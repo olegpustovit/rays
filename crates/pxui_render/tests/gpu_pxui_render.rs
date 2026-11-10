@@ -49,11 +49,13 @@ fn target(device: &Device) -> Texture {
 }
 
 /// Open a clearing pass on `target`, run `body`, submit and wait.
-fn pass(queue: &Queue, target: &Texture, body: &mut dyn FnMut(&RenderEncoder)) {
+fn pass(queue: &Queue, target: &Texture, body: &mut dyn FnMut(&RenderEncoder)) { pass_with(queue, target, Load::Clear, body) }
+
+fn pass_with(queue: &Queue, target: &Texture, load: Load, body: &mut dyn FnMut(&RenderEncoder)) {
     let commands = ok(be::begin_commands(queue));
     let clear = (BG[0] as f64 / 255.0, BG[1] as f64 / 255.0, BG[2] as f64 / 255.0, 1.0);
     let encoder = ok(be::render_encoder(&commands, &RenderTarget {
-        colors: vec![ColorAttachment { texture: target.clone(), resolve: None, load: Load::Clear, store: Store::Store, clear }],
+        colors: vec![ColorAttachment { texture: target.clone(), resolve: None, load, store: Store::Store, clear }],
         depth: None,
     }));
     body(&encoder);
@@ -159,7 +161,7 @@ fn near(a: [u8; 4], b: [u8; 4], tolerance: i32) -> bool { a.iter().zip(b).all(|(
 /// Metal handles live on the process main thread, which libtest never gives a test: this target is
 /// `harness = false` and speaks just enough of libtest's protocol (`--list`, names to filter).
 fn main() {
-    let cases: [(&str, fn()); 10] = [
+    let cases: [(&str, fn()); 11] = [
         ("gpu_scene_golden_and_spot_checks", gpu_scene_golden_and_spot_checks),
         ("gpu_one_draw_per_layer", gpu_one_draw_per_layer),
         ("gpu_warm_frame_allocates_nothing", gpu_warm_frame_allocates_nothing),
@@ -168,6 +170,7 @@ fn main() {
         ("gpu_ramp_gradient", gpu_ramp_gradient),
         ("gpu_retained_layer_writes_only_dirty_ranges", gpu_retained_layer_writes_only_dirty_ranges),
         ("gpu_backdrop_blur", gpu_backdrop_blur),
+        ("gpu_backdrop_blur_panel", gpu_backdrop_blur_panel),
         ("fit_modes_place_and_crop", fit_modes_place_and_crop),
         ("nine_slice_corners_stay_and_centre_stretches", nine_slice_corners_stay_and_centre_stretches),
     ];
@@ -483,6 +486,36 @@ fn gpu_backdrop_blur() {
     assert_ramp(&row, 16, 2.0, "x4 downsample");
     assert!(painter.blur(&queue, &source, [0, 0, size[0] + 1, size[1]], 4.0).is_err(), "region outside the source is refused");
     for texture in [&source, &shown] { ok(be::destroy_texture(texture)); }
+    drop(painter);
+    finish(device, queue);
+}
+
+/// The host's backdrop-blur sequence for one view: draw the backdrop, end the pass, blur the region
+/// under the view, reopen the pass on the same target (`Load::Load`), draw the blur as an image
+/// clipped to the view's rounded rect. The tint halves the blurred colour so it differs from the backdrop.
+fn gpu_backdrop_blur_panel() {
+    let Some(device) = open() else { return };
+    let queue = ok(be::create_queue(&device));
+    let mut painter = painter(&device);
+    let target = target(&device);
+    let size = [W * SCALE, H * SCALE];
+    let panel = [40.0, 24.0, 88.0, 72.0];
+    let region = panel.map(|v| (v * SCALE as f32) as u32);
+    let edge = [Instance::rect([0.0, 0.0, 64.0, 96.0], [0, 0, 0, 255]), Instance::rect([64.0, 0.0, 128.0, 96.0], [255, 255, 255, 255])];
+    painter.begin_frame();
+    pass(&queue, &target, &mut |encoder| ok(painter.draw(encoder, size, SCALE as f32, &edge, &[])));
+    let blurred = ok(painter.blur(&queue, &target, region, 8.0)).clone();
+    let glass = [Instance::image(panel, [0.0, 0.0, 1.0, 1.0], [128, 128, 128, 255]).radii([12.0; 4])];
+    pass_with(&queue, &target, Load::Load, &mut |encoder| ok(painter.draw(encoder, size, SCALE as f32, &glass, &[Break { at_instance: 0, texture: Some(&blurred) }])));
+    let pixels = ok(be::read_texture(&target, (size[0] * 4) as i64));
+    let red = |x: f32, y: f32| at(&pixels, x, y)[0] as i32;
+    assert_eq!((red(20.0, 48.0), red(110.0, 48.0)), (0, 255), "outside the view the backdrop is untouched");
+    assert_eq!((red(87.0, 25.0), red(41.0, 25.0)), (255, 0), "outside the rounded corner the backdrop shows");
+    assert!(red(45.0, 48.0) <= 4 && (red(82.0, 48.0) - 128).abs() <= 4, "far from the edge the blur is the tinted backdrop: {} {}", red(45.0, 48.0), red(82.0, 48.0));
+    let (left, right) = (red(63.5, 48.0), red(64.5, 48.0));
+    assert!((50..=78).contains(&left) && (50..=78).contains(&right), "the hard edge is a soft ramp through half tint: {left} {right}");
+    assert!(red(58.0, 48.0) > 4 && red(70.0, 48.0) < 124, "the ramp spreads across the edge");
+    ok(be::destroy_texture(&target));
     drop(painter);
     finish(device, queue);
 }

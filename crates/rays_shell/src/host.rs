@@ -174,9 +174,15 @@ fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Er
             });
         }
         sync_atlas(s, ui)?;
-        // ponytail: `out.blurs` (views asking for a blurred backdrop) is not fulfilled: this layer draws
-        // in one call inside the scene pass; fulfilling it splits the draw at `at_instance`, ends the
-        // pass and runs `Painter::blur`. Do it when an editor view asks for a backdrop blur.
+        // ponytail: `out.blurs` (views asking for a blurred backdrop) is not fulfilled. The sequence is
+        // proven in pxui_render's `gpu_backdrop_blur_panel` (draw backdrop, end pass, `Painter::blur`,
+        // reopen with `Load::Load`, draw the image under a rounded clip) but needs a renderer hook that
+        // `UiPass` lacks: `encode_frame` records every batch into ONE uncommitted command buffer, while
+        // `Painter::blur` takes a `Queue` and submits its own commands, so it would read the target before
+        // this frame's earlier batches ran. Needed: `UiPass` exposing the frame's command buffer plus the
+        // target texture and a "split the pass here" callback (end the encoder, let the painter encode its
+        // two blur passes into the same commands, reopen with Load::Load); `Painter::blur` then takes
+        // commands instead of a queue. Do it when an editor view asks for a backdrop blur.
         for (index, v) in ui.output().views {
             s.painter.set_view(*index, View { offset: v.offset, opacity: v.opacity, clip: v.clip, scale: v.scale, transform: v.transform, pivot: v.pivot })?;
         }
