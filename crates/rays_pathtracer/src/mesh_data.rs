@@ -124,7 +124,7 @@ fn flatten(extras: &Extras, objects: &[(rays::mesh::Mesh, i64)]) -> Result<FlatP
     }
     for (source_mesh, material_index) in objects {
         let view = rays::mesh::view::packed_view(source_mesh)?;
-        if view.mode != rays::mesh::mode::Triangles {
+        if view.mode != rays::mesh::Mode::Triangles {
             return Err("path tracer meshes must be triangle-ready".to_string());
         }
         let normals_view = match &view.normals {
@@ -134,7 +134,7 @@ fn flatten(extras: &Extras, objects: &[(rays::mesh::Mesh, i64)]) -> Result<FlatP
         if view.indices.len() % 3 != 0 {
             return Err("path tracer mesh indices must contain complete triangles".to_string());
         }
-        let component = |plane: &rays::mesh::vec3_view, index: usize| (plane.x[index], plane.y[index], plane.z[index]);
+        let component = |plane: &rays::mesh::Vec3View, index: usize| (plane.x[index], plane.y[index], plane.z[index]);
         let mut id_bytes = vec![0u8; 4];
         put_u32(&mut id_bytes, 0, *material_index);
         for triangle in 0..view.indices.len() / 3 {

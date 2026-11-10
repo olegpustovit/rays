@@ -113,7 +113,7 @@ fn device_topology_refits() {
         held.extend([positions, indices]);
         unregisters.push(unregister);
         let mesh = rays::mesh::view::create_device(
-            rays::mesh::view::device_args { device_index_count: Some(6), key, normals: true, ..Default::default() },
+            rays::mesh::view::DeviceArgs { device_index_count: Some(6), key, normals: true, ..Default::default() },
             4,
         )
         .unwrap();

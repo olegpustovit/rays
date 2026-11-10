@@ -43,17 +43,17 @@ fn camera() -> rays::camera::Camera {
 }
 
 /// a small World: a dim gradient, a bright disc baked into both maps, a rect-light strip and a sun
-fn baked() -> w::baked {
+fn baked() -> w::Baked {
     let layers = vec![
-        w::layer::Gradient { zenith: w::rgb(0.3, 0.35, 0.5), horizon: w::rgb(0.2, 0.2, 0.2), nadir: w::rgb(0.05, 0.05, 0.05), sharpness: 1. },
-        w::layer::Shape { shape: w::shape::Circle, azimuth: 2.5, elevation: 0.6, width: 0.6, height: 0.6, softness: 0.1, color: w::rgb(1., 0.8, 0.6), intensity: 4., emit: w::emit::Dome },
-        w::layer::Shape { shape: w::shape::Rect, azimuth: -1., elevation: 0.4, width: 0.5, height: 0.3, softness: 0., color: w::rgb(1., 1., 1.), intensity: 3., emit: w::emit::Light },
-        w::layer::Sun { angular_radius: 0.1, intensity: 20., tint: w::rgb(1., 0.95, 0.9) },
+        w::Layer::Gradient { zenith: w::rgb(0.3, 0.35, 0.5), horizon: w::rgb(0.2, 0.2, 0.2), nadir: w::rgb(0.05, 0.05, 0.05), sharpness: 1. },
+        w::Layer::Shape { shape: w::Shape::Circle, azimuth: 2.5, elevation: 0.6, width: 0.6, height: 0.6, softness: 0.1, color: w::rgb(1., 0.8, 0.6), intensity: 4., emit: w::Emit::Dome },
+        w::Layer::Shape { shape: w::Shape::Rect, azimuth: -1., elevation: 0.4, width: 0.5, height: 0.3, softness: 0., color: w::rgb(1., 1., 1.), intensity: 3., emit: w::Emit::Light },
+        w::Layer::Sun { angular_radius: 0.1, intensity: 20., tint: w::rgb(1., 0.95, 0.9) },
     ];
     let mut definition = w::default();
     definition.exposure = 0.5;
-    definition.sun = w::sun_mode::Manual(0.8, 0.9);
-    definition.layers = layers.into_iter().map(|layer| w::entry { name: "layer".to_string(), layer, visible: true }).collect();
+    definition.sun = w::SunMode::Manual(0.8, 0.9);
+    definition.layers = layers.into_iter().map(|layer| w::Entry { name: "layer".to_string(), layer, visible: true }).collect();
     w::bake(Some(1), None, 16, 8, &definition).expect("bake")
 }
 
@@ -102,7 +102,7 @@ fn has(fragment: &str, line: &str) -> bool {
     line.contains(fragment)
 }
 
-fn scenario(label: &str, instanced: bool, world: Option<&w::baked>) {
+fn scenario(label: &str, instanced: bool, world: Option<&w::Baked>) {
     let (width, height, frames) = (env("PT_W", 16), env("PT_H", 12), env("PT_FRAMES", 2));
     let mut t = get(p::create(&p::CreateOptions { spp: Some(2), bounces: Some(4), ..Default::default() }, width, height, &dome()));
     get(p::set_world(&mut t, world));

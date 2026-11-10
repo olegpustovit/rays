@@ -88,10 +88,10 @@ pub fn light_of(l: &rays::light::Light) -> Light {
     let color = linear::rgb(c.r as f64 / 255., c.g as f64 / 255., c.b as f64 / 255.);
     let rect = |at: vec3::T, target: vec3::T, distance2: f64, (w, h): (f64, f64)| Light { at, target, size: (w, h), color, intensity: std::f64::consts::PI * l.intensity * distance2 / (w * h) };
     match &l.kind {
-        rays::light::kind::Area { position, direction, width, height, .. } => rect(*position, vec3::add(*position, *direction), 1., (*width, *height)),
-        rays::light::kind::Point { position, .. } => rect(*position, vec3::sub(*position, vec3::unit_y()), 1., (0.1, 0.1)),
-        rays::light::kind::Spot { position, direction, .. } => rect(*position, vec3::add(*position, *direction), 1., (0.1, 0.1)),
-        rays::light::kind::Directional { direction } => rect(vec3::scale(vec3::normalize(*direction), -100.), vec3::zero(), 1e4, (20., 20.)),
+        rays::light::Kind::Area { position, direction, width, height, .. } => rect(*position, vec3::add(*position, *direction), 1., (*width, *height)),
+        rays::light::Kind::Point { position, .. } => rect(*position, vec3::sub(*position, vec3::unit_y()), 1., (0.1, 0.1)),
+        rays::light::Kind::Spot { position, direction, .. } => rect(*position, vec3::add(*position, *direction), 1., (0.1, 0.1)),
+        rays::light::Kind::Directional { direction } => rect(vec3::scale(vec3::normalize(*direction), -100.), vec3::zero(), 1e4, (20., 20.)),
     }
 }
 
@@ -172,7 +172,7 @@ pub struct PathTracer {
     pub lights: Buffer,
     pub light_count: i64,
     pub scene_lights: Vec<Light>,
-    pub world: Option<rays::world::baked>,
+    pub world: Option<rays::world::Baked>,
     pub world_buffer: Buffer,
     /// the World's CDF alone, for the Lisp kernel
     pub cdf_buffer: Buffer,
@@ -240,7 +240,7 @@ fn renderer_err(e: &ogpu_core::error::Error) -> String {
     s
 }
 
-fn resources_err(e: &runtime_resources::error) -> String {
+fn resources_err(e: &runtime_resources::Error) -> String {
     ogpu_core::error::to_string(e)
 }
 
@@ -303,7 +303,7 @@ pub fn prepare_extras(first_material: i64, spheres: &[Sphere], strands: &[Strand
 /// ponytail: float4 colours take the host route; a vec4 gather is the upgrade if a sketch needs them.
 pub fn device_of(m: &rays::mesh::Mesh) -> Option<mesh_data::Device> {
     match rays::mesh::view::device(m) {
-        Some((key, true)) if rays::mesh::mode(m) == rays::mesh::mode::Triangles => {
+        Some((key, true)) if rays::mesh::mode(m) == rays::mesh::Mode::Triangles => {
             let index_count = rays::mesh::index_count(m);
             let width = rays::mesh::view::device_color_width(m);
             if index_count > 0 && index_count % 3 == 0 && width != 4 {
@@ -404,7 +404,7 @@ pub fn panel_bytes(panels: &[Panel]) -> Vec<u8> {
     builder
 }
 
-pub fn light_bytes(world_lights: &[rays::world::light], lights: &[Light]) -> Vec<u8> {
+pub fn light_bytes(world_lights: &[rays::world::Light], lights: &[Light]) -> Vec<u8> {
     let mut builder = Vec::with_capacity(256);
     let normalize = |v: vec3::T| {
         let l = (v.x * v.x + v.y * v.y + v.z * v.z).sqrt();
@@ -455,7 +455,7 @@ pub fn float32_bytes(parts: &[&[f64]]) -> Vec<u8> {
     bytes
 }
 
-pub fn world_bytes(baked: &rays::world::baked) -> Result<(Vec<u8>, Vec<u8>), String> {
+pub fn world_bytes(baked: &rays::world::Baked) -> Result<(Vec<u8>, Vec<u8>), String> {
     let (width, height) = (baked.camera.width, baked.camera.height);
     let cdf = &baked.cdf;
     if width < 1
@@ -1178,7 +1178,7 @@ fn restore_film(t: &mut PathTracer) -> Result<(), String> {
 
 /// The kernels' scene facts: what the static stage folds.
 fn lisp_facts(t: &PathTracer) -> lisp_kernel::Facts {
-    let map = |w: &dyn Fn(&rays::world::map) -> i64| match &t.world {
+    let map = |w: &dyn Fn(&rays::world::Map) -> i64| match &t.world {
         Some(baked) => w(&baked.camera),
         None => 1,
     };
@@ -1190,13 +1190,13 @@ fn lisp_facts(t: &PathTracer) -> lisp_kernel::Facts {
         lights: t.light_count,
         world: t.world.is_some(),
         background: match &t.world {
-            Some(rays::world::baked { background: rays::world::background::Color(_), .. }) => 1,
-            Some(rays::world::baked { background: rays::world::background::Transparent, .. }) => 2,
+            Some(rays::world::Baked { background: rays::world::Background::Color(_), .. }) => 1,
+            Some(rays::world::Baked { background: rays::world::Background::Transparent, .. }) => 2,
             _ => 0,
         },
         map_w: map(&|m| m.width),
         map_h: map(&|m| m.height),
-        sun: matches!(&t.world, Some(rays::world::baked { sun: Some(sun), .. }) if sun.angular_radius > 0.),
+        sun: matches!(&t.world, Some(rays::world::Baked { sun: Some(sun), .. }) if sun.angular_radius > 0.),
         bsdf_only: t.bsdf_only,
         instanced: t.gpu.shape.instanced,
         colored: t.gpu.shape.colored,
@@ -1247,7 +1247,7 @@ fn lisp_words(t: &PathTracer, camera: &Camera, fov: f64, lo: i64, hi: i64) -> Ve
         None => zero.clone(),
     };
     let sun = match &t.world {
-        Some(rays::world::baked { sun: Some(sun), .. }) if sun.angular_radius > 0. => Some(sun.clone()),
+        Some(rays::world::Baked { sun: Some(sun), .. }) if sun.angular_radius > 0. => Some(sun.clone()),
         _ => None,
     };
     // 1 - cos r = 2 sin^2 (r / 2), exact for tiny discs
@@ -1287,7 +1287,7 @@ fn lisp_words(t: &PathTracer, camera: &Camera, fov: f64, lo: i64, hi: i64) -> Ve
         ("sky", rgb(&t.sky)),
         ("ground", rgb(&t.ground)),
         ("bg", match &t.world {
-            Some(rays::world::baked { background: rays::world::background::Color(c), .. }) => vec![c.r, c.g, c.b],
+            Some(rays::world::Baked { background: rays::world::Background::Color(c), .. }) => vec![c.r, c.g, c.b],
             _ => zero.clone(),
         }),
         ("sundir", match &sun {
@@ -1533,7 +1533,7 @@ fn swap_buffer(t: &mut PathTracer, label: &str, bytes: &[u8], which: SlotOf) -> 
 }
 
 fn rebuild_lights(t: &mut PathTracer) -> Result<(), String> {
-    let world_lights: Vec<rays::world::light> = match &t.world {
+    let world_lights: Vec<rays::world::Light> = match &t.world {
         Some(baked) => baked.lights.clone(),
         None => vec![],
     };
@@ -1551,7 +1551,7 @@ pub fn set_lights(t: &mut PathTracer, lights: &[Light]) -> Result<(), String> {
 }
 
 /// The same baked World by identity: the shared arrays, and the facts carried beside them.
-fn same_world(a: &rays::world::baked, b_: &rays::world::baked) -> bool {
+fn same_world(a: &rays::world::Baked, b_: &rays::world::Baked) -> bool {
     std::sync::Arc::ptr_eq(&a.camera.pixels, &b_.camera.pixels)
         && std::sync::Arc::ptr_eq(&a.lighting.pixels, &b_.lighting.pixels)
         && std::sync::Arc::ptr_eq(&a.cdf.marginal, &b_.cdf.marginal)
@@ -1565,7 +1565,7 @@ fn same_world(a: &rays::world::baked, b_: &rays::world::baked) -> bool {
 /// Light and frame the scene with a baked World instead of the procedural `environment` (whose sky, ground
 /// and panels are then ignored); `None` restores it. Uploads the maps and CDF only when the value changes,
 /// then restarts accumulation. The effective exposure is `2 ** baked.exposure` times `create`'s `exposure`.
-pub fn set_world(t: &mut PathTracer, baked: Option<&rays::world::baked>) -> Result<(), String> {
+pub fn set_world(t: &mut PathTracer, baked: Option<&rays::world::Baked>) -> Result<(), String> {
     match (&t.world, baked) {
         (Some(current), Some(next)) if same_world(current, next) => Ok(()),
         (None, None) => Ok(()),
@@ -1718,7 +1718,7 @@ pub mod private {
                 return Value::Floats(4, std::sync::Arc::new(vec![0.; 4]));
             }
             if name == "order" {
-                return Value::Int_array(std::sync::Arc::new(vec![0]));
+                return Value::IntArray(std::sync::Arc::new(vec![0]));
             }
             let ty = &types.iter().find(|(k, _)| *k == name).expect("table").1;
             let (buffer, count) = lisp_table(t, &t.gpu.tables, &film_accum, &film_accum, &film_accum, name);
@@ -1728,13 +1728,13 @@ pub mod private {
             match ty {
                 flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Vec4 => Value::Floats(4, std::sync::Arc::new(a)),
                 flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Vec3 => Value::Floats(3, std::sync::Arc::new(a)),
-                flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Int => Value::Int_array(std::sync::Arc::new(a.iter().map(|v| *v as i64).collect())),
+                flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Int => Value::IntArray(std::sync::Arc::new(a.iter().map(|v| *v as i64).collect())),
                 _ => Value::Floats(1, std::sync::Arc::new(a)),
             }
         };
         let words: Vec<(String, Vec<f64>)> = values.iter().map(|(n, w)| (n.to_string(), w.clone())).collect();
         let tables_: Vec<(Symbol, Value)> = types.iter().map(|(n, _)| (flow_syntax::symbol::intern(n), value(n))).collect();
-        let pixels = Value::Int_array(std::sync::Arc::new((0..n).collect()));
+        let pixels = Value::IntArray(std::sync::Arc::new((0..n).collect()));
         match lisp_kernel::cpu(&kernels, words, tables_, pixels, "trace")? {
             Value::Floats(4, v) => Ok((*v).clone()),
             _ => Err("path tracer CPU film is not vec4".to_string()),

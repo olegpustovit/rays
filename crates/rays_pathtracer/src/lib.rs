@@ -1,4 +1,4 @@
-//! Port of lib/rays_pathtracer: the hardware path tracer. The Lisp kernels (pathtrace.rays,
+//! the hardware path tracer. The Lisp kernels (pathtrace.rays,
 //! pathtrace_helpers.rays, resolve_preview.rays) stay Lisp and are read in place from lib/.
 
 // ponytail: the Lisp op bodies return flow_check's large `Diagnostic`; box it there, not here.

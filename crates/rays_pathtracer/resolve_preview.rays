@@ -23,4 +23,4 @@
                  (if near {:r (+ s.r (* c.x wt)) :g (+ s.g (* c.y wt)) :b (+ s.b (* c.z wt)) :w (+ s.w wt)} s)))]
     [(aces-gamma (* (/ acc.r acc.w) exposure)) (aces-gamma (* (/ acc.g acc.w) exposure))
      (aces-gamma (* (/ acc.b acc.w) exposure)) (if (and clear (<= center.w 0.)) 0. 1.)]))
-; GPU vs MSL-semantics parity: lib/flow_gpu/test_resolve.ml
+; GPU and Metal semantics are checked by the resolve conformance suite.

@@ -130,7 +130,7 @@ fn lens() {
     let mut tracer = get(p::create(&pt::options(2), 48, 32, &l.scene));
     let camera = lit_camera();
     let pinhole = capture(&mut tracer, &camera, 2);
-    let lensed = rays::camera::with_lens(rays::camera::lens { aperture: 0.2, focus_distance: Some(2.) }, &camera).unwrap();
+    let lensed = rays::camera::with_lens(rays::camera::Lens { aperture: 0.2, focus_distance: Some(2.) }, &camera).unwrap();
     let blurred = capture(&mut tracer, &lensed, 16);
     assert!(blurred != pinhole && capture(&mut tracer, &lensed, 16) == blurred);
     assert!(capture(&mut tracer, &camera, 2) == pinhole);

@@ -140,8 +140,8 @@ pub fn destroy_film(keep: Option<usize>, film: &Film) {
 
 pub fn camera_fov(camera: &rays::camera::Camera) -> Result<f64, String> {
     match rays::camera::projection(camera) {
-        rays::camera::projection::Perspective { fov_y, .. } => Ok(fov_y),
-        rays::camera::projection::Orthographic { .. } => Err("path tracer requires a perspective camera".to_string()),
+        rays::camera::Projection::Perspective { fov_y, .. } => Ok(fov_y),
+        rays::camera::Projection::Orthographic { .. } => Err("path tracer requires a perspective camera".to_string()),
     }
 }
 

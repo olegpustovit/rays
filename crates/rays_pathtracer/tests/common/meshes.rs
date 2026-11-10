@@ -4,7 +4,7 @@ use rays::mesh::{self, view};
 use rays_math::{mat4, vec3};
 
 fn build(positions: &[vec3::T], normals: &[vec3::T], indices: Vec<i64>) -> mesh::Mesh {
-    let planes = |list: &[vec3::T]| mesh::Vec3_buffer::of_planes(list.iter().map(|v| v.x).collect(), list.iter().map(|v| v.y).collect(), list.iter().map(|v| v.z).collect());
+    let planes = |list: &[vec3::T]| mesh::Vec3Buffer::of_planes(list.iter().map(|v| v.x).collect(), list.iter().map(|v| v.y).collect(), list.iter().map(|v| v.z).collect());
     view::create_packed_owned(None, Some(indices), Some(planes(normals)), None, None, planes(positions)).expect("mesh")
 }
 

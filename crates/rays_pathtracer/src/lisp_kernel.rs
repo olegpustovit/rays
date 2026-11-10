@@ -115,7 +115,7 @@ pub fn placeholder(ty: &Ty) -> Value {
         Ty::Int => Value::Int(1_000_000 * k + 7),
         Ty::Array(inner) if **inner == Ty::Vec4 => Value::Floats(4, Arc::new(vec![0.; 4])),
         Ty::Array(inner) if **inner == Ty::Vec3 => Value::Floats(3, Arc::new(vec![0.; 3])),
-        Ty::Array(inner) if **inner == Ty::Int => Value::Int_array(Arc::new(vec![0])),
+        Ty::Array(inner) if **inner == Ty::Int => Value::IntArray(Arc::new(vec![0])),
         _ => Value::Floats(1, Arc::new(vec![0.])),
     }
 }
@@ -123,7 +123,7 @@ pub fn placeholder(ty: &Ty) -> Value {
 fn same_placeholder(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Floats(1, x), Value::Floats(1, y)) | (Value::Floats(3, x), Value::Floats(3, y)) | (Value::Floats(4, x), Value::Floats(4, y)) => Arc::ptr_eq(x, y),
-        (Value::Int_array(x), Value::Int_array(y)) => Arc::ptr_eq(x, y),
+        (Value::IntArray(x), Value::IntArray(y)) => Arc::ptr_eq(x, y),
         _ => a == b,
     }
 }
@@ -296,7 +296,7 @@ pub fn compile(f: &Facts) -> Result<Rc<T>, String> {
         fns: RefCell::new(vec![]),
         evals: RefCell::new(vec![]),
         values: uniforms().into_iter().chain(tables()).map(|(name, ty)| (name.to_string(), (ty.clone(), placeholder(&ty)))).collect(),
-        pixels: Value::Int_array(Arc::new(vec![0])),
+        pixels: Value::IntArray(Arc::new(vec![0])),
         kernels: RefCell::new(vec![]),
         oracle: RefCell::new(None),
     }))
@@ -585,7 +585,7 @@ pub fn gather_kernel(lease: &renderer::renderer::Gpu, pipes: &pipelines::T) -> R
         Value::Source(p) if p.name == "pt/src" && p.fields.is_empty() => replacement.clone(),
         v => v.clone(),
     });
-    let residual = deferred("gather", bound, &[Value::Int_array(Arc::new(vec![0]))], Ty::Vec3)?;
+    let residual = deferred("gather", bound, &[Value::IntArray(Arc::new(vec![0]))], Ty::Vec3)?;
     let term = e::residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
     let template = packed::compile_template(&packed::CompileOptions::default(), residual, &term).ok_or("path tracer gather has no device template")?;
     let options = emit::Options {

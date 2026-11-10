@@ -1,6 +1,6 @@
 ; Path tracer helpers of pathtrace.metal as Rays Lisp defns (P8.S3): PCG, the GGX terms, Fresnel and the BSDF
 ; mixture pdf. Inlined at lowering; the CPU walker is the oracle and the Metal kernel matches it
-; (lib/flow_gpu/test_helpers.ml). Integers are the fast tier's 63-bit ints with explicit 32-bit masks.
+; Integers use explicit 32-bit masks for fast GPU kernels.
 (defn pcg-next :context value [(s : int)]
   (let* [next (int/and (int/add (int/mul s 747796405) 2891336453) 4294967295)
          word (int/and (int/mul (int/xor (int/shr s (int/add (int/shr s 28) 4)) s) 277803737) 4294967295)]
