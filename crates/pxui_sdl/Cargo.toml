@@ -1,0 +1,20 @@
+[package]
+name = "pxui_sdl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The SDL window host: a leaf that reaches only SDL, the input types and the native layer token.
+[dependencies]
+input = { path = "../input" }
+native_layer_token_sys = { path = "../native_layer_token_sys" }
+sdl3 = { path = "../sdl3" }
+
+# The window needs the SDL main thread, which libtest never gives a test: this target's own main runs it.
+[[test]]
+name = "window_pxui_sdl"
+path = "tests/window_pxui_sdl.rs"
+harness = false
+
+[lints]
+workspace = true

@@ -1,9 +1,9 @@
 use ogpu_core::error::{self, Error, ErrorKind};
 use ogpu_core::surface;
-use sdl3::cursor::{Cursor, Shape};
-use sdl3::window::{Flag, Window as SdlWindow};
-use sdl3::{DialogFilter as SdlDialogFilter, DialogKind as SdlDialogKind, NativeView, Rect};
+use pxui_sdl::{Extent, Window};
+use std::{cell::RefCell, rc::Rc};
 
+pub use pxui_sdl::{change_flag, clipboard_get_text, clipboard_set_text, CursorShape, DialogFilter, DialogKind};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameFacts {
@@ -26,61 +26,8 @@ pub struct PresentationFacts {
     pub pixel_density: f64,
 }
 
-/// SDL announces a change of size or density with an event instead of making every frame ask.
-/// The announcement is one bit: set by the event, taken by the next frame, which re-reads the
-/// window only if it was set.
-pub mod change_flag {
-    #[derive(Debug)]
-    pub struct ChangeFlag {
-        announced: bool,
-    }
-
-    pub fn create() -> ChangeFlag {
-        ChangeFlag { announced: false }
-    }
-
-    pub fn announce(flag: &mut ChangeFlag) {
-        flag.announced = true;
-    }
-
-    /// Clears the announcement and says whether there was one.
-    pub fn take(flag: &mut ChangeFlag) -> bool {
-        std::mem::replace(&mut flag.announced, false)
-    }
-
-    /// `query` runs once per announcement, however many arrived; true when it ran.
-    pub fn refresh(flag: &mut ChangeFlag, query: &mut dyn FnMut()) -> bool {
-        let announced = take(flag);
-        if announced {
-            query();
-        }
-        announced
-    }
-}
-
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CursorShape {
-    Default,
-    HorizontalResize,
-    VerticalResize,
-    Text,
-}
-
-
-struct Window {
-    handle: SdlWindow,
-    view: NativeView,
-    vsync: bool,
-    cursors: Vec<(CursorShape, Cursor)>,
-    cursor_shape: Option<CursorShape>,
-    text_input: bool,
-    changed: change_flag::ChangeFlag,
-    /// window coordinates per logical point: SDL's display scale over its pixel density
-    unit: f64,
-}
-
-/// One render target: a presenting window, or (`window = None`) an owned offscreen texture.
+/// One render target: a presenting `pxui_sdl` window, or (`window = None`) an owned offscreen
+/// texture's extent. Whoever opened it destroys it; the renderer only reads it.
 pub struct Runtime {
     window: Option<Window>,
     facts: FrameFacts,
@@ -88,22 +35,18 @@ pub struct Runtime {
     dead: bool,
 }
 
+/// A target shared between its owner (who opens and destroys it) and the renderer that draws to it.
+pub type Target = Rc<RefCell<Runtime>>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DialogKind {
-    OpenFile,
-    OpenFiles,
-    SaveFile,
-    OpenFolder,
+/// A visible, resizable window target for the caller to own.
+pub fn open_window(title: &str, width: i64, height: i64, vsync: bool, high_density: bool) -> Result<Target, Error> {
+    let mut runtime = create(Some(vsync), Some(false), Some(high_density), Some(title), width, height)?;
+    if let Err(e) = set_resizable(&mut runtime, true) {
+        let _ = destroy(&mut runtime);
+        return Err(e);
+    }
+    Ok(Rc::new(RefCell::new(runtime)))
 }
-
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DialogFilter {
-    pub name: String,
-    pub pattern: String,
-}
-
 
 fn stale_error(operation: &str) -> Error {
     error::make(operation, ErrorKind::StaleHandle, "runtime is destroyed")
@@ -113,70 +56,8 @@ fn fail_error(op: &str, text: &str) -> Error {
     error::make(op, ErrorKind::InvalidState, text)
 }
 
-fn sdl_error(op: &str, failure: &sdl3::Error) -> Error {
-    fail_error(op, &failure.to_string())
-}
-
-pub fn clipboard_set_text(text: &str) -> Result<(), Error> {
-    sdl3::clipboard::set_text(text).map_err(|failure| sdl_error("Runtime.clipboard_set_text", &failure))
-}
-
-pub fn clipboard_get_text() -> Result<String, Error> {
-    sdl3::clipboard::get_text().map_err(|failure| sdl_error("Runtime.clipboard_get_text", &failure))
-}
-
-// macOS reports window coordinates in points (display scale 2 over density 2: one coordinate a
-// point); Windows reports pixels with density 1 and the monitor's scaling as the display scale
-// (1.5 at 150%). Rays lays out in points, so window coordinates are divided by that ratio here
-// and multiplied back where a size or a rect goes to SDL.
-fn window_unit(window: &SdlWindow) -> Result<f64, Error> {
-    let op = "Runtime.window_unit";
-    let scale = window.display_scale().map_err(|failure| sdl_error(op, &failure))? as f64;
-    let density = window.pixel_density().map_err(|failure| sdl_error(op, &failure))? as f64;
-    let unit = scale / density;
-    Ok(if (unit - 1.).abs() < 1e-3 { 1. } else { unit })
-}
-
-// Round halfway values away from zero.
-fn to_points(unit: f64, size: i32) -> i64 {
-    std::cmp::max(1, ((size as f64) / unit).round() as i64)
-}
-
-fn to_window(unit: f64, size: i64) -> i32 {
-    std::cmp::max(1, ((size as f64) * unit).round() as i64) as i32
-}
-
-fn facts_in(unit: f64, window: &SdlWindow) -> Result<FrameFacts, Error> {
-    let (lw, lh) = window.size().map_err(|failure| sdl_error("Runtime.facts", &failure))?;
-    let (dw, dh) = window.size_in_pixels().map_err(|failure| sdl_error("Runtime.facts", &failure))?;
-    if lw > 0 && lh > 0 && dw > 0 && dh > 0 {
-        let lw = to_points(unit, lw);
-        let lh = to_points(unit, lh);
-        let (dw, dh) = (dw as i64, dh as i64);
-        Ok(FrameFacts {
-            logical_width: lw,
-            logical_height: lh,
-            drawable_width: dw,
-            drawable_height: dh,
-            pixel_scale_x: dw as f64 / lw as f64,
-            pixel_scale_y: dh as f64 / lh as f64,
-        })
-    } else {
-        Err(fail_error("Runtime.facts", "window dimensions are invalid"))
-    }
-}
-
-fn facts(window: &SdlWindow) -> Result<FrameFacts, Error> {
-    facts_in(window_unit(window)?, window)
-}
-
-// Every step is checked: the first failure is the result.
-fn reveal(window: &SdlWindow) -> std::result::Result<(), sdl3::Error> {
-    window.show()?;
-    window.restore()?;
-    window.raise_window()?;
-    window.center()?;
-    window.sync()
+fn facts_of(extent: Extent) -> FrameFacts {
+    offscreen_facts(extent.logical.0, extent.logical.1, extent.drawable.0, extent.drawable.1)
 }
 
 /// `high_density` (default true) asks for a drawable at the display's native density; false keeps
@@ -190,62 +71,12 @@ pub fn create(
     height: i64,
 ) -> Result<Runtime, Error> {
     let op = "Runtime.create";
-    let vsync = vsync.unwrap_or(true);
-    let hidden = hidden.unwrap_or(true);
-    let high_density = high_density.unwrap_or(true);
-    let title = title.unwrap_or("Rays");
     if width <= 0 || height <= 0 {
         return Err(error::make(op, ErrorKind::InvalidArgument, "dimensions must be positive"));
     }
-    sdl3::init::init(&[sdl3::init::Subsystem::Video]).map_err(|failure| sdl_error(op, &failure))?;
-    // The window and view release themselves when `build` returns; a failure then quits video.
-    let build = || -> Result<Runtime, Error> {
-        // SDL itself turns a Control-click into the secondary click.
-        sdl3::hint::control_click_is_right_click(true).map_err(|failure| sdl_error(op, &failure))?;
-        if cfg!(windows) {
-            sdl3::hint::mouse_relative_system_scale(true).map_err(|failure| sdl_error(op, &failure))?;
-        }
-        let mut flags = vec![Flag::NativeView];
-        if high_density {
-            flags.push(Flag::HighPixelDensity);
-        }
-        if hidden {
-            flags.push(Flag::Hidden);
-        }
-        let handle = SdlWindow::create(title, width as i32, height as i32, &flags).map_err(|failure| sdl_error(op, &failure))?;
-        let unit = window_unit(&handle)?;
-        if unit != 1. {
-            handle.set_size(to_window(unit, width), to_window(unit, height)).map_err(|failure| sdl_error(op, &failure))?;
-        }
-        if !hidden {
-            reveal(&handle).map_err(|failure| sdl_error(op, &failure))?;
-        }
-        let mut view = NativeView::create(&handle).map_err(|failure| sdl_error(op, &failure))?;
-        let _token = view.layer().map_err(|failure| sdl_error(op, &failure))?;
-        // Size the renderer for the actual drawable once, rather than allocating a
-        // logical-size target and immediately resizing it.
-        let facts = facts(&handle)?;
-        Ok(Runtime {
-            window: Some(Window {
-                handle,
-                view,
-                vsync,
-                cursors: Vec::new(),
-                cursor_shape: None,
-                text_input: false,
-                changed: change_flag::create(),
-                unit,
-            }),
-            facts,
-            presentation: None,
-            dead: false,
-        })
-    };
-    let created = build();
-    if created.is_err() {
-        let _ = sdl3::init::quit_subsystems(&[sdl3::init::Subsystem::Video]);
-    }
-    created
+    let window = Window::open_with(title.unwrap_or("Rays"), width, height, vsync.unwrap_or(true), hidden.unwrap_or(true), high_density.unwrap_or(true))
+        .map_err(|text| fail_error(op, &text))?;
+    Ok(Runtime { facts: facts_of(window.extent()), window: Some(window), presentation: None, dead: false })
 }
 
 fn offscreen_facts(logical_width: i64, logical_height: i64, width: i64, height: i64) -> FrameFacts {
@@ -293,20 +124,8 @@ pub fn map_logical_rect(facts: &FrameFacts, rect: (i64, i64, i64, i64)) -> (i64,
 // call while nothing was announced.
 pub fn sync_facts(value: &mut Runtime) -> Result<(), Error> {
     let Some(window) = value.window.as_mut() else { return Ok(()) };
-    if !change_flag::take(&mut window.changed) {
-        return Ok(());
-    }
-    window.unit = window_unit(&window.handle)?;
-    let live = facts_in(window.unit, &window.handle)?;
-    let f = &value.facts;
-    if live.logical_width == f.logical_width
-        && live.logical_height == f.logical_height
-        && live.drawable_width == f.drawable_width
-        && live.drawable_height == f.drawable_height
-    {
-        return Ok(());
-    }
-    value.facts = live;
+    window.sync().map_err(|text| fail_error("Runtime.facts", &text))?;
+    value.facts = facts_of(window.extent());
     Ok(())
 }
 
@@ -320,19 +139,15 @@ pub fn resize(value: &mut Runtime, width: i64, height: i64) -> Result<(), Error>
     if width <= 0 || height <= 0 {
         return Err(error::make(op, ErrorKind::InvalidArgument, "dimensions must be positive"));
     }
-    match value.window.as_ref() {
+    value.presentation = None;
+    match value.window.as_mut() {
         Some(window) => {
-            window.handle.set_size(to_window(window.unit, width), to_window(window.unit, height)).map_err(|failure| sdl_error(op, &failure))?;
-            value.presentation = None;
-            value.facts = facts(&window.handle)?;
-            Ok(())
+            window.resize(width, height).map_err(|text| fail_error(op, &text))?;
+            value.facts = facts_of(window.extent());
         }
-        None => {
-            value.presentation = None;
-            value.facts = offscreen_facts(width, height, width, height);
-            Ok(())
-        }
+        None => value.facts = offscreen_facts(width, height, width, height),
     }
+    Ok(())
 }
 
 pub fn frame_facts(value: &Runtime) -> FrameFacts {
@@ -342,16 +157,16 @@ pub fn frame_facts(value: &Runtime) -> FrameFacts {
 /// Window coordinates per logical point: 1 on macOS and offscreen, the monitor's scaling (1.5 at
 /// 150%) on Windows, whose SDL events and sizes are in pixels. Input divides by it.
 pub fn window_unit_of(value: &Runtime) -> f64 {
-    value.window.as_ref().map_or(1., |w| w.unit)
+    value.window.as_ref().map_or(1., |w| w.unit())
 }
 
-fn live_window(operation: &str, value: &mut Runtime, callback: &mut dyn FnMut(&mut Window) -> Result<(), Error>) -> Result<(), Error> {
+fn live_window(operation: &str, value: &mut Runtime, callback: &mut dyn FnMut(&mut Window) -> Result<(), String>) -> Result<(), Error> {
     if value.dead {
         return Err(stale_error(operation));
     }
     match value.window.as_mut() {
         None => Err(error::make(operation, ErrorKind::Unsupported, "operation requires a window")),
-        Some(window) => callback(window),
+        Some(window) => callback(window).map_err(|text| fail_error(operation, &text)),
     }
 }
 
@@ -359,7 +174,7 @@ fn query_presentation(value: &Runtime) -> Result<PresentationFacts, Error> {
     let f = &value.facts;
     let pixel_density = match value.window.as_ref() {
         None => f.pixel_scale_x,
-        Some(w) => w.handle.pixel_density().map_err(|failure| sdl_error("Runtime.presentation_facts", &failure))? as f64 * w.unit,
+        Some(w) => w.pixel_density().map_err(|text| fail_error("Runtime.presentation_facts", &text))?,
     };
     Ok(PresentationFacts {
         logical_width: f.logical_width,
@@ -395,93 +210,37 @@ pub fn presentation_facts(value: &mut Runtime) -> Result<PresentationFacts, Erro
 pub fn window_changed(value: &mut Runtime) {
     if !value.dead {
         if let Some(window) = value.window.as_mut() {
-            change_flag::announce(&mut window.changed);
+            window.announce_change();
         }
     }
 }
 
 pub fn set_resizable(value: &mut Runtime, enabled: bool) -> Result<(), Error> {
-    live_window("Runtime.set_resizable", value, &mut |w| {
-        w.handle.set_resizable(enabled).map_err(|failure| sdl_error("Runtime.set_resizable", &failure))
-    })
+    live_window("Runtime.set_resizable", value, &mut |w| w.set_resizable(enabled))
 }
 
-/// The native window's own background (sRGB, 0..1): what the title bar shows, since a Rays window
-/// hides its title and keeps only the traffic lights.
+/// The native window's own background (sRGB, 0..1).
 pub fn set_window_background(value: &mut Runtime, color: (f64, f64, f64)) -> Result<(), Error> {
-    live_window("Runtime.set_window_background", value, &mut |w| {
-        w.handle.set_background(color.0 as f32, color.1 as f32, color.2 as f32).map_err(|failure| sdl_error("Runtime.set_window_background", &failure))
-    })
+    live_window("Runtime.set_window_background", value, &mut |w| w.set_background(color))
 }
 
 /// Hide and capture the pointer, reporting relative motion (fly cameras).
 pub fn set_relative_mouse(value: &mut Runtime, enabled: bool) -> Result<(), Error> {
-    live_window("Runtime.set_relative_mouse", value, &mut |w| {
-        w.handle.set_relative_mouse(enabled).map_err(|failure| sdl_error("Runtime.set_relative_mouse", &failure))
-    })
+    live_window("Runtime.set_relative_mouse", value, &mut |w| w.set_relative_mouse(enabled))
 }
 
 pub fn set_cursor(value: &mut Runtime, shape: CursorShape) -> Result<(), Error> {
-    live_window("Runtime.set_cursor", value, &mut |window| {
-        if window.cursor_shape == Some(shape) {
-            return Ok(());
-        }
-        let index = match window.cursors.iter().position(|(s, _)| *s == shape) {
-            Some(i) => i,
-            None => {
-                let native = match shape {
-                    CursorShape::Default => Shape::Default,
-                    CursorShape::HorizontalResize => Shape::EwResize,
-                    CursorShape::VerticalResize => Shape::NsResize,
-                    CursorShape::Text => Shape::Text,
-                };
-                let cursor = Cursor::create(native).map_err(|failure| sdl_error("Runtime.set_cursor", &failure))?;
-                // Lookup is by key; retained list order determines destruction order.
-                window.cursors.insert(0, (shape, cursor));
-                0
-            }
-        };
-        window.cursors[index].1.set().map_err(|failure| sdl_error("Runtime.set_cursor", &failure))?;
-        window.cursor_shape = Some(shape);
-        Ok(())
-    })
+    live_window("Runtime.set_cursor", value, &mut |w| w.set_cursor(shape))
 }
 
 /// Text input runs only while a text field has focus: `Some (region, cursor)` (logical points)
-/// starts it and places the input method there, `None` stops it. Repeating the same answer costs
-/// no SDL call.
+/// starts it and places the input method there, `None` stops it.
 pub fn set_text_input(value: &mut Runtime, area: Option<((i64, i64, i64, i64), i64)>) -> Result<(), Error> {
-    let operation = "Runtime.set_text_input";
-    live_window(operation, value, &mut |window| match area {
-        None => {
-            if window.text_input {
-                sdl3::text_input::stop(&window.handle).map_err(|failure| sdl_error(operation, &failure))?;
-                window.text_input = false;
-            }
-            Ok(())
-        }
-        Some(((x, y, width, height), cursor)) => {
-            if !window.text_input {
-                sdl3::text_input::start(&window.handle).map_err(|failure| sdl_error(operation, &failure))?;
-                window.text_input = true;
-            }
-            let unit = window.unit;
-            let scale = |v: i64| (v as f64 * unit).round() as i32;
-            sdl3::text_input::set_area(
-                    &window.handle,
-                    Rect { x: scale(x), y: scale(y), width: scale(width), height: scale(height) },
-                    scale(cursor),
-                ).map_err(|failure| sdl_error(operation, &failure))
-        }
-    })
+    live_window("Runtime.set_text_input", value, &mut |w| w.set_text_input(area))
 }
 
 pub fn show(value: &mut Runtime) -> Result<(), Error> {
-    live_window("Runtime.show", value, &mut |window| {
-        reveal(&window.handle).map_err(|failure| sdl_error("Runtime.show", &failure))?;
-        change_flag::announce(&mut window.changed);
-        Ok(())
-    })?;
+    live_window("Runtime.show", value, &mut |w| w.show())?;
     let synced = sync_facts(value);
     if synced.is_ok() {
         value.presentation = None;
@@ -490,41 +249,26 @@ pub fn show(value: &mut Runtime) -> Result<(), Error> {
 }
 
 /// Opens a native file dialog and returns at once with its id; the outcome is a
-/// `Input.File_dialog` carrying the same id. `pattern` lists extensions separated by semicolons
-/// ("png;jpg"), or "*". At most 8 dialogs are open at once; a ninth is an error.
+/// `Input.File_dialog` carrying the same id.
 pub fn show_dialog(
     value: &mut Runtime,
     filters: Option<&[DialogFilter]>,
     default_location: Option<&str>,
     kind: DialogKind,
 ) -> Result<i64, Error> {
-    let op = "Runtime.show_dialog";
     let mut id = 0;
-    let filters: Vec<SdlDialogFilter> = filters
-        .unwrap_or(&[])
-        .iter()
-        .map(|f| SdlDialogFilter { name: f.name.clone(), pattern: f.pattern.clone() })
-        .collect();
-    let native = match kind {
-        DialogKind::OpenFile => SdlDialogKind::OpenFile,
-        DialogKind::OpenFiles => SdlDialogKind::OpenFiles,
-        DialogKind::SaveFile => SdlDialogKind::SaveFile,
-        DialogKind::OpenFolder => SdlDialogKind::OpenFolder,
-    };
-    live_window(op, value, &mut |window| {
-        id = sdl3::dialog::show(&window.handle, native, &filters, default_location).map_err(|failure| sdl_error(op, &failure))? as i64;
+    live_window("Runtime.show_dialog", value, &mut |w| {
+        id = w.show_dialog(filters.unwrap_or(&[]), default_location, kind)?;
         Ok(())
     })?;
     Ok(id)
 }
 
-/// Shown and neither minimized nor covered. SDL announces the start of occlusion and not its end,
-/// so a caller that saw the window hidden asks this once per frame to learn when it is back.
+/// Shown and neither minimized nor covered; see `Window::visible`.
 pub fn visible(value: &mut Runtime) -> Result<bool, Error> {
     let mut seen = false;
-    live_window("Runtime.visible", value, &mut |window| {
-        let state = window.handle.state().map_err(|failure| sdl_error("Runtime.visible", &failure))?;
-        seen = !(state.hidden || state.minimized || state.occluded);
+    live_window("Runtime.visible", value, &mut |w| {
+        seen = w.visible()?;
         Ok(())
     })?;
     Ok(seen)
@@ -535,29 +279,9 @@ pub fn destroy(value: &mut Runtime) -> Result<(), Error> {
         return Ok(());
     }
     value.dead = true;
-    let mut failure: Option<Error> = None;
-    let mut record = |result: Result<(), Error>| {
-        if let Err(e) = result {
-            if failure.is_none() {
-                failure = Some(e);
-            }
-        }
-    };
-    if let Some(window) = value.window.as_mut() {
-        if window.text_input {
-            record(sdl3::text_input::stop(&window.handle).map_err(|failure| sdl_error("Runtime.destroy", &failure)));
-        }
-        for (_, cursor) in window.cursors.iter_mut() {
-            record(cursor.destroy().map_err(|failure| sdl_error("Runtime.destroy", &failure)));
-        }
-        window.cursors.clear();
-        record(window.view.destroy().map_err(|failure| sdl_error("Runtime.destroy", &failure)));
-        record(window.handle.destroy().map_err(|failure| sdl_error("Runtime.destroy", &failure)));
-        record(sdl3::init::quit_subsystems(&[sdl3::init::Subsystem::Video]).map_err(|failure| sdl_error("Runtime.destroy", &failure)));
-    }
-    match failure {
+    match value.window.as_mut() {
+        Some(window) => window.destroy().map_err(|text| fail_error("Runtime.destroy", &text)),
         None => Ok(()),
-        Some(e) => Err(e),
     }
 }
 
@@ -568,10 +292,10 @@ pub fn is_window(value: &Runtime) -> bool {
 pub fn surface_configuration(value: &mut Runtime) -> Result<surface::Configuration, Error> {
     let layer = match value.window.as_mut() {
         None => None,
-        Some(w) => Some(w.view.layer().map_err(|failure| sdl_error("Runtime.surface_configuration", &failure))?),
+        Some(w) => Some(w.token().map_err(|text| fail_error("Runtime.surface_configuration", &text))?),
     };
     let f = &value.facts;
-    let vsync = value.window.as_ref().is_some_and(|w| w.vsync);
+    let vsync = value.window.as_ref().is_some_and(|w| w.vsync());
     Ok(surface::Configuration {
         logical_width: f.logical_width,
         logical_height: f.logical_height,

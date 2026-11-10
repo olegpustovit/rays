@@ -9,6 +9,11 @@ rust-version.workspace = true
 native_layer_token_sys = { path = "../native_layer_token_sys" }
 sdl3_sys = { path = "../sdl3_sys" }
 
+[features]
+image = ["sdl3_sys/image"]
+mixer = ["sdl3_sys/mixer"]
+ttf = ["sdl3_sys/ttf"]
+
 [dev-dependencies]
 sdl3_sys = { path = "../sdl3_sys", features = ["test-util"] }
 

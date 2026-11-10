@@ -10,7 +10,16 @@ fn window_scene2_argument() {
     }
     let before = ogpu_core::impl_::live_handles().unwrap();
     // The retained-argument frame sweep measures rendering, not display pacing.
-    let runtime = match renderer::create(&renderer::Configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() }) {
+    let cfg = renderer::Configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() };
+    let target = match runtime::open_window(&cfg.title, cfg.logical_width, cfg.logical_height, cfg.vsync, cfg.high_density) {
+        Ok(target) => target,
+        Err(e) => {
+            println!("RAYS_TEST_SKIP: runtime-next scene2 retained argument: skipped (no window: {})", ogpu_core::error::to_string(&e));
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
+            return;
+        }
+    };
+    let runtime = match renderer::create(&cfg, &target) {
         Ok(runtime) => runtime,
         Err(e) => {
             println!("RAYS_TEST_SKIP: runtime-next scene2 retained argument: skipped ({})", ogpu_core::error::to_string(&e));
@@ -26,6 +35,7 @@ fn window_scene2_argument() {
         runtime::runtime_input::drain(&mut input);
     });
     renderer::destroy(&runtime).unwrap();
+    runtime::destroy(&mut target.borrow_mut()).unwrap();
     assert_eq!(ogpu_core::impl_::live_handles().unwrap(), before, "scene2 retained argument live-handle delta");
 }
 

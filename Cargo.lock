@@ -520,6 +520,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pxui_sdl"
+version = "0.1.0"
+dependencies = [
+ "input",
+ "native_layer_token_sys",
+ "sdl3",
+]
+
+[[package]]
 name = "pxui_text"
 version = "0.1.0"
 dependencies = [
@@ -684,6 +693,7 @@ dependencies = [
  "rays_diagnostic",
  "rays_math",
  "renderer",
+ "runtime",
  "runtime_resources",
 ]
 
@@ -806,6 +816,7 @@ dependencies = [
  "input",
  "ogpu_core",
  "ogpu_mock",
+ "pxui_sdl",
  "sdl3",
 ]
 

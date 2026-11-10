@@ -421,10 +421,19 @@ fn run_runtime(coordinator: &rr::Renderer, f: &dyn Fn(&mut runtime::Runtime) -> 
     out.unwrap_or_else(|| Err(startup_error("Sketch.run_state", ErrorKind::InvalidState, "no runtime")))
 }
 
+/// The renderer first, then the window this sketch opened for it. A renderer that refuses to
+/// destroy (shared leases) leaves the window alone too.
+fn destroy_run(coordinator: &rr::Renderer, target: &runtime::Target) {
+    if rr::destroy(coordinator).is_ok() {
+        let _ = runtime::destroy(&mut target.borrow_mut());
+    }
+}
+
 struct Finish {
     state: Rc<RunContext>,
     previous: Option<Rc<RunContext>>,
     coordinator: rr::Renderer,
+    target: runtime::Target,
     caches: layer::CacheContext,
     model: Rc<CrashState>,
     last_scene: Rc<RefCell<Option<scene::Scene>>>,
@@ -449,7 +458,7 @@ impl Finish {
             layer::release(&scene_);
         }
         layer::clear_cache_context(&self.caches);
-        let _ = rr::destroy(&self.coordinator);
+        destroy_run(&self.coordinator, &self.target);
     }
 }
 
@@ -526,15 +535,14 @@ fn run_state_internal(
         vsync,
         high_density,
     };
-    let coordinator = rr::create(&configuration)?;
-    run_runtime(&coordinator, &|r| runtime::show(r)).inspect_err(|_| {
-        let _ = rr::destroy(&coordinator);
+    let target = runtime::open_window(&configuration.title, configuration.logical_width, configuration.logical_height, vsync, high_density)?;
+    let coordinator = rr::create(&configuration, &target).inspect_err(|_| {
+        let _ = runtime::destroy(&mut target.borrow_mut());
     })?;
-    let initial_facts = with_runtime_facts(&coordinator).inspect_err(|_| {
-        let _ = rr::destroy(&coordinator);
-    })?;
+    run_runtime(&coordinator, &|r| runtime::show(r)).inspect_err(|_| destroy_run(&coordinator, &target))?;
+    let initial_facts = with_runtime_facts(&coordinator).inspect_err(|_| destroy_run(&coordinator, &target))?;
     if let Err(message) = input_state::configure(&state.input.borrow(), initial_facts.logical_width, initial_facts.logical_height) {
-        let _ = rr::destroy(&coordinator);
+        destroy_run(&coordinator, &target);
         return Err(startup_error(op, ErrorKind::InvalidState, &format!("input: {message}")));
     }
     let mut logical_width = config_.width;
@@ -645,12 +653,13 @@ fn run_state_internal(
     });
     let release_after_failed_init = |caches: &layer::CacheContext, coordinator: &rr::Renderer| {
         layer::clear_cache_context(caches);
-        let _ = rr::destroy(coordinator);
+        destroy_run(coordinator, &target);
     };
     // init: a panic here writes a crash report (no frames yet) and leaves nothing running
     struct InitGuard {
         caches: layer::CacheContext,
         coordinator: rr::Renderer,
+        target: runtime::Target,
         crash: Rc<CrashState>,
         armed: bool,
     }
@@ -661,11 +670,11 @@ fn run_state_internal(
                     report_crash(&self.crash);
                 }
                 layer::clear_cache_context(&self.caches);
-                let _ = rr::destroy(&self.coordinator);
+                destroy_run(&self.coordinator, &self.target);
             }
         }
     }
-    let mut init_guard = InitGuard { caches: caches.clone(), coordinator: coordinator.clone(), crash: crash.clone(), armed: true };
+    let mut init_guard = InitGuard { caches: caches.clone(), coordinator: coordinator.clone(), target: target.clone(), crash: crash.clone(), armed: true };
     let mut initial: Option<Model> = None;
     with_run_caches(&mut || initial = Some((program_.init)(&first)));
     init_guard.armed = false;
@@ -682,6 +691,7 @@ fn run_state_internal(
         state: state.clone(),
         previous,
         coordinator: coordinator.clone(),
+        target: target.clone(),
         caches: caches.clone(),
         model: crash.clone(),
         last_scene: last_scene.clone(),

@@ -745,8 +745,11 @@ pub fn wait_event_timeout(timeout_ms: i32) -> bool {
 }
 
 /// Raw bridges to the SDL3_image, SDL3_ttf and SDL3_mixer satellites (built and linked with SDL3).
+#[cfg(feature = "image")]
 pub mod image;
+#[cfg(feature = "mixer")]
 pub mod mixer;
+#[cfg(feature = "ttf")]
 pub mod ttf;
 
 #[cfg(feature = "test-util")]

@@ -21,7 +21,7 @@ scene_command = { path = "../scene_command" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 
 [dev-dependencies]
-sdl3 = { path = "../sdl3" }
+sdl3 = { path = "../sdl3", features = ["image"] }
 
 [[test]]
 name = "e2e"
