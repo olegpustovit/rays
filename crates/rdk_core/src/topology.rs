@@ -1246,7 +1246,7 @@ mod ported_rdk_tests {
         )
         .unwrap();
         assert!(all_triangles(&empty).unwrap());
-        assert_eq!(payload_bytes(&empty), 8);
+        assert_eq!(payload_bytes(&empty), 4, "one u32 initial offset");
         assert_eq!(empty_reads.load(Ordering::SeqCst), 0, "empty topology metadata forced payload");
         assert_eq!(&*view::view(&empty).unwrap().primitive_offsets, &[0]);
         assert_eq!(empty_reads.load(Ordering::SeqCst), 1);
