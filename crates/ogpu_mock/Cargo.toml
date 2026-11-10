@@ -10,3 +10,6 @@ path = "src/lib.rs"
 
 [dependencies]
 ogpu_core = { path = "../ogpu_core" }
+
+[lints]
+workspace = true
