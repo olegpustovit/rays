@@ -1,0 +1,12 @@
+[alias]
+t = "run -q -p rays-t --"
+
+# Windows-gnu: a 256 MB main-thread stack, as in Rays.
+# ponytail: Rays also links with rustc's bundled lld there (a -B path pinned to one user's toolchain); add it per machine in ~/.cargo/config.toml.
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-Clink-arg=-Wl,--stack,268435456"]
+
+# Main-thread stack 256 MB on every binary: harness = false targets run their cases on the main thread.
+# A linker wrapper, not a rustflag: the flag must not reach proc-macro dylibs (pxui_text's cosmic-text).
+[target.aarch64-apple-darwin]
+linker = "tools/cc-stack.sh"

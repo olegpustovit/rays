@@ -210,18 +210,30 @@ pub fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
 
 
 /// External crates a package may name (package, dependency): `cc` is allowed everywhere as a build dependency.
-pub const EXTERNAL_CRATES: &[(&str, &str)] = &[("pxui_text", "cosmic-text")]; // pxui
+pub const EXTERNAL_CRATES: &[(&str, &str)] = &[
+    ("pxui_text", "cosmic-text"), // pxui
+];
 
 /// Direct edges that are forbidden outright (from, to, reason).
 pub const NO_DIRECT: &[(&str, &str, &str)] = &[("rays", "sdl3", "SDL services belong to runtime")];
 
 /// Crates whose tests (dev dependencies) may not reach the window host, SDL or any Rays crate either.
-pub const TESTS_INCLUDED: &[&str] = &["pxui", "pxui_text", "pxui_render"]; // pxui
-pub const TESTS_INCLUDED_FORBIDDEN: &[&str] = &["sdl3", "sdl3_sys", "pxui_sdl", "runtime", "runtime_resources", "renderer", "rays", "rays_shell", "rays_graph", "rays_editor", "param", "mem"]; // pxui
+pub const TESTS_INCLUDED: &[&str] = &[
+    "pxui", "pxui_text", "pxui_render", // pxui
+];
+pub const TESTS_INCLUDED_FORBIDDEN: &[&str] = &[
+    "sdl3", "sdl3_sys", "pxui_sdl", "runtime", "runtime_resources", "renderer", "rays", "rays_shell", "rays_graph", "rays_editor", "param", "mem", // pxui
+];
 
 /// `cargo t` registry checks run by `gate docs` (package, filter, test target).
 pub const DOCS_CHECKS: &[(&str, &str, Option<&str>)] = &[
     ("flow_check", "examples_check", None),
     ("rays_bin", "cli_help_errors_json_and_documentation", Some("cli")),
     ("rays_bin", "registry_metadata_contracts", Some("cli")),
+];
+
+/// Crates besides `*_sys` that may use `unsafe`.
+pub const UNSAFE_CRATES: &[&str] = &[
+    "parallel",
+    "pxui_wayland", // pxui: owns its C shim and the extern block over it, like a *_sys crate
 ];

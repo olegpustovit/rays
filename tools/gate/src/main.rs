@@ -207,12 +207,12 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
         KERNEL_ENTRY.iter().any(|(file, entry)| path.ends_with(file) && name.text == *entry)
             .then(|| function_body(&tokens, index).map(|(body, _)| (index, body)))?
     }).collect();
-    let unsafe_allowed = crate_name.ends_with("_sys") || crate_name == "parallel";
+    let unsafe_allowed = crate_name.ends_with("_sys") || policy::UNSAFE_CRATES.contains(&crate_name);
     let mut issues = Vec::new();
 
     for (index, token) in tokens.iter().enumerate() {
         if token.text == "unsafe" && !unsafe_allowed {
-            issue(&mut issues, path, token.line, "unsafe is restricted to *_sys crates and parallel");
+            issue(&mut issues, path, token.line, "unsafe is restricted to *_sys crates and the policy's UNSAFE_CRATES");
         }
         if matches!(token.text.as_str(), "async" | "await") {
             issue(&mut issues, path, token.line, "async/await is not allowed in product code");
@@ -1204,6 +1204,17 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
 }
 
 
+/// With a `pxui/` checkout: its recorded commit must be on the PXUI remote (tools/check-pxui-remote.sh).
+fn pxui_remote(workspace: &Path) -> Result<Vec<String>, String> {
+    if !workspace.join("pxui").exists() {
+        return Ok(Vec::new());
+    }
+    let output = std::process::Command::new("sh").arg("tools/check-pxui-remote.sh").current_dir(workspace).output()
+        .map_err(|error| format!("cannot run tools/check-pxui-remote.sh: {error}"))?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    Ok(if output.status.success() { Vec::new() } else { vec![String::from_utf8_lossy(&output.stderr).trim().to_owned()] })
+}
+
 fn docs(workspace: &Path) -> Result<Vec<String>, String> {
     // rays-t bounds setup/build, each case and the test run. Gate checks never refresh fixtures.
     for (package, filter, target) in policy::DOCS_CHECKS.iter().copied() {
@@ -1231,8 +1242,8 @@ fn workspace_root() -> Result<PathBuf, String> {
 fn main() {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_else(|| "all".into());
-    if args.next().is_some() || !matches!(command.as_str(), "shape" | "deps" | "docs" | "all") {
-        eprintln!("usage: cargo run -p gate -- <shape|deps|docs|all>");
+    if args.next().is_some() || !matches!(command.as_str(), "shape" | "deps" | "docs" | "pxui" | "all") {
+        eprintln!("usage: cargo run -p gate -- <shape|deps|docs|pxui|all>");
         process::exit(2);
     }
     let workspace = match workspace_root() {
@@ -1246,8 +1257,10 @@ fn main() {
         "shape" => shape(&workspace),
         "deps" => deps(&workspace),
         "docs" => docs(&workspace),
+        "pxui" => pxui_remote(&workspace),
         _ => shape(&workspace).and_then(|mut errors| {
             errors.extend(deps(&workspace)?);
+            errors.extend(pxui_remote(&workspace)?);
             if errors.is_empty() { errors.extend(docs(&workspace)?); }
             Ok(errors)
         }),
