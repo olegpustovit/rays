@@ -231,6 +231,28 @@ fn normalization_clamps_rejects_non_finite_and_keeps_signed_zero() {
     };
     let Value::Float(normalized_zero) = &signed_zero[1] else { unreachable!() };
     assert_eq!(normalized_zero.to_bits(), expected_zero.to_bits());
+    for (low, high, input, expected) in [
+        (Some(0.0), None, -0.0, 0.0_f64),
+        (Some(-0.0), None, 0.0, 0.0),
+        (Some(-0.0), None, -0.0, -0.0),
+        (Some(0.0), None, 0.0, 0.0),
+        (None, Some(-0.0), 0.0, -0.0),
+        (None, Some(0.0), -0.0, -0.0),
+        (None, None, -0.0, -0.0),
+        (None, None, 0.0, 0.0),
+    ] {
+        let kind = floating(low.unwrap_or(-10.0), high.unwrap_or(10.0), low, high).unwrap();
+        let Value::Float(actual) = normalize_value(&kind, &Value::Float(input)).unwrap() else { unreachable!() };
+        assert_eq!(actual.to_bits(), expected.to_bits());
+        let schema = schema_ok("zero", vec![field_ok("value", kind, Value::Float(input))]);
+        let Value::Float(default) = schema.default()[0] else { unreachable!() };
+        assert_eq!(default.to_bits(), expected.to_bits());
+        let mut record = vec![Value::Float(input)];
+        assert_eq!(schema.normalize(&mut record).unwrap(), input.to_bits() != expected.to_bits());
+        let Value::Float(actual) = record[0] else { unreachable!() };
+        assert_eq!(actual.to_bits(), expected.to_bits());
+        assert!(!schema.normalize(&mut record).unwrap());
+    }
     let mut nan = vec![Value::Int(3), Value::Float(f64::NAN), text_value("ok")];
     let before_nan = nan.clone();
     assert!(template.normalize(&mut nan).is_err());

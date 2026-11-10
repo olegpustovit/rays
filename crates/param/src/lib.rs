@@ -216,6 +216,13 @@ fn display_value(kind: &Kind, value: &Value) -> Result<Value, String> {
     }
 }
 
+// Native float min/max may choose either sign when zeros differ. Prefer +0 at lower bounds
+// and -0 at upper bounds, matching deterministic extrema without changing NaN comparisons.
+fn clamp_float(range: FloatRange, value: f64) -> f64 {
+    let value = range.hard_min.map_or(value, |low| if low > value || (low == value && low.is_sign_positive()) { low } else { value });
+    range.hard_max.map_or(value, |high| if high < value || (high == value && high.is_sign_negative()) { high } else { value })
+}
+
 pub fn normalize_value(kind: &Kind, value: &Value) -> Result<Value, String> {
     if !kind.validate_type(value) {
         return Err("parameter value has the wrong type".to_owned());
@@ -232,8 +239,7 @@ pub fn normalize_value(kind: &Kind, value: &Value) -> Result<Value, String> {
             if !value.is_finite() {
                 return Err("float parameter must be finite".to_owned());
             }
-            let value = range.hard_min.map_or(*value, |low| low.max(*value));
-            Ok(Value::Float(range.hard_max.map_or(value, |high| high.min(value))))
+            Ok(Value::Float(clamp_float(*range, *value)))
         }
         (Kind::Choice { options }, Value::Choice(value)) => {
             if options.iter().any(|option| option == value) {
@@ -288,8 +294,7 @@ fn normalize_in_place(kind: &Kind, value: &mut Value) -> bool {
             changed
         }
         (Kind::Floating(range), Value::Float(value)) => {
-            let min_clamped = range.hard_min.map_or(*value, |low| low.max(*value));
-            let normalized = range.hard_max.map_or(min_clamped, |high| high.min(min_clamped));
+            let normalized = clamp_float(*range, *value);
             let changed =
                 *value != normalized || (*value == 0.0 && value.to_bits() != normalized.to_bits());
             if changed {
