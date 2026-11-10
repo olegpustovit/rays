@@ -121,15 +121,15 @@
   },
   "Z0": {
     "status": "active",
-    "note": "296c35c2 bf116466 c1617a45 25c98948 608c3385 21eef57a \u2014 established guards and measured ratchets"
+    "note": "296c35c2 bf116466 c1617a45 25c98948 608c3385 21eef57a 0718cf9e \u2014 established guards and measured ratchets"
   },
   "Z1": {
     "status": "active",
     "note": "f24b8b34 \u2014 owner-buffer/callback/label/published-scene/renderer scratch reuse qualified; positive idle allocations and unexplained sea spike remain"
   },
   "Z2": {
-    "status": "active",
-    "note": "2aa78a9a \u2014 shared Text committed; actual shared Record/Symbol/path migration passes foundations and native callers"
+    "status": "done",
+    "note": "2aa78a9a 0718cf9e \u2014 binary Arc Text, process-wide u32 names, sorted shared Record/shape and typed path/cache owners"
   },
   "Z3": {
     "status": "pending",
@@ -141,7 +141,7 @@
   },
   "Z5": {
     "status": "active",
-    "note": "9ec77825 0e3d83a9 \u2014 full64-bit hash/SplitMix64 across CPU/Lisp/prelude/JS/private caches; identifier and prelude source-location goldens qualified"
+    "note": "9ec77825 0e3d83a9 b032690c 1cb47792 \u2014 full64 hash/SplitMix64 and unambiguous segment framing; strict scratch regression corrected"
   },
   "Z6": {
     "status": "pending",
@@ -152,8 +152,8 @@
     "note": ""
   },
   "Z8": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "Physical byte-limit/typed-memory regressions being installed; shared allocation owners and all cap callers mapped"
   },
   "Z9": {
     "status": "pending",
@@ -205,7 +205,7 @@
   },
   "G1": {
     "status": "active",
-    "note": "3541e92f \u2014 Core admission consumed by native/sys descriptors, ICB indices and argument slots; physical refit extent guards preserved"
+    "note": "3541e92f fff7ce6c d70effc7 \u2014 Core descriptor/slot/size admission and successful-Driver state transitions"
   },
   "G2": {
     "status": "done",
