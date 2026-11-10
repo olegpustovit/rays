@@ -129,7 +129,7 @@
   },
   "Z2": {
     "status": "active",
-    "note": "2aa78a9a \u2014 shared binary Text qualified; process symbols/sorted records/path caller migration underway"
+    "note": "2aa78a9a \u2014 shared Text committed; actual shared Record/Symbol/path migration passes foundations and native callers"
   },
   "Z3": {
     "status": "pending",
@@ -141,7 +141,7 @@
   },
   "Z5": {
     "status": "active",
-    "note": "9ec77825 \u2014 full64-bit hash/SplitMix64 across CPU/Lisp/prelude/JS/private caches; source/spec/intentional identifier goldens qualified"
+    "note": "9ec77825 0e3d83a9 \u2014 full64-bit hash/SplitMix64 across CPU/Lisp/prelude/JS/private caches; identifier and prelude source-location goldens qualified"
   },
   "Z6": {
     "status": "pending",
@@ -205,7 +205,7 @@
   },
   "G1": {
     "status": "active",
-    "note": "29c9efbf 98ffd32a \u2014 common GPU semantic validation consolidated; literal admission audit still finds overlap"
+    "note": "3541e92f \u2014 Core admission consumed by native/sys descriptors, ICB indices and argument slots; physical refit extent guards preserved"
   },
   "G2": {
     "status": "done",
@@ -225,7 +225,7 @@
   },
   "G6": {
     "status": "active",
-    "note": "Caller-owned decoder API installed; export validates exact positive RGBA payloads, direct SDL edge is dev-only"
+    "note": "94fd5cfe \u2014 caller-owned decoder; exact positive RGBA validation; direct SDL edge is dev-only"
   },
   "G7": {
     "status": "pending",
