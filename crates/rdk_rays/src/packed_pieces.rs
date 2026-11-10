@@ -40,7 +40,7 @@ fn dense_int(values: &[i64]) -> (Vec<usize>, usize) {
         .iter()
         .map(|value| {
             let next = table.len();
-            *table.entry(value.clone()).or_insert(next)
+            *table.entry(*value).or_insert(next)
         })
         .collect();
     (dense, table.len())

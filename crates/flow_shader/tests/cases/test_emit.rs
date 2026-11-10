@@ -207,7 +207,7 @@ pub fn every_packed_operation_prints_or_is_refused() {
 }
 
 pub fn golden_kernels_match_byte_for_byte() {
-    let mut cases: Vec<(String, packed::T)> = tp::fixtures(None, 1024).into_iter().map(|(n, p)| (n.to_owned(), p)).collect();
+    let mut cases: Vec<(String, packed::T)> = tp::fixtures(None, 1024).into_iter().map(|(n, p)| (n, p)).collect();
     cases.push(("two_outputs".to_owned(), tp::two_outputs()));
     for (name, program) in cases {
         let msl = exact(&program);

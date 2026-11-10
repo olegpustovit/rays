@@ -33,7 +33,7 @@ pub fn unfold_in(used: &mut Vec<String>, name: Option<&str>, sx: &S, leaf: &str,
     let sc = ensure(&set_node(sx, leaf, e2, builder)?, builder);
     let at = if base == "@result" { sc.ps.len() } else { first_pair_index(&sc, leaf, builder)? };
     let ps = insert_at(&sc.ps, at as i64, &[(sym(&name, builder), inner)]);
-    Ok((rebuild(&sc, &ps, sc.res.clone(), builder), name))
+    Ok((rebuild(&sc, &ps, sc.res, builder), name))
 }
 
 // a wire never deletes a node: the nested node an input held stays, as a binding nothing reads
@@ -41,9 +41,9 @@ pub fn keep_nested(pick: &dyn Fn(&S, &SyntaxBuilder) -> bool, used: &mut Vec<Str
     match key {
         ArgKey::Pos(_) | ArgKey::Kw(_) | ArgKey::Arm(_) | ArgKey::Cell(_) => match arg_get(&get_node(sx, leaf, builder)?, key, builder) {
             Some(a) if pick(&a,builder) => Ok(unfold_in(used, None, sx, leaf, key, &[], builder)?.0),
-            _ => Ok(sx.clone()),
+            _ => Ok(*sx),
         },
-        _ => Ok(sx.clone()),
+        _ => Ok(*sx),
     }
 }
 

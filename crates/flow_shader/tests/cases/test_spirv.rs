@@ -28,7 +28,7 @@ fn cases() -> Vec<(String, flow_ir::packed::T)> {
         .iter()
         .map(|(n, s)| (n.to_string(), tp::compile(s))),
     );
-    out.extend(tp::vector_fixtures(None, 16).into_iter().map(|(n, p)| (n.to_string(), p)));
+    out.extend(tp::vector_fixtures(None, 16).into_iter().map(|(n, p)| (n, p)));
     out
 }
 

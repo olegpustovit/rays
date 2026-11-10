@@ -997,7 +997,7 @@ pub mod ray {
                 Direction::RayVector(vec3(p_direction_vector[0], p_direction_vector[1], p_direction_vector[2]))
             }
             RayDirection::Normal => Direction::RayNormal,
-            RayDirection::Attribute => Direction::RayAttribute(p_direction_attribute.clone()),
+            RayDirection::Attribute => Direction::RayAttribute(p_direction_attribute),
         };
         let max_distance = if p_limit_max_distance { Some(p_max_distance) } else { None };
         let text = |s: &String| support::optional_text(s);

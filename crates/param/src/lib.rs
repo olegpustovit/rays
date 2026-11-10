@@ -1102,7 +1102,7 @@ mod tests {
             vec![x.clone(), y.clone(), FieldView { folder: vec!["other".into()], ..z.clone() }],
             vec![x.clone(), y.clone(), FieldView { kind: KindView::Text, ..z.clone() }],
             vec![x.clone(), y.clone(), z.clone(), x.clone(), y.clone(), z.clone()],
-            vec![FieldView { name: "center".into(), ..p.clone() }, x.clone(), y.clone(), z.clone()],
+            vec![FieldView { name: "center".into(), ..p.clone() }, x, y, z],
         ] {
             assert!(group_vec3(&fields, false).is_err());
         }
@@ -1124,8 +1124,8 @@ mod tests {
             inferred.iter().map(|field| field.vec3.clone()).collect::<Vec<_>>(),
             vec![Some(("p".into(), 0)), Some(("p".into(), 1)), Some(("p".into(), 2))]
         );
-        let mut clashing = ungrouped.clone();
-        clashing.insert(0, FieldView { name: "p".into(), ..p.clone() });
+        let mut clashing = ungrouped;
+        clashing.insert(0, FieldView { name: "p".into(), ..p });
         let clash = &group_vec3(&clashing, true).unwrap()[1];
         assert_eq!(
             clash.iter().map(|field| field.vec3.clone()).collect::<Vec<_>>(),
@@ -1382,7 +1382,7 @@ mod tests {
             .unwrap();
         assert_eq!(canonical, value);
         assert!(!has_effects(effects));
-        let mut normalized = raw.clone();
+        let mut normalized = raw;
         assert!(schema.normalize(&mut normalized).unwrap());
         assert_eq!(normalized, value);
 

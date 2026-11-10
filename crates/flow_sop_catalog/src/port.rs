@@ -239,7 +239,7 @@ mod tests {
         let b = Port { node: 2, path: "a".into() };
         assert!(a < b);
         let mut map = std::collections::BTreeMap::new();
-        map.insert(b.clone(), 1);
+        map.insert(b, 1);
         map.insert(a.clone(), 2);
         assert_eq!(map.keys().next(), Some(&a));
     }

@@ -395,7 +395,7 @@ mod tests {
     fn editor_readers_keep_bindings_keywords_and_context() {
         let text = "(workspace w (graph g :context scene [(depth : int 5)] (let* [ring (sop/box) n 2] (fn [x y] x))))";
         let (tokens, _, stack) = lex(text);
-        let (names, defns, graphs) = bound(text, &tokens, text.len());
+        let (names, _defns, graphs) = bound(text, &tokens, text.len());
         assert!(names.iter().any(|(name, _)| name == "depth"));
         assert!(names.iter().any(|(name, _)| name == "ring"));
         assert!(names.iter().any(|(name, _)| name == "n"));

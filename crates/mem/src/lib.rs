@@ -1278,7 +1278,7 @@ mod tests {
         let _guard = setup();
         let owner = plan("concurrent.roots");
         let calls = Arc::new(AtomicUsize::new(0));
-        let callback_calls = calls.clone();
+        let callback_calls = calls;
         let lock_checks = Arc::new(AtomicUsize::new(0));
         let callback_lock_checks = lock_checks.clone();
         root(&owner, Arc::new(move |visitor| {
@@ -1488,7 +1488,7 @@ mod tests {
             false
         }));
         set_device_budget(1_000);
-        let device_owner = vram.clone();
+        let device_owner = vram;
         let device: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(move || device_owner.bytes());
         let usage: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(|| 0);
         assert_eq!(
@@ -1652,7 +1652,7 @@ mod tests {
         let owner = cache("dead.concurrent");
         charge(&owner, 77);
         let barrier = Arc::new(Barrier::new(2));
-        let barrier_live = barrier.clone();
+        let barrier_live = barrier;
         let forgotten = Arc::new(AtomicUsize::new(0));
         let forgotten_ref = forgotten.clone();
         let owner_forget = owner.clone();

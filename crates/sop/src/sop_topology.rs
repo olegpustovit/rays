@@ -1170,8 +1170,8 @@ pub mod poly_cut {
         let cut_group = support::optional_text(&p_cut_group);
         let detection = match p_detection {
             PolyCutDetection::All => Detection::PolyCutAll,
-            PolyCutDetection::Crossing => Detection::PolyCutCrossing { attribute: p_attribute.clone(), value: p_value },
-            PolyCutDetection::Change => Detection::PolyCutChange { attribute: p_attribute.clone(), threshold: p_threshold },
+            PolyCutDetection::Crossing => Detection::PolyCutCrossing { attribute: p_attribute, value: p_value },
+            PolyCutDetection::Change => Detection::PolyCutChange { attribute: p_attribute, threshold: p_threshold },
         };
         Ok(make(
             label,
@@ -1963,7 +1963,7 @@ pub mod fuse {
         }
         let targeting = match p_targeting {
             FuseTargeting::NearPoints => Targeting::NearPoints,
-            FuseTargeting::SpecifiedPoints => Targeting::SpecifiedPoints(p_target_attribute.clone()),
+            FuseTargeting::SpecifiedPoints => Targeting::SpecifiedPoints(p_target_attribute),
         };
         let group = support::optional_text(&p_group);
         let target_group = support::optional_text(&p_target_group);

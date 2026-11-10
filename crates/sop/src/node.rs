@@ -9,7 +9,6 @@ use rays_math::mat4;
 
 use crate::context::{self, dependencies};
 use crate::payload;
-use crate::support;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CookMode {

@@ -672,7 +672,7 @@ mod tests {
             2.,
             &triangles(&[(-1., 1., 0.5), (3., 1., 0.5), (-1., 1., 1.5), (3., 1., 1.5)], vec![0, 1, 2, 1, 3, 2]),
         );
-        let mut params = front(right.clone());
+        let mut params = front(right);
         params.operation = Operation::Difference;
         params.right_treatment = Treatment::Surface;
         let output = run(&params, &left).unwrap();

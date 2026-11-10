@@ -449,17 +449,17 @@ pub fn with_kw(args: &[S], k: &str, v: Option<S>, b: &mut SyntaxBuilder) -> Vec<
         if kw_pair_at(args, i, b) {
             if kw_name(&args[i], b) == k {
                 if let Some(v) = v {
-                    out.push(args[i].clone());
+                    out.push(args[i]);
                     out.push(keep_notes(&args[i + 1], v, b));
                 }
                 out.extend(args[i + 2..].iter().cloned());
                 return out;
             }
-            out.push(args[i].clone());
-            out.push(args[i + 1].clone());
+            out.push(args[i]);
+            out.push(args[i + 1]);
             i += 2;
         } else {
-            out.push(args[i].clone());
+            out.push(args[i]);
             i += 1;
         }
     }
@@ -489,16 +489,16 @@ pub fn with_pos(args: &[S], i: i64, v: Option<S>, b: &mut SyntaxBuilder) -> Vec<
                     let mut j = 0;
                     while j < args.len() {
                         if kw_pair_at(args, j, b) {
-                            out.push(args[j].clone());
-                            out.push(args[j + 1].clone());
+                            out.push(args[j]);
+                            out.push(args[j + 1]);
                             j += 2;
                         } else if seen + 1 == n {
-                            out.push(args[j].clone());
+                            out.push(args[j]);
                             out.extend(additions.iter().cloned());
                             out.extend(args[j + 1..].iter().cloned());
                             return out;
                         } else {
-                            out.push(args[j].clone());
+                            out.push(args[j]);
                             seen += 1;
                             j += 1;
                         }
@@ -513,8 +513,8 @@ pub fn with_pos(args: &[S], i: i64, v: Option<S>, b: &mut SyntaxBuilder) -> Vec<
         let mut j = 0;
         while j < args.len() {
             if kw_pair_at(args, j, b) {
-                out.push(args[j].clone());
-                out.push(args[j + 1].clone());
+                out.push(args[j]);
+                out.push(args[j + 1]);
                 j += 2;
             } else if k == i {
                 if let Some(v) = v {
@@ -523,7 +523,7 @@ pub fn with_pos(args: &[S], i: i64, v: Option<S>, b: &mut SyntaxBuilder) -> Vec<
                 out.extend(args[j + 1..].iter().cloned());
                 return out;
             } else {
-                out.push(args[j].clone());
+                out.push(args[j]);
                 k += 1;
                 j += 1;
             }
@@ -600,10 +600,10 @@ fn root_order(args: &[S], b: &SyntaxBuilder) -> Vec<S> {
     let mut i = 0;
     while i < args.len() {
         if kw_pair_at(args, i, b) {
-            kws.push((args[i].clone(), args[i + 1].clone()));
+            kws.push((args[i], args[i + 1]));
             i += 2;
         } else {
-            pos.push(args[i].clone());
+            pos.push(args[i]);
             i += 1;
         }
     }
@@ -707,7 +707,7 @@ pub fn find_pair(sc: &Scope, leaf: &str, b: &SyntaxBuilder) -> Option<usize> {
 
 pub fn enter(e: &S, b: &mut SyntaxBuilder) -> R<S> {
     if scope_of(e, b).is_some() {
-        Ok(e.clone())
+        Ok(*e)
     } else if is_zone(e, b) {
         last_child(e, b)
     } else {
@@ -741,12 +741,12 @@ pub fn descend(cur: &S, names: &[Symbol], f: &mut dyn FnMut(&S, &mut SyntaxBuild
         Id,
     }
     let (child, back) = match scope_of(cur, b) {
-        Some(sc) if base == "@result" => (sc.res.clone(), Back::Scope(sc, None)),
+        Some(sc) if base == "@result" => (sc.res, Back::Scope(sc, None)),
         Some(sc) => match find_pair(&sc, name, b) {
-            Some(j) => (sc.ps[j].1.clone(), Back::Scope(sc, Some(j))),
+            Some(j) => (sc.ps[j].1, Back::Scope(sc, Some(j))),
             None => return Err(fail(&format!("Binding {} no longer exists.", name))),
         },
-        None if base == "@result" => (cur.clone(), Back::Id),
+        None if base == "@result" => (*cur, Back::Id),
         None => return Err(fail("Scope no longer exists.")),
     };
     let arms = keys.iter().any(|k| matches!(k, ArgKey::Arm(_)));
@@ -765,7 +765,7 @@ pub fn descend(cur: &S, names: &[Symbol], f: &mut dyn FnMut(&S, &mut SyntaxBuild
         Back::Scope(sc, Some(j)) => {
             let mut ps = sc.ps.clone();
             ps[j].1 = out;
-            rebuild(&sc, &ps, sc.res.clone(), b)
+            rebuild(&sc, &ps, sc.res, b)
         }
     })
 }
@@ -780,7 +780,7 @@ pub fn with_root(src: &[S], seg: &str, f: &mut dyn FnMut(&S, &mut SyntaxBuilder)
                     hit = true;
                     f(item, b)
                 } else {
-                    Ok(item.clone())
+                    Ok(*item)
                 }
             })
             .collect()
@@ -821,10 +821,10 @@ pub fn get_node(sx: &S, leaf: &str, b: &mut SyntaxBuilder) -> R<S> {
         match scope_of(sx, b) {
             Some(sc) if leaf == "@result" => Ok(sc.res),
             Some(sc) => match find_pair(&sc, leaf, b) {
-                Some(j) => Ok(sc.ps[j].1.clone()),
+                Some(j) => Ok(sc.ps[j].1),
                 None => Err(fail(&format!("Binding {} no longer exists.", leaf))),
             },
-            None if leaf == "@result" => Ok(sx.clone()),
+            None if leaf == "@result" => Ok(*sx),
             None => Err(fail(&format!("Binding {} no longer exists.", leaf))),
         }
     }
@@ -832,7 +832,7 @@ pub fn get_node(sx: &S, leaf: &str, b: &mut SyntaxBuilder) -> R<S> {
 
 pub fn reorder(sx: &S, b: &mut SyntaxBuilder) -> R<S> {
     let Some(sc) = scope_of(sx, b) else {
-        return Ok(sx.clone());
+        return Ok(*sx);
     };
     // the first binding whose reads are all bound goes next; by name in two tables, and a scope
     // already in order (every scrub) is one pass
@@ -863,8 +863,8 @@ pub fn reorder(sx: &S, b: &mut SyntaxBuilder) -> R<S> {
             }
         }
     }
-    let ps: Vec<(S, S)> = out.into_iter().map(|k| sc.ps[k].clone()).collect();
-    Ok(rebuild(&sc, &ps, sc.res.clone(), b))
+    let ps: Vec<(S, S)> = out.into_iter().map(|k| sc.ps[k]).collect();
+    Ok(rebuild(&sc, &ps, sc.res, b))
 }
 
 pub fn set_node(sx: &S, leaf: &str, e: S, b: &mut SyntaxBuilder) -> R<S> {
@@ -872,7 +872,7 @@ pub fn set_node(sx: &S, leaf: &str, e: S, b: &mut SyntaxBuilder) -> R<S> {
         let (base, keys) = split_leaf(leaf)?;
         fn put(cur: &S, keys: &[ArgKey], e: &S, leaf: &str, b: &mut SyntaxBuilder) -> R<S> {
             match keys {
-                [] => Ok(keep_notes(cur, e.clone(), b)),
+                [] => Ok(keep_notes(cur, *e, b)),
                 [key, rest @ ..] => match arg_get(cur, key, b) {
                     Some(a) => arg_set(cur, key, Some(put(&a, rest, e, leaf, b)?), b),
                     None => Err(fail(&format!("Node {} no longer exists.", leaf))),
@@ -888,7 +888,7 @@ pub fn set_node(sx: &S, leaf: &str, e: S, b: &mut SyntaxBuilder) -> R<S> {
                 Some(j) => {
                     let mut ps = sc.ps.clone();
                     ps[j].1 = keep_notes(&ps[j].1, e, b);
-                    Ok(rebuild(&sc, &ps, sc.res.clone(), b))
+                    Ok(rebuild(&sc, &ps, sc.res, b))
                 }
                 None => Err(fail(&format!("Binding {} no longer exists.", leaf))),
             },
@@ -1013,10 +1013,10 @@ pub fn select(sx: &S, nodes: &[Path], what: &str, b: &mut SyntaxBuilder) -> R<Se
 
 pub fn body_of(x: &Selection, b: &mut SyntaxBuilder) -> S {
     if x.sel.len() == 1 {
-        x.sel[0].1.clone()
+        x.sel[0].1
     } else {
-        let mut others: Vec<(S, S)> = x.sel.iter().enumerate().filter(|(k, _)| *k != x.out_idx).map(|(_, q)| q.clone()).collect();
-        others.push(x.out().clone());
+        let mut others: Vec<(S, S)> = x.sel.iter().enumerate().filter(|(k, _)| *k != x.out_idx).map(|(_, q)| *q).collect();
+        others.push(*x.out());
         call("let*", vec![vec_of(flat_pairs(&others), b), sym(&x.out_name, b)], b)
     }
 }
@@ -1058,7 +1058,7 @@ fn put_target(sc: &Scope, ps: &[(S, S)], target: &Target, e: S, b: &mut SyntaxBu
         Target::At(j) => {
             let mut ps = ps.to_vec();
             ps[*j].1 = keep_notes(&ps[*j].1, e, b);
-            rebuild(sc, &ps, sc.res.clone(), b)
+            rebuild(sc, &ps, sc.res, b)
         }
         Target::Result => rebuild(sc, ps, keep_notes(&sc.res, e, b), b),
     }
@@ -1095,34 +1095,34 @@ pub fn attach(sc: &Scope, ps: &[(S, S)], name: &str, expr: &S, b: &mut SyntaxBui
         if head_sym(&e, b) == Some("scene/root") {
             return Err(fail("The scene already has a root."));
         }
-        Ok((collapse(sc, &sc.ps, arg_set(expr, &ArgKey::Pos(0), Some(sc.res.clone()), b)?, b), expr.clone()))
+        Ok((collapse(sc, &sc.ps, arg_set(expr, &ArgKey::Pos(0), Some(sc.res), b)?, b), *expr))
     } else if starts_with("scene/", head) && head != Some("scene/merge") {
-        Ok((join_merge(sc, ps, name, b)?, expr.clone()))
+        Ok((join_merge(sc, ps, name, b)?, *expr))
     } else if starts_with("world/", head) {
         match head_sym(&e, b) {
-            Some("world/none") => Ok((rebuild(sc, ps, sym(name, b), b), expr.clone())),
-            Some(_) => Ok((rebuild(sc, ps, sym(name, b), b), arg_set(expr, &ArgKey::Pos(0), Some(sc.res.clone()), b)?)),
-            None => Ok((rebuild(sc, ps, sc.res.clone(), b), expr.clone())),
+            Some("world/none") => Ok((rebuild(sc, ps, sym(name, b), b), *expr)),
+            Some(_) => Ok((rebuild(sc, ps, sym(name, b), b), arg_set(expr, &ArgKey::Pos(0), Some(sc.res), b)?)),
+            None => Ok((rebuild(sc, ps, sc.res, b), *expr)),
         }
     } else {
-        Ok((rebuild(sc, ps, sc.res.clone(), b), expr.clone()))
+        Ok((rebuild(sc, ps, sc.res, b), *expr))
     }
 }
 
 pub fn detach_result(name: &str, below: &Option<S>, root: &S, b: &mut SyntaxBuilder) -> R<S> {
     let top = match below {
-        Some(b) => b.clone(),
+        Some(b) => *b,
         None => call("world/none", Vec::new(), b),
     };
     if matches!(head_sym(root, b), Some("graph")) {
         let body = last_child(root, b)?;
         match scope_of(&body, b) {
             Some(sc) if sym_of(&sc.res,b)==Some(name) => Ok(set_last(root, rebuild(&sc, &sc.ps, top, b), b)),
-            Some(_) => Ok(root.clone()),
-            None => Ok(if sym_of(&body,b)==Some(name) { set_last(root, top, b) } else { root.clone() }),
+            Some(_) => Ok(*root),
+            None => Ok(if sym_of(&body,b)==Some(name) { set_last(root, top, b) } else { *root }),
         }
     } else {
-        Ok(root.clone())
+        Ok(*root)
     }
 }
 

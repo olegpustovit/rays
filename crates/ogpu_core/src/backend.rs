@@ -2316,7 +2316,7 @@ mod ownership_tests {
         assert_eq!(buffer_to_texture(&blit, &buffer, None, 256, 1024, &texture, None, None, Extent { width: 4, height: 4, depth: 1 }).unwrap_err().kind, ErrorKind::InvalidState);
         assert_eq!(end_blit(&blit).unwrap_err().kind, ErrorKind::InvalidState);
         let color = |texture| ColorAttachment { texture, resolve: None, load: Load::Clear, store: Store::Store, clear: (0.,0.,0.,1.) };
-        assert_eq!(render_encoder(&commands, &RenderTarget { colors: vec![color(depth.clone())], depth: None }).err().unwrap().kind, ErrorKind::InvalidArgument);
+        assert_eq!(render_encoder(&commands, &RenderTarget { colors: vec![color(depth)], depth: None }).err().unwrap().kind, ErrorKind::InvalidArgument);
         assert_eq!(render_encoder(&commands, &RenderTarget { colors: vec![color(texture.clone())], depth: Some(DepthAttachment {
             depth_texture: texture, depth_load: Load::Clear, depth_store: Store::Store, depth_clear: 1. }) }).err().unwrap().kind, ErrorKind::InvalidArgument);
         let sampler = SamplerDescriptor { label: None, min_filter: types::SamplerFilter::Nearest, mag_filter: types::SamplerFilter::Nearest,
@@ -2489,7 +2489,7 @@ mod ownership_tests {
         assert!(weak.upgrade().is_some());
         fail.set(false);
         destroy_pipeline(&pipeline).unwrap();
-        destroy_pipeline(&pipeline.clone()).unwrap();
+        destroy_pipeline(&pipeline).unwrap();
         assert!(weak.upgrade().is_none());
         assert_eq!(max_total_threads(&pipeline), 64);
         assert_eq!(library.0.pipelines.get(), 0);

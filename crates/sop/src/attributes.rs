@@ -441,7 +441,7 @@ pub mod distance_from_geometry {
                     reference_selection,
                     reference_kind,
                     falloff,
-                    radius: radius.clone(),
+                    radius: radius,
                     distance_attribute: distance_attribute.clone(),
                     mask_attribute: mask_attribute.clone(),
                     reference: inputs[1].clone(),
@@ -737,8 +737,8 @@ pub mod attribute_mirror {
         let owner = p_owner;
         let (group_use, method_kind) = (p_group_use, p_method_);
         let (distance, tolerance) = (p_distance, p_tolerance);
-        let (mapping_attribute, mapping_destination) = (p_mapping_attribute.clone(), p_mapping_destination_group.clone());
-        let attributes = p_attributes.clone();
+        let (mapping_attribute, mapping_destination) = (p_mapping_attribute, p_mapping_destination_group);
+        let attributes = p_attributes;
         Ok(build::make_geometry(
             build::Args {
                 label: Some(label.to_owned()),
@@ -1509,7 +1509,7 @@ pub mod attribute_transfer {
         let (names, pattern) = if p_use_names {
             (Some(decode_names(&p_names).expect("validated")), None)
         } else {
-            (None, Some(p_pattern.clone()))
+            (None, Some(p_pattern))
         };
         let mode = support::transfer_mode_of(p_mode, p_neighbors, p_power, p_kernel_radius);
         let falloff = support::transfer_falloff_of(p_falloff, p_uniform_bias);

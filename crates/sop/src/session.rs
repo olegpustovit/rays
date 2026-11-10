@@ -256,7 +256,7 @@ pub fn create(max_entries: i64, max_payload_bytes: i64) -> Result<T, String> {
     let pool: SharedPool = Arc::new(Mutex::new(Pool {
         refs: HashMap::new(),
         bytes: 0,
-        owner: owner.clone(),
+        owner: owner,
         charged: HashMap::new(),
         resident: HashMap::new(),
         dropped: Vec::new(),

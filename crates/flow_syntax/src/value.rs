@@ -261,7 +261,7 @@ pub fn ty_of(value: &Value) -> Ty {
         Value::Int_array(_) => Ty::Array(Box::new(Ty::Int)),
         Value::Text_array(_) => Ty::Array(Box::new(Ty::Text)),
         Value::Floats(width, _) => Ty::Array(Box::new(match width { 1 => Ty::Float, 2 => Ty::Vec2, 3 => Ty::Vec3, 4 => Ty::Vec4, _ => Ty::Any })),
-        Value::Record(fields) => Ty::Record(fields.iter().map(|(name, value)| (name.clone(), ty_of(value))).collect()),
+        Value::Record(fields) => Ty::Record(fields.iter().map(|(name, value)| (*name, ty_of(value))).collect()),
         Value::Deferred(ty, _) => ty.clone(),
         Value::Struct(g) | Value::Source(g) => g.ty.clone(),
         Value::No_geo => ty::geometry(),
@@ -294,7 +294,7 @@ pub fn coerce_to(want: &Ty, value: &Value) -> Result<Value, Diagnostic> {
         (Ty::List(element), Value::List(values)) => Ok(Value::List(Arc::new(values.iter().map(|value| coerce_to(element, value)).collect::<Result<Vec<_>, _>>()?))),
         (Ty::Array(element), Value::Int_array(values)) if **element == Ty::Float => Ok(Value::Floats(1, Arc::new(values.iter().map(|value| *value as f64).collect()))),
         (Ty::Record(wanted), Value::Record(fields)) => Ok(Value::Record(fields.iter().map(|(name, value)| {
-            Ok((name.clone(), wanted.iter().find(|(field, _)| field == name).map_or_else(|| Ok(value.clone()), |(_, want)| coerce_to(want, value))?))
+            Ok((*name, wanted.iter().find(|(field, _)| field == name).map_or_else(|| Ok(value.clone()), |(_, want)| coerce_to(want, value))?))
         }).collect::<Result<Vec<_>, Diagnostic>>()?.into())),
         _ => Ok(value.clone()),
     }

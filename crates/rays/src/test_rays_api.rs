@@ -262,7 +262,7 @@ fn local_identity_cache_recency_release_and_accounting() {
     assert!(idlist::find(&mut empty, &item(1)).is_none());
     assert_eq!(mem::bytes(&owner), 0);
 
-    let mut collision = idlist::create(owner.clone(), 2, Box::new(move |a, b| number(a) == number(b)), None);
+    let mut collision = idlist::create(owner, 2, Box::new(move |a, b| number(a) == number(b)), None);
     let first = item(1);
     idlist::add(&mut collision, 0, first.clone(), item(11));
     idlist::add(&mut collision, 0, item(2), item(22));

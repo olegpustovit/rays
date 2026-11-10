@@ -1,5 +1,4 @@
 // GPU image publication tests check storage-free ownership, CPU transitions, resize, leases and checked source lifetime.
-use crate::common;
 use ogpu_core::backend::{self as b, Driver, DriverDevice, DriverResource, Texture};
 use ogpu_core::error::{self, ErrorKind};
 use ogpu_core::types::{TextureDescriptor, TextureFormat, TextureUsage};
@@ -169,7 +168,7 @@ fn gpu_image() {
     I::destroy(&image).unwrap();
     I::destroy(&image).unwrap();
     assert!(!b::texture_destroyed(&first) && !b::texture_destroyed(&second));
-    let large = texture(&TextureDescriptor { width: 1024, height: 1024, ..descriptor.clone() });
+    let large = texture(&TextureDescriptor { width: 1024, height: 1024, ..descriptor });
     let large_source = Rc::new(RefCell::new(Some(large.clone())));
     let large_image = I::of_gpu(1024, 1024, from(&large_source)).unwrap();
     assert!(I::cpu_storage_bytes(&large_image) == 0 && reads.get() == 2);

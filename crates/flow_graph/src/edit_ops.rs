@@ -145,7 +145,7 @@ pub fn remap(op: &Op, p: &[Symbol]) -> Option<Path> {
         }
         Op::Hoist { node } if base::has_prefix(node, p) && node.len() >= 3 => {
             let k = node.len() - 2;
-            Some(p.iter().enumerate().filter(|(i, _)| *i != k).map(|(_, s)| s.clone()).collect())
+            Some(p.iter().enumerate().filter(|(i, _)| *i != k).map(|(_, s)| *s).collect())
         }
         Op::DeleteNodes { nodes } if nodes.iter().any(|n| base::has_prefix(n, p)) => None,
         _ => Some(p.to_vec()),
@@ -322,12 +322,12 @@ pub fn fold_into(src: &[S], node: &[Symbol], builder: &mut SyntaxBuilder) -> R<V
             return Err(fail("That node is already written in its use."));
         }
         let j = first_pair_index(&sc, &leaf, builder)?;
-        let (p, e) = sc.ps[j].clone();
+        let (p, e) = sc.ps[j];
         let name = match &node_of(&p, builder) {
             Node::Sym(n) => builder.name(*n).to_owned(),
             _ => return Err(fail("Only a plain name can be folded.")),
         };
-        let others: Vec<(S, S)> = sc.ps.iter().enumerate().filter(|(k, _)| *k != j).map(|(_, q)| q.clone()).collect();
+        let others: Vec<(S, S)> = sc.ps.iter().enumerate().filter(|(k, _)| *k != j).map(|(_, q)| *q).collect();
         let uses = others.iter().fold(count_refs(&name, &sc.res, builder), |n, (_, x)| n + count_refs(&name, x, builder));
         if uses != 1 {
             return Err(fail(&format!("Fold needs exactly one use of {} inside its scope.", name)));
@@ -335,7 +335,7 @@ pub fn fold_into(src: &[S], node: &[Symbol], builder: &mut SyntaxBuilder) -> R<V
         // the binding's note goes with it
         let moved = with_notes(&e, notes(&p,builder).iter().chain(notes(&e,builder)).cloned().collect(),builder);
         let rep = |x: &S, builder: &mut SyntaxBuilder| replace_ref(&name, &moved, x, builder);
-        let ps: Vec<(S, S)> = others.iter().map(|(q, x)| (q.clone(), rep(x,builder))).collect();
+        let ps: Vec<(S, S)> = others.iter().map(|(q, x)| (*q, rep(x,builder))).collect();
         let res = rep(&sc.res,builder);
         if ps.iter().any(|(_, x)| count_refs(&name, x, builder) > 0) || count_refs(&name, &res, builder) > 0 {
             return Err(fail(&format!("{} is read by field; it cannot be folded.", name)));
@@ -358,7 +358,7 @@ pub fn inline_autos(src: Vec<S>, sp: &[Symbol], names: &[String], builder: &mut 
                     }
                 }
             }
-            Ok(sx.clone())
+            Ok(*sx)
         }, builder);
         if ok {
             let mut node = sp.to_vec();
@@ -398,9 +398,9 @@ fn zone(h: &str, iv: &str, n: i64, body: S, builder: &mut SyntaxBuilder) -> S {
 }
 
 fn build_wrap(b: &Build, x: &Selection, iv: &str, used: &mut Vec<String>, builder: &mut SyntaxBuilder) -> Vec<(S, S)> {
-    let out = x.out().0.clone();
+    let out = x.out().0;
     match b {
-        Build::If(fallback) => vec![(out, call("if", vec![sym("true", builder), body_of(x, builder), fallback.clone()], builder))],
+        Build::If(fallback) => vec![(out, call("if", vec![sym("true", builder), body_of(x, builder), *fallback], builder))],
         Build::MapSource { h, c } => {
             let body = replace_ref(c, &sym(iv, builder), &body_of(x, builder), builder);
             vec![(out, call(h, vec![call("fn", vec![vec(vec![sym(iv, builder)], builder), body], builder), sym(c, builder)], builder))]
@@ -438,7 +438,7 @@ fn wrap_attempt(src: &[S], sp: &[Symbol], nodes: &[Path], build: &Build, builder
             None => fresh(&mut used, "i"),
         };
         let added = build_wrap(build, &x, &iv, &mut used, builder);
-        reorder(&rebuild(&x.sc, &insert_at(&x.keep, x.first.min(x.keep.len()) as i64, &added), x.sc.res.clone(), builder), builder)
+        reorder(&rebuild(&x.sc, &insert_at(&x.keep, x.first.min(x.keep.len()) as i64, &added), x.sc.res, builder), builder)
     }, builder)
 }
 
@@ -451,7 +451,7 @@ fn arms_of(sx: &S, leaf: &str, builder: &mut SyntaxBuilder) -> R<(S, String, Vec
     let kids = children(&e, builder);
     let args = kids[1..].to_vec();
     let (prefix, args) = if h == "case" {
-        let first = args.first().ok_or_else(|| fail("The edit failed: Failure(\"hd\")"))?.clone();
+        let first = *args.first().ok_or_else(|| fail("The edit failed: Failure(\"hd\")"))?;
         (vec![first], args[1..].to_vec())
     } else {
         (Vec::new(), args)
@@ -486,8 +486,8 @@ fn add_arm(src: &[S], node: &[Symbol], after: i64, fallback: &Option<S>, builder
             }
         };
         let fb = match fallback {
-            Some(f) => f.clone(),
-            None => arms.last().ok_or_else(|| fail("The edit failed: Failure(\"hd\")"))?.1.clone(),
+            Some(f) => *f,
+            None => arms.last().ok_or_else(|| fail("The edit failed: Failure(\"hd\")"))?.1,
         };
         let mut items = vec![sym(&h, builder)];
         items.extend(prefix.iter().cloned());
@@ -503,7 +503,7 @@ fn delete_arm(src: &[S], node: &[Symbol], index: i64, builder: &mut SyntaxBuilde
         if index < 0 || index >= arms.len() as i64 - 1 {
             return Err(fail("The final else arm stays."));
         }
-        let kept: Vec<(S, S)> = arms.iter().enumerate().filter(|(i, _)| *i as i64 != index).map(|(_, a)| a.clone()).collect();
+        let kept: Vec<(S, S)> = arms.iter().enumerate().filter(|(i, _)| *i as i64 != index).map(|(_, a)| *a).collect();
         let mut items = vec![sym(&h, builder)];
         items.extend(prefix.iter().cloned());
         items.extend(flat_pairs(&kept));
@@ -516,10 +516,10 @@ fn set_arg(src: &[S], node: &[Symbol], key: &ArgKey, sub: &[i64], value: &S, bui
     edit_scope(src, &sp, &mut |sx, builder| {
         let e = get_node(sx, &leaf, builder)?;
         let arg = if sub.is_empty() {
-            value.clone()
+            *value
         } else {
             match arg_get(&e, key, builder) {
-                Some(cur) => set_sub(&cur, sub, value.clone(), builder)?,
+                Some(cur) => set_sub(&cur, sub, *value, builder)?,
                 None => return Err(fail("That input is not set.")),
             }
         };
@@ -529,7 +529,7 @@ fn set_arg(src: &[S], node: &[Symbol], key: &ArgKey, sub: &[i64], value: &S, bui
 
 fn connect(src: &[S], node: &[Symbol], key: &ArgKey, name: &str, iter: bool, builder: &mut SyntaxBuilder) -> R<Vec<S>> {
     let (sp, leaf) = split_node(node)?;
-    let root = hd(&sp)?.clone();
+    let root = hd(&sp)?;
     let mut used = root_used(src, &root, builder);
     let mut prev: Vec<String> = Vec::new();
     let out = edit_scope(src, &sp, &mut |sx, builder| {
@@ -541,7 +541,7 @@ fn connect(src: &[S], node: &[Symbol], key: &ArgKey, name: &str, iter: bool, bui
             let (held, at) = holder(name)?;
             unfold_in(&mut used, None, sx, &held, &at, &[], builder)?
         } else {
-            (sx.clone(), name.to_owned())
+            (*sx, name.to_owned())
         };
         if leaf == "@result" && *key == ArgKey::Whole {
             let sc = ensure(&sx, builder);
@@ -557,7 +557,7 @@ fn connect(src: &[S], node: &[Symbol], key: &ArgKey, name: &str, iter: bool, bui
                 };
                 let fr = fresh_name(src, &root, &base, builder);
                 let mut ps = sc.ps.clone();
-                ps.push((sym(&fr, builder), sc.res.clone()));
+                ps.push((sym(&fr, builder), sc.res));
                 ps
             };
             reorder(&rebuild(&sc, &ps, sym(&name, builder), builder), builder)
@@ -570,7 +570,7 @@ fn connect(src: &[S], node: &[Symbol], key: &ArgKey, name: &str, iter: bool, bui
             let step = match (iter, arg_get(&e, key, builder)) {
                 (true, Some(cur)) => match &node_of(&cur, builder) {
                     Node::Num(n) if builder.name(*n) != "0" && builder.name(*n) != "1" && (builder.name(*n)).parse::<f64>().ok() != Some(0.0) && (builder.name(*n)).parse::<f64>().ok() != Some(1.0) => {
-                        call("*", vec![sym(&name, builder), cur.clone()], builder)
+                        call("*", vec![sym(&name, builder), cur], builder)
                     }
                     _ => sym(&name, builder),
                 },
@@ -586,7 +586,7 @@ fn connect(src: &[S], node: &[Symbol], key: &ArgKey, name: &str, iter: bool, bui
 
 fn disconnect(src: &[S], node: &[Symbol], key: &ArgKey, fallback: &Option<S>, builder: &mut SyntaxBuilder) -> R<Vec<S>> {
     let (sp, leaf) = split_node(node)?;
-    let root = hd(&sp)?.clone();
+    let root = hd(&sp)?;
     let mut prev: Vec<String> = Vec::new();
     let out = edit_scope(src, &sp, &mut |sx, builder| {
         let mut used = root_used(src, &root, builder);
@@ -596,7 +596,7 @@ fn disconnect(src: &[S], node: &[Symbol], key: &ArgKey, fallback: &Option<S>, bu
             prev = vec![builder.name(n).to_owned()];
         }
         let v = match (key, fallback) {
-            (_, Some(d)) => Some(d.clone()),
+            (_, Some(d)) => Some(*d),
             (ArgKey::Kw(_) | ArgKey::Field(_) | ArgKey::Pos(_), None) => None,
             (_, None) => return Err(fail("Nothing to fall back to. Drag another output onto it instead.")),
         };
@@ -653,19 +653,19 @@ fn delete_nodes(src: &[S], nodes: &[Path], builder: &mut SyntaxBuilder) -> R<Vec
                 match scope_of(sx, builder) {
                     Some(sc) if leaf != "@result" => {
                         let j = first_pair_index(&sc, &leaf, builder)?;
-                        let (p, e) = sc.ps[j].clone();
-                        gone = Some(e.clone());
+                        let (p, e) = sc.ps[j];
+                        gone = Some(e);
                         touched.push((sp.clone(), dedup(&sym_list(&e, builder))));
-                        let others: Vec<(S, S)> = sc.ps.iter().enumerate().filter(|(k, _)| *k != j).map(|(_, q)| q.clone()).collect();
+                        let others: Vec<(S, S)> = sc.ps.iter().enumerate().filter(|(k, _)| *k != j).map(|(_, q)| *q).collect();
                         // a deleted value dissolves: its readers get its expression; a scene object leaves
                         // the result that held it instead, and so does a loop the result reads (below)
                         let obj = starts_with("scene/", head_sym(&e, builder)) || starts_with("world/", head_sym(&e, builder));
                         let rep = |x: &S, builder: &mut SyntaxBuilder| match node_of(&p, builder) {
                             Node::Sym(n) if !obj => { let name=builder.name(n).to_owned();replace_ref(&name, &e, x, builder) },
-                            _ => x.clone(),
+                            _ => *x,
                         };
-                        let ps: Vec<(S, S)> = others.iter().map(|(q, x)| (q.clone(), rep(x,builder))).collect();
-                        let res = if is_zone(&e, builder) { sc.res.clone() } else { rep(&sc.res,builder) };
+                        let ps: Vec<(S, S)> = others.iter().map(|(q, x)| (*q, rep(x,builder))).collect();
+                        let res = if is_zone(&e, builder) { sc.res } else { rep(&sc.res,builder) };
                         Ok(collapse(&sc, &ps, res, builder))
                     }
                     _ => Err(fail("Only a named node can be deleted.")),
@@ -691,7 +691,7 @@ fn delete_nodes(src: &[S], nodes: &[Path], builder: &mut SyntaxBuilder) -> R<Vec
         let mut used = false;
         let _ = edit_scope(&out, &sp, &mut |sx, builder| {
             used = sym_list(sx, builder).contains(&name);
-            Ok(sx.clone())
+            Ok(*sx)
         }, builder);
         if !nested(&name) && used {
             return Err(fail(&format!(
@@ -731,11 +731,11 @@ fn rename(src: &[S], node: &[Symbol], to: &str, builder: &mut SyntaxBuilder) -> 
                 .enumerate()
                 .map(|(k, (p, v))| {
                     if k == j {
-                        (with_node(p, Draft::Sym(to.to_owned()), builder), v.clone())
+                        (with_node(p, Draft::Sym(to.to_owned()), builder), *v)
                     } else if k > j {
-                        (p.clone(), rename_ref(&old, to, v, builder))
+                        (*p, rename_ref(&old, to, v, builder))
                     } else {
-                        (p.clone(), v.clone())
+                        (*p, *v)
                     }
                 })
                 .collect();
@@ -749,7 +749,7 @@ fn hoist_inner(v: &S, leaf: &str, hoisted: &mut Option<(S, S)>, builder: &mut Sy
     let entered = enter(v, builder)?;
     let sc = scope_of(&entered, builder).ok_or_else(|| fail("Nothing to move."))?;
     let j = first_pair_index(&sc, leaf, builder)?;
-    let (p, e) = sc.ps[j].clone();
+    let (p, e) = sc.ps[j];
     let local: Vec<String> = dedup(&sym_list(&e, builder))
         .into_iter()
         .filter(|x| sc.ps.iter().any(|(q, _)| pat_names(q, builder).contains(x)))
@@ -758,8 +758,8 @@ fn hoist_inner(v: &S, leaf: &str, hoisted: &mut Option<(S, S)>, builder: &mut Sy
         return Err(fail(&format!("{} uses {} from inside this scope. Move that out first.", leaf, local.join(", "))));
     }
     *hoisted = Some((p, e));
-    let rest: Vec<(S, S)> = sc.ps.iter().enumerate().filter(|(k, _)| *k != j).map(|(_, q)| q.clone()).collect();
-    Ok(leave(v, collapse(&sc, &rest, sc.res.clone(), builder), builder))
+    let rest: Vec<(S, S)> = sc.ps.iter().enumerate().filter(|(k, _)| *k != j).map(|(_, q)| *q).collect();
+    Ok(leave(v, collapse(&sc, &rest, sc.res, builder), builder))
 }
 
 fn hoist(src: &[S], node: &[Symbol], builder: &mut SyntaxBuilder) -> R<Vec<S>> {
@@ -778,7 +778,7 @@ fn hoist(src: &[S], node: &[Symbol], builder: &mut SyntaxBuilder) -> R<Vec<S>> {
             let k = first_pair_index(&out_scope, &owner, builder)?;
             let mut ps = out_scope.ps.clone();
             ps[k].1 = hoist_inner(&ps[k].1.clone(), &leaf, &mut hoisted, builder)?;
-            (ps, out_scope.res.clone(), k)
+            (ps, out_scope.res, k)
         };
         let pe = hoisted.ok_or_else(|| fail("Nothing to move."))?;
         reorder(&rebuild(&out_scope, &insert_at(&ps, at as i64, &[pe]), res, builder), builder)
@@ -787,13 +787,13 @@ fn hoist(src: &[S], node: &[Symbol], builder: &mut SyntaxBuilder) -> R<Vec<S>> {
 
 fn wrap_attempts(src: &[S], nodes: &[Path], loop_: Loop, fallback: &Option<S>, builder: &mut SyntaxBuilder) -> R<Vec<Attempt>> {
     let sp = scope_path_of(nodes)?;
-    let root = hd(&sp)?.clone();
+    let root = hd(&sp)?;
     let rootf = root_form(src, &root, builder)?;
     let mk_attempt = |nodes: Vec<Path>, build: Build| Attempt::Wrap { sp: sp.clone(), nodes, build };
     match loop_ {
         Loop::If => {
             let fallbacks = match fallback {
-                Some(f) => vec![f.clone()],
+                Some(f) => vec![*f],
                 None => vec![
                     sym("nil", builder),
                     num(0, builder),
@@ -832,7 +832,7 @@ fn wrap_attempts(src: &[S], nodes: &[Path], loop_: Loop, fallback: &Option<S>, b
             let mut free_names: Vec<String> = Vec::new();
             edit_scope(src, &sp, &mut |sx, builder| {
                 free_names = outside_names(&rootf, &select(sx, nodes, "Iterate", builder)?, builder);
-                Ok(sx.clone())
+                Ok(*sx)
             }, builder)?;
             if free_names.is_empty() {
                 Ok(vec![Attempt::Refuse(
@@ -847,7 +847,7 @@ fn wrap_attempts(src: &[S], nodes: &[Path], loop_: Loop, fallback: &Option<S>, b
 
 fn make_local_fn(src: &[S], nodes: &[Path], builder: &mut SyntaxBuilder) -> R<Vec<S>> {
     let sp = scope_path_of(nodes)?;
-    let root = hd(&sp)?.clone();
+    let root = hd(&sp)?;
     let rootf = root_form(src, &root, builder)?;
     let mut used = root_used(src, &root, builder);
     edit_scope(src, &sp, &mut |sx, builder| {
@@ -868,9 +868,9 @@ fn make_local_fn(src: &[S], nodes: &[Path], builder: &mut SyntaxBuilder) -> R<Ve
         }
         let added = vec![
             (sym(&fname, builder), call("fn", vec![vec(params.iter().map(|p| sym(p, builder)).collect(), builder), body], builder)),
-            (x.out().0.clone(), call(&fname, outer.iter().map(|n| sym(n, builder)).collect(), builder)),
+            (x.out().0, call(&fname, outer.iter().map(|n| sym(n, builder)).collect(), builder)),
         ];
-        reorder(&rebuild(&x.sc, &insert_at(&x.keep, x.first.min(x.keep.len()) as i64, &added), x.sc.res.clone(), builder), builder)
+        reorder(&rebuild(&x.sc, &insert_at(&x.keep, x.first.min(x.keep.len()) as i64, &added), x.sc.res, builder), builder)
     }, builder)
 }
 
@@ -897,7 +897,7 @@ fn make_macro(src: &[S], nodes: &[Path], name: &str, holes: &[(Vec<i64>, String)
         for (path, _) in holes {
             hole_vals.push(get_sub(&tmpl, path, builder).ok_or_else(|| fail("A hole is not in the template."))?);
         }
-        let mut body = tmpl.clone();
+        let mut body = tmpl;
         for (path, n) in holes {
             body = set_sub(&body, path, unquote(sym(n, builder), builder), builder)?;
         }
@@ -914,12 +914,12 @@ fn make_macro(src: &[S], nodes: &[Path], name: &str, holes: &[(Vec<i64>, String)
         defn = Some(call("defmacro", vec![sym(name, builder), vec(params.iter().map(|p| sym(p, builder)).collect(), builder), mk(Draft::Quote(QuoteKind::Quasi, body), builder)], builder));
         let mut args = hole_vals.clone();
         args.extend(free_n.iter().map(|f| sym(f, builder)));
-        let added = vec![(x.out().0.clone(), call(name, args, builder))];
-        reorder(&rebuild(&x.sc, &insert_at(&x.keep, x.first.min(x.keep.len()) as i64, &added), x.sc.res.clone(), builder), builder)
+        let added = vec![(x.out().0, call(name, args, builder))];
+        reorder(&rebuild(&x.sc, &insert_at(&x.keep, x.first.min(x.keep.len()) as i64, &added), x.sc.res, builder), builder)
     }, builder)?;
     let defn = defn.ok_or_else(|| fail("The edit failed: Invalid_argument(\"option is None\")"))?;
-    map_items(&out, &mut |items, builder| {
-        let mut r = vec![defn.clone()];
+    map_items(&out, &mut |items, _builder| {
+        let mut r = vec![defn];
         r.extend(items);
         Ok(r)
     }, builder)
@@ -953,12 +953,12 @@ fn make_defn(src: &[S], nodes: &[Path], name: &str, context: &str, params: &[(St
             typed.push(mk(Draft::List(vec![sym(n, builder), sym(":", builder), sym(&ty, builder)].into()), builder));
         }
         defn = Some(call("defn", vec![sym(name, builder), kwf("context", builder), sym(context, builder), vec(typed, builder), body_of(&x, builder)], builder));
-        let added = vec![(x.out().0.clone(), call(name, outer.iter().map(|n| sym(n, builder)).collect(), builder))];
-        reorder(&rebuild(&x.sc, &insert_at(&x.keep, x.first.min(x.keep.len()) as i64, &added), x.sc.res.clone(), builder), builder)
+        let added = vec![(x.out().0, call(name, outer.iter().map(|n| sym(n, builder)).collect(), builder))];
+        reorder(&rebuild(&x.sc, &insert_at(&x.keep, x.first.min(x.keep.len()) as i64, &added), x.sc.res, builder), builder)
     }, builder)?;
     let defn = defn.ok_or_else(|| fail("The edit failed: Invalid_argument(\"option is None\")"))?;
-    map_items(&out, &mut |items, builder| {
-        let mut r = vec![defn.clone()];
+    map_items(&out, &mut |items, _builder| {
+        let mut r = vec![defn];
         r.extend(items);
         Ok(r)
     }, builder)
@@ -1008,7 +1008,7 @@ fn move_binding(src: &[S], node: &[Symbol], by: i64, builder: &mut SyntaxBuilder
         }
         let mut a = sc.ps.clone();
         a.swap(j as usize, k as usize);
-        let moved = rebuild(&sc, &a, sc.res.clone(), builder);
+        let moved = rebuild(&sc, &a, sc.res, builder);
         let keys = |x: &S, builder: &SyntaxBuilder| -> Vec<String> {
             match scope_of(x, builder) {
                 Some(sc) => sc.ps.iter().map(|(p, _)| pat_key(p, builder)).collect(),
@@ -1104,7 +1104,7 @@ fn add_field(src: &[S], node: &[Symbol], name: &str, value: &S, builder: &mut Sy
         if arg_get(&e, &key, builder).is_some() {
             return Err(fail(&format!("There is a field {} already.", name)));
         }
-        reorder(&set_node(sx, &leaf, arg_set(&e, &key, Some(value.clone()), builder)?, builder)?, builder)
+        reorder(&set_node(sx, &leaf, arg_set(&e, &key, Some(*value), builder)?, builder)?, builder)
     }, builder)
 }
 
@@ -1116,12 +1116,12 @@ fn add_node(src: &[S], scope: &[Symbol], name: &str, expr: &S, builder: &mut Syn
     edit_scope(src, scope, &mut |sx, builder| {
         let sc = ensure(sx, builder);
         let mut ps = sc.ps.clone();
-        ps.push((sym(name, builder), expr.clone()));
-        let (body, expr) = if scope.len() == 1 { attach(&sc, &ps, name, expr, builder)? } else { (rebuild(&sc, &ps, sc.res.clone(), builder), expr.clone()) };
+        ps.push((sym(name, builder), *expr));
+        let (body, expr) = if scope.len() == 1 { attach(&sc, &ps, name, expr, builder)? } else { (rebuild(&sc, &ps, sc.res, builder), *expr) };
         let body = match scope_of(&body, builder) {
             Some(b) => {
-                let ps2: Vec<(S, S)> = b.ps.iter().map(|(p, v)| if sym_of(p,builder)==Some(name) { (p.clone(), expr.clone()) } else { (p.clone(), v.clone()) }).collect();
-                rebuild(&b, &ps2, b.res.clone(), builder)
+                let ps2: Vec<(S, S)> = b.ps.iter().map(|(p, v)| if sym_of(p,builder)==Some(name) { (*p, expr) } else { (*p, *v) }).collect();
+                rebuild(&b, &ps2, b.res, builder)
             }
             None => body,
         };
@@ -1188,7 +1188,7 @@ fn group_merge(src: &[S], nodes: &[Path], name: &str, builder: &mut SyntaxBuilde
         let sc = ensure(sx, builder);
         let mut ps = sc.ps.clone();
         ps.push((sym(name, builder), call("scene/merge", leaves.iter().map(|l| sym(l, builder)).collect(), builder)));
-        reorder(&rebuild(&sc, &ps, sc.res.clone(), builder), builder)
+        reorder(&rebuild(&sc, &ps, sc.res, builder), builder)
     }, builder)
 }
 
@@ -1224,10 +1224,10 @@ fn set_graph(src: &[S], name: &str, form: &S, builder: &mut SyntaxBuilder) -> R<
     let exists = workspace_parts(src, builder)?.1.iter().any(|i| root_name(i, builder).as_deref() == Some(name));
     map_items(src, &mut |items, builder| {
         if exists {
-            Ok(items.into_iter().map(|i| if root_name(&i, builder).as_deref() == Some(name) { form.clone() } else { i }).collect())
+            Ok(items.into_iter().map(|i| if root_name(&i, builder).as_deref() == Some(name) { *form } else { i }).collect())
         } else {
             let mut items = items;
-            items.push(form.clone());
+            items.push(*form);
             Ok(items)
         }
     }, builder)
@@ -1237,7 +1237,7 @@ fn set_graph(src: &[S], name: &str, form: &S, builder: &mut SyntaxBuilder) -> R<
 pub fn rewrite(src: &[S], op: &Op, fallback: &Option<S>, builder: &mut SyntaxBuilder) -> R<Vec<Attempt>> {
     match op {
         Op::Wrap { nodes, loop_ } => wrap_attempts(src, nodes, *loop_, fallback, builder),
-        _ => Ok(vec![Attempt::Plain(op.clone(), fallback.clone())]),
+        _ => Ok(vec![Attempt::Plain(op.clone(), *fallback)]),
     }
 }
 

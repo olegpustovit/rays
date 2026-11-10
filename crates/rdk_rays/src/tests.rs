@@ -77,7 +77,7 @@ fn surface_failure() {
         Ok(_) => panic!("bow-tie surface was accepted"),
     };
     let like = Storage::Float3(positions.clone());
-    let normals_source = positions.clone();
+    let normals_source = positions;
     let normals = attribute::create_deferred(
         None,
         None,

@@ -765,7 +765,7 @@ mod tests {
         let (squares, values) = run(1);
         assert_eq!(squares[10_006], 10_006 * 10_006);
         assert_eq!(values[0], 0);
-        assert_eq!((squares.clone(), values.clone()), run(4));
+        assert_eq!((squares, values), run(4));
     }
 
     #[test]

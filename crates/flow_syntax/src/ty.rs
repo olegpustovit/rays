@@ -175,7 +175,7 @@ fn parse_type(source: &str, at: &mut usize) -> Option<Ty> {
     }
     let name = source.get(start..*at)?;
     structural().into_iter().find(|(candidate, _)| *candidate == name).map(|(_, ty)| ty)
-        .or_else(|| descriptors().into_iter().find(|d| d.name == name).map(|d| Ty::Named(name.to_owned())))
+        .or_else(|| descriptors().into_iter().find(|d| d.name == name).map(|_d| Ty::Named(name.to_owned())))
 }
 fn parse_fields(source: &str, at: &mut usize) -> Option<Ty> {
     if eat(source, at, "}") { return Some(Ty::Record(Vec::new())); }
@@ -281,7 +281,7 @@ pub fn coerce(have: &Ty, want: &Ty) -> Ty {
     match (have, want) {
         (Ty::List(h), Ty::List(w)) => Ty::List(Box::new(coerce(h, w))),
         (Ty::Array(h), Ty::Array(w)) => Ty::Array(Box::new(if matches!(w.as_ref(), Ty::Any) { (**h).clone() } else { (**w).clone() })),
-        (Ty::Record(hs), Ty::Record(ws)) => Ty::Record(hs.iter().map(|(name, ty)| (name.clone(), ws.iter().find(|(field, _)| field == name).map_or_else(|| ty.clone(), |(_, want)| coerce(ty, want)))).collect()),
+        (Ty::Record(hs), Ty::Record(ws)) => Ty::Record(hs.iter().map(|(name, ty)| (*name, ws.iter().find(|(field, _)| field == name).map_or_else(|| ty.clone(), |(_, want)| coerce(ty, want)))).collect()),
         _ if (num(have) || matches!(have, Ty::Bool)) && (num(want) || matches!(want, Ty::Bool) || vector(want) && !matches!(have, Ty::Bool)) => want.clone(),
         _ => have.clone(),
     }
@@ -296,7 +296,7 @@ pub fn join(a: &Ty, b: &Ty) -> Option<Ty> {
         (Ty::List(x), Ty::List(y)) => join(x, y).map(|t| Ty::List(Box::new(t))),
         (Ty::Array(x), Ty::Array(y)) => join(x, y).map(|t| Ty::Array(Box::new(t))),
         (Ty::Record(xs), Ty::Record(ys)) if xs.len() == ys.len() && xs.iter().all(|(name, _)| ys.iter().any(|(other, _)| other == name)) => {
-            xs.iter().map(|(name, x)| Some((name.clone(), join(x, &ys.iter().find(|(other, _)| other == name)?.1)?))).collect::<Option<Vec<_>>>().map(Ty::Record)
+            xs.iter().map(|(name, x)| Some((*name, join(x, &ys.iter().find(|(other, _)| other == name)?.1)?))).collect::<Option<Vec<_>>>().map(Ty::Record)
         }
         _ => None,
     }
