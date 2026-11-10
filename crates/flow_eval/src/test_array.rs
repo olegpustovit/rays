@@ -75,7 +75,7 @@ fn text_arrays_through_the_evaluator() {
     for body in ["(map (fn [x] x) (array/text 0))", "(for [x (array/text 0)] x)", "(scan [a \"seed\"] [x (array/text 0)] x)", "(array/slice (array/text 1) 1 0)", "(for [x (array/text 0) y (array/text -1)] y)", "(for [x (array/text 2) y (array/text 0)] y)", "(scan [a \"seed\"] [x (array/text 0) y (array/text -1)] y)", "(array/concat (array/text 0) (array/text 0))"] {
         assert_eq!(value("host", body), text_array(&[]), "{body}");
     }
-    assert_eq!(value("host", "(fold [a \"seed\"] [x (array/text 0)] x)"), Value::Text(b"seed".to_vec()));
+    assert_eq!(value("host", "(fold [a \"seed\"] [x (array/text 0)] x)"), Value::Text(b"seed".as_slice().into()));
     let bulk_calls = Arc::new(AtomicI64::new(0));
     let c = bulk_calls.clone();
     let handlers = ResidualHandlers { bulk: Some(Arc::new(move |_| { c.fetch_add(1, Ordering::SeqCst); None })), ..Default::default() };

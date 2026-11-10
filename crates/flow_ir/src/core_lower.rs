@@ -137,7 +137,7 @@ pub struct Closure {
 }
 fn identity_of(f: &Callable) -> i64 { match f { Callable::Closure(c) => c.identity, Callable::Named { identity, .. } => *identity } }
 
-fn text(s: &str) -> Value { Value::Text(s.as_bytes().to_vec()) }
+fn text(s: &str) -> Value { Value::Text(s.as_bytes().into()) }
 fn int(n: i64) -> Lowered { Known(Value::Int(n)) }
 fn float(x: f64) -> Lowered { Known(Value::Float(x)) }
 fn boolean(b: bool) -> Lowered { Known(Value::Bool(b)) }
@@ -1205,7 +1205,7 @@ impl Lowerer {
                 Literal::Bool(b) => return Ok(Known(Value::Bool(b))),
                 _ => (),
             },
-            Node::Text(id) => return Ok(Known(Value::Text(x.arena().bytes(id).to_vec()))),
+            Node::Text(id) => return Ok(Known(Value::Text(x.arena().shared_bytes(id)))),
             Node::Nil => return Ok(Known(Value::No_geo)),
             _ => {}
         }
@@ -1264,7 +1264,7 @@ impl Lowerer {
                 Literal::Bool(b) => Ok(Known(Value::Bool(b))),
                 _ => Err(refusal("literal")),
             },
-            Node::Text(id) => Ok(Known(Value::Text(arena.bytes(id).to_vec()))),
+            Node::Text(id) => Ok(Known(Value::Text(arena.shared_bytes(id)))),
             Node::Nil => Ok(Known(Value::No_geo)),
             Node::Record(range) => (|| -> R<Lowered> {
                 let mut out = Vec::new();
@@ -1328,7 +1328,7 @@ impl Lowerer {
                 let mut texts = Vec::new();
                 for value in &values {
                     texts.push(match value {
-                        Known(v) if C::literal_of_value(v).is_some() => Known(Value::Text(V::show_with(&|v| v.clone(), v))),
+                        Known(v) if C::literal_of_value(v).is_some() => Known(Value::Text(V::show_with(&|v| v.clone(), v).into())),
                         _ => self.primitive(s, source, &Ty::Text, C::Primitive::Show, vec![("value", value.clone())])?,
                     });
                 }
@@ -1336,8 +1336,8 @@ impl Lowerer {
                 match known_values(&pairs) {
                     Some(texts) => {
                         let mut out = Vec::new();
-                        for (_, v) in texts { if let Value::Text(t) = v { out.extend(t); } }
-                        Ok(Known(Value::Text(out)))
+                        for (_, v) in texts { if let Value::Text(t) = v { out.extend_from_slice(&t); } }
+                        Ok(Known(Value::Text(out.into())))
                     }
                     None => self.primitive(s, source, &Ty::Text, C::Primitive::Text_concat, texts.into_iter().map(|v| ("part", v)).collect()),
                 }
@@ -1659,7 +1659,7 @@ impl Lowerer {
             Some((arm, rest)) => {
                 let syntax = owner.arena().syntax();
                 let lit: Value = match syntax.row(arm.form).node {
-                    SNode::Str(t) => Value::Text(syntax.bytes(t).to_vec()),
+                    SNode::Str(t) => Value::Text(syntax.shared_bytes(t)),
                     SNode::Sym(t) => Value::Bool(syntax.name(t) == "true"),
                     SNode::Num(t) => {
                         let t = syntax.name(t);
@@ -2492,9 +2492,9 @@ impl Lowerer {
             "range" | "take" | "drop" | "rest" | "reverse" | "first" | "last" | "array/sum" | "linspace" => self.sequence_operation(s, source, ty, name, args),
             "pointer/down" | "key/down" => {
                 let (wanted, names) = if name == "key/down" { (arg("key")?, "keys") }
-                    else { (args.iter().find(|(n, _)| n == "button").map(|(_, v)| v.clone()).unwrap_or_else(|| Known(Value::Text(b"left".to_vec()))), "buttons") };
+                    else { (args.iter().find(|(n, _)| n == "button").map(|(_, v)| v.clone()).unwrap_or_else(|| Known(Value::Text(b"left".as_slice().into()))), "buttons") };
                 match (name, &wanted) {
-                    ("pointer/down", Known(Value::Text(b))) if !["left", "right", "middle", "x1", "x2"].iter().any(|k| k.as_bytes() == b.as_slice()) => {
+                    ("pointer/down", Known(Value::Text(b))) if !["left", "right", "middle", "x1", "x2"].iter().any(|k| k.as_bytes() == b.as_ref()) => {
                         self.primitive(s, source, &Ty::Bool, C::Primitive::Fail("E_RANGE".into(), "Pointer button is left, right, middle, x1 or x2.".into()), vec![])
                     }
                     ("pointer/down", Known(Value::Text(_))) | ("key/down", _) => {
@@ -3090,7 +3090,7 @@ mod tests {
     fn scope_forks_share_values_and_keep_their_snapshot() {
         let key = CacheKey::Residual((7, 3));
         let mut parent = Scope::fresh();
-        parent.cache.insert(key.clone(), Known(Value::Record(vec![("data".into(), Value::Text(vec![b'x'; 4096]))])));
+        parent.cache.insert(key.clone(), Known(Value::Record(vec![("data".into(), Value::Text(vec![b'x'; 4096].into()))])));
         let original = parent.cached(&key).unwrap() as *const Lowered;
         let mut child = parent.fork();
         assert!(std::ptr::eq(child.cached(&key).unwrap(), original), "fork must share cached values");
@@ -3108,7 +3108,7 @@ mod tests {
         assert!(sibling.cached(&absent).is_none());
 
         let mut populated = Scope::fresh();
-        for i in 0..1024 { populated.cache.insert(CacheKey::Residual((i, 0)), Known(Value::Text(vec![b'x'; 64]))); }
+        for i in 0..1024 { populated.cache.insert(CacheKey::Residual((i, 0)), Known(Value::Text(vec![b'x'; 64].into()))); }
         let started = std::time::Instant::now();
         for _ in 0..128 { std::hint::black_box(populated.cache.clone()); }
         let copied = started.elapsed();

@@ -525,3 +525,23 @@ fn deeply_nested_scalar_body_compiles_on_default_stack() {
         Value::Floats(1, Arc::new(vec![expected])),
     );
 }
+
+#[test]
+fn shared_binary_text_survives_packed_select_and_carried_loops() {
+    let bytes: Vec<u8> = (0..=255).collect();
+    let literal = ts::text_literal(&bytes);
+    let body = format!("(map (fn [(i : int)] (iterate 3 {literal} (fn [s] (if (> t 0.) (if (int/eq (int/mod i 2) 0) s \"other\\000\\255\") s)))) (array/range 1025 :type int))");
+    for fusion in [false, true] {
+        let program = ts::compile_with(None, fusion, "", &body);
+        assert!(program.code.iter().any(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Loop_begin(_))));
+        assert!(program.code.iter().any(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Text_const(_))));
+        for time in [-0.25, 0.25] {
+            let live = input::at_time(time);
+            let expected = Value::Text_array(Arc::new((0..1025).map(|i| if time > 0. && i % 2 == 1 { b"other\0\xff".as_slice() } else { &bytes }).collect()));
+            assert_eq!(ok(reference(&program, &live)), expected);
+            for domains in [1, 8] {
+                ts::with_domains(domains, &|| assert_eq!(ok(packed::force(&program, &live, &strict())), expected));
+            }
+        }
+    }
+}

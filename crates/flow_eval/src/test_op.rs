@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use flow_syntax::{context, syntax, ty};
 use std::cell::RefCell;
 
-fn t(s: &str) -> Value { Value::Text(s.as_bytes().to_vec()) }
+fn t(s: &str) -> Value { Value::Text(s.as_bytes().into()) }
 fn ia(v: &[i64]) -> Value { Value::Int_array(Arc::new(v.to_vec())) }
 fn fa(v: &[f64]) -> Value { Value::Floats(1, Arc::new(v.to_vec())) }
 fn na(n: &str, v: Value) -> (String, Value) { (n.to_owned(), v) }
@@ -114,7 +114,7 @@ fn every_operator_shape_and_arithmetic() {
     let repr = find("text/repr", context::value());
     let mut every = Vec::new(); for c in 0..=255u8 { every.push(c); }
     for text in [every, vec![], "é日本😀\0\u{8}\t\n\r\\\"".as_bytes().to_vec()] {
-        assert_eq!(check(&repr, &[na("text", Value::Text(text.clone()))]), Value::Text(ocaml_s(&text).into_bytes()));
+        assert_eq!(check(&repr, &[na("text", Value::Text(text.clone().into()))]), Value::Text(ocaml_s(&text).into_bytes().into()));
     }
     for o in op::all().iter().filter(|o| !o.name.starts_with("gpu/")) {
         assert_eq!(op::find(&[], &o.name, &o.ctx).unwrap().name, o.name);
@@ -288,12 +288,12 @@ fn typed_op() -> Op {
     o.out = Arc::new(|_| Ok(Ty::Array(Box::new(Ty::Float))));
     o.out_args = Some(Arc::new(|args| match args.iter().find(|(n, _, _)| n == "type") {
         None => Ok(Ty::Array(Box::new(Ty::Float))),
-        Some((_, _, Some(param::Value::Text(s)))) if s == b"float" => Ok(Ty::Array(Box::new(Ty::Float))),
-        Some((_, _, Some(param::Value::Text(s)))) if s == b"vec3" => Ok(Ty::Array(Box::new(Ty::Vec3))),
+        Some((_, _, Some(param::Value::Text(s)))) if s.as_ref() == b"float" => Ok(Ty::Array(Box::new(Ty::Float))),
+        Some((_, _, Some(param::Value::Text(s)))) if s.as_ref() == b"vec3" => Ok(Ty::Array(Box::new(Ty::Vec3))),
         _ => Err(value::fail("E_TEST_TYPE", "The type must be literal.")),
     }));
     o.body = Arc::new(|_, _, args| match args.iter().find(|(n, _)| n == "type") {
-        Some((_, Value::Text(s))) if s == b"vec3" => Ok(Value::Floats(3, Arc::new(vec![1., 2., 3.]))),
+        Some((_, Value::Text(s))) if s.as_ref() == b"vec3" => Ok(Value::Floats(3, Arc::new(vec![1., 2., 3.]))),
         _ => Ok(Value::Floats(1, Arc::new(vec![1.]))),
     });
     o

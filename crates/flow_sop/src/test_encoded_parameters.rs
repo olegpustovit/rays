@@ -50,9 +50,9 @@ fn defaults_are_canonical_and_the_authored_source_is_kept() {
     let (checked, diagnostics) = catalog::check_workspace(operators::all(), false, None, &catalog, &forms);
     let checked = checked.unwrap_or_else(|| panic!("{diagnostics:?}"));
     let definition = checked.nodes.iter().find(|n| n.kind.qualified == "sop/test_encoded").expect("node");
-    assert_eq!(definition.fields[0].default, ParamValue::Text(b"point".to_vec()));
+    assert_eq!(definition.fields[0].default, ParamValue::Text(b"point".as_slice().into()));
     assert_eq!(lisp::flat(&checked.source[0]), lisp::flat(&forms[0]));
-    assert_eq!(definition.kind.parameters[0].fields[0].2, ParamValue::Text(b"point".to_vec()));
+    assert_eq!(definition.kind.parameters[0].fields[0].2, ParamValue::Text(b"point".as_slice().into()));
 }
 
 #[test]

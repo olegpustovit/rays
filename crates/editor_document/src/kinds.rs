@@ -29,8 +29,8 @@ fn name_field() -> FieldView {
         unit: None,
         vec3: None,
         kind: KindView::Text,
-        default: Value::Text(Vec::new()),
-        current: Value::Text(Vec::new()),
+        default: Value::Text(Vec::new().into()),
+        current: Value::Text(Vec::new().into()),
     }
 }
 
@@ -80,7 +80,7 @@ pub fn window_schema() -> Arc<Schema> {
     S.get_or_init(|| {
         let title = decl::Spec {
             label: "Title (on restart)",
-            ..decl::spec("title", decl::text_kind(), Value::Text(b"Rays".to_vec()))
+            ..decl::spec("title", decl::text_kind(), Value::Text(b"Rays".as_slice().into()))
         };
         schema_of(vec![
             title,

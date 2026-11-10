@@ -98,14 +98,15 @@ mod tests {
     fn retained_memory_counts_capacity_and_deduplicates_shared_owners() {
         let mut text = Vec::with_capacity(128);
         text.push(b'x');
-        let pointer = text.as_ptr() as usize;
         let atom = make(Draft::Str(text));
+        let Node::Str(id) = atom.node else { unreachable!() };
+        let allocation = (atom.bytes(id).as_ptr() as usize, atom.bytes(id).len() + 2 * std::mem::size_of::<usize>());
         let mut memory = Memory::default();
         memory.add(&atom);
         let first = memory.bytes();
         memory.add(&atom.clone());
         assert_eq!(memory.bytes(), first);
-        assert!(memory.into_allocations().contains(&(pointer, 128)));
+        assert!(memory.into_allocations().contains(&allocation), "immutable bytes retain their Arc header and payload");
         let form = one("; note\n(a ['b] \"text\")");
         let mut memory = Memory::default();
         memory.add(&form);

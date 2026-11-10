@@ -116,7 +116,7 @@ fn chain_over_a_cooked_input_folds_into_one_region() {
         // the second card still cooks as two displacements
         if domains == 1 {
             let graph = &l.graphs[0];
-            let cards: Vec<&E::Node> = l.plan.nodes.iter().filter(|n| n.kind == E::card_kind() && n.args.iter().find(|(k, _)| k == "kind").map(|(_, v)| v) == Some(&E::Value::Text(b"sop/noise_displace".to_vec()))).collect();
+            let cards: Vec<&E::Node> = l.plan.nodes.iter().filter(|n| n.kind == E::card_kind() && n.args.iter().find(|(k, _)| k == "kind").map(|(_, v)| v) == Some(&E::Value::Text(b"sop/noise_displace".as_slice().into()))).collect();
             let d2 = cards[1];
             let n = edit::compile_node(&graph.network.geometry, *l.compiled.get(&d2.id).expect("compiled card")).expect("compile");
             let two = cook_fresh(domains, &n);

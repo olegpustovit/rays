@@ -169,7 +169,7 @@ pub fn host_inputs() {
     assert!(lower.plan.nodes[0].args.iter().find(|(k, _)| k == "radius").map(|(_, v)| v.clone()) == Some(Value::Float(9.)));
     let bad = {
         let mut b = workspace.clone();
-        b.inputs = std::sync::Arc::new(vec![("g".to_string(), vec![("radius".to_string(), Value::Text(b"wrong".to_vec()))])]);
+        b.inputs = std::sync::Arc::new(vec![("g".to_string(), vec![("radius".to_string(), Value::Text(b"wrong".as_slice().into()))])]);
         b
     };
     assert!(editor_document::lowering::of_workspace(&options, &bad).is_err());

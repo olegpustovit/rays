@@ -35,7 +35,7 @@ fn schema() -> Arc<param::Schema> {
             "doc-settings".to_owned(),
             vec![
                 param::field("amount".to_owned(), param::floating(0., 10., None, None).unwrap(), Value::Float(0.)).unwrap().label("Amount".to_owned()).unwrap(),
-                param::field("mode".to_owned(), param::text(), Value::Text(b"a".to_vec())).unwrap().label("Mode".to_owned()).unwrap(),
+                param::field("mode".to_owned(), param::text(), Value::Text(b"a".as_slice().into())).unwrap().label("Mode".to_owned()).unwrap(),
             ],
         )
         .unwrap(),
@@ -54,7 +54,7 @@ fn of_text(catalog: &Catalog, st: Option<settings::T>, text: &str) -> doc::T {
 }
 
 fn plain() -> settings::T {
-    settings::make(&schema(), vec![Value::Float(0.), Value::Text(b"a".to_vec())])
+    settings::make(&schema(), vec![Value::Float(0.), Value::Text(b"a".as_slice().into())])
 }
 
 fn p(parts: &[&str]) -> Vec<String> {
@@ -73,7 +73,7 @@ fn part_text() {
     assert!(d.layout.level[&p(&["g", "a"])] == Level::Full && d.layout.pinned[&p(&["g", "a"])]);
     assert_eq!(d.layout.at[&p(&["g", "b"])], (300.5, 40.));
     assert_eq!(d.layout.frames[&p(&["g"])][0].title, "Legs");
-    assert_eq!(settings::get(&schema(), &d.settings).unwrap(), vec![Value::Float(2.5), Value::Text(b"b".to_vec())]);
+    assert_eq!(settings::get(&schema(), &d.settings).unwrap(), vec![Value::Float(2.5), Value::Text(b"b".as_slice().into())]);
     let out = doc::to_text(&d).unwrap();
     assert!(has(&out, "; a small study") && has(&out, "; moved right"), "comments survive to_text");
     let again = of_text(&catalog, Some(plain()), &out);
@@ -285,7 +285,7 @@ fn part_contexts() {
     assert!(!lowering::window(&exact).unwrap().fast, "settings :precision \"exact\" is not fast");
     assert!(lowering::fast(&d), "a document without :precision is fast");
     assert!(
-        settings::fields(&d.settings).iter().any(|f| f.name == "title" && f.current == Value::Text(b"Bloom study".to_vec())),
+        settings::fields(&d.settings).iter().any(|f| f.name == "title" && f.current == Value::Text(b"Bloom study".as_slice().into())),
         "the settings graph is the document's settings"
     );
     // ids are fresh per build; everything else is a function of the source

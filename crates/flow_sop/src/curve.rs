@@ -72,7 +72,7 @@ fn schema() -> Arc<param::Schema> {
                 }),
             };
             let fields = vec![
-                param::field(PARAMETER.into(), points_kind, Value::Text(Vec::new()))
+                param::field(PARAMETER.into(), points_kind, Value::Text(Vec::new().into()))
                     .and_then(|f| f.label("Points".into()))
                     .expect("curve points field"),
                 param::field(CLOSED_PARAMETER.into(), Kind::Toggle, Value::Bool(false))
@@ -88,7 +88,7 @@ fn schema() -> Arc<param::Schema> {
 }
 
 fn values_of(curve: &Curve) -> Vec<Value> {
-    vec![Value::Text(encode(&curve.points).into_bytes()), Value::Bool(curve.closed), Value::Bool(curve.filled)]
+    vec![Value::Text(encode(&curve.points).into_bytes().into()), Value::Bool(curve.closed), Value::Bool(curve.filled)]
 }
 
 fn of_values(values: &[Value]) -> Result<Curve, String> {
@@ -202,6 +202,6 @@ mod tests {
             node::apply_parameters(&made, &[(CLOSED_PARAMETER.to_owned(), Value::Bool(false))]).expect("edit");
         assert!(effects.cook);
         assert_eq!(node::id(&edited), node::id(&made));
-        assert!(node::apply_parameters(&made, &[(PARAMETER.to_owned(), Value::Text(b"bad".to_vec()))]).is_err());
+        assert!(node::apply_parameters(&made, &[(PARAMETER.to_owned(), Value::Text(b"bad".as_slice().into()))]).is_err());
     }
 }

@@ -69,7 +69,7 @@ fn frame_reads_force_against_the_live_frame() {
     live.keys = vec![Key::Space, Key::Unknown(4242)];
     live.buttons = vec![MouseButton::LeftButton, MouseButton::MouseX2];
     live.events = vec![Event::Key_pressed(Key::Unknown(4242)), Event::Pointer_cancelled(MouseButton::MouseX2), Event::Trackpad_scrolled { delta: (0., -12.), phase: ScrollPhase::Momentum, time: 3.5 }];
-    let t = |s: &str| Value::Text(s.as_bytes().to_vec());
+    let t = |s: &str| Value::Text(s.as_bytes().into());
     assert_eq!(force(&snapshot, &live, None), Ok(Value::Record(vec![
         f("keys", Value::List(Arc::new(vec![t("space"), t("unknown:4242")]))),
         f("buttons", Value::List(Arc::new(vec![t("left"), t("x2")]))),

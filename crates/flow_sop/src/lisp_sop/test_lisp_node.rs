@@ -490,7 +490,7 @@ fn every_control_kind_reaches_the_body_with_exactly_one_miss_per_edit() {
             ("enabled", V::Bool(false), (3.5, 2.0, 3.0)),
             ("count", V::Int(3), (5.5, 2.0, 3.0)),
             ("amount", V::Float(1.5), (5.5, 2.0, 3.0)),
-            ("tag", V::Text(b"changed".to_vec()), (14.5, 2.0, 3.0)),
+            ("tag", V::Text(b"changed".as_slice().into()), (14.5, 2.0, 3.0)),
             ("mode", V::Choice("B".to_owned()), (24.5, 2.0, 3.0)),
             ("offset_x", V::Float(4.0), (7.5, 2.0, 3.0)),
             ("offset_y", V::Float(4.0), (4.5, 4.0, 3.0)),

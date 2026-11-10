@@ -128,7 +128,7 @@ fn declared_preserved_topology_holds_at_one_and_eight_domains() {
     let eight = cook_out(&mut cold, 8, &noise);
     assert!(geometry_bytes(&one) == geometry_bytes(&eight), "Normal 3D SOP differs across domains");
     session::close(&mut cold);
-    let (updated, _) = node::apply_parameters(&peak, &[("direction_attribute".to_owned(), param::Value::Text(b"direction".to_vec()))]).unwrap();
+    let (updated, _) = node::apply_parameters(&peak, &[("direction_attribute".to_owned(), param::Value::Text(b"direction".as_slice().into()))]).unwrap();
     let reads = &node::facts(&updated).reads;
     assert!(reads.iter().any(|r| r == "direction") && !reads.iter().any(|r| r == "N"), "PPX rebuild retained stale facts");
     session::close(&mut evaluator);

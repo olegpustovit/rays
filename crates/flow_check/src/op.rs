@@ -56,7 +56,7 @@ pub const MAX_ITERATIONS: usize = 4096;
 pub const MAX_WOSIZE: usize = (1usize << 54) - 1;
 fn fail(code: &str, message: &str) -> Diagnostic { value::fail(code, message) }
 fn failf(code: &str, message: String) -> Diagnostic { value::failf(code, &message) }
-fn text(s: &str) -> Value { Value::Text(s.as_bytes().to_vec()) }
+fn text(s: &str) -> Value { Value::Text(s.as_bytes().into()) }
 fn text_string(v: &Value) -> Result<&str, Diagnostic> {
     match v { Value::Text(bytes) => std::str::from_utf8(bytes).map_err(|_| fail("E_TYPE", "Expected UTF-8 text.")), _ => Err(fail("E_TYPE", "Expected text.")) }
 }
@@ -512,17 +512,17 @@ fn table_decode(bytes:&[u8])->Result<Value,Diagnostic>{
     let(mut rows,mut row,mut cell,mut escaped)=(Vec::new(),Vec::new(),Vec::new(),false);
     for &b in bytes{
         if escaped{escaped=false;match b{b'\\'=>cell.push(b'\\'),b't'=>cell.push(b'\t'),b'n'=>cell.push(b'\n'),_=>return Err(fail("E_TABLE",&format!("unsupported table escape \\{}",b as char)))}}
-        else{match b{b'\\'=>escaped=true,b'\t'=>row.push(Value::Text(std::mem::take(&mut cell))),b'\n'=>{row.push(Value::Text(std::mem::take(&mut cell)));rows.push(Value::List(Arc::new(std::mem::take(&mut row))))},_=>cell.push(b)}}
+        else{match b{b'\\'=>escaped=true,b'\t'=>row.push(Value::Text(std::mem::take(&mut cell).into())),b'\n'=>{row.push(Value::Text(std::mem::take(&mut cell).into()));rows.push(Value::List(Arc::new(std::mem::take(&mut row))))},_=>cell.push(b)}}
     }
     if escaped{return Err(fail("E_TABLE","trailing table escape"))}
-    row.push(Value::Text(cell));rows.push(Value::List(Arc::new(row)));Ok(Value::List(Arc::new(rows)))
+    row.push(Value::Text(cell.into()));rows.push(Value::List(Arc::new(row)));Ok(Value::List(Arc::new(rows)))
 }
 fn table_encode(rows:&Value)->Result<Value,Diagnostic>{
     let Value::List(rows)=rows else{return Err(fail("E_TYPE","Expected a table of text cells."))};
     let mut out=Vec::new();
     for (ri,row) in rows.iter().enumerate(){if ri>0{out.push(b'\n')}let Value::List(cells)=row else{return Err(fail("E_TYPE","Table rows must be lists of text."))};
-        for (ci,cell) in cells.iter().enumerate(){if ci>0{out.push(b'\t')}let Value::Text(cell)=cell else{return Err(fail("E_TYPE","Table cells must be text."))};for &b in cell{match b{b'\\'=>out.extend_from_slice(b"\\\\"),b'\t'=>out.extend_from_slice(b"\\t"),b'\n'=>out.extend_from_slice(b"\\n"),_=>out.push(b)}}}
-    }Ok(Value::Text(out))
+        for (ci,cell) in cells.iter().enumerate(){if ci>0{out.push(b'\t')}let Value::Text(cell)=cell else{return Err(fail("E_TYPE","Table cells must be text."))};for &b in cell.iter(){match b{b'\\'=>out.extend_from_slice(b"\\\\"),b'\t'=>out.extend_from_slice(b"\\t"),b'\n'=>out.extend_from_slice(b"\\n"),_=>out.push(b)}}}
+    }Ok(Value::Text(out.into()))
 }
 fn text_repr(bytes:&[u8])->Vec<u8>{
     let mut out=vec![b'"'];for &b in bytes{match b{b'"'=>out.extend_from_slice(b"\\\""),b'\\'=>out.extend_from_slice(b"\\\\"),b'\n'=>out.extend_from_slice(b"\\n"),b'\r'=>out.extend_from_slice(b"\\r"),b'\t'=>out.extend_from_slice(b"\\t"),8=>out.extend_from_slice(b"\\b"),0..=31|127..=255=>out.extend_from_slice(format!("\\{b:03}").as_bytes()),_=>out.push(b)}}out.push(b'"');out
@@ -573,7 +573,7 @@ fn array_ops()->Vec<Op>{
     });
     let mut range=op_with("array/range",context::value(),vec![("count",Ty::Int)],vec![],None,vec![("type",Ty::Text)],arr(Ty::Float),"Array",range_body);
     range.choices=vec![("type".into(),vec!["float".into(),"int".into()])];
-    range.out_args=Some(Arc::new(|args|match args.literal_arg("type"){None=>Ok(arr(Ty::Float)),Some(param::Value::Text(t)) if t.as_slice()==b"int"=>Ok(arr(Ty::Int)),Some(param::Value::Text(t)) if t.as_slice()==b"float"=>Ok(arr(Ty::Float)),_=>Err(fail("E_ARRAY_TYPE","Array range type is the literal int or float."))}));
+    range.out_args=Some(Arc::new(|args|match args.literal_arg("type"){None=>Ok(arr(Ty::Float)),Some(param::Value::Text(t)) if t.as_ref()==b"int"=>Ok(arr(Ty::Int)),Some(param::Value::Text(t)) if t.as_ref()==b"float"=>Ok(arr(Ty::Float)),_=>Err(fail("E_ARRAY_TYPE","Array range type is the literal int or float."))}));
     ops.push(range);
     for (name,ty,default,limit) in [("array/int",Ty::Int,Value::Int(0),MAX_WOSIZE),("array/text",Ty::Text,text(""),MAX_WOSIZE),("array/float",Ty::Float,Value::Float(0.),MAX_WOSIZE),("array/vec3",Ty::Vec3,Value::Vec3(0.,0.,0.),MAX_WOSIZE),("array/vec4",Ty::Vec4,Value::Vec4(0.,0.,0.,0.),MAX_WOSIZE)]{
         let value_ty=ty.clone();let output_ty=ty.clone();
@@ -799,9 +799,9 @@ fn list_out(index:usize)->Out{Arc::new(move |ts|match ts.get(index){Some(Ty::Lis
 fn text_ops()->Vec<Op>{
     let mut ops=Vec::new();
     ops.push(value_op("text/blank?",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Bool,"Text",Arc::new(|_,_,a|Ok(Value::Bool(text_bytes(a.get_arg("text")?)?.iter().all(u8::is_ascii_whitespace))))));
-    ops.push(value_op("text/trim",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;let mut start=0;let mut end=b.len();while start<end&&b[start].is_ascii_whitespace(){start+=1}while end>start&&b[end-1].is_ascii_whitespace(){end-=1}Ok(Value::Text(b[start..end].to_vec()))})));
-    ops.push(value_op("text/lower",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_bytes(a.get_arg("text")?)?.iter().map(u8::to_ascii_lowercase).collect())))));
-    ops.push(value_op("text/repr",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_repr(text_bytes(a.get_arg("text")?)?))))));
+    ops.push(value_op("text/trim",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;let mut start=0;let mut end=b.len();while start<end&&b[start].is_ascii_whitespace(){start+=1}while end>start&&b[end-1].is_ascii_whitespace(){end-=1}Ok(Value::Text((&b[start..end]).into()))})));
+    ops.push(value_op("text/lower",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_bytes(a.get_arg("text")?)?.iter().map(u8::to_ascii_lowercase).collect::<std::sync::Arc<[u8]>>())))));
+    ops.push(value_op("text/repr",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_repr(text_bytes(a.get_arg("text")?)?).into())))));
     ops.push(value_op("text/split",vec![("text",Ty::Text),("separator",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let source=text_bytes(a.get_arg("text")?)?;let separator=text_bytes(a.get_arg("separator")?)?;if separator.is_empty(){return Err(fail("E_TEXT_SEPARATOR","text/split needs a nonempty separator."))}Ok(Value::Text_array(Arc::new(bytes_split(source,separator))))})));
     ops.push(value_op("text/tokens",vec![("text",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;let mut out=TextArray::new();let mut start=0;for i in 0..=b.len(){if i==b.len()||matches!(b[i],b' '|b','|b'\t'|b'\n'){if i>start{out.push(&b[start..i])}start=i+1}}Ok(Value::Text_array(Arc::new(out)))})));
     for (name,float_result) in [("text/to_float",true),("text/to_int",false)]{
@@ -983,7 +983,7 @@ mod tests{
         assert_eq!(range.signature.pos,vec![("count".into(),Ty::Int)]);
         let args=vec![("count".into(),Value::Int(3))];
         assert_eq!((range.body)(&input::at_time(0.),&|_,_|Err(fail("E_NODE","unexpected node")), &args).unwrap(),Value::Floats(1, Arc::new(vec![0.,1.,2.])));
-        let typed=vec![("type".into(),arr(Ty::Int),Some(param::Value::Text(b"int".to_vec())))];
+        let typed=vec![("type".into(),arr(Ty::Int),Some(param::Value::Text(b"int".as_slice().into())))];
         assert_eq!(result_type(&range,&typed).unwrap(),arr(Ty::Int));
         let sum=find(&[],"array/segment_sum",&value_context).expect("segment sum operator");
         let values=Value::Int_array(Arc::new(vec![2,4,7]));

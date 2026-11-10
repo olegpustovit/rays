@@ -256,7 +256,7 @@ pub fn material_graph<'a>(value: &ModelView<'a>, path: &str) -> Option<String> {
     }
     let ev = pane_laid(value)?.evaluated.as_ref()?;
     ev.results.iter().find_map(|(graph, v)| match v {
-        EvalValue::Struct(g) if g.name == "material/standard" && materials.contains(graph) && g.fields.iter().find(|(k, _)| k == "name").map(|(_, v)| v) == Some(&EvalValue::Text(path.as_bytes().to_vec())) => Some(graph.clone()),
+        EvalValue::Struct(g) if g.name == "material/standard" && materials.contains(graph) && g.fields.iter().find(|(k, _)| k == "name").map(|(_, v)| v) == Some(&EvalValue::Text(path.as_bytes().into())) => Some(graph.clone()),
         _ => None,
     })
 }

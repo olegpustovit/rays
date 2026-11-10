@@ -22,7 +22,7 @@ pub enum Literal {
     Int(i64),
     Float(f64),
     Bool(bool),
-    Text(Vec<u8>),
+    Text(Arc<[u8]>),
     Vector(Vec<f64>),
     List(Vec<Literal>),
     Record(Vec<(String, Literal)>),
@@ -203,7 +203,7 @@ pub mod region {
         /// Prepared table register, exact integer index, width and component.
         Gather(i64, i64, i64, i64),
         Int_gather(i64, i64),
-        Text_const(Vec<u8>),
+        Text_const(Arc<[u8]>),
         Text_input(i64),
         Text_uniform(i64),
         Text_gather(i64, i64),
@@ -1541,7 +1541,7 @@ mod tests {
     #[test]
     fn prints_if() {
         let p = program(
-            vec![Literal::Text(b"yes".to_vec()), Literal::Text(b"no".to_vec()), Literal::Bool(true)],
+            vec![Literal::Text(b"yes".as_slice().into()), Literal::Text(b"no".as_slice().into()), Literal::Bool(true)],
             vec![Ty::Bool, Ty::Text],
             vec![
                 s(0, StatementNode::Assign(0, Expr::Constant(2))),
@@ -1594,5 +1594,37 @@ mod tests {
         let v = Value::Record(vec![("a".into(), Value::Vec3(1.0, 2.0, 3.0)), ("b".into(), Value::List(Arc::new(vec![Value::Int(1)])))]);
         assert_eq!(value_of_literal(&literal_of_value(&v).unwrap()), v);
         assert!(literal_of_value(&Value::Fn(value::FnId(0, 0))).is_none());
+        // Text is arbitrary bytes. Param, checked literals and IR reads share their frozen payload.
+        let raw: Vec<u8> = (0..=255).collect();
+        let parameter = param::Value::Text(raw.clone().into());
+        let text = match &parameter { param::Value::Text(bytes) => Value::Text(bytes.clone()), _ => unreachable!() };
+        let Value::Text(bytes) = &text else { unreachable!() };
+        let literal = literal_of_value(&text).unwrap();
+        for _ in 0..1024 {
+            let restored = value_of_literal(&literal);
+            let Value::Text(shared) = &restored else { unreachable!() };
+            assert_eq!(shared.as_ptr(), bytes.as_ptr());
+            assert_eq!(value::show_with(&|v| v.clone(), &restored), raw);
+            let mut key = b"s256:".to_vec(); key.extend_from_slice(&raw);
+            assert_eq!(value::key_of(&|_| 0, &restored), key);
+        }
+        assert_eq!(std::mem::size_of::<Value>(), 40);
+        let syntax = flow_syntax::syntax::make(flow_syntax::syntax::Draft::Str(raw));
+        let mut builder = flow_check::term_arena::TermBuilder::new();
+        let form = builder.import_form(&syntax);
+        let row = builder.push(None, &flow_syntax::ty::Ty::Text, form, flow_check::term_arena::Draft::Text(bytes.clone()));
+        let arena = builder.freeze();
+        let checked = arena.handle(row);
+        let flow_check::term_arena::Node::Text(id) = checked.node else { unreachable!() };
+        assert_eq!(checked.arena().bytes(id).as_ptr(), bytes.as_ptr());
+        let imported = checked.form();
+        let (flow_syntax::syntax::Node::Str(a), flow_syntax::syntax::Node::Str(b)) = (syntax.node, imported.node) else { unreachable!() };
+        assert_eq!(syntax.bytes(a).as_ptr(), imported.bytes(b).as_ptr());
+        let mut builder = flow_check::term_arena::TermBuilder::new();
+        let row = builder.import(&checked);
+        let copied = builder.freeze().handle(row);
+        let flow_check::term_arena::Node::Text(id) = copied.node else { unreachable!() };
+        assert_eq!(copied.arena().bytes(id).as_ptr(), bytes.as_ptr());
+
     }
 }

@@ -396,7 +396,7 @@ fn lisp_apply() {
             (v.x.clone(), v.y.clone(), v.z.clone())
         }));
         assert!(after != before && layers(e) != picture, "Lisp applied after the frame's cook or composition");
-        assert!(editor::workspace(e).layout.at == ws.layout.at && got(&editor::workspace(e).settings) == vec![param::Value::Float(3.), param::Value::Text(b"kept".to_vec())], "Lisp apply lost layout or sketch settings");
+        assert!(editor::workspace(e).layout.at == ws.layout.at && got(&editor::workspace(e).settings) == vec![param::Value::Float(3.), param::Value::Text(b"kept".as_slice().into())], "Lisp apply lost layout or sketch settings");
     });
 }
 

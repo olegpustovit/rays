@@ -86,7 +86,7 @@ pub struct SyntaxArena {
     edges: Vec<SyntaxId>,
     ranges: Vec<Range>,
     names: Vec<String>,
-    bytes: Vec<Vec<u8>>,
+    bytes: Vec<Arc<[u8]>>,
     trivia: Vec<Trivia>,
 }
 
@@ -107,6 +107,7 @@ impl Syntax {
     pub fn child(&self, row: SyntaxId) -> Syntax { self.arena.handle(row) }
     pub fn name(&self, name: NameId) -> &str { self.arena.name(name) }
     pub fn bytes(&self, bytes: BytesId) -> &[u8] { self.arena.bytes(bytes) }
+    pub fn shared_bytes(&self, bytes: BytesId) -> Arc<[u8]> { self.arena.shared_bytes(bytes) }
     pub fn range(&self, range: RangeId) -> &[SyntaxId] { self.arena.range(range) }
     pub fn children(&self) -> &[SyntaxId] { self.arena.children(self.row) }
     pub fn trivia(&self) -> Option<&Trivia> { self.arena.trivia(self.row) }
@@ -121,6 +122,7 @@ impl SyntaxArena {
     pub fn rows(&self) -> &[SyntaxRow] { &self.rows }
     pub fn name(&self, id: NameId) -> &str { &self.names[id.0 as usize] }
     pub fn bytes(&self, id: BytesId) -> &[u8] { &self.bytes[id.0 as usize] }
+    pub fn shared_bytes(&self, id: BytesId) -> Arc<[u8]> { self.bytes[id.0 as usize].clone() }
     pub fn range(&self, id: RangeId) -> &[SyntaxId] {
         let range = self.ranges[id.0 as usize];
         &self.edges[range.start as usize..range.start as usize + range.len as usize]
@@ -150,8 +152,8 @@ impl SyntaxArena {
         memory.allocation(self.ranges.as_ptr(), self.ranges.capacity() * std::mem::size_of::<Range>());
         memory.allocation(self.names.as_ptr(), self.names.capacity() * std::mem::size_of::<String>());
         for name in &self.names { memory.allocation(name.as_ptr(), name.capacity()); }
-        memory.allocation(self.bytes.as_ptr(), self.bytes.capacity() * std::mem::size_of::<Vec<u8>>());
-        for bytes in &self.bytes { memory.allocation(bytes.as_ptr(), bytes.capacity()); }
+        memory.allocation(self.bytes.as_ptr(), self.bytes.capacity() * std::mem::size_of::<Arc<[u8]>>());
+        for bytes in &self.bytes { memory.allocation(bytes.as_ptr(), bytes.len() + 2 * std::mem::size_of::<usize>()); }
         memory.allocation(self.trivia.as_ptr(), self.trivia.capacity() * std::mem::size_of::<Trivia>());
         for trivia in &self.trivia {
             for lines in [&trivia.notes, &trivia.meta, &trivia.tail] {
@@ -168,7 +170,7 @@ pub struct SyntaxBuilder {
     edges: Vec<SyntaxId>,
     ranges: Vec<Range>,
     names: NamesBuilder,
-    bytes: Vec<Vec<u8>>,
+    bytes: Vec<Arc<[u8]>>,
     trivia: Vec<Trivia>,
     imports: FastMap<(u64, u32), SyntaxId>,
 }
@@ -190,7 +192,7 @@ impl SyntaxBuilder {
         let node = match draft {
             Draft::Sym(name) => Node::Sym(self.intern(&name)), Draft::Kw(name) => Node::Kw(self.intern(&name)),
             Draft::Num(name) => Node::Num(self.intern(&name)), Draft::Str(bytes) => {
-                let id = BytesId(index(self.bytes.len())); self.bytes.push(bytes); Node::Str(id)
+                let id = BytesId(index(self.bytes.len())); self.bytes.push(bytes.into()); Node::Str(id)
             }
             Draft::List(children) => Node::List(self.range(&children)), Draft::Vec(children) => Node::Vec(self.range(&children)),
             Draft::Map(children) => Node::Map(self.range(&children)), Draft::Quote(kind, child) => Node::Quote(kind, child),
@@ -303,9 +305,10 @@ impl SyntaxBuilder {
         row.id = authored;
         row.span = span;
     }
-    pub fn bytes(&mut self, bytes: &[u8]) -> BytesId {
+    pub fn bytes(&mut self, bytes: &[u8]) -> BytesId { self.shared_bytes(bytes.into()) }
+    fn shared_bytes(&mut self, bytes: Arc<[u8]>) -> BytesId {
         let id = BytesId(index(self.bytes.len()));
-        self.bytes.push(bytes.to_vec());
+        self.bytes.push(bytes);
         id
     }
     pub fn range(&mut self, children: &[SyntaxId]) -> RangeId {
@@ -355,7 +358,7 @@ impl SyntaxBuilder {
                 Node::Sym(name) => Node::Sym(self.intern(source.name(name))),
                 Node::Kw(name) => Node::Kw(self.intern(source.name(name))),
                 Node::Num(name) => Node::Num(self.intern(source.name(name))),
-                Node::Str(bytes) => Node::Str(self.bytes(source.bytes(bytes))),
+                Node::Str(bytes) => Node::Str(self.shared_bytes(source.shared_bytes(bytes))),
                 Node::List(range) | Node::Vec(range) | Node::Map(range) => {
                     let children: Vec<SyntaxId> = source.range(range).iter().map(|child| self.imports[&(source.owner, child.0)]).collect();
                     let range = self.range(&children);
@@ -497,7 +500,7 @@ pub fn renumber(first: Id, form: &Syntax) -> (Syntax, Id) {
             Node::Sym(name) => Node::Sym(builder.intern(source.name(name))),
             Node::Kw(name) => Node::Kw(builder.intern(source.name(name))),
             Node::Num(name) => Node::Num(builder.intern(source.name(name))),
-            Node::Str(bytes) => Node::Str(builder.bytes(source.bytes(bytes))),
+            Node::Str(bytes) => Node::Str(builder.shared_bytes(source.shared_bytes(bytes))),
             Node::List(_) | Node::Vec(_) | Node::Map(_) => {
                 let range = builder.range(&children[start..]);
                 match row.node { Node::List(_) => Node::List(range), Node::Vec(_) => Node::Vec(range), _ => Node::Map(range) }

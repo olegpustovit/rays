@@ -46,7 +46,7 @@ fn string(text: &str) -> S {
     s::make(s::Draft::Str(text.as_bytes().to_vec()))
 }
 fn text_value(t: &str) -> Value {
-    Value::Text(t.as_bytes().to_vec())
+    Value::Text(t.as_bytes().into())
 }
 fn text_of(v: &[u8]) -> String {
     String::from_utf8_lossy(v).into_owned()
@@ -393,7 +393,7 @@ pub fn kind_fields(value: &Model, graph: &str, head: &str, authored: &dyn Fn(&st
         // a built-in of the workspace, not a catalog kind: its four keywords
         let field = |name: &str, default: Value, view: KindView| -> FieldView {
             let current = match (authored(name), &default) {
-                (Some(e), Value::Text(_)) if matches!(e.node, SNode::Str(_)) => match e.node { SNode::Str(t) => Value::Text(e.bytes(t).to_vec()), _ => unreachable!() },
+                (Some(e), Value::Text(_)) if matches!(e.node, SNode::Str(_)) => match e.node { SNode::Str(t) => Value::Text(e.shared_bytes(t)), _ => unreachable!() },
                 (Some(e), Value::Float(_)) => match number(&e) {
                     Some(f) => Value::Float(f),
                     None => default.clone(),
@@ -438,7 +438,7 @@ pub fn kind_fields(value: &Model, graph: &str, head: &str, authored: &dyn Fn(&st
                     _ => unreachable!(),
                 },
                 (Some(e), Value::Text(_)) if matches!(e.node, SNode::Str(_)) => match e.node {
-                    SNode::Str(t) => Value::Text(e.bytes(t).to_vec()),
+                    SNode::Str(t) => Value::Text(e.shared_bytes(t)),
                     _ => unreachable!(),
                 },
                 (Some(e), Value::Bool(_)) if matches!(e.node, SNode::Sym(b) if matches!(e.name(b), "true" | "false")) => match e.node {
@@ -549,7 +549,7 @@ fn literal_fields(
             }
             float_of(name).map(|f| (vec![field(None, "", KindView::Floating(float_range(f)), Value::Float(f))], None))
         }
-        SNode::Str(t) => Some((vec![field(None, "", KindView::Text, Value::Text(syntax.bytes(*t).to_vec()))], None)),
+        SNode::Str(t) => Some((vec![field(None, "", KindView::Text, Value::Text(syntax.shared_bytes(*t)))], None)),
         SNode::Sym(b) if matches!(syntax.name(*b), "true" | "false") => Some((
             vec![field(
                 None,
@@ -690,7 +690,7 @@ pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(
                 Value::Float(f) => Some(num(&lisp::float(*f))),
                 Value::Int(i) => Some(num(&i.to_string())),
                 Value::Bool(b) => Some(sym(if *b { "true" } else { "false" })),
-                Value::Text(t) => Some(s::make(s::Draft::Str(t.clone()))),
+                Value::Text(t) => Some(s::make(s::Draft::Str(t.to_vec()))),
                 Value::Choice(t) => Some(string(t)),
             };
             syntax.map(|value| {
@@ -827,7 +827,7 @@ fn syntax_of_value(v: &Value) -> S {
         Value::Float(f) => num(&lisp::float(*f)),
         Value::Int(i) => num(&i.to_string()),
         Value::Bool(b) => sym(if *b { "true" } else { "false" }),
-        Value::Text(t) => s::make(s::Draft::Str(t.clone())),
+        Value::Text(t) => s::make(s::Draft::Str(t.to_vec())),
         Value::Choice(t) => string(t),
     }
 }

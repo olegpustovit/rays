@@ -426,7 +426,7 @@ pub fn compile(draw: &Draw) -> Compiled {
         Draw::Path { path: p, args } => Box::new(move |vals, sink| self::path(sink, p, &args, vals)),
         Draw::Text_run { at, text, ink: i, size } => Box::new(move |vals, sink| {
             let text = match &vals[text as usize] {
-                Value::Text(s) => s.clone(),
+                Value::Text(s) => s.to_vec(),
                 _ => return Err(v::fail("E_TYPE", "Drawing text is text.")),
             };
             if !text.is_empty() {
@@ -483,7 +483,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    fn text(s: &str) -> Value { Value::Text(s.as_bytes().to_vec()) }
+    fn text(s: &str) -> Value { Value::Text(s.as_bytes().into()) }
     fn run(draw: Draw, values: Vec<Value>, size: (i64, i64)) -> Result<Vec<Entry>, Diagnostic> {
         let buffers = Buffers::create();
         let mut s = sink(None, size, &buffers);

@@ -37,7 +37,7 @@ fn bytes(g: &geo::T) -> Vec<u8> {
 }
 
 fn text(s: &str) -> Value {
-    Value::Text(s.as_bytes().to_vec())
+    Value::Text(s.as_bytes().into())
 }
 
 fn ints(a: &[i64]) -> Value {

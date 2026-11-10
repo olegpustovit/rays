@@ -176,7 +176,7 @@ fn errors(planes:bool) {
 fn unavailable_topology_sources_refuse(){
     let lookup:ak::GeometryLookup=Arc::new(|_|None);
     for g in [Value::No_geo,Value::Deferred(ty::geometry(),7),Value::Deferred(Ty::Float,7)] {
-        let source=source_value("sop/topology", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(),g),("component".into(),Value::Text(b"vertex_points".to_vec()))]);
+        let source=source_value("sop/topology", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(),g),("component".into(),Value::Text(b"vertex_points".as_slice().into()))]);
         assert_eq!(ak::resolve(None,&lookup,&source).unwrap_err().code,"E_DATA_SOURCE");
     }
 }
@@ -334,8 +334,8 @@ fn text_attribute_eval_read_write_preserves_every_byte() {
     let lookup: ak::GeometryLookup = Arc::new({ let input = input.clone(); move |_| Some(input.clone()) });
     let source = source_value("sop/attr", Ty::Array(Box::new(Ty::Text)), vec![
         ("geometry".into(), Value::Deferred(ty::geometry(), 7)),
-        ("attribute".into(), Value::Text(b"bytes".to_vec())),
-        ("type".into(), Value::Text(b"text".to_vec())),
+        ("attribute".into(), Value::Text(b"bytes".as_slice().into())),
+        ("type".into(), Value::Text(b"text".as_slice().into())),
     ]);
     assert_eq!(ak::resolve(None, &lookup, &source).unwrap(), Value::Text_array(Arc::new(rows.clone().into())));
     let literal = flow_syntax::lisp::quote_string(&bytes);
@@ -360,11 +360,11 @@ fn text_attribute_eval_read_write_preserves_every_byte() {
 fn attribute_identifiers_refuse_non_utf8() {
     let op = operators::all().into_iter().find(|op| op.name == "sop/with_attr").unwrap();
     for (field, code) in [("attribute", "E_ATTR_NAME"), ("owner", "E_ATTR_OWNER"), ("type", "E_ATTR_TYPE")] {
-        let mut args = vec![("attribute".to_owned(), Value::Text(b"bytes".to_vec()))];
+        let mut args = vec![("attribute".to_owned(), Value::Text(b"bytes".as_slice().into()))];
         if field == "attribute" {
-            args[0].1 = Value::Text(vec![255]);
+            args[0].1 = Value::Text(vec![255].into());
         } else {
-            args.push((field.to_owned(), Value::Text(vec![255])));
+            args.push((field.to_owned(), Value::Text(vec![255].into())));
         }
         assert_eq!((op.check)(&args).unwrap_err().code, code);
     }

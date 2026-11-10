@@ -25,7 +25,7 @@ fn node(text: &str, gpu: Option<gpu::Config>, after: Option<&str>) -> sop::node:
     let l = lowered(text, gpu);
     let graph = &l.graphs[0];
     let id = if let Some(name) = after {
-        let write = |n: &&flow_eval::Node, name: &str| n.kind == "sop/with_attr" && n.args.iter().any(|(k,v)| k == "attribute" && matches!(v, flow_syntax::value::Value::Text(s) if s == name.as_bytes()));
+        let write = |n: &&flow_eval::Node, name: &str| n.kind == "sop/with_attr" && n.args.iter().any(|(k,v)| k == "attribute" && matches!(v, flow_syntax::value::Value::Text(s) if s.as_ref() == name.as_bytes()));
         let first = l.plan.nodes.iter().find(|n| write(n, name)).expect("first write");
         let last = l.plan.nodes.iter().find(|n| n.id > first.id && write(n, "N")).expect("last write");
         l.compiled[&last.id]

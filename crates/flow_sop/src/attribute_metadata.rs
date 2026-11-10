@@ -447,7 +447,7 @@ pub fn kind(owner: Owner, name: &str, value: &geometry::T) -> Option<String> {
 
 fn type_of(owner: Owner, name: &str, value: &geometry::T) -> Result<Value, Diagnostic> {
     match kind(owner, name, value) {
-        Some(kind) => Ok(Value::Text(kind.into_bytes())),
+        Some(kind) => Ok(Value::Text(kind.into_bytes().into())),
         None => Err(error("E_ATTR_TYPE", &format!("Attribute {} is missing.", node::ocaml_quote(name)))),
     }
 }
@@ -616,7 +616,7 @@ mod tests {
             args.extend(extra.into_iter().map(|(n, v)| (n.to_owned(), v)));
             flow_syntax::value::source_value(operation, Ty::Any, args)
         };
-        let text = |s: &str| Value::Text(s.as_bytes().to_vec());
+        let text = |s: &str| Value::Text(s.as_bytes().into());
         let attr_type = source("sop/attr_type", vec![("attribute", text("Cd"))]);
         assert_eq!(resolve(&lookup, &attr_type).expect("type"), text("float"));
         let missing = source("sop/attr_type", vec![("attribute", text("zz"))]);

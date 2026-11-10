@@ -99,7 +99,7 @@ fn scalar_draft(value: &Value) -> Draft {
         Value::Float(x) => Draft::Num(lisp::float(*x)),
         Value::Int(i) => Draft::Num(i.to_string()),
         Value::Bool(b) => Draft::Sym(if *b { "true" } else { "false" }.to_owned()),
-        Value::Text(bytes) => Draft::Str(bytes.clone()),
+        Value::Text(bytes) => Draft::Str(bytes.to_vec()),
         Value::Choice(text) => Draft::Str(text.as_bytes().to_vec()),
     }
 }

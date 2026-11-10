@@ -318,7 +318,7 @@ impl Fold {
                 let pat = text_arg(&u.args, "attribute").filter(|pat| pat != name && literal_pattern(pat) && u.args.iter().all(|(k, _)| ["geometry", "attribute", "owner"].contains(&k.as_str())))?;
                 let owner = text_arg(&u.args, "owner").unwrap_or_else(|| "point".into());
                 chain.push(id);
-                dels.push(Value::Record(vec![("owner".into(), Value::Text(owner.into_bytes())), ("pattern".into(), Value::Text(pat.into_bytes()))]));
+                dels.push(Value::Record(vec![("owner".into(), Value::Text(owner.into_bytes().into())), ("pattern".into(), Value::Text(pat.into_bytes().into()))]));
                 id = self.shape.passes(u, id)?;
             } else if self.point_write(u) && !deletes(u).iter().any(|d| pattern(d).as_deref() == Some(name)) {
                 let Some(Value::Deferred(_, base)) = get(&u.args, "geometry") else { return None };
@@ -499,8 +499,8 @@ impl Take {
                         Some((_, kind, earlier))
                             if fields.iter().all(|(k, v)| match k.as_str() {
                                 "geometry" | "attribute" => true,
-                                "owner" => *v == Value::Text(b"point".to_vec()),
-                                "type" => *v == Value::Text(kind.clone().into_bytes()),
+                                "owner" => *v == Value::Text(b"point".as_slice().into()),
+                                "type" => *v == Value::Text(kind.clone().into_bytes().into()),
                                 _ => false,
                             }) =>
                         {
@@ -656,7 +656,7 @@ impl Scan<'_> {
 }
 
 fn fused_entry(name: &str, kind: &str, values: Value) -> Value {
-    Value::Record(vec![("attribute".into(), Value::Text(name.as_bytes().to_vec())), ("type".into(), Value::Text(kind.as_bytes().to_vec())), ("values".into(), values)])
+    Value::Record(vec![("attribute".into(), Value::Text(name.as_bytes().into())), ("type".into(), Value::Text(kind.as_bytes().into())), ("values".into(), values)])
 }
 
 /// whether a write's values map an index (`array/range`); one that reads no attribute too is a

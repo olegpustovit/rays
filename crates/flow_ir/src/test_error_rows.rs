@@ -58,7 +58,7 @@ fn resolve(grain: i64, calls: &Arc<AtomicI64>) -> ResolveFn {
         Value::Source(g) if g.name == "$core/diagnostic_index" && g.ty == Ty::Int => match g.fields.as_slice() {
             [(rows_name, rows), (policy_name, Value::Text(policy))] if rows_name == "rows" && policy_name == "policy" => {
                 calls.fetch_add(1, Ordering::SeqCst);
-                let grain = match policy.as_slice() {
+                let grain = match policy.as_ref() {
                     b"first" => None,
                     b"range-last" => Some(grain),
                     _ => panic!("unexpected policy"),

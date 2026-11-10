@@ -222,7 +222,7 @@ fn settings_form(st: &settings::T) -> Option<S> {
             PV::Bool(b) => Draft::Sym(if *b { "true" } else { "false" }.to_owned()),
             PV::Int(i) => Draft::Num(i.to_string()),
             PV::Float(x) => Draft::Num(lisp::float(*x)),
-            PV::Text(bytes) => Draft::Str(bytes.clone()),
+            PV::Text(bytes) => Draft::Str(bytes.to_vec()),
             PV::Choice(choice) => Draft::Str(choice.as_bytes().to_vec()),
         };
         items.push(builder.push_draft(0, value, span.clone(), None));
@@ -248,7 +248,7 @@ fn read_settings(base: &settings::T, form: &S) -> Result<settings::T, String> {
                     (PV::Bool(_), Node::Sym(text)) if form.name(text) == "false" => PV::Bool(false),
                     (PV::Int(_), Node::Num(text)) => PV::Int(form.name(text).parse::<i64>().map_err(|_| wrong())?),
                     (PV::Float(_), Node::Num(text)) => PV::Float(cfmt::parse_ocaml_float(form.name(text)).ok_or_else(wrong)?),
-                    (PV::Text(_), Node::Str(bytes)) => PV::Text(form.bytes(bytes).to_vec()),
+                    (PV::Text(_), Node::Str(bytes)) => PV::Text(form.shared_bytes(bytes)),
                     (PV::Choice(_), Node::Str(bytes)) => PV::Choice(String::from_utf8_lossy(form.bytes(bytes)).into_owned()),
                     _ => return Err(wrong()),
                 };

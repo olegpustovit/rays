@@ -104,7 +104,7 @@ fn last_value(t: &Pane, n: &p::Node, r: &p::Row) -> Option<S> {
         Some(Summary::Value(Value::Int(i))) => Draft::Num(i.to_string()),
         Some(Summary::Value(Value::Float(f))) if f.is_finite() => Draft::Num(lisp::float(f)),
         Some(Summary::Value(Value::Bool(b))) => Draft::Sym(b.to_string()),
-        Some(Summary::Value(Value::Text(b))) => Draft::Str(b),
+        Some(Summary::Value(Value::Text(b))) => Draft::Str(b.to_vec()),
         Some(Summary::Value(Value::Vec2(a, b))) => vector(&[a, b]),
         Some(Summary::Value(Value::Vec3(a, b, c))) => vector(&[a, b, c]),
         Some(Summary::Value(Value::Vec4(a, b, c, d))) => vector(&[a, b, c, d]),

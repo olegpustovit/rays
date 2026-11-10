@@ -31,7 +31,7 @@ fn arg<'a>(args: &'a Args, name: &str) -> Option<&'a Value> {
     args.iter().find(|(key, _)| key == name).map(|(_, value)| value)
 }
 fn is_text(value: Option<&Value>, text: &str) -> bool {
-    matches!(value, Some(Value::Text(bytes)) if bytes.as_slice() == text.as_bytes())
+    matches!(value, Some(Value::Text(bytes)) if bytes.as_ref() == text.as_bytes())
 }
 fn ints(values: Vec<i64>) -> Value {
     Value::Int_array(Arc::new(values))
@@ -1070,7 +1070,7 @@ mod tests {
     use flow_syntax::value::source_value;
 
     fn text(s: &str) -> Value {
-        Value::Text(s.as_bytes().to_vec())
+        Value::Text(s.as_bytes().into())
     }
     fn floats(v: Vec<f64>) -> Value {
         Value::Floats(3, Arc::new(v))
@@ -1180,7 +1180,7 @@ mod integration {
         Value::Int_array(Arc::new(a.to_vec()))
     }
     fn text(s: &str) -> Value {
-        Value::Text(s.as_bytes().to_vec())
+        Value::Text(s.as_bytes().into())
     }
     fn lookup_of(geometry: Option<Geometry>) -> attribute_kernel::GeometryLookup {
         Arc::new(move |id| if id == 7 { geometry.clone() } else { None })

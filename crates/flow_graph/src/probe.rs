@@ -710,7 +710,7 @@ impl Probe {
             "case" => {
                 let equal = |value: &Value, literal: &Syntax| -> bool {
                     match (value, &literal.node) {
-                        (Value::Text(a), SNode::Str(b)) => a.as_slice() == literal.bytes(*b),
+                        (Value::Text(a), SNode::Str(b)) => a.as_ref() == literal.bytes(*b),
                         (Value::Bool(_) | Value::Int(_) | Value::Float(_), SNode::Sym(s)) if literal.name(*s) == "true" => flow_syntax::value::truthy(value).unwrap_or(false),
                         (Value::Bool(_) | Value::Int(_) | Value::Float(_), SNode::Sym(s)) if literal.name(*s) == "false" => !flow_syntax::value::truthy(value).unwrap_or(true),
                         (Value::Bool(a), SNode::Num(b)) => *a == (cfmt::parse_ocaml_float(literal.name(*b)).unwrap_or(0.0) != 0.0),

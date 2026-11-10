@@ -128,7 +128,7 @@ fn refuse(node: &str, message: &str) -> Result<(), String> {
 // ---- field constructors (one `Spec` each; descriptions and vec3 by struct update)
 
 fn text(name: &'static str, label: &'static str, folder: &'static str, default: &str) -> Spec {
-    Spec { label, folder, ..decl::spec(name, decl::text_kind(), Value::Text(default.as_bytes().to_vec())) }
+    Spec { label, folder, ..decl::spec(name, decl::text_kind(), Value::Text(default.as_bytes().into())) }
 }
 
 fn toggle(name: &'static str, label: &'static str, folder: &'static str, default: bool) -> Spec {
@@ -1839,7 +1839,7 @@ pub mod fuse {
 
     fn bytes(values: &[Value], index: usize) -> Vec<u8> {
         match &values[index] {
-            Value::Text(value) => value.clone(),
+            Value::Text(value) => value.to_vec(),
             _ => unreachable!("parameter {index} is not text"),
         }
     }
@@ -2852,13 +2852,13 @@ mod tests {
         let whole = geometry_of(&cook(&mut s, 4, &n));
         assert_eq!((geometry::point_count(&whole), geometry::primitive_count(&whole)), (0, 0));
         // a missing group, then a missing connectivity attribute
-        let (missing, _) = node::apply_parameters(&n, &[("group".to_owned(), Value::Text(b"absent".to_vec()))]).unwrap();
+        let (missing, _) = node::apply_parameters(&n, &[("group".to_owned(), Value::Text(b"absent".as_slice().into()))]).unwrap();
         assert_eq!(cook_code(&missing), "missing_group");
         let (absent, _) =
-            node::apply_parameters(&n, &[("connectivity_attribute".to_owned(), Value::Text(b"absent".to_vec()))]).unwrap();
+            node::apply_parameters(&n, &[("connectivity_attribute".to_owned(), Value::Text(b"absent".as_slice().into()))]).unwrap();
         assert_eq!(cook_code(&absent), "invalid_topology");
         // blank group and attribute are accepted and mean none
-        let blank = [("group".to_owned(), Value::Text(b" ".to_vec())), ("connectivity_attribute".to_owned(), Value::Text(b" ".to_vec()))];
+        let blank = [("group".to_owned(), Value::Text(b" ".as_slice().into())), ("connectivity_attribute".to_owned(), Value::Text(b" ".as_slice().into()))];
         let (blank, _) = node::apply_parameters(&n, &blank).unwrap();
         assert_eq!(geometry::point_count(&geometry_of(&cook(&mut s, 4, &blank))), 0);
         session::close(&mut s);
@@ -2873,7 +2873,7 @@ mod tests {
             &n,
             &[
                 ("mode".to_owned(), Value::Choice("Triangle fan".to_owned())),
-                ("patch_group".to_owned(), Value::Text(b"patch".to_vec())),
+                ("patch_group".to_owned(), Value::Text(b"patch".as_slice().into())),
             ],
         )
         .unwrap();
@@ -2885,7 +2885,7 @@ mod tests {
         assert_eq!(rdk_core::group::cardinality(&patch), 8);
         assert_eq!(geometry::primitive_count(&out), 12);
         session::close(&mut s);
-        let (missing, _) = node::apply_parameters(&n, &[("boundary_group".to_owned(), Value::Text(b"missing".to_vec()))]).unwrap();
+        let (missing, _) = node::apply_parameters(&n, &[("boundary_group".to_owned(), Value::Text(b"missing".as_slice().into()))]).unwrap();
         assert_eq!(cook_code(&missing), "missing_group");
     }
 
@@ -2924,7 +2924,7 @@ mod tests {
         refused(
             convex_hull::factory(),
             1,
-            vec![("source_point_attribute", Value::Text(b" P ".to_vec()))],
+            vec![("source_point_attribute", Value::Text(b" P ".as_slice().into()))],
             "sop/convex_hull: source point attribute must not be P",
         );
         refused(
@@ -2943,7 +2943,7 @@ mod tests {
             ("intersecting_group", ""),
             ("self_intersecting_group", ""),
         ]
-        .map(|(name, value)| (name.to_owned(), Value::Text(value.as_bytes().to_vec())));
+        .map(|(name, value)| (name.to_owned(), Value::Text(value.as_bytes().into())));
         match node::apply_parameters(&detect, &cleared) {
             Ok(_) => panic!("boolean_detect accepted no outputs"),
             Err(error) => assert!(error.contains("sop/boolean_detect: at least one output must be requested"), "{error}"),
@@ -2953,7 +2953,7 @@ mod tests {
             Ok(_) => panic!("fuse accepted modify_target with a target"),
             Err(error) => assert!(error.contains("modify target requires a disconnected target input"), "{error}"),
         }
-        let creases = [("crease_group".to_owned(), Value::Text(b"c".to_vec()))];
+        let creases = [("crease_group".to_owned(), Value::Text(b"c".as_slice().into()))];
         let sub = node_of(&subdivide_cracks::factory(), &[fixture()]);
         match node::apply_parameters(&sub, &creases) {
             Ok(_) => panic!("subdivide accepted a crease group without creases"),

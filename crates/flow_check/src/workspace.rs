@@ -810,7 +810,7 @@ impl Checker {
             Some(param::Value::Float(value)) => (self.make_term(form, Ty::Float, Draft::Lit(param::Value::Float(value))), Info::leaf(Ty::Float)),
             _ => self.fail_term(form, "E_TYPE", "Nonfinite number."),
         },
-        SNode::Str(bytes) => (self.make_term(form, Ty::Text, Draft::Text(form.bytes(bytes).to_vec())), Info::leaf(Ty::Text)),
+        SNode::Str(bytes) => (self.make_term(form, Ty::Text, Draft::Text(form.shared_bytes(bytes))), Info::leaf(Ty::Text)),
         SNode::Kw(key) => self.fail_term(form, "E_KEYWORD", &format!("Keyword :{} has no call to belong to.", form.name(key))),
         SNode::Sym(name) => self.symbol(cx, form, form.name(name)),
         SNode::Vec(items) => self.vector(cx, form, form.range(items)),
@@ -3542,10 +3542,10 @@ fn literal_param(terms: &TermBuilder, mut term: TermId) -> Option<param::Value> 
         return match terms.node(term) {
             PackedNode::Lit(id) => Some(match terms.literal(id) {
                 packed::Literal::Bool(value) => param::Value::Bool(value), packed::Literal::Int(value) => param::Value::Int(value),
-                packed::Literal::Float(value) => param::Value::Float(value), packed::Literal::Text(id) => param::Value::Text(terms.raw_bytes(id).to_vec()),
+                packed::Literal::Float(value) => param::Value::Float(value), packed::Literal::Text(id) => param::Value::Text(terms.shared_raw_bytes(id)),
                 packed::Literal::Choice(name) => param::Value::Choice(terms.name(name).to_owned()),
             }),
-            PackedNode::Text(id) => Some(param::Value::Text(terms.raw_bytes(id).to_vec())),
+            PackedNode::Text(id) => Some(param::Value::Text(terms.shared_raw_bytes(id))),
             PackedNode::Expanded(id) => { term = terms.expanded(id).body; continue; }
             _ => None,
         };
@@ -3571,10 +3571,10 @@ fn catalog_term_of(term: &packed::Term) -> catalog::Term {
     let node = match term.node {
         PackedNode::Lit(id) => catalog::TermNode::Literal(match arena.literal(id) {
             packed::Literal::Bool(value) => param::Value::Bool(value), packed::Literal::Int(value) => param::Value::Int(value),
-            packed::Literal::Float(value) => param::Value::Float(value), packed::Literal::Text(id) => param::Value::Text(arena.bytes(id).to_vec()),
+            packed::Literal::Float(value) => param::Value::Float(value), packed::Literal::Text(id) => param::Value::Text(arena.shared_bytes(id)),
             packed::Literal::Choice(name) => param::Value::Choice(term.name(name).to_owned()),
         }),
-        PackedNode::Text(id) => catalog::TermNode::Literal(param::Value::Text(arena.bytes(id).to_vec())),
+        PackedNode::Text(id) => catalog::TermNode::Literal(param::Value::Text(arena.shared_bytes(id))),
         PackedNode::Nil => catalog::TermNode::Nil,
         PackedNode::Vec(range) => catalog::TermNode::Vector(arena.term_ids(range).iter().map(|&id| {
             let mut component = catalog_term_of(&term.child(id));
@@ -3864,7 +3864,8 @@ mod memory_tests {
 
         let mut text = Vec::with_capacity(128);
         text.push(b'x');
-        let allocation = (text.as_ptr() as usize, text.capacity());
+        let text: Arc<[u8]> = text.into();
+        let allocation = (text.as_ptr() as usize, text.len() + 2 * std::mem::size_of::<usize>());
         let mut builder = TermBuilder::new();
         let form = builder.import_form(&syntax::make(syntax::Draft::Sym("x".into())));
         let root = builder.push(None, &Ty::Text, form, Draft::Text(text));
@@ -3875,7 +3876,7 @@ mod memory_tests {
         memory.term(&arena.handle(root));
         assert_eq!((memory.syntax.bytes(), memory.checked_bytes()), before, "separate handles share one arena allocation");
         let (_, checked) = memory.into_allocations();
-        assert!(checked.contains(&allocation), "unused retained capacity is not live length");
+        assert!(checked.contains(&allocation), "shared immutable text payload and Arc header are retained");
     }
 
     #[test]

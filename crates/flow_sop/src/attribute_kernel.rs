@@ -123,7 +123,7 @@ fn field_of(value: Option<Value>, field: &str) -> Option<Value> {
 /// The captured value a term names (`captured` / `lookup` of the OCaml).
 fn lookup(bindings: &dyn Fn(&str) -> Option<Value>, term: &Term) -> Option<Value> {
     match term.node {
-        TNode::Text(id) => Some(Value::Text(term.arena().bytes(id).to_vec())),
+        TNode::Text(id) => Some(Value::Text(term.arena().shared_bytes(id))),
         TNode::RefBinding(id) => {
             let binding = term.arena().ref_binding(id);
             let mut value = bindings(term.name(binding.name));
@@ -1104,22 +1104,22 @@ fn borrowed_storage(geometry: GeometryFn, values: &Value) -> Result<Option<(Stor
         let (storage, count) = match (&storage, component) {
             (Storage::FloatArray(_) | Storage::IntArray(_), None) => return typed_array_foundation(),
             (_, None) => (storage, count),
-            (Storage::FloatArray(data), Some(Value::Text(c))) if c == b"offsets" => {
+            (Storage::FloatArray(data), Some(Value::Text(c))) if c.as_ref() == b"offsets" => {
                 let data = float_array::view::view(data).offsets;
                 let n = data.len();
                 (Storage::Int(data), n)
             }
-            (Storage::FloatArray(data), Some(Value::Text(c))) if c == b"values" => {
+            (Storage::FloatArray(data), Some(Value::Text(c))) if c.as_ref() == b"values" => {
                 let data = float_array::view::view(data).values;
                 let n = data.len();
                 (Storage::Float(data), n)
             }
-            (Storage::IntArray(data), Some(Value::Text(c))) if c == b"offsets" => {
+            (Storage::IntArray(data), Some(Value::Text(c))) if c.as_ref() == b"offsets" => {
                 let data = int_array::view::view(data).offsets;
                 let n = data.len();
                 (Storage::Int(data), n)
             }
-            (Storage::IntArray(data), Some(Value::Text(c))) if c == b"values" => {
+            (Storage::IntArray(data), Some(Value::Text(c))) if c.as_ref() == b"values" => {
                 let data = int_array::view::view(data).values;
                 let n = data.len();
                 (Storage::Int(data), n)
@@ -1138,7 +1138,7 @@ fn borrowed_storage(geometry: GeometryFn, values: &Value) -> Result<Option<(Stor
     else {
         return Ok(None);
     };
-    let is = |args: &Vec<(String, Value)>, c: &[u8]| matches!(assoc(args, "component"), Some(Value::Text(t)) if t == c);
+    let is = |args: &Vec<(String, Value)>, c: &[u8]| matches!(assoc(args, "component"), Some(Value::Text(t)) if t.as_ref() == c);
     let without = |args: &Vec<(String, Value)>| args.iter().filter(|(k, _)| k != "component").cloned().collect::<Vec<_>>();
     if !(is(offsets, b"offsets") && is(vals, b"values") && without(offsets) == without(vals)) {
         return Ok(None);
@@ -1445,7 +1445,7 @@ pub fn write_constant_source(
         (Some(selection), Some(default)) => write_selected(grain, owner, kind, name, values, selection, default, g).map(Some),
         (None, None) => match &value {
             Value::Int(n) => semantic_owned(owner, name, Storage::Int(Arc::new(vec![*n; count])), g).map(Some),
-            Value::Text(t) => semantic_owned(owner, name, Storage::Text(Arc::new(std::iter::repeat_n(t.as_slice(), count).collect())), g).map(Some),
+            Value::Text(t) => semantic_owned(owner, name, Storage::Text(Arc::new(std::iter::repeat_n(t.as_ref(), count).collect())), g).map(Some),
             Value::Float(x) => install(owner, kind, name, vec![vec![*x; count]], g).map(Some),
             Value::Vec3(x, y, z) => install(owner, kind, name, [*x, *y, *z].iter().map(|v| vec![*v; count]).collect(), g).map(Some),
             Value::Vec4(x, y, z, q) => install(owner, kind, name, [*x, *y, *z, *q].iter().map(|v| vec![*v; count]).collect(), g).map(Some),
@@ -1607,7 +1607,7 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
             _ => None,
         };
     }
-    let owner_edge = |v: Option<&Option<Value>>| matches!(v, Some(Some(Value::Text(t))) if t == b"edge");
+    let owner_edge = |v: Option<&Option<Value>>| matches!(v, Some(Some(Value::Text(t))) if t.as_ref() == b"edge");
     let (edge, args): (bool, Option<Vec<(String, Value)>>) = match term.node {
         TNode::Get(id) if {
             let get = term.arena().get(id);
@@ -1624,7 +1624,7 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
             let resolved: Vec<(String, Option<Value>)> = term.arena().fields(call.args).iter().map(|field| {
                 let t = term.child(field.term);
                 (term.name(field.name).to_owned(), match t.node {
-                    TNode::Text(id) => Some(Value::Text(t.arena().bytes(id).to_vec())),
+                    TNode::Text(id) => Some(Value::Text(t.arena().shared_bytes(id))),
                     _ => captured(&bindings, &t),
                 })
             }).collect();
@@ -1639,7 +1639,7 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
             Some(Value::Source(g)) if g.name == "sop/edges" => (true, Some(g.fields)),
             Some(Value::Source(g)) if g.name == "sop/group" => {
                 let args = promoted(&g.fields, &|x: &Value| x.clone());
-                (matches!(assoc(&args, "owner"), Some(Value::Text(t)) if t == b"edge"), Some(args))
+                (matches!(assoc(&args, "owner"), Some(Value::Text(t)) if t.as_ref() == b"edge"), Some(args))
             }
             _ => (false, None),
         },
@@ -1654,8 +1654,8 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
         owner_origin(by_source, id, &["@sop-owner", owner_name(owner)])
     } else if kind == "float_array" || kind == "int_array" {
         match assoc(&args, "component") {
-            Some(Value::Text(c)) if c == b"offsets" => owner_origin(by_source, id, &["@sop-csr-offsets", owner_name(owner)]),
-            Some(Value::Text(c)) if c == b"values" => {
+            Some(Value::Text(c)) if c.as_ref() == b"offsets" => owner_origin(by_source, id, &["@sop-csr-offsets", owner_name(owner)]),
+            Some(Value::Text(c)) if c.as_ref() == b"values" => {
                 let name = assoc(&args, "attribute").and_then(text_of)?;
                 Some((vec!["@sop-csr-values".into(), owner_name(owner).into(), name, kind.clone(), id.to_string()], Vec::new()))
             }
@@ -1723,7 +1723,7 @@ fn borrowed_source(geometry: &GeometryLookup, residual: ResidualIdAlias, term: &
                 args.iter().find(|field| term.name(field.name) == name).and_then(|field| {
                     let t = term.child(field.term);
                     match t.node {
-                        TNode::Text(id) => Some(Value::Text(t.arena().bytes(id).to_vec())),
+                        TNode::Text(id) => Some(Value::Text(t.arena().shared_bytes(id))),
                         _ => captured(&bindings, &t),
                     }
                 })
@@ -2652,7 +2652,7 @@ use rdk_ops::line_geometry;
                             assert_eq!(bits(&original), before);
                         };
                         invalid(Value::Int_array(Arc::new(vec![0; count + 1])), &default, &values, "E_ATTR_COUNT");
-                        invalid(Value::Int_array(Arc::new(vec![0; count])), &Value::Text(b"wrong".to_vec()), &values, "E_ATTR_TYPE");
+                        invalid(Value::Int_array(Arc::new(vec![0; count])), &Value::Text(b"wrong".as_slice().into()), &values, "E_ATTR_TYPE");
                         if count > 0 {
                             invalid(Value::Int_array(Arc::new(vec![2; count])), &default, &values, "E_ATTR_SELECTION");
                             let mut bad = replacements.clone();
@@ -2794,7 +2794,7 @@ use rdk_ops::line_geometry;
                 ("vec3", Value::Vec3(-0.0, 1.0, f64::from_bits(1))),
                 ("vec4", Value::Vec4(-0.0, 1.0, 2.0, f64::from_bits(1))),
                 ("int", Value::Int(9007199254740993)),
-                ("text", Value::Text("猫😀".as_bytes().to_vec())),
+                ("text", Value::Text("猫😀".as_bytes().into())),
             ];
             for (kind, fill) in fills {
                 let name = format!("array/{kind}");
@@ -3106,7 +3106,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     fn missing_geometry_source_is_refused() {
         let lookup: GeometryLookup = Arc::new(|_| None);
         for geometry in [Value::No_geo, Value::Deferred(ty::geometry(), 7), Value::Deferred(Ty::Float, 7)] {
-            let source = source_value("sop/topology", array_of(Ty::Int), vec![("geometry".into(), geometry), ("component".into(), Value::Text(b"vertex_points".to_vec()))]);
+            let source = source_value("sop/topology", array_of(Ty::Int), vec![("geometry".into(), geometry), ("component".into(), Value::Text(b"vertex_points".as_slice().into()))]);
             assert_eq!(code(resolve(None, &lookup, &source)), "E_DATA_SOURCE");
         }
     }
@@ -3121,7 +3121,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     }
 
     fn attr_source(name: &str, attribute: &str, extra: &[(&str, Value)]) -> Value {
-        let mut args = vec![("geometry".to_owned(), Value::Deferred(ty::geometry(), 7)), ("attribute".to_owned(), Value::Text(attribute.as_bytes().to_vec()))];
+        let mut args = vec![("geometry".to_owned(), Value::Deferred(ty::geometry(), 7)), ("attribute".to_owned(), Value::Text(attribute.as_bytes().into()))];
         args.extend(extra.iter().map(|(k, v)| ((*k).to_owned(), v.clone())));
         source_value(name, array_of(Ty::Vec3), args)
     }
@@ -3135,7 +3135,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         assert_eq!(reads(&value), vec!["*".to_owned()], "a bare geometry is opaque");
         let named = Value::List(Arc::new(vec![attr_source("sop/attr", "P", &[]), attr_source("sop/attr_checked", "Cd", &[]), attr_source("sop/attr", "P", &[])]));
         assert_eq!(reads(&named), vec!["Cd".to_owned(), "P".to_owned()]);
-        let topology = source_value("sop/count", Ty::Int, vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("element".into(), Value::Text(b"points".to_vec()))]);
+        let topology = source_value("sop/count", Ty::Int, vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("element".into(), Value::Text(b"points".as_slice().into()))]);
         assert!(reads(&topology).is_empty(), "topology-only readers read no attribute");
         let names = source_value("sop/attr_names", array_of(Ty::Text), vec![("geometry".into(), Value::Deferred(ty::geometry(), 7))]);
         assert_eq!(reads(&names), vec!["*".to_owned()]);
@@ -3180,7 +3180,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
                 }
                 other => panic!("P reads as a vec3 array, got {other:?}"),
             }
-            let component = |name: &str| Value::Text(name.as_bytes().to_vec());
+            let component = |name: &str| Value::Text(name.as_bytes().into());
             match read(&attr_source("sop/attr_checked", "P", &[("component", component("valid"))])) {
                 Value::Int_array(valid) => {
                     assert_eq!(valid.len(), count);
@@ -3215,7 +3215,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         let source = |name: &str, extra: &[(&str, Value)]| source_value(name, Ty::Float, extra.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect());
         assert_eq!(resolve(Some(&context), &lookup, &source("sop/context_frame", &[])).unwrap(), Value::Float(5.0));
         assert_eq!(resolve(Some(&context), &lookup, &source("sop/context_time", &[])).unwrap(), Value::Float(1.5));
-        let seeded = source("sop/context_seed", &[("namespace", Value::Text(b"n".to_vec())), ("salt", Value::Int(3))]);
+        let seeded = source("sop/context_seed", &[("namespace", Value::Text(b"n".as_slice().into())), ("salt", Value::Int(3))]);
         let expected = seed_for(3, 42, "n", "");
         assert_eq!(resolve(Some(&context), &lookup, &seeded).unwrap(), Value::Int(expected));
         let record = Value::Record(vec![("t".into(), source("sop/context_time", &[])), ("k".into(), Value::Int(1))]);

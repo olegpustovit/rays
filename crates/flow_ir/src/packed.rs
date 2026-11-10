@@ -1389,11 +1389,11 @@ struct GuardSpans {
 struct TC {
     integer: Vec<i64>,
     floats: Vec<f64>,
-    texts: Vec<Vec<u8>>,
+    texts: Vec<Arc<[u8]>>,
     traced: Vec<Option<(i64, Vec<f64>, ray_host::Hit)>>,
     next_float: Vec<f64>,
     next_int: Vec<i64>,
-    next_text: Vec<Vec<u8>>,
+    next_text: Vec<Arc<[u8]>>,
     tables: HashMap<i64, Arc<rays_math::noise::T>>,
     scratch: rays_math::noise::Fbm3Scratch,
     indices: Vec<usize>,
@@ -1604,7 +1604,7 @@ fn texec(
             };
             let o = toff(place);
             for j in first..last {
-                tc.texts[o + j] = data[source_index(tc, j, i)].to_vec();
+                tc.texts[o + j] = Arc::from(&data[source_index(tc, j, i)]);
             }
         }
         Instruction::Text_gather(array, index) => {
@@ -1616,7 +1616,7 @@ fn texec(
             let o = toff(place);
             for j in first..last {
                 let k = row(array, tc.integer[*index as usize * bs + j])?;
-                tc.texts[o + j] = data[k].to_vec();
+                tc.texts[o + j] = Arc::from(&data[k]);
             }
         }
         Instruction::Text_select(condition, yes, no) => {
@@ -2146,7 +2146,7 @@ fn typed_chunk(
     base: usize,
     fouts: &mut [Option<&mut [f64]>],
     iouts: &mut [Option<&mut [i64]>],
-    touts: &mut [Option<&mut [Vec<u8>]>],
+    touts: &mut [Option<&mut [Arc<[u8]>]>],
     planes: &mut [Vec<Option<&mut [f64]>>],
 ) -> K<()> {
     if sh.ordered {
@@ -2165,11 +2165,11 @@ fn typed_chunk(
     let mut tc = TC {
         integer: vec![0; if integers { slots * bs } else { 0 }],
         floats: vec![0.0; slots * bs],
-        texts: vec![Vec::new(); sh.text_count * bs],
+        texts: if sh.text_count == 0 { Vec::new() } else { vec![Arc::from([]); sh.text_count * bs] },
         traced: vec![None; if traces { bs } else { 0 }],
         next_float: vec![0.0; sh.carried],
         next_int: vec![0; sh.carried],
-        next_text: vec![Vec::new(); sh.carried],
+        next_text: if sh.text_count == 0 || sh.carried == 0 { Vec::new() } else { vec![Arc::from([]); sh.carried] },
         tables: HashMap::new(),
         scratch: rays_math::noise::create_fbm3_scratch(),
         indices: if sh.contiguous { Vec::new() } else { vec![0; bs] },
@@ -2371,7 +2371,7 @@ fn split_ints<'a>(data: &'a mut [i64], bounds: &[usize]) -> Vec<Mutex<Option<&'a
     parts
 }
 
-fn split_texts<'a>(data: &'a mut [Vec<u8>], bounds: &[usize]) -> Vec<Mutex<Option<&'a mut [Vec<u8>]>>> {
+fn split_texts<'a>(data: &'a mut [Arc<[u8]>], bounds: &[usize]) -> Vec<Mutex<Option<&'a mut [Arc<[u8]>]>>> {
     let mut parts = Vec::with_capacity(bounds.len().saturating_sub(1));
     let mut rest = data;
     for c in 0..bounds.len().saturating_sub(1) {
@@ -2579,7 +2579,7 @@ fn run_typed(
     let n_out = t.outputs.len();
     let mut fvec: Vec<Vec<f64>> = vec![Vec::new(); n_out];
     let mut ivec: Vec<Vec<i64>> = vec![Vec::new(); n_out];
-    let mut tvec: Vec<Vec<Vec<u8>>> = vec![Vec::new(); n_out];
+    let mut tvec: Vec<Vec<Arc<[u8]>>> = vec![Vec::new(); n_out];
     if collecting && !has_planes {
         for k in 0..n_out {
             let width = t.outputs[k].len();
@@ -2587,7 +2587,7 @@ fn run_typed(
                 if kept > MAX_ARRAY {
                     return Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds."));
                 }
-                tvec[k] = vec![Vec::new(); kept];
+                tvec[k] = if kept == 0 { Vec::new() } else { vec![Arc::from([]); kept] };
             } else if integer_outputs[k] {
                 if kept > MAX_ARRAY {
                     return Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds."));
@@ -2756,7 +2756,7 @@ fn run_typed(
             .collect();
         let i_parts: Vec<Option<Vec<Mutex<Option<&mut [i64]>>>>> =
             ivec.iter_mut().map(|d| if d.is_empty() { None } else { Some(split_ints(d.as_mut_slice(), &bounds)) }).collect();
-        let t_parts: Vec<Option<Vec<Mutex<Option<&mut [Vec<u8>]>>>>> =
+        let t_parts: Vec<Option<Vec<Mutex<Option<&mut [Arc<[u8]>]>>>>> =
             tvec.iter_mut().map(|d| if d.is_empty() { None } else { Some(split_texts(d.as_mut_slice(), &bounds)) }).collect();
         let p_parts: Vec<Vec<Option<Vec<Mutex<Option<&mut [f64]>>>>>> = match planes_opt.as_mut() {
             None => Vec::new(),
@@ -2769,7 +2769,7 @@ fn run_typed(
         let run_one = |c: usize, fo: Option<&Forcer<'_>>| -> K<()> {
             let mut fouts: Vec<Option<&mut [f64]>> = f_parts.iter().map(|p| p.as_ref().map(|v| v[c].lock().unwrap().take().unwrap())).collect();
             let mut iouts: Vec<Option<&mut [i64]>> = i_parts.iter().map(|p| p.as_ref().map(|v| v[c].lock().unwrap().take().unwrap())).collect();
-            let mut touts: Vec<Option<&mut [Vec<u8>]>> = t_parts.iter().map(|p| p.as_ref().map(|v| v[c].lock().unwrap().take().unwrap())).collect();
+            let mut touts: Vec<Option<&mut [Arc<[u8]>]>> = t_parts.iter().map(|p| p.as_ref().map(|v| v[c].lock().unwrap().take().unwrap())).collect();
             let mut planes: Vec<Vec<Option<&mut [f64]>>> = p_parts
                 .iter()
                 .map(|row| row.iter().map(|p| p.as_ref().map(|v| v[c].lock().unwrap().take().unwrap())).collect())

@@ -264,7 +264,7 @@ fn a_deferred_grid_stays_a_card_and_the_driven_noise_inlines() {
         .unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let kinds: Vec<&str> = l.plan.nodes.iter().map(|n| n.kind.as_str()).collect();
     assert!(!kinds.contains(&"sop/attribute_noise"), "the driven noise stayed the catalog node: {kinds:?}");
-    let grid_card = l.plan.nodes.iter().find(|n| n.kind == flow_eval::card_kind() && n.args.iter().any(|(k, v)| k == "kind" && *v == flow_eval::Value::Text(b"sop/grid".to_vec())));
+    let grid_card = l.plan.nodes.iter().find(|n| n.kind == flow_eval::card_kind() && n.args.iter().any(|(k, v)| k == "kind" && *v == flow_eval::Value::Text(b"sop/grid".as_slice().into())));
     let value = grid_card.and_then(|n| n.args.iter().find(|(k, _)| k == "value")).map(|(_, v)| v.clone());
     assert!(matches!(value, Some(flow_eval::Value::Deferred(..))), "the grid's card is structural: {value:?}");
 }

@@ -146,7 +146,7 @@ fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::Panels> {
                 _ => panels::Size::Ratio(0.5),
             };
             let axis = match args.iter().find(|(n, _)| n == "axis") {
-                Some((_, E::Text(t))) if t == b"vertical" => panels::Axis::V,
+                Some((_, E::Text(t))) if t.as_ref() == b"vertical" => panels::Axis::V,
                 _ => panels::Axis::H,
             };
             Ok(panels::Panels::Split { axis, size, a: Box::new(a), b: Box::new(b) })

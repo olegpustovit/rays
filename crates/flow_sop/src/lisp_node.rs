@@ -85,7 +85,7 @@ fn scalar(value: &ParamValue) -> Value {
         ParamValue::Int(v) => Value::Int(*v),
         ParamValue::Float(v) => Value::Float(*v),
         ParamValue::Text(v) => Value::Text(v.clone()),
-        ParamValue::Choice(v) => Value::Text(v.clone().into_bytes()),
+        ParamValue::Choice(v) => Value::Text(v.clone().into_bytes().into()),
     }
 }
 
@@ -396,7 +396,7 @@ mod tests {
         let (edited, effects) = node::apply_parameters(&made, &[("count".to_owned(), ParamValue::Int(5))]).expect("edit");
         assert!(effects.cook && node::id(&edited) == node::id(&made));
         assert_eq!(rdk_core::geometry::point_count(&cook(&edited).expect("cooks")), 5);
-        assert!(node::apply_parameters(&made, &[("count".to_owned(), ParamValue::Text(b"x".to_vec()))]).is_err());
+        assert!(node::apply_parameters(&made, &[("count".to_owned(), ParamValue::Text(b"x".as_slice().into()))]).is_err());
     }
 
     #[test]

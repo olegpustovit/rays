@@ -29,7 +29,7 @@ fn text_of(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 fn text_value(text: String) -> Value {
-    Value::Text(text.into_bytes())
+    Value::Text(text.into_bytes().into())
 }
 
 pub fn owner(name: &str) -> Result<Owner, Diagnostic> {
@@ -304,7 +304,7 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<Geometry>, source: &Value) -> Re
             if operation == "sop/group" {
                 match arg(args, "as_owner") {
                     None => read(owner, &group_name, &found),
-                    Some(Value::Text(target)) if target.as_slice() == b"point" => read_points(owner, &group_name, &found),
+                    Some(Value::Text(target)) if target.as_ref() == b"point" => read_points(owner, &group_name, &found),
                     Some(Value::Text(_)) => fail("E_GROUP_TARGET", "Group promotion target is point."),
                     Some(_) => fail("E_GROUP_TYPE", "Group as_owner must be text."),
                 }
@@ -313,7 +313,7 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<Geometry>, source: &Value) -> Re
                     unreachable!("order returns a record");
                 };
                 match arg(args, "component") {
-                    Some(Value::Text(component)) => match fields.iter().find(|(key, _)| key.as_bytes() == component.as_slice()) {
+                    Some(Value::Text(component)) => match fields.iter().find(|(key, _)| key.as_bytes() == component.as_ref()) {
                         Some((_, value)) => Ok(value.clone()),
                         None => fail("E_GROUP_TYPE", "Group order component is ordered or indices."),
                     },

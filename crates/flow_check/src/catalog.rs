@@ -206,7 +206,7 @@ fn literal(form: &Syntax) -> Result<Value, Diagnostic> {
             Some("bool") => boolean(&form.child(items[1])).map(Value::Bool),
             Some("int") => integer(&form.child(items[1])).map(Value::Int),
             Some("float") => floating(&form.child(items[1])).map(Value::Float),
-            Some("text") => byte_string(&form.child(items[1])).map(Value::Text),
+            Some("text") => byte_string(&form.child(items[1])).map(|bytes| Value::Text(bytes.into())),
             Some("choice") => string(&form.child(items[1])).map(Value::Choice),
             _ => Err(bad(form, "Unknown literal kind in Flow manifest")),
         },
@@ -710,7 +710,7 @@ mod tests {
         let digest = md5_hex(format!("(version 1)\n(kinds {kind})").as_bytes());
         let manifest = format!("(flow_manifest (version 1) (digest \"{digest}\") (kinds {kind}))");
         let (catalog, _) = catalog_of_manifest(&manifest).expect("valid byte-backed text");
-        assert_eq!(catalog.kinds[0].parameters[0].fields[0].2, Value::Text(vec![255]));
+        assert_eq!(catalog.kinds[0].parameters[0].fields[0].2, Value::Text(vec![255].into()));
     }
 }
 

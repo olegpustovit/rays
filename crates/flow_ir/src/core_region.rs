@@ -687,7 +687,7 @@ impl Lower {
         if e.registers.len() == 1 && self.bottom_registers[e.registers[0] as usize] {
             // The guarded Raise has already run before this unreachable value. A typed placeholder
             // keeps bottom branches out of numeric banks.
-            Ok(one(self.emit(I::Text_const(Vec::new()))?))
+            Ok(one(self.emit(I::Text_const(Vec::new().into()))?))
         } else {
             if e.registers.len() != 1 || !self.text_registers[e.registers[0] as usize] {
                 return Err(self.refuse("E_PACKED_TYPE", "Packed Text leaves require text values."));
@@ -1498,7 +1498,7 @@ impl Lower {
                 Literal::Bool(b) => self.literal(t, &Value::Bool(b)),
                 _ => Err(self.term_unsupported(t)),
             },
-            Node::Text(id) => self.literal(t, &Value::Text(arena.bytes(id).to_vec())),
+            Node::Text(id) => self.literal(t, &Value::Text(arena.shared_bytes(id))),
             Node::RefBinding(id) => {
                 let binding = arena.ref_binding(id);
                 let name = t.name(binding.name);
@@ -1598,9 +1598,9 @@ impl Lower {
             }
             Node::Op(id) if t.name(arena.op(id).op) == "error" && self.constant_only("error") => {
                 let args = arena.fields(arena.op(id).args);
-                let text = |me: &Lower, arg: &Term| -> Res<Vec<u8>> {
+                let text = |me: &Lower, arg: &Term| -> Res<std::sync::Arc<[u8]>> {
                     let bytes = match arg.node {
-                        Node::Text(id) => arg.arena().bytes(id).to_vec(),
+                        Node::Text(id) => arg.arena().shared_bytes(id),
                         Node::RefBinding(id) => {
                             let binding = arg.arena().ref_binding(id);
                             let resolve = || -> Res<Value> {
@@ -1621,7 +1621,7 @@ impl Lower {
                 // `let code = ... and message = ...`: in order
                 let code = String::from_utf8_lossy(&text(self, &find("code").ok_or_else(|| invalid("Not_found"))?)?).into_owned();
                 let message = String::from_utf8_lossy(&text(self, &find("message").ok_or_else(|| invalid("Not_found"))?)?).into_owned();
-                let cause = match find("cause") { Some(c) => Some(text(self, &c)?), None => None };
+                let cause = match find("cause") { Some(c) => Some(text(self, &c)?.to_vec()), None => None };
                 Ok(one(self.emit(I::Raise(t.ty().clone(), code, message, cause))?))
             }
             Node::Op(id) if t.name(arena.op(id).op) == "color/hsl" && arena.fields(arena.op(id).args).iter().map(|field| t.name(field.name)).eq(["h", "s", "l"]) => {

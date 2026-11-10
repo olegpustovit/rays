@@ -91,7 +91,7 @@ pub struct Expanded { pub name: NameId, pub body: TermId }
 
 /// Construction-only values use local child IDs; no node imports its own recursive subtree.
 pub enum Draft {
-    Lit(param::Value), Text(Vec<u8>), Nil, Time, Vec(Vec<TermId>), RefBinding(String, Vec<String>),
+    Lit(param::Value), Text(Arc<[u8]>), Nil, Time, Vec(Vec<TermId>), RefBinding(String, Vec<String>),
     Call { kind: String, ctx: Context, args: Vec<(String, TermId)> },
     Op { op: String, args: Vec<(String, TermId)>, skip: Vec<Vec<usize>> },
     CallFn { fn_name: String, args: Vec<TermId>, body: Option<TermId> }, FnRef(String),
@@ -111,7 +111,7 @@ struct Tables {
     rows: Vec<TermRow>, ranges: Vec<Range>, terms: Vec<TermId>, names: Vec<NameId>,
     fields: Vec<Field>, bindings: Vec<Binding>, arms: Vec<Arm>, case_arms: Vec<CaseArm>, params: Vec<Parameter>,
     patterns: Vec<PatternNode>, pattern_edges: Vec<PatternId>, paths: Vec<RangeId>, types: Vec<Ty>,
-    bytes: Vec<Vec<u8>>, literals: Vec<Literal>, skips: Vec<RangeId>, indices: Vec<usize>,
+    bytes: Vec<Arc<[u8]>>, literals: Vec<Literal>, skips: Vec<RangeId>, indices: Vec<usize>,
     refs: Vec<RefBinding>, calls: Vec<Call>, ops: Vec<Op>, call_fns: Vec<CallFn>, graphs: Vec<GraphRef>,
     lets: Vec<Let>, states: Vec<State>, loops: Vec<Loop>, pairs: Vec<Pair>, errors: Vec<ErrorRows>,
     ifs: Vec<If>, conds: Vec<Cond>, cases: Vec<Case>, functions: Vec<Function>, hofs: Vec<Hof>,
@@ -184,6 +184,7 @@ impl TermArena {
     pub fn skip(&self, id: RangeId) -> &[RangeId] { &self.tables.skips[self.bounds(id)] }
     pub fn indices(&self, id: RangeId) -> &[usize] { &self.tables.indices[self.bounds(id)] }
     pub fn bytes(&self, id: u32) -> &[u8] { &self.tables.bytes[id as usize] }
+    pub fn shared_bytes(&self, id: u32) -> Arc<[u8]> { self.tables.bytes[id as usize].clone() }
     pub fn literal(&self, id: u32) -> Literal { self.tables.literals[id as usize] }
     pub fn children(&self, id: TermId) -> &[TermId] { self.term_ids(self.row(id).children) }
     payload_accessors! {
@@ -306,7 +307,7 @@ impl TermArena {
         buffers! {
             rows: TermRow, ranges: Range, terms: TermId, names: NameId, fields: Field, bindings: Binding,
             arms: Arm, case_arms: CaseArm, params: Parameter, patterns: PatternNode, pattern_edges: PatternId,
-            paths: RangeId, types: Ty, bytes: Vec<u8>, literals: Literal, skips: RangeId, indices: usize,
+            paths: RangeId, types: Ty, bytes: Arc<[u8]>, literals: Literal, skips: RangeId, indices: usize,
             refs: RefBinding, calls: Call, ops: Op, call_fns: CallFn, graphs: GraphRef, lets: Let, states: State,
             loops: Loop, pairs: Pair, errors: ErrorRows, ifs: If, conds: Cond, cases: Case, functions: Function,
             hofs: Hof, gets: Get, assocs: Assoc, list_ops: ListOp, expanded: Expanded,
@@ -314,7 +315,7 @@ impl TermArena {
         checked.allocation(self.free_names.as_ptr(), self.free_names.capacity() * std::mem::size_of::<RangeId>());
         checked.allocation(self.names.as_ptr(), self.names.capacity() * std::mem::size_of::<String>());
         for name in &self.names { checked.allocation(name.as_ptr(), name.capacity()); }
-        for bytes in &self.tables.bytes { checked.allocation(bytes.as_ptr(), bytes.capacity()); }
+        for bytes in &self.tables.bytes { checked.allocation(bytes.as_ptr(), bytes.len() + 2 * std::mem::size_of::<usize>()); }
         for ty in &self.tables.types { attribute_type(checked, ty); }
         self.syntax.attribute(syntax);
     }
@@ -371,6 +372,7 @@ impl TermBuilder {
     pub fn skip_ranges(&self, id: RangeId) -> &[RangeId] { &self.tables.skips[self.bounds(id)] }
     pub fn indices(&self, id: RangeId) -> &[usize] { &self.tables.indices[self.bounds(id)] }
     pub fn raw_bytes(&self, id: u32) -> &[u8] { &self.tables.bytes[id as usize] }
+    pub fn shared_raw_bytes(&self, id: u32) -> Arc<[u8]> { self.tables.bytes[id as usize].clone() }
     pub fn literal(&self, id: u32) -> Literal { self.tables.literals[id as usize] }
     payload_accessors! {
         ref_binding: refs -> RefBinding, call: calls -> Call, op: ops -> Op, call_fn: call_fns -> CallFn,
@@ -572,7 +574,7 @@ impl TermBuilder {
         }
         range
     }
-    fn bytes(&mut self, bytes: Vec<u8>) -> u32 {
+    fn bytes(&mut self, bytes: Arc<[u8]>) -> u32 {
         let id = index(self.tables.bytes.len());
         self.tables.bytes.push(bytes);
         id
@@ -745,10 +747,10 @@ impl TermBuilder {
         match node {
             Node::Lit(id) => Draft::Lit(match source.literal(id) {
                 Literal::Bool(value) => param::Value::Bool(value), Literal::Int(value) => param::Value::Int(value),
-                Literal::Float(value) => param::Value::Float(value), Literal::Text(id) => param::Value::Text(source.bytes(id).to_vec()),
+                Literal::Float(value) => param::Value::Float(value), Literal::Text(id) => param::Value::Text(source.shared_bytes(id)),
                 Literal::Choice(name) => param::Value::Choice(source.name(name).to_owned()),
             }),
-            Node::Text(id) => Draft::Text(source.bytes(id).to_vec()), Node::Nil => Draft::Nil, Node::Time => Draft::Time,
+            Node::Text(id) => Draft::Text(source.shared_bytes(id)), Node::Nil => Draft::Nil, Node::Time => Draft::Time,
             Node::Vec(range) => Draft::Vec(terms(range)), Node::ListLit(range) => Draft::ListLit(terms(range)),
             Node::Str(range) => Draft::Str(terms(range)), Node::Record(range) => Draft::Record(fields(range)),
             Node::FnRef(name) => Draft::FnRef(source.name(name).to_owned()),
@@ -1176,8 +1178,8 @@ mod tests {
         let zone = vec!["g".into(), "x".into()];
         let drafts = vec![
             Draft::Lit(param::Value::Bool(true)), Draft::Lit(param::Value::Int(-3)),
-            Draft::Lit(param::Value::Text(vec![0, 255])), Draft::Lit(param::Value::Choice("x".into())),
-            Draft::Text(vec![0, 254]), Draft::Nil, Draft::Time, Draft::Vec(vec![atom, atom]),
+            Draft::Lit(param::Value::Text(vec![0, 255].into())), Draft::Lit(param::Value::Choice("x".into())),
+            Draft::Text(vec![0, 254].into()), Draft::Nil, Draft::Time, Draft::Vec(vec![atom, atom]),
             Draft::RefBinding("x".into(), vec!["y".into()]),
             Draft::Call { kind: "sop/test".into(), ctx: flow_syntax::context::sop(), args: fields.clone() },
             Draft::Op { op: "+".into(), args: fields.clone(), skip: vec![vec![0, 1], vec![2]] },

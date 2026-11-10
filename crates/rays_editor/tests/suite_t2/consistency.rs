@@ -48,7 +48,7 @@ fn settings_schema() -> Arc<param::Schema> {
             "consistency".to_owned(),
             vec![
                 param::field("amount".to_owned(), param::floating(0., 10., None, None).unwrap(), Value::Float(0.)).unwrap().label("Amount".to_owned()).unwrap(),
-                param::field("mode".to_owned(), param::text(), Value::Text(b"default".to_vec())).unwrap().label("Mode".to_owned()).unwrap(),
+                param::field("mode".to_owned(), param::text(), Value::Text(b"default".as_slice().into())).unwrap().label("Mode".to_owned()).unwrap(),
             ],
         )
         .unwrap(),
@@ -56,7 +56,7 @@ fn settings_schema() -> Arc<param::Schema> {
 }
 
 pub fn settings_of(x: f64, mode: &str) -> settings::T {
-    settings::make(&settings_schema(), vec![Value::Float(x), Value::Text(mode.as_bytes().to_vec())])
+    settings::make(&settings_schema(), vec![Value::Float(x), Value::Text(mode.as_bytes().into())])
 }
 
 pub fn got(s: &settings::T) -> Vec<Value> {
@@ -64,7 +64,7 @@ pub fn got(s: &settings::T) -> Vec<Value> {
 }
 
 fn vals(x: f64, mode: &str) -> Vec<Value> {
-    vec![Value::Float(x), Value::Text(mode.as_bytes().to_vec())]
+    vec![Value::Float(x), Value::Text(mode.as_bytes().into())]
 }
 
 /// `with_editor`: a fresh editor, one frame, `f`, close.

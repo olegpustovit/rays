@@ -27,7 +27,7 @@ fn parameters_schema() -> param::Schema {
             folder(f("count", param::integer(1, 5, Some(1), Some(10)).unwrap(), Value::Int(2)), &["Geometry"]).label("Count".to_string()).unwrap(),
             folder(f("enabled", param::toggle(), Value::Bool(true)), &["Geometry"]),
             folder(f("amount", param::floating(0., 1., None, None).unwrap(), Value::Float(0.5)), &["Look", "Noise"]).impact(Impact::View),
-            folder(f("title", param::text(), Value::Text(b"Node SOP".to_vec())), &["Look"]).impact(Impact::Export),
+            folder(f("title", param::text(), Value::Text(b"Node SOP".as_slice().into())), &["Look"]).impact(Impact::Export),
             folder(f("mode", param::choice(vec!["Cube".into(), "Sphere".into()]).unwrap(), Value::Choice("Cube".into())), &["Geometry"]),
         ],
     )

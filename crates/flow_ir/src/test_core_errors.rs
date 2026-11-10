@@ -64,7 +64,7 @@ fn core_loops_observe_cancellation_without_restarting_the_walker() {
             assert_eq!(core_exec::execute(&prepared,&input::at_time(1.),&options).unwrap_err().code,"cancelled");
         }));
         assert_eq!(walked.load(Ordering::Relaxed),0);
-        assert_eq!(core_exec::execute(&prepared,&input::at_time(1.),&options).unwrap(),Value::Text(vec![b'b';4096]));
+        assert_eq!(core_exec::execute(&prepared,&input::at_time(1.),&options).unwrap(),Value::Text(vec![b'b';4096].into()));
     }
 }
 

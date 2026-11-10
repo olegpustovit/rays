@@ -76,7 +76,7 @@ pub mod group_transfer {
             Spec { label: "Use rules", ..decl::spec("use_rules", decl::toggle_kind(), Value::Bool(false)) },
             Spec {
                 label: "Rules (owner, pattern, prefix)",
-                ..decl::spec("rules", rules_kind(), Value::Text(encode(&[])))
+                ..decl::spec("rules", rules_kind(), Value::Text(encode(&[]).into()))
             },
             Spec {
                 label: "Conflict",

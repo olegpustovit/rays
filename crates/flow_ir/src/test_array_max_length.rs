@@ -48,9 +48,9 @@ fn op_direct_and_literal_selectors() {
     assert_eq!(value("(array/max_length)"), Value::Int(m));
     assert_eq!(op::result_type(&op, &[]).unwrap(), Ty::Int);
     for (kind, limit) in limits() {
-        assert_eq!(direct(vec![("type".into(), Value::Text(kind.as_bytes().to_vec()))]).unwrap(), Value::Int(limit));
+        assert_eq!(direct(vec![("type".into(), Value::Text(kind.as_bytes().into()))]).unwrap(), Value::Int(limit));
         assert_eq!(value(&literal(kind)), Value::Int(limit));
-        assert_eq!(op::result_type(&op, &[("type".into(), Ty::Text, Some(param::Value::Text(kind.as_bytes().to_vec())))]).unwrap(), Ty::Int);
+        assert_eq!(op::result_type(&op, &[("type".into(), Ty::Text, Some(param::Value::Text(kind.as_bytes().into())))]).unwrap(), Ty::Int);
         let body = format!("(if (> t 0.) {} (int/sub {} 1))", literal(kind), literal(kind));
         let val = value(&body);
         let r = residual(&val);
@@ -71,14 +71,14 @@ fn op_direct_and_literal_selectors() {
             let guard = |count: i64| {
                 format!("(let* [maximum (int/sub {} {extra})] (if (int/le {count} maximum) \"ok\" (error \"E_CAPACITY\" \"count exceeds element capacity\")))", literal(kind))
             };
-            assert_eq!(value(&guard(maximum)), Value::Text(b"ok".to_vec()));
+            assert_eq!(value(&guard(maximum)), Value::Text(b"ok".as_slice().into()));
             match e::static_eval(&checked(&guard(maximum + 1))) {
                 Err(d) => assert!(d.code == "E_CAPACITY" && d.message == "count exceeds element capacity"),
                 Ok(_) => panic!("guard should fail"),
             }
         }
     }
-    failure("E_ARRAY_TYPE", direct(vec![("type".into(), Value::Text(b"unknown".to_vec()))]));
+    failure("E_ARRAY_TYPE", direct(vec![("type".into(), Value::Text(b"unknown".as_slice().into()))]));
     match op::result_type(&op, &[("type".into(), Ty::Text, None)]) {
         Err(d) => assert_eq!(d.code, "E_ARRAY_TYPE"),
         Ok(_) => panic!("expected E_ARRAY_TYPE"),

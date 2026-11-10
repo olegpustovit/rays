@@ -44,7 +44,7 @@ fn literal(t: &Term) -> Option<Value> {
             Literal::Float(f) => Some(Value::Float(f)),
             _ => None,
         },
-        Node::Text(id) => Some(Value::Text(t.arena().bytes(id).to_vec())),
+        Node::Text(id) => Some(Value::Text(t.arena().shared_bytes(id))),
         _ => None,
     }
 }
@@ -630,7 +630,7 @@ pub fn label_context(label: &str, graph: &Graph) -> (Graph, Vec<(String, String)
             None => {
                 let input = format!("$context{}", inputs.len());
                 let form = builder.import_form(&source.form());
-                let text = builder.push(None, &Ty::Text, form, Draft::Text(label.as_bytes().to_vec()));
+                let text = builder.push(None, &Ty::Text, form, Draft::Text(label.as_bytes().into()));
                 let mut args = args;
                 args.push((operators::context_label().to_owned(), text));
                 let path: Option<Vec<_>> = source.path().map(|ids| ids.iter().map(|&id| source.name(id).to_owned()).collect());

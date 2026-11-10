@@ -12,7 +12,7 @@ fn schema_ok(name: &str, fields: Vec<Field>) -> Schema {
 }
 
 fn text_value(value: &str) -> Value {
-    Value::Text(value.as_bytes().to_vec())
+    Value::Text(value.as_bytes().into())
 }
 
 fn float_field(name: &str, value: f64) -> Field {

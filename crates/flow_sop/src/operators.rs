@@ -28,7 +28,7 @@ fn constant(ty: Ty) -> Out {
     Arc::new(move |_| Ok(ty.clone()))
 }
 fn text(s: &str) -> Value {
-    Value::Text(s.as_bytes().to_vec())
+    Value::Text(s.as_bytes().into())
 }
 fn arg<'a>(args: &'a Args, name: &str) -> Option<&'a Value> {
     args.iter().find(|(key, _)| key == name).map(|(_, v)| v)
@@ -415,7 +415,7 @@ fn components() -> Op {
         choices: vec![("over".into(), strings(&["edges", "points"]))],
         check: Arc::new(|args| match arg(args, "over") {
             None => Ok(()),
-            Some(Value::Text(over)) if over.as_slice() == b"edges" || over.as_slice() == b"points" => Ok(()),
+            Some(Value::Text(over)) if over.as_ref() == b"edges" || over.as_ref() == b"points" => Ok(()),
             Some(_) => fail("E_COMPONENTS_OVER", "Components :over is edges or points."),
         }),
         body: record_body("sop/components", fields),
@@ -570,7 +570,7 @@ fn group_check(args: &Args) -> Result<(), Diagnostic> {
     }
     if let Some(target) = arg(args, "as_owner") {
         match target {
-            Value::Text(t) if t.as_slice() == b"point" => {}
+            Value::Text(t) if t.as_ref() == b"point" => {}
             _ => return fail("E_GROUP_TARGET", "Group promotion target is point."),
         }
     }

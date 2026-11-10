@@ -28,12 +28,12 @@ fn normalize_error(span: &Syntax, message: &str) -> Diagnostic {
 }
 
 fn evaluate(workspace: &Workspace, graph: &str, form: &Syntax, raw: &[u8]) -> Result<Vec<u8>, Diagnostic> {
-    let inputs = vec![(graph.to_owned(), vec![("raw_value".to_owned(), Value::Text(raw.to_vec()))])];
+    let inputs = vec![(graph.to_owned(), vec![("raw_value".to_owned(), Value::Text(raw.into()))])];
     let result = residual::handle(ResidualHandlers::default(), &mut || {
         host::static_with_requests(None, false, Some(&inputs), workspace)
     })?;
     match result.results.iter().find(|(name, _)| name == graph) {
-        Some((_, Value::Text(canonical))) if result.plan.nodes.is_empty() => Ok(canonical.clone()),
+        Some((_, Value::Text(canonical))) if result.plan.nodes.is_empty() => Ok(canonical.to_vec()),
         _ => Err(normalize_error(form, "An encoded normalizer must return concrete text without cooked effects.")),
     }
 }
@@ -87,7 +87,7 @@ fn normalize_node(workspace: &Workspace, node: &NodeDefinition) -> Result<NodeDe
         match (hook, &field.default) {
             (Some((_, normalize)), ParamValue::Text(raw)) => {
                 let canonical = normalize(raw)?;
-                let value = ParamValue::Text(canonical);
+                let value = ParamValue::Text(canonical.into());
                 fields.push(FieldView { default: value.clone(), current: value, ..field.clone() });
             }
             _ => fields.push(field.clone()),
@@ -145,7 +145,7 @@ fn walk_graph(hooks: &Hooks, graph: &Graph) -> Result<Graph, Diagnostic> {
                             let row = *builder.row(arg);
                             let ty = builder.type_by_id(row.ty).clone();
                             let path: Option<Vec<_>> = row.path.map(|id| builder.path_names(id).iter().map(|&id| builder.name(id).to_owned()).collect());
-                            builder.push(path.as_deref(), &ty, row.form, Draft::Text(text))
+                            builder.push(path.as_deref(), &ty, row.form, Draft::Text(text.into()))
                         }
                         Err(mut d) => {
                             let form = builder.row(arg).form;

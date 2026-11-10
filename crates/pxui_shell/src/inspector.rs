@@ -226,7 +226,7 @@ fn input(
             };
             let opts = ValueFieldOpts { placeholder, left: true, ..ValueFieldOpts::default() };
             let (text, _) = ui.value_field((x, y), w, 20.0, &opts, &|_| true, &key, &value);
-            if text == value { Vec::new() } else { vec![FlowChange::Edited(field.name.clone(), Value::Text(text.into_bytes()))] }
+            if text == value { Vec::new() } else { vec![FlowChange::Edited(field.name.clone(), Value::Text(text.into_bytes().into()))] }
         }
         (KindView::Choice(choices), current @ (Value::Choice(_) | Value::Int(_))) => {
             let boxed = ui.box_(&key, BoxOpts::default().flags(CLICKABLE | TAB_STOP | CLIP).at((x, y)).w(Size::Px(w)).h(Size::Px(20.0)));
@@ -459,7 +459,7 @@ fn color_row_1(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, field: &FieldView
             Vec::new()
         } else {
             match color::hex(&text) {
-                Ok(_) => vec![FlowChange::Edited(field.name.clone(), Value::Text(text.into_bytes()))],
+                Ok(_) => vec![FlowChange::Edited(field.name.clone(), Value::Text(text.into_bytes().into()))],
                 Err(_) => Vec::new(),
             }
         };

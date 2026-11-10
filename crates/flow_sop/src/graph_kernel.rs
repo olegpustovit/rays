@@ -168,8 +168,8 @@ fn shortest_paths(args: &[(String, Value)]) -> Result<(Vec<f64>, Vec<i64>, Vec<i
     let hops = flag("hops", args)?;
     let lowest = match args.named("ties") {
         None => false,
-        Some(Value::Text(t)) if t.as_slice() == b"first" => false,
-        Some(Value::Text(t)) if t.as_slice() == b"lowest" => true,
+        Some(Value::Text(t)) if t.as_ref() == b"first" => false,
+        Some(Value::Text(t)) if t.as_ref() == b"lowest" => true,
         Some(_) => return Err(refuse("E_GRAPH_OPTION", "Graph ties is first or lowest.")),
     };
     let target = match args.named("target") {
@@ -398,7 +398,7 @@ mod tests {
     use super::*;
 
     fn source(name: &str, component: &str, mut args: Vec<(String, Value)>) -> Value {
-        args.push(("component".to_owned(), Value::Text(component.as_bytes().to_vec())));
+        args.push(("component".to_owned(), Value::Text(component.as_bytes().into())));
         flow_syntax::value::source_value(name, flow_syntax::ty::Ty::Any, args)
     }
 

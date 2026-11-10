@@ -176,7 +176,7 @@ fn v3(spec: Spec, group: &'static str, component: i64) -> Spec {
     Spec { vec3: Some((group, component)), ..spec }
 }
 fn txt(name: &'static str, label: &'static str, folder: &'static str, default: &str) -> Spec {
-    Spec { label, folder, ..decl::spec(name, decl::text_kind(), Value::Text(default.as_bytes().to_vec())) }
+    Spec { label, folder, ..decl::spec(name, decl::text_kind(), Value::Text(default.as_bytes().into())) }
 }
 fn tog(name: &'static str, label: &'static str, folder: &'static str, default: bool) -> Spec {
     Spec { label, folder, ..decl::spec(name, decl::toggle_kind(), Value::Bool(default)) }

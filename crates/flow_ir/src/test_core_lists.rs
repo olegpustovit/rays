@@ -204,7 +204,7 @@ fn known_5001_geometry_map_filter_captures() {
             [(_, Value::Int(id))] => Ok(Value::Deferred(g.ty.clone(), *id)),
             _ => Err(ts_error(format!("Unexpected capture source: {}", g.name))),
         },
-        Value::Source(g) if g.name == "$core/operator" && g.ty == ty::geometry() && matches!(g.fields.first(), Some((n, Value::Text(t))) if n == "$name" && (t == b"nth" || t == b"first")) => {
+        Value::Source(g) if g.name == "$core/operator" && g.ty == ty::geometry() && matches!(g.fields.first(), Some((n, Value::Text(t))) if n == "$name" && (t.as_ref() == b"nth" || t.as_ref() == b"first")) => {
             let Some((_, Value::Text(text))) = g.fields.first() else { unreachable!("matched above") };
             let op = op::find(&[], &String::from_utf8_lossy(text), &context::host()).expect("collection op");
             (op.body)(&input::at_time(0.), &|_, _| panic!("Collection selector unexpectedly constructed a node"), &g.fields[..])

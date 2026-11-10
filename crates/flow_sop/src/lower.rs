@@ -331,7 +331,7 @@ fn material_args(kind: &str, args: Vec<(String, Value)>) -> Vec<(String, Value)>
             (name, Value::Struct(g)) if name == "material" && g.name == "material/standard" => {
                 let fields = &g.fields;
                 let field = |n: &str, default: Value| get(fields, n).cloned().unwrap_or(default);
-                out.push(("material".into(), field("name", Value::Text(Vec::new()))));
+                out.push(("material".into(), field("name", Value::Text(Vec::new().into()))));
                 out.push(("color".into(), field("color", Value::Vec3(1., 1., 1.))));
                 out.push(("roughness".into(), field("roughness", Value::Float(0.4))));
                 out.push(("emission".into(), field("emission", Value::Vec3(0., 0., 0.))));
@@ -3104,7 +3104,7 @@ impl HostRun {
         if !catalog && name == "sop/delete_attr" {
             // as its node cooks it: a one-call workspace would requalify the catalog
             let args = self.force_args(false, &args)?;
-            let owner = get(&args, "owner").cloned().unwrap_or(Value::Text(b"point".to_vec()));
+            let owner = get(&args, "owner").cloned().unwrap_or(Value::Text(b"point".as_slice().into()));
             return match (get(&args, "geometry"), get(&args, "attribute"), owner) {
                 (Some(Value::Deferred(actual, id)), Some(Value::Text(pattern)), Value::Text(owner)) if is_geometry_ty(actual) => {
                     let target = self.geometry_r(*id)?;
@@ -3383,7 +3383,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
             let (run, scope) = (run.clone(), scope.clone());
             move |value: &Value| -> R<Option<Value>> {
                 match value {
-                    Value::Source(g) if g.name == "$core/operator" && is_geometry_ty(&g.ty) && get(&g.fields, "$name") == Some(&Value::Text(b"sop/mesh".to_vec())) => {
+                    Value::Source(g) if g.name == "$core/operator" && is_geometry_ty(&g.ty) && get(&g.fields, "$name") == Some(&Value::Text(b"sop/mesh".as_slice().into())) => {
                         let (ty, args) = (&g.ty, &g.fields);
                         let points = match get(args, "points") {
                             Some(p) => scope_count(&**scope, p)?,
@@ -4092,7 +4092,7 @@ impl Lowerer {
             Kind::Curve => {
                 let mut dynamic: Vec<Dynamic> = Vec::new();
                 let encode = |points: &[(String, Value)]| -> R<Vec<(String, param::Value)>> {
-                    Ok(vec![(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&CookServices::curve_points(points)?).into_bytes()))])
+                    Ok(vec![(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&CookServices::curve_points(points)?).into_bytes().into()))])
                 };
                 let closed = match get(args, "closed") {
                     None => Vec::new(),
@@ -4108,7 +4108,7 @@ impl Lowerer {
                 changes.extend(filled);
                 match get(args, "points") {
                     Some(points) if E::is_live(points) => {
-                        dynamic.push((points.clone(), Arc::new(move |v: &Value| Ok(vec![(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&CookServices::curve_points(&[("points".to_owned(), v.clone())])?).into_bytes()))]))));
+                        dynamic.push((points.clone(), Arc::new(move |v: &Value| Ok(vec![(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&CookServices::curve_points(&[("points".to_owned(), v.clone())])?).into_bytes().into()))]))));
                     }
                     _ => changes.extend(encode(args)?),
                 }
@@ -5047,7 +5047,7 @@ pub fn field_calls(state: Option<&State>, live: &Frame, resolve: flow_ir::core_e
     let mut offset: i64 = 0;
     let mut out: Vec<FieldCall> = Vec::new();
     for node in &lowered.plan.nodes {
-        let args: Option<Vec<(String, Value)>> = if node.kind == E::card_kind() && get(&node.args, "kind") == Some(&Value::Text(b"sop/iso_surface".to_vec())) {
+        let args: Option<Vec<(String, Value)>> = if node.kind == E::card_kind() && get(&node.args, "kind") == Some(&Value::Text(b"sop/iso_surface".as_slice().into())) {
             match get(&node.args, "parameters") {
                 Some(Value::Record(parameters)) => Some(node.args.iter().chain(parameters.iter()).cloned().collect()),
                 _ => None,

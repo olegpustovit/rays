@@ -35,7 +35,7 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Bool(bool),
-    Text(Vec<u8>),
+    Text(Arc<[u8]>),
     Vec2(f64, f64),
     Vec3(f64, f64, f64),
     Vec4(f64, f64, f64, f64),
@@ -206,7 +206,7 @@ pub fn show_with(conc: &dyn Fn(&Value) -> Value, value: &Value) -> Vec<u8> {
         Value::Int(n) => n.to_string().into_bytes(),
         Value::Float(n) => fmt4(n).into_bytes(),
         Value::Bool(value) => if value { b"true".to_vec() } else { b"false".to_vec() },
-        Value::Text(text) => text,
+        Value::Text(text) => text.to_vec(),
         Value::Vec2(x, y) => format!("[{} {}]", fmt4(x), fmt4(y)).into_bytes(),
         Value::Vec3(x, y, z) => format!("[{} {} {}]", fmt4(x), fmt4(y), fmt4(z)).into_bytes(),
         Value::Vec4(x, y, z, w) => format!("[{} {} {} {}]", fmt4(x), fmt4(y), fmt4(z), fmt4(w)).into_bytes(),
@@ -489,7 +489,7 @@ pub fn array_get(value: &Value, index: i64) -> Result<Value, Diagnostic> {
     let index = index as usize;
     let value = match value {
         Value::Int_array(values) => Value::Int(values[index]),
-        Value::Text_array(values) => { let mut text = array_buffer(values[index].len())?; text.extend_from_slice(&values[index]); Value::Text(text) },
+        Value::Text_array(values) => { let mut text = array_buffer(values[index].len())?; text.extend_from_slice(&values[index]); Value::Text(text.into()) },
         Value::Floats(1, values) => Value::Float(values[index]),
         Value::Floats(2, values) => Value::Vec2(values[index * 2], values[index * 2 + 1]),
         Value::Floats(3, values) => Value::Vec3(values[index * 3], values[index * 3 + 1], values[index * 3 + 2]),
@@ -594,9 +594,9 @@ fn inherit_envelope(original: &Diagnostic, mut mapped: Diagnostic) -> Diagnostic
 }
 fn error_payload(diagnostic: &Diagnostic) -> Value {
     Value::Record(vec![
-        ("code".into(), Value::Text(diagnostic.code.as_bytes().to_vec())),
-        ("message".into(), Value::Text(diagnostic.message.as_bytes().to_vec())),
-        ("cause".into(), Value::List(Arc::new(diagnostic.cause.iter().map(|cause| Value::Text(cause.clone())).collect()))),
+        ("code".into(), Value::Text(diagnostic.code.as_bytes().into())),
+        ("message".into(), Value::Text(diagnostic.message.as_bytes().into())),
+        ("cause".into(), Value::List(Arc::new(diagnostic.cause.iter().map(|cause| Value::Text(cause.clone().into())).collect()))),
     ])
 }
 pub fn with_error(protected: &dyn Fn() -> Result<Value, Diagnostic>, map: &dyn Fn(Value) -> Result<Value, Diagnostic>) -> Result<Value, Diagnostic> {
@@ -616,13 +616,13 @@ pub fn with_error(protected: &dyn Fn() -> Result<Value, Diagnostic>, map: &dyn F
     let Value::Record(fields) = mapped else { return Err(malformed()); };
     if fields.len() != 3 { return Err(malformed()); }
     let Some(Value::Text(code)) = fields.iter().find(|(name, _)| name == "code").map(|(_, value)| value) else { return Err(malformed()); };
-    let Ok(code) = String::from_utf8(code.clone()) else { return Err(malformed()); };
+    let Ok(code) = String::from_utf8(code.to_vec()) else { return Err(malformed()); };
     let Some(Value::Text(message)) = fields.iter().find(|(name, _)| name == "message").map(|(_, value)| value) else { return Err(malformed()); };
-    let Ok(message) = String::from_utf8(message.clone()) else { return Err(malformed()); };
+    let Ok(message) = String::from_utf8(message.to_vec()) else { return Err(malformed()); };
     let Some(Value::List(causes)) = fields.iter().find(|(name, _)| name == "cause").map(|(_, value)| value) else { return Err(malformed()); };
     let cause = match causes.as_slice() {
         [] => None,
-        [Value::Text(cause)] => Some(cause.clone()),
+        [Value::Text(cause)] => Some(cause.to_vec()),
         _ => return Err(malformed()),
     };
     let mut result = original;
@@ -694,7 +694,7 @@ mod tests {
         assert_ne!(key_of(&|id| id.0, &packed), key_of(&|id| id.0, &Value::Floats(1, Arc::new(integers.iter().map(|n| *n as f64).collect()))));
         assert_eq!(array_init(&Ty::Int, 0, &|_| unreachable!()).unwrap(), Value::Int_array(Arc::new(vec![])));
         assert_eq!(array_init(&Ty::Text, 0, &|_| unreachable!()).unwrap(), Value::Text_array(Arc::new(TextArray::new())));
-        assert_eq!(array_init(&Ty::Text, 2, &|index| Value::Text(vec![0xff, index as u8])).unwrap(), Value::Text_array(Arc::new(vec![vec![0xff, 0], vec![0xff, 1]].into())));
+        assert_eq!(array_init(&Ty::Text, 2, &|index| Value::Text(vec![0xff, index as u8].into())).unwrap(), Value::Text_array(Arc::new(vec![vec![0xff, 0], vec![0xff, 1]].into())));
         assert_eq!(array_init(&Ty::Text, 1, &|_| Value::Int(0)).unwrap_err().code, "E_ARRAY_TYPE");
         for count in [-1, i64::MAX] { assert_eq!(array_init(&Ty::Int, count, &|_| unreachable!()).unwrap_err().code, "E_ARRAY_RANGE"); }
         for element in [Ty::Int, Ty::Float, Ty::Vec2, Ty::Vec3, Ty::Vec4, Ty::Text] {
@@ -728,16 +728,16 @@ mod tests {
         let array = Value::Text_array(texts.clone());
         assert_eq!(ty_of(&array), Ty::Array(Box::new(Ty::Text)));
         assert_eq!(array_length(&array), Ok(texts.len()));
-        for (index, text) in texts.iter().enumerate() { assert_eq!(array_get(&array, index as i64), Ok(Value::Text(text.to_vec()))); }
+        for (index, text) in texts.iter().enumerate() { assert_eq!(array_get(&array, index as i64), Ok(Value::Text(text.into()))); }
         assert_eq!(show_with(&|value| value.clone(), &array), "6 × text".as_bytes().to_vec());
         let bytes = (0_u8..=255).collect::<Vec<_>>();
-        let every_byte = Value::Text(bytes.clone());
+        let every_byte = Value::Text(bytes.clone().into());
         assert_eq!(show_with(&|value| value.clone(), &every_byte), bytes);
         let mut expected_key = b"s256:".to_vec();
         expected_key.extend(0_u8..=255);
         assert_eq!(key_of(&|id| id.0, &every_byte), expected_key);
         let byte_array = Value::Text_array(Arc::new(vec![(0_u8..=255).collect::<Vec<u8>>()].into()));
-        assert_eq!(array_get(&byte_array, 0), Ok(Value::Text((0_u8..=255).collect())));
+        assert_eq!(array_get(&byte_array, 0), Ok(Value::Text((0_u8..=255).collect::<std::sync::Arc<[u8]>>())));
         let mut expected_array_key = b"AT[256:".to_vec();
         expected_array_key.extend(0_u8..=255);
         expected_array_key.push(b']');
@@ -854,8 +854,8 @@ mod tests {
     fn error_mapping_preserves_provenance() {
         let original = fail("E_SOURCE", "original");
         let mapped = with_error(&|| Err(original.clone()), &|_| Ok(Value::Record(vec![
-            ("code".into(), Value::Text(b"E_MAPPED".to_vec())),
-            ("message".into(), Value::Text(b"mapped".to_vec())),
+            ("code".into(), Value::Text(b"E_MAPPED".as_slice().into())),
+            ("message".into(), Value::Text(b"mapped".as_slice().into())),
             ("cause".into(), Value::List(Arc::new(vec![]))),
         ]))).unwrap_err();
         assert_eq!(mapped.code, "E_MAPPED");

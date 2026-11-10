@@ -200,9 +200,9 @@ fn diagnostic_envelopes_are_lossless() {
     match V::with_error(&|| V::raise_diagnostic(original.clone()), &|_| {
         called.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Record(vec![
-            ("code".into(), Value::Text(b"E_NEW".to_vec())),
-            ("message".into(), Value::Text(b"new".to_vec())),
-            ("cause".into(), Value::List(Arc::new(vec![Value::Text(b"a".to_vec()), Value::Text(b"b".to_vec())]))),
+            ("code".into(), Value::Text(b"E_NEW".as_slice().into())),
+            ("message".into(), Value::Text(b"new".as_slice().into())),
+            ("cause".into(), Value::List(Arc::new(vec![Value::Text(b"a".as_slice().into()), Value::Text(b"b".as_slice().into())]))),
         ]))
     }) {
         Err(actual) => assert!(actual.code == "E_DIAGNOSTIC_MAP" && actual.trace == original.trace && actual.hints == original.hints && actual.cause == original.cause),

@@ -104,7 +104,7 @@ fn attr_names(owner: Owner, pattern: &str, input: &geo::T) -> Result<Value, Diag
 }
 
 fn text(s: &str) -> Value {
-    Value::Text(s.as_bytes().to_vec())
+    Value::Text(s.as_bytes().into())
 }
 
 fn add(owner: Owner, name: &str, value: f64, geometry: &geo::T) -> geo::T {

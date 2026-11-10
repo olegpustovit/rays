@@ -28,7 +28,7 @@ fn text(value: &Value) -> String {
 }
 
 fn text_value(value: &str) -> Value {
-    Value::Text(value.as_bytes().to_vec())
+    Value::Text(value.as_bytes().into())
 }
 
 fn int(value: &Value) -> i64 {
@@ -1726,7 +1726,7 @@ mod tests {
             &n,
             &[
                 ("use_names".to_owned(), Value::Bool(true)),
-                ("names".to_owned(), Value::Text(table)),
+                ("names".to_owned(), Value::Text(table.into())),
             ],
         )
         .err()

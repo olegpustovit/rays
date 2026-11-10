@@ -302,7 +302,7 @@ fn parameter(
             let value = integer(default_form)?; bounded(value as f64)?;
             (KindView::Integer(param::IntRange { soft_min: lo, soft_max: hi, hard_min, hard_max }), Value::Int(value))
         }
-        ("text" | "encoded" | "ramp", Ty::Text) => (KindView::Text, Value::Text(byte_text(default_form)?)),
+        ("text" | "encoded" | "ramp", Ty::Text) => (KindView::Text, Value::Text(byte_text(default_form)?.into())),
         ("choice", Ty::Text) => {
             let value = text(default_form)?;
             if !choices.contains(&value) { return Err(bad(default_form, "Default is not one of the choices.")); }
@@ -456,7 +456,7 @@ mod tests {
         let source = r#"(defnode sop/byte_text [(geo : geometry) (caption : text "\255")] geo)"#;
         let forms = syntax::parse(source).expect("valid syntax");
         let node = parse(&forms[0]).expect("valid defnode");
-        assert_eq!(node.fields[0].default, Value::Text(vec![255]));
+        assert_eq!(node.fields[0].default, Value::Text(vec![255].into()));
     }
 }
 

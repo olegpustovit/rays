@@ -55,7 +55,7 @@ fn literal(form: &S) -> Option<Lit> {
             (None, Some(n)) if n.is_finite() => Some((Ty::Float, E::Float(n))),
             _ => None,
         },
-        Node::Str(text) => Some((Ty::Text, E::Text(form.bytes(*text).to_vec()))),
+        Node::Str(text) => Some((Ty::Text, E::Text(form.shared_bytes(*text)))),
         Node::Sym(text) if form.name(*text) == "true" || form.name(*text) == "false" => {
             Some((Ty::Bool, E::Bool(form.name(*text) == "true")))
         }

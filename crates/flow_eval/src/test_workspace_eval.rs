@@ -36,7 +36,7 @@ pub fn is(src: &str, want: Value) {
     assert!(same(&got, &want), "{src}: got {}, want {}", String::from_utf8_lossy(&show(&got)), String::from_utf8_lossy(&show(&want)));
 }
 pub fn ints(l: &[i64]) -> Value { Value::List(Arc::new(l.iter().map(|n| Value::Int(*n)).collect())) }
-pub fn t(s: &str) -> Value { Value::Text(s.as_bytes().to_vec()) }
+pub fn t(s: &str) -> Value { Value::Text(s.as_bytes().into()) }
 
 /// A run-time error: the code, and text in the message.
 pub fn err(src: &str, code: &str, text: &str) {
@@ -121,7 +121,7 @@ fn nested_data_and_lazy_selection() {
                 let label = fields.iter().find(|(n, _)| n == "label").unwrap().1.clone();
                 let rows = fields.iter().find(|(n, _)| n == "rows").unwrap().1.clone();
                 match (label, inner(live, node, &[("rows".to_owned(), rows)])?) {
-                    (Value::Text(mut l), Value::Text(table)) => { l.extend(table); Ok(Value::Text(l)) }
+                    (Value::Text(l), Value::Text(table)) => { let mut output = l.to_vec(); output.extend_from_slice(&table); Ok(Value::Text(output.into())) }
                     _ => panic!(),
                 }
             }
@@ -500,7 +500,7 @@ fn d3_nonfinite_and_panel_checks() {
 
 #[test]
 fn c2_str_formatting() {
-    let s = |src: &str| match bound(&value(&format!("(let* [z (str {src})] 1)")), "z") { Value::Text(s) => String::from_utf8(s).unwrap(), _ => panic!("not text") };
+    let s = |src: &str| match bound(&value(&format!("(let* [z (str {src})] 1)")), "z") { Value::Text(s) => String::from_utf8(s.to_vec()).unwrap(), _ => panic!("not text") };
     assert!(s("3") == "3" && s("-3") == "-3" && s("2.0") == "2" && s("100.0") == "100");
     assert!(s("0.1") == "0.1" && s("0.30000000000000004") == "0.3" && s("1.23456") == "1.2346");
     for (x, want) in [("0.03125", "0.0313"), ("-0.03125", "-0.0313"), ("0.00005", "0.0001"), ("0.00015", "0.0001"), ("1.00005", "1.0001"), ("0.09375", "0.0938"), ("0.15625", "0.1563"), ("2.00005", "2"), ("0.00035", "0.0003"), ("0.000125", "0.0001"), ("123456789.123456", "123456789.1235")] {

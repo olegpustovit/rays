@@ -66,7 +66,7 @@ fn equal_result(a: &Result<Value, Diagnostic>, b: &Result<Value, Diagnostic>) ->
 fn concrete_values_skip_resolver_and_state() {
     let value = Value::Record(vec![
         ("values".to_owned(), Value::Int_array(Arc::new(vec![1, 0, 1]))),
-        ("nested".to_owned(), Value::List(Arc::new(vec![Value::Float(-0.0), Value::Text("raw\0é".as_bytes().to_vec())]))),
+        ("nested".to_owned(), Value::List(Arc::new(vec![Value::Float(-0.0), Value::Text("raw\0é".as_bytes().into())]))),
     ]);
     for reference in [false, true] {
         let ticks = Arc::new(AtomicI64::new(0));

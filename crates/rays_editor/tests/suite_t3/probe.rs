@@ -323,7 +323,7 @@ pub fn skips() {
         match rg.plan_node(None, &result, &[k]) {
             Some(id) => {
                 let n = &plan.nodes[id as usize];
-                check(n.kind == flow_eval::card_kind() && n.args.iter().any(|(name, value)| name == "kind" && value == &Value::Text(b"sop/box".to_vec())) && n.iter == vec![k] && n.site == result, &format!("a card names its call at its own tuple: {} {:?} {:?}", n.kind, n.iter, n.site));
+                check(n.kind == flow_eval::card_kind() && n.args.iter().any(|(name, value)| name == "kind" && value == &Value::Text(b"sop/box".as_slice().into())) && n.iter == vec![k] && n.site == result, &format!("a card names its call at its own tuple: {} {:?} {:?}", n.kind, n.iter, n.site));
             }
             None => fail("an iteration that ran has no plan node"),
         }

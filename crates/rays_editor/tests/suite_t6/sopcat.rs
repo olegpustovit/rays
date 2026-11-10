@@ -27,7 +27,7 @@ fn diag(d: &rays_diagnostic::Diagnostic) -> String {
 }
 
 fn text(s: &str) -> Value {
-    Value::Text(s.as_bytes().to_vec())
+    Value::Text(s.as_bytes().into())
 }
 
 fn choice(s: &str) -> Value {
@@ -391,13 +391,13 @@ fn perturbed(view: &FieldView) -> Option<Value> {
             [v + 0.25, v - 0.25, (r.soft_min + r.soft_max) / 2., r.soft_min, r.soft_max].into_iter().find(|c| c != v && ok(*c)).map(Value::Float)
         }
         (KindView::Text, Value::Text(v)) => {
-            let mut t = v.clone();
+            let mut t = v.to_vec();
             if t.is_empty() {
                 t = b"p".to_vec();
             } else {
                 t.push(b'p');
             }
-            Some(Value::Text(t))
+            Some(Value::Text(t.into()))
         }
         (KindView::Choice(options), Value::Choice(v)) => options.iter().find(|o| *o != v).map(|o| Value::Choice(o.clone())),
         (KindView::Choice(options), Value::Int(v)) => [v + 1, v - 1, 0].into_iter().find(|c| c != v && *c >= 0 && (*c as usize) < options.len()).map(Value::Int),

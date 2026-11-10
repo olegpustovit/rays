@@ -188,7 +188,7 @@ fn args(p: &[i64], v: &[i64], prim: &[i64], offsets: &[i64], values: &[i64], pol
         ("points".into(), ints(p)),
         ("vertices".into(), ints(v)),
         ("primitives".into(), ints(prim)),
-        ("positions".into(), Value::Text(policy.as_bytes().to_vec())),
+        ("positions".into(), Value::Text(policy.as_bytes().into())),
         ("edge_map".into(), Value::Record(vec![("offsets".into(), ints(offsets)), ("values".into(), ints(values))])),
     ]
 }
@@ -425,7 +425,7 @@ fn malformed_arguments_get_typed_codes_and_cancellation_is_honoured() {
     let valid = args(&[0, 1, 2], &[0, 1, 2], &[0], &[0, 1, 2, 3], &[0, 1, 2], "target");
     let ints = |a: &[i64]| Value::Int_array(Arc::new(a.to_vec()));
     for (key, value, code) in [
-        ("positions", Value::Text(b"other".to_vec()), "E_REMAP_POLICY"),
+        ("positions", Value::Text(b"other".as_slice().into()), "E_REMAP_POLICY"),
         ("points", ints(&[]), "E_REMAP_COUNT"),
         ("points", ints(&[-2, 1, 2]), "E_REMAP_INDEX"),
         ("vertices", ints(&[0, 1, 9]), "E_REMAP_INDEX"),
@@ -666,7 +666,7 @@ fn changing_any_semantic_input_misses_the_cache() {
     let variants: Vec<(geo::T, geo::T, Args)> = vec![
         (src.clone(), dst.clone(), replace(&base, "points", ints(&[1, 2, 0]))),
         (src.clone(), dst.clone(), replace(&base, "vertices", ints(&[1, 2, 0]))),
-        (src.clone(), dst.clone(), replace(&base, "positions", Value::Text(b"mapped".to_vec()))),
+        (src.clone(), dst.clone(), replace(&base, "positions", Value::Text(b"mapped".as_slice().into()))),
         (src.clone(), dst.clone(), replace(&base, "edge_map", Value::Record(vec![("offsets".into(), ints(&[0, 1, 2, 3])), ("values".into(), ints(&[2, 1, 0]))]))),
         (src.clone(), target_p, base.clone()),
         (src.clone(), target_topology, base.clone()),
@@ -791,7 +791,7 @@ fn mix_args(pc: &Mix, vc: &Mix, rc: &Mix, policy: &str, offsets: &[i64], ancesto
         ("ra".into(), ints(&rc.0)),
         ("rb".into(), ints(&rc.1)),
         ("rt".into(), floats(&rc.2)),
-        ("positions".into(), Value::Text(policy.as_bytes().to_vec())),
+        ("positions".into(), Value::Text(policy.as_bytes().into())),
         ("edge_map".into(), Value::Record(vec![("offsets".into(), ints(offsets)), ("values".into(), ints(ancestors))])),
     ]
 }

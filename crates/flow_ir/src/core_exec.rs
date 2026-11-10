@@ -475,7 +475,7 @@ fn arg(args: &[(String, i64)], key: &str) -> Option<i64> { args.iter().find(|(n,
 fn arg_names(args: &[(String, i64)], names: &[&str]) -> bool {
     args.len() == names.len() && args.iter().zip(names).all(|((n, _), m)| n == m)
 }
-fn text_value(s: &str) -> Value { Value::Text(s.as_bytes().to_vec()) }
+fn text_value(s: &str) -> Value { Value::Text(s.as_bytes().into()) }
 
 fn rows_parallel() -> Box<dyn Fn(i64, i64, &(dyn Fn(i64) + Send + Sync)) + Send + Sync> {
     Box::new(|start, finish, work| {
@@ -508,7 +508,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String,
             Arc::new(move |st| v::coerce_to(&ty, &st.values[ix(first)]))
         }
         Primitive::Truthy => Arc::new(move |st| Ok(Value::Bool(v::truthy(&st.values[ix(first)])?))),
-        Primitive::Show => Arc::new(move |st| Ok(Value::Text(v::show_with(&|x| x.clone(), &st.values[ix(first)])))),
+        Primitive::Show => Arc::new(move |st| Ok(Value::Text(v::show_with(&|x| x.clone(), &st.values[ix(first)]).into()))),
         Primitive::Text_concat => {
             let args = args_v.clone();
             Arc::new(move |st| {
@@ -519,7 +519,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String,
                         _ => return Err(v::fail("E_TYPE", "Expected text.")),
                     }
                 }
-                Ok(Value::Text(out))
+                Ok(Value::Text(out.into()))
             })
         }
         Primitive::Fail(code, message) => {
@@ -594,9 +594,9 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String,
                 let element = match integer {
                     None => Ty::Float,
                     Some(n) => match &st.values[ix(n)] {
-                        Value::Text(t) if t == b"int" => Ty::Int,
-                        Value::Text(t) if t == b"float" => Ty::Float,
-                        Value::Text(t) if t == b"text" => Ty::Text,
+                        Value::Text(t) if t.as_ref() == b"int" => Ty::Int,
+                        Value::Text(t) if t.as_ref() == b"float" => Ty::Float,
+                        Value::Text(t) if t.as_ref() == b"text" => Ty::Text,
                         _ => return Err(v::fail("E_ARRAY_TYPE", "Core array type is int, float or text.")),
                     },
                 };
@@ -622,7 +622,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String,
                         if element == Ty::Int {
                             v::array_init(&Ty::Int, count, &|_| Value::Int(0))
                         } else if element == Ty::Text {
-                            v::array_init(&Ty::Text, count, &|_| Value::Text(Vec::new()))
+                            v::array_init(&Ty::Text, count, &|_| Value::Text(Vec::new().into()))
                         } else {
                             if count < 0 || count > op::MAX_WOSIZE as i64 / width {
                                 return Err(v::fail("E_ARRAY_RANGE", "Array length is outside native storage bounds."));

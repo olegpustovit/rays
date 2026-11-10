@@ -530,7 +530,7 @@ fn live_curve_points_stay_typed_and_match_the_authored_curve() {
     inf.insert(points_port.clone(), Value::List(Arc::new(vec![Value::Vec3(f64::INFINITY, 0.0, 0.0)])));
     let nonfinite = resolve(&with(inf).unwrap()).unwrap();
     let static_node = edit::find(&expected_graph.network.geometry, expected_graph.root.unwrap()).unwrap();
-    let (static_node, _) = node::apply_parameters(&static_node, &[(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&[(f64::INFINITY, 0.0, 0.0)]).into_bytes()))]).unwrap();
+    let (static_node, _) = node::apply_parameters(&static_node, &[(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&[(f64::INFINITY, 0.0, 0.0)]).into_bytes().into()))]).unwrap();
     let static_geometry = edit::replace_node(&static_node, &expected_graph.network.geometry).unwrap();
     match (cook_result(&nonfinite.geometry, curve_id, 0.5), cook_result(&static_geometry, expected_graph.root.unwrap(), 0.5)) {
         (Err(actual), Err(expected)) => assert!(actual.code == expected.code && actual.message == expected.message, "nonfinite typed curve refusal differs from authored curve"),

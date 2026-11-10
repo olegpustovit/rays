@@ -215,7 +215,7 @@ fn add_span(mut d: Diagnostic, term: &Term) -> Diagnostic {
     d
 }
 fn fail_frame(frame: &Frame) -> Result<(), Diagnostic> { input::validate(frame).map_err(|message| error("E_FRAME", &message)) }
-fn text(s: &str) -> Value { Value::Text(s.as_bytes().to_vec()) }
+fn text(s: &str) -> Value { Value::Text(s.as_bytes().into()) }
 fn path_text(path: &[String]) -> String { path.join("/") }
 fn int_value(v: &Value) -> Result<i64, Diagnostic> { value::int_of(v) }
 fn num(v: &Value) -> Result<f64, Diagnostic> { value::num(v) }
@@ -722,7 +722,7 @@ fn literal_case(x: &flow_syntax::syntax::Syntax) -> Result<Value, Diagnostic> {
             if !s.contains('.') && !s.contains('e') && !s.contains('E') { if let Ok(n) = s.parse::<i64>() { return Ok(Value::Int(n)); } }
             s.parse::<f64>().map(Value::Float).map_err(|_| error("E_CASE", "Invalid numeric case literal."))
         }
-        S::Str(id) => Ok(Value::Text(x.bytes(id).to_vec())),
+        S::Str(id) => Ok(Value::Text(x.shared_bytes(id))),
         S::Sym(id) => Ok(Value::Bool(x.name(id) == "true")),
         _ => eval_error("E_CASE", "case matches literal numbers, text or booleans."),
     }
@@ -1485,7 +1485,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
             Literal::Int(n) => Ok(Value::Int(n)), Literal::Float(n) => Ok(Value::Float(n)), Literal::Bool(v) => Ok(Value::Bool(v)),
             _ => eval_error("E_TYPE", "Unexpected literal."),
         },
-        TermNode::Text(id) => Ok(Value::Text(arena.bytes(id).to_vec())),
+        TermNode::Text(id) => Ok(Value::Text(arena.shared_bytes(id))),
         TermNode::Nil => Ok(Value::No_geo),
         TermNode::Time => if let Some(frame) = &a.time { Ok(Value::Float(frame.t)) } else { need_time() },
         TermNode::Vec(range) => (|| -> Result<Value, Diagnostic> {
@@ -1766,7 +1766,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 let value = concrete_data(a, value)?;
                 bytes.extend(value::show_with(&|value| value.clone(), &value));
             }
-            Ok(Value::Text(bytes))
+            Ok(Value::Text(bytes.into()))
         })(),
         TermNode::ListOp(id) => (|| -> Result<Value, Diagnostic> {
             let terms = arena.term_ids(arena.list_op(id).args);
@@ -1792,9 +1792,9 @@ fn diagnostic_effect(term: &Term) -> bool {
 }
 fn diagnostic_payload(diagnostic: &Diagnostic) -> Value {
     Value::Record(vec![
-        ("code".into(), Value::Text(diagnostic.code.as_bytes().to_vec())),
-        ("message".into(), Value::Text(diagnostic.message.as_bytes().to_vec())),
-        ("cause".into(), Value::List(Arc::new(diagnostic.cause.iter().map(|cause| Value::Text(cause.clone())).collect()))),
+        ("code".into(), Value::Text(diagnostic.code.as_bytes().into())),
+        ("message".into(), Value::Text(diagnostic.message.as_bytes().into())),
+        ("cause".into(), Value::List(Arc::new(diagnostic.cause.iter().map(|cause| Value::Text(cause.clone().into())).collect()))),
     ])
 }
 fn is_cancelled(diagnostic: &Diagnostic) -> bool { diagnostic.code == "cancelled" || diagnostic.code == "E_CANCELLED" }
@@ -3723,6 +3723,37 @@ pub fn live_kernels_get() -> Arc<dyn Fn(&[Node]) -> bool + Send + Sync> { LIVE_K
 
 #[cfg(test)]
 mod tests {
+#[test]
+fn text_clones_and_parameter_reads_share_binary_payloads() {
+    let bytes: Vec<u8> = (0..=255).cycle().take(65_536).collect();
+    let parameter = param::Value::Text(bytes.into());
+    let value = match &parameter {
+        param::Value::Text(bytes) => Value::Text(bytes.clone()),
+        _ => unreachable!(),
+    };
+    let mut copies = Vec::with_capacity(2048);
+    mem_sys::local_reset();
+    let started = std::time::Instant::now();
+    for _ in 0..1024 {
+        copies.push(std::hint::black_box(value.clone()));
+        copies.push(match &parameter {
+            param::Value::Text(bytes) => Value::Text(bytes.clone()),
+            _ => unreachable!(),
+        });
+    }
+    let elapsed = started.elapsed();
+    let allocations = mem_sys::local_alloc_count();
+    eprintln!("1024 binary Text clones + Param conversions: {allocations} allocations, {elapsed:?}");
+    assert_eq!(allocations, 0);
+    assert_eq!(std::mem::size_of::<Value>(), 40);
+    let Value::Text(source) = &value else { unreachable!() };
+    for copy in &copies {
+        let Value::Text(bytes) = copy else { unreachable!() };
+        assert_eq!(bytes.as_ptr(), source.as_ptr());
+        assert_eq!(&bytes[..], &source[..]);
+    }
+}
+
     use super::*;
 
     #[test]
@@ -3986,7 +4017,7 @@ mod tests {
     fn formatting_preserves_shared_byte_value_output() {
         assert_eq!(show(&Value::Int(7)), b"7");
         assert_eq!(show(&Value::Bool(true)), b"true");
-        assert_eq!(show(&Value::Text(vec![0xff])), vec![0xff]);
+        assert_eq!(show(&Value::Text(vec![0xff].into())), vec![0xff]);
     }
     #[test]
     fn checked_workspace_if_runs_only_its_selected_branch() {
@@ -4239,7 +4270,7 @@ impl Compiler {
         let arena = t.arena();
         Some(match t.node {
             TermNode::Lit(id) => Kind::Lit(match arena.literal(id) { Literal::Int(n) => Value::Int(n), Literal::Float(n) => Value::Float(n), Literal::Bool(v) => Value::Bool(v), _ => return None }),
-            TermNode::Text(id) => Kind::Lit(Value::Text(arena.bytes(id).to_vec())),
+            TermNode::Text(id) => Kind::Lit(Value::Text(arena.shared_bytes(id))),
             TermNode::Nil => Kind::Lit(Value::No_geo),
             TermNode::RefBinding(id) => {
                 let binding = arena.ref_binding(id);

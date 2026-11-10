@@ -32,7 +32,7 @@ impl Storage {
         let mut pending = vec![value];
         while let Some(value) = pending.pop() {
             match value {
-                Value::Text(bytes) => { self.buffer(bytes); }
+                Value::Text(bytes) => { self.heap.allocation(bytes.as_ptr(), bytes.len() + 2 * std::mem::size_of::<usize>()); }
                 Value::Int_array(values) => { if self.shared(values) { self.buffer(values); } }
                 Value::Floats(1..=4, values) => {
                     if self.shared(values) { self.buffer(values); }

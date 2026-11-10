@@ -114,7 +114,7 @@ fn constant_arrays() {
     }
     let scope = flow_gpu::host::resident_scope(true, true, &host);
     assert!(scope.executor().fill(&Ty::Array(Box::new(Ty::Float)), 1, &Value::Float(f64::MAX)).unwrap().is_none());
-    assert!(scope.executor().fill(&Ty::Array(Box::new(Ty::Text)), 1, &Value::Text(Vec::new())).unwrap().is_none());
+    assert!(scope.executor().fill(&Ty::Array(Box::new(Ty::Text)), 1, &Value::Text(Vec::new().into())).unwrap().is_none());
     scope.executor().close();
     flow_gpu::host::close(&host);
 }

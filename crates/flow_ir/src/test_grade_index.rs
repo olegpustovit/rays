@@ -152,7 +152,7 @@ fn bad_inputs() {
     for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         reject("E_NONFINITE", grade(floats(&[0., x]), false));
     }
-    for bad in [Value::Floats(3, Arc::new(vec![0., 0., 0.])), Value::Int(1), Value::Text(b"a".to_vec()), Value::List(Arc::new(vec![Value::Int(1)]))] {
+    for bad in [Value::Floats(3, Arc::new(vec![0., 0., 0.])), Value::Int(1), Value::Text(b"a".as_slice().into()), Value::List(Arc::new(vec![Value::Int(1)]))] {
         reject("E_ARRAY_TYPE", grade(bad, false));
     }
     for (a, b) in [(ints(&[]), texts(&[])), (floats(&[]), floats(&[])), (Value::Int(1), ints(&[]))] {

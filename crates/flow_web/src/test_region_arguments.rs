@@ -264,7 +264,7 @@ fn unused_composite_arguments_validate_every_leaf() {
     let mut source = script();
     for value in [
         leaves(),
-        list(vec![Value::Text(b"fallback".to_vec()), Value::Int(9007199254740993), Value::Float(0.5)]),
+        list(vec![Value::Text(b"fallback".as_slice().into()), Value::Int(9007199254740993), Value::Float(0.5)]),
         Value::Record(vec![("leaves".into(), leaves()), ("large".into(), Value::Int((1i64 << 62) - 1))]),
         list(vec![int_array()]), record(list(vec![int_array()])),
         list(vec![Value::Int(9007199254740993), Value::Float(f64::NAN)]),
@@ -288,11 +288,11 @@ fn malformed_nested_integer_and_packed_layouts() {
     let mut source = script();
     for (value, mutation) in [
         (leaves(), "args.at(-1)[0]=1n<<63n"),
-        (list(vec![Value::Text(b"fallback".to_vec()), Value::Int(9007199254740993), Value::Float(0.5)]), "args.at(-1)[1]=-(1n<<63n)-1n"),
+        (list(vec![Value::Text(b"fallback".as_slice().into()), Value::Int(9007199254740993), Value::Float(0.5)]), "args.at(-1)[1]=-(1n<<63n)-1n"),
         (record(leaves()), "args.at(-1).get('leaves')[0]=1n<<63n"),
         (list(vec![int_array()]), "args.at(-1)[0]=new p.PArray(3,BigInt64Array.of(1n,2n,3n))"),
         (record(list(vec![int_array()])), "args.at(-1).get('leaves')[0]=new p.PArray(3,BigInt64Array.of(1n,2n,3n))"),
-        (list(vec![Value::Text(b"fallback".to_vec()), int_array()]), "args.at(-1)[1]=new p.PArray(5,Float64Array.of(1))"),
+        (list(vec![Value::Text(b"fallback".as_slice().into()), int_array()]), "args.at(-1)[1]=new p.PArray(5,Float64Array.of(1))"),
     ] { malformed_program(&mut source, &unused(value, original.clone()), mutation, 32766, "E_CORE_ARGUMENT", STORAGE); }
     finish(source);
 }

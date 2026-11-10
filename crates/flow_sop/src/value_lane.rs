@@ -55,7 +55,7 @@ struct Plan {
 pub struct Resolved {
     pub geometry: edit_graph::T,
     pub applied: BTreeMap<Port, PortValue>,
-    pub applied_text: BTreeMap<Port, Vec<u8>>,
+    pub applied_text: BTreeMap<Port, Arc<[u8]>>,
     /// Live curve points remain a typed array and are not text-encoded.
     pub applied_points: BTreeMap<Port, Vec<(f64, f64, f64)>>,
     pub time_dependent: bool,
@@ -195,7 +195,7 @@ fn live_port_value(value: &Value) -> Result<PortValue, Diagnostic> {
 }
 
 /// Live text parameters. Curve points stay on their typed path below.
-fn live_text(parameter: &Parameter, value: Value) -> Result<Vec<u8>, Diagnostic> {
+fn live_text(parameter: &Parameter, value: Value) -> Result<Arc<[u8]>, Diagnostic> {
     match value {
         Value::Text(text) => Ok(text),
         _ => Err(live_error(&format!("Live value does not fit {}", parameter.path))),
@@ -319,7 +319,7 @@ fn compute(
         }
         geometry = apply_geometry(&geometry, &target.port, &changes)?;
     }
-    let mut applied_text: BTreeMap<Port, Vec<u8>> = BTreeMap::new();
+    let mut applied_text: BTreeMap<Port, Arc<[u8]>> = BTreeMap::new();
     let mut applied_points: BTreeMap<Port, Vec<(f64, f64, f64)>> = BTreeMap::new();
     for late in &plan.late {
         match late {

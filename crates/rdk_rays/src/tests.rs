@@ -185,7 +185,7 @@ fn field(name: &str, current: Value) -> FieldView {
 }
 
 fn explosion_of(amount: f64, scale_x: f64, noise: Option<(f64, f64, i64)>) -> Option<Explosion> {
-    let mut fields = vec![field("amount", Value::Float(amount)), field("scale_x", Value::Float(scale_x)), field("piece_attribute", Value::Text(b"class".to_vec()))];
+    let mut fields = vec![field("amount", Value::Float(amount)), field("scale_x", Value::Float(scale_x)), field("piece_attribute", Value::Text(b"class".as_slice().into()))];
     if let Some((a, f, s)) = noise {
         fields.push(field("noise_amount", Value::Float(a)));
         fields.push(field("noise_frequency", Value::Float(f)));
@@ -316,7 +316,7 @@ fn geometry_view_keeps_opaque_bytes_and_validates_material_identifiers() {
     let paths = |path| geometry::with_attribute(attribute::create_owned("shop_materialpath", Owner::Primitive, Storage::Text(std::sync::Arc::new(vec![Vec::new(), path].into()))).unwrap(), &g).unwrap();
     assert_eq!(geometry_view::cast_material(surface.as_ref(), &paths("猫".as_bytes().to_vec()), origin, direction).unwrap().1, Some("猫".to_owned()));
     assert!(geometry_view::cast_material(surface.as_ref(), &paths(bytes), origin, direction).is_none());
-    let fields = vec![field("amount", Value::Float(1.0)), field("piece_attribute", Value::Text(vec![255]))];
+    let fields = vec![field("amount", Value::Float(1.0)), field("piece_attribute", Value::Text(vec![255].into()))];
     assert!(packed_pieces::explosion("exploded_view", &fields).is_none());
 }
 

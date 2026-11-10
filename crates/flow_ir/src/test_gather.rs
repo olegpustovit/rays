@@ -427,7 +427,7 @@ fn one_lane_copies_constants_and_uniforms() {
     let cases: Vec<(Ty, Value, String, Value)> = vec![
         (Ty::Int, ints(&[MAX_INT]), MIN_INT.to_string(), Value::Int(9007199254740993)),
         (Ty::Float, Value::Floats(1, Arc::new(vec![f64::from_bits(1)])), "-0.0".into(), Value::Float(-0.)),
-        (Ty::Text, texts(&[b"\xff\0"]), "\"constant\"".into(), Value::Text(b"\x80\0uniform".to_vec())),
+        (Ty::Text, texts(&[b"\xff\0"]), "\"constant\"".into(), Value::Text(b"\x80\0uniform".as_slice().into())),
     ];
     let thread = std::thread::current().id();
     for (ty, table, constant, scalar) in cases {
@@ -512,7 +512,7 @@ fn malformed_public_region_input_is_checked_when_selected() {
                 sources: Some(vec![(rid, Arc::new(term.clone()))]),
                 widths: Some(vec![1]),
                 uniforms: Some(vec![]),
-                code: Some(vec![Instruction::Const(if selected { 1. } else { 0. }), Instruction::Guarded(vec![(0, true)], Box::new(Instruction::Int_input(0))), Instruction::Text_const(b"safe\xff\0".to_vec())]),
+                code: Some(vec![Instruction::Const(if selected { 1. } else { 0. }), Instruction::Guarded(vec![(0, true)], Box::new(Instruction::Int_input(0))), Instruction::Text_const(b"safe\xff\0".as_slice().into())]),
                 outputs: Some(vec![vec![2]]),
                 count: Some(Some(count as i64)),
                 ..Default::default()
@@ -799,7 +799,7 @@ fn text_identity_uniform_and_failures() {
         resolver(move |_| {
             assert_eq!(std::thread::current().id(), thread);
             calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Value::Text(three.clone()))
+            Ok(Value::Text(three.clone().into()))
         })
     };
     assert_eq!(ok(force_r(&pk(&uniform), &live, &text_resolve)), Value::Text_array(Arc::new(vec![three.clone(); 2049].into())));
@@ -968,7 +968,7 @@ fn list_tables_exact_widths_and_range_guards() {
         assert_eq!(actual.as_ref().err().expect("range error").code, "E_LIST_RANGE");
         same_error(&packed_force(&pk(&value), &live, false, None), &force_reference(&value, &live));
     }
-    for table in [Value::List(Arc::new(vec![])), Value::List(Arc::new(vec![Value::Int(1), Value::Text(b"mixed".to_vec())]))] {
+    for table in [Value::List(Arc::new(vec![])), Value::List(Arc::new(vec![Value::Int(1), Value::Text(b"mixed".as_slice().into())]))] {
         let value = instantiate(Some(&table), &list_int, "(fn [(index : int)] (nth data index))", vec![0]);
         match compile_region(residual(&value), true, None) {
             Err(ds) if ds.len() == 1 => assert_eq!(ds[0].code, "E_PACKED_CAPTURE"),
