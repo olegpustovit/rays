@@ -32,12 +32,7 @@ extern "C" int32_t rays_metal_sampler_create(MetalHandle *device_handle,
     const char **message) {
   if (message) *message = nullptr;
   if (output) *output = nullptr;
-  if (s == nullptr || output == nullptr || s->min_filter < 0 || s->min_filter > 1 ||
-      s->mag_filter < 0 || s->mag_filter > 1 || s->mip_filter < 0 || s->mip_filter > 2 ||
-      s->address_s < 0 || s->address_s > 5 ||
-      s->address_t < 0 || s->address_t > 5 || s->address_r < 0 || s->address_r > 5 ||
-      s->border_color < 0 || s->border_color > 2 || s->reduction_mode < 0 || s->reduction_mode > 2 ||
-      s->compare_function < 0 || s->compare_function > 7)
+  if (s == nullptr || output == nullptr)
     return rays_metal_set_invalid_argument(message, "invalid sampler descriptor");
   @try { @autoreleasepool {
     id<MTLDevice> device = (__bridge id<MTLDevice>)rays_metal_handle_object(device_handle, KIND_DEVICE);
@@ -146,20 +141,17 @@ extern "C" int32_t rays_metal_render_pass_set_actions(MetalHandle *pass_handle, 
     int32_t color_store, int32_t depth_load, int32_t depth_store, double clear_depth,
     int32_t stencil_load, int32_t stencil_store, uint32_t clear_stencil, const char **message) {
   if (message) *message = nullptr;
-  // -1 (and clear_depth -1.0, clear_stencil UINT32_MAX) leave that field as it is: the single-attachment wrappers below must not reset the others.
-  const bool keep_depth = clear_depth == -1.0, keep_stencil = clear_stencil == UINT32_MAX;
-  if (color_load < -1 || color_load > 2 || color_store < -1 || color_store > 3 || depth_load < -1 || depth_load > 2 || depth_store < -1 || depth_store > 1 || stencil_load < -1 || stencil_load > 2 || stencil_store < -1 || stencil_store > 1) return rays_metal_set_invalid_argument(message, "invalid render-pass actions");
   @try { @autoreleasepool {
     MTLRenderPassDescriptor *pass = (__bridge MTLRenderPassDescriptor *)rays_metal_handle_object(pass_handle, KIND_RENDER_PASS_DESCRIPTOR);
     if (!pass) return rays_metal_set_error(message, "invalid render-pass handle");
-    if (color_load >= 0) pass.colorAttachments[0].loadAction = static_cast<MTLLoadAction>(color_load);
-    if (color_store >= 0) pass.colorAttachments[0].storeAction = static_cast<MTLStoreAction>(color_store);
-    if (depth_load >= 0) pass.depthAttachment.loadAction = static_cast<MTLLoadAction>(depth_load);
-    if (depth_store >= 0) pass.depthAttachment.storeAction = static_cast<MTLStoreAction>(depth_store);
-    if (!keep_depth) pass.depthAttachment.clearDepth = clear_depth;
-    if (stencil_load >= 0) pass.stencilAttachment.loadAction = static_cast<MTLLoadAction>(stencil_load);
-    if (stencil_store >= 0) pass.stencilAttachment.storeAction = static_cast<MTLStoreAction>(stencil_store);
-    if (!keep_stencil) pass.stencilAttachment.clearStencil = clear_stencil;
+    pass.colorAttachments[0].loadAction = static_cast<MTLLoadAction>(color_load);
+    pass.colorAttachments[0].storeAction = static_cast<MTLStoreAction>(color_store);
+    pass.depthAttachment.loadAction = static_cast<MTLLoadAction>(depth_load);
+    pass.depthAttachment.storeAction = static_cast<MTLStoreAction>(depth_store);
+    pass.depthAttachment.clearDepth = clear_depth;
+    pass.stencilAttachment.loadAction = static_cast<MTLLoadAction>(stencil_load);
+    pass.stencilAttachment.storeAction = static_cast<MTLStoreAction>(stencil_store);
+    pass.stencilAttachment.clearStencil = clear_stencil;
     return 0;
   }} @catch (NSException *exception) { return rays_metal_set_error(message, exception.reason.UTF8String); }
 }

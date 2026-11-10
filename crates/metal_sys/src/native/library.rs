@@ -1,4 +1,4 @@
-pub use super::{compile_library, find_function, library_function_names, specialize_function};
+pub use super::{compile_library, create_function, library_function_names};
 
 use super::{Error, Handle, NativeHandle};
 

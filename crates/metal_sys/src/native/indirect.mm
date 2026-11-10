@@ -29,9 +29,7 @@ extern "C" int32_t rays_metal_indirect_command_buffer_create(
     MetalHandle *device_handle, const RaysIndirectCommandBufferDescriptor *source,
     uint64_t raw_count, int64_t raw_options, MetalHandle **out, const char **message) {
     if (@available(macOS 10.14, *)) { } else return rays_metal_set_unavailable(message, "indirect command buffers require macOS 10.14 or newer");
-    constexpr int64_t valid_command_types = 1 | 2 | 32 | 64;
-    if (source == nullptr || out == nullptr || raw_options < 0 ||
-        source->command_types == 0 || (source->command_types & ~valid_command_types) != 0)
+    if (source == nullptr || out == nullptr)
         return rays_metal_set_error(message, "invalid indirect command buffer size or options");
     @try {
         @autoreleasepool {
@@ -40,9 +38,6 @@ extern "C" int32_t rays_metal_indirect_command_buffer_create(
             descriptor.commandTypes = static_cast<MTLIndirectCommandType>(source->command_types);
             descriptor.inheritBuffers = source->inherit_buffers != 0;
             descriptor.inheritPipelineState = source->inherit_pipeline_state != 0;
-            if (source->max_vertex_buffer_bind_count < 0 || source->max_fragment_buffer_bind_count < 0 || source->max_kernel_buffer_bind_count < 0 ||
-                source->max_kernel_threadgroup_memory_bind_count < 0 || source->max_object_buffer_bind_count < 0 || source->max_mesh_buffer_bind_count < 0 || source->max_object_threadgroup_memory_bind_count < 0)
-                return rays_metal_set_error(message, "invalid indirect descriptor binding count");
             descriptor.maxVertexBufferBindCount = static_cast<NSUInteger>(source->max_vertex_buffer_bind_count);
             descriptor.maxFragmentBufferBindCount = static_cast<NSUInteger>(source->max_fragment_buffer_bind_count);
             if (@available(macOS 11.0, *)) descriptor.maxKernelBufferBindCount = static_cast<NSUInteger>(source->max_kernel_buffer_bind_count);

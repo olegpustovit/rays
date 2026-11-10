@@ -306,8 +306,7 @@ extern "C" int32_t rays_metal_compiler_create_render_pipeline(
   if (output) *output = nullptr;
   if (compiler_handle == nullptr || library_handle == nullptr || raw_vertex == nullptr ||
       output == nullptr || (attachment_count != 0 && attachments == nullptr) ||
-      raw_sample_count > std::numeric_limits<NSUInteger>::max() ||
-      raw_topology < 1 || raw_topology > 3)
+      raw_sample_count > std::numeric_limits<NSUInteger>::max())
     return rays_metal_set_error(message, "invalid Metal 4 render-pipeline arguments");
   @try {
     @autoreleasepool {
@@ -359,12 +358,6 @@ extern "C" int32_t rays_metal_compiler_create_render_pipeline(
         }
         for (NSUInteger index = 0; index < attachment_count; ++index) {
           const RaysMetalColorAttachment &source = attachments[index];
-          if (source.pixel_format == MTLPixelFormatInvalid || source.pixel_format == MTLPixelFormatDepth32Float ||
-              source.blending_state < 0 || source.blending_state > 1 || source.source_rgb_blend_factor < 0 || source.source_rgb_blend_factor > 18 ||
-              source.destination_rgb_blend_factor < 0 || source.destination_rgb_blend_factor > 18 || source.rgb_blend_operation < 0 || source.rgb_blend_operation > 4 ||
-              source.source_alpha_blend_factor < 0 || source.source_alpha_blend_factor > 18 || source.destination_alpha_blend_factor < 0 || source.destination_alpha_blend_factor > 18 ||
-              source.alpha_blend_operation < 0 || source.alpha_blend_operation > 4 || source.write_mask < 0 || (source.write_mask & ~15) != 0)
-            return rays_metal_set_error(message, "invalid Metal 4 color attachment descriptor");
           MTL4RenderPipelineColorAttachmentDescriptor *attachment = [[MTL4RenderPipelineColorAttachmentDescriptor alloc] init];
           attachment.pixelFormat = static_cast<MTLPixelFormat>(source.pixel_format);
           attachment.blendingState = static_cast<MTL4BlendState>(source.blending_state);
@@ -537,9 +530,7 @@ extern "C" int32_t rays_metal_render_encoder_use_resources(
     size_t count, int32_t raw_usage, int32_t raw_stages,
     const char **message) {
   if (message) *message = nullptr;
-  if (encoder_handle == nullptr || resources == nullptr ||
-      raw_usage <= 0 || (raw_usage & ~7) != 0 ||
-      raw_stages <= 0 || (raw_stages & ~3) != 0)
+  if (encoder_handle == nullptr || resources == nullptr)
     return rays_metal_set_error(message, "invalid render resource-use arguments");
   @try {
     @autoreleasepool {

@@ -197,36 +197,24 @@ pub mod native {
         { let _ = library; Err(Error::Unavailable) }
     }
 
-    pub fn find_function(library: &Handle, name: &str) -> Result<Handle, Error> {
+    pub fn create_function(library: &Handle, profile: &ogpu_core::shader::AdmittedFunction, label: Option<&str>) -> Result<Handle, Error> {
+        ogpu_core::validation::validate_label("Metal.Function.create",label).map_err(|failure|Error::InvalidArgument(failure.message.into()))?;
         #[cfg(target_vendor = "apple")]
         {
-            let name = std::ffi::CString::new(name).map_err(|_| Error::InvalidArgument("Metal names may not contain NUL".into()))?;
+            let name = std::ffi::CString::new(profile.name()).map_err(|_| Error::InvalidArgument("Metal names may not contain NUL".into()))?;
             let mut output = std::ptr::null_mut();
             let mut message: *const c_char = std::ptr::null();
-            let status = unsafe { rays_metal_function_find(library.as_native_ptr()?, name.as_ptr(), &mut output, &mut message) };
+            let status = if profile.specialized() || label.is_some() {
+                let label = label.map(std::ffi::CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels may not contain NUL".into()))?;
+                let names = profile.constants().iter().map(|item| std::ffi::CString::new(item.0.as_str()).map_err(|_| Error::InvalidArgument("function-constant names may not contain NUL".into()))).collect::<Result<Vec<_>, _>>()?;
+                let raw = profile.constants().iter().zip(&names).map(|(value, name)| RawFunctionConstant { name: name.as_ptr(), tag: value.1, integral: value.2, floating: value.3 }).collect::<Vec<_>>();
+                unsafe { rays_metal_function_specialize(library.as_native_ptr()?, name.as_ptr(), raw.as_ptr(), raw.len(), label.as_ref().map_or(std::ptr::null(),|v|v.as_ptr()), &mut output, &mut message) }
+            } else { unsafe { rays_metal_function_find(library.as_native_ptr()?, name.as_ptr(), &mut output, &mut message) } };
             if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
             unsafe { Handle::from_native(output) }
         }
         #[cfg(not(target_vendor = "apple"))]
-        { let _ = (library, name); Err(Error::Unavailable) }
-    }
-
-    pub fn specialize_function(library: &Handle, name: &str, constants: &[(String, i32, i64, f64)], label: Option<&str>) -> Result<Handle, Error> {
-        #[cfg(target_vendor = "apple")]
-        {
-            let name = std::ffi::CString::new(name).map_err(|_| Error::InvalidArgument("Metal names may not contain NUL".into()))?;
-            let label = label.map(std::ffi::CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels may not contain NUL".into()))?;
-            let label_pointer = label.as_ref().map_or(std::ptr::null(), |value| value.as_ptr());
-            let names = constants.iter().map(|item| std::ffi::CString::new(item.0.as_str()).map_err(|_| Error::InvalidArgument("function-constant names may not contain NUL".into()))).collect::<Result<Vec<_>, _>>()?;
-            let raw = constants.iter().zip(&names).map(|(value, name)| RawFunctionConstant { name: name.as_ptr(), tag: value.1, integral: value.2, floating: value.3 }).collect::<Vec<_>>();
-            let mut output = std::ptr::null_mut();
-            let mut message: *const c_char = std::ptr::null();
-            let status = unsafe { rays_metal_function_specialize(library.as_native_ptr()?, name.as_ptr(), raw.as_ptr(), raw.len(), label_pointer, &mut output, &mut message) };
-            if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
-            unsafe { Handle::from_native(output) }
-        }
-        #[cfg(not(target_vendor = "apple"))]
-        { let _ = (library, name, constants, label); Err(Error::Unavailable) }
+        { let _ = (library, profile, label); Err(Error::Unavailable) }
     }
 
     #[repr(C)]

@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::native::resource::{error, sys_error, enter_main, Buffer, CommandBuffer, Device, DeviceFamily, Error, ErrorKind, Lifetime, Texture, TextureRegion};
+use crate::native::resource::{error, sys_error, enter_main, Buffer, CommandBuffer, Device, Error, ErrorKind, Lifetime, Texture, TextureRegion};
 use crate::native::{descriptors::{DepthStencil, RenderPassDescriptor, Sampler}, library::Library};
 
 pub use ogpu_core::render_pass::Primitive as PrimitiveTopology;
@@ -83,7 +83,6 @@ impl Compiler {
         const OP: &str = "Metal.Compiler.create";
         enter_main(OP)?;
         device.ensure_live(OP)?;
-        if !device.supports_family(DeviceFamily::Metal4)? { return Err(error(OP, ErrorKind::Unsupported, "the Metal device does not support Metal 4")); }
         let raw = metal_sys::native::pipeline::create_compiler(device.raw()).map_err(|failure| sys_error(OP, failure))?;
         device.attach_child(OP)?;
         Ok(Self(Arc::new(CompilerInner { raw, lifetime: Lifetime::new(), device: device.clone(), device_attached: AtomicBool::new(true) })))

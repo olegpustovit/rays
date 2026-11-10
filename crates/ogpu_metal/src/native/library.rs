@@ -95,9 +95,7 @@ impl Function {
         const OP: &str = "Metal.Function.create";
         enter_main(OP)?;
         library.lifetime().ensure_live(OP)?;
-        let raw = if profile.specialized() {
-            metal_sys::native::specialize_function(library.raw(), profile.name(), profile.constants(), None)
-        } else { metal_sys::native::find_function(library.raw(), profile.name()) }.map_err(|failure| sys_error(OP, failure))?;
+        let raw = metal_sys::native::create_function(library.raw(), profile, None).map_err(|failure| sys_error(OP, failure))?;
         library.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
         Ok(Self(Arc::new(FunctionInner { raw, lifetime: Lifetime::new(), library: library.clone(), library_attached: AtomicBool::new(true) })))
     }
