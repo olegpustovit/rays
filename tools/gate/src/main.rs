@@ -961,6 +961,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("ogpu_metal", &["ogpu_core", "metal_sys", "native_layer_token_sys"][..]),
         ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys", "rays_math"][..]),
         ("pxui", &["rays", "rays_math", "param", "mem", "scene_command"][..]),
+        ("pxui_text", &[][..]),
         ("pxui_shell", &["rays", "rays_math", "editor_core", "pxui"][..]),
         ("pxui_graph", &[
             "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "flow_graph", "pxui", "editor_core",
@@ -1304,7 +1305,9 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
                         None
                     }
                 }
-            } else if dependency_package == "cc" && dependency.kind == "build-dependencies" {
+            } else if (dependency_package == "cc" && dependency.kind == "build-dependencies")
+                || (package.package_name == "pxui_text" && dependency_package == "cosmic-text" && dependency.kind == "dependencies")
+            {
                 None
             } else {
                 errors.push(format!("{path}:{}: external dependency `{dependency_package}` is not allowed; use a local workspace crate (cc is the sole exception)", dependency.line));

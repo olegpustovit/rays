@@ -1,0 +1,14 @@
+[package]
+name = "pxui_text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
+
+[dev-dependencies]
+mem_sys = { path = "../mem_sys" }
+
+[lints]
+workspace = true
