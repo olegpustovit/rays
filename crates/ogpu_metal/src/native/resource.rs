@@ -364,12 +364,13 @@ impl Texture {
             (o.x as u64, o.y as u64, o.z as u64, e.width as u64, e.height as u64, e.depth as u64),
             read.mip_level() as u64, read.slice() as u64).map_err(|failure| sys_error(OP, failure))
     }
-    pub fn read_bytes_into(&self, read: &mut TextureReadInto<'_>) -> Result<(), Error> {
+    pub fn read_bytes_into(&self, read: &TextureReadInto, destination: &mut [u8]) -> Result<(), Error> {
         const OP: &str = "Metal.Texture.read_bytes_into";
-        let (read, destination) = read.parts();
+        read.bind_destination(destination.len())?;
+        let read = read.layout();
         self.validate_read_owner(OP, read)?;
         let o = read.region().origin(); let e = read.region().extent();
-        metal_sys::native::read_texture(&self.0.raw, destination, read.bytes_per_row(), read.bytes_per_image(),
+        metal_sys::native::read_texture(&self.0.raw, destination, read.length(), read.bytes_per_row(), read.bytes_per_image(),
             (o.x as u64, o.y as u64, o.z as u64, e.width as u64, e.height as u64, e.depth as u64),
             read.mip_level() as u64, read.slice() as u64).map_err(|failure| sys_error(OP, failure))
     }
@@ -670,8 +671,9 @@ impl ComputeEncoder {
         self.0.command_buffer.retain_texture(texture);
         Ok(())
     }
-    pub fn set_bytes(&self, index: usize, bytes: ogpu_core::validation::AdmittedBytes<'_>) -> Result<(), Error> {
-        metal_sys::native::set_compute_bytes(&self.0.raw, bytes, index as u64).map_err(|failure| sys_error("Metal.Compute_encoder.set_bytes", failure))
+    pub fn set_bytes(&self, index: usize, admitted: ogpu_core::validation::AdmittedBytes, bytes: &[u8]) -> Result<(), Error> {
+        admitted.bind(bytes.len())?;
+        metal_sys::native::set_compute_bytes(&self.0.raw, admitted, bytes, index as u64).map_err(|failure| sys_error("Metal.Compute_encoder.set_bytes", failure))
     }
     pub fn dispatch_threads(&self, threads: (usize, usize, usize), threadgroup: (usize, usize, usize)) -> Result<(), Error> {
         let make_size = |(width, height, depth)| metal_sys::registry::record::Mtl_size_int { width, height, depth };

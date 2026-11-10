@@ -194,9 +194,17 @@ fn admitted_descriptors_preserve_advanced_limits_and_transfer_ownership() {
         assert_eq!(admit_base_texture_read(&admitted,row).err().unwrap().kind, ErrorKind::InvalidArgument);
     }
     let mut destination = [0xa5;64];
-    let mut read = admit_base_texture_read(&admitted,16).unwrap().into_destination(&mut destination).unwrap();
-    let (layout, borrowed) = read.parts(); assert_eq!(layout.length(),borrowed.len());
-    borrowed[0] = 7; assert_eq!(destination[0],7);
+    let read = admit_base_texture_read(&admitted,16).unwrap().into_destination(&mut destination).unwrap();
+    assert_eq!(read.layout().length(), destination.len());
+    read.bind_destination(destination.len()).unwrap();
+    for length in [63,65] {
+        assert_eq!(read.bind_destination(length).unwrap_err().kind, ErrorKind::InvalidArgument);
+    }
+    let bytes = validation::admit_bytes("test", &[1,2,3,4]).unwrap();
+    bytes.bind(4).unwrap();
+    for length in [3,5] {
+        assert_eq!(bytes.bind(length).unwrap_err().kind, ErrorKind::InvalidArgument);
+    }
     let mut other_caps = caps; other_caps.limits.max_texture_dimension_3d += 1;
     assert!(admitted.admitted_for(&caps)); assert!(!admitted.admitted_for(&other_caps));
     admitted.retire();

@@ -297,9 +297,11 @@ fn texture_swizzle_code(value: SwizzleChannel) -> i32 {
 
 
     pub fn read_texture(
-        texture: &Handle, destination: &mut [u8], bytes_per_row: usize, bytes_per_image: usize,
+        texture: &Handle, destination: &mut [u8], length: usize, bytes_per_row: usize, bytes_per_image: usize,
         region: (u64, u64, u64, u64, u64, u64), mip_level: u64, slice: u64,
     ) -> Result<(), Error> {
+        // Bound the actual borrow before FFI even if admission came from another slice.
+        let destination = destination.get_mut(..length).ok_or_else(|| Error::InvalidArgument("texture destination is too short".into()))?;
         #[cfg(target_vendor = "apple")]
         {
             let mut message: *const c_char = std::ptr::null();
@@ -366,8 +368,9 @@ fn texture_swizzle_code(value: SwizzleChannel) -> i32 {
     }
 
 
-    pub fn set_compute_bytes(encoder: &Handle, admitted: ogpu_core::validation::AdmittedBytes<'_>, index: u64) -> Result<(), Error> {
-        let bytes=admitted.bytes();
+    pub fn set_compute_bytes(encoder: &Handle, admitted: ogpu_core::validation::AdmittedBytes, bytes: &[u8], index: u64) -> Result<(), Error> {
+        // The owner checks exact contract binding; Sys independently bounds the FFI span.
+        let bytes = bytes.get(..admitted.length()).ok_or_else(|| Error::InvalidArgument("inline byte source is too short".into()))?;
         #[cfg(target_vendor = "apple")]
         {
             let mut message: *const c_char = std::ptr::null();

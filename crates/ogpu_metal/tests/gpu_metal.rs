@@ -223,6 +223,10 @@ fn gpu_compute_encoder() {
     let encoder = ComputeEncoder::create(&command).unwrap_or_else(|failure| die(failure));
     encoder.set_pipeline(&pipeline).unwrap_or_else(|failure| die(failure));
     encoder.set_buffer(0, 0, &buffer).unwrap_or_else(|failure| die(failure));
+    let inline = ogpu_core::validation::admit_bytes("test", &[0;4]).unwrap();
+    for bytes in [&[0u8;3][..], &[0u8;5][..]] {
+        reject(ErrorKind::InvalidArgument, encoder.set_bytes(1, inline, bytes).err());
+    }
     set_native_bytes(&encoder,1, &3i32.to_le_bytes()).unwrap_or_else(|failure| die(failure));
     encoder.set_texture(0, &texture).unwrap_or_else(|failure| die(failure));
     encoder.dispatch_threads((4, 1, 1), (1, 1, 1)).unwrap_or_else(|failure| die(failure));
@@ -547,6 +551,12 @@ fn gpu_texture_transfer_descriptors() {
     for row in 0..4 {
         assert!(into[row * 16..row * 16 + 16] == texture_bytes[row * 20..row * 20 + 16], "texture read into caller storage changed pixel data");
     }
+    let read = ogpu_core::validation::admit_texture_read(texture.admitted_descriptor(), full, 0, 0, 16, 64).unwrap().into_destination(&mut into).unwrap();
+    for length in [63,65] {
+        let mut replacement = vec![0xa5; length];
+        reject(ErrorKind::InvalidArgument, texture.read_bytes_into(&read, &mut replacement).err());
+        assert_eq!(replacement, vec![0xa5; length], "invalid replacement destination was written");
+    }
     reject(ErrorKind::InvalidArgument, read_texture_into(&texture, full, 0, 0, 16, 64, &mut vec![0u8; 63]).err());
     reject(ErrorKind::InvalidArgument, read_texture(&texture, full, 0, 0, 15, 60).err());
     reject(ErrorKind::InvalidArgument, read_texture(&texture, full, 0, 0, 20, 79).err());
@@ -603,8 +613,11 @@ fn gpu_texture_transfer_descriptors() {
         Texture::descriptor_2d(F::Rgba8Unorm,4,4,StorageMode::Shared,&[TextureUsage::TextureBinding],None)).unwrap();
     let raw_texture = metal_sys::native::create_texture(&raw_device, &raw_descriptor).unwrap();
     let mut sentinel = [0xa5; 63];
-    assert!(matches!(metal_sys::native::read_texture(&raw_texture, &mut sentinel, 16, 64, (0,0,0,4,4,1), 0, 0), Err(metal_sys::Error::InvalidArgument(_))));
+    assert!(matches!(metal_sys::native::read_texture(&raw_texture, &mut sentinel, 64, 16, 64, (0,0,0,4,4,1), 0, 0), Err(metal_sys::Error::InvalidArgument(_))));
     assert_eq!(sentinel,[0xa5;63], "short borrowed sys destination was modified");
+    let mut sentinel = [0xa5;64];
+    assert!(matches!(metal_sys::native::read_texture(&raw_texture, &mut sentinel, 63, 16, 64, (0,0,0,4,4,1), 0, 0), Err(metal_sys::Error::InvalidArgument(_))));
+    assert_eq!(sentinel,[0xa5;64], "native transfer exceeded its bounded sys prefix");
     drop(raw_texture); drop(raw_device);
     queue.destroy().unwrap_or_else(|failure| die(failure));
     device.destroy().unwrap_or_else(|failure| die(failure));
@@ -1229,7 +1242,7 @@ fn read_texture(texture: &Texture, region: TextureRegion, mip: usize, slice: usi
 }
 fn read_texture_into(texture: &Texture, region: TextureRegion, mip: usize, slice: usize, row: usize, image: usize, destination: &mut [u8]) -> Result<(), Error> {
     let read = ogpu_core::validation::admit_texture_read(texture.admitted_descriptor(), region, mip, slice, row, image)?;
-    texture.read_bytes_into(&mut read.into_destination(destination)?)
+    texture.read_bytes_into(&read.into_destination(destination)?, destination)
 }
 
 // Direct advanced entry points use the same Core admission as ordinary driver calls.
@@ -1270,4 +1283,4 @@ fn set_pass_actions(pass:&RenderPassDescriptor,color_load:LoadAction,color_store
 }
 
 fn set_native_viewport(encoder:&RenderEncoder,viewport:Viewport)->Result<(),Error>{encoder.set_viewport(ogpu_core::render_pass::admit_viewport(viewport)?)}
-fn set_native_bytes(encoder:&ComputeEncoder,index:usize,bytes:&[u8])->Result<(),Error>{encoder.set_bytes(index,ogpu_core::validation::admit_bytes("test",bytes)?)}
+fn set_native_bytes(encoder:&ComputeEncoder,index:usize,bytes:&[u8])->Result<(),Error>{encoder.set_bytes(index,ogpu_core::validation::admit_bytes("test",bytes)?,bytes)}

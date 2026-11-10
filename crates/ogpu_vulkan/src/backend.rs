@@ -383,8 +383,9 @@ impl DriverResource for TextureResource {
             .map_err(|failure| of_vk(TEXTURE_OP, failure))?;
         Ok(bytes)
     }
-    fn read_texture_into(&self, read: &mut TextureReadInto<'_>) -> Result<(), Error> {
-        let (read, destination) = read.parts();
+    fn read_texture_into(&self, read: &TextureReadInto, destination: &mut [u8]) -> Result<(), Error> {
+        read.bind_destination(destination.len())?;
+        let read = read.layout();
         if !read.belongs_to(&self.profile) {
             return Err(fail(TEXTURE_OP, ErrorKind::InvalidArgument, "transfer belongs to another admitted texture"));
         }
@@ -1148,8 +1149,9 @@ impl DriverComputeEncoder for ComputePass {
         let entry = self.cmds.dev.find_buffer(QUEUE_OP, id)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.set_buffer(index as u32, offset as u64, &entry.buffer.borrow()))
     }
-    fn set_bytes(&self, index: i64, bytes: ogpu_core::validation::AdmittedBytes<'_>) -> Result<(), Error> {
-        self.cmds.run(QUEUE_OP, &mut |c| c.set_bytes(index as u32, bytes.bytes()))
+    fn set_bytes(&self, index: i64, admitted: ogpu_core::validation::AdmittedBytes, bytes: &[u8]) -> Result<(), Error> {
+        admitted.bind(bytes.len())?;
+        self.cmds.run(QUEUE_OP, &mut |c| c.set_bytes(index as u32, bytes))
     }
     fn set_texture(&self, index: i64, id: Token) -> Result<(), Error> {
         let entry = self.cmds.dev.find_texture(QUEUE_OP, id)?;

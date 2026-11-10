@@ -34,9 +34,9 @@ pub trait DriverResource {
     fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, Error>;
     fn read_into(&self, offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), Error>;
     fn read_texture(&self, read: &TextureRead) -> Result<Vec<u8>, Error> { self.read(0, read.length()) }
-    fn read_texture_into(&self, read: &mut TextureReadInto<'_>) -> Result<(), Error> {
-        let (layout, destination) = read.parts();
-        self.read_into(0, destination, 0, layout.length())
+    fn read_texture_into(&self, read: &TextureReadInto, destination: &mut [u8]) -> Result<(), Error> {
+        read.bind_destination(destination.len())?;
+        self.read_into(0, destination, 0, read.layout().length())
     }
     fn destroy(&self) -> Result<(), Error>;
 }
@@ -137,7 +137,7 @@ pub struct Instance {
 pub trait DriverComputeEncoder {
     fn set_pipeline(&self, pipeline: Token) -> Result<(), Error>;
     fn set_buffer(&self, index: i64, offset: i64, buffer: Token) -> Result<(), Error>;
-    fn set_bytes(&self, index: i64, bytes: crate::validation::AdmittedBytes<'_>) -> Result<(), Error>;
+    fn set_bytes(&self, index: i64, admitted: crate::validation::AdmittedBytes, bytes: &[u8]) -> Result<(), Error>;
     fn set_texture(&self, index: i64, texture: Token) -> Result<(), Error>;
     fn set_accel(&self, index: i64, accel: Token) -> Result<(), Error>;
     fn dispatch_threads(&self, threads: (i64, i64, i64), threadgroup: (i64, i64, i64)) -> Result<(), Error>;
@@ -753,8 +753,8 @@ pub fn read_texture(texture: &Texture, bytes_per_row: i64) -> Result<Vec<u8>, Er
 }
 pub fn read_texture_into(texture: &Texture, bytes_per_row: i64, destination: &mut [u8]) -> Result<(), Error> {
     let read = crate::validation::admit_base_texture_read(&texture.texture_descriptor, bytes_per_row)?;
-    let mut read = read.into_destination(destination)?;
-    texture.resource.0.raw().read_texture_into(&mut read)
+    let read = read.into_destination(destination)?;
+    texture.resource.0.raw().read_texture_into(&read, destination)
 }
 pub fn complete_through(queue: &Queue, epoch: i64) -> Result<(), Error> {
     let q = queue.0.borrow();
@@ -1238,8 +1238,8 @@ pub fn set_bytes(encoder: &ComputeEncoder, index: i64, bytes: &[u8]) -> Result<(
     const OP: &str = "Backend.set_bytes";
     open_compute(OP, encoder)?;
     check_slot(OP, index)?;
-    let bytes=crate::validation::admit_bytes(OP,bytes)?;
-    encoder.0.raw().set_bytes(index, bytes)
+    let admitted=crate::validation::admit_bytes(OP,bytes)?;
+    encoder.0.raw().set_bytes(index, admitted, bytes)
 }
 pub fn set_texture(encoder: &ComputeEncoder, index: i64, texture: &Texture) -> Result<(), Error> {
     const OP: &str = "Backend.set_texture";
@@ -2113,7 +2113,7 @@ mod ownership_tests {
     impl DriverComputeEncoder for Payload {
         fn set_pipeline(&self, _: Token) -> Result<(), Error> { Ok(()) }
         fn set_buffer(&self, _: i64, _: i64, _: Token) -> Result<(), Error> { Ok(()) }
-        fn set_bytes(&self, _: i64, _: crate::validation::AdmittedBytes<'_>) -> Result<(), Error> { panic!("invalid bytes reached driver") }
+        fn set_bytes(&self, _: i64, _: crate::validation::AdmittedBytes, _: &[u8]) -> Result<(), Error> { panic!("invalid bytes reached driver") }
         fn set_texture(&self, _: i64, _: Token) -> Result<(), Error> { unreachable!() }
         fn set_accel(&self, _: i64, _: Token) -> Result<(), Error> { unreachable!() }
         fn dispatch_threads(&self, _: (i64, i64, i64), _: (i64, i64, i64)) -> Result<(), Error> { Ok(()) }
@@ -2251,6 +2251,11 @@ mod ownership_tests {
         for row in [-1, 0, 15, 17, i64::MAX] {
             assert_eq!(read_texture(&texture, row).unwrap_err().kind, ErrorKind::InvalidArgument);
             assert_eq!(read_texture_into(&texture, row, &mut [0; 64]).unwrap_err().kind, ErrorKind::InvalidArgument);
+        }
+        for length in [63,65] {
+            let mut destination = vec![0xa5; length];
+            assert_eq!(read_texture_into(&texture, 16, &mut destination).unwrap_err().kind, ErrorKind::InvalidArgument);
+            assert_eq!(destination, vec![0xa5; length]);
         }
         assert_eq!(read_texture(&texture, 16).unwrap(), [7; 64]);
         let buffer = Buffer { resource: texture.resource.clone(), memory: Memory::Shared,

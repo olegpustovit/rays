@@ -40,8 +40,8 @@ impl Texture {
     pub(crate) fn read_bytes(&self, read: &ogpu_core::validation::TextureRead) -> Result<Vec<u8>, Error> {
         self.0.metal.read_bytes(read)
     }
-    pub(crate) fn read_bytes_into(&self, read: &mut ogpu_core::validation::TextureReadInto<'_>) -> Result<(), Error> {
-        self.0.metal.read_bytes_into(read)
+    pub(crate) fn read_bytes_into(&self, read: &ogpu_core::validation::TextureReadInto, destination: &mut [u8]) -> Result<(), Error> {
+        self.0.metal.read_bytes_into(read, destination)
     }
 
     pub fn destroy(&self) -> Result<(), Error> {

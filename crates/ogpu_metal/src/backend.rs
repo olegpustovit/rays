@@ -154,8 +154,8 @@ impl DriverResource for MetalTexture {
         Err(fail("Ogpu_metal.Backend.texture.read_into", ErrorKind::InvalidArgument, "texture reads require an admitted layout"))
     }
     fn read_texture(&self, read: &TextureRead) -> Result<Vec<u8>, Error> { self.value.read_bytes(read) }
-    fn read_texture_into(&self, read: &mut TextureReadInto<'_>) -> Result<(), Error> {
-        self.value.read_bytes_into(read)
+    fn read_texture_into(&self, read: &TextureReadInto, destination: &mut [u8]) -> Result<(), Error> {
+        self.value.read_bytes_into(read, destination)
     }
     fn destroy(&self) -> Result<(), Error> {
         self.value.destroy()?;

@@ -112,16 +112,22 @@ impl TextureRead {
     pub fn bytes_per_row(&self) -> usize { self.bytes_per_row }
     pub fn bytes_per_image(&self) -> usize { self.bytes_per_image }
     pub fn length(&self) -> usize { self.length }
-    pub fn into_destination(self, destination: &mut [u8]) -> Result<TextureReadInto<'_>, Error> {
+    pub fn into_destination(self, destination: &mut [u8]) -> Result<TextureReadInto, Error> {
         if destination.len() != self.length {
             return Err(invalid("Ogpu.Validation.admit_texture_read_into", "destination length does not match the transfer layout"));
         }
-        Ok(TextureReadInto { read: self, destination })
+        Ok(TextureReadInto { read: self })
     }
 }
-pub struct TextureReadInto<'a> { read: TextureRead, destination: &'a mut [u8] }
-impl TextureReadInto<'_> {
-    pub fn parts(&mut self) -> (&TextureRead, &mut [u8]) { (&self.read, self.destination) }
+pub struct TextureReadInto { read: TextureRead }
+impl TextureReadInto {
+    pub fn layout(&self) -> &TextureRead { &self.read }
+    pub fn bind_destination(&self, length: usize) -> Result<(), Error> {
+        // Bind a replacement borrow to the admitted layout; do not readmit that layout.
+        if length != self.read.length() {
+            Err(invalid("Ogpu.Validation.bind_texture_destination", "destination length does not match the transfer layout"))
+        } else { Ok(()) }
+    }
 }
 
 fn invalid(operation: &str, message: &str) -> Error {
@@ -423,11 +429,19 @@ pub fn admit_sampler(profile: SamplerProfile) -> Result<AdmittedSampler, Error> 
 }
 
 #[derive(Clone, Copy)]
-pub struct AdmittedBytes<'a>(&'a [u8]);
-impl AdmittedBytes<'_> { pub fn bytes(&self)->&[u8] {self.0} }
-pub fn admit_bytes<'a>(operation:&str,bytes:&'a [u8])->Result<AdmittedBytes<'a>,Error>{
+pub struct AdmittedBytes(usize);
+impl AdmittedBytes {
+    pub fn length(self) -> usize { self.0 }
+    pub fn bind(self, length: usize) -> Result<(), Error> {
+        // Bind the current borrow; the 1..=4096 admission has already happened.
+        if length != self.0 {
+            Err(invalid("Ogpu.Validation.bind_bytes", "inline byte length does not match admission"))
+        } else { Ok(()) }
+    }
+}
+pub fn admit_bytes(operation:&str,bytes:&[u8])->Result<AdmittedBytes,Error>{
     if bytes.is_empty() || bytes.len()>4096 {Err(invalid(operation,"inline bytes must contain 1..=4096 bytes"))}
-    else {Ok(AdmittedBytes(bytes))}
+    else {Ok(AdmittedBytes(bytes.len()))}
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

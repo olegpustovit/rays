@@ -47,8 +47,8 @@ impl DriverComputeEncoder for Compute {
         self.encoder.set_buffer(index as usize, offset as u64, buffer.metal())
     }
 
-    fn set_bytes(&self, index: i64, bytes: ogpu_core::validation::AdmittedBytes<'_>) -> Result<(), Error> {
-        self.encoder.set_bytes(index as usize, bytes)
+    fn set_bytes(&self, index: i64, admitted: ogpu_core::validation::AdmittedBytes, bytes: &[u8]) -> Result<(), Error> {
+        self.encoder.set_bytes(index as usize, admitted, bytes)
     }
 
     fn set_texture(&self, index: i64, token: Token) -> Result<(), Error> {
