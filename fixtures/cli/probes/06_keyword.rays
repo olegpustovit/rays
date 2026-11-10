@@ -1,0 +1,1 @@
+(workspace probe (graph picture :context sop (sop/uv_sphere :row 8)))

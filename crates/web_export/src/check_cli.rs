@@ -5,6 +5,7 @@ use flow_syntax::syntax as s;
 use rays_diagnostic::{Diagnostic, Severity};
 
 pub type Fail = String;
+pub use flow_web::kernel_table::json_string;
 
 fn read_imports(file: &str, text: &str) -> Result<Vec<(String, String)>, Vec<Diagnostic>> {
     let base = std::path::Path::new(file).parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -90,20 +91,22 @@ pub fn check_text(imports: Vec<(String, String)>, text: &str, lower: bool) -> Re
     })
 }
 
-/// The text, the document when the file reads, the printed diagnostics and whether it passes.
-pub fn check_file(path: &str, lower: bool) -> Result<(String, Option<doc::T>, String, bool), Fail> {
+/// The checked file and its original diagnostics, shared by text and JSON CLI output.
+pub fn check_diagnostics(path: &str, lower: bool) -> Result<(String, Option<doc::T>, Vec<Diagnostic>, bool), Fail> {
     let text = std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|e| format!("rays: {e}"))?;
     let (document, ds, allow) = match read_imports(path, &text) {
         Ok(imports) => check_text(imports, &text, lower)?,
         Err(ds) => (None, ds, false),
     };
-    let mut printed = String::new();
-    for d in &ds {
-        printed.push_str(&rays_diagnostic::report(path, &text, d));
-        printed.push('\n');
-    }
     let failed = document.is_none() || ds.iter().any(|d| d.severity == Severity::ErrorSeverity || !allow);
-    Ok((text, document, printed, !failed))
+    Ok((text, document, ds, !failed))
+}
+
+/// The text, the document when the file reads, the printed diagnostics and whether it passes.
+pub fn check_file(path: &str, lower: bool) -> Result<(String, Option<doc::T>, String, bool), Fail> {
+    let (text, document, ds, passed) = check_diagnostics(path, lower)?;
+    let printed = ds.iter().map(|d| format!("{}\n", rays_diagnostic::report(path, &text, d))).collect();
+    Ok((text, document, printed, passed))
 }
 
 /// `rays fmt FILE`: (stdout, stderr, exit code).

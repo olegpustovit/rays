@@ -1,0 +1,1 @@
+(workspace probe (graph picture :context draw (draw/circle [0 0 0] 2 :fill "notacolor")))

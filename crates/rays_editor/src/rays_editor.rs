@@ -545,6 +545,44 @@ pub mod workspace {
         result
     }
 
+    /// Render only a draw graph to a native offscreen target, with a fresh deterministic clock.
+    pub fn render_png(graph: Option<&str>, size: Option<(i64, i64)>, frame: i64, path: &str, doc: &workspace_doc::T) -> Result<(), Diagnostic> {
+        let fail = |code: &str, message: String| rays_diagnostic::error(code.to_string(), message, None, None, None, Vec::new(), Vec::new());
+        let window = workspace_window(doc)?;
+        let (width, height) = size.unwrap_or((window.width, window.height));
+        if frame < 0 || width <= 0 || height <= 0 {
+            return Err(fail("E_RENDER_RANGE", "Frame must be nonnegative and dimensions positive.".into()));
+        }
+        let chosen = doc.checked.graphs.iter().find(|g| g.context == flow_syntax::context::draw() && graph.is_none_or(|n| g.name == n));
+        let graph = chosen.ok_or_else(|| fail("E_DRAW_GRAPH", format!("Render needs a draw graph{}.", graph.map(|g| format!(" named {g}")).unwrap_or_default())))?;
+        let lowered = flow_sop::lower::of_checked(Some(sop::nodes::factories()), flow_sop::lower::Options { reference: true, inputs: Some((*doc.inputs).clone()), ..Default::default() }, &doc.checked)?;
+        let evaluated = &lowered.evaluated;
+        let value = evaluated.results.iter().find(|(name, _)| *name == graph.name).map(|(_, value)| value.clone()).ok_or_else(|| fail("E_DRAW_GRAPH", "Draw graph has no result.".into()))?;
+        let prepared = drawing::prepare(&drawing::PrepareOptions { states: evaluated.states.clone(), ..Default::default() }, &evaluated.plan, &value)?;
+        let mut host = workspace_host::create(workspace_host::CreateOptions { seed: Some(window.seed), ..Default::default() });
+        workspace_images::bind(&host.images, &lowered);
+        let result = (|| {
+            let canvas = rays::canvas::create(width, height).map_err(|m| fail("E_GPU_STARTUP", m))?;
+            let result = (|| {
+                let state = flow_eval::create_state();
+                for tick in 0..=frame {
+                    let live = input::Frame { dt: 1. / 60., frame: tick, tick, size: (width, height), pointer: (-100., -100.), ..input::at_time(tick as f64 / 60.) };
+                    let (images, image_state, image_plan, image_live) = (host.images.clone(), state.clone(), evaluated.plan.clone(), live.clone());
+                    let resolver: drawing::image_resolver = Rc::new(move |v| workspace_images::image(None, false, &images, &image_state, &image_live, &image_plan, v));
+                    let scene = drawing::render_prepared(&prepared, &live, live.size, &drawing::RenderOptions { state: Some(state.clone()), image: Some(resolver), ..Default::default() })?;
+                    if tick == frame {
+                        rays::canvas::render(Some(1), &canvas, &scene).map_err(|m| fail("E_RENDER", m))?;
+                    }
+                }
+                rays::canvas::save_png(&canvas, path).map_err(|m| fail("E_IO", m))
+            })();
+            let closed = rays::canvas::destroy(&canvas).map_err(|m| fail("E_RENDER", m));
+            result.and(closed)
+        })();
+        workspace_host::close(&mut host);
+        result
+    }
+
     /// Export a draw graph (the first by default) through `Sketch::export_state`. Each invocation
     /// starts a fresh fold and pins every frame fact.
     pub fn export(graph: Option<&str>, fps: Option<i64>, directory: &str, frames: i64, doc: &workspace_doc::T) -> Result<(), Diagnostic> {

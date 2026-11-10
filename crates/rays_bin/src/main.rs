@@ -1,5 +1,5 @@
 //! `rays`: an empty editor, a .rays workspace opened natively, check, fmt, mem, web.
-use rays_bin::{check, fmt, web, EMPTY};
+use rays_bin::{check, check_json, documentation, fmt, web, EMPTY};
 use rays_editor::rays_editor::{measure, workspace};
 
 fn die(m: &str) -> ! {
@@ -75,20 +75,72 @@ fn crash_report(message: &str, backtrace: &str) {
     }
 }
 
+const USAGE: &str = "Usage: rays [FILE.rays]
+       rays check [--json] FILE...
+       rays fmt FILE
+       rays doc [NAME|NAMESPACE/|SEARCH] [--json] [--all] [--markdown]
+       rays render FILE -o PNG [--frame N] [--size WIDTHxHEIGHT] [--graph NAME]
+       rays mem FILE [--frames N]
+       rays web FILE -o DIR
+
+Exit codes: 0 success, 1 diagnostics or invalid arguments, 2 crash.";
+
+fn usage(argument: &str) -> ! {
+    die(&format!("rays: invalid argument {argument:?}\n{USAGE}"))
+}
+
+fn render_command(args: &[&str]) {
+    let Some((file, options)) = args.split_first() else { usage("render: missing FILE") };
+    if file.starts_with('-') { usage(file); }
+    let (mut output, mut graph, mut size, mut frame) = (None, None, None, 0);
+    let mut rest = options;
+    while !rest.is_empty() {
+        let [flag, value, tail @ ..] = rest else { usage(rest[0]); };
+        match *flag {
+            "-o" if output.is_none() => output = Some(*value),
+            "--graph" if graph.is_none() => graph = Some(*value),
+            "--frame" => frame = value.parse::<i64>().ok().filter(|n| *n >= 0).unwrap_or_else(|| usage(value)),
+            "--size" => size = Some(value.split_once('x').and_then(|(w,h)| Some((w.parse::<i64>().ok()?, h.parse::<i64>().ok()?))).filter(|(w,h)| *w > 0 && *h > 0).unwrap_or_else(|| usage(value))),
+            _ => usage(flag),
+        }
+        rest = tail;
+    }
+    let output = output.unwrap_or_else(|| usage("render: missing -o PNG"));
+    let text = std::fs::read_to_string(file).unwrap_or_else(|e| die(&format!("rays: {file}: {e}")));
+    let doc = rays_editor::source_file::read_imports(file, &text).and_then(|imports| workspace::load(None, imports, None, &text)).unwrap_or_else(|ds| {
+        for d in ds { eprintln!("{}", rays_diagnostic::report(file, &text, &d)); }
+        std::process::exit(1)
+    });
+    if let Err(d) = workspace::render_png(graph, size, frame, output, &doc) { die(&rays_diagnostic::report(file, &text, &d)); }
+}
+
 fn run(args: Vec<String>) {
     if let Err(m) = mem::configure(&|n| std::env::var(n).ok()) {
         die(&format!("rays: {m}"));
     }
     let a: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    if a.contains(&"--help") || a == ["-h"] { println!("{USAGE}"); return; }
     match a.as_slice() {
+        ["render", args @ ..] => render_command(args),
+        ["doc", "--markdown"] => print!("{}", documentation::guide().unwrap_or_else(|m| die(&m))),
+        ["doc", options @ ..] => {
+            let mut query = None;
+            for option in options { match *option { "--json" | "--all" => (), value if !value.starts_with('-') && query.is_none() => query = Some(value), bad => usage(bad) } }
+            let output = documentation::print(query, options.contains(&"--json"), options.contains(&"--all")).unwrap_or_else(|m| die(&m));
+            print!("{output}");
+        },
         [] if std::path::Path::new("untitled.rays").exists() => native(None, "untitled.rays"),
         [] => native(Some(EMPTY.to_string()), "untitled.rays"),
         [p] if p.ends_with(".rays") => native(None, p),
         ["check", files @ ..] if !files.is_empty() => {
+            let json = files.contains(&"--json");
+            let paths: Vec<_> = files.iter().copied().filter(|file| *file != "--json").collect();
+            if paths.is_empty() { usage("check: missing FILE"); }
             let mut ok = true;
-            for f in files {
-                let (printed, code) = check(f);
-                eprint!("{printed}");
+            for f in paths {
+                if f.starts_with('-') { usage(f); }
+                let (printed, code) = if json { check_json(f) } else { check(f) };
+                if json { print!("{printed}"); } else { eprint!("{printed}"); }
                 ok = ok && code == 0;
             }
             if !ok {
@@ -116,7 +168,7 @@ fn run(args: Vec<String>) {
                 std::process::exit(1)
             }
         }
-        _ => die("usage: rays [FILE.rays] | rays check FILE... | rays fmt FILE | rays mem FILE [--frames N] | rays web FILE -o DIR"),
+        _ => usage(a.iter().copied().find(|arg| arg.starts_with('-')).or(a.first().copied()).unwrap_or("missing command argument")),
     }
 }
 
