@@ -10,3 +10,6 @@ path = "src/lib.rs"
 
 [dependencies]
 native_layer_token_sys = { path = "../native_layer_token_sys" }
+
+[lints]
+workspace = true
