@@ -302,14 +302,22 @@ fn prune(checked: &Workspace, catalog: &Catalog, layout: &lbp::T) -> lbp::T {
             }
         }
     }
-    for g in checked.graphs.iter() {
+    // Only a graph some layout key is rooted in can make a key known: project just those.
+    let collected = std::cell::RefCell::new(HashSet::<String>::new());
+    lbp::remap(&|p| { collected.borrow_mut().extend(p.first().map(|s| s.to_string())); None }, layout);
+    let roots = collected.into_inner();
+    for g in checked.graphs.iter().filter(|g| roots.contains(&g.name)) {
         match projection::of_graph_with(&|_| false, catalog, checked, &g.name) {
             Ok(sc) => scope(&mut known, &sc),
             Err(_) => return layout.clone(),
         }
     }
     for g in checked.defs.iter() {
-        match projection::of_graph_with(&|_| false, catalog, checked, &format!("def:{}", g.name)) {
+        let name = format!("def:{}", g.name);
+        if !roots.contains(&name) {
+            continue;
+        }
+        match projection::of_graph_with(&|_| false, catalog, checked, &name) {
             Ok(sc) => scope(&mut known, &sc),
             Err(_) => return layout.clone(),
         }
