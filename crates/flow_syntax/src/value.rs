@@ -269,6 +269,21 @@ pub fn ty_of(value: &Value) -> Ty {
         Value::Residual(_) => Ty::Any,
     }
 }
+/// `ty_of(value) == *want` without building the type for the common non-recursive cases.
+pub fn ty_is(value: &Value, want: &Ty) -> bool {
+    match (value, want) {
+        (Value::Int(_), Ty::Int) | (Value::Float(_), Ty::Float) | (Value::Bool(_), Ty::Bool) | (Value::Text(_), Ty::Text)
+        | (Value::Vec2(..), Ty::Vec2) | (Value::Vec3(..), Ty::Vec3) | (Value::Vec4(..), Ty::Vec4) | (Value::Residual(_), Ty::Any) => true,
+        (Value::Deferred(ty, _), want) => ty == want,
+        (Value::Struct(g) | Value::Source(g), want) => g.ty == *want,
+        (Value::Int_array(_), Ty::Array(e)) => **e == Ty::Int,
+        (Value::Text_array(_), Ty::Array(e)) => **e == Ty::Text,
+        (Value::Floats(width, _), Ty::Array(e)) => **e == match width { 1 => Ty::Float, 2 => Ty::Vec2, 3 => Ty::Vec3, 4 => Ty::Vec4, _ => Ty::Any },
+        (Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Text(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..) | Value::Residual(_)
+            | Value::Int_array(_) | Value::Text_array(_) | Value::Floats(..), _) => false,
+        _ => ty_of(value) == *want,
+    }
+}
 pub fn elem_ty(values: &[Value]) -> Ty {
     let mut current = Ty::Any;
     for value in values {

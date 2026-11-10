@@ -358,6 +358,8 @@ pub mod region {
         pub capture_roots: flow_eval::Roots,
         pub destination: Option<Arc<Destination>>,
         pub slot_plan: Arc<OnceLock<Registers>>,
+        /// The declared argument types, found once per capture binding (a rebound region starts empty).
+        pub argument_types: Arc<OnceLock<Vec<Ty>>>,
         pub residual: ResidualId,
         pub term: Arc<Term>,
         pub sources: Sources,
@@ -761,6 +763,16 @@ pub mod region {
         }
     }
 
+    /// `uniform_ty(a) == uniform_ty(b)`, without building the types of the common plain values.
+    fn uniform_ty_is(a: &Value, b: &Value) -> bool {
+        match (a, b) {
+            (Value::Residual(_), _) | (_, Value::Residual(_)) => uniform_ty(a) == uniform_ty(b),
+            (Value::Deferred(ty, _), _) => value::ty_is(b, ty),
+            (Value::Struct(g) | Value::Source(g), _) => value::ty_is(b, &g.ty),
+            _ => value::ty_of(a) == value::ty_of(b),
+        }
+    }
+
     fn invalid(term: &Term, message: &str) -> Vec<Diagnostic> {
         vec![rays_diagnostic::error("E_PACKED_LAYOUT".to_owned(), message.to_owned(), Some(term.form().span.clone()), None, None, Vec::new(), Vec::new())]
     }
@@ -923,6 +935,7 @@ pub mod region {
             capture_roots: Default::default(),
             destination: None,
             slot_plan: Arc::new(OnceLock::new()),
+            argument_types: Arc::new(OnceLock::new()),
             residual: p.residual,
             term: p.term,
             sources: p.sources,
@@ -955,6 +968,7 @@ pub mod region {
             capture_roots: t.capture_roots.clone(),
             destination: None,
             slot_plan: Arc::new(OnceLock::new()),
+            argument_types: Arc::new(OnceLock::new()),
             residual: o.residual.unwrap_or(t.residual),
             term: o.term.unwrap_or_else(|| t.term.clone()),
             sources: o.sources.unwrap_or_else(|| t.sources.clone()),
@@ -987,20 +1001,27 @@ pub mod region {
         pub fn with_captures(
             t: &T, residual: ResidualId, uniforms: Vec<Value>, sources: Sources, stages: Sources, count: Option<i64>,
         ) -> Result<T, Diagnostic> {
-            let diagnostic = rays_diagnostic::error(
+            let layout_changed = || rays_diagnostic::error(
                 "E_CORE_ARGUMENT".to_owned(),
                 "A rebound region changed its validated capture layout.".to_owned(),
                 Some(t.term.form().span.clone()), None, None, Vec::new(), Vec::new(),
             );
             if uniforms.len() != t.uniforms.len()
-                || !t.uniforms.iter().zip(uniforms.iter()).all(|(b, a)| uniform_ty(b) == uniform_ty(a))
+                || !t.uniforms.iter().zip(uniforms.iter()).all(|(b, a)| uniform_ty_is(b, a))
                 || sources.len() != t.sources.len()
                 || !t.sources.iter().zip(sources.iter()).all(|(b, a)| b.1.ty() == a.1.ty())
                 || stages.len() != t.stages.len()
             {
-                return Err(diagnostic);
+                return Err(layout_changed());
             }
-            let mut bound = T { residual, uniforms, sources, stages, count, ..t.clone() };
+            // Every other field is shared or copied once; the replaced captures are never cloned first.
+            let mut bound = T {
+                capture_roots: Default::default(), destination: t.destination.clone(), slot_plan: t.slot_plan.clone(), argument_types: Arc::new(OnceLock::new()), residual, term: t.term.clone(),
+                sources, widths: t.widths.clone(), uniforms, uniform_names: t.uniform_names.clone(), code: t.code.clone(),
+                dependent: t.dependent.clone(), outputs: t.outputs.clone(), count, origin: t.origin.clone(), iteration: t.iteration,
+                result: t.result.clone(), skip: t.skip.clone(), stages, fusion: t.fusion, dynamic: t.dynamic,
+                count_source: t.count_source.clone(), body: t.body.clone(), binding_fn: t.binding_fn.clone(), sites: t.sites.clone(),
+            };
             bound.capture_roots = capture_roots(&bound);
             Ok(bound)
         }

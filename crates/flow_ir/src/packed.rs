@@ -1131,7 +1131,7 @@ fn fast_chunk(sh: &TS, f: &Fast, chunk: usize, base: usize, outs: &mut [Option<&
 /// Everything one `force` carries through its nested evaluations.
 #[derive(Clone)]
 struct Run {
-    t: T,
+    t: Arc<T>,
     live: Live,
     state: State,
     elems: Option<Vec<(Symbol, Value)>>,
@@ -1217,7 +1217,7 @@ fn trace_field(field: i64, h: &ray_host::Hit) -> f64 {
 }
 
 struct TS {
-    t: T,
+    t: Arc<T>,
     live: Live,
     inputs: Vec<Value>,
     borrowed: Vec<Option<Vec<Column>>>,
@@ -1285,7 +1285,7 @@ impl TS {
             return Ok(v);
         }
         let value = self.uvalue(i, fo)?;
-        if value::ty_of(&value) != *ty {
+        if !value::ty_is(&value, ty) {
             return Err(fail("E_ARRAY_TYPE", "Kernel lookup table changed its packed element type."));
         }
         value::validate(&value)?;
@@ -2081,7 +2081,7 @@ fn integer_range(residual: ResidualId, term: &Term) -> Option<(ResidualId, Term)
 }
 
 fn cached_ty(sh: &TS, i: i64, ty: &Ty) -> bool {
-    matches!(sh.prepared[i as usize].get(), Some(v) if value::ty_of(v) == *ty)
+    matches!(sh.prepared[i as usize].get(), Some(v) if value::ty_is(v, ty))
 }
 
 fn cached_table(sh: &TS, register: i64) -> Option<&Value> {
@@ -3065,7 +3065,7 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
                 // a settled value (a captured array per iterate step) is read, not compiled
                 Some((_, v)) if !E::is_live(v) => return match dispatch {
                     Some(d) => d(residual, term),
-                    None if value::ty_of(v) == *term.ty() => Ok(v.clone()),
+                    None if value::ty_is(v, term.ty()) => Ok(v.clone()),
                     None => eval_term(run, residual, term),
                 },
                 _ => None,
@@ -3086,7 +3086,7 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
     match compile_impl(false, t.fusion, t.dynamic, &t.count_source, residual, term) {
         Ok(program) => {
             let inner = Run {
-                t: program,
+                t: program.into(),
                 live: run.live.clone(),
                 state: run.state.clone(),
                 elems: run.elems.clone(),
@@ -3289,7 +3289,7 @@ pub struct ForceOptions {
 
 fn make_run(t: &T, live: &Live, o: &ForceOptions, column_source: Option<ColumnSource>, expected_count: Option<usize>) -> Run {
     Run {
-        t: t.clone(),
+        t: t.clone().into(),
         live: live.clone(),
         state: o.state.clone().unwrap_or_else(E::create_state),
         elems: o.elems.clone(),
@@ -3357,10 +3357,10 @@ pub mod host {
         CURRENT.with(|c| c.borrow().is_none())
     }
 
-    fn argument_index(v: &Value) -> Result<Option<(Ty, i64)>, Diagnostic> {
+    fn argument_index(v: &Value) -> Result<Option<(&Ty, i64)>, Diagnostic> {
         match v {
             Value::Source(g) if g.name == "$core/argument" => match (g.fields.len(), g.fields.get_str("index")) {
-                (1, Some(Value::Int(index))) => Ok(Some((g.ty.clone(), *index))),
+                (1, Some(Value::Int(index))) => Ok(Some((&g.ty, *index))),
                 _ => Err(value::fail("E_CORE_ARGUMENT", "Invalid compiled argument declaration.")),
             },
             _ => Ok(None),
@@ -3369,6 +3369,18 @@ pub mod host {
 
     /// Declared types of the structured Core arguments captured by this region.
     pub fn argument_types(t: &T) -> Result<Vec<Ty>, Diagnostic> {
+        cached_argument_types(t).map(<[Ty]>::to_vec)
+    }
+
+    fn cached_argument_types(t: &T) -> Result<&[Ty], Diagnostic> {
+        if let Some(types) = t.argument_types.get() {
+            return Ok(types);
+        }
+        let types = collect_argument_types(t)?;
+        Ok(t.argument_types.get_or_init(|| types))
+    }
+
+    fn collect_argument_types(t: &T) -> Result<Vec<Ty>, Diagnostic> {
         let mut types: HashMap<i64, Ty> = HashMap::new();
         let mut visited: HashSet<(i64, i64)> = HashSet::new();
         fn value(v: &Value, types: &mut HashMap<i64, Ty>, visited: &mut HashSet<(i64, i64)>) -> Result<(), Diagnostic> {
@@ -3377,9 +3389,10 @@ pub mod host {
                     return Err(value::fail("E_CORE_ARGUMENT", "Invalid compiled argument index."));
                 }
                 match types.get(&index) {
-                    Some(old) if *old != ty => return Err(value::fail("E_CORE_ARGUMENT", "Compiled argument types disagree.")),
-                    _ => {
-                        types.insert(index, ty);
+                    Some(old) if old != ty => return Err(value::fail("E_CORE_ARGUMENT", "Compiled argument types disagree.")),
+                    Some(_) => {}
+                    None => {
+                        types.insert(index, ty.clone());
                     }
                 }
                 return Ok(());
@@ -3436,12 +3449,12 @@ pub mod host {
     /// for a device that checks what it uploads (a resident fold's placeholders are zeros).
     pub fn bind_arguments(t: &T, arguments: &[Value], validate: Option<bool>) -> Result<T, Diagnostic> {
         let validate = validate.unwrap_or(true);
-        let types = argument_types(t)?;
+        let types = cached_argument_types(t)?;
         if types.len() != arguments.len() {
             return Err(value::fail("E_CORE_ARGUMENT", "Compiled region argument count differs from its declaration."));
         }
         for (index, v) in arguments.iter().enumerate() {
-            if value::ty_of(v) != types[index] {
+            if !value::ty_is(v, &types[index]) {
                 return Err(value::fail("E_CORE_ARGUMENT", "Compiled region argument storage differs from its declared type."));
             }
             if validate {
@@ -3735,7 +3748,7 @@ pub mod host {
 
     fn pv_run(pv: &Pv, resolve: &Option<Resolve>) -> Run {
         Run {
-            t: pv.t.clone(),
+            t: pv.t.clone().into(),
             live: pv.live.clone(),
             state: pv.state.clone(),
             elems: None,
@@ -3787,7 +3800,7 @@ pub mod host {
 
     fn pv_force(pv: &Pv, resolve: &Option<Resolve>, program: &T) -> Result<Value, Diagnostic> {
         let mut run = pv_run(pv, resolve);
-        run.t = program.clone();
+        run.t = program.clone().into();
         force_one(&run, None)
     }
 
@@ -4005,7 +4018,7 @@ pub mod host {
             }
         };
         for (index, value) in arrays.iter().enumerate() {
-            if value::ty_of(value) != *t.sources[index].1.ty() {
+            if !value::ty_is(value, t.sources[index].1.ty()) {
                 return Err(fail("E_ARRAY_TYPE", "Kernel input changed its packed element type."));
             }
         }

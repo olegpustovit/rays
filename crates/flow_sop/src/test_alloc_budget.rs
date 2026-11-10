@@ -242,9 +242,9 @@ fn attribute_map_output_buffers() {
 // Shared residual/term/Record data, Symbol names and geometry layout: maxima across all three fixture sizes,
 // rounded to cover key-size variation. Never raise.
 // Each pair is (allocations, peak B); changed-input peak excludes only newly owned output payload.
-const SUBDIVIDE_WARM: [(u64, i64); 2] = [(8, 2_878), (68_565, 2_660_000)];
-const BOOLEAN_WARM: [(u64, i64); 2] = [(9, 3_534), (16_500, 855_000)];
-const SCATTER_WARM: [(u64, i64); 2] = [(8, 3_960), (262_500, 6_400_000)];
+const SUBDIVIDE_WARM: [(u64, i64); 2] = [(8, 2_878), (45_700, 2_660_000)];
+const BOOLEAN_WARM: [(u64, i64); 2] = [(9, 3_534), (16_250, 855_000)];
+const SCATTER_WARM: [(u64, i64); 2] = [(8, 3_960), (244_900, 6_400_000)];
 
 // These are session cooks: lowering and input construction stay outside the counters.
 // Measure a cache hit, then a genuinely new input after the same-sized kernel has warmed.
