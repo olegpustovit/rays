@@ -1,6 +1,6 @@
 //! exact overlap arrangements for coplanar
 //! Boolean face pairs.
-#![allow(non_snake_case)]
+
 
 use std::sync::Arc;
 

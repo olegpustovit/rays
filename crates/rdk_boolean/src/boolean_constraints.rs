@@ -2,7 +2,7 @@
 //! exact triangle-triangle constraint planning
 //! for the Boolean pipeline (broad phase, exact classification, implicit event points, CSR
 //! incidence per face).
-#![allow(non_snake_case)]
+
 
 use std::sync::Arc;
 

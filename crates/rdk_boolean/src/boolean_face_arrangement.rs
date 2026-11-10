@@ -1,6 +1,6 @@
 //! exact planar splitting of one face's
 //! non-coplanar Boolean constraints.
-#![allow(non_snake_case)]
+
 use rays_math::float::{min as fmin, max as fmax, compare as fcmp};
 
 use std::cmp::Ordering;

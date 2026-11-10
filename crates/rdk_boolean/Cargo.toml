@@ -13,3 +13,6 @@ cfmt = { path = "../cfmt" }
 
 [dev-dependencies]
 rdk_ops = { path = "../rdk_ops" }
+
+[lints]
+workspace = true

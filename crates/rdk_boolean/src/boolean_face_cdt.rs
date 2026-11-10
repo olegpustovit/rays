@@ -1,6 +1,6 @@
 //! deterministic exact-predicate constrained
 //! Delaunay refinement of one face (adapter over `Planar_cdt`).
-#![allow(non_snake_case)]
+
 use rays_math::float::{min as fmin, max as fmax};
 
 use std::cell::RefCell;

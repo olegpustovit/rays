@@ -1,6 +1,6 @@
 //! parallel deterministic per-face Boolean
 //! constraint refinement.
-#![allow(non_snake_case)]
+
 
 use std::sync::Arc;
 

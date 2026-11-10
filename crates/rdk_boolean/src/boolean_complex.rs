@@ -1,6 +1,6 @@
 //! the conforming two-complex assembled from refined
 //! Boolean faces.
-#![allow(non_snake_case)]
+
 
 use std::collections::HashMap;
 use std::sync::Arc;
