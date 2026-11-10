@@ -472,7 +472,7 @@ pub fn buffer_info_length(receiver: &Handle) -> Result<u64, Error> {
     Ok(unsafe { output.assume_init() })
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_buffer_info_length"] fn ffi_rays_metal_buffer_info_length(receiver: *mut super::NativeHandle, output: *mut u64, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn buffer_info_storageMode(receiver: &Handle) -> Result<i64, Error> {
+pub fn buffer_info_storage_mode(receiver: &Handle) -> Result<i64, Error> {
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     let mut output: MaybeUninit<i64> = MaybeUninit::uninit();
@@ -482,7 +482,7 @@ pub fn buffer_info_storageMode(receiver: &Handle) -> Result<i64, Error> {
     Ok(unsafe { output.assume_init() })
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_buffer_info_storageMode"] fn ffi_rays_metal_buffer_info_storageMode(receiver: *mut super::NativeHandle, output: *mut i64, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn buffer_info_cpuCacheMode(receiver: &Handle) -> Result<i64, Error> {
+pub fn buffer_info_cpu_cache_mode(receiver: &Handle) -> Result<i64, Error> {
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     let mut output: MaybeUninit<i64> = MaybeUninit::uninit();
@@ -492,7 +492,7 @@ pub fn buffer_info_cpuCacheMode(receiver: &Handle) -> Result<i64, Error> {
     Ok(unsafe { output.assume_init() })
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_buffer_info_cpuCacheMode"] fn ffi_rays_metal_buffer_info_cpuCacheMode(receiver: *mut super::NativeHandle, output: *mut i64, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn buffer_info_hazardTrackingMode(receiver: &Handle) -> Result<i64, Error> {
+pub fn buffer_info_hazard_tracking_mode(receiver: &Handle) -> Result<i64, Error> {
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     let mut output: MaybeUninit<i64> = MaybeUninit::uninit();

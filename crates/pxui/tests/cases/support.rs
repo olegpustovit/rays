@@ -54,7 +54,3 @@ pub fn frame_at(keys: Vec<Key>, scale: f64, time: f64, events: Vec<Event>) -> fr
     input.events = events;
     frame::Frame { input, pixel_scale: (scale, scale), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
-
-pub fn simple_frame(events: Vec<Event>) -> frame::Frame {
-    frame_at(Vec::new(), 1.0, 0.0, events)
-}

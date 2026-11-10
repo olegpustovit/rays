@@ -29,6 +29,7 @@ pub struct Argument {
     pub buffer_struct_type: Option<ReflectedType>,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)] // Snapshot mirrors every driver reflection kind, including unsupported fixture variants.
 pub enum Kind { Scalar, Array, Pointer, Struct, TextureReference, TensorReference }
 
 

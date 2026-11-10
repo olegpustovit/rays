@@ -993,7 +993,7 @@ impl Ui {
                     }
                     _ => {
                         // a lead (the expression's f) and a trail (its live value) frame the value: 6 between
-                        let mut draw_part = |paint: &mut Paint, right: bool, text: &str, color: Color| -> f64 {
+                        let draw_part = |paint: &mut Paint, right: bool, text: &str, color: Color| -> f64 {
                             let width = paint.text_width(size, text);
                             let tx = if right { (x + w - 2) as f64 - width } else { (x + 2) as f64 };
                             paint.text_with((tx, text_y), size, 0.0, Some(color), text);
@@ -3119,7 +3119,7 @@ impl Ui {
         let row_top = |index: i64| {
             y + 7.0 + items.iter().take(0.max(index) as usize).fold(0.0, |top, (text, _)| top + if text.is_empty() { gap } else { row_height })
         };
-        let mut sub_geometry = |ui: &mut Ui, sub: &Submenu| -> Rect {
+        let sub_geometry = |ui: &mut Ui, sub: &Submenu| -> Rect {
             let sub_width = view_w.min(ui.menu_measure(if sub.current.is_none() { 0.0 } else { 14.0 }, &sub.keys, &[], 0.0, &sub.rows, swatch_pad, key_size));
             let sub_height = height_of(&sub.rows);
             let sx = if x + width - 1.0 + sub_width <= view_w { x + width - 1.0 } else { x - sub_width + 1.0 };

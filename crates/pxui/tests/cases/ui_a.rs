@@ -18,7 +18,7 @@ fn field_ui() -> Ui {
 fn scale_1(scale: f64) {
     let lab = |m: &str| label(scale, m);
     let mut ui = field_ui();
-    let mut roots = |ui: &mut Ui, events: Vec<Event>| -> (Signal, Signal, i64) {
+    let roots = |ui: &mut Ui, events: Vec<Event>| -> (Signal, Signal, i64) {
         let mut out = None;
         ui.frame(&frame_at(vec![], scale, 0.5, events), &mut |ui| {
             let root = ui.box_("root", BoxOpts::default().flags(CLICKABLE).w(Size::Px(100.0)).h(Size::Px(100.0)));
@@ -311,7 +311,7 @@ fn scale_7(scale: f64) {
 
     let fixed = RefCell::new([false; 4]);
     let mut ui = field_ui();
-    let mut fixed_panel = |ui: &mut Ui, events: Vec<Event>| {
+    let fixed_panel = |ui: &mut Ui, events: Vec<Event>| {
         let t = advance();
         ui.frame(&frame_at(vec![], scale, t, events), &mut |ui| {
             ui.panel(PanelOpts::default().at(0.0, 0.0).width(240.0).height(80.0), "fixed", &mut |ui| {
@@ -336,7 +336,7 @@ fn scale_7(scale: f64) {
 
     let mut ui = field_ui();
     let child_y = Cell::new(0.0);
-    let mut rubber = |ui: &mut Ui, events: Vec<Event>| {
+    let rubber = |ui: &mut Ui, events: Vec<Event>| {
         let t = advance();
         let mut child = None;
         ui.frame(&frame_at(vec![], scale, t, events), &mut |ui| {
@@ -362,7 +362,7 @@ fn scale_7(scale: f64) {
     ui.destroy();
 
     let mut ui = field_ui();
-    let mut scroll_dir = |ui: &mut Ui, events: Vec<Event>| -> UiBox {
+    let scroll_dir = |ui: &mut Ui, events: Vec<Event>| -> UiBox {
         let t = advance();
         let mut parent = None;
         ui.frame(&frame_at(vec![], scale, t, events), &mut |ui| {
@@ -543,7 +543,7 @@ fn scale_9(scale: f64) {
     // A pinch goes where the wheel goes: to the scrollable box under the pointer, its factors
     // multiplied within a frame, and nowhere else.
     let mut ui = field_ui();
-    let mut pinched = |ui: &mut Ui, events: Vec<Event>| -> f64 {
+    let pinched = |ui: &mut Ui, events: Vec<Event>| -> f64 {
         let t = advance();
         let mut seen = 1.0;
         ui.frame(&frame_at(vec![], scale, t, events), &mut |ui| {
@@ -798,7 +798,7 @@ pub fn window_pxui_tooltip_rest() {
     let mut ui = field_ui();
     let key_name = RefCell::new("a".to_owned());
     let skip = Cell::new(false);
-    let mut step = |ui: &mut Ui, key: Option<&str>, skipped: bool, time: f64, events: Vec<Event>| -> (bool, bool, bool) {
+    let step = |ui: &mut Ui, key: Option<&str>, skipped: bool, time: f64, events: Vec<Event>| -> (bool, bool, bool) {
         let mut out = (false, false, false);
         key_name.replace(key.unwrap_or("a").to_owned());
         skip.set(skipped);

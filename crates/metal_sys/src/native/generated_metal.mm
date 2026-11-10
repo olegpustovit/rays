@@ -29,7 +29,11 @@ extern "C" int32_t rays_metal_default_device(MetalHandle **out, const char **mes
 extern "C" int32_t rays_metal_device_supports_sampler_reduction(MetalHandle *handle, uint8_t *output, const char **message) { if (message) *message = nullptr; if (output == nullptr) return set_error(message, "invalid sampler capability output"); @try { @autoreleasepool { id<MTLDevice> device = checked_object(handle, KIND_DEVICE); BOOL supported = NO; if (@available(macOS 26.0, *)) { supported = [device supportsFamily:MTLGPUFamilyApple10] && [MTLSamplerDescriptor instancesRespondToSelector:@selector(reductionMode)] && [MTLSamplerDescriptor instancesRespondToSelector:@selector(setReductionMode:)] && [MTLSamplerDescriptor instancesRespondToSelector:@selector(lodBias)] && [MTLSamplerDescriptor instancesRespondToSelector:@selector(setLodBias:)]; } *output = supported ? 1 : 0; return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
 extern "C" int pthread_main_np(void);
 extern "C" int32_t rays_metal_is_main_thread(void) { return pthread_main_np(); }
+// Legacy Metal ABI coverage remains callable on older supported macOS versions.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 extern "C" int32_t rays_metal_buffer_copy(MetalHandle *handle, uint64_t offset, uint8_t *bytes, uintptr_t length, uint8_t write, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLBuffer> buffer = checked_object(handle, KIND_BUFFER); if (offset > buffer.length || length > buffer.length - offset) return set_error(message, "buffer range is out of bounds"); void *contents = buffer.contents; if (contents == nullptr) return set_error(message, "buffer has no CPU mapping"); if (length != 0) { if (write) __builtin_memcpy(static_cast<uint8_t *>(contents) + offset, bytes, length); else __builtin_memcpy(bytes, static_cast<uint8_t *>(contents) + offset, length); } if (write && length != 0 && buffer.storageMode == MTLStorageModeManaged) [buffer didModifyRange:NSMakeRange(static_cast<NSUInteger>(offset), static_cast<NSUInteger>(length))]; return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
+#pragma clang diagnostic pop
 extern "C" int32_t rays_metal_buffer_readback(MetalHandle *handle, uint8_t **contents, uint64_t *length, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLBuffer> buffer = checked_object(handle, KIND_BUFFER); if (buffer.storageMode != MTLStorageModeShared) return rays_metal_set_unsupported(message, "readback requires shared buffer storage"); if (contents == nullptr || length == nullptr) return set_error(message, "invalid readback output"); *contents = static_cast<uint8_t *>(buffer.contents); *length = buffer.length; if (*contents == nullptr) return set_error(message, "buffer has no CPU mapping"); return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
 #include <unistd.h>
 extern "C" int32_t rays_metal_buffer_create_mapped(MetalHandle *device_handle, uint64_t length, int64_t options, MetalHandle **out, float **mapping, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLDevice> device = checked_object(device_handle, KIND_DEVICE); const uint64_t page = static_cast<uint64_t>(getpagesize()); if (page == 0 || length > UINT64_MAX - (page - 1)) return set_error(message, "mapped buffer rounded length overflows"); const uint64_t rounded = ((length + page - 1) / page) * page; if (rounded > std::numeric_limits<NSUInteger>::max()) return set_error(message, "mapped buffer exceeds Metal length bounds"); id<MTLBuffer> buffer = [device newBufferWithLength:static_cast<NSUInteger>(rounded) options:static_cast<MTLResourceOptions>(options)]; if (buffer == nil || buffer.contents == nullptr) return set_error(message, "unable to allocate mapped Metal buffer"); __builtin_memset(buffer.contents, 0, static_cast<size_t>(rounded)); *out = make_handle(buffer, KIND_BUFFER); if (*out == nullptr) return set_error(message, "unable to allocate Metal handle"); *mapping = static_cast<float *>(buffer.contents); return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
@@ -95,7 +99,11 @@ struct RaysPresentationCommandSnapshot { uint64_t queue_device_id; uint64_t devi
 extern "C" int32_t rays_metal_presentation_command_snapshot(MetalHandle *handle, RaysPresentationCommandSnapshot *out, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLCommandBuffer> buffer = checked_object(handle, KIND_COMMAND_BUFFER); out->queue_device_id = buffer.commandQueue.device.registryID; out->device_id = buffer.device.registryID; out->error_options = static_cast<uint64_t>(buffer.errorOptions); out->gpu_start = buffer.GPUStartTime; out->gpu_end = buffer.GPUEndTime; out->kernel_start = buffer.kernelStartTime; out->kernel_end = buffer.kernelEndTime; out->retained_references = buffer.retainedReferences ? 1 : 0; return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
 extern "C" int32_t rays_metal_texture_info(MetalHandle *handle, int64_t *values, const char **message) { if (message) *message = nullptr; if (values == nullptr) return set_error(message, "invalid texture-info output"); @try { @autoreleasepool { id<MTLTexture> texture = checked_object(handle, KIND_TEXTURE); MTLTextureSwizzleChannels swizzle = texture.swizzle; values[0] = static_cast<int64_t>(texture.textureType); values[1] = static_cast<int64_t>(texture.pixelFormat); values[2] = static_cast<int64_t>(texture.width); values[3] = static_cast<int64_t>(texture.height); values[4] = static_cast<int64_t>(texture.depth); values[5] = static_cast<int64_t>(texture.mipmapLevelCount); values[6] = static_cast<int64_t>(texture.sampleCount); values[7] = static_cast<int64_t>(texture.arrayLength); values[8] = static_cast<int64_t>(texture.usage); values[9] = static_cast<int64_t>(texture.storageMode); values[10] = static_cast<int64_t>(texture.cpuCacheMode); values[11] = static_cast<int64_t>(texture.hazardTrackingMode); values[12] = texture.allowGPUOptimizedContents ? 1 : 0; values[13] = static_cast<int64_t>(texture.compressionType); values[14] = static_cast<int64_t>(swizzle.red); values[15] = static_cast<int64_t>(swizzle.green); values[16] = static_cast<int64_t>(swizzle.blue); values[17] = static_cast<int64_t>(swizzle.alpha); return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
 #include <cstring>
+// Legacy Metal ABI coverage remains callable on older supported macOS versions.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 extern "C" int32_t rays_metal_library_compile(MetalHandle *device_handle, const char *source_bytes, const char *label_bytes, MetalHandle **out, const char **message) { if (message) *message = nullptr; if (source_bytes == nullptr) return set_error(message, "null Metal source"); @try { @autoreleasepool { id<MTLDevice> device = checked_object(device_handle, KIND_DEVICE); NSString *source = [NSString stringWithUTF8String:source_bytes]; if (source == nil) return set_error(message, "Metal source is not valid UTF-8"); NSString *label = label_bytes ? [NSString stringWithUTF8String:label_bytes] : nil; if (label_bytes && label == nil) return set_error(message, "Metal library label is not valid UTF-8"); MTLCompileOptions *options = [[MTLCompileOptions alloc] init]; options.fastMathEnabled = NO; NSError *error = nil; id<MTLLibrary> library = [device newLibraryWithSource:source options:options error:&error]; if (library == nil) { NSString *description = error.localizedDescription ?: @"Metal source compilation failed without NSError"; if (label) description = [NSString stringWithFormat:@"%@: %@", label, description]; return set_error(message, description.UTF8String); } library.label = label; if (library.device.registryID != device.registryID || ((label == nil) != (library.label == nil)) || (label && ![library.label isEqualToString:label])) return set_error(message, "Metal changed checked library properties"); *out = make_handle(library, KIND_LIBRARY); return *out ? 0 : set_error(message, "unable to allocate Metal handle"); } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
+#pragma clang diagnostic pop
 extern "C" int32_t rays_metal_library_function_names(MetalHandle *handle, char **output, uintptr_t *length, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLLibrary> library = checked_object(handle, KIND_LIBRARY); std::string packed; for (NSString *name in library.functionNames) { const char *utf8 = name.UTF8String ?: ""; packed.append(utf8); packed.push_back('\0'); } if (packed.empty()) packed.push_back('\0'); char *bytes = new (std::nothrow) char[packed.size()]; if (bytes == nullptr) return set_error(message, "unable to allocate function-name buffer"); std::memcpy(bytes, packed.data(), packed.size()); *output = bytes; *length = packed.size(); return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
 extern "C" void rays_metal_free_bytes(char *bytes) { delete[] bytes; }
 extern "C" int32_t rays_metal_function_find(MetalHandle *library_handle, const char *name_bytes, MetalHandle **out, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLLibrary> library = checked_object(library_handle, KIND_LIBRARY); NSString *name = name_bytes ? [NSString stringWithUTF8String:name_bytes] : nil; if (name == nil) return set_error(message, "Metal function name is not valid UTF-8"); id<MTLFunction> function = [library newFunctionWithName:name]; if (function == nil) return set_error(message, "Metal library has no function with the requested name"); if (function.device.registryID != library.device.registryID || ![function.name isEqualToString:name]) return set_error(message, "Metal changed checked function lookup properties"); *out = make_handle(function, KIND_FUNCTION); return *out ? 0 : set_error(message, "unable to allocate Metal handle"); } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
@@ -395,6 +403,9 @@ static_assert(static_cast<unsigned long long>(MTLDataTypeUShort4) == 0x000000000
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 110000
 static_assert(static_cast<unsigned long long>(MTLDataTypeVisibleFunctionTable) == 0x0000000000000073ULL);
 #endif
+// These stable ABI constants are deprecated in favour of MTLGPUFamily.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 101100
 static_assert(static_cast<unsigned long long>(MTLFeatureSet_OSX_GPUFamily1_v1) == 0x0000000000002710ULL);
 #endif
@@ -422,6 +433,7 @@ static_assert(static_cast<unsigned long long>(MTLFeatureSet_macOS_GPUFamily2_v1)
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 101200
 static_assert(static_cast<unsigned long long>(MTLFeatureSet_macOS_ReadWriteTextureTier2) == 0x0000000000002712ULL);
 #endif
+#pragma clang diagnostic pop
 extern "C" int32_t rays_metal_device_supports_family(MetalHandle *receiver, int64_t arg0, uint8_t *out, const char **message) {
   if (message) *message = nullptr;
   @try {
@@ -486,7 +498,11 @@ extern "C" int32_t rays_metal_device_is_low_power(MetalHandle *receiver, uint8_t
   @try {
     @autoreleasepool {
       id<MTLDevice> object = checked_object(receiver, KIND_DEVICE);
+// Legacy Metal ABI coverage remains callable on older supported macOS versions.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
       const BOOL native_result = object.lowPower;
+#pragma clang diagnostic pop
       *out = native_result ? 1 : 0;
       return 0;
     }
@@ -497,7 +513,11 @@ extern "C" int32_t rays_metal_device_is_removable(MetalHandle *receiver, uint8_t
   @try {
     @autoreleasepool {
       id<MTLDevice> object = checked_object(receiver, KIND_DEVICE);
+// Legacy Metal ABI coverage remains callable on older supported macOS versions.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
       const BOOL native_result = object.removable;
+#pragma clang diagnostic pop
       *out = native_result ? 1 : 0;
       return 0;
     }
@@ -508,7 +528,11 @@ extern "C" int32_t rays_metal_device_is_headless(MetalHandle *receiver, uint8_t 
   @try {
     @autoreleasepool {
       id<MTLDevice> object = checked_object(receiver, KIND_DEVICE);
+// Legacy Metal ABI coverage remains callable on older supported macOS versions.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
       const BOOL native_result = object.headless;
+#pragma clang diagnostic pop
       *out = native_result ? 1 : 0;
       return 0;
     }

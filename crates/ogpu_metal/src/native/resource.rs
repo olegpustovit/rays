@@ -164,9 +164,9 @@ fn cache_code(cache: CpuCacheMode) -> i64 { match cache { CpuCacheMode::DefaultC
 fn verify_buffer(operation: &str, raw: &metal_sys::Handle, length: u64, storage: StorageMode, cache: CpuCacheMode) -> Result<(), Error> {
     let actual = (
         metal_sys::registry::buffer_info_length(raw).map_err(|failure| sys_error(operation, failure))?,
-        metal_sys::registry::buffer_info_storageMode(raw).map_err(|failure| sys_error(operation, failure))?,
-        metal_sys::registry::buffer_info_cpuCacheMode(raw).map_err(|failure| sys_error(operation, failure))?,
-        metal_sys::registry::buffer_info_hazardTrackingMode(raw).map_err(|failure| sys_error(operation, failure))?,
+        metal_sys::registry::buffer_info_storage_mode(raw).map_err(|failure| sys_error(operation, failure))?,
+        metal_sys::registry::buffer_info_cpu_cache_mode(raw).map_err(|failure| sys_error(operation, failure))?,
+        metal_sys::registry::buffer_info_hazard_tracking_mode(raw).map_err(|failure| sys_error(operation, failure))?,
     );
     if actual != (length, storage_code(storage), cache_code(cache), 2) {
         Err(error(operation, ErrorKind::DeviceLost, "Metal changed checked buffer properties during creation"))

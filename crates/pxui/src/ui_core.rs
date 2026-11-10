@@ -575,11 +575,6 @@ impl Default for Fonts {
     }
 }
 
-fn iter_code_points(text: &str, visit: &mut dyn FnMut(i64)) {
-    for c in text.chars() {
-        visit(c as i64);
-    }
-}
 
 fn upward(directory: &std::path::Path, relative: &std::path::Path) -> Option<String> {
     let mut dir = Some(directory.to_path_buf());
@@ -818,9 +813,6 @@ pub struct Ui {
 pub type ShelfEntry = (i64, String, Vec<(String, usize, usize)>, Vec<(String, usize, usize)>);
 
 
-fn nonfinite(x: f64) -> bool {
-    !x.is_finite()
-}
 
 pub fn contains(rect: Rect, point: (f64, f64)) -> bool {
     let (x, y, w, h) = rect;
@@ -2380,13 +2372,7 @@ impl Ui {
         self.foreground.push((order, b.index));
     }
 
-    pub(crate) fn box_flags(&self, b: &UiBox) -> Flags {
-        self.boxes[b.index].flags
-    }
 
-    pub(crate) fn set_box_flags(&mut self, b: &UiBox, flags: Flags) {
-        self.boxes[b.index].flags = flags;
-    }
 
     pub(crate) fn set_box_h(&mut self, b: &UiBox, h: Size) {
         self.boxes[b.index].h = h;
@@ -2416,9 +2402,6 @@ impl Ui {
         self.overlays.push(index);
     }
 
-    pub(crate) fn modal_key(&self) -> Option<i64> {
-        self.modal_key
-    }
 
     pub(crate) fn slot_rect(&self, slot: usize) -> Rect {
         let s = &self.slots[slot];
@@ -3599,9 +3582,6 @@ impl Ui {
         self.modal_heights.get(&key).map(|(h, _)| *h).unwrap_or(0.0)
     }
 
-    pub(crate) fn hit_within_pub(&mut self, key: i64, ancestor: i64) -> bool {
-        self.hit_within(key, ancestor)
-    }
 
     pub(crate) fn slot_rw(&self, slot: usize) -> f64 {
         self.slots[slot].rw
@@ -3611,7 +3591,4 @@ impl Ui {
         self.boxes[b.index].flags = flags;
     }
 
-    pub(crate) fn scrub_origin_get(&self) -> Option<(i64, String)> {
-        self.scrub_origin.clone()
-    }
 }
