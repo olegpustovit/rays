@@ -26,6 +26,12 @@ pub struct Trace {
     pub operation: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Authoring {
+    pub signature: Option<String>,
+    pub suggest: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
     pub code: String,
@@ -37,8 +43,18 @@ pub struct Diagnostic {
     pub cause: Option<Vec<u8>>,
     pub hints: Vec<String>,
     pub trace: Vec<Trace>,
-    pub signature: Option<String>,
-    pub suggest: Vec<String>,
+    pub authoring: Option<Box<Authoring>>,
+}
+
+impl Diagnostic {
+    pub fn signature(&self) -> Option<&str> { self.authoring.as_ref().and_then(|a| a.signature.as_deref()) }
+    pub fn suggest(&self) -> &[String] { self.authoring.as_ref().map_or(&[], |a| a.suggest.as_slice()) }
+    pub fn set_signature(&mut self, signature: Option<String>) {
+        if signature.is_some() || self.authoring.is_some() { self.authoring.get_or_insert_default().signature = signature; }
+    }
+    pub fn set_suggest(&mut self, suggest: Vec<String>) {
+        if !suggest.is_empty() || self.authoring.is_some() { self.authoring.get_or_insert_default().suggest = suggest; }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,8 +101,7 @@ pub fn error(
         cause,
         hints,
         trace,
-        signature: None,
-        suggest: Vec::new(),
+        authoring: None,
     }
 }
 
@@ -100,8 +115,7 @@ pub fn warning(span: Option<Span>, code: String, message: String) -> Diagnostic 
         cause: None,
         hints: Vec::new(),
         trace: Vec::new(),
-        signature: None,
-        suggest: Vec::new(),
+        authoring: None,
     }
 }
 
