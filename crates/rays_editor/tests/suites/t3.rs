@@ -8,7 +8,7 @@ mod t3c;
 mod commands;
 #[path = "../suite_t3/cook.rs"]
 mod cook_t;
-#[path = "../../../pxui_graph/tests/cases/support.rs"]
+#[path = "../../../rays_graph/tests/cases/support.rs"]
 mod pg;
 #[path = "../suite_t3/probe.rs"]
 mod probe_t;

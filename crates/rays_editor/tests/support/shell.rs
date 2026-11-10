@@ -167,7 +167,7 @@ impl Run {
     pub fn click(&mut self, p: (f64, f64)) {
         self.click_button(MouseButton::LeftButton, p)
     }
-    pub fn panes(&self) -> pxui_shell::layout::Panes {
+    pub fn panes(&self) -> rays_shell::layout::Panes {
         editor::panes(&self.e, &idle_frame(0))
     }
     pub fn undo_label(&self) -> Option<String> {

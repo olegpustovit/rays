@@ -5,8 +5,8 @@ use flow_graph::flow_edit::Op;
 use flow_graph::projection as p;
 use flow_syntax::syntax as s;
 use input::{Event, Key, MouseButton};
-use pxui_graph::scope_pane as scope;
-use pxui_graph::scope_state::{Change, Command, ScopeOpts};
+use rays_graph::scope_pane as scope;
+use rays_graph::scope_state::{Change, Command, ScopeOpts};
 use std::rc::Rc;
 
 fn syn(op: Op) -> Change {
@@ -284,7 +284,7 @@ fn scope_gestures_4() {
     check(p::find(&sc, &result).expect("result").synthetic, "crossing fixture has no unnamed result");
     for level in [p::Level::Card, p::Level::Chip, p::Level::Point] {
         struct Every(p::Level);
-        impl pxui_graph::scope_state::Saved for Every {
+        impl rays_graph::scope_state::Saved for Every {
             fn level(&self, _: &[flow_syntax::symbol::Symbol]) -> Option<(p::Level, bool)> {
                 Some((self.0, true))
             }

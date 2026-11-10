@@ -367,13 +367,13 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut EditorModel, origin: vec3
                     let in_pane = root == laid_graph(&*value);
                     value.probes = probes;
                     value.select_later = if in_pane { Vec::new() } else { vec![shown.clone()] };
-                    if in_pane { pxui_graph::scope_state::select(vec![shown.clone()], &mut pane_mut(value).view); };
+                    if in_pane { rays_graph::scope_state::select(vec![shown.clone()], &mut pane_mut(value).view); };
                 }
                 None => {},
             }
         }
         None => {
-            pxui_graph::scope_state::clear_selection(&mut pane_mut(value).view);
+            rays_graph::scope_state::clear_selection(&mut pane_mut(value).view);
         },
     }
 }

@@ -12,7 +12,7 @@ What is normative, and where:
 |---|---|---|
 | The language's forms, types, loops, functions, macros, and time rules | §11–§13 of this file | `Flow.Syntax`, `Flow.Macro`, `Flow.Workspace`, `Flow.Eval` |
 | The reader, the printer, argument rules, metadata, the editor graph's layout forms | this file, §11 | `Flow.Syntax`, `Flow.Lisp`, `Flow.Workspace`, `Editor_document.Lowering` |
-| The document, layout, exposure, the graph pane, its gestures and keys, carry, the views | this file, §3 to §10 | `Editor_document`, `Flow_graph.Flow_edit`, `Flow_graph.Projection`, `Pxui_graph.Scope`, `Rays_editor` |
+| The document, layout, exposure, the graph pane, its gestures and keys, carry, the views | this file, §3 to §10 | `Editor_document`, `Flow_graph.Flow_edit`, `Flow_graph.Projection`, `Rays_graph.Scope`, `Rays_editor` |
 | Lowering and live values | this file, §13 | `Flow_sop.Lower`, `Flow_sop.Value_lane` |
 | Materials | `workspace/materials.md` | |
 | The kit the pane is drawn with | `pxui.md` | `Pxui.Theme`, `Pxui.Ui` |
@@ -390,7 +390,7 @@ Bypass on `if` selects its then arm; `cond` and `case` cannot be bypassed.
 ### 6.5 Colour and type
 
 A node's type square, its ports and its wires take the colour of the type
-(`Pxui_graph.Node_menu.port_color`, from `Pxui.Theme.ports`: geometry is the theme accent;
+(`Rays_graph.Node_menu.port_color`, from `Pxui.Theme.ports`: geometry is the theme accent;
 float, int, vec3, bool, text, function and record have their own; a list draws its elements'
 colour). The selection is accent corner brackets, a bypassed card is hatched, the node the
 viewport shows wears an accent flag, a drop target is dashed, a node the checker or a cook
@@ -459,7 +459,7 @@ include every geometry node of the scope (`Scope.Inspect.footer_paths`). A name 
 ### 7.2 Keys
 
 All keys are `Editor_core.Command.t` entries in the one keymap. The graph pane's own keys are
-`Pxui_graph.Scope.bindings`; the host scopes them to the graph panel. Node keys act on the
+`Rays_graph.Scope.bindings`; the host scopes them to the graph panel. Node keys act on the
 selection, row keys on the row under the pointer.
 
 | Key | Command id | Action |
@@ -524,7 +524,7 @@ it is view state, outside the document and history.
 ### 7.3 Add
 
 `/ a`, `Tab` in the graph panel and a right-click on empty canvas open the node menu
-(`Pxui_graph.Node_menu`): a search field over the kinds, the likeliest first (what takes an
+(`Rays_graph.Node_menu`): a search field over the kinds, the likeliest first (what takes an
 input after the selected node, then the rest), typed search over the whole catalog by name,
 key or category. A kind of another context is listed after the others, dimmed, and cannot be
 picked. The host writes one `Add_node`: a kind with an input reads the selected node, or the
@@ -696,7 +696,7 @@ Everything in §6 and §7.
 
 ### 8.2 List
 
-`Pxui_shell.Tree` rows. Its keys (`Tree.bindings`, scoped to the graph panel): arrows or
+`Rays_shell.Tree` rows. Its keys (`Tree.bindings`, scoped to the graph panel): arrows or
 `j` / `k` move, Shift extends, Left and Right fold and unfold, Home and End, Tab and
 Shift-Tab reparent, `⌥↑` / `⌥↓` move a row, `F2` renames, Delete removes, `s` filters, `h`
 hides or shows, Enter opens the selected row in the graph, `f` reveals the selection.
@@ -729,7 +729,7 @@ scroll position, so it overshoots and settles like every other scrolling view.
 
 ## 9. Inspector
 
-`Pxui_shell.Inspector` shows the selected node's inputs: the same rows the card has, every
+`Rays_shell.Inspector` shows the selected node's inputs: the same rows the card has, every
 one of them, with a pin toggle per row (§5.1) and a reset. An edit there is the same
 `Flow_edit` op the canvas writes and records the same history entry. An `:of` keyword ties it to one graph panel
 (§11.11). A value operator's input that is itself an operator call (`b` in `(+ 2.0 (* 3.0 a))`) shows one sub-row per literal leaf of that call (labelled `b.1`, `b.1.0`: the argument indices from the row down; depth 4, 12 rows), edited through `Set_arg` with a `sub` path (child indices, the head being child 0); an Unfold button promotes the call to its own binding and card. A single click on such an expression chip on a card (the text after its `ƒ`) makes that expression the inspector's subject: the pane selects the card and the row (`holder @ [":" ^ label]`), and the inspector titles it `holder · label`, names the operator in its head and shows those sub-rows and the Unfold button.
@@ -742,7 +742,7 @@ determines the source. Dotted record reads follow the binding that owns the reco
 
 On by default until the user turns it off (`?`); the setting persists in user preferences.
 
-- **Strip.** `Pxui_shell.Status_bar.guide` lists the keys that apply now. Each command
+- **Strip.** `Rays_shell.Status_bar.guide` lists the keys that apply now. Each command
   carries `guide : Guide_context.t list` (pure data, no predicate), and the host computes the
   current context: `Canvas | Node | Multi | Hints | Leader | Search | List | Text`. `Canvas`
   is the empty canvas, `Node` one node selected, `Multi` several.
@@ -1111,7 +1111,7 @@ These rules settle language and editor cases that would otherwise admit two read
 ### 11.11 Editor context: the layout forms
 
 An `editor` graph returns `(ui/workspace root)`, written in place or bound to a name the graph
-returns. `Lowering.editor` lowers it to an `Editor_core.Panels.t` tree; `Pxui_shell.Layout.geometry`
+returns. `Lowering.editor` lowers it to an `Editor_core.Panels.t` tree; `Rays_shell.Layout.geometry`
 places it. All sizes are logical points.
 
 | Form | Meaning |
@@ -2157,7 +2157,7 @@ them.
 Rules from the root `AGENTS.md` apply. What the code holds itself to:
 
 - A graph-pane frame costs what is in view, never the size of the graph
-  (`lib/pxui_graph/AGENTS.md`); hidden iterations are never built, a zone draws its body
+  (`lib/rays_graph/AGENTS.md`); hidden iterations are never built, a zone draws its body
   once.
 - The value lane does no work for networks without drives.
 - A frame never re-lowers.
@@ -2170,7 +2170,7 @@ Window-free logic tests in `runtest`: the reader, printer, macros, checker and e
 (`crates/flow_check/src/`), threading round trips over every checked-in workspace
 (`crates/rays_editor/tests/`), edits (`crates/editor_document/src/test_workspace_edit.rs`), projection and probes
 (`crates/editor_document/src/test_projection.rs`, `crates/rays_editor/tests/`), the pane's gestures
-(`crates/pxui_graph/tests/`), the document and its layout (`crates/editor_document/src/test_workspace_doc.rs`),
+(`crates/rays_graph/tests/`), the document and its layout (`crates/editor_document/src/test_workspace_doc.rs`),
 lowering, zones and live values (`crates/editor_document/src/test_workspace_cook.rs`, `crates/flow_sop/src/lisp_sop/test_workspace_zone.rs`,
 `crates/flow_sop/src/`), the shell and its layout forms (`crates/rays_editor/tests/`),
 the text pane (`crates/rays_editor/src/test_text_pane.rs`), the carry (`crates/pxui/tests/`,

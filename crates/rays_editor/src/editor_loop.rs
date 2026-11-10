@@ -20,7 +20,7 @@ use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::Value as EValue;
 use input::{Event, Key, MouseButton};
 use pxui::ui::Ui;
-use pxui_shell::layout::Bounds;
+use rays_shell::layout::Bounds;
 use rays::frame;
 use rays::image;
 use rays::scene::{self, Node as scene_node};
@@ -214,7 +214,7 @@ pub fn preview_images(value: &LoopModel, frame_: &frame::Frame) -> Vec<String> {
     if let Some(laid) = m::pane_laid(&(&value.core).into()) {
         if let Some(records) = &laid.records {
             let chains = probe::chains(&laid.scope);
-            for path in pxui_graph::scope_state::selected(m::pane_view(&(&value.core).into())) {
+            for path in rays_graph::scope_state::selected(m::pane_view(&(&value.core).into())) {
                 let probes: Vec<i64> = chains.get(&path).cloned().unwrap_or_default().iter().map(|zone| value.core.probes.get(zone).copied().unwrap_or(0)).collect();
                 let summary = records.borrow_mut().at(&path, &probes);
                 match summary {
@@ -234,7 +234,7 @@ pub fn preview_images(value: &LoopModel, frame_: &frame::Frame) -> Vec<String> {
 /// are reduced before sealing its history. Updates the drag and returns the input
 /// with the drag's pointer events taken out, the held modifiers at the end of the frame, and the
 /// pane's press and release for the camera's pointer grab.
-pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key], &[(i64, (Panel, Option<pxui_shell::layout::Path>))]), loaded: bool, actions: &[Action], sent: &'a frame::Frame, area: Bounds) -> (Cow<'a, frame::Frame>, Vec<Key>, (bool, bool)) {
+pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key], &[(i64, (Panel, Option<rays_shell::layout::Path>))]), loaded: bool, actions: &[Action], sent: &'a frame::Frame, area: Bounds) -> (Cow<'a, frame::Frame>, Vec<Key>, (bool, bool)) {
     let (previous_level, previous_map, held_keys, pane_keys) = before;
     let seal = |core: &mut m::EditorModel| { core.history = history::seal(false, core.history.clone()); };
     let world_drag = if loaded
@@ -889,7 +889,7 @@ pub fn state_text(value: &LoopModel) -> String {
         None => "none".to_string(),
     };
     let scope_selected = {
-        let paths = pxui_graph::scope_state::selected(m::pane_view(&core.into()));
+        let paths = rays_graph::scope_state::selected(m::pane_view(&core.into()));
         if paths.is_empty() { "-".to_string() } else { paths.iter().map(|p| flow_syntax::symbol::join_path(&p, "/")).collect::<Vec<_>>().join(", ") }
     };
     let or_dash = |o: &Option<String>| o.clone().unwrap_or_else(|| "-".to_string());
@@ -908,7 +908,7 @@ pub fn state_text(value: &LoopModel) -> String {
         editor_panes::route(&core.into()),
         text_pane::summary(&core.text),
         core.map_view,
-        pxui_graph::scope_frame::inspect::grabbed(m::pane_view(&core.into())),
+        rays_graph::scope_frame::inspect::grabbed(m::pane_view(&core.into())),
         core.guide,
         core.hud.as_ref().map(|(h, _)| h.clone()).unwrap_or_else(|| "-".to_string()),
         selected,

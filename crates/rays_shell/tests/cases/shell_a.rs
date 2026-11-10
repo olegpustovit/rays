@@ -2,12 +2,12 @@
 //! windows, breadcrumbs), the strips (status, timeline, guide, echo) and the prompts.
 use input::{Event, Key, MouseButton};
 use pxui::ui::*;
-use pxui_shell::chrome::{self, Intent, Side};
-use pxui_shell::layout::{self as L, Axis, Panel, Size as PSize, Panels};
-use pxui_shell::prompt::{self, Macro, MacroResult};
-use pxui_shell::status_bar::{self, TipKind};
-use pxui_shell::timeline_bar;
-use pxui_shell::which_key;
+use rays_shell::chrome::{self, Intent, Side};
+use rays_shell::layout::{self as L, Axis, Panel, Size as PSize, Panels};
+use rays_shell::prompt::{self, Macro, MacroResult};
+use rays_shell::status_bar::{self, TipKind};
+use rays_shell::timeline_bar;
+use rays_shell::which_key;
 use rays::frame;
 use rays::scene::layer;
 
@@ -115,7 +115,7 @@ pub fn window_shell_tools_start() {
     let plain = from(&mut ui, false, "Graph\tgarden / sop");
     let title = from(&mut ui, false, "Graph");
     assert!((focused - plain - 12.0).abs() <= 1e-6 && plain > title + 25.0, "a header's tools do not start after its focus square, title and breadcrumb");
-    let cap = pxui_shell::kit::cap_width(&mut ui, "Graph");
+    let cap = rays_shell::kit::cap_width(&mut ui, "Graph");
     assert!((title - (12.0 + cap + 25.0)).abs() <= 1e-6, "a title alone is not 12 in, its label and 25 to the tools");
     ui.destroy();
 }

@@ -9,8 +9,8 @@ use flow_graph::probe;
 use flow_graph::projection::{self as fproj, ZoneKind};
 use flow_syntax::phase_timer;
 use pxui::ui::Ui;
-use pxui_graph::scope_state as scope;
-use pxui_shell::status_bar::{self, Opts, State};
+use rays_graph::scope_state as scope;
+use rays_shell::status_bar::{self, Opts, State};
 use rays::frame;
 use sop::async_cook::Status;
 

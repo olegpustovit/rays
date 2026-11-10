@@ -4,7 +4,7 @@ use flow_syntax::ty;
 use input::{Event, Key, MouseButton};
 use pxui::theme;
 use pxui::ui::*;
-use pxui_graph::node_menu::{self, Entry, Menu};
+use rays_graph::node_menu::{self, Entry, Menu};
 use rays::frame as rframe;
 
 const BOUNDS: (i64, i64, i64, i64) = (20, 30, 800, 520);

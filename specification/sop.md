@@ -151,7 +151,7 @@ components into one inspector row and graph port. Choices retain their typed
 values. Native `spec()` blocks and Lisp `defnode` declarations expose the same
 schema facts, without a source preprocessor or generated Rust constructors.
 
-Schemas live in the dependency-free `param` library. `Pxui_shell.Inspector`
+Schemas live in the dependency-free `param` library. `Rays_shell.Inspector`
 converts a node.s folders to nested accordions and kinds to native widgets; the
 host applies the returned changes through
 `Node.apply_parameters`, synchronizes hard-bound normalization, and returns
@@ -948,7 +948,7 @@ rebuild decodes the physical input list with the slot presence captured at
 build time, so sparse optional connections keep their slot. Match Size exercises
 this path with one required geometry input and one optional target input.
 
-The node menu (`Pxui_graph.Node_menu`: leader `/ a`, `Tab` in the graph panel, or a
+The node menu (`Rays_graph.Node_menu`: leader `/ a`, `Tab` in the graph panel, or a
 right-click on the empty canvas) is a search field over the kinds, the likeliest first.
 Typing searches the whole catalog by stable key, display label, or category. Catalog tests require unique keys, instantiate every
 registered factory with disconnected placeholders, and compare the constructed
@@ -956,7 +956,7 @@ registered factory with disconnected placeholders, and compare the constructed
 enter an editable graph or points at the wrong SOP fails the test suite. They
 also perturb every cook-impact field of every registered node and require its
 `Node.parameter_key` to change.
-`Pxui_graph.Node_menu.entries_of_factories` is the single adapter from factories to
+`Rays_graph.Node_menu.entries_of_factories` is the single adapter from factories to
 menu entries, and a reachability regression searches the node menu for every
 generated stable key. `sop/blend_shapes`, `sop/attribute_composite`, `sop/skin` and
 `sop/ordered_group` are registered as `sop/blend_shapes`, `sop/attribute_composite`,
@@ -1006,7 +1006,7 @@ changing stored literals. Time-dependent networks resolve on each advancing fram
 unchanged effective values retain their graph and cook keys. A `^:bypass` call makes no
 node: the evaluator passes its first input through.
 
-`rays.pxui_graph` presents the text as a graph (`Pxui_graph.Scope` over
+`rays.rays_graph` presents the text as a graph (`Rays_graph.Scope` over
 `Flow_graph.Projection`): a left-to-right layout on a 24-point lattice, straight wires bent
 clear of cards, explicit point/chip/card/full levels, zones for loops and functions.
 Its gestures and keys are `specification/flow.md` §6 and §7. The canvas never mutates

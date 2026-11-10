@@ -7,7 +7,7 @@ use editor_core::panels::Panel;
 use flow_native::drawing;
 use flow_syntax::ty::Ty;
 use pxui::ui::Ui;
-use pxui_shell::layout::Bounds;
+use rays_shell::layout::Bounds;
 use rays::camera as rcam;
 use rays::frame;
 use rays::image;

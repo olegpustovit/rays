@@ -13,7 +13,7 @@ use editor_document::layout_edit;
 use editor_document::scene_sync::{self as sync, Edit};
 use flow_graph::flow_edit;
 use param::Value;
-use pxui_shell::{layout, tree};
+use rays_shell::{layout, tree};
 use rays::world;
 
 use crate::editor_commands::{self, Action, action_of};

@@ -43,7 +43,7 @@ use crate::timeline;
 use crate::viewport as V;
 use crate::world_map::WorldDrag;
 
-pub type Layout = pxui_shell::layout::Panels;
+pub type Layout = rays_shell::layout::Panels;
 
 /// How the editor draws a prepared object (the sketch's `draw`).
 pub type DrawFn = Rc<dyn Fn(&node::T, &cook::Prepared) -> Result<d3::Scene3, ConversionError>>;
@@ -319,7 +319,7 @@ pub fn selected_node(value: &LoopModel) -> Option<Picked> {
 pub fn displayed_node(value: &LoopModel) -> node::T {
     editor_list::displayed_node(&(&value.core).into())
 }
-pub fn panes(value: &LoopModel, frame_: &frame::Frame) -> pxui_shell::layout::Panes {
+pub fn panes(value: &LoopModel, frame_: &frame::Frame) -> rays_shell::layout::Panes {
     editor_shell::panes(&(&value.core).into(), frame_)
 }
 pub fn can_undo(value: &LoopModel) -> bool {
@@ -353,7 +353,7 @@ pub fn set_probe(value: LoopModel, zone: &[Symbol], index: i64) -> LoopModel {
 }
 
 pub fn node_box(value: &LoopModel, path: &[Symbol]) -> Option<(i64, i64, i64, i64)> {
-    pxui_graph::scope_frame::inspect::box_of(m::pane_view(&(&value.core).into()), path).map(|(x, y, w, h)| (x as i64, y as i64, w as i64, h as i64))
+    rays_graph::scope_frame::inspect::box_of(m::pane_view(&(&value.core).into()), path).map(|(x, y, w, h)| (x as i64, y as i64, w as i64, h as i64))
 }
 
 pub fn edit(mut value: LoopModel, op: &fe::Op) -> Result<LoopModel, String> {
@@ -477,7 +477,7 @@ pub fn follow_focus(value: &LoopModel, core: &m::EditorModel, frame_: &frame::Fr
 }
 
 /// `follow_focus` over a geometry already laid out.
-pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &pxui_shell::layout::Geometry) -> Focus {
+pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &rays_shell::layout::Geometry) -> Focus {
     let keys: Vec<String> = g
         .leaves
         .iter()
@@ -523,7 +523,7 @@ pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &pxui_shell:
     }
 }
 
-pub fn paint_view(value: &LoopModel, key: &str, viewport: pxui_shell::layout::Bounds, view_: &rays::camera::Camera, rendered: &d3::Scene3) -> Vec<rays::scene::Node> {
+pub fn paint_view(value: &LoopModel, key: &str, viewport: rays_shell::layout::Bounds, view_: &rays::camera::Camera, rendered: &d3::Scene3) -> Vec<rays::scene::Node> {
     V::paint(&value.extra, key, V::film(&value.extra, &look_key(value, key), viewport), view_, rendered)
 }
 

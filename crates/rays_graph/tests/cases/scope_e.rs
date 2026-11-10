@@ -2,8 +2,8 @@
 use crate::support::*;
 use flow_graph::flow_edit as e;
 use flow_graph::projection as p;
-use pxui_graph::scope_pane as scope;
-use pxui_graph::scope_state::ScopeOpts;
+use rays_graph::scope_pane as scope;
+use rays_graph::scope_state::ScopeOpts;
 use std::rc::Rc;
 
 fn scope_of(text: &str) -> p::Scope {
@@ -143,8 +143,8 @@ fn bench_scope_big() {
 
 fn scope_mutation_keeps_prior_changes_and_defers_syntax_edits() {
     use input::Key;
-    use pxui_graph::scope_commands::step_hints;
-    use pxui_graph::scope_state::{Change, Command};
+    use rays_graph::scope_commands::step_hints;
+    use rays_graph::scope_state::{Change, Command};
     let projection = Rc::new(scope_of("(workspace w (graph g :context sop (let* [a (sop/box) b (sop/transform a) c (sop/transform b)] c)))"));
     let mut view = scope::create(Some(1000), Some(700));
     scope::with_scope(ScopeOpts::default(), "g", projection.clone(), &mut view);
@@ -166,7 +166,7 @@ fn scope_mutation_keeps_prior_changes_and_defers_syntax_edits() {
 }
 
 fn change_equality() {
-    use pxui_graph::scope_state::Change;
+    use rays_graph::scope_state::Change;
     let edit = Change::SyntaxEdit(e::Op::Rename { node: path(&["g", "a"]), to_: "b".into() });
     let same = edit.clone();
     let different = Change::SyntaxEdit(e::Op::Rename { node: path(&["g", "a"]), to_: "c".into() });

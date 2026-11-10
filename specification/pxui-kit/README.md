@@ -1,8 +1,8 @@
 # The kit's reference sheets
 
 The design of the Rays UI (kit rev 3) as static pages, one per sheet of the "Rays UI Redesign"
-canvas, with their renders. They are the ground truth for `Pxui.Theme`, `Pxui.Ui`, `Pxui_shell`,
-`Pxui_graph` and the editor's panels: a panel is right when its picture matches its sheet, token
+canvas, with their renders. They are the ground truth for `Pxui.Theme`, `Pxui.Ui`, `Rays_shell`,
+`Rays_graph` and the editor's panels: a panel is right when its picture matches its sheet, token
 for token and point for point. Like `specification/flow/prototype`, this is a reference to open in
 a browser, never product code and never a web fallback.
 

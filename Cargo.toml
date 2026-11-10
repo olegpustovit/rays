@@ -23,7 +23,7 @@ opt-level = 3
 # B2: UI / graph crates off the `rays check` hot path — faster cold codegen, hot path stays opt-level 1
 [profile.dev.package.rays_editor]
 opt-level = 0
-[profile.dev.package.pxui_graph]
+[profile.dev.package.rays_graph]
 opt-level = 0
 [profile.dev.package.editor_document]
 opt-level = 0

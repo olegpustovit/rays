@@ -5,7 +5,7 @@ use editor_core::panels::Panel;
 use editor_document::lowering;
 use flow_graph::flow_edit::ArgKey;
 use input::{Event, Key, MouseButton};
-use pxui_shell::layout;
+use rays_shell::layout;
 use rays_editor::{editor, reduce};
 
 const LB: MouseButton = MouseButton::LeftButton;
@@ -235,7 +235,7 @@ pub fn run_outline_button() {
     let leaf = layout::find(&layout::geometry(None, None, &d.shell.expect("shell").tree, &idle_frame(0)), &Panel::Graph).expect("graph leaf");
     let header = leaf.header;
     let mut ui = pxui::ui::Ui::create(input::Platform::Apple, Some(11), None);
-    let from = pxui_shell::chrome::tools_start(&mut ui, true, false, false, &format!("Graph\t{} / value", r.dump("pane graph")));
+    let from = rays_shell::chrome::tools_start(&mut ui, true, false, false, &format!("Graph\t{} / value", r.dump("pane graph")));
     let (x, y) = match rays_editor::bars::tool_rect(true, &mut ui, header, from, rays_editor::bars::Tool::Outline) {
         Some((x, y, w, h)) => (x + w / 2., y + h / 2.),
         None => fail("the Outline button is cut off"),

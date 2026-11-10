@@ -11,9 +11,9 @@ use editor_core::guide_context as gc;
 use editor_core::keymap::Trigger;
 use editor_core::panels::{Axis, Panel, Path};
 use input::Key;
-use pxui_graph::scope_commands as scope_commands;
-use pxui_graph::scope_state::Command as Scope_command_t;
-use pxui_shell::tree;
+use rays_graph::scope_commands as scope_commands;
+use rays_graph::scope_state::Command as Scope_command_t;
+use rays_shell::tree;
 
 use crate::text_pane;
 
@@ -300,7 +300,7 @@ pub fn text_keys() -> Vec<(&'static str, Trigger)> {
     ]
 }
 
-/// The leader sheet's sections (`Pxui_shell.Which_key.panel`): what a command is for, from its id.
+/// The leader sheet's sections (`Rays_shell.Which_key.panel`): what a command is for, from its id.
 pub fn group(c: &Command) -> &'static str {
     let id = c.id.as_str();
     let starts = |prefix: &str| id.starts_with(prefix);
@@ -321,7 +321,7 @@ pub fn group(c: &Command) -> &'static str {
     }
 }
 
-/// The key sheet's sections (`Pxui_shell.Which_key.sheet`): a pane's own keys under the pane, the
+/// The key sheet's sections (`Rays_shell.Which_key.sheet`): a pane's own keys under the pane, the
 /// rest as the leader sheet has them.
 pub fn sheet_group(c: &Command) -> &'static str {
     match &c.scope {

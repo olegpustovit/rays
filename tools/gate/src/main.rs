@@ -961,8 +961,8 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("ogpu_metal", &["ogpu_core", "metal_sys", "native_layer_token_sys"][..]),
         ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys", "rays_math"][..]),
         ("pxui", &["rays", "rays_math", "param", "mem", "scene_command"][..]),
-        ("pxui_shell", &["rays", "rays_math", "editor_core", "pxui"][..]),
-        ("pxui_graph", &[
+        ("rays_shell", &["rays", "rays_math", "editor_core", "pxui"][..]),
+        ("rays_graph", &[
             "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "flow_graph", "pxui", "editor_core",
         ][..]),
         ("editor_core", &["param", "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "runtime_resources"][..]),
@@ -1007,7 +1007,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let mut rules: HashMap<String, HashSet<String>> = HashMap::new();
     let upper = [
         "param", "flow_ir", "flow_web", "flow_shader", "flow_gpu", "flow_graph", "flow_sop",
-        "flow_native", "rays", "editor_core", "editor_document", "pxui", "pxui_shell", "pxui_graph",
+        "flow_native", "rays", "editor_core", "editor_document", "pxui", "rays_shell", "rays_graph",
         "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer",
         "web_export", "rays_editor", "rays_bin", "flow_sop_catalog",
     ];
@@ -1038,29 +1038,29 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         forbid(library, &["sdl3", "runtime", "rays", "renderer"]);
     }
     forbid("runtime", &upper);
-    forbid("flow_native", &["pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
+    forbid("flow_native", &["pxui", "rays_shell", "rays_graph", "rays_editor"]);
     forbid("flow_ir", &[
-        "rays", "pxui", "pxui_shell", "pxui_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops",
+        "rays", "pxui", "rays_shell", "rays_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops",
         "rdk_boolean", "rdk_rays", "rays_pathtracer", "rays_editor",
     ]);
     forbid("flow_shader", &[
         "runtime", "renderer", "ogpu_mock", "ogpu_metal", "ogpu_vulkan",
         "rays", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer", "flow_sop",
-        "sop", "editor_core", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
+        "sop", "editor_core", "pxui", "rays_shell", "rays_graph", "rays_editor",
     ]);
     forbid("flow_gpu", &[
         "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer", "flow_sop",
-        "editor_core", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
+        "editor_core", "pxui", "rays_shell", "rays_graph", "rays_editor",
     ]);
     forbid("flow_web", &[
         "rays", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer",
-        "flow_sop", "flow_gpu", "editor_core", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
+        "flow_sop", "flow_gpu", "editor_core", "pxui", "rays_shell", "rays_graph", "rays_editor",
     ]);
     forbid("flow_web", &gpu);
     // G6: the web target needs no SDL, runtime or renderer, directly or transitively.
-    forbid("web_export", &["pxui", "pxui_shell", "pxui_graph", "rays_editor", "rays", "runtime", "runtime_resources", "renderer", "sdl3"]);
+    forbid("web_export", &["pxui", "rays_shell", "rays_graph", "rays_editor", "rays", "runtime", "runtime_resources", "renderer", "sdl3"]);
     forbid("rays", &[
-        "pxui", "pxui_shell", "pxui_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean",
+        "pxui", "rays_shell", "rays_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean",
         "rdk_rays", "rays_pathtracer", "rays_editor",
     ]);
     forbid("rays_math", &["rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "sop"]);
@@ -1073,31 +1073,31 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     forbid("rdk_ops", &gpu);
     forbid("rdk_boolean", &["rdk_ops", "rays", "rdk_rays", "sop"]);
     forbid("rdk_boolean", &gpu);
-    forbid("sop", &["rays", "rdk_rays", "pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
+    forbid("sop", &["rays", "rdk_rays", "pxui", "rays_shell", "rays_graph", "rays_editor"]);
     forbid("sop", &gpu);
-    forbid("editor_core", &["pxui", "pxui_shell", "pxui_graph", "rays_editor", "sop"]);
-    forbid("editor_document", &["pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
-    forbid("pxui", &["editor_core", "pxui_shell", "sop", "pxui_graph", "rays_editor"]);
-    forbid("pxui_shell", &["sop", "pxui_graph", "rays_editor"]);
-    forbid("pxui_graph", &["sop", "pxui_shell", "rays_editor"]);
+    forbid("editor_core", &["pxui", "rays_shell", "rays_graph", "rays_editor", "sop"]);
+    forbid("editor_document", &["pxui", "rays_shell", "rays_graph", "rays_editor"]);
+    forbid("pxui", &["editor_core", "rays_shell", "sop", "rays_graph", "rays_editor"]);
+    forbid("rays_shell", &["sop", "rays_graph", "rays_editor"]);
+    forbid("rays_graph", &["sop", "rays_shell", "rays_editor"]);
     forbid("rays_pathtracer", &[
         "metal_sys", "ogpu_metal", "ogpu_mock", "rdk_core", "sop", "flow_sop", "editor_core",
-        "editor_document", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
+        "editor_document", "pxui", "rays_shell", "rays_graph", "rays_editor",
     ]);
     forbid("rdk_rays", &[
         "metal_sys", "ogpu_metal", "rdk_boolean", "sop", "editor_core",
-        "editor_document", "pxui", "pxui_shell", "pxui_graph", "rays_pathtracer", "rays_editor",
+        "editor_document", "pxui", "rays_shell", "rays_graph", "rays_pathtracer", "rays_editor",
     ]);
     // Flow is UI-free and GPU-free, but its three crates may reach the OCaml flow's leaves (param, input, diagnostic).
     for library in ["flow_syntax", "flow_check", "flow_eval"] {
         forbid(library, &[
             "flow_ir", "flow_web", "flow_shader", "flow_gpu", "flow_graph", "flow_sop", "flow_native", "rays",
-            "editor_core", "pxui", "pxui_shell", "pxui_graph", "sop", "rays_editor",
+            "editor_core", "pxui", "rays_shell", "rays_graph", "sop", "rays_editor",
         ]);
         forbid(library, &gpu);
     }
     forbid("flow_sop_catalog", &[
-        "flow_sop", "flow_native", "rays", "editor_core", "editor_document", "pxui", "pxui_shell", "pxui_graph", "rays_editor", "rays_bin",
+        "flow_sop", "flow_native", "rays", "editor_core", "editor_document", "pxui", "rays_shell", "rays_graph", "rays_editor", "rays_bin",
     ]);
     forbid("flow_sop_catalog", &gpu);
     rules

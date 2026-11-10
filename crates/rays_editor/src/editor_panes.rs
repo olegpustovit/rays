@@ -17,14 +17,14 @@ use flow_syntax::context;
 use flow_syntax::syntax::{Node as SNode, Syntax};
 use pxui::ui::Ui;
 use pxui::ui::UiBox;
-use pxui_graph::node_menu;
+use rays_graph::node_menu;
 
 
-use pxui_graph::scope_state as scope;
-use pxui_shell::kit::{self, ButtonOpts};
-use pxui_shell::layout::{self, Leaf};
-use pxui_shell::timeline_bar;
-use pxui_shell::tree;
+use rays_graph::scope_state as scope;
+use rays_shell::kit::{self, ButtonOpts};
+use rays_shell::layout::{self, Leaf};
+use rays_shell::timeline_bar;
+use rays_shell::tree;
 use rays::frame;
 
 use crate::bars;
@@ -723,7 +723,7 @@ pub fn draw_other_graph_panes<'a>(
                         scope::with_guide(false, &mut active.view);
                         scope::with_theme(theme, &mut active.view);
                         scope::with_bounds(x, y, width.max(1), height.max(1), &mut active.view);
-                        pxui_graph::scope_pane::update(&pressed_keys(value, shortcut_frame), &mut active.view, ui, shortcut_frame, &mut Vec::new());
+                        rays_graph::scope_pane::update(&pressed_keys(value, shortcut_frame), &mut active.view, ui, shortcut_frame, &mut Vec::new());
                     });
                 }
                 out.push((key.clone(), active));
@@ -857,7 +857,7 @@ pub fn draw_graph_pane<'a>(
             scope::with_theme(theme, scope_view);
             scope::with_bounds(gx, gy, gw.max(1), gh.max(1), scope_view);
             scope::with_carry(carry_lit.clone(), carry_hot.clone(), scope_view);
-            pxui_graph::scope_pane::update(&pressed, scope_view, ui, shortcut_frame, scope_frame_changes);
+            rays_graph::scope_pane::update(&pressed, scope_view, ui, shortcut_frame, scope_frame_changes);
         });
     }
     let mut menu = menu;
@@ -892,7 +892,7 @@ pub fn draw_timeline_pane(
     slots: &[(layout::Bounds, UiBox, bool)],
     timeline_root: &Option<(Panel, UiBox)>,
     strip_bounds: layout::Bounds,
-) -> (Vec<TimelineIntent>, Vec<pxui_shell::chrome::Intent>) {
+) -> (Vec<TimelineIntent>, Vec<rays_shell::chrome::Intent>) {
     let mut intents = Vec::new();
     for (bounds, boxed, edge) in slots {
         if bounds.3 <= 0 {
@@ -904,7 +904,7 @@ pub fn draw_timeline_pane(
         });
     }
     let mut strip_playback: Vec<TimelineIntent> = Vec::new();
-    let mut strip_layout: Vec<pxui_shell::chrome::Intent> = Vec::new();
+    let mut strip_layout: Vec<rays_shell::chrome::Intent> = Vec::new();
     if let Some((_, boxed)) = timeline_root {
         if strip_bounds.3 > 0 {
             ui.within(boxed, &mut |ui| {
@@ -923,7 +923,7 @@ pub fn draw_timeline_pane(
                                 match result {
                                     pxui::ui::MenuResult::Pick(0) => strip_playback.push(TimelineIntent::PauseToggle),
                                     pxui::ui::MenuResult::Pick(1) => strip_playback.push(TimelineIntent::StopPlayback),
-                                    pxui::ui::MenuResult::Pick(2) => strip_layout.push(pxui_shell::chrome::Intent::Toggle(vec![usize::MAX])),
+                                    pxui::ui::MenuResult::Pick(2) => strip_layout.push(rays_shell::chrome::Intent::Toggle(vec![usize::MAX])),
                                     _ => {}
                                 }
                             }

@@ -4,8 +4,8 @@ use editor_document::kind_graph;
 use param::Value;
 use pxui::theme;
 use pxui::ui::{BoxOpts, Paint, Size, Ui, UiBox, CLIP};
-use pxui_shell::kit;
-use pxui_shell::layout::Leaf;
+use rays_shell::kit;
+use rays_shell::layout::Leaf;
 use rays_math::color::T as Color;
 
 use crate::editor_inspect::{group_digits, scene};

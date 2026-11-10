@@ -12,7 +12,7 @@ use flow_graph::flow_edit::Op;
 use flow_syntax::syntax;
 use input::{Event, MouseButton};
 use param::Value;
-use pxui_graph::scope_state as scope;
+use rays_graph::scope_state as scope;
 use rays::frame;
 
 use crate::cook;
@@ -271,7 +271,7 @@ fn whole_frame_update() {
         let value = model();
         let frame0 = frame_at(0.0, vec![], vec![]);
         let camera = |_: &mut pxui::ui::Ui| -> PanelResult { Rc::new(()) };
-        let handles = |_: &mut pxui::ui::Ui, _: Option<&Picked>, _: rays_math::mat4::T, _: pxui_shell::layout::Bounds| (Vec::new(), false, None);
+        let handles = |_: &mut pxui::ui::Ui, _: Option<&Picked>, _: rays_math::mat4::T, _: rays_shell::layout::Bounds| (Vec::new(), false, None);
         let view_state: Rc<dyn Fn(Option<&PanelResult>) -> syntax::Syntax> = Rc::new(|_| syntax::make(syntax::Draft::Map(Vec::new())));
         // the panes hidden: only the keys and the reducer run
         let mut updated = value.clone();
@@ -502,7 +502,7 @@ fn frame_views_borrow_the_owned_model() {
         }
         let frame = frame_at(0.0, vec![], vec![]);
         let camera = |_: &mut pxui::ui::Ui| -> PanelResult { Rc::new(()) };
-        let handles = |_: &mut pxui::ui::Ui, _: Option<&Picked>, _: rays_math::mat4::T, _: pxui_shell::layout::Bounds| (Vec::new(), false, None);
+        let handles = |_: &mut pxui::ui::Ui, _: Option<&Picked>, _: rays_math::mat4::T, _: rays_shell::layout::Bounds| (Vec::new(), false, None);
         let view_state = Rc::new(|_: Option<&PanelResult>| syntax::make(syntax::Draft::Map(Vec::new())));
         let identity = value.preferences.as_ptr();
         // Warm the UI's font/layout caches before measuring a steady frame.

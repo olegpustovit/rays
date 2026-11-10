@@ -278,7 +278,7 @@ fn router_actions(focus: &Panel, events: Vec<Event>) -> Vec<l::Action> {
 }
 
 pub fn keys_and_guide() {
-    use pxui_graph::scope_commands as scope;
+    use rays_graph::scope_commands as scope;
     text_keys_are_handled();
     for focus in [Panel::View(String::new()), Panel::View("v1.0".into()), Panel::Graph, Panel::List, Panel::Lisp, Panel::Inspector, Panel::Outline, Panel::Timeline] {
         for (events, expected) in [
@@ -345,8 +345,8 @@ pub fn keys_and_guide() {
         "the host guide contexts changed"
     );
     // the list walks with j and k as with the arrows
-    let list_step = |c: char, expected: pxui_shell::tree::Command| router_actions(&Panel::Graph, vec![ch(c)]).iter().any(|a| *a == l::Action::ListCommand(expected));
-    assert!(list_step('j', pxui_shell::tree::Command::Down) && list_step('k', pxui_shell::tree::Command::Up), "j and k do not walk the list");
+    let list_step = |c: char, expected: rays_shell::tree::Command| router_actions(&Panel::Graph, vec![ch(c)]).iter().any(|a| *a == l::Action::ListCommand(expected));
+    assert!(list_step('j', rays_shell::tree::Command::Down) && list_step('k', rays_shell::tree::Command::Up), "j and k do not walk the list");
     // focus is a panel; commands are scoped by its kind
     assert!(
         [Panel::Graph, Panel::List, Panel::Lisp].iter().all(|p| l::scope(p) == Panel::Graph)
@@ -364,7 +364,7 @@ pub fn keys_and_guide() {
     );
     let table: Vec<command::Command> = bindings.iter().map(|(c, _)| command::Command { scope: Some(Panel::Graph), ..c.clone() }).collect();
     let refs: Vec<&command::Command> = table.iter().collect();
-    use pxui_graph::scope_state::{Command as SC, Direction};
+    use rays_graph::scope_state::{Command as SC, Direction};
     let cases: Vec<(Key, Vec<Key>, SC)> = vec![
         (Key::ArrowLeft, vec![], SC::Walk(Direction::Left)),
         (Key::ArrowDown, vec![], SC::Walk(Direction::Down)),

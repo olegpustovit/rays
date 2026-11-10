@@ -16,7 +16,7 @@ use flow_syntax::value::Value;
 use input::Key;
 use pxui::theme::{self, Theme};
 use pxui::ui::*;
-use pxui_shell::kit::{self, ButtonOpts};
+use rays_shell::kit::{self, ButtonOpts};
 use rays_math::color::{self, T as Color};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -656,13 +656,13 @@ pub fn describe(row: &Row) -> String {
 /// a graph's square wears a port colour of the kit: geometry for a SOP graph, record for a World
 fn context_color(theme: &Theme, c: Option<Context>) -> Color {
     let c = c.unwrap_or(context::sop());
-    pxui_graph::node_menu::color(theme, context::descriptor(c).color)
+    rays_graph::node_menu::color(theme, context::descriptor(c).color)
 }
 
 fn type_color(theme: &Theme, t: &Ty) -> Color {
     let ports = theme::ports(theme);
     match t {
-        Ty::Named(_) => pxui_graph::node_menu::color(theme, match ty::color(t) { ColorKind::Output => ColorKind::Compound, c => c }),
+        Ty::Named(_) => rays_graph::node_menu::color(theme, match ty::color(t) { ColorKind::Output => ColorKind::Compound, c => c }),
         Ty::Float => ports.float,
         Ty::Int => ports.int,
         Ty::Bool => ports.bool,

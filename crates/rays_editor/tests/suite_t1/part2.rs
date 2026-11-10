@@ -83,9 +83,9 @@ pub fn run_values() {
         let lowered = &doc.workspace.lowered;
         let mut all = factories();
         all.extend(lowered.factories.iter().cloned());
-        let entries: Vec<pxui_graph::node_menu::Entry> = flow_sop::catalog::with_library(all.iter().map(flow_sop::catalog::descriptor).collect())
+        let entries: Vec<rays_graph::node_menu::Entry> = flow_sop::catalog::with_library(all.iter().map(flow_sop::catalog::descriptor).collect())
             .into_iter()
-            .map(|d| pxui_graph::node_menu::Entry {
+            .map(|d| rays_graph::node_menu::Entry {
                 key: d.key.clone(),
                 label: d.label.clone(),
                 category: d.category.clone(),
@@ -95,8 +95,8 @@ pub fn run_values() {
                 off: None,
             })
             .collect();
-        let menu = pxui_graph::node_menu::create(None, 0, 0, entries);
-        pxui_graph::node_menu::keys(&menu, "points").iter().position(|k| k == "points").expect("points in the menu")
+        let menu = rays_graph::node_menu::create(None, 0, 0, entries);
+        rays_graph::node_menu::keys(&menu, "points").iter().position(|k| k == "points").expect("points in the menu")
     };
     let e = add(None, &pick_points, "points");
     check(editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), "(sop/points)"), &format!("Points actual zero-input menu insertion: {}", source(&e)));

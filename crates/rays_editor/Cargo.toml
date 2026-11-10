@@ -26,8 +26,8 @@ flow_sop = { path = "../flow_sop" }
 flow_graph = { path = "../flow_graph" }
 editor_core = { path = "../editor_core" }
 pxui = { path = "../pxui" }
-pxui_shell = { path = "../pxui_shell" }
-pxui_graph = { path = "../pxui_graph" }
+rays_shell = { path = "../rays_shell" }
+rays_graph = { path = "../rays_graph" }
 lru = { path = "../lru" }
 cfmt = { path = "../cfmt" }
 parallel = { path = "../parallel" }
@@ -73,8 +73,8 @@ harness = false
 workspace = true
 
 [[test]]
-name = "window_pxui_graph"
-path = "../pxui_graph/tests/window_pxui_graph.rs"
+name = "window_rays_graph"
+path = "../rays_graph/tests/window_rays_graph.rs"
 harness = false
 
 [[test]]

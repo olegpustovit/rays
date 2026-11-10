@@ -8,7 +8,7 @@ use editor_document::layout_edit::Op as L;
 use editor_document::workspace_doc;
 use input::{Event, Key, MouseButton};
 use param::Value;
-use pxui_shell::layout;
+use rays_shell::layout;
 use rays_editor::editor;
 
 const LB: MouseButton = MouseButton::LeftButton;

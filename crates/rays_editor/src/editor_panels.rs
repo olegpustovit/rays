@@ -14,9 +14,9 @@ use flow_graph::flow_edit::{self as fe, ArgKey, Op};
 use flow_graph::projection as fproj;
 use flow_syntax::{context, lisp, syntax as s, ty::Ty};
 use param::Value;
-use pxui_graph::scope_state as scope;
-use pxui_shell::chrome::{self, Side};
-use pxui_shell::layout::{self, Leaf};
+use rays_graph::scope_state as scope;
+use rays_shell::chrome::{self, Side};
+use rays_shell::layout::{self, Leaf};
 use sop::edit_graph::Factory;
 
 use crate::bars;

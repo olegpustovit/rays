@@ -7,7 +7,7 @@ use editor_core::panels::Panel;
 use editor_document::workspace_doc as wd;
 use flow_graph::flow_edit::Op;
 use input::{Event, Key, MouseButton};
-use pxui_shell::layout;
+use rays_shell::layout;
 use rays_editor::{editor, editor_renderer};
 
 pub const CASES: &[(&str, fn())] = &[

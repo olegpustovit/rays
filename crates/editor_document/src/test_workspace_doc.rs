@@ -395,7 +395,7 @@ fn part_literals() {
         if fast {
             assert_eq!(format!("{:?}", patched.plan), format!("{:?}", reference.plan), "literal plan differs from full evaluation");
         }
-        // the cook comparison (Test_support.Workspace_cook, 3 domains) and the Pxui_graph pane
+        // the cook comparison (Test_support.Workspace_cook, 3 domains) and the Rays_graph pane
         // update are not here: both live in crates editor_document cannot reach
         let scope = flow_graph::projection::of_graph(&catalog, &old.checked, "g").unwrap();
         let arguments: Vec<_> = changes.iter().map(|c| (c.path.clone(), ArgKey::Kw(c.field.clone()), c.expr.clone())).collect();

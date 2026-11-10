@@ -3,7 +3,7 @@ use flow_check::catalog::Catalog;
 use input::{Event, Key, MouseButton, Platform};
 use param::{Impact, Value};
 use pxui::ui::Ui;
-use pxui_shell::inspector::{self, FlowChange, FlowOpts, FlowRow};
+use rays_shell::inspector::{self, FlowChange, FlowOpts, FlowRow};
 
 fn fail(message: &str) -> ! {
     panic!("test_sop_ui: {message}")

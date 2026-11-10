@@ -4,7 +4,7 @@ use super::t5c::*;
 use editor_core::keymap::Trigger;
 use editor_core::panels::{Axis, Panel, Size, Panels as Tree};
 use input::{Event, Key, MouseButton};
-use pxui_shell::layout as L;
+use rays_shell::layout as L;
 use rays_editor::navigator as N;
 use rays_editor::editor;
 use std::rc::Rc;

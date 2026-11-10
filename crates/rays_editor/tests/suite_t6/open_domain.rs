@@ -116,9 +116,9 @@ pub fn open_domain() {
     let replaced = doc(of_text(&[changed], &catalog, text));
     assert!(!P::same_graph(&workspace.checked, &replaced.checked, "g"), "changed declarations reused stale projection");
     let theme = pxui::theme::default();
-    assert!(pxui_graph::node_menu::port_color(&theme, &geometry) == pxui::theme::ports(&theme).geometry, "custom operator ignored its built-in result color");
-    let menu = pxui_graph::node_menu::create(None, 100, 100, pxui_graph::node_menu::of_ops(&ops, &context));
-    assert!(pxui_graph::node_menu::keys(&menu, "toy") == ["=sop/toy_emit"], "menu omitted custom operator");
+    assert!(rays_graph::node_menu::port_color(&theme, &geometry) == pxui::theme::ports(&theme).geometry, "custom operator ignored its built-in result color");
+    let menu = rays_graph::node_menu::create(None, 100, 100, rays_graph::node_menu::of_ops(&ops, &context));
+    assert!(rays_graph::node_menu::keys(&menu, "toy") == ["=sop/toy_emit"], "menu omitted custom operator");
     for context in C::all() {
         let desc = C::descriptor(context);
         assert!(!desc.label.is_empty() && !desc.group.is_empty() && T::of_string(&T::to_string(&desc.result)) == Some(desc.result.clone()), "incomplete context descriptor: {}", desc.name);

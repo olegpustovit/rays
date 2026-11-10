@@ -7,7 +7,7 @@ use editor_document::workspace_doc;
 use flow_graph::flow_edit::{ArgKey, Op};
 use flow_syntax::syntax::{self as s, Draft as Node};
 use input::{Event, Key, MouseButton};
-use pxui_shell::layout;
+use rays_shell::layout;
 use rays_editor::editor;
 use std::cell::RefCell;
 use std::rc::Rc;

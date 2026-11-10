@@ -13,9 +13,9 @@ use flow_graph::projection as p;
 use flow_syntax::context::{self, Context};
 use flow_syntax::syntax::{self as s, Node as SNode, Syntax};
 use flow_syntax::ty::{self, Ty};
-use pxui_graph::node_menu::Entry;
+use rays_graph::node_menu::Entry;
 
-use pxui_graph::scope_state as scope;
+use rays_graph::scope_state as scope;
 use sop::edit_graph::InputRequirement;
 
 use crate::editor_inspect::{kind, kinds, new_graph, new_material};
@@ -389,7 +389,7 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<Change> {
         None => vec![],
     };
     // a wire pulled off an existing wire: the new node goes between its source and its sink
-    let insert: Vec<fe::Op> = match (selected.as_slice(), &input, pxui_graph::scope_pane::selected_wire(pane_view(value)), laid) {
+    let insert: Vec<fe::Op> = match (selected.as_slice(), &input, rays_graph::scope_pane::selected_wire(pane_view(value)), laid) {
         ([path], Some(from), Some((target, wkey)), Some(k)) if reads(from, &expr) => {
             let ok = match p::find(&k.scope, &target) {
                 Some(n) => n.rows.iter().any(|r| r.key == wkey && r.chip == p::Chip::Name(last_of(path).to_owned())),

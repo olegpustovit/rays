@@ -25,7 +25,7 @@ define behavioral contracts.
 | `sdl3`, `sdl3_sys` | SDL family safe API and required ABI bridge |
 | `ogpu_core`, `ogpu_metal`, `ogpu_vulkan` | GPU boundary and supported native backends |
 | `metal_sys`, `vulkan_sys` | Checked-in native GPU ABI bindings |
-| `pxui`, `pxui_shell`, `pxui_graph` | Shared UI engine, chrome and editable graph projection |
+| `pxui`, `rays_shell`, `rays_graph` | Shared UI engine, chrome and editable graph projection |
 | `editor_core`, `editor_document` | Intents, authoritative workspace text and atomic reducers |
 | `rays_editor`, `rays_bin` | Native editor integration and CLI |
 

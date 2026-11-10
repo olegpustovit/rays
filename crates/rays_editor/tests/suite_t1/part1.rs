@@ -5,7 +5,7 @@ use editor_core::panels::{self, Panel, Size};
 use editor_document::document::{Home, Origin};
 use flow_graph::flow_edit::ArgKey;
 use input::{Event, Key, MouseButton};
-use pxui_shell::layout;
+use rays_shell::layout;
 use rays_editor::{editor, reduce};
 
 pub fn run_lowering() {

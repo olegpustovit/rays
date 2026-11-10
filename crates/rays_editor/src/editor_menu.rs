@@ -2,8 +2,8 @@
 
 use flow_syntax::context::{self, Context};
 use flow_syntax::ty;
-use pxui_graph::node_menu::{self as menu, Entry};
-use pxui_graph::scope_state as scope;
+use rays_graph::node_menu::{self as menu, Entry};
+use rays_graph::scope_state as scope;
 
 use crate::editor_add::{add_target, binding_name, value_entries};
 use crate::editor_inspect::kinds;

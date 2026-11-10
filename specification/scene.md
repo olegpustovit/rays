@@ -152,7 +152,7 @@ and every mark over a view is clipped to its pane. "Render / save PNG" captures 
 List rows carry a kind badge (G geometry, L light, C camera, W world, ✦ sun,
 · layer, S SOP); the status bar names the open level's keys.
 
-The list (`Pxui_shell.Tree`) follows WAI-ARIA tree keys: arrows move the
+The list (`Rays_shell.Tree`) follows WAI-ARIA tree keys: arrows move the
 focus and select, Shift extends, Left/Right fold or go to parent/child,
 Home/End, Tab/Shift-Tab reparent under the row above or up a level (keeping
 the world transform), Alt-arrows reorder, F2 renames, `/` filters (keeping

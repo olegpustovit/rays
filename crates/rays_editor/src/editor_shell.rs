@@ -8,9 +8,9 @@ use editor_document::workspace_doc;
 use flow_syntax::context;
 use pxui::theme::Theme;
 use pxui::ui::{PanelOpts, Ui};
-use pxui_graph::scope_state as scope;
-use pxui_shell::inspector::FlowRow;
-use pxui_shell::layout;
+use rays_graph::scope_state as scope;
+use rays_shell::inspector::FlowRow;
+use rays_shell::layout;
 use rays::frame;
 use rays_diagnostic::Diagnostic;
 

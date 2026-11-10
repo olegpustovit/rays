@@ -3,7 +3,7 @@
 use editor_document::document::Level;
 use editor_document::kind_graph as kg;
 use param::Value;
-use pxui_shell::layout::Bounds;
+use rays_shell::layout::Bounds;
 use rays::world;
 
 use crate::editor_host;

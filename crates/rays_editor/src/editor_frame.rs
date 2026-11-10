@@ -26,14 +26,14 @@ use flow_syntax::syntax::{Node as SNode, Syntax};
 use input::{Event, Key, MouseButton};
 use param::{Effects, FieldView, Value};
 use pxui::ui::{BoxOpts, MenuOpts, MenuResult, Size, Ui, UiBox, CLICKABLE};
-use pxui_graph::node_menu;
-use pxui_graph::scope_state as scope;
-use pxui_shell::chrome;
-use pxui_shell::layout::{self, Leaf};
-use pxui_shell::prompt as shell_prompt;
-use pxui_shell::status_bar::{self, TipKind};
-use pxui_shell::which_key;
-use pxui_shell::tree;
+use rays_graph::node_menu;
+use rays_graph::scope_state as scope;
+use rays_shell::chrome;
+use rays_shell::layout::{self, Leaf};
+use rays_shell::prompt as shell_prompt;
+use rays_shell::status_bar::{self, TipKind};
+use rays_shell::which_key;
+use rays_shell::tree;
 use rays::frame;
 
 use crate::carry as carry_mod;
@@ -435,7 +435,7 @@ pub fn draw_notice<'a>(value: &ModelView<'a>, frame_: &frame::Frame, roots: &[(L
             };
             fn cards(view: &scope::Pane, s: &fproj::Scope, out: &mut Vec<(f64, f64, f64, f64)>) {
                 for n in &s.nodes {
-                    out.extend(pxui_graph::scope_frame::inspect::box_of(view, &n.path));
+                    out.extend(rays_graph::scope_frame::inspect::box_of(view, &n.path));
                     if let Some(z) = &n.zone {
                         cards(view, &z.scope, out);
                     }
@@ -1036,7 +1036,7 @@ pub fn update_frame(
     for a in &actions {
         match a {
             Action::ScopeCommand(command) if scope_active => {
-                pxui_graph::scope_commands::run_command(&mut scope_view, command.clone(), &mut scope_command_changes);
+                rays_graph::scope_commands::run_command(&mut scope_view, command.clone(), &mut scope_command_changes);
             }
             Action::OpenCamera => scope::clear_selection(&mut scope_view),
             _ => {}

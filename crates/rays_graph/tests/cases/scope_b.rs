@@ -6,8 +6,8 @@ use flow_graph::projection as p;
 use flow_syntax::syntax::{self as s, Node};
 use input::{Event, Key, MouseButton};
 use pxui::ui::Ui;
-use pxui_graph::scope_pane as scope;
-use pxui_graph::scope_state::{Change, Command, Pane, ScopeOpts};
+use rays_graph::scope_pane as scope;
+use rays_graph::scope_state::{Change, Command, Pane, ScopeOpts};
 use std::rc::Rc;
 
 fn syn(op: e::Op) -> Change {

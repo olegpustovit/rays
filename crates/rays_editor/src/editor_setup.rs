@@ -17,8 +17,8 @@ use flow_syntax::phase_timer;
 use flow_syntax::syntax::{self, Draft};
 use input::Platform;
 use pxui::ui::Ui;
-use pxui_graph::scope_state as scope;
-use pxui_shell::{layout, tree};
+use rays_graph::scope_state as scope;
+use rays_shell::{layout, tree};
 use sop::edit_graph::Factory;
 
 use crate::cook;

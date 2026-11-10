@@ -23,7 +23,7 @@ pub fn columns(owner: i64, geometry: &gv::T) -> Vec<gv::Column> {
 pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), owner: i64, geometry: Option<&gv::T>) -> Option<i64> {
     let (x, y, w, h) = bounds;
     let owner = owner.clamp(0, 3);
-    let (changed, _) = pxui_shell::kit::segments(ui, "sheet-owners", (x + w) as f64 - 8.0, y as f64 + 2.0, &labels(), owner);
+    let (changed, _) = rays_shell::kit::segments(ui, "sheet-owners", (x + w) as f64 - 8.0, y as f64 + 2.0, &labels(), owner);
     match geometry {
         None => {
             let b = ui.box_(

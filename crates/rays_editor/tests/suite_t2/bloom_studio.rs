@@ -8,7 +8,7 @@ use editor_core::panels::Panel;
 use editor_document::document;
 use editor_document::workspace_doc as wd;
 use input::{Event, Key, MouseButton};
-use pxui_shell::layout;
+use rays_shell::layout;
 use rays_editor::navigator as n;
 use rays_editor::editor;
 
@@ -189,7 +189,7 @@ fn body(r: &mut Bloom) {
     let header = graph_leaf(r).header;
     let mut ui = pxui::ui::Ui::create(input::Platform::Apple, Some(11), None);
     let route = dump_line(&r.e, "route").split('>').map(|s| s.trim().to_owned()).collect::<Vec<_>>().join(" / ");
-    let from = pxui_shell::chrome::tools_start(&mut ui, true, false, false, &format!("Graph\t{route} / sop"));
+    let from = rays_shell::chrome::tools_start(&mut ui, true, false, false, &format!("Graph\t{route} / sop"));
     let tool = rays_editor::bars::tool_rect(false, &mut ui, header, from, rays_editor::bars::Tool::Defn).unwrap_or_else(|| panic!("the toolbar is cut off (header {header:?}, tools from {from:.0})"));
     let before = source(&r.e);
     let p = row_centre(r, "heart");

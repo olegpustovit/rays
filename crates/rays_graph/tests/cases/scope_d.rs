@@ -8,8 +8,8 @@ use flow_graph::probe::{self, Execution};
 use flow_graph::projection as p;
 use input::{Event, MouseButton};
 use pxui::ui::Ui;
-use pxui_graph::scope_pane as scope;
-use pxui_graph::scope_state::{Change, Command, Pane, ScopeOpts};
+use rays_graph::scope_pane as scope;
+use rays_graph::scope_state::{Change, Command, Pane, ScopeOpts};
 use std::cell::RefCell;
 use std::rc::Rc;
 

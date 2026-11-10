@@ -23,8 +23,8 @@ use flow_syntax::syntax::{self as s, Node as SNode, Syntax};
 use flow_syntax::ty::{self, Ty};
 use param::{FieldView, FloatRange, Impact, IntRange, KindView, Value};
 use pxui::ui::{HeadAction, Ui, UiBox};
-use pxui_graph::scope_state::Change as ScopeChange;
-use pxui_shell::inspector as insp;
+use rays_graph::scope_state::Change as ScopeChange;
+use rays_shell::inspector as insp;
 use sop::edit_graph;
 use sop::node;
 
@@ -733,7 +733,7 @@ pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(
 pub fn spreadsheet_source<'a>(value: &ModelView<'a>) -> Option<&'a rdk_rays::geometry_view::T> {
     let laid = crate::editor_model::pane_laid(value)?;
     let records = laid.records.as_ref()?;
-    let path = pxui_graph::scope_state::selected(&crate::editor_model::pane_view(value)).into_iter().next()?;
+    let path = rays_graph::scope_state::selected(&crate::editor_model::pane_view(value)).into_iter().next()?;
     let chains = probe::chains(&laid.scope);
     let node_id = compiled_at(value, &chains, records, &path)?;
     let object_id = node_owner(value, node_id)?;
@@ -855,7 +855,7 @@ fn is_literal(e: &S) -> bool {
 pub type LayoutNames = Option<(Vec<String>, i64)>;
 
 /// What a drag of a splitter gives: the size to write.
-pub type Resized<'a> = &'a dyn Fn(&[Symbol], pxui_shell::layout::Way) -> Option<le::Size>;
+pub type Resized<'a> = &'a dyn Fn(&[Symbol], rays_shell::layout::Way) -> Option<le::Size>;
 
 /// The intents the rows' widgets returned, as document changes.
 #[allow(clippy::too_many_arguments)]
@@ -910,11 +910,11 @@ pub fn field_edits<'a>(
             }
             if nm == "@size" {
                 if let Some(index) = size_names.iter().position(|x| x == chosen) {
-                    let how = [pxui_shell::layout::Way::Ratio, pxui_shell::layout::Way::First, pxui_shell::layout::Way::Second][index];
+                    let how = [rays_shell::layout::Way::Ratio, rays_shell::layout::Way::First, rays_shell::layout::Way::Second][index];
                     let size = resized(&n.path, how).unwrap_or(match how {
-                        pxui_shell::layout::Way::Ratio => le::Size::Ratio(0.5),
-                        pxui_shell::layout::Way::First => le::Size::First(240),
-                        pxui_shell::layout::Way::Second => le::Size::Second(240),
+                        rays_shell::layout::Way::Ratio => le::Size::Ratio(0.5),
+                        rays_shell::layout::Way::First => le::Size::First(240),
+                        rays_shell::layout::Way::Second => le::Size::Second(240),
                     });
                     out.push(Change::LayoutEdit(le::Op::SetLayoutSize { node: n.path.clone(), size }));
                 }
@@ -1239,7 +1239,7 @@ pub fn input_inspector(ui: &mut Ui, graph: &str, width: f64, scope: &p::Scope, p
                     Ty::Float => Some(param::number::Kind::Float),
                     _ => None,
                 };
-                text = pxui_graph::scope_frame::num_field(ui, (cx, cy), cw, 20.0, None, kind, None, false, "ws-input-default-field", &shown).unwrap_or_else(|| shown.clone());
+                text = rays_graph::scope_frame::num_field(ui, (cx, cy), cw, 20.0, None, kind, None, false, "ws-input-default-field", &shown).unwrap_or_else(|| shown.clone());
             }
             _ => {
                 let o = pxui::ui::ValueFieldOpts { left: float_of(&shown).is_none(), ..Default::default() };

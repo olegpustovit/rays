@@ -34,9 +34,9 @@ use locally owned mutation and packed storage without exposing mutable aliases.
   boxed face lists.
 - Persistent spatial structures are for incremental/query workloads. Bulk
   construction may use mutable staging and freeze once.
-- A graph-pane frame costs what is in view, never the size of the graph: `Pxui_graph.Scope`
+- A graph-pane frame costs what is in view, never the size of the graph: `Rays_graph.Scope`
   builds bucket indices over tiles and wire bounds with the geometry and asks them each
-  frame (`lib/pxui_graph/AGENTS.md`). Navigation and node movement do
+  frame (`lib/rays_graph/AGENTS.md`). Navigation and node movement do
   no procedural cook work.
 - `Iso3.extract` streams deterministic XY-plane windows in two passes. It
   retains exact-sized output and finite-difference normals without the former

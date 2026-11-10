@@ -3,8 +3,8 @@ use crate::shell_a::{base, fr, new_ui};
 use input::{Event, Key, MouseButton};
 use param::{FieldView, FloatRange, Impact, KindView, Value};
 use pxui::ui::*;
-use pxui_shell::inspector::{self, FlowChange, FlowOpts, FlowRow};
-use pxui_shell::tree::{self as T, Command, DropAt, Intent, Row};
+use rays_shell::inspector::{self, FlowChange, FlowOpts, FlowRow};
+use rays_shell::tree::{self as T, Command, DropAt, Intent, Row};
 use rays_math::color;
 
 fn left_press(p: (f64, f64)) -> Event {

@@ -22,7 +22,7 @@ use flow_syntax::phase_timer;
 use flow_syntax::syntax::Syntax;
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::Value;
-use pxui_graph::scope_state as scope;
+use rays_graph::scope_state as scope;
 use sop::context as sop_context;
 
 use crate::editor_inspect::{node_owner_of, viewed_path};

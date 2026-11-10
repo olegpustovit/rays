@@ -8,8 +8,8 @@ scene and event model.
 ## Architecture: one box, one pass, one draw list
 
 `Pxui.Ui` is the only UI engine. The panel kit, the parameter inspector
-(`Pxui_shell.Inspector`), the workspace chrome (`pxui_shell`, `rays_editor`), and the graph canvas
-(`pxui_graph`) all build boxes in the same `Ui` frame, share one pointer
+(`Rays_shell.Inspector`), the workspace chrome (`rays_shell`, `rays_editor`), and the graph canvas
+(`rays_graph`) all build boxes in the same `Ui` frame, share one pointer
 capture, one focus, and one hit list, and paint into one instance list.
 
 ```text
@@ -131,7 +131,7 @@ bypassed or stale, a dot every 24 points and a register cross every 480 by 192 o
 Widgets. A field is a value on an `edge` hairline (accent while it holds the keyboard, invalid
 when refused); the 2-point `ink_2` line under a number is its position in the soft range. A
 button is its text and, in `ink_3`, its key: hover and pressed fills, the `control` fill while
-active, and one outlined primary button per panel (`Pxui_shell.Kit.button`). Tabs are text, the
+active, and one outlined primary button per panel (`Rays_shell.Kit.button`). Tabs are text, the
 one in use underlined (`Kit.segments`). A switch is 28 by 14 with an 8-point knob, accent when on.
 A section is a label in `ink_3` with a chevron under 16 points of space (4 at the top of its
 parent, none after a closed section). A list row is 24 points: hover is `faint_border`, the
@@ -142,7 +142,7 @@ scrollbar is a 4-point `border` thumb with no track.
 Chrome and panels. The status strip reads, left to right: the document's file (its name when it has none), a dot for its state
 (checked, cooking, refused), the status line, a hairline, the focused pane's context as a label
 and each of its keys before what it does, then the layout in use and the frame rate
-(`Pxui_shell.Status_bar`). The keys are the ones the pane's sheet lists, in its words (graph:
+(`Rays_shell.Status_bar`). The keys are the ones the pane's sheet lists, in its words (graph:
 `Tab add after`, `o open`, `v view`, `b bypass`, `i enter`, `f frame`, `w hints`, `/ leader`; viewport:
 move, rotate, scale, enter object, orbit; Lisp, Timeline and Inspector have none). A graph that is
 the only docked pane shows `N nodes · M selected` and `ZOOM P%` on the right in place of the
@@ -157,7 +157,7 @@ the one text fitter. A floating window's title row ends
 with a chevron (dock) and a cross (close); a floating viewport is the white sheet with its picture
 inset 12 points in a line-2 frame, the mode and camera as a label inside it. A value with a unit
 (`[@sop.unit "deg"]` on the field, carried by `Param.field_view.unit`) shows it after the number
-in `ink_3`; a vector row and a colour row are `Pxui_shell.Kit.vector` and `Kit.colour`. A docked timeline is one bar with the ruler at its end; a taller one
+in `ink_3`; a vector row and a colour row are `Rays_shell.Kit.vector` and `Kit.colour`. A docked timeline is one bar with the ruler at its end; a taller one
 puts the ruler under the bar with numbered major ticks and the last frame, a field, at the bar's end. The
 leader is a sheet along the bottom with its sections in columns; the key sheet has a filter
 field. The Outline lists, under a search field and an add button, the scene with its objects
@@ -301,13 +301,13 @@ the title bar of a PXUI host is the ground its chrome is painted on.
   `crates/rays_editor/src/viewport.rs`; it uses the shared inspector rows and reads the camera each frame.
 - `Editor_core.Store.Settings` persists model values as one
   `(settings :sketch "name" :key value ...)` s-expression, written atomically.
-- `Pxui_shell.Inspector.fields` builds standalone parameter rows from a
+- `Rays_shell.Inspector.fields` builds standalone parameter rows from a
   schema each frame (folders become inspector sections, keys are field names) and
   applies edits through `Node.apply_parameters`. `Inspector.flow_fields`
   builds editor rows from a node of the workspace text: card pins (●/○), grouped vec3
   controls, drive source and live-value display, and reset. It emits
   typed requests for the host to apply after the PXUI frame.
-- `Pxui_graph.Scope.update view ui frame` builds the graph canvas: a clickable,
+- `Rays_graph.Scope.update view ui frame` builds the graph canvas: a clickable,
   scrollable canvas box and one box per visible tile, keyed by path, with
   socket, field and button children. The pane's bucket indices cull
   tiles and resolve wire hits. Nodes flow left to right;
@@ -315,7 +315,7 @@ the title bar of a PXUI host is the ground its chrome is painted on.
   segments bent clear of cards, never authored. The dot grid is on a
   continuous 24-point graph pitch. Scrolling zooms at the pointer, and dragged
   tile boxes move in the frame that receives the pointer motion.
-  The node menu (host-opened, `Pxui_graph.Node_menu`) uses `Ui.popup`, with a search row
+  The node menu (host-opened, `Rays_graph.Node_menu`) uses `Ui.popup`, with a search row
   that takes focus in the frame it opens; a
   right click opens `Ui.context_menu` for a tile.
   Levels point/chip/card/full are set explicitly (`o`, `p`) and never by the zoom; cards
@@ -337,7 +337,7 @@ the title bar of a PXUI host is the ground its chrome is painted on.
   typing changes it. Their golden is `fixtures/kit_overlays_2x.png`.
 - `Rays_editor` builds the whole workspace — pane backgrounds, splitters,
   headers, graph, inspector, status — in one `Ui.frame` per application
-  frame.  The panes are the leaves of a `Pxui_shell.Layout` tree: every
+  frame.  The panes are the leaves of a `Rays_shell.Layout` tree: every
   leaf has a 24-point header (its kind as a label, a breadcrumb, its tools, the accent square of
   the focused pane), a right-click menu on it (split, close, retype)
   and a collapse chevron (a window has dock and close); a splitter is a one-point gutter whose seven-point drag
@@ -361,8 +361,8 @@ numeric-field editing, bounded scrolling, inspector sections,
 and identical behaviour at 1× and 2× (`lib/pxui/test_ui`);
 offscreen 2x pixel parity of the kit (`test_ui_parity`, in `runtest`); exact UI-pipeline
 coverage against Scene2 geometry (`rays_execution/test_ui_pipeline`);
-and the graph, inspector, and workspace contracts (`test/test_pxui_graph`,
-`test/test_sop_ui`, `lib/pxui_shell/test_shell`, `test/test_rays_editor`).
+and the graph, inspector, and workspace contracts (`test/test_rays_graph`,
+`test/test_sop_ui`, `lib/rays_shell/test_shell`, `test/test_rays_editor`).
 
 ## Undo history
 

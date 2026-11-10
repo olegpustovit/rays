@@ -17,7 +17,7 @@ use flow_syntax::syntax::{Node as SNode, Syntax};
 use input::Event;
 use param::{FieldView, KindView, Value};
 use pxui::ui::{BoxOpts, Size, Ui, ValueFieldOpts, CLICKABLE};
-use pxui_shell::layout::Bounds;
+use rays_shell::layout::Bounds;
 use rays::camera as rcam;
 use rays::easy_camera;
 use rays::frame;
@@ -234,7 +234,7 @@ pub struct Extra {
     pub free_camera: rcam::Camera,
     /// the document's root settings, the renderer as shown
     pub root: root::Parameters,
-    root_rows: Rc<RefCell<(Option<root::Parameters>, Vec<pxui_shell::inspector::FlowRow>)>>,
+    root_rows: Rc<RefCell<(Option<root::Parameters>, Vec<rays_shell::inspector::FlowRow>)>>,
     /// the Render section's edit
     pub root_request: Option<root::Parameters>,
     /// the ACTIVE camera follows the viewport
@@ -525,7 +525,7 @@ pub fn panel(ui: &mut Ui, control_: &Control, camera_: &Camera, extra_: &Extra, 
     // the scene's root: renderer, size and samples
     let mut root_ = extra_.root.clone();
     ui.inspector_section("renderer-section", true, None, "Scene root", &mut |ui| {
-        use pxui_shell::inspector::{self, FlowChange, FlowOpts, FlowRow};
+        use rays_shell::inspector::{self, FlowChange, FlowOpts, FlowRow};
         let mut cached = extra_.root_rows.borrow_mut();
         if cached.0.as_ref() != Some(&extra_.root) {
             let Ok(fields) = root::parameters_schema().view(&root::to_values(&extra_.root)) else { return; };

@@ -10,7 +10,7 @@ use editor_document::scene_sync;
 use flow_syntax::{context, ty};
 use flow_sop::network as net;
 use param::Value;
-use pxui_shell::tree::{self, DropAt, Intent, Row};
+use rays_shell::tree::{self, DropAt, Intent, Row};
 use rays_math::color::{self, T as Color};
 use rays_math::mat4;
 use sop::custom;

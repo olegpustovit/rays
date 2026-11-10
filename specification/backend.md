@@ -187,7 +187,7 @@ the clock, and `flow_graph.Probe` receives only neutral tier/group/time metadata
 Neither `flow_ir` nor `flow_graph` gains a platform-clock dependency.
 
 `flow_graph` depends only on `flow` and `param`. It owns `Projection`,
-`Flow_edit`, `Exposure` and `Probe` for every domain. `pxui_graph` consumes
+`Flow_edit`, `Exposure` and `Probe` for every domain. `rays_graph` consumes
 that neutral layer and menu entries supplied by the host; it never reaches
 `sop` or `rdk`, even transitively. The gate checks both boundaries.
 
@@ -355,7 +355,7 @@ are explicitly registered as `Native` entries. This does not change the OGPU
 boundary or expose the private raw ABI (see `specification/metal.md`).
 The dependency-free `param` library owns typed parameter schemas under the
 single `Param` name, including canonical float text and vector grouping, so
-`Pxui_shell.Inspector` renders SOP nodes and plain sketch records alike
+`Rays_shell.Inspector` renders SOP nodes and plain sketch records alike
 without the geometry stack. The `editor_core` library owns bounded,
 labelled undo history with explicit edit merge rules, named commands, key
 routing, and atomic file storage (user preferences and documents are
@@ -371,17 +371,17 @@ the value lane on its initial domain before cook submissions and retains
 applied values for the graph and inspector. The gate forbids
 `flow` from reaching anything but `diagnostic`, `param`, `input` and `rays_math`, and `flow_sop` from reaching UI,
 the SOP catalog, editor or GPU libraries.
-`editor_document` owns the UI-free saved overlay, while `pxui_graph` and
-`pxui_shell` are presentation adapters over it. The PXUI engine depends directly
-on `rays`, `rays_math` and `param` for UI values, shared hashing and the number field's model; `pxui_shell`
+`editor_document` owns the UI-free saved overlay, while `rays_graph` and
+`rays_shell` are presentation adapters over it. The PXUI engine depends directly
+on `rays`, `rays_math` and `param` for UI values, shared hashing and the number field's model; `rays_shell`
 depends on `rays`, `rays_math`, `editor_core` and `pxui`. `editor_core`,
-`editor_document`, `pxui_graph` and `rays_editor` name math values from
+`editor_document`, `rays_graph` and `rays_editor` name math values from
 `rays_math` directly. `rays_editor` applies their typed requests and schedules
 cooks; none of these edges points back into
 `flow` or `flow_sop`.
-`pxui_graph` exports its graph commands as `Editor_core.Command.t` entries without handling key
+`rays_graph` exports its graph commands as `Editor_core.Command.t` entries without handling key
 events. `editor_core` depends on `rays` for frame and event values and on
-`rays_math` for math values, never on UI or geometry libraries. `pxui_shell` owns editor chrome over the shared PXUI
+`rays_math` for math values, never on UI or geometry libraries. `rays_shell` owns editor chrome over the shared PXUI
 handle; `Layout` computes pane geometry and `Chrome` handles standard splitters,
 headers, and focus outline. Layout geometry is pure and has no mutable cache
 inside the PXUI frame. Its which-key panel reads generic editor commands, while its

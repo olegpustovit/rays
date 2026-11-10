@@ -26,9 +26,9 @@ use flow_graph::flow_edit::{self as fe, ArgKey, Op};
 use flow_syntax::syntax::{Node as SNode, Syntax};
 use input::{Event, MouseButton};
 use param::{Effects, Value};
-use pxui_graph::scope_commands;
-use pxui_graph::scope_state as scope;
-use pxui_shell::{prompt as shell_prompt, tree};
+use rays_graph::scope_commands;
+use rays_graph::scope_state as scope;
+use rays_shell::{prompt as shell_prompt, tree};
 use rays::frame;
 use sop::edit_graph::Factory;
 
@@ -1045,7 +1045,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let mut scope_changes = result.scope_changes.clone();
     if let ([path], Some(_), Some(menu)) = (&added[..], &result.menu_pick, &value.menu) {
         let sc = path[..path.len().saturating_sub(1)].to_vec();
-        let (mx, my) = pxui_graph::node_menu::position(menu);
+        let (mx, my) = rays_graph::node_menu::position(menu);
         if let Some((x, y)) = scope::scope_point(pane_view(&value.into()), &sc, mx as f64, my as f64) {
             scope_changes.insert(0, scope::Change::Moved(vec![(path.clone(), x, y)]));
         }
@@ -1291,7 +1291,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         Some(k) if scope_name(&(&*value2).into()).is_some() => {
             // only the footers drawn and the selection are counted, not every node of the graph
             let view = pane_view(&(&*value2).into());
-            let mut shown = pxui_graph::scope_frame::inspect::footer_paths(view);
+            let mut shown = rays_graph::scope_frame::inspect::footer_paths(view);
             shown.extend(scope::selected(view));
             k.targets.iter().filter_map(|(path, target)| if shown.contains(path) { Some(*target) } else { None }).collect()
         }

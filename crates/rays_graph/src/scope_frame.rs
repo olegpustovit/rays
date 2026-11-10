@@ -38,7 +38,7 @@ fn left_button(sg: &Signal) -> bool {
     sg.button == Some(MouseButton::LeftButton)
 }
 
-/// The number field of a row, the kit's (`param::number`, as `Pxui_shell.Kit.number`): the kind is the
+/// The number field of a row, the kit's (`param::number`, as `Rays_shell.Kit.number`): the kind is the
 /// row's type, and only a literal with no typed row behind it is read by its spelling. `Some text` the
 /// frame the number changed.
 pub fn num_field(ui: &mut Ui, at: (f64, f64), w: f64, h: f64, size: Option<i64>, kind: Option<Kind>, range: Option<(f64, f64)>, nonfinite: bool, label: &str, text: &str) -> Option<String> {

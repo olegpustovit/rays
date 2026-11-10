@@ -28,10 +28,10 @@ use flow_syntax::ty::Ty;
 use input::{Frame as Input, Key};
 use param::{Effects, FieldView, Value};
 use pxui::ui::Ui;
-use pxui_graph::node_menu;
-use pxui_graph::scope_state as scope;
-use pxui_shell::prompt as shell_prompt;
-use pxui_shell::{layout, timeline_bar, tree};
+use rays_graph::node_menu;
+use rays_graph::scope_state as scope;
+use rays_shell::prompt as shell_prompt;
+use rays_shell::{layout, timeline_bar, tree};
 use rays::frame;
 use sop::edit_graph::Factory;
 
@@ -265,7 +265,7 @@ pub fn of_sop(node: &sop::node::T) -> Picked {
 #[derive(Clone)]
 pub enum Change {
     FollowSource(w::Path),
-    DockPanels(layout::Path, layout::Path, pxui_shell::chrome::Side),
+    DockPanels(layout::Path, layout::Path, rays_shell::chrome::Side),
     PanelState(layout::Path, panels::State),
     SelectLayout(String),
     SyntaxEdit(Op),

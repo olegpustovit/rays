@@ -7,8 +7,8 @@ use flow_eval::Value;
 use flow_graph::flow_edit as fe;
 use flow_graph::probe::{self, Footer, Geometry, Options, Probe, Summary};
 use flow_graph::projection as p;
-use pxui_graph::scope_pane as scope;
-use pxui_graph::scope_state::{Change, ScopeOpts};
+use rays_graph::scope_pane as scope;
+use rays_graph::scope_state::{Change, ScopeOpts};
 use std::rc::Rc;
 
 fn fail(message: &str) -> ! {
@@ -193,7 +193,7 @@ pub fn nested() {
 
 /// every zone shows this iteration
 struct FixedProbe(i64);
-impl pxui_graph::scope_state::Saved for FixedProbe {
+impl rays_graph::scope_state::Saved for FixedProbe {
     fn probe(&self, _: &[Symbol]) -> i64 {
         self.0
     }
@@ -422,7 +422,7 @@ pub fn run() {
 }
 
 /// `Test_support.Graph_pane.scope_view` over the editor's catalog.
-fn scope_view(opts: ScopeOpts, w: &Workspace, graph: &str) -> (pxui_graph::scope_state::Pane, Rc<p::Scope>) {
+fn scope_view(opts: ScopeOpts, w: &Workspace, graph: &str) -> (rays_graph::scope_state::Pane, Rc<p::Scope>) {
     let sc = Rc::new(scope_of(w, graph));
     let view = { let mut r8_view = scope::create(Some(1000), Some(700)); scope::with_scope(opts, graph, sc.clone(), &mut r8_view); r8_view };
     ({ let mut r8_view = view; scope::with_records(pg::recorded(w), &mut r8_view); r8_view }, sc)

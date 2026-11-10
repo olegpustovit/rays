@@ -15,9 +15,9 @@ use flow_sop::port;
 use flow_syntax::syntax::Node as SNode;
 use param::{FieldView, Value};
 use pxui::ui::{Drop, Ui, UiBox};
-use pxui_graph::scope_state as scope;
-use pxui_shell::inspector as insp;
-use pxui_shell::layout;
+use rays_graph::scope_state as scope;
+use rays_shell::inspector as insp;
+use rays_shell::layout;
 use sop::edit_graph;
 use sop::node;
 

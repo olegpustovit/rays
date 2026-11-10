@@ -7,9 +7,9 @@ use flow_check::workspace::Path;
 use flow_graph::edit_tree::ArgKey;
 use input::{Event, Key, MouseButton};
 use pxui::ui::*;
-use pxui_graph::scope_commands;
-use pxui_graph::scope_pane as scope;
-use pxui_graph::scope_state::{Change, Command, Pane, ScopeOpts};
+use rays_graph::scope_commands;
+use rays_graph::scope_pane as scope;
+use rays_graph::scope_state::{Change, Command, Pane, ScopeOpts};
 use std::rc::Rc;
 
 fn at_of(pairs: Vec<(Path, (f64, f64))>) -> ScopeOpts {

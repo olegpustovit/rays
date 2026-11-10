@@ -170,14 +170,14 @@ pub fn layout_panes() {
         return;
     }
     use editor_core::panels;
-    use pxui_shell::{chrome, layout as L};
-    for (graph, _) in pxui_graph::scope_commands::bindings() {
+    use rays_shell::{chrome, layout as L};
+    for (graph, _) in rays_graph::scope_commands::bindings() {
         assert!(
             rays_editor::editor_commands::keymap().iter().any(|c| c.id == graph.id && c.trigger == graph.trigger && true),
             "graph command missing from the host keymap"
         );
     }
-    for (graph, action) in pxui_graph::scope_commands::bindings() {
+    for (graph, action) in rays_graph::scope_commands::bindings() {
         assert!(
             rays_editor::editor_commands::keymap().iter().any(|c| c.id == graph.id && c.trigger == graph.trigger && *rays_editor::editor_commands::action_of(c) == rays_editor::editor_commands::Action::ScopeCommand(action.clone())),
             "graph command missing from the host keymap"

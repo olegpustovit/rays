@@ -7,7 +7,7 @@ use editor_core::router;
 use editor_document::document::{self, Home, T as Document};
 use flow_check::workspace as w;
 use input::{Event, Key};
-use pxui_graph::scope_state as scope;
+use rays_graph::scope_state as scope;
 use rays::frame;
 
 use crate::carry::{self as carry_mod, Place};

@@ -11,8 +11,8 @@ use flow_graph::flow_edit::Op;
 use flow_graph::projection as fproj;
 use flow_syntax::lisp;
 use param::Value;
-use pxui_graph::scope_commands;
-use pxui_graph::scope_state as scope;
+use rays_graph::scope_commands;
+use rays_graph::scope_state as scope;
 use rays_diagnostic::{self as diag, Diagnostic, Position};
 
 use crate::cook;

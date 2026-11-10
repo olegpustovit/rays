@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use editor_core::panels::{self, Axis, Panel, Path, Size};
 use pxui::ui::{BoxOpts, Size as UiSize, Ui};
-use pxui_shell::kit::{self, ButtonOpts};
+use rays_shell::kit::{self, ButtonOpts};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
@@ -32,8 +32,8 @@ const TOOLS: [(Tool, &str, &str); 6] = [
 ];
 
 /// The toolbar sits in the graph panel's header, after its title, breadcrumb and the 1 x 12 rule
-/// (`Pxui_shell.Chrome.tools_start`): text buttons 20 high and 8 apart, as wide as their text
-/// (`Pxui_shell.Kit.button_width`); a tool that would run into the views and the collapse button is
+/// (`Rays_shell.Chrome.tools_start`): text buttons 20 high and 8 apart, as wide as their text
+/// (`Rays_shell.Kit.button_width`); a tool that would run into the views and the collapse button is
 /// left out.
 const VIEWS: [&str; 3] = ["Graph", "List", "Text"];
 
@@ -77,7 +77,7 @@ fn tool_rects(outline: bool, ui: &mut Ui, header: Header, from: f64) -> [Option<
 }
 
 /// Where a toolbar button sits (`from` points after the header's left edge, see
-/// `Pxui_shell.Chrome.tools_start`); none when the header is too narrow for it.
+/// `Rays_shell.Chrome.tools_start`); none when the header is too narrow for it.
 pub fn tool_rect(outline: bool, ui: &mut Ui, header: Header, from: f64, tool: Tool) -> Option<Rect> {
     tool_rects(outline, ui, header, from).into_iter().flatten().find(|(t, ..)| *t == tool).map(|(.., r)| r)
 }

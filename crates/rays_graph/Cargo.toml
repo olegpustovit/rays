@@ -1,12 +1,12 @@
 [package]
 autotests = false
-name = "pxui_graph"
+name = "rays_graph"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "pxui_graph"
+name = "rays_graph"
 path = "src/lib.rs"
 test = false
 

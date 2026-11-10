@@ -8,7 +8,7 @@ use std::sync::Arc;
 use editor_core::panels::{self, Panel};
 use editor_document::document::{self, Level};
 use editor_document::workspace_doc::{self, TextOptions};
-use pxui_shell::tree::{self, Intent};
+use rays_shell::tree::{self, Intent};
 
 use crate::cook;
 use crate::editor_carry;
@@ -211,7 +211,7 @@ fn single_draw_default_canvas_has_editable_layout() {
     assert_eq!(value.focus, Panel::Canvas("picture".into()));
     let shown = editor_shell::shell_tree(&value, &value.workspace);
     assert_eq!(*shown, panels::Panels::Leaf(Panel::Canvas("picture".into())));
-    let (_, changes) = crate::editor_panels::layout_intents(&(&value).into(), &value.workspace, &[pxui_shell::chrome::Intent::SplitPanel(vec![], panels::Axis::H)]);
+    let (_, changes) = crate::editor_panels::layout_intents(&(&value).into(), &value.workspace, &[rays_shell::chrome::Intent::SplitPanel(vec![], panels::Axis::H)]);
     assert_eq!(changes.len(), 2, "the first gesture materializes then edits the layout");
     let mut doc = (*value.doc).clone();
     for change in changes {
