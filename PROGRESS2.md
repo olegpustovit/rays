@@ -20,8 +20,8 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | D | 12 | 12 | 0 | 0 |
 | Z | 11 | 0 | 4 | 7 |
 | R | 10 | 10 | 0 | 0 |
-| G | 7 | 1 | 1 | 5 |
-| **All** | **58** | **40** | **6** | **12** |
+| G | 7 | 1 | 2 | 4 |
+| **All** | **58** | **40** | **7** | **11** |
 
 ## Items
 
@@ -83,7 +83,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | G3 | G | pending | — | ogpu_core/metal gpu tests; Windows ogpu_vulkan |
 | G4 | G | pending | — | Destroy-in-flight cases, live_handles delta 0 |
 | G5 | G | pending | — | Mock queue tests; a Metal queue case |
-| G6 | G | pending | — | cargo t -p web_export |
+| G6 | G | active | Caller-owned decoder API installed; export validates exact positive RGBA payloads, direct SDL edge is dev-only | Injected-image/export/e2e qualification pending Z2 coherent source; transitive native Document SDL routes remain explicit |
 | G7 | G | pending | — | refits() &gt; 0 over 3 frames |
 ## Order
 
@@ -401,3 +401,12 @@ The D wave is complete. At most two agents build concurrently. Current build slo
 - **Actual core Symbol/Record source installed**, not just a draft: process-wide u32 identifiers retain original bytes and never serialize numeric IDs; privately sorted immutable fields share an authored-order shape, preserving duplicate first-match lookup, assoc replacement/append, equality, display and existing key MD5s. Struct/Source share immutable payload owners. Ty record field names are symbols too. Full flow_syntax46/46 passes4.458s including compilation (slowest0.160s); source shape remains493→493 with no added findings. The initial custom borrowed iterator/FromIterator draft introduced3source findings; it is replaced by a concrete standard repeat_n/zip/map iterator and explicit Vec construction boundaries, without gate exceptions.
 - The core regression preserves frozen record key8e640fe7beef4e570ef5815a2b15d1c6 and visible-byte digesteddfe8c787c4a0f3c4f3c5f7a9c3f6f1, Value40B, actual numeric-sorted storage, authored traversal, duplicate/COW edits, parallel shared shape reuse and retained-memory dedup. A3072clone allocation guard is installed in flow_eval but awaits coherent downstream APIs before execution. One process-owned symbol memory attribution hook counts the table once in the retained-root collector.
 - Actual87path/capture files are installed through narrow apply-checked hunks after syntax parsing; this is **not** type/runtime qualification. Child owns path/capture corrections, parent owns actual Record/named-field consumers, root owns symbol/value/ty and regressions. Durable hashes continue to require resolved bytes with Z5 framing. Full combined workspace/Flow/parallel/SOP/graph/Web/native qualification and any Z2 closure remain outstanding. G1 continues its complete admission preparation outside the worktree, with no third build.
+
+- Record Symbol caller migration now executes the actual3072populated Record/Struct/Source clone guard: **0allocations/33.709µs**,11.425s wall including10.85s compile; Eval production and tests compile. The earlier7168allocation baseline covered1024nested Record clones before both Text and Record ownership changes; it is not an identical3072case timing comparison. `/tmp/rays-z2-record-clones.log`.
+- Signature audit found runtime/lowering name clones, so internal operator signatures/choice keys and public checker signature field keys now use Symbol. Construction-only Call/Op/GraphRef/Record/Assoc Draft fields also carry Symbol to avoid a String-vector roundtrip into local NameIds. All40checker tests pass11.994s including compilation (slowest0.105s); all-target check Cargo1.21s. Declaration goldens remain unchanged. A concrete borrowed Record adapter now shares constant-array validation with Args without materializing a Vec; its regression awaits the next coherent consumer check.
+- **G6 source installed, not qualified/closed:** Export/files/check_cli accept a borrowed decoder; rays_bin supplies the existing native SDL decoder, while web_export's own SDL edge is test-only. Decoder output is checked for positive dimensions, checked RGBA extent and exact byte length, preserving located E_WEB_IMAGE failures. One injected-image guard covers exact path/call/pixel bundling, callback failure, zero/negative/overflow dimensions and both short/long payloads; actual execution waits for Z2 consumers. Syntax parsing and scoped diff checks pass. Fresh normal cargo tree still shows editor_document→rays→runtime/resources SDL routes; no claim that the entire native dependency graph is SDL-free. Root owns these disjoint decoder/API/gate/manifest hunks; parent retains Record hunks in the same export files.
+- G1's full literal admission batch is now actually installed:53source/manifest paths plus its narrow gate edge, preserving G6's separate caller dependency rule. First scoped check finds one missing mock import, corrected. Second check is running; no native or full G1 completion is claimed. G1 and Z2 are the two builders; root performs read/review/docs and syntax parsing only.
+
+- G1 actual full admission Core/mock/Metal **61/61** conformance passes13.51s wall (runner12.990s, slowest native library0.321s); scoped all-target Core/mock/Metal/Vulkan check passes1.74s wall/Cargo1.63s. A workspace diagnostic exposes known in-progress Z2 caller mismatches plus one G1 renderer sample-mask test caller, which is corrected; no repeated full workspace qualification is claimed. New checks exercise exact sample-mask holes/caps, borrowed63B destination safety, ownership/lifetime retirement and actual native execution. Full literal remaining-check audit and exact Windows proof remain.
+
+- Artifact **v32** published through the CLI; downloaded HTML is byte-identical, embedded/tracked seeds and all58live plan documents match. Tracker immediate/live/offline regression passes. Counts **40done/7active/11pending (69.0%)**; G6 is active from real installed source, no additional partial stage counted complete. Fresh Tailscale read confirms Windows peer remains offline (last seen2026-11-10T00:50:00.1Z); no SSH/write attempted. The current goal turn is **progress** through committed qualified Text, actual tested Record/Symbol/checker source, full G1 source+61native conformance and decoder injection; full goal stays active.

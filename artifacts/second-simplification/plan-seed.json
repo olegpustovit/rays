@@ -129,7 +129,7 @@
   },
   "Z2": {
     "status": "active",
-    "note": "Shared binary Text Arc ownership installed across80paths; process symbols/sorted record shapes/full path migration remain"
+    "note": "2aa78a9a \u2014 shared binary Text qualified; process symbols/sorted records/path caller migration underway"
   },
   "Z3": {
     "status": "pending",
@@ -224,8 +224,8 @@
     "note": ""
   },
   "G6": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "Caller-owned decoder API installed; export validates exact positive RGBA payloads, direct SDL edge is dev-only"
   },
   "G7": {
     "status": "pending",
