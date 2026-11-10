@@ -1,9 +1,4 @@
-//! Port of lib/flow_sop/lisp_node.ml: a checked Lisp geometry body as a SOP node. Node-owned
-//! schemas and cook identity; the body is built from the node's parameter values and cooked in its
-//! own session.
-//!
-//! The OCaml domain-local storage (`Domain.DLS`) of the cooked inputs and of the pending initial
-//! changes are thread-locals here: a node cooks on one thread, nested bodies on the same one.
+//! A checked Lisp geometry body owns its schema and cook identity and cooks in its own session. Cooked inputs and pending initial changes are thread-local; nested bodies use the same cook thread.
 use flow_syntax::symbol::Symbol;
 use flow_eval::Value;
 use param::{Field, FieldView, Kind, KindView, Schema, Value as ParamValue};

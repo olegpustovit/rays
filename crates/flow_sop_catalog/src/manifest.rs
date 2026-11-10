@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/manifest.ml: the deterministic catalog snapshot (`flow_manifest.sexp`)
+//! the deterministic catalog snapshot (`flow_manifest.sexp`)
 //! shared by the generator and the runtime check.
 use flow_check::catalog as flow_catalog;
 use flow_check::defnode::Defnode;
@@ -311,9 +311,7 @@ pub fn lisp_node(calls: &[String], node: &Defnode) -> String {
     })
 }
 
-/// The checked-in S-expression and its digest, checking with `ops` (OCaml `Operators.all`).
-/// The digest covers the sop kinds, the catalog the PPX links against; the generated scene, world
-/// and settings kinds (`extra`) follow them and are outside it.
+/// The checked-in manifest digest covers native SOP kinds, excluding generated scene/World/settings kinds appended afterward.
 pub fn generate_with(
     ops: &[Op],
     extra: &[Descriptor],

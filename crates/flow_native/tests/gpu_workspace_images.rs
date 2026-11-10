@@ -1,7 +1,4 @@
-//! Tests of the workspace image owner on `sketches/flow_image.rays` (a noise image drawn as a
-//! picture): resolving an image node, keeping it while fresh, and drawing it through the
-//! `Drawing` image callback. (The OCaml suite reaches the owner only through the editor tests.)
-//! Image resources need the process main thread (SDL), so this target runs from its own main.
+//! Workspace image nodes resolve, retain freshness and draw through the image callback. Resource setup runs on the process main thread.
 mod common;
 use flow_eval as e;
 use flow_native::{drawing, workspace_gpu, workspace_images as wi, workspace_resources};

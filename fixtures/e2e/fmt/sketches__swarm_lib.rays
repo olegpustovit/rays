@@ -98,7 +98,7 @@
                                axis# (if (< (abs t#.y) 0.9)
                                          [0.0 1.0 0.0]
                                          [1.0 0.0 0.0])
-                               side# (if (> (dot out# out#) 0.000001)
+                               side# (if (> (dot out# out#) 1e-6)
                                          out#
                                          (cross t# axis#))]
                           (let* [n# (normalize (cross side# t#))]
@@ -249,8 +249,8 @@
 ; gradient, {:gradient vec3 :distance float}.
 (defn surface :context value [(p : vec3) (ring : float) (thickness : float)]
   (let* [flat (sqrt (+ (* p.x p.x) (* p.z p.z)))
-         out [(* p.x (/ (- flat ring) (max flat 0.000001))) p.y (* p.z (/ (- flat ring) (max flat 0.000001)))]
-         across (max (length out) 0.000001)]
+         out [(* p.x (/ (- flat ring) (max flat 1e-6))) p.y (* p.z (/ (- flat ring) (max flat 1e-6)))]
+         across (max (length out) 1e-6)]
     {:gradient (/ out across) :distance (- across thickness)}))
 
 ; the original's flat grey background

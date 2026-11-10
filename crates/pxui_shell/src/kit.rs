@@ -1,4 +1,4 @@
-//! Port of lib/pxui_shell/kit.ml. Kit rev 3 pieces the chrome shares: where text sits in a
+//! Kit rev 3 pieces the chrome shares: where text sits in a
 //! 24-point bar, and the text button.
 use std::borrow::Cow;
 use pxui::theme;

@@ -25,7 +25,7 @@ const store = (rt, s, index, value) => {
   }
 };
 export function frame(input, state, rt) {
-  K ??= [-1e3, 2, 3, 2, 3];
+  K ??= [-1000, 2, 3, 2, 3];
   let l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15;
   let l16, l17, l18, l19;
   let at = 0;

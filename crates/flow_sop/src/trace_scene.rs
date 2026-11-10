@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/trace_scene.ml: `scene/trace` on the CPU. Registers a geometry (with
+//! `scene/trace` on the CPU. Registers a geometry (with
 //! optional procedural spheres, strands, vertex motion) or instances of prototypes with the
 //! `Ray_host` registry that the Flow evaluator and Packed kernels query.
 use flow_check::ray_host::{self as host, Hit};
@@ -318,13 +318,7 @@ pub fn register(
     Ok(())
 }
 
-/// Instances of prototypes with row-major 3x4 object-to-world transforms. `instance` is the array
-/// index, `prim` the primitive within its prototype, `normal` the world-space unit normal, `t` the
-/// world distance. `motion` is instance motion: each instance's shutter-end transform,
-/// interpolated with its start at the query's time.
-///
-/// Unlike OCaml, a transform that is not 12 numbers is refused here, at registration, rather than
-/// failing on a query.
+/// Instances use row-major 3x4 transforms. Query results carry instance index, prototype primitive, world-space normal/distance and shutter-interpolated motion. Reject transforms of any width other than 12 at registration.
 pub fn register_instances(
     spheres: &[Sphere],
     strands: &[Strand],

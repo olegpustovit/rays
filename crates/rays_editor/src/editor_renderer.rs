@@ -1,9 +1,4 @@
-//! The one renderer choice every sketch shows in its settings block, so the editor shell reads the
-//! same across sketches; and the editor's path-traced viewports (port of lib/rays_editor/renderer.ml,
-//! public as `Rays_editor.Renderer`).
-//!
-//! Gaps against OCaml: the converted-mesh cache is a plain 64-entry MRU list (not registered with
-//! `Lru`'s ledger as `editor.meshes`), and its byte charge is an estimate of the mesh arrays.
+//! Path-traced editor viewports share the renderer settings. ponytail: converted meshes use a 64-entry MRU list with estimated byte charges outside global Lru retreat.
 #![allow(non_camel_case_types)]
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -17,7 +12,6 @@ use rays::scene3::{self as d3, walk};
 use rays_math::{color, mat4};
 use rays_pathtracer::rays_pathtracer as p;
 
-/// OCaml `Renderer.t`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Path_traced,

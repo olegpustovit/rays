@@ -1,4 +1,4 @@
-//! Port of the pure parts of lib/rays_editor/test/test_text_pane.ml: selection-scoped text, token
+//! selection-scoped text, token
 //! scrubs, paste, find, symbols and lines. The sections that drive the whole editor
 //! (`editor_text`, `editor_binding`, `editor_w9`, `editor_active_scrub`, `editor_command_click`,
 //! `editor_literal_scrub`, `editor_text_drop`, `editor_graph_drafts`, `editor_text_find`,

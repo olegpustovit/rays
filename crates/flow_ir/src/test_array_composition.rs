@@ -1,8 +1,4 @@
-// Port of lib/flow_ir/test_array_composition.ml.
-// Sizes: OCaml sweeps 0/1/13/4097/5001/32769 rows; the direct-operator checks keep that sweep, the
-// compiled/Core checks use 0/1/13/2049 (still crossing two 1024-lane blocks) to fit the 5 s debug budget.
-// Not ported: the in-place `mutate` of results (OCaml arrays are mutable); the Rust equivalent is
-// that a result never shares its source's Arc storage and the sources compare equal afterwards.
+// Direct array operators use the broad size sweep; compiled/Core cases cross 1024-lane boundaries within the debug budget. Results must not share source Arc storage and sources remain unchanged.
 use flow_syntax::symbol::Symbol;
 use crate::core_ir::region::Instruction;
 use crate::flow_ir::executor;
@@ -330,12 +326,7 @@ fn argument_errors_precede_the_table() {
     }
 }
 
-/// Two separately checked closures capture the same spelling. Supply the helper through the
-/// existing callable-binding API: graph-local shadowing, Fn graph inputs and escaping Fn results
-/// are correctly refused.
-// Product defect: map_function on the template body fails E_FUNCTION_ID ("Function belongs to an expired evaluation") at
-// the `(helper ...)` call: the helper FnId lives in another evaluation's arena (get_fn is per arena in flow_eval), where OCaml
-// function ids are global.
+/// Known failure: map_function on a template helper from another evaluation reports E_FUNCTION_ID because the helper's home arena has expired; graph-local shadowing and escaping Fn values remain refused.
 #[test]
 fn captured_helpers() {
     let helpers: Vec<(&str, Box<dyn Fn(f64) -> i64>)> = vec![

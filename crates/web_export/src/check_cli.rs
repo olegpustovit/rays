@@ -1,4 +1,4 @@
-//! rays: the command line (port of bin/rays.ml). `check` and `fmt` are library functions so the
+//! rays: the command line. `check` and `fmt` are library functions so the
 //! e2e goldens (fixtures/e2e) run them in process.
 use editor_document::{lowering, workspace_doc as doc};
 use flow_syntax::syntax as s;

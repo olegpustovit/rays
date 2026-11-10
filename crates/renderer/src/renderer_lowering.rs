@@ -294,8 +294,7 @@ fn transform_bits(t_: &Transform) -> [f64; 6] {
     [t_.xx, t_.xy, t_.yx, t_.yy, t_.tx, t_.ty]
 }
 
-/// The lowered scene's quads: the texture is identified by pointer (the OCaml key compares it
-/// physically; a cached draw keeps the texture alive, so a pointer cannot be reused while cached).
+/// Cached quads retain texture owners, so pointer identity cannot be reused while the draw is cached.
 fn quad(
     state_: &mut Lowering,
     texture: &Rc<SampledTexture>,

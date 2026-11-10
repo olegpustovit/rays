@@ -1,5 +1,4 @@
-//! Port of lib/flow_sop (typed SOP/value overlay over flow + flow_ir + sop). One module per OCaml file.
-//! Lisp SOP bodies stay in crates/flow_sop/nodes/*.rays (the contract), read in place.
+//! Typed SOP/value lowering over Flow, IR and SOP; embedded Lisp node sources are the language contract.
 pub use flow_sop_catalog::{catalog, encoded_parameters, network, port};
 pub mod manifest;
 pub mod curve;

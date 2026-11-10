@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/image_kernel.ml(i): packed pixel functions; procedural images never depend
+//! packed pixel functions; procedural images never depend
 //! on the Flow compiler.
 use std::io::Write as _;
 use crate::attribute_kernel;
@@ -146,8 +146,7 @@ pub fn node(state: Option<&e::State>, t: &T) -> node::T {
     )
 }
 
-/// Port of lib/flow_sop/test_image_kernel.ml, less its Flow_graph projection and edit gestures and
-/// the display-qualification test (those need the graph library and `Lower`).
+/// Image kernel contracts; projection, edit gestures and display qualification use graph-layer tests.
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,3 +1,4 @@
+// Resource creation and rollback retain their existing dependency order.
 //! Isolated native frame coordinator. The public values deliberately contain no SDL or native handles.
 use crate::renderer_leases::{self, Policy as lease_policy};
 use crate::renderer_lowering::{self, ui_sampler, ui_white_texture};
@@ -330,7 +331,7 @@ pub struct RendererData {
     retain_after: Rc<Cell<i64>>,
 }
 
-/// The renderer: a shared handle (its parts are interior-mutable, as the OCaml record's fields were).
+/// The renderer is a shared handle with interior-mutable components.
 #[derive(Clone)]
 pub struct Renderer(Rc<RendererData>);
 
@@ -937,7 +938,7 @@ fn has_gpu_shapes(commands: &[Command]) -> bool {
     commands.iter().any(|command| matches!(command, Command::Shapes(shapes) if shapes.marks().is_some()))
 }
 
-/// OCaml's structural equality of two command arrays.
+/// Compare command arrays structurally.
 fn commands_equal(left: &[Command], right: &[Command]) -> bool {
     left.len() == right.len()
         && left.iter().zip(right.iter()).all(|(a, b)| match (a, b) {
@@ -957,7 +958,7 @@ fn commands_equal(left: &[Command], right: &[Command]) -> bool {
 }
 
 fn sample_hash(values: &[f64]) -> i64 {
-    // OCaml's Hashtbl.hash looks at a bounded sample; the plan is verified exactly after a hit.
+    // A sampled hash selects a candidate bucket; verify the complete retained plan exactly after a hit.
     let mut h = values.len() as i64;
     for v in values.iter().take(16) {
         h = rays_math::hash::mix(h, v.to_bits() as i64);
@@ -1180,8 +1181,7 @@ fn lower_scene2_submission(submission_: &Submission, density: i64, resource_: &d
         close_submission(submission_);
         return Err(e);
     }
-    // ponytail: the OCaml version turns an exception raised by the resolver into an error; a Rust
-    // resolver that panics unwinds through here.
+    // ponytail: resolver panics unwind; add a panic-to-error boundary only if resolver contracts require recovery.
     match lower_scene2_with_policy(
         &submission_.0.owner,
         &lease_policy::RetainImageSnapshots(submission_.0.image_leases.clone()),
@@ -1513,7 +1513,7 @@ fn make_retained_target(f: &presentation_facts, draws: &[Draw]) -> Option<Retain
         high_density: true,
     })
     .ok()?;
-    // (OCaml evaluates the three of the tuple right to left: canvas, target, step)
+    // Prepare canvas, then target, then step, preserving resource validation priority.
     let canvas = canvas::create(dw, dh);
     let target = offscreen_target(&exec);
     let stepped = step(Some((0.0, 0.0, 0.0, 0.0)), &exec, draws);

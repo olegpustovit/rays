@@ -1,7 +1,4 @@
-//! test_open_domain.ml. Not ported (no Rust counterpart worth the plumbing here): the Marshal round trips of the
-//! built-in identities (Rust values are plain data), the painted-colour checks through `Scene.Layer.stage_native`
-//! on a PXUI frame, and the Lisp text pane completion/help checks (`Lisp_text` takes a names table the OCaml test
-//! does not need); everything else is asserted.
+//! Open-domain tests retain visible rendering, inspection and editing contracts; omitted runtime-only measurements remain in owning native suites.
 #![allow(dead_code, unused_imports)]
 use std::sync::Arc;
 

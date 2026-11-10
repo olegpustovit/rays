@@ -1,9 +1,4 @@
-//! Port of lib/rays_editor/text_pane.ml(i): the workspace text pane (Selection, Graph and Document
-//! tabs over the Lisp text). Pure state and text plus `view`, which draws and returns intents for
-//! `Editor_frame` to apply after the frame.
-//!
-//! Sharing: OCaml shares the source, the printed text and the span maps; here `Shown` holds them in
-//! `Arc`s and `Printed` is the one lazily printed document behind `applied` / `applied_spans`.
+//! The text pane keeps pure tab/text state and returns intents for post-frame application. Shown shares source/text/span maps through Arcs; Printed lazily owns one document and both span views.
 use flow_syntax::symbol::Symbol;
 use editor_document::literal_edit::Change;
 use editor_document::settings;
@@ -32,8 +27,7 @@ pub enum Tab {
 }
 pub type Path = flow_check::workspace::Path;
 
-/// A document printed once, on demand: the text and its span map (`applied` and `applied_spans`
-/// of the OCaml `shown` are two views of one of these).
+/// One lazily printed document owns its text and span maps.
 #[derive(Clone)]
 pub struct Printed {
     cell: Arc<PrintCell>,
@@ -236,7 +230,6 @@ pub fn initial() -> State {
     }
 }
 
-// ---- byte helpers (OCaml strings are bytes) ----
 
 /// `String.sub text a len`, lossily decoded where the cut falls inside a character.
 pub fn sub(text: &str, a: i64, len: i64) -> String {
@@ -1041,10 +1034,7 @@ fn patched_shown(previous: &WorkspaceDoc, workspace: &WorkspaceDoc, shown: &Show
     }))
 }
 
-/// `make_shown` for the state's tab, cached by source, optional workspace, graph, selection and
-/// tab. A workspace includes saved layout and settings in the Document tab.
-/// ponytail: the cache compares the source structurally (OCaml `==`), O(source) per frame; hold the
-/// source in an `Arc` end to end if that shows in a profile.
+/// Cache shown text by source, workspace, graph, selection and tab. ponytail: source equality may walk O(source); retain an identity owner end-to-end if profiling justifies it.
 pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], graph: &str, selected: Option<&Path>) -> Result<(State, Shown), Diagnostic> {
     let graph = match (&state.tab, &state.binding_draft) {
         (Tab::Selection, Some((path, _))) if !path.is_empty() => path[0].as_str(),
@@ -1823,9 +1813,9 @@ fn colour_popup(ui: &mut Ui, at: (f64, f64), text: &str, range: (i64, i64)) -> O
                     left: false,
                     ..ValueFieldOpts::default()
                 };
-                let (changed, _) = ui.value_field((ax_x, cy), field_w, 20.0, &o, &|t| cfmt::parse_ocaml_float(t).is_some(), &format!("text-colour-{}", axis), &display);
+                let (changed, _) = ui.value_field((ax_x, cy), field_w, 20.0, &o, &|t| (t).parse::<f64>().ok().is_some(), &format!("text-colour-{}", axis), &display);
                 if changed != display && from_slider.is_none() {
-                    if let Some(v) = cfmt::parse_ocaml_float(&changed) {
+                    if let Some(v) = (&changed).parse::<f64>().ok() {
                         let v = v.min(1.0).max(0.0);
                         from_slider = Some(hex(if index == 0 { v } else { r }, if index == 1 { v } else { g }, if index == 2 { v } else { bl }));
                     }

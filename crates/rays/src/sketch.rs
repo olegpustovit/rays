@@ -272,7 +272,7 @@ fn event_text(e: &Event) -> String {
     }
 }
 
-/// UTC civil time from the system clock (days-from-civil inversion; OCaml printed local time).
+/// UTC civil time from the system clock using days-from-civil inversion.
 fn utc_now() -> (i64, i64, i64, i64, i64, i64) {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
     let days = secs.div_euclid(86400);
@@ -458,7 +458,7 @@ impl Drop for Finish {
             report_crash(&self.model);
         }
         if !self.done {
-            // on_stop runs before the renderer goes, as OCaml's Fun.protect did
+            // Run on_stop before destroying the renderer.
             if let (Some(on_stop), Ok(m)) = (&self.model.program.on_stop, self.model.model.try_borrow())
                 && let Some(m) = m.as_ref() {
                     on_stop(m.as_ref());

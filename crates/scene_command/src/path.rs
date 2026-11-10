@@ -63,7 +63,7 @@ pub fn of_commands(commands: &[Command]) -> Path {
 }
 
 impl Path {
-    /// The commands in order (OCaml `(path :> command array)`).
+    /// Path commands remain in authored order.
     pub fn commands(&self) -> &[Command] {
         &self.0
     }
@@ -232,8 +232,7 @@ pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Me
     ys.dedup_by(|a, b| *a == *b);
     let mut vertices = Vec::new();
     let mut triangles = Vec::new();
-    // OCaml prepends each quad's six indices onto a list that is reversed at the end,
-    // so every quad is emitted as one block in reverse order.
+    // Each quad emits its existing reversed index block, preserving triangle orientation.
     let add_quad = |vertices: &mut Vec<Point>, triangles: &mut Vec<usize>, left: Crossing, right: Crossing, y0: f64, y1: f64| -> Result<(), Error> {
         if vertices.len().checked_add(4).filter(|n| *n <= MAX_POINTS).is_none() {
             return Err(Error::ComplexityLimit);
@@ -306,13 +305,11 @@ pub fn stroke(
         if length == 0.0 { None } else { Some((dx / length, dy / length)) }
     };
     let offset = |p: Point, nx: f64, ny: f64, scale: f64| Point { x: p.x + nx * scale, y: p.y + ny * scale };
-    // OCaml's `triangle (vertex a) (vertex b) (vertex c)` evaluates its arguments right to
-    // left, so the vertices are stored c, b, a and the triangle reads back in that order.
     let add_triangle = |vertices: &mut Vec<Point>, indices: &mut Vec<usize>, a: Point, b: Point, c: Point| -> Result<(), Error> {
         if vertices.len().checked_add(3).filter(|n| *n <= MAX_POINTS).is_none() { return Err(Error::ComplexityLimit); }
         let base = vertices.len();
-        vertices.extend_from_slice(&[c, b, a]);
-        indices.extend_from_slice(&[base, base + 1, base + 2]);
+        vertices.extend_from_slice(&[a, b, c]);
+        indices.extend_from_slice(&[base + 2, base + 1, base]);
         Ok(())
     };
     let fan = |vertices: &mut Vec<Point>, indices: &mut Vec<usize>, center: Point, radius: f64, start_angle: f64, delta: f64| -> Result<(), Error> {

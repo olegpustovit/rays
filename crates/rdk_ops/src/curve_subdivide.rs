@@ -1,8 +1,4 @@
-//! Curve subdivision (Catmull-Clark and bilinear) over packed polygon curves.
-//!
-//! OCaml raises `Error.Fail`, `Invalid_argument` and `Cancel.Cancelled` out of `iterate`; here each
-//! is an `error::T`: a failure has code `invalid_parameter` and the OCaml message, a cancellation
-//! has code `cancelled`.
+//! Curve subdivision returns invalid_parameter failures and preserves cancelled errors.
 
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology,

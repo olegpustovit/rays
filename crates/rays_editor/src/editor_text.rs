@@ -1,7 +1,4 @@
-//! The text pane's applies: drafts, merges, scrubs and the save-time bookkeeping of unsaved work.
-//! Port of lib/rays_editor/editor_text.ml.
-//!
-//! Optional arguments of the OCaml functions are trailing `Option`s.
+//! Apply text-pane drafts, merges, scrubs and save bookkeeping; optional settings use trailing Options.
 #![allow(non_camel_case_types)]
 use flow_syntax::symbol::Symbol;
 use std::sync::Arc;

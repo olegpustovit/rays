@@ -1,12 +1,4 @@
-//! Terminal render representation for disconnected SOP pieces.
-//!
-//! The source remains one immutable cooked RDK geometry. Piece membership and centers are compiled
-//! once into compact arrays, after which explosion controls only rebuild render positions; they
-//! never recook topology. This is the Rays counterpart of Connectivity -> Pack by Name ->
-//! Transform Pieces/Exploded View, without inventing editable packed primitives inside a geometry.
-//!
-//! Gaps against OCaml: the `Invalid_argument` raises (empty piece attribute, non-finite controls)
-//! are `Err` values.
+//! Disconnected pieces compile immutable membership/center arrays once; explosion only rebuilds render positions and never recooks topology. Invalid controls return Err.
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -1,4 +1,4 @@
-// Port of lib/rays_math/test_clock.ml. Readings never go back, and two within a microsecond or two
+// Readings never go back, and two within a microsecond or two
 // of work differ: no step of a millisecond hides a short run.
 use crate::clock;
 

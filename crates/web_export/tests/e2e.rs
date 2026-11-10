@@ -1,5 +1,4 @@
-//! `check` and `fmt` on every .rays file against the OCaml goldens in fixtures/e2e (CRLF
-//! normalized). One test per golden file keeps failures and the five-second budget local.
+//! Check/fmt every Rays source against owned CRLF-normalized fixtures; each file has its own budgeted case.
 use std::path::PathBuf;
 
 fn root() -> PathBuf {
@@ -264,7 +263,7 @@ fn every_indexed_file_has_a_golden_test() {
     assert_eq!(FILES, indexed, "update the per-file tests when the golden corpus changes");
 }
 
-/// `rays web` writes the files the OCaml binary wrote (fixtures/web_export; a file over 1 MiB is held as its md5).
+/// Web export matches owned fixture files; outputs above 1MiB use MD5 integrity checks.
 #[test]
 fn web_basic() {
     std::thread::Builder::new()

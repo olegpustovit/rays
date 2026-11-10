@@ -1,6 +1,4 @@
-//! The History half of lib/editor_core/test_history.ml, over the specialised history: the present is
-//! a real `Document` whose `active_camera` carries the test's integer (and the snapshot's
-//! `saved_camera` is the entry's), so every assertion of the OCaml test keeps its meaning.
+//! History tests use real documents; active/saved cameras carry the test identity through present and snapshot transitions.
 use std::cell::RefCell;
 use std::sync::Arc;
 

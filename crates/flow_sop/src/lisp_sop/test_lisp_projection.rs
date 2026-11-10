@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/test_lisp_projection.ml: the card's inspector rows and its factory node's
+//! the card's inspector rows and its factory node's
 //! parameter metadata: this module lowers calls as that node.
 use super::support::*;
 use crate::{catalog, lisp_sop, manifest, operators};
@@ -36,7 +36,7 @@ fn field(name: &str, label: &str, kind: param::Kind, default: f64, vec3: Option<
     f
 }
 
-/// The OCaml schema, independent of the declaration, as a metadata oracle.
+/// Schema metadata expected independently of the node declaration.
 fn schema() -> Arc<param::Schema> {
     Arc::new(
         param::schema(
@@ -134,7 +134,7 @@ fn row_expr(cat: &Catalog, ws: &w::Workspace, key: &ArgKey) -> Option<String> {
 }
 
 #[test]
-fn lisp_card_matches_the_ocaml_schema_and_gestures_project_back() {
+fn lisp_card_matches_native_schema_and_gestures_project_back() {
     let base = catalog_of(&lisp_sop::factories());
     let mut with_native = vec![native_factory()];
     with_native.extend(lisp_sop::factories());
@@ -144,14 +144,14 @@ fn lisp_card_matches_the_ocaml_schema_and_gestures_project_back() {
     let native = checked(&native_catalog, &parse(&format!("(workspace w {GRAPH})")));
     let actual = card(&base, &workspace);
     let expected = card(&native_catalog, &native);
-    assert!(normalize(&actual) == normalize(&expected), "Lisp and OCaml cards differ");
+    assert!(normalize(&actual) == normalize(&expected), "Lisp and native cards differ");
     assert_eq!(actual.rows.iter().map(|r| r.label.clone()).collect::<Vec<_>>(), vec!["geo", "distance", "scale"], "Lisp card omits its schema rows");
     assert!(actual.rows[0].head && p::bypassable(&actual), "Lisp header geometry input differs");
     let full = |n: &p::Node| p::lines(&|_| None, p::Level::Full, n);
     assert!(full(&normalize(&actual)) == full(&normalize(&expected)), "Lisp full card and inspector folder rows differ");
     let n = lisp_sop::workspace_node(&[], &source(10));
     let native_fields = schema().view(&[Value::Float(2.0), Value::Float(1.0), Value::Float(2.0), Value::Float(3.0)]).unwrap();
-    assert!(node::parameter_fields(&n) == native_fields, "Lisp inspector metadata differs from OCaml schema");
+    assert!(node::parameter_fields(&n) == native_fields, "Lisp inspector metadata differs from native schema");
     let (edited, changed) = apply(&base, &forms, Op::SetArg { node: actual.path.clone(), key: ArgKey::Kw("distance".into()), sub: vec![], value: num("3.0") }).unwrap();
     assert_eq!(row_expr(&base, &changed, &ArgKey::Kw("distance".into())), Some("3.0".to_owned()), "scalar scrub did not project back");
     let (_, changed) = apply(&base, &edited, Op::SetArg { node: actual.path.clone(), key: ArgKey::Kw("scale".into()), sub: vec![1], value: num("4.0") }).unwrap();

@@ -1,4 +1,4 @@
-//! Port of lib/rays_editor/editor_add.ml: what the add menu adds. A kind picked in the node menu
+//! what the add menu adds. A kind picked in the node menu
 //! becomes one `AddNode` at the selected zone (else the graph body), wired to the selected node
 //! when the kind takes a geometry input; the language's forms and "Value" entries are cards with a
 //! small working expression to edit in place. Bundle C.

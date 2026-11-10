@@ -1,4 +1,4 @@
-//! Port of lib/flow_ir/core_draw.ml: the lowering rules of the draw operators, and the device
+//! the lowering rules of the draw operators, and the device
 //! placement and sibling fusion of a lowered program's mark sets. A rule names the inputs it needs,
 //! supplies the defaults (white ink and fill, width 1) and writes statements; every check of a
 //! value is the executor's.
@@ -571,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn draw_lowering_matches_the_ocaml_snapshot() {
+    fn draw_lowering_matches_owned_snapshot() {
         let actual = dump();
         let expected = include_str!("../../../crates/flow_ir/core_draw.expected").replace("\r\n", "\n");
         if actual != expected {

@@ -1,19 +1,4 @@
-//! Port of lib/editor_document/scene_sync.ml: edits of the scene and the World, written to the
-//! workspace text.
-//!
-//! The text is the truth. What the inspector, the handles, the scene list (reparent, rename,
-//! delete, hide), the World keys and the panels ask of an object the text has is written to its
-//! text (`set_fields`, `write`: `Flow_edit` ops on the graph that declares it, an inline call
-//! unfolded into a binding first) and the text lowered again; the derived document is never edited
-//! in between. Objects that only the host made (its camera and lights, a scene of one geometry
-//! object per `sop` graph, a World given by `?world`) have no text: those are edited as derived
-//! objects, and `reconcile` writes their kind as a graph on the first explicit edit, once. It also
-//! writes the fields of a camera that follows the viewport.
-//!
-//! Approximations of OCaml physical identity (`==`): the workspace and its source are tracked by
-//! `changed` / `source_changed` flags on the state (set whenever an op or a settings write is
-//! applied); `reconcile`'s "nothing derived changed" shortcut compares scene/layers structurally
-//! and networks by `ptr_eq` (a missed shortcut falls through to the same result).
+//! Authored text is the source of truth. Scene, World, settings and layout edits rewrite source before lowering. Host-only objects reconcile into authored graphs on their first explicit edit. Change flags track source/workspace replacement; unchanged derived scene/layers compare structurally and networks by pointer identity.
 use crate::document::{self, Home, Level};
 use crate::kind_graph as g;
 use crate::kinds;
@@ -418,7 +403,7 @@ fn homed(doc: &document::T, id: i64) -> bool {
 fn unique(graph: &[g::Node], id: i64) -> R<()> {
     let found = label(graph, id).and_then(|l| graph.iter().find(|i| i.id != id && i.label == l && i.kind != "world"));
     match found {
-        Some(_) => stop(format!("Two objects are named {}. Rename one of them first.", sop::node::ocaml_quote(&label(graph, id).unwrap_or_default()))),
+        Some(_) => stop(format!("Two objects are named {}. Rename one of them first.", format!("{:?}", &label(graph, id).unwrap_or_default()))),
         None => Ok(()),
     }
 }
@@ -975,7 +960,7 @@ fn write_edit(st: &mut State, doc: &document::T, level: Level, edit: &Edit) -> R
                 // share would move the other's children
                 let graph = document::scene_graph(doc);
                 if graph.iter().any(|i| i.id != *id && i.label == *name && i.kind != "world") {
-                    return stop(format!("Two objects are named {}. Rename one of them first.", sop::node::ocaml_quote(name)));
+                    return stop(format!("Two objects are named {}. Rename one of them first.", format!("{:?}", name)));
                 }
                 for (o, home) in &doc.homes.objects {
                     let key = if o == id {

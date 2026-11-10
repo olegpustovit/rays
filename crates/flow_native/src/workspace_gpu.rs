@@ -1,13 +1,4 @@
-//! Port of lib/flow_native/workspace_gpu.ml: the workspace's GPU service. One owner (the thread
-//! that created it, OCaml's initial domain) holds the GPU lease and the `flow_gpu` host; cook
-//! workers reach it through a proxy backend whose every call is queued here and served by `pump`.
-//!
-//! Rust shape notes. OGPU handles are `Rc`, so the owner's state lives in a thread-local registry
-//! (as `flow_gpu::host` does) and the `Send + Sync` `Gpu::Backend` holds only an id.
-//! A worker's call becomes a `Job` (a boxed `FnOnce` returning a boxed `Any`) that the owner runs
-//! in `pump`. A resident scope the owner makes for a worker stays in a thread-local table; the
-//! worker's proxy objects hold its id and route every call. `Domain.is_main_domain` is "the
-//! thread that created this service". The wake byte on a socket pair is a `Condvar`.
+//! The creating thread owns the GPU lease and host. Worker proxies carry IDs and queue callbacks for pump; owner state and resident scopes live in thread-local tables. A condition variable wakes the owner. No mutable native handle crosses threads.
 use crate::drawing;
 use crate::marks_scene;
 use flow_gpu::host as h;

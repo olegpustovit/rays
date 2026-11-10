@@ -1,6 +1,4 @@
-//! Port of lib/flow_sop/attribute_kernel.ml: cook-time connection between immutable geometry and
-//! packed Flow data, and the attribute write node. The OCaml mention of Lower (fold_writes) is only
-//! a comment, so no forward hook is needed: Lower calls this module, never the reverse.
+//! Connect immutable geometry to packed Flow attributes. Lower calls this module; no reverse dependency or hook is needed.
 use flow_syntax::symbol::Symbol;
 use std::io::Write as _;
 use std::collections::HashSet;
@@ -28,7 +26,6 @@ use sop::node::{self, build, CookMode, Elementwise, Facts, InputUse, Topology};
 use flow_ir::flow_ir::Id as FId;
 use crate::{attribute_metadata, graph_kernel, group_kernel, topology_kernel_impl};
 
-/// OCaml `geometry : int -> Rdk.Geometry.t option`.
 pub type GeometryFn<'a> = &'a (dyn Fn(i64) -> Option<geometry::T> + Send + Sync);
 pub type GeometryLookup = Arc<dyn Fn(i64) -> Option<geometry::T> + Send + Sync>;
 
@@ -118,7 +115,7 @@ fn field_of(value: Option<Value>, field: &str) -> Option<Value> {
     }
 }
 
-/// The captured value a term names (`captured` / `lookup` of the OCaml).
+/// Resolve the captured value named by a term.
 fn lookup(bindings: &dyn Fn(&str) -> Option<Value>, term: &Term) -> Option<Value> {
     match term.node {
         TNode::Text(id) => Some(Value::Text(term.arena().shared_bytes(id))),
@@ -382,7 +379,7 @@ fn storage_kind(storage: &Storage) -> &'static str {
     }
 }
 
-/// The float planes of a storage, borrowed (OCaml `columns`).
+/// Borrow a storage's float planes.
 fn columns(storage: &Storage) -> Result<Option<Vec<&[f64]>>, Diagnostic> {
     attribute::float_planes(storage).map_err(|e| fail("E_ATTR_TYPE", &rerr(&e)))
 }
@@ -442,8 +439,7 @@ fn ranges(grain: i64, count: usize, strides: &[usize], piece: &(dyn Fn(usize, us
     Ok(out)
 }
 
-/// A bounded ring keyed by the identity of a first plane (OCaml `Flow.Value.remember ()`): a hit
-/// whose other planes differ is a miss that does not replace the entry.
+/// A bounded ring keys on first-plane identity; differing companion planes make a miss without replacing that entry.
 struct Ring<X> {
     slots: Mutex<Vec<(Vec<Weak<Vec<f64>>>, X)>>,
 }
@@ -980,7 +976,6 @@ fn install(owner: Owner, kind: &str, name: &str, planes: Vec<Vec<f64>>, g: &geom
     install_planes(owner, kind, name, shared(planes), g)
 }
 
-/// OCaml `Resident (v, count)` read back from a holder.
 fn resident_of(holder: &Arc<dyn rdk_core::packed::deferred::Holder>) -> Option<(Value, i64)> {
     topology_kernel_impl::resident_points_of(holder).map(|r| (r.value.clone(), r.count))
 }
@@ -2065,7 +2060,6 @@ pub mod display_sink {
 
 // ---- the node ----------------------------------------------------------------------------------
 
-/// The optional arguments of OCaml `node`.
 #[derive(Clone)]
 pub struct NodeOptions {
     pub state: Option<E::State>,
@@ -2398,7 +2392,6 @@ impl Kernel {
     }
 }
 
-/// The attribute write node (OCaml `Attribute_kernel.node`).
 pub fn node(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>, o: &NodeOptions, name: &str, values: &Value, sources: &[i64], inputs: &[node::T]) -> node::T {
     let (o, values, sources, inputs) = (o.clone(), values.clone(), sources.to_vec(), inputs.to_vec());
     let source = o.source.clone();
@@ -2552,7 +2545,7 @@ mod tests {
     use rdk_core::topology;
 use rdk_ops::line_geometry;
 
-    /// Bit-exact description of positions and attributes (OCaml `geometry_bytes`, minus groups).
+    /// Describe positions and attributes as exact payload bytes, excluding groups.
     fn bits(g: &geometry::T) -> Vec<u64> {
         let mut out = Vec::new();
         let view = float3::view::view(geometry::positions(g)).unwrap();
@@ -2905,9 +2898,7 @@ use rdk_ops::line_geometry;
         }
     }
 
-    /// Full planar attributes: all owners/vec widths, native raw payload bytes, capacity type
-    /// boundary and exact 1/4/8-domain errors. (OCaml's physical-identity asserts on the Flow
-    /// planes have no Rust meaning: Flow arrays are `Arc<Vec>`, geometry planes are `Arc<Vec<f64>>`.)
+    /// Validate all planar attribute owners/vector widths, exact native payload bytes, capacity types and equal 1/4/8-domain errors.
     #[test]
     fn full_planar_attributes() {
         for n in [0usize, 1, 6, 32769] {
@@ -3026,7 +3017,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         evaluation.records.iter().find(|(p, _)| p == &vec!["g".to_owned(), "tested".to_owned()]).expect("tested record").1[0].1.clone()
     }
 
-    /// OCaml `fields` of a geometry without its points: the topology planes as Flow arrays.
+    /// Expose topology planes as Flow arrays without geometry points.
     fn topology_fields(g: &geometry::T) -> Vec<(Symbol, Value)> {
         let view = topology::view::view(geometry::topology(g)).unwrap();
         vec![

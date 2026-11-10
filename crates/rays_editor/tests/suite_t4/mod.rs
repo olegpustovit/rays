@@ -43,7 +43,7 @@ pub fn of_text(factories: Option<&[sop::edit_graph::Factory]>, text: &str) -> ed
     editor_document::workspace_doc::of_text(&Default::default(), &catalog, text).unwrap_or_else(|ds| panic!("{ds:?}"))
 }
 
-/// An editor stepped frame by frame, as the OCaml `current`/`count` refs.
+/// A frame-by-frame editor with retained current model and frame count.
 pub struct Driver {
     pub ed: Option<editor::Editor>,
     pub count: i64,
@@ -91,7 +91,7 @@ pub fn temp_dir(name: &str) -> String {
 }
 
 impl Driver {
-    /// Every argument of the OCaml `step`: buttons, keys, delta, mouse, events.
+    /// Frame input includes buttons, keys, delta, pointer and events.
     pub fn full(&mut self, buttons: &[MouseButton], keys: &[Key], delta: (f64, f64), mouse: (f64, f64), events: Vec<Event>) {
         self.step_with(&Opts { buttons: buttons.to_vec(), keys: keys.to_vec(), delta, mouse: None }, mouse, events)
     }
@@ -105,7 +105,7 @@ pub fn init_sdl() {
     sdl3::init::init(&[sdl3::init::Subsystem::Video, sdl3::init::Subsystem::Events]).expect("SDL init");
 }
 
-/// OCaml `float_of_string` for the `%h` hex floats of the document dump (and plain decimals).
+/// Parse native decimal document-dump values.
 pub fn float_of_string(s: &str) -> f64 {
     let (neg, s) = match s.strip_prefix('-') {
         Some(r) => (true, r),

@@ -1,4 +1,4 @@
-//! Port of lib/editor_document/kind_graph.ml: the scene's objects and the World's layers as plain
+//! the scene's objects and the World's layers as plain
 //! data, each an instance of a kind (a typed schema and its descriptor), with its values and at
 //! most one input. No SOP node, no cook.
 use crate::settings;
@@ -173,7 +173,7 @@ pub fn schema_of(specs: Vec<decl::Spec>) -> Arc<Schema> {
     decl::schema(&decl::META, specs)
 }
 
-/// A record read by field name (the typed `parameters` records of the OCaml, positional here).
+/// Read a typed parameter record by field name.
 #[derive(Clone)]
 pub struct Rec {
     schema: Arc<Schema>,

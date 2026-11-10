@@ -1,6 +1,4 @@
-//! The body of lib/renderer/test_scene2_argument.ml, run on a window renderer (window_scene2_argument)
-//! and on an offscreen one (gpu_scene2_argument). Omitted from the OCaml test: the `Gc` allocation and
-//! promotion bounds of the animated-affine loop (no OCaml GC here); the frames still run.
+//! Run the same argument-stream workload on window and offscreen renderers; animated sweeps retain real frames and exact result assertions.
 use ::renderer::renderer::{self, prepared_draw};
 use ::renderer::scene_execution::{self, GeometryDraw, Mesh, MeshKey, new_bytes, PipelineFamily, SampledTexture, State, TextureLevel};
 use ogpu_core::pipeline::Blend;
@@ -31,15 +29,13 @@ fn describe(s: &renderer::Stats) -> String {
     format!("misses {} hits {}", s.retained_plan_misses, s.retained_plan_hits)
 }
 
-/// How many frames each sweep runs. A presented window frame waits ~10 ms on the compositor for its
-/// drawable, so the window run shortens the churn, mixed and animated sweeps; the offscreen run keeps
-/// the OCaml lengths. The 80-identity plan churn is two whole cycles in both.
+/// Presented windows shorten sweep counts to bound compositor waits; offscreen sweeps retain full churn and both run two 80-identity cycles.
 pub struct Frames {
     pub churn: i64,
     pub mixed: i64,
     pub animated: i64,
 }
-pub const OCAML: Frames = Frames { churn: 300, mixed: 100, animated: 100 };
+pub const STRESS: Frames = Frames { churn: 300, mixed: 100, animated: 100 };
 pub const WINDOW: Frames = Frames { churn: 60, mixed: 30, animated: 20 };
 
 pub fn run(runtime: &renderer::Renderer, frames: &Frames, mut before_draw: impl FnMut()) {

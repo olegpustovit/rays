@@ -1,4 +1,4 @@
-//! Port of lib/web_export/web_export.ml: the static 2D workspace export, with its JavaScript/WGSL
+//! the static 2D workspace export, with its JavaScript/WGSL
 //! runtime embedded. `lower` checks and lowers the first draw graph; `files` prints the export.
 use rays_math::hash;
 use rays_math::text_array::TextArray;
@@ -886,7 +886,7 @@ pub fn files(d: &doc::T, lowered: &Lowered, decode_image: &dyn Fn(&str) -> Resul
     Ok(out)
 }
 
-/// OCaml `Web_export.load`: the text, and the checked document (imports read beside the file).
+/// Read text and check imports relative to the document file.
 pub fn load(path: &str) -> (String, Result<doc::T, Vec<Diagnostic>>) {
     let read = |p: &str| std::fs::read(p).map(|b| String::from_utf8_lossy(&b).into_owned());
     let text = match read(path) {

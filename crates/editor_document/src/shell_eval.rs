@@ -1,8 +1,5 @@
-//! Port of lib/editor_document/shell_eval.ml: the panel tree of a `ui/workspace` graph: its panels,
-//! where each was written, the viewports and canvases it names, the start state and the layout
-//! switch.
-//!
-//! Paths are kept root-first (OCaml keeps them reversed while walking and reverses on use).
+// Later authored origins take precedence during reverse lookup.
+//! Evaluate the ui/workspace panel tree, its authored origins, viewport/canvas names, initial state and layout switch. Paths stay root-first.
 use crate::document::{self, Home, Origin, PreviewSource, Start, Switch};
 use crate::workspace_doc;
 use editor_core::panels::{self, Panel};
@@ -221,7 +218,7 @@ struct Found {
 
 impl Found {
     fn add(&mut self, path: &[usize], o: Origin) {
-        // consed in OCaml: the latest is first
+        // The latest authored origin takes precedence.
         self.found.insert(0, (path.to_vec(), o));
     }
     fn inline(&mut self, home: &Home, path: &[usize], key: &ArgKey, t: &Term) {
@@ -409,7 +406,7 @@ pub fn editor(workspace: &workspace_doc::T, plan: &Plan) -> R<Option<Editor>> {
                 .map(|(_, old, origin)| {
                     let key = match origin {
                         Some(Origin::Bound(name)) if leaves.iter().filter(|(_, _, o)| o == origin).count() == 1 => {
-                            format!("{}:{}/{}", old.chars().next().unwrap_or(' '), sop::node::ocaml_quote(&g.name), sop::node::ocaml_quote(name))
+                            format!("{}:{}/{}", old.chars().next().unwrap_or(' '), format!("{:?}", &g.name), format!("{:?}", name))
                         }
                         _ => old.clone(),
                     };

@@ -101,7 +101,7 @@ pub fn raw(
     }
     let connectivity = match connectivity_attribute {
         None => Connectivity::Always,
-        Some(name) if support::ocaml_trim_is_empty(name) => {
+        Some(name) if (name).trim().is_empty() => {
             return Err(fail(
                 "Rdk.Edge_collapse.edge_collapse: connectivity attribute name must not be empty",
             ));

@@ -1,3 +1,4 @@
+// Deterministic source order breaks ties between equal exact coordinates.
 //! Shared exact-predicate planar constraint-recovery kernel.
 //!
 //! Its ear clip is not `Polygon_triangulation.find_ear`: it uses exact orientation predicates and
@@ -468,8 +469,7 @@ fn canonical_constraints(
             weight.checked_neg().ok_or_else(|| err_message("Planar CDT constraint winding exceeds integer range"))?
         };
     }
-    // ponytail: stable sort where OCaml's heap sort is unstable; equal keys only differ in the
-    // order their integer weights are summed, which matters only for overflow detection.
+    // Stable equal-key order makes integer weight overflow reporting deterministic.
     let mut order: Vec<usize> = (0..count).collect();
     order.sort_by(|&l, &r| pairs[l].cmp(&pairs[r]));
     let mut unique_pairs: Vec<i64> = Vec::with_capacity(count);
@@ -1995,8 +1995,7 @@ fn run(
     })
 }
 
-/// `triangle_points` and `constraint_points` are packed triples and endpoint pairs.
-/// `Err` carries the OCaml `Error` message (including cancellation).
+/// Packed triangle triples and endpoint pairs report typed triangulation/cancellation failures.
 pub fn build(
     cancel_value: Option<&cancel::T>,
     workspace: Option<&mut Workspace>,

@@ -1,14 +1,4 @@
-//! Port of lib/flow_native/test_frame_alloc.ml: recursive_signals at full depth (its fold into a
-//! draw, on the editor's own path: Drawing over the workspace GPU owner, fast precision) drawn many
-//! times. After warm-up a frame creates no GPU buffer and allocates at most 1.1 MB. The
-//! sketch animates, so every frame does its work and its counts move; the pointer rests.
-//!
-//! The fold's arrays stay on the device through the draw: the picture must match the one drawn
-//! after reading them back (the host declines to draw over them, so they come back and the marks
-//! upload).
-//!
-//! Uses the counting allocator's cumulative allocated bytes for the OCaml per-frame budget.
-//! `RAYS_ALLOC_PROFILE` has no Rust counterpart (no allocation sampler).
+//! Animated frames keep packed arrays on device through drawing. After warm-up they create no GPU buffers and stay within the allocator's fixed per-frame byte budget. Reading arrays back must produce the same picture.
 mod common;
 use flow_eval as e;
 use flow_native::{drawing, workspace_gpu as wg};

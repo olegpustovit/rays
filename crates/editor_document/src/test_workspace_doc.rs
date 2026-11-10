@@ -1,4 +1,3 @@
-//! Port of the Workspace_doc parts (text, edit, imports) of lib/rays_editor/test/test_workspace_doc.ml.
 use crate::kinds;
 use crate::layout_by_path as lbp;
 use crate::settings;
@@ -209,7 +208,7 @@ fn build(previous: Option<&crate::document::T>, ws: &doc::T) -> crate::document:
     }
 }
 
-/// OCaml `full_edit`: the checked edit without the literal fast path.
+/// Run the checked edit without the literal fast path.
 fn full_edit(catalog: &Catalog, d: &doc::T, op: &Op) -> Result<(Vec<s::Syntax>, flow_check::workspace::Workspace), rays_diagnostic::Diagnostic> {
     let (ops, library) = (d.checked.ops.clone(), d.fragment);
     let checker = move |catalog: &Catalog, forms: &[s::Syntax]| flow_sop_catalog::catalog::check_workspace(&ops, library, None, catalog, forms);

@@ -1,6 +1,4 @@
-//! Port of lib/editor_document/layout_edit.ml: the editor graph's layout edits (panels, splits,
-//! tiles, floats and the switch of layouts) as pure rewrites of the workspace source, built on
-//! `flow_graph::edit_tree`. OCaml's raised edit failures are `Err(Diagnostic)`.
+//! Pure graph layout edits for panels, splits, tiles, floating windows and layout switches; failures are typed diagnostics.
 use flow_check::catalog::Catalog;
 use flow_check::op::Op as FlowOp;
 use flow_check::workspace as w;

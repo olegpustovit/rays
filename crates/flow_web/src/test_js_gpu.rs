@@ -1,6 +1,4 @@
-//! Port of lib/flow_web/test_js_gpu.ml (P6.4a): the frame of a program whose mark-set attributes the
-//! export placed on the GPU. `FrameOptions.gpu` prints the `Invoke` of a GPU region as
-//! `await rt.gpuArray(k)`; without it the output is the CPU form, unchanged.
+//! Frame export preserves GPU mark-set attributes and dispatch contracts.
 use crate::core_fixtures as fixtures;
 use crate::js::{self, FrameOptions};
 use crate::node_harness::repo_path;

@@ -1,4 +1,4 @@
-//! Port of lib/sop/image.ml: immutable, renderer-independent row-major images, backed by float
+//! immutable, renderer-independent row-major images, backed by float
 //! samples in [0,1] or owned RGBA8 bytes.
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -32,7 +32,7 @@ pub fn data_id(image: &T) -> i64 {
     image.0.data_id
 }
 
-/// Identity of the shared image (OCaml `==`).
+/// Physical identity of a shared image.
 pub fn ptr_eq(a: &T, b: &T) -> bool {
     Arc::ptr_eq(&a.0, &b.0)
 }

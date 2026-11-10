@@ -1,4 +1,4 @@
-//! The device side of scene/trace (port of lib/flow_shader/trace.ml). The region keeps a scene/trace
+//! The device side of scene/trace. The region keeps a scene/trace
 //! as its host fields (Trace), which the CPU answers through the ray host; a traced kernel instead
 //! inlines trace.rays' trace-hit (trace-occluded for a ray whose only read field is hit), compiled once
 //! a scene variant, in place of those fields.
@@ -13,7 +13,7 @@ use std::sync::{LazyLock, Mutex};
 
 pub const SOURCE: &str = include_str!("../trace.rays");
 
-/// OCaml's polymorphic variant ``[ `Loop | `Native ]``.
+/// Select loop or native ray tracing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Curves {
     Loop,

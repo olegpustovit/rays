@@ -13,16 +13,6 @@ pub fn fresh_data_id() -> i64 {
     NEXT_DATA_ID.fetch_add(1, AtomicOrdering::Relaxed)
 }
 
-/// OCaml `String.trim` (space, tab, newline, form feed, carriage return only).
-pub fn ocaml_trim(value: &str) -> &str {
-    value.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c'))
-}
-
-/// OCaml `String.trim s = ""`.
-pub fn ocaml_trim_is_empty(value: &str) -> bool {
-    ocaml_trim(value).is_empty()
-}
-
 #[allow(non_snake_case)]
 pub mod bits {
     pub fn mem(bits: &[u8], index: i64) -> bool {

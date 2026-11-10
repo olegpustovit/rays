@@ -38,12 +38,12 @@ fn make(code: Code, message: String) -> error::T {
     error::new(OPERATION, code, message)
 }
 
-/// Any OCaml string error, wrapped by `Error.guard ~operation:"merge" ~code:"schema_mismatch"`.
+/// Merge storage/schema failures use schema_mismatch under operation merge.
 fn fail(message: &str) -> error::T {
     make(Code::SchemaMismatch, message.to_owned())
 }
 
-/// A core error that was a plain string in OCaml: re-coded under this operation.
+/// Recode a shared helper failure under merge.
 fn lift(value: error::T) -> error::T {
     if error::is_cancelled(&value) {
         error::cancelled(OPERATION)
@@ -327,7 +327,7 @@ fn merge(
         None => merge_plain(cancel_value, grain, geometries),
         Some(name)
             if !geometries.is_empty()
-                && !support::ocaml_trim_is_empty(name)
+                && !(name).trim().is_empty()
                 && geometries.iter().all(|item| geometry::find_attribute(owner, name, item).is_none()) =>
         {
             let merged = merge_plain(cancel_value, grain, geometries)?;
@@ -359,7 +359,7 @@ pub fn run(params: &RunParams, geometries: &[geometry::T]) -> Result<geometry::T
 /// `run` with the provenance attribute and `source_base = tag_base`.
 pub fn run_tagged(params: &RunTaggedParams, geometries: &[geometry::T]) -> Result<geometry::T, error::T> {
     let authored = match &params.source_attribute {
-        Some(name) if !support::ocaml_trim_is_empty(name) => Some(support::ocaml_trim(name).to_owned()),
+        Some(name) if !(name).trim().is_empty() => Some((name).trim().to_owned()),
         _ => None,
     };
     let call = |source_attribute: Option<String>, source_base: i64| {

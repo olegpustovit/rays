@@ -1,4 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_face_cdt.ml: deterministic exact-predicate constrained
+//! deterministic exact-predicate constrained
 //! Delaunay refinement of one face (adapter over `Planar_cdt`).
 #![allow(non_snake_case)]
 use rays_math::float::{min as fmin, max as fmax};
@@ -44,7 +44,7 @@ pub fn triangle_count(value: &T) -> i64 {
     value.triangle_a.len() as i64
 }
 
-/// `Invalid_argument` in OCaml for a corner other than 0, 1 or 2: a panic here.
+/// A corner outside 0, 1 or 2 is a programmer contract violation.
 pub fn triangle_point(value: &T, triangle: i64, local: i64) -> i64 {
     match local {
         0 => value.triangle_a[triangle as usize],
@@ -113,8 +113,7 @@ fn reverse(sign: Sign) -> Sign {
     }
 }
 
-/// Orientation of index triples, cached under the sorted triple (sign flips with the permutation
-/// parity). The OCaml table is only a cache: results do not depend on its representation.
+/// Cache orientation under sorted index triples and flip sign with permutation parity; cache representation never affects results.
 fn cached_orient(
     cache: &RefCell<HashMap<(i64, i64, i64), Sign>>,
     points: &[implicit_point::T],

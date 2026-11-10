@@ -1,7 +1,4 @@
-// Port of lib/flow_ir/test_error_rows.ml.
-// The two checked graph-edit blocks of the OCaml file use flow_graph, which flow_ir does not list
-// as a dependency; they are kept in `graph_edits` below, compiled out until a dev-dependency
-// `flow_graph = { path = "../flow_graph" }` is added to flow_ir/Cargo.toml.
+// Graph-edit coverage belongs in the graph layer to preserve the IR crate's dependency boundary.
 use crate::core_exec::ResolveFn;
 use crate::test_support::{self as ts, ok};
 use flow_check::catalog::Catalog;
@@ -14,7 +11,6 @@ use rays_diagnostic::Diagnostic;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
-const OCAML_MAX_INT: i64 = i64::MAX;
 
 fn catalog() -> Catalog { Catalog { version: 1, kinds: vec![] } }
 
@@ -102,7 +98,7 @@ fn boundary_and_tail_selection_with_complete_immutable_flags() {
         for i in &bits { rows[*i] = 1; }
         let before = rows.clone();
         let flags = Value::Int_array(Arc::new(rows.clone()));
-        for grain in [1, 97, 4096, OCAML_MAX_INT] {
+        for grain in [1, 97, 4096, i64::MAX] {
             let selected = V::error_row_index(&flags, Some(grain), None).unwrap().expect("a failing row");
             failure(selected, evaluate(Some(resolve(grain, &calls)), flags.clone(), &range_last(MAPPER)));
         }

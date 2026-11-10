@@ -1,4 +1,4 @@
-//! Port of lib/flow_web/test_array_composition_web.ml. Every comparison executes the emitted
+//! Every comparison executes the emitted
 //! frame and regions, with real per-frame preparation, on the main thread and workers 1/8.
 use crate::{js, kernel_table::json_string, node_harness::{run_ok, runtime_url}, text_literal, wgsl};
 use flow_check::{catalog::Catalog, workspace};

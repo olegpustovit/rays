@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/group_kernel.ml(i): cooked immutable group boundary; native RDK owns
+//! cooked immutable group boundary; native RDK owns
 //! membership and order.
 use flow_syntax::symbol::Symbol;
 use crate::attribute_metadata;
@@ -56,7 +56,7 @@ fn count(geometry: &Geometry, owner: Owner) -> Result<i64, Diagnostic> {
 }
 
 fn name_check(name: &str) -> Result<(), Diagnostic> {
-    if name.trim_matches(|c| matches!(c, ' ' | '\u{c}' | '\n' | '\r' | '\t')).is_empty() {
+    if name.trim().is_empty() {
         fail("E_GROUP_NAME", "Group name must not be blank.")
     } else {
         Ok(())

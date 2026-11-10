@@ -1,4 +1,4 @@
-//! Port of lib/sop/groups.ml: group nodes, declared once (metadata, fields, parameters, operator).
+//! group nodes, declared once (metadata, fields, parameters, operator).
 use std::sync::Arc;
 
 use param::Value;

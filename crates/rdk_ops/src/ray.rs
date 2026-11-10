@@ -1,3 +1,4 @@
+// Preserve the existing generated attribute precedence against imported attributes.
 use std::sync::{Arc, Mutex};
 
 use rdk_core::{
@@ -70,12 +71,11 @@ fn fail(code: Code, message: &str) -> error::T {
     error::new("ray", code, message.to_owned())
 }
 
-use rdk_core::support::ocaml_trim_is_empty as blank;
 
 fn validate_name(label: &str, name: &Option<String>) -> Result<(), error::T> {
     match name {
         None => Ok(()),
-        Some(name) if blank(name) => Err(fail(Code::InvalidName, &format!("{label} must not be empty"))),
+        Some(name) if (name).trim().is_empty() => Err(fail(Code::InvalidName, &format!("{label} must not be empty"))),
         Some(name) if name == "P" => Err(fail(Code::InvalidName, &format!("{label} cannot be P"))),
         Some(_) => Ok(()),
     }
@@ -149,7 +149,7 @@ fn direction_planes(
             Ok(RayDirections::ConstantDirection { x: value.x, y: value.y, z: value.z })
         }
         Direction::RayAttribute(name) => {
-            if blank(name) {
+            if (name).trim().is_empty() {
                 return Err(fail(Code::InvalidDirection, "ray direction attribute name must not be empty"));
             }
             let values = deform::point_vector_attribute("Rdk.Ray.ray", name, source)
@@ -396,8 +396,7 @@ fn raycast_samples_into(
         let (first, last) = (first as usize, last as usize);
         let mut guard = parts[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (p_primitives, p_triangles, p_barycentric_a, p_barycentric_b, p_barycentric_c, p_distances, p_direction_signs, p_hit_counts, p_normals) = &mut *guard;
-        // Scratch is per range, as in the OCaml worker: its `combined` slots carry over between
-        // queries of one range.
+        // Per-range scratch retains combined slots across queries within that range.
         let result_count = samples_u * 2;
         let mut scratch = [0.0f64; 8];
         let mut node_stack = [0i64; 65];
@@ -747,7 +746,7 @@ fn run_inner(
         validate_name(label, name)?;
     }
     if let Some(name) = &params.hit_group {
-        if blank(name) {
+        if (name).trim().is_empty() {
             return Err(fail(Code::InvalidName, "hit group name must not be empty"));
         }
     }
@@ -1021,7 +1020,7 @@ fn run_inner(
             unique_attribute_name(source, collision, &taken, "__rays_ray_vertex_weights")
         }
     };
-    // Most recent first, as the OCaml lists are consed.
+    // Use newest-first imported-attribute precedence.
     let mut attributes: Vec<attribute::T> = Vec::new();
     let mut protected_attributes: Vec<attribute::T> = Vec::new();
     let imported_point_attribute = |name: &str| -> bool {

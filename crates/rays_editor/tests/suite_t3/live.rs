@@ -1,5 +1,4 @@
-//! Port of lib/rays_editor/test/test_workspace_live.ml (W2b: live drives, volatile cache slots,
-//! fixed-step determinism, realtime edits and the editor's cook path).
+//! Live drives, volatile cache slots, fixed-step determinism, realtime edits and the editor cook path.
 use super::support::*;
 use super::t3c::frame_at;
 use flow_sop::lower;

@@ -1,8 +1,4 @@
-//! Cases of lib/rays that need the SDL main thread but no GPU: images, fonts, automatic text,
-//! display-list image binding and staged resource ownership.
-//! Not ported: the `Gc.allocated_bytes` ceilings of the automatic text test (no OCaml GC), and the
-//! audio synth playback (it needs `SDL_AUDIODRIVER=dummy`, which a Rust test cannot set safely;
-//! the case runs when that variable is already set).
+//! Main-thread image/font/text/resource tests check staged ownership; audio playback runs only when the caller supplied an appropriate audio driver.
 use rays::audio;
 use rays::camera;
 use rays::font;

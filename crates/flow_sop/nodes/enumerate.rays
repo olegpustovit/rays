@@ -21,19 +21,23 @@
 (defn enumerate_spread :context value [(n : int) (selected : (array int)) (rank : (array int))]
   (exact (map (fn [(shifted : int)] (int/sub shifted 1))
     (array/scatter_add selected (exact (map (fn [(r : int)] (int/add r 1)) rank)) n))))
-;; Native sequence_fits: start + top*step must stay inside the 63-bit range. Exact where the
-; headroom fits an Int, otherwise through a float estimate.
+; Unsigned room/divisor expressed with wrapping signed operations; divisor is positive.
+; Halving first keeps signed division exact, including room with its high bit set.
+(defn enumerate_room_quotient :context value [(room : int) (divisor : int)]
+  (if (int/ge room 0) (int/div room divisor)
+    (let* [half (int/and (int/shr room 1) 9223372036854775807)
+           quotient (int/mul (int/div half divisor) 2)
+           remainder (int/sub room (int/mul quotient divisor))]
+      (int/add quotient (if (or (int/lt remainder 0) (int/ge remainder divisor)) 1 0)))))
+; Exact endpoint check over all signed 64-bit values; no float estimate loses boundary bits.
 (defn enumerate_overflows :context value [(start : int) (step : int) (top : int)]
-  (let* [limit 4611686018427387903
-         divisor (if (int/lt step 0) (int/sub 0 step) (if (int/eq step 0) 1 step))
-         reach (+ (float start) (* (float top) (float step)))]
-    (cond
-      (or (int/le top 0) (int/eq step 0)) false
-      (int/gt step 0)
-        (if (int/ge start 0) (int/gt top (int/div (int/sub limit start) divisor)) (> reach 4611686018427387904.0))
-      :else
-        (if (int/lt start 0) (int/gt top (int/div (int/add (int/add start limit) 1) divisor))
-          (< reach -4611686018427387904.0)))))
+  (if (or (int/le top 0) (int/eq step 0)) false
+    (let* [room (if (int/gt step 0) (int/sub 9223372036854775807 start)
+                  (int/sub start -9223372036854775808))
+           divisor (if (int/lt step 0) (int/sub 0 step) step)
+           quotient (if (int/lt divisor 0) (if (int/lt room 0) 1 0)
+                      (enumerate_room_quotient room divisor))]
+      (and (int/ge quotient 0) (int/gt top quotient)))))
 (defnode sop/enumerate :label "Enumerate" :category ["Attribute" "Generate"]
   :validate (and (not (text/blank? name)) (not (and (equal? owner "Point") (equal? name "P"))))
   :code "E_PARAM" :message "sop/enumerate: invalid attribute name"

@@ -1,4 +1,4 @@
-// Port of lib/flow_ir/test_core_control.ml (core_control.expected is read in place).
+//! Control-flow register programs match core_control.expected.
 use crate::core_ir as C;
 use crate::core_lower;
 use crate::flow_ir::executor;

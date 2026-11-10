@@ -1,4 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_radial.ml: exact radial ordering of surface charts around
+//! exact radial ordering of surface charts around
 //! complex edges. `Invalid_argument` becomes an `invalid_complex` error.
 use std::cell::Cell;
 use std::cmp::Ordering;

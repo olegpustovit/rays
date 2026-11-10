@@ -1,9 +1,7 @@
-// Port of lib/mem/test_mem.ml, assertion for assertion.
 use super::*;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
-const OCAML_MAX_INT: i64 = (1 << 62) - 1;
 
 static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -399,7 +397,7 @@ fn cook_admission_sheds_then_refuses_naming_owners() {
     let session = cache("cook.session");
     charge(&session, 123);
     assert!(admit().is_ok(), "unlimited admits");
-    assert!(admit_bytes(Pool::Host, OCAML_MAX_INT).is_ok());
+    assert!(admit_bytes(Pool::Host, i64::MAX).is_ok());
     let footprint = phys_footprint().unwrap_or(0);
     set_budget_from(Source::Override, footprint + (1 << 30));
     assert!(admit_bytes(Pool::Host, 1 << 20).is_ok());

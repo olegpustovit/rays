@@ -1,7 +1,7 @@
 // Rays web export: frame program. frame(input, state, rt); see crates/flow_web/src/js.rs.
 let K;
 export function frame(input, state, rt) {
-  K ??= [-1e3, false, 0n, 4611686018427387903n, 2, 1, 2, false, 0n, 4611686018427387903n, 2, 1, 2];
+  K ??= [-1000, false, 0n, 4611686018427387903n, 2, 1, 2, false, 0n, 4611686018427387903n, 2, 1, 2];
   let l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15;
   let l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31;
   let l32, l33, l34, l35, l36, l37, l38, l39, l40, l41, l42, l43, l44, l45, l46, l47;

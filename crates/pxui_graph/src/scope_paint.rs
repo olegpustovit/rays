@@ -1,6 +1,4 @@
-// Port of lib/pxui_graph/scope_paint.ml(i): the kit's cards, wires, zones and footers, drawn through a
-// `Paint`. Painters get only the `Paint` (no `Ui`): text is placed with `Paint::text_top`, the theme is
-// `t.theme`. OCaml optional arguments become option structs (`NodeOpts`, `HeaderOpts`) or `Option`s.
+// Draw cards, wires, zones and footers through Paint rather than Ui. Text uses Paint::text_top and the shared theme.
 use flow_syntax::symbol::Symbol;
 use std::borrow::Cow;
 use crate::node_menu;
@@ -286,7 +284,7 @@ pub fn live_value(t: &Pane, name: &str) -> Option<String> {
 }
 
 fn float_opt(s: &str) -> Option<f64> {
-    cfmt::parse_ocaml_float(s)
+    (s).parse::<f64>().ok()
 }
 
 /// "[0 1 0]" as its numbers.

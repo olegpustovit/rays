@@ -1,4 +1,4 @@
-//! The node menu (the OCaml `run_menu`), assertion for assertion.
+//! Node-menu interaction and typed intent contracts.
 use crate::support::*;
 use flow_syntax::ty;
 use input::{Event, Key, MouseButton};

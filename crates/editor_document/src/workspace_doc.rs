@@ -1,4 +1,4 @@
-//! Port of lib/editor_document/workspace_doc.ml: the workspace document: a checked workspace, its
+//! the workspace document: a checked workspace, its
 //! layout keyed by path and the sketch settings. UI-free. The source text is the authored truth;
 //! `checked` is derived from it and every edit validates atomically.
 //!
@@ -248,7 +248,7 @@ fn read_settings(base: &settings::T, form: &S) -> Result<settings::T, String> {
                     (PV::Bool(_), Node::Sym(text)) if form.name(text) == "true" => PV::Bool(true),
                     (PV::Bool(_), Node::Sym(text)) if form.name(text) == "false" => PV::Bool(false),
                     (PV::Int(_), Node::Num(text)) => PV::Int(form.name(text).parse::<i64>().map_err(|_| wrong())?),
-                    (PV::Float(_), Node::Num(text)) => PV::Float(cfmt::parse_ocaml_float(form.name(text)).ok_or_else(wrong)?),
+                    (PV::Float(_), Node::Num(text)) => PV::Float((form.name(text)).parse::<f64>().ok().ok_or_else(wrong)?),
                     (PV::Text(_), Node::Str(bytes)) => PV::Text(form.shared_bytes(bytes)),
                     (PV::Choice(_), Node::Str(bytes)) => PV::Choice(String::from_utf8_lossy(form.bytes(bytes)).into_owned()),
                     _ => return Err(wrong()),
@@ -368,7 +368,6 @@ fn prune_keys(checked: &Workspace, layout: &lbp::T) -> lbp::T {
     lbp::T { editor, ..lbp::remap(&|p| if keep(p) { Some(p.clone()) } else { None }, &lbp::T { editor: None, ..layout.clone() }) }
 }
 
-/// What `of_text` and `check_text` take beside the catalog: OCaml's optional arguments.
 #[derive(Clone, Default)]
 pub struct TextOptions {
     /// Defaults to `flow_sop::operators::all`; an explicit list replaces those extensions.
@@ -579,9 +578,7 @@ fn checker_for(ops: Vec<FlowOp>, library: bool) -> Box<flow_edit::Checker> {
     Box::new(move |catalog: &Catalog, forms: &[S]| fsc::check_workspace(&ops, library, None, catalog, forms))
 }
 
-/// An edit's checked workspace carries the document's ops Arc: the edit checked against those ops, and
-/// `same_graph` compares them by identity (OCaml shares the list across edits).
-// ponytail: flow_check builds a fresh ops Arc from the slice it is given; swap it here instead of threading the Arc through check.
+/// A checked edit retains the document's operator Arc because graph identity compares that owner. ponytail: checking builds a fresh Arc from the input slice; replace it here until the checker carries that owner through.
 fn keep_ops(t: &T, (source, mut checked): (Vec<S>, Workspace)) -> (Vec<S>, Workspace) {
     checked.ops = t.checked.ops.clone();
     (source, checked)

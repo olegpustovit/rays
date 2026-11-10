@@ -1,9 +1,5 @@
-//! What the loop draws of the views: the cursor, the World bake of a frame, the hidden scene and
-//! the composition of the viewports, canvases and floating windows under the UI. Port of
-//! lib/rays_editor/loop_view.ml.
-//!
-//! Gap against OCaml: the hidden scene is reused by value (width, height, the rendered scene by
-//! `Scene3::same`, camera, background, visibility), where OCaml compared physically.
+// Preserve the existing viewport and floating-window compositing priority.
+//! Compose viewport, canvas and floating-window layers under UI. Hidden scenes are reused by extent, Scene3::same, camera, background and visibility.
 #![allow(non_camel_case_types)]
 use std::rc::Rc;
 
@@ -215,7 +211,7 @@ pub fn compose_view(
     let root_of = |panel: &Panel, path: &Vec<usize>| -> Option<i64> {
         core.pane_keys.iter().find_map(|(root, (p, pp))| if p == panel && pp.as_ref() == Some(path) { Some(*root) } else { None })
     };
-    // newest first, as OCaml's prepended lists are
+    // Compose newest floating windows first.
     let mut painted: Vec<Nodes> = Vec::new();
     let mut windows: Vec<(Option<i64>, Nodes)> = Vec::new();
     for (key, bounds) in editor_shell::view_bodies_in(&core.into(), &geometry) {

@@ -1,4 +1,4 @@
-//! Port of lib/rdk/geom/exact/exact_dyadic.ml: exact dyadic arithmetic for binary64 predicate
+//! exact dyadic arithmetic for binary64 predicate
 //! fallback. Magnitudes are little-endian base-2^64 limbs. `Invalid_argument` becomes a panic.
 use std::cell::RefCell;
 
@@ -119,7 +119,7 @@ pub fn to_scaled_interval(value: &T) -> (f64, f64, i64) {
     if value.negative { (-upper, -lower, exponent) } else { (lower, upper, exponent) }
 }
 
-/// C `ldexp` (round to nearest even into subnormals), the port of OCaml's `Float.ldexp`.
+/// Scale by a power of two with nearest-even rounding into subnormals.
 pub fn ldexp(value: f64, exponent: i64) -> f64 {
     let bits = value.to_bits();
     let sign = bits & 0x8000_0000_0000_0000;
@@ -1191,8 +1191,7 @@ pub mod scratch {
         result
     }
 
-    /// Codes: 0 miss, 1 negative-oriented hit, 2 positive-oriented hit,
-    /// 3 query on the closed triangle, 4 degenerate triangle (see the OCaml interface).
+    /// Hit codes: 0 miss, 1 negative orientation, 2 positive orientation, 3 query on closed triangle, 4 degenerate triangle.
     #[allow(clippy::too_many_arguments)]
     pub fn radial_dot_homogeneous(
         ex0: &T,

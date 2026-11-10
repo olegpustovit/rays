@@ -1,6 +1,5 @@
 //! The open level's list: its objects, the focused geometry object and its cook, and the list
-//! rows and intents. Port of lib/rays_editor/editor_list.ml.
-#![allow(non_camel_case_types)]
+//! rows and intents. #![allow(non_camel_case_types)]
 use std::collections::HashMap;
 use std::rc::Rc;
 

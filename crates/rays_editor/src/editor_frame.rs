@@ -470,8 +470,7 @@ pub fn draw_handles<'a>(value: &ModelView<'a>, workspace: &shell, selection: sel
     let (handle_edits, grab, picked_id) = match active {
         Some(leaf) if visible(workspace, &leaf.panel) => {
             let mut out = (Vec::new(), false, None);
-            // ponytail: `space` reads the pane's scope node and the scene, never the selection, so
-            // the model is passed as it is (OCaml re-selects a copy first)
+            // ponytail: space reads the pane scope and scene, so reuse the current model until selection affects that operation.
             ui.within(view_root, &mut |ui| {
                 out = view_handles(ui, handle_target.as_ref(), space(value), leaf.body);
             });

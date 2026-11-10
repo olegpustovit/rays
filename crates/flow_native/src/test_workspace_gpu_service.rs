@@ -1,8 +1,4 @@
-//! Port of lib/flow_native/test_workspace_gpu_service.ml: a worker cook reaches the
-//! workspace-owned packed-attribute GPU proxy only while the owner thread pumps it.
-//!
-//! "Initial domain" is the thread that created the service (the test's own thread); the OCaml
-//! `Domain.spawn` workers are scoped threads.
+//! Worker cooks reach the workspace GPU proxy only while the creating thread pumps owner work.
 use crate::workspace_gpu as wg;
 use flow_ir::core_exec::Resident;
 use flow_ir::flow_ir::gpu as G;

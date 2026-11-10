@@ -1,4 +1,4 @@
-//! Port of lib/rays_pathtracer/mesh_build.ml: scene geometry on the device, built in stages
+//! scene geometry on the device, built in stages
 //! (upload, primitive structure, compaction, instance structure) without waiting.
 use crate::frame_data::{buffer, gpu_err, put_f32, storage};
 use crate::mesh_data;
@@ -104,7 +104,7 @@ pub struct MeshBuild {
     pub uncompacted_scene: Vec<Accel>,
     pub stage: Stage,
     pub instance_count: i64,
-    /// `encode_instances` made a structure of its own (OCaml compares `build.gpu.structure` physically)
+    /// Encoded instances retain their own acceleration structure identity.
     pub instances_built: bool,
     /// the prototype structure's build scratch, until the build finishes
     pub proto_scratch: Option<Buffer>,

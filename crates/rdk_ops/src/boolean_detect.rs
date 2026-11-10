@@ -298,8 +298,8 @@ fn run(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -
     let names: Vec<&str> =
         [intersections_attribute, count_attribute, self_intersections, self_count].into_iter().flatten().collect();
     let groups: Vec<&str> = [intersecting_group, self_group].into_iter().flatten().collect();
-    if names.iter().any(|name| support::ocaml_trim_is_empty(name))
-        || groups.iter().any(|name| support::ocaml_trim_is_empty(name))
+    if names.iter().any(|name| (name).trim().is_empty())
+        || groups.iter().any(|name| (name).trim().is_empty())
     {
         return Err(invalid("output names must not be empty"));
     }
@@ -363,7 +363,7 @@ fn run(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -
             &source_surface,
             geometry_value,
         )?;
-        // The OCaml installs the self outputs onto the geometry returned by the cross stage.
+        // Install self-stage results on the geometry returned by the cross stage.
         current = install_outputs(
             cancel_value,
             grain,

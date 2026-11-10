@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/context_kernel.ml(i): cook-context constants available to Lisp node bodies
+//! cook-context constants available to Lisp node bodies
 //! (`sop/context_seed` and friends), and the source digests that key prepared kernels.
 use flow_syntax::symbol::{self, Symbol};
 use crate::operators;
@@ -217,10 +217,7 @@ pub fn context_ops_reached(inputs: &[(Symbol, Value)], defs: &[Graph], graph: &G
             scan.scan(defs, &bindings, default, graph);
         }
     }
-    // OCaml conses: the last name found comes first
-    let mut found = scan.found.into_inner();
-    found.reverse();
-    found
+    scan.found.into_inner()
 }
 
 /// Whether a reachable, unpruned call of the zero-state operator `op` (default `sop/context_seed`)
@@ -230,8 +227,7 @@ pub fn depends(op: Option<&str>, inputs: &[(Symbol, Value)], defs: &[Graph], gra
     context_ops_reached(inputs, defs, graph).iter().any(|name| name == op)
 }
 
-/// The graph with its context operators replaced by the context's values. A seed without a literal
-/// namespace is OCaml's `Invalid_argument "E_SEED_NAMESPACE: ..."`, here its message as `Err`.
+/// Specialize context operators into values; a nonliteral seed namespace returns an E_SEED_NAMESPACE error.
 pub fn specialize(provenance: Option<i64>, context: &sop::context::T, label: &str, graph: &Graph) -> Result<Graph, String> {
     // Term arenas are immutable and their identities never reused: a graph specialized for the same
     // provenance, context facts and label is the same graph (a parameter edit rebuilds a Lisp node
@@ -513,8 +509,7 @@ fn put_library_free(buffer: &mut Vec<u8>, x: &Syntax) {
     buffer.push(b')');
 }
 
-/// Cache key: length-prefixed dump of spelling, comments and flags, no ids or spans; a library form
-/// is its id, fixed with the binary. The MD5 is returned as lowercase hex (OCaml: the raw 16 bytes).
+/// Cache source identity from resolved spelling, comments and flags rather than local IDs/spans; static library forms retain binary-owned identity.
 fn forms_digest(forms: &[Syntax]) -> String {
     let mut buffer: Vec<u8> = Vec::with_capacity(4096);
     for f in forms {

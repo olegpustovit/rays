@@ -1,5 +1,5 @@
 //! `print_shader OWNER`: prints OWNER's shaders from its `shaders/NAME.rays` into the current
-//! directory (port of lib/flow_shader/print_shader.ml): NAME.metal and the Vulkan modules
+//! directory: NAME.metal and the Vulkan modules
 //! NAME.{vert,frag,comp}.spv.
 use std::fs;
 

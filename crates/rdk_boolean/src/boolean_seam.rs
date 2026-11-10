@@ -1,4 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_seam.ml: exact seam and coincident-surface product from a
+//! exact seam and coincident-surface product from a
 //! Boolean complex. Classification and chaining are sequential (each edge writes only its own
 //! slot, so the result is the parallel path's by construction); `grain` still feeds the exact
 //! curve verification and `parallel_cutoff` is only validated.
@@ -610,7 +610,6 @@ fn materialize_curves(
     })
 }
 
-/// OCaml's optional arguments of `build`.
 #[derive(Clone, Copy)]
 pub struct Params {
     pub grain: i64,

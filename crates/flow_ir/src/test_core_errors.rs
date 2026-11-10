@@ -1,4 +1,3 @@
-// Port of lib/flow_ir/test_core_errors.ml.
 use crate::core_exec::{self, Options};
 use crate::core_lower;
 use crate::flow_ir::executor;

@@ -73,28 +73,6 @@ pub enum TermNode {
     Reference(String, String),
 }
 
-fn trim_ascii(value: &str) -> &str {
-    value.trim_matches(|ch| matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{000c}'))
-}
-
-fn format_g(value: f64) -> String {
-    if value == 0.0 {
-        return if value.is_sign_negative() { "-0".into() } else { "0".into() };
-    }
-    let scientific = format!("{value:.5e}");
-    let Some((mantissa, exponent)) = scientific.split_once('e') else { return scientific; };
-    let exponent = exponent.parse::<i32>().unwrap_or(0);
-    let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
-    if (-4..6).contains(&exponent) {
-        let decimals = (5 - exponent).max(0) as usize;
-        let fixed = format!("{:.*}", decimals, value);
-        if fixed.contains('.') { fixed.trim_end_matches('0').trim_end_matches('.').to_owned() } else { fixed }
-    } else {
-        let sign = if exponent < 0 { "-" } else { "+" };
-        format!("{mantissa}e{sign}{:02}", exponent.abs())
-    }
-}
-
 fn symbol(form: &Syntax) -> Option<&str> {
     match &form.node {
         Node::Sym(name) => Some(form.name(*name)),
@@ -353,7 +331,7 @@ fn facts(form: &Syntax) -> Result<KernelFacts, Diagnostic> {
     let writes_form = property(fields, form, "writes")?;
     let reads = strings(&reads_form, "reads")?;
     let writes = strings(&writes_form, "writes")?;
-    if reads.iter().chain(&writes).any(|name| trim_ascii(name).is_empty()) {
+    if reads.iter().chain(&writes).any(|name| (name).trim().is_empty()) {
         return Err(bad(form, "Blank component name in kernel facts"));
     }
     let exact_form = property(fields, form, "exact")?;
@@ -466,12 +444,12 @@ pub fn resolve_component_names(lookup: &dyn Fn(&str) -> Option<String>, names: &
         if !name.starts_with('$') { result.push(name.clone()); continue; }
         let body = &name[1..];
         if let Some((parameter, fallback)) = body.split_once('|') {
-            result.push(lookup(parameter).map(|value| trim_ascii(&value).to_owned()).filter(|value| !value.is_empty()).unwrap_or_else(|| fallback.to_owned()));
+            result.push(lookup(parameter).map(|value| (&value).trim().to_owned()).filter(|value| !value.is_empty()).unwrap_or_else(|| fallback.to_owned()));
         } else if let Some((parameter, prefix)) = body.split_once('~') {
-            if let Some(value) = lookup(parameter).map(|value| trim_ascii(&value).to_owned()).filter(|value| value.starts_with(prefix)) {
-                let rest = trim_ascii(&value[prefix.len()..]).to_owned(); if !rest.is_empty() { result.push(rest); }
+            if let Some(value) = lookup(parameter).map(|value| (&value).trim().to_owned()).filter(|value| value.starts_with(prefix)) {
+                let rest = (&value[prefix.len()..]).trim().to_owned(); if !rest.is_empty() { result.push(rest); }
             }
-        } else if let Some(value) = lookup(body).map(|value| trim_ascii(&value).to_owned()).filter(|value| !value.is_empty()) {
+        } else if let Some(value) = lookup(body).map(|value| (&value).trim().to_owned()).filter(|value| !value.is_empty()) {
             result.push(value);
         }
     }
@@ -590,7 +568,7 @@ fn validate_range(report: &mut dyn FnMut(Severity, &str, &str), parameter: &Para
                 if range.hard_min.is_some_and(|bound| number < bound as f64) || range.hard_max.is_some_and(|bound| number > bound as f64) {
                     report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} is outside its hard range", parameter.name));
                 } else if number < range.soft_min as f64 || number > range.soft_max as f64 {
-                    report(Severity::Warning, "W_SOFT_RANGE", &format!(":{} {} is outside the slider range {}–{}. Allowed, but check it", parameter.name, format_g(number), range.soft_min, range.soft_max));
+                    report(Severity::Warning, "W_SOFT_RANGE", &format!(":{} {} is outside the slider range {}–{}. Allowed, but check it", parameter.name, param::float_text(number), range.soft_min, range.soft_max));
                 }
             }
         }
@@ -599,7 +577,7 @@ fn validate_range(report: &mut dyn FnMut(Severity, &str, &str), parameter: &Para
             else if range.hard_min.is_some_and(|bound| number < bound) || range.hard_max.is_some_and(|bound| number > bound) {
                 report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} is outside its hard range", parameter.name));
             } else if number < range.soft_min || number > range.soft_max {
-                report(Severity::Warning, "W_SOFT_RANGE", &format!(":{} {} is outside the slider range {}–{}. Allowed, but check it", parameter.name, format_g(number), format_g(range.soft_min), format_g(range.soft_max)));
+                report(Severity::Warning, "W_SOFT_RANGE", &format!(":{} {} is outside the slider range {}–{}. Allowed, but check it", parameter.name, param::float_text(number), param::float_text(range.soft_min), param::float_text(range.soft_max)));
             }
         }
         _ => (),
@@ -618,7 +596,7 @@ pub fn validate_parameter(report: &mut dyn FnMut(Severity, &str, &str), paramete
         report(Severity::ErrorSeverity, "E_TYPE", &format!(":{} takes {}, but this is {}", parameter.name, parameter.ty.as_ref().map_or("text".into(), port_type::name), term.ty.as_ref().map_or("nil or text".into(), port_type::name)));
     }
     if let (Some(PortType::Int), TermNode::Literal(Value::Float(number))) = (&parameter.ty, &term.node) {
-        if number.fract() != 0.0 { report(Severity::ErrorSeverity, "E_INT_LITERAL", &format!(":{} is an integer, not {}", parameter.name, format_g(*number))); }
+        if number.fract() != 0.0 { report(Severity::ErrorSeverity, "E_INT_LITERAL", &format!(":{} is an integer, not {}", parameter.name, param::float_text(*number))); }
         else if *number >= 9_223_372_036_854_775_808.0 || *number < -9_223_372_036_854_775_808.0 { report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} is outside the integer range", parameter.name)); }
     }
     if let ([(_, KindView::Choice(options), _)], TermNode::Literal(value)) =
@@ -714,7 +692,6 @@ mod tests {
     }
 }
 
-// Port of lib/flow/test_catalog.ml.
 #[cfg(test)]
 mod test_catalog {
     use super::*;

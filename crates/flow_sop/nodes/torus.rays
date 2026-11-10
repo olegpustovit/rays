@@ -92,7 +92,7 @@
      :code "E_PARAM" :message "sop/torus: V end cap needs polygon connectivity, an open V sweep and distinct endpoints")
    (rows : int 48 :label "Rows" :folder ["Resolution"] :min 3 :max 256 :hard_min 2 :primary true
      :validate (torus_fits connectivity u_wrap v_wrap u_end_caps v_end_cap rows columns)
-     :code "E_PARAM" :message "sop/torus: output cardinality exceeds OCaml array limits")
+     :code "E_PARAM" :message "sop/torus: output cardinality exceeds native storage or index limits")
    (columns : int 24 :label "Columns" :folder ["Resolution"] :min 3 :max 256 :hard_min 2 :primary true)
    (uv_attribute : text "uv" :label "UV attribute" :folder ["Attributes"]
      :validate (not (or (equal? (text/trim uv_attribute) "P") (equal? (text/trim uv_attribute) "N")))

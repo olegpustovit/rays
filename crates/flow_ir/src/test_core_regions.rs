@@ -1,4 +1,3 @@
-// Port of lib/flow_ir/test_core_regions.ml.
 use crate::core_fuse;
 use crate::core_ir::region as R;
 use crate::core_lower;
@@ -18,8 +17,6 @@ use std::sync::Arc;
 
 type RegionT = R::T;
 
-const OCAML_MAX_INT: i64 = i64::MAX;
-const OCAML_MIN_INT: i64 = i64::MIN;
 
 fn counting_measure(kernels: &Arc<AtomicI64>) -> packed::Measure {
     let kernels = kernels.clone();
@@ -377,8 +374,7 @@ fn carried_loops_defn_pcg_vec3() {
     assert!(packed::gpu_refusals(true, true, &pcg).is_empty());
 }
 
-// 32769 crosses a parallel chunk boundary but takes several seconds in a debug build:
-// the default loop uses 4097 elements, RAYS_SLOW=1 the OCaml size.
+// Default cases cross a parallel block at 4097 elements; RAYS_SLOW extends the fixture to 32769 rows.
 fn parallel_count() -> usize { if std::env::var("RAYS_SLOW").is_ok_and(|v| v == "1") { 32769 } else { 4097 } }
 
 #[test]
@@ -432,11 +428,11 @@ fn malformed_loops_are_rejected_when_rebuilt() {
     rejected("end owner", changed(finish, R::Instruction::Loop_end(h + 1, vec![h + 1], None)), outputs.clone());
     rejected("integer stop", changed(finish, R::Instruction::Loop_end(h, vec![h + 1], Some(h))), outputs.clone());
     rejected("future stop", changed(finish, R::Instruction::Loop_end(h, vec![h + 1], Some(result as i64))), outputs.clone());
-    rejected("result component", changed(result, R::Instruction::Loop_result(h, OCAML_MAX_INT, Ty::Float)), outputs.clone());
+    rejected("result component", changed(result, R::Instruction::Loop_result(h, i64::MAX, Ty::Float)), outputs.clone());
     rejected("escaped carry", program.code.to_vec(), vec![vec![h + 1]]);
     rejected("escaped body value", changed(result, R::Instruction::Unary(Unary::Abs, loop_.finish - 1)), outputs.clone());
-    assert_eq!(op::range_length(None, OCAML_MAX_INT, OCAML_MIN_INT).unwrap(), 0);
-    match op::range_length(None, OCAML_MIN_INT, OCAML_MAX_INT) {
+    assert_eq!(op::range_length(None, i64::MAX, i64::MIN).unwrap(), 0);
+    match op::range_length(None, i64::MIN, i64::MAX) {
         Err(error) => assert!(error.code == "E_ITER_BOUND"),
         Ok(_) => panic!("range overflow accepted"),
     }

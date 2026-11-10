@@ -1,6 +1,4 @@
-//! Shared by flow_gpu's native tests. `gpu()` selects the platform's OGPU implementation (Vulkan
-//! with validation fatal on Windows, Metal on macOS) and reports whether a device exists; a test
-//! with none prints "skipped" and returns, as the OCaml suite skips without a display or GPU.
+//! Native test helpers select Metal or fatal-validation Vulkan. Tests report device absence explicitly.
 #![allow(dead_code)]
 pub use flow_ir::test_support as test_program;
 #[path = "../../../renderer/tests/common/window.rs"]

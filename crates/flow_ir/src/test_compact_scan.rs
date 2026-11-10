@@ -1,4 +1,3 @@
-// Port of lib/flow_ir/test_compact_scan.ml.
 use flow_syntax::symbol::Symbol;
 use crate::flow_ir::executor;
 use crate::test_support::*;
@@ -11,10 +10,6 @@ use std::sync::{Arc, Mutex};
 const MAX_INT: i64 = i64::MAX;
 const MIN_INT: i64 = i64::MIN;
 
-/// OCaml 63-bit wrapping addition.
-fn add63(a: i64, b: i64) -> i64 {
-    a.wrapping_add(b)
-}
 fn ints(v: &[i64]) -> Value {
     Value::Int_array(Arc::new(v.to_vec()))
 }
@@ -35,10 +30,10 @@ fn compact(mask: &[i64]) -> Vec<i64> {
     mask.iter().enumerate().filter(|(_, n)| **n == 1).map(|(i, _)| i as i64).collect()
 }
 fn scan(values: &[i64]) -> Vec<i64> {
-    let mut sum = 0;
+    let mut sum = 0i64;
     let mut out = vec![0];
     for n in values {
-        sum = add63(sum, *n);
+        sum = sum.wrapping_add(*n);
         out.push(sum);
     }
     out
@@ -116,10 +111,7 @@ fn bad_masks_and_types() {
 
 #[test]
 fn core_and_executor_match_the_reference() {
-    // Sizes: OCaml used 32769-row bodies. The default loop uses 1025 rows (one 1024-lane block crossing),
-    // 1 and 4 domains and two times (both sides of `(> t 0.)`); RAYS_SLOW=1 runs 2049 rows, 1/4/8 domains
-    // and four times. No huge array is fabricated to exercise the allocation bound. The guard precedes
-    // count+1 and allocation; runtime proof uses real small/large tails.
+    // Default cases cross a block at 1025 rows with 1/4 domains; RAYS_SLOW adds rows/domains/times. Capacity guards precede count+1 and allocation; ordinary fixtures validate actual tails.
     let slow = std::env::var("RAYS_SLOW").as_deref() == Ok("1");
     let n = if slow { 2049 } else { 1025 };
     let (domain_counts, times): (&[i64], &[f64]) = if slow { (&[1, 4, 8], &[-1., 0., 0.25, 2.]) } else { (&[1, 4], &[-1., 2.]) };

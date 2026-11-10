@@ -1,6 +1,4 @@
-//! Port of lib/renderer/test_offscreen.ml, split into independent test fns (one process each).
-//! Not ported: the raising resolver (Rust has no catchable exception across the resolver), the
-//! Gc allocated/promoted-word ceilings (no OCaml GC), the `ps` RSS tool (Mem.phys_footprint only).
+//! Offscreen renderer cases qualify pixels, ownership, errors and retained resources in independent processes.
 use crate::common;
 use renderer::renderer;
 use ::renderer::renderer::native;

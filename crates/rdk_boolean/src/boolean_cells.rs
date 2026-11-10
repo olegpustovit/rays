@@ -1,4 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_cells.ml: exact-axis shell winding classification for a
+//! exact-axis shell winding classification for a
 //! Weiler complex. Operand component builds share the worker pool; each BVH query owns its scratch.
 use rdk_core::support::DisjointSet;
 use std::sync::{Arc, Mutex};
@@ -416,7 +416,6 @@ fn finish_fail(failure: Fail) -> error::T {
     }
 }
 
-/// OCaml's `?track_left ?track_right`.
 #[derive(Clone, Copy)]
 pub struct Params {
     pub track_left: bool,

@@ -48,7 +48,7 @@
                           p1 (if line b (bezier a b d e (fld f at 15)))
                           v (- p1 p0)
                           len (len2 v)
-                          dir (if (> len 0.000001) (/ v len) [1.0 0.0])
+                          dir (if (> len 1e-6) (/ v len) [1.0 0.0])
                           n [(- 0.0 dir.y) dir.x]
                           h (+ (* (fld f at 12) 0.5) 1.5)
                           p (+ (mix2 (- p0 (* dir h)) (+ p1 (* dir h)) [c.x c.x])
@@ -118,7 +118,7 @@
                                             len (len2 ab)
                                             fw (fwidth2 p)
                                             along (unit (/ (dot2 (- p a) ab)
-                                                           (max (dot2 ab ab) 0.000000000001)))
+                                                           (max (dot2 ab ab) 1e-12)))
                                             wire (- (len2 (- p (+ a (* ab along))))
                                                     (* params.y 0.5))
                                             dir (/ ab len)
@@ -129,7 +129,7 @@
                                                              0.0)
                                                   wire)
                                             px (max (len2 fw) 0.0001)]
-                                       {:discard (and (= kind 5.0) (<= len 0.000001))
+                                       {:discard (and (= kind 5.0) (<= len 1e-6))
                                         :color (fade color (unit (- 0.5 (/ d px))))})
       (= kind 3.0) (let* [q (- p a)
                           s extra.z

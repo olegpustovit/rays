@@ -1,4 +1,4 @@
-//! Port of lib/flow_gpu/test_sampling.ml: independent CPU arithmetic and native GPU parity.
+//! independent CPU arithmetic and native GPU parity.
 use crate::common;
 #[path = "common/pathtrace_reference.rs"]
 mod reference_math;

@@ -1,4 +1,3 @@
-// Port of lib/flow_graph/test_graph_edits.ml.
 use crate::flow_edit::{apply_checked, apply_checked_with, ArgKey, Loop, Op};
 use crate::projection as p;
 use crate::test_support::*;
@@ -9,7 +8,7 @@ use std::sync::Arc;
 fn same_graph_keys_on_the_shared_ops() {
     let src = parse("(workspace w (graph g :context host (let* [a 1.0] a)) (graph other :context host (let* [b 2.0] b)))");
     let rename = Op::Rename { node: path(&["other", "b"]), to_: "moved".into() };
-    // no ops on both sides: OCaml's `[]` is one value, so the graphs are the same
+    // Canonical empty operator sets retain graph identity.
     assert!(p::same_graph(&check(&src), &check(&src), "g"));
     // the editor's ops: one list, checked into the base workspace
     let mut user = flow_check::op::find(&[], "array/float", &flow_syntax::context::value()).unwrap().clone();
@@ -24,7 +23,7 @@ fn same_graph_keys_on_the_shared_ops() {
     edited.ops = base.ops.clone();
     assert!(p::same_graph(&base, &edited, "g"));
     assert!(!p::same_graph(&base, &edited, "other"));
-    // the same ops checked as a new list are a different list, as in OCaml, even with equal contents
+    // Separately checked operator owners are distinct even when their contents are equal.
     let (_, fresh) = apply_checked_with(&Arc::new((*ops).clone()), false, None, &catalog(), &src, &rename).unwrap();
     assert!(!p::same_graph(&base, &fresh, "g"));
 }
@@ -158,8 +157,7 @@ fn a_call_in_a_vector_cell_is_a_node() {
     assert!(has(&text_of(&named), "twice (* 2.0 3.0)") && has(&text_of(&named), "[0.0 twice]"));
 }
 
-// Extra coverage of gestures the OCaml tests of this library do not reach: each applies, re-checks
-// and writes the text the OCaml rewrite writes.
+// Gestures are applied, rechecked and written back through the public graph-edit path.
 #[test]
 fn gesture_smoke() {
     let src = source("[a 1.0 b (+ a 2.0) c (* b 3.0) l (list 1 2 3)] c");

@@ -1,4 +1,4 @@
-// Port of lib/flow_graph/edit_base.ml: the syntax-tree helpers, the op type and the
+// the syntax-tree helpers, the op type and the
 // source-rewrite primitives every graph gesture is built from.
 use flow_check::workspace as w;
 use flow_syntax::syntax::{self as s, Node, Syntax, SyntaxBuilder};
@@ -351,11 +351,11 @@ pub fn scope_path_of(nodes: &[Path]) -> R<Path> {
 }
 
 pub fn note_lines(t: &str) -> Vec<String> {
-    let t = t.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{000c}'));
+    let t = t.trim();
     if t.is_empty() {
         Vec::new()
     } else {
-        t.split('\n').map(|l| l.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{000c}')).to_owned()).collect()
+        t.split('\n').map(|l| l.trim().to_owned()).collect()
     }
 }
 
@@ -696,7 +696,7 @@ pub fn chain_in(e: &S, b: &mut SyntaxBuilder) -> ArgKey {
 }
 
 pub fn find_pair_in(ps: &[(S, S)], leaf: &str, b: &SyntaxBuilder) -> Option<usize> {
-    // ponytail: a malformed key reads as its base name here, where the OCaml raises
+    // ponytail: malformed pair keys use the base segment; validate encoded keys here if untrusted keys reach this boundary.
     let base = leaf.split('#').next().unwrap_or("");
     ps.iter().position(|(p, _)| pat_key(p, b) == base)
 }

@@ -51,7 +51,6 @@ fn make(code: Code, message: String) -> error::T {
     error::new(OPERATION, code, message)
 }
 
-/// OCaml `invalid_arg`: reported as `invalid_geometry`; cancellation keeps its own code.
 fn lift(value: error::T) -> error::T {
     if error::is_cancelled(&value) {
         error::cancelled(OPERATION)
@@ -383,7 +382,7 @@ fn build_provenance(
     let mut counts = vec![0_i64; point_count as usize];
     let event_count = raw.x.len();
     let collision_input = if is_self { 0 } else { 1 };
-    // (input, piece, index, u) per record, evaluated in OCaml's order (source record, then collision).
+    // Collision records preserve source-record then collision order.
     for event in 0..event_count {
         cancel::poll(cancel_value, event as i64, 4095)?;
         let point = of_event[event];
@@ -471,7 +470,7 @@ fn create_output(params: &Params, data: Provenance) -> Result<geometry::T, error
 fn validate_name(name: &Option<String>) -> bool {
     match name {
         None => true,
-        Some(name) => !support::ocaml_trim_is_empty(name),
+        Some(name) => !(name).trim().is_empty(),
     }
 }
 

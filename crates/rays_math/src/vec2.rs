@@ -20,5 +20,5 @@ pub fn sub(a: T, b: T) -> T {
 }
 
 pub fn to_string(a: T) -> String {
-    format!("({}, {})", crate::format_g(a.x), crate::format_g(a.y))
+    format!("({}, {})", a.x, a.y)
 }

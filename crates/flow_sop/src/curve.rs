@@ -1,10 +1,7 @@
-//! Port of lib/flow_sop/curve.ml: the lowered `sop/curve`. Authored `points` use a lossless text
-//! encoding for parameter views; live drives pass the vec3 array through `replace_points`.
-//! `closed` joins the last point to the first.
-//!
-//! ponytail: the OCaml schema value is the typed array (encoded only for views); parameter values
-//! here are text, so a live `replace_points` re-encodes its points (O(n) hex floats per rebuild).
-use flow_ir::core_ir::hex_float;
+//! The lowered `sop/curve`. Parameter views encode points as native round-trip decimal text;
+//! live drives pass the vec3 array through `replace_points`. `closed` joins the last point.
+//! ponytail: views still encode O(n) coordinates per rebuild; retain typed points if profiling warrants it.
+use std::fmt::Write as _;
 use param::{Kind, Value};
 use rays_diagnostic::Diagnostic;
 use rdk_ops::line_geometry;
@@ -24,14 +21,14 @@ pub const CLOSED_PARAMETER: &str = "closed";
 /// `"filled"`: the closed curve is one polygon surface, not a polyline.
 pub const FILLED_PARAMETER: &str = "filled";
 
-/// Lossless (hexadecimal floats), deterministic.
+/// Native shortest round-trip decimals, preserving every finite coordinate bit.
 pub fn encode(points: &[(f64, f64, f64)]) -> String {
     let mut out = String::with_capacity(points.len() * 40);
     for (i, (x, y, z)) in points.iter().enumerate() {
         if i > 0 {
             out.push(';');
         }
-        out.push_str(&format!("{},{},{}", hex_float(*x), hex_float(*y), hex_float(*z)));
+        let _ = write!(out, "{x:?},{y:?},{z:?}");
     }
     out
 }
@@ -41,7 +38,7 @@ fn decode(text: &str) -> Result<Vec<(f64, f64, f64)>, String> {
     if text.is_empty() {
         return Ok(Vec::new());
     }
-    let number = |part: &str| cfmt::parse_ocaml_float(part).ok_or_else(failure);
+    let number = |part: &str| (part).parse::<f64>().ok().ok_or_else(failure);
     let mut points = Vec::new();
     for point in text.split(';') {
         let parts: Vec<&str> = point.split(',').collect();
@@ -180,13 +177,17 @@ mod tests {
 
     #[test]
     fn encoding_is_lossless_and_round_trips() {
-        let points = vec![(0.1, -2.5, 1e300), (0.0, -0.0, 3.0)];
+        let points = vec![(0.1, -2.5, 1e300), (0.0, -0.0, 3.0), (f64::MAX, f64::MIN_POSITIVE, f64::from_bits(1))];
         let text = encode(&points);
-        assert_eq!(text, "0x1.999999999999ap-4,-0x1.4p+1,0x1.7e43c8800759cp+996;0x0p+0,-0x0p+0,0x1.8p+1");
         let back = decode(&text).expect("decodes");
-        assert_eq!(back.len(), 2);
-        assert_eq!(back[0].0.to_bits(), 0.1f64.to_bits());
-        assert_eq!(back[1].1.to_bits(), (-0.0f64).to_bits());
+        assert_eq!(encode(&back), text);
+        for (a, b) in points.iter().zip(&back) {
+            assert_eq!([a.0.to_bits(), a.1.to_bits(), a.2.to_bits()], [b.0.to_bits(), b.1.to_bits(), b.2.to_bits()]);
+        }
+        let classes = decode(&encode(&[(f64::NAN, f64::INFINITY, f64::NEG_INFINITY)])).unwrap()[0];
+        assert!(classes.0.is_nan() && classes.1 == f64::INFINITY && classes.2 == f64::NEG_INFINITY);
+        assert!(decode("0x1p0,2,3").is_err());
+        assert!(decode("1_0,2,3").is_err());
         assert!(decode("1,2").is_err());
         assert_eq!(decode("").expect("empty"), Vec::new());
     }

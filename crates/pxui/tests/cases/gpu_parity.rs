@@ -1,7 +1,4 @@
-//! The kit widgets, the overlays and the graph pane zone tokens are compared pixel for pixel with
-//! goldens rendered by this kit (rev 3, specification/pxui.md) with DepartureMono: a change of a
-//! token or of a widget geometry shows here. Each is drawn offscreen at two pixels a point, without
-//! a window, as tools/ui_shot does. The goldens are the OCaml tree files, read in place.
+//! Native pixel goldens pin kit widgets, overlays and graph zone tokens at two pixels per logical point. Token geometry and every channel are checked.
 use crate::common;
 use input::{Event, Platform};
 use pxui::theme;
@@ -185,8 +182,7 @@ fn gpu_parity_panel() {
     check("kit panel", "kit_panel_2x.png", render(300, &mut new_panel));
 }
 
-/// Inspect the real painter packets without creating a GPU device (the OCaml `commands`): every
-/// fixture stages to non-empty UI layers whose batches are well formed, at 1x and 2x.
+/// Inspect actual staged painter packets at 1x/2x without a device; every fixture must produce nonempty, valid UI layers.
 fn gpu_parity_commands() {
     let fixtures: [(&str, i64, fn(&mut Ui)); 4] = [("overlays", 300, overlays), ("zones", 390, zones), ("table", 300, table), ("panel", 300, new_panel)];
     for density in [1.0, 2.0] {

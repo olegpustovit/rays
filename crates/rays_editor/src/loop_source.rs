@@ -1,6 +1,5 @@
 //! The source file of the loop: polled, imported, saved over, and the autosave of the recovery
-//! file. Port of lib/rays_editor/loop_source.ml.
-//!
+//! file. //!
 //! Source operations mutate the stored model and the frame's change metadata.
 #![allow(non_camel_case_types)]
 use std::path::Path;

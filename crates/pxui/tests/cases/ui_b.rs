@@ -1,5 +1,4 @@
-//! Port of lib/pxui/test_ui.ml, part two: the picker, the context menu and its submenu, and the
-//! text-area rig (insert, Enter, Home/End, IME, clipboard, Tab, soft wrap, scrolling).
+//! Picker, context menu, submenu and tooltip interaction contracts.
 use crate::support::*;
 use input::{Event, Key, Platform};
 use pxui::ui::*;

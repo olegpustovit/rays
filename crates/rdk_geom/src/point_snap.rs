@@ -1,7 +1,4 @@
-//! Point snapping plan: one target point per source point, or -1.
-//!
-//! OCaml returns `(int array, string) result`; here a failure is an `error::T` with code
-//! `invalid_parameter` and the OCaml message (prefix included), a cancellation has code `cancelled`.
+//! Point snapping returns one destination index per source or -1; invalid input and cancellation retain distinct codes.
 
 use std::sync::Arc;
 

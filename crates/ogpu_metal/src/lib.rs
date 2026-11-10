@@ -1,7 +1,4 @@
-//! OGPU's Metal implementation: lib/ogpu_metal (the driver record) and lib/ogpu_metal_native (the
-//! device, resource, queue, surface and encoder modules under it) in one crate, one file per OCaml
-//! module. It compiles everywhere; on a platform without Metal the native backend refuses with a typed
-//! error, so `create_device` reports `NoAdapter`/`Unsupported` rather than the build failing.
+//! The Metal driver owns native device, resource, queue, surface and encoder modules. Unsupported platforms compile but return typed NoAdapter/Unsupported errors.
 pub mod device;
 pub mod buffer;
 pub mod texture;

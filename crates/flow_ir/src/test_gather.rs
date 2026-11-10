@@ -1,8 +1,4 @@
-// Port of lib/flow_ir/test_gather.ml (the `--bench`, `--bench-text`, `--profile-text` and
-// `--trace-text` blocks are timing/diagnostic harnesses and are not ported).
-// Sizes: OCaml used 32769-row maps; 2049 keeps two 1024-lane block crossings (a second block
-// boundary for the block/chunk error-order checks at 1500) within the 5 s debug budget. The
-// 16383/16384 chunk-edge cases are shrunk to the 1023/1024/1025 block edges.
+// Compiled gather fixtures cross block/chunk/error boundaries within the five-second debug case budget.
 use crate::core_ir::region::{self, Instruction};
 use crate::packed;
 use crate::test_support::*;
@@ -239,9 +235,7 @@ fn failing_table() -> ResolveArc {
     })
 }
 
-// Product defect (flow_eval force_reference vs packed): for `(array/nth data (int/div index 0))` with a failing table the
-// packed kernel (and OCaml's reference) report the table error first (E_DATA_SOURCE, cause "table first"); the Rust
-// reference reports the index error first (E_RANGE division by zero).
+// Known failure: with a failing table and index division by zero, packed evaluation reports the table error first while force_reference reports the index error first.
 #[test]
 fn argument_errors_precede_table_resolution() {
     let failing = failing_table();
@@ -994,9 +988,7 @@ fn list_tables_exact_widths_and_range_guards() {
 }
 
 
-// Product defect: Host::force_reference of a two-column Text map fails E_UNBOUND ("$kernel-input:0 is
-// not bound") when it is called inside a multi-domain scope (4 or 8 domains); outside one it
-// succeeds. OCaml's test calls the reference inside Parallel.run.
+// Known failure: a two-column Text reference map inside a 4/8-domain scope reports E_UNBOUND for $kernel-input:0; execution outside that scope succeeds.
 #[test]
 fn text_select_reference_inside_domains() {
     let live = live_at(0.25);

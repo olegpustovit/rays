@@ -1,7 +1,4 @@
-//! Port of lib/rays_editor/test/test_sop_ui.ml. Not ported: `dynamic_schema` and the
-//! `Sop_params_fixture` / PPX registry checks (they exercise `[@@deriving sop_params]`, which has no Rust
-//! counterpart: no proc macros); the selected-node inspector runs over a hand-built `param` schema with
-//! the fields the PPX record derives, applied through `Schema::apply_all` as `Node.apply_parameters` does.
+//! Selected-node inspector rows apply a concrete parameter schema through Schema::apply_all.
 use flow_check::catalog::Catalog;
 use input::{Event, Key, MouseButton, Platform};
 use param::{Impact, Value};

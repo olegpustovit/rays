@@ -208,7 +208,7 @@ pub struct Params {
 
 fn invalid_name(label: &str, name: &Option<String>) -> Option<error::T> {
     match name {
-        Some(name) if support::ocaml_trim_is_empty(name) => {
+        Some(name) if (name).trim().is_empty() => {
             Some(fail(&format!("Rdk.Fuse_grid.fuse: {label} name must not be empty")))
         }
         _ => None,

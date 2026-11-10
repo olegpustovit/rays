@@ -1,5 +1,3 @@
-//! Port of lib/flow_gpu/kernels.ml: the compute stages Run and Host dispatch, printed from
-//! shaders/NAME.rays (captured in fixtures/shaders/flow_gpu, byte-exact to the OCaml build).
 use flow_shader::emit::{Kernel, SpirvLazy};
 use ogpu_core::shader::{Binding, BindingKind, Stage};
 

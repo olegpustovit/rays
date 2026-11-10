@@ -1,4 +1,4 @@
-//! Port of lib/rdk/geom/spatial/spatial_index.ml: immutable balanced index over packed 3D points.
+//! immutable balanced index over packed 3D points.
 //!
 //! Construction uses an in-place median partition, skips globally flat axes, and stores one packed
 //! point-index permutation plus at most three active axis codes. Queries are deterministic: equal
@@ -242,7 +242,7 @@ pub mod view {
         let capacity = q.capacity;
         let cap = capacity as usize;
         let mut found = found;
-        // NaN distances fall through to insertion, as in the OCaml comparison.
+        // NaN distances continue through the established insertion path.
         if !(distance > q.maximum_squared) {
             let last_slot = q.offset + cap - 1;
             let full_and_worse = found >= capacity
@@ -483,7 +483,7 @@ mod tests {
         packed::float3::of_owned(x.to_vec(), y.to_vec(), z.to_vec()).unwrap()
     }
 
-    /// Builds with `domains` workers, as in the OCaml `Parallel.run ~domains`.
+    /// Build with the supplied shared worker-domain count.
     fn build(domains: i64, source: &packed::float3::T, grain: i64) -> T {
         let slot: Mutex<Option<T>> = Mutex::new(None);
         parallel::run_unit(Some(domains), &|| {
@@ -507,7 +507,6 @@ mod tests {
 
     #[test]
     fn distance_only_search_matches_provenance_and_misses_are_infinite() {
-        // Port of test_distance_from_geometry.ml test_distance_only_indexes.
         let queries = points(&[0.0, 1.0, 4.0], &[0.0, 2.0, 0.0], &[0.0, 0.0, 0.0]);
         let source = points(&[0.0, 3.0], &[1.0, 0.0], &[0.0, 0.0]);
         let index = create(None, Some(1), None, &source).unwrap();
@@ -533,7 +532,6 @@ mod tests {
 
     #[test]
     fn parallel_build_and_queries_match_sequential_and_brute_force() {
-        // Port of test_rdk_attributes.ml's spatial exactness check, plus 1-vs-4 identity.
         let count = 257_usize;
         let (mut xs, mut ys, mut zs) = (Vec::new(), Vec::new(), Vec::new());
         for point in 0..count {

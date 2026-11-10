@@ -118,7 +118,21 @@ fn lisp_source_merge_domains_inputs_and_cancellation() {
     let mut s=new_session(32,268_435_456);assert!(try_cook(&mut s,&c,&merged).is_err());session::close(&mut s);
 }
 
-/// Physical identity of a cooked geometry (OCaml `==`): the same payload object.
+/// Physical identity of a cooked geometry payload.
 fn same(a: &geo::T, b: &geo::T) -> bool {
     geo::data_id(a) == geo::data_id(b)
+}
+
+#[test]
+fn negative_authored_tag_bases_do_not_request_provenance() {
+    let original = cook_once(1, &lisp_sop::node(&[], "(sop/box)"));
+    let inputs = [("fixture".to_owned(), lisp_sop::snapshot(&original))];
+    for base in [i64::MIN, -(1i64 << 62), -1] {
+        let node = lisp_sop::node(&inputs, &format!("(sop/concat (list (sop/ext_fixture)) :tag_base {base})"));
+        for domains in [1, 8] {
+            let actual = cook_once(domains, &node);
+            assert!(geo::find_attribute(rdk_core::attribute::Owner::Primitive, lower::source_attribute(), &actual).is_none());
+            assert_eq!(geometry_bytes(&actual), geometry_bytes(&original));
+        }
+    }
 }

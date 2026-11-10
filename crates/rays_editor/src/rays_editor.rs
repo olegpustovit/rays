@@ -1,11 +1,4 @@
-//! The public API of Rays Editor: `Editor`, `Reduce`, `Workspace`, `Measure`, `Source`, `Settings`,
-//! `Renderer`. Port of lib/rays_editor/rays_editor.ml (and its .mli). OCaml's modules are Rust
-//! modules with the same names; the crate root re-exports them (`rays_editor::Editor`).
-//!
-//! OCaml optional arguments: `Editor::create` takes a `Create` record (`loop_model::Create`),
-//! `Editor::update_with` an `inspector` callback answering `Rc<dyn Any>`, and `Measure::run` a
-//! `MeasureOptions` record. `editor::Editor` is a plain `Clone` value: a test keeps the one it is given
-//! and passes it by value to the functions that return the next.
+//! Public editor APIs retain typed create/measure options, sketch-owned inspector results and shared document/model snapshots.
 #![allow(non_camel_case_types, non_snake_case)]
 use editor_document::lowering;
 
@@ -326,7 +319,6 @@ pub mod editor {
         value
     }
 
-    /// Replace the camera orbit from code (the OCaml `{ editor with camera }`).
     pub fn set_camera(value: Editor, camera: easy_camera::EasyCamera) -> Editor {
         let mut value = value;
         value.camera = camera;
@@ -334,7 +326,6 @@ pub mod editor {
         value
     }
 
-    /// OCaml's `Editor.run`.
     #[allow(clippy::too_many_arguments)]
     pub fn run(
         options: Create,
@@ -651,7 +642,6 @@ pub mod measure {
     #[derive(Clone, Debug)]
     pub struct sample {
         pub frame: i64,
-        /// Rust allocator-requested live bytes (OCaml: live words after a full collection).
         pub live: i64,
         /// The device's allocated bytes, through OGPU.
         pub device: i64,
@@ -675,7 +665,6 @@ pub mod measure {
         pub cook_error: Option<String>,
     }
 
-    /// OCaml's optional arguments of `run`.
     pub struct MeasureOptions {
         pub width: i64,
         pub height: i64,

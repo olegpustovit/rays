@@ -1,7 +1,4 @@
-//! Maximal point chains of a unique-edge graph.
-//!
-//! OCaml returns `(.., string) result`; here a failure is an `error::T` with operation
-//! `Poly_path.chains`, code `invalid_parameter` and the OCaml message.
+//! Poly_path.chains returns maximal chains with invalid_parameter failures.
 use rdk_core::error;
 use rdk_core::error::Code;
 

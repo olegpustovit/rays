@@ -1,5 +1,4 @@
-//! Port of lib/sop/node.ml: immutable procedural DAG nodes. Shared node values represent shared
-//! graph subgraphs; `ptr_eq` is OCaml's physical equality.
+//! Immutable procedural DAG nodes share immutable subgraphs; ptr_eq tests owner identity.
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -133,7 +132,7 @@ fn fresh_id() -> i64 {
     NEXT_ID.try_update(Ordering::SeqCst, Ordering::SeqCst, |id| id.checked_add(1)).expect("node id space exhausted")
 }
 
-/// OCaml `==` on nodes.
+/// Physical node identity.
 pub fn ptr_eq(a: &T, b: &T) -> bool {
     Arc::ptr_eq(&a.0, &b.0)
 }
@@ -236,7 +235,7 @@ pub fn apply_parameters(value: &T, changes: &[(String, Value)]) -> Result<(T, Ef
         if changes.is_empty() {
             return Ok((value.clone(), param::NO_EFFECTS));
         }
-        return Err(format!("node {} has no exposed parameters", ocaml_quote(&value.0.label)));
+        return Err(format!("node {} has no exposed parameters", rdk_core::attribute::quote(&value.0.label)));
     };
     let (values, effects) = p.schema.apply_all(&p.values, changes)?;
     if !param::has_effects(effects) {
@@ -255,8 +254,7 @@ pub fn apply_parameters(value: &T, changes: &[(String, Value)]) -> Result<(T, Ef
     }
 }
 
-/// OCaml `%S` for a plain string.
-pub use rdk_core::attribute::quote as ocaml_quote;
+
 
 fn facts_key(facts: &Facts) -> Vec<u8> {
     let mut out = Vec::new();
@@ -315,8 +313,7 @@ pub mod build {
         Ok(T(Arc::new(data)))
     }
 
-    /// Arguments of `make`/`make_geometry` (OCaml labelled arguments). Start from `args(operation)`
-    /// and override fields with struct update syntax.
+    /// Construct make/make_geometry options from args(operation), then override declared fields.
     pub struct Args {
         pub label: Option<String>,
         pub operation: String,

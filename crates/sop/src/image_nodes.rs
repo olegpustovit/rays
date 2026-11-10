@@ -1,4 +1,4 @@
-//! Port of lib/sop/image_nodes.ml: the neutral cooked-image generator (`image/noise`). Its schema is
+//! the neutral cooked-image generator (`image/noise`). Its schema is
 //! declared like the geometry SOPs (`decl::schema`), but the factory is built by hand because the
 //! node is an image, not a geometry, and its editor label is "Image Noise" rather than the key.
 use std::sync::Arc;
@@ -55,9 +55,7 @@ fn cancelled_error() -> Diagnostic {
     support::diagnostic("E_CANCELLED", "Image cook was cancelled.")
 }
 
-/// Samples the noise at each pixel's (x, y) times the frequency, grey with alpha 1. The OCaml cook
-/// runs rows on the pool; this one is serial, which gives the same bytes.
-// ponytail: serial row loop; parallel::for_ over disjoint row slices if noise images get large.
+/// Sample grayscale noise with alpha one at each pixel's scaled coordinates. ponytail: fill rows serially until profiling justifies disjoint parallel slices.
 fn cook_noise(context: &context::T, p: &Parameters) -> Result<Cooked, Diagnostic> {
     if context::cancelled(context) {
         return Err(cancelled_error());

@@ -1,6 +1,4 @@
-//! Port of lib/rdk/geom/exact/predicates.ml: filtered exact geometric predicates over finite
-//! IEEE-754 coordinates. `Invalid_argument` (non-finite coordinate, bad range) becomes a panic;
-//! packed index parameters are `i64` and an out-of-range index panics like OCaml's bounds error.
+//! Filtered exact predicates require finite coordinates and valid packed ranges; programmer-invalid input panics before indexing.
 use crate::exact_dyadic::scratch;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -25,7 +25,7 @@ const store = (rt, s, index, value) => {
   }
 };
 export function frame(input, state, rt) {
-  K ??= [-1e3, 12n, 12n, 12n, [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n, 11n], [1n, 2n, 4n, 8n, 16n, 32n, 64n, 128n, 256n, 512n, 1024n, 2048n], 12n, 2n, 12n, 1n, 0n, 12n, 12n, true, false, 1n, 0n, 1n, 0n, 0n, 0n, 12n, 0n, 12n, [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n, 11n], 12n, 12n, 12n, [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n, 11n], [1n, 2n, 4n, 8n, 16n, 32n, 64n, 128n, 256n, 512n, 1024n, 2048n], 12n, 2n, 12n, 1n, 0n, 12n, 12n, true, false, 1n, 0n, 1n, 0n, 0n, 0n, 12n, 0n, 12n, [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n, 11n]];
+  K ??= [-1000, 12n, 12n, 12n, [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n, 11n], [1n, 2n, 4n, 8n, 16n, 32n, 64n, 128n, 256n, 512n, 1024n, 2048n], 12n, 2n, 12n, 1n, 0n, 12n, 12n, true, false, 1n, 0n, 1n, 0n, 0n, 0n, 12n, 0n, 12n, [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n, 11n], 12n, 12n, 12n, [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n, 11n], [1n, 2n, 4n, 8n, 16n, 32n, 64n, 128n, 256n, 512n, 1024n, 2048n], 12n, 2n, 12n, 1n, 0n, 12n, 12n, true, false, 1n, 0n, 1n, 0n, 0n, 0n, 12n, 0n, 12n, [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n, 11n]];
   let l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15;
   let l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31;
   let l32, l33, l34, l35, l36, l37, l38, l39, l40, l41, l42, l43, l44, l45, l46, l47;

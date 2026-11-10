@@ -1,4 +1,4 @@
-//! Port of lib/flow_gpu/pipelines.ml: compiled compute pipelines by kernel entry, at most 64.
+//! compiled compute pipelines by kernel entry, at most 64.
 use crate::small_lru::List;
 use flow_shader::emit::Kernel;
 use flow_syntax::value;

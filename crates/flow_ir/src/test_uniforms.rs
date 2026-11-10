@@ -1,7 +1,4 @@
-// Port of lib/flow_ir/test_uniforms.ml.
-// Sizes: OCaml used 32769-element maps/tables and counts up to 32769 (and 16385 for the rollback);
-// 2049 keeps two 1024-lane block crossings (the count sweep 0/1/1023/1024/1025/2049 keeps the edges)
-// to fit the 5 s debug budget. The 13,824-element chunk check keeps its size.
+// Count sweeps include 0/1/1023/1024/1025/2049 and the full chunk case while keeping individual debug cases within budget.
 use crate::core_ir::region::Instruction;
 use crate::flow_ir::executor;
 use crate::packed::{self, host};
@@ -522,9 +519,7 @@ fn small_maps_share_chunks_across_domains() {
     }
 }
 
-// Product defect: when the resolver advances a state fold and a later reduction fails, packed::force
-// (and host::prepare) leave the state advanced (stamp changes: 8 vs 0); OCaml rolls both callers back.
-// The four `rollback_*` tests check results and bytes only; this is their state assertion.
+// Known failure: if state advancement precedes a failed reduction, packed::force/host::prepare may retain the advanced stamp instead of rolling back; dedicated rollback tests pin this assertion.
 #[test]
 fn rollback_restores_state() {
     rollback_case(Ty::Float, 0, true);

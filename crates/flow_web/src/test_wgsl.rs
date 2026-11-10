@@ -1,7 +1,4 @@
-//! Port of lib/flow_web/test_wgsl.ml: goldens for the WGSL printer (the OCaml goldens are read in
-//! place), the shared refusals, image kernels and fast kernels. The OCaml test's
-//! `--write-goldens`, `--write-kernel-table` and `--write-fast-table` modes (inputs of the
-//! browser checks under tools/web/test) stay with the OCaml binary.
+//! Owned WGSL fixtures cover shared refusals, image and fast kernels; browser qualification performs real target compilation.
 use crate::test_program::{die, carried_fixtures, compile, fixtures, two_outputs, vector_fixtures};
 use crate::wgsl;
 use flow_ir::core_ir::region::Instruction;

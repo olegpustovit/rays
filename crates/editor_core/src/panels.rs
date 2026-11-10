@@ -1,4 +1,4 @@
-//! Port of lib/editor_core/panels.ml: the shell as data, a tree of panels. Pure and
+//! the shell as data, a tree of panels. Pure and
 //! presentation-free.
 
 use flow_syntax::packed_ops::{float_min, float_max};

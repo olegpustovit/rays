@@ -1,5 +1,4 @@
-//! Port of lib/editor_document: the private editor document boundary (scene/network/settings
-//! model, edits, lowering, write-back). One module per OCaml file.
+//! The private editor document boundary: scene/network/settings models, edits, lowering and write-back.
 #![allow(clippy::all)]
 pub mod settings;
 pub mod kind_graph;

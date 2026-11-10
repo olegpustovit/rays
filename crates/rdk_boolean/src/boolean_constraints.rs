@@ -1,4 +1,5 @@
-//! Port of lib/rdk/boolean/boolean_constraints.ml: exact triangle-triangle constraint planning
+// Exact constructions run in deterministic candidate order; the first failing candidate wins.
+//! exact triangle-triangle constraint planning
 //! for the Boolean pipeline (broad phase, exact classification, implicit event points, CSR
 //! incidence per face).
 #![allow(non_snake_case)]
@@ -19,7 +20,6 @@ pub enum Side {
     Right,
 }
 
-/// OCaml's optional arguments of `build`; `grain` is required there too.
 #[derive(Clone)]
 pub struct Params {
     pub cancel: Option<Arc<cancel::T>>,
@@ -604,7 +604,7 @@ pub fn build(params: &Params, left: &geometry::T, right: &geometry::T) -> Result
     let event_count = event_offsets[candidate_count];
     let mut event_points: Vec<Option<implicit_point::T>> = vec![None; event_count];
     let mut first_error: Option<PointError> = None;
-    // Exact construction stays on one stable stream (as in OCaml).
+    // Exact constraints are constructed on one stable stream.
     for candidate in 0..candidate_count {
         poll(cancel_value, candidate as i64)?;
         let count = counts[candidate];

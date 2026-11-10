@@ -1,6 +1,4 @@
-//! Port of lib/rays_editor/test/test_editor_cook.ml. The worker-side `prepare` barriers of the OCaml
-//! test (a prepare that blocks in the cook worker) are expressed with a node cook that blocks, because
-//! the Rust cook prepares on the initial domain (cook.rs `Raw`/`finish`).
+//! Worker barriers block a node cook; owner-thread preparation stays outside the cook worker.
 use super::t3c::*;
 use super::support::*;
 use editor_document::settings;
@@ -50,7 +48,7 @@ fn still_frame() -> rays::frame::Frame {
     f
 }
 
-/// `Settings.none` is one value in OCaml; `settings::none()` makes a schema each call, and settings compare by schema.
+/// Empty settings compare through their schema, so retain one settings value across unchanged cook requests.
 pub fn none_settings() -> settings::T {
     thread_local! { static NONE: settings::T = settings::none(); }
     NONE.with(|n| n.clone())
@@ -292,8 +290,7 @@ pub fn reuse() {
         }
     }
     let objs = vec![scrubbed(0), clone_obj(&objects[1])];
-    // OCaml compares the summaries list physically; a Rust Vec has no identity, so the arrival of the
-    // counts is the footer-only job running (probe_job) and finishing once the edits settle
+    // Footer summaries arrive after the footer-only probe job finishes and edits settle.
     let mut counted = false;
     await_until(|| {
         live_update(&mut rig, false, &objs);
@@ -366,8 +363,7 @@ pub fn live_drive() {
     assert!(points_of(&rig.pieces()[0].prepared) == one_domain, "driven geometry differed between one and three domains");
 }
 
-/// A delayed completion is stamped with the settings it was submitted with; a superseded or emptied
-/// one never republishes. (The OCaml test blocks the prepare; here the first node cook blocks.)
+/// Delayed completion retains submitted settings; superseded or emptied requests never publish.
 pub fn barriers() {
     let source = source_geometry();
     let prepare_x: cook::Prepare_fn = Rc::new(|s, _| prepared_at(mode_of(s) as f64));

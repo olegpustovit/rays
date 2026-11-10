@@ -1,7 +1,4 @@
-//! The model's shell functions: the layouts, panel keys and states, the geometry, graph panels and
-//! the inspector panel. Port of lib/rays_editor/editor_shell.ml.
-//!
-//! Functions that return an updated model take it by value (OCaml `{ value with .. }`).
+//! Shell helpers return updated owned models for layouts, panel state, geometry and inspectors.
 #![allow(non_camel_case_types)]
 use flow_syntax::symbol::Symbol;
 use std::borrow::Cow;

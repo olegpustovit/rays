@@ -61,7 +61,7 @@
            checked_x (float/mul_checked size_x uniform_scale) checked_y (float/mul_checked size_y uniform_scale)
            checked_z (float/mul_checked size_z uniform_scale)
            sx checked_x.value sy checked_y.value sz checked_z.value
-           max_int 4611686018427387903]
+           max_int 9223372036854775807]
       (cond
         (or (int/eq x_divisions max_int) (or (int/eq y_divisions max_int) (int/eq z_divisions max_int)))
           (box_error "point cardinality overflows")
@@ -135,8 +135,8 @@
                                    :else (and (int/le surface_cells primitive_limit)
                                               (int/le surface_cells (int/div limit 4))))]
             (cond
-              (int/lt point_count 0) (box_error "point cardinality exceeds OCaml array limits")
-              (not topology_ok) (box_error "topology cardinality exceeds OCaml array limits")
+              (int/lt point_count 0) (box_error "point cardinality exceeds native storage or index limits")
+              (not topology_ok) (box_error "topology cardinality exceeds native storage or index limits")
               :else
                 (let* [primitive_count (if polygon (int/mul surface_cells primitive_per_cell) 0)
                        vertex_count (if polygon (int/mul surface_cells slots) 0)

@@ -1,4 +1,4 @@
-//! Port of lib/flow_native/workspace_host.ml: the host effects a workspace's `effects` list asks
+//! the host effects a workspace's `effects` list asks
 //! for (quit, save a PNG, play a sample, open a file dialog), their rising-edge bookkeeping and the
 //! resources the workspace owns.
 use flow_syntax::symbol::Symbol;
@@ -200,7 +200,6 @@ fn sample(host: &WorkspaceHost, state: &e::State, live: &Frame, value: &Value) -
                         "sawtooth" => sample::waveform::Saw,
                         _ => return Err(audio_error("Unknown audio waveform.")),
                     };
-                    // the OCaml key prints the floats in hex; their bits name them just as well
                     let key = format!("synth:{wave}:{:x}:{:x}:{:x}", frequency.to_bits(), duration.to_bits(), volume.to_bits());
                     workspace_resources::sample(&host.resources, &key, &|audio| sample::synth(audio, Some(volume), waveform, frequency, duration))
                 }

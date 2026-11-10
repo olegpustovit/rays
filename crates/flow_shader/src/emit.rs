@@ -1,9 +1,4 @@
-//! The Metal (MSL) kernel printer and the raster-stage instruction printer (port of
-//! lib/flow_shader/emit.ml). The kernel is printed twice: the first pass counts each register's
-//! references and where they are, the second prints a register read once inline.
-//!
-//! Rust shape notes: OCaml's exception-based `fail` becomes a recorded failure (`Gen::failure`)
-//! after which the printer stops; the layout visitor is the `Visit` impl of the generator.
+//! Print MSL kernels and raster instructions in two passes: first count register uses and locations, then inline registers read once. The visitor records the first printer failure and stops.
 #![allow(non_snake_case)]
 use rays_math::hash::digest;
 use crate::noise;
@@ -29,7 +24,7 @@ enum SpirvState {
     Done(SpirvResult),
 }
 
-/// OCaml's `Lazy.t`: the SPIR-V form of a kernel, printed when first asked.
+/// Print a kernel's SPIR-V representation on first use.
 #[derive(Clone)]
 pub struct SpirvLazy(Arc<Mutex<SpirvState>>);
 

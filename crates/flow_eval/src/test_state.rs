@@ -1,4 +1,3 @@
-// Port of lib/flow/test_state.ml.
 use crate::*;
 use crate::test_workspace::{base_catalog as _unused, show_ds};
 use flow_check::{catalog::Catalog, op::{self, Op}, workspace as W};

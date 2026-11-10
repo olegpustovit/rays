@@ -31,7 +31,7 @@ fn byte_count(length: i64) -> usize {
 }
 
 fn require_name(operation: &str, name: &str) -> Result<(), error::T> {
-    if support::ocaml_trim_is_empty(name) {
+    if (name).trim().is_empty() {
         Err(invalid_edge_group(operation, "Edge_group: empty name"))
     } else {
         Ok(())
@@ -569,7 +569,9 @@ mod tests {
         assert_eq!(super::cardinality(&group), 1);
         assert!(super::mem(0, &group));
         assert!(!super::mem(1, &group));
-        let renamed = with_name("\u{00a0}", &group).unwrap();
+        assert!(with_name("\u{00a0}", &group).is_err());
+        let renamed = with_name("\u{00a0}edge\u{00a0}", &group).unwrap();
+        assert_eq!(super::name(&renamed), "\u{00a0}edge\u{00a0}");
         assert_eq!(super::topology_data_id(&renamed), topology::data_id(&topology));
         assert_ne!(super::data_id(&renamed), super::data_id(&group));
         assert_eq!(super::payload_bytes(&renamed), super::payload_bytes(&group));

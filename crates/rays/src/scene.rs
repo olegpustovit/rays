@@ -1,7 +1,4 @@
-//! Pure 2D scene descriptions and their lowering to renderer layers.
-//!
-//! Scene constructors are pure data; `Layer` holds the staging the native renderer consumes. Where
-//! OCaml raised `Invalid_argument`/`Failure` the Rust function returns `Err(message)`.
+//! Pure 2D scene constructors retain data and staging for native lowering; invalid input returns Result messages.
 use crate::font;
 use crate::image;
 use crate::path as path_mod;
@@ -146,7 +143,7 @@ fn create_shape_cache_context() -> shape_cache_context {
     }
 }
 
-/// An estimate of the heap a cached node holds (OCaml walked the value).
+/// Estimate retained heap bytes of a cached scene node.
 fn node_bytes(n: &node) -> i64 {
     match n {
         node::Geometry(g) => (g.vertices.len() * 8 + g.indices.len() * 8 + 64) as i64,
@@ -836,7 +833,7 @@ pub mod layer {
         }
     }
 
-    /// The IR and its resources, at the fixed 640x480 extent check of OCaml's `stage`.
+    /// Check IR resources at the fixed 640x480 extent.
     pub fn stage(width: i64, height: i64, scene: &[node]) -> Result<(Rc<render_ir::RenderIr>, Vec<(i64, retained_resource)>), String> {
         if width <= 0 || height <= 0 {
             return Err("invalid scene extent".to_string());

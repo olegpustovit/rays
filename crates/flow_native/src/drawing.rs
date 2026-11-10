@@ -1,4 +1,4 @@
-//! Port of lib/flow_native/drawing.ml: native Scene lowering of Flow's typed deferred drawing plan.
+//! native Scene lowering of Flow's typed deferred drawing plan.
 //! Uses the workspace evaluator and the environment's fold state.
 use crate::marks_scene::{self, attribute};
 use flow_check::workspace::Paths;

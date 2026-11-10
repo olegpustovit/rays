@@ -1,8 +1,4 @@
-//! Port of lib/flow_ir/core_lower.ml: frame lowering of residuals into structured core programs.
-//! OCaml exceptions (`Unsupported`, `Diagnostic.Error`) are the `Stop` error; statement lists are
-//! built by pushing; a scope is a statement list with its
-//! cache, copied or fresh exactly where the OCaml code copies or creates a Hashtbl.
-//! Locals are numbered in source order.
+//! Lower residuals into structured frame programs. Stop carries typed unsupported/diagnostic failures; source traversal assigns locals. Statement scopes retain their own cache and shared parent lookup according to branch/loop boundaries.
 #![allow(non_camel_case_types, non_snake_case, clippy::too_many_arguments)]
 
 use flow_syntax::symbol::{self, Symbol};
@@ -23,7 +19,6 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 
-/// OCaml's `Unsupported` and `Diagnostic.Error`.
 #[derive(Clone, Debug)]
 pub enum Stop { Unsupported(String), Diag(Diagnostic) }
 impl From<Diagnostic> for Stop {
@@ -1664,7 +1659,7 @@ impl Lowerer {
                         let t = syntax.name(t);
                         match if t.contains('.') { None } else { t.parse::<i64>().ok() } {
                             Some(n) => Value::Int(n),
-                            None => Value::Float(cfmt::parse_ocaml_float(t).ok_or_else(|| Stop::Diag(V::fail("E_INTERNAL", "float_of_string")))?),
+                            None => Value::Float((t).parse::<f64>().ok().ok_or_else(|| Stop::Diag(V::fail("E_INTERNAL", "float_of_string")))?),
                         }
                     }
                     _ => return Err(refusal("case")),
@@ -2245,7 +2240,6 @@ impl Lowerer {
     }
 }
 
-/// What a loop's innermost body needs (OCaml closes over these).
 struct LoopCtx {
     zone_source: C::Source,
     source: C::Source,
@@ -2782,9 +2776,7 @@ impl Lowerer {
 }
 
 impl Lowerer {
-    /// `branch` for a non-record type whose else arm ignores the arm's own scope and lowers into the
-    /// caller's (the nested `arm` of color/hsl in the OCaml): the nested comparison and branch land
-    /// in the outer statement list before this branch's own statement.
+    /// Nested non-record branches lower their comparison into the caller's outer statement scope before this branch's statement.
     fn branch_outer(&mut self, s: &mut Scope, source: &C::Source, ty: &Ty, condition: &Lowered, yes: Lower,
                     no_outer: &mut dyn FnMut(&mut Lowerer, &mut Scope) -> R<Lowered>) -> R<Lowered> {
         let condition = self.ensure(s, source, condition)?;
@@ -3061,7 +3053,6 @@ fn count_origins(program: C::Program) -> C::Program {
     C::Program { regions, ..program }
 }
 
-/// Frame lowering of a residual (see the OCaml interface for what lowers).
 pub fn lower(value: Option<Value>, trace: Option<Trace>, strict: bool, budget: Option<i64>, lowered: Option<LoweredHook>, root: ResidualId) -> Result<C::Program, String> {
     let result = lower_value(new_lowerer(value, trace, budget, lowered, strict, None, false, Some(root)));
     if static_sop(root) { result.map(count_origins) } else { result }
@@ -3181,7 +3172,7 @@ mod tests {
     }
 
     #[test]
-    fn lowering_matches_the_ocaml_snapshot() {
+    fn lowering_matches_owned_snapshot() {
         let mut out = String::new();
         for (i, body) in LOWER_EXPRESSIONS.iter().enumerate() {
             out.push_str(&format!("expression {i}: {body}\n"));

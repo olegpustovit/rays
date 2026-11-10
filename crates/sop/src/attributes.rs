@@ -1,4 +1,4 @@
-//! Port of lib/sop/attributes.ml: the attribute, UV and transfer nodes, declared once each (Image
+//! the attribute, UV and transfer nodes, declared once each (Image
 //! Texels is the carrier that lets a Lisp body sample pixels). See PORTING.md.
 use std::sync::Arc;
 
@@ -57,7 +57,7 @@ fn safe_square_limit() -> f64 {
     f64::MAX.sqrt()
 }
 
-// Choice tables that have no support.rs twin: the row order is the OCaml `Param.choice` order.
+// Choice row order is user-visible and remains authored order.
 const REFERENCE: Choice<transform_ops::DistanceFromGeometryReference> = Choice(&[
     ("Points", transform_ops::DistanceFromGeometryReference::DistanceReferencePoints),
     ("Primitives", transform_ops::DistanceFromGeometryReference::DistanceReferencePrimitives),
@@ -756,7 +756,7 @@ pub mod attribute_mirror {
                     Some(name) => Some(geometry::find_group(group_owner, name, geometry).ok_or_else(|| {
                         support::diagnostic(
                             "missing_group",
-                            &format!("attribute_mirror could not find selection group {}", node::ocaml_quote(name)),
+                            &format!("attribute_mirror could not find selection group {}", rdk_core::attribute::quote(name)),
                         )
                     })?),
                 };
@@ -769,7 +769,7 @@ pub mod attribute_mirror {
                                     "missing_group",
                                     &format!(
                                         "attribute_mirror could not find mapping destination group {}",
-                                        node::ocaml_quote(&mapping_destination)
+                                        rdk_core::attribute::quote(&mapping_destination)
                                     ),
                                 )
                             })?;
@@ -1661,7 +1661,7 @@ mod tests {
     }
 
     #[test]
-    fn every_node_declares_its_fields_in_ocaml_order() {
+    fn every_node_declares_its_authored_schema_fields() {
         let names = |factory: &Factory| -> Vec<String> {
             edit_graph::factory_fields(factory).iter().map(|f| f.name.clone()).collect()
         };

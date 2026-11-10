@@ -1,10 +1,4 @@
-//! Port of lib/flow_ir/core_exec.ml(i): initial-domain execution of the structured frame core,
-//! using native primitive bodies.
-//!
-//! OCaml exceptions become `Result<_, Diagnostic>` throughout. `Resident_overflow` is a
-//! diagnostic with the reserved code [`RESIDENT_OVERFLOW`]: [`resident_overflow`] makes one and
-//! [`is_resident_overflow`] tests for it. A region is run through `Options::force`
-//! (default `packed::force`). Optional OCaml arguments are the fields of [`Options`].
+//! Initial-thread execution of structured frame programs uses typed Diagnostics. Reserved resident-overflow diagnostics are constructed and recognized through shared helpers; region execution goes through Options::force.
 #![allow(non_camel_case_types, non_snake_case)]
 
 use flow_syntax::symbol::Symbol;
@@ -183,7 +177,7 @@ fn arena_take(a: &mut Arena, result: i64) -> Value {
 }
 
 fn arena_kill(value: &mut Value) {
-    // an array shared elsewhere is not ours to fill (the OCaml arena owns its arrays outright)
+    // An array shared elsewhere is not owned exclusively and cannot be filled in place.
     match value {
         Value::Int_array(data) => {
             if let Some(d) = Arc::get_mut(data) { d.iter_mut().for_each(|x| *x = i64::MIN); }
@@ -194,7 +188,6 @@ fn arena_kill(value: &mut Value) {
         _ => {}
     }
 }
-/// OCaml's `min_int` (63-bit).
 
 /// The carrier `Region::floats_for` recognises: only the data is reused, each result boxes its own
 /// width.
@@ -214,7 +207,7 @@ fn arena_die(a: &mut Arena, values: &mut [Value], n: i64) {
     }
 }
 
-/// Physical identity of two values (OCaml `==`): the same array storage, or the same constant.
+/// Values share physical identity when their array storage or constant owner is the same.
 pub fn phys_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int_array(x), Value::Int_array(y)) => Arc::ptr_eq(x, y),

@@ -1,4 +1,4 @@
-//! Port of test_image_sink.ml. Faults and command observations wrap the selected native driver;
+//! Faults and command observations wrap the selected native driver;
 //! compute and raster commands still execute on the real GPU. Rust's !Send handles enforce the
 //! oracle's owner-thread restrictions at compile time rather than transporting Rc across threads.
 use crate::common;
@@ -13,7 +13,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 
-// A Send implementation would make the OCaml wrong-domain calls expressible in safe Rust.
+// Handles are deliberately not Send: safe code cannot move them to a foreign owner thread.
 const _: fn() = || {
     trait Ambiguous<A> { fn check() {} }
     impl<T: ?Sized> Ambiguous<()> for T {}

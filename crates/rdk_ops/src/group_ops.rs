@@ -7,7 +7,7 @@ use rdk_core::{support, attribute, attribute_pattern, cancel, edge_group, error,
 use rdk_core::error::Code;
 use rdk_geom::{proximity_index, spatial_index};
 
-use crate::attribute_ops::{is_blank, make_error, ocaml_quote};
+use crate::attribute_ops::{make_error};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Owner {
@@ -392,7 +392,7 @@ fn rename_entry(
                 &format!(
                     "Group Rename: destination {} group {} already exists",
                     ordinary_owner(owner).map(group::owner_name).unwrap_or("edge"),
-                    ocaml_quote(new_name)
+                    rdk_core::attribute::quote_bytes((new_name).as_ref())
                 ),
             )),
             RenameConflict::RenameOverwrite => {
@@ -428,7 +428,7 @@ fn rename_inner(rules: &[RenameRule], geometry_value: &geometry::T) -> Result<ge
                 continue;
             };
             let new_name = String::from_utf8_lossy(&new_name).into_owned();
-            if is_blank(&new_name) {
+            if (&new_name).trim().is_empty() {
                 return Err(make_error(
                     "group_rename",
                     Code::InvalidGroup,
@@ -451,7 +451,7 @@ fn delete_inner(params: &DeleteParams, geometry_value: &geometry::T) -> Result<g
     let mut store = store_of_geometry(geometry_value);
     let mut compiled: Vec<(Option<Owner>, attribute_pattern::T)> = Vec::new();
     for rule in &params.rules {
-        if !is_blank(&rule.delete_pattern) {
+        if !(&rule.delete_pattern).trim().is_empty() {
             compiled.push((rule.delete_owner, attribute_pattern::compile(&rule.delete_pattern)?));
         }
     }
@@ -685,7 +685,7 @@ fn transfer_inner(params: &TransferParams) -> Result<geometry::T, error::T> {
         if rule.transfer_owner == Owner::GroupVertices {
             return Err(fail("Group Transfer: vertex groups are not supported"));
         }
-        let pattern_source = if is_blank(&rule.transfer_pattern) { "*" } else { rule.transfer_pattern.as_str() };
+        let pattern_source = if (&rule.transfer_pattern).trim().is_empty() { "*" } else { rule.transfer_pattern.as_str() };
         let pattern = attribute_pattern::compile(pattern_source)?;
         let sources: Vec<&NamedEntry> = source_store
             .entries
@@ -717,7 +717,7 @@ fn transfer_inner(params: &TransferParams) -> Result<geometry::T, error::T> {
         let mapping = slot.as_ref().ok_or_else(|| fail("Group Transfer: missing mapping"))?;
         for source_entry in sources {
             let proposed = format!("{}{}", rule.transfer_prefix, source_entry.entry_name);
-            if is_blank(&proposed) {
+            if (&proposed).trim().is_empty() {
                 return Err(fail("Group Transfer: prefix produced an empty group name"));
             }
             let existing = store_find(&target_store, rule.transfer_owner, &proposed);

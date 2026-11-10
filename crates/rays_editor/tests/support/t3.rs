@@ -1,7 +1,7 @@
 //! Test support shared by suite t3: ports of lisp_sop.ml, Test_support.Workspace_cook, Editor_prepare and
 //! test_text.ml (copied from flow_sop/src/lisp_sop.rs and lisp_sop/support.rs, which are cfg(test) there).
 #![allow(dead_code)]
-// Port of lib/flow_sop/lisp_sop/lisp_sop.ml. Test support: a SOP graph written as Rays Lisp text,
+// Test support: a SOP graph written as Rays Lisp text,
 // compiled to a `sop::node::T` by the same lowering the editor uses.
 use flow_sop::{catalog, lower, manifest, operators};
 use flow_check::op;
@@ -20,8 +20,7 @@ pub fn factories() -> Vec<Factory> {
     sop::nodes::factories()
 }
 
-/// A generator node holding an already built geometry: the one OCaml-only source, used through
-/// `with_`.
+/// A generator retains already-built geometry through with_.
 pub fn snapshot(geometry: &rdk_core::geometry::T) -> node::T {
     let parameters = format!("data_id={};bytes={}", rdk_core::geometry::data_id(geometry), rdk_core::geometry::payload_bytes(geometry));
     let geometry = geometry.clone();
@@ -261,8 +260,7 @@ pub fn geometry_bytes(g: &geo::T) -> Vec<u8> {
     out.into_bytes()
 }
 
-/// The text of a specification/workspace/cases fixture: `bloom` and `variations` are fixtures of
-/// their own, the other ten are the sketches `sketches/ws_NAME.rays` (the OCaml dune rule copies them).
+/// Read specification cases directly; bloom/variations are standalone fixtures and remaining sources live in sketches/ws_NAME.rays.
 pub fn case_text(name: &str) -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let path = if name == "bloom" || name == "variations" {
@@ -312,7 +310,7 @@ pub fn x_of(p: &cook::prepared) -> f64 {
     first_point(p).0
 }
 
-/// Polls `predicate` until true (a 60 s deadline), the OCaml `await`.
+/// Poll until true within the existing 60-second deadline.
 pub fn await_until(mut predicate: impl FnMut() -> bool) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
@@ -352,8 +350,7 @@ pub fn checked(text: &str) -> Workspace {
     }
 }
 
-/// The text of a specification/workspace/cases fixture: `bloom` and `variations` are fixtures of their
-/// own, the other ten are the sketches `sketches/ws_NAME.rays` (the OCaml dune rule copies them).
+/// Read standalone bloom/variations fixtures and shared sketches/ws_NAME.rays sources directly.
 pub fn read_case(name: &str) -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let path = if name == "bloom" || name == "variations" { root.join("specification/workspace/cases").join(format!("{name}.lisp")) } else { root.join("sketches").join(format!("ws_{name}.rays")) };

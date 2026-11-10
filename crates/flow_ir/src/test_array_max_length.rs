@@ -1,4 +1,3 @@
-// Port of lib/flow_ir/test_array_max_length.ml.
 use flow_syntax::symbol::Symbol;
 use crate::packed;
 use crate::test_support::*;
@@ -145,8 +144,7 @@ fn array_init_past_the_native_bound_is_a_memory_error() {
     }
 }
 
-// Product defect: array/max_length's body (flow_check op.rs array_ops) reads :type with text_string,
-// so a non-text argument fails E_TYPE; OCaml reports E_ARRAY_TYPE for Int, Bool and Text_array.
+// Wrong-storage array/max_length selectors report E_TYPE; an unrecognized Text selector reports E_ARRAY_TYPE.
 #[test]
 fn direct_non_text_type_is_array_type() {
     let op = op::find(&[], "array/max_length", &context::value()).unwrap();

@@ -1,8 +1,4 @@
-//! Port of lib/flow_sop/test_concat.ml: `sop/concat` is `Rdk.Mesh_merge.run` on cooked geometries.
-//! Bytes equal the native merge for one, two and three inputs with matching, mismatched and padded
-//! attribute/group sets; errors share the native merge's code; inputs are not mutated.
-//! The full OCaml matrix: reference and CPU tiers, domains {1, 4}, grains {1, 97, 4096}; one `#[test]` per
-//! case so each lowers once.
+//! Concat matches native mesh merge for one, two and three immutable inputs, including attributes/groups and refusal codes, across reference/CPU tiers, domains and grains.
 use super::support::*;
 use crate::{lisp_sop, lower};
 use rdk_core::attribute::{self, Owner, Storage};

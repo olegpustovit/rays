@@ -126,8 +126,7 @@ pub fn with_dir<R>(f: impl FnOnce(&str) -> R) -> R {
     }
 }
 
-/// `create` with the OCaml tests' defaults: platform Apple, await, the surface prepare and a
-/// scene3 draw of the prepared surface (`native`: the app's own prepare and draw).
+/// Native consistency tests use Apple input, awaited cook and the application's own surface preparation/drawing path.
 pub fn create(ws: &workspace_doc::T, presets: Option<&str>, camera: Option<rays::easy_camera::EasyCamera>, native: bool) -> Ed {
     let options = editor::Create {
         platform: Some(input::Platform::Apple),

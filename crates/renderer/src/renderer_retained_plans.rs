@@ -13,7 +13,7 @@ pub enum Resource {
     Canvas(canvas::Canvas),
 }
 
-/// The id a command names, the resource's identity (the OCaml physical equality) and its generation.
+/// Resource identity includes its command ID and generation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ResourceStamp {
     ImageStamp(i64, i64, i64),

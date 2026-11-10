@@ -803,7 +803,7 @@ new export reset state. Functions, deferred nodes and layouts cannot be stored i
 
 The full live frame record, pointer routing, fold reset rules, packed-array constructors and
 native storage limits are specified in §13. Graph inputs and the checked `.rays` file are the
-source of truth; the `rays` executable reads them directly and does not generate OCaml source.
+source of truth; the `rays` executable reads them directly and does not generate a second implementation.
 
 **Skipping a loop copy.** `(for [x xs …] :skip tuples body)` omits the listed iteration
 tuples, and `(scene/merge a b … :skip tuples)` omits the listed arguments. A tuple contains
@@ -849,9 +849,9 @@ per line when a form breaks, notes and `^:` flags kept. Printing is a fixed poin
 `print (parse (print x)) = print x`. Comments are kept inside parameter vectors and between
 and after root forms; a comment written after a quote prefix is moved before it.
 
-`Flow.Lisp.float` uses `Param.float_text` in workspace-literal mode: the shortest
-digits that read back as the same value, always with a `.` and never an
-exponent (`1e-14` is written `0.00000000000001`). Non-finite values print as
+`Flow.Lisp.float` uses Rust's native shortest round-trip float formatting through
+`Param.float_text` in workspace-literal mode. A finite float has a `.` or an exponent
+(`1.0`, `1e-14`), preserving its type and negative zero when read back. Non-finite values print as
 `NaN`, `Infinity` or `-Infinity`, preserving their class when read back. Finite
 parameter, integer conversion and packed-array boundaries still reject them.
 
@@ -898,7 +898,7 @@ kind, by its qualified name or its short name within the graph's context
 distance 2 or less; a kind of another context is `E_WRONG_CONTEXT`.
 
 `defnode` declares a Lisp-backed SOP catalog kind. Its name is `sop/<name>`;
-it cannot replace an existing OCaml kind or another workspace definition
+it cannot replace an existing native catalog kind or another workspace definition
 (`E_NAME`). Its call remains a catalog call with one card and cook identity.
 The body is checked with the declared input types and must return geometry;
 recursive node dependencies are `E_RECURSION`.
@@ -1063,8 +1063,7 @@ head of a call, not as an argument.
 
 `Diagnostic.t` is the shared record with code, severity, source position and span, message, cause, hints, and trace. `Diagnostic.Error` carries one such value at refusal boundaries.
 A source diagnostic has a 1-based position and a half-open byte span; one without source
-text leaves both absent. `Diagnostic.report` prints the OCaml compiler's format, so dune and
-editors jump to the line. Messages are sentences that name the fix.
+text leaves both absent. `Diagnostic.report` prints file, line and column locations so editors can jump to the source. Messages are sentences that name the fix.
 
 The reader's and the argument checker's codes (the language's own are listed in
 `workspace.mli`, `eval.mli` and `macro.mli`):
@@ -2097,8 +2096,7 @@ There is no second drawing path for it.
 `Rays_editor.Workspace.export` uses the same evaluator and Drawing lowering
 with a fresh fold and a fixed clock. It pins logical size, step, frame index,
 pointer, held keys/buttons and events; `sketches/particles.rays` is
-the 10,000-particle reference and its native fixed exports are byte-identical
-to the original OCaml example.
+the 10,000-particle reference and its native fixed exports match the owned deterministic fixtures.
 
 ### Editor consistency
 
@@ -2207,7 +2205,7 @@ dropped from Finder (§7.12).
 | Viewing a node | `v` is a per-object lexical preview request outside the source, layout and history; loop selectors choose its tuple |
 | Vec3 | metadata grouping of three float fields; no new `Param.value` case |
 | Names in the language | stable keys and field names verbatim (`noise_displace`, `size_x`) |
-| Float spelling | one printer, shortest round-trip, always a `.`, never an exponent; the reader accepts exponents |
+| Float spelling | one printer, native Rust shortest round-trip, with a `.` or an exponent to retain float type |
 | Positional after keyword | allowed; positionals are numbered in written order, an input given twice is `E_DUPLICATE_PARAM` |
 | Nesting limit | 256, `->` steps included |
 | Macros | quasiquote templates only |

@@ -1,4 +1,5 @@
-// Port of lib/pxui_graph/scope_frame.ml: the graph pane's frame gestures; private state, commands and
+// Geometry report priority remains stable within the existing bounded probe budget.
+// the graph pane's frame gestures; private state, commands and
 // painting compose here on the shared PXUI handle.
 use flow_syntax::symbol::Symbol;
 use crate::scope_commands::*;
@@ -241,7 +242,7 @@ pub enum Tap {
     Replace,
 }
 
-/// What a click on a deletable input turns into (a thunk in OCaml: unwire probes the last value).
+/// Deletable-input clicks return an unwire action that probes the previous value.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Del {
     /// `n.rows[i]`
@@ -490,7 +491,7 @@ pub fn row_fields_of(ui: &mut Ui, z: f64, pl: &Placed, n: &p::Node, r: &p::Row, 
     Vec::new()
 }
 
-/// The frame-wide mutable state the OCaml closures shared (`wire_hits`, `finished`, `opened`).
+/// Frame-wide gesture state shared by wire hit testing and completion.
 pub struct Ctx {
     pub wire_hits: HashMap<usize, Vec<UiBox>>,
     pub finished: bool,
@@ -539,7 +540,7 @@ pub fn edit_field(c: &mut Ctx, ui: &mut Ui, at: (f64, f64), w: f64, h: f64, key:
     let mut o = ValueFieldOpts::default();
     o.size = Some(c.fs);
     o.edit = true;
-    o.left = cfmt::parse_ocaml_float(current).is_none();
+    o.left = (current).parse::<f64>().ok().is_none();
     let (v, open) = ui.value_field(at, w, h, &o, valid, key, current);
     if !open {
         c.finished = true;
@@ -1961,7 +1962,7 @@ pub mod inspect {
         if !zone_open {
             return seen;
         }
-        // the OCaml fold conses onto `seen`: the geometry nodes come first, the last item first
+        // Geometry reports precede other reports, with later items first within that priority.
         let mut out: Vec<Path> = Vec::new();
         for (pl, _, _) in t.geo.items.iter() {
             if let Item::Item(n) = &pl.item {

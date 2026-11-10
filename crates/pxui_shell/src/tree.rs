@@ -1,4 +1,4 @@
-//! Port of lib/pxui_shell/tree.ml: a keyboard-first tree list (WAI-ARIA treeview keys): focus is
+//! a keyboard-first tree list (WAI-ARIA treeview keys): focus is
 //! separate from selection, folds and a filter (keeping ancestors) are view state, rows show
 //! indent guides and sticky ancestors, toggle columns paint when dragged, and rows drag with a
 //! 4-point dead zone onto before/inside/after drop zones. The host owns rows and selection and
@@ -716,7 +716,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
             Some((name, Pick::Submit)) => {
                 ui.dismiss_popup();
                 t.renaming = None;
-                let trimmed = name.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c')).to_string();
+                let trimmed = name.trim().to_string();
                 if !trimmed.is_empty() {
                     intents.push(Intent::Rename(id, trimmed));
                 }

@@ -1,11 +1,4 @@
-//! Port of lib/flow_ir/core.ml(i): structured frame programs. Locals and constants are numbered in
-//! authored traversal order; values are immutable after publication. OCaml `Core` is `core_ir` here.
-//!
-//! Naming: variants keep their OCaml spelling (`Array_max_length`), types are CamelCase, OCaml's
-//! `Core.Region` is the module [`Region`] with the record `Region::T` (alias [`RegionT`]). All ints
-//! are i64 (registers, locals, constants are indices; cast with `as usize` where indexing).
-//! `'a live` is concretized as [`Region::LiveInt`] / [`Region::LiveFloat`].
-//! `Region::T` fields are all `pub` for reading; build one only through `make`/`rebuild`.
+//! Structured frame programs number locals/constants in authored traversal order and publish immutable values. Indices use i64; live fields use Region::LiveInt/LiveFloat. Read Region::T fields directly but construct through make/rebuild.
 #![allow(non_camel_case_types, non_snake_case)]
 
 use flow_syntax::symbol::Symbol;
@@ -72,7 +65,6 @@ pub struct Source {
 pub enum Mark { Rect, Circle, Line }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Transform { Translate, Rotate, Scale }
-/// OCaml `Core.path`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PathKind { Rounded_rect, Polygon, Polyline }
 
@@ -390,7 +382,6 @@ pub mod region {
         pub sites: Arc<Vec<(i64, Path, Vec<i64>)>>,
     }
 
-    /// The arguments of [`make`] (OCaml's labelled arguments), owned.
     #[derive(Clone, Debug)]
     pub struct Parts {
         pub residual: ResidualId,
@@ -1016,7 +1007,6 @@ pub mod region {
     }
 }
 
-/// OCaml `type region = Region.t`.
 pub type RegionT = region::T;
 
 #[derive(Clone, Debug)]
@@ -1144,7 +1134,7 @@ pub fn literal_of_value(value: &Value) -> Option<Literal> {
     convert(value)
 }
 
-/// Panics (OCaml `invalid_arg`) on a vector or array of an unsupported width.
+/// Unsupported vector/array widths are programmer errors and panic.
 pub fn value_of_literal(literal: &Literal) -> Value {
     match literal {
         Literal::Int(n) => Value::Int(*n),
@@ -1167,7 +1157,7 @@ pub fn value_of_literal(literal: &Literal) -> Value {
     }
 }
 
-/// OCaml `%S`: a double-quoted `String.escaped`.
+/// Double-quoted opaque bytes using the specified decimal byte codec.
 pub fn quoted(bytes: &[u8]) -> String {
     let mut out = String::from("\"");
     for &b in bytes {
@@ -1184,21 +1174,6 @@ pub fn quoted(bytes: &[u8]) -> String {
     }
     out.push('"');
     out
-}
-
-/// OCaml `%h`.
-pub fn hex_float(x: f64) -> String {
-    if x.is_nan() { return "nan".to_owned(); }
-    if x.is_infinite() { return if x > 0.0 { "infinity" } else { "-infinity" }.to_owned(); }
-    let bits = x.to_bits();
-    let sign = if bits >> 63 == 1 { "-" } else { "" };
-    let exponent = ((bits >> 52) & 0x7ff) as i64;
-    let mantissa = bits & ((1u64 << 52) - 1);
-    let (lead, exp) = if exponent == 0 { (0, if mantissa == 0 { 0 } else { -1022 }) } else { (1, exponent - 1023) };
-    let mut digits = format!("{:013x}", mantissa);
-    while digits.ends_with('0') { digits.pop(); }
-    let frac = if digits.is_empty() { String::new() } else { format!(".{}", digits) };
-    format!("{}0x{}{}p{}{}", sign, lead, frac, if exp < 0 { "-" } else { "+" }, exp.abs())
 }
 
 fn lisp_float(x: f64) -> String { flow_syntax::lisp::float(x) }
@@ -1395,7 +1370,7 @@ pub fn pp(p: &Program) -> String {
             I::Binary(op, a, b) => o.push_str(&format!("{}(r{} r{})", primitive_name(&Primitive::Numeric(*op)), a, b)),
             I::Unary(op, a) => o.push_str(&format!("{}(r{})", primitive_name(&Primitive::Math(*op)), a)),
             I::Noise3(x, y, z, seed, octaves, lacunarity, gain) => {
-                let fractal = |v: &region::LiveFloat| match v { region::LiveFloat::Fixed(v) => hex_float(*v), region::LiveFloat::Live(r) => format!("r{}", r) };
+                let fractal = |v: &region::LiveFloat| match v { region::LiveFloat::Fixed(v) => lisp_float(*v), region::LiveFloat::Live(r) => format!("r{}", r) };
                 let oct = match octaves { region::LiveInt::Fixed(n) => n.to_string(), region::LiveInt::Live(r) => format!("r{}", r) };
                 let extra = if *lacunarity == region::LiveFloat::Fixed(2.0) && *gain == region::LiveFloat::Fixed(0.5) { String::new() }
                     else { format!(" lacunarity={} gain={}", fractal(lacunarity), fractal(gain)) };
@@ -1586,11 +1561,7 @@ mod tests {
     }
 
     #[test]
-    fn hex_float_and_quoting() {
-        assert_eq!(hex_float(2.0), "0x1p+1");
-        assert_eq!(hex_float(0.5), "0x1p-1");
-        assert_eq!(hex_float(1.5), "0x1.8p+0");
-        assert_eq!(hex_float(0.0), "0x0p+0");
+    fn byte_quoting() {
         assert_eq!(quoted(&[b'a', b'"', b'b', 10, 1]), "\"a\\\"b\\n\\001\"");
     }
 

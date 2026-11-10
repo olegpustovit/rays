@@ -1,5 +1,4 @@
-//! Port of lib/rays_editor/test/test_probe.ml (W5: recorded values, footers, iteration counts,
-//! inspector rows and the viewport header text).
+//! Probe values, footer content and iteration counts remain stable across frames.
 use flow_syntax::symbol::Symbol;
 use super::pg::{self, check};
 use super::support::*;
@@ -350,7 +349,7 @@ pub fn budget() {
     check(unbudgeted.contains(&ys), &format!("an unbudgeted probe counts the map: {unbudgeted:?}"));
     let now = Rc::new(std::cell::Cell::new(0.0f64));
     let n2 = now.clone();
-    // the clock is Send + Sync in Options: a shared atomic counter plays the OCaml ref
+    // Options clocks are Send+Sync shared atomic counters.
     let ticks = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let t2 = ticks.clone();
     let clock: std::sync::Arc<dyn Fn() -> f64 + Send + Sync> = std::sync::Arc::new(move || (t2.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1) as f64);

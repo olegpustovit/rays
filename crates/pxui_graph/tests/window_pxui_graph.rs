@@ -1,5 +1,4 @@
-//! The graph pane and its node menu on the SDL main thread (fonts): the OCaml
-//! lib/pxui_graph test_pxui_graph. Cases read specification/workspace/cases in place.
+//! Graph pane and node-menu cases run on the SDL main thread and read shared specification fixtures directly.
 #[path = "../../rays/tests/common/mod.rs"]
 mod common;
 #[path = "cases/support.rs"]

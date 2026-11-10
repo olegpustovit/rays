@@ -587,7 +587,7 @@ fn clean(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, e
         &params.edge_groups,
     ] {
         if let Some(pattern) = pattern {
-            if !support::ocaml_trim_is_empty(pattern) {
+            if !(pattern).trim().is_empty() {
                 attribute_pattern::compile(pattern)?;
             }
         }
@@ -642,7 +642,7 @@ fn clean(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, e
         (group_ops::Owner::GroupEdges, &params.edge_groups),
     ] {
         match pattern {
-            Some(delete_pattern) if !support::ocaml_trim_is_empty(delete_pattern) => rules.push(group_ops::DeleteRule {
+            Some(delete_pattern) if !(delete_pattern).trim().is_empty() => rules.push(group_ops::DeleteRule {
                 delete_owner: Some(owner),
                 delete_pattern: delete_pattern.clone(),
             }),

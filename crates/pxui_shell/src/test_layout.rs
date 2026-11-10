@@ -1,4 +1,3 @@
-//! Port of the pure layout and header-slot sections of lib/pxui_shell/test_shell.ml.
 use crate::chrome;
 use crate::layout::{self as L, Axis, Panel, Size, Panels};
 use editor_core::panels;
@@ -280,7 +279,7 @@ fn header_groups_stand_inside_the_header() {
 
 #[test]
 fn layout_geometry_is_cheap() {
-    // the benchmark of the OCaml suite as a smoke: many geometries of the default tree, one answer
+    // Smoke-test repeated default-tree layouts against one expected geometry.
     let f = frame_of((1000, 300));
     let tree = L::default();
     let mut sum = 0;

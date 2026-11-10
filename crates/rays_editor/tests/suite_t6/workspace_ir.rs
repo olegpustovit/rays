@@ -48,7 +48,7 @@ fn signature(e: &E::Eval) -> Sig {
 }
 
 pub fn check(root_relative: &str) {
-    // OCaml installs these module hooks before any static evaluation, not at the first lowering.
+    // Install module hooks before the first static evaluation.
     flow_sop::lower::install_hooks();
     let path = repo_root().join(root_relative);
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{root_relative}: {e}"));

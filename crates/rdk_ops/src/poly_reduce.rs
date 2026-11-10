@@ -63,7 +63,6 @@ fn fail(message: &str) -> error::T {
     make(Code::InvalidTopology, message)
 }
 
-use rdk_core::support::ocaml_trim_is_empty as blank;
 
 fn validate_group(owner: group::Owner, length: i64, label: &str, item: Option<&group::T>) -> Result<(), error::T> {
     match item {
@@ -566,7 +565,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         _ => {}
     }
     if let Some(name) = &params.output_group {
-        if blank(name) {
+        if (name).trim().is_empty() {
             return Err(fail("Rdk.Poly_reduce.poly_reduce: output group name must not be empty"));
         }
     }

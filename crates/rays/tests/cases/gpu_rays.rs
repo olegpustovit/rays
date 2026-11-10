@@ -1,8 +1,4 @@
-//! Offscreen-GPU cases of lib/rays (canvas depth, World raster, Scene3 float32 and lowering
-//! uploads). Tests normally share a device; lifetime assertions release the helper's lease first
-//! so destroying the last canvas also releases the device's cached native resources.
-//! Not ported: the canvas wrong-execution-context checks (OCaml Domain/Thread based) and the
-//! allocation (`Gc`) ceilings.
+//! Native offscreen geometry, World, depth and upload cases release the helper device lease before lifetime assertions.
 use crate::common;
 use rays::camera;
 use rays::canvas;

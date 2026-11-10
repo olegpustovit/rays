@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/test_metadata_kernel.ml: authored metadata operations preserve native owner,
+//! authored metadata operations preserve native owner,
 //! storage and ordering semantics.
 use std::sync::Arc;
 use super::support::*;

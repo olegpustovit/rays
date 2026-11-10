@@ -27,12 +27,22 @@
   (let* [order (array/grade ids)
          sizes (array/scatter_add ids (array/int (array/count ids) 1) count)]
     (ec_plan true "" order (int_gather ids order) (array/scan_sum sizes) count (array/int 0))))
+; A nonnegative piece/point key is q*points+p. Check its greatest possible index,
+; not the element count, so the full 0..i64::MAX index domain remains available.
+(defn ec_key_fits :context value [(points : int) (count : int)]
+  (cond (or (int/lt points 0) (int/lt count 0)) false
+        (or (int/eq points 0) (int/eq count 0)) true
+        :else (let* [whole (int/div 9223372036854775807 points)
+                     tail (int/mod 9223372036854775807 points)
+                     last (int/sub count 1)]
+                (or (int/lt last whole)
+                    (and (int/eq last whole) (int/le (int/sub points 1) tail))))))
 ; Primitive pieces: unique (piece, point) pairs ordered by piece then point.
 (defn ec_grouped_primitives :context sop [(geo : geometry) (ids : (array int)) (count : int)]
   (let* [topo (sop/topology geo)
          adjacency (sop/adjacency geo)
          points (sop/count geo :points)]
-    (if (int/gt points (int/div 4611686018427387903 (if (int/gt count 0) count 1)))
+    (if (not (ec_key_fits points count))
       (ec_plan false "piece/point incidence key exceeds integer limits" (array/int 0) (array/int 0) (array/int 0) 0 (array/int 0))
       (let* [piece_of_vertex (exact (map (fn [(p : int)] (array/nth ids p)) adjacency.primitive_of_vertex))
              keys (exact (map (fn [(q : int) (p : int)] (int/add (int/mul q points) p)) piece_of_vertex topo.vertex_points))

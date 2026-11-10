@@ -1,6 +1,5 @@
 //! Leader actions owned by the workspace, the undo labels of intents, the World keys and the
-//! routed keymap. Port of lib/rays_editor/editor_actions.ml.
-#![allow(non_camel_case_types)]
+//! routed keymap. #![allow(non_camel_case_types)]
 use editor_core::keymap::Trigger;
 use std::cell::RefCell;
 use std::rc::Rc;

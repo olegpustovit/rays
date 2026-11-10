@@ -1,6 +1,5 @@
 //! Panels: titles, the navigator's inputs, the focused leaf, layout gestures, docking, and the
-//! clipboard commands. Port of lib/rays_editor/editor_panels.ml.
-#![allow(non_camel_case_types)]
+//! clipboard commands. #![allow(non_camel_case_types)]
 use flow_syntax::symbol::Symbol;
 use std::rc::Rc;
 

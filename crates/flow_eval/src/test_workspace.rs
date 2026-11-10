@@ -1,4 +1,4 @@
-// Port of lib/flow/test_workspace.ml (the checker's static half).
+//! Static workspace checking and evaluation contracts.
 use crate::*;
 use flow_check::{catalog::{self, Catalog, Kind, Parameter}, port_type::PortType, workspace as W};
 use flow_syntax::{context, macros, syntax::{self, Node as SN, Syntax}, ty, value};
@@ -846,9 +846,9 @@ fn workspace_precision() {
 }
 
 #[test]
-fn sketch_checks_match_the_ocaml_oracle() {
+fn sketch_checks_match_owned_diagnostics() {
     let slow = std::env::var("RAYS_SLOW").is_ok_and(|v| v == "1");
-    // The checker's observable output over sketches/*.rays is byte-equal to the OCaml checker's (golden/sketch_checks.txt).
+    // Owned golden/sketch_checks.txt pins observable checker output for shipped sketches.
     let out = std::env::var("RAYS_DUMP_CHK").ok();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sketches");
     let mut files = std::fs::read_dir(&root).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "rays")).collect::<Vec<_>>();
@@ -907,7 +907,7 @@ fn sketch_checks_match_the_ocaml_oracle() {
             let golden = if slow { golden } else {
                 golden.lines().filter(|l| !(l.starts_with("PLAN ") || l.starts_with("N ") || l.starts_with("R ") || l.starts_with("EVAL_ERROR"))).map(|l| format!("{l}\n")).collect::<String>()
             };
-            assert!(text == golden, "checker output differs from the OCaml oracle in golden/sketch_checks.txt (regenerate with zz_flowcheck_dump/chk.exe)");
+            assert!(text == golden, "checker output differs from owned golden/sketch_checks.txt (regenerate with RAYS_DUMP_CHK)");
         }
     }
 }

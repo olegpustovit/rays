@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/port.ml: a node parameter port (node id, path) and the vec3 grouping of
+//! a node parameter port (node id, path) and the vec3 grouping of
 //! a node's fields.
 use flow_check::port_type::{self, PortType, PortValue};
 use param::{FieldView, FloatRange, IntRange, Kind, KindView, Value};
@@ -11,7 +11,7 @@ pub struct Port {
     pub path: String,
 }
 
-/// `Port.compare`: node id, then the path as OCaml `String.compare` (byte order).
+/// Order ports by node ID, then unsigned path bytes.
 pub fn compare(a: &Port, b: &Port) -> Ordering {
     a.node.cmp(&b.node).then_with(|| a.path.as_bytes().cmp(b.path.as_bytes()))
 }

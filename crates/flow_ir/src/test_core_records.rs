@@ -1,5 +1,3 @@
-// Port of lib/flow_ir/test_core_records.ml (core_records.expected is read in place).
-// `--bench-records` of the OCaml executable is a bench, not a test; it is not ported here.
 use crate::core_exec::{self, Options};
 use crate::core_ir as C;
 use crate::core_lower;
@@ -83,7 +81,7 @@ fn concrete_values_skip_resolver_and_state() {
         });
         let options = executor::ForceOptions { strict: true, reference, state: Some(state.clone()), resolve: Some(resolve), ..Default::default() };
         let result = ok(executor::force(&program, &options, &input::at_time(f64::NAN)));
-        // OCaml also checks physical identity; Rust values are cloned, so structural equality stands in.
+        // Cloned record values compare structurally.
         assert!(result == value && E::state_stamp(&state) == stamp && resolutions.load(Ordering::SeqCst) == 0 && ticks.load(Ordering::SeqCst) == 2);
         let executions = profile::executions(&profile);
         assert_eq!(executions.len(), 1, "Concrete execution lost its profile entry");
@@ -193,8 +191,7 @@ fn core_record_and_text_print_is_stable() {
     }
 }
 
-// Fails today: the flow_eval reference walker leaves lazily captured record fields unforced
-// (`captured` returns a Residual, `captured-str` prints `?`); Core and the executor agree with OCaml.
+// Known failure: the reference walker leaves captured record fields residual while Core and executor force them; captured-str consequently prints a question mark.
 #[test]
 fn core_and_executor_match_the_reference_walker_on_every_case() {
     let (_, failures) = dump();

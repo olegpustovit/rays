@@ -1,4 +1,4 @@
-//! Port of lib/rays_editor/editor_inspect.ml: the levels of the model (kinds, objects, network,
+//! the levels of the model (kinds, objects, network,
 //! displayed node), node ownership, new graphs and materials, and the workspace inspector (the
 //! sheet of the node selected in the graph pane). Bundle C; Editor_model and Editor_shell come
 //! from bundle D.

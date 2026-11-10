@@ -1,5 +1,4 @@
-//! Port of lib/rays_editor/test/test_sop_catalog.ml (the catalog membership / metadata / cache-key
-//! checks, the Blend Shapes / Attribute Composite / Skin nodes and the ws_morph sketch).
+//! Catalog membership, metadata, cache keys and shipped modeling nodes.
 #![allow(dead_code, unused_imports)]
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -709,7 +708,7 @@ pub fn cases() -> Vec<(&'static str, fn())> {
         ("sopcat_morph_sketch", morph_sketch),
         ("sopcat_node_inputs", node_inputs),
     ];
-    // every field of every registered SOP: exhaustive qualification, as in the OCaml suite
+    // Exhaustive qualification checks every field of every registered SOP.
     if std::env::var("RAYS_SLOW").as_deref() == Ok("1") {
         cases.push(("sopcat_manifest_exhaustive", manifest_exhaustive));
         cases.push(("sopcat_perturbation", perturbation));

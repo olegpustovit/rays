@@ -1,4 +1,4 @@
-// Rust bridge build contract, ported from lib/metal/metal_build_config.ml.
+// Rust bridge build contract.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Sanitizer { Address, Undefined, Thread }
 

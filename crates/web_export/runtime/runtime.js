@@ -33,8 +33,7 @@ export const eventRecord = (kind, fields = {}) => new Map(EVENT_FIELDS.map(([nam
   [name, name === 'kind' ? kind : name in fields ? fields[name] : ZERO[type]()]));
 const point = (x, y) => Float64Array.of(x, y, 0);   // op.ml:109 `point`
 
-// ---- names ----
-// Native button names, live_frame.ml:17-18. Held order is the OCaml variant order (input.ml:12-17).
+// Held button names retain the native declaration order.
 const BUTTONS = ['left', 'right', 'middle', 'x1', 'x2'];
 const DOM_BUTTON = ['left', 'middle', 'right', 'x1', 'x2'];   // MouseEvent.button 0..4
 // live_frame.ml:3-12. Held keys are `KeySet.elements`, i.e. polymorphic `compare` on Input.key

@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/value_lane.ml: live drives, the arguments of a lowered graph that depend
+//! live drives, the arguments of a lowered graph that depend
 //! on `t`. One cache retains the last plan and resolution; a static network reuses its result
 //! without recomputation.
 //!

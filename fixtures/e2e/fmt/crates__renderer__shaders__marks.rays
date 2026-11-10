@@ -36,7 +36,7 @@
         (let* [b [(array/nth extent wide) (array/nth extent (int/add wide 1))]
                d (- b a)
                len (sqrt (+ (* d.x d.x) (* d.y d.y)))
-               dir (if (> len 0.000001) (/ d len) [1.0 0.0])
+               dir (if (> len 1e-6) (/ d len) [1.0 0.0])
                n [(- 0.0 dir.y) dir.x]
                h (+ (* sw 0.5) 1.5)
                s (- a (* dir h))
@@ -104,7 +104,7 @@
                             [(* len 0.5) (* params.y 0.5)]
                             0.0)
                px (max (footprint p) 0.0001)]
-          {:discard (<= len 0.000001)
+          {:discard (<= len 1e-6)
            :color [color.x color.y color.z (* color.w (unit (- 0.5 (/ d px))))]})
         (let* [lo [box.x box.y]
                hi [box.z box.w]

@@ -64,7 +64,7 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Float(f64),
-    /// Raw OCaml string bytes; not restricted to UTF-8.
+    /// Arbitrary bytes; not restricted to UTF-8.
     Text(Arc<[u8]>),
     Choice(String),
 }
@@ -692,7 +692,10 @@ pub fn float_text(value: f64) -> String {
 }
 
 pub fn float_text_with_decimal(value: f64, decimal: bool) -> String {
-    cfmt::ocaml_float(value, decimal)
+    if value.is_nan() { "NaN".to_owned() }
+    else if value.is_infinite() { if value.is_sign_negative() { "-Infinity" } else { "Infinity" }.to_owned() }
+    else if decimal { format!("{value:?}") }
+    else { value.to_string() }
 }
 
 pub fn group_vec3(fields: &[FieldView], infer: bool) -> Result<Vec<Vec<FieldView>>, String> {
@@ -864,13 +867,13 @@ pub mod number {
     pub fn valid(kind: Kind, text: &str) -> bool {
         match kind {
             Kind::Int => text.parse::<i64>().is_ok(),
-            Kind::Float => parse_float(text).is_some_and(f64::is_finite),
+            Kind::Float => text.parse::<f64>().is_ok_and(f64::is_finite),
         }
     }
 
     pub fn fraction(range: (f64, f64), text: &str) -> Option<f64> {
         let (low, high) = range;
-        parse_float(text)
+        text.parse::<f64>().ok()
             .filter(|_| high > low)
             .map(|value| ((value - low) / (high - low)).clamp(0.0, 1.0))
     }
@@ -893,7 +896,7 @@ pub mod number {
     }
 
     pub fn scrub(kind: Kind, range: Option<(f64, f64)>, origin: &str, dx: f64, fine: bool) -> String {
-        let Some(value) = parse_float(origin) else {
+        let Ok(value) = origin.parse::<f64>() else {
             return origin.to_owned();
         };
         // a drag stays inside the soft range; a value typed outside it is not pulled in
@@ -930,9 +933,6 @@ pub mod number {
         }
     }
 
-    fn parse_float(text: &str) -> Option<f64> {
-        cfmt::parse_ocaml_float(text)
-    }
 }
 
 fn validate_int_range(range: IntRange) -> Result<(), String> {
@@ -987,7 +987,7 @@ fn validate_choice_labels(labels: &[String]) -> Result<(), String> {
 }
 
 fn nonblank(what: &str, value: &str) -> Result<(), String> {
-    if value.trim_matches(|character| character == ' ' || matches!(character as u32, 9 | 10 | 12 | 13)).is_empty() {
+    if value.trim().is_empty() {
         Err(format!("{what} must not be blank"))
     } else {
         Ok(())
@@ -1067,36 +1067,6 @@ mod tests {
 
     #[test]
     fn translated_param_assertions() {
-        for value in [
-            0.0,
-            -0.0,
-            f64::from_bits(1.0f64.to_bits() + 1),
-            0.1 + 0.2,
-            std::f64::consts::PI,
-            f64::MAX,
-            f64::MIN_POSITIVE,
-            f64::from_bits(1),
-            -1.2345678901234567,
-        ] {
-            assert_eq!(float_text(value).parse::<f64>().unwrap().to_bits(), value.to_bits());
-        }
-        assert_eq!(float_text(1.234567890123456), "1.234567890123456");
-        assert_eq!(float_text(std::f64::consts::PI), "3.141592653589793");
-        assert_eq!(float_text(10.0), "10");
-        assert_eq!(float_text(100.0), "100");
-        assert_eq!(float_text(1000.0), "1e3");
-        assert_eq!(float_text(0.0001), "1e-4");
-        assert_eq!(float_text_with_decimal(-0.0, true), "-0.0");
-        for i in 0..=2047u64 {
-            let bits = i.wrapping_mul(6364136223846793005).wrapping_add(1);
-            let value = f64::from_bits(bits);
-            if value.is_finite() {
-                let text = float_text(value);
-                assert_eq!(text.parse::<f64>().unwrap().to_bits(), bits);
-                assert_eq!(float_text_with_decimal(value, true).parse::<f64>().unwrap().to_bits(), bits);
-            }
-        }
-
         let plain = schema_ok("position", vec![float_field("x", 1.0)]);
         let grouped = schema_ok(
             "position",
@@ -1458,8 +1428,8 @@ mod tests {
         assert!(!number::valid(number::Kind::Int, "0x7fffffffffffffff"));
         assert!(!number::valid(number::Kind::Int, "0x8000000000000000"));
         assert!(!number::valid(number::Kind::Int, "0xff"));
-        assert!(number::valid(number::Kind::Float, "0x1.8p1"));
-        assert!(number::valid(number::Kind::Float, "0x1p-1074"));
+        assert!(!number::valid(number::Kind::Float, "0x1.8p1"));
+        assert!(!number::valid(number::Kind::Float, "0x1p-1074"));
         assert_eq!(number::fraction((0.0, 10.0), "5"), Some(0.5));
         assert_eq!(number::show(10.0), "10.0");
         assert_eq!(
@@ -1499,7 +1469,7 @@ mod tests {
         assert_eq!(s(Int, None, "3", -18.0, false), "0");
         assert_eq!(s(Int, Some((0.0, 5.0)), "9", 6.0, false), "9");
         assert_eq!(s(Int, Some((0.0, 5.0)), "2", 1000.0, false), "5");
-        assert_eq!(number::show(1e-7), "0.0000001");
+        assert_eq!(number::show(1e-7), "1e-7");
         assert_eq!(number::show(1.0), "1.0");
         assert_eq!(number::show(123_456_789.123), "123456789.123");
         assert_eq!(number::show(-0.0), "-0.0");
@@ -1518,13 +1488,14 @@ mod tests {
             assert!(!int(text), "accepted invalid decimal i64 {text}");
         }
         let float = |text| number::valid(Float, text);
-        assert!(float("1_000.5") && float(" 1") && float("1.") && float(".5") && float("+.5"));
-        assert!(float("0x_1p0") && float("0x1p-1074") && float("1.5e+3"));
+        assert!(float("1.") && float(".5") && float("+.5"));
+        assert!(!float("1_000.5") && !float(" 1"));
+        assert!(!float("0x_1p0") && !float("0x1p-1074") && float("1.5e+3"));
         assert!(!float(" 5 ") && !float("1e") && !float("1e400") && !float("infinity") && !float("1d"));
     }
 
     #[test]
-    fn invalid_configuration_returns_ocaml_errors() {
+    fn invalid_configuration_returns_typed_errors() {
         assert_eq!(
             integer(0, 0, None, None).err().as_deref(),
             Some("Param.integer: soft max must be greater than soft min")

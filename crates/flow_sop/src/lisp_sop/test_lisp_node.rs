@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/test_lisp_node.ml: the Lisp node's own protocol (its factory node, as the
+//! the Lisp node's own protocol (its factory node, as the
 //! inspector and node menu build it: parameters, rebuilds, cook identity).
 use super::support::*;
 use crate::{lisp_sop, lower, operators};
@@ -205,7 +205,7 @@ fn prepared_bodies_reuse_unchanged_graphs_and_recompile_a_live_state() {
 use rays_math::{mat4, vec3};
 use std::sync::atomic::{AtomicI64, Ordering};
 
-/// OCaml `==` on cooked geometries: the same payload.
+/// Physical identity of cooked geometry payloads.
 fn same(a: &geo::T, b: &geo::T) -> bool {
     geo::data_id(a) == geo::data_id(b)
 }

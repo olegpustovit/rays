@@ -1,7 +1,4 @@
-//! Immutable indexed 3D geometry.
-//!
-//! Packed planes and index arrays are `Arc`s so `same` is identity in constant time; functions
-//! OCaml raised `Invalid_argument` from return `Err(message)`.
+//! Immutable indexed geometry shares Arc planes/indices for constant-time identity and returns validation failures as Result messages.
 use crate::num::{fmax, fmin};
 use rays_math::color;
 use rays_math::vec2;
@@ -191,7 +188,7 @@ pub(crate) fn create_owned_full(
     };
     let colors = colors_attribute(vertex_count, colors);
     let tex_coords = uv_attribute(vertex_count, tex_coords);
-    // OCaml reports the first failing of (normals, colors, tex_coords).
+    // Validate normals, then colors, then texture coordinates; the first failure wins.
     let normals = normals?;
     let colors = colors?;
     let tex_coords = tex_coords?;
@@ -372,8 +369,7 @@ fn recalculate_host_normals(mesh: &Mesh) -> Mesh {
         }
         mode::Points | mode::Lines | mode::Line_strip | mode::Line_loop => {}
     }
-    // ponytail: sequential; the OCaml loop was parallel with identical results, add a chunked
-    // parallel fill when the parallel crate gets a safe disjoint-write helper.
+    // ponytail: normal generation is serial; use shared disjoint ranges if normalization becomes measurable.
     let (mut ox, mut oy, mut oz) = (Vec::with_capacity(vertex_count), Vec::with_capacity(vertex_count), Vec::with_capacity(vertex_count));
     for index in 0..vertex_count {
         let (x, y, z) = (nx[index], ny[index], nz[index]);
@@ -491,7 +487,7 @@ pub mod view {
         super::create_packed_arcs(mode_, indices, normals, colors, tex_coords, vertices)
     }
 
-    /// Arguments of `create_device`; unnamed ones default as in OCaml.
+    /// create_device options use the declared defaults for omitted values.
     #[derive(Default)]
     pub struct device_args {
         pub mode: Option<mode>,

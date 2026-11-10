@@ -1,4 +1,3 @@
-//! Port of crates/rdk/ops (dune library rdk_ops). One module per non-empty OCaml file; empty OCaml modules are omitted.
 pub(crate) mod attribute_blur;
 pub(crate) mod attribute_interpolate;
 pub mod attribute_lifecycle;

@@ -526,8 +526,7 @@ mod tests {
 
 #[cfg(test)]
 mod sources_tests {
-    //! Port of lib/rdk/test_rdk_sources.ml's pattern assertions. Rust has no OCaml minor heap,
-    //! but repeated compilation retains the source regression's full iteration count.
+    //! Repeated pattern compilation preserves the full regression iteration count.
     use super::*;
 
     #[test]

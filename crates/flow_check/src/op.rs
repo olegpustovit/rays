@@ -272,7 +272,7 @@ fn builtin_packed_kind(op:&Op)->Option<PackedKind>{
     primitive.or_else(||Some(match op.name.as_str(){"length"=>PackedKind::Length,"dot"=>PackedKind::Dot,"cross"=>PackedKind::Cross,"normalize"=>PackedKind::Normalize,"scene/trace"=>PackedKind::Trace,"exact"=>PackedKind::Exact,"nth"=>PackedKind::Gather,n if n.starts_with("gpu/")=>PackedKind::Stage,_ if op.live=>PackedKind::Frame,_=>PackedKind::ConstantOnly}))
 }
 
-// OCaml compares physically; a clone shares every Arc, so equal fields and the same closures are the same declaration.
+// Clones share every Arc; equal fields and identical closures identify the same operator declaration.
 fn same_op(a:&Op,b:&Op)->bool{a.name==b.name&&a.ctx==b.ctx&&a.signature==b.signature&&a.any_num==b.any_num&&a.choices==b.choices&&a.shape==b.shape&&a.live==b.live&&a.category==b.category&&Arc::ptr_eq(&a.out,&b.out)&&Arc::ptr_eq(&a.check,&b.check)&&Arc::ptr_eq(&a.body,&b.body)&&a.out_args.is_some()==b.out_args.is_some()&&a.packed_extension==b.packed_extension&&a.arithmetic.is_some()==b.arithmetic.is_some()}
 use crate::ray_host;
 
@@ -490,9 +490,8 @@ fn bytes_split(source:&[u8],separator:&[u8])->Result<TextArray,Diagnostic>{
     while i+separator.len()<=source.len(){if &source[i..i+separator.len()]==separator{out.try_push(&source[start..i]).map_err(|_|array_memory_error())?;i+=separator.len();start=i}else{i+=1}}
     out.try_push(&source[start..]).map_err(|_|array_memory_error())?;Ok(out)
 }
-fn trim_ascii(bytes:&[u8])->&[u8]{let mut start=0;let mut end=bytes.len();while start<end&&bytes[start].is_ascii_whitespace(){start+=1}while end>start&&bytes[end-1].is_ascii_whitespace(){end-=1}&bytes[start..end]}
 fn parse_float_token(bytes:&[u8])->Option<f64>{
-    let s=std::str::from_utf8(trim_ascii(bytes)).ok()?;let b=s.as_bytes();let n=b.len();let i=usize::from(n>0&&(b[0]==b'+'||b[0]==b'-'));
+    let s=std::str::from_utf8(bytes.trim_ascii()).ok()?;let b=s.as_bytes();let n=b.len();let i=usize::from(n>0&&(b[0]==b'+'||b[0]==b'-'));
     let digits=|mut j:usize|{while j<n&&b[j].is_ascii_digit(){j+=1}j};
     let a=digits(i);let end=if a<n&&b[a]==b'.'{digits(a+1)}else{a};let mantissa=a>i||end>a+1;
     if !mantissa{return None}
@@ -501,7 +500,7 @@ fn parse_float_token(bytes:&[u8])->Option<f64>{
     let v=s.parse::<f64>().ok()?;v.is_finite().then_some(v)
 }
 fn parse_int_token(bytes:&[u8])->Option<i64>{
-    let s=std::str::from_utf8(trim_ascii(bytes)).ok()?;let b=s.as_bytes();let i=usize::from(!b.is_empty()&&(b[0]==b'+'||b[0]==b'-'));
+    let s=std::str::from_utf8(bytes.trim_ascii()).ok()?;let b=s.as_bytes();let i=usize::from(!b.is_empty()&&(b[0]==b'+'||b[0]==b'-'));
     if i==b.len()||!b[i..].iter().all(u8::is_ascii_digit){return None}
     s.strip_prefix('+').unwrap_or(s).parse::<i64>().ok()
 }
@@ -735,7 +734,7 @@ fn stage_ops()->Vec<Op>{
     });
     let mut trace=value_op("scene/trace",vec![("scene",Ty::Int),("origin",Ty::Vec3),("dir",Ty::Vec3),("tmin",Ty::Float),("tmax",Ty::Float),("time",Ty::Float)],vec![],None,vec![],scene_ty,"Scene",body);trace.live=true;ops.insert(0,trace);ops
 }
-// OCaml `=`: structural, left to right; it raises only when it meets two closures, so `(equal? f nil)` is false.
+// Structural equality visits left to right and refuses only when two closures meet; equal?(function,nil) is false.
 fn eq_fn(a:&Value,b:&Value)->Option<bool>{
     let fields=|f:&value::Record,g:&value::Record|{if f.len()!=g.len(){return Some(false)}for((n,x),(m,y))in f.iter().zip(g){if n!=m{return Some(false)}match eq_fn(x,y){Some(true)=>{}other=>return other}}Some(true)};
     match(a,b){
@@ -831,7 +830,7 @@ fn list_out(index:usize)->Out{Arc::new(move |ts|match ts.get(index){Some(Ty::Lis
 fn text_ops()->Vec<Op>{
     let mut ops=Vec::new();
     ops.push(value_op("text/blank?",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Bool,"Text",Arc::new(|_,_,a|Ok(Value::Bool(text_bytes(a.get_arg("text")?)?.iter().all(u8::is_ascii_whitespace))))));
-    ops.push(value_op("text/trim",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;let mut start=0;let mut end=b.len();while start<end&&b[start].is_ascii_whitespace(){start+=1}while end>start&&b[end-1].is_ascii_whitespace(){end-=1}Ok(Value::Text((&b[start..end]).into()))})));
+    ops.push(value_op("text/trim",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;Ok(Value::Text(b.trim_ascii().into()))})));
     ops.push(value_op("text/lower",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_bytes(a.get_arg("text")?)?.iter().map(u8::to_ascii_lowercase).collect::<std::sync::Arc<[u8]>>())))));
     ops.push(value_op("text/repr",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_repr(text_bytes(a.get_arg("text")?)?).into())))));
     ops.push(value_op("text/split",vec![("text",Ty::Text),("separator",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let source=text_bytes(a.get_arg("text")?)?;let separator=text_bytes(a.get_arg("separator")?)?;if separator.is_empty(){return Err(fail("E_TEXT_SEPARATOR","text/split needs a nonempty separator."))}Ok(Value::Text_array(Arc::new(bytes_split(source,separator)?)))})));
@@ -865,7 +864,7 @@ fn list_ops()->Vec<Op>{
     }
     ops.push(with_defaults(mk("rest",context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_out(0),Arc::new(|_,_,a|{let xs=value::list_arg(a.get_arg("list")?)?;Ok(Value::List(Arc::new(if xs.is_empty(){xs.to_vec()}else{xs[1..].to_vec()})))})),"List"));
     ops.push(with_defaults(mk("nth",context::value(),signature(vec![("list",list(Ty::Any)),("index",Ty::Int)],vec![],None,vec![]),list_element_out(0),Arc::new(|_,_,a|{
-        let raw=a.get_arg("index")?;if let Value::Float(x)=raw{if x.fract()!=0.{return Err(failf("E_LIST_RANGE",format!("nth index {} is not a whole number.",value::general(*x))))}}
+        let raw=a.get_arg("index")?;if let Value::Float(x)=raw{if x.fract()!=0.{return Err(failf("E_LIST_RANGE",format!("nth index {} is not a whole number.",param::float_text(*x))))}}
         let i=int_of(raw)?;let xs=value::list_arg(a.get_arg("list")?)?;if i<0||i as u128>=xs.len() as u128{return Err(failf("E_LIST_RANGE",format!("nth index {i} is out of range for a list of length {}.",xs.len())))}Ok(xs[i as usize].clone())
     })),"List"));
     ops.push(with_defaults(mk("reverse",context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_out(0),Arc::new(|_,_,a|{let xs=value::list_arg(a.get_arg("list")?)?;Ok(Value::List(Arc::new(xs.iter().rev().cloned().collect())))})),"List"));
@@ -1031,15 +1030,13 @@ mod tests{
         assert_eq!(all().iter().filter(|op|op.name=="ui/graph").count(),1);
     }
 }
-// The declarations (name, context, category, shape, signature, choices, flags) are byte-equal to
-// the OCaml table's: golden/ops.txt is `zz_flowcheck_dump/dump.ml` run over `Op.all` (kept in
-// ../flow_eval/golden/oracle/dump.ml.txt).
+// Owned golden/ops.txt pins declaration names, contexts, categories, shapes, signatures, choices and flags.
 #[cfg(test)]
-mod ocaml_table {
+mod operator_schema {
     use super::*;
     fn sg(l:&[(Symbol,Ty)])->String{l.iter().map(|(n,t)|format!("{}:{}",n,ty::to_string(t))).collect::<Vec<_>>().join(",")}
     #[test]
-    fn declarations_match_the_ocaml_table() {
+    fn declarations_match_owned_schema() {
         let mut out=String::new();
         for o in all(){
             out.push_str(&format!("{}|{}|{}|{}|pos={}|opt={}|rest={}|kw={}|choices={}|any={}|live={}|ar={}|pk={}\n",o.name,context::name(o.ctx),o.category,

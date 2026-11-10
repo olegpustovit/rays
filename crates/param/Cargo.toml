@@ -9,4 +9,3 @@ name = "param"
 path = "src/lib.rs"
 
 [dependencies]
-cfmt = { path = "../cfmt" }

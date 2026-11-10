@@ -1,7 +1,4 @@
-//! Port of lib/flow_gpu/test_emit.ml, the Metal-printer half: shared operations, golden
-//! arithmetic/select/seeded fBm kernels (crates/flow_gpu/goldens/*.metal, byte for byte) and typed
-//! refusals. The WGSL comparisons (flow_web), `qualify_workspace` and the CPU-execution comparisons of
-//! the OCaml file belong to flow_web and flow_ir and are not repeated here.
+//! Shared Metal operations, seeded arithmetic/noise kernels and typed refusals compare with owned goldens. Web and CPU qualification lives in their owning crates.
 use flow_check::op;
 use flow_ir::core_ir::region::{Instruction, Loop};
 use flow_ir::kernel_layout::{self, PlanOptions, Visit};

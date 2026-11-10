@@ -1,5 +1,5 @@
 //! Binary SPIR-V compute emission from the shared kernel layout, and Vulkan raster/compute stage
-//! modules (port of lib/flow_shader/spirv.ml). Opcodes and operands follow the Khronos unified
+//! modules. Opcodes and operands follow the Khronos unified
 //! SPIR-V grammar: <https://registry.khronos.org/SPIR-V/>.
 //!
 //! Id allocation order is part of the output: nested calls are bound to temporaries left to right

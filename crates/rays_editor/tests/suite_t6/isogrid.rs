@@ -1,7 +1,4 @@
-//! test_isogrid_deferred.ml: a real 64^3 workspace; three complete editor frames while the cook worker holds a
-//! finished but unpublished cook. The OCaml barrier sits in `prepare` on the worker; here `prepare` runs on the
-//! initial domain, so the barrier is the worker's own clock read after the cook (`async_cook` times every cook with
-//! it), taken only on a non-main thread. Conditions synchronize the test; no sleep or clock decides it.
+//! A finished cook is held before publication by the worker's own clock read. Conditions synchronize the barrier; sleeps and wall-clock timing never decide readiness.
 #![allow(dead_code, unused_imports)]
 use std::sync::{Arc, Condvar, Mutex};
 

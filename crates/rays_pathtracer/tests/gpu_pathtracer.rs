@@ -1,11 +1,4 @@
-//! Port of lib/rays_pathtracer/test_pathtracer.ml. The OCaml `run` is one long function; it is split here
-//! into named cases (each its own process under `cargo t`, each under 5 s): `lit` (determinism, preview,
-//! camera moves), `instanced` (instancing against the transformed mesh, queue_mesh, handles), `lens`,
-//! `residency`, `cap`, `furnace`, `materials_motion`, `strands`. Differences from the OCaml:
-//! - geometry comes from tests/common/meshes.rs (no rdk_test_support port yet);
-//! - resolutions and sample counts are shrunk to stay under the 5 s budget (noted per case);
-//! - `exact_m1` (byte-for-byte digests of two frames recorded on an Apple M1) is not ported: the digests
-//!   are of the OCaml/RDK geometry, which these generators do not reproduce.
+//! Hardware path-tracer cases split determinism, instancing, lens, residency, sample cap, furnace, motion/materials and strands into budgeted tests with owned geometry fixtures.
 use crate::common;
 use common::meshes;
 use common::pt::{self, frame, frames, get, pixels, rgb};
@@ -152,8 +145,7 @@ fn instanced() {
     }
     let initial_handles = pt::live_handles();
     let mut l = lit_scene();
-    // one material class throughout (the OCaml scene mixes a metal sphere with the matte instances): every
-    // distinct shape costs a kernel front end, and this case needs only the instanced and the flat one
+    // Use one material class so this instancing test compiles only the required flat and instanced kernels.
     l.scene.objects = vec![(l.sphere.clone(), pt::material(rgb(0.7, 0.5, 0.3))), (l.floor.clone(), matte())];
     let mut tracer = get(p::create(&pt::options(2), 48, 32, &l.scene));
     let camera = lit_camera();
@@ -199,8 +191,7 @@ fn instanced() {
     println!("pathtracer: instancing, queue_mesh, stable handles ok");
 }
 
-/// An instance structure only references its BLAS: without declaring it read each dispatch, the device
-/// evicts it and later frames get darker. (Shrunk: 160x160 and 20 frames; OCaml 320x320 and 60.)
+/// Every dispatch declares BLAS reads through its instance structure; later frames must not darken through residency eviction.
 fn residency() {
     if !common::gpu() {
         return;
@@ -235,8 +226,7 @@ fn residency() {
     println!("pathtracer: instance structure stays resident");
 }
 
-/// A sample cap reached at a larger size: every frame completes with no device loss (validation is fatal),
-/// the film changed from its first frame and settled toward its mean. (Shrunk to 320x180; OCaml 960x540.)
+/// A capped progressive film remains device-valid, changes from its initial frame and converges toward its mean.
 fn cap() {
     if !common::gpu() {
         return;

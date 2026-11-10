@@ -1,9 +1,4 @@
-//! Port of lib/flow_sop/test_planes.ml: `sop/attr_planes` reads any float-family attribute as x/y/z/w
-//! planes with a cook-time width; `sop/with_planes` writes them back with the matching storage type.
-//!
-//! One workspace per owner writes all four widths back under new names (the OCaml test lowers once per
-//! owner, name, tier and setting); the refusals share one workspace with a graph each. The full OCaml
-//! matrix runs: reference and CPU tiers, (domains, grain) (1, 97), (4, 1), (4, 4096).
+//! Read/write every float-plane width under matching storage types. Validate reference/CPU equality across the exact domain/grain matrix without redundant lowering.
 use super::support::*;
 use crate::{lisp_sop, lower};
 use rdk_core::attribute::{self, Owner, Storage};

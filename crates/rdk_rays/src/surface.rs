@@ -1,9 +1,4 @@
-//! Prepared SOP surfaces. Material batches share one converted mesh, and explosion moves complete
-//! pieces before any material split.
-//!
-//! Gaps against OCaml: a device mesh's host-copy request returns its conversion failure as a `Result`;
-//! `scene3` returns it as a [`ConversionError`] value.
-//! `last_topology` keys on the topology's `data_id` where OCaml compared physically.
+//! Prepared surfaces share converted material meshes and explode whole pieces before material splitting. Conversion errors stay typed; last_topology keys by topology data ID.
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -144,7 +139,7 @@ fn valid_tuple(a: &Option<packed::float4::T>) -> bool {
     })
 }
 
-/// OCaml's structural hash and equality see 0. and -0. as one key.
+/// Numeric cache keys normalize 0 and -0 to the same value.
 fn key_bits(values: [f64; 8]) -> [u64; 8] {
     values.map(|v| (v + 0.0).to_bits())
 }

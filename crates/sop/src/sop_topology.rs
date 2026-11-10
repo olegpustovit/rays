@@ -1,5 +1,4 @@
-//! Port of lib/sop/sop_topology.ml: the topology and Boolean nodes, declared once (metadata,
-//! fields, parameters, operator). One `pub mod` per OCaml module, in the OCaml order.
+//! Topology and Boolean nodes declare metadata, fields, parameters and operators once in authored order.
 use std::sync::Arc;
 
 use param::{Kind, Value};
@@ -43,7 +42,7 @@ fn done(result: Result<geometry::T, rdk_core::error::T>) -> Result<GeometryCooke
 }
 
 fn missing(code: &str, what: &str, name: &str) -> Diagnostic {
-    support::diagnostic(code, &format!("{what} {}", node::ocaml_quote(name)))
+    support::diagnostic(code, &format!("{what} {}", rdk_core::attribute::quote(name)))
 }
 
 /// A named group of `owner` looked up in `geometry`, or the diagnostic `code`: "`what` "name"".
@@ -106,11 +105,6 @@ fn vs(values: &[Value], index: usize) -> String {
         Value::Text(value) => String::from_utf8_lossy(value).into_owned(),
         _ => unreachable!("parameter {index} is not text"),
     }
-}
-
-/// OCaml `String.trim t = ""`.
-fn blank(text: &str) -> bool {
-    text.trim().is_empty()
 }
 
 /// `List.length l <> List.length (List.sort_uniq compare l)`.
@@ -539,7 +533,7 @@ pub mod remesh {
         if p_smoothing < 0. || p_smoothing > 1. {
             return refuse("remesh", "smoothing must be finite and within [0,1]");
         }
-        if p_preserve_uv_seams && blank(&p_uv_attribute) {
+        if p_preserve_uv_seams && (&p_uv_attribute).trim().is_empty() {
             return refuse("remesh", "empty UV attribute name");
         }
         Ok(())
@@ -740,7 +734,7 @@ pub mod clean {
             &p_primitive_groups,
             &p_edge_groups,
         ] {
-            if !blank(pattern) {
+            if !(pattern).trim().is_empty() {
                 support::validate_parameter_pattern("sop/clean", pattern)?;
             }
         }
@@ -874,7 +868,7 @@ pub mod join_curves {
         if !p_tolerance.is_finite() || p_tolerance < 0. {
             return refuse("join_curves", "tolerance must be finite and nonnegative");
         }
-        if support::decode_curve_join_picks(&p_picked_ends)?.is_some() && (!blank(&p_group) || p_connect_closest_ends) {
+        if support::decode_curve_join_picks(&p_picked_ends)?.is_some() && (!(&p_group).trim().is_empty() || p_connect_closest_ends) {
             return refuse("join_curves", "picked ends are mutually exclusive with group and closest ordering");
         }
         Ok(())
@@ -935,7 +929,7 @@ pub mod join_curves {
                         None => {
                             return Err(support::diagnostic_with(
                                 "missing_group",
-                                &format!("join_curves could not find primitive group {}", node::ocaml_quote(name)),
+                                &format!("join_curves could not find primitive group {}", rdk_core::attribute::quote(name)),
                                 None,
                                 vec!["Create the primitive group before Curve Join".to_owned()],
                             ));
@@ -1127,7 +1121,7 @@ pub mod poly_cut {
         if p_threshold < 0. {
             return refuse("poly_cut", "threshold must be nonnegative");
         }
-        if p_detection != PolyCutDetection::All && blank(&p_attribute) {
+        if p_detection != PolyCutDetection::All && (&p_attribute).trim().is_empty() {
             return refuse("poly_cut", "attribute must be nonblank");
         }
         if p_detection == PolyCutDetection::Crossing && p_attribute == "P" {
@@ -1611,7 +1605,7 @@ pub mod boolean_fracture {
         if p_cleanup_max_batches < 1 {
             return refuse("boolean_fracture", "cleanup batches must be positive");
         }
-        if blank(&p_piece_attribute) {
+        if (&p_piece_attribute).trim().is_empty() {
             return refuse("boolean_fracture", "piece attribute must be nonblank");
         }
         Ok(())
@@ -1862,13 +1856,13 @@ pub mod fuse {
             return refuse("fuse", "tolerances must be finite and nonnegative");
         }
         let specified = p_targeting == FuseTargeting::SpecifiedPoints;
-        if specified && blank(&p_target_attribute) {
+        if specified && (&p_target_attribute).trim().is_empty() {
             return refuse("fuse", "specified targets require an attribute name");
         }
-        if blank(&p_match_attribute) && (p_match_condition != MatchCondition::EqualAttributeValues || p_match_tolerance != 0.) {
+        if (&p_match_attribute).trim().is_empty() && (p_match_condition != MatchCondition::EqualAttributeValues || p_match_tolerance != 0.) {
             return refuse("fuse", "match condition and tolerance require a match attribute");
         }
-        if specified && (!blank(&p_radius_attribute) || !blank(&p_match_attribute)) {
+        if specified && (!(&p_radius_attribute).trim().is_empty() || !(&p_match_attribute).trim().is_empty()) {
             return refuse("fuse", "specified targets do not accept radius or match attributes");
         }
         if p_keep_fused_points && !p_fuse_points {
@@ -1877,7 +1871,7 @@ pub mod fuse {
         if matches!(
             p_position,
             Position::WeightedAverage | Position::WeightedSum | Position::MinimumWeight | Position::MaximumWeight
-        ) && blank(&p_weight_attribute)
+        ) && (&p_weight_attribute).trim().is_empty()
         {
             return refuse("fuse", "weighted position reduction requires a weight attribute");
         }
@@ -2094,7 +2088,7 @@ pub mod subdivide_cracks {
         if !p_crease_weight.is_finite() || p_crease_weight < 0. {
             return refuse("subdivide_cracks", "crease weight must be finite and nonnegative");
         }
-        if !p_generate_resulting_creases && !blank(&p_resulting_crease_group) {
+        if !p_generate_resulting_creases && !(&p_resulting_crease_group).trim().is_empty() {
             return refuse("subdivide_cracks", "resulting crease group requires generated creases");
         }
         Ok(())
@@ -2156,7 +2150,7 @@ pub mod subdivide_cracks {
         let p_treat_curves_as_independent = vb(values, 17);
         let p_recompute_point_normals = vb(values, 18);
         let creases = inputs[1].clone();
-        if creases.is_none() && !blank(&p_crease_group) {
+        if creases.is_none() && !(&p_crease_group).trim().is_empty() {
             return Err("sop/subdivide_cracks: crease group requires a crease input".to_owned());
         }
         let cracks = match p_cracks {
@@ -2597,7 +2591,7 @@ pub mod triangulate_2d {
         {
             return refuse("triangulate_2d", "plane normal must be nonzero");
         }
-        if p_projection == Triangulate2dProjection::Attribute && blank(&p_point_attribute) {
+        if p_projection == Triangulate2dProjection::Attribute && (&p_point_attribute).trim().is_empty() {
             return refuse("triangulate_2d", "point attribute must be nonblank");
         }
         Ok(())

@@ -1,4 +1,4 @@
-//! Port of lib/sop/shapes.ml: shape nodes, declared once. This wave ports `null` and `switch`, the
+//! shape nodes, declared once. This wave ports `null` and `switch`, the
 //! worked examples of PORTING.md; clip, exploded_view, pack_instances, soft_transform and ray follow.
 use std::sync::Arc;
 
@@ -195,10 +195,6 @@ fn owner_spec(folder: &'static str) -> Spec {
 }
 fn all_finite(values: &[f64]) -> bool {
     values.iter().all(|v| v.is_finite())
-}
-/// OCaml `String.trim` (space, \t, \n, \r, \012).
-fn trim(text: &str) -> &str {
-    text.trim_matches([' ', '\t', '\n', '\r', '\x0c'])
 }
 fn vec3(x: f64, y: f64, z: f64) -> rays_math::vec3::T {
     rays_math::vec3::create(x, y, z)
@@ -420,7 +416,7 @@ pub mod exploded_view {
         if !all_finite(&[amount, sx, sy, sz, noise_amount, noise_frequency]) || noise_frequency < 0.0 {
             return Err("sop/exploded_view: controls must be finite and noise frequency nonnegative".to_owned());
         }
-        if trim(&piece).is_empty() {
+        if (&piece).trim().is_empty() {
             return Err("sop/exploded_view: piece attribute must be nonblank".to_owned());
         }
         Ok(())
@@ -676,13 +672,13 @@ pub mod soft_transform {
         if p_radius == 0.0 && (p_metric != SoftTransformMetric::Attribute || p_apply_rolloff) {
             return refuse("rolloff radius must be positive");
         }
-        if p_metric == SoftTransformMetric::Attribute && trim(&p_metric_attribute).is_empty() {
+        if p_metric == SoftTransformMetric::Attribute && (&p_metric_attribute).trim().is_empty() {
             return refuse("metric attribute must be nonblank");
         }
         if p_metric == SoftTransformMetric::Attribute && p_metric_attribute == "P" {
             return refuse("metric attribute requires scalar storage");
         }
-        if trim(&p_falloff_attribute) == "P" {
+        if (&p_falloff_attribute).trim() == "P" {
             return refuse("falloff output must not replace P");
         }
         match transform_ops::compose_transform(&compose_params(values)) {
@@ -746,7 +742,7 @@ pub mod soft_transform {
         );
         // [@@sop.node_facts]: the attribute names come from the parameters.
         let named = |extra: &str| -> Vec<String> {
-            ["P", "N", extra].into_iter().filter(|n| !trim(n).is_empty()).map(str::to_owned).collect()
+            ["P", "N", extra].into_iter().filter(|n| !(n).trim().is_empty()).map(str::to_owned).collect()
         };
         let facts = node::Facts {
             elementwise: Elementwise::Points,
@@ -920,7 +916,7 @@ pub mod ray {
                 RayDirection::Vector if dx == 0.0 && dy == 0.0 && dz == 0.0 => {
                     return refuse("direction must be nonzero");
                 }
-                RayDirection::Attribute if trim(&p_direction_attribute).is_empty() => {
+                RayDirection::Attribute if (&p_direction_attribute).trim().is_empty() => {
                     return refuse("direction attribute must be nonblank");
                 }
                 _ => {}
@@ -952,11 +948,11 @@ pub mod ray {
         }
         let patterns = [&p_point_pattern, &p_vertex_pattern, &p_primitive_pattern, &p_detail_pattern];
         for pattern in patterns {
-            if !trim(pattern).is_empty() {
+            if !(pattern).trim().is_empty() {
                 support::validate_parameter_pattern("sop/ray", pattern)?;
             }
         }
-        if p_match_groups && [&p_point_pattern, &p_vertex_pattern, &p_primitive_pattern].iter().all(|n| trim(n).is_empty()) {
+        if p_match_groups && [&p_point_pattern, &p_vertex_pattern, &p_primitive_pattern].iter().all(|n| (n).trim().is_empty()) {
             return refuse("group interpolation requires a pattern");
         }
         Ok(())
@@ -1023,7 +1019,7 @@ pub mod ray {
                         rdk_core::geometry::find_group(rdk_core::group::Owner::Primitive, name, &inputs[1]).ok_or_else(|| {
                             support::diagnostic(
                                 "missing_collision_group",
-                                &format!("ray could not find collision primitive group {}", node::ocaml_quote(name)),
+                                &format!("ray could not find collision primitive group {}", rdk_core::attribute::quote(name)),
                             )
                         })?,
                     ),

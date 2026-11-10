@@ -1,4 +1,3 @@
-// Port of lib/flow_ir/test_grade_index.ml.
 use flow_syntax::symbol::Symbol;
 use crate::flow_ir::executor;
 use crate::test_support::*;
@@ -183,8 +182,7 @@ fn check_bodies(bodies: &[&str]) {
 
 #[test]
 fn grade_programs_match_the_reference() {
-    // Sizes: OCaml used 32769 / 5001 rows; 2049 (1100 for the gather-style bodies) keeps one or two 1024-lane block
-    // crossings within the 5 s debug budget.
+    // Fixtures cross 1024-lane blocks while staying within the per-case debug budget.
     check_bodies(&[
         "(array/grade (map (fn [(i : int)] (int/mod (int/add i (frame/index)) 7)) (array/range 2049 :type int)) :descending true)",
         "(array/grade (map (fn [x] (if (> t 0.) x (- 0. x))) (array/range 2049)))",

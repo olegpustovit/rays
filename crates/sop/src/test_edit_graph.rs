@@ -1,6 +1,4 @@
-//! Port of lib/sop/test_edit_graph.ml. Lisp-built nodes are replaced by `snapshot` sources, the
-//! ported `null` factory and a small N-input pass-through. Not ported: the "factory metadata
-//! sharing" block (it asserts OCaml physical sharing of immutable default values).
+//! Editable-graph tests use immutable snapshot sources, null and N-input pass-through factories.
 use std::sync::Arc;
 
 use crate::edit_graph::{self, InputRequirement::*};

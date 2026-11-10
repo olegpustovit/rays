@@ -1,4 +1,3 @@
-// Port of lib/flow_graph/test_string_bytes.ml.
 use crate::flow_edit::{apply_checked, ArgKey, Op};
 use crate::projection as p;
 use crate::test_support::*;

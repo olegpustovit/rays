@@ -1,4 +1,4 @@
-//! Port of lib/rays_editor/navigator.ml(i): the Outline panel, a map of the document. A search
+//! the Outline panel, a map of the document. A search
 //! field, then a section per kind of graph (the scene with its objects and their visible and render
 //! flags, geometry and materials with how many graphs use each, the World, the layouts), the active
 //! graph unfolded into its loops and bindings, the reusable functions and macros, the active graph's
@@ -297,7 +297,7 @@ fn zone_glyph(kind: p::ZoneKind) -> &'static str {
 
 fn number(form: &S) -> Option<f64> {
     match &form.node {
-        Node::Num(text) => cfmt::parse_ocaml_float(form.name(*text)),
+        Node::Num(text) => (form.name(*text)).parse::<f64>().ok(),
         _ => None,
     }
 }
@@ -1023,20 +1023,20 @@ fn input_sliders(
                 let show = move |v: f64| if integer { format!("{}", v.round() as i64) } else { cfmt::g(v, 3) };
                 // a scrub from the value at the press, like a card's field: 1 per 6 points for an integer, a hundredth of the
                 // magnitude per point for a float, Shift is finer
-                let scrub: Rc<dyn Fn(&str, f64, bool) -> String> = Rc::new(move |origin, dx, shift| match cfmt::parse_ocaml_float(origin) {
+                let scrub: Rc<dyn Fn(&str, f64, bool) -> String> = Rc::new(move |origin, dx, shift| match (origin).parse::<f64>().ok() {
                     None => origin.to_owned(),
                     Some(o) if integer => show(o + (dx / if shift { 24.0 } else { 6.0 }).round()),
                     Some(o) => show(o + (dx * 0.01 * o.abs().max(1.0) * if shift { 0.1 } else { 1.0 })),
                 });
                 let text = show(*value);
                 let o = ValueFieldOpts { scrub: Some(scrub), edit: typed_row == Some(k), ..ValueFieldOpts::default() };
-                let valid = move |t: &str| match cfmt::parse_ocaml_float(t) {
+                let valid = move |t: &str| match (t).parse::<f64>().ok() {
                     Some(v) => v.is_finite() && (!integer || v.fract() == 0.0),
                     None => false,
                 };
                 let (changed, _) = ui.value_field((x + 20.0 + label_w, ry + 2.0), w - 32.0 - label_w, 20.0, &o, &valid, &format!("navigator-input-{}-{}", graph, name), &text);
                 if changed != text
-                    && let Some(v) = cfmt::parse_ocaml_float(&changed)
+                    && let Some(v) = (&changed).parse::<f64>().ok()
                 {
                     emit.push(Intent::SetDefault { graph: graph.clone(), input: name.clone(), value: v, integer });
                 }

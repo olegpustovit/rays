@@ -1,4 +1,4 @@
-//! Port of lib/flow_ir/test_support/test_program.ml: compile a body to a packed region through the
+//! compile a body to a packed region through the
 //! real checker, evaluator and `packed::compile_result`.
 use flow_check::catalog::Catalog;
 use flow_check::workspace::{self as W, Path};

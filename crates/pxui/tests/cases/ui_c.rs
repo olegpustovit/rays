@@ -1,6 +1,4 @@
-//! Port of lib/pxui/test_ui.ml, part three: the text-area language, completion, scrub, rewrite and
-//! undo tests, the modal and popup tests, two widgets sharing nothing, the carry, retired
-//! callbacks, retained keys and the text-undo memory ledger.
+//! Text-area editing, completion, scrubbing and rewrite contracts.
 use crate::support::*;
 use crate::ui_b::*;
 use input::{Event, Key, MouseButton, Platform};
@@ -805,8 +803,7 @@ pub fn window_pxui_carry() {
 }
 
 pub fn window_pxui_retired_callbacks() {
-    // A published frame keeps none of its callbacks: every closure a box was given is dropped
-    // (the OCaml test watches the GC; here the payload each closure owns loses its last owner).
+    // Published frames retain no callback payloads: each closure releases its last captured owner after painting.
     let mut ui = Ui::create(Platform::Apple, None, Some(font_path()));
     let held: Vec<Rc<[u8; 32]>> = (0..5).map(|_| Rc::new([b'x'; 32])).collect();
     let seen: Rc<RefCell<[bool; 5]>> = Rc::new(RefCell::new([false; 5]));

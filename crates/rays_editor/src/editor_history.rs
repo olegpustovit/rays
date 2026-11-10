@@ -1,7 +1,4 @@
-//! `Editor_core.History` specialised to the editor's one instance: the present is the editor's
-//! `Document`, an entry is its `Snapshot`.(OCaml's polymorphic history cannot live in `editor_core`
-//! here: `editor_document` depends on `editor_core`.) The present is an `Arc`, so physical
-//! equality of OCaml is `Arc::ptr_eq`.
+//! History retains Arc<Document> presents and compact snapshots; Arc::ptr_eq identifies unchanged documents.
 #![allow(non_camel_case_types)]
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -18,10 +15,7 @@ pub enum Merge {
     Repair,
 }
 
-/// The present is a live value behind an [`Arc`]; an entry keeps only what [`keep`] takes
-/// from it. Arc identity stands in for OCaml's physical equality(`==`).
-///
-/// [`keep`]: t::keep
+/// A live Arc present owns the document; history entries retain only keep() snapshots.
 pub struct EditorHistory {
     /// Oldest first; the newest entry is at the back.
     past: VecDeque<(Arc<E>, String, i64)>,
@@ -40,8 +34,7 @@ pub struct EditorHistory {
     merge: Option<Merge>,
 }
 
-// ponytail: every field is an Arc or a plain value, so a clone is cheap and undo/redo can
-// return the old history unchanged on Error without OCaml's immutable sharing.
+// ponytail: cheap Arc/plain-value clones preserve the prior history unchanged after a failed undo/redo.
 impl Clone for EditorHistory {
     fn clone(&self) -> Self {
         EditorHistory {
@@ -202,9 +195,7 @@ fn amend(value: Arc<A>, mut h: EditorHistory) -> EditorHistory {
     h
 }
 
-/// `Step` adds an undo entry; matching `Gesture` keys merge until [`seal`]; matching `Burst`
-/// keys merge while edits stay within the window; `Repair` changes the current entry without
-/// adding a step. `label` names the entry(OCaml's default is "Edit").
+/// Step adds an entry; equal Gesture keys merge until seal; equal Burst keys merge within the time window; Repair replaces the current entry. label defaults to Edit.
 pub fn record(merge: Merge, label: &str, value: Arc<A>, h: EditorHistory) -> EditorHistory {
     let continuation = match(&merge, &h.merge) {
        (Merge::Repair, _) => true,
@@ -319,7 +310,7 @@ pub fn restart(value: Arc<A>, h: EditorHistory) -> EditorHistory {
     h
 }
 
-/// The present itself (OCaml hands out the value; its identity is the `Arc`).
+/// Return the retained present Arc.
 pub fn present_arc(h: &EditorHistory) -> Arc<A> {
     h.present.clone()
 }

@@ -313,8 +313,7 @@ fn run(
     Ok(output)
 }
 
-/// Returns flattened token triples. The outer `Err` is a cancellation (an OCaml exception); the
-/// inner `Err` is the OCaml `result` error message.
+/// The outer Result carries cancellation; the inner Result carries a triangulation failure message.
 pub fn triangulate(
     cancel_value: Option<&cancel::T>,
     point: &dyn Fn(i64) -> (f64, f64),

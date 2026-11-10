@@ -1,4 +1,4 @@
-//! Port of the pure sections of lib/pxui_shell/test_shell.ml: tree keys, the key sheet, scrubbing.
+//! tree keys, the key sheet, scrubbing.
 use crate::tree::{self as T, Command, Intent, Row};
 use crate::which_key;
 use editor_core::command;
@@ -69,7 +69,7 @@ fn scrub_and_show() {
         N::show(1e-7),
         N::show(0.5),
     ];
-    assert_eq!(got.to_vec(), vec!["1.5", "1", "1234567.99", "5", "2.0", "9", "0.0000001", "0.5"]);
+    assert_eq!(got.to_vec(), vec!["1.5", "1", "1234567.99", "5", "2.0", "9", "1e-7", "0.5"]);
 }
 
 #[test]

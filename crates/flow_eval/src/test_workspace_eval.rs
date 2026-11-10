@@ -1,5 +1,3 @@
-// Port of lib/flow/test_workspace_eval.ml (part 1: helpers, fixtures, value cases, functions,
-// lists, patterns, records). Each OCaml `t "name"` case is one #[test] here.
 use std::sync::Arc;
 use crate::*;
 use crate::test_workspace::{base_catalog, bad_text, good, parse, run_in, run_src, show_ds, errors};
@@ -292,7 +290,7 @@ fn cond_case_str_macros_bypass() {
     is(&value("(case 9 1 10 :else 0)"), Value::Int(0));
     is(&value("(case \"b\" \"a\" 1 \"b\" 2 :else 0)"), Value::Int(2));
     is(&value("(case true false 1 true 2 :else 0)"), Value::Int(2));
-    assert_eq!(bound(&value("(let* [s (str \"a\" 1 2.5 true [1 2 3] 1.23456 (list 1 2) {:a 1} (/ 1 3))] 1)"), "s"), t("a12.5true[1 2 3]1.2346[1 2]{:a 1}0.3333"));
+    assert_eq!(bound(&value("(let* [s (str \"a\" 1 2.5 true [1 2 3] 1.23456 (list 1 2) {:a 1} (/ 1 3))] 1)"), "s"), t("a12.5true[1 2 3]1.23456[1 2]{:a 1}0.3333333333333333"));
     let r = run_ws(&check(&sop("(sop/blast (sop/group_bounds (sop/box) :name (str \"floor_\" 2)) :group (str \"floor_\" 2))")), 0.);
     assert_eq!(*(r.nodes_of("sop/blast")[0]).arg_of("group"), t("floor_2"));
     assert_eq!(*(r.nodes_of("sop/group_bounds")[0]).arg_of("name"), t("floor_2"));
@@ -339,7 +337,7 @@ fn live_values_and_the_split_evaluation() {
 
 #[test]
 fn residuals_force_by_time() {
-    // the 40-deep shared chain recurses deeply in a debug build (like the OCaml native stack, not the default 2 MB test thread)
+    // Run the deep shared chain on a stack large enough for debug recursion.
     std::thread::Builder::new().stack_size(64 << 20).spawn(residuals_force_by_time_body).unwrap().join().unwrap();
 }
 fn residuals_force_by_time_body() {
@@ -502,14 +500,13 @@ fn d3_nonfinite_and_panel_checks() {
 fn c2_str_formatting() {
     let s = |src: &str| match bound(&value(&format!("(let* [z (str {src})] 1)")), "z") { Value::Text(s) => String::from_utf8(s.to_vec()).unwrap(), _ => panic!("not text") };
     assert!(s("3") == "3" && s("-3") == "-3" && s("2.0") == "2" && s("100.0") == "100");
-    assert!(s("0.1") == "0.1" && s("0.30000000000000004") == "0.3" && s("1.23456") == "1.2346");
-    for (x, want) in [("0.03125", "0.0313"), ("-0.03125", "-0.0313"), ("0.00005", "0.0001"), ("0.00015", "0.0001"), ("1.00005", "1.0001"), ("0.09375", "0.0938"), ("0.15625", "0.1563"), ("2.00005", "2"), ("0.00035", "0.0003"), ("0.000125", "0.0001"), ("123456789.123456", "123456789.1235")] {
-        assert_eq!(s(x), want, "{x}");
+    for text in ["0.1", "0.30000000000000004", "1.23456", "0.03125", "-0.03125", "0.00005", "0.00015", "1.00005", "0.09375", "0.15625", "2.00005", "0.00035", "0.000125", "123456789.123456", "-0.00001", "0.99999"] {
+        assert_eq!(s(text), text);
     }
-    assert!(s("-0.00001") == "0" && s("0.99999") == "1" && s("12345.6789") == "12345.6789");
+    assert_eq!(s("-0.0"), "-0");
     assert!(s("true false") == "truefalse" && s("[1 2.5 3]") == "[1 2.5 3]" && s("(list)") == "[]");
     assert!(s("{:a 1.5 :b [1 2 3]}") == "{:a 1.5 :b [1 2 3]}" && s("\"x\" 1") == "x1");
-    assert_eq!(s("[1 0.5 0.33333]"), "[1 0.5 0.3333]");
+    assert_eq!(s("[1 0.5 0.33333]"), "[1 0.5 0.33333]");
     assert_eq!(s("(list [1 2 3] [4 5 6])"), "[[1 2 3] [4 5 6]]");
     assert_eq!(s("{:p (list 1 2) :q {:r true}}"), "{:p [1 2] :q {:r true}}");
 }

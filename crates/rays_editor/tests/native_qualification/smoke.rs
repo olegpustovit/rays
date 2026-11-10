@@ -3,8 +3,7 @@ use rays::{camera, easy_camera, font, image, light, path, scene};
 use rays_math::{color, mat4, noise, rand, vec3};
 use std::sync::{Mutex, OnceLock};
 
-// Rust exposes the scheduler, not OCaml's init_array/map_array convenience wrappers.
-// Keep the original sizes, grains and nested scheduling through the public scheduler.
+// Shared scheduler tests retain exact sizes, grains and nested execution through the public worker pool.
 fn init<T: Send + Sync>(grain: i64, length: usize, f: impl Fn(i64) -> T + Send + Sync) -> Vec<T> {
     let values: Vec<OnceLock<T>> = (0..length).map(|_| OnceLock::new()).collect();
     parallel::for_(grain, 0, length as i64 - 1, &|index| {

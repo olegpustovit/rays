@@ -1,6 +1,5 @@
 //! The status strip: the line it says, the open dialog's name for a crash report, the probe
-//! caption. Port of lib/rays_editor/editor_status.ml.
-#![allow(non_camel_case_types)]
+//! caption. #![allow(non_camel_case_types)]
 use flow_syntax::symbol::Symbol;
 use editor_core::guide_context;
 use editor_core::keymap;

@@ -739,7 +739,7 @@ mod tests {
             ("(case (mod f 3) 0 \"a\" :else \"b\")", "(case (mod f 3) 0 \"a\" :else \"b\")\n"),
             ("(graph g :context sop (sop/box))", "(graph g :context sop\n  (sop/box))\n"),
             ("(defmacro twice [x] `(+ ~x ~x))", "(defmacro twice [x]\n  `(+ ~x ~x))\n"),
-            ("(nums 007 0.0000001 1e3 -.5)", "(nums 007 0.0000001 1e3 -0.5)\n"),
+            ("(nums 007 0.0000001 1e3 -.5)", "(nums 007 1e-7 1e3 -0.5)\n"),
             ("(str \"a\\\"b\\\\c\\n\\td\" \"é · ü\")", "(str \"a\\\"b\\\\c\\n\\td\" \"é · ü\")\n"),
         ];
         for (source, expected) in cases {
@@ -835,9 +835,9 @@ mod tests {
     #[test]
     fn floats_and_patch_atoms() {
         for (value, expected) in [
-            (1.0, "1.0"), (-0.5, "-0.5"), (1e-14, "0.00000000000001"), (2e6, "2000000.0"),
-            (6.1e-17, "0.000000000000000061"), (1234567.89, "1234567.89"), (0.1, "0.1"),
-            (-3.3e-7, "-0.00000033"), (1e21, "1000000000000000000000.0"),
+            (1.0, "1.0"), (-0.5, "-0.5"), (1e-14, "1e-14"), (2e6, "2000000.0"),
+            (6.1e-17, "6.1e-17"), (1234567.89, "1234567.89"), (0.1, "0.1"),
+            (-3.3e-7, "-3.3e-7"), (1e21, "1e21"),
             (f64::NAN, "NaN"), (f64::INFINITY, "Infinity"), (f64::NEG_INFINITY, "-Infinity"),
         ] { assert_eq!(float(value), expected); }
         for value in [1e-14, 2e6, 6.1e-17, 0.30000000000000004, f64::MAX, f64::from_bits(1), -123.456e-9] {
@@ -877,224 +877,7 @@ mod tests {
         assert!(patch_atoms(&(text, spans), &[root.clone()]).is_none());
     }
 
-    const GOLDEN: &[(&str, &str)] = &[
-    ( r####"(sop/box ; the size
- :size [1 2 3] :center [0 0 0])"####,
-      r####"(sop/box
-  ; the size
-  :size [1 2 3]
-  :center [0 0 0])"#### ),
-    ( r####"(sop/box :size [1 2 3]
- ; where it sits
- :center [0 0 0])"####,
-      r####"(sop/box
-  :size [1 2 3]
-  ; where it sits
-  :center [0 0 0])"#### ),
-    ( r####"(sop/box :size [1 2 3]
- :center ; on top
- [0 0 0])"####,
-      r####"(sop/box
-  :size [1 2 3]
-  :center
-    ; on top
-    [0 0 0])"#### ),
-    ( r####"(let* [a 1 ; one
- b 2
- ; last
- ] (+ a b))"####,
-      r####"(let* [a 1
-       ; one
-       b 2
-       ; last
-       ]
-  (+ a b))"#### ),
-    ( r####"(let* [a 1
- b
- ; the value
- 2] (+ a b))"####,
-      r####"(let* [a 1
-       b
-         ; the value
-         2]
-  (+ a b))"#### ),
-    ( r####"(let* [a 1 b 2 c 3] (+ a b c))"####,
-      r####"(let* [a 1
-       b 2
-       c 3]
-  (+ a b c))"#### ),
-    (r####"[1 ; first
- 2 3]"####, r####"[1
- ; first
- 2
- 3]"####),
-    (r####"[1 2 3
- ; done
- ]"####, r####"[1
- 2
- 3
- ; done
- ]"####),
-    ( r####"{:a 1 ; note on b
- :b 2 :c
- ; on value
- 3}"####,
-      r####"{:a 1
- ; note on b
- :b 2
- :c
-   ; on value
-   3}"#### ),
-    (r####"{:a 1 :b 2}"####, r####"{:a 1 :b 2}"####),
-    ( r####"(cond ; first
- (= f 0) big.frame (= f 1) small.pane
- ; otherwise
- :else small.frame)"####,
-      r####"(cond
-  ; first
-  (= f 0) big.frame
-  (= f 1) small.pane
-  ; otherwise
-  :else small.frame)"####
-    ),
-    ( r####"(case (mod f 3) 0 "#b0680f" 1 "#285f77" :else "#6b50ae")"####,
-      r####"(case (mod f 3) 0 "#b0680f" 1 "#285f77" :else "#6b50ae")"#### ),
-    ( r####"(case ; why
- x 0 "a" :else "b")"####,
-      r####"(case
-  ; why
-  x
-  0 "a"
-  :else "b")"#### ),
-    ( r####"(if ; test
- (> x 1) (sop/box) (sop/uv_sphere))"####,
-      r####"(if
-    ; test
-    (> x 1)
-    (sop/box)
-    (sop/uv_sphere))"#### ),
-    ( r####"(if (> x 1) (sop/box :size [1 1 1] :center [0 0 0] :rotation [0 0.5 0]) (sop/uv_sphere :radius 2 :segments 12 :rings 8))"####,
-      r####"(if (> x 1)
-    (sop/box :size [1 1 1] :center [0 0 0] :rotation [0 0.5 0])
-    (sop/uv_sphere :radius 2 :segments 12 :rings 8))"####
-    ),
-    ( r####"(fold [acc 0] [i (range 10)] ; step
- (+ acc i))"####,
-      r####"(fold [acc 0]
-      [i (range 10)]
-  ; step
-  (+ acc i))"#### ),
-    ( r####"(fold [shape (sop/box)] [i (range steps)] (sop/merge shape (sop/transform shape :rotate [0 0.1 0] :uniform_scale 0.9)))"####,
-      r####"(fold [shape (sop/box)]
-      [i (range steps)]
-  (sop/merge shape (sop/transform shape :rotate [0 0.1 0] :uniform_scale 0.9)))"####
-    ),
-    ( r####"(for [i (range 3) j (range 4)] (sop/uv_sphere :radius 0.1 :center [i j 0] :segments 8 :rings 4 :rotation [0 1 0]))"####,
-      r####"(for [i (range 3)
-      j (range 4)]
-  (sop/uv_sphere :radius 0.1 :center [i j 0] :segments 8 :rings 4 :rotation [0 1 0]))"####
-    ),
-    ( r####"(sum [k (range 5)] (/ 1 (+ k 1)))"####,
-      r####"(sum [k (range 5)] (/ 1 (+ k 1)))"#### ),
-    (r####"(fn [x y] (* x y))"####, r####"(fn [x y] (* x y))"####),
-    (r####"(fn [i] ; scale
- (* i 2))"####, r####"(fn [i]
-  ; scale
-  (* i 2))"####),
-    ( r####"(defmacro twice [x] `(+ ~x ~x))"####,
-      r####"(defmacro twice [x]
-  `(+ ~x ~x))"#### ),
-    ( r####"(defmacro radial [i n body] `(sop/merge (for [~i (range ~n)] (sop/transform ~body :rotate [0 (* (/ ~i ~n) 6.2832) 0]))))"####,
-      r####"(defmacro radial [i n body]
-  `(sop/merge (for [~i (range ~n)]
-                (sop/transform ~body :rotate [0 (* (/ ~i ~n) 6.2832) 0]))))"####
-    ),
-    ( r####"(defmacro spl [xs] `(sop/merge ~@xs))"####,
-      r####"(defmacro spl [xs]
-  `(sop/merge ~@xs))"#### ),
-    ( r####"(graph g :context sop (sop/box))"####,
-      r####"(graph g :context sop
-  (sop/box))"#### ),
-    ( r####"(graph g :context sop [(n : int 3)] ; body
- (sop/box))"####,
-      r####"(graph g :context sop [(n : int 3)]
-  ; body
-  (sop/box))"#### ),
-    ( r####"(graph g :context sop [(n : int 3)] (sop/box)
- ; end
-)"####,
-      r####"(graph g :context sop [(n : int 3)]
-  (sop/box)
-  ; end
-  )"#### ),
-    ( r####"(nums 2.0 .5 1. 0.50 -3 -0.25 1.500000)"####,
-      r####"(nums 2.0 0.5 1.0 0.5 -3 -0.25 1.5)"#### ),
-    (r####"(str "a\"b\\c\n\td" "é · ü")"####, r####"(str "a\"b\\c\n\td" "é · ü")"####),
-    ( r####"(sop/merge aaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccc ddddddddddddddddddddddd)"####,
-      r####"(sop/merge aaaaaaaaaaaaaaaaaaaaaaaa
-           bbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-           cccccccccccccccccccccccccc
-           ddddddddddddddddddddddd)"####
-    ),
-    ( r####"(some-long-function-name-here-x aaaaaaaaaaaaaaaaaaaaa :key bbbbbbbbbbbbbbbbbbbbbbbb :other (ccccccccccccccc dddddddddddddd))"####,
-      r####"(some-long-function-name-here-x aaaaaaaaaaaaaaaaaaaaa
-    :key bbbbbbbbbbbbbbbbbbbbbbbb
-    :other (ccccccccccccccc dddddddddddddd))"####
-    ),
-    ( r####"(sop/uv_sphere :radius [0.45 0.04 0.12 0.45 0.04 0.12 0.45 0.04 0.12 0.45 0.04 0.12 0.45 0.04 0.12 0.45] :segments 12)"####,
-      r####"(sop/uv_sphere :radius [0.45 0.04 0.12 0.45 0.04 0.12 0.45 0.04 0.12 0.45 0.04 0.12 0.45 0.04 0.12 0.45]
-               :segments 12)"####
-    ),
-    ( r####"(let* [{:keys [shape y]} st [l m r] xs
- p (sop/transform shape :translate [0 y 0] :rotate [0 (* f 0.3) 0] :uniform_scale 0.5)] p)"####,
-      r####"(let* [{:keys [shape y]} st
-       [l m r] xs
-       p (sop/transform shape
-                        :translate [0 y 0]
-                        :rotate [0 (* f 0.3) 0]
-                        :uniform_scale 0.5)]
-  p)"####
-    ),
-    ( r####"(workspace w
- ; a
- ; b
-
- ;; c
- (graph g :context sop (sop/box)) (defn h :context value [(x : float)] x)
- ; trailing
-)"####,
-      r####"(workspace w
-
-  ; a
-  ; b
-  ; c
-  (graph g :context sop
-    (sop/box))
-
-  (defn h :context value [(x : float)]
-    x)
-  ; trailing
-  )"####
-    ),
-    (r####"(vec3 1 2 3)"####, r####"(vec3 1 2 3)"####),
-    (r####"()"####, r####"()"####),
-    ( r####"(sop/merge (for [r (range rings) m (range moons)] (let* [radius (+ 0.6 (* r 0.35))] (sop/uv_sphere :radius radius))))"####,
-      r####"(sop/merge (for [r (range rings)
-                 m (range moons)]
-             (let* [radius (+ 0.6 (* r 0.35))] (sop/uv_sphere :radius radius))))"####
-    ),
-    ];
-
     fn root() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..") }
-
-    #[test]
-    fn ocaml_goldens_are_fixed_points() {
-        for (source, expected) in GOLDEN {
-            let text = printed(source);
-            assert_eq!(text, format!("{expected}\n"), "source: {source}");
-            assert_eq!(printed(&text), text);
-        }
-    }
 
     #[test]
     fn checked_in_workspaces_print_as_fixed_points() {

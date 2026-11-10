@@ -1,4 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_solid.ml: build-once exact solid Boolean arrangement.
+//! build-once exact solid Boolean arrangement.
 use std::sync::Arc;
 
 use rdk_core::{cancel, error, geometry};
@@ -56,7 +56,7 @@ pub mod view {
 }
 
 fn shatter_error() -> error::T {
-    // OCaml `invalid_arg`: an exception outside every `result`.
+    // This internal programmer-invalid argument remains outside ordinary recoverable results.
     error::new(OPERATION, Code::InvalidArgument, "Shatter has no single product expression".to_owned())
 }
 

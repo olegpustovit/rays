@@ -341,9 +341,7 @@ fn create_inner(
     })
 }
 
-/// Selected polygon primitives must be triangles. Open and closed polygon curves are expanded into
-/// stable segment pieces without materializing new geometry. Referenced positions must be finite,
-/// triangles non-degenerate, and segments non-zero. `grain` defaults to 16384 in OCaml.
+/// Polygon selections must be triangles; curves become stable segments without rebuilding geometry. Positions must be finite, triangles nondegenerate and segments nonzero.
 pub fn create(
     cancel_value: Option<&cancel::T>,
     grain: Option<i64>,
@@ -401,8 +399,7 @@ fn pairs_of(
         return Ok((Vec::new(), Vec::new()));
     }
     let ranges = support::range_count(left_count, grain) as usize;
-    // ponytail: OCaml counts then fills (two traversals) to size output exactly; one pass into
-    // per-range buffers joined in range order yields the same bytes.
+    // Range-local outputs join in deterministic range order after one traversal.
     let mut parts = vec![(Vec::new(), Vec::new()); ranges];
     let part_windows = support::Windows::even(&mut parts, 1);
     support::run_indexed_ranges(grain, left_count, &|range, first, last| {

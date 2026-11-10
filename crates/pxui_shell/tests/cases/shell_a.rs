@@ -16,7 +16,7 @@ pub fn new_ui() -> Ui {
     Ui::create(input::Platform::Apple, Some(11), Some(path))
 }
 
-/// The OCaml test's `frame`: 400 x 300 unless sized, at `pointer` with `events`.
+/// Build a 400x300 logical frame unless sized, with the supplied pointer and events.
 pub fn fr(size: (i64, i64), pointer: (f64, f64), events: Vec<Event>) -> frame::Frame {
     let mut input = input::at_time(0.0);
     input.size = size;

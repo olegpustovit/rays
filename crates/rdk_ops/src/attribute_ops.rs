@@ -1,5 +1,4 @@
-//! Attribute ownership and reduction operations (OCaml `Attribute_ops`). The thin wrappers over the
-//! lifecycle/blur/transfer/interpolate modules re-code their failures as OCaml does.
+//! Attribute lifecycle, blur, transfer and interpolation wrappers retain operation-specific typed failure codes.
 use rdk_core::{cancel, error, support};
 use rdk_core::error::Code;
 use rays_math::text_array::TextArray;
@@ -9,13 +8,7 @@ pub(crate) fn make_error(operation: &str, code: Code, message: &str) -> error::T
     error::new(operation, code, message.to_owned())
 }
 
-/// OCaml `String.trim s = ""`.
-pub(crate) use rdk_core::support::ocaml_trim_is_empty as is_blank;
 
-/// OCaml `Printf "%S"`: a double-quoted string with `String.escaped` escapes.
-pub fn ocaml_quote(text: impl AsRef<[u8]>) -> String {
-    rdk_core::attribute::quote_bytes(text.as_ref())
-}
 
 /// Runs `work(element, planes)` for every element in disjoint final output windows.
 /// The result is identical for any domain count; the lowest failing range wins.
@@ -182,14 +175,14 @@ pub(crate) fn interpolate_attribute(
     name: &str,
 ) -> Result<InterpolateAttribute, error::T> {
     let bad = |message: &str| make_error("attribute_interpolate", Code::InvalidArgument, message);
-    if is_blank(name) {
+    if (name).trim().is_empty() {
         return Err(bad("Rdk.Attribute_ops.interpolate_attribute: empty source name"));
     }
     if name == "P" && owner != attribute::Owner::Point {
         return Err(bad("Rdk.Attribute_ops.interpolate_attribute: canonical P must be point owned"));
     }
     let target = into.unwrap_or(name);
-    if is_blank(target) {
+    if (target).trim().is_empty() {
         return Err(bad("Rdk.Attribute_ops.interpolate_attribute: empty target name"));
     }
     Ok(InterpolateAttribute {
@@ -429,8 +422,7 @@ pub fn transfer_all(params: &attribute_transfer::AllParams) -> Result<geometry::
     attribute_transfer::transfer_all(params)
 }
 
-/// Test fixtures shared by the attribute and group tests of this crate (OCaml `Rdk_test_support`
-/// helpers, reduced to what those tests use).
+/// Shared attribute/group fixtures contain only geometry needed by these tests.
 #[cfg(test)]
 pub(crate) mod fixtures {
     use std::sync::Arc;

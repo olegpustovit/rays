@@ -1,4 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_complex.ml: the conforming two-complex assembled from refined
+//! the conforming two-complex assembled from refined
 //! Boolean faces.
 #![allow(non_snake_case)]
 
@@ -37,7 +37,6 @@ fn fail(code: Code, message: &str) -> error::T {
     error::new(OPERATION, code, message.to_owned())
 }
 
-/// OCaml `Invalid_argument message` surfaces as `invalid_refinement`.
 fn invalid(message: &str) -> error::T {
     fail(Code::InvalidRefinement, message)
 }
@@ -52,7 +51,7 @@ pub fn facet_count(value: &T) -> i64 {
     value.facet_a.len() as i64
 }
 
-/// `Invalid_argument` in OCaml for a corner other than 0, 1 or 2: a panic here.
+/// A corner outside 0, 1 or 2 is a programmer contract violation.
 pub fn facet_vertex(value: &T, facet: i64, local: i64) -> i64 {
     match local {
         0 => value.facet_a[facet as usize],
@@ -236,9 +235,7 @@ fn poll(cancel_value: Option<&cancel::T>, index: i64, mask: i64) -> Result<(), e
     cancel::poll(cancel_value, index, mask).map_err(|_| error::cancelled(OPERATION))
 }
 
-/// Sorts `values` by `compare_points`: sorted runs of 2048 in parallel, then pairwise merges of
-/// doubling width, as the OCaml `parallel_sort_indices`. The comparator is total, so the result is
-/// the same as any other sort.
+/// Sorts use a total point comparator, so parallel run merging and a direct sort have the same result.
 fn parallel_sort_indices(
     cancel_value: Option<&cancel::T>,
     token_points: &[implicit_point::T],

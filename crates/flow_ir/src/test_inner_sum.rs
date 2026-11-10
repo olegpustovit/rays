@@ -1,4 +1,3 @@
-// Port of lib/flow_ir/test_inner_sum.ml.
 use crate::flow_ir::{self, profile};
 use crate::packed;
 use crate::test_support::*;
@@ -134,7 +133,7 @@ fn late_slice_diagnostic_matches_the_walker() {
     }
 }
 
-// Product defect: the static map of 4101 rows reports head_elements 4096 (OCaml: 0, the fast path ran every row).
+// Known failure: the static-map profile records a 4096-element walked head instead of routing the complete eligible map to its kernel.
 #[test]
 fn static_map_profile() {
     let workspace = checked("(map (fn [(i : int)]\n         (array/sum (map (fn [(j : int)] (+ i j)) (array/range 3 :type int))))\n         (array/range 4101 :type int))");
@@ -146,8 +145,7 @@ fn static_map_profile() {
     assert!(maps.iter().any(|m| m.count == 4101 && m.head_elements == 0 && m.tail_elements == 0), "static maps (last): {:?}", maps.last().map(|m| (m.count, m.head_elements, m.tail_elements, m.deferred)));
 }
 
-// Product defect: a slice start of 2^62-1 (OCaml max_int) is refused by packed with "needs a
-// non-negative whole length" where the walker says "An array slice must be within its source."
+// Known failure: a large nonnegative slice start produces different packed/reference refusal messages.
 #[test]
 fn slice_start_max_int() {
     for count in [0, 1, 64] {

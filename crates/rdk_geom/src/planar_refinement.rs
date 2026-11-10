@@ -1,7 +1,5 @@
-//! Bounded deterministic quality refinement for a planar constrained Delaunay triangulation.
-//!
-//! `Invalid_argument` sites that OCaml's top-level handler turns into `Error msg` are validated
-//! up front or returned as `Err(msg)`; nothing here relies on a panic.
+// Equal exact coordinates keep the existing deterministic event tie order.
+//! Planar constrained refinement uses bounded deterministic batches; invalid input is validated or returned as Err instead of relying on panic recovery.
 use rays_math::float::{min as omin, max as omax};
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -271,7 +269,7 @@ fn barycentric(x: &[f64], y: &[f64], a: i64, b: i64, c: i64, px: f64, py: f64) -
     }
 }
 
-/// OCaml `Result.get_ok`.
+/// Require an already successful internal result.
 fn get_ok(value: Result<implicit_point::T, PointError>) -> Result<implicit_point::T, String> {
     value.map_err(|_| "result is Error _".to_owned())
 }
@@ -484,7 +482,7 @@ fn cancelled() -> String {
     "Planar refinement was cancelled".to_owned()
 }
 
-/// Maps an `error::T` raised by a helper (cancellation or invalid argument) to the OCaml message.
+/// Map cancellation and invalid-input helper errors into the refinement message.
 fn conv(value: error::T) -> String {
     if error::is_cancelled(&value) {
         cancelled()
@@ -786,17 +784,17 @@ fn run(
     if initial_len.checked_add(maximum_new_points).is_none() {
         return Err("Planar refinement point limit exceeds array limits".to_owned());
     }
-    // OCaml `initial_points.(0)` raises Invalid_argument "index out of bounds" when empty.
+    // Initial point coordinates must be nonempty before indexing element zero.
     if initial_points.is_empty() {
         return Err("index out of bounds".to_owned());
     }
-    // Implicit_point predicates panic (OCaml Invalid_argument) on mixed sources; reject up front.
+    // Reject mixed implicit-point sources before entering predicates that would panic.
     for point in initial_points.iter().skip(1) {
         if implicit_point::midpoint(&initial_points[0], point).is_err() {
             return Err("Rdk implicit points belong to different coordinate sources".to_owned());
         }
     }
-    // OCaml indexes x/y by these triangle points in the first classification: bounds-check here.
+    // Bounds-check triangle point indices before their first x/y classification read.
     for &point in &initial_triangle_points[..initial_triangle_points.len() / 3 * 3] {
         if point < 0 || point >= initial_len {
             return Err("index out of bounds".to_owned());
@@ -888,7 +886,7 @@ fn run(
         } else {
             Some(constraint_index(cancel_value, &points, &constraints)?)
         };
-        // ponytail: sequential where OCaml runs `construct` through Parallel.for_ (same result).
+        // ponytail: candidate construction is serial; use disjoint output ranges only if profiles justify parallel work.
         for candidate in 0..bad_count {
             poll(cancel_value, candidate as i64, 1023)?;
             let (a, b, c) = (candidate_a[candidate], candidate_b[candidate], candidate_c[candidate]);
@@ -1046,7 +1044,7 @@ fn run(
                         implicit_point::compare_y(&points[left as usize], &points[right as usize])
                     }
                 };
-                // OCaml builds the list by consing, so it starts newest-first; List.sort is stable.
+                // Stable equal-key sorting preserves newest-first construction order.
                 let mut ordered: Vec<i64> = events[segment].iter().rev().copied().collect();
                 ordered.sort_by(|&l, &r| to_ordering(compare(l, r)));
                 if compare(a, b) >= 0 {
@@ -1243,7 +1241,7 @@ fn run(
     })
 }
 
-/// Refine in deterministic stable batches. `Err` carries the OCaml `Error` message.
+/// Refinement returns deterministic batches or a typed operation failure message.
 #[allow(clippy::too_many_arguments)]
 pub fn build(
     cancel_value: Option<&cancel::T>,

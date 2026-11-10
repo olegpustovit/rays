@@ -1,4 +1,4 @@
-// Port of lib/flow_ir/test_region_snapshot.ml: the kernel register programs of the shared
+// the kernel register programs of the shared
 // fixtures and four workspaces, compared byte for byte with crates/flow_ir/snapshots/*.txt.
 // Region_snapshot keeps one process-wide buffer, so the tests of this file take a lock.
 use crate::core_lower;
@@ -133,8 +133,7 @@ fn state_branch_laziness_and_shared_fixture_snapshot() {
         assert!(same, "state branch laziness differs at t={time}");
         assert!(state_dump(&core_state) == state_dump(&reference_state), "state branch changed inactive state at t={time}");
     }
-    // OCaml evaluates the elements of a list literal right to left, so the snapshot holds the last
-    // fixture of Test_program.fixtures / vector_fixtures first; compile them in that order.
+    // Snapshot fixture compilation retains its existing last-fixture-first ordering.
     let array = "(array/range 1024)";
     let traced = |fusion: bool, body: String| { ts::compile_with(Some(trace()), fusion, "", &body); };
     traced(true, format!("(map (fn [x] (noise3 [(* x 0.02) t 0.25] :seed 31 :octaves 3)) {array})"));

@@ -1,4 +1,4 @@
-//! The device side of noise3 (port of lib/flow_shader/noise.ml). A kernel inlines noise.rays'
+//! The device side of noise3. A kernel inlines noise.rays'
 //! noise-fbm, compiled once an octave count, at each Noise3, its permutation gathers becoming reads of
 //! the seed's table entries (Region::Noise_table).
 use crate::lisp_stage;

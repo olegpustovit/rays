@@ -1,4 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_refinement.ml: parallel deterministic per-face Boolean
+//! parallel deterministic per-face Boolean
 //! constraint refinement.
 #![allow(non_snake_case)]
 
@@ -41,7 +41,7 @@ pub mod view {
 
 type FaceResult = Result<cdt_mod::T, error::T>;
 
-/// Faces of one side in index order; the first failing face's error wins, as in OCaml.
+/// Process faces in index order; the first failing face wins.
 fn build_side(
     cancel_value: Option<&cancel::T>,
     coplanar: Option<&coplanar_mod::T>,

@@ -13,7 +13,7 @@ listed separately: none is a hidden primitive in a target's numeric runtime.
 
 The static stage evaluates frame-independent expressions with the tree walker,
 using graph input defaults. Its data becomes constants, including packed arrays
-and resource descriptions. It never serializes an OCaml closure, cache, SDL
+and resource descriptions. It never serializes a closure, cache, SDL
 object or GPU handle. The remaining checked expressions lower once to a frame
 program and its regions.
 
@@ -436,16 +436,16 @@ unlisted calls in `prims.js`.
 | `int/add`, `int/sub`, `int/mul`, `int/div`, `int/mod`, `int/and`, `int/or`, `int/xor`, `int/shl`, `int/shr` | 10 | Exact signed 64-bit integer operations, including wrapping overflow, division and remainder, bitwise operations and checked shifts; zero integer divisor is `E_RANGE`. No 32-bit JavaScript bitwise truncation. |
 | `int/lt`, `int/le`, `int/gt`, `int/ge`, `int/eq` | 5 | Exact integer comparisons without a floating conversion. |
 | `equal?`, `show`, `text/concat` | 3 | Typed structural equality, source value display, and ordered text concatenation. `show` has display formatting, distinct from workspace source-number printing. |
-| `text/blank?` | 1 | True exactly when `String.trim` yields empty text: only ASCII space, tab, LF, CR and form feed are whitespace. Vertical tab, NUL and Unicode spaces remain nonblank; wrong input storage is `E_TYPE`. |
-| `text/trim`, `text/lower` | 2 | `String.trim` removes only ASCII space, tab, LF, CR and form feed at either end. `String.lowercase_ascii` changes only ASCII A–Z; non-ASCII UTF-8 bytes are unchanged. Both accept text storage only (`E_TYPE`) and execute as structured text operations, never numeric packed instructions. |
-| `text/repr` | 1 | Text to quoted text with exactly `Printf.%S` byte escaping: ASCII quotes and backslashes escape, backspace/tab/LF/CR use named escapes, and every other nonprintable byte uses three decimal digits. UTF-8 is quoted byte by byte, yielding ASCII output. Native text includes arbitrary bytes; JavaScript quotes their reversible byte representation. Wrong storage is `E_TYPE`. This is a structured text operation. |
+| `text/blank?` | 1 | True exactly when byte trimming yields empty text: only ASCII space, tab, LF, CR and form feed are whitespace. Vertical tab, NUL and Unicode spaces remain nonblank; wrong input storage is `E_TYPE`. |
+| `text/trim`, `text/lower` | 2 | Byte trimming removes only ASCII space, tab, LF, CR and form feed at either end. ASCII lowercasing changes only ASCII A–Z; non-ASCII UTF-8 bytes are unchanged. Both accept text storage only (`E_TYPE`) and execute as structured text operations, never numeric packed instructions. |
+| `text/repr` | 1 | Text to quoted text with the specified byte escaping: ASCII quotes and backslashes escape, backspace/tab/LF/CR use named escapes, and every other nonprintable byte uses three decimal digits. UTF-8 is quoted byte by byte, yielding ASCII output. Native text includes arbitrary bytes; JavaScript quotes their reversible byte representation. Wrong storage is `E_TYPE`. This is a structured text operation. |
 | `text/split`, `text/tokens` | 2 | `(text/split text separator)` returns the `(array text)` pieces between each non-overlapping, left-to-right occurrence of a nonempty separator, keeping empty pieces (`"a,,b"` by `","` is three pieces, `""` is one empty piece); an empty separator is `E_TEXT_SEPARATOR`. `(text/tokens text)` splits on space, comma, TAB and LF only (not CR) and drops empty tokens. Separators and tokens match bytewise, so UTF-8 passes through unchanged. Wrong storage is `E_TYPE`. Structured text operations. |
-| `text/to_float`, `text/to_int` | 2 | Total token readers returning an ordered record `{:value :valid}`; invalid text gives value zero and `valid` false, never an error. Input is trimmed with `String.trim` (ASCII space, TAB, LF, CR, FF). `text/to_float` accepts exactly `[+-]?(digits[.digits*]\|.digits)([eE][+-]?digits)?` with ASCII digits and a finite result (no hex, underscores, `nan`, `inf`; `1e999` is invalid). `text/to_int` accepts exactly `[+-]?digits` and must fit the 64-bit signed integer. Ramp text `pos:value,...` is `text/split` by `","` then `":"` then these readers. Wrong storage is `E_TYPE`. |
+| `text/to_float`, `text/to_int` | 2 | Total token readers returning an ordered record `{:value :valid}`; invalid text gives value zero and `valid` false, never an error. Input is trimmed bytewise (ASCII space, TAB, LF, CR, FF). `text/to_float` accepts exactly `[+-]?(digits[.digits*]\|.digits)([eE][+-]?digits)?` with ASCII digits and a finite result (no hex, underscores, `nan`, `inf`; `1e999` is invalid). `text/to_int` accepts exactly `[+-]?digits` and must fit the 64-bit signed integer. Ramp text `pos:value,...` is `text/split` by `","` then `":"` then these readers. Wrong storage is `E_TYPE`. |
 | `text/table_decode`, `text/table_encode` | 2 | Exact ordered text-cell tables, with tab-separated cells, LF-separated rows and only backslash, `t` and `n` escapes. Empty text decodes to an empty table; encoding empty rows retains the native codec's empty-row ambiguity. Invalid escapes are `E_TABLE`, invalid cell storage is `E_TYPE`. |
 | `sequence/length`, `sequence/get`, `sequence/build`, `sequence/slice`, `sequence/concat` | 5 | Element count, checked list element access, fresh bounded-list storage, checked copying slice, and ordered concatenation with the 4,096-element cap. Element layouts and nested record field order are explicit. Given an element width of 1 to 4, `sequence/build` allocates packed storage with no list cap, filled by the same ordered stores (the walker's `array_init` checks per element). Integer and text builders require width one and explicit type `int` or `text`. Text builders store strings and do not create packed numeric storage. |
 | `array/max_length`, `array/range`, `array/int`, `array/text`, `array/float`, `array/vec3`, `array/vec4`, `array/nth`, `array/count`, `array/slice`, `array/concat` | 11 | Typed-array construction, indexing, length and copying operations, including exact integer and decoded text storage. Range defaults to float and accepts the literal type `int`. Vector constructors accept the matching vector or broadcast a scalar; omitted values are typed zero. Count is in elements, not components; all products and offsets are checked before allocation or access. An array is not converted to a list. |
 | `array/grade`, `array/index_of` | 2 | Whole-array CPU operations returning fresh IntArray indices. Grade accepts Int/finite Float/native-byte Text keys and stably grades original indices; descending mode swaps comparator orientation while retaining equal-key order, including ±0. Index_of accepts matching Int or Text keys/queries, preserves query order/count, returns the first original key index or -1, and allows duplicate keys. Inputs are immutable. Grade count is keys count; lookup count is queries count, never an implicit first-input owner origin. Text uses unsigned byte order/equality through the reversible JS codec, without Unicode normalization/UTF-16 collation. No Region/GPU sort or lookup instruction is implied. |
-| `array/compact`, `array/scan_sum` | 2 | Whole-array ordered Int operations, structured Core on CPU. Compact accepts an Int 0/1 mask (`E_ARRAY_MASK` otherwise) and returns fresh increasing kept indices. Scan returns fresh exclusive boundary offsets of length n+1: initial zero then ordered signed63 `int/add` prefixes, including the terminal total; empty input gives `[0]`. Negative entries and wrap remain ordinary integer arithmetic. n must be below native Int-array capacity before n+1 is formed. No count/topology origin is inherited: compact cardinality depends on mask data, scan cardinality is n+1. Strict packed producers/consumers remain numeric kernels; dynamic per-row compact/scan is refused by the Region/GPU tier. |
+| `array/compact`, `array/scan_sum` | 2 | Whole-array ordered Int operations, structured Core on CPU. Compact accepts an Int 0/1 mask (`E_ARRAY_MASK` otherwise) and returns fresh increasing kept indices. Scan returns fresh exclusive boundary offsets of length n+1: initial zero then ordered signed64 `int/add` prefixes, including the terminal total; empty input gives `[0]`. Negative entries and wrap remain ordinary integer arithmetic. n must be below native Int-array capacity before n+1 is formed. No count/topology origin is inherited: compact cardinality depends on mask data, scan cardinality is n+1. Strict packed producers/consumers remain numeric kernels; dynamic per-row compact/scan is refused by the Region/GPU tier. |
 | `array/scatter_add` | 1 | Fresh, zero-filled Int/Float/Vec2/3/4 array of the specified Int size. Indices must be IntArray and have exactly the values' length (`E_ARRAY_COUNT`). Source rows and vector components are added in order, including duplicate indices; Int additions wrap at signed 64 bits and Float additions round separately and reject nonfinite inputs/sums (`E_NONFINITE`). Each index must be inside the output (`E_ARRAY_RANGE`). No atomic GPU scatter or index regrouping is implied: the whole-array operation runs on the CPU; strict packed input maps retain their ordinary qualification. |
 | `array/min`, `array/max`, `array/segment_sum`, `array/segment_min`, `array/segment_max` | 5 | Ordered typed numeric reductions, componentwise for vectors. Integer sums wrap at signed 64 bits; floating extrema retain `Float.min`/`Float.max` signed-zero semantics. Segment offsets must be an integer array starting at zero, nondecreasing and ending at the value count (`E_ARRAY_OFFSETS`). Duplicate offsets yield typed zero for sums and `E_ARRAY_EMPTY` for extrema. Global empty extrema also fail; offsets `[0]` yield zero output rows. Independent contiguous segments may use the shared pool; additions within each segment retain source order. These operations do not gather or rearrange values. |
 | `array/segment_argmax` | 1 | Int or Float values with the same segment offsets (`E_ARRAY_OFFSETS`, `E_ARRAY_TYPE` for vectors, text or non-integer offsets): an IntArray with one entry per segment, the index into `values` (not relative to the segment) of the first maximum, so ties keep the earliest and signed zeros compare equal; -1 for an empty segment (no error). Float values must be finite (`E_NONFINITE`). Independent segments may use the shared pool; the result does not depend on the domain count. |
@@ -634,17 +634,16 @@ octave count; non-constant or out-of-range settings keep their current refusals.
 
 Integer and structural results (counts, topology, ordering, indices, text, diagnostics) are exact bytes
 on every platform; a difference there is a bug. Floating results are exact where the operation is: IEEE
-`+ - * /`, `sqrt`, `fma` and conversions. `Float.fma` is exact on every platform: Windows' OCaml runtime
-emulation rounded subnormal results wrongly, so `Rays_math.Fma.fma` calls the C library's `fma`
-(hardware or ucrtbase). Windows links its math from ucrtbase, which agrees with the Mac's libm except in
-the last bit: measured over 6000 arguments, `sin` and `cos` differ in about 5 percent of
-them by one ulp, `exp`, `pow` and `log` in under 1 percent, `tan` in 40 percent by up to two. Native OCaml geometry differs too, because ocamlopt on arm64
-contracts `a*b+c` into a fused multiply-add and on x86 it does not; the Lisp helpers write their fused
-forms with `fma` explicitly and are the same everywhere.
+`+ - * /`, `sqrt`, `fma` and conversions. Fused multiply-add uses the native
+correctly rounded operation, including subnormal results. Transcendental library
+functions may differ in their last bits across operating systems. Geometry and Lisp
+helpers request `fma` explicitly where fusion is intended; ordinary operations retain
+their specified evaluation order. Historical platform comparison measurements are in
+[the retired port notes](../docs/history/ocaml-port-notes.md).
 
 The Mac's expected bytes, hashes and digests stay untouched and are the only ones the Mac accepts.
 A test whose result is a float-derived hash or digest keeps a second expected value for Windows, selected
-by `Sys.win32` (or a Windows data file beside the Mac's), adopted only after the two machines' floats were
+by the Windows target (or a Windows data file beside the Mac's), adopted only after the two machines' floats were
 compared: same counts and topology, every float within a few ulp. A native check of an operation the
 Lisp fuses compares on Windows with a test-local form written with `fma`, never a looser tolerance. Text
 drawn with the system font (SF Mono on the Mac, Segoe UI on Windows) has per-platform glyph rectangles.
@@ -703,8 +702,8 @@ component grouping for `show` and `equal?`. Published columns are immutable;
 
 `nth` (`sequence/get`) checks a Float index for whole-numberness before
 conversion, then checks the converted index against [0,length); failures are
-`E_LIST_RANGE`. The non-whole message prints the index with C `%g` (six
-significant digits, `1.23457e+08`, `nan`, `inf`), not the display printer; an
+`E_LIST_RANGE`. The non-whole message prints the index with native shortest round-trip
+display spelling, including the specified nonfinite forms; an
 Int index is never non-whole. `sequence/build` fills its elements with empty
 placeholders (the native `No_geo`), which an ordered store replaces; with a
 `width` it allocates zeroed packed storage instead, and the packed ceiling
@@ -809,17 +808,16 @@ source kinds:
 - Text: remove one initial `#` if present. Length 3/4 doubles each character;
   resulting length must be 6/8, otherwise `E_DRAW_COLOR` with
   "Color.hex: expected #rgb, #rgba, #rrggbb, or #rrggbbaa". Each two-character
-  channel is parsed in base 16, case insensitive. Besides two hex digits, the
-  native integer parser accepts a hex digit followed by `_` as that single
-  digit (e.g. `f_0000` is RGB 15,0,0). A leading underscore, sign or any other
-  character fails with `E_DRAW_COLOR` ("Color.hex: invalid hexadecimal digit").
+  channel requires exactly two hexadecimal digits, case insensitive. Underscores,
+  signs and all other characters fail with `E_DRAW_COLOR`
+  ("Color.hex: invalid hexadecimal digit").
   Alpha defaults to 255. No whitespace trimming or named colors. The length
   counts UTF-8 bytes, not characters: `#é1` is three bytes, so it doubles to
   six and fails on its digit, not on its length.
 - Vec3: finite-check components named `red`, `green`, `blue`, then convert
   each through the unclamped-input byte path below; alpha is 255. The checks
-  run blue, then green, then red (OCaml evaluates the arguments right to
-  left), so a vector with several non-finite channels reports `blue` first.
+  run blue, then green, then red, so a vector with several non-finite channels
+  reports `blue` first.
 - List of exactly four elements: number-convert and finite-check each channel
   named `color`, then use the unclamped-input path, including alpha. Element 3
   is checked first and element 0 last, so a non-number in any element fails
@@ -887,52 +885,28 @@ operation or a shader.
 | Residual in a diagnostic/debug display | `?`; frame program values are concretized before normal display. |
 | Other native value | Its type spelling, e.g. `geometry`, `image`, `drawing`, `sample`, `fn`; this does not make the value legal for web export. |
 
-Display-number formatting follows the actual `Value.show_with` implementation,
-not the shorter intent comment in `value.ml` and not `Flow.Lisp.float`:
+Display-number formatting uses Rust's native shortest round-trip `f64` Display
+through `Param.float_text`, with no fixed-precision rounding or tie adjustment.
+Finite values keep all digits needed to read back as the same binary64 value;
+negative zero displays `-0`. NaN and positive/negative infinity display `NaN`,
+`Infinity` and `-Infinity`, keeping debug display total without admitting nonfinite
+inputs into a checked frame. Vectors use this same rule for each component.
+The web runtime expands its native shortest exponent spelling to the same decimal
+Display bytes and preserves negative zero explicitly.
 
-1. NaN displays `NaN`, positive/negative infinity `Infinity` / `-Infinity`.
-   These spellings make debug display total; they do not allow non-finite
-   numeric inputs or literals into a checked frame.
-2. For a finite x, take its absolute binary64 magnitude. Format that magnitude
-   to exactly 40 fractional decimal places with nearest-even rounding. A tie
-   flag is true when fractional digit 5 is `5` and fractional digits 6..40
-   are all zero (digits are counted starting at 1).
-3. If flagged, add the binary64 value `1e-6` to the magnitude, rounding that
-   addition to binary64. Otherwise retain the magnitude. Format the resulting
-   double to exactly four fractional decimal places with nearest-even
-   rounding, with a fixed decimal point and no exponent.
-4. Remove trailing fractional zeroes and then an empty decimal point. Prefix
-   `-` only when x<0 and the trimmed result is not `0`. Both signed zeros and
-   a negative value rounded to zero display `0`.
-
-A target can implement the fixed-format steps from the exact binary64 ratio:
-decode sign/exponent/mantissa, scale the non-negative ratio by 10^places,
-divide as integers, and increment the quotient if remainder exceeds half the
-denominator, or equals half with an odd quotient. Decimal padding supplies
-the specified fractional width. BigInt supplies these fixed-format steps in
-JavaScript; Number supplies the intervening `+ 1e-6` exactly as above. Plain
-`toFixed(4)`, `Math.round(x*10000)` or conversion back through Number is not a
-complete implementation: large values switch to exponent notation, and the
-native tie adjustment can disappear below an ULP.
-
-Examples verified against the native implementation:
-
-| Float | Display |
+| Input | Display |
 | --- | --- |
-| `0.03125` | `0.0313` |
-| `-0.03125` | `-0.0313` |
-| `17179869184.03125` | `17179869184.0312` (the 1e-6 tie adjustment rounds away) |
+| `0.03125` | `0.03125` |
+| `-0.03125` | `-0.03125` |
+| `17179869184.03125` | `17179869184.03125` |
 | `1e21` | `1000000000000000000000` |
-| `-0.0` | `0` |
-| `0.00005` | `0.0001` |
+| `-0.0` | `-0` |
+| `0.00005` | `0.00005` |
 
-Source-number printing remains separate: `Flow.Lisp.float` tries 15, 16,
-then 17 significant digits until the result reads back as the same double,
-expands any exponent to fixed decimal notation, and supplies a dot (`1.0`,
-not `1`). Non-finite source-print input is `0.0`; a writer that needs to reject
-it must do so before printing. Displaying `1.0` gives `1`; writing that
-Float back to Lisp gives `1.0`. Neither printer is a reason to change the
-other's contract.
+Source-number printing uses the same native significant digits in workspace-literal
+mode, with a dot or exponent to retain the Float type (`1.0` and `1e-14`). It keeps
+negative zero and the specified nonfinite spellings. Source printing and value display
+differ in type marking, not in the numeric information retained.
 
 `equal?` is typed structural equality, with no scalar numeric coercion.
 Reactive fields in a captured list or record are concretized before comparison;
@@ -1374,7 +1348,7 @@ operation. A user function/macro row is not a new runtime primitive.
 | `graph/chains` | intrinsic | `(graph/chains adjacency :mask m)` walks the selected non-self edges (0/1 `:mask`, one entry per unique edge) with `Rdk.Poly_path.chains`, the traversal `PolyPath` uses (branch paths by point number, then isolated loops), returning ragged `{:offsets :values :closed}`: point rows, `closed` 1 for an isolated loop whose first point repeats last. `E_GRAPH_MASK`, `E_GRAPH_ADJACENCY` refuse. JavaScript twin `graph_chains`. |
 | `sop/mesh` | intrinsic | Geometry from four required keyword arrays: `:points` Vec3, `:vertex_points` Int, `:primitive_offsets` Int and `:kinds` Int. Ordinary Flow point layout/finiteness is checked first, then 0/1/2 kinds, then native `Topology.create_owned` validation. Invalid kinds report `E_TOPOLOGY_KIND`; native topology errors report `E_TOPOLOGY` with the unchanged native message. Owned copies protect retained arguments; no attributes, groups or instances are implied by these four arrays. Live/state/zone captures use the ordinary retained data and cooked-call boundaries, with lazy selected errors and causes. The JavaScript host twin agrees; SOP geometry remains outside current 2D export. |
 | `sop/mesh_planes` | intrinsic | The same owned topology/geometry boundary with a required `:points` socket typed as exactly `{x: Array(Float), y: Array(Float), z: Array(Float)}`. Plane lengths must agree (`E_ARRAY_COUNT`); point finiteness, kind codes and native topology validation retain Mesh ordering. Native construction copies three owned planes directly and avoids an interleaved Vec3 buffer, including the reference path. Other required keyword rows remain exact Int arrays. Known extra/missing/wrong typed fields are checked errors; concrete runtime records are validated too. Existing Mesh remains Vec3-array typed. Cards, defaults, menu insertion, source save, live/state/zone captures and host JavaScript twins use the ordinary paths; SOP geometry is still refused by 2D export. |
-| `sop/group` | intrinsic | Cooked point/vertex/primitive/edge group mask as an owned exact integer array of zeros and ones. `:owner` selects the source group. Optional `:as_owner point` returns a point-length mask containing any point incident to a selected source element; omitted promotion preserves the source-owner mask. Repeated corners and shared edges contribute membership once, and isolated points are unselected for non-point sources. This mask does not carry traversal order. Missing source groups report `E_GROUP_MISSING`; invalid promotion targets report `E_GROUP_TARGET`. Group names retain exact byte spelling and native ASCII whitespace validation. Packed count origins use the output point owner for promoted masks. Geometry host groups preserve owner, name, membership and optional explicit traversal order; `sop/group_order` remains a query of the source group. Outside the current 2D export scope. |
+| `sop/group` | intrinsic | Cooked point/vertex/primitive/edge group mask as an owned exact integer array of zeros and ones. `:owner` selects the source group. Optional `:as_owner point` returns a point-length mask containing any point incident to a selected source element; omitted promotion preserves the source-owner mask. Repeated corners and shared edges contribute membership once, and isolated points are unselected for non-point sources. This mask does not carry traversal order. Missing source groups report `E_GROUP_MISSING`; invalid promotion targets report `E_GROUP_TARGET`. Group names retain exact byte spelling and native Unicode whitespace validation. Packed count origins use the output point owner for promoted masks. Geometry host groups preserve owner, name, membership and optional explicit traversal order; `sop/group_order` remains a query of the source group. Outside the current 2D export scope. |
 | `sop/group_names` | intrinsic | Owner-filtered names in native insertion order using the shared Houdini-style wildcard, class, escape and exclusion rules. Invalid patterns report `E_GROUP_PATTERN`; names remain exact text arrays. |
 | `sop/group_entries` | intrinsic | `(sop/group_entries geometry pattern :owner "any")` returns ordered parallel text arrays in `{:owners ... :names ...}`. Ordinary groups retain global insertion order across owners, followed by edge groups. Owner filtering and patterns use the same rules as `sop/group_names`; invalid owner/type/pattern or unavailable geometry retain the existing group-source diagnostics. Arrays have no 4,096-entry bound. The native and JavaScript host protocols agree; reached cooked sources remain outside 2D web export. |
 | `sop/attr_entries` | intrinsic | `(sop/attr_entries geometry :owner point)` returns the record `{:name :type :owner}` of parallel text arrays over the stored attributes of one owner (`point`, `vertex`, `primitive`, `detail`; `any` lists every owner) in native attribute order, `type` spelled as `sop/attr_type` does and `owner` as lower-case owner text. Canonical `P` is not a stored attribute and is absent, as in `sop/attr_names`. Dynamic native sources use `Host_source`; 2D web export refuses those sources with `E_WEB_SOURCE`. |
@@ -1386,7 +1360,7 @@ operation. A user function/macro row is not a new runtime primitive.
 | `text/glob_rewrite_set_matches` | intrinsic | Pure `(text/glob_rewrite_set_matches pattern replacement text)`: whether some positive term of the rename set matches the whole name (native `Attribute_pattern.rewrite_set` returns a name), so a caller can refuse an unmatched name that `text/glob_rewrite_set` would return unchanged. Same errors and dynamic-source handling as `text/glob_rewrite_set`. |
 | `sop/group_order` | intrinsic | Record of Boolean `ordered` and exact integer `indices`, preserving ordered-empty versus unordered groups. Edge groups return false and an empty index array. |
 | `sop/with_group` | intrinsic | Immutable owner-aware mask write, preserving topology and unrelated payloads. Optional integer order must enumerate selected elements once, or an order record preserves the query's ordering state. Edge explicit order is `E_GROUP_OWNER`; wrong cardinality, mask or order is `E_GROUP_COUNT`, `E_GROUP_MASK` or `E_GROUP_ORDER`. |
-| `sop/context_seed` | intrinsic | A defnode body cook-context constant, specialized before core lowering. Its literal namespace and node label are UTF-8 FNV-1a hashed into 64 bits, multiplied by `0x9e3779b97f4a7c15`, xor-ed with the context seed, then xor-ed with the unsigned upper 32 bits and truncated to a signed native 63-bit int. The optional literal `:salt` int (low 63 bits of a 64-bit word, bit 63 clear) is xor-ed into the identity before the multiply, as native `mixed_seed(context, identity xor salt)` does; absent, the result is unchanged. Fixtures pass the implicit context as a record of decimal seed text and label; use outside a body or in a pure parameter validator is `E_NODE_CONTEXT`. |
+| `sop/context_seed` | intrinsic | A defnode body cook-context constant, specialized before core lowering. The shared 64-bit word hash combines every context seed and optional literal `:salt` bit; namespace and node label are then hashed as separately length-framed UTF-8 byte sequences. The final word is interpreted as a signed 64-bit Int. Salt defaults to zero. Identical resolved bytes and context values give identical results across process interning order and native/Web runtimes. Fixtures pass the implicit context as a record of decimal seed text and label; use outside a body or in a pure parameter validator is `E_NODE_CONTEXT`. |
 | `sop/uv_sphere` | refused on web | Native geometry factory. |
 | `split-level` | compiler rule | Inline checked definition: packed slices/concatenation, nested maps, `value/rand`, arithmetic and numeric branches. |
 | `sqrt` | primitive | `sqrt` |
@@ -1655,12 +1629,12 @@ authored `:source_attribute` (`Rdk.Mesh_merge.run_tagged`). Its only author is t
 `merge` node: `sop/provenance_base`, a zero-argument int, is available in a defnode
 body only (`E_NODE_CONTEXT` elsewhere or in a validator) and is specialized to the
 base the editor lowering allocated for that call, or -1 when the node is lowered
-without provenance (the port gate). The base is part of the node's cache source.
+without provenance. The base is part of the node's cache source.
 The node's inputs are tagged `base + input index`, and `Lower.tags` reports them
-exactly as the former native lowering did.
+with their allocated source identities.
 
-`sop/context_frame` is the cook frame as a float (`Int64.to_float (Context.frame context)`, what the
-native `attribute_fade` reads). Like `sop/context_seed` it is available in a defnode body only,
+`sop/context_frame` is the cook frame as a float (the ordinary i64-to-f64 conversion used by
+native `attribute_fade`). Like `sop/context_seed` it is available in a defnode body only,
 specialized to a literal before core lowering, so a node that reaches it declares the Frame cache
 dependency and its body is rebuilt when the cook frame changes. No JavaScript twin and no fixture
 (the web target runs `:context draw` graphs, which have `frame/index`).
@@ -1739,7 +1713,7 @@ arity and finite-value validation remain the same as before this sharing rule.
 Int is a native signed 64-bit integer with two's-complement wrapping; every
 `int/*` operation is `i64` wrapping arithmetic. `i64::MIN` is a reachable value:
 `MAX+1 = MIN`, `MIN / -1 = MIN`, `MIN mod -1 = 0`, `abs(MIN) = MIN`. `rand/at`,
-`Rand.float_at` and the geometry hashes keep their historical bit-exact results:
-they are named hash functions that wrap their intermediates to the former signed
-63-bit range internally (`rays_math::hash::wrap_int63`), so seeds equal modulo
-2^63 alias one another. This is deterministic and part of the contract.
+`Rand.float_at` and geometry hashing use the shared full-width 64-bit word/byte
+hash and immutable SplitMix64 generator. Every seed/index bit participates;
+seeds separated by 2^63 are distinct inputs. Frozen raw-bit vectors pin native
+and Web results.

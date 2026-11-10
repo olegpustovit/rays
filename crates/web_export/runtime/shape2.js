@@ -1,8 +1,4 @@
-// Port of lib/scene_command/shape2.ml with the parts of path.ml it uses: adaptive cubic flattening
-// (tolerance 0.25), non-zero scanline fill, and butt-capped, mitred strokes (miter limit 4). Round
-// joins, round caps and quadratics are never reached by polygon, polyline or rounded_rect.
-// Entries are {type: "geometry", vertices: Float64Array (x, y pairs), indices: Int32Array, color}; a
-// colour is a signed int32 or null. Same arithmetic order as the OCaml, so results are bit-equal.
+// Adaptive cubic flattening, nonzero fill and budgeted strokes share native arithmetic order. Geometry entries carry packed f64 vertices, i32 indices and optional packed color. Unsupported join/cap forms stay outside this runtime path.
 
 const TOLERANCE = 0.25, MITER_LIMIT = 4;
 
@@ -61,7 +57,7 @@ function fill(path) {
       else if (was && !inside) {
         const base = vertices.length / 2;
         vertices.push(left.x0, y0, edge.x0, y0, edge.x1, y1, left.x1, y1);
-        indices.push(base + 3, base + 2, base, base + 2, base + 1, base);   // the OCaml conses then reverses the list
+        indices.push(base + 3, base + 2, base, base + 2, base + 1, base);
       }
     }
   }
@@ -72,7 +68,7 @@ function stroke(path, width) {
   const half = width * 0.5, vertices = [], indices = [];
   const vertex = p => { vertices.push(p[0], p[1]); return vertices.length / 2 - 1; };
   const triangle = (a, b, c) => indices.push(c, b, a);   // consed, then reversed
-  const tri = (a, b, c) => { const ic = vertex(c), ib = vertex(b), ia = vertex(a); triangle(ia, ib, ic); };   // OCaml evaluates arguments right to left
+  const tri = (a, b, c) => { const ia = vertex(a), ib = vertex(b), ic = vertex(c); triangle(ia, ib, ic); };
   const unit = (a, b) => {
     const dx = b[0] - a[0], dy = b[1] - a[1], length = Math.sqrt(dx * dx + dy * dy);
     return length === 0 ? null : [dx / length, dy / length];

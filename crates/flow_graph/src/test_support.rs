@@ -1,4 +1,3 @@
-// The one-liners every OCaml test file under lib/flow_graph copies (and lib/test_support).
 use crate::projection as p;
 use flow_check::catalog::Catalog;
 use flow_check::workspace as w;

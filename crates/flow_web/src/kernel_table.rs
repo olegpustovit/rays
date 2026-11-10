@@ -1,4 +1,4 @@
-//! Port of lib/flow_web/kernel_table.ml: the kernel table lib/web_export/runtime/gpu.js loads, as
+//! the kernel table lib/web_export/runtime/gpu.js loads, as
 //! JSON text.
 use crate::text_literal;
 use crate::wgsl::{Kind, Wgsl};

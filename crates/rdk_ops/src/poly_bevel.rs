@@ -34,7 +34,7 @@ pub struct Params {
 }
 
 impl Params {
-    /// The defaults of the OCaml test front end (`Poly_bevel_front.run`).
+    /// Native bevel option defaults.
     #[cfg(test)]
     pub(crate) fn new(distance: f64) -> Params {
         Params {
@@ -65,11 +65,10 @@ fn fail(message: String) -> error::T {
     make(Code::InvalidTopology, &message)
 }
 
-use rdk_core::support::ocaml_trim_is_empty as blank;
 
 fn validate_name(label: &str, name: &Option<String>) -> Result<(), error::T> {
     match name {
-        Some(name) if blank(name) => Err(fail(format!("{PREFIX}: {label} group name must not be empty"))),
+        Some(name) if (name).trim().is_empty() => Err(fail(format!("{PREFIX}: {label} group name must not be empty"))),
         _ => Ok(()),
     }
 }
@@ -232,7 +231,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     }
     let point_scale: Option<Vec<f64>> = match &params.point_scale_attribute {
         None => None,
-        Some(name) if blank(name) => {
+        Some(name) if (name).trim().is_empty() => {
             return Err(fail(format!("{PREFIX}: point scale attribute name must not be empty")));
         }
         Some(name) => match geometry::find_attribute(attribute::Owner::Point, name, geometry_value) {
@@ -1367,8 +1366,7 @@ mod tests {
             cardinality(&connected, "edges") == 4 && cardinality(&connected, "corners") == 2,
             "PolyBevel connected edge-run corner planning"
         );
-        // The OCaml fixture is a 3 x 2 x 2 divided box with point normals; a plain box with a
-        // point normal attribute covers the same recompute and flat-angle filter.
+        // A box with point normals qualifies recomputation and flat-angle filtering.
         let normals = attribute::create_owned(
             "N",
             attribute::Owner::Point,

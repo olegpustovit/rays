@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/network.ml: SOP geometry with the live arguments of a lowered workspace
+//! SOP geometry with the live arguments of a lowered workspace
 //! graph. Layout and probes stay in the editor document; resolution never changes these literal
 //! records.
 use flow_check::workspace::Paths;
@@ -20,8 +20,7 @@ pub type FrameNode = Arc<dyn Fn(&Network, &State, &Frame, &node::T) -> Result<no
 
 static NEXT_IDENTITY: AtomicU64 = AtomicU64::new(1);
 
-/// A lowered graph's geometry with its live drives. Every `with_*` makes a network with a fresh
-/// identity ({@link ptr_eq}, OCaml `==`); a clone keeps it.
+/// Every with_* rebuild gives a network a fresh identity; clones preserve it.
 #[derive(Clone)]
 pub struct Network {
     pub geometry: edit_graph::T,
@@ -48,7 +47,7 @@ fn fresh() -> u64 {
 /// Stable identity retained by clones and changed by edits.
 pub fn identity(network: &Network) -> u64 { network.identity }
 
-/// OCaml `==` on networks.
+/// Physical network identity.
 pub fn ptr_eq(a: &Network, b: &Network) -> bool {
     a.identity == b.identity
 }

@@ -46,8 +46,7 @@ fn shapes_layout_finite_bounds_owned_commands() {
 }
 
 #[test]
-fn failing_tessellation_is_an_error_with_ocaml_message() {
-    // A non-finite point fails tessellation; OCaml's Shape2 raised Invalid_argument with these texts.
+fn failing_tessellation_returns_the_operation_error() {
     let bad = path_mod::Point { x: f64::NAN, y: 0.0 };
     let ok = path_mod::Point { x: 1.0, y: 1.0 };
     let open = path_mod::of_commands(&[path_mod::Command::MoveTo(bad), path_mod::Command::LineTo(ok)]);

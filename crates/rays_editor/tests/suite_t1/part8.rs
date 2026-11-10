@@ -253,8 +253,7 @@ pub fn run_idle_rest() {
     if !gpu() {
         return;
     }
-    // An idle frame is the last one again: no input, no cook, a clock nothing reads.
-    // (The allocation bounds of the OCaml test have no Gc counterpart; the scenes compare by Scene::same.)
+    // An idle frame repeats retained state with no unread clock/input/cook changes.
     struct T {
         e: editor::Editor,
         count: i64,
@@ -295,7 +294,7 @@ pub fn run_idle_rest() {
     let after_rest = |t: &mut T, wake: &dyn Fn(&mut T) -> Vec<rays::scene::node>, what: &str| {
         let prev = t.tick0();
         let woke = wake(t);
-        // OCaml asserted physical inequality here; Scene::same compares pictures, and a moved pointer draws the same one
+        // Pointer movement may leave the rendered Scene picture unchanged.
         let _ = (&woke, &prev);
         for _ in 0..12 {
             t.tick0();
@@ -315,7 +314,7 @@ pub fn run_idle_rest() {
         (graph editor :context editor (ui/workspace (ui/canvas (ref picture) :focus true))))"##,
         30,
     );
-    // OCaml asserted a fresh Scene.t each frame here; Scene::same compares pictures and this one holds still, so unobservable
+    // Scene::same compares pictures, so a stationary frame need not expose a fresh scene identity.
     let _ = (t.tick0(), t.tick0());
     // stopped, it does
     t.tick((450., 300.), 1, vec![key(Key::Space)]);

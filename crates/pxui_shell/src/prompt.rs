@@ -1,4 +1,4 @@
-//! Port of lib/pxui_shell/prompt.ml: standard name and searchable-picker modals; hosts interpret
+//! standard name and searchable-picker modals; hosts interpret
 //! the result.
 use crate::kit;
 use input::Key;

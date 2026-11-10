@@ -69,7 +69,7 @@ pub fn run_values() {
     check(has(&source(&e), "(str \"text\")"), &format!("a str binding: {}", source(&e)));
     editor::close(&e);
     let facs = factories();
-    check(!facs.iter().any(|f| sop::edit_graph::factory_key(f) == "line"), "Line production menu still uses an OCaml registration");
+    check(!facs.iter().any(|f| sop::edit_graph::factory_key(f) == "line"), "Line production menu still uses a native registration");
     let e = add0("line");
     check(editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), "(sop/line)"), &format!("Line actual zero-input menu insertion: {}", source(&e)));
     let ws = editor::workspace(&e);
@@ -77,7 +77,7 @@ pub fn run_values() {
     let pane = flow_graph::projection::of_graph(&catalog(), &ws.checked, "g").expect("scope");
     check(pane.nodes.iter().any(|c| c.head == "sop/line"), "Line menu insertion has no geometry card");
     editor::close(&e);
-    check(!facs.iter().any(|f| sop::edit_graph::factory_key(f) == "points"), "Points production menu still uses an OCaml registration");
+    check(!facs.iter().any(|f| sop::edit_graph::factory_key(f) == "points"), "Points production menu still uses a native registration");
     let pick_points = |editor: &editor::Editor| -> usize {
         let doc = build_ok(&editor::workspace(editor));
         let lowered = &doc.workspace.lowered;

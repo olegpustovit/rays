@@ -1,4 +1,4 @@
-//! Port of lib/flow_native/marks_scene.ml: the adapter from the mark table
+//! the adapter from the mark table
 //! (`scene_command::marks`, specification/marks.md) to `rays::scene`. It builds the same
 //! `ui_batch` records, geometry and transforms `Drawing` builds today, so the renderer sees the
 //! same commands.

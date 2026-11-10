@@ -1,7 +1,4 @@
-//! Port of lib/flow_gpu/test_spirv.ml (the SPIR-V half of lib/flow_shader's tests): every kernel
-//! prints deterministically, shares the Metal kernel's bindings and layout, and matches the digest
-//! goldens byte for byte (size and MD5 of the module): exact kernels crates/flow_gpu/goldens/spirv.sexp,
-//! fast ones tests/spirv_fast.sexp.
+//! Generated SPIR-V kernels validate and preserve their shared program contracts.
 use flow_ir::kernel_layout;
 use flow_shader::emit::{self, Curves};
 use rays_math::hash::md5_hex;

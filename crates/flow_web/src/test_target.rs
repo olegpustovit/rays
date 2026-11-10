@@ -1,4 +1,4 @@
-//! Port of lib/flow_web/test_target.ml: WebGPU kernel legality as diagnostics with spans.
+//! WebGPU kernel legality as diagnostics with spans.
 use crate::target;
 use crate::test_program::compile;
 use flow_ir::core_ir::region;

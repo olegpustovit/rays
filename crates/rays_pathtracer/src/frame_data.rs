@@ -1,4 +1,4 @@
-//! Port of lib/rays_pathtracer/frame_data.ml: the film's buffers and the camera's axes.
+//! the film's buffers and the camera's axes.
 use ogpu_core::backend::{self as b, Buffer, Texture};
 use ogpu_core::types::{BufferDescriptor, BufferUsage, Memory, TextureDescriptor, TextureFormat, TextureUsage};
 use rays_math::vec3;

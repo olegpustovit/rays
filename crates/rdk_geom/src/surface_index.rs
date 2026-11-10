@@ -696,10 +696,7 @@ fn triangle_pairs_of(
         return Ok((Vec::new(), Vec::new()));
     }
     let shared_topology = std::sync::Arc::ptr_eq(&left_surface.topology.vertex_points, &right_surface.topology.vertex_points);
-    // A lower bound keeps empty/disjoint workloads O(F / 128) in range metadata even when the caller
-    // requests grain one; output order stays triangle-major, independent of this subdivision.
-    // ponytail: OCaml's non-single-pass mode counts then fills; per-range buffers joined in range
-    // order give the same bytes in one traversal, so both modes share this path.
+    // A minimum range size bounds empty/disjoint metadata at O(F/128), even for grain one. Output stays triangle-major; one traversal joins per-range outputs in deterministic range order.
     let range_size = if single_pass { grain.max(128) } else { grain.max(1) };
     let ranges = support::range_count(left_count, range_size) as usize;
     let mut parts = vec![(Vec::new(), Vec::new()); ranges];
@@ -833,7 +830,7 @@ fn self_pairs_disjoint_topology(
     };
     let mut first_all: Vec<i64> = Vec::new();
     let mut second_all: Vec<i64> = Vec::new();
-    // `gather` of OCaml, unrolled: cross pairs of every peeled hub, then the final self pairs.
+    // Visit cross pairs for each peeled hub, then final self-pairs.
     let mut owned: Option<T> = None;
     loop {
         let indexed: &T = owned.as_ref().unwrap_or(surface);
@@ -1870,7 +1867,6 @@ mod tests {
 
 #[cfg(test)]
 mod ported_tests {
-    //! Port of lib/rdk/test_surface_index.ml.
     use super::*;
 
     fn high_valence_surface() -> geometry::T {

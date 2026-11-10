@@ -1,6 +1,4 @@
-//! Port of lib/editor_core/editor_core.ml: Keymap, Guide_context, Command and Router (History is specialised in rays_editor::editor_history: it names the editor Document).
-//! Each OCaml submodule is a Rust module with the same name; its main type is `t` (or the OCaml
-//! type name where it has one).
+//! Pure editor state: Keymap, Guide_context, Command and Router. Document-specific History lives in rays_editor::editor_history.
 
 pub mod keymap {
     use input::{Key, Platform};
@@ -179,7 +177,7 @@ pub mod command {
         pub action: usize,
     }
 
-    /// The OCaml optional arguments `?trigger ?scope ?guide` are positional here.
+    /// Optional trigger, scope and guide arguments.
     pub fn make(
         trigger: Option<Trigger>,
         scope: Option<Panel>,

@@ -1,4 +1,4 @@
-// Port of lib/pxui_graph/scope_state.ml(i): the graph pane's immutable view state, layout and culling
+// the graph pane's immutable view state, layout and culling
 // queries. The pane draws one `Projection::Scope` with its zones, rails, iteration selectors, chips and
 // output rows on the shared PXUI handle and returns typed requests; it never edits.
 use flow_syntax::symbol::Symbol;

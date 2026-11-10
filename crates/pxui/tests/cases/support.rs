@@ -1,4 +1,3 @@
-//! Helpers shared by the PXUI interaction tests (the OCaml test_ui.ml frame builders).
 use input::{Event, Key, MouseButton, Platform};
 use pxui::ui::*;
 use rays::frame;
@@ -46,7 +45,6 @@ pub fn kc(c: char) -> Key {
     Key::KeyChar(c)
 }
 
-/// The OCaml test_ui `frame`: a 320x240 frame at `time` with the given scale, keys and events.
 pub fn frame_at(keys: Vec<Key>, scale: f64, time: f64, events: Vec<Event>) -> frame::Frame {
     let mut input = input::at_time(time);
     input.dt = 1.0 / 60.0;

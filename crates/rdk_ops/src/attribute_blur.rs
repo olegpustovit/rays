@@ -74,7 +74,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
             return Err(invalid("selection must be a matching point group"));
         }
     }
-    let nothing = crate::attribute_ops::is_blank(&params.pattern)
+    let nothing = (&params.pattern).trim().is_empty()
         || params.iterations == 0
         || match params.selection.as_ref() {
             Some(selection) => group::cardinality(selection) == 0,

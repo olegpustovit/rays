@@ -1,4 +1,4 @@
-//! The OCaml `scope_gestures_3` and `scope_gestures_4` (lists, records, expression chips; frames, f, marquee).
+//! List/record/expression-chip gestures and scope framing/marquee contracts.
 use crate::support::*;
 use flow_graph::edit_tree::ArgKey;
 use flow_graph::flow_edit::Op;
@@ -149,7 +149,7 @@ fn scope_gestures_3() {
     check(scope::selected(&eview) == want, "the pane did not keep the row selected beside its card");
 }
 
-/// OCaml `drag`: press at `a`, move to `b`, release; the changes of the move and the release.
+/// Drag presses at a, moves to b and releases; return move/release changes in order.
 fn drag(ui: &mut pxui::ui::Ui, view: scope::Pane, shift: bool, a: (i64, i64), b: (i64, i64)) -> (scope::Pane, Vec<Change>) {
     let mut evs = Vec::new();
     if shift {

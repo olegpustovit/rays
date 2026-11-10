@@ -1,4 +1,4 @@
-//! Port of lib/flow_native/live_frame.ml. Capture ordered input and logical dimensions.
+//! Capture ordered input and logical dimensions.
 use input::{Event, Frame};
 
 /// The window's focus is the editor's: a sketch reads only its loss.

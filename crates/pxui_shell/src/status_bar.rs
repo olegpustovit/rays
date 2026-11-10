@@ -1,4 +1,4 @@
-//! Port of lib/pxui_shell/status_bar.ml: the status strip, the guide strip and the echo tips.
+//! the status strip, the guide strip and the echo tips.
 use crate::kit;
 use std::borrow::Cow;
 use editor_core::guide_context;
@@ -264,7 +264,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                 fx - 5.0
             };
             let stored = |ui: &Ui| -> Option<f64> {
-                ui.text_state(&bar).and_then(|t| cfmt::parse_ocaml_float(&t)).map(|w| w.min(max_w))
+                ui.text_state(&bar).and_then(|t| (&t).parse::<f64>().ok()).map(|w| w.min(max_w))
             };
             let split_x = (match stored(ui) {
                 Some(w) => fx + w,

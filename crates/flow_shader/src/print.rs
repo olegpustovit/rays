@@ -1,6 +1,4 @@
-//! The tables and driver of `print_shader` (port of lib/flow_shader/print_shader.ml): prints an
-//! owner library's shaders from their `.rays` sources, as (file name, bytes) pairs. The OCaml
-//! executable's `web` owner (WGSL printers over flow_web) is not ported here.
+//! Print owner shaders from their .rays sources as filename/byte pairs; the Web owner lives in flow_web.
 use crate::raster;
 
 /// (output name, source, vertex entry, fragment entry, textures in argument buffers)

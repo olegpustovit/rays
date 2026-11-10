@@ -160,8 +160,7 @@ impl Run {
     }
 }
 
-/// The monolithic OCaml `run` is cut in five sections, each from a fresh editor (a 144-frame
-/// chain would be over the 5 s case budget in a debug build).
+/// Each scene-tree section starts from a fresh editor to keep the full frame chain within the five-second case budget.
 fn section(body: fn(&mut Run, &Ctx, &Rc<Cell<i64>>)) {
     if !common::gpu() {
         return;

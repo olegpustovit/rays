@@ -1,9 +1,4 @@
-//! Port of lib/flow_web/js.ml: JavaScript for packed regions placed on the CPU (`region`) and for
-//! frame programs (`frame`). The printed text must match the OCaml printer byte for byte.
-//!
-//! Rust shape notes: OCaml's `Diagnostic.Error` exception is a `Result<_, Diagnostic>`; the
-//! optional arguments of `frame` are `FrameOptions` (callbacks are `Arc<dyn Fn>`); the printer
-//! contexts own their data (no lifetimes).
+//! Print CPU packed regions and structured frame programs as JavaScript. Diagnostics are Results; frame options own Arc callbacks and printer contexts own their data.
 use crate::text_literal;
 use flow_syntax::symbol::Symbol;
 use flow_check::workspace::DiagnosticPolicy;
@@ -28,25 +23,7 @@ fn escape(s: &str) -> String { text_literal::quote(s.as_bytes()) }
 
 fn error(code: &str, message: &str) -> Diagnostic { value::fail(code, message) }
 
-/// OCaml's `%S` of an identifier-like string.
-fn ocaml_quote(s: &str) -> String {
-    let mut out = String::from("\"");
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\t' => out.push_str("\\t"),
-            '\r' => out.push_str("\\r"),
-            c if (c as u32) < 32 || c as u32 == 127 => {
-                let _ = write!(out, "\\{:03}", c as u32);
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
+
 
 fn binary(operation: Binary, a: &str, b: &str) -> String {
     match operation {
@@ -242,7 +219,7 @@ impl Printer {
                     Conversion::IntegerResult(n) => (n.clone(), format!("Math.floor({} + 0.5)", self.numeric(*a))),
                     Conversion::ToFloat => unreachable!("to_float is matched above"),
                 };
-                format!("convert({}, {x})", ocaml_quote(&name))
+                format!("convert({}, {x})", escape(&name))
             }
             Instruction::Raise(_, code, message, cause) => format!(
                 "fail({}, {}{})",

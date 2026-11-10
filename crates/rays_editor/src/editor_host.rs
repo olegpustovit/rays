@@ -1,8 +1,4 @@
-//! The host's entry points into the model: scene bookkeeping, settings and root edits, host
-//! gestures, the World, placed pieces, picking, reload and the carry's surface. Port of
-//! lib/rays_editor/editor_host.ml.
-//!
-//! OCaml optional arguments are `Option` parameters, placed as in the OCaml signature.
+//! Model entry points handle scene/settings edits, World state, picking, reload and carried surfaces; optional settings use concrete Options.
 #![allow(non_camel_case_types)]
 use std::rc::Rc;
 use std::sync::Arc;
@@ -43,9 +39,7 @@ pub enum scene_mode {
     Amend,
 }
 
-/// Editor_loop-owned scene edits (camera bookkeeping, a camera following the viewport): view
-/// state, never an undo entry. `active_camera`: `None` is OCaml's omitted argument (the document's
-/// own).
+/// Host camera bookkeeping changes view state without history entries. active_camera None uses the document camera.
 pub fn scene_edit(value: &mut EditorModel, mode: scene_mode, active_camera: Option<Option<i64>>, scene_graph: kg::T) {
     if value.carry.is_some() {
         return;

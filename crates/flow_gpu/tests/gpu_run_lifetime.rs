@@ -1,5 +1,4 @@
-//! Native port of lib/flow_gpu/test_run_lifetime.ml.
-//! Run, Output and Pipelines are !Send: Rust excludes the OCaml wrong-domain owner moves.
+//! Run, Output and Pipelines are not Send; aliases retain native ownership across release and readback.
 use crate::common;
 use common::test_program as tp;
 use flow_gpu::{pipelines, run};

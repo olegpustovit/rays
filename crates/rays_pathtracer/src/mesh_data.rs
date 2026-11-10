@@ -1,6 +1,4 @@
-//! Port of lib/rays_pathtracer/mesh_data.ml: prepared geometry (flat, instanced or a scene of
-//! several placed meshes), pure data that a cook worker may build off the initial domain.
-//! The OCaml `'material t` is concrete here: the only instantiation is `material`.
+//! Prepared flat/instanced/scene geometry is pure worker-safe data with concrete material values.
 use crate::frame_data::{put_f32, put_u32};
 use crate::rays_pathtracer::Material;
 use ogpu_core::backend as b;

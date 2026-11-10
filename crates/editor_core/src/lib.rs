@@ -1,6 +1,4 @@
-//! Port of lib/editor_core: pure editor state shared by the sketch host and presentation adapters.
-//! `editor_core` holds Keymap, Guide_context, Command and Router, re-exported at the crate
-//! root as the OCaml module paths `Editor_core.History` and so on.
+//! Pure editor state shared by sketch hosts and presentation adapters, re-exported at the crate root.
 #![allow(non_camel_case_types)]
 
 pub mod editor_core;

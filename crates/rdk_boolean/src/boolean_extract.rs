@@ -1,7 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_extract.ml: typed expression extraction from classified Weiler
-//! cells. OCaml exceptions (`Invalid_argument`, `Cancel.Cancelled`, `Error.Rdk`) travel as the
-//! private `Fail` enum and are mapped to the same typed errors the OCaml `try` blocks produce.
-//! Ancestry planes that `View.ancestry_view` exposes are shared `Arc` slices.
+//! Extract typed expressions from classified Weiler cells. Private Fail variants preserve cancellation, invalid-input and RDK error codes. Ancestry planes share Arc storage.
 use std::sync::Arc;
 
 use rdk_core::packed;
@@ -504,7 +501,6 @@ fn cached_barycentric(
     }
 }
 
-/// OCaml's optional arguments of `build_with_ancestry`.
 #[derive(Clone, Copy)]
 pub struct Options {
     pub require_closed: bool,

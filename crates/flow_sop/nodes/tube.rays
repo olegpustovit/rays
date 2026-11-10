@@ -87,7 +87,7 @@
                       tips (int/add (if (= top.value 0.0) 1 0) (if (= bottom.value 0.0) 1 0))]
                  (or (not (and top.valid bottom.valid))
                      (tube_fits connectivity end_caps consolidate_cap_points tips rows columns)))
-     :code "E_PARAM" :message "sop/tube: output cardinality exceeds OCaml array limits")
+     :code "E_PARAM" :message "sop/tube: output cardinality exceeds native storage or index limits")
    (uv_attribute : text "uv" :label "UV attribute" :folder ["Attributes"]
      :validate (not (or (equal? (text/trim uv_attribute) "P") (equal? (text/trim uv_attribute) "N")))
      :code "E_PARAM" :message "sop/tube: UV attribute cannot be P or N")

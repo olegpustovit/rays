@@ -10,7 +10,7 @@ fn gpu_scene2_argument() {
     }
     let before = ogpu_core::impl_::live_handles().unwrap();
     let runtime = renderer::create_offscreen(&renderer::Configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, ..renderer::default_configuration() }).unwrap();
-    scene2_argument_body::run(&runtime, &scene2_argument_body::OCAML, || {});
+    scene2_argument_body::run(&runtime, &scene2_argument_body::STRESS, || {});
     renderer::destroy(&runtime).unwrap();
     assert_eq!(ogpu_core::impl_::live_handles().unwrap(), before, "scene2 retained argument live-handle delta");
 }

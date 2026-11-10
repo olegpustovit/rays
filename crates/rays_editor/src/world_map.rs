@@ -1,6 +1,5 @@
 //! The World's lat-long map in the view pane: its sRGB image, where a point lands on it, and the
-//! drags that rotate the World or move a layer or the sun. Port of lib/rays_editor/world_map.ml.
-#![allow(non_camel_case_types)]
+//! drags that rotate the World or move a layer or the sun. #![allow(non_camel_case_types)]
 use editor_document::document::Level;
 use editor_document::kind_graph as kg;
 use param::Value;

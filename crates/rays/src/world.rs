@@ -1362,7 +1362,7 @@ pub fn presets() -> Vec<(String, World)> {
     ]
 }
 
-/// `{ baked with background; exposure }` (the OCaml record update; the products are shared).
+/// Update baked background/exposure while sharing the retained products.
 pub fn with_background(b: &baked, background: background, exposure: Option<f64>) -> baked {
     baked { background, exposure: exposure.unwrap_or(b.exposure), ..b.clone() }
 }

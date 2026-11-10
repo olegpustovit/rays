@@ -1,8 +1,4 @@
-//! Ports of the OCaml tests that target this library: `surface_failure` of
-//! lib/rdk/test_attribute_lifecycle.ml, the quad/extrude bridge checks of lib/rdk/test_rdk.ml, the
-//! Packed_pieces checks of lib/rays_editor/test/test_packed_pieces.ml (the explosion node is built
-//! as parameter fields instead of a Lisp node; the Boolean-fracture half needs the SOP layer), and
-//! a few reads of Geometry_view.
+//! Bridge tests cover surface conversion failures, quad/extrusion topology, piece rendering and geometry inspection.
 use std::sync::Arc;
 
 use param::{FieldView, Impact, KindView, Value};
@@ -308,7 +304,7 @@ fn geometry_view_keeps_opaque_bytes_and_validates_material_identifiers() {
     let g = geometry::with_attribute(attribute::create_owned("tag", Owner::Primitive, Storage::Text(std::sync::Arc::new(vec![bytes.clone(), "猫".as_bytes().to_vec()].into()))).unwrap(), &two_pieces()).unwrap();
     let columns = geometry_view::columns(2, &g);
     let (_, cell) = columns.iter().find(|(name, _)| name == "tag").unwrap();
-    assert_eq!(cell(0), rdk_ops::attribute_ops::ocaml_quote(&bytes));
+    assert_eq!(cell(0), rdk_core::attribute::quote_bytes((&bytes).as_ref()));
     assert_eq!(cell(1), "猫");
     let surface = geometry_view::surface(&g);
     let origin = vec3::create(2.0, 0.0, 5.0);

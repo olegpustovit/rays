@@ -5,7 +5,7 @@ use std::sync::Arc;
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, packed};
 use rdk_core::error::Code;
 
-use crate::attribute_ops::{is_blank, make_error, ocaml_quote};
+use crate::attribute_ops::{make_error};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RenameConflict {
@@ -70,7 +70,7 @@ fn check_cancel(cancel_token: Option<&cancel::T>, index: i64) -> Result<(), erro
 fn compile_optional(label: &str, source: &Option<String>) -> Result<Option<attribute_pattern::T>, error::T> {
     match source {
         None => Ok(None),
-        Some(source) if is_blank(source) => Ok(None),
+        Some(source) if (source).trim().is_empty() => Ok(None),
         Some(source) => attribute_pattern::compile(source)
             .map(Some)
             .map_err(|failure| fail(format!("{label}: {}", error::message(&failure)))),
@@ -190,7 +190,7 @@ fn rename_entry(
     if old_name == name {
         return Ok(());
     }
-    if is_blank(name) {
+    if (name).trim().is_empty() {
         return Err(fail("Attribute Rename: rewrite produced an empty attribute name".to_owned()));
     }
     if owner == attribute::Owner::Point && name == "P" {
@@ -204,7 +204,7 @@ fn rename_entry(
             RenameConflict::AttributeRenameError => Err(fail(format!(
                 "Attribute Rename: destination {} attribute {} already exists",
                 owner_name(owner),
-                ocaml_quote(name)
+                rdk_core::attribute::quote_bytes((name).as_ref())
             ))),
             RenameConflict::AttributeRenameOverwrite => {
                 store_remove(store, destination);
@@ -300,7 +300,7 @@ fn swap_set_position(store: &mut Store, item: &attribute::T) -> Result<(), error
         }
         _ => Err(fail(format!(
             "Attribute Swap: point position P requires float3 storage, but {} is {}",
-            ocaml_quote(attribute::name(item)),
+            rdk_core::attribute::quote_bytes((attribute::name(item)).as_ref()),
             attribute::kind_name(item)
         ))),
     }

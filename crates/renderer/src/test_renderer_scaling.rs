@@ -1,6 +1,4 @@
-//! lib/renderer/test_renderer_scaling.ml. The OCaml test also counted minor-heap words per cached
-//! call; Rust has no such counter, so the cached path is checked for identity instead (the same
-//! draws come back without being rebuilt).
+//! Cached scene scaling returns the same draw owners without rebuilding.
 use crate::renderer::native;
 use crate::renderer_lowering::default_state;
 use crate::scene_execution::{empty_bytes, GeometryDraw, Mesh, MeshKey, PipelineFamily, SampledDraw};

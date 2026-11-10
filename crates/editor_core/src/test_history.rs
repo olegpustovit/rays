@@ -1,4 +1,4 @@
-//! Port of lib/editor_core/test_history.ml: the Router and the platform-modifier labels (the History half lives in rays_editor/src/test_editor_history.rs).
+//! the Router and the platform-modifier labels (the History half lives in rays_editor/src/test_editor_history.rs).
 use crate::command;
 use crate::keymap::{label, Trigger};
 use crate::panels::Panel;

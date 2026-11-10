@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/test_graph.ml: graph/shortest_paths, graph/color, graph/chains, graph/forest
+//! graph/shortest_paths, graph/color, graph/chains, graph/forest
 //! against independent oracles and the RDK callers they wrap. The reference interpreter and the strict
 //! compiled tier must agree with the oracle at one and eight domains.
 use crate::{attribute_kernel as ak, catalog, operators};

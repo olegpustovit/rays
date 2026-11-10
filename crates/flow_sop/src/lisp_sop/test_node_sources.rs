@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/test_node_sources.ml: the embedded node library, its pruning, kept checks,
+//! the embedded node library, its pruning, kept checks,
 //! cache-key facts, manifest round trip and diagnostics.
 use super::support::*;
 use crate::{catalog, context_kernel, lower, manifest, operators};
@@ -291,4 +291,31 @@ fn library_diagnostics_keep_their_codes_spans_and_messages_and_checks_are_kept()
     assert_eq!(check(text), expected);
     assert_eq!(catalog::private::library_checks(), before);
     let _ = Severity::ErrorSeverity;
+}
+
+#[test]
+fn enumerate_endpoint_check_covers_full_signed_range() {
+    let library = parse(&format!("{}\n{}", include_str!("../../nodes/enumerate.rays"), include_str!("../../nodes/extract_centroid.rays")));
+    let starts = [i64::MIN, i64::MIN + 1, -(1i64 << 62), -1, 0, 1, i64::MAX - 1, i64::MAX];
+    let steps = [i64::MIN, -i64::MAX, -3, -2, -1, 0, 1, 2, 3, i64::MAX];
+    let mut calls = Vec::new();
+    let mut expected = Vec::new();
+    for start in starts { for step in steps { for top in [0, 1, 2, i64::MAX] {
+        calls.push(format!("(enumerate_overflows {start} {step} {top})"));
+        let endpoint = start as i128 + step as i128 * top as i128;
+        expected.push(Value::Bool(endpoint < i64::MIN as i128 || endpoint > i64::MAX as i128));
+    }}}
+    for (start, step, top) in [(i64::MIN, 3i64, 6_148_914_691_236_517_205i64), (i64::MIN, 3, 6_148_914_691_236_517_206), (i64::MAX, -3, 6_148_914_691_236_517_205), (i64::MAX, -3, 6_148_914_691_236_517_206), (i64::MIN, 2, i64::MAX)] {
+        calls.push(format!("(enumerate_overflows {start} {step} {top})"));
+        let endpoint = start as i128 + step as i128 * top as i128;
+        expected.push(Value::Bool(endpoint < i64::MIN as i128 || endpoint > i64::MAX as i128));
+    }
+    for (points, count) in [(0, i64::MAX), (1, i64::MAX), (2, 1i64 << 62), (2, (1i64 << 62) + 1), (3, i64::MAX / 3), (3, i64::MAX / 3 + 1), (i64::MAX, 0), (i64::MAX, 2)] {
+        calls.push(format!("(ec_key_fits {points} {count})"));
+        expected.push(Value::Bool(points as i128 * count as i128 <= i64::MAX as i128 + 1));
+    }
+    let source = parse(&format!("(workspace full_width (graph result :context host (list {})))", calls.join(" ")));
+    let workspace = checked(catalog::check_workspace(operators::all(), false, Some(&library), &Catalog { version: 1, kinds: vec![] }, &source));
+    let evaluation = flow_eval::r#static(&workspace, false, None).unwrap();
+    assert_eq!(evaluation.results[0].1, Value::List(std::sync::Arc::new(expected)));
 }

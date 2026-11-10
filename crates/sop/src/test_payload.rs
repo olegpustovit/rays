@@ -1,6 +1,4 @@
-//! Port of lib/sop/test_payload.ml. The OCaml test cooks `Image_nodes.noise_factory` (deferred
-//! module) and a Lisp `sop/transform`; here a small deterministic image generator and a
-//! geometry-adapter node stand in for them, keeping every session/accounting assertion.
+//! Deterministic native image/geometry fixtures retain all session and accounting assertions.
 use std::sync::Arc;
 
 use rays_math::mat4;

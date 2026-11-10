@@ -1,4 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_weiler.ml: Weiler half-facet adjacency and local shell graph.
+//! Weiler half-facet adjacency and local shell graph.
 use rdk_core::support::DisjointSet;
 use std::sync::Arc;
 

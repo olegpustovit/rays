@@ -1,4 +1,4 @@
-//! Port of lib/rdk/ops/mesh/subdivide_refine.ml: stencil plans, creases, face-varying refinement,
+//! stencil plans, creases, face-varying refinement,
 //! attribute/group remapping and local-part combination for polygon subdivision.
 pub(crate) use rays_math::float::{min as fmin, max as fmax};
 use rdk_core::support::DisjointSet;
@@ -66,7 +66,7 @@ use TrianglePolicy::*;
 
 pub(crate) const EDGE_ANCESTRY_PREFIX: &str = "__rdk_subdivide_edge_ancestry_";
 
-/// OCaml `Error.Fail message`: the guard at the public entry rebuilds it with the operation's code.
+/// Public subdivision maps helper failures into its operation code.
 pub(crate) fn fail(message: String) -> error::T {
     error::new("Rdk_mesh.Subdivide.subdivide", Code::InvalidParameter, message)
 }
@@ -75,7 +75,7 @@ pub(crate) fn failm(message: &str) -> error::T {
     fail(message.to_owned())
 }
 
-/// OCaml `Invalid_argument`.
+/// Internal invalid-input failure.
 pub(crate) fn invalid_arg(message: String) -> error::T {
     error::new("Rdk_mesh.Subdivide.subdivide", Code::InvalidArgument, message)
 }
@@ -1676,13 +1676,12 @@ pub enum FvarRefinement {
 
 
 
-/// OCaml `Float.equal`: NaN equals itself, zeros of either sign are equal.
+/// Float equality treats NaNs as equal and both signed zeros as equal.
 pub(crate) fn float_equal(a: f64, b: f64) -> bool {
     a == b || (a.is_nan() && b.is_nan())
 }
 
-// The face-varying refinement walks union-find sets, so it runs sequentially (the OCaml runs
-// disjoint per-point sets concurrently); the result is identical.
+// Face-varying union-find refinement runs serially while preserving the same disjoint-set result.
 pub(crate) fn fvar_refinement(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,

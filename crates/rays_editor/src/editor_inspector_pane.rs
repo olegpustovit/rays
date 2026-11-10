@@ -1,4 +1,4 @@
-//! Port of crates/rays_editor/editor_inspector_pane.ml: the Inspector panel of a frame. Which subject
+//! the Inspector panel of a frame. Which subject
 //! it shows: the node selected in the graph pane, a scene object or World layer, the settings and
 //! camera panel when nothing is selected. Bundle C.
 #![allow(non_camel_case_types)]

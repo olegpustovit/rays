@@ -1,6 +1,4 @@
-//! Immutable perspective and orthographic cameras.
-//!
-//! Functions OCaml documents as raising `Invalid_argument` return `Err(message)`.
+//! Immutable perspective/orthographic cameras return validation errors as Result messages.
 use rays_math::mat4;
 use rays_math::vec3;
 
@@ -141,7 +139,7 @@ fn projection_matrix(viewport: (i64, i64, i64, i64), camera: &Camera) -> Result<
 }
 
 pub(crate) fn view_projection_matrix(viewport: (i64, i64, i64, i64), camera: &Camera) -> Result<mat4::T, String> {
-    // OCaml evaluates the right operand of an application first: the view matrix, then the projection.
+    // Validate the view matrix before projection, preserving error priority.
     let view = view_matrix(camera)?;
     let projection = projection_matrix(viewport, camera)?;
     Ok(mat4::mul(&projection, &view))
@@ -188,9 +186,8 @@ pub fn world_to_camera(camera: &Camera, point: vec3::T) -> Result<vec3::T, Strin
 /// A world-space ray origin and normalized direction.
 pub fn screen_ray(viewport: (i64, i64, i64, i64), camera: &Camera, at: (f64, f64)) -> Result<Option<(vec3::T, vec3::T)>, String> {
     let (x, y) = at;
-    // Tuple components evaluate right to left in OCaml: the far point first.
-    let far = screen_to_world(viewport, camera, vec3::create(x, y, 1.))?;
     let near = screen_to_world(viewport, camera, vec3::create(x, y, 0.))?;
+    let far = screen_to_world(viewport, camera, vec3::create(x, y, 1.))?;
     Ok(match (near, far) {
         (Some(near), Some(far)) => Some((near, vec3::normalize(vec3::sub(far, near)))),
         _ => None,

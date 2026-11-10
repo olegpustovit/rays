@@ -1,4 +1,4 @@
-//! `rays` (port of bin/rays.ml): an empty editor, a .rays workspace opened natively, check, fmt, mem, web.
+//! `rays`: an empty editor, a .rays workspace opened natively, check, fmt, mem, web.
 use rays_bin::{check, fmt, web, EMPTY};
 use rays_editor::rays_editor::{measure, workspace};
 

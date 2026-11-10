@@ -1,4 +1,4 @@
-//! Port of lib/editor_document/document_edit.ml: the document reducers. Every edit of a
+//! the document reducers. Every edit of a
 //! `document::T` is rewritten, checked and lowered atomically, or refused and changes nothing.
 use crate::document::{self, Origin};
 use crate::layout_by_path as lbp;

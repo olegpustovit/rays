@@ -1,9 +1,4 @@
-//! The editor's frame coordinator and resource lifetime. Port of lib/rays_editor/editor_loop.ml.
-//!
-//! Conventions of this port (see loop_model.rs): `update_with`'s `inspector` answers `Rc<dyn Any>`
-//! (OCaml's `'a`); frame closures receive its `Ui`. `Mem.root` attributes retained source and
-//! checked-term buffers when the immutable document changes; allocator/Arc metadata and other
-//! lowering owners remain outside that accounting.
+//! Coordinate editor frames and resource lifetime. Inspectors return Rc<dyn Any>; frame closures use the shared Ui. Retained source/term memory accounting updates when documents change and excludes other allocator/lowering owners.
 #![allow(non_camel_case_types, non_upper_case_globals)]
 use std::borrow::Cow;
 use std::any::Any;
@@ -950,7 +945,6 @@ pub fn close(value: &LoopModel) {
     editor_host::close(&value.core);
 }
 
-/// OCaml's `run`: the editor as a sketch program.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     options: Create,

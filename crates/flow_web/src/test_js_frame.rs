@@ -1,4 +1,4 @@
-//! Port of the golden half of lib/flow_web/test_js_frame.ml: `js::frame` against the 93
+//! `js::frame` against the 93
 //! `frame_*.js` goldens (read in place from crates/flow_web/goldens), from the shared core fixtures and
 //! two workspaces, plus the coverage check, the resident-fold assertion, the region-layout
 //! assertion and the range-last refusal. The node half (emitted programs against `Core_exec` through
@@ -385,8 +385,6 @@ fn diagnose_span(statements: &[C::Statement]) -> Option<rays_diagnostic::Span> {
 fn range_last_diagnosis_is_refused_with_its_span() {
     let (_, program) = wrapped(
         "range-last-boundary",
-        // The OCaml test writes `:policy` after the mapper; the Rust flow_check port accepts only
-        // `rows :policy text mapper` (a gap in flow_check::workspace::error_rows, reported).
         "(let* [unused (error_rows (array/int 2 1) :policy \"range-last\" (fn [index]
         {:code \"E_ROW\" :message (str index) :cause (list)}))] 0)",
     );

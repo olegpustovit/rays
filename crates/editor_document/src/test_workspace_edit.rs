@@ -1,8 +1,4 @@
-//! Port of lib/flow_sop/test_workspace_edit.ml (W3): every graph gesture of the study as a pure
-//! rewrite of the workspace text: apply the op, compare the printed text. A refused edit changes
-//! nothing.
-//!
-//! Uses the editor's complete kinds catalog, including scene/world/layout gestures.
+//! Workspace graph gestures preserve authored semantics and projection.
 use flow_sop::lisp_sop::support::*;
 use flow_sop::{manifest, lisp_sop};
 use flow_check::catalog::Catalog;

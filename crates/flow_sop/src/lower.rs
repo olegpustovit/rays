@@ -1,8 +1,4 @@
-//! Port of lib/flow_sop/lower.ml: lowering of a checked workspace to SOP networks.
-//!
-//! The OCaml lowering context is shared by cook closures; its prepared-factory cache stays outside
-//! that context so returned nodes own their cook dependencies without owning themselves.
-//! OCaml exceptions (`Diagnostic.Error`) are `Result`s.
+//! Lower checked workspaces into SOP networks. Prepared factories are cached outside the context retained by cook closures so returned nodes cannot retain themselves. Failures propagate as Results.
 use flow_syntax::symbol::Symbol;
 use std::fmt::Write as _;
 use crate::{
@@ -124,9 +120,7 @@ fn fail(code: &str, message: &str) -> Diagnostic {
 thread_local! {
     static LAST_BUILD_FAILURE: std::cell::RefCell<Option<Diagnostic>> = const { std::cell::RefCell::new(None) };
 }
-/// A factory build fails with text only (`Edit_graph` factories return `Result<_, string>`); OCaml raises
-/// the diagnostic through them, so remember it here and let `edit_r` hand it back (code and span kept).
-// ponytail: one slot per thread, matched by message; a build and its `edit_r` run on one thread.
+/// Factory errors expose only text, so preserve the full diagnostic in a thread-local slot until edit_r restores its code/span. ponytail: the slot is matched by message; factory build and edit_r must stay on the same thread.
 fn keep_diagnostic(d: Diagnostic) -> String {
     let message = d.message.clone();
     LAST_BUILD_FAILURE.with(|slot| *slot.borrow_mut() = Some(d));
@@ -534,7 +528,7 @@ fn metadata_factory(operation: &str, args: &[(Symbol, Value)], sources: &[i64]) 
             _ => Err(fail("E_METADATA_BOOL", "Metadata flags must be static booleans")),
         }
     };
-    // every argument is read here, as the OCaml reads them lazily per rebuild but raises at lowering
+    // Read all arguments during lowering so validation errors are not delayed until a later rebuild.
     let (owner, pattern, replacement, conflict) = (text("owner", "any")?, text("pattern", "")?, text("replacement", "")?, text("conflict", "error")?);
     let (owner_p, source, destination, method) = (text("owner", "point")?, text("source", "")?, text("destination", "")?, text("method", "swap")?);
     let (inverse, unused) = (flag("inverse")?, flag("unused")?);
@@ -940,7 +934,7 @@ type StatefulPrograms = (R<executor::Program>, Arc<std::sync::OnceLock<R<executo
 // ponytail: the 8 newest; key a weak table if more stateful meshes live at once
 static STATEFUL_PROGRAMS: LazyLock<lru::Memo<StatefulKey, StatefulPrograms>> = LazyLock::new(|| lru::Memo::new("flow_sop.stateful_programs", 8));
 
-/// Settings shared by every kernel-node builder (the labelled arguments of the OCaml functions).
+/// Settings shared by all kernel-node builders.
 #[derive(Clone)]
 pub struct KernelEnv {
     pub gpu: gpu::Config,
@@ -1266,8 +1260,7 @@ fn guards_of(key: &str, args: &[(Symbol, Value)]) -> Vec<Value> {
     }
 }
 
-/// The diagnostic a guard's `error` text holds. ponytail: the OCaml side marshals a `Diagnostic.t`;
-/// the Rust evaluator stores `code: message`, decoded here.
+/// Decode a deferred guard's code/message envelope. ponytail: the evaluator stores code:message text; retain a structured Diagnostic if this representation stops being sufficient.
 fn decode_error(text: &[u8]) -> Diagnostic {
     let s = txt(text);
     match s.split_once(": ") {
@@ -2172,8 +2165,7 @@ fn static_source_of(node: &dyn Fn(i64) -> Option<ENode>, value: &Value) -> Optio
 
 static HOOKS: std::sync::Once = std::sync::Once::new();
 
-/// The evaluator's host hooks (inline parameters, live kernels, static facts and sources), installed
-/// once before the first lowering. They are module-level side effects in the OCaml.
+/// Install evaluator host hooks once before the first lowering: inline parameters, live kernels, static facts and sources.
 pub fn install_hooks() {
     HOOKS.call_once(|| {
         E::set_inline_parameters(Arc::new(|checked: &Workspace, d: &NodeDefinition| inline_policy(checked, d)));
@@ -2564,8 +2556,29 @@ impl CookServices {
         }
     }
 
+    /// Template and live rebuilds read the original plan: reuse the base allocated at preparation.
+    fn resolve_provenance(&self, site: &W::Path, iter: &[i64], args: &mut [(Symbol, Value)]) -> R<()> {
+        for (name, value) in args {
+            if name.as_str() == "tag_base" && matches!(value, Value::Source(g) if g.ty == Ty::Int && g.name == "sop/provenance_base") {
+                let base = self.concat_tags.lock().unwrap().get(&(site.clone(), iter.to_vec())).copied()
+                    .ok_or_else(|| fail("E_LOWER", "Provenance request was not prepared."))?;
+                *value = Value::Int(base);
+            }
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn arrays_node(&self, node: Option<&ENode>, strict: Option<bool>, host: bool, state: Option<State>, elems: Option<Vec<(Symbol, Value)>>, operation: &str, args: &[(Symbol, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
+        let resolved = if args.iter().any(|(k, v)| k == "tag_base" && matches!(v, Value::Source(g) if g.ty == Ty::Int && g.name == "sop/provenance_base")) {
+            let node = node.ok_or_else(|| fail("E_LOWER", "Provenance request has no owning node."))?;
+            let mut args = args.to_vec();
+            self.resolve_provenance(&node.site, &node.iter, &mut args)?;
+            Some(args)
+        } else {
+            None
+        };
+        let args = resolved.as_deref().unwrap_or(args);
         let strict_param = strict.unwrap_or(self.o.strict_body);
         let what = format!("arrays {operation}{}", if host { "true" } else { "" });
         let env = self.kenv(node, strict_param);
@@ -2928,7 +2941,7 @@ impl HostRun {
         Ok(geometry)
     }
 
-    /// `geometry id` of the OCaml: a failure is stashed and reported when the resolver returns.
+    /// Stash geometry lookup failures until the resolver returns.
     fn geometry(&self, id: i64) -> Option<rdk_core::geometry::T> {
         match self.geometry_r(id) {
             Ok(g) => Some(g),
@@ -3916,10 +3929,10 @@ impl Lowerer {
         let cid = self.compiled[node.id as usize];
         // an inlined merge body's provenance base (its sop/concat), allocated here as its card was
         let mut node = node.clone();
-        if node.args.iter().any(|(k, v)| k == "tag_base" && matches!(v, Value::Int(n) if *n == ops::PROVENANCE_SENTINEL)) {
+        if node.args.iter().any(|(k, v)| k == "tag_base" && matches!(v, Value::Source(g) if g.ty == Ty::Int && g.name == "sop/provenance_base")) {
             let base = if self.o.provenance_tags { self.tag_sources(cid, &node.args) } else { -1 };
             self.concat_tags.lock().unwrap().insert((node.site.clone(), node.iter.clone()), base);
-            node.args = node.args.iter().map(|(k, v)| if k == "tag_base" && matches!(v, Value::Int(n) if *n == ops::PROVENANCE_SENTINEL) { (k.clone(), Value::Int(base)) } else { (k.clone(), v.clone()) }).collect();
+            self.resolve_provenance(&node.site, &node.iter, &mut node.args)?;
         }
         let live: Vec<(Symbol, Value)> = node.args.iter().filter(|(_, v)| E::is_live(v)).cloned().collect();
         let resource = is_resource(&node);
@@ -4440,7 +4453,8 @@ impl Lowerer {
             if !is_geometry_arrays(&n.kind) || edit::find(graph, self.compiled[n.id as usize]).is_none() || !E::state_dependent(&geometry_arrays_data(&n.args)) {
                 continue;
             }
-            let (this, n) = (self.services.clone(), n.clone());
+            let (this, mut n) = (self.services.clone(), n.clone());
+            this.resolve_provenance(&n.site, &n.iter, &mut n.args)?;
             frame_nodes.insert(
                 self.compiled[n.id as usize],
                 Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, node: &node::T| {
@@ -4896,7 +4910,7 @@ fn finish(lowerer: &Arc<Lowerer>) -> R<T> {
     })
 }
 
-/// One lowering of an already-qualified-by-`lower_checked` workspace (the OCaml `lower_checked`).
+/// Lower a workspace already qualified by lower_checked.
 pub fn lower_checked(factories: Vec<Factory>, o: Options, checked: Workspace) -> R<T> {
     let _phase = flow_syntax::phase_timer::measure("lower");
     let lowerer = make_lowerer(factories, o, checked)?;
@@ -5096,10 +5110,7 @@ pub fn field_calls(state: Option<&State>, live: &Frame, resolve: flow_ir::core_e
     out
 }
 
-/// The Rust evaluator marks a Lisp call whose body failed as a `$card` with no value and the
-/// diagnostic attached; the lowering reads it as the OCaml evaluator leaves it, the written-out
-/// call (`kind` with its slot inputs and canonical parameters) carrying the error, so its factory
-/// node reports the body's failure at cook.
+/// A failed inline call retains its authored kind, slot inputs, canonical parameters and diagnostic; the factory reports that body failure when cooked.
 fn failed_card_as_call(n: &ENode, plan: &Plan, checked: &Workspace) -> ENode {
     if n.kind != E::card_kind() || n.error.is_none() {
         return n.clone();

@@ -1,6 +1,5 @@
 //! A Lisp entry compiled as a stage: one Packed program of the entry over its element parameters, an
 //! output per leaf of its result record. Its array parameters are buffers (Raster's bindings).
-//! Port of lib/flow_shader/lisp_stage.ml.
 use flow_syntax::symbol::Symbol;
 use flow_check::catalog::Catalog;
 use flow_check::op::{self, Op, Shape, Signature};

@@ -1,9 +1,5 @@
-//! Port of lib/rays_editor/editor_panes.ml: the graph pane's projection, the panel instances (every
-//! leaf draws with its own list, text pane or outline), start keywords, graph naming and the
-//! per-panel draw functions of a frame. Bundle C; the model chain below it is bundle D.
-//!
-//! The OCaml labelled arguments of the `draw_*` functions are positional here, in the order the
-//! OCaml signature lists them.
+// Preserve the existing pane intent priority when dispatching edits.
+//! Graph projections and panel instances draw list/text/outline contents and return per-panel intents after construction.
 #![allow(non_camel_case_types)]
 
 use flow_syntax::symbol::Symbol;
@@ -639,7 +635,7 @@ pub fn draw_text_panes(
     for (key, path, state, shown) in other_texts {
         locals = put_local(&key, &|l| local { code: state.clone(), ..l }, &locals);
         let intents = view_text(ui, &path, &state, &shown);
-        // OCaml folds with a cons: the last pane drawn comes first
+        // Dispatch intents from the latest drawn pane first.
         texts.insert(0, (key, shown, intents));
     }
     (text, text_intents, locals, texts)

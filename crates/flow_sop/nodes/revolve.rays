@@ -1,10 +1,4 @@
-; Whole Revolve draft. The OCaml kernel counts, plans and fills; here the same plan is
-; arrays. Source vertices carry rings (one point per angular sample, one for an on-axis
-; vertex); each selected curve emits rows, columns, surface cells and caps in that order.
-; Output primitives are described by (section, a, b), output corners are resolved from
-; them, and the geometry is rebuilt with sop/mesh and carried by sop/remap.
-; Sections: 0 row, 1 column, 2 surface cell, 3 start cap, 4 finish cap.
-; Arithmetic keeps the OCaml order; native arm64 fuses a*b+c with the right-hand product.
+; Revolve plans output rows, columns, surface cells and caps in deterministic order. Source rings and on-axis points map into rebuilt topology through sop/mesh/remap. Preserve explicit fused arithmetic and source operation order.
 
 ; Distance between two points scaled by the largest component (robust_distance).
 (defn revolve_distance :context value [(a : vec3) (b : vec3)]

@@ -1,4 +1,4 @@
-//! Port of lib/sop/edit_graph.ml: immutable editable representation of a procedural network.
+//! immutable editable representation of a procedural network.
 //!
 //! `node::T` remains the compiled, cookable DAG. This document can also hold disconnected input
 //! slots and nodes outside the current display path, then compile any valid node back to an
@@ -9,7 +9,7 @@ use std::sync::{Arc, OnceLock};
 use param::{Effects, FieldView, Value};
 
 use crate::context::dependencies;
-use crate::node::{self, build, ocaml_quote, Facts};
+use crate::node::{self, build, Facts};
 use crate::support;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,12 +59,11 @@ struct Inner {
     root: Option<i64>,
 }
 
-/// ponytail: the OCaml document is a persistent map; this clones the (Arc-sharing) map per edit.
-/// Use a persistent map if documents grow past a few thousand nodes.
+/// ponytail: edits clone an Arc-sharing node map; use persistent storage only beyond a measured few thousand nodes.
 #[derive(Clone)]
 pub struct T(Arc<Inner>);
 
-/// OCaml `==` on documents.
+/// Physical editable-document identity.
 pub fn ptr_eq(a: &T, b: &T) -> bool {
     Arc::ptr_eq(&a.0, &b.0)
 }
@@ -314,7 +313,7 @@ impl Compile {
                     if !optional {
                         outcome = Err(format!(
                             "node {} input {} is disconnected",
-                            ocaml_quote(node::label(&entry.node)),
+                            rdk_core::attribute::quote(node::label(&entry.node)),
                             index
                         ));
                         break;
@@ -401,7 +400,7 @@ pub fn replace_node(n: &node::T, value: &T) -> Result<T, String> {
     if entry.factory.is_none() && arity != entry.inputs.len() {
         return Err(format!(
             "replacement node {} changed input arity from {} to {}",
-            ocaml_quote(node::label(n)),
+            rdk_core::attribute::quote(node::label(n)),
             entry.inputs.len(),
             arity
         ));
@@ -447,13 +446,13 @@ pub fn add_node(inputs: Option<&[Option<i64>]>, factory: Option<&Factory>, n: &n
     if !fits {
         return Err(format!(
             "new node {} expects {} inputs, received {} slots",
-            ocaml_quote(node::label(n)),
+            rdk_core::attribute::quote(node::label(n)),
             arity,
             inputs.len()
         ));
     }
     if let Some(source) = inputs.iter().flatten().find(|source| !value.0.entries.contains_key(source)) {
-        return Err(format!("new node {} references missing node #{}", ocaml_quote(node::label(n)), source));
+        return Err(format!("new node {} references missing node #{}", rdk_core::attribute::quote(node::label(n)), source));
     }
     let mut inner = (*value.0).clone();
     inner.entries.insert(id, Arc::new(Entry { node: n.clone(), inputs, factory: factory.cloned() }));
@@ -536,7 +535,7 @@ pub fn connect(source: i64, consumer: i64, input_index: i64, value: &T) -> Resul
         None => false,
     };
     if input_index < 0 || input_index > len || (input_index == len && !grows) {
-        return Err(format!("node {} has no input {}", ocaml_quote(node::label(&entry.node)), input_index));
+        return Err(format!("node {} has no input {}", rdk_core::attribute::quote(node::label(&entry.node)), input_index));
     }
     if depends_on(value, source, consumer) {
         return Err("connection would create a procedural cycle".to_owned());
@@ -558,7 +557,7 @@ pub fn disconnect(consumer: i64, input_index: i64, value: &T) -> Result<T, Strin
         return Err(format!("editable graph has no consumer node #{consumer}"));
     };
     if input_index < 0 || input_index >= entry.inputs.len() as i64 {
-        return Err(format!("node {} has no input {}", ocaml_quote(node::label(&entry.node)), input_index));
+        return Err(format!("node {} has no input {}", rdk_core::attribute::quote(node::label(&entry.node)), input_index));
     }
     let mut inputs = entry.inputs.clone();
     inputs[input_index as usize] = None;
@@ -616,7 +615,7 @@ fn keyword_slots(slots: &[String], requirements: &[InputRequirement], fields: &[
     names.to_vec()
 }
 
-/// Declaration of a factory (OCaml labelled arguments of `factory`/`factory_slots`).
+/// Concrete factory declaration arguments.
 pub struct FactoryArgs {
     pub operation: Option<String>,
     pub slots: Option<Vec<String>>,
@@ -660,7 +659,7 @@ fn make_factory(what: &str, args: FactoryArgs, requirements: Vec<InputRequiremen
         operation,
         label: args.label,
         category: args.category,
-        // share_default_values is an OCaml memory optimisation; values here are owned.
+        // Default parameter values are owned by their native node.
         fields: args.fields,
         requirements,
         slots,

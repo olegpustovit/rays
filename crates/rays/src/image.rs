@@ -10,7 +10,7 @@ pub struct image_data {
     height: Cell<i64>,
 }
 
-/// Handle semantics: clones share one image; `same` is OCaml's physical equality.
+/// Image clones retain the same shared image identity.
 #[derive(Clone)]
 pub struct Image(Rc<image_data>);
 

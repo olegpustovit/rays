@@ -1,5 +1,4 @@
-// Port of lib/scene_command/test_display_list.ml, assertion for assertion. The OCaml file has no
-// `check` calls; its `require` calls are the assertions here.
+// Display-list retention and traversal assertions.
 use crate::display_list::{self, Builder};
 use crate::render_ir::{self, Command, Error, Geometry, Rect};
 use std::sync::Arc;

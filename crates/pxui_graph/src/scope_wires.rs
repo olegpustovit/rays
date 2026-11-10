@@ -1,4 +1,5 @@
-// Port of lib/pxui_graph/scope_wires.ml: the pane's geometry (items, wires, curve sampling) and the
+// Inner scopes retain their existing paint and hit priority over ancestor frames.
+// the pane's geometry (items, wires, curve sampling) and the
 // bucket indices over tiles and wire bounds.
 use flow_syntax::symbol::Symbol;
 use flow_check::workspace::Path;
@@ -738,7 +739,7 @@ impl CloneLight for Placed {
 pub fn compute(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, scope: &p::Scope, layout: &p::Layout, shift: &dyn Fn(&[Symbol]) -> (f64, f64)) -> Geo {
     let mut w = Walk { items: Vec::new(), slot: HashMap::new(), origins: vec![(scope.path.clone(), (0.0, 0.0))] };
     walk(name_w, shown, shift, &mut w, 0.0, 0.0, layout);
-    // origins were consed on in OCaml: the latest first
+    // Later authored origins paint and hit-test before ancestors.
     let mut origins = w.origins;
     origins.reverse();
     let tiles = index_of(w.items.len(), &|i| {

@@ -1,7 +1,4 @@
-// Ports of test_runtime_resources.ml, test_png_rows.ml, test_resources_font.ml and
-// test_resources_audio.ml. They run on the process main thread (see common/mod.rs).
-// Not ported: the `Gc.allocated_bytes` / `Gc.quick_stat` ceilings, which measure OCaml's heap;
-// the storage hand-over they guard is checked by snapshot lifetime and pixels instead.
+// Main-thread resource fixtures check storage handoff through snapshot lifetimes and actual pixels.
 use crate::common;
 use ogpu_core::error::ErrorKind;
 use runtime_resources::*;

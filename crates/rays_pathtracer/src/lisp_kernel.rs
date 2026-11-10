@@ -1,18 +1,4 @@
-//! Port of lib/rays_pathtracer/lisp_kernel.ml: the tracer's Lisp kernels (pathtrace.rays) for one scene
-//! shape. The scene's facts (sizes, counts, flags) are literals the static stage folds, everything else is a
-//! host placeholder bound per dispatch. A scalar or vector placeholder becomes a uniform whose words a
-//! dispatch rewrites; an array placeholder becomes a gather table read from a device buffer the tracer owns
-//! (never uploaded by the runner). Each kernel maps the film's pixel indices (a device buffer of [0, n)) to one
-//! vec4 written into the caller's buffer, so a frame encodes every dispatch into its own command buffer
-//! without waiting.
-//!
-//! Rust notes. OCaml finds a placeholder again in a template's uniforms by physical equality of a fresh boxed
-//! scalar. Rust scalars have no identity, so each scalar placeholder here carries a distinct sentinel value
-//! (never read: a dispatch rewrites its words) and arrays are distinct `Arc`s. `map_function_bindings` edits
-//! the function in place, so the CPU oracle (`cpu`) evaluates its own copy of the declarations.
-//! The on-disk front-end cache (`cache_dir`, in lisp_kernel_cache.rs) stores each kernel's front-end result in
-//! a hand-written binary format (OCaml: Marshal) under the digest of the executable's identity, the kernel's
-//! text and the scene facts.
+//! Each path-tracer scene shape compiles Lisp kernels once. Static facts fold; dispatch uniforms and retained device buffers supply dynamic values. Placeholders have distinct scalar/Arc identities and CPU reference bindings own a separate declaration copy. The disk cache serializes fields under executable/text/scene content identity.
 use flow_syntax::symbol::Symbol;
 use flow_check::catalog::Catalog;
 use flow_check::op::{self, Op, Shape, Signature};
@@ -446,8 +432,7 @@ fn front(job: &mut FrontJob, name: &str) -> Result<FrontResult, String> {
 }
 
 thread_local! {
-    /// The front end's results of this process, newest first (the in-memory twin of OCaml's on-disk kernel
-    /// cache): a later tracer of the same scene shape skips the check, the evaluation and the emit.
+    /// A newest-first front-end cache skips checking, evaluation and emission for later tracers with the same scene shape.
     static FRONTS: RefCell<Vec<(String, FrontResult)>> = const { RefCell::new(Vec::new()) };
 }
 

@@ -1,11 +1,4 @@
-//! Explicit bridge to Rays's renderer mesh. Point and vertex `N`, `Cd`, and `uv` attributes are
-//! preserved; primitive `Cd` is expanded to corners when neither vertex nor point `Cd` is present.
-//! RGB float3 `Cd` gets opaque alpha; float4 retains alpha. Vertex-owned attributes cause
-//! deterministic corner expansion because Rays's render mesh has one attribute tuple per render
-//! vertex. Both values remain immutable.
-//!
-//! Gap against OCaml: rays' `Mesh` planes are `Arc<Vec<f64>>` and rdk's are `Arc<Vec<f64>>`, so the
-//! conversion copies the planes and indices where OCaml shared them.
+//! The Rays mesh bridge preserves point/vertex N, Cd and uv; primitive colors expand per corner when required. Vertex-owned attributes cause deterministic corner expansion; immutable input planes stay unchanged.
 use std::sync::Arc;
 
 use rays::mesh::{self, Vec3_buffer};
@@ -196,8 +189,7 @@ type Standard = (
 );
 
 fn standards(g: &geometry::T) -> Result<Standard, String> {
-    // OCaml evaluates the tuple right to left; the first error reported is the same set of
-    // failures, and each read is independent, so report in N, Cd, uv order of the pattern match.
+    // Read independent generated attributes in N, Cd, uv priority order.
     let n = standard(g, "N", float3, float3);
     let cd = standard(g, "Cd", float4, float4);
     let uv = standard(g, "uv", float2, float2);

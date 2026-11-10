@@ -1,9 +1,4 @@
-//! Port of lib/rays_pathtracer/test_scene.ml: several objects per trace (scene_mesh), Light.t conversion,
-//! and a flat mesh mixing triangles with analytic spheres (one BLAS per geometry kind). OCaml's `run` is
-//! split into `live_updates`, `scene_mesh`, `timing`, `mixed_spheres` and `light_of` (each its own process,
-//! each under 5 s warm). Geometry comes from tests/common/meshes.rs. The 2001-instance timing keeps its
-//! sizes but takes the median of 3 runs instead of 8; `bench` (1200x1560 frame cost) is not in runtest and
-//! not ported.
+//! Scene tracing covers live updates, instanced structures, mixed analytic spheres and light conversion; each case owns a fresh device and stays within the warm case budget.
 use crate::common;
 use common::meshes;
 use common::pt::{self, frames, get, pixels, rgb};

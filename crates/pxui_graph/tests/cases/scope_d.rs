@@ -1,5 +1,4 @@
-//! The OCaml `run_scope` (conditional arms, fixture counts, the iteration selector, gestures, the
-//! macro lens), split into cases at its natural boundaries.
+//! Conditional arms, iteration selection, macro lens and fixture counts have independently budgeted gesture cases.
 use flow_syntax::symbol::Symbol;
 use crate::support::*;
 use flow_eval::Value;

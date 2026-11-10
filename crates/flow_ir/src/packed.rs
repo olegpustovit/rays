@@ -1,10 +1,4 @@
-//! Specialized numeric packed maps, loops and reductions with scalar registers in 1,024-element
-//! blocks (port of lib/flow_ir/packed.ml). Accumulators retain reference evaluation order.
-//!
-//! Rust shape notes: OCaml's optional arguments become option structs ([`CompileOptions`],
-//! [`ForceOptions`], [`PrepareOptions`]); a kernel's exceptions become [`KErr`] values; the chunks
-//! of a launch write disjoint `&mut` slices cut from the output arrays (`split_parts`), so the
-//! parallel path needs no `unsafe`.
+//! Packed numeric maps, loops and reductions use 1024-element register blocks and preserve accumulator order. Options are concrete structs; failures are KErr values. Launch chunks fill disjoint mutable slices without unsafe code.
 #![allow(non_snake_case, non_camel_case_types, clippy::too_many_arguments)]
 
 use crate::core_fuse;
@@ -3547,7 +3541,7 @@ pub mod host {
     // What a source or uniform reads: a value itself; `array/range` of an array's count times `mul`
     // over `div`; or a term over the listed values (`None`: a form not traversed here).
     fn shape(residual: ResidualId, term: &Term) -> Shape {
-        // `acc` holds the OCaml list reversed: a cons is a push.
+        // Push accumulated arguments then reverse once to restore authored order.
         fn refs(r: ResidualId, term: &Term, acc: Option<Vec<Value>>) -> Option<Vec<Value>> {
             let mut acc = acc?;
             match &term.node {
@@ -4206,8 +4200,7 @@ pub mod host {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Tests (ported from lib/flow_ir/test_packed.ml, test_noise.ml and test_uniforms.ml; the cases that
-// run through the executor, the profile or the device belong to flow_ir.rs and core_exec.rs)
+// Packed values, noise and uniforms; executor/profile/device cases live in flow_ir.rs and core_exec.rs.
 
 #[cfg(test)]
 mod tests {
@@ -4246,7 +4239,7 @@ mod tests {
         a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits())
     }
 
-    // Marshal-equality of the OCaml tests: exact float bits, exact integers.
+    // Compare exact floating bits and exact integers.
     fn value_same(a: &Value, b: &Value) -> bool {
         match (a, b) {
             (Value::Float(x), Value::Float(y)) => x.to_bits() == y.to_bits(),

@@ -1,7 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_payload.ml: primitive-owned payload transfer for exact Boolean
-//! extraction. Every per-element loop writes its own slot, so the loops run sequentially (the
-//! parallel path of the OCaml is byte-identical by construction); `grain` is validated and passed
-//! to group construction. Cancellation is polled every 4096 elements like `Support.parallel_for`.
+//! Primitive payload transfer writes independent slots and preserves sequential/parallel bytes. Grain validation and 4096-element cancellation polling remain shared contracts.
 use std::sync::Arc;
 use std::collections::HashMap;
 

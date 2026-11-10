@@ -1,6 +1,4 @@
-// A real window: native frames 1/2/60/300 and a resize, zero handle delta (300: past the renderer's
-// 240-frame uniform shrink; each presented frame waits ~10 ms on the compositor for its drawable). A missing window or
-// device is a skip, as in the OCaml test.
+// Window rendering covers lifetime, resize and the uniform-shrink boundary with no handle delta; device/window absence is explicitly reported.
 use crate::common;
 use ::renderer::renderer::{self, PipelineFamily, native};
 use ::renderer::scene_execution::{self, new_bytes, GeometryDraw, Mesh, MeshKey, State};

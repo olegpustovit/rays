@@ -1,4 +1,4 @@
-//! Port of lib/editor_document/preset.ml: sketch presets: the editable document as one
+//! sketch presets: the editable document as one
 //! s-expression file (`workspace_doc::to_text`, then a `(view ...)` form). No other format.
 use crate::document;
 use crate::kinds;
@@ -20,7 +20,7 @@ pub struct Loaded {
 
 /// Keep `A-Za-z0-9_-`; every other character becomes `_`.
 pub fn sanitize(name: &str) -> String {
-    name.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}'))
+    name.trim()
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
         .collect()
@@ -55,7 +55,7 @@ pub fn path(directory: &str, name: &str) -> String {
 
 fn finite(f: &S) -> bool {
     match &f.node {
-        Node::Num(n) => cfmt::parse_ocaml_float(f.name(*n)).is_some_and(|x| x.is_finite()),
+        Node::Num(n) => (f.name(*n)).parse::<f64>().ok().is_some_and(|x| x.is_finite()),
         Node::Vec(range) | Node::Map(range) | Node::List(range) => f.range(*range).iter().all(|id| finite(&f.child(*id))),
         _ => true,
     }

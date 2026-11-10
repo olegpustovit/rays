@@ -30,7 +30,7 @@ pub enum Projection {
     PointAttribute(String),
 }
 
-/// Every field is required in OCaml; `Default` carries the defaults the tests rely on.
+/// All triangulation options are concrete; Default provides the declared native defaults.
 pub struct Params {
     pub grain: i64,
     pub selection: Option<element_selection::T>,
@@ -107,7 +107,7 @@ fn make(code: Code, message: String) -> error::T {
     error::new(GUARD_OPERATION, code, message)
 }
 
-/// `Error.guard ~code:"invalid_triangulation"`: every OCaml string error.
+/// Triangulation failures use invalid_triangulation.
 fn fail(message: String) -> error::T {
     make(Code::InvalidTriangulation, message)
 }
@@ -116,8 +116,7 @@ fn invalid(message: &str) -> error::T {
     fail(format!("{OPERATION}: {message}"))
 }
 
-/// A core error that was a plain string in OCaml, inside the `try` that reports cancellation as
-/// a string error.
+/// Translate helper failures and cancellation at the triangulation boundary.
 fn lift(value: error::T) -> error::T {
     if error::is_cancelled(&value) {
         fail(format!("{OPERATION}: triangulation was cancelled"))
@@ -135,7 +134,7 @@ fn get_core(value: error::T) -> error::T {
     }
 }
 
-/// Core errors that OCaml raised as Rdk exceptions keep their identity, except cancellation.
+/// Preserve core error identity except the explicitly translated cancellation boundary.
 fn pass(value: error::T) -> error::T {
     if error::is_cancelled(&value) {
         fail(format!("{OPERATION}: triangulation was cancelled"))
@@ -696,11 +695,11 @@ fn project(
             })
         }
         Projection::PointAttribute(name) => {
-            if support::ocaml_trim_is_empty(name) {
+            if (name).trim().is_empty() {
                 return Err(invalid("point position attribute name is empty"));
             }
             let Some(item) = geometry::find_attribute(attribute::Owner::Point, name, geometry_value) else {
-                return Err(fail(format!("{OPERATION}: missing point attribute {}", ocaml_quoted(name))));
+                return Err(fail(format!("{OPERATION}: missing point attribute {}", rdk_core::attribute::quote(name))));
             };
             match attribute::view::storage(&item).map_err(pass)? {
                 attribute::Storage::Float2(values) => {
@@ -715,15 +714,13 @@ fn project(
                 }
                 _ => Err(fail(format!(
                     "{OPERATION}: point attribute {} must be float2 or float3",
-                    ocaml_quoted(name)
+                    rdk_core::attribute::quote(name)
                 ))),
             }
         }
     }
 }
 
-/// OCaml `%S`: a double-quoted string with `\\`, `\"` and control characters escaped.
-use rdk_core::attribute::quote as ocaml_quoted;
 
 struct PointMaterialization {
     positions: packed::float3::T,
@@ -1312,7 +1309,7 @@ fn exact_points(x: &[f64], y: &[f64], arrangement: Option<&planar_constraints::T
 
 fn blank(name: &Option<String>, message: &str) -> Result<(), error::T> {
     match name {
-        Some(name) if support::ocaml_trim_is_empty(name) => Err(invalid(message)),
+        Some(name) if (name).trim().is_empty() => Err(invalid(message)),
         _ => Ok(()),
     }
 }

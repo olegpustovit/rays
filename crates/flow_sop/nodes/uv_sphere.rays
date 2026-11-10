@@ -94,12 +94,12 @@
    (rotation_y : float 0.0 :label "Rotate Y" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 1])
    (rotation_z : float 0.0 :label "Rotate Z" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 2])
    (segments : int 48 :label "Segments" :folder ["Resolution"] :min 3 :max 256 :hard_min 3 :primary true
-     :validate (not (or (int/eq segments 4611686018427387903) (int/eq rings 4611686018427387903)))
+     :validate (not (or (int/eq segments 9223372036854775807) (int/eq rings 9223372036854775807)))
      :code "E_PARAM" :message "sop/uv_sphere: output cardinality overflows")
    (rings : int 24 :label "Rings" :folder ["Resolution"] :min 2 :max 128 :hard_min 2 :primary true
-     :validate (or (or (int/eq segments 4611686018427387903) (int/eq rings 4611686018427387903))
+     :validate (or (or (int/eq segments 9223372036854775807) (int/eq rings 9223372036854775807))
                    (uvs_cardinality_ok connectivity unique_points_per_pole triangular_poles segments rings))
-     :code "E_PARAM" :message "sop/uv_sphere: output cardinality exceeds OCaml array limits")
+     :code "E_PARAM" :message "sop/uv_sphere: output cardinality exceeds native storage or index limits")
    (uv_attribute : text "uv" :label "UV attribute" :folder ["Attributes"]
      :validate (not (or (equal? (text/trim uv_attribute) "P") (equal? (text/trim uv_attribute) "N")))
      :code "E_PARAM" :message "sop/uv_sphere: UV attribute cannot be P or N")]

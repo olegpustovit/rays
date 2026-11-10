@@ -1,4 +1,4 @@
-// Port of lib/pxui_graph/scope_commands.ml(i): maps keys and menus to typed requests.
+// maps keys and menus to typed requests.
 use flow_syntax::symbol::Symbol;
 use crate::scope_state::{self as st, Change, Command, Direction, Drag, Editing, Fr, HintTarget, Hinting, Pane, PathSet};
 use crate::scope_wires::{fallback, line_of_row, root_name, rows_top};

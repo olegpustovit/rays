@@ -1,9 +1,4 @@
-//! Port of lib/rays_pathtracer/test_world.ml: the World path. CDF + MIS sampling is unbiased (furnace, and
-//! MIS matches BSDF-only sampling on a peaked map with a sun), MIS has lower variance, miss pixels show the
-//! background, and rect lights are hittable. OCaml's `run` is split into `furnace_mis`, `backgrounds` and
-//! `mirror` (each its own process, each under 5 s). Samples per pixel are unchanged, but a tracer takes 16
-//! of them per `render` instead of 1 (OCaml: spp 1 and as many frames), so the GPU round trips shrink 16x;
-//! `bench_world` (a convergence probe, not in runtest) is not ported.
+//! World tracing checks unbiased CDF/MIS sampling, lower variance, miss backgrounds and hittable rectangle lights. Sixteen samples per render amortize GPU round trips without changing sample count.
 use crate::common;
 use common::pt::{self, get, mean_red, pixels, rgb, rmse};
 use rays::world as w;

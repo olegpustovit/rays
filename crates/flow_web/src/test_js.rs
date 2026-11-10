@@ -1,4 +1,4 @@
-//! Port of lib/flow_web/test_js.ml: goldens for `js::region` (read in place from lib/flow_web/goldens),
+//! goldens for `js::region` (read in place from lib/flow_web/goldens),
 //! and a run of every emitted region function under node against native `packed::force_all`.
 //! The node comparisons are split over several tests so each stays under the 5 s budget; they skip
 //! (loudly) when node is absent.
@@ -443,8 +443,7 @@ fn nonfinite_value_is_a_status_and_native_refuses_it_too() {
     assert!(packed::force(&overflow, &input::at_time(1.0), &ForceOptions::default()).is_err());
 }
 
-/// The OCaml test's full-size hash case (70,000 elements, past one 65,536-element block); too slow
-/// for the 5 s budget at -O0, so it runs only with `--ignored`.
+/// The 70000-element hash fixture crosses a 65536-element block and runs only in exhaustive qualification.
 #[test]
 #[ignore]
 fn fast_64_bit_hash_at_70000_elements() {

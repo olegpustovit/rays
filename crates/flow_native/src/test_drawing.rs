@@ -1,6 +1,4 @@
-//! Tests of the native drawing path (`drawing`, `marks_scene`) on the CPU: the mark table a draw
-//! graph produces becomes the Scene the OCaml adapter builds. (The OCaml suite reaches these only
-//! through the editor tests; these are the Rust port's own checks of the ported modules.)
+//! Native drawing tests lower typed mark tables into Scene descriptions independently of editor setup.
 use crate::drawing;
 use crate::marks_scene;
 use flow_ir::core_exec::Buffers;

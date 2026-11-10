@@ -1,16 +1,4 @@
-//! The loop's model `t`: the editor core with the 3D viewport, the cameras, what was drawn, the
-//! source file and the autosave bookkeeping; its accessors and the composition of the scene objects.
-//! Port of lib/rays_editor/loop_model.ml.
-//!
-//! Conventions of this port (see also editor_model.rs):
-//! - `t` is `Clone`; the host (`Flow_native.Workspace_host.t`) is shared behind `Rc<RefCell<..>>`.
-//! - OCaml's physical comparisons of rendered scenes, bakes, camera orbits and the model core are
-//!   `Rc` identity where a value is shared (`baked`, `drawn`), `Scene3::same` for a scene, and the
-//!   `rest` bookkeeping: every function that replaces `core` or `extra` outside a frame (`edit`,
-//!   `set_probe`, `set_settings`, `set_renderer`, `with_core`) drops `rest`, which is what OCaml's
-//!   `rest.rested == value.core` meant.
-//! - The `drawn` textures are never known to be the same ones (`rays::texture` has no identity), so
-//!   a piece with a texture is composed again each frame it has one.
+//! Loop snapshots share the host through Rc<RefCell>. Scene identity and retained rest bookkeeping skip unchanged composition; replacing core/extra invalidates rest. Shared baked/drawn owners compare by identity, while Scene3 uses same().
 #![allow(non_camel_case_types)]
 use flow_syntax::symbol::Symbol;
 use std::collections::BTreeMap;
@@ -160,7 +148,7 @@ pub fn seed_lights(lights: &[light::Light], scene: kg::T) -> kg::T {
     scene
 }
 
-/// OCaml's optional arguments of `create`.
+/// Optional loop creation settings.
 #[derive(Default)]
 pub struct Create {
     pub inputs: Option<Rc<workspace_doc::Inputs>>,

@@ -1,4 +1,3 @@
-//! Direct behavioral port of lib/rays_editor/marks_scene_test/test_marks_scene.ml.
 use flow_ir::{core_draw, core_exec::{self, Buffers}};
 use flow_native::{drawing, marks_scene as ms};
 use rays::scene;

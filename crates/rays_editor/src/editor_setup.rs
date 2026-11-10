@@ -1,6 +1,5 @@
 //! Creation of the model: the document a workspace starts from, the preferences and the state
-//! folder. Port of lib/rays_editor/editor_setup.ml.
-#![allow(non_camel_case_types)]
+//! folder. #![allow(non_camel_case_types)]
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -102,7 +101,7 @@ pub fn browse(value: &EditorModel, query: &str) -> Option<prompt> {
     Some(prompt::Browsing { query: query.to_string(), presets: preset::list(&value.presets), last_state })
 }
 
-/// OCaml's optional arguments of `create`.
+/// Optional loop creation settings.
 pub struct create_opts {
     pub gpu: Option<workspace_gpu::policy>,
     pub settings: Option<settings::T>,

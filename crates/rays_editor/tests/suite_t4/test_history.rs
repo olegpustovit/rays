@@ -51,7 +51,7 @@ pub fn history() {
     let _ = std::fs::remove_dir_all(&presets);
 }
 
-// ponytail: OCaml uses (sop/transform (sop/grid ...) :translate [(sin t) 0 0]); transform/grid lowering hangs in the Rust port (slow lowering: perf3), the budget does not depend on the node
+// ponytail: the history budget uses a cheap animated generator; qualify transform/grid lowering separately until perf3 is resolved.
 const BUDGET: &str = "\n(workspace budget\n  (graph g :context sop\n    (sop/box)))\n";
 
 pub fn budget() {

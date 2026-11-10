@@ -1,4 +1,4 @@
-//! Port of lib/flow_web/text_literal.ml. Invalid native UTF-8 bytes use isolated low surrogates.
+//! Invalid native UTF-8 bytes use isolated low surrogates.
 //! Valid Unicode stays Unicode; runtime textBytes reverses the exceptional byte representation.
 use std::fmt::Write;
 

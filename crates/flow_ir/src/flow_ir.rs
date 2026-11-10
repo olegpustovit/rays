@@ -1,9 +1,4 @@
-﻿//! Port of crates/flow_ir/flow_ir.ml(i): the public entry of the typed dataflow IR over `flow`
-//! evaluations. OCaml submodules are Rust modules with their OCaml names (`Gpu`, `Cost`,
-//! `Profile`, `Executor`); optional arguments are option structs; exceptions are `Result`s.
-//!
-//! Unlike OCaml, the closures a program keeps (`Gpu::Backend`, `Gpu::Kernel`) are `Arc`s so a
-//! kernel can be shared; "physical equality" of a backend is `Arc::ptr_eq`.
+//! Public typed dataflow IR over evaluation. Backend/kernel closures use Arc so kernels can be shared; backend physical identity is Arc::ptr_eq.
 #![allow(non_camel_case_types, non_snake_case, clippy::too_many_arguments, clippy::type_complexity)]
 
 use flow_syntax::symbol::{self, Symbol};
@@ -591,8 +586,7 @@ fn same_bits(a: &Value, b: &Value) -> bool {
     }
 }
 
-/// The panics a kernel that cannot run raises, OCaml's `Invalid_argument | Not_found` (an index, slice
-/// or `None` lookup out of range) and arithmetic failures; anything else is a bug and keeps unwinding.
+/// Recognized bounds/lookup/arithmetic panics become kernel refusals; unexpected panics remain bugs and unwind.
 fn is_kernel_refusal(text: &str) -> bool {
     ["index out of bounds", "out of range for slice", "out of range", "called `Option::unwrap()` on a `None`", "attempt to", "capacity overflow"]
         .iter().any(|marker| text.contains(marker))
@@ -630,8 +624,7 @@ fn static_map(verify: bool, failure: &Arc<Mutex<Option<Diagnostic>>>, residual: 
             }
             Ok(p) => p,
         };
-        // OCaml catches Invalid_argument, Not_found and Failure here only: a kernel that cannot run is
-        // a refusal (E_PACKED_EXECUTION) and the walker takes the map, not a dead cook
+        // A recognized kernel execution failure is E_PACKED_EXECUTION and returns control to the walker instead of killing a cook.
         match guarded_force(&mut || packed::force(&packed, &input::at_time(0.0), &packed::ForceOptions::default())) {
             Ok(value) => {
                 if verify {
@@ -2589,7 +2582,7 @@ mod tests {
     use flow_syntax::syntax;
     use std::sync::atomic::AtomicBool;
 
-    /// OCaml static_map: a kernel run that raises is a refusal with E_PACKED_EXECUTION, not a dead cook.
+    /// Static-map execution failures return E_PACKED_EXECUTION refusals.
     #[test]
     fn a_panicking_static_kernel_is_a_refusal() {
         let error = guarded_force(&mut || panic!("index out of bounds: the len is 3")).expect_err("a panic is an error");
@@ -3086,8 +3079,7 @@ mod tests {
 
     #[test]
     fn frame_kernel_multi_block_branch() {
-        // ponytail: 4,097 elements (four blocks and one over) instead of the OCaml 16,385: the
-        // reference walker is the cost in a debug build, the block seam is the same.
+        // Block/chunk seam fixtures stay within the focused debug deadline.
         compare_frames(
             &state_value("(state [p (array/range 4097)] (map (fn [x] (if (not (and (>= x 0) (< x (frame/width)))) (- 0 x) (+ x (frame/dt)))) p))"),
             &FOLD_FRAMES,
@@ -3555,8 +3547,7 @@ mod tests {
 
     #[test]
     fn executor_large_map_matches_the_walker_and_domains() {
-        // ponytail: 65,536 elements, not the OCaml 1,000,000: the reference walker is the cost in a
-        // debug build; the block, chunk and domain seams are the same.
+        // Block/chunk seam fixtures stay within the focused debug deadline.
         let ws = check("(workspace large (graph g :context value (let* [xs (array/range 8192) mapped (map (fn [x] (sin (+ (* x 0.25) t))) xs)] (array/sum mapped))))");
         let evaluated = ok(e::r#static(&ws, true, None));
         let v = evaluated.records.iter().find(|(path, _)| *path == p(&["g", "mapped"])).unwrap().1[0].1.clone();

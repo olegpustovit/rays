@@ -1,4 +1,4 @@
-//! Port of lib/flow_gpu/test_triangles.ml: resident triangle indices match the host's exact ear
+//! resident triangle indices match the host's exact ear
 //! order (winding, projection, concavity, partial groups, two-pass reduction) and fall back
 //! conservatively (`E_GPU_DISPLAY_TRIANGLES`); the host wrapper reuses its display storage and
 //! counts only validation bytes; display normals of the result point at +z.

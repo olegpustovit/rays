@@ -1,4 +1,4 @@
-//! Port of lib/flow_gpu/test_uint32.ml: exact uint32 outputs, inputs, tables and holders above 2^24
+//! exact uint32 outputs, inputs, tables and holders above 2^24
 //! and through 2^32-1, the resident fold's uint32 scope, compaction block tails, topology
 //! validation on the device and GPU-origin streams.
 //!

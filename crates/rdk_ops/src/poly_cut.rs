@@ -1,8 +1,4 @@
-//! Packed polygon-curve cutting kernel (Poly Cut): removes or splits curve edges at points, edges,
-//! attribute crossings or attribute changes.
-//!
-//! OCaml wraps `cut` in `Error.guard ~operation:"poly_cut" ~code:"invalid_poly_cut"`: a failure has
-//! those fields and the OCaml message, a cancellation has code `cancelled`.
+//! Polygon-curve cutting preserves invalid_poly_cut failures and cancelled errors.
 use rays_math::float::max as omax;
 use std::sync::Arc;
 
@@ -14,7 +10,6 @@ use rdk_core::error::Code;
 use rdk_core::support::Windows;
 
 use crate::curve_join;
-use crate::transform_ops::ocaml_quote;
 
 const OPEN_POLYLINE: u8 = 1;
 
@@ -114,14 +109,14 @@ enum Numeric {
 
 // ponytail: scalar attribute payload is copied once per cut; borrow it if a profile shows this matters.
 fn numeric_attribute(name: &str, value: &geometry::T) -> Result<Numeric, error::T> {
-    if name.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c')).is_empty() {
+    if name.trim().is_empty() {
         return Err(fail("cut attribute name must not be empty".to_owned()));
     }
     if name == "P" {
         return Ok(Numeric::Tuple3(packed::float3::view::view(geometry::positions(value))?));
     }
     let Some(item) = geometry::find_attribute(attribute::Owner::Point, name, value) else {
-        return Err(fail(format!("point cut attribute {} was not found", ocaml_quote(name))));
+        return Err(fail(format!("point cut attribute {} was not found", rdk_core::attribute::quote_bytes((name).as_ref()))));
     };
     Ok(match attribute::view::storage(&item)? {
         attribute::Storage::Float(values) => Numeric::ScalarFloat(values.to_vec()),
@@ -132,7 +127,7 @@ fn numeric_attribute(name: &str, value: &geometry::T) -> Result<Numeric, error::
         _ => {
             return Err(fail(format!(
                 "point cut attribute {} must have numeric scalar or tuple storage, not {}",
-                ocaml_quote(name),
+                rdk_core::attribute::quote_bytes((name).as_ref()),
                 attribute::kind_name(&item)
             )))
         }
@@ -276,7 +271,7 @@ fn remap_edge_groups(
         if edge_group::topology_data_id(item) != topology_index::topology_data_id(source_index) {
             return Err(fail(format!(
                 "edge group {} belongs to a different topology",
-                ocaml_quote(edge_group::name(item))
+                rdk_core::attribute::quote_bytes((edge_group::name(item)).as_ref())
             )));
         }
         let byte_count = (edge_count + 7) / 8;

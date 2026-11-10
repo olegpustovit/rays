@@ -1,4 +1,4 @@
-//! Port of lib/flow_ir/fallback.ml: every time work meant for the device runs on the CPU instead,
+//! every time work meant for the device runs on the CPU instead,
 //! here, with why. Bounded to 64 distinct (site, reason) pairs; a measured choice of the CPU is not
 //! a fallback.
 use std::collections::HashMap;

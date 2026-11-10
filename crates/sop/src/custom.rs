@@ -1,4 +1,4 @@
-//! Port of lib/sop/custom.ml: the public extension point for custom procedural SOPs.
+//! the public extension point for custom procedural SOPs.
 use std::sync::Arc;
 
 use param::{Schema, Value};

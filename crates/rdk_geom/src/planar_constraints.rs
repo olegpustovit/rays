@@ -1,3 +1,4 @@
+// Exact point cache population and deterministic segment tie order are intentional.
 //! Exact arrangement of projected planar constraint segments.
 use rays_math::float::{min as omin, max as omax, compare as float_compare};
 use std::cmp::Ordering;
@@ -34,7 +35,7 @@ fn invalid_string(message: String) -> error::T {
     error::new("Planar_constraints", Code::InvalidArgument, message)
 }
 
-/// Maps an internal error to the OCaml `Error` message.
+/// Map an internal geometry error into the operation's diagnostic message.
 fn message_of(value: &error::T) -> String {
     if error::is_cancelled(value) {
         "Planar constraint arrangement was cancelled".to_owned()
@@ -126,7 +127,7 @@ pub mod view {
         exact_point(value, point)
     }
 
-    /// Panics (OCaml `Invalid_argument`) when a point index is out of range.
+    /// Out-of-range point indices are programmer errors and panic.
     pub fn orient2d(value: &T, a: i64, b: i64, c: i64) -> Sign {
         let pa = exact_point(value, a).expect("Planar_constraints: point is out of range");
         let pb = exact_point(value, b).expect("Planar_constraints: point is out of range");
@@ -134,7 +135,7 @@ pub mod view {
         implicit_point::orient2d_xy(&pa, &pb, &pc)
     }
 
-    /// Panics (OCaml `Invalid_argument`) when a point index is out of range.
+    /// Out-of-range point indices are programmer errors and panic.
     pub fn incircle(value: &T, a: i64, b: i64, c: i64, d: i64) -> Sign {
         let pa = exact_point(value, a).expect("Planar_constraints: point is out of range");
         let pb = exact_point(value, b).expect("Planar_constraints: point is out of range");
@@ -266,7 +267,7 @@ fn run(
         split_segments.push(segment as i64);
         split_points.push(second[segment]);
     }
-    // Keeps OCaml's `explicit 0` side effect on the cache.
+    // Populate the explicit-zero cache entry before processing later constraints.
     explicit_of(&source, &mut explicit_cache, 0)?;
     let mut crossing_points: Vec<implicit_point::T> = Vec::new();
     let mut crossing_first: Vec<i64> = Vec::new();
@@ -654,8 +655,7 @@ fn run(
     let atomic_first = |segment: usize| omin_i(atomic[segment * 2], atomic[segment * 2 + 1]);
     let atomic_second = |segment: usize| omax_i(atomic[segment * 2], atomic[segment * 2 + 1]);
     let mut atomic_order: Vec<usize> = (0..atomic_count).collect();
-    // ponytail: stable sort where OCaml's heap sort is unstable; equal pairs are merged by summing
-    // windings, which differs only in which overflow is detected first.
+    // Stable equal-pair order makes winding overflow reporting deterministic.
     atomic_order.sort_by(|&left, &right| {
         atomic_first(left)
             .cmp(&atomic_first(right))

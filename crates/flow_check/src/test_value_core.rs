@@ -1,5 +1,3 @@
-// Port of lib/flow/test_value_core.ml, assertion for assertion. The OCaml file reaches Value,
-// Context and Symbol (flow_syntax) and Port_type and Param (here), so it lives in flow_check.
 use crate::port_type::{can_connect, coerce, of_field_kind, PortType, PortValue};
 use flow_syntax::context;
 use flow_syntax::symbol;
@@ -7,8 +5,6 @@ use flow_syntax::ty;
 use flow_syntax::value::{self, Value};
 use param::KindView;
 
-const OCAML_MAX_INT: i64 = i64::MAX;
-const OCAML_MIN_INT: i64 = i64::MIN;
 
 #[test]
 fn value_keys_contexts_and_symbols() {
@@ -41,9 +37,9 @@ fn coercions_follow_the_port_rules() {
         (PortType::Vec3, PortValue::Bool(true), PortValue::Vec3(1.0, 1.0, 1.0)),
         (PortType::Vec3, PortValue::Int(2), PortValue::Vec3(2.0, 2.0, 2.0)),
         (PortType::Vec3, PortValue::Float(3.0), PortValue::Vec3(3.0, 3.0, 3.0)),
-        (PortType::Int, PortValue::Float(1e100), PortValue::Int(OCAML_MAX_INT)),
-        (PortType::Int, PortValue::Float(-1e100), PortValue::Int(OCAML_MIN_INT)),
-        (PortType::Int, PortValue::Int(OCAML_MAX_INT), PortValue::Int(OCAML_MAX_INT)),
+        (PortType::Int, PortValue::Float(1e100), PortValue::Int(i64::MAX)),
+        (PortType::Int, PortValue::Float(-1e100), PortValue::Int(i64::MIN)),
+        (PortType::Int, PortValue::Int(i64::MAX), PortValue::Int(i64::MAX)),
         (PortType::Vec3, PortValue::Vec3(1.0, 2.0, 3.0), PortValue::Vec3(1.0, 2.0, 3.0)),
     ];
     for (target, input, expected) in cases {

@@ -1,4 +1,3 @@
-//! Shared helpers of the path tracer tests (the OCaml Test_pathtracer.pixels and the `get` unwrap).
 #![allow(dead_code)]
 use rays_math::color::linear;
 use rays_pathtracer::rays_pathtracer as p;

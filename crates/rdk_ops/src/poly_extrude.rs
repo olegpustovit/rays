@@ -35,7 +35,7 @@ pub struct Params {
 }
 
 impl Params {
-    /// The defaults of the OCaml test front end (`Poly_extrude_front.run`).
+    /// Native extrusion option defaults.
     pub fn new(distance: f64) -> Params {
         Params {
             cancel: None,
@@ -65,7 +65,6 @@ fn fail(message: &str) -> error::T {
     make(Code::InvalidGeometry, message)
 }
 
-use rdk_core::support::ocaml_trim_is_empty as blank;
 
 use rdk_core::group::merge as merge_group;
 
@@ -73,7 +72,7 @@ use rdk_core::edge_group::merge as merge_edge_group;
 
 fn validate_name(label: &str, name: &Option<String>) -> Result<(), error::T> {
     match name {
-        Some(name) if blank(name) => Err(fail(&format!(
+        Some(name) if (name).trim().is_empty() => Err(fail(&format!(
             "Rdk_mesh.Poly_extrude.poly_extrude: empty {label} group name"
         ))),
         _ => Ok(()),

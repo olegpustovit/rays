@@ -1,5 +1,3 @@
-// Port of lib/flow_ir/test_support/{test_program,core_fixtures,array_composition_cases}.ml:
-// the fixtures shared by the flow_ir tests (and the web printer goldens in OCaml).
 #![allow(dead_code)]
 use flow_syntax::symbol::Symbol;
 use crate::core_exec;
@@ -42,7 +40,6 @@ pub fn live_frame(t: f64, frame: i64) -> Frame {
     f.frame = frame;
     f
 }
-/// OCaml `Parallel.run ~domains (fun () -> ...)`.
 pub fn with_domains(domains: i64, f: &dyn Fn()) {
     parallel::run_unit(Some(domains), &|| {
         f();
@@ -208,8 +205,7 @@ pub fn run_simple(program: &c::Program, live: &Frame) -> Result<Value, Diagnosti
     run(None, false, None, None, program, live)
 }
 
-/// A Core program but for its regions is plain data (no closures or residuals).
-/// ponytail: OCaml marshals and compares; the Rust check is Debug equality of a clone.
+/// A Core program outside its regions is plain data. ponytail: clone checks compare Debug output; use raw-bit structural equality if payload distinctions require it.
 pub fn plain_roundtrip(p: &c::Program) {
     let copy = p.clone();
     assert_eq!(
@@ -558,7 +554,7 @@ thread_local! {
 }
 pub fn captured_helper(body: &str) -> flow_syntax::value::FnId {
     let recorded = |source: &str| ok(e::r#static(&composition_checked("", source), true, None));
-    // A function id dies with its evaluation (OCaml's GC keeps it): hold every Eval for this thread.
+    // Retain every evaluation used by fixture function IDs for this thread.
     let callable = |ev: e::Eval| {
         let (_, recs) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
         let f = match &recs[0].1 {

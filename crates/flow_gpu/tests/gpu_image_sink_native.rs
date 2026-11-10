@@ -1,4 +1,4 @@
-//! Port of lib/flow_gpu/test_image_sink_native.ml: real GPU conversion, qualified publication,
+//! real GPU conversion, qualified publication,
 //! retained image/mesh consumers, expiry, resize and borrowed ownership. The native fixture
 //! selects the installed Vulkan/Metal implementation; no mock executes a producer or consumer.
 //! Owner-only Rc values are !Send, so Rust rejects the oracle's wrong-domain transfers statically.

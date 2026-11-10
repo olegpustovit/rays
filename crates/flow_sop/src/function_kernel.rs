@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/function_kernel.ml(i): language-owned compiled bulk functions behind the Sop
+//! language-owned compiled bulk functions behind the Sop
 //! payload boundary.
 use flow_syntax::symbol::Symbol;
 use std::io::Write as _;

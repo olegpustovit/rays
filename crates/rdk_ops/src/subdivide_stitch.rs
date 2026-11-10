@@ -1,4 +1,4 @@
-//! Port of lib/rdk/ops/mesh/subdivide_stitch.ml: crack closure by pulling or stitching the
+//! crack closure by pulling or stitching the
 //! subdivided boundary to the unselected faces.
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::support::{self, Windows};

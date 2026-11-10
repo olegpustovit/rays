@@ -1,12 +1,4 @@
-//! The engine of the immediate-mode PXUI: keys, the retained cache, boxes, layout, input routing,
-//! the carry, the glyph atlas, painting and `frame`. Every call creates one box (a node with an
-//! integer key, flags and a size rule per axis); per-key state lives in the retained cache owned by
-//! `Ui` and is dropped once a key is not built for a frame. Input is routed against the previous
-//! frame's rectangles; layout runs after the build; boxes paint into one packed instance list.
-//!
-//! Translation notes: callbacks that returned `'a` in OCaml return nothing here (capture the result
-//! in a local), `within`/`scope`/`frame` also come as `enter`/`leave` pairs; painters get a `Paint`
-//! that owns the glyph atlas and the instance builder for the duration of the paint.
+//! Each frame builds keyed boxes with flags and per-axis sizing. Per-key state lives in Ui's retained cache and expires when omitted for a frame. Input uses prior-frame rectangles; layout follows construction and painting packs instance lists. Painters own their Paint borrow for the paint duration.
 use crate::theme::{self, Theme};
 use input::{Event, Key, MouseButton, Platform, ScrollPhase};
 use rays_math::hash;
@@ -21,10 +13,8 @@ use std::sync::OnceLock;
 
 pub type Rect = (f64, f64, f64, f64);
 pub type Flags = i64;
-/// "no box": the OCaml `-1` of parents, children and siblings.
+/// Sentinel for no box in parent, child and sibling indices.
 pub const NONE: usize = usize::MAX;
-/// OCaml's `min_int` (63-bit): the "unset" retained state.
-pub const MIN_INT: i64 = -4611686018427387904;
 
 // ---------------------------------------------------------------- keys
 
@@ -305,7 +295,7 @@ struct Slot {
     scroll_velocity: f64,
     scroll_start: f64,
     scroll_from: f64,
-    state_value: i64,
+    state_value: Option<i64>,
     text_value: Option<String>,
     labels: Vec<Rc<str>>,
     label_count: usize,
@@ -333,7 +323,7 @@ impl Slot {
             scroll_velocity: 0.0,
             scroll_start: 0.0,
             scroll_from: 0.0,
-            state_value: MIN_INT,
+            state_value: None,
             text_value: None,
             labels: Vec::new(),
             label_count: 0,
@@ -2303,12 +2293,11 @@ impl Ui {
 
     /// Retained per-box scalar state for custom widgets.
     pub fn state(&self, b: &UiBox, default: i64) -> i64 {
-        let value = self.slots[b.box_slot].state_value;
-        if value == MIN_INT { default } else { value }
+        self.slots[b.box_slot].state_value.unwrap_or(default)
     }
 
     pub fn set_state(&mut self, b: &UiBox, value: i64) {
-        self.slots[b.box_slot].state_value = value;
+        self.slots[b.box_slot].state_value = Some(value);
     }
 
     /// Stable paint text follows its existing retained box key and is discarded with that slot.
@@ -2423,7 +2412,7 @@ impl Ui {
         self.table.find(key)
     }
 
-    pub(crate) fn slot_state(&self, slot: usize) -> i64 {
+    pub(crate) fn slot_state(&self, slot: usize) -> Option<i64> {
         self.slots[slot].state_value
     }
 
@@ -3262,7 +3251,7 @@ impl Ui {
             paint.text_s((x + 7.0, ty), small, theme.foreground, tip_text);
             paint.text_s((x + 7.0 + tw1 + 6.0, ty), small, theme::ink_3(&theme), tip_key);
         });
-        // `(max_int, tip) :: (max_int, ghost) :: foreground` in OCaml's newest-first list
+        // Tooltip and ghost layers precede existing foreground entries at maximum priority.
         self.foreground.push((i64::MAX, tip.index));
         self.foreground.push((i64::MAX, ghost.index));
         self.leave(saved);

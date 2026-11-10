@@ -1,8 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_materialization.ml: post-rounding Boolean materialization policy.
-//!
-//! OCaml exceptions (`Cancelled`, `Invalid_argument`) become `Err` values: `inv` marks an
-//! `Invalid_argument` with the reserved code `invalid_argument` and `guard` turns it (and every
-//! cancellation) into the stable diagnostic each OCaml `try ... with` produced.
+//! Post-rounding Boolean materialization maps invalid_argument and cancellation through stable typed diagnostics.
 use rdk_core::support::DisjointSet;
 use rays_math::float::{min as omin, max as omax, compare as float_compare};
 use std::sync::atomic::{AtomicI64, AtomicU8, Ordering as AtomicOrdering};
@@ -37,12 +33,10 @@ fn fail_with(code: Code, message: &str) -> error::T {
     make(code, message.to_owned())
 }
 
-/// OCaml `invalid_arg`.
 fn inv(message: &str) -> error::T {
     make(Code::InvalidArgument, message.to_owned())
 }
 
-/// A failure of an OCaml call that raised instead of returning a result.
 fn raised(failure: error::T) -> error::T {
     if error::is_cancelled(&failure) {
         failure
@@ -51,7 +45,7 @@ fn raised(failure: error::T) -> error::T {
     }
 }
 
-/// The OCaml `try ... with Cancelled -> ... | Invalid_argument m -> error invalid_code m`.
+/// Map internal invalid-input failures and cancellation into the operation's stable diagnostic codes.
 fn guard_fail(invalid_code: Code, failure: error::T) -> error::T {
     match error::code(&failure) {
         Code::Cancelled => error::cancelled(OPERATION),

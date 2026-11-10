@@ -23,7 +23,7 @@ pub const CASES: &[(&str, fn())] = &[
     ("workspace_doc_part_projection_reuse", part_projection_reuse),
 ];
 
-pub const SKIPPED: &[(&str, &str)] = &[("workspace_doc_part_files", "lowers every checked-in .rays (6-30 s each in the OCaml build, the sweep opens sketches whose lowering hangs): slow lowering: perf3")];
+pub const SKIPPED: &[(&str, &str)] = &[("workspace_doc_part_files", "lowers every checked-in .rays (the sweep opens sketches whose lowering hangs): slow lowering: perf3")];
 
 const STILL: &str = "; a small study
 (workspace study

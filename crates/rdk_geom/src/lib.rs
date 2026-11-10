@@ -1,4 +1,3 @@
-//! Port of crates/rdk/geom (dune library rdk_geom). One module per OCaml file.
 pub mod exact_dyadic;
 pub mod predicates;
 pub mod implicit_point;

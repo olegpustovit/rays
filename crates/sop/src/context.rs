@@ -1,4 +1,4 @@
-//! Port of lib/sop/context.ml: target-neutral facts available while cooking a procedural graph.
+//! target-neutral facts available while cooking a procedural graph.
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
@@ -196,8 +196,7 @@ pub fn cpu_consumers(value: &T, node: i64) -> Option<i64> {
     value.cpu_consumers.get(&node).copied().flatten()
 }
 
-/// Add immutable consumer metadata, sharing cancellation and deferred checks. A negative count is
-/// a programming error (OCaml `Invalid_argument`).
+/// Consumer metadata shares cancellation and deferred checks; a negative count is a programmer error.
 pub fn with_cpu_consumers(value: &T, node: i64, count: Option<i64>) -> T {
     if let Some(n) = count {
         assert!(n >= 0, "Context.with_cpu_consumers: negative count");

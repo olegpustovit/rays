@@ -1,12 +1,4 @@
-//! Port of lib/flow_gpu/host.ml: the GPU backend a drawing or sketch runs its kernels on. It owns at
-//! most 64 runners and 64 pipelines, the resident fold's buffers (`resident_scope`), the display
-//! storage pool and the topology validation status.
-//!
-//! Rust shape notes. OGPU handles are `Rc`, so the host lives on its creating thread. A
-//! `Gpu::Backend`/`Kernel`/`core_exec::Resident` must be `Send + Sync`: each holds only an id (or an
-//! `Arc<Guard>`) and finds the host (or fold scope) through a thread-local registry. Called from
-//! another thread they answer the OCaml "called from another domain" error (or decline, for the
-//! resident fold).
+//! The GPU host owns bounded runner/pipeline caches, resident fold buffers, display storage and topology validation. Rc resources stay on their creating thread; Send+Sync proxies carry IDs/guards and resolve through a thread-local owner registry. Foreign-thread calls return a typed ownership error or decline the resident fold.
 use crate::kernels;
 use crate::pipelines::{self, is_vulkan};
 use crate::run::{self, gpu as gpu_r, Options, Uint32Holder};
@@ -2185,8 +2177,7 @@ impl Scope {
     }
 
     fn retain_float(&self, value_: &Value) -> Option<G::Planes> {
-        // The OCaml holder is shared by every alias; Rust's `Planes` is not `Clone`, so an alias
-        // asking again gets a thin view of the same one.
+        // Aliases receive thin views over the same non-Clone plane owner.
         if !live(&self.t) {
             return None;
         }

@@ -1,7 +1,4 @@
-//! Port of lib/flow_sop/test_workspace_cook.ml (W2): every workspace fixture lowers and cooks, byte
-//! for byte the same at 1 and 3 domains; node counts; provenance.
-//!
-//! Uses the editor's full kinds catalog for scene/world/settings/UI fixtures as well as SOP graphs.
+//! Workspace fixtures lower and cook to deterministic geometry bytes.
 use flow_sop::lisp_sop::support::*;
 use flow_sop::{catalog as fcat, lower, operators};
 use flow_sop::lisp_sop;
@@ -399,8 +396,7 @@ fn check_fixture(name: &str, compare: bool, cook: bool) -> usize {
         phase_timer::calls(&phases, "check") == 0 && phase_timer::calls(&phases, "evaluate") == 1 && phase_timer::calls(&phases, "lower") == 1,
         "{name}: checked lowering repeated a check or evaluation"
     );
-    // OCaml compares physically (plan ==, states ==); the Rust plan is held by value and the
-    // evaluation by Arc, so the retained evaluation is compared structurally.
+    // The retained evaluation is shared by Arc and compared structurally; the plan is held by value.
     assert!(
         from_checked.plan.nodes.len() == from_checked.evaluated.plan.nodes.len() && from_checked.states == from_checked.evaluated.states,
         "{name}: lowering did not retain its evaluation"
@@ -544,8 +540,7 @@ fn bloom_node_counts_and_provenance() {
     }
 }
 
-/// Blend Shapes with a graph-parameter weight: the weights decide at run time which shapes apply, so the
-/// shape folds stay residual until lowered (OCaml lowers it; `sopcat_morph_sketch`).
+/// Runtime Blend Shapes weights keep shape folds residual until lowering.
 #[test]
 fn blend_shapes_param_weight_lowers() {
     // the deferred shape folds lower through deep evaluator recursion: a debug build needs more than the 2 MB test-thread stack (passes at 4 MB)

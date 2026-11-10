@@ -1,7 +1,4 @@
-//! Port of the slice of lib/sop/test_diagnostics.ml that does not need Lisp: the diagnostic code of a
-//! missing group, decided by `support`. The OCaml file is one table of Lisp texts over every node
-//! (`(sop/attribute_fade ...)`, ...) cooked at 1 and 4 domains; those rows return when the
-//! node-definition waves and the Lisp layer exist.
+//! Native diagnostic fixtures pin missing-group and declared-node failure codes.
 use crate::support::{self, ElementGroup};
 use crate::test_support::fixture;
 

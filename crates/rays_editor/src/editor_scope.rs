@@ -1,4 +1,4 @@
-//! Port of lib/rays_editor/editor_scope.ml: lay the workspace pane out again when the document, the
+//! lay the workspace pane out again when the document, the
 //! probes or the graph changed (`sync_scope`), the probe previews it shows (`sync_views`), and the
 //! inspector's subject for a scene object or World layer (`scene_target`). Bundle C.
 #![allow(non_camel_case_types)]

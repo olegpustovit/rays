@@ -1,4 +1,4 @@
-//! Port of lib/editor_document/panel_kinds.ml: the editor's panel kinds as the forms a layout
+//! the editor's panel kinds as the forms a layout
 //! gesture writes. `Flow_graph.Flow_edit` rewrites the editor graph's layout and is given these
 //! forms: it knows no panel kind.
 use flow_syntax::syntax::{Node, Syntax};

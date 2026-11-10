@@ -1,4 +1,4 @@
-//! Port of lib/flow_native/workspace_resources.ml: the audio samples and images a workspace owns
+//! the audio samples and images a workspace owns
 //! (at most 64 of each), released together on `close`.
 use rays::audio::{self, sample};
 use rays::image;
@@ -17,7 +17,7 @@ pub struct data {
     pub images_destroyed: i64,
 }
 
-/// Shared by the host and the image owner (handle semantics, as the OCaml mutable record).
+/// The host and image owner share handle semantics over the same resource table.
 #[derive(Clone)]
 pub struct WorkspaceResources(pub Rc<RefCell<data>>);
 

@@ -1,4 +1,3 @@
-// Port of lib/rays_math/test_color.ml, assertion for assertion.
 use crate::{color as Color, hash, rand};
 
 const MIN_INT: i64 = i64::MIN;

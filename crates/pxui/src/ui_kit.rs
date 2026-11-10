@@ -494,8 +494,7 @@ impl Ui {
     pub fn expanded(&self, text: &str) -> Option<bool> {
         let key = key_of(self.current_seed(), text);
         let slot = self.slot_for(key)?;
-        let value = self.slot_state(slot);
-        if value == MIN_INT { None } else { Some(value == 1) }
+        self.slot_state(slot).map(|value| value == 1)
     }
 
     /// The value control inside an inspector row.

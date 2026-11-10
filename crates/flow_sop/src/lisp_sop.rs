@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/lisp_sop/lisp_sop.ml. Test support: a SOP graph written as Rays Lisp text,
+//! Test support: a SOP graph written as Rays Lisp text,
 //! compiled to a `sop::node::T` by the same lowering the editor uses.
 use crate::{catalog, lower, manifest, operators};
 use flow_check::op;
@@ -15,8 +15,7 @@ pub fn factories() -> Vec<Factory> {
     sop::nodes::factories()
 }
 
-/// A generator node holding an already built geometry: the one OCaml-only source, used through
-/// `with_`.
+/// A generator retains already-built geometry through with_.
 pub fn snapshot(geometry: &rdk_core::geometry::T) -> node::T {
     let parameters = format!("data_id={};bytes={}", rdk_core::geometry::data_id(geometry), rdk_core::geometry::payload_bytes(geometry));
     let geometry = geometry.clone();

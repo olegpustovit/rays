@@ -1,8 +1,4 @@
-//! Curve Join: welds selected open polyline curves into chains.
-//!
-//! OCaml returns `(Geometry.t, string) result` and lets `Cancel.Cancelled` escape; here a failure is
-//! an `error::T` with operation `Curve_join.join`, code `invalid_parameter` and the OCaml message,
-//! and a cancellation keeps code `cancelled`.
+//! Curve Join failures use operation Curve_join.join and invalid_parameter; cancellation keeps cancelled.
 use rays_math::float::compare as float_compare;
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -573,7 +569,7 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
         }
     } else if connect_closest_ends {
         if selected_count > i64::MAX / 2 {
-            return Err(fail("Curve Join endpoint count exceeds OCaml array limits".to_owned()));
+            return Err(fail("Curve Join endpoint count exceeds native storage or index limits".to_owned()));
         }
         let input_primitives = selected_primitives.clone();
         let endpoint_count = selected_count * 2;
@@ -762,7 +758,7 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
         primitive_count - selected_count
     };
     if retained_primitive_count > i64::MAX - chain_count {
-        return Err(fail("Curve Join primitive cardinality exceeds OCaml array limits".to_owned()));
+        return Err(fail("Curve Join primitive cardinality exceeds native storage or index limits".to_owned()));
     }
     let output_primitive_count = retained_primitive_count + chain_count;
     let opc = output_primitive_count as usize;
@@ -818,7 +814,7 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
     let mut primitive_offsets = vec![0_i64; opc + 1];
     for primitive in 0..opc {
         if primitive_offsets[primitive] > i64::MAX - output_sizes[primitive] {
-            return Err(fail("Curve Join output cardinality exceeds OCaml array limits".to_owned()));
+            return Err(fail("Curve Join output cardinality exceeds native storage or index limits".to_owned()));
         }
         primitive_offsets[primitive + 1] = primitive_offsets[primitive] + output_sizes[primitive];
     }

@@ -1,4 +1,4 @@
-//! Port of lib/renderer/test_scene2_coordinates.ml: 1x and 2x density as separate test fns.
+//! 1x and 2x density as separate test fns.
 use crate::common;
 use renderer::renderer;
 use ::renderer::renderer::native;

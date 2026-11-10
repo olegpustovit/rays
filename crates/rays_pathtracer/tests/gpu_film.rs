@@ -1,4 +1,4 @@
-//! Port of lib/rays_pathtracer/test_gpu_film.ml: the traced film is published as a GPU texture, byte
+//! the traced film is published as a GPU texture, byte
 //! for byte the standalone render, sampled by Canvas, released and resized, with zero live-handle delta.
 use crate::common;
 use common::meshes;
@@ -92,6 +92,8 @@ fn film() {
     pt::frame(&mut tracer, &camera);
     let before = p::private::device_bytes(&tracer);
     get(p::release_film(&mut tracer));
+    // Release drops the owners; settle deferred native destruction before measuring residency.
+    pt::live_handles();
     let after = p::private::device_bytes(&tracer);
     println!("GPU film at rest: device {before} -> {after} bytes at 320x180");
     assert!(before - after >= 116 * 320 * 180);

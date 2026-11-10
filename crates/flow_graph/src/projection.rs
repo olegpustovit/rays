@@ -1,4 +1,4 @@
-// Port of lib/flow_graph/projection.ml: the graph pane's view of a checked workspace: nodes, zones,
+// the graph pane's view of a checked workspace: nodes, zones,
 // rows, chips and their layout, with no drawing.
 use crate::edit_base::{self as eb, ArgKey};
 use crate::exposure;
@@ -209,7 +209,7 @@ fn macro_lens(c: &Cx, call: &S) -> Lens {
                 break;
             }
             Ok(next) => {
-                // ponytail: unchanged is judged by equality where the OCaml compares identity
+                // ponytail: equality may walk unchanged forms; use stable identities if profiles justify this comparison.
                 if s::equal(&next, &cur) {
                     break;
                 }
@@ -362,7 +362,7 @@ pub fn same_graph(a: &w::Workspace, b: &w::Workspace, name: &str) -> bool {
     let (Some(x), Some(y)) = (graph_of(a, name), graph_of(b, name)) else {
         return false;
     };
-    // OCaml's `[]` is one immediate value, so two workspaces with no ops are physically equal too
+    // Two workspaces with no operators share the canonical empty operator set.
     if !(((a.ops.is_empty() && b.ops.is_empty()) || Arc::ptr_eq(&a.ops, &b.ops))
         && x.context == y.context
         && s::equal(&x.form, &y.form)
@@ -468,7 +468,7 @@ fn show_value(v: &PValue) -> String {
     match v {
         PValue::Bool(b) => b.to_string(),
         PValue::Int(i) => i.to_string(),
-        PValue::Float(f) => fvalue::general(*f),
+        PValue::Float(f) => param::float_text(*f),
         PValue::Text(s) => String::from_utf8_lossy(s).into_owned(),
         PValue::Choice(s) => s.clone(),
     }
@@ -567,10 +567,6 @@ fn macro_rows(c: &Cx, m: &S, owner: &S, head: &str, args: &[SyntaxId]) -> Vec<Ro
     rows
 }
 
-fn trim_ws(t: &str) -> &str {
-    t.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{000c}'))
-}
-
 fn kind_section(k: &catalog::Kind) -> String {
     let name = match k.qualified.rfind('/') {
         Some(i) => &k.qualified[i + 1..],
@@ -593,7 +589,7 @@ fn kind_rows(c: &Cx, k: &catalog::Kind, owner: &S, head: &str, args: &[SyntaxId]
         let default = if slot_ty == ty::geometry() {
             None
         } else {
-            ty::default(&slot_ty).map(|form| trim_ws(&lisp::text(&[form])).to_owned())
+            ty::default(&slot_ty).map(|form| (&lisp::text(&[form])).trim().to_owned())
         };
         // the first geometry slot is the header's in-port, not a row of the body
         let head_of = i == 0 && slot_ty == ty::geometry();
@@ -1694,7 +1690,6 @@ fn point_width(n: &Node) -> f64 {
     POINT_SIZE + 8.0 + 7.0 * point_title(n).len() as f64
 }
 
-/// The hooks a layout asks the host (all optional in the OCaml; defaults here).
 #[derive(Clone)]
 pub struct LayoutOptions {
     /// reserve a footer row under every card and zone

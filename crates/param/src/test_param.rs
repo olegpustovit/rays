@@ -1,6 +1,4 @@
-// Port of lib/param/test_param.ml, assertion for assertion. The OCaml schema is generic over a
-// record with get/set closures; here a record is a `&[Value]` in field order, so each `let () =`
-// block maps to one test over the same field definitions.
+// Parameter schema values, identity, effects and native numeric printing.
 use super::*;
 
 fn field_ok(name: &str, kind: Kind, default: Value) -> Field {
@@ -19,7 +17,7 @@ fn float_field(name: &str, value: f64) -> Field {
     field_ok(name, floating(-10.0, 10.0, None, None).unwrap(), Value::Float(value))
 }
 
-// The OCaml bit pattern generator: 64-bit multiply and add with wraparound.
+// Deterministic wrapping 64-bit bit patterns.
 fn pattern_bits(i: u64) -> u64 {
     i.wrapping_mul(6364136223846793005).wrapping_add(1)
 }
@@ -51,8 +49,16 @@ fn float_text_round_trips_and_is_shortest() {
     assert_eq!(float_text(1.234567890123456), "1.234567890123456");
     assert_eq!(float_text(std::f64::consts::PI), "3.141592653589793");
     assert!(float_text(10.0) == "10" && float_text(100.0) == "100");
-    assert!(float_text(1000.0) == "1e3" && float_text(0.0001) == "1e-4");
+    assert!(float_text(1000.0) == "1000" && float_text(0.0001) == "0.0001");
     assert_eq!(float_text_with_decimal(-0.0, true), "-0.0");
+    for (value, expected) in [(f64::NAN, "NaN"), (f64::INFINITY, "Infinity"), (f64::NEG_INFINITY, "-Infinity")] {
+        assert_eq!(float_text(value), expected);
+        assert_eq!(float_text_with_decimal(value, true), expected);
+    }
+    assert!(number::valid(number::Kind::Float, "1.25e3"));
+    for text in ["0x1p0", "1_0", " 1", "1 ", "NaN", "Infinity"] {
+        assert!(!number::valid(number::Kind::Float, text), "{text}");
+    }
     for i in 0..=2047u64 {
         let bits = pattern_bits(i);
         let value = f64::from_bits(bits);

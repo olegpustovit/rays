@@ -1,10 +1,4 @@
-fn ocaml_int(value: i64) -> i64 {
-    let low = (value as u64) & ((1_u64 << 63) - 1);
-    ((low << 1) as i64) >> 1
-}
-
 pub fn rewrite(text: &str, caret: i64) -> (String, i64) {
-    let caret = ocaml_int(caret);
     let bytes = text.as_bytes();
     let n = bytes.len();
     let lines: Vec<(usize, usize)> = {
@@ -89,11 +83,18 @@ pub fn rewrite(text: &str, caret: i64) -> (String, i64) {
             } else if i < n { out.push(b'\n'); }
         }
     }
-    (String::from_utf8(out).expect("inserting ASCII closers preserves UTF-8"), ocaml_int(caret.wrapping_add(shift as i64)))
+    (String::from_utf8(out).expect("inserting ASCII closers preserves UTF-8"), caret.saturating_add(shift as i64))
 }
 #[cfg(test)]
 mod tests {
     use super::rewrite;
+    #[test]
+    fn full_width_caret_preserves_negative_sentinels_and_saturates() {
+        for caret in [i64::MIN, -1, 1i64 << 62] {
+            assert_eq!(rewrite("(a", caret), ("(a)".into(), caret.saturating_add(i64::from(caret > 2))));
+        }
+        assert_eq!(rewrite("(a", i64::MAX), ("(a)".into(), i64::MAX));
+    }
     #[test]
     fn infers_closers_and_preserves_utf8() {
         assert_eq!(rewrite("(a\n  (b\nc", 0), ("(a\n  (b))\nc".into(), 0));

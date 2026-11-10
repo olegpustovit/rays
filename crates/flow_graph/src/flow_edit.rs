@@ -1,4 +1,4 @@
-// Port of lib/flow_graph/flow_edit.ml(i): every graph gesture as a pure rewrite of the workspace
+// every graph gesture as a pure rewrite of the workspace
 // source. A gesture names its target by a `workspace::Path`: the scope path of the binding, then its
 // name (`["flower", "ring", "u"]`, or `["g", "@result"]` for a body result).
 pub use crate::edit_base::{

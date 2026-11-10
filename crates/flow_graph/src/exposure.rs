@@ -1,4 +1,4 @@
-// Port of lib/flow_graph/exposure.ml: which parameter rows a card shows (flow.md section 5.1).
+// which parameter rows a card shows (flow.md section 5.1).
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Facts {

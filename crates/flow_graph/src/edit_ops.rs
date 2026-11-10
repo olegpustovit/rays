@@ -307,7 +307,7 @@ fn hd(sp: &[Symbol]) -> R<&str> {
 }
 
 fn float_of(t: &str) -> R<f64> {
-    cfmt::parse_ocaml_float(t).ok_or_else(|| fail("The edit failed: Failure(\"float_of_string\")"))
+    (t).parse::<f64>().ok().ok_or_else(|| fail("The edit failed: Failure(\"float_of_string\")"))
 }
 
 // a binding used once is inlined into its use
@@ -569,7 +569,7 @@ fn connect(src: &[S], node: &[Symbol], key: &ArgKey, name: &str, iter: bool, bui
             }
             let step = match (iter, arg_get(&e, key, builder)) {
                 (true, Some(cur)) => match &node_of(&cur, builder) {
-                    Node::Num(n) if builder.name(*n) != "0" && builder.name(*n) != "1" && cfmt::parse_ocaml_float(builder.name(*n)) != Some(0.0) && cfmt::parse_ocaml_float(builder.name(*n)) != Some(1.0) => {
+                    Node::Num(n) if builder.name(*n) != "0" && builder.name(*n) != "1" && (builder.name(*n)).parse::<f64>().ok() != Some(0.0) && (builder.name(*n)).parse::<f64>().ok() != Some(1.0) => {
                         call("*", vec![sym(&name, builder), cur.clone()], builder)
                     }
                     _ => sym(&name, builder),
@@ -1075,7 +1075,7 @@ fn add_item(src:&[S],node:&[Symbol],builder:&mut SyntaxBuilder)->R<Vec<S>>{
         let strip=|id:S,builder:&mut SyntaxBuilder|with_notes(&id,Vec::new(),builder);
         let value=if is_str{mk(Draft::Str(b" ".to_vec()),builder)}else if n>=2{
             let last=children(&e,builder)[n];let before=children(&e,builder)[n-1];
-            let numbers=match(node_of(&last,builder),node_of(&before,builder)){(Node::Num(a),Node::Num(b))=>cfmt::parse_ocaml_float(builder.name(a)).zip(cfmt::parse_ocaml_float(builder.name(b))),_=>None};
+            let numbers=match(node_of(&last,builder),node_of(&before,builder)){(Node::Num(a),Node::Num(b))=>(builder.name(a)).parse::<f64>().ok().zip((builder.name(b)).parse::<f64>().ok()),_=>None};
             match numbers{Some((fa,fb))=>{let x=((2.0*fa-fb)*1000.0).round()/1000.0;mk(Draft::Num(if fa.is_finite()&&fa.fract()==0.0{(x as i64).to_string()}else{lisp::float(x)}),builder)},None=>strip(last,builder)}
         }else if n==1{strip(children(&e,builder)[1],builder)}else{mk(Draft::Num("0".into()),builder)};
         let mut out=children(&e,builder).to_vec();out.push(value);let e=with_node(&e,Draft::List(out),builder);set_node(sx,&leaf,e,builder)

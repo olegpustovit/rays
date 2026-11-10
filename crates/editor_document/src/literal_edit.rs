@@ -1,9 +1,4 @@
-//! Port of lib/editor_document/literal_edit.ml: a literal edited in place. Same-type catalog
-//! literals keep the checked graph's topology and liveness; the edit re-checks the workspace and
-//! patches the lowering instead of lowering again.
-//!
-//! Gap: OCaml tells the recorded values apart by physical identity (`==`); Rust values have none,
-//! so `lower_value` matches the recorded `Source`/`Struct` values structurally.
+//! Literal edits keep same-type graph topology and liveness, recheck the workspace and patch lowering. Recorded Source/Struct values are matched structurally.
 use flow_syntax::symbol::Symbol;
 use crate::layout_by_path::Path;
 use flow_check::catalog::{self as fc, Catalog};
@@ -41,7 +36,7 @@ pub struct Change {
 }
 
 fn float_of_string_opt(text: &str) -> Option<f64> {
-    cfmt::parse_ocaml_float(text)
+    (text).parse::<f64>().ok()
 }
 
 type Lit = (Ty, E);

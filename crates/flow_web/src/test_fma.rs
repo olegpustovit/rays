@@ -1,9 +1,4 @@
-//! Port of the web half of lib/flow_web/test_fma.ml: explicit and checked FMA/multiply regions printed
-//! by `js::region` run under node against the exact binary64 results (`f64::mul_add` is a single
-//! rounding), the prims.js scalar primitives, the nonfinite statuses of malformed regions, and the GPU
-//! refusal. The native-side assertions of the OCaml test (reference interpreter, `Executor` on one
-//! and eight domains, `Op.find "fma"` bodies, lazy-arm evaluation) belong to the flow_ir and
-//! flow_eval ports and are not repeated here.
+//! Actual generated FMA/multiply regions compare binary64 bits against native fused results, scalar primitives, malformed nonfinite statuses and GPU refusals.
 use crate::js;
 use crate::node_harness::{node_available, run_ok, runtime_url};
 use crate::test_program::die;

@@ -276,7 +276,7 @@ pub fn scrubbed(literal: &str, dx: f64, coarse: bool) -> String {
         (Some(dot), _) => {
             let decimals = literal.len() - dot - 1;
             let step = 10.0f64.powf(-((decimals + 1) as f64)) * if coarse { 10.0 } else { 1.0 };
-            let v = cfmt::parse_ocaml_float(literal).unwrap_or(0.0) + dx * step;
+            let v = (literal).parse::<f64>().ok().unwrap_or(0.0) + dx * step;
             let s = cfmt::f(v, decimals + 1);
             let mut n = s.len();
             while n > 0 && s.as_bytes()[n - 1] == b'0' {

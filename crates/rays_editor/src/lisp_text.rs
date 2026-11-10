@@ -461,7 +461,7 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
         None => (caret, caret),
     };
     let context = scan::context_of(text, tokens, open_stack);
-    // the innermost open bracket is the first of the stack (innermost first, as in OCaml)
+    // The first stack entry is the innermost open bracket.
     let innermost = open_stack.first();
     let enclosing: Option<usize> = innermost.and_then(|(_, at)| scan::index_at(tokens, *at));
     let enclosing_head: Option<String> = match enclosing {
@@ -725,7 +725,7 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
         Kind::Str => match enclosing_head.as_deref().and_then(kind) {
             Some(k) => {
                 let v: String = w.replace('"', " ");
-                let v = v.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}')).to_string();
+                let v = v.trim().to_string();
                 k.fields
                     .iter()
                     .find(|f| matches!(&f.kind, param::KindView::Choice(options) if options.contains(&v)))

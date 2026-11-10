@@ -1,4 +1,4 @@
-// Port of lib/flow/test_op.ml. Lives in flow_eval because it drives Workspace.check and Eval together.
+// Lives in flow_eval because it drives Workspace.check and Eval together.
 use flow_syntax::symbol::Symbol;
 use crate::*;
 use flow_check::{catalog::{Catalog, Kind, Slot}, op::{self, Op, Shape}, ray_host, workspace as W};
@@ -92,16 +92,6 @@ fn rejects_code(name: &str, args: &[(Symbol, Value)], code: &str) {
     let o = find(name, context::value());
     match (o.body)(&input::at_time(0.), &no_node, args) { Err(d) => assert_eq!(d.code, code, "{name}"), Ok(_) => panic!("accepted {name}") }
 }
-fn ocaml_s(bytes: &[u8]) -> String {
-    let mut out = String::from("\"");
-    for &c in bytes {
-        match c {
-            b'"' => out.push_str("\\\""), b'\\' => out.push_str("\\\\"), b'\n' => out.push_str("\\n"), b'\t' => out.push_str("\\t"),
-            b'\r' => out.push_str("\\r"), 8 => out.push_str("\\b"), 32..=126 => out.push(c as char), _ => out.push_str(&format!("\\{:03}", c)),
-        }
-    }
-    out.push('"'); out
-}
 fn parse(s: &str) -> Vec<syntax::Syntax> { syntax::parse(s).unwrap() }
 fn empty() -> Catalog { Catalog { version: 1, kinds: vec![] } }
 fn wcheck(ops: &[Op], catalog: &Catalog, src: &str) -> (Option<W::Workspace>, Vec<Diagnostic>) { W::check(ops, false, false, None, catalog, &parse(src)) }
@@ -114,8 +104,8 @@ fn every_operator_shape_and_arithmetic() {
     for id in 0..10 { ray_host::register(id, Arc::new(|_| ray_host::MISS)); }
     let repr = find("text/repr", context::value());
     let mut every = Vec::new(); for c in 0..=255u8 { every.push(c); }
-    for text in [every, vec![], "é日本😀\0\u{8}\t\n\r\\\"".as_bytes().to_vec()] {
-        assert_eq!(check(&repr, &[na("text", Value::Text(text.clone().into()))]), Value::Text(ocaml_s(&text).into_bytes().into()));
+    for (text, expected) in [every, vec![], "é日本😀\0\u{8}\t\n\r\\\"".as_bytes().to_vec()].into_iter().zip(include_str!("../golden/text_repr_bytes.txt").lines()) {
+        assert_eq!(check(&repr, &[na("text", Value::Text(text.into()))]), Value::Text(expected.as_bytes().into()));
     }
     for o in op::all().iter().filter(|o| !o.name.starts_with("gpu/")) {
         assert_eq!(op::find(&[], &o.name, &o.ctx).unwrap().name, o.name);

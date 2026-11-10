@@ -522,7 +522,7 @@ fn fast_point_area(
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = support::grain(OPERATION, params.grain)?;
     let cancel_value = params.cancel.as_ref();
-    if support::ocaml_trim_is_empty(&params.attribute) {
+    if (&params.attribute).trim().is_empty() {
         return Err(make_error(Code::InvalidTopology, format!("{OPERATION}: attribute name must not be empty")));
     }
     if !params.cusp_angle.is_finite()
@@ -789,10 +789,12 @@ mod tests {
     }
 
     #[test]
-    fn nonbreaking_space_is_a_valid_attribute_name() {
+    fn unicode_attribute_names_reject_blank_and_preserve_authored_spelling() {
         let mut parameters = params(None, Some(1));
         parameters.attribute = "\u{00a0}".to_owned();
+        assert!(run(&parameters, &triangle()).is_err());
+        parameters.attribute = "\u{00a0}normal\u{00a0}".to_owned();
         let output = run(&parameters, &triangle()).unwrap();
-        assert!(geometry::find_attribute(attribute::Owner::Point, "\u{00a0}", &output).is_some());
+        assert!(geometry::find_attribute(attribute::Owner::Point, "\u{00a0}normal\u{00a0}", &output).is_some());
     }
 }

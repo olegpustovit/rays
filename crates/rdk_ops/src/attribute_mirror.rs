@@ -7,7 +7,7 @@ use rdk_core::{support,
 use rdk_geom::spatial_index;
 
 use rdk_core::error::Code;
-use crate::attribute_ops::{is_blank, make_error, map_ints, map_planes, map_texts, ocaml_quote};
+use crate::attribute_ops::{make_error, map_ints, map_planes, map_texts};
 use rays_math::text_array::TextArray;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,7 +119,7 @@ fn validate_group(label: &str, owner: attribute::Owner, count: i64, value: Optio
 
 fn validate_name(label: &str, value: &Option<String>) -> Result<(), error::T> {
     match value {
-        Some(name) if is_blank(name) => Err(fail(&format!("Attribute Mirror {label} must be non-empty"))),
+        Some(name) if (name).trim().is_empty() => Err(fail(&format!("Attribute Mirror {label} must be non-empty"))),
         _ => Ok(()),
     }
 }
@@ -348,7 +348,7 @@ fn explicit_mapping(
 ) -> Result<Mapping, error::T> {
     let count = owner_count(owner, geometry_value)?;
     let owner_of_attribute = attribute_owner(owner)?;
-    if is_blank(mapping_attribute) {
+    if (mapping_attribute).trim().is_empty() {
         return Err(fail("Attribute Mirror mapping attribute must be non-empty"));
     }
     validate_group("mapping destination group", owner, count, Some(destination_group))?;
@@ -356,7 +356,7 @@ fn explicit_mapping(
         return Err(fail(&format!(
             "Attribute Mirror could not find {} mapping attribute {}",
             owner_name(owner)?,
-            ocaml_quote(mapping_attribute)
+            rdk_core::attribute::quote_bytes((mapping_attribute).as_ref())
         )));
     };
     let values = match attribute::view::storage(&found)? {
@@ -549,7 +549,7 @@ fn remap_attribute(
             attribute::Owner::Primitive => "primitive",
             attribute::Owner::Detail => "detail",
         },
-        ocaml_quote(name)
+        rdk_core::attribute::quote_bytes((name).as_ref())
     );
     let source = attribute::view::storage(item)?;
     let storage = match source {
@@ -728,7 +728,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
         )?;
         generated.insert(0, item);
     }
-    // OCaml builds this list by consing and reverses it once more at the end.
+    // Mapping is emitted after the selected attributes, in their existing stored order.
     generated.reverse();
     let mut groups: Vec<group::T> = Vec::new();
     if let Some(name) = &params.source_group {

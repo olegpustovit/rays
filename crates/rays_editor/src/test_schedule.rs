@@ -1,4 +1,4 @@
-//! Port of the schedule half of test_packed_pieces.ml `test_timeline_and_schedule`.
+//! Fixed-step scheduling and timeline behavior.
 use crate::schedule as s;
 use crate::test_timeline::frame_with;
 use input::MouseButton;

@@ -90,7 +90,7 @@ impl Default for CacheOptions {
             shed: Shed::Home,
             rebuild: 1.0,
             charges: true,
-            byte_capacity: (1_i64 << 62) - 1,
+            byte_capacity: i64::MAX,
             evictable: None,
             release: None,
         }
@@ -1246,8 +1246,8 @@ mod tests {
     }
 
     #[test]
-    fn default_byte_capacity_matches_ocaml_int_max() {
-        assert_eq!(CacheOptions::default().byte_capacity, (1_i64 << 62) - 1);
+    fn default_byte_capacity_uses_native_int_max() {
+        assert_eq!(CacheOptions::default().byte_capacity, i64::MAX);
     }
 
     #[test]

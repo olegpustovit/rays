@@ -1,4 +1,4 @@
-//! Port of the timeline half of test_packed_pieces.ml `test_timeline_and_schedule`.
+//! Timeline controls and scheduling intents.
 use crate::timeline::{self as t, Mode};
 use rays::frame;
 

@@ -1,8 +1,4 @@
-//! Port of lib/flow_ir/core_marks.ml: execution of draw statements into the mark table
-//! (`specification/marks.md`). Every check of a value and every conversion is drawing.ml's, so the
-//! table encodes the same picture. Errors are `Result<_, Diagnostic>` (OCaml `V.fail`).
-//! Not_found of `Buffers.find` / `Buffers.device` is `None`; a Shape2 tessellation failure
-//! (OCaml `invalid_arg`) is an `E_DRAW_RANGE` diagnostic.
+//! Execute draw statements into the mark table. Buffer lookup misses return None; tessellation failures become E_DRAW_RANGE diagnostics.
 use flow_syntax::symbol::Symbol;
 use crate::core_ir::{Draw, Mark, PathKind, Transform};
 use flow_check::op::drawing_color;
@@ -477,8 +473,6 @@ pub fn compile(draw: &Draw) -> Compiled {
     }
 }
 
-/// Direct tests of the draw statements against values the OCaml `core_marks.expected` pictures
-/// resolve to (the lowering `Core_draw` and the executor test the rest end to end).
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,7 +491,6 @@ mod tests {
     fn background_fills_the_canvas() {
         // picture 0: (draw/background "#14161c") on 200x100
         let entries = run(Draw::Background(0), vec![text("#14161c")], (200, 100)).unwrap();
-        // OCaml prints indices [3 2 0 2 1 0]; scene_command::shape2 currently yields [0 1 2 0 2 3] (reported, not ours).
         let Entry::Geometry { vertices, indices, color } = &entries[0] else { panic!("geometry") };
         assert_eq!((vertices.clone(), indices.len(), *color), (vec![0.0, 0.0, 200.0, 0.0, 200.0, 100.0, 0.0, 100.0], 6, 0x14161cff));
     }

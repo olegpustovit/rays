@@ -1,5 +1,4 @@
-// Port of lib/scene_command/test_ui_primitives.ml, assertion for assertion. The OCaml file's
-// Gc.allocated_bytes budgets have no counterpart in the Rust test harness and are not ported.
+// UI primitive encoding and ownership assertions.
 use crate::render_ir::{self, Command, Transform};
 use crate::shape2;
 use crate::ui_batch::{self, Builder, Table};

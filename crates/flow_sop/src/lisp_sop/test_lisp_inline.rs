@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/test_lisp_inline.ml. Single-program design: a Lisp node call evaluates its
+//! Single-program design: a Lisp node call evaluates its
 //! body in the calling program, so chained nodes are one program for the region passes.
 use super::support::*;
 use crate::{lisp_sop, lower, value_lane};
@@ -238,9 +238,7 @@ fn cooked_data_arguments_resolve_once_per_cook() {
     assert!(large <= 12.0 * small + 0.05, "step E2: 4x points took {large:.3}s vs {small:.3}s");
 }
 
-/// OCaml `test_lisp_inline.ml` ("a driven transform"): a card whose `:validate` or `if` reads a live
-/// argument stays inlined, its check deferred as a guard of the card (`Eval.guards`, `card ~guards`),
-/// not the plain catalog node rebuilt per frame (on gpu_sea: a new device site and slot set per frame).
+/// Live validation/if expressions remain inline guards of the same card rather than creating new per-frame device sites and slots.
 #[test]
 fn a_live_validation_inlines_the_card_as_a_guard() {
     let l = lower::workspace(None, Vec::new(), lower::Options::default(), &parse("(workspace x (graph g :context sop (sop/transform (sop/grid :rows 5 :columns 7) :recompute_normals true :shear_xy (* t 2.0))))"))
@@ -249,12 +247,7 @@ fn a_live_validation_inlines_the_card_as_a_guard() {
     assert!(!kinds.contains(&"sop/transform"), "the driven transform stayed a catalog node: {kinds:?}");
 }
 
-/// gpu_sea's chain with the host deferring large static maps (`defer`, as the editor lowers): a grid's
-/// own check of a deferred map (its rows mask) is answered by the host's bulk callback (OCaml's
-/// `Bulk_needed` -> `bulk`), so the grid stays a card over cooked nodes. When it was not asked, the
-/// grid turned structural (a residual), the noise read an open input (`sop/has_attr` unfolded) and
-/// stayed the catalog node, re-lowered every frame with `sop/attr` sources its device kernels could
-/// not bind.
+/// The host bulk callback resolves a deferred grid validation mask, preserving its card and bindable cooked sources instead of relowering a catalog node every frame.
 #[test]
 fn a_deferred_grid_stays_a_card_and_the_driven_noise_inlines() {
     let text = "(workspace x (graph g :context sop (-> (sop/grid :counts \"Point counts\" :connectivity \"Triangles\" :columns 70 :rows 70) \

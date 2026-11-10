@@ -248,7 +248,7 @@ pub fn tex_coord(owner: Owner) -> Key {
 }
 
 pub fn create_owned(name: &str, owner: Owner, storage: Storage) -> Result<T, error::T> {
-    if support::ocaml_trim_is_empty(name) {
+    if (name).trim().is_empty() {
         return Err(invalid_attribute("Attribute.create_owned", "empty name"));
     }
     Ok(T {
@@ -269,7 +269,7 @@ pub fn create_deferred(
     length: i64,
     materialise: Arc<dyn Fn() -> Storage + Send + Sync>,
 ) -> Result<T, error::T> {
-    if support::ocaml_trim_is_empty(name) {
+    if (name).trim().is_empty() {
         return Err(invalid_attribute("Attribute.create_deferred", "empty name"));
     }
     let kind = storage_kind(like);
@@ -365,7 +365,7 @@ pub fn storage_id(value: &T) -> i64 {
 }
 
 pub fn with_name(name: &str, value: &T) -> Result<T, error::T> {
-    if support::ocaml_trim_is_empty(name) {
+    if (name).trim().is_empty() {
         return Err(invalid_attribute("Attribute.with_name", "empty name"));
     }
     if name == value.name {
@@ -492,6 +492,17 @@ mod tests {
     use super::{Arc, Owner, Storage};
 
     #[test]
+    fn names_reject_unicode_whitespace_without_altering_nonblank_spelling() {
+        for name in ["\u{b}", "\u{85}", "\u{a0}", "\u{2003}", "\u{2028}", "\u{3000}"] {
+            assert!(super::create_owned(name, Owner::Point, Storage::Float(Arc::new(Vec::new()))).is_err());
+            assert!(crate::group::ordered(crate::group::Owner::Point, name, 0, &[]).is_err());
+        }
+        let name = "\u{a0}point\u{a0}";
+        let value = super::create_owned(name, Owner::Point, Storage::Float(Arc::new(Vec::new()))).unwrap();
+        assert_eq!(super::name(&value), name);
+    }
+
+    #[test]
     fn quote_codecs_preserve_bytes_and_unicode_separately() {
         assert_eq!(
             super::quote_bytes(b"\"\\\n\t\r\x08\x00\x1f\x7f\xc3\xa9\xff"),
@@ -507,15 +518,6 @@ mod tests {
     }
 
 
-    #[test]
-    fn name_whitespace_is_ascii_only() {
-        let whitespace = " \t\n\r\u{000c}";
-        assert!(super::create_owned(whitespace, Owner::Point, Storage::Float(Arc::new(vec![]))).is_err());
-        let nbsp = "\u{00a0}";
-        let value = super::create_owned(nbsp, Owner::Point, Storage::Float(Arc::new(vec![]))).unwrap();
-        assert_eq!(super::name(&value), nbsp);
-        assert!(super::with_name(nbsp, &value).is_ok());
-    }
     #[test]
     fn typed_key_checks_owner_and_storage_and_rename_shares_payload_identity() {
         let value = super::create_owned("signal", Owner::Point, Storage::Float(Arc::new(vec![1.0, 2.0])))

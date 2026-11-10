@@ -1,7 +1,6 @@
 //! The one reduction phase of a frame: what the panes asked for (`frame_result`) and the keys
 //! (`actions`) become the next model. Nothing here builds UI: the panes have finished constructing
 //! their boxes, and a test can run it on a frame result it made itself.
-//! Port of lib/rays_editor/editor_reduce.ml.
 //!
 //! The reducer owns the model and keeps only the previous identities needed for comparisons;
 //! `Frame_input.view_state` is an `Rc<dyn Fn>`; optional arguments (`?gpu ?pump`) are trailing

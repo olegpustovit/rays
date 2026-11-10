@@ -1,4 +1,4 @@
-//! Port of lib/pxui_shell/chrome.ml: chrome of the retained workspace, painted and hit through
+//! chrome of the retained workspace, painted and hit through
 //! PXUI boxes: panel backgrounds, splitters, and header bars with a collapse button and a
 //! right-click menu (split, close, retype).
 use std::borrow::Cow;
@@ -104,7 +104,7 @@ fn split_crumbs(sub: &str) -> Vec<String> {
             i += 1;
         }
     }
-    out.into_iter().map(|s| s.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c')).to_string()).collect()
+    out.into_iter().map(|s| s.trim().to_string()).collect()
 }
 
 /// a path too long for its room loses its head, not its subject: "… / sop". Each part keeps its
@@ -209,7 +209,7 @@ pub fn panel_menu(
         Some(text) => {
             let parts: Vec<&str> = text.split(' ').collect();
             if parts.len() == 2 {
-                match (cfmt::parse_ocaml_float(parts[0]), cfmt::parse_ocaml_float(parts[1])) {
+                match ((parts[0]).parse::<f64>().ok(), (parts[1]).parse::<f64>().ok()) {
                     (Some(mx), Some(my)) => (mx, my),
                     _ => default_at,
                 }
@@ -865,7 +865,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
                 Some(text) => {
                     let parts: Vec<&str> = text.split(' ').collect();
                     if parts.len() == 2 {
-                        match (cfmt::parse_ocaml_float(parts[0]), cfmt::parse_ocaml_float(parts[1])) {
+                        match ((parts[0]).parse::<f64>().ok(), (parts[1]).parse::<f64>().ok()) {
                             (Some(a), Some(b)) => (a, b),
                             _ => default_at,
                         }

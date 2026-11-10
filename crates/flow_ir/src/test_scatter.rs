@@ -1,4 +1,4 @@
-// Port of lib/flow_ir/test_scatter.ml. The `--bench` block is not ported.
+// The `--bench` block is not ported.
 use flow_syntax::symbol::Symbol;
 use crate::flow_ir::executor;
 use crate::test_support::*;
@@ -123,7 +123,6 @@ fn malformed_inputs() {
 
 #[test]
 fn core_and_executor_match_the_reference() {
-    // Sizes: OCaml used 32769 / 5001; 2049 keeps two 1024-lane block crossings within the debug budget.
     for body in [
         "(array/scatter_add (map (fn [(i : int)] (int/mod i 97)) (array/range 2049 :type int)) (map (fn [x] (+ x t)) (array/range 2049)) 97)",
         "(array/scatter_add (array/int 13 0) (array/int 13 (int/add (frame/index) 9007199254740993)) 2)",

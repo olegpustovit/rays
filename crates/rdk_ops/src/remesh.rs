@@ -1,4 +1,4 @@
-//! Port of lib/rdk/ops/mesh/remesh.ml: incremental isotropic remeshing (split, collapse, flip,
+//! incremental isotropic remeshing (split, collapse, flip,
 //! smooth, project) over one local mutable triangle structure per iteration.
 use rays_math::float::max as float_max;
 use std::sync::Arc;
@@ -21,13 +21,11 @@ pub(crate) fn fail(message: &str) -> error::T {
     error::new("remesh", Code::InvalidRemesh, format!("{OPERATION}: {message}"))
 }
 
-/// OCaml `Invalid_argument`; the public entry turns it into a prefixed failure.
+/// The public remesh entry wraps invalid-input messages with the operation prefix.
 pub(crate) fn invalid_arg(message: String) -> error::T {
     error::new("remesh", Code::InvalidArgument, message)
 }
 
-/// OCaml `%S`.
-use crate::attribute_ops::ocaml_quote as quoted;
 
 pub struct ProjectionScratch {
     pub count: i64,
@@ -41,7 +39,7 @@ pub struct ProjectionScratch {
 
 pub(crate) fn validate_name(label: &str, name: Option<&str>) -> Result<(), error::T> {
     match name {
-        Some(name) if rdk_core::support::ocaml_trim_is_empty(name) => Err(fail(&format!("{label} name must not be empty"))),
+        Some(name) if (name).trim().is_empty() => Err(fail(&format!("{label} name must not be empty"))),
         _ => Ok(()),
     }
 }
@@ -101,11 +99,11 @@ pub(crate) fn target_values(
     let Some(name) = name else {
         return Ok(None);
     };
-    if rdk_core::support::ocaml_trim_is_empty(name) {
+    if (name).trim().is_empty() {
         return Err(fail("target-size attribute name must not be empty"));
     }
     match geometry::find_attribute(Owner::Point, name, geometry_value) {
-        None => Err(fail(&format!("point target-size attribute {} does not exist", quoted(name)))),
+        None => Err(fail(&format!("point target-size attribute {} does not exist", rdk_core::attribute::quote_bytes((name).as_ref())))),
         Some(found) => match attribute::view::storage(&found)? {
             Storage::Float(values) => {
                 let mut invalid = -1_i64;
@@ -122,14 +120,14 @@ pub(crate) fn target_values(
                 } else {
                     Err(fail(&format!(
                         "target-size attribute {} must be finite and positive at point {}",
-                        quoted(name),
+                        rdk_core::attribute::quote_bytes((name).as_ref()),
                         invalid
                     )))
                 }
             }
             _ => Err(fail(&format!(
                 "point target-size attribute {} must be scalar float",
-                quoted(name)
+                rdk_core::attribute::quote_bytes((name).as_ref())
             ))),
         },
     }
@@ -208,7 +206,7 @@ pub(crate) fn uv_reader(name: &str, geometry_value: &geometry::T) -> Result<Opti
         Some(equal) => Ok(Some(equal)),
         None => Err(fail(&format!(
             "vertex UV attribute {} must be float, float2, float3, or float4",
-            quoted(name)
+            rdk_core::attribute::quote_bytes((name).as_ref())
         ))),
     }
 }
@@ -652,14 +650,14 @@ pub(crate) fn local_of_geometry(
                 _ => {
                     return Err(invalid_arg(format!(
                         "{OPERATION}: point target-size attribute {} must be scalar float",
-                        quoted(name)
+                        rdk_core::attribute::quote_bytes((name).as_ref())
                     )));
                 }
             },
             None => {
                 return Err(invalid_arg(format!(
                     "{OPERATION}: point target-size attribute {} does not exist",
-                    quoted(name)
+                    rdk_core::attribute::quote_bytes((name).as_ref())
                 )));
             }
         },
@@ -2679,7 +2677,7 @@ mod tests {
     }
 
     #[test]
-    fn grid_fixture_matches_ocaml_generator() {
+    fn grid_fixture_keeps_row_major_layout() {
         let source = grid(9, 7, 6.0, true);
         let topology = topology::view::view(geometry::topology(&source)).unwrap();
         assert_eq!(&topology.vertex_points[..12], &[0, 9, 10, 0, 10, 1, 1, 10, 2, 2, 10, 11]);

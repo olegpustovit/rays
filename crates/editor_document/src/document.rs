@@ -1,4 +1,4 @@
-//! Port of lib/editor_document/document.ml: everything the user edits and saves, as one immutable
+//! everything the user edits and saves, as one immutable
 //! value: the one thing `Editor_core.History` snapshots. Selection, hover and the open level are
 //! view state and stay outside. The document is a workspace (its text is the authored truth); the
 //! scene, the networks and the shell are what lowering derives from it.
@@ -149,7 +149,7 @@ pub struct Shell {
     pub switch: Option<Switch>,
 }
 
-/// A value computed on first use and kept (OCaml `Lazy.t`), for the window's precision.
+/// Compute and retain the value on first use, at the window's precision.
 #[derive(Clone)]
 pub struct LazyBool {
     cell: Arc<OnceLock<bool>>,
@@ -335,9 +335,9 @@ pub fn validate(value: &T) -> Result<(), String> {
     for node in &value.scene {
         match (node.kind.as_str(), value.networks.contains_key(&node.id), value.layers.contains_key(&node.id)) {
             ("geometry", true, false) | ("world", false, true) | ("camera" | "light", false, false) => {}
-            ("geometry" | "world", _, _) => return Err(format!("object {} (#{}) has no network", sop::node::ocaml_quote(&node.label), node.id)),
+            ("geometry" | "world", _, _) => return Err(format!("object {} (#{}) has no network", format!("{:?}", &node.label), node.id)),
             ("camera" | "light", _, _) => return Err(format!("object #{} cannot own a network", node.id)),
-            _ => return Err(format!("invalid scene object {}", sop::node::ocaml_quote(&node.kind))),
+            _ => return Err(format!("invalid scene object {}", format!("{:?}", &node.kind))),
         }
     }
     let owner = |id: i64, kind: &str| -> Result<(), String> {
@@ -412,38 +412,13 @@ pub fn object_network(value: &T, id: i64) -> Option<(net::Network, Option<i64>)>
     value.networks.get(&id).map(|n| (n.graph.clone(), n.displayed))
 }
 
-/// OCaml `Printf "%h"`.
-pub fn hex_float(x: f64) -> String {
-    if x.is_nan() {
-        return "nan".to_owned();
-    }
-    if x.is_infinite() {
-        return if x < 0. { "-infinity" } else { "infinity" }.to_owned();
-    }
-    let bits = x.to_bits();
-    let sign = if bits >> 63 == 1 { "-" } else { "" };
-    let exponent = ((bits >> 52) & 0x7ff) as i64;
-    let mantissa = bits & ((1u64 << 52) - 1);
-    let (lead, exp) = if exponent == 0 {
-        if mantissa == 0 { (0, 0) } else { (0, -1022) }
-    } else {
-        (1, exponent - 1023)
-    };
-    let mut digits = format!("{mantissa:013x}");
-    while digits.ends_with('0') {
-        digits.pop();
-    }
-    let frac = if digits.is_empty() { String::new() } else { format!(".{digits}") };
-    format!("{sign}0x{lead}{frac}p{}{}", if exp < 0 { "-" } else { "+" }, exp.abs())
-}
-
 fn pv(v: &PV) -> String {
     match v {
         PV::Bool(x) => x.to_string(),
         PV::Int(x) => x.to_string(),
-        PV::Float(x) => hex_float(*x),
-        PV::Text(x) => sop::node::ocaml_quote(&String::from_utf8_lossy(x)),
-        PV::Choice(x) => sop::node::ocaml_quote(x),
+        PV::Float(x) => param::float_text_with_decimal(*x, true),
+        PV::Text(x) => lisp::quote_string(x),
+        PV::Choice(x) => lisp::quote_string(x.as_bytes()),
     }
 }
 
@@ -472,7 +447,7 @@ pub fn dump(value: &T) -> String {
                 "  node {} {} {} slots={} inputs={}{} {}",
                 info.id,
                 key,
-                sop::node::ocaml_quote(&info.label),
+                format!("{:?}", &info.label),
                 slots,
                 inputs,
                 root,
@@ -494,7 +469,7 @@ pub fn dump(value: &T) -> String {
                 "  node {} {} {} input={} {}",
                 node.id,
                 node.kind,
-                sop::node::ocaml_quote(&node.label),
+                format!("{:?}", &node.label),
                 node.input.map_or("_".to_owned(), |i| i.to_string()),
                 fields_text(&kg::fields(node))
             ));
@@ -508,7 +483,7 @@ pub fn dump(value: &T) -> String {
         kinds_line(&mut line, &format!("object {id}"), "world", l);
     }
     for (key, world) in &value.view_worlds {
-        line(format!("view {} world {}", key, world.as_ref().map_or("-".to_owned(), |w| sop::node::ocaml_quote(&w.node.label))));
+        line(format!("view {} world {}", key, world.as_ref().map_or("-".to_owned(), |w| format!("{:?}", &w.node.label))));
     }
     for (key, r) in &value.view_roots {
         let camera = match &r.camera {
@@ -616,7 +591,7 @@ pub fn describe(source: &[S], home: &Home) -> String {
         Home::Copy { loop_, .. } => describe(source, loop_),
         home => match syntax_of(source, home) {
             None => match enclosing(home) {
-                Some(n) => format!("a form in {}", sop::node::ocaml_quote(&n)),
+                Some(n) => format!("a form in {}", format!("{:?}", &n)),
                 None => "a form".to_owned(),
             },
             Some(e) => {
@@ -627,7 +602,7 @@ pub fn describe(source: &[S], home: &Home) -> String {
                     Err(error) => wh.push(rays_diagnostic::to_string(&error)),
                 }
                 if let Some(n) = enclosing(home) {
-                    wh.push(format!("in {}", sop::node::ocaml_quote(&n)));
+                    wh.push(format!("in {}", format!("{:?}", &n)));
                 }
                 format!("`{}`{}", truncate(40, &head_text(&e)), if wh.is_empty() { String::new() } else { format!(" ({})", wh.join(", ")) })
             }

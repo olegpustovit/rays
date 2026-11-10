@@ -899,10 +899,7 @@ mod deferred_tests {
 
 #[cfg(test)]
 mod ported_rdk_tests {
-    //! Port of `check_topology_validation` and `check_deferred_topology` from lib/rdk/test_rdk.ml.
-    //! Domain contexts retain the source's one/four/eight-domain matrix even though Rust
-    //! validation is sequential. Owned Vec inputs replace mutable aliased OCaml arrays.
-    //! Fallible materialisers cache failures, including an unread topology released before use.
+    //! Topology validation retains 1/4/8-domain equality over immutable owned inputs. Failed materialization is cached, including topology released before its first read.
     use super::*;
     use crate::packed::deferred::Holder;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1009,7 +1006,7 @@ mod ported_rdk_tests {
     struct TestHolder;
     impl Holder for TestHolder {}
 
-    /// 2 x 2 quad grid over 9 points (the OCaml `Plane_generators.grid ~connectivity:Grid_quads`).
+    /// A 2x2 quad grid uses nine source points.
     fn grid_quads() -> T {
         let mut vertices = Vec::new();
         for row in 0..2_i64 {

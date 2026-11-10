@@ -1,5 +1,3 @@
-//! Port of lib/flow_ir (typed dataflow IR over flow evaluations). One module per OCaml file.
-//! OCaml `Core` is `core_ir` here: a module named `core` would shadow Rust's `core` crate.
 pub mod core_ir;
 pub mod core_marks;
 pub mod fallback;
@@ -14,7 +12,6 @@ pub mod flow_ir;
 #[cfg(test)]
 mod region_snapshot;
 
-// Ported OCaml test files (lib/flow_ir/test_*.ml).
 #[cfg(test)] mod test_arena;
 #[cfg(test)] mod test_array_composition;
 #[cfg(test)] mod test_array_max_length;

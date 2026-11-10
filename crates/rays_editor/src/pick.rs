@@ -51,7 +51,7 @@ pub fn tint(output: &Output, lit: &Set) -> Result<Output, rays_diagnostic::Diagn
     }
     let (r, g, b, _) = rays_math::color::to_floats(pxui::theme::default().accent);
     let tinted = gv::tint(flow_sop::lower::source_attribute(), (r, g, b), &|tag| lit.contains(&tag), &geometry);
-    // OCaml `tinted == geometry`: an untagged geometry comes back as itself
+    // An untagged geometry retains the same payload identity after tinting.
     if rdk_core::geometry::data_id(&tinted) == rdk_core::geometry::data_id(&geometry) {
         return Ok(output.clone());
     }

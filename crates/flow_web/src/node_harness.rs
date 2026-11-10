@@ -1,5 +1,4 @@
-//! Test support: run a generated JavaScript module under node (the OCaml tests shell out to node
-//! the same way). The tests skip loudly when node is absent.
+//! Execute generated JavaScript modules under Node; report skips explicitly when Node is absent.
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;

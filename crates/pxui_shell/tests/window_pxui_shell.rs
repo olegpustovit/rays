@@ -1,6 +1,4 @@
-//! The interaction contract of the editor chrome on the SDL main thread (fonts): the OCaml
-//! lib/pxui_shell test_shell. There are no pixel goldens in lib/pxui_shell; the OCaml suite counts
-//! the instances a strip draws, which these cases do through `Layer::stage_native`.
+//! Editor chrome interactions run on the SDL main thread; stage_native packet counts validate painted strip geometry.
 #[path = "../../rays/tests/common/mod.rs"]
 mod common;
 #[path = "cases/shell_a.rs"]

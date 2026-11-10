@@ -1,4 +1,4 @@
-//! Port of lib/rays_editor/test/test_materials.ml: material refs, group preservation and domain
+//! material refs, group preservation and domain
 //! exactness (the file's main body), `face_materials_preserve_explosion` and the editor outline /
 //! follow-and-back / rename / assign test (`follow_tests`). Not ported: `carry_tests` and
 //! `viewport_carry_tests` (see the report).

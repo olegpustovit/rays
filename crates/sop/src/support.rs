@@ -1,7 +1,4 @@
-//! Port of lib/sop/support.ml: helpers shared by the node declarations and the hand-written SOPs.
-//!
-//! Choice parameters: every OCaml `Param.choice ~equal [ (label, v); ... ]` is one `Choice` table of
-//! `(label, value)` rows. The row order is the user-visible choice order.
+//! Shared SOP declaration helpers retain user-visible choice row order.
 use param::{Kind, Value};
 use rays_diagnostic::Diagnostic;
 use rdk_core::{attribute, geometry, group};
@@ -339,7 +336,7 @@ fn owner_of_token<T: Copy>(table: &[(&str, &str, T)], what: &str, token: &str) -
         .iter()
         .find(|(one, many, _)| token == *one || token == *many)
         .map(|row| row.2)
-        .ok_or_else(|| format!("unknown {what} owner {}", crate::node::ocaml_quote(token)))
+        .ok_or_else(|| format!("unknown {what} owner {}", rdk_core::attribute::quote(token)))
 }
 
 fn attribute_owner_of_token(token: &str) -> Result<attribute::Owner, String> {
@@ -500,7 +497,7 @@ pub fn optional_element_group(owner: GroupOpsOwner, name: &str) -> Option<Elemen
 }
 
 fn group_missing(operation: &str, what: &str, name: &str) -> Diagnostic {
-    missing_group(format!("{operation} could not find {what} group {}", crate::node::ocaml_quote(name)))
+    missing_group(format!("{operation} could not find {what} group {}", rdk_core::attribute::quote(name)))
 }
 
 pub fn resolve_element_group(
@@ -573,7 +570,7 @@ pub fn uv_parameterize_seams(
     }
     Err(diagnostic_with(
         "missing_group",
-        &format!("{operation} could not find edge or vertex seam group {}", crate::node::ocaml_quote(group_name)),
+        &format!("{operation} could not find edge or vertex seam group {}", rdk_core::attribute::quote(group_name)),
         None,
         vec![format!("Create a native edge group or compatibility vertex-edge group before {operation}")],
     ))

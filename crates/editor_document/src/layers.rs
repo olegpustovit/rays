@@ -1,4 +1,4 @@
-//! Port of lib/editor_document/layers.ml: the World's layers as plain kinds (`world/gradient`,
+//! the World's layers as plain kinds (`world/gradient`,
 //! `world/sky`, ...) and the stack they make: a `World.t` read from, and written to, a
 //! `kind_graph::T` of layers. Angles are degrees in the inspector and radians in `World`.
 use crate::kind_graph::{self as g, chc, fl, int, kind_make, schema_of, tog, Rec};

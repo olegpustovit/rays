@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/test_remap.ml: `sop/remap` against the native Topology_remap helpers, across
+//! `sop/remap` against the native Topology_remap helpers, across
 //! the reference and CPU tiers, domains and grains.
 //!
 //! Text fixtures retain the original invalid 0xff byte and embedded NUL without Unicode substitution.

@@ -1,4 +1,3 @@
-//! Port of crates/rdk/boolean (dune library rdk_boolean). One module per OCaml file.
 pub mod boolean;
 pub mod boolean_cells;
 pub mod boolean_complex;

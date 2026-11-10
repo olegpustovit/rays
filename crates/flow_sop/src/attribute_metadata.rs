@@ -1,8 +1,4 @@
-//! Port of lib/flow_sop/attribute_metadata.ml: topology-preserving attribute metadata operations
-//! over cooked geometry.
-//!
-//! The OCaml node constructors raise a Flow diagnostic on a bad owner or conflict word; here they
-//! return `Result<node::T, Diagnostic>` (the same diagnostic, as a value).
+//! Topology-preserving metadata nodes return typed Diagnostics for invalid owner/conflict words.
 use flow_syntax::symbol::Symbol;
 use flow_eval::Value;
 use flow_syntax::lisp;
@@ -180,7 +176,7 @@ pub fn attribute_owner(text: &str) -> Result<Option<Owner>, Diagnostic> {
         "primitive" | "primitives" => Ok(Some(Owner::Primitive)),
         "detail" => Ok(Some(Owner::Detail)),
         "any" | "*" => Ok(None),
-        _ => Err(error("E_ATTR_OWNER", &format!("Unknown attribute owner {}.", node::ocaml_quote(text)))),
+        _ => Err(error("E_ATTR_OWNER", &format!("Unknown attribute owner {}.", rdk_core::attribute::quote(text)))),
     }
 }
 
@@ -191,7 +187,7 @@ pub fn group_owner(text: &str) -> Result<Option<GroupOwner>, Diagnostic> {
         "primitive" | "primitives" => Ok(Some(GroupOwner::GroupPrimitives)),
         "edge" | "edges" => Ok(Some(GroupOwner::GroupEdges)),
         "any" | "*" => Ok(None),
-        _ => Err(error("E_GROUP_OWNER", &format!("Unknown group owner {}.", node::ocaml_quote(text)))),
+        _ => Err(error("E_GROUP_OWNER", &format!("Unknown group owner {}.", rdk_core::attribute::quote(text)))),
     }
 }
 
@@ -202,7 +198,7 @@ pub fn attr_conflict(text: &str) -> Result<RenameConflict, Diagnostic> {
         "overwrite" => Ok(RenameConflict::AttributeRenameOverwrite),
         _ => Err(error(
             "E_METADATA_CONFLICT",
-            &format!("Unknown attribute rename conflict {}.", node::ocaml_quote(text)),
+            &format!("Unknown attribute rename conflict {}.", rdk_core::attribute::quote(text)),
         )),
     }
 }
@@ -213,7 +209,7 @@ pub fn group_conflict(text: &str) -> Result<group_ops::RenameConflict, Diagnosti
         "error" => Ok(group_ops::RenameConflict::RenameError),
         "overwrite" => Ok(group_ops::RenameConflict::RenameOverwrite),
         "union" => Ok(group_ops::RenameConflict::RenameUnion),
-        _ => Err(error("E_METADATA_CONFLICT", &format!("Unknown group rename conflict {}.", node::ocaml_quote(text)))),
+        _ => Err(error("E_METADATA_CONFLICT", &format!("Unknown group rename conflict {}.", rdk_core::attribute::quote(text)))),
     }
 }
 
@@ -449,7 +445,7 @@ pub fn kind(owner: Owner, name: &str, value: &geometry::T) -> Option<String> {
 fn type_of(owner: Owner, name: &str, value: &geometry::T) -> Result<Value, Diagnostic> {
     match kind(owner, name, value) {
         Some(kind) => Ok(Value::Text(kind.into_bytes().into())),
-        None => Err(error("E_ATTR_TYPE", &format!("Attribute {} is missing.", node::ocaml_quote(name)))),
+        None => Err(error("E_ATTR_TYPE", &format!("Attribute {} is missing.", rdk_core::attribute::quote(name)))),
     }
 }
 

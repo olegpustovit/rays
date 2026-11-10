@@ -1,4 +1,4 @@
-//! test_gallery_shapes.ml: the gallery's Lisp graphs against independent OCaml-side inputs.
+//! Gallery Lisp shapes use independently authored fixture inputs.
 #![allow(dead_code, unused_imports)]
 use flow_syntax::syntax::{self as S, Node, Syntax};
 use rdk_core::packed::float3;

@@ -1,7 +1,5 @@
-//! Port of lib/flow_ir/region_snapshot.ml: instruction-level snapshots of every packed program a
-//! test compiles. The state is process-global (as OCaml's module-level buffer); one test owns it.
-//! Snapshot files are `crates/flow_ir/snapshots/<name>.txt`; `REGION_SNAPSHOT_DIR` rewrites them.
-use crate::core_ir::{hex_float, quoted, region::{self as R, Instruction as I, LiveFloat, LiveInt, Projection}};
+//! Process-global region snapshots have one test owner. REGION_SNAPSHOT_DIR writes crates/flow_ir/snapshots/<name>.txt.
+use crate::core_ir::{quoted, region::{self as R, Instruction as I, LiveFloat, LiveInt, Projection}};
 use crate::core_ir::RegionT;
 use crate::packed;
 use flow_syntax::packed_ops::{self, Binary, Conversion, Unary};
@@ -45,7 +43,7 @@ fn projection(p: &Projection) -> &'static str {
 /// One instruction as the snapshot files print it.
 pub fn instruction(x: &I) -> String {
     match x {
-        I::Const(x) => format!("Const {}", hex_float(*x)),
+        I::Const(x) => format!("Const {}", flow_syntax::lisp::float(*x)),
         I::Input(i, w, c) => format!("Input {} {} {}", i, w, c),
         I::Uniform(i, c) => format!("Uniform {} {}", i, c),
         I::Frame(name) => format!("Frame {}", quoted(name.as_bytes())),
@@ -53,7 +51,7 @@ pub fn instruction(x: &I) -> String {
         I::Binary(op, a, b) => format!("Binary {} {} {}", binary_name(*op), a, b),
         I::Unary(op, a) => format!("Unary {} {}", unary_name(*op), a),
         I::Noise3(x, y, z, seed, octaves, lacunarity, gain) => {
-            let fractal = |v: &LiveFloat| match v { LiveFloat::Fixed(v) => hex_float(*v), LiveFloat::Live(r) => format!("r{}", r) };
+            let fractal = |v: &LiveFloat| match v { LiveFloat::Fixed(v) => flow_syntax::lisp::float(*v), LiveFloat::Live(r) => format!("r{}", r) };
             let octaves = match octaves { LiveInt::Fixed(n) => n.to_string(), LiveInt::Live(r) => format!("r{}", r) };
             let extra = if *lacunarity == LiveFloat::Fixed(2.0) && *gain == LiveFloat::Fixed(0.5) {
                 String::new()
@@ -177,7 +175,6 @@ pub fn record(result: &Result<RegionT, Vec<Diagnostic>>) {
     }
 }
 
-/// Append raw text (OCaml `Buffer.add_string Region_snapshot.buffer`).
 pub fn append(text: &str) {
     STATE.lock().unwrap().buffer.push_str(text);
 }
@@ -213,9 +210,7 @@ pub fn finish(name: &str) -> Result<(), String> {
     Err(format!("region snapshot {} differs: length differs at line {}", name, n))
 }
 
-/// The differential test against the OCaml oracle: `golden/region_cases.txt` is compiled the way
-/// `Test_program.compile` does, with fusion on and off, and every register program must print as
-/// `golden/region_cases.expected` (printed by `lib/flow_ir`'s own OCaml for the same cases).
+/// Compile every owned region case with fusion on and off and compare exact register-program output with golden/region_cases.expected.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,9 +278,8 @@ mod tests {
     }
 
     #[test]
-    fn registers_match_the_ocaml_oracle() {
+    fn register_programs_match_owned_goldens() {
         let cases = include_str!("../golden/region_cases.txt");
-        let expected = include_str!("../golden/region_cases.expected");
         let mut actual = String::new();
         for (i, body) in cases.lines().enumerate() {
             if body.trim().is_empty() || body.starts_with('#') { continue; }
@@ -297,17 +291,8 @@ mod tests {
                 }
             }
         }
-        // Where OCaml's check or program failed, the message text is not compared.
-        let normal = |s: &str| s.lines().map(|l| if l.starts_with("check-error") { "check-error".to_owned() } else { l.to_owned() }).collect::<Vec<_>>();
-        let (a, e) = (normal(&actual), normal(expected));
-        let mut shown = 0;
-        for (n, (x, y)) in a.iter().zip(e.iter()).enumerate() {
-            if x != y {
-                eprintln!("line {}: rust {:?} ocaml {:?}", n + 1, x, y);
-                shown += 1;
-                if shown > 8 { break; }
-            }
-        }
-        assert!(shown == 0 && a.len() == e.len(), "register programs differ from the OCaml oracle ({} vs {} lines)", a.len(), e.len());
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("golden/region_cases.expected");
+        if std::env::var_os("RAYS_UPDATE_FIXTURES").is_some() { std::fs::write(&path, &actual).unwrap(); }
+        assert_eq!(actual, std::fs::read_to_string(path).unwrap());
     }
 }

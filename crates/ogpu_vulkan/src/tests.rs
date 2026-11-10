@@ -1,8 +1,4 @@
-//! The Vulkan parts of lib/ogpu/conformance (test_vulkan.ml and conformance.ml), run against a real
-//! device. The OCaml suite is one function over one device; here it is three stages and the
-//! out-of-memory check, each with its own device, so each stays inside the per-test budget. Every
-//! test skips when no Vulkan device exists, and ends with zero live handles and zero validation
-//! messages. The SPIR-V comes from crates/ogpu_vulkan/tests/shaders/*.{comp,vert,frag}, built by build.rs.
+//! Real-device Vulkan cases end with zero live handles and fatal validation errors. Shaders compile from the owned SPIR-V source fixtures.
 use crate::{backend::create_with_validation, impl_};
 use ogpu_core::{
     acceleration::InstanceKind,

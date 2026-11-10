@@ -1,7 +1,4 @@
-//! Port of lib/flow_sop/test_grid_bulk.ml. Lowering a static grid makes its per-point arrays as
-//! block kernels, not by walking each point. The OCaml test counts the allocated words per point;
-//! Rust has no allocation counter here, so the same fixture is lowered at both sizes and the time
-//! must grow far less than a walk of every point would (a walked element costs thousands of words).
+//! Static grid point arrays lower into block kernels rather than per-point walks. Comparing two fixture sizes bounds growth independently of total point count.
 use super::support::*;
 use crate::lower;
 

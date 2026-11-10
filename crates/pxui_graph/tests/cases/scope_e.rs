@@ -1,4 +1,4 @@
-//! run_sticky, run_readable and the big-scope bench (the OCaml tail of test_pxui_graph.ml).
+//! Sticky/readable scope interactions and large-scope layout measurement.
 use crate::support::*;
 use flow_graph::flow_edit as e;
 use flow_graph::projection as p;
@@ -106,8 +106,7 @@ fn run_readable() {
     check(unfolds >= 2, "Unfold all did not unfold every call of the card");
 }
 
-/// 2,001 nodes in one scope: laying it out and painting a frame (the OCaml `bench_scope_big`). Prints
-/// timings when `RAYS_BENCH_SCOPE` is set; otherwise one frame is checked so the route stays alive.
+/// Build, lay out and paint a 2001-node scope; RAYS_BENCH_SCOPE prints timings, otherwise check one live frame.
 fn bench_scope_big() {
     let sc = Rc::new(big_scope(2001));
     let mut ui = new_ui();

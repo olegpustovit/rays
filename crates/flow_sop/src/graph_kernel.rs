@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/graph_kernel.ml: private boundary for the pure `graph/` sources.
+//! private boundary for the pure `graph/` sources.
 //! `graph/shortest_paths`, `graph/forest`, `graph/color` and `graph/chains` resolve from their
 //! array arguments alone, with owned results, and never read geometry. The adjacency arrives as
 //! the record `sop/adjacency` returns (or a CSR row record for colouring).

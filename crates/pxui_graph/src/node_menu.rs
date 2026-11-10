@@ -1,4 +1,4 @@
-// Port of lib/pxui_graph/node_menu.ml(i): the node menu (leader `/ a`, the sheet's [01]): a search field
+// the node menu (leader `/ a`, the sheet's [01]): a search field
 // over the kinds, the likeliest first, typed search over the whole catalog by name, key or category.
 // Pure state plus one PXUI popup; the host decides what a picked key adds.
 use flow_check::op::{self, Op};

@@ -1,15 +1,4 @@
-//! Port of lib/editor_document/lowering.ml: the scene, world and settings contexts of a workspace.
-//!
-//! Their Lisp spellings are generated from the schemas that exist (see `kinds`). The evaluator
-//! returns these calls as `Struct` values; `of_workspace` walks the scene, world and settings
-//! results into the editor document: objects become plain instances of their kinds, the World one
-//! with its layer stack, settings a `settings::T`. Nothing is a SOP node and nothing cooks.
-//!
-//! Approximations of OCaml physical equality (`==`): values (`E`) are compared structurally where
-//! OCaml compared an evaluated value by identity (a viewport's scene against the default scene);
-//! networks use `network::ptr_eq`, SOP graphs and nodes their `ptr_eq`, settings `same_values`.
-//! `Document::Workspace::fast` is computed eagerly (OCaml `lazy`): it reads the settings graph
-//! once with the lowering.
+//! Lower scene, World and settings results into the editor document without cooking SOPs. Values compare structurally; networks and SOP nodes use pointer identity, settings use same_values. Fast settings are computed once with lowering.
 use flow_syntax::symbol::Symbol;
 use crate::document::{self, Home, ViewRoot, ViewWorld};
 use crate::kind_graph as kg;
@@ -46,7 +35,6 @@ fn flow<T>(r: Result<T, String>) -> R<T> {
     r.map_err(|m| diag("E_DOCUMENT", &m))
 }
 
-/// OCaml's optional arguments of `of_workspace`.
 #[derive(Clone, Default)]
 pub struct Options {
     /// None: `sop::nodes::factories()`.
@@ -151,7 +139,6 @@ pub fn plan_window(workspace: &workspace_doc::T, plan: &Plan) -> R<Window> {
         None => Ok(window_default()),
         Some(value) => {
             let st = settings_of(&value)?;
-            // OCaml raises Invalid_argument when the record does not read through the schema
             let values = settings::get(&window_schema(), &st).map_err(|m| diag("E_DOCUMENT", &m))?;
             Ok(window_of_values(&values))
         }
@@ -474,7 +461,7 @@ fn forced_args(forced: E) -> Record {
 fn item_of(lowered: &lower_mod::T, call: &Call) -> R<Item> {
     let Call { kind, args, home, via } = call;
     let dynamic: Vec<&(Symbol, E)> = args.iter().filter(|(key, value)| live_light_field(kind, key) && flow_eval::is_live(value)).collect();
-    // OCaml folds from the right: the first error from the right wins
+    // The first failing input from the right wins.
     let mut dyn_params: Vec<(port::Parameter, E)> = Vec::new();
     let kind_ports = ports(kind);
     for (key, value) in dynamic.iter().rev() {
@@ -754,7 +741,7 @@ fn link_parents(graph: kg::T, objects_: &[(i64, Item)]) -> R<kg::T> {
                 };
                 match objects_.iter().find_map(|(pid, p)| if pid != id && p.label == label { Some(*pid) } else { None }) {
                     Some(pid) => Some(pid),
-                    None => return Err(diag("E_LOWER", &format!("{}: there is no object named {} to be its parent.", item.label, sop::node::ocaml_quote(name)))),
+                    None => return Err(diag("E_LOWER", &format!("{}: there is no object named {} to be its parent.", item.label, format!("{:?}", name)))),
                 }
             }
         };
@@ -1008,7 +995,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         match find_claim(&graph, &used, &item.kind_of.key, &home, &item.label, &old_homes.objects).and_then(|id| kg::find(&graph, id)) {
             Some(node) => {
                 let claimed = with_values(&item.kind_of, &kg::Node { label: item.label.clone(), ..node.clone() }, &item.values)?;
-                // OCaml: `claimed == node` is never physically true here (the label update allocates)
+                // Updating the label allocates a distinct claimed node.
                 graph = kg::replace(&graph, &claimed);
                 used.push(node.id);
                 objects_.push((node.id, item.clone()));
@@ -1209,7 +1196,6 @@ pub fn scene_reads(doc: &document::T) -> sop::context::dependencies::T {
     found
 }
 
-/// `previous`, `state` and `live` are OCaml's optional arguments.
 pub fn resolve_scene(previous: Option<&kg::T>, state: Option<&flow_eval::State>, live: Option<&input::Frame>, doc: &document::T, time: f64) -> (kg::T, Vec<Diagnostic>) {
     let live_frame = match live {
         Some(l) => l.clone(),
@@ -1251,7 +1237,6 @@ pub fn resolve_scene(previous: Option<&kg::T>, state: Option<&flow_eval::State>,
     (graph, errors)
 }
 
-// ---- SHA-256 (OCaml: Digestif.SHA256) ----
 
 const K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,

@@ -1,5 +1,4 @@
-//! The virtual `Impl` of the OCaml library: one backend record, chosen once per thread at startup
-//! by the executable (`select`); unselected is a typed error, never a default.
+//! Select exactly one backend per thread at startup; an unselected backend returns a typed error.
 use crate::{
     backend::Driver,
     error::{self, Error, ErrorKind},

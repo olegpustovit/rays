@@ -46,15 +46,7 @@ fn current_residual_handlers() -> Option<ResidualHandlers> {
     ACTIVE_RESIDUAL_HANDLERS.with(|handlers| handlers.borrow().last().cloned())
 }
 thread_local! { static ACTIVE_OBSERVED_RESIDUALS: RefCell<Vec<Vec<ResidualId>>> = const { RefCell::new(Vec::new()) }; }
-// ---- arena ownership ----
-// OCaml's evaluator has no lock: a host callback (the resolver, kernel/bulk/defer/map handlers, the inline-parameter hook and policy, the
-// live-kernels and static facts/source hooks, a nested rewrite) re-enters and mutates the very evaluation that called it. Here an arena lives
-// in a Slot. An evaluation checks it out (takes it out of the slot) and owns it while it runs callback-free code; around every host callback it
-// lends it back (`lend`), so the callback, on this thread or any other, finds the live arena in its slot and changes it in place, and the
-// evaluation takes it again when the callback returns: OCaml's sharing, with no copy. A thread holds at most one arena outside a lend and never
-// waits for an arena while holding one (`not_holding` panics instead), so no wait can close a cycle: re-entrance cannot deadlock, and a callback
-// reached without a lend is a panic that names the arena, never a hang. Trusted calls made while holding (operator bodies and checks, the
-// interrupt probe) never reach an arena.
+// An evaluation checks its arena out of a Slot only while executing callback-free code. Before every host callback it lends the arena back, so reentrant calls on this or another thread can access the same live arena without copying it. A thread holds at most one arena outside a lend and never waits while holding another: not_holding panics rather than permitting a deadlock. Trusted operator/check/interrupt callbacks must not access an arena.
 struct Slot { id: i64, cell: Mutex<Option<Arena>>, returned: Condvar }
 #[path = "memory.rs"]
 mod memory;
@@ -104,8 +96,7 @@ fn peek<T>(slot: &Slot, f: impl FnOnce(&mut Arena) -> T) -> T {
     let mut cell = filled(slot);
     f(cell.as_mut().expect("filled"))
 }
-/// Run a host callback with `a` back in its slot (OCaml: the callback sees and changes this evaluation). A detached copy (a probe worker)
-/// has no slot: its callback runs as is.
+/// Put the arena back in its slot while running a host callback. Detached probe copies have no slot and run the callback directly.
 fn lend<T>(a: &mut Arena, f: impl FnOnce() -> T) -> T {
     let slot = HELD.with(|held| held.borrow().as_ref().filter(|slot| slot.id == a.id && a.owns_index).cloned());
     let Some(slot) = slot else { return f(); };
@@ -127,10 +118,7 @@ fn lend<T>(a: &mut Arena, f: impl FnOnce() -> T) -> T {
     SPARE.with(|spare| { let mut spare = spare.borrow_mut(); if spare.len() < 8 { spare.push(hollow); } });
     result
 }
-// OCaml's with_live evaluates in a copy of the evaluation's state (`live_state`): its frame, state, resolver, elements, step count, memo and
-// call counts are its own, it records nothing, and the evaluation it was reached from keeps its own. An entry reached from a callback of an
-// evaluation of the same arena (the arena is lent) runs that way and puts them back on exit; residuals and functions it makes stay, as OCaml's
-// values do.
+// Live evaluation uses private frame/state/resolver/elements/step/memo/call-count state and records nothing. Reentry into a lent arena temporarily installs and restores that state; residuals and functions created there stay available.
 struct LiveSaved { time: Option<Frame>, state: Option<State>, resolve: Option<ResolveFn>, elems: BTreeMap<Symbol, Value>, step_count: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, record: bool }
 fn save_live(a: &mut Arena) -> Option<LiveSaved> {
     (a.lent > 0).then(|| LiveSaved {
@@ -147,8 +135,7 @@ fn restore_live(a: &mut Arena, saved: Option<LiveSaved>) {
     let Some(saved) = saved else { a.resolve = None; a.elems = Default::default(); return; };
     (a.time, a.state, a.resolve, a.elems, a.step_count, a.fn_calls, a.memo, a.record) = (saved.time, saved.state, saved.resolve, saved.elems, saved.step_count, saved.fn_calls, saved.memo, saved.record);
 }
-// A residual handler's callback runs outside that handler, as an OCaml effect handler's does: an evaluation the callback starts (a kernel
-// compile evaluating a term of its residual) offers nothing to the handler that is running it, only to the handlers around it.
+// A residual callback runs outside its own handler; nested evaluation offers work only to enclosing handlers.
 fn outside_handler<T>(f: impl FnOnce() -> T) -> T {
     let handler = ACTIVE_RESIDUAL_HANDLERS.with(|handlers| handlers.borrow_mut().pop());
     let observed = ACTIVE_OBSERVED_RESIDUALS.with(|observed| observed.borrow_mut().pop());
@@ -285,7 +272,7 @@ pub struct Node {
 }
 #[derive(Clone, Debug)]
 pub struct Instance { pub graph: String, pub default: bool, pub inputs: Vec<(Symbol, Value)>, pub result: Value }
-/// `id` is the plan's identity (OCaml `==`): assigned by `fresh_plan_id` where a plan is built, kept by clones.
+/// The plan identity is assigned when built and preserved by clones.
 #[derive(Clone, Debug)]
 pub struct Plan { pub id: u64, pub instances: Vec<Instance>, pub nodes: Vec<Node> }
 static NEXT_PLAN_ID: AtomicU64 = AtomicU64::new(1);
@@ -345,7 +332,7 @@ pub fn roots<'a>(values: impl IntoIterator<Item = &'a Value>) -> Roots {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct StateKey { instance: i64, path: Path, iter: Vec<i64> }
-// instance, then path, then iter: the OCaml compare of the key tuple
+// Compare instance, then path, then iteration.
 impl Ord for StateKey { fn cmp(&self, other: &Self) -> std::cmp::Ordering { self.instance.cmp(&other.instance).then_with(|| self.path.cmp(&other.path)).then_with(|| self.iter.cmp(&other.iter)) } }
 impl PartialOrd for StateKey { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) } }
 // ponytail: a write copies a shared map; use persistent maps if changed-state copying dominates.
@@ -382,8 +369,7 @@ static NEXT_BULK: AtomicI64 = AtomicI64::new(-1);
 type Interrupt = Arc<dyn Fn() -> bool + Send + Sync>;
 static INTERRUPTS: LazyLock<Mutex<HashMap<std::thread::ThreadId, Interrupt>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static ARENAS: LazyLock<Mutex<HashMap<i64, Weak<Slot>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-// ponytail: OCaml keeps an arena alive through any value that points into it; ids here do not, so each thread keeps its 64 newest arenas alive so a value
-// outliving its Eval still resolves.  Per thread, not global: a shared ring let unrelated threads evict an arena a test still used.  Key by owner instead if 64 is not enough.
+// ponytail: each thread retains its 64 newest arenas so IDs in escaping values still resolve. Use explicit per-owner retention if values need to outlive that window.
 thread_local! { static RECENT_ARENAS: RefCell<std::collections::VecDeque<Arc<Slot>>> = const { RefCell::new(std::collections::VecDeque::new()) }; }
 static SOURCE_HOOK: LazyLock<RwLock<Arc<dyn Fn(&dyn Fn(i64)->Option<Node>, &Value)->Option<Value> + Send + Sync>>> = LazyLock::new(|| RwLock::new(Arc::new(|_,_|None)));
 static FACTS_HOOK: LazyLock<RwLock<Arc<dyn Fn(&dyn Fn(i64)->Option<Node>, i64)->String + Send + Sync>>> = LazyLock::new(|| RwLock::new(Arc::new(|_,_|String::new())));
@@ -459,8 +445,7 @@ struct Arena {
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
     state: Option<State>, elems: BTreeMap<Symbol,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<HashSet<Arc<Path>>>, ops_seen: Shared<HashMap<Symbol, (&'static str, OpRef)>>, arg_pool: Shared<AddrMap<Vec<(Symbol, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route, Arc<Path>, Arc<Path>)>>, plans: Shared<AddrMap<CodePlan>>, fn_plans: Shared<AddrMap<CodePlan>>, pure: Shared<AddrMap<(&'static str, Option<usize>)>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>,
     packed_bases: Shared<IdMap<(u64, flow_check::term_arena::PathId), Arc<Path>>>,
-    // while an inlined body with a live argument evaluates: its deferred checks, oldest first (OCaml st.guards, newest first). A test that reads
-    // only frame facts and selects an arm that fails statically is checked when the card cooks: the card fails with that diagnostic when the test is that bool
+    // Deferred checks are kept oldest first while an inline argument is live. Checks depending only on frame facts run when the card cooks and report the failing branch diagnostic.
     guards: Option<Vec<(Value, bool, Diagnostic)>>,
 }
 static EMPTY_WORKSPACE: LazyLock<Shared<Workspace>> = LazyLock::new(|| Shared::new(Workspace {
@@ -579,7 +564,7 @@ impl Env {
 
 fn new_fid(a: &Arena) -> FnId { FnId(NEXT_FID.fetch_add(1, Ordering::Relaxed), a.id) }
 fn new_rid(a: &Arena) -> ResidualId { ResidualId(NEXT_RID.fetch_add(1, Ordering::Relaxed), a.id) }
-// OCaml closures are values, so a function made by another evaluation still calls; here it is read from the arena that made it (`a` lent meanwhile).
+// Functions are read from their home arena; the caller's arena is lent while a captured function executes.
 fn foreign_fn(a: &mut Arena, id: FnId) -> Option<Function> {
     if id.1 == a.id { return None; }
     lend(a, || slot_of(id.1).and_then(|home| peek(&home, |home| home.functions.get(&id).cloned())))
@@ -691,13 +676,11 @@ fn cooked_geometry(a: &mut Arena, value: &Value) -> bool {
 fn mk_node(a:&mut Arena,c:&ExecCtx,authored:i64,ty:Ty,kind:String,args:Vec<(Symbol,Value)>)->Result<Value,Diagnostic>{
     if c.data{return eval_error("E_ARRAY_TYPE","Packed-array functions produce data, not graph nodes.")}
     if a.time.is_some(){return Err(errorf("E_LIVE_GEOMETRY",format!("{} makes geometry; geometry cannot be created while evaluating a live value.",kind)))}
-    // A geometry computed from cooked data (a fold over sop/attr_names) is only a value at cook time; a node reading it is deferred with it,
-    // up to the graph root, whose structural node cooks the lot (OCaml's `cooked_geometry`).
+    // Geometry computed from cooked data is deferred through its readers to the graph root, whose structural node cooks the complete value.
     if args.iter().any(|(_, value)| cooked_geometry(a, value)) { return need_time(); }
     push_node(a, c, authored, ty, kind, args)
 }
-// A plan node, as the card marker makes it (OCaml builds the marker without `mk_node`'s cooked-geometry deferral: its value may be a
-// residual geometry the marker cooks behind).
+// Card markers retain residual geometry directly; the card resolves it while cooking.
 fn push_node(a: &mut Arena, c: &ExecCtx, authored: i64, ty: Ty, kind: String, args: Vec<(Symbol, Value)>) -> Result<Value, Diagnostic> {
     if c.data{return eval_error("E_ARRAY_TYPE","Packed-array functions produce data, not graph nodes.")}
     if a.time.is_some(){return Err(errorf("E_LIVE_GEOMETRY",format!("{} makes geometry; geometry cannot be created while evaluating a live value.",kind)))}
@@ -892,9 +875,7 @@ fn eval_error(code: &str, message: &str) -> Result<Value, Diagnostic> {
     Err(error(code, message))
 }
 fn need_time() -> Result<Value, Diagnostic> { Err(error("$NEEDS_TIME", "")) }
-// ---- deferred checks (OCaml guardable / guarding / add_guard / arm_error) ----
-// A deferred check's test reads frame facts only: no cooked data, fold state or zone element, so the card forces it with its cook's input alone.
-// A residual or closure of another evaluation is not one (its environment is not at hand): the call stays the plain catalog node.
+// A deferred check reads only frame facts, not cooked data, fold state or zone elements. Foreign residual/closure environments keep the call as an ordinary catalog node.
 fn guardable(a: &mut Arena, v: &Value) -> bool {
     fn reads_elem(t: &Term) -> bool {
         matches!(t.node, TermNode::RefBinding(id) if t.name(t.arena().ref_binding(id).name).starts_with("$elem:")) || children(t).any(|child| reads_elem(&child))
@@ -931,13 +912,12 @@ fn arm_error(a: &mut Arena, c: &ExecCtx, env: &Env, arm: &Term) -> Result<Option
     a.authored.truncate(authored);
     match result {
         Ok(_) => Ok(None),
-        // OCaml's Needs_t passes through arm_error
         Err(d) if d.code == "$NEEDS_TIME" => Err(d),
         Err(d) if ["cancelled", "E_CANCELLED", "E_EVAL_BUDGET", "E_DEPTH"].contains(&d.code.as_str()) => Err(d),
         Err(d) => Ok(Some(d)),
     }
 }
-// a validation refusal (OCaml `refusal`): E_LOWER naming the validation's code, an E_PARAM by its message alone
+// Validation refusals preserve E_LOWER with the validation code and E_PARAM with its message.
 fn refusal(code: &str, message: &str) -> Diagnostic { error("E_LOWER", &if code == "E_PARAM" { message.to_owned() } else { format!("{code}: {message}") }) }
 fn force_res(a: &mut Arena, id: ResidualId) -> Result<Value, Diagnostic> {
     // a residual a closure carried in from another evaluation (a library body called with the graph's function) is forced where it lives;
@@ -1021,10 +1001,7 @@ fn function_value(value: &Value) -> bool {
         _ => false,
     }
 }
-// ---- inline body memo (OCaml's inline_memo / replay_inline) ----
-// An inline body's evaluation, kept for a later evaluation of the same card (declaration, canonical parameters, input shapes):
-// its nodes in creation order and value, the residuals and functions it made, the kernels it offered, and the site and iteration it ran at.
-// A replay puts them at the next ids of the new evaluation. Only a body whose values reference nothing but what it made (or its cooked inputs) is kept.
+// Memoized inline bodies retain creation-ordered nodes, values, residuals, functions, offered kernels, site and iteration. Replay remaps them into fresh evaluation IDs. Only bodies whose references stay within their own values or cooked inputs are cached.
 struct InlineRegion { nodes: usize, authored: usize, residuals: usize, functions: usize, observed: usize, states: usize, cells: usize, approx: u64 }
 struct InlineEntry {
     nodes: Vec<Node>, authored: Vec<i64>, value: Value, observed: Vec<ResidualId>, lo: i64, inputs: Vec<i64>, site: Path, iter: Vec<i64>,
@@ -1263,7 +1240,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
     let was_replayed = replayed.is_some();
     let mut body_nodes = region.nodes;
     let mut body_authored = region.authored;
-    // the body's deferred checks (a replay brings its own); gathered only while an argument is live, as OCaml's st.guards
+    // Gather deferred checks only while an argument is live; replay brings its own checks.
     let guards;
     let evaluated = if let Some((value, replayed_guards)) = replayed { guards = replayed_guards; Ok(value) } else {
         let gathers = args.iter().any(|(_, value)| matches!(value, Value::Residual(_)));
@@ -1274,7 +1251,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
         guards = std::mem::replace(&mut a.guards, outer).unwrap_or_default();
         match body? {
             Some(evaluated) => evaluated,
-            // a validation that reads a live argument it cannot defer (OCaml's Needs_t in the call): the plain catalog node
+            // A validation that reads an unavailable live value keeps the ordinary catalog node.
             None => return catalog_call(a, c, authored, definition.kind.qualified.clone(), definition.kind.context.clone(), args.to_vec()),
         }
     };
@@ -1333,8 +1310,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
         ("parameters".into(), Value::Record(parameters.into())),
         ("slots".into(), Value::Record(slot_values.into())),
     ];
-    // its deferred checks, oldest first: test, fails (the test's failing value) and error (the diagnostic as `code: message`, which the
-    // host's check_guards decodes; OCaml marshals it)
+    // Deferred checks retain oldest-first test, failing value and a code/message envelope decoded by the host.
     if !guards.is_empty() {
         marker_args.push(("guards".into(), Value::List(Arc::new(guards.into_iter().map(|(test, fails, d)| Value::Record(vec![
             ("test".into(), test), ("fails".into(), Value::Bool(fails)), ("error".into(), text(&format!("{}: {}", d.code, d.message))),
@@ -1343,8 +1319,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
     marker_args.extend(args.iter().filter(|(_, value)| function_value(value)).cloned());
     push_node(a, c, authored, flow_syntax::ty::geometry(), "$card".into(), marker_args)
 }
-// An inlined body's fresh evaluation: its inputs bound, its validations checked (one of a live argument deferred to the card's cook while
-// a.guards gathers), its body evaluated. Ok(None) when a validation reads a live argument it cannot defer (OCaml's Needs_t): the plain node.
+// Evaluate an inline body with bound inputs and collected deferred checks. Return None when a validation requires a live value that cannot be deferred.
 fn inline_body(a: &mut Arena, context: &ExecCtx, definition: &W::NodeDefinition, parameters: &[(Symbol, Value)], args: &[(Symbol, Value)], body_nodes: &mut usize, body_authored: &mut usize) -> Result<Option<Result<Value, Diagnostic>>, Diagnostic> {
     let context = context.clone();
     let mut env = Env::empty();
@@ -1757,7 +1732,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
             for (i, term) in terms.iter().enumerate() {
                 let context = sub(a, c, Seg::Index("", i));
                 let value = eval_concrete(a, &context, env, &t.child(*term))?;
-                // OCaml shows through `concrete`: captured fields of a record are forced first.
+                // Force lazily captured record fields before showing the value.
                 let value = concrete_data(a, value)?;
                 bytes.extend(value::show_with(&|value| value.clone(), &value));
             }
@@ -1813,7 +1788,7 @@ fn concrete_data(a: &mut Arena, value: Value) -> Result<Value, Diagnostic> {
 }
 fn eval_with_error(a: &mut Arena, c: &ExecCtx, env: &Env, protected: &Term, mapper: &Term) -> Result<Value, Diagnostic> {
     if a.time.is_none() { return need_time(); }
-    // OCaml runs both inside Value.with_error: an error raised while evaluating the protected term or the mapper is mapped / inherits the envelope
+    // Errors from both the protected term and its mapper inherit the same error envelope.
     let guarded = (|| -> Result<Value, Diagnostic> {
         let protected = eval_sub(a, c, "0".into(), env, protected)?;
         match concrete_data(a, protected)? {
@@ -1857,7 +1832,7 @@ fn eval_error_rows(a: &mut Arena, c: &ExecCtx, env: &Env, rows: &Term, policy: W
                 let bindings = Env::of(residual.env);
                 let captured = capture_in(a, &term, &bindings);
                 let needed = residual_id(a, ResidualData { env: captured, term, ctx: residual.ctx, previous: false, live: None });
-                // OCaml answers Bulk_needed with the host's bulk callback: a check the card needs now (a deferred mask) is asked of it
+                // A deferred mask needed during validation is requested through the host bulk callback.
                 match current_residual_handlers().and_then(|handlers| handlers.bulk).and_then(|bulk| call_lent(a, needed, &|id| bulk(id))) {
                     Some(Value::Int_array(values)) => Value::Int_array(values),
                     _ => return need_time(),
@@ -2202,7 +2177,7 @@ fn eval_hof(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::HofKin
     let result = (|| {
         let function = eval_concrete_sub(a, c, "f".into(), env, function_term)?;
         let Value::Fn(function) = function else { return eval_error("E_TYPE", "Expected a function."); };
-        // OCaml records a map's `~calls` (where its closure's call count starts, and the map) before the frame test below gives way.
+        // Reserve the map's closure-call ordinal before the frame-dependent branch can defer.
         let calls = if matches!(kind, W::HofKind::Map) && a.record && c.record && matches!(term.ty(), Ty::Array(_)) {
             match own_fn(a, &function).cloned() {
                 Some(Function::Closure(closure)) => {
@@ -2264,9 +2239,7 @@ fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: F
     if static_map {
         if let Some(map) = current_residual_handlers().and_then(|handlers| handlers.map) { let at = site(c); progress.finish = Some(lend(a, || outside_handler(|| map(&at, term, count)))); }
     }
-    // A packed map of at least BULK_MIN_ELEMENTS (and at most 4,096, where OCaml walks it) is offered to a trusted bulk handler before
-    // it is walked: the handler's whole array is the walker's (trusted), the call counts are reserved as for a large map, and packed
-    // walks restore their step count, so nothing observable differs; it only asks the host where OCaml would not (post_parity_backlog).
+    // Trusted bulk handlers may execute packed maps before walking them. The whole array is authoritative; reserved call counts and restored packed step counts preserve observable evaluation state.
     if static_map && count >= BULK_MIN_ELEMENTS && count <= MAX_ITERATIONS && matches!(term.ty(), Ty::Array(_))
         // never while recording: the walk records each element (a large map replays its records; a walked one is the record)
         && !(a.record && c.record) && current_residual_handlers().is_some_and(|handlers| handlers.trusted)
@@ -2298,7 +2271,7 @@ fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: F
                     return Ok(candidate);
                 }
             }
-            large = false; // OCaml walks the whole map after a refused whole-array offer, with no second offer
+            large = false; // After a refused whole-array offer, walk the complete map without making a second offer.
         }
     }
     let walked = if large { MAX_ITERATIONS } else { count };
@@ -2553,7 +2526,7 @@ fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, node: &flow_che
         cx.route = Route(None);
         sync_site(a, &mut cx);
         cx.iter = cx.iter.push(ordinal as i64);
-        // OCaml matches the skip tuples against the iteration path: the outer iteration plus this flat ordinal.
+        // Match skip tuples against the outer iteration path followed by the flat ordinal.
         let skipped = skip.iter().any(|indices| owner.arena().indices(*indices).iter().copied().map(|index| index as i64).eq(cx.iter.to_vec().into_iter()));
         let mut local = env.clone();
         for (binding, value) in clauses.iter().zip(selected.iter()) {
@@ -2703,7 +2676,7 @@ fn static_source_fields(value: &Value) -> bool {
         v => !is_live_value(v),
     }
 }
-// OCaml with_live: a fresh state unless one is supplied, restored when the walk fails.
+// Use a fresh live state unless supplied; restore state after a failed walk.
 pub fn force_with(value: &Value, live: &Frame, state: Option<&State>, elems: Option<&[(Symbol, Value)]>, resolve: Option<ResolveFn>) -> Result<Value, Diagnostic> {
     let _nesting = EvalNesting::enter()?;
     check_value_nesting(value)?;
@@ -2749,7 +2722,7 @@ fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Opti
                 restore_live(&mut arena, saved_live);
                 forced?
             };
-            // OCaml's `go (force_res c r)`: a result that still holds residuals (captured record fields) is forced again.
+            // A forced result that still contains residual record fields is forced again.
             if is_live_value(&forced) { force_general(&forced, live, state, elems, resolve) } else { Ok(forced) }
         }
         value if value.is_data_source() => {
@@ -2945,8 +2918,7 @@ fn structure_context(out: &mut String, context: &ExecCtx) {
     structure_path(out, &context.base);
     structure_path(out, &context.route.to_vec());
 }
-// OCaml's `structure` term: the form spells an authored term (its id and flat text); a library form's id alone names it; a synthetic
-// term (form 0) spells its node kind and children.
+// Authored terms are identified by form ID and flat text; library forms by ID; synthetic terms by node kind and children.
 fn structure_term(out: &mut String, term: &Term) {
     out.push('t');
     let form = term.form();
@@ -3450,7 +3422,7 @@ pub mod residual {
         arena.state = state.cloned().or(arena.state.clone());
         arena.elems = elems.unwrap_or(&[]).iter().cloned().collect();
         arena.resolve = resolve;
-        // OCaml's with_live builds a fresh live state per call: no memo, step count or call counts survive a previous time.
+        // Live calls start without memoized values, prior step counts or prior call counts.
         arena.step_count = 0;
         arena.fn_calls.clear();
         arena.memo.clear();
@@ -3512,10 +3484,7 @@ fn arena_for_value(value: &Value) -> Option<Arc<Slot>> {
         _ => None,
     }
 }
-// A rewrite runs the host's `replace`, `fresh` and `retarget` between short accesses of the value's home arena and holds none across them, so
-// a callback may rewrite again (a folded write copying an earlier one): each copy gets its own fresh id, as in OCaml.
-// A bound kernel owns a fresh capture arena; dropping it releases that frame's arrays,
-// including closures evaluation creates while preparing the bound inputs.
+// Host replace/fresh/retarget callbacks run between short home-arena accesses, so callbacks may recursively rewrite; each copy receives a fresh ID. Bound kernels own fresh capture arenas and release captured frame arrays and preparation closures when dropped.
 fn rewrite_home(home: &Arc<Slot>, owned: &mut Option<HashMap<i64, Arc<Slot>>>) -> Arc<Slot> {
     let Some(homes) = owned else { return home.clone(); };
     homes.entry(home.id).or_insert_with(|| {
@@ -4127,9 +4096,7 @@ fn text_clones_and_parameter_reads_share_binary_payloads() {
     }
 }
 
-// Dependence without a collecting walk (frame_dependent / state_dependent): every residual remembers its answer, as the OCaml
-// residual does (dep_frame / dep_state); without it a let-bound array read by many bindings is walked once per reader and
-// `static_sop` asks every residual. It is keyed by id and home: deterministic ids repeat across plans.
+// Memoize frame/state dependence by residual ID plus home arena, since deterministic IDs repeat across plans. Shared let-bound arrays must not be rewalked for every reader.
 #[derive(Default)]
 struct DependencyMemo {
     generation: u64,

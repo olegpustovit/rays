@@ -1,6 +1,4 @@
-//! Port of lib/flow_sop/test_group_kernel.ml: authored group writes, queries, promotion and folds
-//! against the native group storage, at one and eight domains. The OCaml file's `--bench-promotion`
-//! section (a one-million-point benchmark run only with that flag) is not ported.
+//! Authored group writes, queries, promotion and folds match native group storage at one and eight domains.
 use super::support::*;
 use crate::{attribute_kernel, catalog, lisp_sop, lower, manifest, operators, value_lane};
 use flow_graph::flow_edit::{apply_checked_with, ArgKey, Op};
@@ -745,13 +743,15 @@ promotion_cutoff!(
 #[test]
 fn group_query_promotion_names_and_refusals() {
     let geometry = promotion_fixture(7);
-    for name in ["\u{a0}", "\u{3000}"] {
+    for name in ["\u{a0}group\u{a0}", "\u{3000}group\u{3000}"] {
         let g = native_write(None, Some(group::Owner::Vertex), name, &vec![1; geo::vertex_count(&geometry) as usize], &geometry);
         assert!(flow_ok(promoted_query(&g, "vertex", name)) == native_promoted(&g, "vertex", name, 97));
     }
     for (name, owner, target, code) in [
         ("absent", "vertex", text("point"), "E_GROUP_MISSING"),
         (" ", "vertex", text("point"), "E_GROUP_NAME"),
+        ("\u{a0}", "vertex", text("point"), "E_GROUP_NAME"),
+        ("\u{3000}", "vertex", text("point"), "E_GROUP_NAME"),
         ("absent", "detail", text("point"), "E_GROUP_OWNER"),
         ("absent", "vertex", text("edge"), "E_GROUP_TARGET"),
         ("absent", "vertex", Value::Int(0), "E_GROUP_TYPE"),

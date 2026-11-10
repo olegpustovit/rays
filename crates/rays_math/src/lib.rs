@@ -11,38 +11,6 @@ pub mod text_array;
 pub mod vec2;
 pub mod vec3;
 
-pub(crate) fn format_g(value: f64) -> String {
-    if value.is_nan() {
-        return "nan".to_owned();
-    }
-    if value.is_infinite() {
-        return if value.is_sign_negative() { "-inf" } else { "inf" }.to_owned();
-    }
-    if value == 0.0 {
-        return if value.is_sign_negative() { "-0" } else { "0" }.to_owned();
-    }
-
-    let scientific = format!("{value:.5e}");
-    let (mantissa, exponent) = scientific.split_once('e').expect("scientific float format");
-    let exponent: i32 = exponent.parse().expect("scientific exponent");
-    if !(-4..6).contains(&exponent) {
-        let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
-        format!("{mantissa}e{exponent:+03}")
-    } else {
-        let precision = (5 - exponent).max(0) as usize;
-        let mut fixed = format!("{value:.precision$}");
-        if fixed.contains('.') {
-            while fixed.ends_with('0') {
-                fixed.pop();
-            }
-            if fixed.ends_with('.') {
-                fixed.pop();
-            }
-        }
-        fixed
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -71,7 +39,7 @@ mod tests {
     }
 
     #[test]
-    fn ocaml_fma_normal_results() {
+    fn fma_normal_results() {
         assert_eq!(crate::fma::fma(3.0, 5.0, 7.0), 22.0);
         assert_eq!(crate::fma::fma(1.0000000000000002, 1.0000000000000002, -1.0000000000000004), 4.930380657631324e-32);
     }

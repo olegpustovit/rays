@@ -14,7 +14,7 @@ pub fn load(text: &str) -> wd::T {
     workspace::load(None, Vec::new(), None, text).unwrap_or_else(|ds| panic!("{}", diag_text(&ds)))
 }
 
-/// A 1000 x 700 frame at time 0 with the given events (the frame the OCaml tests use).
+/// A 1000x700 frame at time zero with supplied events.
 pub fn frame(events: Vec<Event>) -> frame::Frame {
     frame::Frame { input: input::Frame { dt: 1. / 60., size: (1000, 700), events, ..input::at_time(0.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
 }

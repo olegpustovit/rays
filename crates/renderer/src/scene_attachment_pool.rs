@@ -1,3 +1,4 @@
+// Reuse the most recently created compatible attachment first.
 use ogpu_core::backend::{self, Device, Texture};
 use ogpu_core::caps::{self, Feature};
 use ogpu_core::error::{self, Error, ErrorKind};
@@ -110,7 +111,7 @@ pub fn acquire_many(value: &mut AttachmentPool, keys: &[(Kind, i64, bool)]) -> R
             },
         }
     }
-    // OCaml prepends the new entries, newest first; a pass that made none leaves the list as it is
+    // New attachments are newest-first; a pass creating none leaves reuse priority unchanged.
     if !made.is_empty() {
         made.reverse();
         made.append(&mut value.entries);

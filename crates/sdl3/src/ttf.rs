@@ -164,7 +164,7 @@ pub mod font {
         value.is_finite() && value > 0.0
     }
 
-    // ponytail: Rust's &str is always valid UTF-8, so the OCaml validator has nothing left to check.
+    // Rust str inputs already satisfy UTF-8 validity.
     fn validate_text(operation: &'static str, text: &str) -> std::result::Result<(), Error> {
         if text.contains('\0') {
             Err(error(operation, ErrorKind::InvalidArgument, "text contains a NUL byte"))

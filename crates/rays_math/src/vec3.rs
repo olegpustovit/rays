@@ -60,5 +60,5 @@ pub fn nearly_equal(a: T, b: T, eps: f64) -> bool {
 
 pub fn to_triple(a: T) -> (f64, f64, f64) { (a.x, a.y, a.z) }
 pub fn to_string(a: T) -> String {
-    format!("({}, {}, {})", crate::format_g(a.x), crate::format_g(a.y), crate::format_g(a.z))
+    format!("({}, {}, {})", a.x, a.y, a.z)
 }

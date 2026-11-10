@@ -32,12 +32,12 @@ fn make(code: Code, message: String) -> error::T {
     error::new(GUARD_OPERATION, code, message)
 }
 
-/// OCaml `invalid_arg`/`Fail`: reported as `invalid_geometry` under this operation.
+/// Convex hull failures use invalid_geometry under this operation.
 fn fail(message: String) -> error::T {
     make(Code::InvalidGeometry, message)
 }
 
-/// An error that was a plain string in OCaml: re-coded under this operation.
+/// Recode a helper failure under this operation.
 fn lift(value: error::T) -> error::T {
     if error::is_cancelled(&value) {
         error::cancelled(GUARD_OPERATION)
@@ -705,12 +705,12 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
     let cancel_value = params.cancel.as_deref();
     let grain = support::resolve(params.grain).map_err(|_| fail(format!("{OPERATION}: grain must be positive")))?;
     if let Some(name) = &params.source_point_attribute {
-        if support::ocaml_trim_is_empty(name) || name == "P" {
+        if (name).trim().is_empty() || name == "P" {
             return Err(fail(format!("{OPERATION}: source point attribute name must be non-empty and not P")));
         }
     }
     if let Some(name) = &params.hull_group {
-        if support::ocaml_trim_is_empty(name) {
+        if (name).trim().is_empty() {
             return Err(fail(format!("{OPERATION}: hull group name must be non-empty")));
         }
     }

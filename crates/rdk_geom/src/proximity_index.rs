@@ -1,7 +1,4 @@
-//! Spatial nearest-entity queries over packed primitive and edge features.
-//!
-//! OCaml returns `(_, string) result`; a failure here is an `error::T` with code
-//! `invalid_parameter` and the OCaml message, and a cancellation keeps code `cancelled`.
+//! Nearest-entity queries return invalid_parameter failures and preserve cancelled errors.
 use rdk_core::{cancel, error, geometry, packed, polygon_triangulation, support, topology, topology_index};
 use rdk_core::error::Code;
 

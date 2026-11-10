@@ -1,4 +1,4 @@
-//! Port of lib/sop/session.ml: explicit, bounded graph-evaluation state. A session is
+//! explicit, bounded graph-evaluation state. A session is
 //! single-caller. Cache keys are opaque byte strings (`Vec<u8>`).
 //!
 //! Independent branches fan out to the shared pool: workers cook on a `snapshot` of the cache
@@ -55,7 +55,7 @@ pub struct Output {
     pub instances: Option<Arc<Vec<mat4::T>>>,
 }
 
-/// OCaml `==` on outputs: same payload value, same instance array.
+/// Output identity requires the same payload and instance array.
 pub fn same_output(a: &Output, b: &Output) -> bool {
     payload::ptr_eq(&a.payload, &b.payload)
         && match (&a.instances, &b.instances) {
@@ -566,8 +566,7 @@ fn facts_error(message: &str) -> Diagnostic {
     crate::support::diagnostic("E_NODE_FACTS", message)
 }
 
-/// `node_result`: a panic in a node's cook is that node's error (OCaml: any exception other than the
-/// two it names), not the end of the cook or its worker. The message and code are OCaml's.
+/// Node cook panics become that node's stable error, allowing the session and worker to cook again.
 fn node_result<X>(f: impl FnOnce() -> Result<X, Diagnostic>) -> Result<X, Diagnostic> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(result) => result,
@@ -1106,7 +1105,7 @@ fn snapshot(session: &T) -> T {
     }
 }
 
-/// OCaml `==` on cached entries: the same entry, or the same output with no delta.
+/// Cached entries are the same owner, or retain the same output without a delta.
 fn same_entry(a: &Arc<Entry>, b: &Arc<Entry>) -> bool {
     Arc::ptr_eq(a, b) || (same_output(&a.output, &b.output) && a.delta.is_none() && b.delta.is_none())
 }
@@ -1308,7 +1307,7 @@ fn clone_memo(memo: &Memo, left: Vec<i64>) -> Memo {
     Memo { results: memo.results.clone(), census: Arc::clone(&memo.census), left }
 }
 
-/// OCaml `==` on memoized results (a worker's copy of the parent's entry is the same value).
+/// Worker copies of memoized results retain their parent's result identity.
 fn same_result(a: &Result<Output, Diagnostic>, b: &Result<Output, Diagnostic>) -> bool {
     match (a, b) {
         (Ok(a), Ok(b)) => same_output(a, b),

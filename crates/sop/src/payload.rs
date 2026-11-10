@@ -1,4 +1,4 @@
-//! Port of lib/sop/payload.ml: the three cooked payload kinds.
+//! the three cooked payload kinds.
 use rays_diagnostic::Diagnostic;
 
 use crate::{image, kernel};
@@ -34,7 +34,7 @@ pub fn element_count(value: &T) -> i64 {
     }
 }
 
-/// OCaml `==` on payloads: the same variant over the same shared value (compared by data id).
+/// Payload identity requires the same variant and shared data ID.
 pub fn ptr_eq(a: &T, b: &T) -> bool {
     match (a, b) {
         (T::Geometry(x), T::Geometry(y)) => rdk_core::geometry::data_id(x) == rdk_core::geometry::data_id(y),

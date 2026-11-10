@@ -1,8 +1,4 @@
-//! Port of the `pure` part of lib/rays_editor/test/test_drawing.ml (typed draw plan, errors, packed
-//! particles, editable folds, host inputs). Not ported: the Flow_ir GPU backend mock
-//! (`Flow_ir.Gpu.backend` record), the 100000-circle and static-canvas allocation measurements
-//! (`Gc.allocated_bytes` has no Rust counterpart), the native byte-for-byte export and the benchmark
-//! (their own aliases in OCaml, `--bench`/directory arguments).
+//! Typed drawing tests cover errors, packed particles, editable folds and host inputs; native ownership/allocation paths have separate qualification cases.
 use super::support::*;
 use super::t3c::*;
 use flow_eval::Value;

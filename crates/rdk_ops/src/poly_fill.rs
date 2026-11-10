@@ -55,7 +55,6 @@ fn fail(message: String) -> error::T {
     make(Code::InvalidGeometry, &message)
 }
 
-use rdk_core::support::ocaml_trim_is_empty as blank;
 
 /// First loop of `range` when `loop_count` loops are split into `grain`-sized ranges.
 fn first_loop(range: i64, grain: i64, loop_count: usize) -> usize {
@@ -712,7 +711,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     let unique_points = params.unique_points;
     let reverse_patches = params.reverse_patches;
     if let Some(name) = &params.patch_group {
-        if blank(name) {
+        if (name).trim().is_empty() {
             return Err(fail(format!("{OPERATION}: patch group name must not be empty")));
         }
     }

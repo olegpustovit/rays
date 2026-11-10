@@ -8,7 +8,7 @@ use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, pac
 use rays_math::text_array::TextArray;
 use rdk_geom::{spatial_index, surface_index};
 
-use crate::attribute_ops::{is_blank, make_error, map_ints, map_planes, map_texts};
+use crate::attribute_ops::{make_error, map_ints, map_planes, map_texts};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kernel {
@@ -125,12 +125,12 @@ pub struct AllParams {
     pub target: geometry::T,
 }
 
-/// An `Error msg` of the OCaml API (coded `invalid_transfer`).
+/// Transfer storage failures are recoded as invalid_transfer.
 fn fail(message: &str) -> error::T {
     make_error("attribute_transfer", Code::InvalidTransfer, message)
 }
 
-/// An `invalid_arg msg` of the OCaml API (coded `invalid_position`).
+/// Transfer position failures are recoded as invalid_position.
 fn invalid(message: &str) -> error::T {
     make_error("attribute_transfer", Code::InvalidPosition, message)
 }
@@ -195,7 +195,7 @@ fn selected_attributes(
             let mut seen: HashSet<&str> = HashSet::new();
             let mut result = Vec::new();
             for name in names {
-                if is_blank(name) {
+                if (name).trim().is_empty() {
                     return Err(fail(&format!("{operation}: attribute names must not be empty")));
                 }
                 if name == "P" && owner == attribute::Owner::Point {
@@ -893,11 +893,11 @@ pub(crate) fn surface_attribute(
     if owner == attribute::Owner::Detail {
         return Err(bad("Rdk.Attribute_ops.surface_attribute: detail ownership is not spatial"));
     }
-    if is_blank(name) {
+    if (name).trim().is_empty() {
         return Err(bad("Rdk.Attribute_ops.surface_attribute: empty source name"));
     }
     let target_name = into.unwrap_or(name).to_owned();
-    if is_blank(&target_name) {
+    if (&target_name).trim().is_empty() {
         return Err(bad("Rdk.Attribute_ops.surface_attribute: empty target name"));
     }
     if owner == attribute::Owner::Point && name == "P" {
@@ -955,7 +955,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
         }
         if specification.source_owner == attribute::Owner::Detail {
             failure = Some("detail attributes are not spatial surface attributes".to_owned());
-        } else if is_blank(&specification.source_name) || is_blank(&specification.target_name) {
+        } else if (&specification.source_name).trim().is_empty() || (&specification.target_name).trim().is_empty() {
             failure = Some("attribute names must not be empty".to_owned());
         } else if specification.source_owner == attribute::Owner::Point && specification.source_name == "P" {
             failure = Some("canonical P cannot be transferred as an ordinary attribute".to_owned());
@@ -997,7 +997,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
     }
     let distance_name: Option<String> = match &params.distance_attribute {
         None => None,
-        Some(name) if is_blank(name) => {
+        Some(name) if (name).trim().is_empty() => {
             failure = Some("distance attribute name must not be empty".to_owned());
             None
         }

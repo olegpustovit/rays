@@ -301,7 +301,7 @@ fn images_noise_and_load() {
     assert_eq!(rays::image::get_size(&image).unwrap(), (2, 2));
     assert!(rays::image::same(&ok(editor::private::image(&owner, &value)), &image));
     let oracle = pixels(&image);
-    // ponytail: the Pxui.Ui.Paint.image frame of the OCaml case is not ported (UI paint is covered by the pxui suites)
+    // UI image painting is covered by PXUI; this case checks image ownership and bytes.
     assert_eq!(pixels(&image), oracle);
     let picture = result_of(&evaluated, "picture");
     let commands: RefCell<Option<Vec<Cmd>>> = RefCell::new(None);

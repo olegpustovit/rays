@@ -1,4 +1,3 @@
-// Port of lib/flow/test_macro.ml, assertion for assertion.
 use crate::lisp;
 use crate::macros::{self, MAX_DEPTH, MAX_FORMS};
 use crate::syntax::{self, Syntax};

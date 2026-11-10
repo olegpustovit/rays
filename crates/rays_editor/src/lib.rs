@@ -1,4 +1,4 @@
-//! Rays Editor: the native workspace editor (port of lib/rays_editor). One module per OCaml file.
+//! The native Rays workspace editor.
 pub mod bars;
 pub mod carry;
 pub mod cook;

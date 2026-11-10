@@ -1,4 +1,4 @@
-//! Port of lib/pxui_shell/which_key.ml: the leader sheet and the key table.
+//! the leader sheet and the key table.
 //! Commands are `editor_core::command::Command`; their scope is a kind of panel, `Panel`.
 use crate::kit;
 use crate::layout;

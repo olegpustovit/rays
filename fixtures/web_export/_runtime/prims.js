@@ -236,30 +236,19 @@ export function equal(a, b) {
 }
 
 const bits = new DataView(new ArrayBuffer(8));
-// Exact fixed-point text of a finite x >= 0: nearest-even from the binary64 ratio.
-function fixed(x, places) {
-  bits.setFloat64(0, x);
-  const hi = bits.getUint32(0), exponent = (hi >>> 20) & 0x7ff;
-  const fraction = (BigInt(hi & 0xfffff) << 32n) | BigInt(bits.getUint32(4));
-  const m = exponent === 0 ? fraction : fraction | (1n << 52n), e = (exponent || 1) - 1075;
-  const scaled = m * 10n ** BigInt(places);
-  let q;
-  if (e >= 0) q = scaled << BigInt(e);
-  else {
-    const d = 1n << BigInt(-e), twice = (scaled % d) * 2n;
-    q = scaled / d;
-    if (twice > d || (twice === d && (q & 1n))) q += 1n;
-  }
-  const s = q.toString().padStart(places + 1, '0');
-  return s.slice(0, s.length - places) + '.' + s.slice(s.length - places);
-}
+// Rust Display expands the native shortest digits and retains negative zero.
 function display(x) {
-  if (Number.isNaN(x)) return 'NaN';
-  if (!Number.isFinite(x)) return x > 0 ? 'Infinity' : '-Infinity';
-  const ax = Math.abs(x), tail = fixed(ax, 40).split('.')[1];
-  const tie = tail[4] === '5' && /^0*$/.test(tail.slice(5));
-  const s = fixed(tie ? ax + 1e-6 : ax, 4).replace(/0+$/, '').replace(/\.$/, '');
-  return x < 0 && s !== '0' ? '-' + s : s;
+  if (Object.is(x, -0)) return '-0';
+  if (!Number.isFinite(x) || x === 0) return String(x);
+  const negative = x < 0, magnitude = Math.abs(x);
+  const shortest = String(magnitude).split('e')[0].replace('.', '').replace(/^0+|0+$/g, '');
+  const text = magnitude.toPrecision(shortest.length);
+  if (!text.includes('e')) return (negative ? '-' : '') + text;
+  const [mantissa, exponent] = text.split('e');
+  const digits = mantissa.replace('.', ''), point = (mantissa.includes('.') ? mantissa.indexOf('.') : mantissa.length) + Number(exponent);
+  const decimal = point <= 0 ? '0.' + '0'.repeat(-point) + digits
+    : point >= digits.length ? digits + '0'.repeat(point - digits.length) : digits.slice(0, point) + '.' + digits.slice(point);
+  return (negative ? '-' : '') + decimal;
 }
 export function show(v) {
   if (v === null) return 'geometry';
@@ -343,19 +332,10 @@ export function text_table_encode(rows) {
 
 // ---- bounded lists ----
 const list = v => Array.isArray(v) ? v : err('E_TYPE', 'Expected a list.');
-function printG(x) { // C printf %g, for the one native message that uses it
-  if (Number.isNaN(x)) return 'nan';
-  if (!Number.isFinite(x)) return x > 0 ? 'inf' : '-inf';
-  if (x === 0) return Object.is(x, -0) ? '-0' : '0';
-  const [m, e] = x.toExponential(5).split('e'), p = +e;
-  const trim = s => s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s;
-  return p < -4 || p >= 6 ? trim(m) + 'e' + (p < 0 ? '-' : '+') + String(Math.abs(p)).padStart(2, '0')
-    : trim(x.toFixed(5 - p));
-}
 export const sequence_length = l => BigInt(list(l).length);
 export function sequence_get(l, index) {
   if (typeof index === 'number' && !Number.isInteger(index))
-    err('E_LIST_RANGE', `nth index ${printG(index)} is not a whole number.`);
+    err('E_LIST_RANGE', `nth index ${display(index)} is not a whole number.`);
   const xs = list(l), i = intOf(index);
   return i < 0n || i >= BigInt(xs.length)
     ? err('E_LIST_RANGE', `nth index ${i} is out of range for a list of length ${xs.length}.`) : xs[Number(i)];
@@ -810,10 +790,10 @@ function hexColor(text) {
   if (b[0] === 35) b.shift();
   if (b.length === 3 || b.length === 4) b = b.flatMap(c => [c, c]);
   if (b.length !== 6 && b.length !== 8) err('E_DRAW_COLOR', 'Color.hex: expected #rgb, #rgba, #rrggbb, or #rrggbbaa');
-  const channel = at => { // two hex digits, or one followed by '_'
+  const channel = at => {
     const high = hexDigit(b[at]), low = hexDigit(b[at + 1]);
-    if (high < 0 || (low < 0 && b[at + 1] !== 95)) err('E_DRAW_COLOR', 'Color.hex: invalid hexadecimal digit');
-    return BigInt(low < 0 ? high : high * 16 + low);
+    if (high < 0 || low < 0) err('E_DRAW_COLOR', 'Color.hex: invalid hexadecimal digit');
+    return BigInt(high * 16 + low);
   };
   return [channel(0), channel(2), channel(4), b.length === 8 ? channel(6) : 255n];
 }
@@ -833,7 +813,7 @@ export function color_parse(v) {
 // Cook-context and geometry metadata host protocol. Geometry stays an immutable
 // Map with an ordered attributes list; canonical positions live outside it.
 export function sop_context_seed(namespace, context) {
-  if (typeof namespace !== 'string' || !namespace.trim()) err('E_SEED_NAMESPACE', 'A context seed namespace must be nonblank.');
+  if (typeof namespace !== 'string' || metadataTrim(namespace) === '') err('E_SEED_NAMESPACE', 'A context seed namespace must be nonblank.');
   if (!(context instanceof Map)) err('E_NODE_CONTEXT', 'Context seed is available inside a defnode body.');
   let identity = hashWord64(BigInt(context.get('seed')), 0n);
   identity = hashBytes64(identity, textBytes(namespace));
@@ -915,7 +895,7 @@ function attributePattern(source, rewriteLabel = null) {
 }
 
 // Metadata host operations keep the native byte glob and immutable store order.
-const metadataTrim = text => text.replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, '');
+const metadataTrim = text => text.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '');
 function metadataOwner(text, groups = false, one = false) {
   const token = text_lower(metadataTrim(text));
   const owner = ({ points: 'point', vertices: 'vertex', primitives: 'primitive', edges: 'edge', '*': 'any' })[token] ?? token;
@@ -1267,7 +1247,7 @@ export function sop_delete_edge(geometry, name) {
 }
 
 export function sop_delete_attr(geometry, pattern, owner = 'point') {
-  if (typeof pattern !== 'string' || !pattern.trim()) err('E_ATTR_NAME', 'An attribute pattern must be nonblank.');
+  if (typeof pattern !== 'string' || metadataTrim(pattern) === '') err('E_ATTR_NAME', 'An attribute pattern must be nonblank.');
   const matches = attributePattern(pattern);
   if (!['point', 'vertex', 'primitive', 'detail'].includes(owner))
     err('E_ATTR_OWNER', 'Attribute owner is point, vertex, primitive or detail.');
@@ -1281,7 +1261,7 @@ export function sop_delete_attr(geometry, pattern, owner = 'point') {
 // Geometry host contracts; SOP graphs remain outside the 2D export target.
 const attributeTypes = ['float', 'int', 'vec2', 'vec3', 'vec4', 'text', 'float_array', 'int_array'];
 function attributeArgs(name, owner, type) {
-  if (typeof name !== 'string' || text_blank(name)) err('E_ATTR_NAME', 'An attribute needs a nonblank name.');
+  if (typeof name !== 'string' || metadataTrim(name) === '') err('E_ATTR_NAME', 'An attribute needs a nonblank name.');
   if (!['point', 'vertex', 'primitive', 'detail'].includes(owner))
     err('E_ATTR_OWNER', 'Attribute owner is point, vertex, primitive or detail.');
   if (type !== undefined && !attributeTypes.includes(type))
@@ -1892,7 +1872,7 @@ function groupOwner(owner) {
 }
 function groupName(name) {
   if (typeof name !== 'string') err('E_GROUP_TYPE', 'Group name must be text.');
-  if (text_blank(name)) err('E_GROUP_NAME', 'Group name must not be blank.');
+  if (metadataTrim(name) === '') err('E_GROUP_NAME', 'Group name must not be blank.');
 }
 function groupGeometry(geometry) {
   if (!(geometry instanceof Map)) err('E_DATA_SOURCE', 'Group source requires cooked geometry.');

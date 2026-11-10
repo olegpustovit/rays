@@ -1,9 +1,4 @@
-//! Port of lib/sop/nodes.ml: the native SOPs (exact predicates, spatial indexes, solvers, wiring,
-//! carriers); every other kind is a Lisp `defnode`.
-//!
-//! The registry is the OCaml `factories` list in the OCaml order. Ported nodes are listed; the
-//! others are kept as comments at their place so a later wave only uncomments one line per node
-//! it ports (and `test_manifest` then checks it against flow_manifest.sexp).
+//! Native SOP registry ordering is authored and pinned by flow_manifest.sexp; other node definitions live in Lisp defnodes.
 use std::sync::OnceLock;
 
 use crate::edit_graph::Factory;

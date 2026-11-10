@@ -1,6 +1,4 @@
-//! Port of lib/flow_sop/test_workspace_zone.ml (W8): loops over geometry. A Garden-like graph
-//! (scatter, then a for over its points) cooks deterministically at 1 and 3 domains; moving one
-//! point recooks only its element; pieces, keys and provenance.
+//! Workspace geometry zones preserve cooked results and cache semantics.
 use flow_syntax::symbol::Symbol;
 use super::support::*;
 use crate::curve;

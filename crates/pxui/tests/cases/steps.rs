@@ -1,5 +1,4 @@
-//! The OCaml test_ui `step` family: a panel at the origin, 240 wide, rows from y = 3 of 24 each,
-//! the value column from x = 120, toggles at x in [197, 237).
+//! Interaction steps use a 240-point panel, 24-point rows, a value column at 120 and toggle bounds [197,237).
 use crate::support::*;
 use input::{Event, Key};
 use pxui::ui::*;

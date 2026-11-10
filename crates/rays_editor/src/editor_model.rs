@@ -1,13 +1,4 @@
-//! Every type of the editor: the model `t`, `frame_result`, `change`, `carry`. Port of
-//! lib/rays_editor/editor_model.ml.
-//!
-//! The sketch lifecycle retains model snapshots; frames read borrowed `ModelView`s.
-//! - `doc` is an `Arc<Document>`: it is `History`'s present, and OCaml's physical equality of
-//!   documents is `Arc::ptr_eq` (a no-op edit is detected with `same_document`).
-//! - `ui` is an `Rc<RefCell<Ui>>`: the one immediate-mode handle, shared by every copy of the model.
-//! - OCaml `Lazy.t` fields are `Lazy_vocab`.
-//! - `'panel` of `frame_result` / `update` is the sketch-owned inspector result: `Panel_result`.
-//! - `Level_map` is an association list (`Document.level` has no `Ord`).
+//! The model retains Arc<Document> snapshots and frames borrow ModelView. Ui is shared through Rc<RefCell>. Vocabulary is lazy, inspector results are sketch-owned, and level values use an association list because Document::level has no Ord.
 #![allow(non_camel_case_types, non_upper_case_globals)]
 use std::any::Any;
 use std::cell::{OnceCell, RefCell};
@@ -79,7 +70,7 @@ pub enum projection {
 }
 pub use projection::*;
 
-/// OCaml's `Level_map`: a level's value, by assoc list.
+/// Level-keyed values use an association list.
 pub type Level_map = Vec<(Level, projection)>;
 
 pub fn level_map_empty() -> Level_map {
@@ -302,8 +293,7 @@ pub enum change {
     Rename { node: i64, label: String },
 }
 
-/// The sketch-owned value an inspector callback builds below the camera and render sections
-/// (OCaml's `'panel`); the loop that asked downcasts it.
+/// Inspector callbacks return a sketch-owned result; the requesting loop downcasts it.
 pub type Panel_result = Rc<dyn Any>;
 
 #[derive(Clone)]
@@ -419,7 +409,7 @@ pub fn flow_catalog(value: &EditorModel) -> Option<Arc<Catalog>> {
     editor_document::kinds::shared(Some(&value.factories)).ok()
 }
 
-/// OCaml `Lazy.t` of the text pane's vocabulary.
+/// Build the text pane vocabulary on first use.
 #[derive(Clone)]
 pub struct Lazy_vocab {
     cell: Rc<OnceCell<lisp_text::Vocab>>,
@@ -647,7 +637,7 @@ pub struct update {
     pub input: frame::Frame,
 }
 
-// ---- identity of documents (OCaml `==`) ----
+// Document identity.
 
 /// The same workspace document, physically: the checked source, its inputs, and the rest by value.
 pub fn same_workspace(a: &workspace_doc::T, b: &workspace_doc::T) -> bool {
@@ -660,7 +650,7 @@ pub fn same_workspace(a: &workspace_doc::T, b: &workspace_doc::T) -> bool {
         && a.imports == b.imports
 }
 
-/// OCaml's `a == b` on documents: nothing an edit could have changed differs.
+/// Two documents are unchanged when no editable field differs.
 pub fn same_document(a: &Document, b: &Document) -> bool {
     same_workspace(&a.workspace.ws, &b.workspace.ws)
         && settings::same_values(&a.settings, &b.settings)
@@ -707,8 +697,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
     document::snapshot(doc)
 }
 
-/// OCaml's pseudo path `[ -1 ]`: the host bar above the panels. Layout paths are `usize`, so the
-/// bar's one index is `usize::MAX`; its panel key prints it as `-1`.
+/// The host bar uses usize::MAX internally and prints -1 in its panel key; it sits above panel paths.
 pub const HOST_BAR: usize = usize::MAX;
 
 pub fn path_index_text(i: usize) -> String {

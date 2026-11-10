@@ -1,4 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_coplanar.ml: exact overlap arrangements for coplanar
+//! exact overlap arrangements for coplanar
 //! Boolean face pairs.
 #![allow(non_snake_case)]
 
@@ -70,7 +70,7 @@ pub fn boundary_count(value: &T, pair: i64) -> i64 {
     }
 }
 
-/// `Invalid_argument` in OCaml: a panic here (a contract violation by the caller).
+/// A caller contract violation panics.
 pub fn boundary_first(value: &T, pair: i64, boundary: i64) -> i64 {
     match kind(value, pair) {
         OverlapKind::Segment if boundary == 0 => 0,
@@ -162,7 +162,7 @@ fn compare_projected(projection: Projection, left: &implicit_point::T, right: &i
     if comparison != 0 { comparison.cmp(&0) } else { second(left, right).cmp(&0) }
 }
 
-/// None for a degenerate triangle (OCaml `Invalid_argument`).
+/// A degenerate triangle returns None.
 fn inside_triangle(orient: Orient, triangle: &[implicit_point::T], point: &implicit_point::T) -> Option<bool> {
     let orientation = orient(&triangle[0], &triangle[1], &triangle[2]);
     let first = orient(&triangle[0], &triangle[1], point);
@@ -208,7 +208,7 @@ fn convex_hull(projection: Projection, candidates: &[implicit_point::T], count: 
     (0..size).map(|index| points[hull[index]].clone()).collect()
 }
 
-/// None: Construction_failed or Invalid_argument in OCaml.
+/// Construction failure or invalid input returns None.
 fn build_pair(constraints: &constraints_mod::T, pair: i64) -> Option<Overlap> {
     let source = constraints_mod::view::source(constraints);
     let first_side = constraints_mod::coplanar_first_side(constraints, pair);
@@ -526,7 +526,7 @@ mod tests {
 
     #[test]
     fn one_vs_many_ranges_equal() {
-        // `repeated` fixture of the OCaml file, shrunk: independent coplanar pairs.
+        // Independent repeated coplanar pairs qualify stable output.
         let mut points = Vec::new();
         let mut tris = Vec::new();
         for face in 0..6i64 {

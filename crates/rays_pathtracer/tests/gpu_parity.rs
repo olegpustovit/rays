@@ -1,8 +1,4 @@
-//! Port of lib/rays_pathtracer/test_parity.ml: raster/path tracer parity (plan D15): each built-in World
-//! lights a matte and a glossy probe; the raster World path must land near the converged path tracer in mean
-//! probe luminance and in where the brightest highlight sits. Qualification in OCaml (it converges 1024
-//! samples per preset); shrunk here to 256 samples at 128x64 (64 frames of 4) so one preset-set run fits a
-//! test, with the OCaml thresholds unchanged. Probes are tests/common/meshes.rs spheres.
+//! Raster/path-tracer parity compares probe luminance/highlight location over converged World presets, using 256 samples at 128x64 to stay within the case budget.
 use crate::common;
 use common::meshes;
 use common::pt::{self, get, rgb};

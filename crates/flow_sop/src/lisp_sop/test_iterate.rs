@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/test_iterate.ml: `iterate` in one cook node, against a direct smoothing.
+//! `iterate` in one cook node, against a direct smoothing.
 use super::support::*;
 use crate::lower;
 use rdk_core::geometry as geo;

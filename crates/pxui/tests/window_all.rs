@@ -1,5 +1,4 @@
-//! The interaction contract of the immediate-mode kit on the SDL main thread (fonts): the OCaml
-//! lib/pxui test_ui, test_input, test_keyboard and test_table.
+//! Run kit interaction cases on the SDL main thread so native fonts and input follow production ownership.
 #[path = "../../rays/tests/common/mod.rs"]
 mod common;
 #[path = "cases/gpu_parity.rs"]

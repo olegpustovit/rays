@@ -1,6 +1,4 @@
-//! Fonts and rendered text images, with per-font and per-context text caches.
-//!
-//! The OCaml `[`Msg of string]` errors are plain `String`s here.
+//! Fonts and rendered images use per-font/per-context caches with String errors.
 use crate::image;
 use renderer::side_lru::{self, Table, TableKey};
 use rays_math::color;
@@ -36,7 +34,7 @@ pub struct font_data {
     cache: RefCell<Table>,
 }
 
-/// An open font: clones share one font (the OCaml value's identity is `same`).
+/// Open font clones share one font; same tests that owner identity.
 #[derive(Clone)]
 pub struct Font(Rc<font_data>);
 

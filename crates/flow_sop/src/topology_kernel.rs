@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/topology_kernel.ml(i): the public face of `topology_kernel_impl`.
+//! the public face of `topology_kernel_impl`.
 use flow_syntax::symbol::Symbol;
 use crate::topology_kernel_impl as imp;
 use flow_ir::flow_ir::gpu::Integers;

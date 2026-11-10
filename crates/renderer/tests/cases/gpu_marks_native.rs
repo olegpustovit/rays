@@ -1,8 +1,4 @@
-//! The Marks pipeline family must light exactly the pixels the Ui_batch path (Ui family, 64-byte
-//! instances) lights for the same marks: rect, circle and line, with and without a stroke, at 63, 64,
-//! 65 and 100,000 instances, at 1x and 2x density. Inputs are multiples of 1/8 so that binary32 sums
-//! such as x + width are exact; see specification/marks.md. Every channel is compared.
-//! The OCaml loop over (density, kind) is split into one test fn per pair so each stays under 5 s.
+//! Marks and Ui pipelines must illuminate identical pixels for rect/circle/line at boundary and large instance counts, 1x/2x density, with exact binary32 source coordinates. Compare every channel.
 use crate::common;
 use ogpu_core::backend::{self, Buffer, Device};
 use ogpu_core::pipeline::Blend;

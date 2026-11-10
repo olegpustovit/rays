@@ -124,7 +124,7 @@
          normal_present (if (and (and compile normals_active) use_normal_attribute)
                           (sop/has_attr in0 normal_name :owner normal_kind) false)]
     (cond
-      (int/eq steps -4611686018427387904)
+      (int/eq steps -9223372036854775808)
         (gx_error "Group Expand: steps magnitude exceeds the supported integer range")
       (not (fold [seen false] [candidate (sop/group_names in0 "*" :owner kind)] (or seen (equal? candidate group))))
         (gx_error (str "Group Expand: missing " kind " group " (text/repr group)))

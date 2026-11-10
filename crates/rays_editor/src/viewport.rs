@@ -1,10 +1,4 @@
-//! The 3D viewport: the camera control, the Viewport/Render panel sections, camera objects,
-//! look-through, the render requests, the guides and the handles. Port of
-//! lib/rays_editor/viewport.ml.
-//!
-//! Conventions of this port: `extra` is a plain `Clone` value (OCaml's physical comparisons of it
-//! are done by the loop through its `rest` bookkeeping); the camera of OCaml's `Pxui camera control`
-//! is `CC`; `inspector` callbacks answer `Rc<dyn Any>` (OCaml's `'a`).
+//! Viewport camera controls, panel requests, guides and handles return frame intents. Loop rest bookkeeping tracks changes to cloned extras; inspector results remain sketch-owned Rc values.
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 use std::any::Any;
 use std::borrow::Cow;

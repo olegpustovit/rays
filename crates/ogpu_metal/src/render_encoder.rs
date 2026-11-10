@@ -38,8 +38,7 @@ struct ResolvedDraw {
     index: Option<(OgpuIndex, crate::buffer::Buffer, i64, i64)>,
 }
 
-// ponytail: the OCaml all-indexed fast path (Metal prepared indexed draws, one native call for the
-// batch) is not in the Rust `metal` crate; every batch takes the per-draw path, whose output is the same.
+// ponytail: indexed batches issue one native draw at a time; add batched native draws only when measured workloads justify it.
 fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[DriverBatchDraw]) -> Result<(), Error> {
     let mut resolved: Vec<ResolvedDraw> = Vec::with_capacity(draws.len());
     for d in draws {

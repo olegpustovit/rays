@@ -1,8 +1,4 @@
-//! Port of lib/sop/test_parallel_branches.ml: parallel branch transactions of `Session::cook` are
-//! byte-, key- and counter-identical to input-order execution, including cancellation and errors.
-//! The OCaml test builds some graphs from Lisp SOPs (noise_displace, merge, grid); here the same
-//! shapes are native nodes that allocate new planes (`shifted`), since the Lisp reader is not part
-//! of this crate. Timings are driven by an injected clock instead of sleeping.
+//! Parallel branch transactions must match input-order execution in bytes, keys, counters, cancellation and error selection. Native fixtures allocate fresh planes; injected clocks avoid timing races.
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

@@ -1,4 +1,4 @@
-// Port of the Eval-facing parts of lib/flow/test_array.ml. The Value-only blocks (storage,
+// The Value-only blocks (storage,
 // validation, allocation, the GC-weak memo) belong to flow_syntax's value tests.
 use crate::*;
 use crate::test_workspace::{errors, show_ds};

@@ -1,9 +1,4 @@
-// Port of lib/flow_ir/test_static_map.ml: Flow_ir.static against Flow.Eval.static. A static packed
-// map of more than 4,096 elements is made by its CPU kernel after the walker's first 4,096
-// elements, and the evaluation is the same value bit for bit, the same records and the same failure.
-//
-// Not ported (and why): the 200,000-element wall-clock bound and the Gc.allocated_bytes marginal cost (OCaml heap measurement); the kernel claim is asserted from the profile tier instead.
-// Sizes: OCaml used 20000/9000 element maps; 5000/4500 still cross the 4,096 walked head.
+// Static packed maps cross the 4096-element walked head and compare result bits, records and failures against reference evaluation. Profile tiers identify actual kernel execution.
 use flow_syntax::symbol::Symbol;
 use crate::core_exec;
 use crate::core_ir::{Expr, StatementNode};
@@ -113,8 +108,7 @@ fn failures_are_the_walkers() {
     }
 }
 
-/// It is the kernel that makes the elements past 4,096: the profile reports the Cpu_kernel tier with
-/// no walked tail (OCaml also bounded the CPU seconds of 200,000 elements).
+/// The profile must report Cpu_kernel with no walked tail beyond the head.
 #[test]
 fn kernel_makes_the_elements_past_the_head() {
     let ws = checked("(map (fn [i] [(sin i) (cos i) 0]) (array/range 20000))");
@@ -386,9 +380,7 @@ fn strict_captured_iterate() {
     }
 }
 
-// Product defect: Flow_ir.static walks the first 4,096 elements of a kernel-able map before the kernel
-// (head_elements = 4096); OCaml runs the kernel first (head_elements = 0, head_seconds = 0). Covers the
-// head assertions of static_map_profile, trusted_replay and this clock check.
+// Known failure: static_map_profile, trusted_replay and clock checks observe a walked 4096-element head before the kernel instead of a complete eager kernel run.
 #[test]
 fn kernel_first_profile_clock() {
     let ticks = Arc::new(AtomicU64::new(0));
@@ -523,10 +515,7 @@ fn sop_deferral() {
     }
     assert!(same(&recorded(&eager, "small"), &recorded(&deferred, "small")));
     let maps = profile::static_maps(&profile);
-    // The large constant arrays (`array/range 4101`, ...) defer at their constructor, so every large SOP map
-    // over them becomes a residual before `eval_map` runs and records no static-map entry (the OCaml
-    // reference deferred at the map, where `Profile::deferred` marked its entry). What the entry proved
-    // still holds: nothing large in the SOP graph is walked eagerly, only the 3-element `small` map.
+    // Large SOP arrays defer at construction, so they are never walked eagerly; only the small map is eager.
     assert!(maps.iter().filter(|m| m.site.first().is_some_and(|s| s == "sculpture")).all(|m| m.count <= 4096 && !m.deferred && m.tail_elements == 0));
     assert!(maps.iter().any(|m| m.site.first().is_some_and(|s| s == "sculpture") && m.count == 3 && m.head_elements == 3));
     assert!(maps.iter().any(|m| m.count == 4101 && m.site.first().map(|s| s == "volume").unwrap_or(false) && !m.deferred));

@@ -1,4 +1,4 @@
-//! Native grid and fused-chain qualification (OCaml native aliases use GRID_SIDE=256).
+//! Qualify native grid and fused-chain behavior at the authored fixture sizes.
 #[path = "chains_frames.rs"]
 mod frames;
 #[path = "chains_scrub.rs"]

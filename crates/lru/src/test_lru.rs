@@ -1,4 +1,3 @@
-// Port of lib/lru/test_lru.ml, assertion for assertion.
 use super::*;
 use std::any::Any;
 use std::collections::hash_map::DefaultHasher;
@@ -14,7 +13,7 @@ fn setup() -> MutexGuard<'static, ()> {
     guard
 }
 
-// OCaml's int log: (key, value) pairs, newest first, as the OCaml list is built.
+// Integer log entries are newest-first key/value pairs.
 type Log = Arc<Mutex<Vec<(i32, String)>>>;
 
 fn int_hash(value: i32) -> u64 {

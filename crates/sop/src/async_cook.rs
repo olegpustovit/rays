@@ -1,14 +1,4 @@
-//! Port of lib/sop/async_cook.ml: bounded latest-request background cooking for interactive
-//! sketches.
-//!
-//! One persistent worker thread owns one procedural session. Submitting a newer request cancels the
-//! active context, replaces the single pending slot, and prevents stale results from being
-//! published. Prepared values must remain target-neutral; SDL and GPU work belongs on the initial
-//! thread after polling.
-//!
-//! The OCaml `'a` of a worker is `Prepared = Box<dyn Any + Send>`: a caller downcasts what its own
-//! `prepare` produced. The OCaml code also converts an exception in a cook into
-//! `Uncaught_exception`; so does `execute` here (a panic in a cook is a typed error; the worker lives).
+//! One persistent worker owns a procedural session. New requests cancel active work, replace the pending slot and suppress stale publication. Prepared values stay target-neutral; SDL/GPU work runs on the initial thread after polling. Cook/prepare panics become typed request failures without killing the worker.
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, Weak};
@@ -102,8 +92,7 @@ fn none_volatile() -> Arc<dyn Fn(i64) -> bool + Send + Sync> {
     Arc::new(|_| false)
 }
 
-/// OCaml `with exn -> Error (Uncaught_exception ...)`: whatever the cook, the footer reads or `prepare`
-/// raises is an error of this request; the worker lives on.
+/// Cook, footer and prepare panics fail the current request while preserving worker liveness.
 fn execute(session: &mut session::T, request: Request) -> Result<Prepared, Error> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| execute_request(session, request))) {
         Ok(result) => result,
@@ -317,9 +306,7 @@ pub fn stats(value: &T) -> session::Stats {
     value.0.stats.lock().unwrap().clone()
 }
 
-/// Block until the newest submitted request completes and take it, like `poll`. For fixed-step runs
-/// only (an interactive sketch never blocks); panics (OCaml `Invalid_argument`) when nothing is
-/// pending or the worker is closed.
+/// Fixed-step waits take the newest completed request; interactive frames do not block. Waiting without a pending request or after close is a programmer error.
 pub fn await_completion(value: &T) -> Completion {
     let mut state = value.0.state.lock().unwrap();
     assert!(!(state.closed || state.stopping), "Async_cook.await: worker is closed");

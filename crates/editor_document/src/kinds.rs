@@ -1,4 +1,4 @@
-//! Port of lib/editor_document/kinds.ml: one Lisp kind per object schema (`scene/light`), per World
+//! one Lisp kind per object schema (`scene/light`), per World
 //! layer (`world/sky`) and the workspace settings record (`settings/config`), generated from their
 //! schemas, with the window the settings graph asks of the host.
 //!

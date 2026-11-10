@@ -361,7 +361,7 @@ mod tests {
         let t = create(None, &lo_x, &lo_y, &hi_x, &hi_y).unwrap();
         let mut got = vec![];
         candidate_pairs(None, &t, &mut |a, b| {
-            // Faithful to OCaml: pairs inside one leaf are visited in tree order, so normalize.
+            // Normalize pairs visited within one leaf from tree order into canonical pair order.
             got.push((a.min(b), a.max(b)));
             Ok(())
         })

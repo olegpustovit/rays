@@ -1,5 +1,4 @@
-//! The OCaml test_pxui_graph.ml lines 218-899: zoom geometry, levels, hover, idle frame, suspend,
-//! pinch, carry, ghost values.
+//! Graph geometry, zoom, hover, idle, suspension, pinch, carry and ghost-value contracts.
 use crate::support::*;
 use editor_core::keymap::Trigger;
 use flow_graph::flow_edit::Op;

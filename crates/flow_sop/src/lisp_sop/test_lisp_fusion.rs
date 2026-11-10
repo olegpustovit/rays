@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/test_lisp_fusion.ml. A chain of Lisp-bodied point deformers cooks as one
+//! A chain of Lisp-bodied point deformers cooks as one
 //! kernel run, with the bytes of the chain run one deformer at a time.
 use super::support::*;
 use crate::lower;

@@ -72,7 +72,7 @@ fn token(c: &Shared) -> i64 {
 }
 
 fn mip_extent(value: i64, mip: i64) -> i64 {
-    // OCaml `lsr` by 64 or more is unspecified; a level that deep is 1 anyway.
+    // Mip levels deeper than the machine shift width still have extent one.
     std::cmp::max(1, if mip >= 63 { 0 } else { value >> mip })
 }
 
@@ -429,7 +429,7 @@ struct MockCommands {
 }
 
 impl MockCommands {
-    // injected failures and loss are checked in the order of the OCaml mock
+    // Preserve deterministic injected-failure/device-loss precedence.
     fn submit(&self, operation: &str) -> Result<(), Error> {
         let injected = std::mem::replace(&mut self.c.borrow_mut().fail_submission, false);
         if injected {
@@ -663,7 +663,7 @@ pub fn live_counts(control: &Control) -> (i64, i64, i64, i64, i64) {
     (s.buffers, s.textures, s.pipelines, s.queues, s.surfaces)
 }
 
-/// Recorded operations, oldest first (the OCaml control keeps them newest first, unread).
+/// Recorded operations are returned oldest first.
 pub fn trace(control: &Control) -> Vec<String> {
     control.0.borrow().trace.clone()
 }

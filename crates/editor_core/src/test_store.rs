@@ -1,4 +1,3 @@
-//! Port of lib/editor_core/test_store.ml.
 use crate::store::{read_text, settings, user_folder, write_text};
 use input::Platform;
 use flow_syntax::syntax::{self, Syntax};
@@ -13,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-/// A fresh directory under the platform temporary folder (OCaml's Filename.temp_dir).
+/// A fresh directory under the platform temporary folder.
 fn temp_dir(prefix: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), n));
@@ -21,7 +20,7 @@ fn temp_dir(prefix: &str) -> PathBuf {
     dir
 }
 
-/// Removes what it holds, in the order given, when the test ends (OCaml's Fun.protect ~finally).
+/// Remove retained entries in order when this test ends.
 struct Cleanup(Vec<PathBuf>);
 
 impl Drop for Cleanup {
@@ -108,7 +107,6 @@ fn settings_int_above_2_62_decodes_as_int() {
 #[test]
 fn user_folder_follows_platform() {
     let pref = Some("C:/AppData/rays/editor/");
-    // Filename.concat "/h" ".rays": OCaml joins with the platform's directory separator
     let expected = if cfg!(windows) { "/h\\.rays" } else { "/h/.rays" };
     assert!(user_folder(Platform::Apple, pref, "/h") == expected);
     assert!(user_folder(Platform::Other, pref, "/h") == "C:/AppData/rays/editor/");

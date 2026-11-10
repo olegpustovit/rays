@@ -1,4 +1,4 @@
-//! Port of lib/rdk/boolean/boolean_face_arrangement.ml: exact planar splitting of one face's
+//! exact planar splitting of one face's
 //! non-coplanar Boolean constraints.
 #![allow(non_snake_case)]
 use rays_math::float::{min as fmin, max as fmax, compare as fcmp};
@@ -29,7 +29,6 @@ fn fail(code: Code, message: &str) -> error::T {
     error::new(OPERATION, code, message.to_owned())
 }
 
-/// OCaml `Invalid_argument message` surfaces as `invalid_constraints`.
 fn invalid(message: &str) -> error::T {
     fail(Code::InvalidConstraints, message)
 }

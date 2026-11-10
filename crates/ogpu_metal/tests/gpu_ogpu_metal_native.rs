@@ -1,7 +1,4 @@
-// Port of lib/ogpu_metal/test_device_error.ml, test_ogpu_metal_{foundation,texture,pipeline,acceleration,
-// capabilities,sampler_pixels}.ml and test_pipeline_argument_buffer.ml: the native modules and the driver
-// record on the real Metal device. Direct native module handles follow their last Rust owner; core
-// wrappers release driver payloads at logical destroy, even when dead wrappers remain in scope.
+// Native module and driver ownership, texture, pipeline, sampler and capability contracts.
 use ogpu_core::{
     backend as be,
     binding::{self, Kind as LayoutKind, LayoutEntry, Stage as LayoutStage},

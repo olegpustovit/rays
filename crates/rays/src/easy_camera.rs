@@ -1,7 +1,4 @@
-//! Functional pointer-controlled orbit camera inspired by openFrameworks' `ofEasyCam`. All
-//! positions and control areas use logical points.
-//!
-//! Functions OCaml documents as raising `Invalid_argument` return `Err(message)`.
+//! Functional pointer-controlled orbit cameras use logical coordinates and return validation errors as Results.
 use crate::camera;
 use crate::frame;
 use crate::num::{fmax, fmin};

@@ -1,4 +1,4 @@
-// Port of lib/flow_ir/test_reductions.ml. The `--bench` block is not ported (a timing harness,
+// The `--bench` block is not ported (a timing harness,
 // not an assertion).
 use flow_syntax::symbol::Symbol;
 use crate::flow_ir::executor;
@@ -13,8 +13,7 @@ use flow_syntax::value::{Value, source_value};
 use rays_diagnostic::Diagnostic;
 use std::sync::Arc;
 
-// Sizes: OCaml used 5001-element arrays (5 blocks of 1024); 2049 keeps three block crossings and fits the 5 s budget in debug.
-// OCaml native ints are 63 bits.
+// 2049 elements cross three 1024-lane blocks within the debug budget; integer arithmetic is full-width i64.
 const MIN_INT: i64 = i64::MIN;
 const MAX_INT: i64 = i64::MAX;
 

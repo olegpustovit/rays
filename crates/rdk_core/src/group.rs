@@ -28,7 +28,7 @@ fn byte_count(length: i64) -> usize {
 }
 
 fn require_name(operation: &str, name: &str) -> Result<(), error::T> {
-    if support::ocaml_trim_is_empty(name) {
+    if (name).trim().is_empty() {
         Err(invalid_group(operation, "Group: empty name"))
     } else {
         Ok(())
@@ -160,7 +160,7 @@ pub fn ordered(
     length: i64,
     elements: &[i64],
 ) -> Result<T, error::T> {
-    if support::ocaml_trim_is_empty(name) {
+    if (name).trim().is_empty() {
         return Err(invalid_group("Group.ordered", "Group: empty name"));
     }
     if length < 0 {
@@ -732,12 +732,6 @@ mod tests {
         let actual = super::merge(wrong_length, merged).err().unwrap();
         assert_eq!(error::code(&actual), error::code(&expected));
         assert_eq!(error::message(&actual), error::message(&expected));
-    }
-
-    #[test]
-    fn names_use_ocaml_ascii_whitespace() {
-        assert!(super::ordered(Owner::Point, " \t\n\r\u{000c}", 0, &[]).is_err());
-        assert!(super::ordered(Owner::Point, "\u{00a0}", 0, &[]).is_ok());
     }
 
     #[test]

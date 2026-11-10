@@ -1,4 +1,3 @@
-// Port of lib/flow_ir/test_core_state.ml.
 use crate::core_lower;
 use crate::flow_ir::executor;
 use crate::test_support::{self as ts, ok};

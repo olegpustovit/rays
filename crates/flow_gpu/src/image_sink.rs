@@ -1,4 +1,4 @@
-//! Port of lib/flow_gpu/image_sink.ml: initial-thread conversion of validated packed vec4 output to
+//! initial-thread conversion of validated packed vec4 output to
 //! a resident RGBA8 texture, drawn by the generated image.rays raster stages: the unorm store
 //! clamps channels to [0,1] and rounds to nearest, ties to even. No pixels are read back.
 use crate::pipelines::is_vulkan;

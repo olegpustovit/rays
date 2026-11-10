@@ -1,4 +1,4 @@
-// Port of lib/flow_graph/probe.ml: probes and footers: what a recording evaluation saw at each path,
+// probes and footers: what a recording evaluation saw at each path,
 // per iteration tuple, and the text and numbers a node footer, the iteration counts and the
 // inspector's per-iteration list show. No drawing here.
 use crate::projection as p;
@@ -715,9 +715,9 @@ impl Probe {
                         (Value::Text(a), SNode::Str(b)) => a.as_ref() == literal.bytes(*b),
                         (Value::Bool(_) | Value::Int(_) | Value::Float(_), SNode::Sym(s)) if literal.name(*s) == "true" => flow_syntax::value::truthy(value).unwrap_or(false),
                         (Value::Bool(_) | Value::Int(_) | Value::Float(_), SNode::Sym(s)) if literal.name(*s) == "false" => !flow_syntax::value::truthy(value).unwrap_or(true),
-                        (Value::Bool(a), SNode::Num(b)) => *a == (cfmt::parse_ocaml_float(literal.name(*b)).unwrap_or(0.0) != 0.0),
-                        (Value::Int(a), SNode::Num(b)) => *a as f64 == cfmt::parse_ocaml_float(literal.name(*b)).unwrap_or(f64::NAN),
-                        (Value::Float(a), SNode::Num(b)) => *a == cfmt::parse_ocaml_float(literal.name(*b)).unwrap_or(f64::NAN),
+                        (Value::Bool(a), SNode::Num(b)) => *a == ((literal.name(*b)).parse::<f64>().ok().unwrap_or(0.0) != 0.0),
+                        (Value::Int(a), SNode::Num(b)) => *a as f64 == (literal.name(*b)).parse::<f64>().ok().unwrap_or(f64::NAN),
+                        (Value::Float(a), SNode::Num(b)) => *a == (literal.name(*b)).parse::<f64>().ok().unwrap_or(f64::NAN),
                         _ => false,
                     }
                 };

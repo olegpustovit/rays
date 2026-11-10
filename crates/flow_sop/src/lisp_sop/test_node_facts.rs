@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/test_node_facts.ml: each Lisp node's declared facts, checked on its factory
+//! each Lisp node's declared facts, checked on its factory
 //! node (this module lowers calls as that node).
 use super::support::*;
 use crate::{lisp_sop, lower};
@@ -26,7 +26,7 @@ fn rdk_ok<A>(r: Result<A, rdk_core::error::T>) -> A {
     r.unwrap_or_else(|e| panic!("{}", rdk_core::error::to_string(&e)))
 }
 
-/// Plane_generators.grid's default triangles in the XZ plane, retaining the OCaml fixture bounds.
+/// Grid fixture triangles lie in the XZ plane with fixed source bounds.
 fn plane_grid(columns: i64, rows: i64, size: f64) -> geo::T {
     let stride = columns + 1;
     let (mut x, mut y) = (Vec::new(), Vec::new());

@@ -1,4 +1,4 @@
-//! Helpers shared by the pane's cases (the top of the OCaml test_pxui_graph.ml).
+//! Shared graph-pane fixture, frame and gesture builders.
 #![allow(dead_code)]
 use flow_syntax::symbol::Symbol;
 use flow_check::catalog::Catalog;
@@ -83,7 +83,7 @@ pub fn checked(text: &str) -> Workspace {
 }
 
 pub fn load_workspace(name: &str) -> Workspace {
-    // Dune copies these sketches into the OCaml fixture directory; read the same sources directly.
+    // Read the shared sketch sources directly.
     let path = if matches!(name, "bloom" | "variations") {
         format!("{CASES_DIR}/{name}.lisp")
     } else {
@@ -168,7 +168,7 @@ pub fn big_scope(n: i64) -> p::Scope {
     p::of_graph(&scope_catalog(), &ws, "g").unwrap_or_else(|e| panic!("{e}"))
 }
 
-/// The OCaml test module `G` (scope_gestures): a large window keeps the zoom at 1, where every field is built.
+/// A large window keeps zoom at one so every graph field is built.
 pub mod g {
     use super::*;
 

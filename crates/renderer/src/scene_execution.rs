@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
-/// OCaml `bytes`, compared by physical equality where the OCaml code does (`Rc::ptr_eq`).
+/// Shared byte owners use Rc::ptr_eq where storage identity matters.
 pub use runtime_resources::bytes;
 
 pub fn new_bytes(value: Vec<u8>) -> bytes {
@@ -206,7 +206,7 @@ impl Mesh {
     }
 }
 
-/// Equality is structural, as OCaml's `=` on the record (bytes by content, floats by value).
+/// Structural scene equality compares bytes by content and floats by value.
 #[derive(Clone, PartialEq)]
 pub struct State {
     pub viewport: (i64, i64, i64, i64),
@@ -285,7 +285,7 @@ pub struct SampledDraw {
     pub draw: GeometryDraw,
 }
 
-/// A draw handed around by identity (OCaml's physical equality on the record).
+/// Retain draws by shared owner identity.
 pub type Draw = Rc<SampledDraw>;
 
 pub type Scene3Entry = Draw;

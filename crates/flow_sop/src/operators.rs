@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/operators.ml(i): the SOP workspace host's operator declarations.
+//! the SOP workspace host's operator declarations.
 use flow_syntax::symbol::{self, Symbol};
 use crate::{attribute_kernel, attribute_metadata};
 use flow_check::op::{Args, Body, Check, Op, Out, OutArgs, Shape, Signature};
@@ -40,10 +40,6 @@ fn text_arg(args: &Args, name: &str) -> Option<String> {
         Some(Value::Text(bytes)) => Some(String::from_utf8_lossy(bytes).into_owned()),
         _ => None,
     }
-}
-/// OCaml `String.trim` blankness.
-fn blank(s: &str) -> bool {
-    s.chars().all(|c| matches!(c, ' ' | '\u{c}' | '\n' | '\r' | '\t'))
 }
 fn component_args(args: &Args, component: &str) -> Vec<(Symbol, Value)> {
     let mut all = args.to_vec();
@@ -119,7 +115,7 @@ fn validate_args(args: &Args) -> Result<(), Diagnostic> {
     match arg(args, "attribute") {
         Some(Value::Text(name)) => {
             let name = std::str::from_utf8(name).map_err(|_| value::fail("E_ATTR_NAME", "Attribute name must be UTF-8 text."))?;
-            if blank(name) {
+            if (name).trim().is_empty() {
                 return fail("E_ATTR_NAME", "An attribute needs a nonblank name.");
             }
         }
@@ -316,7 +312,7 @@ fn delete_attr() -> Op {
         choices: vec![("owner".into(), strings(&["point", "vertex", "primitive", "detail"]))],
         check: Arc::new(|args| {
             match text_arg(args, "attribute") {
-                Some(pattern) if !blank(&pattern) => {
+                Some(pattern) if !(&pattern).trim().is_empty() => {
                     rdk_core::attribute_pattern::compile(&pattern).map_err(|e| value::fail("E_ATTR_PATTERN", rdk_core::error::message(&e)))?;
                 }
                 _ => return fail("E_ATTR_NAME", "An attribute pattern must be nonblank."),
@@ -560,7 +556,7 @@ fn mesh_planes() -> Op {
 
 fn group_check(args: &Args) -> Result<(), Diagnostic> {
     match text_arg(args, "name") {
-        Some(name) if !blank(&name) => {}
+        Some(name) if !(&name).trim().is_empty() => {}
         _ => return fail("E_GROUP_NAME", "Group name must not be blank."),
     }
     if let Some(owner) = arg(args, "owner") {
@@ -686,10 +682,6 @@ fn with_group() -> Op {
 // ---------------------------------------------------------------------------------------------
 // context
 
-/// What `sop/provenance_base` is in an inlined body: the lowering of its `sop/concat` replaces it
-/// with the provenance base it allocates. OCaml `min_int` (63-bit).
-pub const PROVENANCE_SENTINEL: i64 = -(1 << 62);
-
 /// The reserved argument naming the card whose inlined body reads its cook context.
 pub fn context_label() -> &'static str {
     flow_eval::CONTEXT_LABEL
@@ -699,7 +691,6 @@ pub fn context_label() -> &'static str {
 /// operator is a cook-time source the kernel resolves from its cook context; elsewhere it is refused.
 fn context_source(what: &'static str) -> Body {
     Arc::new(move |_, _, args| match arg(args, context_label()) {
-        Some(Value::Text(_)) if what == "Provenance base" => Ok(Value::Int(PROVENANCE_SENTINEL)),
         Some(Value::Text(_)) => {
             let (name, ty) = match what {
                 "Context seed" => ("sop/context_seed", Ty::Int),
@@ -724,7 +715,7 @@ fn context_seed() -> Op {
         shape: Shape::Scalar,
         check: Arc::new(|args| {
             match text_arg(args, "namespace") {
-                Some(namespace) if !blank(&namespace) => {}
+                Some(namespace) if !(&namespace).trim().is_empty() => {}
                 _ => return fail("E_SEED_NAMESPACE", "A context seed namespace must be nonblank."),
             }
             match arg(args, "salt") {
@@ -849,7 +840,7 @@ fn swap_attr() -> Op {
             match arg(args, "method") {
                 None => Ok(()),
                 Some(Value::Text(method)) => {
-                    let method = String::from_utf8_lossy(method).trim_matches(|c| matches!(c, ' ' | '\u{c}' | '\n' | '\r' | '\t')).to_ascii_lowercase();
+                    let method = String::from_utf8_lossy(method).trim().to_ascii_lowercase();
                     if ["swap", "move", "copy"].contains(&method.as_str()) {
                         Ok(())
                     } else {
@@ -886,7 +877,7 @@ fn delete_attrs() -> Op {
                     None => {}
                     Some(Value::Text(pattern)) => {
                         let pattern = String::from_utf8_lossy(pattern);
-                        if !blank(&pattern) {
+                        if !(&pattern).trim().is_empty() {
                             rdk_core::attribute_pattern::compile(&pattern).map_err(|e| value::fail("E_METADATA_PATTERN", rdk_core::error::message(&e)))?;
                         }
                     }
@@ -1277,7 +1268,7 @@ mod tests {
     }
 
     #[test]
-    fn declares_the_ocaml_operator_list_in_order() {
+    fn declares_the_authored_operator_list_in_order() {
         let names: Vec<&str> = all().iter().map(|op| op.name.as_str()).collect();
         assert_eq!(names.len(), 50);
         assert_eq!(names[0], "sop/attr");
@@ -1286,7 +1277,7 @@ mod tests {
     }
 
     #[test]
-    fn inherits_the_chain_the_ocaml_records_do() {
+    fn inherits_parent_factory_fields() {
         assert_eq!(find("sop/mesh").category, "Topology");
         assert_eq!(find("sop/edges").shape, Shape::Struct { splice: false });
         assert_eq!(find("sop/with_attr").shape, Shape::Scalar);
@@ -1322,7 +1313,7 @@ mod tests {
         let labelled = vec![(context_label().into(), text("card"))];
         assert!(matches!((op.body)(&frame, node, &labelled).unwrap(), Value::Source(g) if g.ty == Ty::Float && g.name == "sop/context_frame"));
         let provenance = find("sop/provenance_base");
-        assert_eq!((provenance.body)(&frame, node, &labelled).unwrap(), Value::Int(PROVENANCE_SENTINEL));
+        assert!(matches!((provenance.body)(&frame, node, &labelled).unwrap(), Value::Source(g) if g.ty == Ty::Int && g.name == "sop/provenance_base"));
     }
 }
 

@@ -1,7 +1,4 @@
-//! Port of lib/flow_sop/test_projection.ml (W4 part A): the graph pane's projection of every
-//! fixture (nodes, zones, rows, chips), liveness and invariance flags, and the layout.
-//!
-//! Uses the editor's complete kinds catalog, retaining the study's graph and layout projections.
+//! Graph projection of workspace cards and their typed ports.
 use flow_syntax::symbol::Symbol;
 use flow_sop::lisp_sop::support::*;
 use flow_sop::{catalog as fcat, port};

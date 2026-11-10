@@ -1,4 +1,4 @@
-//! Port of lib/flow_native/probe_run.ml: what the graph pane's probes run on, kept out of the
+//! what the graph pane's probes run on, kept out of the
 //! editor so it reaches no `flow_ir`. The exact frame/region compiler the canvas uses, and the
 //! profile of its groups read as the footer's "ran on" line.
 use flow_syntax::symbol::Symbol;

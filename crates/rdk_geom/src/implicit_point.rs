@@ -1,6 +1,5 @@
-//! Port of lib/rdk/geom/exact/implicit_point.ml: exact homogeneous points used by
-//! mesh-arrangement kernels. `Invalid_argument` becomes a panic; indices are `i64`.
-//! The float filters keep OCaml's exact operation order (no FMA contraction).
+//! Exact implicit points; float filters preserve operation order without FMA contraction.
+//! Exact homogeneous mesh points use i64 indices and panic on programmer-invalid inputs. Float filters preserve explicit operation order without FMA contraction.
 use rays_math::float::{min as float_min, max as float_max};
 use crate::exact_dyadic as exact;
 use crate::exact_dyadic::ldexp;
@@ -1964,8 +1963,7 @@ pub fn incircle_zx(a: &T, b: &T, c: &T, d: &T) -> Sign {
 mod tests {
     use super::*;
 
-    // OCaml's test_implicit_point.ml defines only this fixture and an empty `run`; the checks
-    // below exercise the same coordinates table.
+    // The implicit-point coordinate fixture is checked directly.
     const COORDINATES: [(f64, f64, f64); 19] = [
         (0., 0., 0.),
         (2., 0., 0.),

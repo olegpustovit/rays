@@ -1,7 +1,6 @@
 //! Raster stages from Rays Lisp: a vertex stage is a map over vertex ids, a fragment stage a map over
 //! fragments. A stage is one Packed program of its Lisp entry with an output per leaf of its result
 //! record, printed by Emit's instruction printer in a raster placement (`emit::stage_body`).
-//! Port of lib/flow_shader/raster.ml.
 use crate::emit::{self, Raster};
 use crate::lisp_stage::{self, compile, fail, is_buffer, Leaf, Stage as LStage};
 use crate::spirv::{self, Output};

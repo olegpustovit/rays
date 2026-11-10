@@ -1,13 +1,4 @@
-//! Port of lib/rays_pathtracer/rays_pathtracer.ml(i): the hardware ray-tracing path tracer on its Rays Lisp
-//! kernels (pathtrace.rays, emitted by flow_gpu).
-//!
-//! RDK meshes carry metallic-roughness materials and are lit by a procedural dome: a sky/ground gradient plus
-//! soft rectangular emitter panels, or by a baked `Rays.World` (`set_world`). Rendering is progressive: every
-//! `render` call adds `spp` samples per pixel into an accumulation buffer and refreshes the borrowed `image`;
-//! a camera change restarts accumulation.
-//!
-//! Rust notes: the tracer is a plain struct mutated through `&mut t`; OCaml optional arguments are an options
-//! struct (`create_options`) or `Option` parameters; `move` is `r#move`.
+//! Hardware tracing accumulates spp samples per render and refreshes a borrowed image; camera changes reset accumulation. RDK metallic/roughness materials use a procedural dome or baked World. Kernels are emitted from pathtrace.rays.
 use flow_syntax::symbol::Symbol;
 use crate::frame_data::{self, allocate_film, camera_fov, color_tuple, destroy_film, Film, gpu_err, put_u32};
 use crate::lisp_kernel;

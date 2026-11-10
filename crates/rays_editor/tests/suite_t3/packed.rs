@@ -1,6 +1,4 @@
-//! Port of lib/rays_editor/test/test_packed_pieces.ml. The `test_timeline_and_schedule` section is the
-//! assertions of `test_timeline::timeline_advances_pauses_stops_resets_and_seeks` and
-//! `test_schedule::*` in src/ (bundle A ported them from the same OCaml), so it is not repeated.
+//! Packed-piece tests reuse the owning timeline and schedule suites instead of duplicating their assertions.
 use super::support::*;
 use rays_math::vec3;
 use sop::context::{self as sctx, Options as ContextOptions};

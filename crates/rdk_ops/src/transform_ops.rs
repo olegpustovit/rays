@@ -1,8 +1,4 @@
-//! Transform composition, soft (falloff-weighted) transforms and distance-from-geometry weights.
-//!
-//! The OCaml entry points wrap their work in `Error.guard`: a failure has the guard's operation and
-//! code (`compose_transform` / `soft_transform` / `distance_from_geometry`) and the OCaml message,
-//! a cancellation has code `cancelled`.
+//! Transform composition, soft transforms and distance weights retain their operation-specific codes; cancellation stays cancelled.
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 
@@ -68,8 +64,6 @@ fn fail(message: String) -> error::T {
     error::new("Error.Fail", Code::InvalidParameter, message)
 }
 
-/// OCaml `%S`: a quoted string with OCaml escapes (non-ASCII bytes as decimal `\ddd`).
-pub(crate) use crate::attribute_ops::ocaml_quote;
 
 fn transform_rotation_matrix(order: TransformRotationOrder, angles: vec3::T) -> mat4::T {
     let x = mat4::rotation_x(angles.x);
@@ -350,12 +344,12 @@ fn point_float_output(
         Some(item) => match attribute::view::storage(&item)? {
             attribute::Storage::Float(values) => {
                 if values.len() as i64 != geometry::point_count(value) {
-                    Err(fail(format!("{operation}: point attribute {} length mismatch", ocaml_quote(name))))
+                    Err(fail(format!("{operation}: point attribute {} length mismatch", rdk_core::attribute::quote_bytes((name).as_ref()))))
                 } else {
                     Ok(values.to_vec())
                 }
             }
-            _ => Err(fail(format!("{operation}: point attribute {} must be float", ocaml_quote(name)))),
+            _ => Err(fail(format!("{operation}: point attribute {} must be float", rdk_core::attribute::quote_bytes((name).as_ref())))),
         },
     }
 }
@@ -364,13 +358,12 @@ fn valid_output_attribute_name(name: Option<&str>) -> bool {
     match name {
         None => true,
         Some(name) => {
-            let trimmed = name.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c'));
+            let trimmed = name.trim();
             !trimmed.is_empty() && trimmed != "P"
         }
     }
 }
 
-use rdk_core::support::ocaml_trim_is_empty as blank;
 
 pub struct DistanceFromGeometryParams {
     pub cancel: Option<Arc<cancel::T>>,
@@ -602,19 +595,19 @@ fn soft_attribute_weights(
     name: &str,
     value: &geometry::T,
 ) -> Result<Vec<f64>, error::T> {
-    if blank(name) {
+    if (name).trim().is_empty() {
         return Err(fail("Rdk.Transform_ops.soft_transform: empty distance attribute name".to_owned()));
     }
     let Some(item) = geometry::find_attribute(attribute::Owner::Point, name, value) else {
         return Err(fail(format!(
             "Rdk.Transform_ops.soft_transform: missing point distance attribute {}",
-            ocaml_quote(name)
+            rdk_core::attribute::quote_bytes((name).as_ref())
         )));
     };
     let attribute::Storage::Float(values) = attribute::view::storage(&item)? else {
         return Err(fail(format!(
             "Rdk.Transform_ops.soft_transform: point distance attribute {} must be float",
-            ocaml_quote(name)
+            rdk_core::attribute::quote_bytes((name).as_ref())
         )));
     };
     let count = values.len() as i64;
@@ -642,7 +635,7 @@ fn soft_attribute_weights(
     } else {
         Err(fail(format!(
             "Rdk.Transform_ops.soft_transform: distance attribute {} element {invalid} is non-finite",
-            ocaml_quote(name)
+            rdk_core::attribute::quote_bytes((name).as_ref())
         )))
     }
 }
@@ -675,7 +668,7 @@ fn run_soft_transform(
         return Err(fail(format!("{operation}: matrix must be finite")));
     }
     if let Some(name) = params.falloff_attribute.as_deref() {
-        if blank(name) {
+        if (name).trim().is_empty() {
             return Err(fail(format!("{operation}: empty falloff attribute name")));
         }
     }

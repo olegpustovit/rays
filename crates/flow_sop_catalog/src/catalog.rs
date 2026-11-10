@@ -1,5 +1,5 @@
 // b0: warm incremental smoke (shared target/, dev profile)
-//! Port of lib/flow_sop/catalog.ml: adapt native factories and embedded Lisp declarations to the
+//! adapt native factories and embedded Lisp declarations to the
 //! context-generic Flow checker/printer descriptor, and check workspaces with the embedded node
 //! library in scope. The library is `crates/flow_sop/nodes/*.rays`, read in place with `include_str!`
 //! and sorted by file name (as `gen/embed_forms.ml`); each form's id range is fixed by its place in
@@ -517,7 +517,7 @@ fn is_embedded(supplied: &[Syntax]) -> bool {
 type PreludeKey = (bool, Catalog, Vec<i64>);
 
 thread_local! {
-    // ponytail: per-thread cache of eight preludes, most recent first (OCaml kept one global list).
+    // ponytail: cache the eight newest prelude shapes per thread; share immutable checked shapes only if profiles justify synchronization.
     static PRELUDES: RefCell<Vec<(PreludeKey, Rc<(Catalog, Prelude)>)>> = const { RefCell::new(Vec::new()) };
     static PRELUDE_CHECKS: Cell<usize> = const { Cell::new(0) };
 }
@@ -569,7 +569,6 @@ fn prelude_cached(
     value
 }
 
-/// Introspection for tests (the OCaml `Catalog.Private`).
 pub mod private {
     use super::*;
 

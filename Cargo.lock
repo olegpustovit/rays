@@ -24,7 +24,6 @@ version = "0.1.0"
 name = "editor_core"
 version = "0.1.0"
 dependencies = [
- "cfmt",
  "flow_syntax",
  "input",
  "ogpu_mock",
@@ -134,7 +133,6 @@ dependencies = [
 name = "flow_ir"
 version = "0.1.0"
 dependencies = [
- "cfmt",
  "flow_check",
  "flow_eval",
  "flow_graph",
@@ -240,7 +238,6 @@ dependencies = [
 name = "flow_syntax"
 version = "0.1.0"
 dependencies = [
- "cfmt",
  "param",
  "rays_diagnostic",
  "rays_math",
@@ -344,9 +341,6 @@ version = "0.1.0"
 [[package]]
 name = "param"
 version = "0.1.0"
-dependencies = [
- "cfmt",
-]
 
 [[package]]
 name = "pxui"

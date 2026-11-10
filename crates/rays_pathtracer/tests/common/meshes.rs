@@ -1,7 +1,4 @@
-//! Mesh generators for the path tracer tests. The OCaml tests build their geometry with
-//! rdk_test_support (Box_generator, Uv_sphere) through Rdk_rays.Rays_mesh.to_trace_mesh, whose Rust
-//! twin has no test-support port yet: these produce the same shapes as triangle-ready Rays meshes with
-//! per-vertex normals (a box with flat faces, a UV sphere with smooth normals).
+//! Test meshes provide triangle-ready Rays geometry with flat box normals or smooth UV-sphere normals.
 #![allow(dead_code)]
 use rays::mesh::{self, view};
 use rays_math::{mat4, vec3};

@@ -34,10 +34,10 @@ pub fn print(form: &Syntax) -> Result<String, String> {
     lisp::print(std::slice::from_ref(form)).map(|(text, _)| text).map_err(|error| rays_diagnostic::to_string(&error))
 }
 
-/// OCaml's `float_of_string_opt` on a number form, finite only.
+/// Parse a finite float from a numeric form.
 pub fn num_of(form: &Syntax) -> Option<f64> {
     match &form.node {
-        Node::Num(n) => cfmt::parse_ocaml_float(form.name(*n)).filter(|v| v.is_finite()),
+        Node::Num(n) => (form.name(*n)).parse::<f64>().ok().filter(|v| v.is_finite()),
         _ => None,
     }
 }

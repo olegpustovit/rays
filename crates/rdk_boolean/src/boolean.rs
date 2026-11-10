@@ -1,4 +1,4 @@
-//! Port of lib/rdk/boolean/boolean.ml: exact treatment-aware polygon Boolean products.
+//! exact treatment-aware polygon Boolean products.
 use std::sync::Arc;
 
 use rdk_core::support;
@@ -33,11 +33,6 @@ fn fail_with(code: Code, message: &str) -> error::T {
 
 fn invalid_output(operation: &str, failure: &error::T) -> error::T {
     make(operation, Code::InvalidOutput, error::message(failure).to_owned())
-}
-
-/// OCaml `String.trim`.
-fn trimmed_empty(name: &str) -> bool {
-    name.trim_matches(|c| matches!(c, ' ' | '\x0c' | '\n' | '\r' | '\t')).is_empty()
 }
 
 fn has_duplicate(names: &[String]) -> bool {
@@ -96,7 +91,7 @@ pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T>
         return Err(fail_with(Code::InvalidParameter, "cleanup_max_batches must be positive"));
     }
     if let Some(name) = &params.piece_attribute {
-        if trimmed_empty(name) {
+        if (name).trim().is_empty() {
             return Err(fail_with(Code::InvalidParameter, "piece attribute name must not be empty"));
         }
     }
@@ -106,7 +101,7 @@ pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T>
         .cloned()
         .collect();
     let shatter = params.operation == Operation::Shatter;
-    if shatter && group_names.iter().any(|name| trimmed_empty(name)) {
+    if shatter && group_names.iter().any(|name| (name).trim().is_empty()) {
         return Err(fail_with(Code::InvalidParameter, "shatter group names must not be empty"));
     }
     if shatter && has_duplicate(&group_names) {
@@ -309,7 +304,6 @@ pub struct SeamParams {
     pub right: geometry::T,
 }
 
-/// The OCaml optional-argument defaults of `Boolean.seam`.
 pub fn default_seam_params(right: geometry::T) -> SeamParams {
     SeamParams {
         cancel: None,
@@ -343,7 +337,7 @@ pub fn seam(params: &SeamParams, left: &geometry::T) -> Result<geometry::T, erro
         }
         SeamOutput::CoincidentPatches => params.coincident_group.iter().cloned().collect(),
     };
-    if names.iter().any(|name| trimmed_empty(name)) {
+    if names.iter().any(|name| (name).trim().is_empty()) {
         return Err(fail_with(Code::InvalidParameter, "Boolean seam group names must not be empty"));
     }
     if has_duplicate(&names) {

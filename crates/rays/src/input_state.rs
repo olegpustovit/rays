@@ -3,8 +3,7 @@ use input::{Event, Key, MouseButton};
 use runtime::runtime_input as ri;
 use runtime::runtime_input_sdl3 as sdl;
 
-/// OCaml's polymorphic `compare` on `Input.key`: constant constructors (ArrowUp .. Delete) in
-/// declaration order first, then `KeyChar c`, then `Unknown n`.
+/// Key ordering uses constant constructors in declaration order, followed by KeyChar and Unknown payloads.
 fn key_rank(key: &Key) -> (i64, i64) {
     let index = match key {
         Key::ArrowUp => 0,
@@ -56,7 +55,7 @@ fn button_rank(button: &MouseButton) -> i64 {
 
 pub struct InputState {
     source: ri::RuntimeInput,
-    /// Sorted, distinct (OCaml's `Set`).
+    /// Sorted distinct keys.
     pressed_keys: Vec<Key>,
     pressed_buttons: Vec<MouseButton>,
     mouse: (f64, f64),

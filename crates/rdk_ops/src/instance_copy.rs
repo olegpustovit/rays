@@ -556,7 +556,7 @@ mod tests {
         assert!(same_positions_and_topology(&one, &four), "one/four-domain mismatch");
     }
 
-    /// Port of test_copy_to_points.ml: it builds the fixtures a Copy to Points run consumes and
+    /// it builds the fixtures a Copy to Points run consumes and
     /// asserts nothing on them; here the fixtures must still construct and merge.
     #[test]
     fn copy_to_points_fixtures_construct() {

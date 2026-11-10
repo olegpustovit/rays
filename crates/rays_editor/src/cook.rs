@@ -1,7 +1,6 @@
 //! The editor's cook: one geometry object's latest cook (its displayed SOP graph, the sketch's
 //! prepared value, and bounds in the object's own space), the async worker, the schedule, the probe
-//! footers and the framing jobs. Port of lib/rays_editor/cook.ml.
-#![allow(non_camel_case_types)]
+//! footers and the framing jobs. #![allow(non_camel_case_types)]
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
@@ -90,12 +89,12 @@ pub enum Raw {
     Framed(Option<bounds>),
 }
 
-/// Lazily computed bounds of a piece (OCaml `Lazy.force piece.bounds`).
+/// Compute a piece's bounds on first use.
 pub fn piece_bounds(piece: &piece) -> Option<bounds> {
     *piece.bounds.get_or_init(|| output_bounds(&piece.output).ok().flatten())
 }
 
-/// Lazily built ray index of a piece (OCaml `Lazy.force piece.surface`).
+/// Build a piece's ray index on first use.
 pub fn piece_surface(piece: &piece) -> Option<&gv::Surface> {
     piece
         .surface
@@ -118,11 +117,7 @@ struct Cache_entry {
     bytes: i64,
 }
 
-/// The prepared cache: at most 16 entries and 64 MiB, most recent first (OCaml
-/// `Lru.Make (Prepared_key)`, keyed by physical identity of the settings and the output).
-///
-/// ponytail: a plain MRU list on the initial domain, not registered with `Lru`'s memory retreat
-/// (the ledger entry `editor.prepared` charged nothing); a surface cannot be shared across threads.
+/// Prepared results use a 16-entry/64MiB MRU cache keyed by settings/output identity. ponytail: it remains an initial-thread list outside global Lru retreat; a surface cannot be shared between threads.
 struct Prepared_cache {
     entries: VecDeque<Cache_entry>,
     bytes: i64,
@@ -472,9 +467,7 @@ pub fn prepared_context(readers: i64, context: context::T, nodes: &[node::T]) ->
 }
 
 
-/// `objects` are the visible geometry objects as (id, network, display node); `frame_request` is
-/// (object, node) to frame. `live` and `input` are OCaml's optional arguments; `pump` serves the
-/// device while a fixed-step run waits (default: sleep 0.5 ms).
+/// Prepare visible geometry tuples and optional frame targets; live/input control the run and pump services owner work while fixed-step execution waits.
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     gpu: Option<&gpu::Config>,

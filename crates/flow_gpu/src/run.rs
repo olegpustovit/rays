@@ -1,12 +1,4 @@
-//! Port of lib/flow_gpu/run.ml: one runner per prepared kernel (its buffers, uniforms, status and
-//! the outputs it keeps), the buffer pool runners share, and the resident fold's device stages.
-//!
-//! Mutable OGPU handles and command submission stay on their creating thread. A holder's
-//! `Arc<Token>` carries its fate and an owning read-only native allocation handle: after owner
-//! settlement, any thread can perform the first conversion without an owner pump. Unsettled
-//! foreign reads still ask `service` to perform owner-only completion and status validation.
-//! Dropping the last token queues release (OCaml: `Gc.finalise`); materialisation releases its
-//! native readback lease as soon as real owned planes have been published.
+//! Runners own prepared kernel buffers, uniforms, status and retained outputs. Mutable submission stays on the creating thread. Output tokens carry an owning read-only allocation: settled readback may convert on any thread; unsettled reads ask the owner service to complete and validate. Dropping the last token queues release; publishing owned planes releases the readback lease.
 use crate::kernels;
 use crate::pipelines;
 use flow_ir::flow_ir::gpu;
@@ -385,7 +377,6 @@ fn reclaim(pool: &Pool, device: &Device) {
         all.retain(|(id, w)| w.strong_count() > 0 && held.contains_key(id));
         s.retired = all;
     }
-    // Rust drops dead holders at once, so the OCaml "ask for a collection" step has nothing to do.
     let over = {
         let s = pool.0.s.borrow();
         s.retired.iter().map(|(id, _)| s.held.get(id).map_or(0, |(_, c, _)| *c)).sum::<i64>() > retired_budget_for(device)
@@ -2819,7 +2810,7 @@ pub fn free_budget_bytes() -> i64 {
     free_budget
 }
 
-/// The same runner (physical equality in OCaml).
+/// Physical identity of a runner.
 pub fn same(a: &T, b: &T) -> bool {
     Rc::ptr_eq(&a.0, &b.0)
 }

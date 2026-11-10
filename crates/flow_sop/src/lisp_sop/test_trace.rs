@@ -1,7 +1,4 @@
-//! Port of the kernel half of lib/flow_sop/test_trace.ml (the host half lives in trace_scene.rs): a `.rays`
-//! kernel traces a lattice of rays at a quad; the packed kernel is bit-identical to the reference walker
-//! at 1 and 8 domains, its t and prim match a direct raycast, and one host query is made per ray.
-//! The real JavaScript region exporter refuses the native trace source with E_WEB_SOURCE.
+//! Native trace kernels match the reference walker at 1 and 8 domains; Web export reports E_WEB_SOURCE.
 use crate::{catalog, operators, trace_scene};
 use flow_check::catalog::Catalog;
 use flow_check::ray_host as host;

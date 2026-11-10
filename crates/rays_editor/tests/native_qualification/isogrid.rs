@@ -1,4 +1,4 @@
-//! Native IsoGrid viewport qualification, ported from test_isogrid_viewport.ml.
+//! Native IsoGrid viewport qualification.
 use flow_native::workspace_gpu as gpu;
 use flow_ir::flow_ir::gpu as ir_gpu;
 use rdk_core::{geometry as g, packed::float3, topology};

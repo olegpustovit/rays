@@ -1,6 +1,3 @@
-// Port of crates/metal/test_metal_{device_safe,device_queue_safe,device_library_safe,command_buffer_safe,
-// blit_safe,compute_pipeline_safe}.ml on the real Metal device. Each case runs in its own process
-// (rays-t passes --exact), as the OCaml suite does, since they count process-wide handles.
 use ogpu_metal::native as m;
 use ogpu_core::error::{self, Error, ErrorKind};
 use m::Format;
@@ -38,8 +35,7 @@ fn without_handles(name: &str, operation: &mut dyn FnMut()) {
 }
 const SOURCE_K: &str = "#include <metal_stdlib>\nusing namespace metal; kernel void k(uint i [[thread_position_in_grid]]) {}";
 
-// The OCaml wrong-domain cases are prevented at the Rust ownership boundary:
-// neither moving a handle nor sharing a reference may enter a foreign thread.
+// Non-Send native handles cannot be moved or shared across foreign threads in safe Rust.
 fn gpu_owner_only_handles() {
     trait AmbiguousIfSend<A> { fn check() {} }
     impl<T: ?Sized> AmbiguousIfSend<()> for T {}
@@ -394,7 +390,6 @@ fn gpu_sampler() {
 }
 
 
-// Port of lib/metal/test_metal_texture_safe.ml, one case per former section.
 fn full_region(width: usize, height: usize) -> TextureRegion { TextureRegion { x: 0, y: 0, z: 0, width, height, depth: 1 } }
 fn complete(commands: &CommandBuffer) {
     commands.commit().unwrap_or_else(|failure| die(failure));

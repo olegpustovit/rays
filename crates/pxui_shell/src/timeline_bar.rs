@@ -1,4 +1,3 @@
-//! Port of lib/pxui_shell/timeline_bar.ml.
 use crate::kit;
 use input::MouseButton;
 use pxui::theme;

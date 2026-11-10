@@ -1,8 +1,4 @@
-//! Deterministic point clustering and representative order.
-//!
-//! OCaml returns `(t, string) result` and lets `Cancel.Cancelled` escape; here both are an
-//! `error::T`: a plain failure has code `invalid_parameter` and the OCaml message, a cancellation
-//! has code `cancelled`.
+//! Point clustering returns invalid_parameter failures and preserves cancelled errors.
 use rdk_core::support::DisjointSet;
 use rdk_core::{cancel, error, geometry, group, packed};
 use rdk_core::error::Code;

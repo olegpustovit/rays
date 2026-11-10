@@ -1,7 +1,4 @@
-//! Smoke test of the whole editor: create an `Editor` on small workspaces, run a few frames
-//! windowless (SDL's dummy video driver, the Vulkan device of the other native targets) and check
-//! that nothing errs and the frame has a picture. The OCaml suite (crates/rays_editor/test) is ported
-//! on top of this API; see docs/history/rays_editor_plan.md, "Editor API for tests".
+//! Smoke-test native editor creation, a few frames, typed errors and a nonempty rendered picture.
 #[path = "../../rays/tests/common/mod.rs"]
 mod common;
 

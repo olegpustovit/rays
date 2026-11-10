@@ -46,7 +46,7 @@
          c (at3 p ic)
          d (at3 p id)
          m (max (max (magnitude a) (magnitude b)) (max (magnitude c) (magnitude d)))
-         epsilon (+ (* (* m m) 0.000001) 1e-10)
+         epsilon (+ (* (* m m) 1e-6) 1e-10)
          normal (+ (+ (+ (newell a b) (newell b c)) (newell c d)) (newell d a))
          ax (abs normal.x)
          ay (abs normal.y)

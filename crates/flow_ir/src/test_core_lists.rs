@@ -1,4 +1,3 @@
-// Port of lib/flow_ir/test_core_lists.ml.
 use crate::core_ir as C;
 use crate::core_lower;
 use crate::flow_ir::executor;

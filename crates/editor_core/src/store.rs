@@ -1,4 +1,4 @@
-//! Port of lib/editor_core/store.ml: atomic file writes and the s-expression state stored beside
+//! atomic file writes and the s-expression state stored beside
 //! documents (a sketch's or the editor's saved settings; viewport camera forms live in rays_editor).
 
 use input::Platform;
@@ -90,7 +90,7 @@ pub fn user_folder(platform: Platform, pref: Option<&str>, home: &str) -> String
     }
 }
 
-/// OCaml's `Filename.concat`: a separator only when the directory does not end in one.
+/// Join a filename with a directory using one platform separator.
 pub fn filename_concat(dir: &str, file: &str) -> String {
     let (sep, ends) = if cfg!(windows) {
         ("\\", dir.is_empty() || dir.ends_with('/') || dir.ends_with('\\'))

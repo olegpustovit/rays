@@ -3,10 +3,7 @@ use rays_diagnostic::{Diagnostic, Severity};
 use rays_math::text_array::TextArray;
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
-/// A function / residual value: its id and the evaluation (arena) it lives in. OCaml's value carries its
-/// record, so it can never resolve in another evaluation; the home does the same here. Equality, hashing
-/// and printing are by id alone (the OCaml key of a residual is its rid), so ids minted deterministically
-/// per plan stay cache keys across evaluations.
+/// Function/residual IDs carry their home evaluation arena so resolution never enters a different evaluation. Equality, hashing and display use the deterministic ID alone, preserving plan cache keys across evaluations.
 #[derive(Clone, Copy)]
 pub struct FnId(pub i64, pub i64);
 #[derive(Clone, Copy)]
@@ -251,26 +248,6 @@ pub fn int_of(value: &Value) -> Result<i64, Diagnostic> {
     match value { Value::Int(n) => Ok(*n), _ => to_int("int", round(num(value)?)) }
 }
 
-fn trim_decimal(mut value: String) -> String {
-    if value.contains('.') {
-        while value.ends_with('0') { value.pop(); }
-        if value.ends_with('.') { value.pop(); }
-    }
-    value
-}
-pub fn general(value: f64) -> String { cfmt::g(value, 6) }
-fn fixed(digits: usize, value: f64) -> String { format!("{value:.digits$}") }
-pub fn fmt4(value: f64) -> String {
-    if value.is_nan() { return "NaN".into(); }
-    if !value.is_finite() { return if value > 0.0 { "Infinity".into() } else { "-Infinity".into() }; }
-    let absolute = value.abs();
-    let full = fixed(40, absolute);
-    let tail = full.split_once('.').map_or("", |(_, fraction)| fraction);
-    let tie = tail.as_bytes().get(4) == Some(&b'5') && tail.get(5..).is_some_and(|rest| rest.bytes().all(|byte| byte == b'0'));
-    let rendered = trim_decimal(fixed(4, if tie { absolute + 1e-6 } else { absolute }));
-    if value < 0.0 && rendered != "0" { format!("-{rendered}") } else { rendered }
-}
-
 pub fn ty_of(value: &Value) -> Ty {
     match value {
         Value::Int(_) => Ty::Int,
@@ -326,12 +303,12 @@ pub fn coerce_to(want: &Ty, value: &Value) -> Result<Value, Diagnostic> {
 pub fn show_with(conc: &dyn Fn(&Value) -> Value, value: &Value) -> Vec<u8> {
     match conc(value) {
         Value::Int(n) => n.to_string().into_bytes(),
-        Value::Float(n) => fmt4(n).into_bytes(),
+        Value::Float(n) => param::float_text(n).into_bytes(),
         Value::Bool(value) => if value { b"true".to_vec() } else { b"false".to_vec() },
         Value::Text(text) => text.to_vec(),
-        Value::Vec2(x, y) => format!("[{} {}]", fmt4(x), fmt4(y)).into_bytes(),
-        Value::Vec3(x, y, z) => format!("[{} {} {}]", fmt4(x), fmt4(y), fmt4(z)).into_bytes(),
-        Value::Vec4(x, y, z, w) => format!("[{} {} {} {}]", fmt4(x), fmt4(y), fmt4(z), fmt4(w)).into_bytes(),
+        Value::Vec2(x, y) => format!("[{} {}]", param::float_text(x), param::float_text(y)).into_bytes(),
+        Value::Vec3(x, y, z) => format!("[{} {} {}]", param::float_text(x), param::float_text(y), param::float_text(z)).into_bytes(),
+        Value::Vec4(x, y, z, w) => format!("[{} {} {} {}]", param::float_text(x), param::float_text(y), param::float_text(z), param::float_text(w)).into_bytes(),
         Value::List(values) => {
             let mut output = vec![b'['];
             for (index, value) in values.iter().enumerate() {
@@ -942,8 +919,8 @@ mod tests {
         let source = source_value("texts", Ty::Array(Box::new(Ty::Text)), vec![("values".into(), array.clone())].into());
         assert_eq!(ty_of(&source), Ty::Array(Box::new(Ty::Text)));
         assert_ne!(key_of(&|id| id.0, &source), key_of(&|id| id.0, &array));
-        assert_eq!(general(1e-5), "1e-05");
-        assert_eq!(fmt4(1.23456), "1.2346");
+        assert_eq!(param::float_text(1e-5), "0.00001");
+        assert_eq!(param::float_text(1.23456), "1.23456");
     }
 
     #[test]

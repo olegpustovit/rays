@@ -1,5 +1,4 @@
-//! Shared helpers of suite t3: ports of test_editor_input.ml's `frame`, ws_fixture.ml, the
-//! `E3.create ... Editor_prepare.*` calls and the crash-dump readers the OCaml tests use.
+//! Shared editor frame, workspace and crash-dump test helpers.
 #![allow(dead_code)]
 use std::sync::Arc;
 
@@ -53,7 +52,7 @@ pub fn box_workspace() -> wd::T {
     load("(workspace box (graph geo :context sop (sop/box)))")
 }
 
-/// The options every OCaml test passes: Apple platform, 11-point text, awaited cook.
+/// Test defaults: Apple platform, 11-point text, awaited cook.
 pub fn options() -> editor::Create {
     editor::Create { platform: Some(Platform::Apple), ui_text_size: Some(11), await_: Some(true), domains: Some(1), ..Default::default() }
 }

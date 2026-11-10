@@ -1,6 +1,4 @@
-//! The embedded runtime (OCaml `Web_runtime` / `Web_shaders`): crates/web_export/runtime/*.js included
-//! in place, plus the WGSL that `print_shader web` prints at build time (compaction, dispatch,
-//! and the presenter's marks), printed here from the same `.rays` sources.
+//! Embed runtime JavaScript directly and print shared WGSL helper sources once from their .rays inputs.
 use flow_syntax::Diagnostic;
 use flow_web::wgsl;
 use std::sync::OnceLock;
@@ -46,7 +44,7 @@ fn marks() -> Result<String, Diagnostic> {
     wgsl::raster(&pipelines)
 }
 
-/// Printed once per process (the OCaml build prints them once).
+/// Print once per process.
 pub fn assets() -> Result<&'static Assets, Diagnostic> {
     static CELL: OnceLock<Result<Assets, Diagnostic>> = OnceLock::new();
     CELL.get_or_init(|| {
@@ -60,7 +58,7 @@ pub fn assets() -> Result<&'static Assets, Diagnostic> {
     .map_err(|d| d.clone())
 }
 
-/// The runtime files by name (sorted as the OCaml table is).
+/// Return runtime files in deterministic name order.
 pub fn files(assets: &Assets) -> Vec<(String, Vec<u8>)> {
     let mut v: Vec<(&str, &str)> = vec![
         ("gpu.js", GPU),

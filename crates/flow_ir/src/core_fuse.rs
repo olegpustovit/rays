@@ -1,8 +1,4 @@
-//! Port of lib/flow_ir/core_fuse.ml: fusion on regions. A map-like region absorbs the Collect + Zip
-//! regions that feed it when their counts or origins agree, sharing equal instructions, within the
-//! register limit. Declining leaves the region unfused; it never fails.
-//!
-//! OCaml physical equality (`==`) on terms and values is structural equality here.
+//! Map regions absorb compatible Collect/Zip producers while counts/origins and register limits permit. Declining leaves the program unfused. Term/value comparisons are structural.
 use crate::core_ir::region::{self as R, CountSource, Instruction as I, Iteration, RegionResult};
 use crate::core_ir::RegionT;
 use crate::core_region::{count_of, finish_loops, instruction_key, lower};
@@ -15,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 
-/// OCaml `Core_region.Unsupported`: the register limit declined, or a producer cannot be spliced.
+/// Fusion declines when the register limit is reached or a producer cannot be spliced.
 #[derive(Debug)]
 pub struct Unsupported;
 type Res<X> = Result<X, Unsupported>;

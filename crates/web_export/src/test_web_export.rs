@@ -1,6 +1,4 @@
-//! Byte-for-byte Rust export goldens, initially captured from the retired OCaml exporter.
-//! Intentional shared-hash/RNG changes update their fixtures with numeric checks retained.
-//! A file over 1 MiB is held as its `.md5` checksum.
+//! Owned export goldens include intentional shared-hash/RNG updates and numeric verification; files above 1MiB use MD5 integrity checks.
 use rays_math::hash::md5_hex;
 use crate::{web_export, web_runtime};
 use std::path::PathBuf;
@@ -63,7 +61,7 @@ fn check(sketch: &str) {
 }
 
 
-/// The embedded WGSL the OCaml build prints (print_shader web) is reproduced exactly.
+/// Embedded WGSL shaders match their owned printer fixtures.
 #[test]
 fn build_printed_wgsl() {
     let dir = root().join("fixtures/web_export/_runtime");

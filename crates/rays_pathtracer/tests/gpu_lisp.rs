@@ -1,11 +1,4 @@
-//! Port of lib/rays_pathtracer/test_lisp.ml: the tracer's kernels (pathtrace.rays) on the GPU against the CPU
-//! walker, the oracle, on a small scene (a plane, one material with round corners, a rect light, no lens) lit
-//! by the sky/ground environment with a dome panel or by a baked World (camera and lighting maps, CDF, sun, a
-//! World rect light). Both accumulate the same frames with the same PCG draws; the RGBA8 films are compared
-//! as RMSE of (byte difference / 255). Then the trace kernel's static shape (and, on Metal, its register
-//! pressure). The dome scene also runs as a one-object scene_mesh (an instance structure), as the editor
-//! traces it. Cases: `library`, `cache`, `dome`, `dome_instanced`, `world`. PT_W / PT_H / PT_FRAMES override
-//! the 16 x 12 x 2 defaults (OCaml: 4 frames; the oracle evaluates every frame) as in OCaml; `PT_BENCH` (a GPU-time print) is not ported.
+//! GPU Lisp kernels compare against CPU reference films on small deterministic dome/World scenes. PT_W/PT_H/PT_FRAMES control the budgeted dimensions/frame count; native kernels retain register-pressure qualification.
 use crate::common;
 use common::pt::{self, get, rgb};
 use flow_check::ray_host::{self, Hit};

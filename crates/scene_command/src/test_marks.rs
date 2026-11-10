@@ -1,4 +1,3 @@
-// Port of lib/scene_command/test_marks.ml, assertion for assertion.
 use crate::marks::{self, Buffer, ColorAttr, Entry, Kind, PairAttr, ScalarAttr};
 
 fn ok(table: &[Entry]) {
@@ -9,7 +8,7 @@ fn bad(table: &[Entry]) {
     assert!(marks::validate(table).is_err());
 }
 
-// OCaml `buf ?(id = 1) ?(count = 2) width`, typed per attribute kind.
+// Construct typed attribute-buffer fixtures with explicit ID/count/width.
 fn buf(id: i64, count: i64, width: i64) -> Buffer {
     Buffer { id, count, width }
 }

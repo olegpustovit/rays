@@ -1,8 +1,4 @@
-//! Interpolate source attributes onto destination elements (primitive/UVW or weighted drivers).
-//!
-//! The OCaml version mutates shared output planes from parallel ranges. Here every range works on
-//! per-destination `Cell`s gathered from the job outputs and the cells are scattered back in range
-//! order, which is byte-identical to the sequential path for any domain count.
+//! Attribute interpolation uses per-destination cells and joins range outputs deterministically, yielding identical sequential/parallel payload bytes.
 use std::collections::HashSet;
 use std::sync::Arc;
 use rays_math::text_array::TextArray;
@@ -12,7 +8,7 @@ use rdk_core::{
 };
 use rdk_core::error::Code;
 
-use crate::attribute_ops::{make_error, ocaml_quote};
+use crate::attribute_ops::{make_error};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Spec {
@@ -87,17 +83,16 @@ pub struct WeightedParams {
 
 const OPERATION: &str = "attribute_interpolate";
 
-/// An `Error msg` of the OCaml API (the caller codes it `invalid_interpolate`).
+/// Interpolation storage failures are recoded as invalid_interpolate.
 fn fail(message: &str) -> error::T {
     make_error(OPERATION, Code::InvalidInterpolate, message)
 }
 
-/// An `invalid_arg msg` of the OCaml API (the caller codes it `invalid_parameter`).
+/// Interpolation parameter failures are recoded as invalid_parameter.
 fn invalid(message: &str) -> error::T {
     make_error(OPERATION, Code::InvalidParameter, message)
 }
 
-use rdk_core::support::ocaml_trim_is_empty as is_blank;
 
 enum Data {
     F(Vec<Arc<Vec<f64>>>),
@@ -203,7 +198,7 @@ fn create_group_jobs(
         if !seen.insert(group::name(source).to_owned()) {
             return Err(fail(&format!(
                 "Attribute Interpolate: duplicate target group {}",
-                ocaml_quote(group::name(source))
+                rdk_core::attribute::quote_bytes((group::name(source)).as_ref())
             )));
         }
         let existing = geometry::find_group(target_group_owner, group::name(source), target);
@@ -310,7 +305,7 @@ fn source_data(
         None => Err(fail(&format!(
             "Attribute Interpolate: source is missing {} attribute {}",
             owner_name(source_owner),
-            ocaml_quote(source_name)
+            rdk_core::attribute::quote_bytes((source_name).as_ref())
         ))),
         Some(found) => data_of(attribute::view::storage(&found)?),
     }
@@ -336,7 +331,7 @@ fn create_job(
     target: &geometry::T,
     spec: &Spec,
 ) -> Result<Job, error::T> {
-    if is_blank(&spec.source_name) || is_blank(&spec.target_name) {
+    if (&spec.source_name).trim().is_empty() || (&spec.target_name).trim().is_empty() {
         return Err(fail("Attribute Interpolate: attribute names must not be empty"));
     }
     if spec.source_name == "P" && spec.source_owner != attribute::Owner::Point {
@@ -351,7 +346,7 @@ fn create_job(
         if !same_kind(&source_value, existing) {
             return Err(fail(&format!(
                 "Attribute Interpolate: target attribute {} has incompatible storage",
-                ocaml_quote(&spec.target_name)
+                rdk_core::attribute::quote_bytes((&spec.target_name).as_ref())
             )));
         }
     }
@@ -989,7 +984,7 @@ fn compute_primitive_weights(
     if computed.computed_owner == WeightedSource::Primitives {
         return Err(fail("Attribute Interpolate: computed weights support point or vertex numbers"));
     }
-    if is_blank(numbers_name) || is_blank(weights_name) {
+    if (numbers_name).trim().is_empty() || (weights_name).trim().is_empty() {
         return Err(fail("Attribute Interpolate: computed attribute names must not be empty"));
     }
     if numbers_name == weights_name {
@@ -1158,7 +1153,7 @@ fn collect_jobs(
         if !seen.insert(spec.target_name.clone()) {
             return Err(fail(&format!(
                 "Attribute Interpolate: duplicate target attribute {}",
-                ocaml_quote(&spec.target_name)
+                rdk_core::attribute::quote_bytes((&spec.target_name).as_ref())
             )));
         }
         jobs.push(create_job(target_owner, source, target, spec)?);
@@ -1188,7 +1183,7 @@ pub(crate) fn interpolate_primitive(params: &PrimitiveParams) -> Result<geometry
     if !blend.is_finite() || !(0.0..=1.0).contains(&blend) {
         return Err(fail("Attribute Interpolate: blend must be finite and in [0,1]"));
     }
-    if is_blank(&primitive_attribute) || is_blank(&uvw_attribute) {
+    if (&primitive_attribute).trim().is_empty() || (&uvw_attribute).trim().is_empty() {
         return Err(fail("Attribute Interpolate: driver attribute names must not be empty"));
     }
     let primitive_driver = geometry::find_attribute(target_owner, &primitive_attribute, target);
@@ -1196,13 +1191,13 @@ pub(crate) fn interpolate_primitive(params: &PrimitiveParams) -> Result<geometry
     let Some(primitive_driver) = primitive_driver else {
         return Err(fail(&format!(
             "Attribute Interpolate: missing destination integer attribute {}",
-            ocaml_quote(&primitive_attribute)
+            rdk_core::attribute::quote_bytes((&primitive_attribute).as_ref())
         )));
     };
     let Some(uvw_driver) = uvw_driver else {
         return Err(fail(&format!(
             "Attribute Interpolate: missing destination float3 attribute {}",
-            ocaml_quote(&uvw_attribute)
+            rdk_core::attribute::quote_bytes((&uvw_attribute).as_ref())
         )));
     };
     let (primitive_numbers, uvw) = match (attribute::view::storage(&primitive_driver)?, attribute::view::storage(&uvw_driver)?) {
@@ -1468,7 +1463,7 @@ pub(crate) fn interpolate_weighted(params: &WeightedParams) -> Result<geometry::
     if !threshold.is_finite() || threshold <= 0.0 {
         return Err(fail("Attribute Interpolate: threshold must be finite and positive"));
     }
-    if is_blank(&numbers_attribute) || is_blank(&weights_attribute) {
+    if (&numbers_attribute).trim().is_empty() || (&weights_attribute).trim().is_empty() {
         return Err(fail("Attribute Interpolate: driver attribute names must not be empty"));
     }
     let numbers_driver = geometry::find_attribute(target_owner, &numbers_attribute, target);
@@ -1476,13 +1471,13 @@ pub(crate) fn interpolate_weighted(params: &WeightedParams) -> Result<geometry::
     let Some(numbers_driver) = numbers_driver else {
         return Err(fail(&format!(
             "Attribute Interpolate: missing destination integer-array attribute {}",
-            ocaml_quote(&numbers_attribute)
+            rdk_core::attribute::quote_bytes((&numbers_attribute).as_ref())
         )));
     };
     let Some(weights_driver) = weights_driver else {
         return Err(fail(&format!(
             "Attribute Interpolate: missing destination float-array attribute {}",
-            ocaml_quote(&weights_attribute)
+            rdk_core::attribute::quote_bytes((&weights_attribute).as_ref())
         )));
     };
     let (numbers, weights) = match (attribute::view::storage(&numbers_driver)?, attribute::view::storage(&weights_driver)?) {
@@ -1500,7 +1495,7 @@ pub(crate) fn interpolate_weighted(params: &WeightedParams) -> Result<geometry::
             "Attribute Interpolate: {}-number mode cannot interpolate {} group {}",
             weighted_owner_name(weighted_owner),
             owner_name(spec.group_source_owner),
-            ocaml_quote(group::name(&spec.group_source))
+            rdk_core::attribute::quote_bytes((group::name(&spec.group_source)).as_ref())
         )));
     }
     let mut group_jobs = create_group_jobs(target_owner, target, &params.groups)?;
@@ -1512,7 +1507,7 @@ pub(crate) fn interpolate_weighted(params: &WeightedParams) -> Result<geometry::
                 "Attribute Interpolate: {}-number mode cannot interpolate {} attribute {}",
                 weighted_owner_name(weighted_owner),
                 owner_name(spec.source_owner),
-                ocaml_quote(&spec.source_name)
+                rdk_core::attribute::quote_bytes((&spec.source_name).as_ref())
             )))
         }
     })?;

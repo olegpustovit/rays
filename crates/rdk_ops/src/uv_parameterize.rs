@@ -1,13 +1,8 @@
-//! Mean-value UV parameterization of triangle meshes (flatten to circles, or relax given UVs).
-//!
-//! OCaml returns `(Geometry.t, string) result` and lets `Cancel.Cancelled` escape; here a failure is
-//! an `error::T` with operation `Uv_parameterize.solve`, code `invalid_parameter` and the OCaml
-//! message, and a cancellation keeps code `cancelled`.
+//! UV solve failures use operation Uv_parameterize.solve and invalid_parameter; cancellation keeps cancelled.
 use rdk_core::support::DisjointSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::transform_ops::ocaml_quote;
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology, topology_index,
 };
@@ -251,7 +246,7 @@ fn solve_checked(
     let grain = support::resolve(params.grain).map_err(|_| fail("grain must be positive"))?;
     let name = params.name.as_str();
     let (iterations, tolerance, uv_tolerance) = (params.iterations, params.tolerance, params.uv_tolerance);
-    if name.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c')).is_empty() {
+    if name.trim().is_empty() {
         return Err(fail("UV attribute name must not be empty"));
     }
     if iterations <= 0 {
@@ -470,7 +465,7 @@ fn solve_checked(
             None => {
                 return Err(fail(&format!(
                     "UV Relax requires vertex float2 attribute {}",
-                    ocaml_quote(name)
+                    rdk_core::attribute::quote_bytes((name).as_ref())
                 )))
             }
             Some(item) => match attribute::view::storage(&item)? {
@@ -478,7 +473,7 @@ fn solve_checked(
                 _ => {
                     return Err(fail(&format!(
                         "UV Relax vertex attribute {} must be float2",
-                        ocaml_quote(name)
+                        rdk_core::attribute::quote_bytes((name).as_ref())
                     )))
                 }
             },

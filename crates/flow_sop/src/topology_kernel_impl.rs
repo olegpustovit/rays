@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/topology_kernel_impl.ml: topology data sources over cooked geometry, the
+//! topology data sources over cooked geometry, the
 //! mesh constructor (host and device-resident), `sop/remap` and `sop/concat`.
 use flow_syntax::symbol::Symbol;
 use flow_ir::flow_ir::gpu::{self, Integers, Planes, Residency};
@@ -36,13 +36,6 @@ fn is_text(value: Option<&Value>, text: &str) -> bool {
 }
 fn ints(values: Vec<i64>) -> Value {
     Value::Int_array(Arc::new(values))
-}
-/// OCaml `String.trim`: ' ', '\012', '\n', '\r', '\t'.
-fn trim(bytes: &[u8]) -> String {
-    let blank = |b: &u8| matches!(*b, b' ' | 0x0c | b'\n' | b'\r' | b'\t');
-    let start = bytes.iter().position(|b| !blank(b)).unwrap_or(bytes.len());
-    let end = bytes.iter().rposition(|b| !blank(b)).map_or(start, |i| i + 1);
-    String::from_utf8_lossy(&bytes[start..end]).into_owned()
 }
 fn admit(bytes: i64) -> Result<(), Diagnostic> {
     mem::admit_bytes(mem::Pool::Host, bytes).map_err(|r| value::fail("E_ARRAY_MEMORY", &r.to_string()))
@@ -359,8 +352,7 @@ pub fn mesh_points(points: &Value) -> Result<(i64, Positions), Diagnostic> {
             let find = |name: &str| fields.iter().find(|(key, _)| key == name).map(|(_, v)| v);
             match (find("x"), find("y"), find("z")) {
                 (Some(Value::Floats(1, x)), Some(Value::Floats(1, y)), Some(Value::Floats(1, z))) => {
-                    // Validation is per field in order: the first failing field's error. The
-                    // OCaml parallel path above 65536 elements reports the same error.
+                    // Validate fields in order; the first failing field wins for every domain count.
                     for (_, field) in fields {
                         value::validate(field)?;
                     }
@@ -416,7 +408,7 @@ pub fn mesh_with<'a>(args: &dyn Fn(&str) -> Option<&'a Value>) -> Result<Geometr
     }
 }
 
-/// The unread resident points of a mesh (OCaml `Resident (value, count)`).
+/// Resident mesh points retain their value and count until read.
 pub struct ResidentPoints {
     pub value: Value,
     pub count: i64,
@@ -495,7 +487,7 @@ fn host_topology(point_count: i64, vertices: &[i64], offsets: &[i64], kinds: &[i
 enum StaticKey {
     Floats(Weak<Vec<f64>>),
     Ints(Weak<Vec<i64>>),
-    // a lazy residual is the physical value OCaml compares with ==: stable across frames, so its id and home arena
+    // Lazy residual cache keys include their stable ID and home arena.
     Residual(i64, i64),
 }
 struct StaticTopology {
@@ -1040,7 +1032,7 @@ pub fn concat_with<'a>(cancel: Option<Arc<cancel::T>>, grain: i64, sources: &[Ge
     let text = |name: &str| -> Result<String, Diagnostic> {
         match args(name) {
             None => Ok(String::new()),
-            Some(Value::Text(bytes)) => Ok(trim(bytes)),
+            Some(Value::Text(bytes)) => Ok(String::from_utf8_lossy(bytes).trim().to_owned()),
             Some(_) => fail("E_CONCAT_TYPE", &format!("Concat {name} must be text.")),
         }
     };

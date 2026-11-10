@@ -1,4 +1,4 @@
-//! Port of lib/editor_document/settings.ml: sketch-owned settings, a typed `Param` record stored
+//! sketch-owned settings, a typed `Param` record stored
 //! with its schema so the document stays one immutable value. A record is the schema's `Value`
 //! slice, positional.
 use param::{Effects, FieldView, Schema, Value};
@@ -14,7 +14,7 @@ pub fn make(schema: &Arc<Schema>, values: Vec<Value>) -> T {
     T { schema: schema.clone(), values: Arc::new(values) }
 }
 
-/// One shared value, as in OCaml: `same_values (none ()) (none ())` holds.
+/// The empty settings record is shared: two none() calls have the same stored values.
 pub fn none() -> T {
     static NONE: std::sync::OnceLock<T> = std::sync::OnceLock::new();
     NONE.get_or_init(|| make(&Arc::new(param::schema("none".to_owned(), Vec::new()).expect("valid schema")), Vec::new())).clone()
@@ -33,8 +33,7 @@ pub fn defaults(settings: &T) -> T {
     make(&settings.schema, settings.schema.default().to_vec())
 }
 
-/// The stored record read through `schema`, matching fields by name. `Err` when `schema` does not
-/// describe it (OCaml raises `Invalid_argument`).
+/// Read the stored record through its schema by field name; return Err for an incompatible schema.
 pub fn get(schema: &Schema, settings: &T) -> Result<Vec<Value>, String> {
     let values: Vec<(String, Value)> =
         fields(settings).into_iter().map(|field| (field.name, field.current)).collect();
@@ -51,7 +50,7 @@ pub fn apply(settings: &T, changes: &[(String, Value)]) -> Result<(T, Effects), 
         .map(|(values, effects)| (T { schema: settings.schema.clone(), values: Arc::new(values) }, effects))
 }
 
-/// Physical identity of the stored record (OCaml `==` on `values`).
+/// Physical identity of the stored value record.
 pub fn same_values(a: &T, b: &T) -> bool {
     Arc::ptr_eq(&a.values, &b.values)
 }

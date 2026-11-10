@@ -1,4 +1,3 @@
-//! Port of lib/rays_editor/test/test_editor_commands.ml.
 use super::t3c::*;
 use editor_core::command;
 use editor_core::guide_context::GuideContext as Ctx;

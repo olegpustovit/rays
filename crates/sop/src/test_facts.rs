@@ -1,7 +1,4 @@
-//! Port of lib/sop/test_facts.ml (the parts that do not drive Lisp nodes): component cache facts,
-//! refusals, consumer facts, payload budget and shared plane charge.
-//! Not ported: test_reuse, test_parameter_reads, test_normals_cache_refresh (they cook Lisp
-//! `sop/*` nodes) and test_chain_peak (measures the OCaml GC).
+//! Session fact tests cover cache component facts, consumer metadata, refusals, budgets and shared-plane attribution.
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
@@ -342,8 +339,7 @@ fn shared_plane_charge() {
     assert_eq!(mem::bytes(&owner), before, "closing left a slot's charge on the ledger");
 }
 
-/// OCaml `Session.node_result`: an exception in a node's cook is that node's error, not the end of
-/// the cook; the session cooks again afterwards.
+/// A cook panic fails that node; later session cooks remain valid.
 #[test]
 fn a_panicking_node_is_a_diagnostic_on_that_node() {
     let panicking = build::make_geometry(

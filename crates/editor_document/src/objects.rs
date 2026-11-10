@@ -1,4 +1,4 @@
-//! Port of lib/editor_document/objects.ml: the scene's objects as plain kinds (`scene/geometry`,
+//! the scene's objects as plain kinds (`scene/geometry`,
 //! `scene/camera`, `scene/light`, `scene/root`): typed schemas, and the reads and edits of a
 //! `kind_graph::T` of them. The input of an object is its parent.
 use crate::kind_graph::{self as g, chc, fl, int, kind_make, schema_of, tog, Rec};
@@ -410,7 +410,7 @@ pub mod light {
     }
 }
 
-/// The node's values read through `schema` (OCaml `read`); `None` when a value is refused.
+/// Read node values through the schema; return None when a value is refused.
 pub fn read(schema: &Schema, node: &g::Node) -> Option<Vec<Value>> {
     // values made over this very schema are already its record
     if let Some(values) = crate::settings::record_of(&node.values, schema) {

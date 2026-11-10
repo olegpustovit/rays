@@ -1,8 +1,4 @@
-//! What an editor reads of a cooked geometry: summaries, bounds, the sheet's columns, a wire mesh,
-//! picking and the probed-iteration tint. Pure over the geometry; no UI.
-//!
-//! Gaps against OCaml: `points_of_nothing` is a function (Rust has no such value); `tags` copies
-//! the tag array where OCaml borrowed it.
+//! Pure cooked-geometry summaries, bounds, tables, wire meshes, picking and iteration tint. Tag queries own copies of retained arrays.
 use rays::mesh;
 use rays_math::vec3;
 use rdk_core::attribute::{self, Owner, Storage};
@@ -125,7 +121,7 @@ fn cell(a: &attribute::T, row: i64, component: usize) -> String {
         Storage::Int(values) => values[at].to_string(),
         Storage::Text(values) => match std::str::from_utf8(&values[at]) {
             Ok(text) => text.to_owned(),
-            Err(_) => rdk_ops::attribute_ops::ocaml_quote(&values[at]),
+            Err(_) => rdk_core::attribute::quote_bytes((&values[at]).as_ref()),
         },
         Storage::IntArray(values) => packed::int_array::get(values, row).map(|v| ints(&v)).unwrap_or_default(),
         Storage::FloatArray(values) => packed::float_array::get(values, row).map(|v| floats(&v)).unwrap_or_default(),

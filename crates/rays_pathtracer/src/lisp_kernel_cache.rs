@@ -1,9 +1,4 @@
-//! The on-disk cache of lisp_kernel.ml (`cache_dir`, `cached`, `store`), split out of lisp_kernel.rs.
-//! A later process of the same executable skips the front end (the old handwritten kernel had none): each
-//! kernel's result is a file under `cache_dir` (the user cache directory; None disables it), named by the
-//! digest of the executable's identity, the kernel's text and the scene facts, holding a digest of its
-//! payload. A torn or unreadable entry is recompiled and rewritten; past `CACHE_FILES` the oldest are
-//! removed. OCaml marshals the value; this writes the fields by hand.
+//! Kernel disk caches key executable/text/scene identity and verify payload digests. Torn/unreadable entries recompile; files beyond CACHE_FILES evict oldest first.
 use crate::lisp_kernel::{self, FrontResult, PREVIEWS, T};
 use flow_ir::packed::host as phost;
 use flow_shader::emit;

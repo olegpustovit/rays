@@ -1,4 +1,4 @@
-//! Port of lib/sop/kernel.ml: a deferred per-element computation carried as a payload.
+//! a deferred per-element computation carried as a payload.
 use std::sync::Arc;
 
 use rays_diagnostic::Diagnostic;

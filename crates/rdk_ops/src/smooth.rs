@@ -1,4 +1,4 @@
-//! Port of lib/rdk/ops/mesh/smooth.ml: constrained, iterated Laplacian smoothing of points.
+//! constrained, iterated Laplacian smoothing of points.
 use std::sync::Arc;
 
 use rdk_core::attribute::Owner;

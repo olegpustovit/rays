@@ -1,11 +1,4 @@
-//! Port of lib/flow_web/wgsl.ml: WGSL compute kernels for packed regions, the web counterpart of
-//! `Flow_shader.Emit`, with the same refusals (`packed::gpu_refusals`), binding numbering and
-//! uniform layout. Nothing here is compiled by a WebGPU implementation in the test suite; the first
-//! real compile is the browser run.
-//!
-//! Rust shape notes: OCaml's `Diagnostic.Error` exception is a `Result<_, Diagnostic>`; the
-//! fast-kernel printer is a struct implementing `kernel_layout::Visit` (the loop callback
-//! re-enters the visitor), and records its first failure.
+//! WGSL printing preserves shared refusals, binding numbers and uniform layout. Fast-kernel visitors record their first failure; real WebGPU compilation is qualified by the browser path.
 use flow_ir::core_ir::region::{self, Instruction, LiveFloat, LiveInt, Stage as RStage};
 use flow_ir::kernel_layout::{self, PlanOptions, scope, Visit};
 use flow_ir::packed;

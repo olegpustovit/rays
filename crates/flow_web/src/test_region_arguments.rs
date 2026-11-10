@@ -1,4 +1,4 @@
-//! Port of lib/flow_web/test_region_arguments.ml: real Core Invoke arguments, exact output bytes,
+//! real Core Invoke arguments, exact output bytes,
 //! lazy captures, malformed composite leaves, and synchronous-preparation refusals under Node.
 use crate::js::{self, FrameOptions};
 use crate::kernel_table::json_string;

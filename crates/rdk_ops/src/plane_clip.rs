@@ -36,7 +36,7 @@ pub struct Params {
 }
 
 impl Params {
-    /// The defaults of the OCaml test front end (`Plane_clip_front.clip`).
+    /// Native clip option defaults.
     #[cfg(test)]
     pub(crate) fn new(origin: rays_math::vec3::T, normal: rays_math::vec3::T) -> Params {
         Params {
@@ -69,7 +69,6 @@ fn fail(message: &str) -> error::T {
     make("clip", Code::InvalidGeometry, message)
 }
 
-use rdk_core::support::ocaml_trim_is_empty as blank;
 
 fn clamp01(value: f64) -> f64 {
     if value < 0.0 {
@@ -1443,7 +1442,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     if !snapping_tolerance.is_finite() || snapping_tolerance < 0.0 {
         return Err(fail("Rdk.Plane_clip.clip: snapping tolerance must be finite and non-negative"));
     }
-    if blank(&params.clip_attribute) {
+    if (&params.clip_attribute).trim().is_empty() {
         return Err(fail("Rdk.Plane_clip.clip: clip attribute must not be empty"));
     }
     let distance = params.distance;
@@ -1457,7 +1456,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     let mut seen_names: Vec<&str> = Vec::new();
     for name in [&params.cap_group, &params.clipped_group, &params.above_group, &params.below_group] {
         if let Some(name) = name {
-            if blank(name) {
+            if (name).trim().is_empty() {
                 return Err(fail("Rdk.Plane_clip.clip: output group names must not be empty"));
             }
             if seen_names.contains(&name.as_str()) {
@@ -1467,7 +1466,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
         }
     }
     if let Some(name) = &params.clipped_edge_group {
-        if blank(name) {
+        if (name).trim().is_empty() {
             return Err(fail("Rdk.Plane_clip.clip: clipped edge group name must not be empty"));
         }
     }
@@ -2255,7 +2254,7 @@ pub(crate) mod test_util {
         )
     }
 
-    /// The simple C polygon of the OCaml clip tests, counter-clockwise in the XY plane.
+    /// A counterclockwise C-shaped polygon in the XY plane.
     pub(crate) fn c_outline() -> (Vec<f64>, Vec<f64>) {
         (
             vec![-2.0, 2.0, 2.0, -1.0, -1.0, 2.0, 2.0, -2.0],

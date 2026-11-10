@@ -1,8 +1,4 @@
-//! Port of lib/flow_gpu/test_run.ml, the runner half: emitted kernels match the CPU tier within
-//! the recorded native noise tolerance, uniform/frame/input reuse, fast precision (carried loops,
-//! int32 arithmetic, gathers), selected and untaken integer errors, empty dispatches, fused
-//! outputs, refusals, and a drawing's region read back through `Executor::region_readback`.
-//! Resident-fold, resident-value and counted compaction scenarios live in `gpu_resident.rs`.
+//! Emitted kernels match CPU evaluation within the specified numeric tolerances.
 use crate::common;
 use common::test_program as tp;
 use flow_gpu::{host, pipelines, run};

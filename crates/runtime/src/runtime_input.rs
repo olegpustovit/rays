@@ -173,7 +173,7 @@ pub fn snapshot(value: &RuntimeInput) -> snapshot {
 
 static PLATFORM: OnceLock<Platform> = OnceLock::new();
 
-// Read once from SDL, on first use (OCaml reads it at module initialisation).
+// Read SDL input state once on first use.
 pub fn platform() -> Platform {
     *PLATFORM.get_or_init(|| platform_of_name(&sdl3::platform_name()))
 }

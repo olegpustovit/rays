@@ -1,4 +1,3 @@
-// Port of lib/flow_graph/edit_unfold.ml.
 use crate::edit_base::{ids::*, ArgKey, R, fail};
 use flow_syntax::syntax::SyntaxBuilder;
 

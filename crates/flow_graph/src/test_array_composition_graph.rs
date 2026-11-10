@@ -1,4 +1,3 @@
-// Port of lib/flow_graph/test_array_composition_graph.ml.
 use crate::flow_edit::{apply_checked, default_for, ArgKey, Op};
 use crate::projection as p;
 use crate::test_support::*;

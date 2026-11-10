@@ -1,4 +1,4 @@
-//! Port of lib/flow_web/target.ml: WebGPU kernel legality as diagnostics with spans. Limits are the
+//! WebGPU kernel legality as diagnostics with spans. Limits are the
 //! WebGPU specification's defaults: `maxStorageBuffersPerShaderStage` is 8 and
 //! `maxComputeWorkgroupsPerDimension` is 65,535.
 use crate::wgsl::{self, Kind};

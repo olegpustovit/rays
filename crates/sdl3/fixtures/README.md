@@ -18,20 +18,10 @@ fixture.  Rays uses them under SDL_image's zlib license:
 > misrepresented; altered source versions must be plainly marked; and this
 > notice must not be removed or altered from a source distribution.
 
-`orientation-6.jpg` is the unmodified upstream `sample.jpg` byte stream with a
-minimal EXIF orientation-6 APP1 segment inserted by Rays's OCaml fixture
-tool. `alpha.svg` is a Rays-authored two-pixel half-transparent/opaque
-fixture. Regenerate the oriented JPEG with:
-
-```sh
-dune exec tools/sdl3/generate_image_fixtures.exe -- \
-  lib/sdl3_image/fixtures/sample.jpg \
-  lib/sdl3_image/fixtures
-```
-
-The same OCaml tool writes the Rays-authored minimal ILBM and XV fixtures
-for the two legacy still-image decoders that upstream tests but does not ship
-as files in its source tree.
+`orientation-6.jpg` is the upstream `sample.jpg` byte stream with a minimal EXIF
+orientation-6 APP1 segment. `alpha.svg` is a Rays-authored two-pixel alpha fixture;
+the minimal ILBM and XV files exercise the corresponding still-image decoders.
+Historical generation notes are in [docs/history/ocaml-image-fixtures.md](../../../docs/history/ocaml-image-fixtures.md).
 
 The conformance test decodes every file both by path and from copied bytes,
 normalizes to tightly packed RGBA8, compares the common 23×42 source image

@@ -43,7 +43,7 @@ fn make(code: Code, message: String) -> error::T {
     error::new(GUARD_OPERATION, code, message)
 }
 
-/// A plain OCaml string error.
+/// A plain operation failure message.
 fn fail(message: &str) -> error::T {
     make(Code::InvalidGeometry, message.to_owned())
 }

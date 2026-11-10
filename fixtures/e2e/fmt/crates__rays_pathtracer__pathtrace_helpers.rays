@@ -25,7 +25,7 @@
 (defn v-smith :context value [(nov : float) (nol : float) (a2 : float)]
   (let* [gv (* nol (sqrt (+ (* (* nov nov) (- 1.0 a2)) a2)))
          gl (* nov (sqrt (+ (* (* nol nol) (- 1.0 a2)) a2)))]
-    (/ 0.5 (max (+ gv gl) 0.000001))))
+    (/ 0.5 (max (+ gv gl) 1e-6))))
 
 (defn fresnel :context value [(f0 : vec3) (voh : float)]
   (let* [f (pow (- 1.0 voh) 5.0)] (+ f0 (* (- [1.0 1.0 1.0] f0) f))))
@@ -69,7 +69,7 @@
          b (/ (dot (cross lu p) n) nn)
          c (/ (- 0.0 dn) (sqrt nn))
          cosl (if (> one-sided 0.5) c (abs c))
-         ok (and (and (>= (abs dn) 0.000000000001) (> nn 0.0))
+         ok (and (and (>= (abs dn) 1e-12) (> nn 0.0))
                  (and (and (> dist 0.0001) (< dist tmax))
                       (and (and (>= a 0.0) (<= a 1.0))
                            (and (and (>= b 0.0) (<= b 1.0)) (> cosl 0.0001)))))]
@@ -133,7 +133,7 @@
   (let* [lp (+ lo (+ (* lu ru) (* lv rv)))
          ln (normalize (cross lu lv))
          wi (- lp hitp)
-         dist2 (max (dot wi wi) 0.00000001)
+         dist2 (max (dot wi wi) 1e-8)
          dist (sqrt dist2)
          w (/ wi dist)
          cl (dot ln w)]

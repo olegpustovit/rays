@@ -460,7 +460,6 @@ mod tests {
     }
 }
 
-// Port of lib/flow/test_defnode.ml.
 #[cfg(test)]
 mod test_defnode {
     use crate::{catalog, op, workspace as W};

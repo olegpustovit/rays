@@ -1,4 +1,4 @@
-//! Port of lib/pxui_shell/layout.ml: the shell's panels as a tree and its geometry.
+//! the shell's panels as a tree and its geometry.
 use editor_core::panels::{self, State};
 pub use editor_core::panels::{Axis, Panel, Size, Panels};
 use rays::frame;

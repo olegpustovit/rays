@@ -1,9 +1,4 @@
-//! Port of lib/flow_ir/core_region.ml: lowers a checked packed form (map, reduce, numeric loop,
-//! array/sum) to a core region. It reads terms; everything after it reads the region only.
-//!
-//! OCaml exceptions: `Unsupported` / `Compile_refused d` / `Diagnostic.Error d` are the variants of
-//! [`Stop`]; `Invalid_argument` (an out-of-bounds register read, `Option.get`) is `Stop::Invalid`.
-//! Registers are numbered in source order: first operand first.
+//! Lower checked numeric forms into regions; downstream stages consume regions only. Registers follow first-operand-first traversal. Stop distinguishes unsupported, compile, diagnostic and invalid-input failures.
 use flow_syntax::symbol::{self, Symbol};
 use crate::core_ir::region::{
     self as R, CountSource, Instruction as I, Iteration, LiveFloat, LiveInt, Loop, Parts, Projection, RegionResult, Stage,
@@ -30,9 +25,7 @@ pub enum Stop {
     Unsupported,
     /// Compile-time refusals bypass the lazy runtime `Diagnostic.Error` handler.
     Refused(Diagnostic),
-    /// OCaml `Diagnostic.Error`.
     Error(Diagnostic),
-    /// OCaml `Invalid_argument`.
     Invalid(String),
 }
 impl From<Diagnostic> for Stop {
@@ -84,7 +77,6 @@ pub fn instruction_key(instruction: &I) -> InstructionKey {
 
 fn width_opt(ty: &Ty) -> Option<i64> { packed_ops::scalar_width(ty).map(|w| w as i64) }
 fn width_res(ty: &Ty) -> Res<i64> { width_opt(ty).ok_or(Stop::Unsupported) }
-/// The scalar width of a type; 0 where OCaml raises `Unsupported`.
 pub fn width_of(ty: &Ty) -> i64 { width_opt(ty).unwrap_or(0) }
 
 fn packed_list(value: &Value) -> Option<Value> {
@@ -145,7 +137,7 @@ pub fn finish_loops(finishes: &HashMap<i64, i64>, code: Vec<I>) -> Vec<I> {
         .enumerate()
         .map(|(slot, instruction)| match finishes.get(&(slot as i64)) {
             Some(finish) => patch(instruction, *finish),
-            // OCaml's Hashtbl.find raises Not_found for a slot without a finish: only headers have one.
+            // Only loop headers have a finish slot.
             None => instruction,
         })
         .collect()
@@ -188,7 +180,7 @@ fn iteration_skips(iter: &[i64], skip: &[Vec<usize>]) -> Vec<i64> {
 }
 
 pub(crate) fn same_op(a: &op::Op, b: &op::Op) -> bool {
-    // OCaml compares physically; a clone shares every Arc.
+    // Clones retain every shared Arc, so identity comparison recognizes the same region.
     a.name == b.name && a.ctx == b.ctx && a.signature == b.signature && a.live == b.live && a.category == b.category
         && std::sync::Arc::ptr_eq(&a.out, &b.out) && std::sync::Arc::ptr_eq(&a.check, &b.check) && std::sync::Arc::ptr_eq(&a.body, &b.body)
 }
@@ -1819,7 +1811,7 @@ impl Lower {
                 for arm in arena.case_arms(case.arms).iter().rev() {
                     let literal = arena.syntax().handle(arm.form);
                     let (value, ty) = match literal.node {
-                        SNode::Num(s) => (param::Value::Float(cfmt::parse_ocaml_float(literal.name(s)).ok_or_else(|| invalid("float_of_string"))?), Ty::Float),
+                        SNode::Num(s) => (param::Value::Float((literal.name(s)).parse::<f64>().ok().ok_or_else(|| invalid("float_of_string"))?), Ty::Float),
                         SNode::Sym(s) if matches!(literal.name(s), "true" | "false") => (param::Value::Bool(literal.name(s) == "true"), Ty::Bool),
                         _ => return Err(refusal(t, "E_PACKED_FORM", "Packed case arms require numeric or boolean literals.")),
                     };

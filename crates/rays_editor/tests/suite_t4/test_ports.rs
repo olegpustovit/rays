@@ -73,7 +73,7 @@ fn save_roundtrip(name: &str) {
     save.input.events = vec![Event::Key_pressed(Key::KeyChar('s'))];
     ed = editor::update(ed, &save);
     ed = editor::update(ed, &frame_of(false, name, 2));
-    // (the OCaml inode check is POSIX-only: an atomic replace keeps the text and comments)
+    // Atomic replacement preserves source text and comments.
     assert!(std::fs::read_to_string(&file).unwrap() == source, "{name}: Command-S changed the source file");
     assert!(Doc::to_text(&editor::workspace(&ed)).unwrap() == source, "{name}: the document changed on save");
     editor::close(&ed);

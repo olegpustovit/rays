@@ -1,13 +1,4 @@
-//! Port of lib/flow_native/workspace_images.ml: the images a workspace's plan resolves (load,
-//! noise, map, render, exact), their CPU snapshots, GPU-resident textures and the geometry
-//! captures an image map reads, kept fresh per frame and bounded at 64 entries.
-//!
-//! Rust shape notes. The resolver is re-entrant (a render resolves child images through its
-//! `image` callback), so the owner is an `Rc<Data>` whose fields are `RefCell`/`Cell`s borrowed
-//! briefly; `Send + Sync` closures the callees demand (`lower::ImageResolver`, `core_exec::ResolveFn`)
-//! hold an id and find the owner in a thread-local table, so a call from another thread is the
-//! OCaml "must resolve on the initial domain" error. Plans are identified by `plan_id` (the
-//! addresses of their vectors), the OCaml physical equality.
+//! Workspace images retain bounded load/noise/map/render/exact caches with CPU snapshots and GPU textures. Reentrant child resolution uses brief Cell/RefCell borrows of one Rc owner. Send+Sync resolver closures carry an ID resolved through a thread-local table; foreign-thread resolution is a typed error. Plan IDs are assigned at construction and preserved by clones.
 use flow_syntax::symbol::Symbol;
 use crate::drawing;
 use crate::workspace_gpu;
@@ -38,7 +29,7 @@ const ENTRY_CAPACITY: usize = 64;
 
 pub type PlanId = u64;
 
-/// The identity of a plan (OCaml `==`): its `id`, assigned when the plan is built and kept by clones.
+/// A plan ID is assigned at construction and retained by clones.
 pub fn plan_id(plan: &e::Plan) -> PlanId {
     plan.id
 }
@@ -1100,7 +1091,7 @@ fn resolve_exact(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, plan: &e::Plan,
 
 /// `resolve` for a child value inside a running request (same plan, state and frame).
 fn resolve_with(t_: &Rc<Data>, ctx: &Ctx, display: bool, plan: &e::Plan, value: &Value) -> Result<EntryRef, Diagnostic> {
-    // the OCaml child resolutions pass no ?gpu
+    // Resolve child images without inheriting the parent's GPU option.
     resolve(t_, &Ctx { gpu: None, ..ctx.clone() }, None, display, plan, value)
 }
 

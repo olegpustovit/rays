@@ -1,9 +1,4 @@
-//! Port of lib/flow_gpu/test_trace.ml (P8.S2): scene/trace on the GPU. The emitted ray queries over
-//! structures from `run::build_scene` match the CPU host: prim, instance and hit exactly; t, uv and
-//! normal within 1e-5 (flat scene, instanced scene with the per-instance table, procedural spheres,
-//! vertex and instance motion, strands as native curves or swept-AABB capsule candidates). Without
-//! `ray_tracing_motion` the static kernel over the shutter-midpoint scene matches the CPU at 0.5.
-//! The OCaml grid generator is replaced by the same two triangles built by hand (prim = triangle).
+//! GPU scene tracing compares primitive/instance/hit exactly and t/uv/normal within 1e-5. Static midpoint scenes qualify devices without motion tracing. Fixtures cover triangles, instances, procedural spheres, motion and strands.
 use crate::common;
 use common::test_program as tp;
 use flow_gpu::{pipelines, run};

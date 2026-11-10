@@ -1,4 +1,4 @@
-//! The case lists shared by the WGSL tests and the OCaml-oracle comparison (test_oracle.rs).
+//! Kernel inputs shared by the current WGSL compiler tests.
 
 pub fn fast_cases() -> Vec<(&'static str, &'static str)> {
     vec![

@@ -1,5 +1,4 @@
-//! Port of lib/pxui/test_ui.ml, part one: the scale-parameterised interaction contract
-//! (scale_1 to scale_11) and the hover, tooltip and retained-state tests.
+//! Scale-parameterized interaction, layout and retained state contracts.
 use crate::steps::*;
 use crate::support::*;
 use input::{Event, Key, MouseButton, ScrollPhase};
@@ -9,7 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 fn parse(text: &str) -> Option<f64> {
-    cfmt::parse_ocaml_float(text)
+    (text).parse::<f64>().ok()
 }
 
 fn field_ui() -> Ui {
@@ -964,7 +963,24 @@ pub fn window_pxui_batches() {
     ui.destroy();
 }
 
+pub fn window_pxui_full_width_retained_state() {
+    let mut ui = field_ui();
+    for value in [i64::MIN, -(1i64 << 62), 0, i64::MAX] {
+        ui.frame(&frame_at(vec![], 1.0, 0.0, vec![]), &mut |ui| {
+            let b = ui.box_("full-width-state", BoxOpts::default());
+            ui.set_state(&b, value);
+            assert_eq!(ui.state(&b, 99), value);
+        });
+        ui.frame(&frame_at(vec![], 1.0, 0.1, vec![]), &mut |ui| {
+            let b = ui.box_("full-width-state", BoxOpts::default());
+            assert_eq!(ui.state(&b, 99), value);
+        });
+    }
+    ui.destroy();
+}
+
 pub const CASES: &[(&str, fn())] = &[
+    ("window_pxui_full_width_retained_state", window_pxui_full_width_retained_state),
     ("window_pxui_scale_1x", window_pxui_scale_1x),
     ("window_pxui_scale_2x", window_pxui_scale_2x),
     ("window_pxui_tooltip_rest", window_pxui_tooltip_rest),

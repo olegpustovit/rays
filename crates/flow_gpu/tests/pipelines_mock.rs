@@ -1,4 +1,4 @@
-//! Port of lib/flow_gpu/test_pipelines.ml: shared kernel sources compile once, the cache holds 64
+//! shared kernel sources compile once, the cache holds 64
 //! pipelines and releases the evicted, `close` is idempotent and a closed cache refuses. The
 //! portable mock cannot execute compute: this driver adds owned pipeline handles only.
 use crate::common;

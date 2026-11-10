@@ -1,5 +1,4 @@
-// Re-entrant and concurrent evaluation: host callbacks that evaluate, rewrite and bind again in the evaluation
-// that called them (OCaml has no lock: they share it), from 8 threads at once, one arena shared by all of them.
+// Reentrant and concurrent callbacks evaluate, rewrite and bind within one shared arena from eight threads.
 use crate::*;
 use crate::test_workspace_eval::{check, ok};
 use flow_check::workspace as W;
@@ -84,8 +83,7 @@ fn reentrant_callbacks_on_eight_threads_share_arenas_without_deadlock() {
     assert_eq!(nested.load(Ordering::Relaxed), 8 * 50 * 2 * per_force, "every evaluation made the same offers and re-entered each");
 }
 
-// A kernel handler that evaluates the very term it was offered (a kernel compile lowering its residual) is not offered it again: the
-// callback runs outside its handler, as an OCaml effect handler's does. Before, this recursed until the stack overflowed (procedural_modeling).
+// Kernel compilation runs outside the handler that offered the term, preventing recursive re-offering of the same residual.
 #[test]
 fn a_kernel_callback_evaluating_its_own_term_is_not_offered_it_again() {
     let ws = check(SOURCE);

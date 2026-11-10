@@ -1,7 +1,3 @@
-// Port of lib/flow_ir/test_arena.ml. Memory plan S5: a program's region results die at their last read.
-// Not ported: the Gc.stat live-word peak and Gc.allocated_bytes assertions (OCaml heap
-// measurements with no Rust equivalent); the arena plan, the structural chain check and the
-// clobbered-run equality are.
 use crate::core_exec::arena_buffers;
 use crate::core_ir as c;
 use crate::core_lower;
@@ -76,8 +72,7 @@ fn chain_of_regions() {
     let reference = result_of(&plain, &live);
     assert_eq!(result_of(&prepare_clobber(&program), &live), reference, "a dead array was read");
 
-    // one size: the arena reuses, and a dead array read past its last use would be NaN.
-    // 30_000 in OCaml; 5_000 still crosses the 1024-lane block boundaries several times.
+    // Reuse one arena size across block boundaries; a read after a clobbered array's last use becomes NaN.
     let program = core(&chain(count, &|_| 5_000));
     let plain = prepare(&program);
     let clobbered = prepare_clobber(&program);

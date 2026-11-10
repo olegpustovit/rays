@@ -1,4 +1,4 @@
-//! Port of lib/sop/zone.ml: the zone cook step, a loop over the elements of cooked geometry.
+//! the zone cook step, a loop over the elements of cooked geometry.
 //!
 //! A zone node has the collection as input 0 (and any outer geometry its body reads as further
 //! inputs). When the session cooks it, `Node.Build.expand` derives the elements of the collection,
@@ -212,8 +212,8 @@ pub fn node(args: Args, body: Body, inputs: Vec<node::T>) -> node::T {
             Kind::Points => "points",
             Kind::Pieces => "pieces",
         },
-        node::ocaml_quote(args.key.as_deref().unwrap_or("")),
-        node::ocaml_quote(&args.source_attribute),
+        rdk_core::attribute::quote(args.key.as_deref().unwrap_or("")),
+        rdk_core::attribute::quote(&args.source_attribute),
         args.source_base,
         inputs.len(),
         args.live

@@ -321,7 +321,7 @@
 (defn v-smith :context value [(nov : float) (nol : float) (a2 : float)]
   (let* [gv (* nol (sqrt (fma (* nov nov) (- 1.0 a2) a2)))
          gl (* nov (sqrt (fma (* nol nol) (- 1.0 a2) a2)))]
-    (/ 0.5 (max (+ gv gl) 0.000001))))
+    (/ 0.5 (max (+ gv gl) 1e-6))))
 
 ; ks scales the specular lobe (the mirror blend in world-fragment)
 (defn eval-brdf :context value [(ns : vec3) (v : vec3) (l : vec3) (diffuse : vec3) (f0 : float) (a2 : float) (ks : float)]

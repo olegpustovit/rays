@@ -1,5 +1,4 @@
-//! Port of lib/rdk/ops/mesh/subdivide.ml: polygon and curve subdivision with local selections,
-//! crack closure, creases and holes. Includes the refinement and stitch modules, as the OCaml does.
+//! Polygon/curve subdivision retains selections, crack closure, creases and holes through shared refinement/stitching owners.
 use std::sync::Arc;
 
 use rdk_core::attribute::{self, Owner, Storage};
@@ -242,8 +241,6 @@ fn detail_int(name: &str, item: &attribute::T) -> Result<i64, error::T> {
     }
 }
 
-/// OCaml `%S`: a double-quoted string with `String.escaped` escapes.
-use crate::attribute_ops::ocaml_quote as ocaml_quoted;
 
 pub(crate) fn resolve_scheme(default: Scheme, found: Option<&attribute::T>) -> Result<Scheme, error::T> {
     let Some(item) = found else {
@@ -267,7 +264,7 @@ pub(crate) fn resolve_scheme(default: Scheme, found: Option<&attribute::T>) -> R
             "bilinear" => Ok(Scheme::Bilinear),
             value => Err(fail(format!(
                 "detail attribute osd_scheme has unsupported value {}; expected \"catmull-clark\", \"loop\", or \"bilinear\"",
-                ocaml_quoted(value)
+                rdk_core::attribute::quote_bytes((value).as_ref())
             ))),
         },
         _ => Err(fail(format!(
@@ -425,7 +422,7 @@ fn validate_crease_arguments(
         }
     }
     if let Some(name) = resulting_crease_group {
-        if rdk_core::support::ocaml_trim_is_empty(name) {
+        if (name).trim().is_empty() {
             return Err(failm("resulting crease group name must not be empty"));
         }
         if !generate_resulting_creases {
@@ -858,7 +855,7 @@ pub struct Params {
     pub recompute_point_normals: bool,
 }
 
-/// OCaml's `Invalid_argument` caught inside the curve path becomes a plain failure message.
+/// Curve subdivision converts internal invalid input into an operation failure message.
 fn invalid_argument_to_failure(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
     match result {
         Err(failure) if error::code(&failure) == Code::InvalidArgument => {
@@ -1058,7 +1055,7 @@ fn mixed_subdivide(
 fn guard(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
     match result {
         Ok(value) => Ok(value),
-        // OCaml lets Invalid_argument escape the guard as an exception.
+        // A programmer-invalid argument remains outside ordinary recoverable refinement failures.
         Err(failure) if error::code(&failure) == Code::InvalidArgument => {
             Err(error::new("subdivide", Code::InvalidArgument, error::message(&failure).to_owned()))
         }

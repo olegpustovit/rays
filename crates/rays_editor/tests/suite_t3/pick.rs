@@ -1,5 +1,4 @@
-//! Port of lib/rays_editor/test/test_viewport_pick.ml (W6: viewport provenance, CPU ray picks,
-//! the highlight, and the editor's click-to-select), using the original sketches.
+//! Viewport provenance and CPU picking preserve visible source identity.
 use super::probe_t::fixture as case_text;
 
 use super::t3c::*;

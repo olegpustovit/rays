@@ -253,7 +253,7 @@ fn canonical_triangle_into(output: &mut [i64], offset: usize, first: i64, second
     }
 }
 
-/// OCaml `Float.frexp` exponent of a finite non-negative value.
+/// Return the binary exponent of a finite nonnegative value.
 fn frexp_exponent(value: f64) -> i64 {
     if value == 0. || !value.is_finite() {
         return 0;

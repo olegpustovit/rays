@@ -1,4 +1,4 @@
-// Port of lib/flow_ir/test_core_marks.ml (core_marks.expected is read in place).
+//! Drawing register programs match core_marks.expected.
 use crate::core_draw;
 use crate::core_exec::{self, Buffers, DeviceFn, DrawOptions};
 use crate::core_ir as C;
@@ -58,30 +58,11 @@ const ERRORS: [(&str, &str); 6] = [
     ("(draw/image (image/noise))", "E_IMAGE"),
 ];
 
-/// OCaml `%h`.
-fn hex(x: f64) -> String {
-    if x.is_nan() { return "nan".into(); }
-    if x.is_infinite() { return if x < 0. { "-infinity".into() } else { "infinity".into() }; }
-    let bits = x.to_bits();
-    let sign = if bits >> 63 == 1 { "-" } else { "" };
-    let exponent = ((bits >> 52) & 0x7ff) as i64;
-    let mantissa = bits & ((1u64 << 52) - 1);
-    let digits = {
-        let full = format!("{mantissa:013x}");
-        full.trim_end_matches('0').to_owned()
-    };
-    let fraction = if digits.is_empty() { String::new() } else { format!(".{digits}") };
-    if exponent == 0 && mantissa == 0 { return format!("{sign}0x0p+0"); }
-    if exponent == 0 { return format!("{sign}0x0{fraction}p-1022"); }
-    let e = exponent - 1023;
-    format!("{sign}0x1{fraction}p{}{}", if e < 0 { "-" } else { "+" }, e.abs())
-}
-
 fn ink(c: i32) -> String { format!("{:08x}", c as u32) }
 
 fn pair(buffers: &Buffers, a: &PairAttr) -> String {
     match a {
-        PairAttr::Constant((x, y)) => format!("const {},{}", hex(*x), hex(*y)),
+        PairAttr::Constant((x, y)) => format!("const {},{}", flow_syntax::lisp::float(*x), flow_syntax::lisp::float(*y)),
         PairAttr::Buffer(b) => buffer(buffers, b.id, b.count, b.width),
         PairAttr::Device(_) => panic!("no device attribute without a device host"),
     }
@@ -89,7 +70,7 @@ fn pair(buffers: &Buffers, a: &PairAttr) -> String {
 
 fn scalar(buffers: &Buffers, a: &ScalarAttr) -> String {
     match a {
-        ScalarAttr::Constant(x) => format!("const {}", hex(*x)),
+        ScalarAttr::Constant(x) => format!("const {}", flow_syntax::lisp::float(*x)),
         ScalarAttr::Buffer(b) => buffer(buffers, b.id, b.count, b.width),
         ScalarAttr::Device(_) => panic!("no device attribute without a device host"),
     }
@@ -105,7 +86,7 @@ fn color(buffers: &Buffers, a: &ColorAttr) -> String {
 
 fn buffer(buffers: &Buffers, id: i64, count: i64, width: i64) -> String {
     let data = buffers.find(id).expect("buffer");
-    format!("buffer {id} count={count} width={width} [{}]", data.iter().map(|x| hex(*x)).collect::<Vec<_>>().join(" "))
+    format!("buffer {id} count={count} width={width} [{}]", data.iter().map(|x| flow_syntax::lisp::float(*x)).collect::<Vec<_>>().join(" "))
 }
 
 fn lowered(body: &str) -> (C::Program, Option<ResidualId>) {
@@ -147,13 +128,13 @@ fn dump() -> String {
                 Entry::Geometry { vertices, indices, color } => out.push_str(&format!(
                     "  geometry {} vertices=[{}] indices=[{}]\n",
                     ink(*color),
-                    vertices.iter().map(|x| hex(*x)).collect::<Vec<_>>().join(" "),
+                    vertices.iter().map(|x| flow_syntax::lisp::float(*x)).collect::<Vec<_>>().join(" "),
                     indices.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")
                 )),
                 Entry::Image { .. } => out.push_str("  image\n"),
                 Entry::Text { x, y, size, color, text } => out.push_str(&format!("  text {x},{y} size={size} {} {:?}\n", ink(*color), String::from_utf8_lossy(text))),
                 Entry::PushTransform { xx, xy, yx, yy, tx, ty } => {
-                    out.push_str(&format!("  push {} {} {} {} {} {}\n", hex(*xx), hex(*xy), hex(*yx), hex(*yy), hex(*tx), hex(*ty)))
+                    out.push_str(&format!("  push {} {} {} {} {} {}\n", flow_syntax::lisp::float(*xx), flow_syntax::lisp::float(*xy), flow_syntax::lisp::float(*yx), flow_syntax::lisp::float(*yy), flow_syntax::lisp::float(*tx), flow_syntax::lisp::float(*ty)))
                 }
                 Entry::PopTransform => out.push_str("  pop\n"),
                 Entry::PushClip { .. } => out.push_str("  push-clip\n"),
@@ -177,7 +158,9 @@ fn dump() -> String {
 #[test]
 fn core_marks_snapshot_is_byte_identical() {
     let actual = dump();
-    let expected = include_str!("../../../crates/flow_ir/core_marks.expected").replace("\r\n", "\n");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("core_marks.expected");
+    if std::env::var_os("RAYS_UPDATE_FIXTURES").is_some() { std::fs::write(&path, &actual).unwrap(); }
+    let expected = std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
     if actual != expected {
         let first = actual.lines().zip(expected.lines()).position(|(a, b)| a != b).unwrap_or(0);
         panic!("Core marks changed at line {}:\nactual:   {:?}\nexpected: {:?}", first + 1, actual.lines().nth(first), expected.lines().nth(first));
@@ -320,7 +303,7 @@ fn nested_maps_draw_the_walkers_points_at_one_four_and_eight_domains() {
                     }
                     assert!(*count > 4096);
                     if sum.to_bits() != expected.to_bits() {
-                        panic!("nested maps: points differ from the walker at {domains} domains ({} vs {})", hex(sum), hex(expected));
+                        panic!("nested maps: points differ from the walker at {domains} domains ({} vs {})", flow_syntax::lisp::float(sum), flow_syntax::lisp::float(expected));
                     }
                 }
                 _ => panic!("nested maps: one point set expected"),

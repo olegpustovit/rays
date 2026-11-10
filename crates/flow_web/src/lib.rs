@@ -1,5 +1,3 @@
-//! Port of lib/flow_web: WGSL and JavaScript printers from `flow_ir` core programs for the web
-//! export. One module per OCaml file; `test_*` modules are the ported OCaml tests.
 #![allow(non_camel_case_types, non_snake_case)]
 pub mod text_literal;
 pub mod kernel_table;
@@ -28,7 +26,6 @@ mod test_text_bytes;
 #[cfg(test)]
 mod oracle_cases;
 #[cfg(test)]
-mod test_oracle;
 #[cfg(test)]
 mod test_fma;
 #[cfg(test)]

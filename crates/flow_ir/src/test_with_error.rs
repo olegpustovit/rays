@@ -1,4 +1,3 @@
-// Port of lib/flow_ir/test_with_error.ml.
 // Not ported: (a) the `Effect.perform Bulk_static` block (flow_eval's `ResidualHandlers::bulk` returns
 // an Option, so a handler cannot raise a diagnostic through the effect handler) and (b) `raise Exit`
 // propagating out of `V.with_error` (Rust has no exceptions). The checked graph edit (flow_graph) is
@@ -151,7 +150,7 @@ fn ill_typed_with_error_forms_are_rejected_by_the_checker() {
 }
 
 fn original() -> Diagnostic {
-    // ponytail: OCaml's cause starts with the raw byte \255; Rust's cause is a String, so U+00FF stands in.
+    // ponytail: diagnostic causes are UTF-8, so the byte fixture uses U+00FF; use byte-valued causes only if the language contract requires them.
     rays_diagnostic::error(
         "E_CHILD".into(),
         "child".into(),

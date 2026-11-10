@@ -1,4 +1,4 @@
-//! Port of lib/pxui_shell/inspector.ml: parameter rows generated from `Param` metadata, the one
+//! parameter rows generated from `Param` metadata, the one
 //! inspector path for SOP nodes and plain sketch settings alike.
 use crate::kit;
 use param::{Effects, FieldView, KindView, Schema, Value};
@@ -207,7 +207,7 @@ fn input(
                 Some((range.soft_min, range.soft_max)),
                 Some(param::number::show(*value)),
                 &param::float_text_with_decimal(*value, true),
-                &|text| cfmt::parse_ocaml_float(text).map(Value::Float),
+                &|text| (text).parse::<f64>().ok().map(Value::Float),
                 field,
                 path,
                 &key,

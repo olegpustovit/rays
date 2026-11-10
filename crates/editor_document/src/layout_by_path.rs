@@ -1,4 +1,4 @@
-//! Port of lib/editor_document/layout_by_path.ml: canvas layout keyed by workspace path: the
+//! canvas layout keyed by workspace path: the
 //! fields of the workspace's active layout. A path is the lexical identity of a binding, so a key
 //! survives every text edit that keeps the path. Persisted as one `(layout ...)` s-expression.
 use editor_core::panels::{self, State};
@@ -165,7 +165,7 @@ fn fail<V>(message: String) -> Result<V, String> {
 
 fn read_number(f: &Syntax) -> Result<f64, String> {
     match &f.node {
-        Node::Num(text) => match cfmt::parse_ocaml_float(f.name(*text)) {
+        Node::Num(text) => match (f.name(*text)).parse::<f64>().ok() {
             Some(x) if x.is_finite() => Ok(x),
             _ => fail(format!("bad number {}", f.name(*text))),
         },

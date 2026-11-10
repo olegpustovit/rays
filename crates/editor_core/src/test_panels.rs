@@ -1,4 +1,3 @@
-//! Port of lib/editor_core/test_panels.ml.
 use crate::panels::{each_leaf, label, labels, leaves, set_size, Panels, to_string, valid, Axis, Panel, Size};
 
 fn v() -> Panels {

@@ -137,7 +137,7 @@ fn window_unit(window: &Window) -> Result<f64, Error> {
     Ok(if (unit - 1.).abs() < 1e-3 { 1. } else { unit })
 }
 
-// OCaml `Float.round` rounds half away from zero, like f64::round.
+// Round halfway values away from zero.
 fn to_points(unit: f64, size: i32) -> i64 {
     std::cmp::max(1, ((size as f64) / unit).round() as i64)
 }
@@ -436,7 +436,7 @@ pub fn set_cursor(value: &mut Runtime, shape: cursor_shape) -> Result<(), Error>
                     cursor_shape::Text => Shape::Text,
                 };
                 let cursor = Cursor::create(native).map_err(|failure| sdl_error("Runtime.set_cursor", &failure))?;
-                // OCaml prepends; lookup is by key so order only matters for destroy order.
+                // Lookup is by key; retained list order determines destruction order.
                 window.cursors.insert(0, (shape, cursor));
                 0
             }

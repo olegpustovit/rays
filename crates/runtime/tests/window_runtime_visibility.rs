@@ -1,8 +1,7 @@
 mod common;
 use runtime::*;
 
-// Needs SDL_VIDEODRIVER=dummy (or a display) and the initial thread; a missing window is a skip,
-// as in the OCaml test.
+// Window visibility requires the initial thread and reports a missing window explicitly.
 fn window_runtime_visibility() {
     let mut runtime = match create(None, None, None, None, 32, 24) {
         Ok(runtime) => runtime,

@@ -1,4 +1,4 @@
-//! Port of lib/rays_editor/test/test_scene_sync.ml. Tests marked slow lower many documents; a lowering
+//! Tests marked slow lower many documents; a lowering
 //! costs ~200 ms in a debug build (flow_eval static evaluation), so they run with RAYS_SLOW=1.
 //!
 //! Not ported: `qualification_roots` (reads Flow.Workspace physical identity/qualification of the
@@ -217,7 +217,7 @@ fn edit_ws(doc: &Doc, op: &Op) -> Result<workspace_doc::T, String> {
     workspace_doc::edit(&catalog(), &doc.workspace.ws, op).map_err(|d| rays_diagnostic::to_string(&d))
 }
 
-/// `edit doc op` of the OCaml: the op applied and lowered over `doc`.
+/// Apply an edit and lower the resulting document.
 fn edit(doc: &Doc, op: &Op) -> Doc {
     lower(Some(doc), &edit_ws(doc, op).unwrap())
 }

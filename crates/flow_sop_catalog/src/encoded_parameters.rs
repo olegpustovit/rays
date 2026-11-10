@@ -1,4 +1,4 @@
-//! Port of lib/flow_sop/encoded_parameters.ml: pure checked Lisp normalizers used by parameter
+//! pure checked Lisp normalizers used by parameter
 //! defaults and native schemas.
 use flow_check::catalog::{self as flow_catalog, Parameter};
 use flow_check::workspace::{Graph, Node, NodeDefinition, Pattern, Term, Workspace};
