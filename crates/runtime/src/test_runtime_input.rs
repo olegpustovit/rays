@@ -78,7 +78,7 @@ fn runtime_input_translates_sdl_events_into_facts() {
     runtime_input_sdl3::push(&mut native, key(SdlKey::Space, true)).unwrap();
     assert_eq!(
         source::drain(&mut native),
-        vec![Event::Key_pressed(InputKey::Space)],
+        vec![Event::KeyPressed(InputKey::Space)],
         "the space bar did not arrive as the named Space key"
     );
 
@@ -97,17 +97,17 @@ fn runtime_input_translates_sdl_events_into_facts() {
     source::set_relative(&mut native, false);
     source::begin_frame(&mut native);
     source::drain(&mut native);
-    source::push(&mut native, Event::Pointer_pressed(InputButton::LeftButton, (1., 1.))).unwrap();
-    source::push(&mut native, Event::Focus_lost).unwrap();
+    source::push(&mut native, Event::PointerPressed(InputButton::LeftButton, (1., 1.))).unwrap();
+    source::push(&mut native, Event::FocusLost).unwrap();
     assert!(
         matches!(
             source::drain(&mut native).as_slice(),
-            [Event::Pointer_pressed(InputButton::LeftButton, _), Event::Focus_lost]
+            [Event::PointerPressed(InputButton::LeftButton, _), Event::FocusLost]
         ),
         "focus loss synthesized a pointer cancellation event"
     );
-    source::push(&mut native, Event::Pointer_pressed(InputButton::LeftButton, (1., 1.))).unwrap();
-    source::push(&mut native, Event::Pointer_cancelled(InputButton::LeftButton)).unwrap();
+    source::push(&mut native, Event::PointerPressed(InputButton::LeftButton, (1., 1.))).unwrap();
+    source::push(&mut native, Event::PointerCancelled(InputButton::LeftButton)).unwrap();
     source::drain(&mut native);
 
     // keys: held keys are variants, and a modifier list and repeat survive
@@ -117,30 +117,30 @@ fn runtime_input_translates_sdl_events_into_facts() {
     assert_eq!(
         source::drain(&mut native),
         vec![
-            Event::Key_pressed(InputKey::KeyChar('a')),
-            Event::Key_pressed(InputKey::Ctrl),
-            Event::Key_released(InputKey::KeyChar('a')),
+            Event::KeyPressed(InputKey::KeyChar('a')),
+            Event::KeyPressed(InputKey::Ctrl),
+            Event::KeyReleased(InputKey::KeyChar('a')),
         ],
         "keys are not the translated key variants in order"
     );
     assert_eq!(
         runtime_input_sdl3::translate(key(SdlKey::Unknown(0x4000_0064), true)),
-        Some(Event::Key_pressed(InputKey::Unknown(0x4000_0064))),
+        Some(Event::KeyPressed(InputKey::Unknown(0x4000_0064))),
         "an unknown key lost its code"
     );
     let window_expectations = [
-        (WindowChange::Shown, Some(Event::Visibility_changed(true))),
-        (WindowChange::Hidden, Some(Event::Visibility_changed(false))),
-        (WindowChange::Minimized, Some(Event::Visibility_changed(false))),
-        (WindowChange::Occluded, Some(Event::Visibility_changed(false))),
-        (WindowChange::Restored, Some(Event::Visibility_changed(true))),
-        (WindowChange::FocusGained, Some(Event::Focus_gained)),
-        (WindowChange::FocusLost, Some(Event::Focus_lost)),
+        (WindowChange::Shown, Some(Event::VisibilityChanged(true))),
+        (WindowChange::Hidden, Some(Event::VisibilityChanged(false))),
+        (WindowChange::Minimized, Some(Event::VisibilityChanged(false))),
+        (WindowChange::Occluded, Some(Event::VisibilityChanged(false))),
+        (WindowChange::Restored, Some(Event::VisibilityChanged(true))),
+        (WindowChange::FocusGained, Some(Event::FocusGained)),
+        (WindowChange::FocusLost, Some(Event::FocusLost)),
         (WindowChange::CloseRequested, Some(Event::Closed)),
         (WindowChange::Resized(640, 480), Some(Event::Resized((640, 480)))),
         (
             WindowChange::PixelSizeChanged(1280, 960),
-            Some(Event::Pixel_size_changed((1280, 960))),
+            Some(Event::PixelSizeChanged((1280, 960))),
         ),
         // a minimizing window can report no size: no event, no error
         (WindowChange::Resized(0, 0), None),
@@ -167,9 +167,9 @@ fn runtime_input_translates_sdl_events_into_facts() {
     assert_eq!(
         source::drain(&mut visibility),
         vec![
-            Event::Visibility_changed(false),
-            Event::Visibility_changed(true),
-            Event::Pixel_size_changed((800, 600)),
+            Event::VisibilityChanged(false),
+            Event::VisibilityChanged(true),
+            Event::PixelSizeChanged((800, 600)),
         ],
         "window events did not arrive in order"
     );
@@ -199,13 +199,13 @@ fn runtime_input_translates_sdl_events_into_facts() {
     .unwrap();
     assert_eq!(
         source::drain(&mut native),
-        vec![Event::Trackpad_scrolled { delta: (0., -12.), phase: input::ScrollPhase::Moved, time: 3.5 }],
+        vec![Event::TrackpadScrolled { delta: (0., -12.), phase: input::ScrollPhase::Moved, time: 3.5 }],
         "a trackpad scroll was not translated as it came"
     );
     assert!(
         source::push(
             &mut native,
-            Event::Trackpad_scrolled {
+            Event::TrackpadScrolled {
                 delta: (f64::NAN, 0.),
                 phase: input::ScrollPhase::Lifted,
                 time: 0.,
@@ -227,7 +227,7 @@ fn runtime_input_translates_sdl_events_into_facts() {
     for (outcome, expected) in dialog_expectations {
         assert_eq!(
             runtime_input_sdl3::translate(SdlEvent::Dialog { id: 7, outcome }),
-            Some(Event::File_dialog { id: 7, result: expected }),
+            Some(Event::FileDialog { id: 7, result: expected }),
             "a file dialog outcome did not translate"
         );
     }
@@ -245,20 +245,20 @@ fn runtime_input_translates_sdl_events_into_facts() {
     assert_eq!(
         source::drain(&mut native),
         vec![
-            Event::File_drag_moved((5.5, 6.5)),
-            Event::File_dropped(drop.to_string()),
-            Event::File_drag_ended,
+            Event::FileDragMoved((5.5, 6.5)),
+            Event::FileDropped(drop.to_string()),
+            Event::FileDragEnded,
         ],
         "native file drop must carry its drag position and the full path without reading it"
     );
     assert!(
-        source::push(&mut native, Event::File_dropped(String::new())).is_err(),
+        source::push(&mut native, Event::FileDropped(String::new())).is_err(),
         "empty file-drop path passed input validation"
     );
-    source::push(&mut native, Event::File_dropped(drop.to_string())).unwrap();
+    source::push(&mut native, Event::FileDropped(drop.to_string())).unwrap();
     assert_eq!(
         source::drain(&mut native),
-        vec![Event::File_dropped(drop.to_string())],
+        vec![Event::FileDropped(drop.to_string())],
         "rejected file drop corrupted the next event"
     );
     assert!(
@@ -282,7 +282,7 @@ fn runtime_input_translates_sdl_events_into_facts() {
     );
     assert_eq!(
         source::drain(&mut batch),
-        vec![Event::Text_input("after".to_string())],
+        vec![Event::TextInput("after".to_string())],
         "a rejected event dropped the rest of its batch"
     );
 
@@ -297,7 +297,7 @@ fn runtime_input_translates_sdl_events_into_facts() {
     // A full queue drops its oldest event: the newest eight remain.
     assert_eq!(
         source::drain(&mut bounded),
-        (0..8).map(|index| Event::Pointer_moved(((99_993 + index) as f64, 0.))).collect::<Vec<_>>(),
+        (0..8).map(|index| Event::PointerMoved(((99_993 + index) as f64, 0.))).collect::<Vec<_>>(),
         "input queue is not bounded"
     );
     assert_eq!(
@@ -323,9 +323,9 @@ fn runtime_input_translates_sdl_events_into_facts() {
     assert_eq!(
         source::drain(&mut scaled),
         vec![
-            Event::Pointer_moved((200., 100.)),
-            Event::Pointer_pressed(InputButton::LeftButton, (20., 30.)),
-            Event::File_drag_moved((10., 2.)),
+            Event::PointerMoved((200., 100.)),
+            Event::PointerPressed(InputButton::LeftButton, (20., 30.)),
+            Event::FileDragMoved((10., 2.)),
             Event::Resized((1000, 600)),
             Event::Scrolled((0., 1.)),
         ],

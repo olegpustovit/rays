@@ -16,7 +16,7 @@ fn offscreen_target_is_not_a_window() {
     assert!(create(None, None, None, None, 0, 4).is_err());
 }
 
-// test_renderer_scaling.ml's Change_flag checks: one query per announcement burst.
+// 's Change_flag checks: one query per announcement burst.
 #[test]
 fn change_flag_queries_once_per_announcement() {
     let mut flag = change_flag::create();

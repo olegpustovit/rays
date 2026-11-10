@@ -6,7 +6,8 @@ fn window_runtime_visibility() {
     let mut runtime = match create(None, None, None, None, 32, 24) {
         Ok(runtime) => runtime,
         Err(e) => {
-            println!("runtime visibility: skipped ({})", ogpu_core::error::to_string(&e));
+            println!("RAYS_TEST_SKIP: runtime visibility: skipped ({})", ogpu_core::error::to_string(&e));
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
             return;
         }
     };
@@ -21,8 +22,8 @@ fn window_runtime_visibility() {
     assert!(configuration.layer.is_some() && configuration.logical_width > 0);
     resize(&mut runtime, 40, 30).unwrap();
     assert_eq!(frame_facts(&runtime).logical_width, 40);
-    set_cursor(&mut runtime, cursor_shape::Text).unwrap();
-    set_cursor(&mut runtime, cursor_shape::Text).unwrap();
+    set_cursor(&mut runtime, CursorShape::Text).unwrap();
+    set_cursor(&mut runtime, CursorShape::Text).unwrap();
     destroy(&mut runtime).unwrap();
     assert!(show(&mut runtime).is_err());
     println!("runtime visibility: hidden/show flags passed");

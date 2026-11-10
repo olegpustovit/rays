@@ -16,3 +16,6 @@ ogpu_mock = { path = "../ogpu_mock" }
 [[test]]
 name = "window_runtime_visibility"
 harness = false
+
+[lints]
+workspace = true

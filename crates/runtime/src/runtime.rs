@@ -1,12 +1,12 @@
 use ogpu_core::error::{self, Error, ErrorKind};
 use ogpu_core::surface;
 use sdl3::cursor::{Cursor, Shape};
-use sdl3::window::{Flag, Window};
-use sdl3::{DialogFilter, DialogKind, NativeView, Rect};
+use sdl3::window::{Flag, Window as SdlWindow};
+use sdl3::{DialogFilter as SdlDialogFilter, DialogKind as SdlDialogKind, NativeView, Rect};
 
-#[allow(non_camel_case_types)]
+
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct frame_facts {
+pub struct FrameFacts {
     pub logical_width: i64,
     pub logical_height: i64,
     pub drawable_width: i64,
@@ -16,9 +16,9 @@ pub struct frame_facts {
 }
 
 /// An offscreen target never vsyncs and reports its drawable/logical ratio as its density.
-#[allow(non_camel_case_types)]
+
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct presentation_facts {
+pub struct PresentationFacts {
     pub logical_width: i64,
     pub logical_height: i64,
     pub drawable_width: i64,
@@ -58,22 +58,22 @@ pub mod change_flag {
     }
 }
 
-#[allow(non_camel_case_types)]
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum cursor_shape {
+pub enum CursorShape {
     Default,
-    Horizontal_resize,
-    Vertical_resize,
+    HorizontalResize,
+    VerticalResize,
     Text,
 }
 
-#[allow(non_camel_case_types)]
-struct window {
-    handle: Window,
+
+struct Window {
+    handle: SdlWindow,
     view: NativeView,
     vsync: bool,
-    cursors: Vec<(cursor_shape, Cursor)>,
-    cursor_shape: Option<cursor_shape>,
+    cursors: Vec<(CursorShape, Cursor)>,
+    cursor_shape: Option<CursorShape>,
     text_input: bool,
     changed: change_flag::ChangeFlag,
     /// window coordinates per logical point: SDL's display scale over its pixel density
@@ -82,24 +82,24 @@ struct window {
 
 /// One render target: a presenting window, or (`window = None`) an owned offscreen texture.
 pub struct Runtime {
-    window: Option<window>,
-    facts: frame_facts,
-    presentation: Option<presentation_facts>,
+    window: Option<Window>,
+    facts: FrameFacts,
+    presentation: Option<PresentationFacts>,
     dead: bool,
 }
 
-#[allow(non_camel_case_types)]
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum dialog_kind {
-    Open_file,
-    Open_files,
-    Save_file,
-    Open_folder,
+pub enum DialogKind {
+    OpenFile,
+    OpenFiles,
+    SaveFile,
+    OpenFolder,
 }
 
-#[allow(non_camel_case_types)]
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct dialog_filter {
+pub struct DialogFilter {
     pub name: String,
     pub pattern: String,
 }
@@ -129,7 +129,7 @@ pub fn clipboard_get_text() -> Result<String, Error> {
 // point); Windows reports pixels with density 1 and the monitor's scaling as the display scale
 // (1.5 at 150%). Rays lays out in points, so window coordinates are divided by that ratio here
 // and multiplied back where a size or a rect goes to SDL.
-fn window_unit(window: &Window) -> Result<f64, Error> {
+fn window_unit(window: &SdlWindow) -> Result<f64, Error> {
     let op = "Runtime.window_unit";
     let scale = window.display_scale().map_err(|failure| sdl_error(op, &failure))? as f64;
     let density = window.pixel_density().map_err(|failure| sdl_error(op, &failure))? as f64;
@@ -146,14 +146,14 @@ fn to_window(unit: f64, size: i64) -> i32 {
     std::cmp::max(1, ((size as f64) * unit).round() as i64) as i32
 }
 
-fn facts_in(unit: f64, window: &Window) -> Result<frame_facts, Error> {
+fn facts_in(unit: f64, window: &SdlWindow) -> Result<FrameFacts, Error> {
     let (lw, lh) = window.size().map_err(|failure| sdl_error("Runtime.facts", &failure))?;
     let (dw, dh) = window.size_in_pixels().map_err(|failure| sdl_error("Runtime.facts", &failure))?;
     if lw > 0 && lh > 0 && dw > 0 && dh > 0 {
         let lw = to_points(unit, lw);
         let lh = to_points(unit, lh);
         let (dw, dh) = (dw as i64, dh as i64);
-        Ok(frame_facts {
+        Ok(FrameFacts {
             logical_width: lw,
             logical_height: lh,
             drawable_width: dw,
@@ -166,12 +166,12 @@ fn facts_in(unit: f64, window: &Window) -> Result<frame_facts, Error> {
     }
 }
 
-fn facts(window: &Window) -> Result<frame_facts, Error> {
+fn facts(window: &SdlWindow) -> Result<FrameFacts, Error> {
     facts_in(window_unit(window)?, window)
 }
 
 // Every step is checked: the first failure is the result.
-fn reveal(window: &Window) -> std::result::Result<(), sdl3::Error> {
+fn reveal(window: &SdlWindow) -> std::result::Result<(), sdl3::Error> {
     window.show()?;
     window.restore()?;
     window.raise_window()?;
@@ -212,7 +212,7 @@ pub fn create(
         if hidden {
             flags.push(Flag::Hidden);
         }
-        let handle = Window::create(title, width as i32, height as i32, &flags).map_err(|failure| sdl_error(op, &failure))?;
+        let handle = SdlWindow::create(title, width as i32, height as i32, &flags).map_err(|failure| sdl_error(op, &failure))?;
         let unit = window_unit(&handle)?;
         if unit != 1. {
             handle.set_size(to_window(unit, width), to_window(unit, height)).map_err(|failure| sdl_error(op, &failure))?;
@@ -226,7 +226,7 @@ pub fn create(
         // logical-size target and immediately resizing it.
         let facts = facts(&handle)?;
         Ok(Runtime {
-            window: Some(window {
+            window: Some(Window {
                 handle,
                 view,
                 vsync,
@@ -248,8 +248,8 @@ pub fn create(
     created
 }
 
-fn offscreen_facts(logical_width: i64, logical_height: i64, width: i64, height: i64) -> frame_facts {
-    frame_facts {
+fn offscreen_facts(logical_width: i64, logical_height: i64, width: i64, height: i64) -> FrameFacts {
+    FrameFacts {
         logical_width,
         logical_height,
         drawable_width: width,
@@ -274,7 +274,7 @@ pub fn create_offscreen(logical_width: i64, logical_height: i64, width: i64, hei
     }
 }
 
-fn scale_rect(facts: &frame_facts, rect: (i64, i64, i64, i64)) -> (i64, i64, i64, i64) {
+fn scale_rect(facts: &FrameFacts, rect: (i64, i64, i64, i64)) -> (i64, i64, i64, i64) {
     let (x, y, w, h) = rect;
     let edge = |value: i64, logical: i64, drawable: i64| value * drawable / logical;
     let l = edge(x, facts.logical_width, facts.drawable_width);
@@ -284,7 +284,7 @@ fn scale_rect(facts: &frame_facts, rect: (i64, i64, i64, i64)) -> (i64, i64, i64
     (l, t, r - l, b - t)
 }
 
-pub fn map_logical_rect(facts: &frame_facts, rect: (i64, i64, i64, i64)) -> (i64, i64, i64, i64) {
+pub fn map_logical_rect(facts: &FrameFacts, rect: (i64, i64, i64, i64)) -> (i64, i64, i64, i64) {
     scale_rect(facts, rect)
 }
 
@@ -335,7 +335,7 @@ pub fn resize(value: &mut Runtime, width: i64, height: i64) -> Result<(), Error>
     }
 }
 
-pub fn frame_facts(value: &Runtime) -> frame_facts {
+pub fn frame_facts(value: &Runtime) -> FrameFacts {
     value.facts
 }
 
@@ -345,7 +345,7 @@ pub fn window_unit_of(value: &Runtime) -> f64 {
     value.window.as_ref().map_or(1., |w| w.unit)
 }
 
-fn live_window(operation: &str, value: &mut Runtime, callback: &mut dyn FnMut(&mut window) -> Result<(), Error>) -> Result<(), Error> {
+fn live_window(operation: &str, value: &mut Runtime, callback: &mut dyn FnMut(&mut Window) -> Result<(), Error>) -> Result<(), Error> {
     if value.dead {
         return Err(stale_error(operation));
     }
@@ -355,13 +355,13 @@ fn live_window(operation: &str, value: &mut Runtime, callback: &mut dyn FnMut(&m
     }
 }
 
-fn query_presentation(value: &Runtime) -> Result<presentation_facts, Error> {
+fn query_presentation(value: &Runtime) -> Result<PresentationFacts, Error> {
     let f = &value.facts;
     let pixel_density = match value.window.as_ref() {
         None => f.pixel_scale_x,
         Some(w) => w.handle.pixel_density().map_err(|failure| sdl_error("Runtime.presentation_facts", &failure))? as f64 * w.unit,
     };
-    Ok(presentation_facts {
+    Ok(PresentationFacts {
         logical_width: f.logical_width,
         logical_height: f.logical_height,
         drawable_width: f.drawable_width,
@@ -371,7 +371,7 @@ fn query_presentation(value: &Runtime) -> Result<presentation_facts, Error> {
 }
 
 /// Cached presentation facts, requeried when the drawable changes and after resize or show.
-pub fn presentation_facts(value: &mut Runtime) -> Result<presentation_facts, Error> {
+pub fn presentation_facts(value: &mut Runtime) -> Result<PresentationFacts, Error> {
     if value.dead {
         return Err(stale_error("Runtime.presentation_facts"));
     }
@@ -421,7 +421,7 @@ pub fn set_relative_mouse(value: &mut Runtime, enabled: bool) -> Result<(), Erro
     })
 }
 
-pub fn set_cursor(value: &mut Runtime, shape: cursor_shape) -> Result<(), Error> {
+pub fn set_cursor(value: &mut Runtime, shape: CursorShape) -> Result<(), Error> {
     live_window("Runtime.set_cursor", value, &mut |window| {
         if window.cursor_shape == Some(shape) {
             return Ok(());
@@ -430,10 +430,10 @@ pub fn set_cursor(value: &mut Runtime, shape: cursor_shape) -> Result<(), Error>
             Some(i) => i,
             None => {
                 let native = match shape {
-                    cursor_shape::Default => Shape::Default,
-                    cursor_shape::Horizontal_resize => Shape::EwResize,
-                    cursor_shape::Vertical_resize => Shape::NsResize,
-                    cursor_shape::Text => Shape::Text,
+                    CursorShape::Default => Shape::Default,
+                    CursorShape::HorizontalResize => Shape::EwResize,
+                    CursorShape::VerticalResize => Shape::NsResize,
+                    CursorShape::Text => Shape::Text,
                 };
                 let cursor = Cursor::create(native).map_err(|failure| sdl_error("Runtime.set_cursor", &failure))?;
                 // Lookup is by key; retained list order determines destruction order.
@@ -494,22 +494,22 @@ pub fn show(value: &mut Runtime) -> Result<(), Error> {
 /// ("png;jpg"), or "*". At most 8 dialogs are open at once; a ninth is an error.
 pub fn show_dialog(
     value: &mut Runtime,
-    filters: Option<&[dialog_filter]>,
+    filters: Option<&[DialogFilter]>,
     default_location: Option<&str>,
-    kind: dialog_kind,
+    kind: DialogKind,
 ) -> Result<i64, Error> {
     let op = "Runtime.show_dialog";
     let mut id = 0;
-    let filters: Vec<DialogFilter> = filters
+    let filters: Vec<SdlDialogFilter> = filters
         .unwrap_or(&[])
         .iter()
-        .map(|f| DialogFilter { name: f.name.clone(), pattern: f.pattern.clone() })
+        .map(|f| SdlDialogFilter { name: f.name.clone(), pattern: f.pattern.clone() })
         .collect();
     let native = match kind {
-        dialog_kind::Open_file => DialogKind::OpenFile,
-        dialog_kind::Open_files => DialogKind::OpenFiles,
-        dialog_kind::Save_file => DialogKind::SaveFile,
-        dialog_kind::Open_folder => DialogKind::OpenFolder,
+        DialogKind::OpenFile => SdlDialogKind::OpenFile,
+        DialogKind::OpenFiles => SdlDialogKind::OpenFiles,
+        DialogKind::SaveFile => SdlDialogKind::SaveFile,
+        DialogKind::OpenFolder => SdlDialogKind::OpenFolder,
     };
     live_window(op, value, &mut |window| {
         id = sdl3::dialog::show(&window.handle, native, &filters, default_location).map_err(|failure| sdl_error(op, &failure))? as i64;

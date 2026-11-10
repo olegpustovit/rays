@@ -69,29 +69,29 @@ pub fn positive(width: i32, height: i32) -> bool {
     width > 0 && height > 0
 }
 
-pub fn translate(event: SdlEvent) -> Option<runtime_input::event> {
+pub fn translate(event: SdlEvent) -> Option<runtime_input::Event> {
     match event {
-        SdlEvent::MouseMotion { x, y, .. } => Some(Event::Pointer_moved((x, y))),
+        SdlEvent::MouseMotion { x, y, .. } => Some(Event::PointerMoved((x, y))),
         SdlEvent::MouseButton { button: raw, down, x, y } => {
             let value = button(raw);
             Some(if down {
-                Event::Pointer_pressed(value, (x, y))
+                Event::PointerPressed(value, (x, y))
             } else {
-                Event::Pointer_released(value, (x, y))
+                Event::PointerReleased(value, (x, y))
             })
         }
         SdlEvent::MouseWheel { x, y, .. } => Some(Event::Scrolled((x, y))),
-        SdlEvent::Scroll { x, y, phase, seconds } => Some(Event::Trackpad_scrolled {
+        SdlEvent::Scroll { x, y, phase, seconds } => Some(Event::TrackpadScrolled {
             delta: (x, y),
             phase: scroll_phase(phase),
             time: seconds,
         }),
         SdlEvent::Key { key: raw, down, .. } => {
             let value = key(raw);
-            Some(if down { Event::Key_pressed(value) } else { Event::Key_released(value) })
+            Some(if down { Event::KeyPressed(value) } else { Event::KeyReleased(value) })
         }
-        SdlEvent::TextInput(text) => Some(Event::Text_input(text)),
-        SdlEvent::TextEditing { text, start, length } => Some(Event::Text_editing {
+        SdlEvent::TextInput(text) => Some(Event::TextInput(text)),
+        SdlEvent::TextEditing { text, start, length } => Some(Event::TextEditing {
             text,
             start: i64::from(start),
             length: i64::from(length),
@@ -102,37 +102,37 @@ pub fn translate(event: SdlEvent) -> Option<runtime_input::event> {
         SdlEvent::Window(WindowChange::PixelSizeChanged(width, height))
             if positive(width, height) =>
         {
-            Some(Event::Pixel_size_changed((i64::from(width), i64::from(height))))
+            Some(Event::PixelSizeChanged((i64::from(width), i64::from(height))))
         }
         SdlEvent::Window(WindowChange::Resized(..) | WindowChange::PixelSizeChanged(..)) => None,
-        SdlEvent::Window(WindowChange::FocusLost) => Some(Event::Focus_lost),
-        SdlEvent::Window(WindowChange::FocusGained) => Some(Event::Focus_gained),
+        SdlEvent::Window(WindowChange::FocusLost) => Some(Event::FocusLost),
+        SdlEvent::Window(WindowChange::FocusGained) => Some(Event::FocusGained),
         SdlEvent::Window(WindowChange::Shown | WindowChange::Restored) => {
-            Some(Event::Visibility_changed(true))
+            Some(Event::VisibilityChanged(true))
         }
         // SDL sends an event when a window becomes occluded and none when it stops:
         // the runtime reads the window's state to see it end (Runtime.visible).
         SdlEvent::Window(
             WindowChange::Hidden | WindowChange::Minimized | WindowChange::Occluded,
-        ) => Some(Event::Visibility_changed(false)),
+        ) => Some(Event::VisibilityChanged(false)),
         SdlEvent::Window(WindowChange::CloseRequested) => Some(Event::Closed),
         SdlEvent::Quit => Some(Event::Closed),
         SdlEvent::Pinch { phase: PinchPhase::Updated, scale } => Some(Event::Pinched(scale)),
         SdlEvent::Pinch { phase: PinchPhase::Began | PinchPhase::Ended, .. } => None,
-        SdlEvent::Drop { change: DropChange::File(path), .. } => Some(Event::File_dropped(path)),
+        SdlEvent::Drop { change: DropChange::File(path), .. } => Some(Event::FileDropped(path)),
         SdlEvent::Drop { change: DropChange::Position, x, y } => {
-            Some(Event::File_drag_moved((x, y)))
+            Some(Event::FileDragMoved((x, y)))
         }
-        SdlEvent::Drop { change: DropChange::Complete, .. } => Some(Event::File_drag_ended),
+        SdlEvent::Drop { change: DropChange::Complete, .. } => Some(Event::FileDragEnded),
         SdlEvent::Drop { change: DropChange::Begin, .. } => None,
         SdlEvent::Dialog { id, outcome: DialogOutcome::Chosen(paths) } => {
-            Some(Event::File_dialog { id: i64::from(id), result: Ok(paths) })
+            Some(Event::FileDialog { id: i64::from(id), result: Ok(paths) })
         }
         SdlEvent::Dialog { id, outcome: DialogOutcome::Cancelled } => {
-            Some(Event::File_dialog { id: i64::from(id), result: Ok(Vec::new()) })
+            Some(Event::FileDialog { id: i64::from(id), result: Ok(Vec::new()) })
         }
         SdlEvent::Dialog { id, outcome: DialogOutcome::Failed(message) } => {
-            Some(Event::File_dialog { id: i64::from(id), result: Err(message) })
+            Some(Event::FileDialog { id: i64::from(id), result: Err(message) })
         }
     }
 }
@@ -165,7 +165,7 @@ pub fn push(value: &mut runtime_input::RuntimeInput, event: SdlEvent) -> Result<
     match event {
         SdlEvent::MouseMotion { x, y, dx, dy } => {
             runtime_input::add_motion(value, dx, dy);
-            runtime_input::push(value, Event::Pointer_moved((x, y)))
+            runtime_input::push(value, Event::PointerMoved((x, y)))
         }
         event => match translate(event) {
             None => Ok(()),

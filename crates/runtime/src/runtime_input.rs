@@ -1,23 +1,24 @@
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 
-use input::{Event, Platform, platform_of_name};
+pub use input::Event;
+use input::{Platform, platform_of_name};
 
-#[allow(non_camel_case_types)]
-pub type event = Event;
 
-#[allow(non_camel_case_types)]
+
+
+
 #[derive(Clone, Debug, PartialEq)]
-pub struct snapshot {
+pub struct Snapshot {
     pub pointer: (f64, f64),
     pub mouse_delta: (f64, f64),
     pub visible: bool,
 }
 
 // All-float records store their fields unboxed, so per-event updates assign in place.
-#[allow(non_camel_case_types)]
+
 #[derive(Debug)]
-struct pair {
+struct Pair {
     px: f64,
     py: f64,
 }
@@ -26,8 +27,8 @@ struct pair {
 pub struct RuntimeInput {
     max_events: i64,
     events: VecDeque<Event>,
-    pointer: pair,
-    mouse_delta: pair,
+    pointer: Pair,
+    mouse_delta: Pair,
     visible: bool,
     // Relative (captured) pointer mode: motion deltas come from the device's
     // relative motion, since absolute positions stop at the window edge.
@@ -45,8 +46,8 @@ pub fn create(max_events: i64, logical_width: i64, logical_height: i64) -> Resul
         Ok(RuntimeInput {
             max_events,
             events: VecDeque::new(),
-            pointer: pair { px: 0., py: 0. },
-            mouse_delta: pair { px: 0., py: 0. },
+            pointer: Pair { px: 0., py: 0. },
+            mouse_delta: Pair { px: 0., py: 0. },
             visible: true,
             relative: false,
             unit: 1.,
@@ -56,7 +57,7 @@ pub fn create(max_events: i64, logical_width: i64, logical_height: i64) -> Resul
 
 fn apply(value: &mut RuntimeInput, event: &Event) {
     match *event {
-        Event::Pointer_moved((x, y)) => {
+        Event::PointerMoved((x, y)) => {
             if !value.relative {
                 value.mouse_delta.px = value.mouse_delta.px + x - value.pointer.px;
                 value.mouse_delta.py = value.mouse_delta.py + y - value.pointer.py;
@@ -64,38 +65,38 @@ fn apply(value: &mut RuntimeInput, event: &Event) {
             value.pointer.px = x;
             value.pointer.py = y;
         }
-        Event::Pointer_pressed(_, (x, y)) | Event::Pointer_released(_, (x, y)) => {
+        Event::PointerPressed(_, (x, y)) | Event::PointerReleased(_, (x, y)) => {
             value.pointer.px = x;
             value.pointer.py = y;
         }
-        Event::Visibility_changed(visible) => value.visible = visible,
-        Event::Text_input(_)
-        | Event::Text_editing { .. }
-        | Event::File_dropped(_)
-        | Event::File_drag_moved(_)
-        | Event::File_drag_ended
-        | Event::Pixel_size_changed(_)
+        Event::VisibilityChanged(visible) => value.visible = visible,
+        Event::TextInput(_)
+        | Event::TextEditing { .. }
+        | Event::FileDropped(_)
+        | Event::FileDragMoved(_)
+        | Event::FileDragEnded
+        | Event::PixelSizeChanged(_)
         | Event::Pinched(_)
-        | Event::Trackpad_scrolled { .. }
-        | Event::Focus_gained
+        | Event::TrackpadScrolled { .. }
+        | Event::FocusGained
         | Event::Closed
-        | Event::File_dialog { .. }
-        | Event::Dialog_opened(_)
-        | Event::Pointer_cancelled(_)
+        | Event::FileDialog { .. }
+        | Event::DialogOpened(_)
+        | Event::PointerCancelled(_)
         | Event::Scrolled(_)
-        | Event::Key_pressed(_)
-        | Event::Key_released(_)
-        | Event::Focus_lost
+        | Event::KeyPressed(_)
+        | Event::KeyReleased(_)
+        | Event::FocusLost
         | Event::Resized(_) => {}
     }
 }
 
-pub fn push(value: &mut RuntimeInput, event: event) -> Result<(), String> {
+pub fn push(value: &mut RuntimeInput, event: Event) -> Result<(), String> {
     let error = match &event {
-        Event::File_dropped(path) if path.is_empty() || path.contains('\0') => {
+        Event::FileDropped(path) if path.is_empty() || path.contains('\0') => {
             Some("file-drop path is malformed")
         }
-        Event::Resized((width, height)) | Event::Pixel_size_changed((width, height))
+        Event::Resized((width, height)) | Event::PixelSizeChanged((width, height))
             if *width <= 0 || *height <= 0 =>
         {
             Some("resize dimensions must be positive")
@@ -103,7 +104,7 @@ pub fn push(value: &mut RuntimeInput, event: event) -> Result<(), String> {
         Event::Pinched(scale) if !scale.is_finite() || *scale <= 0. => {
             Some("pinch scale must be finite and positive")
         }
-        Event::Trackpad_scrolled { delta: (x, y), time: seconds, .. }
+        Event::TrackpadScrolled { delta: (x, y), time: seconds, .. }
             if !(x.is_finite() && y.is_finite() && seconds.is_finite()) =>
         {
             Some("scroll gesture must be finite")
@@ -121,7 +122,7 @@ pub fn push(value: &mut RuntimeInput, event: event) -> Result<(), String> {
     Ok(())
 }
 
-pub fn drain(value: &mut RuntimeInput) -> Vec<event> {
+pub fn drain(value: &mut RuntimeInput) -> Vec<Event> {
     value.events.drain(..).collect()
 }
 
@@ -163,8 +164,8 @@ pub fn set_extent(_value: &RuntimeInput, logical_width: i64, logical_height: i64
     }
 }
 
-pub fn snapshot(value: &RuntimeInput) -> snapshot {
-    snapshot {
+pub fn snapshot(value: &RuntimeInput) -> Snapshot {
+    Snapshot {
         pointer: (value.pointer.px, value.pointer.py),
         mouse_delta: (value.mouse_delta.px, value.mouse_delta.py),
         visible: value.visible,
