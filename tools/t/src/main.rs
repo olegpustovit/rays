@@ -1464,10 +1464,12 @@ mod tests {
     #[test]
     fn cargo_json_manifest_disambiguates_shared_gpu_target_names() {
         let root = temp_path("manifest");
-        fs::create_dir_all(&root).unwrap();
-        let manifest = root.join("Cargo.toml");
+        // Exercise JSON path escaping on Unix as well as native Windows separators.
+        let manifest = root.join("cargo\\metadata").join("Cargo.toml");
+        fs::create_dir_all(manifest.parent().unwrap()).unwrap();
         fs::write(&manifest, "[package]\nname = \"flow_gpu\"\n").unwrap();
-        let output = format!(r#"{{"reason":"compiler-artifact","package_id":"path+file:///workspace#0.1.0","manifest_path":"{}","target":{{"name":"gpu_all","test":true}},"executable":"target/debug/deps/gpu_all-123"}}"#, manifest.display());
+        let escaped_manifest = manifest.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+        let output = format!(r#"{{"reason":"compiler-artifact","package_id":"path+file:///workspace#0.1.0","manifest_path":"{}","target":{{"name":"gpu_all","test":true}},"executable":"target/debug/deps/gpu_all-123"}}"#, escaped_manifest);
         assert_eq!(test_executables(output.as_bytes()).unwrap()[0].crate_name, "flow_gpu");
         fs::remove_dir_all(root).unwrap();
     }
