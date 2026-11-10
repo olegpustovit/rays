@@ -136,6 +136,33 @@ fn lookup(geometries: Vec<rdk_core::geometry::T>, sources: Vec<i64>) -> ak::Geom
     Arc::new(move |id: i64| sources.iter().position(|s| *s == id).map(|i| geometries[i].clone()))
 }
 fn key_text(v: &Value) -> String {
+    if let Value::Record(fields) = v {
+        let mut arrays: Vec<&Value> = Vec::new();
+        for (_, value) in fields.iter() {
+            let large = match value {
+                Value::IntArray(values) => values.len() >= 1_048_576,
+                Value::Floats(_, values) => values.len() >= 1_048_576,
+                _ => false,
+            };
+            if large && !arrays.iter().any(|previous| match (*previous, value) {
+                (Value::IntArray(a), Value::IntArray(b)) => Arc::ptr_eq(a, b),
+                (Value::Floats(_, a), Value::Floats(_, b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            }) {
+                arrays.push(value);
+                if arrays.len() > 32 { break; }
+            }
+        }
+        // The measured 1M-word dispatch bound amortizes pool overhead; digest memoization still
+        // starts at 4096. Stay within its 32 slots, then assemble ordered keys/residuals here.
+        // A pool failure leaves misses for the original sequential computation.
+        if (2..=32).contains(&arrays.len()) {
+            let _ = parallel::for_(1, 0, arrays.len() as i64 - 1, &|index| {
+                flow_syntax::value::key_of(&|_| 0, arrays[index as usize]);
+                Ok(())
+            });
+        }
+    }
     txt(&flow_syntax::value::key_of(&|r: ResidualId| E::residual::residual_id(r), v))
 }
 fn txt(bytes: &[u8]) -> String {
@@ -5271,6 +5298,38 @@ fn failed_card_as_call(n: &ENode, plan: &Plan, checked: &Workspace) -> ENode {
 #[cfg(test)]
 mod lend_session_tests {
     use super::*;
+
+    #[test]
+    fn numeric_field_keys_preserve_order_bits_widths_and_residuals_in_all_domains() {
+        let record = |length| {
+            let ints = Arc::new((0..length).map(|i| i as i64 - 4096).collect::<Vec<_>>());
+            let floats = Arc::new((0..length + 3).map(|i| match i % 4 {
+                0 => -0.0, 1 => f64::from_bits(0x7ff8000000000042), 2 => f64::INFINITY, _ => i as f64,
+            }).collect::<Vec<_>>());
+            Value::Record(vec![
+                ("z".into(), Value::IntArray(ints.clone())),
+                ("residual".into(), Value::Residual(ResidualId(123, 456))),
+                ("a".into(), Value::Floats(3, floats.clone())),
+                ("same_int".into(), Value::IntArray(ints)),
+                ("same_digest_other_width".into(), Value::Floats(1, floats)),
+            ].into())
+        };
+        for length in [8193, 1_048_578] {
+            let expected = txt(&flow_syntax::value::key_of(&|id| id.0, &record(length)));
+            for domains in [1, 4] {
+                parallel::with_domains(domains, || {
+                    assert_eq!(key_text(&record(length)), expected);
+                    parallel::for_(1, 0, 1, &|_| {
+                        assert_eq!(key_text(&record(length)), expected);
+                        Ok(())
+                    }).unwrap();
+                });
+            }
+        }
+        let fields = (0..33).map(|i| (format!("field{i}").into(), Value::IntArray(Arc::new(vec![i; 4097])))).collect::<Vec<_>>();
+        let over_capacity = Value::Record(fields.into());
+        assert_eq!(key_text(&over_capacity), txt(&flow_syntax::value::key_of(&|id| id.0, &over_capacity)));
+    }
 
     #[test]
     fn reentrant_lend_does_not_deadlock() {
