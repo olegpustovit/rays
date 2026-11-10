@@ -14,3 +14,8 @@ sdl3_sys = { path = "../sdl3_sys", features = ["test-util"] }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "window_sdl3"
+path = "tests/window_sdl3.rs"
+harness = false

@@ -144,7 +144,8 @@ pub mod thread {
     }
 }
 
-// The test harness never runs a test on the process main thread, so a test claims that role.
+// Dummy-driver unit tests simulate the guard; real native tests use the production guard
+// from the process initial thread in the harness-free window_sdl3 target.
 #[cfg(not(test))]
 fn main_thread() -> bool {
     sys::is_main_thread()
