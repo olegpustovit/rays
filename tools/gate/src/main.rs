@@ -928,6 +928,8 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ][..]),
         // The window host is a leaf: it may reach only SDL, the input types and the native layer token.
         ("pxui_sdl", &["sdl3", "input", "native_layer_token_sys"][..]),
+        // Its Wayland sibling: libwayland-client and xkbcommon through its own C shim, no other crate.
+        ("pxui_wayland", &["input", "native_layer_token_sys"][..]),
         ("runtime", &["pxui_sdl", "sdl3", "ogpu_core", "input"][..]),
         ("runtime_resources", &["sdl3", "ogpu_core"][..]),
         ("renderer", &["ogpu_core", "scene_command", "runtime", "lru", "rays_math", "runtime_resources", "scene_core"][..]),
@@ -1027,7 +1029,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let foundational = [
         "cfmt",
         "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
-        "lru", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3", "pxui_sdl",
+        "lru", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3", "pxui_sdl", "pxui_wayland",
         "metal_sys", "vulkan_sys", "ogpu_core",
         "rdk_core",
     ];
@@ -1045,6 +1047,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     }
     forbid("runtime", &upper);
     forbid("pxui_sdl", &["ogpu_core", "runtime", "renderer"]);
+    forbid("pxui_wayland", &["sdl3", "pxui_sdl", "ogpu_core", "runtime", "renderer", "pxui", "pxui_render"]);
     forbid("flow_native", &["pxui", "rays_shell", "rays_graph", "rays_editor"]);
     forbid("flow_ir", &[
         "rays", "pxui", "rays_shell", "rays_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops",
@@ -1139,9 +1142,12 @@ fn target_platform(target: &str) -> Option<&'static str> {
     }
     let apple = target.contains("apple") || target.contains("macos") || target.contains("ios");
     let windows = target.contains("windows");
+    // A Linux-only target (the Wayland host's tests) selects nothing on the two gated platforms.
+    let linux = target.contains("linux");
     match (apple, windows) {
         (true, false) => Some("apple"),
         (false, true) => Some("windows"),
+        (false, false) if linux => Some("linux"),
         _ => None,
     }
 }
@@ -1172,7 +1178,8 @@ fn ogpu_selection_errors(
                     "ogpu_vulkan" => "windows",
                     _ => continue,
                 };
-                if dependency.optional || dependency.target.as_deref().and_then(target_platform) != Some(expected) {
+                let platform = dependency.target.as_deref().and_then(target_platform);
+                if dependency.optional || !(platform == Some(expected) || (expected == "windows" && platform == Some("linux"))) {
                     errors.push(format!("{path}: {} backend {} must be nonoptional and target {expected}", package.crate_name, dependency.alias));
                 }
             }
@@ -1738,6 +1745,8 @@ mod tests {
         app.deps.push(DepSpec { kind: "dependencies".into(), ..mock });
         assert!(!check(&app).is_empty(), "native applications cannot select the mock backend");
         assert_eq!(target_platform("cfg(target_os = \"windows\")"), Some("windows"));
+        assert_eq!(target_platform("cfg(any(windows, target_os = \"linux\"))"), Some("windows"));
+        assert_eq!(target_platform("cfg(target_os = \"linux\")"), Some("linux"));
     }
 
     #[test]

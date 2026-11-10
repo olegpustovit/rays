@@ -1,4 +1,4 @@
-//! Safe Vulkan device API over `vulkan_sys` (Windows only).
+//! Safe Vulkan device API over `vulkan_sys` (Windows and Linux).
 #![forbid(unsafe_code)]
 
 use native_layer_token_sys::portable::Token;
@@ -165,6 +165,7 @@ impl ZeroedView {
 pub struct Sampler(sys::Sampler);
 pub struct Surface { inner: sys::Surface, _token: Token }
 impl Surface {
+    pub fn set_extent(&mut self, width: u32, height: u32) { self.inner.set_extent(width, height) }
     pub fn configure(&mut self, immediate: bool) -> Result<(), Error> { self.inner.configure(immediate).map_err(|failure| error("surface_configure", failure)) }
     pub fn acquire(&mut self) -> Result<Acquire, Error> { self.inner.acquire().map_err(|failure| error("surface_acquire", failure)) }
     pub fn discard(&mut self) { self.inner.discard() }

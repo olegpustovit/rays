@@ -2,7 +2,7 @@
 use std::{env, path::PathBuf, process::Command};
 
 fn tool(name: &str) -> Option<PathBuf> {
-    let exe = format!("{name}.exe");
+    let exe = if cfg!(windows) { format!("{name}.exe") } else { name.to_owned() };
     let mut dirs: Vec<PathBuf> = env::var_os("PATH").map(|p| env::split_paths(&p).collect()).unwrap_or_default();
     for fallback in ["C:/msys64/mingw64/bin", "C:/msys64/ucrt64/bin", "C:/VulkanSDK/Bin"] {
         dirs.push(PathBuf::from(fallback));
@@ -14,11 +14,28 @@ fn run(program: &PathBuf, dir: &PathBuf, args: &[&str]) -> bool {
     Command::new(program).current_dir(dir).args(args).status().is_ok_and(|s| s.success())
 }
 
+/// Builds the Wayland test shim where libwayland headers exist; the `wayland_probe` cfg gates the test that uses it.
+/// ponytail: header path is hardcoded to /usr/include (Debian/Ubuntu); use pkg-config if another layout matters.
+fn wayland_probe() {
+    println!("cargo:rustc-check-cfg=cfg(wayland_probe)");
+    println!("cargo:rerun-if-changed=tests/wayland_probe.c");
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") || !std::path::Path::new("/usr/include/wayland-client.h").is_file() {
+        return;
+    }
+    cc::Build::new().file("tests/wayland_probe.c").cargo_metadata(false).warnings(true).compile("wayland_probe");
+    // Link args are not propagated downstream, so only this package's own test binary gets the shim and libwayland-client.
+    println!("cargo:rustc-link-arg={}/libwayland_probe.a", env::var("OUT_DIR").unwrap());
+    println!("cargo:rustc-link-arg=-lwayland-client");
+    println!("cargo:rustc-cfg=wayland_probe");
+}
+
 fn main() {
+    wayland_probe();
     let source = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("tests/shaders");
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     println!("cargo:rerun-if-changed={}", source.display());
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=PATH");
     let (Some(glslang), Some(link)) = (tool("glslangValidator"), tool("spirv-link")) else {
         println!("cargo:warning=glslangValidator or spirv-link not found: the gpu_ conformance tests cannot run");
         println!("cargo:rustc-env=OGPU_VK_SPV_DIR=");

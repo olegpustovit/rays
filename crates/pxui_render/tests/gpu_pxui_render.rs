@@ -18,7 +18,7 @@ fn ok<T>(result: Result<T, Error>) -> T { result.unwrap_or_else(|e| panic!("{}",
 
 /// A device on the platform backend, or None (reported as a skip) where neither exists.
 fn open() -> Option<Device> {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     ogpu_core::impl_::select(ogpu_core::impl_::Impl {
         backend: ogpu_vulkan::impl_::BACKEND,
         create_driver: || ogpu_vulkan::backend::create_with_validation((true, true)),
@@ -26,7 +26,7 @@ fn open() -> Option<Device> {
     });
     #[cfg(target_os = "macos")]
     ogpu_core::impl_::select(ogpu_metal::impl_::implementation());
-    if !cfg!(any(windows, target_os = "macos")) {
+    if !cfg!(any(windows, target_os = "linux", target_os = "macos")) {
         println!("RAYS_TEST_SKIP: no native OGPU implementation on this platform");
         assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "RAYS_ALLOW_SKIP=1 explicitly permits skipping");
         return None;

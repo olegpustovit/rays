@@ -13,8 +13,11 @@ ogpu_core = { path = "../ogpu_core" }
 vulkan_sys = { path = "../vulkan_sys" }
 native_layer_token_sys = { path = "../native_layer_token_sys" }
 
-[target.'cfg(windows)'.dependencies]
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
 rays_math = { path = "../rays_math" }
+
+[build-dependencies]
+cc = "1"
 
 [lints]
 workspace = true

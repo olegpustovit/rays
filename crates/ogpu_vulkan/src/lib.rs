@@ -1,11 +1,11 @@
-//! OGPU's Vulkan implementation: the driver traits over the safe `vulkan` module (Windows only).
+//! OGPU's Vulkan implementation: the driver traits over the safe `vulkan` module (Windows and Linux).
 pub mod reflect;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 pub mod vulkan;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 pub mod backend;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 pub mod impl_;
 
-#[cfg(all(test, windows))]
+#[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;

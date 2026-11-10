@@ -328,6 +328,8 @@ fn gpu_conformance_transfer_and_compute() {
     compact[8..].copy_from_slice(&padded[256..264]);
     require(be::read_texture(&first, 8).unwrap_or_else(|failure| die(failure)) == compact, "uploaded texture differs from its padded rows");
     let inset = be::create_texture(&device, TextureDescriptor { width: 4, height: 4, ..round_trip }).unwrap_or_else(|failure| die(failure));
+    // New image memory is undefined (lavapipe recycles freed memory), so start from zeros.
+    be::write_texture(&inset, None, Origin { x: 0, y: 0, z: 0 }, Extent { width: 4, height: 4, depth: 1 }, 16, &[0u8; 64]).unwrap_or_else(|failure| die(failure));
     blit(&|encoder| {
         be::buffer_to_texture(encoder, &upload, None, 256, 512, &inset, None, Some(Origin { x: 1, y: 1, z: 0 }), extent).unwrap_or_else(|failure| die(failure))
     });
@@ -659,7 +661,10 @@ fn gpu_conformance_ray_tracing() {
     let Some(device) = open() else { return };
     let capabilities = be::capabilities(&device);
     let profile = capabilities;
-    require(profile.ray_tracing && profile.ray_tracing_motion && profile.ray_tracing_refit, "this device lacks ray queries");
+    if !(profile.ray_tracing && profile.ray_tracing_motion && profile.ray_tracing_refit) {
+        eprintln!("RAYS_TEST_SKIP: OGPU ray tracing (Vulkan): this device lacks ray queries (CPU drivers such as lavapipe)");
+        return;
+    }
     let queue = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
     let ray_interface = vec![
         compute_binding(0, BindingKind::AccelerationStructure),
@@ -1521,12 +1526,14 @@ fn gpu_painter_primitives() {
     require(pixels.chunks_exact(4).all(|p| p == [0x20, 0x40, 0x80, 0xff]), "offscreen clear differs");
 
     let atlas = be::create_texture(&device, TextureDescriptor { format: TextureFormat::R8Unorm, ..texture_descriptor("atlas", 4, &[TextureUsage::TextureBinding, TextureUsage::TextureCopyDst]) }).unwrap_or_else(|failure| die(failure));
+    // New image memory is undefined (lavapipe recycles freed memory), so start from zeros.
+    be::write_texture(&atlas, None, Origin { x: 0, y: 0, z: 0 }, Extent { width: 4, height: 4, depth: 1 }, 4, &[0u8; 16]).unwrap_or_else(|failure| die(failure));
     // A 2x2 glyph with a padded 4-byte row pitch, whose last row carries only its pixels.
     be::write_texture(&atlas, None, Origin { x: 1, y: 1, z: 0 }, Extent { width: 2, height: 2, depth: 1 }, 4, &[1, 2, 0, 0, 3, 4]).unwrap_or_else(|failure| die(failure));
     let mut expected = vec![0u8; 16];
     expected[5..7].copy_from_slice(&[1, 2]);
     expected[9..11].copy_from_slice(&[3, 4]);
-    require(be::read_texture(&atlas, 4).unwrap_or_else(|failure| die(failure)) == expected, "R8 sub-rectangle write differs");
+    assert_eq!(be::read_texture(&atlas, 4).unwrap_or_else(|failure| die(failure)), expected, "R8 sub-rectangle write differs");
     refused(be::write_texture(&atlas, None, Origin { x: 3, y: 3, z: 0 }, Extent { width: 2, height: 2, depth: 1 }, 4, &[0; 6]).err(), ErrorKind::InvalidArgument, "an out-of-bounds rectangle was accepted");
 
     let ring = be::create_host_buffer(&device, buf("ring", 64, &[BufferUsage::Vertex, BufferUsage::Storage])).unwrap_or_else(|failure| die(failure));
@@ -1564,4 +1571,42 @@ fn gpu_out_of_device_memory_is_capacity() {
     drop(raw);
     assert_eq!(impl_::live_handles(), 0, "out-of-memory test leaked handles");
     assert_eq!(crate::vulkan::Device::validation_messages(), 0, "out-of-memory test: validation messages");
+}
+
+/// Wayland: surface from a (wl_display, wl_surface) token, swapchain, acquire and present one image. Needs a compositor
+/// (WSLg's `WAYLAND_DISPLAY=wayland-0` works); no xdg role is required for the swapchain.
+#[cfg(wayland_probe)]
+#[test]
+fn gpu_wayland_surface_swapchain_present() {
+    use crate::vulkan as vk;
+    use ogpu_core::validation::{admit_texture, TextureProfile};
+    use native_layer_token_sys::portable::Token;
+    use native_layer_token_sys::{Token as SysToken, WaylandLayer};
+    use std::ffi::c_void;
+    unsafe extern "C" { fn rays_wl_probe_open(display: *mut *mut c_void, surface: *mut *mut c_void) -> i32; }
+    unsafe extern "C" fn keep(_: *mut c_void) {}
+    unsafe extern "C" fn free_layer(layer: *mut c_void) { drop(unsafe { Box::from_raw(layer.cast::<WaylandLayer>()) }) }
+    let (mut display, mut surface) = (std::ptr::null_mut(), std::ptr::null_mut());
+    if unsafe { rays_wl_probe_open(&mut display, &mut surface) } != 0 {
+        eprintln!("RAYS_TEST_SKIP: OGPU Wayland surface: no compositor (set WAYLAND_DISPLAY / XDG_RUNTIME_DIR)");
+        assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "RAYS_ALLOW_SKIP=1 explicitly permits skipping");
+        return;
+    }
+    let layer = Box::into_raw(Box::new(WaylandLayer { display, surface }));
+    // SAFETY: the layer is freed exactly once by the token's release callback; display and surface outlive the process.
+    let token = Token::from_sys(unsafe { SysToken::from_raw(layer.cast(), 1, 1, Some(keep), Some(free_layer)) }.unwrap());
+    let device = vk::Device::create(true, true).expect("fatal-validation Vulkan device");
+    let mut window = device.surface(&token, 1, 1, false).expect("VkSurfaceKHR from wl_surface");
+    assert_eq!(window.acquire().unwrap(), vk::Acquire::Occluded, "no size asked yet");
+    window.set_extent(64, 48);
+    let caps = device.facts().unwrap().capabilities();
+    let profile = TextureProfile::descriptor_2d(TextureFormat::Rgba8Unorm, 64, 48, types::StorageMode::Private,
+        vec![TextureUsage::TextureCopySrc, TextureUsage::RenderAttachment], None);
+    let source = device.texture(&admit_texture(&caps, profile).unwrap()).unwrap();
+    let queue = device.queue().unwrap();
+    assert!(matches!(window.acquire().unwrap(), vk::Acquire::Image(_)), "swapchain image acquired");
+    let mut commands = queue.begin().unwrap();
+    let epoch = window.present(&mut commands, &source).expect("present");
+    queue.wait(epoch).unwrap();
+    assert_eq!(vk::Device::validation_messages(), 0);
 }

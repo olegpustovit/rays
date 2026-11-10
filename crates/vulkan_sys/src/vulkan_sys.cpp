@@ -1,9 +1,14 @@
 #define VK_NO_PROTOTYPES
+#ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #undef interface
+#else
+#define VK_USE_PLATFORM_WAYLAND_KHR
+#include <unistd.h>
+#endif
 #include "vendor/volk.h"
 #include "vendor/vk_mem_alloc.h"
 #include <algorithm>
@@ -98,7 +103,7 @@ struct Device {
   VkQueue main_queue{}, transfer_queue{};
   uint32_t main_family{}, transfer_family{};
   VkPhysicalDeviceProperties properties{};
-  bool budget{};
+  bool budget{}, swapchain{}, ray_tracing{};
   VkPipelineCache pipeline_cache{};
   std::atomic<int64_t> held{};
   VkSemaphore ticks{};
@@ -138,7 +143,7 @@ struct Surface {
   VkSemaphore rendered[16]{};
   VkSemaphore acquired[17]{};
   uint32_t image_count{}, acquire_at{};
-  VkExtent2D extent{};
+  VkExtent2D extent{}, wanted{};  // wanted: the size a Wayland host asks for (the surface itself reports none)
   VkPresentModeKHR mode{};
   int held_image{-1};
   VkSemaphore held_semaphore{};
@@ -177,12 +182,19 @@ VkBool32 VKAPI_CALL on_message(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                const VkDebugUtilsMessengerCallbackDataEXT *data, void *) {
   if (severity < VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT || validation_silent) return VK_FALSE;
   validation_messages.fetch_add(1, std::memory_order_relaxed);
+#ifdef _WIN32
   DWORD n;
   HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
   WriteFile(err, "vulkan validation: ", 19, &n, nullptr);
   WriteFile(err, data->pMessage, static_cast<DWORD>(strlen(data->pMessage)), &n, nullptr);
   WriteFile(err, "\n", 1, &n, nullptr);
   if (validation_fatal) TerminateProcess(GetCurrentProcess(), 70);
+#else
+  (void)!write(2, "vulkan validation: ", 19);
+  (void)!write(2, data->pMessage, strlen(data->pMessage));
+  (void)!write(2, "\n", 1);
+  if (validation_fatal) _exit(70);
+#endif
   return VK_FALSE;
 }
 
@@ -222,14 +234,26 @@ int create_device(bool validation, bool fatal, Device **out) {
   VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
   app.pApplicationName = "rays"; app.pEngineName = "rays"; app.apiVersion = VK_API_VERSION_1_3;
   const char *layers[] = {"VK_LAYER_KHRONOS_validation"};
-  const char *extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME};
+#ifdef _WIN32
+  const char *platform_surface = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+#else
+  const char *platform_surface = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME;
+#endif
+  // Surface extensions are optional: a headless instance (no window system) still creates devices.
+  VkExtensionProperties instance_available[256]; uint32_t instance_count = 256;
+  vkEnumerateInstanceExtensionProperties(nullptr, &instance_count, instance_available);
+  const char *extensions[3]; uint32_t extension_count = 0;
+  if (has_extension(instance_available, instance_count, VK_KHR_SURFACE_EXTENSION_NAME) && has_extension(instance_available, instance_count, platform_surface)) {
+    extensions[extension_count++] = VK_KHR_SURFACE_EXTENSION_NAME; extensions[extension_count++] = platform_surface;
+  }
+  if (validation) extensions[extension_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
   VkValidationFeatureEnableEXT enables[] = {VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT};
   VkValidationFeaturesEXT features{VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT};
   features.enabledValidationFeatureCount = 1; features.pEnabledValidationFeatures = enables;
   VkInstanceCreateInfo ii{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
   ii.pNext = validation ? &features : nullptr; ii.pApplicationInfo = &app;
   ii.enabledLayerCount = validation ? 1 : 0; ii.ppEnabledLayerNames = layers;
-  ii.enabledExtensionCount = validation ? 3 : 2; ii.ppEnabledExtensionNames = extensions;
+  ii.enabledExtensionCount = extension_count; ii.ppEnabledExtensionNames = extensions;
   if (!process_instance) {
     r = vkCreateInstance(&ii, nullptr, &process_instance);
     if (r != VK_SUCCESS) { delete d; return r; }
@@ -245,22 +269,32 @@ int create_device(bool validation, bool fatal, Device **out) {
   }
   VkPhysicalDevice physicals[8]; uint32_t physical_count = 8;
   r = vkEnumeratePhysicalDevices(d->instance, &physical_count, physicals);
-  for (uint32_t i = 0; r >= 0 && i < physical_count; ++i) {
-    VkPhysicalDeviceProperties p; vkGetPhysicalDeviceProperties(physicals[i], &p);
-    if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && p.apiVersion >= VK_API_VERSION_1_3) {
-      d->physical = physicals[i]; d->properties = p; break;
+  // Prefer discrete, then integrated, then virtual, then CPU (lavapipe).
+  const VkPhysicalDeviceType order[] = {VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU, VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
+      VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU, VK_PHYSICAL_DEVICE_TYPE_CPU};
+  for (VkPhysicalDeviceType want : order) {
+    for (uint32_t i = 0; !d->physical && r >= 0 && i < physical_count; ++i) {
+      VkPhysicalDeviceProperties p; vkGetPhysicalDeviceProperties(physicals[i], &p);
+      if (p.deviceType == want && p.apiVersion >= VK_API_VERSION_1_3) { d->physical = physicals[i]; d->properties = p; }
     }
   }
   int failure = d->physical ? 0 : RV_NO_DEVICE;
   VkExtensionProperties available[512]; uint32_t available_count = 512;
   if (!failure) vkEnumerateDeviceExtensionProperties(d->physical, nullptr, &available_count, available);
-  const char *required[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
-      VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
+  const char *required[] = {VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME};
+  const char *ray_extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
   const char *enabled[12]; uint32_t enabled_count = 0;
   for (const char *name : required) {
     if (!failure && !has_extension(available, available_count, name)) failure = RV_MISSING;
     enabled[enabled_count++] = name;
   }
+  // Optional features degrade through caps: no swapchain extension = no windows; no ray extensions = no ray tracing.
+  if (!failure && has_extension(available, available_count, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+    enabled[enabled_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME; d->swapchain = true;
+  }
+  d->ray_tracing = !failure;
+  for (const char *name : ray_extensions) d->ray_tracing = d->ray_tracing && has_extension(available, available_count, name);
+  if (d->ray_tracing) for (const char *name : ray_extensions) enabled[enabled_count++] = name;
   if (failure || !has_extension(available, available_count, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME) ||
       !has_extension(available, available_count, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME)) {
     delete d; return failure ? failure : RV_MISSING;
@@ -276,16 +310,20 @@ int create_device(bool validation, bool fatal, Device **out) {
   bool shared = transfer_family < 0;
   if (shared) transfer_family = main_family;
   d->main_family = static_cast<uint32_t>(main_family); d->transfer_family = static_cast<uint32_t>(transfer_family);
+  // A family with a single queue (lavapipe) cannot give the transfer path its own: both then share one VkQueue.
+  VkQueueFamilyProperties families[16]; uint32_t family_count = 16;
+  vkGetPhysicalDeviceQueueFamilyProperties(d->physical, &family_count, families);
+  bool one_queue = shared && families[main_family].queueCount < 2;
   float priorities[2] = {1.f, 1.f};
   VkDeviceQueueCreateInfo queues[2]{};
   queues[0] = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}; queues[0].queueFamilyIndex = d->main_family;
-  queues[0].queueCount = shared ? 2 : 1; queues[0].pQueuePriorities = priorities;
+  queues[0].queueCount = shared && !one_queue ? 2 : 1; queues[0].pQueuePriorities = priorities;
   queues[1] = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}; queues[1].queueFamilyIndex = d->transfer_family;
   queues[1].queueCount = 1; queues[1].pQueuePriorities = priorities;
   VkPhysicalDeviceRobustness2FeaturesEXT robustness{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT}; robustness.nullDescriptor = VK_TRUE;
   VkPhysicalDeviceRayQueryFeaturesKHR ray{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR}; ray.pNext = &robustness; ray.rayQuery = VK_TRUE;
   VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR}; accel.pNext = &ray; accel.accelerationStructure = VK_TRUE;
-  VkPhysicalDeviceVulkan13Features v13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES}; v13.pNext = &accel;
+  VkPhysicalDeviceVulkan13Features v13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES}; v13.pNext = d->ray_tracing ? static_cast<void *>(&accel) : static_cast<void *>(&robustness);
   v13.dynamicRendering = VK_TRUE; v13.synchronization2 = VK_TRUE; v13.maintenance4 = VK_TRUE;
   VkPhysicalDeviceVulkan12Features v12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES}; v12.pNext = &v13;
   v12.timelineSemaphore = VK_TRUE; v12.bufferDeviceAddress = VK_TRUE; v12.scalarBlockLayout = VK_TRUE;
@@ -315,7 +353,7 @@ int create_device(bool validation, bool fatal, Device **out) {
   if (r != VK_SUCCESS) { delete d; return r == VK_ERROR_FEATURE_NOT_PRESENT || r == VK_ERROR_EXTENSION_NOT_PRESENT ? RV_MISSING : r; }
   volkLoadDevice(d->device);
   vkGetDeviceQueue(d->device, d->main_family, 0, &d->main_queue);
-  vkGetDeviceQueue(d->device, d->transfer_family, shared ? 1 : 0, &d->transfer_queue);
+  if (one_queue) d->transfer_queue = d->main_queue; else vkGetDeviceQueue(d->device, d->transfer_family, shared ? 1 : 0, &d->transfer_queue);
   VmaVulkanFunctions functions{}; functions.vkGetInstanceProcAddr = vkGetInstanceProcAddr; functions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
   VmaAllocatorCreateInfo ai{}; ai.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | (d->budget ? VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT : 0);
   ai.physicalDevice = d->physical; ai.device = d->device; ai.pVulkanFunctions = &functions; ai.instance = d->instance; ai.vulkanApiVersion = VK_API_VERSION_1_3;
@@ -463,6 +501,8 @@ int64_t commit_cmd(Command *c, VkSemaphore wait, VkSemaphore signal) {
   if (q->flight_tail) q->flight_tail->next = c; else q->flight_head = c; q->flight_tail = c; return static_cast<int64_t>(epoch);
 }
 VkResult transfer_copy(Device *d, VkBuffer src, VkDeviceSize so, VkBuffer dst, VkDeviceSize doff, VkDeviceSize size) {
+  // Sharing the main queue: take its lock first (same order as everyone else), held across the wait.
+  std::unique_lock<std::recursive_mutex> shared_queue(d->qlock, std::defer_lock); if (d->transfer_queue == d->main_queue) shared_queue.lock();
   std::lock_guard<std::mutex> lock(d->xlock); VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO}; bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   VkResult r = vkBeginCommandBuffer(d->transfer_cb, &bi);
   if (r == VK_SUCCESS) { VkBufferCopy region{so, doff, size}; vkCmdCopyBuffer(d->transfer_cb, src, dst, 1, &region);
@@ -497,14 +537,14 @@ VkResult staged_write(Buffer *b, VkDeviceSize offset, const void *src, VkDeviceS
 }
 
 extern "C" {
-struct rv_facts { uint64_t max_buffer, max_texture_1d, max_texture_2d, max_texture_3d, max_texture_cube, max_array_layers, device_local_bytes; uint32_t sample_counts, color_sample_counts, depth_sample_counts, max_invocations, api_version; };
+struct rv_facts { uint64_t max_buffer, max_texture_1d, max_texture_2d, max_texture_3d, max_texture_cube, max_array_layers, device_local_bytes; uint32_t sample_counts, color_sample_counts, depth_sample_counts, max_invocations, api_version, ray_tracing; };
 int32_t rv_device_create(bool validation, bool fatal, void **out) { return create_device(validation, fatal, reinterpret_cast<Device **>(out)); }
 int32_t rv_validation_messages() { return validation_messages.load(std::memory_order_relaxed); }
 int32_t rv_device_facts(void *handle, rv_facts *out) {
   auto *d = static_cast<Device *>(handle); auto *l = &d->properties.limits; VkPhysicalDeviceMemoryProperties m{}; vkGetPhysicalDeviceMemoryProperties(d->physical, &m);
   uint64_t local = 0; for (uint32_t i = 0; i < m.memoryHeapCount; ++i) if ((m.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) && m.memoryHeaps[i].size > local) local = m.memoryHeaps[i].size;
   VkSampleCountFlags s = l->framebufferColorSampleCounts & l->framebufferDepthSampleCounts;
-  *out = {l->maxStorageBufferRange, l->maxImageDimension1D, l->maxImageDimension2D, l->maxImageDimension3D, l->maxImageDimensionCube, l->maxImageArrayLayers, local, static_cast<uint32_t>(s), static_cast<uint32_t>(l->framebufferColorSampleCounts), static_cast<uint32_t>(l->framebufferDepthSampleCounts), l->maxComputeWorkGroupInvocations, d->properties.apiVersion}; return VK_SUCCESS;
+  *out = {l->maxStorageBufferRange, l->maxImageDimension1D, l->maxImageDimension2D, l->maxImageDimension3D, l->maxImageDimensionCube, l->maxImageArrayLayers, local, static_cast<uint32_t>(s), static_cast<uint32_t>(l->framebufferColorSampleCounts), static_cast<uint32_t>(l->framebufferDepthSampleCounts), l->maxComputeWorkGroupInvocations, d->properties.apiVersion, d->ray_tracing}; return VK_SUCCESS;
 }
 int32_t rv_device_memory(void *handle, uint64_t *held, uint64_t *budget) {
   auto *d = static_cast<Device *>(handle); VmaBudget b[VK_MAX_MEMORY_HEAPS]{}; vmaGetHeapBudgets(d->allocator, b); VkPhysicalDeviceMemoryProperties m{}; vkGetPhysicalDeviceMemoryProperties(d->physical, &m);
@@ -888,11 +928,15 @@ int32_t rv_render_draw_indexed_indirect(void *commands, void *buffer, void *argu
 static VkResult rv_swapchain_build(Surface *s) {
   Device *d = s->device; VkSurfaceCapabilitiesKHR caps{}; VkResult r = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(d->physical,s->surface,&caps); if (r != VK_SUCCESS) return r;
   { std::lock_guard<std::recursive_mutex> lock(d->qlock); r = vkQueueWaitIdle(d->main_queue); } if (r != VK_SUCCESS) return r;
-  VkSwapchainKHR old = s->swapchain; s->swapchain = VK_NULL_HANDLE; s->extent = caps.currentExtent; s->held_image = s->current_image = -1; s->stale = false;
-  if (!caps.currentExtent.width || !caps.currentExtent.height) { if (old) vkDestroySwapchainKHR(d->device,old,nullptr); return VK_SUCCESS; }
+  VkSwapchainKHR old = s->swapchain; s->swapchain = VK_NULL_HANDLE; s->held_image = s->current_image = -1; s->stale = false;
+  VkExtent2D extent = caps.currentExtent;
+  if (extent.width == UINT32_MAX) extent = {std::clamp(s->wanted.width, caps.minImageExtent.width, caps.maxImageExtent.width), std::clamp(s->wanted.height, caps.minImageExtent.height, caps.maxImageExtent.height)};
+  if (!s->wanted.width && caps.currentExtent.width == UINT32_MAX) extent = {};
+  s->extent = extent;
+  if (!extent.width || !extent.height) { if (old) vkDestroySwapchainKHR(d->device,old,nullptr); return VK_SUCCESS; }
   uint32_t minimum = std::max(caps.minImageCount + 1,3u); if (caps.maxImageCount && minimum > caps.maxImageCount) minimum = caps.maxImageCount;
   VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR}; ci.surface = s->surface; ci.minImageCount = minimum;
-  ci.imageFormat = VK_FORMAT_B8G8R8A8_UNORM; ci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; ci.imageExtent = caps.currentExtent;
+  ci.imageFormat = VK_FORMAT_B8G8R8A8_UNORM; ci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; ci.imageExtent = extent;
   ci.imageArrayLayers = 1; ci.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
   ci.preTransform = caps.currentTransform; ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; ci.presentMode = s->mode; ci.clipped = VK_TRUE; ci.oldSwapchain = old;
   r = vkCreateSwapchainKHR(d->device,&ci,nullptr,&s->swapchain); if (old) vkDestroySwapchainKHR(d->device,old,nullptr); if (r != VK_SUCCESS) return r;
@@ -902,15 +946,28 @@ static VkResult rv_swapchain_build(Surface *s) {
   for (uint32_t i=0;i<17;++i) { if (s->acquired[i]) vkDestroySemaphore(d->device,s->acquired[i],nullptr); vkCreateSemaphore(d->device,&si,nullptr,&s->acquired[i]); }
   return VK_SUCCESS;
 }
+#ifndef _WIN32
+// Matches native_layer_token_sys::WaylandLayer: the token's pointer names this pair.
+struct WaylandLayer { wl_display *display; wl_surface *surface; };
+#endif
 int32_t rv_surface_create(void *device, void *hwnd, bool immediate, void **out) {
   auto *d = static_cast<Device *>(device); if (!hwnd) return VK_ERROR_SURFACE_LOST_KHR;
+  if (!d->swapchain) return VK_ERROR_EXTENSION_NOT_PRESENT;
   auto *s = new (std::nothrow) Surface{}; if (!s) return VK_ERROR_OUT_OF_HOST_MEMORY; s->device=d; s->mode=immediate?VK_PRESENT_MODE_IMMEDIATE_KHR:VK_PRESENT_MODE_FIFO_KHR;
+#ifdef _WIN32
   VkWin32SurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR}; si.hinstance=GetModuleHandleW(nullptr); si.hwnd=static_cast<HWND>(hwnd);
-  VkResult r=vkCreateWin32SurfaceKHR(d->instance,&si,nullptr,&s->surface); if(r!=VK_SUCCESS){delete s;return r;}
+  VkResult r=vkCreateWin32SurfaceKHR(d->instance,&si,nullptr,&s->surface);
+#else
+  auto *layer=static_cast<WaylandLayer *>(hwnd);
+  VkWaylandSurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR}; si.display=layer->display; si.surface=layer->surface;
+  VkResult r=vkCreateWaylandSurfaceKHR?vkCreateWaylandSurfaceKHR(d->instance,&si,nullptr,&s->surface):VK_ERROR_EXTENSION_NOT_PRESENT;
+#endif
+  if(r!=VK_SUCCESS){delete s;return r;}
   VkBool32 supported=VK_FALSE; vkGetPhysicalDeviceSurfaceSupportKHR(d->physical,d->main_family,s->surface,&supported);
   r=supported?rv_swapchain_build(s):VK_ERROR_INCOMPATIBLE_DISPLAY_KHR;
   if(r!=VK_SUCCESS){vkDestroySurfaceKHR(d->instance,s->surface,nullptr);delete s;return r;} *out=s;return VK_SUCCESS;
 }
+void rv_surface_set_extent(void *surface, uint32_t width, uint32_t height) { auto *s=static_cast<Surface *>(surface); s->wanted={width,height}; s->stale=true; }
 int32_t rv_surface_configure(void *surface, bool immediate) { auto *s=static_cast<Surface *>(surface); s->mode=immediate?VK_PRESENT_MODE_IMMEDIATE_KHR:VK_PRESENT_MODE_FIFO_KHR; return rv_swapchain_build(s); }
 int32_t rv_surface_acquire(void *surface, int32_t *image) {
   auto *s=static_cast<Surface *>(surface);
@@ -938,7 +995,8 @@ int32_t rv_commit_present(void *commands, void *surface, void *source, uint64_t 
   VkImageBlit blit{};blit.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};blit.srcOffsets[1]={static_cast<int32_t>(t->width),static_cast<int32_t>(t->height),1};
   blit.dstSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};blit.dstOffsets[1]={static_cast<int32_t>(s->extent.width),static_cast<int32_t>(s->extent.height),1};
   vkCmdBlitImage(c->cb,t->image,VK_IMAGE_LAYOUT_GENERAL,image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&blit,VK_FILTER_NEAREST);
-  b.srcStageMask=VK_PIPELINE_STAGE_2_BLIT_BIT;b.srcAccessMask=VK_ACCESS_2_TRANSFER_WRITE_BIT;b.dstStageMask=VK_PIPELINE_STAGE_2_NONE;b.dstAccessMask=0;
+  /* dst ALL_COMMANDS, not NONE: the transition must be ordered before the semaphore signal (sync validation PRESENT_AFTER_WRITE). */
+  b.srcStageMask=VK_PIPELINE_STAGE_2_BLIT_BIT;b.srcAccessMask=VK_ACCESS_2_TRANSFER_WRITE_BIT;b.dstStageMask=VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;b.dstAccessMask=0;
   b.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;b.newLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;vkCmdPipelineBarrier2(c->cb,&info);
   VkSemaphore rendered=s->rendered[idx];int64_t e=commit_cmd(c,s->current_semaphore,rendered);if(e<0)return static_cast<int32_t>(e);*committed=true;
   VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};pi.waitSemaphoreCount=1;pi.pWaitSemaphores=&rendered;pi.swapchainCount=1;pi.pSwapchains=&s->swapchain;pi.pImageIndices=&idx;

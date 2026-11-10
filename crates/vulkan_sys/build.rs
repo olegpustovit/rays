@@ -5,7 +5,7 @@ fn main() {
     println!("cargo:rerun-if-changed=vendor/volk.c");
     println!("cargo:rerun-if-changed=vendor/volk.h");
     println!("cargo:rerun-if-changed=vendor/vk_mem_alloc.h");
-    if !std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target| target == "windows") {
+    if !std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|target| target == "windows" || target == "linux") {
         return;
     }
 
