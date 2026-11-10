@@ -6,7 +6,7 @@ use rays::{canvas, scene, scene3};
 use rays_math::{color, vec3};
 use flow_sop::lower;
 
-pub(super) const FROZEN: &str = "75686b00542de41aba26b5ff4cc63f88805924f4a625e8ad44c033d66664eeda";
+pub(super) const FROZEN: &str = "df27c6082e2a3db5d3da2f188fc00ece9fb3c102838c1d557568ae0e36bf1260";
 pub(super) fn ok<T>(r: Result<T, rays_diagnostic::Diagnostic>) -> T {
     r.unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)))
 }
