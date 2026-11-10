@@ -24,7 +24,7 @@
 ; Select a layer chip to edit its rows in
 ; the inspector: `level` (which band it follows), `share_from`..`share_to` (the share of cells
 ; marked), its shape (`narrow`, `radius`, `stroke`, `diagonal`) and `grey`.
-; Run: `dune exec sketches/flow_contours/main.exe`.
+; Run: `cargo run -p rays_bin -- sketches/flow_contours.rays`.
 
 (workspace flow_contours
 
@@ -116,8 +116,8 @@
            base 24.0
            ; the one height field every layer reads, and the picture it is drawn on: the
            ; whole viewport, cut into square cells
-           field {:width (float (frame/width))
-                  :height (float (frame/height))
+           field {:width (frame/width)
+                  :height (frame/height)
                   :columns (/ (frame/width) cell)
                   :rows (/ (frame/height) cell)
                   :drift (* t speed)
@@ -148,7 +148,7 @@
            network (ui/graph "picture" :focus true)
            inspector (ui/inspector :of network)
            outline (ui/outline)
-           network_dock (ui/split-at "horizontal" 0.5 outline network)
+           network_dock (ui/split_at "horizontal" 0.5 outline network)
            split_at (ui/split "horizontal"
                               preview
                               (ui/split "horizontal"

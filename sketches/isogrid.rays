@@ -6,8 +6,8 @@
 ; maze, slice-x/y/z, rotate-x/y/z, flip, mirror-x/y/z, mirror-xz, reset.
 ; remove-2/4/8/16/32/64/128 carves one scale; -random selects blocks for an edit.
 ; Repeated steps compose with a fresh deterministic random stream.
-; Run: dune exec rays -- sketches/isogrid.rays
-; GPU parity: _build/default/tools/check.exe @tools/isogrid-native
+; Run: cargo run -p rays_bin -- sketches/isogrid.rays
+; GPU parity: cargo t -p rays_editor --test gpu_editor native_isogrid_viewport
 ; Voxel maps are GPU-capable; the maze walks on the CPU; measured placement decides where the mesh is built.
 (workspace isogrid
 
@@ -21,13 +21,13 @@
       (/ final 2147483648.0)))
 
   (defn cell :context value [(index : int) (side : int)]
-    [(int/div index (* side side)) (mod (int/div index side) side) (mod index side)])
+    [(int/div index (int/mul side side)) (mod (int/div index side) side) (mod index side)])
 
   ; Outside the volume is empty, including when a neighbour crosses a row boundary.
   (defn occupied :context value [(voxels : (array int)) (side : int) (p : vec3)]
     (if (and (and (>= p.x 0) (< p.x side))
              (and (and (>= p.y 0) (< p.y side)) (and (>= p.z 0) (< p.z side))))
-        (array/nth voxels (+ (+ (* (int p.x) (* side side)) (* (int p.y) side)) (int p.z)))
+        (array/nth voxels (int/add (int/add (int/mul (int p.x) (int/mul side side)) (int/mul (int p.y) side)) (int p.z)))
         0))
 
   ; Randomly subdivide a block into eight retained/removed octants, as in subdivideRandomGrid.
@@ -320,7 +320,7 @@
                                  direction (nth directions (mod face 6))]
                             (if (and (= (array/nth volume.voxels index) 1)
                                      (= (occupied volume.voxels side (+ p direction)) 0)) 1 0)))
-                        (array/range (* (* side side) (* side 6)) :type int)))
+                        (array/range (int/mul (int/mul side side) (int/mul side 6)) :type int)))
            face_count (array/count faces)
            vertices (array/range (* face_count 4) :type int)
            positions (map (fn [(vertex : int)]
@@ -343,7 +343,7 @@
 
   (graph scene :context scene
     (let* [sculpture (scene/geometry (ref sculpture) :name "IsoGrid")
-           camera (scene/camera :eye [10 8 10] :target [0 0 0] :fov 36 :follow_viewport true)
+           camera (scene/camera :eye [10 8 10] :target [0 0 0] :fov 0.62831853071795862 :follow_viewport true)
            light (scene/light :shape "Directional" :translate [6 10 8] :intensity 1.8)]
       (scene/root (scene/merge sculpture camera light) :camera camera)))
 
