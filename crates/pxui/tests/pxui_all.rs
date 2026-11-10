@@ -1,5 +1,7 @@
 //! Kit interaction, text and retained-state cases: headless, no SDL, no window.
 use mem_sys as _; // the counting global allocator
+#[path = "cases/nodes.rs"]
+mod nodes;
 #[path = "cases/run.rs"]
 mod run;
 #[path = "cases/small.rs"]
@@ -21,5 +23,6 @@ fn main() {
     cases.extend_from_slice(ui_a::CASES);
     cases.extend_from_slice(ui_b::CASES);
     cases.extend_from_slice(ui_c::CASES);
+    cases.extend_from_slice(nodes::CASES);
     run::run(&cases);
 }

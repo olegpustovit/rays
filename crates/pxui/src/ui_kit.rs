@@ -355,27 +355,27 @@ impl Ui {
             Some(height) => Size::Px(height),
             None => Size::Fit,
         };
-        let panel = self.box_(
-            label,
-            BoxOpts::default()
-                .flags(SCROLL | CLIP | BLOCKING)
-                .w(Size::Px(width))
-                .h(h)
-                .max_h(max_h)
-                .axis(Axis::Column)
-                .padding(padding as f32)
-                .at((opts.x, opts.y))
-                .scroll_step(row_height as f32),
-        );
         let theme = self.theme();
+        let stroke = opts.stroke;
+        // a floating sheet (a menu, a window) is the input white; a docked panel is the ground
+        let look = Look { fill: if stroke.is_some() { theme.input } else { theme.panel }, ..Look::NONE };
+        let panel = self.node(
+            label,
+            Node {
+                flags: SCROLL | CLIP | BLOCKING,
+                w: Size::Px(width),
+                h,
+                max_h,
+                padding: padding as f32,
+                at: Some((opts.x, opts.y)),
+                scroll_step: row_height as f32,
+                look,
+                ..Node::DEFAULT
+            },
+        );
         let index = panel.index;
         let slot = panel.box_slot;
-        let stroke = opts.stroke;
-        self.draw(&panel, move |paint, Rect { x, y, w, h }| {
-            // a floating sheet (a menu, a window) is the input white; a docked panel is the ground
-            paint.fill(x, y, w, h, if stroke.is_some() { theme.input } else { theme.panel });
-        });
-        self.draw_over(&panel, move |paint, rect| {
+        self.canvas_over(&panel, move |paint, rect| {
             if let Some(color) = stroke {
                 let Rect { x, y, w, h } = rect;
                 paint.frame(x, y, w, h, color);
@@ -716,13 +716,13 @@ impl Ui {
     /// above it when it is the first thing of its parent.
     pub fn label(&mut self, text: &str) {
         let gap = if self.last_child_of_parent() == NONE { 4.0 } else { 0.0 };
-        let row = self.box_(text, BoxOpts::default().flags(NO_FLAGS).w(Size::Grow).h(Size::Px(gap + self.row_height() as f32)));
-        let theme = self.theme();
-        let shown = self.cached_label(&row, 0, shown(text));
-        self.draw(&row, move |paint, Rect { x, y, w: _, h }| {
-            let cy = cap_y(paint, y + gap, h - gap);
-            paint.cap((x + SIDE as f32, cy), Some(theme::ink_2(&theme)), &shown);
-        });
+        let size = 8.max(self.font_size() - 2);
+        let look = Look { text: theme::ink_2(&self.theme()), font: Font { size, tracking: 0.08 * size as f32, caps: true }, ..Look::NONE };
+        let row = self.node(
+            text,
+            Node { h: Size::Px(gap + self.row_height() as f32), look, inset: Edges { l: SIDE as f32, t: gap, r: 0.0, b: 0.0 }, ..Node::DEFAULT },
+        );
+        self.text(&row, shown(text));
     }
 
     /// A window's foot: a line-2 hairline under 4 points of space, then the keys in ink-3 each

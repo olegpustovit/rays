@@ -1,4 +1,9 @@
-//! Each frame builds keyed boxes with flags and per-axis sizing. Per-key state lives in Ui's retained cache and expires when omitted for a frame. Input uses prior-frame rectangles; layout follows construction and painting packs instance lists. Painters own their Paint borrow for the paint duration.
+//! Each frame declares keyed nodes. A node is a retained record with a stable `Handle` (slot index and
+//! generation): its layout inputs, its laid-out rectangle, its retained input state, and its `Look`
+//! and text as plain data the engine paints with no closure. A node lives until the build that owns
+//! it stops declaring it. Input uses prior-frame rectangles; layout follows construction and painting
+//! packs instance lists. Canvas closures live in the frame arena and run after layout. Between builds
+//! the `patch_*` functions rewrite one node's instances in place (layer 1 of specification/pxui.md).
 use crate::theme::{self, Theme};
 pub use crate::geom::Rect;
 pub(crate) use crate::geom::p32;
@@ -7,6 +12,8 @@ use crate::geom::hash;
 use input::frame as rframe;
 use crate::geom::{color, Rgba as Color};
 use crate::draw::{Break, Instance};
+use crate::arena::{self, Arena};
+pub use crate::geom::Edges;
 use std::any::Any;
 use pxui_text::{Metrics, Style, Text};
 use std::borrow::Cow;
@@ -30,8 +37,6 @@ fn hash_range(seed: i64, text: &str, first: usize, last: usize) -> i64 {
 fn find_marker(text: &str, marker: &str) -> Option<usize> {
     if text.contains('#') { text.find(marker) } else { None }
 }
-
-thread_local! { static LABEL: std::cell::Cell<String> = const { std::cell::Cell::new(String::new()) }; }
 
 pub fn key_of(seed: i64, text: &str) -> i64 {
     // the id after ### replaces the label's hash, under the same parent: two panels that build the
@@ -121,14 +126,14 @@ impl SlotTable {
 
 // ------------------------------------------------------------- boxes
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug)]
 pub enum Size {
     /// fixed
     Px(f32),
     /// fraction of the parent's inner size
     Pct(f32),
     /// function of the parent's inner size
-    Rel(Rc<dyn Fn(f32) -> f32>),
+    Rel(fn(f32) -> f32),
     /// share of the remaining space, or the full cross size
     Grow,
     /// children's extent plus padding
@@ -210,18 +215,87 @@ pub enum UndoKind {
     Redo,
 }
 
-/// A painter runs with the box's final laid-out rectangle.
-pub type Painter = Rc<dyn Fn(&mut Paint, Rect)>;
 pub type HitFn = Rc<dyn Fn(Rect) -> Rect>;
 
-// Keep a box's allocation between frames, but release its captured document and resources as
-// soon as painting finishes. A different closure type replaces this one row safely.
-struct PaintRow {
-    value: Box<dyn Any>,
-    paint: fn(&dyn Any, &mut Paint, Rect),
-    clear: fn(&mut dyn Any),
+/// A drop shadow under a node: none while `color` is transparent.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shadow {
+    pub color: Color,
+    pub offset: (f32, f32),
+    pub blur: f32,
+    pub spread: f32,
 }
 
+/// Node text: `size` points (0: the UI's font size), `tracking` points after every glyph, `caps`
+/// upper-cases it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Font {
+    pub size: i64,
+    pub tracking: f32,
+    pub caps: bool,
+}
+
+/// What a node looks like, as plain data the engine paints with no closure, in this order: the
+/// shadow, the fill, a `border_w` border inside the box, `radius` on every corner, then the node's
+/// text in `text` and `font`. Transparent colours paint nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Look {
+    pub fill: Color,
+    pub border: Color,
+    pub border_w: f32,
+    pub radius: f32,
+    pub shadow: Shadow,
+    pub text: Color,
+    pub font: Font,
+}
+
+const CLEAR: Color = Color { r: 0, g: 0, b: 0, a: 0 };
+
+impl Look {
+    pub const NONE: Look = Look {
+        fill: CLEAR,
+        border: CLEAR,
+        border_w: 0.0,
+        radius: 0.0,
+        shadow: Shadow { color: CLEAR, offset: (0.0, 0.0), blur: 0.0, spread: 0.0 },
+        text: CLEAR,
+        font: Font { size: 0, tracking: 0.0, caps: false },
+    };
+}
+
+/// A node's layout inputs and look. `at` places it outside the flow at an offset from the parent's
+/// origin; `max_h` caps a `Fit` height; `inset` is where its text sits inside it.
+#[derive(Clone, Copy, Debug)]
+pub struct Node {
+    pub flags: Flags,
+    pub w: Size,
+    pub h: Size,
+    pub max_h: f32,
+    pub axis: Axis,
+    pub padding: f32,
+    pub at: Option<(f32, f32)>,
+    pub scroll_step: f32,
+    pub look: Look,
+    pub inset: Edges,
+}
+
+impl Node {
+    pub const DEFAULT: Node = Node {
+        flags: NO_FLAGS,
+        w: Size::Grow,
+        h: Size::Fit,
+        max_h: f32::INFINITY,
+        axis: Axis::Column,
+        padding: 0.0,
+        at: None,
+        scroll_step: 24.0,
+        look: Look::NONE,
+        inset: Edges { l: 0.0, t: 0.0, r: 0.0, b: 0.0 },
+    };
+}
+
+/// One box of this frame's build: its place in the tree, its hit shape and its canvases. What
+/// outlives the frame is in the node's slot.
 struct BoxRec {
     key: i64,
     slot: usize,
@@ -229,58 +303,30 @@ struct BoxRec {
     first: usize,
     last: usize,
     next: usize,
-    flags: Flags,
-    w: Size,
-    h: Size,
-    max_h: f32,
-    row: bool,
-    padding: f32,
-    at_x: f32,
-    at_y: f32,
-    scroll_step: f32,
     hit: Option<HitFn>,
     hit_rect: Option<Rect>,
-    painters: Vec<PaintRow>,
-    overlays: Vec<PaintRow>,
-    painter_count: usize,
-    overlay_count: usize,
+    paint: arena::List,
+    over: arena::List,
 }
 
 impl BoxRec {
     fn blank() -> BoxRec {
-        BoxRec {
-            key: 0,
-            slot: 0,
-            parent: NONE,
-            first: NONE,
-            last: NONE,
-            next: NONE,
-            flags: 0,
-            w: Size::Grow,
-            h: Size::Grow,
-            max_h: f32::INFINITY,
-            row: false,
-            padding: 0.0,
-            at_x: f32::NAN,
-            at_y: f32::NAN,
-            scroll_step: 0.0,
-            hit: None,
-            hit_rect: None,
-            painters: Vec::new(),
-            overlays: Vec::new(),
-            painter_count: 0,
-            overlay_count: 0,
-        }
+        BoxRec { key: 0, slot: 0, parent: NONE, first: NONE, last: NONE, next: NONE, hit: None, hit_rect: None, paint: arena::EMPTY, over: arena::EMPTY }
     }
 }
 
-/// A box handle: its index in this frame's build (`NONE` for `box_of_key`), key and retained slot.
+/// A node handle: its index in this frame's build (`NONE` for `box_of_key`), key, retained slot and
+/// the slot's generation. The slot and generation are stable while the node lives; a handle to a
+/// node that is gone is stale, and the engine checks it before touching the slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UiBox {
     pub index: usize,
     pub box_key: i64,
     pub box_slot: usize,
+    pub generation: u32,
 }
+
+pub type Handle = UiBox;
 
 pub fn key(b: &UiBox) -> i64 {
     b.box_key
@@ -288,7 +334,15 @@ pub fn key(b: &UiBox) -> i64 {
 
 struct Slot {
     key: i64,
+    /// bumped when the slot is freed: handles to the node it held are stale from then on
+    generation: u32,
     touched: i64,
+    node: Node,
+    text: String,
+    /// where the node's look was painted: layer, instance range, the clip, and the frame
+    range: (u32, u32, u32),
+    clip: Rect,
+    painted: i64,
     rx: f32,
     ry: f32,
     rw: f32,
@@ -319,7 +373,13 @@ impl Slot {
     fn fresh() -> Slot {
         Slot {
             key: 0,
+            generation: 0,
             touched: -1,
+            node: Node::DEFAULT,
+            text: String::new(),
+            range: (0, 0, 0),
+            clip: Rect::new(0.0, 0.0, 0.0, 0.0),
+            painted: -1,
             rx: 0.0,
             ry: 0.0,
             rw: 0.0,
@@ -546,6 +606,12 @@ pub struct Ui {
     /// the frame before's layers, painted over by the next frame
     spare: Vec<Layer>,
     draw_revision: i64,
+    /// the frame number of the last paint: node ranges painted then index `draw`
+    painted: i64,
+    /// the scratch layer a patch paints one node into
+    patch_layers: Vec<Layer>,
+    /// canvas closures and formatted labels of the frame being built
+    arena: Arena,
     painting: bool,
     frame_requested: bool,
     out: PlatformOut,
@@ -669,6 +735,9 @@ impl Ui {
             draw_len: 0,
             spare: Vec::new(),
             draw_revision: 0,
+            painted: -1,
+            patch_layers: Vec::new(),
+            arena: Arena::default(),
             painting: false,
             frame_requested: false,
             out: PlatformOut::default(),
@@ -688,6 +757,7 @@ impl Ui {
             self.spare.clear();
             self.draw_len = 0;
             self.boxes.clear();
+            self.arena.reset();
             for slot in &mut self.slots { slot.labels.clear(); }
             self.count = 0;
         }
@@ -811,7 +881,12 @@ impl Ui {
             }
         };
         let s = &mut self.slots[slot];
+        // a reused slot keeps its generation and its text's storage
+        let (generation, mut text) = (s.generation, std::mem::take(&mut s.text));
+        text.clear();
         *s = Slot::fresh();
+        s.generation = generation;
+        s.text = text;
         s.key = key;
         s.touched = self.frame_number;
         self.scroll_y[slot] = 0.0;
@@ -827,6 +902,7 @@ impl Ui {
             if key != 0 && self.slots[slot].touched < self.frame_number {
                 self.table.remove(key);
                 self.slots[slot].key = 0;
+                self.slots[slot].generation = self.slots[slot].generation.wrapping_add(1);
                 self.slots[slot].text_value = None;
                 self.slots[slot].labels.clear();
                 self.free.push(slot);
@@ -1757,33 +1833,48 @@ impl Ui {
         index
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn set_box(&mut self, index: usize, flags: Flags, w: Size, h: Size, max_h: f32, row: bool, padding: f32, at_x: f32, at_y: f32, scroll_step: f32, hit: Option<HitFn>) {
+    /// Declare build box `index`: its node record takes `node`, and its text, hit shape and canvases
+    /// start empty. A patch made since the node's last build ends here.
+    fn set_box(&mut self, index: usize, node: Node) {
         let b = &mut self.boxes[index];
-        b.flags = flags;
-        b.w = w;
-        b.h = h;
-        b.max_h = max_h;
-        b.row = row;
-        b.padding = padding;
-        b.at_x = at_x;
-        b.at_y = at_y;
-        b.scroll_step = scroll_step;
-        b.hit = hit;
+        b.hit = None;
         b.hit_rect = None;
-        b.painter_count = 0;
-        b.overlay_count = 0;
+        b.paint = arena::EMPTY;
+        b.over = arena::EMPTY;
+        let s = &mut self.slots[b.slot];
+        s.node = node;
+        s.text.clear();
     }
 
-    pub fn box_keyed(&mut self, key: i64, opts: BoxOpts) -> UiBox {
+    /// The layout inputs and look of build box `index`.
+    fn nd(&self, index: usize) -> &Node {
+        &self.slots[self.boxes[index].slot].node
+    }
+
+    /// Declare a node under the current parent by its key.
+    pub fn node_keyed(&mut self, key: i64, node: Node) -> Handle {
         self.require_building();
         let key = self.unique_key(key);
         let parent = self.current_parent();
         let index = self.append_box(key, parent);
-        let (at_x, at_y) = opts.at.unwrap_or((f32::NAN, f32::NAN));
-        self.set_box(index, opts.flags, opts.w, opts.h, opts.max_h, opts.axis == Axis::Row, opts.padding, at_x, at_y, opts.scroll_step, opts.hit);
-        self.boxes[index].hit_rect = opts.hit_rect;
-        UiBox { index, box_key: key, box_slot: self.boxes[index].slot }
+        self.set_box(index, node);
+        let slot = self.boxes[index].slot;
+        UiBox { index, box_key: key, box_slot: slot, generation: self.slots[slot].generation }
+    }
+
+    /// Declare a node under the current parent, keyed by `label` (see `key_of`).
+    pub fn node(&mut self, label: &str, node: Node) -> Handle {
+        self.require_building();
+        let key = key_of(self.current_seed(), label);
+        self.node_keyed(key, node)
+    }
+
+    pub fn box_keyed(&mut self, key: i64, opts: BoxOpts) -> UiBox {
+        let BoxOpts { flags, w, h, max_h, axis, padding, at, scroll_step, hit, hit_rect } = opts;
+        let b = self.node_keyed(key, Node { flags, w, h, max_h, axis, padding, at, scroll_step, ..Node::DEFAULT });
+        self.boxes[b.index].hit = hit;
+        self.boxes[b.index].hit_rect = hit_rect;
+        b
     }
 
     /// Create a box under the current parent. `at` positions it outside the flow at an offset from
@@ -1796,25 +1887,38 @@ impl Ui {
         self.box_keyed(key, opts)
     }
 
-    /// `box_` of a label formatted into one reused buffer: keys hash the text, none keeps it.
+    /// `box_` of a label formatted into the frame arena: keys hash the text, none keeps it.
     pub fn box_fmt(&mut self, label: std::fmt::Arguments, opts: BoxOpts) -> UiBox {
         match label.as_str() {
             Some(text) => self.box_(text, opts),
             None => {
-                let mut text = LABEL.take();
-                text.clear();
-                let _ = std::fmt::Write::write_fmt(&mut text, label);
-                let b = self.box_(&text, opts);
-                LABEL.set(text);
-                b
+                self.require_building();
+                let range = self.arena.fmt(label);
+                let key = key_of(self.current_seed(), self.arena.str(range));
+                self.box_keyed(key, opts)
             }
         }
     }
 
     pub fn set_at(&mut self, b: &UiBox, at: (f32, f32)) {
         self.require_building();
-        self.boxes[b.index].at_x = at.0;
-        self.boxes[b.index].at_y = at.1;
+        self.slots[b.box_slot].node.at = Some(at);
+    }
+
+    /// The handle still names the node it was made for (that node has not gone since).
+    pub fn live(&self, b: &Handle) -> bool {
+        self.slots.get(b.box_slot).is_some_and(|s| s.generation == b.generation && s.key == b.box_key && s.key != 0)
+    }
+
+    /// Set the node's text (painted in its look's text colour and font).
+    pub fn text(&mut self, b: &Handle, text: &str) {
+        if self.live(b) {
+            let s = &mut self.slots[b.box_slot].text;
+            if s != text {
+                s.clear();
+                s.push_str(text);
+            }
+        }
     }
 
     /// Start building children of `b`; give the result to `leave`.
@@ -1863,22 +1967,26 @@ impl Ui {
     }
 
     pub fn box_of_key(&self, key: i64) -> Option<UiBox> {
-        self.table.find(key).map(|slot| UiBox { index: NONE, box_key: key, box_slot: slot })
+        self.table.find(key).map(|slot| UiBox { index: NONE, box_key: key, box_slot: slot, generation: self.slots[slot].generation })
     }
 
-    /// The box's screen rectangle from the previous frame.
+    /// The box's screen rectangle from the previous frame (empty for a stale handle).
     pub fn rect(&self, b: &UiBox) -> Rect {
+        if !self.live(b) {
+            return Rect::new(0.0, 0.0, 0.0, 0.0);
+        }
         let s = &self.slots[b.box_slot];
         Rect::new(s.rx, s.ry, s.rw, s.rh)
     }
 
+    /// What input did to the node this frame; a stale handle has no signal.
     pub fn signal(&self, b: &UiBox) -> Signal {
-        let key = b.box_key;
-        let held = self.active == Some(key);
+        let key = if self.live(b) { b.box_key } else { 0 };
+        let held = key != 0 && self.active == Some(key);
         let slot = &self.slots[b.box_slot];
-        match self.signals.get(&key) {
+        match self.signals.get(&key).filter(|_| key != 0) {
             None => Signal {
-                hovered: self.hot == key,
+                hovered: key != 0 && self.hot == key,
                 pressed: false,
                 subtree_press: None,
                 held,
@@ -2104,38 +2212,28 @@ impl Ui {
         self.slots[b.box_slot].text_value = value;
     }
 
-    /// Paint with the box's final laid-out rectangle, before its children.
-    pub fn draw<F: Fn(&mut Paint, Rect) + 'static>(&mut self, b: &UiBox, painter: F) {
-        let b = &mut self.boxes[b.index];
-        let position = b.painter_count;
-        b.painter_count += 1;
-        if let Some(value) = b.painters.get_mut(position).and_then(|row| row.value.downcast_mut::<Option<F>>()) {
-            *value = Some(painter);
-        } else {
-            let row = PaintRow {
-                value: Box::new(Some(painter)),
-                paint: |value, paint, rect| value.downcast_ref::<Option<F>>().unwrap().as_ref().unwrap()(paint, rect),
-                clear: |value| { *value.downcast_mut::<Option<F>>().unwrap() = None; },
-            };
-            if position == b.painters.len() { b.painters.push(row); } else { b.painters[position] = row; }
-        }
+    /// Free-form drawing with the node's final laid-out rectangle, after its look and before its
+    /// children. The closure lives in the frame arena: it runs once after layout and is dropped when
+    /// painting ends.
+    pub fn canvas<F: Fn(&mut Paint, Rect) + 'static>(&mut self, b: &UiBox, f: F) {
+        assert!(b.index < self.count && self.boxes[b.index].slot == b.box_slot, "Ui.canvas: the node was not built this frame");
+        self.arena.add(&mut self.boxes[b.index].paint, f);
     }
 
-    /// Paint after the box's children, outside its content clip.
-    pub fn draw_over<F: Fn(&mut Paint, Rect) + 'static>(&mut self, b: &UiBox, painter: F) {
-        let b = &mut self.boxes[b.index];
-        let position = b.overlay_count;
-        b.overlay_count += 1;
-        if let Some(value) = b.overlays.get_mut(position).and_then(|row| row.value.downcast_mut::<Option<F>>()) {
-            *value = Some(painter);
-        } else {
-            let row = PaintRow {
-                value: Box::new(Some(painter)),
-                paint: |value, paint, rect| value.downcast_ref::<Option<F>>().unwrap().as_ref().unwrap()(paint, rect),
-                clear: |value| { *value.downcast_mut::<Option<F>>().unwrap() = None; },
-            };
-            if position == b.overlays.len() { b.overlays.push(row); } else { b.overlays[position] = row; }
-        }
+    /// A canvas that draws after the node's children, outside its content clip.
+    pub fn canvas_over<F: Fn(&mut Paint, Rect) + 'static>(&mut self, b: &UiBox, f: F) {
+        assert!(b.index < self.count && self.boxes[b.index].slot == b.box_slot, "Ui.canvas_over: the node was not built this frame");
+        self.arena.add(&mut self.boxes[b.index].over, f);
+    }
+
+    /// `canvas` under its earlier name.
+    pub fn draw<F: Fn(&mut Paint, Rect) + 'static>(&mut self, b: &UiBox, f: F) {
+        self.canvas(b, f);
+    }
+
+    /// `canvas_over` under its earlier name.
+    pub fn draw_over<F: Fn(&mut Paint, Rect) + 'static>(&mut self, b: &UiBox, f: F) {
+        self.canvas_over(b, f);
     }
 
     /// Raise a root box and its children above ordinary boxes, below modal popups. Higher `order`
@@ -2151,7 +2249,7 @@ impl Ui {
 
 
     pub(crate) fn set_box_h(&mut self, b: &UiBox, h: Size) {
-        self.boxes[b.index].h = h;
+        self.slots[b.box_slot].node.h = h;
     }
 
     /// The last child built under the current parent (`NONE` when it has none yet).
@@ -2160,7 +2258,7 @@ impl Ui {
     }
 
     pub(crate) fn box_w_px(&self, index: usize) -> Option<f32> {
-        match self.boxes[index].w {
+        match self.nd(index).w {
             Size::Px(w) => Some(w),
             _ => None,
         }
@@ -2195,15 +2293,15 @@ impl Ui {
     // ------------------------------------------------------------- layout
 
     fn flow(&self, index: usize) -> bool {
-        self.boxes[index].at_x.is_nan()
+        self.nd(index).at.is_none()
     }
 
     /// Bottom-up: fixed and fit sizes. Children follow their parent in build order, so a reverse
     /// sweep sees every child first.
     fn intrinsic(&mut self) {
         for index in (0..self.count).rev() {
-            let padding = self.boxes[index].padding;
-            let row = self.boxes[index].row;
+            let padding = self.nd(index).padding;
+            let row = self.nd(index).axis == Axis::Row;
             let mut along = 0.0;
             let mut across: f32 = 0.0;
             let mut next = self.boxes[index].first;
@@ -2230,8 +2328,8 @@ impl Ui {
                 Size::Fit => content,
                 _ => 0.0,
             };
-            self.l_w[index] = resolve(&self.boxes[index].w, content_w);
-            self.l_h[index] = self.boxes[index].max_h.min(resolve(&self.boxes[index].h, content_h));
+            self.l_w[index] = resolve(&self.nd(index).w, content_w);
+            self.l_h[index] = self.nd(index).max_h.min(resolve(&self.nd(index).h, content_h));
         }
     }
 
@@ -2269,7 +2367,7 @@ impl Ui {
             // held by the fingers: it springs back when they lift
             self.slots[slot].scroll_event_time = f64::INFINITY;
         } else if wheel != 0.0 {
-            let step = self.boxes[index].scroll_step;
+            let step = self.nd(index).scroll_step;
             self.pull(slot, max_scroll, height, SCROLL_WHEEL_PAST, wheel as f64 * step as f64);
             self.slots[slot].scroll_event_time = time;
         }
@@ -2350,9 +2448,9 @@ impl Ui {
         self.l_x[0] = 0.0;
         self.l_y[0] = 0.0;
         for index in 0..self.count {
-            let padding = self.boxes[index].padding;
-            let row = self.boxes[index].row;
-            let flags = self.boxes[index].flags;
+            let padding = self.nd(index).padding;
+            let row = self.nd(index).axis == Axis::Row;
+            let flags = self.nd(index).flags;
             let scrolls = flags & SCROLL != 0;
             let max_scroll = 0.0f32.max(self.l_content[index] - self.l_h[index]);
             let gutter = if scrolls && max_scroll > 0.0 && flags & OVER_THUMB == 0 { 10.0 } else { 0.0 };
@@ -2374,10 +2472,10 @@ impl Ui {
             let mut next = self.boxes[index].first;
             while next != NONE {
                 let child = next;
-                self.l_w[child] = relative(&self.boxes[child].w, inner_w, self.l_w[child]);
-                self.l_h[child] = self.boxes[child].max_h.min(relative(&self.boxes[child].h, inner_h, self.l_h[child]));
+                self.l_w[child] = relative(&self.nd(child).w, inner_w, self.l_w[child]);
+                self.l_h[child] = self.nd(child).max_h.min(relative(&self.nd(child).h, inner_h, self.l_h[child]));
                 if self.flow(child) {
-                    let grows = if row { self.boxes[child].w.is_grow() } else { self.boxes[child].h.is_grow() };
+                    let grows = if row { self.nd(child).w.is_grow() } else { self.nd(child).h.is_grow() };
                     if grows {
                         grow_count += 1;
                     } else {
@@ -2397,17 +2495,17 @@ impl Ui {
             while next != NONE {
                 let child = next;
                 if row {
-                    if self.boxes[child].w.is_grow() && self.flow(child) {
+                    if self.nd(child).w.is_grow() && self.flow(child) {
                         self.l_w[child] = share;
                     }
-                    if self.boxes[child].h.is_grow() {
-                        self.l_h[child] = self.boxes[child].max_h.min(inner_h);
+                    if self.nd(child).h.is_grow() {
+                        self.l_h[child] = self.nd(child).max_h.min(inner_h);
                     }
                 } else {
-                    if self.boxes[child].h.is_grow() && self.flow(child) {
-                        self.l_h[child] = self.boxes[child].max_h.min(share);
+                    if self.nd(child).h.is_grow() && self.flow(child) {
+                        self.l_h[child] = self.nd(child).max_h.min(share);
                     }
-                    if self.boxes[child].w.is_grow() {
+                    if self.nd(child).w.is_grow() {
                         self.l_w[child] = inner_w;
                     }
                 }
@@ -2422,8 +2520,9 @@ impl Ui {
                         cursor += self.l_h[child];
                     }
                 } else {
-                    self.l_x[child] = self.l_x[index] + self.boxes[child].at_x;
-                    self.l_y[child] = self.l_y[index] + self.boxes[child].at_y;
+                    let (at_x, at_y) = self.nd(child).at.unwrap_or((0.0, 0.0));
+                    self.l_x[child] = self.l_x[index] + at_x;
+                    self.l_y[child] = self.l_y[index] + at_y;
                 }
                 next = self.boxes[child].next;
             }
@@ -2553,6 +2652,44 @@ impl Paint {
         let r = [self.snap(x0), self.snap(y0), self.snap(x1), self.snap(y1)];
         if r[2] > r[0] && r[3] > r[1] {
             self.push(Instance::rect(r, color));
+        }
+    }
+
+    /// A node's look and text in `r`: what the engine paints for it with no closure.
+    fn look(&mut self, r: Rect, node: &Node, text: &str) {
+        let Look { fill, border, border_w, radius, shadow, text: ink, font } = node.look;
+        let Rect { x, y, w, h } = r;
+        let corners = [x, y, x + w, y + h];
+        if shadow.color.a > 0 && w > 0.0 && h > 0.0 {
+            self.push(Instance::shadow(corners, [radius; 4], rgba(shadow.color), [shadow.offset.0, shadow.offset.1], shadow.blur, shadow.spread, false));
+        }
+        let bordered = border_w > 0.0 && border.a > 0;
+        if radius > 0.0 {
+            if (fill.a > 0 || bordered) && w > 0.0 && h > 0.0 {
+                let shape = Instance::rect(corners, rgba(fill)).radii([radius; 4]);
+                self.push(if bordered { shape.border(border_w, rgba(border)) } else { shape });
+            }
+        } else {
+            if fill.a > 0 {
+                self.fill(x, y, w, h, fill);
+            }
+            if bordered {
+                self.frame_w(x, y, w, h, border_w, border);
+            }
+        }
+        if !text.is_empty() {
+            let size = if font.size > 0 { font.size } else { self.font_size };
+            let inset = node.inset;
+            let at = (x + inset.l, text_top_for(self.font_size, Some(size), y + inset.t, h - inset.t - inset.b));
+            if font.caps {
+                let mut buffer = std::mem::take(&mut self.label);
+                buffer.clear();
+                buffer.extend(text.chars().map(|c| c.to_ascii_uppercase()));
+                self.text_with(at, Some(size), font.tracking, Some(ink), &buffer);
+                self.label = buffer;
+            } else {
+                self.text_with(at, Some(size), font.tracking, Some(ink), text);
+            }
         }
     }
 
@@ -2915,7 +3052,7 @@ impl Ui {
     fn record_hit(&mut self, index: usize, parent: i64, rect: Rect) {
         let position = self.hit_count;
         let Rect { x, y, w, h } = rect;
-        let rec = HitRec { key: self.boxes[index].key, parent, flags: self.boxes[index].flags, x, y, w, h };
+        let rec = HitRec { key: self.boxes[index].key, parent, flags: self.nd(index).flags, x, y, w, h };
         if position >= self.hits.len() {
             self.hits.push(rec);
         } else {
@@ -2925,14 +3062,24 @@ impl Ui {
         self.hit_count = position + 1;
     }
 
-    fn run_painters(&self, painters: &[PaintRow], index: usize, clip_rect: Rect, paint: &mut Paint) {
-        if !painters.is_empty() {
+    fn run_painters(&self, first: u32, index: usize, clip_rect: Rect, paint: &mut Paint) {
+        if first != arena::END {
             paint.clip_rect = clip_rect;
-            let local = self.screen(index);
-            for painter in painters {
-                (painter.paint)(painter.value.as_ref(), paint, local);
-            }
+            self.arena.run(first, paint, self.screen(index));
         }
+    }
+
+    /// Paint the node's look and text, recording the instance range a patch rewrites.
+    fn paint_node(&mut self, paint: &mut Paint, index: usize, clip_rect: Rect) {
+        paint.clip_rect = clip_rect;
+        let slot = self.boxes[index].slot;
+        let start = paint.layers[paint.layer].instances.len() as u32;
+        let s = &self.slots[slot];
+        paint.look(self.screen(index), &s.node, &s.text);
+        let s = &mut self.slots[slot];
+        s.range = (paint.layer as u32, start, paint.layers[paint.layer].instances.len() as u32);
+        s.clip = clip_rect;
+        s.painted = self.frame_number;
     }
 
     fn visit(&mut self, paint: &mut Paint, index: usize, clip_rect: Rect, parent_hit: i64) {
@@ -2962,7 +3109,7 @@ impl Ui {
                 vw > 0.0 && vh > 0.0
             }
         };
-        let flags = self.boxes[index].flags;
+        let flags = self.nd(index).flags;
         let has_hit = flags & HIT_FLAGS != 0 && hw > 0.0 && hh > 0.0;
         if has_hit {
             self.record_hit(index, parent_hit, clipped_hit);
@@ -2972,10 +3119,11 @@ impl Ui {
         let shown = visible;
         if shown || ((w <= 0.0 || h <= 0.0) && flags & CLIP == 0) {
             if shown {
-                self.run_painters(&self.boxes[index].painters[..self.boxes[index].painter_count], index, clip_rect, paint);
+                self.paint_node(paint, index, clip_rect);
+                self.run_painters(self.boxes[index].paint.0, index, clip_rect, paint);
             }
             let child_clip = if flags & CLIP != 0 {
-                let padding = self.boxes[index].padding;
+                let padding = self.nd(index).padding;
                 intersect(clip_rect, Rect::new(x + padding, y + padding, 0.0f32.max(w - 2.0 * padding), 0.0f32.max(h - 2.0 * padding)))
             } else {
                 clip_rect
@@ -2987,7 +3135,7 @@ impl Ui {
                 child = self.boxes[child].next;
             }
             if shown {
-                self.run_painters(&self.boxes[index].overlays[..self.boxes[index].overlay_count], index, clip_rect, paint);
+                self.run_painters(self.boxes[index].over.0, index, clip_rect, paint);
             }
             if shown && self.keyboard_focus && self.focus == self.boxes[index].key && flags & FOCUS_MARK == 0 {
                 paint.clip_rect = clip_rect;
@@ -3022,8 +3170,31 @@ impl Ui {
         self.chain_key = 0;
         let clip = Rect::new(0.0, 0.0, frame.input.size.0 as f32, frame.input.size.1 as f32);
         // paint into the other buffer, keeping the last frame's layers to compare with
+        let spare = std::mem::take(&mut self.spare);
+        let mut paint = self.paint_begin(spare, clip);
+        self.painted = self.frame_number;
+        self.visit(&mut paint, 0, clip, 0);
+        self.out.ime = paint.ime;
+        self.edit_scroll_x = paint.edit_scroll_x;
+        let len = paint.layer + 1;
+        let layers = self.paint_end(paint);
+        let same = |a: &Layer, b: &Layer| {
+            a.key == b.key && a.instances == b.instances && a.breaks == b.breaks
+                && a.images.len() == b.images.len() && a.images.iter().zip(&b.images).all(|(x, y)| Rc::ptr_eq(&x.handle, &y.handle))
+        };
+        if len != self.draw_len || !layers[..len].iter().zip(&self.draw[..len]).all(|(a, b)| same(a, b)) {
+            self.draw_revision += 1;
+        }
+        self.spare = std::mem::replace(&mut self.draw, layers);
+        self.draw_len = len;
+        self.painting = false;
+    }
+
+    /// A painter over `layers` (its first layer cleared) with the text engine and the layout
+    /// arrays lent to it; `paint_end` takes them back.
+    fn paint_begin(&mut self, layers: Vec<Layer>, clip: Rect) -> Paint {
         let mut paint = Paint {
-            layers: std::mem::take(&mut self.spare),
+            layers,
             // the base layer is the one after none
             layer: usize::MAX,
             clip_rect: clip,
@@ -3039,24 +3210,113 @@ impl Ui {
             scroll_y: std::mem::take(&mut self.scroll_y),
         };
         paint.next_layer(0);
-        self.visit(&mut paint, 0, clip, 0);
-        let len = paint.layer + 1;
-        let same = |a: &Layer, b: &Layer| {
-            a.key == b.key && a.instances == b.instances && a.breaks == b.breaks
-                && a.images.len() == b.images.len() && a.images.iter().zip(&b.images).all(|(x, y)| Rc::ptr_eq(&x.handle, &y.handle))
-        };
-        if len != self.draw_len || !paint.layers[..len].iter().zip(&self.draw[..len]).all(|(a, b)| same(a, b)) {
-            self.draw_revision += 1;
+        paint
+    }
+
+    fn paint_end(&mut self, paint: Paint) -> Vec<Layer> {
+        let Paint { layers, text, label, l_content, scroll_y, .. } = paint;
+        self.text = Some(text);
+        self.label = label;
+        self.l_content = l_content;
+        self.scroll_y = scroll_y;
+        layers
+    }
+
+    // ----------------------------------------------------- direct patching
+
+    /// Repaint one node's look and text over its range of the last frame's instances: in place when
+    /// the count is unchanged, else the layer's later instances, node ranges and breaks shift.
+    /// While building nothing is rewritten: the frame's paint emits the node anyway.
+    fn repaint_node(&mut self, slot: usize) -> bool {
+        let (layer, start, end) = self.slots[slot].range;
+        let (layer, start, end) = (layer as usize, start as usize, end as usize);
+        if self.building || self.slots[slot].painted != self.painted || layer >= self.draw_len {
+            // not on screen (or about to be painted): the record holds the patch
+            return true;
         }
-        self.spare = std::mem::replace(&mut self.draw, paint.layers);
-        self.draw_len = len;
-        self.text = Some(paint.text);
-        self.out.ime = paint.ime;
-        self.label = paint.label;
-        self.edit_scroll_x = paint.edit_scroll_x;
-        self.l_content = paint.l_content;
-        self.scroll_y = paint.scroll_y;
-        self.painting = false;
+        let scratch = std::mem::take(&mut self.patch_layers);
+        let mut paint = self.paint_begin(scratch, self.slots[slot].clip);
+        let s = &self.slots[slot];
+        paint.look(Rect::new(s.rx, s.ry, s.rw, s.rh), &s.node, &s.text);
+        let scratch = self.paint_end(paint);
+        let fresh = &scratch[0].instances;
+        let target = &mut self.draw[layer];
+        // ponytail: a colour glyph in the patch, or a texture break inside the node, needs the
+        // layer's breaks rebuilt; such a patch waits for the next frame (whose build wins).
+        if fresh.iter().any(|i| i.kind == crate::draw::kind::IMAGE)
+            || target.breaks.iter().any(|b| start < b.at_instance as usize && (b.at_instance as usize) < end)
+        {
+            self.patch_layers = scratch;
+            self.request_frame();
+            return false;
+        }
+        if fresh.len() == end - start {
+            target.instances[start..end].copy_from_slice(fresh);
+        } else {
+            // ponytail: a count change shifts the layer's tail and scans every slot, O(instances +
+            // nodes); a range allocator with slack per node (commit 2's retained ranges) avoids it.
+            target.instances.splice(start..end, fresh.iter().copied());
+            let delta = fresh.len() as i64 - (end - start) as i64;
+            let shift = |v: u32| (v as i64 + delta) as u32;
+            for b in &mut target.breaks {
+                if b.at_instance as usize >= end {
+                    b.at_instance = shift(b.at_instance);
+                }
+            }
+            let painted = self.painted;
+            for (index, s) in self.slots.iter_mut().enumerate() {
+                if index != slot && s.painted == painted && s.range.0 as usize == layer && s.range.1 as usize >= end {
+                    s.range = (s.range.0, shift(s.range.1), shift(s.range.2));
+                }
+            }
+            self.slots[slot].range.2 = (start + fresh.len()) as u32;
+        }
+        self.patch_layers = scratch;
+        self.draw_revision += 1;
+        true
+    }
+
+    /// Between builds: set a node's text and rewrite only its instances, with no build or layout.
+    /// The host sees `draw_revision` change, draws, and drains new glyphs from `text_mut`. The patch
+    /// holds until the node's owner next declares it; then the build's value wins. `false` for a
+    /// stale handle, or when the patch has to wait for the next frame.
+    pub fn patch_text(&mut self, b: &Handle, text: &str) -> bool {
+        if !self.live(b) {
+            return false;
+        }
+        self.text(b, text);
+        self.repaint_node(b.box_slot)
+    }
+
+    /// `patch_text` for the look's fill colour.
+    pub fn patch_fill(&mut self, b: &Handle, fill: Color) -> bool {
+        self.patch_look(b, &Look { fill, ..self.slots.get(b.box_slot).map_or(Look::NONE, |s| s.node.look) })
+    }
+
+    /// `patch_text` for the whole look.
+    pub fn patch_look(&mut self, b: &Handle, look: &Look) -> bool {
+        if !self.live(b) {
+            return false;
+        }
+        self.slots[b.box_slot].node.look = *look;
+        self.repaint_node(b.box_slot)
+    }
+
+    /// `patch_text` for the node's rectangle: its look and text move or resize. Its children, its
+    /// canvases and its hit area stay until the next frame.
+    pub fn patch_rect(&mut self, b: &Handle, rect: Rect) -> bool {
+        if !self.live(b) {
+            return false;
+        }
+        let s = &mut self.slots[b.box_slot];
+        (s.rx, s.ry, s.rw, s.rh) = (rect.x, rect.y, rect.w, rect.h);
+        self.repaint_node(b.box_slot)
+    }
+
+    /// `patch_rect` by an offset.
+    pub fn patch_offset(&mut self, b: &Handle, dx: f32, dy: f32) -> bool {
+        let r = self.rect(b);
+        self.patch_rect(b, Rect::new(r.x + dx, r.y + dy, r.w, r.h))
     }
 
     // -------------------------------------------------------------- frame
@@ -3082,11 +3342,10 @@ impl Ui {
         let tw2 = self.text_width(Some(small), tip_key);
         let tip_w = 2.0 + 12.0 + tw1 + 6.0 + tw2;
         let tip = self.box_("ui-carry-tip", BoxOpts::default().w(Size::Px(tip_w)).h(Size::Px(20.0)).at((px + 14.0, py + 14.0 + 20.0 + 8.0)));
-        let value = payload.value.clone();
-        self.draw_over(&ghost, move |paint, Rect { x, y, w, h }| {
-            paint.fill(x, y, w, h, theme.input);
-            paint.text_s((x + 6.0, y + ((20 - size) as f32 / 2.0).floor()), size, theme.foreground, &value);
-        });
+        let look = Look { fill: theme.input, text: theme.foreground, font: Font { size, tracking: 0.0, caps: false }, ..Look::NONE };
+        self.slots[ghost.box_slot].node.look = look;
+        self.slots[ghost.box_slot].node.inset.l = 6.0;
+        self.text(&ghost, &payload.value);
         self.draw_over(&tip, move |paint, Rect { x, y, w, h }| {
             paint.fill(x, y, w, h, theme.input);
             paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::edge(&theme));
@@ -3103,16 +3362,12 @@ impl Ui {
     fn clear_frame_callbacks(&mut self) {
         for index in 0..self.count {
             let b = &mut self.boxes[index];
-            b.w = Size::Grow;
-            b.h = Size::Grow;
             b.hit = None;
             b.hit_rect = None;
-            for row in b.painters.iter_mut().chain(&mut b.overlays) {
-                (row.clear)(row.value.as_mut());
-            }
-            b.painter_count = 0;
-            b.overlay_count = 0;
+            b.paint = arena::EMPTY;
+            b.over = arena::EMPTY;
         }
+        self.arena.reset();
     }
 
     /// Route the frame's ordered events, run the builder, lay out, and paint. Tab/Shift-Tab
@@ -3159,19 +3414,8 @@ impl Ui {
         self.parents.clear();
         self.seeds.clear();
         let root = self.append_box(ROOT_KEY, NONE);
-        self.set_box(
-            root,
-            NO_FLAGS,
-            Size::Px(frame.input.size.0 as f32),
-            Size::Px(frame.input.size.1 as f32),
-            f32::INFINITY,
-            false,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            None,
-        );
+        let (w, h) = (frame.input.size.0 as f32, frame.input.size.1 as f32);
+        self.set_box(root, Node { w: Size::Px(w), h: Size::Px(h), at: Some((0.0, 0.0)), scroll_step: 0.0, ..Node::DEFAULT });
         self.parents.push(root);
         self.seeds.push(ROOT_KEY);
     }
@@ -3403,7 +3647,7 @@ impl Ui {
     }
 
     pub(crate) fn set_flags_of_box(&mut self, b: &UiBox, flags: Flags) {
-        self.boxes[b.index].flags = flags;
+        self.slots[b.box_slot].node.flags = flags;
     }
 
 }

@@ -792,8 +792,8 @@ pub fn window_pxui_carry() {
 pub fn window_pxui_retired_callbacks() {
     // Published frames retain no callback payloads: each closure releases its last captured owner after painting.
     let mut ui = Ui::create(Platform::Apple, None, golden_text());
-    let held: Vec<Rc<[u8; 32]>> = (0..5).map(|_| Rc::new([b'x'; 32])).collect();
-    let seen: Rc<RefCell<[bool; 5]>> = Rc::new(RefCell::new([false; 5]));
+    let held: Vec<Rc<[u8; 32]>> = (0..3).map(|_| Rc::new([b'x'; 32])).collect();
+    let seen: Rc<RefCell<[bool; 3]>> = Rc::new(RefCell::new([false; 3]));
     let painter = |index: usize| -> Box<dyn Fn(&mut Paint, Rect)> {
         let (bytes, seen) = (held[index].clone(), seen.clone());
         Box::new(move |_, _| {
@@ -809,16 +809,10 @@ pub fn window_pxui_retired_callbacks() {
             rect
         })
     };
-    let relative = |index: usize| -> Size {
-        let (bytes, seen) = (held[index].clone(), seen.clone());
-        Size::Rel(Rc::new(move |size| {
-            seen.borrow_mut()[index] = true;
-            let _ = bytes.len();
-            size
-        }))
-    };
+    // relative sizes are plain function pointers: they hold nothing
+    let relative = Size::Rel(|size| size);
     ui.frame(&frame_at(vec![], 1.0, 0.0, vec![]), &mut |ui| {
-        let b = ui.box_("callbacks", BoxOpts::default().w(relative(3)).h(relative(4)).hit(hit.clone()));
+        let b = ui.box_("callbacks", BoxOpts::default().w(relative).h(relative).hit(hit.clone()));
         ui.draw(&b, painter(0));
         ui.draw_over(&b, painter(1));
     });
@@ -831,7 +825,7 @@ pub fn window_pxui_retired_callbacks() {
     }
     ui.frame(&frame_at(vec![], 1.0, 1.0, vec![]), &mut |_| {});
     if held.iter().any(|h| Rc::strong_count(h) > 1) {
-        fail("a smaller UI frame retained a retired paint, overlay, hit or size callback");
+        fail("a smaller UI frame retained a retired paint, overlay or hit callback");
     }
     ui.destroy();
 }

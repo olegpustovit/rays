@@ -164,7 +164,42 @@ fn gpu_parity_draw_calls() {
     }
 }
 
+/// A node patched between builds renders as a fresh build with the patched values would.
+fn gpu_patch() {
+    if !gpu::available() {
+        return;
+    }
+    let chip = |text: &'static str, fill: (i64, i64, i64)| {
+        move |ui: &mut Ui| -> Handle {
+            let look = Look { fill: pxui::geom::color::rgb(fill.0, fill.1, fill.2), text: pxui::geom::color::black(), ..Look::NONE };
+            let h = ui.node("clock", Node { w: Size::Px(120.0), h: Size::Px(24.0), at: Some((10.0, 10.0)), look, inset: Edges { l: 6.0, ..Edges::default() }, ..Node::DEFAULT });
+            ui.text(&h, text);
+            h
+        }
+    };
+    let shot = |ui: &mut Ui| gpu::render(ui, (WIDTH as u32, 60), 2, [228, 139, 161, 255]).0;
+    let built = |text: &'static str, fill| {
+        let mut ui = Ui::create(Platform::Apple, None, crate::support::golden_text());
+        let mut handle = None;
+        for count in 0..2 {
+            ui.frame(&frame_at(count, 60, 2), &mut |ui| handle = Some(chip(text, fill)(ui)));
+        }
+        (ui, handle.unwrap())
+    };
+    let (mut ui, clock) = built("12:00", (200, 40, 40));
+    let before = shot(&mut ui);
+    assert!(ui.patch_fill(&clock, pxui::geom::color::rgb(40, 40, 200)) && ui.patch_text(&clock, "12:00:01"), "patch refused");
+    let patched = shot(&mut ui);
+    ui.destroy();
+    let (mut fresh, _) = built("12:00:01", (40, 40, 200));
+    let expected = shot(&mut fresh);
+    fresh.destroy();
+    assert!(patched != before && patched == expected, "a patched node renders unlike its fresh build");
+    println!("PXUI patch: renders as its fresh build");
+}
+
 pub const CASES: &[(&str, fn())] = &[
+    ("gpu_patch", gpu_patch),
     ("gpu_parity_commands", gpu_parity_commands),
     ("gpu_parity_draw_calls", gpu_parity_draw_calls),
     ("gpu_parity_overlays", gpu_parity_overlays),

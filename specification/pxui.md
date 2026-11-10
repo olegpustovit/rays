@@ -393,6 +393,13 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
 1. Retained nodes. Every node has a stable `Handle`; the app patches it directly (`patch_text`,
    `patch_fill`). One small write, nothing rebuilt or compared. For hot elements only: a clock, a caret,
    a meter. A patch survives until its view next rebuilds.
+   Landed (P5 commit 1): `ui.node(label, Node { w, h, flags, look, inset, ..Node::DEFAULT }) -> Handle`,
+   `ui.text(&h, s)`, `ui.signal(&h)`, `ui.canvas(&h, |p, rect| ..)` / `canvas_over`, `ui.live(&h)`, and
+   `patch_text`, `patch_fill`, `patch_look`, `patch_rect`, `patch_offset` (each `-> bool`, `false` for a
+   stale handle). A node lives while its builder declares it; a patch rewrites the node's own look and
+   text instances in the last frame's layer and bumps `draw_revision` (no build, no layout,
+   `wants_frame` stays false); its next declaration wins over the patch. Canvas closures and formatted
+   keys live in a per-frame bump arena.
 2. Hybrid views. `ui.view(key, revision, w, h, f)` is skipped when its revision and bounds match the last
    frame; its instance range stays in the GPU buffer. Debug builds re-run cached views and assert the
    output equals the cached one. `ui.list` builds only the rows on screen.

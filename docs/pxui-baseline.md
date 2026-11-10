@@ -39,3 +39,10 @@ closures of the toggle and button, and the text field's value copies; labels now
 cached labels, hit shapes are kept per shape or per slot, and `text_field` returns the new value only
 on the frames that change it. `gpu_parity_draw_calls` asserts one painter draw call per layer for the
 panel and for the clipped table. A focused text field still copies its value while editing.
+
+## After P5 commit 1 (retained nodes)
+
+Nodes are retained records with `Handle`s; `Look` data replaces the panel's, label's and carry
+ghost's paint closures; canvas closures live in the frame arena. `window_pxui_baseline`: 0
+allocations, about 3.9 to 4.0 us per warm kit frame before and after (debug, 2x).
+`window_pxui_arena_first_frame` asserts the first frame of a new canvas node allocates nothing.
