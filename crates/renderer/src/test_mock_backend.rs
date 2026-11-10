@@ -1,4 +1,4 @@
-//! lib/renderer/test_mock_backend.ml: the mock backend has no renderer shaders, and caps live allocations.
+//! : the mock backend has no renderer shaders, and caps live allocations.
 use crate::renderer;
 use ogpu_core::backend as b;
 use ogpu_core::error::{self, ErrorKind};

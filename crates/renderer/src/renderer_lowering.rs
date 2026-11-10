@@ -1,11 +1,11 @@
 use crate::renderer_retained_plans::Resource;
-use crate::scene_execution::{self, bytes, Draw, empty_bytes, Mesh, MeshKey, new_bytes, PipelineFamily, SampledDraw, SampledTexture, State, TextureLevel};
+use crate::scene_execution::{self, Bytes, Draw, empty_bytes, Mesh, MeshKey, new_bytes, PipelineFamily, SampledDraw, SampledTexture, State, TextureLevel};
 use crate::side_lru::{self, Item, TableKey};
 use ogpu_core::error::{self, Error, ErrorKind};
 use ogpu_core::pipeline::Blend;
 use ogpu_core::render_pass::{Comparison, Cull, Load, Primitive};
 use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
-use runtime::presentation_facts;
+use runtime::PresentationFacts;
 use scene_command::render_ir::{self as ir, Command, Geometry, Rect, Transform};
 use scene_command::ui_batch::Table as Shapes;
 use std::cell::RefCell;
@@ -46,7 +46,7 @@ pub fn identity_transform(transform: &Transform) -> bool {
     transform.xx == 1.0 && transform.xy == 0.0 && transform.yx == 0.0 && transform.yy == 1.0 && transform.tx == 0.0 && transform.ty == 0.0
 }
 
-pub fn affine_uniforms(transform: &Transform) -> bytes {
+pub fn affine_uniforms(transform: &Transform) -> Bytes {
     let mut target = vec![0u8; 24];
     if identity_transform(transform) {
         put(&mut target, 0, 1.0);
@@ -183,15 +183,15 @@ pub fn same_bytes_range(source: &[u8], offset: usize, target: &[u8]) -> bool {
 
 struct CachedQuadPayload {
     mesh_key: String,
-    vertices: bytes,
-    indices: bytes,
+    vertices: Bytes,
+    indices: Bytes,
 }
 
 pub struct UiSlot {
-    pub vertices: bytes,
-    pub indices: bytes,
-    pub affine: bytes,
-    pub source: bytes,
+    pub vertices: Bytes,
+    pub indices: Bytes,
+    pub affine: Bytes,
+    pub source: Bytes,
 }
 
 pub type UiSlotRef = Rc<RefCell<UiSlot>>;
@@ -209,7 +209,7 @@ pub struct Lowering {
     out_slots: Vec<Draw>,
     out_list: Vec<Draw>,
     ui_slots: side_lru::Table,
-    ui_indices_scratch: bytes,
+    ui_indices_scratch: Bytes,
 }
 
 pub fn create() -> Lowering {
@@ -223,13 +223,13 @@ pub fn create() -> Lowering {
     }
 }
 
-pub fn ui_affine(transform: &Transform) -> bytes {
+pub fn ui_affine(transform: &Transform) -> Bytes {
     let mut target = vec![0u8; 24];
     write_affine(&mut target, transform);
     new_bytes(target)
 }
 
-pub fn ui_index_bytes(value: &mut Lowering, count: i64) -> Result<bytes, Error> {
+pub fn ui_index_bytes(value: &mut Lowering, count: i64) -> Result<Bytes, Error> {
     let operation = "Renderer.ui_index_bytes";
     if count < 0 || count > i32::MAX as i64 / 4 {
         return Err(error::make(operation, ErrorKind::Capacity, "UI indices exceed signed 32-bit vertex addressing"));
@@ -282,9 +282,6 @@ pub fn find_ui_slot(value: &mut Lowering, key: i64) -> UiSlotRef {
     slot
 }
 
-fn bits(values: &[f64]) -> String {
-    values.iter().map(|v| v.to_bits().to_string()).collect::<Vec<_>>().join(",")
-}
 
 fn rect_bits(r: &Rect) -> [f64; 4] {
     [r.x, r.y, r.width, r.height]
@@ -436,7 +433,7 @@ fn to_blend(mode: ir::Blend) -> Blend {
 
 pub fn lower_scene2(
     state_: &mut Lowering,
-    facts: &presentation_facts,
+    facts: &PresentationFacts,
     density: i64,
     snapshot: &mut dyn FnMut(i64, Resource) -> Result<(i64, i64, Rc<SampledTexture>), Error>,
     resolve_gpu: &dyn Fn(&Shapes) -> Result<Option<String>, String>,

@@ -93,7 +93,7 @@ fn gpu_offscreen_clear_resize() {
     native::runtime_of_mut(&e, &mut |rt| ime = Some(runtime::set_text_input(rt, Some(((1, 1, 2, 1), 1)))));
     assert!(ime.unwrap().is_err(), "offscreen execution accepted a native IME area");
     let mut cur = None;
-    native::runtime_of_mut(&e, &mut |rt| cur = Some(runtime::set_cursor(rt, runtime::cursor_shape::Horizontal_resize)));
+    native::runtime_of_mut(&e, &mut |rt| cur = Some(runtime::set_cursor(rt, runtime::CursorShape::HorizontalResize)));
     assert!(cur.unwrap().is_err(), "offscreen execution accepted a native cursor");
     clear_to(&e, (1., 0., 0., 1.));
     let first = renderer::capture(&e).unwrap();
@@ -356,7 +356,7 @@ fn gpu_offscreen_eviction() {
     renderer::destroy(&e).unwrap();
 }
 
-// lib/scene_execution/test_retained_eviction.ml, using production pipelines and ABI.
+// , using production pipelines and ABI.
 fn execution_retained_eviction(textured: bool, frames: i32) {
     if !common::gpu() { return; }
     use ::renderer::scene_execution::{SampledTexture, TextureLevel};
@@ -756,7 +756,7 @@ fn gpu_execution_offscreen_lifecycle() {
         assert!(se::private::cache_count_for_report(&mut e)<=256);
     }
     se::destroy(&mut e).unwrap();
-    // test_automatic_scratch.ml: mixed families admit only after two identical frames.
+    // : mixed families admit only after two identical frames.
     let mut cfg=cfg.clone(); cfg.logical_width=64; cfg.logical_height=64; cfg.physical_width=64; cfg.physical_height=64;
     let mut mixed = renderer_pipeline::create_renderer(&ogpu_core::impl_::backend().unwrap(),None,None,true,ogpu_core::impl_::create_driver().unwrap(),&cfg).unwrap();
     let mut first=(*d).clone(); first.draw.state.viewport=(0,0,64,64); first.draw.state.scissor=(0,0,64,64);

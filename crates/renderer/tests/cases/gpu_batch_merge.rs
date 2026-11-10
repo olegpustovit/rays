@@ -46,11 +46,11 @@ fn all_sets(sets: &[i64]) -> Table {
     b.publish().unwrap()
 }
 
-fn floats(a: &[f64]) -> scene_execution::bytes {
+fn floats(a: &[f64]) -> scene_execution::Bytes {
     new_bytes(a.iter().flat_map(|v| (*v as f32).to_le_bytes()).collect())
 }
 
-fn words(a: &[i32]) -> scene_execution::bytes {
+fn words(a: &[i32]) -> scene_execution::Bytes {
     new_bytes(a.iter().flat_map(|v| v.to_le_bytes()).collect())
 }
 

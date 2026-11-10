@@ -1,4 +1,4 @@
-#![allow(non_camel_case_types)]
+
 use crate::common;
 use ogpu_core::error::ErrorKind;
 use ogpu_core::pipeline::Blend;
@@ -11,9 +11,9 @@ fn set(bytes: &mut [u8], index: usize, value: f32) {
     bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
 }
 
-type rgba = (f64, f64, f64, f64);
+type Rgba = (f64, f64, f64, f64);
 
-fn uniform(ambient: rgba, diffuse: rgba, global: rgba, light: Option<([f64; 3], rgba, f64)>) -> Vec<u8> {
+fn uniform(ambient: Rgba, diffuse: Rgba, global: Rgba, light: Option<([f64; 3], Rgba, f64)>) -> Vec<u8> {
     let mut values = vec![0f64; 1364];
     for matrix in 0..3 {
         for diagonal in 0..4 {
@@ -21,7 +21,7 @@ fn uniform(ambient: rgba, diffuse: rgba, global: rgba, light: Option<([f64; 3], 
         }
     }
     values[50] = 1.0;
-    let color = |values: &mut Vec<f64>, offset: usize, c: rgba| {
+    let color = |values: &mut Vec<f64>, offset: usize, c: Rgba| {
         values[offset] = c.0;
         values[offset + 1] = c.1;
         values[offset + 2] = c.2;
@@ -61,7 +61,8 @@ fn window_scene3_lighting() {
     }) {
         Ok(r) => r,
         Err(_) => {
-            println!("renderer Scene3 lighting: skipped");
+            println!("RAYS_TEST_SKIP: renderer Scene3 lighting: skipped");
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
             return;
         }
     };
@@ -132,7 +133,7 @@ fn window_scene3_lighting() {
         (0, 255, 0),
     );
     let set64 = |bytes: &mut Vec<u8>, index: usize, value: f64| set(bytes, index, value as f32);
-    let positional = |kind: f64, color: rgba| -> Vec<u8> {
+    let positional = |kind: f64, color: Rgba| -> Vec<u8> {
         let mut bytes = uniform((0.0, 0.0, 0.0, 1.0), (1.0, 1.0, 1.0, 1.0), (0.0, 0.0, 0.0, 1.0), Some(([0.0, 0.0, -1.0], color, 1.0)));
         set64(&mut bytes, 84, kind);
         set64(&mut bytes, 85, 0.0);

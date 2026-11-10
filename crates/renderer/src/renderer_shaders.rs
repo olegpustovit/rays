@@ -11,7 +11,7 @@ pub const SCENE3_TEXTURED: &str = include_str!("../../../fixtures/shaders/render
 pub const SCENE3_WORLD: &str = include_str!("../../../fixtures/shaders/renderer/scene3_world.metal");
 pub const SCENE3_SUN_DEPTH: &str = include_str!("../../../fixtures/shaders/renderer/scene3_sun_depth.metal");
 
-/// Vulkan's stages (`renderer_spirv.ml`).
+/// Vulkan's stages (``).
 pub mod spirv {
     pub const MARKS_VERT: &[u8] = include_bytes!("../../../fixtures/shaders/renderer/marks.vert.spv");
     pub const MARKS_FRAG: &[u8] = include_bytes!("../../../fixtures/shaders/renderer/marks.frag.spv");

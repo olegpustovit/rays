@@ -14,7 +14,8 @@ fn window_runtime_render() {
     let value = match renderer::create(&cfg) {
         Ok(value) => value,
         Err(e) => {
-            println!("renderer: skipped (no window/native device: {})", ogpu_core::error::to_string(&e));
+            println!("RAYS_TEST_SKIP: renderer: skipped (no window/native device: {})", ogpu_core::error::to_string(&e));
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
             return;
         }
     };

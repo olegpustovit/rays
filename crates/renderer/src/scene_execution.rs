@@ -19,17 +19,17 @@ use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 /// Shared byte owners use Rc::ptr_eq where storage identity matters.
-pub use runtime_resources::bytes;
+pub use runtime_resources::Bytes;
 
-pub fn new_bytes(value: Vec<u8>) -> bytes {
+pub fn new_bytes(value: Vec<u8>) -> Bytes {
     Rc::new(value)
 }
 
-pub fn empty_bytes() -> bytes {
+pub fn empty_bytes() -> Bytes {
     new_bytes(Vec::new())
 }
 
-fn blen(value: &bytes) -> usize {
+fn blen(value: &Bytes) -> usize {
     value.len()
 }
 
@@ -191,11 +191,11 @@ pub fn mesh_key_string(key: &MeshKey) -> String {
 #[derive(Clone)]
 pub struct Mesh {
     pub key: MeshKey,
-    pub vertices: bytes,
+    pub vertices: Bytes,
     /// Immutable published UI vertices; when present, `vertices` must be empty.
     pub shared_vertices: Option<Arc<Vec<u8>>>,
     pub vertex_count: i64,
-    pub indices: bytes,
+    pub indices: Bytes,
     pub index_count: i64,
     pub primitive: Primitive,
 }
@@ -219,7 +219,7 @@ pub struct State {
     pub depth_write: bool,
     pub depth_load: Load,
     pub depth_clear: f64,
-    pub transform_uniforms: Option<bytes>,
+    pub transform_uniforms: Option<Bytes>,
 }
 
 #[derive(Clone)]
@@ -248,7 +248,7 @@ use PipelineFamily::*;
 pub struct TextureLevel {
     pub width: i64,
     pub height: i64,
-    pub bytes: bytes,
+    pub bytes: Bytes,
 }
 
 /// `levels` is an `Rc` so that "the immutable levels this slot was uploaded from" stays a
@@ -264,7 +264,7 @@ pub struct SampledTexture {
 #[derive(Clone)]
 pub struct AuxiliaryResource {
     pub key: String,
-    pub buffer: bytes,
+    pub buffer: Bytes,
     pub texture: SampledTexture,
     /// A `Scene3_world` draw's camera map (texture 9, sampler 10).
     pub environment: Option<SampledTexture>,
@@ -283,7 +283,7 @@ pub struct SampledDraw {
     pub auxiliary: Option<Rc<AuxiliaryResource>>,
     /// Independently retained Scene3 color/UV stream (12 bytes per vertex), bound at vertex buffer
     /// 11. Required (and only valid) for the Scene3 families; 2D, UI and Marks draws carry `None`.
-    pub vertex_attributes: Option<(String, bytes)>,
+    pub vertex_attributes: Option<(String, Bytes)>,
     pub samples: i64,
     pub draw: GeometryDraw,
 }
@@ -337,11 +337,11 @@ struct UniformPage {
 }
 
 struct CachedAuxiliary {
-    copy: bytes,
+    copy: Bytes,
     buffer: Buffer,
     /// The bytes this entry was uploaded from: a physically equal source is a hit without comparing
     /// (World blocks can carry a whole shadow map).
-    source: bytes,
+    source: Bytes,
 }
 type CachedAuxiliaryRef = Rc<RefCell<CachedAuxiliary>>;
 
@@ -1085,7 +1085,7 @@ fn scratch_mem_mesh(scratch: &PreparedScratch, item: &CachedRef) -> bool {
 /// One entry per key. A hit needs no hashing: vertex-stable keys carry their identity, other draws
 /// keep the exact source bytes they were uploaded from and compare them physically. Content hashing
 /// happens once per upload and only decides a same-key miss for fresh but equal bytes.
-fn prepare(value: &mut SceneExecution, uniforms: Option<&bytes>, vertex_stable: bool, mesh: &Mesh) -> Result<CachedRef, Error> {
+fn prepare(value: &mut SceneExecution, uniforms: Option<&Bytes>, vertex_stable: bool, mesh: &Mesh) -> Result<CachedRef, Error> {
     let uniform_bytes: Vec<u8> = uniforms.map(|b| b.to_vec()).unwrap_or_default();
     let valid_uniforms = uniforms.is_none_or(|bytes_| valid_uniform_bytes(&bytes_));
     let key = mesh_key_string(&mesh.key);
@@ -1150,7 +1150,7 @@ fn prepare(value: &mut SceneExecution, uniforms: Option<&bytes>, vertex_stable: 
 
 fn prepare_upload(
     value: &mut SceneExecution,
-    uniforms: Option<&bytes>,
+    uniforms: Option<&Bytes>,
     uniform_bytes: &[u8],
     valid_uniforms: bool,
     vertex_stable: bool,
@@ -1275,7 +1275,7 @@ fn align256(value: i64) -> i64 {
 
 /// A Scene2 mesh's constants (marks.rays, geometry-vertex): its affine (24 bytes of floats or 48 of
 /// doubles, none the identity) and the colour flag: each vertex carries its colour word
-fn geometry_constants(affine: Option<&bytes>) -> bytes {
+fn geometry_constants(affine: Option<&Bytes>) -> Bytes {
     let mut constants = vec![0u8; 32];
     let mut put = |index: usize, value: f32| constants[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
     match affine {
@@ -1315,7 +1315,7 @@ enum Deferred {
     Texture(Texture),
 }
 
-fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sources: &[Option<bytes>]) -> Result<Vec<Option<UniformSlice>>, Error> {
+fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sources: &[Option<Bytes>]) -> Result<Vec<Option<UniformSlice>>, Error> {
     let operation = "Scene_execution.prepare_uniforms";
     // one page per plan S6: a frame's needs far under it for long enough bring it back down, also
     // when the uniforms stop changing
@@ -1748,7 +1748,7 @@ fn upload_texture(
     }
 }
 
-fn prepare_storage(value: &mut SceneExecution, key: &str, bytes_: &bytes) -> Result<CachedAuxiliaryRef, Error> {
+fn prepare_storage(value: &mut SceneExecution, key: &str, bytes_: &Bytes) -> Result<CachedAuxiliaryRef, Error> {
     let found = side_lru::find(&mut value.auxiliary_cache, &skey(key)).map(|item| cached_auxiliary_of(&item));
     if let Some(item) = found {
         if Rc::ptr_eq(&item.borrow().source, bytes_) {
@@ -3230,7 +3230,7 @@ struct DrawMode {
     scene2: bool,
     affine: bool,
     scene3_transform: bool,
-    source: Option<bytes>,
+    source: Option<Bytes>,
 }
 
 fn submit_prepared(
@@ -3264,7 +3264,7 @@ fn submit_prepared(
             DrawMode { scene2, affine, scene3_transform, source }
         })
         .collect();
-    let sources: Vec<Option<bytes>> = modes.iter().map(|m| m.source.clone()).collect();
+    let sources: Vec<Option<Bytes>> = modes.iter().map(|m| m.source.clone()).collect();
     let frame = match acquire(value) {
         Err(e) => {
             after_prepare();

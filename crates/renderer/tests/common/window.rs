@@ -14,10 +14,16 @@ pub fn run(tests: &[(&str, fn())]) {
         }
         return;
     }
+    let grouped = args.iter().any(|a| a == "--rays-group");
     let filters: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     for (name, test) in tests {
         if !filters.is_empty() && !filters.iter().any(|f| f == name) {
             continue;
+        }
+        if grouped {
+            use std::io::Write;
+            println!("RAYS_CASE_START:{name}");
+            std::io::stdout().flush().unwrap();
         }
         let started = std::time::Instant::now();
         // A failing test panics: the hook prints its message, then the shared device is released
@@ -27,12 +33,19 @@ pub fn run(tests: &[(&str, fn())]) {
             super::release_keepalive();
             std::process::exit(101);
         }
-        println!("test {name} ... ok ({:.2}s)", started.elapsed().as_secs_f64());
+        let elapsed = started.elapsed().as_secs_f64();
+        if grouped {
+            use std::io::Write;
+            println!("RAYS_CASE_END:{name}\t{elapsed:.6}");
+            std::io::stdout().flush().unwrap();
+        }
+        println!("test {name} ... ok ({elapsed:.2}s)");
     }
     super::release_keepalive();
 }
 
 /// Keep existing case names, adding their former target only when names collide.
+#[allow(dead_code)] // Single-group test targets use run directly.
 pub fn group_cases(groups: &[(&str, &[(&str, fn())])]) -> Vec<(String, fn())> {
     let mut counts = std::collections::HashMap::new();
     for (_, tests) in groups {
@@ -49,6 +62,7 @@ pub fn group_cases(groups: &[(&str, &[(&str, fn())])]) -> Vec<(String, fn())> {
     cases
 }
 
+#[allow(dead_code)] // Single-group test targets use run directly.
 pub fn run_groups(groups: &[(&str, &[(&str, fn())])]) {
     let cases = group_cases(groups);
     let cases: Vec<(&str, fn())> = cases.iter().map(|(name, test)| (name.as_str(), *test)).collect();

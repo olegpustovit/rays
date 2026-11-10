@@ -1,4 +1,4 @@
-#![allow(non_camel_case_types)]
+
 use crate::common;
 use ogpu_core::backend::{self, Buffer};
 use ogpu_core::pipeline::Blend;
@@ -39,14 +39,14 @@ fn uniform(red: bool) -> Vec<u8> {
     bytes
 }
 
-struct fixture {
+struct Fixture {
     vertices: Vec<u8>,
     indices: Vec<u8>,
     attributes: Vec<u8>,
     mesh: Mesh,
 }
 
-fn fixture() -> fixture {
+fn fixture() -> Fixture {
     let mut indices = vec![0u8; 12];
     let mut vertices = vec![0u8; 24 * 3];
     let mut attributes = vec![0u8; 12 * 3];
@@ -68,10 +68,10 @@ fn fixture() -> fixture {
         index_count: 3,
         primitive: Primitive::TriangleList,
     };
-    fixture { vertices, indices, attributes, mesh }
+    Fixture { vertices, indices, attributes, mesh }
 }
 
-fn entry(f: &fixture, scissor: (i64, i64, i64, i64), uniforms: Vec<u8>) -> SampledDraw {
+fn entry(f: &Fixture, scissor: (i64, i64, i64, i64), uniforms: Vec<u8>) -> SampledDraw {
     SampledDraw {
         family: PipelineFamily::Scene3,
         blend: Blend::Replace,
@@ -175,7 +175,7 @@ fn gpu_scene3_shared_mesh_and_instances() {
     println!("Scene3 shared-mesh and instances passed");
 }
 
-struct resident {
+struct Resident {
     runtime: Renderer,
     host: Renderer,
     gpu: renderer::Gpu,
@@ -184,10 +184,10 @@ struct resident {
     key: String,
     alive: Rc<Cell<bool>>,
     unregister: Box<dyn Fn()>,
-    f: fixture,
+    f: Fixture,
 }
 
-fn resident() -> resident {
+fn resident() -> Resident {
     let f = fixture();
     let host = renderer::create_offscreen(&config()).unwrap();
     let gpu = renderer::acquire_gpu().unwrap();
@@ -212,10 +212,10 @@ fn resident() -> resident {
     let alive = Rc::new(Cell::new(true));
     let valid = alive.clone();
     let (key, unregister) = renderer::register_gpu_positions(&gpu, &positions, None, Some((device_indices.clone(), 3)), None, 3, 0, Rc::new(move || valid.get())).unwrap();
-    resident { runtime, host, gpu, positions, device_indices, key, alive, unregister, f }
+    Resident { runtime, host, gpu, positions, device_indices, key, alive, unregister, f }
 }
 
-fn finish(r: resident, color_buffers: Vec<Buffer>) {
+fn finish(r: Resident, color_buffers: Vec<Buffer>) {
     (r.unregister)();
     renderer::destroy(&r.runtime).unwrap();
     for buffer in color_buffers.iter() {
@@ -227,7 +227,7 @@ fn finish(r: resident, color_buffers: Vec<Buffer>) {
     renderer::destroy(&r.host).unwrap();
 }
 
-fn device_entry(r: &resident, key: String, uniforms: Vec<u8>, attributes: &str, host_bytes: Vec<u8>) -> SampledDraw {
+fn device_entry(r: &Resident, key: String, uniforms: Vec<u8>, attributes: &str, host_bytes: Vec<u8>) -> SampledDraw {
     let mut e = entry(&r.f, (0, 0, 4, 4), uniforms);
     e.vertex_attributes = Some((attributes.to_owned(), new_bytes(host_bytes)));
     e.draw.mesh = Mesh { key: MeshKey::GpuVertices { name: Rc::new(key), indices: None }, vertices: scene_execution::empty_bytes(), indices: scene_execution::empty_bytes(), ..r.f.mesh.clone() };
@@ -389,13 +389,13 @@ fn gpu_scene3_borrowed_stream_guards() {
 }
 
 #[derive(Default)]
-struct native_vertex_observation {
+struct NativeVertexObservation {
     buffers: std::collections::HashMap<String, backend::Token>,
     bindings: Vec<(i64, backend::Token, i64)>,
     mesh_upload_bytes: usize,
 }
 
-type Seen = Rc<std::cell::RefCell<native_vertex_observation>>;
+type Seen = Rc<std::cell::RefCell<NativeVertexObservation>>;
 type E = ogpu_core::error::Error;
 macro_rules! forward {
     ($($name:ident($($arg:ident: $ty:ty),*) -> $ret:ty;)*) => {
@@ -524,14 +524,14 @@ fn observe_native_vertices(base: Box<dyn backend::Driver>, seen: Seen) -> Box<dy
     Box::new(ObservedDriver { base, seen })
 }
 
-// lib/scene_execution/test_gpu_vertices.ml:249-283,291-310,344-370.
+// :249-283,291-310,344-370.
 fn gpu_borrowed_vertex_encoder_observation() {
     if !common::gpu() { return; }
     use ::renderer::{renderer_pipeline, scene_execution as se};
     use ogpu_core::surface::{Configuration, Format, PresentMode};
     use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
     let baseline = ogpu_core::impl_::live_handles().unwrap();
-    let seen = Rc::new(std::cell::RefCell::new(native_vertex_observation::default()));
+    let seen = Rc::new(std::cell::RefCell::new(NativeVertexObservation::default()));
     let driver = observe_native_vertices(ogpu_core::impl_::create_driver().unwrap(), seen.clone());
     let cfg = Configuration { logical_width: 4, logical_height: 4, physical_width: 4, physical_height: 4, format: Format::Rgba8Unorm, present_mode: PresentMode::Immediate, max_acquired: 1, layer: None };
     let owner = se::create_gpu_vertices_owner();

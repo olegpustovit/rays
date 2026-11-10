@@ -6,11 +6,11 @@ use ogpu_core::render_pass::{Comparison, Cull, Load, Primitive};
 use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
 use std::rc::Rc;
 
-fn words(values: &[u32]) -> scene_execution::bytes {
+fn words(values: &[u32]) -> scene_execution::Bytes {
     new_bytes(values.iter().flat_map(|v| v.to_le_bytes()).collect())
 }
 
-fn floats(values: &[f32]) -> scene_execution::bytes {
+fn floats(values: &[f32]) -> scene_execution::Bytes {
     new_bytes(values.iter().flat_map(|v| v.to_le_bytes()).collect())
 }
 

@@ -4,11 +4,11 @@ use crate::renderer_lowering::default_state;
 use crate::scene_execution::{empty_bytes, GeometryDraw, Mesh, MeshKey, PipelineFamily, SampledDraw};
 use ogpu_core::pipeline::Blend;
 use ogpu_core::render_pass::Primitive;
-use runtime::{change_flag, frame_facts};
+use runtime::{change_flag, FrameFacts};
 use std::rc::Rc;
 
-fn facts(drawable_width: i64, drawable_height: i64, scale_x: f64, scale_y: f64) -> frame_facts {
-    frame_facts { logical_width: 4, logical_height: 4, drawable_width, drawable_height, pixel_scale_x: scale_x, pixel_scale_y: scale_y }
+fn facts(drawable_width: i64, drawable_height: i64, scale_x: f64, scale_y: f64) -> FrameFacts {
+    FrameFacts { logical_width: 4, logical_height: 4, drawable_width, drawable_height, pixel_scale_x: scale_x, pixel_scale_y: scale_y }
 }
 
 #[test]

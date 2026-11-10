@@ -35,13 +35,19 @@ pub fn gpu() -> bool {
             KEEP.with(|k| *k.borrow_mut() = Some(lease));
             true
         }
+        Err(e) if e.kind == error::ErrorKind::NoAdapter => {
+            println!("RAYS_TEST_SKIP: no device ({})", error::to_string(&e));
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "RAYS_ALLOW_SKIP=1 explicitly permits skipping missing GPU coverage");
+            false
+        }
         Err(e) => panic!("{}", error::to_string(&e)),
     }
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
 pub fn gpu() -> bool {
-    println!("skipped: native renderer integration requires Windows Vulkan or macOS Metal");
+    println!("RAYS_TEST_SKIP: skipped: native renderer integration requires Windows Vulkan or macOS Metal");
+    assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
     false
 }
 

@@ -1,4 +1,4 @@
-//! lib/renderer/test_scene2_argument.ml on an offscreen renderer (the window run is
+//!  on an offscreen renderer (the window run is
 //! window_scene2_argument.rs); both share tests/scene2_argument_body.
 use crate::common;
 use crate::scene2_argument_body;

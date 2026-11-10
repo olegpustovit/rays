@@ -62,7 +62,7 @@
                     [0. 0. 1. 0.])
                   [(array/nth input (int/add at 3)) (array/nth input (int/add at 4)) (array/nth input (int/add at 5)) 0.])
          instanced (> (array/nth surface 83) 0.5)
-         base (int/mul (gpu/instance-id) 48)
+         base (int/mul (gpu/instance_id) 48)
          clip (if instanced (transform instances base local) (transform surface 0 local))
          world (if instanced (transform instances (int/add base 16) local) (transform surface 16 local))
          turned (if instanced (transform instances (int/add base 32) normal) (transform surface 32 normal))
@@ -131,7 +131,7 @@
 (defn scene-surface :context value
   [(p : (array float)) (color : vec4) (world : vec3) (normal : vec3) (tex : vec4)]
   (let* [n0 (unit3 normal)
-         n (if (and (> (array/nth p 74) 0.5) (not (gpu/front-facing))) (neg3 n0) n0)
+         n (if (and (> (array/nth p 74) 0.5) (not (gpu/front_facing))) (neg3 n0) n0)
          view (unit3 (- (at3 p 48) world))
          count (let* [c (int (array/nth p 73))] (if (int/lt c 64) c 64))
          lit (fold [acc {:primary (fma3 (at3 p 52) (at3 p 69) (at3 p 64)) :spec [0. 0. 0.]}] [i (range count)]
@@ -161,7 +161,7 @@
    (surface : (array float)) (instances : (array float))]
   (let* [at (int/mul vid (if (> (array/nth surface 79) 0.5) 3 6))
          local [(array/nth input at) (array/nth input (int/add at 1)) (array/nth input (int/add at 2)) 1.]
-         base (int/mul (gpu/instance-id) 48)
+         base (int/mul (gpu/instance_id) 48)
          world (if (> (array/nth surface 83) 0.5) (transform instances (int/add base 16) local) (transform surface 16 local))]
     {:position (transform sun 40 world)}))
 (defn byte-at :context value [(d : int) (k : int)] (/ (float (int/and (int/shr d k) 255)) 255.))
@@ -274,7 +274,7 @@
       (> (array/nth p 76) 0.5) (let* [c (* (at3 p 64) modulation)] [c.x c.y c.z alpha])
       :else
         (let* [n0 (unit3 normal)
-               n (if (and (> (array/nth p 74) 0.5) (not (gpu/front-facing))) (neg3 n0) n0)
+               n (if (and (> (array/nth p 74) 0.5) (not (gpu/front_facing))) (neg3 n0) n0)
                v (unit3 (- (at3 p 48) world))
                albedo (pow3 (* (at3 p 56) modulation) 2.2)
                rough (max (array/nth p 77) 0.03) a (* rough rough) a2 (* a a) f0 (array/nth p 78)
@@ -283,7 +283,7 @@
                ; (emitters and sun disc included), so the analytic highlights fade by the same weight
                ks (min (max (/ (array/nth p 77) 0.2) 0.) 1.)
                i (neg3 v) r (world-uv (fma3 (let* [k (* -2. (dot3 n i))] [k k k]) n i))
-               sharp (rgb (gpu/sample-level 9 r (* (max rough 0.2) 5.)))
+               sharp (rgb (gpu/sample_level 9 r (* (max rough 0.2) 5.)))
                reflection (if (< ks 1.) (mix3 (rgb (gpu/sample 11 r)) sharp ks) sharp)
                base (+ (fma3 (* (/ albedo 3.141592653589793) (world-irradiance w n)) (- [1. 1. 1.] spec) (* reflection spec))
                        (pow3 (* (at3 p 64) modulation) 2.2))

@@ -59,7 +59,7 @@
   ; each kind computes only what it reads: glyphs, most of the UI, sample and return
   (let* [kind params.w p local a [extra.x extra.y] radius params.x border params.y]
     (cond
-      (= kind 1.) {:discard false :color (* color (gpu/sample 3 (/ uv (gpu/texture-size 3))))}
+      (= kind 1.) {:discard false :color (* color (gpu/sample 3 (/ uv (gpu/texture_size 3))))}
       (or (= kind 2.) (= kind 5.))
         (let* [b [extra.z extra.w] ab (- b a) len (len2 ab) fw (fwidth2 p)
                along (unit (/ (dot2 (- p a) ab) (max (dot2 ab ab) 0.000000000001)))

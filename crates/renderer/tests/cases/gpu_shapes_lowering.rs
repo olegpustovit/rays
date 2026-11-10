@@ -1,4 +1,4 @@
-//! lib/renderer/test_shapes_lowering.ml: published batch pixels and exact allocation ceilings.
+//! : published batch pixels and exact allocation ceilings.
 use crate::common;
 use ::renderer::renderer::{self, native};
 use scene_command::render_ir::{self as ir, Blend, Command};

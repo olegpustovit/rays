@@ -1,4 +1,4 @@
-//! lib/scene_execution/test_prepared_scene3.ml: validation and borrowed-resource ownership.
+//! : validation and borrowed-resource ownership.
 use super::*;
 use ogpu_core::types::{AddressMode as SamplerAddress, MipFilter, SamplerFilter};
 
@@ -100,7 +100,7 @@ fn published_shapes_retain_immutable_vertices_without_copying() {
     let storage=published.instances_shared();
     let expected=storage.as_ref().clone();
     let commands=vec![Command::Shapes(published.clone())];
-    let facts=runtime::presentation_facts { logical_width:4,logical_height:4,drawable_width:4,drawable_height:4,pixel_density:1. };
+    let facts=runtime::PresentationFacts { logical_width:4,logical_height:4,drawable_width:4,drawable_height:4,pixel_density:1. };
     let mut state=lowering::create();
     let mut snapshot=|_,_| panic!("shape fixture unexpectedly resolves an image");
     let draws=lowering::lower_scene2(&mut state,&facts,1,&mut snapshot,&|_| Ok(None),&|| {},&|_| None,&commands).unwrap();

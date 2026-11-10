@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 /// Image snapshot leases a submission keeps until it closes.
 #[derive(Clone)]
-pub struct Leases(Rc<RefCell<Vec<image::lease>>>);
+pub struct Leases(Rc<RefCell<Vec<image::Lease>>>);
 
 /// The leases held when a lowering began: how many there were.
 pub type Checkpoint = usize;
@@ -26,7 +26,7 @@ pub fn checkpoint(policy_: &Policy) -> Option<Checkpoint> {
     }
 }
 
-pub fn retain(value: &Leases, lease: image::lease) {
+pub fn retain(value: &Leases, lease: image::Lease) {
     value.0.borrow_mut().push(lease);
 }
 

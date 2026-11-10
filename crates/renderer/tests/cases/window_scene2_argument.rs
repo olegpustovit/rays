@@ -1,4 +1,4 @@
-//! lib/renderer/test_scene2_argument.ml on a real window renderer (skipped without a display); the
+//!  on a real window renderer (skipped without a display); the
 //! offscreen run is gpu_scene2_argument.rs; both share tests/scene2_argument_body.
 use crate::common;
 use crate::scene2_argument_body;
@@ -13,7 +13,8 @@ fn window_scene2_argument() {
     let runtime = match renderer::create(&renderer::Configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() }) {
         Ok(runtime) => runtime,
         Err(e) => {
-            println!("runtime-next scene2 retained argument: skipped ({})", ogpu_core::error::to_string(&e));
+            println!("RAYS_TEST_SKIP: runtime-next scene2 retained argument: skipped ({})", ogpu_core::error::to_string(&e));
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
             return;
         }
     };

@@ -4,13 +4,13 @@ use crate::renderer_leases::{self, Policy as lease_policy};
 use crate::renderer_lowering::{self, ui_sampler, ui_white_texture};
 use crate::renderer_pipeline;
 use crate::renderer_retained_plans::{self, Plan, Resource as retained_resource, Segment};
-use crate::scene_execution::{self, bytes, GeometryDraw, new_bytes, PreparedScene3, SampledDraw, SampledTexture, TextureLevel};
+use crate::scene_execution::{self, Bytes, GeometryDraw, new_bytes, PreparedScene3, SampledDraw, SampledTexture, TextureLevel};
 use crate::side_lru::{self, Item, TableKey};
 use ogpu_core::backend::{self, Buffer, Device, Queue, Texture};
 use ogpu_core::error::{self as oerror, Error, ErrorKind};
 use ogpu_core::pipeline::Blend;
 use ogpu_core::types::{AddressMode, BufferDescriptor, BufferUsage, MipFilter, SamplerDescriptor, SamplerFilter};
-use runtime::{frame_facts, presentation_facts};
+use runtime::{FrameFacts, PresentationFacts};
 use runtime_resources::{assets, canvas, image, text};
 use scene_command::render_ir::{self as ir, Command, RenderIr};
 use scene_command::ui_batch::Table as Shapes;
@@ -88,7 +88,7 @@ pub type GpuOwner = Rc<GpuOwnerData>;
 /// valid only while that producer's output is current.
 #[derive(Clone)]
 pub enum MarksSource {
-    Host(bytes, i64),
+    Host(Bytes, i64),
     Device(Rc<dyn Fn() -> Option<Buffer>>, i64),
 }
 
@@ -100,7 +100,7 @@ pub struct GpuMarksData {
     stamp: Cell<i64>,
     count: Cell<i64>,
     owned: RefCell<Vec<Option<Buffer>>>,
-    last: RefCell<Vec<bytes>>,
+    last: RefCell<Vec<Bytes>>,
     device: RefCell<Vec<(Rc<dyn Fn() -> Option<Buffer>>, Buffer)>>,
     registration: RefCell<Option<scene_execution::GpuVertices>>,
 }
@@ -204,7 +204,7 @@ fn count_draws(counters: &mut StatsCounters, count: i64) {
 
 pub struct ScaledCache {
     input: Vec<Draw>,
-    facts: Option<frame_facts>,
+    facts: Option<FrameFacts>,
     output: Vec<Draw>,
 }
 
@@ -212,12 +212,12 @@ pub fn new_scaled_cache() -> ScaledCache {
     ScaledCache { input: Vec::new(), facts: None, output: Vec::new() }
 }
 
-fn scale_required(facts: &frame_facts) -> bool {
+fn scale_required(facts: &FrameFacts) -> bool {
     facts.logical_width != facts.drawable_width || facts.logical_height != facts.drawable_height
 }
 
 /// `None` when the draw is unchanged.
-fn scale_draw(facts: &frame_facts, draw_: &GeometryDraw) -> Option<GeometryDraw> {
+fn scale_draw(facts: &FrameFacts, draw_: &GeometryDraw) -> Option<GeometryDraw> {
     let viewport = runtime::map_logical_rect(facts, draw_.state.viewport);
     let scissor = runtime::map_logical_rect(facts, draw_.state.scissor);
     if viewport == draw_.state.viewport && scissor == draw_.state.scissor {
@@ -230,7 +230,7 @@ fn scale_draw(facts: &frame_facts, draw_: &GeometryDraw) -> Option<GeometryDraw>
     }
 }
 
-pub fn scale_draws(facts: &frame_facts, draws: &[GeometryDraw]) -> Vec<GeometryDraw> {
+pub fn scale_draws(facts: &FrameFacts, draws: &[GeometryDraw]) -> Vec<GeometryDraw> {
     if !scale_required(facts) {
         draws.to_vec()
     } else {
@@ -238,7 +238,7 @@ pub fn scale_draws(facts: &frame_facts, draws: &[GeometryDraw]) -> Vec<GeometryD
     }
 }
 
-pub fn scale_sampled_resources(facts: &frame_facts, draws: &[Draw]) -> Vec<Draw> {
+pub fn scale_sampled_resources(facts: &FrameFacts, draws: &[Draw]) -> Vec<Draw> {
     if !scale_required(facts) {
         return draws.to_vec();
     }
@@ -259,11 +259,11 @@ fn same_draw_list(left: &[Draw], right: &[Draw]) -> bool {
     left.len() == right.len() && left.iter().zip(right.iter()).all(|(a, b)| Rc::ptr_eq(a, b))
 }
 
-pub fn scale_sampled_cached(cache: &mut ScaledCache, facts: &frame_facts, draws: &[Draw]) -> Vec<Draw> {
+pub fn scale_sampled_cached(cache: &mut ScaledCache, facts: &FrameFacts, draws: &[Draw]) -> Vec<Draw> {
     scale_sampled_ref(cache, facts, draws).to_vec()
 }
 
-pub(crate) fn scale_sampled_ref<'a>(cache: &'a mut ScaledCache, facts: &frame_facts, draws: &'a [Draw]) -> &'a [Draw] {
+pub(crate) fn scale_sampled_ref<'a>(cache: &'a mut ScaledCache, facts: &FrameFacts, draws: &'a [Draw]) -> &'a [Draw] {
     if !scale_required(facts) { return draws; }
     if !same_draw_list(draws, &cache.input) || cache.facts.as_ref() != Some(facts) {
         cache.input.clear();
@@ -311,7 +311,7 @@ pub struct RendererData {
     owns_device_lease: bool,
     gpu_owner: GpuOwner,
     renderer: RefCell<scene_execution::SceneExecution>,
-    renderer_facts: Cell<frame_facts>,
+    renderer_facts: Cell<FrameFacts>,
     counters: RefCell<StatsCounters>,
     scaled: RefCell<ScaledCache>,
     assets: RefCell<assets::Assets>,
@@ -397,7 +397,7 @@ pub fn prepared_draw(
     blend_: Option<Blend>,
     texture: Option<Rc<SampledTexture>>,
     auxiliary: Option<Rc<scene_execution::AuxiliaryResource>>,
-    vertex_attributes: Option<(String, bytes)>,
+    vertex_attributes: Option<(String, Bytes)>,
     samples: Option<i64>,
     value: GeometryDraw,
 ) -> Draw {
@@ -683,7 +683,7 @@ pub fn stats(value: &Renderer) -> Result<Stats, Error> {
     })
 }
 
-pub fn presentation_facts_of(value: &Renderer) -> Result<presentation_facts, Error> {
+pub fn presentation_facts_of(value: &Renderer) -> Result<PresentationFacts, Error> {
     runtime::presentation_facts(&mut value.0.runtime.borrow_mut())
 }
 
@@ -751,7 +751,7 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
             side_lru::remove(&mut table, &snapshot_key(key, density));
         }
     };
-    let finish = |copy: bool, key: &str, generation: i64, width: i64, height: i64, pixels: &bytes| -> Result<(i64, i64, Rc<SampledTexture>), Error> {
+    let finish = |copy: bool, key: &str, generation: i64, width: i64, height: i64, pixels: &Bytes| -> Result<(i64, i64, Rc<SampledTexture>), Error> {
         if let Some(cached) = find(key, generation) {
             return Ok(cached);
         }
@@ -1500,7 +1500,7 @@ pub fn destroy(value: &Renderer) -> Result<(), Error> {
 
 /// The first sight of a layer draws it directly; the second renders it offscreen. `None` when the
 /// target cannot be made: the view then stays direct for as long as the layer does.
-fn make_retained_target(f: &presentation_facts, draws: &[Draw]) -> Option<RetainedTarget> {
+fn make_retained_target(f: &PresentationFacts, draws: &[Draw]) -> Option<RetainedTarget> {
     let dw = f.drawable_width;
     let dh = f.drawable_height;
     let exec = create_offscreen(&Configuration {
@@ -1780,7 +1780,7 @@ pub mod native {
         }
         let mut changed = v.registration.borrow().is_none() || v.count.get() != count;
         let mut device: Vec<(Rc<dyn Fn() -> Option<Buffer>>, Buffer)> = Vec::new();
-        let upload = |index: usize, data: &bytes, changed: &mut bool| -> Result<Buffer, Error> {
+        let upload = |index: usize, data: &Bytes, changed: &mut bool| -> Result<Buffer, Error> {
             let owned = v.owned.borrow()[index].clone();
             let length = data.len() as i64;
             let size = 16.max(length);
