@@ -1524,6 +1524,8 @@ fn gpu_painter_primitives() {
     require(pixels.chunks_exact(4).all(|p| p == [0x20, 0x40, 0x80, 0xff]), "offscreen clear differs");
 
     let atlas = be::create_texture(&device, TextureDescriptor { format: TextureFormat::R8Unorm, ..texture_descriptor("atlas", 4, &[TextureUsage::TextureBinding, TextureUsage::TextureCopyDst]) }).unwrap_or_else(|failure| die(failure));
+    // New image memory is undefined (lavapipe recycles freed memory), so start from zeros.
+    be::write_texture(&atlas, None, Origin { x: 0, y: 0, z: 0 }, Extent { width: 4, height: 4, depth: 1 }, 4, &[0u8; 16]).unwrap_or_else(|failure| die(failure));
     // A 2x2 glyph with a padded 4-byte row pitch, whose last row carries only its pixels.
     be::write_texture(&atlas, None, Origin { x: 1, y: 1, z: 0 }, Extent { width: 2, height: 2, depth: 1 }, 4, &[1, 2, 0, 0, 3, 4]).unwrap_or_else(|failure| die(failure));
     let mut expected = vec![0u8; 16];
