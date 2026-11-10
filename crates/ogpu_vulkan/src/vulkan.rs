@@ -267,42 +267,6 @@ mod tests {
         assert_eq!(Device::validation_messages(),0);
     }
 
-    /// Wayland: surface from a (wl_display, wl_surface) token, swapchain, acquire and present one image. Needs a compositor
-    /// (WSLg's `WAYLAND_DISPLAY=wayland-0` works); no xdg role is required for the swapchain.
-    #[cfg(wayland_probe)]
-    #[test]
-    fn gpu_wayland_surface_swapchain_present() {
-        use ogpu_core::{types::{StorageMode, TextureFormat, TextureUsage}, validation::{admit_texture, TextureProfile}};
-        use native_layer_token_sys::{Token as SysToken, WaylandLayer};
-        use std::ffi::c_void;
-        unsafe extern "C" { fn rays_wl_probe_open(display: *mut *mut c_void, surface: *mut *mut c_void) -> i32; }
-        unsafe extern "C" fn keep(_: *mut c_void) {}
-        unsafe extern "C" fn free_layer(layer: *mut c_void) { drop(unsafe { Box::from_raw(layer.cast::<WaylandLayer>()) }) }
-        let (mut display, mut surface) = (std::ptr::null_mut(), std::ptr::null_mut());
-        if unsafe { rays_wl_probe_open(&mut display, &mut surface) } != 0 {
-            eprintln!("RAYS_TEST_SKIP: OGPU Wayland surface: no compositor (set WAYLAND_DISPLAY / XDG_RUNTIME_DIR)");
-            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "RAYS_ALLOW_SKIP=1 explicitly permits skipping");
-            return;
-        }
-        let layer = Box::into_raw(Box::new(WaylandLayer { display, surface }));
-        // SAFETY: the layer is freed exactly once by the token's release callback; display and surface outlive the process.
-        let token = Token::from_sys(unsafe { SysToken::from_raw(layer.cast(), 1, 1, Some(keep), Some(free_layer)) }.unwrap());
-        let device = Device::create(true, true).expect("fatal-validation Vulkan device");
-        let mut window = device.surface(&token, 1, 1, false).expect("VkSurfaceKHR from wl_surface");
-        assert_eq!(window.acquire().unwrap(), Acquire::Occluded, "no size asked yet");
-        window.set_extent(64, 48);
-        let caps = device.facts().unwrap().capabilities();
-        let profile = TextureProfile::descriptor_2d(TextureFormat::Rgba8Unorm, 64, 48, StorageMode::Private,
-            vec![TextureUsage::TextureCopySrc, TextureUsage::RenderAttachment], None);
-        let source = device.texture(&admit_texture(&caps, profile).unwrap()).unwrap();
-        let queue = device.queue().unwrap();
-        assert!(matches!(window.acquire().unwrap(), Acquire::Image(_)), "swapchain image acquired");
-        let mut commands = queue.begin().unwrap();
-        let epoch = window.present(&mut commands, &source).expect("present");
-        queue.wait(epoch).unwrap();
-        assert_eq!(Device::validation_messages(), 0);
-    }
-
     #[test]
     fn missing_vulkan_adapter_features_have_the_no_adapter_kind() {
         for failure in [sys::Error::NoDevice, sys::Error::MissingFeature, sys::Error::VulkanResult(-8)] {

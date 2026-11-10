@@ -166,3 +166,19 @@ The slowest cases were catalog perturbation (29.389 s) and the full shattered st
 warm allocation/topology 4 and CLI 4. No performance profile overrides were used.
 The historical editor harness still prints four `SKIPPED` metadata notices; the
 runner's zero skip count does not establish coverage for those excluded ported cases.
+
+## Vulkan on Linux (lavapipe, headless, WSL2)
+
+`ogpu_vulkan` builds on Linux with no window system; any Vulkan 1.3 device works, including the CPU
+driver. Needs `libvulkan-dev` and `mesa-vulkan-drivers`; `libwayland-dev` adds the Wayland surface smoke
+test. The tests also need `glslangValidator`, `spirv-link` and the validation layer. Without root, unpack the
+`.deb`s of `glslang-tools`, `vulkan-validationlayers` and `vulkan-tools` (`apt-get download`, `dpkg -x <deb> ~/vk/root`) and:
+
+```sh
+export PATH=~/vk/root/usr/bin:$PATH LD_LIBRARY_PATH=~/vk/root/usr/lib/x86_64-linux-gnu
+export VK_ADD_LAYER_PATH=~/vk/root/usr/share/vulkan/explicit_layer.d
+export XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir WAYLAND_DISPLAY=wayland-0   # WSLg, for the Wayland smoke test
+cargo t -p ogpu_vulkan && cargo t -p pxui_render
+```
+
+A changed `PATH` reruns the shader build step. Build in the Linux filesystem, not under `/mnt/c`.
