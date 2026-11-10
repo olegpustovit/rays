@@ -11,15 +11,17 @@ path = "src/lib.rs"
 test = false
 
 [dependencies]
-rays = { path = "../rays" }
 rays_math = { path = "../rays_math" }
-param = { path = "../param" }
-mem = { path = "../mem" }
 cfmt = { path = "../cfmt" }
 input = { path = "../input" }
 scene_command = { path = "../scene_command" }
 
+# ponytail: the window cases run on the Rays host (fonts, clipboard, scene lowering) until
+# pxui_text and pxui_render make them headless (P2-P4).
 [dev-dependencies]
+rays = { path = "../rays" }
+param = { path = "../param" }
+mem = { path = "../mem" }
 rays_shell = { path = "../rays_shell" }
 rays_graph = { path = "../rays_graph" }
 ogpu_core = { path = "../ogpu_core" }

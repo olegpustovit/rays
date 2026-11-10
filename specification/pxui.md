@@ -21,7 +21,7 @@ let update model frame =
   if Pxui.Ui.button ui "Quit" then Sketch.quit ();
   { model with animate; name }
 
-let view model _frame = scene_of model @ Pxui.Ui.scene model.ui
+let view model _frame = scene_of model @ Rays_shell.Host.scene model.ui
 ```
 
 Widget values live in the sketch model; widgets return them. There are no
@@ -58,10 +58,14 @@ Each frame runs four steps:
 4. **Paint.** Boxes paint depth-first with nested clip rectangles, culling
    boxes outside their clip. Painters receive the final rectangle and emit
    `Scene.Private.Ui_batch` instances. `Ui.to_front ~order` raises a root in both
-   painting and hit testing. The published `Ui.scene` contains native-only UI
-   batches plus `Scene.text_input_region` metadata. `Ui.scene ~under` can insert
-   a host Scene immediately before a raised root's UI batch, letting floating
-   native viewports share the UI's paint order without another hit-test path.
+   painting and hit testing. `Ui.frame` returns `FrameOut`: the paint layers
+   (a batch and its bound images per raised root) and `PlatformOut` (cursor,
+   the focused text's input-method area, window ground, clipboard write, paste
+   request; the host sends `Event.Paste` with the next frame).
+   `rays_shell::host::scene ~under` wraps the layers as native-only UI scene
+   nodes plus `Scene.text_input_region`, inserting a host Scene immediately
+   before a raised root's batch, so floating native viewports share the UI's
+   paint order without another hit-test path.
 
 ## Renderer
 
@@ -253,8 +257,9 @@ A positive vertical delta moves the content down, matching a downward natural
 trackpad or Magic Mouse gesture; an ordinary wheel follows SDL's normal
 direction. Horizontal steps do nothing. The scrollbar shows the bounded offset.
 
-A `Ui` handle gives its theme's `panel` colour to the window
-(`Sketch.set_window_background`) on its first frame and when the theme changes:
+A `Ui` handle asks for its theme's `panel` colour as the window ground
+(`PlatformOut.background`, applied with `Sketch.set_window_background`) on its
+first frame and when the theme changes:
 the title bar of a PXUI host is the ground its chrome is painted on.
 
 ## Pointer and keyboard contract

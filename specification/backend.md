@@ -372,9 +372,12 @@ applied values for the graph and inspector. The gate forbids
 `flow` from reaching anything but `diagnostic`, `param`, `input` and `rays_math`, and `flow_sop` from reaching UI,
 the SOP catalog, editor or GPU libraries.
 `editor_document` owns the UI-free saved overlay, while `rays_graph` and
-`rays_shell` are presentation adapters over it. The PXUI engine depends directly
-on `rays`, `rays_math` and `param` for UI values, shared hashing and the number field's model; `rays_shell`
-depends on `rays`, `rays_math`, `editor_core` and `pxui`. `editor_core`,
+`rays_shell` are presentation adapters over it. The PXUI engine reaches only `input`, `cfmt`,
+`rays_math` (colour, hashing) and `scene_command` (its instance batch); it may not reach `rays`,
+`param` or `mem`. It takes `input` frames and returns paint layers and platform requests;
+`rays_shell::host` serves its fonts and textures from Rays, applies the requests (clipboard,
+paste, window ground, memory ledger) and wraps the layers as scene nodes. `rays_shell`
+depends on `rays`, `rays_math`, `editor_core`, `mem` and `pxui`. `editor_core`,
 `editor_document`, `rays_graph` and `rays_editor` name math values from
 `rays_math` directly. `rays_editor` applies their typed requests and schedules
 cooks; none of these edges points back into
