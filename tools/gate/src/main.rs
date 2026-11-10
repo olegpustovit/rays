@@ -926,7 +926,9 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
             "input", "rays_math", "lru", "runtime_resources", "runtime", "scene_command", "renderer",
             "parallel", "ogpu_core", "scene_core",
         ][..]),
-        ("runtime", &["sdl3", "ogpu_core", "input"][..]),
+        // The window host is a leaf: it may reach only SDL, the input types and the native layer token.
+        ("pxui_sdl", &["sdl3", "input", "native_layer_token_sys"][..]),
+        ("runtime", &["pxui_sdl", "sdl3", "ogpu_core", "input"][..]),
         ("runtime_resources", &["sdl3", "ogpu_core"][..]),
         ("renderer", &["ogpu_core", "scene_command", "runtime", "lru", "rays_math", "runtime_resources", "scene_core"][..]),
         ("flow_syntax", &["param", "rays_diagnostic", "input", "rays_math"][..]),
@@ -974,7 +976,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ][..]),
         ("rays_pathtracer", &[
             "rays", "ogpu_core", "renderer", "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_gpu", "input",
-            "runtime_resources", "rays_math", "flow_shader",
+            "runtime_resources", "rays_math", "flow_shader", "runtime",
         ][..]),
         ("rays_bin", &["editor_document", "rays_editor", "web_export", "flow_syntax", "flow_check", "flow_eval", "flow_sop", "sop", "runtime", "sdl3", "ogpu_core", "ogpu_metal", "ogpu_vulkan"][..]),
     ])
@@ -1023,7 +1025,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let foundational = [
         "cfmt",
         "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
-        "lru", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3",
+        "lru", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3", "pxui_sdl",
         "metal_sys", "vulkan_sys", "ogpu_core",
         "rdk_core",
     ];
@@ -1040,6 +1042,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         forbid(library, &["sdl3", "runtime", "rays", "renderer"]);
     }
     forbid("runtime", &upper);
+    forbid("pxui_sdl", &["ogpu_core", "runtime", "renderer"]);
     forbid("flow_native", &["pxui", "rays_shell", "rays_graph", "rays_editor"]);
     forbid("flow_ir", &[
         "rays", "pxui", "rays_shell", "rays_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops",

@@ -805,6 +805,7 @@ version = "0.1.0"
 dependencies = [
  "input",
  "ogpu_core",
+ "ogpu_mock",
  "pxui_sdl",
  "sdl3",
 ]
