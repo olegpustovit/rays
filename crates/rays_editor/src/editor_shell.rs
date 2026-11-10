@@ -167,10 +167,42 @@ pub fn shell_hidden<'a>(value: &ModelView<'a>, shell: &shell) -> Vec<Panel> {
     }
 }
 
-pub fn geometry<'a>(value: &ModelView<'a>, shell: &shell, frame: &frame::Frame) -> layout::Geometry {
+/// What `geometry` read: a frame lays the shell out many times, so the last answer is kept
+/// while every input compares equal.
+struct GeoKey {
+    size: (i64, i64),
+    shell_doc: Option<std::sync::Arc<editor_document::document::Shell>>,
+    states: std::collections::BTreeMap<flow_check::workspace::Path, panels::State>,
+    graph: String,
+    workspace: shell,
+}
+
+thread_local! { static GEOMETRY: std::cell::RefCell<Option<(GeoKey, std::rc::Rc<layout::Geometry>)>> = const { std::cell::RefCell::new(None) }; }
+
+pub fn geometry<'a>(value: &ModelView<'a>, shell: &shell, frame: &frame::Frame) -> std::rc::Rc<layout::Geometry> {
+    let ws = &value.doc.workspace.ws;
+    let graph = workspace_doc::editor_graph_ref(ws).map_or("@default", |g| g.name.as_str());
+    let hit = GEOMETRY.with(|cache| cache.borrow().as_ref().and_then(|(k, g)| {
+        let same = k.size == frame.input.size
+            && k.graph == graph
+            && match (&k.shell_doc, &value.doc.shell) { (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b), (None, None) => true, _ => false }
+            && k.states == ws.layout.panels
+            && k.workspace.restored == shell.restored
+            && k.workspace.tree == shell.tree
+            && k.workspace.hidden == shell.hidden
+            && k.workspace.live == shell.live
+            && k.workspace.window_live == shell.window_live;
+        same.then(|| g.clone())
+    }));
+    if let Some(g) = hit {
+        return g;
+    }
     let state = |path: &[usize]| panel_state(value, path);
     let hidden = shell_hidden(value, shell);
-    layout::geometry(Some(&state), Some(&hidden), &shell_tree(value, shell), frame)
+    let g = std::rc::Rc::new(layout::geometry(Some(&state), Some(&hidden), &shell_tree(value, shell), frame));
+    let key = GeoKey { size: frame.input.size, shell_doc: value.doc.shell.clone(), states: ws.layout.panels.clone(), graph: graph.to_owned(), workspace: shell.clone() };
+    GEOMETRY.with(|cache| *cache.borrow_mut() = Some((key, g.clone())));
+    g
 }
 
 pub fn has_panel<'a>(value: &ModelView<'a>, panel: &Panel) -> bool {

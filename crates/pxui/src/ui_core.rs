@@ -30,6 +30,8 @@ fn find_marker(text: &str, marker: &str) -> Option<usize> {
     if text.contains('#') { text.find(marker) } else { None }
 }
 
+thread_local! { static LABEL: std::cell::Cell<String> = const { std::cell::Cell::new(String::new()) }; }
+
 pub fn key_of(seed: i64, text: &str) -> i64 {
     // the id after ### replaces the label's hash, under the same parent: two panels that build the
     // same widget keep separate state
@@ -2039,6 +2041,21 @@ impl Ui {
         self.require_building();
         let key = key_of(self.current_seed(), label);
         self.box_keyed(key, opts)
+    }
+
+    /// `box_` of a label formatted into one reused buffer: keys hash the text, none keeps it.
+    pub fn box_fmt(&mut self, label: std::fmt::Arguments, opts: BoxOpts) -> UiBox {
+        match label.as_str() {
+            Some(text) => self.box_(text, opts),
+            None => {
+                let mut text = LABEL.take();
+                text.clear();
+                let _ = std::fmt::Write::write_fmt(&mut text, label);
+                let b = self.box_(&text, opts);
+                LABEL.set(text);
+                b
+            }
+        }
     }
 
     pub fn set_at(&mut self, b: &UiBox, at: (f64, f64)) {

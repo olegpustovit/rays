@@ -33,9 +33,12 @@ const FRAMES: i64 = 30;
 // Never raise.
 // Z2 shared immutable Text, sorted Record fields and Symbol paths; measured idle guard pairs.
 // Z8 retains immutable image cache storage instead of copying it during every frame.
-const BASIC: (u64, u64) = (934, 99_304);
-const EMPTY: (u64, u64) = (801, 50_552);
-const BARE: (u64, u64) = (1_055, 66_699);
+// Z1: one memoised shell geometry per frame, box labels formatted into a reused buffer, stack-chunked
+// Metal residency lists, no layout intent work without intents: basic 858 / 91,365; empty 609 / 36,159;
+// bare 723 / 46,059.
+const BASIC: (u64, u64) = (858, 91_365);
+const EMPTY: (u64, u64) = (609, 36_159);
+const BARE: (u64, u64) = (723, 46_059);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");

@@ -1128,7 +1128,7 @@ pub fn handles(ui: &mut Ui, selected: Option<&picked>, scene_: &kg::T, space: &m
         if extra_.show.handles {
             for a in arrows(node, view_, bounds, space, extra_.tool) {
                 let (tx, ty) = a.tip;
-                let box_ = ui.box_(&format!("handle-{}", a.name), BoxOpts::default().flags(CLICKABLE).w(Size::Px(14.)).h(Size::Px(14.)).at((tx - 7., ty - 7.)));
+                let box_ = ui.box_fmt(format_args!("handle-{}", a.name), BoxOpts::default().flags(CLICKABLE).w(Size::Px(14.)).h(Size::Px(14.)).at((tx - 7., ty - 7.)));
                 let signal = ui.signal(&box_);
                 let (mx, my) = signal.drag;
                 let (ux, uy) = a.unit;
@@ -1152,7 +1152,7 @@ pub fn handles(ui: &mut Ui, selected: Option<&picked>, scene_: &kg::T, space: &m
             if let Some(camera_) = camera_ {
                 if !same_view(&camera_, view_) {
                     if let Some((x, y)) = project(bounds, view_, rcam::position(&camera_)) {
-                        let box_ = ui.box_(&format!("pick-camera-{node_id}"), BoxOpts::default().flags(CLICKABLE).w(Size::Px(pick_size)).h(Size::Px(pick_size)).at((x - pick_size / 2., y - pick_size / 2.)));
+                        let box_ = ui.box_fmt(format_args!("pick-camera-{node_id}"), BoxOpts::default().flags(CLICKABLE).w(Size::Px(pick_size)).h(Size::Px(pick_size)).at((x - pick_size / 2., y - pick_size / 2.)));
                         let signal = ui.signal(&box_);
                         grab = grab || signal.held;
                         if signal.clicked {

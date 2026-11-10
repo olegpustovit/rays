@@ -50,7 +50,7 @@ impl Ui {
         let theme = self.theme();
         let root = self.box_(label, BoxOpts::default().flags(CLIP).at(at).w(Size::Px(w)).h(Size::Px(h)));
         let saved = self.enter(&root);
-        let header = self.box_(&format!("{}-header", label), BoxOpts::default().w(Size::Px(w)).h(Size::Px(row_h)));
+        let header = self.box_fmt(format_args!("{}-header", label), BoxOpts::default().w(Size::Px(w)).h(Size::Px(row_h)));
         {
             let stops = stops.clone();
             let headers = headers.to_vec();
@@ -78,7 +78,7 @@ impl Ui {
         let last = rows.min(first + (body_h / row_h).ceil() as i64 + 2);
         let mut clicked = None;
         let saved_body = self.enter(&body);
-        let extent = self.box_(&format!("{}-extent", label), BoxOpts::default().w(Size::Px(w)).h(Size::Px(rows as f64 * row_h)));
+        let extent = self.box_fmt(format_args!("{}-extent", label), BoxOpts::default().w(Size::Px(w)).h(Size::Px(rows as f64 * row_h)));
         let saved_extent = self.enter(&extent);
         for index in first..last {
             let row = self.box_(

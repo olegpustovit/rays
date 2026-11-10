@@ -1869,7 +1869,7 @@ fn find_button(ui: &mut Ui, key: &str, right: &mut f64, active: bool, name: &str
 }
 
 fn rule(ui: &mut Ui, theme: &Theme, key: &str, x: f64, width: f64, name: &str, at: f64) {
-    let boxed = ui.box_(&format!("{}{}", key, name), BoxOpts::default().w(Size::Px(width)).h(Size::Px(1.0)).at((x, at)));
+    let boxed = ui.box_fmt(format_args!("{}{}", key, name), BoxOpts::default().w(Size::Px(width)).h(Size::Px(1.0)).at((x, at)));
     let edge = theme::edge(theme);
     ui.draw(&boxed, move |paint, (x, y, w, h)| paint.fill(x, y, w, h, edge));
 }
@@ -1926,7 +1926,7 @@ fn find_bar(
         reveal = true;
     }
     let count_w = 76.0;
-    let boxed = ui.box_(&format!("{}-find-count", key), BoxOpts::default().w(Size::Px(count_w)).h(Size::Px(find_row)).at((right - count_w, ry)));
+    let boxed = ui.box_fmt(format_args!("{}-find-count", key), BoxOpts::default().w(Size::Px(count_w)).h(Size::Px(find_row)).at((right - count_w, ry)));
     let (bad, ink2) = (total == 0 && !f.query.is_empty(), theme::ink_2(theme));
     ui.draw(&boxed, move |paint, (x, y, w, h)| {
         let tw = paint.text_width(None, &count);
@@ -2339,7 +2339,7 @@ fn editor_area(
         if kit::switch(ui, &format!("{}-parinfer", key), (switch_x, ty + 1.0 + ((c.bar - 14.0) / 2.0)), state.parinfer) {
             push(emit, Intent::ToggleParinfer);
         }
-        let boxed = ui.box_(&format!("{}-parinfer-label", key), BoxOpts::default().w(Size::Px(80.0)).h(Size::Px(c.bar)).at((switch_x - 8.0 - 80.0, ty + 1.0)));
+        let boxed = ui.box_fmt(format_args!("{}-parinfer-label", key), BoxOpts::default().w(Size::Px(80.0)).h(Size::Px(c.bar)).at((switch_x - 8.0 - 80.0, ty + 1.0)));
         let ink2 = theme::ink_2(&theme);
         ui.draw(&boxed, move |paint, (x, y, w, h)| {
             let label = "parinfer";

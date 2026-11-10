@@ -44,8 +44,8 @@ pub enum Intent {
     Crumb(Path, i64),
 }
 
-fn floating(ui: &mut Ui, flags: Flags, (x, y, width, height): Bounds, label: &str) -> UiBox {
-    ui.box_(
+fn floating(ui: &mut Ui, flags: Flags, (x, y, width, height): Bounds, label: std::fmt::Arguments) -> UiBox {
+    ui.box_fmt(
         label,
         BoxOpts::default().flags(flags).w(Size::Px(width as f64)).h(Size::Px(height as f64)).at((x as f64, y as f64)),
     )
@@ -359,7 +359,7 @@ pub fn update(
             // a view paints its own picture; a window over one still has its line-3 edge and the
             // sheet fill of its title row's margin
             Panel::View(_) | Panel::Canvas(_) | Panel::Timeline if l.floating => {
-                let boxed = floating(ui, NO_FLAGS, l.frame, &format!("workspace-window-edge{}", key(&l.path)));
+                let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-window-edge{}", key(&l.path)));
                 ui.to_front(order, &boxed);
                 let l = l.clone();
                 let moving = moving.clone();
@@ -391,7 +391,7 @@ pub fn update(
                 let fy = l.frame.1;
                 let hy = l.header.1;
                 if hy > fy {
-                    let boxed = floating(ui, NO_FLAGS, l.frame, &format!("workspace-margin{}", key(&l.path)));
+                    let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-margin{}", key(&l.path)));
                     ui.draw(&boxed, move |paint, (x, y, w, _)| {
                         paint.fill(x, y, w, (hy - fy) as f64, theme.panel);
                     });
@@ -402,7 +402,7 @@ pub fn update(
                     ui,
                     NO_FLAGS,
                     l.frame,
-                    &format!("workspace-{}{}", panels::name(p).to_ascii_lowercase(), key(&l.path)),
+                    format_args!("workspace-{}{}", panels::lower_name(p), key(&l.path)),
                 );
                 if l.floating {
                     ui.to_front(order, &boxed);
@@ -426,7 +426,7 @@ pub fn update(
     // where the drag tip goes: over the right of the window being moved
     let mut tip: Option<(i64, i64, i64)> = None;
     for (n, s) in geometry.splitters.iter().enumerate() {
-        let boxed = floating(ui, NO_FLAGS, s.bounds, &format!("workspace-gutter-{n}"));
+        let boxed = floating(ui, NO_FLAGS, s.bounds, format_args!("workspace-gutter-{n}"));
         ui.draw(&boxed, move |paint, (x, y, w, h)| paint.fill(x, y, w, h, theme::edge(&theme)));
     }
     let mut headers: Vec<Header> = Vec::new();
@@ -436,8 +436,8 @@ pub fn update(
         if h <= 0 {
             continue;
         }
-        let label = format!("{}{}", panels::name(&l.panel).to_ascii_lowercase(), key(&l.path));
-        let boxed = floating(ui, CLICKABLE | CLIP, l.header, &format!("workspace-header-{label}"));
+        let (name, path) = (panels::lower_name(&l.panel), key(&l.path));
+        let boxed = floating(ui, CLICKABLE | CLIP, l.header, format_args!("workspace-header-{name}{path}"));
         if l.floating {
             ui.to_front(order, &boxed);
         }
@@ -449,7 +449,7 @@ pub fn update(
             ui,
             TAB_STOP_MARKED | CLICKABLE,
             (x + 0.max(w - 8 - size), y + ((h - size) / 2), size, size),
-            &format!("workspace-collapse-{label}"),
+            format_args!("workspace-collapse-{name}{path}"),
         );
         if l.floating {
             ui.to_front(order, &button);
@@ -463,7 +463,7 @@ pub fn update(
                 ui,
                 TAB_STOP_MARKED | CLICKABLE,
                 (x + 0.max(w - tools), y + ((h - size) / 2), size, size),
-                &format!("workspace-dock-{label}"),
+                format_args!("workspace-dock-{name}{path}"),
             );
             ui.to_front(order, &dock);
             let signal = ui.signal(&dock);
@@ -487,7 +487,7 @@ pub fn update(
             ui,
             CLICKABLE | BLOCKING,
             (x, y, 0.max(w - tools), h),
-            &format!("workspace-drag-{label}"),
+            format_args!("workspace-drag-{name}{path}"),
         );
         if l.floating {
             ui.to_front(order, &grip);
@@ -555,7 +555,7 @@ pub fn update(
             for (n, (index, part)) in parts.iter().enumerate() {
                 let pw = ui.text_width(None, part);
                 if *index >= 0 && n + 1 < parts.len() && tx + pw <= limit {
-                    let b = floating(ui, CLICKABLE, (tx as i64, y, pw.ceil() as i64, h), &format!("workspace-crumb-{label}-{index}"));
+                    let b = floating(ui, CLICKABLE, (tx as i64, y, pw.ceil() as i64, h), format_args!("workspace-crumb-{name}{path}-{index}"));
                     if l.floating {
                         ui.to_front(order, &b);
                     }
@@ -590,7 +590,7 @@ pub fn update(
         for l in &geometry.leaves {
             if l.path == path {
                 let (fx, fy, fw, fh) = l.frame;
-                let boxed = floating(ui, NO_FLAGS, (fx - 8, fy - 8, fw + 16, fh + 16), "workspace-moving");
+                let boxed = floating(ui, NO_FLAGS, (fx - 8, fy - 8, fw + 16, fh + 16), format_args!("workspace-moving"));
                 ui.to_front(i64::MAX - 1, &boxed);
                 // the padding box of the window, brackets 4 points outside it
                 ui.draw(&boxed, move |paint, _| {
@@ -735,7 +735,7 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
         let ex = 36.min(w / 3);
         let ey = 36.min(h / 3);
         // the pane's own box sits under its four edges, so the pane under the pointer is known
-        let pane = floating(ui, CLICKABLE, (x, y, w, h), &format!("workspace-drop-pane-{}", key(&leaf.path)));
+        let pane = floating(ui, CLICKABLE, (x, y, w, h), format_args!("workspace-drop-pane-{}", key(&leaf.path)));
         ui.to_front(i64::MAX, &pane);
         let pane_hovered = ui.signal(&pane).hovered;
         let mut edges: Vec<(Side, &str, UiBox, bool)> = Vec::new();
@@ -751,7 +751,7 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
                 Side::Top => "top",
                 Side::Bottom => "bottom",
             };
-            let boxed = floating(ui, CLICKABLE | BLOCKING, rect, &format!("workspace-drop-{}{}", key(&leaf.path), suffix));
+            let boxed = floating(ui, CLICKABLE | BLOCKING, rect, format_args!("workspace-drop-{}{}", key(&leaf.path), suffix));
             ui.to_front(i64::MAX, &boxed);
             let hovered = ui.signal(&boxed).hovered;
             edges.push((side, suffix, boxed, hovered));
@@ -814,7 +814,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
             .w(Size::Px(width as f64))
             .h(Size::Px(height as f64));
         opts.hit = Some(Rc::new(move |_| hit_rect));
-        let boxed = ui.box_(&format!("workspace-grip-{n}"), opts);
+        let boxed = ui.box_fmt(format_args!("workspace-grip-{n}"), opts);
         let signal = ui.signal(&boxed);
         if signal.hovered || signal.held {
             ui.request_cursor(if s.axis == Axis::H { Cursor::Horizontal_resize } else { Cursor::Vertical_resize });
@@ -893,7 +893,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
         }
         let bounds = leaf.frame;
         let (x, y, w, h) = bounds;
-        let boxed = floating(ui, CLICKABLE | BLOCKING, (x + w - 12, y + h - 12, 12, 12), &format!("workspace-window-size-{}", key(&leaf.path)));
+        let boxed = floating(ui, CLICKABLE | BLOCKING, (x + w - 12, y + h - 12, 12, 12), format_args!("workspace-window-size-{}", key(&leaf.path)));
         ui.to_front(order, &boxed);
         let signal = ui.signal(&boxed);
         let (x, y, w, h) = drag_origin(ui, &boxed, bounds, &signal);

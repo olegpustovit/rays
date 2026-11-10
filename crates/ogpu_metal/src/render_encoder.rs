@@ -63,8 +63,19 @@ fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[Driver
 /// Declares residency once per pass: `declared` holds the tokens this encoder already uses (a pass
 /// shared by several batches repeats their atlases).
 fn use_resources(context: &CommandContext, encoder: &RenderEncoder, resources: &[Rc<dyn DriverResource>], declared: &mut Vec<i64>) -> Result<(), Error> {
-    let mut buffers: Vec<RenderResource> = Vec::new();
-    let mut textures: Vec<RenderResource> = Vec::new();
+    // scratch kept between passes; the clones are dropped before it is put back
+    thread_local! { static SCRATCH: std::cell::RefCell<(Vec<RenderResource>, Vec<RenderResource>)> = const { std::cell::RefCell::new((Vec::new(), Vec::new())) }; }
+    let (mut buffers, mut textures) = SCRATCH.with(|s| std::mem::take(&mut *s.borrow_mut()));
+    buffers.clear();
+    textures.clear();
+    let result = declare(context, encoder, resources, declared, &mut buffers, &mut textures);
+    buffers.clear();
+    textures.clear();
+    SCRATCH.with(|s| *s.borrow_mut() = (buffers, textures));
+    result
+}
+
+fn declare(context: &CommandContext, encoder: &RenderEncoder, resources: &[Rc<dyn DriverResource>], declared: &mut Vec<i64>, buffers: &mut Vec<RenderResource>, textures: &mut Vec<RenderResource>) -> Result<(), Error> {
     for resource in resources {
         let token = resource.token();
         if declared.contains(&token) {
@@ -82,10 +93,10 @@ fn use_resources(context: &CommandContext, encoder: &RenderEncoder, resources: &
         }
     }
     if !buffers.is_empty() {
-        encoder.use_resources(&buffers, &[ResourceUsage::Read], &[RenderStage::Vertex, RenderStage::Fragment])?;
+        encoder.use_resources(buffers, &[ResourceUsage::Read], &[RenderStage::Vertex, RenderStage::Fragment])?;
     }
     if !textures.is_empty() {
-        encoder.use_resources(&textures, &[ResourceUsage::Sample], &[RenderStage::Fragment])?;
+        encoder.use_resources(textures, &[ResourceUsage::Sample], &[RenderStage::Fragment])?;
     }
     Ok(())
 }

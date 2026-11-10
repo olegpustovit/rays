@@ -93,6 +93,21 @@ pub fn name(panel: &Panel) -> &'static str {
     }
 }
 
+/// `name` in lowercase, for box labels.
+pub fn lower_name(panel: &Panel) -> &'static str {
+    match panel {
+        Panel::Canvas(_) => "canvas",
+        Panel::View(_) => "view",
+        Panel::Graph => "graph",
+        Panel::List => "list",
+        Panel::Lisp => "lisp",
+        Panel::Inspector => "inspector",
+        Panel::Spreadsheet => "spreadsheet",
+        Panel::Outline => "outline",
+        Panel::Timeline => "timeline",
+    }
+}
+
 // Leaves outside floats in tree order (`docked`), else only the floats met outside other floats.
 fn walk(path: &mut Path, tree: &Panels, docked: bool, f: &mut dyn FnMut(&[usize], &Panel) -> bool) -> bool {
     let mut under = |path: &mut Path, i: usize, sub: &Panels, f: &mut dyn FnMut(&[usize], &Panel) -> bool| {
