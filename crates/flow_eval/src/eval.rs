@@ -460,16 +460,26 @@ static EMPTY_WORKSPACE: LazyLock<Shared<Workspace>> = LazyLock::new(|| Shared::n
     live: BTreeSet::new(), invariant: BTreeSet::new(), approx: BTreeSet::new(), packed: Vec::new().into(), packed_roots: Vec::new(), approx_reasons: Vec::new().into(),
     kind_fns: Vec::new(), ops: Vec::new().into(),
 }));
+thread_local! { static EMPTY_ARENA: Arena = Arena::empty(); }
 impl Arena {
+    /// Every table starts as a clone of one empty arena's shared cells (a refcount bump); a table allocates
+    /// only when first written, so an arena made for a rewrite costs a few allocations, not one per table.
     fn fresh(id: i64, workspace: Shared<Workspace>, record: bool, budget: usize, interrupt: Option<Interrupt>, owns_index: bool) -> Arena {
+        EMPTY_ARENA.with(|empty| Arena {
+            id, workspace, record, budget, interrupt, owns_index,
+            source_key: Arc::new(std::sync::OnceLock::new()), state: Some(State::default()),
+            ..empty.clone()
+        })
+    }
+    fn empty() -> Arena {
         Arena {
-            id, workspace, functions: Shared::default(), residuals: Shared::default(),
+            id: 0, workspace: EMPTY_WORKSPACE.clone(), functions: Shared::default(), residuals: Shared::default(),
             residual_index: None,
             source_key: Arc::new(std::sync::OnceLock::new()),
             nodes: Shared::default(), authored: Vec::new(), cells: Shared::default(), cache: Shared::default(),
-            states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, decisions: 0, policies: Shared::default(), record,
+            states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, decisions: 0, policies: Shared::default(), record: false,
             time: None, resolve: None, state: Some(State::default()), elems: BTreeMap::new(), step_count: 0,
-            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), fn_plans: Shared::default(), pure: Shared::default(), terms: Shared::default(), guards: None,
+            budget: 0, fn_calls: Shared::default(), memo: Shared::default(), interrupt: None, owns_index: false, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), fn_plans: Shared::default(), pure: Shared::default(), terms: Shared::default(), guards: None,
             packed_bases: Shared::default(),
         }
     }
