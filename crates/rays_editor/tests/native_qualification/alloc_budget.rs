@@ -33,9 +33,9 @@ const FRAMES: i64 = 30;
 // Never raise.
 // Z2 shared immutable Text, sorted Record fields and Symbol paths; measured idle guard pairs.
 // Z8 retains immutable image cache storage instead of copying it during every frame.
-const BASIC: (u64, u64) = (971, 100_129);
-const EMPTY: (u64, u64) = (841, 51_000);
-const BARE: (u64, u64) = (1_090, 67_083);
+const BASIC: (u64, u64) = (934, 99_304);
+const EMPTY: (u64, u64) = (801, 50_552);
+const BARE: (u64, u64) = (1_055, 66_699);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");
