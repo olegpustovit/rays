@@ -395,8 +395,9 @@ mod tests {
         let x = points.iter().map(|p| p.0).collect();
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();
-        let offsets = (0..=triangles.len() as i64 / 3).map(|p| p * 3).collect();
-        let topology_value = topology::polygons_owned(points.len() as i64, triangles.to_vec(), offsets).unwrap();
+        let offsets = (0..=triangles.len() as u32 / 3).map(|p| p * 3).collect();
+        let corners = triangles.iter().map(|&v| v as u32).collect();
+        let topology_value = topology::polygons_owned(points.len() as i64, corners, offsets).unwrap();
         geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None).unwrap()
     }
 

@@ -728,7 +728,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         let mut second_edge: i64 = -1;
         let mut count = 0;
         for at in first..last {
-            let edge = index.point_edges[at];
+            let edge = i64::from(index.point_edges[at]);
             if edge_selected(edge) {
                 if count == 0 {
                     first_edge = edge;
@@ -939,8 +939,8 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         let (left, right) = edge_halves(edge);
         let left_next = rdk_core::topology_index::widen(index.next_vertex[left]);
         let right_next = rdk_core::topology_index::widen(index.next_vertex[right]);
-        let left_primitive = index.primitive_of_vertex[left];
-        let right_primitive = index.primitive_of_vertex[right];
+        let left_primitive = i64::from(index.primitive_of_vertex[left]);
+        let right_primitive = i64::from(index.primitive_of_vertex[right]);
         for layer in 0..divisions_u {
             let primitive = strip_first_primitive + ordinal * divisions_u + layer;
             let output = strip_first_vertex + (ordinal * divisions_u + layer) * 4;
@@ -985,7 +985,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             vertex_points[patch_cursor] = corner_point[corner];
             vertex_left[patch_cursor] = corner as i64;
             vertex_right[patch_cursor] = corner as i64;
-            source_primitive = source_primitive.min(index.primitive_of_vertex[corner]);
+            source_primitive = source_primitive.min(i64::from(index.primitive_of_vertex[corner]));
             patch_cursor += 1;
             let connection_follows = at + 1 < last || component_closed[component] || joined;
             if connection_follows {
@@ -1065,10 +1065,10 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     let output_positions = packed::float3::view::of_owned_exn(px, py, pz)?;
     let output_topology = topology::view::create_validated_owned(
         retained_points as i64,
-        vertex_points,
-        primitive_offsets,
+        topology::narrow("Poly_bevel", &vertex_points)?,
+        topology::narrow("Poly_bevel", &primitive_offsets)?,
         primitive_kinds,
-    );
+    )?;
     let mut attributes = Vec::new();
     for source in geometry::attributes(geometry_value) {
         if let Some(mapped) = interpolate_attribute(cancel_ref, grain, &point_map, &vertex_left, &vertex_right, &vertex_weight, &primitive_map, &source)? {

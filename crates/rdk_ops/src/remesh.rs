@@ -11,7 +11,7 @@ use rdk_core::error::Code;
 use rdk_core::support::Windows;
 
 use crate::subdivide_refine::{
-    collect_edge_members, fmin, gf, gi,
+    collect_edge_members, fmin, gf, gi, gs,
 };
 
 const OPERATION: &str = "Rdk_mesh.Remesh.remesh";
@@ -218,7 +218,7 @@ pub(crate) fn endpoint_vertices(
     incidence: i64,
 ) -> Option<(i64, i64)> {
     let vertex = gi(&index.edge_vertices, incidence);
-    let next = gi(&index.next_vertex, vertex);
+    let next = gs(&index.next_vertex, vertex);
     if next < 0 {
         return None;
     }
@@ -687,12 +687,12 @@ pub(crate) fn local_of_geometry(
         v_orders: vertex_groups.iter().map(group::ordered_elements).collect(),
         vertex_groups,
         tris,
-        c_point: topology_view.vertex_points[..corners as usize].to_vec(),
+        c_point: topology_view.vertex_points[..corners as usize].iter().map(|&p| i64::from(p)).collect(),
         c_left: (0..corners).collect(),
         c_right: (0..corners).collect(),
         c_weight: vec![0.0; corners as usize],
         c_next_at_point: vec![-1; corners as usize],
-        c_edge: index.edge_of_vertex.to_vec(),
+        c_edge: index.edge_of_vertex.iter().map(|&e| rdk_core::topology_index::widen(e)).collect(),
         c_next_in_edge: vec![-1; corners as usize],
         t_alive: vec![1; tris as usize],
         t_source: (0..tris).collect(),
@@ -701,8 +701,8 @@ pub(crate) fn local_of_geometry(
         source_tris: tris,
         edges: edge_total as i64,
         live_edges: edge_total as i64,
-        e_a: index.edge_a.to_vec(),
-        e_b: index.edge_b.to_vec(),
+        e_a: index.edge_a.iter().map(|&p| i64::from(p)).collect(),
+        e_b: index.edge_b.iter().map(|&p| i64::from(p)).collect(),
         e_first: vec![-1; edge_total],
         e_incidence: vec![0; edge_total],
         e_alive: vec![1; edge_total],
@@ -716,7 +716,7 @@ pub(crate) fn local_of_geometry(
         let point = l.c_point[corner as usize];
         l.attach_point(corner, point);
         l.p_used[point as usize] = 1;
-        l.attach_edge(corner, gi(&index.edge_of_vertex, corner));
+        l.attach_edge(corner, gs(&index.edge_of_vertex, corner));
     }
     for (slot, item) in edge_groups.iter().enumerate() {
         if edge_group::length(item) != l.edges {
@@ -1905,10 +1905,10 @@ pub(crate) fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T
     }
     let topology_value = topology::view::create_validated_owned(
         point_count,
-        vertex_points,
-        (0..=ranking.tri_count).map(|position| position * 3).collect(),
+        topology::narrow("Remesh", &vertex_points)?,
+        (0..=ranking.tri_count as u32).map(|position| position * 3).collect(),
         vec![0u8; ranking.tri_count as usize],
-    );
+    )?;
     let grain = Some(l.grain);
     let mut attributes = Vec::new();
     for item in geometry::attributes(&l.start) {
@@ -2654,7 +2654,7 @@ mod tests {
         let count = x.len();
         let base = geometry::create(
             packed::float3::view::of_owned_exn(x, vec![0.0; count], z).unwrap(),
-            topology::polygons_owned(count as i64, vertex_points, offsets).unwrap(),
+            topology::polygons_owned(count as i64, topology::narrow("test", &vertex_points).unwrap(), topology::narrow("test", &offsets).unwrap()).unwrap(),
             None,
             None,
             None,
@@ -2704,7 +2704,7 @@ mod tests {
         for primitive in 0..geometry::primitive_count(value) as usize {
             assert!(
                 view.primitive_kinds[primitive] == 0
-                    && view.primitive_offsets[primitive + 1] - view.primitive_offsets[primitive] == 3,
+                    && i64::from(view.primitive_offsets[primitive + 1]) - i64::from(view.primitive_offsets[primitive]) == 3,
                 "Remesh emitted a non-triangle primitive"
             );
         }
@@ -2848,7 +2848,7 @@ mod tests {
             &topology_index::create(None, geometry::topology(&output)).unwrap(),
         );
         let boundary_edges = (0..index.edge_a.len())
-            .filter(|&edge| index.edge_offsets[edge + 1] - index.edge_offsets[edge] == 1)
+            .filter(|&edge| i64::from(index.edge_offsets[edge + 1]) - i64::from(index.edge_offsets[edge]) == 1)
             .count() as i64;
         assert!(
             edge_group::cardinality(&features) > boundary_edges,
@@ -2905,7 +2905,7 @@ mod tests {
         let positions = packed::float3::view::view(geometry::positions(value)).unwrap();
         for plane in [&positions.x, &positions.y, &positions.z] { floats(&mut out, plane); }
         let top = topology::view::view(geometry::topology(value)).unwrap();
-        words(&mut out, &[top.point_count]); words(&mut out, &top.vertex_points); words(&mut out, &top.primitive_offsets); bytes(&mut out, &top.primitive_kinds);
+        words(&mut out, &[top.point_count]); words(&mut out, &top.vertex_points.iter().map(|&p| i64::from(p)).collect::<Vec<_>>()); words(&mut out, &top.primitive_offsets.iter().map(|&p| i64::from(p)).collect::<Vec<_>>()); bytes(&mut out, &top.primitive_kinds);
         for item in geometry::attributes(value) {
             bytes(&mut out, attribute::name(&item).as_bytes()); words(&mut out, &[attribute::owner(&item) as i64]); bytes(&mut out, attribute::kind_name(&item).as_bytes());
             match attribute::view::storage(&item).unwrap() {

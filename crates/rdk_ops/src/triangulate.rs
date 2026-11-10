@@ -28,8 +28,8 @@ fn collapsed_quad_removed(
     view: &topology::view::View,
     primitive: usize,
 ) -> i64 {
-    let first = view.primitive_offsets[primitive];
-    let last = view.primitive_offsets[primitive + 1];
+    let first = i64::from(view.primitive_offsets[primitive]);
+    let last = i64::from(view.primitive_offsets[primitive + 1]);
     if last - first != 4 {
         return -1;
     }
@@ -129,7 +129,7 @@ fn triangulate(
             for primitive in first..last {
                 support::poll(cancel_value, primitive)?;
                 let (index, at) = (primitive as usize, (primitive - first) as usize);
-                let size = view.primitive_offsets[index + 1] - view.primitive_offsets[index];
+                let size = i64::from(view.primitive_offsets[index + 1]) - i64::from(view.primitive_offsets[index]);
                 if !selected(index) {
                     vertex_bases[at] = size;
                 } else if view.primitive_kinds[index] != 0 {
@@ -216,8 +216,8 @@ fn triangulate(
             let mut scratch = polygon_triangulation::create_scratch();
             for primitive in first as usize..last as usize {
                 cancel::poll(cancel_value, primitive as i64, 1023)?;
-                let source_first = view.primitive_offsets[primitive];
-                let source_last = view.primitive_offsets[primitive + 1];
+                let source_first = i64::from(view.primitive_offsets[primitive]);
+                let source_last = i64::from(view.primitive_offsets[primitive + 1]);
                 let output_primitive = first_output_primitive(primitive) - base_primitive;
                 let output_vertex = first_output_vertex(primitive) - base_vertex;
                 let (offset_value, source_size) = (first_output_vertex(primitive), source_last - source_first);
@@ -227,7 +227,7 @@ fn triangulate(
                     primitive_map[output_primitive as usize] = primitive as i64;
                     for local in 0..source_size {
                         output_vertices[(output_vertex + local) as usize] =
-                            view.vertex_points[(source_first + local) as usize];
+                            i64::from(view.vertex_points[(source_first + local) as usize]);
                         vertex_map[(output_vertex + local) as usize] = source_first + local;
                     }
                 } else if collapsed_removals[primitive] != 0 {
@@ -239,7 +239,7 @@ fn triangulate(
                         source_first + remaining(2),
                     ];
                     for (corner, &old) in olds.iter().enumerate() {
-                        output_vertices[output_vertex as usize + corner] = view.vertex_points[old as usize];
+                        output_vertices[output_vertex as usize + corner] = i64::from(view.vertex_points[old as usize]);
                         vertex_map[output_vertex as usize + corner] = old;
                     }
                     output_offsets[output_primitive as usize] = offset_value;
@@ -249,7 +249,7 @@ fn triangulate(
                         let vertex = output_vertex + triangle * 3;
                         let target = (output_primitive + triangle) as usize;
                         for (corner, &old) in [a, b, c].iter().enumerate() {
-                            output_vertices[vertex as usize + corner] = view.vertex_points[old as usize];
+                            output_vertices[vertex as usize + corner] = i64::from(view.vertex_points[old as usize]);
                             vertex_map[vertex as usize + corner] = old;
                         }
                         output_offsets[target] = vertex + base_vertex;
@@ -280,10 +280,10 @@ fn triangulate(
     }
     let output_topology = topology::view::create_validated_owned(
         geometry::point_count(geometry_value),
-        output_vertices,
-        output_offsets,
+        topology::narrow("Triangulate", &output_vertices)?,
+        topology::narrow("Triangulate", &output_offsets)?,
         output_kinds,
-    );
+    )?;
     topology_remap::preserving_points(
         cancel_value, grain, &output_topology, &vertex_map, &primitive_map, geometry_value,
     )

@@ -195,8 +195,8 @@ fn merge_plain(
     let mut px = Vec::with_capacity(point_count as usize);
     let mut py = Vec::with_capacity(point_count as usize);
     let mut pz = Vec::with_capacity(point_count as usize);
-    let mut vertex_points: Vec<i64> = Vec::with_capacity(vertex_count as usize);
-    let mut primitive_offsets: Vec<i64> = Vec::with_capacity(primitive_count as usize + 1);
+    let mut vertex_points: Vec<u32> = Vec::with_capacity(vertex_count as usize);
+    let mut primitive_offsets: Vec<u32> = Vec::with_capacity(primitive_count as usize + 1);
     primitive_offsets.push(0);
     let mut primitive_kinds: Vec<u8> = Vec::with_capacity(primitive_count as usize);
     let (mut point_at, mut vertex_at) = (0_i64, 0_i64);
@@ -207,15 +207,15 @@ fn merge_plain(
         px.extend_from_slice(&positions.x);
         py.extend_from_slice(&positions.y);
         pz.extend_from_slice(&positions.z);
-        vertex_points.extend(view.vertex_points.iter().map(|&point| point + point_at));
-        primitive_offsets.extend(view.primitive_offsets[1..].iter().map(|&offset| offset + vertex_at));
+        vertex_points.extend(view.vertex_points.iter().map(|&point| point + point_at as u32));
+        primitive_offsets.extend(view.primitive_offsets[1..].iter().map(|&offset| offset + vertex_at as u32));
         primitive_kinds.extend_from_slice(&view.primitive_kinds);
         point_at += geometry::point_count(item);
         vertex_at += geometry::vertex_count(item);
     }
     let positions = packed::float3::view::of_owned_exn(px, py, pz).map_err(lift)?;
     let topology_value =
-        topology::view::create_validated_owned(point_count, vertex_points, primitive_offsets, primitive_kinds);
+        topology::view::create_validated_owned(point_count, vertex_points, primitive_offsets, primitive_kinds).map_err(lift)?;
     let mut attributes = Vec::new();
     for template in &first_attributes {
         let values: Vec<attribute::T> =
@@ -404,8 +404,8 @@ mod tests {
     fn polyline(points: &[(f64, f64, f64)]) -> geometry::T {
         let topology_value = topology::create_owned(
             points.len() as i64,
-            (0..points.len() as i64).collect(),
-            vec![0, points.len() as i64],
+            (0..points.len() as u32).collect(),
+            vec![0, points.len() as u32],
             vec![PrimitiveKind::OpenPolyline],
         ).unwrap();
         let x = points.iter().map(|p| p.0).collect();

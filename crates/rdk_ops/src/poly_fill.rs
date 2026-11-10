@@ -489,7 +489,7 @@ fn triangulate_loops(
 enum CenterMap {
     None,
     Point(usize),
-    Vertex { vertex_points: Arc<Vec<i64>>, first_point: usize },
+    Vertex { vertex_points: Arc<Vec<u32>>, first_point: usize },
 }
 
 fn center_loop(centers: &CenterMap, index: usize) -> i64 {
@@ -807,9 +807,9 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     }
     patch_primitive_base[loop_count] = primitive_at;
     patch_vertex_base[loop_count] = vertex_at;
-    let mut vertex_points = vec![0i64; output_vertices];
+    let mut vertex_points = vec![0u32; output_vertices];
     let mut vertex_map = vec![0i64; output_vertices];
-    let mut primitive_offsets = vec![0i64; output_primitives + 1];
+    let mut primitive_offsets = vec![0u32; output_primitives + 1];
     let mut primitive_map = vec![0i64; output_primitives];
     let mut primitive_kinds = vec![0u8; output_primitives];
     vertex_points[..source_vertices].copy_from_slice(&source.vertex_points[..source_vertices]);
@@ -833,7 +833,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         plan.loop_vertices[plan.loop_offsets[loop_index] + local] as i64
     };
     let source_primitive_of_local = |loop_index: usize, local: usize| -> i64 {
-        reverse.primitive_of_vertex[vertex_of_local(loop_index, local) as usize]
+        i64::from(reverse.primitive_of_vertex[vertex_of_local(loop_index, local) as usize])
     };
     let center_base = source_points + added_boundary_points;
     let patch_grain = (grain / 64).max(1);
@@ -863,13 +863,13 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             let vertex_base = patch_vertex_base[loop_index];
             match mode {
                 Mode::FillSinglePolygon => {
-                    primitive_offsets[primitive_base - primitive_origin] = vertex_base as i64;
+                    primitive_offsets[primitive_base - primitive_origin] = vertex_base as u32;
                     primitive_map[primitive_base - primitive_origin] = source_primitive_of_local(loop_index, 0);
                     for output_local in 0..size {
                         let source_local =
                             if reverse_patches || output_local == 0 { output_local } else { size - output_local };
                         let output = vertex_base + output_local - vertex_origin;
-                        vertex_points[output] = point_of_local(loop_index, source_local);
+                        vertex_points[output] = point_of_local(loop_index, source_local) as u32;
                         vertex_map[output] = vertex_of_local(loop_index, source_local);
                     }
                 }
@@ -884,11 +884,11 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                         let b = triangle_local[source_triangle + 1];
                         let c = triangle_local[source_triangle + 2];
                         let (a, b, c) = if reverse_patches { (a, b, c) } else { (a, c, b) };
-                        primitive_offsets[primitive] = output as i64;
+                        primitive_offsets[primitive] = output as u32;
                         primitive_map[primitive] = source_primitive_of_local(loop_index, a);
-                        vertex_points[window] = point_of_local(loop_index, a);
-                        vertex_points[window + 1] = point_of_local(loop_index, b);
-                        vertex_points[window + 2] = point_of_local(loop_index, c);
+                        vertex_points[window] = point_of_local(loop_index, a) as u32;
+                        vertex_points[window + 1] = point_of_local(loop_index, b) as u32;
+                        vertex_points[window + 2] = point_of_local(loop_index, c) as u32;
                         vertex_map[window] = vertex_of_local(loop_index, a);
                         vertex_map[window + 1] = vertex_of_local(loop_index, b);
                         vertex_map[window + 2] = vertex_of_local(loop_index, c);
@@ -901,19 +901,19 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                         let primitive = primitive_base + edge - primitive_origin;
                         let output = vertex_base + edge * 3;
                         let window = output - vertex_origin;
-                        primitive_offsets[primitive] = output as i64;
+                        primitive_offsets[primitive] = output as u32;
                         primitive_map[primitive] = source_primitive_of_local(loop_index, edge);
                         if reverse_patches {
-                            vertex_points[window] = point_of_local(loop_index, edge);
-                            vertex_points[window + 1] = point_of_local(loop_index, next);
-                            vertex_points[window + 2] = center;
+                            vertex_points[window] = point_of_local(loop_index, edge) as u32;
+                            vertex_points[window + 1] = point_of_local(loop_index, next) as u32;
+                            vertex_points[window + 2] = center as u32;
                             vertex_map[window] = vertex_of_local(loop_index, edge);
                             vertex_map[window + 1] = vertex_of_local(loop_index, next);
                             vertex_map[window + 2] = vertex_of_local(loop_index, 0);
                         } else {
-                            vertex_points[window] = point_of_local(loop_index, edge);
-                            vertex_points[window + 1] = center;
-                            vertex_points[window + 2] = point_of_local(loop_index, next);
+                            vertex_points[window] = point_of_local(loop_index, edge) as u32;
+                            vertex_points[window + 1] = center as u32;
+                            vertex_points[window + 2] = point_of_local(loop_index, next) as u32;
                             vertex_map[window] = vertex_of_local(loop_index, edge);
                             vertex_map[window + 1] = vertex_of_local(loop_index, 0);
                             vertex_map[window + 2] = vertex_of_local(loop_index, next);
@@ -924,7 +924,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         }
         Ok(())
     })?;
-    primitive_offsets[output_primitives] = output_vertices as i64;
+    primitive_offsets[output_primitives] = output_vertices as u32;
     let point_centers = match point_center_base {
         None => CenterMap::None,
         Some(first) => CenterMap::Point(first),
@@ -938,7 +938,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         vertex_points,
         primitive_offsets,
         primitive_kinds,
-    );
+    ).unwrap();
     let mut attributes = Vec::new();
     for item in geometry::attributes(geometry_value) {
         attributes.push(remap_attribute(

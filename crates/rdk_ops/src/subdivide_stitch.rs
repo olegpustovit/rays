@@ -5,7 +5,7 @@ use rdk_core::support::{self, Windows};
 use rdk_core::{cancel, geometry, packed, topology, topology_index};
 
 use crate::subdivide_refine::{
-    checked_add, checked_mul, failm, fmax, fmin, gf, gi, invalid_arg, DividedBoundary,
+    checked_add, checked_mul, failm, fmax, fmin, gf, gi, gs, invalid_arg, DividedBoundary,
     InterfaceChains, PointWeld, PullPlan, TriangleAppend,
 };
 
@@ -351,7 +351,7 @@ pub(crate) fn stitch_boundary_no_edge_division(
             };
             let coarse_directed =
                 gi(&unselected_index.edge_vertices, gi(&unselected_index.edge_offsets, coarse_edge));
-            let coarse_next = gi(&unselected_index.next_vertex, coarse_directed);
+            let coarse_next = gs(&unselected_index.next_vertex, coarse_directed);
             if coarse_next < 0 {
                 return Err(failm("stitch coarse edge has no complete corner"));
             }

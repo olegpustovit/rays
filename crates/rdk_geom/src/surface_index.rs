@@ -1007,7 +1007,7 @@ fn query_closest(value: &T, qx: f64, qy: f64, qz: f64, maximum: f64, scratch: &m
 pub fn closest_many_into(
     cancel_value: Option<&cancel::T>,
     selection: Option<&group::T>,
-    position_indices: Option<&[i64]>,
+    position_indices: Option<&[u32]>,
     grain: i64,
     value: &T,
     queries: &packed::float3::T,
@@ -1031,7 +1031,7 @@ pub fn closest_many_into(
         }
     }
     if let Some(values) = position_indices {
-        if values.iter().any(|&point| point < 0 || point >= position_count) {
+        if values.iter().any(|&point| i64::from(point) >= position_count) {
             return Err(invalid_argument("Surface_index: query position index is out of bounds"));
         }
     }
@@ -1070,9 +1070,9 @@ pub fn closest_many_into(
                 cancel::poll(cancel_value, query, 4095)?;
                 if selection.is_none_or(|selected_group| group::mem(query, selected_group)) {
                     let point = match position_indices {
-                        None => query,
-                        Some(values) => values[query as usize],
-                    } as usize;
+                        None => query as usize,
+                        Some(values) => values[query as usize] as usize,
+                    };
                     let (qx, qy, qz) = (query_view.x[point], query_view.y[point], query_view.z[point]);
                     if !(qx.is_finite() && qy.is_finite() && qz.is_finite()) {
                         return Err(invalid_argument("Surface_index: query positions must be finite"));

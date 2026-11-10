@@ -375,8 +375,8 @@ fn edge_remove_fast(
     let mut fragment_counts = vec![0_i64; primitive_count as usize];
     support::par_fill(cancel_value, chunk, &mut fragment_counts, &|primitive| {
         let pu = primitive as usize;
-        let first = topology.primitive_offsets[pu];
-        let last = topology.primitive_offsets[pu + 1];
+        let first = i64::from(topology.primitive_offsets[pu]);
+        let last = i64::from(topology.primitive_offsets[pu + 1]);
         if primitive_action[pu] == 0 {
             return Ok(1);
         }
@@ -436,8 +436,8 @@ fn edge_remove_fast(
                 support::poll(cancel_value, primitive)?;
                 let pu = primitive as usize;
                 let target_base = primitive_bases[pu];
-                let first = topology.primitive_offsets[pu];
-                let last = topology.primitive_offsets[pu + 1];
+                let first = i64::from(topology.primitive_offsets[pu]);
+                let last = i64::from(topology.primitive_offsets[pu + 1]);
                 if primitive_action[pu] == 0 {
                     maps[(target_base - base) as usize] = primitive;
                     sizes[(target_base - base) as usize] = last - first;
@@ -535,13 +535,13 @@ fn edge_remove_fast(
                 let primitive = primitive_map[tu];
                 let pu = primitive as usize;
                 let output = primitive_offsets[tu] - base;
-                let source_first = topology.primitive_offsets[pu];
-                let source_last = topology.primitive_offsets[pu + 1];
+                let source_first = i64::from(topology.primitive_offsets[pu]);
+                let source_last = i64::from(topology.primitive_offsets[pu + 1]);
                 if fragment_start[tu] < 0 {
                     kinds[(target - first_target) as usize] = topology.primitive_kinds[pu];
                     for vertex in source_first..source_last {
                         let target_vertex = (output + vertex - source_first) as usize;
-                        points[target_vertex] = topology.vertex_points[vertex as usize];
+                        points[target_vertex] = i64::from(topology.vertex_points[vertex as usize]);
                         maps[target_vertex] = vertex;
                         edge_of_vertex[target_vertex] = rdk_core::topology_index::widen(index.edge_of_vertex[vertex as usize]);
                     }
@@ -557,7 +557,7 @@ fn edge_remove_fast(
                             source_first + (start - source_first + local) % source_size
                         };
                         let slot = (output + local) as usize;
-                        points[slot] = topology.vertex_points[source_vertex as usize];
+                        points[slot] = i64::from(topology.vertex_points[source_vertex as usize]);
                         maps[slot] = source_vertex;
                         if local < edges {
                             edge_of_vertex[slot] = rdk_core::topology_index::widen(index.edge_of_vertex[source_vertex as usize]);
@@ -576,8 +576,8 @@ fn edge_remove_fast(
     }
     let output_topology = topology::create_owned(
         geometry::point_count(value),
-        vertex_points,
-        primitive_offsets,
+        topology::narrow("Poly_cut", &vertex_points)?,
+        topology::narrow("Poly_cut", &primitive_offsets)?,
         primitive_kinds.into_iter().map(kind_of).collect(),
     )?;
     remap_all(
@@ -644,8 +644,8 @@ impl Samples<'_> {
         } else {
             part as f64 / parts as f64
         };
-        let left_point = source.view.vertex_points[sv];
-        let right_point = source.view.vertex_points[next as usize];
+        let left_point = i64::from(source.view.vertex_points[sv]);
+        let right_point = i64::from(source.view.vertex_points[next as usize]);
         if weight <= 0.0 {
             self.point_left[output] = left_point;
             self.point_right[output] = left_point;
@@ -755,7 +755,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                 if next < 0 {
                     continue;
                 }
-                let primitive = index.primitive_of_vertex[vu];
+                let primitive = i64::from(index.primitive_of_vertex[vu]);
                 let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vu]);
                 let excluded = !selected(primitives, primitive)
                     || match cut_edges {
@@ -766,8 +766,8 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                     parts_out[slot] = 1;
                     continue;
                 }
-                let left = topology.vertex_points[vu];
-                let right = topology.vertex_points[next as usize];
+                let left = i64::from(topology.vertex_points[vu]);
+                let right = i64::from(topology.vertex_points[next as usize]);
                 let eligible = match (element, cut_points) {
                     (Element::PolyCutPoints, Some(selection)) => {
                         group::mem(left, selection) || group::mem(right, selection)
@@ -868,7 +868,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
     }
     if let Some(block) = error_vertices.iter().position(|&vertex| vertex >= 0) {
         let vertex = error_vertices[block];
-        let point = topology.vertex_points[vertex as usize];
+        let point = i64::from(topology.vertex_points[vertex as usize]);
         let message = match error_kinds[block] {
             1 => format!("cut attribute is non-finite at operated point {point}"),
             2 => format!("attribute change is not representable on edge from vertex {vertex}"),
@@ -885,7 +885,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
         if next >= 0 || previous >= 0 {
             match element {
                 Element::PolyCutPoints => {
-                    let point = topology.vertex_points[vu];
+                    let point = i64::from(topology.vertex_points[vu]);
                     if selected(cut_points, point) {
                         let outgoing = next >= 0 && invalid_edges[vu] != 0;
                         let incoming = previous >= 0 && invalid_edges[previous as usize] != 0;
@@ -924,8 +924,8 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
     support::par_fill(cancel_value, chunk, &mut primitive_action, &|primitive| {
         let mut changed = false;
         if selected(primitives, primitive) {
-            let first = topology.primitive_offsets[primitive as usize];
-            let last = topology.primitive_offsets[primitive as usize + 1];
+            let first = i64::from(topology.primitive_offsets[primitive as usize]);
+            let last = i64::from(topology.primitive_offsets[primitive as usize + 1]);
             for vertex in first..last {
                 if rdk_core::topology_index::widen(index.next_vertex[vertex as usize]) >= 0 && edge_parts[vertex as usize] != 1 {
                     changed = true;
@@ -967,8 +967,8 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
     let pc = primitive_count as usize;
     let mut primitive_segment_offsets = vec![0_i64; pc + 1];
     for primitive in 0..pc {
-        let first = topology.primitive_offsets[primitive];
-        let last = topology.primitive_offsets[primitive + 1];
+        let first = i64::from(topology.primitive_offsets[primitive]);
+        let last = i64::from(topology.primitive_offsets[primitive + 1]);
         let mut count = 0_i64;
         for vertex in first..last {
             let parts = edge_parts[vertex as usize];
@@ -999,8 +999,8 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
             for primitive in first_primitive..last_primitive {
                 support::poll(cancel_value, primitive)?;
                 let pu = primitive as usize;
-                let first = topology.primitive_offsets[pu];
-                let last = topology.primitive_offsets[pu + 1];
+                let first = i64::from(topology.primitive_offsets[pu]);
+                let last = i64::from(topology.primitive_offsets[pu + 1]);
                 let mut output = primitive_segment_offsets[pu] - base;
                 let closed = topology.primitive_kinds[pu] != OPEN_POLYLINE;
                 for vertex in first..last {
@@ -1080,7 +1080,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                 support::poll(cancel_value, primitive)?;
                 let pu = primitive as usize;
                 let target_base = primitive_bases[pu];
-                let source_size = topology.primitive_offsets[pu + 1] - topology.primitive_offsets[pu];
+                let source_size = i64::from(topology.primitive_offsets[pu + 1]) - i64::from(topology.primitive_offsets[pu]);
                 if primitive_action[pu] == 0 {
                     maps[(target_base - base) as usize] = primitive;
                     sizes[(target_base - base) as usize] = source_size;
@@ -1179,12 +1179,12 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                 let pu = primitive as usize;
                 let output_first = primitive_offsets[tu] - base;
                 if fragment_first[tu] < 0 {
-                    let source_first = topology.primitive_offsets[pu];
-                    let source_last = topology.primitive_offsets[pu + 1];
+                    let source_first = i64::from(topology.primitive_offsets[pu]);
+                    let source_last = i64::from(topology.primitive_offsets[pu + 1]);
                     kinds[kind_slot] = topology.primitive_kinds[pu];
                     for source_vertex in source_first..source_last {
                         let output = (output_first + source_vertex - source_first) as usize;
-                        let point = topology.vertex_points[source_vertex as usize];
+                        let point = i64::from(topology.vertex_points[source_vertex as usize]);
                         samples.point_left[output] = point;
                         samples.point_right[output] = point;
                         samples.vertex_left[output] = source_vertex;
@@ -1228,7 +1228,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
         source_point_used.fill(1);
     } else {
         for point in 0..pcount {
-            if index.point_offsets[point] == index.point_offsets[point + 1] {
+            if i64::from(index.point_offsets[point]) == i64::from(index.point_offsets[point + 1]) {
                 source_point_used[point] = 1;
             }
         }
@@ -1307,8 +1307,8 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
     }
     let output_topology = topology::create_owned(
         output_point_count,
-        vertex_points,
-        primitive_offsets,
+        topology::narrow("Poly_cut", &vertex_points)?,
+        topology::narrow("Poly_cut", &primitive_offsets)?,
         primitive_kinds.into_iter().map(kind_of).collect(),
     )?;
     let mut attributes = Vec::new();
@@ -1409,7 +1409,7 @@ mod tests {
             points.iter().map(|p| p.2).collect(),
         )
         .unwrap();
-        let ids: Vec<i64> = (0..points.len() as i64).collect();
+        let ids: Vec<u32> = (0..points.len() as u32).collect();
         let mut builder = topology::builder::create(points.len() as i64, None, None).unwrap();
         if closed {
             topology::builder::add_closed_polyline(&mut builder, &ids).unwrap();
@@ -1435,7 +1435,7 @@ mod tests {
 
     fn primitive_points(value: &geometry::T, primitive: usize) -> Vec<i64> {
         let v = view(value);
-        v.vertex_points[v.primitive_offsets[primitive] as usize..v.primitive_offsets[primitive + 1] as usize].to_vec()
+        v.vertex_points[v.primitive_offsets[primitive] as usize..v.primitive_offsets[primitive + 1] as usize].iter().map(|&p| i64::from(p)).collect()
     }
 
     fn params() -> Params {
@@ -1784,7 +1784,7 @@ mod tests {
     fn one_and_four_domains_cut_identically() {
         let points: Vec<(f64, f64, f64)> = (0..400).map(|p| (p as f64, (p % 7) as f64, 0.0)).collect();
         let source = with_float("signal", (0..400).map(|p| ((p * 37) % 11) as f64 - 5.0).collect(), &polyline(&points, false));
-        let run = |domains: i64| -> (Vec<f64>, Vec<i64>, Vec<i64>) {
+        let run = |domains: i64| -> (Vec<f64>, Vec<u32>, Vec<u32>) {
             let output = Mutex::new(None);
             parallel::run_unit(Some(domains), &|| {
                 let result = cut(&Params { grain: Some(16), ..edges_cut(crossing("signal", 0.0)) }, &source)

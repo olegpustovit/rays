@@ -44,16 +44,16 @@ fn compact(
     let py = topology_remap::select_float(cancel_value, grain, None, &new_to_old, &positions.y)?;
     let pz = topology_remap::select_float(cancel_value, grain, None, &new_to_old, &positions.z)?;
     let positions = packed::float3::view::of_owned_exn(px, py, pz)?;
-    let mut vertex_points = vec![0i64; source.vertex_points.len()];
+    let mut vertex_points = vec![0u32; source.vertex_points.len()];
     support::par_fill(cancel_value, grain, &mut vertex_points, &|vertex| {
-        Ok(old_to_new[source.vertex_points[vertex as usize] as usize])
+        Ok(old_to_new[source.vertex_points[vertex as usize] as usize] as u32)
     })?;
     let new_topology = topology::view::create_validated_shared(
         retained,
         vertex_points,
         source.primitive_offsets.clone(),
         source.primitive_kinds,
-    );
+    )?;
     let mut attributes = Vec::new();
     for item in geometry::attributes(value) {
         if attribute::owner(&item) != attribute::Owner::Point {
@@ -162,7 +162,7 @@ mod tests {
         let (x, y, z) = positions(&g);
         let (vertex_points, offsets, _) = topo(&g);
         let shift = |v: &Vec<f64>| std::iter::once(9.0).chain(v.iter().copied()).collect::<Vec<f64>>();
-        let vp: Vec<i64> = vertex_points.iter().map(|p| p + 1).collect();
+        let vp: Vec<u32> = vertex_points.iter().map(|p| p + 1).collect();
         let g = geom(&shift(&x), &shift(&y), &shift(&z), &vp, &offsets, None);
         let count = geometry::point_count(&g);
         let g = with_attr(&g, Owner::Point, "id", Storage::Int(Arc::new((0..count).collect())));

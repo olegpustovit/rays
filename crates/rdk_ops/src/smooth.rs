@@ -266,7 +266,7 @@ mod tests {
         let count = x.len();
         geometry::create(
             packed::float3::view::of_owned_exn(x, vec![0.0; count], z).unwrap(),
-            rdk_core::topology::polygons_owned(count as i64, vertex_points, offsets).unwrap(),
+            rdk_core::topology::polygons_owned(count as i64, rdk_core::topology::narrow("test", &vertex_points).unwrap(), rdk_core::topology::narrow("test", &offsets).unwrap()).unwrap(),
             None,
             None,
             None,

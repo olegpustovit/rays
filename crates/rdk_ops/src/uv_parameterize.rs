@@ -52,7 +52,7 @@ fn edge_endpoint_corners(
     edge: i64,
     local: i64,
 ) -> Result<(i64, i64), error::T> {
-    let corner = index_view.edge_vertices[(index_view.edge_offsets[edge as usize] + local) as usize];
+    let corner = i64::from(index_view.edge_vertices[(index_view.edge_offsets[edge as usize] as i64 + local) as usize]);
     let next = rdk_core::topology_index::widen(index_view.next_vertex[corner as usize]);
     if next < 0 {
         return Err(fail("UV parameterization requires polygon edges"));
@@ -343,7 +343,7 @@ fn solve_checked(
     let mut variable_point = vec![-1_i64; nv];
     for corner in 0..vc {
         let variable = corner_to_variable[corner] as usize;
-        let point = topology_view.vertex_points[corner];
+        let point = i64::from(topology_view.vertex_points[corner]);
         if variable_point[variable] < 0 {
             variable_point[variable] = point;
         } else if variable_point[variable] != point {
@@ -615,18 +615,18 @@ fn solve_checked(
     }
     for primitive in 0..primitive_count {
         cancel::poll(cancel_value, primitive, 4095)?;
-        let first = topology_view.primitive_offsets[primitive as usize];
+        let first = i64::from(topology_view.primitive_offsets[primitive as usize]);
         for local in 0..3 {
             let corner = first + local;
             let next = first + (local + 1) % 3;
             let previous = first + (local + 2) % 3;
             let variable = corner_to_variable[corner as usize] as usize;
-            let point = topology_view.vertex_points[corner as usize];
+            let point = i64::from(topology_view.vertex_points[corner as usize]);
             for neighbor_corner in [previous, next] {
                 let slot = cursor[variable] as usize;
                 cursor[variable] += 1;
                 let neighbor = corner_to_variable[neighbor_corner as usize];
-                let edge_length = distance(point, topology_view.vertex_points[neighbor_corner as usize]);
+                let edge_length = distance(point, i64::from(topology_view.vertex_points[neighbor_corner as usize]));
                 let weight = corner_tangent[corner as usize] / edge_length;
                 if !finite(weight) || weight <= 0.0 {
                     return Err(fail("UV parameterization produced an invalid mean-value weight"));

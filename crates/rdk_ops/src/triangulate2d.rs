@@ -310,8 +310,8 @@ fn constraint_endpoint_selection(
                 continue;
             }
             cancel::poll(cancel_value, edge, 4095).map_err(pass)?;
-            retain(index_view.edge_a[edge as usize])?;
-            retain(index_view.edge_b[edge as usize])?;
+            retain(i64::from(index_view.edge_a[edge as usize]))?;
+            retain(i64::from(index_view.edge_b[edge as usize]))?;
         }
     }
     if let Some(item) = constraint_primitives {
@@ -323,8 +323,8 @@ fn constraint_endpoint_selection(
         }
         for primitive in members_preferred(item) {
             cancel::poll(cancel_value, primitive, 4095).map_err(pass)?;
-            for vertex in view.primitive_offsets[primitive as usize]..view.primitive_offsets[primitive as usize + 1] {
-                retain(view.vertex_points[vertex as usize])?;
+            for vertex in i64::from(view.primitive_offsets[primitive as usize])..i64::from(view.primitive_offsets[primitive as usize + 1]) {
+                retain(i64::from(view.vertex_points[vertex as usize]))?;
             }
         }
     }
@@ -442,7 +442,7 @@ fn constraint_segments(
                 continue;
             }
             cancel::poll(cancel_value, edge, 4095).map_err(pass)?;
-            add(&mut source, &mut winding, 0, index_view.edge_a[edge as usize], index_view.edge_b[edge as usize])?;
+            add(&mut source, &mut winding, 0, i64::from(index_view.edge_a[edge as usize]), i64::from(index_view.edge_b[edge as usize]))?;
         }
     }
     if let Some(item) = constraint_primitives {
@@ -454,8 +454,8 @@ fn constraint_segments(
         }
         for primitive in members_preferred(item) {
             cancel::poll(cancel_value, primitive, 4095).map_err(pass)?;
-            let first = view.primitive_offsets[primitive as usize];
-            let last = view.primitive_offsets[primitive as usize + 1];
+            let first = i64::from(view.primitive_offsets[primitive as usize]);
+            let last = i64::from(view.primitive_offsets[primitive as usize + 1]);
             let size = last - first;
             let kind = view.primitive_kinds[primitive as usize];
             let segments = if kind == 1 { (size - 1).max(0) } else { size };
@@ -466,8 +466,8 @@ fn constraint_segments(
                     &mut source,
                     &mut winding,
                     weight,
-                    view.vertex_points[(first + local) as usize],
-                    view.vertex_points[(first + next) as usize],
+                    i64::from(view.vertex_points[(first + local) as usize]),
+                    i64::from(view.vertex_points[(first + next) as usize]),
                 )?;
             }
         }
@@ -476,7 +476,7 @@ fn constraint_segments(
         let primitive_count = geometry::primitive_count(geometry_value);
         let vertex_count = geometry::vertex_count(geometry_value);
         let projected_vertex_points = par_i64(cancel_value, grain, vertex_count, &|vertex| {
-            let source_point = view.vertex_points[vertex as usize];
+            let source_point = i64::from(view.vertex_points[vertex as usize]);
             let local = local_of_point[source_point as usize];
             if local >= 0 { unique_of(local) } else { Ok(-1) }
         })?;
@@ -484,8 +484,8 @@ fn constraint_segments(
         for primitive in 0..primitive_count {
             cancel::poll(cancel_value, primitive, 4095).map_err(pass)?;
             if view.primitive_kinds[primitive as usize] == 0 {
-                let first = view.primitive_offsets[primitive as usize];
-                let last = view.primitive_offsets[primitive as usize + 1];
+                let first = i64::from(view.primitive_offsets[primitive as usize]);
+                let last = i64::from(view.primitive_offsets[primitive as usize + 1]);
                 let selected = (first..last).filter(|&vertex| projected_vertex_points[vertex as usize] >= 0).count() as i64;
                 if selected != 0 && selected != last - first {
                     return Err(invalid("silhouette polygons must be wholly inside or outside the point selection"));
@@ -497,8 +497,8 @@ fn constraint_segments(
         }
         let signs = par_i64(cancel_value, grain, primitive_count, &|primitive| {
             if selected_polygons[primitive as usize] {
-                let first = view.primitive_offsets[primitive as usize];
-                let count = view.primitive_offsets[primitive as usize + 1] - first;
+                let first = i64::from(view.primitive_offsets[primitive as usize]);
+                let count = i64::from(view.primitive_offsets[primitive as usize + 1]) - first;
                 if count < 3 || first > projected_vertex_points.len() as i64 - count {
                     return Err(fail("Rdk.Predicates.polygon_area_sign_packed: invalid polygon range".to_owned()));
                 }
@@ -512,12 +512,12 @@ fn constraint_segments(
         let index_view = topology_index::view::view(&index);
         let edge_count = index_view.edge_a.len() as i64;
         let edge_winding = par_i64(cancel_value, grain, edge_count, &|edge| {
-            let first = index_view.edge_offsets[edge as usize];
-            let last = index_view.edge_offsets[edge as usize + 1];
+            let first = i64::from(index_view.edge_offsets[edge as usize]);
+            let last = i64::from(index_view.edge_offsets[edge as usize + 1]);
             let mut weight = 0_i64;
             for incidence in first..last {
-                let vertex = index_view.edge_vertices[incidence as usize];
-                let primitive = index_view.primitive_of_vertex[vertex as usize];
+                let vertex = i64::from(index_view.edge_vertices[incidence as usize]);
+                let primitive = i64::from(index_view.primitive_of_vertex[vertex as usize]);
                 if signs[primitive as usize] == chosen {
                     let next = rdk_core::topology_index::widen(index_view.next_vertex[vertex as usize]);
                     if next >= 0 {
@@ -538,8 +538,8 @@ fn constraint_segments(
             cancel::poll(cancel_value, edge, 4095).map_err(pass)?;
             let weight = edge_winding[edge as usize];
             if weight != 0 {
-                let source_a = index_view.edge_a[edge as usize];
-                let source_b = index_view.edge_b[edge as usize];
+                let source_a = i64::from(index_view.edge_a[edge as usize]);
+                let source_b = i64::from(index_view.edge_b[edge as usize]);
                 let local_a = local_of_point[source_a as usize];
                 let local_b = local_of_point[source_b as usize];
                 if local_a < 0 || local_b < 0 {
@@ -1117,7 +1117,7 @@ fn output_topology(
         }
         let primitive_offsets: Vec<i64> = (0..=triangle_count).map(|primitive| primitive * 3).collect();
         return Ok(OutputTopologyPlan {
-            topology: topology::polygons_owned(output_point_count, vertex_points, primitive_offsets).map_err(pass)?,
+            topology: topology::polygons_owned(output_point_count, topology::narrow("Triangulate2d", &vertex_points)?, topology::narrow("Triangulate2d", &primitive_offsets)?).map_err(pass)?,
             vertex_source: Vec::new(),
             primitive_source: Vec::new(),
             kept_primitive_count: 0,
@@ -1146,7 +1146,7 @@ fn output_topology(
             kept_vertex_offsets[primitive + 1] = checked_add(
                 "kept vertex count",
                 kept_vertex_offsets[primitive],
-                source.primitive_offsets[primitive + 1] - source.primitive_offsets[primitive],
+                i64::from(source.primitive_offsets[primitive + 1]) - i64::from(source.primitive_offsets[primitive]),
             )?;
         }
     }
@@ -1162,8 +1162,8 @@ fn output_topology(
         cancel::poll(cancel_value, primitive as i64, 1023).map_err(pass)?;
         let output = source_to_output[primitive];
         if output >= 0 {
-            let source_first = source.primitive_offsets[primitive];
-            let source_last = source.primitive_offsets[primitive + 1];
+            let source_first = i64::from(source.primitive_offsets[primitive]);
+            let source_last = i64::from(source.primitive_offsets[primitive + 1]);
             let target_first = kept_vertex_offsets[primitive];
             primitive_offsets[output as usize] = target_first;
             primitive_kinds[output as usize] = source.primitive_kinds[primitive];
@@ -1171,7 +1171,7 @@ fn output_topology(
             for local in 0..source_last - source_first {
                 let source_vertex = source_first + local;
                 let target_vertex = (target_first + local) as usize;
-                let point = source.vertex_points[source_vertex as usize];
+                let point = i64::from(source.vertex_points[source_vertex as usize]);
                 vertex_points[target_vertex] =
                     if source_point_output.is_empty() { point } else { source_point_output[point as usize] };
                 vertex_source[target_vertex] = source_vertex;
@@ -1191,10 +1191,10 @@ fn output_topology(
     Ok(OutputTopologyPlan {
         topology: topology::view::create_validated_owned(
             output_point_count,
-            vertex_points,
-            primitive_offsets,
+            topology::narrow("Triangulate2d", &vertex_points)?,
+            topology::narrow("Triangulate2d", &primitive_offsets)?,
             primitive_kinds,
-        ),
+        )?,
         vertex_source,
         primitive_source,
         kept_primitive_count,
@@ -1744,11 +1744,11 @@ mod tests {
     }
 
     fn polylines(point_count: i64, vertex_points: Vec<i64>, offsets: Vec<i64>, kinds: Vec<PrimitiveKind>) -> topology::T {
-        topology::create_owned(point_count, vertex_points, offsets, kinds).unwrap()
+        topology::create_owned(point_count, topology::narrow("test", &vertex_points).unwrap(), topology::narrow("test", &offsets).unwrap(), kinds).unwrap()
     }
 
     fn polygons(point_count: i64, vertex_points: Vec<i64>, offsets: Vec<i64>) -> topology::T {
-        topology::polygons_owned(point_count, vertex_points, offsets).unwrap()
+        topology::polygons_owned(point_count, topology::narrow("test", &vertex_points).unwrap(), topology::narrow("test", &offsets).unwrap()).unwrap()
     }
 
     fn attr(name: &str, owner: attribute::Owner, storage: attribute::Storage) -> attribute::T {
@@ -1773,7 +1773,7 @@ mod tests {
 
     fn topology_signature(value: &geometry::T) -> (Vec<i64>, Vec<i64>) {
         let view = topology::view::view(geometry::topology(value)).unwrap();
-        (view.vertex_points.to_vec(), view.primitive_offsets.to_vec())
+        (view.vertex_points.iter().map(|&p| i64::from(p)).collect(), view.primitive_offsets.iter().map(|&p| i64::from(p)).collect())
     }
 
     type Positions = (Vec<f64>, Vec<f64>, Vec<f64>);

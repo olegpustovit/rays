@@ -132,19 +132,19 @@ struct Stamps {
 fn link_valid(index: &topology_index::view::View, stamps: &mut Stamps, incidence: &[i64], edge: usize) -> bool {
     stamps.stamp += 1;
     let current = stamps.stamp;
-    let a = index.edge_a[edge];
-    let b = index.edge_b[edge];
-    for slot in index.point_edge_offsets[a as usize]..index.point_edge_offsets[a as usize + 1] {
+    let a = i64::from(index.edge_a[edge]);
+    let b = i64::from(index.edge_b[edge]);
+    for slot in i64::from(index.point_edge_offsets[a as usize])..i64::from(index.point_edge_offsets[a as usize + 1]) {
         let adjacent = index.point_edges[slot as usize] as usize;
-        let neighbor = if index.edge_a[adjacent] == a { index.edge_b[adjacent] } else { index.edge_a[adjacent] };
+        let neighbor = if i64::from(index.edge_a[adjacent]) == a { i64::from(index.edge_b[adjacent]) } else { i64::from(index.edge_a[adjacent]) };
         if neighbor != b {
             stamps.neighbor[neighbor as usize] = current;
         }
     }
     let mut common = 0;
-    for slot in index.point_edge_offsets[b as usize]..index.point_edge_offsets[b as usize + 1] {
+    for slot in i64::from(index.point_edge_offsets[b as usize])..i64::from(index.point_edge_offsets[b as usize + 1]) {
         let adjacent = index.point_edges[slot as usize] as usize;
-        let neighbor = if index.edge_a[adjacent] == b { index.edge_b[adjacent] } else { index.edge_a[adjacent] };
+        let neighbor = if i64::from(index.edge_a[adjacent]) == b { i64::from(index.edge_b[adjacent]) } else { i64::from(index.edge_a[adjacent]) };
         if neighbor != a && stamps.neighbor[neighbor as usize] == current {
             common += 1;
         }
@@ -171,8 +171,8 @@ fn normal_valid(
     stamps: &mut Stamps,
     edge: usize,
 ) -> bool {
-    let a = index.edge_a[edge];
-    let b = index.edge_b[edge];
+    let a = i64::from(index.edge_a[edge]);
+    let b = i64::from(index.edge_b[edge]);
     let (au, bu) = (a as usize, b as usize);
     let ax = positions.x[au] / coordinate_scale;
     let ay = positions.y[au] / coordinate_scale;
@@ -192,14 +192,14 @@ fn normal_valid(
     stamps.stamp = seen_stamp;
     for point in [a, b] {
         let point = point as usize;
-        for slot in index.point_offsets[point]..index.point_offsets[point + 1] {
+        for slot in i64::from(index.point_offsets[point])..i64::from(index.point_offsets[point + 1]) {
             let primitive = index.primitive_of_vertex[index.point_vertices[slot as usize] as usize] as usize;
             if stamps.primitive[primitive] != seen_stamp {
                 stamps.primitive[primitive] = seen_stamp;
                 let first = topology_view.primitive_offsets[primitive] as usize;
-                let p0 = topology_view.vertex_points[first];
-                let p1 = topology_view.vertex_points[first + 1];
-                let p2 = topology_view.vertex_points[first + 2];
+                let p0 = i64::from(topology_view.vertex_points[first]);
+                let p1 = i64::from(topology_view.vertex_points[first + 1]);
+                let p2 = i64::from(topology_view.vertex_points[first + 2]);
                 if !((p0 == a || p1 == a || p2 == a) && (p0 == b || p1 == b || p2 == b)) {
                     let coord = |point: i64, axis: usize| -> f64 {
                         if point == a || point == b {
@@ -365,7 +365,7 @@ fn plan_round(
     support::par_fill(cancel_ref, (grain / 6).max(1), &mut q, &|point| {
         let point = point as usize;
         let mut entry = [0.0f64; 10];
-        for slot in index.point_offsets[point]..index.point_offsets[point + 1] {
+        for slot in i64::from(index.point_offsets[point])..i64::from(index.point_offsets[point + 1]) {
             let vertex = index.point_vertices[slot as usize] as usize;
             let primitive = index.primitive_of_vertex[vertex] as usize;
             if faces.valid[primitive] {
@@ -401,7 +401,7 @@ fn plan_round(
         }
     }
     for edge in 0..edge_count {
-        let edge_incidence = index.edge_offsets[edge + 1] - index.edge_offsets[edge];
+        let edge_incidence = i64::from(index.edge_offsets[edge + 1]) - i64::from(index.edge_offsets[edge]);
         if edge_incidence > 2 || (params.preserve_boundary && edge_incidence == 1) {
             locked[index.edge_a[edge] as usize] = true;
             locked[index.edge_b[edge] as usize] = true;
@@ -409,9 +409,9 @@ fn plan_round(
     }
     if let Some(item) = primitive_selection {
         for point in 0..point_count {
-            let mut slot = index.point_offsets[point];
-            while !locked[point] && slot < index.point_offsets[point + 1] {
-                let primitive = index.primitive_of_vertex[index.point_vertices[slot as usize] as usize];
+            let mut slot = i64::from(index.point_offsets[point]);
+            while !locked[point] && slot < i64::from(index.point_offsets[point + 1]) {
+                let primitive = i64::from(index.primitive_of_vertex[index.point_vertices[slot as usize] as usize]);
                 if !group::mem(primitive, item) {
                     locked[point] = true;
                 }
@@ -422,15 +422,15 @@ fn plan_round(
     let mut costs = vec![f64::INFINITY; edge_count];
     let mut incidence = vec![0i64; edge_count];
     let eligible_primitives = |edge: usize| -> bool {
-        let first = index.edge_offsets[edge];
-        let last = index.edge_offsets[edge + 1];
+        let first = i64::from(index.edge_offsets[edge]);
+        let last = i64::from(index.edge_offsets[edge + 1]);
         let count = last - first;
         count >= 1
             && count <= 2
             && match primitive_selection {
                 None => true,
                 Some(item) => (first..last).all(|slot| {
-                    let primitive = index.primitive_of_vertex[index.edge_vertices[slot as usize] as usize];
+                    let primitive = i64::from(index.primitive_of_vertex[index.edge_vertices[slot as usize] as usize]);
                     group::mem(primitive, item)
                 }),
             }
@@ -444,7 +444,7 @@ fn plan_round(
         let edge = edge as usize;
         let a = index.edge_a[edge] as usize;
         let b = index.edge_b[edge] as usize;
-        let count = index.edge_offsets[edge + 1] - index.edge_offsets[edge];
+        let count = i64::from(index.edge_offsets[edge + 1]) - i64::from(index.edge_offsets[edge]);
         incidence[slot] = count;
         if a != b && !locked[a] && !locked[b] && eligible_primitives(edge) {
             let ax = positions.x[a] / coordinate_scale;
@@ -507,7 +507,7 @@ fn plan_round(
             removed += reduction;
             for point in [a, b] {
                 reserved[point] = true;
-                for slot in index.point_edge_offsets[point]..index.point_edge_offsets[point + 1] {
+                for slot in i64::from(index.point_edge_offsets[point])..i64::from(index.point_edge_offsets[point + 1]) {
                     let adjacent = index.point_edges[slot as usize] as usize;
                     reserved[index.edge_a[adjacent] as usize] = true;
                     reserved[index.edge_b[adjacent] as usize] = true;

@@ -282,20 +282,20 @@ fn materialize(transforms: &[mat4::T], geometry_value: &geometry::T) -> Result<g
     let vertex_points = build(cancel_value, grain, output_vertices, &|index| {
         let copy = index / source_vertices;
         let at = (index - copy * source_vertices) as usize;
-        source_topology.vertex_points[at] + copy * source_points
+        source_topology.vertex_points[at] + (copy * source_points) as u32
     })?;
     let mut primitive_offsets = build(cancel_value, grain, output_primitives, &|index| {
         let copy = index / source_primitives;
         let at = (index - copy * source_primitives) as usize;
-        source_topology.primitive_offsets[at] + copy * source_vertices
+        source_topology.primitive_offsets[at] + (copy * source_vertices) as u32
     })?;
-    primitive_offsets.push(output_vertices);
+    primitive_offsets.push(output_vertices as u32);
     let mut primitive_kinds: Vec<u8> = Vec::with_capacity(output_primitives as usize);
     for _ in 0..total {
         primitive_kinds.extend_from_slice(&source_topology.primitive_kinds);
     }
     let topology_value =
-        topology::view::create_validated_owned(output_points, vertex_points, primitive_offsets, primitive_kinds);
+        topology::view::create_validated_owned(output_points, vertex_points, primitive_offsets, primitive_kinds)?;
     let source_attributes = geometry::attributes(geometry_value);
     let mut has_normals = false;
     for item in &source_attributes {
@@ -385,7 +385,7 @@ mod tests {
     fn polyline(points: &[P3], closed: bool) -> geometry::T {
         let kind = if closed { PrimitiveKind::ClosedPolyline } else { PrimitiveKind::OpenPolyline };
         let topology_value =
-            topology::create_owned(points.len() as i64, (0..points.len() as i64).collect(), vec![0, points.len() as i64], vec![kind]).unwrap();
+            topology::create_owned(points.len() as i64, (0..points.len() as u32).collect(), vec![0, points.len() as u32], vec![kind]).unwrap();
         let x = points.iter().map(|p| p.0).collect();
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();

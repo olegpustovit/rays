@@ -438,12 +438,12 @@ pub(crate) mod fixtures {
         positions: &[(f64, f64, f64)],
         primitives: &[(topology::PrimitiveKind, Vec<i64>)],
     ) -> geometry::T {
-        let mut vertex_points: Vec<i64> = Vec::new();
-        let mut offsets = vec![0_i64];
+        let mut vertex_points: Vec<u32> = Vec::new();
+        let mut offsets = vec![0_u32];
         let mut kinds = Vec::new();
         for (kind, indices) in primitives {
-            vertex_points.extend(indices);
-            offsets.push(vertex_points.len() as i64);
+            vertex_points.extend(indices.iter().map(|&p| p as u32));
+            offsets.push(vertex_points.len() as u32);
             kinds.push(*kind);
         }
         let topology_value =

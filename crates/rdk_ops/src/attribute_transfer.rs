@@ -1078,7 +1078,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
             fail(&error::to_string(&failure))
         }
     })?;
-    let (query_positions, position_indices): (packed::float3::T, Option<Arc<Vec<i64>>>) = match target_owner {
+    let (query_positions, position_indices): (packed::float3::T, Option<Arc<Vec<u32>>>) = match target_owner {
         attribute::Owner::Point => (geometry::positions(target).clone(), None),
         attribute::Owner::Vertex => {
             let topology_view = topology::view::view(geometry::topology(target))?;
@@ -1127,7 +1127,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
         match owner {
             attribute::Owner::Point => {
                 let vertex = surface_index::view::triangle_vertex(&surface, triangle, local);
-                source_topology.vertex_points[vertex as usize]
+                i64::from(source_topology.vertex_points[vertex as usize])
             }
             attribute::Owner::Vertex => surface_index::view::triangle_vertex(&surface, triangle, local),
             attribute::Owner::Primitive => primitive,
