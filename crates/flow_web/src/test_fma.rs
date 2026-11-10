@@ -207,10 +207,10 @@ fn checked_arithmetic_regions_match_exact_binary64() {
     script.push_str("for(const f of [mul,(a,b)=>fma(a,b,0)])for(const bad of [Infinity,-Infinity,NaN]){try{f(bad,1);throw Error('accepted bad input')}catch(e){if(e.code!=='E_NONFINITE')throw e}}\n");
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         for instruction in [
-            Instruction::Checked_mul(Projection::Value, 0, 1),
-            Instruction::Checked_mul(Projection::Valid, 0, 1),
-            Instruction::Checked_fma(Projection::Value, 0, 1, 2),
-            Instruction::Checked_fma(Projection::Valid, 0, 1, 2),
+            Instruction::CheckedMul(Projection::Value, 0, 1),
+            Instruction::CheckedMul(Projection::Valid, 0, 1),
+            Instruction::CheckedFma(Projection::Value, 0, 1, 2),
+            Instruction::CheckedFma(Projection::Valid, 0, 1, 2),
         ] {
             let malformed = region::rebuild(
                 &packed,
@@ -237,7 +237,7 @@ fn checked_arithmetic_regions_match_exact_binary64() {
                 Instruction::Const(0.0),
                 Instruction::Const(f64::INFINITY),
                 Instruction::Const(1.0),
-                Instruction::Guarded(vec![(0, true)], Box::new(Instruction::Checked_mul(Projection::Value, 1, 2))),
+                Instruction::Guarded(vec![(0, true)], Box::new(Instruction::CheckedMul(Projection::Value, 1, 2))),
             ]),
             outputs: Some(vec![vec![0]]),
             ..Default::default()

@@ -24,7 +24,7 @@ pub fn kernel(packed: &packed::T, count: Option<i64>) -> Result<wgsl::Wgsl, Vec<
         }
         vec![d]
     })?;
-    let buffers = kernel.interface.iter().filter(|b| b.kind != Kind::Uniform_buffer).count() as i64;
+    let buffers = kernel.interface.iter().filter(|b| b.kind != Kind::UniformBuffer).count() as i64;
     let mut out = Vec::new();
     if buffers > MAX_STORAGE_BUFFERS {
         out.push(error(packed, "E_WEB_BUFFERS", format!("This kernel binds {buffers} storage buffers; WebGPU guarantees {MAX_STORAGE_BUFFERS} per shader stage.")));

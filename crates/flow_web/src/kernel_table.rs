@@ -11,9 +11,9 @@ fn json_ints(a: &[i64]) -> String {
 
 fn kind_name(kind: Kind) -> &'static str {
     match kind {
-        Kind::Uniform_buffer => "uniform",
-        Kind::Storage_read => "read",
-        Kind::Storage_read_write => "read_write",
+        Kind::UniformBuffer => "uniform",
+        Kind::StorageRead => "read",
+        Kind::StorageReadWrite => "read_write",
     }
 }
 

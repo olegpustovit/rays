@@ -79,9 +79,9 @@ fn input(source: &mut String, frame: i64, time: f64) -> input::Frame {
 
 fn data(v: &Value) -> String {
     match v {
-        Value::Int_array(a) => format!("BigInt64Array.from([{}])", a.iter().map(|n| format!("{n}n")).collect::<Vec<_>>().join(",")),
-        Value::Text_array(a) if !a.is_empty() && a.iter().all(|s| s == &a[0]) => format!("Array({}).fill({})", a.len(), crate::text_literal::quote(&a[0])),
-        Value::Text_array(a) => format!("[{}]", a.iter().map(|s| crate::text_literal::quote(s)).collect::<Vec<_>>().join(",")),
+        Value::IntArray(a) => format!("BigInt64Array.from([{}])", a.iter().map(|n| format!("{n}n")).collect::<Vec<_>>().join(",")),
+        Value::TextArray(a) if !a.is_empty() && a.iter().all(|s| s == &a[0]) => format!("Array({}).fill({})", a.len(), crate::text_literal::quote(&a[0])),
+        Value::TextArray(a) => format!("[{}]", a.iter().map(|s| crate::text_literal::quote(s)).collect::<Vec<_>>().join(",")),
         Value::Floats(1..=4, a) => format!("Float64Array.from([{}])", a.iter().map(|n| param::float_text(*n)).collect::<Vec<_>>().join(",")),
         _ => panic!("expected array result: {v:?}"),
     }
@@ -91,7 +91,7 @@ fn expectation(source: &mut String, expected: Result<Value, Diagnostic>) {
     match expected {
         Ok(v) => {
             source.push_str(&format!("const got=await frame(input,rt.slots,rt),expected={};", data(&v)));
-            source.push_str(if matches!(v, Value::Text_array(_)) { "assert.deepEqual(got.data,expected);\n" } else { "assert.deepEqual(bytes(got.data),bytes(expected));\n" });
+            source.push_str(if matches!(v, Value::TextArray(_)) { "assert.deepEqual(got.data,expected);\n" } else { "assert.deepEqual(bytes(got.data),bytes(expected));\n" });
         }
         Err(d) => {
             let cause = d.cause.as_deref().map(crate::text_literal::quote).unwrap_or_else(|| "undefined".into());
@@ -255,7 +255,7 @@ fn float_product_empty_and_nonfinite_capture() {
 
 fn list(values: Vec<Value>) -> Value { Value::List(Arc::new(values)) }
 fn leaves() -> Value { list(vec![Value::Int(9007199254740993), Value::Float(0.5)]) }
-fn int_array() -> Value { Value::Int_array(Arc::new(vec![1, 2, 3])) }
+fn int_array() -> Value { Value::IntArray(Arc::new(vec![1, 2, 3])) }
 fn record(value: Value) -> Value { Value::Record(vec![("leaves".into(), value)].into()) }
 
 #[test]
@@ -299,7 +299,7 @@ fn malformed_nested_integer_and_packed_layouts() {
 
 fn replace_table(program: &C::Program, value: Value) -> C::Program {
     fn slot(i: &region::Instruction) -> Option<i64> {
-        match i { region::Instruction::Array_prepare(n, _) => Some(*n), region::Instruction::Guarded(_, body) => slot(body), _ => None }
+        match i { region::Instruction::ArrayPrepare(n, _) => Some(*n), region::Instruction::Guarded(_, body) => slot(body), _ => None }
     }
     let mut program = program.clone();
     let mut replaced = false;

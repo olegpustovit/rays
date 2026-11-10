@@ -26,43 +26,11 @@ fn error(code: &str, message: &str) -> Diagnostic { value::fail(code, message) }
 
 
 fn binary(operation: Binary, a: &str, b: &str) -> String {
-    match operation {
-        Binary::Add => format!("{a} + {b}"),
-        Binary::Sub => format!("{a} - {b}"),
-        Binary::Mul => format!("{a} * {b}"),
-        Binary::Div => format!("{b} === 0 ? 0 : {a} / {b}"),
-        Binary::Mod => format!("{b} === 0 ? 0 : (({a} % {b}) + {b}) % {b}"),
-        Binary::Pow => format!("Math.pow(Math.abs({a}), {b})"),
-        Binary::Min => format!("Math.min({a}, {b})"),
-        Binary::Max => format!("Math.max({a}, {b})"),
-        Binary::Lt => flag(&format!("{a} < {b}")),
-        Binary::Le => flag(&format!("{a} <= {b}")),
-        Binary::Gt => flag(&format!("{a} > {b}")),
-        Binary::Ge => flag(&format!("{a} >= {b}")),
-        Binary::Eq => flag(&format!("{a} === {b}")),
-        Binary::And => flag(&format!("{a} !== 0 && {b} !== 0")),
-        Binary::Or => flag(&format!("{a} !== 0 || {b} !== 0")),
-        Binary::Atan2 => format!("Math.atan2({a}, {b})"),
-        Binary::Hypot => format!("Math.hypot({a}, {b})"),
-        Binary::Ldexp => format!("({a} * 2 ** Math.trunc({b}))"),
-    }
+    flow_syntax::packed_ops::math_source(flow_syntax::packed_ops::math_prim(&flow_syntax::packed_ops::Primitive::Numeric(operation)).js, a, b)
 }
 
 fn unary(operation: Unary, a: &str) -> String {
-    match operation {
-        Unary::Sin => format!("Math.sin({a})"),
-        Unary::Cos => format!("Math.cos({a})"),
-        Unary::Sqrt => format!("Math.sqrt(Math.abs({a}))"),
-        Unary::Abs => format!("Math.abs({a})"),
-        Unary::Not => flag(&format!("{a} === 0")),
-        Unary::Tan => format!("Math.tan({a})"),
-        Unary::Asin => format!("Math.asin({a})"),
-        Unary::Acos => format!("Math.acos({a})"),
-        Unary::Exp => format!("Math.exp({a})"),
-        Unary::Log => format!("Math.log({a})"),
-        Unary::Sign => format!("Math.sign({a})"),
-        Unary::Rsqrt => format!("(1 / Math.sqrt(Math.abs({a})))"),
-    }
+    flow_syntax::packed_ops::math_source(flow_syntax::packed_ops::math_prim(&flow_syntax::packed_ops::Primitive::Math(operation)).js, a, "")
 }
 
 /// [fast] (the workspace's fast precision, a collecting region): integer registers are exact 64-bit
@@ -101,8 +69,8 @@ impl Printer {
         let fast = self.fast;
         Ok(match instruction {
             Instruction::Const(value) => number(*value),
-            Instruction::Loop_result(loop_, component, _) => register(loop_ + 1 + component),
-            Instruction::Loop_begin(_) | Instruction::Loop_carry(..) | Instruction::Loop_end(..) => unreachable!("loop control is emitted by emit_range"),
+            Instruction::LoopResult(loop_, component, _) => register(loop_ + 1 + component),
+            Instruction::LoopBegin(_) | Instruction::LoopCarry(..) | Instruction::LoopEnd(..) => unreachable!("loop control is emitted by emit_range"),
             Instruction::Input(input, w, component) => format!("Number(in{input}[j{input} * {w} + {component}])"),
             Instruction::Uniform(index, component) => format!("Number(uniforms[{index}][{component}])"),
             Instruction::Frame(_) => format!("uniforms[{}][{slot}]", self.view.uniform_widths.len()),
@@ -131,11 +99,11 @@ impl Printer {
                 )
             }
             Instruction::Fma(a, b, c) => format!("fused({}, {}, {})", self.numeric(*a), self.numeric(*b), self.numeric(*c)),
-            Instruction::Checked_mul(p, a, b) => format!("checked({}, {} * {})", *p == Projection::Valid, self.numeric(*a), self.numeric(*b)),
-            Instruction::Checked_fma(p, a, b, c) => {
+            Instruction::CheckedMul(p, a, b) => format!("checked({}, {} * {})", *p == Projection::Valid, self.numeric(*a), self.numeric(*b)),
+            Instruction::CheckedFma(p, a, b, c) => {
                 format!("checked({}, fused({}, {}, {}))", *p == Projection::Valid, self.numeric(*a), self.numeric(*b), self.numeric(*c))
             }
-            Instruction::Array_prepare(i, ty) => {
+            Instruction::ArrayPrepare(i, ty) => {
                 if *ty == Ty::Array(Box::new(Ty::Text)) {
                     format!("table({i}, 'text', 1)")
                 } else {
@@ -149,18 +117,18 @@ impl Printer {
             Instruction::Gather(array, i, width, component) => {
                 format!("{}[row({}, {}, {width}) * {width} + {component}]", register(*array), register(*array), self.index(*i))
             }
-            Instruction::Int_gather(array, i) => format!("{}[row({}, {}, 1)]", register(*array), register(*array), self.index(*i)),
+            Instruction::IntGather(array, i) => format!("{}[row({}, {}, 1)]", register(*array), register(*array), self.index(*i)),
             Instruction::Trace(..) => {
                 return Err(error("E_WEB_SOURCE", "scene/trace needs a native ray-query host; it is outside the 2D web target."))
             }
             Instruction::Stage(..) => return Err(error("E_WEB_SOURCE", "A raster-stage intrinsic runs only in a native fragment stage.")),
-            Instruction::Text_const(value) => text_literal::quote(value),
-            Instruction::Text_input(input) => format!("text(in{input}[j{input}])"),
-            Instruction::Text_uniform(input) => format!("text(uniforms[{input}])"),
-            Instruction::Text_gather(array, i) => format!("{}[row({}, {}, 1)]", register(*array), register(*array), self.index(*i)),
-            Instruction::Text_select(condition, yes, no) => format!("({} !== 0 ? {} : {})", self.numeric(*condition), register(*yes), register(*no)),
-            Instruction::Rand_at(seed, index) => format!("randAt({}, {})", register(*seed), register(*index)),
-            Instruction::Int_compare(op, a, b) if fast => {
+            Instruction::TextConst(value) => text_literal::quote(value),
+            Instruction::TextInput(input) => format!("text(in{input}[j{input}])"),
+            Instruction::TextUniform(input) => format!("text(uniforms[{input}])"),
+            Instruction::TextGather(array, i) => format!("{}[row({}, {}, 1)]", register(*array), register(*array), self.index(*i)),
+            Instruction::TextSelect(condition, yes, no) => format!("({} !== 0 ? {} : {})", self.numeric(*condition), register(*yes), register(*no)),
+            Instruction::RandAt(seed, index) => format!("randAt({}, {})", register(*seed), register(*index)),
+            Instruction::IntCompare(op, a, b) if fast => {
                 let (a, b) = (*a, *b);
                 let eq = format!("(r{a}h === r{b}h && r{a}l === r{b}l)");
                 flag(&match op {
@@ -171,12 +139,12 @@ impl Printer {
                     Comparison::Ieq => eq,
                 })
             }
-            Instruction::Int_const(n) => format!("{n}n"),
-            Instruction::Int_input(i) => format!("in{i}[j{i}]"),
-            Instruction::Int_uniform(i) => format!("uniforms[{i}][0]"),
-            Instruction::Int_accumulator => "st[0]".to_owned(),
-            Instruction::Int_frame(_) => format!("uniforms[{}][{slot}]", self.view.uniform_widths.len()),
-            Instruction::Int_binary(op, a, b) => {
+            Instruction::IntConst(n) => format!("{n}n"),
+            Instruction::IntInput(i) => format!("in{i}[j{i}]"),
+            Instruction::IntUniform(i) => format!("uniforms[{i}][0]"),
+            Instruction::IntAccumulator => "st[0]".to_owned(),
+            Instruction::IntFrame(_) => format!("uniforms[{}][{slot}]", self.view.uniform_widths.len()),
+            Instruction::IntBinary(op, a, b) => {
                 let (a, b) = (register(*a), register(*b));
                 match op {
                     Integer::Iadd => format!("wrap({a} + {b})"),
@@ -191,7 +159,7 @@ impl Printer {
                     Integer::Ishr => format!("shift({a}, {b}, true)"),
                 }
             }
-            Instruction::Int_compare(op, a, b) => flag(&format!(
+            Instruction::IntCompare(op, a, b) => flag(&format!(
                 "{}{}{}",
                 register(*a),
                 match op {
@@ -203,8 +171,8 @@ impl Printer {
                 },
                 register(*b)
             )),
-            Instruction::Int_abs(a) => format!("{} < 0n ? wrap(-{}) : {}", register(*a), register(*a), register(*a)),
-            Instruction::Int_select(c, a, b) => format!("{} !== 0 ? {} : {}", self.numeric(*c), register(*a), register(*b)),
+            Instruction::IntAbs(a) => format!("{} < 0n ? wrap(-{}) : {}", register(*a), register(*a), register(*a)),
+            Instruction::IntSelect(c, a, b) => format!("{} !== 0 ? {} : {}", self.numeric(*c), register(*a), register(*b)),
             Instruction::Convert(Conversion::ToFloat, a) => self.numeric(*a),
             Instruction::Convert(op, a) => {
                 let (name, x) = match op {
@@ -241,12 +209,12 @@ impl Printer {
         let lo = |e: &str| format!("r{slot}l = {e}; r{slot}h = RH;");
         let read = |v: &str| lo(&format!("(typeof ({v}) === 'bigint' ? unbig({v}) : split({v}))"));
         Ok(match body {
-            Instruction::Int_const(n) => format!("r{slot}h = {}; r{slot}l = {};", (n >> 32) as i32, n & 0xffff_ffff),
-            Instruction::Int_input(i) => read(&format!("in{i}[j{i}]")),
-            Instruction::Int_uniform(i) => read(&format!("uniforms[{i}][0]")),
-            Instruction::Int_frame(_) => read(&format!("uniforms[{}][{slot}]", self.view.uniform_widths.len())),
-            Instruction::Int_gather(..) => read(&self.expression(slot, body)?),
-            Instruction::Int_binary(op, a, b) => {
+            Instruction::IntConst(n) => format!("r{slot}h = {}; r{slot}l = {};", (n >> 32) as i32, n & 0xffff_ffff),
+            Instruction::IntInput(i) => read(&format!("in{i}[j{i}]")),
+            Instruction::IntUniform(i) => read(&format!("uniforms[{i}][0]")),
+            Instruction::IntFrame(_) => read(&format!("uniforms[{}][{slot}]", self.view.uniform_widths.len())),
+            Instruction::IntGather(..) => read(&self.expression(slot, body)?),
+            Instruction::IntBinary(op, a, b) => {
                 let (a, b) = (*a, *b);
                 let call = |f: &str| lo(&format!("{f}({}, {}, {}, {})", h(a), l(a), h(b), l(b)));
                 let bits = |o: &str| format!("r{slot}h = {} {o} {}; r{slot}l = ({} {o} {}) >>> 0;", h(a), h(b), l(a), l(b));
@@ -264,7 +232,7 @@ impl Printer {
                 };
                 head
             }
-            Instruction::Int_abs(a) => format!(
+            Instruction::IntAbs(a) => format!(
                 "if ({} < 0) {{ r{slot}l = sub64(0, 0, {}, {}); r{slot}h = RH; }} else {{ r{slot}h = {}; r{slot}l = {}; }}",
                 h(*a),
                 h(*a),
@@ -272,7 +240,7 @@ impl Printer {
                 h(*a),
                 l(*a)
             ),
-            Instruction::Int_select(c, a, b) => format!(
+            Instruction::IntSelect(c, a, b) => format!(
                 "if ({} !== 0) {{ r{slot}h = {}; r{slot}l = {}; }} else {{ r{slot}h = {}; r{slot}l = {}; }}",
                 self.numeric(*c),
                 h(*a),
@@ -280,7 +248,7 @@ impl Printer {
                 h(*b),
                 l(*b)
             ),
-            Instruction::Loop_result(loop_, component, _) => {
+            Instruction::LoopResult(loop_, component, _) => {
                 let source = loop_ + 1 + component;
                 format!("r{slot}h = {}; r{slot}l = {};", h(source), l(source))
             }
@@ -310,10 +278,10 @@ impl Printer {
                 let _ = writeln!(self.line, "    if ({guard}) {{");
             }
             match body {
-                Instruction::Checked_mul(_, a, b) => {
+                Instruction::CheckedMul(_, a, b) => {
                     let _ = writeln!(self.line, "    if (!(Number.isFinite({}) && Number.isFinite({}))) return 1;", self.numeric(*a), self.numeric(*b));
                 }
-                Instruction::Checked_fma(_, a, b, c) => {
+                Instruction::CheckedFma(_, a, b, c) => {
                     let _ = writeln!(
                         self.line,
                         "    if (!(Number.isFinite({}) && Number.isFinite({}) && Number.isFinite({}))) return 1;",
@@ -359,7 +327,7 @@ impl Printer {
         while slot < last {
             let instruction = self.view.code[slot as usize].clone();
             match Instruction::unguarded(&instruction) {
-                Instruction::Loop_begin(lp) => {
+                Instruction::LoopBegin(lp) => {
                     let header = slot;
                     let count = lp.initial.len() as i64;
                     self.declare(header);
@@ -392,7 +360,7 @@ impl Printer {
                     let _ = writeln!(self.line, "    for (; {cond};) {{");
                     self.emit_range(header + 1 + count, lp.finish)?;
                     let (values, stop) = match Instruction::unguarded(&self.view.code[lp.finish as usize]) {
-                        Instruction::Loop_end(_, values, stop) => (values.clone(), *stop),
+                        Instruction::LoopEnd(_, values, stop) => (values.clone(), *stop),
                         _ => unreachable!("loop without its end"),
                     };
                     if let Some(source) = stop {
@@ -451,14 +419,14 @@ impl Printer {
 pub fn region(fast: bool, program: &packed::T) -> Result<String, Diagnostic> {
     let view = host::view(program);
     let has_rand = view.code.iter().any(|i| match i {
-        Instruction::Rand_at(..) => true,
-        Instruction::Guarded(_, b) => matches!(**b, Instruction::Rand_at(..)),
+        Instruction::RandAt(..) => true,
+        Instruction::Guarded(_, b) => matches!(**b, Instruction::RandAt(..)),
         _ => false,
     });
     let fast = fast && program.result == RegionResult::Collect && !has_rand;
     let checks = packed::finite_checks(program);
     let exists = |f: &dyn Fn(&Instruction) -> bool| view.code.iter().any(|i| f(Instruction::unguarded(i)));
-    let gathered = exists(&|i| matches!(i, Instruction::Array_prepare(..)));
+    let gathered = exists(&|i| matches!(i, Instruction::ArrayPrepare(..)));
     let nonfinite: &'static str = if gathered { "fail('E_NONFINITE', 'packed produced a nonfinite value.');" } else { "return 1;" };
     let collecting = matches!(program.result, RegionResult::Collect | RegionResult::Accumulate(_, true));
     let accumulating = program.result != RegionResult::Collect;
@@ -511,16 +479,16 @@ pub fn region(fast: bool, program: &packed::T) -> Result<String, Diagnostic> {
     if textual {
         p.add("  const text = value => typeof value === 'string' ? value : fail('E_ARRAY_TYPE', 'Kernel input changed its packed element type.');\n");
     }
-    if exists(&|i| matches!(i, Instruction::Fma(..) | Instruction::Checked_fma(..))) {
+    if exists(&|i| matches!(i, Instruction::Fma(..) | Instruction::CheckedFma(..))) {
         p.add(FUSED);
     }
-    if exists(&|i| matches!(i, Instruction::Checked_mul(..) | Instruction::Checked_fma(..))) {
+    if exists(&|i| matches!(i, Instruction::CheckedMul(..) | Instruction::CheckedFma(..))) {
         p.add("  const checked = (valid, value) => Number.isFinite(value) ? (valid ? 1 : value) : 0;\n");
     }
     if exists(&|i| matches!(i, Instruction::Noise3(..))) {
         p.add("  const noise = (...args) => { try { return noise3(...args); } catch (e) { if (e?.code === 'E_NONFINITE') return NaN; throw e; } };\n");
     }
-    if exists(&|i| matches!(i, Instruction::Rand_at(..))) {
+    if exists(&|i| matches!(i, Instruction::RandAt(..))) {
         p.add("  const u64 = x => BigInt.asUintN(64, x);\n  const randAt = (seed, index) => { let x = u64(seed + 0x9e3779b97f4a7c15n * u64(index + 1n)); x = u64((x ^ (x >> 30n)) * 0xbf58476d1ce4e5b9n); x = u64((x ^ (x >> 27n)) * 0x94d049bb133111ebn); x ^= x >> 31n; return Number(x >> 11n) / 9007199254740992; };\n");
     }
     if fast {
@@ -637,9 +605,9 @@ fn literal(store: Option<&Arc<dyn Fn(&[f64]) -> String + Send + Sync>>, l: &Lite
             Some(store) => format!("new rt.PArray({width}, {})", store(data)),
             None => format!("new rt.PArray({width}, Float64Array.of({}))", data.iter().map(|x| number(*x)).collect::<Vec<_>>().join(", ")),
         },
-        Literal::Int_array(data) => format!("new rt.PArray(1, BigInt64Array.of({}))", data.iter().map(|n| format!("{n}n")).collect::<Vec<_>>().join(", ")),
-        Literal::Text_array(data) => format!("new rt.TextArray([{}])", data.iter().map(|s| text_literal::quote(s)).collect::<Vec<_>>().join(", ")),
-        Literal::Empty_geometry => "null".to_owned(),
+        Literal::IntArray(data) => format!("new rt.PArray(1, BigInt64Array.of({}))", data.iter().map(|n| format!("{n}n")).collect::<Vec<_>>().join(", ")),
+        Literal::TextArray(data) => format!("new rt.TextArray([{}])", data.iter().map(|s| text_literal::quote(s)).collect::<Vec<_>>().join(", ")),
+        Literal::EmptyGeometry => "null".to_owned(),
     }
 }
 
@@ -682,41 +650,41 @@ fn export_name(primitive: &Primitive) -> String {
 fn signature(primitive: &Primitive) -> Option<Vec<&'static str>> {
     use Primitive as P;
     Some(match primitive {
-        P::Numeric(_) | P::Remainder | P::Integer(_) | P::Integer_compare(_) | P::Equal => vec!["a", "b"],
+        P::Numeric(_) | P::Remainder | P::Integer(_) | P::IntegerCompare(_) | P::Equal => vec!["a", "b"],
         P::Math(Unary::Not) => vec!["a"],
-        P::Math(_) | P::Floor | P::Ceil | P::Round | P::Int_convert | P::Float_convert | P::Color_byte(_) => vec!["x"],
+        P::Math(_) | P::Floor | P::Ceil | P::Round | P::IntConvert | P::FloatConvert | P::ColorByte(_) => vec!["x"],
         P::Show | P::Truthy | P::Coerce(_) => vec!["value"],
-        P::Text_blank | P::Text_trim | P::Text_lower | P::Text_repr => vec!["text"],
-        P::Text_table_decode => vec!["text"],
-        P::Text_table_encode => vec!["rows"],
-        P::Text_tokens | P::Text_to_float | P::Text_to_int => vec!["text"],
-        P::Text_split => vec!["text", "separator"],
-        P::Array_grade => vec!["keys", "descending"],
-        P::Array_index_of => vec!["keys", "queries"],
-        P::Array_compact => vec!["mask"],
-        P::Array_scan_sum => vec!["array"],
-        P::Array_scatter_add => vec!["indices", "values", "size"],
-        P::Array_reduce(_) => vec!["array"],
-        P::Array_segment(_) | P::Array_segment_argmax => vec!["values", "offsets"],
-        P::Next_after => vec!["x", "y"],
-        P::Sequence_length => vec!["list"],
-        P::Sequence_get => vec!["list", "index"],
-        P::Sequence_build => vec!["count", "width", "type", "cooked"],
-        P::Sequence_slice => vec!["list", "first", "count"],
-        P::Array_max_length => vec!["type"],
-        P::Array_range => vec!["count", "type"],
-        P::Array_int | P::Array_text | P::Array_float | P::Array_vec3 | P::Array_vec4 => vec!["count", "value"],
-        P::Array_count => vec!["array"],
-        P::Array_nth => vec!["array", "index"],
-        P::Array_slice => vec!["array", "first", "count"],
-        P::Array_concat => vec!["first", "second"],
+        P::TextBlank | P::TextTrim | P::TextLower | P::TextRepr => vec!["text"],
+        P::TextTableDecode => vec!["text"],
+        P::TextTableEncode => vec!["rows"],
+        P::TextTokens | P::TextToFloat | P::TextToInt => vec!["text"],
+        P::TextSplit => vec!["text", "separator"],
+        P::ArrayGrade => vec!["keys", "descending"],
+        P::ArrayIndexOf => vec!["keys", "queries"],
+        P::ArrayCompact => vec!["mask"],
+        P::ArrayScanSum => vec!["array"],
+        P::ArrayScatterAdd => vec!["indices", "values", "size"],
+        P::ArrayReduce(_) => vec!["array"],
+        P::ArraySegment(_) | P::ArraySegmentArgmax => vec!["values", "offsets"],
+        P::NextAfter => vec!["x", "y"],
+        P::SequenceLength => vec!["list"],
+        P::SequenceGet => vec!["list", "index"],
+        P::SequenceBuild => vec!["count", "width", "type", "cooked"],
+        P::SequenceSlice => vec!["list", "first", "count"],
+        P::ArrayMaxLength => vec!["type"],
+        P::ArrayRange => vec!["count", "type"],
+        P::ArrayInt | P::ArrayText | P::ArrayFloat | P::ArrayVec3 | P::ArrayVec4 => vec!["count", "value"],
+        P::ArrayCount => vec!["array"],
+        P::ArrayNth => vec!["array", "index"],
+        P::ArraySlice => vec!["array", "first", "count"],
+        P::ArrayConcat => vec!["first", "second"],
         P::Noise3 => vec!["position", "seed", "octaves", "lacunarity", "gain"],
-        P::Rand_at => vec!["seed", "index"],
+        P::RandAt => vec!["seed", "index"],
         P::Error => vec!["code", "message", "cause"],
-        P::Fma | P::Checked_fma => vec!["a", "b", "c"],
-        P::Checked_mul => vec!["a", "b"],
-        P::Fail(..) | P::Fail_diagnostic(_) => vec![],
-        P::Text_concat | P::Sequence_concat | P::Rand | P::Color_parse => return None,
+        P::Fma | P::CheckedFma => vec!["a", "b", "c"],
+        P::CheckedMul => vec!["a", "b"],
+        P::Fail(..) | P::FailDiagnostic(_) => vec![],
+        P::TextConcat | P::SequenceConcat | P::Rand | P::ColorParse => return None,
     })
 }
 
@@ -801,10 +769,10 @@ fn call(primitive: &Primitive, args: &[(Symbol, i64)]) -> Result<String, Diagnos
     };
     let mut statics: Vec<String> = match primitive {
         Primitive::Coerce(ty) => vec![ty_json(ty)],
-        Primitive::Color_byte(C::ByteMode::Clamped) => vec!["\"clamped\"".to_owned()],
-        Primitive::Color_byte(C::ByteMode::Unclamped) => vec!["\"unclamped\"".to_owned()],
+        Primitive::ColorByte(C::ByteMode::Clamped) => vec!["\"clamped\"".to_owned()],
+        Primitive::ColorByte(C::ByteMode::Unclamped) => vec!["\"unclamped\"".to_owned()],
         Primitive::Fail(code, message) => vec![escape(code), escape(message)],
-        Primitive::Fail_diagnostic(d) => {
+        Primitive::FailDiagnostic(d) => {
             let mut s = vec![escape(&d.code), escape(&d.message), d.cause.as_ref().map(|c| crate::text_literal::quote(c)).unwrap_or_else(|| "undefined".to_owned())];
             if !(d.hints.is_empty() && d.trace.is_empty()) {
                 s.push(format!("[{}]", d.hints.iter().map(|h| escape(h)).collect::<Vec<_>>().join(",")));
@@ -829,11 +797,11 @@ fn expression(ctx: &mut Context, e: &Expr) -> Result<String, Diagnostic> {
     Ok(match e {
         Expr::Constant(n) => format!("K[{n}]"),
         Expr::Local(n) => local(*n),
-        Expr::Call_index(slot) => format!("BigInt(calls[{slot}]++)"),
+        Expr::CallIndex(slot) => format!("BigInt(calls[{slot}]++)"),
         Expr::Source(v) if ctx.bindings && argument_index(v).map(|i| i >= 0).unwrap_or(false) => {
             format!("rt.coreArgument({})", argument_index(v).expect("argument index"))
         }
-        Expr::Source(_) | Expr::Host_source { .. } | Expr::Source_descriptor { .. } => {
+        Expr::Source(_) | Expr::HostSource { .. } | Expr::SourceDescriptor { .. } => {
             return Err(error("E_WEB_SOURCE", "This host-owned source is outside the 2D web target."))
         }
         Expr::Frame(field) => match field {
@@ -843,8 +811,8 @@ fn expression(ctx: &mut Context, e: &Expr) -> Result<String, Diagnostic> {
             FrameField::Tick => "BigInt(input.tick)".to_owned(),
             FrameField::Width => "BigInt(input.size[0])".to_owned(),
             FrameField::Height => "BigInt(input.size[1])".to_owned(),
-            FrameField::Pointer_x => "input.pointer[0]".to_owned(),
-            FrameField::Pointer_y => "input.pointer[1]".to_owned(),
+            FrameField::PointerX => "input.pointer[0]".to_owned(),
+            FrameField::PointerY => "input.pointer[1]".to_owned(),
             FrameField::Input => "rt.frameValue(input)".to_owned(),
         },
         Expr::Prim(primitive, args) => call(primitive, args)?,
@@ -860,13 +828,7 @@ fn expression(ctx: &mut Context, e: &Expr) -> Result<String, Diagnostic> {
 
 fn object_of(args: &[(Symbol, i64)]) -> String { format!("{{{}}}", args.iter().map(|(k, n)| format!("{k}: {}", local(*n))).collect::<Vec<_>>().join(", ")) }
 
-fn kind_name(mark: C::Mark) -> &'static str {
-    match mark {
-        C::Mark::Rect => "rect",
-        C::Mark::Circle => "circle",
-        C::Mark::Line => "line",
-    }
-}
+fn kind_name(mark: C::Mark) -> &'static str { mark.name() }
 
 fn draw(ctx: &mut Context, d: &Draw) -> String {
     ctx.used.insert("num".to_owned());
@@ -894,15 +856,11 @@ fn draw(ctx: &mut Context, d: &Draw) -> String {
             ctx.used.insert("floatPoint".to_owned());
             format!(
                 "pathOf(rt, {}, {});",
-                escape(match path {
-                    C::PathKind::Rounded_rect => "rounded_rect",
-                    C::PathKind::Polygon => "polygon",
-                    C::PathKind::Polyline => "polyline",
-                }),
+                escape(path.name()),
                 object_of(args)
             )
         }
-        Draw::Text_run { at, text, ink, size } => format!(
+        Draw::TextRun { at, text, ink, size } => format!(
             "if (typeof {t} !== \"string\") rt.fail(\"E_TYPE\", \"Drawing text is text.\"); else if ({t} !== \"\") {{ const [x, y] = point(rt, {}); emit(rt, {{type: \"text\", x, y, size: Number(rt.coerce(\"int\", {})), color: ink(rt, {}), text: {t}}}); }}",
             local(*at),
             local(*size),
@@ -920,11 +878,7 @@ fn draw(ctx: &mut Context, d: &Draw) -> String {
         }
         Draw::Push(t, n) => format!(
             "transform(rt, {}, {});",
-            escape(match t {
-                C::Transform::Translate => "translate",
-                C::Transform::Rotate => "rotate",
-                C::Transform::Scale => "scale",
-            }),
+            escape(t.name()),
             local(*n)
         ),
         Draw::Pop => "emit(rt, {type: \"pop_transform\"});".to_owned(),
@@ -994,8 +948,8 @@ fn slot_key(ctx: &mut Context, program: &C::Program, slot: i64) -> String {
                 .iter
                 .iter()
                 .map(|i| match i {
-                    Iteration::Static_index(i) => i.to_string(),
-                    Iteration::Local_index(l) => format!("{}.toString()", local(*l)),
+                    Iteration::StaticIndex(i) => i.to_string(),
+                    Iteration::LocalIndex(l) => format!("{}.toString()", local(*l)),
                 })
                 .collect::<Vec<_>>()
                 .join(", ")
@@ -1017,7 +971,7 @@ fn statement(ctx: &mut Context, program: &C::Program, depth: usize, s: &Statemen
             line(ctx, depth, &text);
         }
         // a resident loop's array is on the device: its count is the one read back
-        StatementNode::Assign(n, Expr::Prim(Primitive::Array_compact, args)) if ctx.resident && args.len() == 1 => {
+        StatementNode::Assign(n, Expr::Prim(Primitive::ArrayCompact, args)) if ctx.resident && args.len() == 1 => {
             ctx.is_async = true;
             let text = format!("{at}{} = await rt.resident.prim('compact', null, {});", local(*n), local(args[0].1));
             line(ctx, depth, &text);
@@ -1028,7 +982,7 @@ fn statement(ctx: &mut Context, program: &C::Program, depth: usize, s: &Statemen
             line(ctx, depth, &text);
         }
         // a range of a kept array's count: the index buffer the fold binds
-        StatementNode::Assign(n, Expr::Prim(Primitive::Array_range, _)) if ctx.tail_ranges.iter().any(|(k, _)| k == n) => {
+        StatementNode::Assign(n, Expr::Prim(Primitive::ArrayRange, _)) if ctx.tail_ranges.iter().any(|(k, _)| k == n) => {
             ctx.is_async = true;
             let (source, div) = ctx.tail_ranges.iter().find(|(k, _)| k == n).map(|(_, v)| *v).expect("tail range");
             let kind = match program.locals[*n as usize] {
@@ -1038,7 +992,7 @@ fn statement(ctx: &mut Context, program: &C::Program, depth: usize, s: &Statemen
             let text = format!("{at}{} = await rt.resident.range({}, {div}, {kind});", local(*n), local(source));
             line(ctx, depth, &text);
         }
-        StatementNode::Assign(n, Expr::Prim(Primitive::Array_count, args)) if ctx.resident && args.len() == 1 => {
+        StatementNode::Assign(n, Expr::Prim(Primitive::ArrayCount, args)) if ctx.resident && args.len() == 1 => {
             ctx.is_async = true;
             let a = args[0].1;
             let text = format!("{at}{} = await rt.resident.settle({}); {} = rt.array_count({});", local(a), local(a), local(*n), local(a));
@@ -1048,12 +1002,12 @@ fn statement(ctx: &mut Context, program: &C::Program, depth: usize, s: &Statemen
             let text = format!("{at}{} = {};", local(*n), expression(ctx, e)?);
             line(ctx, depth, &text);
         }
-        StatementNode::Reset_call(slot) => line(ctx, depth, &format!("{at}calls[{slot}] = 0;")),
+        StatementNode::ResetCall(slot) => line(ctx, depth, &format!("{at}calls[{slot}] = 0;")),
         StatementNode::Draw(d) => {
             let text = format!("{at}{}", draw(ctx, d));
             line(ctx, depth, &text);
         }
-        StatementNode::Diagnose_rows { rows, policy, index, handler, diagnostic, result } => {
+        StatementNode::DiagnoseRows { rows, policy, index, handler, diagnostic, result } => {
             if *policy == DiagnosticPolicy::RangeLast {
                 let mut d = error("E_WEB_SOURCE", "Range-last diagnosis needs its native host.");
                 d.span = s.source.span.clone();
@@ -1158,7 +1112,7 @@ fn statement(ctx: &mut Context, program: &C::Program, depth: usize, s: &Statemen
             ctx.used.insert("store".to_owned());
             line(ctx, depth, &format!("{at}store(rt, {}, {}, {});", local(*sequence), local(*index), local(*value)));
         }
-        StatementNode::State_read { slot, result, init, initial } => {
+        StatementNode::StateRead { slot, result, init, initial } => {
             let key = slot_key(ctx, program, *slot);
             line(ctx, depth, &format!("{at}{{ const c{id} = {key};"));
             line(ctx, depth, &format!("  if (c{id}.value !== undefined) {} = c{id}.value; else {{", local(*result)));
@@ -1166,11 +1120,11 @@ fn statement(ctx: &mut Context, program: &C::Program, depth: usize, s: &Statemen
             line(ctx, depth, &format!("    {} = {};", local(*result), local(*initial)));
             line(ctx, depth, "  } }");
         }
-        StatementNode::State_peek { slot, found, value } => {
+        StatementNode::StatePeek { slot, found, value } => {
             let key = slot_key(ctx, program, *slot);
             line(ctx, depth, &format!("{at}{{ const c{id} = {key}; {} = c{id}.pending !== undefined; {} = {} ? c{id}.pending : null; }}", local(*found), local(*value), local(*found)));
         }
-        StatementNode::State_write { slot, value } => {
+        StatementNode::StateWrite { slot, value } => {
             let key = slot_key(ctx, program, *slot);
             line(ctx, depth, &format!("{at}{}.pending = {};", key, local(*value)));
         }
@@ -1269,7 +1223,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
             owner: view.owner.as_ref().clone(),
             instance: view.instance,
             prefix: view.prefix.as_ref().clone(),
-            iter: view.iter.to_vec().into_iter().map(Iteration::Static_index).collect(),
+            iter: view.iter.to_vec().into_iter().map(Iteration::StaticIndex).collect(),
             span: Some(view.term.form().span.clone()),
         };
         let mut result: i64 = -1;
@@ -1293,7 +1247,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
     fn facts(slot: usize, instruction: &Instruction) -> Vec<String> {
         match instruction {
             Instruction::Frame(name) => vec![format!("[{slot},{},false]", escape(name))],
-            Instruction::Int_frame(name) => vec![format!("[{slot},{},true]", escape(name))],
+            Instruction::IntFrame(name) => vec![format!("[{slot},{},true]", escape(name))],
             Instruction::Guarded(_, body) => facts(slot, body),
             _ => Vec::new(),
         }
@@ -1490,7 +1444,7 @@ pub fn frame_map(program: &C::Program) -> String {
 }
 
 
-// ---- JavaScript text carried verbatim from lib/flow_web/js.ml ----
+// ---- JavaScript text carried verbatim from  ----
 
 const FUSED: &str = r##"  const fmaBytes = new DataView(new ArrayBuffer(8));
   const fmaDecode = x => {

@@ -207,18 +207,18 @@ fn coverage(programs: &[&C::Program]) {
                         Expr::Constant(_) => "constant",
                         Expr::Local(_) => "local",
                         Expr::Frame(_) => "frame",
-                        Expr::Call_index(_) => "call_index",
+                        Expr::CallIndex(_) => "call_index",
                         Expr::Prim(..) => "prim",
                         Expr::Vec(_) => "vec",
                         Expr::Fields(_) => "fields",
                         Expr::Items(_) => "items",
                         Expr::Field(..) => "field",
                         Expr::Source(_) => "source",
-                        Expr::Host_source { .. } => "host_source",
-                        Expr::Source_descriptor { .. } => "source_descriptor",
+                        Expr::HostSource { .. } => "host_source",
+                        Expr::SourceDescriptor { .. } => "source_descriptor",
                     });
                 }
-                StatementNode::Reset_call(_) => {
+                StatementNode::ResetCall(_) => {
                     seen.insert("reset_call");
                 }
                 StatementNode::Draw(d) => {
@@ -229,7 +229,7 @@ fn coverage(programs: &[&C::Program]) {
                         Draw::Batch { .. } => "batch",
                         Draw::Points { .. } => "points",
                         Draw::Path { .. } => "path",
-                        Draw::Text_run { .. } => "text",
+                        Draw::TextRun { .. } => "text",
                         Draw::Image { .. } => "image",
                         Draw::Push(..) => "push",
                         Draw::Pop => "pop",
@@ -240,7 +240,7 @@ fn coverage(programs: &[&C::Program]) {
                     statements(seen, body);
                     statements(seen, handler);
                 }
-                StatementNode::Diagnose_rows { handler, .. } => {
+                StatementNode::DiagnoseRows { handler, .. } => {
                     seen.insert("diagnose_rows");
                     statements(seen, handler);
                 }
@@ -261,14 +261,14 @@ fn coverage(programs: &[&C::Program]) {
                 StatementNode::Store { .. } => {
                     seen.insert("store");
                 }
-                StatementNode::State_read { init, .. } => {
+                StatementNode::StateRead { init, .. } => {
                     seen.insert("state_read");
                     statements(seen, init);
                 }
-                StatementNode::State_peek { .. } => {
+                StatementNode::StatePeek { .. } => {
                     seen.insert("state_peek");
                 }
-                StatementNode::State_write { .. } => {
+                StatementNode::StateWrite { .. } => {
                     seen.insert("state_write");
                 }
                 StatementNode::Invoke { .. } => {
@@ -366,11 +366,11 @@ fn invalid_region_layouts_are_rejected() {
 fn diagnose_span(statements: &[C::Statement]) -> Option<rays_diagnostic::Span> {
     for s in statements {
         let found = match &s.node {
-            StatementNode::Diagnose_rows { .. } => s.source.span.clone(),
+            StatementNode::DiagnoseRows { .. } => s.source.span.clone(),
             StatementNode::If { yes, no, .. } => diagnose_span(yes).or_else(|| diagnose_span(no)),
             StatementNode::Iterate { body, .. } => diagnose_span(body),
             StatementNode::Counted { init, body, .. } => diagnose_span(init).or_else(|| diagnose_span(body)),
-            StatementNode::State_read { init, .. } => diagnose_span(init),
+            StatementNode::StateRead { init, .. } => diagnose_span(init),
             StatementNode::Protect { body, handler, .. } => diagnose_span(body).or_else(|| diagnose_span(handler)),
             _ => None,
         };

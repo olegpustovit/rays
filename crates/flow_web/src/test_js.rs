@@ -33,7 +33,7 @@ fn live() -> input::Frame {
 
 fn unguarded_int_uniform(i: &Instruction, index: i64) -> bool {
     match i {
-        Instruction::Int_uniform(n) => *n == index,
+        Instruction::IntUniform(n) => *n == index,
         Instruction::Guarded(_, body) => unguarded_int_uniform(body, index),
         _ => false,
     }
@@ -73,7 +73,7 @@ pub(crate) fn run_node_raw(fast: bool, program: &packed::T) -> (i64, Vec<Vec<Str
         _ => panic!("scalar frame fact expected"),
     };
     let packed_text = |v: &Value| match v {
-        Value::Int_array(values) => format!("BigInt64Array.from([{}])", values.iter().map(|n| format!("{n}n")).collect::<Vec<_>>().join(",")),
+        Value::IntArray(values) => format!("BigInt64Array.from([{}])", values.iter().map(|n| format!("{n}n")).collect::<Vec<_>>().join(",")),
         v => array(&flatten(v)),
     };
     let uniform = |index: usize, v: &Value| -> String {
@@ -81,7 +81,7 @@ pub(crate) fn run_node_raw(fast: bool, program: &packed::T) -> (i64, Vec<Vec<Str
             format!("[{}]", scalar(v))
         } else {
             match v {
-                Value::Int_array(_) => packed_text(v),
+                Value::IntArray(_) => packed_text(v),
                 Value::Int(n) => array(&[*n as f64]),
                 _ => array(&flatten(v)),
             }
@@ -146,7 +146,7 @@ fn compare_integer(fast: bool, source: &str) {
     let output = produced.first().expect("an output");
     for v in &expected {
         let values: Vec<i64> = match v {
-            Value::Int_array(values) => (**values).clone(),
+            Value::IntArray(values) => (**values).clone(),
             Value::Int(n) => vec![*n],
             _ => panic!("Integer result expected"),
         };
@@ -443,9 +443,8 @@ fn nonfinite_value_is_a_status_and_native_refuses_it_too() {
     assert!(packed::force(&overflow, &input::at_time(1.0), &ForceOptions::default()).is_err());
 }
 
-/// The 70000-element hash fixture crosses a 65536-element block and runs only in exhaustive qualification.
+/// The hash fixture crosses the 65536-element block boundary.
 #[test]
-#[ignore]
 fn fast_64_bit_hash_at_70000_elements() {
     if !node_available() {
         return;

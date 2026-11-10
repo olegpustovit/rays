@@ -6,7 +6,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub fn node_available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| Command::new("node").arg("--version").output().map(|o| o.status.success()).unwrap_or(false))
+    let available = *AVAILABLE.get_or_init(|| Command::new("node").arg("--version").output().map(|o| o.status.success()).unwrap_or(false));
+    if !available {
+        eprintln!("RAYS_TEST_SKIP: Node.js is absent");
+        assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "Node.js is required; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
+    }
+    available
 }
 
 fn repo_root() -> PathBuf {

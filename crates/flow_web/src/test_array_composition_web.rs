@@ -22,9 +22,9 @@ fn value(body: &str) -> (e::Eval, Value) {
 
 fn data(v: &Value) -> String {
     match v {
-        Value::Int_array(a) if !a.is_empty() && a.iter().all(|n| n == &a[0]) => format!("new BigInt64Array({}).fill({}n)", a.len(), a[0]),
-        Value::Int_array(a) => format!("BigInt64Array.from([{}])", a.iter().map(|n| format!("{n}n")).collect::<Vec<_>>().join(",")),
-        Value::Text_array(a) => {
+        Value::IntArray(a) if !a.is_empty() && a.iter().all(|n| n == &a[0]) => format!("new BigInt64Array({}).fill({}n)", a.len(), a[0]),
+        Value::IntArray(a) => format!("BigInt64Array.from([{}])", a.iter().map(|n| format!("{n}n")).collect::<Vec<_>>().join(",")),
+        Value::TextArray(a) => {
             let mut palette = Vec::new();
             let mut indices = Vec::with_capacity(a.len());
             let mut seen = std::collections::HashMap::new();
@@ -66,7 +66,7 @@ fn append_case_frames(script: &mut String, name: &str, v: &Value, frames: &[(i64
         assert!(core.regions.iter().all(|r| packed::host::argument_types(r).unwrap().is_empty()));
     }
     fn table(i: &Instruction) -> bool {
-        match i { Instruction::Array_prepare(..) => true, Instruction::Guarded(_, inner) => table(inner), _ => false }
+        match i { Instruction::ArrayPrepare(..) => true, Instruction::Guarded(_, inner) => table(inner), _ => false }
     }
     let regions = core.regions.iter().map(|r| {
         if r.code.iter().any(table) {
@@ -87,12 +87,12 @@ rt.invoke=async function(k,args,plan){{assert.ok(plan,'Composition producer has 
         // The captured table has nine elements; concatenation adds exactly frame/index.
         // Avoid the native oracle rebuilding that frame-sized array for every output row.
         let expected = match counted_capture {
-            Some(length) => Ok(Value::Int_array(Arc::new(vec![9 + count; length as usize]))),
+            Some(length) => Ok(Value::IntArray(Arc::new(vec![9 + count; length as usize]))),
             None => e::host::force_reference(v, &live, None, None, None),
         };
         match expected {
             Ok(expected) => {
-                let text = matches!(expected, Value::Text_array(_));
+                let text = matches!(expected, Value::TextArray(_));
                 script.push_str(&format!("const got=await frame(input,rt.slots,rt),expected={};assert.deepEqual({},{},{});\n", data(&expected),
                     if text { "textBytes(got.data)" } else { "bytes(got.data)" },
                     if text { "textBytes(expected)" } else { "bytes(expected)" }, json_string(&format!("{name}/{count}/{time} runtime bytes"))));
@@ -198,7 +198,7 @@ fn closure(body: &str, name: &str, counts: &[i64], frames: &[(i64, f64)], analyt
     let mut script = prelude();
     for &count in counts {
         let v = e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: Ty::Int }, helper,
-            &[Value::Int_array(Arc::new((0..count).collect()))]).unwrap();
+            &[Value::IntArray(Arc::new((0..count).collect()))]).unwrap();
         append_case_frames(&mut script, &format!("{name}/{count}"), &v, frames, analytic_count.then_some(count));
     }
     finish(script);

@@ -12,7 +12,7 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind { Uniform_buffer, Storage_read, Storage_read_write }
+pub enum Kind { UniformBuffer, StorageRead, StorageReadWrite }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Binding { pub group: i64, pub binding: i64, pub kind: Kind }
@@ -198,46 +198,12 @@ const FLUSH_STATUS: &str = "if (sb != 0u) { atomicOr(&status, sb); }";
 fn truth(condition: &str) -> String { format!("select(0.0, 1.0, {condition})") }
 
 fn binary(operation: Binary, a: &str, b: &str) -> Result<String, Diagnostic> {
-    let infix = |operator: &str| truth(&format!("({a}{operator}{b})"));
-    Ok(match operation {
-        Binary::Add => format!("({a} + {b})"),
-        Binary::Sub => format!("({a} - {b})"),
-        Binary::Mul => format!("({a} * {b})"),
-        Binary::Div => format!("select({a} / {b}, 0.0, {b} == 0.0)"),
-        Binary::Mod => format!("select((({a} % {b}) + {b}) % {b}, 0.0, {b} == 0.0)"),
-        Binary::Pow => format!("wpow({a}, {b})"),
-        Binary::Min => format!("min({a}, {b})"),
-        Binary::Max => format!("max({a}, {b})"),
-        Binary::Lt => infix(" < "),
-        Binary::Le => infix(" <= "),
-        Binary::Gt => infix(" > "),
-        Binary::Ge => infix(" >= "),
-        Binary::Eq => infix(" == "),
-        Binary::And => truth(&format!("({a} != 0.0 && {b} != 0.0)")),
-        Binary::Or => truth(&format!("({a} != 0.0 || {b} != 0.0)")),
-        Binary::Atan2 => format!("atan2({a}, {b})"),
-        Binary::Hypot => return Err(fail("Native-safe hypot is not supported by the WGSL kernel target.")),
-        Binary::Ldexp => format!("ldexp({a}, i32({b}))"),
-    })
+    let template = flow_syntax::packed_ops::math_prim(&flow_syntax::packed_ops::Primitive::Numeric(operation)).wgsl.ok_or_else(|| fail("Native-safe hypot is not supported by the WGSL kernel target."))?;
+    Ok(flow_syntax::packed_ops::math_source(template, a, b))
 }
 
 fn unary(operation: Unary, a: &str) -> String {
-    match operation {
-        Unary::Sin => format!("sin({a})"),
-        Unary::Cos => format!("cos({a})"),
-        Unary::Sqrt => format!("sqrt(abs({a}))"),
-        Unary::Abs => format!("abs({a})"),
-        Unary::Not => truth(&format!("({a} == 0.0)")),
-        Unary::Tan => format!("tan({a})"),
-        Unary::Asin | Unary::Acos => format!(
-            "select({}(clamp({a}, -1.0, 1.0)), bitcast<f32>(0x7fc00000u), abs({a}) > 1.0)",
-            if operation == Unary::Asin { "asin" } else { "acos" }
-        ),
-        Unary::Exp => format!("exp({a})"),
-        Unary::Log => format!("select(log(select(1.0, {a}, {a} > 0.0)), bitcast<f32>(0x7fc00000u), {a} <= 0.0)"),
-        Unary::Rsqrt => format!("inverseSqrt(abs({a}))"),
-        Unary::Sign => format!("select({a}, select(-1.0, 1.0, {a} > 0.0), {a} != 0.0)"),
-    }
+    flow_syntax::packed_ops::math_source(flow_syntax::packed_ops::math_prim(&flow_syntax::packed_ops::Primitive::Math(operation)).wgsl.expect("unary target spelling"), a, "")
 }
 
 fn float_bits(value: f64) -> String { format!("bitcast<f32>(0x{:x}u)", (value as f32).to_bits()) }
@@ -248,9 +214,9 @@ fn xyzw(component: i64) -> &'static str { ["x", "y", "z", "w"][component as usiz
 
 fn kind_text(kind: Kind) -> &'static str {
     match kind {
-        Kind::Uniform_buffer => "<uniform>",
-        Kind::Storage_read => "<storage, read>",
-        Kind::Storage_read_write => "<storage, read_write>",
+        Kind::UniformBuffer => "<uniform>",
+        Kind::StorageRead => "<storage, read>",
+        Kind::StorageReadWrite => "<storage, read_write>",
     }
 }
 
@@ -470,7 +436,7 @@ impl Printer {
     /// from a binding of words is their bits
     fn read(&self, prepared: i64, index: i64, width: i64, component: i64) -> Result<String, Diagnostic> {
         match Instruction::unguarded(&self.layout.view.code[prepared as usize]) {
-            Instruction::Array_prepare(u, ty) => {
+            Instruction::ArrayPrepare(u, ty) => {
                 let binding = match self.buffers.iter().find(|(v, _, _, _)| v == u) {
                     Some((_, b, _, _)) => *b,
                     None => return Err(fail("A placed stage reads an unbound table.")),
@@ -512,7 +478,7 @@ impl Printer {
                 Ok(name)
             }
             (RStage::Fwidth, _) => Err(fail("On the web fwidth reads a varying (WGSL's derivative uniformity).")),
-            (RStage::Float_bits, _) => Ok(format!("bitcast<f32>({})", self.low(r[0]))),
+            (RStage::FloatBits, _) => Ok(format!("bitcast<f32>({})", self.low(r[0]))),
             (RStage::Sample(t, c), _) => Ok(format!(
                 "textureSample(texture{t}, sampler{}, vec2<f32>({}, {})).{}",
                 t + 1,
@@ -533,7 +499,7 @@ impl Printer {
             _ => return Err(fail("A workgroup intrinsic runs only in a compute stage.")),
         };
         match stage {
-            RStage::Group_scan(field) => {
+            RStage::GroupScan(field) => {
                 if current.id != 0 || !guards_empty {
                     return Err(fail("A group scan runs in uniform control flow, outside loops and branches."));
                 }
@@ -554,7 +520,7 @@ impl Printer {
             }
             RStage::Store => {
                 let (u, ty) = match Instruction::unguarded(&self.layout.view.code[r[0] as usize]) {
-                    Instruction::Array_prepare(u, ty) => (*u, ty.clone()),
+                    Instruction::ArrayPrepare(u, ty) => (*u, ty.clone()),
                     _ => return Err(fail("A store names a bound buffer.")),
                 };
                 let buffer = match compute.buffers.iter().find(|(v, _, _, _)| *v == u) {
@@ -598,11 +564,11 @@ impl Printer {
             | Instruction::Binary(..) | Instruction::Unary(..) | Instruction::Select(..) => Ok(()),
             Instruction::Noise3(_, _, _, _, LiveInt::Live(_), _, _) => Err(fail("Integer instructions are not supported by the WGSL kernel.")),
             Instruction::Noise3(..) => Ok(()),
-            Instruction::Checked_mul(..) | Instruction::Checked_fma(..) => Err(fail("Checked arithmetic requires binary64 overflow status.")),
+            Instruction::CheckedMul(..) | Instruction::CheckedFma(..) => Err(fail("Checked arithmetic requires binary64 overflow status.")),
             Instruction::Trace(..) => Err(fail("scene/trace needs a native ray-query host.")),
             Instruction::Stage(..) => Err(fail("A raster-stage intrinsic runs only in a fragment stage.")),
-            Instruction::Array_prepare(..) | Instruction::Gather(..) | Instruction::Int_gather(..) => Err(fail("Indexed array reads stay on the CPU.")),
-            Instruction::Text_const(_) | Instruction::Text_input(_) | Instruction::Text_uniform(_) | Instruction::Text_gather(..) | Instruction::Text_select(..) => {
+            Instruction::ArrayPrepare(..) | Instruction::Gather(..) | Instruction::IntGather(..) => Err(fail("Indexed array reads stay on the CPU.")),
+            Instruction::TextConst(_) | Instruction::TextInput(_) | Instruction::TextUniform(_) | Instruction::TextGather(..) | Instruction::TextSelect(..) => {
                 Err(fail("Text kernels stay on the CPU."))
             }
             _ => Err(fail("Integer instructions and conversions are not supported by the WGSL kernel target.")),
@@ -612,7 +578,7 @@ impl Printer {
     fn print_instruction(&mut self, current: &mut scope::T, slot: usize, instruction: &Instruction) -> Result<(), Diagnostic> {
         let layout = self.layout.clone();
         let s = slot as i64;
-        if !layout.used[slot] || (self.fast && matches!(Instruction::unguarded(instruction), Instruction::Array_prepare(..))) {
+        if !layout.used[slot] || (self.fast && matches!(Instruction::unguarded(instruction), Instruction::ArrayPrepare(..))) {
             return Ok(());
         }
         let (guards, instruction) = Instruction::guarded(instruction);
@@ -620,7 +586,7 @@ impl Printer {
             self.precise_refusal(instruction)?;
         }
         let constant = match instruction {
-            Instruction::Const(_) | Instruction::Int_const(_) => self.fast && !layout.finite_checks[slot],
+            Instruction::Const(_) | Instruction::IntConst(_) => self.fast && !layout.finite_checks[slot],
             _ => false,
         };
         if !constant {
@@ -632,12 +598,12 @@ impl Printer {
         let narrow = layout.narrow[slot];
         let expression = if narrow {
             match instruction {
-                Instruction::Int_const(n) => format!("{}u", n & 0xffff_ffff),
+                Instruction::IntConst(n) => format!("{}u", n & 0xffff_ffff),
                 Instruction::Raise(..) if raster => return Err(fail("Explicit errors need a compute status record.")),
                 Instruction::Raise(..) => "0u".to_owned(),
-                Instruction::Int_binary(op, a, b) => self.narrow_integer(*op, &self.low(*a), *b),
-                Instruction::Int_select(condition, yes, no) => format!("select({}, {}, {} != 0.0)", self.low(*no), self.low(*yes), self.float_of(*condition)),
-                Instruction::Loop_result(loop_, component, _) => register(loop_ + 1 + component),
+                Instruction::IntBinary(op, a, b) => self.narrow_integer(*op, &self.low(*a), *b),
+                Instruction::IntSelect(condition, yes, no) => format!("select({}, {}, {} != 0.0)", self.low(*no), self.low(*yes), self.float_of(*condition)),
+                Instruction::LoopResult(loop_, component, _) => register(loop_ + 1 + component),
                 Instruction::Stage(stage, r) if compute => self.group(current, guards.is_empty(), &indentation, stage, r)?,
                 _ => unreachable!("narrow register of an unexpected instruction"),
             }
@@ -646,7 +612,7 @@ impl Printer {
                 Instruction::Const(value) => float_bits(*value),
                 Instruction::Raise(..) if raster => return Err(fail("Explicit errors need a compute status record.")),
                 Instruction::Raise(..) => (if self.integer(s) { "vec2<u32>(0u, 0u)" } else { "0.0" }).to_owned(),
-                Instruction::Int_input(input) => match &self.placement {
+                Instruction::IntInput(input) => match &self.placement {
                     Some(Placement::Compute(_)) => "vec2<u32>(gid.x, 0u)".to_owned(),
                     Some(Placement::Vertex(true, _)) => "vec2<u32>(iid * 4u + quad_corner[vid], 0u)".to_owned(),
                     Some(Placement::Vertex(false, _)) => "vec2<u32>(vid, 0u)".to_owned(),
@@ -662,7 +628,7 @@ impl Printer {
                     word(if *component == 0 { layout.image_width.unwrap_or(0) } else { layout.image_height.unwrap_or(0) })
                 ),
                 Instruction::Gather(prepared, index, width, component) if placed => self.read(*prepared, *index, *width, *component)?,
-                Instruction::Int_gather(prepared, index) if placed => format!("vec2<u32>({}, 0u)", self.read(*prepared, *index, 1, 0)?),
+                Instruction::IntGather(prepared, index) if placed => format!("vec2<u32>({}, 0u)", self.read(*prepared, *index, 1, 0)?),
                 Instruction::Input(input, width, component) => format!("input{input}[i * {width}u + {component}u]"),
                 Instruction::Uniform(index, component) => format!("bitcast<f32>({})", word(layout.uniforms[*index as usize] + component)),
                 Instruction::Frame(_) => format!("bitcast<f32>({})", word(layout.frames[slot])),
@@ -679,16 +645,16 @@ impl Printer {
                 Instruction::Binary(op, a, b) => binary(*op, &self.float_of(*a), &self.float_of(*b))?,
                 Instruction::Unary(op, a) => unary(*op, &self.float_of(*a)),
                 Instruction::Fma(a, b, c) => format!("fma({}, {}, {})", register(*a), register(*b), register(*c)),
-                Instruction::Checked_mul(..) | Instruction::Checked_fma(..) => return Err(fail("Checked arithmetic requires binary64 overflow status.")),
+                Instruction::CheckedMul(..) | Instruction::CheckedFma(..) => return Err(fail("Checked arithmetic requires binary64 overflow status.")),
                 Instruction::Trace(..) => return Err(fail("scene/trace needs a native ray-query host.")),
                 Instruction::Stage(..) => return Err(fail("A raster-stage intrinsic runs only in a fragment stage.")),
                 Instruction::Gather(prepared, index, width, component) => self.element(*prepared, *index, *width, *component)?,
-                Instruction::Int_gather(prepared, index) => format!("i64_from_f({})", self.element(*prepared, *index, 1, 0)?),
-                Instruction::Array_prepare(..) => unreachable!("array_prepare is not printed"),
-                Instruction::Int_const(n) => format!("vec2<u32>({}u, {}u)", lo32(*n), hi32(*n)),
-                Instruction::Int_uniform(index) => format!("i64_from_f(bitcast<f32>({}))", word(layout.uniforms[*index as usize])),
-                Instruction::Int_frame(_) => format!("i64_from_f(bitcast<f32>({}))", word(layout.frames[slot])),
-                Instruction::Int_binary(op, a, b) => {
+                Instruction::IntGather(prepared, index) => format!("i64_from_f({})", self.element(*prepared, *index, 1, 0)?),
+                Instruction::ArrayPrepare(..) => unreachable!("array_prepare is not printed"),
+                Instruction::IntConst(n) => format!("vec2<u32>({}u, {}u)", lo32(*n), hi32(*n)),
+                Instruction::IntUniform(index) => format!("i64_from_f(bitcast<f32>({}))", word(layout.uniforms[*index as usize])),
+                Instruction::IntFrame(_) => format!("i64_from_f(bitcast<f32>({}))", word(layout.frames[slot])),
+                Instruction::IntBinary(op, a, b) => {
                     let (a, b) = (self.int_of(*a), self.int_of(*b));
                     match op {
                         Integer::Iadd => format!("i64_add({a}, {b})"),
@@ -703,7 +669,7 @@ impl Printer {
                         Integer::Ishr => format!("i64_shr({a}, {b})"),
                     }
                 }
-                Instruction::Int_compare(op, a, b) => {
+                Instruction::IntCompare(op, a, b) => {
                     let (a, b) = (self.int_of(*a), self.int_of(*b));
                     truth(&match op {
                         Comparison::Ilt => format!("i64_lt({a}, {b})"),
@@ -713,8 +679,8 @@ impl Printer {
                         Comparison::Ieq => format!("all({a} == {b})"),
                     })
                 }
-                Instruction::Int_abs(a) => format!("i64_abs({})", self.int_of(*a)),
-                Instruction::Int_select(condition, yes, no) => format!("select({}, {}, {} != 0.0)", self.int_of(*no), self.int_of(*yes), self.float_of(*condition)),
+                Instruction::IntAbs(a) => format!("i64_abs({})", self.int_of(*a)),
+                Instruction::IntSelect(condition, yes, no) => format!("select({}, {}, {} != 0.0)", self.int_of(*no), self.int_of(*yes), self.float_of(*condition)),
                 Instruction::Convert(Conversion::ToFloat, a) => self.float_of(*a),
                 Instruction::Convert(Conversion::Truncate | Conversion::CoerceInt | Conversion::IntegerResult(_), a) => self.int_of(*a),
                 Instruction::Convert(Conversion::Floor, a) => format!("i64_from_f(floor({}))", self.float_of(*a)),
@@ -723,7 +689,7 @@ impl Printer {
                     let f = self.float_of(*a);
                     format!("i64_from_f(sign({f}) * floor(abs({f}) + 0.5))")
                 }
-                Instruction::Text_const(_) | Instruction::Text_input(_) | Instruction::Text_uniform(_) | Instruction::Text_gather(..) | Instruction::Text_select(..) => {
+                Instruction::TextConst(_) | Instruction::TextInput(_) | Instruction::TextUniform(_) | Instruction::TextGather(..) | Instruction::TextSelect(..) => {
                     return Err(fail("Text kernels stay on the CPU."))
                 }
                 Instruction::Select(condition, yes, no) => format!("select({}, {}, {} != 0.0)", register(*no), register(*yes), register(*condition)),
@@ -734,7 +700,7 @@ impl Printer {
                     };
                     noise_call(&|r| register(r), &|r| Ok(self.int_of(r)), &float_bits, &table, (*x, *y, *z, *seed, *octaves, *lacunarity, *gain))?
                 }
-                Instruction::Loop_result(loop_, component, _) => register(loop_ + 1 + component),
+                Instruction::LoopResult(loop_, component, _) => register(loop_ + 1 + component),
                 _ => return Err(fail("This instruction is not supported by the WGSL fast kernel target.")),
             }
         };
@@ -754,7 +720,7 @@ impl Printer {
             Instruction::Raise(_, code, message, _) => {
                 let _ = writeln!(current.code, "{indentation}sb |= {}u;", flow_syntax::packed_ops::error_status(code, message));
             }
-            Instruction::Int_binary(operation, _, b) => {
+            Instruction::IntBinary(operation, _, b) => {
                 current.code.push_str(&indentation);
                 current.code.push_str(&integer_status(*operation, &self.int_of(*b)));
             }
@@ -1012,23 +978,23 @@ fn print(fast: bool, image: bool, placement: Option<Placement>, program: &packed
             };
             for (index, used) in layout.input_used.iter().enumerate() {
                 if *used {
-                    bind(index as i64, Kind::Storage_read, format!("input{index}: array<f32>"));
+                    bind(index as i64, Kind::StorageRead, format!("input{index}: array<f32>"));
                 }
             }
             for k in 0..outputs {
-                bind(layout.input_count + k, Kind::Storage_read_write, format!("{}: array<f32>", output_name(k)));
+                bind(layout.input_count + k, Kind::StorageReadWrite, format!("{}: array<f32>", output_name(k)));
             }
-            bind(layout.uniform_binding, Kind::Uniform_buffer, format!("uniforms: array<vec4<u32>, {uniform_words}>"));
-            bind(layout.status_binding, Kind::Storage_read_write, "status: atomic<u32>".to_owned());
+            bind(layout.uniform_binding, Kind::UniformBuffer, format!("uniforms: array<vec4<u32>, {uniform_words}>"));
+            bind(layout.status_binding, Kind::StorageReadWrite, "status: atomic<u32>".to_owned());
             if let Some(binding) = layout.table_binding {
-                bind(binding, Kind::Storage_read, "table: array<i32>".to_owned());
+                bind(binding, Kind::StorageRead, "table: array<i32>".to_owned());
             }
             if fast {
                 for k in 0..layout.gathers.len() as i64 {
-                    bind(layout.gather_base + k, Kind::Storage_read, format!("gather{k}: array<f32>"));
+                    bind(layout.gather_base + k, Kind::StorageRead, format!("gather{k}: array<f32>"));
                 }
-                bind(layout.count_base, Kind::Storage_read, "count_in: array<u32>".to_owned());
-                bind(layout.count_base + 1, Kind::Storage_read_write, "count_out: array<u32>".to_owned());
+                bind(layout.count_base, Kind::StorageRead, "count_in: array<u32>".to_owned());
+                bind(layout.count_base + 1, Kind::StorageReadWrite, "count_out: array<u32>".to_owned());
             }
             let mut prefix = declarations;
             prefix.push_str(FINITE);

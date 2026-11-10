@@ -37,7 +37,7 @@ pub fn fast_cases() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// The error cases of test_wgsl.ml: selected and untaken explicit errors in a fast kernel.
+/// The error cases of : selected and untaken explicit errors in a fast kernel.
 pub fn error_cases() -> Vec<(&'static str, &'static str)> {
     vec![
         (
