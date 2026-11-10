@@ -183,7 +183,6 @@ pub struct RenderEncoder(Arc<RenderEncoderInner>);
 impl RenderEncoder {
     pub fn create(command_buffer: &CommandBuffer, pass: &RenderPassDescriptor) -> Result<Self, Error> {
         const OP: &str = "Metal.RenderEncoder.create";
-        enter_main(OP)?;
         let color_target = pass.color_attachment();
         let depth_target = pass.depth_attachment();
         let stencil_target = pass.stencil_attachment();
@@ -337,7 +336,6 @@ pub struct BlitEncoder(Arc<BlitEncoderInner>);
 impl BlitEncoder {
     pub fn create(command_buffer: &CommandBuffer) -> Result<Self, Error> {
         const OP: &str = "Metal.BlitEncoder.create";
-        enter_main(OP)?;
         let raw = metal_sys::registry::command_buffer_blit_encoder(command_buffer.raw()).map_err(|failure| sys_error(OP, failure))?;
         command_buffer.lifetime().attach();
         Ok(Self(Arc::new(BlitEncoderInner { raw, lifetime: Lifetime::new(), command_buffer: command_buffer.clone(), ended: AtomicBool::new(false) })))

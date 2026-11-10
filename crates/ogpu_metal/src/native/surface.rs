@@ -121,7 +121,6 @@ pub struct Drawable(Arc<DrawableInner>);
 impl Drawable {
     pub fn texture(&self) -> Result<Texture, Error> {
         let operation = "Metal.Drawable.texture";
-        enter_main(operation)?;
         self.ensure_live(operation)?;
         let (raw, width, height, code) = metal_sys::native::surface::drawable_texture(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
         let format = match code {

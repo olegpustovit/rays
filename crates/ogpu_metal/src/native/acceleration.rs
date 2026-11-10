@@ -129,7 +129,6 @@ pub use ogpu_core::validation::CompactedSizeType;
 impl AccelerationEncoder {
     pub fn create(command_buffer: &CommandBuffer) -> Result<Self, Error> {
         const OP: &str = "Metal.Acceleration_encoder.create";
-        enter_main(OP)?;
         let raw = metal_sys::registry::command_buffer_acceleration_encoder(command_buffer.raw()).map_err(|failure| sys_error(OP, failure))?;
         command_buffer.lifetime().attach();
         Ok(Self(Arc::new(AccelerationEncoderInner {

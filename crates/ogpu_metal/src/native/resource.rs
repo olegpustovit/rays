@@ -641,7 +641,6 @@ pub struct ComputeEncoder(Arc<ComputeEncoderInner>);
 impl ComputeEncoder {
     pub fn create(command_buffer: &CommandBuffer) -> Result<Self, Error> {
         let operation = "Metal.Compute_encoder.create";
-        enter_main(operation)?;
         let raw = metal_sys::registry::command_buffer_compute_encoder(command_buffer.raw()).map_err(|failure| sys_error(operation, failure))?;
         command_buffer.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
         Ok(Self(Arc::new(ComputeEncoderInner { raw, lifetime: Lifetime::new(), command_buffer: command_buffer.clone(), ended: AtomicBool::new(false) })))

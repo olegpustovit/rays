@@ -102,7 +102,6 @@ impl Function {
 
     pub fn argument_encoder(&self, buffer_index: ogpu_core::validation::AdmittedSlot) -> Result<ShaderArgumentEncoder, Error> {
         const OP: &str = "Metal.Function.argument_encoder";
-        enter_main(OP)?;
         self.0.lifetime.ensure_live(OP)?;
         let raw = metal_sys::registry::shader_function_argument_encoder(&self.0.raw, buffer_index).map_err(|failure| sys_error(OP, failure))?;
         let (_, encoded_length, alignment, registry_id) =
