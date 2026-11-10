@@ -11,7 +11,7 @@ use crate::{
     device::{fail, Device},
     library::{self, Library},
     pipeline::{self, Native, Pipeline},
-    queue::{self, Cleanup, Queue},
+    queue::{self, Queue},
     render_encoder, sampler,
     surface::{self, Acquire, Frame, PendingPresentation, Surface},
     texture::{self, Texture},
@@ -28,7 +28,7 @@ use ogpu_core::{
     error::{Error, ErrorKind},
     handle,
     pipeline::RenderDescriptor,
-    render_pass::{IndexType, Primitive},
+    render_pass::Primitive,
     shader::{Binding, Shader},
 };
 use std::{
@@ -100,8 +100,8 @@ impl DriverResource for MetalBuffer {
         Ok(())
     }
     fn destroy(&self) -> Result<(), Error> {
-        self.value.destroy()?;
         self.dev.t.resources.borrow_mut().remove(&self.id);
+        self.value.destroy()?;
         Ok(())
     }
 }
@@ -158,8 +158,8 @@ impl DriverResource for MetalTexture {
         self.value.read_bytes_into(read, destination)
     }
     fn destroy(&self) -> Result<(), Error> {
-        self.value.destroy()?;
         self.dev.t.resources.borrow_mut().remove(&self.id);
+        self.value.destroy()?;
         Ok(())
     }
 }
@@ -192,8 +192,8 @@ impl DriverPipeline for MetalPipeline {
         self.max
     }
     fn destroy_pipeline(&self) -> Result<(), Error> {
-        self.pipeline.destroy()?;
         self.dev.t.pipelines.borrow_mut().remove(&self.id);
+        self.pipeline.destroy()?;
         Ok(())
     }
 }
@@ -250,8 +250,8 @@ impl DriverAccel for MetalAccel {
         self.sizes
     }
     fn destroy_accel(&self) -> Result<(), Error> {
-        self.structure.destroy()?;
         self.dev.t.accels.borrow_mut().remove(&self.id);
+        self.structure.destroy()?;
         Ok(())
     }
 }
@@ -302,8 +302,8 @@ impl DriverSampler for MetalSampler {
         self.id
     }
     fn destroy_sampler(&self) -> Result<(), Error> {
-        self.value.destroy()?;
         self.dev.t.samplers.borrow_mut().remove(&self.id);
+        self.value.destroy()?;
         Ok(())
     }
 }
@@ -460,12 +460,6 @@ fn create_argument(dev: &Rc<Dev>, pipeline: Token, stage: ShaderStage, index: og
     Ok(Box::new(MetalArgument { dev: dev.clone(), pipeline, index, encoder, length, alignment }))
 }
 
-fn run_all(retained: &RefCell<Vec<Cleanup>>) {
-    for release in std::mem::take(&mut *retained.borrow_mut()) {
-        release();
-    }
-}
-
 struct AccelRecorder {
     context: Rc<CommandContext>,
     encoder: native::AccelerationEncoder,
@@ -585,7 +579,7 @@ impl DriverCommands for MetalCommands {
         if let Some(open) = open {
             open.end();
         }
-        run_all(&context.retained);
+        context.retained.borrow_mut().clear();
         context.native.destroy()
     }
 }

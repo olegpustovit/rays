@@ -20,16 +20,13 @@ struct AccelInner {
     metal: ma::AccelerationStructure,
     sizes: ma::Sizes,
     buffers: RefCell<Vec<Buffer>>,
-    structures: Vec<Acceleration>,
+    structures: RefCell<Vec<Acceleration>>,
     dead: Cell<bool>,
-    submission_uses: Cell<i64>,
-    destroy_requested: Cell<bool>,
+    released: Cell<bool>,
 }
 
 #[derive(Clone)]
 pub struct Acceleration(Rc<AccelInner>);
-
-pub type Release = Box<dyn FnOnce()>;
 
 fn primitive_build(operation:&str, device:&Device, descriptor:&DriverAccelDescriptor,
     resolve:&dyn Fn(Token)->Result<Buffer,Error>) -> Result<(ma::BuildDescriptor,Vec<Buffer>),Error> {
@@ -53,10 +50,9 @@ fn allocate(device: &Device, descriptor: Option<ma::BuildDescriptor>, sizes: ma:
         metal,
         sizes,
         buffers: RefCell::new(buffers),
-        structures,
+        structures: RefCell::new(structures),
         dead: Cell::new(false),
-        submission_uses: Cell::new(0),
-        destroy_requested: Cell::new(false),
+        released: Cell::new(false),
     })))
 }
 
@@ -77,12 +73,21 @@ pub(crate) fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolv
         DriverAccelDescriptor::Sized { size, template } => {
             let template = resolve_structure(*template)?;
             let sizes = ma::Sizes { acceleration_structure_size: size.get(), ..template.0.sizes };
-            allocate(device, None, sizes, *size, template.0.buffers.borrow().clone(), template.0.structures.clone())
+            allocate(device, None, sizes, *size, template.0.buffers.borrow().clone(), template.0.structures.borrow().clone())
         }
     }
 }
 
+impl Drop for AccelInner {
+    fn drop(&mut self) {
+        let _ = finish_destroy(self);
+    }
+}
+
 fn finish_destroy(value: &AccelInner) -> Result<(), Error> {
+    if value.released.replace(true) {
+        return Ok(());
+    }
     let released = match value.descriptor.borrow().as_ref() {
         None => Ok(()),
         Some(d) => d.destroy(),
@@ -90,6 +95,9 @@ fn finish_destroy(value: &AccelInner) -> Result<(), Error> {
     released?;
     value.metal.destroy()?;
     value.device.detach_resource();
+    // The structure no longer needs what it referenced.
+    value.buffers.borrow_mut().clear();
+    value.structures.borrow_mut().clear();
     Ok(())
 }
 
@@ -139,56 +147,21 @@ impl Acceleration {
 
     pub fn destroy(&self) -> Result<(), Error> {
         let value = &self.0;
-        if value.dead.get() {
-            Ok(())
-        } else if value.submission_uses.get() > 0 {
+        if !value.dead.get() {
+            // Held elsewhere (a command buffer in flight): the last drop releases it.
+            if Rc::strong_count(&self.0) == 1 {
+                finish_destroy(value)?;
+            }
             value.dead.set(true);
-            value.destroy_requested.set(true);
-            Ok(())
-        } else {
-            finish_destroy(value)?;
-            value.dead.set(true);
-            Ok(())
         }
+        Ok(())
     }
 
-    /// Holds the structure, its buffers and its referenced structures for one submission; the
-    /// returned closure releases them all, finishing a destroy requested meanwhile.
-    pub fn retain_submission(&self) -> Result<Release, Error> {
-        if self.0.dead.get() {
-            return Err(fail("Ogpu_metal.Acceleration.retain_submission", ErrorKind::StaleHandle, "acceleration structure is destroyed"));
-        }
-        let mut retained: Vec<Release> = Vec::new();
-        let rollback = |retained: Vec<Release>, failure: Error| -> Result<Release, Error> {
-            for release in retained {
-                release();
-            }
-            Err(failure)
-        };
-        for buffer in self.0.buffers.borrow().iter() {
-            if let Err(e) = buffer.retain_submission() {
-                return rollback(retained, e);
-            }
-            let b = buffer.clone();
-            retained.push(Box::new(move || b.release_submission()));
-        }
-        for structure in &self.0.structures {
-            match structure.retain_submission() {
-                Err(e) => return rollback(retained, e),
-                Ok(release) => retained.push(release),
-            }
-        }
-        self.0.submission_uses.set(self.0.submission_uses.get() + 1);
-        let this = self.clone();
-        Ok(Box::new(move || {
-            for release in retained {
-                release();
-            }
-            let value = &this.0;
-            value.submission_uses.set(value.submission_uses.get() - 1);
-            if value.submission_uses.get() == 0 && value.destroy_requested.get() {
-                let _ = finish_destroy(value);
-            }
-        }))
+    pub fn destroyed(&self) -> bool {
+        self.0.dead.get()
+    }
+
+    pub fn buffers(&self) -> Vec<Buffer> {
+        self.0.buffers.borrow().clone()
     }
 }

@@ -33,8 +33,7 @@ impl DriverComputeEncoder for Compute {
         match pipeline.native() {
             Native::Render(_) => Err(fail(c.operation, ErrorKind::InvalidArgument, "render pipeline cannot execute compute")),
             Native::Compute(compute) => {
-                let p = pipeline.clone();
-                c.keep(pipeline.retain_submission(), Box::new(move || p.release_submission()))?;
+                c.keep_pipeline(&pipeline)?;
                 self.encoder.set_pipeline(compute)
             }
         }

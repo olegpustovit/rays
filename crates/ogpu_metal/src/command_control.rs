@@ -7,7 +7,7 @@ use crate::{
     buffer::Buffer,
     device::{fail, Device},
     pipeline::Pipeline,
-    queue::Cleanup,
+    queue::Retained,
     sampler::Sampler,
     texture::Texture,
 };
@@ -134,23 +134,23 @@ pub struct CommandContext {
     pub tables: Rc<Tables>,
     pub commands_token: i64,
     pub open_encoder: RefCell<Option<OpenEncoder>>,
-    pub retained: RefCell<Vec<Cleanup>>,
+    pub retained: RefCell<Vec<Retained>>,
 }
 
 impl CommandContext {
-    /// Records `release` when `retained` succeeded.
-    pub fn keep(&self, retained: Result<(), Error>, release: Cleanup) -> Result<(), Error> {
-        retained?;
-        self.retained.borrow_mut().push(release);
-        Ok(())
-    }
-
     /// One retain per buffer per command buffer, however many bindings reference it.
     pub fn keep_buffer(&self, buffer: &Buffer) -> Result<(), Error> {
         if buffer.retain_for(self.commands_token)? {
-            let b = buffer.clone();
-            self.retained.borrow_mut().push(Box::new(move || b.release_submission()));
+            self.retained.borrow_mut().push(Retained::Buffer(buffer.clone()));
         }
+        Ok(())
+    }
+
+    pub fn keep_pipeline(&self, pipeline: &Pipeline) -> Result<(), Error> {
+        if pipeline.destroyed() {
+            return Err(fail("Ogpu_metal.Pipeline.retain", ErrorKind::StaleHandle, "pipeline is destroyed"));
+        }
+        self.retained.borrow_mut().push(Retained::Pipeline(pipeline.clone()));
         Ok(())
     }
 
@@ -168,9 +168,14 @@ impl CommandContext {
         }
     }
 
+    /// The structure and the buffers it holds now (a refit replaces them).
     pub fn keep_accel(&self, structure: &Acceleration) -> Result<(), Error> {
-        let release = structure.retain_submission()?;
-        self.retained.borrow_mut().push(release);
+        if structure.destroyed() {
+            return Err(fail("Ogpu_metal.Acceleration.retain", ErrorKind::StaleHandle, "acceleration structure is destroyed"));
+        }
+        let mut held = self.retained.borrow_mut();
+        held.extend(structure.buffers().into_iter().map(Retained::Buffer));
+        held.push(Retained::Accel(structure.clone()));
         Ok(())
     }
 
@@ -184,8 +189,7 @@ impl CommandContext {
     /// One retain per texture per command buffer, however many bindings reference it.
     pub fn keep_texture(&self, texture: &Texture) -> Result<(), Error> {
         if texture.retain_for(self.commands_token)? {
-            let t = texture.clone();
-            self.retained.borrow_mut().push(Box::new(move || t.release_submission()));
+            self.retained.borrow_mut().push(Retained::Texture(texture.clone()));
         }
         Ok(())
     }
@@ -193,8 +197,7 @@ impl CommandContext {
     /// One retain per sampler per command buffer, however many bindings reference it.
     pub fn keep_sampler(&self, sampler: &Sampler) -> Result<(), Error> {
         if sampler.retain_for(self.commands_token)? {
-            let s = sampler.clone();
-            self.retained.borrow_mut().push(Box::new(move || s.release_submission()));
+            self.retained.borrow_mut().push(Retained::Sampler(sampler.clone()));
         }
         Ok(())
     }

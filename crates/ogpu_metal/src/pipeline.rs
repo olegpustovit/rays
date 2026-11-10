@@ -30,14 +30,22 @@ struct PipelineInner {
     handle: ResourceHandle,
     device: Device,
     dead: Cell<bool>,
-    submission_uses: Cell<i64>,
-    destroy_requested: Cell<bool>,
+    released: Cell<bool>,
 }
 
 #[derive(Clone)]
 pub struct Pipeline(Rc<PipelineInner>);
 
+impl Drop for PipelineInner {
+    fn drop(&mut self) {
+        let _ = finish_destroy(self);
+    }
+}
+
 fn finish_destroy(value: &PipelineInner) -> Result<(), Error> {
+    if value.released.replace(true) {
+        return Ok(());
+    }
     match &value.native {
             Native::Compute(x) => x.destroy(),
             Native::Render(x) => x.destroy(),
@@ -155,8 +163,7 @@ pub fn create_compute_from_library(device: &Device, library_value: &Library, adm
         handle: handle::create(device.handle()),
         device: device.clone(),
         dead: Cell::new(false),
-        submission_uses: Cell::new(0),
-        destroy_requested: Cell::new(false),
+        released: Cell::new(false),
     })))
 }
 
@@ -193,8 +200,7 @@ fn build_render(op: &str, device: &Device, descriptor: &RenderDescriptor, admitt
         handle: handle::create(device.handle()),
         device: device.clone(),
         dead: Cell::new(false),
-        submission_uses: Cell::new(0),
-        destroy_requested: Cell::new(false),
+        released: Cell::new(false),
     })))
 }
 
@@ -234,19 +240,19 @@ pub fn create_render_owned(device: &Device, descriptor: &RenderDescriptor, admit
 impl Pipeline {
     pub fn destroy(&self) -> Result<(), Error> {
         let value = &self.0;
-        if value.dead.get() {
-            Ok(())
-        } else if value.submission_uses.get() > 0 {
+        if !value.dead.get() {
+            // Held elsewhere (a command buffer in flight): the last drop releases it.
+            if Rc::strong_count(&self.0) == 1 {
+                finish_destroy(value)?;
+            }
             handle::destroy(&value.handle);
             value.dead.set(true);
-            value.destroy_requested.set(true);
-            Ok(())
-        } else {
-            finish_destroy(value)?;
-            handle::destroy(&value.handle);
-            value.dead.set(true);
-            Ok(())
         }
+        Ok(())
+    }
+
+    pub fn destroyed(&self) -> bool {
+        self.0.dead.get()
     }
 
     pub fn native(&self) -> &Native {
@@ -260,20 +266,5 @@ impl Pipeline {
             _ => return Err(fail(operation, ErrorKind::InvalidState, "fragment function was not retained")),
         };
         function.argument_encoder(buffer_index)
-    }
-
-    pub fn retain_submission(&self) -> Result<(), Error> {
-        if self.0.dead.get() {
-            return Err(fail("Ogpu_metal.Pipeline.retain_submission", ErrorKind::StaleHandle, "pipeline is destroyed"));
-        }
-        self.0.submission_uses.set(self.0.submission_uses.get() + 1);
-        Ok(())
-    }
-
-    pub fn release_submission(&self) {
-        self.0.submission_uses.set(self.0.submission_uses.get() - 1);
-        if self.0.submission_uses.get() == 0 && self.0.destroy_requested.get() {
-            let _ = finish_destroy(&self.0);
-        }
     }
 }

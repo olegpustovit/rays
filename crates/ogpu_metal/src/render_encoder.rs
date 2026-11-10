@@ -24,8 +24,7 @@ fn render_pipeline(context: &CommandContext, token: i64) -> Result<native::Rende
     match pipeline.native() {
         Native::Compute(_) => Err(fail(context.operation, ErrorKind::InvalidArgument, "compute pipeline cannot draw")),
         Native::Render(native) => {
-            let p = pipeline.clone();
-            context.keep(pipeline.retain_submission(), Box::new(move || p.release_submission()))?;
+            context.keep_pipeline(&pipeline)?;
             Ok(native.clone())
         }
     }

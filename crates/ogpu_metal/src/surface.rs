@@ -160,7 +160,9 @@ impl PendingPresentation {
         if !self.available() {
             return Err(fail(op, ErrorKind::Capacity, "bounded presentation slot is already in use"));
         }
-        source.retain_submission()?;
+        if source.destroyed() {
+            return Err(fail(op, ErrorKind::StaleHandle, "texture is destroyed"));
+        }
         *self.payload.borrow_mut() = Some(PendingPayload { owner: surface.clone(), frame: frame.clone(), source: source.clone() });
         self.active.set(true);
         self.epoch.set(0);
@@ -182,9 +184,7 @@ impl PendingPresentation {
 
     pub fn rollback_present(&self) {
         if self.active.get() && self.epoch.get() == 0 {
-            if let Some(p) = self.payload.borrow().as_ref() {
-                p.source.release_submission();
-            }
+            self.payload.borrow_mut().take();
             self.clear();
         }
     }
@@ -200,10 +200,10 @@ impl PendingPresentation {
 
     fn complete_present(&self) {
         if self.active.get() && self.epoch.get() != 0 {
-            let payload = self.payload.borrow();
+            // Taking the payload drops the source, finishing a destroy requested meanwhile.
+            let payload = self.payload.borrow_mut().take();
             if let Some(p) = payload.as_ref() {
                 release(&p.frame);
-                p.source.release_submission();
                 p.owner.0.in_flight_presentations.set(p.owner.0.in_flight_presentations.get() - 1);
                 self.clear();
                 if p.owner.0.in_flight_presentations.get() == 0 && p.owner.0.destroy_pending.get() {

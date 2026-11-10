@@ -8,12 +8,21 @@ use std::{
     rc::Rc,
 };
 
-pub type Cleanup = Box<dyn FnOnce()>;
+/// What a submitted command buffer keeps alive until it completes; the last drop of a destroyed
+/// object finishes its destroy.
+#[allow(dead_code)]
+pub enum Retained {
+    Buffer(crate::buffer::Buffer),
+    Texture(crate::texture::Texture),
+    Sampler(crate::sampler::Sampler),
+    Pipeline(crate::pipeline::Pipeline),
+    Accel(crate::acceleration::Acceleration),
+}
 
 struct Pending {
     epoch: i64,
     command: native::CommandBuffer,
-    cleanup: Vec<Cleanup>,
+    retained: Vec<Retained>,
 }
 
 struct QueueInner {
@@ -141,7 +150,7 @@ impl Queue {
 
     /// Admits an externally encoded, uncommitted native command buffer. On any failure the caller
     /// still owns `native` and `retained`; on success `retained` is emptied into the queue.
-    pub fn submit_native(&self, native: &native::CommandBuffer, retained: &mut Vec<Cleanup>) -> Result<Receipt, Error> {
+    pub fn submit_native(&self, native: &native::CommandBuffer, retained: &mut Vec<Retained>) -> Result<Receipt, Error> {
         let op = "Ogpu_metal.Queue.submit_native";
         let value = &self.0;
         if value.dead.get() {
@@ -155,7 +164,7 @@ impl Queue {
                 Err(e)
             }
             Ok(()) => {
-                value.pending.borrow_mut().push(Pending { epoch, command: native.clone(), cleanup: std::mem::take(retained) });
+                value.pending.borrow_mut().push(Pending { epoch, command: native.clone(), retained: std::mem::take(retained) });
                 Ok(Receipt { epoch })
             }
         }
@@ -192,9 +201,7 @@ impl Queue {
             // `wait_until_completed` returns only after a terminal native status, including its
             // error result, so the handle and all submission-owned cleanup are safe to release.
             let _ = pending.command.destroy();
-            for release in pending.cleanup {
-                release();
-            }
+            drop(pending.retained);
             if let (None, Err(failure)) = (&first_error, outcome) {
                 first_error = Some(failure);
             }

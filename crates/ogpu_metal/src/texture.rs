@@ -12,10 +12,26 @@ struct TextureInner {
     metal: native::Texture,
     handle: ResourceHandle,
     device: Device,
-    submission_uses: Cell<i64>,
-    destroy_requested: Cell<bool>,
     /// Last command buffer that retained it.
     retained_by: Cell<i64>,
+    released: Cell<bool>,
+}
+
+impl TextureInner {
+    fn release(&self) -> Result<(), Error> {
+        if !self.released.get() {
+            self.metal.destroy()?;
+            self.released.set(true);
+            self.device.detach_resource();
+        }
+        Ok(())
+    }
+}
+
+impl Drop for TextureInner {
+    fn drop(&mut self) {
+        let _ = self.release();
+    }
 }
 
 #[derive(Clone)]
@@ -28,9 +44,8 @@ pub(crate) fn create(device: &Device, descriptor: &ogpu_core::validation::Admitt
         metal,
         handle: handle::create(device.handle()),
         device: device.clone(),
-        submission_uses: Cell::new(0),
-        destroy_requested: Cell::new(false),
         retained_by: Cell::new(0),
+        released: Cell::new(false),
     })))
 }
 
@@ -45,47 +60,25 @@ impl Texture {
     }
 
     pub fn destroy(&self) -> Result<(), Error> {
-        if self.destroyed() {
-            Ok(())
-        } else if self.0.submission_uses.get() > 0 {
+        if !self.destroyed() {
+            // Held elsewhere (a command buffer in flight): the last drop releases it.
+            if Rc::strong_count(&self.0) == 1 {
+                self.0.release()?;
+            }
             handle::destroy(&self.0.handle);
-            self.0.destroy_requested.set(true);
-            Ok(())
-        } else {
-            self.0.metal.destroy()?;
-            handle::destroy(&self.0.handle);
-            self.0.device.detach_resource();
-            Ok(())
         }
+        Ok(())
     }
 
     pub fn metal(&self) -> &native::Texture {
         &self.0.metal
     }
 
-    pub fn retain_submission(&self) -> Result<(), Error> {
-        if self.destroyed() {
-            return Err(fail("Ogpu_metal.Texture.retain_submission", ErrorKind::StaleHandle, "texture is destroyed"));
-        }
-        self.0.submission_uses.set(self.0.submission_uses.get() + 1);
-        Ok(())
-    }
-
     /// Retains once per command buffer; `Ok(false)` when `commands` already holds it.
     pub fn retain_for(&self, commands: i64) -> Result<bool, Error> {
-        if self.0.retained_by.get() == commands {
-            Ok(false)
-        } else {
-            self.retain_submission()?;
-            self.0.retained_by.set(commands);
-            Ok(true)
+        if self.destroyed() {
+            return Err(fail("Ogpu_metal.Texture.retain", ErrorKind::StaleHandle, "texture is destroyed"));
         }
-    }
-
-    pub fn release_submission(&self) {
-        self.0.submission_uses.set(self.0.submission_uses.get() - 1);
-        if self.0.submission_uses.get() == 0 && self.0.destroy_requested.get() && self.0.metal.destroy().is_ok() {
-            self.0.device.detach_resource();
-        }
+        Ok(self.0.retained_by.replace(commands) != commands)
     }
 }
