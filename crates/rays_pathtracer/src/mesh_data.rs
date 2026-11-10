@@ -87,7 +87,7 @@ pub struct Device {
     pub key: String,
     pub vertex_count: i64,
     pub index_count: i64,
-    pub corners: Arc<Vec<i64>>,
+    pub corners: Arc<Vec<u32>>,
     pub colored: bool,
     pub holder: rays::mesh::Mesh,
 }

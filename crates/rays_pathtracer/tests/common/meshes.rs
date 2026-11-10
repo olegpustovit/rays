@@ -68,5 +68,5 @@ pub fn transform(matrix: &mat4::T, source: &mesh::Mesh) -> mesh::Mesh {
     let normal_matrix = mat4::transpose(&mat4::inverse(matrix).expect("invertible"));
     let positions: Vec<vec3::T> = (0..view.vertices.length() as usize).map(|i| mat4::transform_point(matrix, view.vertices.get(i))).collect();
     let normals: Vec<vec3::T> = (0..view.vertices.length() as usize).map(|i| vec3::normalize(mat4::transform_direction(&normal_matrix, view.normals.as_ref().expect("normals").get(i)))).collect();
-    build(&positions, &normals, (*view.indices).clone())
+    build(&positions, &normals, view.indices.iter().map(|&i| i64::from(i)).collect())
 }

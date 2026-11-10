@@ -21,7 +21,7 @@ fn mesh(g: &rdk_core::geometry::T) -> Result<rays::mesh::Mesh, String> {
     rdk_rays::rays_mesh::to_mesh(g).map_err(|e| format!("{e:?}"))
 }
 
-type Snap = (Vec<i64>, Vec<f64>, Vec<f64>, Vec<f64>);
+type Snap = (Vec<u32>, Vec<f64>, Vec<f64>, Vec<f64>);
 
 fn snapshot(domains: i64) -> Snap {
     let out = std::cell::RefCell::new(None);

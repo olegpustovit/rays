@@ -38,9 +38,9 @@ fn normal_check(cpu:&g::T,device:&g::T) {
     let topo=rdk_core::topology::view::view(g::topology(device)).unwrap();let positions=g::positions(device);let mut sums=vec![[0.;3];g::point_count(device) as usize];
     for prim in 0..topo.primitive_kinds.len() {
         let first=topo.primitive_offsets[prim] as usize;let last=topo.primitive_offsets[prim+1] as usize;
-        let (ax,ay,az)=p::get(positions,topo.vertex_points[first]).unwrap();let mut sum=[0.;3];
+        let (ax,ay,az)=p::get(positions,i64::from(topo.vertex_points[first])).unwrap();let mut sum=[0.;3];
         for j in first+1..last-1 {
-            let (bx,by,bz)=p::get(positions,topo.vertex_points[j]).unwrap();let (cx,cy,cz)=p::get(positions,topo.vertex_points[j+1]).unwrap();
+            let (bx,by,bz)=p::get(positions,i64::from(topo.vertex_points[j])).unwrap();let (cx,cy,cz)=p::get(positions,i64::from(topo.vertex_points[j+1])).unwrap();
             let (ux,uy,uz)=(bx-ax,by-ay,bz-az);let (vx,vy,vz)=(cx-ax,cy-ay,cz-az);
             sum[0]+=uy*vz-uz*vy;sum[1]+=uz*vx-ux*vz;sum[2]+=ux*vy-uy*vx;
         }

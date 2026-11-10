@@ -110,7 +110,7 @@ fn positions(g: &geo::T) -> Planes {
 
 fn topo(g: &geo::T) -> (i64, Vec<i64>, Vec<i64>, Vec<u8>) {
     let v = topology::view::view(geo::topology(g)).unwrap();
-    (v.point_count, v.vertex_points.to_vec(), v.primitive_offsets.to_vec(), v.primitive_kinds.to_vec())
+    (v.point_count, v.vertex_points.iter().map(|&p| i64::from(p)).collect(), v.primitive_offsets.iter().map(|&p| i64::from(p)).collect(), v.primitive_kinds.to_vec())
 }
 
 fn float3(name: &str, g: &geo::T) -> Planes {

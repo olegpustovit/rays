@@ -1125,8 +1125,8 @@ pub fn display(t_: &WorkspaceGpu, geometry: &rdk_core::geometry::T) -> Option<(S
             None if !rdk_core::topology::all_triangles(topology).unwrap_or(false) => return Err("Host polygon topology requires the host display.".to_owned()),
             None => {
                 // lit triangles without N: the host display's normals, made from P on the device
-                let corners = rdk_core::topology::view::view(topology).map_err(|_| "Device normals could not be derived.".to_owned())?.vertex_points.to_vec();
-                match h::normals(&host, &buffer, count, &Arc::new(corners)) {
+                let corners = rdk_core::topology::view::view(topology).map_err(|_| "Device normals could not be derived.".to_owned())?.vertex_points;
+                match h::normals(&host, &buffer, count, &corners) {
                     Some((buffer, release)) => Some(owned(buffer, release)),
                     None => return Err("Device normals could not be derived.".to_owned()),
                 }

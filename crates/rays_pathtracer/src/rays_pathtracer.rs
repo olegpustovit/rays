@@ -921,7 +921,7 @@ fn device_build(t: &PathTracer, o: &mut DeviceOwned, m: &Mesh, d: &mesh_data::De
             }
             let mut bytes = vec![0u8; 4 * corners as usize];
             for (i, v) in d.corners.iter().enumerate() {
-                put_u32(&mut bytes, 4 * i, *v);
+                put_u32(&mut bytes, 4 * i, i64::from(*v));
             }
             let value = shared(&t.device, "pathtracer-corners", &bytes)?;
             o.owned.push(value.clone());

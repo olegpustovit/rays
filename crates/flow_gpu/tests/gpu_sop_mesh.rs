@@ -26,8 +26,8 @@ fn source(host:bool,case:&str)->String{
 }
 fn read(geometry:&g::T,count:i64,case:&str){
     let t=topology::view::view(g::topology(geometry)).unwrap();let prims=if case=="points"{0}else{count};
-    assert_eq!(t.vertex_points.as_slice(),(0..3*prims).map(|i|if case=="cpu"{3*(i/3)+2-i%3}else{i}).collect::<Vec<_>>());
-    assert_eq!(t.primitive_offsets.as_slice(),(0..=prims).map(|i|3*i).collect::<Vec<_>>());assert_eq!(t.primitive_kinds.as_ref(),vec![0;prims as usize]);
+    assert_eq!(t.vertex_points.as_slice(),(0..3*prims as u32).map(|i|if case=="cpu"{3*(i/3)+2-i%3}else{i}).collect::<Vec<_>>());
+    assert_eq!(t.primitive_offsets.as_slice(),(0..=prims as u32).map(|i|3*i).collect::<Vec<_>>());assert_eq!(t.primitive_kinds.as_ref(),vec![0;prims as usize]);
     for i in 0..3*count{assert_eq!(float3::get(g::positions(geometry),i).unwrap(),(i as f64,0.,0.));}
 }
 /// A residency whose executor is another's; the rest is the base's.
