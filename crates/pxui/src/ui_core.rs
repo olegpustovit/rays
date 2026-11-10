@@ -307,12 +307,139 @@ struct BoxRec {
     hit_rect: Option<Rect>,
     paint: arena::List,
     over: arena::List,
+    /// the view this box holds (`NO_VIEW`), and whether its build was skipped this frame
+    view: u32,
+    kept: bool,
 }
 
 impl BoxRec {
     fn blank() -> BoxRec {
-        BoxRec { key: 0, slot: 0, parent: NONE, first: NONE, last: NONE, next: NONE, hit: None, hit_rect: None, paint: arena::EMPTY, over: arena::EMPTY }
+        BoxRec { key: 0, slot: 0, parent: NONE, first: NONE, last: NONE, next: NONE, hit: None, hit_rect: None, paint: arena::EMPTY, over: arena::EMPTY, view: NO_VIEW, kept: false }
     }
+}
+
+/// No view: a box that holds none, a fresh piece of a layer.
+const NO_VIEW: u32 = u32::MAX;
+/// The clip inside a view with a table entry: its outer clip is the entry's.
+const UNBOUNDED: Rect = Rect::new(-1.0e7, -1.0e7, 2.0e7, 2.0e7);
+/// Instances that fill the room left before a kept view's run: they draw nothing.
+const EMPTY: Instance = Instance::DEFAULT;
+/// Room left before each kept run when a layer is compacted.
+// ponytail: fixed slack per kept view; a view whose neighbours grow past it compacts the layer
+// (every instance rewritten). Size the slack by the neighbours' churn if compaction shows up.
+const SLACK: usize = 32;
+
+/// A view's entry in the painter's view table (`pxui_render::View`): its instances move by `offset`,
+/// their alpha scales by `opacity`, and `clip` (`[x0, y0, x1, y1]`, window points) bounds them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewEntry {
+    pub offset: [f32; 2],
+    pub opacity: f32,
+    pub clip: [f32; 4],
+}
+
+/// A cached subtree (`Ui::view`): when it was built, where its output lives and how it is shown.
+struct ViewRec {
+    name: String,
+    slot: usize,
+    /// the enclosing view (0: the root, which rebuilds every frame)
+    parent: u32,
+    revision: u64,
+    epoch: u64,
+    /// frames it was last built, kept (build skipped) and reached by the paint
+    built: i64,
+    kept: i64,
+    visited: i64,
+    dirty: bool,
+    /// its last build put boxes at the root, asked for a frame or ran a hover delay: rebuild it
+    escapes: bool,
+    patched: bool,
+    /// a clean view rebuilt by `verify_views`: its output must equal the kept one
+    verify: bool,
+    /// `run` in layer `layer` holds its output
+    valid: bool,
+    layer: i64,
+    run: (u32, u32),
+    /// this frame's pieces of it: scratch layer, first and end piece
+    pieces: (usize, usize, usize),
+    /// the texture in effect at the run's start, and the breaks inside it
+    tex0: Option<Image>,
+    breaks: Vec<(u32, Image)>,
+    hits: Vec<HitRec>,
+    hit_parent: i64,
+    /// its box at its build (parent coordinates), how far layout has moved it since, and the clip
+    /// at its box (parent coordinates)
+    built_rect: Rect,
+    delta: (f32, f32),
+    box_clip: Rect,
+    /// its painter table index (0: none, the table was full) and the view whose entry moves its
+    /// instances (itself, or with no index its parent's)
+    index: u16,
+    xf: u32,
+    offset: (f32, f32),
+    opacity: f32,
+    clip: Option<Rect>,
+    /// the composed entry and the screen rectangle it shows
+    shift: (f32, f32),
+    alpha: f32,
+    outer: Rect,
+    screen: Rect,
+    stamp: u64,
+}
+
+impl ViewRec {
+    fn new() -> ViewRec {
+        ViewRec {
+            name: String::new(),
+            slot: NONE,
+            parent: 0,
+            revision: 0,
+            epoch: 0,
+            built: -1,
+            kept: -1,
+            visited: -1,
+            dirty: false,
+            escapes: false,
+            patched: false,
+            verify: false,
+            valid: false,
+            layer: 0,
+            run: (0, 0),
+            pieces: (0, 0, 0),
+            tex0: None,
+            breaks: Vec::new(),
+            hits: Vec::new(),
+            hit_parent: 0,
+            built_rect: Rect::new(0.0, 0.0, 0.0, 0.0),
+            delta: (0.0, 0.0),
+            box_clip: UNBOUNDED,
+            index: 0,
+            xf: 0,
+            offset: (0.0, 0.0),
+            opacity: 1.0,
+            clip: None,
+            shift: (0.0, 0.0),
+            alpha: 1.0,
+            outer: UNBOUNDED,
+            screen: Rect::new(0.0, 0.0, 0.0, 0.0),
+            stamp: 0,
+        }
+    }
+
+    fn entry(&self) -> ViewEntry {
+        let c = clip_of(self.outer);
+        ViewEntry { offset: [self.shift.0, self.shift.1], opacity: self.alpha, clip: [c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32] }
+    }
+}
+
+/// A run of a layer: fresh instances `a..b` of the frame's scratch layer, or a kept view's run;
+/// `at` is where it lands in the retained layer.
+#[derive(Clone, Copy)]
+struct Piece {
+    view: u32,
+    a: u32,
+    b: u32,
+    at: u32,
 }
 
 /// A node handle: its index in this frame's build (`NONE` for `box_of_key`), key, retained slot and
@@ -339,10 +466,15 @@ struct Slot {
     touched: i64,
     node: Node,
     text: String,
-    /// where the node's look was painted: layer, instance range, the clip, and the frame
-    range: (u32, u32, u32),
+    /// where the node's look was painted: the layer's key, the instance range, the clip, and the
+    /// frame
+    range_layer: i64,
+    range: (u32, u32),
     clip: Rect,
     painted: i64,
+    /// the view that declares the node, and the view the node holds (`NO_VIEW`)
+    owner: u32,
+    view: u32,
     rx: f32,
     ry: f32,
     rw: f32,
@@ -377,9 +509,12 @@ impl Slot {
             touched: -1,
             node: Node::DEFAULT,
             text: String::new(),
-            range: (0, 0, 0),
+            range_layer: 0,
+            range: (0, 0),
             clip: Rect::new(0.0, 0.0, 0.0, 0.0),
             painted: -1,
+            owner: 0,
+            view: NO_VIEW,
             rx: 0.0,
             ry: 0.0,
             rw: 0.0,
@@ -405,6 +540,7 @@ impl Slot {
     }
 }
 
+/// A hit rectangle in the coordinates of view `view`'s instances: its entry moves and clips it.
 #[derive(Clone, Copy)]
 struct HitRec {
     key: i64,
@@ -414,6 +550,7 @@ struct HitRec {
     y: f32,
     w: f32,
     h: f32,
+    view: u32,
 }
 
 /// What a press, a drag, a scroll or a key did to a box this frame.
@@ -454,13 +591,57 @@ pub struct Image {
 }
 
 /// One paint layer: the base UI, then a layer per floating root (`key` is its box key; 0 for the
-/// base). Image instances sample `images[break.image]` from each break on. The vectors are cleared
-/// and refilled every frame, never dropped.
+/// base). Image instances sample `images[break.image]` from each break on. A layer is retained: a
+/// frame rewrites only the instances that changed, and a kept view's run stays where it is.
+/// `dirty` gathers the `[start, end)` instance ranges written since the host last called
+/// `Ui::drawn` for this layer; `id` names the layer's storage (stable while it lives, below 64), the
+/// painter's retained layer index.
+#[derive(Default)]
 pub struct Layer {
     pub key: i64,
+    pub id: u32,
     pub instances: Vec<Instance>,
     pub breaks: Vec<Break>,
     pub images: Vec<Image>,
+    pub dirty: Vec<(u32, u32)>,
+    pieces: Vec<Piece>,
+    live: bool,
+}
+
+impl Layer {
+    fn new(key: i64, id: u32) -> Layer {
+        Layer { key, id, instances: Vec::with_capacity(256), breaks: Vec::new(), images: Vec::new(), dirty: Vec::new(), pieces: Vec::new(), live: false }
+    }
+}
+
+/// Add `[a, b)` to sorted, disjoint `ranges`, merging what it touches.
+// ponytail: past 64 ranges the list collapses to its bounding range (the painter rewrites the span).
+fn add_range(ranges: &mut Vec<(u32, u32)>, a: u32, b: u32) {
+    if a >= b {
+        return;
+    }
+    if let Some(last) = ranges.last_mut() {
+        if a >= last.0 && a <= last.1 {
+            last.1 = last.1.max(b);
+            return;
+        }
+    }
+    let at = ranges.partition_point(|r| r.1 < a);
+    let mut end = at;
+    let (mut lo, mut hi) = (a, b);
+    while end < ranges.len() && ranges[end].0 <= hi {
+        lo = lo.min(ranges[end].0);
+        hi = hi.max(ranges[end].1);
+        end += 1;
+    }
+    ranges.drain(at..end);
+    if ranges.len() >= 64 {
+        let (first, last) = (ranges[0].0.min(lo), ranges[ranges.len() - 1].1.max(hi));
+        ranges.clear();
+        ranges.push((first, last));
+    } else {
+        ranges.insert(at, (lo, hi));
+    }
 }
 
 /// What the frame asks of the window system; the host applies it after the frame.
@@ -480,10 +661,14 @@ pub struct PlatformOut {
     pub repaint_at: Option<f64>,
 }
 
-/// The completed frame: its paint layers and the platform requests.
+/// The completed frame: its paint layers, the platform requests, what changed on screen since the
+/// output before (`damage`, window points; `None` when nothing did) and the view table entries the
+/// layers' instances name (the host sets each with `pxui_render::Painter::set_view`).
 pub struct FrameOut<'a> {
     pub draw: &'a [Layer],
     pub platform: &'a PlatformOut,
+    pub damage: Option<Rect>,
+    pub views: &'a [(u16, ViewEntry)],
 }
 
 // -------------------------------------------------------------- text
@@ -610,6 +795,30 @@ pub struct Ui {
     painted: i64,
     /// the scratch layer a patch paints one node into
     patch_layers: Vec<Layer>,
+    /// views by id (0: the root); free ids and painter table indices; the table index's view
+    views: Vec<ViewRec>,
+    free_views: Vec<u32>,
+    free_indices: Vec<u16>,
+    index_owner: Vec<u32>,
+    /// the view being built, and the view whose entry the hits being recorded follow
+    view_cur: u32,
+    paint_xf: u32,
+    /// bumped by what changes every view's output (theme, font size, density, window size)
+    epoch: u64,
+    verify: bool,
+    stamp: u64,
+    /// hot, focus, keyboard focus and carrying as the last frame left them
+    seen: (i64, i64, bool, bool),
+    marks: Vec<i64>,
+    damage: Option<Rect>,
+    view_out: Vec<(u16, ViewEntry)>,
+    view_prev: Vec<(u16, ViewEntry)>,
+    /// (slot, scratch layer) of every node the frame painted, and the compaction buffer
+    painted_nodes: Vec<(usize, usize)>,
+    compact: Vec<Instance>,
+    temp_breaks: Vec<Break>,
+    temp_images: Vec<Image>,
+    evictions: u64,
     /// canvas closures and formatted labels of the frame being built
     arena: Arena,
     painting: bool,
@@ -737,6 +946,25 @@ impl Ui {
             draw_revision: 0,
             painted: -1,
             patch_layers: Vec::new(),
+            views: vec![ViewRec::new()],
+            free_views: Vec::new(),
+            free_indices: (1..=255u16).rev().collect(),
+            index_owner: vec![0; 256],
+            view_cur: 0,
+            paint_xf: 0,
+            epoch: 0,
+            verify: false,
+            stamp: 0,
+            seen: (0, 0, false, false),
+            marks: Vec::new(),
+            damage: None,
+            view_out: Vec::new(),
+            view_prev: Vec::new(),
+            painted_nodes: Vec::new(),
+            compact: Vec::new(),
+            temp_breaks: Vec::new(),
+            temp_images: Vec::new(),
+            evictions: 0,
             arena: Arena::default(),
             painting: false,
             frame_requested: false,
@@ -768,6 +996,9 @@ impl Ui {
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
+        if theme != self.theme {
+            self.epoch += 1;
+        }
         self.theme = theme;
     }
 
@@ -781,13 +1012,35 @@ impl Ui {
         if size <= 0 {
             panic!("Ui.set_font_size: size must be positive");
         }
+        if size != self.font_size {
+            self.epoch += 1;
+        }
         self.font_size = size;
         self.kit_row_height = 24.max(size + 11);
     }
 
     /// The most recently completed frame.
     pub fn output(&self) -> FrameOut<'_> {
-        FrameOut { draw: &self.draw[..self.draw_len], platform: &self.out }
+        FrameOut { draw: &self.draw[..self.draw_len], platform: &self.out, damage: self.damage, views: &self.view_out }
+    }
+
+    /// The host drew layer `index` of the output with its `dirty` ranges: they start over empty.
+    pub fn drawn(&mut self, index: usize) {
+        if let Some(layer) = self.draw[..self.draw_len].get_mut(index) {
+            layer.dirty.clear();
+        }
+    }
+
+    /// Nodes declared by the last build (a kept view counts as its one box): what a view or a
+    /// virtual list saves.
+    pub fn built_nodes(&self) -> usize {
+        self.count
+    }
+
+    /// Re-run every clean view's build and panic, naming the view, when its output differs from the
+    /// kept one (a revision the app forgot to bump). For tests: it builds every view every frame.
+    pub fn verify_views(&mut self, on: bool) {
+        self.verify = on;
     }
 
     /// Ask the host for the clipboard's text; it arrives as `Event::Paste` with the next frame.
@@ -894,12 +1147,33 @@ impl Ui {
         slot
     }
 
+    /// `v` or a view around it kept its last output this frame (its nodes live on undeclared).
+    fn kept_now(&self, mut v: u32) -> bool {
+        while v != 0 {
+            let r = &self.views[v as usize];
+            if r.kept == self.frame_number {
+                return true;
+            }
+            v = r.parent;
+        }
+        false
+    }
+
+    /// Free the nodes this frame did not declare, unless a kept view holds them.
     fn prune(&mut self) {
         for slot in 0..self.slots.len() {
             let label_count = self.slots[slot].label_count;
             self.slots[slot].labels.truncate(label_count);
             let key = self.slots[slot].key;
-            if key != 0 && self.slots[slot].touched < self.frame_number {
+            if key != 0 && (self.slots[slot].scroll_mode != 0 || self.slots[slot].scroll_visual != 0.0) {
+                // a scroll in motion moves its view's layout every frame
+                self.mark_view(self.slots[slot].owner);
+            }
+            if key != 0 && self.slots[slot].touched < self.frame_number && !self.kept_now(self.slots[slot].owner) {
+                let view = std::mem::replace(&mut self.slots[slot].view, NO_VIEW);
+                if view != NO_VIEW {
+                    self.free_view(view);
+                }
                 self.table.remove(key);
                 self.slots[slot].key = 0;
                 self.slots[slot].generation = self.slots[slot].generation.wrapping_add(1);
@@ -1008,7 +1282,8 @@ impl Ui {
 
     fn hit_contains(&self, index: usize, point: (f32, f32)) -> bool {
         let h = &self.hits[index];
-        contains(Rect::new(h.x, h.y, h.w, h.h), point)
+        let v = &self.views[h.view as usize];
+        v.outer.contains(point) && contains(Rect::new(h.x, h.y, h.w, h.h), (point.0 - v.shift.0, point.1 - v.shift.1))
     }
 
     /// Topmost hit entry under `point`; 0 when none.
@@ -1615,6 +1890,15 @@ impl Ui {
     /// animation or timer the app drives calls it every frame it runs).
     pub fn request_frame(&mut self) {
         self.frame_requested = true;
+        self.escape();
+    }
+
+    /// The view being built did what a skipped build would lose (a box at the root, a frame request,
+    /// a hover delay): it rebuilds next frame too.
+    pub(crate) fn escape(&mut self) {
+        if self.building && self.view_cur != 0 {
+            self.views[self.view_cur as usize].escapes = true;
+        }
     }
 
     fn next_repaint(&self, now: f64) -> Option<f64> {
@@ -1814,9 +2098,12 @@ impl Ui {
         let slot = self.slot_of(key);
         self.slots[slot].touched = self.frame_number;
         self.slots[slot].label_count = 0;
+        self.slots[slot].owner = self.view_cur;
         let b = &mut self.boxes[index];
         b.key = key;
         b.slot = slot;
+        b.view = NO_VIEW;
+        b.kept = false;
         b.parent = parent;
         b.first = NONE;
         b.last = NONE;
@@ -1963,6 +2250,7 @@ impl Ui {
     /// Build at the root under the root's own seed, wherever the caller is in the tree: what is
     /// built is laid out in the window, clipped by no pane.
     pub(crate) fn enter_root(&mut self) -> Saved {
+        self.escape();
         Saved::Stacks(std::mem::replace(&mut self.parents, vec![0]), std::mem::replace(&mut self.seeds, vec![ROOT_KEY]))
     }
 
@@ -1976,7 +2264,8 @@ impl Ui {
             return Rect::new(0.0, 0.0, 0.0, 0.0);
         }
         let s = &self.slots[b.box_slot];
-        Rect::new(s.rx, s.ry, s.rw, s.rh)
+        let shift = self.views[self.views[s.owner as usize].xf as usize].shift;
+        Rect::new(s.rx + shift.0, s.ry + shift.1, s.rw, s.rh)
     }
 
     /// What input did to the node this frame; a stale handle has no signal.
@@ -2243,6 +2532,7 @@ impl Ui {
         if self.boxes[b.index].parent != 0 {
             panic!("Ui.to_front: expected a root box");
         }
+        self.escape();
         self.foreground.push((order, b.index));
     }
 
@@ -2273,6 +2563,7 @@ impl Ui {
     }
 
     pub(crate) fn push_overlay(&mut self, index: usize) {
+        self.escape();
         self.overlays.push(index);
     }
 
@@ -2491,6 +2782,8 @@ impl Ui {
             };
             let mut cursor = padding;
             let scroll_offset = if scrolls { self.scroll_y[slot] + self.slots[slot].scroll_visual as f32 } else { 0.0 };
+            let (bake_x, bake_y) = self.baked(index);
+            let (origin_x, origin_y) = (self.l_x[index] + bake_x, self.l_y[index] + bake_y);
             next = self.boxes[index].first;
             while next != NONE {
                 let child = next;
@@ -2511,18 +2804,18 @@ impl Ui {
                 }
                 if self.flow(child) {
                     if row {
-                        self.l_x[child] = self.l_x[index] + cursor;
-                        self.l_y[child] = self.l_y[index] + padding - scroll_offset;
+                        self.l_x[child] = origin_x + cursor;
+                        self.l_y[child] = origin_y + padding - scroll_offset;
                         cursor += self.l_w[child];
                     } else {
-                        self.l_x[child] = self.l_x[index] + padding;
-                        self.l_y[child] = self.l_y[index] + cursor - scroll_offset;
+                        self.l_x[child] = origin_x + padding;
+                        self.l_y[child] = origin_y + cursor - scroll_offset;
                         cursor += self.l_h[child];
                     }
                 } else {
                     let (at_x, at_y) = self.nd(child).at.unwrap_or((0.0, 0.0));
-                    self.l_x[child] = self.l_x[index] + at_x;
-                    self.l_y[child] = self.l_y[index] + at_y;
+                    self.l_x[child] = origin_x + at_x;
+                    self.l_y[child] = origin_y + at_y;
                 }
                 next = self.boxes[child].next;
             }
@@ -2603,6 +2896,8 @@ fn clip_of(Rect { x, y, w, h }: Rect) -> [i16; 4] {
 pub struct Paint {
     layers: Vec<Layer>,
     layer: usize,
+    /// the view table index instances take
+    view: u16,
     pub clip_rect: Rect,
     pub theme: Theme,
     pub font_size: i64,
@@ -2626,19 +2921,39 @@ impl Paint {
     fn next_layer(&mut self, key: i64) {
         self.layer = self.layer.wrapping_add(1);
         if self.layer == self.layers.len() {
-            self.layers.push(Layer { key, instances: Vec::with_capacity(256), breaks: Vec::new(), images: Vec::new() });
+            self.layers.push(Layer::new(key, 0));
         }
         let layer = &mut self.layers[self.layer];
         layer.key = key;
         layer.instances.clear();
         layer.breaks.clear();
         layer.images.clear();
+        layer.pieces.clear();
+        layer.pieces.push(Piece { view: NO_VIEW, a: 0, b: 0, at: 0 });
     }
 
-    /// Append `instance` under the current clip.
+    /// End the current fresh piece and start the next where the instances stand.
+    fn cut(&mut self) {
+        let layer = &mut self.layers[self.layer];
+        let n = layer.instances.len() as u32;
+        layer.pieces.last_mut().expect("a layer starts with a piece").b = n;
+        layer.pieces.push(Piece { view: NO_VIEW, a: n, b: n, at: 0 });
+    }
+
+    /// Kept view `v`'s run goes here.
+    fn keep(&mut self, v: u32) {
+        self.cut();
+        let layer = &mut self.layers[self.layer];
+        let n = layer.instances.len() as u32;
+        let last = layer.pieces.len() - 1;
+        layer.pieces[last].view = v;
+        layer.pieces.push(Piece { view: NO_VIEW, a: n, b: n, at: 0 });
+    }
+
+    /// Append `instance` under the current clip and view.
     fn push(&mut self, instance: Instance) {
         let clip = clip_of(self.clip_rect);
-        self.layers[self.layer].instances.push(Instance { clip, ..instance });
+        self.layers[self.layer].instances.push(Instance { clip, view: self.view, ..instance });
     }
 
     /// An edge at `v` points as the rasteriser covers pixel centres (`a <= centre < b`): snapped
@@ -2852,7 +3167,7 @@ impl Paint {
         let baseline = snap(at.1 + self.text.ascent(style.font) * style.size);
         let origin = (snap(at.0), baseline - m.baseline);
         let color = rgba(color.unwrap_or(self.theme.foreground));
-        let clip = clip_of(self.clip_rect);
+        let (clip, view) = (clip_of(self.clip_rect), self.view);
         let Paint { text: t, layers, layer, .. } = self;
         let layer = &mut layers[*layer];
         t.glyphs(key, origin, d, &mut |g| {
@@ -2868,7 +3183,7 @@ impl Paint {
                     Instance::image(r, uv, [255, 255, 255, color[3]])
                 }
             };
-            layer.instances.push(Instance { clip, ..instance });
+            layer.instances.push(Instance { clip, view, ..instance });
         });
         m
     }
@@ -3050,9 +3365,13 @@ impl Paint {
 
 impl Ui {
     fn record_hit(&mut self, index: usize, parent: i64, rect: Rect) {
-        let position = self.hit_count;
         let Rect { x, y, w, h } = rect;
-        let rec = HitRec { key: self.boxes[index].key, parent, flags: self.nd(index).flags, x, y, w, h };
+        let rec = HitRec { key: self.boxes[index].key, parent, flags: self.nd(index).flags, x, y, w, h, view: self.paint_xf };
+        self.push_hit(rec);
+    }
+
+    fn push_hit(&mut self, rec: HitRec) {
+        let position = self.hit_count;
         if position >= self.hits.len() {
             self.hits.push(rec);
         } else {
@@ -3077,9 +3396,11 @@ impl Ui {
         let s = &self.slots[slot];
         paint.look(self.screen(index), &s.node, &s.text);
         let s = &mut self.slots[slot];
-        s.range = (paint.layer as u32, start, paint.layers[paint.layer].instances.len() as u32);
+        // scratch positions until `settle` places them
+        s.range = (start, paint.layers[paint.layer].instances.len() as u32);
         s.clip = clip_rect;
         s.painted = self.frame_number;
+        self.painted_nodes.push((slot, paint.layer));
     }
 
     fn visit(&mut self, paint: &mut Paint, index: usize, clip_rect: Rect, parent_hit: i64) {
@@ -3109,6 +3430,9 @@ impl Ui {
                 vw > 0.0 && vh > 0.0
             }
         };
+        // a view box is painted wherever it is, so its output can be kept and scrolled into view
+        let view = self.boxes[index].view;
+        let visible = visible || (view != NO_VIEW && w > 0.0 && h > 0.0);
         let flags = self.nd(index).flags;
         let has_hit = flags & HIT_FLAGS != 0 && hw > 0.0 && hh > 0.0;
         if has_hit {
@@ -3129,10 +3453,14 @@ impl Ui {
                 clip_rect
             };
             let parent_hit = if has_hit { self.boxes[index].key } else { parent_hit };
-            let mut child = self.boxes[index].first;
-            while child != NONE {
-                self.visit(paint, child, child_clip, parent_hit);
-                child = self.boxes[child].next;
+            if view != NO_VIEW {
+                self.visit_view(paint, index, view, child_clip, parent_hit);
+            } else {
+                let mut child = self.boxes[index].first;
+                while child != NONE {
+                    self.visit(paint, child, child_clip, parent_hit);
+                    child = self.boxes[child].next;
+                }
             }
             if shown {
                 self.run_painters(self.boxes[index].over.0, index, clip_rect, paint);
@@ -3168,25 +3496,28 @@ impl Ui {
         self.painting = true;
         self.hit_count = 0;
         self.chain_key = 0;
+        self.paint_xf = 0;
+        self.damage = None;
         let clip = Rect::new(0.0, 0.0, frame.input.size.0 as f32, frame.input.size.1 as f32);
-        // paint into the other buffer, keeping the last frame's layers to compare with
-        let spare = std::mem::take(&mut self.spare);
-        let mut paint = self.paint_begin(spare, clip);
+        let scratch = std::mem::take(&mut self.spare);
+        let mut paint = self.paint_begin(scratch, clip);
         self.painted = self.frame_number;
+        self.views[0].visited = self.painted;
         self.visit(&mut paint, 0, clip, 0);
         self.out.ime = paint.ime;
         self.edit_scroll_x = paint.edit_scroll_x;
         let len = paint.layer + 1;
-        let layers = self.paint_end(paint);
-        let same = |a: &Layer, b: &Layer| {
-            a.key == b.key && a.instances == b.instances && a.breaks == b.breaks
-                && a.images.len() == b.images.len() && a.images.iter().zip(&b.images).all(|(x, y)| Rc::ptr_eq(&x.handle, &y.handle))
-        };
-        if len != self.draw_len || !layers[..len].iter().zip(&self.draw[..len]).all(|(a, b)| same(a, b)) {
+        let mut layers = self.paint_end(paint);
+        if self.verify {
+            self.verify_runs(&layers);
+        }
+        let mut changed = self.refresh_views();
+        changed |= self.place_all(&mut layers, len);
+        self.settle(&layers);
+        if changed {
             self.draw_revision += 1;
         }
-        self.spare = std::mem::replace(&mut self.draw, layers);
-        self.draw_len = len;
+        self.spare = layers;
         self.painting = false;
     }
 
@@ -3197,6 +3528,7 @@ impl Ui {
             layers,
             // the base layer is the one after none
             layer: usize::MAX,
+            view: 0,
             clip_rect: clip,
             theme: self.theme,
             font_size: self.font_size,
@@ -3228,50 +3560,82 @@ impl Ui {
     /// the count is unchanged, else the layer's later instances, node ranges and breaks shift.
     /// While building nothing is rewritten: the frame's paint emits the node anyway.
     fn repaint_node(&mut self, slot: usize) -> bool {
-        let (layer, start, end) = self.slots[slot].range;
-        let (layer, start, end) = (layer as usize, start as usize, end as usize);
-        if self.building || self.slots[slot].painted != self.painted || layer >= self.draw_len {
+        if self.building || !self.range_valid(slot) {
             // not on screen (or about to be painted): the record holds the patch
             return true;
         }
+        let (key, (start, end)) = (self.slots[slot].range_layer, self.slots[slot].range);
+        let Some(layer) = self.draw[..self.draw_len].iter().position(|l| l.key == key) else { return true };
+        let (start, end) = (start as usize, end as usize);
+        let owner = self.slots[slot].owner;
         let scratch = std::mem::take(&mut self.patch_layers);
         let mut paint = self.paint_begin(scratch, self.slots[slot].clip);
+        paint.view = self.views[self.views[owner as usize].xf as usize].index;
         let s = &self.slots[slot];
         paint.look(Rect::new(s.rx, s.ry, s.rw, s.rh), &s.node, &s.text);
         let scratch = self.paint_end(paint);
         let fresh = &scratch[0].instances;
-        let target = &mut self.draw[layer];
         // ponytail: a colour glyph in the patch, or a texture break inside the node, needs the
         // layer's breaks rebuilt; such a patch waits for the next frame (whose build wins).
         if fresh.iter().any(|i| i.kind == crate::draw::kind::IMAGE)
-            || target.breaks.iter().any(|b| start < b.at_instance as usize && (b.at_instance as usize) < end)
+            || self.draw[layer].breaks.iter().any(|b| start < b.at_instance as usize && (b.at_instance as usize) < end)
         {
             self.patch_layers = scratch;
             self.request_frame();
             return false;
         }
-        if fresh.len() == end - start {
-            target.instances[start..end].copy_from_slice(fresh);
+        self.damage = None;
+        let mut target = std::mem::take(&mut self.draw[layer]);
+        if fresh.len() <= end - start {
+            // in place; a shorter patch leaves empty instances in the rest of the range
+            for k in start..end {
+                let new = fresh.get(k - start).copied().unwrap_or(EMPTY);
+                if target.instances[k] != new {
+                    let old = target.instances[k];
+                    self.damage_instance(&old);
+                    self.damage_instance(&new);
+                    target.instances[k] = new;
+                    add_range(&mut target.dirty, k as u32, k as u32 + 1);
+                }
+            }
         } else {
-            // ponytail: a count change shifts the layer's tail and scans every slot, O(instances +
-            // nodes); a range allocator with slack per node (commit 2's retained ranges) avoids it.
+            // ponytail: a longer patch shifts the layer's tail and scans every view and node,
+            // O(instances + nodes); a node with slack of its own if growing patches get hot.
+            for k in start..end {
+                let old = target.instances[k];
+                self.damage_instance(&old);
+            }
+            for new in fresh {
+                self.damage_instance(new);
+            }
             target.instances.splice(start..end, fresh.iter().copied());
-            let delta = fresh.len() as i64 - (end - start) as i64;
-            let shift = |v: u32| (v as i64 + delta) as u32;
+            let delta = (fresh.len() - (end - start)) as u32;
+            add_range(&mut target.dirty, start as u32, target.instances.len() as u32);
             for b in &mut target.breaks {
                 if b.at_instance as usize >= end {
-                    b.at_instance = shift(b.at_instance);
+                    b.at_instance += delta;
                 }
             }
-            let painted = self.painted;
             for (index, s) in self.slots.iter_mut().enumerate() {
-                if index != slot && s.painted == painted && s.range.0 as usize == layer && s.range.1 as usize >= end {
-                    s.range = (s.range.0, shift(s.range.1), shift(s.range.2));
+                if index != slot && s.key != 0 && s.range_layer == key && s.range.0 as usize >= end {
+                    s.range = (s.range.0 + delta, s.range.1 + delta);
                 }
             }
-            self.slots[slot].range.2 = (start + fresh.len()) as u32;
+            for r in &mut self.views[1..] {
+                if r.valid && r.layer == key {
+                    if r.run.0 as usize >= end {
+                        r.run.0 += delta;
+                    }
+                    if r.run.1 as usize >= end {
+                        r.run.1 += delta;
+                    }
+                }
+            }
+            self.slots[slot].range.1 = (start + fresh.len()) as u32;
         }
+        self.draw[layer] = target;
         self.patch_layers = scratch;
+        self.views[owner as usize].patched = true;
         self.draw_revision += 1;
         true
     }
@@ -3315,7 +3679,10 @@ impl Ui {
 
     /// `patch_rect` by an offset.
     pub fn patch_offset(&mut self, b: &Handle, dx: f32, dy: f32) -> bool {
-        let r = self.rect(b);
+        if !self.live(b) {
+            return false;
+        }
+        let r = self.slot_rect(b.box_slot);
         self.patch_rect(b, Rect::new(r.x + dx, r.y + dy, r.w, r.h))
     }
 
@@ -3391,7 +3758,12 @@ impl Ui {
             panic!("Ui.frame: time must be finite");
         }
         let (scale_x, scale_y) = frame.pixel_scale;
-        self.density = 1.max(scale_x.max(scale_y).round() as i64);
+        let density = 1.max(scale_x.max(scale_y).round() as i64);
+        let size = (frame.input.size.0 as f32, frame.input.size.1 as f32);
+        if density != self.density || size != (self.view_w, self.view_h) {
+            self.epoch += 1;
+        }
+        self.density = density;
         self.frame_number += 1;
         // a request made between frames is this frame; one made while building is the next
         self.frame_requested = false;
@@ -3404,6 +3776,8 @@ impl Ui {
             self.out.background = Some(self.theme.panel);
         }
         self.route(frame);
+        self.mark_input();
+        self.views[0].built = self.frame_number;
         self.modal_key = None;
         self.modal_extra.clear();
         // Also release callbacks left by a build that raised before publishing.
@@ -3459,11 +3833,24 @@ impl Ui {
         self.arrange(frame.input.t);
         self.paint_all(frame);
         self.text_mut().end_frame();
+        // a glyph evicted from the atlas may be one a kept view's instances sample
+        let evictions = self.text_mut().evictions();
+        if evictions != self.evictions {
+            self.evictions = evictions;
+            self.epoch += 1;
+            self.frame_requested = true;
+        }
         self.foreground.clear();
         self.prune();
         if self.focus != 0 && self.table.find(self.focus).is_none() {
             self.focus = 0;
             self.edit_focus = 0;
+        }
+        // the build moved the focus: views already kept this frame show it next frame
+        if (self.focus, self.keyboard_focus) != (self.seen.1, self.seen.2) {
+            self.mark_key(self.seen.1);
+            self.mark_key(self.focus);
+            (self.seen.1, self.seen.2) = (self.focus, self.keyboard_focus);
         }
         self.out.repaint_at = self.next_repaint(frame.input.t);
         self.frame_requested = false;
@@ -3475,6 +3862,7 @@ impl Ui {
     // ------------------------------------------------------ layout helpers
 
     pub fn hover_delay(&mut self, key: &str) -> bool {
+        self.escape();
         let time = match &self.input_frame {
             Some(frame) => frame.input.t,
             None => 0.0,
@@ -3561,6 +3949,776 @@ impl Ui {
     }
 }
 
+// ------------------------------------------------------ views (layer 2)
+
+/// Rows built past each edge of a virtual list's visible rows.
+const OVERSCAN: usize = 4;
+
+/// IEEE half bits as f32.
+fn half(h: u16) -> f32 {
+    let (e, m) = (((h >> 10) & 0x1f) as i32, (h & 0x3ff) as f32);
+    let v = if e == 0 { m * 2f32.powi(-24) } else if e == 31 { f32::INFINITY } else { (1.0 + m / 1024.0) * 2f32.powi(e - 15) };
+    if h & 0x8000 != 0 { -v } else { v }
+}
+
+/// What an instance can cover, in its own view's points (an empty instance covers nothing).
+fn bounds(i: &Instance) -> Option<Rect> {
+    use crate::draw::kind;
+    if *i == EMPTY {
+        return None;
+    }
+    let [a, b, c, d] = i.rect;
+    let span = |x0: f32, y0: f32, x1: f32, y1: f32, grow: f32| Rect::new(x0 - grow, y0 - grow, x1 - x0 + 2.0 * grow, y1 - y0 + 2.0 * grow);
+    let r = match i.kind {
+        kind::LINE => span(a.min(c), b.min(d), a.max(c), b.max(d), half(i.width)),
+        kind::CURVE => {
+            let (cx, cy) = (f32::from_bits(i.extra[0]), f32::from_bits(i.extra[1]));
+            span(a.min(c).min(cx), b.min(d).min(cy), a.max(c).max(cx), b.max(d).max(cy), half(i.width))
+        }
+        kind::ARC => span(a - c, b - c, a + c, b + c, half(i.width)),
+        kind::SHADOW => {
+            let (dx, dy) = (half(i.extra[0] as u16), half((i.extra[0] >> 16) as u16));
+            let grow = 3.0 * half(i.extra[1] as u16) + half((i.extra[1] >> 16) as u16).abs();
+            span(a.min(a + dx), b.min(b + dy), c.max(c + dx), d.max(d + dy), grow)
+        }
+        _ => Rect::new(a, b, c - a, d - b),
+    };
+    let [x0, y0, x1, y1] = i.clip.map(|v| v as f32);
+    let r = r.intersect(Rect::new(x0, y0, x1 - x0, y1 - y0));
+    (r.w > 0.0 && r.h > 0.0 && r.x.is_finite() && r.y.is_finite()).then_some(r)
+}
+
+fn union(a: Option<Rect>, b: Rect) -> Rect {
+    match a {
+        None => b,
+        Some(a) => {
+            let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
+            Rect::new(x0, y0, (a.x + a.w).max(b.x + b.w) - x0, (a.y + a.h).max(b.y + b.h) - y0)
+        }
+    }
+}
+
+impl Ui {
+    /// A cached subtree: `f` builds its children, and is skipped entirely while `revision` is the
+    /// one it was last built with and nothing else dirtied it; its nodes, their layout, hit areas
+    /// and instance run stay as they were. Its size comes from outside (`Px`, `Pct`, `Rel` or
+    /// `Grow`, never `Fit`). Besides the revision it rebuilds when the theme, the font size, the
+    /// density or the window size change; when input reaches one of its nodes (press, release, drag,
+    /// wheel, keys); when the hovered or focused node enters or leaves it, or carrying starts or
+    /// stops over it; every frame it holds the keyboard focus or a scroll in motion; when its
+    /// laid-out size changes (shown stale for that one frame); and on the frame after a build that
+    /// put boxes at the root (popups, tooltips, `to_front`), asked for a frame or ran a hover delay.
+    /// Pointer motion inside one node rebuilds nothing: a view that draws from the pointer's
+    /// position bumps its own revision. A rebuild of the view rebuilds the views around it; the
+    /// views inside it may still be kept. Returns the view's box, for `view_offset` and friends.
+    pub fn view(&mut self, label: &str, revision: u64, w: Size, h: Size, f: &mut dyn FnMut(&mut Ui)) -> Handle {
+        assert!(!matches!(w, Size::Fit) && !matches!(h, Size::Fit), "Ui.view {label}: a view's size comes from outside (Px, Pct, Rel or Grow), never Fit");
+        let b = self.node(label, Node { w, h, ..Node::DEFAULT });
+        let parent = self.view_cur;
+        let v = match self.slots[b.box_slot].view {
+            NO_VIEW => {
+                let v = self.free_views.pop().unwrap_or_else(|| {
+                    self.views.push(ViewRec::new());
+                    self.views.len() as u32 - 1
+                });
+                let index = self.free_indices.pop().unwrap_or(0);
+                let r = &mut self.views[v as usize];
+                r.name.push_str(label);
+                (r.slot, r.index) = (b.box_slot, index);
+                if index != 0 {
+                    self.index_owner[index as usize] = v;
+                }
+                self.slots[b.box_slot].view = v;
+                v
+            }
+            v => v,
+        };
+        self.boxes[b.index].view = v;
+        let xf = if self.views[v as usize].index != 0 { v } else { self.views[parent as usize].xf };
+        let r = &mut self.views[v as usize];
+        (r.parent, r.xf) = (parent, xf);
+        let clean = r.built >= 0 && r.valid && !r.dirty && !r.escapes && r.revision == revision && r.epoch == self.epoch;
+        if clean && !self.verify {
+            r.kept = self.frame_number;
+            self.boxes[b.index].kept = true;
+            return b;
+        }
+        r.verify = clean;
+        r.escapes = false;
+        self.view_cur = v;
+        let saved = self.enter(&b);
+        f(self);
+        self.leave(saved);
+        self.view_cur = parent;
+        let r = &mut self.views[v as usize];
+        (r.revision, r.epoch, r.built, r.patched) = (revision, self.epoch, self.frame_number, false);
+        r.dirty = r.escapes;
+        if r.escapes && parent != 0 {
+            self.views[parent as usize].escapes = true;
+        }
+        b
+    }
+
+    /// A scrolling list of `count` rows `row_h` points high, filling its parent (`Grow` both ways),
+    /// that builds only the rows in view and `OVERSCAN` more past each edge: `f(ui, i)` builds row
+    /// `i`'s content inside a row box keyed by `i`, so a row's state and handles stay while it is
+    /// built. Returns the list's scroll box.
+    // ponytail: rows of one known height; a measured-height cache when rows vary. Rows are chosen
+    // from the scroll position before layout: a fling past the overscan shows empty rows for a frame.
+    pub fn list(&mut self, label: &str, count: usize, row_h: f32, f: &mut dyn FnMut(&mut Ui, usize)) -> Handle {
+        assert!(row_h > 0.0, "Ui.list {label}: rows need a positive height");
+        let body = self.node(label, Node { flags: SCROLL | CLIP, w: Size::Grow, h: Size::Grow, scroll_step: row_h, ..Node::DEFAULT });
+        let seen = self.slots[body.box_slot].rh;
+        let height = if seen > 0.0 { seen } else { self.view_h };
+        // the wheel and the trackpad move the list before its rows are chosen (as `table` does)
+        self.set_l_h(&body, height);
+        self.set_l_content(&body, count as f32 * row_h);
+        if let Some(t) = self.input_frame_time() {
+            self.apply_scroll(true, t, body.index);
+        }
+        let top = (self.scroll_offset(&body) / row_h).floor().max(0.0) as usize;
+        let first = top.saturating_sub(OVERSCAN).min(count);
+        let last = (top + (height / row_h).ceil() as usize + 1 + OVERSCAN).min(count);
+        let saved = self.enter(&body);
+        let extent = self.node_keyed(int_key(body.box_key, -1), Node { h: Size::Px(count as f32 * row_h), ..Node::DEFAULT });
+        let inner = self.enter(&extent);
+        for i in first..last {
+            let row = self.node_keyed(int_key(body.box_key, i as i64), Node { h: Size::Px(row_h), at: Some((0.0, i as f32 * row_h)), ..Node::DEFAULT });
+            let saved = self.enter(&row);
+            f(self, i);
+            self.leave(saved);
+        }
+        self.leave(inner);
+        self.leave(saved);
+        body
+    }
+
+    /// The view `b` holds, if it is a live view.
+    fn view_id(&self, b: &Handle) -> Option<u32> {
+        if self.live(b) { Some(self.slots[b.box_slot].view).filter(|v| *v != NO_VIEW) } else { None }
+    }
+
+    /// Move a view's output by `(dx, dy)` points from where layout put it: one table entry changes,
+    /// nothing is rebuilt or rewritten. Hit testing and `rect` follow it.
+    pub fn view_offset(&mut self, b: &Handle, dx: f32, dy: f32) {
+        if let Some(v) = self.view_id(b) {
+            self.views[v as usize].offset = (dx, dy);
+            self.view_changed(v);
+        }
+    }
+
+    /// Scale a view's alpha by `opacity` (on each instance; overlaps inside it show through).
+    pub fn view_opacity(&mut self, b: &Handle, opacity: f32) {
+        if let Some(v) = self.view_id(b) {
+            self.views[v as usize].opacity = opacity;
+            self.view_changed(v);
+        }
+    }
+
+    /// Clip a view's output to `clip` (window points), besides its parents' clips; `None` lifts it.
+    // ponytail: no per-view scale or rotation yet (the painter's View has them); hit testing would
+    // have to invert the transform. Add `view_transform` with that inverse when a view needs it.
+    pub fn view_clip(&mut self, b: &Handle, clip: Option<Rect>) {
+        if let Some(v) = self.view_id(b) {
+            self.views[v as usize].clip = clip;
+            self.view_changed(v);
+        }
+    }
+
+    /// A view's entry changed: between frames the table and the damage update now; a view with no
+    /// table index bakes its offset into layout, so it rebuilds next frame.
+    fn view_changed(&mut self, v: u32) {
+        if self.views[v as usize].index == 0 {
+            // ponytail: past 255 views the offset is baked by a rebuild (opacity and clip are not
+            // applied); a larger table or nested tables if that many views move.
+            self.mark_view(v);
+            self.views[v as usize].dirty = true;
+            self.frame_requested = true;
+        } else if !self.building && !self.painting && self.painted >= 0 {
+            self.damage = None;
+            if self.refresh_views() {
+                self.draw_revision += 1;
+            }
+        }
+    }
+
+    /// Mark `v` and the views around it to rebuild at their next declaration; one already kept this
+    /// frame rebuilds next frame.
+    fn mark_view(&mut self, mut v: u32) {
+        while v != 0 && v != NO_VIEW {
+            let r = &mut self.views[v as usize];
+            r.dirty = true;
+            if r.kept == self.frame_number {
+                self.frame_requested = true;
+            }
+            v = r.parent;
+        }
+    }
+
+    fn mark_key(&mut self, key: i64) {
+        if key != 0 {
+            if let Some(slot) = self.table.find(key) {
+                self.mark_view(self.slots[slot].owner);
+            }
+        }
+    }
+
+    /// Dirty the views whose look follows what input changed since the last frame left it.
+    fn mark_input(&mut self) {
+        let mut marks = std::mem::take(&mut self.marks);
+        marks.clear();
+        marks.extend(self.signals.keys().copied());
+        let (hot, focus, keyboard, carrying) = self.seen;
+        let now = (self.hot, self.focus, self.keyboard_focus, self.payload.is_some());
+        if now.0 != hot || now.3 != carrying {
+            marks.extend([hot, now.0]);
+        }
+        if now.1 != focus || now.2 != keyboard {
+            marks.push(focus);
+        }
+        // the focused view paints the caret and the input method's area every frame
+        marks.push(now.1);
+        for key in &marks {
+            self.mark_key(*key);
+        }
+        self.marks = marks;
+        self.seen = now;
+    }
+
+    fn free_view(&mut self, v: u32) {
+        let r = &mut self.views[v as usize];
+        if r.index != 0 {
+            self.free_indices.push(r.index);
+        }
+        let (mut name, mut breaks, mut hits) = (std::mem::take(&mut r.name), std::mem::take(&mut r.breaks), std::mem::take(&mut r.hits));
+        name.clear();
+        breaks.clear();
+        hits.clear();
+        *r = ViewRec { name, breaks, hits, outer: Rect::new(0.0, 0.0, 0.0, 0.0), ..ViewRec::new() };
+        self.free_views.push(v);
+    }
+
+    /// The view's output is in the latest paint: its box was reached, or it sits in a kept view
+    /// that was.
+    fn shown(&self, v: u32) -> bool {
+        if self.views[v as usize].visited == self.painted {
+            return true;
+        }
+        let mut x = self.views[v as usize].parent;
+        while x != 0 {
+            let r = &self.views[x as usize];
+            if r.visited == self.painted {
+                return r.kept == self.painted;
+            }
+            x = r.parent;
+        }
+        false
+    }
+
+    /// Compose view `v`'s entry from its parent's.
+    fn compose(&mut self, v: u32) {
+        let stamp = self.stamp;
+        if v == 0 || self.views[v as usize].stamp == stamp {
+            return;
+        }
+        let parent = self.views[v as usize].parent;
+        self.compose(parent);
+        let pxf = self.views[parent as usize].xf;
+        let (pshift, palpha, pouter) = {
+            let p = &self.views[pxf as usize];
+            (p.shift, p.alpha, p.outer)
+        };
+        let r = &mut self.views[v as usize];
+        r.stamp = stamp;
+        if r.index == 0 {
+            (r.shift, r.alpha, r.outer) = (pshift, palpha, pouter);
+        } else {
+            r.shift = (pshift.0 + r.offset.0 + r.delta.0, pshift.1 + r.offset.1 + r.delta.1);
+            r.alpha = palpha * r.opacity;
+            let c = r.box_clip;
+            r.outer = Rect::new(c.x + pshift.0, c.y + pshift.1, c.w, c.h).intersect(pouter).intersect(r.clip.unwrap_or(UNBOUNDED));
+        }
+        let b = r.built_rect;
+        r.screen = Rect::new(b.x + r.shift.0, b.y + r.shift.1, b.w, b.h).intersect(r.outer);
+    }
+
+    /// Recompose every shown view's entry into `view_out`; the damage gets each moved view's old
+    /// and new rectangles. Whether any entry changed.
+    fn refresh_views(&mut self) -> bool {
+        self.stamp += 1;
+        let mut out = std::mem::take(&mut self.view_prev);
+        out.clear();
+        for v in 1..self.views.len() as u32 {
+            if self.views[v as usize].index == 0 || !self.shown(v) {
+                continue;
+            }
+            let (old_entry, old_screen) = (self.views[v as usize].entry(), self.views[v as usize].screen);
+            self.compose(v);
+            let r = &self.views[v as usize];
+            if r.entry() != old_entry {
+                let screen = r.screen;
+                self.add_damage(old_screen);
+                self.add_damage(screen);
+            }
+            let r = &self.views[v as usize];
+            out.push((r.index, r.entry()));
+        }
+        let changed = out != self.view_out;
+        self.view_prev = std::mem::replace(&mut self.view_out, out);
+        changed
+    }
+
+    /// Add an instance's cover to the damage, moved and clipped as its view shows it.
+    fn damage_instance(&mut self, i: &Instance) {
+        if let Some(r) = bounds(i) {
+            let v = &self.views[self.index_owner[i.view as usize] as usize];
+            let r = Rect::new(r.x + v.shift.0, r.y + v.shift.1, r.w, r.h).intersect(v.outer);
+            self.add_damage(r);
+        }
+    }
+
+    fn add_damage(&mut self, r: Rect) {
+        if r.w > 0.0 && r.h > 0.0 {
+            self.damage = Some(union(self.damage, r));
+        }
+    }
+
+    /// Paint a view box's children: a kept view adds its run and its hit areas, a fresh one paints
+    /// inside its own clip (its outer clip is its table entry's) and records both.
+    fn visit_view(&mut self, paint: &mut Paint, index: usize, v: u32, clip: Rect, parent_hit: i64) {
+        let rect = self.screen(index);
+        let layer = paint.layers[paint.layer].key;
+        let painted = self.painted;
+        let r = &mut self.views[v as usize];
+        r.visited = painted;
+        r.box_clip = clip;
+        if self.boxes[index].kept {
+            r.delta = (rect.x - r.built_rect.x, rect.y - r.built_rect.y);
+            let resized = rect.w != r.built_rect.w || rect.h != r.built_rect.h;
+            let moved = r.index == 0 && r.delta != (0.0, 0.0);
+            let here = r.valid && r.layer == layer;
+            if resized || moved || !here {
+                // ponytail: its old output shows for this frame (none when it changed layers); its
+                // next build, a frame later, fixes it.
+                r.dirty = true;
+                self.frame_requested = true;
+            }
+            if here {
+                paint.keep(v);
+            }
+            let hit_parent = r.hit_parent;
+            for k in 0..self.views[v as usize].hits.len() {
+                let mut h = self.views[v as usize].hits[k];
+                if h.parent == hit_parent {
+                    h.parent = parent_hit;
+                }
+                self.push_hit(h);
+            }
+            return;
+        }
+        if r.verify && r.built_rect != rect {
+            r.verify = false;
+        }
+        r.built_rect = rect;
+        r.delta = (0.0, 0.0);
+        r.layer = layer;
+        let (table, xf) = (r.index, r.xf);
+        let saved = (paint.view, self.paint_xf);
+        if table != 0 {
+            paint.view = table;
+        }
+        self.paint_xf = xf;
+        let child_clip = if table != 0 { UNBOUNDED } else { clip };
+        paint.cut();
+        let (first, hit_start) = (paint.layers[paint.layer].pieces.len() - 1, self.hit_count);
+        let mut child = self.boxes[index].first;
+        while child != NONE {
+            self.visit(paint, child, child_clip, parent_hit);
+            child = self.boxes[child].next;
+        }
+        paint.cut();
+        let r = &mut self.views[v as usize];
+        r.pieces = (paint.layer, first, paint.layers[paint.layer].pieces.len() - 1);
+        r.hit_parent = parent_hit;
+        r.hits.clear();
+        r.hits.extend_from_slice(&self.hits[hit_start..self.hit_count]);
+        (paint.view, self.paint_xf) = saved;
+    }
+
+    /// Children of a view box with no table index are laid out at its offset.
+    fn baked(&self, index: usize) -> (f32, f32) {
+        match self.boxes[index].view {
+            NO_VIEW => (0.0, 0.0),
+            v => {
+                let r = &self.views[v as usize];
+                if r.index == 0 { r.offset } else { (0.0, 0.0) }
+            }
+        }
+    }
+
+    /// The node's instance range indexes the current output: its view's run is shown and was
+    /// painted by the build that painted the node.
+    fn range_valid(&self, slot: usize) -> bool {
+        let s = &self.slots[slot];
+        if s.owner == 0 {
+            return s.painted == self.painted;
+        }
+        let v = &self.views[s.owner as usize];
+        v.valid && s.painted == v.built && self.shown(s.owner)
+    }
+
+    /// Re-run each verified view's build check: its fresh instances (empty ones aside) equal the
+    /// run it kept.
+    fn verify_runs(&self, scratch: &[Layer]) {
+        for r in &self.views[1..] {
+            if !(r.verify && r.valid && !r.patched && r.built == self.painted && r.visited == self.painted) {
+                continue;
+            }
+            let Some(old) = self.draw[..self.draw_len].iter().find(|l| l.key == r.layer) else { continue };
+            let layer = &scratch[r.pieces.0];
+            let pieces = &layer.pieces[r.pieces.1..r.pieces.2];
+            if pieces.iter().any(|p| p.view != NO_VIEW) {
+                continue;
+            }
+            let new = pieces.iter().flat_map(|p| layer.instances[p.a as usize..p.b as usize].iter());
+            let old = old.instances[r.run.0 as usize..r.run.1 as usize].iter();
+            if !old.filter(|i| **i != EMPTY).eq(new.filter(|i| **i != EMPTY)) {
+                panic!("Ui.verify_views: view {:?} built different output under an unchanged revision: its revision misses an input", r.name);
+            }
+        }
+    }
+
+    /// Merge the frame's scratch layers into the retained ones: fresh pieces land where they fall,
+    /// kept runs stay. Gathers dirty ranges and damage; whether anything changed.
+    fn place_all(&mut self, scratch: &mut [Layer], len: usize) -> bool {
+        let mut changed = len != self.draw_len;
+        for layer in &mut self.draw {
+            layer.live = false;
+        }
+        for i in 0..len {
+            let key = scratch[i].key;
+            let j = match (i..self.draw.len()).find(|j| self.draw[*j].key == key) {
+                Some(j) => j,
+                None => {
+                    // a new layer: storage no later layer of this frame wants, emptied
+                    changed = true;
+                    let j = match (i..self.draw.len()).find(|j| !scratch[i + 1..len].iter().any(|s| s.key == self.draw[*j].key)) {
+                        Some(j) => j,
+                        None => {
+                            self.draw.push(Layer::new(i64::MIN, self.draw.len() as u32));
+                            self.draw.len() - 1
+                        }
+                    };
+                    let old = std::mem::take(&mut self.draw[j].instances);
+                    for k in 0..old.len() {
+                        self.damage_instance(&old[k]);
+                    }
+                    let d = &mut self.draw[j];
+                    d.instances = old;
+                    d.instances.clear();
+                    d.key = key;
+                    d.breaks.clear();
+                    d.images.clear();
+                    d.dirty.clear();
+                    j
+                }
+            };
+            if i != j {
+                changed = true;
+                self.draw.swap(i, j);
+            }
+            self.draw[i].live = true;
+            changed |= self.place(&mut scratch[i], i);
+        }
+        // layers of the last frame that are gone
+        for j in len..self.draw.len() {
+            if self.draw[j].live || self.draw[j].instances.is_empty() {
+                continue;
+            }
+            let old = std::mem::take(&mut self.draw[j].instances);
+            for k in 0..old.len() {
+                self.damage_instance(&old[k]);
+            }
+            self.draw[j].instances = old;
+            self.draw[j].instances.clear();
+            self.draw[j].key = i64::MIN;
+        }
+        self.draw_len = len;
+        changed
+    }
+
+    /// One layer: the fast path writes fresh pieces in place and fills the room before each kept run
+    /// with empty instances; when a piece does not fit (or kept runs changed order) the layer is
+    /// compacted with slack before every kept run.
+    fn place(&mut self, s: &mut Layer, at: usize) -> bool {
+        let n = s.instances.len() as u32;
+        if let Some(last) = s.pieces.last_mut() {
+            last.b = n;
+        }
+        let mut d = std::mem::take(&mut self.draw[at]);
+        let old_len = d.instances.len();
+        let mut changed = false;
+        // the room each fresh piece has: up to the next non-empty kept run
+        let mut limit = u32::MAX;
+        for p in s.pieces.iter_mut().rev() {
+            if p.view == NO_VIEW {
+                p.at = limit;
+            } else {
+                let (a, b) = self.views[p.view as usize].run;
+                if a < b {
+                    limit = a;
+                }
+            }
+        }
+        let mut w = 0u32;
+        let mut fits = true;
+        for k in 0..s.pieces.len() {
+            let p = s.pieces[k];
+            if p.view == NO_VIEW {
+                let len = p.b - p.a;
+                if w + len > p.at {
+                    fits = false;
+                    break;
+                }
+                s.pieces[k].at = w;
+                if (w + len) as usize > d.instances.len() {
+                    d.instances.resize((w + len) as usize, EMPTY);
+                }
+                for x in 0..len as usize {
+                    let (i, new) = (w as usize + x, s.instances[p.a as usize + x]);
+                    if i >= old_len || d.instances[i] != new {
+                        if i < old_len {
+                            let old = d.instances[i];
+                            self.damage_instance(&old);
+                        }
+                        self.damage_instance(&new);
+                        d.instances[i] = new;
+                        add_range(&mut d.dirty, i as u32, i as u32 + 1);
+                        changed = true;
+                    }
+                }
+                w += len;
+            } else {
+                let (a, b) = self.views[p.view as usize].run;
+                s.pieces[k].at = a;
+                if a == b {
+                    s.pieces[k].at = w;
+                    continue;
+                }
+                if a < w {
+                    fits = false;
+                    break;
+                }
+                for i in w as usize..a as usize {
+                    if d.instances[i] != EMPTY {
+                        let old = d.instances[i];
+                        self.damage_instance(&old);
+                        d.instances[i] = EMPTY;
+                        add_range(&mut d.dirty, i as u32, i as u32 + 1);
+                        changed = true;
+                    }
+                }
+                w = b;
+            }
+        }
+        if fits {
+            for i in w as usize..d.instances.len() {
+                let old = d.instances[i];
+                self.damage_instance(&old);
+                changed = true;
+            }
+            d.instances.truncate(w as usize);
+        } else {
+            changed = true;
+            self.compact_layer(s, &mut d, old_len);
+        }
+        changed |= self.rebuild_breaks(s, &mut d);
+        self.draw[at] = d;
+        changed
+    }
+
+    fn compact_layer(&mut self, s: &mut Layer, d: &mut Layer, old_len: usize) {
+        let mut out = std::mem::take(&mut self.compact);
+        out.clear();
+        for k in 0..s.pieces.len() {
+            let p = s.pieces[k];
+            if p.view == NO_VIEW {
+                s.pieces[k].at = out.len() as u32;
+                out.extend_from_slice(&s.instances[p.a as usize..p.b as usize]);
+                continue;
+            }
+            let (a, b) = self.views[p.view as usize].run;
+            if a == b {
+                s.pieces[k].at = out.len() as u32;
+                continue;
+            }
+            out.resize(out.len() + SLACK, EMPTY);
+            let to = out.len() as u32;
+            out.extend_from_slice(&d.instances[a as usize..b as usize]);
+            s.pieces[k].at = to;
+            self.move_run(d.key, a, b, to);
+        }
+        for i in 0..out.len().max(old_len) {
+            let (old, new) = (d.instances.get(i).copied(), out.get(i).copied());
+            if old != new {
+                if let Some(old) = old {
+                    self.damage_instance(&old);
+                }
+                if let Some(new) = new {
+                    self.damage_instance(&new);
+                    add_range(&mut d.dirty, i as u32, i as u32 + 1);
+                }
+            }
+        }
+        std::mem::swap(&mut d.instances, &mut out);
+        self.compact = out;
+    }
+
+    /// A kept run `a..b` of layer `key` moved to `to`: the runs inside it and the ranges of nodes
+    /// painted into it follow.
+    // ponytail: scans every view and node, O(views + nodes), on compaction only.
+    fn move_run(&mut self, key: i64, a: u32, b: u32, to: u32) {
+        let shift = |v: u32| v - a + to;
+        for r in &mut self.views[1..] {
+            if r.valid && r.built != self.painted && r.layer == key && r.run.0 >= a && r.run.1 <= b {
+                r.run = (shift(r.run.0), shift(r.run.1));
+            }
+        }
+        for s in &mut self.slots {
+            if s.key != 0 && s.painted != self.painted && s.range_layer == key && s.range.0 >= a && s.range.1 <= b {
+                s.range = (shift(s.range.0), shift(s.range.1));
+            }
+        }
+    }
+
+    /// The layer's texture breaks and images from its pieces; whether they changed.
+    fn rebuild_breaks(&mut self, s: &Layer, d: &mut Layer) -> bool {
+        let kept_breaks = s.pieces.iter().any(|p| p.view != NO_VIEW && {
+            let r = &self.views[p.view as usize];
+            r.tex0.is_some() || !r.breaks.is_empty()
+        });
+        if s.breaks.is_empty() && d.breaks.is_empty() && !kept_breaks {
+            return false;
+        }
+        let mut breaks = std::mem::take(&mut self.temp_breaks);
+        let mut images = std::mem::take(&mut self.temp_images);
+        breaks.clear();
+        images.clear();
+        let mut current: Option<Image> = None;
+        let mut set = |at: u32, tex: &Option<Image>, breaks: &mut Vec<Break>, images: &mut Vec<Image>| {
+            let same = match (&current, tex) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Rc::ptr_eq(&a.handle, &b.handle),
+                _ => false,
+            };
+            if !same {
+                let image = match tex {
+                    None => crate::draw::ATLAS,
+                    Some(t) => match images.iter().position(|i| Rc::ptr_eq(&i.handle, &t.handle)) {
+                        Some(k) => k as u32,
+                        None => {
+                            images.push(t.clone());
+                            images.len() as u32 - 1
+                        }
+                    },
+                };
+                match breaks.last_mut() {
+                    Some(last) if last.at_instance == at => last.image = image,
+                    _ => breaks.push(Break { at_instance: at, image }),
+                }
+                current = tex.clone();
+            }
+        };
+        let tex_of = |image: u32| if image == crate::draw::ATLAS { None } else { Some(s.images[image as usize].clone()) };
+        let (mut si, mut stex) = (0, None);
+        for p in &s.pieces {
+            if p.view == NO_VIEW {
+                while si < s.breaks.len() && s.breaks[si].at_instance <= p.a {
+                    stex = tex_of(s.breaks[si].image);
+                    si += 1;
+                }
+                set(p.at, &stex, &mut breaks, &mut images);
+                while si < s.breaks.len() && s.breaks[si].at_instance < p.b {
+                    stex = tex_of(s.breaks[si].image);
+                    set(p.at + s.breaks[si].at_instance - p.a, &stex, &mut breaks, &mut images);
+                    si += 1;
+                }
+            } else {
+                let r = &self.views[p.view as usize];
+                set(p.at, &r.tex0, &mut breaks, &mut images);
+                for (at, image) in &r.breaks {
+                    set(p.at + at, &Some(image.clone()), &mut breaks, &mut images);
+                }
+            }
+        }
+        // a texture break with no instance after it is dropped by the painter's rule anyway
+        let changed = breaks != d.breaks || images.len() != d.images.len() || images.iter().zip(&d.images).any(|(a, b)| !Rc::ptr_eq(&a.handle, &b.handle));
+        std::mem::swap(&mut breaks, &mut d.breaks);
+        std::mem::swap(&mut images, &mut d.images);
+        self.temp_breaks = breaks;
+        self.temp_images = images;
+        changed
+    }
+
+    /// After placement: fresh views take their runs (and the breaks inside them), views not shown
+    /// lose theirs, and the nodes the frame painted take their places in the retained layers.
+    fn settle(&mut self, scratch: &[Layer]) {
+        let painted = self.painted;
+        for v in 1..self.views.len() {
+            let r = &self.views[v];
+            if r.slot == NONE {
+                continue;
+            }
+            if r.visited == painted && r.built == painted {
+                let (li, first, end) = r.pieces;
+                let pieces = &scratch[li].pieces;
+                let start = pieces[first].at;
+                let last = pieces[end - 1];
+                let stop = match last.view {
+                    NO_VIEW => last.at + (last.b - last.a),
+                    k => {
+                        let (a, b) = self.views[k as usize].run;
+                        if a < b { b } else { last.at }
+                    }
+                };
+                let key = scratch[li].key;
+                let d = self.draw[..self.draw_len].iter().find(|l| l.key == key).expect("placed layer");
+                let mut tex0 = None;
+                let mut breaks = std::mem::take(&mut self.views[v].breaks);
+                breaks.clear();
+                for b in &d.breaks {
+                    let tex = if b.image == crate::draw::ATLAS { None } else { Some(d.images[b.image as usize].clone()) };
+                    if b.at_instance <= start {
+                        tex0 = tex;
+                    } else if b.at_instance < stop {
+                        // ponytail: a break back to the atlas inside a kept view is not replayed;
+                        // the image it follows keeps sampling. Store Option<Image> if a view mixes them.
+                        if let Some(t) = tex {
+                            breaks.push((b.at_instance - start, t));
+                        }
+                    }
+                }
+                let r = &mut self.views[v];
+                (r.run, r.valid, r.tex0, r.breaks) = ((start, stop), true, tex0, breaks);
+            } else if !self.shown(v as u32) {
+                self.views[v].valid = false;
+            }
+        }
+        for k in 0..self.painted_nodes.len() {
+            let (slot, li) = self.painted_nodes[k];
+            let pieces = &scratch[li].pieces;
+            let (a, b) = self.slots[slot].range;
+            // pieces are in scratch order (a kept piece is empty at its place): the first that ends
+            // past the node's start holds it
+            let p = pieces[pieces.partition_point(|p| p.b <= a).min(pieces.len() - 1)];
+            let s = &mut self.slots[slot];
+            s.range = (p.at + a - p.a, p.at + b - p.a);
+            s.range_layer = scratch[li].key;
+        }
+        self.painted_nodes.clear();
+    }
+}
+
 // ---- crate-private access for the kit and text widgets
 
 impl Ui {
@@ -3589,6 +4747,7 @@ impl Ui {
     }
 
     pub(crate) fn set_modal_key(&mut self, key: Option<i64>) {
+        self.escape();
         self.modal_key = key;
     }
 
@@ -3598,6 +4757,7 @@ impl Ui {
 
     /// Popups live at the root: the parents are the root alone, the seeds stay.
     pub(crate) fn enter_root_parent(&mut self) -> Saved {
+        self.escape();
         Saved::Stacks(std::mem::replace(&mut self.parents, vec![0]), self.seeds.clone())
     }
 

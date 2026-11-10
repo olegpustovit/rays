@@ -46,25 +46,26 @@ fn check(name: &str, golden: &str, density: i64, height: i64, pixels: &[u8]) {
     }
     let (gw, gh, g) = png::decode(&std::fs::read(&path).expect("golden"));
     assert!((gw, gh) == (w, h), "PXUI {name} parity: golden is {gw}x{gh}, render is {w}x{h}");
+    // drivers round blends differently by a level (lavapipe): 2 per channel, as pxui_render's golden
+    const TOLERANCE: i32 = 2;
     let mut different = 0usize;
     let mut worst = 0i32;
     let mut first = None;
     for (index, (p, q)) in g.chunks(4).zip(pixels.chunks(4)).enumerate() {
-        if p != q {
+        let most = (0..4).map(|k| (p[k] as i32 - q[k] as i32).abs()).max().unwrap_or(0);
+        worst = worst.max(most);
+        if most > TOLERANCE {
             different += 1;
-            for k in 0..4 {
-                worst = worst.max((p[k] as i32 - q[k] as i32).abs());
-            }
             first.get_or_insert((index as u32 % w, index as u32 / w));
         }
     }
     assert!(
         different == 0,
-        "PXUI {name} drifted from its golden: {different} of {} pixels differ (largest channel difference {worst}), first at {:?}",
+        "PXUI {name} drifted from its golden: {different} of {} pixels differ by more than {TOLERANCE} (largest channel difference {worst}), first at {:?}",
         g.len() / 4,
         first
     );
-    println!("PXUI {name} parity at {density}x: exact");
+    println!("PXUI {name} parity at {density}x: max channel difference {worst}");
 }
 
 fn new_panel(ui: &mut Ui) {
@@ -198,8 +199,95 @@ fn gpu_patch() {
     println!("PXUI patch: renders as its fresh build");
 }
 
+/// A kit panel in a view, kept: the same pixels as rebuilding it every frame.
+fn gpu_view_kept_pixels() {
+    if !gpu::available() {
+        return;
+    }
+    let shoot = |rebuild: bool| {
+        let mut ui = Ui::create(Platform::Apple, None, crate::support::golden_text());
+        for count in 0..3 {
+            let revision = if rebuild { count as u64 } else { 1 };
+            ui.frame(&frame_at(count, 240, 2), &mut |ui| {
+                ui.view("kit", revision, Size::Px(WIDTH as f32), Size::Px(240.0), &mut |ui| new_panel(ui));
+            });
+        }
+        let pixels = gpu::render(&mut ui, (WIDTH as u32, 240), 2, [228, 139, 161, 255]).0;
+        ui.destroy();
+        pixels
+    };
+    assert!(shoot(false) == shoot(true), "a kept view renders unlike its rebuild");
+    println!("PXUI view: kept renders as rebuilt");
+}
+
+/// `view_offset` moves a kept view with its table entry: the pixels of the view rebuilt at that
+/// offset.
+fn gpu_view_offset_pixels() {
+    if !gpu::available() {
+        return;
+    }
+    let shoot = |offset: bool| {
+        let mut ui = Ui::create(Platform::Apple, None, crate::support::golden_text());
+        let mut view = None;
+        for count in 0..2 {
+            ui.frame(&frame_at(count, 240, 2), &mut |ui| {
+                let at = if offset { (0.0, 0.0) } else { (24.0, 16.0) };
+                let holder = ui.node("holder", Node { w: Size::Px(300.0), h: Size::Px(200.0), at: Some(at), ..Node::DEFAULT });
+                let saved = ui.enter(&holder);
+                view = Some(ui.view("kit", 1, Size::Px(300.0), Size::Px(200.0), &mut |ui| new_panel(ui)));
+                ui.leave(saved);
+            });
+        }
+        if offset {
+            ui.view_offset(&view.unwrap(), 24.0, 16.0);
+        }
+        let pixels = gpu::render(&mut ui, (WIDTH as u32, 240), 2, [228, 139, 161, 255]).0;
+        ui.destroy();
+        pixels
+    };
+    assert!(shoot(true) == shoot(false), "an offset view renders unlike the view rebuilt at that offset");
+    println!("PXUI view: offset renders as rebuilt there");
+}
+
+/// The painter writes what changed: nothing for an all-kept frame, one node's instances for a
+/// patch (in each of its three frame copies).
+fn gpu_retained_bytes() {
+    if !gpu::available() {
+        return;
+    }
+    let mut ui = Ui::create(Platform::Apple, None, crate::support::golden_text());
+    let mut chip = None;
+    let mut build = |ui: &mut Ui| {
+        ui.view("kit", 1, Size::Px(WIDTH as f32), Size::Px(200.0), &mut |ui| new_panel(ui));
+        ui.view("chip", 1, Size::Px(100.0), Size::Px(30.0), &mut |ui| {
+            let look = Look { fill: pxui::geom::color::rgb(200, 40, 40), ..Look::NONE };
+            chip = Some(ui.node("chip", Node { w: Size::Px(80.0), h: Size::Px(20.0), look, ..Node::DEFAULT }));
+        });
+    };
+    let mut painter = gpu::painter(&mut ui);
+    let size = (WIDTH as u32, 240);
+    for count in 0..4 {
+        ui.frame(&frame_at(count, 240, 2), &mut build);
+        gpu::render_with(&mut painter, &mut ui, size, 2, [228, 139, 161, 255]);
+    }
+    ui.frame(&frame_at(4, 240, 2), &mut build);
+    gpu::render_with(&mut painter, &mut ui, size, 2, [228, 139, 161, 255]);
+    assert_eq!(painter.retained_bytes(), 0, "an all-kept frame wrote instances");
+    assert!(ui.patch_fill(&chip.unwrap(), pxui::geom::color::rgb(40, 40, 200)), "patch refused");
+    for frame in 0..4 {
+        gpu::render_with(&mut painter, &mut ui, size, 2, [228, 139, 161, 255]);
+        let expected = if frame < 3 { 64 } else { 0 };
+        assert_eq!(painter.retained_bytes(), expected, "frame {frame} after a one-instance patch");
+    }
+    ui.destroy();
+    println!("PXUI retained: 0 bytes kept, 64 bytes per copy for a one-instance patch");
+}
+
 pub const CASES: &[(&str, fn())] = &[
     ("gpu_patch", gpu_patch),
+    ("gpu_view_kept_pixels", gpu_view_kept_pixels),
+    ("gpu_view_offset_pixels", gpu_view_offset_pixels),
+    ("gpu_retained_bytes", gpu_retained_bytes),
     ("gpu_parity_commands", gpu_parity_commands),
     ("gpu_parity_draw_calls", gpu_parity_draw_calls),
     ("gpu_parity_overlays", gpu_parity_overlays),

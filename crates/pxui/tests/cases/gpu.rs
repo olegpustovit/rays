@@ -8,7 +8,7 @@ use ogpu_core::render_pass::{Load, Store};
 use ogpu_core::types::{TextureDescriptor, TextureFormat, TextureUsage};
 use pxui::text::AtlasKind as TextKind;
 use pxui::ui::Ui;
-use pxui_render::{AtlasKind, Break, Painter};
+use pxui_render::{AtlasKind, Break, Painter, View};
 use std::cell::OnceCell;
 
 fn ok<T>(result: Result<T, Error>) -> T {
@@ -56,10 +56,9 @@ pub fn available() -> bool {
     device().is_some()
 }
 
-/// The UI's last frame drawn over `ground` into a `size` x `density` texture: its RGBA pixels and
-/// the painter's draw calls.
-pub fn render(ui: &mut Ui, size: (u32, u32), density: u32, ground: [u8; 4]) -> (Vec<u8>, u64) {
-    let (device, queue) = device().expect("a GPU backend");
+/// A painter for the UI's glyph atlases, with the atlases uploaded.
+pub fn painter(ui: &mut Ui) -> Painter {
+    let (device, _) = device().expect("a GPU backend");
     let text = ui.text_mut();
     let (mask, color) = (text.atlas_size(TextKind::Mask), text.atlas_size(TextKind::Color));
     let mut painter = ok(Painter::new(&device, ColorFormat::Rgba8Unorm, DepthFormat::NoDepth, 1, mask, color));
@@ -67,6 +66,27 @@ pub fn render(ui: &mut Ui, size: (u32, u32), density: u32, ground: [u8; 4]) -> (
         ok(painter.upload(atlas, 0, 0, w, h, text.atlas_pixels(kind), (w * texel) as usize));
     }
     text.drain_uploads(&mut |_, _, _, _, _, _, _| {});
+    painter
+}
+
+/// The UI's last frame drawn over `ground` into a `size` x `density` texture: its RGBA pixels and
+/// the painter's draw calls.
+pub fn render(ui: &mut Ui, size: (u32, u32), density: u32, ground: [u8; 4]) -> (Vec<u8>, u64) {
+    let mut painter = painter(ui);
+    let pixels = render_with(&mut painter, ui, size, density, ground);
+    (pixels, painter.draw_calls())
+}
+
+/// Draw the UI's last frame with `painter` as a host does: new glyphs uploaded, the view table set,
+/// each layer drawn retained with its dirty ranges (then marked drawn).
+pub fn render_with(painter: &mut Painter, ui: &mut Ui, size: (u32, u32), density: u32, ground: [u8; 4]) -> Vec<u8> {
+    let (device, queue) = device().expect("a GPU backend");
+    let mut uploads = Vec::new();
+    ui.text_mut().drain_uploads(&mut |kind, x, y, w, h, bytes, stride| uploads.push((kind, x, y, w, h, bytes.to_vec(), stride)));
+    for (kind, x, y, w, h, bytes, stride) in uploads {
+        let atlas = if kind == TextKind::Mask { AtlasKind::Mask } else { AtlasKind::Color };
+        ok(painter.upload(atlas, x, y, w, h, &bytes, stride));
+    }
     let (w, h) = (size.0 * density, size.1 * density);
     let target = ok(be::create_texture(&device, TextureDescriptor {
         label: Some("pxui.test".into()), width: w as i64, height: h as i64, depth: 1, mip_levels: 1, sample_count: 1,
@@ -79,17 +99,22 @@ pub fn render(ui: &mut Ui, size: (u32, u32), density: u32, ground: [u8; 4]) -> (
         depth: None,
     }));
     painter.begin_frame();
-    for layer in ui.output().draw {
+    for (index, v) in ui.output().views {
+        ok(painter.set_view(*index, View { offset: v.offset, opacity: v.opacity, clip: v.clip, ..View::IDENTITY }));
+    }
+    for index in 0..ui.output().draw.len() {
+        let layer = &ui.output().draw[index];
         // ponytail: PXUI's own tests draw no host images; a break back to the colour atlas is all
         let breaks: Vec<Break> = layer.breaks.iter().map(|b| {
             assert_eq!(b.image, pxui::draw::ATLAS, "host images need a host");
             Break { at_instance: b.at_instance, texture: None }
         }).collect();
-        ok(painter.draw(&encoder, [w, h], density as f32, &layer.instances, &breaks));
+        ok(painter.draw_retained(&encoder, [w, h], density as f32, layer.id, &layer.instances, &layer.dirty, &breaks));
+        ui.drawn(index);
     }
     ok(be::end_render(&encoder));
     ok(be::complete_through(&queue, ok(be::commit(&commands)).epoch));
     let pixels = ok(be::read_texture(&target, (w * 4) as i64));
     ok(be::destroy_texture(&target));
-    (pixels, painter.draw_calls())
+    pixels
 }

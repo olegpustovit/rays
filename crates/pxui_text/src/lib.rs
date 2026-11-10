@@ -189,6 +189,7 @@ pub struct Text {
     atlases: [Atlas; 2],
     slots: HashMap<CacheKey, Slot>,
     dirty: Vec<(AtlasKind, u32, u32, u32, u32)>,
+    evictions: u64,
 }
 
 fn idx(kind: AtlasKind) -> usize {
@@ -208,6 +209,7 @@ impl Text {
             atlases: [Atlas::new(MASK_SIZE, 1), Atlas::new(COLOR_SIZE, 4)],
             slots: HashMap::new(),
             dirty: Vec::new(),
+            evictions: 0,
         };
         for f in fonts {
             t.add_font(f);
@@ -350,7 +352,7 @@ impl Text {
     }
 
     pub fn glyphs(&mut self, key: u64, origin: (f32, f32), scale: f32, f: &mut dyn FnMut(Glyph)) {
-        let Text { fs, swash, entries, frame, atlases, slots, dirty, .. } = self;
+        let Text { fs, swash, entries, frame, atlases, slots, dirty, evictions, .. } = self;
         let Some(e) = entries.get(&key) else { return };
         for run in e.buf.layout_runs() {
             for g in run.glyphs {
@@ -379,6 +381,7 @@ impl Text {
                                 a.px[dst..dst + (w * bpp) as usize].copy_from_slice(&img.data[src..src + (w * bpp) as usize]);
                             }
                             if evicted {
+                                *evictions += 1;
                                 slots.retain(|_, o| !(o.kind == kind && o.shelf == shelf));
                             }
                             dirty.push((kind, x, y, w, h));
@@ -428,6 +431,11 @@ impl Text {
     /// Heap held by the atlas mirrors (layout buffers are cosmic-text's and not counted).
     pub fn bytes(&self) -> usize {
         self.atlases.iter().map(|a| a.px.len()).sum()
+    }
+
+    /// Shelves evicted so far: glyph instances made before an eviction may sample another glyph.
+    pub fn evictions(&self) -> u64 {
+        self.evictions
     }
 
     /// Call once per frame: drops layouts not laid out since the previous call.

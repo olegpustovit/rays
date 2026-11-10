@@ -16,6 +16,8 @@ mod ui_a;
 mod ui_b;
 #[path = "cases/ui_c.rs"]
 mod ui_c;
+#[path = "cases/views.rs"]
+mod views;
 
 fn main() {
     let mut cases: Vec<(&str, fn())> = Vec::new();
@@ -24,5 +26,6 @@ fn main() {
     cases.extend_from_slice(ui_b::CASES);
     cases.extend_from_slice(ui_c::CASES);
     cases.extend_from_slice(nodes::CASES);
+    cases.extend_from_slice(views::CASES);
     run::run(&cases);
 }

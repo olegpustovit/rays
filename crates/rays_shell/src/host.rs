@@ -7,7 +7,7 @@ use ogpu_core::pipeline::{ColorFormat, DepthFormat};
 use ogpu_core::types::{Extent, Origin, TextureDescriptor, TextureFormat, TextureUsage};
 use pxui::text::{self, Text};
 use pxui::ui::{Image, Ui};
-use pxui_render::{AtlasKind, Break, Painter};
+use pxui_render::{AtlasKind, Break, Painter, View};
 use rays::{clipboard, image, scene, sketch};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -141,6 +141,8 @@ struct Shared {
     frame: u64,
     /// image textures by identity, with their generation and the frame that last drew them
     images: Vec<(i64, i64, Texture, u64)>,
+    /// the UI whose instances each retained painter layer holds (by `Layer::id`)
+    retained: [usize; pxui_render::MAX_LAYERS],
 }
 
 fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Error> {
@@ -155,7 +157,7 @@ fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Er
             let (mask, color) = (t.atlas_size(text::AtlasKind::Mask), t.atlas_size(text::AtlasKind::Color));
             let painter = Painter::new(pass.device, ColorFormat::Rgba8Unorm, DepthFormat::NoDepth, 1, mask, color)?;
             scene::on_device_release(release_painter);
-            *shared = Some(Shared { device, painter, owner: 0, frame: 0, images: Vec::new() });
+            *shared = Some(Shared { device, painter, owner: 0, frame: 0, images: Vec::new(), retained: [0; pxui_render::MAX_LAYERS] });
         }
         let s = shared.as_mut().expect("painter");
         if s.frame != pass.frame {
@@ -172,19 +174,37 @@ fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Er
             });
         }
         sync_atlas(s, ui)?;
-        let layer = &ui.output().draw[layer];
-        if layer.breaks.is_empty() {
-            return s.painter.draw(pass.encoder, pass.size_px, pass.scale, &layer.instances, &[]);
+        for (index, v) in ui.output().views {
+            s.painter.set_view(*index, View { offset: v.offset, opacity: v.opacity, clip: v.clip, ..View::IDENTITY })?;
         }
-        for image in &layer.images {
-            image_texture(s, pass, image)?;
+        let out = ui.output();
+        let l = &out.draw[layer];
+        let id = l.id as usize;
+        if id >= pxui_render::MAX_LAYERS {
+            return Err(error::make("Pxui.paint", ErrorKind::InvalidState, "more UI layers than the painter retains"));
         }
-        let textures: Vec<&Texture> = layer.images.iter().map(|i| {
-            let id = as_rays_image(i).map_or(0, image::identity);
-            s.images.iter().find(|(key, ..)| *key == id).map(|(_, _, texture, _)| texture).expect("image texture")
-        }).collect();
-        let breaks: Vec<Break> = layer.breaks.iter().map(|b| Break { at_instance: b.at_instance, texture: (b.image != pxui::draw::ATLAS).then(|| textures[b.image as usize]) }).collect();
-        s.painter.draw(pass.encoder, pass.size_px, pass.scale, &layer.instances, &breaks)
+        // the painter's copy of this layer holds another UI's instances: all of it is new
+        let owner = &*ui as *const Ui as usize;
+        let all = [(0, l.instances.len() as u32)];
+        let dirty: &[(u32, u32)] = if s.retained[id] == owner { &l.dirty } else { &all };
+        s.retained[id] = owner;
+        let result = if l.breaks.is_empty() {
+            s.painter.draw_retained(pass.encoder, pass.size_px, pass.scale, l.id, &l.instances, dirty, &[])
+        } else {
+            for image in &l.images {
+                image_texture(s, pass, image)?;
+            }
+            let textures: Vec<&Texture> = l.images.iter().map(|i| {
+                let id = as_rays_image(i).map_or(0, image::identity);
+                s.images.iter().find(|(key, ..)| *key == id).map(|(_, _, texture, _)| texture).expect("image texture")
+            }).collect();
+            let breaks: Vec<Break> = l.breaks.iter().map(|b| Break { at_instance: b.at_instance, texture: (b.image != pxui::draw::ATLAS).then(|| textures[b.image as usize]) }).collect();
+            s.painter.draw_retained(pass.encoder, pass.size_px, pass.scale, l.id, &l.instances, dirty, &breaks)
+        };
+        if result.is_ok() {
+            ui.drawn(layer);
+        }
+        result
     })
 }
 
