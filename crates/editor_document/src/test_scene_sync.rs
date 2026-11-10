@@ -15,8 +15,7 @@ use crate::settings;
 use crate::workspace_doc::{self, TextOptions};
 use flow_check::catalog::Catalog;
 use flow_graph::flow_edit::{ArgKey, Op};
-use flow_syntax::syntax::{self as s, Node, Syntax};
-use flow_syntax::value::Value as E;
+use flow_syntax::syntax::{self as s, Syntax};
 use param::Value;
 use sop::edit_graph::Factory;
 
@@ -32,8 +31,8 @@ fn factories() -> Vec<Factory> {
     sop::nodes::factories()
 }
 
-fn catalog() -> Catalog {
-    kinds::catalog(flow_sop_catalog::manifest::VERSION, &factories()).expect("catalog")
+fn catalog() -> std::sync::Arc<Catalog> {
+    kinds::shared(None).expect("catalog")
 }
 
 fn contains(text: &str, piece: &str) -> bool {
@@ -272,7 +271,6 @@ fn a_camera_still_takes_no_render_size() {
 // ---- run (): fields, inline, rename, reparent, delete, camera, World, settings, host, add ----
 
 #[test]
-#[ignore = "slow: 3-5 s in a debug build, over the 5 s limit under load; each lowering ~200 ms (parity_backlog: flow_eval static_with cost)"]
 fn camera_write_back_keeps_precision_and_identity() {
     let doc = open_text(TEXT);
     // Following the viewport writes camera coordinates every frame. Rounding them makes the camera
@@ -297,7 +295,6 @@ fn camera_write_back_keeps_precision_and_identity() {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn fields_inline_and_flags() {
     let doc = open_text(TEXT);
     let arm = node_id(&doc, "arm");
@@ -342,7 +339,6 @@ fn fields_inline_and_flags() {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn rename_reparent_and_unparent() {
     let doc = open_text(TEXT);
     let arm = node_id(&doc, "arm");
@@ -390,7 +386,6 @@ fn rename_reparent_and_unparent() {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn delete_camera_world_and_settings() {
     let doc = open_text(TEXT);
     let arm = node_id(&doc, "arm");
@@ -473,7 +468,6 @@ fn delete_camera_world_and_settings() {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn twins_and_host_objects() {
     // a name two objects share is refused whole
     let twins = open_text(
@@ -543,7 +537,6 @@ fn twins_and_host_objects() {
 }
 
 #[test]
-#[ignore = "slow: 3-5 s in a debug build, over the 5 s limit under load; each lowering ~200 ms (parity_backlog: flow_eval static_with cost)"]
 fn adding_by_key() {
     let doc = open_text(TEXT);
     let added = edit(
@@ -672,7 +665,6 @@ fn loop_case(what: &str, text: &str) {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn loop_copies_bound() {
     loop_case(
         "bound",
@@ -686,7 +678,6 @@ fn loop_copies_bound() {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn loop_copies_inline() {
     loop_case(
         "inline",
@@ -699,7 +690,6 @@ fn loop_copies_inline() {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn loop_several_clauses() {
     // several clauses: one iteration of the product goes, the flat iteration index is what is listed
     let grid = open_text(
@@ -736,7 +726,6 @@ fn loop_several_clauses() {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn loop_copy_that_makes_two_objects() {
     let pairs = open_text(
         r#"(workspace pairs
@@ -798,7 +787,6 @@ fn loop_copy_that_makes_two_objects() {
 
 // a loop inside a loop: the copies nest, the rules are the same, and a delete is exact at any depth
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn nested_loops() {
     let text = r#"(workspace nest
     (graph g :context sop (sop/box))
@@ -928,7 +916,6 @@ fn sketch(name: &str) -> String {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn root_settings_and_camera() {
     use root::Renderer as R;
     // a scene without a root renders as the defaults; a camera carries no render size
@@ -995,7 +982,6 @@ fn root_settings_and_camera() {
 }
 
 #[test]
-#[ignore = "slow: lowers every saved sketch; exceeds 60 s even with RAYS_SLOW=1 in a debug build (lowering costs ~200 ms per small document in flow_eval::Host::static_with_requests)"]
 fn root_of_saved_sketches() {
     use root::Renderer as R;
     // shattered_studio carries a root, written by the editor
@@ -1009,7 +995,6 @@ fn root_of_saved_sketches() {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn world_member_edits() {
     let doc = open_text(ROOT_TEXT);
     // the World is a merge member: its keywords edit like an object's, its layers its graph's
@@ -1135,7 +1120,6 @@ fn path(parts: &[&str]) -> flow_check::workspace::Path {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn compose_add_geometry_and_world() {
     // the composition gestures: one op list each, one undo entry (the ops apply together)
     let doc = open_text(ROOT_TEXT);
@@ -1205,7 +1189,6 @@ fn compose_add_geometry_and_world() {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn compose_delete_refcount_and_group() {
     // take a wire out of the merge: the object stays as an unwired binding, and wires back
     let rock = open_text(
@@ -1251,7 +1234,6 @@ fn compose_delete_refcount_and_group() {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn compose_world_member_layer_edits_are_surgical() {
     // E9: deleting or moving one layer of a World member is an edit of that binding: the graph's
     // input, its comment, the expression and the other names stay
@@ -1343,7 +1325,7 @@ const INSTANCES_TEXT: &str = r#"(workspace days
       (scene/root all :camera cam :renderer "Path traced" :max_spp 1024 :bounces 12
                   :width 1600 :height 900)))
   (graph editor :context editor
-    (ui/workspace (ui/split-at "horizontal" 0.5 (ui/viewport (ref day)) (ui/viewport (ref night))))))"#;
+    (ui/workspace (ui/split_at "horizontal" 0.5 (ui/viewport (ref day)) (ui/viewport (ref night))))))"#;
 
 #[test]
 fn instances_each_viewport_has_its_root_and_world() {
@@ -1415,4 +1397,20 @@ fn instances_each_viewport_has_its_root_and_world() {
         .is_err(),
         "two objects parented under each other lowered",
     );
+}
+
+#[test]
+fn scene_angles_are_radians_in_schema_and_runtime() {
+    let angle = std::f64::consts::FRAC_PI_2;
+    let doc = open_text(&format!("(workspace radians (graph geometry :context sop (sop/box)) (graph scene :context scene (scene/merge (scene/geometry (ref geometry) :name \"body\" :rotate [0 0 {angle}]) (scene/camera :name \"camera\" :fov 1.0))))"));
+    let graph = scene(&doc);
+    let geometry = graph.iter().find(|node| node.label == "body").unwrap();
+    assert_eq!(objects::geometry(geometry).unwrap().rotate_z, angle);
+    let fields = kg::fields(geometry);
+    assert_eq!(fields.iter().find(|field| field.name == "rotate_z").unwrap().unit.as_deref(), Some("rad"));
+    let camera = graph.iter().find(|node| node.label == "camera").unwrap();
+    let fields = kg::fields(camera);
+    let fov = fields.iter().find(|field| field.name == "fov").unwrap();
+    assert_eq!(fov.current, Value::Float(1.0));
+    assert_eq!(fov.unit.as_deref(), Some("rad"));
 }

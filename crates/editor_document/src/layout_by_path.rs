@@ -4,7 +4,7 @@
 use editor_core::panels::{self, State};
 use flow_graph::projection::{self, Level};
 use flow_syntax::lisp;
-use flow_syntax::syntax::{self as s, Node, Syntax};
+use flow_syntax::syntax::{Node, Syntax};
 use flow_syntax::arena::{Draft, SyntaxBuilder, SyntaxId};
 use std::collections::BTreeMap;
 

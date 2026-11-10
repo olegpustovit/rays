@@ -1,5 +1,5 @@
-﻿//! Tests for lowering_a / shell_eval_a: the lowering parts of crates/rays_editor/test/test_editor_document.ml
-//! and test_fast_path.ml, plus the module's own checks. The parts of those files that drive the
+//! Tests for lowering_a / shell_eval_a: the lowering parts of
+//! and , plus the module's own checks. The parts of those files that drive the
 //! editor UI (delete-all through real events) or `Scene_sync` (camera write-back) are not here.
 use crate::document::{self, Home};
 use crate::document_edit;
@@ -11,15 +11,15 @@ use crate::workspace_doc::{self, TextOptions};
 use flow_check::catalog::Catalog;
 use flow_graph::flow_edit::{self as fe, ArgKey, Op};
 use flow_ir::flow_ir::gpu;
-use flow_syntax::syntax::{self as s, Node};
+use flow_syntax::syntax::{self as s};
 use std::sync::Arc;
 
 fn factories() -> Vec<sop::edit_graph::Factory> {
     sop::nodes::factories()
 }
 
-fn catalog() -> Catalog {
-    kinds::catalog(flow_sop_catalog::manifest::VERSION, &factories()).expect("catalog")
+fn catalog() -> std::sync::Arc<Catalog> {
+    kinds::shared(None).expect("catalog")
 }
 
 fn ws_of_text(text: &str) -> workspace_doc::T {
@@ -53,7 +53,7 @@ fn sha256_known_vectors() {
     assert_eq!(lowering::sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"), "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
 }
 
-// ---- test_editor_document.ml: the document boundary ----
+// ---- : the document boundary ----
 
 const DOCUMENT_TEXT: &str = r#"(workspace document
   (graph geo1 :context sop (sop/box :size [1 1 1]))
@@ -204,7 +204,7 @@ fn restore_gives_the_snapshot_back() {
     assert_eq!(again.active_camera, doc.active_camera);
 }
 
-// ---- test_fast_path.ml ----
+// ----  ----
 
 const SEA: &str = r#"(workspace sea
   (graph g :context sop [(height : float 0.5)]
@@ -240,8 +240,8 @@ fn plan_key(doc: &document::T) -> Vec<(String, flow_check::workspace::Path, Vec<
     doc.workspace.lowered.plan.nodes.iter().map(|n| (n.kind.clone(), n.site.clone(), n.iter.clone(), flow_eval::structure(&flow_syntax::value::Value::Record(n.args.clone().into())))).collect()
 }
 
-fn fast_catalog() -> Catalog {
-    kinds::catalog(1, &factories()).expect("catalog")
+fn fast_catalog() -> std::sync::Arc<Catalog> {
+    kinds::shared(None).expect("catalog")
 }
 
 #[test]
@@ -270,7 +270,9 @@ fn sketch(file: &str) -> String {
 }
 
 fn scrubs(file: &str, steps: &[(flow_check::workspace::Path, &str, Vec<i64>, &str)]) {
-    let mut doc = lower(None, &ws_of_text(&sketch(file)));
+    // Keep the same authored graph and scrub sites; large mesh/instance counts add no edit coverage.
+    let text = sketch(file).replace("(rings : int 3)", "(rings : int 1)").replace("(moons : int 8)", "(moons : int 2)").replace("(side : int 1000)", "(side : int 8)");
+    let mut doc = lower(None, &ws_of_text(&text));
     for (node, key, sub, value) in steps {
         let op = Op::SetArg { node: node.clone(), key: ArgKey::Kw((*key).to_owned()), sub: sub.clone(), value: parse1(value) };
         let ws = workspace_doc::edit(&fast_catalog(), &doc.workspace.ws, &op).expect("edit");
@@ -297,7 +299,6 @@ fn fast_path_literal_scrub_with_closure() {
 }
 
 #[test]
-#[ignore = "upstream: flow_eval static evaluation of sop/uv_sphere (gpu_sea, orrery) takes 20-40 s per lowering in a debug build, not a deadlock (parity_backlog: flow_eval static_with cost)"]
 fn fast_path_inline_scrubs_gpu_sea() {
     let waves = names(&["sea", "waves"]);
     scrubs(
@@ -315,7 +316,6 @@ fn fast_path_inline_scrubs_gpu_sea() {
 }
 
 #[test]
-#[ignore = "upstream: flow_eval static evaluation of sop/uv_sphere (gpu_sea, orrery) takes 20-40 s per lowering in a debug build, not a deadlock (parity_backlog: flow_eval static_with cost)"]
 fn fast_path_inline_scrubs_orrery() {
     let base = names(&["orrery", "base"]);
     let sun = names(&["orrery", "sun"]);

@@ -9,7 +9,6 @@ use crate::objects::root;
 use crate::settings;
 use crate::workspace_doc;
 use editor_core::panels;
-use flow_check::catalog::Catalog;
 use flow_graph::flow_edit::{arg_of, arg_text, ArgKey};
 use flow_sop::lower as l;
 use flow_sop_catalog::network as net;

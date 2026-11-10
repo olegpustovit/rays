@@ -1,7 +1,7 @@
 //! Graph projection of workspace cards and their typed ports.
 use flow_syntax::symbol::Symbol;
 use flow_sop::lisp_sop::support::*;
-use flow_sop::{catalog as fcat, port};
+use flow_sop::port;
 use flow_sop::lisp_sop;
 use flow_check::catalog::Catalog;
 use flow_check::workspace as w;

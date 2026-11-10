@@ -1,5 +1,4 @@
 use crate::kinds;
-use crate::layout_by_path as lbp;
 use crate::settings;
 use crate::workspace_doc::{self as doc, TextOptions};
 use flow_check::catalog::Catalog;
@@ -20,8 +19,8 @@ const STILL: &str = "; a small study
 
 const VALUE_STUDY: &str = "(workspace study (graph g :context value (let* [a 1.] a)))\n";
 
-fn catalog() -> Catalog {
-    kinds::catalog(1, &sop::nodes::factories()).expect("catalog")
+fn catalog() -> std::sync::Arc<Catalog> {
+    kinds::shared(None).expect("catalog")
 }
 
 fn has(text: &str, sub: &str) -> bool {
@@ -192,6 +191,7 @@ fn factories() -> Vec<sop::edit_graph::Factory> {
 }
 
 fn case(name: &str) -> String {
+    if name == "tree" { return include_str!("../../../sketches/ws_tree.rays").to_owned(); }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../specification/workspace/cases").join(format!("{name}.lisp"));
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
@@ -245,7 +245,6 @@ fn part_view() {
 }
 
 #[test]
-#[ignore = "upstream: bloom (sphere-like nodes) lowers for > 7 min in a debug build in total, never completed; assertions unverified (parity_backlog: flow_eval static_with cost)"]
 fn part_contexts() {
     use crate::{layers, lowering, objects};
     let catalog = catalog();
@@ -347,7 +346,6 @@ fn literal_spelling_changes() {
 }
 
 #[test]
-#[ignore = "slow: each lowering costs ~200 ms in a debug build (flow_eval::Host::static_with_requests); run with RAYS_SLOW=1"]
 fn part_literals() {
     use crate::literal_edit;
     let catalog = catalog();

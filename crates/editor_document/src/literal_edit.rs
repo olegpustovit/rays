@@ -431,7 +431,7 @@ fn lower_value(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
             v => v.clone(),
         }
     }
-    let mut rwv = |v: &E, hit: &mut bool| rw(v, &targets, change, hit, &set);
+    let rwv = |v: &E, hit: &mut bool| rw(v, &targets, change, hit, &set);
     let results: Vec<(Symbol, E)> = lowered.evaluated.results.iter().map(|(n, v)| (n.clone(), rwv(v, &mut hit))).collect();
     let records: w::Paths = Default::default();
     let _ = records;
