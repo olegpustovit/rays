@@ -200,7 +200,7 @@ fn part2_set_arg_beside_a_self_named_graph_ref() {
             "(workspace w\n  (graph cage :context sop (sop/box))\n  (graph scene :context scene\n    (let* [cage (scene/geometry (ref cage) :name \"cage\") camera (scene/camera :fov {fov})]\n      (scene/merge cage camera))))"
         )
     };
-    same("set arg beside a self-named graph ref", &shared("30"), set_arg(path(&["scene", "camera"]), kw("fov"), vec![], num("40")), &shared("40"));
+    same("set arg beside a self-named graph ref", &shared("0.5235987755982988"), set_arg(path(&["scene", "camera"]), kw("fov"), vec![], num("0.6981317007977318")), &shared("0.6981317007977318"));
 }
 
 #[test]

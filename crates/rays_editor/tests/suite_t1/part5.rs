@@ -61,7 +61,7 @@ pub fn run_idle_follow() {
       :shear_xy (* 0.1 (sin t)) :recompute_normals true))
   (graph scene :context scene
     (let* [s (scene/geometry (ref sea) :name "Sea")
-           camera (scene/camera :eye [7.0 4.0 7.0] :target [0 0 0] :fov 40 :follow_viewport true)
+           camera (scene/camera :eye [7.0 4.0 7.0] :target [0 0 0] :fov 0.6981317007977318 :follow_viewport true)
            key (scene/light :name "Key" :translate [4 8 2] :intensity (+ 40.0 (* 10.0 (sin t))))]
       (scene/root (scene/merge s camera key) :width 960 :height 640 :renderer "Path traced" :max_spp 64)))
   (graph editor :context editor (ui/workspace (ui/split "horizontal" (ui/graph "scene") (ui/inspector)))))"#,

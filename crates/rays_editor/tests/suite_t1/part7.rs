@@ -209,7 +209,7 @@ pub fn run_carry_reaches_no_history() {
     let m = (450., 300.);
     let e = editor::update(editor::update(e, &frame(&[], m, vec![], 1)), &frame(&[], m, vec![], 2));
     let side = editor::scene_document(&e).iter().find(|i| i.label == "side").expect("side camera").id;
-    let preview = Op::SetArg { node: vec!["scene".into(), "side".into()], key: ArgKey::Kw("fov".into()), sub: vec![], value: s::make(Node::Num("40.0".into())) };
+    let preview = Op::SetArg { node: vec!["scene".into(), "side".into()], key: ArgKey::Kw("fov".into()), sub: vec![], value: s::make(Node::Num("0.6981317007977318".into())) };
     let before = source(&e);
     let enter = rays_editor::editor_commands::Action::Enter;
     let stepped = reduce::step(e.clone(), Some(&[side]), Some(&preview), &[enter.clone()], &frame(&[], m, vec![], 3)).expect("step");

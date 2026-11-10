@@ -397,7 +397,7 @@ fn enter_camera() {
     (graph scene :context scene
       (scene/merge (scene/geometry (ref g))
         (scene/camera :name "near" :eye [2 3 6])
-        (scene/camera :name "telephoto" :eye [13 8.8 14.8] :fov 20))))"#,
+        (scene/camera :name "telephoto" :eye [13 8.8 14.8] :fov 0.3490658503988659))))"#,
     );
     with_editor(&ws, None, |e| {
         let count = std::cell::Cell::new(1);

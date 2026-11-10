@@ -1320,7 +1320,7 @@ const INSTANCES_TEXT: &str = r#"(workspace days
            all (scene/merge (ref set) cam (scene/world (ref noon) :name "Noon"))]
       (scene/root all :camera cam :renderer "Raster" :width 800 :height 450)))
   (graph night :context scene
-    (let* [cam (scene/camera :name "dusk-cam" :eye [4 2 6] :fov 30)
+    (let* [cam (scene/camera :name "dusk-cam" :eye [4 2 6] :fov 0.5235987755982988)
            all (scene/merge (ref set) cam (scene/world (ref dusk) :name "Dusk" :exposure -2))]
       (scene/root all :camera cam :renderer "Path traced" :max_spp 1024 :bounces 12
                   :width 1600 :height 900)))

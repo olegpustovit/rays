@@ -16,7 +16,7 @@ const STUDIO: &str = r##"(workspace studio
     (material/standard :name "clay" :color "#b0680f" :roughness 0.6))
   (graph scene :context scene
     (let* [plants (scene/geometry (ref garden) :name "garden")
-           cam (scene/camera :eye [0.5 1.8 6] :target [0 0.3 0] :fov 50)
+           cam (scene/camera :eye [0.5 1.8 6] :target [0 0.3 0] :fov 0.8726646259971648)
            sun (scene/light :shape "Directional" :translate [8 11.2 6.4] :intensity 1)
            all (scene/merge plants cam sun)]
       (scene/root all :camera cam)))
