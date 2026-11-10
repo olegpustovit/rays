@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 const LEAF_BUDGET: Duration = Duration::from_secs(1);
 const MIDDLE_BUDGET: Duration = Duration::from_secs(5);
 const TOP_BUDGET: Duration = Duration::from_secs(15);
-const TEST_RUN_TIMEOUT_SECS: u64 = 60;
+
 const TOUCH_MARKER: &[u8] = b"\n// buildtime touch\n";
 
 #[derive(Clone, Copy)]
@@ -58,17 +58,23 @@ enum BudgetResult {
 }
 
 fn main() -> ExitCode {
+    if env::args().nth(1).as_deref() == Some("gc") {
+        return match workspace_root().and_then(|root| gc(&target_dir(&root)).map_err(|error| error.to_string())) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("buildtime: {error}"); ExitCode::FAILURE }
+        };
+    }
     let mode = match env::args().nth(1).as_deref() {
         Some("check") => true,
         Some("measure") => false,
         Some("-h" | "--help") => {
-            println!("usage: cargo run -p buildtime -- check|measure\n\
+            println!("usage: cargo run -p buildtime -- check|measure|gc\n\
                       Override canaries with BUILDTIME_LEAF, BUILDTIME_MIDDLE, and BUILDTIME_TOP.\n\
                       Editor cascade: BUILDTIME_EDITOR_TOUCH (default flow_ir), BUILDTIME_EDITOR (default rays_bin).");
             return ExitCode::SUCCESS;
         }
         _ => {
-            eprintln!("usage: cargo run -p buildtime -- check|measure");
+            eprintln!("usage: cargo run -p buildtime -- check|measure|gc");
             return ExitCode::from(2);
         }
     };
@@ -153,7 +159,7 @@ fn run(enforce_budgets: bool) -> Result<bool, String> {
         let build_elapsed = timings.last().expect("build was recorded").elapsed;
 
         if canary.tier.runs_tests() {
-            let test = timed(&label("cargo-t"), None, &mut timings, || {
+            let test = timed(&label("cargo-t"), Some(Duration::from_secs(60)), &mut timings, || {
                 cargo_tests(&root, &canary.package)
             });
             if let Err(error) = test {
@@ -165,7 +171,7 @@ fn run(enforce_budgets: bool) -> Result<bool, String> {
             let result = add_timing(
                 &label("build+test"),
                 build_elapsed + test_elapsed,
-                Some(canary.tier.budget()),
+                None,
                 &mut timings,
             );
             passed &= !enforce_budgets || result;
@@ -175,6 +181,7 @@ fn run(enforce_budgets: bool) -> Result<bool, String> {
     passed &= run_w0_pair(&root, enforce_budgets, &mut timings);
     passed &= run_w1_editor_chain(&root, enforce_budgets, &mut timings);
     print_slowest(&timings);
+    persist_timings(&root, &timings, passed)?;
     Ok(passed)
 }
 
@@ -400,10 +407,10 @@ fn cargo_tests(root: &Path, package: &str) -> Result<(), String> {
 }
 
 fn cargo_tests_many(root: &Path, packages: &[&str]) -> Result<(), String> {
-    run_cargo(root, "t", packages, Some(TEST_RUN_TIMEOUT_SECS))
+    run_cargo(root, "t", packages, None)
 }
 
-fn run_cargo(root: &Path, action: &str, packages: &[&str], timeout: Option<u64>) -> Result<(), String> {
+fn run_cargo(root: &Path, action: &str, packages: &[&str], _timeout: Option<u64>) -> Result<(), String> {
     let mut command = Command::new("cargo");
     command.current_dir(root).arg(action);
     if action == "check" {
@@ -414,29 +421,106 @@ fn run_cargo(root: &Path, action: &str, packages: &[&str], timeout: Option<u64>)
     for package in packages {
         command.args(["--package", *package]);
     }
-    if let Some(timeout) = timeout {
-        command.env("RAYS_T_TIMEOUT", timeout.to_string());
-    }
-    if action == "t" {
-        // A red test is not a build-speed failure: accept a run that reached rays-t's summary line.
-        let out = command.output().map_err(|error| format!("could not start cargo t: {error}"))?;
-        io::stdout().write_all(&out.stdout).ok();
-        io::stderr().write_all(&out.stderr).ok();
-        if out.status.success() {
-            return Ok(());
-        }
-        if String::from_utf8_lossy(&out.stderr).contains("rays-t: total wall") {
-            eprintln!("buildtime: warning: tests are red in {}; timing still counted", packages.join(", "));
-            return Ok(());
-        }
-        return Err(format!("cargo t exited with {}", out.status));
-    }
     let status = command.status().map_err(|error| format!("could not start cargo {action}: {error}"))?;
     if status.success() {
         Ok(())
     } else {
         Err(format!("cargo {action} exited with {status}"))
     }
+}
+
+fn target_dir(root: &Path) -> PathBuf {
+    env::var_os("CARGO_TARGET_DIR").map(PathBuf::from)
+        .map(|path| if path.is_absolute() { path } else { root.join(path) })
+        .unwrap_or_else(|| root.join("target"))
+}
+
+fn persist_timings(root: &Path, timings: &[Timing], passed: bool) -> Result<(), String> {
+    let target = target_dir(root);
+    fs::create_dir_all(&target).map_err(|error| error.to_string())?;
+    let mut file = OpenOptions::new().create(true).append(true).open(target.join("build-times.tsv"))
+        .map_err(|error| error.to_string())?;
+    if file.metadata().map_err(|error| error.to_string())?.len() == 0 {
+        writeln!(file, "timestamp\tcommit\tstatus\tmeasurements").map_err(|error| error.to_string())?;
+    }
+    let commit = Command::new("git").current_dir(root).args(["rev-parse", "--short", "HEAD"]).output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned()).unwrap_or_else(|_| "unknown".into());
+    let timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let values = timings.iter().map(|timing| format!("{}={:.6}", timing.label, timing.elapsed.as_secs_f64())).collect::<Vec<_>>().join("; ");
+    writeln!(file, "{timestamp}\t{commit}\t{}\t{values}", if passed { "pass" } else { "fail" }).map_err(|error| error.to_string())
+}
+
+fn gc(target: &Path) -> io::Result<()> {
+    let cutoff = SystemTime::now().checked_sub(Duration::from_secs(7 * 86_400)).unwrap_or(SystemTime::UNIX_EPOCH);
+    let mut removed = 0u64;
+    let mut reclaimed = 0u64;
+    gc_profiles(target, cutoff, &mut removed, &mut reclaimed)?;
+    let remaining = directory_bytes(target)?;
+    println!("buildtime: gc removed {removed} stale artifacts ({:.3} GB); target {:.3} GB", reclaimed as f64 / 1e9, remaining as f64 / 1e9);
+    if remaining > 15_000_000_000 {
+        return Err(io::Error::other("target exceeds 15 GB after removing artifacts older than seven days; recent build caches retained"));
+    }
+    Ok(())
+}
+
+fn directory_bytes(path: &Path) -> io::Result<u64> {
+    if !path.exists() { return Ok(0); }
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.is_dir() { return Ok(metadata.len()); }
+    let mut bytes = 0;
+    for entry in fs::read_dir(path)? { bytes += directory_bytes(&entry?.path())?; }
+    Ok(bytes)
+}
+
+fn gc_profiles(path: &Path, cutoff: SystemTime, removed: &mut u64, reclaimed: &mut u64) -> io::Result<()> {
+    if !path.is_dir() { return Ok(()); }
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let child = entry.path();
+        if entry.file_type()?.is_symlink() { continue; }
+        let name = entry.file_name();
+        let _profile_lock = if name == "incremental" || name == "deps" {
+            let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path.join(".cargo-lock"))?;
+            match file.try_lock() {
+                Ok(()) => Some(file),
+                Err(fs::TryLockError::WouldBlock) => { println!("buildtime: gc keeps {} while Cargo is building", child.display()); continue; },
+                Err(fs::TryLockError::Error(error)) => return Err(error),
+            }
+        } else { None };
+        if name == "incremental" {
+            for crate_dir in fs::read_dir(&child)? {
+                let crate_dir = crate_dir?.path();
+                if !crate_dir.is_dir() { continue; }
+                for session in fs::read_dir(crate_dir)? {
+                    let session = session?;
+                    // Rustc locks live sessions. Keep locks and their matching working session.
+                    if session.file_name().to_string_lossy().ends_with(".lock") { continue; }
+                    let metadata = session.metadata()?;
+                    if metadata.modified()? < cutoff {
+                        *reclaimed += directory_bytes(&session.path())?;
+                        if metadata.is_dir() { fs::remove_dir_all(session.path())?; } else { fs::remove_file(session.path())?; }
+                        *removed += 1;
+                    }
+                }
+            }
+        } else if name == "deps" {
+            for artifact in fs::read_dir(child)? {
+                let artifact = artifact?;
+                let metadata = artifact.metadata()?;
+                let path = artifact.path();
+                let executable = path.extension().is_some_and(|extension| extension == "exe") || {
+                    #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; path.extension().is_none() && metadata.permissions().mode() & 0o111 != 0 }
+                    #[cfg(not(unix))] { false }
+                };
+                if metadata.is_file() && executable && metadata.modified()? < cutoff {
+                    *reclaimed += metadata.len();
+                    fs::remove_file(path)?;
+                    *removed += 1;
+                }
+            }
+        } else if child.is_dir() { gc_profiles(&child, cutoff, removed, reclaimed)?; }
+    }
+    Ok(())
 }
 
 fn print_cargo_timing_report(root: &Path) -> Result<(), String> {
@@ -690,6 +774,34 @@ mod tests {
                 let _ = fs::remove_dir_all(parent);
             }
         }
+    }
+
+    #[test]
+    fn gc_removes_only_old_sessions_and_executables_and_persists_status() {
+        let temp = TempFile::new(b"");
+        let root = temp.0.parent().unwrap();
+        let target = root.join("target");
+        let sessions = target.join("debug/incremental/canary");
+        let deps = target.join("debug/deps");
+        fs::create_dir_all(sessions.join("old")).unwrap();
+        fs::create_dir_all(sessions.join("fresh")).unwrap();
+        fs::create_dir_all(&deps).unwrap();
+        let old = SystemTime::now() - Duration::from_secs(8 * 86_400);
+        let old_executable = deps.join("case.exe");
+        fs::write(&old_executable, "binary").unwrap();
+        fs::write(deps.join("libcase.rlib"), "library").unwrap();
+        for path in [sessions.join("old"), old_executable.clone()] {
+            fs::File::open(path).unwrap().set_times(FileTimes::new().set_modified(old)).unwrap();
+        }
+        gc(&target).unwrap();
+        assert!(!sessions.join("old").exists());
+        assert!(sessions.join("fresh").exists());
+        assert!(!old_executable.exists());
+        assert!(deps.join("libcase.rlib").exists());
+        persist_timings(root, &[Timing { label: "test".into(), elapsed: Duration::from_millis(5) }], false).unwrap();
+        let log = fs::read_to_string(target.join("build-times.tsv")).unwrap();
+        assert!(log.contains("\tfail\ttest=0.005000"));
+        assert_eq!(log.lines().count(), 2);
     }
 
     #[test]

@@ -1,16 +1,18 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{self, Child, Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const WHOLE_RUN_DEFAULT: Duration = Duration::from_secs(60);
+const SLOW_RUN_TIMEOUT: Duration = Duration::from_secs(600);
+const QUALIFICATION_TIMEOUT: Duration = Duration::from_secs(240);
 const BUILD_TIMEOUT: Duration = Duration::from_secs(900);
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 const SLOW_TEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -33,6 +35,7 @@ struct Completed {
 
 struct Args {
     cargo: Vec<OsString>,
+    all: bool,
     filter: Option<String>,
     target_dir: Option<PathBuf>,
     test_args: Vec<OsString>,
@@ -46,12 +49,15 @@ struct TestExecutable {
     crate_name: String,
 }
 
+#[derive(Clone)]
 struct TestTiming {
     crate_name: String,
     test: String,
     elapsed: Duration,
+    status: &'static str,
 }
 
+#[derive(Clone)]
 struct TestCase {
     order: usize,
     executable: PathBuf,
@@ -64,6 +70,7 @@ struct TestOutcome {
     timing: TestTiming,
     failure_code: i32,
     whole_timeout: bool,
+    retry: bool,
 }
 
 struct RunReport {
@@ -82,10 +89,11 @@ impl RunReport {
             .iter()
             .fold(Duration::ZERO, |total, timing| total.saturating_add(timing.elapsed));
         eprintln!(
-            "rays-t: total wall {:.3}s; {:.3}s across {} tests",
+            "rays-t: total wall {:.3}s; {:.3}s across {} tests; {} skipped",
             self.started.elapsed().as_secs_f64(),
             test_time.as_secs_f64(),
-            self.timings.len()
+            self.timings.len(),
+            self.timings.iter().filter(|timing| timing.status == "skip").count()
         );
         let mut slowest: Vec<_> = self.timings.iter().collect();
         slowest.sort_by(|left, right| right.elapsed.cmp(&left.elapsed));
@@ -107,19 +115,22 @@ fn append_timings(target_dir: &Path, timings: &[TestTiming]) -> io::Result<()> {
         return Ok(());
     }
     let path = target_dir.join("t-times.tsv");
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    if file.metadata()?.len() == 0 {
-        file.write_all(b"date\tcrate\ttest\tseconds\n")?;
-    }
     let date = current_date();
+    let days = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() / 86_400;
+    let (year, month, day) = civil_date(days.saturating_sub(30) as i64);
+    let cutoff = format!("{year:04}-{month:02}-{day:02}");
+    let old = fs::read_to_string(&path).unwrap_or_default();
+    let mut file = fs::File::create(&path)?;
+    file.write_all(b"date\tcrate\ttest\tseconds\tstatus\tcommit\n")?;
+    for line in old.lines().skip(1).filter(|line| line.split('\t').next().is_some_and(|day| day >= cutoff.as_str())) {
+        writeln!(file, "{line}{}", if line.split('\t').count() == 4 { "\tunknown\tunknown" } else { "" })?;
+    }
+    let commit = Command::new("git").args(["rev-parse", "--short", "HEAD"]).output()
+        .ok().filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned()).unwrap_or_else(|| "unknown".into());
     for timing in timings {
-        writeln!(
-            file,
-            "{date}\t{}\t{}\t{:.6}",
-            escape_tsv(&timing.crate_name),
-            escape_tsv(&timing.test),
-            timing.elapsed.as_secs_f64()
-        )?;
+        writeln!(file, "{date}\t{}\t{}\t{:.6}\t{}\t{commit}", escape_tsv(&timing.crate_name),
+            escape_tsv(&timing.test), timing.elapsed.as_secs_f64(), timing.status)?;
     }
     Ok(())
 }
@@ -162,21 +173,6 @@ fn main() {
 }
 
 fn run() -> i32 {
-    let timeout = match env::var("RAYS_T_TIMEOUT") {
-        Ok(value) => parse_timeout(Some(&value)),
-        Err(env::VarError::NotPresent) => parse_timeout(None),
-        Err(env::VarError::NotUnicode(_)) => {
-            eprintln!("rays-t: RAYS_T_TIMEOUT must be a non-negative integer number of seconds");
-            return 2;
-        }
-    };
-    let timeout = match timeout {
-        Ok(timeout) => timeout,
-        Err(message) => {
-            eprintln!("rays-t: {message}");
-            return 2;
-        }
-    };
     let args = match parse_args(env::args_os().skip(1)) {
         Ok(args) => args,
         Err(message) => {
@@ -185,6 +181,8 @@ fn run() -> i32 {
         }
     };
 
+    if args.all { return run_all(&args); }
+    let timeout = Some(run_timeout(args.test_timeout));
     let run_started = Instant::now();
     let target_dir = args.target_dir.clone().unwrap_or_else(default_target_dir);
     let mut report = RunReport {
@@ -212,6 +210,49 @@ fn run() -> i32 {
         eprintln!("rays-t: could not append test timings: {error}");
         return if status == 0 { 1 } else { status };
     }
+    status
+}
+
+fn run_timeout(case: Duration) -> Duration {
+    if case == SLOW_TEST_TIMEOUT { SLOW_RUN_TIMEOUT } else { WHOLE_RUN_DEFAULT }
+}
+
+fn run_all(args: &Args) -> i32 {
+    let started = Instant::now();
+    let gc = Command::new("cargo").args(["run", "-q", "-p", "buildtime", "--", "gc"]).status();
+    if !gc.is_ok_and(|status| status.success()) { return 1; }
+    let output = match Command::new("cargo").args(["metadata", "--no-deps", "--format-version=1"]).output() {
+        Ok(output) if output.status.success() => output,
+        _ => { eprintln!("rays-t: cannot read workspace metadata"); return 1; }
+    };
+    let json = String::from_utf8_lossy(&output.stdout);
+    let Some(packages) = json_field(&json, "packages") else { return 1; };
+    let mut rows = Vec::new();
+    let mut rest = packages.trim_start_matches('[').trim();
+    let mut status = 0;
+    while rest.starts_with('{') {
+        let Some(end) = json_value_end(rest) else { return 1; };
+        let package = &rest[..end];
+        let Some(name) = json_string_field(package, "name") else { return 1; };
+        let mut command = match env::current_exe() { Ok(path) => Command::new(path), Err(_) => return 1 };
+        command.args(&args.cargo).args(["-p", &name]);
+        if args.test_timeout == SLOW_TEST_TIMEOUT { command.args(["--profile", "slow"]); }
+        if let Some(filter) = &args.filter { command.arg(filter); }
+        if args.list { command.arg("--list"); }
+        if !args.test_args.is_empty() { command.arg("--").args(&args.test_args); }
+        let crate_started = Instant::now();
+        status = match run_command(&mut command, started, Some(QUALIFICATION_TIMEOUT), None, false) {
+            Ok(RunResult::Finished(output)) => status_code(output.status),
+            Ok(RunResult::TimedOut { .. }) => 124,
+            Err(error) => { eprintln!("rays-t: {error}"); 1 }
+        };
+        rows.push((name, crate_started.elapsed(), status));
+        if status != 0 { break; }
+        rest = rest[end..].trim_start().trim_start_matches(',').trim_start();
+    }
+    eprintln!("rays-t: qualification summary (crate / seconds / status)");
+    for (name, elapsed, status) in rows { eprintln!("{name}\t{:.3}\t{status}", elapsed.as_secs_f64()); }
+    eprintln!("rays-t: qualification wall {:.3}s", started.elapsed().as_secs_f64());
     status
 }
 
@@ -355,17 +396,25 @@ fn run_tests(
     // Revisit per-suite scheduling if larger hosts need more throughput.
     let workers = thread::available_parallelism().map_or(1, |count| count.get()).min(4);
     let mut failure_code = 0;
-    let outcomes = run_test_batch(ordinary, workers, args, run_started, timeout);
+    let baselines = recorded_timings(&args.target_dir.clone().unwrap_or_else(default_target_dir));
+    let outcomes = run_test_batch(ordinary, workers, args, run_started, timeout, &baselines);
     if record_outcomes(outcomes, timings, &mut failure_code) {
         return report_whole_timeout(run_started);
     }
     gpu.extend(serial);
-    for case in gpu {
+    let mut gpu = VecDeque::from(gpu);
+    while let Some(case) = gpu.pop_front() {
         if remaining(run_started, timeout).is_some_and(|remaining| remaining.is_zero()) {
             return report_whole_timeout(run_started);
         }
-        let outcome = run_test_case(case, args, run_started, timeout);
-        if record_outcomes(std::iter::once(outcome), timings, &mut failure_code) {
+        let grouped = case.executable.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("gpu_all-"));
+        let outcomes = if grouped {
+            let executable = case.executable.clone();
+            let mut group = vec![case];
+            while gpu.front().is_some_and(|next| next.executable == executable) { group.push(gpu.pop_front().unwrap()); }
+            run_gpu_group(group, args, run_started, timeout)
+        } else { vec![run_test_case(case, args, run_started, timeout)] };
+        if record_outcomes(outcomes, timings, &mut failure_code) {
             return report_whole_timeout(run_started);
         }
     }
@@ -389,6 +438,7 @@ fn run_test_batch(
     args: &Args,
     run_started: Instant,
     timeout: Option<Duration>,
+    baselines: &HashMap<(String, String), Duration>,
 ) -> Vec<TestOutcome> {
     if cases.is_empty() {
         return Vec::new();
@@ -398,16 +448,20 @@ fn run_test_batch(
     let queue = Mutex::new(VecDeque::from(cases));
     let results = Mutex::new(Vec::with_capacity(result_capacity));
     let stop = AtomicBool::new(false);
+    let limit = AtomicUsize::new(worker_count);
+    let retries = Mutex::new(Vec::new());
 
     thread::scope(|scope| {
-        for _ in 0..worker_count {
+        for worker in 0..worker_count {
+            let limit = &limit;
+            let retries = &retries;
             let queue = &queue;
             let results = &results;
             let stop = &stop;
             let args = args;
             let run_started = run_started;
             scope.spawn(move || loop {
-                if stop.load(Ordering::Relaxed) {
+                if stop.load(Ordering::Relaxed) || worker >= limit.load(Ordering::Relaxed) {
                     break;
                 }
                 if remaining(run_started, timeout).is_some_and(|left| left.is_zero()) {
@@ -421,7 +475,14 @@ fn run_test_batch(
                 let Some(case) = case else {
                     break;
                 };
-                let outcome = run_test_case(case, args, run_started, timeout);
+                let mut outcome = run_test_case(case.clone(), args, run_started, timeout);
+                let contended = baselines.get(&(case.crate_name.clone(), case.name.clone()))
+                    .is_some_and(|baseline| outcome.timing.elapsed > baseline.saturating_mul(2));
+                if !outcome.whole_timeout && (contended || outcome.retry) {
+                    limit.store(2, Ordering::Relaxed);
+                    retries.lock().unwrap_or_else(|p| p.into_inner()).push(case);
+                    outcome.retry = true;
+                }
                 let whole_timeout = outcome.whole_timeout;
                 results
                     .lock()
@@ -438,6 +499,12 @@ fn run_test_batch(
     let mut outcomes = results
         .into_inner()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    for case in retries.into_inner().unwrap_or_else(|p| p.into_inner()) {
+        eprintln!("rays-t: retrying {}::{} alone after contention", case.crate_name, case.name);
+        let outcome = run_test_case(case, args, run_started, timeout);
+        outcomes.retain(|old| old.order != outcome.order);
+        outcomes.push(outcome);
+    }
     outcomes.sort_by_key(|outcome| outcome.order);
     outcomes
 }
@@ -450,19 +517,28 @@ fn run_test_case(
 ) -> TestOutcome {
     let test_started = Instant::now();
     let mut command = Command::new(&case.executable);
-    command.args(&args.test_args).arg("--exact").arg(&case.name);
+    command.args(&args.test_args).arg("--nocapture").arg("--exact").arg(&case.name);
+    let mut skipped = false;
     let (elapsed, failure_code, whole_timeout) =
-        match run_command(&mut command, run_started, timeout, Some(args.test_timeout), false) {
-            Ok(RunResult::Finished(output)) => (
+        match run_command(&mut command, run_started, timeout, Some(args.test_timeout), true) {
+            Ok(RunResult::Finished(output)) => {
+                print_bytes(io::stdout(), &output.stdout);
+                print_bytes(io::stderr(), &output.stderr);
+                skipped = String::from_utf8_lossy(&output.stdout).contains("RAYS_TEST_SKIP:")
+                    || String::from_utf8_lossy(&output.stderr).contains("RAYS_TEST_SKIP:");
+                (
                 test_started.elapsed(),
-                if output.status.success() {
+                if skipped && env::var("RAYS_ALLOW_SKIP").as_deref() != Ok("1") {
+                    eprintln!("rays-t: skipped case fails without RAYS_ALLOW_SKIP=1");
+                    1
+                } else if output.status.success() {
                     0
                 } else {
                     eprintln!("rays-t: test {}::{} failed ({})", case.crate_name, case.name, output.status);
                     status_code(output.status)
                 },
                 false,
-            ),
+            )},
             Ok(RunResult::TimedOut { elapsed, whole_run, .. }) => {
                 if !whole_run {
                     eprintln!(
@@ -493,10 +569,98 @@ fn run_test_case(
             crate_name: case.crate_name,
             test: case.name,
             elapsed,
+            status: if skipped { "skip" } else if failure_code == 124 { "timeout" } else if failure_code == 0 { "pass" } else { "fail" },
         },
         failure_code,
         whole_timeout,
+        retry: failure_code == 124 && !whole_timeout,
     }
+}
+
+fn run_gpu_group(cases: Vec<TestCase>, args: &Args, run_started: Instant, timeout: Option<Duration>) -> Vec<TestOutcome> {
+    use std::io::BufRead;
+    let mut command = Command::new(&cases[0].executable);
+    command.arg("--rays-group").args(cases.iter().map(|case| &case.name));
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    let spawned = mem_sys::windows_process::Job::spawn(&mut command);
+    #[cfg(not(windows))]
+    let spawned = spawn(&mut command);
+    #[cfg(windows)]
+    let (mut child, job) = match spawned { Ok(value) => value, Err(_) => return vec![run_test_case(cases[0].clone(), args, run_started, timeout)] };
+    #[cfg(not(windows))]
+    let mut child = match spawned { Ok(child) => child, Err(_) => return vec![run_test_case(cases[0].clone(), args, run_started, timeout)] };
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().map(read_pipe);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let reader = thread::spawn(move || {
+        for line in io::BufReader::new(stdout).lines() {
+            match line { Ok(line) => { if sender.send(line).is_err() { break; } }, Err(_) => break }
+        }
+    });
+    let mut outcomes = Vec::new();
+    let mut active = None;
+    let mut started = Instant::now();
+    let mut skipped = false;
+    let status;
+    let mut whole_timeout;
+    let mut timed_out = false;
+    loop {
+        whole_timeout = remaining(run_started, timeout).is_some_and(|left| left.is_zero());
+        if whole_timeout || started.elapsed() >= args.test_timeout {
+            timed_out = true;
+            status = terminate_tree(&mut child, #[cfg(windows)] &job).ok();
+            break;
+        }
+        match receiver.recv_timeout(POLL_INTERVAL) {
+            Ok(line) => {
+                println!("{line}");
+                if let Some(name) = line.strip_prefix("RAYS_CASE_START:") {
+                    active = cases.iter().position(|case| case.name == name);
+                    started = Instant::now();
+                    skipped = false;
+                } else if line.contains("RAYS_TEST_SKIP:") { skipped = true; }
+                else if let Some(value) = line.strip_prefix("RAYS_CASE_END:") {
+                    if let Some((name, seconds)) = value.split_once('\t') {
+                        if let Some(case) = cases.iter().find(|case| case.name == name) {
+                            let elapsed = seconds.parse::<f64>().ok().filter(|value| value.is_finite() && *value >= 0.0)
+                                .map(Duration::from_secs_f64).unwrap_or_else(|| started.elapsed());
+                            outcomes.push(TestOutcome { order: case.order,
+                                timing: TestTiming { crate_name: case.crate_name.clone(), test: case.name.clone(), elapsed, status: if skipped { "skip" } else { "pass" } },
+                                failure_code: if skipped && env::var("RAYS_ALLOW_SKIP").as_deref() != Ok("1") { 1 } else { 0 },
+                                whole_timeout: false, retry: false });
+                            active = None;
+                            started = Instant::now();
+                        }
+                    }
+                }
+            },
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => { status = child.wait().ok(); break; },
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if let Ok(Some(exit)) = child.try_wait() { status = Some(exit); break; }
+            }
+        }
+    }
+    // Reap readers after the process group is gone, including descendants that held a pipe open.
+    if timed_out || status.is_some_and(|exit| !exit.success()) {
+        let _ = terminate_tree(&mut child, #[cfg(windows)] &job);
+    }
+    let _ = reader.join();
+    if let Ok(output) = join_pipe(stderr) { print_bytes(io::stderr(), &output); }
+    if let Some(index) = active.or_else(|| (outcomes.len() < cases.len()).then_some(outcomes.len())) {
+        let case = &cases[index];
+        outcomes.push(TestOutcome { order: case.order,
+            timing: TestTiming { crate_name: case.crate_name.clone(), test: case.name.clone(), elapsed: started.elapsed(), status: if skipped { "skip" } else if timed_out { "timeout" } else { "fail" } },
+            failure_code: if timed_out { 124 } else { status.map_or(1, status_code).max(1) }, whole_timeout, retry: false });
+        eprintln!("rays-t: grouped case {}::{} failed", case.crate_name, case.name);
+    }
+    if !timed_out && status.is_some_and(|exit| !exit.success()) && outcomes.len() == cases.len() {
+        if let Some(last) = outcomes.last_mut() {
+            last.failure_code = status.map_or(1, status_code);
+            if last.timing.status == "pass" { last.timing.status = "fail"; }
+        }
+    }
+    outcomes
 }
 
 fn record_outcomes(
@@ -516,21 +680,25 @@ fn record_outcomes(
     }
     whole_timeout
 }
-fn parse_timeout(value: Option<&str>) -> Result<Option<Duration>, &'static str> {
-    match value {
-        None => Ok(Some(WHOLE_RUN_DEFAULT)),
-        Some(value) => {
-            let seconds = value
-                .parse::<u64>()
-                .map_err(|_| "RAYS_T_TIMEOUT must be a non-negative integer number of seconds")?;
-            Ok((seconds != 0).then(|| Duration::from_secs(seconds)))
+fn recorded_timings(target: &Path) -> HashMap<(String, String), Duration> {
+    let mut times = HashMap::new();
+    for row in fs::read_to_string(target.join("t-times.tsv")).unwrap_or_default().lines().skip(1) {
+        let columns: Vec<_> = row.split('\t').collect();
+        if columns.len() >= 4 && (columns.len() == 4 || columns[4] == "pass") {
+            if let Ok(seconds) = columns[3].parse::<f64>() {
+                if seconds.is_finite() && seconds > 0.0 {
+                    times.insert((columns[1].into(), columns[2].into()), Duration::from_secs_f64(seconds));
+                }
+            }
         }
     }
+    times
 }
 
 fn parse_args(args: impl Iterator<Item = OsString>) -> Result<Args, String> {
     let mut args = args.peekable();
     let mut cargo = Vec::new();
+    let mut all = false;
     let mut filter = None;
     let mut target_dir = None;
     let mut test_args = Vec::new();
@@ -559,6 +727,7 @@ fn parse_args(args: impl Iterator<Item = OsString>) -> Result<Args, String> {
             }
             break;
         }
+        if text == "--all" { all = true; continue; }
         if text == "--list" {
             list = true;
             continue;
@@ -653,7 +822,7 @@ fn parse_args(args: impl Iterator<Item = OsString>) -> Result<Args, String> {
         }
     }
 
-    Ok(Args { cargo, filter, target_dir, test_args, ignored, list, test_timeout })
+    Ok(Args { cargo, all, filter, target_dir, test_args, ignored, list, test_timeout })
 }
 
 fn default_target_dir() -> PathBuf {
@@ -848,11 +1017,18 @@ fn test_executables(output: &[u8]) -> io::Result<Vec<TestExecutable>> {
         let Some(path) = json_string_field(line, "executable") else {
             continue;
         };
-        let crate_name = json_string_field(line, "package_id")
+        let crate_name = json_string_field(line, "manifest_path")
+            .and_then(|path| fs::read_to_string(path).ok())
+            .and_then(|manifest| manifest.lines().find_map(|line| {
+                let (key, value) = line.split_once('=')?;
+                (key.trim() == "name").then(|| value.trim().trim_matches('"').to_owned())
+            }))
+            .or_else(|| json_string_field(line, "package_id")
             .and_then(|id| {
                 id.rsplit_once('#')
                     .and_then(|(_, name)| name.split_once('@').map(|(name, _)| name.to_owned()))
             })
+            )
             .or_else(|| json_string_field(target, "name"))
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing package name"))?;
         let path = PathBuf::from(path);
@@ -1073,12 +1249,58 @@ mod tests {
         ))
     }
 
+    #[cfg(unix)]
     #[test]
-    fn timeout_parsing_handles_default_disable_and_values() {
-        assert_eq!(parse_timeout(None), Ok(Some(Duration::from_secs(60))));
-        assert_eq!(parse_timeout(Some("0")), Ok(None));
-        assert_eq!(parse_timeout(Some("7")), Ok(Some(Duration::from_secs(7))));
-        assert!(parse_timeout(Some("invalid")).is_err());
+    fn grouped_gpu_cases_keep_individual_timings_and_hard_deadlines() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_path("group");
+        fs::create_dir_all(&root).unwrap();
+        let fixture = root.join("gpu_all-fixture");
+        fs::write(&fixture, "#!/bin/sh\nprintf 'RAYS_CASE_START:first\\nRAYS_CASE_END:first\\t0.001000\\nRAYS_CASE_START:second\\n'\nsleep 2\n").unwrap();
+        fs::set_permissions(&fixture, fs::Permissions::from_mode(0o755)).unwrap();
+        let cases = ["first", "second"].into_iter().enumerate().map(|(order, name)| TestCase {
+            order, executable: fixture.clone(), crate_name: "fixture".into(), name: name.into(),
+        }).collect();
+        let mut args = parse_args(std::iter::empty()).unwrap();
+        args.test_timeout = Duration::from_millis(500);
+        let outcomes = run_gpu_group(cases, &args, Instant::now(), Some(Duration::from_secs(1)));
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(outcomes[0].failure_code, 0);
+        assert_eq!(outcomes[0].timing.elapsed, Duration::from_millis(1));
+        assert_eq!(outcomes[1].failure_code, 124);
+        assert!(outcomes[1].timing.elapsed < Duration::from_secs(1));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skipping_case_fails_by_default_and_is_counted_when_allowed() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_path("skip");
+        fs::create_dir_all(&root).unwrap();
+        let fixture = root.join("case");
+        fs::write(&fixture, "#!/bin/sh\ncase \"$*\" in *--list*--ignored*) exit 0;; *--list*) echo 'fixture: test';; *) echo 'RAYS_TEST_SKIP: missing adapter';; esac\n").unwrap();
+        fs::set_permissions(&fixture, fs::Permissions::from_mode(0o755)).unwrap();
+        let cargo = root.join("cargo");
+        let artifact = format!(r#"{{"reason":"compiler-artifact","package_id":"path+file:///fixture#fixture@0.1.0","target":{{"name":"fixture","test":true}},"executable":"{}"}}"#, fixture.display());
+        fs::write(&cargo, format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", artifact)).unwrap();
+        fs::set_permissions(&cargo, fs::Permissions::from_mode(0o755)).unwrap();
+        let runner = default_target_dir().join("debug/rays-t");
+        let path = env::join_paths(std::iter::once(root.clone()).chain(env::split_paths(&env::var_os("PATH").unwrap_or_default()))).unwrap();
+        for allowed in [false, true] {
+            let output = Command::new(&runner).arg("--target-dir").arg(root.join("target"))
+                .env("PATH", &path).env("RAYS_ALLOW_SKIP", if allowed { "1" } else { "0" })
+                .env("RAYS_T_TIMEOUT", "0").output().unwrap();
+            assert_eq!(output.status.success(), allowed, "{}", String::from_utf8_lossy(&output.stderr));
+            assert!(String::from_utf8_lossy(&output.stderr).contains("1 skipped"));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fixed_timeouts_cannot_be_disabled_by_environment() {
+        assert_eq!(run_timeout(TEST_TIMEOUT), Duration::from_secs(60));
+        assert_eq!(run_timeout(SLOW_TEST_TIMEOUT), Duration::from_secs(600));
     }
 
     #[test]
@@ -1312,15 +1534,16 @@ mod tests {
                 crate_name: "test\tcrate".into(),
                 test: "module::case\nname".into(),
                 elapsed: Duration::from_millis(1250),
+                status: "fail",
             }],
         )
         .unwrap();
         let output = fs::read_to_string(target_dir.join("t-times.tsv")).unwrap();
         let rows: Vec<_> = output.lines().collect();
-        assert_eq!(rows[0], "date\tcrate\ttest\tseconds");
+        assert_eq!(rows[0], "date\tcrate\ttest\tseconds\tstatus\tcommit");
         let (date, row) = rows[1].split_once('\t').unwrap();
         assert_eq!(date.len(), 10);
-        assert_eq!(row, "test\\tcrate\tmodule::case\\nname\t1.250000");
+        assert!(row.starts_with("test\\tcrate\tmodule::case\\nname\t1.250000\tfail\t"));
         fs::remove_dir_all(target_dir).unwrap();
     }
 

@@ -7,3 +7,6 @@ rust-version.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 mem_sys = { path = "../../crates/mem_sys" }
+
+[lints]
+workspace = true

@@ -288,6 +288,10 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
             if tokens.get(bracket).is_some_and(|next| next.text == "[") {
                 if let Some(end) = matching(&tokens, bracket, "[", "]") {
                     let attribute = &tokens[bracket + 1..end];
+                    if attribute.first().is_some_and(|part| part.text == "ignore")
+                        || attribute.first().is_some_and(|part| part.text == "cfg_attr") && attribute.iter().any(|part| part.text == "ignore") {
+                        issue(&mut issues, path, token.line, "ignored tests are forbidden; fix, shrink or delete the case");
+                    }
                     for (offset, part) in attribute.iter().enumerate() {
                         if part.text == "derive" && attribute.get(offset + 1).is_some_and(|next| next.text == "(") {
                             if let Some(derive_end) = matching(attribute, offset + 1, "(", ")") {
@@ -522,7 +526,33 @@ fn shape(workspace: &Path) -> Result<Vec<String>, String> {
         issues.extend(shape_source(&crate_name, &relative, &source));
     }
     issues.sort();
-    Ok(issues)
+    apply_shape_baseline(workspace, issues)
+}
+
+fn apply_shape_baseline(workspace: &Path, issues: Vec<String>) -> Result<Vec<String>, String> {
+    // Explicit legacy exceptions are pinned to the offending source, never a whole crate or rule.
+    // A multiset keeps another copy of an existing exception from silently passing.
+    let mut allowed = HashMap::<(String, String, String), usize>::new();
+    for row in include_str!("../shape-allowlist.tsv").lines().filter(|row| !row.starts_with('#') && !row.is_empty()) {
+        let columns: Vec<_> = row.split('\t').collect();
+        if columns.len() != 4 || columns[3].trim().is_empty() { return Err("invalid shape allowlist entry; each exception needs a reason".into()); }
+        *allowed.entry((columns[0].into(), columns[1].into(), columns[2].into())).or_default() += 1;
+    }
+    let mut remaining = Vec::new();
+    for issue in issues {
+        let admitted = issue.split_once(": ").and_then(|(location, message)| {
+            let (path, line) = location.rsplit_once(':')?;
+            let line = line.parse::<usize>().ok()?;
+            let source = fs::read_to_string(workspace.join(path)).ok()?;
+            let snippet = source.lines().nth(line.checked_sub(1)?)?.split_whitespace().collect::<Vec<_>>().join(" ");
+            let count = allowed.get_mut(&(path.into(), message.into(), snippet))?;
+            if *count == 0 { return None; }
+            *count -= 1;
+            Some(())
+        }).is_some();
+        if !admitted { remaining.push(issue); }
+    }
+    Ok(remaining)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -874,8 +904,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("lru", &["mem"][..]),
         ("param", &["cfmt"][..]),
         ("input", &[][..]),
-        ("rays_math_sys", &[][..]),
-        ("rays_math", &["rays_math_sys"][..]),
+        ("rays_math", &[][..]),
         ("scene_command", &["rays_math"][..]),
         ("parallel", &[][..]),
         ("sdl3_sys", &["native_layer_token_sys"][..]),
@@ -986,7 +1015,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let foundational = [
         "cfmt",
         "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
-        "lru", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3",
+        "lru", "param", "input", "rays_math", "parallel", "scene_command", "sdl3",
         "metal_sys", "vulkan_sys", "ogpu_core",
         "rdk_core",
     ];
@@ -1346,12 +1375,9 @@ fn workspace_root() -> Result<PathBuf, String> {
 
 fn main() {
     let mut args = env::args().skip(1);
-    let Some(command) = args.next() else {
-        eprintln!("usage: cargo run -p gate -- <shape|deps>");
-        process::exit(2);
-    };
-    if args.next().is_some() || !matches!(command.as_str(), "shape" | "deps") {
-        eprintln!("usage: cargo run -p gate -- <shape|deps>");
+    let command = args.next().unwrap_or_else(|| "all".into());
+    if args.next().is_some() || !matches!(command.as_str(), "shape" | "deps" | "all") {
+        eprintln!("usage: cargo run -p gate -- <shape|deps|all>");
         process::exit(2);
     }
     let workspace = match workspace_root() {
@@ -1361,7 +1387,11 @@ fn main() {
             process::exit(2);
         }
     };
-    let result = if command == "shape" { shape(&workspace) } else { deps(&workspace) };
+    let result = match command.as_str() {
+        "shape" => shape(&workspace),
+        "deps" => deps(&workspace),
+        _ => shape(&workspace).and_then(|mut errors| { errors.extend(deps(&workspace)?); Ok(errors) }),
+    };
     match result {
         Ok(issues) if issues.is_empty() => println!("{} gate passed", command),
         Ok(issues) => {
@@ -1395,6 +1425,13 @@ mod tests {
         };
         let disabled = super::lib_unit_tests_disabled(root).expect("manifest scan");
         assert!(disabled.contains("pxui") && disabled.contains("flow_shader"));
+    }
+
+    #[test]
+    fn ignored_cases_are_rejected_even_in_test_regions() {
+        for source in ["#[test] #[ignore] fn case() {}", "#[cfg_attr(unix, ignore = \"slow\")] fn case() {}"] {
+            assert!(shape_source("sample", "sample/tests/cases.rs", source).iter().any(|issue| issue.contains("ignored tests are forbidden")));
+        }
     }
 
     #[test]
