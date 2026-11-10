@@ -288,7 +288,7 @@ fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(Symbol, i64)], values:
                             }
                             ScalarAttr::Buffer(Buffer { id: sink.buffers.add(xs.clone()), count: n, width: 1 })
                         }
-                        Value::Int_array(xs) => {
+                        Value::IntArray(xs) => {
                             if xs.len() as i64 != n {
                                 return Err(length_error("Radii and positions have different lengths."));
                             }
@@ -384,7 +384,7 @@ fn path(sink: &mut Sink, kind: PathKind, raw: &[(Symbol, i64)], values: &[Value]
             let c = ink(arg("color"))?;
             geometry(sink, shape2::polyline(&points, c).map(|g| vec![g]))
         }
-        PathKind::Rounded_rect => {
+        PathKind::RoundedRect => {
             let (width, height) = float_point(arg("size"))?;
             let (x, y) = float_point(arg("at"))?;
             let radius = v::num(arg("radius"))?;
@@ -421,7 +421,7 @@ pub fn compile(draw: &Draw) -> Compiled {
             push(sink, Entry::MarkSet { count, kind: Kind::Point { position, fill } })
         }),
         Draw::Path { path: p, args } => Box::new(move |vals, sink| self::path(sink, p, &args, vals)),
-        Draw::Text_run { at, text, ink: i, size } => Box::new(move |vals, sink| {
+        Draw::TextRun { at, text, ink: i, size } => Box::new(move |vals, sink| {
             let text = match &vals[text as usize] {
                 Value::Text(s) => s.to_vec(),
                 _ => return Err(v::fail("E_TYPE", "Drawing text is text.")),
@@ -548,7 +548,7 @@ mod tests {
         let mut s = sink(None, (10, 10), &buffers);
         let values = vec![Value::Vec3(1.9, -2.5, 0.0), text("hi"), text("#abc"), Value::Int(20), Value::Vec3(12.7, 12.0, 0.0)];
         compile(&Draw::Push(Transform::Translate, 0))(&values, &mut s).unwrap();
-        compile(&Draw::Text_run { at: 4, text: 1, ink: 2, size: 3 })(&values, &mut s).unwrap();
+        compile(&Draw::TextRun { at: 4, text: 1, ink: 2, size: 3 })(&values, &mut s).unwrap();
         compile(&Draw::Pop)(&values, &mut s).unwrap();
         let entries = finish(&s).unwrap();
         assert_eq!(entries[0], Entry::PushTransform { xx: 1.0, xy: 0.0, yx: 0.0, yy: 1.0, tx: 1.0, ty: -2.0 });

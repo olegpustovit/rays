@@ -63,7 +63,7 @@ fn equal_result(a: &Result<Value, Diagnostic>, b: &Result<Value, Diagnostic>) ->
 #[test]
 fn concrete_values_skip_resolver_and_state() {
     let value = Value::Record(vec![
-        ("values".into(), Value::Int_array(Arc::new(vec![1, 0, 1]))),
+        ("values".into(), Value::IntArray(Arc::new(vec![1, 0, 1]))),
         ("nested".into(), Value::List(Arc::new(vec![Value::Float(-0.0), Value::Text("raw\0é".as_bytes().into())]))),
     ].into());
     for reference in [false, true] {

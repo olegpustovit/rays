@@ -1,5 +1,5 @@
 //! Initial-thread execution of structured frame programs uses typed Diagnostics. Reserved resident-overflow diagnostics are constructed and recognized through shared helpers; region execution goes through Options::force.
-#![allow(non_camel_case_types, non_snake_case)]
+
 
 use flow_syntax::symbol::Symbol;
 use crate::core_draw;
@@ -167,7 +167,7 @@ fn arena_new(plan: &Arc<ArenaPlan>, kills: bool) -> Arena {
         sizes: vec![-1; n],
         dirty: false,
         assignment: vec![-1; n],
-        buffers: vec![Value::No_geo; n],
+        buffers: vec![Value::NoGeo; n],
         verified: vec![false; n],
         kills,
     }
@@ -175,15 +175,15 @@ fn arena_new(plan: &Arc<ArenaPlan>, kills: bool) -> Arena {
 
 fn arena_take(a: &mut Arena, result: i64) -> Value {
     match a.assignment[ix(result)] {
-        -1 => Value::No_geo,
-        buffer => std::mem::replace(&mut a.buffers[ix(buffer)], Value::No_geo),
+        -1 => Value::NoGeo,
+        buffer => std::mem::replace(&mut a.buffers[ix(buffer)], Value::NoGeo),
     }
 }
 
 fn arena_kill(value: &mut Value) {
     // An array shared elsewhere is not owned exclusively and cannot be filled in place.
     match value {
-        Value::Int_array(data) => {
+        Value::IntArray(data) => {
             if let Some(d) = Arc::get_mut(data) { d.iter_mut().for_each(|x| *x = i64::MIN); }
         }
         Value::Floats(1..=4, data) => {
@@ -196,7 +196,7 @@ fn arena_kill(value: &mut Value) {
 /// The carrier `Region::floats_for` recognises: only the data is reused, each result boxes its own
 /// width.
 fn arena_die(a: &mut Arena, values: &mut [Value], n: i64) {
-    let mut value = std::mem::replace(&mut values[ix(n)], Value::No_geo);
+    let mut value = std::mem::replace(&mut values[ix(n)], Value::NoGeo);
     if a.verified[ix(n)] {
         if a.kills { arena_kill(&mut value); }
         match a.assignment[ix(n)] {
@@ -214,10 +214,10 @@ fn arena_die(a: &mut Arena, values: &mut [Value], n: i64) {
 /// Values share physical identity when their array storage or constant owner is the same.
 pub fn phys_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Int_array(x), Value::Int_array(y)) => Arc::ptr_eq(x, y),
-        (Value::Text_array(x), Value::Text_array(y)) => Arc::ptr_eq(x, y),
+        (Value::IntArray(x), Value::IntArray(y)) => Arc::ptr_eq(x, y),
+        (Value::TextArray(x), Value::TextArray(y)) => Arc::ptr_eq(x, y),
         (Value::Floats(aw @ 1..=4, x), Value::Floats(bw, y)) if aw == bw => Arc::ptr_eq(x, y),
-        (Value::No_geo, Value::No_geo) => true,
+        (Value::NoGeo, Value::NoGeo) => true,
         (Value::Int(x), Value::Int(y)) => x == y,
         (Value::Float(x), Value::Float(y)) => x.to_bits() == y.to_bits(),
         (Value::Vec2(a, b), Value::Vec2(c, d)) => a.to_bits() == c.to_bits() && b.to_bits() == d.to_bits(),
@@ -240,7 +240,7 @@ fn arena_ran(a: &mut Arena, result: i64, args: &[i64], d: &c::region::Destinatio
     }
     if a.plan.first[ix(result)] >= 0 {
         let size = match value {
-            Value::Int_array(data) if ran => (2 * data.len() as i64) + 1,
+            Value::IntArray(data) if ran => (2 * data.len() as i64) + 1,
             Value::Floats(1..=4, data) if ran => {
                 2 * data.len() as i64
             }
@@ -263,7 +263,7 @@ fn arena_finish(a: &mut Arena) {
             if *buffer >= 0 { wanted[ix(*buffer)] = true; }
         }
         for (i, keep) in wanted.iter().enumerate() {
-            if !keep { a.buffers[i] = Value::No_geo; }
+            if !keep { a.buffers[i] = Value::NoGeo; }
         }
     }
 }
@@ -369,8 +369,8 @@ fn scalar_program(program: &Program) -> Option<Scalar> {
             },
             StatementNode::Assign(l, Expr::Frame(FrameField::Time)) => assign(&mut code, &mut a, &mut b, &program.locals, &mut ok, *l, 1, 0, 0),
             StatementNode::Assign(l, Expr::Frame(FrameField::Dt)) => assign(&mut code, &mut a, &mut b, &program.locals, &mut ok, *l, 2, 0, 0),
-            StatementNode::Assign(l, Expr::Frame(FrameField::Pointer_x)) => assign(&mut code, &mut a, &mut b, &program.locals, &mut ok, *l, 3, 0, 0),
-            StatementNode::Assign(l, Expr::Frame(FrameField::Pointer_y)) => assign(&mut code, &mut a, &mut b, &program.locals, &mut ok, *l, 4, 0, 0),
+            StatementNode::Assign(l, Expr::Frame(FrameField::PointerX)) => assign(&mut code, &mut a, &mut b, &program.locals, &mut ok, *l, 3, 0, 0),
+            StatementNode::Assign(l, Expr::Frame(FrameField::PointerY)) => assign(&mut code, &mut a, &mut b, &program.locals, &mut ok, *l, 4, 0, 0),
             StatementNode::Assign(l, Expr::Local(m)) => {
                 let x = operand(&code, &mut ok, *m);
                 assign(&mut code, &mut a, &mut b, &program.locals, &mut ok, *l, 5, x, 0);
@@ -487,7 +487,7 @@ fn rows_parallel() -> Box<dyn Fn(i64, i64, &(dyn Fn(i64) + Send + Sync)) + Send 
 fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol, i64)]) -> Ex {
     use flow_syntax::packed_ops::{Binary, Unary};
     let first = args.first().map(|(_, n)| *n).unwrap_or(-1);
-    let seal_args = !matches!(operation, Primitive::Sequence_get | Primitive::Sequence_length | Primitive::Sequence_build);
+    let seal_args = !matches!(operation, Primitive::SequenceGet | Primitive::SequenceLength | Primitive::SequenceBuild);
     let sealed: Vec<i64> = args.iter().filter(|(_, n)| !plain(&locals[ix(*n)])).map(|(_, n)| *n).collect();
     let name = c::primitive_name(operation);
     let args_v: Vec<(Symbol, i64)> = args.to_vec();
@@ -507,7 +507,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
         }
         Primitive::Truthy => Arc::new(move |st| Ok(Value::Bool(v::truthy(&st.values[ix(first)])?))),
         Primitive::Show => Arc::new(move |st| Ok(Value::Text(v::show_with(&|x| x.clone(), &st.values[ix(first)]).into()))),
-        Primitive::Text_concat => {
+        Primitive::TextConcat => {
             let args = args_v.clone();
             Arc::new(move |st| {
                 let mut out: Vec<u8> = Vec::new();
@@ -524,12 +524,12 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
             let (code, message) = (code.clone(), message.clone());
             Arc::new(move |_| Err(v::fail(&code, &message)))
         }
-        Primitive::Fail_diagnostic(d) => {
-            let d = d.clone();
+        Primitive::FailDiagnostic(d) => {
+            let d = d.as_ref().clone();
             Arc::new(move |_| Err(d.clone()))
         }
         Primitive::Error => generic(),
-        Primitive::Rand_at => {
+        Primitive::RandAt => {
             let seed = arg(args, "seed").expect("seed");
             let index = arg(args, "index").expect("index");
             Arc::new(move |st| match (&st.values[ix(seed)], &st.values[ix(index)]) {
@@ -537,12 +537,12 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                 _ => Err(v::fail("E_TYPE", "rand/at needs integer seed and index.")),
             })
         }
-        Primitive::Array_reduce(operation) => {
+        Primitive::ArrayReduce(operation) => {
             let values = arg(args, "array").expect("array");
             let operation = *operation;
             Arc::new(move |st| op::reduce_array(None, operation, None, &st.values[ix(values)]))
         }
-        Primitive::Array_segment(operation) => {
+        Primitive::ArraySegment(operation) => {
             let values = arg(args, "values").expect("values");
             let offsets = arg(args, "offsets").expect("offsets");
             let operation = *operation;
@@ -551,7 +551,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                 op::reduce_array(Some(&*rows), operation, Some(&st.values[ix(offsets)]), &st.values[ix(values)])
             })
         }
-        Primitive::Array_segment_argmax => {
+        Primitive::ArraySegmentArgmax => {
             let values = arg(args, "values").expect("values");
             let offsets = arg(args, "offsets").expect("offsets");
             Arc::new(move |st| {
@@ -568,8 +568,8 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                 Ok(Value::Float(v::fin("remainder", x % y)?))
             })
         }
-        Primitive::Array_count if arg_names(args, &["array"]) => Arc::new(move |st| Ok(Value::Int(held_length(st, &st.values[ix(first)])?))),
-        Primitive::Array_nth if arg_names(args, &["array", "index"]) => {
+        Primitive::ArrayCount if arg_names(args, &["array"]) => Arc::new(move |st| Ok(Value::Int(held_length(st, &st.values[ix(first)])?))),
+        Primitive::ArrayNth if arg_names(args, &["array", "index"]) => {
             // A whole index inside native storage, as the operator checks; anything else is its own body.
             let array = arg(args, "array").unwrap();
             let index = arg(args, "index").unwrap();
@@ -579,9 +579,9 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                 _ => slow(st),
             })
         }
-        Primitive::Sequence_get => generic_named("nth", args),
-        Primitive::Sequence_length => generic_named("count", args),
-        Primitive::Sequence_build => {
+        Primitive::SequenceGet => generic_named("nth", args),
+        Primitive::SequenceLength => generic_named("count", args),
+        Primitive::SequenceBuild => {
             let count = arg(args, "count").expect("count");
             let width = arg(args, "width");
             let integer = arg(args, "type");
@@ -611,7 +611,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                         };
                         if count < 0 || count > limit { return Err(v::fail("E_ITER_BOUND", "Core list length exceeds its bound.")); }
                         let mut values = v::array_buffer(count as usize)?;
-                        values.resize(count as usize, Value::No_geo);
+                        values.resize(count as usize, Value::NoGeo);
                         Ok(Value::List(Arc::new(values)))
                     }
                     Some(width) => {
@@ -634,7 +634,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                 }
             })
         }
-        Primitive::Sequence_slice => {
+        Primitive::SequenceSlice => {
             let list = arg(args, "list").expect("list");
             let firstk = arg(args, "first").expect("first");
             let count = arg(args, "count").expect("count");
@@ -651,7 +651,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                 Ok(Value::List(Arc::new(values)))
             })
         }
-        Primitive::Sequence_concat => {
+        Primitive::SequenceConcat => {
             let args = args_v.clone();
             Arc::new(move |st| {
                 let mut parts: Vec<&[Value]> = Vec::new();
@@ -669,7 +669,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                 Ok(Value::List(Arc::new(out.iter().map(|x| v::coerce_to(&ty, x)).collect::<Result<_, _>>()?)))
             })
         }
-        Primitive::Color_parse => Arc::new(move |st| {
+        Primitive::ColorParse => Arc::new(move |st| {
             let color = op::drawing_color(&st.values[ix(first)])?;
             Ok(Value::Record(vec![
                 ("r".into(), Value::Int(color.r)),
@@ -678,7 +678,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                 ("a".into(), Value::Int(color.a)),
             ].into()))
         }),
-        Primitive::Color_byte(mode) => {
+        Primitive::ColorByte(mode) => {
             let mode = *mode;
             Arc::new(move |st| {
                 let f = v::fin("color", v::num(&st.values[ix(first)])?)?;
@@ -766,7 +766,7 @@ fn builds(statements: &[Statement]) -> bool {
     let mut found = false;
     c::iter(
         &mut |s: &Statement| {
-            if let StatementNode::Assign(_, Expr::Prim(Primitive::Sequence_build, _)) = &s.node { found = true; }
+            if let StatementNode::Assign(_, Expr::Prim(Primitive::SequenceBuild, _)) = &s.node { found = true; }
         },
         statements,
     );
@@ -796,8 +796,8 @@ fn hidden(frame: bool, value: &Value) -> bool {
 fn frame_free(frame: bool, instruction: &c::region::Instruction) -> bool {
     use c::region::Instruction as I;
     match instruction {
-        I::Frame(_) | I::Int_frame(_) => frame,
-        I::Rand_at(..) => false,
+        I::Frame(_) | I::IntFrame(_) => frame,
+        I::RandAt(..) => false,
         I::Guarded(_, inner) => frame_free(frame, inner),
         _ => true,
     }
@@ -814,9 +814,9 @@ fn loop_footprint(frame: bool, program: &Program, s: &Statement) -> Option<(Vec<
     {
         let mut collect = |statement: &Statement| {
             match &statement.node {
-                StatementNode::Assign(_, Expr::Prim(Primitive::Rand | Primitive::Rand_at, _)) => exit = true,
+                StatementNode::Assign(_, Expr::Prim(Primitive::Rand | Primitive::RandAt, _)) => exit = true,
                 StatementNode::Assign(_, Expr::Frame(_)) if !frame => exit = true,
-                StatementNode::Assign(_, Expr::Source(_) | Expr::Host_source { .. } | Expr::Source_descriptor { .. }) => exit = true,
+                StatementNode::Assign(_, Expr::Source(_) | Expr::HostSource { .. } | Expr::SourceDescriptor { .. }) => exit = true,
                 StatementNode::Invoke { region, .. } => {
                     let r = &program.regions[ix(*region)];
                     if !r.code.iter().all(|i| frame_free(frame, i))
@@ -826,7 +826,7 @@ fn loop_footprint(frame: bool, program: &Program, s: &Statement) -> Option<(Vec<
                         exit = true;
                     }
                 }
-                StatementNode::Draw(_) | StatementNode::State_read { .. } | StatementNode::State_peek { .. } | StatementNode::State_write { .. } => exit = true,
+                StatementNode::Draw(_) | StatementNode::StateRead { .. } | StatementNode::StatePeek { .. } | StatementNode::StateWrite { .. } => exit = true,
                 _ => {}
             }
             reads.extend(c::reads(statement));
@@ -852,7 +852,7 @@ fn mentions(acc: Vec<i64>, s: &Statement) -> Vec<i64> {
         &mut |statement: &Statement| {
             all.extend(c::reads(statement));
             all.extend(c::writes(statement));
-            if let StatementNode::Reset_call(n) = &statement.node { all.push(*n); }
+            if let StatementNode::ResetCall(n) = &statement.node { all.push(*n); }
         },
         std::slice::from_ref(s),
     );
@@ -867,12 +867,12 @@ fn resident_loop(program: &Program, s: &Statement) -> bool {
     let scalars = |ns: &[i64]| ns.iter().all(|n| !array(*n));
     let expr = |e: &Expr| -> bool {
         match e {
-            Expr::Constant(_) | Expr::Local(_) | Expr::Field(..) | Expr::Frame(_) | Expr::Call_index(_) => true,
-            Expr::Prim(Primitive::Array_compact | Primitive::Coerce(_) | Primitive::Array_count, _) => true,
+            Expr::Constant(_) | Expr::Local(_) | Expr::Field(..) | Expr::Frame(_) | Expr::CallIndex(_) => true,
+            Expr::Prim(Primitive::ArrayCompact | Primitive::Coerce(_) | Primitive::ArrayCount, _) => true,
             Expr::Prim(_, args) => scalars(&args.iter().map(|(_, n)| *n).collect::<Vec<_>>()),
             Expr::Vec(ns) | Expr::Items(ns) => scalars(ns),
             Expr::Fields(xs) => scalars(&xs.iter().map(|(_, n)| *n).collect::<Vec<_>>()),
-            Expr::Source(_) | Expr::Host_source { .. } | Expr::Source_descriptor { .. } => false,
+            Expr::Source(_) | Expr::HostSource { .. } | Expr::SourceDescriptor { .. } => false,
         }
     };
     fn ok(s: &Statement, expr: &dyn Fn(&Expr) -> bool) -> bool {
@@ -944,7 +944,7 @@ pub fn resident_tail(program: &Program, s: &Statement, mark: &dyn Fn(i64) -> boo
                 }
                 !tracked(*n, &held, &counts, &ranges)
             }
-            StatementNode::Assign(n, Expr::Prim(Primitive::Array_count, args)) if args.len() == 1 && held.contains(&args[0].1) => {
+            StatementNode::Assign(n, Expr::Prim(Primitive::ArrayCount, args)) if args.len() == 1 && held.contains(&args[0].1) => {
                 counts.insert(*n, (args[0].1, 1));
                 true
             }
@@ -955,7 +955,7 @@ pub fn resident_tail(program: &Program, s: &Statement, mark: &dyn Fn(i64) -> boo
                 counts.insert(*n, (p, d * constants[&args[1].1]));
                 true
             }
-            StatementNode::Assign(n, Expr::Prim(Primitive::Array_range, args)) if args.len() == 1 && counts.contains_key(&args[0].1) => {
+            StatementNode::Assign(n, Expr::Prim(Primitive::ArrayRange, args)) if args.len() == 1 && counts.contains_key(&args[0].1) => {
                 ranges.insert(*n, counts[&args[0].1]);
                 true
             }
@@ -1131,7 +1131,7 @@ fn arena_plan(remember_loops: bool, excluded: &dyn Fn(i64, i64) -> bool, program
     for n in &program.results { first[ix(*n)] = -1; }
     c::iter(
         &mut |s: &Statement| match &s.node {
-            StatementNode::Invoke { .. } | StatementNode::Assign(_, Expr::Prim(Primitive::Array_count, _)) => {}
+            StatementNode::Invoke { .. } | StatementNode::Assign(_, Expr::Prim(Primitive::ArrayCount, _)) => {}
             _ => {
                 for n in c::reads(s) { first[ix(n)] = -1; }
             }
@@ -1232,10 +1232,10 @@ fn prepare_invoke(packed_region: Packed, args: Vec<i64>, result: i64, on_device:
         let destination: Option<Arc<c::region::Destination>> = match st.arena.as_mut() {
             Some(a) => {
                 let buffer = arena_take(a, result);
-                Some(Arc::new(c::region::Destination::new(buffer, Value::No_geo, a.kills)))
+                Some(Arc::new(c::region::Destination::new(buffer, Value::NoGeo, a.kills)))
             }
             None => {
-                if clobber { Some(Arc::new(c::region::Destination::new(Value::No_geo, Value::No_geo, clobber))) } else { None }
+                if clobber { Some(Arc::new(c::region::Destination::new(Value::NoGeo, Value::NoGeo, clobber))) } else { None }
             }
         };
         if let Some(d) = &destination { bound_region = c::region::with_destination(&bound_region, d.clone()); }
@@ -1373,7 +1373,7 @@ fn unfold_shape(program: &Program, loop_: &Statement, body: &[Statement], index:
         x
     }
     let concat = body.iter().find_map(|s| match &s.node {
-        StatementNode::Assign(pc, Expr::Prim(Primitive::Array_concat, a)) if a.len() == 2 && origin(&copies, a[1].1) == h => Some((*pc, a[0].1)),
+        StatementNode::Assign(pc, Expr::Prim(Primitive::ArrayConcat, a)) if a.len() == 2 && origin(&copies, a[1].1) == h => Some((*pc, a[0].1)),
         _ => None,
     });
     let (pc, pin) = concat?;
@@ -1394,7 +1394,7 @@ fn unfold_shape(program: &Program, loop_: &Statement, body: &[Statement], index:
         .cloned()
         .collect();
     let pure = |s: &Statement| -> bool {
-        matches!(s.node, StatementNode::Assign(..) | StatementNode::Reset_call(_))
+        matches!(s.node, StatementNode::Assign(..) | StatementNode::ResetCall(_))
             && !c::reads(s).iter().any(|n| *n == index || *n == item || moved.contains(n))
     };
     match head.as_slice() {
@@ -1446,7 +1446,7 @@ fn addr(s: &Statement) -> usize { s as *const Statement as usize }
 impl Ctx {
     fn hoisted(&self, s: &Statement) -> bool {
         match &s.node {
-            StatementNode::Assign(n, Expr::Constant(_) | Expr::Frame(FrameField::Time | FrameField::Dt | FrameField::Index | FrameField::Tick | FrameField::Width | FrameField::Height | FrameField::Pointer_x | FrameField::Pointer_y)) => {
+            StatementNode::Assign(n, Expr::Constant(_) | Expr::Frame(FrameField::Time | FrameField::Dt | FrameField::Index | FrameField::Tick | FrameField::Width | FrameField::Height | FrameField::PointerX | FrameField::PointerY)) => {
                 self.hoisted_writes[ix(*n)] == 1
             }
             _ => false,
@@ -1473,7 +1473,7 @@ impl Ctx {
                     Ok(resolved)
                 })
             }
-            Expr::Host_source { name, ty, args } => {
+            Expr::HostSource { name, ty, args } => {
                 let (name, ty, args) = (name.clone(), ty.clone(), args.clone());
                 Arc::new(move |st| {
                     let offered = match st.host_source.clone() {
@@ -1500,8 +1500,8 @@ impl Ctx {
                                 let value = st.values[ix(*i)].clone();
                                 given.push((n.clone(), match &st.resident { Some(r) => host_value(&**r, &value)?, None => value }));
                             }
-                            if name == "$core/complete" && ty == flow_syntax::ty::geometry() && given.len() == 1 && given[0].0 == "value" && given[0].1 == Value::No_geo {
-                                Ok(Value::No_geo)
+                            if name == "$core/complete" && ty == flow_syntax::ty::geometry() && given.len() == 1 && given[0].0 == "value" && given[0].1 == Value::NoGeo {
+                                Ok(Value::NoGeo)
                             } else {
                                 let value = source_value(name.clone(), ty.clone(), given.into());
                                 e::host::force_reference(&value, &st.live, None, None, st.resolve.clone())
@@ -1510,7 +1510,7 @@ impl Ctx {
                     }
                 })
             }
-            Expr::Source_descriptor { name, ty, args } => {
+            Expr::SourceDescriptor { name, ty, args } => {
                 let (name, ty, args) = (name.clone(), ty.clone(), args.clone());
                 Arc::new(move |st| {
                     let given: Vec<(Symbol, Value)> = args.iter().map(|(n, i)| (n.clone(), st.values[ix(*i)].clone())).collect();
@@ -1533,7 +1533,7 @@ impl Ctx {
                 let n = ix(*n);
                 Arc::new(move |st| Ok(st.values[n].clone()))
             }
-            Expr::Call_index(slot) => {
+            Expr::CallIndex(slot) => {
                 let slot = ix(*slot);
                 Arc::new(move |st| {
                     let n = st.calls[slot];
@@ -1547,8 +1547,8 @@ impl Ctx {
                 FrameField::Index => Arc::new(|st| Ok(Value::Int(st.live.frame))),
                 FrameField::Width => Arc::new(|st| Ok(Value::Int(st.live.size.0))),
                 FrameField::Height => Arc::new(|st| Ok(Value::Int(st.live.size.1))),
-                FrameField::Pointer_x => Arc::new(|st| Ok(Value::Float(st.live.pointer.0))),
-                FrameField::Pointer_y => Arc::new(|st| Ok(Value::Float(st.live.pointer.1))),
+                FrameField::PointerX => Arc::new(|st| Ok(Value::Float(st.live.pointer.0))),
+                FrameField::PointerY => Arc::new(|st| Ok(Value::Float(st.live.pointer.1))),
                 FrameField::Tick => Arc::new(|st| Ok(Value::Int(st.live.tick))),
                 FrameField::Input => {
                     let cell = lazy_operator("frame/input".to_owned());
@@ -1557,7 +1557,7 @@ impl Ctx {
             },
             Expr::Prim(operation, args) => {
                 let run = primitive(self.track, &program.locals, operation, args);
-                let constant = matches!(operation, Primitive::Array_int | Primitive::Array_float | Primitive::Array_vec3 | Primitive::Array_vec4).then(|| c::primitive_name(operation));
+                let constant = matches!(operation, Primitive::ArrayInt | Primitive::ArrayFloat | Primitive::ArrayVec3 | Primitive::ArrayVec4).then(|| c::primitive_name(operation));
                 let named_args = if constant.is_some() { args.clone() } else { Vec::new() };
                 let args: Vec<i64> = args.iter().map(|(_, n)| *n).collect();
                 Arc::new(move |st| {
@@ -1751,7 +1751,7 @@ impl Ctx {
     fn statement(&self, s: &Statement) -> Run {
         let program = self.program.clone();
         match &s.node {
-            StatementNode::Assign(n, e @ Expr::Prim(op @ (Primitive::Array_compact | Primitive::Coerce(Ty::Array(_))), args)) if args.len() == 1 => {
+            StatementNode::Assign(n, e @ Expr::Prim(op @ (Primitive::ArrayCompact | Primitive::Coerce(Ty::Array(_))), args)) if args.len() == 1 => {
                 // in a resident fold the device compacts and retypes its own arrays; the host otherwise
                 let value = self.expression(e);
                 let arg = args[0].1;
@@ -1761,7 +1761,7 @@ impl Ctx {
                     let x = match st.resident.clone() {
                         Some(r) if st.resident_on => {
                             let made = match &op {
-                                Primitive::Array_compact => r.compact(&st.values[ix(arg)])?,
+                                Primitive::ArrayCompact => r.compact(&st.values[ix(arg)])?,
                                 Primitive::Coerce(ty) => r.coerce(ty, &st.values[ix(arg)])?,
                                 _ => None,
                             };
@@ -1780,7 +1780,7 @@ impl Ctx {
                     Ok(())
                 })
             }
-            StatementNode::Assign(n, e @ Expr::Prim(Primitive::Array_concat, args)) if args.len() == 2 => {
+            StatementNode::Assign(n, e @ Expr::Prim(Primitive::ArrayConcat, args)) if args.len() == 2 => {
                 // in a resident fold the device joins its own arrays (appending a history in place)
                 let value = self.expression(e);
                 let (a, b) = (args[0].1, args[1].1);
@@ -1797,7 +1797,7 @@ impl Ctx {
                     Ok(())
                 })
             }
-            StatementNode::Assign(n, e @ Expr::Prim(Primitive::Array_range, args)) if args.len() == 1 && self.tail_ranges.iter().any(|(k, _)| k == n) => {
+            StatementNode::Assign(n, e @ Expr::Prim(Primitive::ArrayRange, args)) if args.len() == 1 && self.tail_ranges.iter().any(|(k, _)| k == n) => {
                 // a range of a kept array's count: the device's index buffer while the array stays there,
                 // else made from the array's count (a kept count is its capacity)
                 let value = self.expression(e);
@@ -1832,7 +1832,7 @@ impl Ctx {
                     }
                 })
             }
-            StatementNode::Assign(n, e @ Expr::Prim(Primitive::Array_range, args)) => {
+            StatementNode::Assign(n, e @ Expr::Prim(Primitive::ArrayRange, args)) => {
                 let value = self.expression(e);
                 let count = arg(args, "count").expect("count");
                 let n = *n;
@@ -1849,7 +1849,7 @@ impl Ctx {
                     Ok(())
                 })
             }
-            StatementNode::Assign(n, e @ Expr::Prim(Primitive::Array_int, args)) => {
+            StatementNode::Assign(n, e @ Expr::Prim(Primitive::ArrayInt, args)) => {
                 let value = self.expression(e);
                 let count = arg(args, "count").expect("count");
                 let initial = arg(args, "value");
@@ -1868,7 +1868,7 @@ impl Ctx {
                     Ok(())
                 })
             }
-            StatementNode::Assign(n, e @ Expr::Prim(Primitive::Array_count, args)) if args.len() == 1 => {
+            StatementNode::Assign(n, e @ Expr::Prim(Primitive::ArrayCount, args)) if args.len() == 1 => {
                 // a resident array's length is a capacity: its count is the host array's
                 let value = self.expression(e);
                 let arg = args[0].1;
@@ -1888,7 +1888,7 @@ impl Ctx {
                 let n = ix(*n);
                 enum Ownership { Fresh, Alias(i64), No }
                 let ownership = match e {
-                    Expr::Prim(Primitive::Sequence_build, _) => Ownership::Fresh,
+                    Expr::Prim(Primitive::SequenceBuild, _) => Ownership::Fresh,
                     Expr::Local(old) => Ownership::Alias(*old),
                     _ => Ownership::No,
                 };
@@ -1918,7 +1918,7 @@ impl Ctx {
                     })
                 }
             }
-            StatementNode::Reset_call(slot) => {
+            StatementNode::ResetCall(slot) => {
                 let slot = ix(*slot);
                 Arc::new(move |st| {
                     st.calls[slot] = 0;
@@ -1935,7 +1935,7 @@ impl Ctx {
                     }
                 })
             }
-            StatementNode::Diagnose_rows { rows, policy, index, handler, diagnostic, result } => {
+            StatementNode::DiagnoseRows { rows, policy, index, handler, diagnostic, result } => {
                 let handler = self.plain_block(handler);
                 let (rows, policy, index, diagnostic, result) = (*rows, *policy, *index, *diagnostic, *result);
                 Arc::new(move |st| {
@@ -2159,9 +2159,9 @@ impl Ctx {
                             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
                             _ => false,
                         };
-                        if same { st.values[ix(*m)] = Value::No_geo; }
+                        if same { st.values[ix(*m)] = Value::NoGeo; }
                     }
-                    let mut target = std::mem::replace(&mut st.values[ix(sequence)], Value::No_geo);
+                    let mut target = std::mem::replace(&mut st.values[ix(sequence)], Value::NoGeo);
                     if matches!(target, Value::List(_)) { seal(st, value); }
                     let stored = store_value(&mut target, i, &x);
                     st.values[ix(sequence)] = target;
@@ -2177,7 +2177,7 @@ impl Ctx {
                     Ok(())
                 })
             }
-            StatementNode::State_read { slot, result, init, initial } => {
+            StatementNode::StateRead { slot, result, init, initial } => {
                 let init = self.plain_block(init);
                 let key = self.slot_keys[ix(*slot)].clone();
                 let (result, initial) = (ix(*result), ix(*initial));
@@ -2191,7 +2191,7 @@ impl Ctx {
                         let mut s = cell.borrow_mut();
                         if let Err(d) = init(&mut **s) {
                             *failed.borrow_mut() = Some(d);
-                            return Value::No_geo;
+                            return Value::NoGeo;
                         }
                         // a seed the device computed stays there (Flow.Eval.Device)
                         let r = s.resident.clone();
@@ -2200,7 +2200,7 @@ impl Ctx {
                                 Ok(x) => x,
                                 Err(d) => {
                                     *failed.borrow_mut() = Some(d);
-                                    Value::No_geo
+                                    Value::NoGeo
                                 }
                             },
                             _ => s.values[initial].clone(),
@@ -2214,7 +2214,7 @@ impl Ctx {
                     Ok(())
                 })
             }
-            StatementNode::State_peek { slot, found, value } => {
+            StatementNode::StatePeek { slot, found, value } => {
                 let key = self.slot_keys[ix(*slot)].clone();
                 let (found, value) = (ix(*found), ix(*value));
                 Arc::new(move |st| {
@@ -2222,12 +2222,12 @@ impl Ctx {
                     let root = state_root(st)?;
                     let pending = e::residual::state_peek(root, instance, path, iter, host);
                     st.values[found] = Value::Bool(pending.is_some());
-                    let pending = pending.unwrap_or(Value::No_geo);
+                    let pending = pending.unwrap_or(Value::NoGeo);
                     st.values[value] = if st.resident_on { pending } else { e::device::thaw(&pending) };
                     Ok(())
                 })
             }
-            StatementNode::State_write { slot, value } => {
+            StatementNode::StateWrite { slot, value } => {
                 let key = self.slot_keys[ix(*slot)].clone();
                 let value = ix(*value);
                 Arc::new(move |st| {
@@ -2335,16 +2335,16 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
             let host = slot.plane == Plane::Host;
             let instance = slot.source.instance;
             let iter = slot.source.iter.clone();
-            if iter.iter().all(|i| matches!(i, c::Iteration::Static_index(_))) {
-                let fixed: Vec<i64> = iter.iter().map(|i| if let c::Iteration::Static_index(i) = i { *i } else { 0 }).collect();
+            if iter.iter().all(|i| matches!(i, c::Iteration::StaticIndex(_))) {
+                let fixed: Vec<i64> = iter.iter().map(|i| if let c::Iteration::StaticIndex(i) = i { *i } else { 0 }).collect();
                 Arc::new(move |_| Ok((instance, path.clone(), fixed.clone(), host)))
             } else {
                 Arc::new(move |st| {
                     let mut out = Vec::with_capacity(iter.len());
                     for i in &iter {
                         out.push(match i {
-                            c::Iteration::Static_index(i) => *i,
-                            c::Iteration::Local_index(l) => v::int_of(&st.values[ix(*l)])?,
+                            c::Iteration::StaticIndex(i) => *i,
+                            c::Iteration::LocalIndex(l) => v::int_of(&st.values[ix(*l)])?,
                         });
                     }
                     Ok((instance, path.clone(), out, host))
@@ -2355,8 +2355,8 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
     let mut writes = vec![0i64; program.locals.len()];
     c::iter(
         &mut |s: &Statement| match &s.node {
-            StatementNode::Reset_call(_) | StatementNode::Store { .. } | StatementNode::Draw(_) => {}
-            StatementNode::State_write { value, .. } => writes[ix(*value)] += 1,
+            StatementNode::ResetCall(_) | StatementNode::Store { .. } | StatementNode::Draw(_) => {}
+            StatementNode::StateWrite { value, .. } => writes[ix(*value)] += 1,
             _ => {
                 for w in c::writes(s) { writes[ix(w)] += 1; }
             }
@@ -2438,7 +2438,7 @@ impl Prepared {
         let mut needs_resolver = false;
         c::iter(
             &mut |s: &Statement| {
-                if let StatementNode::Assign(_, Expr::Source(_) | Expr::Host_source { .. } | Expr::Source_descriptor { .. }) = &s.node { needs_resolver = true; }
+                if let StatementNode::Assign(_, Expr::Source(_) | Expr::HostSource { .. } | Expr::SourceDescriptor { .. }) = &s.node { needs_resolver = true; }
             },
             &self.program.body,
         );
@@ -2520,11 +2520,11 @@ fn general_values(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Valu
     let program = &prepared.program;
     let n = program.locals.len();
     let values = if !prepared.pooled {
-        vec![Value::No_geo; n]
+        vec![Value::NoGeo; n]
     } else {
         match prepared.pool.lock().unwrap().take() {
             Some(values) if !values.is_empty() => values,
-            _ => vec![Value::No_geo; n],
+            _ => vec![Value::NoGeo; n],
         }
     };
     let arena = arena_for(prepared, o.resident.is_some());
@@ -2611,7 +2611,7 @@ pub fn draw(prepared: &Prepared, live: &Frame, size: (i64, i64), buffers: &Buffe
     let sink = core_marks::sink(image, size, buffers);
     let arena = arena_for(prepared, o.device.is_some() || o.resident.is_some());
     let options = Options { root: o.root, force: o.force.clone(), resolve: o.resolve.clone(), resident: o.resident.clone(), ..Options::default() };
-    let mut st = new_state(prepared, vec![Value::No_geo; program.locals.len()], arena, live, &options);
+    let mut st = new_state(prepared, vec![Value::NoGeo; program.locals.len()], arena, live, &options);
     st.host_source = None;
     st.marks = Some(sink);
     st.device = o.device.clone();
@@ -2634,7 +2634,7 @@ fn store_value(target: &mut Value, i: i64, x: &Value) -> Result<(), Diagnostic> 
     let range_error = || v::fail("E_LIST_RANGE", "Core store is outside its sequence.");
     let width = match target { Value::Floats(width, _) => *width, _ => 1 };
     match target {
-        Value::Text_array(data) => {
+        Value::TextArray(data) => {
             if i < 0 || i as usize >= data.len() { return Err(range_error()); }
             match x {
                 Value::Text(text) => {
@@ -2649,7 +2649,7 @@ fn store_value(target: &mut Value, i: i64, x: &Value) -> Result<(), Diagnostic> 
             }
             Ok(())
         }
-        Value::Int_array(data) => {
+        Value::IntArray(data) => {
             if i < 0 || i as usize >= data.len() { return Err(range_error()); }
             if Arc::get_mut(data).is_none() {
                 let mut copied = v::array_buffer(data.len())?;
@@ -2689,9 +2689,9 @@ fn store_value(target: &mut Value, i: i64, x: &Value) -> Result<(), Diagnostic> 
 fn builder_stores_preserve_shared_values_and_unique_buffers() {
     let first = |value: &Value| match value { Value::List(xs) => xs[0].clone(), _ => v::array_get(value, 0).unwrap() };
     for (source, replacement) in [
-        (Value::Int_array(Arc::new(vec![1, 2])), Value::Int(7)),
+        (Value::IntArray(Arc::new(vec![1, 2])), Value::Int(7)),
         (Value::Floats(2, Arc::new(vec![1., -0., 2., 3.])), Value::Vec2(7., -0.)),
-        (Value::Text_array(Arc::new(vec![b"a".to_vec(), vec![]].into())), Value::Text(vec![255, 0].into())),
+        (Value::TextArray(Arc::new(vec![b"a".to_vec(), vec![]].into())), Value::Text(vec![255, 0].into())),
         (Value::List(Arc::new(vec![Value::Int(1)])), Value::Int(7)),
     ] {
         let before = first(&source);
@@ -2700,10 +2700,10 @@ fn builder_stores_preserve_shared_values_and_unique_buffers() {
         assert_eq!(first(&source), before);
         assert_eq!(first(&target), replacement);
     }
-    let mut unique = Value::Int_array(Arc::new(vec![1]));
-    let pointer = match &unique { Value::Int_array(data) => Arc::as_ptr(data), _ => unreachable!() };
+    let mut unique = Value::IntArray(Arc::new(vec![1]));
+    let pointer = match &unique { Value::IntArray(data) => Arc::as_ptr(data), _ => unreachable!() };
     store_value(&mut unique, 0, &Value::Int(7)).unwrap();
-    assert!(matches!(unique, Value::Int_array(data) if Arc::as_ptr(&data) == pointer && data[0] == 7));
+    assert!(matches!(unique, Value::IntArray(data) if Arc::as_ptr(&data) == pointer && data[0] == 7));
 }
 
 #[cfg(test)]
@@ -2718,7 +2718,7 @@ fn source_materialization_traverses_reserved_looking_names_and_preserves_unchang
     let original = source_value("$lisp/parameter", Ty::Int, vec![("data".into(), Value::Deferred(Ty::Int, 7))].into());
     let Value::Source(mapped) = host_value(&Device, &original).unwrap() else { panic!("source") };
     assert_eq!(mapped.fields.get_str("data"), Some(&Value::Int(19)));
-    let descriptor = source_value("$lisp/parameter", Ty::Int, vec![("data".into(), Value::No_geo)].into());
+    let descriptor = source_value("$lisp/parameter", Ty::Int, vec![("data".into(), Value::NoGeo)].into());
     let Value::Source(mapped) = host_value(&Device, &descriptor).unwrap() else { panic!("source") };
     let Value::Source(original) = descriptor else { unreachable!() };
     assert!(Arc::ptr_eq(&mapped, &original));

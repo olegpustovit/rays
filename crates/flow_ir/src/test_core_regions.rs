@@ -43,8 +43,8 @@ fn index_only_preparation_counts_without_building_the_range() {
             assert!(kernels.load(Ordering::SeqCst) > 0);
             for array in &inputs.arrays {
                 match array {
-                    Value::Int_array(a) => assert!(a.is_empty()),
-                    _ => panic!("expected an empty Int_array"),
+                    Value::IntArray(a) => assert!(a.is_empty()),
+                    _ => panic!("expected an empty IntArray"),
                 }
             }
         }
@@ -283,7 +283,7 @@ fn core_regions_region_ref_forms_match_the_walker() {
 
 
 fn verify_loop(name: &str, program: &RegionT) {
-    assert!(program.code.iter().any(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Loop_begin(_))), "{name}: no loop");
+    assert!(program.code.iter().any(|i| matches!(R::Instruction::unguarded(i), R::Instruction::LoopBegin(_))), "{name}: no loop");
     for time in [-1., 0.37, 5.] {
         let live = input::at_time(time);
         let expected = reference(program, &live);
@@ -406,9 +406,9 @@ fn carried_loops_uint32_and_iterate_fixtures() {
 #[test]
 fn malformed_loops_are_rejected_when_rebuilt() {
     let program = ts::compile("(map (fn [x] (fold [a t] [i (range 2)] (+ a x))) (array/range 1))");
-    let header = program.code.iter().position(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Loop_begin(_))).expect("loop header");
-    let R::Instruction::Loop_begin(loop_) = R::Instruction::unguarded(&program.code[header]).clone() else { unreachable!("matched above") };
-    let result = program.code.iter().position(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Loop_result(..))).expect("loop result");
+    let header = program.code.iter().position(|i| matches!(R::Instruction::unguarded(i), R::Instruction::LoopBegin(_))).expect("loop header");
+    let R::Instruction::LoopBegin(loop_) = R::Instruction::unguarded(&program.code[header]).clone() else { unreachable!("matched above") };
+    let result = program.code.iter().position(|i| matches!(R::Instruction::unguarded(i), R::Instruction::LoopResult(..))).expect("loop result");
     let rejected = |name: &str, code: Vec<R::Instruction>, outputs: Vec<Vec<i64>>| {
         if R::rebuild(&program, R::Rebuild { code: Some(code), outputs: Some(outputs), ..Default::default() }).is_ok() {
             panic!("accepted malformed loop: {name}");
@@ -421,14 +421,14 @@ fn malformed_loops_are_rejected_when_rebuilt() {
     };
     let h = header as i64;
     let outputs = program.outputs.to_vec();
-    rejected("end outside program", changed(header, R::Instruction::Loop_begin(R::Loop { finish: program.code.len() as i64, ..loop_.clone() })), outputs.clone());
-    rejected("carry type", changed(header + 1, R::Instruction::Loop_carry(h, 0, Ty::Text)), outputs.clone());
-    rejected("carry component", changed(header + 1, R::Instruction::Loop_carry(h, 1, Ty::Float)), outputs.clone());
+    rejected("end outside program", changed(header, R::Instruction::LoopBegin(R::Loop { finish: program.code.len() as i64, ..loop_.clone() })), outputs.clone());
+    rejected("carry type", changed(header + 1, R::Instruction::LoopCarry(h, 0, Ty::Text)), outputs.clone());
+    rejected("carry component", changed(header + 1, R::Instruction::LoopCarry(h, 1, Ty::Float)), outputs.clone());
     let finish = loop_.finish as usize;
-    rejected("end owner", changed(finish, R::Instruction::Loop_end(h + 1, vec![h + 1], None)), outputs.clone());
-    rejected("integer stop", changed(finish, R::Instruction::Loop_end(h, vec![h + 1], Some(h))), outputs.clone());
-    rejected("future stop", changed(finish, R::Instruction::Loop_end(h, vec![h + 1], Some(result as i64))), outputs.clone());
-    rejected("result component", changed(result, R::Instruction::Loop_result(h, i64::MAX, Ty::Float)), outputs.clone());
+    rejected("end owner", changed(finish, R::Instruction::LoopEnd(h + 1, vec![h + 1], None)), outputs.clone());
+    rejected("integer stop", changed(finish, R::Instruction::LoopEnd(h, vec![h + 1], Some(h))), outputs.clone());
+    rejected("future stop", changed(finish, R::Instruction::LoopEnd(h, vec![h + 1], Some(result as i64))), outputs.clone());
+    rejected("result component", changed(result, R::Instruction::LoopResult(h, i64::MAX, Ty::Float)), outputs.clone());
     rejected("escaped carry", program.code.to_vec(), vec![vec![h + 1]]);
     rejected("escaped body value", changed(result, R::Instruction::Unary(Unary::Abs, loop_.finish - 1)), outputs.clone());
     assert_eq!(op::range_length(None, i64::MAX, i64::MIN).unwrap(), 0);
@@ -468,7 +468,7 @@ fn loop_fusion_producer_consumer_scopes_guards_and_sibling_outputs_agree() {
     let text = ts::compile("(map (fn [s] (if (> t 0.) s \"other\"))\n      (map (fn [x] (iterate 2 \"old\" (fn [s] (if (> x t) \"next\" s)))) (array/range 7)))");
     assert_eq!(text.stages.len(), 2);
     let independent = ts::compile("(map (fn [x] [(fold [a t] [i (range 2)] (+ a x))\n                   (fold [a t] [i (range 2)] (+ a x))]) (array/range 7))");
-    assert_eq!(independent.code.iter().filter(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Loop_begin(_))).count(), 2);
+    assert_eq!(independent.code.iter().filter(|i| matches!(R::Instruction::unguarded(i), R::Instruction::LoopBegin(_))).count(), 2);
     let reduction = ts::compile("(fold [total 1.] [x (map (fn [x] (iterate 3 (+ x t) (fn [a] (+ a 1.))))\n      (array/range 7))] (+ (* total 0.5) x))");
     assert_eq!(reduction.stages.len(), 2);
     for program in [&text, &independent, &reduction] {
@@ -529,11 +529,11 @@ fn shared_binary_text_survives_packed_select_and_carried_loops() {
     let body = format!("(map (fn [(i : int)] (iterate 3 {literal} (fn [s] (if (> t 0.) (if (int/eq (int/mod i 2) 0) s \"other\\000\\255\") s)))) (array/range 1025 :type int))");
     for fusion in [false, true] {
         let program = ts::compile_with(None, fusion, "", &body);
-        assert!(program.code.iter().any(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Loop_begin(_))));
-        assert!(program.code.iter().any(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Text_const(_))));
+        assert!(program.code.iter().any(|i| matches!(R::Instruction::unguarded(i), R::Instruction::LoopBegin(_))));
+        assert!(program.code.iter().any(|i| matches!(R::Instruction::unguarded(i), R::Instruction::TextConst(_))));
         for time in [-0.25, 0.25] {
             let live = input::at_time(time);
-            let expected = Value::Text_array(Arc::new((0..1025).map(|i| if time > 0. && i % 2 == 1 { b"other\0\xff".as_slice() } else { &bytes }).collect()));
+            let expected = Value::TextArray(Arc::new((0..1025).map(|i| if time > 0. && i % 2 == 1 { b"other\0\xff".as_slice() } else { &bytes }).collect()));
             assert_eq!(ok(reference(&program, &live)), expected);
             for domains in [1, 8] {
                 ts::with_domains(domains, &|| assert_eq!(ok(packed::force(&program, &live, &strict())), expected));
@@ -576,7 +576,7 @@ fn local_kernel_helpers_capture_registers_before_later_shadowing() {
                 ..Default::default()
             }));
             assert_eq!(reads.load(Ordering::Relaxed), 1);
-            let expected = Value::Int_array(Arc::new((0..9).map(|i| 5 * i + 14).collect()));
+            let expected = Value::IntArray(Arc::new((0..9).map(|i| 5 * i + 14).collect()));
             assert_eq!(actual, expected);
             assert_eq!(actual, ok(packed::reference(&program, &live, None, None, None)));
         });

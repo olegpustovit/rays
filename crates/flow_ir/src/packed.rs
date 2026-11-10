@@ -1,5 +1,5 @@
 //! Packed numeric maps, loops and reductions use 1024-element register blocks and preserve accumulator order. Options are concrete structs; failures are KErr values. Launch chunks fill disjoint mutable slices without unsafe code.
-#![allow(non_snake_case, non_camel_case_types, clippy::too_many_arguments)]
+#![allow(clippy::too_many_arguments)]
 
 use crate::core_fuse;
 use crate::core_ir::region::{self, Instruction, LiveFloat, LiveInt, Loop, Projection, RegionResult};
@@ -52,11 +52,11 @@ pub type ColumnSource = Arc<dyn Fn(ResidualId, &Term) -> Result<Option<Vec<Colum
 #[derive(Clone, Debug)]
 pub enum KErr {
     Unsupported,
-    Diag(Diagnostic),
+    Diag(Box<Diagnostic>),
 }
 impl From<Diagnostic> for KErr {
     fn from(d: Diagnostic) -> KErr {
-        KErr::Diag(d)
+        KErr::Diag(Box::new(d))
     }
 }
 type K<X> = Result<X, KErr>;
@@ -64,7 +64,7 @@ fn interrupted(expired: &Option<Arc<dyn Fn() -> bool + Send + Sync>>, run: &mut 
     let mut result = Ok(());
     let mut work = || {
         if let Err(d) = E::interruptible(&mut || result = run()) {
-            result = Err(KErr::Diag(d));
+            result = Err(KErr::from(d));
         }
     };
     match expired {
@@ -79,7 +79,7 @@ fn interrupted(expired: &Option<Arc<dyn Fn() -> bool + Send + Sync>>, run: &mut 
 }
 
 fn fail(code: &str, message: &str) -> KErr {
-    KErr::Diag(value::fail(code, message))
+    KErr::from(value::fail(code, message))
 }
 
 fn stage_refused() -> KErr {
@@ -96,12 +96,12 @@ fn nonfinite<X>() -> K<X> {
 fn typed_instruction(i: &Instruction) -> bool {
     use Instruction::*;
     match i {
-        Int_const(_) => false, // compile-time configuration literals may be unused
-        Int_input(_) | Int_uniform(_) | Int_frame(_) | Int_accumulator | Int_binary(..) | Int_compare(..)
-        | Int_abs(_) | Convert(..) | Int_select(..) | Raise(..) | Rand_at(..) | Trace(..)
-        | Array_prepare(..) | Gather(..) | Int_gather(..) | Text_const(_) | Text_input(_)
-        | Text_uniform(_) | Text_gather(..) | Text_select(..) => true,
-        Loop_begin(_) | Loop_carry(..) | Loop_end(..) | Loop_result(..) => true,
+        IntConst(_) => false, // compile-time configuration literals may be unused
+        IntInput(_) | IntUniform(_) | IntFrame(_) | IntAccumulator | IntBinary(..) | IntCompare(..)
+        | IntAbs(_) | Convert(..) | IntSelect(..) | Raise(..) | RandAt(..) | Trace(..)
+        | ArrayPrepare(..) | Gather(..) | IntGather(..) | TextConst(_) | TextInput(_)
+        | TextUniform(_) | TextGather(..) | TextSelect(..) => true,
+        LoopBegin(_) | LoopCarry(..) | LoopEnd(..) | LoopResult(..) => true,
         Guarded(_, body) => typed_instruction(body),
         _ => false,
     }
@@ -168,7 +168,7 @@ pub fn output_reachable(t: &T) -> Vec<bool> {
         for r in region::operands(&t.code[slot]) {
             mark(t, used, r as usize);
         }
-        if let Instruction::Loop_begin(loop_) = Instruction::unguarded(&t.code[slot]) {
+        if let Instruction::LoopBegin(loop_) = Instruction::unguarded(&t.code[slot]) {
             for body in slot + 1..=loop_.finish as usize {
                 mark(t, used, body);
             }
@@ -187,10 +187,10 @@ pub fn finite_checks(t: &T) -> Vec<bool> {
     t.code
         .iter()
         .map(|instruction| match Instruction::unguarded(instruction) {
-            Instruction::Const(_) | Instruction::Select(..) | Instruction::Array_prepare(..)
+            Instruction::Const(_) | Instruction::Select(..) | Instruction::ArrayPrepare(..)
             | Instruction::Unary(Unary::Abs | Unary::Sqrt | Unary::Not, _)
-            | Instruction::Loop_begin(_) | Instruction::Loop_carry(..) | Instruction::Loop_end(..)
-            | Instruction::Loop_result(..) | Instruction::Checked_mul(..) | Instruction::Checked_fma(..)
+            | Instruction::LoopBegin(_) | Instruction::LoopCarry(..) | Instruction::LoopEnd(..)
+            | Instruction::LoopResult(..) | Instruction::CheckedMul(..) | Instruction::CheckedFma(..)
             | Instruction::Binary(
                 Binary::Min | Binary::Max | Binary::Lt | Binary::Le | Binary::Gt | Binary::Ge | Binary::Eq | Binary::And | Binary::Or,
                 _,
@@ -218,13 +218,13 @@ pub fn gpu_refusals(fused: bool, fast: bool, t: &T) -> Vec<Diagnostic> {
         reasons.push(gpu_error("scene/trace needs fast precision and a bound acceleration structure."));
     }
     // fast precision (the workspace default) takes gathers and int32 on the device
-    if !fast && any(&|i| matches!(i, Instruction::Array_prepare(..) | Instruction::Gather(..) | Instruction::Int_gather(..))) {
+    if !fast && any(&|i| matches!(i, Instruction::ArrayPrepare(..) | Instruction::Gather(..) | Instruction::IntGather(..))) {
         reasons.push(gpu_error("Indexed array reads stay on the CPU."));
     }
     if !fast && integer_program(t) && !t.code.iter().any(region::text_register) {
         reasons.push(gpu_error("Integer sources, uniforms and instructions stay on the CPU."));
     }
-    if fast && any(&|i| matches!(i, Instruction::Rand_at(..) | Instruction::Int_accumulator)) {
+    if fast && any(&|i| matches!(i, Instruction::RandAt(..) | Instruction::IntAccumulator)) {
         reasons.push(gpu_error("Random streams and integer accumulators stay on the CPU."));
     }
     if any(&|i| matches!(i, Instruction::Binary(Binary::Hypot, _, _))) {
@@ -234,14 +234,14 @@ pub fn gpu_refusals(fused: bool, fast: bool, t: &T) -> Vec<Diagnostic> {
         if any(&|i| matches!(i, Instruction::Fma(..))) {
             reasons.push(gpu_error("FMA requires exact single-rounding binary64 arithmetic."));
         }
-        if any(&|i| matches!(i, Instruction::Checked_mul(..) | Instruction::Checked_fma(..))) {
+        if any(&|i| matches!(i, Instruction::CheckedMul(..) | Instruction::CheckedFma(..))) {
             reasons.push(gpu_error("Checked arithmetic requires binary64 overflow status."));
         }
     }
     if t.result != RegionResult::Collect || !zipped(t) || !t.skip.is_empty() {
         reasons.push(gpu_error("GPU kernels require Collect with Zip iteration and no skipped elements."));
     }
-    if any(&|i| matches!(i, Instruction::Accumulator(_) | Instruction::Int_accumulator)) {
+    if any(&|i| matches!(i, Instruction::Accumulator(_) | Instruction::IntAccumulator)) {
         reasons.push(gpu_error("Ordered accumulators stay on the CPU."));
     }
     let used = output_reachable(t);
@@ -462,7 +462,7 @@ fn unsupported_node(_: &str, _: &NodeArgs) -> Result<Value, Diagnostic> {
 }
 
 fn node_error(d: Diagnostic) -> KErr {
-    if d.code == "$unsupported" { KErr::Unsupported } else { KErr::Diag(d) }
+    if d.code == "$unsupported" { KErr::Unsupported } else { KErr::from(d) }
 }
 
 /// A frame fact's value (`t` or a value-context op over the live frame).
@@ -485,7 +485,7 @@ fn components(v: &Value) -> K<Vec<f64>> {
 }
 
 fn noise_error(message: String) -> KErr {
-    KErr::Diag(value::fail("E_KERNEL", &message))
+    KErr::from(value::fail("E_KERNEL", &message))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1183,7 +1183,7 @@ fn concrete(v: &Value) -> bool {
     matches!(
         v,
         Value::Int(_) | Value::Text(_) | Value::Float(_) | Value::Bool(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..)
-            | Value::Int_array(_) | Value::Text_array(_) | Value::Floats(1..=4, _)
+            | Value::IntArray(_) | Value::TextArray(_) | Value::Floats(1..=4, _)
     )
 }
 
@@ -1259,7 +1259,7 @@ impl TS {
         }
         match fo {
             Some(f) => {
-                let made = f(&self.t.uniforms[i]).map_err(KErr::Diag);
+                let made = f(&self.t.uniforms[i]).map_err(KErr::from);
                 self.ucells[i].value.get_or_init(|| made).clone()
             }
             None => Err(KErr::Unsupported),
@@ -1275,8 +1275,8 @@ impl TS {
     fn frame(&self, slot: usize) -> K<Value> {
         self.frames[slot]
             .get_or_init(|| match Instruction::unguarded(&self.t.code[slot]) {
-                Instruction::Int_frame(name) | Instruction::Frame(name) => frame_fact(name, &self.live),
-                _ => Ok(Value::No_geo),
+                Instruction::IntFrame(name) | Instruction::Frame(name) => frame_fact(name, &self.live),
+                _ => Ok(Value::NoGeo),
             })
             .clone()
     }
@@ -1294,7 +1294,7 @@ impl TS {
     }
     fn table(&self, register: i64) -> K<&Value> {
         match Instruction::unguarded(&self.t.code[register as usize]) {
-            Instruction::Array_prepare(i, _) => self.prepared[*i as usize].get().ok_or_else(|| fail("E_PACKED_LAYOUT", "Array lookup needs its prepared table.")),
+            Instruction::ArrayPrepare(i, _) => self.prepared[*i as usize].get().ok_or_else(|| fail("E_PACKED_LAYOUT", "Array lookup needs its prepared table.")),
             _ => Err(fail("E_PACKED_LAYOUT", "Array lookup needs a table handle.")),
         }
     }
@@ -1364,10 +1364,10 @@ fn finite(x: f64) -> K<f64> {
 fn typed_total(sh: &TS, instruction: &Instruction) -> bool {
     use Instruction::*;
     match instruction {
-        Const(_) | Int_const(_) | Text_const(_) | Int_abs(_) | Int_compare(..) | Int_select(..) | Text_select(..) => true,
-        Int_input(i) => sh.ranges[*i as usize].is_some() || matches!(sh.inputs[*i as usize], Value::Int_array(_)),
-        Text_input(i) => matches!(sh.inputs[*i as usize], Value::Text_array(_)),
-        Int_binary(Integer::Iadd | Integer::Isub | Integer::Imul | Integer::Iand | Integer::Ior | Integer::Ixor, _, _) => true,
+        Const(_) | IntConst(_) | TextConst(_) | IntAbs(_) | IntCompare(..) | IntSelect(..) | TextSelect(..) => true,
+        IntInput(i) => sh.ranges[*i as usize].is_some() || matches!(sh.inputs[*i as usize], Value::IntArray(_)),
+        TextInput(i) => matches!(sh.inputs[*i as usize], Value::TextArray(_)),
+        IntBinary(Integer::Iadd | Integer::Isub | Integer::Imul | Integer::Iand | Integer::Ior | Integer::Ixor, _, _) => true,
         Guarded(_, body) => typed_total(sh, body),
         _ => false,
     }
@@ -1449,7 +1449,7 @@ fn texec_range(
                 texec(sh, regs, tc, fo, slot, instruction, first, last)?;
             }
             slot = match Instruction::unguarded(instruction) {
-                Instruction::Loop_begin(l) => l.finish as usize + 1,
+                Instruction::LoopBegin(l) => l.finish as usize + 1,
                 _ => slot + 1,
             };
         }
@@ -1469,7 +1469,7 @@ fn execute_loop(
 ) -> K<()> {
     let bs = sh.block_size;
     let (next, stop) = match Instruction::unguarded(&regs.run_code[lp.finish as usize]) {
-        Instruction::Loop_end(_, next, stop) => (next.clone(), *stop),
+        Instruction::LoopEnd(_, next, stop) => (next.clone(), *stop),
         _ => unreachable!("loop without its end"),
     };
     let count = lp.initial.len();
@@ -1486,7 +1486,7 @@ fn execute_loop(
         let limit = lp.limit.map(|l| l as usize).unwrap_or(usize::MAX >> 1);
         lengths[lane - first] = match op::range_length(Some(limit), lo, hi) {
             Ok(n) => n,
-            Err(d) => return Err(KErr::Diag(Diagnostic { span: Some(lp.span.clone()), ..d })),
+            Err(d) => return Err(KErr::from(Diagnostic { span: Some(lp.span.clone()), ..d })),
         };
         for component in 0..count {
             tc.copy_loop(regs, bs, lp.initial[component] as usize, header + 1 + component, lane);
@@ -1567,20 +1567,20 @@ fn texec(
         if t.iteration == Iteration::Zip { index } else { index / sh.strides[i] % sh.lengths[i] }
     };
     match instruction {
-        Instruction::Loop_begin(lp) => execute_loop(sh, regs, tc, fo, slot, lp, first, last)?,
-        Instruction::Loop_result(lp, component, _) => {
+        Instruction::LoopBegin(lp) => execute_loop(sh, regs, tc, fo, slot, lp, first, last)?,
+        Instruction::LoopResult(lp, component, _) => {
             for lane in first..last {
                 tc.copy_loop(regs, bs, (*lp + 1 + *component) as usize, slot, lane);
             }
         }
-        Instruction::Loop_carry(..) | Instruction::Loop_end(..) => unreachable!("loop bookkeeping runs inside its loop"),
-        Instruction::Text_const(v) => {
+        Instruction::LoopCarry(..) | Instruction::LoopEnd(..) => unreachable!("loop bookkeeping runs inside its loop"),
+        Instruction::TextConst(v) => {
             let o = toff(place);
             for j in first..last {
                 tc.texts[o + j] = v.clone();
             }
         }
-        Instruction::Text_uniform(i) => {
+        Instruction::TextUniform(i) => {
             if first < last {
                 let v = match sh.uvalue(*i as usize, fo)? {
                     Value::Text(text) => text,
@@ -1592,10 +1592,10 @@ fn texec(
                 }
             }
         }
-        Instruction::Text_input(i) => {
+        Instruction::TextInput(i) => {
             let i = *i as usize;
             let data = match &sh.inputs[i] {
-                Value::Text_array(data) => data,
+                Value::TextArray(data) => data,
                 _ => return Err(fail("E_ARRAY_TYPE", "Kernel input changed its packed element type.")),
             };
             let o = toff(place);
@@ -1603,10 +1603,10 @@ fn texec(
                 tc.texts[o + j] = Arc::from(&data[source_index(tc, j, i)]);
             }
         }
-        Instruction::Text_gather(array, index) => {
+        Instruction::TextGather(array, index) => {
             let array = sh.table(*array)?;
             let data = match array {
-                Value::Text_array(data) => data,
+                Value::TextArray(data) => data,
                 _ => unreachable!("text table"),
             };
             let o = toff(place);
@@ -1615,7 +1615,7 @@ fn texec(
                 tc.texts[o + j] = Arc::from(&data[k]);
             }
         }
-        Instruction::Text_select(condition, yes, no) => {
+        Instruction::TextSelect(condition, yes, no) => {
             let o = toff(place);
             for j in first..last {
                 let register = if tc.numeric(regs, bs, *condition as usize, j) != 0.0 { *yes } else { *no };
@@ -1690,18 +1690,18 @@ fn texec(
         }
         Instruction::Raise(_, code, message, cause) => {
             if first < last {
-                return Err(KErr::Diag(rays_diagnostic::error(code.clone(), message.clone(), None, None, cause.clone(), Vec::new(), Vec::new())));
+                return Err(KErr::from(rays_diagnostic::error(code.clone(), message.clone(), None, None, cause.clone(), Vec::new(), Vec::new())));
             }
         }
-        Instruction::Array_prepare(i, ty) => {
+        Instruction::ArrayPrepare(i, ty) => {
             if first < last {
                 sh.prepare(*i as usize, ty, fo)?;
             }
         }
-        Instruction::Int_gather(array, index) => {
+        Instruction::IntGather(array, index) => {
             let array = sh.table(*array)?;
             match array {
-                Value::Int_array(data) => {
+                Value::IntArray(data) => {
                     for j in first..last {
                         let k = row(array, tc.integer[*index as usize * bs + j])?;
                         tc.integer[at + j] = data[k];
@@ -1721,10 +1721,10 @@ fn texec(
                 tc.floats[at + j] = finite!(data[k * *width as usize + *component as usize]);
             }
         }
-        Instruction::Int_const(n) => tc.integer[at + first..at + last].fill(*n),
+        Instruction::IntConst(n) => tc.integer[at + first..at + last].fill(*n),
         // A constant produces no new value: like every other target (finite_checks), its consumers check it.
         Instruction::Const(x) => tc.floats[at + first..at + last].fill(*x),
-        Instruction::Int_input(i) => {
+        Instruction::IntInput(i) => {
             let i = *i as usize;
             if sh.contiguous {
                 match (&sh.ranges[i], &sh.inputs[i]) {
@@ -1733,7 +1733,7 @@ fn texec(
                             tc.integer[at + j] = (tc.start + j) as i64;
                         }
                     }
-                    (None, Value::Int_array(data)) => {
+                    (None, Value::IntArray(data)) => {
                         tc.integer[at + first..at + last].copy_from_slice(&data[tc.start + first..tc.start + last]);
                     }
                     (None, value) => {
@@ -1750,7 +1750,7 @@ fn texec(
                     let s = source_index(tc, j, i);
                     tc.integer[at + j] = match (&sh.ranges[i], &sh.inputs[i]) {
                         (Some(_), _) => s as i64,
-                        (None, Value::Int_array(data)) => data[s],
+                        (None, Value::IntArray(data)) => data[s],
                         (None, value) => match value::array_get(value, s as i64)? {
                             Value::Int(n) => n,
                             _ => return Err(fail("E_ARRAY_TYPE", "Kernel input changed its packed element type.")),
@@ -1806,7 +1806,7 @@ fn texec(
                 }
             }
         }
-        Instruction::Int_uniform(i) => {
+        Instruction::IntUniform(i) => {
             if first < last {
                 match sh.uvalue(*i as usize, fo)? {
                     Value::Int(n) => tc.integer[at + first..at + last].fill(n),
@@ -1814,7 +1814,7 @@ fn texec(
                 }
             }
         }
-        Instruction::Int_frame(_) => {
+        Instruction::IntFrame(_) => {
             if first < last {
                 match sh.frame(slot)? {
                     Value::Int(n) => tc.integer[at + first..at + last].fill(n),
@@ -1835,7 +1835,7 @@ fn texec(
                 tc.floats[at + first..at + last].fill(x);
             }
         }
-        Instruction::Int_accumulator => match &*sh.accumulator.lock().unwrap() {
+        Instruction::IntAccumulator => match &*sh.accumulator.lock().unwrap() {
             Value::Int(n) => tc.integer[at + first..at + last].fill(*n),
             _ => unreachable!("integer accumulator"),
         },
@@ -1843,19 +1843,19 @@ fn texec(
             let x = finite!(tc.acc[*c as usize]);
             tc.floats[at + first..at + last].fill(x);
         }
-        Instruction::Int_binary(operation, a, b) => {
+        Instruction::IntBinary(operation, a, b) => {
             let (a, b) = (*a as usize * bs, *b as usize * bs);
             for j in first..last {
                 tc.integer[at + j] = packed_ops::integer_apply(*operation, tc.integer[a + j], tc.integer[b + j])?;
             }
         }
-        Instruction::Int_compare(operation, a, b) => {
+        Instruction::IntCompare(operation, a, b) => {
             let (a, b) = (*a as usize * bs, *b as usize * bs);
             for j in first..last {
                 tc.floats[at + j] = if packed_ops::comparison_apply(*operation, tc.integer[a + j], tc.integer[b + j]) { 1.0 } else { 0.0 };
             }
         }
-        Instruction::Int_abs(a) => {
+        Instruction::IntAbs(a) => {
             let a = *a as usize * bs;
             for j in first..last {
                 tc.integer[at + j] = tc.integer[a + j].wrapping_abs();
@@ -1871,7 +1871,7 @@ fn texec(
                 tc.integer[at + j] = convert_int(operation, tc.numeric(regs, bs, *a as usize, j))?;
             }
         }
-        Instruction::Int_select(c, a, b) => {
+        Instruction::IntSelect(c, a, b) => {
             let (a, b) = (*a as usize * bs, *b as usize * bs);
             for j in first..last {
                 let chosen = if tc.numeric(regs, bs, *c as usize, j) != 0.0 { a } else { b };
@@ -1917,14 +1917,14 @@ fn texec(
                 tc.floats[at + j] = finite!(rays_math::fma::fma(tc.floats[a + j], tc.floats[b + j], tc.floats[c + j]));
             }
         }
-        Instruction::Checked_mul(p, a, b) if !banks[*a as usize] && !banks[*b as usize] => {
+        Instruction::CheckedMul(p, a, b) if !banks[*a as usize] && !banks[*b as usize] => {
             let (a, b) = (*a as usize * bs, *b as usize * bs);
             for j in first..last {
                 let (x, y) = (finite(tc.floats[a + j])?, finite(tc.floats[b + j])?);
                 tc.floats[at + j] = checked_projection(*p, std::hint::black_box(x * y));
             }
         }
-        Instruction::Checked_fma(p, a, b, c) if !banks[*a as usize] && !banks[*b as usize] && !banks[*c as usize] => {
+        Instruction::CheckedFma(p, a, b, c) if !banks[*a as usize] && !banks[*b as usize] && !banks[*c as usize] => {
             let (a, b, c) = (*a as usize * bs, *b as usize * bs, *c as usize * bs);
             for j in first..last {
                 let (x, y, z) = (finite(tc.floats[a + j])?, finite(tc.floats[b + j])?, finite(tc.floats[c + j])?);
@@ -1941,14 +1941,14 @@ fn texec(
                 tc.floats[at + j] = finite!(v);
             }
         }
-        Instruction::Checked_mul(p, a, b) => {
+        Instruction::CheckedMul(p, a, b) => {
             for j in first..last {
                 let x = finite!(tc.numeric(regs, bs, *a as usize, j));
                 let y = finite!(tc.numeric(regs, bs, *b as usize, j));
                 tc.floats[at + j] = checked_projection(*p, std::hint::black_box(x * y));
             }
         }
-        Instruction::Checked_fma(p, a, b, c) => {
+        Instruction::CheckedFma(p, a, b, c) => {
             for j in first..last {
                 let x = finite!(tc.numeric(regs, bs, *a as usize, j));
                 let y = finite!(tc.numeric(regs, bs, *b as usize, j));
@@ -1978,7 +1978,7 @@ fn texec(
             }
         }
         Instruction::Stage(..) => return Err(stage_refused()),
-        Instruction::Rand_at(seed, index) => {
+        Instruction::RandAt(seed, index) => {
             let (seed, index) = (*seed as usize * bs, *index as usize * bs);
             for j in first..last {
                 tc.floats[at + j] = packed_ops::rand_at(tc.integer[seed + j], tc.integer[index + j]);
@@ -2086,7 +2086,7 @@ fn cached_ty(sh: &TS, i: i64, ty: &Ty) -> bool {
 
 fn cached_table(sh: &TS, register: i64) -> Option<&Value> {
     match Instruction::unguarded(&sh.t.code[register as usize]) {
-        Instruction::Array_prepare(i, ty) if cached_ty(sh, *i, ty) => sh.prepared[*i as usize].get(),
+        Instruction::ArrayPrepare(i, ty) if cached_ty(sh, *i, ty) => sh.prepared[*i as usize].get(),
         _ => None,
     }
 }
@@ -2114,13 +2114,13 @@ fn safe(sh: &TS, regs: &region::Registers, tc: &TC, length: usize, guards: Vec<(
             all.extend(more.iter().copied());
             safe(sh, regs, tc, length, all, body)
         }
-        Instruction::Array_prepare(i, ty) => cached_ty(sh, *i, ty),
-        Instruction::Text_gather(array, index) => match cached_table(sh, *array) {
-            Some(Value::Text_array(data)) => valid_indices(sh, regs, tc, length, &guards, *index, data.len()),
+        Instruction::ArrayPrepare(i, ty) => cached_ty(sh, *i, ty),
+        Instruction::TextGather(array, index) => match cached_table(sh, *array) {
+            Some(Value::TextArray(data)) => valid_indices(sh, regs, tc, length, &guards, *index, data.len()),
             _ => false,
         },
-        Instruction::Int_gather(array, index) => match cached_table(sh, *array) {
-            Some(Value::Int_array(data)) => valid_indices(sh, regs, tc, length, &guards, *index, data.len()),
+        Instruction::IntGather(array, index) => match cached_table(sh, *array) {
+            Some(Value::IntArray(data)) => valid_indices(sh, regs, tc, length, &guards, *index, data.len()),
             _ => false,
         },
         Instruction::Gather(array, index, width, _) => match (cached_table(sh, *array), *width) {
@@ -2246,7 +2246,7 @@ fn typed_chunk(
                 // proof leaves the whole remaining suffix lane-major.
                 let mut prefix = sh.total_prefix;
                 while prefix < regs.run_code.len() && safe(sh, regs, &tc, length, Vec::new(), &regs.run_code[prefix]) {
-                    if !matches!(Instruction::unguarded(&t.code[prefix]), Instruction::Array_prepare(..)) {
+                    if !matches!(Instruction::unguarded(&t.code[prefix]), Instruction::ArrayPrepare(..)) {
                         texec(sh, regs, &mut tc, fo, prefix, &regs.run_code[prefix], 0, length)?;
                     }
                     prefix += 1;
@@ -2390,11 +2390,11 @@ fn run_typed(
         .code
         .iter()
         .fold(0usize, |count, i| match Instruction::unguarded(i) {
-            Instruction::Loop_begin(l) => count.max(l.initial.len()),
+            Instruction::LoopBegin(l) => count.max(l.initial.len()),
             _ => count,
         });
     let gather = t.code.iter().any(|i| match Instruction::unguarded(i) {
-        Instruction::Array_prepare(..) | Instruction::Gather(..) | Instruction::Int_gather(..) | Instruction::Loop_begin(_) => true,
+        Instruction::ArrayPrepare(..) | Instruction::Gather(..) | Instruction::IntGather(..) | Instruction::LoopBegin(_) => true,
         body => region::text_register(body),
     });
     let cache_guards = carried == 0 && t.result == RegionResult::Collect && t.code.iter().any(|i| matches!(i, Instruction::Guarded(..)));
@@ -2407,7 +2407,7 @@ fn run_typed(
     let mut inputs: Vec<Value> = Vec::with_capacity(nsrc);
     for (i, (r, term)) in t.sources.iter().enumerate() {
         if empty_product {
-            inputs.push(Value::No_geo);
+            inputs.push(Value::NoGeo);
             continue;
         }
         borrowed[i] = match (&run.column_source, term.ty()) {
@@ -2415,13 +2415,13 @@ fn run_typed(
             _ => None,
         };
         let value = if borrowed[i].is_some() {
-            Value::No_geo
+            Value::NoGeo
         } else {
             match integer_range(*r, term) {
                 Some((rr, count)) => {
                     let count_value = evaluate(rr, &Arc::new(count))?;
                     ranges[i] = Some(op::array_count(None, "array/range", &count_value)?);
-                    Value::No_geo
+                    Value::NoGeo
                 }
                 None => evaluate(*r, term)?,
             }
@@ -2630,14 +2630,14 @@ fn run_typed(
     let sh = sh;
     // A Cartesian projection repeats one checked row. Its unused outer input is concrete integers
     // or a checked range; removing those loads cannot hide a type or finite-value error.
-    let outer_ok = |i: usize| sh.ranges[i].is_some() || matches!(sh.inputs[i], Value::Int_array(_));
+    let outer_ok = |i: usize| sh.ranges[i].is_some() || matches!(sh.inputs[i], Value::IntArray(_));
     let repeated_row: Option<(usize, Arc<Vec<f64>>)> = match (t.iteration, &t.result, sh.skip.is_empty(), sh.inputs.as_slice(), t.code.as_slice(), t.outputs.as_slice()) {
-        (Iteration::Product, RegionResult::Collect, true, [_, Value::Floats(1, row)], [Instruction::Int_input(0), Instruction::Input(1, 1, 0)], [o])
+        (Iteration::Product, RegionResult::Collect, true, [_, Value::Floats(1, row)], [Instruction::IntInput(0), Instruction::Input(1, 1, 0)], [o])
             if o.as_slice() == [1] && outer_ok(0) =>
         {
             Some((sh.lengths[0], row.clone()))
         }
-        (Iteration::Product, RegionResult::Collect, true, [_, Value::Floats(1, row)], [Instruction::Input(1, 1, 0), Instruction::Int_input(0)], [o])
+        (Iteration::Product, RegionResult::Collect, true, [_, Value::Floats(1, row)], [Instruction::Input(1, 1, 0), Instruction::IntInput(0)], [o])
             if o.as_slice() == [0] && outer_ok(0) =>
         {
             Some((sh.lengths[0], row.clone()))
@@ -2646,12 +2646,12 @@ fn run_typed(
     };
     // Exact integer scaling needs one pass and no temporary register banks.
     let scaled_column: Option<i64> = match (t.iteration, &t.result, sh.skip.is_empty(), sh.inputs.as_slice(), t.code.as_slice(), t.outputs.as_slice()) {
-        (Iteration::Zip, RegionResult::Collect, true, [_], [Instruction::Int_input(0), Instruction::Int_const(factor), Instruction::Int_binary(Integer::Imul, 0, 1)], [o])
+        (Iteration::Zip, RegionResult::Collect, true, [_], [Instruction::IntInput(0), Instruction::IntConst(factor), Instruction::IntBinary(Integer::Imul, 0, 1)], [o])
             if o.as_slice() == [2] && outer_ok(0) && !has_planes && ivec[0].len() == kept =>
         {
             Some(*factor)
         }
-        (Iteration::Zip, RegionResult::Collect, true, [_], [Instruction::Int_const(factor), Instruction::Int_input(0), Instruction::Int_binary(Integer::Imul, 0, 1)], [o])
+        (Iteration::Zip, RegionResult::Collect, true, [_], [Instruction::IntConst(factor), Instruction::IntInput(0), Instruction::IntBinary(Integer::Imul, 0, 1)], [o])
             if o.as_slice() == [2] && outer_ok(0) && !has_planes && ivec[0].len() == kept =>
         {
             Some(*factor)
@@ -2696,7 +2696,7 @@ fn run_typed(
         let bounds: Vec<usize> = (0..=nchunks).map(|c| (c * per).min(count)).collect();
         let parts = split_ints(ivec[0].as_mut_slice(), &bounds);
         let input: Option<Arc<Vec<i64>>> = match &sh.inputs[0] {
-            Value::Int_array(d) => Some(d.clone()),
+            Value::IntArray(d) => Some(d.clone()),
             _ => None,
         };
         let failure: Mutex<Option<Diagnostic>> = Mutex::new(None);
@@ -2720,7 +2720,7 @@ fn run_typed(
         };
         parallel::for_(1, 0, nchunks as i64 - 1, &work).map_err(noise_error)?;
         if let Some(d) = failure.into_inner().unwrap() {
-            return Err(KErr::Diag(d));
+            return Err(KErr::from(d));
         }
     } else {
         // Lazy captures cannot be forced from a worker thread. The first chunk runs here, in
@@ -2814,7 +2814,7 @@ fn run_typed(
                     let rows = std::mem::take(&mut tvec[k]);
                     value::array_init(&Ty::Text, rows.len() as i64, &|i| Value::Text(rows[i].clone()))
                 } else if sh.integer_outputs[k] {
-                    Ok(Value::Int_array(Arc::new(std::mem::take(&mut ivec[k]))))
+                    Ok(Value::IntArray(Arc::new(std::mem::take(&mut ivec[k]))))
                 } else {
                     Ok(float_value_of(t.outputs[k].len(), std::mem::take(&mut fvec[k])))
                 }
@@ -2878,8 +2878,8 @@ fn same_term(a: &Arc<Term>, b: &Arc<Term>) -> bool {
 fn same_value(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Floats(aw @ 1..=4, x), Value::Floats(bw, y)) if aw == bw => Arc::ptr_eq(x, y),
-        (Value::Int_array(x), Value::Int_array(y)) => Arc::ptr_eq(x, y),
-        (Value::Text_array(x), Value::Text_array(y)) => Arc::ptr_eq(x, y),
+        (Value::IntArray(x), Value::IntArray(y)) => Arc::ptr_eq(x, y),
+        (Value::TextArray(x), Value::TextArray(y)) => Arc::ptr_eq(x, y),
         _ => a == b,
     }
 }
@@ -3217,12 +3217,12 @@ fn run_all(run: &Run, dispatch: Option<Dispatch>, plane_outputs: PlaneOutputs) -
             let flat = match &outcome {
                 Ok(_) => Ok(()),
                 Err(KErr::Unsupported) => Err(value::fail("E_KERNEL", "Kernel needs reference evaluation.")),
-                Err(KErr::Diag(d)) => Err(d.clone()),
+                Err(KErr::Diag(d)) => Err(d.as_ref().clone()),
             };
             *result.borrow_mut() = Some(match outcome {
                 Ok(v) => Ok(v),
                 Err(KErr::Unsupported) => Err(value::fail("E_KERNEL", "Kernel needs reference evaluation.")),
-                Err(KErr::Diag(d)) => Err(d),
+                Err(KErr::Diag(d)) => Err(*d),
             });
             flat
         };
@@ -3873,8 +3873,8 @@ pub mod host {
     pub fn floats(v: &Value) -> Result<Option<Arc<Vec<f64>>>, Diagnostic> {
         Ok(match v {
             Value::Floats(1..=4, values) => Some(values.clone()),
-            Value::Int_array(values) if values.is_empty() => Some(Arc::new(Vec::new())),
-            Value::Int_array(values) => Some(int_floats(values)?),
+            Value::IntArray(values) if values.is_empty() => Some(Arc::new(Vec::new())),
+            Value::IntArray(values) => Some(int_floats(values)?),
             _ => None,
         })
     }
@@ -3888,7 +3888,7 @@ pub mod host {
             let failure = match &r {
                 Ok(_) => None,
                 Err(KErr::Unsupported) => Some(value::fail("E_KERNEL", "Kernel inputs need reference evaluation.")),
-                Err(KErr::Diag(d)) => Some(d.clone()),
+                Err(KErr::Diag(d)) => Some(d.as_ref().clone()),
             };
             *outcome.borrow_mut() = Some(r);
             match failure {
@@ -3899,7 +3899,7 @@ pub mod host {
         match outcome.into_inner() {
             Some(Ok(v)) => Ok(v),
             Some(Err(KErr::Unsupported)) | None => Err(value::fail("E_KERNEL", "Kernel inputs need reference evaluation.")),
-            Some(Err(KErr::Diag(d))) => Err(d),
+            Some(Err(KErr::Diag(d))) => Err(*d),
         }
     }
 
@@ -3976,15 +3976,15 @@ pub mod host {
         for (i, (residual, term)) in t.sources.iter().enumerate() {
             let value = if known[i].is_some() {
                 match term.ty() {
-                    Ty::Array(inner) if **inner == Ty::Int => Value::Int_array(Arc::new(Vec::new())),
+                    Ty::Array(inner) if **inner == Ty::Int => Value::IntArray(Arc::new(Vec::new())),
                     Ty::Array(inner) if **inner == Ty::Float => Value::Floats(1, Arc::new(Vec::new())),
                     _ => return Err(KErr::Unsupported),
                 }
             } else if empty_product {
                 match term.ty() {
                     Ty::Array(inner) => match **inner {
-                        Ty::Int => Value::Int_array(Arc::new(Vec::new())),
-                        Ty::Text => Value::Text_array(Arc::new(rays_math::text_array::TextArray::new())),
+                        Ty::Int => Value::IntArray(Arc::new(Vec::new())),
+                        Ty::Text => Value::TextArray(Arc::new(rays_math::text_array::TextArray::new())),
                         Ty::Float => Value::Floats(1, Arc::new(Vec::new())),
                         Ty::Vec2 => Value::Floats(2, Arc::new(Vec::new())),
                         Ty::Vec3 => Value::Floats(3, Arc::new(Vec::new())),
@@ -4085,7 +4085,7 @@ pub mod host {
             uniforms.push(match held(value) {
                 Some(placeholder) => placeholder,
                 None => force_values(&run, value, &|residual| uniform_of(pv, resolve, &made, residual).map_err(|e| match e {
-                    KErr::Diag(d) => d,
+                    KErr::Diag(d) => *d,
                     KErr::Unsupported => value::fail("E_KERNEL", "Kernel inputs need reference evaluation."),
                 }))?,
             });
@@ -4093,7 +4093,7 @@ pub mod host {
         let mut frame = Vec::with_capacity(t.code.len());
         for instruction in t.code.iter() {
             frame.push(match Instruction::unguarded(instruction) {
-                Instruction::Frame(name) | Instruction::Int_frame(name) => frame_fact(name, live)?,
+                Instruction::Frame(name) | Instruction::IntFrame(name) => frame_fact(name, live)?,
                 _ => Value::Float(0.0),
             });
         }
@@ -4103,7 +4103,7 @@ pub mod host {
     #[derive(Clone, Debug, PartialEq)]
     pub enum Argument {
         Argument(i64),
-        Argument_range(i64, i64, i64),
+        ArgumentRange(i64, i64, i64),
     }
 
     #[derive(Clone)]
@@ -4134,7 +4134,7 @@ pub mod host {
         for (r, term) in t.sources.iter() {
             plan_sources.push(match shape(*r, term) {
                 Shape::Value(v) => Argument::Argument(argument(&v)?),
-                Shape::Range(v, mul, div) => Argument::Argument_range(argument(&v)?, mul, div),
+                Shape::Range(v, mul, div) => Argument::ArgumentRange(argument(&v)?, mul, div),
                 Shape::Opaque(_) => return None,
             });
         }
@@ -4152,10 +4152,10 @@ pub mod host {
         let mut plan_frames: Vec<(usize, Arc<dyn Fn(&Live) -> f64 + Send + Sync>)> = Vec::new();
         for (i, instruction) in t.code.iter().enumerate() {
             match Instruction::unguarded(instruction) {
-                Instruction::Frame(name) | Instruction::Int_frame(name) if name == "t" && matches!(Instruction::unguarded(instruction), Instruction::Frame(_)) => {
+                Instruction::Frame(name) | Instruction::IntFrame(name) if name == "t" && matches!(Instruction::unguarded(instruction), Instruction::Frame(_)) => {
                     plan_frames.push((i, Arc::new(|live: &Live| live.t)));
                 }
-                Instruction::Frame(name) | Instruction::Int_frame(name) => {
+                Instruction::Frame(name) | Instruction::IntFrame(name) => {
                     op::find(&[], name, &context::value())?;
                     let name = name.clone();
                     plan_frames.push((
@@ -4181,7 +4181,7 @@ pub mod host {
         let mut tables = Vec::with_capacity(values.uniforms.len());
         for v in &values.uniforms {
             let as_floats = floats(v)?;
-            uniforms.push(if as_floats.is_none() { components(v).map_err(|e| match e { KErr::Diag(d) => d, KErr::Unsupported => value::fail("E_KERNEL", "unsupported") })? } else { Vec::new() });
+            uniforms.push(if as_floats.is_none() { components(v).map_err(|e| match e { KErr::Diag(d) => *d, KErr::Unsupported => value::fail("E_KERNEL", "unsupported") })? } else { Vec::new() });
             tables.push(as_floats.unwrap_or_else(|| Arc::new(Vec::new())));
         }
         let mut frame = Vec::with_capacity(values.frame.len());
@@ -4468,7 +4468,7 @@ mod tests {
                     let operation = if reverse { format!("(int/mul {factor} x)") } else { format!("(int/mul x {factor})") };
                     let (_, packed) = compile_body(&format!("(map (fn [x] {operation}) (array/range (int/add {count} (int t)) :type int))"), true);
                     let live = input::at_time(0.25);
-                    let expected = Value::Int_array(Arc::new((0..count as i64).map(|i| packed_ops::integer_apply(Integer::Imul, i, factor).unwrap()).collect()));
+                    let expected = Value::IntArray(Arc::new((0..count as i64).map(|i| packed_ops::integer_apply(Integer::Imul, i, factor).unwrap()).collect()));
                     for domains in [1, 4, 8] {
                         at_domains(domains, &|| {
                             assert!(same(&force(&packed, &live, &strict()), &Ok(expected.clone())));
@@ -4602,7 +4602,7 @@ mod tests {
         }
     }
 
-    // test_noise.ml: scaled noise skips an untaken overflow and refuses a selected one.
+    // : scaled noise skips an untaken overflow and refuses a selected one.
     #[test]
     fn scaled_noise_skips_untaken_overflow_and_refuses_selected_overflow() {
         let (_, packed) = compile_body("(map (fn [p] (if (> t 1e308) (noise3 (* p t)) 0.0)) (array/vec3 2051 [2.0 3.0 4.0]))", true);
@@ -4655,10 +4655,10 @@ mod tests {
     #[test]
     fn integer_float_copies_are_charged_and_found_by_identity() {
         let values = Arc::new((0..3001i64).collect::<Vec<_>>());
-        let first = host::floats(&Value::Int_array(values.clone())).unwrap().unwrap();
+        let first = host::floats(&Value::IntArray(values.clone())).unwrap().unwrap();
         assert_eq!(first.len(), 3001);
         assert!(mem::peak(&lru::cache("flow_ir.int_floats")) >= 3001 * 8);
-        assert!(Arc::ptr_eq(&first, &host::floats(&Value::Int_array(values)).unwrap().unwrap()));
+        assert!(Arc::ptr_eq(&first, &host::floats(&Value::IntArray(values)).unwrap().unwrap()));
     }
 
     #[test]

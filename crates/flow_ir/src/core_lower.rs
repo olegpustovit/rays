@@ -1,5 +1,5 @@
 //! Lower residuals into structured frame programs. Stop carries typed unsupported/diagnostic failures; source traversal assigns locals. Statement scopes retain their own cache and shared parent lookup according to branch/loop boundaries.
-#![allow(non_camel_case_types, non_snake_case, clippy::too_many_arguments)]
+#![allow(clippy::too_many_arguments)]
 
 use flow_syntax::symbol::{self, Symbol};
 use crate::core_ir as C;
@@ -59,10 +59,10 @@ fn holds_array_residual(v: &Value) -> bool {
 }
 
 fn failure(d: &Diagnostic) -> C::Primitive {
-    if d.span.is_none() && d.position.is_none() && d.cause.is_none() && d.hints.is_empty() && d.trace.is_empty() {
+    if d.span.is_none() && d.position.is_none() && d.cause.is_none() && d.hints.is_empty() && d.trace.is_empty() && d.authoring.is_none() {
         C::Primitive::Fail(d.code.clone(), d.message.clone())
     } else {
-        C::Primitive::Fail_diagnostic(d.clone())
+        C::Primitive::FailDiagnostic(Box::new(d.clone()))
     }
 }
 
@@ -102,7 +102,7 @@ fn term_path(term: &Term, path: PathId) -> Path {
 enum CacheKey { Residual((i64, i64)), Cooked(Symbol, i64), CookedList(Vec<i64>), Frame(u8) }
 fn frame_key(f: C::FrameField) -> u8 {
     use C::FrameField::*;
-    match f { Time => 0, Dt => 1, Index => 2, Tick => 3, Width => 4, Height => 5, Pointer_x => 6, Pointer_y => 7, Input => 8 }
+    match f { Time => 0, Dt => 1, Index => 2, Tick => 3, Width => 4, Height => 5, PointerX => 6, PointerY => 7, Input => 8 }
 }
 
 type Env = BTreeMap<Symbol, Lowered>;
@@ -111,8 +111,8 @@ type Env = BTreeMap<Symbol, Lowered>;
 pub enum Lowered {
     Known(Value),
     Computed(i64, Ty),
-    Record_fields(Vec<(Symbol, Lowered)>),
-    Record_choice(Box<Lowered>, Box<Lowered>, Box<Lowered>),
+    RecordFields(Vec<(Symbol, Lowered)>),
+    RecordChoice(Box<Lowered>, Box<Lowered>, Box<Lowered>),
     Selected(Vec<Lowered>, Box<Lowered>),
     Callable(Callable),
 }
@@ -230,14 +230,14 @@ fn constant_storage(mut program: C::Program) -> C::Program {
                 write(writes, *dst);
                 match expression {
                     C::Expr::Local(src) if program.locals[*src as usize] == program.locals[*dst as usize] => uses[*src as usize].push(Some(*dst)),
-                    C::Expr::Host_source { ty, args, .. } if ty::is_cooked(ty) => {
+                    C::Expr::HostSource { ty, args, .. } if ty::is_cooked(ty) => {
                         for (_, src) in args {
                             match &program.locals[*src as usize] { Ty::Array(_) => uses[*src as usize].push(Some(-1)), _ => unsafe_use(uses, *src) }
                         }
                     }
-                    C::Expr::Constant(_) | C::Expr::Frame(_) | C::Expr::Call_index(_) | C::Expr::Source(_) => {}
+                    C::Expr::Constant(_) | C::Expr::Frame(_) | C::Expr::CallIndex(_) | C::Expr::Source(_) => {}
                     C::Expr::Local(src) | C::Expr::Field(src, _) => unsafe_use(uses, *src),
-                    C::Expr::Prim(_, args) | C::Expr::Fields(args) | C::Expr::Host_source { args, .. } | C::Expr::Source_descriptor { args, .. } => {
+                    C::Expr::Prim(_, args) | C::Expr::Fields(args) | C::Expr::HostSource { args, .. } | C::Expr::SourceDescriptor { args, .. } => {
                         for (_, src) in args { unsafe_use(uses, *src); }
                     }
                     C::Expr::Vec(args) | C::Expr::Items(args) => for a in args { unsafe_use(uses, *a); },
@@ -257,10 +257,10 @@ fn constant_storage(mut program: C::Program) -> C::Program {
                 for a in args { unsafe_use(uses, *a); }
                 write(writes, *result);
             }
-            N::State_read { result, initial, .. } => { unsafe_use(uses, *initial); write(writes, *result); }
-            N::State_peek { found, value, .. } => for w in [*found, *value] { write(writes, w); },
-            N::State_write { value, .. } => unsafe_use(uses, *value),
-            N::Diagnose_rows { rows, index, diagnostic, result, .. } => {
+            N::StateRead { result, initial, .. } => { unsafe_use(uses, *initial); write(writes, *result); }
+            N::StatePeek { found, value, .. } => for w in [*found, *value] { write(writes, w); },
+            N::StateWrite { value, .. } => unsafe_use(uses, *value),
+            N::DiagnoseRows { rows, index, diagnostic, result, .. } => {
                 for u in [*rows, *diagnostic] { unsafe_use(uses, u); }
                 for w in [*index, *result] { write(writes, w); }
             }
@@ -268,7 +268,7 @@ fn constant_storage(mut program: C::Program) -> C::Program {
                 for u in [*value, *mapped] { unsafe_use(uses, u); }
                 for w in [*failure, *result] { write(writes, w); }
             }
-            N::Reset_call(_) => {}
+            N::ResetCall(_) => {}
             N::Draw(draw) => {
                 use C::Draw as D;
                 match draw {
@@ -276,7 +276,7 @@ fn constant_storage(mut program: C::Program) -> C::Program {
                     D::Point { at, ink } => for u in [*at, *ink] { unsafe_use(uses, u); },
                     D::Mark { args, .. } | D::Batch { args, .. } | D::Path { args, .. } => for (_, n) in args { unsafe_use(uses, *n); },
                     D::Points { positions, ink } => for u in [*positions, *ink] { unsafe_use(uses, u); },
-                    D::Text_run { at, text, ink, size } => for u in [*at, *text, *ink, *size] { unsafe_use(uses, u); },
+                    D::TextRun { at, text, ink, size } => for u in [*at, *text, *ink, *size] { unsafe_use(uses, u); },
                     D::Image { at, scale, angle, .. } => for u in [*at, *scale, *angle] { unsafe_use(uses, u); },
                     D::Push(_, n) => unsafe_use(uses, *n),
                     D::Pop => {}
@@ -288,7 +288,7 @@ fn constant_storage(mut program: C::Program) -> C::Program {
     for st in &program.body { scan(&program, &mut uses, &mut writes, st); }
     for r in &program.results { uses[*r as usize].push(None); }
     for slot in &program.state_slots {
-        for it in &slot.source.iter { if let C::Iteration::Local_index(n) = it { uses[*n as usize].push(None); } }
+        for it in &slot.source.iter { if let C::Iteration::LocalIndex(n) = it { uses[*n as usize].push(None); } }
     }
     fn safe(writes: &[i64], uses: &[Vec<Option<i64>>], seen: &mut Vec<i64>, n: i64) -> bool {
         writes[n as usize] == 1
@@ -304,21 +304,21 @@ fn constant_storage(mut program: C::Program) -> C::Program {
         use C::StatementNode as N;
         let list = |xs: &Vec<C::Statement>| xs.iter().map(|s| rewrite(program, writes, uses, s)).collect::<Vec<_>>();
         let node = match &st.node {
-            N::Assign(dst, C::Expr::Prim(p @ (C::Primitive::Array_int | C::Primitive::Array_text | C::Primitive::Array_float | C::Primitive::Array_vec3 | C::Primitive::Array_vec4), args))
+            N::Assign(dst, C::Expr::Prim(p @ (C::Primitive::ArrayInt | C::Primitive::ArrayText | C::Primitive::ArrayFloat | C::Primitive::ArrayVec3 | C::Primitive::ArrayVec4), args))
                 if safe(writes, uses, &mut Vec::new(), *dst) =>
             {
-                N::Assign(*dst, C::Expr::Source_descriptor {
+                N::Assign(*dst, C::Expr::SourceDescriptor {
                     name: format!("$core/constant-array/{}", C::primitive_name(p)),
                     ty: program.locals[*dst as usize].clone(),
                     args: args.clone(),
                 })
             }
             N::If { condition, yes, no } => N::If { condition: *condition, yes: list(yes), no: list(no) },
-            N::Diagnose_rows { rows, policy, index, handler, diagnostic, result } => N::Diagnose_rows { rows: *rows, policy: *policy, index: *index, handler: list(handler), diagnostic: *diagnostic, result: *result },
+            N::DiagnoseRows { rows, policy, index, handler, diagnostic, result } => N::DiagnoseRows { rows: *rows, policy: *policy, index: *index, handler: list(handler), diagnostic: *diagnostic, result: *result },
             N::Protect { body, value, failure, handler, mapped, result } => N::Protect { body: list(body), value: *value, failure: *failure, handler: list(handler), mapped: *mapped, result: *result },
             N::Counted { first, last, count, index, item, limit, stop, init, body } => N::Counted { first: *first, last: *last, count: *count, index: *index, item: *item, limit: *limit, stop: *stop, init: list(init), body: list(body) },
             N::Iterate { sequence, index, item, limit, body } => N::Iterate { sequence: *sequence, index: *index, item: *item, limit: *limit, body: list(body) },
-            N::State_read { slot, result, init, initial } => N::State_read { slot: *slot, result: *result, init: list(init), initial: *initial },
+            N::StateRead { slot, result, init, initial } => N::StateRead { slot: *slot, result: *result, init: list(init), initial: *initial },
             node => node.clone(),
         };
         C::Statement { id: st.id, source: st.source.clone(), node }
@@ -388,7 +388,7 @@ fn large_array_constructor(name: &str, args: &[(Symbol, Lowered)]) -> bool {
 fn primitive_of_name(name: &str) -> Option<C::Primitive> {
     use C::Primitive as P;
     match PO::primitive(name)? {
-        P::Remainder | P::Show | P::Text_concat | P::Sequence_length | P::Sequence_get | P::Sequence_build | P::Sequence_slice | P::Sequence_concat | P::Array_reduce(Reduction::Sum) | P::Color_parse | P::Truthy => None,
+        P::Remainder | P::Show | P::TextConcat | P::SequenceLength | P::SequenceGet | P::SequenceBuild | P::SequenceSlice | P::SequenceConcat | P::ArrayReduce(Reduction::Sum) | P::ColorParse | P::Truthy => None,
         op => Some(op),
     }
 }
@@ -438,7 +438,7 @@ impl Lowerer {
         let n = self.local(ty);
         let mixed = *ty == Ty::Float
             && match &expression {
-                C::Expr::Prim(C::Primitive::Numeric(_), _) | C::Expr::Prim(C::Primitive::Sequence_get, _) | C::Expr::Field(..) => true,
+                C::Expr::Prim(C::Primitive::Numeric(_), _) | C::Expr::Prim(C::Primitive::SequenceGet, _) | C::Expr::Field(..) => true,
                 C::Expr::Local(old) => self.mixed.contains(old),
                 _ => false,
             };
@@ -483,7 +483,7 @@ impl Lowerer {
                 // a capture inside a source is lowered here, so the program holds plain data only
                 let mut args = Vec::new();
                 for (field, v) in &g.fields { args.push((field.clone(), self.ensure(s, source, &Known(v.clone()))?)); }
-                Ok(self.emit_n(s, source, &g.ty, C::Expr::Host_source { name: g.name.clone(), ty: g.ty.clone(), args }))
+                Ok(self.emit_n(s, source, &g.ty, C::Expr::HostSource { name: g.name.clone(), ty: g.ty.clone(), args }))
             }
             Known(Value::Deferred(ty, id)) if ty::is_cooked(ty) => {
                 let key = CacheKey::Cooked(ty::to_string(ty).into(), *id);
@@ -498,20 +498,20 @@ impl Lowerer {
                 self.ensure(s, source, &value)
             }
             Known(Value::Record(fields)) => {
-                let l = Record_fields(fields.iter().map(|(n, v)| (n.clone(), Known(v.clone()))).collect());
+                let l = RecordFields(fields.iter().map(|(n, v)| (n.clone(), Known(v.clone()))).collect());
                 self.ensure(s, source, &l)
             }
             Known(Value::List(items)) if C::literal_of_value(&Value::List(items.clone())).is_none() => {
                 let ty = self.type_of(v);
                 if items.len() > 4096 && !geometry_collection(&ty) { return Err(refusal("list_limit")); }
                 let cooked = geometry_collection(&ty)
-                    && items.iter().all(|i| match i { Value::Deferred(t, _) => *t == ty::geometry(), Value::No_geo => true, _ => false });
+                    && items.iter().all(|i| match i { Value::Deferred(t, _) => *t == ty::geometry(), Value::NoGeo => true, _ => false });
                 let key = CacheKey::CookedList(items.iter().map(|i| match i { Value::Deferred(_, id) => *id, _ => i64::MIN }).collect());
                 let cached = if cooked { s.cached(&key).cloned() } else { None };
                 let result = match cached {
                     Some(r) => r,
                     None => {
-                        let result = self.primitive(s, source, &ty, C::Primitive::Sequence_build, vec![("count", int(items.len() as i64))])?;
+                        let result = self.primitive(s, source, &ty, C::Primitive::SequenceBuild, vec![("count", int(items.len() as i64))])?;
                         for (index, item) in items.iter().enumerate() {
                             self.store(s, source, &result, &int(index as i64), &Known(item.clone()))?;
                         }
@@ -521,7 +521,7 @@ impl Lowerer {
                 };
                 self.ensure(s, source, &result)
             }
-            Record_choice(condition, yes, no) => {
+            RecordChoice(condition, yes, no) => {
                 let condition = self.ensure(s, source, condition)?;
                 let id = self.number();
                 let result = self.local(&self.type_of(v));
@@ -537,7 +537,7 @@ impl Lowerer {
                 s.st.push(statement(id, source, C::StatementNode::If { condition, yes, no }));
                 Ok(result)
             }
-            Record_fields(fields) => {
+            RecordFields(fields) => {
                 let ty = Ty::Record(fields.iter().map(|(n, v)| (n.clone(), self.type_of(v))).collect());
                 let mut out = Vec::new();
                 for (name, v) in fields { out.push((name.clone(), self.ensure(s, source, v)?)); }
@@ -556,7 +556,7 @@ impl Lowerer {
         // Geometry rest slots already have native collection capacity. This internal
         // builder flag follows their checked type, never an authored count option.
         let mut args = args;
-        if op == C::Primitive::Sequence_build && geometry_collection(ty) { args.push(("cooked", boolean(true))); }
+        if op == C::Primitive::SequenceBuild && geometry_collection(ty) { args.push(("cooked", boolean(true))); }
         let mut lowered = Vec::new();
         for (name, v) in &args { lowered.push(((*name).into(), self.ensure(s, source, v)?)); }
         Ok(self.emit(s, source, ty, C::Expr::Prim(op, lowered)))
@@ -570,8 +570,8 @@ impl Lowerer {
             Known(v) => V::ty_of(v),
             Computed(_, ty) => ty.clone(),
             Callable(_) => Ty::Fn(None),
-            Record_fields(fields) => Ty::Record(fields.iter().map(|(n, v)| (n.clone(), self.type_of(v))).collect()),
-            Record_choice(_, yes, no) => ty::join(&self.type_of(yes), &self.type_of(no)).unwrap_or(Ty::Any),
+            RecordFields(fields) => Ty::Record(fields.iter().map(|(n, v)| (n.clone(), self.type_of(v))).collect()),
+            RecordChoice(_, yes, no) => ty::join(&self.type_of(yes), &self.type_of(no)).unwrap_or(Ty::Any),
         }
     }
 
@@ -581,7 +581,7 @@ impl Lowerer {
             owner: view.owner.as_ref().clone(),
             instance: view.instance,
             prefix: view.prefix.as_ref().clone(),
-            iter: view.iter.to_vec().into_iter().map(C::Iteration::Static_index).collect(),
+            iter: view.iter.to_vec().into_iter().map(C::Iteration::StaticIndex).collect(),
             span: None,
         }
     }
@@ -592,7 +592,7 @@ impl Lowerer {
             Selected(items, index) => {
                 self.select(s, source, ty, items, index, &mut |l, sc, v| l.field(sc, source, ty, v, name))
             }
-            Record_choice(condition, yes, no) => {
+            RecordChoice(condition, yes, no) => {
                 let ty = match self.type_of(&resolved) {
                     Ty::Record(fields) => fields.iter().find(|(n, _)| n == name).map(|(_, t)| t.clone()).unwrap_or_else(|| ty.clone()),
                     _ => ty.clone(),
@@ -602,7 +602,7 @@ impl Lowerer {
                     &mut |l, sc| l.field(sc, source, &ty, &yes, name),
                     &mut |l, sc| l.field(sc, source, &ty, &no, name))
             }
-            Record_fields(fields) => match fields.iter().find(|(n, _)| n == name) {
+            RecordFields(fields) => match fields.iter().find(|(n, _)| n == name) {
                 Some((_, v)) => self.resolve(s, v),
                 None => Err(refusal("get")),
             },
@@ -641,9 +641,9 @@ impl Lowerer {
     fn coerce(&mut self, s: &mut Scope, source: &C::Source, ty: &Ty, l: &Lowered) -> R<Lowered> {
         match l {
             Selected(items, index) => self.select(s, source, ty, items, index, &mut |l, sc, v| l.coerce(sc, source, ty, v)),
-            Record_choice(..) => self.map_fields(s, source, l, &mut |l2, sc, fields| {
-                match l2.coerce(sc, source, ty, &Record_fields(fields.clone()))? {
-                    Record_fields(fields) => Ok(fields),
+            RecordChoice(..) => self.map_fields(s, source, l, &mut |l2, sc, fields| {
+                match l2.coerce(sc, source, ty, &RecordFields(fields.clone()))? {
+                    RecordFields(fields) => Ok(fields),
                     _ => Ok(fields),
                 }
             }),
@@ -654,7 +654,7 @@ impl Lowerer {
                     self.primitive(s, source, ty, failure(&d), vec![])
                 }
             },
-            Record_fields(fields) => match ty {
+            RecordFields(fields) => match ty {
                 Ty::Any => Ok(l.clone()),
                 Ty::Record(wanted) => {
                     let mut out = Vec::new();
@@ -665,7 +665,7 @@ impl Lowerer {
                         };
                         out.push((name.clone(), v));
                     }
-                    Ok(Record_fields(out))
+                    Ok(RecordFields(out))
                 }
                 _ => Ok(l.clone()),
             },
@@ -716,16 +716,16 @@ impl Lowerer {
     fn hold(&mut self, s: &mut Scope, source: &C::Source, ty: Option<&Ty>, value: &Lowered) -> R<Lowered> {
         let resolved = self.resolve(s, value)?;
         match &resolved {
-            Record_fields(fields) => {
+            RecordFields(fields) => {
                 let mut out = Vec::new();
                 for (name, v) in fields {
                     let fty = match ty { Some(Ty::Record(fs)) => fs.iter().find(|(n, _)| n == name).map(|(_, t)| t.clone()), _ => None };
                     out.push((name.clone(), self.hold(s, source, fty.as_ref(), v)?));
                 }
-                Ok(Record_fields(out))
+                Ok(RecordFields(out))
             }
             Known(Value::Record(fields)) => {
-                let l = Record_fields(fields.iter().map(|(n, v)| (n.clone(), Known(v.clone()))).collect());
+                let l = RecordFields(fields.iter().map(|(n, v)| (n.clone(), Known(v.clone()))).collect());
                 self.hold(s, source, ty, &l)
             }
             value => {
@@ -743,7 +743,7 @@ impl Lowerer {
     fn update(&mut self, s: &mut Scope, source: &C::Source, target: &Lowered, value: &Lowered) -> R<()> {
         match target {
             Computed(n, _) => self.assign(s, source, *n, value),
-            Record_fields(fields) => {
+            RecordFields(fields) => {
                 let values = self.record_fields(s, source, value)?;
                 if fields.iter().map(|(n, _)| n).ne(values.iter().map(|(n, _)| n)) { return Err(refusal("accumulator_layout")); }
                 // Read every next field before overwriting any accumulator field.
@@ -793,7 +793,7 @@ impl Lowerer {
     }
 
     fn slice(&mut self, s: &mut Scope, source: &C::Source, ty: &Ty, sequence: &Lowered, first: &Lowered, count: &Lowered) -> R<Lowered> {
-        self.primitive(s, source, ty, C::Primitive::Sequence_slice, vec![("list", sequence.clone()), ("first", first.clone()), ("count", count.clone())])
+        self.primitive(s, source, ty, C::Primitive::SequenceSlice, vec![("list", sequence.clone()), ("first", first.clone()), ("count", count.clone())])
     }
 
     fn sequence_count(&mut self, s: &mut Scope, source: &C::Source, sequence: &Lowered) -> R<Lowered> {
@@ -801,12 +801,12 @@ impl Lowerer {
         match &sequence {
             Selected(items, index) => self.select(s, source, &Ty::Int, items, index, &mut |l, sc, v| l.sequence_count(sc, source, v)),
             Known(Value::List(xs)) => Ok(int(xs.len() as i64)),
-            Known(v @ (Value::Text_array(_) | Value::Int_array(_) | Value::Floats(1..=4, _))) => {
+            Known(v @ (Value::TextArray(_) | Value::IntArray(_) | Value::Floats(1..=4, _))) => {
                 Ok(int(V::array_length(v)? as i64))
             }
             _ => {
                 let packed = matches!(self.type_of(&sequence), Ty::Array(_));
-                self.primitive(s, source, &Ty::Int, if packed { C::Primitive::Array_count } else { C::Primitive::Sequence_length },
+                self.primitive(s, source, &Ty::Int, if packed { C::Primitive::ArrayCount } else { C::Primitive::SequenceLength },
                     vec![(if packed { "array" } else { "list" }, sequence.clone())])
             }
         }
@@ -840,7 +840,7 @@ impl Lowerer {
             _ => {
                 let ty = ty::elem(&self.type_of(&sequence)).unwrap_or(Ty::Any);
                 let packed = matches!(self.type_of(&sequence), Ty::Array(_));
-                self.primitive(s, source, &ty, if packed { C::Primitive::Array_nth } else { C::Primitive::Sequence_get },
+                self.primitive(s, source, &ty, if packed { C::Primitive::ArrayNth } else { C::Primitive::SequenceGet },
                     vec![(if packed { "array" } else { "list" }, sequence.clone()), ("index", index.clone())])
             }
         }
@@ -877,9 +877,9 @@ impl Lowerer {
     fn record_fields(&mut self, s: &mut Scope, source: &C::Source, value: &Lowered) -> R<Vec<(Symbol, Lowered)>> {
         let resolved = self.resolve(s, value)?;
         match &resolved {
-            Record_fields(fields) => Ok(fields.clone()),
+            RecordFields(fields) => Ok(fields.clone()),
             Known(Value::Record(fields)) => Ok(fields.iter().map(|(n, v)| (n.clone(), Known(v.clone()))).collect()),
-            Record_choice(..) => {
+            RecordChoice(..) => {
                 let n = self.ensure(s, source, &resolved)?;
                 let c = Computed(n, self.type_of(&resolved));
                 self.record_fields(s, source, &c)
@@ -902,7 +902,7 @@ impl Lowerer {
                 let cell = std::cell::RefCell::new(f);
                 self.select(s, source, &ty, items, index, &mut |l, sc, v| l.map_fields(sc, source, v, &mut *cell.borrow_mut()))
             }
-            Record_choice(condition, yes, no) if matches!((self.type_of(yes), self.type_of(no)), (Ty::Record(_), Ty::Record(_))) => {
+            RecordChoice(condition, yes, no) if matches!((self.type_of(yes), self.type_of(no)), (Ty::Record(_), Ty::Record(_))) => {
                 let ty = self.type_of(value);
                 let (yes, no) = ((**yes).clone(), (**no).clone());
                 let cell = std::cell::RefCell::new(f);
@@ -912,7 +912,7 @@ impl Lowerer {
             }
             _ => {
                 let fields = self.record_fields(s, source, &resolved)?;
-                Ok(Record_fields(f(self, s, fields)?))
+                Ok(RecordFields(f(self, s, fields)?))
             }
         }
     }
@@ -930,7 +930,7 @@ impl Lowerer {
                 &mut |l, sc| {
                     let old_item = l.sequence_get(sc, source, &old1, &int(0))?;
                     let count = l.sequence_count(sc, source, &value1)?;
-                    let result = l.primitive(sc, source, &value_ty, C::Primitive::Sequence_build, vec![("count", count)])?;
+                    let result = l.primitive(sc, source, &value_ty, C::Primitive::SequenceBuild, vec![("count", count)])?;
                     l.iterate(sc, source, &value1, &mut |l, sc, index, item| {
                         let v = l.coerce_like(sc, source, &old_item, item)?;
                         l.store(sc, source, &result, index, &v)
@@ -1012,7 +1012,7 @@ impl Lowerer {
     fn join(&mut self, source: &C::Source, condition: i64, ty: &Ty, a: &Lowered, b: &Lowered, yes: &mut Scope, no: &mut Scope) -> R<Lowered> {
         fn fields(l: &Lowered) -> Option<Vec<(Symbol, Lowered)>> {
             match l {
-                Record_fields(fs) => Some(fs.clone()),
+                RecordFields(fs) => Some(fs.clone()),
                 Known(Value::Record(fs)) => Some(fs.iter().map(|(n, v)| (n.clone(), Known(v.clone()))).collect()),
                 _ => None,
             }
@@ -1024,9 +1024,9 @@ impl Lowerer {
                     let ty = ty::join(&self.type_of(a), &self.type_of(b)).unwrap_or(Ty::Any);
                     out.push((name.clone(), self.join(source, condition, &ty, a, b, yes, no)?));
                 }
-                Ok(Record_fields(out))
+                Ok(RecordFields(out))
             }
-            _ if matches!(ty, Ty::Record(_)) => Ok(Record_choice(Box::new(Computed(condition, Ty::Bool)), Box::new(a.clone()), Box::new(b.clone()))),
+            _ if matches!(ty, Ty::Record(_)) => Ok(RecordChoice(Box::new(Computed(condition, Ty::Bool)), Box::new(a.clone()), Box::new(b.clone()))),
             _ => {
                 let result = self.local(ty);
                 if *ty == Ty::Float { self.mixed.insert(result); }
@@ -1095,17 +1095,17 @@ impl Lowerer {
                 let g = v.geo_payload().unwrap();
                 let mut args = Vec::new();
                 for (n, v) in &g.fields { args.push((n.clone(), self.ensure(s, source, &Known(v.clone()))?)); }
-                Ok(self.emit(s, source, &g.ty, C::Expr::Source_descriptor { name: g.name.clone(), ty: g.ty.clone(), args }))
+                Ok(self.emit(s, source, &g.ty, C::Expr::SourceDescriptor { name: g.name.clone(), ty: g.ty.clone(), args }))
             }
             Known(Value::Record(fields)) => {
                 let mut out = Vec::new();
                 for (n, v) in fields { out.push((n.clone(), self.descriptor(s, source, &Known(v.clone()))?)); }
-                Ok(Record_fields(out))
+                Ok(RecordFields(out))
             }
-            Record_fields(fields) => {
+            RecordFields(fields) => {
                 let mut out = Vec::new();
                 for (n, v) in fields { out.push((n.clone(), self.descriptor(s, source, v)?)); }
-                Ok(Record_fields(out))
+                Ok(RecordFields(out))
             }
             v => Ok(v.clone()),
         }
@@ -1127,7 +1127,7 @@ impl Lowerer {
             Computed(id, Ty::Record(fields)) if self.has_draw || sop => {
                 let mut out = Vec::new();
                 for (name, ty) in fields { out.push((name.clone(), self.emit(s, source, ty, C::Expr::Field(*id, name.clone())))); }
-                self.capture(s, source, parent, static_, sop, eager, arguments, &Record_fields(out))
+                self.capture(s, source, parent, static_, sop, eager, arguments, &RecordFields(out))
             }
             // a captured function's arrays follow the kernel's own rule
             Known(Value::Fn(f)) if sop => {
@@ -1147,7 +1147,7 @@ impl Lowerer {
                 };
                 Ok(source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))].into()))
             }
-            Record_fields(fields) => {
+            RecordFields(fields) => {
                 let mut out = Vec::new();
                 for (name, v) in fields { out.push((name.clone(), self.capture(s, source, parent, static_, sop, eager, arguments, v)?)); }
                 Ok(Value::Record(out.into()))
@@ -1160,7 +1160,7 @@ impl Lowerer {
                 let f = E::residual::compiled_function(parent, cl.instance, cl.prefix.clone(), cl.zone.clone(), params, cl.body.clone(), bindings)?;
                 Ok(Value::Fn(f))
             }
-            Record_choice(..) if eager && sop => {
+            RecordChoice(..) if eager && sop => {
                 let ty = self.type_of(l);
                 let value = self.ensure(s, source, l)?;
                 self.capture(s, source, parent, static_, sop, eager, arguments, &Computed(value, ty))
@@ -1210,7 +1210,7 @@ impl Lowerer {
                 _ => (),
             },
             Node::Text(id) => return Ok(Known(Value::Text(x.arena().shared_bytes(id)))),
-            Node::Nil => return Ok(Known(Value::No_geo)),
+            Node::Nil => return Ok(Known(Value::NoGeo)),
             _ => {}
         }
         let src = C::Source {
@@ -1271,11 +1271,11 @@ impl Lowerer {
                 _ => Err(refusal("literal")),
             },
             Node::Text(id) => Ok(Known(Value::Text(arena.shared_bytes(id)))),
-            Node::Nil => Ok(Known(Value::No_geo)),
+            Node::Nil => Ok(Known(Value::NoGeo)),
             Node::Record(range) => (|| -> R<Lowered> {
                 let mut out = Vec::new();
                 for field in arena.fields(range) { out.push((x.symbol(field.name), self.term(borrow, s, source, env, &x.child(field.term))?)); }
-                Ok(Record_fields(out))
+                Ok(RecordFields(out))
             })(),
             Node::ListLit(items) => (|| -> R<Lowered> {
                 let items = arena.term_ids(items);
@@ -1302,7 +1302,7 @@ impl Lowerer {
                 let items = arena.term_ids(arena.list_op(id).args);
                 let mut args = Vec::new();
                 for item in items { args.push(("list", self.term(false, s, source, env, &x.child(*item))?)); }
-                self.primitive(s, source, x.ty(), C::Primitive::Sequence_concat, args)
+                self.primitive(s, source, x.ty(), C::Primitive::SequenceConcat, args)
             })(),
             Node::Get(id) => (|| -> R<Lowered> {
                 let get = arena.get(id);
@@ -1345,7 +1345,7 @@ impl Lowerer {
                         for (_, v) in texts { if let Value::Text(t) = v { out.extend_from_slice(&t); } }
                         Ok(Known(Value::Text(out.into())))
                     }
-                    None => self.primitive(s, source, &Ty::Text, C::Primitive::Text_concat, texts.into_iter().map(|v| ("part", v)).collect()),
+                    None => self.primitive(s, source, &Ty::Text, C::Primitive::TextConcat, texts.into_iter().map(|v| ("part", v)).collect()),
                 }
             })(),
             Node::Time => Ok(self.frame(s, source, &Ty::Float, C::FrameField::Time)),
@@ -1402,7 +1402,7 @@ impl Lowerer {
                 all.push(("$name".into(), self.ensure(s, source, &Known(text(kind)))?));
                 all.push(("$context".into(), self.ensure(s, source, &Known(text(context::name(call.ctx))))?));
                 all.extend(lowered);
-                Ok(self.emit(s, source, x.ty(), C::Expr::Host_source { name: "$core/catalog".into(), ty: x.ty().clone(), args: all }))
+                Ok(self.emit(s, source, x.ty(), C::Expr::HostSource { name: "$core/catalog".into(), ty: x.ty().clone(), args: all }))
             })(),
             Node::Let(id) => (|| -> R<Lowered> {
                 let node = arena.let_node(id);
@@ -1425,7 +1425,7 @@ impl Lowerer {
                 let d = self.call(false, &mut handler, source, &payload, None, &mapper, &[Computed(index, Ty::Int)])?;
                 let diagnostic = self.ensure(&mut handler, source, &d)?;
                 let result = self.local(x.ty());
-                self.push(s, source, C::StatementNode::Diagnose_rows { rows, policy: node.policy, index, handler: handler.st, diagnostic, result });
+                self.push(s, source, C::StatementNode::DiagnoseRows { rows, policy: node.policy, index, handler: handler.st, diagnostic, result });
                 Ok(Computed(result, x.ty().clone()))
             })(),
             Node::WithError(id) => (|| -> R<Lowered> {
@@ -1436,9 +1436,9 @@ impl Lowerer {
                 let mut handler = Scope::fresh();
                 let protected_value = self.term(false, &mut body, source, env, protected)?;
                 let value = self.ensure(&mut body, source, &protected_value)?;
-                let complete = ty::is_cooked(protected.ty()) && !matches!(protected_value, Known(Value::No_geo));
+                let complete = ty::is_cooked(protected.ty()) && !matches!(protected_value, Known(Value::NoGeo));
                 let value = if complete {
-                    let l = self.emit(&mut body, source, protected.ty(), C::Expr::Host_source { name: "$core/complete".into(), ty: protected.ty().clone(), args: vec![("value".into(), value)] });
+                    let l = self.emit(&mut body, source, protected.ty(), C::Expr::HostSource { name: "$core/complete".into(), ty: protected.ty().clone(), args: vec![("value".into(), value)] });
                     self.ensure(&mut body, source, &l)?
                 } else { value };
                 let payload = Ty::Record(vec![("code".into(), Ty::Text), ("message".into(), Ty::Text), ("cause".into(), Ty::List(Box::new(Ty::Text)))]);
@@ -1489,7 +1489,7 @@ impl Lowerer {
             Node::FnRef(name) => (|| -> R<Lowered> {
                 let identity = self.new_identity();
                 let slot = self.call_slot(identity);
-                self.push(s, source, C::StatementNode::Reset_call(slot));
+                self.push(s, source, C::StatementNode::ResetCall(slot));
                 Ok(Callable(Callable::Named { name: x.name(name).to_owned(), identity }))
             })(),
             Node::Fn(id) => (|| -> R<Lowered> {
@@ -1508,7 +1508,7 @@ impl Lowerer {
                     None => {
                         let identity = self.new_identity();
                         let slot = self.call_slot(identity);
-                        self.push(s, source, C::StatementNode::Reset_call(slot));
+                        self.push(s, source, C::StatementNode::ResetCall(slot));
                         Closure { params: node.params, body: x.child(node.body), zone: term_path(x, node.zone), env: env.clone(), instance: source.instance, prefix: source.prefix.clone(), identity }
                     }
                 };
@@ -1548,7 +1548,7 @@ impl Lowerer {
                 let map = builder.push(None, &Ty::Array(Box::new(Ty::Int)), form, Draft::Hof(HofKind::Map, vec![mask_fn, items]));
                 let map = builder.freeze().handle(map);
                 let mask = self.term(false, s, source, env, &map)?;
-                let kept = self.primitive(s, source, &Ty::Array(Box::new(Ty::Int)), C::Primitive::Array_compact, vec![("mask", mask)])?;
+                let kept = self.primitive(s, source, &Ty::Array(Box::new(Ty::Int)), C::Primitive::ArrayCompact, vec![("mask", mask)])?;
                 if elem == Ty::Int { Ok(kept) } else { self.primitive(s, source, x.ty(), C::Primitive::Coerce(x.ty().clone()), vec![("value", kept)]) }
             })(),
             Node::Hof(id) if !arena.term_ids(arena.hof(id).args).is_empty() => (|| -> R<Lowered> {
@@ -1605,7 +1605,7 @@ impl Lowerer {
                         let mut values = Vec::new();
                         for (index, item) in items.iter().enumerate() {
                             let mut src2 = source.clone();
-                            src2.iter.push(C::Iteration::Static_index(index as i64));
+                            src2.iter.push(C::Iteration::StaticIndex(index as i64));
                             let mut e2 = env.clone();
                             e2.insert(name, Known(item.clone()));
                             values.push(self.term(false, s, &src2, &e2, &x.child(node.body))?);
@@ -1770,7 +1770,7 @@ impl Lowerer {
         let initial = self.ensure(&mut initial_body, source, &v)?;
         let previous = self.local(&ty);
         if numeric { self.mixed.insert(previous); }
-        self.push(s, source, C::StatementNode::State_read { slot, result: previous, init: initial_body.st, initial });
+        self.push(s, source, C::StatementNode::StateRead { slot, result: previous, init: initial_body.st, initial });
         let previous = Computed(previous, ty.clone());
         if previous_only { return Ok(previous); }
         let env = self.bind(s, source, env.clone(), x, node.binder, previous)?;
@@ -1778,7 +1778,7 @@ impl Lowerer {
         let pending = self.local(&ty);
         let result = self.local(&ty);
         if numeric { self.mixed.insert(pending); self.mixed.insert(result); }
-        self.push(s, source, C::StatementNode::State_peek { slot, found, value: pending });
+        self.push(s, source, C::StatementNode::StatePeek { slot, found, value: pending });
         let id = self.number();
         let yes_id = self.number();
         let yes = vec![statement(yes_id, source, C::StatementNode::Assign(result, C::Expr::Local(pending)))];
@@ -1787,7 +1787,7 @@ impl Lowerer {
         let v = self.coerce(&mut body, source, &ty, &v)?;
         let value = self.ensure(&mut body, source, &v)?;
         let wid = self.number();
-        body.st.push(statement(wid, source, C::StatementNode::State_write { slot, value }));
+        body.st.push(statement(wid, source, C::StatementNode::StateWrite { slot, value }));
         let aid = self.number();
         body.st.push(statement(aid, source, C::StatementNode::Assign(result, C::Expr::Local(value))));
         s.st.push(statement(id, source, C::StatementNode::If { condition: found, yes, no: body.st }));
@@ -1830,14 +1830,14 @@ impl Lowerer {
                             out
                         }
                         Ty::List(elem) => {
-                            let count = self.primitive(s, source, &Ty::Int, C::Primitive::Sequence_length, vec![("list", value.clone())])?;
+                            let count = self.primitive(s, source, &Ty::Int, C::Primitive::SequenceLength, vec![("list", value.clone())])?;
                             let short = self.primitive(s, source, &Ty::Bool, num(PO::Binary::Lt), vec![("a", count), ("b", int(patterns.len() as i64))])?;
                             self.branch(s, source, &Ty::Int, &short,
                                 &mut |l, sc| l.primitive(sc, source, &Ty::Int, C::Primitive::Fail("E_PATTERN".into(), "Not enough elements to destructure.".into()), vec![]),
                                 &mut |_, _| Ok(int(0)))?;
                             let mut out = Vec::new();
                             for index in 0..patterns.len() {
-                                out.push(self.primitive(s, source, elem, C::Primitive::Sequence_get, vec![("list", value.clone()), ("index", int(index as i64))])?);
+                                out.push(self.primitive(s, source, elem, C::Primitive::SequenceGet, vec![("list", value.clone()), ("index", int(index as i64))])?);
                             }
                             out
                         }
@@ -1848,7 +1848,7 @@ impl Lowerer {
                         for index in 0..patterns.len() { out.push(self.sequence_get(s, source, &value, &int(index as i64))?); }
                         out
                     }
-                    Callable(_) | Record_fields(_) | Record_choice(..) => return Err(refusal("pattern")),
+                    Callable(_) | RecordFields(_) | RecordChoice(..) => return Err(refusal("pattern")),
                 };
                 if parts.len() < patterns.len() { return Err(refusal("pattern")); }
                 for (p, v) in patterns.iter().zip(parts.into_iter()) { env = self.bind(s, source, env, owner, *p, v)?; }
@@ -1888,10 +1888,10 @@ impl Lowerer {
     fn call(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, ty: &Ty, specialized: Option<&Term>, f: &Callable, values: &[Lowered]) -> R<Lowered> {
         let identity = identity_of(f);
         let slot = self.call_slot(identity);
-        let ci = self.emit(s, source, &Ty::Int, C::Expr::Call_index(slot));
+        let ci = self.emit(s, source, &Ty::Int, C::Expr::CallIndex(slot));
         let index = self.ensure(s, source, &ci)?;
         let mut source = source.clone();
-        source.iter.push(C::Iteration::Local_index(index));
+        source.iter.push(C::Iteration::LocalIndex(index));
         match f {
             Callable::Closure(cl) => {
                 let params = cl.body.arena().params(cl.params);
@@ -1974,15 +1974,15 @@ impl Lowerer {
                     lowered.push((n.clone(), self.ensure(s, source, &h)?));
                 }
                 Ok(self.emit(s, source, &g.ty, if borrow && storage_argument(&g.ty) {
-                    C::Expr::Source_descriptor { name: g.name.clone(), ty: g.ty.clone(), args: lowered }
+                    C::Expr::SourceDescriptor { name: g.name.clone(), ty: g.ty.clone(), args: lowered }
                 } else {
-                    C::Expr::Host_source { name: g.name.clone(), ty: g.ty.clone(), args: lowered }
+                    C::Expr::HostSource { name: g.name.clone(), ty: g.ty.clone(), args: lowered }
                 }))
             }
             Value::Record(fields) => {
                 let mut out = Vec::new();
                 for (n, f) in fields { out.push((n.clone(), self.host(s, source, borrow, args, f)?)); }
-                Ok(Record_fields(out))
+                Ok(RecordFields(out))
             }
             value => Ok(Known(value.clone())),
         }
@@ -2017,7 +2017,7 @@ impl Lowerer {
             let mut lowered = Vec::new();
             lowered.push(("$name".into(), self.ensure(s, source, &Known(text(name)))?));
             for (n, v) in &largs { lowered.push((n.clone(), self.ensure(s, source, v)?)); }
-            return Ok(self.emit(s, source, x.ty(), C::Expr::Host_source { name: "$core/operator".into(), ty: x.ty().clone(), args: lowered }));
+            return Ok(self.emit(s, source, x.ty(), C::Expr::HostSource { name: "$core/operator".into(), ty: x.ty().clone(), args: lowered }));
         }
         if let Some(value) = &prototype {
             if data_source(value) {
@@ -2109,7 +2109,7 @@ impl Lowerer {
                     let homogeneous = match &value {
                         Known(Value::List(xs)) => {
                             geometry_collection(&self.type_of(&value))
-                                && xs.iter().all(|v| match v { Value::Deferred(t, _) => *t == ty::geometry(), Value::No_geo => true, _ => false })
+                                && xs.iter().all(|v| match v { Value::Deferred(t, _) => *t == ty::geometry(), Value::NoGeo => true, _ => false })
                         }
                         _ => false,
                     };
@@ -2136,7 +2136,7 @@ impl Lowerer {
                         _ => {}
                     }
                 }
-                let result = self.primitive(s, source, ty, C::Primitive::Sequence_build, build_args)?;
+                let result = self.primitive(s, source, ty, C::Primitive::SequenceBuild, build_args)?;
                 let kept = self.hold(s, source, None, &int(0))?;
                 let limit = if *ty == Ty::Array(Box::new(Ty::Int)) || *ty == Ty::Array(Box::new(Ty::Text)) { i64::MAX }
                     else if width > 0 { i64::MAX }
@@ -2162,13 +2162,13 @@ impl Lowerer {
                     }
                 })?;
                 if kind == HofKind::Filter && width > 0 {
-                    self.primitive(s, source, ty, C::Primitive::Array_slice, vec![("array", result), ("first", int(0)), ("count", kept)])
+                    self.primitive(s, source, ty, C::Primitive::ArraySlice, vec![("array", result), ("first", int(0)), ("count", kept)])
                 } else if kind == HofKind::Filter {
                     self.slice(s, source, ty, &result, &int(0), &kept)
                 } else if width > 0 || geometry_collection(ty) {
                     Ok(result)
                 } else {
-                    self.primitive(s, source, ty, C::Primitive::Sequence_concat, vec![("list", result)])
+                    self.primitive(s, source, ty, C::Primitive::SequenceConcat, vec![("list", result)])
                 }
             }
             _ => Err(refusal("higher_order")),
@@ -2178,14 +2178,14 @@ impl Lowerer {
     fn sort_by(&mut self, s: &mut Scope, source: &C::Source, ty: &Ty, f: &Callable, items: &Lowered) -> R<Lowered> {
         if matches!(ty, Ty::Array(_)) { return Err(refusal("packed_higher_order")); }
         let count = self.sequence_count(s, source, items)?;
-        let keys = self.primitive(s, source, &Ty::List(Box::new(Ty::Float)), C::Primitive::Sequence_build, vec![("count", count.clone())])?;
-        let b = self.primitive(s, source, &Ty::List(Box::new(Ty::Int)), C::Primitive::Sequence_build, vec![("count", count.clone())])?;
+        let keys = self.primitive(s, source, &Ty::List(Box::new(Ty::Float)), C::Primitive::SequenceBuild, vec![("count", count.clone())])?;
+        let b = self.primitive(s, source, &Ty::List(Box::new(Ty::Int)), C::Primitive::SequenceBuild, vec![("count", count.clone())])?;
         let current = self.hold(s, source, None, &b)?;
-        let b = self.primitive(s, source, &Ty::List(Box::new(Ty::Int)), C::Primitive::Sequence_build, vec![("count", count.clone())])?;
+        let b = self.primitive(s, source, &Ty::List(Box::new(Ty::Int)), C::Primitive::SequenceBuild, vec![("count", count.clone())])?;
         let scratch = self.hold(s, source, None, &b)?;
         self.iterate(s, source, items, &mut |l, sc, index, item| {
             let key = l.call(false, sc, source, &Ty::Float, None, f, &[item.clone()])?;
-            let key = l.primitive(sc, source, &Ty::Float, C::Primitive::Float_convert, vec![("x", key)])?;
+            let key = l.primitive(sc, source, &Ty::Float, C::Primitive::FloatConvert, vec![("x", key)])?;
             l.store(sc, source, &keys, index, &key)?;
             l.store(sc, source, &current, index, index)
         })?;
@@ -2246,7 +2246,7 @@ impl Lowerer {
                 &mut |_, _| Ok(int(0)))?;
             Ok(())
         })?;
-        let result = self.primitive(s, source, ty, C::Primitive::Sequence_build, vec![("count", count.clone())])?;
+        let result = self.primitive(s, source, ty, C::Primitive::SequenceBuild, vec![("count", count.clone())])?;
         self.counted(4096, None, s, source, &int(0), &count, &mut |l, sc, index| {
             let at = l.sequence_get(sc, source, &current, index)?;
             let value = l.sequence_get(sc, source, items, &at)?;
@@ -2324,19 +2324,19 @@ impl Lowerer {
                         Ty::List(_) => Known(Value::List(Arc::new(Vec::new()))),
                         _ => return Err(refusal("text_collect_source")),
                     };
-                    let nonempty = self.primitive(s, zone_source, &Ty::Bool, C::Primitive::Integer_compare(PO::Comparison::Igt), vec![("a", count.clone()), ("b", int(0))])?;
+                    let nonempty = self.primitive(s, zone_source, &Ty::Bool, C::Primitive::IntegerCompare(PO::Comparison::Igt), vec![("a", count.clone()), ("b", int(0))])?;
                     self.branch(s, zone_source, &source_ty, &nonempty,
                         &mut |l, sc| l.term(false, sc, zone_source, env, &value),
                         &mut |_, _| Ok(empty.clone()))?
                 };
                 let size = self.sequence_count(s, zone_source, &items)?;
-                let zero = self.primitive(s, zone_source, &Ty::Bool, C::Primitive::Integer_compare(PO::Comparison::Ieq), vec![("a", size.clone()), ("b", int(0))])?;
+                let zero = self.primitive(s, zone_source, &Ty::Bool, C::Primitive::IntegerCompare(PO::Comparison::Ieq), vec![("a", size.clone()), ("b", int(0))])?;
                 let old_count = count.clone();
                 count = self.branch(s, zone_source, &Ty::Int, &zero,
                     &mut |_, _| Ok(int(0)),
                     &mut |l, sc| {
                         let limit = l.primitive(sc, zone_source, &Ty::Int, C::Primitive::Integer(PO::Integer::Idiv), vec![("a", int(i64::MAX)), ("b", size.clone())])?;
-                        let over = l.primitive(sc, zone_source, &Ty::Bool, C::Primitive::Integer_compare(PO::Comparison::Igt), vec![("a", old_count.clone()), ("b", limit)])?;
+                        let over = l.primitive(sc, zone_source, &Ty::Bool, C::Primitive::IntegerCompare(PO::Comparison::Igt), vec![("a", old_count.clone()), ("b", limit)])?;
                         l.branch(sc, zone_source, &Ty::Int, &over,
                             &mut |l, sc| l.primitive(sc, zone_source, &Ty::Int, C::Primitive::Fail("E_ARRAY_COUNT".into(), "Array count is too large.".into()), vec![]),
                             &mut |l, sc| l.primitive(sc, zone_source, &Ty::Int, C::Primitive::Integer(PO::Integer::Imul), vec![("a", old_count.clone()), ("b", size.clone())]))
@@ -2349,11 +2349,11 @@ impl Lowerer {
         };
         let output = if collecting {
             match &text_sources {
-                Some((_, count)) => Some(self.primitive(s, zone_source, ty, C::Primitive::Sequence_build,
+                Some((_, count)) => Some(self.primitive(s, zone_source, ty, C::Primitive::SequenceBuild,
                     vec![("count", count.clone()), ("width", int(1)), ("type", Known(text("text")))])?),
                 None => {
                     if matches!(ty, Ty::Array(_)) { return Err(refusal("packed_collect")); }
-                    Some(self.primitive(s, zone_source, ty, C::Primitive::Sequence_build, vec![("count", int(4096))])?)
+                    Some(self.primitive(s, zone_source, ty, C::Primitive::SequenceBuild, vec![("count", int(4096))])?)
                 }
             }
         } else {
@@ -2369,10 +2369,10 @@ impl Lowerer {
         match (output, total, init) {
             (Some(output), _, _) => {
                 if *ty == Ty::Array(Box::new(Ty::Text)) {
-                    self.primitive(s, zone_source, ty, C::Primitive::Array_slice, vec![("array", output), ("first", int(0)), ("count", kept)])
+                    self.primitive(s, zone_source, ty, C::Primitive::ArraySlice, vec![("array", output), ("first", int(0)), ("count", kept)])
                 } else {
                     let output = self.slice(s, zone_source, ty, &output, &int(0), &kept)?;
-                    self.primitive(s, zone_source, ty, C::Primitive::Sequence_concat, vec![("list", output)])
+                    self.primitive(s, zone_source, ty, C::Primitive::SequenceConcat, vec![("list", output)])
                 }
             }
             (_, Some(total), _) => Ok(total),
@@ -2432,7 +2432,7 @@ impl Lowerer {
         let at = self.ensure(s, zone_source, &ctx.attempted)?;
         let mut iteration = zone_source.clone();
         iteration.iter = ctx.source.iter.clone();
-        iteration.iter.push(C::Iteration::Local_index(at));
+        iteration.iter.push(C::Iteration::LocalIndex(at));
         let iteration = &iteration;
         if !ctx.array_loop {
             let over = self.primitive(s, iteration, &Ty::Bool, num(PO::Binary::Ge), vec![("a", ctx.attempted.clone()), ("b", int(4096))])?;
@@ -2446,7 +2446,7 @@ impl Lowerer {
             if tuple.len() != iteration.iter.len() { continue; }
             let mut matches = boolean(true);
             for (index, expected) in iteration.iter.iter().zip(tuple.iter()) {
-                let index = match index { C::Iteration::Static_index(n) => int(*n), C::Iteration::Local_index(n) => Computed(*n, Ty::Int) };
+                let index = match index { C::Iteration::StaticIndex(n) => int(*n), C::Iteration::LocalIndex(n) => Computed(*n, Ty::Int) };
                 let eq = self.primitive(s, iteration, &Ty::Bool, num(PO::Binary::Eq), vec![("a", index), ("b", int(*expected as i64))])?;
                 matches = self.primitive(s, iteration, &Ty::Bool, num(PO::Binary::And), vec![("a", matches), ("b", eq)])?;
             }
@@ -2527,8 +2527,8 @@ impl Lowerer {
             "frame/height" => Ok(self.frame(s, source, ty, C::FrameField::Height)),
             "frame/index" => Ok(self.frame(s, source, ty, C::FrameField::Index)),
             "frame/input" => Ok(self.frame(s, source, ty, C::FrameField::Input)),
-            "pointer/x" => Ok(self.frame(s, source, ty, C::FrameField::Pointer_x)),
-            "pointer/y" => Ok(self.frame(s, source, ty, C::FrameField::Pointer_y)),
+            "pointer/x" => Ok(self.frame(s, source, ty, C::FrameField::PointerX)),
+            "pointer/y" => Ok(self.frame(s, source, ty, C::FrameField::PointerY)),
             "value/lerp" => {
                 let u = self.to_float(s, source, &arg("u")?)?;
                 let inverse = self.calc(s, source, &Ty::Float, PO::Binary::Sub, &float(1.), &u)?;
@@ -2619,7 +2619,7 @@ impl Lowerer {
     }
 
     fn to_float(&mut self, s: &mut Scope, source: &C::Source, v: &Lowered) -> R<Lowered> {
-        self.primitive(s, source, &Ty::Float, C::Primitive::Float_convert, vec![("x", v.clone())])
+        self.primitive(s, source, &Ty::Float, C::Primitive::FloatConvert, vec![("x", v.clone())])
     }
 
     fn vec(&mut self, s: &mut Scope, source: &C::Source, components: &[Lowered]) -> R<Lowered> {
@@ -2645,8 +2645,8 @@ impl Lowerer {
         let wrapped = self.primitive(s, source, &fl, C::Primitive::Remainder, vec![("a", plus), ("b", one.clone())])?;
         let scaled = self.primitive(s, source, &fl, num(PO::Binary::Mul), vec![("a", wrapped), ("b", float(6.))])?;
         let floor = self.primitive(s, source, &fl, C::Primitive::Floor, vec![("x", scaled.clone())])?;
-        let sector = self.primitive(s, source, &Ty::Int, C::Primitive::Int_convert, vec![("x", floor)])?;
-        let sector_f = self.primitive(s, source, &fl, C::Primitive::Float_convert, vec![("x", sector.clone())])?;
+        let sector = self.primitive(s, source, &Ty::Int, C::Primitive::IntConvert, vec![("x", floor)])?;
+        let sector_f = self.primitive(s, source, &fl, C::Primitive::FloatConvert, vec![("x", sector.clone())])?;
         let f = self.primitive(s, source, &fl, num(PO::Binary::Sub), vec![("a", scaled), ("b", sector_f)])?;
         let m = self.primitive(s, source, &Ty::Int, C::Primitive::Integer(PO::Integer::Imod), vec![("a", sector), ("b", int(6))])?;
         // arm k builds one of the six sectors
@@ -2697,7 +2697,7 @@ impl Lowerer {
                 let item = self.local(&Ty::Int);
                 let id = self.number();
                 let mut init = s.fork();
-                let result = self.primitive(&mut init, source, ty, C::Primitive::Sequence_build, vec![("count", Computed(count, Ty::Int))])?;
+                let result = self.primitive(&mut init, source, ty, C::Primitive::SequenceBuild, vec![("count", Computed(count, Ty::Int))])?;
                 let mut body = s.fork();
                 self.store(&mut body, source, &result, &Computed(index, Ty::Int), &Computed(item, Ty::Int))?;
                 s.st.push(statement(id, source, C::StatementNode::Counted { first, last, count, index, item, limit: 4096, stop: None, init: init.st, body: body.st }));
@@ -2717,12 +2717,12 @@ impl Lowerer {
                     let length = self.primitive(s, source, &Ty::Int, num(PO::Binary::Sub), vec![("a", count), ("b", retained.clone())])?;
                     (retained, length)
                 };
-                self.primitive(s, source, ty, C::Primitive::Sequence_slice, vec![("list", sequence), ("first", first), ("count", length)])
+                self.primitive(s, source, ty, C::Primitive::SequenceSlice, vec![("list", sequence), ("first", first), ("count", length)])
             }
             "reverse" => {
                 let sequence = arg("list")?;
                 let count = self.sequence_count(s, source, &sequence)?;
-                let result = self.primitive(s, source, ty, C::Primitive::Sequence_build, vec![("count", count.clone())])?;
+                let result = self.primitive(s, source, ty, C::Primitive::SequenceBuild, vec![("count", count.clone())])?;
                 self.iterate(s, source, &sequence, &mut |l, sc, index, item| {
                     let last = l.primitive(sc, source, &Ty::Int, num(PO::Binary::Sub), vec![("a", count.clone()), ("b", int(1))])?;
                     let reverse = l.primitive(sc, source, &Ty::Int, num(PO::Binary::Sub), vec![("a", last), ("b", index.clone())])?;
@@ -2766,15 +2766,15 @@ impl Lowerer {
                 let item = self.local(&Ty::Int);
                 let id = self.number();
                 let mut init = s.fork();
-                let result = self.primitive(&mut init, source, ty, C::Primitive::Sequence_build, vec![("count", Computed(count, Ty::Int))])?;
+                let result = self.primitive(&mut init, source, ty, C::Primitive::SequenceBuild, vec![("count", Computed(count, Ty::Int))])?;
                 let mut body = s.fork();
                 let single = self.primitive(&mut body, source, &Ty::Bool, num(PO::Binary::Eq), vec![("a", n.clone()), ("b", int(1))])?;
                 let value = self.branch(&mut body, source, &Ty::Float, &single,
                     &mut |_, _| Ok(a.clone()),
                     &mut |l, sc| {
-                        let k = l.primitive(sc, source, &Ty::Float, C::Primitive::Float_convert, vec![("x", Computed(item, Ty::Int))])?;
+                        let k = l.primitive(sc, source, &Ty::Float, C::Primitive::FloatConvert, vec![("x", Computed(item, Ty::Int))])?;
                         let m = l.primitive(sc, source, &Ty::Int, num(PO::Binary::Sub), vec![("a", n.clone()), ("b", int(1))])?;
-                        let steps = l.primitive(sc, source, &Ty::Float, C::Primitive::Float_convert, vec![("x", m)])?;
+                        let steps = l.primitive(sc, source, &Ty::Float, C::Primitive::FloatConvert, vec![("x", m)])?;
                         let span = l.primitive(sc, source, &Ty::Float, num(PO::Binary::Sub), vec![("a", b.clone()), ("b", a.clone())])?;
                         let scaled = l.primitive(sc, source, &Ty::Float, num(PO::Binary::Mul), vec![("a", span), ("b", k)])?;
                         let quotient = l.primitive(sc, source, &Ty::Float, num(PO::Binary::Div), vec![("a", scaled), ("b", steps)])?;
@@ -2864,8 +2864,8 @@ impl Lowerer {
                 for name in ["x", "y", "z"] {
                     let fld = self.field(s, source, &fl, &triple, name)?;
                     let sum = self.calc(s, source, &fl, PO::Binary::Add, &fld, &m)?;
-                    let byte = self.primitive(s, source, &Ty::Int, C::Primitive::Color_byte(C::ByteMode::Clamped), vec![("x", sum)])?;
-                    let as_float = self.primitive(s, source, &fl, C::Primitive::Float_convert, vec![("x", byte)])?;
+                    let byte = self.primitive(s, source, &Ty::Int, C::Primitive::ColorByte(C::ByteMode::Clamped), vec![("x", sum)])?;
+                    let as_float = self.primitive(s, source, &fl, C::Primitive::FloatConvert, vec![("x", byte)])?;
                     channels.push(self.calc(s, source, &fl, PO::Binary::Div, &as_float, &f(255.))?);
                 }
                 self.vec(s, source, &channels)
@@ -2891,9 +2891,9 @@ impl Lowerer {
                 let x = self.to_float(s, source, &arg("x")?)?;
                 let u = self.unit(s, source, &x)?;
                 let position = self.calc(s, source, &fl, PO::Binary::Mul, &u, &f((n - 1) as f64))?;
-                let as_int = self.primitive(s, source, &Ty::Int, C::Primitive::Int_convert, vec![("x", position.clone())])?;
+                let as_int = self.primitive(s, source, &Ty::Int, C::Primitive::IntConvert, vec![("x", position.clone())])?;
                 let left = self.primitive(s, source, &Ty::Int, num(PO::Binary::Min), vec![("a", int(n as i64 - 2)), ("b", as_int)])?;
-                let lf = self.primitive(s, source, &fl, C::Primitive::Float_convert, vec![("x", left.clone())])?;
+                let lf = self.primitive(s, source, &fl, C::Primitive::FloatConvert, vec![("x", left.clone())])?;
                 let diff = self.calc(s, source, &fl, PO::Binary::Sub, &position, &lf)?;
                 let pct = self.unit(s, source, &diff)?;
                 let inverse = self.calc(s, source, &fl, PO::Binary::Sub, &f(1.), &pct)?;
@@ -2927,8 +2927,8 @@ impl Lowerer {
             let b = self.calc(s, source, &fl, PO::Binary::Mul, &float(pick(c2) as f64), pct)?;
             let ab = self.calc(s, source, &fl, PO::Binary::Add, &a, &b)?;
             let sum = self.calc(s, source, &fl, PO::Binary::Add, &ab, &float(0.5))?;
-            let byte = self.primitive(s, source, &Ty::Int, C::Primitive::Int_convert, vec![("x", sum)])?;
-            let as_float = self.primitive(s, source, &fl, C::Primitive::Float_convert, vec![("x", byte)])?;
+            let byte = self.primitive(s, source, &Ty::Int, C::Primitive::IntConvert, vec![("x", sum)])?;
+            let as_float = self.primitive(s, source, &fl, C::Primitive::FloatConvert, vec![("x", byte)])?;
             out.push(self.calc(s, source, &fl, PO::Binary::Div, &as_float, &float(255.))?);
         }
         self.vec(s, source, &out)
@@ -3033,8 +3033,8 @@ fn count_origins(program: C::Program) -> C::Program {
                 let origin = match expression {
                     C::Expr::Local(old) => origins[*old as usize].clone(),
                     C::Expr::Prim(C::Primitive::Coerce(_), args) if args.len() == 1 => origins[args[0].1 as usize].clone(),
-                    C::Expr::Prim(C::Primitive::Array_range | C::Primitive::Array_int | C::Primitive::Array_float | C::Primitive::Array_text | C::Primitive::Array_vec3 | C::Primitive::Array_vec4, args) => count(args, &writes),
-                    C::Expr::Source_descriptor { name, args, .. } if name.starts_with("$core/constant-array/") => count(args, &writes),
+                    C::Expr::Prim(C::Primitive::ArrayRange | C::Primitive::ArrayInt | C::Primitive::ArrayFloat | C::Primitive::ArrayText | C::Primitive::ArrayVec3 | C::Primitive::ArrayVec4, args) => count(args, &writes),
+                    C::Expr::SourceDescriptor { name, args, .. } if name.starts_with("$core/constant-array/") => count(args, &writes),
                     _ => None,
                 };
                 if matches!(program.locals[*local as usize], Ty::Array(_)) {
@@ -3224,7 +3224,7 @@ mod tests {
         assert!(C::literal_of_value(&Value::Residual(r)).is_none());
     }
 
-    // ---- the tests that execute lowered programs (test_core_lower.ml) ----
+    // ---- the tests that execute lowered programs () ----
 
     use crate::core_exec::{self, Options};
     use flow_check::workspace::Paths;
@@ -3302,7 +3302,7 @@ mod tests {
             "(let* [[x y z] v] [(+ x t) y z])", "(value/lerp v [4.0 8.0 12.0] 0.25)",
             "(array/sum (map (fn [p] (+ p v)) (array/vec3 2 [1.0 2.0 3.0])))"] {
             let checked = check_with(&[], &format!("(workspace source_vector (graph g :context value [(v : vec3 [0.0 0.0 0.0])] (let* [tested {body}] 0.0)))"));
-            let descriptor = source_value("test/vector", Ty::Vec3, vec![("tag".into(), Value::No_geo)].into());
+            let descriptor = source_value("test/vector", Ty::Vec3, vec![("tag".into(), Value::NoGeo)].into());
             let evaluated = E::r#static(&checked, true, Some(&[("g".into(), vec![("v".into(), descriptor)])])).unwrap();
             let original = &recorded(&evaluated, &["g", "tested"]);
             let Value::Residual(root) = original else { panic!("source-dependent residual: {body}") };
@@ -3326,11 +3326,11 @@ mod tests {
 
     #[test]
     fn sop_vector_producers_keep_lazy_captures_signed_zero_and_original_owner() {
-        let delayed = source_value("test/delayed", Ty::Float, vec![("tag".into(), Value::No_geo)].into());
+        let delayed = source_value("test/delayed", Ty::Float, vec![("tag".into(), Value::NoGeo)].into());
         let checked = check_with(&[], "(workspace delayed (graph g :context value [(x : float 0.0)] (let* [bad (+ x 1.0)] 0.0)))");
         let evaluated = E::r#static(&checked, true, Some(&[("g".into(), vec![("x".into(), delayed)])])).unwrap();
         let bad = recorded(&evaluated, &["g", "bad"]);
-        let selected = source_value("test/selected", Ty::Bool, vec![("tag".into(), Value::No_geo)].into());
+        let selected = source_value("test/selected", Ty::Bool, vec![("tag".into(), Value::NoGeo)].into());
         let checked = check_with(&[marker("test/geometry", ty::geometry(), 1)],
             "(workspace vector_owner (graph g :context sop [(safe : bool false) (bad : float 0.0)] (let* [tested [(if safe -0.0 bad) -0.0 3.0]] (test/geometry))))");
         let evaluated = E::r#static(&checked, true, Some(&[("g".into(), vec![("safe".into(), selected), ("bad".into(), bad)])])).unwrap();
@@ -3438,7 +3438,7 @@ mod tests {
                 if program.regions[region as usize].term.form().span == helper_span {
                     helper_invokes += 1;
                     assert_eq!(statement.source.owner, vec!["def:sample"]);
-                    assert!(statement.source.iter.iter().any(|index| matches!(index, C::Iteration::Local_index(_))), "a helper vector lost its actual callable iteration");
+                    assert!(statement.source.iter.iter().any(|index| matches!(index, C::Iteration::LocalIndex(_))), "a helper vector lost its actual callable iteration");
                 }
             }
         }, &program.body);
@@ -3621,7 +3621,7 @@ mod tests {
         let count_descriptors = |program: &C::Program| {
             let mut count = 0;
             C::iter(&mut |s| {
-                if let C::StatementNode::Assign(_, C::Expr::Source_descriptor { name, .. }) = &s.node {
+                if let C::StatementNode::Assign(_, C::Expr::SourceDescriptor { name, .. }) = &s.node {
                     if name.starts_with("$core/constant-array/") { count += 1; }
                 }
             }, &program.body);
@@ -3720,7 +3720,7 @@ mod tests {
         let program = lowered(r);
         let mut host = false;
         C::iter(&mut |s| match &s.node {
-            C::StatementNode::Assign(_, C::Expr::Host_source { name, .. }) if name == "test/source" => host = true,
+            C::StatementNode::Assign(_, C::Expr::HostSource { name, .. }) if name == "test/source" => host = true,
             C::StatementNode::Assign(_, C::Expr::Source(_)) => panic!("a captured source stays plain data"),
             _ => {}
         }, &program.body);

@@ -187,10 +187,10 @@ fn lives() -> Vec<Frame> {
 }
 
 const NOT_COVERED: &[&str] = &[
-    "color/hsla", "text/float", "scene/trace", "gpu/fwidth", "gpu/float-bits", "gpu/sample", "gpu/sample-level", "gpu/read", "gpu/texture-size",
-    "gpu/instance-id", "gpu/front-facing", "gpu/depth", "gpu/fragment-x", "gpu/fragment-y", "gpu/trace-triangles", "gpu/trace-any", "gpu/trace-curves",
-    "gpu/trace-curves-any", "gpu/scene-vertex", "gpu/scene-vertex-end", "gpu/scene-instance", "gpu/scene-sphere", "gpu/scene-strand", "gpu/scene-spheres",
-    "gpu/scene-strands", "gpu/group-scan", "gpu/store", "gpu/store-int",
+    "color/hsla", "text/float", "scene/trace", "gpu/fwidth", "gpu/float_bits", "gpu/sample", "gpu/sample_level", "gpu/read", "gpu/texture_size",
+    "gpu/instance_id", "gpu/front_facing", "gpu/depth", "gpu/fragment_x", "gpu/fragment_y", "gpu/trace_triangles", "gpu/trace_any", "gpu/trace_curves",
+    "gpu/trace_curves_any", "gpu/scene_vertex", "gpu/scene_vertex_end", "gpu/scene_instance", "gpu/scene_sphere", "gpu/scene_strand", "gpu/scene_spheres",
+    "gpu/scene_strands", "gpu/group_scan", "gpu/store", "gpu/store_int",
 ];
 
 #[test]
@@ -338,7 +338,7 @@ fn text_arrays_dependent_clauses_and_nested_numeric_bodies_refuse_honestly() {
     let dependent = live_value(r##"(for [x (array/text 2 "猫") y (array/text (if (equal? x "猫") 2501 0) "😀")] (if (> t 0.) x y))"##);
     assert_eq!(ts::lower_strict(residual_of(&dependent)).err().as_deref(), Some("text_collect_dependent_clause"));
     assert!(executor::compile(&dependent, &executor::CompileOptions { strict: true, ..Default::default() }).is_err());
-    assert!(ok(E::host::force_reference(&dependent, &input::at_time(1.), None, None, None)) == Value::Text_array(Arc::new(vec!["猫".as_bytes().to_vec(); 5002].into())));
+    assert!(ok(E::host::force_reference(&dependent, &input::at_time(1.), None, None, None)) == Value::TextArray(Arc::new(vec!["猫".as_bytes().to_vec(); 5002].into())));
     let nested_numeric = live_value(
         "(map (fn [x] (text/trim (text/lower (str (array/sum (map (fn [y] (value/rand y t)) (array/float 2))))))) (array/text 2))",
     );
@@ -350,5 +350,5 @@ fn text_arrays_dependent_clauses_and_nested_numeric_bodies_refuse_honestly() {
         Err(d) => assert!(d.code == "E_KERNEL_FORM"),
         Ok(_) => panic!("Unsupported numeric producer inside Text map qualified"),
     }
-    assert!(matches!(ok(E::host::force_reference(&nested_numeric, &input::at_time(1.), None, None, None)), Value::Text_array(values) if values.len() == 2));
+    assert!(matches!(ok(E::host::force_reference(&nested_numeric, &input::at_time(1.), None, None, None)), Value::TextArray(values) if values.len() == 2));
 }

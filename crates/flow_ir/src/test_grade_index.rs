@@ -12,13 +12,13 @@ const MAX_INT: i64 = i64::MAX;
 const MIN_INT: i64 = i64::MIN;
 
 fn ints(v: &[i64]) -> Value {
-    Value::Int_array(Arc::new(v.to_vec()))
+    Value::IntArray(Arc::new(v.to_vec()))
 }
 fn floats(v: &[f64]) -> Value {
     Value::Floats(1, Arc::new(v.to_vec()))
 }
 fn texts(v: &[Vec<u8>]) -> Value {
-    Value::Text_array(Arc::new(v.to_vec().into()))
+    Value::TextArray(Arc::new(v.to_vec().into()))
 }
 fn grade(keys: Value, descending: bool) -> Result<Value, Diagnostic> {
     call_op("array/grade", vec![("keys", keys), ("descending", Value::Bool(descending))])

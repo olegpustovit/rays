@@ -21,7 +21,7 @@ fn same(a: &Value, b: &Value) -> bool {
     bits(a) == bits(b)
 }
 fn ints(v: &[i64]) -> Value {
-    Value::Int_array(Arc::new(v.to_vec()))
+    Value::IntArray(Arc::new(v.to_vec()))
 }
 fn floats(v: &[f64]) -> Value {
     Value::Floats(1, Arc::new(v.to_vec()))
@@ -70,7 +70,7 @@ fn reduce_array_direct() {
         reject("E_ARRAY_OFFSETS", reduce_array(None, Reduction::Sum, Some(&ints(&offsets)), &floats(&[1., 2.])));
     }
     reject("E_ARRAY_TYPE", reduce_array(None, Reduction::Sum, Some(&floats(&[0., 2.])), &ints(&[1, 2])));
-    reject("E_ARRAY_TYPE", reduce_array(None, Reduction::Minimum, None, &Value::Text_array(Arc::new(vec![b"a".to_vec()].into()))));
+    reject("E_ARRAY_TYPE", reduce_array(None, Reduction::Minimum, None, &Value::TextArray(Arc::new(vec![b"a".to_vec()].into()))));
     reject("E_NONFINITE", reduce_array(None, Reduction::Maximum, None, &floats(&[f64::NAN])));
     reject("E_NONFINITE", reduce_array(None, Reduction::Sum, Some(&ints(&[0, 2])), &floats(&[f64::MAX, f64::MAX])));
 }

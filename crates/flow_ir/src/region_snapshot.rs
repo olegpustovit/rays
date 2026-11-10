@@ -63,27 +63,27 @@ pub fn instruction(x: &I) -> String {
         I::Stage(_, r) => format!("Stage{}", registers(r)),
         I::Trace(field, r) => format!("Trace {}{}", field, registers(r)),
         I::Fma(a, b, c) => format!("Fma {} {} {}", a, b, c),
-        I::Checked_mul(p, a, b) => format!("Checked_mul {} {} {}", projection(p), a, b),
-        I::Array_prepare(i, ty) => format!("Array_prepare {} {}", i, ty::to_string(ty)),
+        I::CheckedMul(p, a, b) => format!("Checked_mul {} {} {}", projection(p), a, b),
+        I::ArrayPrepare(i, ty) => format!("Array_prepare {} {}", i, ty::to_string(ty)),
         I::Gather(a, i, w, c) => format!("Gather {} {} {} {}", a, i, w, c),
-        I::Int_gather(a, i) => format!("Int_gather {} {}", a, i),
-        I::Text_const(s) => format!("Text_const {}", quoted(s)),
-        I::Text_input(i) => format!("Text_input {}", i),
-        I::Text_uniform(i) => format!("Text_uniform {}", i),
-        I::Text_gather(a, i) => format!("Text_gather {} {}", a, i),
-        I::Text_select(c, a, b) => format!("Text_select {} {} {}", c, a, b),
-        I::Checked_fma(p, a, b, c) => format!("Checked_fma {} {} {} {}", projection(p), a, b, c),
-        I::Rand_at(seed, index) => format!("Rand_at {} {}", seed, index),
+        I::IntGather(a, i) => format!("Int_gather {} {}", a, i),
+        I::TextConst(s) => format!("Text_const {}", quoted(s)),
+        I::TextInput(i) => format!("Text_input {}", i),
+        I::TextUniform(i) => format!("Text_uniform {}", i),
+        I::TextGather(a, i) => format!("Text_gather {} {}", a, i),
+        I::TextSelect(c, a, b) => format!("Text_select {} {} {}", c, a, b),
+        I::CheckedFma(p, a, b, c) => format!("Checked_fma {} {} {} {}", projection(p), a, b, c),
+        I::RandAt(seed, index) => format!("Rand_at {} {}", seed, index),
         I::Select(c, a, b) => format!("Select {} {} {}", c, a, b),
-        I::Int_const(n) => format!("Int_const {}", n),
-        I::Int_input(n) => format!("Int_input {}", n),
-        I::Int_uniform(n) => format!("Int_uniform {}", n),
-        I::Int_accumulator => "Int_accumulator".to_owned(),
-        I::Int_frame(name) => format!("Int_frame {}", quoted(name.as_bytes())),
-        I::Int_binary(op, a, b) => format!("Int_binary {} {} {}", packed_ops::integer_name(*op), a, b),
-        I::Int_compare(op, a, b) => format!("Int_compare {} {} {}", packed_ops::comparison_name(*op), a, b),
-        I::Int_abs(a) => format!("Int_abs {}", a),
-        I::Int_select(c, a, b) => format!("Int_select {} {} {}", c, a, b),
+        I::IntConst(n) => format!("Int_const {}", n),
+        I::IntInput(n) => format!("Int_input {}", n),
+        I::IntUniform(n) => format!("Int_uniform {}", n),
+        I::IntAccumulator => "Int_accumulator".to_owned(),
+        I::IntFrame(name) => format!("Int_frame {}", quoted(name.as_bytes())),
+        I::IntBinary(op, a, b) => format!("Int_binary {} {} {}", packed_ops::integer_name(*op), a, b),
+        I::IntCompare(op, a, b) => format!("Int_compare {} {} {}", packed_ops::comparison_name(*op), a, b),
+        I::IntAbs(a) => format!("Int_abs {}", a),
+        I::IntSelect(c, a, b) => format!("Int_select {} {} {}", c, a, b),
         I::Convert(op, a) => {
             let name = match op {
                 Conversion::ToFloat => "float".to_owned(),
@@ -108,10 +108,10 @@ pub fn instruction(x: &I) -> String {
             quoted(message.as_bytes()),
             cause.as_ref().map(|c| format!(" cause={}", quoted(c))).unwrap_or_default()
         ),
-        I::Loop_begin(l) => format!("Loop_begin {} {} end={}", l.first, l.last, l.finish),
-        I::Loop_carry(l, c, t) => format!("Loop_carry {} {} {}", l, c, ty::to_string(t)),
-        I::Loop_end(l, _, stop) => format!("Loop_end {}{}", l, stop.map(|s| format!(" until={}", s)).unwrap_or_default()),
-        I::Loop_result(l, c, t) => format!("Loop_result {} {} {}", l, c, ty::to_string(t)),
+        I::LoopBegin(l) => format!("Loop_begin {} {} end={}", l.first, l.last, l.finish),
+        I::LoopCarry(l, c, t) => format!("Loop_carry {} {} {}", l, c, ty::to_string(t)),
+        I::LoopEnd(l, _, stop) => format!("Loop_end {}{}", l, stop.map(|s| format!(" until={}", s)).unwrap_or_default()),
+        I::LoopResult(l, c, t) => format!("Loop_result {} {} {}", l, c, ty::to_string(t)),
     }
 }
 
@@ -251,7 +251,7 @@ mod tests {
         core_fuse::fuse(false, core_region::lower(true, false, &CountSource::none(), residual, &term).unwrap())
     }
 
-    /// test_core.ml: a packed region is the validated Core.Region itself.
+    /// : a packed region is the validated Core.Region itself.
     #[test]
     fn core_prints_a_region() {
         use crate::core_ir::{pp, Program};

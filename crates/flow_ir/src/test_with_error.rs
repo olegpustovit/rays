@@ -65,7 +65,7 @@ fn error(code: &str, message: &str, cause: Option<&str>, result: Result<Value, D
 }
 
 #[test]
-fn with_error_nil_is_no_geo() { assert!(compare(&format!("(with_error nil {MAPPER})")) == Ok(Value::No_geo)); }
+fn with_error_nil_is_no_geo() { assert!(compare(&format!("(with_error nil {MAPPER})")) == Ok(Value::NoGeo)); }
 
 #[test]
 fn with_error_passes_a_value_without_running_the_mapper() { assert!(compare("(with_error 7 (fn [failure] (error \"E_MAPPER\" \"never\")))") == Ok(Value::Int(7))); }
@@ -151,7 +151,7 @@ fn ill_typed_with_error_forms_are_rejected_by_the_checker() {
 
 fn original() -> Diagnostic {
     // ponytail: diagnostic causes are UTF-8, so the byte fixture uses U+00FF; use byte-valued causes only if the language contract requires them.
-    rays_diagnostic::error(
+    let mut diagnostic = rays_diagnostic::error(
         "E_CHILD".into(),
         "child".into(),
         Some(Span { start: 19, finish: 23 }),
@@ -159,7 +159,10 @@ fn original() -> Diagnostic {
         Some("\u{ff} raw 日本".into()),
         vec!["hint".into()],
         vec![Trace { node_id: 13, label: "child".into(), operation: "native.child".into() }],
-    )
+    );
+    diagnostic.set_signature(Some("(draw/circle center radius)".into()));
+    diagnostic.set_suggest(vec!["draw/circle".into()]);
+    diagnostic
 }
 
 #[test]
@@ -173,7 +176,7 @@ fn diagnostic_envelopes_are_lossless() {
         body: vec![statement(
             0,
             C::StatementNode::Protect {
-                body: vec![statement(1, C::StatementNode::Assign(1, C::Expr::Prim(C::Primitive::Fail_diagnostic(original.clone()), vec![])))],
+                body: vec![statement(1, C::StatementNode::Assign(1, C::Expr::Prim(C::Primitive::FailDiagnostic(Box::new(original.clone())), vec![])))],
                 value: 1,
                 failure: 0,
                 handler: vec![statement(2, C::StatementNode::Assign(2, C::Expr::Local(0)))],

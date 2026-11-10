@@ -11,7 +11,7 @@ const MAX_INT: i64 = i64::MAX;
 const MIN_INT: i64 = i64::MIN;
 
 fn ints(v: &[i64]) -> Value {
-    Value::Int_array(Arc::new(v.to_vec()))
+    Value::IntArray(Arc::new(v.to_vec()))
 }
 fn call(name: &str, array: Value) -> Result<Value, Diagnostic> {
     call_op(name, vec![(if name == "array/compact" { "mask" } else { "array" }, array)])
@@ -40,7 +40,7 @@ fn scan(values: &[i64]) -> Vec<i64> {
 }
 fn arc_of(v: &Value) -> &Arc<Vec<i64>> {
     match v {
-        Value::Int_array(a) => a,
+        Value::IntArray(a) => a,
         _ => panic!("expected an int array"),
     }
 }
@@ -99,7 +99,7 @@ fn bad_masks_and_types() {
             Value::Floats(1, Arc::new(vec![])),
             Value::Floats(1, Arc::new(vec![0., 1.])),
             Value::Floats(3, Arc::new(vec![0., 1.])),
-            Value::Text_array(Arc::new(vec![b"0".to_vec()].into())),
+            Value::TextArray(Arc::new(vec![b"0".to_vec()].into())),
             Value::Int(1),
             Value::Bool(true),
             Value::List(Arc::new(vec![Value::Int(1)])),

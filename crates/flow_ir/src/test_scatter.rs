@@ -12,7 +12,7 @@ const MAX_INT: i64 = i64::MAX;
 const MIN_INT: i64 = i64::MIN;
 
 fn ints(v: &[i64]) -> Value {
-    Value::Int_array(Arc::new(v.to_vec()))
+    Value::IntArray(Arc::new(v.to_vec()))
 }
 fn floats(v: &[f64]) -> Value {
     Value::Floats(1, Arc::new(v.to_vec()))
@@ -65,7 +65,7 @@ fn exact_int_wrap_and_ownership() {
     let input = ints(&[1, 2]);
     let output = scatter(ints(&[0, 0]), input.clone(), Value::Int(1)).unwrap();
     match (&input, &output) {
-        (Value::Int_array(original), Value::Int_array(result)) => {
+        (Value::IntArray(original), Value::IntArray(result)) => {
             assert!(!Arc::ptr_eq(original, result));
             assert_eq!(original.as_slice(), &[1, 2]);
         }
@@ -109,7 +109,7 @@ fn malformed_inputs() {
     reject("E_ARRAY_MEMORY", scatter(ints(&[]), Value::Floats(4, Arc::new(vec![])), Value::Int(isize::MAX as i64 / size_of::<f64>() as i64 / 4 + 1)));
     reject("E_ARRAY_COUNT", scatter(ints(&[0]), ints(&[]), Value::Int(1)));
     reject("E_ARRAY_TYPE", scatter(floats(&[0.]), floats(&[1.]), Value::Int(1)));
-    reject("E_ARRAY_TYPE", scatter(ints(&[]), Value::Text_array(Arc::new(Vec::<Vec<u8>>::new().into())), Value::Int(1)));
+    reject("E_ARRAY_TYPE", scatter(ints(&[]), Value::TextArray(Arc::new(Vec::<Vec<u8>>::new().into())), Value::Int(1)));
     reject("E_ARRAY_TYPE", scatter(ints(&[0]), Value::Floats(3, Arc::new(vec![1., 2.])), Value::Int(1)));
     reject("E_ARRAY_TYPE", scatter(ints(&[]), ints(&[]), Value::Float(1.)));
     // Error order is source-row, then component. A later invalid index cannot replace an earlier

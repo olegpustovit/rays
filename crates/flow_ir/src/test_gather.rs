@@ -65,7 +65,7 @@ fn instantiate_with(table: Option<Value>, bindings: &str, ty: &Ty, body: &str, i
             other => other.clone(),
         });
     }
-    ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: elem(ty) }, f, &[Value::Int_array(Arc::new(indices))]))
+    ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: elem(ty) }, f, &[Value::IntArray(Arc::new(indices))]))
 }
 fn instantiate(table: Option<&Value>, ty: &Ty, body: &str, indices: Vec<i64>) -> Value {
     instantiate_with(table.cloned(), "", ty, body, indices)
@@ -85,7 +85,7 @@ fn same_error(a: &Result<Value, Diagnostic>, b: &Result<Value, Diagnostic>) {
 fn array(ty: &Ty, count: usize) -> Value {
     if *ty == Ty::Int {
         let p = [MIN_INT, MAX_INT, 9007199254740993, 0, -1];
-        return Value::Int_array(Arc::new((0..count).map(|i| p[i % 5]).collect()));
+        return Value::IntArray(Arc::new((0..count).map(|i| p[i % 5]).collect()));
     }
     let width = flow_syntax::packed_ops::scalar_width(ty).unwrap();
     let p = [-0., 0., f64::from_bits(1), 0.25, -0.75];
@@ -104,7 +104,7 @@ fn arr(ty: Ty) -> Ty {
     Ty::Array(Box::new(ty))
 }
 fn ints(v: &[i64]) -> Value {
-    Value::Int_array(Arc::new(v.to_vec()))
+    Value::IntArray(Arc::new(v.to_vec()))
 }
 fn force(p: &packed::T, live: &input::Frame) -> Result<Value, Diagnostic> {
     packed_force(p, live, true, None)
@@ -125,7 +125,7 @@ fn text_bytes(parts: &[&[u8]]) -> Vec<Vec<u8>> {
     parts.iter().map(|p| p.to_vec()).collect()
 }
 fn texts(parts: &[&[u8]]) -> Value {
-    Value::Text_array(Arc::new(text_bytes(parts).into()))
+    Value::TextArray(Arc::new(text_bytes(parts).into()))
 }
 fn lit(bytes: &[u8]) -> String {
     text_literal(bytes)
@@ -259,12 +259,12 @@ fn handles_cannot_escape() {
     let table = int_table();
     let value = instantiate(Some(&table), &arr(Ty::Int), "(fn [(index : int)] (array/nth data index))", (0..2049).map(|i| if i == 4 { 3 } else { 0 }).collect());
     let region = pk(&value);
-    let prepare = region.code.iter().position(|i| matches!(i, Instruction::Array_prepare(..))).expect("Array_prepare");
+    let prepare = region.code.iter().position(|i| matches!(i, Instruction::ArrayPrepare(..))).expect("Array_prepare");
     assert!(region::rebuild(&region, region::Rebuild { outputs: Some(vec![vec![prepare as i64]]), ..Default::default() }).is_err());
-    let input = region.code.iter().position(|i| matches!(i, Instruction::Int_input(..))).expect("Int_input") as i64;
+    let input = region.code.iter().position(|i| matches!(i, Instruction::IntInput(..))).expect("Int_input") as i64;
     let mut code: Vec<Instruction> = region.code.to_vec();
     let last = code.len() - 1;
-    code[last] = Instruction::Int_gather(input, input);
+    code[last] = Instruction::IntGather(input, input);
     assert!(region::rebuild(&region, region::Rebuild { code: Some(code), ..Default::default() }).is_err());
     let mut code: Vec<Instruction> = region.code.to_vec();
     code[prepare] = Instruction::Guarded(vec![(input, true)], Box::new(code[prepare].clone()));
@@ -312,7 +312,7 @@ fn skips_force_into_and_trust_boundaries() {
     let forced = packed::force_into(&pk(&value), &live, &packed::ForceOptions { strict: true, ..Default::default() }, &column_source, 1, &mut outputs).map(|_| Value::Int(0));
     same_error(&forced, &force_reference(&value, &live));
     // Trust boundaries retain source type, unresolved descriptor and finite errors.
-    let ordered = instantiate(None, &arr(Ty::Int), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
+    let _ordered = instantiate(None, &arr(Ty::Int), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
     let bad = instantiate(None, &arr(Ty::Float), "(fn [(index : int)] (array/nth data index))", vec![0]);
     for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let resolve = ok_value(Value::Floats(1, Arc::new(vec![x])));
@@ -477,8 +477,8 @@ fn typed_total_prefix_wrapping_ints_and_text_bytes() {
                 }
                 cur
             };
-            let boundary = p.code.iter().position(|i| matches!(bare(i), Instruction::Array_prepare(..))).expect("boundary");
-            assert!(boundary > 0 && p.code[..boundary].iter().any(|i| matches!(i, Instruction::Int_input(..))));
+            let boundary = p.code.iter().position(|i| matches!(bare(i), Instruction::ArrayPrepare(..))).expect("boundary");
+            assert!(boundary > 0 && p.code[..boundary].iter().any(|i| matches!(i, Instruction::IntInput(..))));
             for domains in [1, 4, 8] {
                 with_domains(domains, &|| assert_eq!(bits(&ok(force(&p, &live))), bits(&reference)));
             }
@@ -505,7 +505,7 @@ fn malformed_public_region_input_is_checked_when_selected() {
                 sources: Some(vec![(rid, Arc::new(term.clone()))]),
                 widths: Some(vec![1]),
                 uniforms: Some(vec![]),
-                code: Some(vec![Instruction::Const(if selected { 1. } else { 0. }), Instruction::Guarded(vec![(0, true)], Box::new(Instruction::Int_input(0))), Instruction::Text_const(b"safe\xff\0".as_slice().into())]),
+                code: Some(vec![Instruction::Const(if selected { 1. } else { 0. }), Instruction::Guarded(vec![(0, true)], Box::new(Instruction::IntInput(0))), Instruction::TextConst(b"safe\xff\0".as_slice().into())]),
                 outputs: Some(vec![vec![2]]),
                 count: Some(Some(count as i64)),
                 ..Default::default()
@@ -513,7 +513,7 @@ fn malformed_public_region_input_is_checked_when_selected() {
             let p = region::rebuild(&template, rebuild).unwrap_or_else(|ds| panic!("{}", show_ds(&ds)));
             for domains in [1, 4, 8] {
                 with_domains(domains, &|| match force(&p, &live) {
-                    Ok(result) => assert!(!selected && result == Value::Text_array(Arc::new(vec![b"safe\xff\0".to_vec(); count].into()))),
+                    Ok(result) => assert!(!selected && result == Value::TextArray(Arc::new(vec![b"safe\xff\0".to_vec(); count].into()))),
                     Err(d) => assert!(selected && d.code == "E_ARRAY_TYPE" && d.message == "Kernel input changed its packed element type.", "{}", d.message),
                 });
             }
@@ -609,7 +609,7 @@ fn late_bounds_versus_earlier_table_cause() {
             None,
             &FnSignature { params: vec![Ty::Int], result: Ty::Text },
             closure,
-            &[Value::Int_array(Arc::new((0..1100).map(|i| if i == early { 1 } else if i == late { 2 } else { 0 }).collect()))],
+            &[Value::IntArray(Arc::new((0..1100).map(|i| if i == early { 1 } else if i == late { 2 } else { 0 }).collect()))],
         ));
         let make = |state: e::State, calls: Arc<Mutex<Vec<&'static str>>>| -> ResolveArc {
             let advancing = advancing.clone();
@@ -659,7 +659,7 @@ fn text_nested_guards_and_error_arm() {
     // Nested one-lane guards change across blocks; the last lane alone takes the error arm, and
     // untaken invalid reads must never execute.
     let live = live_at(0.25);
-    let table = Value::Text_array(Arc::new(strings().into()));
+    let table = Value::TextArray(Arc::new(strings().into()));
     for count in [2048usize, 2049] {
         let value = instantiate(
             Some(&table),
@@ -687,7 +687,7 @@ fn text_nested_guards_and_error_arm() {
 fn text_leaves_are_immutable_byte_copies() {
     let live = live_at(0.25);
     let strs = strings();
-    let table = Value::Text_array(Arc::new(strs.clone().into()));
+    let table = Value::TextArray(Arc::new(strs.clone().into()));
     for count in [0usize, 1, 13, 2049] {
         let value = instantiate(Some(&table), &arr(Ty::Text), "(fn [(index : int)] (if (int/ge index 0) (array/nth data (int/mod index 7)) \"untaken\"))", (0..count as i64).collect());
         let reference = ok(force_reference(&value, &live));
@@ -701,7 +701,7 @@ fn text_leaves_are_immutable_byte_copies() {
                     assert_eq!(bits(&got), bits(&reference));
                     assert_eq!(bits(&ok(executor_force(&core, true, &live))), bits(&reference));
                     match got {
-                        Value::Text_array(out) => {
+                        Value::TextArray(out) => {
                             for (i, s) in out.iter().enumerate() {
                                 assert_eq!(s, &strs[i % 7]);
                             }
@@ -718,7 +718,7 @@ fn text_leaves_are_immutable_byte_copies() {
 fn text_helper_lookup() {
     let live = live_at(0.25);
     let strs = strings();
-    let table = Value::Text_array(Arc::new(strs.clone().into()));
+    let table = Value::TextArray(Arc::new(strs.clone().into()));
     let value = instantiate_with(Some(table.clone()), "lookup (fn [(names : (array text)) (index : int)] (array/nth names index))", &arr(Ty::Text), "(fn [(index : int)] (let* [alias data] (lookup alias (int/mod index 7))))", (0..2049).collect());
     assert_eq!(bits(&ok(force(&pk(&value), &live))), bits(&ok(force_reference(&value, &live))));
 }
@@ -727,7 +727,7 @@ fn text_helper_lookup() {
 fn text_select_and_error_causes() {
     let live = live_at(0.25);
     let strs = strings();
-    let table = Value::Text_array(Arc::new(strs.clone().into()));
+    let table = Value::TextArray(Arc::new(strs.clone().into()));
 
     let closure = make_fn("", &arr(Ty::Text), "(fn [(index : int) (old : text)] (if (int/ge index 0) (array/nth data (int/mod index 7)) old))");
     let closure = e::host::map_function_bindings(closure, &|value| match value {
@@ -736,14 +736,14 @@ fn text_select_and_error_causes() {
     });
     let indices: Vec<i64> = (0..2049).map(|i| if i % 5 == 0 { -1 } else { i }).collect();
     let old: Vec<Vec<u8>> = (0..2049).map(|i| strs[(i + 2) % 7].clone()).collect();
-    let selected = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::Int_array(Arc::new(indices.clone())), Value::Text_array(Arc::new(old.clone().into()))]));
+    let selected = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::IntArray(Arc::new(indices.clone())), Value::TextArray(Arc::new(old.clone().into()))]));
     let selected_reference = bits(&ok(force_reference(&selected, &live)));
     for domains in [1, 4, 8] {
         with_domains(domains, &|| {
             let got = ok(force(&pk(&selected), &live));
             assert_eq!(bits(&got), selected_reference);
             match got {
-                Value::Text_array(out) => {
+                Value::TextArray(out) => {
                     for (i, s) in out.iter().enumerate() {
                         assert_eq!(s, if indices[i] < 0 { &old[i] } else { &strs[indices[i] as usize % 7] });
                     }
@@ -766,7 +766,7 @@ fn text_select_and_error_causes() {
 fn text_identity_uniform_and_failures() {
     let live = live_at(0.25);
     let strs = strings();
-    let table = Value::Text_array(Arc::new(strs.clone().into()));
+    let table = Value::TextArray(Arc::new(strs.clone().into()));
     let thread = std::thread::current().id();
     let identity = recorded(&arr(Ty::Text), "(map (fn [(old : text)] old) data)");
     assert!(!packed::gpu_refusals(false, false, &pk(&identity)).is_empty());
@@ -795,11 +795,11 @@ fn text_identity_uniform_and_failures() {
             Ok(Value::Text(three.clone().into()))
         })
     };
-    assert_eq!(ok(force_r(&pk(&uniform), &live, &text_resolve)), Value::Text_array(Arc::new(vec![three.clone(); 2049].into())));
+    assert_eq!(ok(force_r(&pk(&uniform), &live, &text_resolve)), Value::TextArray(Arc::new(vec![three.clone(); 2049].into())));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-    let bad = instantiate(None, &arr(Ty::Text), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
-    let failing = resolver({
+    let _bad = instantiate(None, &arr(Ty::Text), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
+    let _failing = resolver({
         let three = three.clone();
         move |_| {
             let mut d = v::fail("E_DATA_SOURCE", "Text source failed");
@@ -825,7 +825,7 @@ fn text_identity_uniform_and_failures() {
 #[test]
 fn text_products_changing_tables_fusion_and_refusals() {
     let live = live_at(0.25);
-    let table = Value::Text_array(Arc::new(strings().into()));
+    let table = Value::TextArray(Arc::new(strings().into()));
     let resolve = ok_value(table.clone());
     let product = recorded(&arr(Ty::Text), "(for [i (array/range 2049 :type int) j (array/range 3 :type int)] :skip [4] (if (int/eq i 1) (if (int/eq j 1) (array/nth data -1) \"old\") (array/nth data (int/mod i 7))))");
     for domains in [1, 4, 8] {
@@ -918,7 +918,7 @@ fn inline_table_choices_keep_selected_lane_forcing() {
 fn integer_sources_and_tables_convert_once_per_array() {
     let csr = Arc::new((0..4096).collect::<Vec<i64>>());
     let inputs = || {
-        packed::host::device_inputs(&packed::host::ValueInputs { arrays: vec![Value::Int_array(csr.clone())], uniforms: vec![Value::Int_array(csr.clone())], frame: vec![], count: 4096 }).unwrap()
+        packed::host::device_inputs(&packed::host::ValueInputs { arrays: vec![Value::IntArray(csr.clone())], uniforms: vec![Value::IntArray(csr.clone())], frame: vec![], count: 4096 }).unwrap()
     };
     let a = inputs();
     let b = inputs();
@@ -993,7 +993,7 @@ fn list_tables_exact_widths_and_range_guards() {
 fn text_select_reference_inside_domains() {
     let live = live_at(0.25);
     let strs = strings();
-    let table = Value::Text_array(Arc::new(strs.clone().into()));
+    let table = Value::TextArray(Arc::new(strs.clone().into()));
     let closure = make_fn("", &arr(Ty::Text), "(fn [(index : int) (old : text)] (if (int/ge index 0) (array/nth data (int/mod index 7)) old))");
     let closure = e::host::map_function_bindings(closure, &|value| match value {
         Value::Source(g) if g.name == "probe/table" => table.clone(),
@@ -1001,7 +1001,7 @@ fn text_select_reference_inside_domains() {
     });
     let indices: Vec<i64> = (0..2049).map(|i| if i % 5 == 0 { -1 } else { i }).collect();
     let old: Vec<Vec<u8>> = (0..2049).map(|i| strs[(i + 2) % 7].clone()).collect();
-    let selected = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::Int_array(Arc::new(indices)), Value::Text_array(Arc::new(old.into()))]));
+    let selected = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::IntArray(Arc::new(indices)), Value::TextArray(Arc::new(old.into()))]));
     for domains in [1, 4, 8] {
         with_domains(domains, &|| {
             assert_eq!(bits(&ok(force(&pk(&selected), &live))), bits(&ok(force_reference(&selected, &live))));
@@ -1039,7 +1039,7 @@ fn text_helper_then_select_same_thread() {
 #[test]
 fn text_error_cause_raw_bytes() {
     let live = live_at(0.25);
-    let table = Value::Text_array(Arc::new(strings().into()));
+    let table = Value::TextArray(Arc::new(strings().into()));
     let error = instantiate(Some(&table), &arr(Ty::Text), &format!("(fn [(index : int)] (if (int/lt index 0) (error \"E_TEXT\" \"selected\" :cause {}) (array/nth data index)))", lit(b"raw\xff\0cause")), vec![-1, 0]);
     for domains in [1, 4, 8] {
         with_domains(domains, &|| {

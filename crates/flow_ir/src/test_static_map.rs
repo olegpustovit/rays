@@ -119,7 +119,7 @@ fn kernel_makes_the_elements_past_the_head() {
         _ => panic!("a vec3 array"),
     }
     let maps = profile::static_maps(&profile);
-    assert!(maps.iter().any(|m| m.count == 20000 && m.tier == Tier::Cpu_kernel && m.tail_elements == 0), "walked: {:?}", maps.last().map(|m| (m.tier, m.head_elements, m.tail_elements)));
+    assert!(maps.iter().any(|m| m.count == 20000 && m.tier == Tier::CpuKernel && m.tail_elements == 0), "walked: {:?}", maps.last().map(|m| (m.tier, m.head_elements, m.tail_elements)));
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn static_map_profile_head_tail_and_refusal() {
     assert_eq!(maps.len(), 1, "static map profile missing");
     let map = &maps[0];
     assert!(map.site == vec!["g".to_string(), "@result".to_string()] && map.count == 4100);
-    assert!(map.tier == Tier::Cpu_kernel && map.refusal.is_empty());
+    assert!(map.tier == Tier::CpuKernel && map.refusal.is_empty());
     assert!(map.tail_elements == 0); // head_elements == 0 is `kernel_first_head_is_zero`
     assert_eq!(map.seconds, map.head_seconds + map.kernel_seconds + map.tail_seconds);
 
@@ -202,7 +202,7 @@ fn gather_parity(workspace: &w::Workspace) {
         (Ok(reference), Ok(compiled)) => {
             assert!(same(&result_of(&reference, "g"), &result_of(&compiled, "g")));
             let map = profile::static_maps(&profile).into_iter().find(|m| m.count == 4101).expect("4101 map");
-            assert!(map.tier == Tier::Cpu_kernel && map.tail_elements == 0, "gather walked: {}", show_ds(&map.refusal));
+            assert!(map.tier == Tier::CpuKernel && map.tail_elements == 0, "gather walked: {}", show_ds(&map.refusal));
         }
         (Err(reference), Err(compiled)) => {
             assert!(eq_err(&reference, &compiled) && reference.code == "E_ARRAY_RANGE");
@@ -236,7 +236,7 @@ fn text_gather_residual() {
         Value::Fn(f) => *f,
         _ => panic!("missing Text lookup function"),
     };
-    let value = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: Ty::Text }, f, &[Value::Int_array(Arc::new((0..4101).collect()))]));
+    let value = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: Ty::Text }, f, &[Value::IntArray(Arc::new((0..4101).collect()))]));
     let r = residual(&value);
     let p = compile_region(r, true, None).unwrap_or_else(|ds| panic!("{}", show_ds(&ds[..1])));
     assert_eq!(bits(&ok(packed_force(&p, &live_at(0.), true, None))), bits(&ok(force_reference(&value, &live_at(0.)))));
@@ -315,7 +315,7 @@ fn trusted_replay_verifies_bits() {
     let replay = ok(profile::sample(&profile, &mut || flow_ir::static_(&flow_ir::StaticOptions { record: true, replay: true, verify: true, ..Default::default() }, &workspace)));
     assert!(same(&result_of(&eager, "g"), &result_of(&replay, "g")));
     for map in profile::static_maps(&profile) {
-        assert!(map.tier == Tier::Cpu_kernel && map.tail_elements == 0);
+        assert!(map.tier == Tier::CpuKernel && map.tail_elements == 0);
     }
     let mut eager_probe = flow_graph::probe::make(&eager, Default::default());
     let mut replay_probe = flow_graph::probe::make(&replay, Default::default());
@@ -502,7 +502,7 @@ fn sop_deferral() {
             let actual = ok(core_exec::execute(&prepare(&shared_core), &live, &core_exec::Options { force: Some(force), ..Default::default() }));
             assert!(*runs.lock().unwrap() == 2 && same(&record(&eager), &actual));
             assert!(same(&record(&eager), &ok(executor_force(&shared_program, true, &live))));
-            let cpu = profile::executions(&shared_profile).iter().filter(|x| x.tier == Tier::Cpu_kernel).count();
+            let cpu = profile::executions(&shared_profile).iter().filter(|x| x.tier == Tier::CpuKernel).count();
             assert_eq!(cpu, 2);
             let outputs = Arc::new(Mutex::new(vec![(0..3).map(|_| Some(vec![f64::NAN; 8000])).collect::<Vec<_>>()]));
             let column_source: packed::ColumnSource = Arc::new(|_, _| Ok(None));
@@ -567,11 +567,8 @@ fn kernel_first_head_is_zero() {
 }
 
 
-// The million_marks hash walks at ~0.6 ms an element in a debug build; three evaluations of 4,200
-// elements take ~10 s, over the 5 s budget. Run it by name with --ignored. The cheaper variant below
-// keeps the same kernel arithmetic (sin, mod, abs) with one hash call an element.
+// Keep all three nested captured-helper hash calls and cross the 4096-element kernel boundary.
 #[test]
-#[ignore = "slow in debug (~10 s): walker 0.6 ms/element, 3 evaluations of 4200 elements"]
 fn map_million_marks_hash() {
     check_map(maps()[0]);
 }
@@ -600,6 +597,6 @@ fn fold_over_a_table_is_the_kernels() {
     let fast = ok(profile::sample(&profile, &mut || fast_static(&ws)));
     assert!(same(&result_of(&walked, "g"), &result_of(&fast, "g")), "fold over a table differs from the walker");
     let maps = profile::static_maps(&profile);
-    let kernels = maps.iter().filter(|m| m.count > 4096 && m.tier == Tier::Cpu_kernel && m.refusal.is_empty()).count();
+    let kernels = maps.iter().filter(|m| m.count > 4096 && m.tier == Tier::CpuKernel && m.refusal.is_empty()).count();
     assert_eq!(kernels, 3, "{:?}", maps.iter().map(|m| (m.count, m.tier, m.refusal.iter().map(|d| d.message.clone()).collect::<Vec<_>>())).collect::<Vec<_>>());
 }

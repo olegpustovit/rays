@@ -1,5 +1,5 @@
 //! Structured frame programs number locals/constants in authored traversal order and publish immutable values. Indices use i64; live fields use Region::LiveInt/LiveFloat. Read Region::T fields directly but construct through make/rebuild.
-#![allow(non_camel_case_types, non_snake_case)]
+
 
 use flow_syntax::symbol::Symbol;
 use flow_check::workspace::{DiagnosticPolicy, Path, Term};
@@ -21,26 +21,26 @@ pub enum Literal {
     List(Vec<Literal>),
     Record(Vec<(Symbol, Literal)>),
     Array { width: i64, data: Arc<Vec<f64>> },
-    Int_array(Arc<Vec<i64>>),
-    Text_array(Arc<rays_math::text_array::TextArray>),
-    Empty_geometry,
+    IntArray(Arc<Vec<i64>>),
+    TextArray(Arc<rays_math::text_array::TextArray>),
+    EmptyGeometry,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FrameField { Time, Dt, Index, Tick, Width, Height, Pointer_x, Pointer_y, Input }
+pub enum FrameField { Time, Dt, Index, Tick, Width, Height, PointerX, PointerY, Input }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
     Constant(i64),
     Local(i64),
     Frame(FrameField),
-    Call_index(i64),
+    CallIndex(i64),
     /// Immutable closure-free host source, materialized only when this expression executes.
     Source(Value),
     /// Construct a typed host source from computed arguments.
-    Host_source { name: String, ty: Ty, args: Vec<(Symbol, i64)> },
+    HostSource { name: String, ty: Ty, args: Vec<(Symbol, i64)> },
     /// Immutable host-array query retained for a cooked storage consumer.
-    Source_descriptor { name: String, ty: Ty, args: Vec<(Symbol, i64)> },
+    SourceDescriptor { name: String, ty: Ty, args: Vec<(Symbol, i64)> },
     Prim(Primitive, Vec<(Symbol, i64)>),
     Vec(Vec<i64>),
     Fields(Vec<(Symbol, i64)>),
@@ -49,7 +49,7 @@ pub enum Expr {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Iteration { Static_index(i64), Local_index(i64) }
+pub enum Iteration { StaticIndex(i64), LocalIndex(i64) }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Source {
@@ -66,7 +66,16 @@ pub enum Mark { Rect, Circle, Line }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Transform { Translate, Rotate, Scale }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PathKind { Rounded_rect, Polygon, Polyline }
+pub enum PathKind { RoundedRect, Polygon, Polyline }
+
+pub const MARKS: &[(Mark, &str)] = &[(Mark::Rect, "rect"), (Mark::Circle, "circle"), (Mark::Line, "line")];
+pub const TRANSFORMS: &[(Transform, &str)] = &[(Transform::Translate, "translate"), (Transform::Rotate, "rotate"), (Transform::Scale, "scale")];
+pub const PATH_KINDS: &[(PathKind, &str)] = &[(PathKind::RoundedRect, "rounded_rect"), (PathKind::Polygon, "polygon"), (PathKind::Polyline, "polyline")];
+
+impl Mark { pub fn name(self) -> &'static str { MARKS.iter().find(|(kind, _)| *kind == self).expect("registered mark").1 } }
+impl Transform { pub fn name(self) -> &'static str { TRANSFORMS.iter().find(|(kind, _)| *kind == self).expect("registered transform").1 } }
+impl PathKind { pub fn name(self) -> &'static str { PATH_KINDS.iter().find(|(kind, _)| *kind == self).expect("registered path").1 } }
+
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Draw {
@@ -78,7 +87,7 @@ pub enum Draw {
     Batch { mark: Mark, args: Vec<(Symbol, i64)> },
     Points { positions: i64, ink: i64 },
     Path { path: PathKind, args: Vec<(Symbol, i64)> },
-    Text_run { at: i64, text: i64, ink: i64, size: i64 },
+    TextRun { at: i64, text: i64, ink: i64, size: i64 },
     Image { source: (Ty, i64), at: i64, scale: i64, angle: i64 },
     Push(Transform, i64),
     Pop,
@@ -95,18 +104,18 @@ pub struct Statement {
 pub enum StatementNode {
     Draw(Draw),
     Assign(i64, Expr),
-    Reset_call(i64),
+    ResetCall(i64),
     Protect { body: Vec<Statement>, value: i64, failure: i64, handler: Vec<Statement>, mapped: i64, result: i64 },
-    Diagnose_rows { rows: i64, policy: DiagnosticPolicy, index: i64, handler: Vec<Statement>, diagnostic: i64, result: i64 },
+    DiagnoseRows { rows: i64, policy: DiagnosticPolicy, index: i64, handler: Vec<Statement>, diagnostic: i64, result: i64 },
     If { condition: i64, yes: Vec<Statement>, no: Vec<Statement> },
     Iterate { sequence: i64, index: i64, item: i64, limit: i64, body: Vec<Statement> },
     /// Exact integer induction after the source's endpoint conversion.
     Counted { first: i64, last: i64, count: i64, index: i64, item: i64, limit: i64, stop: Option<i64>, init: Vec<Statement>, body: Vec<Statement> },
     Store { sequence: i64, index: i64, value: i64 },
-    State_read { slot: i64, result: i64, init: Vec<Statement>, initial: i64 },
+    StateRead { slot: i64, result: i64, init: Vec<Statement>, initial: i64 },
     /// `found` := whether this frame already holds a pending write; `value` := it.
-    State_peek { slot: i64, found: i64, value: i64 },
-    State_write { slot: i64, value: i64 },
+    StatePeek { slot: i64, found: i64, value: i64 },
+    StateWrite { slot: i64, value: i64 },
     Invoke { region: i64, args: Vec<i64>, result: i64 },
 }
 
@@ -153,22 +162,22 @@ pub mod region {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Stage {
         Fwidth,
-        Float_bits,
+        FloatBits,
         Sample(i64, i64),
-        Sample_level(i64, i64),
+        SampleLevel(i64, i64),
         Read(i64, i64),
-        Texture_size(i64, i64),
-        Trace_triangles(i64),
-        Trace_any,
-        Trace_curves(i64),
-        Trace_curves_any,
-        Scene_vertex(bool, i64),
-        Scene_instance,
-        Scene_sphere(i64),
-        Scene_strand(i64),
-        Group_scan(i64),
+        TextureSize(i64, i64),
+        TraceTriangles(i64),
+        TraceAny,
+        TraceCurves(i64),
+        TraceCurvesAny,
+        SceneVertex(bool, i64),
+        SceneInstance,
+        SceneSphere(i64),
+        SceneStrand(i64),
+        GroupScan(i64),
         Store,
-        Noise_table(i64),
+        NoiseTable(i64),
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -183,40 +192,40 @@ pub mod region {
         Unary(packed_ops::Unary, i64),
         Noise3(i64, i64, i64, i64, LiveInt, LiveFloat, LiveFloat),
         Fma(i64, i64, i64),
-        Rand_at(i64, i64),
+        RandAt(i64, i64),
         Select(i64, i64, i64),
-        Checked_mul(Projection, i64, i64),
-        Checked_fma(Projection, i64, i64, i64),
+        CheckedMul(Projection, i64, i64),
+        CheckedFma(Projection, i64, i64, i64),
         /// One field of a host ray query: registers scene id, origin, direction, tmin, tmax, time.
         Trace(i64, Vec<i64>),
         /// A raster-stage intrinsic over its operand registers.
         Stage(Stage, Vec<i64>),
         /// Execution-local immutable table capture, resolved before its index.
-        Array_prepare(i64, Ty),
+        ArrayPrepare(i64, Ty),
         /// Prepared table register, exact integer index, width and component.
         Gather(i64, i64, i64, i64),
-        Int_gather(i64, i64),
-        Text_const(Arc<[u8]>),
-        Text_input(i64),
-        Text_uniform(i64),
-        Text_gather(i64, i64),
-        Text_select(i64, i64, i64),
-        Int_const(i64),
-        Int_input(i64),
-        Int_uniform(i64),
-        Int_frame(String),
-        Int_accumulator,
-        Int_binary(Integer, i64, i64),
-        Int_compare(Comparison, i64, i64),
-        Int_abs(i64),
+        IntGather(i64, i64),
+        TextConst(Arc<[u8]>),
+        TextInput(i64),
+        TextUniform(i64),
+        TextGather(i64, i64),
+        TextSelect(i64, i64, i64),
+        IntConst(i64),
+        IntInput(i64),
+        IntUniform(i64),
+        IntFrame(String),
+        IntAccumulator,
+        IntBinary(Integer, i64, i64),
+        IntCompare(Comparison, i64, i64),
+        IntAbs(i64),
         Convert(Conversion, i64),
-        Int_select(i64, i64, i64),
+        IntSelect(i64, i64, i64),
         Guarded(Vec<(i64, bool)>, Box<Instruction>),
         Raise(Ty, String, String, Option<Vec<u8>>),
-        Loop_begin(Loop),
-        Loop_carry(i64, i64, Ty),
-        Loop_end(i64, Vec<i64>, Option<i64>),
-        Loop_result(i64, i64, Ty),
+        LoopBegin(Loop),
+        LoopCarry(i64, i64, Ty),
+        LoopEnd(i64, Vec<i64>, Option<i64>),
+        LoopResult(i64, i64, Ty),
     }
 
     impl Instruction {
@@ -241,15 +250,15 @@ pub mod region {
     pub fn integer_register(instruction: &Instruction) -> bool {
         use Instruction::*;
         match instruction {
-            Int_const(_) | Int_input(_) | Int_uniform(_) | Int_frame(_) | Int_accumulator | Int_binary(..)
-            | Int_abs(_) | Int_select(..) | Int_gather(..) => true,
+            IntConst(_) | IntInput(_) | IntUniform(_) | IntFrame(_) | IntAccumulator | IntBinary(..)
+            | IntAbs(_) | IntSelect(..) | IntGather(..) => true,
             Raise(Ty::Int, ..) => true,
             Convert(Conversion::ToFloat, _) => false,
             Convert(..) => true,
             Guarded(_, body) => integer_register(body),
-            Loop_begin(_) => true,
-            Loop_carry(_, _, Ty::Int) | Loop_result(_, _, Ty::Int) => true,
-            Stage(self::Stage::Trace_triangles(1 | 5) | self::Stage::Trace_curves(1) | self::Stage::Group_scan(_) | self::Stage::Store | self::Stage::Noise_table(_), _) => true,
+            LoopBegin(_) => true,
+            LoopCarry(_, _, Ty::Int) | LoopResult(_, _, Ty::Int) => true,
+            Stage(self::Stage::TraceTriangles(1 | 5) | self::Stage::TraceCurves(1) | self::Stage::GroupScan(_) | self::Stage::Store | self::Stage::NoiseTable(_), _) => true,
             _ => false,
         }
     }
@@ -257,10 +266,10 @@ pub mod region {
     pub fn text_register(instruction: &Instruction) -> bool {
         use Instruction::*;
         match instruction {
-            Text_const(_) | Text_input(_) | Text_uniform(_) | Text_gather(..) | Text_select(..) => true,
+            TextConst(_) | TextInput(_) | TextUniform(_) | TextGather(..) | TextSelect(..) => true,
             Raise(Ty::Text, ..) => true,
             Guarded(_, body) => text_register(body),
-            Loop_carry(_, _, Ty::Text) | Loop_result(_, _, Ty::Text) => true,
+            LoopCarry(_, _, Ty::Text) | LoopResult(_, _, Ty::Text) => true,
             _ => false,
         }
     }
@@ -268,10 +277,10 @@ pub mod region {
     pub fn operands(instruction: &Instruction) -> Vec<i64> {
         use Instruction::*;
         match instruction {
-            Binary(_, a, b) | Int_binary(_, a, b) | Int_compare(_, a, b) | Rand_at(a, b) | Checked_mul(_, a, b)
-            | Gather(a, b, _, _) | Int_gather(a, b) | Text_gather(a, b) => vec![*a, *b],
+            Binary(_, a, b) | IntBinary(_, a, b) | IntCompare(_, a, b) | RandAt(a, b) | CheckedMul(_, a, b)
+            | Gather(a, b, _, _) | IntGather(a, b) | TextGather(a, b) => vec![*a, *b],
             Trace(_, registers) | Stage(_, registers) => registers.clone(),
-            Unary(_, a) | Int_abs(a) | Convert(_, a) => vec![*a],
+            Unary(_, a) | IntAbs(a) | Convert(_, a) => vec![*a],
             Noise3(a, b, c, _, octaves, lacunarity, gain) => {
                 let mut result = vec![*a, *b, *c];
                 if let LiveInt::Live(r) = octaves { result.push(*r); }
@@ -279,25 +288,25 @@ pub mod region {
                 if let LiveFloat::Live(r) = gain { result.push(*r); }
                 result
             }
-            Fma(a, b, c) | Select(a, b, c) | Int_select(a, b, c) | Text_select(a, b, c) | Checked_fma(_, a, b, c) => vec![*a, *b, *c],
+            Fma(a, b, c) | Select(a, b, c) | IntSelect(a, b, c) | TextSelect(a, b, c) | CheckedFma(_, a, b, c) => vec![*a, *b, *c],
             Guarded(guards, body) => {
                 let mut result: Vec<i64> = guards.iter().map(|(c, _)| *c).collect();
                 result.extend(operands(body));
                 result
             }
-            Loop_begin(Loop { first, last, initial, .. }) => {
+            LoopBegin(Loop { first, last, initial, .. }) => {
                 let mut result = vec![*first, *last];
                 result.extend(initial.iter().copied());
                 result
             }
-            Loop_carry(loop_, _, _) => vec![*loop_],
-            Loop_end(loop_, values, stop) => {
+            LoopCarry(loop_, _, _) => vec![*loop_],
+            LoopEnd(loop_, values, stop) => {
                 let mut result = vec![*loop_];
                 result.extend(values.iter().copied());
                 result.extend(stop.iter().copied());
                 result
             }
-            Loop_result(loop_, component, _) => vec![*loop_, loop_.wrapping_add(1).wrapping_add(*component)],
+            LoopResult(loop_, component, _) => vec![*loop_, loop_.wrapping_add(1).wrapping_add(*component)],
             _ => Vec::new(),
         }
     }
@@ -321,7 +330,7 @@ pub mod region {
     }
 
     /// One CPU run of a region from a program's arena: `buffer` is a dead array its one output may
-    /// overwrite (or `No_geo`); the run sets `produced` to its result as it returns.
+    /// overwrite (or `NoGeo`); the run sets `produced` to its result as it returns.
     #[derive(Debug)]
     pub struct Destination {
         pub buffer: Value,
@@ -451,7 +460,7 @@ pub mod region {
     pub fn ints_for(t: &T, length: usize) -> Result<Vec<i64>, Diagnostic> {
         let mut values = value::array_buffer(length)?;
         if let Some(d) = &t.destination {
-            if let Value::Int_array(data) = &d.buffer {
+            if let Value::IntArray(data) = &d.buffer {
                 if data.len() == length && t.outputs.len() == 1 { values.extend_from_slice(data); return Ok(values); }
             }
         }
@@ -469,28 +478,28 @@ pub mod region {
         use Instruction::*;
         match instruction {
             Gather(a, i, w, c) => Gather(*a, at(*i), *w, *c),
-            Int_gather(a, i) => Int_gather(*a, at(*i)),
-            Text_gather(a, i) => Text_gather(*a, at(*i)),
-            Text_select(c, a, b) => Text_select(at(*c), at(*a), at(*b)),
+            IntGather(a, i) => IntGather(*a, at(*i)),
+            TextGather(a, i) => TextGather(*a, at(*i)),
+            TextSelect(c, a, b) => TextSelect(at(*c), at(*a), at(*b)),
             Binary(op, a, b) => Binary(*op, at(*a), at(*b)),
-            Int_binary(op, a, b) => Int_binary(*op, at(*a), at(*b)),
-            Int_compare(op, a, b) => Int_compare(*op, at(*a), at(*b)),
+            IntBinary(op, a, b) => IntBinary(*op, at(*a), at(*b)),
+            IntCompare(op, a, b) => IntCompare(*op, at(*a), at(*b)),
             Unary(op, a) => Unary(*op, at(*a)),
-            Int_abs(a) => Int_abs(at(*a)),
+            IntAbs(a) => IntAbs(at(*a)),
             Convert(op, a) => Convert(op.clone(), at(*a)),
             Noise3(a, b, c, seed, octaves, lacunarity, gain) => {
                 let li = |x: &LiveInt| match x { LiveInt::Fixed(v) => LiveInt::Fixed(*v), LiveInt::Live(r) => LiveInt::Live(at(*r)) };
                 let lf = |x: &LiveFloat| match x { LiveFloat::Fixed(v) => LiveFloat::Fixed(*v), LiveFloat::Live(r) => LiveFloat::Live(at(*r)) };
                 Noise3(at(*a), at(*b), at(*c), *seed, li(octaves), lf(lacunarity), lf(gain))
             }
-            Rand_at(seed, index) => Rand_at(at(*seed), at(*index)),
+            RandAt(seed, index) => RandAt(at(*seed), at(*index)),
             Fma(a, b, c) => Fma(at(*a), at(*b), at(*c)),
-            Checked_mul(p, a, b) => Checked_mul(*p, at(*a), at(*b)),
+            CheckedMul(p, a, b) => CheckedMul(*p, at(*a), at(*b)),
             Trace(field, r) => Trace(*field, r.iter().map(|x| at(*x)).collect()),
             Stage(stage, r) => Stage(*stage, r.iter().map(|x| at(*x)).collect()),
-            Checked_fma(p, a, b, c) => Checked_fma(*p, at(*a), at(*b), at(*c)),
+            CheckedFma(p, a, b, c) => CheckedFma(*p, at(*a), at(*b), at(*c)),
             Select(a, b, c) => Select(at(*a), at(*b), at(*c)),
-            Int_select(a, b, c) => Int_select(at(*a), at(*b), at(*c)),
+            IntSelect(a, b, c) => IntSelect(at(*a), at(*b), at(*c)),
             Guarded(guards, body) => Guarded(guards.iter().map(|(c, yes)| (at(*c), *yes)).collect(), Box::new(map_registers(at, body))),
             other => other.clone(),
         }
@@ -498,7 +507,7 @@ pub mod region {
 
     pub fn has_loop(instruction: &Instruction) -> bool {
         match instruction {
-            Instruction::Loop_begin(_) | Instruction::Loop_carry(..) | Instruction::Loop_end(..) | Instruction::Loop_result(..) => true,
+            Instruction::LoopBegin(_) | Instruction::LoopCarry(..) | Instruction::LoopEnd(..) | Instruction::LoopResult(..) => true,
             Instruction::Guarded(_, body) => has_loop(body),
             _ => false,
         }
@@ -506,7 +515,7 @@ pub mod region {
 
     pub fn array_handle(instruction: &Instruction) -> bool {
         match instruction {
-            Instruction::Array_prepare(..) => true,
+            Instruction::ArrayPrepare(..) => true,
             Instruction::Guarded(_, body) => array_handle(body),
             _ => false,
         }
@@ -606,14 +615,14 @@ pub mod region {
     fn dependent_of(code: &[Instruction]) -> Vec<bool> {
         fn accumulator(i: &Instruction) -> bool {
             match i {
-                Instruction::Accumulator(_) | Instruction::Int_accumulator => true,
+                Instruction::Accumulator(_) | Instruction::IntAccumulator => true,
                 Instruction::Guarded(_, body) => accumulator(body),
                 _ => false,
             }
         }
         fn finish(i: &Instruction, id: usize, dependent: &mut [bool]) {
             match i {
-                Instruction::Loop_end(loop_, _, _) => {
+                Instruction::LoopEnd(loop_, _, _) => {
                     let loop_ = *loop_ as usize;
                     let mut carried = dependent[loop_];
                     for slot in loop_ + 1..=id { carried = carried || dependent[slot]; }
@@ -643,7 +652,7 @@ pub mod region {
         let mut valid = true;
         let inside = |outer: &[i64], inner: &[i64]| outer.iter().all(|s| inner.contains(s));
         let header = |id: i64| -> Option<&Loop> {
-            if id < 0 || id >= n as i64 { None } else if let Instruction::Loop_begin(l) = Instruction::unguarded(&code[id as usize]) { Some(l) } else { None }
+            if id < 0 || id >= n as i64 { None } else if let Instruction::LoopBegin(l) = Instruction::unguarded(&code[id as usize]) { Some(l) } else { None }
         };
         let scalar = |id: i64, ty: &Ty| -> bool {
             if id < 0 || id >= n as i64 { return false; }
@@ -661,14 +670,14 @@ pub mod region {
             let reads = operands(instruction);
             if reads.iter().any(|id| *id < 0 || *id >= slot as i64) {
                 valid = false;
-            } else if !matches!(Instruction::unguarded(instruction), Instruction::Loop_result(..))
+            } else if !matches!(Instruction::unguarded(instruction), Instruction::LoopResult(..))
                 && reads.iter().any(|id| !inside(&scopes[*id as usize], &active))
             {
                 valid = false;
             }
             let slot_i = slot as i64;
             match Instruction::unguarded(instruction) {
-                Instruction::Loop_begin(loop_) => {
+                Instruction::LoopBegin(loop_) => {
                     if loop_.finish <= slot_i + loop_.initial.len() as i64
                         || loop_.finish >= n as i64
                         || loop_.initial.is_empty()
@@ -680,12 +689,12 @@ pub mod region {
                         valid = false;
                     } else {
                         match Instruction::unguarded(&code[loop_.finish as usize]) {
-                            Instruction::Loop_end(owner, values, _) if *owner == slot_i && values.len() == loop_.initial.len() => {}
+                            Instruction::LoopEnd(owner, values, _) if *owner == slot_i && values.len() == loop_.initial.len() => {}
                             _ => valid = false,
                         }
                         for (component, initial) in loop_.initial.iter().enumerate() {
                             match Instruction::unguarded(&code[slot + 1 + component]) {
-                                Instruction::Loop_carry(owner, index, ty) if *owner == slot_i && *index == component as i64 && scalar(*initial, ty) => {}
+                                Instruction::LoopCarry(owner, index, ty) if *owner == slot_i && *index == component as i64 && scalar(*initial, ty) => {}
                                 _ => valid = false,
                             }
                         }
@@ -693,7 +702,7 @@ pub mod region {
                     active.push(slot_i);
                     scopes[slot] = active.clone();
                 }
-                Instruction::Loop_carry(loop_, component, ty) => {
+                Instruction::LoopCarry(loop_, component, ty) => {
                     let ok = match (active.last(), header(*loop_)) {
                         (Some(owner), Some(control)) => {
                             owner == loop_ && *component >= 0
@@ -706,7 +715,7 @@ pub mod region {
                     };
                     if !ok { valid = false; }
                 }
-                Instruction::Loop_end(loop_, values, stop) => {
+                Instruction::LoopEnd(loop_, values, stop) => {
                     let ok = match (active.last(), header(*loop_)) {
                         (Some(owner), Some(control)) => {
                             owner == loop_ && control.finish == slot_i
@@ -720,7 +729,7 @@ pub mod region {
                     if ok {
                         for (component, value) in values.iter().enumerate() {
                             match Instruction::unguarded(&code[(*loop_ as usize) + 1 + component]) {
-                                Instruction::Loop_carry(_, _, ty) if scalar(*value, ty) => {}
+                                Instruction::LoopCarry(_, _, ty) if scalar(*value, ty) => {}
                                 _ => valid = false,
                             }
                         }
@@ -731,7 +740,7 @@ pub mod region {
                         valid = false;
                     }
                 }
-                Instruction::Loop_result(loop_, component, ty) => {
+                Instruction::LoopResult(loop_, component, ty) => {
                     let ok = match header(*loop_) {
                         Some(control) => {
                             *loop_ < slot_i && closed[*loop_ as usize] && *component >= 0
@@ -739,7 +748,7 @@ pub mod region {
                                 && *component < control.initial.len() as i64
                                 && inside(&scopes[*loop_ as usize][..scopes[*loop_ as usize].len().saturating_sub(1)], &active)
                                 && Instruction::guarded(instruction).0 == Instruction::guarded(&code[*loop_ as usize]).0
-                                && matches!(Instruction::unguarded(&code[(loop_ + 1 + component) as usize]), Instruction::Loop_carry(_, _, stored) if stored == ty)
+                                && matches!(Instruction::unguarded(&code[(loop_ + 1 + component) as usize]), Instruction::LoopCarry(_, _, stored) if stored == ty)
                         }
                         None => false,
                     };
@@ -751,7 +760,7 @@ pub mod region {
         valid && active.is_empty()
             && outputs.iter().all(|o| o.iter().all(|id| {
                 *id >= 0 && *id < n as i64 && scopes[*id as usize].is_empty()
-                    && !matches!(Instruction::unguarded(&code[*id as usize]), Instruction::Loop_begin(_) | Instruction::Loop_carry(..) | Instruction::Loop_end(..))
+                    && !matches!(Instruction::unguarded(&code[*id as usize]), Instruction::LoopBegin(_) | Instruction::LoopCarry(..) | Instruction::LoopEnd(..))
             }))
     }
 
@@ -782,8 +791,8 @@ pub mod region {
         let mut operands_ok = true;
         let mut controls = false;
         let ncode = r.code.len() as i64;
-        let array_handle_id = |id: i64| id >= 0 && id < ncode && matches!(Instruction::unguarded(&r.code[id as usize]), Instruction::Array_prepare(..));
-        let table_type = |id: i64| match Instruction::unguarded(&r.code[id as usize]) { Instruction::Array_prepare(_, ty) => ty.clone(), _ => Ty::Any };
+        let array_handle_id = |id: i64| id >= 0 && id < ncode && matches!(Instruction::unguarded(&r.code[id as usize]), Instruction::ArrayPrepare(..));
+        let table_type = |id: i64| match Instruction::unguarded(&r.code[id as usize]) { Instruction::ArrayPrepare(_, ty) => ty.clone(), _ => Ty::Any };
         let text = |id: i64| id >= 0 && id < ncode && text_register(&r.code[id as usize]);
         let prepared_for = |selected: &[(i64, bool)], array: i64| Instruction::guarded(&r.code[array as usize]).0.iter().all(|g| selected.contains(g));
         fn check(
@@ -796,7 +805,7 @@ pub mod region {
             let ops = operands(instruction);
             if !ops.iter().all(|id| ok(*id)) { *operands_ok = false; }
             match instruction {
-                Instruction::Gather(..) | Instruction::Int_gather(..) | Instruction::Text_gather(..) | Instruction::Guarded(..) => {}
+                Instruction::Gather(..) | Instruction::IntGather(..) | Instruction::TextGather(..) | Instruction::Guarded(..) => {}
                 // a store names its buffer by its table
                 Instruction::Stage(Stage::Store, registers) => {
                     if registers[1..].iter().any(|x| array_handle_id(*x))
@@ -808,12 +817,12 @@ pub mod region {
                 _ => { if ops.iter().any(|x| array_handle_id(*x)) { *operands_ok = false; } }
             }
             match instruction {
-                Instruction::Text_select(..) | Instruction::Guarded(..) | Instruction::Loop_begin(_) | Instruction::Loop_end(..) | Instruction::Loop_result(..) => {}
+                Instruction::TextSelect(..) | Instruction::Guarded(..) | Instruction::LoopBegin(_) | Instruction::LoopEnd(..) | Instruction::LoopResult(..) => {}
                 _ => { if ops.iter().any(|x| text(*x)) { *operands_ok = false; } }
             }
             let nuniforms = r.uniforms.len() as i64;
             match instruction {
-                Instruction::Array_prepare(input, ty) => {
+                Instruction::ArrayPrepare(input, ty) => {
                     if *input < 0 || *input >= nuniforms
                         || !matches!(ty, Ty::Array(e) if matches!(**e, Ty::Int | Ty::Text | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4))
                     {
@@ -835,24 +844,24 @@ pub mod region {
                         *operands_ok = false;
                     }
                 }
-                Instruction::Int_gather(array, index) => {
+                Instruction::IntGather(array, index) => {
                     if !(ok(*array) && ok(*index) && array_handle_id(*array)) || !integer_register(&r.code[*index as usize]) {
                         *operands_ok = false;
                     } else if !prepared_for(selected, *array) || table_type(*array) != Ty::Array(Box::new(Ty::Int)) {
                         *operands_ok = false;
                     }
                 }
-                Instruction::Text_gather(array, index) => {
+                Instruction::TextGather(array, index) => {
                     if !(ok(*array) && ok(*index) && array_handle_id(*array)) || !integer_register(&r.code[*index as usize]) {
                         *operands_ok = false;
                     } else if !prepared_for(selected, *array) || table_type(*array) != Ty::Array(Box::new(Ty::Text)) {
                         *operands_ok = false;
                     }
                 }
-                Instruction::Text_select(condition, yes, no) => {
+                Instruction::TextSelect(condition, yes, no) => {
                     if array_handle_id(*condition) || text(*condition) || !(text(*yes) && text(*no)) { *operands_ok = false; }
                 }
-                Instruction::Text_input(input) => {
+                Instruction::TextInput(input) => {
                     if *input < 0 || *input >= r.sources.len() as i64 || *input >= r.widths.len() as i64
                         || r.widths[*input as usize] != 1
                         || *r.sources[*input as usize].1.ty() != Ty::Array(Box::new(Ty::Text))
@@ -860,7 +869,7 @@ pub mod region {
                         *operands_ok = false;
                     }
                 }
-                Instruction::Text_uniform(input) => {
+                Instruction::TextUniform(input) => {
                     if *input < 0 || *input >= nuniforms { *operands_ok = false; }
                     else if uniform_ty(&r.uniforms[*input as usize]) != Ty::Text { *operands_ok = false; }
                 }
@@ -873,7 +882,7 @@ pub mod region {
                         *operands_ok = false;
                     }
                 }
-                Instruction::Int_input(input) => {
+                Instruction::IntInput(input) => {
                     if *input < 0 || *input >= r.sources.len() as i64 || *input >= r.widths.len() as i64
                         || r.widths[*input as usize] != 1
                         || *r.sources[*input as usize].1.ty() != Ty::Array(Box::new(Ty::Int))
@@ -885,12 +894,12 @@ pub mod region {
                     if *input < 0 || *input >= nuniforms || *component < 0 || *component >= 4 { *operands_ok = false; }
                     else if uniform_ty(&r.uniforms[*input as usize]) == Ty::Text { *operands_ok = false; }
                 }
-                Instruction::Int_uniform(input) => {
+                Instruction::IntUniform(input) => {
                     if *input < 0 || *input >= nuniforms { *operands_ok = false; }
                     else if uniform_ty(&r.uniforms[*input as usize]) != Ty::Int { *operands_ok = false; }
                 }
                 Instruction::Accumulator(component) => { if *component < 0 || *component >= 4 { *operands_ok = false; } }
-                Instruction::Loop_begin(_) | Instruction::Loop_carry(..) | Instruction::Loop_end(..) | Instruction::Loop_result(..) => *controls = true,
+                Instruction::LoopBegin(_) | Instruction::LoopCarry(..) | Instruction::LoopEnd(..) | Instruction::LoopResult(..) => *controls = true,
                 Instruction::Guarded(guards, body) => {
                     if guards.iter().any(|(id, _)| array_handle_id(*id) || text(*id)) { *operands_ok = false; }
                     let mut selected2 = selected.to_vec();
@@ -1046,9 +1055,9 @@ pub fn reads(s: &Statement) -> Vec<i64> {
     fn pairs(args: &[(Symbol, i64)]) -> Vec<i64> { args.iter().map(|(_, n)| *n).collect() }
     fn expr(e: &Expr) -> Vec<i64> {
         match e {
-            Expr::Constant(_) | Expr::Call_index(_) | Expr::Frame(_) | Expr::Source(_) => Vec::new(),
+            Expr::Constant(_) | Expr::CallIndex(_) | Expr::Frame(_) | Expr::Source(_) => Vec::new(),
             Expr::Local(n) | Expr::Field(n, _) => vec![*n],
-            Expr::Prim(_, args) | Expr::Host_source { args, .. } | Expr::Source_descriptor { args, .. } => pairs(args),
+            Expr::Prim(_, args) | Expr::HostSource { args, .. } | Expr::SourceDescriptor { args, .. } => pairs(args),
             Expr::Vec(ns) | Expr::Items(ns) => ns.clone(),
             Expr::Fields(xs) => pairs(xs),
         }
@@ -1059,7 +1068,7 @@ pub fn reads(s: &Statement) -> Vec<i64> {
             Draw::Point { at, ink } => vec![*at, *ink],
             Draw::Mark { args, .. } | Draw::Batch { args, .. } | Draw::Path { args, .. } => pairs(args),
             Draw::Points { positions, ink } => vec![*positions, *ink],
-            Draw::Text_run { at, text, ink, size } => vec![*at, *text, *ink, *size],
+            Draw::TextRun { at, text, ink, size } => vec![*at, *text, *ink, *size],
             Draw::Image { at, scale, angle, .. } => vec![*at, *scale, *angle],
             Draw::Pop => Vec::new(),
         }
@@ -1067,9 +1076,9 @@ pub fn reads(s: &Statement) -> Vec<i64> {
     match &s.node {
         StatementNode::Draw(d) => draw(d),
         StatementNode::Assign(_, e) => expr(e),
-        StatementNode::Reset_call(_) | StatementNode::State_peek { .. } => Vec::new(),
+        StatementNode::ResetCall(_) | StatementNode::StatePeek { .. } => Vec::new(),
         StatementNode::Protect { value, mapped, .. } => vec![*value, *mapped],
-        StatementNode::Diagnose_rows { rows, diagnostic, .. } => vec![*rows, *diagnostic],
+        StatementNode::DiagnoseRows { rows, diagnostic, .. } => vec![*rows, *diagnostic],
         StatementNode::If { condition, .. } => vec![*condition],
         StatementNode::Iterate { sequence, .. } => vec![*sequence],
         StatementNode::Counted { first, last, stop, .. } => {
@@ -1078,8 +1087,8 @@ pub fn reads(s: &Statement) -> Vec<i64> {
             r
         }
         StatementNode::Store { index, value, .. } => vec![*index, *value],
-        StatementNode::State_read { initial, .. } => vec![*initial],
-        StatementNode::State_write { value, .. } => vec![*value],
+        StatementNode::StateRead { initial, .. } => vec![*initial],
+        StatementNode::StateWrite { value, .. } => vec![*value],
         StatementNode::Invoke { args, .. } => args.clone(),
     }
 }
@@ -1088,15 +1097,15 @@ pub fn reads(s: &Statement) -> Vec<i64> {
 pub fn writes(s: &Statement) -> Vec<i64> {
     match &s.node {
         StatementNode::Assign(n, _) => vec![*n],
-        StatementNode::Reset_call(_) | StatementNode::Draw(_) | StatementNode::State_write { .. } => Vec::new(),
+        StatementNode::ResetCall(_) | StatementNode::Draw(_) | StatementNode::StateWrite { .. } => Vec::new(),
         StatementNode::Protect { failure, result, .. } => vec![*failure, *result],
-        StatementNode::Diagnose_rows { index, result, .. } => vec![*index, *result],
+        StatementNode::DiagnoseRows { index, result, .. } => vec![*index, *result],
         StatementNode::If { .. } => Vec::new(),
         StatementNode::Iterate { index, item, .. } => vec![*index, *item],
         StatementNode::Counted { count, index, item, .. } => vec![*count, *index, *item],
         StatementNode::Store { sequence, .. } => vec![*sequence],
-        StatementNode::State_read { result, .. } => vec![*result],
-        StatementNode::State_peek { found, value, .. } => vec![*found, *value],
+        StatementNode::StateRead { result, .. } => vec![*result],
+        StatementNode::StatePeek { found, value, .. } => vec![*found, *value],
         StatementNode::Invoke { result, .. } => vec![*result],
     }
 }
@@ -1106,11 +1115,11 @@ pub fn writes(s: &Statement) -> Vec<i64> {
 pub fn children(s: &Statement) -> Vec<&Statement> {
     match &s.node {
         StatementNode::Protect { body, handler, .. } => body.iter().chain(handler.iter()).collect(),
-        StatementNode::Diagnose_rows { handler, .. } => handler.iter().collect(),
+        StatementNode::DiagnoseRows { handler, .. } => handler.iter().collect(),
         StatementNode::If { yes, no, .. } => yes.iter().chain(no.iter()).collect(),
         StatementNode::Iterate { body, .. } => body.iter().collect(),
         StatementNode::Counted { init, body, .. } => init.iter().chain(body.iter()).collect(),
-        StatementNode::State_read { init, .. } => init.iter().collect(),
+        StatementNode::StateRead { init, .. } => init.iter().collect(),
         _ => Vec::new(),
     }
 }
@@ -1127,8 +1136,8 @@ pub fn iter(f: &mut dyn FnMut(&Statement), statements: &[Statement]) {
 fn frame_name(f: FrameField) -> &'static str {
     match f {
         FrameField::Time => "t", FrameField::Dt => "dt", FrameField::Index => "frame", FrameField::Tick => "tick",
-        FrameField::Width => "width", FrameField::Height => "height", FrameField::Pointer_x => "pointer/x",
-        FrameField::Pointer_y => "pointer/y", FrameField::Input => "input",
+        FrameField::Width => "width", FrameField::Height => "height", FrameField::PointerX => "pointer/x",
+        FrameField::PointerY => "pointer/y", FrameField::Input => "input",
     }
 }
 
@@ -1145,10 +1154,10 @@ pub fn literal_of_value(value: &Value) -> Option<Literal> {
             Value::Vec4(x, y, z, w) => Literal::Vector(vec![*x, *y, *z, *w]),
             Value::List(xs) if xs.len() <= 4096 => Literal::List(xs.iter().map(convert).collect::<Option<Vec<_>>>()?),
             Value::Record(xs) => Literal::Record(xs.iter().map(|(n, v)| convert(v).map(|l| (n.clone(), l))).collect::<Option<Vec<_>>>()?),
-            Value::Int_array(data) => Literal::Int_array(data.clone()),
-            Value::Text_array(data) => Literal::Text_array(data.clone()),
+            Value::IntArray(data) => Literal::IntArray(data.clone()),
+            Value::TextArray(data) => Literal::TextArray(data.clone()),
             Value::Floats(width @ 1..=4, data) => Literal::Array { width: *width as i64, data: data.clone() },
-            Value::No_geo => Literal::Empty_geometry,
+            Value::NoGeo => Literal::EmptyGeometry,
             _ => return None,
         })
     }
@@ -1170,10 +1179,10 @@ pub fn value_of_literal(literal: &Literal) -> Value {
         },
         Literal::List(xs) => Value::List(Arc::new(xs.iter().map(value_of_literal).collect())),
         Literal::Record(xs) => Value::Record(xs.iter().map(|(n, v)| (n.clone(), value_of_literal(v))).collect::<Vec<_>>().into()),
-        Literal::Int_array(data) => Value::Int_array(data.clone()),
-        Literal::Text_array(data) => Value::Text_array(data.clone()),
+        Literal::IntArray(data) => Value::IntArray(data.clone()),
+        Literal::TextArray(data) => Value::TextArray(data.clone()),
         Literal::Array { width: width @ 1..=4, data } => Value::Floats(*width as usize, data.clone()),
-        Literal::Empty_geometry => Value::No_geo,
+        Literal::EmptyGeometry => Value::NoGeo,
         Literal::Array { .. } => panic!("Core.value_of_literal: width"),
     }
 }
@@ -1225,14 +1234,14 @@ pub fn pp(p: &Program) -> String {
                 separated(o, xs.len(), &|o, i| { o.push_str(&quoted(xs[i].0.as_bytes())); o.push(':'); literal(o, &xs[i].1); });
                 o.push('}');
             }
-            Literal::Int_array(data) => { o.push_str("array:int["); separated(o, data.len(), &|o, i| o.push_str(&data[i].to_string())); o.push(']'); }
-            Literal::Text_array(data) => { o.push_str("array:text["); separated(o, data.len(), &|o, i| o.push_str(&quoted(&data[i]))); o.push(']'); }
+            Literal::IntArray(data) => { o.push_str("array:int["); separated(o, data.len(), &|o, i| o.push_str(&data[i].to_string())); o.push(']'); }
+            Literal::TextArray(data) => { o.push_str("array:text["); separated(o, data.len(), &|o, i| o.push_str(&quoted(&data[i]))); o.push(']'); }
             Literal::Array { width, data } => {
                 o.push_str(&format!("array{}[", width));
                 separated(o, data.len(), &|o, i| o.push_str(&lisp_float(data[i])));
                 o.push(']');
             }
-            Literal::Empty_geometry => o.push_str("nil"),
+            Literal::EmptyGeometry => o.push_str("nil"),
         }
     }
     fn expression(o: &mut String, e: &Expr) {
@@ -1240,14 +1249,14 @@ pub fn pp(p: &Program) -> String {
             Expr::Constant(n) => o.push_str(&format!("${}", n)),
             Expr::Local(n) => local(o, *n),
             Expr::Frame(f) => o.push_str(&format!("frame.{}", frame_name(*f))),
-            Expr::Call_index(n) => o.push_str(&format!("call[{}]++", n)),
+            Expr::CallIndex(n) => o.push_str(&format!("call[{}]++", n)),
             Expr::Source(value) => o.push_str(&format!("source<{}>", ty::to_string(&value::ty_of(value)))),
-            Expr::Host_source { name, ty, args } => {
+            Expr::HostSource { name, ty, args } => {
                 o.push_str(&format!("host_source<{} {}>(", ty::to_string(ty), quoted(name.as_bytes())));
                 named_locals(o, args);
                 o.push(')');
             }
-            Expr::Source_descriptor { name, ty, args } => {
+            Expr::SourceDescriptor { name, ty, args } => {
                 o.push_str(&format!("source_descriptor<{} {}>(", ty::to_string(ty), quoted(name.as_bytes())));
                 named_locals(o, args);
                 o.push(')');
@@ -1256,10 +1265,10 @@ pub fn pp(p: &Program) -> String {
                 o.push_str(primitive_name(op));
                 match op {
                     Primitive::Coerce(ty) => o.push_str(&format!("<{}>", ty::to_string(ty))),
-                    Primitive::Color_byte(ByteMode::Clamped) => o.push_str("<clamped>"),
-                    Primitive::Color_byte(ByteMode::Unclamped) => o.push_str("<unclamped>"),
+                    Primitive::ColorByte(ByteMode::Clamped) => o.push_str("<clamped>"),
+                    Primitive::ColorByte(ByteMode::Unclamped) => o.push_str("<unclamped>"),
                     Primitive::Fail(code, message) => o.push_str(&format!("<{} {}>", quoted(code.as_bytes()), quoted(message.as_bytes()))),
-                    Primitive::Fail_diagnostic(d) => o.push_str(&format!(
+                    Primitive::FailDiagnostic(d) => o.push_str(&format!(
                         "<{} {} cause={}>", quoted(d.code.as_bytes()), quoted(d.message.as_bytes()),
                         quoted(d.cause.as_deref().unwrap_or_default()))),
                     _ => {}
@@ -1283,15 +1292,15 @@ pub fn pp(p: &Program) -> String {
             Draw::Point { at, ink } => { o.push_str("draw/point at="); local(o, *at); o.push_str(" ink="); local(o, *ink); }
             Draw::Mark { mark, args } | Draw::Batch { mark, args } => {
                 let plural = if matches!(d, Draw::Batch { .. }) { "s" } else { "" };
-                o.push_str(&format!("draw/{}{}", match mark { Mark::Rect => "rect", Mark::Circle => "circle", Mark::Line => "line" }, plural));
+                o.push_str(&format!("draw/{}{}", mark.name(), plural));
                 args_line(o, args);
             }
             Draw::Points { positions, ink } => { o.push_str("draw/points positions="); local(o, *positions); o.push_str(" ink="); local(o, *ink); }
             Draw::Path { path, args } => {
-                o.push_str(&format!("draw/{}", match path { PathKind::Rounded_rect => "rounded_rect", PathKind::Polygon => "polygon", PathKind::Polyline => "polyline" }));
+                o.push_str(&format!("draw/{}", path.name()));
                 args_line(o, args);
             }
-            Draw::Text_run { at, text, ink, size } => {
+            Draw::TextRun { at, text, ink, size } => {
                 o.push_str("draw/text at="); local(o, *at); o.push_str(" text="); local(o, *text);
                 o.push_str(" ink="); local(o, *ink); o.push_str(" size="); local(o, *size);
             }
@@ -1300,7 +1309,7 @@ pub fn pp(p: &Program) -> String {
                 local(o, *at); o.push_str(" scale="); local(o, *scale); o.push_str(" angle="); local(o, *angle);
             }
             Draw::Push(t, n) => {
-                o.push_str(&format!("push {} ", match t { Transform::Translate => "translate", Transform::Rotate => "rotate", Transform::Scale => "scale" }));
+                o.push_str(&format!("push {} ", t.name()));
                 local(o, *n);
             }
             Draw::Pop => o.push_str("pop"),
@@ -1317,7 +1326,7 @@ pub fn pp(p: &Program) -> String {
         o.push_str(" owner=");
         path(o, &s.owner);
         o.push_str(&format!(" instance={} iter=[", s.instance));
-        separated(o, s.iter.len(), &|o, i| match &s.iter[i] { Iteration::Static_index(n) => o.push_str(&n.to_string()), Iteration::Local_index(n) => local(o, *n) });
+        separated(o, s.iter.len(), &|o, i| match &s.iter[i] { Iteration::StaticIndex(n) => o.push_str(&n.to_string()), Iteration::LocalIndex(n) => local(o, *n) });
         o.push(']');
         if !s.prefix.is_empty() { o.push_str(" prefix="); path(o, &s.prefix); }
         if let Some(span) = &s.span { o.push_str(&format!(" span={}..{}", span.start, span.finish)); }
@@ -1332,13 +1341,13 @@ pub fn pp(p: &Program) -> String {
             };
             match &s.node {
                 StatementNode::Assign(n, e) => { local(o, *n); o.push_str(" = "); expression(o, e); }
-                StatementNode::Reset_call(n) => o.push_str(&format!("call[{}] <- 0", n)),
+                StatementNode::ResetCall(n) => o.push_str(&format!("call[{}] <- 0", n)),
                 StatementNode::Protect { body, value, failure, handler, mapped, result } => {
                     local(o, *result); o.push_str(" = protect "); nested(o, "body", body);
                     o.push_str(" value="); local(o, *value); o.push_str(" error="); local(o, *failure);
                     o.push(' '); nested(o, "map", handler); o.push_str(" value="); local(o, *mapped);
                 }
-                StatementNode::Diagnose_rows { rows, policy, index, handler, diagnostic, result } => {
+                StatementNode::DiagnoseRows { rows, policy, index, handler, diagnostic, result } => {
                     local(o, *result); o.push_str(" = diagnose_rows "); local(o, *rows);
                     o.push_str(&format!(" policy={} index=", match policy { DiagnosticPolicy::First => "first", DiagnosticPolicy::RangeLast => "range-last" }));
                     local(o, *index); o.push(' '); nested(o, "map", handler); o.push_str(" diagnostic="); local(o, *diagnostic);
@@ -1360,14 +1369,14 @@ pub fn pp(p: &Program) -> String {
                 StatementNode::Store { sequence, index, value } => {
                     local(o, *sequence); o.push('['); local(o, *index); o.push_str("] <- "); local(o, *value);
                 }
-                StatementNode::State_read { slot, result, init, initial } => {
+                StatementNode::StateRead { slot, result, init, initial } => {
                     local(o, *result); o.push_str(&format!(" = state[{}] ", slot)); nested(o, "init", init);
                     o.push_str(" value="); local(o, *initial);
                 }
-                StatementNode::State_peek { slot, found, value } => {
+                StatementNode::StatePeek { slot, found, value } => {
                     local(o, *found); o.push_str(&format!(" = state[{}] pending ", slot)); local(o, *value);
                 }
-                StatementNode::State_write { slot, value } => { o.push_str(&format!("state[{}] <- ", slot)); local(o, *value); }
+                StatementNode::StateWrite { slot, value } => { o.push_str(&format!("state[{}] <- ", slot)); local(o, *value); }
                 StatementNode::Invoke { region, args, result } => {
                     local(o, *result); o.push_str(&format!(" = region[{}](", region));
                     separated(o, args.len(), &|o, i| local(o, args[i])); o.push(')');
@@ -1397,29 +1406,29 @@ pub fn pp(p: &Program) -> String {
                     else { format!(" lacunarity={} gain={}", fractal(lacunarity), fractal(gain)) };
                 o.push_str(&format!("noise3(r{} r{} r{} seed={} octaves={}{})", x, y, z, seed, oct, extra));
             }
-            I::Rand_at(seed, index) => o.push_str(&format!("rand_at(r{} r{})", seed, index)),
+            I::RandAt(seed, index) => o.push_str(&format!("rand_at(r{} r{})", seed, index)),
             I::Fma(a, b, c) => o.push_str(&format!("fma(r{} r{} r{})", a, b, c)),
-            I::Checked_mul(p, a, b) => o.push_str(&format!("mul_checked.{}(r{} r{})", proj(p), a, b)),
-            I::Array_prepare(i, ty) => o.push_str(&format!("array_prepare u{}:{}", i, ty::to_string(ty))),
+            I::CheckedMul(p, a, b) => o.push_str(&format!("mul_checked.{}(r{} r{})", proj(p), a, b)),
+            I::ArrayPrepare(i, ty) => o.push_str(&format!("array_prepare u{}:{}", i, ty::to_string(ty))),
             I::Gather(a, i, w, c) => o.push_str(&format!("gather(r{} r{} width={} component={})", a, i, w, c)),
-            I::Int_gather(a, i) => o.push_str(&format!("int_gather(r{} r{})", a, i)),
-            I::Text_const(s) => o.push_str(&format!("text_const {}", quoted(s))),
-            I::Text_input(i) => o.push_str(&format!("text_input in{}", i)),
-            I::Text_uniform(i) => o.push_str(&format!("text_uniform u{}", i)),
-            I::Text_gather(a, i) => o.push_str(&format!("text_gather(r{} r{})", a, i)),
-            I::Text_select(c, a, b) => o.push_str(&format!("text_select(r{} r{} r{})", c, a, b)),
+            I::IntGather(a, i) => o.push_str(&format!("int_gather(r{} r{})", a, i)),
+            I::TextConst(s) => o.push_str(&format!("text_const {}", quoted(s))),
+            I::TextInput(i) => o.push_str(&format!("text_input in{}", i)),
+            I::TextUniform(i) => o.push_str(&format!("text_uniform u{}", i)),
+            I::TextGather(a, i) => o.push_str(&format!("text_gather(r{} r{})", a, i)),
+            I::TextSelect(c, a, b) => o.push_str(&format!("text_select(r{} r{} r{})", c, a, b)),
             I::Trace(field, r) => o.push_str(&format!("trace.{}({})", field, regs(r))),
             I::Stage(_, r) => o.push_str(&format!("stage({})", regs(r))),
-            I::Checked_fma(p, a, b, c) => o.push_str(&format!("fma_checked.{}(r{} r{} r{})", proj(p), a, b, c)),
-            I::Select(c, a, b) | I::Int_select(c, a, b) => o.push_str(&format!("select(r{} r{} r{})", c, a, b)),
-            I::Int_const(n) => o.push_str(&format!("int:{}", n)),
-            I::Int_input(i) => o.push_str(&format!("input:int[{}]", i)),
-            I::Int_uniform(i) => o.push_str(&format!("uniform:int[{}]", i)),
-            I::Int_accumulator => o.push_str("accumulator:int"),
-            I::Int_frame(name) => o.push_str(&format!("frame:int[{}]", name)),
-            I::Int_binary(op, a, b) => o.push_str(&format!("{}(r{} r{})", packed_ops::integer_name(*op), a, b)),
-            I::Int_compare(op, a, b) => o.push_str(&format!("{}(r{} r{})", packed_ops::comparison_name(*op), a, b)),
-            I::Int_abs(a) => o.push_str(&format!("int:abs(r{})", a)),
+            I::CheckedFma(p, a, b, c) => o.push_str(&format!("fma_checked.{}(r{} r{} r{})", proj(p), a, b, c)),
+            I::Select(c, a, b) | I::IntSelect(c, a, b) => o.push_str(&format!("select(r{} r{} r{})", c, a, b)),
+            I::IntConst(n) => o.push_str(&format!("int:{}", n)),
+            I::IntInput(i) => o.push_str(&format!("input:int[{}]", i)),
+            I::IntUniform(i) => o.push_str(&format!("uniform:int[{}]", i)),
+            I::IntAccumulator => o.push_str("accumulator:int"),
+            I::IntFrame(name) => o.push_str(&format!("frame:int[{}]", name)),
+            I::IntBinary(op, a, b) => o.push_str(&format!("{}(r{} r{})", packed_ops::integer_name(*op), a, b)),
+            I::IntCompare(op, a, b) => o.push_str(&format!("{}(r{} r{})", packed_ops::comparison_name(*op), a, b)),
+            I::IntAbs(a) => o.push_str(&format!("int:abs(r{})", a)),
             I::Convert(op, a) => {
                 let name = match op {
                     region::Conversion::ToFloat => "float".to_owned(),
@@ -1443,12 +1452,12 @@ pub fn pp(p: &Program) -> String {
                 if let Some(cause) = cause { o.push_str(&format!(" cause={}", quoted(cause))); }
                 o.push('>');
             }
-            I::Loop_begin(l) => o.push_str(&format!("loop r{}..r{} end={}", l.first, l.last, l.finish)),
-            I::Loop_carry(loop_, component, ty) => o.push_str(&format!("carry r{}.{}:{}", loop_, component, ty::to_string(ty))),
-            I::Loop_end(loop_, _, stop) => {
+            I::LoopBegin(l) => o.push_str(&format!("loop r{}..r{} end={}", l.first, l.last, l.finish)),
+            I::LoopCarry(loop_, component, ty) => o.push_str(&format!("carry r{}.{}:{}", loop_, component, ty::to_string(ty))),
+            I::LoopEnd(loop_, _, stop) => {
                 o.push_str(&format!("next r{}{}", loop_, stop.map(|s| format!(" until r{}", s)).unwrap_or_default()));
             }
-            I::Loop_result(loop_, component, ty) => o.push_str(&format!("result r{}.{}:{}", loop_, component, ty::to_string(ty))),
+            I::LoopResult(loop_, component, ty) => o.push_str(&format!("result r{}.{}:{}", loop_, component, ty::to_string(ty))),
         }
     }
     o.push_str("core\n");
@@ -1508,7 +1517,7 @@ mod tests {
             owner: vec!["g".into()],
             instance: 2,
             prefix: Vec::new(),
-            iter: vec![Iteration::Static_index(3)],
+            iter: vec![Iteration::StaticIndex(3)],
             span: Some(Span { start: 10, finish: 20 }),
         }
     }
@@ -1565,12 +1574,12 @@ mod tests {
             vec![Ty::List(Box::new(Ty::Float)), Ty::Int, Ty::Float, Ty::Float],
             vec![
                 s(0, StatementNode::Assign(0, Expr::Constant(0))),
-                s(1, StatementNode::State_read { slot: 0, result: 3, init: vec![s(2, StatementNode::Assign(3, Expr::Constant(1)))], initial: 3 }),
+                s(1, StatementNode::StateRead { slot: 0, result: 3, init: vec![s(2, StatementNode::Assign(3, Expr::Constant(1)))], initial: 3 }),
                 s(3, StatementNode::Iterate {
                     sequence: 0, index: 1, item: 2, limit: 4096,
                     body: vec![s(4, StatementNode::Assign(3, Expr::Prim(Primitive::Numeric(packed_ops::Binary::Add), vec![("a".into(), 3), ("b".into(), 2)])))],
                 }),
-                s(5, StatementNode::State_write { slot: 0, value: 3 }),
+                s(5, StatementNode::StateWrite { slot: 0, value: 3 }),
             ],
             vec![3],
         );

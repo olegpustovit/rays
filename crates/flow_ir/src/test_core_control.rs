@@ -89,7 +89,7 @@ fn dynamic_call_identity_and_statement_traversal() {
     let mut last_call = None;
     C::iter(
         &mut |s: &C::Statement| {
-            if let C::StatementNode::Assign(n, C::Expr::Call_index(_)) = &s.node { last_call = Some(*n); }
+            if let C::StatementNode::Assign(n, C::Expr::CallIndex(_)) = &s.node { last_call = Some(*n); }
         },
         &core.body,
     );
@@ -130,7 +130,7 @@ fn dynamic_call_identity_and_statement_traversal() {
             failure: 7,
             handler: vec![stmt(
                 105,
-                C::StatementNode::Diagnose_rows {
+                C::StatementNode::DiagnoseRows {
                     rows: 8,
                     policy: W::DiagnosticPolicy::First,
                     index: 9,

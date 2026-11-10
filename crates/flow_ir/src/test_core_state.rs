@@ -32,7 +32,7 @@ fn live(frame: i64) -> Frame {
     Frame {
         frame,
         tick: frame,
-        events: if frame % 2 == 1 { vec![Event::Key_pressed(Key::KeyChar('a')), Event::Key_pressed(Key::KeyChar('b'))] } else { vec![] },
+        events: if frame % 2 == 1 { vec![Event::KeyPressed(Key::KeyChar('a')), Event::KeyPressed(Key::KeyChar('b'))] } else { vec![] },
         ..input::at_time(frame as f64 * 0.25)
     }
 }

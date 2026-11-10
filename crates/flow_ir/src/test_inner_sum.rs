@@ -24,7 +24,7 @@ fn mapped(data: &str, bindings: &str, result: Ty, body: &str, indices: Vec<i64>)
     let ev = ok(e::r#static(&workspace, true, None));
     let (_, records) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
     match &records[0].1 {
-        Value::Fn(f) => ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result }, *f, &[Value::Int_array(Arc::new(indices))])),
+        Value::Fn(f) => ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result }, *f, &[Value::IntArray(Arc::new(indices))])),
         _ => panic!("expected a function"),
     }
 }

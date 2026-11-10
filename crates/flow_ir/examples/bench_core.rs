@@ -35,9 +35,9 @@ fn digest(v: &Result<Value, rays_diagnostic::Diagnostic>) -> u64 {
     let mut eat = |x: u64| h = (h ^ x).wrapping_mul(0x100_0000_01b3);
     match v {
         Ok(Value::Floats(1..=4, a)) => a.iter().for_each(|x| eat(x.to_bits())),
-        Ok(Value::Int_array(a)) => a.iter().for_each(|x| eat(*x as u64)),
+        Ok(Value::IntArray(a)) => a.iter().for_each(|x| eat(*x as u64)),
         Ok(Value::Float(x)) => eat(x.to_bits()),
-        Ok(Value::Text_array(a)) => a.iter().for_each(|row| row.iter().chain(&[0xff]).for_each(|b| eat(*b as u64))),
+        Ok(Value::TextArray(a)) => a.iter().for_each(|row| row.iter().chain(&[0xff]).for_each(|b| eat(*b as u64))),
         Ok(other) => format!("{other:?}").bytes().for_each(|b| eat(b as u64)),
         Err(d) => rays_diagnostic::to_string(d).bytes().for_each(|b| eat(b as u64)),
     }

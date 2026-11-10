@@ -129,7 +129,7 @@ fn same_carry_type(a: &Ty, b: &Ty) -> bool {
 pub fn finish_loops(finishes: &HashMap<i64, i64>, code: Vec<I>) -> Vec<I> {
     fn patch(instruction: I, finish: i64) -> I {
         match instruction {
-            I::Loop_begin(loop_) => I::Loop_begin(Loop { finish, ..loop_ }),
+            I::LoopBegin(loop_) => I::LoopBegin(Loop { finish, ..loop_ }),
             I::Guarded(guards, body) => I::Guarded(guards, Box::new(patch(*body, finish))),
             other => other,
         }
@@ -146,11 +146,11 @@ pub fn finish_loops(finishes: &HashMap<i64, i64>, code: Vec<I>) -> Vec<I> {
 
 fn integer_work(instruction: &I) -> bool {
     match instruction {
-        I::Int_const(_) => false,
-        I::Int_input(_) | I::Int_uniform(_) | I::Int_frame(_) | I::Int_accumulator | I::Int_binary(..) | I::Int_compare(..) | I::Int_abs(_)
-        | I::Convert(..) | I::Int_select(..) | I::Rand_at(..) | I::Trace(..) | I::Raise(..) | I::Array_prepare(..) | I::Gather(..)
-        | I::Int_gather(..) | I::Text_const(_) | I::Text_input(_) | I::Text_uniform(_) | I::Text_gather(..) | I::Text_select(..)
-        | I::Loop_begin(_) | I::Loop_carry(..) | I::Loop_end(..) | I::Loop_result(..) => true,
+        I::IntConst(_) => false,
+        I::IntInput(_) | I::IntUniform(_) | I::IntFrame(_) | I::IntAccumulator | I::IntBinary(..) | I::IntCompare(..) | I::IntAbs(_)
+        | I::Convert(..) | I::IntSelect(..) | I::RandAt(..) | I::Trace(..) | I::Raise(..) | I::ArrayPrepare(..) | I::Gather(..)
+        | I::IntGather(..) | I::TextConst(_) | I::TextInput(_) | I::TextUniform(_) | I::TextGather(..) | I::TextSelect(..)
+        | I::LoopBegin(_) | I::LoopCarry(..) | I::LoopEnd(..) | I::LoopResult(..) => true,
         I::Guarded(_, body) => integer_work(body),
         _ => false,
     }
@@ -296,7 +296,7 @@ pub fn count_of(residual: ResidualId, s: &Term) -> Option<i64> {
                 value = field_step(value, s.name(*name)).ok()?;
             }
             match value {
-                v @ (Value::Int_array(_) | Value::Text_array(_) | Value::Floats(1..=4, _)) => V::array_length(&v).ok().map(|n| n as i64),
+                v @ (Value::IntArray(_) | Value::TextArray(_) | Value::Floats(1..=4, _)) => V::array_length(&v).ok().map(|n| n as i64),
                 _ => None,
             }
         }
@@ -532,7 +532,7 @@ impl Lower {
     fn refuse(&self, code: &str, message: &str) -> Stop { refusal(&self.term, code, message) }
 
     fn emit(&mut self, instruction: I) -> Res<i64> {
-        let control = matches!(instruction, I::Loop_begin(_) | I::Loop_carry(..) | I::Loop_end(..));
+        let control = matches!(instruction, I::LoopBegin(_) | I::LoopCarry(..) | I::LoopEnd(..));
         let instruction = if self.guards.is_empty() { instruction } else { I::Guarded(self.guards.clone(), Box::new(instruction)) };
         // As in fusion, compare constant bits too: +0 and -0 remain distinct.
         // ponytail: the sharing key is the Debug text of (scope, key); a typed hash only if emit shows hot.
@@ -556,9 +556,9 @@ impl Lower {
         }
         self.bottom_registers.push(bottom(&instruction));
         match &instruction {
-            I::Array_prepare(_, ty) => { self.array_registers.insert(id, ty.clone()); }
+            I::ArrayPrepare(_, ty) => { self.array_registers.insert(id, ty.clone()); }
             I::Guarded(_, body) => {
-                if let I::Array_prepare(_, ty) = body.as_ref() { self.array_registers.insert(id, ty.clone()); }
+                if let I::ArrayPrepare(_, ty) = body.as_ref() { self.array_registers.insert(id, ty.clone()); }
             }
             _ => {}
         }
@@ -594,7 +594,7 @@ impl Lower {
                 i
             }
         };
-        let prepared = self.emit(I::Array_prepare(i, ty))?;
+        let prepared = self.emit(I::ArrayPrepare(i, ty))?;
         self.array_values.insert(prepared, value.clone());
         Ok(one(prepared))
     }
@@ -605,7 +605,7 @@ impl Lower {
 
     fn literal(&mut self, at: &Term, v: &Value) -> Res<Expression> {
         match v {
-            Value::Int_array(_) | Value::Text_array(_) | Value::Floats(1..=4, _) => {
+            Value::IntArray(_) | Value::TextArray(_) | Value::Floats(1..=4, _) => {
                 self.table(at, ("".into(), Vec::new()), v)
             }
             Value::Record(fs) => {
@@ -619,7 +619,7 @@ impl Lower {
                 let registers = match v {
                     // Emit a constant only after its integer/float use is known.
                     Value::Int(_) => Vec::new(),
-                    Value::Text(text) => vec![self.emit(I::Text_const(text.clone()))?],
+                    Value::Text(text) => vec![self.emit(I::TextConst(text.clone()))?],
                     Value::Float(_) | Value::Bool(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..) => {
                         let mut out = Vec::new();
                         for f in components(v)? { out.push(self.emit(I::Const(f))?); }
@@ -659,7 +659,7 @@ impl Lower {
             Some(value) => {
                 let value = V::coerce_to(&Ty::Int, value)?;
                 match value {
-                    Value::Int(n) => Ok(Expression { registers: vec![self.emit(I::Int_const(n))?], constant: Some(value), fields: Vec::new(), function: None }),
+                    Value::Int(n) => Ok(Expression { registers: vec![self.emit(I::IntConst(n))?], constant: Some(value), fields: Vec::new(), function: None }),
                     _ => Err(invalid("assert false")),
                 }
             }
@@ -681,7 +681,7 @@ impl Lower {
         if e.registers.len() == 1 && self.bottom_registers[e.registers[0] as usize] {
             // The guarded Raise has already run before this unreachable value. A typed placeholder
             // keeps bottom branches out of numeric banks.
-            Ok(one(self.emit(I::Text_const(Vec::new().into()))?))
+            Ok(one(self.emit(I::TextConst(Vec::new().into()))?))
         } else {
             if e.registers.len() != 1 || !self.text_registers[e.registers[0] as usize] {
                 return Err(self.refuse("E_PACKED_TYPE", "Packed Text leaves require text values."));
@@ -694,9 +694,9 @@ impl Lower {
         let mut registers = Vec::new();
         for j in 0..width {
             registers.push(if matches!(source_ty, Ty::Array(ty) if **ty == Ty::Int) {
-                self.emit(I::Int_input(i as i64))?
+                self.emit(I::IntInput(i as i64))?
             } else if matches!(source_ty, Ty::Array(ty) if **ty == Ty::Text) {
-                self.emit(I::Text_input(i as i64))?
+                self.emit(I::TextInput(i as i64))?
             } else {
                 self.emit(I::Input(i as i64, width, j))?
             });
@@ -743,9 +743,9 @@ impl Lower {
             let mut registers = Vec::new();
             for j in 0..width {
                 registers.push(if ty == Ty::Int {
-                    self.emit(I::Int_uniform(i))?
+                    self.emit(I::IntUniform(i))?
                 } else if ty == Ty::Text {
-                    self.emit(I::Text_uniform(i))?
+                    self.emit(I::TextUniform(i))?
                 } else {
                     self.emit(I::Uniform(i, j))?
                 });
@@ -956,7 +956,7 @@ impl Lower {
         if control.initial.is_empty() {
             return Err(Stop::Refused(diag(Some(control.span.clone()), "E_PACKED_TYPE", "A carried loop requires at least one scalar leaf.")));
         }
-        let header = self.emit(I::Loop_begin(control))?;
+        let header = self.emit(I::LoopBegin(control))?;
         self.control_scope.push(header);
         let body = (|| -> Res<()> {
             let mut component = 0;
@@ -965,11 +965,11 @@ impl Lower {
                 shape(ty, &mut |ty| {
                     let index = component;
                     component += 1;
-                    me.emit(I::Loop_carry(header, index, ty))
+                    me.emit(I::LoopCarry(header, index, ty))
                 })?
             };
             let (next, stop) = step(self, header, &carried)?;
-            let finish = self.emit(I::Loop_end(header, next, stop))?;
+            let finish = self.emit(I::LoopEnd(header, next, stop))?;
             self.loop_finishes.insert(header, finish);
             Ok(())
         })();
@@ -980,7 +980,7 @@ impl Lower {
         shape(ty, &mut |ty| {
             let index = component;
             component += 1;
-            me.emit(I::Loop_result(header, index, ty))
+            me.emit(I::LoopResult(header, index, ty))
         })
     }
 
@@ -1103,7 +1103,7 @@ impl Lower {
             return self.literal(t, &value);
         }
         if declaration.live && args.is_empty() && matches!(t.ty(), Ty::Float | Ty::Int | Ty::Bool) {
-            let register = self.emit(if *t.ty() == Ty::Int { I::Int_frame(declaration.name.clone()) } else { I::Frame(declaration.name.clone()) })?;
+            let register = self.emit(if *t.ty() == Ty::Int { I::IntFrame(declaration.name.clone()) } else { I::Frame(declaration.name.clone()) })?;
             return Ok(one(register));
         }
         match kind {
@@ -1127,8 +1127,8 @@ impl Lower {
                 for e in expressions { arguments.push(self.as_float(e)?); }
                 let instruction = |me: &mut Lower, projection: Projection| -> Res<Expression> {
                     let ins = match (&kind, arguments.as_slice()) {
-                        (PackedKind::CheckedMul, [a, b]) => I::Checked_mul(projection, reg(a, 0)?, reg(b, 0)?),
-                        (PackedKind::CheckedFma, [a, b, c]) => I::Checked_fma(projection, reg(a, 0)?, reg(b, 0)?, reg(c, 0)?),
+                        (PackedKind::CheckedMul, [a, b]) => I::CheckedMul(projection, reg(a, 0)?, reg(b, 0)?),
+                        (PackedKind::CheckedFma, [a, b, c]) => I::CheckedFma(projection, reg(a, 0)?, reg(b, 0)?, reg(c, 0)?),
                         _ => return Err(refusal(t, "E_PACKED_OPERATOR", "Checked arithmetic needs scalar arguments.")),
                     };
                     Ok(one(me.emit(ins)?))
@@ -1187,10 +1187,10 @@ impl Lower {
             let (converted, valid) = if is_integer {
                 let converted = self.as_int(&index)?;
                 let r = reg(&converted, 0)?;
-                let zero = self.emit(I::Int_const(0))?;
-                let lo = self.emit(I::Int_compare(Comparison::Ige, r, zero))?;
-                let bound = self.emit(I::Int_const(count))?;
-                let hi = self.emit(I::Int_compare(Comparison::Ilt, r, bound))?;
+                let zero = self.emit(I::IntConst(0))?;
+                let lo = self.emit(I::IntCompare(Comparison::Ige, r, zero))?;
+                let bound = self.emit(I::IntConst(count))?;
+                let hi = self.emit(I::IntCompare(Comparison::Ilt, r, bound))?;
                 // Binary (And, lo, hi) after both operands.
                 let valid = self.emit(I::Binary(Binary::And, lo, hi))?;
                 (converted, valid)
@@ -1213,7 +1213,7 @@ impl Lower {
                 (one(truncated), valid)
             };
             let failure = self.under(valid, false, I::Raise(Ty::Int, "E_LIST_RANGE".to_owned(), "nth index is out of range or is not a whole number.".to_owned(), None))?;
-            let selected = self.emit(I::Int_select(valid, reg(&converted, 0)?, failure))?;
+            let selected = self.emit(I::IntSelect(valid, reg(&converted, 0)?, failure))?;
             (Expression { registers: vec![selected], ..converted }, Some(valid))
         };
         if index.registers.len() != 1 { return Err(refusal(t, "E_PACKED_TYPE", "Array indices require a scalar integer.")); }
@@ -1229,9 +1229,9 @@ impl Lower {
             match valid { None => me.emit(instruction), Some(valid) => me.under(valid, true, instruction) }
         };
         let registers = if element == Ty::Int {
-            vec![gather(self, I::Int_gather(prepared, index))?]
+            vec![gather(self, I::IntGather(prepared, index))?]
         } else if element == Ty::Text {
-            vec![gather(self, I::Text_gather(prepared, index))?]
+            vec![gather(self, I::TextGather(prepared, index))?]
         } else {
             let width = width_res(&element)?;
             let mut out = Vec::new();
@@ -1264,46 +1264,46 @@ impl Lower {
         let stage = |me: &mut Lower, s: Stage| -> Res<Expression> { Ok(one(me.emit(I::Stage(s, operands.clone()))?)) };
         match op_name {
             "gpu/fwidth" => stage(self, Stage::Fwidth),
-            "gpu/float-bits" => stage(self, Stage::Float_bits),
-            "gpu/trace-any" => stage(self, Stage::Trace_any),
-            "gpu/trace-curves-any" => stage(self, Stage::Trace_curves_any),
-            "gpu/trace-triangles" | "gpu/trace-curves" => {
-                let curves = op_name == "gpu/trace-curves";
+            "gpu/float_bits" => stage(self, Stage::FloatBits),
+            "gpu/trace_any" => stage(self, Stage::TraceAny),
+            "gpu/trace_curves_any" => stage(self, Stage::TraceCurvesAny),
+            "gpu/trace_triangles" | "gpu/trace_curves" => {
+                let curves = op_name == "gpu/trace_curves";
                 let names: &[&str] = if curves { &["t", "prim", "u", "hit"] } else { &["t", "prim", "u", "v", "hit", "instance"] };
                 // List.mapi, left to right
                 let mut fields = Vec::new();
                 for (k, name) in names.iter().enumerate() {
-                    let s = if curves { Stage::Trace_curves(k as i64) } else { Stage::Trace_triangles(k as i64) };
+                    let s = if curves { Stage::TraceCurves(k as i64) } else { Stage::TraceTriangles(k as i64) };
                     fields.push(((*name).into(), stage(self, s)?));
                 }
                 Ok(fields_of(fields))
             }
-            "gpu/scene-vertex" | "gpu/scene-vertex-end" => {
-                let end = op_name == "gpu/scene-vertex-end";
+            "gpu/scene_vertex" | "gpu/scene_vertex_end" => {
+                let end = op_name == "gpu/scene_vertex_end";
                 let mut registers = Vec::new();
-                for c in 0..3 { registers.push(self.emit(I::Stage(Stage::Scene_vertex(end, c), operands.clone()))?); }
+                for c in 0..3 { registers.push(self.emit(I::Stage(Stage::SceneVertex(end, c), operands.clone()))?); }
                 Ok(regs(registers))
             }
-            "gpu/scene-instance" => stage(self, Stage::Scene_instance),
-            "gpu/group-scan" => {
-                let before = stage(self, Stage::Group_scan(0))?;
-                let total = stage(self, Stage::Group_scan(1))?;
+            "gpu/scene_instance" => stage(self, Stage::SceneInstance),
+            "gpu/group_scan" => {
+                let before = stage(self, Stage::GroupScan(0))?;
+                let total = stage(self, Stage::GroupScan(1))?;
                 Ok(fields_of(vec![("before".into(), before), ("total".into(), total)]))
             }
-            "gpu/store" | "gpu/store-int" => stage(self, Stage::Store),
-            "gpu/scene-sphere" | "gpu/scene-strand" => {
-                let sphere = op_name == "gpu/scene-sphere";
+            "gpu/store" | "gpu/store_int" => stage(self, Stage::Store),
+            "gpu/scene_sphere" | "gpu/scene_strand" => {
+                let sphere = op_name == "gpu/scene_sphere";
                 let mut registers = Vec::new();
                 for c in 0..4 {
-                    registers.push(self.emit(I::Stage(if sphere { Stage::Scene_sphere(c) } else { Stage::Scene_strand(c) }, operands.clone()))?);
+                    registers.push(self.emit(I::Stage(if sphere { Stage::SceneSphere(c) } else { Stage::SceneStrand(c) }, operands.clone()))?);
                 }
                 Ok(regs(registers))
             }
-            "gpu/sample" | "gpu/sample-level" | "gpu/read" => {
+            "gpu/sample" | "gpu/sample_level" | "gpu/read" => {
                 let tex = texture()?;
                 let mut registers = Vec::new();
                 for c in 0..4 {
-                    let s = match op_name { "gpu/sample" => Stage::Sample(tex, c), "gpu/read" => Stage::Read(tex, c), _ => Stage::Sample_level(tex, c) };
+                    let s = match op_name { "gpu/sample" => Stage::Sample(tex, c), "gpu/read" => Stage::Read(tex, c), _ => Stage::SampleLevel(tex, c) };
                     registers.push(self.emit(I::Stage(s, operands.clone()))?);
                 }
                 Ok(regs(registers))
@@ -1311,7 +1311,7 @@ impl Lower {
             _ => {
                 let tex = texture()?;
                 let mut registers = Vec::new();
-                for c in 0..2 { registers.push(self.emit(I::Stage(Stage::Texture_size(tex, c), operands.clone()))?); }
+                for c in 0..2 { registers.push(self.emit(I::Stage(Stage::TextureSize(tex, c), operands.clone()))?); }
                 Ok(regs(registers))
             }
         }
@@ -1323,17 +1323,17 @@ impl Lower {
             (PackedKind::Integer(operation), [a, b]) => {
                 let a = self.as_int(a)?;
                 let b = self.as_int(b)?;
-                vec![self.emit(I::Int_binary(*operation, reg(&a, 0)?, reg(&b, 0)?))?]
+                vec![self.emit(I::IntBinary(*operation, reg(&a, 0)?, reg(&b, 0)?))?]
             }
             (PackedKind::IntegerCompare(operation), [a, b]) => {
                 let a = self.as_int(a)?;
                 let b = self.as_int(b)?;
-                vec![self.emit(I::Int_compare(*operation, reg(&a, 0)?, reg(&b, 0)?))?]
+                vec![self.emit(I::IntCompare(*operation, reg(&a, 0)?, reg(&b, 0)?))?]
             }
             (PackedKind::RandAt, [a, b]) => {
                 let a = self.as_int(a)?;
                 let b = self.as_int(b)?;
-                vec![self.emit(I::Rand_at(reg(&a, 0)?, reg(&b, 0)?))?]
+                vec![self.emit(I::RandAt(reg(&a, 0)?, reg(&b, 0)?))?]
             }
             (PackedKind::Fma, [a, b, c]) => {
                 let a = self.as_float(a)?;
@@ -1449,7 +1449,7 @@ impl Lower {
                 }
                 out
             }
-            (PackedKind::Unary(Unary::Abs), [a]) if *t.ty() == Ty::Int => vec![self.emit(I::Int_abs(reg(a, 0)?))?],
+            (PackedKind::Unary(Unary::Abs), [a]) if *t.ty() == Ty::Int => vec![self.emit(I::IntAbs(reg(a, 0)?))?],
             (PackedKind::Unary(operation), [a]) if width == 1 => {
                 let a = self.as_float(a)?;
                 vec![self.emit(I::Unary(*operation, reg(&a, 0)?))?]
@@ -1618,7 +1618,7 @@ impl Lower {
                 // a table bound in the body (a helper's parameter): its length where captures are constants
                 let table = self.expression(env, &t.child(arena.fields(arena.op(id).args)[0].term))?;
                 match self.table_length(&table) {
-                    Some(length) => Ok(one(self.emit(I::Int_const(length))?)),
+                    Some(length) => Ok(one(self.emit(I::IntConst(length))?)),
                     None => Err(refusal(t, "E_PACKED_OPERATOR", "Dynamic operator array/count has no packed instruction for 1 arguments at width 1.")),
                 }
             }
@@ -1754,11 +1754,11 @@ impl Lower {
                     }
                 };
                 let (first, last, limit) = match (&element, source.node) {
-                    (Some((Ok(count), ..)), _) => (self.emit(I::Int_const(0))?, bound(self, count)?, None),
-                    (Some((Err(length), ..)), _) => (self.emit(I::Int_const(0))?, self.emit(I::Int_const(*length))?, None),
+                    (Some((Ok(count), ..)), _) => (self.emit(I::IntConst(0))?, bound(self, count)?, None),
+                    (Some((Err(length), ..)), _) => (self.emit(I::IntConst(0))?, self.emit(I::IntConst(*length))?, None),
                     (None, Node::Op(id)) => match arena.fields(arena.op(id).args) {
                         [last] => {
-                            let first = self.emit(I::Int_const(0))?;
+                            let first = self.emit(I::IntConst(0))?;
                             (first, bound(self, &t.child(last.term))?, Some(op::max_iterations() as i64))
                         }
                         [first, last] => {
@@ -1797,7 +1797,7 @@ impl Lower {
                 let initial = self.carried_initial(&seed, t.ty(), &seed_e)?;
                 let count_e = self.expression(env, &count)?;
                 let last = reg(&self.as_int(&count_e)?, 0)?;
-                let first = self.emit(I::Int_const(0))?;
+                let first = self.emit(I::IntConst(0))?;
                 let control = Loop { first, last, finish: -1, initial, limit: None, span: count.form().span.clone() };
                 let ty = t.ty().clone();
                 self.carried_loop(&ty, control, &mut |me, _header, carried| {
@@ -1975,9 +1975,9 @@ impl Lower {
                 for i in 0..width {
                     let (c, a, b) = (condition, self.component(&yes, i)?, self.component(&no, i)?);
                     registers.push(self.emit(if *ty == Ty::Int {
-                        I::Int_select(c, a, b)
+                        I::IntSelect(c, a, b)
                     } else if *ty == Ty::Text {
-                        I::Text_select(c, a, b)
+                        I::TextSelect(c, a, b)
                     } else {
                         I::Select(c, a, b)
                     })?);
@@ -2060,21 +2060,21 @@ impl Lower {
                 let bound = residual::with_bindings(self.residual, &length_term, &[("$inner-sum-table".into(), table_value)])?;
                 let uniform = self.uniform(source, ("".into(), Vec::new()), &Value::Residual(bound))?;
                 let length = reg(&self.as_int(&uniform)?, 0)?;
-                let constant = |me: &mut Lower, n: i64| me.emit(I::Int_const(n));
+                let constant = |me: &mut Lower, n: i64| me.emit(I::IntConst(n));
                 // require condition message value
                 let require = |me: &mut Lower, condition: i64, message: &str, value: i64| -> Res<i64> {
                     let failed = me.under(condition, false, I::Raise(Ty::Int, "E_ARRAY_RANGE".to_owned(), message.to_owned(), None))?;
-                    me.emit(I::Int_select(condition, value, failed))
+                    me.emit(I::IntSelect(condition, value, failed))
                 };
                 // The index domain is checked here; the source bounds are checked below.
                 let c0 = constant(self, 0)?;
-                let ge = self.emit(I::Int_compare(Comparison::Ige, first, c0))?;
+                let ge = self.emit(I::IntCompare(Comparison::Ige, first, c0))?;
                 let first = require(self, ge, "array/slice needs a non-negative whole length.", first)?;
                 // valid = both (compare Ile first length) (compare Ile (constant n) (emit (Int_binary (Isub, length, first))))
-                let diff = self.emit(I::Int_binary(Integer::Isub, length, first))?;
+                let diff = self.emit(I::IntBinary(Integer::Isub, length, first))?;
                 let cn = constant(self, n)?;
-                let fit = self.emit(I::Int_compare(Comparison::Ile, cn, diff))?;
-                let within = self.emit(I::Int_compare(Comparison::Ile, first, length))?;
+                let fit = self.emit(I::IntCompare(Comparison::Ile, cn, diff))?;
+                let within = self.emit(I::IntCompare(Comparison::Ile, first, length))?;
                 let valid = self.emit(I::Binary(Binary::And, within, fit))?;
                 // Keep the guard reachable even when n=0, and guard device gathers: a status error
                 // does not stop the rest of a device invocation.
@@ -2086,10 +2086,10 @@ impl Lower {
                 let mut items = Vec::new();
                 for i in 0..n {
                     let ci = constant(self, i)?;
-                    let index = self.emit(I::Int_binary(Integer::Iadd, first, ci))?;
+                    let index = self.emit(I::IntBinary(Integer::Iadd, first, ci))?;
                     let mut registers = Vec::new();
                     for component in 0..width {
-                        let instruction = if ty == Ty::Int { I::Int_gather(prepared, index) } else { I::Gather(prepared, index, width as i64, component as i64) };
+                        let instruction = if ty == Ty::Int { I::IntGather(prepared, index) } else { I::Gather(prepared, index, width as i64, component as i64) };
                         registers.push(self.under(valid, true, instruction)?);
                     }
                     items.push(regs(registers));
@@ -2104,7 +2104,7 @@ impl Lower {
             let mut registers = Vec::new();
             for (component, register) in s.registers.iter().enumerate() {
                 let other = reg(&item, component)?;
-                registers.push(self.emit(if ty == Ty::Int { I::Int_binary(Integer::Iadd, *register, other) } else { I::Binary(Binary::Add, *register, other) })?);
+                registers.push(self.emit(if ty == Ty::Int { I::IntBinary(Integer::Iadd, *register, other) } else { I::Binary(Binary::Add, *register, other) })?);
             }
             sum = regs(registers);
         }
@@ -2333,7 +2333,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
             let integer = *seed.ty() == Ty::Int && *body.ty() == Ty::Int;
             let mut registers = Vec::new();
             for i in 0..width {
-                registers.push(lower.emit(if integer { I::Int_accumulator } else { I::Accumulator(i) })?);
+                registers.push(lower.emit(if integer { I::IntAccumulator } else { I::Accumulator(i) })?);
             }
             env.push((symbol::intern(name), regs(registers)));
         }
@@ -2405,10 +2405,10 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
         code.into_iter()
             .map(|i| match i {
                 I::Guarded(guards, body) => match *body {
-                    I::Int_const(n) => I::Guarded(guards, Box::new(I::Const(n as f64))),
+                    I::IntConst(n) => I::Guarded(guards, Box::new(I::Const(n as f64))),
                     other => I::Guarded(guards, Box::new(other)),
                 },
-                I::Int_const(n) => I::Const(n as f64),
+                I::IntConst(n) => I::Const(n as f64),
                 other => other,
             })
             .collect()

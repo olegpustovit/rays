@@ -1,10 +1,9 @@
-//! Immutable layout data shared by the Metal and WGSL instruction printers (port of
-//! lib/flow_ir/kernel_layout.ml): which registers a kernel uses, which Int registers print as
+//! Immutable layout data shared by the Metal and WGSL instruction printers: which registers a kernel uses, which Int registers print as
 //! 32-bit words, the uniform words, buffer bindings and scene facts.
 //!
 //! `iter` takes a [`Visit`] object instead of two closures: the loop callback re-enters the
 //! visitor for the loop body, which two borrowed closures could not do.
-#![allow(non_snake_case, non_camel_case_types)]
+
 
 use crate::core_ir::region::{self, Instruction, Loop};
 use crate::packed::{self, host};
@@ -73,10 +72,10 @@ pub struct PlanOptions {
 
 
 
-/// `gpu/scene-spheres` and `gpu/scene-strands`: built-in counts read from the scene's uniform
+/// `gpu/scene_spheres` and `gpu/scene_strands`: built-in counts read from the scene's uniform
 /// words, not frame facts.
 pub fn scene_fact(name: &str) -> bool {
-    name == "gpu/scene-spheres" || name == "gpu/scene-strands"
+    name == "gpu/scene_spheres" || name == "gpu/scene_strands"
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -107,16 +106,16 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
     let mut results: Vec<Vec<usize>> = vec![Vec::new(); size];
     for (slot, instruction) in code.iter().enumerate() {
         match instruction {
-            Instruction::Loop_begin(loop_) => {
+            Instruction::LoopBegin(loop_) => {
                 let next = match code[loop_.finish as usize] {
-                    Instruction::Loop_end(_, next, _) => next,
+                    Instruction::LoopEnd(_, next, _) => next,
                     _ => unreachable!("loop without its end"),
                 };
                 for (c, initial) in loop_.initial.iter().enumerate() {
                     carried[slot + 1 + c] = Some((*initial, next[c]));
                 }
             }
-            Instruction::Loop_result(loop_, c, _) => results[(*loop_ + 1 + *c) as usize].push(slot),
+            Instruction::LoopResult(loop_, c, _) => results[(*loop_ + 1 + *c) as usize].push(slot),
             _ => {}
         }
     }
@@ -131,7 +130,7 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
     };
     let mut header = vec![-1i64; size];
     for (slot, instruction) in code.iter().enumerate() {
-        if let Instruction::Loop_begin(loop_) = instruction {
+        if let Instruction::LoopBegin(loop_) = instruction {
             for c in 0..loop_.initial.len() {
                 header[slot + 1 + c] = slot as i64;
             }
@@ -144,7 +143,7 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
             return Some(0);
         }
         match code[r as usize] {
-            Instruction::Int_binary(Integer::Iadd, a, b) => {
+            Instruction::IntBinary(Integer::Iadd, a, b) => {
                 let first = (step(code, bound, carry, *a), bound[*b as usize]);
                 let second = (step(code, bound, carry, *b), bound[*a as usize]);
                 match (first, second) {
@@ -153,7 +152,7 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
                     _ => None,
                 }
             }
-            Instruction::Int_select(_, yes, no) => match (step(code, bound, carry, *yes), step(code, bound, carry, *no)) {
+            Instruction::IntSelect(_, yes, no) => match (step(code, bound, carry, *yes), step(code, bound, carry, *no)) {
                 (Some(a), Some(b)) => Some(a.max(b)),
                 _ => None,
             },
@@ -169,14 +168,14 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
     };
     let rule = |bound: &[Bound], slot: usize| -> Bound {
         match code[slot] {
-            Instruction::Int_const(n) => at_most(*n),
-            Instruction::Int_binary(Integer::Iand, a, b) => match (bound[*a as usize], bound[*b as usize]) {
+            Instruction::IntConst(n) => at_most(*n),
+            Instruction::IntBinary(Integer::Iand, a, b) => match (bound[*a as usize], bound[*b as usize]) {
                 (Bound::Bot, _) | (_, Bound::Bot) => Bound::Bot,
                 (Bound::Max(a), Bound::Max(b)) => Bound::Max(a.min(b)),
                 (Bound::Max(m), _) | (_, Bound::Max(m)) => Bound::Max(m),
                 _ => Bound::Top,
             },
-            Instruction::Int_binary(Integer::Ior | Integer::Ixor, a, b) => both(
+            Instruction::IntBinary(Integer::Ior | Integer::Ixor, a, b) => both(
                 bound,
                 &|a, b| {
                     let mut m = 0i64;
@@ -188,20 +187,20 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
                 *a,
                 *b,
             ),
-            Instruction::Int_binary(Integer::Ishr, a, b) => match (bound[*a as usize], code[*b as usize]) {
-                (Bound::Max(m), Instruction::Int_const(k)) if 0 <= *k && *k <= 62 => Bound::Max(((m as u64) >> *k as u32) as i64),
+            Instruction::IntBinary(Integer::Ishr, a, b) => match (bound[*a as usize], code[*b as usize]) {
+                (Bound::Max(m), Instruction::IntConst(k)) if 0 <= *k && *k <= 62 => Bound::Max(((m as u64) >> *k as u32) as i64),
                 (m @ (Bound::Max(_) | Bound::Bot), _) => m,
                 (Bound::Top, _) => Bound::Top,
             },
-            Instruction::Int_binary(Integer::Iadd, a, b) => both(bound, &|a, b| at_most(a + b), *a, *b),
-            Instruction::Int_binary(Integer::Imul, a, b) => {
+            Instruction::IntBinary(Integer::Iadd, a, b) => both(bound, &|a, b| at_most(a + b), *a, *b),
+            Instruction::IntBinary(Integer::Imul, a, b) => {
                 both(bound, &|a, b| if b == 0 || a <= limit / b { at_most(a * b) } else { Bound::Top }, *a, *b)
             }
-            Instruction::Int_binary(op @ (Integer::Idiv | Integer::Imod), a, b)
-                if matches!(code[*b as usize], Instruction::Int_const(k) if *k > 0) =>
+            Instruction::IntBinary(op @ (Integer::Idiv | Integer::Imod), a, b)
+                if matches!(code[*b as usize], Instruction::IntConst(k) if *k > 0) =>
             {
                 let k = match code[*b as usize] {
-                    Instruction::Int_const(k) => *k,
+                    Instruction::IntConst(k) => *k,
                     _ => unreachable!("constant divisor"),
                 };
                 match bound[*a as usize] {
@@ -209,12 +208,12 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
                     other => other,
                 }
             }
-            Instruction::Int_binary(Integer::Idiv | Integer::Imod, a, b) => both(bound, &|a, _| Bound::Max(a), *a, *b),
-            Instruction::Int_select(_, yes, no) => join(bound[*yes as usize], bound[*no as usize]),
-            Instruction::Loop_carry(..) => {
+            Instruction::IntBinary(Integer::Idiv | Integer::Imod, a, b) => both(bound, &|a, _| Bound::Max(a), *a, *b),
+            Instruction::IntSelect(_, yes, no) => join(bound[*yes as usize], bound[*no as usize]),
+            Instruction::LoopCarry(..) => {
                 let (initial, next) = carried[slot].expect("a carry has its loop");
                 let loop_ = match code[header[slot] as usize] {
-                    Instruction::Loop_begin(l) => l,
+                    Instruction::LoopBegin(l) => l,
                     _ => unreachable!("carry without its loop"),
                 };
                 match (step(&code, bound, slot as i64, next), bound[initial as usize], bound[loop_.last as usize]) {
@@ -222,16 +221,16 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
                     _ => join(bound[initial as usize], bound[next as usize]),
                 }
             }
-            Instruction::Loop_begin(Loop { first, last, .. }) => both(bound, &|_, last| Bound::Max(last), *first, *last),
+            Instruction::LoopBegin(Loop { first, last, .. }) => both(bound, &|_, last| Bound::Max(last), *first, *last),
             // a scene count, a primitive and an instance index are 32-bit words
-            Instruction::Int_frame(name) if scene_fact(name) => Bound::Max(limit),
+            Instruction::IntFrame(name) if scene_fact(name) => Bound::Max(limit),
             Instruction::Stage(
-                region::Stage::Trace_triangles(1 | 5) | region::Stage::Trace_curves(1) | region::Stage::Group_scan(_),
+                region::Stage::TraceTriangles(1 | 5) | region::Stage::TraceCurves(1) | region::Stage::GroupScan(_),
                 _,
             ) => Bound::Max(limit),
             Instruction::Stage(region::Stage::Store, _) => Bound::Max(1),
-            Instruction::Stage(region::Stage::Noise_table(_), _) => Bound::Max(255),
-            Instruction::Loop_result(loop_, c, _) => bound[(*loop_ + 1 + *c) as usize],
+            Instruction::Stage(region::Stage::NoiseTable(_), _) => Bound::Max(255),
+            Instruction::LoopResult(loop_, c, _) => bound[(*loop_ + 1 + *c) as usize],
             _ => Bound::Top,
         }
     };
@@ -263,15 +262,15 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
             continue;
         }
         match instruction {
-            Instruction::Loop_carry(..) => {
+            Instruction::LoopCarry(..) => {
                 let (initial, _) = carried[slot].expect("a carry has its loop");
                 add(&mut uses, Use::Carry(slot), initial);
             }
-            Instruction::Loop_begin(Loop { first, last, .. }) => {
+            Instruction::LoopBegin(Loop { first, last, .. }) => {
                 add(&mut uses, Use::Exact, *first);
                 add(&mut uses, Use::Exact, *last);
             }
-            Instruction::Loop_end(header, next, stop) => {
+            Instruction::LoopEnd(header, next, stop) => {
                 for (c, value) in next.iter().enumerate() {
                     add(&mut uses, Use::Carry((*header + 1 + c as i64) as usize), *value);
                 }
@@ -279,28 +278,28 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
                     add(&mut uses, Use::Exact, *stop);
                 }
             }
-            Instruction::Loop_result(..) => {}
-            Instruction::Int_binary(Integer::Iadd | Integer::Isub | Integer::Imul | Integer::Iand | Integer::Ior | Integer::Ixor, a, b) => {
+            Instruction::LoopResult(..) => {}
+            Instruction::IntBinary(Integer::Iadd | Integer::Isub | Integer::Imul | Integer::Iand | Integer::Ior | Integer::Ixor, a, b) => {
                 add(&mut uses, Use::Low(slot), *a);
                 add(&mut uses, Use::Low(slot), *b);
             }
-            Instruction::Int_binary(Integer::Ishl, a, b) => {
+            Instruction::IntBinary(Integer::Ishl, a, b) => {
                 add(&mut uses, Use::Low(slot), *a);
                 add(&mut uses, Use::Exact, *b);
             }
-            Instruction::Int_select(condition, yes, no) => {
+            Instruction::IntSelect(condition, yes, no) => {
                 add(&mut uses, Use::Exact, *condition);
                 add(&mut uses, Use::Low(slot), *yes);
                 add(&mut uses, Use::Low(slot), *no);
             }
             // a device gather clamps int(index), the low 32 bits
-            Instruction::Gather(table, index, _, _) | Instruction::Int_gather(table, index) => {
+            Instruction::Gather(table, index, _, _) | Instruction::IntGather(table, index) => {
                 add(&mut uses, Use::Exact, *table);
                 add(&mut uses, Use::Bits, *index);
             }
             // a store's index and Int value, a group scan's operand and a noise table index are
             // uint words on every target
-            Instruction::Stage(region::Stage::Store | region::Stage::Group_scan(_) | region::Stage::Noise_table(_) | region::Stage::Float_bits, r) => {
+            Instruction::Stage(region::Stage::Store | region::Stage::GroupScan(_) | region::Stage::NoiseTable(_) | region::Stage::FloatBits, r) => {
                 for r in r {
                     add(&mut uses, Use::Bits, *r);
                 }
@@ -339,19 +338,19 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
         .map(|slot| {
             integer(slot)
                 && match code[slot] {
-                    Instruction::Int_const(_)
-                    | Instruction::Int_binary(
+                    Instruction::IntConst(_)
+                    | Instruction::IntBinary(
                         Integer::Iadd | Integer::Isub | Integer::Imul | Integer::Iand | Integer::Ior | Integer::Ixor | Integer::Ishl,
                         _,
                         _,
                     )
-                    | Instruction::Int_select(..)
-                    | Instruction::Loop_carry(..)
+                    | Instruction::IntSelect(..)
+                    | Instruction::LoopCarry(..)
                     | Instruction::Stage(..) => true,
-                    Instruction::Int_frame(name) => scene_fact(name),
-                    Instruction::Int_binary(Integer::Ishr, a, _) => fits[*a as usize],
-                    Instruction::Int_binary(Integer::Idiv | Integer::Imod, a, b) => fits[*a as usize] && fits[*b as usize],
-                    Instruction::Loop_begin(_) => fits[slot],
+                    Instruction::IntFrame(name) => scene_fact(name),
+                    Instruction::IntBinary(Integer::Ishr, a, _) => fits[*a as usize],
+                    Instruction::IntBinary(Integer::Idiv | Integer::Imod, a, b) => fits[*a as usize] && fits[*b as usize],
+                    Instruction::LoopBegin(_) => fits[slot],
                     _ => false,
                 }
         })
@@ -380,7 +379,7 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
         .iter()
         .enumerate()
         .map(|(slot, instruction)| match instruction {
-            Instruction::Loop_result(loop_, c, _) => narrow[(*loop_ + 1 + *c) as usize],
+            Instruction::LoopResult(loop_, c, _) => narrow[(*loop_ + 1 + *c) as usize],
             _ => narrow[slot],
         })
         .collect()
@@ -402,8 +401,8 @@ fn specialize(view: &host::View) -> (host::View, Vec<bool>) {
         };
         known[slot] = match Instruction::unguarded(instruction) {
             Instruction::Const(c) => Some(*c),
-            Instruction::Int_const(n) if n.abs() < 1 << 53 => Some(*n as f64),
-            Instruction::Int_compare(op, a, b) => both(&known, *a, *b, &|x, y| {
+            Instruction::IntConst(n) if n.abs() < 1 << 53 => Some(*n as f64),
+            Instruction::IntCompare(op, a, b) => both(&known, *a, *b, &|x, y| {
                 flag(match op {
                     Comparison::Ilt => x < y,
                     Comparison::Ile => x <= y,
@@ -435,7 +434,7 @@ fn specialize(view: &host::View) -> (host::View, Vec<bool>) {
             },
             Instruction::Unary(Unary::Not, a) => known[*a as usize].map(|x| if x == 0.0 { 1.0 } else { 0.0 }),
             Instruction::Convert(flow_syntax::packed_ops::Conversion::ToFloat, a) => known[*a as usize],
-            Instruction::Select(c, yes, no) | Instruction::Int_select(c, yes, no) => {
+            Instruction::Select(c, yes, no) | Instruction::IntSelect(c, yes, no) => {
                 known[*c as usize].and_then(|x| known[(if x != 0.0 { *yes } else { *no }) as usize])
             }
             _ => None,
@@ -449,7 +448,7 @@ fn specialize(view: &host::View) -> (host::View, Vec<bool>) {
     let mut empty: Vec<(usize, Instruction)> = Vec::new();
     // a loop of no passes keeps only its initial values: its end reads them back
     for (slot, instruction) in view.code.iter().enumerate() {
-        if let Instruction::Loop_begin(loop_) = Instruction::unguarded(instruction) {
+        if let Instruction::LoopBegin(loop_) = Instruction::unguarded(instruction) {
             if let (Some(first), Some(last)) = (known[loop_.first as usize], known[loop_.last as usize]) {
                 if first >= last {
                     for body in slot + 1 + loop_.initial.len()..loop_.finish as usize {
@@ -457,7 +456,7 @@ fn specialize(view: &host::View) -> (host::View, Vec<bool>) {
                     }
                     empty.push((
                         loop_.finish as usize,
-                        Instruction::Loop_end(slot as i64, (0..loop_.initial.len()).map(|c| (slot + 1 + c) as i64).collect(), None),
+                        Instruction::LoopEnd(slot as i64, (0..loop_.initial.len()).map(|c| (slot + 1 + c) as i64).collect(), None),
                     ));
                 }
             }
@@ -485,9 +484,9 @@ fn specialize(view: &host::View) -> (host::View, Vec<bool>) {
                 let pick = if known[c as usize].unwrap() != 0.0 { yes } else { no };
                 Instruction::Select(c, pick, pick)
             }
-            Instruction::Int_select(c, yes, no) if known[c as usize].is_some() => {
+            Instruction::IntSelect(c, yes, no) if known[c as usize].is_some() => {
                 let pick = if known[c as usize].unwrap() != 0.0 { yes } else { no };
-                Instruction::Int_select(c, pick, pick)
+                Instruction::IntSelect(c, pick, pick)
             }
             body => body,
         };
@@ -512,7 +511,7 @@ fn operands(i: &Instruction) -> Vec<i64> {
             v.extend(operands(body));
             v
         }
-        Instruction::Select(_, a, b) | Instruction::Int_select(_, a, b) if a == b => vec![*a],
+        Instruction::Select(_, a, b) | Instruction::IntSelect(_, a, b) if a == b => vec![*a],
         instruction => region::operands(instruction),
     }
 }
@@ -527,7 +526,7 @@ fn reachable(whole_loops: bool, view: &host::View, dead: &[bool]) -> Vec<bool> {
         for r in operands(&view.code[slot]) {
             mark(whole_loops, view, dead, used, r as usize);
         }
-        if let Instruction::Loop_begin(loop_) = Instruction::unguarded(&view.code[slot]) {
+        if let Instruction::LoopBegin(loop_) = Instruction::unguarded(&view.code[slot]) {
             if !whole_loops {
                 for carried in slot + 1..=slot + loop_.initial.len() {
                     mark(whole_loops, view, dead, used, carried);
@@ -560,7 +559,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
         first / 4
     };
     let tabled: Vec<i64> = if fast {
-        view.code.iter().filter_map(|i| match Instruction::unguarded(i) { Instruction::Array_prepare(u, _) => Some(*u), _ => None }).collect()
+        view.code.iter().filter_map(|i| match Instruction::unguarded(i) { Instruction::ArrayPrepare(u, _) => Some(*u), _ => None }).collect()
     } else {
         Vec::new()
     };
@@ -575,8 +574,8 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
         .iter()
         .enumerate()
         .map(|(index, instruction)| match Instruction::unguarded(instruction) {
-            Instruction::Int_frame(name) if scene_fact(name) => 0,
-            Instruction::Frame(name) | Instruction::Int_frame(name) => uniform(format!("frame:{index}:{name}"), 1),
+            Instruction::IntFrame(name) if scene_fact(name) => 0,
+            Instruction::Frame(name) | Instruction::IntFrame(name) => uniform(format!("frame:{index}:{name}"), 1),
             _ => 0,
         })
         .collect();
@@ -595,7 +594,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
         .iter()
         .enumerate()
         .filter_map(|(index, instruction)| match Instruction::unguarded(instruction) {
-            Instruction::Noise3(_, _, _, seed, _, _, _) | Instruction::Stage(region::Stage::Noise_table(seed), _) if used[index] => Some(*seed),
+            Instruction::Noise3(_, _, _, seed, _, _, _) | Instruction::Stage(region::Stage::NoiseTable(seed), _) if used[index] => Some(*seed),
             _ => None,
         })
         .collect();
@@ -608,7 +607,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
             .iter()
             .enumerate()
             .filter_map(|(slot, instruction)| match Instruction::unguarded(instruction) {
-                Instruction::Array_prepare(u, ty) if used[slot] => Some((
+                Instruction::ArrayPrepare(u, ty) if used[slot] => Some((
                     slot as i64,
                     (
                         *u,
@@ -628,17 +627,17 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
     let traced = view.code.iter().any(|i| match Instruction::unguarded(i) {
         Instruction::Trace(..) => true,
         Instruction::Stage(
-            region::Stage::Trace_triangles(_)
-            | region::Stage::Trace_any
-            | region::Stage::Trace_curves(_)
-            | region::Stage::Trace_curves_any
-            | region::Stage::Scene_vertex(..)
-            | region::Stage::Scene_instance
-            | region::Stage::Scene_sphere(_)
-            | region::Stage::Scene_strand(_),
+            region::Stage::TraceTriangles(_)
+            | region::Stage::TraceAny
+            | region::Stage::TraceCurves(_)
+            | region::Stage::TraceCurvesAny
+            | region::Stage::SceneVertex(..)
+            | region::Stage::SceneInstance
+            | region::Stage::SceneSphere(_)
+            | region::Stage::SceneStrand(_),
             _,
         ) => true,
-        Instruction::Int_frame(name) => scene_fact(name),
+        Instruction::IntFrame(name) => scene_fact(name),
         _ => false,
     });
     let scene_spheres = if traced { Some(uniform("scene:spheres".to_owned(), 1)) } else { None };
@@ -660,7 +659,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
     let scene = count_base + if counts.is_none() { 0 } else { 2 };
     let mut input_used = vec![false; count as usize];
     for (slot, instruction) in view.code.iter().enumerate() {
-        if let Instruction::Input(input, _, _) | Instruction::Int_input(input) = Instruction::unguarded(instruction) {
+        if let Instruction::Input(input, _, _) | Instruction::IntInput(input) = Instruction::unguarded(instruction) {
             if used[slot] && !image {
                 input_used[*input as usize] = true;
             }
@@ -718,10 +717,10 @@ pub fn iter(plan: &T, visitor: &mut dyn Visit) {
         let mut slot = first;
         while slot < last {
             match Instruction::unguarded(&code[slot]) {
-                Instruction::Loop_begin(control) => {
+                Instruction::LoopBegin(control) => {
                     let header = slot;
                     let (next, stop) = match Instruction::unguarded(&code[control.finish as usize]) {
-                        Instruction::Loop_end(_, values, stop) => (values.clone(), *stop),
+                        Instruction::LoopEnd(_, values, stop) => (values.clone(), *stop),
                         _ => unreachable!("loop without its end"),
                     };
                     let (body_first, finish) = (header + 1 + control.initial.len(), control.finish as usize);

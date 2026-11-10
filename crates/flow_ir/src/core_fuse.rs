@@ -22,8 +22,8 @@ type Source = (ResidualId, Arc<Term>);
 
 fn source_input(term: &Term, source: i64, width: i64, component: i64) -> I {
     match term.ty() {
-        Ty::Array(e) if **e == Ty::Int => I::Int_input(source),
-        Ty::Array(e) if **e == Ty::Text => I::Text_input(source),
+        Ty::Array(e) if **e == Ty::Int => I::IntInput(source),
+        Ty::Array(e) if **e == Ty::Text => I::TextInput(source),
         _ => I::Input(source, width, component),
     }
 }
@@ -50,7 +50,7 @@ impl Builder {
     fn emit(&mut self, instruction: I) -> Res<i64> {
         // ponytail: the sharing key is the Debug text of (scope, key); a typed hash only if fusion shows hot.
         let key = format!("{:?}|{:?}", self.scope, instruction_key(&instruction));
-        let control = matches!(I::unguarded(&instruction), I::Loop_begin(_) | I::Loop_carry(..) | I::Loop_end(..));
+        let control = matches!(I::unguarded(&instruction), I::LoopBegin(_) | I::LoopCarry(..) | I::LoopEnd(..));
         if !control {
             if let Some(id) = self.shared.get(&key) { return Ok(*id); }
         }
@@ -82,12 +82,12 @@ impl Builder {
                     let register = input(self, *source, *width, *component)?;
                     Some(if R::integer_register(&self.code[register as usize]) { self.emit(I::Convert(Conversion::ToFloat, register))? } else { register })
                 }
-                I::Int_input(source) => {
+                I::IntInput(source) => {
                     let register = input(self, *source, 1, 0)?;
                     if !R::integer_register(&self.code[register as usize]) { return Err(Unsupported); }
                     Some(register)
                 }
-                I::Text_input(source) => {
+                I::TextInput(source) => {
                     let register = input(self, *source, 1, 0)?;
                     if !R::text_register(&self.code[register as usize]) { return Err(Unsupported); }
                     Some(register)
@@ -104,8 +104,8 @@ impl Builder {
                 }
             };
             match I::unguarded(instruction) {
-                I::Loop_begin(_) => self.scope.push(registers[i]),
-                I::Loop_end(owner, _, _) => {
+                I::LoopBegin(_) => self.scope.push(registers[i]),
+                I::LoopEnd(owner, _, _) => {
                     self.finishes.insert(registers[*owner as usize], registers[i]);
                     self.scope.pop();
                 }
@@ -125,24 +125,24 @@ fn remap(instruction: &I, registers: &[i64], uniform: i64) -> I {
     let at = |n: i64| registers[n as usize];
     match instruction {
         I::Uniform(n, component) => I::Uniform(uniform + n, *component),
-        I::Array_prepare(n, ty) => I::Array_prepare(uniform + n, ty.clone()),
-        I::Text_uniform(n) => I::Text_uniform(uniform + n),
-        I::Int_uniform(n) => I::Int_uniform(uniform + n),
-        I::Loop_begin(loop_) => I::Loop_begin(R::Loop {
+        I::ArrayPrepare(n, ty) => I::ArrayPrepare(uniform + n, ty.clone()),
+        I::TextUniform(n) => I::TextUniform(uniform + n),
+        I::IntUniform(n) => I::IntUniform(uniform + n),
+        I::LoopBegin(loop_) => I::LoopBegin(R::Loop {
             first: at(loop_.first),
             last: at(loop_.last),
             initial: loop_.initial.iter().map(|r| at(*r)).collect(),
             finish: -1,
             ..loop_.clone()
         }),
-        I::Loop_carry(owner, component, ty) => I::Loop_carry(at(*owner), *component, ty.clone()),
-        I::Loop_end(owner, next, stop) => I::Loop_end(at(*owner), next.iter().map(|r| at(*r)).collect(), stop.map(at)),
-        I::Loop_result(owner, component, ty) => I::Loop_result(at(*owner), *component, ty.clone()),
+        I::LoopCarry(owner, component, ty) => I::LoopCarry(at(*owner), *component, ty.clone()),
+        I::LoopEnd(owner, next, stop) => I::LoopEnd(at(*owner), next.iter().map(|r| at(*r)).collect(), stop.map(at)),
+        I::LoopResult(owner, component, ty) => I::LoopResult(at(*owner), *component, ty.clone()),
         I::Guarded(guards, body) => I::Guarded(guards.iter().map(|(c, yes)| (at(*c), *yes)).collect(), Box::new(remap(body, registers, uniform))),
         // the prepared array is a register too: `map_registers` leaves it as it is
         I::Gather(a, i, w, c) => I::Gather(at(*a), at(*i), *w, *c),
-        I::Int_gather(a, i) => I::Int_gather(at(*a), at(*i)),
-        I::Text_gather(a, i) => I::Text_gather(at(*a), at(*i)),
+        I::IntGather(a, i) => I::IntGather(at(*a), at(*i)),
+        I::TextGather(a, i) => I::TextGather(at(*a), at(*i)),
         other => R::map_registers(&at, other),
     }
 }
@@ -362,7 +362,7 @@ fn fill(source: &Source, width: i64) -> Option<Vec<I>> {
                 }
             });
             return match (term.name(op.op), value, width) {
-                ("array/int", Some(Value::Int(n)), 1) => Some(vec![I::Int_const(n)]),
+                ("array/int", Some(Value::Int(n)), 1) => Some(vec![I::IntConst(n)]),
                 ("array/float", Some(Value::Float(x)), 1) => Some(vec![I::Const(x)]),
                 ("array/float", Some(Value::Int(n)), 1) => Some(vec![I::Const(n as f64)]),
                 ("array/vec3", Some(Value::Vec3(x, y, z)), 3) => Some(vec![I::Const(x), I::Const(y), I::Const(z)]),

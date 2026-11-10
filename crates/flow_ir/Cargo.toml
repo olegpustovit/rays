@@ -19,3 +19,6 @@ input = { path = "../input" }
 
 [dev-dependencies]
 flow_graph = { path = "../flow_graph" }
+
+[lints]
+workspace = true

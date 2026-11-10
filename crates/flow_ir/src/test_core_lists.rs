@@ -7,7 +7,7 @@ use flow_check::workspace as W;
 use flow_eval as E;
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{ResidualId, Value};
-use flow_syntax::{context, syntax};
+use flow_syntax::context;
 use input::Frame;
 use rays_diagnostic::Diagnostic;
 use std::sync::Arc;
@@ -116,7 +116,7 @@ fn core_list_stores_need_a_local_builder() {
     let init = || {
         vec![
             statement(0, C::StatementNode::Assign(0, C::Expr::Constant(0))),
-            statement(1, C::StatementNode::Assign(1, C::Expr::Prim(C::Primitive::Sequence_build, vec![("count".into(), 0)]))),
+            statement(1, C::StatementNode::Assign(1, C::Expr::Prim(C::Primitive::SequenceBuild, vec![("count".into(), 0)]))),
             statement(2, C::StatementNode::Assign(2, C::Expr::Constant(1))),
             statement(3, C::StatementNode::Assign(3, C::Expr::Constant(2))),
         ]
@@ -125,7 +125,7 @@ fn core_list_stores_need_a_local_builder() {
     let live = input::at_time(0.);
     let mut good = init();
     good.push(store());
-    assert!(ts::run_simple(&program(good), &live) == Ok(Value::List(Arc::new(vec![Value::Int(7), Value::No_geo]))));
+    assert!(ts::run_simple(&program(good), &live) == Ok(Value::List(Arc::new(vec![Value::Int(7), Value::NoGeo]))));
     let mut published = init();
     published.push(statement(5, C::StatementNode::Assign(4, C::Expr::Local(1))));
     published.push(statement(6, C::StatementNode::Assign(5, C::Expr::Fields(vec![("xs".into(), 4)]))));
@@ -154,7 +154,7 @@ fn cooked_builders_have_their_own_length_guard() {
         body: vec![
             statement(0, C::StatementNode::Assign(0, C::Expr::Constant(0))),
             statement(1, C::StatementNode::Assign(1, C::Expr::Constant(1))),
-            statement(2, C::StatementNode::Assign(2, C::Expr::Prim(C::Primitive::Sequence_build, vec![("count".into(), 0), ("cooked".into(), 1)]))),
+            statement(2, C::StatementNode::Assign(2, C::Expr::Prim(C::Primitive::SequenceBuild, vec![("count".into(), 0), ("cooked".into(), 1)]))),
         ],
         results: vec![2],
         state_slots: vec![],
@@ -163,7 +163,7 @@ fn cooked_builders_have_their_own_length_guard() {
     };
     let live = input::at_time(0.);
     match ts::run(None, true, None, None, &program(5001, true), &live) {
-        Ok(Value::List(xs)) => assert!(xs.len() == 5001 && xs.iter().all(|x| *x == Value::No_geo)),
+        Ok(Value::List(xs)) => assert!(xs.len() == 5001 && xs.iter().all(|x| *x == Value::NoGeo)),
         _ => panic!("Typed cooked collection retained an unrelated value-list cap"),
     }
     for (count, cooked) in [(5001, false), (-1, true)] {
@@ -191,7 +191,7 @@ fn oversized_core_builders_report_typed_memory() {
             }
         }
         let mut body = (0..constants.len()).map(|id| C::Statement { id: id as i64, source: builder_source(), node: C::StatementNode::Assign(id as i64, C::Expr::Constant(id as i64)) }).collect::<Vec<_>>();
-        body.push(C::Statement { id: 4, source: builder_source(), node: C::StatementNode::Assign(4, C::Expr::Prim(C::Primitive::Sequence_build, args)) });
+        body.push(C::Statement { id: 4, source: builder_source(), node: C::StatementNode::Assign(4, C::Expr::Prim(C::Primitive::SequenceBuild, args)) });
         let program = C::Program { constants, locals: vec![Ty::Int, Ty::Int, Ty::Bool, Ty::Text, if width == 0 { Ty::List(Box::new(element)) } else { Ty::Array(Box::new(element)) }], body, results: vec![4], state_slots: vec![], regions: vec![], call_slots: 0 };
         assert_eq!(ts::run_simple(&program, &input::at_time(0.)).unwrap_err().code, "E_ARRAY_MEMORY");
     }
@@ -219,7 +219,7 @@ fn known_5001_geometry_map_filter_captures() {
     // 5001 elements in RAYS_SLOW=1. The default 257 still overflows the 100-statement loop-body check; the
     // reference clones the whole captured list per selector call, so the cost is quadratic in this size.
     let n = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 5001 } else { 257 };
-    let xs: Vec<Value> = (0..n).map(|i| if i % 11 == 10 { Value::No_geo } else { Value::Deferred(ty::geometry(), if i % 2 == 0 { 17 } else { 23 }) }).collect();
+    let xs: Vec<Value> = (0..n).map(|i| if i % 11 == 10 { Value::NoGeo } else { Value::Deferred(ty::geometry(), if i % 2 == 0 { 17 } else { 23 }) }).collect();
     let resolve: crate::core_exec::ResolveFn = Arc::new(|value: &Value| match value {
         Value::Source(g) if g.name == "$core/cooked" && g.ty == ty::geometry() => match (g.fields.len(), g.fields.iter().next()) {
             (1, Some((_, Value::Int(id)))) => Ok(Value::Deferred(g.ty.clone(), *id)),
@@ -252,7 +252,7 @@ fn known_5001_geometry_map_filter_captures() {
         }
         let builds = |statements: &[C::Statement]| {
             let mut count = 0;
-            C::iter(&mut |s: &C::Statement| { if matches!(&s.node, C::StatementNode::Assign(_, C::Expr::Prim(C::Primitive::Sequence_build, _))) { count += 1; } }, statements);
+            C::iter(&mut |s: &C::Statement| { if matches!(&s.node, C::StatementNode::Assign(_, C::Expr::Prim(C::Primitive::SequenceBuild, _))) { count += 1; } }, statements);
             count
         };
         assert!(loops.iter().all(|body| builds(body) == 0));

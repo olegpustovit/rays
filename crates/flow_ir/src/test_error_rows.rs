@@ -82,10 +82,10 @@ fn range_last(body: &str) -> String { format!("(error_rows flags {body} :policy 
 #[test]
 fn clean_flags_never_ask_the_host_or_run_the_mapper() {
     let calls = Arc::new(AtomicI64::new(0));
-    let empty = Value::Int_array(Arc::new(vec![]));
-    let zero = Value::Int_array(Arc::new(vec![0; 32769]));
+    let empty = Value::IntArray(Arc::new(vec![]));
+    let zero = Value::IntArray(Arc::new(vec![0; 32769]));
     for flags in [empty, zero] {
-        assert!(evaluate(Some(resolve(97, &calls)), flags, &range_last(r##"(fn [index] (error "E_UNTAKEN" "mapper"))"##)) == Ok(Value::No_geo));
+        assert!(evaluate(Some(resolve(97, &calls)), flags, &range_last(r##"(fn [index] (error "E_UNTAKEN" "mapper"))"##)) == Ok(Value::NoGeo));
     }
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
@@ -97,7 +97,7 @@ fn boundary_and_tail_selection_with_complete_immutable_flags() {
         let mut rows = vec![0i64; 32769];
         for i in &bits { rows[*i] = 1; }
         let before = rows.clone();
-        let flags = Value::Int_array(Arc::new(rows.clone()));
+        let flags = Value::IntArray(Arc::new(rows.clone()));
         for grain in [1, 97, 4096, i64::MAX] {
             let selected = V::error_row_index(&flags, Some(grain), None).unwrap().expect("a failing row");
             failure(selected, evaluate(Some(resolve(grain, &calls)), flags.clone(), &range_last(MAPPER)));
@@ -109,13 +109,13 @@ fn boundary_and_tail_selection_with_complete_immutable_flags() {
 
 #[test]
 fn malformed_context_cancellation_and_laziness() {
-    let one = || Value::Int_array(Arc::new(vec![1]));
+    let one = || Value::IntArray(Arc::new(vec![1]));
     match evaluate(None, one(), &range_last(MAPPER)) {
         Err(d) => assert!(d.code == "E_DIAGNOSTIC_CONTEXT"),
         _ => panic!("expected E_DIAGNOSTIC_CONTEXT"),
     }
     // A malformed later flag cannot hide behind an earlier ordinary failure.
-    match evaluate(None, Value::Int_array(Arc::new(vec![1, 0, 2])), &format!("(error_rows flags {MAPPER})")) {
+    match evaluate(None, Value::IntArray(Arc::new(vec![1, 0, 2])), &format!("(error_rows flags {MAPPER})")) {
         Err(d) => assert!(d.code == "E_DIAGNOSTIC_ROWS"),
         _ => panic!("expected E_DIAGNOSTIC_ROWS"),
     }
@@ -137,7 +137,7 @@ fn malformed_context_cancellation_and_laziness() {
     let check = || -> Result<(), Diagnostic> {
         if polls.fetch_add(1, Ordering::SeqCst) + 1 == 3 { Err(V::fail("E_CANCELLED", "cancel scan")) } else { Ok(()) }
     };
-    match V::error_row_index(&Value::Int_array(Arc::new(vec![0; 5001])), Some(97), Some(&check)) {
+    match V::error_row_index(&Value::IntArray(Arc::new(vec![0; 5001])), Some(97), Some(&check)) {
         Err(d) => assert!(d.code == "E_CANCELLED"),
         Ok(_) => panic!("the scan was not cancelled"),
     }
@@ -179,7 +179,7 @@ mod graph_edits {
         let (forms, workspace) = ok(apply_checked(&catalog(), &forms, &Op::SetArg { node: card.path.clone(), key: ArgKey::Pos(1), sub: vec![], value: make(Node::Num("1".into())) }));
         let printed = lisp::print(&forms).unwrap().0;
         checked(&printed);
-        let result = ok(E::static_with(&workspace, true, Some(&[("g".into(), vec![("flags".into(), Value::Int_array(Arc::new(vec![])))])]), None));
+        let result = ok(E::static_with(&workspace, true, Some(&[("g".into(), vec![("flags".into(), Value::IntArray(Arc::new(vec![])))])]), None));
         let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
         let value = result.records.iter().find(|(p, _)| *p == path).unwrap().1[0].1.clone();
         failure(0, E::host::force_reference(&value, &input::at_time(0.), None, None, None));
@@ -200,7 +200,7 @@ mod graph_edits {
             1,
             evaluate(
                 Some(resolve(97, &calls)),
-                Value::Int_array(Arc::new(vec![])),
+                Value::IntArray(Arc::new(vec![])),
                 &format!("(error_rows (array/int 2 1) {MAPPER} :policy \"range-last\")"),
             ),
         );

@@ -2,7 +2,7 @@
 //! placement and sibling fusion of a lowered program's mark sets. A rule names the inputs it needs,
 //! supplies the defaults (white ink and fill, width 1) and writes statements; every check of a
 //! value is the executor's.
-#![allow(non_camel_case_types, non_snake_case)]
+
 
 use flow_syntax::symbol::Symbol;
 use crate::core_ir as C;
@@ -103,7 +103,7 @@ pub fn static_invokes(program: &C::Program) -> Vec<bool> {
     let mut nested = vec![false; n];
     let mut mark = |top: bool, statement: &C::Statement| {
         let mut slots = C::writes(statement);
-        if let C::StatementNode::State_write { value, .. } = &statement.node { slots.push(*value); }
+        if let C::StatementNode::StateWrite { value, .. } = &statement.node { slots.push(*value); }
         for slot in slots {
             writes[slot as usize] += 1;
             if !top { nested[slot as usize] = true; }
@@ -122,7 +122,7 @@ pub fn static_invokes(program: &C::Program) -> Vec<bool> {
             C::Expr::Prim(op, args) => *op != C::Primitive::Rand && args.iter().all(|(_, a)| is_static[*a as usize]),
             C::Expr::Vec(ns) | C::Expr::Items(ns) => ns.iter().all(|a| is_static[*a as usize]),
             C::Expr::Fields(fs) => fs.iter().all(|(_, a)| is_static[*a as usize]),
-            C::Expr::Frame(_) | C::Expr::Call_index(_) | C::Expr::Source(_) | C::Expr::Host_source { .. } | C::Expr::Source_descriptor { .. } => false,
+            C::Expr::Frame(_) | C::Expr::CallIndex(_) | C::Expr::Source(_) | C::Expr::HostSource { .. } | C::Expr::SourceDescriptor { .. } => false,
         }
     }
     for s in &program.body {
@@ -176,8 +176,8 @@ fn scan_block(statements: &[C::Statement], blocks: &mut Vec<Vec<Item>>, info: &m
             C::StatementNode::Protect { body, handler, .. } => { scan_block(body, blocks, info, occurrences, writes, writer); scan_block(handler, blocks, info, occurrences, writes, writer); }
             C::StatementNode::Counted { init, body, .. } => { scan_block(init, blocks, info, occurrences, writes, writer); scan_block(body, blocks, info, occurrences, writes, writer); }
             C::StatementNode::Iterate { body, .. } => scan_block(body, blocks, info, occurrences, writes, writer),
-            C::StatementNode::State_read { init, .. } => scan_block(init, blocks, info, occurrences, writes, writer),
-            C::StatementNode::Diagnose_rows { handler, .. } => scan_block(handler, blocks, info, occurrences, writes, writer),
+            C::StatementNode::StateRead { init, .. } => scan_block(init, blocks, info, occurrences, writes, writer),
+            C::StatementNode::DiagnoseRows { handler, .. } => scan_block(handler, blocks, info, occurrences, writes, writer),
             _ => {}
         }
     }
@@ -347,14 +347,14 @@ fn node(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node) -> Result<(), St
         owner: n.site.clone(),
         instance: n.inst,
         prefix: Vec::new(),
-        iter: n.iter.iter().map(|i| C::Iteration::Static_index(*i)).collect(),
+        iter: n.iter.iter().map(|i| C::Iteration::StaticIndex(*i)).collect(),
         span: None,
     };
     if n.ty != ty::drawing() {
         fail(ctx, &source, "E_TYPE", "The canvas needs a Drawing node.");
         return Ok(());
     }
-    // The data inputs, in written order, as drawing.ml forces them.
+    // The data inputs, in written order, as  forces them.
     let data: Vec<&(Symbol, Value)> = match n.kind.as_str() {
         "draw/merge" => Vec::new(),
         "draw/translate" | "draw/rotate" | "draw/scale" => n.args.iter().filter(|(k, _)| k != "drawing").collect(),
@@ -459,7 +459,7 @@ fn rule(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node, source: &C::Sour
             let text = need("text")?;
             let ink = default(ctx, source, locals, "color", &white)?;
             let size = default(ctx, source, locals, "size", &Value::Int(16))?;
-            emit(ctx, C::Draw::Text_run { at, text, ink, size });
+            emit(ctx, C::Draw::TextRun { at, text, ink, size });
         }
         "draw/image" => {
             let image = match n.args.iter().find(|(k, _)| k == "image") {
@@ -479,7 +479,7 @@ fn rule(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node, source: &C::Sour
             let st = style(ctx, source, locals, &white)?;
             let mut a = args(&[("at", at), ("size", size), ("radius", radius)]);
             a.extend(st);
-            emit(ctx, C::Draw::Path { path: C::PathKind::Rounded_rect, args: a });
+            emit(ctx, C::Draw::Path { path: C::PathKind::RoundedRect, args: a });
         }
         "draw/polygon" => {
             let points = need("points")?;

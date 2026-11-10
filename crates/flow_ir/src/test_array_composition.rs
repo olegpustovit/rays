@@ -21,9 +21,9 @@ fn sample(ty: &Ty, count: usize) -> Value {
     match ty {
         Ty::Int => {
             let p = [MIN_INT, MAX_INT, 9007199254740993, -1, 0];
-            Value::Int_array(Arc::new((0..count).map(|i| p[i % 5]).collect()))
+            Value::IntArray(Arc::new((0..count).map(|i| p[i % 5]).collect()))
         }
-        Ty::Text => Value::Text_array(Arc::new((0..count).map(|i| if i % 2 == 0 { all_bytes() } else { "é日本😀\0".as_bytes().to_vec() }).collect::<rays_math::text_array::TextArray>())),
+        Ty::Text => Value::TextArray(Arc::new((0..count).map(|i| if i % 2 == 0 { all_bytes() } else { "é日本😀\0".as_bytes().to_vec() }).collect::<rays_math::text_array::TextArray>())),
         ty => {
             let width = flow_syntax::packed_ops::scalar_width(ty).unwrap();
             let p = [-0., 0., f64::from_bits(1), 1., -1.];
@@ -44,8 +44,8 @@ fn concat_expected(a: &Value, b: &Value) -> Value {
         Arc::new(a.iter().chain(b.iter()).cloned().collect())
     }
     match (a, b) {
-        (Value::Int_array(a), Value::Int_array(b)) => Value::Int_array(cat(a, b)),
-        (Value::Text_array(a), Value::Text_array(b)) => Value::Text_array(Arc::new(a.iter().chain(b.iter()).collect())),
+        (Value::IntArray(a), Value::IntArray(b)) => Value::IntArray(cat(a, b)),
+        (Value::TextArray(a), Value::TextArray(b)) => Value::TextArray(Arc::new(a.iter().chain(b.iter()).collect())),
         (Value::Floats(1, a), Value::Floats(1, b)) => Value::Floats(1, cat(a, b)),
         (Value::Floats(2, a), Value::Floats(2, b)) => Value::Floats(2, cat(a, b)),
         (Value::Floats(3, a), Value::Floats(3, b)) => Value::Floats(3, cat(a, b)),
@@ -58,8 +58,8 @@ fn slice_expected(a: &Value, first: usize, count: usize) -> Value {
         Arc::new(a[w * first..w * (first + count)].to_vec())
     }
     match a {
-        Value::Int_array(a) => Value::Int_array(sub(a, 1, first, count)),
-        Value::Text_array(a) => Value::Text_array(Arc::new(a.iter().skip(first).take(count).collect())),
+        Value::IntArray(a) => Value::IntArray(sub(a, 1, first, count)),
+        Value::TextArray(a) => Value::TextArray(Arc::new(a.iter().skip(first).take(count).collect())),
         Value::Floats(1, a) => Value::Floats(1, sub(a, 1, first, count)),
         Value::Floats(2, a) => Value::Floats(2, sub(a, 2, first, count)),
         Value::Floats(3, a) => Value::Floats(3, sub(a, 3, first, count)),
@@ -70,8 +70,8 @@ fn slice_expected(a: &Value, first: usize, count: usize) -> Value {
 /// Whether two array values share one allocation.
 fn shares_storage(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Int_array(a), Value::Int_array(b)) => Arc::ptr_eq(a, b),
-        (Value::Text_array(a), Value::Text_array(b)) => Arc::ptr_eq(a, b),
+        (Value::IntArray(a), Value::IntArray(b)) => Arc::ptr_eq(a, b),
+        (Value::TextArray(a), Value::TextArray(b)) => Arc::ptr_eq(a, b),
         (Value::Floats(aw @ 1..=4, a), Value::Floats(bw, b)) if aw == bw => Arc::ptr_eq(a, b),
         _ => false,
     }
@@ -86,7 +86,7 @@ fn instantiated(ty: &Ty, table: Value, body: &str, indices: Vec<i64>) -> Value {
         Value::Fn(f) => *f,
         _ => panic!("expected a function"),
     };
-    ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: ty.clone() }, f, &[Value::Int_array(Arc::new(indices))]))
+    ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: ty.clone() }, f, &[Value::IntArray(Arc::new(indices))]))
 }
 
 #[test]
@@ -162,8 +162,8 @@ per_type!(gather_int: Ty::Int, gather_float: Ty::Float, gather_vec2: Ty::Vec2, g
 fn has_array_prepare(program: &crate::core_ir::Program) -> bool {
     program.regions.iter().any(|r| {
         r.code.iter().any(|i| match i {
-            Instruction::Array_prepare(..) => true,
-            Instruction::Guarded(_, inner) => matches!(**inner, Instruction::Array_prepare(..)),
+            Instruction::ArrayPrepare(..) => true,
+            Instruction::Guarded(_, inner) => matches!(**inner, Instruction::ArrayPrepare(..)),
             _ => false,
         })
     })
@@ -345,7 +345,7 @@ fn captured_helpers() {
                 for time in [-0.25, 0.25] {
                     let live = live_at(time);
                     let reference = force_reference(&value, &live);
-                    let want = Value::Int_array(Arc::new(vec![expected(time); count as usize]));
+                    let want = Value::IntArray(Arc::new(vec![expected(time); count as usize]));
                     assert_eq!(bits(reference.as_ref().unwrap()), bits(&want));
                     for domains in [1, 8] {
                         with_domains(domains, &|| {

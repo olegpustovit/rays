@@ -1,5 +1,5 @@
 //! Public typed dataflow IR over evaluation. Backend/kernel closures use Arc so kernels can be shared; backend physical identity is Arc::ptr_eq.
-#![allow(non_camel_case_types, non_snake_case, clippy::too_many_arguments, clippy::type_complexity)]
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 use flow_syntax::symbol::{self, Symbol};
 use crate::core_exec;
@@ -219,18 +219,18 @@ pub mod gpu {
 pub type Id = (Path, Vec<i64>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Tier { Interp, Core, Cpu_kernel, Gpu, Gpu_compile, Gpu_readback }
+pub enum Tier { Interp, Core, CpuKernel, Gpu, GpuCompile, GpuReadback }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlacementReason {
-    Unsupported_form,
-    Missing_consumer,
-    Validation_read,
-    Cpu_consumer,
-    No_cost_evidence,
-    Cpu_measured_cheaper,
-    Device_measured_cheaper,
-    Held_on_device,
+    UnsupportedForm,
+    MissingConsumer,
+    ValidationRead,
+    CpuConsumer,
+    NoCostEvidence,
+    CpuMeasuredCheaper,
+    DeviceMeasuredCheaper,
+    HeldOnDevice,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -328,8 +328,8 @@ pub mod profile {
     pub fn place(profile: Option<&Arc<T>>, placement: &Placement) {
         let off = |reason: &str| fallback::note(&flow_syntax::symbol::join_path(&placement.owner.0, "/"), reason);
         match placement.reason {
-            PlacementReason::Unsupported_form => off("its form is refused on the device"),
-            PlacementReason::Missing_consumer => off("nothing says who reads it"),
+            PlacementReason::UnsupportedForm => off("its form is refused on the device"),
+            PlacementReason::MissingConsumer => off("nothing says who reads it"),
             _ => {}
         }
         let profile = match profile {
@@ -460,7 +460,7 @@ pub mod cost {
             // inner-loop bodies cost more; this remains the cheap-body baseline.
             Tier::Interp => TierCost { fixed: 0.0, per_element: 0.614741 / 1_000_000.0 },
             Tier::Core => TierCost { fixed: 0.000000170, per_element: 0.0 },
-            Tier::Cpu_kernel => {
+            Tier::CpuKernel => {
                 let per_element = (0.016522884 - 0.000040054) / (1_000_000.0 - 1024.0);
                 TierCost { fixed: 0.000040054 - (per_element * 1024.0), per_element }
             }
@@ -468,11 +468,11 @@ pub mod cost {
                 let per_element = (0.020215034 - 0.000437975) / (1_000_000.0 - 1024.0);
                 TierCost { fixed: 0.000437975 - (per_element * 1024.0), per_element }
             }
-            Tier::Gpu_readback => {
+            Tier::GpuReadback => {
                 let per_element = (0.007947922 - 0.000010014) / (1_000_000.0 - 1024.0);
                 TierCost { fixed: 0.000010014 - (per_element * 1024.0), per_element }
             }
-            Tier::Gpu_compile => TierCost { fixed: 0.008223057, per_element: 0.0 },
+            Tier::GpuCompile => TierCost { fixed: 0.008223057, per_element: 0.0 },
         }
     }
 
@@ -487,7 +487,7 @@ pub mod cost {
         count as f64
             * match tier {
                 Tier::Gpu => ((0.028567791 - 0.001480103) / 990_000.0) - table(Tier::Gpu).per_element,
-                _ => ((0.903350830 - 0.010123968) / 990_000.0) - table(Tier::Cpu_kernel).per_element,
+                _ => ((0.903350830 - 0.010123968) / 990_000.0) - table(Tier::CpuKernel).per_element,
             }
     }
 
@@ -501,7 +501,7 @@ pub mod cost {
     }
 
     /// The same measured CPU decision used at placement and force time.
-    pub fn packed(count: i64) -> Tier { cheapest(&[Tier::Interp, Tier::Cpu_kernel], count) }
+    pub fn packed(count: i64) -> Tier { cheapest(&[Tier::Interp, Tier::CpuKernel], count) }
 
     /// Compare total time to the known consumers, including transfers, validation and sinks.
     /// Missing, negative or nonfinite evidence keeps CPU. Ties keep CPU.
@@ -511,14 +511,14 @@ pub mod cost {
         match (cpu_seconds, device_seconds) {
             (Some(cpu), Some(device)) if valid(cpu) && valid(device) => {
                 if device < cpu {
-                    if resident { PlacementReason::Held_on_device } else { PlacementReason::Device_measured_cheaper }
+                    if resident { PlacementReason::HeldOnDevice } else { PlacementReason::DeviceMeasuredCheaper }
                 } else if cpu_consumers > 0 {
-                    PlacementReason::Cpu_consumer
+                    PlacementReason::CpuConsumer
                 } else {
-                    PlacementReason::Cpu_measured_cheaper
+                    PlacementReason::CpuMeasuredCheaper
                 }
             }
-            _ => PlacementReason::No_cost_evidence,
+            _ => PlacementReason::NoCostEvidence,
         }
     }
 
@@ -527,26 +527,26 @@ pub mod cost {
     pub fn probe_budget(device_seconds: f64) -> f64 { f64::max(0.02, 2.0 * device_seconds) }
 
     pub fn on_device(reason: PlacementReason) -> bool {
-        matches!(reason, PlacementReason::Device_measured_cheaper | PlacementReason::Held_on_device)
+        matches!(reason, PlacementReason::DeviceMeasuredCheaper | PlacementReason::HeldOnDevice)
     }
 
     pub fn reason_name(reason: PlacementReason) -> &'static str {
         match reason {
-            PlacementReason::Unsupported_form => "unsupported_form",
-            PlacementReason::Missing_consumer => "missing_consumer",
-            PlacementReason::Validation_read => "validation_read",
-            PlacementReason::Cpu_consumer => "cpu_consumer",
-            PlacementReason::No_cost_evidence => "no_cost_evidence",
-            PlacementReason::Cpu_measured_cheaper => "cpu_measured_cheaper",
-            PlacementReason::Device_measured_cheaper => "device_measured_cheaper",
-            PlacementReason::Held_on_device => "held_on_device",
+            PlacementReason::UnsupportedForm => "unsupported_form",
+            PlacementReason::MissingConsumer => "missing_consumer",
+            PlacementReason::ValidationRead => "validation_read",
+            PlacementReason::CpuConsumer => "cpu_consumer",
+            PlacementReason::NoCostEvidence => "no_cost_evidence",
+            PlacementReason::CpuMeasuredCheaper => "cpu_measured_cheaper",
+            PlacementReason::DeviceMeasuredCheaper => "device_measured_cheaper",
+            PlacementReason::HeldOnDevice => "held_on_device",
         }
     }
 
     /// Seconds to move `count` elements of `width` floats between host and device: the M1 table, or
     /// the gpu config's `readback_per_float` when the device measured its own.
     pub fn readback(gpu: Option<&gpu::Config>, count: i64, width: i64) -> f64 {
-        let cost = table(Tier::Gpu_readback);
+        let cost = table(Tier::GpuReadback);
         let per_float = gpu.and_then(|g| g.readback_per_float).unwrap_or(cost.per_element);
         cost.fixed + (per_float * count as f64 * width as f64)
     }
@@ -567,7 +567,7 @@ fn scalar_uniforms(packed: &Packed) -> bool {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Sink { Display(String), Sop_input }
+pub enum Sink { Display(String), SopInput }
 
 // ---------------------------------------------------------------------------------------------
 // Static kernels.
@@ -577,7 +577,7 @@ pub const STATIC_VERIFICATION_FAILED: &str = "E_STATIC_VERIFICATION_FAILED";
 
 fn same_bits(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Int_array(a), Value::Int_array(b)) => a == b,
+        (Value::IntArray(a), Value::IntArray(b)) => a == b,
         (Value::Floats(aw @ 1..=4, a), Value::Floats(bw, b)) if aw == bw => a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits()),
         _ => false,
     }
@@ -608,7 +608,7 @@ fn guarded_force(f: &mut dyn FnMut() -> Result<Value, Diagnostic>) -> Result<Val
 /// zero; eager recording still checks its ordinary head. Qualification additionally compares every
 /// element with the reference (a difference is recorded in `failure`).
 fn static_map(verify: bool, failure: &Arc<Mutex<Option<Diagnostic>>>, residual: ResidualId) -> Option<Value> {
-    profile::attempt(Tier::Cpu_kernel, &mut |refuse: &dyn Fn(Vec<Diagnostic>)| {
+    profile::attempt(Tier::CpuKernel, &mut |refuse: &dyn Fn(Vec<Diagnostic>)| {
         let value = Value::Residual(residual);
         if e::frame_dependent(&value) || e::state_dependent(&value) { return None; }
         let view = e::residual::residual_view(residual).ok()?;
@@ -1001,7 +1001,7 @@ impl Qualifier {
                     None,
                     &Placement { owner: (site_path.clone(), site_iter.clone()), count: Some(count), reason, cpu_seconds, device_seconds, cpu_consumers: Some(1) },
                 );
-                cost::on_device(reason) || (inputs.is_none() && reason == PlacementReason::No_cost_evidence)
+                cost::on_device(reason) || (inputs.is_none() && reason == PlacementReason::NoCostEvidence)
             };
             if !packed::gpu_refusals(true, fast, &packed).is_empty() || (scalar_uniforms(&packed) && !placed(None, count)) {
                 return None;
@@ -1521,7 +1521,7 @@ pub mod executor {
                     let (_, path, iter) = packed::site(packed);
                     profile::record(
                         &profile,
-                        &Execution { owner: (path, iter), sites, seconds, tier: if reference { Tier::Interp } else { Tier::Cpu_kernel } },
+                        &Execution { owner: (path, iter), sites, seconds, tier: if reference { Tier::Interp } else { Tier::CpuKernel } },
                     );
                 })
             },
@@ -1569,7 +1569,6 @@ pub mod executor {
         forced: Mutex<HashMap<(i64, i64), Value>>,
         operation: Mutex<HashMap<((i64, i64), bool), Candidate>>,
         fell_back: std::sync::atomic::AtomicBool,
-        packed_ran: Arc<std::sync::atomic::AtomicBool>,
     }
 
     fn reference(run: &Run, value: &Value, state: &e::State) -> Result<Value, Diagnostic> {
@@ -1603,7 +1602,7 @@ pub mod executor {
                             Ok(core) => {
                                 // Placement declines before execution, while state is untouched.
                                 let declined = !self.o.strict
-                                    && core.regions.iter().any(|region| region.count.map(|count| cost::packed(count) != Tier::Cpu_kernel).unwrap_or(false));
+                                    && core.regions.iter().any(|region| region.count.map(|count| cost::packed(count) != Tier::CpuKernel).unwrap_or(false));
                                 if declined { template(r) } else { Candidate::Core(Arc::new(core_exec::prepare(&core, false, false, &Paths::new(), false))) }
                             }
                             Err(_) => template(r),
@@ -1676,7 +1675,7 @@ pub mod executor {
             match self.candidate(r) {
                 Candidate::Core(p) => Some(self.execute_core(Some(r), &p)),
                 Candidate::Packed(p)
-                    if self.o.strict || !packed::static_count(&p).map(|count| cost::packed(count) != Tier::Cpu_kernel).unwrap_or(false) =>
+                    if self.o.strict || !packed::static_count(&p).map(|count| cost::packed(count) != Tier::CpuKernel).unwrap_or(false) =>
                 {
                     Some(packed::force(&p, live, &self.force_options()))
                 }
@@ -1796,7 +1795,6 @@ pub mod executor {
                 forced: Mutex::new(HashMap::new()),
                 operation: Mutex::new(HashMap::new()),
                 fell_back: std::sync::atomic::AtomicBool::new(false),
-                packed_ran: packed_ran.clone(),
             });
             let fallback = |run: &Arc<Run>| -> Result<Value, Diagnostic> {
                 run.fell_back.store(true, Ordering::Relaxed);
@@ -1862,7 +1860,7 @@ pub mod executor {
                     }
                     Some(into) => {
                         let mut outputs = into.outputs.lock().unwrap();
-                        packed::force_into(&into.packed, live, &run.force_options(), &into.column_source, into.count, &mut outputs).map(|_| Value::No_geo)
+                        packed::force_into(&into.packed, live, &run.force_options(), &into.column_source, into.count, &mut outputs).map(|_| Value::NoGeo)
                     }
                 }
             };
@@ -1877,7 +1875,7 @@ pub mod executor {
             result = match (transacted, produced) {
                 (_, Some(r)) => r,
                 (Err(d), None) => Err(d),
-                (Ok(()), None) => Ok(Value::No_geo),
+                (Ok(()), None) => Ok(Value::NoGeo),
             };
             fell_back = fell_back || run.fell_back.load(Ordering::Relaxed);
         }
@@ -2006,16 +2004,16 @@ pub mod executor {
             );
             Ok(None)
         };
-        let Some(backend) = gpu.backend.clone() else { return refused(PlacementReason::No_cost_evidence) };
+        let Some(backend) = gpu.backend.clone() else { return refused(PlacementReason::NoCostEvidence) };
         let fast = gpu.fast;
         let (_, site, _) = packed::site(packed_region);
         // fast precision: a displayed region needs no qualified path, its only use is the screen
         if !((fast && display) || approx.contains(&site)) || !packed::gpu_refusals(true, fast, packed_region).is_empty() {
-            return refused(PlacementReason::Unsupported_form);
+            return refused(PlacementReason::UnsupportedForm);
         }
         let cheaper = |inputs: Option<&packed::Inputs>, count: i64| -> bool {
             if gpu.policy == gpu::Policy::Qualification { return true; }
-            let cpu_seconds = Some(cost::estimate(cost::packed(count), count) + if readback { 0.0 } else { cost::display_sink(Tier::Cpu_kernel, count) });
+            let cpu_seconds = Some(cost::estimate(cost::packed(count), count) + if readback { 0.0 } else { cost::display_sink(Tier::CpuKernel, count) });
             let device_seconds = backend.cost(inputs, fast, packed_region, count).and_then(|seconds| {
                 if !(seconds.is_finite() && seconds >= 0.0) {
                     None
@@ -2030,7 +2028,7 @@ pub mod executor {
                 profile.as_ref(),
                 &Placement { owner: (path, iter), count: Some(count), reason, cpu_seconds, device_seconds, cpu_consumers: Some(cpu_consumers) },
             );
-            cost::on_device(reason) || (inputs.is_none() && reason == PlacementReason::No_cost_evidence)
+            cost::on_device(reason) || (inputs.is_none() && reason == PlacementReason::NoCostEvidence)
         };
         // Static cardinality lets unmeasured placement decline before allocating producer inputs,
         // especially the million-element exact SOP value lane.
@@ -2044,7 +2042,7 @@ pub mod executor {
         )?;
         if !cheaper(Some(&inputs), inputs.count) { return Ok(None); }
         if !(display || readback) {
-            let _ = refused(PlacementReason::Missing_consumer);
+            let _ = refused(PlacementReason::MissingConsumer);
             return Err(v::fail(
                 "E_APPROX_SINK",
                 "GPU arrays require a display sink or (exact x) before CPU, SOP, state, export or cache use.",
@@ -2083,7 +2081,7 @@ pub mod executor {
                         &Execution {
                             owner: (path, iter),
                             sites: packed::provenance(packed_region),
-                            tier: Tier::Gpu_compile,
+                            tier: Tier::GpuCompile,
                             seconds: ((p.clock)() - start.unwrap_or(0.0)).max(0.0),
                         },
                     );
@@ -2095,7 +2093,7 @@ pub mod executor {
         };
         let output = timed(Tier::Gpu, &|o: &gpu::Value| o.gpu_seconds, &mut || kernel.run(&inputs))?;
         if readback {
-            let value = timed_value(profile, packed_region, Tier::Gpu_readback, &mut || kernel.readback(&output))?;
+            let value = timed_value(profile, packed_region, Tier::GpuReadback, &mut || kernel.readback(&output))?;
             Ok(Some(Displayed::Cpu(value)))
         } else {
             Ok(Some(Displayed::Gpu(output)))
@@ -2146,7 +2144,7 @@ pub mod executor {
                 matches!(program.sink, Some(Sink::Display(_))),
                 &program.profile,
                 &program_cache(program),
-                *readback || program.sink == Some(Sink::Sop_input),
+                *readback || program.sink == Some(Sink::SopInput),
                 packed_region,
                 live,
             ),
@@ -2278,7 +2276,7 @@ pub mod executor {
             // the device carries integers as floats: an Int map comes back as the Int array it is
             let value = kernel.readback(&output)?;
             Ok(Some(match (value, packed_region.term.ty()) {
-                (Value::Floats(1, xs), Ty::Array(inner)) if **inner == Ty::Int => Value::Int_array(Arc::new(xs.iter().map(|x| *x as i64).collect())),
+                (Value::Floats(1, xs), Ty::Array(inner)) if **inner == Ty::Int => Value::IntArray(Arc::new(xs.iter().map(|x| *x as i64).collect())),
                 (value, _) => value,
             }))
         }
@@ -2306,7 +2304,7 @@ pub mod executor {
             }
         };
         match (&program.sink, widths, &gpu.backend, packed_root(program)) {
-            (Some(Sink::Sop_input), 1, Some(_), Some(p)) if packed::elementwise(&p) => {
+            (Some(Sink::SopInput), 1, Some(_), Some(p)) if packed::elementwise(&p) => {
                 let (packed_region, _) = program.packed_root.clone().expect("packed root");
                 match display_packed(
                     o.state.as_ref(),
@@ -2407,7 +2405,7 @@ pub mod executor {
                 &Placement {
                     owner: site(&program.value).unwrap_or_else(|| (vec!["@value".into()], Vec::new())),
                     count: o.expected_count,
-                    reason: PlacementReason::No_cost_evidence,
+                    reason: PlacementReason::NoCostEvidence,
                     cpu_seconds: None,
                     device_seconds: None,
                     cpu_consumers: o.cpu_consumers,
@@ -2427,7 +2425,7 @@ pub mod executor {
         match region {
             Some((names, merged)) if gpu.fast && packed::gpu_refusals(true, true, &merged).is_empty() => {
                 if gpu.policy == gpu::Policy::Measured && o.cpu_consumers.is_none() {
-                    report(&merged, packed::static_count(&merged), PlacementReason::Missing_consumer, None, None);
+                    report(&merged, packed::static_count(&merged), PlacementReason::MissingConsumer, None, None);
                     return Ok(None);
                 }
                 let select = |inputs: Option<&packed::Inputs>, preflight: bool, held: bool, held_readback: f64, count: i64| -> bool {
@@ -2458,7 +2456,7 @@ pub mod executor {
                     let reason = cost::choose(cpu_seconds, device_seconds, held, readers);
                     report(&merged, Some(count), reason, cpu_seconds, device_seconds);
                     cost::on_device(reason)
-                        || (preflight && reason == PlacementReason::No_cost_evidence && (cpu_seconds.is_some() || first.is_some()))
+                        || (preflight && reason == PlacementReason::NoCostEvidence && (cpu_seconds.is_some() || first.is_some()))
                         || (!preflight
                             && match &first {
                                 Some(first) => {
@@ -2535,7 +2533,7 @@ pub mod executor {
                 match device {
                     Ok(placed) => Ok(placed),
                     Err(_) => {
-                        report(&merged, packed::static_count(&merged), PlacementReason::Unsupported_form, None, None);
+                        report(&merged, packed::static_count(&merged), PlacementReason::UnsupportedForm, None, None);
                         Ok(None)
                     }
                 }
@@ -2544,7 +2542,7 @@ pub mod executor {
                 report(
                     &merged,
                     packed::static_count(&merged),
-                    if gpu.backend.is_none() { PlacementReason::No_cost_evidence } else { PlacementReason::Unsupported_form },
+                    if gpu.backend.is_none() { PlacementReason::NoCostEvidence } else { PlacementReason::UnsupportedForm },
                     None,
                     None,
                 );
@@ -2567,8 +2565,8 @@ pub mod executor {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Tests: ports of lib/flow_ir/test_ir.ml (cost, qualification), test_core_resident.ml,
-// test_core_parity.ml and test_frame_kernel.ml.
+// Tests: ports of  (cost, qualification), ,
+//  and .
 
 #[cfg(test)]
 mod tests {
@@ -2619,18 +2617,18 @@ mod tests {
     fn cost_choose_picks_by_measured_total_time() {
         let choose = |cpu: Option<f64>, device: Option<f64>, resident: bool, consumers: i64| cost::choose(cpu, device, resident, consumers);
         for bad in [None, Some(f64::NAN), Some(f64::INFINITY), Some(f64::NEG_INFINITY), Some(-1e-12)] {
-            assert_eq!(choose(bad, Some(1.0), false, 0), PlacementReason::No_cost_evidence);
-            assert_eq!(choose(Some(1.0), bad, false, 0), PlacementReason::No_cost_evidence);
+            assert_eq!(choose(bad, Some(1.0), false, 0), PlacementReason::NoCostEvidence);
+            assert_eq!(choose(Some(1.0), bad, false, 0), PlacementReason::NoCostEvidence);
         }
-        assert_eq!(choose(Some(1.0), Some(0.5), false, 0), PlacementReason::Device_measured_cheaper);
-        assert_eq!(choose(Some(1.0), Some(0.5), true, 0), PlacementReason::Held_on_device);
-        assert_eq!(choose(Some(1.0), Some(1.0), false, 0), PlacementReason::Cpu_measured_cheaper);
-        assert_eq!(choose(Some(1.0), Some(1.5), true, 1), PlacementReason::Cpu_consumer);
+        assert_eq!(choose(Some(1.0), Some(0.5), false, 0), PlacementReason::DeviceMeasuredCheaper);
+        assert_eq!(choose(Some(1.0), Some(0.5), true, 0), PlacementReason::HeldOnDevice);
+        assert_eq!(choose(Some(1.0), Some(1.0), false, 0), PlacementReason::CpuMeasuredCheaper);
+        assert_eq!(choose(Some(1.0), Some(1.5), true, 1), PlacementReason::CpuConsumer);
         assert!(!cost::on_device(choose(None, None, true, 0)));
-        assert_eq!(cost::reason_name(PlacementReason::Cpu_consumer), "cpu_consumer");
+        assert_eq!(cost::reason_name(PlacementReason::CpuConsumer), "cpu_consumer");
     }
 
-    // --- the resident device emulator (test_core_resident.ml) ----------------------------------
+    // --- the resident device emulator () ----------------------------------
 
     fn compile_value(body: &str) -> (Value, c::Program, core_exec::Prepared) {
         let body = format!("(if (>= t 0.) {body} {body})");
@@ -2686,7 +2684,7 @@ mod tests {
         fn kept(&self, value: &Value) -> Value {
             let count = v::array_length(value).unwrap() + 3;
             let placeholder = match value {
-                Value::Int_array(_) => Value::Int_array(Arc::new(vec![-999; count])),
+                Value::IntArray(_) => Value::IntArray(Arc::new(vec![-999; count])),
                 Value::Floats(3, _) => Value::Floats(3, Arc::new(vec![-999.0; count * 3])),
                 _ => panic!("unexpected device value"),
             };
@@ -2707,9 +2705,9 @@ mod tests {
         }
         fn compact(&self, mask: &Value) -> Result<Option<Value>, Diagnostic> {
             match self.actual(mask) {
-                Value::Int_array(mask) => {
+                Value::IntArray(mask) => {
                     let indices: Vec<i64> = (0..mask.len()).filter(|k| mask[*k] != 0).map(|k| k as i64).collect();
-                    Ok(Some(self.kept(&Value::Int_array(Arc::new(indices)))))
+                    Ok(Some(self.kept(&Value::IntArray(Arc::new(indices)))))
                 }
                 _ => Ok(None),
             }
@@ -2880,7 +2878,7 @@ mod tests {
         assert_eq!(actual, ok(e::host::force_reference(&value, &live, None, None, None)));
     }
 
-    // --- parity (test_core_parity.ml) ----------------------------------------------------------
+    // --- parity () ----------------------------------------------------------
 
     fn same_bits(a: &Value, b: &Value) -> bool {
         match (a, b) {
@@ -3002,7 +3000,7 @@ mod tests {
         }
     }
 
-    // --- frame folds (test_frame_kernel.ml) ----------------------------------------------------
+    // --- frame folds () ----------------------------------------------------
 
     fn live_at(frame: i64, dt: f64) -> Frame {
         let mut live = input::at_time(frame as f64 / 60.0);
@@ -3114,7 +3112,7 @@ mod tests {
     #[test]
     fn frame_kernel_prepared_programs_match_the_reference_b() { prepared_cases(3, 6); }
 
-    // --- test_ir.ml: qualification, GPU-neutral callbacks, executor parity ---------------------
+    // --- : qualification, GPU-neutral callbacks, executor parity ---------------------
 
     fn check_ops(ops: Vec<flow_check::op::Op>, source: &str) -> w::Workspace {
         let forms = syntax::parse(source).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
@@ -3298,33 +3296,33 @@ mod tests {
 
     fn static_price() -> Option<f64> {
         let cpu = cost::estimate(cost::packed(4097), 4097);
-        Some(cpu - cost::estimate(Tier::Gpu_readback, 8194))
+        Some(cpu - cost::estimate(Tier::GpuReadback, 8194))
     }
 
     // One test per case: each qualifies a 4,097-element map (the static-kernel threshold) and
     // walks it for the reference, about a second in a debug build.
     #[test]
-    fn static_maps_device_cheaper_from_actual_cost() { static_map_case(1, None, Some(0.0), Some(0.0), PlacementReason::Device_measured_cheaper, 1); }
+    fn static_maps_device_cheaper_from_actual_cost() { static_map_case(1, None, Some(0.0), Some(0.0), PlacementReason::DeviceMeasuredCheaper, 1); }
     #[test]
-    fn static_maps_prepared_only_evidence() { static_map_case(1, None, None, Some(0.0), PlacementReason::Device_measured_cheaper, 1); }
+    fn static_maps_prepared_only_evidence() { static_map_case(1, None, None, Some(0.0), PlacementReason::DeviceMeasuredCheaper, 1); }
     #[test]
-    fn static_maps_missing_actual_cost() { static_map_case(1, None, Some(0.0), None, PlacementReason::No_cost_evidence, 0); }
+    fn static_maps_missing_actual_cost() { static_map_case(1, None, Some(0.0), None, PlacementReason::NoCostEvidence, 0); }
     #[test]
-    fn static_maps_negative_cost() { static_map_case(1, None, Some(0.0), Some(-1e-12), PlacementReason::No_cost_evidence, 0); }
+    fn static_maps_negative_cost() { static_map_case(1, None, Some(0.0), Some(-1e-12), PlacementReason::NoCostEvidence, 0); }
     #[test]
-    fn static_maps_expensive_device_keeps_cpu_reader() { static_map_case(1, None, Some(1.0), Some(0.0), PlacementReason::Cpu_consumer, 0); }
+    fn static_maps_expensive_device_keeps_cpu_reader() { static_map_case(1, None, Some(1.0), Some(0.0), PlacementReason::CpuConsumer, 0); }
     #[test]
-    fn static_maps_priced_readback_scalar() { let p = static_price(); static_map_case(1, None, p, p, PlacementReason::Device_measured_cheaper, 1); }
+    fn static_maps_priced_readback_scalar() { let p = static_price(); static_map_case(1, None, p, p, PlacementReason::DeviceMeasuredCheaper, 1); }
     #[test]
-    fn static_maps_priced_readback_vec4() { let p = static_price(); static_map_case(4, None, p, p, PlacementReason::Cpu_consumer, 0); }
+    fn static_maps_priced_readback_vec4() { let p = static_price(); static_map_case(4, None, p, p, PlacementReason::CpuConsumer, 0); }
     #[test]
     fn static_maps_slow_card_readback() {
-        let per_float = (cost::estimate(Tier::Gpu_readback, 2048) - cost::estimate(Tier::Gpu_readback, 1024)) / 1024.0;
+        let per_float = (cost::estimate(Tier::GpuReadback, 2048) - cost::estimate(Tier::GpuReadback, 1024)) / 1024.0;
         let p = static_price();
-        static_map_case(1, Some(2.0 * per_float), p, p, PlacementReason::Cpu_consumer, 0);
+        static_map_case(1, Some(2.0 * per_float), p, p, PlacementReason::CpuConsumer, 0);
     }
     #[test]
-    fn static_maps_free_card_readback() { let p = static_price(); static_map_case(1, Some(0.0), p, p, PlacementReason::Device_measured_cheaper, 1); }
+    fn static_maps_free_card_readback() { let p = static_price(); static_map_case(1, Some(0.0), p, p, PlacementReason::DeviceMeasuredCheaper, 1); }
 
 
     fn has_region(value: &Value) -> bool {

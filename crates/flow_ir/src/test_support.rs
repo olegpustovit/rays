@@ -59,7 +59,7 @@ pub fn check_workspace(source: &str) -> w::Workspace {
     }
 }
 
-// ---- test_program.ml
+// ----
 
 pub fn compile_with(trace: Option<Trace>, fusion: bool, declarations: &str, body: &str) -> packed::T {
     let source = format!("(workspace w {declarations} (graph g :context value (let* [tested {body}] 0.0)))");
@@ -220,7 +220,7 @@ pub fn lower_strict(r: ResidualId) -> Result<c::Program, String> {
     core_lower::lower(None, None, true, None, None, r)
 }
 
-// ---- core_fixtures.ml
+// ----
 
 pub fn offset_op() -> Op {
     let mut o = op::find(&[], "+", &context::value()).expect("+ op").clone();
@@ -282,7 +282,7 @@ pub fn lists() -> Vec<(String, String)> {
         ("rest", "(rest (list t))"),
         ("reverse", "(reverse (list t 1 2))"),
         ("concat", "(concat (list t 1) (list 2 3.))"),
-        ("nth", "(nth (list 1 2 3) t)"),
+        ("nth", "(nth (list 1 2 3) (int t))"),
         ("count", "(count (range t))"),
         ("map", "(map (fn [x] (+ x t)) (range 1000))"),
         ("map-zip", "(map (fn [x y z] (+ (+ x y) (+ z t))) (list 1 2 3) (list 4) (list 5 6))"),
@@ -295,9 +295,9 @@ pub fn lists() -> Vec<(String, String)> {
         ("reduce-record", "(reduce (fn [a x] (assoc a :n (+ a.n t))) {:n 0.} (range 3))"),
         ("reduce-record-int", "(reduce (fn [a x] (assoc a :n (+ a.n t))) {:n 0} (range 3))"),
         ("reduce-empty", "(reduce (fn [a x] (/ t 0.)) 0 (range 0))"),
-        ("sort", "(sort-by (fn [x] (- t x)) (range 12))"),
-        ("sort-stable", "(sort-by (fn [x] (+ t x.k)) (list {:k 2 :id 0} {:k 1 :id 1} {:k 2 :id 2} {:k 1 :id 3}))"),
-        ("sort-empty", "(sort-by (fn [x] (/ t 0.)) (range 0))"),
+        ("sort", "(sort_by (fn [x] (- t x)) (range 12))"),
+        ("sort-stable", "(sort_by (fn [x] (+ t x.k)) (list {:k 2 :id 0} {:k 1 :id 1} {:k 2 :id 2} {:k 1 :id 3}))"),
+        ("sort-empty", "(sort_by (fn [x] (/ t 0.)) (range 0))"),
         ("for-large", "(for [i (range 1000)] (+ i t))"),
         ("for-live-items", "(for [i (list t (+ t 1.))] (* i t))"),
         ("for-product", "(for [i (range 2) j (range 3)] :skip [4] (+ (+ (* 10 i) j) t))"),
@@ -446,7 +446,7 @@ pub fn state_refs() -> Vec<(String, String, String)> {
     ]
 }
 
-// ---- array_composition_cases.ml
+// ----
 
 pub fn composition_checked(declarations: &str, body: &str) -> w::Workspace {
     let text = format!("(workspace composition (graph g :context host {declarations} {body}))");
@@ -548,7 +548,7 @@ pub fn composition_error_cases() -> Vec<(String, String)> {
     ])
 }
 
-/// `captured_helper`: a recorded `tested` function with the helper bound in.
+// `captured_helper`: a recorded `tested` function with the helper bound in.
 thread_local! {
     static KEEP: std::cell::RefCell<Vec<e::Eval>> = const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -579,7 +579,7 @@ pub fn captured_helper(body: &str) -> flow_syntax::value::FnId {
 }
 pub fn helper_value(body: &str, count: i64) -> Result<Value, Diagnostic> {
     let signature = flow_syntax::ty::FnSignature { params: vec![Ty::Int], result: Ty::Int };
-    e::host::map_function(None, None, &signature, captured_helper(body), &[Value::Int_array(Arc::new((0..count).collect()))])
+    e::host::map_function(None, None, &signature, captured_helper(body), &[Value::IntArray(Arc::new((0..count).collect()))])
 }
 /// `same`: equal results are equal bytes; equal errors have equal code, message and cause.
 pub fn same(a: &Result<Value, Diagnostic>, b: &Result<Value, Diagnostic>) {
