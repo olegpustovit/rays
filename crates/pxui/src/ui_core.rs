@@ -12,6 +12,7 @@ use crate::geom::hash;
 use input::frame as rframe;
 use crate::geom::{color, Rgba as Color};
 use crate::draw::{Break, Instance};
+pub use crate::draw::Fit;
 use crate::arena::{self, Arena};
 pub use crate::geom::Edges;
 use std::any::Any;
@@ -386,6 +387,57 @@ pub struct ViewEntry {
     pub offset: [f32; 2],
     pub opacity: f32,
     pub clip: [f32; 4],
+    /// then `pivot + scale * transform * (p - pivot)` (row-major 2x2, window points), as the painter's View
+    pub scale: f32,
+    pub transform: [f32; 4],
+    pub pivot: [f32; 2],
+}
+
+impl ViewEntry {
+    /// Where the painter shows view point `p` (already offset).
+    fn map(&self, p: (f32, f32)) -> (f32, f32) {
+        let [a, b, c, d] = self.transform;
+        let (x, y) = (p.0 - self.pivot[0], p.1 - self.pivot[1]);
+        (self.pivot[0] + self.scale * (a * x + b * y), self.pivot[1] + self.scale * (c * x + d * y))
+    }
+
+    /// The view point the painter shows at window point `q` (before the offset); `None` when the
+    /// transform has no inverse.
+    fn unmap(&self, q: (f32, f32)) -> Option<(f32, f32)> {
+        let [a, b, c, d] = self.transform;
+        let det = (a * d - b * c) * self.scale;
+        if det == 0.0 || !det.is_finite() {
+            return None;
+        }
+        let (x, y) = (q.0 - self.pivot[0], q.1 - self.pivot[1]);
+        Some((self.pivot[0] + (d * x - b * y) / det, self.pivot[1] + (a * y - c * x) / det))
+    }
+
+    fn identity(&self) -> bool {
+        self.scale == 1.0 && self.transform == [1.0, 0.0, 0.0, 1.0]
+    }
+
+    /// The window rectangle that covers `r` (view points, offset) once transformed.
+    fn cover(&self, r: Rect) -> Rect {
+        if self.identity() {
+            return r;
+        }
+        let pts = [(r.x, r.y), (r.x + r.w, r.y), (r.x, r.y + r.h), (r.x + r.w, r.y + r.h)].map(|p| self.map(p));
+        let (x0, y0) = pts.iter().fold((f32::INFINITY, f32::INFINITY), |m, p| (m.0.min(p.0), m.1.min(p.1)));
+        let (x1, y1) = pts.iter().fold((f32::NEG_INFINITY, f32::NEG_INFINITY), |m, p| (m.0.max(p.0), m.1.max(p.1)));
+        Rect::new(x0, y0, x1 - x0, y1 - y0)
+    }
+}
+
+/// A view that asked for its backdrop blurred (`Ui::view_backdrop_blur`): the host draws layer `layer`
+/// up to `at_instance`, blurs what is under `rect` (window points) by `sigma` points with
+/// `pxui_render::Painter::blur`, draws the result as an image there, then draws the rest.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlurOut {
+    pub layer: usize,
+    pub at_instance: u32,
+    pub rect: Rect,
+    pub sigma: f32,
 }
 
 /// A cached subtree (`Ui::view`): when it was built, where its output lives and how it is shown.
@@ -431,6 +483,11 @@ struct ViewRec {
     offset: (f32, f32),
     opacity: f32,
     clip: Option<Rect>,
+    /// its 2D transform about `pivot` (from its box's corner) and its backdrop blur (0: none)
+    scale: f32,
+    transform: [f32; 4],
+    pivot: (f32, f32),
+    blur: f32,
     /// the composed entry and the screen rectangle it shows
     shift: (f32, f32),
     alpha: f32,
@@ -471,6 +528,10 @@ impl ViewRec {
             offset: (0.0, 0.0),
             opacity: 1.0,
             clip: None,
+            scale: 1.0,
+            transform: [1.0, 0.0, 0.0, 1.0],
+            pivot: (0.0, 0.0),
+            blur: 0.0,
             shift: (0.0, 0.0),
             alpha: 1.0,
             outer: UNBOUNDED,
@@ -479,9 +540,23 @@ impl ViewRec {
         }
     }
 
+    /// No scale or transform.
+    fn plain(&self) -> bool {
+        self.scale == 1.0 && self.transform == [1.0, 0.0, 0.0, 1.0]
+    }
+
     fn entry(&self) -> ViewEntry {
         let c = clip_of(self.outer);
-        ViewEntry { offset: [self.shift.0, self.shift.1], opacity: self.alpha, clip: [c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32] }
+        let b = self.built_rect;
+        let pivot = [b.x + self.shift.0 + self.pivot.0, b.y + self.shift.1 + self.pivot.1];
+        ViewEntry {
+            offset: [self.shift.0, self.shift.1],
+            opacity: self.alpha,
+            clip: [c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32],
+            scale: self.scale,
+            transform: self.transform,
+            pivot,
+        }
     }
 }
 
@@ -732,6 +807,7 @@ pub struct FrameOut<'a> {
     pub platform: &'a PlatformOut,
     pub damage: Option<Rect>,
     pub views: &'a [(u16, ViewEntry)],
+    pub blurs: &'a [BlurOut],
 }
 
 // -------------------------------------------------------------- text
@@ -885,6 +961,7 @@ pub struct Ui {
     marks: Vec<i64>,
     damage: Option<Rect>,
     view_out: Vec<(u16, ViewEntry)>,
+    blur_out: Vec<BlurOut>,
     view_prev: Vec<(u16, ViewEntry)>,
     /// (slot, scratch layer) of every node the frame painted, and the compaction buffer
     painted_nodes: Vec<(usize, usize)>,
@@ -1039,6 +1116,7 @@ impl Ui {
             marks: Vec::new(),
             damage: None,
             view_out: Vec::new(),
+            blur_out: Vec::new(),
             view_prev: Vec::new(),
             painted_nodes: Vec::new(),
             compact: Vec::new(),
@@ -1141,7 +1219,7 @@ impl Ui {
 
     /// The most recently completed frame.
     pub fn output(&self) -> FrameOut<'_> {
-        FrameOut { draw: &self.draw[..self.draw_len], platform: &self.out, damage: self.damage, views: &self.view_out }
+        FrameOut { draw: &self.draw[..self.draw_len], platform: &self.out, damage: self.damage, views: &self.view_out, blurs: &self.blur_out }
     }
 
     /// The host drew layer `index` of the output with its `dirty` ranges: they start over empty.
@@ -1403,7 +1481,11 @@ impl Ui {
     fn hit_contains(&self, index: usize, point: (f32, f32)) -> bool {
         let h = &self.hits[index];
         let v = &self.views[h.view as usize];
-        v.outer.contains(point) && contains(Rect::new(h.x, h.y, h.w, h.h), (point.0 - v.shift.0, point.1 - v.shift.1))
+        if !v.outer.contains(point) {
+            return false;
+        }
+        let local = if v.plain() { Some(point) } else { v.entry().unmap(point) };
+        local.is_some_and(|p| contains(Rect::new(h.x, h.y, h.w, h.h), (p.0 - v.shift.0, p.1 - v.shift.1)))
     }
 
     /// Topmost hit entry under `point`; 0 when none.
@@ -3274,22 +3356,53 @@ impl Paint {
         }
     }
 
+    /// Bind `image` for the instances pushed next: the layer breaks to its texture.
+    fn bind(&mut self, image: &Image) {
+        let layer = &mut self.layers[self.layer];
+        let index = match layer.images.iter().position(|other| Rc::ptr_eq(&other.handle, &image.handle)) {
+            Some(index) => index,
+            None => {
+                layer.images.push(image.clone());
+                layer.images.len() - 1
+            }
+        } as u32;
+        if layer.breaks.last().map(|b| b.image) != Some(index) {
+            layer.breaks.push(Break { at_instance: layer.instances.len() as u32, image: index });
+        }
+    }
+
     /// Draw a host-owned image for this frame; the layer breaks to its texture.
     pub fn image(&mut self, x: f32, y: f32, w: f32, h: f32, image: &Image) {
+        self.image_fit(x, y, w, h, image, Fit::Fill, color::white());
+    }
+
+    /// An image placed in the box as CSS `object-fit` places it, its texels multiplied by `tint`
+    /// (white keeps it; see `Instance::image`).
+    pub fn image_fit(&mut self, x: f32, y: f32, w: f32, h: f32, image: &Image, fit: Fit, tint: Color) {
         if w > 0.0 && h > 0.0 {
-            let layer = &mut self.layers[self.layer];
-            let index = match layer.images.iter().position(|other| Rc::ptr_eq(&other.handle, &image.handle)) {
-                Some(index) => index,
-                None => {
-                    layer.images.push(image.clone());
-                    layer.images.len() - 1
-                }
-            } as u32;
-            if layer.breaks.last().map(|b| b.image) != Some(index) {
-                layer.breaks.push(Break { at_instance: layer.instances.len() as u32, image: index });
-            }
-            self.push(Instance::image([x, y, x + w, y + h], [0.0, 0.0, 1.0, 1.0], [255; 4]));
+            self.bind(image);
+            let (rect, uv) = crate::draw::fit(fit, [image.width as f32, image.height as f32], [x, y, x + w, y + h], [0.0, 0.0, 1.0, 1.0]);
+            self.push(Instance::image(rect, uv, rgba(tint)));
         }
+    }
+
+    /// An image as a nine-slice frame (CSS `border-image`): corners `inset` texels in (`[left, top,
+    /// right, bottom]`) stay 1:1, edges and centre stretch over the box.
+    pub fn image_nine(&mut self, x: f32, y: f32, w: f32, h: f32, image: &Image, inset: [f32; 4], tint: Color) {
+        if w > 0.0 && h > 0.0 {
+            self.bind(image);
+            for i in crate::draw::nine_slice([x, y, x + w, y + h], [0.0, 0.0, 1.0, 1.0], [image.width as f32, image.height as f32], inset, rgba(tint)) {
+                self.push(i);
+            }
+        }
+    }
+
+    /// One glyph of font `font` (an icon font loaded into the UI's `Text`) at `size` points, its top-left
+    /// at `at`, in `color`: its advance.
+    pub fn icon(&mut self, at: (f32, f32), font: u16, size: f32, codepoint: char, color: Color) -> f32 {
+        let mut buffer = [0u8; 4];
+        let style = Style { font, size, ..Style::default() };
+        self.text_styled(at, &style, 0.0, Some(color), codepoint.encode_utf8(&mut buffer)).w
     }
 
     /// Square fills cover exactly the pixels of the equivalent triangle rectangle.
@@ -3814,6 +3927,7 @@ impl Ui {
         let mut changed = self.refresh_views();
         changed |= self.place_all(&mut layers, len);
         self.settle(&layers);
+        self.collect_blurs();
         if changed {
             self.draw_revision += 1;
         }
@@ -4536,9 +4650,53 @@ impl Ui {
         }
     }
 
+    /// Scale a view's output by `scale` about its box's centre (`view_transform` with no rotation).
+    pub fn view_scale(&mut self, b: &Handle, scale: f32) {
+        if let Some(v) = self.view_id(b) {
+            let r = self.views[v as usize].built_rect;
+            self.view_transform(b, scale, [1.0, 0.0, 0.0, 1.0], (r.w / 2.0, r.h / 2.0));
+        }
+    }
+
+    /// Map a view's output through `pivot + scale * transform * (p - pivot)` (`transform` a row-major
+    /// 2x2: rotation, skew, flip; `pivot` from its box's top-left corner): one table entry, no rebuild.
+    /// Hit testing follows through the inverse.
+    // ponytail: a view's transform applies to its own instances only, not to views nested in it (the
+    // painter's table is flat), and `rect` reports the untransformed box. Compose transforms down the
+    // view tree when nested transformed views are needed.
+    pub fn view_transform(&mut self, b: &Handle, scale: f32, transform: [f32; 4], pivot: (f32, f32)) {
+        if let Some(v) = self.view_id(b) {
+            let r = &mut self.views[v as usize];
+            (r.scale, r.transform, r.pivot) = (scale, transform, pivot);
+            self.view_changed(v);
+        }
+    }
+
+    /// Ask the host to blur what is under a view by `sigma` points before drawing it (CSS
+    /// `backdrop-filter: blur`); 0 stops it. Reported in `FrameOut::blurs`.
+    // ponytail: rays_shell's host does not fulfil the record yet (it draws each layer in one call
+    // inside the scene pass); it needs the pass split at `at_instance` and a `Painter::blur` there.
+    pub fn view_backdrop_blur(&mut self, b: &Handle, sigma: f32) {
+        if let Some(v) = self.view_id(b) {
+            self.views[v as usize].blur = sigma.max(0.0);
+            self.view_changed(v);
+        }
+    }
+
+    /// The blur records of the shown views, where their runs now sit.
+    fn collect_blurs(&mut self) {
+        self.blur_out.clear();
+        for r in &self.views[1..] {
+            if r.blur > 0.0 && r.valid && r.visited == self.painted {
+                if let Some(layer) = self.draw[..self.draw_len].iter().position(|l| l.key == r.layer) {
+                    let rect = r.entry().cover(r.screen);
+                    self.blur_out.push(BlurOut { layer, at_instance: r.run.0, rect, sigma: r.blur });
+                }
+            }
+        }
+    }
+
     /// Clip a view's output to `clip` (window points), besides its parents' clips; `None` lifts it.
-    // ponytail: no per-view scale or rotation yet (the painter's View has them); hit testing would
-    // have to invert the transform. Add `view_transform` with that inverse when a view needs it.
     pub fn view_clip(&mut self, b: &Handle, clip: Option<Rect>) {
         if let Some(v) = self.view_id(b) {
             self.views[v as usize].clip = clip;
@@ -4560,6 +4718,7 @@ impl Ui {
             if self.refresh_views() {
                 self.draw_revision += 1;
             }
+            self.collect_blurs();
         }
     }
 
@@ -4677,9 +4836,9 @@ impl Ui {
             self.compose(v);
             let r = &self.views[v as usize];
             if r.entry() != old_entry {
-                let screen = r.screen;
-                self.add_damage(old_screen);
-                self.add_damage(screen);
+                let (screen, entry) = (r.screen, r.entry());
+                self.add_damage(old_entry.cover(old_screen));
+                self.add_damage(entry.cover(screen));
             }
             let r = &self.views[v as usize];
             out.push((r.index, r.entry()));
@@ -4693,7 +4852,8 @@ impl Ui {
     fn damage_instance(&mut self, i: &Instance) {
         if let Some(r) = bounds(i) {
             let v = &self.views[self.index_owner[i.view as usize] as usize];
-            let r = Rect::new(r.x + v.shift.0, r.y + v.shift.1, r.w, r.h).intersect(v.outer);
+            let r = Rect::new(r.x + v.shift.0, r.y + v.shift.1, r.w, r.h);
+            let r = if v.plain() { r } else { v.entry().cover(r) }.intersect(v.outer);
             self.add_damage(r);
         }
     }

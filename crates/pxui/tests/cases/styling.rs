@@ -193,7 +193,85 @@ pub fn styling_animate_spring() {
     ui.destroy();
 }
 
+/// A scaled view: its entry carries the transform, and hit testing goes through the inverse.
+pub fn styling_view_transform_hits() {
+    let mut ui = new_ui(None);
+    let (view, clicked) = (Cell::new(None), Cell::new(false));
+    let mut build = |ui: &mut Ui| {
+        view.set(Some(ui.view("v", 1, Size::Px(100.0), Size::Px(50.0), &mut |ui| {
+            let h = ui.node("chip", Node { flags: CLICKABLE, w: Size::Px(40.0), h: Size::Px(20.0), look: Look { fill: color::rgb(9, 9, 9), ..Look::NONE }, ..Node::DEFAULT });
+            clicked.set(clicked.get() || ui.signal(&h).clicked);
+        })));
+    };
+    ui.frame(&at(0.0, vec![]), &mut build);
+    ui.view_transform(&view.get().unwrap(), 2.0, [1.0, 0.0, 0.0, 1.0], (0.0, 0.0));
+    let entry = ui.output().views.iter().find(|(i, _)| *i != 0).map(|(_, e)| *e).expect("an entry");
+    check(entry.scale == 2.0 && entry.pivot == [0.0, 0.0], &format!("the entry lost the transform: {entry:?}"));
+    ui.frame(&at(0.1, vec![press((60, 30)), release((60, 30))]), &mut build);
+    check(clicked.get(), "a click on the scaled chip (60, 30) missed");
+    clicked.set(false);
+    ui.frame(&at(0.2, vec![press((90, 45)), release((90, 45))]), &mut build);
+    check(!clicked.get(), "a click past the scaled chip hit it");
+    ui.view_scale(&view.get().unwrap(), 1.0);
+    ui.frame(&at(0.3, vec![press((60, 30)), release((60, 30))]), &mut build);
+    check(!clicked.get(), "an unscaled chip took a click at (60, 30)");
+    ui.destroy();
+}
+
+/// A backdrop blur is a plain record the host fulfils: the view's shown rectangle, its sigma and where
+/// its run starts in its layer.
+pub fn styling_backdrop_blur_record() {
+    let mut ui = new_ui(None);
+    let view = Cell::new(None);
+    let mut build = |ui: &mut Ui| {
+        ui.node("under", Node { w: Size::Px(300.0), h: Size::Px(30.0), look: Look { fill: color::rgb(1, 2, 3), ..Look::NONE }, ..Node::DEFAULT });
+        view.set(Some(ui.view("glass", 1, Size::Px(120.0), Size::Px(40.0), &mut |ui| {
+            ui.node("pane", Node { w: Size::Px(120.0), h: Size::Px(40.0), look: Look { fill: color::rgba(255, 255, 255, 80), ..Look::NONE }, ..Node::DEFAULT });
+        })));
+    };
+    ui.frame(&at(0.0, vec![]), &mut build);
+    check(ui.output().blurs.is_empty(), "a blur nobody asked for");
+    ui.view_backdrop_blur(&view.get().unwrap(), 6.0);
+    ui.frame(&at(0.1, vec![]), &mut build);
+    let blurs = ui.output().blurs.to_vec();
+    check(blurs.len() == 1 && blurs[0].sigma == 6.0 && blurs[0].rect == Rect::new(0.0, 30.0, 120.0, 40.0), &format!("blur record {blurs:?}"));
+    let layer = &ui.output().draw[blurs[0].layer];
+    check(blurs[0].at_instance >= 1 && layer.instances[blurs[0].at_instance as usize].color == [255, 255, 255, 80], "the blur does not start at the view's run");
+    ui.view_offset(&view.get().unwrap(), 10.0, 0.0);
+    check(ui.output().blurs[0].rect == Rect::new(10.0, 30.0, 120.0, 40.0), "the blur did not follow the view");
+    ui.destroy();
+}
+
+/// Images fit and nine-slice through the painter, and an icon is one glyph of a named font.
+pub fn styling_images_and_icons() {
+    let mut ui = new_ui(None);
+    let image = Image { handle: std::rc::Rc::new(7u8), width: 64, height: 32 };
+    for k in 0..2 {
+        let image = image.clone();
+        ui.frame(&at(k as f64, vec![]), &mut |ui| {
+            let b = ui.node("art", Node { w: Size::Px(100.0), h: Size::Px(100.0), ..Node::DEFAULT });
+            let image = image.clone();
+            ui.canvas(&b, move |p, r| {
+                p.image_fit(r.x, r.y, r.w, r.h, &image, Fit::Contain, color::white());
+                p.image_nine(r.x, r.y, r.w, r.h, &image, [8.0, 8.0, 8.0, 8.0], color::rgba(255, 255, 255, 128));
+                check(p.icon((0.0, 0.0), 0, 13.0, '\u{2192}', color::black()) > 0.0, "an icon with no advance");
+            });
+        });
+    }
+    let layer = &ui.output().draw[0];
+    let images: Vec<_> = layer.instances.iter().filter(|i| i.kind == pxui::draw::kind::IMAGE).collect();
+    check(images.len() == 10, &format!("{} image instances, not 1 fitted and 9 sliced", images.len()));
+    check(images[0].rect == [0.0, 25.0, 100.0, 75.0], &format!("contain placed the image at {:?}", images[0].rect));
+    check(images[1..].iter().all(|i| i.color == [255, 255, 255, 128]), "the slices lost their tint");
+    check(layer.breaks.first().is_some_and(|b| b.image == 0) && layer.images.len() == 1, "one break to the image");
+    check(layer.instances.iter().any(|i| i.kind == pxui::draw::kind::MASK), "the icon drew no glyph");
+    ui.destroy();
+}
+
 pub const CASES: &[(&str, fn())] = &[
+    ("styling_view_transform_hits", styling_view_transform_hits),
+    ("styling_backdrop_blur_record", styling_backdrop_blur_record),
+    ("styling_images_and_icons", styling_images_and_icons),
     ("styling_theme_file_round_trip", styling_theme_file_round_trip),
     ("styling_theme_file_errors", styling_theme_file_errors),
     ("styling_themed_scope", styling_themed_scope),

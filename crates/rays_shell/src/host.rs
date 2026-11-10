@@ -174,8 +174,11 @@ fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Er
             });
         }
         sync_atlas(s, ui)?;
+        // ponytail: `out.blurs` (views asking for a blurred backdrop) is not fulfilled: this layer draws
+        // in one call inside the scene pass; fulfilling it splits the draw at `at_instance`, ends the
+        // pass and runs `Painter::blur`. Do it when an editor view asks for a backdrop blur.
         for (index, v) in ui.output().views {
-            s.painter.set_view(*index, View { offset: v.offset, opacity: v.opacity, clip: v.clip, ..View::IDENTITY })?;
+            s.painter.set_view(*index, View { offset: v.offset, opacity: v.opacity, clip: v.clip, scale: v.scale, transform: v.transform, pivot: v.pivot })?;
         }
         let out = ui.output();
         let l = &out.draw[layer];

@@ -100,7 +100,7 @@ pub fn render_with(painter: &mut Painter, ui: &mut Ui, size: (u32, u32), density
     }));
     painter.begin_frame();
     for (index, v) in ui.output().views {
-        ok(painter.set_view(*index, View { offset: v.offset, opacity: v.opacity, clip: v.clip, ..View::IDENTITY }));
+        ok(painter.set_view(*index, View { offset: v.offset, opacity: v.opacity, clip: v.clip, scale: v.scale, transform: v.transform, pivot: v.pivot }));
     }
     for index in 0..ui.output().draw.len() {
         let layer = &ui.output().draw[index];
