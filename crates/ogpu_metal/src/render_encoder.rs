@@ -30,58 +30,32 @@ fn render_pipeline(context: &CommandContext, pipeline: &dyn DriverPipeline) -> R
     }
 }
 
-struct ResolvedDraw<'a> {
-    /// The portable pipeline's identity, to skip rebinding it.
-    token: *const (),
-    native: native::RenderPipeline,
-    buffers: Vec<(ShaderStage, i64, &'a crate::buffer::Buffer, i64)>,
-    index: Option<(OgpuIndex, &'a crate::buffer::Buffer, i64, i64)>,
-}
-
 // ponytail: indexed batches issue one native draw at a time; add batched native draws only when measured workloads justify it.
 fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[DriverBatchDraw]) -> Result<(), Error> {
-    let mut resolved: Vec<ResolvedDraw<'_>> = Vec::with_capacity(draws.len());
+    let mut previous: Option<*const ()> = None;
     for d in draws {
         let native = render_pipeline(context, &*d.batch_pipeline)?;
-        let mut buffers = Vec::with_capacity(d.batch_buffers.len());
+        let token: *const () = Rc::as_ptr(&d.batch_pipeline).cast();
+        if previous != Some(token) {
+            encoder.set_pipeline(&native)?;
+        }
         for (stage, slot, resource, offset) in &d.batch_buffers {
             let buffer = context.find_buffer(&**resource)?;
             context.keep_buffer(buffer)?;
-            buffers.push((*stage, *slot, buffer, *offset));
-        }
-        let index = match &d.batch_index {
-            None => None,
-            Some((kind, resource, offset, count)) => {
-                let index_buffer = context.find_buffer(&**resource)?;
-                context.keep_buffer(index_buffer)?;
-                Some((*kind, index_buffer, *offset, *count))
-            }
-        };
-        resolved.push(ResolvedDraw { token: Rc::as_ptr(&d.batch_pipeline).cast(), native, buffers, index });
-    }
-    let mut previous: Option<*const ()> = None;
-    for (d, r) in draws.iter().zip(resolved.iter()) {
-        if previous != Some(r.token) {
-            encoder.set_pipeline(&r.native)?;
-        }
-        for (stage, slot, buffer, offset) in &r.buffers {
             match stage {
                 ShaderStage::Vertex => encoder.set_vertex_buffer(*slot as usize, *offset as u64, buffer.metal()),
                 ShaderStage::Fragment => encoder.set_fragment_buffer(*slot as usize, *offset as u64, buffer.metal()),
             }?;
         }
-        match &r.index {
+        match &d.batch_index {
             None => encoder.draw_primitives(d.batch_primitive, d.batch_vertex_start as usize, d.batch_vertex_count as usize, d.batch_instances as usize),
-            Some((kind, index_buffer, offset, count)) => encoder.draw_indexed(
-                d.batch_primitive,
-                *kind,
-                index_buffer.metal(),
-                *offset as u64,
-                *count as u64,
-                Some(d.batch_instances as u64),
-            ),
+            Some((kind, resource, offset, count)) => {
+                let index_buffer = context.find_buffer(&**resource)?;
+                context.keep_buffer(index_buffer)?;
+                encoder.draw_indexed(d.batch_primitive, *kind, index_buffer.metal(), *offset as u64, *count as u64, Some(d.batch_instances as u64))
+            }
         }?;
-        previous = Some(r.token);
+        previous = Some(token);
     }
     Ok(())
 }

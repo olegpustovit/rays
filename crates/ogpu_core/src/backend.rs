@@ -1955,14 +1955,20 @@ pub fn use_resources(encoder: &RenderEncoder, resources: &[ResourceUse]) -> Resu
     const OP: &str = "Backend.use_resources";
     open_render(OP, encoder)?;
     let device = render_device(encoder);
-    let mut tokens = Vec::with_capacity(resources.len());
+    // The handle list is kept between calls (one per pass per frame); the shared handles are dropped here.
+    thread_local! { static USED: std::cell::RefCell<Vec<Rc<dyn DriverResource>>> = const { std::cell::RefCell::new(Vec::new()) }; }
+    let mut used = USED.with(|u| std::mem::take(&mut *u.borrow_mut()));
+    used.clear();
+    let mut admitted = Ok(());
     for resource in resources {
-        match resource {
-            ResourceUse::Buffer(buffer) => { resource_check(OP, &device, &buffer.resource)?; tokens.push(buffer.resource.0.shared()); }
-            ResourceUse::Texture(texture) => { resource_check(OP, &device, &texture.resource)?; tokens.push(texture.resource.0.shared()); }
-        }
+        let (resource, shared) = match resource { ResourceUse::Buffer(b) => (&b.resource, b.resource.0.shared()), ResourceUse::Texture(t) => (&t.resource, t.resource.0.shared()) };
+        if let Err(e) = resource_check(OP, &device, resource) { admitted = Err(e); break; }
+        used.push(shared);
     }
-    encoder.0.raw().use_resources(&tokens)
+    let result = admitted.and_then(|()| encoder.0.raw().use_resources(&used));
+    used.clear();
+    USED.with(|u| *u.borrow_mut() = used);
+    result
 }
 pub fn execute_icb(encoder: &RenderEncoder, icb: &Icb, location: i64, length: i64) -> Result<(), Error> {
     const OP: &str = "Backend.execute_icb";
