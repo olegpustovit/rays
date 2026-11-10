@@ -590,6 +590,17 @@ pub fn reachable_defs<'a, 'g>(workspace: &'a Workspace, roots: impl IntoIterator
 /// to a cook-time source, which residuals capture as a binding, never as a term, so a kernel
 /// specializes it per context by its captures alone. Returns the graph and each input's operator.
 pub fn label_context(label: &str, graph: &Graph) -> (Graph, Vec<(Symbol, String)>) {
+    type Key = (String, (u64, u32), (u64, u32), Vec<(Symbol, Symbol, Option<(u64, u32)>)>);
+    static LABELLED: std::sync::LazyLock<lru::Memo<Key, (Graph, Vec<(Symbol, String)>)>> = std::sync::LazyLock::new(|| lru::Memo::new("flow_sop.labelled_context", 256));
+    let key = (label.to_owned(), graph.body.identity(), graph.form.identity(),
+        graph.inputs.iter().map(|(name, ty, default)| (symbol::intern(name), symbol::intern_owned(flow_syntax::ty::to_string(ty)), default.as_ref().map(Term::identity))).collect());
+    if let Some(hit) = LABELLED.get(&key) { return (*hit).clone(); }
+    let result = label_context_uncached(label, graph);
+    LABELLED.insert(key, result.clone());
+    result
+}
+
+fn label_context_uncached(label: &str, graph: &Graph) -> (Graph, Vec<(Symbol, String)>) {
     fn eligible(t: &Term, into: &mut HashSet<(u64, u32)>) -> bool {
         if !into.insert(t.identity()) { return false; }
         let mut context = matches!(t.node, Node::Op(id) if is_context_op(t.name(t.arena().op(id).op)));
@@ -649,6 +660,43 @@ pub fn label_context(label: &str, graph: &Graph) -> (Graph, Vec<(Symbol, String)
     graph.inputs.extend(inputs.iter().map(|(_, name, _, call)| (name.to_string(), arena.handle(*call).ty().clone(), Some(arena.handle(*call)))));
     let ops = inputs.into_iter().map(|(_, name, op, _)| (name, op)).collect();
     (graph, ops)
+}
+
+/// Helpers retain their public signature. Their context defaults are lexical bindings evaluated
+/// inside the caller's card, so a nested node supplies its own label rather than a baked helper label.
+pub fn capture_context(graph: &Graph) -> Graph {
+    if let Node::Let(id) = graph.body.node {
+        if graph.body.arena().bindings(graph.body.arena().let_node(id).bindings).iter().any(|binding|
+            matches!(graph.body.arena().pattern(binding.pattern), PatternNode::Name(name) if graph.body.name(name).starts_with("$context"))
+                && matches!(graph.body.child(binding.term).node, Node::Op(op) if is_context_op(graph.body.name(graph.body.arena().op(op).op)))) {
+            return graph.clone();
+        }
+    }
+    if !uses_context(graph) { return graph.clone(); }
+    type Key = ((u64, u32), (u64, u32), Vec<(Symbol, Symbol, Option<(u64, u32)>)>);
+    static CAPTURED: std::sync::LazyLock<lru::Memo<Key, Graph>> = std::sync::LazyLock::new(|| lru::Memo::new("flow_sop.captured_context", 256));
+    let key = (graph.body.identity(), graph.form.identity(), graph.inputs.iter().map(|(name, ty, default)| (symbol::intern(name), symbol::intern_owned(flow_syntax::ty::to_string(ty)), default.as_ref().map(Term::identity))).collect());
+    if let Some(hit) = CAPTURED.get(&key) { return (*hit).clone(); }
+    let (labelled, _) = label_context("", graph);
+    let mut builder = TermBuilder::new();
+    let form = builder.import_form(&graph.form);
+    let body = builder.import(&labelled.body);
+    let mut bindings = Vec::new();
+    for (name, _, default) in labelled.inputs.iter().skip(graph.inputs.len()) {
+        let default = default.as_ref().expect("a context input has a default");
+        let value = builder.rewrite(default, &mut |_, _, draft| match draft {
+            Draft::Op { op, args, skip } => Draft::Op { op, args: args.into_iter().filter(|(name, _)| name != operators::context_label()).collect(), skip },
+            draft => draft,
+        });
+        bindings.push((w::Pattern::Name(name.clone()), value));
+    }
+    let body = builder.push(None, graph.body.ty(), form, Draft::Let(bindings, body));
+    let inputs: Vec<_> = graph.inputs.iter().map(|(name, ty, default)| (name.clone(), ty.clone(), default.as_ref().map(|term| builder.import(term)))).collect();
+    let arena = builder.freeze();
+    let captured = Graph { body: arena.handle(body), form: arena.syntax().handle(form),
+        inputs: inputs.into_iter().map(|(name, ty, default)| (name, ty, default.map(|id| arena.handle(id)))).collect(), ..graph.clone() };
+    CAPTURED.insert(key, captured.clone());
+    captured
 }
 
 #[cfg(test)]

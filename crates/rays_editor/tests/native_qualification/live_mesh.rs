@@ -436,11 +436,14 @@ fn orrery_frames() {
     let canvas=rays::canvas::create(320,240).unwrap(); let gpu=wg::create(None);
     let mut editor=editor::create(editor::Create {gpu_owner:Some(gpu.clone()),ui_text_size:Some(11),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,editor::prepare_fn(),editor::draw_fn()).unwrap();
     let frame=|tick|rays::frame::Frame {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
-    // Each animated frame relowers the driven Lisp body (~0.2 s in debug); twelve show the steady
-    // state, then thirty idle frames prove nothing is rebuilt.
+    // Twelve animated frames keep their prepared bodies; thirty idle frames then prove that
+    // rendering and GPU resources are retained too.
     let frames=12;
     let document=editor.core.doc.clone(); let mut first=None;
+    let mut warmed_lower_calls = 0;
     for tick in 1..=frames {
+        let started = std::time::Instant::now();
+        let sample = flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || started.elapsed().as_secs_f64()));
         let f=frame(tick); editor=editor::update(editor,&f);
         assert!(editor.core.cook.error.is_none(),"{:?}",editor.core.cook.error);
         assert!(Arc::ptr_eq(&document,&editor.core.doc),"playback re-lowered the document");
@@ -451,7 +454,12 @@ fn orrery_frames() {
         }
         rays::canvas::render(Some(1),&canvas,&editor::scene(&editor,&f)).unwrap();
         editor=editor::after_present(editor,&f);
+        let timer = sample.finish();
+        let calls = flow_syntax::phase_timer::calls(&timer, "lower");
+        eprintln!("Z7 Orrery frame {tick}: lower_calls={calls}, total_ms={:.3}, lower_ms={:.3}", timer.total * 1000.0, flow_syntax::phase_timer::seconds(&timer, "lower") * 1000.0);
+        if tick > 1 { warmed_lower_calls += calls; }
     }
+    eprintln!("Z7 Orrery warmed animated lower calls: {warmed_lower_calls}");
     Rc::make_mut(&mut editor.core).timeline=timeline::toggle_pause(&editor.core.timeline).0;
     let mut f=frame(frames+1); f.input.dt=0.;
     editor=editor::update(editor,&f);
@@ -481,4 +489,5 @@ fn orrery_frames() {
     assert_eq!(after.runners_created,warm.runners_created,"idle frame created a GPU runner");
     assert_eq!(rays::canvas::private::native_stats(&canvas).unwrap().pipeline_cache_entries,renderer.pipeline_cache_entries,"idle frame compiled a render pipeline");
     editor::close(&editor); wg::close(&gpu); rays::canvas::destroy(&canvas).unwrap();
+    assert_eq!(warmed_lower_calls, 0, "warmed animated frames must reuse lowered bodies");
 }

@@ -71,7 +71,11 @@ pub fn host_value(resident: &dyn Resident, value: &Value) -> Result<Value, Diagn
     Ok(match value {
         Value::Record(fs) => Value::Record(fields(resident, fs)?),
         Value::List(xs) => Value::List(Arc::new(xs.iter().map(|x| host_value(resident, x)).collect::<Result<_, _>>()?)),
-        Value::Source(g) => source_value(g.name.clone(), g.ty.clone(), fields(resident, &g.fields)?),
+        Value::Source(g) => {
+            let mapped = fields(resident, &g.fields)?;
+            if g.fields.iter().zip(&mapped).all(|((_, old), (_, new))| phys_eq(old, new)) { value.clone() }
+            else { source_value(g.name.clone(), g.ty.clone(), mapped) }
+        },
         Value::Struct(g) => struct_value(g.name.clone(), g.ty.clone(), fields(resident, &g.fields)?),
         other => resident.finish(other)?,
     })
@@ -221,8 +225,8 @@ pub fn phys_eq(a: &Value, b: &Value) -> bool {
         (Value::Vec4(a, b, c, d), Value::Vec4(e, f, g, h)) => a.to_bits() == e.to_bits() && b.to_bits() == f.to_bits() && c.to_bits() == g.to_bits() && d.to_bits() == h.to_bits(),
         (Value::Text(x), Value::Text(y)) => x == y,
         (Value::Bool(x), Value::Bool(y)) => x == y,
-        (Value::Residual(x), Value::Residual(y)) => x == y,
-        (Value::Fn(x), Value::Fn(y)) => x == y,
+        (Value::Residual(x), Value::Residual(y)) => (x.0, x.1) == (y.0, y.1),
+        (Value::Fn(x), Value::Fn(y)) => (x.0, x.1) == (y.0, y.1),
         _ => false,
     }
 }
@@ -2700,4 +2704,23 @@ fn builder_stores_preserve_shared_values_and_unique_buffers() {
     let pointer = match &unique { Value::Int_array(data) => Arc::as_ptr(data), _ => unreachable!() };
     store_value(&mut unique, 0, &Value::Int(7)).unwrap();
     assert!(matches!(unique, Value::Int_array(data) if Arc::as_ptr(&data) == pointer && data[0] == 7));
+}
+
+#[cfg(test)]
+#[test]
+fn source_materialization_traverses_reserved_looking_names_and_preserves_unchanged_owners() {
+    struct Device;
+    impl Resident for Device {
+        fn finish(&self, value: &Value) -> Result<Value, Diagnostic> {
+            Ok(match value { Value::Deferred(_, 7) => Value::Int(19), _ => value.clone() })
+        }
+    }
+    let original = source_value("$lisp/parameter", Ty::Int, vec![("data".into(), Value::Deferred(Ty::Int, 7))].into());
+    let Value::Source(mapped) = host_value(&Device, &original).unwrap() else { panic!("source") };
+    assert_eq!(mapped.fields.get_str("data"), Some(&Value::Int(19)));
+    let descriptor = source_value("$lisp/parameter", Ty::Int, vec![("data".into(), Value::No_geo)].into());
+    let Value::Source(mapped) = host_value(&Device, &descriptor).unwrap() else { panic!("source") };
+    let Value::Source(original) = descriptor else { unreachable!() };
+    assert!(Arc::ptr_eq(&mapped, &original));
+    assert!(!phys_eq(&Value::Residual(v::ResidualId(3, 1)), &Value::Residual(v::ResidualId(3, 2))));
 }

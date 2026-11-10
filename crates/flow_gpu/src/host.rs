@@ -1335,6 +1335,11 @@ impl Scope {
         if !self.live_ok() || tys.len() != packed.outputs.len() || (steps > 0 && tys.len() != 1) {
             return Ok(None);
         }
+        // a scalar result (a standalone vector's uniform region) is never a device kernel
+        let types = [Ty::Array(Box::new(Ty::Int)), Ty::Array(Box::new(Ty::Float)), Ty::Array(Box::new(Ty::Vec2)), Ty::Array(Box::new(Ty::Vec3)), Ty::Array(Box::new(Ty::Vec4))];
+        if !tys.iter().all(|ty| types.contains(ty)) {
+            return Ok(None);
+        }
         let site = self.site(packed);
         if site.plan.borrow().is_none() {
             *site.plan.borrow_mut() = Some(phost::plan(packed));
@@ -1364,10 +1369,6 @@ impl Scope {
             };
             return Ok(self.off(packed, &reason).map(|v| vec![v]));
         };
-        let types = [Ty::Array(Box::new(Ty::Int)), Ty::Array(Box::new(Ty::Float)), Ty::Array(Box::new(Ty::Vec2)), Ty::Array(Box::new(Ty::Vec3)), Ty::Array(Box::new(Ty::Vec4))];
-        if !tys.iter().all(|ty| types.contains(ty)) {
-            return Ok(None);
-        }
         let plan = site.plan.borrow().clone();
         let level = match plan {
             Some(Some(plan)) => self.planned(&site, &plan, args, live_),

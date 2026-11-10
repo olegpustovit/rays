@@ -541,3 +541,44 @@ fn shared_binary_text_survives_packed_select_and_carried_loops() {
         }
     }
 }
+
+#[test]
+fn local_kernel_helpers_capture_registers_before_later_shadowing() {
+    let declarations = "(defn bump :context value [(x : int)] (int/add x 10))
+      (defn use :context value [(f : fn) (bias : int)] (f 1))";
+    let body = "(map (fn [(i : int)]
+      (let* [bias i
+             f (fn [(x : int)] (int/add x bias))
+             g (fn [(x : int)] (f x))]
+        (int/add (use f (int/add i 100))
+          (int/add (bump (g 1)) (int/add (g 2) (iterate 2 0 g))))))
+      (array/range (int/add 9 (int t)) :type int))";
+    let program = ts::compile_with(None, true, declarations, body);
+    for domains in [1, 8] {
+        ts::with_domains(domains, &|| {
+            let live = input::at_time(0.0);
+            let source = &program.sources[0].1;
+            let flow_check::workspace::Node::Op(id) = source.node else { panic!("range source") };
+            let count = source.arena().fields(source.arena().op(id).args).iter().find(|field| source.name(field.name) == "count").unwrap();
+            let count = source.child(count.term).identity();
+            let reads = Arc::new(AtomicI64::new(0));
+            let observed = reads.clone();
+            let source_live = live.clone();
+            let actual = ok(packed::force(&program, &live, &packed::ForceOptions {
+                strict: true,
+                dispatch: Some(Arc::new(move |residual, term| {
+                    assert_eq!(term.identity(), count, "only the range's count expression may walk");
+                    assert_eq!(syntax::head(&term.form()), Some("int/add"));
+                    observed.fetch_add(1, Ordering::Relaxed);
+                    E::residual::eval_term(residual, term, &source_live, None, None, None)
+                })),
+                on_walk: Some(Arc::new(|| panic!("a per-element helper restarted the walker"))),
+                ..Default::default()
+            }));
+            assert_eq!(reads.load(Ordering::Relaxed), 1);
+            let expected = Value::Int_array(Arc::new((0..9).map(|i| 5 * i + 14).collect()));
+            assert_eq!(actual, expected);
+            assert_eq!(actual, ok(packed::reference(&program, &live, None, None, None)));
+        });
+    }
+}

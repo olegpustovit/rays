@@ -419,6 +419,8 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
                         let term = builder.freeze().handle(term);
                         E::residual::with_bindings(*r, &term, &[("$vec3".into(), value.clone())]).ok().map(Value::Residual)
                     }
+                    Value::Source(_) => components.iter().find(|(component, _)| *component == axis)
+                        .and_then(|(_, field)| ln::parameter_component(&qualified, name, &value, field)),
                     _ => None,
                 }
             };
@@ -470,10 +472,11 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
             }
         }
         // a live argument is passed as it is, a program input: its field must have nothing to canonicalize
-        let raw = |(name, _): &(Symbol, Value)| -> bool {
+        let raw = |(name, value): &(Symbol, Value)| -> bool {
             match fields.iter().find(|f| *name == f.name) {
                 None if fields.iter().any(|f| live.iter().any(|(n, _)| *n == f.name) && f.vec3.is_some() && f.vec3.as_ref().map(|v| v.0.as_str()) == Some(name.as_str())) => true,
                 None => !fields.iter().any(|f| f.vec3.is_some() && f.vec3.as_ref().map(|v| v.0.as_str()) == Some(name.as_str())),
+                Some(_) if ln::owns_parameter(&qualified, *name, value) => true,
                 Some(f) => {
                     !normalizers.iter().any(|(n, _)| *name == *n)
                         && match &f.kind {
@@ -493,7 +496,11 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
         let (values, _) = schema.apply_all(schema.default(), &changes).map_err(|m| fail("E_LOWER", &m))?;
         let arguments = ln::arguments(&fields, &values).map_err(|m| fail("E_LOWER", &m))?;
         // a context input the call does not reach is bound to a placeholder, so no kernel captures its source
-        let reached = if context_inputs.is_empty() { Vec::new() } else { ck::context_ops_reached(&arguments, &defs, original_body.as_ref().expect("context inputs keep the body")) };
+        // a live argument is unknown here: its default must not prune a branch the live value may take
+        let reached = if context_inputs.is_empty() { Vec::new() } else {
+            let scanned: Vec<_> = arguments.iter().map(|(n, v)| (*n, live.iter().find(|(l, _)| l == n).map_or_else(|| v.clone(), |(_, l)| l.clone()))).collect();
+            ck::context_ops_reached(&scanned, &defs, original_body.as_ref().expect("context inputs keep the body"))
+        };
         let mut out: Vec<(Symbol, Value)> = arguments.into_iter().filter(|(n, _)| !live_names.contains(n)).collect();
         out.extend(live);
         out.extend(context_inputs.iter().filter(|(_, op)| !reached.contains(op)).map(|(n, _)| (n.clone(), Value::Int(0))));
@@ -504,7 +511,13 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
 
 fn at_zero(value: &Value) -> R<Value> {
     if E::is_live(value) {
-        E::force(value, &input::at_time(0.0), None)
+        let context = sctx::create(sctx::Options::default()).expect("the default context");
+        let empty: ak::GeometryLookup = Arc::new(|_| None);
+        let resolve = ln::resolver(Arc::new(move |value| match value {
+            Value::Source(g) if matches!(g.name.as_str(), "sop/context_seed" | "sop/context_frame" | "sop/context_time") => ak::resolve(Some(&context), &empty, value),
+            _ => Err(flow_syntax::value::fail("E_DATA_SOURCE", "This data source needs its host's cooked data.")),
+        }));
+        E::force_with(value, &input::at_time(0.0), None, None, Some(resolve))
     } else {
         Ok(value.clone())
     }
@@ -587,8 +600,7 @@ fn geometry_arrays_data(args: &[(Symbol, Value)]) -> Value {
     Value::Record(args.iter().filter(|(n, _)| !["source", "target", "sources", "geometry"].contains(&n.as_str())).cloned().collect::<Vec<_>>().into())
 }
 
-/// A kernel over data that reads its cook context is built per context from the specialized
-/// data: the last context's build is kept.
+/// Forward the caller's CPU-consumer fact to a kernel's retained inner node.
 fn cook_wrapped(n: &node::T, node_id: i64, context: &sctx::T, payloads: &[payload::T]) -> R<node::Cooked> {
     let context = sctx::with_cpu_consumers(context, node::id(n), sctx::cpu_consumers(context, node_id));
     build::cook(n, &context, payloads)
@@ -603,23 +615,31 @@ fn own_roots(roots: E::Roots, node: node::T) -> node::T {
 fn per_context(value: &Value, build_with: Arc<Build>) -> R<node::T> {
     let roots = E::roots(std::iter::once(value));
     let reads = ak::context_reads(value);
-    if reads == deps_mod::STATIC {
-        return Ok(own_roots(roots, build_with(&|v: &Value| v.clone())?));
+    // Frame and time sources are cook-time uniforms. Only the seed picks compiled constants (a noise
+    // table), so only a seed read rebuilds the kernel, once per seed.
+    if !deps_mod::mem(deps_mod::Fact::Seed, reads) {
+        return Ok(own_roots(roots, build_with(&Value::clone)?));
     }
     let make = {
         let build_with = build_with.clone();
-        move |context: &sctx::T| build_with(&|v: &Value| ak::specialize(context, v))
+        // A noise seed is a construction decision: the rebuild answers it from this cook's context.
+        move |context: &sctx::T| {
+            let (live, resolve) = (sctx::input(context).clone(), {
+                let (context, empty): (sctx::T, ak::GeometryLookup) = (context.clone(), Arc::new(|_| None));
+                ln::resolver(Arc::new(move |value| ak::resolve(Some(&context), &empty, value)))
+            });
+            let shape = Arc::new(move |residual| match E::host::force_reference(&Value::Residual(residual), &live, None, None, Some(resolve.clone())) {
+                Ok(value) => Ok(Some(value)),
+                Err(d) if d.code == "E_DATA_SOURCE" => Ok(None),
+                Err(d) => Err(d),
+            });
+            let mut built = Err(fail("E_LOWER", "A kernel was not built"));
+            E::residual::with_shape(shape, &mut || built = build_with(&|v: &Value| ak::specialize(context, v)));
+            built
+        }
     };
     let base = make(&sctx::create(sctx::Options::default()).expect("context"))?;
-    let key = move |context: &sctx::T| -> (i64, i64, u64) {
-        let has = |fact| deps_mod::mem(fact, reads);
-        (
-            if has(deps_mod::Fact::Seed) { sctx::seed(context) } else { 0 },
-            if has(deps_mod::Fact::Frame) { sctx::frame(context) } else { 0 },
-            if has(deps_mod::Fact::Time) { sctx::time(context).to_bits() } else { 0 },
-        )
-    };
-    let last: Arc<Mutex<Option<((i64, i64, u64), node::T)>>> = Arc::new(Mutex::new(None));
+    let last: Arc<Mutex<Option<(i64, node::T)>>> = Arc::new(Mutex::new(None));
     let facts = node::facts(&base).clone();
     let wrapped = build::make(
         build::Args {
@@ -634,13 +654,13 @@ fn per_context(value: &Value, build_with: Arc<Build>) -> R<node::T> {
         },
         None,
         Arc::new(move |node_id, context, payloads| {
-            let k = key(context);
-            let cached = last.lock().unwrap().as_ref().filter(|(kk, _)| *kk == k).map(|(_, n)| n.clone());
+            let seed = sctx::seed(context);
+            let cached = last.lock().unwrap().as_ref().filter(|(k, _)| *k == seed).map(|(_, n)| n.clone());
             let n = match cached {
                 Some(n) => n,
                 None => {
                     let n = make(context)?;
-                    *last.lock().unwrap() = Some((k, n.clone()));
+                    *last.lock().unwrap() = Some((seed, n.clone()));
                     n
                 }
             };
@@ -944,6 +964,8 @@ pub struct KernelEnv {
     pub reference: bool,
     pub approx: W::Paths,
     pub kernel_source: Arc<dyn Fn() -> String + Send + Sync>,
+    pub checked: Arc<Workspace>,
+    pub factories: Arc<Vec<Factory>>,
 }
 
 #[derive(Clone, Default)]
@@ -952,6 +974,7 @@ pub struct NodeOpts {
     pub host: bool,
     pub state: Option<State>,
     pub elems: Option<Vec<(Symbol, Value)>>,
+    pub resolve: Option<flow_ir::core_exec::ResolveFn>,
 }
 
 fn static_topology_of(operation: &str, args: &flow_syntax::value::Record) -> bool {
@@ -1003,7 +1026,7 @@ fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, ar
     };
     // a stateful mesh is rebuilt each frame over the same arguments: its programs, and so its kernels'
     // device sites, slots and buffers, are the last frame's
-    let (program, points_program) = if opts.state.is_none() {
+    let (program, points_program) = if opts.state.is_none() || ak::has_parameters(&Value::Record(args.clone())) {
         make_programs()
     } else {
         let key = StatefulKey(args.clone(), inputs.to_vec());
@@ -1100,17 +1123,38 @@ fn mesh_cook(
         let cached = static_topology && device && tki::static_cached(&topology_key);
         let program: executor::Program = if cached { points_program.get().cloned().unwrap_or_else(|| program.clone())? } else { program.clone()? };
         let force = |resident: Option<Arc<dyn flow_ir::core_exec::Resident>>| -> R<Value> {
-            let resolve: flow_ir::core_exec::ResolveFn = {
-                let (context, geoms, sources) = (context.clone(), geometries.to_vec(), sources.to_vec());
-                Arc::new(move |v: &Value| {
-                    ak::resolve(Some(&context), &lookup(geoms.clone(), sources.clone()), v)
-                })
-            };
+            let host = Arc::new(OnceLock::<Arc<HostRun>>::new());
+            let resolve: flow_ir::core_exec::ResolveFn = opts.resolve.clone().unwrap_or_else(|| {
+                let (context, geometries, sources, host) = (context.clone(), geometries.to_vec(), sources.to_vec(), host.clone());
+                let (checked, factories, reference, gpu, profile, clock) = (env.checked.clone(), env.factories.clone(), env.reference, env.gpu.clone(), env.profile.clone(), env.clock.clone());
+                let geometry = lookup(geometries.clone(), sources.clone());
+                ln::resolver(Arc::new(move |value: &Value| {
+                    if matches!(value, Value::Source(g) if g.name == "$core/operator" || g.name == "$core/catalog") {
+                        host.get_or_init(|| {
+                            let run = Arc::new(HostRun {
+                                checked: checked.clone(), factories: factories.clone(), reference,
+                                gpu: gpu.clone(), profile: profile.clone(), clock: clock.clone(), context: context.clone(),
+                                handles: Mutex::new(HashMap::new()), geometries: Mutex::new(HashMap::new()), next: AtomicI64::new(-1),
+                                session: Mutex::new(None), stash: Mutex::new(None), resolver: OnceLock::new(),
+                            });
+                            for (id, geometry) in sources.iter().zip(&geometries) {
+                                run.handles.lock().unwrap().insert(*id, (ty::geometry(), None, Some(sop::session::Output { payload: payload::T::Geometry(geometry.clone()), instances: None })));
+                            }
+                            run
+                        });
+                    }
+                    match host.get() {
+                        Some(run) => run.resolve(value),
+                        None => ak::resolve(Some(&context), &geometry, value),
+                    }
+                }))
+            });
             let options = executor::ForceOptions { resident, state: opts.state.clone(), elems: opts.elems.clone(), resolve: Some(resolve), reference: env.reference, strict: env.strict_body };
             // Core and evaluator loops must observe the cook's cancellation, including a first cook.
             let cancel = sctx::cancel_token(context).clone();
             let mut result = Err(fail("E_CANCELLED", "Mesh kernel cancelled."));
             E::with_interrupt(Arc::new(move || rdk_core::cancel::is_cancelled(&cancel)), &mut || result = executor::force(&program, &options, sctx::input(context)));
+            if let Some(run) = host.get() { if let Some(session) = run.session.lock().unwrap().as_mut() { sop::session::close(session); } }
             result
         };
         let scope = if device { env.gpu.backend.as_ref().and_then(|b| b.residency(true)) } else { None };
@@ -1465,9 +1509,9 @@ fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &flow_syntax::value::Recor
                     let sources = sources_c.clone();
                     let resolve: flow_ir::core_exec::ResolveFn = {
                         let context = context.clone();
-                        Arc::new(move |v: &Value| {
+                        ln::resolver(Arc::new(move |v: &Value| {
                             ak::resolve(Some(&context), &lookup(geoms.clone(), sources.clone()), v)
-                        })
+                        }))
                     };
                     let forced = executor::force(
                         &program,
@@ -1579,7 +1623,7 @@ pub fn build_call(
             .collect()
     };
     let capture_factories = make_capture_factories(&[]);
-    let specialized = ck::specialize(provenance, context, label, &definition.body)?;
+    let specialized = ck::label_context(label, &definition.body).0;
     // callable slots forwarded as kernels
     let mut forwarded: Vec<(String, FnId, usize)> = Vec::new();
     for (name, value) in functions {
@@ -1748,8 +1792,30 @@ pub fn build_call(
             }
         }
     }
-    // Header validation is a constructor contract; evaluated body errors belong to cooking. Strict
-    // compiler refusals remain construction errors.
+    // Header validation is a constructor contract and must run even when the body is retained.
+    let parameters = ln::parameter_values(parameters);
+    let reached_ops = ck::context_ops_reached(&parameters, &checked.defs, &definition.body);
+    // Body lowering sees generic capture slots; only their arity shapes those bindings.
+    let inputs_key = Value::Int(inputs.len() as i64);
+    let key = flow_syntax::value::key_of(&|r| r.0, &Value::Record(vec![
+        // A vec3 group's port only restates its components, which the body reads instead.
+        ("parameters".into(), Value::Record(parameters.iter().filter(|(name, _)| !definition.fields.iter()
+            .any(|f| f.vec3.as_ref().is_some_and(|(group, _)| group.as_str() == name.as_str()))).cloned().collect::<Vec<_>>().into())),
+        ("functions".into(), Value::Record(functions.iter().map(|(name, value)| (*name,
+            Value::List(Arc::new(function_elements(value).into_iter().map(|id| Value::List(Arc::new(vec![
+                Value::Int(id.0), Value::Int(id.1), Value::Text(E::structure(&Value::Fn(id)).into_bytes().into()),
+            ]))).collect())))).collect::<Vec<_>>().into())),
+        ("inputs".into(), inputs_key),
+        ("label".into(), Value::Text(label.as_bytes().into())),
+        ("provenance".into(), Value::Int(provenance.unwrap_or(-1))),
+    ].into()));
+    ln::cached_body(key, context, &mut || {
+    let parameters = parameters.as_slice();
+    let mut overrides = overrides.clone();
+    for (name, value) in &mut overrides[0].1 {
+        if let Some((_, bound)) = parameters.iter().find(|(field, _)| field == name) { *value = bound.clone(); }
+    }
+    // Evaluated body errors belong to cooking. Strict compiler refusals remain construction errors.
     let outcome = (|| -> R<BodyResult> {
         let (body_overrides, kernel_bindings, aliases): (_, Vec<(FnId, i64)>, Vec<(usize, Vec<(i64, i64)>)>) = if forwarded.is_empty() {
             (overrides[0].clone(), Vec::new(), Vec::new())
@@ -1799,9 +1865,13 @@ pub fn build_call(
         let mut builder = TermBuilder::new();
         let blank = builder.import_form(&empty_form());
         let graph_form = builder.import_form(&body.form);
+        // A vec3 group's concrete components regroup into its vector. Slot components stay the
+        // body's scalar aliases: regrouping would suspend the live Sources and lose slot identity.
         let mut call_args = Vec::new();
         for (name, ty, _) in &definition.body.inputs {
+            let slot = parameters.iter().any(|(field, value)| field.as_str() == name.as_str() && ln::is_parameter(value));
             let value = match definition.fields.iter().find_map(|f| if *name == f.name { f.vec3.clone() } else { None }) {
+                Some(_) if slot => Some((name.clone(), builder.push(None, ty, blank, Draft::RefBinding(name.clone(), Vec::new())))),
                 None => Some((name.clone(), builder.push(None, ty, blank, Draft::RefBinding(name.clone(), Vec::new())))),
                 Some((group, 0)) => {
                     let components = (0..3).map(|i| {
@@ -1812,7 +1882,7 @@ pub fn build_call(
                 }
                 Some(_) => None,
             };
-            if let Some((name, value)) = value { call_args.push((name.into(), value)); }
+            if let Some((name, value)) = value { call_args.push((name.as_str().into(), value)); }
         }
         let call_id = builder.push(None, &ty::geometry(), blank, Draft::Call { kind: definition.kind.qualified.clone(), ctx: fctx::sop(), args: call_args });
         // the cooked node inputs, not the graph's parameter inputs shadowed below
@@ -1836,8 +1906,14 @@ pub fn build_call(
             vec![body_overrides],
             Workspace {
                 graphs: vec![call].into(),
-                defs: checked.defs.iter().filter(|def| reached_has(def)).cloned().collect::<Vec<_>>().into(),
-                nodes: checked.nodes.clone(),
+                defs: checked.defs.iter().filter(|def| reached_has(def)).map(ck::capture_context).collect::<Vec<_>>().into(),
+                // This invocation's actual header was validated before binding its live slots.
+                // Revalidating those slots here would defer to this same catalog factory again.
+                nodes: checked.nodes.iter().map(|node| {
+                    if node.kind.qualified == definition.kind.qualified && !node.validations.is_empty() {
+                        Arc::new(NodeDefinition { validations: Vec::new(), ..(**node).clone() })
+                    } else { node.clone() }
+                }).collect::<Vec<_>>().into(),
                 ..library.clone()
             },
         )?;
@@ -1852,7 +1928,6 @@ pub fn build_call(
         let mut dependencies = node::graph_dependencies(&compiled);
         let driven = !graph.network.states.is_empty() || !graph.network.drives.is_empty() || !graph.network.frame_nodes.is_empty();
         dependencies = dep_union(dependencies, vl::dependencies(&graph.network));
-        let reached_ops = ck::context_ops_reached(parameters, &checked.defs, &definition.body);
         for (op, fact) in [("sop/context_seed", deps_mod::Fact::Seed), ("sop/context_frame", deps_mod::Fact::Frame), ("sop/context_time", deps_mod::Fact::Time)] {
             if reached_ops.iter().any(|o| o == op) {
                 dependencies = dep_union(dependencies, deps_mod::one(fact));
@@ -1860,9 +1935,10 @@ pub fn build_call(
         }
         let owned: Vec<node::Info> = node::inspect(&compiled).into_iter().filter(|n| !n.operation.starts_with("lisp_capture_")).collect();
         let declared = definition.kind.facts.clone();
-        // a driven body is relowered per frame, so this lowering's nodes speak only for it: without a
-        // declaration its facts are the conservative ones
-        let conservative = driven && declared.is_none();
+        // A driven or context-shaped body can select different topology and read/write sets.
+        // Without a declaration, the default-context nodes do not prove facts for later cooks.
+        let context_dependent = reached_ops.iter().any(|op| matches!(op.as_str(), "sop/context_seed" | "sop/context_frame" | "sop/context_time"));
+        let conservative = (driven || context_dependent) && declared.is_none();
         // A declared `:facts` is the node's contract: the body's selection root reads "*" and replaces
         // topology on paper, which would otherwise defeat component caching for every node that
         // declares it. Session still refuses an undeclared write or a replaced topology at cook time.
@@ -1930,7 +2006,10 @@ pub fn build_call(
                 return Ok(compiled.clone());
             }
             let lane = vl::create(None);
-            let resolved = vl::resolve(Some(&gpu), Some(sctx::input(context)), &lane, sctx::time(context), &network)?;
+            let empty: ak::GeometryLookup = Arc::new(|_| None);
+            let captured = context.clone();
+            let resolve = ln::resolver(Arc::new(move |value| ak::resolve(Some(&captured), &empty, value)));
+            let resolved = vl::resolve_with(Some(&gpu), Some(sctx::input(context)), &lane, sctx::time(context), &network, resolve)?;
             if edit::ptr_eq(&resolved.geometry, &network.geometry) {
                 Ok(compiled.clone())
             } else {
@@ -1942,6 +2021,7 @@ pub fn build_call(
     Ok(match outcome {
         Ok(r) => r,
         Err(d) => lisp_body_failed(checked, definition, inputs, parameters, d),
+    })
     })
 }
 
@@ -2335,7 +2415,7 @@ impl std::ops::Deref for Lowerer {
 /// Cook state never owns prepared factories or nodes made from this state.
 pub struct CookServices {
     o: Options,
-    factories: Vec<Factory>,
+    factories: Arc<Vec<Factory>>,
     checked: Arc<Workspace>,
     evaluated: Arc<E::Eval>,
     _roots: E::Roots,
@@ -2513,7 +2593,7 @@ impl CookServices {
             s
         }
         let card = node.is_some_and(|n| n.kind == E::card_kind());
-        if !(Self::inlined(node) || card) || state.is_some() || elems.is_some() {
+        if ak::has_parameters(data) || !(Self::inlined(node) || card) || state.is_some() || elems.is_some() {
             return build_fn();
         }
         let mut parts = vec![
@@ -2553,6 +2633,8 @@ impl CookServices {
             reference: self.o.reference,
             approx: self.checked.approx.clone(),
             kernel_source: self.kernel_source_of(node),
+            checked: self.checked.clone(),
+            factories: self.factories.clone(),
         }
     }
 
@@ -2582,7 +2664,7 @@ impl CookServices {
         let strict_param = strict.unwrap_or(self.o.strict_body);
         let what = format!("arrays {operation}{}", if host { "true" } else { "" });
         let env = self.kenv(node, strict_param);
-        let opts = NodeOpts { check: Some(strict_param), host, state: state.clone(), elems: elems.clone() };
+        let opts = NodeOpts { check: Some(strict_param), host, state: state.clone(), elems: elems.clone(), resolve: None };
         self.reuse(node, &state, &elems, &what, &Value::Record(args.to_vec().into()), inputs, &|| geometry_arrays_node(&env, &opts, operation, args, sources, inputs))
     }
 
@@ -2623,7 +2705,7 @@ impl CookServices {
 
     fn grp_node(&self, node: Option<&ENode>, state: Option<State>, elems: Option<Vec<(Symbol, Value)>>, args: &[(Symbol, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
         let env = self.kenv(node, self.o.strict_body);
-        let opts = NodeOpts { check: Some(self.o.strict_body), host: false, state: state.clone(), elems: elems.clone() };
+        let opts = NodeOpts { check: Some(self.o.strict_body), host: false, state: state.clone(), elems: elems.clone(), resolve: None };
         self.reuse(node, &state, &elems, "group", &Value::Record(args.to_vec().into()), inputs, &|| group_node(&env, &opts, args, sources, inputs))
     }
 
@@ -2806,6 +2888,7 @@ impl CookServices {
                 let program = flow_ir::core_lower::lower(Some(Value::Residual(residual)), None, true, Some(32768), None, residual)
                     .map_err(|name| fail("E_PACKED_FORM", &format!("Cooked selection cannot compile {name}.")))?;
                 let inputs: Vec<node::T> = captures.iter().map(|(_, _, n)| n.clone()).collect();
+                let captures: Vec<(i64, Ty)> = captures.iter().map(|(id, ty, _)| (*id, ty.clone())).collect();
                 let state_slots = program.state_slots.len();
                 // Preparing cannot fail: a node replaced before it cooks (a Lisp call's inlined body
                 // under its factory node, `lisp_sop::root`) never pays for it.
@@ -2847,12 +2930,12 @@ struct StructEnv {
     gpu: gpu::Config,
     reference: bool,
     checked: Arc<Workspace>,
-    captures: Vec<(i64, Ty, node::T)>,
+    captures: Vec<(i64, Ty)>,
     prepared: Arc<LazyPrepared>,
     clock: Clock,
     residual: ResidualId,
     state_slots: usize,
-    factories: Vec<Factory>,
+    factories: Arc<Vec<Factory>>,
 }
 
 /// Lend the session to `f`: the lock is never held across the cook, which can re-enter (a nested
@@ -2877,7 +2960,12 @@ fn lend_session<X>(slot: &Mutex<Option<sop::session::T>>, f: impl FnOnce(&mut so
 }
 
 struct HostRun {
-    env: StructEnv,
+    checked: Arc<Workspace>,
+    factories: Arc<Vec<Factory>>,
+    reference: bool,
+    gpu: gpu::Config,
+    profile: Arc<profile::T>,
+    clock: Clock,
     context: sctx::T,
     handles: Mutex<HashMap<i64, HostHandle>>,
     geometries: Mutex<HashMap<i64, rdk_core::geometry::T>>,
@@ -2885,6 +2973,7 @@ struct HostRun {
     session: Mutex<Option<sop::session::T>>,
     /// a failure raised inside a `geometry` lookup, reported once the resolver returns
     stash: Mutex<Option<Diagnostic>>,
+    resolver: OnceLock<flow_ir::core_exec::ResolveFn>,
 }
 
 fn data_source(message: &str) -> Diagnostic {
@@ -3032,8 +3121,12 @@ impl HostRun {
     }
 
     fn resolve_fn(self: &Arc<Self>) -> flow_ir::core_exec::ResolveFn {
-        let run = self.clone();
-        Arc::new(move |v: &Value| run.resolve(v))
+        self.resolver.get_or_init(|| {
+            let run = Arc::downgrade(self);
+            ln::resolver(Arc::new(move |v: &Value| {
+                run.upgrade().ok_or_else(|| data_source("A cooked source belongs to an expired execution."))?.resolve(v)
+            }))
+        }).clone()
     }
 
     fn force_args(self: &Arc<Self>, keep_constant: bool, args: &[(Symbol, Value)]) -> R<Vec<(Symbol, Value)>> {
@@ -3060,7 +3153,7 @@ impl HostRun {
     /// sop/mesh, sop/mesh_planes and sop/remap build their node directly from the evaluated
     /// arguments: the former synthetic one-node workspace was checked, evaluated and lowered per call.
     fn host_geometry_arrays(self: &Arc<Self>, lowerer: &HostLowering, ty: Ty, name: &str, args: &[(Symbol, Value)]) -> R<Value> {
-        let op = flow_check::op::find(&self.env.checked.ops, name, &fctx::sop()).ok_or_else(|| data_source("A host call has no checked operator."))?;
+        let op = flow_check::op::find(&self.checked.ops, name, &fctx::sop()).ok_or_else(|| data_source("A host call has no checked operator."))?;
         (op.check)(args)?;
         let scalar = |v: &Value| -> Option<param::Value> {
             match v {
@@ -3094,8 +3187,8 @@ impl HostRun {
     }
 
     fn call(self: &Arc<Self>, lowerer: &HostLowering, ty: Ty, catalog: bool, name: &str, args: Vec<(Symbol, Value)>) -> R<Value> {
-        let checked = &self.env.checked;
-        if catalog && !checked.nodes.iter().any(|n| n.kind.qualified == name) && !self.env.factories.iter().any(|f| format!("sop/{}", edit::factory_key(f)) == name) {
+        let checked = &self.checked;
+        if catalog && !checked.nodes.iter().any(|n| n.kind.qualified == name) && !self.factories.iter().any(|f| format!("sop/{}", edit::factory_key(f)) == name) {
             return Err(data_source("A host call has no checked catalog kind."));
         }
         if !catalog && flow_check::op::find(&checked.ops, name, &fctx::sop()).is_none() {
@@ -3264,10 +3357,10 @@ impl HostRun {
             Workspace { defs: Vec::new().into(), nodes: Vec::new().into(), packed: Vec::new().into(), packed_roots: Vec::new(), ..(**checked).clone() }
         };
         let mut factories = capture_factories;
-        factories.extend(self.env.factories.iter().cloned());
+        factories.extend(self.factories.iter().cloned());
         let lowered = lower_checked(
             factories,
-            Options { reference: self.env.reference, gpu: self.env.gpu.clone(), strict_body: true, inputs: Some(vec![(graph.name.clone(), overrides)]), ..Options::default() },
+            Options { reference: self.reference, gpu: self.gpu.clone(), strict_body: true, inputs: Some(vec![(graph.name.clone(), overrides)]), ..Options::default() },
             Workspace { graphs: vec![graph].into(), ..library },
         )?;
         match lowered.graphs.as_slice() {
@@ -3349,15 +3442,17 @@ impl HostRun {
         HostLowering {
             arrays: Box::new(move |name, args, sources, inputs| {
                 let env = KernelEnv {
-                    gpu: run.env.gpu.clone(),
-                    profile: run.env.profile.clone(),
-                    clock: run.env.clock.clone(),
+                    gpu: run.gpu.clone(),
+                    profile: run.profile.clone(),
+                    clock: run.clock.clone(),
                     strict_body: true,
-                    reference: run.env.reference,
-                    approx: run.env.checked.approx.clone(),
+                    reference: run.reference,
+                    approx: run.checked.approx.clone(),
                     kernel_source: Arc::new(String::new),
+                    checked: run.checked.clone(),
+                    factories: run.factories.clone(),
                 };
-                geometry_arrays_node(&env, &NodeOpts { check: Some(true), host: true, ..NodeOpts::default() }, name, args, sources, inputs)
+                geometry_arrays_node(&env, &NodeOpts { check: Some(true), host: true, resolve: Some(run.resolve_fn()), ..NodeOpts::default() }, name, args, sources, inputs)
             }),
         }
     }
@@ -3381,15 +3476,21 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
     let used_device = std::cell::Cell::new(false);
     let scope = if placed.route != chain::Route::Cpu { env.gpu.backend.as_ref().and_then(|b| b.residency(true)).map(Arc::new) } else { None };
     let run = Arc::new(HostRun {
-        env: env.clone(),
+        checked: env.checked.clone(),
+        factories: env.factories.clone(),
+        reference: env.reference,
+        gpu: env.gpu.clone(),
+        profile: env.profile.clone(),
+        clock: env.clock.clone(),
         context: context.clone(),
         handles: Mutex::new(HashMap::new()),
         geometries: Mutex::new(HashMap::new()),
         next: AtomicI64::new(-1),
         session: Mutex::new(None),
         stash: Mutex::new(None),
+        resolver: OnceLock::new(),
     });
-    for (index, (id, ty, _)) in env.captures.iter().enumerate() {
+    for (index, (id, ty)) in env.captures.iter().enumerate() {
         run.handles.lock().unwrap().insert(*id, (ty.clone(), None, Some(sop::session::Output { payload: payloads[index].clone(), instances: None })));
     }
     let execute = |scope: Option<&Arc<Box<dyn gpu::Residency>>>| -> R<Value> {
@@ -3600,6 +3701,7 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
         });
         ln::node(
             &ln::NodeOptions {
+                kind: definition.kind.qualified.clone(),
                 unbound_function,
                 geometry_inputs,
                 operation: definition.operation.clone(),
@@ -3839,12 +3941,22 @@ impl CookServices {
         let node_c = node.clone();
         let args_c = args.to_vec();
         let (key_c, kind_c, sources_c) = (key.clone(), kind.clone(), sources.clone());
+        let structural = Mutex::new(None);
         let build_inner: Arc<dyn Fn(&[node::T]) -> R<node::T> + Send + Sync> = Arc::new(move |inputs: &[node::T]| {
             match get(&args_c, "value") {
                 Some(Value::Residual(residual)) => {
+                    let mut structural = structural.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if let Some(template) = structural.as_ref() {
+                        return Ok(build::rebuild_with_inputs(template, inputs));
+                    }
                     let captures: Vec<(i64, Ty, node::T)> = sources_c.iter().zip(inputs.iter()).map(|(id, input)| (*id, this.plan.nodes[*id as usize].ty.clone(), input.clone())).collect();
-                    let n = this.reuse(Some(&node_c), &None, &None, "structural", &Value::Residual(*residual), inputs, &|| this.structural_node(Some(&node_c), *residual, &captures))?;
-                    Ok(node::relabel(&key_c, &n))
+                    let n = this.reuse(Some(&node_c), &None, &None, "structural", &Value::Residual(*residual), inputs, &|| {
+                        let _phase = flow_syntax::phase_timer::measure("lower.structural_build");
+                        this.structural_node(Some(&node_c), *residual, &captures)
+                    })?;
+                    let n = node::relabel(&key_c, &n);
+                    *structural = Some(build::without_inputs(&n));
+                    Ok(n)
                 }
                 _ => {
                     // a deferred check of a live argument fails the card's cook as the inlined call would have refused or failed
@@ -4085,9 +4197,9 @@ impl Lowerer {
                                 let sources = sources.clone();
                                 let resolve: flow_ir::core_exec::ResolveFn = {
                                     let context = context.clone();
-                                    Arc::new(move |v: &Value| {
+                                    ln::resolver(Arc::new(move |v: &Value| {
                                         ak::resolve(Some(&context), &lookup(geoms.clone(), sources.clone()), v)
-                                    })
+                                    }))
                                 };
                                 match E::host::force_reference(&g, sctx::input(context), None, None, Some(resolve))? {
                                     Value::Bool(b) => Ok(b),
@@ -4275,6 +4387,11 @@ impl ZoneCook {
                     }
                 }
                 let present: Vec<node::T> = options.iter().flatten().cloned().collect();
+                let mut changes = p.changes.clone();
+                for (v, f) in &p.dynamic {
+                    let forced = E::force_with(v, &live, state.as_ref().map(E::fork_state).as_ref(), Some(outer), None)?;
+                    changes.extend(f(&forced)?);
+                }
                 let made = if let Some(inner) = &p.zone {
                     let inner = match &z.preview {
                         Some((target, probes)) if *target >= inner.lo && *target < inner.hi => this.focus(inner, *target, probes)?,
@@ -4303,14 +4420,11 @@ impl ZoneCook {
                 } else if is_geometry_arrays(&n.kind) {
                     this.arrays_node(Some(&n), None, false, state.clone(), Some(outer.to_vec()), &n.kind, &n.args, &this.deps(&n)?, &present)?
                 } else {
-                    edit_r(ln::with_initial_changes(edit::factory_operation(&p.factory), &p.changes, &mut || edit::instantiate_optional(&p.factory, &options)))?
+                    // an element is built once, from its own values: building it from the shared
+                    // ones and then applying its own would make them look like an edit (slots)
+                    edit_r(ln::with_initial_changes(edit::factory_operation(&p.factory), &changes, &mut || edit::instantiate_optional(&p.factory, &options)))?
                 };
                 let made = edit_r(build::restore_id(p.cid, &made))?;
-                let mut changes = p.changes.clone();
-                for (v, f) in &p.dynamic {
-                    let forced = E::force_with(v, &live, state.as_ref().map(E::fork_state).as_ref(), Some(outer), None)?;
-                    changes.extend(f(&forced)?);
-                }
                 let made = if changes.is_empty() { made } else { edit_r(node::apply_parameters(&made, &changes))?.0 };
                 bound.insert(id, made);
                 Ok(())
@@ -4600,7 +4714,8 @@ impl Lowerer {
                     None => p.slots.iter().find(|(s, _)| *s == i).and_then(|(_, source)| edit::find(&graph, self.compiled[*source as usize])),
                 })
                 .collect();
-            let n = edit_r(ln::with_initial_changes(edit::factory_operation(&p.factory), &p.changes, &mut || edit::instantiate_optional(&p.factory, &options)))?;
+            let driven: Vec<String> = self.pending.lock().unwrap().iter().filter(|d| d.node == p.cid).map(|d| d.field.clone()).collect();
+            let n = edit_r(ln::with_driven_initial_changes(edit::factory_operation(&p.factory), &p.changes, &driven, &mut || edit::instantiate_optional(&p.factory, &options)))?;
             let n = edit_r(build::restore_id(p.cid, &n))?;
             let inputs: Vec<Option<i64>> = options.iter().map(|o| o.as_ref().map(node::id)).collect();
             graph = edit_r(edit::add_node(Some(&inputs), Some(&p.factory), &n, &graph))?;
@@ -4749,6 +4864,9 @@ impl Lowerer {
 
 fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R<Arc<Lowerer>> {
     install_hooks();
+    // Initial authored evaluation also reaches helper bodies; capturing only the later custom
+    // node's workspace leaves these context reads embedded in residual terms.
+    let checked_in = Workspace { defs: checked_in.defs.iter().map(ck::capture_context).collect::<Vec<_>>().into(), ..checked_in };
     let image_origins: Arc<Mutex<HashMap<(i64, W::Path, Vec<i64>), Option<W::Path>>>> = Arc::new(Mutex::new(HashMap::new()));
     let observe: Arc<dyn Fn(Option<W::Path>, ResidualId) + Send + Sync> = {
         let origins = image_origins.clone();
@@ -4797,7 +4915,7 @@ fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R
     let mut services = CookServices {
         _roots: roots,
         o: o.clone(),
-        factories,
+        factories: Arc::new(factories),
         checked,
         evaluated,
         profile,

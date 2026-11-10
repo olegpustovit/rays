@@ -119,7 +119,7 @@ pub fn node(state: Option<&e::State>, t: &T) -> node::T {
         build::Args {
             parameters,
             cook_mode: CookMode::Generator,
-            dependencies: attribute_kernel::input_reads(&Value::Fn(t.function)),
+            dependencies: attribute_kernel::dependencies(&Value::Fn(t.function)),
             inputs: t.inputs.clone(),
             ..build::args("image/map")
         },
@@ -133,7 +133,7 @@ pub fn node(state: Option<&e::State>, t: &T) -> node::T {
             if context::cancelled(ctx) {
                 return Err(flow_syntax::value::fail("E_CANCELLED", "Image kernel cancelled."));
             }
-            let resolve: packed::Resolve = Arc::new(move |v| attribute_kernel::resolve(None, &lookup, v));
+            let resolve: packed::Resolve = crate::lisp_node::resolver(Arc::new(move |v| attribute_kernel::resolve(None, &lookup, v)));
             let options = packed::ForceOptions { state: state.clone(), resolve: Some(resolve), ..Default::default() };
             match packed::force(&packed, context::input(ctx), &options)? {
                 Value::Floats(4, rgba) => {

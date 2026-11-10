@@ -38,10 +38,11 @@ struct Expression {
     registers: Vec<i64>,
     constant: Option<Value>,
     fields: Vec<(Symbol, Expression)>,
+    function: Option<std::sync::Arc<(Params, Term, Env, Scope)>>,
 }
-fn regs(registers: Vec<i64>) -> Expression { Expression { registers, constant: None, fields: Vec::new() } }
+fn regs(registers: Vec<i64>) -> Expression { Expression { registers, constant: None, fields: Vec::new(), function: None } }
 fn one(register: i64) -> Expression { regs(vec![register]) }
-fn fields_of(fields: Vec<(Symbol, Expression)>) -> Expression { Expression { registers: Vec::new(), constant: None, fields } }
+fn fields_of(fields: Vec<(Symbol, Expression)>) -> Expression { Expression { registers: Vec::new(), constant: None, fields, function: None } }
 
 fn diag(span: Option<Span>, code: &str, message: &str) -> Diagnostic {
     rays_diagnostic::error(code.to_owned(), message.to_owned(), span, None, None, Vec::new(), Vec::new())
@@ -612,7 +613,7 @@ impl Lower {
                 for (name, value) in fs {
                     fields.push((name.clone(), self.literal(at, value)?));
                 }
-                Ok(Expression { registers: Vec::new(), constant: Some(v.clone()), fields })
+                Ok(Expression { registers: Vec::new(), constant: Some(v.clone()), fields, function: None })
             }
             _ => {
                 let registers = match v {
@@ -626,7 +627,7 @@ impl Lower {
                     }
                     _ => return Err(refusal(at, "E_PACKED_TYPE", &format!("Packed constant has unsupported type {}.", ty::to_string(&V::ty_of(v))))),
                 };
-                Ok(Expression { registers, constant: Some(v.clone()), fields: Vec::new() })
+                Ok(Expression { registers, constant: Some(v.clone()), fields: Vec::new(), function: None })
             }
         }
     }
@@ -658,7 +659,7 @@ impl Lower {
             Some(value) => {
                 let value = V::coerce_to(&Ty::Int, value)?;
                 match value {
-                    Value::Int(n) => Ok(Expression { registers: vec![self.emit(I::Int_const(n))?], constant: Some(value), fields: Vec::new() }),
+                    Value::Int(n) => Ok(Expression { registers: vec![self.emit(I::Int_const(n))?], constant: Some(value), fields: Vec::new(), function: None }),
                     _ => Err(invalid("assert false")),
                 }
             }
@@ -863,6 +864,7 @@ impl Lower {
             if table_ty.as_ref() == Some(ty) { return Ok(value.clone()); }
         }
         match (ty, &value.constant) {
+            (Ty::Fn(_), _) if value.function.is_some() => Ok(value.clone()),
             (Ty::Int, Some(_)) => self.as_int(value),
             (_, Some(constant)) => {
                 let coerced = V::coerce_to(ty, constant)?;
@@ -1350,6 +1352,12 @@ impl Lower {
                     let name = t.name(arg.name);
                     let value = match &expression.constant {
                         Some(value) => value.clone(),
+                        // The table seed changes the compiled instruction, so an owning body
+                        // projects that choice; per-element or state-reading seeds stay refused.
+                        None if name == "seed" => match residual::construction_value(self.residual, &t.child(arg.term), &self.bindings)? {
+                            Some(value) => value,
+                            None => return Err(refusal(t, "E_PACKED_CONSTANT", "Noise configuration seed must be constant.")),
+                        },
                         None if name == "octaves" => {
                             let r = reg(&self.as_int(expression)?, 0)?;
                             live.push((t.symbol(arg.name), r));
@@ -1481,6 +1489,27 @@ impl Lower {
         refusal(t, "E_PACKED_FORM", &format!("Packed term {} has unsupported type {}.", lisp::flat(&t.form()), ty::to_string(t.ty())))
     }
 
+    fn local_function(&self, env: &Env, term: &Term) -> Option<std::sync::Arc<(Params, Term, Env, Scope)>> {
+        let arena = term.arena();
+        match term.node {
+            Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() =>
+                env_find(env, term.name(arena.ref_binding(id).name)).and_then(|value| value.function.clone()),
+            Node::Fn(id) => {
+                let function = arena.function(id);
+                let (env, scope) = match function.capture {
+                    None => (env.clone(), self.capture_scope.clone()),
+                    Some(id) => {
+                        let original = self.local_function(env, &term.child(id))?;
+                        (original.2.clone(), original.3.clone())
+                    }
+                };
+                let params = arena.params(function.params).iter().map(|param| (arena.owned_pattern(param.pattern), param.ty.map(|ty| arena.ty(ty).clone()))).collect();
+                Some(std::sync::Arc::new((params, term.child(function.body), env, scope)))
+            }
+            _ => None,
+        }
+    }
+
     fn expression_node(&mut self, env: &Env, t: &Term) -> Res<Expression> {
         let arena = t.arena();
         match t.node {
@@ -1492,6 +1521,10 @@ impl Lower {
                 _ => Err(self.term_unsupported(t)),
             },
             Node::Text(id) => self.literal(t, &Value::Text(arena.shared_bytes(id))),
+            Node::Fn(_) => match self.local_function(env, t) {
+                Some(function) => Ok(Expression { function: Some(function), ..regs(Vec::new()) }),
+                None => Err(self.term_unsupported(t)),
+            },
             Node::RefBinding(id) => {
                 let binding = arena.ref_binding(id);
                 let name = t.name(binding.name);
@@ -1864,9 +1897,16 @@ impl Lower {
                 if self.call_depth >= 64 { return Err(refusal(t, "E_PACKED_LIMIT", "Packed helper call depth exceeds 64.")); }
                 let mut values = Vec::new();
                 for &id in arena.term_ids(call.args) { values.push(self.expression(env, &t.child(id))?); }
-                let (cname, cpath) = self.capture_path(t, t.symbol(call.name), &[]);
-                let (params, body, scope) = helper_body(t, self.residual, &self.bindings, fn_name, &cname, &cpath)?;
-                let env2 = self.bind_parameters(t, &params, &values, &Vec::new())?;
+                let local = env_find(env, fn_name).and_then(|value| value.function.clone());
+                let (params, body, base, scope) = match local {
+                    Some(function) => (*function).clone(),
+                    None => {
+                        let (cname, cpath) = self.capture_path(t, t.symbol(call.name), &[]);
+                        let (params, body, scope) = helper_body(t, self.residual, &self.bindings, fn_name, &cname, &cpath)?;
+                        (params, body, Vec::new(), scope)
+                    }
+                };
+                let env2 = self.bind_parameters(t, &params, &values, &base)?;
                 let previous = self.capture_scope.clone();
                 self.capture_scope = scope;
                 self.call_depth += 1;
@@ -2077,9 +2117,16 @@ impl Lower {
 
     fn inline(&mut self, env: &Env, at: &Term, f: &Term, values: &[Expression]) -> Res<Expression> {
         if self.call_depth >= 64 { return Err(refusal(at, "E_PACKED_LIMIT", "Packed helper call depth exceeds 64.")); }
+        let local = self.local_function(env, f);
         let result_ty = self.term.ty().clone();
-        let (params, body, _) = function_body(self.residual, &self.bindings, &result_ty, None, f)?;
-        let base: Env = if literal_function(f) { env.clone() } else { Vec::new() };
+        let (params, body, base, local_scope) = match local {
+            Some(function) => { let (params, body, env, scope) = (*function).clone(); (params, body, env, Some(scope)) }
+            None => {
+                let (params, body, _) = function_body(self.residual, &self.bindings, &result_ty, None, f)?;
+                let base = if literal_function(f) { env.clone() } else { Vec::new() };
+                (params, body, base, None)
+            }
+        };
         let env2 = self.bind_parameters(at, &params, values, &base)?;
         fn scope(me: &Lower, f: &Term) -> Scope {
             match f.node {
@@ -2093,7 +2140,7 @@ impl Lower {
             }
         }
         let previous = self.capture_scope.clone();
-        self.capture_scope = scope(self, f);
+        self.capture_scope = local_scope.unwrap_or_else(|| scope(self, f));
         self.call_depth += 1;
         let result = self.expression(&env2, &body);
         self.capture_scope = previous;
@@ -2104,7 +2151,15 @@ impl Lower {
 
 /// The unfused region of one form; `fusion` and `dynamic` are recorded on it.
 pub fn lower(fusion: bool, dynamic: bool, count_source: &CountSource, residual: ResidualId, term: &Term) -> Result<RegionT, Vec<Diagnostic>> {
-    match lower_inner(fusion, dynamic, count_source, residual, term) {
+    lower_mode(fusion, dynamic, count_source, residual, term, false)
+}
+
+pub(crate) fn lower_uniform(count_source: &CountSource, residual: ResidualId, term: &Term) -> Result<RegionT, Vec<Diagnostic>> {
+    lower_mode(false, true, count_source, residual, term, true)
+}
+
+fn lower_mode(fusion: bool, dynamic: bool, count_source: &CountSource, residual: ResidualId, term: &Term, uniform: bool) -> Result<RegionT, Vec<Diagnostic>> {
+    match lower_inner(fusion, dynamic, count_source, residual, term, uniform) {
         Ok(region) => Ok(region),
         Err(Stop::Refused(d)) | Err(Stop::Error(d)) => {
             let span = d.span.clone().or_else(|| Some(term.form().span.clone()));
@@ -2119,7 +2174,7 @@ pub fn lower(fusion: bool, dynamic: bool, count_source: &CountSource, residual: 
     }
 }
 
-fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual: ResidualId, term: &Term) -> Res<RegionT> {
+fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual: ResidualId, term: &Term, uniform: bool) -> Res<RegionT> {
     let view = residual::residual_view(residual)?;
     let mut captures = view.owned_bindings();
     let refuse = |code: &str, message: &str| -> Stop { refusal(term, code, message) };
@@ -2175,6 +2230,8 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
                 let body = builder.freeze().handle(body);
                 (vec![(Pattern::Name("@item".to_owned()), None)], None, body, term.children(), Cow::Borrowed(captures.as_slice()), Iteration::Zip, RegionResult::Sum(true), Vec::new())
             }
+            _ if uniform && matches!(term.ty(), Ty::Vec2 | Ty::Vec3 | Ty::Vec4) =>
+                (Vec::new(), None, term.clone(), &[], Cow::Borrowed(captures.as_slice()), Iteration::Product, RegionResult::Sum(false), Vec::new()),
             _ => return Err(refuse("E_PACKED_FORM", "Packed kernels require map, reduce, a numeric loop or array/sum.")),
         };
     let bindings = match bindings {
@@ -2310,7 +2367,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
         return Err(refuse("E_PACKED_TYPE", &format!("Packed result has {} components but its type requires {}.", output.len(), width)));
     }
     let counts: Vec<Option<i64>> = sources.iter().map(|&id| count_of(residual, &term.child(id))).collect();
-    let count = match count_of_sources(iteration, &counts) {
+    let count = match if uniform { Ok(Some(1)) } else { count_of_sources(iteration, &counts) } {
         Ok(c) => c,
         Err(Stop::Unsupported) => return Err(refuse("E_PACKED_LIMIT", "Packed product source count exceeds the integer limit.")),
         Err(other) => return Err(other),

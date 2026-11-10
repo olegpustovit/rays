@@ -103,6 +103,7 @@ impl Storage {
                 self.env(&residual.env); self.context(&residual.ctx);
             }
         }
+        if let Some(index) = &arena.residual_index { if self.shared(&index.0) { self.buffer(&index.more); } }
         if self.shared(&arena.memo.0) { for value in arena.memo.values() { self.value(value); } }
         if self.shared(&arena.bases.0) { for path in arena.bases.iter() { if self.shared(path) { self.path(path); } } }
         if self.shared(&arena.packed_bases.0) { for path in arena.packed_bases.values() { if self.shared(path) { self.path(path); } } }

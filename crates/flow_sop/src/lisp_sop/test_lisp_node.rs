@@ -1055,7 +1055,7 @@ fn context_time_is_a_float_time_dependency_in_bodies_only() {
     }
 }
 
-/// A Lisp node's body is lowered over fresh stand-ins for its inputs on every build: the factory
+/// A Lisp node's body is lowered over fresh stand-ins for its inputs once during construction: the factory
 /// node (`card_node`, as `lisp_sop::root` takes it) and its rebuild over other inputs (`restore`, an
 /// input edit) share one build of the body's nodes, and only the node that cooks prepares its
 /// program (the inlined body the factory node replaces never cooks). Every node cooks the inlined
@@ -1070,14 +1070,18 @@ fn a_lisp_node_rebuilt_over_new_inputs_builds_its_body_once() {
     }
     let calls = flow_syntax::phase_timer::calls;
     let text = "(workspace w (graph g :context sop (sop/subdivide (sop/box) :iterations 1 :hole_group \"\")))";
-    let l = lower::workspace(None, Vec::new(), lower::Options::default(), &parse(text)).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let (l, t) = phases(&mut || lower::workspace(None, Vec::new(), lower::Options::default(), &parse(text)).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d))));
+    assert_eq!(calls(&t, "lower.structural_build"), 1, "the authored workspace card builds once");
+    assert_eq!(calls(&t, "lower.inlined_build"), 3, "two box input kernels and the workspace card each build once");
     let (n, t) = phases(&mut || lisp_sop::root(&l, l.graphs.iter().find(|g| g.default).expect("a default graph")).expect("graph root"));
     assert_eq!(node::operation(&n), "subdivide", "the root is the factory node");
+    assert_eq!(calls(&t, "lower.structural_build"), 1, "the factory's parameter-bound body builds once");
     assert_eq!(calls(&t, "lower.inlined_build"), 1, "the factory node builds its body once");
     with_session(&mut |s| {
         let input = cook_with(s, 1, 97, 0, &node::inputs(&n)[0]);
         let (rebuilt, t) = phases(&mut || build::rebuild_with_inputs(&n, &[lisp_sop::snapshot(&input)]));
         assert_eq!(calls(&t, "lower.inlined_build"), 0, "a rebuild over new inputs built the body's nodes again");
+        assert_eq!(calls(&t, "lower.structural_build"), 0, "a rebuild over new inputs rebuilt the structural body");
         let (cooked, t) = phases(&mut || [geometry_bytes(&cook_with(s, 1, 97, 0, &n)), geometry_bytes(&cook_with(s, 1, 97, 0, &rebuilt))]);
         assert_eq!(calls(&t, "lower.structural_prepare"), 1, "the factory node and its rebuild did not share one prepared program");
         let graph = l.graphs.iter().find(|g| g.default).unwrap();
@@ -1085,4 +1089,274 @@ fn a_lisp_node_rebuilt_over_new_inputs_builds_its_body_once() {
         assert!(cooked[0] == expected, "the factory node cooks differently from the inlined body");
         assert!(cooked[1] == expected, "the rebuilt node cooks differently");
     });
+}
+
+#[test]
+fn changed_data_parameters_cook_without_relowering_the_body() {
+    let text = r#"(workspace reused_body
+      (defnode sop/parameter_probe [(amount : float 0.0) (enabled : bool true) (context_seed : bool false)]
+        (sop/line :kind "Points" :points 2 :origin [(if enabled (if context_seed (float (sop/context_seed "parameter_probe")) amount) (- 0.0 amount)) 0.0 0.0]))
+      (graph g :context sop (sop/parameter_probe)))"#;
+    for reference in [false, true] {
+        let n = lower_ref(reference, text);
+        with_session(&mut |s| {
+            // Keep initial preparation outside the measured warm edit/cook. The first edit of a
+            // value turns it into a cook-time slot, which lowers the body once more.
+            let _ = cook_with(s, 1, 97, 0, &n);
+            let (warm, _) = node::apply_parameters(&n, &[("amount".into(), param::Value::Float(0.5)), ("enabled".into(), param::Value::Bool(false))]).unwrap();
+            let _ = cook_with(s, 1, 97, 0, &warm);
+            for domains in [1, 8] {
+                for (amount, enabled) in [(1.25, true), (-0.5, false), (2.75, true), (1.25, false)] {
+                    let start = std::time::Instant::now();
+                    let timer = flow_syntax::phase_timer::SampleGuard::start_with_clock(
+                        Box::new(move || start.elapsed().as_secs_f64()));
+                    let (edited, _) = node::apply_parameters(&n, &[("amount".into(), param::Value::Float(amount)), ("enabled".into(), param::Value::Bool(enabled))]).unwrap();
+                    let actual = cook_with(s, domains, 97, 0, &edited);
+                    let measured = timer.finish();
+                    assert_eq!(geo::point_count(&actual), 2);
+                    assert_eq!(rdk_core::packed::float3::get(geo::positions(&actual), 0).unwrap().0, if enabled { amount } else { -amount });
+                    assert_eq!(flow_syntax::phase_timer::calls(&measured, "lower"), 0,
+                        "a changed data value rebuilt the Lisp body");
+                }
+            }
+            assert_eq!(position(&cook_with(s, 1, 97, 0, &n), 0).0, 0.0,
+                "a retained earlier node observed another node's current parameter scope");
+        });
+    }
+}
+
+#[test]
+fn body_reuse_keeps_branch_count_and_current_data_values() {
+    let text = r#"(workspace shape_body
+      (defnode sop/shape_probe [(amount : float 1.0) (points : int 2 :hard_min 1)]
+        (if (> amount 0.0)
+          (sop/line :kind "Points" :points points :origin [amount 0.0 0.0])
+          (sop/line :kind "Points" :points (int/add points 1) :origin [amount 0.0 0.0])))
+      (graph g :context sop (sop/shape_probe)))"#;
+    for reference in [false, true] {
+        for domains in [1, 8] {
+            let mut previous = lower_ref(reference, text);
+            with_session(&mut |s| {
+                let _ = cook_with(s, domains, 97, 0, &previous);
+                // the first data edit makes `amount` a cook-time slot
+                previous = node::apply_parameters(&previous, &[("amount".into(), param::Value::Float(1.5))]).unwrap().0;
+                let _ = cook_with(s, domains, 97, 0, &previous);
+                for (amount, points, same_shape) in [
+                    (2.0, 2, true), (3.0, 2, true), (-1.0, 2, false),
+                    (-2.0, 2, true), (-3.0, 4, false), (-4.0, 4, true),
+                    (0.5, 4, false), (1.5, 4, true),
+                ] {
+                    let start = std::time::Instant::now();
+                    let timer = flow_syntax::phase_timer::SampleGuard::start_with_clock(
+                        Box::new(move || start.elapsed().as_secs_f64()));
+                    let (next, _) = node::apply_parameters(&previous, &[
+                        ("amount".into(), param::Value::Float(amount)),
+                        ("points".into(), param::Value::Int(points)),
+                    ]).unwrap();
+                    let actual = cook_with(s, domains, 97, 0, &next);
+                    let measured = timer.finish();
+                    assert_eq!(geo::point_count(&actual), if amount > 0.0 { points } else { points + 1 });
+                    assert_eq!(position(&actual, 0).0, amount);
+                    if same_shape {
+                        assert_eq!(flow_syntax::phase_timer::calls(&measured, "lower"), 0,
+                            "changing data within the same branch/count rebuilt the body");
+                    }
+                    previous = next;
+                }
+            });
+        }
+    }
+}
+
+#[test]
+fn nested_parameter_bounds_use_current_values_without_relowering() {
+    let text = r#"(workspace nested_bounds
+      (defnode sop/inner_bounds [(level : float 3.0 :hard_min 2 :hard_max 4)]
+        (sop/line :kind "Points" :points 1 :origin [level 0.0 0.0]))
+      (defnode sop/outer_bounds [(level : float 3.0 :hard_min -100 :hard_max 100)]
+        (sop/inner_bounds :level level))
+      (graph g :context sop (sop/outer_bounds)))"#;
+    for reference in [false, true] {
+        for domains in [1, 8] {
+            let original = lower_ref(reference, text);
+            with_session(&mut |s| {
+                assert_eq!(position(&cook_with(s, domains, 97, 0, &original), 0).0, 3.0);
+                let (warm, _) = node::apply_parameters(&original, &[("level".into(), param::Value::Float(3.5))]).unwrap();
+                assert_eq!(position(&cook_with(s, domains, 97, 0, &warm), 0).0, 3.5);
+                for level in [-9.0f64, -8.0, 3.0, 8.0, 9.0, 2.0] {
+                    let start = std::time::Instant::now();
+                    let timer = flow_syntax::phase_timer::SampleGuard::start_with_clock(
+                        Box::new(move || start.elapsed().as_secs_f64()));
+                    let (next, _) = node::apply_parameters(&original, &[
+                        ("level".into(), param::Value::Float(level)),
+                    ]).unwrap();
+                    let actual = cook_with(s, domains, 97, 0, &next);
+                    let measured = timer.finish();
+                    assert_eq!(position(&actual, 0).0, level.clamp(2.0, 4.0),
+                        "an outer parameter bypassed the nested node's stricter schema");
+                    assert_eq!(flow_syntax::phase_timer::calls(&measured, "lower"), 0,
+                        "a nested bounded data value rebuilt the Lisp body");
+                }
+                assert_eq!(position(&cook_with(s, domains, 97, 0, &original), 0).0, 3.0,
+                    "a retained earlier node observed a later parameter binding");
+            });
+        }
+    }
+}
+
+#[test]
+fn retained_callable_bodies_keep_the_current_capture_and_function() {
+    for reference in [false, true] {
+        for (operation, sign) in [("+", 1.0), ("-", -1.0)] {
+            let text = format!(r#"(workspace callable_body
+              (defnode sop/callable_inner [(geo : geometry) (field : (fn [vec3] vec3))]
+                (sop/with_attr geo :P (exact (map field (sop/attr geo :P)))))
+              (defnode sop/callable_outer [(amount : float 1.0)]
+                (sop/callable_inner (sop/line :kind "Points" :points 1)
+                  (fn [p] ({operation} p [amount 0.0 0.0]))))
+              (graph g :context sop (sop/callable_outer)))"#);
+            let original = lower_ref(reference, &text);
+            for domains in [1, 8] {
+                with_session(&mut |s| {
+                    assert_eq!(position(&cook_with(s, domains, 97, 0, &original), 0).0, sign);
+                    let (warm, _) = node::apply_parameters(&original, &[("amount".into(), param::Value::Float(1.5))]).unwrap();
+                    assert_eq!(position(&cook_with(s, domains, 97, 0, &warm), 0).0, sign * 1.5);
+                    for amount in [2.0, -3.0, 4.0, 2.0] {
+                        let start = std::time::Instant::now();
+                        let timer = flow_syntax::phase_timer::SampleGuard::start_with_clock(
+                            Box::new(move || start.elapsed().as_secs_f64()));
+                        let (next, _) = node::apply_parameters(&original, &[
+                            ("amount".into(), param::Value::Float(amount)),
+                        ]).unwrap();
+                        let actual = cook_with(s, domains, 97, 0, &next);
+                        let measured = timer.finish();
+                        assert_eq!(geo::point_count(&actual), 1);
+                        assert_eq!(position(&actual, 0), (sign * amount, 0.0, 0.0),
+                            "a retained callable froze its capture or reused another function");
+                        assert_eq!(flow_syntax::phase_timer::calls(&measured, "lower"), 0,
+                            "a changed callable capture rebuilt the body");
+                    }
+                });
+                with_session(&mut |s| {
+                    assert_eq!(position(&cook_with(s, domains, 97, 0, &original), 0).0, sign,
+                        "a retained callable observed another node's argument snapshot");
+                });
+            }
+        }
+    }
+}
+
+#[test]
+fn helper_and_callable_context_reads_bind_each_cook_without_relowering() {
+    for reference in [false, true] {
+        // Named call, FnRef invocation and local closure all must retain the caller's cook label.
+        for body in ["(sample)", "(invoke sample)", "(let* [read (fn [] (sample))] (read))"] {
+            let text = format!(r#"(workspace context_body
+              (defn sample :context value [] (+ (sop/context_time) (sop/context_frame)))
+              (defn invoke :context value [(read : fn)] (read))
+              (defnode sop/context_probe []
+                (sop/line :kind "Points" :points 2 :origin [{body} 0.0 0.0]))
+              (graph g :context sop (sop/context_probe)))"#);
+            let n = lower_ref(reference, &text);
+            with_session(&mut |s| {
+                let at = |frame, time, domains| sctx::create(ContextOptions {
+                    frame: Some(frame), time: Some(time), domains: Some(domains),
+                    ..Default::default()
+                }).unwrap();
+                let _ = cook(s, &at(0, 0.0, 1), &n);
+                for (frame, time, domains) in [(1, 0.25, 1), (3, 1.5, 8), (2, 0.5, 1), (3, 1.5, 8)] {
+                    let start = std::time::Instant::now();
+                    let timer = flow_syntax::phase_timer::SampleGuard::start_with_clock(
+                        Box::new(move || start.elapsed().as_secs_f64()));
+                    let actual = cook(s, &at(frame, time, domains), &n);
+                    let measured = timer.finish();
+                    assert_eq!(position(&actual, 0).0, frame as f64 + time);
+                    assert_eq!(geo::point_count(&actual), 2);
+                    assert_eq!(flow_syntax::phase_timer::calls(&measured, "lower"), 0,
+                        "a context fact was baked into a rebuilt helper/callable body");
+                }
+            });
+        }
+    }
+}
+
+#[test]
+fn geometry_loop_shape_reuse_keeps_live_items_and_lazy_ancestors() {
+    let text = r#"(workspace loop_body
+      (defnode sop/loop_probe [(amount : float 1.0) (count : int 2)]
+        (if (> amount 0.0)
+          (sop/merge (for [x (if (int/lt count 0)
+                               (error "E_UNREACHED" "an inactive geometry loop was forced")
+                               (map (fn [i] (+ amount (float i))) (range count)))]
+            (sop/line :kind "Points" :points 1 :origin [x 0.0 0.0])))
+          (sop/line :kind "Points" :points 1 :origin [amount 0.0 0.0])))
+      (graph g :context sop (sop/loop_probe)))"#;
+    for reference in [false, true] {
+        for domains in [1, 8] {
+            let original = lower_ref(reference, text);
+            let mut previous = original.clone();
+            with_session(&mut |s| {
+                let _ = cook_with(s, domains, 97, 0, &previous);
+                previous = node::apply_parameters(&previous, &[("amount".into(), param::Value::Float(1.5))]).unwrap().0;
+                let _ = cook_with(s, domains, 97, 0, &previous);
+                for (amount, count, same_shape) in [
+                    (2.0, 2, true), (3.0, 2, true), (4.0, 4, false),
+                    (-1.0, -7, false), (-2.0, -7, true),
+                    (5.0, 3, false), (6.0, 3, true),
+                ] {
+                    let start = std::time::Instant::now();
+                    let timer = flow_syntax::phase_timer::SampleGuard::start_with_clock(
+                        Box::new(move || start.elapsed().as_secs_f64()));
+                    let (next, _) = node::apply_parameters(&previous, &[
+                        ("amount".into(), param::Value::Float(amount)),
+                        ("count".into(), param::Value::Int(count)),
+                    ]).unwrap();
+                    let actual = cook_with(s, domains, 97, 0, &next);
+                    let measured = timer.finish();
+                    let expected_count = if amount > 0.0 { count } else { 1 };
+                    assert_eq!(geo::point_count(&actual), expected_count);
+                    for index in 0..expected_count {
+                        assert_eq!(position(&actual, index).0, amount + index as f64,
+                            "a geometry template froze a loop item after observing only its count");
+                    }
+                    if same_shape {
+                        assert_eq!(flow_syntax::phase_timer::calls(&measured, "lower"), 0,
+                            "same-count changed elements rebuilt the geometry loop");
+                    }
+                    previous = next;
+                }
+                let retained = cook_with(s, domains, 97, 0, &original);
+                assert_eq!(geo::point_count(&retained), 2);
+                assert_eq!(position(&retained, 0).0, 1.0);
+            });
+        }
+    }
+}
+
+#[test]
+fn grouped_hard_bounds_keep_the_owning_scalar_parameter_slots() {
+    let text = r#"(workspace grouped_bounds
+      (defnode sop/grouped [(radius_x : float 1.0 :hard_min 0 :vec3 ["radius" 0])
+                           (radius_y : float 2.0 :hard_min 0 :vec3 ["radius" 1])
+                           (radius_z : float 3.0 :hard_min 0 :vec3 ["radius" 2])]
+        (sop/line :kind "Points" :points 1 :origin [radius_x radius_y radius_z]))
+      (graph g :context sop (sop/grouped)))"#;
+    for reference in [false, true] {
+        let original = lower_ref(reference, text);
+        with_session(&mut |s| {
+            for domains in [1, 8] {
+                assert_eq!(position(&cook_with(s, domains, 97, 0, &original), 0), (1.0, 2.0, 3.0));
+                let (warm, _) = node::apply_parameters(&original, &[("radius_x".into(), param::Value::Float(0.5))]).unwrap();
+                assert_eq!(position(&cook_with(s, domains, 97, 0, &warm), 0), (0.5, 2.0, 3.0));
+                for (next, expected) in [(4.0, 4.0), (-2.0, 0.0), (5.0, 5.0)] {
+                    let start = std::time::Instant::now();
+                    let timer = flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || start.elapsed().as_secs_f64()));
+                    let (edited, _) = node::apply_parameters(&original, &[("radius_x".into(), param::Value::Float(next))]).unwrap();
+                    assert_eq!(position(&cook_with(s, domains, 97, 0, &edited), 0), (expected, 2.0, 3.0));
+                    assert_eq!(flow_syntax::phase_timer::calls(&timer.finish(), "lower"), 0);
+                }
+                assert_eq!(position(&cook_with(s, domains, 97, 0, &original), 0), (1.0, 2.0, 3.0));
+            }
+        });
+    }
 }

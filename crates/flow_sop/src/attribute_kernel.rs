@@ -699,6 +699,21 @@ pub fn context_reads(value: &Value) -> D::T {
     found
 }
 
+/// Private parameter descriptors have owner-local Arc identity. A global cache keyed only by
+/// durable value bytes must not retain a prepared node bound to another operator's descriptors.
+pub fn has_parameters(value: &Value) -> bool {
+    fn visit(value: &Value, seen: &mut Seen) -> bool {
+        if crate::lisp_node::is_parameter(value) { return true; }
+        match value {
+            Value::Residual(id) if seen.residuals.insert(id.0) => E::residual::residual_bindings(*id).is_some_and(|bindings| bindings.iter().any(|(_, value)| visit(value, seen))),
+            Value::Fn(id) if seen.functions.insert(id.0) => E::residual::function_bindings(*id).iter().any(|(_, value)| visit(value, seen)),
+            Value::List(values) => values.iter().any(|value| visit(value, seen)),
+            value => value.geo_fields().is_some_and(|fields| fields.iter().any(|(_, value)| visit(value, seen))),
+        }
+    }
+    visit(value, &mut Seen::default())
+}
+
 /// The host-input slices a frame-dependent value reads: `t` is the clock, a fold steps with the
 /// frame, and each live operator names its own slice.
 pub fn input_reads(value: &Value) -> D::T {
@@ -728,7 +743,8 @@ struct Specializer<'a> {
 impl Specializer<'_> {
     /// The mapped value and whether it differs from the input.
     fn map(&self, value: &Value) -> (Value, bool) {
-        if let Some(v) = context_value(self.context, value) {
+        if crate::lisp_node::is_parameter(value) { return (value.clone(), false); }
+        if let Some(v) = context_value(self.context, value).filter(|_| matches!(value, Value::Source(g) if g.name == "sop/context_seed")) {
             return (v, true);
         }
         match value {
@@ -804,8 +820,9 @@ impl Specializer<'_> {
     }
 }
 
-/// The data with its context sources replaced by this cook context's values: a kernel over it
-/// compiles them as constants (a noise seed is a region immediate).
+/// The data with its context-seed sources replaced by this cook context's seed: a kernel over it
+/// compiles them as constants (a noise seed is a region immediate). Frame and time stay cook-time
+/// sources, so a frame never lowers a kernel again.
 pub fn specialize(context: &context::T, value: &Value) -> Value {
     let s = Specializer { context, residuals: Default::default(), functions: Default::default() };
     s.map(value).0
@@ -827,6 +844,7 @@ fn component_sources(args: &V::Record, what: &str) -> Result<(i64, String, Strin
 /// Resolve immutable cooked attributes and owner/type predicates, shared by kernels and reference
 /// probes. CSR reads expose typed offsets and values.
 pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &Value) -> Result<Value, Diagnostic> {
+    if let Some(value) = crate::lisp_node::resolve_parameter(value) { return value; }
     if let Some(v) = context.and_then(|c| context_value(c, value)) {
         return Ok(v);
     }
@@ -917,7 +935,7 @@ fn concrete_args(context: Option<&context::T>, geometry: &GeometryLookup, args: 
                 let live = context.map_or_else(|| input::at_time(0.0), |c| context::input(c).clone());
                 let program = executor::compile(value, &executor::CompileOptions { strict: true, ..Default::default() })?;
                 let (ctx, geo) = (context.cloned(), geometry.clone());
-                let resolver: flow_ir::core_exec::ResolveFn = Arc::new(move |v| resolve(ctx.as_ref(), &geo, v));
+                let resolver: flow_ir::core_exec::ResolveFn = crate::lisp_node::resolver(Arc::new(move |v| resolve(ctx.as_ref(), &geo, v)));
                 let forced = executor::force(&program, &executor::ForceOptions { strict: true, resolve: Some(resolver), ..Default::default() }, &live)?;
                 concrete(context, geometry, &forced)
             }
@@ -2135,7 +2153,7 @@ impl Kernel {
         };
         let resolver: flow_ir::core_exec::ResolveFn = {
             let (g, c) = (geo.clone(), context.clone());
-            Arc::new(move |v| resolve(Some(&c), &g, v))
+            crate::lisp_node::resolver(Arc::new(move |v| resolve(Some(&c), &g, v)))
         };
         let live = context::input(context).clone();
         // the site and count a measured decision asked about, and when it left this cook to the CPU
@@ -3261,20 +3279,22 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         let seeded = source("sop/context_seed", &[("namespace", Value::Text(b"n".as_slice().into())), ("salt", Value::Int(3))]);
         let expected = seed_for(3, 42, "n", "");
         assert_eq!(resolve(Some(&context), &lookup, &seeded).unwrap(), Value::Int(expected));
-        let record = Value::Record(vec![("t".into(), source("sop/context_time", &[])), ("k".into(), Value::Int(1))].into());
-        assert_eq!(specialize(&context, &record), Value::Record(vec![("t".into(), Value::Float(1.5)), ("k".into(), Value::Int(1))].into()));
-        assert_eq!(context_reads(&record), D::one(D::Fact::Time));
+        let record = Value::Record(vec![("t".into(), seeded.clone()), ("f".into(), source("sop/context_time", &[])), ("k".into(), Value::Int(1))].into());
+        // only the seed picks compiled constants; time and frame stay cook-time sources
+        assert_eq!(specialize(&context, &record), Value::Record(vec![("t".into(), Value::Int(expected)), ("f".into(), source("sop/context_time", &[])), ("k".into(), Value::Int(1))].into()));
+        assert_eq!(context_reads(&record), D::union(D::one(D::Fact::Seed), D::one(D::Fact::Time)));
         let forms=flow_syntax::syntax::parse("(workspace w (graph g :context value [(bias : float 0)] (let* [f (fn [(x : float)] (+ x bias))] 0)))").unwrap();
         let (workspace,diagnostics)=W::check(&[],false,false,None,&flow_check::catalog::Catalog {version:1,kinds:vec![]},&forms);
         assert!(diagnostics.is_empty());
         let evaluated=E::r#static(&workspace.unwrap(),true,None).unwrap();
         let Value::Fn(original)=evaluated.records.iter().find(|(p,_)|p==&["g","f"]).unwrap().1[0].1 else {panic!("closure")};
-        let captured=source("sop/context_time",&[]);
+        let captured=seeded.clone();
         E::host::map_function_bindings(original,&|_|captured.clone());
-        for time in [1.5,2.5] {
-            let context=context::create(context::Options {time:Some(time),..Default::default()}).unwrap();
+        for seed in [1,2] {
+            let context=context::create(context::Options {seed:Some(seed),..Default::default()}).unwrap();
+            let time = seed_for(3, seed, "n", "");
             let Value::Fn(bound)=specialize(&context,&Value::Fn(original)) else {panic!("bound closure")};
-            assert!(E::residual::function_bindings(bound).iter().all(|(_,v)|*v==Value::Float(time)));
+            assert!(E::residual::function_bindings(bound).iter().all(|(_,v)|*v==Value::Int(time)));
             assert!(E::residual::function_bindings(original).iter().all(|(_,v)|*v==captured));
         }
         assert_eq!(D::to_list(context_reads(&seeded)), vec![D::Fact::Seed]);

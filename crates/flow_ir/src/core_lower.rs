@@ -166,7 +166,7 @@ impl Scope {
     }
 }
 
-fn packed_candidate(x: &Term) -> (bool, bool) {
+pub(crate) fn packed_candidate(x: &Term) -> (bool, bool) {
     fn text_array(ty: &Ty) -> bool { matches!(ty, Ty::Array(inner) if **inner == Ty::Text) }
     fn geometry_accumulator(ty: &Ty) -> bool {
         *ty == ty::geometry() || matches!(ty, Ty::Record(fields) if fields.iter().any(|(_, t)| geometry_accumulator(t)))
@@ -606,6 +606,10 @@ impl Lowerer {
                 Some((_, v)) => self.resolve(s, v),
                 None => Err(refusal("get")),
             },
+            Known(v) if v.is_data_source() => {
+                let id = self.ensure(s, source, &resolved)?;
+                self.field(s, source, ty, &Computed(id, V::ty_of(v)), name)
+            }
             Known(v) => {
                 let v = match (v, name) {
                     (Value::Record(xs), name) => xs.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()).ok_or_else(|| refusal("get"))?,
@@ -1069,7 +1073,7 @@ impl Lowerer {
             && E::residual::free_names(&view.term).iter().any(|name| view.bindings.iter().find(|(n, _)| n.as_ref() == name.as_str()).map(|(_, v)| holds_array_residual(v)).unwrap_or(false));
         let packed = if view.previous || captured_arrays { None } else { self.packed_region(r, &view) };
         let value = if let Some(region) = packed {
-            self.region(s, Vec::new(), region, &view)
+            self.region(s, Vec::new(), region, &view, &source)
         } else {
             let env: Env = view.owned_bindings().into_iter().map(|(n, v)| (n, Known(v))).collect();
             if view.previous {
@@ -1107,29 +1111,29 @@ impl Lowerer {
         }
     }
 
-    fn capture(&mut self, s: &mut Scope, source: &C::Source, parent: ResidualId, static_: bool, sop: bool, arguments: &mut Vec<i64>, l: &Lowered) -> R<Value> {
+    fn capture(&mut self, s: &mut Scope, source: &C::Source, parent: ResidualId, static_: bool, sop: bool, eager: bool, arguments: &mut Vec<i64>, l: &Lowered) -> R<Value> {
         match l {
             // Draws, SOP cooks and state-dependent captures use an explicit producer before
             // the region, which reads its immutable result as an argument.
             Known(Value::Residual(r))
-                if self.initial.is_some() || self.has_draw || static_ || E::state_dependent(&Value::Residual(*r))
-                    || (sop && holds_arrays(self.view(*r)?.term.ty())) =>
+                if eager && (self.initial.is_some() || self.has_draw || static_ || E::state_dependent(&Value::Residual(*r))
+                    || (sop && holds_arrays(self.view(*r)?.term.ty()))) =>
             {
                 let v = self.residual(s, *r)?;
-                self.capture(s, source, parent, static_, sop, arguments, &v)
+                self.capture(s, source, parent, static_, sop, eager, arguments, &v)
             }
             // a record local (a state of several arrays) is passed field by field: Packed takes
             // arrays and scalars, not a record argument
             Computed(id, Ty::Record(fields)) if self.has_draw || sop => {
                 let mut out = Vec::new();
                 for (name, ty) in fields { out.push((name.clone(), self.emit(s, source, ty, C::Expr::Field(*id, name.clone())))); }
-                self.capture(s, source, parent, static_, sop, arguments, &Record_fields(out))
+                self.capture(s, source, parent, static_, sop, eager, arguments, &Record_fields(out))
             }
             // a captured function's arrays follow the kernel's own rule
             Known(Value::Fn(f)) if sop => {
                 let mut replaced = Vec::new();
                 for (_, v) in E::residual::function_bindings(*f) {
-                    let n = self.capture(s, source, parent, static_, sop, arguments, &Known(v.clone()))?;
+                    let n = self.capture(s, source, parent, static_, sop, eager, arguments, &Known(v.clone()))?;
                     replaced.push((v, n));
                 }
                 let replace = move |v: &Value| replaced.iter().find(|(old, _)| old == v).map(|(_, n)| n.clone()).unwrap_or_else(|| v.clone());
@@ -1145,16 +1149,21 @@ impl Lowerer {
             }
             Record_fields(fields) => {
                 let mut out = Vec::new();
-                for (name, v) in fields { out.push((name.clone(), self.capture(s, source, parent, static_, sop, arguments, v)?)); }
+                for (name, v) in fields { out.push((name.clone(), self.capture(s, source, parent, static_, sop, eager, arguments, v)?)); }
                 Ok(Value::Record(out.into()))
             }
             Callable(Callable::Closure(cl)) => {
                 let mut bindings = Vec::new();
-                for (name, v) in &cl.env { bindings.push((name.clone(), self.capture(s, source, parent, static_, sop, arguments, v)?)); }
+                for (name, v) in &cl.env { bindings.push((name.clone(), self.capture(s, source, parent, static_, sop, eager, arguments, v)?)); }
                 let arena = cl.body.arena();
                 let params = arena.params(cl.params).iter().map(|p| (arena.owned_pattern(p.pattern), p.ty.map(|id| arena.ty(id).clone()))).collect();
                 let f = E::residual::compiled_function(parent, cl.instance, cl.prefix.clone(), cl.zone.clone(), params, cl.body.clone(), bindings)?;
                 Ok(Value::Fn(f))
+            }
+            Record_choice(..) if eager && sop => {
+                let ty = self.type_of(l);
+                let value = self.ensure(s, source, l)?;
+                self.capture(s, source, parent, static_, sop, eager, arguments, &Computed(value, ty))
             }
             _ => Err(refusal("packed_capture")),
         }
@@ -1169,12 +1178,13 @@ impl Lowerer {
             let mut bindings = Vec::new();
             for name in &names {
                 if let Some(v) = env.get(name) {
-                    bindings.push((*name, self.capture(s, source, parent, static_, sop, &mut arguments, v)?));
+                    bindings.push((*name, self.capture(s, source, parent, static_, sop, !matches!(x.node, Node::Vec(_)), &mut arguments, v)?));
                 }
             }
             let r = E::residual::with_bindings(parent, x, &bindings)?;
             if E::state_dependent(&Value::Residual(r)) { return Ok(None); }
-            match packed::compile_result(&self.options, r, x) {
+            let compiled = if matches!(x.node, Node::Vec(_)) { packed::compile_uniform(&self.options, r, x) } else { packed::compile_result(&self.options, r, x) };
+            match compiled {
                 Err(d) => { *why = Some(d); Ok(None) }
                 Ok(region) => Ok(if (self.region_allowed)(&region) { Some((r, Arc::new(region), arguments.clone())) } else { None }),
             }
@@ -1213,7 +1223,8 @@ impl Lowerer {
         };
         let source = &src;
         let (numeric_candidate, text_candidate) = packed_candidate(x);
-        let candidate = numeric_candidate || text_candidate;
+        let uniform_candidate = matches!(x.node, Node::Vec(_)) && !self.geometry && self.current.is_some_and(sop_cook);
+        let candidate = numeric_candidate || text_candidate || uniform_candidate;
         if !candidate { return self.term_node(borrow, s, source, env, x); }
         // A State step's maps are deferred past the static pass. Compile those nested kernels
         // under their state residual; other nested candidates keep the existing strict/draw gate.
@@ -1234,7 +1245,8 @@ impl Lowerer {
         };
         if let Some((r, region, args)) = kernel {
             let view = self.view(r)?;
-            return Ok(self.region(s, args, region, &view));
+            let owner = if uniform_candidate { source.clone() } else { self.source_of_view(&view) };
+            return Ok(self.region(s, args, region, &view, &owner));
         }
         // the costliest fallback there is: an interpreted loop, element by element; reported before
         // a strict lowering refuses it, so the refusal names its reason too
@@ -1734,10 +1746,10 @@ impl Lowerer {
         } else { None }
     }
 
-    fn region(&mut self, s: &mut Scope, args: Vec<i64>, packed: Arc<C::RegionT>, view: &E::residual::View) -> Lowered {
+    fn region(&mut self, s: &mut Scope, args: Vec<i64>, packed: Arc<C::RegionT>, view: &E::residual::View, source: &C::Source) -> Lowered {
         let index = self.regions.len() as i64;
         self.regions.push(packed);
-        let mut source = self.source_of_view(view);
+        let mut source = source.clone();
         source.span = Some(view.term.form().span.clone());
         let result = self.local(view.term.ty());
         self.push(s, &source, C::StatementNode::Invoke { region: index, args, result });
@@ -1798,6 +1810,10 @@ impl Lowerer {
             PatternNode::Seq(patterns) => {
                 let patterns = arena.pattern_ids(patterns);
                 let value = self.resolve(s, &value)?;
+                let value = match &value {
+                    Known(v) if v.is_data_source() => Computed(self.ensure(s, source, &value)?, V::ty_of(v)),
+                    _ => value,
+                };
                 let parts: Vec<Lowered> = match &value {
                     Known(v) => match v {
                         Value::List(xs) => xs.iter().map(|v| Known(v.clone())).collect(),
@@ -2520,10 +2536,8 @@ impl Lowerer {
                     let mut parts = Vec::new();
                     for name in ["x", "y", "z"] {
                         let component = |l: &mut Lowerer, sc: &mut Scope, v: &Lowered| -> R<Lowered> {
-                            match v {
-                                Known(Value::Vec3(..)) | Computed(_, Ty::Vec3) => l.field(sc, source, &Ty::Float, v, name),
-                                _ => l.to_float(sc, source, v),
-                            }
+                            if l.type_of(v) == Ty::Vec3 { l.field(sc, source, &Ty::Float, v, name) }
+                            else { l.to_float(sc, source, v) }
                         };
                         let a = component(self, s, &arg("a")?)?;
                         let b = component(self, s, &arg("b")?)?;
@@ -3280,6 +3294,229 @@ mod tests {
     fn recorded(e: &E::Eval, path: &[&str]) -> Value {
         let p: Path = path.iter().map(|s| (*s).into()).collect();
         e.records.iter().find(|(q, _)| *q == p).expect("record").1[0].1.clone()
+    }
+
+    #[test]
+    fn vector_sources_project_and_destructure_the_resolved_value() {
+        for body in ["(+ v.x t)", "(+ (get {:y v.y} :y) t)",
+            "(let* [[x y z] v] [(+ x t) y z])", "(value/lerp v [4.0 8.0 12.0] 0.25)",
+            "(array/sum (map (fn [p] (+ p v)) (array/vec3 2 [1.0 2.0 3.0])))"] {
+            let checked = check_with(&[], &format!("(workspace source_vector (graph g :context value [(v : vec3 [0.0 0.0 0.0])] (let* [tested {body}] 0.0)))"));
+            let descriptor = source_value("test/vector", Ty::Vec3, vec![("tag".into(), Value::No_geo)].into());
+            let evaluated = E::r#static(&checked, true, Some(&[("g".into(), vec![("v".into(), descriptor)])])).unwrap();
+            let original = &recorded(&evaluated, &["g", "tested"]);
+            let Value::Residual(root) = original else { panic!("source-dependent residual: {body}") };
+            let program = lower(None, None, true, None, None, *root).unwrap_or_else(|why| panic!("{body}: {why}"));
+            let prepared = core_exec::prepare(&program, false, false, &Paths::new(), false);
+            for time in [0.5, -1.0, 2.5] {
+                let live = input::at_time(time);
+                let resolve: core_exec::ResolveFn = Arc::new(move |value| match value {
+                    Value::Source(g) if g.name == "test/vector" => Ok(Value::Vec3(time, 2.0, 3.0)),
+                    _ => Err(V::fail("E_TEST_SOURCE", "Unexpected source")),
+                });
+                let expected = E::host::force_reference(original, &live, None, None, Some(resolve.clone())).unwrap();
+                let region_live = live.clone();
+                let region_options = packed::ForceOptions { resolve: Some(resolve.clone()), strict: true, ..Default::default() };
+                let force: core_exec::ForceFn = Arc::new(move |region| packed::force(region, &region_live, &region_options));
+                let actual = core_exec::execute(&prepared, &live, &Options { force: Some(force), resolve: Some(resolve), ..Default::default() }).unwrap();
+                assert_eq!(actual, expected, "a descriptor's fields are not its resolved vector components: {body}");
+            }
+        }
+    }
+
+    #[test]
+    fn sop_vector_producers_keep_lazy_captures_signed_zero_and_original_owner() {
+        let delayed = source_value("test/delayed", Ty::Float, vec![("tag".into(), Value::No_geo)].into());
+        let checked = check_with(&[], "(workspace delayed (graph g :context value [(x : float 0.0)] (let* [bad (+ x 1.0)] 0.0)))");
+        let evaluated = E::r#static(&checked, true, Some(&[("g".into(), vec![("x".into(), delayed)])])).unwrap();
+        let bad = recorded(&evaluated, &["g", "bad"]);
+        let selected = source_value("test/selected", Ty::Bool, vec![("tag".into(), Value::No_geo)].into());
+        let checked = check_with(&[marker("test/geometry", ty::geometry(), 1)],
+            "(workspace vector_owner (graph g :context sop [(safe : bool false) (bad : float 0.0)] (let* [tested [(if safe -0.0 bad) -0.0 3.0]] (test/geometry))))");
+        let evaluated = E::r#static(&checked, true, Some(&[("g".into(), vec![("safe".into(), selected), ("bad".into(), bad)])])).unwrap();
+        let value = recorded(&evaluated, &["g", "tested"]);
+        let Value::Residual(root) = value else { panic!("vector residual") };
+        let program = lower(None, None, true, None, None, root).unwrap();
+        let region = program.regions.iter().find(|region| region.sources.is_empty() && region.count == Some(1)).expect("one compiled vector producer without input arrays");
+        let original = E::residual::residual_view(root).unwrap();
+        let compiled = E::residual::residual_view(region.residual).unwrap();
+        assert_eq!(region.term.identity(), original.term.identity());
+        assert_eq!((&compiled.site, &compiled.owner, &compiled.prefix, compiled.iter.to_vec()), (&original.site, &original.owner, &original.prefix, original.iter.to_vec()));
+        let prepared = core_exec::prepare(&program, false, false, &Paths::new(), false);
+        for time in [0.0, 2.0, 3.0, 0.0] {
+            let live = input::at_time(time);
+            let resolve: core_exec::ResolveFn = Arc::new(move |value| match value {
+                Value::Source(g) if g.name == "test/selected" => Ok(Value::Bool(time < 1.0)),
+                Value::Source(g) if g.name == "test/delayed" && time == 2.0 => Ok(Value::Float(4.0)),
+                Value::Source(g) if g.name == "test/delayed" => Err(V::fail("E_SELECTED", "Only the selected vector arm may read this source")),
+                _ => panic!("unexpected source"),
+            });
+            let expected = E::host::force_reference(&Value::Residual(root), &live, None, None, Some(resolve.clone()));
+            let region_live = live.clone();
+            let options = packed::ForceOptions { resolve: Some(resolve.clone()), strict: true, ..Default::default() };
+            let force: core_exec::ForceFn = Arc::new(move |region| packed::force(region, &region_live, &options));
+            let actual = core_exec::execute(&prepared, &live, &Options { force: Some(force), resolve: Some(resolve), ..Default::default() });
+            match (actual, expected) {
+                (Ok(Value::Vec3(x, y, z)), Ok(Value::Vec3(a, b, c))) => assert_eq!([x.to_bits(), y.to_bits(), z.to_bits()], [a.to_bits(), b.to_bits(), c.to_bits()]),
+                (Err(actual), Err(expected)) => assert_eq!((actual.code, actual.message, actual.cause), (expected.code, expected.message, expected.cause)),
+                (actual, expected) => panic!("compiled {actual:?}, walked {expected:?}"),
+            }
+        }
+        let state_workspace = check_with(&[], "(workspace vector_state (graph g :context host (state [n 0.0] (+ n 1.0))))");
+        let state_evaluation = E::r#static(&state_workspace, true, None).unwrap();
+        let state = state_evaluation.results[0].1.clone();
+        let mut builder = flow_check::term_arena::TermBuilder::new();
+        let form = builder.import_form(&original.term.form());
+        let projected = builder.push(None, &Ty::Float, form, flow_check::term_arena::Draft::RefBinding("nested".into(), vec!["number".into()]));
+        let projected = builder.freeze().handle(projected);
+        let projected = E::residual::with_bindings(root, &projected, &[("nested".into(), Value::Record(vec![("number".into(), state)].into()))]).unwrap();
+        let stateful = E::residual::with_bindings(root, &original.term, &[
+            ("safe".into(), E::residual::residual_binding(root, "safe").unwrap()),
+            ("bad".into(), Value::Residual(projected)),
+        ]).unwrap();
+        assert!(E::state_dependent(&Value::Residual(stateful)), "state detection must traverse residual/record captures");
+        let program = lower(None, None, true, None, None, stateful).unwrap();
+        assert!(!program.state_slots.is_empty(), "state remains in structured Core");
+        assert!(program.regions.iter().all(|region| !(region.sources.is_empty() && region.count == Some(1))), "a state-reading vector cannot enter diagnostic replay");
+    }
+
+    #[test]
+    fn sop_vector_helpers_keep_sibling_values_lazy_errors_and_authored_spans() {
+        let checked = check_with(
+            &[marker("test/geometry", ty::geometry(), 1)],
+            r#"(workspace vector_callers
+              (defn sample :context value [(x : float)] [(log x) -0.0 3.0])
+              (defn forward :context value [(x : float)] (sample x))
+              (defn invoke :context value [(f : fn) (x : float)] (f x))
+              (graph g :context sop [(safe : bool false) (bad : float 0.0)]
+                (let* [tested (if safe
+                  (list [-0.0 -0.0 3.0] [-0.0 -0.0 3.0])
+                  (list (invoke forward bad) (invoke forward (+ bad 1.0))))]
+                  (test/geometry))))"#,
+        );
+        let selected = source_value("test/selected", Ty::Bool, vec![].into());
+        let delayed = source_value("test/delayed", Ty::Float, vec![].into());
+        let evaluated = E::r#static(
+            &checked,
+            true,
+            Some(&[(
+                "g".into(),
+                vec![("safe".into(), selected), ("bad".into(), delayed)],
+            )]),
+        )
+        .unwrap();
+        let value = recorded(&evaluated, &["g", "tested"]);
+        let Value::Residual(home) = &value else { panic!("live helper calls expected") };
+        // Compile the authored call sites, rather than the already-recorded results of walking
+        // those calls during static evaluation.
+        let body = &checked.graphs[0].body;
+        let Node::Let(id) = body.node else { panic!("let body") };
+        let binding = body.arena().bindings(body.arena().let_node(id).bindings).iter()
+            .find(|binding| matches!(body.arena().pattern(binding.pattern), flow_check::term_arena::PatternNode::Name(name) if body.name(name) == "tested")).unwrap();
+        let term = body.child(binding.term);
+        let view = E::residual::residual_view(*home).unwrap();
+        let root = E::residual::with_bindings(*home, &term, &view.bindings).unwrap();
+        let value = Value::Residual(root);
+        let program = lower(None, None, true, None, None, root).unwrap();
+        assert!(
+            program
+                .regions
+                .iter()
+                .filter(|r| r.sources.is_empty() && r.count == Some(1))
+                .count()
+                >= 2,
+            "both sibling helper vectors must exercise the new uniform path"
+        );
+        assert!(
+            program.call_slots > 0,
+            "the regression must retain Core helper call scopes"
+        );
+        let helper_span = checked.defs.iter().find(|definition| definition.name == "sample").unwrap().body.form().span.clone();
+        let mut helper_invokes = 0;
+        C::iter(&mut |statement| {
+            if let C::StatementNode::Invoke { region, .. } = statement.node {
+                if program.regions[region as usize].term.form().span == helper_span {
+                    helper_invokes += 1;
+                    assert_eq!(statement.source.owner, vec!["def:sample"]);
+                    assert!(statement.source.iter.iter().any(|index| matches!(index, C::Iteration::Local_index(_))), "a helper vector lost its actual callable iteration");
+                }
+            }
+        }, &program.body);
+        assert_eq!(helper_invokes, 2);
+        let prepared = core_exec::prepare(&program, false, false, &Paths::new(), false);
+        for domains in [1, 8] {
+            crate::test_support::with_domains(domains, &|| {
+                for time in [-1.0, 1.0, 2.0, 0.0, -1.0] {
+                    let live = input::at_time(time);
+                    let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                    let read_count = reads.clone();
+                    let resolve: core_exec::ResolveFn = Arc::new(move |value| match value {
+                        Value::Source(g) if g.name == "test/selected" => Ok(Value::Bool(time < 0.0)),
+                        Value::Source(g) if g.name == "test/delayed" => {
+                            assert!(time >= 0.0, "an untaken helper vector forced its source");
+                            read_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            Ok(Value::Float(time))
+                        }
+                        _ => panic!("unexpected source"),
+                    });
+                    let expected =
+                        E::host::force_reference(&value, &live, None, None, Some(resolve.clone()));
+                    reads.store(0, std::sync::atomic::Ordering::Relaxed);
+                    let walks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                    let walked = walks.clone();
+                    let region_live = live.clone();
+                    let region_options = packed::ForceOptions {
+                        resolve: Some(resolve.clone()),
+                        strict: true,
+                        on_walk: Some(Arc::new(move || { walked.fetch_add(1, std::sync::atomic::Ordering::Relaxed); })),
+                        ..Default::default()
+                    };
+                    let force: core_exec::ForceFn =
+                        Arc::new(move |region| packed::force(region, &region_live, &region_options));
+                    let actual = core_exec::execute(
+                        &prepared,
+                        &live,
+                        &Options {
+                            root: Some(root),
+                            strict: true,
+                            rerun_on_error: false,
+                            resolve: Some(resolve),
+                            force: Some(force),
+                            on_walk: Some(Arc::new(|| {
+                                panic!("strict helper execution restarted the walker")
+                            })),
+                            ..Default::default()
+                        },
+                    );
+                    assert_eq!(walks.load(std::sync::atomic::Ordering::Relaxed), usize::from(time == 0.0), "only a failed pure vector diagnoses by walking");
+                    if time < 0.0 { assert_eq!(reads.load(std::sync::atomic::Ordering::Relaxed), 0); }
+                    if time == 0.0 { assert_eq!(reads.load(std::sync::atomic::Ordering::Relaxed), 2, "a selected pure source is read once by the failed kernel and once for diagnosis"); }
+                    match (actual, expected) {
+                        (Ok(actual), Ok(expected)) => assert_eq!(
+                            V::key_of(&|r| r.0, &actual),
+                            V::key_of(&|r| r.0, &expected),
+                            "sibling helper values or signed zero changed"
+                        ),
+                        (Err(actual), Err(expected)) => {
+                            assert!(
+                                expected.span.is_some(),
+                                "the walker must locate the authored log failure"
+                            );
+                            assert_eq!(
+                                (actual.code, actual.message, actual.cause, actual.span),
+                                (
+                                    expected.code,
+                                    expected.message,
+                                    expected.cause,
+                                    expected.span
+                                )
+                            );
+                        }
+                        (actual, expected) => panic!("compiled {actual:?}, walked {expected:?}"),
+                    }
+                }
+            });
+        }
     }
 
     #[test]

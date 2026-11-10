@@ -215,8 +215,8 @@ fn live_points(value: Value) -> Result<Vec<(f64, f64, f64)>, Diagnostic> {
     }
 }
 
-fn force(gpu: &gpu::Config, reference: bool, state: &State, live: &Frame, program: &executor::Program) -> Result<Value, Diagnostic> {
-    match executor::force_display(Some(state), reference, Some(gpu.clone()), program, live)? {
+fn force(gpu: &gpu::Config, reference: bool, state: &State, live: &Frame, program: &executor::Program, resolve: &flow_ir::core_exec::ResolveFn) -> Result<Value, Diagnostic> {
+    match executor::force_display(Some(state), Some(resolve), reference, Some(gpu.clone()), program, live)? {
         executor::Displayed::Cpu(value) => Ok(value),
         executor::Displayed::Gpu(_) => Err(port::error("E_APPROX_SINK", "Live SOP values require (exact x).")),
     }
@@ -242,6 +242,7 @@ fn compute(
     previous: Option<&Cache>,
     plan: &Plan,
     live: &Frame,
+    resolve: &flow_ir::core_exec::ResolveFn,
 ) -> Result<Resolved, Diagnostic> {
     let reference = plan.network.reference;
     if let Some(program) = &plan.states {
@@ -253,6 +254,7 @@ fn compute(
                     program,
                     &executor::ForceOptions {
                         resident: Some(scope.executor().clone()),
+                        resolve: Some(resolve.clone()),
                         state: Some(state.clone()),
                         reference,
                         ..executor::ForceOptions::default()
@@ -263,7 +265,7 @@ fn compute(
                 outcome?;
             }
             None => {
-                force(gpu, reference, state, live, program)?;
+                force(gpu, reference, state, live, program, resolve)?;
             }
         }
     }
@@ -308,7 +310,7 @@ fn compute(
         }
     }
     for target in &plan.targets {
-        let value = force(gpu, reference, state, live, &target.program)?;
+        let value = force(gpu, reference, state, live, &target.program, resolve)?;
         let (value, changes) = port::normalize(&target.parameter, &live_port_value(&value)?)?;
         applied.insert(target.port.clone(), value);
         if edit_graph::find(&plan.network.geometry, target.port.node).is_none() {
@@ -324,7 +326,7 @@ fn compute(
     for late in &plan.late {
         match late {
             LateTarget::Text(target) => {
-                let value = force(gpu, reference, state, live, &target.program)?;
+                let value = force(gpu, reference, state, live, &target.program, resolve)?;
                 let text = live_text(&target.parameter, value)?;
                 applied_text.insert(target.port.clone(), text.clone());
                 if edit_graph::find(&plan.network.geometry, target.port.node).is_none() {
@@ -343,7 +345,7 @@ fn compute(
                 geometry = apply_geometry(&geometry, &target.port, &changes)?;
             }
             LateTarget::Curve(CurveTarget { target, closed, filled }) => {
-                let value = force(gpu, reference, state, live, &target.program)?;
+                let value = force(gpu, reference, state, live, &target.program, resolve)?;
                 let points = live_points(value)?;
                 applied_points.insert(target.port.clone(), points.clone());
                 let prior = previous.and_then(|(old, _)| old.applied_points.get(&target.port));
@@ -395,6 +397,15 @@ pub fn resolve(
     time: f64,
     network: &Network,
 ) -> Result<Resolved, Diagnostic> {
+    let empty: attribute_kernel::GeometryLookup = Arc::new(|_| None);
+    let resolve = crate::lisp_node::resolver(Arc::new(move |value| attribute_kernel::resolve(None, &empty, value)));
+    resolve_with(gpu, live, lane, time, network, resolve)
+}
+
+pub(crate) fn resolve_with(
+    gpu: Option<&gpu::Config>, live: Option<&Frame>, lane: &Lane, time: f64,
+    network: &Network, resolve: flow_ir::core_exec::ResolveFn,
+) -> Result<Resolved, Diagnostic> {
     let gpu = gpu.cloned().unwrap_or_else(gpu::default);
     let live = live.cloned().unwrap_or_else(|| input::at_time(time));
     let previous = lane.previous.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
@@ -421,7 +432,7 @@ pub fn resolve(
     };
     let mut outcome: Option<Resolved> = None;
     let transaction = flow_eval::transaction(&lane.state, &mut || {
-        outcome = Some(compute(&gpu, &lane.state, previous.as_ref(), &plan, &live)?);
+        outcome = Some(compute(&gpu, &lane.state, previous.as_ref(), &plan, &live, &resolve)?);
         Ok(())
     });
     let result = match transaction {

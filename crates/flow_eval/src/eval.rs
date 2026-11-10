@@ -40,6 +40,8 @@ pub struct ResidualHandlers {
     pub trusted: bool,
     pub replay: bool,
     pub map: Option<StaticMapRequest>,
+    /// Resolve and retain a projected construction decision during a static body build.
+    pub shape: Option<Arc<dyn Fn(ResidualId) -> Result<Option<Value>, Diagnostic> + Send + Sync>>,
 }
 thread_local! { static ACTIVE_RESIDUAL_HANDLERS: RefCell<Vec<ResidualHandlers>> = const { RefCell::new(Vec::new()) }; }
 fn current_residual_handlers() -> Option<ResidualHandlers> {
@@ -438,10 +440,15 @@ impl<T: Clone> std::ops::DerefMut for Shared<T> { fn deref_mut(&mut self) -> &mu
 #[derive(Clone)]
 struct Arena {
     id: i64, workspace: Shared<Workspace>, functions: Shared<IdMap<FnId, Function>>, residuals: Shared<IdMap<ResidualId, ResidualData>>,
+    // hash-consing index: a key's first residual inline, collisions in the (usually empty) Vec.
+    // Built once an arena holds more than SMALL_RESIDUALS (most per-cook arenas hold a few).
+    residual_index: Option<Shared<ResidualIndex>>,
     // Replays share the immutable workspace and its lazily computed state-reset identity.
     source_key: Arc<std::sync::OnceLock<String>>,
     nodes: Shared<Vec<Node>>, authored: Vec<i64>, cells: Shared<Vec<GraphCell>>, cache: Shared<HashMap<(Symbol, Vec<(Symbol, Vec<u8>)>),usize>>, states: Shared<Vec<Value>>, records: Shared<BTreeMap<Path, Vec<(Vec<i64>,Value)>>>,
-    observed: Vec<ResidualId>, res_log: Shared<Vec<ResidualId>>, fn_log: Shared<Vec<FnId>>, approx: u64, policies: Shared<HashMap<Symbol, Option<Arc<InlineParameterPolicy>>>>,
+    observed: Vec<ResidualId>, res_log: Shared<Vec<ResidualId>>, fn_log: Shared<Vec<FnId>>, approx: u64,
+    // construction decisions answered from a cook context: a body that took one is not memoized
+    decisions: u64, policies: Shared<HashMap<Symbol, Option<Arc<InlineParameterPolicy>>>>,
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
     state: Option<State>, elems: BTreeMap<Symbol,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<HashSet<Arc<Path>>>, ops_seen: Shared<HashMap<Symbol, (&'static str, OpRef)>>, arg_pool: Shared<AddrMap<Vec<(Symbol, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route, Arc<Path>, Arc<Path>)>>, plans: Shared<AddrMap<CodePlan>>, fn_plans: Shared<AddrMap<CodePlan>>, pure: Shared<AddrMap<(&'static str, Option<usize>)>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>,
     packed_bases: Shared<IdMap<(u64, flow_check::term_arena::PathId), Arc<Path>>>,
@@ -457,9 +464,10 @@ impl Arena {
     fn fresh(id: i64, workspace: Shared<Workspace>, record: bool, budget: usize, interrupt: Option<Interrupt>, owns_index: bool) -> Arena {
         Arena {
             id, workspace, functions: Shared::default(), residuals: Shared::default(),
+            residual_index: None,
             source_key: Arc::new(std::sync::OnceLock::new()),
             nodes: Shared::default(), authored: Vec::new(), cells: Shared::default(), cache: Shared::default(),
-            states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, policies: Shared::default(), record,
+            states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, decisions: 0, policies: Shared::default(), record,
             time: None, resolve: None, state: Some(State::default()), elems: BTreeMap::new(), step_count: 0,
             budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), fn_plans: Shared::default(), pure: Shared::default(), terms: Shared::default(), guards: None,
             packed_bases: Shared::default(),
@@ -595,15 +603,206 @@ fn replace_fn(a: &mut Arena, id: FnId, function: Function) {
         }
     }
 }
-fn residual_id(a: &mut Arena, residual: ResidualData) -> ResidualId {
-    let id = new_rid(a);
-    insert_residual(a, id, residual);
-    id
+fn residual_value_same(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Float(x), Value::Float(y)) => x.to_bits() == y.to_bits(),
+        (Value::Vec2(a, b), Value::Vec2(x, y)) => [a.to_bits(), b.to_bits()] == [x.to_bits(), y.to_bits()],
+        (Value::Vec3(a, b, c), Value::Vec3(x, y, z)) => [a.to_bits(), b.to_bits(), c.to_bits()] == [x.to_bits(), y.to_bits(), z.to_bits()],
+        (Value::Vec4(a, b, c, d), Value::Vec4(x, y, z, w)) => [a.to_bits(), b.to_bits(), c.to_bits(), d.to_bits()] == [x.to_bits(), y.to_bits(), z.to_bits(), w.to_bits()],
+        (Value::Floats(aw, a), Value::Floats(bw, b)) => aw == bw && Arc::ptr_eq(a, b),
+        (Value::Int_array(a), Value::Int_array(b)) => Arc::ptr_eq(a, b),
+        (Value::Text_array(a), Value::Text_array(b)) => Arc::ptr_eq(a, b),
+        (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| residual_value_same(a, b)),
+        (Value::Record(a), Value::Record(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|((n, a), (m, b))| n == m && residual_value_same(a, b)),
+        (Value::Source(a), Value::Source(b)) if a.name == "$lisp/parameter" || b.name == "$lisp/parameter" => Arc::ptr_eq(a, b),
+        (Value::Struct(a), Value::Struct(b)) | (Value::Source(a), Value::Source(b)) => a.name == b.name && a.ty == b.ty && a.fields.len() == b.fields.len() && a.fields.iter().zip(b.fields.iter()).all(|((n, a), (m, b))| n == m && residual_value_same(a, b)),
+        (Value::Fn(a), Value::Fn(b)) => (a.0, a.1) == (b.0, b.1),
+        (Value::Residual(a), Value::Residual(b)) => (a.0, a.1) == (b.0, b.1),
+        _ => a == b,
+    }
+}
+fn residual_value_hash(value: &Value, hash: &mut AddrHasher) {
+    use std::hash::Hash;
+    std::mem::discriminant(value).hash(hash);
+    match value {
+        Value::Int(x) => x.hash(hash), Value::Bool(x) => x.hash(hash),
+        Value::Float(x) => x.to_bits().hash(hash),
+        Value::Vec2(a,b) => [a.to_bits(),b.to_bits()].hash(hash),
+        Value::Vec3(a,b,c) => [a.to_bits(),b.to_bits(),c.to_bits()].hash(hash),
+        Value::Vec4(a,b,c,d) => [a.to_bits(),b.to_bits(),c.to_bits(),d.to_bits()].hash(hash),
+        Value::Text(x) => x.hash(hash),
+        Value::Floats(w,x) => { w.hash(hash); (Arc::as_ptr(x) as usize).hash(hash); }
+        Value::Int_array(x) => (Arc::as_ptr(x) as usize).hash(hash),
+        Value::Text_array(x) => (Arc::as_ptr(x) as usize).hash(hash),
+        Value::Fn(x) => (x.0,x.1).hash(hash), Value::Residual(x) => (x.0,x.1).hash(hash),
+        Value::List(x) => { x.len().hash(hash); for value in x.iter() { residual_value_hash(value,hash); } }
+        Value::Record(x) => { x.len().hash(hash); for (name,value) in x { name.hash(hash); residual_value_hash(value,hash); } }
+        Value::Source(x) if x.name == "$lisp/parameter" => (Arc::as_ptr(x) as usize).hash(hash),
+        Value::Struct(x) | Value::Source(x) => { x.name.hash(hash); x.fields.len().hash(hash); for (name,value) in &x.fields { name.hash(hash); residual_value_hash(value,hash); } }
+        // Type remains in collision equality; no allocation to spell it for hashing.
+        Value::Deferred(_,id) => id.hash(hash), Value::No_geo => (),
+    }
+}
+fn residual_frame_same(a: &Frame,b: &Frame) -> bool {
+    let pair = |x: (f64,f64)| (x.0.to_bits(), x.1.to_bits());
+    a.t.to_bits() == b.t.to_bits() && a.dt.to_bits() == b.dt.to_bits()
+        && a.frame == b.frame && a.tick == b.tick && a.size == b.size && pair(a.pointer) == pair(b.pointer)
+        && a.buttons == b.buttons && a.keys == b.keys && a.events.len() == b.events.len()
+        && a.events.iter().zip(&b.events).all(|(a,b)| match (a,b) {
+            (input::Event::Pointer_moved(a),input::Event::Pointer_moved(b))
+            | (input::Event::Scrolled(a),input::Event::Scrolled(b))
+            | (input::Event::File_drag_moved(a),input::Event::File_drag_moved(b)) => pair(*a) == pair(*b),
+            (input::Event::Pointer_pressed(x,a),input::Event::Pointer_pressed(y,b))
+            | (input::Event::Pointer_released(x,a),input::Event::Pointer_released(y,b)) => x == y && pair(*a) == pair(*b),
+            (input::Event::Pinched(a),input::Event::Pinched(b)) => a.to_bits() == b.to_bits(),
+            (input::Event::Trackpad_scrolled {delta:a,phase:x,time:t},input::Event::Trackpad_scrolled {delta:b,phase:y,time:u}) => pair(*a) == pair(*b) && x == y && t.to_bits() == u.to_bits(),
+            _ => a == b,
+        })
+}
+fn residual_route_same(a: &Route,b: &Route) -> bool {
+    let (mut a,mut b) = (&a.0,&b.0);
+    loop { match (a,b) {
+        (None,None) => return true,
+        (Some(x),Some(y)) => { if Arc::ptr_eq(x,y) { return true; } if !x.seg.same(&y.seg) { return false; } a=&x.up.0;b=&y.up.0; }
+        _ => return false,
+    } }
+}
+fn residual_term_same(a: &Term, b: &Term) -> bool {
+    if a.identity() == b.identity() { return true; }
+    if a != b { return false; }
+    // Term's structural equality follows numeric equality; a cached arithmetic body must also
+    // distinguish signed-zero literals in independently imported copies.
+    let mut pending = vec![(a.clone(), b.clone())];
+    while let Some((a, b)) = pending.pop() {
+        if let (TermNode::Lit(x), TermNode::Lit(y)) = (a.node, b.node) {
+            if let (Literal::Float(x), Literal::Float(y)) = (a.arena().literal(x), b.arena().literal(y)) {
+                if x.to_bits() != y.to_bits() { return false; }
+            }
+        }
+        pending.extend(a.children().iter().zip(b.children()).map(|(&x, &y)| (a.child(x), b.child(y))));
+    }
+    true
+}
+fn residual_same(a: &ResidualData,b: &ResidualData) -> bool {
+    let (x,y)=(&a.ctx,&b.ctx);
+    residual_term_same(&a.term, &b.term) && a.previous == b.previous
+        && a.env.len() == b.env.len() && a.env.iter().zip(b.env.iter()).all(|((n,a),(m,b))|n == m && residual_value_same(a,b))
+        && x.arena == y.arena && x.inst == y.inst && x.prefix == y.prefix && x.base == y.base
+        && x.site == y.site && x.iter == y.iter && residual_route_same(&x.route,&y.route)
+        && x.depth == y.depth && x.record == y.record && x.data == y.data && x.geometry == y.geometry
+        && x.host == y.host && x.context == y.context && x.card == y.card
+        && match (&a.live,&b.live) { (None,None)=>true,(Some(a),Some(b))=>residual_frame_same(a,b),_=>false }
+}
+fn residual_term_hash(term: &Term, hash: &mut AddrHasher) {
+    use std::hash::Hash;
+    std::mem::discriminant(&term.node).hash(hash);
+    term.form().span.start.hash(hash);
+    term.form().span.finish.hash(hash);
+    let arena = term.arena();
+    match term.node {
+        TermNode::Lit(id) => match arena.literal(id) {
+            Literal::Int(x) => x.hash(hash), Literal::Float(x) => x.to_bits().hash(hash),
+            Literal::Bool(x) => x.hash(hash), Literal::Text(id) => arena.bytes(id).hash(hash),
+            Literal::Choice(id) => term.name(id).hash(hash),
+        },
+        TermNode::Text(id) => arena.bytes(id).hash(hash),
+        TermNode::RefBinding(id) => { let node = arena.ref_binding(id); term.name(node.name).hash(hash); for &name in arena.name_ids(node.fields) { term.name(name).hash(hash); } }
+        TermNode::Op(id) => term.name(arena.op(id).op).hash(hash),
+        TermNode::Call(id) => term.name(arena.call(id).kind).hash(hash),
+        TermNode::CallFn(id) => term.name(arena.call_fn(id).name).hash(hash),
+        TermNode::GraphRef(id) => term.name(arena.graph_ref(id).graph).hash(hash),
+        TermNode::FnRef(id) => term.name(id).hash(hash),
+        _ => (),
+    }
+    // Hash semantic children rather than arena-local row IDs: imported expressions retain a key,
+    // and indexed loop items spread across buckets instead of forming one quadratic bucket.
+    for &child in term.children() { residual_term_hash(&term.child(child), hash); }
+}
+fn residual_key(residual: &ResidualData) -> u64 {
+    use std::hash::{Hash,Hasher};
+    let mut hash=AddrHasher::default(); let x=&residual.ctx;
+    // Types/metadata and owner identities remain guarded by exact collision equality.
+    residual_term_hash(&residual.term, &mut hash);
+    residual.previous.hash(&mut hash);
+    x.arena.hash(&mut hash);x.inst.hash(&mut hash);x.prefix.hash(&mut hash);x.base.hash(&mut hash);x.site.hash(&mut hash);
+    let mut at=&x.iter.0; while let Some(node)=at { node.index.hash(&mut hash);at=&node.up.0; }
+    // Exact route/frame equality guards collisions; hashing their stable summaries avoids copies.
+    x.depth.hash(&mut hash);x.record.hash(&mut hash);x.data.hash(&mut hash);x.geometry.hash(&mut hash);x.host.hash(&mut hash);x.context.hash(&mut hash);x.card.hash(&mut hash);
+    if let Some(live)=&residual.live { (live.t.to_bits(),live.dt.to_bits(),live.frame,live.tick).hash(&mut hash); }
+    for (name,value) in residual.env.iter() { name.hash(&mut hash);residual_value_hash(value,&mut hash); }
+    hash.finish()
+}
+const SMALL_RESIDUALS: usize = 8;
+/// A key's first residual, plus the rare colliding (key, id) pairs.
+#[derive(Clone, Default)]
+struct ResidualIndex { first: IdMap<u64, ResidualId>, more: Vec<(u64, ResidualId)> }
+impl ResidualIndex {
+    fn add(&mut self, key: u64, id: ResidualId) {
+        if let std::collections::hash_map::Entry::Vacant(slot) = self.first.entry(key) { slot.insert(id); } else { self.more.push((key, id)); }
+    }
+}
+fn index_build(a: &mut Arena) {
+    let mut index = ResidualIndex { first: IdMap::with_capacity_and_hasher(a.residuals.len(), Default::default()), more: Vec::new() };
+    for (id, residual) in a.residuals.iter() { index.add(residual_key(residual), *id); }
+    a.residual_index = Some(Shared::new(index));
+}
+fn index_find(a: &mut Arena, key: u64, residual: &ResidualData) -> Option<ResidualId> {
+    if a.residual_index.is_none() {
+        if a.residuals.len() <= SMALL_RESIDUALS {
+            return a.residuals.iter().find(|(_, old)| residual_same(old, residual)).map(|(id, _)| *id);
+        }
+        index_build(a);
+    }
+    let index = a.residual_index.as_ref()?;
+    let same = |id: &ResidualId| a.residuals.get(id).is_some_and(|old| residual_same(old, residual));
+    index.first.get(&key).filter(|id| same(id)).or_else(|| index.more.iter().find(|(k, id)| *k == key && same(id)).map(|(_, id)| id)).copied()
+}
+fn index_add(a: &mut Arena, key: u64, id: ResidualId) {
+    // a built index already holds the residuals it was built from, this one included
+    match a.residual_index.as_mut() {
+        Some(index) => index.add(key, id),
+        None => if a.residuals.len() > SMALL_RESIDUALS { index_build(a); },
+    }
+}
+fn index_remove(a: &mut Arena, key: u64, id: ResidualId) {
+    let Some(index) = a.residual_index.as_mut() else { return };
+    if let Some(at) = index.more.iter().position(|entry| *entry == (key, id)) { index.more.swap_remove(at); return; }
+    if index.first.get(&key) != Some(&id) { return; }
+    match index.more.iter().position(|(k, _)| *k == key) {
+        Some(at) => { let (_, next) = index.more.swap_remove(at); index.first.insert(key, next); }
+        None => { index.first.remove(&key); }
+    }
+}
+fn residual_id(a: &mut Arena,residual: ResidualData) -> ResidualId {
+    let key=residual_key(&residual);
+    if let Some(id)=index_find(a,key,&residual) { return id; }
+    let id=new_rid(a);insert_residual(a,id,residual);id
+}
+fn store_residual(a: &mut Arena, id: ResidualId, residual: ResidualData) {
+    let old_key = a.residuals.get(&id).map(residual_key);
+    if old_key.is_some() {
+        let mut memo = DEP_MEMO.lock().unwrap();
+        if (memo.values.contains_key(&(id.0, id.1, false)) || memo.values.contains_key(&(id.0, id.1, true)))
+            && a.residuals.get(&id).is_some_and(|old| !residual_same(old, &residual)) { memo.invalidate(); }
+    }
+    let key = residual_key(&residual);
+    a.residuals.insert(id, residual);
+    match old_key {
+        Some(old_key) => reindex_residual(a, id, old_key),
+        None => index_add(a, key, id),
+    }
 }
 fn insert_residual(a: &mut Arena, id: ResidualId, residual: ResidualData) {
-    a.residuals.insert(id, residual);
+    store_residual(a, id, residual);
     a.res_log.push(id);
 }
+fn reindex_residual(a: &mut Arena,id: ResidualId,old_key: u64) {
+    let key=residual_key(a.residuals.get(&id).expect("stored residual"));
+    if old_key == key { return; }
+    index_remove(a, old_key, id);
+    index_add(a, key, id);
+}
+
 fn root_ctx(a: &mut Arena) -> ExecCtx {
     let site = base_of(a, &Path::new());
     ExecCtx { arena: a.id, inst: -1, prefix: Arc::new(Vec::new()), base: Arc::new(Vec::new()), route: Route(None), site, iter: Iter::default(), depth: 0, record: true, data: false, geometry: false, host: false, context: flow_syntax::context::host(), card: None }
@@ -875,6 +1074,30 @@ fn eval_error(code: &str, message: &str) -> Result<Value, Diagnostic> {
     Err(error(code, message))
 }
 fn need_time() -> Result<Value, Diagnostic> { Err(error("$NEEDS_TIME", "")) }
+// Only decisions that build a plan are observed; ordinary data branches remain live Core code.
+fn construction_type(ty: &Ty) -> bool {
+    match ty {
+        Ty::Named(_) => ty::shape(ty),
+        Ty::List(element) | Ty::Array(element) => construction_type(element),
+        Ty::Record(fields) => fields.iter().any(|(_, ty)| construction_type(ty)),
+        _ => false,
+    }
+}
+fn construction_decision(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term) -> Result<Option<Value>, Diagnostic> {
+    if a.time.is_some() { return Ok(None); }
+    let Some(observe) = current_residual_handlers().and_then(|handlers| handlers.shape) else { return Ok(None); };
+    let id = make_residual(a, term, env, c, false, None);
+    // A construction probe must not advance a fold/state before its normal transaction cooks.
+    if dep_value(a, &Value::Residual(id), false, &mut HashSet::new(), &mut HashMap::new()) { return Ok(None); }
+    let value = lend(a, || outside_handler(|| observe(id)))?;
+    if let Some(value) = &value {
+        a.decisions += 1;
+        value::validate(value)?; check_value_nesting(value)?;
+        if value::ty_of(value) != *term.ty() { return Err(error("E_TYPE", "A construction decision has the wrong type.")); }
+    }
+    Ok(value)
+}
+
 // A deferred check reads only frame facts, not cooked data, fold state or zone elements. Foreign residual/closure environments keep the call as an ordinary catalog node.
 fn guardable(a: &mut Arena, v: &Value) -> bool {
     fn reads_elem(t: &Term) -> bool {
@@ -1002,7 +1225,7 @@ fn function_value(value: &Value) -> bool {
     }
 }
 // Memoized inline bodies retain creation-ordered nodes, values, residuals, functions, offered kernels, site and iteration. Replay remaps them into fresh evaluation IDs. Only bodies whose references stay within their own values or cooked inputs are cached.
-struct InlineRegion { nodes: usize, authored: usize, residuals: usize, functions: usize, observed: usize, states: usize, cells: usize, approx: u64 }
+struct InlineRegion { nodes: usize, authored: usize, residuals: usize, functions: usize, observed: usize, states: usize, cells: usize, approx: u64, decisions: u64 }
 struct InlineEntry {
     nodes: Vec<Node>, authored: Vec<i64>, value: Value, observed: Vec<ResidualId>, lo: i64, inputs: Vec<i64>, site: Path, iter: Vec<i64>,
     residuals: Vec<(ResidualId, ResidualData)>, functions: Vec<(FnId, Function, Option<i64>)>,
@@ -1172,12 +1395,18 @@ fn replay_inline(a: &mut Arena, c: &ExecCtx, e: &InlineEntry, inputs: &[i64]) ->
     };
     for (id, _) in &e.residuals { reloc.rmap.insert(*id, new_rid(a)); }
     for (id, _, _) in &e.functions { reloc.fmap.insert(*id, new_fid(a)); }
+    // Captured residuals are creation ordered: each environment can name only an already-created
+    // residual (function identities remain distinct). Canonicalize before relocating consumers.
+    for (old, residual) in &e.residuals {
+        let residual = ResidualData { term: residual.term.clone(), env: reloc.env(&residual.env), ctx: reloc.ctx(&residual.ctx), previous: residual.previous, live: residual.live.clone() };
+        let key = residual_key(&residual);
+        let canonical = index_find(a, key, &residual);
+        if let Some(id) = canonical { reloc.rmap.insert(*old, id); }
+        else { insert_residual(a, reloc.rmap[old], residual); }
+    }
     let nodes: Vec<Node> = e.nodes.iter().map(|n| Node {
         id: reloc.id(n.id), inst: c.inst, site: reloc.path(&n.site), iter: reloc.iter(&n.iter), kind: n.kind.clone(), ty: n.ty.clone(), args: n.args.iter().map(|(name, value)| (*name, reloc.value(value))).collect(), error: n.error.clone(),
     }).collect();
-    let residuals: Vec<(ResidualId, ResidualData)> = e.residuals.iter().map(|(id, r)| (reloc.rmap[id], ResidualData {
-        term: r.term.clone(), env: reloc.env(&r.env), ctx: reloc.ctx(&r.ctx), previous: r.previous, live: r.live.clone(),
-    })).collect();
     let functions: Vec<(FnId, Function, Option<i64>)> = e.functions.iter().map(|(id, f, calls)| {
         let f = match f {
             Function::Closure(closure) => {
@@ -1195,7 +1424,6 @@ fn replay_inline(a: &mut Arena, c: &ExecCtx, e: &InlineEntry, inputs: &[i64]) ->
     let guards: Vec<(Value, bool, Diagnostic)> = e.guards.iter().map(|(test, fails, d)| (reloc.value(test), *fails, d.clone())).collect();
     let observed: Vec<ResidualId> = e.observed.iter().map(|id| reloc.rmap[id]).collect();
     for (node, form) in nodes.into_iter().zip(e.authored.iter()) { a.nodes.push(node); a.authored.push(*form); }
-    for (id, residual) in residuals { insert_residual(a, id, residual); }
     for (id, function, calls) in functions { insert_fn(a, id, function); if let Some(calls) = calls { a.fn_calls.insert(id, calls); } }
     for id in observed {
         a.observed.push(id);
@@ -1230,7 +1458,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
     context.depth += 1;
     context.record = false;
     context.card = definition.kind.qualified.split_once('/').map(|(_, label)| symbol::intern(label)).or_else(|| Some(symbol::intern(&definition.kind.qualified)));
-    let region = InlineRegion { nodes: a.nodes.len(), authored: a.authored.len(), residuals: a.res_log.len(), functions: a.fn_log.len(), observed: a.observed.len(), states: a.states.len(), cells: a.cells.len(), approx: a.approx };
+    let region = InlineRegion { nodes: a.nodes.len(), authored: a.authored.len(), residuals: a.res_log.len(), functions: a.fn_log.len(), observed: a.observed.len(), states: a.states.len(), cells: a.cells.len(), approx: a.approx, decisions: a.decisions };
     let inputs = inline_inputs(&parameters, args);
     let key = inline_key(a, c, policy, &parameters, args);
     let replayed = key.as_ref().and_then(|key| {
@@ -1284,19 +1512,22 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
     // the hook reads other values of this arena (frame_dependent, compile): it runs with the arena lent
     let takes_nodes = made.len() == body_nodes || { let hook = live_kernels_get(); lend(a, || hook(&made[body_nodes..])) };
     drop(made);
-    if live && (matches!(&result, Value::Residual(_)) || !takes_nodes) {
-        a.nodes.truncate(body_nodes);
-        a.authored.truncate(body_authored);
-        return catalog_call(a, c, authored, definition.kind.qualified.clone(), definition.kind.context.clone(), args.to_vec());
-    }
-    if !was_replayed && a.approx == region.approx && a.states.len() == region.states && a.cells.len() == region.cells {
-        if let Some((key, entry)) = key.and_then(|key| inline_entry(a, c, &region, &result, inputs, &guards).map(|entry| (key, entry))) { inline_store(definition.body.body.form().id, key, entry); }
-    }
     let geometry = match &result {
         Value::Deferred(ty, _) if flow_syntax::ty::is_geometry(ty) => true,
         Value::Residual(id) => get_res(a, *id).is_ok_and(|residual| flow_syntax::ty::is_geometry(residual.term.ty())),
         _ => false,
     };
+    // A construction host retains deferred cooked decisions in its prepared body.
+    // Outside that host, a live geometry result remains an ordinary catalog call.
+    let keeps_deferred = geometry && current_residual_handlers().is_some_and(|handlers| handlers.shape.is_some());
+    if live && (!takes_nodes || (matches!(&result, Value::Residual(_)) && !keeps_deferred)) {
+        a.nodes.truncate(body_nodes);
+        a.authored.truncate(body_authored);
+        return catalog_call(a, c, authored, definition.kind.qualified.clone(), definition.kind.context.clone(), args.to_vec());
+    }
+    if !was_replayed && a.approx == region.approx && a.decisions == region.decisions && a.states.len() == region.states && a.cells.len() == region.cells {
+        if let Some((key, entry)) = key.and_then(|key| inline_entry(a, c, &region, &result, inputs, &guards).map(|entry| (key, entry))) { inline_store(definition.body.body.form().id, key, entry); }
+    }
     if a.time.is_some() || c.data || !geometry { return Ok(result); }
     let mut slot_values = Vec::new();
     for slot in &definition.slots {
@@ -1627,7 +1858,12 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
         TermNode::If(id) => (|| -> Result<Value, Diagnostic> {
             let node = arena.if_node(id);
             let (test, yes, no) = (&t.child(node.test), &t.child(node.yes), &t.child(node.no));
-            let test = eval_sub(a, c, "if".into(), env, test)?;
+            let test_term = test;
+            let mut test = eval_sub(a, c, "if".into(), env, test_term)?;
+            if construction_type(t.ty()) && is_live_value(&test) {
+                let context = sub(a, c, "if".into());
+                if let Some(value) = construction_decision(a, &context, env, test_term)? { test = value; }
+            }
             // a live test whose one arm fails statically: the other arm, the test checked as the card cooks
             if guarding(a, &test) {
                 let then_cx = sub(a, c, "then".into());
@@ -1649,7 +1885,11 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
             for (i, arm) in arena.arms(node.arms).iter().enumerate() {
                 let body = &t.child(arm.body);
                 let context = sub(a, c, Seg::Index("test", i));
-                let test = eval_at(a, &context, env, &t.child(arm.test))?;
+                let test_term = t.child(arm.test);
+                let mut test = eval_at(a, &context, env, &test_term)?;
+                if construction_type(t.ty()) && is_live_value(&test) {
+                    if let Some(value) = construction_decision(a, &context, env, &test_term)? { test = value; }
+                }
                 if guarding(a, &test) {
                     let arm_cx = sub(a, c, Seg::Index("arm", i));
                     match arm_error(a, &arm_cx, env, body)? {
@@ -1663,6 +1903,28 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
         })(),
         TermNode::Case(id) => (|| -> Result<Value, Diagnostic> {
             let node = arena.case(id);
+            if construction_type(t.ty()) && a.time.is_none() && current_residual_handlers().is_some_and(|handlers| handlers.shape.is_some()) {
+                // Observe the selected arm, rather than the discriminant's continuously changing value.
+                let mut builder = TermBuilder::new();
+                let form = builder.import_form(&t.form());
+                let value = builder.import(&t.child(node.value));
+                let mut arms = Vec::new();
+                for (index, arm) in arena.case_arms(node.arms).iter().enumerate() {
+                    let literal = builder.import_form(&arena.syntax().handle(arm.form));
+                    let selected = builder.push(None, &Ty::Int, form, Draft::Lit(param::Value::Int(index as i64)));
+                    arms.push((literal, selected));
+                }
+                let count = arms.len();
+                let default = builder.push(None, &Ty::Int, form, Draft::Lit(param::Value::Int(count as i64)));
+                let selected = builder.push(None, &Ty::Int, form, Draft::Case(value, arms, default));
+                let selected = builder.freeze().handle(selected);
+                if let Some(value) = construction_decision(a, c, env, &selected)? {
+                    let Value::Int(index) = value else { return eval_error("E_TYPE", "A case construction decision must be an arm index."); };
+                    if index == count as i64 { return eval_sub(a, c, "else".into(), env, &t.child(node.default)); }
+                    let index = usize::try_from(index).ok().filter(|index| *index < count).ok_or_else(|| error("E_TYPE", "A case construction decision is outside its arms."))?;
+                    return eval_sub(a, c, Seg::Index("arm", index), env, &t.child(arena.case_arms(node.arms)[index].body));
+                }
+            }
             let value = eval_concrete_sub(a, c, "case".into(), env, &t.child(node.value))?;
             for (i, arm) in arena.case_arms(node.arms).iter().enumerate() {
                 let body = &t.child(arm.body);
@@ -2446,6 +2708,39 @@ fn widen_like(a: &mut Arena, w: &Value, v: &Value) -> Result<Value, Diagnostic> 
     let v = concrete(a, v.clone())?;
     match (&w, &v) { (Value::Int(_), Value::Float(_)) => Ok(v), _ => coerce_like(a, &w, &v) }
 }
+fn construction_sequence(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, shapes: bool) -> Result<Value, Diagnostic> {
+    let source = eval_at(a, c, env, term)?;
+    if shapes && a.time.is_none() && is_live_value(&source) {
+        let (element, count_op, nth_op, argument) = match term.ty() {
+            Ty::List(element) => (element.as_ref(), "count", "nth", "list"),
+            Ty::Array(element) => (element.as_ref(), "array/count", "array/nth", "array"),
+            _ => return concrete(a, source),
+        };
+        let mut builder = TermBuilder::new();
+        let form = builder.import_form(&term.form());
+        let source_term = builder.import(term);
+        let count = builder.push(None, &Ty::Int, form, Draft::Op { op: count_op.into(), args: vec![(argument.into(), source_term)], skip: Vec::new() });
+        let arena = builder.freeze();
+        if let Some(value) = construction_decision(a, c, env, &arena.handle(count))? {
+            let Value::Int(count) = value else { return eval_error("E_TYPE", "A loop construction decision must be a count."); };
+            let count = usize::try_from(count).map_err(|_| error("E_TYPE", "A loop construction count must be non-negative."))?;
+            let mut values = value::array_buffer(count)?;
+            // Each item still reads the source at cook time; equal counts never freeze its contents.
+            let mut builder = TermBuilder::new();
+            let form = builder.import_form(&term.form());
+            let source_term = builder.import(term);
+            let mut items = value::array_buffer(count)?;
+            for index in 0..count {
+                let index = builder.push(None, &Ty::Int, form, Draft::Lit(param::Value::Int(index as i64)));
+                items.push(builder.push(None, element, form, Draft::Op { op: nth_op.into(), args: vec![(argument.into(), source_term), ("index".into(), index)], skip: Vec::new() }));
+            }
+            let arena = builder.freeze();
+            for item in items { values.push(Value::Residual(make_residual(a, &arena.handle(item), env, c, false, None))); }
+            return Ok(Value::List(Arc::new(values)));
+        }
+    }
+    concrete(a, source)
+}
 fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, node: &flow_check::term_arena::Loop) -> Result<Value, Diagnostic> {
     let arena = term.arena();
     let kind = &node.kind;
@@ -2477,7 +2772,8 @@ fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, node: &flow_che
     }
     let first = {
         let binding = &clauses[0];
-        let source = eval_concrete_sub(a, c, "in0".into(), env, &term.child(binding.term))?;
+        let source_cx = sub(a, c, "in0".into());
+        let source = construction_sequence(a, &source_cx, env, &term.child(binding.term), construction_type(term.ty()))?;
         if let Value::Struct(g) = &source {
             if matches!(g.ty, Ty::List(_)) && kind == &W::LoopKind::For && clauses.len() == 1 && skip.is_empty() {
                 return eval_geometry_loop(a, c, env, arena, binding.pattern, body, zone, source);
@@ -2502,7 +2798,7 @@ fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, node: &flow_che
         if depth < clauses.len() {
             let binding = &clauses[depth];
             // A later source is evaluated where the earlier names are bound, when its turn comes.
-            let fresh = if depth == 0 { None } else { let in_cx = sub(a, c, Seg::Index("in", depth)); Some(loop_values(eval_concrete(a, &in_cx, env, &owner.child(binding.term))?)?) };
+            let fresh = if depth == 0 { None } else { let in_cx = sub(a, c, Seg::Index("in", depth)); Some(loop_values(construction_sequence(a, &in_cx, env, &owner.child(binding.term), construction_type(owner.ty()))?)?) };
             let items: &[Value] = match &fresh { Some(v) => v, None => &lists[0] };
             for (index, item) in items.iter().enumerate() {
                 selected.push(item.clone());
@@ -2746,7 +3042,7 @@ fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Opti
                 let result = resolve_source_with(&resolve, value)?;
                 force_with(&result, live, state, elems, Some(resolve))
             } else {
-                eval_error("E_DATA_SOURCE", "This data source needs its host's cooked data.")
+                Err(error("E_DATA_SOURCE", "This data source needs its host's cooked data."))
             }
         }
         Value::List(values) => Ok(Value::List(Arc::new(values.iter().map(|value| force_general(value, live, state, elems, resolve.clone())).collect::<Result<Vec<_>, _>>()?))),
@@ -3233,7 +3529,16 @@ pub mod residual {
         }
     }
     pub type ResidualView = View;
-    pub fn handle(handlers: ResidualHandlers, run: &mut dyn FnMut() -> Result<Eval, Diagnostic>) -> Result<Eval, Diagnostic> {
+    pub fn with_shape(shape: Arc<dyn Fn(ResidualId) -> Result<Option<Value>, Diagnostic> + Send + Sync>, run: &mut dyn FnMut()) {
+        let mut handlers = current_residual_handlers().unwrap_or_default();
+        handlers.shape = Some(shape);
+        ACTIVE_RESIDUAL_HANDLERS.with(|active| active.borrow_mut().push(handlers));
+        ACTIVE_OBSERVED_RESIDUALS.with(|observed| observed.borrow_mut().push(Vec::new()));
+        let _scope = ResidualHandlerScope;
+        run();
+    }
+    pub fn handle(mut handlers: ResidualHandlers, run: &mut dyn FnMut() -> Result<Eval, Diagnostic>) -> Result<Eval, Diagnostic> {
+        if handlers.shape.is_none() { handlers.shape = current_residual_handlers().and_then(|outer| outer.shape); }
         ACTIVE_RESIDUAL_HANDLERS.with(|active| active.borrow_mut().push(handlers.clone()));
         ACTIVE_OBSERVED_RESIDUALS.with(|observed| observed.borrow_mut().push(Vec::new()));
         let scope = ResidualHandlerScope;
@@ -3242,6 +3547,19 @@ pub mod residual {
         if let Some(observe) = &handlers.observe { for residual in observed { observe(residual); } }
         drop(scope);
         result
+    }
+    /// A true compile-time instruction choice, observed by an active body owner only.
+    pub fn construction_value(id: ResidualId, term: &Term, bindings: &[(Symbol, Value)]) -> Result<Option<Value>, Diagnostic> {
+        let Some(observe) = current_residual_handlers().and_then(|handlers| handlers.shape) else { return Ok(None); };
+        if free_names(term).iter().any(|name| lookup(bindings, name).is_none()) { return Ok(None); }
+        let projected = with_bindings(id, term, bindings)?;
+        if state_dependent(&Value::Residual(projected)) { return Ok(None); }
+        let value = outside_handler(|| observe(projected))?;
+        if let Some(value) = &value {
+            value::validate(value)?;
+            if value::ty_of(value) != *term.ty() { return Err(error("E_TYPE", "A construction decision has the wrong type.")); }
+        }
+        Ok(value)
     }
     pub fn free_names(term: &Term) -> Vec<Symbol> { super::free_names(term).iter().map(|&id| term.symbol(id)).collect() }
     pub fn residual_id(id: ResidualId) -> i64 { id.0 }
@@ -3297,7 +3615,10 @@ pub mod residual {
             arena.time = Some(live.clone());
             arena.state = state.cloned().or(arena.state.clone());
         }
-        if let Some(residual) = arena.residuals.get_mut(&id) { residual.live = Some(live.clone()); }
+        if let Some(old_key) = arena.residuals.get(&id).map(residual_key) {
+            arena.residuals.get_mut(&id).unwrap().live = Some(live.clone());
+            reindex_residual(arena, id, old_key);
+        }
         Ok(())
     }
     pub fn function_bindings(id: FnId) -> Vec<(Symbol, Value)> {
@@ -3526,7 +3847,7 @@ fn rewrite_value(
             }
             env.extend(overrides);
             residual.env = captured_of(env);
-            peek(&target, |arena| { arena.residuals.insert(copy, residual); });
+            peek(&target, |arena| store_residual(arena, copy, residual));
             Value::Residual(copy)
         }
         Value::Fn(id) => {
@@ -3546,7 +3867,11 @@ fn rewrite_value(
         Value::List(values) => Value::List(Arc::new(values.iter().map(|value| rewrite_value(value, replace, fresh, retarget, residuals, functions, owned)).collect())),
         Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect::<Vec<_>>().into()),
         Value::Struct(g) => value::struct_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect::<Vec<_>>().into()),
-        Value::Source(g) => value::source_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect::<Vec<_>>().into()),
+        Value::Source(g) => {
+            let fields = g.fields.iter().map(|(name, value)| (*name, rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect::<Vec<_>>();
+            if g.fields.iter().zip(&fields).all(|((_, old), (_, new))| residual_value_same(old, new)) { value.clone() }
+            else { value::source_value(g.name.clone(), g.ty.clone(), fields.into()) }
+        },
         _ => value.clone(),
     }
 }
@@ -3557,7 +3882,7 @@ fn remap_value(arena: &mut Arena, value: &Value, sources: &[(i64, i64)], residua
             if id.1 != arena.id || !residuals.insert(*id) { return value.clone(); }
             if let Some(mut residual) = arena.residuals.get(id).cloned() {
                 residual.env = residual.env.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect();
-                arena.residuals.insert(*id, residual);
+                store_residual(arena, *id, residual);
             }
             value.clone()
         }
@@ -3573,7 +3898,11 @@ fn remap_value(arena: &mut Arena, value: &Value, sources: &[(i64, i64)], residua
         Value::List(values) => Value::List(Arc::new(values.iter().map(|value| remap_value(arena, value, sources, residuals, functions)).collect())),
         Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect::<Vec<_>>().into()),
         Value::Struct(g) => value::struct_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect::<Vec<_>>().into()),
-        Value::Source(g) => value::source_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect::<Vec<_>>().into()),
+        Value::Source(g) => {
+            let fields = g.fields.iter().map(|(name, value)| (*name, remap_value(arena, value, sources, residuals, functions))).collect::<Vec<_>>();
+            if g.fields.iter().zip(&fields).all(|((_, old), (_, new))| residual_value_same(old, new)) { value.clone() }
+            else { value::source_value(g.name.clone(), g.ty.clone(), fields.into()) }
+        },
         _ => value.clone(),
     }
 }
@@ -4887,6 +5216,107 @@ fn run_compiled(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Option<Resul
 #[cfg(test)]
 mod ownership_tests {
     use super::*;
+
+    #[test]
+    fn residual_identity_reuses_bindings_without_merging_signed_zero_or_array_storage() {
+        use crate::test_workspace_eval::{check, result};
+        let checked = check("(workspace residual_identity (graph g :context value [(x : float 0.0)] (* x (+ t 1.0))))");
+        let evaluated = static_eval(&checked).unwrap();
+        let Value::Residual(id) = result(&evaluated, "g") else { panic!("residual") };
+        let term = residual::residual_term(id).unwrap();
+        let positive = residual::with_bindings(id, &term, &[("x".into(), Value::Float(0.0))]).unwrap();
+        let repeated = residual::with_bindings(id, &term, &[("x".into(), Value::Float(0.0))]).unwrap();
+        assert_eq!((positive.0, positive.1), (repeated.0, repeated.1), "the same captured expression must have one owning residual ID");
+        let mut imported = TermBuilder::new();
+        let row = imported.import(&term);
+        let imported = imported.freeze().handle(row);
+        assert_eq!(*term, imported);
+        let imported_id = residual::with_bindings(id, &imported, &[("x".into(), Value::Float(0.0))]).unwrap();
+        assert_eq!(positive.0, imported_id.0, "an imported expression in the same home retains canonical identity");
+        let negative = residual::with_bindings(id, &term, &[("x".into(), Value::Float(-0.0))]).unwrap();
+        assert_ne!(positive.0, negative.0, "signed zero is observable arithmetic input");
+        for (id, expected) in [(positive, 0.0_f64), (negative, -0.0_f64)] {
+            let Value::Float(actual) = force(&Value::Residual(id), &input::at_time(0.0), None).unwrap() else { panic!("float") };
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+        let evaluated = static_eval(&check("(workspace residual_arrays (graph g :context value (let* [xs (array/range 2)] (+ (array/sum xs) t))))")).unwrap();
+        let Value::Residual(id) = result(&evaluated, "g") else { panic!("array residual") };
+        let term = residual::residual_term(id).unwrap();
+        let a = Value::Int_array(Arc::new(vec![1, 2]));
+        let b = Value::Int_array(Arc::new(vec![1, 2]));
+        let first = residual::with_bindings(id, &term, &[("xs".into(), a.clone())]).unwrap();
+        let shared = residual::with_bindings(id, &term, &[("xs".into(), a)]).unwrap();
+        let distinct = residual::with_bindings(id, &term, &[("xs".into(), b)]).unwrap();
+        assert_eq!(first.0, shared.0, "clones retain the same immutable array owner");
+        assert_ne!(first.0, distinct.0, "independent array owners must retain independent identity");
+    }
+
+    #[test]
+    fn residual_replacement_replay_and_live_binding_preserve_index_owners() {
+        use crate::test_workspace_eval::{check, result};
+        let evaluation = static_eval(&check("(workspace residual_updates (graph g :context value [(x : float 0.0)] (+ x t)))")).unwrap();
+        let Value::Residual(id) = result(&evaluation, "g") else { panic!("residual") };
+        // a small arena scans its residuals; build the index so its bookkeeping is what is checked
+        peek(&arena_for_residual(&id).unwrap(), index_build);
+        let copied = -8_440_099;
+        for number in [1.0, 2.0, 2.0] {
+            let changed = host::rewrite_with(&Value::Residual(id), &|value| match value { Value::Float(x) if *x == 0.0 => Some(Value::Float(number)), _ => None }, &|| copied, &|_, _| None);
+            assert_eq!(force(&changed, &input::at_time(0.0), None).unwrap(), Value::Float(number));
+        }
+        let state_evaluation = static_eval(&check("(workspace changed_dependency (graph g :context host (state [n 0] (+ n 1))))")).unwrap();
+        let state = result(&state_evaluation, "g");
+        let rewrite = |replacement: &Value| host::rewrite_with(&Value::Residual(id), &|value| matches!(value, Value::Float(x) if *x == 0.0).then(|| replacement.clone()), &|| copied, &|_, _| None);
+        assert!(!state_dependent(&rewrite(&Value::Float(1.0))));
+        assert!(state_dependent(&rewrite(&state)), "a replaced residual must invalidate cached dependency answers");
+        assert!(!state_dependent(&rewrite(&Value::Float(2.0))));
+        let slot = arena_for_residual(&id).unwrap();
+        let mut projection = TermBuilder::new();
+        let form = projection.import_form(&residual::residual_term(id).unwrap().form());
+        let row = projection.push(None, &Ty::Int, form, Draft::RefBinding("state".into(), Vec::new()));
+        let projection = projection.freeze().handle(row);
+        residual::with_shape(Arc::new(|_| panic!("construction must not advance state")), &mut || {
+            peek(&slot, |arena| {
+                let context = root_ctx(arena);
+                let environment = Env::of(captured_of(vec![("state".into(), state.clone())]));
+                assert!(construction_decision(arena, &context, &environment, &projection).unwrap().is_none());
+            });
+        });
+        let count = |arena: &Arena, id: i64| arena.residual_index.iter().map(|index| index.first.values().chain(index.more.iter().map(|(_, id)| id)).filter(|candidate| candidate.0 == id).count()).sum::<usize>();
+        peek(&slot, |arena| assert_eq!(count(arena, copied), 1, "a caller-supplied overwritten ID has one index entry"));
+        for frame in 1..=64 { residual::bind_live(id, &input::at_time(frame as f64), None).unwrap(); }
+        peek(&slot, |arena| assert_eq!(count(arena, id.0), 1, "rebinding live input moves the existing entry"));
+        peek(&slot, |arena| {
+            let residual = own_res(arena, &id).unwrap().clone();
+            let context = residual.ctx.clone();
+            let entry = InlineEntry { nodes: Vec::new(), authored: Vec::new(), value: Value::Residual(id), observed: vec![id], lo: 0, inputs: Vec::new(), site: site(&context), iter: context.iter.to_vec(), residuals: vec![(id, residual)], functions: Vec::new(), guards: Vec::new() };
+            let (replayed, _) = replay_inline(arena, &context, &entry, &[]).unwrap();
+            let Value::Residual(replayed) = replayed else { panic!("replayed residual") };
+            assert_eq!((replayed.0, replayed.1), (id.0, id.1), "replay keeps canonical identity for unchanged owners and bindings");
+            assert_eq!(count(arena, id.0), 1);
+        });
+        let term = residual::residual_term(id).unwrap();
+        let descriptor = || value::source_value("$lisp/parameter", Ty::Float, vec![("x".into(), Value::No_geo)].into());
+        let a = descriptor();
+        let b = descriptor();
+        let first = residual::with_bindings(id, &term, &[("x".into(), a.clone())]).unwrap();
+        let shared = residual::with_bindings(id, &term, &[("x".into(), a.clone())]).unwrap();
+        let distinct = residual::with_bindings(id, &term, &[("x".into(), b)]).unwrap();
+        assert_eq!(first.0, shared.0);
+        assert_ne!(first.0, distinct.0, "nested operator slots must keep their own binding descriptor");
+        let rewritten = host::rewrite_with(&a, &|_| None, &|| copied, &|_, _| None);
+        let (Value::Source(original), Value::Source(rewritten)) = (&a, rewritten) else { panic!("source") };
+        assert!(Arc::ptr_eq(original, &rewritten), "generic rewrites cannot replace an immutable private binding descriptor");
+        let forged = value::source_value("$lisp/parameter", Ty::Float, vec![("nested".into(), Value::Float(3.0))].into());
+        let rewritten = host::rewrite_with(&forged, &|value| matches!(value, Value::Float(_)).then_some(Value::Float(7.0)), &|| copied, &|_, _| None);
+        let Value::Source(rewritten) = rewritten else { panic!("source") };
+        assert_eq!(rewritten.fields.get_str("nested"), Some(&Value::Float(7.0)), "a reserved-looking name cannot suppress traversal");
+        let forged = value::source_value("$lisp/parameter", Ty::Float, vec![("nested".into(), Value::Deferred(ty::geometry(), 9))].into());
+        peek(&slot, |arena| {
+            let remapped = remap_value(arena, &forged, &[(9, 12)], &mut HashSet::new(), &mut HashSet::new());
+            let Value::Source(remapped) = remapped else { panic!("source") };
+            assert_eq!(remapped.fields.get_str("nested"), Some(&Value::Deferred(ty::geometry(), 12)));
+        });
+    }
 
     #[test]
     fn residual_dependency_memo_tracks_capture_edits() {

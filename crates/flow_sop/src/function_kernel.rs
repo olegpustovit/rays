@@ -89,7 +89,7 @@ pub fn node(
     let roots = e::roots(std::iter::once(&function_value)
         .chain(elems_owned.iter().flatten().map(|(_, value)| value))
         .chain(state_values.iter().flatten()));
-    let dependencies = attribute_kernel::input_reads(&Value::Fn(function));
+    let dependencies = attribute_kernel::dependencies(&Value::Fn(function));
     let held_inputs = inputs.clone();
     build::make(
         build::Args { parameters, cook_mode: CookMode::Generic, dependencies, inputs, ..build::args("flow.function") },
@@ -103,7 +103,7 @@ pub fn node(
             let resolve: packed::Resolve = {
                 let capture = geometry_capture.clone();
                 let lookup: attribute_kernel::GeometryLookup = capture;
-                Arc::new(move |v| attribute_kernel::resolve(None, &lookup, v))
+                crate::lisp_node::resolver(Arc::new(move |v| attribute_kernel::resolve(None, &lookup, v)))
             };
             let prepare: kernel::Prepare = {
                 let (signature, sources, inputs, state, elems, resolve) =

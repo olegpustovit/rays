@@ -1305,9 +1305,7 @@ pub mod executor {
             let term = arena.row(id);
             let child = |id| self.unsupported_row(residual, arena, id);
             match term.node {
-                Node::Hof(hof) if matches!(arena.hof(hof).kind, w::HofKind::Map | w::HofKind::Reduce) => self.region_source(residual, &arena.handle(id)),
-                Node::Loop(_) => self.region_source(residual, &arena.handle(id)),
-                Node::Op(op) if arena.name(arena.op(op).op) == "array/sum" => self.region_source(residual, &arena.handle(id)),
+                _ if core_lower::packed_candidate(&arena.handle(id)) != (false, false) => self.region_source(residual, &arena.handle(id)),
                 Node::RefBinding(binding) => {
                     let binding = arena.ref_binding(binding);
                     let mut captured = e::residual::residual_binding(residual, arena.name(binding.name));
@@ -2559,12 +2557,12 @@ pub mod executor {
         }
     }
 
-    pub fn force_display(state: Option<&e::State>, reference: bool, gpu: Option<gpu::Config>, program: &Program, live: &Frame) -> Result<Displayed, Diagnostic> {
+    pub fn force_display(state: Option<&e::State>, resolve: Option<&core_exec::ResolveFn>, reference: bool, gpu: Option<gpu::Config>, program: &Program, live: &Frame) -> Result<Displayed, Diagnostic> {
         let gpu = gpu.unwrap_or_else(gpu::default);
-        match try_display(state, None, reference, &gpu, program, live)? {
+        match try_display(state, resolve, reference, &gpu, program, live)? {
             Some(value) => Ok(value),
             None => {
-                let o = ForceOptions { state: state.cloned(), reference, ..Default::default() };
+                let o = ForceOptions { state: state.cloned(), resolve: resolve.cloned(), reference, ..Default::default() };
                 force(program, &o, live).map(Displayed::Cpu)
             }
         }

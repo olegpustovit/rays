@@ -362,6 +362,11 @@ pub fn compile(options: &CompileOptions, residual: ResidualId, term: &Term) -> O
     compile_result(options, residual, term).ok()
 }
 
+pub(crate) fn compile_uniform(options: &CompileOptions, residual: ResidualId, term: &Term) -> Result<T, Vec<Diagnostic>> {
+    let source = options.count_source.clone().unwrap_or_else(none_source);
+    traced(&options.trace, core_region::lower_uniform(&source, residual, term))
+}
+
 pub fn compile_template(options: &CompileOptions, residual: ResidualId, term: &Term) -> Option<T> {
     let source = options.count_source.clone().unwrap_or_else(none_source);
     traced(&options.trace, compile_impl(false, true, true, &source, residual, term)).ok()
@@ -2505,7 +2510,7 @@ fn run_typed(
         0
     };
     let count: i64 = if nsrc == 0 {
-        0
+        if t.count == Some(1) && matches!(t.result, RegionResult::Sum(false)) { 1 } else { 0 }
     } else if t.iteration == Iteration::Product && lengths.contains(&0) {
         0
     } else {
@@ -2903,23 +2908,6 @@ fn same_resolve(a: &Option<Resolve>, b: &Option<Resolve>) -> bool {
     }
 }
 
-// The same residual can be met as distinct records, under distinct ids (a walker's kernel request
-// numbers each one afresh), so identity is the same term, bindings and site.
-fn same_residual(a: ResidualId, b: ResidualId) -> bool {
-    if a == b {
-        return true;
-    }
-    let (Ok(x), Ok(y)) = (E::residual::residual_view(a), E::residual::residual_view(b)) else { return false };
-    x.term == y.term
-        && x.previous == y.previous
-        && x.instance == y.instance
-        && x.iter == y.iter
-        && x.prefix == y.prefix
-        && x.owner == y.owner
-        && x.host == y.host
-        && x.geometry == y.geometry
-        && same_captures(&x.bindings, &y.bindings)
-}
 
 fn scope_enter(run: &Run) -> bool {
     CURRENT.with(|cell| {
@@ -2983,7 +2971,7 @@ impl Drop for PopGuard {
 fn scope_find(residual: ResidualId, term: &Arc<Term>) -> Option<Value> {
     CURRENT.with(|cell| {
         let current = cell.borrow();
-        current.as_ref()?.entries.iter().find(|(r, t, _)| same_term(t, term) && same_residual(*r, residual)).map(|(_, _, v)| v.clone())
+        current.as_ref()?.entries.iter().find(|(r, t, _)| (r.0, r.1) == (residual.0, residual.1) && same_term(t, term)).map(|(_, _, v)| v.clone())
     })
 }
 
@@ -3257,7 +3245,12 @@ fn run_all(run: &Run, dispatch: Option<Dispatch>, plane_outputs: PlaneOutputs) -
     };
     match &result {
         Ok(_) => result,
-        Err(d) if d.code == "cancelled" => result,
+        Err(d) if d.code == "cancelled" || d.code == "E_CANCELLED" => result,
+        // A standalone pure vector has no element loop to interpret. Diagnose its failure at
+        // the authored operation, but never turn a refused kernel into a successful fallback.
+        Err(_) if t.sources.is_empty() && t.count == Some(1) && matches!(t.term.node, Node::Vec(_)) => {
+            match reference_observed(&run, None) { Err(d) => Err(d), Ok(_) => result }
+        }
         Err(_) if run.strict || has_planes || t.outputs.len() > 1 => result,
         Err(_) => {
             let started = run.measure.as_ref().map(|m| (m.clock)());
@@ -3289,7 +3282,8 @@ pub struct ForceOptions {
     pub resolve: Option<Resolve>,
     pub measure: Option<Measure>,
     pub on_walk: Option<Arc<dyn Fn() + Send + Sync>>,
-    /// Returns kernel errors directly instead of rerunning the reference interpreter.
+    /// Never accepts an interpreted fallback. A failed standalone pure vector may walk only to
+    /// recover its authored diagnostic; `on_walk` reports that diagnosis too.
     pub strict: bool,
 }
 
@@ -4354,7 +4348,13 @@ mod tests {
         let first = {
             let _scope = ScopeGuard(run.in_scope);
             let first = evaluate(&run, &None, program.residual, &program.term).unwrap();
-            let second = evaluate(&run, &None, program.residual, &program.term).unwrap();
+            let view = E::residual::residual_view(program.residual).unwrap();
+            let mut imported = flow_check::term_arena::TermBuilder::new();
+            let row = imported.import(&view.term);
+            let imported = imported.freeze().handle(row);
+            let canonical = E::residual::with_bindings(program.residual, &imported, &view.bindings).unwrap();
+            assert_eq!((canonical.0, canonical.1), (program.residual.0, program.residual.1), "importing a capture in its owner retains the ID used by packed reuse");
+            let second = evaluate(&run, &None, canonical, &program.term).unwrap();
             match (&first, &second) {
                 (Value::Floats(1, a), Value::Floats(1, b)) => assert!(Arc::ptr_eq(a, b)),
                 _ => panic!("Expected shared packed array captures."),
