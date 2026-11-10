@@ -198,6 +198,7 @@ fn atspi_bus_walk_actions_and_events() {
         session_address.clone()
     });
 
+    assert!(matches!(Bridge::connect_to("unix:path=/nonexistent/pxui-a11y", "x"), Err(pxui_atspi::Error::NoBus(_))));
     let bridge = Bridge::connect_to(&address, "pxui test").unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(bridge.embedded(), registry, "Socket.Embed answered exactly when a registry runs");
     assert!(bridge.fd() >= 0);
@@ -393,8 +394,9 @@ else:
         c.drain_signals(5);
     }
     let out = child.wait_with_output().unwrap();
-    let text = String::from_utf8_lossy(&out.stdout);
-    println!("pxui_atspi: libatspi walk:\n{text}{}", String::from_utf8_lossy(&out.stderr));
+    let (text, errors) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    println!("pxui_atspi: libatspi walk:\n{text}{errors}");
+    assert!(!errors.contains("AT-SPI: Error"), "libatspi reported a failed call");
     if text.contains("NOAPP") {
         println!("pxui_atspi: libatspi saw no registry application (plain bus), walk not checked");
         return;

@@ -382,6 +382,13 @@ impl Bridge {
     }
 
     fn handle(&mut self, msg: &mut Msg, out: &mut Vec<A11yAction>) -> Msg {
+        if msg.path() == "/org/a11y/atspi/cache" && msg.interface() == "org.a11y.atspi.Cache" && msg.member() == "GetItems" {
+            // ponytail: an empty cache; libatspi then reads each object on demand. Fill it (and send AddAccessible /
+            // RemoveAccessible) if walking large trees over the bus gets slow.
+            let mut r = msg.reply();
+            r.open(b'a', "((so)(so)(so)iiassusau)").close();
+            return r;
+        }
         let Some(target) = self.target(msg.path()) else {
             return msg.error(UNKNOWN_OBJECT, "no such accessible");
         };

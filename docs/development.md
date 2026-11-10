@@ -196,3 +196,9 @@ half: run the suite with `RAYS_ALLOW_SKIP=1` there.
 Its window test skips without `WAYLAND_DISPLAY`. WSLg's compositor offers `wl_data_device` and `wp_viewporter` but no
 fractional scale, cursor shape, xdg-decoration or text-input-v3, so those paths need another compositor to exercise.
 `cargo run -p pxui_wayland --example window` runs the host loop.
+
+`pxui_atspi` (the AT-SPI2 accessibility bridge) links `libdbus-1` (`libdbus-1-dev`). Its bus test starts a private
+`dbus-daemon` and, when `at-spi2-core` is installed, `at-spi-bus-launcher` with the registry; it skips without
+`dbus-daemon`. A libatspi client walk runs too when `/usr/bin/python3` imports `gi` with the Atspi typelib: unpack
+`gir1.2-atspi-2.0` and `gir1.2-freedesktop` into `~/vk/root` and set
+`GI_TYPELIB_PATH=~/vk/root/usr/lib/x86_64-linux-gnu/girepository-1.0`.
