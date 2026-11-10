@@ -152,8 +152,8 @@
     "note": ""
   },
   "Z8": {
-    "status": "active",
-    "note": "Shared platform-byte allocation owners installed across Core/Packed/JS/SOP/native; final shipped-node/COW/image audit underway"
+    "status": "done",
+    "note": "2c8ea1de \u2014 platform-byte capacities, fallible bulk/COW/native owners and exact JS counts; intentional fixtures/spec refreshed"
   },
   "Z9": {
     "status": "pending",
