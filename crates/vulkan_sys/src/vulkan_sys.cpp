@@ -310,10 +310,14 @@ int create_device(bool validation, bool fatal, Device **out) {
   bool shared = transfer_family < 0;
   if (shared) transfer_family = main_family;
   d->main_family = static_cast<uint32_t>(main_family); d->transfer_family = static_cast<uint32_t>(transfer_family);
+  // A family with a single queue (lavapipe) cannot give the transfer path its own: both then share one VkQueue.
+  VkQueueFamilyProperties families[16]; uint32_t family_count = 16;
+  vkGetPhysicalDeviceQueueFamilyProperties(d->physical, &family_count, families);
+  bool one_queue = shared && families[main_family].queueCount < 2;
   float priorities[2] = {1.f, 1.f};
   VkDeviceQueueCreateInfo queues[2]{};
   queues[0] = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}; queues[0].queueFamilyIndex = d->main_family;
-  queues[0].queueCount = shared ? 2 : 1; queues[0].pQueuePriorities = priorities;
+  queues[0].queueCount = shared && !one_queue ? 2 : 1; queues[0].pQueuePriorities = priorities;
   queues[1] = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}; queues[1].queueFamilyIndex = d->transfer_family;
   queues[1].queueCount = 1; queues[1].pQueuePriorities = priorities;
   VkPhysicalDeviceRobustness2FeaturesEXT robustness{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT}; robustness.nullDescriptor = VK_TRUE;
@@ -349,7 +353,7 @@ int create_device(bool validation, bool fatal, Device **out) {
   if (r != VK_SUCCESS) { delete d; return r == VK_ERROR_FEATURE_NOT_PRESENT || r == VK_ERROR_EXTENSION_NOT_PRESENT ? RV_MISSING : r; }
   volkLoadDevice(d->device);
   vkGetDeviceQueue(d->device, d->main_family, 0, &d->main_queue);
-  vkGetDeviceQueue(d->device, d->transfer_family, shared ? 1 : 0, &d->transfer_queue);
+  if (one_queue) d->transfer_queue = d->main_queue; else vkGetDeviceQueue(d->device, d->transfer_family, shared ? 1 : 0, &d->transfer_queue);
   VmaVulkanFunctions functions{}; functions.vkGetInstanceProcAddr = vkGetInstanceProcAddr; functions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
   VmaAllocatorCreateInfo ai{}; ai.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | (d->budget ? VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT : 0);
   ai.physicalDevice = d->physical; ai.device = d->device; ai.pVulkanFunctions = &functions; ai.instance = d->instance; ai.vulkanApiVersion = VK_API_VERSION_1_3;
@@ -497,6 +501,8 @@ int64_t commit_cmd(Command *c, VkSemaphore wait, VkSemaphore signal) {
   if (q->flight_tail) q->flight_tail->next = c; else q->flight_head = c; q->flight_tail = c; return static_cast<int64_t>(epoch);
 }
 VkResult transfer_copy(Device *d, VkBuffer src, VkDeviceSize so, VkBuffer dst, VkDeviceSize doff, VkDeviceSize size) {
+  // Sharing the main queue: take its lock first (same order as everyone else), held across the wait.
+  std::unique_lock<std::recursive_mutex> shared_queue(d->qlock, std::defer_lock); if (d->transfer_queue == d->main_queue) shared_queue.lock();
   std::lock_guard<std::mutex> lock(d->xlock); VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO}; bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   VkResult r = vkBeginCommandBuffer(d->transfer_cb, &bi);
   if (r == VK_SUCCESS) { VkBufferCopy region{so, doff, size}; vkCmdCopyBuffer(d->transfer_cb, src, dst, 1, &region);

@@ -19,6 +19,7 @@ fn main() {
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     println!("cargo:rerun-if-changed={}", source.display());
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=PATH");
     let (Some(glslang), Some(link)) = (tool("glslangValidator"), tool("spirv-link")) else {
         println!("cargo:warning=glslangValidator or spirv-link not found: the gpu_ conformance tests cannot run");
         println!("cargo:rustc-env=OGPU_VK_SPV_DIR=");
