@@ -7,7 +7,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
-use rdk_core::cancel;
+use rdk_core::{cancel, scratch};
 
 use crate::predicates::Sign;
 
@@ -102,6 +102,11 @@ fn table_with_capacity(capacity: usize) -> Table {
         edge_count: 0,
         tombstone_count: 0,
     }
+}
+
+/// An allocation-free stand-in left behind while a workspace's real table is checked out.
+fn table_empty() -> Table {
+    Table { keys: Vec::new(), first_triangles: Vec::new(), first_opposites: Vec::new(), second_triangles: Vec::new(), second_opposites: Vec::new(), constrained: Vec::new(), edge_count: 0, tombstone_count: 0 }
 }
 
 fn table_create(expected: i64) -> Result<Table, String> {
@@ -403,7 +408,7 @@ fn squared_limit(count: i64) -> i64 {
 }
 
 fn canonicalize(count: usize, triangle_a: &[i64], triangle_b: &[i64], triangle_c: &[i64]) -> Vec<i64> {
-    let mut packed = vec![0i64; count * 3];
+    let mut packed = scratch::filled(count * 3, 0i64);
     for triangle in 0..count {
         let (a, b, c) = (triangle_a[triangle], triangle_b[triangle], triangle_c[triangle]);
         let at = triangle * 3;
@@ -421,8 +426,10 @@ fn canonicalize(count: usize, triangle_a: &[i64], triangle_b: &[i64], triangle_c
             packed[at + 2] = b;
         }
     }
-    let mut order: Vec<usize> = (0..count).collect();
-    order.sort_by(|&left, &right| {
+    let mut order = scratch::empty::<usize>();
+    order.extend(0..count);
+    // Equal packed triples are identical rows, so an unstable sort gives the same bytes.
+    order.sort_unstable_by(|&left, &right| {
         let (l, r) = (left * 3, right * 3);
         packed[l]
             .cmp(&packed[r])
@@ -548,8 +555,8 @@ struct St {
     constraint_winding: Vec<i64>,
     walk_start: i64,
     insertion_queue: BinaryHeap<Reverse<i64>>,
-    strip_marks: Vec<u8>,
-    boundary_stamps: Vec<i64>,
+    strip_marks: scratch::Buf<u8>,
+    boundary_stamps: scratch::Buf<i64>,
     boundary_edges: HashMap<i64, i64>,
     boundary_generation: i64,
 }
@@ -1216,7 +1223,7 @@ fn recover_constraint(
     a: i64,
     b: i64,
 ) -> Result<(), String> {
-    let mut strip: Vec<i64> = Vec::new();
+    let mut strip = scratch::empty::<i64>();
     let mut current = incident_start(st, cb, a, b)?;
     let mut entry_key: i64 = -1;
     let mut steps: i64 = 0;
@@ -1256,9 +1263,9 @@ fn recover_constraint(
         return Err(err_message("Planar CDT constraint trace failed; an open constraint segment contains an unsplit point"));
     }
     let strip_count = strip.len() as i64;
-    let mut boundary_u: Vec<i64> = Vec::new();
-    let mut boundary_v: Vec<i64> = Vec::new();
-    let mut boundary_triangle: Vec<i64> = Vec::new();
+    let mut boundary_u = scratch::empty::<i64>();
+    let mut boundary_v = scratch::empty::<i64>();
+    let mut boundary_triangle = scratch::empty::<i64>();
     for index in 0..strip.len() {
         let triangle = strip[index];
         let (ta, tb, tc) = tri(st, triangle);
@@ -1351,7 +1358,7 @@ fn recover_constraint(
         }
         Ok(next as usize)
     };
-    let mut visited_boundary = vec![0u8; boundary_count];
+    let mut visited_boundary = scratch::filled(boundary_count, 0u8);
     let mut cycles: Vec<Vec<i64>> = Vec::new();
     for start in 0..boundary_count {
         if visited_boundary[start] == 0 {
@@ -1384,7 +1391,7 @@ fn recover_constraint(
             main_cycle = bridge_cycle(st, cb, a, b, &strip, &main_cycle, &cycles[index])?;
         }
     }
-    let mut emitted = vec![0i64; strip.len() * 3];
+    let mut emitted = scratch::filled(strip.len() * 3, 0i64);
     let mut emitted_count: i64 = 0;
     {
         let a_index = point_index(a, &main_cycle);
@@ -1416,8 +1423,8 @@ fn recover_constraint(
             strip_count,
         )?;
     }
-    let mut interior: Vec<i64> = Vec::new();
-    let mut interior_seen = vec![0u8; u(st.point_count)];
+    let mut interior = scratch::empty::<i64>();
+    let mut interior_seen = scratch::filled(u(st.point_count), 0u8);
     for index in 0..strip.len() {
         let (ta, tb, tc) = tri(st, strip[index]);
         for point in [ta, tb, tc] {
@@ -1800,23 +1807,23 @@ fn delaunay_repair(st: &mut St, cancel_value: Option<&cancel::T>, cb: &(&dyn Fn(
     Ok(())
 }
 
-struct Request {
+struct Request<'a> {
     incremental: bool,
     point_count: i64,
     initial_triangle_count: usize,
-    triangle_points: Vec<i64>,
-    insert_points: Vec<i64>,
+    triangle_points: &'a [i64],
+    insert_points: &'a [i64],
     flood: bool,
     remove_outside: bool,
-    constraint_points: Vec<i64>,
-    constraint_winding: Option<Vec<i64>>,
+    constraint_points: &'a [i64],
+    constraint_winding: Option<&'a [i64]>,
 }
 
 fn run(
     st: &mut St,
     cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool),
     cancel_value: Option<&cancel::T>,
-    req: &Request,
+    req: &Request<'_>,
     previous_constraints: &[i64],
 ) -> Result<T, String> {
     let point_count = req.point_count;
@@ -1825,7 +1832,7 @@ fn run(
     let triangle_points = &req.triangle_points[..];
     let incremental = req.incremental;
     if !incremental {
-        let mut referenced = vec![0u8; u(point_count)];
+        let mut referenced = scratch::filled(u(point_count), 0u8);
         for triangle in 0..initial_triangle_count {
             let a = triangle_points[triangle * 3];
             let b = triangle_points[triangle * 3 + 1];
@@ -1880,7 +1887,7 @@ fn run(
         point_count,
         st.key_stride,
         &req.constraint_points,
-        req.constraint_winding.as_deref(),
+        req.constraint_winding,
     )?;
     let (_removed_constraints, added_constraints) = if incremental {
         constraint_delta(previous_constraints, &constraints)
@@ -1911,7 +1918,7 @@ fn run(
     for (insertion, &point) in insert_points.iter().enumerate() {
         poll(cancel_value, insertion as i64, 255)?;
         let (containing, edge) = locate(st, cb, point)?;
-        let inserted_triangles: Vec<i64> = match edge {
+        let (inserted_triangles, inserted_count): ([i64; 4], usize) = match edge {
             None => {
                 let (a, b, c) = tri(st, containing);
                 remove_triangle(st, containing)?;
@@ -1924,7 +1931,7 @@ fn run(
                 seed_triangle(st, containing);
                 seed_triangle(st, second);
                 seed_triangle(st, third);
-                vec![containing, second, third]
+                ([containing, second, third, 0], 3)
             }
             Some((_, pu, pv, opposite)) => {
                 let slot = table_find(&st.table, ek(st, pu, pv)?);
@@ -1958,13 +1965,13 @@ fn run(
                     add_triangle(st, adjacent_second)?;
                     seed_triangle(st, adjacent_triangle);
                     seed_triangle(st, adjacent_second);
-                    vec![containing, containing_second, adjacent_triangle, adjacent_second]
+                    ([containing, containing_second, adjacent_triangle, adjacent_second], 4)
                 } else {
-                    vec![containing, containing_second]
+                    ([containing, containing_second, 0, 0], 2)
                 }
             }
         };
-        legalize_inserted(st, cb, point, &inserted_triangles)?;
+        legalize_inserted(st, cb, point, &inserted_triangles[..inserted_count])?;
         st.walk_start = containing;
     }
     if incremental {
@@ -2072,8 +2079,8 @@ pub fn build(
                 constraint_winding: Vec::new(),
                 walk_start: 0,
                 insertion_queue: BinaryHeap::new(),
-                strip_marks: vec![0; u(triangle_capacity)],
-                boundary_stamps: vec![0; u(point_count)],
+                strip_marks: scratch::filled(u(triangle_capacity), 0u8),
+                boundary_stamps: scratch::filled(u(point_count), 0i64),
                 boundary_edges: HashMap::new(),
                 boundary_generation: 0,
             };
@@ -2100,7 +2107,7 @@ pub fn build(
                     .iter_mut()
                     .for_each(|p| *p = -1);
             }
-            let mut table = std::mem::replace(&mut w.edge_table, table_with_capacity(1));
+            let mut table = std::mem::replace(&mut w.edge_table, table_empty());
             if !incremental {
                 table_reset(&mut table);
             }
@@ -2120,8 +2127,8 @@ pub fn build(
                 constraint_winding: Vec::new(),
                 walk_start: 0,
                 insertion_queue: BinaryHeap::new(),
-                strip_marks: vec![0; u(triangle_capacity)],
-                boundary_stamps: vec![0; u(point_count)],
+                strip_marks: scratch::filled(u(triangle_capacity), 0u8),
+                boundary_stamps: scratch::filled(u(point_count), 0i64),
                 boundary_edges: HashMap::new(),
                 boundary_generation: 0,
             };
@@ -2131,12 +2138,12 @@ pub fn build(
         incremental,
         point_count,
         initial_triangle_count,
-        triangle_points: triangle_points.to_vec(),
-        insert_points: insert_points.to_vec(),
+        triangle_points,
+        insert_points,
         flood: flood_from_hull_boundary,
         remove_outside: remove_outside_constraint_polygons,
-        constraint_points: constraint_points.to_vec(),
-        constraint_winding: constraint_winding.map(|w| w.to_vec()),
+        constraint_points,
+        constraint_winding,
     };
     let result = run(&mut st, &cb, cancel_value, &req, &previous_constraints);
     if let Some(w) = workspace {
@@ -2146,7 +2153,7 @@ pub fn build(
         w.triangle_b = std::mem::take(&mut st.triangle_b);
         w.triangle_c = std::mem::take(&mut st.triangle_c);
         w.point_triangle = std::mem::take(&mut st.point_triangle);
-        w.edge_table = std::mem::replace(&mut st.table, table_with_capacity(1));
+        w.edge_table = std::mem::replace(&mut st.table, table_empty());
         if let Ok(value) = &result {
             if !flood_from_hull_boundary && !remove_outside_constraint_polygons {
                 w.point_count = point_count;

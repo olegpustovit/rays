@@ -6,7 +6,7 @@ use rays_math::float::{min as fmin, max as fmax};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use rdk_core::{cancel, error};
+use rdk_core::{cancel, error, scratch};
 use rdk_core::error::Code;
 use rdk_geom::implicit_point;
 use rdk_geom::planar_cdt;
@@ -194,7 +194,7 @@ pub fn build(
     for local in 0..3 {
         points.push(face_triangle_implicit(constraints, side, triangle, local));
     }
-    let mut arrangement_to_point = vec![0i64; arrangement_count];
+    let mut arrangement_to_point = scratch::filled(arrangement_count, 0i64);
     for arrangement_point in 0..arrangement_count {
         let point = arrangement_mod::view::point(arrangement, arrangement_point as i64);
         let found = (0..3).find(|&candidate| implicit_point::equal(&points[candidate], point));
@@ -209,7 +209,7 @@ pub fn build(
     let projection_axis = projection(&points);
     let orient_points = orient_of(projection_axis);
     let incircle_points = incircle_of(projection_axis);
-    let cache: RefCell<HashMap<(i64, i64, i64), Sign>> = RefCell::new(HashMap::new());
+    let cache: RefCell<HashMap<(i64, i64, i64), Sign>> = RefCell::new(HashMap::with_capacity(32));
     let orient_indices = |a: i64, b: i64, c: i64| cached_orient(&cache, &points, orient_points, a, b, c);
     let source_winding = match orient_indices(0, 1, 2) {
         Sign::Positive => 1,
@@ -217,20 +217,21 @@ pub fn build(
         Sign::Zero => return Err(fail(Code::InvalidConstraints, "degenerate source triangle during face CDT")),
     };
     let initial_triangle_points: [i64; 3] = if source_winding > 0 { [0, 1, 2] } else { [0, 2, 1] };
-    let insert_points: Vec<i64> = (3..points.len() as i64).collect();
+    let mut insert_points = scratch::empty::<i64>();
+    insert_points.extend(3..points.len() as i64);
     let source_constraint_count = arrangement_mod::segment_count(arrangement);
     // Face arrangement already canonicalizes every construction and performs its own indexed
     // incidence pass, so no point/segment rescan is needed here.
-    let mut constraint_points: Vec<i64> = Vec::with_capacity((source_constraint_count * 2) as usize);
+    let mut constraint_points = scratch::empty::<i64>();
     for segment in 0..source_constraint_count {
         constraint_points.push(arrangement_to_point[arrangement_mod::segment_first(arrangement, segment) as usize]);
         constraint_points.push(arrangement_to_point[arrangement_mod::segment_second(arrangement, segment) as usize]);
     }
     let n = points.len();
-    let mut u_min = vec![0.; n];
-    let mut u_max = vec![0.; n];
-    let mut v_min = vec![0.; n];
-    let mut v_max = vec![0.; n];
+    let mut u_min = scratch::filled(n, 0.0f64);
+    let mut u_max = scratch::filled(n, 0.0f64);
+    let mut v_min = scratch::filled(n, 0.0f64);
+    let mut v_max = scratch::filled(n, 0.0f64);
     for point in 0..n {
         let ((x_min, x_max), (y_min, y_max), (z_min, z_max)) = implicit_point::bounds(&points[point]);
         let (a, b, c, d) = match projection_axis {
@@ -266,7 +267,7 @@ pub fn build(
         &incircle_indices,
         Some(&bounds_overlap),
         &initial_triangle_points,
-        Some(&insert_points),
+        Some(&insert_points[..]),
         false,
         &constraint_points,
         None,

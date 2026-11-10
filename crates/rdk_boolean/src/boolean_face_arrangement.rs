@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use rdk_core::{cancel, error};
+use rdk_core::{cancel, error, scratch};
 use rdk_core::error::Code;
 use rdk_geom::bounds2_index;
 use rdk_geom::implicit_point::{self, Projection};
@@ -354,9 +354,10 @@ fn segment_pair_candidates(
     let point_planes = projected_bounds(points, point_count, projection);
     let seg = segment_bounds(segment_first, segment_second, segment_count, &point_planes);
     let seg = choose_sweep_axis(seg);
-    let mut order: Vec<usize> = (0..segment_count).collect();
-    order.sort_by(|&l, &r| fcmp(seg.u_min[l], seg.u_min[r]).then(l.cmp(&r)));
-    let mut active = vec![0usize; segment_count];
+    let mut order = scratch::empty::<usize>();
+    order.extend(0..segment_count);
+    order.sort_unstable_by(|&l, &r| fcmp(seg.u_min[l], seg.u_min[r]).then(l.cmp(&r)));
+    let mut active = scratch::filled(segment_count, 0usize);
     let mut active_count = 0usize;
     let mut first: Vec<i64> = Vec::new();
     let mut second: Vec<i64> = Vec::new();
@@ -407,12 +408,13 @@ fn point_segment_candidates(
     let swap = interval_score(&seg_planes.v_min, &seg_planes.v_max) < interval_score(&seg_planes.u_min, &seg_planes.u_max);
     let (point, seg) = if swap { (swap_axes(point_planes), swap_axes(seg_planes)) } else { (point_planes, seg_planes) };
     let event_count = segment_count + point_count;
-    let mut events: Vec<usize> = (0..event_count).collect();
+    let mut events = scratch::empty::<usize>();
+    events.extend(0..event_count);
     let event_lower = |event: usize| if event < segment_count { seg.u_min[event] } else { point.u_min[event - segment_count] };
-    events.sort_by(|&l, &r| fcmp(event_lower(l), event_lower(r)).then(l.cmp(&r)));
-    let mut active_segments = vec![0usize; segment_count];
+    events.sort_unstable_by(|&l, &r| fcmp(event_lower(l), event_lower(r)).then(l.cmp(&r)));
+    let mut active_segments = scratch::filled(segment_count, 0usize);
     let mut active_segment_count = 0usize;
-    let mut active_points = vec![0usize; point_count];
+    let mut active_points = scratch::filled(point_count, 0usize);
     let mut active_point_count = 0usize;
     let mut first: Vec<i64> = Vec::new();
     let mut second: Vec<i64> = Vec::new();
@@ -470,13 +472,14 @@ fn point_segment_candidates(
     if dense { Ok(CandidateResult::Dense) } else { Ok(CandidateResult::Candidates(finish_candidates(first, second))) }
 }
 
-fn canonicalize_points(points: &[implicit_point::T], count: usize) -> (Vec<implicit_point::T>, Vec<usize>) {
+fn canonicalize_points(points: &[implicit_point::T], count: usize) -> (Vec<implicit_point::T>, scratch::Buf<usize>) {
     if count == 0 {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), scratch::empty());
     }
-    let mut order: Vec<usize> = (0..count).collect();
-    order.sort_by(|&l, &r| compare_xyz(&points[l], &points[r]).cmp(&0).then(l.cmp(&r)));
-    let mut representative = vec![0usize; count];
+    let mut order = scratch::empty::<usize>();
+    order.extend(0..count);
+    order.sort_unstable_by(|&l, &r| compare_xyz(&points[l], &points[r]).cmp(&0).then(l.cmp(&r)));
+    let mut representative = scratch::filled(count, 0usize);
     let mut first = 0usize;
     while first < count {
         let mut last = first + 1;
@@ -490,7 +493,7 @@ fn canonicalize_points(points: &[implicit_point::T], count: usize) -> (Vec<impli
         }
         first = last;
     }
-    let mut old_to_new = vec![0usize; count];
+    let mut old_to_new = scratch::filled(count, 0usize);
     let mut unique_count = 0usize;
     for point in 0..count {
         if representative[point] == point {
@@ -531,8 +534,8 @@ struct State {
     split_points: Vec<i64>,
     split_next: Vec<i64>,
     split_set: HashSet<(i64, i64)>,
-    split_head: Vec<i64>,
-    segment_split_count: Vec<i64>,
+    split_head: scratch::Buf<i64>,
+    segment_split_count: scratch::Buf<i64>,
 }
 
 impl State {
@@ -901,14 +904,14 @@ pub fn build(
         segment_coplanar,
         segment_support_first,
         segment_support_second,
-        orientation_cache: HashMap::new(),
+        orientation_cache: HashMap::with_capacity(32),
         point_index,
         split_segments: Vec::with_capacity(split_capacity),
         split_points: Vec::with_capacity(split_capacity),
         split_next: Vec::with_capacity(split_capacity),
         split_set: HashSet::new(),
-        split_head: vec![-1; raw_segment_count],
-        segment_split_count: vec![0; raw_segment_count],
+        split_head: scratch::filled(raw_segment_count, -1i64),
+        segment_split_count: scratch::filled(raw_segment_count, 0i64),
     };
     for segment in 0..raw_segment_count {
         let (first, second) = (state.segment_first[segment], state.segment_second[segment]);
@@ -1001,16 +1004,17 @@ pub fn build(
     }
     // Materialize the split points of every segment, in axis order.
     let split_count = state.split_segments.len();
-    let mut counts = vec![0usize; raw_segment_count];
+    let mut counts = scratch::filled(raw_segment_count, 0usize);
     for split in 0..split_count {
         counts[state.split_segments[split] as usize] += 1;
     }
-    let mut offsets = vec![0usize; raw_segment_count + 1];
+    let mut offsets = scratch::filled(raw_segment_count + 1, 0usize);
     for segment in 0..raw_segment_count {
         offsets[segment + 1] = offsets[segment] + counts[segment];
     }
-    let mut values = vec![0i64; split_count];
-    let mut cursors = offsets.clone();
+    let mut values = scratch::filled(split_count, 0i64);
+    let mut cursors = scratch::empty::<usize>();
+    cursors.extend_from_slice(&offsets);
     for split in 0..split_count {
         let segment = state.split_segments[split] as usize;
         values[cursors[segment]] = state.split_points[split];
@@ -1040,13 +1044,15 @@ pub fn build(
             }
         }
     }
-    let mut order: Vec<usize> = (0..output_first.len()).collect();
+    let mut order = scratch::empty::<usize>();
+    order.extend(0..output_first.len());
     let key = |i: usize| (output_first[i].min(output_second[i]), output_first[i].max(output_second[i]));
-    order.sort_by(|&l, &r| key(l).cmp(&key(r)));
+    // Ties are duplicate segments with equal keys, and only the key is read afterwards.
+    order.sort_unstable_by(|&l, &r| key(l).cmp(&key(r)));
     let mut unique_first: Vec<i64> = Vec::new();
     let mut unique_second: Vec<i64> = Vec::new();
     let (mut previous_a, mut previous_b) = (-1i64, -1i64);
-    for &segment in &order {
+    for &segment in order.iter() {
         let (a, b) = key(segment);
         if a != previous_a || b != previous_b {
             unique_first.push(a);

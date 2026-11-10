@@ -13,6 +13,7 @@ pub mod packed;
 pub mod point_index;
 pub mod polygon_triangulation;
 pub mod ragged_ops;
+pub mod scratch;
 pub mod support;
 pub mod topology;
 pub mod topology_edge_lookup;
