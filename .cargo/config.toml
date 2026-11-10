@@ -9,5 +9,6 @@ rustflags = ["-Clink-arg=-Wl,--stack,268435456", "-Clink-arg=-fuse-ld=lld", "-Cl
 
 # Main-thread stack 256 MB on every binary (tests, harness=false targets run cases on the main thread,
 # and the app): deep Lisp recursion, as in the plan's §9. Windows: in the rustflags above.
+# A linker wrapper, not a rustflag: the flag must not reach proc-macro dylibs (pxui_text's cosmic-text).
 [target.aarch64-apple-darwin]
-rustflags = ["-Clink-arg=-Wl,-stack_size,0x10000000"]
+linker = "tools/cc-stack.sh"

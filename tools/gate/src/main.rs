@@ -962,6 +962,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys", "rays_math"][..]),
         // PXUI is headed for its own repository: rays_math and scene_command leave in P2 with the draw list.
         ("pxui", &["input", "cfmt", "rays_math", "scene_command"][..]),
+        ("pxui_text", &[][..]),
         ("rays_shell", &["rays", "rays_math", "editor_core", "pxui", "mem"][..]),
         ("rays_graph", &[
             "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "flow_graph", "pxui", "editor_core",
@@ -1305,7 +1306,9 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
                         None
                     }
                 }
-            } else if dependency_package == "cc" && dependency.kind == "build-dependencies" {
+            } else if (dependency_package == "cc" && dependency.kind == "build-dependencies")
+                || (package.package_name == "pxui_text" && dependency_package == "cosmic-text" && dependency.kind == "dependencies")
+            {
                 None
             } else {
                 errors.push(format!("{path}:{}: external dependency `{dependency_package}` is not allowed; use a local workspace crate (cc is the sole exception)", dependency.line));
