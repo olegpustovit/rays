@@ -43,7 +43,6 @@ pub enum ColorKind {
 pub type T = Ty;
 pub type Color = ColorKind;
 
-#[derive(Clone)]
 struct Descriptor {
     name: &'static str,
     shape: bool,
@@ -61,7 +60,8 @@ pub fn panel() -> Ty { Ty::Named("panel".into()) }
 pub fn editor() -> Ty { Ty::Named("editor".into()) }
 pub fn material() -> Ty { Ty::Named("material".into()) }
 
-fn descriptors() -> Vec<Descriptor> {
+fn descriptors() -> &'static [Descriptor] {
+    static DESCRIPTORS: std::sync::LazyLock<Vec<Descriptor>> = std::sync::LazyLock::new(|| {
     let mut builder = SyntaxBuilder::new();
     let nil = default_into(&geometry(), &mut builder).expect("geometry default");
     let image = default_into(&image(), &mut builder).expect("image default");
@@ -80,6 +80,8 @@ fn descriptors() -> Vec<Descriptor> {
         Descriptor { name: "effect", shape: true, color: ColorKind::Output, default: None },
         Descriptor { name: "sample", shape: false, color: ColorKind::Output, default: None },
     ]
+    });
+    &DESCRIPTORS
 }
 
 fn structural() -> Vec<(&'static str, Ty)> {
@@ -92,7 +94,7 @@ fn structural() -> Vec<(&'static str, Ty)> {
 
 pub fn names() -> Vec<(String, Ty)> {
     let mut result: Vec<_> = structural().into_iter().map(|(name, ty)| (name.to_owned(), ty)).collect();
-    result.extend(descriptors().into_iter().map(|d| (d.name.to_owned(), Ty::Named(d.name.to_owned()))));
+    result.extend(descriptors().iter().map(|d| (d.name.to_owned(), Ty::Named(d.name.to_owned()))));
     result
 }
 
@@ -101,21 +103,21 @@ pub fn is_cooked(ty: &Ty) -> bool { *ty == geometry() || *ty == image() }
 
 pub fn shape(ty: &Ty) -> bool {
     match ty {
-        Ty::Named(name) => descriptors().into_iter().find(|d| d.name == name).map_or(true, |d| d.shape),
+        Ty::Named(name) => descriptors().iter().find(|d| d.name == name).map_or(true, |d| d.shape),
         _ => false,
     }
 }
 
 pub fn color(ty: &Ty) -> ColorKind {
     match ty {
-        Ty::Named(name) => descriptors().into_iter().find(|d| d.name == name).map_or(ColorKind::Output, |d| d.color),
+        Ty::Named(name) => descriptors().iter().find(|d| d.name == name).map_or(ColorKind::Output, |d| d.color),
         _ => ColorKind::Output,
     }
 }
 
 pub fn default(ty: &Ty) -> Option<Syntax> {
     match ty {
-        Ty::Named(name) => descriptors().into_iter().find(|d| d.name == name).and_then(|d| d.default),
+        Ty::Named(name) => descriptors().iter().find(|d| d.name == name).and_then(|d| d.default.clone()),
         _ => None,
     }
 }
@@ -175,7 +177,7 @@ fn parse_type(source: &str, at: &mut usize) -> Option<Ty> {
     }
     let name = source.get(start..*at)?;
     structural().into_iter().find(|(candidate, _)| *candidate == name).map(|(_, ty)| ty)
-        .or_else(|| descriptors().into_iter().find(|d| d.name == name).map(|_d| Ty::Named(name.to_owned())))
+        .or_else(|| descriptors().iter().find(|d| d.name == name).map(|_d| Ty::Named(name.to_owned())))
 }
 fn parse_fields(source: &str, at: &mut usize) -> Option<Ty> {
     if eat(source, at, "}") { return Some(Ty::Record(Vec::new())); }
@@ -438,6 +440,9 @@ mod tests {
         assert!(default(&image()).is_some());
         let mut builder = SyntaxBuilder::new();
         for ty in [geometry(), image(), drawing()] {
+            let first = default(&ty).unwrap();
+            let second = default(&ty).unwrap();
+            assert!(std::sync::Arc::ptr_eq(first.arena(), second.arena()), "immutable default syntax is shared");
             let id = default_into(&ty, &mut builder).unwrap();
             assert_eq!(crate::lisp::flat_id(id, &builder), crate::lisp::flat(&default(&ty).unwrap()));
         }
