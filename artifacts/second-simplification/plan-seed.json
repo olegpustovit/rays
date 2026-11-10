@@ -149,7 +149,7 @@
   },
   "Z7": {
     "status": "active",
-    "note": "WIP retained body slots/interner; full38 passed before latest grouped-source repair; helper diagnostic parity case passes"
+    "note": "WIP retained bodies/interner and exact local callable slots; current LispNode39/39; actual Orrery12 animated+30 idle passes with zero warmed lowering"
   },
   "Z8": {
     "status": "done",
@@ -161,7 +161,7 @@
   },
   "Z10": {
     "status": "active",
-    "note": "cebc8739 3720b91b 0c1835b5 348cb071 182b36b5 2de49edb c451ff02 5cc9e71e 6575cdca \u201452 redundant calls removed; committed census11522 at6575cdca;19 crates fully reviewed"
+    "note": "cebc8739 3720b91b 0c1835b5 348cb071 182b36b5 2de49edb c451ff02 5cc9e71e 6575cdca ec456b1c \u201473 redundant calls removed; census11506 at80e76fa2;20 crates reviewed"
   },
   "R1": {
     "status": "done",
@@ -205,7 +205,7 @@
   },
   "G1": {
     "status": "active",
-    "note": "ba056fc5 9a6ddfd1 98b912ad f05dab56 993597ff 1a24f207 \u2014 typed indexed owners; Core direct acceleration-use admission; unused command Arc removed"
+    "note": "ba056fc5 9a6ddfd1 98b912ad f05dab56 993597ff 1a24f207 80e76fa2 \u2014 Core Vulkan texture admission and real final-owner destruction fix"
   },
   "G2": {
     "status": "done",
