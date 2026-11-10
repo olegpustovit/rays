@@ -18,10 +18,10 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | B | 8 | 7 | 1 | 0 |
 | A | 4 | 4 | 0 | 0 |
 | D | 12 | 12 | 0 | 0 |
-| Z | 11 | 2 | 3 | 6 |
+| Z | 11 | 2 | 4 | 5 |
 | R | 10 | 10 | 0 | 0 |
 | G | 7 | 1 | 2 | 4 |
-| **All** | **58** | **42** | **6** | **10** |
+| **All** | **58** | **42** | **7** | **9** |
 
 ## Items
 
@@ -63,7 +63,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Z3 | Z | pending | — | bench_core instructions; warm rebuild ≤ 7.4 s |
 | Z4 | Z | pending | — | rdk/sop suites; parallel equality; memory guard |
 | Z5 | Z | active | `9ec77825` `0e3d83a9` `b032690c` `1cb47792` — full64 hash/SplitMix64 and unambiguous segment framing; strict scratch regression corrected | CPU/Flow/SOP/Shader/Web/native vectors and exports pass; exact Windows stage qualification remains |
-| Z6 | Z | pending | — | grep -ri ocaml crates finds only docs/history references; suites green with regenerated goldens |
+| Z6 | Z | active | Native formatting/compatibility removal prepared; exact pre-change regression and runtime/build baselines captured at `29707ae1` | Source installation and affected runtime/golden/native qualification remain; current compatibility spelling fails the new native-format regression |
 | Z7 | Z | pending | — | Orrery frames lower 0 times after warm-up; flow_sop run well under its cap |
 | Z8 | Z | done | `2c8ea1de` — platform-byte capacities, fallible bulk/COW/native owners and exact JS counts; intentional fixtures/spec refreshed | Foundations572, SOP493, geometry495, Web/Shader/Graph186, exports226, FlowGPU94, native/current strict frames and unchanged shape/deps pass |
 | Z9 | Z | pending | — | Z0 warm-cook guards on subdivide, boolean and scatter |
@@ -78,7 +78,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | R8 | R | done | `70a05621` — thirty mutable Pane operations, all64 Pane rebuilds/with_pane removed; three mutable Tree operations | Graph/shell67, reducer10, editor51, idle3/sea pass; empty cap lowered1198/81820 and confirmed |
 | R9 | R | done | `dbacce38` — existing Arc<Document> retained through reducer/layout/World/adopt; snapshots only on changes | 109 distinct editor/native/warm cases pass; idle helper21→0 allocations; all native caps lowered and confirmed |
 | R10 | R | done | `1f52f3db` — u128 renderer hashes, framed components and explicit GPU name/index fields; Mesh96→88B | Renderer54 collective/Rays33/native idle+sea/warm pass; hashes9216→0 allocations; sea cap lowered51365/2805000 |
-| G1 | G | active | `3541e92f` `fff7ce6c` `d70effc7` `c3169e12` — Core descriptor/slot/size/resource-use admission and successful-Driver state transitions | Mac62 and real Metal resource-use pass; mutable advanced descriptor overlap, four shape findings, advanced predicates/ownership and Windows remain |
+| G1 | G | active | `3541e92f` `fff7ce6c` `d70effc7` `c3169e12` `29707ae1` — Core admission, successful state transitions and non-borrowing count/layout proofs | Mac62/current strict frames pass; four proof shape findings removed493 remain; advanced immutable descriptor admission and exact Windows remain |
 | G2 | G | done | `9556c305` — metal crate deleted; real work/tests moved to ogpu_metal; 25 mirror enums/error graph removed | Local57 plus real LineStrip; workspace/deps/gate; exact Windows30/30 with fatal validation pass |
 | G3 | G | pending | — | ogpu_core/metal gpu tests; Windows ogpu_vulkan |
 | G4 | G | pending | — | Destroy-in-flight cases, live_handles delta 0 |
@@ -453,3 +453,13 @@ The D wave is complete. At most two agents build concurrently. Current build slo
 - Final frozen native qualification: FlowNative21/21 passes6.51s (slowest recursive signals0.891s), native workspace35/35 passes13.59s (state capture2.141s), array-capacity menu passes0.73s (case0.290s). Sea passes1.97s (case1.214s), preserving1,000,000points/1,996,002primitives, maximum13521allocations/1091012B over8frames, zero uploads/payload reads,24B bounds/frame and1.178ms close. Its51365/2805000 cap stays unchanged; the historical unexplained spike remains open under Z1. Final workspace all-targets passes4.69s, dependency gate passes, normalized shape remains497→497 with no added/removed findings, diff check passes. Full current-stage evidence `/tmp/rays-z8-evidence.md`; Windows remains offline and no current Windows qualification is claimed.
 - **Next Z6 preparation is concrete, not completed:** outside-worktree patch `/tmp/rays-z6-full.patch` covers519paths (137substantive behavior/API/spec/test paths, overlapping provenance cleanup);486Rust/3JS syntax parses,8Lisp lexical checks and application check pass. Full source/Param/Value display, parsing/quoting/whitespace, full-width integer/sentinel behavior and retired provenance are covered. No source installation or runtime proof yet; it must rebase against committed Z8 and preserve all new allocation/capacity/fixture guards. G1 non-borrowing proof draft also remains outside the worktree, awaiting coordinated installation and real qualification.
 - Artifact **v36** published with the CLI and verified by exact source byte readback, matching embedded/tracked seeds and all58 live plan documents. Immediate/live/offline tracker checks pass. Snapshot **42done/6active/10pending (72.4%)**. The full58-item objective remains active; Z1 zero allocations/historical sea variance, B8 full-run timeout, remaining Z/G work and exact-current Windows qualification remain open. This goal continuation made concrete progress and completed Z8; it does not establish overall completion.
+- **Qualified ACTIVE G1 proof stage** `29707ae1a9fd19b8aa322fb724a34554c6517178`:10files,+89/−42. Private admitted count/layout values replace borrowed proof wrappers; ordinary current slices retain exact public contract binding and Sys independently bounds the actual prefix before FFI. Logical1..4096/layout admission still happens once in Core before Driver; binding equality is documented honestly as binding rather than solely physical safety. No copied payload, unsafe/pointer token, extra generic framework, checked/unchecked twin or gate exception. Native/Core regressions retain short/long replacement refusal and fail-before-Driver semantics.
+- G1 current proof-stage qualification: Core/mock/Metal62/62 passes12.97s wall (runner12.387s), scoped all-targets0.83s, workspace all-targets7.56s, deps0.30s. Shape drops exactly497→493 (two generic and two lifetime findings removed), zero added; the gate still reports493 historical findings, so it is not called globally green. Idle4 passes8.31s with exact971/100129,841/51000,1090/67083; sea passes1.71s (case1.121s), max13522/1091010 and zero host uploads/payload reads. Windows remains offline (LastSeen00:46:16.1Z); Windows-only bodies are not qualified by the Mac checks. G1 remains ACTIVE for immutable advanced descriptor admission and exact Windows proof. Source/index/build slots released cleanly; Z6 now captures old formatting/runtime and warm-rebuild baselines before coherent source installation.
+
+### Z6 execution baseline — native behavior before migration
+
+- Z6 is ACTIVE after actual baseline execution at `29707ae1`; source installation remains pending. The new native-format expectation fails before the change (exit101,2.14s wall): existing formatting prints `1000.0` as `1e3` and `0.0001` as `1e-4`, rather than native Display spellings `1000` and `0.0001`. Only the existing test-function hunk was temporarily changed, then restored exactly; production source stayed unchanged.
+- Old Param float tests2/2 pass0.85s wall (runner0.306s,test sum0.061s); existing evaluator display case passes0.36s wall (case0.050s). Three quiescent warm Param checks after touching unchanged source take0.49/0.13/0.13s wall, median0.13s, using the shared incremental target without overrides.
+- Identical in-process formatter benchmark source is saved at `/tmp/rays-z6-param-benchmark-snippet.rs`:2048finite values ×8 ×2 formatting modes, sorted samples35.778/37.581/78.586ms, median37.581ms; case0.168s, compile-inclusive wall2.47s. Temporary benchmark test source was restored exactly. These are pre-change measurements, not a speedup claim.
+- Final outside-worktree draft review must cover all metadata trim callers, preserve genuine byte-text whitespace and ownership contracts, and distinguish explicitly requested precision from compatibility-only six-digit formatting. Real native/Web raw-bit parity, actual full-width Lisp arithmetic/provenance, intentional goldens and strict native allocation caps remain required before closing Z6.
+- Artifactv37 published with42done/7active/9pending; downloaded HTML is byte-identical to tracked source and all58 live DB documents equal embedded/tracked seeds. Immediate/live/offline tracker checks and `git diff --check` pass. G1 stays ACTIVE and the overall goal remains unfinished.

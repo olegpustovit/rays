@@ -144,8 +144,8 @@
     "note": "9ec77825 0e3d83a9 b032690c 1cb47792 \u2014 full64 hash/SplitMix64 and unambiguous segment framing; strict scratch regression corrected"
   },
   "Z6": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "Native formatting/compatibility removal prepared; exact pre-change regression and runtime/build baselines captured at 29707ae1"
   },
   "Z7": {
     "status": "pending",
@@ -205,7 +205,7 @@
   },
   "G1": {
     "status": "active",
-    "note": "3541e92f fff7ce6c d70effc7 c3169e12 \u2014 Core descriptor/slot/size/resource-use admission and successful-Driver state transitions"
+    "note": "3541e92f fff7ce6c d70effc7 c3169e12 29707ae1 \u2014 Core admission, successful state transitions and non-borrowing count/layout proofs"
   },
   "G2": {
     "status": "done",
