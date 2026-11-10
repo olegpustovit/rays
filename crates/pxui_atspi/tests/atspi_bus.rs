@@ -67,7 +67,7 @@ impl Client {
     }
 
     /// Call `member` on `dest`, pumping the bridge until the reply comes.
-    fn call_to(&mut self, dest: &str, path: &str, iface: &str, member: &str, args: fn(&mut Msg)) -> Msg {
+    fn call_to(&mut self, dest: &str, path: &str, iface: &str, member: &str, args: &dyn Fn(&mut Msg)) -> Msg {
         let mut m = Msg::call(dest, path, iface, member);
         args(&mut m);
         let serial = self.conn.send(m).expect("call is well-formed");
@@ -84,7 +84,7 @@ impl Client {
         panic!("no reply to {iface}.{member} on {path}");
     }
 
-    fn call(&mut self, path: &str, iface: &str, member: &str, args: fn(&mut Msg)) -> Msg {
+    fn call(&mut self, path: &str, iface: &str, member: &str, args: &dyn Fn(&mut Msg)) -> Msg {
         let dest = self.bridge.bus_name().to_owned();
         let r = self.call_to(&dest, path, iface, member, args);
         assert_eq!(r.kind(), METHOD_RETURN, "{iface}.{member} on {path} failed: {}", r.error_name());
@@ -92,7 +92,7 @@ impl Client {
     }
 
     fn prop(&mut self, path: &str, iface: &str, name: &str) -> Msg {
-        let mut r = self.call(path, PROPS, "Get", |m| {
+        let mut r = self.call(path, PROPS, "Get", &|m| {
             m.s(iface).s(name);
         });
         assert!(r.enter(), "Get returns a variant");
@@ -104,11 +104,11 @@ impl Client {
     }
 
     fn role(&mut self, path: &str) -> u32 {
-        self.call(path, ACCESSIBLE, "GetRole", |_| {}).read_u32().unwrap()
+        self.call(path, ACCESSIBLE, "GetRole", &|_| {}).read_u32().unwrap()
     }
 
     fn children(&mut self, path: &str) -> Vec<String> {
-        let mut r = self.call(path, ACCESSIBLE, "GetChildren", |_| {});
+        let mut r = self.call(path, ACCESSIBLE, "GetChildren", &|_| {});
         let mut out = Vec::new();
         assert!(r.enter());
         while r.arg() == b'r' {
@@ -214,7 +214,7 @@ fn atspi_bus_walk_actions_and_events() {
 
     if registry {
         // The registry lists the application under the desktop.
-        let mut r = c.call_to("org.a11y.atspi.Registry", ROOT_PATH, ACCESSIBLE, "GetChildren", |_| {});
+        let mut r = c.call_to("org.a11y.atspi.Registry", ROOT_PATH, ACCESSIBLE, "GetChildren", &|_| {});
         assert_eq!(r.kind(), METHOD_RETURN);
         let mut apps = Vec::new();
         r.enter();
@@ -245,28 +245,28 @@ fn atspi_bus_walk_actions_and_events() {
     assert_eq!(seen, vec![("Apply".into(), 43), ("Snap".into(), 62), ("Opacity".into(), 51), ("Title".into(), 79)]);
     let (button, toggle, slider, field) = (controls[0].clone(), controls[1].clone(), controls[2].clone(), controls[3].clone());
     assert_eq!(c.prop(&panel, ACCESSIBLE, "ChildCount").read_i32(), Some(4));
-    assert_eq!(c.call(&toggle, ACCESSIBLE, "GetIndexInParent", |_| {}).read_i32(), Some(1));
+    assert_eq!(c.call(&toggle, ACCESSIBLE, "GetIndexInParent", &|_| {}).read_i32(), Some(1));
     let mut parent = c.prop(&toggle, ACCESSIBLE, "Parent");
     parent.enter();
     parent.read_str();
     assert_eq!(parent.read_str(), Some(panel.as_str()));
-    let mut child = c.call(&panel, ACCESSIBLE, "GetChildAtIndex", |m| {
+    let mut child = c.call(&panel, ACCESSIBLE, "GetChildAtIndex", &|m| {
         m.i(2);
     });
     child.enter();
     child.read_str();
     assert_eq!(child.read_str(), Some(slider.as_str()));
-    assert_eq!(c.call(&button, ACCESSIBLE, "GetRoleName", |_| {}).read_str(), Some("push button"));
+    assert_eq!(c.call(&button, ACCESSIBLE, "GetRoleName", &|_| {}).read_str(), Some("push button"));
 
     // States: two words of AtspiStateType bits.
-    let mut st = c.call(&button, ACCESSIBLE, "GetState", |_| {});
+    let mut st = c.call(&button, ACCESSIBLE, "GetState", &|_| {});
     st.enter();
     let (lo, hi) = (st.read_u32().unwrap(), st.read_u32().unwrap());
     assert_eq!(lo & (1 << 11 | 1 << 8 | 1 << 24 | 1 << 30 | 1 << 25), 1 << 11 | 1 << 8 | 1 << 24 | 1 << 30 | 1 << 25, "focusable enabled sensitive visible showing");
     assert_eq!(lo & (1 << 12 | 1 << 4), 0, "not focused, not checked");
     assert_eq!(hi, 0);
 
-    let mut ifaces = c.call(&slider, ACCESSIBLE, "GetInterfaces", |_| {});
+    let mut ifaces = c.call(&slider, ACCESSIBLE, "GetInterfaces", &|_| {});
     ifaces.enter();
     let mut names = Vec::new();
     while let Some(s) = ifaces.read_str() {
@@ -275,26 +275,26 @@ fn atspi_bus_walk_actions_and_events() {
     assert_eq!(names, ["org.a11y.atspi.Accessible", "org.a11y.atspi.Component", "org.a11y.atspi.Value"]);
 
     // Component.
-    let mut ext = c.call(&button, "org.a11y.atspi.Component", "GetExtents", |m| {
+    let mut ext = c.call(&button, "org.a11y.atspi.Component", "GetExtents", &|m| {
         m.u(1);
     });
     ext.enter();
     let e: Vec<i32> = (0..4).map(|_| ext.read_i32().unwrap()).collect();
     assert_eq!(e, [10, 10, 80, 20]);
-    let mut at = c.call(&window, "org.a11y.atspi.Component", "GetAccessibleAtPoint", |m| {
+    let mut at = c.call(&window, "org.a11y.atspi.Component", "GetAccessibleAtPoint", &|m| {
         m.i(15).i(45).u(1);
     });
     at.enter();
     at.read_str();
     assert_eq!(at.read_str(), Some(toggle.as_str()));
-    assert_eq!(c.call(&button, "org.a11y.atspi.Component", "Contains", |m| {
+    assert_eq!(c.call(&button, "org.a11y.atspi.Component", "Contains", &|m| {
         m.i(5).i(5).u(1);
     }).read_bool(), Some(false));
 
     // Value and Text.
     assert_eq!(c.prop(&slider, "org.a11y.atspi.Value", "CurrentValue").read_f64(), Some(0.5));
     assert_eq!(c.prop(&slider, "org.a11y.atspi.Value", "MaximumValue").read_f64(), Some(1.0));
-    assert_eq!(c.call(&field, "org.a11y.atspi.Text", "GetText", |m| {
+    assert_eq!(c.call(&field, "org.a11y.atspi.Text", "GetText", &|m| {
         m.i(0).i(-1);
     }).read_str(), Some("hello"));
     assert_eq!(c.prop(&field, "org.a11y.atspi.Text", "CharacterCount").read_i32(), Some(5));
@@ -302,14 +302,14 @@ fn atspi_bus_walk_actions_and_events() {
 
     // Actions come back as A11yActions.
     assert_eq!(c.prop(&button, "org.a11y.atspi.Action", "NActions").read_i32(), Some(1));
-    assert_eq!(c.call(&button, "org.a11y.atspi.Action", "GetName", |m| {
+    assert_eq!(c.call(&button, "org.a11y.atspi.Action", "GetName", &|m| {
         m.i(0);
     }).read_str(), Some("click"));
-    assert_eq!(c.call(&button, "org.a11y.atspi.Action", "DoAction", |m| {
+    assert_eq!(c.call(&button, "org.a11y.atspi.Action", "DoAction", &|m| {
         m.i(0);
     }).read_bool(), Some(true));
-    assert_eq!(c.call(&button, "org.a11y.atspi.Component", "GrabFocus", |_| {}).read_bool(), Some(true));
-    c.call(&slider, PROPS, "Set", |m| {
+    assert_eq!(c.call(&button, "org.a11y.atspi.Component", "GrabFocus", &|_| {}).read_bool(), Some(true));
+    c.call(&slider, PROPS, "Set", &|m| {
         m.s("org.a11y.atspi.Value").s("CurrentValue").open(b'v', "d").d(0.8).close();
     });
     let id = |slot: u64| node_id(slot as usize, 1);
@@ -319,7 +319,7 @@ fn atspi_bus_walk_actions_and_events() {
         A11yAction { id: id(SLIDER), action: Action::SetValue, payload: 0.8 },
     ]);
     let dest = c.bridge.bus_name().to_owned();
-    let unknown = c.call_to(&dest, &path(999), ACCESSIBLE, "GetRole", |_| {});
+    let unknown = c.call_to(&dest, &path(999), ACCESSIBLE, "GetRole", &|_| {});
     assert_eq!((unknown.kind(), unknown.error_name()), (ERROR, "org.freedesktop.DBus.Error.UnknownObject"));
 
     // Change events from the diff.
