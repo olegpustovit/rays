@@ -142,7 +142,7 @@ pub(crate) fn automatic_boundary_holes(
     let grain = grain.unwrap_or(16_384);
     support::check_positive(grain).map_err(|_| invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()))?;
     let mut boundary_points = vec![0_u8; point_byte_count as usize];
-    support::par_fill(cancel_token, grain, &mut boundary_points, &|byte| {
+    support::par_fill(cancel_token, grain, &mut boundary_points, &|byte: i64| {
         let base = byte << 3;
         let mut value = 0_u8;
         for bit in 0..=(7.min(point_count - base - 1)) {
@@ -166,7 +166,7 @@ pub(crate) fn automatic_boundary_holes(
     let primitive_count = topology_view.primitive_kinds.len() as i64;
     let byte_count = (primitive_count >> 3) + if primitive_count & 7 == 0 { 0 } else { 1 };
     let mut hole_bits = vec![0_u8; byte_count as usize];
-    support::par_fill(cancel_token, grain, &mut hole_bits, &|byte| {
+    support::par_fill(cancel_token, grain, &mut hole_bits, &|byte: i64| {
         let base = byte << 3;
         let mut value = 0_u8;
         for bit in 0..=(7.min(primitive_count - base - 1)) {

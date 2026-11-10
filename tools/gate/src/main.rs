@@ -192,6 +192,21 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
             tokens[index..body].iter().map(|token| &token.text).eq(signature.iter().map(|token| &token.text)).then_some((index, body))
         })
     } else { None };
+    // Per-element kernel entry points take `impl Fn` so the body inlines into the loop (Z3);
+    // allowlisted by path and name, exactly like with_domains.
+    const KERNEL_ENTRY: &[(&str, &str)] = &[
+        ("rdk_core/src/support.rs", "parallel_for"),
+        ("rdk_core/src/support.rs", "par_fill"),
+        ("rdk_core/src/group.rs", "init"),
+        ("rdk_core/src/edge_group.rs", "init"),
+        ("flow_sop/src/attribute_kernel.rs", "ranges"),
+    ];
+    let kernel_headers: Vec<(usize, usize)> = tokens.iter().enumerate().filter_map(|(index, token)| {
+        if token.text != "fn" { return None; }
+        let name = tokens.get(index + 1)?;
+        KERNEL_ENTRY.iter().any(|(file, entry)| path.ends_with(file) && name.text == *entry)
+            .then(|| function_body(&tokens, index).map(|(body, _)| (index, body)))?
+    }).collect();
     let unsafe_allowed = crate_name.ends_with("_sys") || crate_name == "parallel";
     let mut issues = Vec::new();
 
@@ -223,6 +238,7 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
             if (matches!(previous, Some(":") | Some("->") | Some("=") | Some("<") | Some(",") | Some("(") | Some("&") | Some("mut") | Some(">"))
                 || lifetime_reference)
                 && !domain_header.is_some_and(|(start, body)| start <= index && index < body)
+                && !kernel_headers.iter().any(|(start, body)| *start <= index && index < *body)
             {
                 issue(&mut issues, path, token.line, "impl Trait is not allowed in product crates");
             }
@@ -253,7 +269,8 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
                                 || (at > 0 && parameters[at - 1].text == "'" && is_identifier(&parameter.text))
                         })
                     });
-                if !borrow_lifetimes_only && !domain_header.is_some_and(|(start, _)| token.text == "fn" && start == index) {
+                if !borrow_lifetimes_only && !domain_header.is_some_and(|(start, _)| token.text == "fn" && start == index)
+                    && !kernel_headers.iter().any(|(start, _)| token.text == "fn" && *start == index) {
                     issue(&mut issues, path, token.line, "generic items are not allowed in product crates");
                 }
                 if matches!(token.text.as_str(), "struct" | "enum") {

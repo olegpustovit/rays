@@ -112,7 +112,7 @@ pub fn init(
     topology_value: &topology::T,
     index: &topology_index::T,
     name: &str,
-    predicate: &(dyn Fn(i64) -> Result<bool, error::T> + Send + Sync),
+    predicate: impl Fn(i64) -> Result<bool, error::T> + Send + Sync,
 ) -> Result<T, error::T> {
     require_name("Edge_group.init", name)?;
     require_index("Edge_group.init", topology_value, index)?;

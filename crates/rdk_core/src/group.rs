@@ -121,7 +121,7 @@ pub fn init(
     owner: Owner,
     name: &str,
     length: i64,
-    predicate: &(dyn Fn(i64) -> Result<bool, error::T> + Send + Sync),
+    predicate: impl Fn(i64) -> Result<bool, error::T> + Send + Sync,
 ) -> Result<T, error::T> {
     require_name("Group.init", name)?;
     if length < 0 {

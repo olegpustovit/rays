@@ -415,7 +415,7 @@ fn typed_storage(owner: Owner, name: &str, kind: &str, g: &geometry::T) -> Resul
 /// Fill `strides.len()` columns of `count * stride[c]` floats: `piece(first, last, columns)` writes
 /// the disjoint `(last - first) * stride[c]` window of each column for one grain-sized range on the
 /// shared pool, so the result is byte-identical to the sequential path.
-fn ranges(grain: i64, count: usize, strides: &[usize], piece: &(dyn Fn(usize, usize, &mut [&mut [f64]]) + Send + Sync)) -> Result<Vec<Vec<f64>>, Diagnostic> {
+fn ranges(grain: i64, count: usize, strides: &[usize], piece: impl Fn(usize, usize, &mut [&mut [f64]]) + Send + Sync) -> Result<Vec<Vec<f64>>, Diagnostic> {
     let grain = grain.max(1);
     let mut out: Vec<Vec<f64>> = strides.iter().map(|s| {
         let slots = count.checked_mul(*s).ok_or_else(|| V::fail("E_ARRAY_MEMORY", "Attribute storage exceeds native bounds."))?;
@@ -480,7 +480,7 @@ static CHECKED_VALID: Ring<Result<Value, Diagnostic>> = Ring::new();
 fn interleave(count: usize, planes: &[&[f64]], grain: i64) -> Result<Value, Diagnostic> {
     let width = planes.len();
     let planes_owned: Vec<&[f64]> = planes.to_vec();
-    let columns = ranges(grain, count, &[width], &move |first, last, cols| {
+    let columns = ranges(grain, count, &[width], move |first, last, cols| {
         // One loop per width: no inner component loop for the common widths.
         let out = &mut *cols[0];
         match planes_owned.as_slice() {
@@ -559,7 +559,7 @@ fn read_checked(component: &str, owner: Owner, kind: &str, name: &str, g: &geome
     let valid_only = component == "valid";
     let build = || -> Result<Value, Diagnostic> {
         let stride = if valid_only { 1 } else { width };
-        let columns = ranges(16_384, count, &[stride], &|first, last, cols| {
+        let columns = ranges(16_384, count, &[stride], |first, last, cols| {
             let out = &mut *cols[0];
             for i in first..last {
                 let row = (i - first) * stride;
@@ -1298,7 +1298,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
                 return install(owner, kind, name, (0..w).map(|c| vec![values[c]]).collect(), g);
             }
             let finite = AtomicBool::new(true);
-            let planes = ranges(grain, count, &vec![1; w], &|first, last, cols| {
+            let planes = ranges(grain, count, &vec![1; w], |first, last, cols| {
                 for i in first..last {
                     for (c, col) in cols.iter_mut().enumerate() {
                         let v = values[i * w + c];
@@ -1422,7 +1422,7 @@ pub fn write_selected(grain: i64, owner: Owner, kind: &str, name: &str, values: 
             Ok(plane)
         }).collect::<Result<_, Diagnostic>>()?
     } else {
-        ranges(grain, count, &vec![1; w], &|first, last, cols| {
+        ranges(grain, count, &vec![1; w], |first, last, cols| {
             for i in first..last {
                 for (c, col) in cols.iter_mut().enumerate() {
                     col[i - first] = if selection[i] == 1 {
@@ -2555,9 +2555,9 @@ mod tests {
         let count = V::array_max_length(&Ty::Float).unwrap() + 1;
         assert_eq!(interleave(count, &[&[]], 97).unwrap_err().code, "E_ARRAY_MEMORY");
         for (count, stride) in [(usize::MAX, 2), (isize::MAX as usize / 8 + 1, 1)] {
-            assert_eq!(ranges(97, count, &[stride], &|_, _, _| panic!("oversized storage reached fill")).unwrap_err().code, "E_ARRAY_MEMORY");
+            assert_eq!(ranges(97, count, &[stride], |_, _, _| panic!("oversized storage reached fill")).unwrap_err().code, "E_ARRAY_MEMORY");
         }
-        assert_eq!(ranges(97, 0, &[4], &|_, _, _| panic!("empty storage reached fill")).unwrap(), vec![Vec::<f64>::new()]);
+        assert_eq!(ranges(97, 0, &[4], |_, _, _| panic!("empty storage reached fill")).unwrap(), vec![Vec::<f64>::new()]);
     }
 
     use rdk_core::topology;

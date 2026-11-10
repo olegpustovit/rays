@@ -499,7 +499,7 @@ pub fn parallel_for(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     count: i64,
-    work: &(dyn Fn(i64) -> Result<(), error::T> + Sync),
+    work: impl Fn(i64) -> Result<(), error::T> + Sync,
 ) -> Result<(), error::T> {
     if count <= 0 {
         return Ok(());
@@ -565,7 +565,7 @@ pub fn par_fill<T: Send>(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     out: &mut [T],
-    work: &(dyn Fn(i64) -> Result<T, error::T> + Sync),
+    work: impl Fn(i64) -> Result<T, error::T> + Sync,
 ) -> Result<(), error::T> {
     let (count, grain) = (out.len() as i64, grain.max(1));
     let fill = |first: i64, last: i64, out: &mut [T]| {
