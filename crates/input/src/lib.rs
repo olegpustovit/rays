@@ -54,31 +54,31 @@ pub enum ScrollPhase {
     Momentum,
 }
 
-#[allow(non_camel_case_types)]
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    Key_pressed(Key),
-    Key_released(Key),
-    Pointer_moved((f64, f64)),
-    Pointer_pressed(MouseButton, (f64, f64)),
-    Pointer_released(MouseButton, (f64, f64)),
-    Pointer_cancelled(MouseButton),
+    KeyPressed(Key),
+    KeyReleased(Key),
+    PointerMoved((f64, f64)),
+    PointerPressed(MouseButton, (f64, f64)),
+    PointerReleased(MouseButton, (f64, f64)),
+    PointerCancelled(MouseButton),
     Scrolled((f64, f64)),
-    Text_input(String),
-    Text_editing { text: String, start: i64, length: i64 },
-    File_dropped(String),
-    File_drag_moved((f64, f64)),
-    File_drag_ended,
+    TextInput(String),
+    TextEditing { text: String, start: i64, length: i64 },
+    FileDropped(String),
+    FileDragMoved((f64, f64)),
+    FileDragEnded,
     Pinched(f64),
-    File_dialog { id: i64, result: Result<Vec<String>, String> },
-    Dialog_opened(i64),
+    FileDialog { id: i64, result: Result<Vec<String>, String> },
+    DialogOpened(i64),
     Resized((i64, i64)),
-    Focus_lost,
-    Focus_gained,
+    FocusLost,
+    FocusGained,
     Closed,
-    Pixel_size_changed((i64, i64)),
-    Visibility_changed(bool),
-    Trackpad_scrolled { delta: (f64, f64), phase: ScrollPhase, time: f64 },
+    PixelSizeChanged((i64, i64)),
+    VisibilityChanged(bool),
+    TrackpadScrolled { delta: (f64, f64), phase: ScrollPhase, time: f64 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -94,14 +94,6 @@ pub struct Frame {
     pub events: Vec<Event>,
 }
 
-#[allow(non_camel_case_types)]
-pub type key = Key;
-#[allow(non_camel_case_types)]
-pub type mouse_button = MouseButton;
-#[allow(non_camel_case_types)]
-pub type scroll_phase = ScrollPhase;
-#[allow(non_camel_case_types)]
-pub type event = Event;
 
 pub fn at_time(time: f64) -> Frame {
     Frame {
@@ -183,9 +175,9 @@ fn add(key: Key, keys: &mut Vec<Key>) {
 pub fn keys_after(keys: &[Key], event: &Event) -> Vec<Key> {
     let mut keys = keys.to_vec();
     match event {
-        Event::Key_pressed(key) => add(*key, &mut keys),
-        Event::Key_released(key) => keys.retain(|held| held != key),
-        Event::Focus_lost => keys.clear(),
+        Event::KeyPressed(key) => add(*key, &mut keys),
+        Event::KeyReleased(key) => keys.retain(|held| held != key),
+        Event::FocusLost => keys.clear(),
         _ => {}
     }
     keys
@@ -195,14 +187,14 @@ pub fn keys_before(previous: &[Key], held: &[Key], events: &[Event]) -> Vec<Key>
     let mut keys = held.to_vec();
     for event in events {
         match event {
-            Event::Key_pressed(key) | Event::Key_released(key) => {
+            Event::KeyPressed(key) | Event::KeyReleased(key) => {
                 if previous.contains(key) {
                     add(*key, &mut keys);
                 } else {
                     keys.retain(|held| held != key);
                 }
             }
-            Event::Focus_lost => keys = previous.to_vec(),
+            Event::FocusLost => keys = previous.to_vec(),
             _ => {}
         }
     }
@@ -211,11 +203,11 @@ pub fn keys_before(previous: &[Key], held: &[Key], events: &[Event]) -> Vec<Key>
 
 pub fn validate(v: &Frame) -> Result<(), String> {
     let event_valid = |event: &Event| match event {
-        Event::Pointer_moved(p) | Event::Scrolled(p) | Event::File_drag_moved(p) => finite_pair(*p),
-        Event::Pointer_pressed(_, p) | Event::Pointer_released(_, p) => finite_pair(*p),
+        Event::PointerMoved(p) | Event::Scrolled(p) | Event::FileDragMoved(p) => finite_pair(*p),
+        Event::PointerPressed(_, p) | Event::PointerReleased(_, p) => finite_pair(*p),
         Event::Pinched(f) => f.is_finite(),
-        Event::Trackpad_scrolled { delta, time, .. } => finite_pair(*delta) && time.is_finite(),
-        Event::Text_editing { start, length, .. } => *start >= 0 && *length >= 0,
+        Event::TrackpadScrolled { delta, time, .. } => finite_pair(*delta) && time.is_finite(),
+        Event::TextEditing { start, length, .. } => *start >= 0 && *length >= 0,
         Event::Resized((w, h)) => *w >= 0 && *h >= 0,
         _ => true,
     };
@@ -338,34 +330,34 @@ fn put_pair(out: &mut String, pair: (f64, f64)) {
 }
 fn put_event(out: &mut String, event: &Event) {
     match event {
-        Event::Key_pressed(key) => { put_byte(out, 0); put_key(out, *key); }
-        Event::Key_released(key) => { put_byte(out, 1); put_key(out, *key); }
-        Event::Pointer_moved(p) => { put_byte(out, 2); put_pair(out, *p); }
-        Event::Pointer_pressed(button, p) => { put_byte(out, 3); put_button(out, *button); put_pair(out, *p); }
-        Event::Pointer_released(button, p) => { put_byte(out, 4); put_button(out, *button); put_pair(out, *p); }
-        Event::Pointer_cancelled(button) => { put_byte(out, 5); put_button(out, *button); }
+        Event::KeyPressed(key) => { put_byte(out, 0); put_key(out, *key); }
+        Event::KeyReleased(key) => { put_byte(out, 1); put_key(out, *key); }
+        Event::PointerMoved(p) => { put_byte(out, 2); put_pair(out, *p); }
+        Event::PointerPressed(button, p) => { put_byte(out, 3); put_button(out, *button); put_pair(out, *p); }
+        Event::PointerReleased(button, p) => { put_byte(out, 4); put_button(out, *button); put_pair(out, *p); }
+        Event::PointerCancelled(button) => { put_byte(out, 5); put_button(out, *button); }
         Event::Scrolled(p) => { put_byte(out, 6); put_pair(out, *p); }
-        Event::Text_input(text) => { put_byte(out, 7); put_str(out, text); }
-        Event::Text_editing { text, start, length } => { put_byte(out, 8); put_str(out, text); put_int(out, *start); put_int(out, *length); }
-        Event::File_dropped(path) => { put_byte(out, 9); put_str(out, path); }
-        Event::File_drag_moved(p) => { put_byte(out, 10); put_pair(out, *p); }
-        Event::File_drag_ended => put_byte(out, 11),
+        Event::TextInput(text) => { put_byte(out, 7); put_str(out, text); }
+        Event::TextEditing { text, start, length } => { put_byte(out, 8); put_str(out, text); put_int(out, *start); put_int(out, *length); }
+        Event::FileDropped(path) => { put_byte(out, 9); put_str(out, path); }
+        Event::FileDragMoved(p) => { put_byte(out, 10); put_pair(out, *p); }
+        Event::FileDragEnded => put_byte(out, 11),
         Event::Pinched(f) => { put_byte(out, 12); put_f64(out, *f); }
-        Event::File_dialog { id, result } => {
+        Event::FileDialog { id, result } => {
             put_byte(out, 13); put_int(out, *id);
             match result {
                 Ok(paths) => { put_byte(out, 0); put_len(out, paths.len()); for path in paths { put_str(out, path); } }
                 Err(error) => { put_byte(out, 1); put_str(out, error); }
             }
         }
-        Event::Dialog_opened(id) => { put_byte(out, 14); put_int(out, *id); }
+        Event::DialogOpened(id) => { put_byte(out, 14); put_int(out, *id); }
         Event::Resized((w, h)) => { put_byte(out, 15); put_int(out, *w); put_int(out, *h); }
-        Event::Focus_lost => put_byte(out, 16),
-        Event::Focus_gained => put_byte(out, 17),
+        Event::FocusLost => put_byte(out, 16),
+        Event::FocusGained => put_byte(out, 17),
         Event::Closed => put_byte(out, 18),
-        Event::Pixel_size_changed((w, h)) => { put_byte(out, 19); put_int(out, *w); put_int(out, *h); }
-        Event::Visibility_changed(visible) => { put_byte(out, 20); put_byte(out, u8::from(*visible)); }
-        Event::Trackpad_scrolled { delta, phase, time } => {
+        Event::PixelSizeChanged((w, h)) => { put_byte(out, 19); put_int(out, *w); put_int(out, *h); }
+        Event::VisibilityChanged(visible) => { put_byte(out, 20); put_byte(out, u8::from(*visible)); }
+        Event::TrackpadScrolled { delta, phase, time } => {
             put_byte(out, 21); put_pair(out, *delta);
             put_byte(out, match phase { ScrollPhase::Touched => 0, ScrollPhase::Moved => 1, ScrollPhase::Lifted => 2, ScrollPhase::Momentum => 3 });
             put_f64(out, *time);
@@ -382,19 +374,19 @@ fn pair_eq(a: (f64, f64), b: (f64, f64)) -> bool {
 fn event_eq(a: &Event, b: &Event) -> bool {
     use Event::*;
     match (a, b) {
-        (Key_pressed(a), Key_pressed(b)) | (Key_released(a), Key_released(b)) => a == b,
-        (Pointer_moved(a), Pointer_moved(b)) | (Scrolled(a), Scrolled(b)) | (File_drag_moved(a), File_drag_moved(b)) => pair_eq(*a, *b),
-        (Pointer_pressed(ab, ap), Pointer_pressed(bb, bp)) | (Pointer_released(ab, ap), Pointer_released(bb, bp)) => ab == bb && pair_eq(*ap, *bp),
-        (Pointer_cancelled(a), Pointer_cancelled(b)) => a == b,
-        (Text_input(a), Text_input(b)) | (File_dropped(a), File_dropped(b)) => a == b,
-        (Text_editing { text: at, start: as_, length: al }, Text_editing { text: bt, start: bs, length: bl }) => at == bt && as_ == bs && al == bl,
-        (File_drag_ended, File_drag_ended) | (Focus_lost, Focus_lost) | (Focus_gained, Focus_gained) | (Closed, Closed) => true,
+        (KeyPressed(a), KeyPressed(b)) | (KeyReleased(a), KeyReleased(b)) => a == b,
+        (PointerMoved(a), PointerMoved(b)) | (Scrolled(a), Scrolled(b)) | (FileDragMoved(a), FileDragMoved(b)) => pair_eq(*a, *b),
+        (PointerPressed(ab, ap), PointerPressed(bb, bp)) | (PointerReleased(ab, ap), PointerReleased(bb, bp)) => ab == bb && pair_eq(*ap, *bp),
+        (PointerCancelled(a), PointerCancelled(b)) => a == b,
+        (TextInput(a), TextInput(b)) | (FileDropped(a), FileDropped(b)) => a == b,
+        (TextEditing { text: at, start: as_, length: al }, TextEditing { text: bt, start: bs, length: bl }) => at == bt && as_ == bs && al == bl,
+        (FileDragEnded, FileDragEnded) | (FocusLost, FocusLost) | (FocusGained, FocusGained) | (Closed, Closed) => true,
         (Pinched(a), Pinched(b)) => float_eq(*a, *b),
-        (File_dialog { id: ai, result: ar }, File_dialog { id: bi, result: br }) => ai == bi && ar == br,
-        (Dialog_opened(a), Dialog_opened(b)) => a == b,
-        (Resized(a), Resized(b)) | (Pixel_size_changed(a), Pixel_size_changed(b)) => a == b,
-        (Visibility_changed(a), Visibility_changed(b)) => a == b,
-        (Trackpad_scrolled { delta: ad, phase: ap, time: at }, Trackpad_scrolled { delta: bd, phase: bp, time: bt }) => pair_eq(*ad, *bd) && ap == bp && float_eq(*at, *bt),
+        (FileDialog { id: ai, result: ar }, FileDialog { id: bi, result: br }) => ai == bi && ar == br,
+        (DialogOpened(a), DialogOpened(b)) => a == b,
+        (Resized(a), Resized(b)) | (PixelSizeChanged(a), PixelSizeChanged(b)) => a == b,
+        (VisibilityChanged(a), VisibilityChanged(b)) => a == b,
+        (TrackpadScrolled { delta: ad, phase: ap, time: at }, TrackpadScrolled { delta: bd, phase: bp, time: bt }) => pair_eq(*ad, *bd) && ap == bp && float_eq(*at, *bt),
         _ => false,
     }
 }
@@ -417,8 +409,6 @@ pub enum Platform {
     Apple,
     Other,
 }
-#[allow(non_camel_case_types)]
-pub type platform = Platform;
 
 pub fn platform_of_name(name: &str) -> Platform {
     match name {
@@ -442,11 +432,10 @@ pub fn word_held(platform: Platform, keys: &[Key]) -> bool {
     keys.contains(&match platform { Platform::Apple => Key::Alt, Platform::Other => Key::Ctrl })
 }
 
-#[allow(non_camel_case_types)]
-pub mod gate {
-    use super::{Event, Frame, Key};
 
-    pub type frame = Frame;
+pub mod gate {
+    use super::{Event, Key};
+    pub use super::Frame;
 
     #[derive(Clone, Debug)]
     pub struct Gate {
@@ -464,12 +453,12 @@ pub mod gate {
 
     fn pointer_event(event: &Event) -> bool {
         matches!(event,
-            Event::Pointer_moved(_) | Event::Pointer_pressed(_, _) | Event::Pointer_released(_, _)
-            | Event::Pointer_cancelled(_) | Event::Scrolled(_) | Event::Pinched(_)
-            | Event::Trackpad_scrolled { .. })
+            Event::PointerMoved(_) | Event::PointerPressed(_, _) | Event::PointerReleased(_, _)
+            | Event::PointerCancelled(_) | Event::Scrolled(_) | Event::Pinched(_)
+            | Event::TrackpadScrolled { .. })
     }
     fn key_event(event: &Event) -> bool {
-        matches!(event, Event::Key_pressed(_) | Event::Key_released(_) | Event::Text_input(_) | Event::Text_editing { .. })
+        matches!(event, Event::KeyPressed(_) | Event::KeyReleased(_) | Event::TextInput(_) | Event::TextEditing { .. })
     }
 
     pub fn gate(g: &Gate, live: &Frame) -> (Frame, Vec<Key>) {
@@ -488,7 +477,7 @@ pub mod gate {
             let blocked: Vec<Key> = live.keys.iter().copied().filter(|key| g.blocked.contains(key)).collect();
             live.keys.retain(|key| !blocked.contains(key));
             live.events.retain(|event| match event {
-                Event::Key_pressed(key) | Event::Key_released(key) => !blocked.contains(key),
+                Event::KeyPressed(key) | Event::KeyReleased(key) => !blocked.contains(key),
                 _ => true,
             });
             (live, blocked)
@@ -511,10 +500,10 @@ mod tests {
         }
     }
     fn presses(key: Key) -> Frame {
-        input(vec![key], vec![], (10.0, 10.0), vec![Event::Key_pressed(key), Event::Text_input(key_name(key))])
+        input(vec![key], vec![], (10.0, 10.0), vec![Event::KeyPressed(key), Event::TextInput(key_name(key))])
     }
     fn sees(frame: &Frame, key: Key) -> bool {
-        frame.keys.contains(&key) || frame.events.contains(&Event::Key_pressed(key))
+        frame.keys.contains(&key) || frame.events.contains(&Event::KeyPressed(key))
     }
 
     #[test]
@@ -532,7 +521,7 @@ mod tests {
             for key in [Key::Escape, Key::KeyChar('q')] {
                 let (seen, _) = gate::gate(&gate, &presses(key));
                 assert_eq!(sees(&seen, key), reaches, "{}: {} {} the sketch", what, key_name(key), if reaches { "did not reach" } else { "reached" });
-                assert_eq!(seen.events.iter().any(|event| matches!(event, Event::Text_input(_))), reaches, "{}: typed text and the key disagree", what);
+                assert_eq!(seen.events.iter().any(|event| matches!(event, Event::TextInput(_))), reaches, "{}: typed text and the key disagree", what);
             }
         }
 
@@ -544,15 +533,15 @@ mod tests {
         assert!(!sees(&seen, Key::Escape) && blocked == vec![Key::Escape], "a held Esc leaked when the keyboard came back");
         let (seen, blocked) = gate::gate(
             &gate::Gate { blocked: blocked, ..open.clone() },
-            &input(vec![Key::Escape, Key::KeyChar('q')], vec![], (10.0, 10.0), vec![Event::Key_pressed(Key::KeyChar('q'))]),
+            &input(vec![Key::Escape, Key::KeyChar('q')], vec![], (10.0, 10.0), vec![Event::KeyPressed(Key::KeyChar('q'))]),
         );
         assert!(!sees(&seen, Key::Escape) && sees(&seen, Key::KeyChar('q')) && blocked == vec![Key::Escape], "another key was hidden with the held one");
-        let (seen, blocked) = gate::gate(&gate::Gate { blocked: blocked, ..open.clone() }, &input(vec![], vec![], (10.0, 10.0), vec![Event::Key_released(Key::Escape)]));
+        let (seen, blocked) = gate::gate(&gate::Gate { blocked: blocked, ..open.clone() }, &input(vec![], vec![], (10.0, 10.0), vec![Event::KeyReleased(Key::Escape)]));
         assert!(blocked.is_empty() && seen.keys.is_empty(), "a released key stayed hidden");
         let (seen, _) = gate::gate(&gate::Gate { blocked, ..open.clone() }, &presses(Key::Escape));
         assert!(sees(&seen, Key::Escape), "a fresh press after the release did not reach the sketch");
 
-        let moved = input(vec![], vec![], (50.0, 50.0), vec![Event::Pointer_moved((50.0, 50.0))]);
+        let moved = input(vec![], vec![], (50.0, 50.0), vec![Event::PointerMoved((50.0, 50.0))]);
         let away = gate::Gate { pointer_on_picture: false, previous: input(vec![], vec![], (5.0, 5.0), vec![]), ..open };
         let (seen, _) = gate::gate(&away, &moved);
         assert!(seen.pointer == (5.0, 5.0) && seen.events.is_empty(), "the pointer left the picture and the sketch followed");
@@ -562,7 +551,7 @@ mod tests {
         assert!(seen.pointer == (5.0, 5.0) && seen.events.is_empty(), "a pointer over an unfocused window reached the sketch");
         let (seen, _) = gate::gate(&gate::Gate { prompt: true, pointer_on_picture: true, ..away.clone() }, &moved);
         assert!(seen.pointer == (5.0, 5.0), "a prompt did not hold the pointer");
-        let drag = input(vec![], vec![MouseButton::LeftButton], (50.0, 50.0), vec![Event::Pointer_moved((50.0, 50.0))]);
+        let drag = input(vec![], vec![MouseButton::LeftButton], (50.0, 50.0), vec![Event::PointerMoved((50.0, 50.0))]);
         let (seen, _) = gate::gate(&gate::Gate { previous: input(vec![], vec![MouseButton::LeftButton], (5.0, 5.0), vec![]), ..away.clone() }, &drag);
         assert!(seen.pointer == (50.0, 50.0), "a drag that began on the picture was cut off");
         let (seen, _) = gate::gate(&away, &drag);
@@ -587,7 +576,7 @@ mod tests {
         let b = Key::KeyChar('b');
         let previous = [a];
         let held = [b];
-        let events = [Event::Key_released(a), Event::Key_pressed(b)];
+        let events = [Event::KeyReleased(a), Event::KeyPressed(b)];
         let before = keys_before(&previous, &held, &events);
         assert_eq!(before, vec![a]);
         let after = events.iter().fold(before, |keys, event| keys_after(&keys, event));
@@ -599,14 +588,14 @@ mod tests {
         let a = Key::KeyChar('a');
         let b = Key::KeyChar('b');
         let c = Key::KeyChar('c');
-        assert_eq!(keys_after(&[a, b], &Event::Key_pressed(b)), vec![a, b]);
-        assert_eq!(keys_after(&[a, b], &Event::Key_pressed(c)), vec![c, a, b]);
-        assert_eq!(keys_after(&[a, b], &Event::Key_released(a)), vec![b]);
-        assert!(keys_after(&[a, b], &Event::Focus_lost).is_empty());
+        assert_eq!(keys_after(&[a, b], &Event::KeyPressed(b)), vec![a, b]);
+        assert_eq!(keys_after(&[a, b], &Event::KeyPressed(c)), vec![c, a, b]);
+        assert_eq!(keys_after(&[a, b], &Event::KeyReleased(a)), vec![b]);
+        assert!(keys_after(&[a, b], &Event::FocusLost).is_empty());
 
-        assert_eq!(keys_before(&[a], &[b], &[Event::Key_pressed(a)]), vec![a, b]);
-        assert_eq!(keys_before(&[], &[a, b], &[Event::Key_released(a)]), vec![b]);
-        assert_eq!(keys_before(&[a], &[b], &[Event::Focus_lost]), vec![a]);
+        assert_eq!(keys_before(&[a], &[b], &[Event::KeyPressed(a)]), vec![a, b]);
+        assert_eq!(keys_before(&[], &[a, b], &[Event::KeyReleased(a)]), vec![b]);
+        assert_eq!(keys_before(&[a], &[b], &[Event::FocusLost]), vec![a]);
     }
 
     #[test]
@@ -662,8 +651,8 @@ mod tests {
         frame.size = (0, 0);
         frame.events = vec![
             Event::Resized((0, 0)),
-            Event::Text_editing { text: String::new(), start: 0, length: 0 },
-            Event::Pixel_size_changed((-1, -1)),
+            Event::TextEditing { text: String::new(), start: 0, length: 0 },
+            Event::PixelSizeChanged((-1, -1)),
         ];
         assert_eq!(validate(&frame), Ok(()));
 
@@ -679,9 +668,9 @@ mod tests {
         invalid.pointer = (0.0, f64::NEG_INFINITY);
         assert_eq!(validate(&invalid), Err(facts_error.into()));
         invalid = at_time(0.0);
-        invalid.events = vec![Event::Pointer_moved((f64::NAN, 0.0))];
+        invalid.events = vec![Event::PointerMoved((f64::NAN, 0.0))];
         assert_eq!(validate(&invalid), Err(facts_error.into()));
-        invalid.events = vec![Event::Text_editing { text: String::new(), start: -1, length: 0 }];
+        invalid.events = vec![Event::TextEditing { text: String::new(), start: -1, length: 0 }];
         assert_eq!(validate(&invalid), Err(facts_error.into()));
         invalid.events = vec![Event::Resized((0, -1))];
         assert_eq!(validate(&invalid), Err(facts_error.into()));
@@ -733,18 +722,18 @@ mod tests {
         assert_ne!(identity(&event_a), identity(&event_b));
 
         let payload_changes = [
-            (Event::Key_pressed(Key::KeyChar('a')), Event::Key_pressed(Key::KeyChar('b'))),
-            (Event::Pointer_moved((1.0, 2.0)), Event::Pointer_moved((1.0, 3.0))),
-            (Event::Pointer_pressed(MouseButton::LeftButton, (1.0, 2.0)), Event::Pointer_pressed(MouseButton::RightButton, (1.0, 2.0))),
-            (Event::Text_input("first".into()), Event::Text_input("other".into())),
-            (Event::Text_editing { text: "x".into(), start: 1, length: 2 }, Event::Text_editing { text: "x".into(), start: 2, length: 2 }),
-            (Event::File_dropped("a".into()), Event::File_dropped("b".into())),
+            (Event::KeyPressed(Key::KeyChar('a')), Event::KeyPressed(Key::KeyChar('b'))),
+            (Event::PointerMoved((1.0, 2.0)), Event::PointerMoved((1.0, 3.0))),
+            (Event::PointerPressed(MouseButton::LeftButton, (1.0, 2.0)), Event::PointerPressed(MouseButton::RightButton, (1.0, 2.0))),
+            (Event::TextInput("first".into()), Event::TextInput("other".into())),
+            (Event::TextEditing { text: "x".into(), start: 1, length: 2 }, Event::TextEditing { text: "x".into(), start: 2, length: 2 }),
+            (Event::FileDropped("a".into()), Event::FileDropped("b".into())),
             (Event::Pinched(1.0), Event::Pinched(2.0)),
-            (Event::File_dialog { id: 4, result: Ok(vec!["a".into()]) }, Event::File_dialog { id: 4, result: Ok(vec!["b".into()]) }),
-            (Event::Dialog_opened(4), Event::Dialog_opened(5)),
+            (Event::FileDialog { id: 4, result: Ok(vec!["a".into()]) }, Event::FileDialog { id: 4, result: Ok(vec!["b".into()]) }),
+            (Event::DialogOpened(4), Event::DialogOpened(5)),
             (Event::Resized((10, 20)), Event::Resized((10, 21))),
-            (Event::Visibility_changed(false), Event::Visibility_changed(true)),
-            (Event::Trackpad_scrolled { delta: (1.0, 2.0), phase: ScrollPhase::Moved, time: 3.0 }, Event::Trackpad_scrolled { delta: (1.0, 2.0), phase: ScrollPhase::Lifted, time: 3.0 }),
+            (Event::VisibilityChanged(false), Event::VisibilityChanged(true)),
+            (Event::TrackpadScrolled { delta: (1.0, 2.0), phase: ScrollPhase::Moved, time: 3.0 }, Event::TrackpadScrolled { delta: (1.0, 2.0), phase: ScrollPhase::Lifted, time: 3.0 }),
         ];
         for (before, after) in payload_changes {
             let mut a = at_time(0.0);
@@ -756,7 +745,7 @@ mod tests {
         }
 
         let mut ordered = at_time(0.0);
-        ordered.events = vec![Event::Key_pressed(Key::Escape), Event::Text_input("x".into())];
+        ordered.events = vec![Event::KeyPressed(Key::Escape), Event::TextInput("x".into())];
         let mut reversed = ordered.clone();
         reversed.events.reverse();
         assert!(!equal(&ordered, &reversed));
