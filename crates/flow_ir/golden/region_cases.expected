@@ -507,51 +507,9 @@ program
   uniform_widths [1]
   collecting true
 ## case 12 fusion=true
-program
-  r0 = Input 0 1 0
-  r1 = Frame "t"
-  r2 = Array_prepare 0 array:float
-  r3 = Const 0.0
-  r4 = Binary Ge 0 3
-  r5 = Const 3.0
-  r6 = Binary Lt 0 5
-  r7 = Const 1.0
-  r8 = Binary Mod 0 7
-  r9 = Binary Eq 8 3
-  r10 = Binary And 4 6
-  r11 = Binary And 10 9
-  r12 = Guarded 11:true (Convert int 0)
-  r13 = Guarded 11:false (Raise int "E_LIST_RANGE" "nth index is out of range or is not a whole number.")
-  r14 = Int_select 11 12 13
-  r15 = Guarded 11:true (Gather 2 14 1 0)
-  r16 = Binary Add 1 15
-  widths [1]
-  output [16]
-  uniform_widths [1]
-  collecting true
+check-error
 ## case 12 fusion=false
-program
-  r0 = Input 0 1 0
-  r1 = Frame "t"
-  r2 = Array_prepare 0 array:float
-  r3 = Const 0.0
-  r4 = Binary Ge 0 3
-  r5 = Const 3.0
-  r6 = Binary Lt 0 5
-  r7 = Const 1.0
-  r8 = Binary Mod 0 7
-  r9 = Binary Eq 8 3
-  r10 = Binary And 4 6
-  r11 = Binary And 10 9
-  r12 = Guarded 11:true (Convert int 0)
-  r13 = Guarded 11:false (Raise int "E_LIST_RANGE" "nth index is out of range or is not a whole number.")
-  r14 = Int_select 11 12 13
-  r15 = Guarded 11:true (Gather 2 14 1 0)
-  r16 = Binary Add 1 15
-  widths [1]
-  output [16]
-  uniform_widths [1]
-  collecting true
+check-error
 ## case 13 fusion=true
 program
   r0 = Int_input 0

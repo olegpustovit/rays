@@ -161,9 +161,8 @@ assoc-order
 core
   $0 = 0.0
   $1 = 1.9
-  $2 = 2
-  $3 = 0.7
-  $4 = 2
+  $2 = 0.7
+  $3 = 2
   %0 : float
   %1 : float
   %2 : bool
@@ -174,37 +173,39 @@ core
   %7 : float
   %8 : float
   %9 : int
-  %10 : float
-  %11 : int
+  %10 : int
+  %11 : float
   %12 : int
-  %13 : float
-  %14 : rec{a:float,b:int,c:float}
+  %13 : int
+  %14 : float
+  %15 : rec{a:float,b:int,c:float}
   #0 %0 = frame.t @["g" "tested#test"] owner=["g" "tested"] instance=0 iter=[] span=59..60
   #1 %1 = $0 @["g" "tested#test"] owner=["g" "tested"] instance=0 iter=[] span=56..64
   #2 %2 = >("a":%0 "b":%1) @["g" "tested#test"] owner=["g" "tested"] instance=0 iter=[] span=56..64
   #3 if %2 then {
-    #4 %3 = equal?("a":%0 "b":%0) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..109
+    #4 %3 = equal?("a":%0 "b":%0) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..123
     #5 if %3 then {
-      #6 %5 = $1 @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..109
-      #7 %4 = %5 @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..109
+      #6 %5 = $1 @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..123
+      #7 %4 = %5 @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..123
     } else {
-      #8 %6 = $2 @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..109
-      #9 %4 = %6 @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..109
-    } @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..109
-    #10 %7 = $3 @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=99..108
-    #11 %8 = +("a":%0 "b":%7) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=99..108
-    #12 %9 = coerce<int>("value":%8) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..109
-    #13 %10 = %4 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..127
-    #15 %11 = %9 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..127
-    #18 %13 = %0 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..127
+      #8 %6 = fail<"E_TYPE" "Float does not implicitly convert to Int; use int, floor, ceil or round.">() @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..123
+      #9 %4 = %6 @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..123
+    } @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..123
+    #10 %7 = $2 @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=111..120
+    #11 %8 = +("a":%0 "b":%7) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=111..120
+    #12 %9 = round("x":%8) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=104..121
+    #13 %10 = int("x":%9) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=99..122
+    #14 %11 = %4 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..141
+    #16 %12 = %10 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..141
+    #19 %14 = %0 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..141
   } else {
-    #14 %10 = %0 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..127
-    #16 %12 = $4 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..127
-    #17 %11 = %12 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..127
-    #19 %13 = %0 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..127
-  } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..127
-  #20 %14 = record{"a":%10 "b":%11 "c":%13} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..127
-  return %14
+    #15 %11 = %0 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..141
+    #17 %13 = $3 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..141
+    #18 %12 = %13 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..141
+    #20 %14 = %0 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..141
+  } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..141
+  #21 %15 = record{"a":%11 "b":%12 "c":%14} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..141
+  return %15
 assoc-nested
 core
   $0 = 0.0
@@ -217,53 +218,54 @@ core
   %1 : float
   %2 : bool
   %3 : int
-  %4 : vec2
-  %5 : text
+  %4 : int
+  %5 : vec2
   %6 : text
-  %7 : int
+  %7 : text
   %8 : int
-  %9 : vec2
+  %9 : int
   %10 : vec2
-  %11 : bool
+  %11 : vec2
   %12 : bool
   %13 : bool
-  %14 : text
+  %14 : bool
   %15 : text
-  %16 : rec{i:int,v:vec2,extra:bool}
-  %17 : rec{r:rec{i:int,v:vec2,extra:bool},text:text}
+  %16 : text
+  %17 : rec{i:int,v:vec2,extra:bool}
+  %18 : rec{r:rec{i:int,v:vec2,extra:bool},text:text}
   #0 %0 = frame.t @["g" "tested#test"] owner=["g" "tested"] instance=0 iter=[] span=59..60
   #1 %1 = $0 @["g" "tested#test"] owner=["g" "tested"] instance=0 iter=[] span=56..64
   #2 %2 = >("a":%0 "b":%1) @["g" "tested#test"] owner=["g" "tested"] instance=0 iter=[] span=56..64
   #3 if %2 then {
-    #4 %3 = coerce<int>("value":%0) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..148
-    #5 %4 = coerce<vec2>("value":%0) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..148
-    #6 %5 = show("value":%0) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=140..147
-    #7 %6 = text/concat("part":%5) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=140..147
-    #8 %7 = %3 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-    #11 %9 = %4 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-    #14 %12 = $3 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-    #15 %11 = %12 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-    #18 %14 = %6 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
+    #4 %3 = round("x":%0) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=119..128
+    #5 %4 = int("x":%3) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=114..129
+    #6 %5 = coerce<vec2>("value":%0) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..162
+    #7 %6 = show("value":%0) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=154..161
+    #8 %7 = text/concat("part":%6) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=154..161
+    #9 %8 = %4 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+    #12 %10 = %5 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+    #15 %13 = $3 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+    #16 %12 = %13 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+    #19 %15 = %7 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
   } else {
-    #9 %8 = $1 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-    #10 %7 = %8 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-    #12 %10 = $2 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-    #13 %9 = %10 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-    #16 %13 = $4 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-    #17 %11 = %13 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-    #19 %15 = $5 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-    #20 %14 = %15 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-  } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-  #21 %16 = record{"i":%7 "v":%9 "extra":%11} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-  #22 %17 = record{"r":%16 "text":%14} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..198
-  return %17
+    #10 %9 = $1 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+    #11 %8 = %9 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+    #13 %11 = $2 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+    #14 %10 = %11 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+    #17 %14 = $4 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+    #18 %12 = %14 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+    #20 %16 = $5 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+    #21 %15 = %16 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+  } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+  #22 %17 = record{"i":%8 "v":%10 "extra":%12} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+  #23 %18 = record{"r":%17 "text":%15} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..212
+  return %18
 assoc-tag
 core
   $0 = 0.0
   $1 = 1
   $2 = 1.0
   $3 = 1.7
-  $4 = 2
   %0 : float
   %1 : float
   %2 : bool
@@ -292,7 +294,7 @@ core
     #11 %9 = $3 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=91..107
     #12 %8 = %9 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=91..107
   } else {
-    #13 %10 = $4 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=91..107
+    #13 %10 = fail<"E_TYPE" "Float does not implicitly convert to Int; use int, floor, ceil or round.">() @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=91..107
     #14 %8 = %10 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=91..107
   } @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=91..107
   #15 %11 = record{"n":%8} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=91..107
@@ -306,8 +308,8 @@ core
   %3 : rec{n:int}
   #0 %0 = frame.t @["g" "tested" "r" "n"] owner=["g" "tested" "r"] instance=0 iter=[] span=70..71
   #1 %1 = int("x":%0) @["g" "tested" "r" "n"] owner=["g" "tested" "r"] instance=0 iter=[] span=65..72
-  #2 %2 = $0 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=75..91
-  #3 %3 = record{"n":%2} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=75..91
+  #2 %2 = $0 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=75..105
+  #3 %3 = record{"n":%2} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=75..105
   return %3
 assoc-captured-branch
 core
@@ -331,8 +333,8 @@ core
     #6 %5 = int("x":%0) @["g" "tested" "r" "n"] owner=["g" "tested" "r"] instance=0 iter=[] span=65..72
     #7 %3 = %5 @["g" "tested" "chosen"] owner=["g" "tested" "chosen"] instance=0 iter=[] span=81..98
   } @["g" "tested" "chosen"] owner=["g" "tested" "chosen"] instance=0 iter=[] span=81..98
-  #8 %6 = $1 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=100..121
-  #9 %7 = record{"n":%6} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=100..121
+  #8 %6 = $1 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=100..135
+  #9 %7 = record{"n":%6} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=100..135
   return %7
 assoc-captured-nested
 core
@@ -344,9 +346,9 @@ core
   %4 : rec{v:rec{n:int}}
   #0 %0 = frame.t @["g" "tested" "r" "v" "n"] owner=["g" "tested" "r"] instance=0 iter=[] span=74..75
   #1 %1 = int("x":%0) @["g" "tested" "r" "v" "n"] owner=["g" "tested" "r"] instance=0 iter=[] span=69..76
-  #2 %2 = $0 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=80..101
-  #3 %3 = record{"n":%2} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=80..101
-  #4 %4 = record{"v":%3} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=80..101
+  #2 %2 = $0 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=80..115
+  #3 %3 = record{"n":%2} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=80..115
+  #4 %4 = record{"v":%3} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=80..115
   return %4
 assoc-captured-lazy
 core
@@ -356,7 +358,7 @@ core
   %2 : int
   #0 %0 = frame.t @["g" "tested" "r" "v" "n"] owner=["g" "tested" "r"] instance=0 iter=[] span=74..75
   #1 %1 = int("x":%0) @["g" "tested" "r" "v" "n"] owner=["g" "tested" "r"] instance=0 iter=[] span=69..76
-  #2 %2 = $0 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=138..149
+  #2 %2 = $0 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=152..163
   return %2
 branch-order
 core
@@ -445,25 +447,25 @@ core
   #3 if %2 then {
   } else {
   } @["g" "tested" "r"] owner=["g" "tested" "r"] instance=0 iter=[] span=61..100
-  #4 if %2 then {
-    #5 %3 = coerce<int>("value":%0) @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
+  #4 %3 = round("x":%0) @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=119..128
+  #5 %4 = int("x":%3) @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=114..129
+  #6 if %2 then {
   } else {
-    #6 %4 = coerce<int>("value":%0) @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
-  } @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
+  } @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..135
   #7 if %2 then {
   } else {
-  } @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
+  } @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..135
   #8 if %2 then {
-    #9 %6 = $1 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
-    #10 %7 = $2 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
-    #11 %8 = record{"a":%3 "b":%6 "c":%7} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
-    #12 %5 = %8 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
+    #9 %6 = $1 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..135
+    #10 %7 = $2 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..135
+    #11 %8 = record{"a":%4 "b":%6 "c":%7} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..135
+    #12 %5 = %8 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..135
   } else {
-    #13 %9 = $3 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
-    #14 %10 = $4 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
-    #15 %11 = record{"b":%9 "a":%4 "c":%10} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
-    #16 %5 = %11 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
-  } @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..121
+    #13 %9 = $3 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..135
+    #14 %10 = $4 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..135
+    #15 %11 = record{"b":%9 "a":%4 "c":%10} @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..135
+    #16 %5 = %11 @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..135
+  } @["g" "tested" "@result"] owner=["g" "tested" "@result"] instance=0 iter=[] span=102..135
   return %5
 branch-order-nested
 core
@@ -480,16 +482,18 @@ core
   %4 : bool
   %5 : int
   %6 : int
-  %7 : rec{a:int,b:float}
-  %8 : rec{a:int,b:float}
-  %9 : float
+  %7 : int
+  %8 : int
+  %9 : rec{a:int,b:float}
   %10 : rec{a:int,b:float}
   %11 : float
-  %12 : rec{b:float,a:int}
-  %13 : int
-  %14 : float
-  %15 : rec{a:int,b:float}
-  %16 : rec{v:rec{a:int,b:float}}
+  %12 : rec{a:int,b:float}
+  %13 : float
+  %14 : rec{b:float,a:int}
+  %15 : int
+  %16 : float
+  %17 : rec{a:int,b:float}
+  %18 : rec{v:rec{a:int,b:float}}
   #0 %0 = frame.t @["g" "tested#test"] owner=["g" "tested"] instance=0 iter=[] span=59..60
   #1 %1 = $0 @["g" "tested#test"] owner=["g" "tested"] instance=0 iter=[] span=56..66
   #2 %2 = >("a":%0 "b":%1) @["g" "tested#test"] owner=["g" "tested"] instance=0 iter=[] span=56..66
@@ -497,34 +501,36 @@ core
     #4 %3 = $1 @["g" "tested#then" "nv#test"] owner=["g" "tested"] instance=0 iter=[] span=101..109
     #5 %4 = >("a":%0 "b":%3) @["g" "tested#then" "nv#test"] owner=["g" "tested"] instance=0 iter=[] span=101..109
     #6 if %4 then {
+      #7 %5 = round("x":%0) @["g" "tested#then" "nv#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=119..128
+      #8 %6 = int("x":%5) @["g" "tested#then" "nv#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=114..129
     } else {
-    } @["g" "tested#then" "nv"] owner=["g" "tested"] instance=0 iter=[] span=97..134
-    #7 if %4 then {
-      #8 %5 = coerce<int>("value":%0) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=136..151
-    } else {
-      #9 %6 = coerce<int>("value":%0) @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=136..151
-    } @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=136..151
-  } else {
-  } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-  #10 if %2 then {
+      #9 %7 = round("x":%0) @["g" "tested#then" "nv#else" "@result"] owner=["g" "tested"] instance=0 iter=[] span=150..159
+      #10 %8 = int("x":%7) @["g" "tested#then" "nv#else" "@result"] owner=["g" "tested"] instance=0 iter=[] span=145..160
+    } @["g" "tested#then" "nv"] owner=["g" "tested"] instance=0 iter=[] span=97..162
     #11 if %4 then {
-      #12 %9 = $2 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-      #13 %10 = record{"a":%5 "b":%9} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-      #14 %8 = %10 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
     } else {
-      #15 %11 = $3 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-      #16 %12 = record{"b":%11 "a":%6} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-      #17 %8 = %12 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-    } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-    #18 %7 = %8 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
+    } @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=164..179
   } else {
-    #19 %13 = $4 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-    #20 %14 = $5 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-    #21 %15 = record{"a":%13 "b":%14} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-    #22 %7 = %15 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-  } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-  #23 %16 = record{"v":%7} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..171
-  return %16
+  } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+  #12 if %2 then {
+    #13 if %4 then {
+      #14 %11 = $2 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+      #15 %12 = record{"a":%6 "b":%11} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+      #16 %10 = %12 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+    } else {
+      #17 %13 = $3 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+      #18 %14 = record{"b":%13 "a":%8} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+      #19 %10 = %14 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+    } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+    #20 %9 = %10 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+  } else {
+    #21 %15 = $4 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+    #22 %16 = $5 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+    #23 %17 = record{"a":%15 "b":%16} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+    #24 %9 = %17 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+  } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+  #25 %18 = record{"v":%9} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..199
+  return %18
 branch-order-get
 core
   $0 = 0.0
@@ -866,13 +872,13 @@ core
   #1 %1 = $0 @["g" "tested#test"] owner=["g" "tested"] instance=0 iter=[] span=56..64
   #2 %2 = >("a":%0 "b":%1) @["g" "tested#test"] owner=["g" "tested"] instance=0 iter=[] span=56..64
   #3 if %2 then {
-    #4 %3 = fail<"E_NONFINITE" "int produced a nonfinite value.">() @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=65..104
-    #5 %4 = %3 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..112
+    #4 %3 = fail<"E_NONFINITE" "int produced a nonfinite value.">() @["g" "tested#then" "@result"] owner=["g" "tested"] instance=0 iter=[] span=82..109
+    #5 %4 = %3 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..118
   } else {
-    #6 %5 = $1 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..112
-    #7 %4 = %5 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..112
-  } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..112
-  #8 %6 = record{"n":%4} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..112
+    #6 %5 = $1 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..118
+    #7 %4 = %5 @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..118
+  } @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..118
+  #8 %6 = record{"n":%4} @["g" "tested"] owner=["g" "tested"] instance=0 iter=[] span=52..118
   return %6
 equal-tags
 core

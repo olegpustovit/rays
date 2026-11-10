@@ -73,7 +73,9 @@ fn dump() -> String {
 #[test]
 fn core_control_print_is_stable() {
     let actual = dump();
-    let expected = include_str!("../../../crates/flow_ir/core_control.expected").replace("\r\n", "\n");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("core_control.expected");
+    if std::env::var("RAYS_UPDATE_FIXTURES").as_deref() == Ok("1") { std::fs::write(&path, &actual).unwrap(); }
+    let expected = std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
     if actual != expected {
         let first = actual.lines().zip(expected.lines()).position(|(a, b)| a != b).unwrap_or(0);
         panic!("Core control print changed at line {}:\nactual:   {:?}\nexpected: {:?}", first + 1, actual.lines().nth(first), expected.lines().nth(first));

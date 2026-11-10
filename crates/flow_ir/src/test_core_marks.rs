@@ -317,7 +317,7 @@ fn nested_maps_draw_the_walkers_points_at_one_four_and_eight_domains() {
 // once before the fold, so its frame read is a statement of its own, outside the loop.
 #[test]
 fn remembered_loops_never_answer_changed_inputs_from_the_cache() {
-    let body = "(let* [k (int (/ t 2)) p (fold [b (map (fn [i] [i 0 0]) (array/range 3))] [d (range 3)] (map (fn [i] (let* [q (array/nth b i)] [(+ q.x (* k 10)) (+ q.y d) 0])) (array/range 3)))] (draw/merge (draw/point [k 0 0]) (draw/points p)))";
+    let body = "(let* [k (int (/ t 2)) p (fold [b (map (fn [i] [i 0 0]) (array/range 3))] [d (range 3)] (map (fn [i] (let* [q (array/nth b (int i))] [(+ q.x (* k 10)) (+ q.y d) 0])) (array/range 3)))] (draw/merge (draw/point [k 0 0]) (draw/points p)))";
     let (program, root) = lowered(body);
     let remembered = core_exec::prepare(&program, false, true, &Paths::new(), false);
     let points = |prepared: &core_exec::Prepared, t: f64| -> Vec<f64> {
@@ -481,7 +481,7 @@ fn fused_device_dispatches_share_their_inputs_and_follow_the_frame_count() {
 /// resident fold's positions, normals and colors), and a merged region keeps its gathers' tables
 #[test]
 fn sibling_regions_group_at_the_first() {
-    let body = "(let* [w (map (fn [i] (* i t)) (array/range 8)) a (map (fn [i] (+ (array/nth w i) t)) (array/range 4)) k (array/int (array/count w) 1) b (map (fn [i] (* (array/nth w (+ i 1)) t)) (array/range 4)) p (map (fn [i] [(+ (array/nth a i) (array/nth b i)) (array/nth k i) 0]) (array/range 4))] (draw/circles p))";
+    let body = "(let* [w (map (fn [i] (* i t)) (array/range 8)) a (map (fn [i] (+ (array/nth w (int i)) t)) (array/range 4)) k (array/int (array/count w) 1) b (map (fn [i] (* (array/nth w (int (+ i 1))) t)) (array/range 4)) p (map (fn [i] [(+ (array/nth a (int i)) (array/nth b (int i))) (array/nth k (int i)) 0]) (array/range 4))] (draw/circles p))";
     let (program, _) = lowered(body);
     let found = groups(&program, &Paths::new(), &|_| true);
     let sibling = found.iter().find(|g| g.at_first).expect("a sibling group");

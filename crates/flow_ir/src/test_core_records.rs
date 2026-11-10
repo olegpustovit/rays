@@ -97,25 +97,25 @@ fn cases() -> Vec<(&'static str, ResidualId)> {
         ("get", r(r##"(if (> t 0.) (get {:a t :b (* t 2.)} :b) (get {:a (- 0. t) :b 3.} :a))"##)),
         ("dotted", r(r##"(if (> t 0.) (let* [r {:inner {:v [t 2. 3. 4.]}}] r.inner.v.w) t)"##)),
         ("keys", r(r##"(if (> t 0.) (let* [{:keys [a b]} {:a t :b (* t 2.)}] (+ a b)) t)"##)),
-        ("assoc-order", r(r##"(if (> t 0.) (assoc {:a t :b 2} :a 1.9 :c t :b (+ t 0.7)) {:a t :b 2 :c t})"##)),
+        ("assoc-order", r(r##"(if (> t 0.) (assoc {:a t :b 2} :a 1.9 :c t :b (int (round (+ t 0.7)))) {:a t :b 2 :c t})"##)),
         (
             "assoc-nested",
-            r(r##"(if (> t 0.) (assoc {:r {:i 0 :v [1. 2.]} :text "old"} :r {:i t :v t :extra true} :text (str t)) {:r {:i 0 :v [0. 0.] :extra false} :text "none"})"##),
+            r(r##"(if (> t 0.) (assoc {:r {:i 0 :v [1. 2.]} :text "old"} :r {:i (int (round t)) :v t :extra true} :text (str t)) {:r {:i 0 :v [0. 0.] :extra false} :text "none"})"##),
         ),
         ("assoc-tag", r(r##"(let* [r (if (> t 0.) {:n 1} {:n 1.})] (assoc r :n 1.7))"##)),
-        ("assoc-captured", r(r##"(let* [r {:n (int t)}] (assoc r :n 1.7))"##)),
-        ("assoc-captured-branch", r(r##"(let* [r {:n (int t)} chosen (if (> t 0.) r r)] (assoc chosen :n 1.7))"##)),
-        ("assoc-captured-nested", r(r##"(let* [r {:v {:n (int t)}}] (assoc r :v {:n 1.7}))"##)),
+        ("assoc-captured", r(r##"(let* [r {:n (int t)}] (assoc r :n (int (round 1.7))))"##)),
+        ("assoc-captured-branch", r(r##"(let* [r {:n (int t)} chosen (if (> t 0.) r r)] (assoc chosen :n (int (round 1.7))))"##)),
+        ("assoc-captured-nested", r(r##"(let* [r {:v {:n (int t)}}] (assoc r :v {:n (int (round 1.7))}))"##)),
         (
             "assoc-captured-lazy",
-            r(r##"(let* [r {:v {:n (int t)} :unused (exp (* t 100000.))} updated (assoc r :v {:n 1.7})] updated.v.n)"##),
+            r(r##"(let* [r {:v {:n (int t)} :unused (exp (* t 100000.))} updated (assoc r :v {:n (int (round 1.7))})] updated.v.n)"##),
         ),
         ("branch-order", r(r##"(if (> t 0.) {:a t :b 2.} {:b 2. :a t})"##)),
         ("branch-order-show", r(r##"(str (if (> t 0.) {:a t :b 2.} {:b 2. :a t}))"##)),
-        ("branch-order-assoc", r(r##"(let* [r (if (> t 0.) {:a 1 :b 2.} {:b 2. :a 1})] (assoc r :a t :c 3))"##)),
+        ("branch-order-assoc", r(r##"(let* [r (if (> t 0.) {:a 1 :b 2.} {:b 2. :a 1})] (assoc r :a (int (round t)) :c 3))"##)),
         (
             "branch-order-nested",
-            r(r##"(if (> t -10.) (let* [r {:v {:a 0 :b 2.}} nv (if (> t 0.) {:a t :b 3} {:b 3 :a t})] (assoc r :v nv)) {:v {:a 0 :b 2.}})"##),
+            r(r##"(if (> t -10.) (let* [r {:v {:a 0 :b 2.}} nv (if (> t 0.) {:a (int (round t)) :b 3} {:b 3 :a (int (round t))})] (assoc r :v nv)) {:v {:a 0 :b 2.}})"##),
         ),
         ("branch-order-get", r(r##"(let* [r (if (> t 0.) {:a t :b 2.} {:b 2. :a t})] (get r :a))"##)),
         ("text", r(r##"(if (> t 0.) "a\n\"\\é🙂" "b")"##)),
@@ -135,7 +135,7 @@ fn cases() -> Vec<(&'static str, ResidualId)> {
         ),
         ("equal-captures", r(r##"(let* [a {:v t} b {:v t}] (equal? a b))"##)),
         ("equal-capture-fresh", r(r##"(let* [a {:v {:x t}}] (if (> t 0.) (equal? a {:v {:x t}}) false))"##)),
-        ("assoc-error", r(r##"(if (> t 0.) (assoc {:n 0} :n 10000000000000000000.) {:n 0})"##)),
+        ("assoc-error", r(r##"(if (> t 0.) (assoc {:n 0} :n (int 10000000000000000000.)) {:n 0})"##)),
         ("equal-tags", r(r##"(equal? (if (> t 0.) 1 1.) 1)"##)),
         ("equal-text", r(r##"(equal? (if (> t 0.) "same" "other") "same")"##)),
         ("captured", r(r##"(let* [r {:safe t :bad (exp (* t 100000.))}] (if (> t 0.) (get r :safe) t))"##)),
@@ -154,6 +154,7 @@ fn dump() -> (String, Vec<String>) {
             let live = input::at_time(time);
             let value = Value::Residual(r);
             let expected = reference(&value, &live);
+            if name == "assoc-error" && time > 0. { assert!(expected.is_err(), "Selected integer overflow must remain a runtime error"); }
             // Every comparison is collected so one run lists all differing cases.
             if !equal_result(&E::force(&value, &live, None), &expected) {
                 failures.push(format!("{name} at {time}: E::force differs from the reference"));
@@ -184,7 +185,9 @@ fn dump() -> (String, Vec<String>) {
 #[test]
 fn core_record_and_text_print_is_stable() {
     let (actual, _) = dump();
-    let expected = include_str!("../../../crates/flow_ir/core_records.expected").replace("\r\n", "\n");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("core_records.expected");
+    if std::env::var("RAYS_UPDATE_FIXTURES").as_deref() == Ok("1") { std::fs::write(&path, &actual).unwrap(); }
+    let expected = std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
     if actual != expected {
         let first = actual.lines().zip(expected.lines()).position(|(a, b)| a != b).unwrap_or(0);
         panic!("Core record/text print changed at line {}:\nactual:   {:?}\nexpected: {:?}", first + 1, actual.lines().nth(first), expected.lines().nth(first));

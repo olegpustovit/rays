@@ -290,7 +290,11 @@ fn compile_region_term(r: flow_syntax::value::ResidualId, term: &w::Term) -> Res
 #[test]
 fn static_list_guards() {
     for index in [0, 4100] {
-        for bad in ["-1", "3", "0.5"] {
+        let source = format!("(workspace w (graph g :context host (let* [table (list 1 2 3)] (map (fn [(i : int)] (nth table (if (= i {index}) 0.5 0))) (array/range 4101 :type int)))))");
+        let forms = ok(syntax::parse(&source));
+        let (workspace, diagnostics) = w::check(&[], false, false, None, &catalog(), &forms);
+        assert!(workspace.is_none() && diagnostics.iter().any(|d| d.code == "E_TYPE" && d.message.contains("nth index")), "{}", show_ds(&diagnostics));
+        for bad in ["-1", "3"] {
             let source = format!("(let* [table (list 1 2 3)] (map (fn [(i : int)] (nth table (if (= i {index}) {bad} 0))) (array/range 4101 :type int)))");
             let workspace = checked(&source);
             match (e::static_eval(&workspace), fast_static(&workspace)) {
@@ -337,7 +341,7 @@ fn trusted_replay_verifies_bits() {
 fn replay_failures_and_named_function_recording() {
     for body in [
         "(map (fn [(i : int)] (exp (if (= i 4100) 1000. 0.))) (array/range 4101 :type int))",
-        "(let* [table (list 1 2 3)] (map (fn [(i : int)] (nth table (if (= i 4100) 0.5 0.))) (array/range 4101 :type int)))",
+        "(let* [table (list 1 2 3)] (map (fn [(i : int)] (nth table (if (= i 4100) 3 0))) (array/range 4101 :type int)))",
     ] {
         let workspace = checked(body);
         let expected = e::r#static(&workspace, true, None);

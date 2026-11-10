@@ -266,6 +266,8 @@ fn force_strict(program: &executor::Program, live: &Frame) -> Result<Value, Diag
 #[test]
 fn builtin_integer_boundaries_match_native_i64() {
     let mut cases = vec![
+        ("(first (take (int/add 9223372036854775807 (frame/index)) (list 7 9)))".into(), Value::Int(7)),
+        ("(count (drop (int/add 9223372036854775807 (frame/index)) (list 7 9)))".into(), Value::Int(0)),
         ("(abs (int/add -4611686018427387904 (frame/index)))".into(), Value::Int(1 << 62)),
         ("(abs (int/add -9223372036854775808 (frame/index)))".into(), Value::Int(i64::MIN)),
         ("(abs (int/add -9223372036854775807 (frame/index)))".into(), Value::Int(i64::MAX)),

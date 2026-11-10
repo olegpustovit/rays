@@ -501,7 +501,7 @@ fn carried_int_float_widening_retains_exact_initial_bits_through_structured_core
     for (name, body) in [
         ("iterate-carried-widen", "(iterate 1 9007199254740993\n      (fn [a] (+ (float (int/sub a 9007199254740992)) (* t 0.))))"),
         ("fold-carried-widen", "(fold [a 9007199254740993] [i (range 1)]\n      (+ (float (int/sub a 9007199254740992)) (* t 0.)))"),
-        ("record-carried-widen", "(let* [s (iterate 1 {:n 9007199254740993}\n      (fn [a] {:n (+ (float (int/sub a.n 9007199254740992)) (* t 0.))}))] s.n)"),
+        ("record-carried-widen", "(let* [s (iterate 1 {:n 9007199254740993}\n      (fn [a] {:n (int (+ (float (int/sub a.n 9007199254740992)) (* t 0.)))}))] s.n)"),
     ] {
         check(&[0.37], false, name, &format!("(map (fn [x] {body}) (array/range 1))"));
     }

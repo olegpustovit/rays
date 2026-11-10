@@ -46,10 +46,10 @@ root false
 picture 2: (draw/circle [10 20 0] 4)
 core
   $0 = vec[10.0 20.0 0.0]
-  $1 = 4
+  $1 = 4.0
   $2 = vec[1.0 1.0 1.0]
   %0 : vec3
-  %1 : int
+  %1 : float
   %2 : vec3
   #0 %0 = $0 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
   #1 %1 = $1 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
@@ -104,11 +104,11 @@ core
   $0 = vec[0.0 0.0 0.0]
   $1 = vec[5.0 5.0 0.0]
   $2 = "#0f0"
-  $3 = 3
+  $3 = 3.0
   %0 : vec3
   %1 : vec3
   %2 : text
-  %3 : int
+  %3 : float
   #0 %0 = $0 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
   #1 %1 = $1 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
   #2 %2 = $2 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
@@ -260,11 +260,11 @@ picture 14: (let* [p (map (fn [i] [i 0 0]) (array/range 4))] (draw/lines p p :wi
 core
   $0 = array3[0.0 0.0 0.0 1.0 0.0 0.0 2.0 0.0 0.0 3.0 0.0 0.0]
   $1 = array3[0.0 0.0 0.0 1.0 0.0 0.0 2.0 0.0 0.0 3.0 0.0 0.0]
-  $2 = 2
+  $2 = 2.0
   $3 = vec[1.0 1.0 1.0]
   %0 : array:vec3
   %1 : array:vec3
-  %2 : int
+  %2 : float
   %3 : vec3
   #0 %0 = $0 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
   #1 %1 = $1 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
@@ -312,11 +312,11 @@ core
   $0 = vec[12.0 12.0 0.0]
   $1 = "hi"
   $2 = "#abc"
-  $3 = 20
+  $3 = 20.0
   %0 : vec3
   %1 : text
   %2 : text
-  %3 : int
+  %3 : float
   #0 %0 = $0 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
   #1 %1 = $1 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
   #2 %2 = $2 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
@@ -328,11 +328,11 @@ picture 18: (draw/rounded_rect [4 5 0] [60 40 0] :radius 8 :fill "#123")
 core
   $0 = vec[4.0 5.0 0.0]
   $1 = vec[60.0 40.0 0.0]
-  $2 = 8
+  $2 = 8.0
   $3 = "#123"
   %0 : vec3
   %1 : vec3
-  %2 : int
+  %2 : float
   %3 : text
   #0 %0 = $0 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
   #1 %1 = $1 @["g" "@result"] owner=["g" "@result"] instance=0 iter=[]
@@ -383,10 +383,10 @@ root false
 picture 22: (draw/image (image/noise) :at [4 5 0] :scale 2 :angle (* t 0.5))
 core
   $0 = vec[4.0 5.0 0.0]
-  $1 = 2
+  $1 = 2.0
   $2 = 0.5
   %0 : vec3
-  %1 : int
+  %1 : float
   %2 : float
   %3 : float
   %4 : float

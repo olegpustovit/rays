@@ -2706,15 +2706,13 @@ impl Lowerer {
             "take" | "drop" | "rest" => {
                 let sequence = arg("list")?;
                 let count = self.sequence_count(s, source, &sequence)?;
-                let wanted = if name == "rest" { int(1) } else {
-                    let n = arg("n")?;
-                    let f = self.to_float(s, source, &n)?;
-                    self.coerce(s, source, &Ty::Int, &f)?
-                };
-                let retained = self.primitive(s, source, &Ty::Int, num(PO::Binary::Max), vec![("a", int(0)), ("b", wanted)])?;
-                let retained = self.primitive(s, source, &Ty::Int, num(PO::Binary::Min), vec![("a", retained), ("b", count.clone())])?;
+                let wanted = if name == "rest" { int(1) } else { arg("n")? };
+                let negative = self.primitive(s, source, &Ty::Bool, C::Primitive::IntegerCompare(PO::Comparison::Ilt), vec![("a", wanted.clone()), ("b", int(0))])?;
+                let retained = self.branch(s, source, &Ty::Int, &negative, &mut |_, _| Ok(int(0)), &mut |_, _| Ok(wanted.clone()))?;
+                let over = self.primitive(s, source, &Ty::Bool, C::Primitive::IntegerCompare(PO::Comparison::Igt), vec![("a", retained.clone()), ("b", count.clone())])?;
+                let retained = self.branch(s, source, &Ty::Int, &over, &mut |_, _| Ok(count.clone()), &mut |_, _| Ok(retained.clone()))?;
                 let (first, length) = if name == "take" { (int(0), retained) } else {
-                    let length = self.primitive(s, source, &Ty::Int, num(PO::Binary::Sub), vec![("a", count), ("b", retained.clone())])?;
+                    let length = self.primitive(s, source, &Ty::Int, C::Primitive::Integer(PO::Integer::Isub), vec![("a", count), ("b", retained.clone())])?;
                     (retained, length)
                 };
                 self.primitive(s, source, ty, C::Primitive::SequenceSlice, vec![("list", sequence), ("first", first), ("count", length)])

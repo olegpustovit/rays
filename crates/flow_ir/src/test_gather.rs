@@ -950,16 +950,20 @@ fn list_tables_exact_widths_and_range_guards() {
         assert!(actual.as_ref().err().unwrap().code == "E_LIST_RANGE" && actual.as_ref().err().unwrap().code == expected.as_ref().err().unwrap().code);
         same_error(&packed_force(&pk(&value), &live, false, None), &expected);
     }
-    let closure = make_fn("", &list_int, "(fn [(index : float)] (nth data index))");
+    // Host-supplied columns cannot bypass a checked function's Int parameter, even when
+    // the column advertises Float. Fractional Lisp indices are rejected by the checker.
+    let closure = make_fn("", &list_int, "(fn [(index : int)] (nth data index))");
     let closure = e::host::map_function_bindings(closure, &|value| match value {
         Value::Source(g) if g.name == "probe/table" => table.clone(),
         other => other.clone(),
     });
     for index in [-1., 3., 0.5, 2.0000000001, f64::MAX] {
         let value = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Int }, closure, &[Value::Floats(1, Arc::new(vec![index]))]));
-        let actual = force(&pk(&value), &live);
-        assert_eq!(actual.as_ref().err().expect("range error").code, "E_LIST_RANGE");
-        same_error(&packed_force(&pk(&value), &live, false, None), &force_reference(&value, &live));
+        assert_eq!(force_reference(&value, &live).unwrap_err().code, "E_TYPE");
+        match compile_region(residual(&value), true, None) {
+            Err(ds) => assert!(ds.iter().any(|d| d.code == "E_PACKED_TYPE"), "{}", show_ds(&ds)),
+            Ok(_) => panic!("A Float column bypassed the checked Int index parameter"),
+        }
     }
     for table in [Value::List(Arc::new(vec![])), Value::List(Arc::new(vec![Value::Int(1), Value::Text(b"mixed".as_slice().into())]))] {
         let value = instantiate(Some(&table), &list_int, "(fn [(index : int)] (nth data index))", vec![0]);
