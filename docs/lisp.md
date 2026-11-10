@@ -39,6 +39,7 @@ Integers, floats, booleans, text, vectors, lists, arrays, records and functions 
 
 | Form | Meaning |
 | --- | --- |
+| `->` | Thread a value into the first input of each following call. |
 | `assoc` | Return a record with updated fields. |
 | `case` | Match a value against literal alternatives. |
 | `concat` | Join collections with a common element type. |
@@ -46,7 +47,7 @@ Integers, floats, booleans, text, vectors, lists, arrays, records and functions 
 | `defmacro` | Expand syntax before checking the workspace. |
 | `defn` | Define a reusable function with typed inputs. |
 | `defnode` | Define a reusable node with editable parameter metadata. |
-| `error_rows` | Expose deferred diagnostics as data rows. |
+| `error_rows` | Turn flagged integer rows into geometry diagnostics. |
 | `filter` | Keep elements for which a predicate returns true. |
 | `fn` | Create a pure anonymous function. |
 | `fold` | Accumulate a result over a bounded collection. |
@@ -59,7 +60,7 @@ Integers, floats, booleans, text, vectors, lists, arrays, records and functions 
 | `list` | Construct a homogeneous list. |
 | `map` | Apply a pure function to corresponding collection elements. |
 | `quasiquote` | Build macro syntax with unquoted substitutions. |
-| `quote` | Return syntax without evaluating it. |
+| `quote` | Macro templates use quasiquote (`); plain quote is reserved. |
 | `reduce` | Reduce a collection into one accumulator value. |
 | `ref` | Read another graph with optional input overrides. |
 | `scan` | Collect intermediate accumulator values. |
@@ -80,14 +81,15 @@ Each row is a lookup target and an example from its registry entry.
 | Namespace | Example |
 | --- | --- |
 | `/` | `(/ 1.0 1.0)` |
-| `array/` | `(array/compact (array/int 1 1))` |
+| `array/` | `(array/compact (array/int 3 1))` |
 | `audio/` | `(audio/load "example")` |
 | `color/` | `(color/gradient (list "#5aaaf0") 1.0)` |
 | `draw/` | `(draw/background "#5aaaf0")` |
 | `float/` | `(float/fma_checked 1.0 1.0 1.0)` |
 | `frame/` | `(frame/dt)` |
 | `gpu/` | `(gpu/depth)` |
-| `host/` | `(host/dialog "example" true)` |
+| `graph/` | `(graph/chains {:primitive_of_vertex (array/int 3 1) :next_vertex (array/int 3 1) :previous_vertex (array/int 3 1) :edge_of_vertex (array/int 3 1) :opposite_vertex (array/int 3 1) :edge_a (array/int 3 1) :edge_b (array/int 3 1) :point_edge_offsets (array/int 3 1) :point_edges (array/int 3 1) :point_vertex_offsets (array/int 3 1) :point_vertices (array/int 3 1)})` |
+| `host/` | `(host/dialog "open_file" false)` |
 | `image/` | `(image/load "example")` |
 | `key/` | `(key/down "example")` |
 | `material/` | `(material/standard)` |
@@ -95,9 +97,9 @@ Each row is a lookup target and an example from its registry entry.
 | `rand/` | `(rand/at 1 1)` |
 | `scene/` | `(scene/camera)` |
 | `settings/` | `(settings/config)` |
-| `sop/` | `(sop/attr_from_image nil (image/noise :width 1 :height 1))` |
+| `sop/` | `(sop/adjacency nil)` |
 | `text/` | `(text/blank? "example")` |
-| `ui/` | `(ui/canvas (draw/merge))` |
+| `ui/` | `(workspace canvas_example (graph picture :context draw (draw/merge)) (graph editor :context editor (ui/workspace (ui/canvas (ref picture)))))` |
 | `value/` | `(* 1.0 1.0)` |
 | `world/` | `(world/gradient)` |
 

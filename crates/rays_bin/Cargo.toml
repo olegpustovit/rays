@@ -35,3 +35,6 @@ ogpu_vulkan = { path = "../ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ogpu_metal = { path = "../ogpu_metal" }
+
+[lints]
+workspace = true

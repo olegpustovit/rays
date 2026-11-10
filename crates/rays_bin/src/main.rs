@@ -11,9 +11,9 @@ fn var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }
 
-fn process() -> workspace::process {
+fn process() -> workspace::Process {
     let max_frames = var("RAYS_MAX_FRAMES").map(|t| t.trim().parse::<i64>().unwrap_or_else(|_| die("rays: RAYS_MAX_FRAMES must be an integer")));
-    workspace::process { max_frames, crash_dir: var("RAYS_CRASH_DIR"), profile: std::env::var("RAYS_PROFILE").is_ok(), preferences: var("RAYS_EDITOR_PREFERENCES"), ui_font: var("RAYS_UI_FONT") }
+    workspace::Process { max_frames, crash_dir: var("RAYS_CRASH_DIR"), profile: std::env::var("RAYS_PROFILE").is_ok(), preferences: var("RAYS_EDITOR_PREFERENCES"), ui_font: var("RAYS_UI_FONT") }
 }
 
 fn native(text: Option<String>, path: &str) {
@@ -125,7 +125,7 @@ fn run(args: Vec<String>) {
         ["doc", "--markdown"] => print!("{}", documentation::guide().unwrap_or_else(|m| die(&m))),
         ["doc", options @ ..] => {
             let mut query = None;
-            for option in options { match *option { "--json" | "--all" => (), value if !value.starts_with('-') && query.is_none() => query = Some(value), bad => usage(bad) } }
+            for option in options { match *option { "--json" | "--all" => (), value if query.is_none() && (!value.starts_with('-') || matches!(value, "-" | "->")) => query = Some(value), bad => usage(bad) } }
             let output = documentation::print(query, options.contains(&"--json"), options.contains(&"--all")).unwrap_or_else(|m| die(&m));
             print!("{output}");
         },
@@ -148,6 +148,7 @@ fn run(args: Vec<String>) {
             }
         }
         ["fmt", f] => {
+            if f.starts_with('-') { usage(f); }
             let (out, err, code) = fmt(f);
             eprint!("{err}");
             print!("{out}");
@@ -155,12 +156,14 @@ fn run(args: Vec<String>) {
                 std::process::exit(code)
             }
         }
-        ["mem", f] => mem_command(f, 120),
-        ["mem", f, "--frames", n] => match n.parse::<i64>() {
+        ["mem", f] if !f.starts_with('-') => mem_command(f, 120),
+        ["mem", f, "--frames", n] if !f.starts_with('-') => match n.parse::<i64>() {
             Ok(frames) if frames > 0 => mem_command(f, frames),
-            _ => die("rays: --frames takes a positive count"),
+            _ => usage(n),
         },
         ["web", f, "-o", dir] => {
+            if f.starts_with('-') { usage(f); }
+            if dir.starts_with('-') { usage(dir); }
             if let Err(m) = web(f, dir) {
                 if !m.is_empty() {
                     eprintln!("{m}");
