@@ -119,8 +119,13 @@ fn append_timings(target_dir: &Path, timings: &[TestTiming]) -> io::Result<()> {
     let days = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() / 86_400;
     let (year, month, day) = civil_date(days.saturating_sub(30) as i64);
     let cutoff = format!("{year:04}-{month:02}-{day:02}");
-    let old = fs::read_to_string(&path).unwrap_or_default();
-    let mut file = fs::File::create(&path)?;
+    let old = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error),
+    };
+    let temporary = target_dir.join("t-times.tsv.tmp");
+    let mut file = fs::File::create(&temporary)?;
     file.write_all(b"date\tcrate\ttest\tseconds\tstatus\tcommit\n")?;
     for line in old.lines().skip(1).filter(|line| line.split('\t').next().is_some_and(|day| day >= cutoff.as_str())) {
         writeln!(file, "{line}{}", if line.split('\t').count() == 4 { "\tunknown\tunknown" } else { "" })?;
@@ -132,6 +137,9 @@ fn append_timings(target_dir: &Path, timings: &[TestTiming]) -> io::Result<()> {
         writeln!(file, "{date}\t{}\t{}\t{:.6}\t{}\t{commit}", escape_tsv(&timing.crate_name),
             escape_tsv(&timing.test), timing.elapsed.as_secs_f64(), timing.status)?;
     }
+    file.flush()?;
+    drop(file);
+    fs::rename(temporary, path)?;
     Ok(())
 }
 
@@ -626,8 +634,7 @@ fn run_gpu_group(cases: Vec<TestCase>, args: &Args, run_started: Instant, timeou
                 else if let Some(value) = line.strip_prefix("RAYS_CASE_END:") {
                     if let Some((name, seconds)) = value.split_once('\t') {
                         if let Some(case) = cases.iter().find(|case| case.name == name) {
-                            let elapsed = seconds.parse::<f64>().ok().filter(|value| value.is_finite() && *value >= 0.0)
-                                .map(Duration::from_secs_f64).unwrap_or_else(|| started.elapsed());
+                            let elapsed = seconds.parse::<f64>().ok().and_then(|value| Duration::try_from_secs_f64(value).ok()).unwrap_or_else(|| started.elapsed());
                             outcomes.push(TestOutcome { order: case.order,
                                 timing: TestTiming { crate_name: case.crate_name.clone(), test: case.name.clone(), elapsed, status: if skipped { "skip" } else { "pass" } },
                                 failure_code: if skipped && env::var("RAYS_ALLOW_SKIP").as_deref() != Ok("1") { 1 } else { 0 },
@@ -689,8 +696,8 @@ fn recorded_timings(target: &Path) -> HashMap<(String, String), Duration> {
         let columns: Vec<_> = row.split('\t').collect();
         if columns.len() >= 4 && (columns.len() == 4 || columns[4] == "pass") {
             if let Ok(seconds) = columns[3].parse::<f64>() {
-                if seconds.is_finite() && seconds > 0.0 {
-                    times.insert((columns[1].into(), columns[2].into()), Duration::from_secs_f64(seconds));
+                if let Ok(duration) = Duration::try_from_secs_f64(seconds) {
+                    if !duration.is_zero() { times.insert((columns[1].into(), columns[2].into()), duration); }
                 }
             }
         }
@@ -1277,6 +1284,30 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn contention_reduces_workers_and_retries_each_case_once_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_path("contention");
+        fs::create_dir_all(root.join("active")).unwrap();
+        let fixture = root.join("case");
+        fs::write(&fixture, "#!/bin/sh\nname=$3\nbase=${0%/*}\n: > \"$base/active/$$\"\nset -- \"$base\"/active/*\nprintf '%s %s\\n' \"$name\" \"$#\" >> \"$base/calls\"\nsleep 0.03\nrm \"$base/active/$$\"\n").unwrap();
+        fs::set_permissions(&fixture, fs::Permissions::from_mode(0o755)).unwrap();
+        let cases: Vec<_> = (0..8).map(|order| TestCase { order, executable: fixture.clone(), crate_name: "fixture".into(), name: format!("case_{order}") }).collect();
+        let baselines = cases.iter().map(|case| ((case.crate_name.clone(), case.name.clone()), Duration::from_micros(1))).collect();
+        let args = parse_args(std::iter::empty()).unwrap();
+        let outcomes = run_test_batch(cases, 4, &args, Instant::now(), Some(Duration::from_secs(3)), &baselines);
+        assert_eq!(outcomes.len(), 8);
+        assert!(outcomes.iter().all(|outcome| outcome.failure_code == 0));
+        let calls = fs::read_to_string(root.join("calls")).unwrap();
+        let calls: Vec<_> = calls.lines().map(|line| { let (name, active) = line.split_once(' ').unwrap(); (name, active.parse::<usize>().unwrap()) }).collect();
+        assert_eq!(calls.len(), 16);
+        assert!(calls[4..8].iter().all(|(_, active)| *active <= 2), "workers did not drop to two: {calls:?}");
+        assert!(calls[8..].iter().all(|(_, active)| *active == 1), "retries overlapped: {calls:?}");
+        for index in 0..8 { assert_eq!(calls.iter().filter(|(name, _)| *name == format!("case_{index}")).count(), 2); }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn qualification_runs_crates_in_order_and_stops_at_first_failure() {
         use std::os::unix::fs::PermissionsExt;
         let root = temp_path("qualification");
@@ -1586,6 +1617,17 @@ mod tests {
         assert_eq!(date.len(), 10);
         assert!(row.starts_with("test\\tcrate\tmodule::case\\nname\t1.250000\tfail\t"));
         fs::remove_dir_all(target_dir).unwrap();
+    }
+
+    #[test]
+    fn recorded_timings_ignore_nonfinite_and_overflowing_values() {
+        let root = temp_path("invalid-times");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("t-times.tsv"), "date\tcrate\ttest\tseconds\tstatus\tcommit\n2026-01-01\tc\tlarge\t1e300\tpass\tx\n2026-01-01\tc\tnan\tNaN\tpass\tx\n2026-01-01\tc\tvalid\t0.25\tpass\tx\n").unwrap();
+        let timings = recorded_timings(&root);
+        assert_eq!(timings.len(), 1);
+        assert_eq!(timings[&("c".into(), "valid".into())], Duration::from_millis(250));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

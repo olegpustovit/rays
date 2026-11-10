@@ -1,8 +1,8 @@
 use std::env;
 use std::fs::{self, FileTimes, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant, SystemTime};
 
 const LEAF_BUDGET: Duration = Duration::from_secs(1);
@@ -58,6 +58,13 @@ enum BudgetResult {
 }
 
 fn main() -> ExitCode {
+    if env::args().nth(1).as_deref() == Some("profile") {
+        return match profile() {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(error) => { eprintln!("buildtime: {error}"); ExitCode::FAILURE }
+        };
+    }
     if env::args().nth(1).as_deref() == Some("gc") {
         return match workspace_root().and_then(|root| gc(&target_dir(&root)).map_err(|error| error.to_string())) {
             Ok(()) => ExitCode::SUCCESS,
@@ -68,13 +75,13 @@ fn main() -> ExitCode {
         Some("check") => true,
         Some("measure") => false,
         Some("-h" | "--help") => {
-            println!("usage: cargo run -p buildtime -- check|measure|gc\n\
+            println!("usage: cargo run -p buildtime -- check|measure|profile|gc\n\
                       Override canaries with BUILDTIME_LEAF, BUILDTIME_MIDDLE, and BUILDTIME_TOP.\n\
                       Editor cascade: BUILDTIME_EDITOR_TOUCH (default flow_ir), BUILDTIME_EDITOR (default rays_bin).");
             return ExitCode::SUCCESS;
         }
         _ => {
-            eprintln!("usage: cargo run -p buildtime -- check|measure|gc");
+            eprintln!("usage: cargo run -p buildtime -- check|measure|profile|gc");
             return ExitCode::from(2);
         }
     };
@@ -93,6 +100,79 @@ fn main() -> ExitCode {
         }
     }
 }
+
+/// Same command on each machine: preserve the active dev profile and shared incremental cache.
+fn profile() -> Result<bool, String> {
+    let root = workspace_root()?;
+    let mut timings = Vec::new();
+    // Running this tool itself populates deps; those executable/dep-info files do not warm the app.
+    let cold = fs::read_dir(target_dir(&root).join("debug/deps")).map_or(true, |files| {
+        !files.filter_map(Result::ok).any(|file| !file.file_name().to_string_lossy().starts_with("buildtime-"))
+    });
+    let result = (|| {
+        timed(if cold { "profile cold-build" } else { "profile cached-build" }, None, &mut timings, || cargo_build(&root, "rays_bin"))?;
+        let within_budget = timed("profile flow_ir-touch-build", Some(TOP_BUDGET), &mut timings, || {
+            with_touched_sources(&[root.join("crates/flow_ir/src/lib.rs")], || cargo_build(&root, "rays_bin"))
+        })?;
+        Ok(within_budget & corpus(&root, &mut timings)?)
+    })();
+    persist_timings(&root, &timings, result.as_ref().is_ok_and(|passed| *passed))?;
+    print_slowest(&timings);
+    if !cold { println!("profile: cold-build not measured; shared cache preserved"); }
+    result
+}
+
+fn checked_command(command: &mut Command, limit: Duration) -> Result<(), String> {
+    command.stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let mut stderr = child.stderr.take().expect("captured stderr");
+    let reader = std::thread::spawn(move || { let mut bytes = Vec::new(); stderr.read_to_end(&mut bytes).map(|_| bytes) });
+    let started = Instant::now();
+    let result = loop {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            break if status.success() { Ok(()) } else { Err(format!("checker exited with {status}")) };
+        }
+        if started.elapsed() >= limit {
+            // ponytail: `rays check` does not fork; use process groups/Jobs if checking gains subprocesses.
+            child.kill().map_err(|error| error.to_string())?;
+            let _ = child.wait();
+            break Err(format!("checker exceeded {:.3}s", limit.as_secs_f64()));
+        }
+        std::thread::sleep(Duration::from_millis(2).min(limit.saturating_sub(started.elapsed())));
+    };
+    let stderr = reader.join().map_err(|_| "checker stderr reader panicked".to_owned())?.map_err(|error| error.to_string())?;
+    io::stderr().write_all(&stderr).map_err(|error| error.to_string())?;
+    result
+}
+
+fn corpus(root: &Path, timings: &mut Vec<Timing>) -> Result<bool, String> {
+    let mut sketches = fs::read_dir(root.join("sketches")).map_err(|error| error.to_string())?
+        .map(|entry| entry.map(|entry| entry.path())).collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    sketches.retain(|path| path.extension().is_some_and(|extension| extension == "rays"));
+    sketches.sort();
+    if sketches.is_empty() { return Err("no sketches in corpus".into()); }
+    let binary = target_dir(root).join("debug").join(format!("rays{}", env::consts::EXE_SUFFIX));
+    let started = Instant::now();
+    let mut passed = true;
+    for path in &sketches {
+        let remaining = TOP_BUDGET.saturating_sub(started.elapsed());
+        if remaining.is_zero() { eprintln!("buildtime: corpus exceeded 15s before {}", path.display()); passed = false; break; }
+        let label = format!("corpus {}", path.strip_prefix(root).unwrap_or(path).display());
+        let mut command = Command::new(&binary);
+        command.current_dir(root).arg("check").arg(path);
+        if matches!(path.file_stem().and_then(|name| name.to_str()), Some("swarm" | "sop_gallery")) {
+            command.env("RAYS_PROFILE", "1");
+        } else { command.env_remove("RAYS_PROFILE"); }
+        let checked = timed(&label, Some(Duration::from_secs(1)), timings, || checked_command(&mut command, remaining.min(Duration::from_secs(1))));
+        match checked {
+            Ok(within_budget) => passed &= within_budget,
+            Err(error) => { eprintln!("buildtime: {label}: {error}"); passed = false; }
+        }
+    }
+    passed &= add_timing("corpus total", started.elapsed(), Some(TOP_BUDGET), timings);
+    Ok(passed)
+}
+
 
 fn run(enforce_budgets: bool) -> Result<bool, String> {
     let root = workspace_root()?;
@@ -148,7 +228,7 @@ fn run(enforce_budgets: bool) -> Result<bool, String> {
         match build {
             Ok(within_budget) => {
                 passed &= !enforce_budgets || within_budget;
-                print_cargo_timing_report(&root)?;
+                if let Err(error) = print_cargo_timing_report(&root) { eprintln!("buildtime: {error}"); passed = false; }
             }
             Err(error) => {
                 eprintln!("buildtime: {error}");
@@ -596,7 +676,7 @@ fn parse_cargo_timing_report(html: &str) -> Result<Vec<(String, Duration)>, Stri
         }
         rest = &rest[row_end + 4..];
     }
-    if rows.is_empty() {
+    if rows.is_empty() && !html.contains("const UNIT_DATA = [];") {
         return Err("unit table has no timing rows".into());
     }
     let mut packages: Vec<(String, Duration)> = Vec::new();
@@ -776,6 +856,15 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn checker_deadline_terminates_a_stuck_process() {
+        let started = Instant::now();
+        let error = checked_command(Command::new("sleep").arg("2"), Duration::from_millis(50)).unwrap_err();
+        assert!(error.contains("exceeded"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
     #[test]
     fn gc_removes_only_old_sessions_and_executables_and_persists_status() {
         let temp = TempFile::new(b"");
@@ -830,6 +919,13 @@ mod tests {
                 ("beta".into(), Duration::from_millis(900)),
             ]
         );
+    }
+
+    #[test]
+    fn cargo_timing_report_accepts_a_cached_build_with_no_units() {
+        let html = "<table id=\"unit-table\"><tbody></tbody></table><script>const UNIT_DATA = [];</script>";
+        assert!(parse_cargo_timing_report(html).unwrap().is_empty());
+        assert!(parse_cargo_timing_report("<table id=\"unit-table\"><tbody></tbody></table>").is_err());
     }
 
     #[test]

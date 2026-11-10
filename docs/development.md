@@ -6,9 +6,11 @@ No opam, Dune or OCaml compiler is needed.
 ```sh
 cargo check -p flow_ir                  # typecheck after an edit
 cargo t -p flow_ir filter               # focused regression with deadlines
-cargo t -p rays_bin --test e2e          # corpus boundary at a stable checkpoint
+cargo t -p web_export --test e2e          # corpus boundary at a stable checkpoint
 cargo run -p gate -- deps               # architecture boundary check
 cargo run -p buildtime -- check         # explicit build-time qualification
+cargo run -p buildtime -- profile       # app build, flow_ir touch and bounded corpus
+cargo t --all                          # sequential crate qualification, stop at first red
 ```
 
 `cargo t` enforces a 5-second case deadline and 60-second test-run deadline. Its build has a
@@ -53,3 +55,30 @@ performance targets are met.
 SDL tests set their own dummy driver hints: do not globally set SDL_VIDEODRIVER=dummy for their
 whole suite (the environment overrides SDL_SetHint). The Cocoa window case needs a graphical
 session; it reports No available video device in this environment.
+
+## Current profile measurements (2026-11-10)
+
+Run `cargo run -q -p buildtime -- profile` on each machine using the checked-in dev profile.
+It records app build, a real flow_ir source-touch app rebuild, and sorted sketch checks with
+hard 1-second process and 15-second corpus limits in `target/build-times.tsv`. A cold build is
+labelled cold only when the shared dependency cache is empty; preserve a warm cache. Set
+`RAYS_PROFILE=1` on an individual `target/debug/rays check sketches/NAME.rays` to see exclusive
+phase timings and static-map execution/refusal details. `buildtime -- check` separately checks
+the leaf/middle/top source-touch budgets and runs the middle/top suites through `cargo t`.
+
+| Machine / profile | Cold app build | Cached app build | flow_ir touch app build | Corpus |
+| --- | --- | --- | --- | --- |
+| Apple M1, arm64, rustc 1.99.1, current O1 | Unmeasured; warm cache retained | 0.121 s | 4.011 s | Red; stopped at 15.019 s before all 49 files |
+| Windows / current profile | Unmeasured; machine unavailable | Unmeasured | Unmeasured | Unmeasured |
+
+This is current-profile evidence, not a completed O0/O1 comparison. The corpus's one-second
+budget still fails for `sop_gallery`, the three swarm sketches and `ws_rosette`. Direct complete
+probes measured swarm at 2.915 s and gallery at 1.510 s. Swarm materializes 30.84 million exact
+integer corners (1.964 s), 10.28 million offsets and 5.148 million color vectors; validation keeps
+those computed values checked. CLI lowering omits editor probe records, while editor lowering
+retains them. Geometry bytes and selected computed-error diagnostics match in the regression.
+
+`cargo t --all` is implemented and its dispatcher regression passes; complete native qualification
+is still blocked here. GC retains the recent warm cache: its observed size is 75.537 GB and zero
+artifacts qualified for seven-day deletion. The Cocoa window check also needs a graphical session.
+These limits remain failures, not skipped successes.

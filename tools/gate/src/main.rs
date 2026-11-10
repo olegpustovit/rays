@@ -580,6 +580,7 @@ struct Package {
 
 #[derive(Default)]
 struct ParsedManifest {
+    disable_auto_tests: bool,
     package_name: Option<String>,
     lib_name: Option<String>,
     lib_unit_tests: bool,
@@ -798,6 +799,7 @@ fn parse_manifest(path: &Path) -> Result<ParsedManifest, String> {
         .and_then(|entries| entries.get("test"))
         .is_none_or(|(value, _)| value != "false");
     let mut parsed = ParsedManifest {
+        disable_auto_tests: sections.get(&vec!["package".into()]).and_then(|entries| entries.get("autotests")).is_some_and(|(value, _)| value == "false"),
         package_name: field(&["package"], "name"),
         lib_name: field(&["lib"], "name"),
         lib_unit_tests,
@@ -878,7 +880,7 @@ fn package_targets(dir: &Path, manifest: &ParsedManifest) -> Result<(bool, bool)
         has_gpu_dev_targets |= matches!(first, Some("examples" | "benches")) && !manifest_writer;
         // Same native target convention as rays-t; ordinary unit/e2e tests may use GPU types
         // without creating a device. Explicit targets are recorded while parsing the manifest.
-        has_gpu_dev_targets |= first == Some("tests") && components.next().is_none()
+        has_gpu_dev_targets |= !manifest.disable_auto_tests && first == Some("tests") && components.next().is_none()
             && file.file_stem().and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with("gpu_") || name.starts_with("window_"));
     }
@@ -1369,6 +1371,26 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
 }
 
 
+fn docs(workspace: &Path) -> Result<Vec<String>, String> {
+    // rays-t bounds setup/build, each case and the test run. Gate checks never refresh fixtures.
+    for (package, filter, target) in [
+        ("flow_check", "examples_check", None),
+        ("rays_bin", "cli_help_errors_json_and_documentation", Some("cli")),
+        ("rays_bin", "registry_metadata_contracts", Some("cli")),
+    ] {
+        let mut command = std::process::Command::new("cargo");
+        command.current_dir(workspace).args(["t", "--profile", "default", "-p", package])
+            .env_remove("RAYS_UPDATE_FIXTURES").env_remove("RAYS_ALLOW_SKIP");
+        if let Some(target) = target { command.args(["--test", target]); }
+        let status = command.arg(filter).status().map_err(|error| format!("cannot run registry check: {error}"))?;
+        if !status.success() {
+            return Ok(vec![format!("docs gate: {package}::{filter} failed ({status}); examples, descriptions, angle units and docs/lisp.md must match the registry")]);
+        }
+    }
+    Ok(Vec::new())
+}
+
+
 fn workspace_root() -> Result<PathBuf, String> {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -1380,8 +1402,8 @@ fn workspace_root() -> Result<PathBuf, String> {
 fn main() {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_else(|| "all".into());
-    if args.next().is_some() || !matches!(command.as_str(), "shape" | "deps" | "all") {
-        eprintln!("usage: cargo run -p gate -- <shape|deps|all>");
+    if args.next().is_some() || !matches!(command.as_str(), "shape" | "deps" | "docs" | "all") {
+        eprintln!("usage: cargo run -p gate -- <shape|deps|docs|all>");
         process::exit(2);
     }
     let workspace = match workspace_root() {
@@ -1394,7 +1416,12 @@ fn main() {
     let result = match command.as_str() {
         "shape" => shape(&workspace),
         "deps" => deps(&workspace),
-        _ => shape(&workspace).and_then(|mut errors| { errors.extend(deps(&workspace)?); Ok(errors) }),
+        "docs" => docs(&workspace),
+        _ => shape(&workspace).and_then(|mut errors| {
+            errors.extend(deps(&workspace)?);
+            if errors.is_empty() { errors.extend(docs(&workspace)?); }
+            Ok(errors)
+        }),
     };
     match result {
         Ok(issues) if issues.is_empty() => println!("{} gate passed", command),
@@ -1728,6 +1755,13 @@ mod tests {
         assert_eq!(roles(), (false, false), "the text manifest generator requires no device");
         fs::write(root.join("examples/interactive.rs"), "fn main() {}").unwrap();
         assert_eq!(roles(), (false, true), "additional examples retain native backend requirements");
+        fs::remove_dir_all(root.join("examples")).unwrap();
+        fs::create_dir_all(root.join("tests")).unwrap();
+        fs::write(root.join("tests/gpu_unused.rs"), "fn main() {}").unwrap();
+        fs::write(&manifest, "[package]\nname = \"app\"\nautotests = false\n").unwrap();
+        assert_eq!(roles(), (false, false), "disabled automatic test files are not targets");
+        fs::write(&manifest, "[package]\nname = \"app\"\nautotests = false\n[[test]]\nname = \"gpu_actual\"\n").unwrap();
+        assert_eq!(roles(), (false, true), "explicit tests remain active with autotests disabled");
         fs::remove_dir_all(&root).unwrap();
     }
 }
