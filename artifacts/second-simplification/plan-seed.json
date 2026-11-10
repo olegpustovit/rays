@@ -149,7 +149,7 @@
   },
   "Z7": {
     "status": "active",
-    "note": "WIP retained bodies/interner and exact local callable slots; current LispNode39/39; actual Orrery12 animated+30 idle passes with zero warmed lowering"
+    "note": "PAUSED WIP retained bodies/interner; earlier LispNode39/39, foundations470/470 and Orrery12+30 zero warmed lowering; latest mesh owner check passes"
   },
   "Z8": {
     "status": "done",
