@@ -9,8 +9,7 @@ fn main() {
         return;
     }
 
-    let root = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..");
-    let vulkan = root.join("crates/vulkan_sys");
+    let vulkan = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     cc::Build::new()
         .cpp(true)
         .file("src/vulkan_sys.cpp")

@@ -462,7 +462,6 @@ dependencies = [
  "cc",
  "native_layer_token_sys",
  "ogpu_core",
- "rays_math",
  "vulkan_sys",
 ]
 

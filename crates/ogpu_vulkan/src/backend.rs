@@ -2,7 +2,17 @@
 //! `ogpu_core::backend`, as for Metal.
 use ogpu_core::acceleration::{AdmittedBuild,BuildGeometry,BuildLayout};
 use ogpu_core::validation::{AdmittedBuffer, AdmittedTexture, TextureRead, TextureReadInto, StorageMode};
-use rays_math::float::{min as omin, max as omax};
+// NaN-propagating, signed-zero-aware min/max (the extent maths must not depend on operand order).
+fn omin(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y.is_nan() { return f64::NAN; }
+    if x == 0.0 && y == 0.0 { return if x.is_sign_negative() { x } else { y }; }
+    if x < y { x } else { y }
+}
+fn omax(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y.is_nan() { return f64::NAN; }
+    if x == 0.0 && y == 0.0 { return if x.is_sign_negative() { y } else { x }; }
+    if x > y { x } else { y }
+}
 use ogpu_core::{
     backend::{
         DepthState, Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,

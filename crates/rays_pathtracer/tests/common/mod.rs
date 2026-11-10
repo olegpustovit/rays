@@ -1,6 +1,6 @@
 //! Native test helpers select Metal or fatal-validation Vulkan. Tests report device absence explicitly.
 #![allow(dead_code)]
-#[path = "../../../renderer/tests/common/window.rs"]
+#[path = "../../../../tools/t/window_harness.rs"]
 pub mod window;
 
 use ogpu_core::error::{self, ErrorKind};

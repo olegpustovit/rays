@@ -1,4 +1,4 @@
-#[path = "../../renderer/tests/common/window.rs"]
+#[path = "../../../tools/t/window_harness.rs"]
 mod runner;
 #[path = "cases/goldens.rs"]
 mod goldens;

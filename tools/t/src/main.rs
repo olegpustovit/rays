@@ -861,7 +861,9 @@ fn default_target_dir() -> PathBuf {
     if let Some(target_dir) = env::var_os("CARGO_TARGET_DIR") {
         return target_dir.into();
     }
-    for directory in Path::new(env!("CARGO_MANIFEST_DIR")).ancestors() {
+    // The invoking workspace, not the runner's own: Rays runs this crate from the pxui/ checkout.
+    let start = env::current_dir().unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    for directory in start.ancestors() {
         if fs::read_to_string(directory.join("Cargo.toml"))
             .is_ok_and(|manifest| manifest.lines().any(|line| line.trim() == "[workspace]"))
         {
@@ -1289,7 +1291,7 @@ fn report_timeout(elapsed: Duration, operation: &str) -> i32 {
 
 #[cfg(test)]
 #[allow(dead_code)]
-#[path = "../../../crates/renderer/tests/common/window.rs"]
+#[path = "../window_harness.rs"]
 mod native_test_runner;
 #[cfg(test)]
 fn release_keepalive() {}
