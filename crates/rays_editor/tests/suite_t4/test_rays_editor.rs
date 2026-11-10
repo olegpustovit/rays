@@ -55,16 +55,11 @@ fn card_row((x, y, w, _): Rect) -> (i64, i64) {
     (x + w * 20 / 196, y + w * 36 / 196)
 }
 
-/// The packed PXUI instances of a composed scene, for exact comparisons.
-fn ui_bytes(scene: &[rays::scene::Node]) -> Vec<u8> {
-    let staged = rays::scene::layer::stage_native_render(900, 640, scene).unwrap_or_else(|m| panic!("{m}"));
-    let mut out = Vec::new();
-    for layer in &staged.layers {
-        if let rays::scene::layer::NativeLayer::UiLayer(batch, _) = layer {
-            out.extend_from_slice(batch.instances());
-        }
-    }
-    out
+/// The PXUI instances of the editor's last UI frame, for exact comparisons.
+fn ui_bytes(ed: &editor::Editor) -> Vec<pxui::draw::Instance> {
+    let ui = editor::private::ui(ed);
+    let ui = ui.borrow();
+    ui.output().draw.iter().flat_map(|layer| layer.instances.iter().copied()).collect()
 }
 
 const TEXT: &str = r#"(workspace inspectable
@@ -432,7 +427,7 @@ pub fn workspace_walk() {
         f.fps = fps;
         f
     };
-    let status = |ed: &editor::Editor, f: &frame::Frame| ui_bytes(&editor::scene(ed, f));
+    let status = |ed: &editor::Editor, _: &frame::Frame| ui_bytes(ed);
     ed = up(ed, at(1_000, 60.));
     let fps_initial = status(&ed, &at(1_000, 60.));
     ed = up(ed, at(1_030, 120.));
@@ -446,14 +441,14 @@ pub fn workspace_walk() {
     assert!(rays::easy_camera::control_area(&editor::camera(&ed)) == Some(panes.view), "3D camera gestures are not confined to the view column");
     let (ix, iy, _, _) = panes.inspector;
     let camera_header = (ix + 32, iy + 15);
-    let collapsed_scene = ui_bytes(&editor::scene(&ed, &current_frame));
+    let collapsed_scene = ui_bytes(&ed);
     let blank_inspector = (ix + 4, iy + 200);
     ed = up(ed, fre(10, vec![press(LeftButton, blank_inspector), release(LeftButton, blank_inspector), k('/'), k('w')]));
     assert!(!editor::flying(&ed), "same-frame inspector click routed a view-only shortcut");
     ed = up(ed, fre(11, vec![press(LeftButton, camera_header)]));
     ed = up(ed, fre(12, vec![release(LeftButton, camera_header)]));
     ed = up(ed, fre(13, vec![mv((10, 100))]));
-    let expanded_scene = ui_bytes(&editor::scene(&ed, &fr(13)));
+    let expanded_scene = ui_bytes(&ed);
     assert!(expanded_scene != collapsed_scene, "workspace camera accordion lost its armed press before the release frame");
     ed = up(ed, fre(14, vec![press(LeftButton, camera_header)]));
     ed = up(ed, fre(15, vec![release(LeftButton, camera_header)]));
@@ -462,7 +457,7 @@ pub fn workspace_walk() {
     ed = up(ed, fre(17, vec![press(LeftButton, render_header)]));
     ed = up(ed, fre(18, vec![release(LeftButton, render_header)]));
     ed = up(ed, fre(19, vec![mv((10, 100))]));
-    assert!(ui_bytes(&editor::scene(&ed, &fr(19))) != collapsed_scene, "workspace render accordion lost its armed press before the release frame");
+    assert!(ui_bytes(&ed) != collapsed_scene, "workspace render accordion lost its armed press before the release frame");
     ed = up(ed, fre(19, vec![k('/'), k('w')]));
     assert!(!editor::flying(&ed), "inspector child press did not focus its pane");
     // the header: the middle of the card is a row (or the [+ N more] row, which opens it)
@@ -552,14 +547,8 @@ pub fn workspace_walk() {
     }
     assert!(centered(&ed), "display-node cook did not publish the graph's result");
     assert!(!editor::scene(&ed, &current_frame).is_empty(), "sketch environment produced an empty composed scene");
-    // The whole workspace paints in batch groups, not one draw per label.
-    let staged = rays::scene::layer::stage_native_render(900, 640, &editor::scene(&ed, &current_frame)).unwrap_or_else(|m| panic!("{m}"));
-    let mut batches = 0;
-    for layer in &staged.layers {
-        if let rays::scene::layer::NativeLayer::UiLayer(batch, _) = layer {
-            batches += batch.batches().len();
-        }
-    }
+    // The whole workspace paints in a draw call per layer (and per image), not one per label.
+    let batches: usize = editor::private::ui(&ed).borrow().output().draw.iter().map(|l| 1 + l.breaks.len()).sum();
     assert!(batches > 0 && batches <= 32, "workspace UI draws were not batched: {batches}");
     let (graph_x, graph_y, graph_width, graph_height) = editor::panes(&ed, &fr(229)).graph;
     let menu_point = (graph_x + graph_width / 2, graph_y + graph_height / 2);

@@ -10,7 +10,6 @@ use renderer::renderer::Resource as res;
 use runtime_resources::image as RImage;
 use scene_command::display_list;
 use scene_command::render_ir::{self, Command};
-use scene_command::ui_batch;
 use std::sync::Arc;
 
 fn require(condition: bool, message: &str) {
@@ -261,10 +260,9 @@ fn window_resources_display_list_images() {
             _ => fail(&format!("changed layer invalidated unrelated retained Scene2 IR")),
         }
         let mut last_identity: Option<(String, i64)> = None;
+        let paint: scene::UiPaint = std::rc::Rc::new(|_, _| Ok(()));
         for i in 0..24 {
-            let mut b = ui_batch::Builder::create();
-            b.rect(i as f64, 0., 1., 1., -1, 0, 0., 0., false).expect("rect");
-            let frame = vec![layer::ui(None, b.publish().expect("publish")).expect("ui")];
+            let frame = vec![layer::ui(paint.clone(), 0, i)];
             let first = layer::stage_native_render(32, 32, &frame).expect("stage");
             require(std::rc::Rc::ptr_eq(&first, &layer::stage_native_render(32, 32, &frame).expect("stage")), "unchanged UI frame missed stage reuse");
             let now = first.retained.clone().expect("retained");

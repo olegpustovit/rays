@@ -833,25 +833,16 @@ check.  Scenes the engine does not cache (textured, `Scene.D3.Private.cacheable`
 an identity, so they are never retained.  `Scene` stays pure data; this is invisible to it.
 `test_retained_view_native` checks that direct, retained and camera-change frames agree.
 
-PXUI paints through a native-only instance layer. `Scene.Private.ui` wraps a
-renderer-neutral `Scene_command.Ui_batch` (64-byte rect, textured, Bézier
-wire-segment, and dot-grid instances grouped by clip and
-texture) and its bound textures. Staging keeps it as its own
-`Ui_layer`. PXUI reaches the batch builder through `Scene.Private.Ui_batch`,
-so its library depends on `rays` without a direct `scene_command` edge.
-Like `view3d`, the Render_ir materializer skips it, and enclosing
-Scene transforms and clips do not apply. `Renderer.Private
-.lower_ui` turns each batch into one indexed draw of the `Ui` pipeline family:
-vertex pulling reads the instances, a 24-byte affine uniform maps logical
-screen points to clip space, and the logical scissor is scaled to physical
-pixels once, with the other draws. `Ui` draws bind their texture directly,
-so the executor gives the family its own attachment class; it never shares
-an argument-buffer render pass with Scene2 draws. Instance and index bytes
-go through the digest-keyed mesh cache, so an unchanged UI re-uploads
-nothing. The glyph atlas is an ordinary image resource whose generation
-changes only when new glyphs are rasterized.
-PXUI publishes the atlas through public `Image.upload_rgba`, preserving the
-image identity on replacement and retrying a failed upload on the next frame.
+PXUI paints through a native-only UI layer. `Scene.Layer.ui` carries an opaque
+paint callback, a layer index and a stamp (equal stamps paint equal pixels, so
+staging and retained replay still hit). Staging keeps it as its own `Ui_layer`;
+like `view3d`, the Render_ir materializer skips it, and enclosing Scene
+transforms and clips do not apply. The renderer lowers it to one marker draw
+that the executor plans as its own one-sample, depth-free batch over the whole
+target, and encoding calls the callback with the open pass
+(`scene_execution::UiPass`): PXUI's `pxui_render::Painter` draws the layer
+there. `rays` never sees PXUI types. `Shapes` (Lisp shapes and the marks
+fallback) keep the `Ui` pipeline family and its Lisp-generated shader.
 
 `Canvas.render` uses the same lowering, pipeline variants, validation, and
 completion path against a layerless owned texture on the shared device: the

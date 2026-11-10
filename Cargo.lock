@@ -505,7 +505,6 @@ dependencies = [
  "rays_math",
  "rays_shell",
  "renderer",
- "scene_command",
  "sdl3",
 ]
 
@@ -517,6 +516,7 @@ dependencies = [
  "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
+ "pxui",
 ]
 
 [[package]]
@@ -710,6 +710,7 @@ dependencies = [
  "ogpu_vulkan",
  "param",
  "pxui",
+ "pxui_render",
  "rays",
  "rays_math",
  "renderer",

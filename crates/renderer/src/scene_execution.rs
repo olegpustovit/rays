@@ -286,6 +286,35 @@ pub struct SampledDraw {
     pub vertex_attributes: Option<(String, Bytes)>,
     pub samples: i64,
     pub draw: GeometryDraw,
+    /// A UI layer its owner paints into the frame's pass in this draw's place (no mesh, texture
+    /// or pipeline of its own).
+    pub ui: Option<UiLayer>,
+}
+
+/// Where a UI layer is painted: the frame's open 1-sample, depth-free pass over its RGBA8 target
+/// (viewport and scissor cover it), `size_px` pixels at `scale` pixels per point. `frame` is
+/// distinct for every frame encoded in the process.
+pub struct UiPass<'a> {
+    pub encoder: &'a backend::RenderEncoder,
+    pub device: &'a Device,
+    pub size_px: [u32; 2],
+    pub scale: f32,
+    pub frame: u64,
+}
+
+/// Paints layer `layer` of its owner's last UI frame (PXUI's painter, from the shell).
+pub type UiPaint = Rc<dyn Fn(&UiPass, usize) -> Result<(), Error>>;
+
+#[derive(Clone)]
+pub struct UiLayer {
+    pub paint: UiPaint,
+    pub layer: usize,
+}
+
+impl UiLayer {
+    fn identity(&self) -> (usize, usize) {
+        (Rc::as_ptr(&self.paint) as *const u8 as usize, self.layer)
+    }
 }
 
 /// Retain draws by shared owner identity.
@@ -385,6 +414,7 @@ struct AutomaticSignature {
     uniform_offset: Option<i64>,
     vertex_count: i64,
     index_count: i64,
+    ui: Option<(usize, usize)>,
 }
 
 #[derive(Clone)]
@@ -411,6 +441,8 @@ struct BatchPlan {
     driver_draws: Vec<BatchDraw>,
     resources: Vec<ResourceUse>,
     icb: RefCell<Option<Icb>>,
+    /// a UI layer painted in this batch's place
+    ui: Option<UiLayer>,
 }
 
 struct ReplayPlan {
@@ -444,6 +476,7 @@ struct PreparedSlot {
     uniform: Option<UniformSlice>,
     gpu_vertices: Option<GpuVertices>,
     vertex_attributes: Option<CachedAuxiliaryRef>,
+    ui: Option<UiLayer>,
 }
 
 struct PreparedScratch {
@@ -619,6 +652,8 @@ pub struct SceneExecution {
     sun: Option<SunMap>,
     sun_passes: i64,
     in_flight: Option<i64>,
+    /// this frame's process-wide number, for UI painters (`UiPass::frame`)
+    encoded_frame: u64,
     dead: bool,
     /// A borrowed device (shared with a window) is never destroyed here.
     owns_device: bool,
@@ -997,6 +1032,7 @@ pub fn create(
                 sun: None,
                 sun_passes: 0,
                 in_flight: None,
+                encoded_frame: 0,
                 dead: false,
             })
         }
@@ -1908,6 +1944,8 @@ fn coalesce_draws(draws: &[Draw]) -> Result<Vec<Draw>, Error> {
     let stride = |mesh: &Mesh| if mesh.vertex_count == 0 { 0 } else { mesh.vertex_bytes_len() as i64 / mesh.vertex_count };
     let compatible = |first: &SampledDraw, next: &SampledDraw| {
         matches!((&first.draw.mesh.key, &next.draw.mesh.key), (MeshKey::Host(_), MeshKey::Host(_)))
+            && first.ui.is_none()
+            && next.ui.is_none()
             && first.family == next.family
             && first.blend == next.blend
             && first.samples == next.samples
@@ -2029,8 +2067,15 @@ fn auxiliary_signature(entry: &(Rc<AuxiliaryResource>, CachedAuxiliaryRef, Cache
 /// buffer cannot turn into a false cache hit. Completed ring slices may be replayed when the whole uniform set is
 /// unchanged. A changed set gets a different page and offsets.
 fn automatic_signature(slot: &PreparedSlot) -> AutomaticSignature {
-    let item = slot.mesh.as_ref().expect("slot mesh").borrow();
     let mut signature_state = slot.state.clone().expect("slot state");
+    if let Some(ui) = &slot.ui {
+        return AutomaticSignature {
+            family: slot.family, blend: slot.blend, samples: slot.samples, state: signature_state, texture: None,
+            auxiliary: None, environment: None, buffer: 0, index_offset: 0, gpu_vertices: None, vertex_attributes: None,
+            uniform_buffer: None, uniform_offset: None, vertex_count: 0, index_count: 0, ui: Some(ui.identity()),
+        };
+    }
+    let item = slot.mesh.as_ref().expect("slot mesh").borrow();
     if slot.uniform.is_some() {
         signature_state.transform_uniforms = None;
     }
@@ -2050,6 +2095,7 @@ fn automatic_signature(slot: &PreparedSlot) -> AutomaticSignature {
         uniform_offset: slot.uniform.as_ref().map(|u| u.offset),
         vertex_count: item.vertex_count,
         index_count: item.index_count,
+        ui: None,
     }
 }
 
@@ -2068,6 +2114,7 @@ fn make_prepared_slot() -> PreparedSlot {
         uniform: None,
         vertex_attributes: None,
         gpu_vertices: None,
+        ui: None,
     }
 }
 
@@ -2098,6 +2145,7 @@ fn clear_prepared_scratch(scratch: &mut PreparedScratch) {
         slot.mesh = None;
         slot.uniform = None;
         slot.vertex_attributes = None;
+        slot.ui = None;
     }
     scratch.length = 0;
 }
@@ -2328,6 +2376,16 @@ fn encode_batch(value: &mut SceneExecution, encoder: &backend::RenderEncoder, ba
             Some(DepthState { depth_compare: batch.state.depth_compare, depth_write: batch.state.depth_write }),
         )?;
     }
+    if let Some(ui) = &batch.ui {
+        let pass = UiPass {
+            encoder,
+            device: &value.device,
+            size_px: [bound_w as u32, bound_h as u32],
+            scale: bound_w as f32 / value.configuration.logical_width.max(1) as f32,
+            frame: value.encoded_frame,
+        };
+        (ui.paint)(&pass, ui.layer)?;
+    }
     if !batch.draws.is_empty() && visible {
         if !batch.resources.is_empty() {
             backend::use_resources(&encoder, &batch.resources)?;
@@ -2450,6 +2508,8 @@ fn encode_frame(value: &mut SceneExecution, frame: &Acquired, clear: (f64, f64, 
             return Err(e);
         }
     };
+    static ENCODED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    value.encoded_frame = ENCODED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let encoded = (|| -> Result<(), Error> {
         let mut open: Option<backend::RenderEncoder> = None;
         for (index, batch) in batches.iter().enumerate() {
@@ -2964,11 +3024,22 @@ fn plan_batches(value: &mut SceneExecution) -> Result<Vec<Rc<BatchPlan>>, Error>
             let slot = &value.prepared_scratch.slots[index];
             (slot.family, slot.samples, slot.state.clone().expect("slot state"))
         };
+        if let Some(ui) = value.prepared_scratch.slots[index].ui.clone() {
+            let (width, height) = (value.configuration.physical_width, value.configuration.physical_height);
+            let state = State { viewport: (0, 0, width, height), scissor: (0, 0, width, height), cull: Cull::CullNone, ..state };
+            planned.push(Rc::new(BatchPlan {
+                family, samples: 1, state, first, draws: vec![], driver_draws: vec![], resources: vec![], icb: RefCell::new(None), ui: Some(ui),
+            }));
+            first = false;
+            index += 1;
+            continue;
+        }
         let class_ = attachment_class(family);
         let mut next = index + 1;
         while next < length && next - (index + 1) < 65_535 {
             let slot = &value.prepared_scratch.slots[next];
-            if attachment_class(slot.family) == class_
+            if slot.ui.is_none()
+                && attachment_class(slot.family) == class_
                 && slot.samples == samples
                 && same_pass_state(class_, &state, slot.state.as_ref().expect("slot state"))
             {
@@ -2990,6 +3061,7 @@ fn plan_batches(value: &mut SceneExecution) -> Result<Vec<Rc<BatchPlan>>, Error>
             resources: batch_resources_of(value, &draws),
             draws,
             icb: RefCell::new(None),
+            ui: None,
         };
         planned.push(Rc::new(batch));
         first = false;
@@ -3017,6 +3089,7 @@ fn plan_batches(value: &mut SceneExecution) -> Result<Vec<Rc<BatchPlan>>, Error>
             driver_draws: vec![],
             resources: vec![],
             icb: RefCell::new(None),
+            ui: None,
         }));
     }
     Ok(planned)
@@ -3180,7 +3253,7 @@ pub fn submit(
     };
     // An empty mesh (a zero-length line, a zero-radius circle) draws nothing: skip it instead of
     // failing the whole frame.
-    let draws: Vec<Draw> = draws.into_iter().filter(|entry| entry.draw.mesh.vertex_count > 0 && entry.draw.mesh.index_count > 0).collect();
+    let draws: Vec<Draw> = draws.into_iter().filter(|entry| entry.ui.is_some() || (entry.draw.mesh.vertex_count > 0 && entry.draw.mesh.index_count > 0)).collect();
     let valid_mesh = |mesh: &Mesh| {
         !mesh_key_string(&mesh.key).is_empty()
             && mesh.vertex_count > 0
@@ -3192,7 +3265,7 @@ pub fn submit(
     let supported = draws.iter().all(|entry| find_pipeline(value, entry.family, entry.blend, entry.samples).is_some());
     let valid = draws.iter().all(|entry| {
         [1, 4, 9, 16].contains(&entry.samples)
-            && valid_mesh(&entry.draw.mesh)
+            && (entry.ui.is_some() || valid_mesh(&entry.draw.mesh))
             && entry.texture.as_ref().is_none_or(|texture| valid_texture(texture))
             // a Scene2 mesh is untextured, a Scene2 quad samples its texture
             && match entry.family {
@@ -3306,6 +3379,16 @@ fn prepare_all(
 ) -> Result<(), Error> {
     for entry in draws {
         let position = value.prepared_scratch.length;
+        if let Some(ui) = &entry.ui {
+            let slot = &mut value.prepared_scratch.slots[position];
+            slot.family = entry.family;
+            slot.blend = entry.blend;
+            slot.samples = 1;
+            slot.state = Some(entry.draw.state.clone());
+            slot.ui = Some(ui.clone());
+            value.prepared_scratch.length += 1;
+            continue;
+        }
         let mode = &modes[position];
         let (family, draw) = (entry.family, &entry.draw);
         let gpu_vertices = resolve_gpu_vertices(value, entry)?;

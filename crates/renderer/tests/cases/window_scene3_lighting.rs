@@ -97,7 +97,7 @@ fn window_scene3_lighting() {
         primitive: Primitive::TriangleList,
     };
     let entry = |uniforms: Vec<u8>| -> Rc<SampledDraw> {
-        Rc::new(SampledDraw {
+        Rc::new(SampledDraw { ui: None,
             family: PipelineFamily::Scene3,
             blend: Blend::Replace,
             texture: None,

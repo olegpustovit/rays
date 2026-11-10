@@ -1,22 +1,15 @@
-//! Native pixel goldens pin kit widgets, overlays and graph zone tokens at the selected display density. Token geometry and every channel are checked.
+//! Pixel goldens pin kit widgets, overlays and graph zone tokens at 1x and 2x, rendered offscreen
+//! through the PXUI painter whatever the display's density. Token geometry and every channel are checked.
 use crate::common;
 use input::{Event, Platform};
 use pxui::ui::*;
 use rays::{canvas, frame, image, scene};
 use rays_math::color;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 const WIDTH: i64 = 320;
-fn scale() -> i64 {
-    static SCALE: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
-    *SCALE.get_or_init(|| {
-        let window = sdl3::Window::create("PXUI density", 1, 1, &[sdl3::WindowFlag::Hidden, sdl3::WindowFlag::HighPixelDensity]).expect("density probe");
-        let density = f64::from(window.pixel_density().expect("display pixel density"));
-        println!("PXUI native display density: {density}x");
-        assert!(density >= 1.0 && density.fract() == 0.0, "native Canvas requires whole pixel density: {density}");
-        density as i64
-    })
-}
+const DENSITIES: [i64; 2] = [1, 2];
 
 fn font_path() -> String {
     format!("{}/../../assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"))
@@ -26,7 +19,7 @@ fn golden_path(name: &str) -> String {
     format!("{}/../../crates/pxui/fixtures/{}", env!("CARGO_MANIFEST_DIR"), name)
 }
 
-fn frame_at(count: i64, height: i64) -> frame::Frame {
+fn frame_at(count: i64, height: i64, density: i64) -> frame::Frame {
     let mut input = input::at_time(count as f64 / 60.0);
     input.dt = 1.0 / 60.0;
     input.frame = count;
@@ -34,27 +27,29 @@ fn frame_at(count: i64, height: i64) -> frame::Frame {
     input.size = (WIDTH, height);
     input.pointer = (-100.0, -100.0);
     input.events = vec![Event::PointerMoved((-100.0, -100.0))];
-    frame::Frame { input, pixel_scale: (scale() as f64, scale() as f64), fps: 60.0, mouse_delta: (0.0, 0.0) }
+    frame::Frame { input, pixel_scale: (density as f64, density as f64), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
 
 /// The second frame of a fresh UI with the pointer parked away from every widget, rendered
-/// at the selected display density.
-fn render(height: i64, build: &mut dyn FnMut(&mut Ui)) -> canvas::Canvas {
-    let mut ui = Ui::create(Platform::Apple, None, Some(font_path()), &rays_shell::host::BACKEND);
+/// offscreen at `density`, and the painter's draw calls for it.
+fn render(density: i64, height: i64, build: &mut dyn FnMut(&mut Ui)) -> (canvas::Canvas, u64) {
+    let ui = Rc::new(RefCell::new(Ui::create(Platform::Apple, None, Some(font_path()), &rays_shell::host::BACKEND)));
     for count in 0..2 {
-        ui.frame(&frame_at(count, height), build);
+        ui.borrow_mut().frame(&frame_at(count, height, density), build);
     }
-    let canvas_ = canvas::create(WIDTH * scale(), height * scale()).expect("canvas");
+    let canvas_ = canvas::create(WIDTH * density, height * density).expect("canvas");
     let mut nodes = vec![scene::clear(color::rgb(228, 139, 161))];
     nodes.extend(rays_shell::host::scene(&ui, None));
-    canvas::render(Some(scale()), &canvas_, &nodes).expect("Canvas.render");
-    ui.destroy();
-    canvas_
+    let before = rays_shell::host::draw_calls();
+    canvas::render(Some(density), &canvas_, &nodes).expect("Canvas.render");
+    let calls = rays_shell::host::draw_calls() - before;
+    ui.borrow_mut().destroy();
+    (canvas_, calls)
 }
 
-/// Compare `canvas_` with the golden; a drift names the pixels that differ.
-fn check(name: &str, golden: &str, canvas_: canvas::Canvas) {
-    let golden = golden.replace("_2x.png", &format!("_{}x.png", scale()));
+/// Compare `canvas_` with the golden at `density`; a drift names the pixels that differ.
+fn check(name: &str, golden: &str, density: i64, canvas_: canvas::Canvas) {
+    let golden = golden.replace("_2x.png", &format!("_{density}x.png"));
     if std::env::var("RAYS_UPDATE_FIXTURES").as_deref() == Ok("1") {
         canvas::save_png(&canvas_, &golden_path(&golden)).expect("refresh parity golden");
     }
@@ -84,7 +79,7 @@ fn check(name: &str, golden: &str, canvas_: canvas::Canvas) {
         g.len() / 4,
         first
     );
-    println!("PXUI {name} parity: exact");
+    println!("PXUI {name} parity at {density}x: exact");
     let _ = canvas::destroy(&canvas_);
 }
 
@@ -166,65 +161,64 @@ fn table(ui: &mut Ui) {
     ui.table((8.0, 8.0), 304.0, 280.0, &headers, 1000000, cell, "table");
 }
 
-fn gpu_parity_overlays() {
+fn parity(name: &str, golden: &str, height: i64, build: fn(&mut Ui)) {
     if !common::gpu() {
         return;
     }
-    check("overlays", "kit_overlays_2x.png", render(300, &mut overlays));
+    for density in DENSITIES {
+        check(name, golden, density, render(density, height, &mut |ui| build(ui)).0);
+    }
+}
+
+fn gpu_parity_overlays() {
+    parity("overlays", "kit_overlays_2x.png", 300, overlays);
 }
 
 fn gpu_parity_zones() {
-    if !common::gpu() {
-        return;
-    }
-    check("zones", "kit_zones_2x.png", render(390, &mut zones));
+    parity("zones", "kit_zones_2x.png", 390, zones);
 }
 
 fn gpu_parity_table() {
-    if !common::gpu() {
-        return;
-    }
-    check("table", "kit_table_2x.png", render(300, &mut table));
+    parity("table", "kit_table_2x.png", 300, table);
 }
 
 fn gpu_parity_panel() {
-    if !common::gpu() {
-        return;
-    }
-    check("kit panel", "kit_panel_2x.png", render(300, &mut new_panel));
+    parity("kit panel", "kit_panel_2x.png", 300, new_panel);
 }
 
-/// Inspect actual staged painter packets at 1x/2x without a device; every fixture must produce nonempty, valid UI layers.
+/// Every fixture paints nonempty layers at 1x and 2x, without a device.
 fn gpu_parity_commands() {
     let fixtures: [(&str, i64, fn(&mut Ui)); 4] = [("overlays", 300, overlays), ("zones", 390, zones), ("table", 300, table), ("panel", 300, new_panel)];
-    for density in [1.0, 2.0] {
+    for density in DENSITIES {
         for (name, height, build) in fixtures.iter() {
             let mut ui = Ui::create(Platform::Apple, None, Some(font_path()), &rays_shell::host::BACKEND);
             for count in 0..2 {
-                let mut f = frame_at(count, *height);
-                f.pixel_scale = (density, density);
-                ui.frame(&f, &mut |ui| build(ui));
+                ui.frame(&frame_at(count, *height, density), &mut |ui| build(ui));
             }
-            let staged = rays::scene::layer::stage_native(WIDTH, *height, &rays_shell::host::scene(&ui, None)).unwrap_or_else(|e| panic!("{name}: {e}"));
-            let mut packets = 0;
-            for layer in &staged.layers {
-                if let rays::scene::layer::NativeLayer::UiLayer(batch, _) = layer {
-                    assert!(batch.count() > 0, "{name}: empty UI batch");
-                    for b in batch.batches() {
-                        assert!(b.first >= 0 && b.count > 0, "{name}: malformed batch");
-                    }
-                    packets += 1;
-                }
-            }
-            assert!(packets > 0, "{name}: no UI packets at {density}x");
+            let draw = ui.output().draw;
+            assert!(!draw.is_empty() && draw.iter().any(|l| !l.instances.is_empty()), "{name}: no UI instances at {density}x");
             ui.destroy();
         }
     }
-    println!("PXUI packets: four parity fixtures in logical screen points at 1x/2x");
+    println!("PXUI layers: four parity fixtures at 1x/2x");
+}
+
+/// One draw call per UI layer: the kit panel, and the table, a clipped scroll list whose clips
+/// ride in the instances.
+fn gpu_parity_draw_calls() {
+    if !common::gpu() {
+        return;
+    }
+    for (name, build) in [("kit panel", new_panel as fn(&mut Ui)), ("table", table)] {
+        let (canvas_, calls) = render(2, 300, &mut |ui| build(ui));
+        let _ = canvas::destroy(&canvas_);
+        assert_eq!(calls, 1, "{name}: one layer drew in {calls} draw calls");
+    }
 }
 
 pub const CASES: &[(&str, fn())] = &[
     ("gpu_parity_commands", gpu_parity_commands),
+    ("gpu_parity_draw_calls", gpu_parity_draw_calls),
     ("gpu_parity_overlays", gpu_parity_overlays),
     ("gpu_parity_zones", gpu_parity_zones),
     ("gpu_parity_table", gpu_parity_table),

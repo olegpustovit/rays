@@ -140,8 +140,8 @@ fn validate_images(resources: &[(i64, rr::Resource)]) -> Result<(), ogpu_core::e
 fn validate_layers(layers: &[layer::NativeLayer]) -> Result<(), ogpu_core::error::Error> {
     for layer in layers {
         match layer {
-            layer::NativeLayer::Scene2Layer(_, r) | layer::NativeLayer::Scene2Segment(_, r) | layer::NativeLayer::UiLayer(_, r) => validate_images(r)?,
-            layer::NativeLayer::Scene3Layer(_) => {}
+            layer::NativeLayer::Scene2Layer(_, r) | layer::NativeLayer::Scene2Segment(_, r) => validate_images(r)?,
+            layer::NativeLayer::Scene3Layer(_) | layer::NativeLayer::UiLayer(_) => {}
         }
     }
     Ok(())
@@ -203,9 +203,7 @@ fn lower_all(
                     &ir,
                 )
             }
-            layer::NativeLayer::UiLayer(ui, resources) => {
-                native::lower_ui(submission, density, &|id| resources.iter().find(|(i, _)| *i == id).map(|(_, r)| r.clone()), ui)
-            }
+            layer::NativeLayer::UiLayer(ui) => native::ui_draw(submission, ui.clone()),
             layer::NativeLayer::Scene3Layer(prepared) => {
                 sweep_retained(&native::gpu_vertices_owner(execution));
                 let draws = draws_of_prepared(staged, prepared);

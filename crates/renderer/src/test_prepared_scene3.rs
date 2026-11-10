@@ -3,7 +3,7 @@ use super::*;
 use ogpu_core::types::{AddressMode as SamplerAddress, MipFilter, SamplerFilter};
 
 fn entry() -> SampledDraw {
-    SampledDraw {
+    SampledDraw { ui: None,
         family: Scene3, blend: Blend::Replace, texture: None, auxiliary: None,
         vertex_attributes: Some(("attributes".into(), new_bytes(vec![0; 36]))), samples: 1,
         draw: GeometryDraw {

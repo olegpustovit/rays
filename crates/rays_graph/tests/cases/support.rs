@@ -10,7 +10,6 @@ use pxui::ui::*;
 use rays_graph::scope_pane as scope;
 use rays_graph::scope_state::{self, Change, Pane, ScopeOpts};
 use rays::frame as rframe;
-use rays::scene::layer;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -141,16 +140,7 @@ pub fn rect_center(r: (f64, f64, f64, f64)) -> (i64, i64) {
 /// The instances the pane drew (`scope_paint`).
 pub fn scope_paint(ui: &mut Ui, view: Pane) -> i64 {
     let _ = scope_step(ui, view, &frame0());
-    match layer::stage_native(1000, 700, &rays_shell::host::scene(&ui, None)) {
-        Err(message) => fail(&message),
-        Ok(staged) => staged
-            .layers
-            .iter()
-            .fold(0, |total, l| match l {
-                layer::NativeLayer::UiLayer(batch, _) => total + batch.count(),
-                _ => total,
-            }),
-    }
+    ui.output().draw.iter().map(|l| l.instances.len() as i64).sum()
 }
 
 /// `[n]` nodes in one scope: a chain with a long wire back at every seventh node.

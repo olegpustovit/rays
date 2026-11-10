@@ -57,9 +57,9 @@ Each frame runs four steps:
    flow and floating (`at`) children in logical screen points.
 4. **Paint.** Boxes paint depth-first with nested clip rectangles, culling
    boxes outside their clip. Painters receive the final rectangle and emit
-   `Scene.Private.Ui_batch` instances. `Ui.to_front ~order` raises a root in both
+   `pxui::draw::Instance`s, the clip riding in each. `Ui.to_front ~order` raises a root in both
    painting and hit testing. `Ui.frame` returns `FrameOut`: the paint layers
-   (a batch and its bound images per raised root) and `PlatformOut` (cursor,
+   (instances, image breaks and images per raised root, borrowed) and `PlatformOut` (cursor,
    the focused text's input-method area, window ground, clipboard write, paste
    request; the host sends `Event.Paste` with the next frame).
    `rays_shell::host::scene ~under` wraps the layers as native-only UI scene
@@ -92,15 +92,13 @@ PXUI layout, hit bounds, glyph placement and input regions use logical screen
 points directly. The kit has no per-box or per-batch scale or translation;
 physical-pixel snapping uses only the frame's density.
 
-`Ui_batch` groups instances by `{clip, texture}`; untextured
-instances never split a batch. `Rays_execution.Private.lower_ui`
-lowers each batch to one indexed draw with a 24-byte affine uniform (logical
-screen points to clip space) and a logical scissor, which the runtime scales
-to physical pixels exactly once. `Ui` draws use direct texture bindings, so
-the executor gives them their own attachment class and they never share an
-argument-buffer render pass with Scene2 draws. `Scene.Private.ui` layers,
-like `view3d`, ignore enclosing Scene transforms and clips: the batch
-carries its own screen coordinates and clip.
+A layer is one `pxui_render::Painter::draw` call, plus one per image break; clips
+never split it. The Rays host (`rays_shell::host::scene`) puts each layer in the
+scene as `Scene.Layer.ui paint layer stamp`; the renderer calls `paint` with its
+open frame pass (`scene_execution::UiPass`) in the layer's place, and the
+painter draws the layer borrowed from the `Ui`. Glyph uploads are the atlas
+rectangles written since the painter's last upload, into its R8 mask. UI
+layers, like `view3d`, ignore enclosing Scene transforms and clips.
 
 ## Typography and the design kit
 

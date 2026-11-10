@@ -962,12 +962,12 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         // Rust merges OCaml's ogpu_metal_native into ogpu_metal.
         ("ogpu_metal", &["ogpu_core", "metal_sys", "native_layer_token_sys"][..]),
         ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys", "rays_math"][..]),
-        // PXUI is headed for its own repository: rays_math and scene_command leave in P2 with the draw list.
-        ("pxui", &["input", "cfmt", "scene_command"][..]),
+        // PXUI is headed for its own repository: plain data in (input), a draw list out.
+        ("pxui", &["input", "cfmt"][..]),
         ("pxui_text", &[][..]),
-        // The UI painter: only the portable GPU API, so it moves to the PXUI repository unchanged.
-        ("pxui_render", &["ogpu_core"][..]),
-        ("rays_shell", &["rays", "rays_math", "editor_core", "pxui", "mem"][..]),
+        // The UI painter: the portable GPU API and PXUI's draw list, so it moves to the PXUI repository unchanged.
+        ("pxui_render", &["ogpu_core", "pxui"][..]),
+        ("rays_shell", &["rays", "rays_math", "editor_core", "pxui", "pxui_render", "ogpu_core", "mem"][..]),
         ("rays_graph", &[
             "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "flow_graph", "pxui", "editor_core",
         ][..]),
@@ -1084,11 +1084,11 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     forbid("sop", &gpu);
     forbid("editor_core", &["pxui", "rays_shell", "rays_graph", "rays_editor", "sop"]);
     forbid("editor_document", &["pxui", "rays_shell", "rays_graph", "rays_editor"]);
-    forbid("pxui", &["rays", "param", "mem", "lru", "runtime", "runtime_resources", "renderer", "sdl3", "editor_core", "rays_shell", "sop", "rays_graph", "rays_editor"]);
+    forbid("pxui", &["rays", "param", "mem", "lru", "runtime", "runtime_resources", "renderer", "sdl3", "editor_core", "rays_shell", "sop", "rays_graph", "rays_editor", "scene_command", "rays_math", "ogpu_core"]);
     forbid("rays_shell", &["sop", "rays_graph", "rays_editor"]);
     forbid("rays_graph", &["sop", "rays_shell", "rays_editor"]);
-    forbid("pxui_render", &upper_no_gpu);
-    forbid("pxui_render", &["scene_command", "scene_core", "rays_math", "mem", "mem_sys", "lru", "input", "sdl3", "metal_sys", "vulkan_sys", "ogpu_metal", "ogpu_vulkan", "ogpu_mock"]);
+    forbid("pxui_render", &upper_no_gpu.iter().copied().filter(|name| *name != "pxui").collect::<Vec<_>>());
+    forbid("pxui_render", &["scene_command", "scene_core", "rays_math", "mem", "mem_sys", "lru", "sdl3", "metal_sys", "vulkan_sys", "ogpu_metal", "ogpu_vulkan", "ogpu_mock"]);
     forbid("rays_pathtracer", &[
         "metal_sys", "ogpu_metal", "ogpu_mock", "rdk_core", "sop", "flow_sop", "editor_core",
         "editor_document", "pxui", "rays_shell", "rays_graph", "rays_editor",

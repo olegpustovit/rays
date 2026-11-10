@@ -3,7 +3,6 @@ use crate::steps::*;
 use crate::support::*;
 use input::{Event, Key, MouseButton, ScrollPhase};
 use pxui::ui::*;
-use rays::scene::layer;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -569,9 +568,9 @@ fn scale_9(scale: f64) {
 }
 
 fn ime_cursor(ui: &Ui, lab: &dyn Fn(&str) -> String) -> i64 {
-    match &layer::text_regions(&rays_shell::host::scene(&ui, None))[..] {
-        [(_, _, _, _, true, cursor)] => *cursor,
-        _ => fail(&lab("focused text field lost its IME region")),
+    match ui.output().platform.ime {
+        Some((_, cursor)) => cursor,
+        None => fail(&lab("focused text field lost its IME region")),
     }
 }
 
@@ -742,9 +741,9 @@ fn scale_11(scale: f64) {
     field_step(&mut ui, vec![], vec![], &mut build);
     field_step(&mut ui, vec![], vec![press((40, 30)), release((40, 30))], &mut build);
     let cursor = |ui: &Ui| -> i64 {
-        match &layer::text_regions(&rays_shell::host::scene(&ui, None))[..] {
-            [(_, _, _, _, true, cursor)] => *cursor,
-            regions => fail(&lab(&format!("long field lost its IME region ({})", regions.len()))),
+        match ui.output().platform.ime {
+            Some((_, cursor)) => cursor,
+            None => fail(&lab("long field lost its IME region")),
         }
     };
     field_step(&mut ui, vec![Key::Meta], vec![key_down(Key::ArrowLeft)], &mut build);
@@ -935,8 +934,7 @@ pub fn window_pxui_fit_box() {
     ui.destroy();
 }
 
-/// P0 baseline: heap allocations and CPU per warm kit frame, plus draw batches (docs/pxui-baseline.md).
-/// Measurement only; it asserts the frame is warm (second half allocates no more than the first frame did).
+/// Heap allocations and CPU per warm kit frame (docs/pxui-baseline.md). Measurement only.
 pub fn window_pxui_baseline() {
     let build = |ui: &mut Ui| {
         ui.panel(PanelOpts::default(), "panel", &mut |ui| {
@@ -959,36 +957,14 @@ pub fn window_pxui_baseline() {
         ui.frame(f, &mut |ui| build(ui));
         frame_ns += t.elapsed().as_nanos();
     }
-    let frame_allocs = (mem_sys::local_alloc_count() - c0) as f64 / n as f64;
+    let allocs = mem_sys::local_alloc_count() - c0;
     let frame_bytes = (mem_sys::alloc_bytes_total() - b0) as f64 / n as f64;
-    // lowering side: host::scene wraps the draw layers as scene nodes; stage_native lowers them to batches
-    let (c1, b1) = (mem_sys::local_alloc_count(), mem_sys::alloc_bytes_total());
-    let t = std::time::Instant::now();
-    for _ in 0..n {
-        std::hint::black_box(rays_shell::host::scene(&ui, None));
-    }
-    let scene_ns = t.elapsed().as_nanos();
-    let scene_allocs = (mem_sys::local_alloc_count() - c1) as f64 / n as f64;
-    let scene_bytes = (mem_sys::alloc_bytes_total() - b1) as f64 / n as f64;
-    let mut batches = 0;
-    if let Ok(staged) = layer::stage_native(320, 240, &rays_shell::host::scene(&ui, None)) {
-        for l in &staged.layers {
-            if let layer::NativeLayer::UiLayer(batch, _) = l {
-                batches += batch.batches().len();
-            }
-        }
-    }
-    eprintln!("PXUI_BASELINE draw batches (kit panel, 1 layer): {batches}");
-    eprintln!(
-        "PXUI_BASELINE frame: {frame_allocs:.1} allocs {frame_bytes:.0} B {:.1} us | scene(): {scene_allocs:.1} allocs {scene_bytes:.0} B {:.1} us",
-        frame_ns as f64 / n as f64 / 1e3,
-        scene_ns as f64 / n as f64 / 1e3
-    );
+    eprintln!("PXUI_BASELINE frame: {:.1} allocs {frame_bytes:.0} B {:.1} us", allocs as f64 / n as f64, frame_ns as f64 / n as f64 / 1e3);
     ui.destroy();
 }
 
 pub fn window_pxui_batches() {
-    // One panel paints in a handful of batches, not one draw per label.
+    // One panel paints one layer with no texture breaks: one draw call.
     let mut ui = field_ui();
     ui.frame(&frame_at(vec![], 2.0, 0.0, vec![]), &mut |ui| {
         ui.panel(PanelOpts::default(), "panel", &mut |ui| {
@@ -998,19 +974,9 @@ pub fn window_pxui_batches() {
             ui.button("Quit");
         });
     });
-    match layer::stage_native(320, 240, &rays_shell::host::scene(&ui, None)) {
-        Ok(staged) => {
-            let mut batches = 0;
-            for layer in &staged.layers {
-                if let layer::NativeLayer::UiLayer(batch, _) = layer {
-                    batches += batch.batches().len();
-                }
-            }
-            if batches == 0 || batches > 4 {
-                fail(&format!("panel painted in {} batches", batches));
-            }
-        }
-        Err(message) => fail(&message),
+    let draw = ui.output().draw;
+    if draw.len() != 1 || draw[0].instances.is_empty() || !draw[0].breaks.is_empty() {
+        fail(&format!("panel painted {} layers, {} breaks", draw.len(), draw.iter().map(|l| l.breaks.len()).sum::<usize>()));
     }
     ui.destroy();
 }

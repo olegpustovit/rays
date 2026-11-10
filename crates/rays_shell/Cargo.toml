@@ -13,13 +13,14 @@ rays = { path = "../rays" }
 rays_math = { path = "../rays_math" }
 editor_core = { path = "../editor_core" }
 pxui = { path = "../pxui" }
+pxui_render = { path = "../pxui_render" }
+ogpu_core = { path = "../ogpu_core" }
 cfmt = { path = "../cfmt" }
 input = { path = "../input" }
 mem = { path = "../mem" }
 param = { path = "../param" }
 
 [dev-dependencies]
-ogpu_core = { path = "../ogpu_core" }
 renderer = { path = "../renderer" }
 sdl3 = { path = "../sdl3" }
 

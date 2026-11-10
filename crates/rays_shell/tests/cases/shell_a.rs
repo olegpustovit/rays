@@ -9,7 +9,6 @@ use rays_shell::status_bar::{self, TipKind};
 use rays_shell::timeline_bar;
 use rays_shell::which_key;
 use rays::frame;
-use rays::scene::layer;
 
 pub fn new_ui() -> Ui {
     let path = format!("{}/../../assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
@@ -52,13 +51,7 @@ fn moved(p: (f64, f64)) -> Event {
 fn instances(f: &mut dyn FnMut(&mut Ui)) -> i64 {
     let mut ui = new_ui();
     ui.frame(&base(), f);
-    let staged = layer::stage_native(400, 300, &rays_shell::host::scene(&ui, None)).unwrap_or_else(|e| panic!("{e}"));
-    let mut total = 0;
-    for layer in &staged.layers {
-        if let layer::NativeLayer::UiLayer(batch, _) = layer {
-            total += batch.count();
-        }
-    }
+    let total = ui.output().draw.iter().map(|l| l.instances.len() as i64).sum();
     ui.destroy();
     total
 }
@@ -304,7 +297,7 @@ pub fn window_shell_status_and_guide_draw() {
         let o = status_bar::Opts { text: "Overlay".into(), ..status_bar::Opts::default() };
         status_bar::draw(ui, (0, 272, 400, 28), &o);
     });
-    assert!(!rays_shell::host::scene(&ui, None).is_empty(), "PXUI did not draw the status bar");
+    assert!(ui.output().draw.iter().any(|l| !l.instances.is_empty()), "PXUI did not draw the status bar");
     ui.destroy();
 }
 

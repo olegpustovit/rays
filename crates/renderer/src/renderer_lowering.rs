@@ -65,7 +65,7 @@ fn put_vertex(vertices: &mut [u8], index: usize, x: f64, y: f64, color: i32) {
 }
 
 fn scene2_draw(key: String, vertices: Vec<u8>, vertex_count: i64, indices: Vec<u8>, index_count: i64, viewport: (i64, i64, i64, i64), clip: (i64, i64, i64, i64), transform: &Transform) -> SampledDraw {
-    scene_execution::SampledDraw {
+    scene_execution::SampledDraw { ui: None,
         family: PipelineFamily::Scene2,
         blend: Blend::Alpha,
         texture: None,
@@ -147,7 +147,7 @@ pub fn compose_raster(a: &Transform, b: &Transform) -> Transform {
     }
 }
 
-/// PXUI instances: one `Ui` draw per batch. Glyphs sample nearest physical texels.
+/// `Shapes` instances sample nearest physical texels.
 pub fn ui_sampler() -> SamplerDescriptor {
     SamplerDescriptor {
         label: Some("ui".to_owned()),
@@ -174,11 +174,6 @@ thread_local! {
 /// The one shared white texel texture: draws that share it may merge.
 pub fn ui_white_texture() -> Rc<SampledTexture> {
     UI_WHITE.with(|texture| texture.clone())
-}
-
-/// Whether `target` equals the bytes of `source` from `offset` (a multiple of 8 long).
-pub fn same_bytes_range(source: &[u8], offset: usize, target: &[u8]) -> bool {
-    target.len().is_multiple_of(8) && source[offset..offset + target.len()] == *target
 }
 
 struct CachedQuadPayload {
@@ -383,7 +378,7 @@ fn quad(
             result
         }
     };
-    let result: Draw = Rc::new(SampledDraw {
+    let result: Draw = Rc::new(SampledDraw { ui: None,
         family: PipelineFamily::Scene2Textured,
         blend: Blend::Alpha,
         texture: Some(texture.clone()),
@@ -526,7 +521,7 @@ pub fn lower_scene2(
                     }
                     let s = slot.borrow();
                     let family = if gpu_key.is_none() { PipelineFamily::Ui } else { PipelineFamily::Marks };
-                    let draw_: Draw = Rc::new(SampledDraw {
+                    let draw_: Draw = Rc::new(SampledDraw { ui: None,
                         family,
                         blend,
                         texture: if family == PipelineFamily::Marks { None } else { Some(ui_white_texture()) },

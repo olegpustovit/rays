@@ -2,7 +2,6 @@
 use crate::support::*;
 use input::{Event, Key, Platform};
 use pxui::ui::*;
-use rays::scene::layer;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -285,9 +284,9 @@ impl Rig {
     }
 
     pub fn region(&self) -> (i64, i64) {
-        match &layer::text_regions(&rays_shell::host::scene(&self.ui, None))[..] {
-            [(_, y, _, _, true, cursor)] => (*y, *cursor),
-            _ => fail("text area lost its IME region"),
+        match self.ui.output().platform.ime {
+            Some(((_, y, _, _), cursor)) => (y, cursor),
+            None => fail("text area lost its IME region"),
         }
     }
 

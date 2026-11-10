@@ -13,7 +13,6 @@ use rays_math::mat4;
 use rays_math::vec2;
 use rays_math::vec3;
 use renderer::scene_execution as se;
-use scene_command::ui_batch;
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -34,11 +33,6 @@ fn plain(m: &mesh::Mesh) -> d3::Node {
     d3::mesh(None, None, None, None, None, m.clone())
 }
 
-fn ui_for(x: f64) -> ui_batch::Table {
-    let mut builder = ui_batch::Builder::create();
-    builder.rect(x, 0., 1., 1., -1, 0, 0., 0., false).expect("rect");
-    builder.publish().expect("publish")
-}
 
 #[test]
 fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
@@ -82,8 +76,9 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
             "released reusable View3d changed prepared native data"
         );
         let prepared = prepare(16, 16, scene3.clone());
+        let paint: scene::UiPaint = Rc::new(|_, _| Ok(()));
         let with_ui = |x: f64, scene3: d3::Scene3| {
-            layer::stage_native_render(16, 16, &[scene::view3d(None, &cam, scene3), layer::ui(None, ui_for(x)).expect("ui")]).expect("stage")
+            layer::stage_native_render(16, 16, &[scene::view3d(None, &cam, scene3), layer::ui(paint.clone(), 0, x as i64)]).expect("stage")
         };
         let first_ui = with_ui(0., scene3.clone());
         let equivalent = scene_of(vec![d3::mesh(Some(material::unlit(color::white())), None, None, None, None, m.clone())]);

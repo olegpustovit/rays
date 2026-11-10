@@ -1,5 +1,5 @@
-// The PXUI instance pipeline must light exactly the pixels the Scene2 triangle path lights for the
-// design kit's square fills, 1-point strokes, and axis-aligned marker lines, at 1x and 2x density.
+// The `Shapes` instance pipeline must light exactly the pixels the Scene2 triangle path lights for
+// square fills, 1-point strokes, and axis-aligned marker lines, at 1x and 2x density.
 use crate::common;
 use ::renderer::renderer::{self, native};
 use scene_command::render_ir::{self, Command};
@@ -71,7 +71,7 @@ fn run(density: i64) {
     let (fill, stroke) = (rgba(220, 227, 222, 255), rgba(34, 43, 43, 180));
     let (accent, marker) = (rgba(40, 95, 119, 175), rgba(34, 43, 43, 255));
     let scene = old_scene(fill, stroke, accent, marker);
-    let ui = new_batch(fill, stroke, accent, marker);
+    let ui = Rc::new(render_ir::create(vec![Command::Shapes(new_batch(fill, stroke, accent, marker))]).unwrap());
     let cfg = renderer::Configuration { logical_width: 64, logical_height: 40, drawable_width: 64 * density, drawable_height: 40 * density, title: "ui-pipeline".into(), vsync: false, high_density: true };
     let execution = renderer::create_offscreen(&cfg).unwrap();
     let capture = |lower: &dyn Fn(&renderer::Submission) -> Result<renderer::Batch, ogpu_core::error::Error>| {
@@ -85,7 +85,7 @@ fn run(density: i64) {
         result.unwrap()
     };
     let old = capture(&|s| native::lower_scene2(s, density, &|_| None, &scene));
-    let current = capture(&|s| native::lower_ui(s, density, &|_| None, &ui));
+    let current = capture(&|s| native::lower_scene2(s, density, &|_| None, &ui));
     let width = cfg.drawable_width;
     let length = (width * cfg.drawable_height * 4) as usize;
     assert!(old.len() == length && current.len() == length);

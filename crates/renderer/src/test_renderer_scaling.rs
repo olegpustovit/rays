@@ -28,7 +28,7 @@ fn renderer_scaling() {
     let draws = vec![draw.clone()];
     let same = native::scale_draws(&one, &draws);
     assert!(same.len() == 1 && same[0].state == draw.state, "1x draw graph was changed");
-    let sampled: Vec<Rc<SampledDraw>> = vec![Rc::new(SampledDraw {
+    let sampled: Vec<Rc<SampledDraw>> = vec![Rc::new(SampledDraw { ui: None,
         family: PipelineFamily::Scene2,
         blend: Blend::Replace,
         texture: None,

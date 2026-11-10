@@ -10,6 +10,7 @@ use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter}
 use rays_math::color;
 use renderer::renderer::Resource as retained_resource;
 use renderer::scene_execution as se;
+pub use renderer::scene_execution::{UiLayer, UiPaint, UiPass};
 use runtime_resources::{canvas as RCanvas, image as RImage, text as RText};
 use scene_command::display_list::{self, Segment};
 use scene_command::render_ir::{self, Command, Geometry, Transform};
@@ -64,10 +65,16 @@ pub struct DisplayListNode {
     pub resources: Vec<(i64, retained_resource)>,
 }
 
+/// A UI layer its owner paints into the frame's pass; `stamp` changes whenever the owner's
+/// layers do (a new UI frame), so equal nodes paint equal pixels.
 #[derive(Clone)]
 pub struct UiNode {
-    pub ui: ui_batch::Table,
-    pub ui_resources: Vec<(i64, retained_resource)>,
+    pub ui: UiLayer,
+    pub stamp: i64,
+}
+
+fn same_ui_node(a: &UiNode, b: &UiNode) -> bool {
+    Rc::ptr_eq(&a.ui.paint, &b.ui.paint) && a.ui.layer == b.ui.layer && a.stamp == b.stamp
 }
 
 #[derive(Clone)]
@@ -416,7 +423,7 @@ fn same_node(a: &Node, b: &Node) -> bool {
         (Node::Text(x), Node::Text(y)) => same_text(x, y),
         (Node::Image(x), Node::Image(y)) => image::same(&x.image, &y.image) && x.x == y.x && x.y == y.y && x.scale == y.scale && x.angle == y.angle,
         (Node::DisplayList(x), Node::DisplayList(y)) => same_segment(&x.segment, &y.segment) && same_resources(&x.resources, &y.resources),
-        (Node::Ui(x), Node::Ui(y)) => same_ui(&x.ui, &y.ui) && same_resources(&x.ui_resources, &y.ui_resources),
+        (Node::Ui(x), Node::Ui(y)) => same_ui_node(x, y),
         (Node::Shapes(x), Node::Shapes(y)) => same_ui(x, y),
         (Node::View3d(x), Node::View3d(y)) => x.viewport == y.viewport && x.camera == y.camera && scene3::same(&x.scene, &y.scene),
         (Node::Region(a, b, c, d, e, f), Node::Region(a2, b2, c2, d2, e2, f2)) => a == a2 && b == b2 && c == c2 && d == d2 && e == e2 && f == f2,
@@ -571,19 +578,11 @@ pub mod layer {
         Node::LayerBreak
     }
 
-    /// A native-only PXUI instance layer. Like `view3d`, it ignores enclosing Scene transforms and
-    /// clips: the batch carries its own. Every batch texture id must be bound in `images`.
-    pub fn ui(images: Option<Vec<(i64, image::Image)>>, batch: ui_batch::Table) -> Result<Node, String> {
-        let images = images.unwrap_or_default();
-        for id in batch.textures() {
-            if !images.iter().any(|(i, _)| *i == id) {
-                return Err("Scene.Layer.ui: unbound texture resource".to_string());
-            }
-        }
-        Ok(Node::Ui(UiNode {
-            ui: batch,
-            ui_resources: images.iter().map(|(id, img)| (*id, retained_resource::Image(image::resource(img)))).collect(),
-        }))
+    /// A native-only UI layer that `paint` draws into the frame's pass (PXUI's painter). Like
+    /// `view3d`, it ignores enclosing Scene transforms and clips. `stamp` changes whenever what
+    /// the layer paints does.
+    pub fn ui(paint: UiPaint, layer: usize, stamp: i64) -> Node {
+        Node::Ui(UiNode { ui: UiLayer { paint, layer }, stamp })
     }
 
     #[derive(Clone)]
@@ -591,7 +590,7 @@ pub mod layer {
         Scene2Layer(Rc<render_ir::RenderIr>, Vec<(i64, retained_resource)>),
         Scene2Segment(Arc<Segment>, Vec<(i64, retained_resource)>),
         Scene3Layer(lowering::Prepared),
-        UiLayer(ui_batch::Table, Vec<(i64, retained_resource)>),
+        UiLayer(UiLayer),
     }
 
     #[derive(Clone)]
@@ -977,7 +976,7 @@ pub mod layer {
             (Node::Clear(l), Node::Clear(r)) => l == r,
             (Node::Geometry(l), Node::Geometry(r)) => Rc::ptr_eq(l, r) || l == r,
             (Node::DisplayList(l), Node::DisplayList(r)) => Arc::ptr_eq(&l.segment, &r.segment) && same_resources(&l.resources, &r.resources),
-            (Node::Ui(l), Node::Ui(r)) => same_ui(&l.ui, &r.ui) && same_resources(&l.ui_resources, &r.ui_resources),
+            (Node::Ui(l), Node::Ui(r)) => same_ui_node(l, r),
             (Node::Shapes(l), Node::Shapes(r)) => same_ui(l, r),
             (Node::Image(l), Node::Image(r)) => image::same(&l.image, &r.image) && l.x == r.x && l.y == r.y && l.scale == r.scale && l.angle == r.angle,
             (Node::Text(l), Node::Text(r)) => same_text(l, r),
@@ -1014,7 +1013,7 @@ pub mod layer {
             Node::Clear(c) => mix(0, rgba(*c) as i64),
             Node::Geometry(g) => mix(mix(mix(1, g.vertices.len() as i64), g.indices.len() as i64), g.color as i64),
             Node::DisplayList(_) => 3,
-            Node::Ui(_) => 4,
+            Node::Ui(u) => mix(mix(4, u.ui.layer as i64), u.stamp),
             Node::Shapes(_) => 16,
             Node::Image(i) => mix(mix(mix(mix(5, i.x), i.y), i.scale.to_bits() as i64), i.angle.to_bits() as i64),
             Node::Text(tn) => {
@@ -1133,7 +1132,6 @@ pub mod layer {
                 | Node::Clip(_, _, _, _, g)
                 | Node::Blend(_, g) => validate_native_images(g)?,
                 Node::DisplayList(d) => validate_native_resources(&d.resources)?,
-                Node::Ui(u) => validate_native_resources(&u.ui_resources)?,
                 _ => {}
             }
         }
@@ -1236,7 +1234,7 @@ pub mod layer {
                         Err(message) => failure = Some(NativeError::Message(message)),
                     },
                     Grouped::Segment(node_) => layers.push(NativeLayer::Scene2Segment(node_.segment.clone(), node_.resources.clone())),
-                    Grouped::Ui(node_) => layers.push(NativeLayer::UiLayer(node_.ui.clone(), node_.ui_resources.clone())),
+                    Grouped::Ui(node_) => layers.push(NativeLayer::UiLayer(node_.ui.clone())),
                     Grouped::Three(node_) => {
                         let viewport = node_.viewport.unwrap_or((0, 0, width, height));
                         match lowering::prepare(&callbacks, &node_.camera, viewport, &node_.scene) {
@@ -1320,7 +1318,7 @@ pub mod layer {
             .map(|l| match l {
                 NativeLayer::Scene2Segment(segment, _) => display_list::source_bytes(segment),
                 NativeLayer::Scene2Layer(ir, _) => scene2_layer_bytes(ir),
-                NativeLayer::UiLayer(ui, _) => ui.instances().len() as i64,
+                NativeLayer::UiLayer(_) => 0,
                 NativeLayer::Scene3Layer(p) => p
                     .entries
                     .iter()
@@ -1346,8 +1344,8 @@ pub mod layer {
     fn native_resource_stamp(stage: &StagedNative) -> i64 {
         let start = stage.mesh_images.iter().fold(0x345678, |stamp, i| mix(mix(stamp, RImage::identity(i)), RImage::generation(i)));
         stage.layers.iter().fold(start, |stamp, l| match l {
-            NativeLayer::Scene2Layer(_, r) | NativeLayer::Scene2Segment(_, r) | NativeLayer::UiLayer(_, r) => resource_stamp_loop(stamp, r),
-            NativeLayer::Scene3Layer(_) => stamp,
+            NativeLayer::Scene2Layer(_, r) | NativeLayer::Scene2Segment(_, r) => resource_stamp_loop(stamp, r),
+            NativeLayer::Scene3Layer(_) | NativeLayer::UiLayer(_) => stamp,
         })
     }
 

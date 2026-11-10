@@ -133,6 +133,11 @@ pub mod editor {
             workspace_gpu::qualification(&value.host.borrow().gpu)
         }
 
+        /// The editor's UI (its last frame's draw list, for exact comparisons).
+        pub fn ui(value: &Editor) -> Rc<std::cell::RefCell<pxui::ui::Ui>> {
+            value.core.ui.clone()
+        }
+
         /// The crash dump's editor.txt, without writing the dump.
         pub fn state_text(value: &Editor) -> String {
             editor_loop::state_text(value)

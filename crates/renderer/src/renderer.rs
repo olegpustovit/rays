@@ -1,7 +1,7 @@
 // Resource creation and rollback retain their existing dependency order.
 //! Isolated native frame coordinator. The public values deliberately contain no SDL or native handles.
 use crate::renderer_leases::{self, Policy as lease_policy};
-use crate::renderer_lowering::{self, ui_sampler, ui_white_texture};
+use crate::renderer_lowering;
 use crate::renderer_pipeline;
 use crate::renderer_retained_plans::{self, Plan, Resource as retained_resource, Segment};
 use crate::scene_execution::{self, Bytes, GeometryDraw, new_bytes, PreparedScene3, SampledDraw, SampledTexture, TextureLevel};
@@ -14,7 +14,7 @@ use runtime::{FrameFacts, PresentationFacts};
 use runtime_resources::{assets, canvas, image, text};
 use scene_command::render_ir::{self as ir, Command, RenderIr};
 use scene_command::ui_batch::Table as Shapes;
-use scene_command::{marks, ui_batch};
+use scene_command::marks;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -362,7 +362,6 @@ pub struct SubmissionData {
     owner: Renderer,
     submission_state: Cell<SubmissionState>,
     image_leases: renderer_leases::Leases,
-    ui_layers: Cell<i64>,
 }
 
 #[derive(Clone)]
@@ -402,7 +401,7 @@ pub fn prepared_draw(
     samples: Option<i64>,
     value: GeometryDraw,
 ) -> Draw {
-    Rc::new(SampledDraw {
+    Rc::new(SampledDraw { ui: None,
         family: family_,
         blend: blend_.unwrap_or(Blend::Replace),
         texture,
@@ -617,7 +616,6 @@ pub fn begin_submission(value: &Renderer) -> Result<Submission, Error> {
         owner: value.clone(),
         submission_state: Cell::new(SubmissionState::Open),
         image_leases: renderer_leases::create(),
-        ui_layers: Cell::new(0),
     }));
     value.0.submissions.borrow_mut().insert(0, submission_.clone());
     Ok(submission_)
@@ -1109,7 +1107,7 @@ fn step_core(
                             copy.state.scissor = scissor;
                             copy
                         };
-                        Rc::new(SampledDraw {
+                        Rc::new(SampledDraw { ui: x.ui.clone(),
                             family: x.family,
                             blend: x.blend,
                             texture: x.texture.clone(),
@@ -1236,123 +1234,42 @@ fn lower_scene2_segment(
     Ok(lowered)
 }
 
-/// Lowers PXUI instances into one `Ui` draw per batch. Texture ids resolve through `resource`; id 0
-/// samples a white texel.
-fn lower_ui(submission_: &Submission, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ui: &Shapes) -> Result<Batch, Error> {
-    let operation = "Renderer.Native.lower_ui";
-    if let Err(e) = ensure_submission(operation, submission_) {
+/// A UI layer as one draw its owner paints in place, over the whole frame.
+fn ui_draw(submission_: &Submission, ui: scene_execution::UiLayer) -> Result<Batch, Error> {
+    if let Err(e) = ensure_submission("Renderer.Native.ui_draw", submission_) {
         close_submission(submission_);
         return Err(e);
     }
-    let owner = &submission_.0.owner;
-    let facts = match presentation_facts_of(owner) {
+    let facts = match presentation_facts_of(&submission_.0.owner) {
         Ok(facts) => facts,
         Err(e) => {
             close_submission(submission_);
             return Err(e);
         }
     };
-    let width = facts.logical_width as f64;
-    let height = facts.logical_height as f64;
     let framebuffer = (0, 0, facts.logical_width, facts.logical_height);
-    let instances = ui.instances();
-    let texture = |id: i64| -> Result<Rc<SampledTexture>, Error> {
-        if id <= 0 {
-            return Ok(ui_white_texture());
-        }
-        match resource_(id) {
-            None => Err(fail_error(operation, ErrorKind::InvalidState, "UI texture resource id is unbound")),
-            Some(source) => {
-                let policy_ = lease_policy::RetainImageSnapshots(submission_.0.image_leases.clone());
-                let (_, _, texture) = snapshot(owner, &policy_, density, source)?;
-                let mut copy = (*texture).clone();
-                copy.sampler = ui_sampler();
-                Ok(Rc::new(copy))
-            }
-        }
-    };
-    let layer = submission_.0.ui_layers.get();
-    submission_.0.ui_layers.set(layer + 1);
-    let mut draws: Vec<Draw> = Vec::new();
-    let batches = ui.batches();
-    let mut failure_: Option<Error> = None;
-    for (index, batch_) in batches.iter().enumerate() {
-        let (scissor_width, scissor_height) = match &batch_.clip {
-            None => (framebuffer.2, framebuffer.3),
-            Some(clip) => (clip.width as i64, clip.height as i64),
-        };
-        if batch_.count == 0 || scissor_width <= 0 || scissor_height <= 0 {
-            continue;
-        }
-        let built = (|| -> Result<Draw, Error> {
-            let texture = texture(batch_.texture)?;
-            let mut lowering = owner.0.lowering.borrow_mut();
-            let affine = renderer_lowering::ui_affine(
-                &ir::Transform { xx: 2.0 / width, xy: 0.0, yx: 0.0, yy: -2.0 / height, tx: -1.0, ty: 1.0 },
-            );
-            let first = (batch_.first * ui_batch::instance_bytes()) as usize;
-            let length = (batch_.count * ui_batch::instance_bytes()) as usize;
-            let slot_key = layer * 65536 + index as i64;
-            let slot = renderer_lowering::find_ui_slot(&mut lowering, slot_key);
-            let mut s = slot.borrow_mut();
-            if s.vertices.len() != length || !renderer_lowering::same_bytes_range(instances, first, &s.vertices) {
-                s.vertices = runtime_resources::copy_bytes("Renderer.ui_vertices", &instances[first..first + length])?;
-            }
-            if s.indices.len() as i64 != batch_.count * 24 {
-                s.indices = renderer_lowering::ui_index_bytes(&mut lowering, batch_.count)?;
-            }
-            if s.affine != affine {
-                s.affine = affine;
-            }
-            let scissor = match &batch_.clip {
-                None => framebuffer,
-                Some(clip) => {
-                    let x = 0.max(clip.x.floor() as i64);
-                    let y = 0.max(clip.y.floor() as i64);
-                    let right = facts.logical_width.min((clip.x + clip.width).ceil() as i64);
-                    let bottom = facts.logical_height.min((clip.y + clip.height).ceil() as i64);
-                    (x, y, 0.max(right - x), 0.max(bottom - y))
-                }
-            };
-            Ok(Rc::new(SampledDraw {
-                family: PipelineFamily::Ui,
-                blend: Blend::Alpha,
-                texture: Some(texture),
-                auxiliary: None,
-                vertex_attributes: None,
-                samples: 1,
-                draw: GeometryDraw {
-                    mesh: scene_execution::Mesh {
-                        key: scene_execution::MeshKey::Host(format!("ui:{}", slot_key)),
-                        vertices: s.vertices.clone(),
-                        shared_vertices: None,
-                        vertex_count: 4 * batch_.count,
-                        indices: s.indices.clone(),
-                        index_count: 6 * batch_.count,
-                        primitive: ogpu_core::render_pass::Primitive::TriangleList,
-                    },
-                    state: scene_execution::State {
-                        transform_uniforms: Some(s.affine.clone()),
-                        ..renderer_lowering::default_state(framebuffer, scissor)
-                    },
-                },
-            }))
-        })();
-        match built {
-            Ok(value) => draws.push(value),
-            Err(e) => {
-                failure_ = Some(e);
-                break;
-            }
-        }
-    }
-    match failure_ {
-        Some(e) => {
-            close_submission(submission_);
-            Err(e)
-        }
-        None => Ok(Batch { owner: submission_.clone(), draws }),
-    }
+    let draw: Draw = Rc::new(SampledDraw {
+        ui: Some(ui),
+        family: PipelineFamily::Ui,
+        blend: Blend::Alpha,
+        texture: None,
+        auxiliary: None,
+        vertex_attributes: None,
+        samples: 1,
+        draw: GeometryDraw {
+            mesh: scene_execution::Mesh {
+                key: scene_execution::MeshKey::Host("ui-layer".to_owned()),
+                vertices: scene_execution::empty_bytes(),
+                shared_vertices: None,
+                vertex_count: 0,
+                indices: scene_execution::empty_bytes(),
+                index_count: 0,
+                primitive: ogpu_core::render_pass::Primitive::TriangleList,
+            },
+            state: renderer_lowering::default_state(framebuffer, framebuffer),
+        },
+    });
+    Ok(Batch { owner: submission_.clone(), draws: vec![draw] })
 }
 
 /// Adopts already prepared non-Scene2 draws into this submission.
@@ -1895,8 +1812,8 @@ pub mod native {
         super::lower_scene2_segment(submission_, identity, version, cacheable, density, resource_, ir_)
     }
 
-    pub fn lower_ui(submission_: &Submission, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ui: &Shapes) -> Result<Batch, Error> {
-        super::lower_ui(submission_, density, resource_, ui)
+    pub fn ui_draw(submission_: &Submission, ui: scene_execution::UiLayer) -> Result<Batch, Error> {
+        super::ui_draw(submission_, ui)
     }
 
     pub fn step(

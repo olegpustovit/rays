@@ -72,7 +72,7 @@ fn fixture() -> Fixture {
 }
 
 fn entry(f: &Fixture, scissor: (i64, i64, i64, i64), uniforms: Vec<u8>) -> SampledDraw {
-    SampledDraw {
+    SampledDraw { ui: None,
         family: PipelineFamily::Scene3,
         blend: Blend::Replace,
         texture: None,
@@ -561,7 +561,7 @@ fn gpu_borrowed_vertex_encoder_observation() {
         gpu: None,
         sampler: SamplerDescriptor { label: None, min_filter: SamplerFilter::Nearest, mag_filter: SamplerFilter::Nearest, mip_filter: MipFilter::NoMip, address_u: AddressMode::ClampToEdge, address_v: AddressMode::ClampToEdge, lod_min: 0., lod_max: 0., max_anisotropy: 1 },
     });
-    let draw = Rc::new(SampledDraw {
+    let draw = Rc::new(SampledDraw { ui: None,
         family: PipelineFamily::Ui, blend: Blend::Alpha, texture: Some(texture), auxiliary: None, vertex_attributes: None, samples: 1,
         draw: GeometryDraw {
             mesh: Mesh { key: MeshKey::GpuVertices { name: Rc::new("observed\nui".into()), indices: Some(Rc::new("shared\nhost-indices".into())) }, vertices: se::empty_bytes(), shared_vertices: None, vertex_count: 8, indices, index_count: 12, primitive: Primitive::TriangleList },

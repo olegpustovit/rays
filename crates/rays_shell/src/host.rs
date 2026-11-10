@@ -1,9 +1,15 @@
 //! PXUI's host services from Rays: SDL_ttf faces and GPU images in, scene layers and platform
 //! requests out.
 use input::{frame::Frame, Event};
+use ogpu_core::backend::{self, Texture};
+use ogpu_core::error::{self, Error, ErrorKind};
+use ogpu_core::pipeline::{ColorFormat, DepthFormat};
+use ogpu_core::types::{Extent, Origin, TextureDescriptor, TextureFormat, TextureUsage};
 use pxui::ui::{Backend, Font, Image, Raster, Ui};
+use pxui_render::{AtlasKind, Break, Painter};
 use rays::{clipboard, font, image, scene, sketch};
-use std::rc::Rc;
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
 
 /// Run a frame as the Rays host does: the clipboard text the last frame asked for arrives first,
@@ -53,17 +59,19 @@ pub fn charge(ui: &mut Ui) {
 }
 
 /// The last frame as scene nodes: each layer after what `under` puts beneath its floating root
-/// (by box key), then the focused text's input-method area.
-pub fn scene(ui: &Ui, under: Option<&dyn Fn(i64) -> Vec<scene::Node>>) -> Vec<scene::Node> {
+/// (by box key), then the focused text's input-method area. The renderer has `pxui_render`'s
+/// painter draw each layer, borrowed from the UI, in its place in the frame's pass.
+pub fn scene(ui: &Rc<RefCell<Ui>>, under: Option<&dyn Fn(i64) -> Vec<scene::Node>>) -> Vec<scene::Node> {
+    let paint = painter(ui);
+    let ui = ui.borrow();
     let out = ui.output();
     let mut nodes = Vec::new();
-    for layer in out.draw {
+    for (index, layer) in out.draw.iter().enumerate() {
         if let Some(under) = under {
             nodes.extend(under(layer.key));
         }
-        if layer.batch.count() != 0 {
-            let images = layer.images.iter().filter_map(|(id, i)| as_rays_image(i).map(|r| (*id, r.clone()))).collect();
-            nodes.push(scene::layer::ui(Some(images), layer.batch.clone()).expect("PXUI layer"));
+        if !layer.instances.is_empty() {
+            nodes.push(scene::layer::ui(paint.clone(), index, ui.draw_revision()));
         }
     }
     if let Some(((x, y, w, h), caret)) = out.platform.ime {
@@ -72,12 +80,141 @@ pub fn scene(ui: &Ui, under: Option<&dyn Fn(i64) -> Vec<scene::Node>>) -> Vec<sc
     nodes
 }
 
-fn face(f: &Font) -> &font::Font {
-    f.0.downcast_ref::<font::Font>().expect("PXUI font from another backend")
+thread_local! {
+    /// One paint closure per live UI, so equal frames give equal scene nodes.
+    static PAINTS: RefCell<Vec<(Weak<RefCell<Ui>>, scene::UiPaint)>> = const { RefCell::new(Vec::new()) };
+    static PAINTER: RefCell<Option<Shared>> = const { RefCell::new(None) };
 }
 
-fn rays_image(i: &Image) -> &image::Image {
-    i.handle.downcast_ref::<image::Image>().expect("PXUI image from another backend")
+fn painter(ui: &Rc<RefCell<Ui>>) -> scene::UiPaint {
+    PAINTS.with(|paints| {
+        let mut paints = paints.borrow_mut();
+        let weak = Rc::downgrade(ui);
+        if let Some((_, paint)) = paints.iter().find(|(w, _)| w.ptr_eq(&weak)) {
+            return paint.clone();
+        }
+        paints.retain(|(w, _)| w.strong_count() > 0);
+        let held = weak.clone();
+        let paint: scene::UiPaint = Rc::new(move |pass: &scene::UiPass, layer: usize| match held.upgrade() {
+            None => Ok(()),
+            Some(ui) => match ui.try_borrow() {
+                Ok(ui) => paint_layer(&ui, pass, layer),
+                Err(_) => Err(error::make("Pxui.paint", ErrorKind::InvalidState, "the UI is being changed while its frame renders")),
+            },
+        });
+        paints.push((weak, paint.clone()));
+        paint
+    })
+}
+
+/// Draw calls the thread's painter has issued.
+pub fn draw_calls() -> u64 {
+    PAINTER.with(|shared| shared.borrow().as_ref().map_or(0, |s| s.painter.draw_calls()))
+}
+
+/// The thread's painter and what its atlases and textures hold.
+// ponytail: one painter per thread, re-uploading the glyph mask when another UI paints; two UIs
+// drawn into one frame would share the mask. A painter per UI if that ever happens.
+struct Shared {
+    device: i64,
+    painter: Painter,
+    /// the atlas epoch the mask holds, and how many of its written rectangles
+    atlas: (u64, usize),
+    frame: u64,
+    /// image textures by identity, with their generation and the frame that last drew them
+    images: Vec<(i64, i64, Texture, u64)>,
+}
+
+fn paint_layer(ui: &Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Error> {
+    let Some(layer) = ui.output().draw.get(layer) else { return Ok(()) };
+    PAINTER.with(|shared| {
+        let mut shared = shared.borrow_mut();
+        let device = ogpu_core::handle::device_id(backend::device_handle(pass.device));
+        if shared.as_ref().is_none_or(|s| s.device != device) {
+            let size = (pxui::ui::ATLAS_WIDTH as u32, pxui::ui::ATLAS_HEIGHT as u32);
+            let painter = Painter::new(pass.device, ColorFormat::Rgba8Unorm, DepthFormat::NoDepth, 1, size, (1, 1))?;
+            *shared = Some(Shared { device, painter, atlas: (0, 0), frame: 0, images: Vec::new() });
+        }
+        let s = shared.as_mut().expect("painter");
+        if s.frame != pass.frame {
+            s.frame = pass.frame;
+            s.painter.begin_frame();
+            // an image no frame drew for a while goes
+            let frame = pass.frame;
+            s.images.retain(|(_, _, texture, used)| {
+                let keep = frame.saturating_sub(*used) < 8;
+                if !keep {
+                    let _ = backend::destroy_texture(texture);
+                }
+                keep
+            });
+        }
+        sync_atlas(s, ui.atlas())?;
+        if layer.breaks.is_empty() {
+            return s.painter.draw(pass.encoder, pass.size_px, pass.scale, &layer.instances, &[]);
+        }
+        for image in &layer.images {
+            image_texture(s, pass, image)?;
+        }
+        let textures: Vec<&Texture> = layer.images.iter().map(|i| {
+            let id = as_rays_image(i).map_or(0, image::identity);
+            s.images.iter().find(|(key, ..)| *key == id).map(|(_, _, texture, _)| texture).expect("image texture")
+        }).collect();
+        let breaks: Vec<Break> = layer.breaks.iter().map(|b| Break { at_instance: b.at_instance, texture: Some(textures[b.image as usize]) }).collect();
+        s.painter.draw(pass.encoder, pass.size_px, pass.scale, &layer.instances, &breaks)
+    })
+}
+
+/// The glyph mask as the painter's R8 atlas: rows a new epoch fills, then the band of rows the new
+/// glyphs since the last upload span.
+fn sync_atlas(s: &mut Shared, atlas: &pxui::ui::Atlas) -> Result<(), Error> {
+    let (epoch, written) = atlas.written();
+    let width = atlas.width as usize;
+    let rows = if s.atlas.0 != epoch {
+        Some((0, atlas.height as u32))
+    } else {
+        written[s.atlas.1..].iter().fold(None, |band: Option<(u32, u32)>, r| {
+            let (y0, y1) = band.unwrap_or((r[1], r[1] + r[3]));
+            Some((y0.min(r[1]), y1.max(r[1] + r[3])))
+        })
+    };
+    if let Some((y0, y1)) = rows.filter(|(y0, y1)| y1 > y0) {
+        let bytes = &atlas.pixels[y0 as usize * width..y1 as usize * width];
+        s.painter.upload(AtlasKind::Mask, 0, y0, width as u32, y1 - y0, bytes, width)?;
+    }
+    s.atlas = (epoch, written.len());
+    Ok(())
+}
+
+/// A texture holding the image's pixels at their generation.
+// ponytail: images are read back to the CPU and uploaded once per generation (the inspector's
+// one thumbnail); sample a GPU image's own texture if UI images become many or large.
+fn image_texture(s: &mut Shared, pass: &scene::UiPass, i: &Image) -> Result<(), Error> {
+    let Some(rays_image) = as_rays_image(i) else {
+        return Err(error::make("Pxui.paint", ErrorKind::InvalidArgument, "PXUI image from another backend"));
+    };
+    let (id, generation) = (image::identity(rays_image), image::generation(rays_image));
+    if let Some(entry) = s.images.iter_mut().find(|(key, ..)| *key == id) {
+        entry.3 = pass.frame;
+        if entry.1 == generation {
+            return Ok(());
+        }
+        let _ = backend::destroy_texture(&entry.2);
+        s.images.retain(|(key, ..)| *key != id);
+    }
+    let (width, height) = image::dimensions(rays_image);
+    let pixels = image::pixels(rays_image).map_err(|m| error::make("Pxui.paint", ErrorKind::InvalidState, &m))?;
+    let texture = backend::create_texture(pass.device, TextureDescriptor {
+        label: Some("pxui.image".into()), width, height, depth: 1, mip_levels: 1, sample_count: 1,
+        format: TextureFormat::Rgba8Unorm, usage: vec![TextureUsage::TextureBinding, TextureUsage::TextureCopyDst],
+    })?;
+    backend::write_texture(&texture, None, Origin { x: 0, y: 0, z: 0 }, Extent { width, height, depth: 1 }, width * 4, &pixels)?;
+    s.images.push((id, generation, texture, pass.frame));
+    Ok(())
+}
+
+fn face(f: &Font) -> &font::Font {
+    f.0.downcast_ref::<font::Font>().expect("PXUI font from another backend")
 }
 
 /// A Rays image as PXUI's handle, for `Paint::image`.
@@ -106,21 +243,9 @@ fn glyph(f: &Font, density: i64, code: i64) -> Option<Raster> {
     Some(Raster { width: g.glyph_width, height: g.glyph_height, advance: g.glyph_advance, alpha: g.glyph_alpha })
 }
 
-fn upload_rgba(into: Option<&Image>, width: i64, height: i64, rgba: &[u8]) -> Option<Image> {
-    let uploaded = image::upload_rgba(into.map(rays_image), width, height, rgba).ok()?;
-    Some(match into {
-        Some(i) => Image { handle: i.handle.clone(), width, height },
-        None => Image { handle: Rc::new(uploaded), width, height },
-    })
-}
-
 pub static BACKEND: Backend = Backend {
     open_font,
     close_font: |f| font::destroy(face(f)),
     ascent: |f| font::get_ascent(face(f)).unwrap_or(0),
     glyph,
-    upload_rgba,
-    destroy_image: |i| {
-        let _ = image::destroy(rays_image(i));
-    },
 };

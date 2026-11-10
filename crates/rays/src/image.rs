@@ -100,6 +100,11 @@ pub fn identity(image: &Image) -> i64 {
     Resource::identity(&image.0.resource)
 }
 
+/// Changes whenever the image's pixels do.
+pub fn generation(image: &Image) -> i64 {
+    Resource::generation(&image.0.resource)
+}
+
 pub fn pixels(image: &Image) -> Result<Vec<u8>, String> {
     Resource::pixels(&image.0.resource).map_err(|e| message("Image.pixels", &e))
 }

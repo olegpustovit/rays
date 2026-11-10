@@ -6,7 +6,7 @@ use input::{Event, Key, MouseButton, Platform, ScrollPhase};
 use crate::geom::hash;
 use input::frame as rframe;
 use crate::geom::{color, Rgba as Color};
-use scene_command::ui_batch::{self, Clip};
+use crate::draw::{Break, Instance};
 use std::any::Any;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -379,8 +379,9 @@ pub struct Accumulator {
 
 // ------------------------------------------------------ glyph atlas
 
+/// The mask atlas the painter holds: glyph uv are normalised to this size.
 pub const ATLAS_WIDTH: i64 = 1024;
-const ATLAS_MAX_HEIGHT: i64 = 4096;
+pub const ATLAS_HEIGHT: i64 = 4096;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Glyph {
@@ -412,11 +413,13 @@ pub struct Raster {
 }
 
 /// One paint layer: the base UI, then a layer per floating root (`key` is its box key; 0 for the
-/// base). `images` binds every texture id the batch samples.
+/// base). Image instances sample `images[break.image]` from each break on. The vectors are cleared
+/// and refilled every frame, never dropped.
 pub struct Layer {
     pub key: i64,
-    pub batch: ui_batch::Table,
-    pub images: Vec<(i64, Image)>,
+    pub instances: Vec<Instance>,
+    pub breaks: Vec<Break>,
+    pub images: Vec<Image>,
 }
 
 /// What the frame asks of the window system; the host applies it after the frame.
@@ -450,11 +453,10 @@ pub struct Backend {
     pub ascent: fn(&Font) -> i64,
     /// One code point at `density` exactly as it appears inside a rendered string.
     pub glyph: fn(&Font, density: i64, code: i64) -> Option<Raster>,
-    /// Create, or update in place, an RGBA texture.
-    pub upload_rgba: fn(into: Option<&Image>, width: i64, height: i64, rgba: &[u8]) -> Option<Image>,
-    pub destroy_image: fn(&Image),
 }
 
+/// The glyph coverage mirror, one byte per texel, `width` by `height` (the painter's mask atlas
+/// is `ATLAS_WIDTH` by `ATLAS_HEIGHT`; rows past `height` are unused).
 pub struct Atlas {
     pub width: i64,
     pub height: i64,
@@ -463,31 +465,34 @@ pub struct Atlas {
     shelf_x: i64,
     shelf_y: i64,
     shelf_h: i64,
-    dirty: bool,
-    pub image: Option<Image>,
+    /// the glyph rectangles written since `epoch` began, `[x, y, w, h]`
+    written: Vec<[u32; 4]>,
+    epoch: u64,
     fonts: Vec<(Font, i64)>,
     next_font: i64,
 }
 
+/// Every atlas content generation in the process is distinct, so a host can tell a cleared or
+/// different atlas from the one it last uploaded.
+fn next_epoch() -> u64 {
+    static EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl Atlas {
     fn empty() -> Atlas {
-        Atlas { width: ATLAS_WIDTH, height: 0, pixels: Vec::new(), glyphs: HashMap::new(), shelf_x: 0, shelf_y: 0, shelf_h: 0, dirty: false, image: None, fonts: Vec::new(), next_font: 1 }
+        Atlas { width: ATLAS_WIDTH, height: 0, pixels: Vec::new(), glyphs: HashMap::new(), shelf_x: 0, shelf_y: 0, shelf_h: 0, written: Vec::new(), epoch: next_epoch(), fonts: Vec::new(), next_font: 1 }
     }
 
     fn create() -> Atlas {
-        Atlas {
-            width: ATLAS_WIDTH,
-            height: 256,
-            pixels: vec![0; (ATLAS_WIDTH * 256) as usize],
-            glyphs: HashMap::new(),
-            shelf_x: 0,
-            shelf_y: 0,
-            shelf_h: 0,
-            dirty: false,
-            image: None,
-            fonts: Vec::new(),
-            next_font: 1,
-        }
+        Atlas { height: 256, pixels: vec![0; (ATLAS_WIDTH * 256) as usize], ..Atlas::empty() }
+    }
+
+    /// The content generation and the glyph rectangles written in it so far, in order. A host
+    /// uploads `pixels` rows `0..height` when the epoch is new to it, then the rectangles past
+    /// those it has uploaded.
+    pub fn written(&self) -> (u64, &[[u32; 4]]) {
+        (self.epoch, &self.written)
     }
 
     /// PXUI opens its faces once and never restyles them, so a face keeps its glyph ids.
@@ -511,7 +516,8 @@ impl Atlas {
         self.shelf_x = 0;
         self.shelf_y = 0;
         self.shelf_h = 0;
-        self.dirty = true;
+        self.written.clear();
+        self.epoch = next_epoch();
     }
 
     // ponytail: a single shelf-packed page that doubles in height up to 4096 rows; when that
@@ -529,7 +535,7 @@ impl Atlas {
         }
         if self.shelf_y + padded_h > self.height {
             let mut h = self.height;
-            while self.shelf_y + padded_h > h && h < ATLAS_MAX_HEIGHT {
+            while self.shelf_y + padded_h > h && h < ATLAS_HEIGHT {
                 h *= 2;
             }
             if self.shelf_y + padded_h > h {
@@ -564,7 +570,7 @@ impl Atlas {
                                 raster.alpha[(row * raster.width + column) as usize];
                         }
                     }
-                    self.dirty = true;
+                    self.written.push([gx as u32, gy as u32, raster.width as u32, raster.height as u32]);
                     Some(Glyph { gx, gy, gw: raster.width, gh: raster.height, advance: raster.advance })
                 }
             }
@@ -575,19 +581,6 @@ impl Atlas {
         glyph
     }
 
-    /// The mirror is alpha alone: a glyph's color is constant, so the upload writes it.
-    fn publish(&mut self, backend: &Backend) {
-        if self.dirty {
-            let mut rgba = Vec::with_capacity(4 * self.pixels.len());
-            for alpha in &self.pixels {
-                rgba.extend_from_slice(&[0xff, 0xff, 0xff, *alpha]);
-            }
-            if let Some(image) = (backend.upload_rgba)(self.image.as_ref(), self.width, self.height, &rgba) {
-                self.image = Some(image);
-                self.dirty = false;
-            }
-        }
-    }
 }
 
 // ------------------------------------------------------------- fonts
@@ -829,12 +822,15 @@ pub struct Ui {
     hit_count: usize,
     chain_key: i64,
     chain: Vec<i64>,
-    batch_builder: Option<ui_batch::Builder>,
     label: String,
-    painted_layers: Vec<(i64, ui_batch::Table)>,
+    /// the frame's layers are `draw[..draw_len]`; the rest keep their storage for later frames
     draw: Vec<Layer>,
+    draw_len: usize,
+    /// the frame before's layers, painted over by the next frame
+    spare: Vec<Layer>,
+    draw_revision: i64,
+    painting: bool,
     out: PlatformOut,
-    borrowed_images: Vec<(i64, Image)>,
     destroyed: bool,
 }
 
@@ -854,8 +850,8 @@ pub fn contains(rect: Rect, point: (f32, f32)) -> bool { rect.contains(point) }
 
 pub fn intersect(a: Rect, b: Rect) -> Rect { a.intersect(b) }
 
-fn packed(c: Color) -> i32 {
-    (((c.r << 24) | (c.g << 16) | (c.b << 8) | c.a) as u32) as i32
+fn rgba(c: Color) -> [u8; 4] {
+    [c.r as u8, c.g as u8, c.b as u8, c.a as u8]
 }
 
 /// Integer-derived child keys: no label string per frame.
@@ -952,12 +948,13 @@ impl Ui {
             hit_count: 0,
             chain_key: 0,
             chain: Vec::new(),
-            batch_builder: Some(ui_batch::Builder::with_capacity(1024)),
             label: String::new(),
-            painted_layers: Vec::new(),
             draw: Vec::new(),
+            draw_len: 0,
+            spare: Vec::new(),
+            draw_revision: 0,
+            painting: false,
             out: PlatformOut::default(),
-            borrowed_images: Vec::new(),
             destroyed: false,
         }
     }
@@ -971,13 +968,10 @@ impl Ui {
     pub fn destroy(&mut self) {
         if !self.destroyed {
             self.destroyed = true;
-            if let Some(image) = self.fonts.atlas.image.take() {
-                (self.fonts.backend.destroy_image)(&image);
-            }
             self.fonts.destroy();
-            self.borrowed_images.clear();
             self.draw.clear();
-            self.painted_layers.clear();
+            self.spare.clear();
+            self.draw_len = 0;
             self.boxes.clear();
             for slot in &mut self.slots { slot.labels.clear(); }
             self.count = 0;
@@ -1009,7 +1003,7 @@ impl Ui {
 
     /// The most recently completed frame.
     pub fn output(&self) -> FrameOut<'_> {
-        FrameOut { draw: &self.draw, platform: &self.out }
+        FrameOut { draw: &self.draw[..self.draw_len], platform: &self.out }
     }
 
     /// Ask the host for the clipboard's text; it arrives as `Event::Paste` with the next frame.
@@ -1019,6 +1013,16 @@ impl Ui {
 
     pub(crate) fn copy(&mut self, text: &str) {
         self.out.clipboard = Some(text.to_owned());
+    }
+
+    /// Changes exactly when a frame paints layers different from the frame before's.
+    pub fn draw_revision(&self) -> i64 {
+        self.draw_revision
+    }
+
+    /// The glyph mask the frame's glyph instances sample (`Atlas::written` says what changed).
+    pub fn atlas(&self) -> &Atlas {
+        &self.fonts.atlas
     }
 
     /// How many keys the retained cache holds (live slots).
@@ -2732,16 +2736,16 @@ pub fn text_top_for(font_size: i64, size: Option<i64>, y: f32, h: f32) -> f32 {
     y + ((h - size.unwrap_or(font_size) as f32) / 2.0).floor()
 }
 
-/// The painter's handle for one frame. It owns the instance builder, the glyph atlas and the
+/// The painter's handle for one frame. It owns the layers being filled, the glyph atlas and the
 /// layout arrays painters read while painting; `Ui::frame` hands them back afterwards.
 pub struct Paint {
-    pub builder: ui_batch::Builder,
+    layers: Vec<Layer>,
+    layer: usize,
     pub clip_rect: Rect,
     pub theme: Theme,
     pub font_size: i64,
     pub row_height: i64,
     pub fonts: Fonts,
-    pub borrowed_images: Vec<(i64, Image)>,
     /// the focused text's input area and caret offset
     pub ime: Option<((i64, i64, i64, i64), i64)>,
     label: String,
@@ -2754,42 +2758,89 @@ pub struct Paint {
 }
 
 impl Paint {
-    fn prepare(&mut self) {
-        let Rect { x, y, w, h } = self.clip_rect;
-        self.builder.set_clip(Some(Clip { x: x as f64, y: y as f64, width: w as f64, height: h as f64 }));
+    /// Start the next layer (a floating root's), reusing a layer vector a previous frame left.
+    fn next_layer(&mut self, key: i64) {
+        self.layer = self.layer.wrapping_add(1);
+        if self.layer == self.layers.len() {
+            self.layers.push(Layer { key, instances: Vec::with_capacity(256), breaks: Vec::new(), images: Vec::new() });
+        }
+        let layer = &mut self.layers[self.layer];
+        layer.key = key;
+        layer.instances.clear();
+        layer.breaks.clear();
+        layer.images.clear();
     }
 
-    /// Borrow a host-owned image for this frame through the normal UI texture batch.
+    /// Append `instance` under the current clip.
+    fn push(&mut self, instance: Instance) {
+        let Rect { x, y, w, h } = self.clip_rect;
+        let whole = |v: f32| v.clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+        let clip = [whole(x.floor()), whole(y.floor()), whole((x + w).ceil()), whole((y + h).ceil())];
+        self.layers[self.layer].instances.push(Instance { clip, ..instance });
+    }
+
+    /// An edge at `v` points as the rasteriser covers pixel centres (`a <= centre < b`): snapped
+    /// to the pixel grid, so hard-edged fills keep the pixels a triangle rectangle covers.
+    fn snap(&self, v: f32) -> f32 {
+        let d = self.fonts.density as f32;
+        (v * d - 0.5).ceil() / d
+    }
+
+    fn hard(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, color: [u8; 4]) {
+        let r = [self.snap(x0), self.snap(y0), self.snap(x1), self.snap(y1)];
+        if r[2] > r[0] && r[3] > r[1] {
+            self.push(Instance::rect(r, color));
+        }
+    }
+
+    /// Draw a host-owned image for this frame; the layer breaks to its texture.
     pub fn image(&mut self, x: f32, y: f32, w: f32, h: f32, image: &Image) {
-        // ponytail: at most 64 borrowed images per frame, linear identity lookup.
-        let id = match self.borrowed_images.iter().find(|(_, other)| Rc::ptr_eq(&other.handle, &image.handle)) {
-            Some((id, _)) => *id,
-            None => {
-                if self.borrowed_images.len() >= 64 {
-                    panic!("Ui.Paint.image: 64 images per frame");
+        if w > 0.0 && h > 0.0 {
+            let layer = &mut self.layers[self.layer];
+            let index = match layer.images.iter().position(|other| Rc::ptr_eq(&other.handle, &image.handle)) {
+                Some(index) => index,
+                None => {
+                    layer.images.push(image.clone());
+                    layer.images.len() - 1
                 }
-                let id = self.borrowed_images.len() as i64 + 2;
-                self.borrowed_images.insert(0, (id, image.clone()));
-                id
+            } as u32;
+            if layer.breaks.last().map(|b| b.image) != Some(index) {
+                layer.breaks.push(Break { at_instance: layer.instances.len() as u32, image: index });
             }
-        };
-        self.prepare();
-        let (iw, ih) = (image.width, image.height);
-        self.builder
-            .textured(id, x as f64, y as f64, w as f64, h as f64, 0.0, 0.0, iw as f64, ih as f64, -1)
-            .expect("Ui.Paint.image");
+            self.push(Instance::image([x, y, x + w, y + h], [0.0, 0.0, 1.0, 1.0], [255; 4]));
+        }
     }
 
     /// Square fills cover exactly the pixels of the equivalent triangle rectangle.
     pub fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
-        self.prepare();
-        self.builder.rect(x as f64, y as f64, w as f64, h as f64, packed(color), 0, 0.0, 0.0, false).expect("Ui.Paint.fill");
+        if w > 0.0 && h > 0.0 {
+            self.hard(x, y, x + w, y + h, rgba(color));
+        }
     }
 
     /// A band of `width` centred on the rectangle's edges.
     pub fn stroke_w(&mut self, x: f32, y: f32, w: f32, h: f32, width: f32, color: Color) {
-        self.prepare();
-        self.builder.rect(x as f64, y as f64, w as f64, h as f64, 0, packed(color), width as f64, 0.0, false).expect("Ui.Paint.stroke");
+        if !(w > 0.0 && h > 0.0) {
+            return;
+        }
+        let half = width / 2.0;
+        let c = rgba(color);
+        let o = [self.snap(x - half), self.snap(y - half), self.snap(x + w + half), self.snap(y + h + half)];
+        let i = [self.snap(x + half), self.snap(y + half), self.snap(x + w - half), self.snap(y + h - half)];
+        if o[2] <= o[0] || o[3] <= o[1] {
+            return;
+        }
+        let sides = [i[0] - o[0], i[1] - o[1], o[2] - i[2], o[3] - i[3]];
+        if i[2] <= i[0] || i[3] <= i[1] {
+            self.push(Instance::rect(o, c));
+        } else if sides.iter().all(|side| *side == sides[0]) {
+            self.push(Instance::rect(o, [0; 4]).border(sides[0], c));
+        } else {
+            self.hard(o[0], o[1], o[2], i[1], c);
+            self.hard(o[0], i[3], o[2], o[3], c);
+            self.hard(o[0], i[1], i[0], i[3], c);
+            self.hard(i[2], i[1], o[2], i[3], c);
+        }
     }
 
     pub fn stroke(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
@@ -2821,12 +2872,6 @@ impl Paint {
         }
     }
 
-    fn wire(&mut self, p0: (f32, f32), p1: (f32, f32), p2: (f32, f32), p3: (f32, f32), width: f32, color: Color) {
-        self.prepare();
-        let d = |p: (f32, f32)| (p.0 as f64, p.1 as f64);
-        self.builder.wire([d(p0), d(p1), d(p2), d(p3)], width as f64, packed(color)).expect("Ui.Paint.wire");
-    }
-
     /// Butt-capped; axis-aligned lines are exact rectangles.
     pub fn line_w(&mut self, from: (f32, f32), to: (f32, f32), width: f32, color: Color) {
         let (x0, y0) = from;
@@ -2837,14 +2882,7 @@ impl Paint {
         } else if y0 == y1 {
             self.fill(x0.min(x1), y0 - half, (x1 - x0).abs(), width, color);
         } else {
-            self.wire(
-                (x0, y0),
-                (x0 + (x1 - x0) / 3.0, y0 + (y1 - y0) / 3.0),
-                (x0 + 2.0 * (x1 - x0) / 3.0, y0 + 2.0 * (y1 - y0) / 3.0),
-                (x1, y1),
-                width,
-                color,
-            );
+            self.push(Instance::line([x0, y0], [x1, y1], width, rgba(color)));
         }
     }
 
@@ -2852,31 +2890,46 @@ impl Paint {
         self.line_w(from, to, 1.0, color);
     }
 
+    /// A disc with a one-point stroke centred on its edge.
     pub fn circle(&mut self, at: (f32, f32), radius: f32, fill: Option<Color>, stroke: Option<Color>) {
-        self.prepare();
+        if !(radius > 0.0) {
+            return;
+        }
         let fill = match (fill, stroke) {
             (None, None) => Some(color::white()),
             _ => fill,
         };
-        self.builder
-            .rect(
-                (at.0 - radius) as f64,
-                (at.1 - radius) as f64,
-                (2.0 * radius) as f64,
-                (2.0 * radius) as f64,
-                fill.map(packed).unwrap_or(0),
-                stroke.map(packed).unwrap_or(0),
-                if stroke.is_some() { 1.0 } else { 0.0 },
-                radius as f64,
-                true,
-            )
-            .expect("Ui.Paint.circle");
+        let fill = fill.map(rgba).unwrap_or([0; 4]);
+        let (cx, cy) = at;
+        self.push(match stroke {
+            None => Instance::rect([cx - radius, cy - radius, cx + radius, cy + radius], fill).radii([radius; 4]),
+            Some(stroke) => {
+                let r = radius + 0.5;
+                Instance::rect([cx - r, cy - r, cx + r, cy + r], fill).radii([r; 4]).border(1.0, rgba(stroke))
+            }
+        });
     }
 
-    /// Dots every `spacing` points from `origin`, drawn by one quad.
+    /// `dot`-point squares every `spacing` points from `origin`, inside the rectangle.
+    // ponytail: one instance per dot (a 2000 x 1200 pane at the graph's 24-point spacing is about
+    // 4,200); a grid instance kind in the shader if the instance ring shows up in a profile.
     pub fn grid(&mut self, x: f32, y: f32, w: f32, h: f32, origin: (f32, f32), spacing: f32, dot: f32, color: Color) {
-        self.prepare();
-        self.builder.grid(x as f64, y as f64, w as f64, h as f64, origin.0 as f64, origin.1 as f64, spacing as f64, dot as f64, packed(color)).expect("Ui.Paint.grid");
+        if !(w > 0.0 && h > 0.0 && spacing > 0.0) {
+            return;
+        }
+        let c = rgba(color);
+        let saved = self.clip_rect;
+        self.clip_rect = saved.intersect(Rect::new(x, y, w, h));
+        let first = |lo: f32, o: f32| ((lo - o - dot) / spacing).floor() as i64 + 1;
+        let last = |hi: f32, o: f32| ((hi - o) / spacing).ceil() as i64 - 1;
+        for j in first(y, origin.1)..=last(y + h, origin.1) {
+            let dy = origin.1 + j as f32 * spacing;
+            for i in first(x, origin.0)..=last(x + w, origin.0) {
+                let dx = origin.0 + i as f32 * spacing;
+                self.push(Instance::rect([dx, dy, dx + dot, dy + dot], c));
+            }
+        }
+        self.clip_rect = saved;
     }
 
     /// Kit text with its top-left corner at `at`. Without `size` it uses the UI's own font; with
@@ -2888,9 +2941,9 @@ impl Paint {
         }
         let (at, tracking) = ((at.0 as f64, at.1 as f64), tracking as f64);
         let Some(font) = self.fonts.face(size) else { return };
-        self.prepare();
         let id = self.fonts.atlas.font_id(&font);
-        let packed_color = packed(color.unwrap_or(self.theme.foreground));
+        let color = rgba(color.unwrap_or(self.theme.foreground));
+        let (aw, ah) = (ATLAS_WIDTH as f32, ATLAS_HEIGHT as f32);
         let density = self.fonts.density as f64;
         // Snap the run's origin to a physical pixel so each glyph texel lands on exactly one
         // backing pixel, as whole-string text does.
@@ -2908,20 +2961,9 @@ impl Paint {
                     let gx = screen_x + pen.round() / density;
                     let gw = glyph.gw as f64 / density;
                     let gh = glyph.gh as f64 / density;
-                    self.builder
-                        .textured(
-                            1,
-                            gx,
-                            screen_y,
-                            gw,
-                            gh,
-                            glyph.gx as f64,
-                            glyph.gy as f64,
-                            (glyph.gx + glyph.gw) as f64,
-                            (glyph.gy + glyph.gh) as f64,
-                            packed_color,
-                        )
-                        .expect("Ui.Paint.text");
+                    let (u0, v0) = (glyph.gx as f32 / aw, glyph.gy as f32 / ah);
+                    let (u1, v1) = ((glyph.gx + glyph.gw) as f32 / aw, (glyph.gy + glyph.gh) as f32 / ah);
+                    self.push(Instance::mask([gx as f32, screen_y as f32, (gx + gw) as f32, (screen_y + gh) as f32], [u0, v0, u1, v1], color));
                 }
                 pen += glyph.advance as f64 + tracking;
             }
@@ -3108,11 +3150,9 @@ impl Ui {
         }
     }
 
-    fn visit(&mut self, paint: &mut Paint, layers: &mut Vec<(i64, ui_batch::Table)>, layer_key: &mut i64, index: usize, clip_rect: Rect, parent_hit: i64) {
+    fn visit(&mut self, paint: &mut Paint, index: usize, clip_rect: Rect, parent_hit: i64) {
         if self.boxes[index].parent == 0 && self.foreground.iter().any(|(_, root)| *root == index) {
-            layers.push((*layer_key, paint.builder.publish().expect("Ui.frame: publish")));
-            paint.builder.reset();
-            *layer_key = self.boxes[index].key;
+            paint.next_layer(self.boxes[index].key);
         }
         let screen_rect = self.screen(index);
         let slot = self.boxes[index].slot;
@@ -3158,7 +3198,7 @@ impl Ui {
             let parent_hit = if has_hit { self.boxes[index].key } else { parent_hit };
             let mut child = self.boxes[index].first;
             while child != NONE {
-                self.visit(paint, layers, layer_key, child, child_clip, parent_hit);
+                self.visit(paint, child, child_clip, parent_hit);
                 child = self.boxes[child].next;
             }
             if shown {
@@ -3190,43 +3230,49 @@ impl Ui {
         }
     }
 
-    fn paint_all(&mut self, frame: &rframe::Frame) -> Vec<(i64, ui_batch::Table)> {
-        let mut builder = self.batch_builder.take().expect("Ui: painting re-entered");
-        builder.reset();
+    fn paint_all(&mut self, frame: &rframe::Frame) {
+        assert!(!self.painting, "Ui: painting re-entered");
+        self.painting = true;
         self.hit_count = 0;
         self.chain_key = 0;
         self.fonts.density = self.density;
         let clip = Rect::new(0.0, 0.0, frame.input.size.0 as f32, frame.input.size.1 as f32);
         let placeholder = Fonts::placeholder(self.fonts.backend);
+        // paint into the other buffer, keeping the last frame's layers to compare with
         let mut paint = Paint {
-            builder,
+            layers: std::mem::take(&mut self.spare),
+            // the base layer is the one after none
+            layer: usize::MAX,
             clip_rect: clip,
             theme: self.theme,
             font_size: self.font_size,
             row_height: self.kit_row_height,
             fonts: std::mem::replace(&mut self.fonts, placeholder),
-            borrowed_images: std::mem::take(&mut self.borrowed_images),
             ime: None,
             label: std::mem::take(&mut self.label),
             edit_scroll_x: self.edit_scroll_x,
             l_content: std::mem::take(&mut self.l_content),
             scroll_y: std::mem::take(&mut self.scroll_y),
         };
-        let mut layers = std::mem::take(&mut self.painted_layers);
-        layers.clear();
-        let mut key = 0i64;
-        self.visit(&mut paint, &mut layers, &mut key, 0, clip, 0);
-        layers.push((key, paint.builder.publish().expect("Ui.frame: publish")));
-        paint.builder.reset();
-        self.batch_builder = Some(paint.builder);
+        paint.next_layer(0);
+        self.visit(&mut paint, 0, clip, 0);
+        let len = paint.layer + 1;
+        let same = |a: &Layer, b: &Layer| {
+            a.key == b.key && a.instances == b.instances && a.breaks == b.breaks
+                && a.images.len() == b.images.len() && a.images.iter().zip(&b.images).all(|(x, y)| Rc::ptr_eq(&x.handle, &y.handle))
+        };
+        if len != self.draw_len || !paint.layers[..len].iter().zip(&self.draw[..len]).all(|(a, b)| same(a, b)) {
+            self.draw_revision += 1;
+        }
+        self.spare = std::mem::replace(&mut self.draw, paint.layers);
+        self.draw_len = len;
         self.fonts = paint.fonts;
-        self.borrowed_images = paint.borrowed_images;
         self.out.ime = paint.ime;
         self.label = paint.label;
         self.edit_scroll_x = paint.edit_scroll_x;
         self.l_content = paint.l_content;
         self.scroll_y = paint.scroll_y;
-        layers
+        self.painting = false;
     }
 
     // -------------------------------------------------------------- frame
@@ -3382,41 +3428,13 @@ impl Ui {
         self.overlays.clear();
         self.intrinsic();
         self.arrange(frame.input.t);
-        self.borrowed_images.clear();
-        let mut layers = self.paint_all(frame);
+        self.paint_all(frame);
         self.foreground.clear();
         self.prune();
         if self.focus != 0 && self.table.find(self.focus).is_none() {
             self.focus = 0;
             self.edit_focus = 0;
         }
-        let backend = self.fonts.backend;
-        self.fonts.atlas.publish(backend);
-        let mut draw = std::mem::take(&mut self.draw);
-        let layer_count = layers.len();
-        for (position, (key, batch)) in layers.drain(..).enumerate() {
-            if position == draw.len() {
-                draw.push(Layer { key, batch: ui_batch::empty(), images: Vec::new() });
-            }
-            let layer = &mut draw[position];
-            let textures = batch.textures();
-            layer.key = key;
-            layer.images.clear();
-            if let Some(atlas_image) = &self.fonts.atlas.image {
-                if !textures.is_empty() {
-                    layer.images.push((1, atlas_image.clone()));
-                }
-            }
-            for (id, img) in &self.borrowed_images {
-                if textures.contains(id) {
-                    layer.images.push((*id, img.clone()));
-                }
-            }
-            layer.batch = if layer.images.is_empty() && !textures.is_empty() { ui_batch::empty() } else { batch };
-        }
-        draw.truncate(layer_count);
-        self.painted_layers = layers;
-        self.draw = draw;
         // Layout, hit rectangles and painting are published data now. The callbacks can capture
         // whole document versions, so keep them only while building.
         self.clear_frame_callbacks();

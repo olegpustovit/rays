@@ -1215,7 +1215,7 @@ pub(crate) fn prepare(resources: &Resources, cam: &camera::Camera, viewport: Vie
                     transform_uniforms: Some(new_bytes(uniforms)),
                 };
                 let (mesh_, attributes) = BACKGROUND.with(|b| (b.0.clone(), b.1.clone()));
-                entries = vec![Rc::new(SampledDraw {
+                entries = vec![Rc::new(SampledDraw { ui: None,
                     family: PipelineFamily::Scene3World,
                     blend: Blend::Replace,
                     texture: Some(w.camera_map.clone()),
@@ -1314,7 +1314,7 @@ pub(crate) fn prepare(resources: &Resources, cam: &camera::Camera, viewport: Vie
                             scene3::Blend::Alpha if d.texture.is_none() && d.material.diffuse.a == 255 && packed.opaque => Blend::Replace,
                             other => blend(other),
                         };
-                        entries.push(Rc::new(SampledDraw {
+                        entries.push(Rc::new(SampledDraw { ui: None,
                             family,
                             blend: blend_,
                             texture: texture.clone(),
