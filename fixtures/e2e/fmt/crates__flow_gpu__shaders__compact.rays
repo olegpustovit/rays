@@ -29,21 +29,21 @@
           lo# (imin b# (int/mul lane# chunk#))
           hi# (imin b# (int/add lo# chunk#))
           keep# (if (int/lt ~id n#) ~nonzero 0)
-          prefix# (gpu/group-scan (if (int/eq pass# 1)
+          prefix# (gpu/group_scan (if (int/eq pass# 1)
                                       (fold [acc# 0]
                                             [k# (range lo# hi#)]
                                         (int/add acc# (word ~blocks k#)))
                                       keep#))
           first# (int/eq lane# 0)]
      (if (int/eq pass# 0)
-         (if first# (gpu/store-int ~blocks group# prefix#.total) 0)
+         (if first# (gpu/store_int ~blocks group# prefix#.total) 0)
          (if (int/eq pass# 1)
              (int/add (fold [at# prefix#.before]
                             [k# (range lo# hi#)]
                         (int/add at#
                                  (int/mul (word ~blocks k#)
-                                          (gpu/store-int ~blocks (int/add g# k#) at#))))
-                      (if first# (gpu/store-int ~total 0 prefix#.total) 0))
+                                          (gpu/store_int ~blocks (int/add g# k#) at#))))
+                      (if first# (gpu/store_int ~total 0 prefix#.total) 0))
              (if (int/eq keep# 1)
                  (~store ~kept
                          (int/add (word ~blocks (int/add g# group#)) prefix#.before)
@@ -71,5 +71,5 @@
                 blocks
                 size
                 (if (int/eq (array/nth mask id) 0) 0 1)
-                gpu/store-int
+                gpu/store_int
                 id))

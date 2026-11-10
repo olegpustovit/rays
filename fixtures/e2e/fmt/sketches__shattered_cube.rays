@@ -1,13 +1,13 @@
 ; Shattered cube: a Boolean fracture of a cube or a dodecahedron by a noisy
 ; sheet copied onto random oriented points, then an exploded view. The
-; per-piece renderer is OCaml (main.ml); this is the document.
+; per-piece rendering is handled by the native Rust host.
 (workspace shattered_cube
 
   (graph shattered :context sop
     (let* [cube (sop/box :size [2.6 2.6 2.6] :consolidate_points true)
            dodecahedron (sop/platonic :kind "Dodecahedron"
                                       :normals "Vertex"
-                                      :rotation [0.173 0.291 0.113]
+                                      :rotate [0.173 0.291 0.113]
                                       :radius 2.25)
            source-switch (sop/switch cube dodecahedron)
            ; the cutter: a noisy 2 x 2 sheet ...

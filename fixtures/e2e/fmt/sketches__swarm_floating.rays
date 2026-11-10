@@ -59,7 +59,7 @@
            ; the original's camera: 4 units back, an 18 degree lens
            camera (scene/camera :eye [0 0 4]
                                 :target [0 0 0]
-                                :fov 18
+                                :fov 0.3141592653589793
                                 :follow_viewport true)
            ; its warm directional key from above and behind the left shoulder
            key (scene/light :name "Key"
@@ -78,5 +78,5 @@
 ; Swarm, floating (keijiro/Swarm's FloatingSwarm): heads pulled toward a wandering target through a noise
 ; field with drag, trails left behind them drifting in a slower field. Each frame's trail is kept in a
 ; state. Shared definitions: sketches/swarm_lib.rays.
-; Run: dune exec rays -- sketches/swarm_floating.rays
+; Run: cargo run -p rays_bin -- sketches/swarm_floating.rays
 (import "swarm_lib.rays")

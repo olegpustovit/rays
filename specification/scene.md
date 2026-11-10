@@ -40,7 +40,7 @@ root's until the root says them. They stay in the text until it is edited; a roo
 
 ### The World is a merge member
 
-`scene/world (ref sky) :name :exposure :rotation ...` is an object of the scene, as
+`scene/world (ref sky) :name :exposure :rotate ...` is an object of the scene, as
 `scene/geometry (ref shards)` is, and stands to a `:context world` graph as a geometry object to its
 SOP graph. The world graph is the layer stack: its result is the top layer
 (`(graph sky :context world (world/sun (world/sky :turbidity 3)))`, or `(world/none)` for no
@@ -91,7 +91,7 @@ edit of an object the text declares is written to the text.
 | Geometry | `geometry` | translate, rotate (degrees, applied Z·Y·X), scale, visible, renderable | a SOP network |
 | Light | `light` | type (area, point, spot, directional), translate, target, color, intensity, width/height, cone, visible, renderable | none |
 | Camera | `camera` | eye, target, up, fov, near/far, follow viewport, aperture, focus distance (0: the target) | none; never parented |
-| World | `world` | background, rotation, exposure, time of day, day cycle, latitude, day of year, sun linking | its layer stack |
+| World | `world` | background, rotate, exposure, time of day, day cycle, latitude, day of year, sun linking | its layer stack |
 
 The root is not an object of the scene: its settings are `Document.root`. The Camera's render
 resolution and samples belong to the root.
@@ -247,7 +247,7 @@ so playback and `Sketch.export` with `Fixed dt` are deterministic. See
   film size and setting. Viewports over the very same instance with the same World compose one
   scene, so they can share. The sample budget: the focused viewport's slot renders every frame; of
   the other slots that want the GPU (their picture differs from what the tracer last had, or they
-  are short of their cap) one takes a turn per frame, in rotation (`Renderer.next_turn`); a slot at
+  are short of their cap) one takes a turn per frame, in rotate (`Renderer.next_turn`); a slot at
   its cap with an unchanged picture costs nothing. `Editor.slot` reports a slot's film, step,
   samples, cap and the viewports it serves.
 - Not built: comparing two roots in one pane (a wipe between two slots, `:against`).

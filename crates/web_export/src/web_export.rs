@@ -172,7 +172,7 @@ fn key_hash(v: &Value) -> u64 {
     let mut h = hash::SEED;
     let mut mix = |x: u64| { h = hash::word(h, x); };
     match v {
-        Value::Int_array(a) => {
+        Value::IntArray(a) => {
             mix(1); mix(a.len() as u64);
             a.iter().for_each(|x| mix(*x as u64));
         }
@@ -188,7 +188,7 @@ fn key_hash(v: &Value) -> u64 {
 fn same_key(a: &Value, b: &Value) -> bool {
     let f = |x: &Arc<Vec<f64>>, y: &Arc<Vec<f64>>| x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| same_float(*p, *q));
     match (a, b) {
-        (Value::Int_array(x), Value::Int_array(y)) => x == y,
+        (Value::IntArray(x), Value::IntArray(y)) => x == y,
         (Value::Floats(aw @ 1..=4, x), Value::Floats(bw, y)) if aw == bw => f(x, y),
         _ => false,
     }
@@ -203,7 +203,7 @@ fn store(shared: &Shared, values: &Value) -> (i64, i64) {
     let mut s = shared.lock().unwrap();
     let offset = s.data.len() as i64;
     let length = match values {
-        Value::Int_array(a) => {
+        Value::IntArray(a) => {
             a.iter().for_each(|x| s.data.extend_from_slice(&x.to_le_bytes()));
             a.len()
         }
@@ -286,7 +286,7 @@ fn fixed_inputs(r: &C::RegionT) -> R<Fixed> {
         return refuse("E_WEB_CAPTURE", "This region reads a value that changes from frame to frame; the web export needs its inputs fixed.");
     }
     let non_finite = a.uniforms.iter().any(|v| match v {
-        Value::Int(_) | Value::Int_array(_) | Value::Text(_) | Value::Text_array(_) => false,
+        Value::Int(_) | Value::IntArray(_) | Value::Text(_) | Value::TextArray(_) => false,
         _ => uniform_components(v).iter().any(|x| !x.is_finite()),
     });
     if non_finite {
@@ -298,7 +298,7 @@ fn fixed_inputs(r: &C::RegionT) -> R<Fixed> {
         .enumerate()
         .filter_map(|(slot, i)| match region_instruction(i) {
             region::Instruction::Frame(name) => Some((slot as i64, name.clone(), false)),
-            region::Instruction::Int_frame(name) => Some((slot as i64, name.clone(), true)),
+            region::Instruction::IntFrame(name) => Some((slot as i64, name.clone(), true)),
             _ => None,
         })
         .collect();
@@ -313,7 +313,7 @@ fn texts(values: &TextArray) -> String {
 }
 
 fn is_int_array(v: &Value) -> bool {
-    matches!(v, Value::Int_array(_))
+    matches!(v, Value::IntArray(_))
 }
 
 /// The data of a region as the JSON members both the region table and the GPU table carry.
@@ -323,7 +323,7 @@ fn fixed_members(kept: Option<i64>, data: &dyn Fn(&Value) -> (i64, i64), f: &Fix
     } else {
         list(
             &|v: &Value| match v {
-                Value::Text_array(t) => texts(t),
+                Value::TextArray(t) => texts(t),
                 _ => {
                     let (offset, length) = data(v);
                     format!("[{}, {}, {}]", offset, length, is_int_array(v))
@@ -334,11 +334,11 @@ fn fixed_members(kept: Option<i64>, data: &dyn Fn(&Value) -> (i64, i64), f: &Fix
     };
     let uniforms = list(
         &|(index, v): &(usize, Value)| {
-            let integer = f.view.code.iter().any(|i| matches!(region_instruction(i), region::Instruction::Int_uniform(slot) if *slot == *index as i64));
+            let integer = f.view.code.iter().any(|i| matches!(region_instruction(i), region::Instruction::IntUniform(slot) if *slot == *index as i64));
             match (integer, v) {
-                (_, Value::Text_array(t)) => texts(t),
+                (_, Value::TextArray(t)) => texts(t),
                 (_, Value::Text(t)) => format!("{{\"text\":{}}}", json_bytes(t)),
-                (_, Value::Int_array(_) | Value::Floats(1..=4, _)) => {
+                (_, Value::IntArray(_) | Value::Floats(1..=4, _)) => {
                     let (offset, length) = data(v);
                     format!("{{\"table\":[{},{},{}]}}", offset, length, is_int_array(v))
                 }
@@ -473,7 +473,7 @@ fn image_arguments(canvas: bool, lowered: &Lowered, node: &E::Node, values: &[Va
         owner: node.site.clone(),
         instance: node.inst,
         prefix: Vec::new(),
-        iter: node.iter.iter().map(|i| C::Iteration::Static_index(*i)).collect(),
+        iter: node.iter.iter().map(|i| C::Iteration::StaticIndex(*i)).collect(),
         span: Some(lowered.span.clone()),
     };
     fn residual(v: &Value) -> Option<value::ResidualId> {

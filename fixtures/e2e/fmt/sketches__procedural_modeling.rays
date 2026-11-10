@@ -59,7 +59,7 @@
            copied (scene/geometry (ref copies) :name "Copies")
            camera (scene/camera :eye [6.5 5.0 6.5]
                                 :target [0 0.5 0]
-                                :fov 40
+                                :fov 0.6981317007977318
                                 :follow_viewport true)
            key (scene/light :name "Key"
                             :shape "Area"
@@ -79,10 +79,10 @@
                      :seed 2026))
 
   (graph editor :context editor
-    (ui/workspace (ui/split-at "horizontal"
+    (ui/workspace (ui/split_at "horizontal"
                                0.6
                                (ui/viewport (ref scene))
-                               (ui/split-at "vertical"
+                               (ui/split_at "vertical"
                                             0.5
                                             (ui/graph)
                                             (ui/inspector))))))

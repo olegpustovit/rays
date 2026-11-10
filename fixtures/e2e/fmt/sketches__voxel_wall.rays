@@ -37,7 +37,7 @@
                      (let* [wall (scene/geometry (ref wall) :name "wall")
                             camera (scene/camera :eye [-4.133102 1.518379 19.482749]
                                                  :target [0 0 1]
-                                                 :fov 40.107046
+                                                 :fov 0.7000000059488216
                                                  :follow_viewport true)
                             key (scene/light :name "key"
                                              :translate [-34 40 30]

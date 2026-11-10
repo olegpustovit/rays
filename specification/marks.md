@@ -197,7 +197,7 @@ finite, every index in `0 .. vertices/2 - 1` (the `Render_ir` rules).
 
 `Push_transform` carries the six affine coefficients `Render_ir.transform` uses
 (natively a `Scene.Affine` node, built by `Scene.Private.transform`, which keeps the six
-coefficients verbatim: a rotation is not re-derived from an angle, so the stored signs
+coefficients verbatim: a rotate is not re-derived from an angle, so the stored signs
 below survive; `Scene.Affine` lowers to `Render_ir.Push_transform`/`Pop_transform`); entries until the matching `Pop_transform` are in the pushed local coordinates.
 A transform is **never baked into per-instance attributes**. A statement writes:
 

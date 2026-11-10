@@ -40,7 +40,7 @@
 ; `scale`, `cell`, `levels` and `base` are those of `flow_contours`; `summit` is how many contours
 ; there are from the coast up, `fade` how far inland the lines reach, `rate` the pings a second,
 ; `bone` and `signal` the two inks.
-; Run: `dune exec sketches/flow_survey/main.exe`.
+; Run: `cargo run -p rays_bin -- sketches/flow_survey.rays`.
 (workspace flow_survey
 
   ; A survey chart of a drifting island field, every pixel computed by a Lisp kernel on the GPU.
@@ -244,7 +244,7 @@
            network (ui/graph "picture" :focus true)
            inspector (ui/inspector :of network)
            outline (ui/outline)
-           network_dock (ui/split-at "horizontal" 0.5 outline network)
+           network_dock (ui/split_at "horizontal" 0.5 outline network)
            split_at (ui/split "horizontal"
                               preview
                               (ui/split "horizontal"

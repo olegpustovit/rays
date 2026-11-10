@@ -44,7 +44,7 @@
            ; the original's camera: 4 units back, an 18 degree lens
            camera (scene/camera :eye [0 0 4]
                                 :target [0 0 0]
-                                :fov 18
+                                :fov 0.31415926535897931
                                 :follow_viewport true)
            ; its warm directional key from above and behind the left shoulder
            key (scene/light :name "Key"
@@ -67,5 +67,5 @@
 ; range, so the trails, the frames and the mesh are compiled kernels run on the GPU each frame, and the
 ; scene is path traced from those buffers.
 ; Floating and crawling: sketches/swarm_floating.rays, sketches/swarm_crawling.rays.
-; Run: dune exec rays -- sketches/swarm.rays
+; Run: cargo run -p rays_bin -- sketches/swarm.rays
 (import "swarm_lib.rays")

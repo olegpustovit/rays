@@ -4,11 +4,11 @@ Error [E_UNKNOWN_KIND]: Unknown operator “pcg-next”.
 File "crates/rays_pathtracer/pathtrace.rays", line 13, characters 29-49:
 Error [E_UNKNOWN_KIND]: Unknown operator “unit-float”.
 File "crates/rays_pathtracer/pathtrace.rays", line 26, characters 18-27:
-Error [E_UNKNOWN_KIND]: Unknown operator “basis”.
+Error [E_UNKNOWN_KIND]: Unknown operator “basis”. Did you mean asin?
 File "crates/rays_pathtracer/pathtrace.rays", line 35, characters 31-40:
-Error [E_UNKNOWN_KIND]: Unknown operator “basis”.
+Error [E_UNKNOWN_KIND]: Unknown operator “basis”. Did you mean asin?
 File "crates/rays_pathtracer/pathtrace.rays", line 44, characters 12-21:
-Error [E_UNKNOWN_KIND]: Unknown operator “basis”.
+Error [E_UNKNOWN_KIND]: Unknown operator “basis”. Did you mean asin?
 File "crates/rays_pathtracer/pathtrace.rays", line 58, characters 12-24:
 Error [E_UNKNOWN_KIND]: Unknown operator “world-uv”.
 File "crates/rays_pathtracer/pathtrace.rays", line 83, characters 12-24:
@@ -16,7 +16,7 @@ Error [E_UNKNOWN_KIND]: Unknown operator “world-uv”.
 File "crates/rays_pathtracer/pathtrace.rays", line 94, characters 11-84:
 Error [E_UNKNOWN_KIND]: Unknown operator “world-dir”.
 File "crates/rays_pathtracer/pathtrace.rays", line 113, characters 12-21:
-Error [E_UNKNOWN_KIND]: Unknown operator “basis”.
+Error [E_UNKNOWN_KIND]: Unknown operator “basis”. Did you mean asin?
 File "crates/rays_pathtracer/pathtrace.rays", line 140, characters 51-97:
 Error [E_UNKNOWN_KIND]: Unknown operator “rect-hit”.
 File "crates/rays_pathtracer/pathtrace.rays", line 147, characters 60-143:
@@ -36,7 +36,7 @@ Error [E_UNKNOWN_KIND]: Unknown operator “eval-brdf”.
 File "crates/rays_pathtracer/pathtrace.rays", line 242, characters 34-82:
 Error [E_UNKNOWN_KIND]: Unknown operator “power-weight”.
 File "crates/rays_pathtracer/pathtrace.rays", line 247, characters 30-47:
-Error [E_UNKNOWN_KIND]: Unknown operator “basis”.
+Error [E_UNKNOWN_KIND]: Unknown operator “basis”. Did you mean asin?
 File "crates/rays_pathtracer/pathtrace.rays", line 255, characters 58-92:
 Error [E_UNKNOWN_KIND]: Unknown operator “eval-brdf”.
 File "crates/rays_pathtracer/pathtrace.rays", line 256, characters 34-84:

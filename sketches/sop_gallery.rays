@@ -1,6 +1,6 @@
 ; # SOP gallery and editable presets
 ;
-; Run `dune exec examples/sop_gallery/lisp.exe`. `dune runtest` cooks every graph of
+; Run `cargo run -p rays_bin -- sketches/sop_gallery.rays`. `cargo t -p flow_sop` cooks every graph of
 ; `gallery.rays` without a window (`test/test_workspace_ir`).
 ;
 ; The gallery is one workspace, `gallery.rays`: a `sop` graph per entry, and a scene

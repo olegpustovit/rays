@@ -68,12 +68,13 @@ fn swarm_topology_template_matches_original_at_kernel_and_degenerate_boundaries(
     assert_ne!(original, topology);
     let evaluate = |body: &str, tubes: i64, points: i64, sides: i64| {
         let body = body.replace("~tubes", "tubes").replace("~points", "points").replace("~sides", "sides");
-        let source = format!("(workspace w (graph g :context value [(tubes : int {tubes}) (points : int {points}) (sides : int {sides})] (let* [last# (- points 1) rings# (* (* tubes points) sides) {body}] corners#)))");
+        let source = format!("(workspace w (graph g :context value [(tubes : int {tubes}) (points : int {points}) (sides : int {sides})] (let* [last# (- points 1) rings# (* (* tubes points) sides) {body}] 0.0)))").replace('#', "_local");
         let catalog = flow_check::catalog::Catalog { version: 1, kinds: Vec::new() };
         let (checked, errors) = flow_check::workspace::check(ops::all(), false, false, None, &catalog, &parse(&source));
-        let checked = checked.expect(&format!("{errors:?}"));
-        flow_ir::flow_ir::static_(&flow_ir::flow_ir::StaticOptions { verify: true, ..Default::default() }, &checked)
-            .map(|result| result.results[0].1.clone()).map_err(|error| (error.code, error.message))
+        assert!(checked.is_some(), "{errors:?}");
+        let checked = checked.expect("checked topology");
+        flow_ir::flow_ir::static_(&flow_ir::flow_ir::StaticOptions { record: true, replay: true, verify: true, ..Default::default() }, &checked)
+            .map(|result| result.records.iter().find(|(path, _)| path.last().is_some_and(|name| name.as_str() == "corners_local")).expect("recorded corners").1[0].1.clone()).map_err(|error| (error.code, error.message))
     };
     for (tubes, points, sides) in [(0, 3, 3), (1, 3, 3), (2, 1, 3), (2, 0, 3), (2, 3, 0), (-1, 3, 3), (2, -1, 3), (2, 113, 3), (2, 114, 3)] {
         assert_eq!(evaluate(topology, tubes, points, sides), evaluate(&original, tubes, points, sides), "{tubes}/{points}/{sides}");

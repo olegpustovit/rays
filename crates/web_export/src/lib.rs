@@ -1,5 +1,5 @@
 //! Static Web export modules and owned tests.
-#![allow(non_camel_case_types, non_snake_case)]
+
 pub mod check_cli;
 pub mod web_export;
 pub mod web_runtime;

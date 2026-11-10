@@ -82,7 +82,7 @@
                         [0.0 0.0 1.0 0.0])
                     [(array/nth input (int/add at 3)) (array/nth input (int/add at 4)) (array/nth input (int/add at 5)) 0.0])
          instanced (> (array/nth surface 83) 0.5)
-         base (int/mul (gpu/instance-id) 48)
+         base (int/mul (gpu/instance_id) 48)
          clip (if instanced
                   (transform instances base local)
                   (transform surface 0 local))
@@ -202,7 +202,7 @@
 ; Blinn-Phong over the lights: p is the surface buffer, tex the sampled texel (white when untextured)
 (defn scene-surface :context value [(p : (array float)) (color : vec4) (world : vec3) (normal : vec3) (tex : vec4)]
   (let* [n0 (unit3 normal)
-         n (if (and (> (array/nth p 74) 0.5) (not (gpu/front-facing))) (neg3 n0) n0)
+         n (if (and (> (array/nth p 74) 0.5) (not (gpu/front_facing))) (neg3 n0) n0)
          view (unit3 (- (at3 p 48) world))
          count (let* [c (int (array/nth p 73))] (if (int/lt c 64) c 64))
          lit (fold [acc {:primary (fma3 (at3 p 52) (at3 p 69) (at3 p 64))
@@ -239,7 +239,7 @@
 (defn sun-vertex :context value [(vid : int) (input : (array float)) (input-words : (array int)) (sun : (array float)) (surface : (array float)) (instances : (array float))]
   (let* [at (int/mul vid (if (> (array/nth surface 79) 0.5) 3 6))
          local [(array/nth input at) (array/nth input (int/add at 1)) (array/nth input (int/add at 2)) 1.0]
-         base (int/mul (gpu/instance-id) 48)
+         base (int/mul (gpu/instance_id) 48)
          world (if (> (array/nth surface 83) 0.5)
                    (transform instances (int/add base 16) local)
                    (transform surface 16 local))]
@@ -436,7 +436,7 @@
       (> (array/nth p 76) 0.5) (let* [c (* (at3 p 64) modulation)]
                                  [c.x c.y c.z alpha])
       :else (let* [n0 (unit3 normal)
-                   n (if (and (> (array/nth p 74) 0.5) (not (gpu/front-facing)))
+                   n (if (and (> (array/nth p 74) 0.5) (not (gpu/front_facing)))
                          (neg3 n0)
                          n0)
                    v (unit3 (- (at3 p 48) world))
@@ -452,7 +452,7 @@
                    ks (min (max (/ (array/nth p 77) 0.2) 0.0) 1.0)
                    i (neg3 v)
                    r (world-uv (fma3 (let* [k (* -2.0 (dot3 n i))] [k k k]) n i))
-                   sharp (rgb (gpu/sample-level 9 r (* (max rough 0.2) 5.0)))
+                   sharp (rgb (gpu/sample_level 9 r (* (max rough 0.2) 5.0)))
                    reflection (if (< ks 1.0)
                                   (mix3 (rgb (gpu/sample 11 r)) sharp ks)
                                   sharp)

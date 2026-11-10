@@ -112,7 +112,7 @@
          border params.y]
     (cond
       (= kind 1.0) {:discard false
-                    :color (* color (gpu/sample 3 (/ uv (gpu/texture-size 3))))}
+                    :color (* color (gpu/sample 3 (/ uv (gpu/texture_size 3))))}
       (or (= kind 2.0) (= kind 5.0)) (let* [b [extra.z extra.w]
                                             ab (- b a)
                                             len (len2 ab)

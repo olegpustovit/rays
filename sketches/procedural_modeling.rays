@@ -42,7 +42,7 @@
            raised (scene/geometry (ref tiles) :name "Extruded tiles")
            copied (scene/geometry (ref copies) :name "Copies")
            camera (scene/camera :eye [6.5 5.0 6.5] :target [0 0.5 0]
-                                :fov 40 :follow_viewport true)
+                                :fov 0.69813170079773179 :follow_viewport true)
            key (scene/light :name "Key" :shape "Area" :translate [3 7 5]
                             :intensity 60 :width 4 :height 4)]
       (scene/root (scene/merge swept raised copied camera key) :width 960 :height 640
@@ -54,5 +54,5 @@
 
   (graph editor :context editor
     (ui/workspace
-      (ui/split-at "horizontal" 0.6 (ui/viewport (ref scene))
-        (ui/split-at "vertical" 0.5 (ui/graph) (ui/inspector))))))
+      (ui/split_at "horizontal" 0.6 (ui/viewport (ref scene))
+        (ui/split_at "vertical" 0.5 (ui/graph) (ui/inspector))))))

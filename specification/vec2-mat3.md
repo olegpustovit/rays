@@ -9,7 +9,7 @@ type t = { x : float; y : float }
 
 The module provides construction, zero/unit vectors, addition, subtraction,
 negation, scalar multiplication, dot product, squared length, length,
-normalization, distance, angle, rotation, interpolation, and epsilon-aware
+normalization, distance, angle, rotate, interpolation, and epsilon-aware
 comparison.
 
 `normalize Vec2.zero` follows the module's defined safe result; callers that
@@ -25,6 +25,6 @@ command recording. Metal receives the final checked transform data.
 
 ## Regression requirements
 
-- vector identities, zero/near-zero behavior, rotation, and interpolation;
+- vector identities, zero/near-zero behavior, rotate, and interpolation;
 - nested scene-transform order through a native framebuffer fixture;
 - exact one-domain/multi-domain results for pure bulk transforms.

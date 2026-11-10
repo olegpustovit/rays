@@ -57,7 +57,7 @@
   (graph scene :context scene
     (let* [cage (scene/geometry (ref cage) :name "cage")
            camera (scene/camera :eye [16.960626 14.382766 20.136365] :target [0 0 0]
-                                :fov 28.6478898 :aperture 0.5 :follow_viewport true)
+                                :fov 0.5000000007584998 :aperture 0.5 :follow_viewport true)
            key (scene/light :name "key" :translate [-16 22 12] :intensity 873.4423 :width 14 :height 14)
            fill (scene/light :name "fill" :translate [20 2 -6] :intensity 114.0823 :width 16 :height 16)
            sky (scene/world (ref world) :name "studio")]

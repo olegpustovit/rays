@@ -17,6 +17,6 @@
 
   (graph scene :context scene
     (let* [sea (scene/geometry (ref sea) :name "Sea")
-           camera (scene/camera :eye [7.0 4.0 7.0] :target [0 0 0] :fov 40 :follow_viewport true)
+           camera (scene/camera :eye [7.0 4.0 7.0] :target [0 0 0] :fov 0.69813170079773179 :follow_viewport true)
            key (scene/light :name "Key" :shape "Area" :translate [4 8 2] :intensity 60 :width 4 :height 4)]
       (scene/root (scene/merge sea camera key) :width 960 :height 640 :max_spp 64))))

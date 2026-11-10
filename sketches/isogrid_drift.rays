@@ -3,7 +3,7 @@
 ; it. Rooms and motifs stay anchored: a room changes by a wipe, a front one voxel thick sweeping across it, the
 ; old motif on one side and the new on the other, so only the front moves and the rest holds still.
 ; Colour is mostly paper and ink with sparse accents. Scrub `seed`, `tempo`, `palette` and `side`.
-; Run: dune exec rays -- sketches/isogrid_drift.rays
+; Run: cargo run -p rays_bin -- sketches/isogrid_drift.rays
 (workspace isogrid_drift
 
   ; A bounded integer hash: the same decisions on the CPU and on the device.
@@ -213,7 +213,7 @@
   (graph scene :context scene
     (let* [drift (scene/geometry (ref drift) :name "Drift")
            ; Far away through a long lens: as near to isometric as a perspective camera gets.
-           camera (scene/camera :eye [62 62 62] :target [0 0 0] :fov 8 :follow_viewport true)
+           camera (scene/camera :eye [62 62 62] :target [0 0 0] :fov 0.13962634015954636 :follow_viewport true)
            light (scene/light :shape "Directional" :translate [4 10 6] :intensity 1.15)]
       (scene/root (scene/merge drift camera light) :camera camera)))
 

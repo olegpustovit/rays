@@ -1348,7 +1348,7 @@ The first coherent set includes:
   polygon transform controls, and production
   Grid with division/point-count resolution, point/row/column/quad and three
   triangle-connectivity modes, standard/custom plane frames, independent
-  dimensions, center/rotation, normals, and optional normalized UVs;
+  dimensions, center/rotate, normals, and optional normalized UVs;
 - modifiers: raw-matrix or typed TRS/shear/pivot Transform with six affine and
   Euler orders, inversion, typed point/vertex/primitive/native-edge restriction,
   and explicit inverse-transpose/recomputed normal policy; Soft Transform with
@@ -1724,7 +1724,7 @@ The first coherent set includes:
   disjoint/bridged/deleted hole policy, optional boundary curves, and inline
   plus unused-point cleanup through the shared RDK topology core,
   native-edge-group `sop/edge_flip` for deterministic general-polygon boundary
-  rotation, with explicit sequencing for flips that share a primitive,
+  rotate, with explicit sequencing for flips that share a primitive,
   native-edge-group `sop/edge_cusp` through the shared Facet point-fan kernel,
   preserving selected path endpoints and splitting only effective interiors,
   native-edge-group `sop/edge_straighten` using independent packed component

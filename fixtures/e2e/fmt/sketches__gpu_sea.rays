@@ -29,7 +29,7 @@
     (let* [sea (scene/geometry (ref sea) :name "Sea")
            camera (scene/camera :eye [7.0 4.0 7.0]
                                 :target [0 0 0]
-                                :fov 40
+                                :fov 0.6981317007977318
                                 :follow_viewport true)
            key (scene/light :name "Key"
                             :shape "Area"

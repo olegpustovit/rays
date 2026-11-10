@@ -45,7 +45,7 @@
            ; the original's camera: 4 units back, an 18 degree lens
            camera (scene/camera :eye [0 0 4]
                                 :target [0 0 0]
-                                :fov 18
+                                :fov 0.31415926535897931
                                 :follow_viewport true)
            ; its warm directional key from above and behind the left shoulder
            key (scene/light :name "Key"
@@ -64,5 +64,5 @@
 ; Swarm, crawling (keijiro/Swarm's CrawlingSwarm): heads crawl over a surface, the noise field turned
 ; along it by its distance, trails kept in a state. The original's baked skull is a torus here.
 ; Shared definitions: sketches/swarm_lib.rays.
-; Run: dune exec rays -- sketches/swarm_crawling.rays
+; Run: cargo run -p rays_bin -- sketches/swarm_crawling.rays
 (import "swarm_lib.rays")

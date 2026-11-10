@@ -560,7 +560,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_319c1d7ee2932e2e8462769bf18ee1f7(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_fd9310b3e6d5ce625f2d3fe5158adb9f(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].y != 0u) { n = min(n, count_in[0] * uniforms[0].w / uniforms[1].x); }
@@ -568,7 +568,6 @@ fn kernel_319c1d7ee2932e2e8462769bf18ee1f7(@builtin(global_invocation_id) gid: v
   if (i >= n) { return; }
   var sb: u32 = 0u;
   let r4: u32 = 2u;
-  let r9: f32 = bitcast<f32>(0x40000000u);
   let r0: f32 = input0[i * 1u + 0u];
   if (!wfinite(r0)) { sb |= 1u; }
   let r3: vec2<u32> = i64_from_f(r0);
@@ -576,23 +575,20 @@ fn kernel_319c1d7ee2932e2e8462769bf18ee1f7(@builtin(global_invocation_id) gid: v
   if (all(vec2<u32>(r4, 0u) == vec2<u32>(0u))) { sb |= 2u; }
   let r6: f32 = gather1[u32(clamp(i32(i64_to_f(r5)), 0, max(i32(uniforms[0].z) - 1, 0))) * 1u + 0u];
   let r7: vec2<u32> = i64_from_f(r6);
-  let r8: f32 = i64_to_f(r7);
-  let r10: f32 = i64_to_f(i64_mul(r7, vec2<u32>(2u, 0u)));
-  let r11: vec2<u32> = i64_mul(r7, vec2<u32>(2u, 0u));
-  let r12: f32 = select(((r0 % r9) + r9) % r9, 0.0, r9 == 0.0);
-  let r13: f32 = i64_to_f(r11);
-  let r14: f32 = (r13 + r12);
-  let r15: vec2<u32> = i64_from_f(r14);
-  let r16: f32 = gather0[u32(clamp(i32(i64_to_f(r15)), 0, max(i32(uniforms[0].y) - 1, 0))) * 3u + 0u];
-  let r17: f32 = gather0[u32(clamp(i32(i64_to_f(r15)), 0, max(i32(uniforms[0].y) - 1, 0))) * 3u + 1u];
-  let r18: f32 = gather0[u32(clamp(i32(i64_to_f(r15)), 0, max(i32(uniforms[0].y) - 1, 0))) * 3u + 2u];
-  if (!wfinite(r16)) { sb |= 1u; }
-  if (!wfinite(r17)) { sb |= 1u; }
-  if (!wfinite(r18)) { sb |= 1u; }
+  let r8: u32 = ((r7).x * r4);
+    let r9: vec2<u32> = i64_divmod(r3, vec2<u32>(r4, 0u), true);
+  if (all(vec2<u32>(r4, 0u) == vec2<u32>(0u))) { sb |= 2u; }
+  let r10: u32 = (r8 + (r9).x);
+    let r11: f32 = gather0[u32(clamp(i32(bitcast<i32>(r10)), 0, max(i32(uniforms[0].y) - 1, 0))) * 3u + 0u];
+  let r12: f32 = gather0[u32(clamp(i32(bitcast<i32>(r10)), 0, max(i32(uniforms[0].y) - 1, 0))) * 3u + 1u];
+  let r13: f32 = gather0[u32(clamp(i32(bitcast<i32>(r10)), 0, max(i32(uniforms[0].y) - 1, 0))) * 3u + 2u];
+  if (!wfinite(r11)) { sb |= 1u; }
+  if (!wfinite(r12)) { sb |= 1u; }
+  if (!wfinite(r13)) { sb |= 1u; }
   if (sb != 0u) { atomicOr(&status, sb); }
-  outbuf[i * 3u + 0u] = r16;
-  outbuf[i * 3u + 1u] = r17;
-  outbuf[i * 3u + 2u] = r18;
+  outbuf[i * 3u + 0u] = r11;
+  outbuf[i * 3u + 1u] = r12;
+  outbuf[i * 3u + 2u] = r13;
 }
 
 // kernel f3

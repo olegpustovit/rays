@@ -80,7 +80,7 @@ Color constructors support:
 - byte RGB/RGBA and normalized floating channels;
 - CSS-like short and long hexadecimal strings;
 - HSV and HSL with wrapping degree hue and normalized other components;
-- alpha, mixing, lightening, darkening, saturation, and hue rotation;
+- alpha, mixing, lightening, darkening, saturation, and hue rotate;
 - evenly spaced palette gradients.
 
 Colors remain immutable 8-bit sRGB values at the renderer boundary. Palette

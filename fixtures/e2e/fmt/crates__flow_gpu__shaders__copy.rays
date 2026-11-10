@@ -6,7 +6,7 @@
 
 (defn copy-words :context value [(id : int) (src : (array int)) (dst : (array int)) (bound : (array int)) (size : int)]
   (if (int/lt id (word bound 0))
-      (gpu/store-int dst
+      (gpu/store_int dst
                      (int/add (word bound 2) id)
                      (array/nth src (int/add (word bound 1) id)))
       0))

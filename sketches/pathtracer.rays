@@ -2,8 +2,8 @@
 ^:allow-warnings (workspace pathtracer
 
   ; a concrete cube: shade sets a cool grey, slightly bluer than it is red
-  (defn cube :context sop [(center : vec3) (rotation : vec3) (shade : float)]
-    (sop/material (sop/box :size [1.05 1.05 1.05] :center center :rotation rotation)
+  (defn cube :context sop [(center : vec3) (rotate : vec3) (shade : float)]
+    (sop/material (sop/box :size [1.05 1.05 1.05] :center center :rotate rotate)
                   :material "concrete" :color [shade (* shade 1.03) (* shade 1.1)] :roughness 0.62 :round 0.045))
 
   (graph table :context sop
@@ -19,20 +19,20 @@
 
   (graph scene :context scene
     (let* [table (scene/geometry (ref table) :name "table")
-           camera (scene/camera :eye [0 0.668 13.23] :target [0 3.35 0] :fov 34.4)
-           ; the tracer's rect lights of the OCaml demo (26 on 4 x 4, 2 on 3 x 6): intensity = tracer * w * h / pi
+           camera (scene/camera :eye [0 0.668 13.23] :target [0 3.35 0] :fov 0.60039326268604931)
+           ; the tracer's reference rect lights (26 on 4 x 4, 2 on 3 x 6): intensity = tracer * w * h / pi
            key (scene/light :name "key" :translate [-6 12 6] :target [0 3.5 0] :intensity 132.4 :width 4 :height 4)
            rim (scene/light :name "rim" :translate [9 4 -3] :target [0 3.5 0] :intensity 11.46 :width 3 :height 6)
            ; the demo's exposure 0.9, in stops
            sky (scene/world (ref world) :name "studio" :exposure -0.152)]
       (scene/root (scene/merge table camera key rim sky) :camera camera :renderer "Path traced" :bounces 5 :width 480 :height 840)))
 
-  ; a dark dome with one soft panel behind the camera (the OCaml demo's 0.9 x 0.6 rad half-size panel toward +z)
+  ; a dark dome with one soft panel behind the camera (the reference scene's 0.9 x 0.6 rad half-size panel toward +z)
   (graph world :context world
     (world/shape (world/gradient :name "studio"
                                  :zenith [0.008 0.010 0.014]
                                  :horizon [0.008 0.010 0.014]
                                  :nadir [0.002 0.002 0.003]
                                  :sharpness 1)
-                 :name "panel" :azimuth 180 :elevation 11.31 :width 103.1 :height 68.75 :softness 17.19
+                 :name "panel" :azimuth 3.1415926535897931 :elevation 0.19739673840055869 :width 1.7994344588061535 :height 1.1999138607461015 :softness 0.30002209841782529
                  :intensity 0.25)))

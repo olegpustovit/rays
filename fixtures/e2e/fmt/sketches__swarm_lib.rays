@@ -208,11 +208,35 @@
                                        (if (= k# 1)
                                            (if head# next# side#)
                                            (if head# side# next#))))))
-          corners# (map (fn [(w# : int)]
-                          (if (< w# (* body_triangles# 3))
-                              (body_corner# w#)
-                              (cap_corner# (int/sub w# (* body_triangles# 3)))))
-                        (array/range (* triangles# 3) :type int))
+          corner_ids# (array/range (* triangles# 3) :type int)
+          ; One tube's topology repeats with a point offset; degenerate inputs keep the original.
+          ; ponytail: dimensions <= 2^20 prove all counts fit int64. Use checked count products
+          ; if larger dimensions need caching.
+          share_body# (and (> ~tubes 1)
+                           (and (> last# 0)
+                                (and (> ~sides 0)
+                                     (and (<= ~tubes 1048576)
+                                          (and (<= ~points 1048576)
+                                               (<= ~sides 1048576))))))
+          corner_period# (* (* last# ~sides) 6)
+          corner_template# (if share_body#
+                               (map body_corner#
+                                    (array/range corner_period# :type int))
+                               (array/int 0))
+          corners# (if share_body#
+                       (map (fn [(w# : int)]
+                              (if (< w# (* body_triangles# 3))
+                                  (int/add (* (int/div w# corner_period#)
+                                              (* ~points ~sides))
+                                           (array/nth corner_template#
+                                                      (mod w# corner_period#)))
+                                  (cap_corner# (int/sub w# (* body_triangles# 3)))))
+                            corner_ids#)
+                       (map (fn [(w# : int)]
+                              (if (< w# (* body_triangles# 3))
+                                  (body_corner# w#)
+                                  (cap_corner# (int/sub w# (* body_triangles# 3)))))
+                            corner_ids#))
           mesh# (sop/mesh :points (exact ring_points#)
                           :vertex_points (exact corners#)
                           :primitive_offsets (exact (map (fn [(f# : int)] (* f# 3))

@@ -1593,7 +1593,7 @@ export function graph_shortest_paths(adjacency, lengths, roots, radius, hops, bl
   if (hops && ties) err('E_GRAPH_OPTION', 'Graph :hops true does not combine with :ties "lowest".');
   if (ties && blockedPoints !== undefined) err('E_GRAPH_OPTION', 'Graph :ties "lowest" takes blocked_edges only.');
   if (ties) {
-    // Rdk.Shortest_paths.forest_search: settle the queued point of least (distance, root, point).
+    // Settle the queued point of least (distance, root, point).
     const edgeMask = blockedEdges === undefined ? undefined : graphBinary('Graph blocked_edges', edges, 'edge', blockedEdges);
     const dist = new Array(points).fill(Infinity), parent = new Array(points).fill(-1), root = new Array(points).fill(-1);
     const settled = new Array(points).fill(false), order = [];
@@ -1711,7 +1711,7 @@ export function graph_shortest_paths(adjacency, lengths, roots, radius, hops, bl
     ['order', graphIntegers([])]]);
 }
 
-// Rdk.Forest.scan and Rdk.Forest.labels: normalised parents, child CSR in index order, breadth-first order per root.
+// Normalised parents, child CSR in index order, breadth-first order per root.
 export function graph_forest(parents, mask) {
   if (!graphInt(parents)) err('E_GRAPH_PARENT', 'Graph parents is an integer array with one entry per point.');
   const count = parents.data.length;

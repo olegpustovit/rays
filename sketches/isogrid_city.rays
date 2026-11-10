@@ -6,7 +6,7 @@
 ; The whole chain (voxels, surface, faces, positions, colours) is one GPU program of t.
 ; Cook on an M1: 64³ 16 ms, 128³ 110 ms (3M triangles), 256³ 1.1 s (19M triangles, 5.7 GB).
 ; Path traced (Scene root > renderer) too, the mesh is never read back.
-; Run: dune exec rays -- sketches/isogrid_city.rays
+; Run: cargo run -p rays_bin -- sketches/isogrid_city.rays
 (workspace isogrid_city
 
   ; A bounded integer hash: the same decisions on the CPU and on the device.
@@ -200,7 +200,7 @@
   (graph scene :context scene
     (let* [city (scene/geometry (ref city) :name "City")
            ; Far away through a long lens: as near to isometric as a perspective camera gets.
-           camera (scene/camera :eye [62 62 62] :target [0 0 0] :fov 8 :follow_viewport true)
+           camera (scene/camera :eye [62 62 62] :target [0 0 0] :fov 0.13962634015954636 :follow_viewport true)
            light (scene/light :shape "Directional" :translate [4 10 6] :intensity 1.15)]
       (scene/root (scene/merge city camera light) :camera camera)))
 

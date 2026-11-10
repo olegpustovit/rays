@@ -26,31 +26,31 @@
 ; A triangle corner, between the keyframes at the shutter time s in a moving flat scene.
 (defn corner :context value [(k : int) (p : int) (c : int) (moving : bool) (s : float)]
   (if moving
-      (tmix (gpu/scene-vertex k p c) (gpu/scene-vertex-end k p c) s)
-      (gpu/scene-vertex k p c)))
+      (tmix (gpu/scene_vertex k p c) (gpu/scene_vertex_end k p c) s)
+      (gpu/scene_vertex k p c)))
 
 ; An object normal to world space: the transpose of instance k's world-to-object rows, or with motion
 ; the inverse transpose of its interpolated object-to-world keyframes, the cofactor columns signed by
 ; the determinant.
 (defn instance-normal :context value [(k : int) (n : vec3) (motion : bool) (s : float)]
   (if motion
-      (let* [c0 (tmix [(gpu/scene-instance k 1) (gpu/scene-instance k 5) (gpu/scene-instance k 9)]
-                      [(gpu/scene-instance k 13) (gpu/scene-instance k 17) (gpu/scene-instance k 21)]
+      (let* [c0 (tmix [(gpu/scene_instance k 1) (gpu/scene_instance k 5) (gpu/scene_instance k 9)]
+                      [(gpu/scene_instance k 13) (gpu/scene_instance k 17) (gpu/scene_instance k 21)]
                       s)
-             c1 (tmix [(gpu/scene-instance k 2) (gpu/scene-instance k 6) (gpu/scene-instance k 10)]
-                      [(gpu/scene-instance k 14) (gpu/scene-instance k 18) (gpu/scene-instance k 22)]
+             c1 (tmix [(gpu/scene_instance k 2) (gpu/scene_instance k 6) (gpu/scene_instance k 10)]
+                      [(gpu/scene_instance k 14) (gpu/scene_instance k 18) (gpu/scene_instance k 22)]
                       s)
-             c2 (tmix [(gpu/scene-instance k 3) (gpu/scene-instance k 7) (gpu/scene-instance k 11)]
-                      [(gpu/scene-instance k 15) (gpu/scene-instance k 19) (gpu/scene-instance k 23)]
+             c2 (tmix [(gpu/scene_instance k 3) (gpu/scene_instance k 7) (gpu/scene_instance k 11)]
+                      [(gpu/scene_instance k 15) (gpu/scene_instance k 19) (gpu/scene_instance k 23)]
                       s)
              w (+ (+ (* (tcross c1 c2) n.x) (* (tcross c2 c0) n.y))
                   (* (tcross c0 c1) n.z))]
         (tunit (if (< (tdot c0 (tcross c1 c2)) 0.0) (* w -1.0) w)))
-      (tunit [(+ (+ (* (gpu/scene-instance k 1) n.x) (* (gpu/scene-instance k 5) n.y)) (* (gpu/scene-instance k 9) n.z)) (+ (+ (* (gpu/scene-instance k 2) n.x) (* (gpu/scene-instance k 6) n.y)) (* (gpu/scene-instance k 10) n.z)) (+ (+ (* (gpu/scene-instance k 3) n.x) (* (gpu/scene-instance k 7) n.y)) (* (gpu/scene-instance k 11) n.z))])))
+      (tunit [(+ (+ (* (gpu/scene_instance k 1) n.x) (* (gpu/scene_instance k 5) n.y)) (* (gpu/scene_instance k 9) n.z)) (+ (+ (* (gpu/scene_instance k 2) n.x) (* (gpu/scene_instance k 6) n.y)) (* (gpu/scene_instance k 10) n.z)) (+ (+ (* (gpu/scene_instance k 3) n.x) (* (gpu/scene_instance k 7) n.y)) (* (gpu/scene_instance k 11) n.z))])))
 
 ; The nearest triangle: t, primitive, barycentrics, the face normal and the instance (0 in a flat scene).
 (defn triangles :context value [(o : vec3) (dn : vec3) (tmin : float) (tmax : float) (time : float) (instanced : bool) (motion : bool)]
-  (let* [q (gpu/trace-triangles o dn tmin tmax time)]
+  (let* [q (gpu/trace_triangles o dn tmin tmax time)]
     (if q.hit
         (let* [k (if instanced q.instance 0)
                s (min (max time 0.0) 1.0)
@@ -71,8 +71,8 @@
 ; Strand segment k's hit at distance at, curve parameter u: the offset from the axis point at u, less its
 ; tangential part, is the normal; the instance is -2.
 (defn strand-hit :context value [(o : vec3) (dn : vec3) (at : float) (k : int) (u : float)]
-  (let* [a (txyz (gpu/scene-strand k 0))
-         b (txyz (gpu/scene-strand k 1))
+  (let* [a (txyz (gpu/scene_strand k 0))
+         b (txyz (gpu/scene_strand k 1))
          tangent (- b a)
          off (- (+ o (* dn at)) (tmix a b u))
          axial (- off
@@ -84,12 +84,12 @@
 (defn strands :context value [(h : {:t float :prim float :u float :v float :n vec3 :hit bool :inst float}) (o : vec3) (dn : vec3) (tmin : float) (tmax : float) (kind : int)]
   (if (int/eq kind 0)
       h
-      (let* [c (gpu/trace-curves o dn tmin (if h.hit h.t tmax))]
+      (let* [c (gpu/trace_curves o dn tmin (if h.hit h.t tmax))]
         (if c.hit (strand-hit o dn c.t c.prim c.u) h))))
 
 ; Sphere k (centre, radius) met in [tmin, tmax], the nearer root first.
 (defn sphere-t :context value [(o : vec3) (dn : vec3) (tmin : float) (k : int)]
-  (let* [s (gpu/scene-sphere k)
+  (let* [s (gpu/scene_sphere k)
          oc (- o (txyz s))
          b (tdot oc dn)
          q (- oc (* dn b))
@@ -113,7 +113,7 @@
                     kind)]
     (if spheres
         (fold [near h]
-              [k (range (gpu/scene-spheres))]
+              [k (range (gpu/scene_spheres))]
           (let* [s (sphere-t o dn tmin k)]
             (if (and s.real
                      (and (>= s.t tmin)
@@ -131,12 +131,12 @@
 ; Whether anything lies in [tmin, tmax]: any triangle, then any strand, then the spheres until one does.
 (defn trace-occluded :context value [(o : vec3) (d : vec3) (tmin : float) (tmax : float) (time : float) (kind : int) (spheres : bool)]
   (let* [dn (tunit d)]
-    (if (gpu/trace-any o dn tmin tmax time)
+    (if (gpu/trace_any o dn tmin tmax time)
         true
-        (if (if (int/eq kind 0) false (gpu/trace-curves-any o dn tmin tmax))
+        (if (if (int/eq kind 0) false (gpu/trace_curves_any o dn tmin tmax))
             true
             (if spheres
-                (let* [found (iterate (gpu/scene-spheres)
+                (let* [found (iterate (gpu/scene_spheres)
                                       {:k 0 :seen false}
                                       (fn [w]
                                         (let* [s (sphere-t o dn tmin w.k)]

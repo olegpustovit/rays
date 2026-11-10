@@ -20,9 +20,9 @@
                             (ui/viewport (ref scene :seed (+ s 1)))))
            network (ui/graph)
            code (ui/lisp)
-           left (ui/split-at "vertical" 0.58 network code)
+           left (ui/split_at "vertical" 0.58 network code)
            outline (ui/outline)
-           right (ui/split-at "horizontal" 0.5 left sheet)
-           panels (ui/split-at "horizontal" 0.13 outline right)
+           right (ui/split_at "horizontal" 0.5 left sheet)
+           panels (ui/split_at "horizontal" 0.13 outline right)
            shell (ui/workspace panels)]
       shell)))

@@ -1,1 +1,3 @@
-exit 0
+exit 1
+File "specification/pxui-kit/kit.rays", line 19, characters 79-83:
+Error [E_HARD_RANGE]: :fov = 38 is outside its hard range 0.017453292519943295..=3.12413936106985

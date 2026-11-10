@@ -80,7 +80,7 @@
                                 (let* [one# 1.0
                                        half# 0.5
                                        pixel# (/ (* field#.scale field#.columns)
-                                                 field#.width)
+                                                 field#.pixel_width)
                                        x# (* (* uv#.x field#.columns) field#.scale)
                                        y# (* (* uv#.y field#.rows) field#.scale)
                                        height# (noise3 [x# y# field#.drift] :octaves 2)
@@ -118,6 +118,7 @@
            ; whole viewport, cut into square cells
            field {:width (frame/width)
                   :height (frame/height)
+                  :pixel_width (float (frame/width))
                   :columns (/ (frame/width) cell)
                   :rows (/ (frame/height) cell)
                   :drift (* t speed)

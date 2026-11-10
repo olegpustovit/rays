@@ -74,7 +74,7 @@
                                   :visible false)
            camera (scene/camera :eye [5.9410062875096425 6.442144585132843 6.648786603201838]
                                 :target [0.0 0.0 0.0]
-                                :fov 20.5019
+                                :fov 0.35782565791462545
                                 :aperture 0.327837
                                 :focus_distance 7.6332
                                 :follow_viewport true)
@@ -114,10 +114,10 @@
     (let* [preview (ui/viewport (ref scene))
            network_a (ui/graph)
            network_b (ui/lisp)
-           network (ui/split-at "vertical" 0.5 network_a network_b)
+           network (ui/split_at "vertical" 0.5 network_a network_b)
            inspector (ui/inspector)
-           split (ui/split-at "horizontal" 0.64 network inspector)
-           split_2 (ui/split-at "horizontal" 0.45 preview split)]
+           split (ui/split_at "horizontal" 0.64 network inspector)
+           split_2 (ui/split_at "horizontal" 0.45 preview split)]
       (ui/workspace split_2))))
 
 (layout (panel ["editor" "network_a"] :collapsed false)

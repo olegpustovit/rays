@@ -35,6 +35,17 @@ fn check(sketch: &str) {
             std::fs::write(p, bytes).unwrap();
         }
     }
+    if std::env::var("RAYS_UPDATE_FIXTURES").as_deref() == Ok("1") {
+        let base = dir.join(sketch);
+        std::fs::create_dir_all(&base).unwrap();
+        for entry in std::fs::read_dir(&base).unwrap() { std::fs::remove_file(entry.unwrap().path()).unwrap(); }
+        for (name, bytes) in &files {
+            if name.starts_with("runtime/") { continue; }
+            if bytes.len() > 1 << 20 {
+                std::fs::write(base.join(format!("{name}.md5")), format!("{}\n", md5_hex(bytes))).unwrap();
+            } else { std::fs::write(base.join(name), bytes).unwrap(); }
+        }
+    }
     let mut expected: Vec<String> = std::fs::read_dir(dir.join(sketch))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().trim_end_matches(".md5").to_owned())
@@ -45,7 +56,8 @@ fn check(sketch: &str) {
     assert_eq!(produced, expected, "{sketch}: the set of files");
     for (name, bytes) in &files {
         if let Some(rest) = name.strip_prefix("runtime/") {
-            let want = std::fs::read(dir.join("_runtime").join(rest)).unwrap_or_else(|_| panic!("{sketch}: unexpected runtime file {rest}"));
+            let runtime = if rest.ends_with(".wgsl") { root().join("fixtures/web_export/shaders") } else { root().join("crates/web_export/runtime") };
+            let want = std::fs::read(runtime.join(rest)).unwrap_or_else(|_| panic!("{sketch}: unexpected runtime file {rest}"));
             assert!(&want == bytes, "{sketch}: {name}: {}", first_difference(bytes, &want));
             continue;
         }
@@ -64,9 +76,10 @@ fn check(sketch: &str) {
 /// Embedded WGSL shaders match their owned printer fixtures.
 #[test]
 fn build_printed_wgsl() {
-    let dir = root().join("fixtures/web_export/_runtime");
+    let dir = root().join("fixtures/web_export/shaders");
     let a = web_runtime::assets().unwrap();
     for (name, got) in [("compact.wgsl", &a.compact), ("dispatch.wgsl", &a.dispatch), ("marks.wgsl", &a.marks)] {
+        if std::env::var("RAYS_UPDATE_FIXTURES").as_deref() == Ok("1") { std::fs::write(dir.join(name), got).unwrap(); }
         let want = std::fs::read_to_string(dir.join(name)).unwrap();
         assert!(&want == got, "{name}: {}", first_difference(got.as_bytes(), want.as_bytes()));
     }

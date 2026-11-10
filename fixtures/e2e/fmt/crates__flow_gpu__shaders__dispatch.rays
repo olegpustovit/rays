@@ -16,6 +16,6 @@
          group (word bound 3)
          blocks (int/div (int/add n (int/sub group 1)) group)]
     (if (int/eq id 0)
-        (int/add (gpu/store-int groups 0 (if (int/lt blocks 1) 1 blocks))
-                 (int/add (gpu/store-int groups 1 1) (gpu/store-int groups 2 1)))
+        (int/add (gpu/store_int groups 0 (if (int/lt blocks 1) 1 blocks))
+                 (int/add (gpu/store_int groups 1 1) (gpu/store_int groups 2 1)))
         0)))

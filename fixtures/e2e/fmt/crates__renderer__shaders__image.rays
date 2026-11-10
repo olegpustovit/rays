@@ -15,8 +15,8 @@
     (/ k 255.0)))
 
 (defn image-fragment :context value [(colors : (array float)) (size : (array float))]
-  (let* [at (-> (int (gpu/fragment-y))
+  (let* [at (-> (int (gpu/fragment_y))
                 (int/mul (int (array/nth size 0)))
-                (int/add (int (gpu/fragment-x)))
+                (int/add (int (gpu/fragment_x)))
                 (int/mul 4))]
     [(unorm8 (array/nth colors at)) (unorm8 (array/nth colors (int/add at 1))) (unorm8 (array/nth colors (int/add at 2))) (unorm8 (array/nth colors (int/add at 3)))]))

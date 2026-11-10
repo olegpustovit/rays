@@ -6,6 +6,7 @@ use rays_diagnostic::{Diagnostic, Severity};
 
 pub type Fail = String;
 pub use flow_web::kernel_table::json_string;
+pub use flow_web::text_literal::quote as json_bytes;
 
 fn read_imports(file: &str, text: &str) -> Result<Vec<(String, String)>, Vec<Diagnostic>> {
     let base = std::path::Path::new(file).parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -21,6 +22,7 @@ fn read_imports(file: &str, text: &str) -> Result<Vec<(String, String)>, Vec<Dia
 }
 
 fn catalog() -> Result<std::sync::Arc<flow_check::catalog::Catalog>, Fail> {
+    let _phase = flow_syntax::phase_timer::measure("check.catalog");
     editor_document::kinds::shared(None).map_err(|d| format!("rays: catalog: {}", rays_diagnostic::to_string(&d)))
 }
 
@@ -41,6 +43,7 @@ fn check_root(lowered: &flow_sop::lower::T, instance: usize, fallback: Diagnosti
 }
 
 fn check_meshes(lowered: &flow_sop::lower::T) -> Result<(), Diagnostic> {
+    let _phase = flow_syntax::phase_timer::measure("check.meshes");
     for node in &lowered.plan.nodes {
         if (node.kind == "sop/mesh" || node.kind == "sop/mesh_planes") && !flow_eval::is_live(&flow_eval::Value::Record(node.args.clone().into())) {
             if let Err(d) = flow_sop::topology_kernel::mesh(&node.args) {
@@ -73,13 +76,17 @@ pub fn check_text(imports: Vec<(String, String)>, text: &str, lower: bool) -> Re
         Err(ds) => (None, ds, allow),
         Ok((workspace, warnings)) if !lower => (Some(workspace), warnings, allow),
         Ok((workspace, mut warnings)) => {
-            let options = lowering::Options { defer: Some(false), ..Default::default() };
+            let options = lowering::Options { defer: Some(false), record: Some(false), ..Default::default() };
             match lowering::of_workspace(&options, &workspace) {
-                Ok(lowered) => match check_meshes(&lowered.workspace.lowered) {
-                    Ok(()) => (Some(workspace), warnings, allow),
-                    Err(d) => {
-                        warnings.push(d);
-                        (None, warnings, allow)
+                Ok(lowered) => {
+                    let checked = check_meshes(&lowered.workspace.lowered);
+                    { let _phase = flow_syntax::phase_timer::measure("check.drop_document"); drop(lowered); }
+                    match checked {
+                        Ok(()) => (Some(workspace), warnings, allow),
+                        Err(d) => {
+                            warnings.push(d);
+                            (None, warnings, allow)
+                        }
                     }
                 },
                 Err(d) => {
@@ -93,12 +100,27 @@ pub fn check_text(imports: Vec<(String, String)>, text: &str, lower: bool) -> Re
 
 /// The checked file and its original diagnostics, shared by text and JSON CLI output.
 pub fn check_diagnostics(path: &str, lower: bool) -> Result<(String, Option<doc::T>, Vec<Diagnostic>, bool), Fail> {
+    let started = std::time::Instant::now();
+    let profile = std::env::var("RAYS_PROFILE").as_deref().ok().filter(|value| *value == "1")
+        .map(|_| flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || started.elapsed().as_secs_f64())));
     let text = std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|e| format!("rays: {e}"))?;
-    let (document, ds, allow) = match read_imports(path, &text) {
-        Ok(imports) => check_text(imports, &text, lower)?,
-        Err(ds) => (None, ds, false),
+    let maps = profile.as_ref().map(|_| {
+        let started = std::time::Instant::now();
+        flow_ir::flow_ir::profile::create(std::sync::Arc::new(move || started.elapsed().as_secs_f64()))
+    });
+    let mut check = || match read_imports(path, &text) {
+        Ok(imports) => check_text(imports, &text, lower),
+        Err(ds) => Ok((None, ds, false)),
     };
+    let (document, ds, allow) = if let Some(maps) = &maps { flow_ir::flow_ir::profile::sample(maps, &mut check) } else { check() }?;
     let failed = document.is_none() || ds.iter().any(|d| d.severity == Severity::ErrorSeverity || !allow);
+    if let Some(profile) = profile {
+        let profile = profile.finish();
+        eprintln!("profile {path}: total {:.3}s; {}", profile.total, flow_syntax::phase_timer::summary(&profile));
+        for map in maps.iter().flat_map(|maps| flow_ir::flow_ir::profile::static_maps(maps)) {
+            eprintln!("map {}: {} {:?} {:.3}s {}", flow_syntax::symbol::join_path(&map.site, "/"), map.count, map.tier, map.seconds, map.refusal.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("; "));
+        }
+    }
     Ok((text, document, ds, !failed))
 }
 

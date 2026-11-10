@@ -21,7 +21,7 @@
   (graph scene :context scene
     (let* [wall (scene/geometry (ref wall) :name "wall")
            camera (scene/camera :eye [-4.133102 1.518379 19.482749] :target [0 0 1]
-                                :fov 40.107046 :follow_viewport true)
+                                :fov 0.70000000594882161 :follow_viewport true)
            key (scene/light :name "key" :translate [-34 40 30] :intensity 1650.1184 :width 24 :height 24)
            fill (scene/light :name "fill" :translate [30 -10 26] :intensity 343.7747 :width 30 :height 30)
            sky (scene/world (ref world) :name "studio")]

@@ -11,7 +11,7 @@ raster renderer and the Metal path tracer consume. The interface
 - Equirect: `u = atan2 x (-z) / 2pi + 0.5`, `v = acos y / pi`. -Z (front,
   azimuth 0) is `u = 0.5`; azimuth grows toward +X; row 0 is the zenith.
   Texel `(i, j)` holds the direction at its centre.
-- `rotation` turns the whole World about +Y (maps, lights and sun).
+- `rotate` turns the whole World about +Y (maps, lights and sun).
 
 ## Layers
 

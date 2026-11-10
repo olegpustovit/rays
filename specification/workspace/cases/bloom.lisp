@@ -33,7 +33,9 @@
                                   :name "accent"
                                   :translate [2.2 0 -1.2]
                                   :scale [0.55 0.55 0.55])
-           camera (scene/camera :eye [0.5 1.8 6] :target [0.8 0.3 0] :fov 50)
+           camera (scene/camera :eye [0.5 1.8 6]
+                                :target [0.8 0.3 0]
+                                :fov 0.8726646259971648)
            light (scene/light :translate [4 6 5] :intensity 60)
            sky (scene/world (ref world) :name "Bloom study" :exposure -0.5)
            composed (scene/merge main accent camera light sky)]
@@ -57,9 +59,9 @@
            preview (ui/viewport (ref scene))
            inspector (ui/inspector)
            code (ui/lisp)
-           lower (ui/split-at "vertical" 0.46 inspector code)
-           side (ui/split-at "vertical" 0.4 preview lower)
-           main (ui/split-at "horizontal" 0.66 network side)
-           panels (ui/split-at "horizontal" 0.13 outline main)
+           lower (ui/split_at "vertical" 0.46 inspector code)
+           side (ui/split_at "vertical" 0.4 preview lower)
+           main (ui/split_at "horizontal" 0.66 network side)
+           panels (ui/split_at "horizontal" 0.13 outline main)
            shell (ui/workspace panels)]
       shell)))

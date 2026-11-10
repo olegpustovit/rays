@@ -12,7 +12,9 @@
 
   (graph scene :context scene
     (let* [land (scene/geometry (ref terrain) :name "terrain")
-           camera (scene/camera :eye [4 4 6.5] :target [0 0 0] :fov 50)
+           camera (scene/camera :eye [4 4 6.5]
+                                :target [0 0 0]
+                                :fov 0.8726646259971648)
            light (scene/light :translate [-3 5 4] :intensity 60)]
       (scene/merge land camera light)))
 

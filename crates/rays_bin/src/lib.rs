@@ -28,7 +28,7 @@ pub fn diagnostic_json(path: &str, source: &str, d: &rays_diagnostic::Diagnostic
     let hints = d.hints.iter().map(|h| q(h)).collect::<Vec<_>>().join(",");
     let trace = d.trace.iter().map(|t| format!("{{\"node_id\":{},\"label\":{},\"operation\":{}}}", t.node_id, q(&t.label), q(&t.operation))).collect::<Vec<_>>().join(",");
     let span = d.span.as_ref().map(|s| format!("{{\"start\":{},\"finish\":{}}}", s.start, s.finish)).unwrap_or_else(|| "null".into());
-    let signature = d.signature.as_ref().map(|s| q(s)).unwrap_or_else(|| "null".into());
-    let suggest = d.suggest.iter().take(3).map(|s| q(s)).collect::<Vec<_>>().join(",");
+    let signature = d.signature().map(|s| q(s)).unwrap_or_else(|| "null".into());
+    let suggest = d.suggest().iter().take(3).map(|s| q(s)).collect::<Vec<_>>().join(",");
     format!("{{\"file\":{},\"line\":{},\"col\":{},\"end_line\":{},\"end_col\":{},\"severity\":{},\"code\":{},\"message\":{},\"span\":{},\"cause\":{},\"hints\":[{}],\"trace\":[{}],\"suggest\":[{}],\"signature\":{}}}", q(path), number(position.map(|p|p.line)), number(position.map(|p|p.col)), number(end.map(|p|p.line)), number(end.map(|p|p.col)), q(match d.severity { rays_diagnostic::Severity::ErrorSeverity => "error", rays_diagnostic::Severity::Warning => "warning" }), q(&d.code), q(&d.message), span, d.cause.as_ref().map(|b| web_export::check_cli::json_bytes(b)).unwrap_or_else(|| "null".into()), hints, trace, suggest, signature)
 }

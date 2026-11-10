@@ -246,7 +246,7 @@ ranges; finite arithmetic overflow falls back to coordinate-normalized cross
 products, preserving decisions through extreme finite magnitudes. General
 polygons use the same signed vector-area rule, and polygon curves compare
 robust accumulated edge length directly. Point-identical polygon overlaps are
-canonical under cyclic rotation and reversed winding. Triangles use a sorted
+canonical under cyclic rotate and reversed winding. Triangles use a sorted
 three-index signature; N-gons use linear-time minimal cyclic rotations and a
 specialized open-address table. Stable source order selects the retained
 representative. Expected time is O(points + vertices + primitives + output)
@@ -546,7 +546,7 @@ raw-matrix and typed selected Transform, whole-geometry Match Axis, stable point
 attribute-driven point/primitive blast, merge,
 reverse, triangulate, normals, clean, primitive deletion,
 noise displacement, height color, surface scatter, copy to points with the
-standard quaternion, normal/velocity-up, post-rotation, pivot, translation,
+standard quaternion, normal/velocity-up, post-rotate, pivot, translation,
 and scale stack plus packed affine transform overrides and typed source/target
 restriction, with last-match-wins packed target-attribute broadcast,
 `Nothing` overrides, and target-group boolean algebra,
@@ -567,7 +567,7 @@ stable disjoint ranges. Work and owned output are O(vertices + vertex payload),
 with no reverse-incidence index required. Houdini's separate U/V hull and
 surface controls do not apply to RDK's polygon/curve primitive model.
 
-Transform composes six explicit scale/shear, Euler-rotation, and translation
+Transform composes six explicit scale/shear, Euler-rotate, and translation
 orders and all six radian Euler orders into one affine matrix. A translated and
 rotated pivot frame wraps that matrix, and inverse mode rejects singular
 output before cooking. Point, vertex, primitive, and topology-affine edge
@@ -848,7 +848,7 @@ each sampled ring's radial cardinality; unequal neighboring rings use a stable
 minimal triangle/quad zipper with `a + b - gcd(a,b)` faces and
 `3a + 3b - 2gcd(a,b)` corners.
 
-Both paths use scale-safe rotation-minimizing frames, closed-curve holonomy
+Both paths use scale-safe rotate-minimizing frames, closed-curve holonomy
 correction, point-float radius scaling, point-integer snapped seams, optional
 point-authored V and projected joint-up fields, and seam-safe side UVs. The
 general path supports a constant or outgoing-corner float2 first/last interior
@@ -895,7 +895,7 @@ pairs of selected polygon curves and emits the same point/row/column/quad and
 triangle connectivity vocabulary as Grid. Cross sections are interpreted in
 local XY with +Y up and +Z along the backbone, while full local XYZ offsets are
 retained. Average-edge, central-difference, previous/next-edge, and fixed-Z
-tangents feed scale-safe rotation-minimizing frames; closed-loop correction is
+tangents feed scale-safe rotate-minimizing frames; closed-loop correction is
 performed after distance-weighted roll/twist so a non-integral twist cannot be
 concentrated into the closing edge. Conventional point `orient`, `N`, `up`,
 `pscale`, and float3 `scale` fields optionally replace or scale that frame.
@@ -1004,7 +1004,7 @@ point claims and output numbering remain independent of domain scheduling.
 Circle is the packed polygon-curve implementation of SideFX's circle/ellipse
 and arc contract. The compatible default remains a closed XZ circle. Independent
 radii produce ellipses; XY, XZ, YZ, and scale-safe custom axes place the curve;
-center, positive uniform scale, in-plane radians rotation, and reversed
+center, positive uniform scale, in-plane radians rotate, and reversed
 traversal complete the polygon transform surface. Typed arc modes emit a full
 closed curve, an open sampled arc, an endpoint-chord closed arc, or a closed
 pie-slice boundary with one center point. Closed RDK topology is canonical and
@@ -1023,7 +1023,7 @@ can be free points; one open polyline per row, column, or both; quads; regular
 or reverse diagonal triangles; or checkerboard alternating triangles. The
 plane is XZ, XY, YZ, or a caller-defined pair of axes. Custom axes use
 scale-safe normalization and Gram-Schmidt rejection, then an optional in-plane
-rotation; the resulting normal is the normalized vertical-by-horizontal cross
+rotate; the resulting normal is the normalized vertical-by-horizontal cross
 product. Width and height are independent, `size` remains the compatible
 shared default, and an optional point float2 field stores normalized lattice
 coordinates.
@@ -1106,7 +1106,7 @@ exact output rather than duplicating the output snapshot.
 UV Project creates packed vertex float2 coordinates through arbitrary
 planar frames or cylindrical/spherical frames, with finite-input validation,
 primitive restriction, output ranges, per-primitive wrap correction, and pole
-repair. UV Transform applies translation, non-uniform scale, rotation, and
+repair. UV Transform applies translation, non-uniform scale, rotate, and
 pivot to point- or vertex-owned float2 UVs with owner-matched group
 restriction. UV Auto Seam classifies compact undirected topology using angle,
 boundary/non-manifold, primitive partition, and existing-UV continuity rules;
@@ -1750,7 +1750,7 @@ triangle splits share one cardinality plan. Reversing the cross section changes
 profile traversal and winding without mutating the source.
 
 Each source corner normally owns one angular ring. A corner exactly on the
-rotation axis instead owns one point: adjacent cells become `d` triangles and
+rotate axis instead owns one point: adjacent cells become `d` triangles and
 an axis-to-axis cell emits nothing. This avoids coincident points and
 degenerate pole quads while preserving stable profile order. Full polygon
 surfaces may add one N-gon for each non-axis endpoint of an open profile;
@@ -1965,7 +1965,7 @@ The design was checked through 2026-08-04 against SideFX's primary documentation
 - [Edge Transport](https://www.sidefx.com/docs/houdini/nodes/sop/edgetransport.html)
   for Each Curve, Edge Network, Parent Attribute, direction, root, operation,
   normalization, split/merge, constant/distance integration, and vector
-  rotation behavior;
+  rotate behavior;
 - [Attribute Combine](https://www.sidefx.com/docs/houdini/nodes/sop/attribcombine.html)
   for ordered arithmetic layers, source adjustment, tuple conversion,
   cross-input matching, blending, postprocessing, and cleanup policy;

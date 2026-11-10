@@ -8,7 +8,7 @@
 
   (graph scene :context scene
     (let* [mesh (scene/geometry (ref surface) :name "Lisp field")
-           camera (scene/camera :eye [4 3 5] :target [0 0 0] :fov 50)
+           camera (scene/camera :eye [4 3 5] :target [0 0 0] :fov 0.87266462599716477)
            light (scene/light :translate [-3 5 4] :intensity 60)]
       (scene/merge mesh camera light)))
 

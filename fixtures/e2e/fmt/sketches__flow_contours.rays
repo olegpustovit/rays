@@ -24,7 +24,7 @@
 ; Select a layer chip to edit its rows in
 ; the inspector: `level` (which band it follows), `share_from`..`share_to` (the share of cells
 ; marked), its shape (`narrow`, `radius`, `stroke`, `diagonal`) and `grey`.
-; Run: `dune exec sketches/flow_contours/main.exe`.
+; Run: `cargo run -p rays_bin -- sketches/flow_contours.rays`.
 (workspace flow_contours
 
   ; A contour map typed in glyphs, every pixel computed by a Lisp kernel on the GPU.
@@ -79,7 +79,7 @@
                                 (let* [one# 1.0
                                        half# 0.5
                                        pixel# (/ (* field#.scale field#.columns)
-                                                 field#.width)
+                                                 field#.pixel_width)
                                        x# (* (* uv#.x field#.columns) field#.scale)
                                        y# (* (* uv#.y field#.rows) field#.scale)
                                        height# (noise3 [x# y# field#.drift] :octaves 2)
@@ -115,8 +115,9 @@
            base 24.0
            ; the one height field every layer reads, and the picture it is drawn on: the
            ; whole viewport, cut into square cells
-           field {:width (float (frame/width))
-                  :height (float (frame/height))
+           field {:width (frame/width)
+                  :height (frame/height)
+                  :pixel_width (float (frame/width))
                   :columns (/ (frame/width) cell)
                   :rows (/ (frame/height) cell)
                   :drift (* t speed)
@@ -147,7 +148,7 @@
            network (ui/graph "picture" :focus true)
            inspector (ui/inspector :of network)
            outline (ui/outline)
-           network_dock (ui/split-at "horizontal" 0.5 outline network)
+           network_dock (ui/split_at "horizontal" 0.5 outline network)
            split_at (ui/split "horizontal"
                               preview
                               (ui/split "horizontal"

@@ -33,7 +33,7 @@
   (graph scene :context scene
     (let* [ground (scene/geometry (ref tinted) :name "sheet")
            pot (scene/geometry (ref vase) :name "vase" :translate [0 0.2 0])
-           camera (scene/camera :eye [3.2 3 4.6] :target [0 0.7 0] :fov 45)
+           camera (scene/camera :eye [3.2 3 4.6] :target [0 0.7 0] :fov 0.78539816339744828)
            light (scene/light :shape "Directional" :translate [5 8 4] :intensity 2)
            composed (scene/merge ground pot camera light)]
       composed))
@@ -43,8 +43,8 @@
            network (ui/graph)
            preview (ui/viewport (ref scene))
            inspector (ui/inspector)
-           side (ui/split-at "vertical" 0.55 preview inspector)
-           main (ui/split-at "horizontal" 0.6 network side)
-           panels (ui/split-at "horizontal" 0.13 outline main)
+           side (ui/split_at "vertical" 0.55 preview inspector)
+           main (ui/split_at "horizontal" 0.6 network side)
+           panels (ui/split_at "horizontal" 0.13 outline main)
            shell (ui/workspace panels)]
       shell)))

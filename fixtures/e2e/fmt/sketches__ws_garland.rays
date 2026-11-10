@@ -14,8 +14,8 @@
     (let* [size (fn [i] (+ 0.05 (* 0.11 (value/rand seed i))))
            sizes (map size (range count))
            big (filter (fn [s] (> s 0.09)) sizes)
-           ordered (sort-by (fn [s] (- 0 s)) big)
-           total (reduce + 0 big)
+           ordered (sort_by (fn [s] (- 0 s)) big)
+           total (reduce + 0.0 big)
            ; one bead per kept size, largest first
            bead (fn [r k]
                   (sop/uv_sphere :radius r

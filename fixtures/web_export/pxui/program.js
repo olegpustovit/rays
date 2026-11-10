@@ -122,7 +122,7 @@ const transform = (rt, kind, v) => {
   }
 };
 export function frame(input, state, rt) {
-  K ??= ["#e48ba1", new rt.PArray(3, new Float64Array(rt.data, 0, 4860)), "#1e1e1e", Float64Array.of(470, 180, 0), 48n, 0, 0.5, 0.5, 40n, 80n, 255n, 0.5882352941176471, 0.8823529411764706];
+  K ??= ["#e48ba1", new rt.PArray(3, new Float64Array(rt.data, 0, 4860)), "#1e1e1e", Float64Array.of(470, 180, 0), 48, 0, 0.5, 0.5, 40n, 80n, 255n, 0.5882352941176471, 0.8823529411764706];
   let l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15;
   let l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27;
   let at = 0;

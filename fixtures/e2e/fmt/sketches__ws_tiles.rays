@@ -8,7 +8,7 @@
                         (let* [coin (< (value/rand seed x z) 0.5)
                                angle (if coin 0.7854 -0.7854)
                                wall (sop/box :size [(* size 1.4142) 0.3 0.05]
-                                             :rotation [0 angle 0])
+                                             :rotate [0 angle 0])
                                ink (sop/set_color wall
                                                   :color (if coin "#285f77" "#b0680f"))]
                           (sop/transform ink

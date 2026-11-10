@@ -1,4 +1,4 @@
-; Full-bleed recursive rectangles. No rotation or text.
+; Full-bleed recursive rectangles. No rotate or text.
 ; X lights a random selection of rectangles (reshuffled every second): all black at the left, all lit at the right.
 ; Y goes from one rectangle to dense strips. Click cycles the eight color themes.
 ; Pinch zooms in and out about the pointer; a two-finger scroll pans.
@@ -126,8 +126,9 @@
                             (array/range)))]
       (map (fn [i]
              (array/nth raw
-                        (+ (* (int (array/nth kept (int/div (int i) 2))) 2)
-                           (mod i 2))))
+                        (int/add (int/mul (int (array/nth kept (int/div (int i) 2)))
+                                          2)
+                                 (int/mod (int i) 2))))
            (array/range (* (array/count kept) 2)))))
 
   (graph model :context host

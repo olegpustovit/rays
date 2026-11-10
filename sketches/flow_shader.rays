@@ -13,7 +13,7 @@
 ; press `o` to reveal its rows, and `v` to preview it. Open `motion` to inspect drift, breathing,
 ; sway and hue and their per-panel uniforms. Open `ember` to inspect its extra rim layer.
 ; The shader arithmetic includes `pow` and `sin`; the display kernels run through the GPU lane.
-; Run: `dune exec sketches/flow_shader/main.exe`. Edit a card in the graph and the picture follows.
+; Run: `cargo run -p rays_bin -- sketches/flow_shader.rays`. Edit a card in the graph and the picture follows.
 
 (workspace flow_shader
   ;; One shader, many looks.  A panel is four per-pixel kernels composited by alpha, in the

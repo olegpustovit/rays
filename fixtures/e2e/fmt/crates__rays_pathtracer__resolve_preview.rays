@@ -40,5 +40,5 @@
                       :w (+ s.w wt)}
                      s)))]
     [(aces-gamma (* (/ acc.r acc.w) exposure)) (aces-gamma (* (/ acc.g acc.w) exposure)) (aces-gamma (* (/ acc.b acc.w) exposure)) (if (and clear (<= center.w 0.0)) 0.0 1.0)])
-  ; GPU vs MSL-semantics parity: lib/flow_gpu/test_resolve.ml
+  ; GPU and Metal semantics are checked by the resolve conformance suite.
   )
