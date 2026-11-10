@@ -271,3 +271,23 @@ fn native_function_sampler_pass_and_layer_arguments_are_admitted_in_core() {
         assert_eq!(admit_icb(1,d).unwrap_err().kind,ErrorKind::InvalidArgument);
     }
 }
+
+#[test]
+fn native_only_predicates_and_compacted_writes_are_admitted_in_core() {
+    use validation::{CompactedSizeType as T,IcbCommandType as C};
+    for time in [-1.,f64::NAN,f64::INFINITY,f64::NEG_INFINITY] {
+        assert_eq!(crate::surface::validate_present_time("test",time).unwrap_err().kind,ErrorKind::InvalidArgument);
+    }
+    for time in [-0.,0.,1.] {crate::surface::validate_present_time("test",time).unwrap();}
+    assert_eq!(validation::validate_sample_query("test",0).unwrap_err().kind,ErrorKind::InvalidArgument);
+    validation::validate_sample_query("test",1).unwrap();
+    assert_eq!(validation::validate_render_command_types("test",&[C::IndirectConcurrentDispatch]).unwrap_err().kind,ErrorKind::InvalidState);
+    validation::validate_render_command_types("test",&[C::IndirectDrawIndexed]).unwrap();
+    for (offset,length,kind) in [(1,16,T::Uint32),(4,16,T::Uint64),(8,8,T::Uint32),(0,3,T::Uint32),(u64::MAX-7,u64::MAX,T::Uint64)] {
+        assert_eq!(validation::admit_compacted_size_write("test",offset,length,kind).unwrap_err().kind,ErrorKind::InvalidArgument);
+    }
+    for (offset,length,kind,bytes) in [(4,8,T::Uint32,4),(8,16,T::Uint64,8),(u64::MAX-15,u64::MAX,T::Uint64,8)] {
+        let admitted=validation::admit_compacted_size_write("test",offset,length,kind).unwrap();
+        assert_eq!((admitted.offset(),admitted.size_type(),admitted.bytes()),(offset,kind,bytes));
+    }
+}

@@ -331,6 +331,9 @@ fn gpu_resource_bounds() {
     expected.extend_from_slice(&bytes);
     assert_eq!(buffer.read_bytes(0, 32).unwrap_or_else(|failure| die(failure)), expected, "an admitted write did not land at its offset");
     assert_eq!(buffer.read_bytes(31, 1).unwrap_or_else(|failure| die(failure)), vec![1u8], "the last byte was not readable");
+    let private=make_buffer(&device,32,StorageMode::Private,CpuCacheMode::DefaultCache,None).unwrap_or_else(|failure|die(failure));
+    reject(ErrorKind::Unsupported,private.owned_readback().err());
+    private.destroy().unwrap_or_else(|failure|die(failure));
     buffer.destroy().unwrap_or_else(|failure| die(failure));
     device.destroy().unwrap_or_else(|failure| die(failure));
     release_queue::drain().unwrap_or_else(|failure| die(failure));
@@ -1033,6 +1036,12 @@ fragment float4 fragment_direct(O o [[stage_in]],texture2d<float> image [[textur
 
 fn gpu_render_icb_argument() {
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
+    let compute=IndirectCommandBuffer::create(&device,&ogpu_core::validation::admit_icb(1,
+        IndirectCommandBuffer::descriptor(vec![CommandType::IndirectConcurrentDispatch])).unwrap()).unwrap_or_else(|failure|die(failure));
+    without_handles("compute-only ICB render acquisition",&mut || {
+        reject(ErrorKind::InvalidState,RenderCommand::at(&compute,ogpu_core::validation::admit_icb_index(1,0).unwrap()).err());
+    });
+    compute.destroy().unwrap_or_else(|failure|die(failure));
     let library = compile_library(&device, ICB_SOURCE, None).unwrap_or_else(|failure| die(failure));
     let fragment = find_function(&library, "fragment_main").unwrap_or_else(|failure| die(failure));
     let mut encoder = fragment.argument_encoder(ogpu_core::validation::admit_slot("test",1).unwrap()).unwrap_or_else(|failure| die(failure));
@@ -1220,12 +1229,35 @@ fn gpu_acceleration_admission() {
         for refit in [false,true] {
             let command=raw::command_buffer_create(&queue).unwrap();
             let encoder=raw::command_buffer_acceleration_encoder(&command).unwrap();
+            if !refit {
+                let short_scratch=raw::buffer_create(&device,1,0).unwrap();
+                assert!(matches!(accel::encoder_build(&encoder,&structure,&descriptor,&short_scratch,0,false),Err(metal_sys::Error::InvalidArgument(_))));
+            }
             accel::encoder_build(&encoder,&structure,&descriptor,&scratch,0,refit).unwrap();
             raw::acceleration_encoder_end(&encoder).unwrap();
             raw::command_buffer_commit(&command).unwrap();
             sys::wait_command_buffer(&command).unwrap();
             assert!(sys::command_buffer_error(&command).unwrap().is_none());
         }
+        use ogpu_core::validation::{admit_compacted_size_write,CompactedSizeType};
+        let size_buffer=raw::buffer_create(&device,8,0).unwrap();
+        let command=raw::command_buffer_create(&queue).unwrap();
+        assert!(matches!(raw::command_buffer_present_at_time(&command,&device,f64::NAN),Err(metal_sys::Error::InvalidArgument(_))));
+        assert!(matches!(raw::command_buffer_present_after_duration(&command,&device,-1.),Err(metal_sys::Error::InvalidArgument(_))));
+        assert!(matches!(raw::device_supports_texture_sample_count(&device,0),Err(metal_sys::Error::InvalidArgument(_))));
+        let encoder=raw::command_buffer_acceleration_encoder(&command).unwrap();
+        sys::write_buffer(&size_buffer,0,&[0xa5;8]).unwrap();
+        // Logical admission can name a larger allocation; the actual ABI span still binds
+        // this current native buffer and rejects before any device write.
+        let too_large=admit_compacted_size_write("test",8,16,CompactedSizeType::Uint64).unwrap();
+        assert!(matches!(accel::encoder_write_compacted_size(&encoder,&structure,&size_buffer,too_large),Err(metal_sys::Error::InvalidArgument(_))));
+        assert_eq!(sys::read_buffer(&size_buffer,0,8).unwrap(),vec![0xa5;8]);
+        let output=admit_compacted_size_write("test",4,8,CompactedSizeType::Uint32).unwrap();
+        accel::encoder_write_compacted_size(&encoder,&structure,&size_buffer,output).unwrap();
+        raw::acceleration_encoder_end(&encoder).unwrap();raw::command_buffer_commit(&command).unwrap();sys::wait_command_buffer(&command).unwrap();
+        let size_bytes=sys::read_buffer(&size_buffer,0,8).unwrap();
+        assert_eq!(&size_bytes[..4],&[0xa5;4]);
+        assert!(u32::from_le_bytes(size_bytes[4..].try_into().unwrap())>0);
         native.destroy().unwrap_or_else(|failure|die(failure));
     }
     settle(baseline);

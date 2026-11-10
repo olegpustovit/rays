@@ -1207,10 +1207,10 @@ impl DriverAccelEncoder for AccelPass {
         }
         Ok(())
     }
-    fn write_compacted_size(&self, id: Token, dst: Token, offset: i64) -> Result<(), Error> {
+    fn write_compacted_size(&self, id: Token, dst: Token, output: ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> {
         let accel = self.cmds.dev.find_accel(QUEUE_OP, id)?;
         let buffer = self.cmds.dev.find_buffer(QUEUE_OP, dst)?;
-        self.cmds.run(QUEUE_OP, &mut |c| c.write_compacted_size(&accel, &buffer.buffer.borrow(), offset as u64))
+        self.cmds.run(QUEUE_OP, &mut |c| c.write_compacted_size(&accel, &buffer.buffer.borrow(), output))
     }
     fn refit(&self, id: Token, descriptor: &DriverAccelDescriptor, scratch: Token, scratch_offset: i64) -> Result<(), Error> {
         let accel = self.cmds.dev.find_accel(QUEUE_OP, id)?;

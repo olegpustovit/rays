@@ -275,3 +275,8 @@ pub fn destroy(surface: &Surface) {
         invalidate(&mut surface);
     }
 }
+
+pub fn validate_present_time(operation:&str,time:f64)->Result<(),Error> {
+    if time.is_finite() && time>=0. {Ok(())}
+    else {Err(error::make(operation,ErrorKind::InvalidArgument,"presentation time must be finite and nonnegative"))}
+}

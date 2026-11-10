@@ -1026,6 +1026,7 @@ fn ray_tracing(device: &Device) {
 
     // Compaction of the triangle BLAS reproduces its hits.
     let size_buffer = make_buffer(&device, "compacted-size", 8, &[BufferUsage::Storage, BufferUsage::CopySrc]);
+    be::write_buffer(&size_buffer,0,&[0xa5;8]).unwrap_or_else(|failure|die(failure));
     let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = be::accel_encoder(&commands).unwrap_or_else(|failure| die(failure));
     refused(

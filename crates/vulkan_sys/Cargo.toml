@@ -9,3 +9,6 @@ test = false
 
 [build-dependencies]
 cc = "1"
+
+[dependencies]
+ogpu_core = { path = "../ogpu_core" }

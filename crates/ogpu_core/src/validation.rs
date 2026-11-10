@@ -556,3 +556,28 @@ pub fn validate_resource_use(operation: &str, count: usize, usage: i32, stages: 
         Err(invalid(operation, "invalid render resource-use flags"))
     } else { Ok(()) }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompactedSizeType { Uint32, Uint64 }
+#[derive(Clone, Copy, Debug)]
+pub struct AdmittedCompactedSize { offset:u64, size_type:CompactedSizeType }
+impl AdmittedCompactedSize {
+    pub fn offset(self)->u64 {self.offset}
+    pub fn size_type(self)->CompactedSizeType {self.size_type}
+    pub fn bytes(self)->u64 {match self.size_type {CompactedSizeType::Uint32=>4,CompactedSizeType::Uint64=>8}}
+}
+pub fn admit_compacted_size_write(operation:&str,offset:u64,destination_length:u64,size_type:CompactedSizeType)->Result<AdmittedCompactedSize,Error> {
+    let output=AdmittedCompactedSize {offset,size_type};
+    let bytes=output.bytes();
+    if offset%bytes!=0 || offset>destination_length || bytes>destination_length-offset {
+        return Err(invalid(operation,"compacted-size output range is invalid"));
+    }
+    Ok(output)
+}
+pub fn validate_sample_query(operation:&str,count:u64)->Result<(),Error> {
+    if count==0 {Err(invalid(operation,"texture sample count must be positive"))} else {Ok(())}
+}
+pub fn validate_render_command_types(operation:&str,types:&[IcbCommandType])->Result<(),Error> {
+    if types.iter().any(|t|matches!(t,IcbCommandType::IndirectDraw|IcbCommandType::IndirectDrawIndexed)) {Ok(())}
+    else {Err(error::make(operation,ErrorKind::InvalidState,"descriptor does not enable render commands"))}
+}

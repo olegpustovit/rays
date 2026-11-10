@@ -181,6 +181,7 @@ pub fn device_supports_dynamic_libraries(receiver: &Handle) -> Result<bool, Erro
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_device_supports_dynamic_libraries"] fn ffi_rays_metal_device_supports_dynamic_libraries(receiver: *mut super::NativeHandle, output: *mut u8, message: *mut *const std::ffi::c_char) -> i32; }
 pub fn device_supports_texture_sample_count(receiver: &Handle, arg0: u64) -> Result<bool, Error> {
+    ogpu_core::validation::validate_sample_query("Metal.Device.supports_texture_sample_count",arg0).map_err(|failure|Error::InvalidArgument(failure.message.into()))?;
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     let mut output: MaybeUninit<u8> = MaybeUninit::uninit();
@@ -627,6 +628,7 @@ pub fn command_buffer_present(receiver: &Handle, arg0: &Handle) -> Result<(), Er
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_command_buffer_present"] fn ffi_rays_metal_command_buffer_present(receiver: *mut super::NativeHandle, arg0: *mut super::NativeHandle, message: *mut *const std::ffi::c_char) -> i32; }
 pub fn command_buffer_present_at_time(receiver: &Handle, arg0: &Handle, arg1: f64) -> Result<(), Error> {
+    ogpu_core::surface::validate_present_time("Metal.Command_buffer.present",arg1).map_err(|failure|Error::InvalidArgument(failure.message.into()))?;
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_command_buffer_present_at_time(receiver_ptr, arg0.as_native_ptr()?, arg1, &mut message) };
@@ -636,6 +638,7 @@ pub fn command_buffer_present_at_time(receiver: &Handle, arg0: &Handle, arg1: f6
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_command_buffer_present_at_time"] fn ffi_rays_metal_command_buffer_present_at_time(receiver: *mut super::NativeHandle, arg0: *mut super::NativeHandle, arg1: f64, message: *mut *const std::ffi::c_char) -> i32; }
 pub fn command_buffer_present_after_duration(receiver: &Handle, arg0: &Handle, arg1: f64) -> Result<(), Error> {
+    ogpu_core::surface::validate_present_time("Metal.Command_buffer.present",arg1).map_err(|failure|Error::InvalidArgument(failure.message.into()))?;
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_command_buffer_present_after_duration(receiver_ptr, arg0.as_native_ptr()?, arg1, &mut message) };

@@ -126,7 +126,6 @@ impl Device {
     pub fn supports_texture_sample_count(&self, sample_count: usize) -> Result<bool, Error> {
         let operation = "Metal.Device.supports_texture_sample_count";
         self.0.lifetime.ensure_live(operation)?;
-        if sample_count == 0 { return Err(error(operation, ErrorKind::InvalidArgument, "texture sample count must be positive")); }
         metal_sys::registry::device_supports_texture_sample_count(&self.0.raw, sample_count as u64).map_err(|failure| sys_error(operation, failure))
     }
     pub fn destroy(&self) -> Result<(), Error> { self.0.lifetime.destroy_parent("Metal.Device.destroy") }
@@ -227,9 +226,6 @@ impl Buffer {
     pub fn owned_readback(&self) -> Result<std::sync::Arc<dyn Fn(i64, usize) -> Result<Vec<u8>, Error> + Send + Sync>, Error> {
         let operation = "Metal.Buffer.owned_readback";
         self.0.lifetime.ensure_live(operation)?;
-        if self.0.storage != StorageMode::Shared {
-            return Err(error(operation, ErrorKind::Unsupported, "readback requires shared buffer storage"));
-        }
         let readback = metal_sys::native::shared_buffer_readback(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
         Ok(Arc::new(move |offset, length| {
             let offset = u64::try_from(offset).map_err(|_| error(operation, ErrorKind::InvalidArgument, "negative read offset"))?;
@@ -557,9 +553,8 @@ impl CommandBuffer {
         if !self.device().same(drawable.device()) { return Err(error(operation, ErrorKind::CrossDevice, "drawable belongs to another Metal device")); }
         match time {
             PresentTime::Immediate => metal_sys::registry::command_buffer_present(&self.0.raw, drawable.raw()).map_err(|failure| sys_error(operation, failure)),
-            PresentTime::AtTime(time) if time.is_finite() && time >= 0.0 => metal_sys::registry::command_buffer_present_at_time(&self.0.raw, drawable.raw(), time).map_err(|failure| sys_error(operation, failure)),
-            PresentTime::AfterMinimumDuration(duration) if duration.is_finite() && duration >= 0.0 => metal_sys::registry::command_buffer_present_after_duration(&self.0.raw, drawable.raw(), duration).map_err(|failure| sys_error(operation, failure)),
-            _ => Err(error(operation, ErrorKind::InvalidArgument, "presentation time must be finite and nonnegative")),
+            PresentTime::AtTime(time) => metal_sys::registry::command_buffer_present_at_time(&self.0.raw, drawable.raw(), time).map_err(|failure| sys_error(operation, failure)),
+            PresentTime::AfterMinimumDuration(duration) => metal_sys::registry::command_buffer_present_after_duration(&self.0.raw, drawable.raw(), duration).map_err(|failure| sys_error(operation, failure)),
         }?;
         drawable.mark_presentation_scheduled();
         self.retain(RetainedResource::Drawable(drawable.clone()));

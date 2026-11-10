@@ -125,11 +125,7 @@ impl Drop for AccelerationEncoderInner {
 
 #[derive(Clone)]
 pub struct AccelerationEncoder(Arc<AccelerationEncoderInner>);
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CompactedSizeType {
-    Uint32,
-    Uint64,
-}
+pub use ogpu_core::validation::CompactedSizeType;
 impl AccelerationEncoder {
     pub fn create(command_buffer: &CommandBuffer) -> Result<Self, Error> {
         const OP: &str = "Metal.Acceleration_encoder.create";
@@ -173,18 +169,6 @@ impl AccelerationEncoder {
         scratch_offset: u64,
         refit: bool,
     ) -> Result<(), Error> {
-        if scratch_offset > scratch.length() {
-            return Err(error(operation, ErrorKind::InvalidArgument, "scratch offset exceeds its buffer"));
-        }
-        let device = self.0.command_buffer.device();
-        let sizes = metal_sys::native::acceleration::descriptor_sizes(device.raw(), descriptor.native_descriptor()).map_err(|failure| sys_error(operation, failure))?;
-        let scratch_needed = if refit { sizes.refit_scratch_buffer_size } else { sizes.build_scratch_buffer_size };
-        if destination.size() < sizes.acceleration_structure_size {
-            return Err(error(operation, ErrorKind::InvalidArgument, "destination acceleration structure is too small"));
-        }
-        if scratch_needed > scratch.length() - scratch_offset {
-            return Err(error(operation, ErrorKind::InvalidArgument, "scratch range is too small"));
-        }
         metal_sys::native::acceleration::encoder_build(
                 &self.0.raw,
                 destination.raw(),
@@ -224,23 +208,14 @@ impl AccelerationEncoder {
         &self,
         source: &AccelerationStructure,
         destination: &Buffer,
-        offset: u64,
-        size_type: CompactedSizeType,
+        output: ogpu_core::validation::AdmittedCompactedSize,
     ) -> Result<(), Error> {
         const OP: &str = "Metal.Acceleration_encoder.write_compacted_size_typed";
-        let (bytes, uint64) = match size_type {
-            CompactedSizeType::Uint32 => (4, false),
-            CompactedSizeType::Uint64 => (8, true),
-        };
-        if offset % bytes != 0 || offset > destination.length() || bytes > destination.length() - offset {
-            return Err(error(OP, ErrorKind::InvalidArgument, "compacted-size output range is invalid"));
-        }
         metal_sys::native::acceleration::encoder_write_compacted_size(
             &self.0.raw,
             source.raw(),
             destination.raw(),
-            offset,
-            uint64,
+            output,
         ).map_err(|failure| sys_error(OP, failure))?;
         self.0.command_buffer.retain_acceleration(source);
         self.0.command_buffer.retain_buffer(destination);

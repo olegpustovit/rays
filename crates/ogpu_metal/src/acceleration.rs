@@ -133,8 +133,8 @@ impl Acceleration {
         encoder.copy_and_compact(&src.0.metal, &dst.0.metal)
     }
 
-    pub(crate) fn encode_compacted_size(&self, encoder: &ma::AccelerationEncoder, destination: &Buffer, offset: i64) -> Result<(), Error> {
-        encoder.write_compacted_size_typed(&self.0.metal, destination.metal(), offset as u64, ma::CompactedSizeType::Uint64)
+    pub(crate) fn encode_compacted_size(&self, encoder: &ma::AccelerationEncoder, destination: &Buffer, output: ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> {
+        encoder.write_compacted_size_typed(&self.0.metal, destination.metal(), output)
     }
 
     pub fn destroy(&self) -> Result<(), Error> {

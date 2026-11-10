@@ -120,7 +120,7 @@ impl Commands {
         self.0.refit_acceleration(&accel.0, &native, &scratch.0, offset).map_err(|failure| error("accel_refit", failure))
     }
     pub fn compact_acceleration(&mut self, source: &AccelerationStructure, destination: &AccelerationStructure) -> Result<(), Error> { self.0.compact_acceleration(&source.0, &destination.0).map_err(|failure| error("accel_compact", failure)) }
-    pub fn write_compacted_size(&mut self, accel: &AccelerationStructure, buffer: &Buffer, offset: u64) -> Result<(), Error> { self.0.write_compacted_size(&accel.0, &buffer.0, offset).map_err(|failure| error("accel_write_compacted", failure)) }
+    pub fn write_compacted_size(&mut self, accel: &AccelerationStructure, buffer: &Buffer, output:ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> { self.0.write_compacted_size(&accel.0, &buffer.0, output).map_err(|failure| error("accel_write_compacted", failure)) }
 }
 
 #[derive(Clone)]
@@ -191,6 +191,42 @@ impl DepthAttachment{fn native(&self)->sys::DepthAttachment{sys::DepthAttachment
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu_compacted_size_widths_preserve_adjacent_bytes() {
+        use ogpu_core::validation::{admit_compacted_size_write, CompactedSizeType};
+        let device = Device::create(true, true).expect("fatal-validation Vulkan device");
+        let queue = device.queue().unwrap();
+        let mut vertices = device.buffer(36, BufferKind::Shared).unwrap();
+        let mut bytes = Vec::new();
+        for value in [-1f32, -1., 0., 1., -1., 0., 0., 1., 0.] { bytes.extend_from_slice(&value.to_le_bytes()); }
+        vertices.write(0, &bytes).unwrap();
+        let accel = device.acceleration_blas(&[Geometry {
+            kind: GeometryKind::Triangles, buffer: vertices, offset: 0, stride: 12,
+            count: 3, opaque: true, duplicate_any_hit: false,
+        }], false).unwrap();
+        let scratch = device.buffer(accel.sizes().build_scratch_bytes, BufferKind::DeviceLocal).unwrap();
+        let mut commands = queue.begin().unwrap();
+        commands.build_acceleration(&accel, &scratch, 0).unwrap();
+        queue.wait(commands.commit().unwrap()).unwrap();
+        let mut output = device.buffer(24, BufferKind::Shared).unwrap();
+        for (size_type, offset) in [(CompactedSizeType::Uint32, 4), (CompactedSizeType::Uint64, 8)] {
+            output.write(0, &[0xa5; 24]).unwrap();
+            let admitted = admit_compacted_size_write("test", offset, 24, size_type).unwrap();
+            let mut commands = queue.begin().unwrap();
+            commands.write_compacted_size(&accel, &output, admitted).unwrap();
+            queue.wait(commands.commit().unwrap()).unwrap();
+            let mut result = [0; 24];
+            output.read(0, &mut result).unwrap();
+            let start = admitted.offset() as usize;
+            let end = start + admitted.bytes() as usize;
+            assert!(result[..start].iter().chain(&result[end..]).all(|&byte| byte == 0xa5));
+            let mut value = [0; 8];
+            value[..end-start].copy_from_slice(&result[start..end]);
+            assert!(u64::from_le_bytes(value) > 0 && u64::from_le_bytes(value) <= accel.sizes().structure_bytes);
+        }
+        assert_eq!(Device::validation_messages(), 0);
+    }
 
     #[test]
     fn safe_texture_constructor_creates_a_texture() {

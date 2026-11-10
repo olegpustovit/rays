@@ -1080,11 +1080,11 @@ void rv_accel_compact(void *commands,void *source,void *destination) {
   vkCmdCopyAccelerationStructureKHR(c->cb,&i);full_barrier(c->cb);
 }
 static void destroy_query_pool_now(Device *d,void *payload) { vkDestroyQueryPool(d->device,reinterpret_cast<VkQueryPool>(payload),nullptr); }
-int32_t rv_accel_write_compacted(void *commands,void *accel,void *buffer,uint64_t offset) {
+int32_t rv_accel_write_compacted(void *commands,void *accel,void *buffer,uint64_t offset,uint8_t uint64) {
   auto *c=static_cast<Command *>(commands);auto *a=static_cast<Accel *>(accel);VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
   qi.queryType=VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;qi.queryCount=1;VkQueryPool pool{};VkResult r=vkCreateQueryPool(a->device->device,&qi,nullptr,&pool);if(r!=VK_SUCCESS)return r;
   vkCmdResetQueryPool(c->cb,pool,0,1);vkCmdWriteAccelerationStructuresPropertiesKHR(c->cb,1,&a->handle,VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,pool,0);
-  full_barrier(c->cb);vkCmdCopyQueryPoolResults(c->cb,pool,0,1,static_cast<Buffer *>(buffer)->buffer,offset,4,VK_QUERY_RESULT_WAIT_BIT);full_barrier(c->cb);
+  full_barrier(c->cb);vkCmdCopyQueryPoolResults(c->cb,pool,0,1,static_cast<Buffer *>(buffer)->buffer,offset,uint64?8:4,VK_QUERY_RESULT_WAIT_BIT|(uint64?VK_QUERY_RESULT_64_BIT:0));full_barrier(c->cb);
   defer(a->device,destroy_query_pool_now,pool);return VK_SUCCESS;
 }
 }

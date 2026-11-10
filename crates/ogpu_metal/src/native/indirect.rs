@@ -96,9 +96,7 @@ impl RenderCommand {
         const OP: &str = "Metal.Indirect_command_buffer.Render_command.at";
         enter_main(OP)?;
         buffer.0.lifetime.ensure_live(OP)?;
-        if !buffer.0.command_types.contains(&CommandType::IndirectDraw) && !buffer.0.command_types.contains(&CommandType::IndirectDrawIndexed) {
-            return Err(error(OP, ErrorKind::InvalidState, "descriptor does not enable render commands"));
-        }
+        ogpu_core::validation::validate_render_command_types(OP,&buffer.0.command_types)?;
         if !index.belongs_to_capacity(buffer.0.max_command_count) {
             return Err(error(OP, ErrorKind::InvalidArgument, "index was admitted for another indirect command capacity"));
         }

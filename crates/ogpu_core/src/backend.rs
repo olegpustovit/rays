@@ -129,7 +129,7 @@ pub trait DriverComputeEncoder {
 pub trait DriverAccelEncoder {
     fn build(&self, accel: Token, scratch: Token, offset: i64) -> Result<(), Error>;
     fn compact(&self, source: Token, destination: Token) -> Result<(), Error>;
-    fn write_compacted_size(&self, accel: Token, destination: Token, offset: i64) -> Result<(), Error>;
+    fn write_compacted_size(&self, accel: Token, destination: Token, output: crate::validation::AdmittedCompactedSize) -> Result<(), Error>;
     fn refit(&self, accel: Token, descriptor: &DriverAccelDescriptor, scratch: Token, offset: i64) -> Result<(), Error>;
     fn end_accel(&self) -> Result<(), Error>;
 }
@@ -1360,12 +1360,11 @@ pub fn write_compacted_size(encoder: &AccelEncoder, accel: &Accel, dst: &Buffer,
     let device = commands_device(&encoder.0.commands);
     accel_check(OP, &device, accel)?;
     resource_check(OP, &device, &dst.resource)?;
-    let offset = offset.unwrap_or(0);
-    if offset < 0 || offset % 8 != 0 || offset > dst.buffer_descriptor.size - 8 {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "compacted size destination needs eight aligned bytes"));
-    }
+    let offset=u64::try_from(offset.unwrap_or(0)).map_err(|_|make_error(OP,ErrorKind::InvalidArgument,"compacted size destination needs eight aligned bytes"))?;
+    let output=crate::validation::admit_compacted_size_write(OP,offset,dst.buffer_descriptor.size as u64,crate::validation::CompactedSizeType::Uint64)
+        .map_err(|_|make_error(OP,ErrorKind::InvalidArgument,"compacted size destination needs eight aligned bytes"))?;
     acceleration::compacted_size(&device.0.handle, &accel.0.portable.borrow())?;
-    encoder.0.raw().write_compacted_size(accel.0.token, dst.resource.0.token, offset)
+    encoder.0.raw().write_compacted_size(accel.0.token, dst.resource.0.token, output)
 }
 pub fn end_accel(encoder: &AccelEncoder) -> Result<(), Error> {
     const OP: &str = "Backend.end_accel";
@@ -2079,7 +2078,7 @@ mod ownership_tests {
     impl DriverAccelEncoder for Payload {
         fn build(&self, _: Token, _: Token, _: i64) -> Result<(), Error> { self.terminal("test.build") }
         fn compact(&self, _: Token, _: Token) -> Result<(), Error> { self.terminal("test.compact") }
-        fn write_compacted_size(&self, _: Token, _: Token, _: i64) -> Result<(), Error> { unreachable!() }
+        fn write_compacted_size(&self, _: Token, _: Token, _: crate::validation::AdmittedCompactedSize) -> Result<(), Error> { unreachable!() }
         fn refit(&self, _: Token, _: &DriverAccelDescriptor, _: Token, _: i64) -> Result<(), Error> { unreachable!() }
         fn end_accel(&self) -> Result<(), Error> { self.terminal("test.end") }
     }

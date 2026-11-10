@@ -500,13 +500,13 @@ impl DriverAccelEncoder for AccelRecorder {
         c.keep_accel(&dst)?;
         Acceleration::encode_compact(&self.encoder, &src, &dst)
     }
-    fn write_compacted_size(&self, token: Token, dst: Token, offset: i64) -> Result<(), Error> {
+    fn write_compacted_size(&self, token: Token, dst: Token, output: ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> {
         let c = &self.context;
         let structure = c.find_accel(token)?;
         let destination = c.find_buffer(dst)?;
         c.keep_accel(&structure)?;
         c.keep_buffer(&destination)?;
-        structure.encode_compacted_size(&self.encoder, &destination, offset)
+        structure.encode_compacted_size(&self.encoder, &destination, output)
     }
     fn refit(&self, token: Token, descriptor: &DriverAccelDescriptor, scratch: Token, scratch_offset: i64) -> Result<(), Error> {
         let c = &self.context;

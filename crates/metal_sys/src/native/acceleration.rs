@@ -260,6 +260,7 @@ unsafe extern "C" {
     ) -> i32;
     fn rays_metal_acceleration_encoder_build(
         encoder: *mut NativeHandle,
+        descriptor_device: *mut NativeHandle,
         destination: *mut NativeHandle,
         descriptor: *const RawBuildDescriptor,
         scratch: *mut NativeHandle,
@@ -328,6 +329,7 @@ pub fn encoder_build(
         let status = unsafe {
             rays_metal_acceleration_encoder_build(
                 encoder.as_native_ptr()?,
+                descriptor.device.as_native_ptr()?,
                 destination.as_native_ptr()?,
                 &raw,
                 scratch.as_native_ptr()?,
@@ -353,19 +355,18 @@ pub fn encoder_write_compacted_size(
     encoder: &Handle,
     structure: &Handle,
     buffer: &Handle,
-    offset: u64,
-    uint64: bool,
+    output: ogpu_core::validation::AdmittedCompactedSize,
 ) -> Result<(), Error> {
     #[cfg(target_vendor = "apple")]
     {
         let mut message = std::ptr::null();
-        let data_type = if uint64 { 0x55 } else { 0x21 };
+        let data_type = if output.size_type()==ogpu_core::validation::CompactedSizeType::Uint64 { 0x55 } else { 0x21 };
         let status = unsafe {
             rays_metal_acceleration_encoder_write_size(
                 encoder.as_native_ptr()?,
                 structure.as_native_ptr()?,
                 buffer.as_native_ptr()?,
-                offset,
+                output.offset(),
                 data_type,
                 &mut message,
             )
@@ -378,7 +379,7 @@ pub fn encoder_write_compacted_size(
     }
     #[cfg(not(target_vendor = "apple"))]
     {
-        let _ = (encoder, structure, buffer, offset, uint64);
+        let _ = (encoder, structure, buffer, output);
         Err(Error::Unavailable)
     }
 }

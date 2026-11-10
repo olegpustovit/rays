@@ -479,11 +479,11 @@ extern "C" int32_t rays_metal_acceleration_descriptor_sizes(
 }
 
 extern "C" int32_t rays_metal_acceleration_encoder_build(
-    MetalHandle *encoder_handle, MetalHandle *destination_handle,
+    MetalHandle *encoder_handle, MetalHandle *descriptor_device_handle, MetalHandle *destination_handle,
     const RaysAccelBuildDescriptor *raw_descriptor, MetalHandle *scratch_handle,
     uint64_t scratch_offset, uint8_t refit, const char **message) {
   if (message != nullptr) *message = nullptr;
-  if (encoder_handle == nullptr || destination_handle == nullptr ||
+  if (encoder_handle == nullptr || descriptor_device_handle == nullptr || destination_handle == nullptr ||
       raw_descriptor == nullptr || scratch_handle == nullptr ||
       scratch_offset > static_cast<uint64_t>(std::numeric_limits<NSUInteger>::max()))
     return rays_metal_set_error(message, "invalid acceleration build arguments");
@@ -497,8 +497,14 @@ extern "C" int32_t rays_metal_acceleration_encoder_build(
             (__bridge id<MTLAccelerationStructure>)rays_metal_handle_object(
                 destination_handle, KIND_ACCELERATION_STRUCTURE);
         id<MTLBuffer> scratch = rays_accel_buffer(scratch_handle);
-        if (encoder == nil || destination == nil || scratch == nil)
-          return rays_metal_set_error(message, "invalid acceleration encoder, structure, or scratch buffer");
+        id<MTLDevice> descriptor_device = (__bridge id<MTLDevice>)
+            rays_metal_handle_object(descriptor_device_handle, KIND_DEVICE);
+        if (encoder == nil || destination == nil || scratch == nil || descriptor_device == nil)
+          return rays_metal_set_invalid_argument(message, "invalid acceleration encoder, structure, or scratch buffer");
+        if (encoder.device != descriptor_device)
+          return rays_metal_set_invalid_argument(message, "acceleration descriptor belongs to another device");
+        if (destination.device != encoder.device || scratch.device != encoder.device)
+          return rays_metal_set_invalid_argument(message, "acceleration destination or scratch belongs to another device");
         bool unavailable = false;
         MTLAccelerationStructureDescriptor *descriptor =
             rays_accel_descriptor(raw_descriptor, message, &unavailable);
@@ -508,6 +514,15 @@ extern "C" int32_t rays_metal_acceleration_encoder_build(
           return message != nullptr && *message != nullptr ? 1 :
               rays_metal_set_error(message, "unable to create acceleration descriptor");
         }
+        MTLAccelerationStructureSizes sizes =
+            [encoder.device accelerationStructureSizesWithDescriptor:descriptor];
+        if (destination.size < sizes.accelerationStructureSize)
+          return rays_metal_set_invalid_argument(message, "destination acceleration structure is too small");
+        if (scratch_offset > scratch.length)
+          return rays_metal_set_invalid_argument(message, "scratch offset exceeds its buffer");
+        NSUInteger scratch_needed = refit != 0 ? sizes.refitScratchBufferSize : sizes.buildScratchBufferSize;
+        if (scratch_needed > scratch.length - scratch_offset)
+          return rays_metal_set_invalid_argument(message, "scratch range is too small");
         if (refit != 0) {
           [encoder refitAccelerationStructure:destination
                                    descriptor:descriptor
@@ -536,8 +551,8 @@ extern "C" int32_t rays_metal_acceleration_encoder_write_size(
   if (message != nullptr) *message = nullptr;
   uint64_t bytes = size_data_type == 0x55 ? sizeof(uint64_t) : sizeof(uint32_t);
   if (encoder_handle == nullptr || structure_handle == nullptr || buffer_handle == nullptr ||
-      (size_data_type != 0x21 && size_data_type != 0x55) || offset % bytes != 0)
-    return rays_metal_set_error(message, "invalid compacted-size arguments");
+      (size_data_type != 0x21 && size_data_type != 0x55))
+    return rays_metal_set_invalid_argument(message, "invalid compacted-size arguments");
   if (@available(macOS 11.0, *)) {
     @try {
       @autoreleasepool {
@@ -549,8 +564,9 @@ extern "C" int32_t rays_metal_acceleration_encoder_write_size(
                 structure_handle, KIND_ACCELERATION_STRUCTURE);
         id<MTLBuffer> buffer = rays_accel_buffer(buffer_handle);
         if (encoder == nil || structure == nil || buffer == nil ||
+            structure.device != encoder.device || buffer.device != encoder.device ||
             offset > buffer.length || bytes > buffer.length - offset)
-          return rays_metal_set_error(message, "compacted-size destination range out of bounds");
+          return rays_metal_set_invalid_argument(message, "compacted-size destination range out of bounds");
         [encoder writeCompactedAccelerationStructureSize:structure
                                                 toBuffer:buffer
                                                   offset:static_cast<NSUInteger>(offset)

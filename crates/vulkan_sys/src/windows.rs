@@ -232,7 +232,7 @@ unsafe extern "C" {
     fn rv_accel_build(commands:*mut c_void,accel:*mut c_void,scratch:*mut c_void,offset:u64)->i32;
     fn rv_accel_refit(commands:*mut c_void,accel:*mut c_void,geometries:*const NativeGeometry,count:u32,scratch:*mut c_void,offset:u64)->i32;
     fn rv_accel_compact(commands:*mut c_void,source:*mut c_void,destination:*mut c_void);
-    fn rv_accel_write_compacted(commands:*mut c_void,accel:*mut c_void,buffer:*mut c_void,offset:u64)->i32;
+    fn rv_accel_write_compacted(commands:*mut c_void,accel:*mut c_void,buffer:*mut c_void,offset:u64,uint64:u8)->i32;
 }
 
 struct DeviceInner { raw: NonNull<c_void>, /* Vulkan externally synchronizes each VkPipelineCache. */ pipeline_cache: Mutex<()> }
@@ -406,7 +406,7 @@ impl Commands{
         Error::status(unsafe{rv_accel_refit(self.raw.as_ptr(),accel.raw.as_ptr(),native.as_ptr(),native.len() as u32,scratch.raw.as_ptr(),offset)})
     }
     pub fn compact_acceleration(&mut self,source:&AccelerationStructure,destination:&AccelerationStructure)->Result<(),Error>{same(&self.queue.device,&source.device)?;same(&self.queue.device,&destination.device)?;unsafe{rv_accel_compact(self.raw.as_ptr(),source.raw.as_ptr(),destination.raw.as_ptr())};Ok(())}
-    pub fn write_compacted_size(&mut self,accel:&AccelerationStructure,buffer:&Buffer,offset:u64)->Result<(),Error>{same(&self.queue.device,&accel.device)?;same(&self.queue.device,&buffer.device)?;if offset.checked_add(4).is_none_or(|end|end>buffer.size){return Err(Error::InvalidInput("compacted-size write exceeds buffer"));}Error::status(unsafe{rv_accel_write_compacted(self.raw.as_ptr(),accel.raw.as_ptr(),buffer.raw.as_ptr(),offset)})}
+    pub fn write_compacted_size(&mut self,accel:&AccelerationStructure,buffer:&Buffer,output:ogpu_core::validation::AdmittedCompactedSize)->Result<(),Error>{let offset=output.offset();let uint64=output.size_type()==ogpu_core::validation::CompactedSizeType::Uint64;same(&self.queue.device,&accel.device)?;same(&self.queue.device,&buffer.device)?;if offset.checked_add(output.bytes()).is_none_or(|end|end>buffer.size){return Err(Error::InvalidInput("compacted-size write exceeds buffer"));}Error::status(unsafe{rv_accel_write_compacted(self.raw.as_ptr(),accel.raw.as_ptr(),buffer.raw.as_ptr(),offset,uint64.into())})}
 }
 impl Drop for Commands{fn drop(&mut self){if self.active{unsafe{rv_commands_abandon(self.raw.as_ptr())}}}}
 fn native_rect(r:Rect)->NativeRect{NativeRect{x:r.x,y:r.y,width:r.width,height:r.height}}
