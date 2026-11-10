@@ -186,3 +186,24 @@ fn texture_rect_write_and_stable_host_ring() {
     let local = backend::create_buffer(&device, buffer(64), Some(Memory::DeviceLocal)).unwrap();
     assert_eq!(backend::host_ptr(&local).unwrap_err().kind, ErrorKind::Unsupported);
 }
+
+/// A backend without compositor hooks reports none and refuses each one as Unsupported.
+#[cfg(unix)]
+#[test]
+fn mock_has_no_compositor_hooks() {
+    use ogpu_core::dmabuf::{self, Dmabuf, Plane};
+    use std::os::fd::AsFd;
+    select();
+    let device = backend::create_device(virtual_impl::create_driver().unwrap()).unwrap();
+    assert_eq!(backend::external(&device), dmabuf::External::default());
+    assert!(backend::dmabuf_formats(&device).is_empty());
+    let (reader, _writer) = std::io::pipe().unwrap();
+    let planes = [Plane { fd: reader.as_fd(), offset: 0, stride: 16 }];
+    let buffer = Dmabuf { width: 4, height: 4, fourcc: dmabuf::ABGR8888, modifier: dmabuf::MOD_LINEAR, planes: &planes };
+    assert_eq!(backend::import_dmabuf(&device, &buffer, true).err().unwrap().kind, ErrorKind::Unsupported);
+    assert_eq!(backend::import_dmabuf(&device, &Dmabuf { planes: &[], ..buffer }, false).err().unwrap().kind, ErrorKind::InvalidArgument);
+    assert_eq!(backend::import_dmabuf(&device, &Dmabuf { fourcc: dmabuf::fourcc(b"NV12"), ..buffer }, false).err().unwrap().kind, ErrorKind::Unsupported);
+    let queue = backend::create_queue(&device).unwrap();
+    assert_eq!(backend::export_sync_file(&queue).unwrap_err().kind, ErrorKind::Unsupported);
+    assert_eq!(backend::import_sync_file(&queue, reader.into()).unwrap_err().kind, ErrorKind::Unsupported);
+}
