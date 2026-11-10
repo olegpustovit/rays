@@ -252,6 +252,16 @@ fn gpu_render_encoder() {
             label: Some("invalid\0label".into()), ..DepthStencilDescriptor::default()
         }).err());
     });
+    for (compare, operation) in [CompareFunction::Never, CompareFunction::Less, CompareFunction::Equal,
+        CompareFunction::LessEqual, CompareFunction::Greater, CompareFunction::NotEqual,
+        CompareFunction::GreaterEqual, CompareFunction::Always].into_iter().zip([StencilOperation::Keep,
+        StencilOperation::Zero, StencilOperation::Replace, StencilOperation::IncrementClamp,
+        StencilOperation::DecrementClamp, StencilOperation::Invert, StencilOperation::IncrementWrap, StencilOperation::DecrementWrap]) {
+        let face=StencilFace { compare,stencil_fail:operation,depth_fail:operation,pass:operation,read_mask:u32::MAX,write_mask:0x55aa55aa };
+        let state=DepthStencil::create(&device,DepthStencilDescriptor { depth_compare:compare,depth_write:true,
+            front_face:Some(face),back_face:Some(face),label:Some("typed stencil".into()) }).unwrap_or_else(|failure|die(failure));
+        state.destroy().unwrap_or_else(|failure|die(failure));
+    }
     let pass = make_render_pass(&device, 4, 4, 1).unwrap_or_else(|failure| die(failure));
     let color = make_texture(&device, Texture::descriptor_2d(Format::Bgra8Unorm, 4, 4, StorageMode::Private, &[TextureUsage::RenderAttachment], None)).unwrap_or_else(|failure| die(failure));
     let depth = make_texture(&device, Texture::descriptor_2d(Format::Depth32Float, 4, 4, StorageMode::Private, &[TextureUsage::RenderAttachment], None)).unwrap_or_else(|failure| die(failure));

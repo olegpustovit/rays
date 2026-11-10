@@ -9,10 +9,10 @@ use std::ffi::c_char;
 pub struct SamplerDescriptor { pub min_filter:i32, pub mag_filter:i32, pub mip_filter:i32, pub max_anisotropy:i32, pub address_s:i32, pub address_t:i32, pub address_r:i32, pub border_color:i32, pub reduction_mode:i32, pub normalized_coordinates:u8, pub lod_min:f32, pub lod_max:f32, pub lod_average:u8, pub lod_bias:f32, pub compare_function:i32, pub support_argument_buffers:u8 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct StencilFaceDescriptor { pub compare_function:i32, pub stencil_failure_operation:i32, pub depth_failure_operation:i32, pub pass_operation:i32, pub read_mask:u32, pub write_mask:u32 }
+struct StencilFaceDescriptor { pub compare_function:i32, pub stencil_failure_operation:i32, pub depth_failure_operation:i32, pub pass_operation:i32, pub read_mask:u32, pub write_mask:u32 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DepthStencilDescriptor { pub depth_compare_function:i32, pub depth_write_enabled:u8, pub front_face_stencil:StencilFaceDescriptor, pub has_front_face_stencil:u8, pub back_face_stencil:StencilFaceDescriptor, pub has_back_face_stencil:u8 }
+struct DepthStencilDescriptor { pub depth_compare_function:i32, pub depth_write_enabled:u8, pub front_face_stencil:StencilFaceDescriptor, pub has_front_face_stencil:u8, pub back_face_stencil:StencilFaceDescriptor, pub has_back_face_stencil:u8 }
 
 #[cfg(target_vendor = "apple")]
 unsafe extern "C" {
@@ -45,9 +45,21 @@ pub fn create_sampler(device: &Handle, admitted: &ogpu_core::validation::Admitte
  #[cfg(not(target_vendor="apple"))] {let _=(device,admitted);Err(Error::Unavailable)}
 }
 
-pub fn create_depth_stencil(device:&Handle,descriptor:&DepthStencilDescriptor,name:Option<&str>)->Result<Handle,Error>{
- #[cfg(target_vendor="apple")] {let name=label(name)?;let mut out=std::ptr::null_mut();let mut msg=std::ptr::null();let status=unsafe{raw_depth(device.as_native_ptr()?,descriptor,name.as_ref().map_or(std::ptr::null(),|x|x.as_ptr()),&mut out,&mut msg)};unsafe{finish(status,out,msg)}}
- #[cfg(not(target_vendor="apple"))] {let _=(device,descriptor,name);Err(Error::Unavailable)}
+pub fn create_depth_stencil(device:&Handle,descriptor:&ogpu_core::render_pass::DepthStencilDescriptor)->Result<Handle,Error>{
+ ogpu_core::validation::validate_label("Metal.DepthStencil.create",descriptor.label.as_deref()).map_err(|failure|Error::InvalidArgument(failure.message.into()))?;
+ #[cfg(target_vendor="apple")] {
+    let face = |v:ogpu_core::render_pass::StencilFace| StencilFaceDescriptor { compare_function:v.compare as i32,
+        stencil_failure_operation:v.stencil_fail as i32,depth_failure_operation:v.depth_fail as i32,
+        pass_operation:v.pass as i32,read_mask:v.read_mask,write_mask:v.write_mask };
+    let raw = DepthStencilDescriptor { depth_compare_function:descriptor.depth_compare as i32,
+        depth_write_enabled:descriptor.depth_write as u8,front_face_stencil:descriptor.front_face.map(face).unwrap_or_default(),
+        has_front_face_stencil:descriptor.front_face.is_some() as u8,back_face_stencil:descriptor.back_face.map(face).unwrap_or_default(),
+        has_back_face_stencil:descriptor.back_face.is_some() as u8 };
+    let name=label(descriptor.label.as_deref())?;let mut out=std::ptr::null_mut();let mut msg=std::ptr::null();
+    let status=unsafe{raw_depth(device.as_native_ptr()?,&raw,name.as_ref().map_or(std::ptr::null(),|x|x.as_ptr()),&mut out,&mut msg)};
+    unsafe{finish(status,out,msg)}
+ }
+ #[cfg(not(target_vendor="apple"))] {let _=(device,descriptor);Err(Error::Unavailable)}
 }
 pub fn create_render_pass()->Result<Handle,Error>{
  #[cfg(target_vendor="apple")] {crate::registry::render_pass_descriptor_create()}

@@ -9,11 +9,8 @@ pub use ogpu_core::types::SamplerFilter as Filter;
 pub use ogpu_core::types::MipFilter;
 pub use ogpu_core::types::AddressMode;
 pub use ogpu_core::render_pass::Comparison as CompareFunction;
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StencilOperation { Keep, Zero, Replace, IncrementClamp, DecrementClamp, Invert, IncrementWrap, DecrementWrap }
+pub use ogpu_core::render_pass::{StencilOperation, StencilFace, DepthStencilDescriptor};
 pub use ogpu_core::validation::{BorderColor, ReductionMode, SamplerProfile as SamplerDescriptor, AdmittedSampler};
-fn compare(v: CompareFunction) -> i32 { v as i32 }
-fn operation(v: StencilOperation) -> i32 { v as i32 }
 
 struct SamplerInner { raw: metal_sys::Handle, lifetime: Lifetime, device: Device, device_attached: AtomicBool }
 impl SamplerInner { fn detach_device(&self) { if self.device_attached.swap(false, Ordering::AcqRel) { self.device.lifetime().detach(); } } }
@@ -32,12 +29,6 @@ impl Sampler {
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct StencilFace { pub compare: CompareFunction, pub stencil_fail: StencilOperation, pub depth_fail: StencilOperation, pub pass: StencilOperation, pub read_mask: u32, pub write_mask: u32 }
-#[derive(Clone, Debug)]
-pub struct DepthStencilDescriptor { pub depth_compare: CompareFunction, pub depth_write: bool, pub front_face: Option<StencilFace>, pub back_face: Option<StencilFace>, pub label: Option<String> }
-impl Default for DepthStencilDescriptor { fn default() -> Self { Self { depth_compare: CompareFunction::Always, depth_write: false, front_face: None, back_face: None, label: None } } }
-fn face(v: StencilFace) -> sys::StencilFaceDescriptor { sys::StencilFaceDescriptor { compare_function: compare(v.compare), stencil_failure_operation: operation(v.stencil_fail), depth_failure_operation: operation(v.depth_fail), pass_operation: operation(v.pass), read_mask: v.read_mask, write_mask: v.write_mask } }
 struct DepthStencilInner { raw: metal_sys::Handle, lifetime: Lifetime, device: Device, device_attached: AtomicBool }
 impl DepthStencilInner { fn detach_device(&self) { if self.device_attached.swap(false, Ordering::AcqRel) { self.device.lifetime().detach(); } } }
 impl Drop for DepthStencilInner { fn drop(&mut self) { self.lifetime.destroyed.store(true, Ordering::Release); self.detach_device(); } }
@@ -46,9 +37,8 @@ pub struct DepthStencil(Arc<DepthStencilInner>);
 impl DepthStencil {
     pub fn create(device: &Device, d: DepthStencilDescriptor) -> Result<Self, Error> {
         let op = "Metal.DepthStencil.create";
-        enter_main(op)?; device.ensure_live(op)?; ogpu_core::validation::validate_label(op, d.label.as_deref())?;
-        let raw_desc = sys::DepthStencilDescriptor { depth_compare_function: compare(d.depth_compare), depth_write_enabled: d.depth_write as u8, front_face_stencil: d.front_face.map(face).unwrap_or_default(), has_front_face_stencil: d.front_face.is_some() as u8, back_face_stencil: d.back_face.map(face).unwrap_or_default(), has_back_face_stencil: d.back_face.is_some() as u8 };
-        let raw = sys::create_depth_stencil(device.raw(), &raw_desc, d.label.as_deref()).map_err(|failure| sys_error(op, failure))?; device.lifetime().attach(); Ok(Self(Arc::new(DepthStencilInner { raw, lifetime: Lifetime::new(), device: device.clone(), device_attached: AtomicBool::new(true) })))
+        enter_main(op)?; device.ensure_live(op)?;
+        let raw = sys::create_depth_stencil(device.raw(), &d).map_err(|failure| sys_error(op, failure))?; device.lifetime().attach(); Ok(Self(Arc::new(DepthStencilInner { raw, lifetime: Lifetime::new(), device: device.clone(), device_attached: AtomicBool::new(true) })))
     }
     pub fn destroy(&self) -> Result<(), Error> { self.0.lifetime.destroy_parent("Metal.DepthStencil.destroy")?; self.0.detach_device(); Ok(()) }
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }

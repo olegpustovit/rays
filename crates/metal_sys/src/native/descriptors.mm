@@ -73,7 +73,7 @@ extern "C" int32_t rays_metal_depth_stencil_create(MetalHandle *device_handle,
     const RaysDepthStencilDescriptor *s, const char *raw_label, MetalHandle **output,
     const char **message) {
   if (message) *message = nullptr; if (output) *output = nullptr;
-  if (s == nullptr || output == nullptr || s->depth_compare_function < 0 || s->depth_compare_function > 7)
+  if (s == nullptr || output == nullptr)
     return rays_metal_set_error(message, "invalid depth/stencil descriptor");
   @try { @autoreleasepool {
     id<MTLDevice> device = (__bridge id<MTLDevice>)rays_metal_handle_object(device_handle, KIND_DEVICE);
@@ -82,7 +82,6 @@ extern "C" int32_t rays_metal_depth_stencil_create(MetalHandle *device_handle,
     descriptor.depthCompareFunction = static_cast<MTLCompareFunction>(s->depth_compare_function);
     descriptor.depthWriteEnabled = s->depth_write_enabled != 0;
     auto make_face = [](const RaysStencilFaceDescriptor &f) -> MTLStencilDescriptor * {
-      if (f.compare_function < 0 || f.compare_function > 7 || f.stencil_failure_operation < 0 || f.stencil_failure_operation > 7 || f.depth_failure_operation < 0 || f.depth_failure_operation > 7 || f.pass_operation < 0 || f.pass_operation > 7) return nil;
       MTLStencilDescriptor *v = [[MTLStencilDescriptor alloc] init];
       v.stencilCompareFunction = static_cast<MTLCompareFunction>(f.compare_function);
       v.stencilFailureOperation = static_cast<MTLStencilOperation>(f.stencil_failure_operation);

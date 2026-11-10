@@ -39,6 +39,14 @@ pub enum Comparison {
     Always,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StencilOperation { Keep, Zero, Replace, IncrementClamp, DecrementClamp, Invert, IncrementWrap, DecrementWrap }
+#[derive(Clone, Copy, Debug)]
+pub struct StencilFace { pub compare: Comparison, pub stencil_fail: StencilOperation, pub depth_fail: StencilOperation, pub pass: StencilOperation, pub read_mask: u32, pub write_mask: u32 }
+#[derive(Clone, Debug)]
+pub struct DepthStencilDescriptor { pub depth_compare: Comparison, pub depth_write: bool, pub front_face: Option<StencilFace>, pub back_face: Option<StencilFace>, pub label: Option<String> }
+impl Default for DepthStencilDescriptor { fn default() -> Self { Self { depth_compare: Comparison::Always, depth_write: false, front_face: None, back_face: None, label: None } } }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Primitive {
     PointList,
