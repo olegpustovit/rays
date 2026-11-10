@@ -228,11 +228,14 @@ fn run_timeout(case: Duration) -> Duration {
 
 fn run_all(args: &Args) -> i32 {
     let started = Instant::now();
-    let gc = Command::new("cargo").args(["run", "-q", "-p", "buildtime", "--", "gc"]).status();
-    if !gc.is_ok_and(|status| status.success()) { return 1; }
-    let output = match Command::new("cargo").args(["metadata", "--no-deps", "--format-version=1"]).output() {
-        Ok(output) if output.status.success() => output,
-        _ => { eprintln!("rays-t: cannot read workspace metadata"); return 1; }
+    let mut gc = Command::new("cargo");
+    gc.args(["run", "-q", "-p", "buildtime", "--", "gc"]);
+    if let Err(status) = qualification_setup(&mut gc, started, QUALIFICATION_TIMEOUT, false) { return status; }
+    let mut metadata = Command::new("cargo");
+    metadata.args(["metadata", "--no-deps", "--format-version=1"]);
+    let output = match qualification_setup(&mut metadata, started, QUALIFICATION_TIMEOUT, true) {
+        Ok(output) => output,
+        Err(status) => return status,
     };
     let json = String::from_utf8_lossy(&output.stdout);
     let Some(packages) = json_field(&json, "packages") else { return 1; };
@@ -263,6 +266,25 @@ fn run_all(args: &Args) -> i32 {
     for (name, elapsed, status) in rows { eprintln!("{name}\t{:.3}\t{status}", elapsed.as_secs_f64()); }
     eprintln!("rays-t: qualification wall {:.3}s", started.elapsed().as_secs_f64());
     status
+}
+
+// GC and Cargo metadata share the same hard deadline as all following crate runs.
+fn qualification_setup(command: &mut Command, started: Instant, timeout: Duration, capture: bool) -> Result<Completed, i32> {
+    match run_command(command, started, Some(timeout), None, capture) {
+        Ok(RunResult::Finished(output)) => {
+            print_bytes(io::stderr(), &output.stderr);
+            if output.status.success() { Ok(output) } else {
+                print_bytes(io::stdout(), &output.stdout);
+                Err(status_code(output.status))
+            }
+        }
+        Ok(RunResult::TimedOut { elapsed, output, .. }) => {
+            print_bytes(io::stderr(), &output.stderr);
+            print_bytes(io::stdout(), &output.stdout);
+            Err(report_timeout(elapsed, "whole qualification"))
+        }
+        Err(error) => { eprintln!("rays-t: qualification setup failed: {error}"); Err(1) }
+    }
 }
 
 fn run_tests(
@@ -978,6 +1000,49 @@ fn spawn(command: &mut Command) -> io::Result<Child> {
     command.spawn()
 }
 
+#[cfg(unix)]
+fn signal_group(signal: &str, group: u32) -> bool {
+    Command::new("/bin/kill").args([signal, "--"]).arg(format!("-{group}"))
+        .stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|status| status.success())
+}
+
+#[cfg(unix)]
+fn terminate_unix_groups(root: u32) -> bool {
+    // Freeze first: nested runners create their own groups, and must not spawn more work while
+    // we discover descendants. Retain inherited group members even if their parent already exited.
+    let mut groups = vec![root];
+    signal_group("-STOP", root);
+    loop {
+        let output = Command::new("/bin/ps").args(["-A", "-o", "pid=,ppid=,pgid="]).output();
+        let Ok(output) = output else { break };
+        if !output.status.success() { break; }
+        let rows: Vec<(u32, u32, u32)> = String::from_utf8_lossy(&output.stdout).lines().filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
+        }).collect();
+        let mut descendants = HashSet::from([root]);
+        loop {
+            let previous = descendants.len();
+            for (pid, parent, group) in &rows {
+                if descendants.contains(parent) || groups.contains(group) { descendants.insert(*pid); }
+            }
+            if descendants.len() == previous { break; }
+        }
+        let mut added = false;
+        for (pid, _, group) in rows {
+            if group > 1 && descendants.contains(&pid) && !groups.contains(&group) {
+                signal_group("-STOP", group);
+                groups.push(group);
+                added = true;
+            }
+        }
+        if !added { break; }
+    }
+    let mut killed = false;
+    for group in groups.into_iter().rev() { killed |= signal_group("-KILL", group); }
+    killed
+}
+
 fn terminate_tree(
     child: &mut Child,
     #[cfg(windows)] job: &mem_sys::windows_process::Job,
@@ -989,13 +1054,7 @@ fn terminate_tree(
         let tree_killed = {
             #[cfg(unix)]
             {
-                Command::new("kill")
-                    .args(["-KILL", "--"])
-                    .arg(format!("-{}", child.id()))
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status()
-                    .is_ok_and(|status| status.success())
+                terminate_unix_groups(child.id())
             }
             #[cfg(not(unix))]
             {
@@ -1308,6 +1367,19 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn qualification_setup_inherits_the_whole_deadline() {
+        for capture in [false, true] {
+            let mut command = Command::new("sh");
+            command.args(["-c", "sleep 2"]);
+            let now = Instant::now();
+            let result = qualification_setup(&mut command, now - Duration::from_millis(180), Duration::from_millis(240), capture);
+            assert_eq!(result.err(), Some(124));
+            assert!(now.elapsed() < Duration::from_millis(180), "setup restarted the whole deadline");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn qualification_runs_crates_in_order_and_stops_at_first_failure() {
         use std::os::unix::fs::PermissionsExt;
         let root = temp_path("qualification");
@@ -1463,6 +1535,28 @@ mod tests {
         assert!(is_serial_test("gpu_dispatch"));
         assert!(!is_serial_test("ordinary_case"));
         assert!(is_serial_test("module::window_open"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn whole_timeout_kills_nested_process_groups() {
+        if env::var_os("RAYS_T_SELFTEST_NESTED_GROUP").is_some() {
+            let mut command = Command::new("sh");
+            command.args(["-c", "sleep 2"]);
+            let mut child = spawn(&mut command).unwrap();
+            println!("RAYS_NESTED_GROUP_STARTED");
+            io::stdout().flush().unwrap();
+            assert!(child.wait().unwrap().success());
+            return;
+        }
+        let mut command = Command::new(env::current_exe().unwrap());
+        command.args(["--exact", "tests::whole_timeout_kills_nested_process_groups", "--nocapture"])
+            .env("RAYS_T_SELFTEST_NESTED_GROUP", "1");
+        let started = Instant::now();
+        let result = run_command(&mut command, started, Some(Duration::from_millis(240)), None, true).unwrap();
+        let RunResult::TimedOut { whole_run: true, output, .. } = result else { panic!("expected whole deadline") };
+        assert!(String::from_utf8_lossy(&output.stdout).contains("RAYS_NESTED_GROUP_STARTED"));
+        assert!(started.elapsed() < Duration::from_secs(1), "nested process group outlived the whole deadline");
     }
 
     #[cfg(unix)]

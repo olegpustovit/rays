@@ -239,7 +239,8 @@ fn run(enforce_budgets: bool) -> Result<bool, String> {
         let build_elapsed = timings.last().expect("build was recorded").elapsed;
 
         if canary.tier.runs_tests() {
-            let test = timed(&label("cargo-t"), Some(Duration::from_secs(60)), &mut timings, || {
+            // rays-t owns the hard 60-second run budget; this wall measurement includes build/lock wait.
+            let test = timed(&label("cargo-t"), None, &mut timings, || {
                 cargo_tests(&root, &canary.package)
             });
             if let Err(error) = test {
