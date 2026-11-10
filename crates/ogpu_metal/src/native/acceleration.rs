@@ -64,10 +64,8 @@ impl AccelerationStructure {
     }
 }
 
-pub use metal_sys::native::acceleration::{Geometry, Keyframe, IndexBuffer as Index, GeometryCommon, Motion, Sizes};
+pub use metal_sys::native::acceleration::Sizes;
 pub use ogpu_core::acceleration::InstanceKind;
-fn instance_kind_code(kind: InstanceKind) -> i32 { match kind { InstanceKind::UserIdInstances => 1, InstanceKind::MotionInstances => 2 } }
-
 pub struct BuildDescriptor {
     lifetime: Lifetime,
     device: Device,
@@ -85,34 +83,18 @@ impl Drop for BuildDescriptor {
     }
 }
 impl BuildDescriptor {
-    // Input geometry has passed ogpu_core; these native references retain its allocations.
-    pub(crate) fn primitive(device: &Device, geometries: Vec<Geometry>, motion: Option<Motion>, refit: bool, buffers: Vec<Buffer>) -> Result<Self, Error> {
-        device.attach_child("Metal.Acceleration_structure.Build.primitive")?;
-        Ok(Self {
-            lifetime: Lifetime::new(), device: device.clone(),
-            data: metal_sys::native::acceleration::Descriptor::Primitive(metal_sys::native::acceleration::PrimitiveDescriptor { geometries, motion, refit, fast_build: false }),
-            buffers, structures: Vec::new(), device_attached: AtomicBool::new(true),
-        })
-    }
-
-    pub(crate) fn instances(device: &Device, buffer: &Buffer, offset: u64, count: u64, kind: InstanceKind, motion_transforms: Option<(&Buffer, u64, u64)>, structures: &[AccelerationStructure]) -> Result<Self, Error> {
-        const OP: &str = "Metal.Acceleration_structure.Build.instances";
-        let layout = metal_sys::native::acceleration::instance_layout(instance_kind_code(kind)).map_err(|failure| sys_error(OP, failure))?;
-        let stride = u64::try_from(layout[0]).map_err(|_| error(OP, ErrorKind::DeviceLost, "Metal returned an invalid instance descriptor size"))?;
-        let mut buffers = vec![buffer.clone()];
-        let native_transforms = motion_transforms.map(|(buffer, offset, count)| {
-            buffers.push(buffer.clone());
-            metal_sys::native::acceleration::MotionTransforms { buffer: buffer.raw().clone(), offset, count }
-        });
+    pub(crate) fn create(device:&Device, profile:ogpu_core::acceleration::AdmittedBuild,
+        buffers:Vec<Buffer>, structures:Vec<AccelerationStructure>) -> Result<Self,Error> {
+        const OP:&str="Metal.Acceleration_structure.Build.create";
+        device.ensure_live(OP)?;
+        if !profile.admitted_for(&device.capabilities()?) {
+            return Err(error(OP,ErrorKind::CrossDevice,"acceleration capabilities do not match native device"));
+        }
+        let data=metal_sys::native::acceleration::Descriptor::create(device.raw(),profile,
+            buffers.iter().map(|b|b.raw().clone()).collect(),structures.iter().map(|s|s.raw().clone()).collect())
+            .map_err(|failure|sys_error(OP,failure))?;
         device.attach_child(OP)?;
-        Ok(Self {
-            lifetime: Lifetime::new(), device: device.clone(),
-            data: metal_sys::native::acceleration::Descriptor::Instances(metal_sys::native::acceleration::InstancesDescriptor {
-                buffer: buffer.raw().clone(), offset, stride, count, instance_kind: instance_kind_code(kind),
-                structures: structures.iter().map(|value| value.raw().clone()).collect(), motion_transforms: native_transforms, refit: false,
-            }),
-            buffers, structures: structures.to_vec(), device_attached: AtomicBool::new(true),
-        })
+        Ok(Self { lifetime:Lifetime::new(), device:device.clone(),data,buffers,structures,device_attached:AtomicBool::new(true) })
     }
 
     pub(crate) fn sizes(&self) -> Result<Sizes, Error> {

@@ -125,25 +125,15 @@ fn surface_frame_lifecycle_and_acceleration_validation() {
     surface::destroy(&target);
     assert!(has_kind(surface::acquire(&target).err(), ErrorKind::InvalidState));
 
-    let range = acceleration::BufferRange {
-        buffer: handle::create(&device),
-        buffer_size: 4096,
-        offset: 0,
-        length: 1024,
-    };
-    let mut structure = acceleration::create(
-        &device,
-        true,
-        false,
-        acceleration::Descriptor::Blas {
-            geometries: vec![acceleration::Geometry::Triangles {
-                vertices: range,
-                vertex_stride: 12,
-                vertex_count: 3,
-            }],
-            motion_keyframes: None,
-        },
-    )
+    let mut caps=crate::caps::minimum_m1();caps.ray_tracing=true;
+    let profile=acceleration::admit_build(&caps,vec![4096],acceleration::BuildLayout::Primitive {
+        geometries:vec![acceleration::BuildGeometry::Triangles { vertices:vec![acceleration::BuildRange {binding:0,offset:0,length:1024}],
+            vertex_stride:12,triangle_count:1,index:None,common:crate::backend::DEFAULT_GEOMETRY_OPTIONS }],
+        motion:None,refit:false,fast_build:false,
+    }).unwrap();
+    let mut structure=acceleration::create(&device,acceleration::Descriptor::Build {
+        profile,buffers:vec![handle::create(&device)],structures:vec![],
+    })
     .unwrap_or_else(|_| panic!("acceleration create failed"));
     assert!(acceleration::validate_build(&device, &structure).is_ok());
     acceleration::mark_built(&mut structure);

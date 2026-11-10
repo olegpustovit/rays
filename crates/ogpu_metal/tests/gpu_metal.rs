@@ -1184,7 +1184,55 @@ fn gpu_handle_release_pool() {
     assert!(!stderr.contains("MISSING POOLS"), "native handle release autoreleases outside a pool: {stderr}");
 }
 
+fn gpu_acceleration_admission() {
+    use ogpu_core::acceleration::{self,BuildGeometry,BuildIndex,BuildLayout,BuildRange};
+    use ogpu_core::backend::GeometryOptions;
+    use metal_sys::{native as sys,registry as raw};
+    use sys::acceleration as accel;
+    release_queue::drain().unwrap();
+    let baseline=stats().live_handles;
+    {
+        let native=Device::system_default().unwrap_or_else(|failure|die(failure));
+        let caps=native.capabilities().unwrap_or_else(|failure|die(failure));
+        assert!(caps.ray_tracing && caps.ray_tracing_refit,"native acceleration admission requires ray tracing/refit");
+        let device=sys::default_device().unwrap();
+        let vertices=raw::buffer_create(&device,36,0).unwrap();
+        let index=raw::buffer_create(&device,8,0).unwrap();
+        let positions=[-1f32,-1.,0.,1.,-1.,0.,0.,1.,0.].into_iter().flat_map(f32::to_le_bytes).collect::<Vec<_>>();
+        sys::write_buffer(&vertices,0,&positions).unwrap();
+        sys::write_buffer(&index,0,&[0,0,0,0,1,0,2,0]).unwrap();
+        let profile=acceleration::admit_build(&caps,vec![36,8],BuildLayout::Primitive {
+            geometries:vec![BuildGeometry::Triangles {vertices:vec![BuildRange {binding:0,offset:0,length:36}],vertex_stride:12,
+                triangle_count:1,index:Some(BuildIndex {range:BuildRange {binding:1,offset:2,length:6},uint16:true}),
+                common:GeometryOptions {opaque:true,duplicate_intersection:true}}],motion:None,refit:true,fast_build:true,
+        }).unwrap();
+        let short=raw::buffer_create(&device,32,0).unwrap();
+        assert!(matches!(accel::Descriptor::create(&device,profile.clone(),vec![short,index.clone()],vec![]),Err(metal_sys::Error::InvalidArgument(_))));
+        assert!(matches!(accel::Descriptor::create(&device,profile.clone(),vec![device.clone(),index.clone()],vec![]),Err(metal_sys::Error::InvalidArgument(_))));
+        assert!(matches!(accel::Descriptor::create(&device,profile.clone(),vec![vertices.clone()],vec![]),Err(metal_sys::Error::InvalidArgument(_))));
+        let descriptor=accel::Descriptor::create(&device,profile,vec![vertices.clone(),index.clone()],vec![]).unwrap();
+        let sizes=accel::descriptor_sizes(&device,&descriptor).unwrap();
+        assert!(sizes.acceleration_structure_size>0);
+        assert_eq!(accel::descriptor_sizes(&device,&descriptor).unwrap(),sizes,"immutable descriptor sizes changed");
+        let structure=raw::acceleration_structure_create(&device,std::num::NonZeroU64::new(sizes.acceleration_structure_size).unwrap()).unwrap();
+        let scratch=raw::buffer_create(&device,sizes.build_scratch_buffer_size.max(sizes.refit_scratch_buffer_size).max(4),0).unwrap();
+        let queue=raw::command_queue_create(&device).unwrap();
+        for refit in [false,true] {
+            let command=raw::command_buffer_create(&queue).unwrap();
+            let encoder=raw::command_buffer_acceleration_encoder(&command).unwrap();
+            accel::encoder_build(&encoder,&structure,&descriptor,&scratch,0,refit).unwrap();
+            raw::acceleration_encoder_end(&encoder).unwrap();
+            raw::command_buffer_commit(&command).unwrap();
+            sys::wait_command_buffer(&command).unwrap();
+            assert!(sys::command_buffer_error(&command).unwrap().is_none());
+        }
+        native.destroy().unwrap_or_else(|failure|die(failure));
+    }
+    settle(baseline);
+}
+
 pub const CASES: &[(&str, fn())] = &[
+        ("gpu_acceleration_admission", gpu_acceleration_admission),
         ("gpu_handle_release_pool", gpu_handle_release_pool),
         ("gpu_owner_only_handles", gpu_owner_only_handles),
         ("gpu_device_safe", gpu_device_safe),

@@ -295,7 +295,7 @@ static MTLAccelerationStructureDescriptor *rays_accel_descriptor(
   }
   if (source->kind == 0) {
     const RaysAccelPrimitiveDescriptor *primitive = source->primitive;
-    if (primitive == nullptr || primitive->geometry_count == 0 || primitive->geometries == nullptr) {
+    if (primitive == nullptr || primitive->geometries == nullptr) {
       rays_metal_set_error(message, "primitive descriptor requires geometry");
       return nil;
     }
@@ -334,7 +334,7 @@ static MTLAccelerationStructureDescriptor *rays_accel_descriptor(
   if (source->kind == 1) {
     const RaysAccelInstancesDescriptor *instances = source->instances;
     if (instances == nullptr || instances->buffer == nullptr ||
-        instances->structures == nullptr || instances->structure_count == 0) {
+        instances->structures == nullptr) {
       rays_metal_set_error(message, "instance descriptor requires a buffer and structures");
       return nil;
     }
@@ -401,6 +401,45 @@ static MTLAccelerationStructureDescriptor *rays_accel_descriptor(
   }
   rays_metal_set_error(message, "unknown acceleration build descriptor type");
   return nil;
+}
+
+// current objects once when the immutable prepared descriptor takes its owners.
+extern "C" int32_t rays_metal_acceleration_validate_bindings(
+    MetalHandle *device_handle, MetalHandle *const *buffers,
+    const uint64_t *declared_lengths, uintptr_t buffer_count,
+    MetalHandle *const *structures, uintptr_t structure_count,
+    const char **message) {
+  if (message) *message = nullptr;
+  if ((buffer_count && (!buffers || !declared_lengths)) ||
+      (structure_count && !structures))
+    return rays_metal_set_invalid_argument(message, "null acceleration binding array");
+  @try {
+    @autoreleasepool {
+      id<MTLDevice> device = (__bridge id<MTLDevice>)
+          rays_metal_handle_object(device_handle, KIND_DEVICE);
+      if (!device)
+        return rays_metal_set_invalid_argument(message, "invalid acceleration device");
+      for (uintptr_t i = 0; i < buffer_count; ++i) {
+        id<MTLBuffer> buffer = rays_accel_buffer(buffers[i]);
+        if (!buffer || buffer.device != device || buffer.length < declared_lengths[i])
+          return rays_metal_set_invalid_argument(message,
+              "native acceleration buffer device or allocation does not match admission");
+      }
+      if (@available(macOS 11.0, *)) {
+        for (uintptr_t i = 0; i < structure_count; ++i) {
+          id<MTLAccelerationStructure> structure = (__bridge id<MTLAccelerationStructure>)
+              rays_metal_handle_object(structures[i], KIND_ACCELERATION_STRUCTURE);
+          if (!structure || structure.device != device)
+            return rays_metal_set_invalid_argument(message,
+                "native acceleration structure device does not match admission");
+        }
+        return 0;
+      }
+      return rays_metal_set_unavailable(message, "acceleration structures require macOS 11");
+    }
+  } @catch (NSException *exception) {
+    return rays_metal_set_error(message, exception.reason.UTF8String);
+  }
 }
 
 extern "C" int32_t rays_metal_acceleration_descriptor_sizes(

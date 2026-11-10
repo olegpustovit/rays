@@ -1,12 +1,13 @@
 //! OGPU's driver records over the Vulkan bridge. Tokens name native objects; the checks live in
 //! `ogpu_core::backend`, as for Metal.
+use ogpu_core::acceleration::{AdmittedBuild,BuildGeometry,BuildLayout};
 use ogpu_core::validation::{AdmittedBuffer, AdmittedTexture, TextureRead, TextureReadInto, StorageMode};
 use rays_math::float::{min as omin, max as omax};
 use ogpu_core::{
     backend::{
         DepthState, Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,
         DriverBatchDraw, DriverBlitEncoder, DriverCommands, DriverComputeEncoder, DriverDevice, DriverFrame,
-        DriverGeometry, DriverIcb, DriverLibrary, DriverMapped, DriverMapping, DriverPipeline, DriverQueue,
+        DriverIcb, DriverLibrary, DriverMapped, DriverMapping, DriverPipeline, DriverQueue,
         DriverRenderEncoder, DriverRenderTarget, DriverResource, DriverSampler, DriverSurface, Floats,
         GpuTiming, InstanceKind, Receipt, RenderPipelineOptions, ShaderStage, Token, Warm, Winding,
     },
@@ -807,35 +808,39 @@ fn motion_triangle_boxes(
     Ok(box_geometry(entry, vertices / 3))
 }
 
-fn geometry_records(dev: &Rc<Dev>, generated: &mut Vec<Box<dyn DriverResource>>, geometries: &[DriverGeometry]) -> Result<Vec<GeomRecord>, Error> {
-    const OP: &str = "Ogpu_vulkan.accel";
-    let mut records = Vec::new();
+fn accel_i64(value:u64) -> Result<i64,Error> {
+    i64::try_from(value).map_err(|_|fail("Ogpu_vulkan.accel",ErrorKind::InvalidArgument,"acceleration value exceeds native signed bounds"))
+}
+fn accel_u32(value:u64) -> Result<u32,Error> {
+    u32::try_from(value).map_err(|_|fail("Ogpu_vulkan.accel",ErrorKind::InvalidArgument,"acceleration count exceeds Vulkan uint32 bounds"))
+}
+fn geometry_records(dev:&Rc<Dev>, generated:&mut Vec<Box<dyn DriverResource>>, profile:&AdmittedBuild, buffers:&[Token]) -> Result<Vec<GeomRecord>,Error> {
+    const OP:&str="Ogpu_vulkan.accel";
+    let BuildLayout::Primitive { geometries,fast_build,.. }=profile.layout() else {
+        return Err(fail(OP,ErrorKind::InvalidArgument,"Vulkan BLAS requires a primitive descriptor"));
+    };
+    if *fast_build { return Err(fail(OP,ErrorKind::Unsupported,"Vulkan backend does not expose fast-build selection")); }
+    let mut records=Vec::new();
     for geometry in geometries {
         records.push(match geometry {
-            DriverGeometry::Triangles { vertices, offset, vertex_stride, vertex_count, .. } => GeomRecord {
-                kind: vk::GeometryKind::Triangles,
-                buffer: dev.find_buffer(OP, *vertices)?,
-                offset: *offset as u64,
-                stride: *vertex_stride as u64,
-                count: *vertex_count as u32,
-                opaque: true,
-                duplicate: false,
-            },
-            DriverGeometry::MotionTriangles { keyframes, vertex_stride, vertex_count } => {
-                motion_triangle_boxes(dev, OP, generated, keyframes, *vertex_stride, *vertex_count)?
+            BuildGeometry::Triangles { vertices,vertex_stride,triangle_count,index,common } => {
+                if index.is_some() { return Err(fail(OP,ErrorKind::Unsupported,"Vulkan backend does not expose indexed BLAS geometry")); }
+                let vertex_count=triangle_count.checked_mul(3).ok_or_else(||fail(OP,ErrorKind::InvalidArgument,"Vulkan vertex count overflows"))?;
+                let count=accel_u32(vertex_count)?;
+                if vertices.len()==1 {
+                    GeomRecord { kind:vk::GeometryKind::Triangles,buffer:dev.find_buffer(OP,buffers[vertices[0].binding])?,
+                        offset:vertices[0].offset,stride:*vertex_stride,count,opaque:common.opaque,duplicate:common.duplicate_intersection }
+                } else {
+                    let keyframes=vertices.iter().map(|r|Ok((buffers[r.binding],accel_i64(r.offset)?))).collect::<Result<Vec<_>,Error>>()?;
+                    motion_triangle_boxes(dev,OP,generated,&keyframes,accel_i64(*vertex_stride)?,i64::from(count))?
+                }
             }
-            DriverGeometry::Boxes { boxes, stride, count, opaque, duplicate } if boxes.len() == 1 => GeomRecord {
-                kind: vk::GeometryKind::Boxes,
-                buffer: dev.find_buffer(OP, boxes[0].0)?,
-                offset: boxes[0].1 as u64,
-                stride: *stride as u64,
-                count: *count as u32,
-                opaque: *opaque,
-                duplicate: *duplicate,
+            BuildGeometry::BoundingBoxes { boxes,stride,count,common } if boxes.len()==1 => GeomRecord {
+                kind:vk::GeometryKind::Boxes,buffer:dev.find_buffer(OP,buffers[boxes[0].binding])?,offset:boxes[0].offset,
+                stride:*stride,count:accel_u32(*count)?,opaque:common.opaque,duplicate:common.duplicate_intersection,
             },
-            DriverGeometry::Boxes { .. } | DriverGeometry::Curves { .. } => {
-                return Err(fail(OP, ErrorKind::Unsupported, "Vulkan ray queries do not expose native curves or multi-keyframe boxes"));
-            }
+            BuildGeometry::BoundingBoxes { .. } | BuildGeometry::Curves { .. } =>
+                return Err(fail(OP,ErrorKind::Unsupported,"Vulkan ray queries do not expose native curves or multi-keyframe boxes")),
         });
     }
     Ok(records)
@@ -971,58 +976,44 @@ fn destroy_all(resources: Vec<Box<dyn DriverResource>>) {
     }
 }
 
-fn build_accel(
-    dev: &Rc<Dev>,
-    op: &str,
-    descriptor: &DriverAccelDescriptor,
-    generated: &mut Vec<Box<dyn DriverResource>>,
-    stored: &mut Option<Vec<GeomRecord>>,
-) -> Result<vk::AccelerationStructure, Error> {
-    let device = dev.device(op)?;
+fn build_accel(dev:&Rc<Dev>,op:&str,descriptor:&DriverAccelDescriptor,generated:&mut Vec<Box<dyn DriverResource>>,
+    stored:&mut Option<Vec<GeomRecord>>) -> Result<vk::AccelerationStructure,Error> {
+    let device=dev.device(op)?;
     match descriptor {
-        DriverAccelDescriptor::Blas { geometries, refit, .. } => {
-            let records = geometry_records(dev, generated, geometries)?;
-            let created = device.acceleration_blas(&native_geometries(&records), *refit);
-            *stored = Some(records);
-            created.map_err(|failure| of_vk(op, failure))
-        }
-        DriverAccelDescriptor::Tlas {
-            instances,
-            offset,
-            instance_count,
-            kind: InstanceKind::MotionInstances,
-            structures,
-            motion_transforms: Some(transforms),
-        } => {
-            let (proxies, instance_records) =
-                motion_instance_geometries(dev, op, generated, *instances, *offset, *instance_count, structures, *transforms)?;
-            let instance_token = generated_buffer(dev, generated, &instance_records)?;
-            let instance_buffer = dev.find_buffer(op, instance_token)?;
-            let mut children = Vec::new();
-            for proxy in &proxies {
-                let created = device.acceleration_blas(&native_geometries(std::slice::from_ref(proxy)), false);
-                children.push(created.map_err(|failure| of_vk(op, failure))?);
+        DriverAccelDescriptor::Build { profile,buffers,structures } => match profile.layout() {
+            BuildLayout::Primitive { refit,.. } => {
+                let records=geometry_records(dev,generated,profile,buffers)?;
+                let created=device.acceleration_blas(&native_geometries(&records),*refit);
+                *stored=Some(records);
+                created.map_err(|failure|of_vk(op,failure))
             }
-            let refs = children;
-            let buffer = instance_buffer.buffer.borrow();
-            device.acceleration_tlas(&buffer, 0, *instance_count as u32, &refs, true).map_err(|failure| of_vk(op, failure))
-        }
-        DriverAccelDescriptor::Tlas { kind: InstanceKind::MotionInstances, .. } => {
-            Err(fail(op, ErrorKind::InvalidArgument, "motion instances require transform keyframes"))
-        }
-        DriverAccelDescriptor::Tlas { instances, offset, instance_count, structures, .. } => {
-            let buffer = dev.find_buffer(op, *instances)?;
-            let mut handles = Vec::new();
-            for id in structures {
-                handles.push(dev.find_accel(op, *id)?);
+            BuildLayout::Instances { instances,count,kind,motion_transforms,.. } => {
+                let count32=accel_u32(*count)?;
+                let token=buffers[instances.binding];
+                if matches!(kind,InstanceKind::MotionInstances) {
+                    let (transforms,transform_count)=motion_transforms.as_ref().ok_or_else(||fail(op,ErrorKind::InvalidArgument,"motion instances require transform keyframes"))?;
+                    let (proxies,instance_records)=motion_instance_geometries(dev,op,generated,token,accel_i64(instances.offset)?,
+                        i64::from(count32),structures,(buffers[transforms.binding],accel_i64(transforms.offset)?,accel_i64(*transform_count)?))?;
+                    let instance_token=generated_buffer(dev,generated,&instance_records)?;
+                    let instance_buffer=dev.find_buffer(op,instance_token)?;
+                    let mut children=Vec::new();
+                    for proxy in &proxies {
+                        children.push(device.acceleration_blas(&native_geometries(std::slice::from_ref(proxy)),false).map_err(|failure|of_vk(op,failure))?);
+                    }
+                    let buffer=instance_buffer.buffer.borrow();
+                    device.acceleration_tlas(&buffer,0,count32,&children,true).map_err(|failure|of_vk(op,failure))
+                } else {
+                    let buffer=dev.find_buffer(op,token)?;
+                    let handles=structures.iter().map(|t|dev.find_accel(op,*t)).collect::<Result<Vec<_>,_>>()?;
+                    let refs=handles.iter().map(|h|(**h).clone()).collect::<Vec<_>>();
+                    let buffer=buffer.buffer.borrow();
+                    device.acceleration_tlas(&buffer,instances.offset,count32,&refs,false).map_err(|failure|of_vk(op,failure))
+                }
             }
-            let refs: Vec<vk::AccelerationStructure> = handles.iter().map(|handle| (**handle).clone()).collect();
-            let buffer = buffer.buffer.borrow();
-            device.acceleration_tlas(&buffer, *offset as u64, *instance_count as u32, &refs, false).map_err(|failure| of_vk(op, failure))
-        }
-        DriverAccelDescriptor::Sized { size, template } => {
-            let template = dev.find_accel(op, *template)?;
-            device.acceleration_sized(*size, &template).map_err(|failure| of_vk(op, failure))
+        },
+        DriverAccelDescriptor::Sized { size,template } => {
+            let template=dev.find_accel(op,*template)?;
+            device.acceleration_sized(*size,&template).map_err(|failure|of_vk(op,failure))
         }
     }
 }
@@ -1224,11 +1215,11 @@ impl DriverAccelEncoder for AccelPass {
     fn refit(&self, id: Token, descriptor: &DriverAccelDescriptor, scratch: Token, scratch_offset: i64) -> Result<(), Error> {
         let accel = self.cmds.dev.find_accel(QUEUE_OP, id)?;
         let scratch = self.cmds.dev.find_buffer(QUEUE_OP, scratch)?;
-        let DriverAccelDescriptor::Blas { geometries, .. } = descriptor else {
+        let DriverAccelDescriptor::Build { profile,buffers,.. } = descriptor else {
             return Err(fail(QUEUE_OP, ErrorKind::InvalidArgument, "Vulkan refit requires a BLAS descriptor"));
         };
         let mut generated = Vec::new();
-        let records = match geometry_records(&self.cmds.dev, &mut generated, geometries) {
+        let records = match geometry_records(&self.cmds.dev, &mut generated, profile, buffers) {
             Ok(records) => records,
             Err(failure) => {
                 destroy_all(generated);

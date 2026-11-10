@@ -1,6 +1,6 @@
 use crate::validation::{AdmittedBuffer, AdmittedTexture, TextureRead, TextureReadInto, BufferProfile, BufferKind, StorageMode, CpuCacheMode};
 use crate::{
-    acceleration::{self, Acceleration, BufferRange, Descriptor as PortableDescriptor, Geometry as AccelGeometry},
+    acceleration::{self, Acceleration, Descriptor as PortableDescriptor},
     caps::{self, Caps, Feature},
     error::{self, Error, ErrorKind},
     handle::{self, Device as DeviceHandle, ResourceHandle},
@@ -95,30 +95,10 @@ pub struct AccelSizes {
     pub refit_scratch_size: i64,
 }
 
-pub type DriverKeyframe = (Token, i64);
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DriverGeometry {
-    Triangles { vertices: Token, offset: i64, length: i64, vertex_stride: i64, vertex_count: i64 },
-    MotionTriangles { keyframes: Vec<DriverKeyframe>, vertex_stride: i64, vertex_count: i64 },
-    Boxes { boxes: Vec<DriverKeyframe>, stride: i64, count: i64, opaque: bool, duplicate: bool },
-    Curves { control: Vec<DriverKeyframe>, control_stride: i64, control_count: i64, radii: Vec<DriverKeyframe>, radius_stride: i64, indices: Token, index_offset: i64, segment_count: i64, per_segment: i64, curve_type: i64, basis: i64, caps: i64 },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DriverMotion {
-    pub motion_keyframes: i64,
-    pub motion_start: f64,
-    pub motion_end: f64,
-    pub motion_start_border: i64,
-    pub motion_end_border: i64,
-}
-
 #[derive(Clone)]
 pub enum DriverAccelDescriptor {
-    Blas { geometries: Vec<DriverGeometry>, motion: Option<DriverMotion>, refit: bool },
-    Tlas { instances: Token, offset: i64, instance_count: i64, kind: InstanceKind, structures: Vec<Token>, motion_transforms: Option<(Token, i64, i64)> },
-    Sized { size: std::num::NonZeroU64, template: Token },
+    Build { profile:acceleration::AdmittedBuild, buffers:Vec<Token>, structures:Vec<Token> },
+    Sized { size:std::num::NonZeroU64, template:Token },
 }
 
 pub trait DriverAccel {
@@ -998,99 +978,125 @@ pub fn pack_transforms(transforms: &[Vec<f64>]) -> Result<Vec<u8>, Error> {
     Ok(acceleration::pack_transforms(transforms))
 }
 
-fn range(buffer: &Buffer, offset: i64, length: i64) -> BufferRange {
-    BufferRange { buffer: buffer.resource.0.handle.clone(), buffer_size: buffer.buffer_descriptor.size, offset, length }
-}
 fn span(stride: i64, count: i64) -> i64 {
     if count <= 0 || stride <= 0 || count > i64::MAX / stride { 0 } else { count * stride }
 }
-fn keyframe_ranges(stride: i64, count: i64, keyframes: &[Keyframe]) -> Vec<BufferRange> {
-    keyframes.iter().map(|keyframe| range(&keyframe.buffer, keyframe.offset, span(stride, count))).collect()
-}
-fn portable_geometry(geometry: &Geometry) -> AccelGeometry {
-    match geometry {
-        Geometry::Triangles { vertices, offset, length, vertex_stride, vertex_count } =>
-            AccelGeometry::Triangles { vertices: range(vertices, *offset, *length), vertex_stride: *vertex_stride, vertex_count: *vertex_count },
-        Geometry::MotionTriangles { keyframes, vertex_stride, vertex_count } =>
-            AccelGeometry::MotionTriangles { keyframes: keyframe_ranges(*vertex_stride, *vertex_count, keyframes), vertex_stride: *vertex_stride, vertex_count: *vertex_count },
-        Geometry::BoundingBoxes { boxes, stride, count, .. } =>
-            AccelGeometry::BoundingBoxes { boxes: keyframe_ranges(*stride, *count, boxes), stride: *stride, count: *count },
-        Geometry::Curves { control_points, control_stride, control_point_count, radii, radius_stride, indices, index_offset, segment_count, control_points_per_segment, .. } =>
-            AccelGeometry::Curves {
-                control_points: keyframe_ranges(*control_stride, *control_point_count, control_points),
-                control_stride: *control_stride, control_point_count: *control_point_count,
-                radii: keyframe_ranges(*radius_stride, *control_point_count, radii), radius_stride: *radius_stride,
-                indices: range(indices, *index_offset, span(4, *segment_count)), segment_count: *segment_count,
-                control_points_per_segment: *control_points_per_segment,
-            },
+// Convert public arguments once; both state validation and drivers share the admitted layout.
+fn admitted_build_of(device: &Device, descriptor: &AccelDescriptor, refit: bool)
+    -> Result<(acceleration::AdmittedBuild, Vec<Buffer>, Vec<Accel>), Error> {
+    use acceleration::{BuildGeometry as G, BuildIndex, BuildLayout, BuildMotion, BuildRange};
+    const OP: &str = "Backend.create_accel";
+    fn unsigned(value: i64) -> Result<u64, Error> {
+        u64::try_from(value).map_err(|_| make_error(OP,ErrorKind::InvalidArgument,"acceleration layout arguments must be nonnegative"))
     }
-}
-fn portable_of(device: &Device, descriptor: &AccelDescriptor) -> Result<PortableDescriptor,Error> {
-    Ok(match descriptor {
-        AccelDescriptor::Blas { geometries } =>
-            PortableDescriptor::Blas { geometries: geometries.iter().map(portable_geometry).collect(), motion_keyframes: None },
-        AccelDescriptor::MotionBlas { geometries, motion } =>
-            PortableDescriptor::Blas { geometries: geometries.iter().map(portable_geometry).collect(), motion_keyframes: Some(motion.keyframes) },
-        AccelDescriptor::TlasOf { instances, offset, instance_count, kind, structures, .. } => {
-            let stride = device.0.raw().instance_layout(*kind).first().copied().unwrap_or(0);
-            PortableDescriptor::Tlas {
-                instances: range(instances, *offset, span(stride, *instance_count)),
-                instance_stride: stride, instance_count: *instance_count,
-                instance_kind: *kind,
-                structures: structures.iter().map(|structure| acceleration::handle(&structure.0.portable.borrow())).collect(),
+    fn range(buffers: &mut Vec<Buffer>, lengths: &mut Vec<u64>, buffer: &Buffer, offset: i64, length: i64) -> Result<BuildRange, Error> {
+        let value = BuildRange { binding:buffers.len(), offset:unsigned(offset)?, length:unsigned(length)? };
+        lengths.push(unsigned(buffer.buffer_descriptor.size)?);
+        buffers.push(buffer.clone());
+        Ok(value)
+    }
+    fn frames(buffers: &mut Vec<Buffer>, lengths: &mut Vec<u64>, values: &[Keyframe], stride: i64, count: i64) -> Result<Vec<BuildRange>, Error> {
+        values.iter().map(|frame| range(buffers,lengths,&frame.buffer,frame.offset,span(stride,count))).collect()
+    }
+    let mut buffers = Vec::new();
+    let mut lengths = Vec::new();
+    let mut structures = Vec::new();
+    let layout = match descriptor {
+        AccelDescriptor::Blas { geometries } | AccelDescriptor::MotionBlas { geometries, .. } => {
+            // Preserve the portable surface's homogeneous BLAS policy. The direct advanced
+            // metadata representation does not invent a restriction absent from its OS API.
+            let kind = |g: &Geometry| match g {
+                Geometry::Triangles { .. } | Geometry::MotionTriangles { .. } => 0,
+                Geometry::BoundingBoxes { .. } => 1,
+                Geometry::Curves { .. } => 2,
+            };
+            if let Some(first) = geometries.first()
+                && geometries.iter().any(|g| kind(g) != kind(first)) {
+                return Err(make_error(OP,ErrorKind::InvalidArgument,"BLAS geometries must all be one kind (triangles, bounding boxes, or curves)"));
             }
+            let motion = match descriptor {
+                AccelDescriptor::MotionBlas { motion, .. } => Some(BuildMotion {
+                    keyframe_count:unsigned(motion.keyframes)?, start_time:motion.start_time,end_time:motion.end_time,
+                    start_border:motion.start_border,end_border:motion.end_border,
+                }),
+                _ => None,
+            };
+            let mut converted = Vec::with_capacity(geometries.len());
+            for geometry in geometries {
+                let common = GeometryOptions { opaque:true,duplicate_intersection:false };
+                let g = match geometry {
+                    Geometry::Triangles { vertices,offset,length,vertex_stride,vertex_count } => {
+                        if vertex_count % 3 != 0 {
+                            return Err(make_error(OP,ErrorKind::InvalidArgument,"triangle vertices must form whole triangles"));
+                        }
+                        G::Triangles { vertices:vec![range(&mut buffers,&mut lengths,vertices,*offset,*length)?],
+                            vertex_stride:unsigned(*vertex_stride)?,triangle_count:unsigned(*vertex_count)?/3,index:None,common }
+                    }
+                    Geometry::MotionTriangles { keyframes,vertex_stride,vertex_count } => {
+                        // This source variant explicitly requests motion, including a malformed
+                        // one-frame array; preserve its previous rejection in a static BLAS.
+                        if motion.is_none() || vertex_count % 3 != 0 {
+                            return Err(make_error(OP,ErrorKind::InvalidArgument,"motion triangles require a motion BLAS and whole triangles"));
+                        }
+                        G::Triangles { vertices:frames(&mut buffers,&mut lengths,keyframes,*vertex_stride,*vertex_count)?,
+                            vertex_stride:unsigned(*vertex_stride)?,triangle_count:unsigned(*vertex_count)?/3,index:None,common }
+                    }
+                    Geometry::BoundingBoxes { boxes,stride,count,options } => G::BoundingBoxes {
+                        boxes:frames(&mut buffers,&mut lengths,boxes,*stride,*count)?,stride:unsigned(*stride)?,count:unsigned(*count)?,common:*options,
+                    },
+                    Geometry::Curves { control_points,control_stride,control_point_count,radii,radius_stride,indices,index_offset,segment_count,control_points_per_segment,curve_type,basis,caps } => G::Curves {
+                        control_points:frames(&mut buffers,&mut lengths,control_points,*control_stride,*control_point_count)?,
+                        control_stride:unsigned(*control_stride)?,control_point_count:unsigned(*control_point_count)?,
+                        radii:frames(&mut buffers,&mut lengths,radii,*radius_stride,*control_point_count)?,radius_stride:unsigned(*radius_stride)?,
+                        index:BuildIndex { range:range(&mut buffers,&mut lengths,indices,*index_offset,span(4,*segment_count))?,uint16:false },
+                        segment_count:unsigned(*segment_count)?,control_points_per_segment:u32::try_from(*control_points_per_segment)
+                            .map_err(|_| make_error(OP,ErrorKind::InvalidArgument,"curve segment width exceeds its native encoding"))?,
+                        curve_type:*curve_type,basis:*basis,end_caps:*caps,common,
+                    },
+                };
+                converted.push(g);
+            }
+            BuildLayout::Primitive { geometries:converted,motion,refit,fast_build:false }
         }
-        AccelDescriptor::Sized { size, template } =>
-            PortableDescriptor::Sized { size: crate::validation::admit_acceleration_size("Ogpu.Acceleration.create",
-                u64::try_from(*size).map_err(|_| make_error("Ogpu.Acceleration.create",ErrorKind::InvalidArgument,"structure size must be positive"))?)?,
-                template: acceleration::handle(&template.0.portable.borrow()) },
-    })
+        AccelDescriptor::TlasOf { instances,offset,instance_count,kind,structures:source,motion_transforms } => {
+            let stride = device.0.raw().instance_layout(*kind).first().copied().unwrap_or(0);
+            let instances = range(&mut buffers,&mut lengths,instances,*offset,span(stride,*instance_count))?;
+            let transforms = match motion_transforms {
+                None => None,
+                Some((buffer,offset,count)) => Some((range(&mut buffers,&mut lengths,buffer,*offset,span(48,*count))?,unsigned(*count)?)),
+            };
+            structures.extend(source.iter().cloned());
+            BuildLayout::Instances { instances,stride:unsigned(stride)?,count:unsigned(*instance_count)?,record_size:unsigned(stride)?,
+                kind:*kind,structures:structures.len(),motion_transforms:transforms,refit }
+        }
+        AccelDescriptor::Sized { .. } => return Err(make_error(OP,ErrorKind::InvalidArgument,"a sized structure has no build descriptor")),
+    };
+    let admitted = acceleration::admit_build(&device.0.capabilities,lengths,layout)?;
+    Ok((admitted,buffers,structures))
 }
-fn driver_keyframes(keyframes: &[Keyframe]) -> Vec<DriverKeyframe> {
-    keyframes.iter().map(|keyframe| (keyframe.buffer.resource.0.token, keyframe.offset)).collect()
-}
-fn driver_geometry(geometry: &Geometry) -> DriverGeometry {
-    match geometry {
-        Geometry::Triangles { vertices, offset, length, vertex_stride, vertex_count } =>
-            DriverGeometry::Triangles { vertices: vertices.resource.0.token, offset: *offset, length: *length, vertex_stride: *vertex_stride, vertex_count: *vertex_count },
-        Geometry::MotionTriangles { keyframes, vertex_stride, vertex_count } =>
-            DriverGeometry::MotionTriangles { keyframes: driver_keyframes(keyframes), vertex_stride: *vertex_stride, vertex_count: *vertex_count },
-        Geometry::BoundingBoxes { boxes, stride, count, options } =>
-            DriverGeometry::Boxes { boxes: driver_keyframes(boxes), stride: *stride, count: *count, opaque: options.opaque, duplicate: options.duplicate_intersection },
-        Geometry::Curves { control_points, control_stride, control_point_count, radii, radius_stride, indices, index_offset, segment_count, control_points_per_segment, curve_type, basis, caps } =>
-            DriverGeometry::Curves {
-                control: driver_keyframes(control_points), control_stride: *control_stride, control_count: *control_point_count,
-                radii: driver_keyframes(radii), radius_stride: *radius_stride,
-                indices: indices.resource.0.token, index_offset: *index_offset, segment_count: *segment_count,
-                per_segment: *control_points_per_segment,
-                curve_type: match curve_type { CurveType::RoundCurve => 0, CurveType::FlatCurve => 1 },
-                basis: match basis { CurveBasis::Bspline => 0, CurveBasis::CatmullRom => 1, CurveBasis::LinearBasis => 2, CurveBasis::Bezier => 3 },
-                caps: match caps { CurveCaps::NoCaps => 0, CurveCaps::DiskCaps => 1, CurveCaps::SphereCaps => 2 },
-            },
-    }
-}
-fn driver_of(refit: bool, descriptor: &AccelDescriptor, portable: &PortableDescriptor) -> DriverAccelDescriptor {
+
+fn admitted_descriptors(device:&Device, descriptor:&AccelDescriptor, refit:bool) -> Result<(PortableDescriptor,DriverAccelDescriptor),Error> {
     match descriptor {
-        AccelDescriptor::Blas { geometries } =>
-            DriverAccelDescriptor::Blas { geometries: geometries.iter().map(driver_geometry).collect(), motion: None, refit },
-        AccelDescriptor::MotionBlas { geometries, motion } =>
-            DriverAccelDescriptor::Blas {
-                geometries: geometries.iter().map(driver_geometry).collect(),
-                motion: Some(DriverMotion {
-                    motion_keyframes: motion.keyframes, motion_start: motion.start_time, motion_end: motion.end_time,
-                    motion_start_border: border_code(motion.start_border), motion_end_border: border_code(motion.end_border),
-                }), refit,
-            },
-        AccelDescriptor::TlasOf { instances, offset, instance_count, kind, structures, motion_transforms } =>
-            DriverAccelDescriptor::Tlas {
-                instances: instances.resource.0.token, offset: *offset, instance_count: *instance_count, kind: *kind,
-                structures: structures.iter().map(|structure| structure.0.token).collect(),
-                motion_transforms: motion_transforms.as_ref().map(|(buffer, offset, count)| (buffer.resource.0.token, *offset, *count)),
-            },
-        AccelDescriptor::Sized { template, .. } => {
-            let PortableDescriptor::Sized {size,..}=portable else {unreachable!("admitted sized descriptor")};
-            DriverAccelDescriptor::Sized {size:*size,template:template.0.token}
-        },
+        AccelDescriptor::Sized { size,template } => {
+            require("Backend.create_accel",device,Feature::RayTracing)?;
+            if refit { return Err(make_error("Backend.create_accel",ErrorKind::InvalidArgument,"only a primitive structure is refittable")); }
+            let size=crate::validation::admit_acceleration_size("Ogpu.Acceleration.create",
+                u64::try_from(*size).map_err(|_|make_error("Ogpu.Acceleration.create",ErrorKind::InvalidArgument,"structure size must be positive"))?)?;
+            Ok((PortableDescriptor::Sized { size,template:acceleration::handle(&template.0.portable.borrow()) },
+                DriverAccelDescriptor::Sized { size,template:template.0.token }))
+        }
+        _ => {
+            if refit && matches!(descriptor,AccelDescriptor::TlasOf { .. }) {
+                return Err(make_error("Backend.create_accel",ErrorKind::InvalidArgument,"only a primitive structure is refittable"));
+            }
+            let (profile,buffers,structures)=admitted_build_of(device,descriptor,refit)?;
+            let portable=PortableDescriptor::Build { profile:profile.clone(),
+                buffers:buffers.iter().map(|b|b.resource.0.handle.clone()).collect(),
+                structures:structures.iter().map(|a|acceleration::handle(&a.0.portable.borrow())).collect() };
+            let driver=DriverAccelDescriptor::Build { profile,buffers:buffers.iter().map(|b|b.resource.0.token).collect(),
+                structures:structures.iter().map(|a|a.0.token).collect() };
+            Ok((portable,driver))
+        }
     }
 }
 fn descriptor_buffers(descriptor: &AccelDescriptor) -> Vec<Buffer> {
@@ -1128,42 +1134,20 @@ pub fn accel_sizes(value: &Accel) -> AccelSizes { value.0.sizes }
 pub fn create_accel(device: &Device, descriptor: AccelDescriptor, refit: bool) -> Result<Accel, Error> {
     const OP: &str = "Backend.create_accel";
     live(OP, device)?;
-    require(OP, device, Feature::RayTracing)?;
-    if refit { require(OP, device, Feature::RayTracingRefit)?; }
-    let uses_curves = match &descriptor {
-        AccelDescriptor::Blas { geometries } | AccelDescriptor::MotionBlas { geometries, .. } =>
-            geometries.iter().any(|geometry| matches!(geometry, Geometry::Curves { .. })),
-        _ => false,
-    };
-    let uses_motion = matches!(&descriptor, AccelDescriptor::MotionBlas { .. })
-        || matches!(&descriptor, AccelDescriptor::TlasOf { kind: InstanceKind::MotionInstances, .. });
-    if uses_motion { require(OP, device, Feature::RayTracingMotion)?; }
-    if uses_curves { require(OP, device, Feature::RayTracingCurves)?; }
     for buffer in descriptor_buffers(&descriptor) { resource_check(OP, device, &buffer.resource)?; }
     let structures = descriptor_structures(&descriptor);
     for structure in &structures {
         accel_check(OP, device, structure)?;
         if matches!(&descriptor, AccelDescriptor::TlasOf { .. })
-            && matches!(acceleration::descriptor(&structure.0.portable.borrow()), PortableDescriptor::Tlas { .. })
+            && matches!(acceleration::descriptor(&structure.0.portable.borrow()), PortableDescriptor::Build { profile,.. }
+                if matches!(profile.layout(),acceleration::BuildLayout::Instances { .. }))
         {
             return Err(make_error(OP, ErrorKind::InvalidArgument, "TLAS instances must reference bottom-level structures"));
         }
     }
-    let motion_valid = match &descriptor {
-        AccelDescriptor::MotionBlas { motion, .. } =>
-            motion.keyframes >= 2 && motion.start_time.is_finite() && motion.end_time.is_finite()
-                && (motion.start_time as f32).is_finite() && (motion.end_time as f32).is_finite()
-                && (motion.start_time as f32) < (motion.end_time as f32),
-        AccelDescriptor::TlasOf { kind: InstanceKind::MotionInstances, motion_transforms: None, .. } => false,
-        AccelDescriptor::TlasOf { motion_transforms: Some((buffer, offset, count)), .. } =>
-            *offset >= 0 && *count > 0 && count.checked_mul(48).and_then(|bytes| offset.checked_add(bytes))
-                .is_some_and(|end| end <= buffer.buffer_descriptor.size),
-        _ => true,
-    };
-    if !motion_valid { return Err(make_error(OP, ErrorKind::InvalidArgument, "motion keyframes, time range, or transform range is invalid")); }
-    let portable_descriptor = portable_of(device, &descriptor)?;
-    let portable = acceleration::create(&device.0.handle, true, refit, portable_descriptor)?;
-    let raw = match device.0.raw().create_accel(&driver_of(refit, &descriptor, acceleration::descriptor(&portable))) {
+    let (portable_descriptor,driver_descriptor)=admitted_descriptors(device,&descriptor,refit)?;
+    let portable=acceleration::create(&device.0.handle,portable_descriptor)?;
+    let raw = match device.0.raw().create_accel(&driver_descriptor) {
         Ok(raw) => raw,
         Err(error) => { acceleration::destroy(&portable); return Err(error); }
     };
@@ -1341,7 +1325,6 @@ pub fn refit_accel(
 ) -> Result<(), Error> {
     const OP: &str = "Backend.refit_accel";
     let device = commands_device(&encoder.0.commands);
-    require(OP, &device, Feature::RayTracingRefit)?;
     if matches!(&descriptor, AccelDescriptor::TlasOf { .. } | AccelDescriptor::Sized { .. }) {
         return Err(make_error(OP, ErrorKind::InvalidArgument, "only a primitive structure refits"));
     }
@@ -1352,9 +1335,9 @@ pub fn refit_accel(
     // The new native descriptor determines refit scratch extent; the original size can be stale.
     // Core admits the logical buffer/offset; the native backend checks the newly queried extent.
     check_scratch(OP, &device, scratch, offset)?;
-    let portable=portable_of(&device,&descriptor)?;
+    let (portable,driver)=admitted_descriptors(&device,&descriptor,true)?;
     acceleration::refit(&device.0.handle, &mut accel.0.portable.borrow_mut(), &portable)?;
-    encoder.0.raw().refit(accel.0.token, &driver_of(true, &descriptor, &portable), scratch.resource.0.token, offset)
+    encoder.0.raw().refit(accel.0.token, &driver, scratch.resource.0.token, offset)
 }
 pub fn compact_accel(encoder: &AccelEncoder, src: &Accel, dst: &Accel) -> Result<(), Error> {
     const OP: &str = "Backend.compact_accel";
@@ -2289,6 +2272,7 @@ mod ownership_tests {
         let caps = &mut Rc::get_mut(&mut device.0).unwrap().capabilities;
         caps.ray_tracing = true;
         caps.ray_tracing_motion = true;
+        caps.ray_tracing_curves = true;
         let buffer = Buffer {
             resource: make_resource(&device, Box::new(Payload { _owner: Rc::new(()), fail: Rc::new(Cell::new(false)) })),
             memory: Memory::Shared,
@@ -2297,20 +2281,28 @@ mod ownership_tests {
         let invalid = AccelDescriptor::Blas { geometries: vec![Geometry::Triangles { vertices: buffer.clone(), offset: 0, length: 36, vertex_stride: 12, vertex_count: 6 }] };
         let error = create_accel(&device, invalid, false).err().expect("oversized triangle rejected before native entry");
         assert_eq!(error.kind, ErrorKind::InvalidArgument);
-        assert_eq!(error.operation, "Ogpu.Acceleration.validate_elements");
+        assert_eq!(error.operation, "Ogpu.Acceleration.admit_build");
         for (start_time, end_time) in [(f64::MAX / 2., f64::MAX), (1., 1. + f64::EPSILON)] {
             let descriptor = AccelDescriptor::MotionBlas { geometries: Vec::new(), motion: Motion { keyframes: 2, start_time, end_time, start_border: Border::Clamp, end_border: Border::Clamp } };
             let error = create_accel(&device, descriptor, false).err().expect("narrowed motion time rejected");
             assert_eq!(error.kind, ErrorKind::InvalidArgument);
-            assert_eq!(error.operation, "Backend.create_accel");
-            assert_eq!(error.message, "motion keyframes, time range, or transform range is invalid");
+            assert_eq!(error.operation, "Ogpu.Acceleration.admit_build");
+            assert_eq!(error.message, "motion keyframes or time range are invalid");
         }
-        let range = |length| BufferRange { buffer: buffer.resource.0.handle.clone(), buffer_size: 36, offset: 0, length };
-        let curve = PortableDescriptor::Blas { geometries: vec![AccelGeometry::Curves {
-            control_points: vec![range(24)], control_stride: 12, control_point_count: 2,
-            radii: vec![range(8)], radius_stride: 4, indices: range(4), segment_count: 1, control_points_per_segment: 2,
-        }], motion_keyframes: None };
-        let curve = acceleration::create(&device.0.handle, true, false, curve).expect("one index per curve segment");
+        let mixed=AccelDescriptor::Blas {geometries:vec![
+            Geometry::Triangles {vertices:buffer.clone(),offset:0,length:36,vertex_stride:12,vertex_count:3},
+            Geometry::BoundingBoxes {boxes:vec![Keyframe {buffer:buffer.clone(),offset:0}],stride:24,count:1,options:DEFAULT_GEOMETRY_OPTIONS},
+        ]};
+        assert_eq!(create_accel(&device,mixed,false).err().unwrap().kind,ErrorKind::InvalidArgument);
+        use acceleration::{BuildGeometry,BuildIndex,BuildLayout,BuildRange};
+        let range=|length|BuildRange {binding:0,offset:0,length};
+        let profile=acceleration::admit_build(&device.0.capabilities,vec![36],BuildLayout::Primitive {geometries:vec![BuildGeometry::Curves {
+            control_points:vec![range(24)],control_stride:12,control_point_count:2,radii:vec![range(8)],radius_stride:4,
+            index:BuildIndex {range:range(4),uint16:false},segment_count:1,control_points_per_segment:2,
+            curve_type:CurveType::RoundCurve,basis:CurveBasis::LinearBasis,end_caps:CurveCaps::NoCaps,common:DEFAULT_GEOMETRY_OPTIONS,
+        }],motion:None,refit:false,fast_build:false}).unwrap();
+        let curve=acceleration::create(&device.0.handle,PortableDescriptor::Build {profile,buffers:vec![buffer.resource.0.handle.clone()],structures:vec![]})
+            .expect("one index per curve segment");
         acceleration::destroy(&curve);
     }
 
@@ -2351,11 +2343,12 @@ mod ownership_tests {
         let scratch=Buffer {resource,buffer_descriptor:admitted_test_buffer(BufferDescriptor {
             label:None,size:256,usage:vec![BufferUsage::Storage],
         }),memory:Memory::Shared};
-        let range=BufferRange {buffer:scratch.resource.0.handle.clone(),buffer_size:256,offset:0,length:36};
-        let portable=acceleration::create(&device.0.handle,true,false,PortableDescriptor::Blas {
-            geometries:vec![AccelGeometry::Triangles {vertices:range,vertex_stride:12,vertex_count:3}],motion_keyframes:None,
-        }).unwrap();
-        let destination=acceleration::create(&device.0.handle,true,false,PortableDescriptor::Sized {
+        let mut caps=device.0.capabilities;caps.ray_tracing=true;
+        let profile=acceleration::admit_build(&caps,vec![256],acceleration::BuildLayout::Primitive {geometries:vec![
+            acceleration::BuildGeometry::Triangles {vertices:vec![acceleration::BuildRange {binding:0,offset:0,length:36}],vertex_stride:12,
+                triangle_count:1,index:None,common:DEFAULT_GEOMETRY_OPTIONS}],motion:None,refit:false,fast_build:false}).unwrap();
+        let portable=acceleration::create(&device.0.handle,PortableDescriptor::Build {profile,buffers:vec![scratch.resource.0.handle.clone()],structures:vec![]}).unwrap();
+        let destination=acceleration::create(&device.0.handle,PortableDescriptor::Sized {
             size:std::num::NonZeroU64::new(64).unwrap(),template:acceleration::handle(&portable),
         }).unwrap();
         let make=|token,portable| Accel(Rc::new(AccelInner {

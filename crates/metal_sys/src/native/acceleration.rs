@@ -3,98 +3,6 @@ use super::{Error, Handle, NativeHandle};
 use std::ffi::c_char;
 use std::ptr::{null, null_mut};
 
-#[derive(Clone)]
-pub struct Keyframe {
-    pub buffer: Handle,
-    pub offset: u64,
-}
-
-#[derive(Clone)]
-pub struct IndexBuffer {
-    pub buffer: Handle,
-    pub offset: u64,
-    pub uint16: bool,
-}
-
-#[derive(Clone, Copy)]
-pub struct GeometryCommon {
-    pub opaque: bool,
-    pub allow_duplicate_intersection: bool,
-}
-
-#[derive(Clone)]
-pub enum Geometry {
-    Triangles {
-        vertices: Vec<Keyframe>,
-        vertex_stride: u64,
-        triangle_count: u64,
-        index: Option<IndexBuffer>,
-        common: GeometryCommon,
-    },
-    BoundingBoxes {
-        boxes: Vec<Keyframe>,
-        stride: u64,
-        count: u64,
-        common: GeometryCommon,
-    },
-    Curves {
-        control_points: Vec<Keyframe>,
-        control_stride: u64,
-        control_point_count: u64,
-        radii: Vec<Keyframe>,
-        radius_stride: u64,
-        index: IndexBuffer,
-        segment_count: u64,
-        control_points_per_segment: u32,
-        curve_type: i32,
-        basis: i32,
-        end_caps: i32,
-        common: GeometryCommon,
-    },
-}
-
-#[derive(Clone, Copy)]
-pub struct Motion {
-    pub keyframe_count: u64,
-    pub start_time: f64,
-    pub end_time: f64,
-    pub start_border: i32,
-    pub end_border: i32,
-}
-
-#[derive(Clone)]
-pub struct PrimitiveDescriptor {
-    pub geometries: Vec<Geometry>,
-    pub motion: Option<Motion>,
-    pub refit: bool,
-    pub fast_build: bool,
-}
-
-#[derive(Clone)]
-pub struct MotionTransforms {
-    pub buffer: Handle,
-    pub offset: u64,
-    pub count: u64,
-}
-
-#[derive(Clone)]
-pub struct InstancesDescriptor {
-    pub buffer: Handle,
-    pub offset: u64,
-    pub stride: u64,
-    pub count: u64,
-    /// 1 is user-ID descriptors, 2 is motion descriptors.
-    pub instance_kind: i32,
-    pub structures: Vec<Handle>,
-    pub motion_transforms: Option<MotionTransforms>,
-    pub refit: bool,
-}
-
-pub enum Descriptor {
-    Primitive(PrimitiveDescriptor),
-    Instances(InstancesDescriptor),
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Sizes {
     pub acceleration_structure_size: u64,
@@ -211,266 +119,135 @@ impl PreparedDescriptor {
     }
 }
 
-fn raw_keyframes(values: &[Keyframe]) -> Result<Vec<RawKeyframe>, Error> {
-    values
-        .iter()
-        .map(|value| {
-            Ok(RawKeyframe {
-                buffer: value.buffer.as_native_ptr()?,
-                offset: value.offset,
-            })
-        })
-        .collect()
-}
+use ogpu_core::acceleration::{AdmittedBuild, BuildGeometry, BuildLayout, BuildRange, InstanceKind};
+use ogpu_core::backend::{Border, CurveBasis, CurveCaps, CurveType};
 
-fn prepare_descriptor(descriptor: &Descriptor) -> Result<PreparedDescriptor, Error> {
-    match descriptor {
-        Descriptor::Primitive(value) => {
-            if value.geometries.is_empty() {
-                return Err(Error::InvalidArgument("primitive descriptor requires geometry".into()));
-            }
-            let expected = match value.motion {
-                Some(motion) if motion.keyframe_count >= 2 => usize::try_from(motion.keyframe_count)
-                    .map_err(|_| Error::InvalidArgument("motion keyframe count exceeds native bounds".into()))?,
-                Some(_) => return Err(Error::InvalidArgument("motion requires at least two keyframes".into())),
-                None => 1,
-            };
-            for geometry in &value.geometries {
+pub struct Descriptor {
+    admission: AdmittedBuild,
+    device: Handle,
+    _buffers: Vec<Handle>,
+    _structures: Vec<Handle>,
+    prepared: PreparedDescriptor,
+}
+fn admission_error(error: ogpu_core::error::Error) -> Error {
+    Error::InvalidArgument(error.message.into())
+}
+impl Descriptor {
+    pub fn create(device: &Handle, admission: AdmittedBuild, buffers: Vec<Handle>, structures: Vec<Handle>) -> Result<Self, Error> {
+        // Check real OS allocation/device/kind bindings once, at their owning boundary.
+        // These pointer arrays are transient ABI arguments, never admission identities.
+        admission.bind_structures(structures.len()).map_err(admission_error)?;
+        let pointers = buffers.iter().map(Handle::as_native_ptr).collect::<Result<Vec<_>, _>>()?;
+        let structure_pointers = structures.iter().map(Handle::as_native_ptr).collect::<Result<Vec<_>, _>>()?;
+        if pointers.len() != admission.buffer_lengths().len() {
+            return Err(Error::InvalidArgument("native buffer bindings do not match admission".into()));
+        }
+        #[cfg(target_vendor = "apple")]
+        {
+            super::super::drain_releases()?;
+            let mut message = std::ptr::null();
+            let status = unsafe { rays_metal_acceleration_validate_bindings(device.as_native_ptr()?, pointers.as_ptr(),
+                admission.buffer_lengths().as_ptr(), pointers.len(), structure_pointers.as_ptr(), structure_pointers.len(), &mut message) };
+            if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
+        }
+        #[cfg(not(target_vendor = "apple"))]
+        { let _ = (&pointers, &structure_pointers); return Err(Error::Unavailable); }
+        if let BuildLayout::Instances { kind, .. } = admission.layout() {
+            let layout = instance_layout(instance_code(*kind))?;
+            admission.bind_instance_record_size(layout[0] as u64).map_err(admission_error)?;
+        }
+        let prepared = prepare_admitted(&admission, &buffers, &structures)?;
+        Ok(Self { admission, device:device.clone(), _buffers:buffers, _structures:structures, prepared })
+    }
+    pub fn admission(&self) -> &AdmittedBuild { &self.admission }
+    fn for_device(&self, device: &Handle) -> Result<(), Error> {
+        if self.device.same(device) || super::super::registry::device_registry_id(&self.device)?
+            == super::super::registry::device_registry_id(device)? { Ok(()) }
+        else { Err(Error::InvalidArgument("acceleration descriptor belongs to another device".into())) }
+    }
+}
+fn border_code(border: Border) -> i32 { match border { Border::Clamp => 0, Border::Vanish => 1 } }
+fn instance_code(kind: InstanceKind) -> i32 { match kind { InstanceKind::UserIdInstances => 1, InstanceKind::MotionInstances => 2 } }
+fn raw_admitted_frames(ranges: &[BuildRange], buffers: &[Handle]) -> Result<Vec<RawKeyframe>, Error> {
+    ranges.iter().map(|range| Ok(RawKeyframe { buffer:buffers[range.binding].as_native_ptr()?, offset:range.offset })).collect()
+}
+fn prepare_admitted(admission: &AdmittedBuild, buffers: &[Handle], structures: &[Handle]) -> Result<PreparedDescriptor, Error> {
+    let mut prepared = PreparedDescriptor { primitive:None,instances:None,geometries:Vec::new(),
+        keyframes:Vec::new(),secondary_keyframes:Vec::new(),structure_handles:Vec::new() };
+    let pointer = |range: &BuildRange| buffers[range.binding].as_native_ptr();
+    match admission.layout() {
+        BuildLayout::Primitive { geometries, motion, refit, fast_build } => {
+            for geometry in geometries {
                 let (primary, secondary) = match geometry {
-                    Geometry::Triangles { vertices, .. } => (vertices.len(), None),
-                    Geometry::BoundingBoxes { boxes, .. } => (boxes.len(), None),
-                    Geometry::Curves { control_points, radii, .. } => {
-                        (control_points.len(), Some(radii.len()))
-                    }
+                    BuildGeometry::Triangles { vertices,.. } => (vertices.as_slice(),&[][..]),
+                    BuildGeometry::BoundingBoxes { boxes,.. } => (boxes.as_slice(),&[][..]),
+                    BuildGeometry::Curves { control_points,radii,.. } => (control_points.as_slice(),radii.as_slice()),
                 };
-                if primary != expected || secondary.is_some_and(|count| count != expected) {
-                    return Err(Error::InvalidArgument("acceleration geometry keyframe counts do not match the descriptor".into()));
-                }
+                prepared.keyframes.push(if primary.len()>1 { raw_admitted_frames(primary,buffers)? } else { Vec::new() });
+                prepared.secondary_keyframes.push(if secondary.len()>1 { raw_admitted_frames(secondary,buffers)? } else { Vec::new() });
             }
-            let mut prepared = PreparedDescriptor {
-                primitive: None,
-                instances: None,
-                geometries: Vec::with_capacity(value.geometries.len()),
-                keyframes: Vec::with_capacity(value.geometries.len()),
-                secondary_keyframes: Vec::with_capacity(value.geometries.len()),
-                structure_handles: Vec::new(),
-            };
-            for geometry in &value.geometries {
-                let (primary, secondary) = match geometry {
-                    Geometry::Triangles { vertices, .. } => (vertices.as_slice(), &[][..]),
-                    Geometry::BoundingBoxes { boxes, .. } => (boxes.as_slice(), &[][..]),
-                    Geometry::Curves { control_points, radii, .. } => {
-                        (control_points.as_slice(), radii.as_slice())
+            for (i,geometry) in geometries.iter().enumerate() {
+                let frames=&prepared.keyframes[i];
+                let secondary=&prepared.secondary_keyframes[i];
+                let mut raw=RawGeometry { kind:0,buffer:null_mut(),offset:0,stride:0,count:0,secondary_buffer:null_mut(),
+                    secondary_offset:0,secondary_stride:0,index_buffer:null_mut(),index_offset:0,index_uint16:0,
+                    segment_count:0,segment_control_points:0,curve_type:0,basis:0,end_caps:0,
+                    keyframes:if frames.is_empty() { null() } else { frames.as_ptr() },keyframe_count:frames.len(),
+                    secondary_keyframes:if secondary.is_empty() { null() } else { secondary.as_ptr() },secondary_keyframe_count:secondary.len(),
+                    opaque:0,allow_duplicate_intersection:0 };
+                let common=match geometry {
+                    BuildGeometry::Triangles { vertices,vertex_stride,triangle_count,index,common } => {
+                        raw.buffer=pointer(&vertices[0])?; raw.offset=vertices[0].offset;
+                        raw.stride=*vertex_stride; raw.count=*triangle_count;
+                        if let Some(index)=index {
+                            raw.index_buffer=pointer(&index.range)?; raw.index_offset=index.range.offset; raw.index_uint16=index.uint16.into();
+                        }
+                        common
+                    }
+                    BuildGeometry::BoundingBoxes { boxes,stride,count,common } => {
+                        raw.kind=1; raw.buffer=pointer(&boxes[0])?; raw.offset=boxes[0].offset; raw.stride=*stride; raw.count=*count; common
+                    }
+                    BuildGeometry::Curves { control_points,control_stride,control_point_count,radii,radius_stride,index,
+                        segment_count,control_points_per_segment,curve_type,basis,end_caps,common } => {
+                        raw.kind=2; raw.buffer=pointer(&control_points[0])?; raw.offset=control_points[0].offset;
+                        raw.stride=*control_stride; raw.count=*control_point_count;
+                        raw.secondary_buffer=pointer(&radii[0])?; raw.secondary_offset=radii[0].offset; raw.secondary_stride=*radius_stride;
+                        raw.index_buffer=pointer(&index.range)?; raw.index_offset=index.range.offset; raw.index_uint16=index.uint16.into();
+                        raw.segment_count=*segment_count; raw.segment_control_points=*control_points_per_segment;
+                        raw.curve_type=match curve_type { CurveType::RoundCurve=>0,CurveType::FlatCurve=>1 };
+                        raw.basis=match basis { CurveBasis::Bspline=>0,CurveBasis::CatmullRom=>1,CurveBasis::LinearBasis=>2,CurveBasis::Bezier=>3 };
+                        raw.end_caps=match end_caps { CurveCaps::NoCaps=>0,CurveCaps::DiskCaps=>1,CurveCaps::SphereCaps=>2 };
+                        common
                     }
                 };
-                prepared.keyframes.push(if primary.len() > 1 {
-                    raw_keyframes(primary)?
-                } else {
-                    Vec::new()
-                });
-                prepared.secondary_keyframes.push(if secondary.len() > 1 {
-                    raw_keyframes(secondary)?
-                } else {
-                    Vec::new()
-                });
-            }
-            for (index, geometry) in value.geometries.iter().enumerate() {
-                let keyframes = &prepared.keyframes[index];
-                let secondary_keyframes = &prepared.secondary_keyframes[index];
-                let keyframe_ptr = if keyframes.is_empty() { null() } else { keyframes.as_ptr() };
-                let secondary_keyframe_ptr = if secondary_keyframes.is_empty() {
-                    null()
-                } else {
-                    secondary_keyframes.as_ptr()
-                };
-                let raw = match geometry {
-                    Geometry::Triangles {
-                        vertices,
-                        vertex_stride,
-                        triangle_count,
-                        index,
-                        common,
-                    } => {
-                        let first = &vertices[0];
-                        RawGeometry {
-                            kind: 0,
-                            buffer: first.buffer.as_native_ptr()?,
-                            offset: first.offset,
-                            stride: *vertex_stride,
-                            count: *triangle_count,
-                            secondary_buffer: null_mut(),
-                            secondary_offset: 0,
-                            secondary_stride: 0,
-                            index_buffer: index
-                                .as_ref()
-                                .map_or(Ok(null_mut()), |value| value.buffer.as_native_ptr())?,
-                            index_offset: index.as_ref().map_or(0, |value| value.offset),
-                            index_uint16: index.as_ref().is_some_and(|value| value.uint16).into(),
-                            segment_count: 0,
-                            segment_control_points: 0,
-                            curve_type: 0,
-                            basis: 0,
-                            end_caps: 0,
-                            keyframes: keyframe_ptr,
-                            keyframe_count: keyframes.len(),
-                            secondary_keyframes: null(),
-                            secondary_keyframe_count: 0,
-                            opaque: common.opaque.into(),
-                            allow_duplicate_intersection: common.allow_duplicate_intersection.into(),
-                        }
-                    }
-                    Geometry::BoundingBoxes {
-                        boxes,
-                        stride,
-                        count,
-                        common,
-                    } => {
-                        let first = &boxes[0];
-                        RawGeometry {
-                            kind: 1,
-                            buffer: first.buffer.as_native_ptr()?,
-                            offset: first.offset,
-                            stride: *stride,
-                            count: *count,
-                            secondary_buffer: null_mut(),
-                            secondary_offset: 0,
-                            secondary_stride: 0,
-                            index_buffer: null_mut(),
-                            index_offset: 0,
-                            index_uint16: 0,
-                            segment_count: 0,
-                            segment_control_points: 0,
-                            curve_type: 0,
-                            basis: 0,
-                            end_caps: 0,
-                            keyframes: keyframe_ptr,
-                            keyframe_count: keyframes.len(),
-                            secondary_keyframes: null(),
-                            secondary_keyframe_count: 0,
-                            opaque: common.opaque.into(),
-                            allow_duplicate_intersection: common.allow_duplicate_intersection.into(),
-                        }
-                    }
-                    Geometry::Curves {
-                        control_points,
-                        control_stride,
-                        control_point_count,
-                        radii,
-                        radius_stride,
-                        index,
-                        segment_count,
-                        control_points_per_segment,
-                        curve_type,
-                        basis,
-                        end_caps,
-                        common,
-                    } => {
-                        let control = &control_points[0];
-                        let radius = &radii[0];
-                        RawGeometry {
-                            kind: 2,
-                            buffer: control.buffer.as_native_ptr()?,
-                            offset: control.offset,
-                            stride: *control_stride,
-                            count: *control_point_count,
-                            secondary_buffer: radius.buffer.as_native_ptr()?,
-                            secondary_offset: radius.offset,
-                            secondary_stride: *radius_stride,
-                            index_buffer: index.buffer.as_native_ptr()?,
-                            index_offset: index.offset,
-                            index_uint16: index.uint16.into(),
-                            segment_count: *segment_count,
-                            segment_control_points: *control_points_per_segment,
-                            curve_type: *curve_type,
-                            basis: *basis,
-                            end_caps: *end_caps,
-                            keyframes: keyframe_ptr,
-                            keyframe_count: keyframes.len(),
-                            secondary_keyframes: secondary_keyframe_ptr,
-                            secondary_keyframe_count: secondary_keyframes.len(),
-                            opaque: common.opaque.into(),
-                            allow_duplicate_intersection: common.allow_duplicate_intersection.into(),
-                        }
-                    }
-                };
+                raw.opaque=common.opaque.into(); raw.allow_duplicate_intersection=common.duplicate_intersection.into();
                 prepared.geometries.push(raw);
             }
-            let motion = value.motion.unwrap_or(Motion {
-                keyframe_count: 0,
-                start_time: 0.0,
-                end_time: 0.0,
-                start_border: 0,
-                end_border: 0,
-            });
-            let raw_motion = RawMotion {
-                keyframe_count: motion.keyframe_count,
-                start_time: motion.start_time,
-                end_time: motion.end_time,
-                start_border: motion.start_border,
-                end_border: motion.end_border,
-            };
-            prepared.primitive = Some(RawPrimitiveDescriptor {
-                geometries: if prepared.geometries.is_empty() {
-                    null()
-                } else {
-                    prepared.geometries.as_ptr()
-                },
-                geometry_count: prepared.geometries.len(),
-                has_motion: value.motion.is_some().into(),
-                motion: raw_motion,
-                refit: value.refit.into(),
-                fast_build: value.fast_build.into(),
-            });
-            Ok(prepared)
+            prepared.primitive=Some(RawPrimitiveDescriptor { geometries:prepared.geometries.as_ptr(),geometry_count:prepared.geometries.len(),
+                has_motion:motion.is_some().into(),motion:match motion {
+                    Some(m)=>RawMotion { keyframe_count:m.keyframe_count,start_time:m.start_time,end_time:m.end_time,
+                        start_border:border_code(m.start_border),end_border:border_code(m.end_border) },
+                    None=>RawMotion { keyframe_count:0,start_time:0.,end_time:0.,start_border:0,end_border:0 },
+                },refit:(*refit).into(),fast_build:(*fast_build).into() });
         }
-        Descriptor::Instances(value) => {
-            if value.structures.is_empty() {
-                return Err(Error::InvalidArgument("instance descriptor requires structures".into()));
-            }
-            let buffer = value.buffer.as_native_ptr()?;
-            let mut prepared = PreparedDescriptor {
-                primitive: None,
-                instances: None,
-                geometries: Vec::new(),
-                keyframes: Vec::new(),
-                secondary_keyframes: Vec::new(),
-                structure_handles: value
-                    .structures
-                    .iter()
-                    .map(Handle::as_native_ptr)
-                    .collect::<Result<Vec<_>, _>>()?,
+        BuildLayout::Instances { instances,stride,count,kind,motion_transforms,refit,.. } => {
+            prepared.structure_handles=structures.iter().map(Handle::as_native_ptr).collect::<Result<Vec<_>,_>>()?;
+            let (has_motion_transforms,motion_transform_buffer,motion_transform_offset,motion_transform_count)=match motion_transforms {
+                Some((range,count))=>(1,pointer(range)?,range.offset,*count),None=>(0,null_mut(),0,0),
             };
-            let (has_motion_transforms, motion_transform_buffer, motion_transform_offset, motion_transform_count) =
-                match &value.motion_transforms {
-                    Some(transforms) => (
-                        1,
-                        transforms.buffer.as_native_ptr()?,
-                        transforms.offset,
-                        transforms.count,
-                    ),
-                    None => (0, null_mut(), 0, 0),
-                };
-            prepared.instances = Some(RawInstancesDescriptor {
-                buffer,
-                offset: value.offset,
-                stride: value.stride,
-                count: value.count,
-                instance_kind: value.instance_kind,
-                structures: if prepared.structure_handles.is_empty() {
-                    null()
-                } else {
-                    prepared.structure_handles.as_ptr()
-                },
-                structure_count: prepared.structure_handles.len(),
-                has_motion_transforms,
-                motion_transform_buffer,
-                motion_transform_offset,
-                motion_transform_count,
-                refit: value.refit.into(),
-            });
-            Ok(prepared)
+            prepared.instances=Some(RawInstancesDescriptor { buffer:pointer(instances)?,offset:instances.offset,stride:*stride,count:*count,
+                instance_kind:instance_code(*kind),structures:prepared.structure_handles.as_ptr(),structure_count:prepared.structure_handles.len(),
+                has_motion_transforms,motion_transform_buffer,motion_transform_offset,motion_transform_count,refit:(*refit).into() });
         }
     }
+    Ok(prepared)
+}
+
+#[cfg(target_vendor = "apple")]
+unsafe extern "C" {
+    fn rays_metal_acceleration_validate_bindings(device: *mut NativeHandle,
+        buffers: *const *mut NativeHandle, declared_lengths: *const u64, buffer_count: usize,
+        structures: *const *mut NativeHandle, structure_count: usize, message: *mut *const c_char) -> i32;
 }
 
 #[cfg(target_vendor = "apple")]
@@ -506,8 +283,8 @@ unsafe extern "C" {
 }
 
 pub fn descriptor_sizes(device: &Handle, descriptor: &Descriptor) -> Result<Sizes, Error> {
-    let prepared = prepare_descriptor(descriptor)?;
-    let raw = prepared.raw();
+    descriptor.for_device(device)?;
+    let raw=descriptor.prepared.raw();
     #[cfg(target_vendor = "apple")]
     {
         let mut output = RawSizes::default();
@@ -544,8 +321,7 @@ pub fn encoder_build(
     scratch_offset: u64,
     refit: bool,
 ) -> Result<(), Error> {
-    let prepared = prepare_descriptor(descriptor)?;
-    let raw = prepared.raw();
+    let raw=descriptor.prepared.raw();
     #[cfg(target_vendor = "apple")]
     {
         let mut message = std::ptr::null();
