@@ -50,7 +50,7 @@ fn run_core() {
     }).expect("sequential grain cutoff");
 
     assert_eq!(color::to_tuple(color::hex("#369c").expect("short RGBA")), (0x33, 0x66, 0x99, 0xcc));
-    let indexed = rand::seed64(0x7eed_1234_5678_9abc);
+    let indexed = rand::seed(0x7eed_1234_5678_9abc);
     let indexed_values: Vec<_> = (0..10_000).map(|index| rand::float_at(indexed, index)).collect();
     assert_eq!(indexed_values, (0..10_000).map(|index| rand::float_at(indexed, index)).collect::<Vec<_>>());
     assert!(indexed_values.iter().all(|value| *value >= 0. && *value < 1.));

@@ -219,7 +219,7 @@ fn exact_duplicates(x: &[f64], y: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<i64>, Vec<
 }
 
 fn shuffle_spatial_blocks(seed: i64, order: &mut [i64]) -> Result<(), String> {
-    let mut random = rand::seed64(seed);
+    let mut random = rand::seed(seed);
     let block = 256usize;
     let mut first = 0usize;
     while first < order.len() {

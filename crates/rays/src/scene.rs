@@ -628,7 +628,7 @@ pub mod layer {
     }
 
     pub(crate) fn native_segment_version(segment: &Segment, resources: &[(i64, retained_resource)]) -> i64 {
-        let mix = |stamp: i64, value: i64| rays_math::hash::fnv64_mix(stamp, value);
+        let mix = |stamp: i64, value: i64| rays_math::hash::mix(stamp, value);
         let mut stamp = display_list::version(segment);
         for (_, r) in resources {
             stamp = match r {

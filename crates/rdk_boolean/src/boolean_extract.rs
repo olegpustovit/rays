@@ -106,20 +106,10 @@ pub struct Ancestry {
     edge_source_edges: Arc<[i64]>,
 }
 
-fn mix(bits: u64) -> u64 {
-    let bits = bits ^ (bits >> 30);
-    let bits = bits.wrapping_mul(0x1e35a7bd);
-    let bits = bits ^ (bits >> 27);
-    let bits = bits.wrapping_mul(0x17a1465b);
-    bits ^ (bits >> 31)
-}
-
-fn hash_float(value: f64) -> u64 {
-    mix(if value == 0.0 { 0 } else { value.to_bits() })
-}
-
 fn hash_point(x: f64, y: f64, z: f64) -> u64 {
-    hash_float(x) ^ hash_float(y).rotate_left(21) ^ hash_float(z).rotate_left(42)
+    let mut hash = rays_math::hash::SEED;
+    for value in [x, y, z] { hash = rays_math::hash::word(hash, if value == 0.0 { 0 } else { value.to_bits() }); }
+    hash
 }
 
 fn table_capacity(points: usize, message: &str) -> Result<usize, String> {
@@ -495,8 +485,7 @@ fn cached_barycentric(
     c: i64,
     implicit: &implicit_point::T,
 ) -> (f64, f64, f64) {
-    let value = (triangle.wrapping_mul(0x1e35a7bd)) ^ (point.wrapping_mul(0x17a1465b));
-    let mut slot = ((value ^ ((value as u64) >> 16) as i64) as usize) & cache.mask;
+    let mut slot = rays_math::hash::word(rays_math::hash::word(rays_math::hash::SEED, triangle as u64), point as u64) as usize & cache.mask;
     loop {
         let stored = cache.triangle_keys[slot];
         if stored < 0 {

@@ -1,4 +1,4 @@
-kernel_cac7bf35f0c1f0877310b473be6e7e62
+kernel_274a67f9f652304142b93b48a5478a53
 @group(0) @binding(0) var<storage, read> input0: array<f32>;
 @group(0) @binding(1) var<storage, read_write> outbuf: array<f32>;
 @group(0) @binding(2) var<uniform> uniforms: array<vec4<u32>, 2>;
@@ -138,7 +138,7 @@ fn wfbm_live(p: vec3<f32>, octaves: vec2<u32>, o: i32, lacunarity: f32, gain: f3
   return wfbm_fractal(p, i32(octaves.x), o, lacunarity, gain);
 }
 @compute @workgroup_size(64)
-fn kernel_cac7bf35f0c1f0877310b473be6e7e62(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_274a67f9f652304142b93b48a5478a53(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].y != 0u) { n = min(n, count_in[0] * uniforms[0].w / uniforms[1].x); }

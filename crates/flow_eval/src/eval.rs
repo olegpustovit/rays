@@ -393,9 +393,9 @@ static LIVE_KERNELS_HOOK: LazyLock<RwLock<Arc<dyn Fn(&[Node])->bool + Send + Syn
 struct AddrHasher(u64);
 impl std::hash::Hasher for AddrHasher {
     fn finish(&self) -> u64 { self.0 }
-    fn write(&mut self, bytes: &[u8]) { for byte in bytes { self.0 = (self.0.rotate_left(5) ^ u64::from(*byte)).wrapping_mul(0x517c_c1b7_2722_0a95); } }
-    fn write_usize(&mut self, n: usize) { self.write(&n.to_le_bytes()); }
-    fn write_i64(&mut self, n: i64) { self.write(&n.to_le_bytes()); }
+    fn write(&mut self, bytes: &[u8]) { self.0 = rays_math::hash::bytes(self.0, bytes); }
+    fn write_usize(&mut self, n: usize) { self.0 = rays_math::hash::word(self.0, n as u64); }
+    fn write_i64(&mut self, n: i64) { self.0 = rays_math::hash::word(self.0, n as u64); }
 }
 type AddrMap<V> = HashMap<(u64, u32), V, std::hash::BuildHasherDefault<AddrHasher>>;
 type IdMap<K, V> = HashMap<K, V, std::hash::BuildHasherDefault<AddrHasher>>;
@@ -2927,11 +2927,7 @@ pub fn frame_reads(value: &Value) -> Vec<String> {
     let _ = dependent(value, true, &mut reads);
     reads.into_iter().collect()
 }
-fn stable_digest(bytes: &[u8]) -> String {
-    let mut hash = 0xcbf29ce484222325u64;
-    for byte in bytes { hash ^= u64::from(*byte); hash = hash.wrapping_mul(0x100000001b3); }
-    format!("{hash:016x}")
-}
+fn stable_digest(bytes: &[u8]) -> String { format!("{:016x}", rays_math::hash::bytes(rays_math::hash::SEED, bytes)) }
 fn structure_bytes(out: &mut String, bytes: &[u8]) {
     use std::fmt::Write;
     let _ = write!(out, "{}:", bytes.len());

@@ -626,13 +626,10 @@ fn constant_source(value: &Value) -> Option<Result<(String, i64, Value), Diagnos
 
 // ---- cook context ------------------------------------------------------------------------------
 
-/// `Operators.seed_for`: the salt is the low 63 bits of a 64-bit word, xor-ed into the identity
-/// before mixing.
+/// Every seed/salt bit participates; UTF-8 namespace and label are separately framed parts.
 pub fn seed_for(salt: i64, seed: i64, namespace: &str, label: &str) -> i64 {
-    let identity = rays_math::hash::string(&format!("{namespace}:{label}"));
-    let salt = salt & i64::MAX;
-    let mixed = seed ^ (identity ^ salt).wrapping_mul(0x9e3779b97f4a7c15_u64 as i64);
-    ((mixed ^ (((mixed as u64) >> 32) as i64)) << 1) >> 1
+    let hash = rays_math::hash::word(seed as u64, salt as u64);
+    rays_math::hash::bytes(rays_math::hash::bytes(hash, namespace.as_bytes()), label.as_bytes()) as i64
 }
 
 pub fn context_label() -> &'static str {
@@ -3238,8 +3235,13 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
             assert!(E::residual::function_bindings(original).iter().all(|(_,v)|*v==captured));
         }
         assert_eq!(D::to_list(context_reads(&seeded)), vec![D::Fact::Seed]);
-        // the salt is the low 63 bits of a word
-        assert_eq!(seed_for(-1, 7, "a", "b"), seed_for(i64::MAX, 7, "a", "b"));
+        assert_eq!(seed_for(3, 42, "n", ""), 7121092723464601618);
+        assert_eq!(seed_for(-1, 7, "a", "b"), -125837849065051118);
+        assert_eq!(seed_for(i64::MAX, 7, "a", "b"), -8179457758241169492);
+        assert_eq!(seed_for(i64::MIN, i64::MIN, "ž🙂", "a\0b"), 8304211011590275141);
+        // The sign bit of the salt is part of its full-width identity.
+        assert_ne!(seed_for(-1, 7, "a", "b"), seed_for(i64::MAX, 7, "a", "b"));
+        assert_ne!(seed_for(0, 7, "a:b", "c"), seed_for(0, 7, "a", "b:c"));
         assert!(seed_for(0, 1, "x", "y") != seed_for(0, 2, "x", "y"));
     }
 

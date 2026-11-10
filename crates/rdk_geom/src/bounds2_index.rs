@@ -346,10 +346,10 @@ mod tests {
         let mut hi_x = vec![];
         let mut lo_y = vec![];
         let mut hi_y = vec![];
-        let mut s: u64 = 12345;
+        let mut state = rays_math::rand::seed(12345);
         let mut r = || {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            ((s >> 33) % 1000) as f64 / 10.
+            let (value, after) = rays_math::rand::float(state); state = after;
+            (value * 1000.).floor() / 10.
         };
         for _ in 0..n {
             let (x, y) = (r(), r());

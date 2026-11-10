@@ -5,7 +5,7 @@
 //! Rust shape notes: OCaml's exception-based `fail` becomes a recorded failure (`Gen::failure`)
 //! after which the printer stops; the layout visitor is the `Visit` impl of the generator.
 #![allow(non_snake_case)]
-use rays_math::hash::md5_hex;
+use rays_math::hash::digest;
 use crate::noise;
 use crate::trace::Back;
 pub use crate::trace::Curves;
@@ -1586,7 +1586,7 @@ fn generate(o: &Options, raster: Option<Raster>, program: &packed::T) -> Result<
             text
         }
     };
-    let digest = md5_hex(format!("{prefix}{signature}{body}").as_bytes());
+    let digest = format!("{:032x}", digest(format!("{prefix}{signature}{body}").as_bytes()));
     let entry = format!("kernel_{digest}");
     let source = format!("{prefix}kernel void {entry}(\n  {signature}) {{\n{body}}}\n");
     let mut interface: Vec<Binding> = (0..(layout.count_base + if layout.counts.is_none() { 0 } else { 2 }))

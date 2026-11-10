@@ -5,7 +5,7 @@
 @group(0) @binding(4) var<storage, read_write> status: atomic<u32>;
 fn wfinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }
 @compute @workgroup_size(64)
-fn kernel_c500898aae293b7f70718c0673e7b8f7(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_246c38bf0f128cc61c804f8b2d4af842(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;

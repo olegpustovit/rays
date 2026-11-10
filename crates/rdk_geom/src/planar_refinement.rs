@@ -14,8 +14,6 @@ use crate::implicit_point::{self, Error as PointError};
 use crate::planar_cdt;
 use crate::predicates::Sign;
 
-const MASK63: u64 = (1u64 << 63) - 1;
-const MAX_INT: i64 = (1 << 62) - 1;
 
 pub struct T {
     initial_point_count: i64,
@@ -341,13 +339,6 @@ fn canonical_bits(value: f64) -> i64 {
     if value == 0. { 0 } else { value.to_bits() as i64 }
 }
 
-fn wrap63(value: i64) -> i64 {
-    (value << 1) >> 1
-}
-
-fn lsr63(value: i64, amount: u32) -> i64 {
-    (((value as u64) & MASK63) >> amount) as i64
-}
 
 struct Buckets {
     keys: Vec<i64>,
@@ -381,13 +372,8 @@ fn buckets_create(expected: i64) -> Result<Buckets, String> {
 }
 
 fn buckets_key(x: i64, y: i64) -> i64 {
-    // Collisions are checked against canonical coordinates and symbolic points.
-    let mix = |value: i64| -> i64 {
-        let value = wrap63((value ^ lsr63(value, 30)).wrapping_mul(0x3f4a7c159e3779b));
-        let value = wrap63((value ^ lsr63(value, 27)).wrapping_mul(0x2f1bbcdc676dfd1));
-        value ^ lsr63(value, 31)
-    };
-    (mix(wrap63(x)) ^ wrap63(mix(wrap63(y)) << 1)) & MAX_INT
+    // Keys are nonnegative because -1 marks an empty bucket; coordinates still use all 64 bits.
+    (rays_math::hash::word(rays_math::hash::word(rays_math::hash::SEED, x as u64), y as u64) as i64) & i64::MAX
 }
 
 fn buckets_slot(keys: &[i64], key: i64) -> usize {

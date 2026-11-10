@@ -1072,10 +1072,10 @@ mod tests {
 
     #[test]
     fn bounds_index_overlaps_match_a_brute_force_scan_in_ascending_order() {
-        let mut seed = 7_u64;
+        let mut state = rays_math::rand::seed(7);
         let mut next = move || {
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            (seed >> 33) as f64 / (1_u64 << 31) as f64 * 100.0
+            let (value, after) = rays_math::rand::float(state); state = after;
+            value * 100.0
         };
         let mut planes = Planes { u_min: vec![], u_max: vec![], v_min: vec![], v_max: vec![] };
         for _ in 0..300 {

@@ -1,4 +1,4 @@
-kernel_e651d27744a41990cbe8dfa0540ed9f5
+kernel_edf541009453970838d3a90281ac6edc
 @group(0) @binding(0) var<storage, read> input0: array<f32>;
 @group(0) @binding(1) var<storage, read_write> outbuf: array<f32>;
 @group(0) @binding(2) var<uniform> uniforms: array<vec4<u32>, 1>;
@@ -50,7 +50,7 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_e651d27744a41990cbe8dfa0540ed9f5(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_edf541009453970838d3a90281ac6edc(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;

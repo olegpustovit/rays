@@ -981,7 +981,7 @@ fn lower_scene2_with_policy(
                 }
                 Command::Geometry(geometry) => {
                     mix(sample_hash(&geometry.vertices));
-                    mix(geometry.indices.len() as i64 ^ geometry.indices.iter().take(16).fold(0i64, |h, v| h.wrapping_mul(31) ^ v));
+                    mix(geometry.indices.len() as i64 ^ geometry.indices.iter().take(16).fold(0i64, |h, v| rays_math::hash::mix(h, *v)));
                     mix(geometry.color as i64);
                 }
                 _ => {}

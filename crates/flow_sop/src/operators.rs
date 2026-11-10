@@ -750,7 +750,7 @@ fn value_context(name: &'static str, category: &str, out: Ty, what: &'static str
 }
 
 /// Exact context-seed mixing used by `sop/context_seed`, shared with host primitive fixtures.
-/// `salt` is its low 63 bits xor-ed into the identity before mixing.
+/// Every seed/salt bit participates; namespace and label are separately framed UTF-8 parts.
 pub fn seed_for(salt: i64, seed: i64, namespace: &str, label: &str) -> i64 {
     attribute_kernel::seed_for(salt, seed, namespace, label)
 }
@@ -1336,7 +1336,7 @@ mod parity {
     use flow_syntax::syntax::{self, Node as SNode, Syntax};
     use std::sync::LazyLock;
 
-    // OCaml's 63-bit int bounds.
+    // Full signed 64-bit seed and index bounds.
     const MIN_INT: i64 = i64::MIN;
     const MAX_INT: i64 = i64::MAX;
     /// Lanes per parity fixture: over the 4,096-lane parallel floor, 9 blocks of at most 1,024

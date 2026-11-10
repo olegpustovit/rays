@@ -54,7 +54,7 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_99d8d6589a44e30b2622666b82861587(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_7f56a538e552190a37dfb86f66ccad83(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -215,7 +215,7 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_fc078c331161f42ff56e5f59e86f3cfb(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_060846f6197c9ed073bf6f73ac8c08ef(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -379,7 +379,7 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_388bdddef624e648398f82b10f356c16(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_8ba6c698bd1d49665a07f18f80d3bb84(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -542,7 +542,7 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_bee610fcc103fb4dcf3f64f2c262ba40(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_214c83581ca34842a88525d8e39b6eb9(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -707,7 +707,7 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_50b586d61fe6a8e9eac24456200a1173(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_7f5c54d7849c0df620bb0fff949e496f(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -872,7 +872,7 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_3b96400b64538af252e24bd71dda36c1(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_347d3e4698dfbad1bd11c394a4b99289(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;

@@ -13,7 +13,6 @@ use crate::fuse_grid;
 use crate::group_ops;
 use crate::reverse_faces;
 
-const OCAML_MAX_INT: i64 = (1i64 << 62) - 1;
 
 fn make(operation: &str, code: Code, message: String) -> error::T {
     error::new(operation, code, message)
@@ -374,7 +373,7 @@ fn delete_overlaps_general(
                     hash_value = hash::mix(
                         hash_value,
                         clean_cycle_point(&view, first, size, start, direction, offset),
-                    ) & OCAML_MAX_INT;
+                    );
                 }
                 starts[slot] = start;
                 directions[slot] = direction;
@@ -475,7 +474,7 @@ fn delete_triangle_overlaps(
                 firsts[slot] = a;
                 seconds[slot] = b;
                 thirds[slot] = c;
-                hashes[slot] = hash::mix(hash::mix(hash::mix(17 ^ 3, a), b), c) & OCAML_MAX_INT;
+                hashes[slot] = hash::mix(hash::mix(hash::mix(17 ^ 3, a), b), c);
             }
             Ok(())
         })?;

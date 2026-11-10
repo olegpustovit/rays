@@ -65,32 +65,12 @@ fn positions_of(geometry_value: &geometry::T) -> Result<Positions, error::T> {
     Ok(Positions { x: view.x, y: view.y, z: view.z })
 }
 
-fn wrap63(value: i64) -> i64 {
-    (value << 1) >> 1
-}
-
-fn lsr(value: i64, amount: u32) -> i64 {
-    wrap63((((value as u64) & ((1_u64 << 63) - 1)) >> amount) as i64)
-}
-
-fn float_hash(value: f64) -> i64 {
-    if value == 0.0 {
-        0
-    } else {
-        let bits = wrap63(value.to_bits() as i64);
-        if value < 0.0 { bits ^ (-(1_i64 << 62)) } else { bits }
-    }
-}
-
-fn mix(hash: i64) -> i64 {
-    wrap63((hash ^ lsr(hash, 16)).wrapping_mul(0x45d9f3b))
-}
-
 fn hash_position(positions: &Positions, point: usize, mask: i64) -> i64 {
-    let hash = 0x9e3779b9_i64 ^ float_hash(positions.x[point]);
-    let hash = mix(hash) ^ float_hash(positions.y[point]);
-    let hash = mix(hash) ^ float_hash(positions.z[point]);
-    mix(hash) & mask
+    let mut hash = rays_math::hash::SEED;
+    for value in [positions.x[point], positions.y[point], positions.z[point]] {
+        hash = rays_math::hash::word(hash, if value == 0.0 { 0 } else { value.to_bits() });
+    }
+    (hash as i64) & mask
 }
 
 fn next_table_size(count: usize) -> Result<usize, error::T> {

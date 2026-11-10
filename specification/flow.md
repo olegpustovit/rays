@@ -1256,7 +1256,8 @@ the table remains read-only.
 ## 12. Catalog manifest and `rays`
 
 `lib/sop_catalog/flow_manifest.exe` writes `lib/sop_catalog/flow_manifest.sexp`
-(`Flow_sop.Manifest.generate`): the catalog version, a digest, and for every kind its
+(`Flow_sop.Manifest.generate`): the catalog version, a digest (version 1 uses the
+RFC 1321 MD5 content checksum), and for every kind its
 qualified name, key, operation, label, category path, slots, fields (name, label,
 folder, kind with soft and hard range, default, primary, vec3 group, unit) and outputs. The
 file is checked in; `dune build @lib/sop_catalog/runtest` regenerates it and diffs, and an
@@ -2244,8 +2245,12 @@ RGB vec3, or `(list r g b a)` with normalized alpha. `color/hsl h s l` uses hue 
 returns RGB; `color/hsla h s l a` returns that four-component list. `color/gradient stops x`
 uses the native gradient's clamped interpolation and quantization and returns packed-compatible
 RGB (its stops must be opaque). `noise3 p :seed :octaves` defaults to seed 0 and one octave;
-1–64 octaves use native fBm (Metal and WGSL refuse more than 32 as `E_GPU_FORM`) with lacunarity 2 and gain 0.5. Seeds retain their native immutable
+1–64 octaves use native fBm (Metal and WGSL refuse more than 32 as `E_GPU_FORM`) with lacunarity 2 and gain 0.5. Seeds retain all 64 input bits and their native immutable
 permutation table in a per-domain cache of 16 tables. `noise3 [x y 0]` is the 2D form.
+
+`rand/at`, `rand_at`, `value/rand` and seeded noise follow the exact full-width
+formulas in [generative.md](generative.md). Native and JavaScript exports agree
+on binary64 samples, including negative and extreme signed seeds.
 
 The `host` context returns effect values or collections of them. `host/quit when`,
 `host/save_png path when`, `host/dialog kind when :filters :default`, and

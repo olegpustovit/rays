@@ -10,8 +10,6 @@ use rdk_core::cancel;
 
 use crate::predicates::Sign;
 
-// Frozen table-hash domain; cardinalities use native i64 below.
-const HASH_MASK: i64 = (1 << 62) - 1;
 
 pub struct T {
     triangle_points: Arc<[i64]>,
@@ -119,10 +117,7 @@ fn table_clear_constraints(table: &mut Table) {
     table.constrained.iter_mut().for_each(|k| *k = 0);
 }
 
-fn hash(key: i64) -> i64 {
-    let value = key ^ ((key as u64) >> 16) as i64;
-    value.wrapping_mul(0x45d9f3b) & HASH_MASK
-}
+fn hash(key: i64) -> i64 { rays_math::hash::mix(0, key) }
 
 fn find_slot(table: &Table, key: i64) -> usize {
     let mask = (table.keys.len() - 1) as i64;

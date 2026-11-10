@@ -115,7 +115,7 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_6b96011aa1b54abc27797daccb757f47(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_00e3af97fdd2c721cbcc37fb541bdc9b(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].z != 0u) { n = min(n, count_in[0] * uniforms[1].x / uniforms[1].y); }
@@ -411,7 +411,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_6089e24750d5de758b77a8ffce0c9557(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_c4f1b91418c9180de0a478789da785bd(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].x != 0u) { n = min(n, count_in[0] * uniforms[0].z / uniforms[0].w); }
@@ -512,7 +512,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_ddccad0ab4576206a22bdada8260deb8(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_319c1d7ee2932e2e8462769bf18ee1f7(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].y != 0u) { n = min(n, count_in[0] * uniforms[0].w / uniforms[1].x); }
@@ -619,7 +619,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_e54df821f2f2c906dca9823e11e6e672(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_f6017fdb1e8369072dba8dfa1ebdbe68(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].x != 0u) { n = min(n, count_in[0] * uniforms[0].z / uniforms[0].w); }
@@ -717,7 +717,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_7d43493c6870df668b2e5193345d5734(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_515a8739d0b15d52852beec9b941e519(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].x != 0u) { n = min(n, count_in[0] * uniforms[0].z / uniforms[0].w); }
@@ -823,7 +823,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_d10ebf52ab4e1a74b4ba22ac812c4cdb(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_352bc1b2544bbd13e437571039ec14d0(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].y != 0u) { n = min(n, count_in[0] * uniforms[0].w / uniforms[1].x); }

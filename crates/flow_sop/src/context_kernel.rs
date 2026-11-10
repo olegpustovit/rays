@@ -9,7 +9,7 @@ use flow_syntax::syntax::{self, Node as SNode, QuoteKind, Syntax};
 use flow_syntax::ty::Ty;
 use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
-use rays_math::hash::md5_hex;
+use rays_math::hash::digest;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 
@@ -519,7 +519,7 @@ fn forms_digest(forms: &[Syntax]) -> String {
     for f in forms {
         put_form(&mut buffer, f);
     }
-    md5_hex(&buffer)
+    format!("{:032x}", digest(&buffer))
 }
 
 /// Own declaration and transitively referenced checked declarations/helpers.

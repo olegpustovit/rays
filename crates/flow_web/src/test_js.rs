@@ -374,8 +374,7 @@ fn integer_registers_past_2_pow_53_loop() {
     }
 }
 
-/// `i64::MIN / -1` wraps to MIN and `MIN % -1` is 0; `rand/at` keeps its 63-bit hash domain, so seeds
-/// from 2^62 alias other seeds (the same in native, JS and the fast register pairs).
+/// Division wraps at the signed boundary; indexed randomness retains every seed and index bit.
 #[test]
 fn int_div_of_min_and_rand_at_agree_with_native() {
     if !node_available() {
@@ -400,8 +399,7 @@ fn integer_registers_past_2_pow_53_a() { wide_integers(0, 4); }
 #[test]
 fn integer_registers_past_2_pow_53_b() { wide_integers(4, 8); }
 
-// Fast precision's 64-bit register pairs agree with native wherever native's 63 bits do not wrap,
-// far past 2^53 where plain numbers would not
+// Fast precision's 64-bit register pairs agree with native, including values past 2^53.
 const FAST_INTEGERS: [&str; 10] = [
     "(map (fn [(x : int)] (int/and (int/xor (int/mul x 73856093) (int/mul (int/mul x x) 19349663)) 4611686018427387903)) (array/range (int/add 4097 (frame/index)) :type int))",
     "(map (fn [(x : int)] (int/mod (int/mul (int/add x 1103515245) 2654435761) 1000003)) (array/range (int/add 4097 (frame/index)) :type int))",
@@ -457,4 +455,49 @@ fn fast_64_bit_hash_at_70000_elements() {
         true,
         "(map (fn [(x : int)] (int/and (int/xor (int/mul x 73856093) (int/mul (int/mul x x) 19349663)) 4611686018427387903)) (array/range (int/add 70000 (frame/index)) :type int))",
     );
+}
+
+/// Frozen independent vectors exercise the shipped runtime, not only generated region code.
+#[test]
+fn full_width_random_runtime_vectors() {
+    if !node_available() { eprintln!("node is absent: SKIPPED"); return; }
+    let mut script = format!("import * as p from \"{}\";\n", runtime_url("prims.js"));
+    script.push_str("import assert from 'node:assert/strict';const view=new DataView(new ArrayBuffer(8));const bits=x=>{view.setFloat64(0,x,true);return view.getBigUint64(0,true)};\n");
+    script.push_str("assert.equal(bits(p.rand_at(0n,0n)),0x3fec4415072f63b9n);\n");
+    script.push_str("assert.equal(bits(p.rand_at(1n,0n)),0x3fe22145bd91204bn);\n");
+    script.push_str("assert.equal(bits(p.rand_at(-1n,0n)),0x3fec9b2e2ee36ca5n);\n");
+    script.push_str("assert.equal(bits(p.rand_at(4611686018427387904n,0n)),0x3f654a1d51c1f500n);\n");
+    script.push_str("assert.equal(bits(p.rand_at(-4611686018427387904n,0n)),0x3fa2b21e4fe2a180n);\n");
+    script.push_str("assert.equal(bits(p.rand_at(9223372036854775807n,0n)),0x3fc533ebaa9701ccn);\n");
+    script.push_str("assert.equal(bits(p.rand_at(-9223372036854775808n,0n)),0x3fd207b02884aa7cn);\n");
+    script.push_str("assert.equal(bits(p.rand_at(0n,-1n)),0x0000000000000000n);\n");
+    script.push_str("assert.equal(bits(p.rand_at(0n,9223372036854775807n)),0x3fc2e13752bce754n);\n");
+    script.push_str("assert.equal(bits(p.rand_at(0n,-9223372036854775808n)),0x3fd207b02884aa7cn);\n");
+    script.push_str("assert.equal(bits(p.rand_at(-1n,-1n)),0x3fe69a0abf9e5977n);\n");
+    script.push_str("assert.equal(bits(p.rand_at(-9223372036854775808n,9223372036854775807n)),0x0000000000000000n);\n");
+    script.push_str("assert.equal(bits(p.rand_at(9223372036854775807n,-9223372036854775808n)),0x3fec9b2e2ee36ca5n);\n");
+    assert_eq!(rays_math::hash::float_sequence(&[]).to_bits(), 0x3fc6587b4fa55f50);
+    script.push_str("assert.equal(bits(p.value_rand()),0x3fc6587b4fa55f50n);\n");
+    assert_eq!(rays_math::hash::float_sequence(&[0.0]).to_bits(), 0x3fea0570ae1251aa);
+    script.push_str("assert.equal(bits(p.value_rand(0.0)),0x3fea0570ae1251aan);\n");
+    assert_eq!(rays_math::hash::float_sequence(&[-0.0]).to_bits(), 0x3fea0570ae1251aa);
+    script.push_str("assert.equal(bits(p.value_rand(-0.0)),0x3fea0570ae1251aan);\n");
+    assert_eq!(rays_math::hash::float_sequence(&[1.0]).to_bits(), 0x3fe5e5711b4bd1e0);
+    script.push_str("assert.equal(bits(p.value_rand(1.0)),0x3fe5e5711b4bd1e0n);\n");
+    assert_eq!(rays_math::hash::float_sequence(&[1.0, 2.0]).to_bits(), 0x3fdc00e7fb3c1606);
+    script.push_str("assert.equal(bits(p.value_rand(1.0,2.0)),0x3fdc00e7fb3c1606n);\n");
+    assert_eq!(rays_math::hash::float_sequence(&[2.0, 1.0]).to_bits(), 0x3fe39c48d5cedf8d);
+    script.push_str("assert.equal(bits(p.value_rand(2.0,1.0)),0x3fe39c48d5cedf8dn);\n");
+    assert_eq!(rays_math::hash::float_sequence(&[-1.25, 1e+20]).to_bits(), 0x3fc6292b1cb3f9c0);
+    script.push_str("assert.equal(bits(p.value_rand(-1.25,1e+20)),0x3fc6292b1cb3f9c0n);\n");
+    script.push_str("assert.equal(p.sop_context_seed(\"n\",new Map([[\"seed\",0n],[\"label\",\"\"]])),-7541087314458812168n);\n");
+    script.push_str("assert.equal(p.sop_context_seed(\"\\u017e\\ud83d\\ude42\",new Map([[\"seed\",-1n],[\"label\",\"a\\u0000b\"]])),-4018171267666195374n);\n");
+    script.push_str("assert.equal(p.sop_context_seed(\"a:b\",new Map([[\"seed\",-9223372036854775808n],[\"label\",\"c\"]])),-7593990123217220747n);\n");
+    script.push_str("assert.equal(p.sop_context_seed(\"a\",new Map([[\"seed\",9223372036854775807n],[\"label\",\"b:c\"]])),-6270758179017106594n);\n");
+    for seed in [0, -1, i64::MIN, i64::MAX] {
+        let noise = rays_math::noise::create(seed);
+        let expected = rays_math::noise::sample3(&noise, 0.125, -1.25, 9.5).to_bits();
+        script.push_str(&format!("assert.equal(bits(p.noise3(new Float64Array([0.125,-1.25,9.5]),{seed}n,1n,2,0.5)),{expected}n);\n"));
+    }
+    run_ok(&script);
 }

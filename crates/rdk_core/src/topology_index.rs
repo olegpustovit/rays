@@ -47,17 +47,8 @@ fn next_power_of_two(value: usize) -> Result<usize, error::T> {
     Ok(result)
 }
 
-fn wrap_int63(value: i64) -> i64 {
-    let low = (value as u64) & ((1_u64 << 63) - 1);
-    ((low << 1) as i64) >> 1
-}
-
 pub(crate) fn hash_pair(a: i64, b: i64) -> usize {
-    let scaled_b = wrap_int63(b.wrapping_mul(31_337));
-    let value = rays_math::hash::mix(a, scaled_b);
-    let logical_shift = (((value as u64) & ((1_u64 << 63) - 1)) >> 16) as i64;
-    let hash = (value ^ logical_shift) & ((1_i64 << 62) - 1);
-    hash as usize
+    rays_math::hash::word(rays_math::hash::word(rays_math::hash::SEED, a as u64), b as u64) as usize
 }
 
 fn create_uncached(

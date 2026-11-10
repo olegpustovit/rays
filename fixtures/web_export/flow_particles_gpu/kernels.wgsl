@@ -50,7 +50,7 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_47b91c697c17da6d1caccc5fba8e45bd(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_66f91d3db53c57f1be7c79ca33b9ac8c(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;

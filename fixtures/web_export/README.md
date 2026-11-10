@@ -1,8 +1,9 @@
 # web_export fixtures
 
-Output of the OCaml `rays web sketches/NAME.rays -o DIR` (`bin/rays.exe`) for the sketches that export,
-read by `rs/crates/web_export/src/test_web_export.rs`, which exports each sketch with the Rust crate and
-compares every file byte for byte.
+Rust-owned output fixtures for `web_export`, initially captured from the retired OCaml exporter.
+`crates/web_export/src/test_web_export.rs` exports each sketch with the current Rust crate and
+compares every file byte for byte. Z5 updates the shipped hash/RNG runtime, generated kernel identifiers and
+content-addressed module names. Captured numeric/binary data and large-file checksums remain unchanged.
 
 | Path | Content |
 |---|---|
@@ -17,7 +18,10 @@ recursive_signals. The other sketches have no `:context draw` graph (E_WEB_GRAPH
 
 ## Regenerating
 
-Build the OCaml binary if stale, then from the repository root:
+Capture current exports with:
 
-    ~/.local/bin/rw 'dune build bin/rays.exe'
-    ~/.local/bin/rw 'sh rs/fixtures/web_export/capture.sh'
+    WEB_EXPORT_DUMP=/tmp/rays-web-export cargo t -p web_export --lib
+
+The dump is written before comparison, so failures leave reviewable outputs. Review each
+changed file against the intended behavior before updating its fixture. Files over 1 MiB keep
+the existing MD5 checksum representation; runtime files are shared under `_runtime/`.

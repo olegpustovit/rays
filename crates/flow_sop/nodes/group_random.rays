@@ -6,9 +6,8 @@
 (defn group_random_pair :context value [(a : int) (b : int)]
   (let* [left (if (int/le a b) a b)
          right (if (int/le a b) b a)
-         mixed_left (int/mul (int/xor left (int/shr left 29)) 2177342782468422677)
-         mixed_right (int/xor right (int/shr right 27))]
-    (int/and (int/xor mixed_left (int/mul mixed_right 1499779743744070123)) 4611686018427387903)))
+         mixed_left (rand_mix_index (int/add (int/xor 2611923443488327891 left) -7046029254386353131))]
+    (rand_mix_index (int/add (int/xor mixed_left right) -7046029254386353131))))
 (defn group_random_missing :context sop [(geo : geometry) (owner : text) (name : text)]
   (let* [found (group_exists geo owner (if (equal? name "") "x" name))]
     (and (not (equal? name "")) (not found))))

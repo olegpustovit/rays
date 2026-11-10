@@ -1,4 +1,4 @@
-kernel_0b6eab60d971e5a6011afe871db11763
+kernel_d09f5686c4a7b3bcc6917c36c9bcb1ab
 @group(0) @binding(0) var<storage, read> input0: array<f32>;
 @group(0) @binding(1) var<storage, read_write> outbuf: array<f32>;
 @group(0) @binding(2) var<uniform> uniforms: array<vec4<u32>, 1>;
@@ -69,7 +69,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_0b6eab60d971e5a6011afe871db11763(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_d09f5686c4a7b3bcc6917c36c9bcb1ab(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[0].w != 0u) { n = min(n, count_in[0] * uniforms[0].y / uniforms[0].z); }

@@ -46,7 +46,7 @@ pub(crate) fn format_g(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn ocaml_string_hash_and_rand_tests() {
+    fn color_hash_and_rand_tests() {
         use crate::{color as Color, hash, rand};
 
         let close = |a: f64, b: f64| (a - b).abs() < 1e-15;
@@ -61,17 +61,13 @@ mod tests {
         assert_eq!(Color::aces(0.0), 0.0);
         assert!(close(Color::aces(1.0), 2.54 / 3.16));
         assert_eq!(Color::linear::rgb(1.5, -0.25, 4.0), Color::linear::T { r: 1.5, g: -0.25, b: 4.0 });
-        assert_eq!(hash::mix(3, 7), 3 * 65599 ^ 7);
-        assert_eq!(hash::mix_with(1_000_003, 3, 7), 3 * 1_000_003 ^ 7);
-        assert_eq!(hash::fnv64_mix(0xcbf29ce484222325_u64 as i64, 65),
-            (0xcbf29ce484222325_u64 ^ 65).wrapping_mul(0x100000001b3) as i64);
-        assert_eq!(hash::float_sequence32(&[1.0, 2.0]), 3_648_346_971);
+        assert_eq!(hash::mix(3, 7) as u64, 0x6e73e372e2338aca);
         for seed in [-(1_i64 << 62), -1, 0, 1, (1_i64 << 62) - 1] {
             for index in [-(1_i64 << 62), -1, 0, 1, (1_i64 << 62) - 1] {
                 assert_eq!(rand::float_at_int(seed, index), rand::float_at(rand::seed(seed), index));
             }
         }
-        assert_eq!(hash::string(""), 0xcbf29ce484222325_u64 as i64);
+        assert_eq!(hash::string("") as u64, 0x2cb0f69f4abea221);
     }
 
     #[test]

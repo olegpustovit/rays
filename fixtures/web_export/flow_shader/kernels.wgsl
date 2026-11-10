@@ -9,7 +9,7 @@ fn pixel_uv(index: u32, size: f32) -> f32 {
   return q + fma(-q, size, x) / size;
 }
 @compute @workgroup_size(64)
-fn kernel_279041b1a34538489fd6088a5f812e75(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_bb76330115359fbc64c8d7dcb0944385(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -69,7 +69,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_3a15ff44c248e0e6ef7b2cec630e3acd(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_6879ff4dcf3be3c00eaf8db5c4d86330(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -174,7 +174,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_ec14dc1c7079f649e2a4d045e2d19a8f(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_606077972f79db3e6c90a2b76e180bff(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -302,7 +302,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_31e5001e6efce6cfa780795fe6557e20(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_7364af138115e1561227db6da768d641(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -397,7 +397,7 @@ fn pixel_uv(index: u32, size: f32) -> f32 {
   return q + fma(-q, size, x) / size;
 }
 @compute @workgroup_size(64)
-fn kernel_279041b1a34538489fd6088a5f812e75(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_bb76330115359fbc64c8d7dcb0944385(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -457,7 +457,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_af26fdd5299dc8fbc6204b901fd29abb(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_600af57cea324e8f9dec87572f8702c6(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -563,7 +563,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_c00d92bd671777305712c283cae47cfa(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_2c93de973fc874ee9a7405ace4521a3c(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -688,7 +688,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_be1ecbf8c7e3db24d2b3cef14bf150b1(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_dceb80825ddbed247bca1fd155ba1cc6(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -785,7 +785,7 @@ fn pixel_uv(index: u32, size: f32) -> f32 {
   return q + fma(-q, size, x) / size;
 }
 @compute @workgroup_size(64)
-fn kernel_f71c5a9fa8496fd81b560d110c015f60(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_7b1412d967b786f55c8e636e0fd852d5(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -844,7 +844,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_77dc76b3f033322ecc7da21a72c9ee41(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_a888c6a8cf7d994412ee87437e941dba(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -947,7 +947,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_2de2c57bebbce975d1dfdbf4eefac88b(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_93504fef59fa7049b21665bb85105199(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -1067,7 +1067,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_fe9f2759488cc720a8fd940c84e74173(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_f58f82f3ecc5aac50d44b077df044acc(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -1161,7 +1161,7 @@ fn pixel_uv(index: u32, size: f32) -> f32 {
   return q + fma(-q, size, x) / size;
 }
 @compute @workgroup_size(64)
-fn kernel_fc62ede7ccb5b361b48d8fcb5e7e377f(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_d52edf27c6c9155587afc5037060fb0b(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -1219,7 +1219,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_40a852bd666d7dfabc1ce8fc103019ea(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_1e86a815cfee2fe01767ff2c715a6f6b(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -1326,7 +1326,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_e144cfa226f82a1da2fb9ba413db759a(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_fe727fb250fda4e4c8b850ab3a5683bf(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -1451,7 +1451,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_39b8490e231201e136985f5c8a13d799(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_b01a17dbc104735f210f371218cf3a06(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -1549,7 +1549,7 @@ fn pixel_uv(index: u32, size: f32) -> f32 {
   return q + fma(-q, size, x) / size;
 }
 @compute @workgroup_size(64)
-fn kernel_5ebe970c20ef069e90c2aa3f22475322(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_a04b60b6aebce37e4fe584da35b32d5a(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -1607,7 +1607,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_f502ce717778189582471eccd81a612c(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_7c67650bfc220d1c02a8750646006647(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -1705,7 +1705,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_c3f0e3a68bd90d3f557e7afac472b369(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_75ad46ba4d3b2be398e9a1babdf1393f(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -1825,7 +1825,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_8ab3cdeeb0c10d7636696d30b1ab18b8(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_425a00396959ac9a1f66fd6276745b1d(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -1925,7 +1925,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_ef04102bda509f9330ee6cf83274e268(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_bf9e9fa06289699fb75e830c54638784(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -2019,7 +2019,7 @@ fn pixel_uv(index: u32, size: f32) -> f32 {
   return q + fma(-q, size, x) / size;
 }
 @compute @workgroup_size(64)
-fn kernel_f71c5a9fa8496fd81b560d110c015f60(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_7b1412d967b786f55c8e636e0fd852d5(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -2078,7 +2078,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_7726b99031fc8563051443f16b5dbb7b(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_cc7b78d0b2c6e57501e0d3fa99d99713(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -2184,7 +2184,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_52ab5b8b8ab3d47c36cfeac389f806ce(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_293e6dff5f1e0964b72811648e295a66(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -2306,7 +2306,7 @@ fn wpow(a: f32, b: f32) -> f32 {
   return pow(x, b);
 }
 @compute @workgroup_size(64)
-fn kernel_c601133f6c93cbc9db25e9bb11cf56c9(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_4194400704802b1cdf0894cfea35319d(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;

@@ -1,6 +1,6 @@
-//! Byte-for-byte comparison of the Rust export with the OCaml `rays web FILE.rays -o DIR`
-//! (fixtures: fixtures/web_export, captured by capture.sh). A file over 1 MiB is held as its
-//! `.md5` digest.
+//! Byte-for-byte Rust export goldens, initially captured from the retired OCaml exporter.
+//! Intentional shared-hash/RNG changes update their fixtures with numeric checks retained.
+//! A file over 1 MiB is held as its `.md5` checksum.
 use rays_math::hash::md5_hex;
 use crate::{web_export, web_runtime};
 use std::path::PathBuf;
@@ -20,7 +20,7 @@ fn export(sketch: &str) -> Vec<(String, Vec<u8>)> {
 fn first_difference(a: &[u8], b: &[u8]) -> String {
     let at = a.iter().zip(b.iter()).position(|(x, y)| x != y).unwrap_or(a.len().min(b.len()));
     let around = |s: &[u8]| String::from_utf8_lossy(&s[at.saturating_sub(40)..(at + 40).min(s.len())]).into_owned();
-    format!("first difference at byte {at} (rust {} bytes, ocaml {} bytes)\n  rust:  {:?}\n  ocaml: {:?}", a.len(), b.len(), around(a), around(b))
+    format!("first difference at byte {at} (rust {} bytes, fixture {} bytes)\n  rust:  {:?}\n  fixture: {:?}", a.len(), b.len(), around(a), around(b))
 }
 
 fn check(sketch: &str) {

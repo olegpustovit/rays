@@ -164,15 +164,8 @@ fn direction_planes(
     }
 }
 
-fn wrap63(value: i64) -> i64 {
-    (value << 1) >> 1
-}
-
 fn jitter_stream(query: i64, sample: i64, component: i64) -> i64 {
-    wrap63(
-        wrap63(wrap63(query.wrapping_mul(0x1e3779b97f4a7c15)) ^ wrap63(sample.wrapping_mul(0x14d049bb133111eb)))
-            ^ wrap63(component.wrapping_mul(0x11b54a32d192ed03)),
-    )
+    rays_math::hash::word(rays_math::hash::word(rays_math::hash::word(rays_math::hash::SEED, query as u64), sample as u64), component as u64) as i64
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -69,39 +69,34 @@ fn order(keys: &[i64]) -> Vec<usize> {
     order
 }
 
-/// Two independent FNV-1a lanes: 128 bits of content identity (OCaml used MD5; only equality of
-/// digests is observable).
+/// Two seeded lanes of the shared word hash retain the 128-bit content identity.
 struct Digest(u64, u64);
-
 impl Digest {
-    fn new() -> Digest {
-        Digest(0xcbf29ce484222325, 0x84222325cbf29ce4)
+    fn new() -> Self { Self(rays_math::hash::SEED, rays_math::hash::SEED2) }
+    fn int(&mut self, value: i64) {
+        self.0 = rays_math::hash::word(self.0, value as u64);
+        self.1 = rays_math::hash::word(self.1, value as u64);
     }
-    fn byte(&mut self, b: u8) {
-        self.0 = (self.0 ^ u64::from(b)).wrapping_mul(0x100000001b3);
-        self.1 = (self.1 ^ u64::from(b)).wrapping_mul(0x1000193).rotate_left(5);
+    fn bytes(&mut self, bytes: &[u8]) {
+        self.0 = rays_math::hash::bytes(self.0, bytes);
+        self.1 = rays_math::hash::bytes(self.1, bytes);
     }
-    fn int(&mut self, v: i64) {
-        v.to_le_bytes().iter().for_each(|b| self.byte(*b));
-    }
-    fn text(&mut self, s: &str) {
-        self.int(s.len() as i64);
-        s.bytes().for_each(|b| self.byte(b));
-    }
-    fn hex(&self) -> String {
-        format!("{:016x}{:016x}", self.0, self.1)
-    }
+    fn text(&mut self, text: &str) { self.bytes(text.as_bytes()); }
+    fn hex(&self) -> String { format!("{:016x}{:016x}", self.0, self.1) }
 }
 
 fn digest(geometry_value: &geometry::T) -> String {
     let mut d = Digest::new();
     if let Ok(view) = rdk_core::topology::view::view(geometry::topology(geometry_value)) {
+        d.int(view.vertex_points.len() as i64);
         view.vertex_points.iter().for_each(|v| d.int(*v));
+        d.int(view.primitive_offsets.len() as i64);
         view.primitive_offsets.iter().for_each(|v| d.int(*v));
-        view.primitive_kinds.iter().for_each(|v| d.byte(*v));
+        d.bytes(&view.primitive_kinds);
     }
     if let Ok(view) = rdk_core::packed::float3::view::view(geometry::positions(geometry_value)) {
         for plane in [&view.x, &view.y, &view.z] {
+            d.int(plane.len() as i64);
             plane.iter().for_each(|v| d.int(v.to_bits() as i64));
         }
     }

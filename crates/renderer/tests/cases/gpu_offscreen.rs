@@ -654,6 +654,21 @@ fn gpu_execution_texture_sampling() {
             assert_eq!(renderer::stats(&e).unwrap().uploaded_bytes,uploaded,"malformed texture rejection was not atomic");
         }
     }
+    // None and an empty label collided in the former sampler hash; actual descriptors stay distinct.
+    let mut exact = (*execution_scene3_draw("sampler-exact-descriptor",u32::MAX,(0.1,0.1))).clone();
+    exact.family=renderer::PipelineFamily::Scene3Textured;
+    exact.texture=Some(Rc::new(SampledTexture { key:"native-mip-chain".into(),levels:levels.clone(),sampler:nearest.clone(),gpu:None }));
+    exact.draw.state.viewport=(0,0,4,4); exact.draw.state.scissor=(0,0,4,4);
+    let exact=Rc::new(exact);
+    for _ in 0..3 { renderer::draw(None,&e,&[exact.clone()]).unwrap(); renderer::capture(&e).unwrap(); }
+    let before=live_handles();
+    let mut labelled=(*exact).clone();
+    Rc::make_mut(labelled.texture.as_mut().unwrap()).sampler.label=Some(String::new());
+    let labelled=Rc::new(labelled);
+    renderer::draw(None,&e,&[labelled.clone()]).unwrap(); renderer::capture(&e).unwrap();
+    assert_eq!(live_handles(),before+1,"distinct sampler descriptor reused an existing sampler");
+    for _ in 0..3 { renderer::draw(None,&e,&[labelled.clone()]).unwrap(); renderer::capture(&e).unwrap(); }
+    assert_eq!(live_handles(),before+1,"identical sampler descriptor created another sampler");
     let quad=|texture:SampledTexture,uv:f32| {
         let mut d=(*execution_scene3_draw("sampler-quad",u32::MAX,(0.,0.))).clone();
         d.family=renderer::PipelineFamily::Scene2Textured; d.vertex_attributes=None; d.draw.state.transform_uniforms=None;

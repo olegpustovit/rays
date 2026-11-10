@@ -9,7 +9,7 @@ fn pixel_uv(index: u32, size: f32) -> f32 {
   return q + fma(-q, size, x) / size;
 }
 @compute @workgroup_size(64)
-fn kernel_cf4d185ad10fc7bb59255e1030129a33(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_5a006ca0a81c6925792c735495c0885c(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;

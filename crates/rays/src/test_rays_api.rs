@@ -62,8 +62,8 @@ fn math_vec_color_mat4() {
 
 #[test]
 fn random_and_noise_are_deterministic() {
-    let a = rand::seed64(0x123456789abcdef);
-    let b = rand::seed64(0x123456789abcdef);
+    let a = rand::seed(0x123456789abcdef);
+    let b = rand::seed(0x123456789abcdef);
     let left: Vec<f64> = (0..100_000).map(|i| rand::float_at(a, i)).collect();
     let right: Vec<f64> = (0..100_000).map(|i| rand::float_at(b, i)).collect();
     check(left == right && left.iter().all(|x| *x >= 0. && *x < 1.), "Rand deterministic 100k");

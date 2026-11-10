@@ -171,16 +171,14 @@
         (list {:r0 (get (nth reduced.rows 0) :right) :r1 (get (nth reduced.rows 1) :right)
                :r2 (get (nth reduced.rows 2) :right) :r3 (get (nth reduced.rows 3) :right)}))))
 
+  ; Full 64-bit SplitMix64. Negative literals spell the same unsigned multiplier bits.
   (defn rand_mix_index :context value [(value : int)]
-    (let* [a (int/xor value (int/shr (int/and value 9223372036854775807) 30))
-           b (int/sub (int/xor (int/and (int/mul a 4564476756301768121) 9223372036854775807) 4611686018427387904) 4611686018427387904)
-           c (int/xor b (int/shr (int/and b 9223372036854775807) 27))
-           d (int/sub (int/xor (int/and (int/mul c 1499779743744070123) 9223372036854775807) 4611686018427387904) 4611686018427387904)]
-      (int/xor d (int/shr (int/and d 9223372036854775807) 31))))
+    (let* [a (int/mul (int/xor value (int/shr value 30)) -4658895280553007687)
+           b (int/mul (int/xor a (int/shr a 27)) -7723592293110705685)]
+      (int/xor b (int/shr b 31))))
   (defn rand_at :context value [(seed : int) (index : int)]
-    (let* [shifted (int/sub (int/xor (int/and (int/add (int/sub (int/xor (int/and index 9223372036854775807) 4611686018427387904) 4611686018427387904) 1276007651554290947) 9223372036854775807) 4611686018427387904) 4611686018427387904)
-           key (int/sub (int/xor (int/and (int/xor (int/sub (int/xor (int/and seed 9223372036854775807) 4611686018427387904) 4611686018427387904) (int/sub (int/xor (int/and (int/mul shifted 2177342782468422677) 9223372036854775807) 4611686018427387904) 4611686018427387904)) 9223372036854775807) 4611686018427387904) 4611686018427387904)]
-      (/ (float (int/shr (int/and (rand_mix_index key) 9223372036854775807) 10)) 9007199254740992.0)))
+    (let* [state (int/add seed (int/mul (int/add index 1) -7046029254386353131))]
+      (/ (float (int/shr (rand_mix_index state) 11)) 9007199254740992.0)))
 
   ; Reindexing helpers (C.8). Exact integer gather: source[index[i]].
   (defn int_gather :context value [(source : (array int)) (index : (array int))]

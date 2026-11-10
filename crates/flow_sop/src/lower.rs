@@ -346,16 +346,7 @@ fn material_args(kind: &str, args: Vec<(String, Value)>) -> Vec<(String, Value)>
 /// ids and the library is part of the binary. An authored one is digested afresh.
 static LIBRARY_KEYS: Mutex<BTreeMap<(String, i64), String>> = Mutex::new(BTreeMap::new());
 
-fn digest(text: &str) -> String {
-    // the OCaml Digest is MD5; only equality of keys matters here, never the bytes
-    let mut h: u64 = 0xcbf29ce484222325;
-    let mut g: u64 = 0x9e3779b97f4a7c15;
-    for b in text.bytes() {
-        h = (h ^ b as u64).wrapping_mul(0x100000001b3);
-        g = (g.rotate_left(5) ^ b as u64).wrapping_mul(0xff51afd7ed558ccd);
-    }
-    format!("{h:016x}{g:016x}")
-}
+fn digest(text: &str) -> String { format!("{:032x}", rays_math::hash::digest(text.as_bytes())) }
 
 pub fn declaration_key(checked: &Workspace, d: &NodeDefinition) -> String {
     let compute = || digest(&ck::declaration_source(checked, d));

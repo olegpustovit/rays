@@ -1,8 +1,8 @@
 // Port of lib/rays_math/test_color.ml, assertion for assertion.
 use crate::{color as Color, hash, rand};
 
-const OCAML_MIN_INT: i64 = -(1 << 62);
-const OCAML_MAX_INT: i64 = (1 << 62) - 1;
+const MIN_INT: i64 = i64::MIN;
+const MAX_INT: i64 = i64::MAX;
 
 fn close(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-15
@@ -25,19 +25,13 @@ fn color_hex_unit_floats_hsl_hsv_aces_and_linear() {
 
 #[test]
 fn hash_mixes_float_sequences_and_strings() {
-    assert_eq!(hash::mix(3, 7), (3 * 65599) ^ 7);
-    assert_eq!(hash::mix_with(1_000_003, 3, 7), (3 * 1_000_003) ^ 7);
-    assert_eq!(
-        hash::fnv64_mix(0xcbf29ce484222325_u64 as i64, 65),
-        (0xcbf29ce484222325_u64 as i64 ^ 65).wrapping_mul(0x100000001b3)
-    );
-    assert_eq!(hash::float_sequence32(&[1.0, 2.0]), 3_648_346_971);
-    assert_eq!(hash::string(""), 0xcbf29ce484222325_u64 as i64);
+    assert_eq!(hash::mix(3, 7) as u64, 0x6e73e372e2338aca);
+    assert_eq!(hash::string("rays") as u64, 0xd2dfb10bc7fe070c);
 }
 
 #[test]
 fn float_at_int_matches_float_at_over_the_seed_and_index_edges() {
-    let edges = [OCAML_MIN_INT, -1, 0, 1, OCAML_MAX_INT];
+    let edges = [MIN_INT, -1, 0, 1, MAX_INT];
     for seed in edges {
         for index in edges {
             assert_eq!(rand::float_at_int(seed, index), rand::float_at(rand::seed(seed), index));

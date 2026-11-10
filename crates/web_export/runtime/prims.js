@@ -2,7 +2,7 @@
 // Each export is named after its primitive: "+" add, "-" sub, "*" mul, "/" div, "<" lt, "<=" le,
 // ">" gt, ">=" ge, "=" eq, "equal?" equal, and every "/" becomes "_" (int/mul -> int_mul).
 //
-// Values: Int = BigInt (63-bit signed), Float = Number, Bool = boolean, Text = string,
+// Values: Int = BigInt (64-bit signed), Float = Number, Bool = boolean, Text = string,
 // Vec2/3/4 = Float64Array of length 2/3/4, List = Array, Record = Map (insertion = field order),
 // packed array = PArray, empty geometry (sequence_build filler) = null.
 // Static lowering parameters come first: coerce(type, v), color_byte(mode, v), fail(code, message).
@@ -65,8 +65,6 @@ const toInt = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? BigInt(Mat
   : err('E_NONFINITE', `${name} produced a nonfinite value.`);
 const intOf = v => typeof v === 'bigint' ? v : toInt('int', Math.floor(num(v) + 0.5));
 const wrap = n => BigInt.asIntN(64, n);
-// rand/at and the geometry hashes keep the 63-bit domain of the OCaml port: seeds from 2^62 alias.
-const w63 = n => BigInt.asIntN(63, n);
 const isVec = v => v instanceof Float64Array;
 const isNum = v => typeof v === 'bigint' || typeof v === 'number';
 
@@ -176,7 +174,7 @@ export const and = (a, b) => truth(a) && truth(b);
 export const or = (a, b) => truth(a) || truth(b);
 export const not = a => !truth(a);
 
-// ---- signed 63-bit integers ----
+// ---- signed 64-bit integers ----
 const operand = v => typeof v === 'bigint' ? v : intOf(v);
 const nonzero = (a, b) => { const x = operand(a), y = operand(b);
   return y === 0n ? err('E_RANGE', 'Integer division by zero.') : [x, y]; };
@@ -197,16 +195,27 @@ export const int_le = (a, b) => operand(a) <= operand(b);
 export const int_gt = (a, b) => operand(a) > operand(b);
 export const int_ge = (a, b) => operand(a) >= operand(b);
 export const int_eq = (a, b) => operand(a) === operand(b);
+const u64 = x => BigInt.asUintN(64, x);
+function avalanche64(x) {
+  x = u64((x ^ (x >> 30n)) * 0xbf58476d1ce4e5b9n);
+  x = u64((x ^ (x >> 27n)) * 0x94d049bb133111ebn);
+  return x ^ (x >> 31n);
+}
+const hashWord64 = (hash, word) => avalanche64(u64((hash ^ u64(word)) + 0x9e3779b97f4a7c15n));
+function hashBytes64(seed, bytes) {
+  let hash = hashWord64(seed, BigInt(bytes.length));
+  for (let at = 0; at < bytes.length; at += 8) {
+    let word = 0n;
+    for (let i = 0; i < Math.min(8, bytes.length - at); i++) word |= BigInt(bytes[at + i]) << BigInt(i * 8);
+    hash = hashWord64(hash, word);
+  }
+  return hash;
+}
 export function rand_at(seed, index) {
   if (typeof seed !== 'bigint' || typeof index !== 'bigint' || wrap(seed) !== seed || wrap(index) !== index)
     err('E_TYPE', 'rand/at needs integer seed and index.');
-  let x = w63(w63(seed) ^ w63(w63(w63(index) + 0x11b54a32d192ed03n) * 0x1e3779b97f4a7c15n));
-  x = w63(x ^ (BigInt.asUintN(63, x) >> 30n));
-  x = w63(x * 0x3f58476d1ce4e5b9n);
-  x = w63(x ^ (BigInt.asUintN(63, x) >> 27n));
-  x = w63(x * 0x14d049bb133111ebn);
-  x = w63(x ^ (BigInt.asUintN(63, x) >> 31n));
-  return Number(BigInt.asUintN(63, x) >> 10n) / 9007199254740992;
+  const x = avalanche64(u64(seed + 0x9e3779b97f4a7c15n * u64(index + 1n)));
+  return Number(x >> 11n) / 9007199254740992;
 }
 
 // ---- equality, display, text ----
@@ -683,15 +692,14 @@ export function array_concat(a, b) {
 
 // ---- hash, noise, colour ----
 export function value_rand(...keys) {
-  const ks = keys.map(num);
-  let h = 0x9e3779b9;
-  for (const x of ks) {
-    h = Math.imul(h ^ (Math.floor(x * 1000003) >>> 0), 0x85ebca6b) >>> 0;
-    h = (h ^ (h >>> 13)) >>> 0;
-    h = Math.imul(h, 0xc2b2ae35) >>> 0;
-    h = (h ^ (h >>> 16)) >>> 0;
+  let hash = hashWord64(0x243f6a8885a308d3n, BigInt(keys.length));
+  for (const key of keys) {
+    const x = num(key);
+    bits.setFloat64(0, x, true);
+    const word = x === 0 ? 0n : Number.isNaN(x) ? 0x7ff8000000000000n : bits.getBigUint64(0, true);
+    hash = hashWord64(hash, word);
   }
-  return (h % 1000000) / 1000000;
+  return Number(hash >> 11n) / 9007199254740992;
 }
 
 const U64 = (1n << 64n) - 1n, tables = new Map(); // at most 16 dynamic seeds
@@ -702,8 +710,7 @@ function permutation(seed) {
   const p = Array.from({ length: 256 }, (_, i) => i);
   for (let i = 255; i >= 1; i--) {
     s = (s + 0x9E3779B97F4A7C15n) & U64;
-    let z = s ^ (s >> 30n); z = (z * 0xBF58476D1CE4E5B9n) & U64;
-    z ^= z >> 27n; z = (z * 0x94D049BB133111EBn) & U64; z ^= z >> 31n;
+    const z = avalanche64(s);
     const j = Number(z % BigInt(i + 1));
     [p[i], p[j]] = [p[j], p[i]];
   }
@@ -769,7 +776,7 @@ export function image_noise(width, height, frequency, seed) {
   return pixels;
 }
 
-// Native float-to-int conversion of c*255+0.5: truncate, saturate at int64, keep 63 bits, clamp to a byte.
+// Native float-to-int conversion of c*255+0.5: truncate, saturate at int64, clamp to a byte.
 function byte(c) {
   const t = c * 255 + 0.5;
   if (Number.isNaN(t)) return 0n;
@@ -811,11 +818,10 @@ export function color_parse(v) {
 export function sop_context_seed(namespace, context) {
   if (typeof namespace !== 'string' || !namespace.trim()) err('E_SEED_NAMESPACE', 'A context seed namespace must be nonblank.');
   if (!(context instanceof Map)) err('E_NODE_CONTEXT', 'Context seed is available inside a defnode body.');
-  let identity = 0xcbf29ce484222325n;
-  for (const byte of textBytes(`${namespace}:${context.get('label')}`))
-    identity = BigInt.asUintN(64, (identity ^ BigInt(byte)) * 0x100000001b3n);
-  const mixed = BigInt.asUintN(64, BigInt(context.get('seed')) ^ (identity * 0x9e3779b97f4a7c15n));
-  return w63(mixed ^ (mixed >> 32n));
+  let identity = hashWord64(BigInt(context.get('seed')), 0n);
+  identity = hashBytes64(identity, textBytes(namespace));
+  identity = hashBytes64(identity, textBytes(context.get('label')));
+  return BigInt.asIntN(64, identity);
 }
 
 function attributePattern(source, rewriteLabel = null) {

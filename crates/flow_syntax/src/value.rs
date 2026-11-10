@@ -98,7 +98,7 @@ pub fn fail(code: &str, message: &str) -> Diagnostic { diagnostic(code, message)
 pub fn failf(code: &str, message: &str) -> Diagnostic { diagnostic(code, message) }
 
 pub fn hash(values: &[f64]) -> f64 {
-    (rays_math::hash::float_sequence32(values) % 1_000_000) as f64 / 1_000_000.0
+    rays_math::hash::float_sequence(values)
 }
 
 fn round(value: f64) -> f64 { (value + 0.5).floor() }
@@ -340,22 +340,19 @@ pub fn remembered() -> Vec<Retained> {
 pub fn retained_bytes() -> usize { DIGESTS.retained_bytes() + FINITE_ARRAYS.retained_bytes() }
 
 fn digest_float_array(values: &[f64]) -> String {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for value in values { for byte in value.to_bits().to_le_bytes() { hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3); } }
-    format!("{:016x}", hash)
+    let mut hash = rays_math::hash::word(rays_math::hash::SEED, values.len() as u64);
+    for value in values { hash = rays_math::hash::word(hash, value.to_bits()); }
+    format!("{hash:016x}")
 }
 fn digest_int_array(values: &[i64]) -> String {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for value in values { for byte in value.to_le_bytes() { hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3); } }
-    format!("{:016x}", hash)
+    let mut hash = rays_math::hash::word(rays_math::hash::SEED, values.len() as u64);
+    for value in values { hash = rays_math::hash::word(hash, *value as u64); }
+    format!("{hash:016x}")
 }
 fn digest_text_array(values: &TextArray) -> String {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for value in values.iter() {
-        for byte in (value.len() as u64).to_le_bytes() { hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3); }
-        for byte in value { hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3); }
-    }
-    format!("{:016x}", hash)
+    let mut hash = rays_math::hash::word(rays_math::hash::SEED, values.len() as u64);
+    for value in values.iter() { hash = rays_math::hash::bytes(hash, value); }
+    format!("{hash:016x}")
 }
 fn memo_digest(key: MemoKey, digest: &dyn Fn() -> String) -> String { DIGESTS.get_or_compute(key, digest) }
 fn key_float_array(values: &Arc<Vec<f64>>, tag: &str) -> Vec<u8> {

@@ -9,8 +9,7 @@
 //! that owns the glyph atlas and the instance builder for the duration of the paint.
 use crate::theme::{self, Theme};
 use input::{Event, Key, MouseButton, Platform, ScrollPhase};
-use rays_math::hash::{lsr, wrap_int63};
-use rays_math::hash::{fnv_int_mix, fnv_int_range};
+use rays_math::hash;
 use rays::{font, frame as rframe, image, scene, sketch};
 use rays_math::color::{self, T as Color};
 use scene_command::ui_batch::{self, Clip};
@@ -29,10 +28,9 @@ pub const MIN_INT: i64 = -4611686018427387904;
 
 const ROOT_KEY: i64 = 0x2c1b3c6d;
 
-/// 63-bit FNV-1a; keys 0 and 1 are the open-addressing empty/tombstone marks.
+/// Keys 0 and 1 are the open-addressing empty/tombstone marks.
 fn hash_range(seed: i64, text: &str, first: usize, last: usize) -> i64 {
-    let hash = fnv_int_range(seed ^ 0x2bf29ce484222325, text, first as i64, last as i64);
-    let hash = hash ^ lsr(hash, 29);
+    let hash = hash::bytes(seed as u64, &text.as_bytes()[first..last]) as i64;
     if hash == 0 || hash == 1 { hash + 2 } else { hash }
 }
 
@@ -438,7 +436,7 @@ impl Atlas {
             Some(at) => {
                 // A mutated font (style, hinting) rasterizes differently: new glyph ids.
                 let id = self.fonts[at].1;
-                self.glyphs.retain(|key, _| lsr(*key, 26) != id);
+                self.glyphs.retain(|key, _| ((*key as u64 >> 26) as i64) != id);
                 self.fonts.remove(at);
                 self.fonts.insert(0, (font.clone(), id, generation));
                 id
@@ -832,8 +830,7 @@ fn packed(c: Color) -> i32 {
 
 /// Integer-derived child keys: no label string per frame.
 pub fn int_key(seed: i64, n: i64) -> i64 {
-    let hash = fnv_int_mix(seed, wrap_int63(n.wrapping_mul(0x1e3779b97f4a7c15)));
-    let hash = hash ^ lsr(hash, 29);
+    let hash = hash::mix(seed, n);
     if hash == 0 || hash == 1 { hash + 2 } else { hash }
 }
 

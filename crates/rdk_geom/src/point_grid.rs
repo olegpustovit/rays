@@ -13,11 +13,6 @@ pub struct T {
     pub cell_count: i64,
 }
 
-/// Wraps to OCaml's signed 63-bit `int`.
-pub(crate) fn wrap63(value: i64) -> i64 {
-    (value << 1) >> 1
-}
-
 fn next_power_of_two(value: i64) -> i64 {
     let mut result = 8_i64;
     while result < value {
@@ -28,24 +23,12 @@ fn next_power_of_two(value: i64) -> i64 {
 
 #[inline]
 fn integer_hash(x: i64, y: i64, z: i64) -> i64 {
-    let value = wrap63(
-        wrap63(x.wrapping_mul(73_856_093)) ^ wrap63(y.wrapping_mul(19_349_663))
-            ^ wrap63(z.wrapping_mul(83_492_791)),
-    );
-    // `value lsr 16` on a 63-bit int, then `land max_int`.
-    let logical = ((value as u64) & ((1_u64 << 63) - 1)) >> 16;
-    (value ^ logical as i64) & (i64::MAX >> 1)
+    let h = rays_math::hash::word(rays_math::hash::word(rays_math::hash::word(rays_math::hash::SEED, x as u64), y as u64), z as u64);
+    h as i64
 }
 
 /// Exact cell coordinate of a float (zero maps to zero).
-pub fn float_cell(value: f64) -> i64 {
-    if value == 0.0 {
-        0
-    } else {
-        let bits = value.to_bits();
-        wrap63((bits ^ (bits >> 32)) as i64)
-    }
-}
+pub fn float_cell(value: f64) -> i64 { if value == 0.0 { 0 } else { value.to_bits() as i64 } }
 
 /// Room for `cells` distinct cells and point numbers below `points`.
 pub fn create(cells: i64, points: i64) -> T {

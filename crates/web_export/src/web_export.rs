@@ -1,6 +1,6 @@
 //! Port of lib/web_export/web_export.ml: the static 2D workspace export, with its JavaScript/WGSL
 //! runtime embedded. `lower` checks and lowers the first draw graph; `files` prints the export.
-use rays_math::hash::md5_hex;
+use rays_math::hash;
 use rays_math::text_array::TextArray;
 use crate::web_runtime;
 use editor_document::workspace_doc as doc;
@@ -169,18 +169,15 @@ fn same_float(a: f64, b: f64) -> bool {
 }
 
 fn key_hash(v: &Value) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut mix = |x: u64| {
-        h ^= x;
-        h = h.wrapping_mul(0x100_0000_01b3);
-    };
+    let mut h = hash::SEED;
+    let mut mix = |x: u64| { h = hash::word(h, x); };
     match v {
         Value::Int_array(a) => {
-            mix(1);
+            mix(1); mix(a.len() as u64);
             a.iter().for_each(|x| mix(*x as u64));
         }
         Value::Floats(width @ 1..=4, a) => {
-            mix(*width as u64 + 1);
+            mix(*width as u64 + 1); mix(a.len() as u64);
             a.iter().for_each(|x| mix(bits(*x)));
         }
         _ => {}
@@ -729,9 +726,12 @@ impl Export<'_> {
 
     fn emit_module(&mut self, name: &str, program: &C::Program) -> R<String> {
         let js = self.emit_program(&format!("{name}:"), program)?;
-        let mut hashed = js.clone().into_bytes();
-        hashed.extend_from_slice(&self.store.lock().unwrap().data);
-        let file = format!("{name}-{}.js", md5_hex(&hashed));
+        let identity = hash::digest(js.as_bytes());
+        let store = self.store.lock().unwrap();
+        let a = hash::bytes((identity >> 64) as u64, &store.data);
+        let b = hash::bytes(identity as u64, &store.data);
+        let file = format!("{name}-{a:016x}{b:016x}.js");
+        drop(store);
         self.modules.push((file.clone(), js));
         self.imports.push(format!("import * as {name} from \"./{file}\";\n"));
         Ok(name.to_owned())

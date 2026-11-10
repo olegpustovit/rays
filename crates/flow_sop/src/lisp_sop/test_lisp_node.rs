@@ -137,8 +137,8 @@ fn authored_body_errors_cook_lazily() {
     let salt: i64 = -1582480459898762999;
     let salted_seed = operators::seed_for(salt, 0, "body_error", "body_error");
     assert!(salted_seed != seed && operators::seed_for(0, 0, "body_error", "body_error") == seed, "context seed salt did not change the mix or changed the unsalted one");
-    // the same salt as native's 0x6a09e667f3bcc909 xor: its low 63 bits
-    assert_eq!(salt & i64::MAX, 0x6a09e667f3bcc909, "salt literal is not native's constant");
+    // The original signed literal retains its full-width bits as a salt.
+    assert_eq!(salt as u64, 0xea09e667f3bcc909, "salt literal lost its high bit");
     let salted_call = lower_ref(false, &source(&format!("(if (int/eq (sop/context_seed \"body_error\" :salt {salt}) {salted_seed}) (error \"E_BODY\" \"body failure\" :cause \"authored cause\") geo)")));
     with_session(&mut |s| expect_error(s, 1, &salted_call));
 }

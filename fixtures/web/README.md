@@ -1,7 +1,9 @@
 # Web printer fixtures (flow_web)
 
-Oracle texts for `rs/crates/flow_web`, printed by the OCaml `Flow_web` printers (`lib/flow_web`) at
-the time the Rust port was written. Nothing here is hand-edited.
+Rust-owned printer fixtures for `crates/flow_web`, initially captured from the retired OCaml
+printers. Z5 replaces generated kernel identifiers with the shared two-lane word hash; each
+former MD5 identifier was verified against its source before changing only the identifier.
+Shader bodies and the documented register-order differences remain unchanged.
 
 | Directory | Printer | Cases |
 |---|---|---|
@@ -15,15 +17,14 @@ printer refuses); JS files are the `region` source. File names are the case name
 outside `[A-Za-z0-9-]` replaced by `_`.
 
 The frame-level goldens (`frame_*.js`, 93 files) and the four `.wgsl`/`.js` goldens of the basic
-fixtures are not copied: the Rust tests read them in place from `lib/flow_web/goldens/`.
+fixtures are not copied: the Rust tests read them in place from `crates/flow_web/goldens/`.
 
 ## Regenerating
 
-`oracle/dump.ml.txt` is the throwaway OCaml dumper (`oracle/dune.txt` its dune stanza). To regenerate: copy
-both into a temporary directory at the repository root as `dump.ml` and `dune`, build and run it with the
-Windows environment wrapper, then delete the directory:
-
-    rw 'cd /c/Users/snowbear/projects/rays && dune build ./scratch_flowweb_dump/dump.exe && ./_build/default/scratch_flowweb_dump/dump.exe rs/fixtures/web'
+Use the current Rust `wgsl::kernel`, `wgsl::kernel_fast` and `js::region` printers. Run
+`cargo t -p flow_web test_oracle`; differing actual texts are written to the system temporary
+directory as `flow_web_actual_*`. Review each intended difference before updating its fixture.
+`oracle/dump.ml.txt` and `oracle/dune.txt` retain the original capture evidence.
 
 The Rust side is `crates/flow_web/src/test_oracle.rs`. It lists the few cases that differ today because
 `flow_ir` hands the printers a different register program (OCaml evaluates the branches of `if` right to

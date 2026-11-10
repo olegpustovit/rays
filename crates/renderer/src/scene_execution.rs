@@ -605,7 +605,7 @@ pub struct SceneExecution {
     staged_frame: i64,
     /// and the frame before it did too
     staged_stream: bool,
-    samplers: HashMap<u64, Sampler>,
+    samplers: Vec<(SamplerDescriptor, Sampler)>,
     arguments: Option<ArgumentPool>,
     icb_stats: IcbStats,
     uploaded: i64,
@@ -975,7 +975,7 @@ pub fn create(
                 texture_upload_scratch: None,
                 staged_frame: -1,
                 staged_stream: false,
-                samplers: HashMap::new(),
+                samplers: Vec::new(),
                 arguments: None,
                 icb_stats: IcbStats {
                     builds: 0,
@@ -1007,15 +1007,12 @@ pub fn create(
     }
 }
 
-const HASH_SEED: u128 = (0xcbf29ce484222325u128 << 64) | 0x84222325cbf29ce4;
+const HASH_SEED: u128 = (rays_math::hash::SEED as u128) << 64 | rays_math::hash::SEED2 as u128;
 
 /// Length-framed parts keep component boundaries distinct without temporary strings.
 fn digest(hash: u128, data: &[u8]) -> u128 {
-    let (mut a, mut b) = ((hash >> 64) as u64, hash as u64);
-    for x in (data.len() as u64).to_le_bytes().into_iter().chain(data.iter().copied()) {
-        a = (a ^ u64::from(x)).wrapping_mul(0x100000001b3);
-        b = (b.rotate_left(5) ^ u64::from(x)).wrapping_mul(0x9E3779B97F4A7C15);
-    }
+    let a = rays_math::hash::bytes((hash >> 64) as u64, data);
+    let b = rays_math::hash::bytes(hash as u64, data);
     (u128::from(a) << 64) | u128::from(b)
 }
 
@@ -2115,53 +2112,24 @@ fn render_target(
     })
 }
 
-struct Mix(u64);
-
-impl Mix {
-    fn word(&mut self, value: u64) {
-        self.0 = (self.0 ^ value).wrapping_mul(0x9E3779B97F4A7C15).rotate_left(29);
+fn sampler_for(value: &mut SceneExecution, descriptor: &SamplerDescriptor) -> Result<(usize, Sampler), Error> {
+    if let Some((index, (_, sampler))) = value.samplers.iter().enumerate().find(|(_, (stored, _))| stored == descriptor) {
+        return Ok((index, sampler.clone()));
     }
-    fn text(&mut self, value: &str) {
-        for b in value.bytes() {
-            self.word(b as u64);
-        }
-    }
-    fn sampler(&mut self, sampler: &SamplerDescriptor) {
-        self.text(sampler.label.as_deref().unwrap_or(""));
-        self.word(sampler.min_filter as u64);
-        self.word(sampler.mag_filter as u64);
-        self.word(sampler.mip_filter as u64);
-        self.word(sampler.address_u as u64);
-        self.word(sampler.address_v as u64);
-        self.word(sampler.lod_min.to_bits());
-        self.word(sampler.lod_max.to_bits());
-        self.word(sampler.max_anisotropy as u64);
-    }
-}
-
-fn sampler_key(descriptor: &SamplerDescriptor) -> u64 {
-    let mut h = Mix(0x9E3779B97F4A7C15);
-    h.sampler(descriptor);
-    h.0
-}
-
-fn sampler_for(value: &mut SceneExecution, descriptor: &SamplerDescriptor) -> Result<Sampler, Error> {
-    let key = sampler_key(descriptor);
-    if let Some(sampler) = value.samplers.get(&key) {
-        return Ok(sampler.clone());
-    }
-    // ponytail: 64 distinct sampler states per renderer; a scene using more clears the table and
-    // drops replay plans that borrowed them.
+    // ponytail: linear scan of at most 64 descriptors; index only if profiling justifies it.
+    // A scene using more clears the table and drops replay plans that borrowed its samplers.
     if value.samplers.len() >= 64 {
-        for sampler in value.samplers.values() {
+        for (_, sampler) in &value.samplers {
             let _ = backend::destroy_sampler(sampler);
         }
         value.samplers.clear();
+        if let Some(pool) = &mut value.arguments { pool.slices.clear(); pool.next = 0; }
         drop_plans(value);
     }
     let sampler = backend::create_sampler(&value.device, descriptor.clone())?;
-    value.samplers.insert(key, sampler.clone());
-    Ok(sampler)
+    let index = value.samplers.len();
+    value.samplers.push((descriptor.clone(), sampler.clone()));
+    Ok((index, sampler))
 }
 
 const ARGUMENT_PAGE_BYTES: i64 = 256 * 1024;
@@ -2204,7 +2172,8 @@ fn argument_slice(value: &mut SceneExecution, variant: usize, texture: &Texture,
     if backend::argument_length(&argument) > stride {
         return Err(failure_error("Scene_execution.argument_slice", ErrorKind::Capacity, "argument layout exceeds the shared slice stride"));
     }
-    let key = (backend::texture_id(texture), sampler_key(sampler_descriptor));
+    let (sampler_index, sampler) = sampler_for(value, sampler_descriptor)?;
+    let key = (backend::texture_id(texture), sampler_index as u64);
     if let Some(offset) = value.arguments.as_ref().expect("argument pool").slices.get(&key) {
         return Ok((buffer, *offset));
     }
@@ -2217,7 +2186,6 @@ fn argument_slice(value: &mut SceneExecution, variant: usize, texture: &Texture,
         }
     }
     let offset = value.arguments.as_ref().expect("argument pool").next * stride;
-    let sampler = sampler_for(value, sampler_descriptor)?;
     backend::argument_texture(&argument, &buffer, offset, 0, texture)?;
     backend::argument_sampler(&argument, &buffer, offset, 1, &sampler)?;
     let pool = value.arguments.as_mut().expect("argument pool");
@@ -2717,7 +2685,7 @@ fn plan_entry(value: &mut SceneExecution, index: usize) -> Result<PlanDraw, Erro
                 let (page, offset) = argument_slice(value, variant, &texture, &source.sampler)?;
                 (vec![(fragment_stage, 7, page, offset)], vec![], vec![], vec![texture])
             } else {
-                let sampler = sampler_for(value, &source.sampler)?;
+                let (_, sampler) = sampler_for(value, &source.sampler)?;
                 (vec![], vec![(fragment_stage, 1, texture)], vec![(fragment_stage, 2, sampler)], vec![])
             }
         }
@@ -2743,7 +2711,7 @@ fn plan_entry(value: &mut SceneExecution, index: usize) -> Result<PlanDraw, Erro
             buffers = all;
         }
         Some((source, buffer, texture)) => {
-            let sampler = sampler_for(value, &source.texture.sampler)?;
+            let (_, sampler) = sampler_for(value, &source.texture.sampler)?;
             let mut all = vec![(vertex_stage, 0, vertices.clone(), 0), (fragment_stage, 3, buffer.borrow().buffer.clone(), 0)];
             all.extend(extra);
             all.extend(buffers);
@@ -2761,7 +2729,7 @@ fn plan_entry(value: &mut SceneExecution, index: usize) -> Result<PlanDraw, Erro
     // World draws bind the sun map at 8 (the camera map stands in when there is none; the block
     // says whether to read it) and the camera map at 9/10.
     if let (Scene3World, Some((source, cached))) = (family, &slot_environment) {
-        let sampler = sampler_for(value, &source.sampler)?;
+        let (_, sampler) = sampler_for(value, &source.sampler)?;
         let camera = cached.borrow().texture.clone();
         let sun = match (&value.sun, sun_requested) {
             (Some(sun), true) => sun.color.clone(),
@@ -3494,12 +3462,6 @@ pub fn read_pixels(value: &mut SceneExecution, bytes_per_row: i64) -> Result<Vec
     backend::read_texture(&value.target, bytes_per_row)
 }
 
-fn sorted_samplers(samplers: HashMap<u64, Sampler>) -> Vec<(u64, Sampler)> {
-    let mut entries: Vec<(u64, Sampler)> = samplers.into_iter().collect();
-    entries.sort_by_key(|a| a.0);
-    entries
-}
-
 /// Every owned handle is released; the first failure is reported after the remaining releases and
 /// device teardown have run.
 pub fn destroy(value: &mut SceneExecution) -> Result<(), Error> {
@@ -3563,7 +3525,7 @@ pub fn destroy(value: &mut SceneExecution) -> Result<(), Error> {
     if let Some(pool) = value.arguments.take() {
         named("argument page", backend::destroy_buffer(&pool.buffer), &mut first);
     }
-    for (_, sampler) in sorted_samplers(std::mem::take(&mut value.samplers)) {
+    for (_, sampler) in std::mem::take(&mut value.samplers) {
         record(backend::destroy_sampler(&sampler), &mut first);
     }
     if let Some(sun) = value.sun.take() {

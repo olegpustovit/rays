@@ -294,7 +294,7 @@ pub fn disk_cached(t: &T, name: &str, make: &dyn Fn() -> Result<FrontResult, Str
     let text = lisp_kernel::text(&t.facts, PREVIEWS.contains(&name));
     let backend = ogpu_core::impl_::backend().unwrap_or_default();
     let key = [executable.as_str(), name, text.as_str(), format!("{:?}", t.facts).as_str(), backend.as_str()].join("\0");
-    let file = Path::new(&dir).join(rays_math::hash::md5_hex(key.as_bytes()));
+    let file = Path::new(&dir).join(format!("{:032x}", rays_math::hash::digest(key.as_bytes())));
     if let Ok(data) = std::fs::read(&file)
         && data.len() > 32 && rays_math::hash::md5_hex(&data[32..]).as_bytes() == &data[..32]
             && let Some(found) = decode(&data[32..]) {

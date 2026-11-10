@@ -547,7 +547,7 @@ pub fn region(fast: bool, program: &packed::T) -> Result<String, Diagnostic> {
         p.add("  const noise = (...args) => { try { return noise3(...args); } catch (e) { if (e?.code === 'E_NONFINITE') return NaN; throw e; } };\n");
     }
     if exists(&|i| matches!(i, Instruction::Rand_at(..))) {
-        p.add("  const w63 = x => BigInt.asIntN(63, x);\n  const randAt = (seed, index) => { let x = w63(w63(seed) ^ w63(w63(w63(index) + 0x11b54a32d192ed03n) * 0x1e3779b97f4a7c15n)); x = w63(x ^ (BigInt.asUintN(63, x) >> 30n)); x = w63(x * 0x3f58476d1ce4e5b9n); x = w63(x ^ (BigInt.asUintN(63, x) >> 27n)); x = w63(x * 0x14d049bb133111ebn); x = w63(x ^ (BigInt.asUintN(63, x) >> 31n)); return Number(BigInt.asUintN(63, x) >> 10n) / 9007199254740992; };\n");
+        p.add("  const u64 = x => BigInt.asUintN(64, x);\n  const randAt = (seed, index) => { let x = u64(seed + 0x9e3779b97f4a7c15n * u64(index + 1n)); x = u64((x ^ (x >> 30n)) * 0xbf58476d1ce4e5b9n); x = u64((x ^ (x >> 27n)) * 0x94d049bb133111ebn); x ^= x >> 31n; return Number(x >> 11n) / 9007199254740992; };\n");
     }
     if fast {
         p.add("  const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? Math.trunc(x) : fail('E_NONFINITE', name + ' produced a nonfinite value.');\n");

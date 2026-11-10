@@ -437,13 +437,19 @@ fn named_arguments_and_residual_capture() {
 
 #[test]
 fn hash_vectors() {
-    let h = hash;
-    assert!(h(&[]) == 0.435769 && h(&[0.]) == 0.009611 && h(&[3., 4., 5.]) == 0.706664);
-    assert!(h(&[1.5, -2.]) == 0.622571 && h(&[7., 0., 1.]) == 0.089347 && h(&[1e10]) == 0.736254);
-    assert!(h(&[-0.25, 12345.678]) == 0.068138 && h(&[1., 2., 3., 4., 5., 6.]) == 0.659002);
-    assert!(h(&[0.000001]) == 0.954845 && h(&[1e300]) == h(&[0.]));
-    assert_eq!(g_value(&value("(value/rand 3 4 5)")), Value::Float(0.706664));
-    assert_eq!(g_value(&value("(value/rand 1.5 -2)")), Value::Float(0.622571));
+    assert_eq!(hash(&[]).to_bits(), 0x3fc6587b4fa55f50);
+    assert_eq!(hash(&[0.0]).to_bits(), 0x3fea0570ae1251aa);
+    assert_eq!(hash(&[3.0, 4.0, 5.0]).to_bits(), 0x3fe77641ba88a649);
+    assert_eq!(hash(&[1.5, -2.0]).to_bits(), 0x3fdf2729792298a6);
+    assert_eq!(hash(&[7.0, 0.0, 1.0]).to_bits(), 0x3fe2130ca45c0027);
+    assert_eq!(hash(&[10000000000.0]).to_bits(), 0x3fe95d0e30608c04);
+    assert_eq!(hash(&[-0.25, 12345.678]).to_bits(), 0x3fe16861194a3f34);
+    assert_eq!(hash(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).to_bits(), 0x3fdcb1a6192a2798);
+    assert_eq!(hash(&[1e-06]).to_bits(), 0x3fa30db06d075850);
+    assert_eq!(hash(&[1e+300]).to_bits(), 0x3fe0498e053a94c4);
+    assert_ne!(hash(&[1e300]), hash(&[0.]));
+    assert_eq!(g_value(&value("(value/rand 3 4 5)")), Value::Float(f64::from_bits(0x3fe77641ba88a649)));
+    assert_eq!(g_value(&value("(value/rand 1.5 -2)")), Value::Float(f64::from_bits(0x3fdf2729792298a6)));
     assert_eq!(g_value(&value("(value/rand true)")), Value::Float(hash(&[1.])));
 }
 

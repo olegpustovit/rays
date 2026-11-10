@@ -13,7 +13,7 @@ use flow_syntax::packed_ops::{Binary, Comparison, Conversion, Integer, Unary};
 use flow_syntax::ty::Ty;
 use flow_syntax::value;
 use flow_syntax::Diagnostic;
-use rays_math::hash::md5_hex;
+use rays_math::hash::digest;
 use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -1074,7 +1074,7 @@ fn print(fast: bool, image: bool, placement: Option<Placement>, program: &packed
                 let _ = writeln!(head, "  let image_width = u32(bitcast<f32>({}));", word(layout.image_width.unwrap_or(0)));
             }
             let body = format!("{head}{body}");
-            let entry = format!("kernel_{}", md5_hex(format!("{prefix}{signature}{body}").as_bytes()));
+            let entry = format!("kernel_{:032x}", digest(format!("{prefix}{signature}{body}").as_bytes()));
             let source = format!("{prefix}@compute @workgroup_size(64)\nfn {entry}{signature} {{\n{body}}}\n");
             Ok(Wgsl {
                 source,

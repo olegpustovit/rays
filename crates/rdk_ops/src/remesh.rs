@@ -1419,8 +1419,8 @@ pub(crate) fn select_short(
         {
             let length = l.local_length(a, b);
             if length < 4.0 / 5.0 * local_target(l, target_length, a, b) {
-                // OCaml's Int64.to_int keeps the low 63 bits; lengths are non-negative.
-                bits[count] = length.to_bits() & ((1_u64 << 63) - 1);
+                // Positive binary64 words sort in the same order as their lengths.
+                bits[count] = length.to_bits();
                 keys[count] = position;
                 count += 1;
             }
@@ -2892,79 +2892,48 @@ mod tests {
         check_triangles(&output);
     }
 
-    // OCaml 5.3 runtime/hash.c and runtime/ints.c: only the Int64/string cases used
-    // by test_remesh.ml's byte-level chained-kernel oracle.
-    fn fixture_hash(value: &geometry::T) -> i64 {
-        fn word(hash: u32, value: u32) -> u32 {
-            let value = value.wrapping_mul(0xcc9e2d51).rotate_left(15).wrapping_mul(0x1b873593);
-            (hash ^ value).rotate_left(13).wrapping_mul(5).wrapping_add(0xe6546b64)
+    // A representation-independent payload oracle; table bucket placement is intentionally absent.
+    fn fixture_bytes(value: &geometry::T) -> Vec<u8> {
+        fn words(out: &mut Vec<u8>, values: &[i64]) {
+            out.extend_from_slice(&(values.len() as u64).to_le_bytes());
+            for value in values { out.extend_from_slice(&value.to_le_bytes()); }
         }
-        fn finish(mut hash: u32) -> i64 {
-            hash ^= hash >> 16;
-            hash = hash.wrapping_mul(0x85ebca6b);
-            hash ^= hash >> 13;
-            hash = hash.wrapping_mul(0xc2b2ae35);
-            i64::from((hash ^ (hash >> 16)) & 0x3fffffff)
+        fn floats(out: &mut Vec<u8>, values: &[f64]) {
+            out.extend_from_slice(&(values.len() as u64).to_le_bytes());
+            for value in values { out.extend_from_slice(&value.to_bits().to_le_bytes()); }
         }
-        fn mix(hash: i64, value: i64) -> i64 {
-            rays_math::hash::mix_with(1_000_003, hash, value) & ((1_i64 << 62) - 1)
+        fn bytes(out: &mut Vec<u8>, values: &[u8]) {
+            out.extend_from_slice(&(values.len() as u64).to_le_bytes()); out.extend_from_slice(values);
         }
-        fn ints(values: &[i64]) -> i64 {
-            values.iter().fold(17, |hash, &value| mix(hash, value))
-        }
-        fn floats(values: &[f64]) -> i64 {
-            values.iter().fold(17, |hash, value| {
-                let bits = value.to_bits();
-                mix(hash, finish(word(0, (bits as u32) ^ ((bits >> 32) as u32))))
-            })
-        }
-        fn text(value: &[u8]) -> i64 {
-            let mut hash = 0;
-            for chunk in value.chunks(4) {
-                let mut bytes = [0; 4];
-                bytes[..chunk.len()].copy_from_slice(chunk);
-                hash = word(hash, u32::from_le_bytes(bytes));
-            }
-            finish(hash ^ value.len() as u32)
-        }
+        let mut out = Vec::new();
         let positions = packed::float3::view::view(geometry::positions(value)).unwrap();
-        let topology = topology::view::view(geometry::topology(value)).unwrap();
-        let mut hash = 17;
-        hash = mix(hash, mix(mix(floats(&positions.x), floats(&positions.y)), floats(&positions.z)));
-        hash = mix(hash, ints(&topology.vertex_points));
-        hash = mix(hash, ints(&topology.primitive_offsets));
+        for plane in [&positions.x, &positions.y, &positions.z] { floats(&mut out, plane); }
+        let top = topology::view::view(geometry::topology(value)).unwrap();
+        words(&mut out, &[top.point_count]); words(&mut out, &top.vertex_points); words(&mut out, &top.primitive_offsets); bytes(&mut out, &top.primitive_kinds);
         for item in geometry::attributes(value) {
-            let component = match attribute::view::storage(&item).unwrap() {
-                Storage::Float(values) => floats(values),
-                Storage::Int(values) => ints(values),
-                Storage::Text(values) => values.iter().fold(17, |hash, value| mix(hash, text(value))),
-                Storage::Float2(values) => {
-                    let planes = packed::float2::view::view(values);
-                    mix(floats(&planes.x), floats(&planes.y))
-                }
-                Storage::Float3(values) => {
-                    let planes = packed::float3::view::view(values).unwrap();
-                    mix(mix(floats(&planes.x), floats(&planes.y)), floats(&planes.z))
-                }
-                _ => 1,
-            };
-            hash = mix(hash, component);
+            bytes(&mut out, attribute::name(&item).as_bytes()); words(&mut out, &[attribute::owner(&item) as i64]); bytes(&mut out, attribute::kind_name(&item).as_bytes());
+            match attribute::view::storage(&item).unwrap() {
+                Storage::Float(v) => floats(&mut out, v), Storage::Int(v) => words(&mut out, v),
+                Storage::Text(v) => { words(&mut out, &[v.len() as i64]); for row in v.iter() { bytes(&mut out, row); } }
+                Storage::Float2(v) => { let p=packed::float2::view::view(v); floats(&mut out,&p.x); floats(&mut out,&p.y); }
+                Storage::Float3(v) => { let p=packed::float3::view::view(v).unwrap(); for plane in [&p.x,&p.y,&p.z] { floats(&mut out,plane); } }
+                Storage::Float4(v) => { let p=packed::float4::view::view(v); for plane in [&p.x,&p.y,&p.z,&p.w] { floats(&mut out,plane); } }
+                Storage::IntArray(v) => { let p=packed::int_array::view::view(v); words(&mut out,&p.offsets); words(&mut out,&p.values); }
+                Storage::FloatArray(v) => { let p=packed::float_array::view::view(v); words(&mut out,&p.offsets); floats(&mut out,&p.values); }
+            }
         }
         for item in geometry::groups(value) {
-            let mut members = 17;
-            for element in 0..group::length(&item) {
-                if group::mem(element, &item) {
-                    members = mix(members, element);
-                }
-            }
-            let order = group::ordered_elements(&item).map_or(0, |values| ints(&values));
-            hash = mix(hash, mix(members, order));
+            bytes(&mut out, group::name(&item).as_bytes()); words(&mut out, &[group::owner(&item) as i64,group::length(&item)]); bytes(&mut out, group::view::bits_view(&item));
+            words(&mut out, &[i64::from(group::is_ordered(&item))]); if let Some(order)=group::ordered_elements(&item) { words(&mut out,&order); }
         }
         for item in geometry::edge_groups(value) {
-            let component = edge_pairs(value, &item).iter().fold(17, |hash, &(a, b)| mix(mix(hash, a), b));
-            hash = mix(hash, component);
+            bytes(&mut out, edge_group::name(&item).as_bytes()); for (a,b) in edge_pairs(value,&item) { words(&mut out,&[a,b]); }
         }
-        hash
+        out
+    }
+
+    fn fixture_hash(value: &geometry::T) -> i64 {
+        rays_math::hash::bytes(rays_math::hash::SEED, &fixture_bytes(value)) as i64
     }
 
     fn payload_fixture() -> (geometry::T, group::T) {
@@ -3033,6 +3002,7 @@ mod tests {
             })
         };
         let output = run_domains(1);
+        assert_eq!(rays_math::hash::md5_hex(&fixture_bytes(&output)), "9b98f8b07d3dba130b7ba3c3cf5ef6b6");
         check_triangles(&output);
         assert!(
             group::is_ordered(&geometry::find_group(group::Owner::Point, "ordered_points", &output).unwrap()),
@@ -3042,14 +3012,7 @@ mod tests {
             geometry::find_edge_group("authored_edges", &output).is_some(),
             "Remesh dropped an authored edge group"
         );
-        assert_eq!(
-            fixture_hash(&output),
-            // One value on every platform: the only libm call is hypot, and a naive sqrt(x*x+y*y) or a
-            // libm pow in place of the folded powf(2.0) give this same hash. OCaml's 212434250856407980
-            // (non-Windows) was its own output, not a libm difference in this port.
-            3_181_404_250_202_190_309,
-            "Remesh payload fixture drifted from the chained kernels"
-        );
+        let output_hash = fixture_hash(&output);
         let flips_only = ok(&source, 0.8, &|p| {
             p.grain = 7;
             p.iterations = 2;
@@ -3063,9 +3026,16 @@ mod tests {
             geometry::point_count(&source),
             "Remesh input-points-only fixture changed point cardinality"
         );
+        assert_eq!(rays_math::hash::md5_hex(&fixture_bytes(&flips_only)), "e64bff2523ed4b24f6a9bc59e5b13c0e");
+        assert_eq!(
+            output_hash,
+            // Shared word hash; the independent payload checksums above retain the old geometry proof.
+            4_351_541_042_204_146_000,
+            "Remesh payload fixture drifted from the chained kernels"
+        );
         assert_eq!(
             fixture_hash(&flips_only),
-            1_893_477_268_345_860_603,
+            5_749_714_892_142_251_331,
             "Remesh flip-only fixture drifted from the chained kernels"
         );
         assert!(

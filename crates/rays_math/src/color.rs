@@ -1,5 +1,4 @@
 use crate::float::{min as float_min, max as float_max};
-use crate::hash::wrap_int63;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct T {
@@ -202,9 +201,7 @@ pub fn to_string(color: T) -> String {
 }
 
 pub fn to_hex(color: T) -> i64 {
-    wrap_int63(wrap_int63(color.r.wrapping_shl(16))
-        | wrap_int63(color.g.wrapping_shl(8))
-        | wrap_int63(color.b))
+    (color.r << 16) | (color.g << 8) | color.b
 }
 
 pub fn of_floats(r: f64, g: f64, b: f64, a: f64) -> T {

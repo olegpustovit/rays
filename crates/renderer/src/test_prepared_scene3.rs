@@ -144,7 +144,7 @@ fn numeric_content_hash_allocates_nothing() {
 
 #[test]
 fn numeric_hash_parts_and_typed_gpu_keys() {
-    assert_eq!(digest(HASH_SEED, b"abc"), 0xc11ab6d2519bc2b29fa85a2c4f783ca6);
+    assert_eq!(digest(HASH_SEED, b"abc"), 0xde36c8e699433a29a604a2b10e138a81);
     assert_ne!(digest(digest(HASH_SEED, b"a"), b"bc"), digest(digest(HASH_SEED, b"ab"), b"c"));
     assert_ne!(digest(HASH_SEED, b"a"), digest(digest(HASH_SEED, b"a"), b""));
     let name = Rc::new("vertices\nstream".to_owned());
