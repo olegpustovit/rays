@@ -7,6 +7,7 @@
 #undef interface
 #else
 #define VK_USE_PLATFORM_WAYLAND_KHR
+#include <unistd.h>
 #endif
 #include "vendor/volk.h"
 #include "vendor/vk_mem_alloc.h"
@@ -181,12 +182,19 @@ VkBool32 VKAPI_CALL on_message(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                const VkDebugUtilsMessengerCallbackDataEXT *data, void *) {
   if (severity < VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT || validation_silent) return VK_FALSE;
   validation_messages.fetch_add(1, std::memory_order_relaxed);
+#ifdef _WIN32
   DWORD n;
   HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
   WriteFile(err, "vulkan validation: ", 19, &n, nullptr);
   WriteFile(err, data->pMessage, static_cast<DWORD>(strlen(data->pMessage)), &n, nullptr);
   WriteFile(err, "\n", 1, &n, nullptr);
   if (validation_fatal) TerminateProcess(GetCurrentProcess(), 70);
+#else
+  (void)!write(2, "vulkan validation: ", 19);
+  (void)!write(2, data->pMessage, strlen(data->pMessage));
+  (void)!write(2, "\n", 1);
+  if (validation_fatal) _exit(70);
+#endif
   return VK_FALSE;
 }
 
