@@ -358,6 +358,73 @@ the title bar of a PXUI host is the ground its chrome is painted on.
   `Editor.update_with ~inspector` adds sketch-owned kit widgets
   below the camera sections.
 
+## Framework seams (target contract)
+
+Target of the framework extraction (proposal phases P1 to P5). Nothing here is implemented until its
+phase lands; the baseline it replaces is in `docs/pxui-baseline.md`.
+
+**Input is data, output is data.** The host calls one function per drawn frame:
+
+```text
+FrameIn  { events: &[input::Event], size: (f32, f32) /* logical points */, scale: f32, time: f64 }
+FrameOut { draw: &DrawList,          // borrowed from the Ui, valid until the next frame
+           platform: Platform { cursor, ime_rect, clipboard_writes, paste_request, repaint_at, background },
+           damage: Rect }            // union of changed node rectangles; a window host may ignore it
+ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
+```
+
+- No callback into the platform. Paste arrives as an event the frame after `paste_request`.
+- `repaint_at` is the time of the next needed frame; `Ui::wants_frame(&events, now)` lets a host skip
+  `frame` entirely. Idle costs zero builds, layouts and draws.
+- A target is an image, not a swapchain: `pxui_render::Painter::draw(&mut pass, out.draw)` draws into a
+  pass the caller opened (window swapchain image, display buffer, or the pass Rays already has open).
+- There is no `Host` trait. Each host crate (`pxui_sdl`, later `pxui_wayland`) exposes the same functions
+  (`open`, `pump`, `size`, `scale`, `time`, `target`, `apply`); the app links the one it wants.
+- `pxui` may depend only on `input`, `cfmt` and plain types of its own: `Point`, `Rect`, `Edges`,
+  `Rgba`, all `f32`. It knows no GPU, window system, `rays`, `param` or `mem`. Memory is reported as bytes
+  (`Ui::bytes()`); the embedder charges its own ledger. Enforced by `cargo run -p gate -- deps`.
+- Logical points everywhere in `pxui`; drawable-pixel conversion is `pxui_render`'s.
+
+**Two-layer engine, both plain Rust, no markup, no interpreter.**
+
+1. Retained nodes. Every node has a stable `Handle`; the app patches it directly (`patch_text`,
+   `patch_fill`). One small write, nothing rebuilt or compared. For hot elements only: a clock, a caret,
+   a meter. A patch survives until its view next rebuilds.
+2. Hybrid views. `ui.view(key, revision, w, h, f)` is skipped when its revision and bounds match the last
+   frame; its instance range stays in the GPU buffer. Debug builds re-run cached views and assert the
+   output equals the cached one. `ui.list` builds only the rows on screen.
+
+Composition closures are called immediately; standard widgets carry a `Look` (plain data); only `canvas`
+closures outlive the build, and they live in the frame arena. Public functions take concrete types or
+`&mut dyn FnMut`; no proc macros, no generics-heavy public API.
+
+**Budgets (asserted by tests once the owning phase lands).**
+
+| Measure | Target |
+| --- | --- |
+| Heap allocations, steady UI frame | 0 in `pxui` + `pxui_render` + `pxui_text` (counting allocator) |
+| Draw calls per UI layer | 1, plus one per external texture (clip rides in the instance) |
+| Atlas upload when dirty | changed rectangles only, R8 mask atlas (RGBA8 for colour glyphs) |
+| Frames built or drawn while idle | 0 |
+| Work when one view changes | that view only; the rest replays |
+| Text shaping | full shaping, cached per node (`pxui_text`) |
+| Warm `cargo check -p pxui` | under 1 s |
+| Clean debug build, PXUI repo | under 30 s (cosmic-text about 13 s of it) |
+
+**Crate fate.**
+
+| Crate | Fate |
+| --- | --- |
+| `ogpu_core`, `ogpu_mock`, `ogpu_metal`, `metal_sys`, `ogpu_vulkan`, `vulkan_sys`, `native_layer_token_sys` | move to the PXUI repo |
+| `input`, `cfmt`, `mem_sys`, `sdl3`, `sdl3_sys`, `tools/t` | move (sdl3 image and mixer behind features) |
+| `pxui` | moves after cutting `rays`, `param`, `mem`; absorbs `scene_command::ui_batch` as its draw list; port and zone colours leave |
+| `pxui_text` | new: cosmic-text, the only crate with external dependencies |
+| `pxui_render` | new: from `renderer::lower_ui` and a hand-written MSL and GLSL UI shader |
+| `pxui_sdl` | new: from `runtime` (window, SDL event pump, surface token) |
+| `pxui_wayland` | new, later |
+| `pxui_shell`, `pxui_graph` | stay in Rays, renamed `rays_shell`, `rays_graph` |
+| `rays`, `renderer`, `scene_*`, `runtime_resources`, `mem`, `lru`, `parallel`, `param`, `rays_math`, `flow_*`, `rdk_*`, `sop`, `editor_*` | stay |
+
 ## Regression requirements
 
 Tests for PXUI changes must cover press/release commit and cancellation,

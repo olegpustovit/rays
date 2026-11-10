@@ -935,6 +935,58 @@ pub fn window_pxui_fit_box() {
     ui.destroy();
 }
 
+/// P0 baseline: heap allocations and CPU per warm kit frame, plus draw batches (docs/pxui-baseline.md).
+/// Measurement only; it asserts the frame is warm (second half allocates no more than the first frame did).
+pub fn window_pxui_baseline() {
+    let build = |ui: &mut Ui| {
+        ui.panel(PanelOpts::default(), "panel", &mut |ui| {
+            ui.label("PXUI");
+            ui.toggle("Animate", true);
+            ui.text_field("Caption", "Functional UI");
+            ui.button("Quit");
+        });
+    };
+    let mut ui = field_ui();
+    for i in 0..30 {
+        ui.frame(&frame_at(vec![], 2.0, i as f64 / 60.0, vec![]), &mut |ui| build(ui));
+    }
+    let (n, mut frame_ns) = (200u64, 0u128);
+    let frames: Vec<_> = (0..n).map(|i| frame_at(vec![], 2.0, (30 + i) as f64 / 60.0, vec![])).collect();
+    mem_sys::local_reset();
+    let (c0, b0) = (mem_sys::local_alloc_count(), mem_sys::alloc_bytes_total());
+    for f in &frames {
+        let t = std::time::Instant::now();
+        ui.frame(f, &mut |ui| build(ui));
+        frame_ns += t.elapsed().as_nanos();
+    }
+    let frame_allocs = (mem_sys::local_alloc_count() - c0) as f64 / n as f64;
+    let frame_bytes = (mem_sys::alloc_bytes_total() - b0) as f64 / n as f64;
+    // lowering side: Ui::scene clones Vec<Node>; stage_native lowers it to batches
+    let (c1, b1) = (mem_sys::local_alloc_count(), mem_sys::alloc_bytes_total());
+    let t = std::time::Instant::now();
+    for _ in 0..n {
+        std::hint::black_box(ui.scene(None));
+    }
+    let scene_ns = t.elapsed().as_nanos();
+    let scene_allocs = (mem_sys::local_alloc_count() - c1) as f64 / n as f64;
+    let scene_bytes = (mem_sys::alloc_bytes_total() - b1) as f64 / n as f64;
+    let mut batches = 0;
+    if let Ok(staged) = layer::stage_native(320, 240, &ui.scene(None)) {
+        for l in &staged.layers {
+            if let layer::NativeLayer::UiLayer(batch, _) = l {
+                batches += batch.batches().len();
+            }
+        }
+    }
+    eprintln!("PXUI_BASELINE draw batches (kit panel, 1 layer): {batches}");
+    eprintln!(
+        "PXUI_BASELINE frame: {frame_allocs:.1} allocs {frame_bytes:.0} B {:.1} us | scene(): {scene_allocs:.1} allocs {scene_bytes:.0} B {:.1} us",
+        frame_ns as f64 / n as f64 / 1e3,
+        scene_ns as f64 / n as f64 / 1e3
+    );
+    ui.destroy();
+}
+
 pub fn window_pxui_batches() {
     // One panel paints in a handful of batches, not one draw per label.
     let mut ui = field_ui();
@@ -987,4 +1039,5 @@ pub const CASES: &[(&str, fn())] = &[
     ("window_pxui_hover_cursor", window_pxui_hover_cursor),
     ("window_pxui_fit_box", window_pxui_fit_box),
     ("window_pxui_batches", window_pxui_batches),
+    ("window_pxui_baseline", window_pxui_baseline),
 ];

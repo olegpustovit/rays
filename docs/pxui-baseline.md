@@ -1,0 +1,32 @@
+# PXUI baseline (phase P0)
+
+Measured at commit `896e1754` plus the measurement case `window_pxui_baseline`
+(`crates/pxui/tests/cases/ui_a.rs`), on an Apple M1 (M-series Mac), debug (`dev`) profile, warm shared
+state, one cargo process at a time. Re-run with `cargo t -p pxui window_pxui_baseline`.
+
+| Measure | Value |
+| --- | --- |
+| Heap allocations, warm kit frame (`Ui::frame`, panel with label, toggle, text field, button, 2x, 200 frames after 30 warm-up) | 15.0 per frame, 317 B per frame |
+| CPU per warm kit frame (`Ui::frame` only) | about 5.7 us |
+| `Ui::scene(None)` after the frame (clones the node list) | 2.0 allocs, 200 B, about 0.1 us |
+| Draw batches, same kit panel (`stage_native`, one UI layer) | 2 |
+| Clean debug `cargo build -p pxui` (cold `target/`, includes rays, renderer, runtime, sdl3 and the rest of its closure) | 12.35 s wall (42.7 s user) |
+| Warm `cargo check -p pxui` after editing `ui_core.rs` | 0.12 to 0.13 s cargo, 0.17 s wall (a bare `touch` does not trigger a re-check) |
+| `cargo t -p pxui`, warm (29 existing cases plus baseline, 2 runs) | 2.37 s wall |
+| `cargo t -p pxui`, first run with test dependencies cold | 12.75 s wall (14.3 s including cargo) |
+| Slowest cases | `gpu_parity_overlays` 0.20 s, `gpu_parity_commands` 0.18 s, `gpu_parity_panel` 0.18 s |
+
+## Not isolated, and caveats
+
+- There was no existing zero-allocation test for PXUI (the proposal's claim is not backed by one in
+  `crates/pxui/tests`). The kit frame is not allocation-free today: 15 allocations per warm frame.
+  The case reports the count only and asserts nothing; the P2 budget (0) is not met yet.
+- Allocation count is the measuring thread's (`mem_sys::local_alloc_count`); bytes are the process-wide
+  total (`alloc_bytes_total`), so worker-thread allocations inflate bytes only.
+- The frame measured is one small panel, not the whole editor. The proposal's 462 allocations and
+  31,882 bytes per frame (editor, empty document) are not reproduced here.
+- Not measured: `renderer::lower_ui` (allocates a `Vec<Draw>` per call) and the dirty-atlas RGBA
+  expansion. Both need a GPU or mock backend frame and belong to P2's baseline. The 2 allocations above are
+  `Ui::scene` only.
+- Draw calls: `batches()` counts batches, which is the draw count for the one UI layer; a clipped scroll
+  list was not measured, only the plain panel.
