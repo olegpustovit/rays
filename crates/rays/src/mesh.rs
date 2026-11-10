@@ -442,7 +442,7 @@ pub mod view {
             vertices: mesh.vertices.to_array(),
             normals: mesh.normals.as_ref().map(|n| n.to_array()),
             colors: mesh.colors.clone(),
-            tex_coords: mesh.tex_coords.clone(),
+            tex_coords: mesh.tex_coords,
         })
     }
 

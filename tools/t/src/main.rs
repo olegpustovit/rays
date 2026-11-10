@@ -405,7 +405,7 @@ fn run_test_batch(
             let results = &results;
             let stop = &stop;
             let args = args;
-            let run_started = run_started.clone();
+            let run_started = run_started;
             scope.spawn(move || loop {
                 if stop.load(Ordering::Relaxed) {
                     break;

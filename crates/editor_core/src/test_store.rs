@@ -51,7 +51,7 @@ fn symlink_save_keeps_link() {
     let root = temp_dir("rays-store-link");
     let target = root.join("real.rays");
     let link = root.join("link.rays");
-    let _cleanup = Cleanup(vec![link.clone(), target.clone(), root.clone()]);
+    let _cleanup = Cleanup(vec![link.clone(), target.clone(), root]);
     write_text(target.to_str().unwrap(), "old").unwrap();
     symlink_file(&target, &link).expect("symlink (Windows needs developer mode or admin)");
     write_text(link.to_str().unwrap(), "new").unwrap();
@@ -64,7 +64,7 @@ fn settings_round_trip() {
     let root = temp_dir("rays-store");
     let directory = root.join("nested");
     let path = directory.join("settings.rays");
-    let _cleanup = Cleanup(vec![path.clone(), directory.clone(), root.clone()]);
+    let _cleanup = Cleanup(vec![path.clone(), directory, root]);
     let filename = path.to_str().unwrap();
     let values = vec![
         ("animate".to_string(), value("true")),
@@ -91,7 +91,7 @@ fn settings_round_trip() {
 fn settings_int_above_2_62_decodes_as_int() {
     let root = temp_dir("rays-store-int63");
     let path = root.join("settings.rays");
-    let _cleanup = Cleanup(vec![path.clone(), root.clone()]);
+    let _cleanup = Cleanup(vec![path.clone(), root]);
     let filename = path.to_str().unwrap();
     for value in [1i64 << 62, i64::MIN, i64::MAX] {
         write_text(filename, &format!("(settings :sketch \"test\" :lim {value})")).unwrap();
@@ -118,7 +118,7 @@ fn user_folder_follows_platform() {
 fn settings_keep_first_typed_entry_and_refuse_invalid_overwrite() {
     let root = temp_dir("rays-store-preferences");
     let path = root.join("preferences.rays");
-    let _cleanup = Cleanup(vec![path.clone(), root.clone()]);
+    let _cleanup = Cleanup(vec![path.clone(), root]);
     let filename = path.to_str().unwrap();
     let original = "(settings :sketch \"rays-editor\" :guide false :guide true :memory_budget -9223372036854775808 :unknown (choice \"é\"))";
     write_text(filename, original).unwrap();

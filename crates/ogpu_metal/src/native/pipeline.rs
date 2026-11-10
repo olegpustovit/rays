@@ -189,7 +189,7 @@ impl RenderEncoder {
         let raw = metal_sys::registry::command_buffer_render_encoder_from_pass(command_buffer.raw(), pass.raw()).map_err(|failure| sys_error(OP, failure))?;
         command_buffer.lifetime().attach();
         pass.lifetime().attach();
-        for texture in [color_target.clone(), depth_target, stencil_target, pass.resolve_texture()].into_iter().flatten() {
+        for texture in [color_target, depth_target, stencil_target, pass.resolve_texture()].into_iter().flatten() {
             command_buffer.retain_texture(&texture);
         }
         Ok(Self(Arc::new(RenderEncoderInner {

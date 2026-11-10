@@ -6,7 +6,7 @@ use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
 static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
 
 pub fn fresh_owner_id() -> u64 {
-    NEXT_OWNER.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+    NEXT_OWNER.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
         .expect("arena identity space exhausted")
 }
 

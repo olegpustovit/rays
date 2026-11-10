@@ -544,7 +544,7 @@ struct MockDevice { c: Shared, handle: handle::Device, capabilities: caps::Caps 
 
 impl DriverDevice for MockDevice {
     fn device_handle(&self) -> handle::Device { self.handle.clone() }
-    fn capabilities(&self) -> caps::Caps { self.capabilities.clone() }
+    fn capabilities(&self) -> caps::Caps { self.capabilities }
     fn allocated_size(&self) -> i64 {
         self.c.borrow().memory.values().map(|bytes| bytes.lock().unwrap().len() as i64).sum()
     }
@@ -608,7 +608,7 @@ struct MockDriver { c: Shared, capabilities: caps::Caps }
 impl Driver for MockDriver {
     fn create_device(&self) -> Result<Box<dyn DriverDevice>, Error> {
         token(&self.c);
-        Ok(Box::new(MockDevice { c: self.c.clone(), handle: handle::create_device(), capabilities: self.capabilities.clone() }))
+        Ok(Box::new(MockDevice { c: self.c.clone(), handle: handle::create_device(), capabilities: self.capabilities }))
     }
 }
 

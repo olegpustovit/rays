@@ -10,7 +10,6 @@ use param::{Effects, FieldView, Value};
 
 use crate::context::dependencies;
 use crate::node::{self, build, Facts};
-use crate::support;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputRequirement {

@@ -1621,7 +1621,7 @@ mod tests {
         };
         assert!(check(&app).is_empty(), "normal target-specific native startup");
         let valid = app.clone();
-        app.deps = vec![core.clone()];
+        app.deps = vec![core];
         assert_eq!(check(&app).len(), 2, "each platform needs its backend");
         app.has_binary = false;
         assert!(check(&app).is_empty(), "CPU unit/e2e tests may link portable GPU types");
@@ -1629,7 +1629,7 @@ mod tests {
         assert_eq!(check(&app).len(), 2, "GPU targets still require an implementation");
         app.deps.push(mock.clone());
         assert!(check(&app).is_empty(), "mock-only GPU contract tests");
-        for mut native in [metal.clone(), vulkan.clone()] {
+        for mut native in [metal.clone(), vulkan] {
             native.kind = "dev-dependencies".into();
             app.deps.push(native);
         }
@@ -1644,7 +1644,7 @@ mod tests {
         app.deps[1].optional = true;
         assert!(!check(&app).is_empty(), "optional native edge");
         app = valid.clone();
-        app.deps.push(metal.clone());
+        app.deps.push(metal);
         assert!(!check(&app).is_empty(), "duplicate native edges");
         app = valid.clone();
         app.deps[1].target = Some("cfg(windows)".into());

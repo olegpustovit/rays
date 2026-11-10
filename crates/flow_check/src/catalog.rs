@@ -734,7 +734,7 @@ mod test_catalog {
         assert!(check(&field, PortType::Fn(signature.clone())).is_empty());
         assert_eq!(check(&field, PortType::Float), vec!["E_TYPE"]);
         assert_eq!(check(&field, PortType::Fn(FnSignature { params: vec![], ..signature.clone() })), vec!["E_TYPE"]);
-        let mut image = field.clone(); image.ty = Some(PortType::Image);
+        let mut image = field; image.ty = Some(PortType::Image);
         assert!(check(&image, PortType::Image).is_empty());
         assert_eq!(check(&size(), PortType::Image), vec!["E_TYPE"]);
         for target in [PortType::Image, PortType::Fn(signature)] {

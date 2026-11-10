@@ -110,7 +110,7 @@ pub fn lower_name(panel: &Panel) -> &'static str {
 
 // Leaves outside floats in tree order (`docked`), else only the floats met outside other floats.
 fn walk(path: &mut Path, tree: &Panels, docked: bool, f: &mut dyn FnMut(&[usize], &Panel) -> bool) -> bool {
-    let mut under = |path: &mut Path, i: usize, sub: &Panels, f: &mut dyn FnMut(&[usize], &Panel) -> bool| {
+    let under = |path: &mut Path, i: usize, sub: &Panels, f: &mut dyn FnMut(&[usize], &Panel) -> bool| {
         path.push(i);
         let stop = walk(path, sub, docked, f);
         path.pop();

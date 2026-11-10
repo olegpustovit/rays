@@ -618,7 +618,7 @@ mod tests {
         assert_eq!(view::point(&index, 2, 1).unwrap(), 5);
         assert!(view::vertex(&index, 1, 2).is_err());
         let (left, right) = view::overlapping_self_pairs(None, 1, 0.0, &index).unwrap();
-        assert_eq!((left.clone(), right.clone()), (vec![0, 1], vec![1, 2]));
+        assert_eq!((left.clone(), right), (vec![0, 1], vec![1, 2]));
         let (sequential, _) = view::overlapping_self_pairs(None, 100, 0.0, &index).unwrap();
         assert_eq!(sequential, left);
         let found = view::find_overlapping_self_pair(None, 1, 0.0, &index, &|a, b| a == 1 && b == 2).unwrap();

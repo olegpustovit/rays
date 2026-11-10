@@ -223,7 +223,7 @@ fn identity_list_recency_release_copy_and_clear() {
         identity.find(&a).as_ref().map(text) == Some("a") && identity.peek(&b).as_ref().map(text) == Some("b"),
         "identity list finds typed physical keys"
     );
-    identity.add(c.clone(), sv("c"), 0);
+    identity.add(c, sv("c"), 0);
     assert!(
         identity.peek(&b).is_none()
             && identity.peek(&a).as_ref().map(text) == Some("a")
@@ -308,7 +308,7 @@ fn owner_charges_eviction_clear_copies_and_resizes() {
     let list_owner = mem::cache("test.lru.list");
     let listed = IdentityList::new(list_owner.clone(), 4, Arc::new(array_equal));
     let key = kv(0);
-    listed.add(key.clone(), sv("a"), 5);
+    listed.add(key, sv("a"), 5);
     let attributed = mem::attributed();
     let evictors = mem::evictor_count();
     let list_copy = listed.copy(noop_release());

@@ -233,7 +233,7 @@ fn window_resources_display_list_images() {
             ([layer::native_layer::Scene2_segment(retained, r)], Some((identity, 3))) if r.is_empty() && identity == "scene2-segment:41" && Arc::ptr_eq(retained, &segment) => {}
             _ => fail(&format!("root display list did not retain direct native identity")),
         }
-        let transformed = layer::stage_native(32, 32, &[scene::translate(5, 7, vec![node.clone()])]).expect("stage");
+        let transformed = layer::stage_native(32, 32, &[scene::translate(5, 7, vec![node])]).expect("stage");
         match (transformed.layers.as_slice(), &transformed.retained) {
             ([layer::native_layer::Scene2_layer(ir, r)], Some((identity, 1))) if r.is_empty() && identity.starts_with("scene-stage:") => {
                 match render_ir::commands_readonly(ir) {
@@ -292,7 +292,7 @@ fn window_resources_display_list_images() {
             _ => fail(&format!("display-list image binding lost managed identity")),
         }
         let peer = image::create(1, 1, Some(color::white())).expect("image");
-        let rebound = layer::stage_native(32, 32, &[scene::display_list(Some(vec![(7, peer.clone())]), image_segment.clone()).expect("display list")]).expect("stage");
+        let rebound = layer::stage_native(32, 32, &[scene::display_list(Some(vec![(7, peer.clone())]), image_segment).expect("display list")]).expect("stage");
         require(first.retained != rebound.retained, "equal-generation image identities collided in retained replay");
         image::destroy(&peer).expect("destroy");
         let replacement = image::create(1, 1, Some(color::black())).expect("image");

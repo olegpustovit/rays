@@ -10,7 +10,7 @@ use flow_syntax::value::int_of;
 pub type Args = [(Symbol, Value)];
 pub type Node = dyn Fn(&str, &Args) -> Result<Value, Diagnostic>;
 pub type Check = Arc<dyn Fn(&Args) -> Result<(), Diagnostic> + Send + Sync>;
-pub type Body = Arc<dyn Fn(&Frame, &(dyn Fn(&str, &Args) -> Result<Value, Diagnostic>), &Args) -> Result<Value, Diagnostic> + Send + Sync>;
+pub type Body = Arc<dyn Fn(&Frame, &dyn Fn(&str, &Args) -> Result<Value, Diagnostic>, &Args) -> Result<Value, Diagnostic> + Send + Sync>;
 pub type Out = Arc<dyn Fn(&[Ty]) -> Result<Ty, Diagnostic> + Send + Sync>;
 pub type OutArgs = Arc<dyn Fn(&[(Symbol, Ty, Option<param::Value>)]) -> Result<Ty, Diagnostic> + Send + Sync>;
 pub type ArithmeticFn = dyn Fn(&Value, &Value) -> Result<Value, Diagnostic> + Send + Sync;
@@ -84,7 +84,7 @@ fn pairs(fields: Vec<(&str, Ty)>) -> Vec<(Symbol, Ty)> { fields.into_iter().map(
 fn signature(pos: Vec<(&str,Ty)>, opt: Vec<(&str,Ty)>, rest: Option<(&str,Ty)>, kw: Vec<(&str,Ty)>) -> Signature {
     Signature { pos: pairs(pos), opt: pairs(opt), rest: rest.map(|(n,t)|(n.into(),t)), kw: pairs(kw) }
 }
-type NodeDelegate = fn(&Frame, &(dyn Fn(&str, &Args) -> Result<Value, Diagnostic>), &Args) -> Result<Value, Diagnostic>;
+type NodeDelegate = fn(&Frame, &dyn Fn(&str, &Args) -> Result<Value, Diagnostic>, &Args) -> Result<Value, Diagnostic>;
 static EMPTY_CHECK: LazyLock<Check> = LazyLock::new(|| Arc::new(|_| Ok(())));
 fn delegate_body(f: NodeDelegate) -> Body { Arc::new(f) }
 macro_rules! builtin_delegates {
@@ -678,7 +678,7 @@ fn host_ops()->Vec<Op>{
         ("host/quit",vec![("when",Ty::Bool)],vec![],None,vec![],effect.clone(),vec![]),
         ("host/save_png",vec![("path",Ty::Text),("when",Ty::Bool)],vec![],None,vec![],effect.clone(),vec![]),
         ("host/dialog",vec![("kind",Ty::Text),("when",Ty::Bool)],vec![],None,vec![("filters",Ty::Any),("default",Ty::Text)],effect.clone(),vec![("kind",vec!["open_file","open_files","save_file","open_folder"])]),
-        ("host/play",vec![("sample",sample.clone()),("when",Ty::Bool)],vec![],None,vec![("volume",Ty::Float),("loops",Ty::Int)],effect.clone(),vec![]),
+        ("host/play",vec![("sample",sample.clone()),("when",Ty::Bool)],vec![],None,vec![("volume",Ty::Float),("loops",Ty::Int)],effect,vec![]),
         ("audio/synth",vec![],vec![],None,vec![("waveform",Ty::Text),("frequency",Ty::Float),("duration",Ty::Float),("volume",Ty::Float)],sample.clone(),vec![("waveform",vec!["sine","square","triangle","sawtooth"])]),
         ("audio/load",vec![("path",Ty::Text)],vec![],None,vec![],sample,vec![]),
     ];
@@ -891,7 +891,7 @@ fn color_ops()->Vec<Op>{
 fn misc_value_ops()->Vec<Op>{
     let mut ops=Vec::new();
     ops.push(value_op("value/rand",vec![],vec![],Some(("key",Ty::Float)),vec![],Ty::Float,"Math",Arc::new(|_,_,a|Ok(Value::Float(value::hash(&a.iter().map(|(_,v)|num(v)).collect::<Result<Vec<_>,_>>()?))))));
-    let mut error=value_op("error",vec![("code",Ty::Text),("message",Ty::Text)],vec![],None,vec![("cause",Ty::Text)],Ty::Any,"Value",Arc::new(|_,_,a|{
+    let error=value_op("error",vec![("code",Ty::Text),("message",Ty::Text)],vec![],None,vec![("cause",Ty::Text)],Ty::Any,"Value",Arc::new(|_,_,a|{
         let code=diagnostic_text(a.get_arg("code")?)?;let message=diagnostic_text(a.get_arg("message")?)?;let cause=a.opt_arg("cause").map(|value| text_bytes(value).map(<[u8]>::to_vec)).transpose()?;
         Err(rays_diagnostic::error(code,message,None,None,cause,Vec::new(),Vec::new()))
     }));ops.push(error);

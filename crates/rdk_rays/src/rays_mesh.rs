@@ -279,7 +279,7 @@ fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::Mesh, String> {
         } else {
             mesh::view::create_packed_shared(
                 Some(mesh::mode::Triangles),
-                Some(vertex_points.clone()),
+                Some(vertex_points),
                 normals,
                 colors,
                 tex_coords,

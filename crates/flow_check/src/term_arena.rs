@@ -1,7 +1,6 @@
 use crate::workspace::{Context, DiagnosticPolicy, HofKind, LoopKind, Pattern};
 use flow_syntax::{arena::{self, FastMap, NamesBuilder, Syntax, SyntaxArena, SyntaxBuilder}, ty::Ty};
 pub use flow_syntax::arena::{NameId, SyntaxId};
-use std::collections::HashMap;
 use flow_syntax::symbol::{self, Symbol};
 use std::sync::Arc;
 
@@ -1202,7 +1201,7 @@ mod tests {
             Draft::CallFn { fn_name: "f".into(), args: vec![atom], body: Some(other) }, Draft::FnRef("f".into()),
             Draft::GraphRef { graph: "g".into(), inputs: fields.clone() }, Draft::Let(bindings.clone(), atom),
             Draft::State { binder: pattern.clone(), init: atom, step: other, zone: zone.clone() },
-            Draft::Loop { kind: LoopKind::Scan, accs: bindings.clone(), clauses: bindings.clone(), skip: vec![vec![1]], body: atom, zone: zone.clone() },
+            Draft::Loop { kind: LoopKind::Scan, accs: bindings.clone(), clauses: bindings, skip: vec![vec![1]], body: atom, zone: zone.clone() },
             Draft::WithError(atom, other), Draft::ErrorRows { rows: atom, policy: DiagnosticPolicy::RangeLast, mapper: other },
             Draft::If(atom, other, atom), Draft::Cond(vec![(atom, other)], atom), Draft::Case(atom, vec![(form, other)], atom),
             Draft::Fn { params: vec![(pattern, Some(Ty::Float))], body: atom, zone: zone.clone(), capture: Some(other) },

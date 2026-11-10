@@ -811,7 +811,7 @@ mod tests {
         let view = int_array::view::view(&values);
         assert_eq!(&*view.offsets, &[0, 2, 2]);
         assert!(int_array::create_owned(vec![1], vec![]).is_err());
-        let shared = values.clone();
+        let shared = values;
         let another_view = int_array::view::view(&shared);
         assert!(Arc::ptr_eq(&view.offsets, &another_view.offsets));
     }

@@ -1319,7 +1319,7 @@ mod tests {
         let mut collect = |key: &Key, _: &Value| order.push(*key.as_any().downcast_ref::<[i32; 1]>().unwrap());
         list.iter(&mut collect);
         assert_eq!(order, vec![[2], [1]]);
-        list.add(c.clone(), string_value("c"), 0);
+        list.add(c, string_value("c"), 0);
         assert!(list.peek(&b).is_none());
         assert!(list.peek(&a).is_some());
         assert_eq!(evicted.lock().unwrap().as_slice(), &[([2], "b".to_owned())]);

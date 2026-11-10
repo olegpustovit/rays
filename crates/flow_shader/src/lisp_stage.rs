@@ -111,7 +111,7 @@ fn leaves(flat: bool, path: &[Symbol], ty: &Ty) -> Vec<Leaf> {
             .iter()
             .flat_map(|(name, ty)| {
                 let mut p = path.to_vec();
-                p.push(name.clone().into());
+                p.push((*name).into());
                 leaves(flat || name == "flat", &p, ty)
             })
             .collect(),

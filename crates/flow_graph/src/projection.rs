@@ -10,7 +10,7 @@ use flow_syntax::context::Context;
 use flow_syntax::syntax::{self as s, Node as SNode, Syntax};
 use flow_syntax::arena::{self, SyntaxBuilder, SyntaxId};
 use flow_syntax::ty::{self, Ty};
-use flow_syntax::{lisp, macros, value as fvalue};
+use flow_syntax::{lisp, macros};
 use param::{KindView, Value as PValue};
 use std::collections::HashMap;
 use std::rc::Rc;

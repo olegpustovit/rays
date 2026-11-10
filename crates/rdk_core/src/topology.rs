@@ -757,7 +757,7 @@ mod tests {
         let materialised = view::view(&deferred).unwrap();
         assert!(Arc::ptr_eq(&native.vertex_points, &materialised.vertex_points));
         assert!(Arc::ptr_eq(&native.primitive_offsets, &materialised.primitive_offsets));
-        let mut reader = materialised.vertex_points.clone();
+        let mut reader = materialised.vertex_points;
         Arc::make_mut(&mut reader)[0] = 2;
         assert_eq!(view::view(&owned).unwrap().vertex_points.as_slice(), &[0, 1, 2]);
         assert_eq!(view::view(&deferred).unwrap().vertex_points.as_slice(), &[0, 1, 2]);
