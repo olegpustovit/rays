@@ -194,8 +194,8 @@ fn gpu_scene_golden_and_spot_checks() {
     let (mut different, mut first, mut max) = (0, None, 0);
     for (i, (a, b)) in pixels.chunks(4).zip(expected.chunks(4)).enumerate() {
         max = max.max(a.iter().zip(b).map(|(x, y)| (*x as i32 - *y as i32).abs()).max().unwrap());
-        // ponytail: 4 levels absorb Metal/Vulkan transcendental differences on edges; tighten after the Windows run.
-        if !near(a.try_into().unwrap(), b.try_into().unwrap(), 4) {
+        // ponytail: 2 levels (measured max: Metal 0, Vulkan 1) absorb transcendental differences on edges.
+        if !near(a.try_into().unwrap(), b.try_into().unwrap(), 2) {
             different += 1;
             first.get_or_insert((i as u32 % w, i as u32 / w));
         }
