@@ -272,7 +272,7 @@ fn web_basic() {
         .spawn(|| {
             std::env::set_current_dir(root()).unwrap();
             let out = std::env::temp_dir().join(format!("rays_bin_web_{}", std::process::id()));
-            web_export::web("sketches/basic.rays", &out.to_string_lossy()).unwrap();
+            web_export::web("sketches/basic.rays", &out.to_string_lossy(), &|_| panic!("basic has no image/load")).unwrap();
             let golden = root().join("fixtures/web_export/basic");
             let mut n = 0;
             for e in std::fs::read_dir(&golden).unwrap() {

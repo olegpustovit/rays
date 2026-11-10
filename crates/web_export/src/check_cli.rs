@@ -130,14 +130,14 @@ pub fn check(path: &str) -> (String, i32) {
 pub const EMPTY: &str = include_str!("empty.rays");
 
 /// `rays web FILE -o DIR`.
-pub fn web(path: &str, dir: &str) -> Result<(), Fail> {
+pub fn web(path: &str, dir: &str, decode_image: &dyn Fn(&str) -> Result<(i64, i64, Vec<u8>), String>) -> Result<(), Fail> {
     let (text, document, printed, passed) = check_file(path, true)?;
     eprint!("{printed}");
     let document = match document {
         Some(d) if passed => d,
         _ => return Err(String::new()),
     };
-    let files = crate::web_export::lower(&document).and_then(|l| crate::web_export::files(&document, &l));
+    let files = crate::web_export::lower(&document).and_then(|l| crate::web_export::files(&document, &l, decode_image));
     match files {
         Err(d) => Err(rays_diagnostic::report(path, &text, &d)),
         Ok(files) => {

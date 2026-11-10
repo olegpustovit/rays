@@ -7,9 +7,10 @@ not select an alternate renderer through environment variables or public API.
 Web export is a separate compiler target emitted from a Lisp workspace (`flow_web`, `specification/web-export/plan.md`), not a fallback: the native program never selects it.
 Generated `image/map` pixels use the shared packed compiler and WGSL target, then a GPU RGBA8 conversion and the
 existing textured-quad presenter on one WebGPU device; no native renderer or geometry dependency enters `flow_web`.
-`image/render` uses that presenter with an owned RGBA8 offscreen target on the same device. The export tool
-decodes `image/load` assets through the existing SDL3_image decoder and bundles straight-alpha RGBA8 bytes;
-this native dependency stays in `web_export`, outside `flow_web`. `image/noise` uses the shared JavaScript
+`image/render` uses that presenter with an owned RGBA8 offscreen target on the same device. The native CLI
+supplies the existing SDL3_image decoder to `web_export`, which validates positive dimensions and exact
+straight-alpha RGBA8 storage before bundling it. The decoder dependency belongs to the caller, outside
+`web_export` and `flow_web`. `image/noise` uses the shared JavaScript
 noise implementation at double precision, matching the native CPU generator before uploading its pixels.
 Every image producer shares the workspace state slots by native source identity (instance, path and plane).
 An absent system-default Metal device maps to OGPU `No_adapter`. A failure reading the
@@ -101,14 +102,13 @@ Scene-resolution errors are cached with their own result, separately from
 combined drawing/image/texture errors, so corrected geometry clears the old
 message without re-resolving an unchanged scene graph.
 
-`bin/rays.ml` owns the product executable. `lib/web_export` owns static export
+`rays_bin` owns the product executable. `web_export` owns static export
 and its embedded `runtime/` assets, with a narrow lower/files/load interface.
-Its direct dependencies are `flow`, `flow_ir`, `flow_web`, `flow_sop`,
-`editor_document`, `sop_catalog`, `input`, `param`, `scene_command` and
-`sdl3_image`. The gate rejects UI dependencies and checks the binary's terminal
+The gate enforces its direct dependency boundary, rejects UI dependencies and checks the binary's terminal
 backend selection. The emitters in `flow_web` keep their existing lower-layer
-boundary; native decoding and document/catalog integration remain in
-`web_export`.
+boundary. Document/catalog integration remains in `web_export`, including its existing transitive
+native dependencies. Image decoding is supplied by the caller through the `files` interface;
+`web_export` uses SDL directly only in its decoder integration tests.
 
 The shared file-table embedder belongs to `flow`; both the node catalog and
 web runtime embedding invoke it. The manifest generator belongs to

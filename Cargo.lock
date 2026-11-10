@@ -454,6 +454,7 @@ dependencies = [
  "rays_diagnostic",
  "rays_editor",
  "runtime",
+ "sdl3",
  "sop",
  "web_export",
 ]

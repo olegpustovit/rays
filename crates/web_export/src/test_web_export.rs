@@ -14,7 +14,10 @@ fn export(sketch: &str) -> Vec<(String, Vec<u8>)> {
     let (_, doc) = web_export::load(&path.to_string_lossy());
     let doc = doc.unwrap_or_else(|ds| panic!("{sketch}: {}", ds.iter().map(|d| d.message.clone()).collect::<Vec<_>>().join("; ")));
     let lowered = web_export::lower(&doc).unwrap_or_else(|d| panic!("{sketch}: lower: {} {}", d.code, d.message));
-    web_export::files(&doc, &lowered).unwrap_or_else(|d| panic!("{sketch}: files: {} {}", d.code, d.message))
+    web_export::files(&doc, &lowered, &|path| {
+        let decoded = sdl3::image::load_file(path).map_err(|error| error.to_string())?;
+        Ok((i64::from(decoded.width), i64::from(decoded.height), decoded.pixels))
+    }).unwrap_or_else(|d| panic!("{sketch}: files: {} {}", d.code, d.message))
 }
 
 fn first_difference(a: &[u8], b: &[u8]) -> String {
@@ -78,6 +81,36 @@ fn no_draw_graph_is_refused() {
     let d = web_export::lower(&doc.unwrap()).err().unwrap();
     assert_eq!(d.code, "E_WEB_GRAPH");
     assert_eq!(d.message, "The workspace has no draw graph to export.");
+}
+
+#[test]
+fn injected_image_decoder_bundles_exact_rgba_and_reports_invalid_payloads() {
+    let source = "(workspace injected (graph drawing :context draw (draw/image (image/load \"injected.png\"))))";
+    let (document, diagnostics, _) = crate::check_cli::check_text(Vec::new(), source, false).unwrap();
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let document = document.unwrap();
+    let lowered = web_export::lower(&document).unwrap();
+    let calls = std::cell::Cell::new(0);
+    let pixels = [0, 255, 65, 128, 255, 0, 128, 255];
+    let files = web_export::files(&document, &lowered, &|path| {
+        assert_eq!(path, "injected.png");
+        calls.set(calls.get() + 1);
+        Ok((2, 1, pixels.to_vec()))
+    }).unwrap();
+    assert_eq!(calls.get(), 1);
+    assert!(files.iter().find(|(name, _)| name == "data.bin").unwrap().1.ends_with(&pixels));
+    let program = std::str::from_utf8(&files.iter().find(|(name, _)| name == "program.js").unwrap().1).unwrap();
+    assert!(program.contains("length: 8, width: 2, height: 1"), "{program}");
+    let error = web_export::files(&document, &lowered, &|_| Err("injected decode failure".into())).unwrap_err();
+    assert_eq!(error.code, "E_WEB_IMAGE");
+    assert!(error.span.is_some());
+    assert!(error.message.contains("injected.png") && error.message.contains("injected decode failure"));
+    for (width, height, length) in [(0, 1, 0), (-1, 1, 0), (i64::MAX, 2, 0), (2, 1, 7), (2, 1, 9)] {
+        let error = web_export::files(&document, &lowered, &|_| Ok((width, height, vec![0; length]))).unwrap_err();
+        assert_eq!(error.code, "E_WEB_IMAGE");
+        assert!(error.span.is_some());
+        assert!(error.message.contains("injected.png") && error.message.contains("RGBA"));
+    }
 }
 
 macro_rules! sketches {

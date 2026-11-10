@@ -915,13 +915,13 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("editor_core", &["param", "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "runtime_resources"][..]),
         ("web_export", &[
             "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_web", "flow_sop", "editor_document", "input",
-            "param", "scene_command", "sdl3", "flow_shader", "rays_math", "sop",
+            "param", "scene_command", "flow_shader", "rays_math", "sop",
         ][..]),
         ("rays_pathtracer", &[
             "rays", "ogpu_core", "renderer", "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_gpu", "input",
             "runtime_resources", "rays_math", "flow_shader",
         ][..]),
-        ("rays_bin", &["editor_document", "rays_editor", "web_export", "flow_syntax", "flow_check", "flow_eval", "flow_sop", "sop", "runtime", "ogpu_core", "ogpu_metal", "ogpu_vulkan"][..]),
+        ("rays_bin", &["editor_document", "rays_editor", "web_export", "flow_syntax", "flow_check", "flow_eval", "flow_sop", "sop", "runtime", "sdl3", "ogpu_core", "ogpu_metal", "ogpu_vulkan"][..]),
     ])
 }
 

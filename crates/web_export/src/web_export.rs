@@ -558,6 +558,7 @@ fn map_entry(lowered: &Lowered, id: usize) -> R<MapEntry> {
 
 struct Export<'a> {
     lowered: &'a Lowered,
+    decode_image: &'a dyn Fn(&str) -> Result<(i64, i64, Vec<u8>), String>,
     fast: bool,
     store: Shared,
     /// (table entry, "// kernel id\n" ^ source)
@@ -791,10 +792,16 @@ impl Export<'_> {
             "image/load" => match node_arg(node, "path", Value::Int(0)) {
                 Value::Text(path) => {
                     let path = String::from_utf8_lossy(&path).into_owned();
-                    let decoded = sdl3::image::load_file(&path).map_err(|e| {
+                    let (width, height, pixels) = (self.decode_image)(&path).map_err(|e| {
                         err("E_WEB_IMAGE", &format!("Cannot bundle image {:?}: {}", path, e), Some(lowered.span.clone()))
                     })?;
-                    self.assets.push((id, decoded.width as i64, decoded.height as i64, decoded.pixels));
+                    let expected = usize::try_from(width).ok().and_then(|width| {
+                        usize::try_from(height).ok().and_then(|height| width.checked_mul(height)?.checked_mul(4))
+                    });
+                    if width <= 0 || height <= 0 || expected != Some(pixels.len()) {
+                        return Err(err("E_WEB_IMAGE", &format!("Cannot bundle image {path:?}: decoder must return positive dimensions and exactly width × height × 4 RGBA bytes."), Some(lowered.span.clone())));
+                    }
+                    self.assets.push((id, width, height, pixels));
                     (false, "kind: 'load'".to_owned())
                 }
                 _ => return refuse("A standalone export needs image/load paths known at export time."),
@@ -807,11 +814,12 @@ impl Export<'_> {
     }
 }
 
-pub fn files(d: &doc::T, lowered: &Lowered) -> R<Files> {
+pub fn files(d: &doc::T, lowered: &Lowered, decode_image: &dyn Fn(&str) -> Result<(i64, i64, Vec<u8>), String>) -> R<Files> {
     // the workspace's precision, as the editor reads it: fast unless (settings/config :precision "exact")
     let fast = editor_document::lowering::plan_window(d, &lowered.plan).map(|w| w.fast).unwrap_or(true);
     let mut e = Export {
         lowered,
+        decode_image,
         fast,
         store: Arc::new(Mutex::new(Store { data: Vec::new(), buckets: HashMap::new() })),
         kernels: Vec::new(),
