@@ -195,7 +195,7 @@ fn geometric_point_vectors(
     let mut primitive = 0usize;
     for (vertex, &point) in view.vertex_points.iter().enumerate() {
         cancel::poll(cancel_value, vertex as i64, 16_383)?;
-        while vertex as i64 >= view.primitive_offsets[primitive + 1] {
+        while vertex as u32 >= view.primitive_offsets[primitive + 1] {
             primitive += 1;
         }
         let point = point as usize;

@@ -44,7 +44,7 @@ fn replace(head: &str, replacement: &Syntax, form: &Syntax) -> Syntax {
 fn polygon(points: &[(f64, f64, f64)]) -> rdk_core::geometry::T {
     let count = points.len() as i64;
     let positions = float3::view::of_owned_exn(points.iter().map(|p| p.0).collect(), points.iter().map(|p| p.1).collect(), points.iter().map(|p| p.2).collect()).unwrap();
-    let topology = rdk_core::topology::polygons_owned(count, (0..count).collect(), vec![0, count]).unwrap();
+    let topology = rdk_core::topology::polygons_owned(count, (0..count as u32).collect(), vec![0, count as u32]).unwrap();
     rdk_core::geometry::create(positions, topology, None, None, None).unwrap()
 }
 

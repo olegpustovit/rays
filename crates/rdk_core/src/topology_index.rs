@@ -3,23 +3,26 @@ use std::sync::{Arc, LazyLock};
 use crate::{cancel, error, point_index, support, topology};
 use crate::error::Code;
 
+/// Missing neighbour, edge or opposite vertex in the u32 index tables.
+pub const NONE: u32 = u32::MAX;
+
 struct Data {
     topology_id: i64,
     point_count: i64,
-    primitive_of_vertex: Arc<[i64]>,
-    next_vertex: Arc<[i64]>,
-    previous_vertex: Arc<[i64]>,
-    edge_of_vertex: Arc<[i64]>,
-    opposite_vertex: Arc<[i64]>,
-    edge_a: Arc<[i64]>,
-    edge_b: Arc<[i64]>,
-    edge_slots: Arc<[i64]>,
-    edge_offsets: Arc<[i64]>,
-    edge_vertices: Arc<[i64]>,
-    point_offsets: Arc<[i64]>,
-    point_vertices: Arc<[i64]>,
-    point_edge_offsets: Arc<[i64]>,
-    point_edges: Arc<[i64]>,
+    primitive_of_vertex: Arc<[u32]>,
+    next_vertex: Arc<[u32]>,
+    previous_vertex: Arc<[u32]>,
+    edge_of_vertex: Arc<[u32]>,
+    opposite_vertex: Arc<[u32]>,
+    edge_a: Arc<[u32]>,
+    edge_b: Arc<[u32]>,
+    edge_slots: Arc<[u32]>,
+    edge_offsets: Arc<[u32]>,
+    edge_vertices: Arc<[u32]>,
+    point_offsets: Arc<[u32]>,
+    point_vertices: Arc<[u32]>,
+    point_edge_offsets: Arc<[u32]>,
+    point_edges: Arc<[u32]>,
 }
 
 #[derive(Clone)]
@@ -61,66 +64,72 @@ fn create_uncached(
     let point_count = source.point_count;
     let vertex_count = source.vertex_points.len();
     let primitive_count = source.primitive_kinds.len();
-    let mut next_vertex = vec![-1_i64; vertex_count];
-    let mut previous_vertex = vec![-1_i64; vertex_count];
-    let mut edge_of_vertex = vec![-1_i64; vertex_count];
-    let mut opposite_vertex = vec![-1_i64; vertex_count];
+    let mut next_vertex = vec![NONE; vertex_count];
+    let mut previous_vertex = vec![NONE; vertex_count];
+    let mut edge_of_vertex = vec![NONE; vertex_count];
+    let mut opposite_vertex = vec![NONE; vertex_count];
     let mut outgoing_count = 0_usize;
 
     for primitive in 0..primitive_count {
         cancel::poll(cancel_value, primitive as i64, 1023).map_err(|_| cancelled_error())?;
-        let first = usize::try_from(source.primitive_offsets[primitive])
-            .expect("Topology primitive offset is invalid");
-        let last = usize::try_from(source.primitive_offsets[primitive + 1])
-            .expect("Topology primitive offset is invalid");
+        let first = source.primitive_offsets[primitive] as usize;
+        let last = source.primitive_offsets[primitive + 1] as usize;
         let cyclic = source.primitive_kinds[primitive] != 1;
         for vertex in first..last {
             if vertex + 1 < last {
-                next_vertex[vertex] = (vertex + 1) as i64;
+                next_vertex[vertex] = (vertex + 1) as u32;
             } else if cyclic {
-                next_vertex[vertex] = first as i64;
+                next_vertex[vertex] = first as u32;
             }
             if vertex > first {
-                previous_vertex[vertex] = (vertex - 1) as i64;
+                previous_vertex[vertex] = (vertex - 1) as u32;
             } else if cyclic {
-                previous_vertex[vertex] = (last - 1) as i64;
+                previous_vertex[vertex] = (last - 1) as u32;
             }
-            if next_vertex[vertex] >= 0 {
+            if next_vertex[vertex] != NONE {
                 outgoing_count += 1;
             }
         }
+    }
+    // Point-edge offsets hold up to two entries per edge and must fit u32.
+    if outgoing_count.checked_mul(2).is_none_or(|entries| entries > u32::MAX as usize) {
+        return Err(error::new(
+            "Topology_index.create",
+            Code::GeometryTooLarge,
+            "Topology_index.create: edge count exceeds the 4294967295 element limit".to_owned(),
+        ));
     }
     let table_size = outgoing_count
         .checked_mul(2)
         .ok_or_else(|| table_error("Topology_index.create: edge count exceeds table limits"))?
         .max(8);
     let table_capacity = next_power_of_two(table_size)?;
-    let mut edge_slots = vec![-1_i64; table_capacity];
-    let mut edge_a = Vec::with_capacity(outgoing_count);
-    let mut edge_b = Vec::with_capacity(outgoing_count);
-    let mut edge_counts = Vec::with_capacity(outgoing_count);
+    let mut edge_slots = vec![NONE; table_capacity];
+    let mut edge_a: Vec<u32> = Vec::with_capacity(outgoing_count);
+    let mut edge_b: Vec<u32> = Vec::with_capacity(outgoing_count);
+    let mut edge_counts: Vec<u32> = Vec::with_capacity(outgoing_count);
     let mut edge_count = 0_usize;
     let mask = table_capacity - 1;
 
     for vertex in 0..vertex_count {
         cancel::poll(cancel_value, vertex as i64, 16_383).map_err(|_| cancelled_error())?;
         let next = next_vertex[vertex];
-        if next < 0 {
+        if next == NONE {
             continue;
         }
         let left = source.vertex_points[vertex];
         let right = source.vertex_points[next as usize];
         let (a, b) = if left <= right { (left, right) } else { (right, left) };
-        let mut slot = hash_pair(a, b) & mask;
+        let mut slot = hash_pair(i64::from(a), i64::from(b)) & mask;
         let edge = loop {
             let candidate = edge_slots[slot];
-            if candidate < 0 {
+            if candidate == NONE {
                 let edge = edge_count;
                 edge_count += 1;
-                edge_slots[slot] = edge as i64;
+                edge_slots[slot] = edge as u32;
                 edge_a.push(a);
                 edge_b.push(b);
-                edge_counts.push(0_i64);
+                edge_counts.push(0);
                 break edge;
             }
             let candidate = candidate as usize;
@@ -129,22 +138,22 @@ fn create_uncached(
             }
             slot = (slot + 1) & mask;
         };
-        edge_of_vertex[vertex] = edge as i64;
+        edge_of_vertex[vertex] = edge as u32;
         edge_counts[edge] += 1;
     }
 
-    let mut edge_offsets = vec![0_i64; edge_count + 1];
+    let mut edge_offsets = vec![0_u32; edge_count + 1];
     for edge in 0..edge_count {
         edge_offsets[edge + 1] = edge_offsets[edge] + edge_counts[edge];
     }
-    let mut edge_vertices = vec![0_i64; outgoing_count];
+    let mut edge_vertices = vec![0_u32; outgoing_count];
     let mut edge_cursor = edge_offsets.clone();
     for vertex in 0..vertex_count {
         let edge = edge_of_vertex[vertex];
-        if edge >= 0 {
+        if edge != NONE {
             let edge_index = edge as usize;
             let output = edge_cursor[edge_index] as usize;
-            edge_vertices[output] = vertex as i64;
+            edge_vertices[output] = vertex as u32;
             edge_cursor[edge_index] += 1;
         }
     }
@@ -154,13 +163,13 @@ fn create_uncached(
         if last - first == 2 {
             let left = edge_vertices[first] as usize;
             let right = edge_vertices[first + 1] as usize;
-            opposite_vertex[left] = right as i64;
-            opposite_vertex[right] = left as i64;
+            opposite_vertex[left] = right as u32;
+            opposite_vertex[right] = left as u32;
         }
     }
 
     let point_count_usize = usize::try_from(point_count).expect("Topology point count is invalid");
-    let mut point_edge_offsets = vec![0_i64; point_count_usize + 1];
+    let mut point_edge_offsets = vec![0_u32; point_count_usize + 1];
     for edge in 0..edge_count {
         let a = edge_a[edge] as usize;
         let b = edge_b[edge] as usize;
@@ -172,17 +181,17 @@ fn create_uncached(
     for point in 0..point_count_usize {
         point_edge_offsets[point + 1] += point_edge_offsets[point];
     }
-    let mut point_edges = vec![0_i64; point_edge_offsets[point_count_usize] as usize];
+    let mut point_edges = vec![0_u32; point_edge_offsets[point_count_usize] as usize];
     let mut point_edge_cursor = point_edge_offsets.clone();
     for edge in 0..edge_count {
         let a = edge_a[edge] as usize;
         let output = point_edge_cursor[a] as usize;
-        point_edges[output] = edge as i64;
+        point_edges[output] = edge as u32;
         point_edge_cursor[a] += 1;
         let b = edge_b[edge] as usize;
         if b != a {
             let output = point_edge_cursor[b] as usize;
-            point_edges[output] = edge as i64;
+            point_edges[output] = edge as u32;
             point_edge_cursor[b] += 1;
         }
     }
@@ -214,7 +223,7 @@ fn index_bytes(value: &support::IdentityValue) -> i64 {
         return 0;
     };
     let data = &index.data;
-    let words = std::mem::size_of::<i64>() as i64;
+    let words = std::mem::size_of::<u32>() as i64;
     [
         data.primitive_of_vertex.len(),
         data.next_vertex.len(),
@@ -279,7 +288,7 @@ pub fn edge_count(value: &T) -> i64 {
     value.data.edge_a.len() as i64
 }
 
-fn get(name: &str, values: &[i64], index: i64) -> Result<i64, error::T> {
+fn get(name: &str, values: &[u32], index: i64) -> Result<i64, error::T> {
     let Some(index) = usize::try_from(index)
         .ok()
         .filter(|&index| index < values.len())
@@ -291,7 +300,12 @@ fn get(name: &str, values: &[i64], index: i64) -> Result<i64, error::T> {
             format!("Topology_index.{name}: index out of bounds"),
         ));
     };
-    Ok(values[index])
+    Ok(widen(values[index]))
+}
+
+/// NONE becomes the public -1 "missing" value.
+pub fn widen(value: u32) -> i64 {
+    if value == NONE { -1 } else { i64::from(value) }
 }
 
 pub fn primitive_of_vertex(value: &T, index: i64) -> Result<i64, error::T> {
@@ -322,11 +336,11 @@ pub fn find_edge_index(value: &T, a: i64, b: i64) -> i64 {
     let mut slot = hash_pair(a, b) & mask;
     loop {
         let edge = value.data.edge_slots[slot];
-        if edge < 0 {
+        if edge == NONE {
             return -1;
         }
         let edge = edge as usize;
-        if value.data.edge_a[edge] == a && value.data.edge_b[edge] == b {
+        if i64::from(value.data.edge_a[edge]) == a && i64::from(value.data.edge_b[edge]) == b {
             return edge as i64;
         }
         slot = (slot + 1) & mask;
@@ -351,7 +365,7 @@ pub fn edge_incidence_count(value: &T, edge: i64) -> Result<i64, error::T> {
                 "Topology_index.edge_incidence_count: index out of bounds".to_owned(),
             )
         })?;
-    Ok(value.data.edge_offsets[edge + 1] - value.data.edge_offsets[edge])
+    Ok(i64::from(value.data.edge_offsets[edge + 1] - value.data.edge_offsets[edge]))
 }
 
 pub fn edge_vertex(value: &T, edge: i64, local: i64) -> Result<i64, error::T> {
@@ -364,7 +378,7 @@ pub fn edge_vertex(value: &T, edge: i64, local: i64) -> Result<i64, error::T> {
         ));
     }
     let edge = edge as usize;
-    Ok(value.data.edge_vertices[(value.data.edge_offsets[edge] + local) as usize])
+    Ok(i64::from(value.data.edge_vertices[(value.data.edge_offsets[edge] as i64 + local) as usize]))
 }
 
 pub fn point_incidence_count(value: &T, point: i64) -> Result<i64, error::T> {
@@ -375,7 +389,7 @@ pub fn point_incidence_count(value: &T, point: i64) -> Result<i64, error::T> {
             "Topology_index.point_incidence_count: point out of bounds".to_owned(),
         ));
     }
-    Ok(value.data.point_offsets[point as usize + 1] - value.data.point_offsets[point as usize])
+    Ok(i64::from(value.data.point_offsets[point as usize + 1] - value.data.point_offsets[point as usize]))
 }
 
 pub fn point_vertex(value: &T, point: i64, local: i64) -> Result<i64, error::T> {
@@ -387,7 +401,7 @@ pub fn point_vertex(value: &T, point: i64, local: i64) -> Result<i64, error::T> 
             "Topology_index.point_vertex: local index out of bounds".to_owned(),
         ));
     }
-    Ok(value.data.point_vertices[(value.data.point_offsets[point as usize] + local) as usize])
+    Ok(i64::from(value.data.point_vertices[(value.data.point_offsets[point as usize] as i64 + local) as usize]))
 }
 
 pub fn point_edge_count(value: &T, point: i64) -> Result<i64, error::T> {
@@ -398,10 +412,10 @@ pub fn point_edge_count(value: &T, point: i64) -> Result<i64, error::T> {
             "Topology_index.point_edge_count: point out of bounds".to_owned(),
         ));
     }
-    Ok(
+    Ok(i64::from(
         value.data.point_edge_offsets[point as usize + 1]
             - value.data.point_edge_offsets[point as usize],
-    )
+    ))
 }
 
 pub fn point_edge(value: &T, point: i64, local: i64) -> Result<i64, error::T> {
@@ -413,7 +427,7 @@ pub fn point_edge(value: &T, point: i64, local: i64) -> Result<i64, error::T> {
             "Topology_index.point_edge: local index out of bounds".to_owned(),
         ));
     }
-    Ok(value.data.point_edges[(value.data.point_edge_offsets[point as usize] + local) as usize])
+    Ok(i64::from(value.data.point_edges[(value.data.point_edge_offsets[point as usize] as i64 + local) as usize]))
 }
 
 pub mod view {
@@ -421,19 +435,19 @@ pub mod view {
 
     #[derive(Clone)]
     pub struct View {
-        pub primitive_of_vertex: Arc<[i64]>,
-        pub next_vertex: Arc<[i64]>,
-        pub previous_vertex: Arc<[i64]>,
-        pub edge_of_vertex: Arc<[i64]>,
-        pub opposite_vertex: Arc<[i64]>,
-        pub edge_a: Arc<[i64]>,
-        pub edge_b: Arc<[i64]>,
-        pub edge_offsets: Arc<[i64]>,
-        pub edge_vertices: Arc<[i64]>,
-        pub point_offsets: Arc<[i64]>,
-        pub point_vertices: Arc<[i64]>,
-        pub point_edge_offsets: Arc<[i64]>,
-        pub point_edges: Arc<[i64]>,
+        pub primitive_of_vertex: Arc<[u32]>,
+        pub next_vertex: Arc<[u32]>,
+        pub previous_vertex: Arc<[u32]>,
+        pub edge_of_vertex: Arc<[u32]>,
+        pub opposite_vertex: Arc<[u32]>,
+        pub edge_a: Arc<[u32]>,
+        pub edge_b: Arc<[u32]>,
+        pub edge_offsets: Arc<[u32]>,
+        pub edge_vertices: Arc<[u32]>,
+        pub point_offsets: Arc<[u32]>,
+        pub point_vertices: Arc<[u32]>,
+        pub point_edge_offsets: Arc<[u32]>,
+        pub point_edges: Arc<[u32]>,
     }
 
     pub fn view(value: &T) -> View {

@@ -104,7 +104,7 @@ fn run_case(lease: &renderer::renderer::Gpu, pipes: &pipelines::T, host_: Option
         let count = result.expect("accepted");
         assert_eq!(reads.get(), 4);
         let positions = float3::of_owned(xs, ys, zs).expect("positions");
-        let top = topology::polygons_owned(point_count as i64, vertices, offsets_i).expect("topology");
+        let top = topology::polygons_owned(point_count as i64, topology::saturate(&vertices), topology::saturate(&offsets_i)).expect("topology");
         let geo = geometry::create(positions, top, None, None, None).expect("geometry");
         let expected = match triangulate::run(&triangulate::Params { cancel: None, grain: None, primitives: None }, &geo) {
             Ok(g) => topology::view::view(geometry::topology(&g)).expect("view").vertex_points.to_vec(),
@@ -114,7 +114,7 @@ fn run_case(lease: &renderer::renderer::Gpu, pipes: &pipelines::T, host_: Option
         assert_eq!(count as usize, expected.len());
         for (i, word) in expected.iter().enumerate() {
             let got = i32::from_le_bytes(actual[i * 4..i * 4 + 4].try_into().unwrap()) as i64;
-            assert!(got == *word, "quad index {i}: device {got} vs host {word}");
+            assert!(got == i64::from(*word), "quad index {i}: device {got} vs host {word}");
         }
         if let Some(h) = host_ {
             let (normals, release) = host::normals(h, &p, point_count as i64, &Arc::new(expected)).expect("normals");

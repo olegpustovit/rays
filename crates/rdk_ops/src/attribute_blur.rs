@@ -188,8 +188,8 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
                         let mut total = 0.0_f64;
                         for local in first..last {
                             let edge = topology.point_edges[local] as usize;
-                            let a = topology.edge_a[edge];
-                            let b = topology.edge_b[edge];
+                            let a = i64::from(topology.edge_a[edge]);
+                            let b = i64::from(topology.edge_b[edge]);
                             let neighbor = if a == point { b } else { a };
                             if neighbor != point {
                                 sum += source[neighbor as usize];

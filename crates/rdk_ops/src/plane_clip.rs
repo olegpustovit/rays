@@ -196,12 +196,12 @@ struct Ctx {
     pz: Arc<Vec<f64>>,
     raw_distance: Vec<f64>,
     classified_distance: Vec<f64>,
-    vertex_points: Arc<Vec<i64>>,
-    primitive_offsets: Arc<Vec<i64>>,
+    vertex_points: Arc<Vec<u32>>,
+    primitive_offsets: Arc<Vec<u32>>,
     primitive_kinds: Arc<[u8]>,
-    edge_a: Arc<[i64]>,
-    edge_b: Arc<[i64]>,
-    edge_of_vertex: Arc<[i64]>,
+    edge_a: Arc<[u32]>,
+    edge_b: Arc<[u32]>,
+    edge_of_vertex: Arc<[u32]>,
     affected_points: Option<Vec<u8>>,
     shared_token_of_point: Vec<i64>,
     shared_point_of_token: Vec<usize>,
@@ -264,7 +264,7 @@ impl Ctx {
     }
 
     fn edge_token(&self, side: usize, vertex: usize) -> Result<usize, error::T> {
-        let edge = self.edge_of_vertex[vertex];
+        let edge = rdk_core::topology_index::widen(self.edge_of_vertex[vertex]);
         if edge < 0 {
             Err(fail("Rdk.Plane_clip.clip: missing topology edge"))
         } else {
@@ -328,7 +328,7 @@ impl Ctx {
         }
     }
 
-    fn inside(&self, side: usize, point: i64) -> bool {
+    fn inside(&self, side: usize, point: u32) -> bool {
         side_inside(side, self.classified_distance[point as usize])
     }
 
@@ -1838,10 +1838,10 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     }
     let output_topology = topology::view::create_validated_owned(
         output_point_count as i64,
-        output_vertex_points.clone(),
-        builder.offsets.clone(),
+        topology::narrow("Plane_clip", &output_vertex_points)?,
+        topology::narrow("Plane_clip", &builder.offsets)?,
         builder.kinds.clone(),
-    );
+    )?;
     let primitive_source = &builder.primitive_source;
     let remap_attribute = |source: &attribute::T| -> Result<attribute::T, error::T> {
         let owner = attribute::owner(source);
@@ -2178,11 +2178,11 @@ pub(crate) mod test_util {
 
     pub(crate) fn geom(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, polys: &[(topology::PrimitiveKind, Vec<i64>)]) -> geometry::T {
         let mut vertex_points = Vec::new();
-        let mut offsets = vec![0i64];
+        let mut offsets = vec![0u32];
         let mut kinds = Vec::new();
         for (kind, points) in polys {
-            vertex_points.extend_from_slice(points);
-            offsets.push(vertex_points.len() as i64);
+            vertex_points.extend(points.iter().map(|&p| p as u32));
+            offsets.push(vertex_points.len() as u32);
             kinds.push(*kind);
         }
         let topo = topology::create_owned(x.len() as i64, vertex_points, offsets, kinds).unwrap();
@@ -2291,7 +2291,7 @@ pub(crate) mod test_util {
         let mut polys = Vec::new();
         for p in 0..view.primitive_kinds.len() {
             let mut points: Vec<i64> =
-                view.vertex_points[view.primitive_offsets[p] as usize..view.primitive_offsets[p + 1] as usize].to_vec();
+                view.vertex_points[view.primitive_offsets[p] as usize..view.primitive_offsets[p + 1] as usize].iter().map(|&v| i64::from(v)).collect();
             points.reverse();
             polys.push(points);
         }
@@ -2313,7 +2313,7 @@ pub(crate) mod test_util {
                 polys.push(
                     view.vertex_points[view.primitive_offsets[p] as usize..view.primitive_offsets[p + 1] as usize]
                         .iter()
-                        .map(|&v| v + base)
+                        .map(|&v| i64::from(v) + base)
                         .collect(),
                 );
             }
@@ -2970,7 +2970,7 @@ mod tests {
             for prim in 0..offsets.len() - 1 {
                 if prim % 5 == 0 {
                     nvp.extend_from_slice(&vp[offsets[prim] as usize..offsets[prim + 1] as usize]);
-                    noff.push(nvp.len() as i64);
+                    noff.push(nvp.len() as u32);
                 }
             }
             fx::geom(&x, &y, &z, &nvp, &noff, None)

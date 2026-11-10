@@ -637,7 +637,7 @@ fn materialize(
         }
         Hull::Plane(point_map) => {
             let count = point_map.len() as i64;
-            let topology_value = topology::polygons_owned(count, (0..count).collect(), vec![0, count])?;
+            let topology_value = topology::polygons_owned(count, (0..count as u32).collect(), vec![0, count as u32])?;
             remap(&point_map, topology_value)
         }
         Hull::Solid(faces, alive_faces) => {
@@ -678,16 +678,16 @@ fn materialize(
             let mut primitive_offsets = Vec::with_capacity(primitive_count + 1);
             for (primitive, &(a, b, c)) in triangles.iter().enumerate() {
                 cancel::poll(cancel_value, primitive as i64, 4095)?;
-                primitive_offsets.push(vertex_points.len() as i64);
-                vertex_points.extend_from_slice(&[a, b, c]);
+                primitive_offsets.push(vertex_points.len() as u32);
+                vertex_points.extend_from_slice(&[a as u32, b as u32, c as u32]);
             }
-            primitive_offsets.push((primitive_count * 3) as i64);
+            primitive_offsets.push((primitive_count * 3) as u32);
             let topology_value = topology::view::create_validated_owned(
                 output_points,
                 vertex_points,
                 primitive_offsets,
                 vec![0_u8; primitive_count],
-            );
+            )?;
             remap(&point_map, topology_value)
         }
     }
@@ -842,8 +842,8 @@ mod tests {
             let first = view.primitive_offsets[primitive] as usize;
             let last = view.primitive_offsets[primitive + 1] as usize;
             for at in first..last {
-                let a = view.vertex_points[at];
-                let b = view.vertex_points[if at + 1 == last { first } else { at + 1 }];
+                let a = i64::from(view.vertex_points[at]);
+                let b = i64::from(view.vertex_points[if at + 1 == last { first } else { at + 1 }]);
                 *counts.entry((a.min(b), a.max(b))).or_insert(0) += 1;
             }
         }

@@ -79,7 +79,7 @@ fn point_selected(
             let mut at = reverse.point_offsets[point as usize];
             let last = reverse.point_offsets[(point + 1) as usize];
             while at < last {
-                if group::mem(reverse.point_vertices[at as usize], value) {
+                if group::mem(i64::from(reverse.point_vertices[at as usize]), value) {
                     return true;
                 }
                 at += 1;
@@ -92,7 +92,7 @@ fn point_selected(
             let last = reverse.point_offsets[(point + 1) as usize];
             while at < last {
                 let vertex = reverse.point_vertices[at as usize];
-                if group::mem(reverse.primitive_of_vertex[vertex as usize], value) {
+                if group::mem(i64::from(reverse.primitive_of_vertex[vertex as usize]), value) {
                     return true;
                 }
                 at += 1;
@@ -104,7 +104,7 @@ fn point_selected(
             let mut at = reverse.point_edge_offsets[point as usize];
             let last = reverse.point_edge_offsets[(point + 1) as usize];
             while at < last {
-                if edge_group::mem(reverse.point_edges[at as usize], value) {
+                if edge_group::mem(i64::from(reverse.point_edges[at as usize]), value) {
                     return true;
                 }
                 at += 1;
@@ -122,19 +122,19 @@ fn vertex_selected(
     edges: Option<&topology_index::view::View>,
 ) -> bool {
     match selection {
-        T::SelectedPoints(value) => group::mem(topology.vertex_points[vertex as usize], value),
+        T::SelectedPoints(value) => group::mem(i64::from(topology.vertex_points[vertex as usize]), value),
         T::SelectedVertices(value) => group::mem(vertex, value),
         T::SelectedPrimitives(value) => {
-            group::mem(points.expect("point selection index required").primitive_of_vertex[vertex as usize], value)
+            group::mem(i64::from(points.expect("point selection index required").primitive_of_vertex[vertex as usize]), value)
         }
         T::SelectedEdges(value) => {
             let reverse = edges.expect("edge selection index required");
             let outgoing = reverse.edge_of_vertex[vertex as usize];
             let previous = reverse.previous_vertex[vertex as usize];
-            (outgoing >= 0 && edge_group::mem(outgoing, value))
-                || (previous >= 0
-                    && reverse.edge_of_vertex[previous as usize] >= 0
-                    && edge_group::mem(reverse.edge_of_vertex[previous as usize], value))
+            (outgoing != topology_index::NONE && edge_group::mem(i64::from(outgoing), value))
+                || (previous != topology_index::NONE
+                    && reverse.edge_of_vertex[previous as usize] != topology_index::NONE
+                    && edge_group::mem(i64::from(reverse.edge_of_vertex[previous as usize]), value))
         }
     }
 }
@@ -151,7 +151,7 @@ fn primitive_selected(
             let mut vertex = topology.primitive_offsets[primitive as usize];
             let last = topology.primitive_offsets[(primitive + 1) as usize];
             while vertex < last {
-                if group::mem(topology.vertex_points[vertex as usize], value) {
+                if group::mem(i64::from(topology.vertex_points[vertex as usize]), value) {
                     return true;
                 }
                 vertex += 1;
@@ -162,7 +162,7 @@ fn primitive_selected(
             let mut vertex = topology.primitive_offsets[primitive as usize];
             let last = topology.primitive_offsets[(primitive + 1) as usize];
             while vertex < last {
-                if group::mem(vertex, value) {
+                if group::mem(i64::from(vertex), value) {
                     return true;
                 }
                 vertex += 1;
@@ -175,7 +175,7 @@ fn primitive_selected(
             let last = topology.primitive_offsets[(primitive + 1) as usize];
             while vertex < last {
                 let edge = reverse.edge_of_vertex[vertex as usize];
-                if edge >= 0 && edge_group::mem(edge, value) {
+                if edge != topology_index::NONE && edge_group::mem(i64::from(edge), value) {
                     return true;
                 }
                 vertex += 1;

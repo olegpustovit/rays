@@ -6,8 +6,8 @@ pub(crate) fn geom(
     x: &[f64],
     y: &[f64],
     z: &[f64],
-    vertex_points: &[i64],
-    offsets: &[i64],
+    vertex_points: &[u32],
+    offsets: &[u32],
     kinds: Option<Vec<PrimitiveKind>>,
 ) -> geometry::T {
     let positions = packed::float3::view::of_owned_exn(x.to_vec(), y.to_vec(), z.to_vec()).unwrap();
@@ -52,7 +52,7 @@ pub(crate) fn positions(g: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     (v.x.to_vec(), v.y.to_vec(), v.z.to_vec())
 }
 
-pub(crate) fn topo(g: &geometry::T) -> (Vec<i64>, Vec<i64>, Vec<u8>) {
+pub(crate) fn topo(g: &geometry::T) -> (Vec<u32>, Vec<u32>, Vec<u8>) {
     let v = topology::view::view(geometry::topology(g)).unwrap();
     (v.vertex_points.to_vec(), v.primitive_offsets.to_vec(), v.primitive_kinds.to_vec())
 }
@@ -72,19 +72,19 @@ pub(crate) fn grid(columns: i64, rows: i64, size: f64, quads: bool) -> geometry:
         }
     }
     let z = vec![0.0; x.len()];
-    let (mut vp, mut offsets) = (Vec::new(), vec![0i64]);
+    let (mut vp, mut offsets) = (Vec::new(), vec![0u32]);
     for j in 0..rows {
         for i in 0..columns {
-            let a = j * stride + i;
-            let (b, c, d) = (a + 1, a + 1 + stride, a + stride);
+            let a = (j * stride + i) as u32;
+            let (b, c, d) = (a + 1, a + 1 + stride as u32, a + stride as u32);
             if quads {
                 vp.extend_from_slice(&[a, b, c, d]);
-                offsets.push(vp.len() as i64);
+                offsets.push(vp.len() as u32);
             } else {
                 vp.extend_from_slice(&[a, b, c]);
-                offsets.push(vp.len() as i64);
+                offsets.push(vp.len() as u32);
                 vp.extend_from_slice(&[a, c, d]);
-                offsets.push(vp.len() as i64);
+                offsets.push(vp.len() as u32);
             }
         }
     }
@@ -95,8 +95,8 @@ pub(crate) fn polyline(points: &[(f64, f64, f64)]) -> geometry::T {
     let x: Vec<f64> = points.iter().map(|p| p.0).collect();
     let y: Vec<f64> = points.iter().map(|p| p.1).collect();
     let z: Vec<f64> = points.iter().map(|p| p.2).collect();
-    let vp: Vec<i64> = (0..points.len() as i64).collect();
-    geom(&x, &y, &z, &vp, &[0, points.len() as i64], Some(vec![PrimitiveKind::OpenPolyline]))
+    let vp: Vec<u32> = (0..points.len() as u32).collect();
+    geom(&x, &y, &z, &vp, &[0, points.len() as u32], Some(vec![PrimitiveKind::OpenPolyline]))
 }
 
 pub(crate) fn edge_group_where(

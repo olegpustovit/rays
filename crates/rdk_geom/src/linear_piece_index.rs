@@ -125,8 +125,8 @@ fn create_inner(
     for slot in 0..selected_count {
         cancel::poll(cancel_value, slot as i64, 4095)?;
         let primitive = selected[slot];
-        let first = topology_view.primitive_offsets[primitive as usize];
-        let last = topology_view.primitive_offsets[primitive as usize + 1];
+        let first = i64::from(topology_view.primitive_offsets[primitive as usize]);
+        let last = i64::from(topology_view.primitive_offsets[primitive as usize + 1]);
         let size = last - first;
         let pieces = match topology_view.primitive_kinds[primitive as usize] {
             0 => {
@@ -183,8 +183,8 @@ fn create_inner(
             cancel::poll(cancel_value, slot, 4095)?;
             let primitive = selected[slot as usize];
             let output = (piece_offsets[slot as usize] - base) as usize;
-            let first = topology_view.primitive_offsets[primitive as usize];
-            let last = topology_view.primitive_offsets[primitive as usize + 1];
+            let first = i64::from(topology_view.primitive_offsets[primitive as usize]);
+            let last = i64::from(topology_view.primitive_offsets[primitive as usize + 1]);
             let size = last - first;
             let code = topology_view.primitive_kinds[primitive as usize];
             if code == 0 {
@@ -541,7 +541,7 @@ pub mod view {
 
     /// Original source point number for a piece corner.
     pub fn point(value: &T, piece: i64, corner: i64) -> Result<i64, error::T> {
-        Ok(value.topology.vertex_points[vertex(value, piece, corner)? as usize])
+        Ok(i64::from(value.topology.vertex_points[vertex(value, piece, corner)? as usize]))
     }
 
     /// Global polygon-curve parameter at segment endpoint 0 or 1.
@@ -601,7 +601,7 @@ mod tests {
         let y = vec![0.0, 0.0, 4.0, 1.0, 1.0, 1.0];
         let z = vec![0.0, 0.0, 0.0, -1.0, 1.0, 3.0];
         let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
-        let topo = topology::view::create_validated_owned(6, vec![0, 1, 2, 3, 4, 5], vec![0, 3, 6], vec![0, 1]);
+        let topo = topology::view::create_validated_owned(6, vec![0, 1, 2, 3, 4, 5], vec![0, 3, 6], vec![0, 1]).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
     }
 
@@ -630,7 +630,7 @@ mod tests {
     #[test]
     fn degenerate_segment_is_reported() {
         let positions = packed::float3::view::of_owned_exn(vec![0.0, 0.0], vec![0.0, 0.0], vec![0.0, 0.0]).unwrap();
-        let topo = topology::view::create_validated_owned(2, vec![0, 1], vec![0, 2], vec![1]);
+        let topo = topology::view::create_validated_owned(2, vec![0, 1], vec![0, 2], vec![1]).unwrap();
         let geom = geometry::create(positions, topo, None, None, None).unwrap();
         let failure = create(None, None, None, &geom).err().unwrap();
         assert_eq!(error::code(&failure), Code::InvalidSurface);

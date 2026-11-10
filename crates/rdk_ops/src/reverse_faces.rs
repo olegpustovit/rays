@@ -19,7 +19,7 @@ fn reverse(
     if primitive_count == 0 {
         return Ok(geometry_value.clone());
     }
-    let (mut vertex_points, mut vertex_map) = (vec![0; vertex_count], vec![0; vertex_count]);
+    let (mut vertex_points, mut vertex_map) = (vec![0_u32; vertex_count], vec![0_i64; vertex_count]);
     let average_primitive_size = (vertex_count / primitive_count).max(1);
     let primitive_grain = (grain / average_primitive_size as i64).max(1);
     {
@@ -43,7 +43,7 @@ fn reverse(
                     let at = (first + local - base) as usize;
                     let old_vertex = first + old_local;
                     points[at] = source.vertex_points[old_vertex as usize];
-                    map[at] = old_vertex;
+                    map[at] = i64::from(old_vertex);
                 }
             }
             Ok(())
@@ -54,7 +54,7 @@ fn reverse(
         vertex_points,
         source.primitive_offsets.clone(),
         source.primitive_kinds,
-    );
+    )?;
     let mut attributes = Vec::new();
     for item in geometry::attributes(geometry_value) {
         let owner = attribute::owner(&item);

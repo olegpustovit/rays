@@ -45,7 +45,7 @@ pub struct Tables {
 /// last gather read, kept until the gather's `receipt` completes.
 #[derive(Clone)]
 pub struct DeviceGpu {
-    pub corners: std::sync::Arc<Vec<i64>>,
+    pub corners: std::sync::Arc<Vec<u32>>,
     pub vertex_count: i64,
     pub material_key: Vec<u8>,
     pub vix: Buffer,

@@ -294,10 +294,11 @@ pub fn validate_materialized(
     x: &[f64],
     y: &[f64],
     z: &[f64],
-    vertex_points: &[i64],
+    corners: usize,
+    vertex_at: &dyn Fn(usize) -> i64,
 ) -> Result<(), error::T> {
     let points = x.len() as i64;
-    if vertex_points.len() % 3 != 0 {
+    if corners % 3 != 0 {
         return Err(make(
             Code::RoundingCardinality,
             "materialized triangle corners are not divisible by three".to_owned(),
@@ -311,11 +312,11 @@ pub fn validate_materialized(
             _ => predicates::orient2d_packed(z, x, a, b, c),
         }
     };
-    for triangle in 0..vertex_points.len() / 3 {
+    for triangle in 0..corners / 3 {
         let offset = triangle * 3;
-        let a = vertex_points[offset];
-        let b = vertex_points[offset + 1];
-        let c = vertex_points[offset + 2];
+        let a = vertex_at(offset);
+        let b = vertex_at(offset + 1);
+        let c = vertex_at(offset + 2);
         if a < 0 || a >= points || b < 0 || b >= points || c < 0 || c >= points {
             return Err(make(
                 Code::RoundingCardinality,
@@ -368,7 +369,7 @@ fn validate_closed_inner(topology_value: &topology::T) -> Result<(), Fail> {
     let mut triangle_only = true;
     for primitive in 0..primitive_count {
         if !(view.primitive_kinds[primitive] == 0
-            && view.primitive_offsets[primitive + 1] - view.primitive_offsets[primitive] == 3)
+            && i64::from(view.primitive_offsets[primitive + 1]) - i64::from(view.primitive_offsets[primitive]) == 3)
         {
             triangle_only = false;
             break;
@@ -382,9 +383,9 @@ fn validate_closed_inner(topology_value: &topology::T) -> Result<(), Fail> {
     let point_count = view.point_count;
     for triangle in 0..primitive_count {
         let offset = triangle * 3;
-        let a = view.vertex_points[offset];
-        let b = view.vertex_points[offset + 1];
-        let c = view.vertex_points[offset + 2];
+        let a = i64::from(view.vertex_points[offset]);
+        let b = i64::from(view.vertex_points[offset + 1]);
+        let c = i64::from(view.vertex_points[offset + 2]);
         keys[offset] = edge_key(point_count, a, b)?;
         keys[offset + 1] = edge_key(point_count, b, c)?;
         keys[offset + 2] = edge_key(point_count, c, a)?;
@@ -413,10 +414,10 @@ fn validate_closed_inner(topology_value: &topology::T) -> Result<(), Fail> {
 
 fn native_edge(view: &topology_index::view::View, primitive: i64, first: i64, second: i64) -> i64 {
     let (f, s) = (first as usize, second as usize);
-    if view.primitive_of_vertex[f] == primitive && view.next_vertex[f] == second {
-        view.edge_of_vertex[f]
-    } else if view.primitive_of_vertex[s] == primitive && view.next_vertex[s] == first {
-        view.edge_of_vertex[s]
+    if i64::from(view.primitive_of_vertex[f]) == primitive && rdk_core::topology_index::widen(view.next_vertex[f]) == second {
+        rdk_core::topology_index::widen(view.edge_of_vertex[f])
+    } else if i64::from(view.primitive_of_vertex[s]) == primitive && rdk_core::topology_index::widen(view.next_vertex[s]) == first {
+        rdk_core::topology_index::widen(view.edge_of_vertex[s])
     } else {
         -1
     }
@@ -936,7 +937,7 @@ fn build_internal(
     }
     edge_source_offsets[sc * 3] = edge_source_count as i64;
     if let Err(failure) =
-        validate_materialized(internal.defer_rounded_slivers, &x, &y, &z, &vertex_points)
+        validate_materialized(internal.defer_rounded_slivers, &x, &y, &z, vertex_points.len(), &|i| vertex_points[i])
     {
         return Err(Fail::Rdk(make(
             error::code(&failure),
@@ -945,7 +946,7 @@ fn build_internal(
     }
     let primitive_offsets: Vec<i64> = (0..=selected_count).map(|triangle| triangle * 3).collect();
     let topology_value =
-        match topology::polygons_owned(point_count, vertex_points, primitive_offsets) {
+        match topology::polygons_owned(point_count, topology::narrow("Boolean", &vertex_points)?, topology::narrow("Boolean", &primitive_offsets)?) {
             Ok(value) => value,
             Err(failure) => {
                 return Err(Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())));
@@ -1092,9 +1093,10 @@ pub mod view {
         x: &[f64],
         y: &[f64],
         z: &[f64],
-        vertex_points: &[i64],
+        corners: usize,
+        vertex_at: &dyn Fn(usize) -> i64,
     ) -> Result<(), error::T> {
-        super::validate_materialized(allow_degenerate, x, y, z, vertex_points)
+        super::validate_materialized(allow_degenerate, x, y, z, corners, vertex_at)
     }
 
     #[allow(clippy::type_complexity)]
@@ -1163,9 +1165,9 @@ fn reverse_inner(cancel_value: Option<&cancel::T>, value: &Ancestry) -> Result<A
     for primitive in 0..primitives {
         cancel::poll(cancel_value, primitive as i64, 4095)?;
         let offset = primitive * 3;
-        vertex_points[offset] = source_topology.vertex_points[offset];
-        vertex_points[offset + 1] = source_topology.vertex_points[offset + 2];
-        vertex_points[offset + 2] = source_topology.vertex_points[offset + 1];
+        vertex_points[offset] = i64::from(source_topology.vertex_points[offset]);
+        vertex_points[offset + 1] = i64::from(source_topology.vertex_points[offset + 2]);
+        vertex_points[offset + 2] = i64::from(source_topology.vertex_points[offset + 1]);
         corner_complex_vertices[offset] = value.corner_complex_vertices[offset];
         corner_complex_vertices[offset + 1] = value.corner_complex_vertices[offset + 2];
         corner_complex_vertices[offset + 2] = value.corner_complex_vertices[offset + 1];
@@ -1200,8 +1202,8 @@ fn reverse_inner(cancel_value: Option<&cancel::T>, value: &Ancestry) -> Result<A
     let primitive_offsets: Vec<i64> = (0..=primitives as i64).map(|primitive| primitive * 3).collect();
     let topology_value = topology::polygons_owned(
         geometry::point_count(&value.geometry),
-        vertex_points,
-        primitive_offsets,
+        topology::narrow("Boolean", &vertex_points)?,
+        topology::narrow("Boolean", &primitive_offsets)?,
     )
     .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))?;
     let geometry_value =
@@ -1346,7 +1348,7 @@ fn concatenate_inner(cancel_value: Option<&cancel::T>, values: &[Ancestry]) -> R
     edge_source_offsets[corners] = total_edge_sources as i64;
     let primitive_offsets: Vec<i64> =
         (0..=total_primitives as i64).map(|primitive| primitive * 3).collect();
-    let topology_value = topology::polygons_owned(point_count, vertex_points, primitive_offsets)
+    let topology_value = topology::polygons_owned(point_count, topology::narrow("Boolean", &vertex_points)?, topology::narrow("Boolean", &primitive_offsets)?)
         .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))?;
     let positions = packed::float3::view::of_owned_exn(x, y, z)
         .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))?;
@@ -1383,19 +1385,19 @@ mod tests {
     // test_materialization_validation
     #[test]
     fn materialization_validation() {
-        validate_materialized(false, &[0., 1., 0.], &[0., 0., 1.], &[0., 0., 0.], &[0, 1, 2])
+        validate_materialized(false, &[0., 1., 0.], &[0., 0., 1.], &[0., 0., 0.], 3, &|i| i as i64)
             .expect("valid rounded triangle failed");
-        match validate_materialized(false, &[0., 0.], &[0., 0.], &[0., 0.], &[]) {
+        match validate_materialized(false, &[0., 0.], &[0., 0.], &[0., 0.], 0, &|i| i as i64) {
             Err(failure) if error::code(&failure) == Code::RoundingCollision => {}
             Err(failure) => panic!("unexpected rounding collision error: {}", error::to_string(&failure)),
             Ok(()) => panic!("rounded exact-point collision was accepted"),
         }
-        match validate_materialized(false, &[0., 1., 2.], &[0., 0., 0.], &[0., 0., 0.], &[0, 1, 2]) {
+        match validate_materialized(false, &[0., 1., 2.], &[0., 0., 0.], &[0., 0., 0.], 3, &|i| i as i64) {
             Err(failure) if error::code(&failure) == Code::RoundingDegenerate => {}
             Err(failure) => panic!("unexpected rounding degeneracy error: {}", error::to_string(&failure)),
             Ok(()) => panic!("rounded collinear output triangle was accepted"),
         }
-        validate_materialized(true, &[0., 1., 2.], &[0., 0., 0.], &[0., 0., 0.], &[0, 1, 2])
+        validate_materialized(true, &[0., 1., 2.], &[0., 0., 0.], &[0., 0., 0.], 3, &|i| i as i64)
             .expect("explicit deferred rounding repair was rejected");
         let (x, y, z, representatives, map) = coalesce_positions(
             &[10, 11, 12, 13, 14],

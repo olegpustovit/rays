@@ -470,10 +470,10 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
         None => false,
     };
     let endpoint = |primitive: i64, reverse: bool, last: bool| -> i64 {
-        let first = source.primitive_offsets[primitive as usize];
-        let stop = source.primitive_offsets[primitive as usize + 1];
+        let first = i64::from(source.primitive_offsets[primitive as usize]);
+        let stop = i64::from(source.primitive_offsets[primitive as usize + 1]);
         let vertex = if last != reverse { stop - 1 } else { first };
-        source.vertex_points[vertex as usize]
+        i64::from(source.vertex_points[vertex as usize])
     };
     let distance = |left: i64, right: i64| -> Result<f64, error::T> {
         let (l, r) = (left as usize, right as usize);
@@ -740,7 +740,7 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
         }
         chain_last[chain] = index as i64;
         let primitive = selected_primitives[index] as usize;
-        let size = source.primitive_offsets[primitive + 1] - source.primitive_offsets[primitive];
+        let size = i64::from(source.primitive_offsets[primitive + 1]) - i64::from(source.primitive_offsets[primitive]);
         chain_size[chain] += size - if index as i64 > chain_first[chain] && welded[index] { 1 } else { 0 };
     }
     if wrap {
@@ -793,8 +793,8 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
         if primitive >= 0 {
             descriptor_primitive[output] = primitive;
             primitive_map[output] = primitive;
-            output_sizes[output] = source.primitive_offsets[primitive as usize + 1]
-                - source.primitive_offsets[primitive as usize];
+            output_sizes[output] = i64::from(source.primitive_offsets[primitive as usize + 1])
+                - i64::from(source.primitive_offsets[primitive as usize]);
             output_kinds[output] = match source.primitive_kinds[primitive as usize] {
                 0 => topology::PrimitiveKind::Polygon,
                 1 => topology::PrimitiveKind::OpenPolyline,
@@ -846,8 +846,8 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
                 let mut previous = -1_i64;
                 let single = descriptor_primitive[output_primitive as usize];
                 if single >= 0 {
-                    let source_first = source.primitive_offsets[single as usize];
-                    let source_size = source.primitive_offsets[single as usize + 1] - source_first;
+                    let source_first = i64::from(source.primitive_offsets[single as usize]);
+                    let source_size = i64::from(source.primitive_offsets[single as usize + 1]) - source_first;
                     fill_source(
                         &mut buf,
                         &source.vertex_points,
@@ -863,8 +863,8 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
                     let chain = descriptor_chain[output_primitive as usize] as usize;
                     for index in chain_first[chain]..=chain_last[chain] {
                         let primitive = selected_primitives[index as usize] as usize;
-                        let source_first = source.primitive_offsets[primitive];
-                        let source_size = source.primitive_offsets[primitive + 1] - source_first;
+                        let source_first = i64::from(source.primitive_offsets[primitive]);
+                        let source_size = i64::from(source.primitive_offsets[primitive + 1]) - source_first;
                         fill_source(
                             &mut buf,
                             &source.vertex_points,
@@ -882,8 +882,8 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
     }
     let output_topology = topology::create_owned(
         source.point_count,
-        vertex_points,
-        primitive_offsets.clone(),
+        topology::narrow("Curve_join", &vertex_points)?,
+        topology::narrow("Curve_join", &primitive_offsets)?,
         output_kinds.clone(),
     )?;
     let mut attributes = Vec::new();
@@ -957,8 +957,8 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
             let mut source_corner_edge = vec![-1_i64; source.vertex_points.len()];
             let mut source_edge_at = 0_i64;
             for primitive in 0..primitive_count as usize {
-                let first = source.primitive_offsets[primitive];
-                let size = source.primitive_offsets[primitive + 1] - first;
+                let first = i64::from(source.primitive_offsets[primitive]);
+                let size = i64::from(source.primitive_offsets[primitive + 1]) - first;
                 let kind = match source.primitive_kinds[primitive] {
                     0 => topology::PrimitiveKind::Polygon,
                     1 => topology::PrimitiveKind::OpenPolyline,
@@ -1011,7 +1011,7 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
                     let source_corner = edge_source_corner[vertex as usize];
                     if source_corner >= 0 {
                         let source_edge = topology_index::edge_of_vertex(&source_index, source_corner)?;
-                        let target_edge = target_view.edge_of_vertex[vertex as usize];
+                        let target_edge = rdk_core::topology_index::widen(target_view.edge_of_vertex[vertex as usize]);
                         if source_edge >= 0 && target_edge >= 0 && edge_group::mem(source_edge, source_group) {
                             edge_group::builder::set(&mut builder, target_edge, true)?;
                         }
@@ -1041,7 +1041,7 @@ struct FillBuf<'a> {
 /// `(source_first, source_size)` and `flags` is `(reverse, skip_first)`.
 fn fill_source(
     buf: &mut FillBuf<'_>,
-    source_vertex_points: &[i64],
+    source_vertex_points: &[u32],
     output_at: &mut usize,
     previous: &mut i64,
     piece: (i64, i64),
@@ -1055,7 +1055,7 @@ fn fill_source(
         let source_vertex = source_first + local;
         let output = *output_at;
         buf.map[output] = source_vertex;
-        buf.points[output] = source_vertex_points[source_vertex as usize];
+        buf.points[output] = i64::from(source_vertex_points[source_vertex as usize]);
         if *previous >= 0 {
             buf.corner[*previous as usize] = if step == first_step && first_step == 0 {
                 -1
@@ -1083,7 +1083,7 @@ mod tests {
         .unwrap();
         let mut builder = topology::builder::create(points.len() as i64, None, None).unwrap();
         for row in rows {
-            topology::builder::add_open_polyline(&mut builder, row).unwrap();
+            topology::builder::add_open_polyline(&mut builder, &row.iter().map(|&p| p as u32).collect::<Vec<_>>()).unwrap();
         }
         let topo = topology::builder::freeze(&mut builder).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
@@ -1108,7 +1108,7 @@ mod tests {
     fn rows(value: &geometry::T) -> Vec<Vec<i64>> {
         let view = topology::view::view(geometry::topology(value)).unwrap();
         (0..view.primitive_offsets.len() - 1)
-            .map(|p| view.vertex_points[view.primitive_offsets[p] as usize..view.primitive_offsets[p + 1] as usize].to_vec())
+            .map(|p| view.vertex_points[view.primitive_offsets[p] as usize..view.primitive_offsets[p + 1] as usize].iter().map(|&v| i64::from(v)).collect())
             .collect()
     }
 

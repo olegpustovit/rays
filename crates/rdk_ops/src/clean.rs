@@ -169,8 +169,8 @@ pub(crate) fn delete_degenerate(
     } else {
         support::par_fill(cancel_value, params.grain, &mut flags, &|primitive| {
             let primitive = primitive as usize;
-            let first = view.primitive_offsets[primitive];
-            let last = view.primitive_offsets[primitive + 1];
+            let first = i64::from(view.primitive_offsets[primitive]);
+            let last = i64::from(view.primitive_offsets[primitive + 1]);
             let kind = view.primitive_kinds[primitive];
             if !selected(primitive) {
                 return Ok(0);
@@ -285,7 +285,7 @@ fn delete_nan_points(
 
 fn clean_cycle_point(view: &topology::view::View, first: i64, size: i64, start: i64, direction: i64, offset: i64) -> i64 {
     let local = (start + direction * offset) % size;
-    view.vertex_points[(first + if local < 0 { local + size } else { local }) as usize]
+    i64::from(view.vertex_points[(first + if local < 0 { local + size } else { local }) as usize])
 }
 
 fn clean_minimal_rotation(view: &topology::view::View, first: i64, size: i64, direction: i64) -> i64 {
@@ -351,8 +351,8 @@ fn delete_overlaps_general(
                 if view.primitive_kinds[primitive] != 0 {
                     continue;
                 }
-                let first = view.primitive_offsets[primitive];
-                let size = view.primitive_offsets[primitive + 1] - first;
+                let first = i64::from(view.primitive_offsets[primitive]);
+                let size = i64::from(view.primitive_offsets[primitive + 1]) - first;
                 let mut start = clean_minimal_rotation(&view, first, size, 1);
                 let mut direction = 1i64;
                 let reverse_start = clean_minimal_rotation(&view, first, size, -1);
@@ -388,10 +388,10 @@ fn delete_overlaps_general(
     let mask = (capacity - 1) as i64;
     let mut flags = vec![0u8; primitive_count];
     let point = |primitive: usize, offset: i64| -> i64 {
-        let first = view.primitive_offsets[primitive];
+        let first = i64::from(view.primitive_offsets[primitive]);
         let size = sizes[primitive];
         let local = (starts[primitive] + (directions[primitive] * offset)) % size;
-        view.vertex_points[(first + if local < 0 { local + size } else { local }) as usize]
+        i64::from(view.vertex_points[(first + if local < 0 { local + size } else { local }) as usize])
     };
     let equal = |left: usize, right: usize| -> bool {
         sizes[left] == sizes[right] && (0..sizes[left]).all(|offset| point(left, offset) == point(right, offset))
@@ -462,7 +462,7 @@ fn delete_triangle_overlaps(
                 let slot = (primitive - chunk_first) as usize;
                 let primitive = primitive as usize;
                 let first = view.primitive_offsets[primitive] as usize;
-                let (p0, p1, p2) = (view.vertex_points[first], view.vertex_points[first + 1], view.vertex_points[first + 2]);
+                let (p0, p1, p2) = (i64::from(view.vertex_points[first]), i64::from(view.vertex_points[first + 1]), i64::from(view.vertex_points[first + 2]));
                 let (low, high) = if p0 <= p1 { (p0, p1) } else { (p1, p0) };
                 let (a, b, c) = if p2 <= low {
                     (p2, low, high)
@@ -748,7 +748,7 @@ mod tests {
             let (vp, offsets, _) = topo(&out);
             assert_eq!(ids, expected_ids);
             assert_eq!(vp, expected_vertices);
-            assert_eq!(offsets, (0..=ids.len() as i64).map(|i| i * 3).collect::<Vec<_>>());
+            assert_eq!(offsets, (0..=ids.len() as u32).map(|i| i * 3).collect::<Vec<_>>());
         }
         assert_eq!(topo(&source), before, "overlap repair mutated its source");
     }
@@ -765,7 +765,7 @@ mod tests {
             dense_vp.extend_from_slice(&[a, b, c, b, c, a, c, b, a]);
         }
         let (x, y, z) = positions(&g);
-        let dense_offsets: Vec<i64> = (0..=(primitives * 3) as i64).map(|p| p * 3).collect();
+        let dense_offsets: Vec<u32> = (0..=(primitives * 3) as u32).map(|p| p * 3).collect();
         let dense = geom(&x, &y, &z, &dense_vp, &dense_offsets, None);
         let ids: Vec<i64> = (0..primitives as i64 * 3).map(|p| p / 3).collect();
         let dense = with_attr(&dense, Owner::Primitive, "source_id", Storage::Int(Arc::new(ids)));
@@ -889,21 +889,21 @@ mod tests {
             for p in (0..x.len()).step_by(997) {
                 x[p] = f64::NAN;
             }
-            let (mut new_vp, mut new_offsets) = (Vec::new(), vec![0i64]);
+            let (mut new_vp, mut new_offsets) = (Vec::new(), vec![0u32]);
             for prim in 0..offsets.len() - 1 {
                 let corners = &vp[offsets[prim] as usize..offsets[prim + 1] as usize];
                 new_vp.extend_from_slice(corners);
-                new_offsets.push(new_vp.len() as i64);
+                new_offsets.push(new_vp.len() as u32);
                 if prim % 7 == 0 {
                     let mut rotated = corners.to_vec();
                     rotated.rotate_left(1);
                     new_vp.extend(rotated);
-                    new_offsets.push(new_vp.len() as i64);
+                    new_offsets.push(new_vp.len() as u32);
                 }
                 if prim % 11 == 0 {
                     let (a, b) = (corners[0], corners[1]);
                     new_vp.extend(if quads { vec![a, b, a, b] } else { vec![a, a, b] });
-                    new_offsets.push(new_vp.len() as i64);
+                    new_offsets.push(new_vp.len() as u32);
                 }
             }
             let source = geom(&x, &y, &z, &new_vp, &new_offsets, None);

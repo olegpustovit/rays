@@ -109,7 +109,7 @@ fn polyline(closed: bool, filled: bool, points: &[(f64, f64, f64)]) -> Result<ge
     let failure = |message: String| {
         rdk_error::new("polyline", rdk_error::Code::InvalidParameter, message)
     };
-    let topology = topology::polygons_owned(count, (0..count).collect(), vec![0, count]).map_err(|e| failure(rdk_error::message(&e).to_owned()))?;
+    let topology = topology::polygons_owned(count, (0..count as u32).collect(), vec![0, count as u32]).map_err(|e| failure(rdk_error::message(&e).to_owned()))?;
     geometry::create(geometry::positions(&line).clone(), topology, None, None, None)
         .map_err(|e| failure(rdk_error::message(&e).to_owned()))
 }

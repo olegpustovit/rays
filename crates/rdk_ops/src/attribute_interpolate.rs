@@ -926,8 +926,8 @@ fn interpolate_primitive_groups(
             }
             return Ok(());
         }
-        let first = topology_view.primitive_offsets[primitive as usize];
-        let last = topology_view.primitive_offsets[primitive as usize + 1];
+        let first = i64::from(topology_view.primitive_offsets[primitive as usize]);
+        let last = i64::from(topology_view.primitive_offsets[primitive as usize + 1]);
         let size = last - first;
         let u = uvw.x[destination as usize] * pre_scale;
         let v = uvw.y[destination as usize] * pre_scale;
@@ -947,7 +947,7 @@ fn interpolate_primitive_groups(
                         let weight = kind_weight(kind, size, u, v, local);
                         let vertex = first + local;
                         let source_element = if job.group_source_owner == attribute::Owner::Point {
-                            topology_view.vertex_points[vertex as usize]
+                            i64::from(topology_view.vertex_points[vertex as usize])
                         } else {
                             vertex
                         };
@@ -1043,7 +1043,7 @@ fn compute_primitive_weights(
         } else if primitive < 0 || primitive >= primitive_count {
             0
         } else {
-            topology_view.primitive_offsets[primitive as usize + 1] - topology_view.primitive_offsets[primitive as usize]
+            i64::from(topology_view.primitive_offsets[primitive as usize + 1]) - i64::from(topology_view.primitive_offsets[primitive as usize])
         }
     };
     let zeros = vec![0_i64; target_count as usize];
@@ -1084,8 +1084,8 @@ fn compute_primitive_weights(
                             .copy_from_slice(&old_weights.values[old_first..old_first + length]);
                     }
                 } else if primitive >= 0 && primitive < primitive_count {
-                    let first = topology_view.primitive_offsets[primitive as usize];
-                    let last = topology_view.primitive_offsets[primitive as usize + 1];
+                    let first = i64::from(topology_view.primitive_offsets[primitive as usize]);
+                    let last = i64::from(topology_view.primitive_offsets[primitive as usize + 1]);
                     let size = last - first;
                     let u = uvw.x[d] * pre_scale;
                     let v = uvw.y[d] * pre_scale;
@@ -1093,7 +1093,7 @@ fn compute_primitive_weights(
                     for local in 0..size {
                         let vertex = first + local;
                         numbers[output_first + local as usize] = if computed.computed_owner == WeightedSource::Points {
-                            topology_view.vertex_points[vertex as usize]
+                            i64::from(topology_view.vertex_points[vertex as usize])
                         } else {
                             vertex
                         };
@@ -1257,8 +1257,8 @@ pub(crate) fn interpolate_primitive(params: &PrimitiveParams) -> Result<geometry
             }
             return Ok(());
         }
-        let first = topology_view.primitive_offsets[primitive as usize];
-        let last = topology_view.primitive_offsets[primitive as usize + 1];
+        let first = i64::from(topology_view.primitive_offsets[primitive as usize]);
+        let last = i64::from(topology_view.primitive_offsets[primitive as usize + 1]);
         let size = last - first;
         let u = uvw.x[destination as usize] * pre_scale;
         let v = uvw.y[destination as usize] * pre_scale;
@@ -1275,7 +1275,7 @@ pub(crate) fn interpolate_primitive(params: &PrimitiveParams) -> Result<geometry
                 best_local = local;
             }
             let vertex = first + local;
-            let point = topology_view.vertex_points[vertex as usize];
+            let point = i64::from(topology_view.vertex_points[vertex as usize]);
             for &index in &point_numeric {
                 add_numeric(&shared[index], &mut cells[index], point, weight);
             }
@@ -1284,7 +1284,7 @@ pub(crate) fn interpolate_primitive(params: &PrimitiveParams) -> Result<geometry
             }
         }
         let best_vertex = first + best_local;
-        let best_point = topology_view.vertex_points[best_vertex as usize];
+        let best_point = i64::from(topology_view.vertex_points[best_vertex as usize]);
         for &index in &primitive_numeric {
             set_numeric(&shared[index], &mut cells[index], primitive);
         }
@@ -1374,7 +1374,7 @@ fn weighted_source_index(
     match (weighted_owner, source_owner) {
         (_, attribute::Owner::Detail) => 0,
         (WeightedSource::Points, attribute::Owner::Point) => source_element,
-        (WeightedSource::Vertices, attribute::Owner::Point) => topology_view.vertex_points[source_element as usize],
+        (WeightedSource::Vertices, attribute::Owner::Point) => i64::from(topology_view.vertex_points[source_element as usize]),
         (WeightedSource::Vertices, attribute::Owner::Vertex) => source_element,
         (WeightedSource::Vertices, attribute::Owner::Primitive) => primitive_of_vertex[source_element as usize],
         (WeightedSource::Primitives, attribute::Owner::Primitive) => source_element,
@@ -1547,7 +1547,7 @@ pub(crate) fn interpolate_weighted(params: &WeightedParams) -> Result<geometry::
     let primitive_of_vertex: Vec<i64> = if needs_primitive_map {
         let mut output = vec![-1_i64; geometry::vertex_count(source) as usize];
         for primitive in 0..geometry::primitive_count(source) {
-            for vertex in topology_view.primitive_offsets[primitive as usize]..topology_view.primitive_offsets[primitive as usize + 1] {
+            for vertex in i64::from(topology_view.primitive_offsets[primitive as usize])..i64::from(topology_view.primitive_offsets[primitive as usize + 1]) {
                 output[vertex as usize] = primitive;
             }
         }

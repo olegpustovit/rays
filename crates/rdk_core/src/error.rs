@@ -27,6 +27,7 @@ codes! {
     ExactConstructionFailed = "exact_construction_failed",
     Fail = "fail",
     GeometryMismatch = "geometry_mismatch",
+    GeometryTooLarge = "geometry_too_large",
     Internal = "internal",
     InvalidArgument = "invalid_argument",
     InvalidAttribute = "invalid_attribute",

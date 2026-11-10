@@ -211,7 +211,7 @@ fn resident_streams() {
             host_count.set(host_count.get() + 1);
             Ok(test_meshes::box_(1., 1., 1.))
         });
-        let create = |indices: Option<Vec<i64>>, colors: Option<Vec<color::T>>, tex_coords: Option<Vec<vec2::T>>, mode: mesh::mode, index_count: i64, color_width: i64| {
+        let create = |indices: Option<Vec<u32>>, colors: Option<Vec<color::T>>, tex_coords: Option<Vec<vec2::T>>, mode: mesh::mode, index_count: i64, color_width: i64| {
             mesh::view::create_device(
                 mesh::view::device_args {
                     mode: Some(mode),

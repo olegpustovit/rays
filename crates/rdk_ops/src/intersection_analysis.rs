@@ -546,6 +546,8 @@ mod tests {
     type P3 = (f64, f64, f64);
 
     fn with_topology(points: &[P3], vertex_points: Vec<i64>, offsets: Vec<i64>, kinds: Vec<PrimitiveKind>) -> geometry::T {
+        let narrow = |v: Vec<i64>| v.into_iter().map(|p| p as u32).collect::<Vec<u32>>();
+        let (vertex_points, offsets) = (narrow(vertex_points), narrow(offsets));
         let x = points.iter().map(|p| p.0).collect();
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();

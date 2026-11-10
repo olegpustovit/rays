@@ -97,19 +97,19 @@ pub(crate) fn apply_with_mapping(
         let count_windows = Windows::even(&mut retained_counts, grain);
         support::run_indexed_ranges(grain, primitive_count, &|range, chunk_first, chunk_last| {
             let (keep, counts) = (keep_windows.take(range), count_windows.take(range));
-            let base = offsets[chunk_first as usize];
+            let base = i64::from(offsets[chunk_first as usize]);
             for primitive in chunk_first..chunk_last {
                 support::poll(cancel_value, primitive)?;
                 let primitive = primitive as usize;
-                let first = offsets[primitive];
-                let last = offsets[primitive + 1];
+                let first = i64::from(offsets[primitive]);
+                let last = i64::from(offsets[primitive + 1]);
                 if remove_degenerate_primitives {
                     let mut retained = 0i64;
                     let mut previous_point = -1i64;
                     let mut first_vertex = -1i64;
                     let mut last_vertex = -1i64;
                     for vertex in first..last {
-                        let point = source.vertex_points[vertex as usize];
+                        let point = i64::from(source.vertex_points[vertex as usize]);
                         if retained == 0 || point != previous_point {
                             keep[(vertex - base) as usize] = 1;
                             if retained == 0 {
@@ -163,8 +163,8 @@ pub(crate) fn apply_with_mapping(
     vertex_first[source_primitives] = output_vertices;
     let mut vertex_map = vec![0i64; output_vertices as usize];
     let mut primitive_map = vec![0i64; output_primitives as usize];
-    let mut vertex_points = vec![0i64; output_vertices as usize];
-    let mut primitive_offsets = vec![0i64; output_primitives as usize + 1];
+    let mut vertex_points = vec![0u32; output_vertices as usize];
+    let mut primitive_offsets = vec![0u32; output_primitives as usize + 1];
     let mut primitive_kinds = vec![0u8; output_primitives as usize];
     {
         let vertex_bound = |range: i64| vertex_first[chunk_start(range)] as usize;
@@ -189,12 +189,12 @@ pub(crate) fn apply_with_mapping(
                     primitive_kinds[target] = source.primitive_kinds[primitive];
                     for vertex in offsets[primitive]..offsets[primitive + 1] {
                         if keep_vertex[vertex as usize] != 0 {
-                            vertex_map[output] = vertex;
+                            vertex_map[output] = i64::from(vertex);
                             vertex_points[output] = source.vertex_points[vertex as usize];
                             output += 1;
                         }
                     }
-                    primitive_offsets[target] = output as i64 + vertex_base;
+                    primitive_offsets[target] = (output as i64 + vertex_base) as u32;
                 }
             }
             Ok(())
@@ -242,13 +242,13 @@ pub(crate) fn apply_with_mapping(
     let vertex_points = if point_identity {
         vertex_points
     } else {
-        let mut remapped = vec![0i64; output_vertices as usize];
+        let mut remapped = vec![0u32; output_vertices as usize];
         support::par_fill(cancel_value, grain, &mut remapped, &|vertex| {
             let point = old_to_new[vertex_points[vertex as usize] as usize];
             if point < 0 {
                 return Err(fail("cleanup retained a deleted point"));
             }
-            Ok(point)
+            Ok(point as u32)
         })?;
         remapped
     };
@@ -257,7 +257,7 @@ pub(crate) fn apply_with_mapping(
         vertex_points,
         primitive_offsets,
         primitive_kinds,
-    );
+    )?;
     let positions = if point_identity {
         geometry::positions(geometry_value).clone()
     } else {
@@ -395,13 +395,13 @@ mod tests {
     fn parallel_exact() {
         // 1500 copies of the degenerate fixture: 6000 primitives cross the grain of 64 many times.
         let copies = 1500i64;
-        let (mut x, mut vp, mut offsets, mut kinds) = (Vec::new(), Vec::new(), vec![0i64], Vec::new());
-        let one_vp = [0i64, 0, 1, 2, 0, 1, 2, 0, 3, 3, 3, 4, 4];
-        let one_offsets = [4i64, 8, 11, 13];
+        let (mut x, mut vp, mut offsets, mut kinds) = (Vec::new(), Vec::new(), vec![0u32], Vec::new());
+        let one_vp = [0u32, 0, 1, 2, 0, 1, 2, 0, 3, 3, 3, 4, 4];
+        let one_offsets = [4u32, 8, 11, 13];
         for copy in 0..copies {
             x.extend((0..6).map(|p| (copy * 6 + p) as f64));
-            vp.extend(one_vp.iter().map(|p| p + copy * 6));
-            offsets.extend(one_offsets.iter().map(|o| o + copy * 13));
+            vp.extend(one_vp.iter().map(|p| p + copy as u32 * 6));
+            offsets.extend(one_offsets.iter().map(|o| o + copy as u32 * 13));
             kinds.extend([PrimitiveKind::Polygon, PrimitiveKind::Polygon, PrimitiveKind::Polygon, PrimitiveKind::OpenPolyline]);
         }
         let zeros = vec![0.0; x.len()];

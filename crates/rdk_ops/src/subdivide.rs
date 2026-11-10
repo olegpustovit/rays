@@ -147,12 +147,12 @@ pub(crate) fn automatic_boundary_holes(
         let mut value = 0_u8;
         for bit in 0..=(7.min(point_count - base - 1)) {
             let point = base + bit;
-            let mut at = gi(&index.point_edge_offsets, point);
-            let last = gi(&index.point_edge_offsets, point + 1);
+            let mut at = gt(&index.point_edge_offsets, point);
+            let last = gt(&index.point_edge_offsets, point + 1);
             let mut boundary = false;
             while at < last && !boundary {
-                let edge = gi(&index.point_edges, at);
-                if gi(&index.edge_offsets, edge + 1) - gi(&index.edge_offsets, edge) == 1 {
+                let edge = gt(&index.point_edges, at);
+                if gt(&index.edge_offsets, edge + 1) - gt(&index.edge_offsets, edge) == 1 {
                     boundary = true;
                 }
                 at += 1;
@@ -171,13 +171,13 @@ pub(crate) fn automatic_boundary_holes(
         let mut value = 0_u8;
         for bit in 0..=(7.min(primitive_count - base - 1)) {
             let primitive = base + bit;
-            let first = gi(&topology_view.primitive_offsets, primitive);
-            let last = gi(&topology_view.primitive_offsets, primitive + 1);
+            let first = gt(&topology_view.primitive_offsets, primitive);
+            let last = gt(&topology_view.primitive_offsets, primitive + 1);
             let mut vertex = first;
             let mut boundary = false;
             while vertex < last && !boundary {
                 cancel::poll(cancel_token, vertex, 4095)?;
-                let point = gi(&topology_view.vertex_points, vertex);
+                let point = gt(&topology_view.vertex_points, vertex);
                 if gu(&boundary_points, point >> 3) & (1 << (point & 7)) != 0 {
                     boundary = true;
                 }
@@ -1165,7 +1165,7 @@ mod tests {
     use parallel::with_domains;
 
     fn polygons(point_count: i64, vertex_points: Vec<i64>, offsets: Vec<i64>) -> topology::T {
-        topology::polygons_owned(point_count, vertex_points, offsets).unwrap()
+        topology::polygons_owned(point_count, topology::narrow("test", &vertex_points).unwrap(), topology::narrow("test", &offsets).unwrap()).unwrap()
     }
 
     fn make(
@@ -1380,7 +1380,7 @@ mod tests {
         let view = topology_index::view::view(&index);
         let edge = topology_index::find_edge(&index, a, b).unwrap();
         let mut result = 0.0_f64;
-        for at in view.edge_offsets[edge as usize]..view.edge_offsets[edge as usize + 1] {
+        for at in i64::from(view.edge_offsets[edge as usize])..i64::from(view.edge_offsets[edge as usize + 1]) {
             result = fmax(result, values[view.edge_vertices[at as usize] as usize]);
         }
         result
@@ -1477,12 +1477,12 @@ mod tests {
             );
             let creaseweight: Vec<f64> = (0..geometry::vertex_count(&base))
                 .map(|vertex| {
-                    let edge = index.edge_of_vertex[vertex as usize];
+                    let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vertex as usize]);
                     if edge < 0 {
                         return 0.0;
                     }
-                    let a = index.edge_a[edge as usize];
-                    let b = index.edge_b[edge as usize];
+                    let a = i64::from(index.edge_a[edge as usize]);
+                    let b = i64::from(index.edge_b[edge as usize]);
                     let neighbor = if a == 4 {
                         Some(b)
                     } else if b == 4 {
@@ -1579,7 +1579,7 @@ mod tests {
         let high_right = topology_index::find_edge(&mask_index_value, 6, 10).unwrap();
         let mask_weights: Vec<f64> = (0..geometry::vertex_count(&mask_base))
             .map(|vertex| {
-                let edge = mask_index.edge_of_vertex[vertex as usize];
+                let edge = rdk_core::topology_index::widen(mask_index.edge_of_vertex[vertex as usize]);
                 if edge == target_edge {
                     0.5
                 } else if edge == high_left || edge == high_right {
@@ -1625,7 +1625,7 @@ mod tests {
         let fvar_at = |geometry_value: &geometry::T, point: i64| {
             let topology_view = topology::view::view(geometry::topology(geometry_value)).unwrap();
             let values = floats(Owner::Vertex, "fvar", geometry_value);
-            let vertex = topology_view.vertex_points.iter().position(|&p| p == point).unwrap();
+            let vertex = topology_view.vertex_points.iter().position(|&p| i64::from(p) == point).unwrap();
             values[vertex]
         };
         assert!(
@@ -1915,7 +1915,7 @@ mod tests {
         let fvar_at_shared = |geometry_value: &geometry::T| {
             let topology_view = topology::view::view(geometry::topology(geometry_value)).unwrap();
             let values = floats(Owner::Vertex, "fvar", geometry_value);
-            values[topology_view.vertex_points.iter().position(|&p| p == shared).unwrap()]
+            values[topology_view.vertex_points.iter().position(|&p| i64::from(p) == shared).unwrap()]
         };
         assert!(
             close(fvar_at_shared(&standard), expected_standard)
@@ -1953,7 +1953,7 @@ mod tests {
         );
         let source_edge = shared - geometry::point_count(&triangles);
         let creaseweights: Vec<f64> = (0..geometry::vertex_count(&triangles))
-            .map(|vertex| if source_index.edge_of_vertex[vertex as usize] == source_edge { 1.0 } else { 0.0 })
+            .map(|vertex| if rdk_core::topology_index::widen(source_index.edge_of_vertex[vertex as usize]) == source_edge { 1.0 } else { 0.0 })
             .collect();
         let creased = geometry::with_attribute(
             float_attr(Owner::Vertex, "creaseweight", creaseweights),
@@ -2026,7 +2026,7 @@ mod tests {
         );
         let values: Vec<f64> = (0..geometry::vertex_count(geometry_value))
             .map(|vertex| {
-                make_value(vertex, index.primitive_of_vertex[vertex as usize], view.vertex_points[vertex as usize])
+                make_value(vertex, i64::from(index.primitive_of_vertex[vertex as usize]), i64::from(view.vertex_points[vertex as usize]))
             })
             .collect();
         geometry::with_attribute(float_attr(Owner::Vertex, "fvar", values), geometry_value).unwrap()
@@ -2035,8 +2035,8 @@ mod tests {
     fn source_corner(geometry_value: &geometry::T, primitive: i64, point: i64) -> i64 {
         let view = topology::view::view(geometry::topology(geometry_value)).unwrap();
         let mut result = -1;
-        for vertex in view.primitive_offsets[primitive as usize]..view.primitive_offsets[primitive as usize + 1] {
-            if view.vertex_points[vertex as usize] == point {
+        for vertex in i64::from(view.primitive_offsets[primitive as usize])..i64::from(view.primitive_offsets[primitive as usize + 1]) {
+            if i64::from(view.vertex_points[vertex as usize]) == point {
                 result = vertex;
             }
         }
@@ -2249,13 +2249,13 @@ mod tests {
         let crease_edge = topology_index::find_edge(&source_index_value, 5, 6).unwrap();
         let source_index = topology_index::view::view(&source_index_value);
         let crease_weights: Vec<f64> = (0..geometry::vertex_count(&input))
-            .map(|vertex| if source_index.edge_of_vertex[vertex as usize] == crease_edge { 1.0 } else { 0.0 })
+            .map(|vertex| if rdk_core::topology_index::widen(source_index.edge_of_vertex[vertex as usize]) == crease_edge { 1.0 } else { 0.0 })
             .collect();
         let creased_input =
             geometry::with_attribute(float_attr(Owner::Vertex, "creaseweight", crease_weights), &input).unwrap();
         let smooth_output = run_fvar(&input, 1, SubdivideFvarNone);
         let creased_output = run_fvar(&creased_input, 1, SubdivideFvarNone);
-        let directed = source_index.edge_vertices[source_index.edge_offsets[crease_edge as usize] as usize];
+        let directed = i64::from(source_index.edge_vertices[source_index.edge_offsets[crease_edge as usize] as usize]);
         let edge_output = directed * 4 + 1;
         assert!(
             at(&smooth_output, edge_output) != at(&creased_output, edge_output),
@@ -2711,7 +2711,7 @@ mod tests {
         let mut surface = vec![false; view.point_count as usize];
         let mut curve = vec![false; view.point_count as usize];
         for primitive in 0..view.primitive_kinds.len() {
-            for vertex in view.primitive_offsets[primitive]..view.primitive_offsets[primitive + 1] {
+            for vertex in i64::from(view.primitive_offsets[primitive])..i64::from(view.primitive_offsets[primitive + 1]) {
                 let point = view.vertex_points[vertex as usize] as usize;
                 if view.primitive_kinds[primitive] == 0 {
                     surface[point] = true;
@@ -2740,7 +2740,7 @@ mod tests {
             &topology_index::create(None, geometry::topology(value)).unwrap(),
         );
         (0..index.edge_a.len())
-            .filter(|&edge| index.edge_offsets[edge + 1] - index.edge_offsets[edge] == 1)
+            .filter(|&edge| i64::from(index.edge_offsets[edge + 1]) - i64::from(index.edge_offsets[edge]) == 1)
             .count()
     }
 

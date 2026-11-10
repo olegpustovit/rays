@@ -190,9 +190,9 @@ fn remap_edge_groups_from_index(
     for item in groups {
         output.push(edge_group::init(Some(grain), target_topology, &target_index, edge_group::name(item), &|edge| Ok({
             cancel::poll(cancel_value, edge, 4095).map_err(|_| cancelled_error())?;
-            let first = target.edge_offsets[edge as usize];
-            let target_vertex = target.edge_vertices[first as usize];
-            let source_edge = source.edge_of_vertex[target_vertex as usize];
+            let first = i64::from(target.edge_offsets[edge as usize]);
+            let target_vertex = i64::from(target.edge_vertices[first as usize]);
+            let source_edge = rdk_core::topology_index::widen(source.edge_of_vertex[target_vertex as usize]);
             source_edge >= 0 && edge_group::mem(source_edge, item)
         }))?);
     }
@@ -232,20 +232,20 @@ fn remap_healed_edge_groups(
         output.push(edge_group::init(Some(grain), target_topology, &target_index, edge_group::name(item), &|edge| Ok({
             cancel::poll(cancel_value, edge, 4095).map_err(|_| cancelled_error())?;
             let mut found = false;
-            let mut incidence = target.edge_offsets[edge as usize];
-            let incidence_last = target.edge_offsets[edge as usize + 1];
+            let mut incidence = i64::from(target.edge_offsets[edge as usize]);
+            let incidence_last = i64::from(target.edge_offsets[edge as usize + 1]);
             while !found && incidence < incidence_last {
-                let target_vertex = target.edge_vertices[incidence as usize];
+                let target_vertex = i64::from(target.edge_vertices[incidence as usize]);
                 let source_first = vertex_map[target_vertex as usize];
                 let source_last = vertex_map[target.next_vertex[target_vertex as usize] as usize];
                 let mut source_vertex = source_first;
                 let mut traversed = 0_usize;
                 while !found && source_vertex != source_last && traversed <= source.next_vertex.len() {
-                    let source_edge = source.edge_of_vertex[source_vertex as usize];
+                    let source_edge = rdk_core::topology_index::widen(source.edge_of_vertex[source_vertex as usize]);
                     if source_edge >= 0 && edge_group::mem(source_edge, item) {
                         found = true;
                     }
-                    source_vertex = source.next_vertex[source_vertex as usize];
+                    source_vertex = rdk_core::topology_index::widen(source.next_vertex[source_vertex as usize]);
                     traversed += 1;
                 }
                 incidence += 1;
@@ -350,8 +350,8 @@ fn inline_primitive(
     primitives: Option<&group::T>,
     primitive: i64,
 ) -> InlineResult {
-    let first = topology_view.primitive_offsets[primitive as usize];
-    let last = topology_view.primitive_offsets[primitive as usize + 1];
+    let first = i64::from(topology_view.primitive_offsets[primitive as usize]);
+    let last = i64::from(topology_view.primitive_offsets[primitive as usize + 1]);
     let count = (last - first) as usize;
     if !is_selected(primitives, primitive) || topology_view.primitive_kinds[primitive as usize] != 0 || count <= 3 {
         return InlineResult { retained: count as i64, keep: vec![true; count], failure: false };
@@ -451,7 +451,7 @@ fn remove_inline_points(
     }
     let mut vertex_map: Vec<i64> = Vec::with_capacity(output_vertices as usize);
     for primitive in 0..primitive_count as usize {
-        let first = view.primitive_offsets[primitive];
+        let first = i64::from(view.primitive_offsets[primitive]);
         for (local, &kept) in results[primitive].keep.iter().enumerate() {
             if kept {
                 vertex_map.push(first + local as i64);
@@ -479,10 +479,10 @@ fn remove_inline_points(
     let vertex_points: Vec<i64> = vertex_map.iter().map(|&vertex| old_to_new[view.vertex_points[vertex as usize] as usize]).collect();
     let target_topology = topology::view::create_validated_shared(
         output_points,
-        vertex_points,
-        primitive_offsets.into(),
+        topology::narrow("Facet", &vertex_points)?,
+        topology::narrow("Facet", &primitive_offsets)?.into(),
         view.primitive_kinds,
-    );
+    )?;
     let point_identity = output_points == source_points;
     let new_positions =
         if point_identity { geometry::positions(geometry_value).clone() } else { select_positions(cancel_value, grain, &point_map, geometry_value)? };
@@ -517,7 +517,7 @@ fn unique_points_all(cancel_value: Option<&cancel::T>, grain: i64, geometry_valu
     let mut point = 0_i64;
     while !shared && point < source_points {
         poll(cancel_value, point, 4095)?;
-        if incidence.point_offsets[point as usize + 1] - incidence.point_offsets[point as usize] > 1 {
+        if i64::from(incidence.point_offsets[point as usize + 1]) - i64::from(incidence.point_offsets[point as usize]) > 1 {
             shared = true;
         }
         point += 1;
@@ -528,7 +528,7 @@ fn unique_points_all(cancel_value: Option<&cancel::T>, grain: i64, geometry_valu
     let mut isolated: Vec<i64> = Vec::new();
     for point in 0..source_points {
         poll(cancel_value, point, 4095)?;
-        if incidence.point_offsets[point as usize] == incidence.point_offsets[point as usize + 1] {
+        if i64::from(incidence.point_offsets[point as usize]) == i64::from(incidence.point_offsets[point as usize + 1]) {
             isolated.push(point);
         }
     }
@@ -536,14 +536,14 @@ fn unique_points_all(cancel_value: Option<&cancel::T>, grain: i64, geometry_valu
         return Err(fail("Facet Unique Points output exceeds integer cardinality limits"));
     }
     let output_points = source_vertices + isolated.len() as i64;
-    let mut point_map: Vec<i64> = view.vertex_points.to_vec();
+    let mut point_map: Vec<i64> = view.vertex_points.iter().map(|&p| i64::from(p)).collect();
     point_map.extend_from_slice(&isolated);
     let target_topology = topology::view::create_validated_shared(
         output_points,
-        (0..source_vertices).collect(),
+        (0..source_vertices as u32).collect(),
         view.primitive_offsets.clone(),
         view.primitive_kinds,
-    );
+    )?;
     let positions = select_positions(cancel_value, grain, &point_map, geometry_value)?;
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
     let groups = remap_point_groups(cancel_value, grain, &point_map, geometry_value)?;
@@ -587,7 +587,7 @@ fn unique_points_selected(
     for primitive in 0..primitive_count {
         poll(cancel_value, primitive, 1023)?;
         let selected = group::mem(primitive, primitives);
-        for vertex in view.primitive_offsets[primitive as usize]..view.primitive_offsets[primitive as usize + 1] {
+        for vertex in i64::from(view.primitive_offsets[primitive as usize])..i64::from(view.primitive_offsets[primitive as usize + 1]) {
             let point = view.vertex_points[vertex as usize] as usize;
             if incidence_count[point] < 2 {
                 incidence_count[point] += 1;
@@ -614,7 +614,7 @@ fn unique_points_selected(
     let mut selected_offsets = vec![0_i64; primitive_count as usize + 1];
     for primitive in 0..primitive_count as usize {
         let selected_vertices = if group::mem(primitive as i64, primitives) {
-            view.primitive_offsets[primitive + 1] - view.primitive_offsets[primitive]
+            i64::from(view.primitive_offsets[primitive + 1]) - i64::from(view.primitive_offsets[primitive])
         } else {
             0
         };
@@ -647,13 +647,13 @@ fn unique_points_selected(
     let mut vertex_points = vec![0_i64; source_vertices];
     for primitive in 0..primitive_count {
         poll(cancel_value, primitive, 1023)?;
-        let first = view.primitive_offsets[primitive as usize];
-        let last = view.primitive_offsets[primitive as usize + 1];
+        let first = i64::from(view.primitive_offsets[primitive as usize]);
+        let last = i64::from(view.primitive_offsets[primitive as usize + 1]);
         if group::mem(primitive, primitives) {
             let target = retained_count + selected_offsets[primitive as usize];
             for vertex in first..last {
                 let point = target + vertex - first;
-                point_map[point as usize] = view.vertex_points[vertex as usize];
+                point_map[point as usize] = i64::from(view.vertex_points[vertex as usize]);
                 vertex_points[vertex as usize] = point;
             }
         } else {
@@ -664,10 +664,10 @@ fn unique_points_selected(
     }
     let target_topology = topology::view::create_validated_shared(
         output_points,
-        vertex_points,
+        topology::narrow("Facet", &vertex_points)?,
         view.primitive_offsets.clone(),
         view.primitive_kinds,
-    );
+    )?;
     let positions = select_positions(cancel_value, grain, &point_map, geometry_value)?;
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
     let groups = remap_point_groups(cancel_value, grain, &point_map, geometry_value)?;
@@ -723,18 +723,18 @@ fn orient_polygons(
                     let current = queue[queue_first];
                     queue_first += 1;
                     let current_flipped = orientation[current as usize] == 1;
-                    let first = view.primitive_offsets[current as usize];
-                    let last = view.primitive_offsets[current as usize + 1];
+                    let first = i64::from(view.primitive_offsets[current as usize]);
+                    let last = i64::from(view.primitive_offsets[current as usize + 1]);
                     for vertex in first..last {
-                        let edge = index_view.edge_of_vertex[vertex as usize];
+                        let edge = rdk_core::topology_index::widen(index_view.edge_of_vertex[vertex as usize]);
                         if edge >= 0 && invalid_edge < 0 && contradiction < 0 {
-                            let edge_first = index_view.edge_offsets[edge as usize];
-                            let edge_last = index_view.edge_offsets[edge as usize + 1];
+                            let edge_first = i64::from(index_view.edge_offsets[edge as usize]);
+                            let edge_last = i64::from(index_view.edge_offsets[edge as usize + 1]);
                             let mut incidence = 0;
                             let mut other_vertex = -1_i64;
                             for at in edge_first..edge_last {
-                                let candidate_vertex = index_view.edge_vertices[at as usize];
-                                let candidate = index_view.primitive_of_vertex[candidate_vertex as usize];
+                                let candidate_vertex = i64::from(index_view.edge_vertices[at as usize]);
+                                let candidate = i64::from(index_view.primitive_of_vertex[candidate_vertex as usize]);
                                 if is_selected(primitives, candidate) {
                                     incidence += 1;
                                     if candidate != current {
@@ -745,10 +745,10 @@ fn orient_polygons(
                             if incidence > 2 {
                                 invalid_edge = edge;
                             } else if incidence == 2 && other_vertex >= 0 {
-                                let other = index_view.primitive_of_vertex[other_vertex as usize];
+                                let other = i64::from(index_view.primitive_of_vertex[other_vertex as usize]);
                                 if other != current && is_polygon(other) {
                                     let same_direction =
-                                        view.vertex_points[vertex as usize] == view.vertex_points[other_vertex as usize];
+                                        i64::from(view.vertex_points[vertex as usize]) == i64::from(view.vertex_points[other_vertex as usize]);
                                     let other_flipped = current_flipped != same_direction;
                                     let expected = if other_flipped { 1_u8 } else { 0_u8 };
                                     match orientation[other as usize] {
@@ -785,20 +785,20 @@ fn orient_polygons(
     let mut vertex_map = vec![0_i64; vertex_count];
     for primitive in 0..primitive_count as usize {
         poll(cancel_value, primitive as i64, 1023)?;
-        let first = view.primitive_offsets[primitive];
-        let last = view.primitive_offsets[primitive + 1];
+        let first = i64::from(view.primitive_offsets[primitive]);
+        let last = i64::from(view.primitive_offsets[primitive + 1]);
         for vertex in first..last {
             let source = if orientation[primitive] == 1 { first + last - vertex - 1 } else { vertex };
-            vertex_points[vertex as usize] = view.vertex_points[source as usize];
+            vertex_points[vertex as usize] = i64::from(view.vertex_points[source as usize]);
             vertex_map[vertex as usize] = source;
         }
     }
     let target_topology = topology::view::create_validated_shared(
         view.point_count,
-        vertex_points,
+        topology::narrow("Facet", &vertex_points)?,
         view.primitive_offsets.clone(),
         view.primitive_kinds.clone(),
-    );
+    )?;
     let mut attributes = Vec::new();
     for item in geometry::attributes(geometry_value) {
         attributes.push(remap_vertex_attribute(cancel_value, grain, &vertex_map, &item)?);
@@ -851,12 +851,12 @@ fn split_points_on_edge_ends(
     }
     for point in 0..view.point_count {
         poll(cancel_value, point, 4095)?;
-        let first = iv.point_offsets[point as usize];
-        let last = iv.point_offsets[point as usize + 1];
+        let first = i64::from(iv.point_offsets[point as usize]);
+        let last = i64::from(iv.point_offsets[point as usize + 1]);
         let mut representative = -1_i64;
         for at in first..last {
-            let vertex = iv.point_vertices[at as usize];
-            if !affected[point as usize] || !is_selected(primitives, iv.primitive_of_vertex[vertex as usize]) {
+            let vertex = i64::from(iv.point_vertices[at as usize]);
+            if !affected[point as usize] || !is_selected(primitives, i64::from(iv.primitive_of_vertex[vertex as usize])) {
                 if representative < 0 {
                     representative = vertex;
                 } else {
@@ -868,17 +868,17 @@ fn split_points_on_edge_ends(
     for edge in 0..edge_count {
         poll(cancel_value, edge, 4095)?;
         let flags = split_ends[edge as usize];
-        let first = iv.edge_offsets[edge as usize];
-        let last = iv.edge_offsets[edge as usize + 1];
+        let first = i64::from(iv.edge_offsets[edge as usize]);
+        let last = i64::from(iv.edge_offsets[edge as usize + 1]);
         if last > first {
-            let a = iv.edge_a[edge as usize];
-            let b = iv.edge_b[edge as usize];
+            let a = i64::from(iv.edge_a[edge as usize]);
+            let b = i64::from(iv.edge_b[edge as usize]);
             let mut representative_a = -1_i64;
             let mut representative_b = -1_i64;
             for at in first..last {
-                let vertex = iv.edge_vertices[at as usize];
-                let vertex_a = if view.vertex_points[vertex as usize] == a { vertex } else { iv.next_vertex[vertex as usize] };
-                let vertex_b = if view.vertex_points[vertex as usize] == b { vertex } else { iv.next_vertex[vertex as usize] };
+                let vertex = i64::from(iv.edge_vertices[at as usize]);
+                let vertex_a = if i64::from(view.vertex_points[vertex as usize]) == a { vertex } else { rdk_core::topology_index::widen(iv.next_vertex[vertex as usize]) };
+                let vertex_b = if i64::from(view.vertex_points[vertex as usize]) == b { vertex } else { rdk_core::topology_index::widen(iv.next_vertex[vertex as usize]) };
                 if flags & 1 == 0 {
                     if representative_a < 0 {
                         representative_a = vertex_a;
@@ -902,14 +902,14 @@ fn split_points_on_edge_ends(
     let mut overflow = false;
     for point in 0..source_points {
         poll(cancel_value, point, 4095)?;
-        let first = iv.point_offsets[point as usize];
-        let last = iv.point_offsets[point as usize + 1];
+        let first = i64::from(iv.point_offsets[point as usize]);
+        let last = i64::from(iv.point_offsets[point as usize + 1]);
         let mut component = 0;
         if primitives.is_some() {
             let mut at = first;
             while at < last && component == 0 {
-                let vertex = iv.point_vertices[at as usize];
-                if !is_selected(primitives, iv.primitive_of_vertex[vertex as usize]) {
+                let vertex = i64::from(iv.point_vertices[at as usize]);
+                if !is_selected(primitives, i64::from(iv.primitive_of_vertex[vertex as usize])) {
                     let representative = sets.find(vertex as usize);
                     root_output[representative as usize] = point;
                     component = 1;
@@ -943,7 +943,7 @@ fn split_points_on_edge_ends(
     for representative in 0..vertex_count as usize {
         let output = root_output[representative];
         if output >= source_points {
-            point_map[output as usize] = view.vertex_points[representative];
+            point_map[output as usize] = i64::from(view.vertex_points[representative]);
         }
     }
     let mut vertex_points = vec![0_i64; vertex_count as usize];
@@ -954,10 +954,10 @@ fn split_points_on_edge_ends(
     }
     let target_topology = topology::view::create_validated_shared(
         output_points,
-        vertex_points,
+        topology::narrow("Facet", &vertex_points)?,
         view.primitive_offsets.clone(),
         view.primitive_kinds,
-    );
+    )?;
     let positions = select_positions(cancel_value, grain, &point_map, geometry_value)?;
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
     let groups = remap_point_groups(cancel_value, grain, &point_map, geometry_value)?;
@@ -1012,17 +1012,17 @@ fn cusp_polygons(
                 } else if !is_polygon(primitive) {
                     false
                 } else {
-                    let first = view.primitive_offsets[primitive as usize];
-                    let last = view.primitive_offsets[primitive as usize + 1];
+                    let first = i64::from(view.primitive_offsets[primitive as usize]);
+                    let last = i64::from(view.primitive_offsets[primitive as usize + 1]);
                     let mut found = false;
                     let mut vertex = first;
                     while !found && vertex < last {
-                        let edge = iv.edge_of_vertex[vertex as usize];
+                        let edge = rdk_core::topology_index::widen(iv.edge_of_vertex[vertex as usize]);
                         if edge >= 0 {
-                            let mut at = iv.edge_offsets[edge as usize];
-                            let finish = iv.edge_offsets[edge as usize + 1];
+                            let mut at = i64::from(iv.edge_offsets[edge as usize]);
+                            let finish = i64::from(iv.edge_offsets[edge as usize + 1]);
                             while !found && at < finish {
-                                found = is_selected(primitives, iv.primitive_of_vertex[iv.edge_vertices[at as usize] as usize]);
+                                found = is_selected(primitives, i64::from(iv.primitive_of_vertex[iv.edge_vertices[at as usize] as usize]));
                                 at += 1;
                             }
                         }
@@ -1048,11 +1048,11 @@ fn cusp_polygons(
     support::run_indexed_ranges(grain, edge_count, &|range, first_edge, last_edge| {
         for (edge, out) in (first_edge..last_edge).zip(windows.take(range)) {
             cancel::poll(cancel_value, edge, 4095)?;
-            let first = iv.edge_offsets[edge as usize];
-            let last = iv.edge_offsets[edge as usize + 1];
+            let first = i64::from(iv.edge_offsets[edge as usize]);
+            let last = i64::from(iv.edge_offsets[edge as usize + 1]);
             let mut touches_selection = false;
             for at in first..last {
-                let primitive = iv.primitive_of_vertex[iv.edge_vertices[at as usize] as usize];
+                let primitive = i64::from(iv.primitive_of_vertex[iv.edge_vertices[at as usize] as usize]);
                 if is_selected(primitives, primitive) {
                     touches_selection = true;
                 }
@@ -1061,8 +1061,8 @@ fn cusp_polygons(
             if touches_selection && last - first > 2 {
                 value = 2;
             } else if touches_selection && last - first == 2 {
-                let left = iv.primitive_of_vertex[iv.edge_vertices[first as usize] as usize];
-                let right = iv.primitive_of_vertex[iv.edge_vertices[first as usize + 1] as usize];
+                let left = i64::from(iv.primitive_of_vertex[iv.edge_vertices[first as usize] as usize]);
+                let right = i64::from(iv.primitive_of_vertex[iv.edge_vertices[first as usize + 1] as usize]);
                 if is_polygon(left) && is_polygon(right) {
                     let (l, r) = (left as usize, right as usize);
                     let dot = (nx[l] * nx[r]) + (ny[l] * ny[r]) + (nz[l] * nz[r]);
@@ -1105,8 +1105,8 @@ fn planar_primitive(
     primitives: Option<&group::T>,
     primitive: i64,
 ) -> PlanarResult {
-    let first = topology_view.primitive_offsets[primitive as usize];
-    let last = topology_view.primitive_offsets[primitive as usize + 1];
+    let first = i64::from(topology_view.primitive_offsets[primitive as usize]);
+    let last = i64::from(topology_view.primitive_offsets[primitive as usize + 1]);
     let count = last - first;
     let mut result = PlanarResult { failure: 0, changed: false, projected: vec![(0.0, 0.0, 0.0); count as usize] };
     if !(is_selected(primitives, primitive) && topology_view.primitive_kinds[primitive as usize] == 0 && count > 3) {
@@ -1255,7 +1255,7 @@ fn make_planar(
     let mut unchanged_reference = vec![false; point_count as usize];
     for primitive in 0..primitive_count as usize {
         if !results[primitive].changed {
-            for vertex in view.primitive_offsets[primitive]..view.primitive_offsets[primitive + 1] {
+            for vertex in i64::from(view.primitive_offsets[primitive])..i64::from(view.primitive_offsets[primitive + 1]) {
                 unchanged_reference[view.vertex_points[vertex as usize] as usize] = true;
             }
         }
@@ -1265,7 +1265,7 @@ fn make_planar(
     let mut overflow = false;
     for primitive in 0..primitive_count as usize {
         if results[primitive].changed {
-            for vertex in view.primitive_offsets[primitive]..view.primitive_offsets[primitive + 1] {
+            for vertex in i64::from(view.primitive_offsets[primitive])..i64::from(view.primitive_offsets[primitive + 1]) {
                 let point = view.vertex_points[vertex as usize] as usize;
                 if unchanged_reference[point] || claimed[point] {
                     if extras >= i64::MAX - point_count {
@@ -1296,9 +1296,9 @@ fn make_planar(
     for primitive in 0..primitive_count as usize {
         poll(cancel_value, primitive as i64, 1023)?;
         if results[primitive].changed {
-            let first = view.primitive_offsets[primitive];
-            for vertex in first..view.primitive_offsets[primitive + 1] {
-                let source_point = view.vertex_points[vertex as usize];
+            let first = i64::from(view.primitive_offsets[primitive]);
+            for vertex in first..i64::from(view.primitive_offsets[primitive + 1]) {
+                let source_point = i64::from(view.vertex_points[vertex as usize]);
                 let target = if !unchanged_reference[source_point as usize] && !claimed[source_point as usize] {
                     claimed[source_point as usize] = true;
                     source_point
@@ -1308,7 +1308,7 @@ fn make_planar(
                     point_map[target as usize] = source_point;
                     target
                 };
-                vertex_points[vertex as usize] = target;
+                vertex_points[vertex as usize] = target as u32;
                 let (px, py, pz) = results[primitive].projected[(vertex - first) as usize];
                 x[target as usize] = px;
                 y[target as usize] = py;
@@ -1325,7 +1325,7 @@ fn make_planar(
         vertex_points,
         view.primitive_offsets.clone(),
         view.primitive_kinds,
-    );
+    )?;
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
     let groups = remap_point_groups(cancel_value, grain, &point_map, geometry_value)?;
     let edge_groups =
@@ -1440,7 +1440,7 @@ fn consolidate_vertex_normal(
     let mut averages: Vec<Option<(f64, f64, f64)>> = vec![None; clusters.count.max(0) as usize];
     let windows = support::Windows::even(&mut averages, chunk);
     let in_selection =
-        |vertex: i64| is_selected(primitives, incidence.primitive_of_vertex[vertex as usize]);
+        |vertex: i64| is_selected(primitives, i64::from(incidence.primitive_of_vertex[vertex as usize]));
     support::run_indexed_ranges(chunk, clusters.count, &|range, first_cluster, last_cluster| {
         for (cluster, out) in (first_cluster..last_cluster).zip(windows.take(range)) {
             cancel::poll(cancel_value, cluster, 1023)?;
@@ -1451,8 +1451,8 @@ fn consolidate_vertex_normal(
                 let mut elements = 0_i64;
                 for slot in first..last {
                     let point = clusters.members[slot as usize] as usize;
-                    for at in incidence.point_offsets[point]..incidence.point_offsets[point + 1] {
-                        let vertex = incidence.point_vertices[at as usize];
+                    for at in i64::from(incidence.point_offsets[point])..i64::from(incidence.point_offsets[point + 1]) {
+                        let vertex = i64::from(incidence.point_vertices[at as usize]);
                         if in_selection(vertex) {
                             let v = vertex as usize;
                             let value = max_abs3(source.x[v], source.y[v], source.z[v]);
@@ -1468,8 +1468,8 @@ fn consolidate_vertex_normal(
                     if scale != 0.0 {
                         for slot in first..last {
                             let point = clusters.members[slot as usize] as usize;
-                            for at in incidence.point_offsets[point]..incidence.point_offsets[point + 1] {
-                                let vertex = incidence.point_vertices[at as usize];
+                            for at in i64::from(incidence.point_offsets[point])..i64::from(incidence.point_offsets[point + 1]) {
+                                let vertex = i64::from(incidence.point_vertices[at as usize]);
                                 if in_selection(vertex) {
                                     let v = vertex as usize;
                                     ax += source.x[v] / scale;
@@ -1494,8 +1494,8 @@ fn consolidate_vertex_normal(
         let Some((nx, ny, nz)) = *average else { continue };
         for slot in clusters.offsets[cluster]..clusters.offsets[cluster + 1] {
             let point = clusters.members[slot as usize] as usize;
-            for at in incidence.point_offsets[point]..incidence.point_offsets[point + 1] {
-                let vertex = incidence.point_vertices[at as usize];
+            for at in i64::from(incidence.point_offsets[point])..i64::from(incidence.point_offsets[point + 1]) {
+                let vertex = i64::from(incidence.point_vertices[at as usize]);
                 if in_selection(vertex) {
                     x[vertex as usize] = nx;
                     y[vertex as usize] = ny;
@@ -1712,7 +1712,7 @@ fn adjust_normals(
             for primitive in 0..topology::primitive_count(topology_value) {
                 poll(cancel_value, primitive, 1023)?;
                 if group::mem(primitive, item) {
-                    for vertex in view.primitive_offsets[primitive as usize]..view.primitive_offsets[primitive as usize + 1] {
+                    for vertex in i64::from(view.primitive_offsets[primitive as usize])..i64::from(view.primitive_offsets[primitive as usize + 1]) {
                         vertices[vertex as usize] = true;
                         points[view.vertex_points[vertex as usize] as usize] = true;
                     }
@@ -1753,10 +1753,10 @@ fn facet_point_selection(
         topology::point_count(topology_value),
         &|point| Ok({
             let mut found = false;
-            let mut at = view.point_offsets[point as usize];
-            let finish = view.point_offsets[point as usize + 1];
+            let mut at = i64::from(view.point_offsets[point as usize]);
+            let finish = i64::from(view.point_offsets[point as usize + 1]);
             while !found && at < finish {
-                found = group::mem(view.primitive_of_vertex[view.point_vertices[at as usize] as usize], primitives);
+                found = group::mem(i64::from(view.primitive_of_vertex[view.point_vertices[at as usize] as usize]), primitives);
                 at += 1;
             }
             found
@@ -1784,8 +1784,8 @@ fn facet_primitives_of_selection(
             primitive_count,
             &|primitive| Ok({
                 cancel::poll(cancel_value, primitive, 4095).map_err(|_| cancelled_error())?;
-                (view.primitive_offsets[primitive as usize]..view.primitive_offsets[primitive as usize + 1])
-                    .any(|vertex| group::mem(view.vertex_points[vertex as usize], points))
+                (i64::from(view.primitive_offsets[primitive as usize])..i64::from(view.primitive_offsets[primitive as usize + 1]))
+                    .any(|vertex| group::mem(i64::from(view.vertex_points[vertex as usize]), points))
             }),
         )?,
         element_selection::T::SelectedVertices(vertices) => group::init(
@@ -1795,7 +1795,7 @@ fn facet_primitives_of_selection(
             primitive_count,
             &|primitive| Ok({
                 cancel::poll(cancel_value, primitive, 4095).map_err(|_| cancelled_error())?;
-                (view.primitive_offsets[primitive as usize]..view.primitive_offsets[primitive as usize + 1])
+                (i64::from(view.primitive_offsets[primitive as usize])..i64::from(view.primitive_offsets[primitive as usize + 1]))
                     .any(|vertex| group::mem(vertex, vertices))
             }),
         )?,
@@ -1804,8 +1804,8 @@ fn facet_primitives_of_selection(
             let incidence = topology_index::view::view(&index);
             group::init(Some(grain), group::Owner::Primitive, "__facet_from_edges", primitive_count, &|primitive| Ok({
                 cancel::poll(cancel_value, primitive, 4095).map_err(|_| cancelled_error())?;
-                (view.primitive_offsets[primitive as usize]..view.primitive_offsets[primitive as usize + 1]).any(|vertex| {
-                    let edge = incidence.edge_of_vertex[vertex as usize];
+                (i64::from(view.primitive_offsets[primitive as usize])..i64::from(view.primitive_offsets[primitive as usize + 1])).any(|vertex| {
+                    let edge = rdk_core::topology_index::widen(incidence.edge_of_vertex[vertex as usize]);
                     edge >= 0 && edge_group::mem(edge, edges)
                 })
             }))?
@@ -2013,7 +2013,8 @@ mod tests {
     }
 
     fn polygons(point_count: i64, vertex_points: Vec<i64>, offsets: Vec<i64>) -> topology::T {
-        topology::polygons_owned(point_count, vertex_points, offsets).unwrap()
+        let narrow = |v: Vec<i64>| v.into_iter().map(|p| p as u32).collect::<Vec<u32>>();
+        topology::polygons_owned(point_count, narrow(vertex_points), narrow(offsets)).unwrap()
     }
 
     fn build(
@@ -2170,7 +2171,7 @@ mod tests {
         let view = topology_index::view::view(&index);
         let mut found = -1;
         for edge in 0..view.edge_a.len() {
-            if view.edge_a[edge] == a && view.edge_b[edge] == b {
+            if i64::from(view.edge_a[edge]) == a && i64::from(view.edge_b[edge]) == b {
                 found = edge as i64;
             }
         }
@@ -2338,7 +2339,7 @@ mod tests {
         let ids = point_ints("id", &output);
         for local in 0..3 {
             let output_point = output_view.vertex_points[3 + local] as usize;
-            let source_point = source_view.vertex_points[3 + local];
+            let source_point = i64::from(source_view.vertex_points[3 + local]);
             check(ids[output_point] == source_point, "grouped Facet changed an unselected primitive point");
         }
         let empty = primitive_group(&source, &|_| false);
@@ -2576,7 +2577,7 @@ mod tests {
             vec![0, 1, 2, 3, 4, 5, 1, 7, 8, 9, 10, 11],
             vec![0, 6, 9, 12],
             vec![0, 0, 1],
-        );
+        ).unwrap();
         let point_id = attribute::create_owned("point_id", attribute::Owner::Point, attribute::Storage::Int(Arc::new((0..12).collect()))).unwrap();
         let corner_id = attribute::create_owned("corner_id", attribute::Owner::Vertex, attribute::Storage::Int(Arc::new((0..12).collect()))).unwrap();
         let face_id = attribute::create_owned("face_id", attribute::Owner::Primitive, attribute::Storage::Int(Arc::new(vec![10, 11, 12]))).unwrap();
@@ -2588,7 +2589,7 @@ mod tests {
         let index = topology_index::create(None, &topology_value).unwrap();
         let view = topology_index::view::view(&index);
         let segment = edge_group::init(None, &topology_value, &index, "removed_segment", &|edge| Ok({
-            view.edge_a[edge as usize] == 1 && view.edge_b[edge as usize] == 2
+            i64::from(view.edge_a[edge as usize]) == 1 && i64::from(view.edge_b[edge as usize]) == 2
         })).unwrap();
         geometry::with_edge_group(segment, &geometry_value).unwrap()
     }
@@ -2713,7 +2714,7 @@ mod tests {
         let index = topology_index::create(None, &topology_value).unwrap();
         let view = topology_index::view::view(&index);
         let crease = edge_group::init(None, &topology_value, &index, "shared", &|edge| Ok({
-            view.edge_a[edge as usize] == 0 && view.edge_b[edge as usize] == 2
+            i64::from(view.edge_a[edge as usize]) == 0 && i64::from(view.edge_b[edge as usize]) == 2
         })).unwrap();
         let geometry_value = geometry::with_edge_group(crease, &geometry_value).unwrap();
         let oriented = facet_ok(Params { orient_polygons: Some(true), ..Params::default() }, &geometry_value);
@@ -2857,12 +2858,12 @@ mod tests {
         let output = facet_ok(Params { selection: selection(&selected), cusp_angle: Some(1.), ..Params::default() }, &source);
         check(geometry::point_count(&output) == 12, "grouped Facet Cusp Polygons cardinality");
         let topology_view = view_of(&output);
-        for vertex in topology_view.primitive_offsets[0]..topology_view.primitive_offsets[1] {
-            check(topology_view.vertex_points[vertex as usize] >= 8, "grouped Facet did not separate a selected cusp corner");
+        for vertex in i64::from(topology_view.primitive_offsets[0])..i64::from(topology_view.primitive_offsets[1]) {
+            check(i64::from(topology_view.vertex_points[vertex as usize]) >= 8, "grouped Facet did not separate a selected cusp corner");
         }
         for primitive in 1..geometry::primitive_count(&output) as usize {
-            for vertex in topology_view.primitive_offsets[primitive]..topology_view.primitive_offsets[primitive + 1] {
-                check(topology_view.vertex_points[vertex as usize] < 8, "grouped Facet changed an unselected cusp point");
+            for vertex in i64::from(topology_view.primitive_offsets[primitive])..i64::from(topology_view.primitive_offsets[primitive + 1]) {
+                check(i64::from(topology_view.vertex_points[vertex as usize]) < 8, "grouped Facet changed an unselected cusp point");
             }
         }
     }
@@ -2924,8 +2925,8 @@ mod tests {
         );
         let topology_view = view_of(&output);
         check(
-            topology_view.vertex_points[0] >= 6
-                && topology_view.vertex_points[3] >= 6
+            i64::from(topology_view.vertex_points[0]) >= 6
+                && i64::from(topology_view.vertex_points[3]) >= 6
                 && topology_view.vertex_points[4..8] == [0, 3, 4, 5],
             "Facet Make Planar did not isolate shared projected corners",
         );
@@ -3051,7 +3052,7 @@ mod tests {
         check(geometry::point_count(&fused) == 5, "grouped Facet point consolidation cardinality");
         let fused_view = view_of(&fused);
         check(
-            fused_view.vertex_points[0] == fused_view.vertex_points[1] && fused_view.vertex_points[3] != fused_view.vertex_points[0],
+            i64::from(fused_view.vertex_points[0]) == i64::from(fused_view.vertex_points[1]) && i64::from(fused_view.vertex_points[3]) != i64::from(fused_view.vertex_points[0]),
             "grouped Facet point consolidation crossed its selection boundary",
         );
     }
@@ -3191,7 +3192,7 @@ mod tests {
         let normal = attribute::create_owned("N", attribute::Owner::Point, attribute::Storage::Float3(f3(nx, ny, nz))).unwrap();
         build(
             f3(x, y, z),
-            topology::view::create_validated_owned(count as i64, Vec::new(), vec![0], Vec::new()),
+            topology::view::create_validated_owned(count as i64, Vec::new(), vec![0], Vec::new()).unwrap(),
             vec![normal],
             Vec::new(),
         )
@@ -3277,7 +3278,7 @@ mod tests {
                 vertex_points,
                 source_view.primitive_offsets.clone(),
                 source_view.primitive_kinds.clone(),
-            ),
+            ).unwrap(),
             Some(geometry::attributes(&source)),
             Some(geometry::groups(&source)),
             None,

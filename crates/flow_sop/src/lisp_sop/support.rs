@@ -135,12 +135,13 @@ pub fn fixture_grid(columns: i64, rows: i64, size: f64) -> geo::T {
         }
     }
     let z = vec![0.0; x.len()];
-    let (mut vp, mut offsets) = (Vec::new(), vec![0i64]);
+    let (mut vp, mut offsets) = (Vec::new(), vec![0u32]);
     for j in 0..rows {
         for i in 0..columns {
-            let a = j * stride + i;
+            let a = (j * stride + i) as u32;
+            let stride = stride as u32;
             vp.extend_from_slice(&[a, a + 1, a + 1 + stride, a + stride]);
-            offsets.push(vp.len() as i64);
+            offsets.push(vp.len() as u32);
         }
     }
     let positions = fixture_ok(rdk_core::packed::float3::of_owned(x, y, z).map_err(|e| rdk_core::error::to_string(&e)));

@@ -5,9 +5,9 @@ use crate::error::Code;
 
 pub struct T {
     point_count: i64,
-    edge_a: Arc<[i64]>,
-    edge_b: Arc<[i64]>,
-    slots: Vec<i64>,
+    edge_a: Arc<[u32]>,
+    edge_b: Arc<[u32]>,
+    slots: Vec<u32>,
 }
 
 fn cancelled_error() -> error::T {
@@ -29,10 +29,8 @@ pub fn create(
     let mut outgoing_count = 0_usize;
     for primitive in 0..primitive_count {
         cancel::poll(cancel_value, primitive as i64, 4095).map_err(|_| cancelled_error())?;
-        let first = usize::try_from(source.primitive_offsets[primitive])
-            .expect("Topology edge lookup: invalid primitive offset");
-        let last = usize::try_from(source.primitive_offsets[primitive + 1])
-            .expect("Topology edge lookup: invalid primitive offset");
+        let first = source.primitive_offsets[primitive] as usize;
+        let last = source.primitive_offsets[primitive + 1] as usize;
         let size = last - first;
         outgoing_count = outgoing_count
             .checked_add(if source.primitive_kinds[primitive] == 1 {
@@ -49,7 +47,7 @@ pub fn create(
     let slot_count = requested_slots.checked_next_power_of_two().ok_or_else(|| {
         invalid_table_error("Topology edge lookup exceeds array limits")
     })?;
-    let mut slots = vec![-1_i64; slot_count];
+    let mut slots = vec![topology_index::NONE; slot_count];
     let mut edge_a = Vec::with_capacity(outgoing_count);
     let mut edge_b = Vec::with_capacity(outgoing_count);
     let mut edge_count = 0_usize;
@@ -57,10 +55,8 @@ pub fn create(
 
     for primitive in 0..primitive_count {
         cancel::poll(cancel_value, primitive as i64, 4095).map_err(|_| cancelled_error())?;
-        let first = usize::try_from(source.primitive_offsets[primitive])
-            .expect("Topology edge lookup: invalid primitive offset");
-        let last = usize::try_from(source.primitive_offsets[primitive + 1])
-            .expect("Topology edge lookup: invalid primitive offset");
+        let first = source.primitive_offsets[primitive] as usize;
+        let last = source.primitive_offsets[primitive + 1] as usize;
         for vertex in first..last {
             let next = if vertex + 1 < last {
                 Some(vertex + 1)
@@ -75,11 +71,11 @@ pub fn create(
             let left = source.vertex_points[vertex];
             let right = source.vertex_points[next];
             let (a, b) = if left <= right { (left, right) } else { (right, left) };
-            let mut slot = topology_index::hash_pair(a, b) & mask;
+            let mut slot = topology_index::hash_pair(i64::from(a), i64::from(b)) & mask;
             loop {
                 let candidate = slots[slot];
-                if candidate < 0 {
-                    slots[slot] = edge_count as i64;
+                if candidate == topology_index::NONE {
+                    slots[slot] = edge_count as u32;
                     edge_a.push(a);
                     edge_b.push(b);
                     edge_count += 1;
@@ -117,7 +113,7 @@ pub fn endpoints(value: &T, edge: i64) -> Result<(i64, i64), error::T> {
                 "Topology_edge_lookup.endpoints: index out of bounds".to_owned(),
             )
         })?;
-    Ok((value.edge_a[edge], value.edge_b[edge]))
+    Ok((i64::from(value.edge_a[edge]), i64::from(value.edge_b[edge])))
 }
 
 pub fn find(value: &T, a: i64, b: i64) -> i64 {
@@ -129,11 +125,11 @@ pub fn find(value: &T, a: i64, b: i64) -> i64 {
     let mut slot = topology_index::hash_pair(a, b) & mask;
     loop {
         let edge = value.slots[slot];
-        if edge < 0 {
+        if edge == topology_index::NONE {
             return -1;
         }
         let edge = edge as usize;
-        if value.edge_a[edge] == a && value.edge_b[edge] == b {
+        if i64::from(value.edge_a[edge]) == a && i64::from(value.edge_b[edge]) == b {
             return edge as i64;
         }
         slot = (slot + 1) & mask;

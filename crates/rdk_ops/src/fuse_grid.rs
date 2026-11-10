@@ -1049,7 +1049,7 @@ mod tests {
         let mut z = pz.clone();
         z.extend(shifted.2.iter());
         let mut all_vp = vp.clone();
-        all_vp.extend(vp.iter().map(|v| v + count));
+        all_vp.extend(vp.iter().map(|v| v + count as u32));
         let mut all_offsets = offsets.clone();
         let base_len = *offsets.last().unwrap();
         all_offsets.extend(offsets.iter().skip(1).map(|o| o + base_len));
@@ -1154,7 +1154,7 @@ mod tests {
         let (x2, y2): (Vec<f64>, Vec<f64>) = (x.iter().map(|v| v + 0.013).collect(), y.iter().map(|v| v - 0.017).collect());
         let both = |a: &Vec<f64>, b: &Vec<f64>| a.iter().chain(b.iter()).copied().collect::<Vec<f64>>();
         let mut all_vp = vp.clone();
-        all_vp.extend(vp.iter().map(|v| v + half));
+        all_vp.extend(vp.iter().map(|v| v + half as u32));
         let mut all_offsets = offsets.clone();
         let base_len = *offsets.last().unwrap();
         all_offsets.extend(offsets.iter().skip(1).map(|o| o + base_len));

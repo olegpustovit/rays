@@ -957,7 +957,7 @@ mod tests {
         }
         let count = x.len();
         let positions = packed::float3::of_owned(x, vec![0.0; count], z).unwrap();
-        let topo = topology::polygons_owned(count as i64, vertices, offsets).unwrap();
+        let topo = topology::polygons_owned(count as i64, topology::narrow("test", &vertices).unwrap(), topology::narrow("test", &offsets).unwrap()).unwrap();
         let normals = packed::float3::of_owned(vec![0.0; count], vec![1.0; count], vec![0.0; count]).unwrap();
         let normal = attribute::create_key_owned(
             &attribute::normal(attribute::Owner::Point),
@@ -1345,8 +1345,8 @@ mod tests {
         for segment in 0..segments {
             triangles.extend([point(rings, segment), point(rings - 1, segment), point(rings - 1, segment + 1)]);
         }
-        let offsets = (0..=triangles.len() / 3).map(|index| index as i64 * 3).collect();
-        let sphere_topology = topology::polygons_owned(sphere_points.len() as i64, triangles, offsets).unwrap();
+        let offsets: Vec<i64> = (0..=triangles.len() / 3).map(|index| index as i64 * 3).collect();
+        let sphere_topology = topology::polygons_owned(sphere_points.len() as i64, topology::narrow("test", &triangles).unwrap(), topology::narrow("test", &offsets).unwrap()).unwrap();
         let surface = geometry::create(
             geometry::positions(&points_geometry(&sphere_points)).clone(), sphere_topology, None, None, None,
         ).unwrap();

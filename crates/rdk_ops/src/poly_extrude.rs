@@ -253,10 +253,10 @@ fn run_default(
     let output_positions = packed::float3::view::of_owned_exn(px, py, pz)?;
     let output_topology = topology::view::create_validated_owned(
         output_points as i64,
-        vertex_points,
-        primitive_offsets,
+        topology::narrow("Poly_extrude", &vertex_points)?,
+        topology::narrow("Poly_extrude", &primitive_offsets)?,
         primitive_kinds,
-    );
+    )?;
     let attributes = remap_attributes(cancel_ref, grain, &point_map, &vertex_map, &primitive_map, geometry_value)?;
     let groups = remap_groups(grain, &point_map, &vertex_map, &primitive_map, geometry_value)?;
     let source_groups = geometry::edge_groups(geometry_value);
@@ -439,7 +439,7 @@ fn run_general(
         cancel::poll(cancel_ref, primitive as i64, 4_095)?;
         if selected[primitive] {
             selected_vertices +=
-                (topology_view.primitive_offsets[primitive + 1] - topology_view.primitive_offsets[primitive]) as usize;
+                (i64::from(topology_view.primitive_offsets[primitive + 1]) - i64::from(topology_view.primitive_offsets[primitive])) as usize;
         }
     }
     let mut boundary_vertices: Vec<usize> = Vec::new();
@@ -466,7 +466,7 @@ fn run_general(
                                 let mut other: i64 = -1;
                                 for at in edge_first..edge_last {
                                     let candidate =
-                                        index_view.primitive_of_vertex[index_view.edge_vertices[at] as usize];
+                                        i64::from(index_view.primitive_of_vertex[index_view.edge_vertices[at] as usize]);
                                     if candidate != primitive as i64 {
                                         other = candidate;
                                     }
@@ -497,7 +497,7 @@ fn run_general(
                 let first = topology_view.primitive_offsets[primitive] as usize;
                 let last = topology_view.primitive_offsets[primitive + 1] as usize;
                 for vertex in first..last {
-                    let point = topology_view.vertex_points[vertex];
+                    let point = i64::from(topology_view.vertex_points[vertex]);
                     if !association_table.contains_key(&(component, point)) {
                         association_table.insert((component, point), association_sources.len());
                         association_sources.push(point);
@@ -518,7 +518,7 @@ fn run_general(
                 let first = topology_view.primitive_offsets[primitive] as usize;
                 let last = topology_view.primitive_offsets[primitive + 1] as usize;
                 for vertex in first..last {
-                    let point = topology_view.vertex_points[vertex];
+                    let point = i64::from(topology_view.vertex_points[vertex]);
                     let association = pair_find(&association_table, component, point)?;
                     direction_x[association] += face_nx[primitive];
                     direction_y[association] += face_ny[primitive];
@@ -565,7 +565,7 @@ fn run_general(
     let mut front_start = Vec::with_capacity(source_primitives + 1);
     for primitive in 0..source_primitives {
         cancel::poll(cancel_ref, primitive as i64, 4_095)?;
-        let count = (topology_view.primitive_offsets[primitive + 1] - topology_view.primitive_offsets[primitive]) as usize;
+        let count = (i64::from(topology_view.primitive_offsets[primitive + 1]) - i64::from(topology_view.primitive_offsets[primitive])) as usize;
         base_start.push(base_vertices);
         front_start.push(front_cursor);
         if !selected[primitive] || output_back {
@@ -644,7 +644,7 @@ fn run_general(
                 back_membership[output] = 1;
             }
             vertex_cursor +=
-                (topology_view.primitive_offsets[primitive + 1] - topology_view.primitive_offsets[primitive]) as usize;
+                (i64::from(topology_view.primitive_offsets[primitive + 1]) - i64::from(topology_view.primitive_offsets[primitive])) as usize;
             primitive_cursor += 1;
         }
     }
@@ -657,8 +657,8 @@ fn run_general(
                 primitive_offsets[output] = vertex_cursor as i64;
                 primitive_map[output] = primitive as i64;
                 front_membership[output] = 1;
-                vertex_cursor += (topology_view.primitive_offsets[primitive + 1]
-                    - topology_view.primitive_offsets[primitive]) as usize;
+                vertex_cursor += (i64::from(topology_view.primitive_offsets[primitive + 1])
+                    - i64::from(topology_view.primitive_offsets[primitive])) as usize;
                 primitive_cursor += 1;
             }
         }
@@ -670,7 +670,7 @@ fn run_general(
             for division in 0..divisions_u {
                 let output = side_first_primitive + boundary * divisions_u + division;
                 primitive_offsets[output] = (side_first_vertex + (boundary * divisions_u + division) * 4) as i64;
-                primitive_map[output] = index_view.primitive_of_vertex[boundary_vertices[boundary]];
+                primitive_map[output] = i64::from(index_view.primitive_of_vertex[boundary_vertices[boundary]]);
                 side_membership[output] = 1;
             }
         }
@@ -702,7 +702,7 @@ fn run_general(
                 let output = base_start[primitive] - base_origin;
                 for vertex in first..last {
                     let local = vertex - first;
-                    base_points[output + local] = topology_view.vertex_points[vertex];
+                    base_points[output + local] = i64::from(topology_view.vertex_points[vertex]);
                     base_map[output + local] = vertex as i64;
                 }
             }
@@ -711,7 +711,7 @@ fn run_general(
                 let component = primitive_component[primitive];
                 for vertex in first..last {
                     let local = vertex - first;
-                    let point = topology_view.vertex_points[vertex];
+                    let point = i64::from(topology_view.vertex_points[vertex]);
                     let association = pair_find(&association_table, component, point)?;
                     front_points[output + local] = (source_points + association * divisions_u + divisions_u - 1) as i64;
                     front_map[output + local] = vertex as i64;
@@ -744,8 +744,8 @@ fn run_general(
                 let next = index_view.next_vertex[vertex] as usize;
                 let primitive = index_view.primitive_of_vertex[vertex] as usize;
                 let component = primitive_component[primitive];
-                let point = topology_view.vertex_points[vertex];
-                let next_point = topology_view.vertex_points[next];
+                let point = i64::from(topology_view.vertex_points[vertex]);
+                let next_point = i64::from(topology_view.vertex_points[next]);
                 let association = pair_find(&association_table, component, point)?;
                 let next_association = pair_find(&association_table, component, next_point)?;
                 for division in 0..divisions_u {
@@ -766,10 +766,10 @@ fn run_general(
     let output_positions = packed::float3::view::of_owned_exn(px, py, pz)?;
     let output_topology = topology::view::create_validated_owned(
         output_points as i64,
-        vertex_points,
-        primitive_offsets,
+        topology::narrow("Poly_extrude", &vertex_points)?,
+        topology::narrow("Poly_extrude", &primitive_offsets)?,
         primitive_kinds,
-    );
+    )?;
     let attributes = remap_attributes(cancel_ref, grain, &point_map, &vertex_map, &primitive_map, geometry_value)?;
     let mut groups = remap_groups(grain, &point_map, &vertex_map, &primitive_map, geometry_value)?;
     let add_role = |name: &Option<String>,
@@ -852,8 +852,8 @@ fn run_general(
                         let next = index_view.next_vertex[vertex] as usize;
                         let primitive = index_view.primitive_of_vertex[vertex] as usize;
                         let component = primitive_component[primitive];
-                        let a = topology_view.vertex_points[vertex];
-                        let b = topology_view.vertex_points[next];
+                        let a = i64::from(topology_view.vertex_points[vertex]);
+                        let b = i64::from(topology_view.vertex_points[next]);
                         if layer == 0 {
                             add_edge(&mut bits, a, b);
                         } else {

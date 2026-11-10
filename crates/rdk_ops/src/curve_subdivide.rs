@@ -56,8 +56,8 @@ fn map_floats(
     Ok(output)
 }
 
-fn primitive_size(offsets: &[i64], primitive: usize) -> i64 {
-    offsets[primitive + 1] - offsets[primitive]
+fn primitive_size(offsets: &[u32], primitive: usize) -> i64 {
+    i64::from(offsets[primitive + 1] - offsets[primitive])
 }
 
 fn validate(cancel_value: Option<&cancel::T>, value: &geometry::T) -> Result<(), error::T> {
@@ -73,8 +73,8 @@ fn validate(cancel_value: Option<&cancel::T>, value: &geometry::T) -> Result<(),
         } else if kind != 1 && kind != 2 {
             return Err(fail("curve refinement received an unsupported primitive kind"));
         }
-        let first = view.primitive_offsets[primitive];
-        let last = view.primitive_offsets[primitive + 1];
+        let first = i64::from(view.primitive_offsets[primitive]);
+        let last = i64::from(view.primitive_offsets[primitive + 1]);
         let cyclic = kind == 2;
         for vertex in first..last {
             let next = if vertex + 1 < last {
@@ -84,7 +84,7 @@ fn validate(cancel_value: Option<&cancel::T>, value: &geometry::T) -> Result<(),
             } else {
                 -1
             };
-            if next >= 0 && view.vertex_points[vertex as usize] == view.vertex_points[next as usize] {
+            if next >= 0 && i64::from(view.vertex_points[vertex as usize]) == i64::from(view.vertex_points[next as usize]) {
                 return Err(fail("a polygon curve contains a zero-length topology edge"));
             }
         }
@@ -100,10 +100,10 @@ fn validate(cancel_value: Option<&cancel::T>, value: &geometry::T) -> Result<(),
 }
 
 fn other_endpoint(index: &topology_index::view::View, point: i64, edge: i64) -> Result<i64, error::T> {
-    if index.edge_a[edge as usize] == point {
-        Ok(index.edge_b[edge as usize])
-    } else if index.edge_b[edge as usize] == point {
-        Ok(index.edge_a[edge as usize])
+    if i64::from(index.edge_a[edge as usize]) == point {
+        Ok(i64::from(index.edge_b[edge as usize]))
+    } else if i64::from(index.edge_b[edge as usize]) == point {
+        Ok(i64::from(index.edge_a[edge as usize]))
     } else {
         Err(fail("curve point-edge incidence is inconsistent"))
     }
@@ -123,7 +123,7 @@ fn shared_plan(
     let output_points = checked_add("curve subdivision point count", source_points, edge_count)?;
     let mut point_offsets = vec![0_i64; output_points as usize + 1];
     for point in 0..source_points as usize {
-        let degree = index.point_edge_offsets[point + 1] - index.point_edge_offsets[point];
+        let degree = i64::from(index.point_edge_offsets[point + 1]) - i64::from(index.point_edge_offsets[point]);
         point_offsets[point + 1] =
             point_offsets[point] + if scheme == Scheme::CatmullClark && degree == 2 { 3 } else { 1 };
     }
@@ -159,14 +159,14 @@ fn shared_plan(
                 let slot = (point - first_point) as usize;
                 old[slot] = true;
                 representative[slot] = point;
-                let edge_first = index.point_edge_offsets[point as usize];
-                let edge_last = index.point_edge_offsets[point as usize + 1];
+                let edge_first = i64::from(index.point_edge_offsets[point as usize]);
+                let edge_last = i64::from(index.point_edge_offsets[point as usize + 1]);
                 if scheme == Scheme::CatmullClark && edge_last - edge_first == 2 {
-                    sources[first] = other_endpoint(index, point, index.point_edges[edge_first as usize])?;
+                    sources[first] = other_endpoint(index, point, i64::from(index.point_edges[edge_first as usize]))?;
                     weights[first] = 0.125;
                     sources[first + 1] = point;
                     weights[first + 1] = 0.75;
-                    sources[first + 2] = other_endpoint(index, point, index.point_edges[edge_first as usize + 1])?;
+                    sources[first + 2] = other_endpoint(index, point, i64::from(index.point_edges[edge_first as usize + 1]))?;
                     weights[first + 2] = 0.125;
                 } else {
                     sources[first] = point;
@@ -191,7 +191,7 @@ fn shared_plan(
             for edge in first_edge..last_edge {
                 cancel::poll(cancel_value, edge, 4095)?;
                 let first = point_offsets[(source_points + edge) as usize] as usize - base;
-                let (a, b) = (index.edge_a[edge as usize], index.edge_b[edge as usize]);
+                let (a, b) = (i64::from(index.edge_a[edge as usize]), i64::from(index.edge_b[edge as usize]));
                 sources[first] = a;
                 weights[first] = 0.5;
                 sources[first + 1] = b;
@@ -237,22 +237,22 @@ fn shared_plan(
             let base = rows(range) as i64;
             for primitive in first_primitive..last_primitive {
                 cancel::poll(cancel_value, primitive, 4095)?;
-                let first = view.primitive_offsets[primitive as usize];
-                let last = view.primitive_offsets[primitive as usize + 1];
+                let first = i64::from(view.primitive_offsets[primitive as usize]);
+                let last = i64::from(view.primitive_offsets[primitive as usize + 1]);
                 let mut output = primitive_offsets[primitive as usize] - base;
                 for vertex in first..last {
                     let at = output as usize;
                     output += 1;
-                    points[at] = view.vertex_points[vertex as usize];
+                    points[at] = i64::from(view.vertex_points[vertex as usize]);
                     left[at] = vertex;
                     right[at] = vertex;
                     old[at] = true;
-                    let edge = index.edge_of_vertex[vertex as usize];
+                    let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vertex as usize]);
                     if edge >= 0 {
                         source_edge[at] = edge;
                         let midpoint = output as usize;
                         output += 1;
-                        let next = index.next_vertex[vertex as usize];
+                        let next = rdk_core::topology_index::widen(index.next_vertex[vertex as usize]);
                         if next < 0 {
                             return Err(fail("curve edge has no following corner"));
                         }
@@ -272,10 +272,10 @@ fn shared_plan(
     }
     let output_topology = topology::view::create_validated_shared(
         output_points,
-        vertex_points,
-        primitive_offsets.into(),
+        topology::narrow("Curve_subdivide", &vertex_points)?,
+        topology::narrow("Curve_subdivide", &primitive_offsets)?.into(),
         primitive_kinds,
-    );
+    )?;
     let output_index = if geometry::edge_groups(value).is_empty() {
         None
     } else {
@@ -331,8 +331,8 @@ fn independent_plan(
     let mut vertex_old = vec![false; count];
     let mut source_edge_of_output_vertex = vec![-1_i64; count];
     for primitive in 0..source_primitives {
-        let first = view.primitive_offsets[primitive];
-        let last = view.primitive_offsets[primitive + 1];
+        let first = i64::from(view.primitive_offsets[primitive]);
+        let last = i64::from(view.primitive_offsets[primitive + 1]);
         let closed = view.primitive_kinds[primitive] == 2;
         let mut output = primitive_offsets[primitive];
         for vertex in first..last {
@@ -340,22 +340,22 @@ fn independent_plan(
             output += 1;
             let smooth = scheme == Scheme::CatmullClark && (closed || (vertex > first && vertex + 1 < last));
             point_offsets[old + 1] = point_offsets[old] + if smooth { 3 } else { 1 };
-            point_representative[old] = view.vertex_points[vertex as usize];
+            point_representative[old] = i64::from(view.vertex_points[vertex as usize]);
             point_old[old] = true;
             vertex_left[old] = vertex;
             vertex_right[old] = vertex;
             vertex_old[old] = true;
-            let edge = index.edge_of_vertex[vertex as usize];
+            let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vertex as usize]);
             if edge >= 0 {
                 source_edge_of_output_vertex[old] = edge;
                 let midpoint = output as usize;
                 output += 1;
                 point_offsets[midpoint + 1] = point_offsets[midpoint] + 2;
-                let next = index.next_vertex[vertex as usize];
+                let next = rdk_core::topology_index::widen(index.next_vertex[vertex as usize]);
                 if next < 0 {
                     return Err(fail("curve edge has no following corner"));
                 }
-                let (a, b) = (view.vertex_points[vertex as usize], view.vertex_points[next as usize]);
+                let (a, b) = (i64::from(view.vertex_points[vertex as usize]), i64::from(view.vertex_points[next as usize]));
                 point_representative[midpoint] = a.min(b);
                 vertex_left[midpoint] = vertex;
                 vertex_right[midpoint] = next;
@@ -386,8 +386,8 @@ fn independent_plan(
             let base = rows(range) as i64;
             for primitive in first_primitive..last_primitive {
                 cancel::poll(cancel_value, primitive, 4095)?;
-                let first = view.primitive_offsets[primitive as usize];
-                let last = view.primitive_offsets[primitive as usize + 1];
+                let first = i64::from(view.primitive_offsets[primitive as usize]);
+                let last = i64::from(view.primitive_offsets[primitive as usize + 1]);
                 let closed = view.primitive_kinds[primitive as usize] == 2;
                 let mut output = primitive_offsets[primitive as usize];
                 for vertex in first..last {
@@ -397,23 +397,23 @@ fn independent_plan(
                     if smooth {
                         let previous = if vertex > first { vertex - 1 } else { last - 1 };
                         let next = if vertex + 1 < last { vertex + 1 } else { first };
-                        sources[at] = view.vertex_points[previous as usize];
+                        sources[at] = i64::from(view.vertex_points[previous as usize]);
                         weights[at] = 0.125;
-                        sources[at + 1] = view.vertex_points[vertex as usize];
+                        sources[at + 1] = i64::from(view.vertex_points[vertex as usize]);
                         weights[at + 1] = 0.75;
-                        sources[at + 2] = view.vertex_points[next as usize];
+                        sources[at + 2] = i64::from(view.vertex_points[next as usize]);
                         weights[at + 2] = 0.125;
                     } else {
-                        sources[at] = view.vertex_points[vertex as usize];
+                        sources[at] = i64::from(view.vertex_points[vertex as usize]);
                         weights[at] = 1.0;
                     }
-                    let next = index.next_vertex[vertex as usize];
+                    let next = rdk_core::topology_index::widen(index.next_vertex[vertex as usize]);
                     if next >= 0 {
                         let midpoint_at = (point_offsets[output as usize] - base) as usize;
                         output += 1;
-                        sources[midpoint_at] = view.vertex_points[vertex as usize];
+                        sources[midpoint_at] = i64::from(view.vertex_points[vertex as usize]);
                         weights[midpoint_at] = 0.5;
-                        sources[midpoint_at + 1] = view.vertex_points[next as usize];
+                        sources[midpoint_at + 1] = i64::from(view.vertex_points[next as usize]);
                         weights[midpoint_at + 1] = 0.5;
                     }
                 }
@@ -423,10 +423,10 @@ fn independent_plan(
     }
     let output_topology = topology::view::create_validated_shared(
         output_points,
-        vertex_points,
-        primitive_offsets.into(),
+        topology::narrow("Curve_subdivide", &vertex_points)?,
+        topology::narrow("Curve_subdivide", &primitive_offsets)?.into(),
         view.primitive_kinds.clone(),
-    );
+    )?;
     let output_index = if geometry::edge_groups(value).is_empty() {
         None
     } else {
@@ -476,7 +476,7 @@ fn point_float(
 ) -> Result<Vec<f64>, error::T> {
     map_floats(grain, cancel_value, plan.point_representative.len() as i64, &|point| {
         let mut sum = 0.0;
-        for at in plan.point_offsets[point as usize]..plan.point_offsets[point as usize + 1] {
+        for at in i64::from(plan.point_offsets[point as usize])..i64::from(plan.point_offsets[point as usize + 1]) {
             sum += source[plan.point_sources[at as usize] as usize] * plan.point_weights[at as usize];
         }
         sum
@@ -616,7 +616,7 @@ fn remap_edge_group(
         cancel::poll(cancel_value, vertex as i64, 16_383)?;
         let source_edge = plan.source_edge_of_output_vertex[vertex];
         if source_edge >= 0 && edge_group::mem(source_edge, value) {
-            let output_edge = output_view.edge_of_vertex[vertex];
+            let output_edge = rdk_core::topology_index::widen(output_view.edge_of_vertex[vertex]);
             if output_edge < 0 {
                 return Err(fail("curve child edge ancestry is incomplete"));
             }

@@ -457,7 +457,7 @@ fn interpolate_csr(
     interpolate_fixed(cancel_value, ancestry, view, corner_count, pair)
 }
 
-fn first_corners(vertex_points: &[i64], point_count: usize) -> Vec<i64> {
+fn first_corners(vertex_points: &[u32], point_count: usize) -> Vec<i64> {
     let mut representatives = vec![-1_i64; point_count];
     for (corner, &point) in vertex_points.iter().enumerate() {
         if representatives[point as usize] < 0 {
@@ -479,7 +479,7 @@ fn conflict_fail(name: &str, point: usize) -> Fail {
 fn consolidate_to_points(
     tolerance: f64,
     name: &str,
-    vertex_points: &[i64],
+    vertex_points: &[u32],
     point_count: usize,
     representatives: &[i64],
     storage: Storage,
@@ -640,7 +640,7 @@ fn copy_group(
     grain: i64,
     view: &View,
     ancestry: &extract::Ancestry,
-    vertex_points: &[i64],
+    vertex_points: &[u32],
     point_count: usize,
     representatives: &[i64],
     point_conflict: PointConflict,
@@ -729,8 +729,8 @@ fn copy_edge_group(
     let output_index = topology_index::view::view(index);
     let member = |edge: i64| -> Result<bool, error::T> {
         cancel::poll(cancel_value, edge, 4095)?;
-        let first = output_index.edge_offsets[edge as usize];
-        let last = output_index.edge_offsets[edge as usize + 1];
+        let first = i64::from(output_index.edge_offsets[edge as usize]);
+        let last = i64::from(output_index.edge_offsets[edge as usize + 1]);
         for incident in first..last {
             let corner = output_index.edge_vertices[incident as usize] as usize;
             let source = view.edge_source_offsets[corner] as usize;
@@ -801,7 +801,7 @@ fn copy_points_inner(
     if corner_count != primitive_count * 3 || topology_view.vertex_points.len() as i64 != corner_count {
         return Err(invalid_fail("Boolean corner payload requires triangular extraction topology"));
     }
-    let vertex_points: &[i64] = &topology_view.vertex_points;
+    let vertex_points: &[u32] = &topology_view.vertex_points;
     let corner_count = corner_count as usize;
     let representatives = first_corners(vertex_points, point_count);
     if representatives.iter().any(|&corner| corner < 0) {

@@ -579,7 +579,7 @@ fn cooked_folds_traverse_inventory() {
 #[test]
 fn ordinary_group_byte_masks_preserve_immutable_storage() {
     for n in [0i64, 1, 7, 8, 9, 63, 64, 65, 32769] {
-        let t = ok(topology::create_owned(n, (0..n * 2).map(|i| i / 2).collect(), (0..=n).map(|i| i * 2).collect(), vec![topology::PrimitiveKind::OpenPolyline; n as usize]));
+        let t = ok(topology::create_owned(n, (0..n as u32 * 2).map(|i| i / 2).collect(), (0..=n as u32).map(|i| i * 2).collect(), vec![topology::PrimitiveKind::OpenPolyline; n as usize]));
         let nn = n as usize;
         let geometry = ok(geo::create(ok(float3::view::of_owned_exn(vec![0.0; nn], vec![0.0; nn], vec![0.0; nn])), t, None, None, None));
         for (owner, native_owner) in OWNERS {

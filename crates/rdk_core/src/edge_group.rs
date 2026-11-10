@@ -436,8 +436,8 @@ pub fn replicate_exact_copies(
         let primitive_offset = copy * source_primitives;
         for vertex in 0..source_vertices {
             let target_vertex = vertex_offset + vertex;
-            let expected_point = source.vertex_points[vertex as usize] + point_offset;
-            if target.vertex_points[target_vertex as usize] != expected_point {
+            let expected_point = i64::from(source.vertex_points[vertex as usize]) + point_offset;
+            if i64::from(target.vertex_points[target_vertex as usize]) != expected_point {
                 valid = false;
                 break;
             }
@@ -447,8 +447,8 @@ pub fn replicate_exact_copies(
         }
         for primitive in 0..source_primitives {
             let target_primitive = primitive_offset + primitive;
-            if target.primitive_offsets[target_primitive as usize]
-                != source.primitive_offsets[primitive as usize] + vertex_offset
+            if i64::from(target.primitive_offsets[target_primitive as usize])
+                != i64::from(source.primitive_offsets[primitive as usize]) + vertex_offset
                 || target.primitive_kinds[target_primitive as usize]
                     != source.primitive_kinds[primitive as usize]
             {
@@ -461,7 +461,7 @@ pub fn replicate_exact_copies(
         }
     }
     if valid {
-        valid = target.primitive_offsets[expected_primitives as usize] == expected_vertices;
+        valid = i64::from(target.primitive_offsets[expected_primitives as usize]) == expected_vertices;
     }
     if !valid {
         return Err(invalid_edge_group(

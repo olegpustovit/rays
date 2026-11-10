@@ -89,9 +89,9 @@ fn digest(geometry_value: &geometry::T) -> String {
     let mut d = Digest::new();
     if let Ok(view) = rdk_core::topology::view::view(geometry::topology(geometry_value)) {
         d.int(view.vertex_points.len() as i64);
-        view.vertex_points.iter().for_each(|v| d.int(*v));
+        view.vertex_points.iter().for_each(|&v| d.int(i64::from(v)));
         d.int(view.primitive_offsets.len() as i64);
-        view.primitive_offsets.iter().for_each(|v| d.int(*v));
+        view.primitive_offsets.iter().for_each(|&v| d.int(i64::from(v)));
         d.bytes(&view.primitive_kinds);
     }
     if let Ok(view) = rdk_core::packed::float3::view::view(geometry::positions(geometry_value)) {

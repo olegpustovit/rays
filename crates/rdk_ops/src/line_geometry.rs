@@ -41,7 +41,7 @@ fn polyline_inner(params: &Params, values: &[(f64, f64, f64)]) -> Result<geometr
     }
     let cloud = points(values)?;
     let mut builder = topology::builder::create(count as i64, Some(count as i64), Some(1))?;
-    let indices: Vec<i64> = (0..count as i64).collect();
+    let indices: Vec<u32> = (0..count as u32).collect();
     if params.closed {
         topology::builder::add_closed_polyline(&mut builder, &indices)?;
     } else {

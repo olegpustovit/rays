@@ -23,7 +23,7 @@ const TRIANGLES: [[usize; 3]; 2] = [[0, 1, 2], [0, 2, 3]];
 
 fn mesh(points: &Points) -> geometry::T {
     let positions = float3::of_owned(points.iter().map(|p| p[0]).collect(), points.iter().map(|p| p[1]).collect(), points.iter().map(|p| p[2]).collect()).expect("positions");
-    let top = topology::polygons_owned(points.len() as i64, TRIANGLES.iter().flatten().map(|i| *i as i64).collect(), vec![0, 3, 6]).expect("topology");
+    let top = topology::polygons_owned(points.len() as i64, TRIANGLES.iter().flatten().map(|i| *i as u32).collect(), vec![0, 3, 6]).expect("topology");
     geometry::create(positions, top, None, None, None).expect("mesh")
 }
 

@@ -269,8 +269,8 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             let first = index.edge_offsets[edge] as usize;
             let left = index.edge_vertices[first] as usize;
             let right = index.edge_vertices[first + 1] as usize;
-            let left_next = index.next_vertex[left];
-            let right_next = index.next_vertex[right];
+            let left_next = rdk_core::topology_index::widen(index.next_vertex[left]);
+            let right_next = rdk_core::topology_index::widen(index.next_vertex[right]);
             let left_primitive = index.primitive_of_vertex[left] as usize;
             let right_primitive = index.primitive_of_vertex[right] as usize;
             if left_next >= 0
@@ -345,9 +345,9 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         cancel::poll(cancel_ref, vertex as i64, 16_383)?;
         let primitive = index.primitive_of_vertex[vertex] as usize;
         if topology_view.primitive_kinds[primitive] == 0 {
-            let previous = index.previous_vertex[vertex];
-            let incoming = if previous < 0 { -1 } else { index.edge_of_vertex[previous as usize] };
-            let outgoing = index.edge_of_vertex[vertex];
+            let previous = rdk_core::topology_index::widen(index.previous_vertex[vertex]);
+            let incoming = if previous < 0 { -1 } else { rdk_core::topology_index::widen(index.edge_of_vertex[previous as usize]) };
+            let outgoing = rdk_core::topology_index::widen(index.edge_of_vertex[vertex]);
             let incoming_selected = edge_selected(incoming);
             let outgoing_selected = edge_selected(outgoing);
             if incoming_selected || outgoing_selected {
@@ -360,15 +360,15 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                 }
                 if outgoing_selected {
                     move_to_previous[vertex] = amount;
-                    let opposite = index.opposite_vertex[vertex];
+                    let opposite = rdk_core::topology_index::widen(index.opposite_vertex[vertex]);
                     if opposite < 0 {
                         return Err(inconsistent());
                     }
-                    successor[vertex] = index.next_vertex[opposite as usize];
+                    successor[vertex] = rdk_core::topology_index::widen(index.next_vertex[opposite as usize]);
                 }
                 if incoming_selected {
                     move_to_next[vertex] = amount;
-                    let opposite = index.opposite_vertex[previous as usize];
+                    let opposite = rdk_core::topology_index::widen(index.opposite_vertex[previous as usize]);
                     if opposite < 0 {
                         return Err(inconsistent());
                     }
@@ -418,8 +418,8 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             let first = index.edge_offsets[edge] as usize;
             let left = index.edge_vertices[first] as usize;
             let right = index.edge_vertices[first + 1] as usize;
-            let left_next = index.next_vertex[left];
-            let right_next = index.next_vertex[right];
+            let left_next = rdk_core::topology_index::widen(index.next_vertex[left]);
+            let right_next = rdk_core::topology_index::widen(index.next_vertex[right]);
             if left_next >= 0
                 && right_next >= 0
                 && topology_view.primitive_kinds[index.primitive_of_vertex[left] as usize] == 0
@@ -728,7 +728,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         let mut second_edge: i64 = -1;
         let mut count = 0;
         for at in first..last {
-            let edge = index.point_edges[at];
+            let edge = i64::from(index.point_edges[at]);
             if edge_selected(edge) {
                 if count == 0 {
                     first_edge = edge;
@@ -795,11 +795,11 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         if topology_view.primitive_kinds[primitive] != 0 {
             continue;
         }
-        let edge = index.edge_of_vertex[vertex];
+        let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vertex]);
         if edge_selected(edge) {
             continue;
         }
-        let opposite = index.opposite_vertex[vertex];
+        let opposite = rdk_core::topology_index::widen(index.opposite_vertex[vertex]);
         if opposite < 0 {
             continue;
         }
@@ -907,7 +907,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                     lefts[output] = vertex as i64;
                     rights[output] = vertex as i64;
                     output += 1;
-                    let next = index.next_vertex[vertex];
+                    let next = rdk_core::topology_index::widen(index.next_vertex[vertex]);
                     let count = insert_count[vertex];
                     if count > 0 {
                         points[output] = insert_point0[vertex];
@@ -937,10 +937,10 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         }
         let ordinal = ordinal as usize;
         let (left, right) = edge_halves(edge);
-        let left_next = index.next_vertex[left];
-        let right_next = index.next_vertex[right];
-        let left_primitive = index.primitive_of_vertex[left];
-        let right_primitive = index.primitive_of_vertex[right];
+        let left_next = rdk_core::topology_index::widen(index.next_vertex[left]);
+        let right_next = rdk_core::topology_index::widen(index.next_vertex[right]);
+        let left_primitive = i64::from(index.primitive_of_vertex[left]);
+        let right_primitive = i64::from(index.primitive_of_vertex[right]);
         for layer in 0..divisions_u {
             let primitive = strip_first_primitive + ordinal * divisions_u + layer;
             let output = strip_first_vertex + (ordinal * divisions_u + layer) * 4;
@@ -985,16 +985,16 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             vertex_points[patch_cursor] = corner_point[corner];
             vertex_left[patch_cursor] = corner as i64;
             vertex_right[patch_cursor] = corner as i64;
-            source_primitive = source_primitive.min(index.primitive_of_vertex[corner]);
+            source_primitive = source_primitive.min(i64::from(index.primitive_of_vertex[corner]));
             patch_cursor += 1;
             let connection_follows = at + 1 < last || component_closed[component] || joined;
             if connection_follows {
                 let edge = index.edge_of_vertex[corner] as usize;
                 let (left, right) = edge_halves(edge);
                 let (endpoint, ascending, source0, source1) = if corner == left {
-                    (0, true, left as i64, index.next_vertex[right])
+                    (0, true, left as i64, rdk_core::topology_index::widen(index.next_vertex[right]))
                 } else if corner == right {
-                    (1, false, index.next_vertex[left], right as i64)
+                    (1, false, rdk_core::topology_index::widen(index.next_vertex[left]), right as i64)
                 } else {
                     return Err(inconsistent());
                 };
@@ -1065,10 +1065,10 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     let output_positions = packed::float3::view::of_owned_exn(px, py, pz)?;
     let output_topology = topology::view::create_validated_owned(
         retained_points as i64,
-        vertex_points,
-        primitive_offsets,
+        topology::narrow("Poly_bevel", &vertex_points)?,
+        topology::narrow("Poly_bevel", &primitive_offsets)?,
         primitive_kinds,
-    );
+    )?;
     let mut attributes = Vec::new();
     for source in geometry::attributes(geometry_value) {
         if let Some(mapped) = interpolate_attribute(cancel_ref, grain, &point_map, &vertex_left, &vertex_right, &vertex_weight, &primitive_map, &source)? {

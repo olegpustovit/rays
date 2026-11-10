@@ -3012,7 +3012,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
 
     fn fixture(index: usize) -> geometry::T {
         let make = |count: i64, vertices: Vec<i64>, offsets: Vec<i64>, kinds: Vec<topology::PrimitiveKind>| {
-            let t = topology::create_owned(count, vertices, offsets, kinds).unwrap();
+            let t = topology::create_owned(count, topology::saturate(&vertices), topology::saturate(&offsets), kinds).unwrap();
             let x: Vec<f64> = (0..count).map(|i| i as f64).collect();
             let y: Vec<f64> = (0..count).map(|i| if i % 2 == 0 { -0.0 } else { 0.25 }).collect();
             geometry::create(float3::of_owned(x, y, vec![2.0; count as usize]).unwrap(), t, None, None, None).unwrap()
@@ -3039,8 +3039,8 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     fn topology_fields(g: &geometry::T) -> Vec<(Symbol, Value)> {
         let view = topology::view::view(geometry::topology(g)).unwrap();
         vec![
-            ("vertex_points".into(), Value::Int_array(Arc::new(view.vertex_points.to_vec()))),
-            ("primitive_offsets".into(), Value::Int_array(Arc::new(view.primitive_offsets.to_vec()))),
+            ("vertex_points".into(), Value::Int_array(Arc::new(view.vertex_points.iter().map(|&v| i64::from(v)).collect()))),
+            ("primitive_offsets".into(), Value::Int_array(Arc::new(view.primitive_offsets.iter().map(|&v| i64::from(v)).collect()))),
             ("kinds".into(), Value::Int_array(Arc::new(view.primitive_kinds.iter().map(|k| i64::from(*k)).collect()))),
         ]
     }

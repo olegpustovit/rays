@@ -101,7 +101,7 @@ fn grid(columns:i64,rows:i64,size:f64,quads:bool) -> geo::T {
         if quads { vertices.extend([a,d,c,b]); offsets.push(vertices.len() as i64); }
         else { vertices.extend([a,d,c,a,c,b]); offsets.extend([vertices.len() as i64-3,vertices.len() as i64]); }
     }}
-    let topology=topology::polygons_owned(count,vertices,offsets).unwrap();
+    let topology=topology::polygons_owned(count,topology::saturate(&vertices),topology::saturate(&offsets)).unwrap();
     let normals=packed::float3::of_owned(vec![0.0;count as usize],vec![1.0;count as usize],vec![0.0;count as usize]).unwrap();
     geo::create(positions,topology,Some(vec![attribute::create_owned("N",Owner::Point,Storage::Float3(normals)).unwrap()]),None,None).unwrap()
 }
@@ -125,17 +125,17 @@ fn inline_geometry(polygons:i64) -> geo::T {
     let count=polygons*6; let mut x=vec![0.0;count as usize]; let mut z=x.clone();
     for p in 0..polygons as usize { let at=p*6; let base=p as f64*4.0; for (i,dx) in [0.0,1.0,2.0,3.0,3.0,0.0].iter().enumerate(){x[at+i]=base+dx;} z[at+4]=1.0;z[at+5]=1.0; }
     let positions=packed::float3::of_owned(x,vec![0.0;count as usize],z).unwrap();
-    geo::create(positions,topology::polygons_owned(count,(0..count).collect(),(0..=polygons).map(|p|p*6).collect()).unwrap(),None,None,None).unwrap()
+    geo::create(positions,topology::polygons_owned(count,(0..count as u32).collect(),(0..=polygons as u32).map(|p|p*6).collect()).unwrap(),None,None,None).unwrap()
 }
 fn edge_equalize_geometry(count:i64) -> geo::T {
     let mut x=Vec::new(); for edge in 0..count {let base=edge as f64*3.0; x.extend([base,base+0.5+(edge%17) as f64*0.1]);}
     let positions=packed::float3::of_owned(x,vec![0.0;count as usize*2],vec![0.0;count as usize*2]).unwrap();
-    geo::create(positions,topology::create_owned(count*2,(0..count*2).collect(),(0..=count).map(|p|p*2).collect(),vec![topology::PrimitiveKind::OpenPolyline;count as usize]).unwrap(),None,None,None).unwrap()
+    geo::create(positions,topology::create_owned(count*2,(0..count as u32*2).collect(),(0..=count as u32).map(|p|p*2).collect(),vec![topology::PrimitiveKind::OpenPolyline;count as usize]).unwrap(),None,None,None).unwrap()
 }
 fn edge_flip_geometry(pairs:i64) -> geo::T {
     let mut x=Vec::new(); let mut y=Vec::new();let mut vertices=Vec::new();
     for pair in 0..pairs { let p=pair*4; let (ox,oy)=((pair%250) as f64*2.0,(pair/250) as f64*2.0); x.extend([ox,ox+1.0,ox+1.0,ox]);y.extend([oy,oy,oy+1.0,oy+1.0]);vertices.extend([p,p+1,p+2,p,p+2,p+3]); }
-    let topology=topology::polygons_owned(pairs*4,vertices,(0..=pairs*2).map(|p|p*3).collect()).unwrap();
+    let topology=topology::polygons_owned(pairs*4,topology::saturate(&vertices),(0..=pairs as u32*2).map(|p|p*3).collect()).unwrap();
     let index=topology_index::create(None,&topology).unwrap();
     let edges=edge_group::init(Some(97),&topology,&index,"flip_edges",&|edge| Ok({let (a,b)=topology_index::edge_points(&index,edge).unwrap(); (a-b).abs()==2&&a.min(b)%4==0})).unwrap();
     geo::create(packed::float3::of_owned(x,y,vec![0.0;pairs as usize*4]).unwrap(),topology,None,None,Some(vec![edges])).unwrap()
@@ -143,7 +143,7 @@ fn edge_flip_geometry(pairs:i64) -> geo::T {
 fn curve_chain_geometry(segments:i64) -> geo::T {
     let count=segments+1;
     let positions=packed::float3::of_owned((0..count).map(|p|p as f64*0.002).collect(),(0..count).map(|p|(p as f64*0.017).sin()).collect(),(0..count).map(|p|(p as f64*0.011).cos()*0.25).collect()).unwrap();
-    let topology=topology::create_owned(count,(0..segments*2).map(|v|v/2+(v&1)).collect(),(0..=segments).map(|p|p*2).collect(),vec![topology::PrimitiveKind::OpenPolyline;segments as usize]).unwrap();
+    let topology=topology::create_owned(count,(0..segments as u32*2).map(|v|v/2+(v&1)).collect(),(0..=segments as u32).map(|p|p*2).collect(),vec![topology::PrimitiveKind::OpenPolyline;segments as usize]).unwrap();
     let source=geo::create(positions,topology,None,None,None).unwrap();
     let source=add(&source,Owner::Point,"curve_sample",Storage::Float(Arc::new((0..count).map(|p|((p%257) as f64).powi(2)).collect())));
     let source=add(&source,Owner::Vertex,"curve_u",Storage::Float(Arc::new((0..segments*2).map(|v|(v&1) as f64).collect())));

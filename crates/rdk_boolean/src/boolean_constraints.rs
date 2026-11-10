@@ -204,13 +204,13 @@ fn concatenate_positions(
     Ok((left.x.len() as i64, x, y, z))
 }
 
-fn all_triangle_points(vertex_points: &[i64], surface: &surface_index::T, offset: i64) -> Vec<i64> {
+fn all_triangle_points(vertex_points: &[u32], surface: &surface_index::T, offset: i64) -> Vec<i64> {
     let triangle_count = surface_index::triangle_count(surface);
     let mut output = vec![0i64; (triangle_count * 3) as usize];
     for triangle in 0..triangle_count {
         for local in 0..3 {
             let vertex = surface_index::view::triangle_vertex(surface, triangle, local);
-            output[(triangle * 3 + local) as usize] = offset + vertex_points[vertex as usize];
+            output[(triangle * 3 + local) as usize] = offset + i64::from(vertex_points[vertex as usize]);
         }
     }
     output
@@ -740,7 +740,7 @@ mod tests {
         let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
         let offsets: Vec<i64> = (0..=(triangles.len() as i64 / 3)).map(|p| p * 3).collect();
         let kinds = vec![PrimitiveKind::Polygon; offsets.len() - 1];
-        let topology = topology::create_owned(points.len() as i64, triangles.to_vec(), offsets, kinds).unwrap();
+        let topology = topology::create_owned(points.len() as i64, topology::narrow("test", triangles).unwrap(), topology::narrow("test", &offsets).unwrap(), kinds).unwrap();
         geometry::create(positions, topology, None, None, None).unwrap()
     }
 

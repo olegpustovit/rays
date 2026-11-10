@@ -110,10 +110,10 @@ impl Heap {
 pub struct SearchParams {
     pub cancel: Option<Arc<cancel::T>>,
     pub radius: f64,
-    pub point_edge_offsets: Arc<[i64]>,
-    pub point_edges: Arc<[i64]>,
-    pub edge_a: Arc<[i64]>,
-    pub edge_b: Arc<[i64]>,
+    pub point_edge_offsets: Arc<[u32]>,
+    pub point_edges: Arc<[u32]>,
+    pub edge_a: Arc<[u32]>,
+    pub edge_b: Arc<[u32]>,
     pub lengths: Arc<Vec<f64>>,
 }
 
@@ -142,7 +142,7 @@ pub fn search(params: &SearchParams, roots: &[i64]) -> Result<(Vec<f64>, Vec<i64
         if distance <= params.radius {
             for slot in params.point_edge_offsets[point as usize]..params.point_edge_offsets[point as usize + 1] {
                 let edge = params.point_edges[slot as usize] as usize;
-                let (a, b) = (params.edge_a[edge], params.edge_b[edge]);
+                let (a, b) = (i64::from(params.edge_a[edge]), i64::from(params.edge_b[edge]));
                 let neighbor = if a == point { b } else { a };
                 if neighbor != point {
                     let candidate = distance + params.lengths[edge];
@@ -166,10 +166,10 @@ pub struct HopSearchParams {
     pub blocked_point: Box<dyn Fn(i64) -> bool + Send + Sync>,
     pub blocked_edge: Box<dyn Fn(i64) -> bool + Send + Sync>,
     pub target: i64,
-    pub point_edge_offsets: Arc<[i64]>,
-    pub point_edges: Arc<[i64]>,
-    pub edge_a: Arc<[i64]>,
-    pub edge_b: Arc<[i64]>,
+    pub point_edge_offsets: Arc<[u32]>,
+    pub point_edges: Arc<[u32]>,
+    pub edge_a: Arc<[u32]>,
+    pub edge_b: Arc<[u32]>,
     pub lengths: Arc<Vec<f64>>,
 }
 
@@ -208,9 +208,9 @@ pub fn hop_search(
         head += 1;
         let eu = element as usize;
         for slot in params.point_edge_offsets[eu]..params.point_edge_offsets[eu + 1] {
-            let edge = params.point_edges[slot as usize];
+            let edge = i64::from(params.point_edges[slot as usize]);
             if !(params.blocked_edge)(edge) {
-                let (a, b) = (params.edge_a[edge as usize], params.edge_b[edge as usize]);
+                let (a, b) = (i64::from(params.edge_a[edge as usize]), i64::from(params.edge_b[edge as usize]));
                 let next = if a == element { b } else { a };
                 if next != element && (next == target || !(params.blocked_point)(next)) {
                     let nu = next as usize;
@@ -264,10 +264,10 @@ pub struct Forest {
 pub fn forest_search(
     valid_edge: &dyn Fn(i64) -> bool,
     capacity: i64,
-    point_edge_offsets: &[i64],
-    point_edges: &[i64],
-    edge_a: &[i64],
-    edge_b: &[i64],
+    point_edge_offsets: &[u32],
+    point_edges: &[u32],
+    edge_a: &[u32],
+    edge_b: &[u32],
     lengths: &[f64],
     roots: &[i64],
 ) -> Forest {
@@ -295,9 +295,9 @@ pub fn forest_search(
         order_count += 1;
         let pu = point as usize;
         for at in point_edge_offsets[pu]..point_edge_offsets[pu + 1] {
-            let edge = point_edges[at as usize];
+            let edge = i64::from(point_edges[at as usize]);
             if valid_edge(edge) {
-                let (a, b) = (edge_a[edge as usize], edge_b[edge as usize]);
+                let (a, b) = (i64::from(edge_a[edge as usize]), i64::from(edge_b[edge as usize]));
                 let neighbor = if a == point { b } else { a };
                 let nu = neighbor as usize;
                 if heap.positions[nu] != -2 {
@@ -332,11 +332,11 @@ mod tests {
     use super::*;
 
     // A path 0-1-2-3 of unit edges plus a long chord 0-3 of length 2.5.
-    fn path() -> (Arc<[i64]>, Arc<[i64]>, Arc<[i64]>, Arc<[i64]>, Arc<Vec<f64>>) {
-        let edge_a: Arc<[i64]> = Arc::from(vec![0, 1, 2, 0]);
-        let edge_b: Arc<[i64]> = Arc::from(vec![1, 2, 3, 3]);
-        let offsets: Arc<[i64]> = Arc::from(vec![0, 2, 4, 6, 8]);
-        let edges: Arc<[i64]> = Arc::from(vec![0, 3, 0, 1, 1, 2, 2, 3]);
+    fn path() -> (Arc<[u32]>, Arc<[u32]>, Arc<[u32]>, Arc<[u32]>, Arc<Vec<f64>>) {
+        let edge_a: Arc<[u32]> = Arc::from(vec![0, 1, 2, 0]);
+        let edge_b: Arc<[u32]> = Arc::from(vec![1, 2, 3, 3]);
+        let offsets: Arc<[u32]> = Arc::from(vec![0, 2, 4, 6, 8]);
+        let edges: Arc<[u32]> = Arc::from(vec![0, 3, 0, 1, 1, 2, 2, 3]);
         let lengths: Arc<Vec<f64>> = Arc::from(vec![1.0, 1.0, 1.0, 2.5]);
         (offsets, edges, edge_a, edge_b, lengths)
     }

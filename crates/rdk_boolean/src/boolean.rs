@@ -411,7 +411,7 @@ mod tests {
         let x: Vec<f64> = points.iter().map(|p| p.0).collect();
         let y: Vec<f64> = points.iter().map(|p| p.1).collect();
         let z: Vec<f64> = points.iter().map(|p| p.2).collect();
-        let topology_value = topology::polygons_owned(points.len() as i64, vertex_points, offsets).unwrap();
+        let topology_value = topology::polygons_owned(points.len() as i64, topology::narrow("test", &vertex_points).unwrap(), topology::narrow("test", &offsets).unwrap()).unwrap();
         geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None)
             .unwrap()
     }
@@ -531,8 +531,8 @@ mod tests {
             positions.x.to_vec(),
             positions.y.to_vec(),
             positions.z.to_vec(),
-            topology_view.vertex_points.to_vec(),
-            topology_view.primitive_offsets.to_vec(),
+            topology_view.vertex_points.iter().map(|&p| i64::from(p)).collect(),
+            topology_view.primitive_offsets.iter().map(|&p| i64::from(p)).collect(),
             topology_view.primitive_kinds.to_vec(),
         )
     }
@@ -799,8 +799,8 @@ mod tests {
                     let last = topology_view.primitive_offsets[primitive + 1];
                     for vertex in first..last {
                         let next = if vertex + 1 == last { first } else { vertex + 1 };
-                        let a = topology_view.vertex_points[vertex as usize];
-                        let b = topology_view.vertex_points[next as usize];
+                        let a = i64::from(topology_view.vertex_points[vertex as usize]);
+                        let b = i64::from(topology_view.vertex_points[next as usize]);
                         let edge = if a < b { (a, b) } else { (b, a) };
                         *edges.entry(edge).or_insert(0) += 1;
                     }

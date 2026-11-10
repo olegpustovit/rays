@@ -219,7 +219,7 @@ pub(crate) struct Data {
     shared: run::Pool,
     ownership: RefCell<Option<run::T>>,
     /// a triangle mesh's corners and per-point corner CSR on the device, by its corners array
-    tables: RefCell<List<Arc<Vec<i64>>, Option<Vec<Buffer>>>>,
+    tables: RefCell<List<Arc<Vec<u32>>, Option<Vec<Buffer>>>>,
 }
 
 #[derive(Clone)]
@@ -295,7 +295,7 @@ pub fn create(_clock: &dyn Fn() -> f64, gpu_: &renderer::renderer::Gpu) -> T {
         s.runners_released = r2.borrow().runners_released + 1;
         *r2.borrow_mut() = s;
     });
-    let tables_release = Box::new(|_: &Arc<Vec<i64>>, v: Option<Vec<Buffer>>| {
+    let tables_release = Box::new(|_: &Arc<Vec<u32>>, v: Option<Vec<Buffer>>| {
         if let Some(bs) = v {
             bs.iter().for_each(|x| {
                 let _ = b::destroy_buffer(x);
@@ -2589,13 +2589,13 @@ pub fn triangle_indices(t: &T, positions: (&Buffer, i64), vertices: (&Buffer, i6
 /// the device holds and the triangles' `corners`, computed on the device and waited for. The
 /// buffer is the caller's until the release. The corner tables are kept by the `corners` array's
 /// identity (8). `None` when the device cannot, or a point has more than 4,096 corners.
-pub fn normals(t: &T, positions: &Buffer, count: i64, corners: &Arc<Vec<i64>>) -> Option<(Buffer, Box<dyn Fn()>)> {
+pub fn normals(t: &T, positions: &Buffer, count: i64, corners: &Arc<Vec<u32>>) -> Option<(Buffer, Box<dyn Fn()>)> {
     let device = device_of(t);
     let queue = queue_of(t);
-    let upload = |label: &str, values: &[i64]| -> Option<Buffer> {
+    let upload = |label: &str, values: &[u32]| -> Option<Buffer> {
         let mut bytes = vec![0u8; 4 * 1.max(values.len())];
         for (i, v) in values.iter().enumerate() {
-            bytes[i * 4..i * 4 + 4].copy_from_slice(&(*v as i32).to_le_bytes());
+            bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
         }
         let buffer = b::create_buffer(&device, BufferDescriptor { label: Some(label.to_owned()), size: bytes.len() as i64, usage: vec![BufferUsage::Storage, BufferUsage::CopyDst] }, None).ok()?;
         if b::write_buffer(&buffer, 0, &bytes).is_ok() {
@@ -2606,7 +2606,7 @@ pub fn normals(t: &T, positions: &Buffer, count: i64, corners: &Arc<Vec<i64>>) -
         }
     };
     let tables = || -> Option<Vec<Buffer>> {
-        let mut offsets = vec![0i64; count as usize + 1];
+        let mut offsets = vec![0u32; count as usize + 1];
         for p in corners.iter() {
             offsets[*p as usize + 1] += 1;
         }
@@ -2617,10 +2617,10 @@ pub fn normals(t: &T, positions: &Buffer, count: i64, corners: &Arc<Vec<i64>>) -
         for p in 1..=count as usize {
             offsets[p] += offsets[p - 1];
         }
-        let mut next: Vec<i64> = offsets[..count as usize].to_vec();
-        let mut vertices = vec![0i64; corners.len()];
+        let mut next: Vec<u32> = offsets[..count as usize].to_vec();
+        let mut vertices = vec![0u32; corners.len()];
         for (v, p) in corners.iter().enumerate() {
-            vertices[next[*p as usize] as usize] = v as i64;
+            vertices[next[*p as usize] as usize] = v as u32;
             next[*p as usize] += 1;
         }
         let made = [upload("Flow display corners", corners), upload("Flow display point offsets", &offsets), upload("Flow display point corners", &vertices)];

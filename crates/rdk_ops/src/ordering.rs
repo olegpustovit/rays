@@ -15,15 +15,15 @@ fn apply_primitives(
     let source_topology = geometry::topology(value);
     let source = topology::view::view(source_topology)?;
     let primitive_count = permutation.len();
-    let mut offsets = vec![0_i64; primitive_count + 1];
+    let mut offsets = vec![0_u32; primitive_count + 1];
     for primitive in 0..primitive_count {
         let source_primitive = permutation[primitive] as usize;
         offsets[primitive + 1] = offsets[primitive] + source.primitive_offsets[source_primitive + 1]
             - source.primitive_offsets[source_primitive];
     }
     let vertex_count = offsets[primitive_count] as usize;
-    let mut vertex_points = vec![0; vertex_count];
-    let mut vertex_map = vec![0; vertex_count];
+    let mut vertex_points = vec![0_u32; vertex_count];
+    let mut vertex_map = vec![0_i64; vertex_count];
     let mut kinds = vec![0_u8; primitive_count];
     if primitive_count > 0 {
         let chunk = (grain / 8).max(1);
@@ -44,7 +44,7 @@ fn apply_primitives(
                 points[at..at + (end - start) as usize]
                     .copy_from_slice(&source.vertex_points[start as usize..end as usize]);
                 for (slot, source_vertex) in map[at..at + (end - start) as usize].iter_mut().zip(start..end) {
-                    *slot = source_vertex;
+                    *slot = i64::from(source_vertex);
                 }
             }
             Ok(())
@@ -58,7 +58,7 @@ fn apply_primitives(
         vertex_points,
         offsets,
         kinds,
-    );
+    )?;
     let mut attributes = Vec::new();
     for item in geometry::attributes(value) {
         attributes.push(match attribute::owner(&item) {

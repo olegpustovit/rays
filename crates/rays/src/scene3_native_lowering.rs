@@ -187,7 +187,7 @@ thread_local! {
 }
 
 struct device_indices_entry {
-    corners: Option<Arc<Vec<i64>>>,
+    corners: Option<Arc<Vec<u32>>>,
     mode: scene3::render_mode,
     count: i64,
     primitive: Primitive,
@@ -875,15 +875,15 @@ fn pack_attributes(count: Option<i64>, view: &mesh::view::packed_view) -> Result
     if finite { Ok(new_bytes(b)) } else { Err(error::Invalid_mesh) }
 }
 
-fn pack_indices(values: &[i64]) -> bytes {
+fn pack_indices(values: &[u32]) -> bytes {
     let mut b = vec![0u8; values.len() * 4];
     for (i, value) in values.iter().enumerate() {
-        b[i * 4..i * 4 + 4].copy_from_slice(&(*value as i32).to_le_bytes());
+        b[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
     }
     new_bytes(b)
 }
 
-fn triangle_indices(mode: mesh::mode, source: &[i64]) -> Option<Vec<i64>> {
+fn triangle_indices(mode: mesh::mode, source: &[u32]) -> Option<Vec<u32>> {
     match mode {
         mesh::mode::Triangles if source.len().is_multiple_of(3) => Some(source.to_vec()),
         mesh::mode::Triangle_strip if source.len() >= 3 => Some(
@@ -915,7 +915,7 @@ fn triangle_indices(mode: mesh::mode, source: &[i64]) -> Option<Vec<i64>> {
     }
 }
 
-fn line_indices(mode: mesh::mode, source: &[i64]) -> Option<Vec<i64>> {
+fn line_indices(mode: mesh::mode, source: &[u32]) -> Option<Vec<u32>> {
     match mode {
         mesh::mode::Lines if source.len().is_multiple_of(2) => Some(source.to_vec()),
         mesh::mode::Line_strip if source.len() >= 2 => Some((0..(source.len() - 1) * 2).map(|i| source[(i / 2) + (i % 2)]).collect()),
@@ -924,8 +924,8 @@ fn line_indices(mode: mesh::mode, source: &[i64]) -> Option<Vec<i64>> {
     }
 }
 
-fn unique_triangle_edges(triangles: &[i64]) -> Vec<i64> {
-    let mut seen: HashSet<(i64, i64)> = HashSet::with_capacity(triangles.len());
+fn unique_triangle_edges(triangles: &[u32]) -> Vec<u32> {
+    let mut seen: HashSet<(u32, u32)> = HashSet::with_capacity(triangles.len());
     let mut edges = Vec::new();
     for i in 0..triangles.len() / 3 {
         let a = triangles[i * 3];
@@ -1013,8 +1013,8 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, 
         match found {
             Some(packed) => Some(packed),
             None => {
-                let made: Option<(Primitive, Vec<i64>)> = if points {
-                    Some((Primitive::PointList, (0..count).collect()))
+                let made: Option<(Primitive, Vec<u32>)> = if points {
+                    Some((Primitive::PointList, (0..count as u32).collect()))
                 } else {
                     triangle_indices(source.mode, &source.indices).map(|indices| {
                         if mode == scene3::render_mode::Wireframe {
@@ -1117,8 +1117,8 @@ fn packed_of_host(mode: scene3::render_mode, m: &mesh::Mesh) -> Result<Rc<packed
     {
         view = mesh::view::packed_view(&mesh::recalculate_normals(m)).map_err(|_| error::Invalid_mesh)?;
     }
-    let native: Option<(Primitive, Vec<i64>)> = match mode {
-        scene3::render_mode::Vertices => Some((Primitive::PointList, (0..view.vertices.x.len() as i64).collect())),
+    let native: Option<(Primitive, Vec<u32>)> = match mode {
+        scene3::render_mode::Vertices => Some((Primitive::PointList, (0..view.vertices.x.len() as u32).collect())),
         scene3::render_mode::Faces | scene3::render_mode::Wireframe => match view.mode {
             mesh::mode::Points => Some((Primitive::PointList, view.indices.to_vec())),
             mesh::mode::Lines | mesh::mode::Line_strip | mesh::mode::Line_loop => {

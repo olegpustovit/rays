@@ -50,7 +50,7 @@ mod tests {
         }
         let count = x.len();
         let positions = packed::float3::of_owned(x, vec![0.0; count], z).unwrap();
-        let topo = topology::polygons_owned(count as i64, vertices, offsets).unwrap();
+        let topo = topology::polygons_owned(count as i64, topology::narrow("test", &vertices).unwrap(), topology::narrow("test", &offsets).unwrap()).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
     }
 

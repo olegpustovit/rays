@@ -218,7 +218,7 @@ fn create_with(
         let vertex_bits = group::view::bits_view(vertex_group);
         selected_primitives = filter_items(cancel_value, grain.max(1), &selected_primitives, &|primitive| {
             let last = topology_view.primitive_offsets[primitive as usize + 1];
-            (topology_view.primitive_offsets[primitive as usize]..last).any(|vertex| selected(vertex_bits, vertex))
+            (topology_view.primitive_offsets[primitive as usize]..last).any(|vertex| selected(vertex_bits, i64::from(vertex)))
         })?;
     }
     let selected_count = selected_primitives.len();
@@ -232,8 +232,8 @@ fn create_with(
             if topology_view.primitive_kinds[primitive as usize] != 0 {
                 return Err(fail(format!("primitive {primitive} is a curve, not a polygon")));
             }
-            let size = topology_view.primitive_offsets[primitive as usize + 1]
-                - topology_view.primitive_offsets[primitive as usize];
+            let size = i64::from(topology_view.primitive_offsets[primitive as usize + 1]
+                - topology_view.primitive_offsets[primitive as usize]);
             if size < 3 {
                 return Err(fail(format!("primitive {primitive} has fewer than three corners")));
             }
@@ -246,9 +246,9 @@ fn create_with(
         let n = triangle_total as usize;
         Triangles {
             primitives: (0..triangle_total).collect(),
-            vertex_a: (0..n).map(|t| topology_view.primitive_offsets[t]).collect(),
-            vertex_b: (0..n).map(|t| topology_view.primitive_offsets[t] + 1).collect(),
-            vertex_c: (0..n).map(|t| topology_view.primitive_offsets[t] + 2).collect(),
+            vertex_a: (0..n).map(|t| i64::from(topology_view.primitive_offsets[t])).collect(),
+            vertex_b: (0..n).map(|t| i64::from(topology_view.primitive_offsets[t]) + 1).collect(),
+            vertex_c: (0..n).map(|t| i64::from(topology_view.primitive_offsets[t]) + 2).collect(),
         }
     } else {
         let average = if selected_count == 0 {
@@ -376,9 +376,9 @@ fn create_with(
                 let s = slot as usize;
                 let at = s - first_slot as usize;
                 let primitive = triangles.primitives[s];
-                let a = vertex_points[triangles.vertex_a[s] as usize];
-                let b = vertex_points[triangles.vertex_b[s] as usize];
-                let c = vertex_points[triangles.vertex_c[s] as usize];
+                let a = i64::from(vertex_points[triangles.vertex_a[s] as usize]);
+                let b = i64::from(vertex_points[triangles.vertex_b[s] as usize]);
+                let c = i64::from(vertex_points[triangles.vertex_c[s] as usize]);
                 let (ax, ay, az) = (positions.x[a as usize], positions.y[a as usize], positions.z[a as usize]);
                 let (bx, by, bz) = (positions.x[b as usize], positions.y[b as usize], positions.z[b as usize]);
                 let (cx, cy, cz) = (positions.x[c as usize], positions.y[c as usize], positions.z[c as usize]);
@@ -439,15 +439,15 @@ fn create_with(
         let mut max_d = [f64::NEG_INFINITY; 4];
         let first_triangle = order[0] as usize;
         let mut common = [
-            vertex_points[triangles.vertex_a[first_triangle] as usize],
-            vertex_points[triangles.vertex_b[first_triangle] as usize],
-            vertex_points[triangles.vertex_c[first_triangle] as usize],
+            i64::from(vertex_points[triangles.vertex_a[first_triangle] as usize]),
+            i64::from(vertex_points[triangles.vertex_b[first_triangle] as usize]),
+            i64::from(vertex_points[triangles.vertex_c[first_triangle] as usize]),
         ];
         for &item in order {
             let triangle = item as usize;
-            let a = vertex_points[triangles.vertex_a[triangle] as usize];
-            let b = vertex_points[triangles.vertex_b[triangle] as usize];
-            let c = vertex_points[triangles.vertex_c[triangle] as usize];
+            let a = i64::from(vertex_points[triangles.vertex_a[triangle] as usize]);
+            let b = i64::from(vertex_points[triangles.vertex_b[triangle] as usize]);
+            let c = i64::from(vertex_points[triangles.vertex_c[triangle] as usize]);
             for slot in common.iter_mut() {
                 if !(*slot < 0 || *slot == a || *slot == b || *slot == c) {
                     *slot = -1;
@@ -624,7 +624,7 @@ fn corner_point(surface: &T, triangle: usize, local: i64) -> i64 {
         1 => surface.vertex_b[triangle],
         _ => surface.vertex_c[triangle],
     };
-    surface.topology.vertex_points[vertex as usize]
+    i64::from(surface.topology.vertex_points[vertex as usize])
 }
 
 fn triangle_strictly_on_one_side(plane_surface: &T, plane: usize, triangle_surface: &T, triangle: usize) -> bool {
@@ -661,16 +661,16 @@ fn triangle_has_point(surface: &T, triangle: usize, point: i64) -> bool {
         return false;
     }
     let points = &surface.topology.vertex_points;
-    point == points[surface.vertex_a[triangle] as usize]
-        || point == points[surface.vertex_b[triangle] as usize]
-        || point == points[surface.vertex_c[triangle] as usize]
+    point == i64::from(points[surface.vertex_a[triangle] as usize])
+        || point == i64::from(points[surface.vertex_b[triangle] as usize])
+        || point == i64::from(points[surface.vertex_c[triangle] as usize])
 }
 
 fn triangles_share_point(left_surface: &T, left_triangle: usize, right_surface: &T, right_triangle: usize) -> bool {
     let points = &left_surface.topology.vertex_points;
-    triangle_has_point(right_surface, right_triangle, points[left_surface.vertex_a[left_triangle] as usize])
-        || triangle_has_point(right_surface, right_triangle, points[left_surface.vertex_b[left_triangle] as usize])
-        || triangle_has_point(right_surface, right_triangle, points[left_surface.vertex_c[left_triangle] as usize])
+    triangle_has_point(right_surface, right_triangle, i64::from(points[left_surface.vertex_a[left_triangle] as usize]))
+        || triangle_has_point(right_surface, right_triangle, i64::from(points[left_surface.vertex_b[left_triangle] as usize]))
+        || triangle_has_point(right_surface, right_triangle, i64::from(points[left_surface.vertex_c[left_triangle] as usize]))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1007,7 +1007,7 @@ fn query_closest(value: &T, qx: f64, qy: f64, qz: f64, maximum: f64, scratch: &m
 pub fn closest_many_into(
     cancel_value: Option<&cancel::T>,
     selection: Option<&group::T>,
-    position_indices: Option<&[i64]>,
+    position_indices: Option<&[u32]>,
     grain: i64,
     value: &T,
     queries: &packed::float3::T,
@@ -1031,7 +1031,7 @@ pub fn closest_many_into(
         }
     }
     if let Some(values) = position_indices {
-        if values.iter().any(|&point| point < 0 || point >= position_count) {
+        if values.iter().any(|&point| i64::from(point) >= position_count) {
             return Err(invalid_argument("Surface_index: query position index is out of bounds"));
         }
     }
@@ -1070,9 +1070,9 @@ pub fn closest_many_into(
                 cancel::poll(cancel_value, query, 4095)?;
                 if selection.is_none_or(|selected_group| group::mem(query, selected_group)) {
                     let point = match position_indices {
-                        None => query,
-                        Some(values) => values[query as usize],
-                    } as usize;
+                        None => query as usize,
+                        Some(values) => values[query as usize] as usize,
+                    };
                     let (qx, qy, qz) = (query_view.x[point], query_view.y[point], query_view.z[point]);
                     if !(qx.is_finite() && qy.is_finite() && qz.is_finite()) {
                         return Err(invalid_argument("Surface_index: query positions must be finite"));
@@ -1319,7 +1319,7 @@ pub mod view {
 
     /// Original source point index referenced by one internal triangle corner.
     pub fn triangle_point(value: &T, triangle: i64, local: i64) -> i64 {
-        value.topology.vertex_points[triangle_vertex(value, triangle, local) as usize]
+        i64::from(value.topology.vertex_points[triangle_vertex(value, triangle, local) as usize])
     }
 
     /// Original source primitive for one internal triangle.
@@ -1763,7 +1763,7 @@ mod tests {
         let y = vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0];
         let z = vec![0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0];
         let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
-        let topo = topology::view::create_validated_owned(7, vec![0, 1, 2, 3, 4, 5, 6], vec![0, 4, 7], vec![0, 0]);
+        let topo = topology::view::create_validated_owned(7, vec![0, 1, 2, 3, 4, 5, 6], vec![0, 4, 7], vec![0, 0]).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
     }
     #[test]
@@ -1857,7 +1857,7 @@ mod tests {
         let index = create(None, None, None, Some(&vertices), Some(VertexSelection::AnyTriangleVertex), &geom).unwrap();
         assert!(triangle_count(&index) >= 2);
         let flat = packed::float3::view::of_owned_exn(vec![0.0, 1.0, 2.0], vec![0.0; 3], vec![0.0; 3]).unwrap();
-        let topo = topology::view::create_validated_owned(3, vec![0, 1, 2], vec![0, 3], vec![0]);
+        let topo = topology::view::create_validated_owned(3, vec![0, 1, 2], vec![0, 3], vec![0]).unwrap();
         let degenerate = geometry::create(flat, topo, None, None, None).unwrap();
         let failure = create(None, None, None, None, None, &degenerate).err().unwrap();
         assert_eq!(error::message(&failure), "primitive 0 is degenerate");
@@ -1887,16 +1887,16 @@ mod ported_tests {
             y[extra + at] = py;
         }
         let primitive_count = ring + 2;
-        let mut vertices = vec![0_i64; primitive_count * 3];
+        let mut vertices = vec![0_u32; primitive_count * 3];
         for primitive in 0..ring {
             vertices[primitive * 3] = 0;
-            vertices[primitive * 3 + 1] = 1 + primitive as i64;
-            vertices[primitive * 3 + 2] = 1 + ((primitive + 1) % ring) as i64;
+            vertices[primitive * 3 + 1] = 1 + primitive as u32;
+            vertices[primitive * 3 + 2] = 1 + ((primitive + 1) % ring) as u32;
         }
         for at in 0..6 {
-            vertices[ring * 3 + at] = (extra + at) as i64;
+            vertices[ring * 3 + at] = (extra + at) as u32;
         }
-        let offsets: Vec<i64> = (0..=primitive_count as i64).map(|value| value * 3).collect();
+        let offsets: Vec<u32> = (0..=primitive_count as u32).map(|value| value * 3).collect();
         let topology_value = topology::polygons_owned(point_count as i64, vertices, offsets).unwrap();
         let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
         geometry::create(positions, topology_value, None, None, None).unwrap()
@@ -1972,7 +1972,7 @@ mod attribute_suite_tests {
     fn single_polygon(x: Vec<f64>, y: Vec<f64>) -> geometry::T {
         let count = x.len() as i64;
         let positions = packed::float3::view::of_owned_exn(x, y, vec![0.0; count as usize]).unwrap();
-        let topo = topology::polygons_owned(count, (0..count).collect(), vec![0, count]).unwrap();
+        let topo = topology::polygons_owned(count, (0..count as u32).collect(), vec![0, count as u32]).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
     }
 
