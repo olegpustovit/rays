@@ -515,7 +515,7 @@ impl CommandBuffer {
         queue.0.lifetime.ensure_live(operation)?;
         let raw = metal_sys::registry::command_buffer_create(queue.raw()).map_err(|failure| sys_error(operation, failure))?;
         queue.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
-        Ok(Self(Arc::new(CommandBufferInner { raw, lifetime: Lifetime::new(), queue: queue.clone(), queue_attached: AtomicBool::new(true), resources: RefCell::new(Vec::new()) })))
+        Ok(Self(Arc::new(CommandBufferInner { raw, lifetime: Lifetime::new(), queue: queue.clone(), queue_attached: AtomicBool::new(true), resources: RefCell::new(Vec::with_capacity(16)) })))
     }
     pub fn device(&self) -> &Device { self.0.queue.device() }
 
