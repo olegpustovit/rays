@@ -60,7 +60,10 @@ pub fn all_draws_and_errors() {
             Ok(_) => panic!("{text} rendered"),
         }
     }
-    let invalid = ok(flow_eval::static_eval(&doc(r#"(workspace invalid (graph g :context draw (draw/background "invalid")))"#).checked));
+    let errors = rays_editor::workspace::load(None, vec![], None, r#"(workspace invalid (graph g :context draw (draw/background "invalid")))"#)
+        .err().expect("invalid literal color is rejected when checking");
+    assert!(errors.iter().any(|error| error.code == "E_TYPE"));
+    let invalid = ok(flow_eval::static_eval(&doc(r#"(workspace invalid (graph g :context draw (let [color "invalid"] (draw/background color))))"#).checked));
     let value = invalid.results.iter().find(|(n, _)| n == "g").unwrap().1.clone();
     match render_once(&invalid.plan, &value, &input::at_time(0.), (800, 600)) {
         Err(d) => assert!(d.code == "E_DRAW_COLOR"),

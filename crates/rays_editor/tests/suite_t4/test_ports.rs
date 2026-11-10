@@ -128,7 +128,7 @@ pub fn moving_circles() {
     }
     let text = r##"(workspace moving
  (graph picture :context draw (let* [phase (state [p 0.0] (+ p (frame/dt)))
-  positions (map (fn [i] [(+ (mod i 640) (* 5 (sin phase))) (mod (int/div i 640) 360) 0]) (array/range 10000))]
+  positions (map (fn [i] [(+ (mod i 640) (* 5 (sin phase))) (mod (int/div i 640) 360) 0]) (array/range 10000 :type int))]
   (draw/merge (draw/background "#111827") (draw/circles positions :radius 2.0 :fill "#22d3ee"))))
  (graph window :context settings (settings/config :width 640 :height 360)))"##;
     let workspace = workspace::load(None, vec![], None, text).unwrap_or_else(|ds| panic!("{ds:?}"));

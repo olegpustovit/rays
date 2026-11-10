@@ -3,7 +3,11 @@
 (workspace recursive_rectangles
 
   (defn scheme-hash :context value [(scheme : int)]
-    (int/and (int/add (int/mul (int/add scheme 1) 1103515245) 12345) 4611686018427387903))
+    (-> scheme
+        (int/add 1)
+        (int/mul 1103515245)
+        (int/add 12345)
+        (int/and 4611686018427387903)))
 
   (defn palette-color :context value [(scheme : int) (tile : int)]
     (let* [hash (-> tile
@@ -68,7 +72,8 @@
                             (array/range)))]
       (map (fn [i]
              (array/nth raw
-                        (int/add (int/mul (int (array/nth kept (int/div (int i) 2))) 2)
+                        (int/add (int/mul (int (array/nth kept (int/div (int i) 2)))
+                                          2)
                                  (int/mod (int i) 2))))
            (array/range (* (array/count kept) 2)))))
 
