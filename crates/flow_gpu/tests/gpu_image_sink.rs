@@ -79,7 +79,7 @@ impl b::DriverRenderEncoder for Wrapped<dyn b::DriverRenderEncoder> {
         render_set_pipeline(pipeline: b::Token) -> Result<(), E>;
         set_stage_buffer(stage: b::ShaderStage, index: i64, offset: i64, buffer: b::Token) -> Result<(), E>;
         set_stage_texture(stage: b::ShaderStage, index: i64, texture: b::Token) -> Result<(), E>;
-        set_stage_sampler(stage: b::ShaderStage, index: i64, sampler: b::Token) -> Result<(), E>;
+        set_stage_sampler(stage: b::ShaderStage, index: i64, sampler: &dyn b::DriverSampler) -> Result<(), E>;
         set_viewport(rect: ogpu_core::render_pass::AdmittedViewport) -> Result<(), E>;
         set_scissor(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
         set_cull(cull: ogpu_core::render_pass::Cull) -> Result<(), E>;

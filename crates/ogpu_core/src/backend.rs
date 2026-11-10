@@ -193,7 +193,7 @@ pub trait DriverRenderEncoder {
     fn render_set_pipeline(&self, pipeline: Token) -> Result<(), Error>;
     fn set_stage_buffer(&self, stage: ShaderStage, index: i64, offset: i64, buffer: Token) -> Result<(), Error>;
     fn set_stage_texture(&self, stage: ShaderStage, index: i64, texture: Token) -> Result<(), Error>;
-    fn set_stage_sampler(&self, stage: ShaderStage, index: i64, sampler: Token) -> Result<(), Error>;
+    fn set_stage_sampler(&self, stage: ShaderStage, index: i64, sampler: &dyn DriverSampler) -> Result<(), Error>;
     fn set_viewport(&self, rect: crate::render_pass::AdmittedViewport) -> Result<(), Error>;
     fn set_scissor(&self, rect: Rect) -> Result<(), Error>;
     fn set_cull(&self, cull: Cull) -> Result<(), Error>;
@@ -209,7 +209,7 @@ pub trait DriverRenderEncoder {
 }
 
 pub trait DriverSampler {
-    fn sampler_token(&self) -> Token;
+    fn as_any(&self) -> &dyn std::any::Any;
     fn destroy_sampler(&self) -> Result<(), Error>;
 }
 
@@ -226,7 +226,7 @@ pub trait DriverArgument {
     fn argument_length(&self) -> i64;
     fn argument_alignment(&self) -> i64;
     fn argument_texture(&self, buffer: Token, offset: i64, slot: i64, texture: Token) -> Result<(), Error>;
-    fn argument_sampler(&self, buffer: Token, offset: i64, slot: i64, sampler: Token) -> Result<(), Error>;
+    fn argument_sampler(&self, buffer: Token, offset: i64, slot: i64, sampler: &dyn DriverSampler) -> Result<(), Error>;
     fn destroy_argument(&self) -> Result<(), Error>;
 }
 
@@ -392,7 +392,7 @@ pub struct BlitEncoder(Rc<BlitInner>);
 struct BlitInner { raw: RefCell<Option<Box<dyn DriverBlitEncoder>>>, commands: Commands, open: Cell<bool> }
 #[derive(Clone)]
 pub struct Sampler(Rc<SamplerInner>);
-struct SamplerInner { raw: RefCell<Option<Box<dyn DriverSampler>>>, token: Token, device: Device, dead: Cell<bool> }
+struct SamplerInner { raw: RefCell<Option<Box<dyn DriverSampler>>>, device: Device, dead: Cell<bool> }
 #[derive(Clone)]
 pub struct Icb(Rc<IcbInner>);
 struct IcbInner { raw: RefCell<Option<Box<dyn DriverIcb>>>, token: Token, device: Device, capacity: i64, dead: Cell<bool> }
@@ -1481,7 +1481,7 @@ pub fn create_sampler(device: &Device, descriptor: SamplerDescriptor) -> Result<
     let descriptor = crate::validation::admit_sampler(crate::validation::SamplerProfile::ordinary(descriptor))?;
     let raw = device.0.raw().create_sampler(&descriptor)?;
     device.0.children.set(device.0.children.get() + 1);
-    Ok(Sampler(Rc::new(SamplerInner { token: raw.sampler_token(), raw: RefCell::new(Some(raw)), device: device.clone(), dead: Cell::new(false) })))
+    Ok(Sampler(Rc::new(SamplerInner { raw: RefCell::new(Some(raw)), device: device.clone(), dead: Cell::new(false) })))
 }
 pub fn destroy_sampler(sampler: &Sampler) -> Result<(), Error> {
     if sampler.0.dead.get() { return Ok(()); }
@@ -1653,7 +1653,7 @@ pub fn argument_sampler(argument: &Argument, buffer: &Buffer, offset: i64, slot:
     if slot < 0 { return Err(make_error(OP, ErrorKind::InvalidArgument, "argument slot is negative")); }
     if sampler.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "sampler is destroyed")); }
     if !Rc::ptr_eq(&sampler.0.device.0, &argument.0.device.0) { return Err(make_error(OP, ErrorKind::CrossDevice, "sampler belongs to another device")); }
-    argument.0.raw().argument_sampler(buffer.resource.0.token, offset, slot, sampler.0.token)
+    argument.0.raw().argument_sampler(buffer.resource.0.token, offset, slot, &*sampler.0.raw())
 }
 pub fn destroy_argument(argument: &Argument) -> Result<(), Error> {
     if argument.0.dead.get() { return Ok(()); }
@@ -1810,7 +1810,7 @@ pub fn set_stage_sampler(encoder: &RenderEncoder, stage: ShaderStage, index: i64
     if !Rc::ptr_eq(&sampler.0.device.0, &render_device(encoder).0) {
         return Err(make_error(OP, ErrorKind::CrossDevice, "sampler belongs to another device"));
     }
-    encoder.0.raw().set_stage_sampler(stage, index, sampler.0.token)
+    encoder.0.raw().set_stage_sampler(stage, index, &*sampler.0.raw())
 }
 pub fn set_viewport(encoder: &RenderEncoder, rect: Rect) -> Result<(), Error> {
     const OP: &str = "Backend.set_viewport";
@@ -2253,7 +2253,7 @@ mod ownership_tests {
         let argument = Argument(Rc::new(ArgumentInner {
             raw: RefCell::new(None), length: 0, alignment: 1, device: device.clone(), dead: Cell::new(false),
         }));
-        let sampler = Sampler(Rc::new(SamplerInner { raw: RefCell::new(None), token: 8, device: device.clone(), dead: Cell::new(false) }));
+        let sampler = Sampler(Rc::new(SamplerInner { raw: RefCell::new(None), device: device.clone(), dead: Cell::new(false) }));
         reject(ErrorKind::InvalidArgument, argument_sampler(&argument, &buffer, 0, -1, &sampler));
 
         for wrong in [

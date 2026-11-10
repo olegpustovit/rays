@@ -38,7 +38,6 @@ pub struct IcbEntry {
 pub struct Tables {
     pub resources: RefCell<HashMap<i64, Resource>>,
     pub pipelines: RefCell<HashMap<i64, Pipeline>>,
-    pub samplers: RefCell<HashMap<i64, Sampler>>,
     pub accels: RefCell<HashMap<i64, Acceleration>>,
     pub icbs: RefCell<HashMap<i64, Rc<IcbEntry>>>,
     /// Every depth-stencil state, made with the device (`create_depth_states`): eight comparisons
@@ -52,7 +51,6 @@ impl Tables {
         Tables {
             resources: RefCell::new(HashMap::new()),
             pipelines: RefCell::new(HashMap::new()),
-            samplers: RefCell::new(HashMap::new()),
             accels: RefCell::new(HashMap::new()),
             icbs: RefCell::new(HashMap::new()),
             depth_states: RefCell::new(Vec::new()),
@@ -208,10 +206,6 @@ impl CommandContext {
 
     pub fn pipeline(&self, token: i64) -> Option<Pipeline> {
         self.tables.pipelines.borrow().get(&token).cloned()
-    }
-
-    pub fn sampler(&self, token: i64) -> Option<Sampler> {
-        self.tables.samplers.borrow().get(&token).cloned()
     }
 
     pub fn icb(&self, token: i64) -> Option<native::IndirectCommandBuffer> {

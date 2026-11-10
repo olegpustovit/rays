@@ -11,7 +11,7 @@ use crate::native::{
     RenderEncoder, RenderPassDescriptor,
 };
 use ogpu_core::{
-    backend::{DepthState, DriverBatchDraw, DriverRenderEncoder, DriverRenderTarget, ShaderStage, Token, Winding as OgpuWinding},
+    backend::{DepthState, DriverBatchDraw, DriverRenderEncoder, DriverRenderTarget, DriverSampler, ShaderStage, Token, Winding as OgpuWinding},
     error::ErrorKind,
     render_pass::{Cull, IndexType as OgpuIndex, Primitive as OgpuPrimitive, Rect},
 };
@@ -180,12 +180,12 @@ impl DriverRenderEncoder for Render {
         }
     }
 
-    fn set_stage_sampler(&self, stage: ShaderStage, index: i64, token: Token) -> Result<(), Error> {
+    fn set_stage_sampler(&self, stage: ShaderStage, index: i64, sampler: &dyn DriverSampler) -> Result<(), Error> {
         let c = &self.context;
-        let Some(sampler) = c.sampler(token) else {
+        let Some(sampler) = sampler.as_any().downcast_ref::<crate::backend::MetalSampler>().map(|s| &s.value) else {
             return Err(fail(c.operation, ErrorKind::InvalidArgument, "sampler graph is incomplete"));
         };
-        c.keep_sampler(&sampler)?;
+        c.keep_sampler(sampler)?;
         match stage {
             ShaderStage::Vertex => self.encoder.set_vertex_sampler(index as usize, sampler.metal()),
             ShaderStage::Fragment => self.encoder.set_fragment_sampler(index as usize, sampler.metal()),

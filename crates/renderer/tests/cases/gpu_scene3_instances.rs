@@ -419,7 +419,7 @@ impl backend::DriverRenderEncoder for Observed<dyn backend::DriverRenderEncoder>
     forward! {
         render_set_pipeline(pipeline: backend::Token) -> Result<(), E>;
         set_stage_texture(stage: backend::ShaderStage, index: i64, texture: backend::Token) -> Result<(), E>;
-        set_stage_sampler(stage: backend::ShaderStage, index: i64, sampler: backend::Token) -> Result<(), E>;
+        set_stage_sampler(stage: backend::ShaderStage, index: i64, sampler: &dyn backend::DriverSampler) -> Result<(), E>;
         set_viewport(rect: ogpu_core::render_pass::AdmittedViewport) -> Result<(), E>;
         set_scissor(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
         set_cull(cull: Cull) -> Result<(), E>;

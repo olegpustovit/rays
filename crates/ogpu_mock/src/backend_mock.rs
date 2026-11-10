@@ -530,7 +530,7 @@ impl DriverLibrary for MockLibrary {
 struct MockSampler { c: Shared, id: i64 }
 
 impl DriverSampler for MockSampler {
-    fn sampler_token(&self) -> i64 { self.id }
+    fn as_any(&self) -> &dyn std::any::Any { self }
     fn destroy_sampler(&self) -> Result<(), Error> {
         self.c.borrow_mut().pipelines -= 1;
         add(&self.c, format!("destroy-sampler:{}", self.id));

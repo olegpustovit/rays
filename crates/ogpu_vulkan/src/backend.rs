@@ -178,7 +178,6 @@ struct Dev {
     buffers: RefCell<HashMap<i64, Rc<BufferEntry>>>,
     textures: RefCell<HashMap<i64, Rc<TextureEntry>>>,
     pipelines: RefCell<HashMap<i64, Rc<PipelineEntry>>>,
-    samplers: RefCell<HashMap<i64, Rc<vk::Sampler>>>,
     icbs: RefCell<HashMap<i64, Rc<RefCell<Vec<IcbCommand>>>>>,
     arguments: RefCell<HashMap<(i64, i64), ArgumentCell>>,
     frames: RefCell<HashMap<i64, Rc<RefCell<Option<vk::Surface>>>>>,
@@ -217,12 +216,6 @@ impl Dev {
         match self.pipelines.borrow().get(&id) {
             Some(pipeline) => Ok(pipeline.clone()),
             None => Err(fail(op, ErrorKind::InvalidArgument, "pipeline graph is incomplete")),
-        }
-    }
-    fn find_sampler(&self, op: &str, id: Token) -> Result<Rc<vk::Sampler>, Error> {
-        match self.samplers.borrow().get(&id) {
-            Some(sampler) => Ok(sampler.clone()),
-            None => Err(fail(op, ErrorKind::InvalidArgument, "sampler graph is incomplete")),
         }
     }
     fn find_accel(&self, op: &str, id: Token) -> Result<Rc<vk::AccelerationStructure>, Error> {
@@ -585,22 +578,26 @@ fn create_sampler(dev: &Rc<Dev>, descriptor: &ogpu_core::validation::AdmittedSam
         })
     .map_err(|failure| of_vk(OP, failure))?;
     live_add(1);
-    let id = dev.token();
-    dev.samplers.borrow_mut().insert(id, Rc::new(native));
-    Ok(Box::new(OwnedSampler { dev: dev.clone(), id }))
+    Ok(Box::new(OwnedSampler { native: Rc::new(native) }))
 }
 
 struct OwnedSampler {
-    dev: Rc<Dev>,
-    id: Token,
+    native: Rc<vk::Sampler>,
+}
+
+/// The native sampler behind a portable one, or the graph-incomplete error.
+fn native_sampler(op: &str, sampler: &dyn DriverSampler) -> Result<Rc<vk::Sampler>, Error> {
+    match sampler.as_any().downcast_ref::<OwnedSampler>() {
+        Some(sampler) => Ok(sampler.native.clone()),
+        None => Err(fail(op, ErrorKind::InvalidArgument, "sampler graph is incomplete")),
+    }
 }
 
 impl DriverSampler for OwnedSampler {
-    fn sampler_token(&self) -> Token {
-        self.id
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
     fn destroy_sampler(&self) -> Result<(), Error> {
-        self.dev.samplers.borrow_mut().remove(&self.id);
         live_add(-1);
         Ok(())
     }
@@ -677,8 +674,8 @@ impl DriverArgument for ArgumentSlices {
         self.dev.arguments.borrow_mut().entry((buffer, offset)).or_default().0 = Some(texture);
         Ok(())
     }
-    fn argument_sampler(&self, buffer: Token, offset: i64, _slot: i64, sampler: Token) -> Result<(), Error> {
-        let sampler = self.dev.find_sampler(ARGUMENT_OP, sampler)?;
+    fn argument_sampler(&self, buffer: Token, offset: i64, _slot: i64, sampler: &dyn DriverSampler) -> Result<(), Error> {
+        let sampler = native_sampler(ARGUMENT_OP, sampler)?;
         self.dev.arguments.borrow_mut().entry((buffer, offset)).or_default().1 = Some(sampler);
         Ok(())
     }
@@ -1300,8 +1297,8 @@ impl DriverRenderEncoder for Render {
         let entry = self.cmds.dev.find_texture(QUEUE_OP, id)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.set_texture(index as u32, &entry.texture))
     }
-    fn set_stage_sampler(&self, _stage: ShaderStage, index: i64, id: Token) -> Result<(), Error> {
-        let sampler = self.cmds.dev.find_sampler(QUEUE_OP, id)?;
+    fn set_stage_sampler(&self, _stage: ShaderStage, index: i64, sampler: &dyn DriverSampler) -> Result<(), Error> {
+        let sampler = native_sampler(QUEUE_OP, sampler)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.set_sampler(index as u32, &sampler))
     }
     fn set_viewport(&self, rect: ogpu_core::render_pass::AdmittedViewport) -> Result<(), Error> {
@@ -1716,7 +1713,6 @@ impl DriverDevice for VulkanDevice {
         self.dev.buffers.borrow_mut().clear();
         self.dev.textures.borrow_mut().clear();
         self.dev.pipelines.borrow_mut().clear();
-        self.dev.samplers.borrow_mut().clear();
         self.dev.icbs.borrow_mut().clear();
         self.dev.arguments.borrow_mut().clear();
         self.dev.frames.borrow_mut().clear();
@@ -1749,7 +1745,6 @@ fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> Resu
         buffers: RefCell::default(),
         textures: RefCell::default(),
         pipelines: RefCell::default(),
-        samplers: RefCell::default(),
         icbs: RefCell::default(),
         arguments: RefCell::default(),
         frames: RefCell::default(),

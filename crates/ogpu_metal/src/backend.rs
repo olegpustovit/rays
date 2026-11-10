@@ -291,18 +291,15 @@ fn instance_layout(kind: InstanceKind) -> Vec<i64> {
     metal_sys::native::acceleration::instance_layout(kind).expect("Metal instance layout").to_vec()
 }
 
-struct MetalSampler {
-    dev: Rc<Dev>,
-    value: sampler::Sampler,
-    id: i64,
+pub(crate) struct MetalSampler {
+    pub(crate) value: sampler::Sampler,
 }
 
 impl DriverSampler for MetalSampler {
-    fn sampler_token(&self) -> Token {
-        self.id
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
     fn destroy_sampler(&self) -> Result<(), Error> {
-        self.dev.t.samplers.borrow_mut().remove(&self.id);
         self.value.destroy()?;
         Ok(())
     }
@@ -310,9 +307,7 @@ impl DriverSampler for MetalSampler {
 
 fn create_sampler(dev: &Rc<Dev>, descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn DriverSampler>, Error> {
     let value = sampler::create(&dev.device, descriptor)?;
-    let id = dev.t.token();
-    dev.t.samplers.borrow_mut().insert(id, value.clone());
-    Ok(Box::new(MetalSampler { dev: dev.clone(), value, id }))
+    Ok(Box::new(MetalSampler { value }))
 }
 
 fn create_render_pipeline(dev: &Rc<Dev>, _options: RenderPipelineOptions, descriptor: &RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn DriverPipeline>, Error> {
@@ -437,9 +432,9 @@ impl DriverArgument for MetalArgument {
             _ => Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "texture graph is incomplete")),
         }
     }
-    fn argument_sampler(&self, buffer: Token, offset: i64, slot: i64, sampler: Token) -> Result<(), Error> {
-        match self.dev.t.samplers.borrow().get(&sampler) {
-            Some(sampler) => self.encode(buffer, offset, native::ShaderArgumentResource::Sampler(sampler.metal().clone()), slot),
+    fn argument_sampler(&self, buffer: Token, offset: i64, slot: i64, sampler: &dyn DriverSampler) -> Result<(), Error> {
+        match sampler.as_any().downcast_ref::<MetalSampler>() {
+            Some(sampler) => self.encode(buffer, offset, native::ShaderArgumentResource::Sampler(sampler.value.metal().clone()), slot),
             None => Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "sampler graph is incomplete")),
         }
     }
