@@ -995,7 +995,7 @@ int32_t rv_commit_present(void *commands, void *surface, void *source, uint64_t 
   VkImageBlit blit{};blit.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};blit.srcOffsets[1]={static_cast<int32_t>(t->width),static_cast<int32_t>(t->height),1};
   blit.dstSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};blit.dstOffsets[1]={static_cast<int32_t>(s->extent.width),static_cast<int32_t>(s->extent.height),1};
   vkCmdBlitImage(c->cb,t->image,VK_IMAGE_LAYOUT_GENERAL,image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&blit,VK_FILTER_NEAREST);
-  b.srcStageMask=VK_PIPELINE_STAGE_2_BLIT_BIT;b.srcAccessMask=VK_ACCESS_2_TRANSFER_WRITE_BIT;b.dstStageMask=VK_PIPELINE_STAGE_2_NONE;b.dstAccessMask=0;
+  b.srcStageMask=VK_PIPELINE_STAGE_2_BLIT_BIT;b.srcAccessMask=VK_ACCESS_2_TRANSFER_WRITE_BIT;b.dstStageMask=VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;b.dstAccessMask=0;
   b.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;b.newLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;vkCmdPipelineBarrier2(c->cb,&info);
   VkSemaphore rendered=s->rendered[idx];int64_t e=commit_cmd(c,s->current_semaphore,rendered);if(e<0)return static_cast<int32_t>(e);*committed=true;
   VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};pi.waitSemaphoreCount=1;pi.pWaitSemaphores=&rendered;pi.swapchainCount=1;pi.pSwapchains=&s->swapchain;pi.pImageIndices=&idx;

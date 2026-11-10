@@ -328,6 +328,8 @@ fn gpu_conformance_transfer_and_compute() {
     compact[8..].copy_from_slice(&padded[256..264]);
     require(be::read_texture(&first, 8).unwrap_or_else(|failure| die(failure)) == compact, "uploaded texture differs from its padded rows");
     let inset = be::create_texture(&device, TextureDescriptor { width: 4, height: 4, ..round_trip }).unwrap_or_else(|failure| die(failure));
+    // New image memory is undefined (lavapipe recycles freed memory), so start from zeros.
+    be::write_texture(&inset, None, Origin { x: 0, y: 0, z: 0 }, Extent { width: 4, height: 4, depth: 1 }, 16, &[0u8; 64]).unwrap_or_else(|failure| die(failure));
     blit(&|encoder| {
         be::buffer_to_texture(encoder, &upload, None, 256, 512, &inset, None, Some(Origin { x: 1, y: 1, z: 0 }), extent).unwrap_or_else(|failure| die(failure))
     });
