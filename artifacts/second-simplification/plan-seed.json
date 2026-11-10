@@ -149,7 +149,7 @@
   },
   "Z7": {
     "status": "active",
-    "note": "Baseline at 9deaa70d: actual warmed Orrery567lower calls; zero-call guard fails before implementation"
+    "note": "WIP body slots and residual interning: data/loop/branch/nested-bound guards pass; baseline567 warmed Orrery lower calls retained"
   },
   "Z8": {
     "status": "done",
@@ -205,7 +205,7 @@
   },
   "G1": {
     "status": "active",
-    "note": "ba056fc5 plus prior stages \u2014 immutable Core geometry admission shared by Driver/Sys; raw storage prepared once; 484 net lines removed"
+    "note": "ba056fc5 9a6ddfd1 plus prior stages \u2014 immutable geometry and output proofs; one actual native build/refit size query; Vulkan32/64 write bug repaired"
   },
   "G2": {
     "status": "done",
