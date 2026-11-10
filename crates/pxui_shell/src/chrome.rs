@@ -28,18 +28,18 @@ pub enum Intent {
     /// undock, move/resize, or dock a panel
     Window(Path, Option<Bounds>),
     /// Transient bounds; `true` commits the released gesture.
-    Window_drag(Path, Bounds, bool),
+    WindowDrag(Path, Bounds, bool),
     /// a panel drag; `true` on release
     Dragging(Path, bool),
-    Dock_panel(Path, Path, Side),
+    DockPanel(Path, Path, Side),
     /// the header menu
-    Split_panel(Path, Axis),
+    SplitPanel(Path, Axis),
     /// split a panel where the pointer is: the first half keeps this share of the extent, the
     /// second is a panel of the kind
-    Split_panel_at(Path, Axis, f64, Panel),
-    Close_panel(Path),
+    SplitPanelAt(Path, Axis, f64, Panel),
+    ClosePanel(Path),
     /// `View ""` means a viewport
-    Retype_panel(Path, Panel),
+    RetypePanel(Path, Panel),
     /// a click on part `i` of a docked header's breadcrumb, not its last
     Crumb(Path, i64),
 }
@@ -148,17 +148,7 @@ fn has_crumbs(sub: &str) -> bool {
 }
 
 fn retypes() -> Vec<(&'static str, Panel)> {
-    vec![
-        ("Graph", Panel::Graph),
-        ("List", Panel::List),
-        ("Lisp", Panel::Lisp),
-        ("Inspector", Panel::Inspector),
-        ("Spreadsheet", Panel::Spreadsheet),
-        ("Outline", Panel::Outline),
-        ("Timeline", Panel::Timeline),
-        ("Viewport", Panel::View(String::new())),
-        ("Canvas", Panel::Canvas(String::new())),
-    ]
+    editor_core::panels::PANELS.iter().map(|entry| (entry.menu_title, entry.panel.clone())).collect()
 }
 
 fn drag_origin(ui: &mut Ui, boxed: &UiBox, bounds: Bounds, signal: &Signal) -> Bounds {
@@ -236,17 +226,7 @@ pub fn panel_menu(
         String::new(),
     ];
     for (_, panel) in &kinds {
-        let id = match panel {
-            Panel::Graph => "panel.graph",
-            Panel::List => "panel.list",
-            Panel::Lisp => "panel.lisp",
-            Panel::Inspector => "panel.inspector",
-            Panel::Spreadsheet => "panel.spreadsheet",
-            Panel::Outline => "panel.outline",
-            Panel::Canvas(_) => "panel.canvas",
-            Panel::Timeline => "panel.timeline",
-            Panel::View(_) => "panel.viewport",
-        };
+        let id = editor_core::panels::definition(panel).command;
         keys.push(last_char(&key_of(id)));
     }
     let current = 5 + kinds
@@ -266,14 +246,14 @@ pub fn panel_menu(
         MenuResult::Pick(i) => {
             ui.set_state(boxed, 0);
             vec![match i {
-                0 => Intent::Split_panel(l.path.clone(), Axis::H),
-                1 => Intent::Split_panel(l.path.clone(), Axis::V),
+                0 => Intent::SplitPanel(l.path.clone(), Axis::H),
+                1 => Intent::SplitPanel(l.path.clone(), Axis::V),
                 2 => Intent::Window(
                     l.path.clone(),
                     if state(&l.path).window.is_some() { None } else { Some((x, y, 120.max(w), 80.max(h))) },
                 ),
-                3 => Intent::Close_panel(l.path.clone()),
-                i => Intent::Retype_panel(l.path.clone(), kinds[(i - 5) as usize].1.clone()),
+                3 => Intent::ClosePanel(l.path.clone()),
+                i => Intent::RetypePanel(l.path.clone(), kinds[(i - 5) as usize].1.clone()),
             }]
         }
     }
@@ -453,7 +433,7 @@ pub fn update(
             ui.to_front(order, &button);
         }
         if ui.signal(&button).clicked {
-            intents.push(if windowed { Intent::Close_panel(l.path.clone()) } else { Intent::Toggle(l.path.clone()) });
+            intents.push(if windowed { Intent::ClosePanel(l.path.clone()) } else { Intent::Toggle(l.path.clone()) });
         }
         let tools = 8 + size + if windowed { size + 8 } else { 0 };
         if windowed {
@@ -514,7 +494,7 @@ pub fn update(
             if (px - sx).hypot(py - sy) >= 4.0 {
                 if cancelled {
                     if state(&l.path).window.is_some() {
-                        intents.push(Intent::Window_drag(l.path.clone(), (ox, oy, ow, oh), drag.released));
+                        intents.push(Intent::WindowDrag(l.path.clone(), (ox, oy, ow, oh), drag.released));
                     }
                 } else {
                     intents.push(Intent::Dragging(l.path.clone(), drag.released));
@@ -528,7 +508,7 @@ pub fn update(
                         tip = Some((wx, wy, ow));
                         *moving.borrow_mut() = Some(l.path.clone());
                     }
-                    intents.push(Intent::Window_drag(l.path.clone(), (wx, wy, ow, oh), drag.released));
+                    intents.push(Intent::WindowDrag(l.path.clone(), (wx, wy, ow, oh), drag.released));
                 }
             }
         }
@@ -785,7 +765,7 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
                 });
             }
             if under && released && hovered {
-                out.push(Intent::Dock_panel(source.clone(), leaf.path.clone(), side));
+                out.push(Intent::DockPanel(source.clone(), leaf.path.clone(), side));
             }
         }
     }
@@ -815,7 +795,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
         let boxed = ui.box_fmt(format_args!("workspace-grip-{n}"), opts);
         let signal = ui.signal(&boxed);
         if signal.hovered || signal.held {
-            ui.request_cursor(if s.axis == Axis::H { Cursor::Horizontal_resize } else { Cursor::Vertical_resize });
+            ui.request_cursor(if s.axis == Axis::H { Cursor::HorizontalResize } else { Cursor::VerticalResize });
         }
         if signal.held {
             let accent = theme.accent;
@@ -899,7 +879,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
             let (px, py) = if signal.released { signal.release_point } else { signal.pointer };
             let (sx, sy) = signal.press_point;
             if px != sx || py != sy {
-                intents.push(Intent::Window_drag(
+                intents.push(Intent::WindowDrag(
                     leaf.path.clone(),
                     (x, y, 120.max(w + (px - sx).round() as i64), 80.max(h + (py - sy).round() as i64)),
                     signal.released,

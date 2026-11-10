@@ -1,5 +1,5 @@
-//! Port of lib/pxui_shell: editor chrome over PXUI.
-#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
+//! editor chrome over PXUI.
+
 
 pub mod chrome;
 pub mod inspector;

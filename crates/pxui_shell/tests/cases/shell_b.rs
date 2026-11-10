@@ -1,4 +1,4 @@
-//! Ports of lib/pxui_shell/test_shell.ml, part two: the inspector rows and the tree list.
+//! Ports of , part two: the inspector rows and the tree list.
 use crate::shell_a::{base, fr, new_ui};
 use input::{Event, Key, MouseButton};
 use param::{FieldView, FloatRange, Impact, KindView, Value};
@@ -8,11 +8,11 @@ use pxui_shell::tree::{self as T, Command, DropAt, Intent, Row};
 use rays_math::color;
 
 fn left_press(p: (f64, f64)) -> Event {
-    Event::Pointer_pressed(MouseButton::LeftButton, p)
+    Event::PointerPressed(MouseButton::LeftButton, p)
 }
 
 fn left_release(p: (f64, f64)) -> Event {
-    Event::Pointer_released(MouseButton::LeftButton, p)
+    Event::PointerReleased(MouseButton::LeftButton, p)
 }
 
 // ----------------------------------------------------------------------- inspector
@@ -102,7 +102,7 @@ fn gesture(ui: &mut Ui, label: &str, rows: &[FlowRow], at: (f64, f64), by: Optio
         None => build_rows(ui, at, vec![left_release(at)], label, rows),
         Some(by) => {
             let to = (at.0 + by, at.1);
-            let mut found = build_rows(ui, to, vec![Event::Pointer_moved(to)], label, rows);
+            let mut found = build_rows(ui, to, vec![Event::PointerMoved(to)], label, rows);
             found.extend(build_rows(ui, to, vec![left_release(to)], label, rows));
             found
         }
@@ -127,7 +127,7 @@ pub fn window_shell_vector_cells() {
         let mut found = Vec::new();
         for x in [90, 110, 130, 150, 170, 190, 210, 230] {
             let at = (x as f64, 12.0);
-            build_rows(&mut ui, at, vec![Event::Pointer_moved(at)], "vector", &vector);
+            build_rows(&mut ui, at, vec![Event::PointerMoved(at)], "vector", &vector);
             let mut changes = build_rows(&mut ui, at, vec![left_press(at)], "vector", &vector);
             changes.extend(gesture(&mut ui, "vector", &vector, at, by));
             build_rows(&mut ui, (0.0, 0.0), vec![], "vector", &vector);
@@ -154,7 +154,7 @@ fn ranged_float(drags: bool) {
         let mut ui = new_ui();
         build_rows(&mut ui, (0.0, 0.0), vec![], "scalar", &rows);
         let at = (180.0, 12.0);
-        build_rows(&mut ui, at, vec![Event::Pointer_moved(at)], "scalar", &rows);
+        build_rows(&mut ui, at, vec![Event::PointerMoved(at)], "scalar", &rows);
         let mut found = build_rows(&mut ui, at, vec![left_press(at)], "scalar", &rows);
         found.extend(gesture(&mut ui, "scalar", &rows, at, by));
         ui.destroy();
@@ -207,7 +207,7 @@ fn step(ui: &mut Ui, mut tree: T::Tree, mouse: (f64, f64), events: Vec<Event>, r
 fn tree_gesture(ui: &mut Ui, t: T::Tree, from: (f64, f64), to: (f64, f64), rows: &[Row]) -> (T::Tree, Vec<Intent>) {
     let (t, _) = step(ui, t, from, vec![], rows);
     let (t, pressed) = step(ui, t, from, vec![left_press(from)], rows);
-    let (t, moved) = step(ui, t, to, vec![Event::Pointer_moved(to)], rows);
+    let (t, moved) = step(ui, t, to, vec![Event::PointerMoved(to)], rows);
     let (t, released) = step(ui, t, to, vec![left_release(to)], rows);
     let mut all = pressed;
     all.extend(moved);
@@ -272,7 +272,7 @@ pub fn window_shell_tree_shift_select() {
         &mut ui,
         t,
         center(2),
-        vec![Event::Key_pressed(Key::Shift), left_press(center(2)), Event::Key_released(Key::Shift), left_release(center(2))],
+        vec![Event::KeyPressed(Key::Shift), left_press(center(2)), Event::KeyReleased(Key::Shift), left_release(center(2))],
         &rows,
     );
     expect("Shift selection uses the captured press keys", intents, vec![Intent::Select(vec![3, 1, 2])]);
@@ -293,7 +293,7 @@ pub fn window_shell_tree_scroll_and_sticky() {
             out.unwrap()
         };
         t = run(&mut ui, t, (200.0, 60.0), vec![]).0;
-        t = run(&mut ui, t, (200.0, 60.0), vec![Event::Pointer_moved((200.0, 60.0)), Event::Scrolled((0.0, -2.0))]).0;
+        t = run(&mut ui, t, (200.0, 60.0), vec![Event::PointerMoved((200.0, 60.0)), Event::Scrolled((0.0, -2.0))]).0;
         t = run(&mut ui, t, (200.0, 60.0), vec![]).0;
         let (_, intents) = run(&mut ui, t, at, vec![left_press(at)]);
         ui.destroy();

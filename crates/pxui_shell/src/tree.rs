@@ -60,21 +60,21 @@ pub enum Intent {
 pub enum Command {
     Up,
     Down,
-    Extend_up,
-    Extend_down,
+    ExtendUp,
+    ExtendDown,
     Collapse,
     Expand,
     First,
     Last,
-    Indent_rows,
-    Outdent_rows,
-    Move_up,
-    Move_down,
-    Rename_row,
-    Delete_rows,
+    IndentRows,
+    OutdentRows,
+    MoveUp,
+    MoveDown,
+    RenameRow,
+    DeleteRows,
     Filter,
     Hide,
-    Activate_row,
+    ActivateRow,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -135,22 +135,22 @@ pub fn bindings() -> Vec<(command::Command, Command)> {
         key("down", "next row", Key::ArrowDown, Command::Down, vec![]),
         key("up", "previous row", Key::KeyChar('k'), Command::Up, vec![]),
         key("down", "next row", Key::KeyChar('j'), Command::Down, vec![]),
-        key("extend-up", "extend selection up", Key::ArrowUp, Command::Extend_up, vec![Key::Shift]),
-        key("extend-down", "extend selection down", Key::ArrowDown, Command::Extend_down, vec![Key::Shift]),
+        key("extend-up", "extend selection up", Key::ArrowUp, Command::ExtendUp, vec![Key::Shift]),
+        key("extend-down", "extend selection down", Key::ArrowDown, Command::ExtendDown, vec![Key::Shift]),
         key("collapse", "fold / parent", Key::ArrowLeft, Command::Collapse, vec![]),
         key("expand", "unfold / first child", Key::ArrowRight, Command::Expand, vec![]),
         key("first", "first row", Key::Home, Command::First, vec![]),
         key("last", "last row", Key::End, Command::Last, vec![]),
-        key("indent", "reparent under previous", Key::Tab, Command::Indent_rows, vec![]),
-        key("outdent", "reparent up a level", Key::Tab, Command::Outdent_rows, vec![Key::Shift]),
-        key("move-up", "move up", Key::ArrowUp, Command::Move_up, vec![Key::Alt]),
-        key("move-down", "move down", Key::ArrowDown, Command::Move_down, vec![Key::Alt]),
-        key("rename", "rename", Key::F2, Command::Rename_row, vec![]),
-        key("delete", "delete", Key::Delete, Command::Delete_rows, vec![]),
-        key("delete", "delete", Key::Backspace, Command::Delete_rows, vec![]),
+        key("indent", "reparent under previous", Key::Tab, Command::IndentRows, vec![]),
+        key("outdent", "reparent up a level", Key::Tab, Command::OutdentRows, vec![Key::Shift]),
+        key("move-up", "move up", Key::ArrowUp, Command::MoveUp, vec![Key::Alt]),
+        key("move-down", "move down", Key::ArrowDown, Command::MoveDown, vec![Key::Alt]),
+        key("rename", "rename", Key::F2, Command::RenameRow, vec![]),
+        key("delete", "delete", Key::Delete, Command::DeleteRows, vec![]),
+        key("delete", "delete", Key::Backspace, Command::DeleteRows, vec![]),
         key("filter", "filter", Key::KeyChar('s'), Command::Filter, vec![]),
         key("hide", "hide / show", Key::KeyChar('h'), Command::Hide, vec![]),
-        key("activate", "open selected in graph", Key::Enter, Command::Activate_row, vec![]),
+        key("activate", "open selected in graph", Key::Enter, Command::ActivateRow, vec![]),
     ]
 }
 
@@ -244,12 +244,12 @@ pub fn run_command(t: &mut Tree, rows: &[Row], selected: &[i64], command: Comman
     let intents = match (command, cur) {
         (Command::Up, Some(k)) => mv(t, k - 1),
         (Command::Down, Some(k)) => mv(t, k + 1),
-        (Command::Up | Command::Extend_up, None) => mv(t, count as i64 - 1),
-        (Command::Down | Command::Extend_down, None) => mv(t, 0),
+        (Command::Up | Command::ExtendUp, None) => mv(t, count as i64 - 1),
+        (Command::Down | Command::ExtendDown, None) => mv(t, 0),
         (Command::First, _) => mv(t, 0),
         (Command::Last, _) => mv(t, count as i64 - 1),
-        (Command::Extend_up, Some(k)) => extend(t, k - 1),
-        (Command::Extend_down, Some(k)) => extend(t, k + 1),
+        (Command::ExtendUp, Some(k)) => extend(t, k - 1),
+        (Command::ExtendDown, Some(k)) => extend(t, k + 1),
         (Command::Collapse, Some(k)) => {
             let k = k as usize;
             let index = shown[k];
@@ -281,16 +281,16 @@ pub fn run_command(t: &mut Tree, rows: &[Row], selected: &[i64], command: Comman
                 Vec::new()
             }
         }
-        (Command::Indent_rows, _) => vec![Intent::Indent(targets)],
-        (Command::Outdent_rows, _) => vec![Intent::Outdent(targets)],
-        (Command::Delete_rows, _) => vec![Intent::Delete(targets)],
-        (Command::Move_up, _) => vec![Intent::Reorder { ids: targets, delta: -1 }],
-        (Command::Move_down, _) => vec![Intent::Reorder { ids: targets, delta: 1 }],
+        (Command::IndentRows, _) => vec![Intent::Indent(targets)],
+        (Command::OutdentRows, _) => vec![Intent::Outdent(targets)],
+        (Command::DeleteRows, _) => vec![Intent::Delete(targets)],
+        (Command::MoveUp, _) => vec![Intent::Reorder { ids: targets, delta: -1 }],
+        (Command::MoveDown, _) => vec![Intent::Reorder { ids: targets, delta: 1 }],
         (Command::Filter, _) => {
             t.filter = Some(t.filter.clone().unwrap_or_default());
             Vec::new()
         }
-        (Command::Rename_row, Some(k)) if !at(k as usize).ghost => {
+        (Command::RenameRow, Some(k)) if !at(k as usize).ghost => {
             t.renaming = Some((at(k as usize).id, at(k as usize).label.clone()));
             Vec::new()
         }
@@ -301,8 +301,8 @@ pub fn run_command(t: &mut Tree, rows: &[Row], selected: &[i64], command: Comman
             };
             vec![Intent::Flag { ids: targets, column: 0, value }]
         }
-        (Command::Activate_row, Some(k)) => vec![Intent::Activate(at(k as usize).id)],
-        (Command::Collapse | Command::Expand | Command::Rename_row | Command::Hide | Command::Activate_row, _) => Vec::new(),
+        (Command::ActivateRow, Some(k)) => vec![Intent::Activate(at(k as usize).id)],
+        (Command::Collapse | Command::Expand | Command::RenameRow | Command::Hide | Command::ActivateRow, _) => Vec::new(),
     };
     emit.extend(intents);
 }

@@ -20,7 +20,7 @@ fn tree_keys_through_run_command() {
     expect("Down from nothing selects the first row", intents, vec![Intent::Select(vec![1])]);
     let (t, intents) = run(t, Command::Down);
     expect("Down moves to the child", intents, vec![Intent::Select(vec![2])]);
-    let (_, intents) = run(t.clone(), Command::Extend_down);
+    let (_, intents) = run(t.clone(), Command::ExtendDown);
     expect("Shift-Down extends from the anchor", intents, vec![Intent::Select(vec![3, 2])]);
     let (t, intents) = run(t, Command::Collapse);
     expect("Left on a leaf goes to its parent", intents, vec![Intent::Select(vec![1])]);
@@ -35,15 +35,15 @@ fn tree_keys_through_run_command() {
     expect("Right on an open parent goes to its first child", intents, vec![Intent::Select(vec![2])]);
     let (_, intents) = run(t.clone(), Command::Last);
     expect("End selects the last row", intents, vec![Intent::Select(vec![4])]);
-    let (_, intents) = { let mut r8_tree = t.clone(); let mut r8_intents = Vec::new(); T::run_command(&mut r8_tree, &rows, &[2, 3], Command::Indent_rows, &mut r8_intents); (r8_tree, r8_intents) };
+    let (_, intents) = { let mut r8_tree = t.clone(); let mut r8_intents = Vec::new(); T::run_command(&mut r8_tree, &rows, &[2, 3], Command::IndentRows, &mut r8_intents); (r8_tree, r8_intents) };
     expect("Tab reparents the selection", intents, vec![Intent::Indent(vec![2, 3])]);
-    let (_, intents) = run(t.clone(), Command::Outdent_rows);
+    let (_, intents) = run(t.clone(), Command::OutdentRows);
     expect("Shift-Tab outdents the focus", intents, vec![Intent::Outdent(vec![2])]);
-    let (_, intents) = run(t.clone(), Command::Move_up);
+    let (_, intents) = run(t.clone(), Command::MoveUp);
     expect("Alt-Up reorders", intents, vec![Intent::Reorder { ids: vec![2], delta: -1 }]);
     let (_, intents) = run(t.clone(), Command::Hide);
     expect("h hides the focused row", intents, vec![Intent::Flag { ids: vec![2], column: 0, value: false }]);
-    let (_, intents) = run(t.clone(), Command::Activate_row);
+    let (_, intents) = run(t.clone(), Command::ActivateRow);
     expect("the enter key activates", intents, vec![Intent::Activate(2)]);
     let (filtering, _) = run(t, Command::Filter);
     assert!(T::editing(&filtering), "/ opens the filter");

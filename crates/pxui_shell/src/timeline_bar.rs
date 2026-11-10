@@ -5,12 +5,12 @@ use pxui::ui::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Intent {
-    Pause_toggle,
-    Stop_playback,
-    Reset_playback,
-    Seek_playback(i64),
+    PauseToggle,
+    StopPlayback,
+    ResetPlayback,
+    SeekPlayback(i64),
     /// the last frame, typed in a tall timeline's End field
-    Set_end(i64),
+    SetEnd(i64),
 }
 
 /// The strip of the workspace sheet is one 24-point bar: Play, Stop, F, the frame field, the time
@@ -151,26 +151,26 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
         // a typed frame clamps to the timeline: 0 to the last frame
         if typed != current {
             if let Ok(n) = typed.trim().parse::<i64>() {
-                out.push(Intent::Seek_playback(0.max(max_frame.min(n))));
+                out.push(Intent::SeekPlayback(0.max(max_frame.min(n))));
             }
         }
         if ended != last {
             if let Ok(n) = ended.trim().parse::<i64>() {
-                out.push(Intent::Set_end(n));
+                out.push(Intent::SetEnd(n));
             }
         }
         if pause {
-            out.push(Intent::Pause_toggle);
+            out.push(Intent::PauseToggle);
         }
         if stop {
-            out.push(Intent::Stop_playback);
+            out.push(Intent::StopPlayback);
         }
         if reset {
-            out.push(Intent::Reset_playback);
+            out.push(Intent::ResetPlayback);
         }
         if let Some(target) = scrub {
             if target != frame as f64 {
-                out.push(Intent::Seek_playback(target as i64));
+                out.push(Intent::SeekPlayback(target as i64));
             }
         }
     });

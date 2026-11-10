@@ -1,4 +1,4 @@
-//! Ports of lib/pxui_shell/test_shell.ml, part one: the chrome (panes, splitters, header menu,
+//! Ports of , part one: the chrome (panes, splitters, header menu,
 //! windows, breadcrumbs), the strips (status, timeline, guide, echo) and the prompts.
 use input::{Event, Key, MouseButton};
 use pxui::ui::*;
@@ -30,23 +30,23 @@ pub fn base() -> frame::Frame {
 }
 
 fn left_press(p: (f64, f64)) -> Event {
-    Event::Pointer_pressed(MouseButton::LeftButton, p)
+    Event::PointerPressed(MouseButton::LeftButton, p)
 }
 
 fn left_release(p: (f64, f64)) -> Event {
-    Event::Pointer_released(MouseButton::LeftButton, p)
+    Event::PointerReleased(MouseButton::LeftButton, p)
 }
 
 fn right_press(p: (f64, f64)) -> Event {
-    Event::Pointer_pressed(MouseButton::RightButton, p)
+    Event::PointerPressed(MouseButton::RightButton, p)
 }
 
 fn right_release(p: (f64, f64)) -> Event {
-    Event::Pointer_released(MouseButton::RightButton, p)
+    Event::PointerReleased(MouseButton::RightButton, p)
 }
 
 fn moved(p: (f64, f64)) -> Event {
-    Event::Pointer_moved(p)
+    Event::PointerMoved(p)
 }
 
 fn instances(f: &mut dyn FnMut(&mut Ui)) -> i64 {
@@ -55,7 +55,7 @@ fn instances(f: &mut dyn FnMut(&mut Ui)) -> i64 {
     let staged = layer::stage_native(400, 300, &ui.scene(None)).unwrap_or_else(|e| panic!("{e}"));
     let mut total = 0;
     for layer in &staged.layers {
-        if let layer::native_layer::Ui_layer(batch, _) = layer {
+        if let layer::NativeLayer::UiLayer(batch, _) = layer {
             total += batch.count();
         }
     }
@@ -102,7 +102,7 @@ pub fn window_shell_splitter_hit_area() {
     };
     chrome_frame(&mut ui, vec![]);
     chrome_frame(&mut ui, vec![moved(((divider_x - 2) as f64, 100.0))]);
-    assert!(ui.cursor() == Some(Cursor::Horizontal_resize), "thin splitter lost its wider resize hit area");
+    assert!(ui.cursor() == Some(Cursor::HorizontalResize), "thin splitter lost its wider resize hit area");
     ui.destroy();
 }
 
@@ -185,7 +185,7 @@ pub fn window_shell_splitter_drag_and_menus() {
     chrome_frame(&mut ui, &default, (620.0, 28.0), vec![moved((620.0, 28.0))]);
     let pick = chrome_frame(&mut ui, &default, (620.0, 28.0), vec![left_press((620.0, 28.0)), left_release((620.0, 28.0))]);
     assert!(
-        matches!(pick.as_slice(), [Intent::Split_panel(path, Axis::H)] if path == &vec![1usize, 0]),
+        matches!(pick.as_slice(), [Intent::SplitPanel(path, Axis::H)] if path == &vec![1usize, 0]),
         "the header menu did not split the graph panel ({} intents)",
         pick.len()
     );
@@ -217,7 +217,7 @@ pub fn window_shell_window_past_the_edge() {
     let got: Vec<(i64, i64)> = drags
         .iter()
         .filter_map(|i| match i {
-            Intent::Window_drag(_, (x, _, w, _), _) => Some((*x, *w)),
+            Intent::WindowDrag(_, (x, _, w, _), _) => Some((*x, *w)),
             _ => None,
         })
         .collect();
@@ -277,7 +277,7 @@ pub fn window_shell_drop_targets() {
     let p = (4.0, 300.0);
     run(&mut ui, p, vec![moved(p)], Some((vec![1, 0], false)));
     let docked = run(&mut ui, p, vec![moved(p)], Some((vec![1, 0], true)));
-    assert!(docked.contains(&Intent::Dock_panel(vec![1, 0], vec![0], Side::Left)), "a release over an edge did not dock there: {docked:?}");
+    assert!(docked.contains(&Intent::DockPanel(vec![1, 0], vec![0], Side::Left)), "a release over an edge did not dock there: {docked:?}");
     ui.destroy();
 }
 
@@ -337,13 +337,13 @@ pub fn window_shell_timeline_frame_field() {
         if !ui.text_input_focused() {
             press(ui, (x, 285.0));
         }
-        bar(ui, (x, 285.0), vec![Event::Text_input(text.to_string())]);
-        let mut sought = bar(ui, (x, 285.0), vec![Event::Key_pressed(key)]);
+        bar(ui, (x, 285.0), vec![Event::TextInput(text.to_string())]);
+        let mut sought = bar(ui, (x, 285.0), vec![Event::KeyPressed(key)]);
         sought.extend(bar(ui, (x, 285.0), vec![]));
         sought
             .into_iter()
             .filter_map(|i| match i {
-                timeline_bar::Intent::Seek_playback(n) => Some(n),
+                timeline_bar::Intent::SeekPlayback(n) => Some(n),
                 _ => None,
             })
             .collect()
@@ -354,7 +354,7 @@ pub fn window_shell_timeline_frame_field() {
     assert!(enter(&mut ui, "99999", Key::Enter) == vec![240], "a frame past the end did not clamp to the last frame");
     assert!(enter(&mut ui, "-5", Key::Enter) == vec![0], "a negative frame did not clamp to 0");
     assert!(enter(&mut ui, "x", Key::Enter).is_empty(), "text that is not a frame was committed");
-    bar(&mut ui, (0.0, 0.0), vec![Event::Key_pressed(Key::Escape)]);
+    bar(&mut ui, (0.0, 0.0), vec![Event::KeyPressed(Key::Escape)]);
     ui.destroy();
 }
 
@@ -419,7 +419,7 @@ pub fn window_shell_status_rule_drags() {
             let p = (x as f64, 285.0);
             strip(ui, p, vec![moved(p)]);
             strip(ui, p, vec![]);
-            if ui.cursor() == Some(Cursor::Horizontal_resize) {
+            if ui.cursor() == Some(Cursor::HorizontalResize) {
                 return x;
             }
             x += 1;

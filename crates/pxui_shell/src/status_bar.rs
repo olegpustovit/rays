@@ -281,7 +281,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                 let w = stored(ui);
                 // the hit box sits on the rule: it follows the stored width once there is one
                 if sg.hovered || sg.held {
-                    ui.request_cursor(Cursor::Horizontal_resize);
+                    ui.request_cursor(Cursor::HorizontalResize);
                 }
                 if sg.pressed && w.is_none() {
                     ui.set_text_state(&bar, Some((natural_end - fx).to_string()));
