@@ -25,6 +25,7 @@ use flow_syntax::lisp;
 use flow_syntax::syntax::{Node as SNode, Syntax};
 use input::{Event, Key, MouseButton};
 use param::{Effects, FieldView, Value};
+use pxui::geom::p32;
 use pxui::ui::{BoxOpts, MenuOpts, MenuResult, Size, Ui, UiBox, CLICKABLE};
 use rays_graph::node_menu;
 use rays_graph::scope_state as scope;
@@ -252,7 +253,7 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
                     let keys: Vec<String> = (0..kinds.len()).map(|i| (i + 1).to_string()).collect();
                     let items: Vec<(String, bool)> = kinds.iter().map(|p| (panels::name(p).to_string(), true)).collect();
                     let opts = MenuOpts { width: Some(200.0), keys, ..Default::default() };
-                    match ui.context_menu(at, &opts, if split { "split-kind" } else { "window-kind" }, &items) {
+                    match ui.context_menu(p32(at), &opts, if split { "split-kind" } else { "window-kind" }, &items) {
                         MenuResult::Open => (Some(open_prompt), None),
                         MenuResult::Dismiss => (None, None),
                         MenuResult::Pick(i) => pick(i as usize),
@@ -267,7 +268,7 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
             let (mx, my) = frame_.input.pointer;
             let leaf = geometry(value, workspace, frame_).leaves.iter().find(|l| {
                 let (x, y, w, h) = l.frame;
-                !l.floating && pxui::ui::contains((x as f64, y as f64, w as f64, h as f64), (mx, my))
+                !l.floating && pxui::ui::contains(pxui::ui::Rect::new(x as f32, y as f32, w as f32, h as f32), p32((mx, my)))
             }).cloned();
             let ratio = match &leaf {
                 Some(l) => {
@@ -277,7 +278,7 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
                 }
                 None => 0.5,
             };
-            let b = ui.box_("split-pending", BoxOpts::default().flags(CLICKABLE).w(Size::Px(frame_.input.size.0 as f64)).h(Size::Px(frame_.input.size.1 as f64)).at((0.0, 0.0)));
+            let b = ui.box_("split-pending", BoxOpts::default().flags(CLICKABLE).w(Size::Px((frame_.input.size.0 as f64) as f32)).h(Size::Px((frame_.input.size.1 as f64) as f32)).at((0.0, 0.0)));
             ui.to_front(900, &b);
             let theme = ui.theme();
             let painted = leaf.clone();
@@ -289,28 +290,28 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
                 let cut = if axis == Axis::H { x + w * ratio } else { y + h * ratio };
                 let (nx, ny, nw, nh) = if axis == Axis::H { (cut, y, x + w - cut, h) } else { (x, cut, w, y + h - cut) };
                 // the panel being split is tinted, the room of the new one more
-                let tint = |alpha: i64| rays_math::color::with_alpha(theme.accent, alpha);
-                paint.fill(x, y, w, h, tint(22));
-                paint.fill(nx, ny, nw, nh, tint(56));
+                let tint = |alpha: i64| pxui::geom::color::with_alpha(theme.accent, alpha);
+                paint.fill(x as f32, y as f32, w as f32, h as f32, tint(22));
+                paint.fill(nx as f32, ny as f32, nw as f32, nh as f32, tint(56));
                 // the new panel's room: accent brackets 6 inside its corners; the panel kept stays as it is
-                paint.brackets(nx + 6.0, ny + 6.0, nw - 12.0, nh - 12.0, 0.0, 12.0, 1.0, theme.accent);
+                paint.brackets((nx + 6.0) as f32, (ny + 6.0) as f32, (nw - 12.0) as f32, (nh - 12.0) as f32, 0.0, 12.0, 1.0, theme.accent);
                 // the cut: a hairline through the panel with a short accent cap at each end
                 let (a, b2, (ux, uy)) = if axis == Axis::H { ((cut, y), (cut, y + h), (0.0, 1.0)) } else { ((x, cut), (x + w, cut), (1.0, 0.0)) };
-                paint.line_w(a, b2, 1.0, theme.accent);
+                paint.line_w(p32(a), p32(b2), 1.0, theme.accent);
                 for (px, py, sgn) in [(a.0, a.1, 1.0), (b2.0, b2.1, -1.0)] {
                     let (px, py) = (px + sgn * ux, py + sgn * uy);
-                    paint.line_w((px - 5.0 * uy, py - 5.0 * ux), (px + 5.0 * uy, py + 5.0 * ux), 3.0, theme.accent);
+                    paint.line_w(((px - 5.0 * uy) as f32, (py - 5.0 * ux) as f32), ((px + 5.0 * uy) as f32, (py + 5.0 * ux) as f32), 3.0, theme.accent);
                 }
                 // what is being made, in the new panel's room, and the keys that steer it
                 let (cx, cy) = (nx + nw / 2.0, ny + nh / 2.0);
                 if nw > 90.0 && nh > 40.0 {
-                    let cw = paint.cap_width(&name);
-                    paint.cap((cx - cw / 2.0, cy - 14.0), Some(theme.accent), &name);
+                    let cw = f64::from(paint.cap_width(&name));
+                    paint.cap(((cx - cw / 2.0) as f32, (cy - 14.0) as f32), Some(theme.accent), &name);
                     let hint = "TAB  TURN   ESC  CANCEL";
-                    let hw = paint.cap_width(hint);
-                    paint.cap((cx - hw / 2.0, cy + 4.0), Some(pxui::theme::ink_3(&theme)), hint);
+                    let hw = f64::from(paint.cap_width(hint));
+                    paint.cap(((cx - hw / 2.0) as f32, (cy + 4.0) as f32), Some(pxui::theme::ink_3(&theme)), hint);
                 }
-                paint.ratio((mx + 12.0, my + 12.0), (ratio * 100.0) as i64, 100 - (ratio * 100.0) as i64);
+                paint.ratio(((mx + 12.0) as f32, (my + 12.0) as f32), (ratio * 100.0) as i64, 100 - (ratio * 100.0) as i64);
             });
             let signal = ui.signal(&b);
             let cancel = pressed(Key::Escape) || frame_.input.events.iter().any(|e| matches!(e, Event::PointerPressed(MouseButton::RightButton, _)));
@@ -449,6 +450,7 @@ pub fn draw_notice<'a>(value: &ModelView<'a>, frame_: &frame::Frame, roots: &[(L
                 NoticeKind::Info => TipKind::Info,
                 NoticeKind::Refusal => TipKind::Refusal,
             };
+            let avoid: Vec<(f32, f32, f32, f32)> = avoid.iter().map(|r| (r.0 as f32, r.1 as f32, r.2 as f32, r.3 as f32)).collect();
             status_bar::tips(ui, bounds, &avoid, &[(text.clone(), tip)]);
         }
     }
@@ -687,7 +689,7 @@ pub fn node_menu_step<'a>(value: &ModelView<'a>, workspace: &Shell, frame_: &fra
             None => (0, 0, 0, 0),
         };
         let (mx, my) = frame_.input.pointer;
-        let at = if pxui::ui::contains((gx as f64, gy as f64, gw as f64, gh as f64), (mx, my)) { (mx as i64, my as i64) } else { (gx + gw / 3, gy + gh / 3) };
+        let at = if pxui::ui::contains(pxui::ui::Rect::new(gx as f32, gy as f32, gw as f32, gh as f32), p32((mx, my))) { (mx as i64, my as i64) } else { (gx + gw / 3, gy + gh / 3) };
         match open_menu(None, value, at) {
             Some(menu) => (Some(menu), Vec::new()),
             None => (value.menu.clone(), vec![Change::Declined("Open a graph to add a node to it".to_string())]),
@@ -772,7 +774,7 @@ pub fn gated(value: &mut EditorModel, frame_: &frame::Frame, text_focus: bool, h
     }
     window_focus = if window_focus >= 0 { (window_focus + 1).min(2) } else { -1 };
     let roots: Vec<i64> = value.pane_keys.iter().map(|(k, _)| *k).collect();
-    let pane_is_picture = match value.ui.borrow().root_at(frame_.input.pointer, &roots) {
+    let pane_is_picture = match value.ui.borrow().root_at(p32(frame_.input.pointer), &roots) {
         None => true,
         Some(key) => match value.pane_keys.iter().find(|(k, _)| *k == key) {
             Some((_, (panel, _))) => is_picture(panel),
@@ -1141,8 +1143,8 @@ pub fn update_frame(
             // them and cuts the title, so a narrow header drops the text tabs, then the views, and
             // never draws one over another
             let geo0 = geometry(&(&*value).into(), &workspace, frame_);
-            let mut group_table: HashMap<layout::Path, Vec<f64>> = HashMap::new();
-            let mut tools_table: HashMap<layout::Path, f64> = HashMap::new();
+            let mut group_table: HashMap<layout::Path, Vec<f32>> = HashMap::new();
+            let mut tools_table: HashMap<layout::Path, f32> = HashMap::new();
             let platform_ui = ui.platform();
             let _ = platform_ui;
             for leaf in &geo0.leaves {
@@ -1160,9 +1162,9 @@ pub fn update_frame(
                 group_table.insert(leaf.path.clone(), widths);
                 tools_table.insert(leaf.path.clone(), chrome::tools_start(ui, header_focus.as_ref() == Some(&leaf.path), leaf.floating, false, &panel_title(&vw, leaf)));
             }
-            let header_groups = |leaf: &Leaf| -> Vec<f64> { group_table.get(&leaf.path).cloned().unwrap_or_default() };
-            let header_slots = |leaf: &Leaf| -> Vec<Option<f64>> { chrome::header_slots(leaf, &header_groups(leaf)).0 };
-            let tools_from = |leaf: &Leaf| -> f64 { tools_table.get(&leaf.path).copied().unwrap_or(0.0) };
+            let header_groups = |leaf: &Leaf| -> Vec<f32> { group_table.get(&leaf.path).cloned().unwrap_or_default() };
+            let header_slots = |leaf: &Leaf| -> Vec<Option<f32>> { chrome::header_slots(leaf, &header_groups(leaf)).0 };
+            let tools_from = |leaf: &Leaf| -> f32 { tools_table.get(&leaf.path).copied().unwrap_or(0.0) };
             let key_of = |id: &str| -> String {
                 match keymap.iter().find(|c| c.id == id) {
                     Some(Command { trigger: Some(trigger), .. }) => keymap::label(platform, trigger),

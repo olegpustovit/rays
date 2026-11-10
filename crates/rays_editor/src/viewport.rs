@@ -90,8 +90,8 @@ pub mod cc {
             let edit = ui.signal(&label_hit).double_clicked;
             let shown = cfmt::g(value, 6);
             let opts = ValueFieldOpts {
-                fraction: Some((value - low) / (high - low)),
-                slide: Some(Rc::new(move |fraction: f64| cfmt::g(low + fraction * (high - low), 6))),
+                fraction: Some(((value - low) / (high - low)) as f32),
+                slide: Some(Rc::new(move |fraction: f32| cfmt::g(low + fraction as f64 * (high - low), 6))),
                 edit,
                 ..Default::default()
             };
@@ -1128,9 +1128,9 @@ pub fn handles(ui: &mut Ui, selected: Option<&Picked>, scene_: &kg::T, space: &m
         if extra_.show.handles {
             for a in arrows(node, view_, bounds, space, extra_.tool) {
                 let (tx, ty) = a.tip;
-                let box_ = ui.box_fmt(format_args!("handle-{}", a.name), BoxOpts::default().flags(CLICKABLE).w(Size::Px(14.)).h(Size::Px(14.)).at((tx - 7., ty - 7.)));
+                let box_ = ui.box_fmt(format_args!("handle-{}", a.name), BoxOpts::default().flags(CLICKABLE).w(Size::Px(14.)).h(Size::Px(14.)).at(((tx - 7.) as f32, (ty - 7.) as f32)));
                 let signal = ui.signal(&box_);
-                let (mx, my) = signal.drag;
+                let (mx, my) = pxui::geom::p64(signal.drag);
                 let (ux, uy) = a.unit;
                 let delta = match a.tool {
                     Tool::Turn => (mx * ux + my * uy) / ux.hypot(uy),
@@ -1152,7 +1152,7 @@ pub fn handles(ui: &mut Ui, selected: Option<&Picked>, scene_: &kg::T, space: &m
             if let Some(camera_) = camera_ {
                 if !same_view(&camera_, view_) {
                     if let Some((x, y)) = project(bounds, view_, rcam::position(&camera_)) {
-                        let box_ = ui.box_fmt(format_args!("pick-camera-{node_id}"), BoxOpts::default().flags(CLICKABLE).w(Size::Px(PICK_SIZE)).h(Size::Px(PICK_SIZE)).at((x - PICK_SIZE / 2., y - PICK_SIZE / 2.)));
+                        let box_ = ui.box_fmt(format_args!("pick-camera-{node_id}"), BoxOpts::default().flags(CLICKABLE).w(Size::Px(PICK_SIZE as f32)).h(Size::Px(PICK_SIZE as f32)).at(((x - PICK_SIZE / 2.) as f32, (y - PICK_SIZE / 2.) as f32)));
                         let signal = ui.signal(&box_);
                         grab = grab || signal.held;
                         if signal.clicked {

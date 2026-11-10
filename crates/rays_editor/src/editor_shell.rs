@@ -428,7 +428,7 @@ pub fn on_sheet(ui: &mut Ui, floating: bool, build: &mut dyn FnMut(&mut Ui)) {
 pub fn inspector_panel(window: bool, ui: &mut Ui, bounds: layout::Bounds, build: &mut dyn FnMut(&mut Ui)) {
     let (x, y, width, height) = bounds;
     ui.panel(
-        PanelOpts { window, x: x as f64, y: y as f64, width: width as f64, height: Some(height as f64), padding: 0, ..PanelOpts::default() },
+        PanelOpts { window, x: x as f32, y: y as f32, width: width as f32, height: Some(height as f32), padding: 0, ..PanelOpts::default() },
         "workspace-inspector-panel",
         build,
     );

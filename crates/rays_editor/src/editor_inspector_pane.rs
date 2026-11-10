@@ -78,7 +78,7 @@ pub fn inspect_panel<'a>(
     } else {
         bounds
     };
-    let width = bounds.2.max(1) as f64;
+    let width = bounds.2.max(1) as f32;
     let mut result: Option<InspectorResult> = None;
     on_sheet(ui, window, &mut |ui| {
         ui.within(inspector_root, &mut |ui| {
@@ -153,7 +153,7 @@ pub fn inspect_panel<'a>(
                         if !fields.is_empty() {
                             ui.scope("sketch-settings", &mut |ui| {
                                 ui.inspector_section("sketch-settings-section", true, None, "Settings", &mut |ui| {
-                                    changes = insp::fields(ui, &[], Some(bounds.2 as f64), std::mem::take(&mut fields));
+                                    changes = insp::fields(ui, &[], Some(bounds.2 as f32), std::mem::take(&mut fields));
                                 });
                             });
                         }
@@ -204,7 +204,7 @@ pub fn inspect_panel<'a>(
 
 /// `workspace_inspector` for a node of the graph pane, gathering the places the choice controls
 /// offer a carried payload (the material one): the inspector reports each choice control it builds.
-fn workspace_inspector_with_drops<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, path: &[Symbol], opts: &InspectorOpts, drops: &Rc<RefCell<Vec<(carry::Place, bool)>>>) -> Inspected {
+fn workspace_inspector_with_drops<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, path: &[Symbol], opts: &InspectorOpts, drops: &Rc<RefCell<Vec<(carry::Place, bool)>>>) -> Inspected {
     let place_path = path.to_vec();
     let drops_in = drops.clone();
     // the callback needs the Ui to read the drop target: collect the boxes, ask after
@@ -235,7 +235,7 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
     let mut changes: Vec<Change> = Vec::new();
     inspector_panel(window, ui, bounds, &mut |ui| {
         ui.scope(&format!("node.{node_id}"), &mut |ui| {
-            let inspector_width = bounds.2.max(1) as f64;
+            let inspector_width = bounds.2.max(1) as f32;
             let input = kind_graph::find(document, node_id).and_then(|n| n.input);
             let input_count = if kind_ == "camera" || kind_ == "root" || kind_ == "world" { 0 } else { 1 };
             // the head: the kind as the sheet writes it (scene/camera), VIEW while displayed, the

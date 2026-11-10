@@ -22,7 +22,7 @@ use flow_syntax::lisp;
 use flow_syntax::syntax::{self as s, Node as SNode, Syntax};
 use flow_syntax::ty::{self, Ty};
 use param::{FieldView, FloatRange, Impact, IntRange, KindView, Value};
-use pxui::ui::{HeadAction, Ui, UiBox};
+use pxui::ui::{HeadAction, Rect, Ui, UiBox};
 use rays_graph::scope_state::Change as ScopeChange;
 use rays_shell::inspector as insp;
 use sop::edit_graph;
@@ -771,7 +771,7 @@ pub fn iteration_picks(ui: &mut Ui, footer: &probe::Footer, chain: &[Path], prob
 
 /// The note above the binding in the Lisp: one line here, typing is one history entry; the last
 /// section, closed.
-pub fn note_section(ui: &mut Ui, width: f64, n: &p::Node) -> Vec<Change> {
+pub fn note_section(ui: &mut Ui, width: f32, n: &p::Node) -> Vec<Change> {
     if n.synthetic || p::anonymous(n) {
         return Vec::new();
     }
@@ -796,7 +796,7 @@ pub fn note_section(ui: &mut Ui, width: f64, n: &p::Node) -> Vec<Change> {
 }
 
 /// What the cook made of a geometry node: read-out rows, as the sheet's Output section.
-pub fn output_section(ui: &mut Ui, width: f64, geo: Option<&probe::Geometry>) {
+pub fn output_section(ui: &mut Ui, width: f32, geo: Option<&probe::Geometry>) {
     if let Some(g) = geo {
         ui.inspector_section("ws-output", true, None, "Output", &mut |ui| {
             ui.inspector_readout(Some(width), "ws-output-points", "points", &group_digits(g.points));
@@ -862,7 +862,7 @@ pub type Resized<'a> = &'a dyn Fn(&[Symbol], rays_shell::layout::Way) -> Option<
 pub fn field_edits<'a>(
     ui: &mut Ui,
     on_choice: Option<&dyn Fn(&str, &UiBox)>,
-    width: f64,
+    width: f32,
     expanded: &[String],
     parameters: &[port::Parameter],
     ref_rows: &[(p::Row, insp::FlowRow)],
@@ -1180,7 +1180,7 @@ pub fn reference_rows<'a>(value: &ModelView<'a>, n: &p::Node) -> Vec<(p::Row, in
 }
 
 /// The readouts a node shows under its head.
-pub fn readout_rows(ui: &mut Ui, n: &p::Node, value: &Model, footer: &probe::Footer, readouts: &[(String, String)], width: f64, zone_text: bool) {
+pub fn readout_rows(ui: &mut Ui, n: &p::Node, value: &Model, footer: &probe::Footer, readouts: &[(String, String)], width: f32, zone_text: bool) {
     // the head's detail line says it for a node; a zone keeps its readout rows
     if zone_text {
         for (label, text) in readouts {
@@ -1203,7 +1203,7 @@ pub fn readout_rows(ui: &mut Ui, n: &p::Node, value: &Model, footer: &probe::Foo
 }
 
 /// A loop or scope says what it is, then the rows of its rail.
-pub fn zone_says(ui: &mut Ui, width: f64, zone_text: &Option<(&'static str, fn(&str) -> String)>, n: &p::Node) {
+pub fn zone_says(ui: &mut Ui, width: f32, zone_text: &Option<(&'static str, fn(&str) -> String)>, n: &p::Node) {
     if let (Some(z), Some((_, sentence))) = (&n.zone, zone_text) {
         let var = z.rail.iter().find(|r| r.role == p::Role::Var).map(|r| r.name.clone()).unwrap_or_else(|| "item".to_owned());
         ui.inspector_message("ws-zone-says", &sentence(&var));
@@ -1223,7 +1223,7 @@ pub fn zone_says(ui: &mut Ui, width: f64, zone_text: &Option<(&'static str, fn(&
 }
 
 /// A graph input: its type, and its default as one Lisp form.
-pub fn input_inspector(ui: &mut Ui, graph: &str, width: f64, scope: &p::Scope, path: &[Symbol]) -> (Vec<Change>, Vec<ScopeChange>) {
+pub fn input_inspector(ui: &mut Ui, graph: &str, width: f32, scope: &p::Scope, path: &[Symbol]) -> (Vec<Change>, Vec<ScopeChange>) {
     let Some(input) = scope.inputs.iter().find(|i| i.path == path) else { return (vec![], vec![]) };
     ui.inspector_header("ws-input", Some("input"), None, None, None, &[], None, false, &input.name, &ty::to_string(&input.ty));
     let shown = input.default.as_ref().map(lisp::flat).unwrap_or_default();
@@ -1239,7 +1239,7 @@ pub fn input_inspector(ui: &mut Ui, graph: &str, width: f64, scope: &p::Scope, p
                     Ty::Float => Some(param::number::Kind::Float),
                     _ => None,
                 };
-                text = rays_graph::scope_frame::num_field(ui, (cx, cy), cw, 20.0, None, kind, None, false, "ws-input-default-field", &shown).unwrap_or_else(|| shown.clone());
+                text = rays_graph::scope_frame::num_field(ui, (cx as f64, cy as f64), cw as f64, 20.0, None, kind, None, false, "ws-input-default-field", &shown).unwrap_or_else(|| shown.clone());
             }
             _ => {
                 let o = pxui::ui::ValueFieldOpts { left: float_of(&shown).is_none(), ..Default::default() };
@@ -1259,7 +1259,7 @@ pub fn input_inspector(ui: &mut Ui, graph: &str, width: f64, scope: &p::Scope, p
 }
 
 /// An expression chip clicked on a card: the row is the subject.
-pub fn expression_inspector(ui: &mut Ui, width: f64, value: &Model, holder: &p::Node, r: &p::Row) -> (Vec<Change>, Vec<ScopeChange>) {
+pub fn expression_inspector(ui: &mut Ui, width: f32, value: &Model, holder: &p::Node, r: &p::Row) -> (Vec<Change>, Vec<ScopeChange>) {
     let e = r.expr.clone().expect("expression row");
     let op = s::head(&e).unwrap_or_default().to_owned();
     ui.inspector_header("ws-header", Some(&op), None, None, None, &[], None, false, &format!("{} \u{b7} {}", p::title(holder), r.label), &lisp::flat(&e));
@@ -1324,7 +1324,7 @@ fn zone_words(kind: p::ZoneKind) -> (&'static str, fn(&str) -> String) {
 /// catalog parameters of the lowered node at that iteration. An edit is a `SetArg` on the
 /// authored argument; an argument that is not a literal shows its expression and is locked.
 /// Returns the graph requests and the probe moves.
-pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, path: &[Symbol], o: &InspectorOpts) -> Inspected {
+pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, path: &[Symbol], o: &InspectorOpts) -> Inspected {
     let laid = match &o.laid {
         Some(k) => Some(k.clone()),
         None => crate::editor_model::pane_laid(value).cloned(),
@@ -1366,12 +1366,12 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, p
     if let Some(image) = preview {
         let (w, h) = rays::image::dimensions(&image);
         ui.inspector_readout(Some(width), "image-size", "image", &format!("{w} \u{d7} {h}"));
-        let height = 160.0f64.min(width * h as f64 / w as f64);
+        let height = 160.0f32.min(width * h as f32 / w as f32);
         let bx = ui.box_("image-thumbnail", pxui::ui::BoxOpts::default().w(pxui::ui::Size::Px(width)).h(pxui::ui::Size::Px(height)));
         let image = rays_shell::host::image(&image);
-        ui.draw(&bx, move |paint, (x, y, bw, bh)| {
-            let scale = (bw / w as f64).min(bh / h as f64);
-            paint.image(x, y, w as f64 * scale, h as f64 * scale, &image);
+        ui.draw(&bx, move |paint, Rect { x, y, w: bw, h: bh }| {
+            let scale = (bw / w as f32).min(bh / h as f32);
+            paint.image(x, y, w as f32 * scale, h as f32 * scale, &image);
         });
     }
     // a loop or scope says what it is, then the rows of its rail

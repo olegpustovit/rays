@@ -11,7 +11,7 @@ use pxui::theme::{self, Theme};
 use pxui::ui::*;
 use rays_shell::kit::{self, ButtonOpts};
 use rays_shell::layout;
-use rays_math::color;
+use pxui::geom::color;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
@@ -184,7 +184,7 @@ pub struct State {
     /// the closing brackets follow indentation
     pub parinfer: bool,
     /// the right-click menu while it is open
-    pub menu: Option<(f64, f64)>,
+    pub menu: Option<(f32, f32)>,
     /// the colour literal being edited: byte range, edited yet
     pub picker: Option<(i64, i64, bool)>,
     /// a successfully applied token scrub; retain printed line breaks until release
@@ -1711,7 +1711,7 @@ pub enum Intent {
     /// the debounced parse of the draft
     Live(Live),
     /// the right-click menu opened here, or closed
-    Menu(Option<(f64, f64)>),
+    Menu(Option<(f32, f32)>),
     ToggleWrap,
     /// the Document text while a number in it is dragged (`true` on the frame the drag ends)
     DocScrub(String, bool),
@@ -1765,7 +1765,7 @@ fn first_line(message: &str) -> String {
 
 /// The kit's colour control (swatch, hex, r g b) in a popup over the literal `text[a..b)`: the
 /// new literal while it is edited; `None` once the popup is dismissed.
-fn colour_popup(ui: &mut Ui, at: (f64, f64), text: &str, range: (i64, i64)) -> Option<String> {
+fn colour_popup(ui: &mut Ui, at: (f32, f32), text: &str, range: (i64, i64)) -> Option<String> {
     let (a, b) = range;
     let theme = ui.theme();
     let literal = sub(text, a + 1, b - a - 2);
@@ -1796,17 +1796,17 @@ fn colour_popup(ui: &mut Ui, at: (f64, f64), text: &str, range: (i64, i64)) -> O
             let field_w = ((cw - 100.0).max(60.0) - 16.0) / 3.0;
             let mut from_slider: Option<String> = None;
             for (index, (axis, cur)) in [("r", r), ("g", g), ("b", bl)].into_iter().enumerate() {
-                let ax_x = sliders_x + (index as f64 * (field_w + 8.0));
+                let ax_x = sliders_x + (index as f32 * (field_w + 8.0));
                 let (cap_y, size, ink) = (kit::cap_y(ui, cy, 20.0), kit::cap_size(ui), theme::ink_3(&theme));
                 let boxed2 = boxed.clone();
-                ui.draw(&boxed2, move |paint, (x, y, _, _)| {
+                ui.draw(&boxed2, move |paint, Rect { x, y, w: _, h: _ }| {
                     let _ = cap_y;
                     paint.text_s((x + ax_x + 2.0, kit::cap_y_paint(paint, y + cy, 20.0)), size, ink, axis);
                 });
                 let display = format!("{:.2}", cur);
                 let o = ValueFieldOpts {
                     display: Some(display.clone()),
-                    fraction: Some(cur),
+                    fraction: Some(cur as f32),
                     slide: Some(Rc::new(|f| format!("{:.2}", f))),
                     edit: false,
                     left: false,
@@ -1845,7 +1845,7 @@ fn tab_labels(width: i64, dirty: bool) -> Vec<(Tab, String)> {
 }
 
 /// The room the Selection / Graph / Document tabs of `view` take in the header of a panel `width` wide.
-pub fn tabs_width(ui: &mut Ui, width: i64, state: &State, shown: &Shown) -> f64 {
+pub fn tabs_width(ui: &mut Ui, width: i64, state: &State, shown: &Shown) -> f32 {
     let dirty = match dirty(state, shown) {
         Ok(dirty) => dirty,
         Err(error) => return ui.text_width(None, &diagnostic::to_string(&error)),
@@ -1858,7 +1858,7 @@ pub fn tabs_width(ui: &mut Ui, width: i64, state: &State, shown: &Shown) -> f64 
 }
 
 /// a find-bar button right-aligned in a row: it takes its width off `right` and leaves a gap
-fn find_button(ui: &mut Ui, key: &str, right: &mut f64, active: bool, name: &str, label: &str, at_y: f64) -> bool {
+fn find_button(ui: &mut Ui, key: &str, right: &mut f32, active: bool, name: &str, label: &str, at_y: f32) -> bool {
     let w = kit::button_width(ui, None, false, label);
     *right -= w;
     let o = ButtonOpts { active, ..ButtonOpts::default() };
@@ -1867,10 +1867,10 @@ fn find_button(ui: &mut Ui, key: &str, right: &mut f64, active: bool, name: &str
     hit
 }
 
-fn rule(ui: &mut Ui, theme: &Theme, key: &str, x: f64, width: f64, name: &str, at: f64) {
+fn rule(ui: &mut Ui, theme: &Theme, key: &str, x: f32, width: f32, name: &str, at: f32) {
     let boxed = ui.box_fmt(format_args!("{}{}", key, name), BoxOpts::default().w(Size::Px(width)).h(Size::Px(1.0)).at((x, at)));
     let edge = theme::edge(theme);
-    ui.draw(&boxed, move |paint, (x, y, w, h)| paint.fill(x, y, w, h, edge));
+    ui.draw(&boxed, move |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, edge));
 }
 
 /// the find bar between the text and the footer: one row, two with the replace row
@@ -1880,13 +1880,13 @@ fn find_bar(
     emit: &Emit,
     state: &State,
     theme: &Theme,
-    find_row: f64,
+    find_row: f32,
     key: &str,
-    width: f64,
-    x: f64,
+    width: f32,
+    x: f32,
     current: Option<(i64, i64)>,
     matches: &[(i64, i64)],
-    ay: f64,
+    ay: f32,
 ) {
     let Some(f) = &state.find else { return };
     let ry = ay + 1.0;
@@ -1927,7 +1927,7 @@ fn find_bar(
     let count_w = 76.0;
     let boxed = ui.box_fmt(format_args!("{}-find-count", key), BoxOpts::default().w(Size::Px(count_w)).h(Size::Px(find_row)).at((right - count_w, ry)));
     let (bad, ink2) = (total == 0 && !f.query.is_empty(), theme::ink_2(theme));
-    ui.draw(&boxed, move |paint, (x, y, w, h)| {
+    ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
         let tw = paint.text_width(None, &count);
         paint.text_c((x + w - tw, paint.text_top(None, y, h)), if bad { theme::invalid() } else { ink2 }, &count);
     });
@@ -2036,14 +2036,14 @@ fn caret_select(text: &str, state: &State, shown: &Shown) -> Rc<dyn Fn(i64) -> O
 }
 
 struct AreaCtx {
-    x: f64,
-    width: f64,
-    row: f64,
+    x: f32,
+    width: f32,
+    row: f32,
     theme: Theme,
-    footer: f64,
+    footer: f32,
     narrow: bool,
-    bar: f64,
-    find_row: f64,
+    bar: f32,
+    find_row: f32,
     language: Language,
     names: Names,
     time: f64,
@@ -2059,7 +2059,7 @@ fn editor_area(
     state: &State,
     shown: &Shown,
     key: &str,
-    at: (f64, f64),
+    at: (f32, f32),
     text: &str,
     errors: &[Diagnostic],
     spans: Vec<(i64, i64)>,
@@ -2340,7 +2340,7 @@ fn editor_area(
         }
         let boxed = ui.box_fmt(format_args!("{}-parinfer-label", key), BoxOpts::default().w(Size::Px(80.0)).h(Size::Px(c.bar)).at((switch_x - 8.0 - 80.0, ty + 1.0)));
         let ink2 = theme::ink_2(&theme);
-        ui.draw(&boxed, move |paint, (x, y, w, h)| {
+        ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
             let label = "parinfer";
             let tw = paint.text_width(None, label);
             paint.text_c((x + w - tw, paint.text_top(None, y, h)), ink2, label);
@@ -2365,7 +2365,7 @@ fn editor_area(
             let w = if label.is_empty() { 0.0 } else { kit::cap_width(ui, &label) };
             (label, w)
         };
-        ui.draw(&msg, move |paint, (x, y, w, h)| {
+        ui.draw(&msg, move |paint, Rect { x, y, w, h }| {
             // the state: a dot in the error colour or the accent for a draft, then what it says; the
             // first error is "n errors" in the error colour and its line and message in ink-2
             let tx = if wrong || can_apply {
@@ -2438,10 +2438,10 @@ fn editor_area(
 }
 
 /// The text pane: draws inside `Ui::frame` and returns the intents `Editor_frame` applies after it.
-fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f64>, vocab: &Vocab, names: &Names, time: f64, state: &State, shown: &Shown) -> Result<Vec<Intent>, Diagnostic> {
+fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, vocab: &Vocab, names: &Names, time: f64, state: &State, shown: &Shown) -> Result<Vec<Intent>, Diagnostic> {
     let (x, y, width, height) = bounds;
-    let row = ui.row_height() as f64;
-    let (x, y, width, height) = (x as f64, y as f64, width as f64, height as f64);
+    let row = ui.row_height() as f32;
+    let (x, y, width, height) = (x as f32, y as f32, width as f32, height as f32);
     let theme = ui.theme();
     let emit: Emit = Rc::new(RefCell::new(Vec::new()));
     // the printed document is made here, once a frame, never inside a token scrub
@@ -2455,7 +2455,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f6
     // `tabs_right` is where the header has room for them (`Chrome::header_slots`); none in a header too narrow
     if let Some(right) = tabs_right {
         let labels: Vec<String> = tabs.iter().map(|(_, l)| l.clone()).collect();
-        let (hit, _) = kit::segments(ui, "text-tab", right, y - layout::HEADER_HEIGHT as f64 + 2.0, &labels, active);
+        let (hit, _) = kit::segments(ui, "text-tab", right, y - layout::HEADER_HEIGHT as f32 + 2.0, &labels, active);
         if let Some(index) = hit {
             push(&emit, Intent::Tab(tabs[index as usize].0));
         }
@@ -2588,15 +2588,15 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f6
 }
 
 /// A printing refusal is visible in the pane and reaches the editor without replacing its draft.
-pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f64>, vocab: &Vocab, names: &Names, time: f64, state: &State, shown: &Shown) -> Vec<Intent> {
+pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, vocab: &Vocab, names: &Names, time: f64, state: &State, shown: &Shown) -> Vec<Intent> {
     match view_checked(ui, bounds, tabs_right, vocab, names, time, state, shown) {
         Ok(intents) => intents,
         Err(error) => {
             let (x, y, width, height) = bounds;
             let boxed = ui.box_("text-print-error", BoxOpts::default().flags(CLIP)
-                .w(Size::Px(width as f64)).h(Size::Px(height as f64)).at((x as f64, y as f64)));
+                .w(Size::Px(width as f32)).h(Size::Px(height as f32)).at((x as f32, y as f32)));
             let message = diagnostic::to_string(&error);
-            ui.draw(&boxed, move |paint, (x, y, _, _)| {
+            ui.draw(&boxed, move |paint, Rect { x, y, w: _, h: _ }| {
                 let top = paint.text_top(None, y, 24.0);
                 paint.text_c((x + 12.0, top), theme::invalid(), &message);
             });

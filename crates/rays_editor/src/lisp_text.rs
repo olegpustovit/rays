@@ -71,7 +71,7 @@ fn word(text: &str, t: &Token) -> String {
     scan::word(text, t)
 }
 
-pub fn colorize_now(theme: &Theme, text: &str) -> Vec<(i64, i64, rays_math::color::T)> {
+pub fn colorize_now(theme: &Theme, text: &str) -> Vec<(i64, i64, pxui::geom::color::T)> {
     // kit rev 3: forms in the float blue, a kind's namespace in the vector purple, keywords in the
     // bool red, numbers green, strings in the record green; brackets and comments recede to ink-3
     let ports = rays_graph::scope_paint::ports(theme);
@@ -727,7 +727,7 @@ pub fn context_at(text: &str, caret: usize) -> CodeContext {
 }
 
 /// The "#rrggbb" literals of the text with their colour.
-pub fn color_chips(text: &str) -> Vec<(i64, i64, rays_math::color::T)> {
+pub fn color_chips(text: &str) -> Vec<(i64, i64, pxui::geom::color::T)> {
     let lexed = lex(text);
     let bytes = text.as_bytes();
     let mut out = Vec::new();
@@ -735,7 +735,7 @@ pub fn color_chips(text: &str) -> Vec<(i64, i64, rays_math::color::T)> {
         if t.kind != Kind::Str || t.stop - t.start < 9 || bytes[t.stop - 1] != b'"' {
             continue;
         }
-        if let Ok(color) = rays_math::color::hex(sub(text, t.start + 1, t.stop - 1)) {
+        if let Ok(color) = pxui::geom::color::hex(sub(text, t.start + 1, t.stop - 1)) {
             out.push((t.start as i64, t.stop as i64, color));
         }
     }

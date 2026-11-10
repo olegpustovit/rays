@@ -319,7 +319,7 @@ pub fn run_spreadsheet() {
     let mut ui = pxui::ui::Ui::create(input::Platform::Apple, None, None, &rays_shell::host::BACKEND);
     let detail_width = ui.text_width(None, "Detail");
     ui.destroy();
-    let point = ((x + w) as f64 - 8. - detail_width / 2., y as f64 + 12.);
+    let point = ((x + w) as f64 - 8. - f64::from(detail_width) / 2., y as f64 + 12.);
     r.step(point, vec![]);
     r.step(point, vec![Event::PointerPressed(LB, point), Event::PointerReleased(LB, point)]);
     check(reduce::spreadsheet(&r.e, &[1, 0]).0 == 3, "spreadsheet Detail tab did not route shared input");

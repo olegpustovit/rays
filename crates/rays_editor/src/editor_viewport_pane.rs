@@ -6,7 +6,7 @@ use pxui::theme;
 use pxui::ui::{BoxOpts, Paint, Size, Ui, UiBox, CLIP};
 use rays_shell::kit;
 use rays_shell::layout::Leaf;
-use rays_math::color::T as Color;
+use pxui::geom::color::T as Color;
 
 use crate::editor_inspect::{group_digits, scene};
 use crate::editor_list::{piece, pieces};
@@ -19,14 +19,14 @@ pub type Rect = (i64, i64, i64, i64);
 /// runs past the pane's edge is cut there and never lies on its neighbour.
 fn view_layer(ui: &mut Ui, bounds: Rect, key: &str) -> UiBox {
     let (bx, by, bw, bh) = bounds;
-    let pane = ui.box_(key, BoxOpts::default().flags(CLIP).w(Size::Px(bw as f64)).h(Size::Px(bh as f64)).at((bx as f64, by as f64)));
+    let pane = ui.box_(key, BoxOpts::default().flags(CLIP).w(Size::Px(bw as f32)).h(Size::Px(bh as f32)).at((bx as f32, by as f32)));
     let mut inner: Option<UiBox> = None;
     ui.within(&pane, &mut |ui| inner = Some(ui.box_("marks", BoxOpts::default().w(Size::Grow).h(Size::Grow))));
     inner.expect("marks box")
 }
 
 /// A label in the row at `y`; `pl` and `pr` points of ground beside it; its width.
-fn label(paint: &mut Paint, theme: &theme::Theme, rh: f64, x: f64, y: f64, pl: f64, pr: f64, color: Option<Color>, text: &str) -> f64 {
+fn label(paint: &mut Paint, theme: &theme::Theme, rh: f32, x: f32, y: f32, pl: f32, pr: f32, color: Option<Color>, text: &str) -> f32 {
     let w = paint.cap_width(text);
     paint.fill(x - pl, y, w + pl + pr, rh, theme.panel);
     let cy = kit::cap_y_paint(paint, y, rh);
@@ -42,7 +42,7 @@ fn field(node: &kind_graph::Node, name: &str) -> Option<f64> {
 }
 
 /// The draw of the traced readout of a viewport (its samples are the caption's "n/cap spp").
-fn traced_readout(paint: &mut Paint, theme: &theme::Theme, rh: f64, narrow: bool, (x, y, w, h): (f64, f64, f64, f64), t: &Trace) {
+fn traced_readout(paint: &mut Paint, theme: &theme::Theme, rh: f32, narrow: bool, (x, y, w, h): (f32, f32, f32, f32), t: &Trace) {
     if !(w > 200.0 && h > 120.0) {
         return;
     }
@@ -51,7 +51,7 @@ fn traced_readout(paint: &mut Paint, theme: &theme::Theme, rh: f64, narrow: bool
     let oy = y + if narrow { 8.0 } else { 12.0 };
     let ox = fx + 8.0;
     let title = paint.font_size * theme::TITLE_SIZE / theme::FONT_SIZE;
-    let bar_w = if narrow { 112.0 } else { 224.0f64.min(w - 24.0) };
+    let bar_w = if narrow { 112.0 } else { 224.0f32.min(w - 24.0) };
     paint.fill(fx, oy, bar_w + 16.0, 3.0 * rh + 24.0, theme.panel);
     let tw = label(paint, theme, rh, ox, oy, 0.0, 0.0, Some(theme.foreground), "Path traced");
     if !narrow {
@@ -68,7 +68,7 @@ fn traced_readout(paint: &mut Paint, theme: &theme::Theme, rh: f64, narrow: bool
     // the bar: a line-3 box 4 high, filled inside it with the share of the samples
     let by = row2 + rh + 4.0;
     paint.stroke(ox + 0.5, by + 0.5, bar_w - 1.0, 3.0, theme::border(theme));
-    paint.fill(ox + 1.0, by + 1.0, (bar_w - 2.0) * 1.0f64.min(t.samples as f64 / t.cap.max(1) as f64), 2.0, theme.foreground);
+    paint.fill(ox + 1.0, by + 1.0, (bar_w - 2.0) * 1.0f32.min(t.samples as f32 / t.cap.max(1) as f32), 2.0, theme.foreground);
     // under it: the seconds the accumulation took and, on a wide body, the bounces and the film in
     // pixels
     let (fw, fh) = t.film;
@@ -88,7 +88,7 @@ fn traced_readout(paint: &mut Paint, theme: &theme::Theme, rh: f64, narrow: bool
     paint.cap((ox, cy), None, &text);
 }
 
-fn camera_readout(paint: &mut Paint, theme: &theme::Theme, rh: f64, (x, y, w, _h): (f64, f64, f64, f64), node: &kind_graph::Node) {
+fn camera_readout(paint: &mut Paint, theme: &theme::Theme, rh: f32, (x, y, w, _h): (f32, f32, f32, f32), node: &kind_graph::Node) {
     // the render camera: its name, its lens and focus as a two-column grid whose labels and values
     // both end at their column's right edge, 10 apart
     let mut rows: Vec<(String, String)> = vec![("Camera".to_string(), node.label.clone())];
@@ -108,12 +108,12 @@ fn camera_readout(paint: &mut Paint, theme: &theme::Theme, rh: f64, (x, y, w, _h
             rows.push(("Focus".to_string(), cfmt::f(d, 2)));
         }
     }
-    let value_w = rows.iter().fold(0.0f64, |m, (_, v)| m.max(paint.text_width(None, v)));
-    let label_w = rows.iter().fold(0.0f64, |m, (l, _)| m.max(paint.cap_width(l)));
+    let value_w = rows.iter().fold(0.0f32, |m, (_, v)| m.max(paint.text_width(None, v)));
+    let label_w = rows.iter().fold(0.0f32, |m, (l, _)| m.max(paint.cap_width(l)));
     let right = x + w - 12.0;
-    paint.fill(right - value_w - 10.0 - label_w - 8.0, y + 12.0, value_w + 10.0 + label_w + 8.0, rh * rows.len() as f64 + 4.0, theme.panel);
+    paint.fill(right - value_w - 10.0 - label_w - 8.0, y + 12.0, value_w + 10.0 + label_w + 8.0, rh * rows.len() as f32 + 4.0, theme.panel);
     for (i, (name, text)) in rows.iter().enumerate() {
-        let ry = y + 12.0 + rh * i as f64;
+        let ry = y + 12.0 + rh * i as f32;
         let cy = kit::cap_y_paint(paint, ry, rh);
         let nw = paint.cap_width(name);
         paint.cap((right - value_w - 10.0 - nw, cy), None, name);
@@ -138,7 +138,7 @@ pub fn draw_viewport_pane<'a>(
         let layer = view_layer(ui, leaf.body, "viewport-caption");
         let theme = ui.theme();
         let text = text.clone();
-        ui.draw(&layer, move |paint, (x, y, _, h)| {
+        ui.draw(&layer, move |paint, pxui::geom::Rect { x, y, h, .. }| {
             let (px, py) = (x + 12.0, y + h - 24.0);
             let w = paint.cap_width(&text) + 8.0;
             paint.fill(px - 4.0, py, w, 16.0, theme.panel);
@@ -150,7 +150,7 @@ pub fn draw_viewport_pane<'a>(
     // brackets and name, and the scene's size and the frame rate at the lower right; every label is
     // a row high and sits on a patch of the ground
     let theme = ui.theme();
-    let rh = ui.row_height() as f64;
+    let rh = ui.row_height() as f32;
     // a viewport window labels its frame at the top left: the shading and the camera ("Wire . top")
     for (leaf, _) in roots {
         if let (Panel::View(key), Some((_, mode))) = (&leaf.panel, &value.view_tools) {
@@ -167,11 +167,11 @@ pub fn draw_viewport_pane<'a>(
                 let w = kit::cap_width(ui, &text) + 8.0;
                 let boxed = ui.box_(
                     &format!("viewport-window-label-{key}"),
-                    BoxOpts::default().w(Size::Px(w)).h(Size::Px(16.0)).at((bx as f64 + 8.0, by as f64 + 4.0)),
+                    BoxOpts::default().w(Size::Px(w)).h(Size::Px(16.0)).at((bx as f32 + 8.0, by as f32 + 4.0)),
                 );
                 ui.to_front(i64::MAX, &boxed);
                 let size = kit::cap_size(ui);
-                ui.draw(&boxed, move |paint, (x, y, _, h)| {
+                ui.draw(&boxed, move |paint, pxui::geom::Rect { x, y, h, .. }| {
                     let cy = paint.text_top(Some(size), y, h);
                     paint.cap((x + 4.0, cy), None, &text);
                 });
@@ -211,9 +211,9 @@ pub fn draw_viewport_pane<'a>(
         // camera readout, no object count; a wide one follows viewport.html
         let narrow = bw < 1000;
         let fps = value.status_fps;
-        ui.draw(&overlay, move |paint, (x, y, w, h)| {
+        ui.draw(&overlay, move |paint, pxui::geom::Rect { x, y, w, h }| {
             if let Some((gx, gy, gw, gh)) = gate {
-                let (gx, gy, gw, gh) = (gx as f64, gy as f64, gw as f64, gh as f64);
+                let (gx, gy, gw, gh) = (gx as f32, gy as f32, gw as f32, gh as f32);
                 paint.stroke(gx + 0.5, gy + 0.5, gw - 1.0, gh - 1.0, theme::edge(&theme));
                 // the corner marks lie on the frame's own edge: 16 points, 1 wide, in ink
                 paint.brackets(gx, gy, gw, gh, 0.0, 16.0, 1.0, theme.foreground);
@@ -228,7 +228,7 @@ pub fn draw_viewport_pane<'a>(
                 traced_readout(paint, &theme, rh, narrow, (x, y, w, h), t);
             }
             if let Some(((sx, sy, sw, sh), name)) = &boxed {
-                let (sx, sy, sw, sh) = (*sx as f64, *sy as f64, *sw as f64, *sh as f64);
+                let (sx, sy, sw, sh) = (*sx as f32, *sy as f32, *sw as f32, *sh as f32);
                 if sw > 8.0 && sh > 8.0 {
                     paint.brackets(sx, sy, sw, sh, 4.0, 8.0, 2.0, theme.accent);
                     // the name in the accent, in the row that ends where the brackets begin, then how
@@ -258,7 +258,7 @@ pub fn draw_viewport_pane<'a>(
             if let Some(fps) = fps {
                 items.push((format!("{fps} fps"), Some(theme.foreground)));
             }
-            let mut total = 12.0 * (items.len() as f64 - 1.0);
+            let mut total = 12.0 * (items.len() as f32 - 1.0);
             for (text, _) in &items {
                 total += paint.cap_width(text);
             }

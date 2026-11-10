@@ -19,6 +19,7 @@ use flow_native::workspace_images;
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::Value as EValue;
 use input::{Event, Key, MouseButton};
+use pxui::geom::p64;
 use pxui::ui::Ui;
 use rays_shell::layout::Bounds;
 use rays::frame;
@@ -252,16 +253,16 @@ pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key],
     let (world_drag, engaged) = match (&signal, &view) {
         (Some(s), Some(box_)) => {
             let drag = match world_drag {
-                None if s.pressed && s.button == Some(MouseButton::LeftButton) => match world_operation(core, area, s.press_point, ui.press_keys(box_).contains(&Key::Shift)) {
-                    Some(operation) => { seal(core); Some(self::WorldDrag { operation, point: s.press_point, area }) },
+                None if s.pressed && s.button == Some(MouseButton::LeftButton) => match world_operation(core, area, p64(s.press_point), ui.press_keys(box_).contains(&Key::Shift)) {
+                    Some(operation) => { seal(core); Some(self::WorldDrag { operation, point: p64(s.press_point), area }) },
                     None => None,
                 },
                 drag => drag,
             };
             match drag {
-                Some(drag) if s.released => { move_world(core, &drag, s.release_point); seal(core); (None, true) },
-                Some(drag) if s.held => { move_world(core, &drag, s.pointer); (Some(self::WorldDrag { point: s.pointer, ..drag }), true) },
-                Some(drag) => { move_world(core, &drag, s.pointer); seal(core); (None, true) },
+                Some(drag) if s.released => { move_world(core, &drag, p64(s.release_point)); seal(core); (None, true) },
+                Some(drag) if s.held => { move_world(core, &drag, p64(s.pointer)); (Some(self::WorldDrag { point: p64(s.pointer), ..drag }), true) },
+                Some(drag) => { move_world(core, &drag, p64(s.pointer)); seal(core); (None, true) },
                 None => (None, false),
             }
         }
@@ -339,7 +340,7 @@ pub fn pick_in_views(value: &mut LoopModel, focused: &Focus, camera: &V::Camera,
             Event::PointerPressed(MouseButton::LeftButton, point) => press = Some(*point),
             Event::PointerReleased(MouseButton::LeftButton, (qx, qy)) => {
                 match press {
-                    Some((px, py)) if (qx - px).hypot(qy - py) < pxui::ui::DRAG_THRESHOLD => clicks.insert(0, (*qx, *qy)),
+                    Some((px, py)) if (qx - px).hypot(qy - py) < pxui::ui::DRAG_THRESHOLD as f64 => clicks.insert(0, (*qx, *qy)),
                     _ => {}
                 }
                 press = None;

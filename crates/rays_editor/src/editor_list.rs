@@ -11,7 +11,7 @@ use flow_syntax::{context, ty};
 use flow_sop::network as net;
 use param::Value;
 use rays_shell::tree::{self, DropAt, Intent, Row};
-use rays_math::color::{self, T as Color};
+use pxui::geom::color::{self, T as Color};
 use rays_math::mat4;
 use sop::custom;
 use sop::edit_graph;

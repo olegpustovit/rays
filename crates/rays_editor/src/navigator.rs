@@ -17,7 +17,7 @@ use input::Key;
 use pxui::theme::{self, Theme};
 use pxui::ui::*;
 use rays_shell::kit::{self, ButtonOpts};
-use rays_math::color::{self, T as Color};
+use pxui::geom::color::{self, T as Color};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -59,7 +59,7 @@ pub struct State {
     /// graphs whose node rows are unfolded under their row
     opened: Vec<String>,
     /// the right-click menu: its point and the graph row it was opened on
-    context: Option<(f64, f64, Option<String>)>,
+    context: Option<(f32, f32, Option<String>)>,
 }
 
 /// The contexts "New graph" offers: sop, scene, draw, image, value, material.
@@ -674,7 +674,7 @@ fn type_color(theme: &Theme, t: &Ty) -> Color {
     }
 }
 
-fn height_of(rh: f64, row: &Row) -> f64 {
+fn height_of(rh: f32, row: &Row) -> f32 {
     match row {
         Row::Head(..) => rh + 16.0,
         _ => rh,
@@ -682,7 +682,7 @@ fn height_of(rh: f64, row: &Row) -> f64 {
 }
 
 /// the top of every row below the search field, and the total
-fn tops(rh: f64, rows: &[Row]) -> Vec<f64> {
+fn tops(rh: f32, rows: &[Row]) -> Vec<f32> {
     let mut tops = vec![0.0; rows.len() + 1];
     // a section has 16 points of space above it, the first one 4
     for (i, r) in rows.iter().enumerate() {
@@ -692,12 +692,12 @@ fn tops(rh: f64, rows: &[Row]) -> Vec<f64> {
 }
 
 /// the search row: 4 points of margin over a 24-point row
-const SEARCH_HEIGHT: f64 = 28.0;
+const SEARCH_HEIGHT: f32 = 28.0;
 
 /// Every row with its rectangle when not scrolled: where `view` draws it and where a click on it lands.
-pub fn row_rects(state: &State, pa: &Params, bounds: (i64, i64, i64, i64)) -> Vec<(Row, (f64, f64, f64, f64))> {
+pub fn row_rects(state: &State, pa: &Params, bounds: (i64, i64, i64, i64)) -> Vec<(Row, (f32, f32, f32, f32))> {
     let (x, y, w, _) = bounds;
-    let (rh, x, y, w) = (24.0, x as f64, y as f64, w as f64);
+    let (rh, x, y, w) = (24.0, x as f32, y as f32, w as f32);
     let rows = rows(w >= 300.0, state, pa);
     let t = tops(rh, &rows);
     rows.into_iter().enumerate().map(|(i, r)| (r, (x, y + SEARCH_HEIGHT + t[i], w, t[i + 1] - t[i]))).collect()
@@ -705,29 +705,29 @@ pub fn row_rects(state: &State, pa: &Params, bounds: (i64, i64, i64, i64)) -> Ve
 
 struct PaintCtx {
     rows: Vec<Row>,
-    tops: Vec<f64>,
+    tops: Vec<f32>,
     theme: Theme,
     muted: Color,
     hovered: Option<usize>,
-    rh: f64,
-    body: f64,
-    w: f64,
-    top: f64,
-    x: f64,
-    scroll: f64,
+    rh: f32,
+    body: f32,
+    w: f32,
+    top: f32,
+    x: f32,
+    scroll: f32,
     wide: bool,
-    label_w: f64,
+    label_w: f32,
     has_scope: bool,
     opened: Vec<String>,
     small: i64,
 }
 
-fn ell<'a>(paint: &mut Paint, limit: f64, label: &'a str) -> Cow<'a, str> {
+fn ell<'a>(paint: &mut Paint, limit: f32, label: &'a str) -> Cow<'a, str> {
     ellipsis(&mut |s| paint.text_width(None, s), limit, label)
 }
 
 /// hover is the faintest line, the current row the control fill, the selected one adds the accent brackets
-fn shade(paint: &mut Paint, c: &PaintCtx, k: usize, ry: f64, rhh: f64, selected: bool, current: bool) {
+fn shade(paint: &mut Paint, c: &PaintCtx, k: usize, ry: f32, rhh: f32, selected: bool, current: bool) {
     let (x, w, theme) = (c.x, c.w, &c.theme);
     if selected {
         paint.fill(x + 4.0, ry, w - 8.0, rhh, theme.control);
@@ -740,7 +740,7 @@ fn shade(paint: &mut Paint, c: &PaintCtx, k: usize, ry: f64, rhh: f64, selected:
 }
 
 /// the detail at the row's end takes at most half the row; the label keeps the rest
-fn right_text(paint: &mut Paint, c: &PaintCtx, ty: f64, label: &str) -> f64 {
+fn right_text(paint: &mut Paint, c: &PaintCtx, ty: f32, label: &str) -> f32 {
     let label = ell(paint, (c.w - 24.0) / 2.0, label);
     let tw = paint.text_width(None, &label);
     paint.text_c((c.x + c.w - tw - 12.0, ty), c.muted, &label);
@@ -748,13 +748,13 @@ fn right_text(paint: &mut Paint, c: &PaintCtx, ty: f64, label: &str) -> f64 {
 }
 
 /// a label with a detail at the right stops short of it instead of running under it
-fn labelled(paint: &mut Paint, c: &PaintCtx, ty: f64, color: Color, from: f64, label: &str, detail: &str) {
+fn labelled(paint: &mut Paint, c: &PaintCtx, ty: f32, color: Color, from: f32, label: &str, detail: &str) {
     let edge = right_text(paint, c, ty, detail);
     let cut = ell(paint, edge - from, label);
     paint.text_c((from, ty), color, &cut);
 }
 
-fn square(paint: &mut Paint, c: &PaintCtx, ry: f64, sx: f64, color: Color) {
+fn square(paint: &mut Paint, c: &PaintCtx, ry: f32, sx: f32, color: Color) {
     paint.fill(sx, ry + (c.rh / 2.0) - 4.0, 8.0, 8.0, color);
 }
 
@@ -765,12 +765,12 @@ fn paint_row(paint: &mut Paint, c: &PaintCtx, k: usize, row: &Row) {
     let ink_3 = theme::ink_3(theme);
     let ty = paint.text_top(None, ry, rh);
     // a zone's kind: an accent label, no fill
-    let tag = |paint: &mut Paint, tx: f64, glyph: &str| -> f64 {
+    let tag = |paint: &mut Paint, tx: f32, glyph: &str| -> f32 {
         paint.cap((tx, kit::cap_y_paint(paint, ry, rh)), Some(theme.accent), glyph);
         tx + paint.cap_width(glyph) + 8.0
     };
     // the right columns: a 20-point count, or the two 12-point flags 8 apart
-    let flag_x = |column: i64| x + w - 12.0 - 12.0 - ((1 - column) as f64 * 20.0);
+    let flag_x = |column: i64| x + w - 12.0 - 12.0 - ((1 - column) as f32 * 20.0);
     match row {
         Row::Head(s, right) => {
             let cy = kit::cap_y_paint(paint, ry + rhh - rh, rh);
@@ -798,14 +798,14 @@ fn paint_row(paint: &mut Paint, c: &PaintCtx, k: usize, row: &Row) {
             let ox = if o.chosen && wide {
                 x + 26.5
             } else {
-                x + (if wide { 38.0 } else { 20.0 }) + (8.0 * o.depth as f64) - if o.chosen { 1.0 } else { 0.0 }
+                x + (if wide { 38.0 } else { 20.0 }) + (8.0 * o.depth as f32) - if o.chosen { 1.0 } else { 0.0 }
             };
             // the selected object stands in the root's indent with a chevron of its own
             if o.chosen && wide {
                 paint.chevron((x + 15.0, ry + (rh / 2.0)), Dir::Down, theme.foreground);
             }
             let right = x + w - if o.chosen { 7.0 } else { 12.0 };
-            let flag_x = |column: i64| right - 12.0 - ((1 - column) as f64 * 20.0);
+            let flag_x = |column: i64| right - 12.0 - ((1 - column) as f32 * 20.0);
             paint.cap((ox, kit::cap_y_paint(paint, ry, rh)), Some(if o.chosen { theme.foreground } else { muted }), &o.letter);
             let cy = ry + (rh / 2.0);
             // a flag is a 12-point box with its 1-point line and a 6-point mark inset 2 inside it: the render camera's is the accent
@@ -880,7 +880,7 @@ fn paint_row(paint: &mut Paint, c: &PaintCtx, k: usize, row: &Row) {
                     // a function: the diamond of its port, a 7-point square turned 45 degrees (10 across), in half-point rows
                     let (cx, cy) = (x + 16.0, ry + (rh / 2.0));
                     for kk in 0..20 {
-                        let off = ((kk as f64 + 0.5) * 0.5) - 5.0;
+                        let off = ((kk as f32 + 0.5) * 0.5) - 5.0;
                         let half = 5.0 - off.abs();
                         paint.fill(cx - half, cy + off - 0.25, 2.0 * half, 0.5, rays_graph::scope_paint::ports(theme).fn_);
                     }
@@ -914,7 +914,7 @@ fn paint_row(paint: &mut Paint, c: &PaintCtx, k: usize, row: &Row) {
         }
         Row::NodeRow { depth, label, detail, zone, ty: node_ty, result, selected, .. } => {
             shade(paint, c, k, ry, rhh, *selected, false);
-            let nx = x + 28.0 + (12.0 * *depth as f64);
+            let nx = x + 28.0 + (12.0 * *depth as f32);
             match zone {
                 Some(glyph) => {
                     let from = tag(paint, nx, glyph);
@@ -959,14 +959,14 @@ fn paint_rows(ui: &mut Ui, content: &UiBox, c: PaintCtx) {
 }
 
 /// the wide sheet's bar of its keys and the graph count
-fn paint_footer(ui: &mut Ui, theme: Theme, muted: Color, rh: f64, bounds: (f64, f64, f64, f64), footer: f64, graphs: usize) {
+fn paint_footer(ui: &mut Ui, theme: Theme, muted: Color, rh: f32, bounds: (f32, f32, f32, f32), footer: f32, graphs: usize) {
     if footer <= 0.0 {
         return;
     }
     let (x, y, w, h) = bounds;
     let boxed = ui.box_("navigator-footer", BoxOpts::default().w(Size::Px(w)).h(Size::Px(footer)).at((x, y + h - footer)));
     let small = kit::cap_size(ui);
-    ui.draw(&boxed, move |paint, (fx, fy, fw, _)| {
+    ui.draw(&boxed, move |paint, Rect { x: fx, y: fy, w: fw, h: _ }| {
         paint.fill(fx, fy, fw, footer, theme.panel);
         paint.fill(fx, fy, fw, 1.0, theme::edge(&theme));
         let mut tx = fx + 12.0;
@@ -983,10 +983,10 @@ fn paint_footer(ui: &mut Ui, theme: Theme, muted: Color, rh: f64, bounds: (f64, 
     });
 }
 
-fn paint_thumb(ui: &mut Ui, theme: Theme, total: f64, rh: f64, boxed: &UiBox) {
+fn paint_thumb(ui: &mut Ui, theme: Theme, total: f32, rh: f32, boxed: &UiBox) {
     // the scroll thumb: 4 points wide, 2 from the edge, line-3, over a track 6 points in from both ends
     let scroll = ui.scroll_position(boxed);
-    ui.draw_over(boxed, move |paint, (bx, by, bw, bh)| {
+    ui.draw_over(boxed, move |paint, Rect { x: bx, y: by, w: bw, h: bh }| {
         let content = total + rh;
         if content > bh {
             let track = (bh - 12.0).max(1.0);
@@ -1002,14 +1002,14 @@ fn input_sliders(
     ui: &mut Ui,
     emit: &mut Vec<Intent>,
     rows: &[Row],
-    tops: &[f64],
-    top: f64,
-    scroll: f64,
-    rh: f64,
-    body: f64,
-    x: f64,
-    w: f64,
-    label_w: f64,
+    tops: &[f32],
+    top: f32,
+    scroll: f32,
+    rh: f32,
+    body: f32,
+    x: f32,
+    w: f32,
+    label_w: f32,
     typed_row: Option<usize>,
 ) {
     // the sliders of the inputs, over their rows: a drag scrubs and Option-click types, as every numeric field of
@@ -1023,10 +1023,10 @@ fn input_sliders(
                 let show = move |v: f64| if integer { format!("{}", v.round() as i64) } else { cfmt::g(v, 3) };
                 // a scrub from the value at the press, like a card's field: 1 per 6 points for an integer, a hundredth of the
                 // magnitude per point for a float, Shift is finer
-                let scrub: Rc<dyn Fn(&str, f64, bool) -> String> = Rc::new(move |origin, dx, shift| match (origin).parse::<f64>().ok() {
+                let scrub: Rc<dyn Fn(&str, f32, bool) -> String> = Rc::new(move |origin, dx, shift| match (origin).parse::<f64>().ok() {
                     None => origin.to_owned(),
-                    Some(o) if integer => show(o + (dx / if shift { 24.0 } else { 6.0 }).round()),
-                    Some(o) => show(o + (dx * 0.01 * o.abs().max(1.0) * if shift { 0.1 } else { 1.0 })),
+                    Some(o) if integer => show(o + (dx as f64 / if shift { 24.0 } else { 6.0 }).round()),
+                    Some(o) => show(o + (dx as f64 * 0.01 * o.abs().max(1.0) * if shift { 0.1 } else { 1.0 })),
                 });
                 let text = show(*value);
                 let o = ValueFieldOpts { scrub: Some(scrub), edit: typed_row == Some(k), ..ValueFieldOpts::default() };
@@ -1048,9 +1048,9 @@ fn input_sliders(
 /// Draw the panel in `bounds` (scrolling, searching, sliders).
 pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params) -> (State, Vec<Intent>) {
     let theme = ui.theme();
-    let rh = ui.row_height() as f64;
+    let rh = ui.row_height() as f32;
     let (x, y, w, h) = bounds;
-    let (x, y, w, h) = (x as f64, y as f64, w as f64, h as f64);
+    let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);
     let muted = theme::muted(&theme);
     // the search field above the list
     let was_typing = state.typing;
@@ -1083,7 +1083,7 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
     if state.query.is_empty() && !typing && state.rename.is_none() {
         let boxed = ui.box_("navigator-placeholder", BoxOpts::default().flags(CLIP).w(Size::Px(field_w - 4.0)).h(Size::Px(20.0)).at((x + 10.0, y + 6.0)));
         let wide_field = w >= 300.0;
-        ui.draw(&boxed, move |paint, (px, py, pw, h)| {
+        ui.draw(&boxed, move |paint, Rect { x: px, y: py, w: pw, h }| {
             let ty = paint.text_top(None, py, h);
             paint.text_c((px, ty), muted, "/");
             let cut = ell(paint, pw - 12.5, if wide_field { "go to node, graph, function" } else { "go to" });
@@ -1108,7 +1108,7 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
     let mut content: Option<UiBox> = None;
     ui.within(&boxed, &mut |ui: &mut Ui| content = Some(ui.box_("navigator-content", BoxOpts::default().w(Size::Px(w)).h(Size::Px(total + rh)))));
     let content = content.expect("navigator content");
-    let row_at = |(_, py): (f64, f64)| -> Option<usize> {
+    let row_at = |(_, py): (f32, f32)| -> Option<usize> {
         let off = py - top + scroll;
         if py < top || off >= total {
             None
@@ -1167,7 +1167,7 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
                 let path = o.home.clone().unwrap();
                 let px = signal.release_point.0;
                 let flag = |column: i64| {
-                    let fx = x + w - 12.0 - 12.0 - ((1 - column) as f64 * 20.0);
+                    let fx = x + w - 12.0 - 12.0 - ((1 - column) as f32 * 20.0);
                     px >= fx - 4.0 && px < fx + 16.0
                 };
                 match (o.visible, o.render) {

@@ -120,13 +120,13 @@ fn body(r: &mut Bloom) {
         let active = dump_line(&r.e, "pane graph");
         let rects = n::row_rects(&state, &params(r, &active, scope_of(&active)), outline(r));
         let (_, (x, y, w, h)) = rects.into_iter().find(|(row, _)| n::describe(row).contains(text)).unwrap_or_else(|| panic!("no Navigator row {text}"));
-        (x + 20. + w / 8., y + h / 2.)
+        (f64::from(x + 20. + w / 8.), f64::from(y + h / 2.))
     };
     {
         let active = dump_line(&r.e, "pane graph");
         let rects = n::row_rects(&state, &params(r, &active, scope_of(&active)), outline(r));
         let (_, (x, y, _, h)) = rects.into_iter().find(|(row, _)| n::describe(row).contains("flower · ")).expect("no flower row");
-        r.click((x + 5., y + h / 2.));
+        r.click((f64::from(x + 5.), f64::from(y + h / 2.)));
     }
     let p = row_centre(r, "R root (scene)");
     r.click(p);
@@ -164,7 +164,7 @@ fn body(r: &mut Bloom) {
     // an input's slider writes the graph input's default
     let rects = n::row_rects(&state, &params(r, "flower", scope.clone()), outline(r));
     let (_, (x, y, w, h)) = rects.into_iter().find(|(row, _)| n::describe(row).contains("input petals")).expect("no petals slider");
-    let (slider_y, slider_x, slider_w) = (y + h / 2., x + 76., w - 86.);
+    let (slider_y, slider_x, slider_w) = (f64::from(y + h / 2.), f64::from(x + 76.), f64::from(w - 86.));
     let from = (slider_x + slider_w * 0.3, slider_y);
     let to = (slider_x + slider_w * 0.9, slider_y);
     r.step(&[], &[], from, vec![Event::PointerMoved(from)]);
@@ -195,7 +195,7 @@ fn body(r: &mut Bloom) {
     let p = row_centre(r, "heart");
     r.click(p);
     assert_eq!(dump_line(&r.e, "scope selected"), "flower/heart", "the heart is selected");
-    r.click((tool.0 + tool.2 / 2., tool.1 + tool.3 / 2.));
+    r.click((f64::from(tool.0 + tool.2 / 2.), f64::from(tool.1 + tool.3 / 2.)));
     assert_eq!(editor::undo_label(&r.e).as_deref(), Some("Make reusable function"), "the defn tool made a function: {:?} / {}", editor::undo_label(&r.e), dump_line(&r.e, "edit error"));
     assert!(source(&r.e).contains("(defn heart_2 :context sop []"), "a defn with its own name: {}", source(&r.e));
     assert!(source(&r.e) != before, "the text changed");

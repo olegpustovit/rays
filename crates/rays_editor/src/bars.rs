@@ -19,7 +19,7 @@ pub enum Tool {
     Outline,
 }
 
-pub type Rect = (f64, f64, f64, f64);
+pub type Rect = (f32, f32, f32, f32);
 pub type Header = (i64, i64, i64, i64);
 
 const TOOLS: [(Tool, &str, &str); 6] = [
@@ -39,8 +39,8 @@ const VIEWS: [&str; 3] = ["Graph", "List", "Text"];
 
 type Placed = (Tool, &'static str, &'static str, Rect);
 
-fn tool_rects(outline: bool, ui: &mut Ui, header: Header, from: f64) -> [Option<Placed>; 7] {
-    let (hx, hy, hw, hh) = (header.0 as f64, header.1 as f64, header.2 as f64, header.3 as f64);
+fn tool_rects(outline: bool, ui: &mut Ui, header: Header, from: f32) -> [Option<Placed>; 7] {
+    let (hx, hy, hw, hh) = (header.0 as f32, header.1 as f32, header.2 as f32, header.3 as f32);
     // the views are 12 apart and end 36 points from the edge (8, the 20-point button, 8)
     let mut views_w = 24.0;
     for v in VIEWS.iter() { views_w += ui.text_width(None, v); }
@@ -78,25 +78,25 @@ fn tool_rects(outline: bool, ui: &mut Ui, header: Header, from: f64) -> [Option<
 
 /// Where a toolbar button sits (`from` points after the header's left edge, see
 /// `Rays_shell.Chrome.tools_start`); none when the header is too narrow for it.
-pub fn tool_rect(outline: bool, ui: &mut Ui, header: Header, from: f64, tool: Tool) -> Option<Rect> {
+pub fn tool_rect(outline: bool, ui: &mut Ui, header: Header, from: f32, tool: Tool) -> Option<Rect> {
     tool_rects(outline, ui, header, from).into_iter().flatten().find(|(t, ..)| *t == tool).map(|(.., r)| r)
 }
 
 /// The 1 x 12 rule that parts a header's title from the tools that start at `from`.
-pub fn rule(ui: &mut Ui, key: &str, header: Header, from: f64) {
+pub fn rule(ui: &mut Ui, key: &str, header: Header, from: f32) {
     let (hx, hy, _, hh) = header;
     let b = ui.box_(
         key,
-        BoxOpts::default().w(UiSize::Px(1.0)).h(UiSize::Px(12.0)).at((hx as f64 + from - 13.0, hy as f64 + ((hh - 12) as f64 / 2.0))),
+        BoxOpts::default().w(UiSize::Px(1.0)).h(UiSize::Px(12.0)).at((hx as f32 + from - 13.0, hy as f32 + ((hh - 12) as f32 / 2.0))),
     );
     let border = pxui::theme::border(&ui.theme());
-    ui.draw(&b, move |paint, (x, y, w, h)| paint.fill(x, y, w, h, border));
+    ui.draw(&b, move |paint, pxui::geom::Rect { x, y, w, h }| paint.fill(x, y, w, h, border));
 }
 
 /// The toolbar in a panel header, `from` points after the header's left edge; the tool clicked this
 /// frame. `outline` adds the Outline button (when the window has none), which splits one in to the
 /// right of the graph.
-pub fn graph_tools(outline: bool, ui: &mut Ui, header: Header, from: f64, enabled: &dyn Fn(Tool) -> bool) -> Option<Tool> {
+pub fn graph_tools(outline: bool, ui: &mut Ui, header: Header, from: f32, enabled: &dyn Fn(Tool) -> bool) -> Option<Tool> {
     let rects = tool_rects(outline, ui, header, from);
     if rects[0].is_some() {
         rule(ui, "workspace-tool-rule", header, from);

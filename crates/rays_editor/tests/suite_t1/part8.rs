@@ -237,7 +237,7 @@ pub fn run_outline_button() {
     let mut ui = pxui::ui::Ui::create(input::Platform::Apple, Some(11), None, &rays_shell::host::BACKEND);
     let from = rays_shell::chrome::tools_start(&mut ui, true, false, false, &format!("Graph\t{} / value", r.dump("pane graph")));
     let (x, y) = match rays_editor::bars::tool_rect(true, &mut ui, header, from, rays_editor::bars::Tool::Outline) {
-        Some((x, y, w, h)) => (x + w / 2., y + h / 2.),
+        Some((x, y, w, h)) => (f64::from(x + w / 2.), f64::from(y + h / 2.)),
         None => fail("the Outline button is cut off"),
     };
     ui.destroy();

@@ -142,7 +142,7 @@ pub fn carry_tests() {
             let text = N::describe(&row);
             let text = text.strip_prefix("> ").unwrap_or(&text).to_string();
             if text.starts_with(&format!("{graph} · ")) {
-                return (x + w / 2., y + h / 2.);
+                return (f64::from(x + w / 2.), f64::from(y + h / 2.));
             }
         }
         fail(&format!("the outline has no row {graph}"))
