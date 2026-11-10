@@ -68,6 +68,17 @@ fn check(name: &str, golden: &str, density: i64, height: i64, pixels: &[u8]) {
     println!("PXUI {name} parity at {density}x: max channel difference {worst}");
 }
 
+/// The second theme, from its file alone.
+fn dusk() -> Theme {
+    Theme::parse(include_str!("../../themes/dusk.theme"), &Theme::default()).expect("dusk.theme")
+}
+
+/// The kit panel under the dusk theme.
+fn dusk_panel(ui: &mut Ui) {
+    let theme = dusk();
+    ui.themed(&theme, &mut |ui| new_panel(ui));
+}
+
 fn new_panel(ui: &mut Ui) {
     ui.panel(PanelOpts::default(), "panel", &mut |ui| {
         ui.label("PXUI");
@@ -134,6 +145,33 @@ fn gpu_parity_table() {
 
 fn gpu_parity_panel() {
     parity("kit panel", "kit_panel_2x.png", 300, new_panel);
+}
+
+/// Restyling from data alone: the kit panel under `themes/dusk.theme` has its golden, rounded corners
+/// that show the ground, a lifted shadow and a gradient button.
+fn gpu_parity_dusk() {
+    if !gpu::available() {
+        return;
+    }
+    parity("dusk panel", "kit_dusk_2x.png", 300, dusk_panel);
+    let (pixels, calls) = render(2, 300, &mut |ui| dusk_panel(ui));
+    assert_eq!(calls, 1, "the dusk panel drew in {calls} draw calls");
+    let px = |x: f32, y: f32| {
+        let i = (((y * 2.0) as usize) * (WIDTH as usize * 2) + (x * 2.0) as usize) * 4;
+        [pixels[i], pixels[i + 1], pixels[i + 2]]
+    };
+    let ground = [228, 139, 161];
+    let panel = [0x1d, 0x22, 0x30];
+    assert_eq!(px(120.0, 76.0), panel, "the panel's inside is not its fill");
+    // the panel spans (12, 12) to (292, 136); its corner is cut by the 10-point radius
+    assert!(px(12.5, 12.5) != panel, "the panel's corner is not rounded");
+    assert_eq!(px(300.0, 290.0), ground, "far from the panel is not the ground");
+    let shade = px(150.0, 140.0);
+    assert!(shade.iter().zip(ground).all(|(s, g)| *s < g), "no shadow under the panel: {shade:?}");
+    // the button's ground runs 114 to 134: a gradient from #3b82f6 down to #1d4ed8
+    let (top, bottom) = (px(24.0, 115.0), px(24.0, 133.0));
+    assert!(top[1] > bottom[1] + 30 && top[0] > bottom[0], "the button is not a top-to-bottom gradient: {top:?} {bottom:?}");
+    println!("PXUI dusk: rounded corner, shadow and gradient endpoints {top:?} {bottom:?}");
 }
 
 /// Every fixture paints nonempty layers at 1x and 2x, without a device.
@@ -293,4 +331,5 @@ pub const CASES: &[(&str, fn())] = &[
     ("gpu_parity_overlays", gpu_parity_overlays),
     ("gpu_parity_table", gpu_parity_table),
     ("gpu_parity_panel", gpu_parity_panel),
+    ("gpu_parity_dusk", gpu_parity_dusk),
 ];

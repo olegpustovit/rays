@@ -1,0 +1,54 @@
+# Dusk: a second pxui theme made from data alone, over Theme::default().
+# Token keys re-derive every look from the tokens; the part keys below then restyle single looks.
+
+tokens.panel = #1d2230
+tokens.foreground = #e6e9f2
+tokens.control = #2c3346
+tokens.input = #262c3c
+tokens.track = #151a24
+tokens.accent = #3b82f6
+tokens.radius.small = 5
+tokens.radius.medium = 8
+tokens.radius.large = 10
+tokens.motion.fast = 0.08
+tokens.motion.normal = 0.16
+
+# a lifted panel
+panel.shadow.color = #00000099
+panel.shadow.y = 4
+panel.shadow.blur = 16
+
+# buttons: a gradient pill with a soft shadow; brighter on hover, flat and darker when pressed
+button.fill = #3b82f6
+button.gradient = #1d4ed8
+button.text = #ffffff
+button.shadow.color = #00000066
+button.shadow.y = 2
+button.shadow.blur = 6
+button.hover.fill = #60a5fa
+button.hover.gradient = #2563eb
+button.pressed.fill = #1d4ed8
+button.pressed.gradient = #1e40af
+button.pressed.shadow.color = #00000000
+button.ring.sides = all
+button.ring.color = #93c5fd
+
+# switches: a round track and knob
+switch.radius = 7
+switch.border_w = 0
+switch.checked.fill = #3b82f6
+knob.radius = 4
+knob.checked.fill = #ffffff
+
+# fields: a rounded well with an inner shadow and an accent line while edited
+field.fill = #151a24
+field.radius = 4
+field.sides = bottom
+field.shadow.color = #00000080
+field.shadow.y = 1
+field.shadow.blur = 3
+field.shadow.inner = true
+
+# rows: a rounded hover
+toggle.hover.radius = 4
+row.hover.radius = 4

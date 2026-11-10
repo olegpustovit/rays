@@ -6,6 +6,8 @@ mod nodes;
 mod run;
 #[path = "cases/small.rs"]
 mod small;
+#[path = "cases/styling.rs"]
+mod styling;
 #[path = "cases/steps.rs"]
 mod steps;
 #[path = "cases/support.rs"]
@@ -27,5 +29,6 @@ fn main() {
     cases.extend_from_slice(ui_c::CASES);
     cases.extend_from_slice(nodes::CASES);
     cases.extend_from_slice(views::CASES);
+    cases.extend_from_slice(styling::CASES);
     run::run(&cases);
 }

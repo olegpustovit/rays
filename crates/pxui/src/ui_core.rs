@@ -220,7 +220,7 @@ pub enum UndoKind {
 
 pub type HitFn = Rc<dyn Fn(Rect) -> Rect>;
 
-pub use crate::theme::{Font, Look, Ring, Shadow, State, States, Theme, Tokens};
+pub use crate::theme::{Curve, Font, Look, Ring, Shadow, State, States, Theme, Tokens};
 
 /// Where a node's look, text and mark sit in its laid-out rectangle: `inset` in from each side, then
 /// at most `w` wide (at the left, or the right with `end`) and `h` high (centred), when finite. The
@@ -286,6 +286,8 @@ pub struct Node {
     pub mark: Mark,
     pub bar: Option<Bar>,
     pub state: State,
+    /// the transition `set_look` picked for a change of state, started when the node is painted
+    pub transition: Option<Curve>,
 }
 
 impl Node {
@@ -304,6 +306,7 @@ impl Node {
         mark: Mark::None,
         bar: None,
         state: State { hovered: false, pressed: false, focused: false, disabled: false, checked: false },
+        transition: None,
     };
 }
 
@@ -329,6 +332,37 @@ impl BoxRec {
     fn blank() -> BoxRec {
         BoxRec { key: 0, slot: 0, parent: NONE, first: NONE, last: NONE, next: NONE, hit: None, hit_rect: None, paint: arena::EMPTY, over: arena::EMPTY, view: NO_VIEW, kept: false }
     }
+}
+
+/// No running transition.
+const NO_TWEEN: u32 = u32::MAX;
+
+/// A node's look and where `animate` puts it: offset and opacity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Pose {
+    look: Look,
+    dx: f32,
+    dy: f32,
+    opacity: f32,
+}
+
+/// A running transition of slot `slot` (while it has `generation`) from `from` to `to`.
+#[derive(Clone, Copy)]
+struct Tween {
+    slot: usize,
+    generation: u32,
+    start: f64,
+    curve: Curve,
+    from: Pose,
+    to: Pose,
+}
+
+/// What `Ui::animate` moves a node to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Target {
+    Look(Look),
+    Offset(f32, f32),
+    Opacity(f32),
 }
 
 /// A transparent colour.
@@ -518,6 +552,12 @@ struct Slot {
     press_y: f32,
     /// consecutive left presses within 0.35 s and 5 points
     press_count: i64,
+    /// the look and state last painted while some theme animates (what a transition starts from),
+    /// the running transition (`NO_TWEEN`), and where `animate` left the node: offset and opacity
+    seen: Look,
+    seen_state: State,
+    tween: u32,
+    pose: (f32, f32, f32),
 }
 
 impl Slot {
@@ -555,6 +595,10 @@ impl Slot {
             press_x: 0.0,
             press_y: 0.0,
             press_count: 0,
+            seen: Look::NONE,
+            seen_state: State::default(),
+            tween: NO_TWEEN,
+            pose: (0.0, 0.0, 1.0),
         }
     }
 }
@@ -729,6 +773,10 @@ pub struct Ui {
     theme_depth: usize,
     theme_ids: Vec<Theme>,
     theme_id: u32,
+    /// running transitions, the frame's time, and whether a theme in effect animates
+    tweens: Vec<Tween>,
+    now: f64,
+    motion: bool,
     font_size: i64,
     platform: Platform,
     /// the text engine; `Paint` holds it while a frame paints
@@ -893,6 +941,9 @@ impl Ui {
             theme_depth: 0,
             theme_ids: Vec::new(),
             theme_id: 0,
+            tweens: Vec::new(),
+            now: 0.0,
+            motion: false,
             font_size,
             platform,
             text: Some(text),
@@ -1059,6 +1110,7 @@ impl Ui {
                 self.theme_ids.len() as u32
             }
         };
+        self.motion |= theme.tokens.moves();
         if self.theme_depth == self.themes.len() {
             self.themes.push(*theme);
         } else {
@@ -1973,6 +2025,7 @@ impl Ui {
         if self.frame_requested
             || self.active.is_some()
             || self.focus != 0
+            || !self.tweens.is_empty()
             || self.slots.iter().any(|s| s.scroll_mode != 0 || s.scroll_visual != 0.0)
         {
             return Some(now);
@@ -2264,8 +2317,15 @@ impl Ui {
     /// its signal is known).
     pub fn set_look(&mut self, b: &Handle, look: Look, state: State) {
         if self.live(b) {
+            let s = &self.slots[b.box_slot];
+            // a node shown last frame in another state moves to this look over the theme's transition
+            let transition = if self.motion && s.seen_state != state && self.range_valid(b.box_slot) {
+                Some(self.theme().tokens.transition(s.seen_state, state)).filter(|c| !c.instant())
+            } else {
+                None
+            };
             let n = &mut self.slots[b.box_slot].node;
-            (n.look, n.state) = (look, state);
+            (n.look, n.state, n.transition) = (look, state, transition);
         }
     }
 
@@ -3101,7 +3161,7 @@ impl Paint {
         let shown = |c: Color| c.a > 0 || steady;
         let round = steady || look.gradient.is_some() || radii.iter().any(|r| *r > 0.0) || look.shadows.iter().any(|s| shown(s.color));
         let shadow = |s: &Shadow| Instance::shadow(corners, radii, rgba(fade(s.color)), [s.offset.0, s.offset.1], s.blur / 2.0, s.spread, s.inner);
-        let bordered = look.border_w > 0.0 && shown(look.border);
+        let bordered = steady || (look.border_w > 0.0 && look.border.a > 0);
         if area {
             for s in &look.shadows {
                 if !s.inner && shown(s.color) {
@@ -3173,7 +3233,7 @@ impl Paint {
             self.chevron((x + w / 2.0, y + h / 2.0), direction, fade(look.text));
         }
         let ring = look.ring;
-        if focused && area && ring.width > 0.0 && ring.color.a > 0 {
+        if focused && area && (steady || (ring.width > 0.0 && ring.color.a > 0)) {
             if round {
                 self.push(Instance::rect(corners, [0; 4]).radii(radii).border(ring.width, rgba(fade(ring.color))).sides(ring.sides));
             } else {
@@ -3605,10 +3665,29 @@ impl Ui {
         paint.clip_rect = clip_rect;
         let slot = self.boxes[index].slot;
         let start = paint.layers[paint.layer].instances.len() as u32;
-        let s = &self.slots[slot];
+        if let Some(curve) = self.slots[slot].node.transition.take() {
+            let from = match self.tween_of(slot) {
+                Some(_) => self.pose(slot).0,
+                None => Pose { look: self.slots[slot].seen, ..self.rest(slot) },
+            };
+            let to = Pose { look: self.slots[slot].node.look, ..self.rest(slot) };
+            self.start_tween(slot, curve, from, to);
+        }
+        // a declaration wins over an animated look
+        if let Some(t) = self.tween_of(slot) {
+            let look = self.slots[slot].node.look;
+            self.tweens[t].to.look = look;
+        }
+        let (pose, steady) = self.pose(slot);
         let focused = self.marks_focus(slot);
-        paint.look(self.screen(index), &s.node, &s.node.look, &s.text, focused, false);
+        let r = self.screen(index);
+        let s = &self.slots[slot];
+        let look = Look { opacity: pose.look.opacity * pose.opacity, ..pose.look };
+        paint.look(Rect::new(r.x + pose.dx, r.y + pose.dy, r.w, r.h), &s.node, &look, &s.text, focused, steady);
         let s = &mut self.slots[slot];
+        if self.motion {
+            (s.seen, s.seen_state) = (s.node.look, s.node.state);
+        }
         // scratch positions until `settle` places them
         s.range = (start, paint.layers[paint.layer].instances.len() as u32);
         s.clip = clip_rect;
@@ -3792,9 +3871,11 @@ impl Ui {
         let scratch = std::mem::take(&mut self.patch_layers);
         let mut paint = self.paint_begin(scratch, self.slots[slot].clip);
         paint.view = self.views[self.views[owner as usize].xf as usize].index;
-        let s = &self.slots[slot];
+        let (pose, steady) = self.pose(slot);
         let focused = self.marks_focus(slot);
-        paint.look(Rect::new(s.rx, s.ry, s.rw, s.rh), &s.node, &s.node.look, &s.text, focused, false);
+        let s = &self.slots[slot];
+        let look = Look { opacity: pose.look.opacity * pose.opacity, ..pose.look };
+        paint.look(Rect::new(s.rx + pose.dx, s.ry + pose.dy, s.rw, s.rh), &s.node, &look, &s.text, focused, steady);
         let scratch = self.paint_end(paint);
         let fresh = &scratch[0].instances;
         // ponytail: a colour glyph in the patch, or a texture break inside the node, needs the
@@ -4006,6 +4087,7 @@ impl Ui {
         self.count = 0;
         self.closed_section = NONE;
         (self.theme_depth, self.theme_id) = (0, 0);
+        (self.now, self.motion) = (frame.input.t, self.theme.tokens.moves());
         self.building = true;
         self.parents.clear();
         self.seeds.clear();
@@ -4054,6 +4136,7 @@ impl Ui {
         self.intrinsic();
         self.arrange(frame.input.t);
         self.paint_all(frame);
+        self.step_tweens();
         self.text_mut().end_frame();
         // a glyph evicted from the atlas may be one a kept view's instances sample
         let evictions = self.text_mut().evictions();
@@ -4163,6 +4246,127 @@ impl Ui {
 
     pub(crate) fn input_frame_time(&self) -> Option<f64> {
         self.input_frame.as_ref().map(|f| f.input.t)
+    }
+}
+
+// ---------------------------------------------------------- transitions
+
+impl Ui {
+    /// The running transition of `slot`, if it is still that node's.
+    fn tween_of(&self, slot: usize) -> Option<usize> {
+        let s = &self.slots[slot];
+        let t = s.tween as usize;
+        (s.tween != NO_TWEEN && t < self.tweens.len() && self.tweens[t].slot == slot && self.tweens[t].generation == s.generation).then_some(t)
+    }
+
+    /// Where the node rests: its declared look, offset and opacity.
+    fn rest(&self, slot: usize) -> Pose {
+        let s = &self.slots[slot];
+        Pose { look: s.node.look, dx: s.pose.0, dy: s.pose.1, opacity: s.pose.2 }
+    }
+
+    /// What the node shows now, and whether a transition is running (its instances stay steady).
+    fn pose(&self, slot: usize) -> (Pose, bool) {
+        match self.tween_of(slot) {
+            None => (self.rest(slot), false),
+            Some(i) => {
+                let t = &self.tweens[i];
+                let p = t.curve.at((self.now - t.start) as f32);
+                let f = |a: f32, b: f32| a + (b - a) * p;
+                let pose = Pose { look: t.from.look.lerp(&t.to.look, p), dx: f(t.from.dx, t.to.dx), dy: f(t.from.dy, t.to.dy), opacity: f(t.from.opacity, t.to.opacity) };
+                (pose, true)
+            }
+        }
+    }
+
+    fn start_tween(&mut self, slot: usize, curve: Curve, from: Pose, to: Pose) {
+        let tween = Tween { slot, generation: self.slots[slot].generation, start: self.now, curve, from, to };
+        match self.tween_of(slot) {
+            Some(i) => self.tweens[i] = tween,
+            None => {
+                self.slots[slot].tween = self.tweens.len() as u32;
+                self.tweens.push(tween);
+            }
+        }
+    }
+
+    /// After a paint: finished transitions come to rest, and nodes the paint did not reach (in a kept
+    /// view) are rewritten in place through the patch path, so a transition never rebuilds a view.
+    fn step_tweens(&mut self) {
+        let damage = self.damage;
+        let mut i = 0;
+        while i < self.tweens.len() {
+            let t = self.tweens[i];
+            let s = &self.slots[t.slot];
+            if s.key == 0 || s.generation != t.generation || s.tween != i as u32 {
+                self.drop_tween(i);
+                continue;
+            }
+            let done = t.curve.at((self.now - t.start) as f32) >= 1.0;
+            if done {
+                let s = &mut self.slots[t.slot];
+                (s.node.look, s.pose) = (t.to.look, (t.to.dx, t.to.dy, t.to.opacity));
+                self.drop_tween(i);
+            } else {
+                i += 1;
+            }
+            if done || self.slots[t.slot].painted != self.frame_number {
+                self.repaint_node(t.slot);
+            }
+        }
+        self.damage = match (damage, self.damage) {
+            (Some(a), b) => Some(union(b, a)),
+            (None, b) => b,
+        };
+    }
+
+    fn drop_tween(&mut self, i: usize) {
+        let slot = self.tweens[i].slot;
+        if self.slots[slot].tween == i as u32 {
+            self.slots[slot].tween = NO_TWEEN;
+        }
+        self.tweens.swap_remove(i);
+        if let Some(moved) = self.tweens.get(i) {
+            if self.slots[moved.slot].tween == self.tweens.len() as u32 {
+                self.slots[moved.slot].tween = i as u32;
+            }
+        }
+    }
+
+    /// Animate a node to `target` along `curve` from where it shows now: its look, its offset from
+    /// where layout puts it, or its opacity. Driven by the patch path (the node's view does not
+    /// rebuild); the frame gate asks for frames until it rests. An animated look holds until the
+    /// node's next declaration (as `patch_look`); offset and opacity hold until animated again. The
+    /// theme's `reduced_motion` makes it a jump. `false` for a stale handle.
+    // ponytail: from -> to only, no keyframe lists; chain calls when a run ends if one is needed.
+    // Offset and opacity move the node's own look and text, not its children (a view's offset and
+    // opacity move a group), and hit testing stays where layout put it.
+    pub fn animate(&mut self, b: &Handle, target: Target, curve: Curve) -> bool {
+        if !self.live(b) {
+            return false;
+        }
+        let slot = b.box_slot;
+        let curve = if self.theme().tokens.reduced_motion { Curve::Bezier { duration: 0.0, points: [0.0, 0.0, 1.0, 1.0] } } else { curve };
+        let from = self.pose(slot).0;
+        let mut to = match self.tween_of(slot) {
+            Some(i) => self.tweens[i].to,
+            None => self.rest(slot),
+        };
+        match target {
+            Target::Look(look) => to.look = look,
+            Target::Offset(dx, dy) => (to.dx, to.dy) = (dx, dy),
+            Target::Opacity(o) => to.opacity = o.clamp(0.0, 1.0),
+        }
+        self.start_tween(slot, curve, from, to);
+        if !self.building {
+            self.frame_requested = true;
+        }
+        true
+    }
+
+    /// Transitions running now.
+    pub fn transitions(&self) -> usize {
+        self.tweens.len()
     }
 }
 

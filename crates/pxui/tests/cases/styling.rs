@@ -1,0 +1,204 @@
+//! Styling: theme files, scoped themes, variants, transitions and animation (headless, no GPU).
+use crate::support::*;
+use pxui::geom::color;
+use pxui::ui::*;
+use std::cell::Cell;
+
+const RAYS: &str = include_str!("../../themes/rays.theme");
+const DUSK: &str = include_str!("../../themes/dusk.theme");
+
+fn at(t: f64, events: Vec<input::Event>) -> input::frame::Frame {
+    frame_at(vec![], 2.0, t, events)
+}
+
+/// The shipped default theme file is `Theme::default()` written out, and parses back to it;
+/// `RAYS_UPDATE_FIXTURES=1` rewrites it.
+pub fn styling_theme_file_round_trip() {
+    let base = Theme::default();
+    let written = base.write();
+    let path = format!("{}/themes/rays.theme", env!("CARGO_MANIFEST_DIR"));
+    if std::env::var("RAYS_UPDATE_FIXTURES").as_deref() == Ok("1") {
+        std::fs::write(&path, &written).expect("rays.theme");
+    }
+    check(written == RAYS, "themes/rays.theme is not Theme::default().write()");
+    check(Theme::parse(RAYS, &base) == Ok(base), "rays.theme does not parse back to Theme::default()");
+    let dusk = Theme::parse(DUSK, &base).unwrap_or_else(|e| panic!("dusk.theme: {e:?}"));
+    check(dusk != base && dusk.tokens.accent == color::rgb(0x3b, 0x82, 0xf6), "dusk.theme did not restyle");
+    check(dusk.button.idle.gradient == Some(color::rgb(0x1d, 0x4e, 0xd8)) && dusk.button.idle.radius == [5.0; 4], "dusk button");
+    check(Theme::parse(&dusk.write(), &base) == Ok(dusk), "a written theme does not round trip");
+    // part keys over a base keep the base's other looks; comments and blank lines are skipped
+    let t = Theme::parse("# a comment\n\nbutton.hover.fill = #223344  # trailing\n", &dusk).expect("one key");
+    check(t.button.hover.fill == color::rgb(0x22, 0x33, 0x44) && t.panel == dusk.panel && t.tokens == dusk.tokens, "a part key changed more than its look");
+}
+
+/// Unknown keys and malformed or out-of-range values are errors with their lines; nothing panics.
+pub fn styling_theme_file_errors() {
+    let text = "tokens.accent = #3b82f6\nbutton.hover.fil = #fff\nbutton.idle.radius = -2\ntokens.motion.fast = soon\nnonsense\nwidget.idle.fill = #000\nbutton.idle.sides = up\nfield.idle.border = #12\ntokens.density = 9\n";
+    let errors = Theme::parse(text, &Theme::default()).expect_err("a bad file parsed");
+    let lines: Vec<usize> = errors.iter().map(|e| e.line).collect();
+    check(lines == [2, 3, 4, 5, 6, 7, 8, 9], &format!("error lines {lines:?}: {errors:?}"));
+    check(errors.iter().all(|e| !e.message.is_empty()), "an error without a message");
+    for junk in ["=", "= 1", "a =", "\u{0}", "button.idle.radius = 1 2 3", "button.idle.font.size = 99999999999999999999"] {
+        check(Theme::parse(junk, &Theme::default()).is_err(), &format!("`{junk}` parsed"));
+    }
+}
+
+/// `themed` scopes an override to what it builds; a view built under one rebuilds when it changes and
+/// is kept while it does not.
+pub fn styling_themed_scope() {
+    let mut ui = new_ui(None);
+    let dusk = Theme::parse(DUSK, &Theme::default()).expect("dusk");
+    let base = *ui.theme();
+    let (runs, inside, outside) = (Cell::new(0), Cell::new(None), Cell::new(None));
+    let which = Cell::new(dusk);
+    let mut build = |ui: &mut Ui| {
+        let theme = which.get();
+        ui.themed(&theme, &mut |ui| {
+            inside.set(Some(ui.theme().tokens.accent));
+            ui.view("v", 1, Size::Px(200.0), Size::Px(100.0), &mut |ui| {
+                runs.set(runs.get() + 1);
+                ui.panel(PanelOpts::default(), "p", &mut |ui| {
+                    ui.button("Go");
+                });
+            });
+        });
+        outside.set(Some(ui.theme().tokens.accent));
+    };
+    ui.frame(&at(0.0, vec![]), &mut build);
+    ui.frame(&at(0.1, vec![]), &mut build);
+    check(inside.get() == Some(dusk.tokens.accent) && outside.get() == Some(base.tokens.accent), "the override leaked or did not apply");
+    check(runs.get() == 1, &format!("a view under an unchanged override ran {} builds", runs.get()));
+    let has = |ui: &Ui, c: color::T| ui.output().draw.iter().any(|l| l.instances.iter().any(|i| i.color == [c.r as u8, c.g as u8, c.b as u8, c.a as u8]));
+    check(has(&ui, dusk.button.idle.fill), "the view did not paint the override's button");
+    which.set(base);
+    ui.frame(&at(0.2, vec![]), &mut build);
+    check(runs.get() == 2, "a view did not rebuild when its override changed");
+    check(!has(&ui, dusk.button.idle.fill), "the old override's look stayed");
+    ui.destroy();
+}
+
+/// A variant is a `States` value: `button_with` paints its looks.
+pub fn styling_variant_states() {
+    let mut ui = new_ui(None);
+    let red = color::rgb(220, 30, 40);
+    let t = *ui.theme();
+    let danger = States { idle: Look { fill: red, ..t.button.idle }, ..t.button };
+    for k in 0..2 {
+        ui.frame(&at(k as f64, vec![]), &mut |ui| {
+            ui.panel(PanelOpts::default(), "p", &mut |ui| {
+                ui.button_with("Delete", &danger);
+            });
+        });
+    }
+    let fills: Vec<[u8; 4]> = ui.output().draw[0].instances.iter().map(|i| i.color).collect();
+    check(fills.contains(&[220, 30, 40, 255]), "the variant's idle fill was not painted");
+    ui.destroy();
+}
+
+/// A hover in a kept view starts the theme's transition: the view builds once for the hover, then the
+/// node's instances change frame by frame through the patch path with no build and no allocation, and
+/// the frame gate goes idle when it ends.
+pub fn styling_transition_without_rebuild() {
+    let mut ui = new_ui(None);
+    let mut theme = Theme::default();
+    theme.tokens.motion.normal = 0.2;
+    theme.button.hover.fill = color::rgb(0, 0, 255);
+    ui.set_theme(theme);
+    let runs = Cell::new(0);
+    let mut build = |ui: &mut Ui| {
+        ui.view("v", 1, Size::Px(200.0), Size::Px(100.0), &mut |ui| {
+            runs.set(runs.get() + 1);
+            ui.panel(PanelOpts::default(), "p", &mut |ui| {
+                ui.button("Go");
+            });
+        });
+    };
+    let blue = |ui: &Ui| ui.output().draw[0].instances.iter().filter(|i| i.color[0] == 0 && i.color[1] == 0 && i.color[2] > 0).map(|i| i.color[2]).max();
+    ui.frame(&at(0.0, vec![move_to((300, 230))]), &mut build);
+    ui.frame(&at(0.1, vec![]), &mut build);
+    // the button's ground is (17, 14) to (49, 34) in the panel at (12, 12)
+    ui.frame(&at(1.0, vec![move_to((24, 24))]), &mut build);
+    let after_hover = runs.get();
+    check(ui.transitions() == 1, &format!("{} transitions after a hover", ui.transitions()));
+    let mut seen = Vec::new();
+    for k in 1..=4 {
+        let t = 1.0 + 0.04 * k as f64;
+        check(ui.wants_frame(&[], t), "the gate idled during a transition");
+        mem_sys::local_reset();
+        let before = mem_sys::local_alloc_count();
+        ui.frame(&at(t, vec![]), &mut build);
+        let allocs = mem_sys::local_alloc_count() - before;
+        // the first step warms the patch path's scratch layer
+        check(k == 1 || allocs == 0, &format!("a transition frame allocated {allocs} times"));
+        seen.push(blue(&ui));
+    }
+    check(runs.get() == after_hover, &format!("the transition rebuilt its view {} times", runs.get() - after_hover));
+    check(seen.windows(2).all(|w| w[0] < w[1]), &format!("the fill did not move toward the hover look: {seen:?}"));
+    ui.frame(&at(1.3, vec![]), &mut build);
+    check(ui.transitions() == 0 && blue(&ui) == Some(255), "the transition did not come to rest on the hover look");
+    check(!ui.wants_frame(&[], 2.0), "the gate did not idle after the transition");
+    check(runs.get() == after_hover, "resting rebuilt the view");
+    ui.destroy();
+}
+
+/// `reduced_motion` zeroes the durations: a hover snaps.
+pub fn styling_reduced_motion() {
+    let mut ui = new_ui(None);
+    let mut theme = Theme::default();
+    theme.tokens.motion.normal = 0.2;
+    theme.tokens.reduced_motion = true;
+    ui.set_theme(theme);
+    let mut build = |ui: &mut Ui| {
+        ui.panel(PanelOpts::default(), "p", &mut |ui| {
+            ui.button("Go");
+        });
+    };
+    ui.frame(&at(0.0, vec![move_to((300, 230))]), &mut build);
+    ui.frame(&at(0.1, vec![move_to((24, 24))]), &mut build);
+    check(ui.transitions() == 0, "reduced motion animated a hover");
+    let handle = ui.box_of_key(key_of(0x2c1b3c6d, "p")).expect("panel");
+    check(ui.animate(&handle, Target::Opacity(0.5), Curve::Spring { omega: 20.0 }), "animate refused");
+    ui.frame(&at(0.2, vec![]), &mut build);
+    check(ui.transitions() == 0, "reduced motion ran an animation");
+    ui.destroy();
+}
+
+/// `animate` moves a node's offset and opacity on a spring between frames and settles.
+pub fn styling_animate_spring() {
+    let mut ui = new_ui(None);
+    let chip = Cell::new(None);
+    let mut build = |ui: &mut Ui| {
+        ui.view("v", 1, Size::Px(200.0), Size::Px(100.0), &mut |ui| {
+            let look = Look { fill: color::rgb(200, 40, 40), ..Look::NONE };
+            chip.set(Some(ui.node("chip", Node { w: Size::Px(40.0), h: Size::Px(20.0), look, ..Node::DEFAULT })));
+        });
+    };
+    ui.frame(&at(0.0, vec![]), &mut build);
+    ui.frame(&at(0.1, vec![]), &mut build);
+    let chip = chip.get().expect("chip");
+    let x0 = |ui: &Ui| ui.output().draw[0].instances.iter().find(|i| i.color[0] == 200).map(|i| i.rect[0]);
+    check(ui.animate(&chip, Target::Offset(30.0, 0.0), Curve::Spring { omega: 30.0 }), "animate refused");
+    check(ui.wants_frame(&[], 0.1), "an animation did not ask for a frame");
+    let mut xs = Vec::new();
+    for k in 1..=40 {
+        ui.frame(&at(0.1 + 0.02 * k as f64, vec![]), &mut build);
+        xs.push(x0(&ui).unwrap_or(f32::NAN));
+        if ui.transitions() == 0 {
+            break;
+        }
+    }
+    check(xs.windows(2).all(|w| w[0] <= w[1]) && xs[0] > 0.0, &format!("a critically damped spring overshot or stood: {xs:?}"));
+    check(ui.transitions() == 0 && *xs.last().unwrap() == 30.0, &format!("the spring did not settle on 30: {xs:?}"));
+    check(!ui.wants_frame(&[], 5.0), "the gate did not idle after the spring");
+    ui.destroy();
+}
+
+pub const CASES: &[(&str, fn())] = &[
+    ("styling_theme_file_round_trip", styling_theme_file_round_trip),
+    ("styling_theme_file_errors", styling_theme_file_errors),
+    ("styling_themed_scope", styling_themed_scope),
+    ("styling_variant_states", styling_variant_states),
+    ("styling_transition_without_rebuild", styling_transition_without_rebuild),
+    ("styling_reduced_motion", styling_reduced_motion),
+    ("styling_animate_spring", styling_animate_spring),
+];

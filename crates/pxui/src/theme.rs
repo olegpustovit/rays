@@ -263,6 +263,66 @@ impl Look {
     }
 }
 
+/// How an animation runs from 0 to 1: a CSS cubic-bezier over `duration` seconds, or a critically
+/// damped spring of natural frequency `omega` (radians a second) that settles by itself.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Curve {
+    Bezier { duration: f32, points: [f32; 4] },
+    Spring { omega: f32 },
+}
+
+impl Curve {
+    /// A run that is over before it starts.
+    pub fn instant(&self) -> bool {
+        matches!(self, Curve::Bezier { duration, .. } if !(*duration > 0.0))
+    }
+
+    /// Progress `t` seconds in; exactly 1 once the run is over.
+    pub fn at(&self, t: f32) -> f32 {
+        match *self {
+            Curve::Bezier { duration, points: [x1, y1, x2, y2] } => {
+                if !(t < duration) {
+                    return 1.0;
+                }
+                let s = (t / duration).max(0.0);
+                let b = |a: f32, c: f32, u: f32| 3.0 * (1.0 - u) * (1.0 - u) * u * a + 3.0 * (1.0 - u) * u * u * c + u * u * u;
+                // x is monotonic in u for x1, x2 in 0..=1: bisect for the u where x(u) = s
+                let (mut lo, mut hi) = (0.0f32, 1.0f32);
+                for _ in 0..24 {
+                    let mid = (lo + hi) / 2.0;
+                    if b(x1, x2, mid) < s { lo = mid } else { hi = mid }
+                }
+                b(y1, y2, (lo + hi) / 2.0)
+            }
+            Curve::Spring { omega } => {
+                let wt = (omega * t).max(0.0);
+                let rest = (1.0 + wt) * (-wt).exp();
+                if rest < 1.0e-3 || !(omega > 0.0) { 1.0 } else { 1.0 - rest }
+            }
+        }
+    }
+}
+
+impl Tokens {
+    /// The transition between two states in this theme: `fast` into or out of a press, `normal`
+    /// otherwise, on the theme's easing; none with `reduced_motion`.
+    pub fn transition(&self, from: State, to: State) -> Curve {
+        let duration = if self.reduced_motion || from == to {
+            0.0
+        } else if from.pressed != to.pressed {
+            self.motion.fast
+        } else {
+            self.motion.normal
+        };
+        Curve::Bezier { duration, points: self.motion.ease }
+    }
+
+    /// Whether any state change in this theme animates.
+    pub fn moves(&self) -> bool {
+        !self.reduced_motion && (self.motion.fast > 0.0 || self.motion.normal > 0.0)
+    }
+}
+
 /// What the pointer and keyboard are doing to a widget; `States::pick` resolves it to a look.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct State {
@@ -812,6 +872,7 @@ impl Theme {
                 Some(Ok(())) => {}
             }
         }
+        errors.sort_by_key(|e| e.line);
         if errors.is_empty() { Ok(theme) } else { Err(errors) }
     }
 
@@ -826,12 +887,17 @@ impl Theme {
             let _ = writeln!(out, "{} = {}", f.key, write_value((f.get)(self)));
         }
         let lf = look_fields();
+        // a field every state shares is one `part.field` line
         for part in WIDGETS {
             let mut states = *widget(self, part);
-            for s in STATES {
-                let look = state_mut(&mut states, s).unwrap();
-                for f in &lf {
-                    let _ = writeln!(out, "{part}.{s}.{} = {}", f.key, write_value((f.get)(look)));
+            for f in &lf {
+                let values: Vec<Value> = STATES.iter().map(|s| (f.get)(state_mut(&mut states, s).unwrap())).collect();
+                if values.iter().all(|v| *v == values[0]) {
+                    let _ = writeln!(out, "{part}.{} = {}", f.key, write_value(values[0]));
+                } else {
+                    for (s, v) in STATES.iter().zip(values) {
+                        let _ = writeln!(out, "{part}.{s}.{} = {}", f.key, write_value(v));
+                    }
                 }
             }
         }
