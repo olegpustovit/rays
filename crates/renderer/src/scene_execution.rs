@@ -305,6 +305,26 @@ pub struct UiPass<'a> {
 /// Paints layer `layer` of its owner's last UI frame (PXUI's painter, from the shell).
 pub type UiPaint = Rc<dyn Fn(&UiPass, usize) -> Result<(), Error>>;
 
+thread_local! {
+    static RELEASE_HOOKS: RefCell<Vec<fn()>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Run `hook` (once registered) before this thread destroys a device, so GPU objects held outside
+/// the renderer (a UI painter) are freed first: a device with live children is not destroyed.
+pub fn on_device_release(hook: fn()) {
+    RELEASE_HOOKS.with(|h| {
+        let mut h = h.borrow_mut();
+        if !h.contains(&hook) {
+            h.push(hook);
+        }
+    });
+}
+
+pub(crate) fn run_release_hooks() {
+    let hooks = RELEASE_HOOKS.with(|h| h.borrow().clone());
+    hooks.into_iter().for_each(|hook| hook());
+}
+
 #[derive(Clone)]
 pub struct UiLayer {
     pub paint: UiPaint,
@@ -3675,6 +3695,7 @@ pub fn destroy(value: &mut SceneExecution) -> Result<(), Error> {
     }
     record(backend::destroy_queue(&value.queue), &mut first);
     if value.owns_device {
+        run_release_hooks();
         record(backend::destroy_device(&value.device), &mut first);
     }
     match first {

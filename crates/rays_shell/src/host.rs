@@ -115,6 +115,16 @@ fn painter(ui: &Rc<RefCell<Ui>>) -> scene::UiPaint {
     })
 }
 
+/// Free the painter's GPU objects (its pipeline and the glyph atlases' textures) and the image
+/// textures; the renderer calls this before it destroys a device. The next paint re-uploads.
+fn release_painter() {
+    if let Some(s) = PAINTER.with(|p| p.borrow_mut().take()) {
+        for (_, _, texture, _) in &s.images {
+            let _ = backend::destroy_texture(texture);
+        }
+    }
+}
+
 /// Draw calls the thread's painter has issued.
 pub fn draw_calls() -> u64 {
     PAINTER.with(|shared| shared.borrow().as_ref().map_or(0, |s| s.painter.draw_calls()))
@@ -144,6 +154,7 @@ fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Er
             let t = ui.text_mut();
             let (mask, color) = (t.atlas_size(text::AtlasKind::Mask), t.atlas_size(text::AtlasKind::Color));
             let painter = Painter::new(pass.device, ColorFormat::Rgba8Unorm, DepthFormat::NoDepth, 1, mask, color)?;
+            scene::on_device_release(release_painter);
             *shared = Some(Shared { device, painter, owner: 0, frame: 0, images: Vec::new() });
         }
         let s = shared.as_mut().expect("painter");

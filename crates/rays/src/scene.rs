@@ -10,7 +10,7 @@ use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter}
 use rays_math::color;
 use renderer::renderer::Resource as retained_resource;
 use renderer::scene_execution as se;
-pub use renderer::scene_execution::{UiLayer, UiPaint, UiPass};
+pub use renderer::scene_execution::{on_device_release, UiLayer, UiPaint, UiPass};
 use runtime_resources::{canvas as RCanvas, image as RImage};
 use scene_command::display_list::{self, Segment};
 use scene_command::render_ir::{self, Command, Geometry, Transform};

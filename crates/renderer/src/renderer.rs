@@ -434,6 +434,7 @@ fn release_headless() {
         }
     });
     if let Some(device) = destroy {
+        scene_execution::run_release_hooks();
         let _ = backend::destroy_device(&device);
     }
 }
