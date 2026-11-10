@@ -26,4 +26,4 @@ Historical generation notes are in [docs/history/ocaml-image-fixtures.md](../../
 The conformance test decodes every file both by path and from copied bytes,
 normalizes to tightly packed RGBA8, compares the common 23×42 source image
 across lossless formats, checks alpha independently, and verifies the EXIF
-rotation by exact pixel mapping.
+rotate by exact pixel mapping.

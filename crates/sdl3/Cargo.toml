@@ -11,3 +11,6 @@ sdl3_sys = { path = "../sdl3_sys" }
 
 [dev-dependencies]
 sdl3_sys = { path = "../sdl3_sys", features = ["test-util"] }
+
+[lints]
+workspace = true

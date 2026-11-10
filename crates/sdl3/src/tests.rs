@@ -384,15 +384,18 @@ fn injected_video_startup_failure_child() {
 #[cfg(target_os = "macos")]
 #[test]
 fn cocoa_layer_ownership_and_trackpad_phases() {
-    // Trackpad phases need a real Cocoa window, so the dummy driver gate skips this (macOS only).
+    // Trackpad phases need a real Cocoa window; the dummy driver cannot cover this case.
     if std::env::var("SDL_VIDEODRIVER").ok().as_deref() == Some("dummy") {
+        eprintln!("RAYS_TEST_SKIP: trackpad phases require a real Cocoa window");
+        assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "RAYS_ALLOW_SKIP=1 explicitly permits skipping Cocoa coverage");
         return;
     }
     claim_main();
     // An SSH/tmux login has no window server (launchctl manager "Background"): nothing to test there.
     if let Err(e) = crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]) {
         assert!(e.message.contains("not available") || e.message.contains("No available video device"), "{e:?}");
-        eprintln!("skipped: no window server ({})", e.message);
+        eprintln!("RAYS_TEST_SKIP: skipped: no window server ({})", e.message);
+        assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
         return;
     }
     let mut window = crate::Window::create(
