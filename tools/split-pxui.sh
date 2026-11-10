@@ -49,9 +49,11 @@ git update-ref refs/heads/main "$sha"
 git symbolic-ref HEAD refs/heads/main
 
 args=()
-for c in $CRATES; do args+=(--path "crates/$c"); done
-for p in $EXTRA; do args+=(--path "$p"); done
-git filter-repo --force "${args[@]}"
+# Before 57487bbd7 the Rust tree lived under rs/: follow it, so history reaches back to the port's start.
+# ponytail: crates renamed since (ogpu -> ogpu_core, cfmt_sys, metal) keep history only from their rename.
+for c in $CRATES; do args+=(--path "crates/$c" --path "rs/crates/$c"); done
+for p in $EXTRA; do args+=(--path "$p" --path "rs/$p"); done
+git filter-repo --force "${args[@]}" --path-rename rs/:
 git checkout -q main
 
 # --- the one generated commit ---------------------------------------------------------------
