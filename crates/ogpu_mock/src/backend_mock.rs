@@ -468,7 +468,7 @@ impl DriverCommands for MockCommands {
         self.submit("Backend_mock.commit_present")?;
         self.run()?;
         self.epoch.set(self.epoch.get() + 1);
-        add(&self.c, format!("commit-present:{}:{}:{}:{}", self.id, source.token(), frame.frame_token, self.epoch.get()));
+        add(&self.c, format!("commit-present:{}:{}:{}:{}", self.id, source.token(), frame.0.downcast_ref::<i64>().copied().unwrap_or(0), self.epoch.get()));
         Ok(Receipt { epoch: self.epoch.get() })
     }
     fn abandon(&self) -> Result<(), Error> {
@@ -493,7 +493,7 @@ impl DriverSurface for MockSurface {
             Ok(DriverAcquire::DeviceLost)
         } else {
             self.frame.set(self.frame.get() + 1);
-            Ok(DriverAcquire::Acquired(DriverFrame { frame_token: self.frame.get() }))
+            Ok(DriverAcquire::Acquired(DriverFrame(std::rc::Rc::new(self.frame.get()))))
         }
     }
     fn discard(&self, _: DriverFrame) -> Result<(), Error> {

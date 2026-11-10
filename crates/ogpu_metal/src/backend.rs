@@ -33,7 +33,6 @@ use ogpu_core::{
 };
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
     rc::Rc,
 };
 
@@ -43,9 +42,8 @@ const PENDING_PRESENTATION_CAPACITY: usize = 3;
 struct Dev {
     device: Device,
     t: Rc<Tables>,
-    libraries: RefCell<HashMap<i64, Library>>,
-    active_queues: RefCell<HashMap<i64, Rc<Vec<PendingPresentation>>>>,
-    acquired_frames: RefCell<HashMap<i64, (Surface, Frame)>>,
+    /// Queues made and not yet destroyed.
+    queues: Cell<i64>,
     cleanup_error: RefCell<Option<Error>>,
     device_live: Rc<Cell<bool>>,
 }
@@ -210,7 +208,6 @@ fn own_pipeline(pipeline: Pipeline) -> Result<Box<dyn DriverPipeline>, Error> {
 struct MetalLibrary {
     dev: Rc<Dev>,
     value: Library,
-    id: i64,
 }
 
 impl DriverLibrary for MetalLibrary {
@@ -219,17 +216,13 @@ impl DriverLibrary for MetalLibrary {
         own_pipeline(pipeline)
     }
     fn destroy_library(&self) -> Result<(), Error> {
-        self.value.destroy()?;
-        self.dev.libraries.borrow_mut().remove(&self.id);
-        Ok(())
+        self.value.destroy()
     }
 }
 
 fn create_library(dev: &Rc<Dev>, shader: &Shader) -> Result<Box<dyn DriverLibrary>, Error> {
     let value = library::create(&dev.device, shader)?;
-    let id = dev.t.token();
-    dev.libraries.borrow_mut().insert(id, value.clone());
-    Ok(Box::new(MetalLibrary { dev: dev.clone(), value, id }))
+    Ok(Box::new(MetalLibrary { dev: dev.clone(), value }))
 }
 
 fn warm_library(dev: &Rc<Dev>, shader: &Shader) -> Option<ogpu_core::backend::Warm> {
@@ -498,7 +491,6 @@ impl DriverAccelEncoder for AccelRecorder {
 }
 
 struct MetalCommands {
-    dev: Rc<Dev>,
     queue: Queue,
     active: Rc<Vec<PendingPresentation>>,
     context: Rc<CommandContext>,
@@ -531,13 +523,13 @@ impl DriverCommands for MetalCommands {
     fn commit_present(&self, source: &dyn DriverResource, frame: DriverFrame) -> Result<Receipt, Error> {
         let context = &self.context;
         let source = context.find_texture(source)?;
-        let Some((surface, native_frame)) = self.dev.acquired_frames.borrow().get(&frame.frame_token).cloned() else {
-            return Err(fail(context.operation, ErrorKind::InvalidState, "frame token is stale"));
+        let Some(AcquiredFrame { surface, frame: native_frame }) = frame.0.downcast_ref::<AcquiredFrame>() else {
+            return Err(fail(context.operation, ErrorKind::InvalidState, "frame is not this driver's"));
         };
         let Some(pending) = self.active.iter().find(|p| p.available()) else {
             return Err(fail(context.operation, ErrorKind::Capacity, "bounded presentation slots are all in flight"));
         };
-        pending.prepare_present(&surface, &native_frame, &source)?;
+        pending.prepare_present(surface, native_frame, source)?;
         if let Err(e) = pending.presentation_encoder(&context.native) {
             pending.rollback_present();
             return Err(e);
@@ -551,7 +543,6 @@ impl DriverCommands for MetalCommands {
             }
             Ok(receipt) => {
                 pending.commit_present(receipt.epoch);
-                self.dev.acquired_frames.borrow_mut().remove(&frame.frame_token);
                 Ok(Receipt { epoch: receipt.epoch })
             }
         }
@@ -579,14 +570,13 @@ fn begin_commands(dev: &Rc<Dev>, queue: &Queue, active: &Rc<Vec<PendingPresentat
         open_encoder: RefCell::new(None),
         retained: RefCell::new(Vec::new()),
     });
-    Ok(Box::new(MetalCommands { dev: dev.clone(), queue: queue.clone(), active: active.clone(), context }))
+    Ok(Box::new(MetalCommands { queue: queue.clone(), active: active.clone(), context }))
 }
 
 struct MetalQueue {
     dev: Rc<Dev>,
     queue: Queue,
     active: Rc<Vec<PendingPresentation>>,
-    token: i64,
 }
 
 impl DriverQueue for MetalQueue {
@@ -615,7 +605,7 @@ impl DriverQueue for MetalQueue {
         }
         self.queue.destroy()?;
         surface::clear_pending_presentations(&self.active);
-        self.dev.active_queues.borrow_mut().remove(&self.token);
+        self.dev.queues.set(self.dev.queues.get() - 1);
         match self.dev.take_cleanup_error() {
             None => Ok(()),
             Some(e) => Err(e),
@@ -625,14 +615,18 @@ impl DriverQueue for MetalQueue {
 
 fn create_queue(dev: &Rc<Dev>) -> Result<Box<dyn DriverQueue>, Error> {
     let queue = queue::create(&dev.device)?;
-    let token = dev.t.token();
     let active: Rc<Vec<PendingPresentation>> = Rc::new((0..PENDING_PRESENTATION_CAPACITY).map(|_| surface::create_pending_presentation()).collect());
-    dev.active_queues.borrow_mut().insert(token, active.clone());
-    Ok(Box::new(MetalQueue { dev: dev.clone(), queue, active, token }))
+    dev.queues.set(dev.queues.get() + 1);
+    Ok(Box::new(MetalQueue { dev: dev.clone(), queue, active }))
+}
+
+/// What a frame carries from acquire to present or discard.
+struct AcquiredFrame {
+    surface: Surface,
+    frame: Frame,
 }
 
 struct MetalSurface {
-    dev: Rc<Dev>,
     value: Surface,
 }
 
@@ -646,19 +640,15 @@ impl DriverSurface for MetalSurface {
             Acquire::Occluded => Ok(DriverAcquire::Occluded),
             Acquire::DeviceLost => Ok(DriverAcquire::DeviceLost),
             Acquire::Acquired(frame) => {
-                let frame_token = frame.id();
-                self.dev.acquired_frames.borrow_mut().insert(frame_token, (self.value.clone(), frame));
-                Ok(DriverAcquire::Acquired(DriverFrame { frame_token }))
+                Ok(DriverAcquire::Acquired(DriverFrame(Rc::new(AcquiredFrame { surface: self.value.clone(), frame }))))
             }
         }
     }
     fn discard(&self, frame: DriverFrame) -> Result<(), Error> {
-        let Some((_, native)) = self.dev.acquired_frames.borrow().get(&frame.frame_token).cloned() else {
-            return Err(fail("Ogpu_metal.Backend.surface", ErrorKind::InvalidState, "frame token is stale"));
+        let Some(acquired) = frame.0.downcast_ref::<AcquiredFrame>() else {
+            return Err(fail("Ogpu_metal.Backend.surface", ErrorKind::InvalidState, "frame is not this driver's"));
         };
-        self.value.discard(&native)?;
-        self.dev.acquired_frames.borrow_mut().remove(&frame.frame_token);
-        Ok(())
+        self.value.discard(&acquired.frame)
     }
     fn destroy_surface(&self) -> Result<(), Error> {
         if self.value.in_flight_presentations() != 0 {
@@ -684,11 +674,11 @@ fn create_surface(dev: &Rc<Dev>, configuration: &ogpu_core::surface::AdmittedCon
             configuration.layer_profile(true)?,
         )?;
     let value = surface::create(&dev.device, layer)?;
-    Ok(Box::new(MetalSurface { dev: dev.clone(), value }))
+    Ok(Box::new(MetalSurface { value }))
 }
 
 fn destroy_device(dev: &Rc<Dev>) -> Result<(), Error> {
-    if !dev.active_queues.borrow().is_empty() {
+    if dev.queues.get() != 0 {
         return Err(fail("Ogpu_metal.Backend.destroy_device", ErrorKind::InvalidState, "device has active queues"));
     }
     for (_, state) in std::mem::take(&mut *dev.t.depth_states.borrow_mut()) {
@@ -793,9 +783,7 @@ impl Driver for MetalDriver {
         let dev = Rc::new(Dev {
             device,
             t: Rc::new(Tables::new()),
-            libraries: RefCell::new(HashMap::new()),
-            active_queues: RefCell::new(HashMap::new()),
-            acquired_frames: RefCell::new(HashMap::new()),
+            queues: Cell::new(0),
             cleanup_error: RefCell::new(None),
             device_live: device_live.clone(),
         });

@@ -64,8 +64,9 @@ pub trait DriverPipeline {
     fn destroy_pipeline(&self) -> Result<(), Error>;
 }
 
+/// One acquired frame: whatever the driver needs to present or discard it.
 #[derive(Clone)]
-pub struct DriverFrame { pub frame_token: Token }
+pub struct DriverFrame(pub Rc<dyn std::any::Any>);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GpuTiming { pub gpu_seconds: f64 }

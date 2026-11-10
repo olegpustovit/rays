@@ -151,7 +151,7 @@ struct DiscardSurface { fail_first: bool, attempts: std::rc::Rc<std::cell::Cell<
 impl crate::backend::DriverSurface for DiscardSurface {
     fn configure(&self, _: &crate::surface::AdmittedConfiguration) -> Result<(), crate::error::Error> { Ok(()) }
     fn acquire_sync(&self) -> Result<crate::backend::DriverAcquire, crate::error::Error> {
-        Ok(crate::backend::DriverAcquire::Acquired(crate::backend::DriverFrame { frame_token: 7 }))
+        Ok(crate::backend::DriverAcquire::Acquired(crate::backend::DriverFrame(std::rc::Rc::new(7i64))))
     }
     fn discard(&self, _: crate::backend::DriverFrame) -> Result<(), crate::error::Error> {
         let current = self.attempts.get();

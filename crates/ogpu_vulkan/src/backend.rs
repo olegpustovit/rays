@@ -177,7 +177,6 @@ fn validation_mode() -> (bool, bool) {
 struct Dev {
     device: RefCell<Option<Rc<vk::Device>>>,
     next: Cell<i64>,
-    frames: RefCell<HashMap<i64, Rc<RefCell<Option<vk::Surface>>>>>,
     queues: Cell<i64>,
     max_invocations: i64,
 }
@@ -1470,22 +1469,17 @@ impl DriverCommands for CommandsHandle {
     }
     fn commit_present(&self, source: &dyn DriverResource, frame: DriverFrame) -> Result<Receipt, Error> {
         let source = texture_entry(QUEUE_OP, source)?;
-        let surface = self.cmds.dev.frames.borrow().get(&frame.frame_token).cloned();
-        let Some(surface) = surface else {
-            return Err(fail(QUEUE_OP, ErrorKind::InvalidState, "frame token is stale"));
+        let Some(surface) = frame.0.downcast_ref::<RefCell<Option<vk::Surface>>>() else {
+            return Err(fail(QUEUE_OP, ErrorKind::InvalidState, "frame is not this driver's"));
         };
-        let result = self.cmds.commit_with(QUEUE_OP, &mut |slot| {
+        self.cmds.commit_with(QUEUE_OP, &mut |slot| {
             let handle_error = || vk::Error { operation: "commit_present", kind: vk::ErrorKind::InvalidHandle };
             let commands = slot.as_mut().ok_or_else(handle_error)?;
             let mut surface = surface.borrow_mut();
             let epoch = surface.as_mut().ok_or_else(handle_error)?.present(commands, &source.texture)?;
             *slot = None;
             Ok(epoch)
-        });
-        if result.is_ok() {
-            self.cmds.dev.frames.borrow_mut().remove(&frame.frame_token);
-        }
-        result
+        })
     }
     fn abandon(&self) -> Result<(), Error> {
         *self.cmds.commands.borrow_mut() = None;
@@ -1555,7 +1549,6 @@ fn surface_stale() -> Error {
 }
 
 struct SurfaceHandle {
-    dev: Rc<Dev>,
     cell: Rc<RefCell<Option<vk::Surface>>>,
 }
 
@@ -1573,9 +1566,7 @@ impl DriverSurface for SurfaceHandle {
         };
         match acquired {
             Ok(vk::Acquire::Image(_)) => {
-                let frame_token = self.dev.token();
-                self.dev.frames.borrow_mut().insert(frame_token, self.cell.clone());
-                Ok(DriverAcquire::Acquired(DriverFrame { frame_token }))
+                Ok(DriverAcquire::Acquired(DriverFrame(self.cell.clone())))
             }
             Ok(vk::Acquire::TimedOut) => Ok(DriverAcquire::Timeout),
             Ok(vk::Acquire::Occluded) => Ok(DriverAcquire::Occluded),
@@ -1584,17 +1575,15 @@ impl DriverSurface for SurfaceHandle {
         }
     }
     fn discard(&self, frame: DriverFrame) -> Result<(), Error> {
-        if self.dev.frames.borrow_mut().remove(&frame.frame_token).is_some() {
-            if let Some(surface) = self.cell.borrow_mut().as_mut() {
-                surface.discard();
-            }
-            Ok(())
-        } else {
-            Err(fail(SURFACE_OP, ErrorKind::InvalidState, "frame token is stale"))
+        if frame.0.downcast_ref::<RefCell<Option<vk::Surface>>>().is_none() {
+            return Err(fail(SURFACE_OP, ErrorKind::InvalidState, "frame is not this driver's"));
         }
+        if let Some(surface) = self.cell.borrow_mut().as_mut() {
+            surface.discard();
+        }
+        Ok(())
     }
     fn destroy_surface(&self) -> Result<(), Error> {
-        self.dev.frames.borrow_mut().retain(|_, surface| !Rc::ptr_eq(surface, &self.cell));
         live_add(-1);
         *self.cell.borrow_mut() = None;
         Ok(())
@@ -1608,7 +1597,7 @@ fn create_surface(dev: &Rc<Dev>, configuration: &ogpu_core::surface::AdmittedCon
     let device = dev.device(SURFACE_OP)?;
     let native = device.surface(layer, layer.owner_id(), layer.generation(), immediate(configuration)).map_err(|failure| of_vk(SURFACE_OP, failure))?;
     live_add(1);
-    Ok(Box::new(SurfaceHandle { dev: dev.clone(), cell: Rc::new(RefCell::new(Some(native))) }))
+    Ok(Box::new(SurfaceHandle { cell: Rc::new(RefCell::new(Some(native))) }))
 }
 
 struct VulkanDevice {
@@ -1694,7 +1683,6 @@ impl DriverDevice for VulkanDevice {
         }
         self.device_live.set(false);
         // Natives leaked past their owners go with the device.
-        self.dev.frames.borrow_mut().clear();
         *self.dev.device.borrow_mut() = None;
         handle::destroy_device(&self.handle);
         Ok(())
@@ -1718,7 +1706,6 @@ fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> Resu
     let dev = Rc::new(Dev {
         device: RefCell::new(Some(Rc::new(device))),
         next: Cell::new(1),
-        frames: RefCell::default(),
         queues: Cell::new(0),
         max_invocations: facts.max_invocations as i64,
     });
