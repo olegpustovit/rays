@@ -33,8 +33,8 @@ pub fn live_handles() -> i64 {
 /// The record `ogpu_core::impl_::select` takes.
 pub fn implementation() -> Impl {
     Impl {
-        backend: BACKEND.to_owned(),
-        create_driver: Box::new(create_driver),
-        live_handles: Box::new(live_handles),
+        backend: BACKEND,
+        create_driver,
+        live_handles,
     }
 }

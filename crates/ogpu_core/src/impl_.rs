@@ -3,26 +3,26 @@ use crate::{
     backend::Driver,
     error::{self, Error, ErrorKind},
 };
-use std::{cell::RefCell, rc::Rc};
+use std::cell::Cell;
 
 pub use crate::backend::Implementation as Impl;
 
 thread_local! {
-    static SELECTED: RefCell<Option<Rc<Impl>>> = const { RefCell::new(None) };
+    static SELECTED: Cell<Option<Impl>> = const { Cell::new(None) };
 }
 
 pub fn select(implementation: Impl) {
-    SELECTED.with(|cell| *cell.borrow_mut() = Some(Rc::new(implementation)));
+    SELECTED.with(|cell| cell.set(Some(implementation)));
 }
 
-fn selected(operation: &str) -> Result<Rc<Impl>, Error> {
-    SELECTED.with(|cell| cell.borrow().clone()).ok_or_else(|| {
+fn selected(operation: &str) -> Result<Impl, Error> {
+    SELECTED.with(Cell::get).ok_or_else(|| {
         error::make(operation, ErrorKind::NoAdapter, "no OGPU implementation selected")
     })
 }
 
 pub fn backend() -> Result<String, Error> {
-    Ok(selected("Ogpu.Impl.backend")?.backend.clone())
+    Ok(selected("Ogpu.Impl.backend")?.backend.to_owned())
 }
 
 pub fn create_driver() -> Result<Box<dyn Driver>, Error> {

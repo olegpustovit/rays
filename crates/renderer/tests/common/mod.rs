@@ -23,9 +23,9 @@ pub fn gpu() -> bool {
     use ogpu_core::impl_::Impl;
     #[cfg(windows)]
     ogpu_core::impl_::select(Impl {
-        backend: ogpu_vulkan::impl_::BACKEND.to_owned(),
-        create_driver: Box::new(|| ogpu_vulkan::backend::create_with_validation((true, true))),
-        live_handles: Box::new(ogpu_vulkan::impl_::live_handles),
+        backend: ogpu_vulkan::impl_::BACKEND,
+        create_driver: || ogpu_vulkan::backend::create_with_validation((true, true)),
+        live_handles: ogpu_vulkan::impl_::live_handles,
     });
     #[cfg(target_os = "macos")]
     ogpu_core::impl_::select(ogpu_metal::impl_::implementation());

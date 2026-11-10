@@ -281,12 +281,14 @@ pub trait Driver {
     fn create_device(&self) -> Result<Box<dyn DriverDevice>, Error>;
 }
 
-/// A backend factory record; selection belongs to the public OGPU layer.
+/// A backend's name and entry points; selection belongs to the public OGPU layer.
+#[derive(Clone, Copy)]
 pub struct Implementation {
-    pub backend: String,
-    pub create_driver: Box<dyn Fn() -> Box<dyn Driver>>,
+    pub backend: &'static str,
+    /// A fresh driver per call.
+    pub create_driver: fn() -> Box<dyn Driver>,
     /// Native handles still alive. Diagnostics only.
-    pub live_handles: Box<dyn Fn() -> i64>,
+    pub live_handles: fn() -> i64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
