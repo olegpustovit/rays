@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::cmp::Ordering;
 use std::sync::Arc;
 
-use rdk_core::{cancel, error};
+use rdk_core::{cancel, error, scratch};
 use rdk_core::error::Code;
 use rdk_geom::implicit_point;
 use rdk_geom::predicates::Sign;
@@ -74,8 +74,10 @@ pub fn build(cancel_value: Option<&cancel::T>, c: &Arc<complex::T>) -> Result<T,
         let count = last - first;
         // Cyclic order is unique only from three charts onward. One/two-chart edges retain the
         // complex's stable facet order without exact angular arithmetic.
-        let order: Vec<i64> = if count <= 2 {
-            (0..count).collect()
+        let order = if count <= 2 {
+            let mut order = scratch::i64_empty();
+            order.extend(0..count);
+            order
         } else {
             radial_order(c, edge, first, count)?
         };
@@ -89,7 +91,7 @@ pub fn build(cancel_value: Option<&cancel::T>, c: &Arc<complex::T>) -> Result<T,
     Ok(T { complex: Arc::clone(c), offsets, facets, locals })
 }
 
-fn radial_order(c: &complex::T, edge: i64, first: i64, count: i64) -> Result<Vec<i64>, error::T> {
+fn radial_order(c: &complex::T, edge: i64, first: i64, count: i64) -> Result<scratch::I64, error::T> {
     let edge_start = complex::view::vertex(c, complex::edge_first(c, edge));
     let edge_end = complex::view::vertex(c, complex::edge_second(c, edge));
     let reference_facet = complex::edge_incident_facet(c, first);
@@ -109,7 +111,8 @@ fn radial_order(c: &complex::T, edge: i64, first: i64, count: i64) -> Result<Vec
             && complex::member_face(c, left_member) == complex::member_face(c, right_member)
     };
     let invalid = Cell::new(false);
-    let halves: Vec<i64> = (0..count as usize)
+    let mut halves = scratch::i64_empty();
+    halves.extend((0..count as usize)
         .map(|index| {
             let facet = complex::edge_incident_facet(c, first + index as i64);
             if facet == reference_facet {
@@ -137,12 +140,12 @@ fn radial_order(c: &complex::T, edge: i64, first: i64, count: i64) -> Result<Vec
                     },
                 }
             }
-        })
-        .collect();
+        }));
     if invalid.get() {
         return Err(fail(Code::InvalidComplex, "radial chart opposite point lies on its edge"));
     }
-    let mut order: Vec<i64> = (0..count).collect();
+    let mut order = scratch::i64_empty();
+    order.extend(0..count);
     order.sort_by(|&left, &right| {
         let by_half = halves[left as usize].cmp(&halves[right as usize]);
         if by_half != Ordering::Equal {

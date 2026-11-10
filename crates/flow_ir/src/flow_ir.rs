@@ -361,12 +361,9 @@ pub mod profile {
         // ponytail: 512 recent groups, a linear scan once per group; index if profiling many small
         // groups measurably costs a frame.
         let mut list = profile.executions.lock().unwrap();
-        let mut next = vec![execution.clone()];
-        for old in list.iter() {
-            if next.len() >= 512 { break; }
-            if !(old.sites == execution.sites && old.tier == execution.tier) { next.push(old.clone()); }
-        }
-        *list = next;
+        list.retain(|old| !(old.sites == execution.sites && old.tier == execution.tier));
+        list.insert(0, execution.clone());
+        list.truncate(512);
     }
 
     /// The `Executor` entry of a static map: `finish(head, tail, completed)` closes it.

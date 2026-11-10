@@ -243,8 +243,8 @@ fn attribute_map_output_buffers() {
 // rounded to cover key-size variation. Never raise.
 // Each pair is (allocations, peak B); changed-input peak excludes only newly owned output payload.
 const SUBDIVIDE_WARM: [(u64, i64); 2] = [(18, 3_752), (68_565, 2_660_000)];
-const BOOLEAN_WARM: [(u64, i64); 2] = [(25, 4_426), (26_695, 855_000)];
-const SCATTER_WARM: [(u64, i64); 2] = [(18, 5_360), (598_565, 12_985_200)];
+const BOOLEAN_WARM: [(u64, i64); 2] = [(25, 4_426), (16_500, 855_000)];
+const SCATTER_WARM: [(u64, i64); 2] = [(18, 5_360), (262_500, 6_400_000)];
 
 // These are session cooks: lowering and input construction stay outside the counters.
 // Measure a cache hit, then a genuinely new input after the same-sized kernel has warmed.
