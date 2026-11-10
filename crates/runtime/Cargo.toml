@@ -6,11 +6,9 @@ license.workspace = true
 
 [dependencies]
 input = { path = "../input" }
+pxui_sdl = { path = "../pxui_sdl" }
 sdl3 = { path = "../sdl3" }
 ogpu_core = { path = "../ogpu_core" }
-
-[dev-dependencies]
-ogpu_mock = { path = "../ogpu_mock" }
 
 # The window needs the SDL main thread, which libtest never gives a test: this target's own main runs it.
 [[test]]

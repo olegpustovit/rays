@@ -1,3 +1,5 @@
+//! The render target Rays hands the renderer: a `pxui_sdl` window or an offscreen extent, plus the
+//! portable per-frame input source. Window hosting itself lives in `pxui_sdl`.
 mod runtime;
 pub use runtime::*;
 
@@ -6,7 +8,7 @@ pub mod runtime_input;
 pub mod runtime_input_sdl3;
 
 /// Native binary startup policy; does not acquire SDL subsystems or change their ownership.
-pub use sdl3::init::configure_native_process;
+pub use pxui_sdl::configure_native_process;
 #[cfg(test)]
 mod test_runtime_input;
 #[cfg(test)]
