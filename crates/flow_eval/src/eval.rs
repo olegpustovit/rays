@@ -2950,7 +2950,14 @@ fn structure_term(out: &mut String, term: &Term) {
     out.push('t');
     let form = term.form();
     out.push_str(&form.id.to_string());
-    structure_bytes(out, term.path().map_or_else(|| "-".to_owned(), |path| path.iter().map(|name| term.name(*name)).collect::<Vec<_>>().join("/")).as_bytes());
+    match term.path() {
+        Some(path) => {
+            out.push('P');
+            for name in path { structure_bytes(out, term.name(*name).as_bytes()); }
+            out.push(';');
+        }
+        None => out.push('-'),
+    }
     structure_bytes(out, ty::to_string(term.ty()).as_bytes());
     if form.id < flow_syntax::syntax::LIBRARY_BASE {
         structure_bytes(out, flow_syntax::lisp::flat(&form).as_bytes());
@@ -3948,6 +3955,35 @@ fn text_clones_and_parameter_reads_share_binary_payloads() {
         assert_eq!(lookup(&captured, "b"), Some(&Value::Int(3)), "a later binding replaces an earlier one");
         assert_eq!(lookup(&captured, "c"), None);
         assert!(Arc::ptr_eq(&no_captures(), &no_captures()), "the empty environment is shared");
+    }
+
+    #[test]
+    fn term_structure_frames_path_segments_and_presence() {
+        let source = form();
+        let paths = [
+            Some(vec![Symbol::from("a/b"), Symbol::from("c")]),
+            Some(vec![Symbol::from("a"), Symbol::from("b/c")]),
+            Some(vec![Symbol::from("-")]), Some(Vec::new()), None,
+        ];
+        let mut encoded = Vec::new();
+        for path in &paths {
+            let mut builder = flow_check::term_arena::TermBuilder::new();
+            let form = builder.import_form(&source);
+            let id = builder.push(path.as_deref(), &Ty::Int, form, flow_check::term_arena::Draft::Lit(param::Value::Int(7)));
+            let term = builder.freeze().handle(id);
+            let mut text = String::new();
+            structure_term(&mut text, &term);
+            assert!(!encoded.contains(&text), "distinct term paths share structural identity: {path:?}");
+            encoded.push(text);
+        }
+        // Growing the process table cannot alter the serialized spelling of existing terms.
+        symbol::intern("z5_structure_unrelated_symbol");
+        let mut builder = flow_check::term_arena::TermBuilder::new();
+        let form = builder.import_form(&source);
+        let id = builder.push(paths[0].as_deref(), &Ty::Int, form, flow_check::term_arena::Draft::Lit(param::Value::Int(7)));
+        let mut text = String::new();
+        structure_term(&mut text, &builder.freeze().handle(id));
+        assert_eq!(text, encoded[0]);
     }
 
     #[test]
