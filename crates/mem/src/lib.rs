@@ -1031,10 +1031,6 @@ impl Report {
             format_bytes(self.budget),
         )
     }
-
-    pub fn to_string(&self) -> String {
-        format!("{self}")
-    }
 }
 
 pub fn report() -> Report {
