@@ -9,3 +9,6 @@ name = "param"
 path = "src/lib.rs"
 
 [dependencies]
+
+[lints]
+workspace = true
