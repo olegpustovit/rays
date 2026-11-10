@@ -948,7 +948,7 @@ fn device_build(t: &PathTracer, o: &mut DeviceOwned, m: &Mesh, d: &mesh_data::De
                 corners: d.corners.clone(),
                 vertex_count: d.vertex_count,
                 material_key: material_key.to_vec(),
-                vix: vix.clone(),
+                vix,
                 owns_vix: held.is_none(),
                 refit_scratch,
                 source: d.holder.clone(),

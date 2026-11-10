@@ -167,7 +167,7 @@ fn apply(st: &mut State, op: Op) -> R<()> {
             st.source_changed = true;
             Ok(())
         }
-        Err(d) => stop(d.message.clone()),
+        Err(d) => stop(d.message),
     }
 }
 
@@ -499,7 +499,7 @@ fn set_camera(st: &mut State, before: &document::T, alive: &dyn Fn(i64) -> bool,
                     if let Some(h) = home(id) {
                         let p = bind(st, &h)?;
                         if f::arg_text(&st.workspace.source, &p, &active).is_some() {
-                            apply(st, Op::Disconnect { node: p, key: active.clone(), fallback: None })?;
+                            apply(st, Op::Disconnect { node: p, key: active, fallback: None })?;
                         }
                     }
                 }

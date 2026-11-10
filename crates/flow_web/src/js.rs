@@ -746,8 +746,7 @@ pub struct FrameOptions {
     pub internal: bool,
 }
 
-struct Context<'a> {
-    program: &'a C::Program,
+struct Context {
     body: String,
     used: HashSet<String>,
     map: Vec<(i64, flow_ir::core_ir::Span)>,
@@ -769,7 +768,7 @@ struct Context<'a> {
     kernel: Option<KernelFn>,
 }
 
-impl Context<'_> {
+impl Context {
     fn is_gpu(&self, region: i64) -> bool { self.gpu.as_ref().map(|g| g(region)).unwrap_or(false) }
     fn kernel_of(&self, region: i64) -> Option<String> { self.kernel.as_ref().and_then(|k| k(region)) }
     fn slot_of(&self, slot: i64) -> i64 { self.state_slot.as_ref().map(|f| f(slot)).unwrap_or(slot) }
@@ -826,7 +825,7 @@ fn call(primitive: &Primitive, args: &[(Symbol, i64)]) -> Result<String, Diagnos
     Ok(format!("rt.{}({})", export_name(primitive), statics.join(", ")))
 }
 
-fn expression(ctx: &mut Context<'_>, e: &Expr) -> Result<String, Diagnostic> {
+fn expression(ctx: &mut Context, e: &Expr) -> Result<String, Diagnostic> {
     Ok(match e {
         Expr::Constant(n) => format!("K[{n}]"),
         Expr::Local(n) => local(*n),
@@ -869,7 +868,7 @@ fn kind_name(mark: C::Mark) -> &'static str {
     }
 }
 
-fn draw(ctx: &mut Context<'_>, d: &Draw) -> String {
+fn draw(ctx: &mut Context, d: &Draw) -> String {
     ctx.used.insert("num".to_owned());
     match d {
         Draw::Background(c) => format!(
@@ -967,7 +966,7 @@ fn shapes_json(packed: &packed::T) -> String {
     format!("{{sources:{},uniforms:{}}}", list(host::source_shapes(packed)), list(host::uniform_shapes(packed)))
 }
 
-fn line(ctx: &mut Context<'_>, depth: usize, text: &str) {
+fn line(ctx: &mut Context, depth: usize, text: &str) {
     for _ in 0..2 * depth {
         ctx.body.push(' ');
     }
@@ -975,15 +974,15 @@ fn line(ctx: &mut Context<'_>, depth: usize, text: &str) {
     ctx.body.push('\n');
 }
 
-fn statements(ctx: &mut Context<'_>, depth: usize, list: &[Statement]) -> Result<(), Diagnostic> {
+fn statements(ctx: &mut Context, program: &C::Program, depth: usize, list: &[Statement]) -> Result<(), Diagnostic> {
     for s in list {
-        statement(ctx, depth, s)?;
+        statement(ctx, program, depth, s)?;
     }
     Ok(())
 }
 
-fn slot_key(ctx: &mut Context<'_>, slot: i64) -> String {
-    let state = &ctx.program.state_slots[slot as usize];
+fn slot_key(ctx: &mut Context, program: &C::Program, slot: i64) -> String {
+    let state = &program.state_slots[slot as usize];
     let stamp = if state.plane == Plane::Host { "input.tick" } else { "input.frame" };
     let key = if state.source.iter.is_empty() {
         "\"\"".to_owned()
@@ -1006,14 +1005,14 @@ fn slot_key(ctx: &mut Context<'_>, slot: i64) -> String {
     format!("cell(state, {}, {key}, {stamp})", ctx.slot_of(slot))
 }
 
-fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), Diagnostic> {
+fn statement(ctx: &mut Context, program: &C::Program, depth: usize, s: &Statement) -> Result<(), Diagnostic> {
     if let Some(span) = &s.source.span {
         ctx.map.push((s.id, span.clone()));
     }
     let at = format!("at = {}; ", s.id);
     let id = s.id;
     match &s.node {
-        StatementNode::Assign(n, Expr::Items(ns)) if ctx.program.locals[*n as usize] == Ty::List(Box::new(flow_syntax::ty::geometry())) => {
+        StatementNode::Assign(n, Expr::Items(ns)) if program.locals[*n as usize] == Ty::List(Box::new(flow_syntax::ty::geometry())) => {
             let text = format!("{at}{} = rt.sequence_cooked([{}]);", local(*n), ns.iter().map(|n| local(*n)).collect::<Vec<_>>().join(","));
             line(ctx, depth, &text);
         }
@@ -1032,7 +1031,7 @@ fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), D
         StatementNode::Assign(n, Expr::Prim(Primitive::Array_range, _)) if ctx.tail_ranges.iter().any(|(k, _)| k == n) => {
             ctx.is_async = true;
             let (source, div) = ctx.tail_ranges.iter().find(|(k, _)| k == n).map(|(_, v)| *v).expect("tail range");
-            let kind = match ctx.program.locals[*n as usize] {
+            let kind = match program.locals[*n as usize] {
                 Ty::Array(ref e) if **e == Ty::Int => "'int'",
                 _ => "'float'",
             };
@@ -1065,7 +1064,7 @@ fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), D
             line(ctx, depth, &format!("  if (row{id} >= 0) {{"));
             line(ctx, depth, &format!("    {} = BigInt(row{id});", local(*index)));
             line(ctx, depth, "    try {");
-            statements(ctx, depth + 3, handler)?;
+            statements(ctx, program, depth + 3, handler)?;
             line(
                 ctx,
                 depth,
@@ -1078,13 +1077,13 @@ fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), D
         }
         StatementNode::Protect { body, value, failure, handler, mapped, result } => {
             line(ctx, depth, &format!("{at}try {{"));
-            statements(ctx, depth + 1, body)?;
+            statements(ctx, program, depth + 1, body)?;
             line(ctx, depth, &format!("  {} = {};", local(*result), local(*value)));
             line(ctx, depth, &format!("}} catch (error{id}) {{"));
             line(ctx, depth, &format!("  if (error{id} instanceof rt.Fail && error{id}.statement === undefined) error{id}.statement = at;"));
             line(ctx, depth, &format!("  {} = rt.error_payload(error{id});", local(*failure)));
             line(ctx, depth, "  try {");
-            statements(ctx, depth + 2, handler)?;
+            statements(ctx, program, depth + 2, handler)?;
             line(ctx, depth, &format!("  }} catch (mapper{id}) {{"));
             line(ctx, depth, &format!("    if (mapper{id} instanceof rt.Fail && mapper{id}.statement === undefined) mapper{id}.statement = at;"));
             line(ctx, depth, &format!("    rt.error_mapper_failure(error{id}, mapper{id});"));
@@ -1094,12 +1093,12 @@ fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), D
         }
         StatementNode::If { condition, yes, no } => {
             line(ctx, depth, &format!("{at}if (rt.truthy({})) {{", local(*condition)));
-            statements(ctx, depth + 1, yes)?;
+            statements(ctx, program, depth + 1, yes)?;
             if no.is_empty() {
                 line(ctx, depth, "}");
             } else {
                 line(ctx, depth, "} else {");
-                statements(ctx, depth + 1, no)?;
+                statements(ctx, program, depth + 1, no)?;
                 line(ctx, depth, "}");
             }
         }
@@ -1109,7 +1108,7 @@ fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), D
             line(ctx, depth, &format!("  if (c{id} > {limit}) rt.fail(\"E_ITER_BOUND\", \"Core iteration exceeds its bound.\");"));
             line(ctx, depth, &format!("  for (let i{id} = 0; i{id} < c{id}; i{id}++) {{"));
             line(ctx, depth, &format!("    {} = BigInt(i{id}); {} = Array.isArray(s{id}) ? s{id}[i{id}] : rt.array_nth(s{id}, i{id});", local(*index), local(*item)));
-            statements(ctx, depth + 2, body)?;
+            statements(ctx, program, depth + 2, body)?;
             line(ctx, depth, "  }");
             line(ctx, depth, "}");
         }
@@ -1126,7 +1125,7 @@ fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), D
             );
             line(ctx, depth, &format!("  if (n{id} > {limit}n) rt.fail(\"E_ITER_BOUND\", \"Core iteration exceeds its bound.\");"));
             line(ctx, depth, &format!("  {} = n{id};", local(*count)));
-            statements(ctx, depth + 1, init)?;
+            statements(ctx, program, depth + 1, init)?;
             let exact_count = *limit > 9007199254740991;
             line(
                 ctx,
@@ -1151,7 +1150,7 @@ fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), D
                     local(*item)
                 ),
             );
-            statements(ctx, depth + 2, body)?;
+            statements(ctx, program, depth + 2, body)?;
             line(ctx, depth, "  }");
             line(ctx, depth, "}");
         }
@@ -1160,19 +1159,19 @@ fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), D
             line(ctx, depth, &format!("{at}store(rt, {}, {}, {});", local(*sequence), local(*index), local(*value)));
         }
         StatementNode::State_read { slot, result, init, initial } => {
-            let key = slot_key(ctx, *slot);
+            let key = slot_key(ctx, program, *slot);
             line(ctx, depth, &format!("{at}{{ const c{id} = {key};"));
             line(ctx, depth, &format!("  if (c{id}.value !== undefined) {} = c{id}.value; else {{", local(*result)));
-            statements(ctx, depth + 2, init)?;
+            statements(ctx, program, depth + 2, init)?;
             line(ctx, depth, &format!("    {} = {};", local(*result), local(*initial)));
             line(ctx, depth, "  } }");
         }
         StatementNode::State_peek { slot, found, value } => {
-            let key = slot_key(ctx, *slot);
+            let key = slot_key(ctx, program, *slot);
             line(ctx, depth, &format!("{at}{{ const c{id} = {key}; {} = c{id}.pending !== undefined; {} = {} ? c{id}.pending : null; }}", local(*found), local(*value), local(*found)));
         }
         StatementNode::State_write { slot, value } => {
-            let key = slot_key(ctx, *slot);
+            let key = slot_key(ctx, program, *slot);
             line(ctx, depth, &format!("{at}{}.pending = {};", key, local(*value)));
         }
         StatementNode::Invoke { region, args, result } => {
@@ -1180,7 +1179,7 @@ fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), D
             if ctx.is_gpu(*region) && ctx.kernel_of(*region).is_none() {
                 line(ctx, depth, &format!("{at}{} = await rt.gpuArray({region});", local(*result)));
             } else {
-                let r = ctx.program.regions[*region as usize].clone();
+                let r = &program.regions[*region as usize];
                 let mut dynamic = ctx.templated || r.uniforms.iter().any(E::frame_dependent);
                 if !dynamic {
                     for (residual, term) in r.sources.iter() {
@@ -1193,7 +1192,7 @@ fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), D
                 }
                 let plan = if dynamic { format!(", B{region}") } else { String::new() };
                 if dynamic && !ctx.plans.contains_key(region) {
-                    let text = binding_plan(ctx.fast, ctx.kernel_of(*region), &r)?;
+                    let text = binding_plan(ctx.fast, ctx.kernel_of(*region), r)?;
                     ctx.plans.insert(*region, text);
                 }
                 let argument_list = args.iter().map(|a| local(*a)).collect::<Vec<_>>().join(", ");
@@ -1325,8 +1324,8 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
 
 fn names(a: &[i64]) -> String { a.iter().map(|n| local(*n)).collect::<Vec<_>>().join(", ") }
 
-fn resident_statement(ctx: &mut Context<'_>, options: &FrameOptions, depth: usize, s: &Statement) -> Result<(), Diagnostic> {
-    let live = core_exec::resident_live(ctx.program, s);
+fn resident_statement(ctx: &mut Context, program: &C::Program, options: &FrameOptions, depth: usize, s: &Statement) -> Result<(), Diagnostic> {
+    let live = core_exec::resident_live(program, s);
     match live {
         Some(live) if options.fast && !options.bindings && !options.internal => {
             ctx.is_async = true;
@@ -1342,13 +1341,13 @@ fn resident_statement(ctx: &mut Context<'_>, options: &FrameOptions, depth: usiz
             C::iter(&mut |s| arrays.extend(C::writes(s)), std::slice::from_ref(s));
             arrays.sort();
             arrays.dedup();
-            let arrays: Vec<i64> = arrays.into_iter().filter(|n| matches!(ctx.program.locals[*n as usize], Ty::Array(_))).collect();
+            let arrays: Vec<i64> = arrays.into_iter().filter(|n| matches!(program.locals[*n as usize], Ty::Array(_))).collect();
             ctx.loop_arrays = names(&arrays);
             ctx.resident = true;
-            statement(ctx, 3, s)?;
+            statement(ctx, program, 3, s)?;
             ctx.resident = false;
             // its arrays stay on the device when what follows only ranges over and draws them
-            let tail = core_exec::resident_tail(ctx.program, s, &|r| ctx.is_gpu(r));
+            let tail = core_exec::resident_tail(program, s, &|r| ctx.is_gpu(r));
             if let Some((_, ranges)) = &tail {
                 let mut merged = ranges.clone();
                 merged.extend(ctx.tail_ranges.iter().cloned());
@@ -1366,7 +1365,7 @@ fn resident_statement(ctx: &mut Context<'_>, options: &FrameOptions, depth: usiz
             );
             Ok(())
         }
-        _ => statement(ctx, depth, s),
+        _ => statement(ctx, program, depth, s),
     }
 }
 
@@ -1384,7 +1383,6 @@ pub fn frame_result(options: &FrameOptions, program: &C::Program) -> Result<(Str
         }
     }
     let mut ctx = Context {
-        program,
         body: String::with_capacity(4096),
         used: HashSet::new(),
         map: Vec::new(),
@@ -1415,10 +1413,10 @@ pub fn frame_result(options: &FrameOptions, program: &C::Program) -> Result<(Str
                 let _ = write!(ctx.body, "    if (h{}) [{}] = h{}; else {{\n", s.id, names(&writes), s.id);
                 // a resident fold (native Core_exec.resident_live): in fast precision its regions stay on
                 // the device and its live writes come back once, as it ends
-                resident_statement(&mut ctx, options, 3, s)?;
+                resident_statement(&mut ctx, program, options, 3, s)?;
                 let _ = write!(ctx.body, "    rt.keep(M, {}, k{}, [{}]); }} }}\n", s.id, s.id, names(&writes));
             }
-            _ => resident_statement(&mut ctx, options, 2, s)?,
+            _ => resident_statement(&mut ctx, program, options, 2, s)?,
         }
     }
     let code = std::mem::take(&mut ctx.body);

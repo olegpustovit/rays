@@ -446,7 +446,7 @@ fn prepare_source(d: &Data, gpu: Option<&G::Config>, request: &RequestRef, state
         _ => {
             let (cone, root) = l::source_cone(&owner, id)?;
             let source = Rc::new(RefCell::new(Source {
-                network: owner.network.clone(),
+                network: owner.network,
                 cone,
                 id: root,
                 lane: Rc::new(value_lane::create(Some(e::fork_state(state)))),
@@ -1451,7 +1451,7 @@ pub fn image(gpu: Option<&G::Config>, display: bool, t_: &WorkspaceImages, state
     let mut e = entry.borrow_mut();
     e.image = Some(image_.clone());
     e.texture = Some(texture_slot(&cpu.payload));
-    e.display = Some(cpu.stamp.clone());
+    e.display = Some(cpu.stamp);
     Ok(image_)
 }
 

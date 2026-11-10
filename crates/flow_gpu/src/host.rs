@@ -493,7 +493,7 @@ impl HostKernel {
             output: RefCell::new(None),
         });
         t.0.created.set(t.0.created.get() + 1);
-        t.0.runners.borrow_mut().add(key.clone(), runner.clone());
+        t.0.runners.borrow_mut().add(key, runner.clone());
         Ok(runner)
     }
 }
@@ -1486,7 +1486,7 @@ impl Scope {
                     let mut s = self.s.borrow_mut();
                     s.settled = false;
                     if reset_status {
-                        s.status_runs.push(run_.clone());
+                        s.status_runs.push(run_);
                     }
                 }
                 slot.spent.borrow_mut().push(cell);
@@ -1497,7 +1497,7 @@ impl Scope {
                     let mut s = self.s.borrow_mut();
                     s.settled = false;
                     if reset_status {
-                        s.status_runs.push(run_.clone());
+                        s.status_runs.push(run_);
                     }
                 }
                 let known = length == n
@@ -2222,10 +2222,9 @@ impl Scope {
         // a host read copies: the state's buffer stays its, for the next step to bind
         let buffer = p.buffer.0.clone();
         let (count, width) = (holder.count, holder.width);
-        let thunk_holder = Arc::new(holder);
         let id = self.t.0.id;
         let read: Arc<dyn Fn() -> Value + Send + Sync> = {
-            let h = thunk_holder.clone();
+            let h = Arc::new(holder);
             let slot_key = buffer_id_of(&buffer);
             Arc::new(move || {
                 // the holder's planes carry the values; the buffer view is only valid on the

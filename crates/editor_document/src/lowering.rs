@@ -905,7 +905,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
             };
             let lowered = lower(&gpu)?;
             match (gpu.backend.is_some(), plan_window(workspace, &lowered.plan)) {
-                (true, Ok(window)) if window.fast != gpu.fast => lower(&gpu::Config { fast: window.fast, ..gpu.clone() })?,
+                (true, Ok(window)) if window.fast != gpu.fast => lower(&gpu::Config { fast: window.fast, ..gpu })?,
                 _ => lowered,
             }
         }

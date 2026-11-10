@@ -666,7 +666,7 @@ fn cpu_run(facts: &Facts, checked: &mut Option<w::Workspace>, words: Vec<(String
         }
         v => v.clone(),
     });
-    let inputs = if name == "trace" { vec![pixels.clone(), pixels.clone()] } else { vec![pixels.clone()] };
+    let inputs = if name == "trace" { vec![pixels.clone(), pixels] } else { vec![pixels] };
     let residual = deferred(name, bound, &inputs, Ty::Vec4)?;
     let term = e::residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
     let program = packed::compile_result(&packed::CompileOptions::default(), residual, &term).map_err(|ds| diagnostics(&ds))?;

@@ -1681,8 +1681,8 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
     });
     let token = Arc::new(Token { id, owner: d.domain, fate: fate.clone(), shared: d.pool.0.shared.clone(), settled: settled.clone() });
     let weak = Arc::downgrade(&token);
-    d.state.borrow_mut().kept.push(KeptRef { epoch, settled: settled.clone(), token: weak.clone(), id });
-    d.pool.0.s.borrow_mut().held.insert(id, (buffer.clone(), capacity, fate.clone()));
+    d.state.borrow_mut().kept.push(KeptRef { epoch, settled, token: weak.clone(), id });
+    d.pool.0.s.borrow_mut().held.insert(id, (buffer.clone(), capacity, fate));
     KEPT.with(|k| k.borrow_mut().insert(id, kept.clone()));
     BINDABLE.with(|b| b.borrow_mut().push((Arc::downgrade(&placeholder), weak.clone(), id, count * width)));
     let resident = Value::Floats(width as usize, placeholder);

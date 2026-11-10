@@ -448,7 +448,7 @@ pub fn check_text(options: &TextOptions, catalog: &Catalog, text: &str) -> Resul
     let (checked, warnings) = fsc::check_workspace(&ops, fragment, None, catalog, std::slice::from_ref(&ws));
     let Some(mut checked) = checked else { return Err(warnings) };
     // the ops stay one shared list across text edits (`same_graph` compares them by identity)
-    checked.ops = ops.clone();
+    checked.ops = ops;
     let layout = match forms.iter().find(|f| head(f) == Some("layout")) {
         None => options.layout.clone().unwrap_or_default(),
         Some(f) => lbp::of_syntax(f).map_err(|m| vec![diag(Some(f.span.clone()), "E_LAYOUT", &m)])?,

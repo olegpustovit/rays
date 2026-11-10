@@ -693,7 +693,7 @@ fn upload_inner(o: &mut OwnedResources, reuse: Option<&GpuMesh>, material_data: 
     } else {
         // A reused compacted prototype only needs its instance structure.
         let mut build = MeshBuild {
-            gpu: GpuMesh { primitive: Some(primitive.clone()), ..gpu_mesh_ },
+            gpu: GpuMesh { primitive: Some(primitive), ..gpu_mesh_ },
             scratch: work.clone(),
             extra_scratch: None,
             size_buffer: None,

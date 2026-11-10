@@ -108,7 +108,7 @@ pub fn lower(d: &doc::T) -> R<Lowered> {
     }
     let options = flow_sop::lower::Options { inputs: Some((*d.inputs).clone()), ..Default::default() };
     let lowered = flow_sop::lower::of_checked(None, options, &d.checked)?;
-    let evaluated = lowered.evaluated.clone();
+    let evaluated = lowered.evaluated;
     let value = evaluated
         .results
         .iter()
@@ -651,18 +651,9 @@ impl Export<'_> {
         let storing = self.store.clone();
         let options = js::FrameOptions {
             fast,
-            kernel: Some(Arc::new({
-                let fk = fk.clone();
-                move |k| fk.get(k as usize).cloned().flatten()
-            })),
-            state_slot: Some(Arc::new({
-                let s = slot_arc.clone();
-                move |k| s[k as usize]
-            })),
-            gpu: Some(Arc::new({
-                let g = gd.clone();
-                move |k| g.get(k as usize).copied().unwrap_or(false)
-            })),
+            kernel: Some(Arc::new(move |k| fk.get(k as usize).cloned().flatten())),
+            state_slot: Some(Arc::new(move |k| slot_arc[k as usize])),
+            gpu: Some(Arc::new(move |k| gd.get(k as usize).copied().unwrap_or(false))),
             store: Some(Arc::new(move |values: &[f64]| {
                 let (offset, length) = store(&storing, &Value::Floats(1, Arc::new(values.to_vec())));
                 format!("new Float64Array(rt.data, {offset}, {length})")
