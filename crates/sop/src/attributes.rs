@@ -1,5 +1,5 @@
 //! the attribute, UV and transfer nodes, declared once each (Image
-//! Texels is the carrier that lets a Lisp body sample pixels). See PORTING.md.
+//! Texels is the carrier that lets a Lisp body sample pixels). .
 use std::sync::Arc;
 
 use param::Value;
@@ -85,7 +85,7 @@ pub mod image_texels {
 
     // `type parameters = unit`: no fields, so no Parameters struct and no conversion.
     pub const META: Meta = Meta {
-        key: "image_texels",
+        description: "Expose decoded image pixels as row-major points with RGBA attributes.", key: "image_texels",
         label: "Image Texels",
         category: "Attribute/Image",
         inputs: 1,
@@ -100,7 +100,7 @@ pub mod image_texels {
 
     /// One point per texel in row-major order, P = (x, y, width), and the Point Float4 attribute
     /// "rgba". An Image input is cooked by its own node; this one is a Generator over it.
-    pub fn operator(label: &str, _values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
+    pub fn operator(label: &str, _values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
         Ok(build::make(
             build::Args {
                 label: Some(label.to_owned()),
@@ -153,7 +153,7 @@ pub mod uv_flatten {
     use super::*;
 
     pub const META: Meta = Meta {
-        key: "uv_flatten",
+        description: "Flatten polygon UV islands while respecting selected seams.", key: "uv_flatten",
         label: "UV Flatten",
         category: "UV/Layout",
         inputs: 1,
@@ -175,11 +175,11 @@ pub mod uv_flatten {
         ]
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p_name = text(&values[0]);
-        let p_seams = text(&values[1]);
-        let p_iterations = int(&values[2]);
-        let p_tolerance = float(&values[3]);
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
+        let p_name = text(&values["name"]);
+        let p_seams = text(&values["seams"]);
+        let p_iterations = int(&values["iterations"]);
+        let p_tolerance = float(&values["tolerance"]);
         let input = inputs[0].clone().unwrap();
         let (name, seams_name, iterations, tolerance) =
             (p_name, support::optional_text(&p_seams), p_iterations, p_tolerance);
@@ -221,7 +221,7 @@ pub mod uv_relax {
     use super::*;
 
     pub const META: Meta = Meta {
-        key: "uv_relax",
+        description: "Relax texture coordinates within selected UV islands.", key: "uv_relax",
         label: "UV Relax",
         category: "UV/Layout",
         inputs: 1,
@@ -247,12 +247,12 @@ pub mod uv_relax {
         ]
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p_name = text(&values[0]);
-        let p_seams = text(&values[1]);
-        let p_uv_tolerance = float(&values[2]);
-        let p_iterations = int(&values[3]);
-        let p_tolerance = float(&values[4]);
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
+        let p_name = text(&values["name"]);
+        let p_seams = text(&values["seams"]);
+        let p_uv_tolerance = float(&values["uv_tolerance"]);
+        let p_iterations = int(&values["iterations"]);
+        let p_tolerance = float(&values["tolerance"]);
         let input = inputs[0].clone().unwrap();
         let (name, seams_name, uv_tolerance, iterations, tolerance) =
             (p_name, support::optional_text(&p_seams), p_uv_tolerance, p_iterations, p_tolerance);
@@ -296,7 +296,7 @@ pub mod distance_from_geometry {
     use super::*;
 
     pub const META: Meta = Meta {
-        key: "distance_from_geometry",
+        description: "Measure point distances to a target surface or its elements.", key: "distance_from_geometry",
         label: "Distance from Geometry",
         category: "Attribute/Distance",
         inputs: 2,
@@ -357,6 +357,7 @@ pub mod distance_from_geometry {
                 )
             },
             Spec {
+                unit: Some("m"),
                 label: "Fixed radius",
                 ..decl::spec("radius", decl::float_kind(0.0001, 1000.0, Some(0.0), None), Value::Float(1.0))
             },
@@ -373,11 +374,11 @@ pub mod distance_from_geometry {
         ]
     }
 
-    pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p_radius_mode = support::DISTANCE_RADIUS.of(&values[6]);
-        let p_radius = float(&values[7]);
-        let p_distance_attribute = text(&values[8]);
-        let p_mask_attribute = text(&values[9]);
+    pub fn validate(values: &decl::Values<'_>) -> Result<(), String> {
+        let p_radius_mode = support::DISTANCE_RADIUS.of(&values["radius_mode"]);
+        let p_radius = float(&values["radius"]);
+        let p_distance_attribute = text(&values["distance_attribute"]);
+        let p_mask_attribute = text(&values["mask_attribute"]);
         if !p_radius.is_finite()
             || p_radius < 0.0
             || (matches!(p_radius_mode, DistanceRadiusMode::Fixed) && p_radius == 0.0)
@@ -397,17 +398,17 @@ pub mod distance_from_geometry {
         Ok(())
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p_affected_owner = support::ELEMENT_OWNER.of(&values[0]);
-        let p_affected_group = text(&values[1]);
-        let p_reference_owner = support::ELEMENT_OWNER.of(&values[2]);
-        let p_reference_group = text(&values[3]);
-        let p_reference_kind = REFERENCE.of(&values[4]);
-        let p_falloff = support::SOFT_FALLOFF.of(&values[5]);
-        let p_radius_mode = support::DISTANCE_RADIUS.of(&values[6]);
-        let p_radius = float(&values[7]);
-        let p_distance_attribute = text(&values[8]);
-        let p_mask_attribute = text(&values[9]);
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
+        let p_affected_owner = support::ELEMENT_OWNER.of(&values["affected_owner"]);
+        let p_affected_group = text(&values["affected_group"]);
+        let p_reference_owner = support::ELEMENT_OWNER.of(&values["reference_owner"]);
+        let p_reference_group = text(&values["reference_group"]);
+        let p_reference_kind = REFERENCE.of(&values["reference_kind"]);
+        let p_falloff = support::SOFT_FALLOFF.of(&values["falloff"]);
+        let p_radius_mode = support::DISTANCE_RADIUS.of(&values["radius_mode"]);
+        let p_radius = float(&values["radius"]);
+        let p_distance_attribute = text(&values["distance_attribute"]);
+        let p_mask_attribute = text(&values["mask_attribute"]);
         let (source, reference) = (inputs[0].clone().unwrap(), inputs[1].clone().unwrap());
         let affected = support::optional_element_group(p_affected_owner, &p_affected_group);
         let reference_selection = support::optional_element_group(p_reference_owner, &p_reference_group);
@@ -465,7 +466,7 @@ pub mod attribute_mirror {
     use super::*;
 
     pub const META: Meta = Meta {
-        key: "attribute_mirror",
+        description: "Mirror matched attributes across a spatial or UV symmetry plane.", key: "attribute_mirror",
         label: "Attribute Mirror",
         category: "Attribute/Transform",
         inputs: 1,
@@ -490,18 +491,21 @@ pub mod attribute_mirror {
                 ..decl::spec("method_", MIRROR_METHOD.kind(), MIRROR_METHOD.at(0))
             },
             Spec {
+                unit: Some("m"),
                 label: "Origin X",
                 folder: "Plane/Origin",
                 vec3: Some(("origin", 0)),
                 ..decl::spec("origin_x", decl::float_kind(-10.0, 10.0, None, None), Value::Float(0.0))
             },
             Spec {
+                unit: Some("m"),
                 label: "Origin Y",
                 folder: "Plane/Origin",
                 vec3: Some(("origin", 1)),
                 ..decl::spec("origin_y", decl::float_kind(-10.0, 10.0, None, None), Value::Float(0.0))
             },
             Spec {
+                unit: Some("m"),
                 label: "Origin Z",
                 folder: "Plane/Origin",
                 vec3: Some(("origin", 2)),
@@ -526,6 +530,7 @@ pub mod attribute_mirror {
                 ..decl::spec("normal_z", decl::float_kind(-1.0, 1.0, None, None), Value::Float(0.0))
             },
             Spec {
+                unit: Some("m"),
                 label: "Maximum distance",
                 folder: "Plane",
                 ..decl::spec("distance", decl::float_kind(0.0, 1000000.0, Some(0.0), None), Value::Float(1000000.0))
@@ -594,29 +599,29 @@ pub mod attribute_mirror {
         ]
     }
 
-    pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p_owner = support::ELEMENT_ATTRIBUTE_OWNER.of(&values[0]);
-        let p_attributes = text(&values[1]);
-        let p_method_ = MIRROR_METHOD.of(&values[4]);
-        let p_origin_x = float(&values[5]);
-        let p_origin_y = float(&values[6]);
-        let p_origin_z = float(&values[7]);
-        let p_normal_x = float(&values[8]);
-        let p_normal_y = float(&values[9]);
-        let p_normal_z = float(&values[10]);
-        let p_distance = float(&values[11]);
-        let p_tolerance = float(&values[12]);
-        let p_mapping_attribute = text(&values[13]);
-        let p_mapping_destination_group = text(&values[14]);
-        let p_transform = MIRROR_TRANSFORM.of(&values[15]);
-        let p_uv_origin_u = float(&values[16]);
-        let p_uv_origin_v = float(&values[17]);
-        let p_uv_direction_u = float(&values[18]);
-        let p_uv_direction_v = float(&values[19]);
-        let p_replace_strings = boolean(&values[20]);
-        let p_string_search = bytes(&values[21]).to_vec();
-        let p_source_group = text(&values[24]);
-        let p_destination_group = text(&values[25]);
+    pub fn validate(values: &decl::Values<'_>) -> Result<(), String> {
+        let p_owner = support::ELEMENT_ATTRIBUTE_OWNER.of(&values["owner"]);
+        let p_attributes = text(&values["attributes"]);
+        let p_method_ = MIRROR_METHOD.of(&values["method_"]);
+        let p_origin_x = float(&values["origin_x"]);
+        let p_origin_y = float(&values["origin_y"]);
+        let p_origin_z = float(&values["origin_z"]);
+        let p_normal_x = float(&values["normal_x"]);
+        let p_normal_y = float(&values["normal_y"]);
+        let p_normal_z = float(&values["normal_z"]);
+        let p_distance = float(&values["distance"]);
+        let p_tolerance = float(&values["tolerance"]);
+        let p_mapping_attribute = text(&values["mapping_attribute"]);
+        let p_mapping_destination_group = text(&values["mapping_destination_group"]);
+        let p_transform = MIRROR_TRANSFORM.of(&values["transform"]);
+        let p_uv_origin_u = float(&values["uv_origin_u"]);
+        let p_uv_origin_v = float(&values["uv_origin_v"]);
+        let p_uv_direction_u = float(&values["uv_direction_u"]);
+        let p_uv_direction_v = float(&values["uv_direction_v"]);
+        let p_replace_strings = boolean(&values["replace_strings"]);
+        let p_string_search = bytes(&values["string_search"]).to_vec();
+        let p_source_group = text(&values["source_group"]);
+        let p_destination_group = text(&values["destination_group"]);
         let finite = |value: f64| -> Result<(), String> {
             if value.is_finite() { Ok(()) } else { Err("sop/attribute_mirror: controls must be finite".to_owned()) }
         };
@@ -688,33 +693,33 @@ pub mod attribute_mirror {
         }
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p_owner = support::ELEMENT_ATTRIBUTE_OWNER.of(&values[0]);
-        let p_attributes = text(&values[1]);
-        let p_group = text(&values[2]);
-        let p_group_use = GROUP_USE.of(&values[3]);
-        let p_method_ = MIRROR_METHOD.of(&values[4]);
-        let p_origin_x = float(&values[5]);
-        let p_origin_y = float(&values[6]);
-        let p_origin_z = float(&values[7]);
-        let p_normal_x = float(&values[8]);
-        let p_normal_y = float(&values[9]);
-        let p_normal_z = float(&values[10]);
-        let p_distance = float(&values[11]);
-        let p_tolerance = float(&values[12]);
-        let p_mapping_attribute = text(&values[13]);
-        let p_mapping_destination_group = text(&values[14]);
-        let p_transform = MIRROR_TRANSFORM.of(&values[15]);
-        let p_uv_origin_u = float(&values[16]);
-        let p_uv_origin_v = float(&values[17]);
-        let p_uv_direction_u = float(&values[18]);
-        let p_uv_direction_v = float(&values[19]);
-        let p_replace_strings = boolean(&values[20]);
-        let p_string_search = bytes(&values[21]).to_vec();
-        let p_string_replacement = bytes(&values[22]).to_vec();
-        let p_output_mapping = text(&values[23]);
-        let p_source_group = text(&values[24]);
-        let p_destination_group = text(&values[25]);
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
+        let p_owner = support::ELEMENT_ATTRIBUTE_OWNER.of(&values["owner"]);
+        let p_attributes = text(&values["attributes"]);
+        let p_group = text(&values["group"]);
+        let p_group_use = GROUP_USE.of(&values["group_use"]);
+        let p_method_ = MIRROR_METHOD.of(&values["method_"]);
+        let p_origin_x = float(&values["origin_x"]);
+        let p_origin_y = float(&values["origin_y"]);
+        let p_origin_z = float(&values["origin_z"]);
+        let p_normal_x = float(&values["normal_x"]);
+        let p_normal_y = float(&values["normal_y"]);
+        let p_normal_z = float(&values["normal_z"]);
+        let p_distance = float(&values["distance"]);
+        let p_tolerance = float(&values["tolerance"]);
+        let p_mapping_attribute = text(&values["mapping_attribute"]);
+        let p_mapping_destination_group = text(&values["mapping_destination_group"]);
+        let p_transform = MIRROR_TRANSFORM.of(&values["transform"]);
+        let p_uv_origin_u = float(&values["uv_origin_u"]);
+        let p_uv_origin_v = float(&values["uv_origin_v"]);
+        let p_uv_direction_u = float(&values["uv_direction_u"]);
+        let p_uv_direction_v = float(&values["uv_direction_v"]);
+        let p_replace_strings = boolean(&values["replace_strings"]);
+        let p_string_search = bytes(&values["string_search"]).to_vec();
+        let p_string_replacement = bytes(&values["string_replacement"]).to_vec();
+        let p_output_mapping = text(&values["output_mapping"]);
+        let p_source_group = text(&values["source_group"]);
+        let p_destination_group = text(&values["destination_group"]);
         let input = inputs[0].clone().unwrap();
         let origin = rays_math::vec3::create(p_origin_x, p_origin_y, p_origin_z);
         let normal = rays_math::vec3::create(p_normal_x, p_normal_y, p_normal_z);
@@ -812,7 +817,7 @@ pub mod attribute_transfer_all {
     use super::*;
 
     pub const META: Meta = Meta {
-        key: "attribute_transfer_all",
+        description: "Transfer matching attributes across element owners using distance weights.", key: "attribute_transfer_all",
         label: "Attribute Transfer All",
         category: "Attribute/Transfer",
         inputs: 2,
@@ -842,6 +847,7 @@ pub mod attribute_transfer_all {
                 ..decl::spec("power", decl::float_kind(0.0, 10.0, Some(0.0), None), Value::Float(2.0))
             },
             Spec {
+                unit: Some("m"),
                 label: "Kernel radius",
                 folder: "Sampling",
                 ..decl::spec("kernel_radius", decl::float_kind(0.0, 100.0, Some(0.0), None), Value::Float(1.0))
@@ -852,11 +858,13 @@ pub mod attribute_transfer_all {
                 ..decl::spec("distance_mode", support::KERNEL_MODE.kind(), support::KERNEL_MODE.value(&KernelMode::Explicit))
             },
             Spec {
+                unit: Some("m"),
                 label: "Maximum distance",
                 folder: "Distance",
                 ..decl::spec("max_distance", decl::float_kind(0.0, 100.0, Some(0.0), None), Value::Float(1.0))
             },
             Spec {
+                unit: Some("m"),
                 label: "Blend width",
                 folder: "Distance",
                 ..decl::spec("blend_width", decl::float_kind(0.0, 100.0, Some(0.0), None), Value::Float(0.0))
@@ -878,19 +886,19 @@ pub mod attribute_transfer_all {
         ]
     }
 
-    pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p_point_pattern = text(&values[0]);
-        let p_vertex_pattern = text(&values[1]);
-        let p_primitive_pattern = text(&values[2]);
-        let p_detail_pattern = text(&values[3]);
-        let p_mode = support::TRANSFER_MODE.of(&values[4]);
-        let p_neighbors = int(&values[5]);
-        let p_power = float(&values[6]);
-        let p_kernel_radius = float(&values[7]);
-        let p_distance_mode = support::KERNEL_MODE.of(&values[8]);
-        let p_max_distance = float(&values[9]);
-        let p_blend_width = float(&values[10]);
-        let p_uniform_bias = float(&values[12]);
+    pub fn validate(values: &decl::Values<'_>) -> Result<(), String> {
+        let p_point_pattern = text(&values["point_pattern"]);
+        let p_vertex_pattern = text(&values["vertex_pattern"]);
+        let p_primitive_pattern = text(&values["primitive_pattern"]);
+        let p_detail_pattern = text(&values["detail_pattern"]);
+        let p_mode = support::TRANSFER_MODE.of(&values["mode"]);
+        let p_neighbors = int(&values["neighbors"]);
+        let p_power = float(&values["power"]);
+        let p_kernel_radius = float(&values["kernel_radius"]);
+        let p_distance_mode = support::KERNEL_MODE.of(&values["distance_mode"]);
+        let p_max_distance = float(&values["max_distance"]);
+        let p_blend_width = float(&values["blend_width"]);
+        let p_uniform_bias = float(&values["uniform_bias"]);
         let refuse = |message: &str| Err(format!("sop/attribute_transfer_all: {message}"));
         let patterns = [&p_point_pattern, &p_vertex_pattern, &p_primitive_pattern, &p_detail_pattern];
         if patterns.iter().all(|text| text.trim().is_empty()) {
@@ -931,21 +939,21 @@ pub mod attribute_transfer_all {
         Ok(())
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p_point_pattern = text(&values[0]);
-        let p_vertex_pattern = text(&values[1]);
-        let p_primitive_pattern = text(&values[2]);
-        let p_detail_pattern = text(&values[3]);
-        let p_mode = support::TRANSFER_MODE.of(&values[4]);
-        let p_neighbors = int(&values[5]);
-        let p_power = float(&values[6]);
-        let p_kernel_radius = float(&values[7]);
-        let p_distance_mode = support::KERNEL_MODE.of(&values[8]);
-        let p_max_distance = float(&values[9]);
-        let p_blend_width = float(&values[10]);
-        let p_falloff = support::TRANSFER_FALLOFF.of(&values[11]);
-        let p_uniform_bias = float(&values[12]);
-        let p_unmatched = support::TRANSFER_UNMATCHED.of(&values[13]);
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
+        let p_point_pattern = text(&values["point_pattern"]);
+        let p_vertex_pattern = text(&values["vertex_pattern"]);
+        let p_primitive_pattern = text(&values["primitive_pattern"]);
+        let p_detail_pattern = text(&values["detail_pattern"]);
+        let p_mode = support::TRANSFER_MODE.of(&values["mode"]);
+        let p_neighbors = int(&values["neighbors"]);
+        let p_power = float(&values["power"]);
+        let p_kernel_radius = float(&values["kernel_radius"]);
+        let p_distance_mode = support::KERNEL_MODE.of(&values["distance_mode"]);
+        let p_max_distance = float(&values["max_distance"]);
+        let p_blend_width = float(&values["blend_width"]);
+        let p_falloff = support::TRANSFER_FALLOFF.of(&values["falloff"]);
+        let p_uniform_bias = float(&values["uniform_bias"]);
+        let p_unmatched = support::TRANSFER_UNMATCHED.of(&values["unmatched"]);
         let (source, target) = (inputs[0].clone().unwrap(), inputs[1].clone().unwrap());
         let mode = support::transfer_mode_of(p_mode, p_neighbors, p_power, p_kernel_radius);
         let falloff = support::transfer_falloff_of(p_falloff, p_uniform_bias);
@@ -1001,7 +1009,7 @@ pub mod attribute_transfer_surface {
     use super::*;
 
     pub const META: Meta = Meta {
-        key: "attribute_transfer_surface",
+        description: "Interpolate source surface attributes onto target geometry.", key: "attribute_transfer_surface",
         label: "Attribute Transfer Surface",
         category: "Attribute/Transfer",
         inputs: 2,
@@ -1030,11 +1038,13 @@ pub mod attribute_transfer_surface {
                 ..decl::spec("distance_mode", support::KERNEL_MODE.kind(), support::KERNEL_MODE.value(&KernelMode::Explicit))
             },
             Spec {
+                unit: Some("m"),
                 label: "Maximum distance",
                 folder: "Distance",
                 ..decl::spec("max_distance", decl::float_kind(0.0, 100.0, Some(0.0), None), Value::Float(1.0))
             },
             Spec {
+                unit: Some("m"),
                 label: "Blend width",
                 folder: "Distance",
                 ..decl::spec("blend_width", decl::float_kind(0.0, 100.0, Some(0.0), None), Value::Float(0.0))
@@ -1092,17 +1102,17 @@ pub mod attribute_transfer_surface {
         ]
     }
 
-    pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p_target_owner = support::ATTRIBUTE_OWNER.of(&values[0]);
-        let p_attributes = bytes(&values[1]).to_vec();
-        let p_distance_mode = support::KERNEL_MODE.of(&values[2]);
-        let p_max_distance = float(&values[3]);
-        let p_blend_width = float(&values[4]);
-        let p_uniform_bias = float(&values[6]);
-        let p_distance_attribute = text(&values[8]);
-        let p_source_group_pattern = text(&values[10]);
-        let p_source_vertex_group_pattern = text(&values[12]);
-        let p_target_group_pattern = text(&values[15]);
+    pub fn validate(values: &decl::Values<'_>) -> Result<(), String> {
+        let p_target_owner = support::ATTRIBUTE_OWNER.of(&values["target_owner"]);
+        let p_attributes = bytes(&values["attributes"]).to_vec();
+        let p_distance_mode = support::KERNEL_MODE.of(&values["distance_mode"]);
+        let p_max_distance = float(&values["max_distance"]);
+        let p_blend_width = float(&values["blend_width"]);
+        let p_uniform_bias = float(&values["uniform_bias"]);
+        let p_distance_attribute = text(&values["distance_attribute"]);
+        let p_source_group_pattern = text(&values["source_group_pattern"]);
+        let p_source_vertex_group_pattern = text(&values["source_vertex_group_pattern"]);
+        let p_target_group_pattern = text(&values["target_group_pattern"]);
         let refuse = |message: &str| Err(format!("sop/attribute_transfer_surface: {message}"));
         if p_target_owner == attribute::Owner::Detail {
             return refuse("detail target is not spatial");
@@ -1148,23 +1158,23 @@ pub mod attribute_transfer_surface {
         Ok(())
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p_target_owner = support::ATTRIBUTE_OWNER.of(&values[0]);
-        let p_attributes = bytes(&values[1]).to_vec();
-        let p_distance_mode = support::KERNEL_MODE.of(&values[2]);
-        let p_max_distance = float(&values[3]);
-        let p_blend_width = float(&values[4]);
-        let p_falloff = support::TRANSFER_FALLOFF.of(&values[5]);
-        let p_uniform_bias = float(&values[6]);
-        let p_unmatched = support::TRANSFER_UNMATCHED.of(&values[7]);
-        let p_distance_attribute = text(&values[8]);
-        let p_source_group = text(&values[9]);
-        let p_source_group_pattern = text(&values[10]);
-        let p_source_vertex_group = text(&values[11]);
-        let p_source_vertex_group_pattern = text(&values[12]);
-        let p_source_vertex_selection = VERTEX_SELECTION.of(&values[13]);
-        let p_target_group = text(&values[14]);
-        let p_target_group_pattern = text(&values[15]);
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
+        let p_target_owner = support::ATTRIBUTE_OWNER.of(&values["target_owner"]);
+        let p_attributes = bytes(&values["attributes"]).to_vec();
+        let p_distance_mode = support::KERNEL_MODE.of(&values["distance_mode"]);
+        let p_max_distance = float(&values["max_distance"]);
+        let p_blend_width = float(&values["blend_width"]);
+        let p_falloff = support::TRANSFER_FALLOFF.of(&values["falloff"]);
+        let p_uniform_bias = float(&values["uniform_bias"]);
+        let p_unmatched = support::TRANSFER_UNMATCHED.of(&values["unmatched"]);
+        let p_distance_attribute = text(&values["distance_attribute"]);
+        let p_source_group = text(&values["source_group"]);
+        let p_source_group_pattern = text(&values["source_group_pattern"]);
+        let p_source_vertex_group = text(&values["source_vertex_group"]);
+        let p_source_vertex_group_pattern = text(&values["source_vertex_group_pattern"]);
+        let p_source_vertex_selection = VERTEX_SELECTION.of(&values["source_vertex_selection"]);
+        let p_target_group = text(&values["target_group"]);
+        let p_target_group_pattern = text(&values["target_group_pattern"]);
         let (source, target) = (inputs[0].clone().unwrap(), inputs[1].clone().unwrap());
         let attributes = support::decode_surface_attributes(&p_attributes).expect("validated");
         let target_owner = p_target_owner;
@@ -1202,7 +1212,7 @@ pub mod attribute_transfer_surface {
             group::Owner::Point => "point",
         };
         let (blend_width, unmatched, source_vertex_selection) = (p_blend_width, p_unmatched, p_source_vertex_selection);
-        
+
         Ok(build::make_geometry(
             build::Args {
                 label: Some(label.to_owned()),
@@ -1293,7 +1303,7 @@ pub mod attribute_transfer {
     }
 
     pub const META: Meta = Meta {
-        key: "attribute_transfer",
+        description: "Transfer selected attributes from nearby source elements.", key: "attribute_transfer",
         label: "Attribute Transfer",
         category: "Attribute/Transfer",
         inputs: 2,
@@ -1330,6 +1340,7 @@ pub mod attribute_transfer {
                 ..decl::spec("power", decl::float_kind(0.0, 10.0, Some(0.0), None), Value::Float(2.0))
             },
             Spec {
+                unit: Some("m"),
                 label: "Kernel radius",
                 folder: "Sampling",
                 ..decl::spec("kernel_radius", decl::float_kind(0.0, 100.0, Some(0.0), None), Value::Float(1.0))
@@ -1340,11 +1351,13 @@ pub mod attribute_transfer {
                 ..decl::spec("distance_mode", support::KERNEL_MODE.kind(), support::KERNEL_MODE.value(&KernelMode::Explicit))
             },
             Spec {
+                unit: Some("m"),
                 label: "Maximum distance",
                 folder: "Distance",
                 ..decl::spec("max_distance", decl::float_kind(0.0, 100.0, Some(0.0), None), Value::Float(1.0))
             },
             Spec {
+                unit: Some("m"),
                 label: "Blend width",
                 folder: "Distance",
                 ..decl::spec("blend_width", decl::float_kind(0.0, 100.0, Some(0.0), None), Value::Float(0.0))
@@ -1397,25 +1410,25 @@ pub mod attribute_transfer {
         ]
     }
 
-    pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p_owner = support::ATTRIBUTE_OWNER.of(&values[0]);
-        let p_use_names = boolean(&values[1]);
-        let p_names = bytes(&values[2]).to_vec();
-        let p_pattern = text(&values[3]);
-        let p_mode = support::TRANSFER_MODE.of(&values[4]);
-        let p_neighbors = int(&values[5]);
-        let p_power = float(&values[6]);
-        let p_kernel_radius = float(&values[7]);
-        let p_distance_mode = support::KERNEL_MODE.of(&values[8]);
-        let p_max_distance = float(&values[9]);
-        let p_blend_width = float(&values[10]);
-        let p_uniform_bias = float(&values[12]);
-        let p_source_group = text(&values[14]);
-        let p_source_group_pattern = text(&values[15]);
-        let p_source_vertex_group = text(&values[16]);
-        let p_source_vertex_group_pattern = text(&values[17]);
-        let p_target_group = text(&values[19]);
-        let p_target_group_pattern = text(&values[20]);
+    pub fn validate(values: &decl::Values<'_>) -> Result<(), String> {
+        let p_owner = support::ATTRIBUTE_OWNER.of(&values["owner"]);
+        let p_use_names = boolean(&values["use_names"]);
+        let p_names = bytes(&values["names"]).to_vec();
+        let p_pattern = text(&values["pattern"]);
+        let p_mode = support::TRANSFER_MODE.of(&values["mode"]);
+        let p_neighbors = int(&values["neighbors"]);
+        let p_power = float(&values["power"]);
+        let p_kernel_radius = float(&values["kernel_radius"]);
+        let p_distance_mode = support::KERNEL_MODE.of(&values["distance_mode"]);
+        let p_max_distance = float(&values["max_distance"]);
+        let p_blend_width = float(&values["blend_width"]);
+        let p_uniform_bias = float(&values["uniform_bias"]);
+        let p_source_group = text(&values["source_group"]);
+        let p_source_group_pattern = text(&values["source_group_pattern"]);
+        let p_source_vertex_group = text(&values["source_vertex_group"]);
+        let p_source_vertex_group_pattern = text(&values["source_vertex_group_pattern"]);
+        let p_target_group = text(&values["target_group"]);
+        let p_target_group_pattern = text(&values["target_group_pattern"]);
         let refuse = |message: &str| Err(format!("sop/attribute_transfer: {message}"));
         if p_use_names {
             let names = decode_names(&p_names)?;
@@ -1481,28 +1494,28 @@ pub mod attribute_transfer {
         Ok(())
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p_owner = support::ATTRIBUTE_OWNER.of(&values[0]);
-        let p_use_names = boolean(&values[1]);
-        let p_names = bytes(&values[2]).to_vec();
-        let p_pattern = text(&values[3]);
-        let p_mode = support::TRANSFER_MODE.of(&values[4]);
-        let p_neighbors = int(&values[5]);
-        let p_power = float(&values[6]);
-        let p_kernel_radius = float(&values[7]);
-        let p_distance_mode = support::KERNEL_MODE.of(&values[8]);
-        let p_max_distance = float(&values[9]);
-        let p_blend_width = float(&values[10]);
-        let p_falloff = support::TRANSFER_FALLOFF.of(&values[11]);
-        let p_uniform_bias = float(&values[12]);
-        let p_unmatched = support::TRANSFER_UNMATCHED.of(&values[13]);
-        let p_source_group = text(&values[14]);
-        let p_source_group_pattern = text(&values[15]);
-        let p_source_vertex_group = text(&values[16]);
-        let p_source_vertex_group_pattern = text(&values[17]);
-        let p_source_vertex_selection = VERTEX_SELECTION.of(&values[18]);
-        let p_target_group = text(&values[19]);
-        let p_target_group_pattern = text(&values[20]);
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
+        let p_owner = support::ATTRIBUTE_OWNER.of(&values["owner"]);
+        let p_use_names = boolean(&values["use_names"]);
+        let p_names = bytes(&values["names"]).to_vec();
+        let p_pattern = text(&values["pattern"]);
+        let p_mode = support::TRANSFER_MODE.of(&values["mode"]);
+        let p_neighbors = int(&values["neighbors"]);
+        let p_power = float(&values["power"]);
+        let p_kernel_radius = float(&values["kernel_radius"]);
+        let p_distance_mode = support::KERNEL_MODE.of(&values["distance_mode"]);
+        let p_max_distance = float(&values["max_distance"]);
+        let p_blend_width = float(&values["blend_width"]);
+        let p_falloff = support::TRANSFER_FALLOFF.of(&values["falloff"]);
+        let p_uniform_bias = float(&values["uniform_bias"]);
+        let p_unmatched = support::TRANSFER_UNMATCHED.of(&values["unmatched"]);
+        let p_source_group = text(&values["source_group"]);
+        let p_source_group_pattern = text(&values["source_group_pattern"]);
+        let p_source_vertex_group = text(&values["source_vertex_group"]);
+        let p_source_vertex_group_pattern = text(&values["source_vertex_group_pattern"]);
+        let p_source_vertex_selection = VERTEX_SELECTION.of(&values["source_vertex_selection"]);
+        let p_target_group = text(&values["target_group"]);
+        let p_target_group_pattern = text(&values["target_group_pattern"]);
         let (source, target) = (inputs[0].clone().unwrap(), inputs[1].clone().unwrap());
         let owner = p_owner;
         let source_vertex_selection = p_source_vertex_selection;

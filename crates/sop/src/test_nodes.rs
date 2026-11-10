@@ -143,3 +143,10 @@ fn async_cook_publishes_the_newest_request_and_refuses_after_close() {
     async_cook::close(&worker);
     assert!(async_cook::submit(&worker, context(1), n, Box::new(|_| Err("late".to_owned()))).is_err());
 }
+
+#[test]
+fn every_native_factory_constructs_default_facts_by_field_name() {
+    for factory in crate::nodes::factories() {
+        let _ = crate::edit_graph::factory_facts(&factory);
+    }
+}

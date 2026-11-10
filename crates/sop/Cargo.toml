@@ -17,3 +17,6 @@ mem = { path = "../mem" }
 lru = { path = "../lru" }
 parallel = { path = "../parallel" }
 cfmt = { path = "../cfmt" }
+
+[lints]
+workspace = true

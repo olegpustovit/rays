@@ -16,7 +16,7 @@ pub mod null {
 
     // `type parameters = unit`: no fields, so no Parameters struct and no conversion.
     pub const META: Meta = Meta {
-        key: "null",
+        description: "Pass geometry through unchanged.", key: "null",
         label: "Null",
         category: "Utility",
         inputs: 1,
@@ -27,7 +27,7 @@ pub mod null {
         Vec::new()
     }
 
-    pub fn operator(label: &str, _values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
+    pub fn operator(label: &str, _values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
         Ok(build::make_geometry(
             build::Args {
                 label: Some(label.to_owned()),
@@ -50,7 +50,7 @@ pub mod switch {
     use super::*;
 
     pub const META: Meta = Meta {
-        key: "switch",
+        description: "Pass through one selected geometry input.", key: "switch",
         label: "Switch",
         category: "Utility",
         inputs: 3,
@@ -84,8 +84,8 @@ pub mod switch {
         decl::schema(&META, specs(Some(labels)))
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let index = match &values[0] { Value::Int(input) => *input, _ => unreachable!("switch: parameter record has the wrong shape") };
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
+        let index = match &values["input"] { Value::Int(input) => *input, _ => unreachable!("switch: parameter record has the wrong shape") };
         let nodes = decl::connected(inputs);
         if index < 0 || index as usize >= nodes.len() {
             return Err("sop/switch: input is outside the connected branches".to_owned());
@@ -115,48 +115,6 @@ pub mod switch {
 
 // ---------------------------------------------------------------- shared helpers for the nodes below
 
-/// Positional reader over a schema-normalised value slice.
-struct Reader {
-    values: Vec<Value>,
-    at: usize,
-}
-
-impl Reader {
-    fn new(values: &[Value]) -> Reader {
-        Reader { values: values.to_vec(), at: 0 }
-    }
-    fn next(&mut self) -> Value {
-        self.at += 1;
-        self.values[self.at - 1].clone()
-    }
-    fn float(&mut self) -> f64 {
-        match self.next() {
-            Value::Float(f) => f,
-            _ => unreachable!("parameter record has the wrong shape"),
-        }
-    }
-    fn int(&mut self) -> i64 {
-        match self.next() {
-            Value::Int(i) => i,
-            _ => unreachable!("parameter record has the wrong shape"),
-        }
-    }
-    fn bool(&mut self) -> bool {
-        match self.next() {
-            Value::Bool(b) => b,
-            _ => unreachable!("parameter record has the wrong shape"),
-        }
-    }
-    fn text(&mut self) -> String {
-        match self.next() {
-            Value::Text(t) => String::from_utf8_lossy(&t).into_owned(),
-            _ => unreachable!("parameter record has the wrong shape"),
-        }
-    }
-    fn choice<T: Clone>(&mut self, table: &support::Choice<T>) -> T {
-        table.of(&self.next())
-    }
-}
 
 fn fl(name: &'static str, label: &'static str, folder: &'static str, min: f64, max: f64, default: f64) -> Spec {
     Spec { label, folder, ..decl::spec(name, decl::float_kind(min, max, None, None), Value::Float(default)) }
@@ -206,8 +164,9 @@ fn xyz_specs(
     limit: f64,
     group: &'static str,
     defaults: [f64; 3],
+    unit: Option<&'static str>,
 ) -> Vec<Spec> {
-    (0..3).map(|i| v3(fl(names[i], labels[i], folder, -limit, limit, defaults[i]), group, i as i64)).collect()
+    (0..3).map(|i| v3(Spec { unit, ..fl(names[i], labels[i], folder, -limit, limit, defaults[i]) }, group, i as i64)).collect()
 }
 
 pub mod clip {
@@ -221,17 +180,17 @@ pub mod clip {
     ]);
 
     pub const META: Meta =
-        Meta { key: "clip", label: "Clip", category: "Modify", inputs: 1, validate: Some(validate), ..decl::META };
+        Meta { description: "Clip selected geometry against a plane and optionally fill the cut.", key: "clip", label: "Clip", category: "Modify", inputs: 1, validate: Some(validate), ..decl::META };
 
     pub fn specs() -> Vec<Spec> {
         let mut specs = vec![
             owner_spec("Selection"),
             txt("group", "Group", "Selection", ""),
             pick("keep", "Keep", "", KEEP.kind(), KEEP.at(0)),
-            fl_hard("snapping_tolerance", "Snapping tolerance", "Robustness", 0.0, 0.001, 0.0, 1e-9),
+            Spec { unit: Some("m"), ..fl_hard("snapping_tolerance", "Snapping tolerance", "Robustness", 0.0, 0.001, 0.0, 1e-9) },
             tog("fill", "Fill cut", "Topology", false),
             tog("split_connectivity", "Split connectivity", "Topology", false),
-            fl("distance", "Distance", "Plane", -10.0, 10.0, 0.0),
+            Spec { unit: Some("m"), ..fl("distance", "Distance", "Plane", -10.0, 10.0, 0.0) },
         ];
         specs.extend(xyz_specs(
             ["origin_x", "origin_y", "origin_z"],
@@ -240,6 +199,7 @@ pub mod clip {
             10.0,
             "origin",
             [0.0; 3],
+            Some("m"),
         ));
         specs.extend(xyz_specs(
             ["normal_x", "normal_y", "normal_z"],
@@ -248,6 +208,7 @@ pub mod clip {
             1.0,
             "normal",
             [0.0, 1.0, 0.0],
+            None,
         ));
         specs.extend([
             txt("clip_attribute", "Clip attribute", "Attributes", "P"),
@@ -261,21 +222,21 @@ pub mod clip {
         specs
     }
 
-    pub fn validate(values: &[Value]) -> Result<(), String> {
-        let mut r = Reader::new(values);
-        r.at += 2;
-        let p_keep = r.choice(&KEEP);
-        let p_snapping_tolerance = r.float();
-        r.at += 1;
-        let p_split_connectivity = r.bool();
-        let p_distance = r.float();
-        let p_origin = [r.float(), r.float(), r.float()];
-        let p_normal = [r.float(), r.float(), r.float()];
-        r.at += 2;
-        let p_cap_group = r.text();
-        let p_clipped_group = r.text();
-        let p_above_group = r.text();
-        let p_below_group = r.text();
+    pub fn validate(values: &decl::Values<'_>) -> Result<(), String> {
+
+
+        let p_keep = KEEP.of(&values["keep"]);
+        let p_snapping_tolerance = decl::float(&values["snapping_tolerance"]);
+
+        let p_split_connectivity = decl::bool(&values["split_connectivity"]);
+        let p_distance = decl::float(&values["distance"]);
+        let p_origin = [decl::float(&values["origin_x"]), decl::float(&values["origin_y"]), decl::float(&values["origin_z"])];
+        let p_normal = [decl::float(&values["normal_x"]), decl::float(&values["normal_y"]), decl::float(&values["normal_z"])];
+
+        let p_cap_group = decl::text(&values["cap_group"]);
+        let p_clipped_group = decl::text(&values["clipped_group"]);
+        let p_above_group = decl::text(&values["above_group"]);
+        let p_below_group = decl::text(&values["below_group"]);
         let [ox, oy, oz] = p_origin;
         let [nx, ny, nz] = p_normal;
         if !all_finite(&[ox, oy, oz, nx, ny, nz, p_distance, p_snapping_tolerance]) {
@@ -303,24 +264,24 @@ pub mod clip {
         Ok(())
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let mut r = Reader::new(values);
-        let p_group_owner = support::ELEMENT_OWNER.of(&r.next());
-        let p_group = r.text();
-        let p_keep = r.choice(&KEEP);
-        let p_snapping_tolerance = r.float();
-        let p_fill = r.bool();
-        let p_split_connectivity = r.bool();
-        let p_distance = r.float();
-        let p_origin = [r.float(), r.float(), r.float()];
-        let p_normal = [r.float(), r.float(), r.float()];
-        let p_clip_attribute = r.text();
-        let p_clipped_edge_group = r.text();
-        let p_cap_group = r.text();
-        let p_clipped_group = r.text();
-        let p_above_group = r.text();
-        let p_below_group = r.text();
-        let p_replace_existing_groups = r.bool();
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
+
+        let p_group_owner = support::ELEMENT_OWNER.of(&values["group_owner"]);
+        let p_group = decl::text(&values["group"]);
+        let p_keep = KEEP.of(&values["keep"]);
+        let p_snapping_tolerance = decl::float(&values["snapping_tolerance"]);
+        let p_fill = decl::bool(&values["fill"]);
+        let p_split_connectivity = decl::bool(&values["split_connectivity"]);
+        let p_distance = decl::float(&values["distance"]);
+        let p_origin = [decl::float(&values["origin_x"]), decl::float(&values["origin_y"]), decl::float(&values["origin_z"])];
+        let p_normal = [decl::float(&values["normal_x"]), decl::float(&values["normal_y"]), decl::float(&values["normal_z"])];
+        let p_clip_attribute = decl::text(&values["clip_attribute"]);
+        let p_clipped_edge_group = decl::text(&values["clipped_edge_group"]);
+        let p_cap_group = decl::text(&values["cap_group"]);
+        let p_clipped_group = decl::text(&values["clipped_group"]);
+        let p_above_group = decl::text(&values["above_group"]);
+        let p_below_group = decl::text(&values["below_group"]);
+        let p_replace_existing_groups = decl::bool(&values["replace_existing_groups"]);
         let selection = support::optional_element_group(p_group_owner, &p_group);
         let clip_attribute = support::optional_text(&p_clip_attribute).unwrap_or_else(|| "P".to_owned());
         let origin = support::vec3_copy(&vec3(p_origin[0], p_origin[1], p_origin[2]));
@@ -379,7 +340,7 @@ pub mod exploded_view {
     use param::Impact;
 
     pub const META: Meta = Meta {
-        key: "exploded_view",
+        description: "Move attribute-defined pieces outward from their common centre.", key: "exploded_view",
         label: "Exploded View",
         category: "Visualize",
         inputs: 1,
@@ -408,11 +369,11 @@ pub mod exploded_view {
         ]
     }
 
-    pub fn validate(values: &[Value]) -> Result<(), String> {
-        let mut r = Reader::new(values);
-        let (amount, sx, sy, sz) = (r.float(), r.float(), r.float(), r.float());
-        let piece = r.text();
-        let (noise_amount, noise_frequency) = (r.float(), r.float());
+    pub fn validate(values: &decl::Values<'_>) -> Result<(), String> {
+
+        let (amount, sx, sy, sz) = (decl::float(&values["amount"]), decl::float(&values["scale_x"]), decl::float(&values["scale_y"]), decl::float(&values["scale_z"]));
+        let piece = decl::text(&values["piece_attribute"]);
+        let (noise_amount, noise_frequency) = (decl::float(&values["noise_amount"]), decl::float(&values["noise_frequency"]));
         if !all_finite(&[amount, sx, sy, sz, noise_amount, noise_frequency]) || noise_frequency < 0.0 {
             return Err("sop/exploded_view: controls must be finite and noise frequency nonnegative".to_owned());
         }
@@ -422,7 +383,7 @@ pub mod exploded_view {
         Ok(())
     }
 
-    pub fn operator(label: &str, _values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
+    pub fn operator(label: &str, _values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
         Ok(build::make_geometry(
             build::Args {
                 label: Some(label.to_owned()),
@@ -449,7 +410,7 @@ pub mod pack_instances {
     use rdk_core::{geometry, packed};
 
     pub const META: Meta = Meta {
-        key: "pack_instances",
+        description: "Pack connected geometry inputs as reusable instances.", key: "pack_instances",
         label: "Pack Instances",
         category: "Copy",
         inputs: 2,
@@ -472,7 +433,7 @@ pub mod pack_instances {
         }
     }
 
-    pub fn operator(label: &str, _values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
+    pub fn operator(label: &str, _values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
         Ok(build::make_geometry(
             build::Args {
                 label: Some(label.to_owned()),
@@ -535,7 +496,7 @@ pub mod soft_transform {
     ]);
 
     pub const META: Meta = Meta {
-        key: "soft_transform",
+        description: "Apply a transform with distance-based falloff around a pivot.", key: "soft_transform",
         label: "Soft Transform",
         category: "Deform",
         inputs: 1,
@@ -550,7 +511,7 @@ pub mod soft_transform {
             txt("group", "Group", "Selection", ""),
             pick("order", "Transform order", "Transform", ORDER.kind(), ORDER.at(0)),
             pick(
-                "rotation_order",
+                "rotate_order",
                 "Rotation order",
                 "Transform/Rotate",
                 ROTATION_ORDER.kind(),
@@ -564,6 +525,7 @@ pub mod soft_transform {
             10.0,
             "translate",
             [0.0; 3],
+            Some("m"),
         ));
         specs.extend(xyz_specs(
             ["rotate_x", "rotate_y", "rotate_z"],
@@ -572,6 +534,7 @@ pub mod soft_transform {
             pi,
             "rotate",
             [0.0; 3],
+            Some("rad"),
         ));
         specs.extend(xyz_specs(
             ["scale_x", "scale_y", "scale_z"],
@@ -580,6 +543,7 @@ pub mod soft_transform {
             10.0,
             "scale",
             [1.0; 3],
+            None,
         ));
         specs.extend([
             fl("shear_xy", "Shear XY", "Transform/Shear", -4.0, 4.0, 0.0),
@@ -594,14 +558,16 @@ pub mod soft_transform {
             10.0,
             "pivot",
             [0.0; 3],
+            Some("m"),
         ));
         specs.extend(xyz_specs(
-            ["pivot_rotation_x", "pivot_rotation_y", "pivot_rotation_z"],
+            ["pivot_rotate_x", "pivot_rotate_y", "pivot_rotate_z"],
             ["Pivot rotate X", "Pivot rotate Y", "Pivot rotate Z"],
-            "Transform/Pivot rotation",
+            "Transform/Pivot rotate",
             pi,
-            "pivot_rotation",
+            "pivot_rotate",
             [0.0; 3],
+            Some("rad"),
         ));
         specs.extend([
             tog("invert", "Invert transform", "Transform", false),
@@ -621,26 +587,26 @@ pub mod soft_transform {
                 support::SOFT_FALLOFF.kind(),
                 support::SOFT_FALLOFF.at(2),
             ),
-            fl_hard("radius", "Radius", "Soft selection", 0.0, 100.0, 0.0, 1.0),
+            Spec { unit: Some("m"), ..fl_hard("radius", "Radius", "Soft selection", 0.0, 100.0, 0.0, 1.0) },
             txt("falloff_attribute", "Falloff output attribute", "Output", ""),
             tog("recompute_normals", "Recompute normals", "Output", true),
         ]);
         specs
     }
 
-    fn compose_params(values: &[Value]) -> transform_ops::ComposeTransformParams {
-        let mut r = Reader::new(values);
-        r.at += 2;
-        let p_order = r.choice(&ORDER);
-        let p_rotation_order = r.choice(&ROTATION_ORDER);
-        let p_translate = [r.float(), r.float(), r.float()];
-        let p_rotate = [r.float(), r.float(), r.float()];
-        let p_scale = [r.float(), r.float(), r.float()];
-        let p_shear = [r.float(), r.float(), r.float()];
-        let p_uniform_scale = r.float();
-        let p_pivot = [r.float(), r.float(), r.float()];
-        let p_pivot_rotation = [r.float(), r.float(), r.float()];
-        let p_invert = r.bool();
+    fn compose_params(values: &decl::Values<'_>) -> transform_ops::ComposeTransformParams {
+
+
+        let p_order = ORDER.of(&values["order"]);
+        let p_rotation_order = ROTATION_ORDER.of(&values["rotate_order"]);
+        let p_translate = [decl::float(&values["translate_x"]), decl::float(&values["translate_y"]), decl::float(&values["translate_z"])];
+        let p_rotate = [decl::float(&values["rotate_x"]), decl::float(&values["rotate_y"]), decl::float(&values["rotate_z"])];
+        let p_scale = [decl::float(&values["scale_x"]), decl::float(&values["scale_y"]), decl::float(&values["scale_z"])];
+        let p_shear = [decl::float(&values["shear_xy"]), decl::float(&values["shear_xz"]), decl::float(&values["shear_yz"])];
+        let p_uniform_scale = decl::float(&values["uniform_scale"]);
+        let p_pivot = [decl::float(&values["pivot_x"]), decl::float(&values["pivot_y"]), decl::float(&values["pivot_z"])];
+        let p_pivot_rotation = [decl::float(&values["pivot_rotate_x"]), decl::float(&values["pivot_rotate_y"]), decl::float(&values["pivot_rotate_z"])];
+        let p_invert = decl::bool(&values["invert"]);
         let v = |a: [f64; 3]| vec3(a[0], a[1], a[2]);
         transform_ops::ComposeTransformParams {
             order: p_order,
@@ -656,15 +622,15 @@ pub mod soft_transform {
         }
     }
 
-    pub fn validate(values: &[Value]) -> Result<(), String> {
-        let mut r = Reader::new(values);
-        r.at += 24;
-        let p_metric = r.choice(&METRIC);
-        let p_metric_attribute = r.text();
-        let p_apply_rolloff = r.bool();
-        r.at += 1;
-        let p_radius = r.float();
-        let p_falloff_attribute = r.text();
+    pub fn validate(values: &decl::Values<'_>) -> Result<(), String> {
+
+
+        let p_metric = METRIC.of(&values["metric"]);
+        let p_metric_attribute = decl::text(&values["metric_attribute"]);
+        let p_apply_rolloff = decl::bool(&values["apply_rolloff"]);
+
+        let p_radius = decl::float(&values["radius"]);
+        let p_falloff_attribute = decl::text(&values["falloff_attribute"]);
         let refuse = |message: &str| Err(format!("sop/soft_transform_trs: {message}"));
         if !p_radius.is_finite() || p_radius < 0.0 {
             return refuse("radius must be finite and nonnegative");
@@ -690,18 +656,18 @@ pub mod soft_transform {
         }
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let mut r = Reader::new(values);
-        let p_group_owner = support::ELEMENT_OWNER.of(&r.next());
-        let p_group = r.text();
-        r.at += 22;
-        let p_metric = r.choice(&METRIC);
-        let p_metric_attribute = r.text();
-        let p_apply_rolloff = r.bool();
-        let p_falloff = support::SOFT_FALLOFF.of(&r.next());
-        let p_radius = r.float();
-        let p_falloff_attribute = r.text();
-        let p_recompute_normals = r.bool();
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
+
+        let p_group_owner = support::ELEMENT_OWNER.of(&values["group_owner"]);
+        let p_group = decl::text(&values["group"]);
+
+        let p_metric = METRIC.of(&values["metric"]);
+        let p_metric_attribute = decl::text(&values["metric_attribute"]);
+        let p_apply_rolloff = decl::bool(&values["apply_rolloff"]);
+        let p_falloff = support::SOFT_FALLOFF.of(&values["falloff"]);
+        let p_radius = decl::float(&values["radius"]);
+        let p_falloff_attribute = decl::text(&values["falloff_attribute"]);
+        let p_recompute_normals = decl::bool(&values["recompute_normals"]);
         let selection = support::optional_element_group(p_group_owner, &p_group);
         let falloff_attribute = support::optional_text(&p_falloff_attribute);
         let metric = match p_metric {
@@ -793,7 +759,7 @@ pub mod ray {
     ]);
 
     pub const META: Meta = Meta {
-        key: "ray",
+        description: "Project points toward a target surface along a direction or nearest-hit query.", key: "ray",
         label: "Ray",
         category: "Modify/Project",
         inputs: 2,
@@ -822,6 +788,7 @@ pub mod ray {
             1.0,
             "direction_vector",
             [0.0, 1.0, 0.0],
+            None,
         ));
         specs.extend([
             txt("direction_attribute", "Direction attribute", "Ray", "N"),
@@ -837,12 +804,12 @@ pub mod ray {
             fl_hard("jitter_scale", "Jitter scale", "Jitter", 0.0, 10.0, 0.0, 1.0),
             int("seed", "Seed", "Jitter", 0, 999999, None, 0),
             pick("combine", "Combine", "Jitter", COMBINE.kind(), COMBINE.at(0)),
-            fl_hard("min_distance", "Minimum distance", "Distance", 0.0, 1000.0, 0.0, 0.0),
+            Spec { unit: Some("m"), ..fl_hard("min_distance", "Minimum distance", "Distance", 0.0, 1000.0, 0.0, 0.0) },
             tog("limit_max_distance", "Limit maximum distance", "Distance", false),
-            fl_hard("max_distance", "Maximum distance", "Distance", 0.0, 1000.0, 0.0, 10.0),
+            Spec { unit: Some("m"), ..fl_hard("max_distance", "Maximum distance", "Distance", 0.0, 1000.0, 0.0, 10.0) },
             fl_hard("tolerance", "Tolerance", "Distance", 0.0, 1.0, 0.0, 0.0),
             fl("scale", "Scale", "Transform", -10.0, 10.0, 1.0),
-            fl("lift", "Lift", "Transform", -10.0, 10.0, 0.0),
+            Spec { unit: Some("m"), ..fl("lift", "Lift", "Transform", -10.0, 10.0, 0.0) },
             txt("distance_attribute", "Distance", "Output", ""),
             txt("primitive_attribute", "Primitive", "Output", ""),
             txt("source_vertex_numbers_attribute", "Source vertices", "Output", ""),
@@ -858,34 +825,34 @@ pub mod ray {
         specs
     }
 
-    pub fn validate(values: &[Value]) -> Result<(), String> {
-        let mut r = Reader::new(values);
-        r.at += 3;
-        let p_method = r.choice(&METHOD);
-        let p_direction = r.choice(&DIRECTION);
-        let p_direction_vector = [r.float(), r.float(), r.float()];
-        let p_direction_attribute = r.text();
-        r.at += 2;
-        let p_samples = r.int();
-        let p_jitter_scale = r.float();
-        r.at += 2;
-        let p_min_distance = r.float();
-        let p_limit_max_distance = r.bool();
-        let p_max_distance = r.float();
-        let p_tolerance = r.float();
-        let p_scale = r.float();
-        let p_lift = r.float();
-        let p_distance_attribute = r.text();
-        let p_primitive_attribute = r.text();
-        let p_source_vertex_numbers_attribute = r.text();
-        let p_source_vertex_weights_attribute = r.text();
-        r.at += 1;
-        let p_normal_attribute = r.text();
-        let p_point_pattern = r.text();
-        let p_vertex_pattern = r.text();
-        let p_primitive_pattern = r.text();
-        let p_detail_pattern = r.text();
-        let p_match_groups = r.bool();
+    pub fn validate(values: &decl::Values<'_>) -> Result<(), String> {
+
+
+        let p_method = METHOD.of(&values["method_"]);
+        let p_direction = DIRECTION.of(&values["direction"]);
+        let p_direction_vector = [decl::float(&values["direction_x"]), decl::float(&values["direction_y"]), decl::float(&values["direction_z"])];
+        let p_direction_attribute = decl::text(&values["direction_attribute"]);
+
+        let p_samples = decl::int(&values["samples"]);
+        let p_jitter_scale = decl::float(&values["jitter_scale"]);
+
+        let p_min_distance = decl::float(&values["min_distance"]);
+        let p_limit_max_distance = decl::bool(&values["limit_max_distance"]);
+        let p_max_distance = decl::float(&values["max_distance"]);
+        let p_tolerance = decl::float(&values["tolerance"]);
+        let p_scale = decl::float(&values["scale"]);
+        let p_lift = decl::float(&values["lift"]);
+        let p_distance_attribute = decl::text(&values["distance_attribute"]);
+        let p_primitive_attribute = decl::text(&values["primitive_attribute"]);
+        let p_source_vertex_numbers_attribute = decl::text(&values["source_vertex_numbers_attribute"]);
+        let p_source_vertex_weights_attribute = decl::text(&values["source_vertex_weights_attribute"]);
+
+        let p_normal_attribute = decl::text(&values["normal_attribute"]);
+        let p_point_pattern = decl::text(&values["point_pattern"]);
+        let p_vertex_pattern = decl::text(&values["vertex_pattern"]);
+        let p_primitive_pattern = decl::text(&values["primitive_pattern"]);
+        let p_detail_pattern = decl::text(&values["detail_pattern"]);
+        let p_match_groups = decl::bool(&values["match_groups"]);
         let refuse = |message: &str| Err(format!("sop/ray: {message}"));
         let [dx, dy, dz] = p_direction_vector;
         if !all_finite(&[dx, dy, dz, p_jitter_scale, p_min_distance, p_max_distance, p_tolerance, p_scale, p_lift]) {
@@ -958,38 +925,38 @@ pub mod ray {
         Ok(())
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let mut r = Reader::new(values);
-        let p_group_owner = support::ELEMENT_OWNER.of(&r.next());
-        let p_group = r.text();
-        let p_collision_group = r.text();
-        let p_method = r.choice(&METHOD);
-        let p_direction = r.choice(&DIRECTION);
-        let p_direction_vector = [r.float(), r.float(), r.float()];
-        let p_direction_attribute = r.text();
-        let p_direction_mode = r.choice(&DIRECTION_MODE);
-        let p_surface_hit = r.choice(&SURFACE);
-        let p_samples = r.int();
-        let p_jitter_scale = r.float();
-        let p_seed = r.int();
-        let p_combine = r.choice(&COMBINE);
-        let p_min_distance = r.float();
-        let p_limit_max_distance = r.bool();
-        let p_max_distance = r.float();
-        let p_tolerance = r.float();
-        let p_scale = r.float();
-        let p_lift = r.float();
-        let p_distance_attribute = r.text();
-        let p_primitive_attribute = r.text();
-        let p_source_vertex_numbers_attribute = r.text();
-        let p_source_vertex_weights_attribute = r.text();
-        let p_hit_group = r.text();
-        let p_normal_attribute = r.text();
-        let p_point_pattern = r.text();
-        let p_vertex_pattern = r.text();
-        let p_primitive_pattern = r.text();
-        let p_detail_pattern = r.text();
-        let p_match_groups = r.bool();
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
+
+        let p_group_owner = support::ELEMENT_OWNER.of(&values["group_owner"]);
+        let p_group = decl::text(&values["group"]);
+        let p_collision_group = decl::text(&values["collision_group"]);
+        let p_method = METHOD.of(&values["method_"]);
+        let p_direction = DIRECTION.of(&values["direction"]);
+        let p_direction_vector = [decl::float(&values["direction_x"]), decl::float(&values["direction_y"]), decl::float(&values["direction_z"])];
+        let p_direction_attribute = decl::text(&values["direction_attribute"]);
+        let p_direction_mode = DIRECTION_MODE.of(&values["direction_mode"]);
+        let p_surface_hit = SURFACE.of(&values["surface_hit"]);
+        let p_samples = decl::int(&values["samples"]);
+        let p_jitter_scale = decl::float(&values["jitter_scale"]);
+        let p_seed = decl::int(&values["seed"]);
+        let p_combine = COMBINE.of(&values["combine"]);
+        let p_min_distance = decl::float(&values["min_distance"]);
+        let p_limit_max_distance = decl::bool(&values["limit_max_distance"]);
+        let p_max_distance = decl::float(&values["max_distance"]);
+        let p_tolerance = decl::float(&values["tolerance"]);
+        let p_scale = decl::float(&values["scale"]);
+        let p_lift = decl::float(&values["lift"]);
+        let p_distance_attribute = decl::text(&values["distance_attribute"]);
+        let p_primitive_attribute = decl::text(&values["primitive_attribute"]);
+        let p_source_vertex_numbers_attribute = decl::text(&values["source_vertex_numbers_attribute"]);
+        let p_source_vertex_weights_attribute = decl::text(&values["source_vertex_weights_attribute"]);
+        let p_hit_group = decl::text(&values["hit_group"]);
+        let p_normal_attribute = decl::text(&values["normal_attribute"]);
+        let p_point_pattern = decl::text(&values["point_pattern"]);
+        let p_vertex_pattern = decl::text(&values["vertex_pattern"]);
+        let p_primitive_pattern = decl::text(&values["primitive_pattern"]);
+        let p_detail_pattern = decl::text(&values["detail_pattern"]);
+        let p_match_groups = decl::bool(&values["match_groups"]);
         let selection = support::optional_element_group(p_group_owner, &p_group);
         let collision_group = support::optional_text(&p_collision_group);
         let direction = match p_direction {

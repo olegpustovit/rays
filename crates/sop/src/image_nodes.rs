@@ -25,7 +25,9 @@ struct Parameters {
 }
 
 fn from_values(values: &[Value]) -> Parameters {
-    match (&values[0], &values[1], &values[2], &values[3]) {
+    let schema = schema();
+    let values = decl::Values::new(&schema, values);
+    match (&values["width"], &values["height"], &values["frequency"], &values["seed"]) {
         (Value::Int(width), Value::Int(height), Value::Float(frequency), Value::Int(seed)) => Parameters {
             width: *width,
             height: *height,
@@ -36,7 +38,7 @@ fn from_values(values: &[Value]) -> Parameters {
     }
 }
 
-const META: Meta = Meta { key: "image/noise", label: "Noise", category: "Image", inputs: 0, schema_name: "image/noise", ..decl::META };
+const META: Meta = Meta { description: "Generate a seeded procedural noise image.", key: "image/noise", label: "Noise", category: "Image", inputs: 0, schema_name: "image/noise", ..decl::META };
 
 fn specs() -> Vec<Spec> {
     vec![
@@ -123,6 +125,7 @@ pub fn noise_factory() -> Factory {
     let default_parameters = from_values(&defaults);
     edit_graph::factory(
         FactoryArgs {
+            description: "Generate a seeded procedural noise image.".into(),
             operation: Some("image/noise".to_owned()),
             slots: None,
             input_types: None,

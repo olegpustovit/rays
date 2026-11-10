@@ -629,7 +629,6 @@ pub fn resolve_transfer_group(
             .ok_or_else(|| group_missing(operation, owner_name, name)),
         (None, None) => Ok(None),
         (None, Some(pattern)) => {
-            // Rdk.Cancel.check raises; here a cancellation is a diagnostic.
             rdk_core::cancel::check(cancel_token).map_err(|e| structured_rdk_error(&e))?;
             let matches: Vec<group::T> = geometry::groups(geometry_value)
                 .into_iter()

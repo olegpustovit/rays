@@ -3,13 +3,34 @@
 //!
 //! A node declaration is plain data: a `Meta` const (the `[@@sop.node_*]` attributes), a
 //! `Vec<Spec>` (one `[@sop.*]`-annotated record field each), and an `operator` fn that reads
-//! schema values into the native kernel parameters. See PORTING.md for the pattern.
+//! schema values into the native kernel parameters.
 use std::sync::Arc;
 
 use param::{Field, Impact, Kind, Schema, Value};
 
 use crate::edit_graph::{self, Factory, InputRequirement};
 use crate::node::{self, build, Elementwise, Facts, Topology};
+
+/// Schema-normalized values read by field name, independent of declaration order.
+pub struct Values<'a> { schema: &'a Schema, values: &'a [Value] }
+impl<'a> Values<'a> {
+    pub fn new(schema: &'a Schema, values: &'a [Value]) -> Self {
+        assert_eq!(schema.fields().len(), values.len(), "normalized parameter count");
+        Self { schema, values }
+    }
+}
+impl std::ops::Index<&str> for Values<'_> {
+    type Output = Value;
+    fn index(&self, name: &str) -> &Value {
+        // ponytail: schemas have at most dozens of fields; cache indices if construction profiling warrants it.
+        let index = self.schema.fields().iter().position(|field| field.name() == name).expect("parameter declared by the node schema");
+        &self.values[index]
+    }
+}
+pub fn float(value: &Value) -> f64 { if let Value::Float(value) = value { *value } else { unreachable!("float parameter") } }
+pub fn int(value: &Value) -> i64 { if let Value::Int(value) = value { *value } else { unreachable!("int parameter") } }
+pub fn bool(value: &Value) -> bool { if let Value::Bool(value) = value { *value } else { unreachable!("bool parameter") } }
+pub fn text(value: &Value) -> String { if let Value::Text(value) = value { String::from_utf8_lossy(value).into_owned() } else { unreachable!("text parameter") } }
 
 /// `[@@sop.node_facts { ... }]`: the refinement of the conservative facts.
 #[derive(Clone, Copy)]
@@ -24,9 +45,9 @@ pub struct FactsDecl {
 /// `(label, parameter values, inputs one per slot) -> unparameterized operator node`. The slice
 /// holds one entry per slot; a required slot is always `Some`; a rest slot continues to the end
 /// (use `connected`). The operator may refuse by wiring, so it returns a `Result`.
-pub type Operator = fn(&str, &[Value], &[Option<node::T>]) -> Result<node::T, String>;
+pub type Operator = fn(&str, &Values<'_>, &[Option<node::T>]) -> Result<node::T, String>;
 /// `[@@sop.validate f]`.
-pub type Validate = fn(&[Value]) -> Result<(), String>;
+pub type Validate = fn(&Values<'_>) -> Result<(), String>;
 /// The optional `?schema` callback of `<t>_build`: presentation derived from the parameters and the
 /// constructed node (e.g. Switch's choices).
 pub type DynamicSchema = fn(&[Value], &node::T) -> Arc<Schema>;
@@ -39,6 +60,7 @@ pub struct Meta {
     /// `sop.node_operation`.
     pub operation: Option<&'static str>,
     pub label: &'static str,
+    pub description: &'static str,
     /// `sop.node_category`, `/`-separated.
     pub category: &'static str,
     /// `sop.node_inputs`.
@@ -63,6 +85,7 @@ pub const META: Meta = Meta {
     key: "",
     operation: None,
     label: "",
+    description: "",
     category: "",
     inputs: 0,
     slots: None,
@@ -222,10 +245,11 @@ pub fn build(decl: &Decl, label: &str, inputs: &[Option<node::T>], values: &[Val
             ));
         }
     }
+    let named = Values::new(&decl.schema, values);
     if let Some(validate) = meta.validate {
-        validate(values)?;
+        validate(&named)?;
     }
-    let mut made = (decl.operator)(label, values, inputs)?;
+    let mut made = (decl.operator)(label, &named, inputs)?;
     if let Some(facts) = &meta.facts {
         let refined = Facts {
             elementwise: facts.elementwise,
@@ -297,6 +321,7 @@ pub fn factory(decl: &Decl) -> Factory {
         "sop_node key, label, and category must not be blank"
     );
     let mut args = edit_graph::FactoryArgs {
+        description: meta.description.to_owned(),
         operation: meta.operation.map(str::to_owned),
         slots: meta.slots.map(|_| slot_names(&meta)),
         input_types: meta.types.map(|types| types.iter().map(|t| (*t).to_owned()).collect()),

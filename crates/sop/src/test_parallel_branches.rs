@@ -489,7 +489,7 @@ fn zone_roots_fork_and_stay_exact() {
     session::close(&mut eight);
 }
 
-/// The session-level core of lib/sop/test_parallel_exact.ml: one graph of real native SOPs (clip,
+/// The session-level core of : one graph of real native SOPs (clip,
 /// soft transform) cooked at 1 and 4 domains is equal, plane for plane.
 #[test]
 fn native_sops_are_equal_at_one_and_many_domains() {

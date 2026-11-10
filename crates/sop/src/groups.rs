@@ -63,7 +63,7 @@ pub mod group_transfer {
     }
 
     pub const META: Meta = Meta {
-        key: "group_transfer",
+        description: "Transfer groups from nearby source geometry.", key: "group_transfer",
         label: "Group Transfer",
         category: "Group/Transfer",
         inputs: 2,
@@ -88,20 +88,21 @@ pub mod group_transfer {
             },
             Spec { label: "Create empty groups", ..decl::spec("create_empty", decl::toggle_kind(), Value::Bool(false)) },
             Spec {
+                unit: Some("m"),
                 label: "Maximum distance",
                 ..decl::spec("distance", decl::float_kind(0.0, 10.0, Some(0.0), None), Value::Float(0.001))
             },
         ]
     }
 
-    pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
+    pub fn operator(label: &str, values: &decl::Values<'_>, inputs: &[Option<node::T>]) -> Result<node::T, String> {
         let (Value::Bool(use_rules), Value::Text(encoded), Value::Bool(create_empty), Value::Float(distance)) =
-            (&values[0], &values[1], &values[3], &values[4])
+            (&values["use_rules"], &values["rules"], &values["create_empty"], &values["distance"])
         else {
             unreachable!("group_transfer: parameter record has the wrong shape")
         };
         let rules = if *use_rules { decode(encoded).expect("rules were normalized by the schema") } else { default_transfer_rules() };
-        let conflict = support::GROUP_COPY_CONFLICT.of(&values[2]);
+        let conflict = support::GROUP_COPY_CONFLICT.of(&values["conflict"]);
         let (create_empty, distance) = (*create_empty, *distance);
         let (source, target) = (inputs[0].clone().unwrap(), inputs[1].clone().unwrap());
         Ok(build::make_geometry(

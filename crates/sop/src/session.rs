@@ -212,7 +212,7 @@ pub struct T {
     /// the per-cook memo's storage, kept between cooks: a cache hit builds no table
     /// the cache key's buffer, kept after a hit
     key_pool: Vec<u8>,
-    memo_pool: (HashMap<i64, Vec<(node::T, Result<Output, Diagnostic>)>>, Vec<i64>),
+    memo_pool: (HashMap<i64, Vec<(node::T, Result<Output, Box<Diagnostic>>)>>, Vec<i64>),
     clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     max_entries: i64,
     max_payload_bytes: i64,
@@ -786,13 +786,13 @@ fn input_geometry(session: &mut T, output: &Output) -> Result<payload::T, Diagno
 /// A table of this cook's results by node id so a node reachable through several paths is
 /// evaluated once; the physical check guards reused ids.
 struct Memo {
-    results: HashMap<i64, Vec<(node::T, Result<Output, Diagnostic>)>>,
+    results: HashMap<i64, Vec<(node::T, Result<Output, Box<Diagnostic>>)>>,
     census: Arc<Census>,
     left: Vec<i64>,
 }
 
 fn memo_find(memo: &Memo, n: &node::T) -> Option<Result<Output, Diagnostic>> {
-    memo.results.get(&node::id(n))?.iter().find(|(seen, _)| node::ptr_eq(seen, n)).map(|(_, r)| r.clone())
+    memo.results.get(&node::id(n))?.iter().find(|(seen, _)| node::ptr_eq(seen, n)).map(|(_, r)| r.clone().map_err(|error| *error))
 }
 
 fn memo_remove(memo: &mut Memo, n: &node::T) {
@@ -980,14 +980,15 @@ enum Prediction {
     Missing,
 }
 
-type Results = HashMap<i64, Vec<(node::T, Result<Output, Diagnostic>)>>;
+// Keep the uncommon diagnostic off successful memo slots as its presentation metadata grows.
+type Results = HashMap<i64, Vec<(node::T, Result<Output, Box<Diagnostic>>)>>;
 type Predictions = HashMap<i64, Vec<(node::T, Prediction)>>;
 
 fn cached_output(predictions: &mut Predictions, results: &Results, session: &T, context: &context::T, n: &node::T) -> Prediction {
     if let Some(found) = predictions.get(&node::id(n)).and_then(|v| v.iter().find(|(seen, _)| node::ptr_eq(seen, n))) {
         return found.1.clone();
     }
-    let remembered = results.get(&node::id(n)).and_then(|v| v.iter().find(|(seen, _)| node::ptr_eq(seen, n))).map(|(_, r)| r.clone());
+    let remembered = results.get(&node::id(n)).and_then(|v| v.iter().find(|(seen, _)| node::ptr_eq(seen, n))).map(|(_, r)| r.clone().map_err(|error| *error));
     let prediction = match remembered {
         Some(Ok(output)) => Prediction::Known(output),
         Some(Err(_)) => Prediction::Missing,
@@ -1059,7 +1060,7 @@ fn evaluate(memo: &mut Memo, session: &mut T, context: &context::T, n: &node::T)
         return result;
     }
     let result = evaluate_uncached(memo, session, context, n);
-    memo.results.entry(node::id(n)).or_default().push((n.clone(), result.clone()));
+    memo.results.entry(node::id(n)).or_default().push((n.clone(), result.clone().map_err(Box::new)));
     consumed(memo, n);
     result
 }
@@ -1326,7 +1327,7 @@ fn clone_memo(memo: &Memo, left: Vec<i64>) -> Memo {
 }
 
 /// Worker copies of memoized results retain their parent's result identity.
-fn same_result(a: &Result<Output, Diagnostic>, b: &Result<Output, Diagnostic>) -> bool {
+fn same_result(a: &Result<Output, Box<Diagnostic>>, b: &Result<Output, Box<Diagnostic>>) -> bool {
     match (a, b) {
         (Ok(a), Ok(b)) => same_output(a, b),
         (Err(a), Err(b)) => rays_diagnostic::error_to_string(a) == rays_diagnostic::error_to_string(b),

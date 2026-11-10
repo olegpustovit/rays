@@ -1,4 +1,4 @@
-//! Port of lib/sop: immutable SOP graphs over rdk. See PORTING.md for the node pattern.
+//! immutable SOP graphs over rdk. See PORTING.md for the node pattern.
 pub mod context;
 pub mod decl;
 pub mod image;

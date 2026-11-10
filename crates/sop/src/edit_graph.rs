@@ -31,6 +31,7 @@ struct FactoryData {
     key: String,
     operation: String,
     label: String,
+    description: String,
     category: Vec<String>,
     fields: Vec<FieldView>,
     requirements: Vec<InputRequirement>,
@@ -623,6 +624,7 @@ pub struct FactoryArgs {
     pub fields: Vec<FieldView>,
     pub key: String,
     pub label: String,
+    pub description: String,
     pub category: Vec<String>,
 }
 
@@ -635,6 +637,7 @@ pub fn factory_args(key: &str, label: &str, category: &[&str]) -> FactoryArgs {
         fields: Vec::new(),
         key: key.to_owned(),
         label: label.to_owned(),
+        description: String::new(),
         category: category.iter().map(|c| (*c).to_owned()).collect(),
     }
 }
@@ -657,6 +660,7 @@ fn make_factory(what: &str, args: FactoryArgs, requirements: Vec<InputRequiremen
         key: args.key,
         operation,
         label: args.label,
+        description: args.description,
         category: args.category,
         // Default parameter values are owned by their native node.
         fields: args.fields,
@@ -701,6 +705,9 @@ pub fn factory_operation(value: &Factory) -> &str {
 }
 pub fn factory_label(value: &Factory) -> &str {
     &value.0.label
+}
+pub fn factory_description(value: &Factory) -> &str {
+    &value.0.description
 }
 pub fn factory_category(value: &Factory) -> &[String] {
     &value.0.category
