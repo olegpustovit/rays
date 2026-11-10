@@ -18,10 +18,10 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | B | 8 | 8 | 0 | 0 |
 | A | 4 | 4 | 0 | 0 |
 | D | 12 | 12 | 0 | 0 |
-| Z | 11 | 7 | 4 | 0 |
+| Z | 11 | 8 | 3 | 0 |
 | R | 10 | 10 | 0 | 0 |
-| G | 7 | 6 | 1 | 0 |
-| **All** | **58** | **53** | **5** | **0** |
+| G | 7 | 7 | 0 | 0 |
+| **All** | **58** | **55** | **3** | **0** |
 
 ## Items
 
@@ -713,3 +713,4 @@ All commands use the normal shared target and `cargo t`, without RAYS_SLOW/deadl
 - Windows box back online (HEAD 6fd9abe6, 176 behind dev); Windows qualification agent dispatched for G3/G5/G1/Z4/Z5/Z10 (Vulkan compiled for the first time since G3/G5).
 - **Z9** merged (`06105ee5` `bb5f1cde` + root shape fix): process-wide ledger-charged scratch pool (`rdk_core::scratch`, evictor empties under pressure; ponytail: per-worker pools if contention); boolean CDT/arrangement/radial buffers borrow it; flow_ir profile::record updates in place. Changed-input warm cooks: boolean 26,695→16,214 allocs (cap 16,500), scatter 422,487→261,961 (cap 262,500, peak cap 12.99M→6.4M), subdivide 68,525→68,523 (≈99% of subdivide/scatter allocations are Flow evaluation: arg type clones, Walker path vecs, Arena::fresh, lowering Source clones — not kernel scratch). flow_sop438, rdk_*, flow_ir pass; shape 491.
 - Artifact v52: Z9 done (53/58). Z0 flow-eval warm-cook agent dispatched.
+- **Windows qualification** (kyiv-win-1 at dev 2a9b4244 + test-only slack): workspace all-targets check 0 errors (G1/G3/G5 Vulkan cfg(windows) compiles); `RAYS_VULKAN_VALIDATION=fatal` ogpu_core/mock/vulkan 40/40 11 s, flow_gpu 94/94 100 s, renderer gpu_ 43/43 34 s, rays_pathtracer 25/25 39 s, flow_native 21/21 16 s; Z5 vector suites (rays_math20, flow_web123, flow_syntax47, rdk_geom96, rdk_ops234, rdk_boolean77, web_export226, flow_eval115) pass; flow_sop 438 pass; rays_editor no failures before 60 s cap (238/303); gate deps pass. Only failure: warm cache-hit bytes +8 B on x86_64 (hashbrown SSE2 control group on a per-hit table) — per-arch slack NOT merged; root cause handed to Z0/Z1 (remove table from hit path).
