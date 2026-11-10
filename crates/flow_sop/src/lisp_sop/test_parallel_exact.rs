@@ -89,15 +89,22 @@ fn curve(points:impl IntoIterator<Item=(f64,f64,f64)>) -> String { let points=po
 fn merge(nodes:&[node::T]) -> node::T { let names=nodes.iter().enumerate().map(|(i,n)|(format!("m{i}"),n.clone())).collect::<Vec<_>>(); super::node(&names,&format!("(sop/merge {})",names.iter().map(|(name,_)|format!("(sop/ext_{name})")).collect::<Vec<_>>().join(" "))) }
 
 fn fvar(interpolation:&str) {
+    // Eight columns align with the UV period, retaining smooth interior fans and split seams.
     let source=grid(8,8,8.0,true);let topology=topology::view::view(geo::topology(&source)).unwrap();
     let count=geo::vertex_count(&source);
     let values=packed::float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%8/3) as f64).collect()).unwrap();
+    let uv=packed::float2::view::view(&values);
+    let mut fans=vec![Vec::new();geo::point_count(&source) as usize];
+    for (v,&p) in topology.vertex_points.iter().enumerate() { fans[p as usize].push((uv.x[v].to_bits(),uv.y[v].to_bits())); }
+    assert!(fans.iter().any(|fan|fan.len()==4 && fan.iter().all(|value|*value==fan[0])), "smooth interior UV fan");
+    assert!(fans.iter().any(|fan|fan.len()==4 && fan.iter().any(|value|*value!=fan[0])), "interior UV seam");
     let source=super::snapshot(&add(&source,Owner::Vertex,"fvar_uv",Storage::Float2(values)));
     let text=r###"(sop/subdivide (sop/ext_fvar_source) :crease_weight_mode "Auto"
        :boundary_interpolation "Edge only" :remove_holes true
        :generate_resulting_creases true :hole_group ""
        :face_varying_interpolation %S)"###.replace("%S",&format!("{interpolation:?}"));
-    exact(&bind(&[("fvar_source",&source)],&text));
+    let output=exact(&bind(&[("fvar_source",&source)],&text));
+    assert_eq!((geo::point_count(&output),geo::primitive_count(&output),geo::vertex_count(&output)),(289,256,1024));
 }
 
 fn inline_geometry(polygons:i64) -> geo::T {
@@ -132,9 +139,9 @@ fn group_fixture() -> node::T {
     use rays_math::{mat4,vec3};
     let matrix=mat4::mul(&mat4::translation(vec3::create(2.0,3.0,4.0)),&mat4::mul(&mat4::rotation(vec3::create(1.0,2.0,3.0),0.7),&mat4::scaling(vec3::create(1.25,0.75,1.5))));
     let parameters=(0..4).flat_map(|row|(0..4).map(move |column|(row,column))).map(|(row,column)|format!(":m{row}{column} {}",super::float(mat4::get(&matrix,row,column).unwrap()))).collect::<Vec<_>>().join(" ");
-    let base=super::node(&[],r#"(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 112 :rows 88 :size 20.0)"#);
-    let base=chain(&base,&format!("(sop/transform :mode \"Matrix\" {parameters})"));
-    bind(&[("base",&base)],&r###"(-> (sop/ext_base)
+    // 4,225 points, 8,192 primitives and 12,416 edges retain the 4,097-element paths.
+    super::node(&[],&r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 64 :rows 64 :size 20.0)
+     (sop/transform :mode "Matrix" %matrix)
      (sop/color_by_height :low_red 45 :low_green 36 :low_blue 114
        :high_red 244 :high_green 124 :high_blue 42)
      %s
@@ -142,7 +149,8 @@ fn group_fixture() -> node::T {
      (sop/group_unshared :owner "Points" :name "surface_boundary")
      (sop/group_boundary_components :prefix "boundary_loop")
      (sop/group_range :owner "Primitives" :name "all_faces" :range_mode "From ends")
-     (sop/group_range :owner "Primitives" :name "connected_faces"
+     (sop/group_range :owner "Primitives" :name "bounded_faces" :range_mode "Start and end" :start 7 :end_ 4800)
+     (sop/group_range :owner "Primitives" :name "connected_faces" :range_mode "Start and end"
        :connectivity_mode "Connected with seams" :connectivity_tolerance 1e-06
        :use_collision true :collision_owner "Points"
        :collision_pattern "middle" :keep_boundary true :remove_other_regions true
@@ -154,7 +162,7 @@ fn group_fixture() -> node::T {
        :group "connected_faces")
      (sop/group_edges :use_max_angle true :use_min_angle true :name "surface_edges"
        :angle_basis "Incident edges" :min_angle 0.1 :max_angle 2.9)
-     (sop/group_unshared :owner "Edges" :name "unshared_edges"))"###.replace("%s",&bounds("middle",[-5.0,-100.0,-5.0],[5.0,100.0,5.0])))
+     (sop/group_unshared :owner "Edges" :name "unshared_edges"))"###.replace("%s",&bounds("middle",[-5.0,-100.0,-5.0],[5.0,100.0,5.0])).replace("%matrix",&parameters))
 }
 fn owner_transfer_sources() -> (node::T,node::T) {
     let source=super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 24 :rows 24 :size 8.0)
@@ -498,7 +506,7 @@ fn filters_clipped() {
 
 #[test]
 fn subdivision_creased_subdivision() {
-    let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 8 :rows 8 :size 8.0)
+    let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 3 :rows 20 :size 8.0)
      (sop/set_float :owner "Vertex" :name "creaseweight" :value 1.5)
      (sop/subdivide
        :crease_weight_mode "Auto"
@@ -512,7 +520,7 @@ fn subdivision_creased_subdivision() {
 
 #[test]
 fn subdivision_chaikin_subdivision() {
-    let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 8 :rows 8 :size 8.0)
+    let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 3 :rows 20 :size 8.0)
      (sop/attribute_randomize
        :a [0.0 0.0 0.0]
        :b [4.0 0.0 0.0]
@@ -534,7 +542,7 @@ fn subdivision_chaikin_subdivision() {
 
 #[test]
 fn subdivision_smooth_triangles() {
-    let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 8 :rows 8 :size 8.0)
+    let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 3 :rows 20 :size 8.0)
      (sop/set_float :owner "Vertex" :name "fvar_sample" :value 2.5)
      (sop/subdivide
        :crease_weight_mode "Auto"
@@ -544,7 +552,7 @@ fn subdivision_smooth_triangles() {
        :hole_group ""
        :face_varying_interpolation "None"
        :triangle_policy "Smooth"))"###));
-    assert_eq!(geo::primitive_count(&one),8*8*2*3);
+    assert_eq!(geo::primitive_count(&one),3*20*2*3);
 }
 
 #[test]
@@ -791,7 +799,13 @@ fn generated_inline_facet() {
 fn groups() {
     let one=exact(&group_fixture());
     assert!(has(&one,Owner::Point,"N")&&has(&one,Owner::Point,"Cd"));
-    assert_eq!(geo::groups(&one).iter().map(group::name).collect::<Vec<_>>(),vec!["middle","middle_grown","surface_boundary","boundary_loop__0","all_faces","connected_faces"]);
+    assert_eq!(geo::groups(&one).iter().map(group::name).collect::<Vec<_>>(),vec!["middle","middle_grown","surface_boundary","boundary_loop__0","all_faces","bounded_faces","connected_faces"]);
+    assert_eq!((geo::point_count(&one),geo::primitive_count(&one),geo::vertex_count(&one)),(4_225,8_192,24_576));
+    assert_eq!(topology_index::edge_count(&topology_index::create(None,geo::topology(&one)).unwrap()),12_416);
+    let bounded=geo::find_group(group::Owner::Primitive,"bounded_faces",&one).unwrap();
+    assert_eq!(group::cardinality(&bounded),4_794);
+    assert!(group::mem(4_800,&bounded));
+    assert!((4_801..group::length(&bounded)).all(|i|!group::mem(i,&bounded)));
     let reference=super::node(&[],r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 8 :rows 4 :size 2.0)
      (sop/set_float :name "reference_keep" :value 1.0)
      (sop/set_float :name "reference_drop" :value 2.0))"###);
@@ -903,8 +917,9 @@ fn filters_constrained_source() {
 
 #[test]
 fn subdivision_all_edge_source() {
-    let source=grid(8,8,8.0,true);
+    let source=grid(2,20,8.0,true);
     let count=topology_index::edge_count(&topology_index::create(None,geo::topology(&source)).unwrap());
+    assert_eq!(count,102);
     let source=super::snapshot(&source);
     let one=exact(&bind(&[("all_edge_source",&source)],r###"(sop/subdivide
    (sop/ext_all_edge_source)
@@ -921,18 +936,12 @@ fn subdivision_all_edge_source() {
 
 #[test]
 fn subdivision_dense_curve_source() {
-    let source=super::snapshot(&curve_chain_geometry(129));
-    let one=exact(&bind(&[("dense_curve_source",&source)],r###"(sop/subdivide
-   (sop/ext_dense_curve_source)
-   :crease_weight_mode "Auto"
-   :face_varying_interpolation "All"
-   :boundary_interpolation "Edge only"
-   :remove_holes true
-   :generate_resulting_creases true
-   :hole_group ""
-   :iterations 2)"###));
-    assert_eq!((geo::point_count(&one),geo::vertex_count(&one)),(517,645));
-    let one=exact(&bind(&[("dense_curve_source",&source)],r###"(sop/subdivide
+    // Points, edges and primitives all cross grain 97. Both outputs cross four grains.
+    let source=curve_chain_geometry(98);
+    assert!(geo::point_count(&source)>97 && geo::primitive_count(&source)>97);
+    assert!(topology_index::edge_count(&topology_index::create(None,geo::topology(&source)).unwrap())>97);
+    let source=super::snapshot(&source);
+    let independent=bind(&[("dense_curve_source",&source)],r###"(sop/subdivide
    (sop/ext_dense_curve_source)
    :crease_weight_mode "Auto"
    :face_varying_interpolation "All"
@@ -941,15 +950,19 @@ fn subdivision_dense_curve_source() {
    :generate_resulting_creases true
    :hole_group ""
    :iterations 2
-   :treat_curves_as_independent true)"###));
-    assert_eq!((geo::point_count(&one),geo::vertex_count(&one)),(645,645));
+   :treat_curves_as_independent true)"###);
+    let one=exact(&independent);
+    assert_eq!((geo::point_count(&one),geo::vertex_count(&one)),(490,490));
+    let (shared,_)=node::apply_parameters(&independent,&[("treat_curves_as_independent".into(),param::Value::Bool(false))]).unwrap();
+    let one=exact(&shared);
+    assert_eq!((geo::point_count(&one),geo::vertex_count(&one)),(393,490));
 }
 
 #[test]
 fn subdivision_crease_topology() {
-    let source=super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 8 :rows 8 :size 8.0)
+    let source=super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 3 :rows 20 :size 8.0)
      (sop/set_float :owner "Vertex" :name "creaseweight" :value 2.5))"###);
-    let one=exact(&bind(&[("crease_topology",&source)],r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 8 :rows 8 :size 8.0)
+    let one=exact(&bind(&[("crease_topology",&source)],r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 3 :rows 20 :size 8.0)
      (sop/subdivide
        (sop/ext_crease_topology)
        :crease_weight_mode "Auto"
@@ -989,8 +1002,8 @@ fn subdivision_boundary_edge() {
        :width_mode "Auto"
        :height_mode "Auto"
        :connectivity "Quads"
-       :columns 8
-       :rows 8
+       :columns 2
+       :rows 20
        :size 8.0)
      (sop/set_float :name "boundary_sample" :value 2.5)
      (sop/subdivide :crease_weight_mode "Auto" :face_varying_interpolation "All"
@@ -1005,8 +1018,8 @@ fn subdivision_boundary_corner() {
        :width_mode "Auto"
        :height_mode "Auto"
        :connectivity "Quads"
-       :columns 8
-       :rows 8
+       :columns 2
+       :rows 20
        :size 8.0)
      (sop/set_float :name "boundary_sample" :value 2.5)
      (sop/subdivide :crease_weight_mode "Auto" :face_varying_interpolation "All"
@@ -1051,7 +1064,7 @@ fn subdivision_fvar_all() { fvar("All"); }
 
 #[test]
 fn subdivision_detail_source() {
-    let source=grid(8,8,8.0,false);let count=geo::vertex_count(&source);
+    let source=grid(3,20,8.0,false);let count=geo::vertex_count(&source);
     let source=add(&source,Owner::Vertex,"fvar_sample",Storage::Float(Arc::new((0..count).map(|v|((v%127) as f64).powi(2)).collect())));
     let mut source=add(&source,Owner::Vertex,"creaseweight",Storage::Float(Arc::new((0..count).map(|v|((v*17%41) as f64)/10.0).collect())));
     source=add(&source,Owner::Detail,"osd_scheme",Storage::Text(Arc::new(vec![b"catmull-clark".to_vec()].into())));
