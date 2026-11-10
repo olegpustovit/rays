@@ -497,21 +497,21 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Second simplification Z10 — clone review
 
-This is the active second plan's Z10 ledger; the completed port plan above is unchanged. Baseline source: `ba056fc5910945e6b198be5bcbbf69dd6fab5557` (2026-11-10). Counts are literal `.clone()` occurrences in committed `crates/*/src/**/*.rs`, including inline tests, comments and strings; integration tests, examples and build scripts are excluded. They inventory review scope, not redundant operations. Total: **11,571 across 50 crates**. Reproduce with `git grep -o -F '.clone()' ba056fc5 -- crates`, grouping only those source paths. The artifact's original estimate was 11,707; this different-time count proves no runtime savings.
+This is the active second plan's Z10 ledger; the completed port plan above is unchanged. Baseline source: `ba056fc5910945e6b198be5bcbbf69dd6fab5557` (2026-11-10). Counts are literal `.clone()` occurrences in committed `crates/*/src/**/*.rs`, including inline tests, comments and strings; integration tests, examples and build scripts are excluded. They inventory review scope, not redundant operations. Baseline total: **11,571 across 50 crates**; current committed census at `3720b91b`: **11,539**, exactly 32 fewer across eight crates. Reproduce with `git grep -o -F '.clone()' ba056fc5 -- crates`, grouping only those source paths. The artifact's original estimate was 11,707; this different-time count proves no runtime savings.
 
 The exact command `cargo clippy --workspace --lib --message-format=json -- -W clippy::redundant_clone` initially exits 101 in 5.301 s at the existing default-denied `mem::Report::to_string` wrapper, before emitting any redundant-clone diagnostics. Commit `cebc8739` removes that wrapper; standard ToString delegates to the same Display implementation. All callers were traced. Existing `cargo t -p mem owner_bytes_drive_report_and_formatting` passes: 2.50 s wall / 2.135 s runner / 0.022 s case.
 
 The second exact Clippy run exits 101 in 7.915 s at the existing approximate-PI literal in `sop_topology.rs`, after 59 redundant-clone diagnostics. A separate inventory-only command, `cargo clippy --workspace --lib --message-format=json -- --cap-lints warn -W clippy::redundant_clone`, exits 0 in 17.068 s and emits **151 candidates across 20 crates**. This is an inventory, not clean-lint qualification; no repository lint policy changes. Raw results and exact commands are in `/tmp/rays-z10-clippy-{before,after-report,audit}.{jsonl,stderr,result.json}`. Clippy's library build excludes conditional test code, while the literal source census includes inline tests. Zero candidates does not prove that every remaining ownership choice is appropriate.
 
-| Crate | Baseline clones | Current clones | Clippy candidates | Ownership review |
+| Crate | Baseline clones | Current clones | Clippy candidates (baseline) | Ownership review |
 |---|---:|---:|---:|---|
-| cfmt | 0 | 0 | 0 | Pending review |
+| cfmt | 0 | 0 | 0 | Reviewed: no Clone/clone sites |
 | editor_core | 47 | 47 | 0 | Pending review |
 | editor_document | 642 | 642 | 4 | Pending review |
 | flow_check | 538 | 538 | 9 | Pending review |
 | flow_eval | 646 | 646 | 1 | Pending review |
 | flow_gpu | 293 | 293 | 6 | Pending review |
-| flow_graph | 389 | 389 | 2 | Pending review |
+| flow_graph | 389 | 387 | 2 | Clippy sites moved in 3720b91b; broader ownership review pending |
 | flow_ir | 1472 | 1472 | 7 | Pending review |
 | flow_native | 311 | 311 | 2 | Pending review |
 | flow_shader | 119 | 119 | 0 | Pending review |
@@ -522,32 +522,32 @@ The second exact Clippy run exits 101 in 7.915 s at the existing approximate-PI 
 | input | 26 | 26 | 0 | Pending review |
 | lru | 52 | 52 | 0 | Pending review |
 | mem | 61 | 61 | 0 | Pending review |
-| mem_sys | 0 | 0 | 0 | Pending review |
+| mem_sys | 0 | 0 | 0 | Reviewed: no Clone/clone sites (including Windows helper) |
 | metal_sys | 3 | 3 | 0 | Pending review |
-| native_layer_token_sys | 3 | 3 | 0 | Pending review |
+| native_layer_token_sys | 3 | 3 | 0 | Reviewed: shared Arc token; all three explicit clones exercise final-owner/concurrent-release tests |
 | ogpu_core | 113 | 113 | 0 | Pending review |
 | ogpu_metal | 137 | 137 | 1 | Pending review |
 | ogpu_mock | 23 | 23 | 0 | Pending review |
 | ogpu_vulkan | 102 | 102 | 0 | Pending review |
-| parallel | 2 | 2 | 0 | Pending review |
+| parallel | 2 | 2 | 0 | Reviewed: borrowed cached errors need owned strings; Arc::clone retains worker/shutdown owners |
 | param | 115 | 115 | 0 | Pending review |
 | pxui | 100 | 100 | 0 | Pending review |
-| pxui_graph | 357 | 357 | 3 | Pending review |
-| pxui_shell | 112 | 112 | 3 | Pending review |
-| rays | 325 | 325 | 3 | Pending review |
+| pxui_graph | 357 | 354 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
+| pxui_shell | 112 | 109 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
+| rays | 325 | 322 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
 | rays_bin | 1 | 1 | 0 | Pending review |
-| rays_diagnostic | 2 | 2 | 0 | Pending review |
+| rays_diagnostic | 2 | 2 | 0 | Reviewed: both clones preserve the original diagnostic for independent test assertions |
 | rays_editor | 1734 | 1734 | 55 | Pending review |
-| rays_math | 1 | 1 | 0 | Pending review |
-| rays_math_sys | 0 | 0 | 0 | Pending review |
+| rays_math | 1 | 1 | 0 | Reviewed: only literal clone is retained test input; explicit fallible TextArray copy is intentional |
+| rays_math_sys | 0 | 0 | 0 | Reviewed: no Clone/clone sites |
 | rays_pathtracer | 235 | 235 | 5 | Pending review |
-| rdk_boolean | 93 | 93 | 1 | Pending review |
+| rdk_boolean | 93 | 92 | 1 | Clippy sites moved in 3720b91b; broader ownership review pending |
 | rdk_core | 135 | 135 | 0 | Pending review |
-| rdk_geom | 116 | 116 | 3 | Pending review |
-| rdk_ops | 642 | 642 | 14 | Pending review |
+| rdk_geom | 116 | 113 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
+| rdk_ops | 642 | 628 | 14 | Clippy sites moved in 3720b91b; broader ownership review pending |
 | rdk_rays | 61 | 61 | 0 | Pending review |
-| renderer | 289 | 289 | 3 | Pending review |
-| runtime | 2 | 2 | 0 | Pending review |
+| renderer | 289 | 286 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
+| runtime | 2 | 2 | 0 | Reviewed: two strings copied from borrowed public filters into owned native filter records |
 | runtime_resources | 32 | 32 | 0 | Pending review |
 | scene_command | 22 | 22 | 0 | Pending review |
 | sdl3 | 8 | 8 | 0 | Pending review |
@@ -557,3 +557,9 @@ The second exact Clippy run exits 101 in 7.915 s at the existing approximate-PI 
 | web_export | 56 | 56 | 4 | Pending review |
 
 Z10 remains ACTIVE. Crate-by-crate ownership review, necessary fixes and unchanged Z0 runtime guards are required before completion. Changes owned by other active stages are not counted as Z10 savings.
+
+Ownership review now covers the eight small crates marked above, including qualified calls such as `Arc::clone` and `TextArray::try_clone` which are outside the literal count. No changes were needed there. The first cleanup batch is committed as `3720b91badfc69a3984ab8a899eae31d7853c10a`: exactly 32 last-use copies removed in 22 files across eight larger crates, 29 insertions / 32 deletions. No signatures, branches, allocation caps, goldens or deadlines changed. Existing geometry buffers, topology fields, renderer resources, graph names and UI snapshots move into their final use; three resulting self-shadowing statements were deleted. Root independently verifies the committed path set and exact per-crate clone deltas. Those eight larger crates are not declared fully reviewed from Clippy candidates alone.
+
+Qualification: scoped all-targets check passes (5.30 s wall / 5.22 s Cargo); `cargo t -p rdk_geom -p rdk_ops -p rdk_boolean` passes 407 cases (23.21 / 22.446 s, slowest parallel_exactness_at_scale 1.236 s); `cargo t -p flow_graph -p pxui_graph -p pxui_shell` passes 106 (40.78 / 40.460 s, slowest bench_scope_big 0.918 s); `cargo t -p renderer -p rays` passes 93 (31.02 / 30.477 s, slowest blends_samples_resize 2.069 s). The existing conditional SDL audio subcase is skipped; no audio qualification claimed. All reported commands terminate with exit 0, and diff checks pass. Logs: `/tmp/rays-z10-root-{check,rdk,graph-ui,renderer-rays}.log`.
+
+The editor idle/sea and SOP warm allocation guards are deliberately held until the concurrent Z7 source batch is coherent. They have not run on this stage yet and remain required for full Z10 qualification. No runtime savings claim is made from the clone count.

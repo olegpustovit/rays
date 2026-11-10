@@ -161,7 +161,7 @@
   },
   "Z10": {
     "status": "active",
-    "note": "cebc8739 stdlib formatter cleanup; ba056fc5 baseline: 11,571 literal clones and151 Clippy candidates inventoried"
+    "note": "cebc8739 3720b91b \u2014 stdlib formatter and32 last-use clone removals; 50-crate count ledger; 151 initial Clippy candidates"
   },
   "R1": {
     "status": "done",
