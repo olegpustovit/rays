@@ -7,7 +7,7 @@ use ogpu_core::error::{self, Error};
 use ogpu_core::pipeline::{ColorFormat, DepthFormat};
 use ogpu_core::render_pass::{Load, Store};
 use ogpu_core::types::{Extent, Origin, TextureDescriptor, TextureFormat, TextureUsage};
-use pxui_render::{flags, AtlasKind, Break, Instance, Painter, View};
+use pxui_render::{flags, ramp, AtlasKind, Break, Instance, Painter, View};
 #[path = "png.rs"]
 mod png;
 
@@ -145,12 +145,13 @@ fn near(a: [u8; 4], b: [u8; 4], tolerance: i32) -> bool { a.iter().zip(b).all(|(
 /// Metal handles live on the process main thread, which libtest never gives a test: this target is
 /// `harness = false` and speaks just enough of libtest's protocol (`--list`, names to filter).
 fn main() {
-    let cases: [(&str, fn()); 5] = [
+    let cases: [(&str, fn()); 6] = [
         ("gpu_scene_golden_and_spot_checks", gpu_scene_golden_and_spot_checks),
         ("gpu_one_draw_per_layer", gpu_one_draw_per_layer),
         ("gpu_warm_frame_allocates_nothing", gpu_warm_frame_allocates_nothing),
         ("gpu_view_scale_and_rotation", gpu_view_scale_and_rotation),
         ("gpu_per_side_borders", gpu_per_side_borders),
+        ("gpu_ramp_gradient", gpu_ramp_gradient),
     ];
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--ignored") { return; }
@@ -326,4 +327,32 @@ fn gpu_per_side_borders() {
     assert_eq!(at(&pixels, 63.0, 20.0), white, "left side is only 2 wide");
     assert_eq!(at(&pixels, 90.0, 20.0), RED, "right side 4 wide, own colour");
     assert_eq!(at(&pixels, 76.0, 9.0), white, "no top border from the helper either");
+}
+
+fn gpu_ramp_gradient() {
+    let Some(device) = open() else { return };
+    let queue = ok(be::create_queue(&device));
+    let mut painter = ok(Painter::new(&device, ColorFormat::Rgba8Unorm, DepthFormat::NoDepth, 1, (64, 64), (256, 4)));
+    let target = target(&device);
+    let external = texture(&device, 4, 4, &[TextureUsage::TextureBinding, TextureUsage::TextureCopyDst]);
+    ok(be::write_texture(&external, None, Origin { x: 0, y: 0, z: 0 }, Extent { width: 4, height: 4, depth: 1 }, 16, &[255; 64]));
+    let mut row = [0u8; 1024];
+    ramp(&[(0.0, RED), (0.5, GREEN), (1.0, BLUE)], &mut row);
+    assert_eq!((&row[..4], &row[1020..]), (&RED[..], &BLUE[..]), "ends are the end stops");
+    ok(painter.upload(AtlasKind::Color, 0, 2, 256, 1, &row, 1024));
+    let bar = |y: f32| Instance::rect([0.0, y, 100.0, y + 20.0], [0; 4]).linear([0.0, 0.5], [1.0, 0.5], [0; 4]).ramp(2);
+    let instances = [bar(0.0), bar(40.0)];
+    painter.begin_frame();
+    // Row 40 is drawn after a break onto an external texture: ramps still read the atlas.
+    let breaks = [Break { at_instance: 1, texture: Some(&external) }];
+    pass(&queue, &target, &mut |encoder| ok(painter.draw(encoder, [W * SCALE, H * SCALE], SCALE as f32, &instances, &breaks)));
+    let pixels = ok(be::read_texture(&target, (W * SCALE * 4) as i64));
+    for texture in [&target, &external] { ok(be::destroy_texture(texture)); }
+    drop(painter);
+    finish(device, queue);
+    for y in [10.0, 50.0] {
+        assert!(near(at(&pixels, 50.0, y), GREEN, 2), "middle pixel is the middle stop: {:?}", at(&pixels, 50.0, y));
+        assert!(near(at(&pixels, 0.5, y), RED, 8) && near(at(&pixels, 99.5, y), BLUE, 8), "ends");
+    }
+    assert_eq!(at(&pixels, 110.0, 10.0), BG, "outside the rect");
 }

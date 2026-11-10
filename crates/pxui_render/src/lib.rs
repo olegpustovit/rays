@@ -30,7 +30,7 @@
 //! | 16–23 | `clip` i16×4  | clip x0 y0 x1 y1, whole points in view space; [`NO_CLIP`] = none                                                                           |||||||
 //! | 24–27 | `color` rgba8 | fill (gradient stop 0)    | colour / tint        | shadow colour                | stroke                | stroke                    | stroke             |
 //! | 28–31 | `color2` rgba8| border colour             | –                    | –                            | –                     | –                         | –                  |
-//! | 32–39 | `aux` u32×2   | [0] gradient stop 1 rgba8 | uv u0v0, u1v1 unorm16×2 each | –                    | dash on, off, phase f16 | dash on, off, phase f16 | –                  |
+//! | 32–39 | `aux` u32×2   | [0] gradient stop 1 rgba8, [1] ramp row + 1 (0 = none) | uv u0v0, u1v1 unorm16×2 each | –                    | dash on, off, phase f16 | dash on, off, phase f16 | –                  |
 //! | 40–47 | `radii` f16×4 | corners tl tr br bl       | image corners        | caster corners               | –                     | –                         | –                  |
 //! | 48–49 | `width` f16   | border width              | –                    | –                            | stroke width          | stroke width              | stroke width       |
 //! | 50    | `kind` u8     | see [`kind`]                                                                                                                              |||||||
@@ -41,7 +41,10 @@
 //!
 //! Gradient geometry is in rect-normalised units (0..1 across the rect): linear = from xy, to xy;
 //! radial = centre xy, radius xy; conic = centre xy, start angle in turns (0 = +x, clockwise).
-//! Stops interpolate premultiplied. Shadow sigma is the gaussian deviation (CSS blur radius / 2);
+//! Stops interpolate premultiplied. Gradients with more than two stops sample a ramp: a 256×1 row of the
+//! colour atlas at x = 0 (the caller fills it with [`ramp`] and [`Painter::upload`], then names it with
+//! `Instance::ramp(row)`; the atlas must be ≥ 256 wide). `t` picks texel `round(t·255)`; the inline stops are ignored.
+//! Shadow sigma is the gaussian deviation (CSS blur radius / 2);
 //! an outer shadow is not cut out under its caster (draw the caster on top).
 //!
 //! # View table
@@ -90,6 +93,32 @@ impl View {
     pub fn rotation(radians: f32, pivot: [f32; 2]) -> View {
         let (s, c) = radians.sin_cos();
         View { transform: [c, -s, s, c], pivot, ..View::IDENTITY }
+    }
+}
+
+/// Texels in a gradient ramp row.
+pub const RAMP_TEXELS: usize = 256;
+
+/// Rasterise gradient `stops` (`(position 0..=1, straight rgba)`, ascending) into `row`: texel `i` holds
+/// the colour at `t = i / 255`, interpolated premultiplied like the inline two-stop gradient, clamped
+/// outside the first and last stop. Upload it with `painter.upload(AtlasKind::Color, 0, y, 256, 1, row, 1024)`.
+pub fn ramp(stops: &[(f32, [u8; 4])], row: &mut [u8; RAMP_TEXELS * 4]) {
+    let premul = |c: [u8; 4]| { let a = c[3] as f32 / 255.0; [c[0] as f32 * a, c[1] as f32 * a, c[2] as f32 * a, c[3] as f32] };
+    for (i, texel) in row.chunks_exact_mut(4).enumerate() {
+        let t = i as f32 / 255.0;
+        let next = stops.iter().position(|s| s.0 >= t).unwrap_or(stops.len());
+        let c = match (next.checked_sub(1).map(|k| stops[k]), stops.get(next)) {
+            (None, Some(s)) => premul(s.1),
+            (Some(s), None) => premul(s.1),
+            (Some(a), Some(b)) => {
+                let f = if b.0 > a.0 { (t - a.0) / (b.0 - a.0) } else { 1.0 };
+                let (p, q) = (premul(a.1), premul(b.1));
+                std::array::from_fn(|k| p[k] + (q[k] - p[k]) * f)
+            }
+            (None, None) => [0.0; 4],
+        };
+        let un = if c[3] > 0.0 { 255.0 / c[3] } else { 0.0 };
+        texel.copy_from_slice(&[(c[0] * un).round() as u8, (c[1] * un).round() as u8, (c[2] * un).round() as u8, c[3].round() as u8]);
     }
 }
 
@@ -146,13 +175,15 @@ fn atlas(device: &Device, label: &str, format: TextureFormat, (width, height): (
 
 fn pipeline(device: &Device, format: ColorFormat, depth: DepthFormat, samples: i64) -> Result<Pipeline, Error> {
     let name = ogpu_core::impl_::backend()?;
-    // (binding, shader kind, layout kind, stage): two vertex storage buffers, two textures and a sampler.
+    // (binding, shader kind, layout kind, stage): two vertex storage buffers, two textures, a sampler and the
+    // colour atlas again (always the atlas, for gradient ramps, even inside a break).
     let slots = [
         (0, BindingKind::StorageBuffer, LayoutKind::Buffer, Stage::Vertex),
         (1, BindingKind::StorageBuffer, LayoutKind::Buffer, Stage::Vertex),
         (2, BindingKind::SampledTexture, LayoutKind::Texture, Stage::Fragment),
         (3, BindingKind::SampledTexture, LayoutKind::Texture, Stage::Fragment),
         (4, BindingKind::Sampler, LayoutKind::Sampler, Stage::Fragment),
+        (5, BindingKind::SampledTexture, LayoutKind::Texture, Stage::Fragment),
     ];
     let artifact = |stage: Stage| shader::create(shader::Descriptor {
         backend: name.clone(),
@@ -286,6 +317,7 @@ impl Painter {
         backend::set_stage_buffer(pass, ShaderStage::Vertex, 1, Some(start as i64), &self.ring)?;
         backend::set_stage_texture(pass, ShaderStage::Fragment, 2, &self.mask)?;
         backend::set_stage_sampler(pass, ShaderStage::Fragment, 4, &self.sampler)?;
+        backend::set_stage_texture(pass, ShaderStage::Fragment, 5, &self.color)?;
         let mut at = start + header;
         let mut bound: Option<*const Texture> = None;
         for k in 0..=breaks.len() {

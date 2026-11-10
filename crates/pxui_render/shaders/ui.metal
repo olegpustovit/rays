@@ -78,7 +78,7 @@ vertex VOut ui_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
   o.v_p0 = p0;
   o.v_p2 = p2;
   o.v_misc = float4(width, half2x16(I.c.y).y, va.z, 0.0);
-  o.v_kf = uint2(kind, flags);
+  o.v_kf = uint2(kind, flags | (kind == RECT ? I.b.y << 8u : 0u));  // rect: gradient ramp row + 1 above the flags
   return o;
 }
 
@@ -163,12 +163,13 @@ float sd_bezier(float2 pos, float2 A, float2 B, float2 C) {
 }
 
 fragment float4 ui_fragment(VOut in [[stage_in]], texture2d<float> mask_tex [[texture(2)]],
-                            texture2d<float> color_tex [[texture(3)]], sampler samp [[sampler(4)]]) {
+                            texture2d<float> color_tex [[texture(3)]], sampler samp [[sampler(4)]],
+                            texture2d<float> atlas_tex [[texture(5)]]) {
   float2 p = in.v_pos.xy;
   // points per pixel, rotation invariant (equals the old fwidth form on axis-aligned views)
   float px = max(sqrt(0.5 * (dot(dfdx(p), dfdx(p)) + dot(dfdy(p), dfdy(p)))), 1e-4);
   float pxt = max(sqrt(0.5 * (dot(dfdx(in.v_tp), dfdx(in.v_tp)) + dot(dfdy(in.v_tp), dfdy(in.v_tp)))), 1e-4);
-  uint kind = in.v_kf.x, flags = in.v_kf.y;
+  uint kind = in.v_kf.x, flags = in.v_kf.y & 255u, ramp = in.v_kf.y >> 8u;
   float clip_cov = cover(sd_rect(p, in.v_clip, float4(in.v_misc.y)), px) * cover(sd_rect(in.v_tp, in.v_vclip, float4(0.0)), pxt);
   if (clip_cov <= 0.0) discard_fragment();
   float4 col;
@@ -194,7 +195,8 @@ fragment float4 ui_fragment(VOut in [[stage_in]], texture2d<float> mask_tex [[te
         float2 e = (q - in.v_p0.xy) * size;
         t = wrap(atan2(e.y, e.x) / TAU - in.v_p0.z, 1.0);
       }
-      fill = mix_premul(in.v_color, in.v_p2, clamp(t, 0.0, 1.0));
+      t = clamp(t, 0.0, 1.0);
+      fill = ramp != 0u ? atlas_tex.read(uint2(uint(t * 255.0 + 0.5), ramp - 1u)) : mix_premul(in.v_color, in.v_p2, t);
     }
     if (in.v_misc.x > 0.0) {
       float inner = d + in.v_misc.x;

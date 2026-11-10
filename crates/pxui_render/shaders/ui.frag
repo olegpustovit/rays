@@ -1,9 +1,11 @@
 #version 450
+#extension GL_EXT_samplerless_texture_functions : require
 // pxui_render fragment stage. Line-for-line parallel with ui.metal (fragment half); layout in src/lib.rs.
 // Rebuild ui.frag.spv with shaders/build.sh after editing. Output is straight (non-premultiplied) alpha.
 layout(set = 0, binding = 2) uniform texture2D mask_tex;
 layout(set = 0, binding = 3) uniform texture2D color_tex;
 layout(set = 0, binding = 4) uniform sampler samp;
+layout(set = 0, binding = 5) uniform texture2D atlas_tex;
 layout(location = 0) in vec4 v_pos;
 layout(location = 1) flat in vec4 v_rect;
 layout(location = 2) flat in vec4 v_radii;
@@ -107,7 +109,7 @@ void main() {
   // points per pixel, rotation invariant (equals the old fwidth form on axis-aligned views)
   float px = max(sqrt(0.5 * (dot(dFdx(p), dFdx(p)) + dot(dFdy(p), dFdy(p)))), 1e-4);
   float pxt = max(sqrt(0.5 * (dot(dFdx(v_tp), dFdx(v_tp)) + dot(dFdy(v_tp), dFdy(v_tp)))), 1e-4);
-  uint kind = v_kf.x, flags = v_kf.y;
+  uint kind = v_kf.x, flags = v_kf.y & 255u, ramp = v_kf.y >> 8u;
   float clip_cov = cover(sd_rect(p, v_clip, vec4(v_misc.y)), px) * cover(sd_rect(v_tp, v_vclip, vec4(0.0)), pxt);
   if (clip_cov <= 0.0) discard;
   vec4 col;
@@ -133,7 +135,8 @@ void main() {
         vec2 e = (q - v_p0.xy) * size;
         t = wrap(atan(e.y, e.x) / TAU - v_p0.z, 1.0);
       }
-      fill = mix_premul(v_color, v_p2, clamp(t, 0.0, 1.0));
+      t = clamp(t, 0.0, 1.0);
+      fill = ramp != 0u ? texelFetch(atlas_tex, ivec2(int(t * 255.0 + 0.5), int(ramp) - 1), 0) : mix_premul(v_color, v_p2, t);
     }
     if (v_misc.x > 0.0) {
       float inner = d + v_misc.x;

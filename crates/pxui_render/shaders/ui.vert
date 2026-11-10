@@ -72,5 +72,5 @@ void main() {
   v_p0 = p0;
   v_p2 = p2;
   v_misc = vec4(width, unpackHalf2x16(I.c.y).y, va.z, 0.0);
-  v_kf = uvec2(kind, flags);
+  v_kf = uvec2(kind, flags | (kind == RECT ? I.b.y << 8u : 0u));  // rect: gradient ramp row + 1 above the flags
 }

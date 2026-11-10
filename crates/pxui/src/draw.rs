@@ -147,6 +147,9 @@ impl Instance {
     fn gradient(self, kind: u8, geometry: [f32; 4], to: [u8; 4]) -> Self {
         Instance { flags: self.flags & !3 | kind, aux: [u32::from_le_bytes(to), 0], extra: [halves(geometry[0], geometry[1]), halves(geometry[2], geometry[3])], ..self }
     }
+    /// Colour the gradient from row `row` of the colour atlas (see `pxui_render::ramp`) instead of the
+    /// two inline stops; call after `linear`/`radial`/`conic`.
+    pub fn ramp(self, row: u32) -> Self { Instance { aux: [self.aux[0], row + 1], ..self } }
     pub fn linear(self, from: [f32; 2], to: [f32; 2], color: [u8; 4]) -> Self { self.gradient(flags::LINEAR, [from[0], from[1], to[0], to[1]], color) }
     pub fn radial(self, center: [f32; 2], radius: [f32; 2], color: [u8; 4]) -> Self { self.gradient(flags::RADIAL, [center[0], center[1], radius[0], radius[1]], color) }
     pub fn conic(self, center: [f32; 2], start_turns: f32, color: [u8; 4]) -> Self { self.gradient(flags::CONIC, [center[0], center[1], start_turns, 0.0], color) }
