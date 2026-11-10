@@ -6,7 +6,7 @@ use flow_syntax::context::{self, Context};
 use flow_syntax::ty::{self, ColorKind, Ty};
 use pxui::theme::{self, Theme};
 use pxui::ui::{fuzzy_match, Axis, BoxOpts, Pick, PickerOpts, Size, Ui, BLOCKING, CLICKABLE};
-use rays_math::color::T as Color;
+use pxui::geom::{color::T as Color, Rect};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -220,24 +220,24 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
         None,
         true,
         false,
-        (x as f64, y as f64),
-        width as f64,
-        height as f64,
+        (x as f32, y as f32),
+        width as f32,
+        height as f32,
         "pxui-graph-menu",
         &mut |ui: &mut Ui| {
             let theme = ui.theme();
             // the title row: the label at 12 and, right-aligned 8 from the edge in ink-2 at the label
             // size, the node the new one goes after
-            let title = ui.box_("pxui-graph-menu-title", BoxOpts::default().w(Size::Grow).h(Size::Px((4 + row) as f64)));
+            let title = ui.box_("pxui-graph-menu-title", BoxOpts::default().w(Size::Grow).h(Size::Px(((4 + row) as f64) as f32)));
             let after = m.after.clone();
-            ui.draw(&title, move |paint, (x, y, w, h)| {
+            ui.draw(&title, move |paint, Rect { x, y, w, h }| { let (x, y, w, h) = (x as f64, y as f64, w as f64, h as f64);
                 let size = paint.label_size();
-                let top = paint.text_top(Some(size), y + 4.0, h - 4.0);
-                paint.cap((x + 12.0, top), None, "Add node");
+                let top = f64::from(paint.text_top(Some(size), (y + 4.0) as f32, (h - 4.0) as f32));
+                paint.cap(((x + 12.0) as f32, top as f32), None, "Add node");
                 if let Some(name) = &after {
                     let text = format!("after {}", name);
-                    let tw = paint.text_width(Some(size), &text);
-                    paint.text_s((x + w - 8.0 - tw, top), size, theme::ink_2(&theme), &text);
+                    let tw = f64::from(paint.text_width(Some(size), &text));
+                    paint.text_s(((x + w - 8.0 - tw) as f32, top as f32), size, theme::ink_2(&theme), &text);
                 }
             });
             // the rows, kept so that a row's square and unavailability are known
@@ -261,13 +261,13 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
             // a cross at the right of the search row clears it
             let clear = ui.box_(
                 "pxui-graph-menu-clear",
-                BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(20.0)).h(Size::Px(20.0)).at(((x + width - 25) as f64, (y + 1 + row + 4 + 4) as f64)),
+                BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(20.0)).h(Size::Px(20.0)).at((((x + width - 25) as f64) as f32, ((y + 1 + row + 4 + 4) as f64) as f32)),
             );
             if !query.is_empty() {
                 let muted = theme::muted(&ui.theme());
-                ui.draw(&clear, move |paint, (cx, cy, _, _)| {
-                    let ty = paint.text_top(None, cy, 20.0);
-                    paint.text_c((cx + 6.5, ty), muted, "\u{d7}");
+                ui.draw(&clear, move |paint, Rect { x: cx, y: cy, w: _, h: _ }| { let (cx, cy) = (cx as f64, cy as f64);
+                    let ty = f64::from(paint.text_top(None, cy as f32, 20.0));
+                    paint.text_c(((cx + 6.5) as f32, ty as f32), muted, "\u{d7}");
                 });
             }
             let query = if ui.signal(&clear).clicked { String::new() } else { query };

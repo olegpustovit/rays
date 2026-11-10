@@ -19,7 +19,7 @@ use param::number::Kind;
 use pxui::theme;
 use pxui::ui::*;
 use rays::frame as rframe;
-use rays_math::color;
+use pxui::geom::{color, p32, p64};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -59,9 +59,9 @@ pub fn num_field(ui: &mut Ui, at: (f64, f64), w: f64, h: f64, size: Option<i64>,
     });
     let mut o = ValueFieldOpts::default();
     o.size = size;
-    o.fraction = range.and_then(|r| param::number::fraction(r, text));
-    o.scrub = Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, range, origin, dx, fine)));
-    let text2 = ui.value_field(at, w, h, &o, &*valid, label, text).0;
+    o.fraction = range.and_then(|r| param::number::fraction(r, text)).map(|f| f as f32);
+    o.scrub = Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, range, origin, dx as f64, fine)));
+    let text2 = ui.value_field(p32(at), w as f32, h as f32, &o, &*valid, label, text).0;
     if text2 != text && valid(&text2) { Some(text2) } else { None }
 }
 
@@ -271,7 +271,7 @@ pub struct Tile {
 }
 
 fn box_in(ui: &mut Ui, flags: Flags, w: f64, h: f64, at: (f64, f64), name: &str) -> UiBox {
-    ui.box_(name, BoxOpts::default().flags(flags).w(Size::Px(w)).h(Size::Px(h)).at(at))
+    ui.box_(name, BoxOpts::default().flags(flags).w(Size::Px(w as f32)).h(Size::Px(h as f32)).at(p32(at)))
 }
 
 /// A tile's ports and taps: out-ports, deletable inputs, zone controls.
@@ -476,7 +476,7 @@ pub fn row_fields_of(ui: &mut Ui, z: f64, pl: &Placed, n: &p::Node, r: &p::Row, 
                 SNode::Sym(b) if matches!(ex.name(*b), "true" | "false") => {
                     let toggle = ui.box_(
                         &format!("b{}", name),
-                        BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(sp::SWITCH_W * z)).h(Size::Px(sp::SWITCH_H * z)).at(((pl.w - sp::HEAD_PAD - sp::SWITCH_W) * z, (ry + 5.0) * z)),
+                        BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px((sp::SWITCH_W * z) as f32)).h(Size::Px((sp::SWITCH_H * z) as f32)).at((((pl.w - sp::HEAD_PAD - sp::SWITCH_W) * z) as f32, ((ry + 5.0) * z) as f32)),
                     );
                     if ui.signal(&toggle).clicked {
                         let mut builder = flow_syntax::arena::SyntaxBuilder::new();
@@ -530,7 +530,7 @@ pub fn wire_boxes(c: &mut Ctx, t: &Pane, ui: &mut Ui, origin: (f64, f64), name: 
                 let x1 = ax + ((bx - ax) * u1);
                 let y1 = ay + ((by - ay) * u1);
                 count += 1;
-                let b = ui.box_fmt(format_args!("{}{}", prefix, count), BoxOpts::default().flags(CLICKABLE).at((x0.min(x1) - 4.0 - origin.0, y0.min(y1) - 4.0 - origin.1)).w(Size::Px((x1 - x0).abs() + 8.0)).h(Size::Px((y1 - y0).abs() + 8.0)));
+                let b = ui.box_fmt(format_args!("{}{}", prefix, count), BoxOpts::default().flags(CLICKABLE).at(((x0.min(x1) - 4.0 - origin.0) as f32, (y0.min(y1) - 4.0 - origin.1) as f32)).w(Size::Px(((x1 - x0).abs() + 8.0) as f32)).h(Size::Px(((y1 - y0).abs() + 8.0) as f32)));
                 c.wire_hits.entry(i).or_default().insert(0, b);
             }
         }
@@ -543,7 +543,7 @@ pub fn edit_field(c: &mut Ctx, ui: &mut Ui, at: (f64, f64), w: f64, h: f64, key:
     o.size = Some(c.fs);
     o.edit = true;
     o.left = (current).parse::<f64>().ok().is_none();
-    let (v, open) = ui.value_field(at, w, h, &o, valid, key, current);
+    let (v, open) = ui.value_field(p32(at), w as f32, h as f32, &o, valid, key, current);
     if !open {
         c.finished = true;
     }
@@ -631,15 +631,15 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                         &format!("a{}", i),
                         BoxOpts::default()
                             .flags(CLICKABLE | TAB_STOP)
-                            .w(Size::Px(if r.kind == p::RowKind::Add { (pl.w - sp::LABEL_X - sp::HEAD_PAD) * z } else { 24.0 * z }))
-                            .h(Size::Px(16.0 * z))
-                            .at(((if r.kind == p::RowKind::Add { sp::LABEL_X } else { sp::value_x(pl.w) }) * z, row_y)),
+                            .w(Size::Px((if r.kind == p::RowKind::Add { (pl.w - sp::LABEL_X - sp::HEAD_PAD) * z } else { 24.0 * z }) as f32))
+                            .h(Size::Px((16.0 * z) as f32))
+                            .at((((if r.kind == p::RowKind::Add { sp::LABEL_X } else { sp::value_x(pl.w) }) * z) as f32, row_y as f32)),
                     );
                     // a click on the expression's text (not its glyph, which unfolds) makes the row the inspector's
                     // subject: the holder stays selected, the row is `holder @ [":" ^ label]`
                     let mut subject: Vec<Change> = Vec::new();
                     if let p::Chip::Inline { .. } = r.chip {
-                        let cb = ui.box_fmt(format_args!("ex{}", i), BoxOpts::default().flags(CLICKABLE).w(Size::Px((sp::FIELD_W - 24.0) * z)).h(Size::Px(16.0 * z)).at(((sp::value_x(pl.w) + 24.0) * z, row_y)));
+                        let cb = ui.box_fmt(format_args!("ex{}", i), BoxOpts::default().flags(CLICKABLE).w(Size::Px(((sp::FIELD_W - 24.0) * z) as f32)).h(Size::Px((16.0 * z) as f32)).at((((sp::value_x(pl.w) + 24.0) * z) as f32, row_y as f32)));
                         let sg = ui.signal(&cb);
                         // a double click expands the call in place, as the glyph does
                         if sg.double_clicked {
@@ -694,7 +694,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                 } else if let (p::Chip::Name(nm), true) = (&r.chip, t.folds.contains_key(&(n.path.clone(), i))) {
                     // the fold button of a wired row, where `paint_value` draws its glyph
                     let (left, fw, _, _, _) = sp::wired_geo(&mut |size, text| measure_ui(ui, t, size, text), t, z, fs, 0.0, pl.w * z, true, &sp::wired_name(r, nm));
-                    let b = ui.box_fmt(format_args!("fold{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(fw)).h(Size::Px(16.0 * z)).at((left - fw - (2.0 * z), row_y)));
+                    let b = ui.box_fmt(format_args!("fold{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(fw as f32)).h(Size::Px((16.0 * z) as f32)).at(((left - fw - (2.0 * z)) as f32, row_y as f32)));
                     if ui.signal(&b).clicked {
                         add_clicks.push(Change::SyntaxEdit(e::Op::FoldInto { node: t.folds[&(n.path.clone(), i)].clone() }));
                     }
@@ -717,7 +717,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                             let mut m = |size: i64, text: &str| measure_ui(ui, t, size, text);
                             let (left, _, room, _, _) = sp::wired_geo(&mut m, t, z, fs, 0.0, pl.w * z, false, nm);
                             let width = m(fs, "\u{2190}") + (6.0 * z) + m(fs, nm).min(room);
-                            let b = ui.box_fmt(format_args!("ref{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(width)).h(Size::Px(16.0 * z)).at((left, row_y)));
+                            let b = ui.box_fmt(format_args!("ref{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(width as f32)).h(Size::Px((16.0 * z) as f32)).at((left as f32, row_y as f32)));
                             if ui.signal(&b).clicked {
                                 add_clicks.push(Change::Selected(vec![cand]));
                             }
@@ -774,7 +774,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                 if let p::Line::Row(i, r) = line {
                     if let (p::RowKind::Rest, ArgKey::Pos(j)) = (r.kind, &r.key) {
                         if *j >= 1 {
-                            let b = ui.box_fmt(format_args!("mv{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(16.0 * z)).h(Size::Px(16.0 * z)).at(((pl.w - 22.0) * z, (top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z)));
+                            let b = ui.box_fmt(format_args!("mv{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px((16.0 * z) as f32)).h(Size::Px((16.0 * z) as f32)).at((((pl.w - 22.0) * z) as f32, ((top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z) as f32)));
                             if ui.signal(&b).clicked {
                                 movers.push(Change::SyntaxEdit(e::Op::MoveItem { node: n.path.clone(), pos: *j }));
                             }
@@ -796,7 +796,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                     if let p::Line::Row(i, r) = line {
                         if let ArgKey::Pos(j) = &r.key {
                             if r.kind != p::RowKind::Add && *j != *active {
-                                let b = ui.box_fmt(format_args!("sw{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px((pl.w - 24.0) * z)).h(Size::Px(16.0 * z)).at((12.0 * z, (top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z)));
+                                let b = ui.box_fmt(format_args!("sw{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(((pl.w - 24.0) * z) as f32)).h(Size::Px((16.0 * z) as f32)).at(((12.0 * z) as f32, ((top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z) as f32)));
                                 if ui.signal(&b).clicked {
                                     switchers.push(Change::LayoutActive { graph: t.key.clone(), index: *j });
                                 }
@@ -854,7 +854,7 @@ pub fn context_step(t: &mut Pane, ui: &mut Ui, tiles: &[Tile], canvas_signal: &S
         let mut found: Option<((f64, f64), Path)> = None;
         for tl in tiles {
             if context_clicked(&tl.sig) {
-                found = Some((tl.sig.release_point, t.geo.items[tl.slot].0.path.clone()));
+                found = Some((p64(tl.sig.release_point), t.geo.items[tl.slot].0.path.clone()));
                 break;
             }
         }
@@ -868,12 +868,12 @@ pub fn context_step(t: &mut Pane, ui: &mut Ui, tiles: &[Tile], canvas_signal: &S
         }
     }
     if t.context.is_none() && context_clicked(canvas_signal) {
-        let (x, y) = canvas_signal.release_point;
+        let (x, y) = p64(canvas_signal.release_point);
         emit.push(Change::MenuRequested(x, y));
     }
     if let Some((at, path)) = t.context.clone() {
         let items = context_items(t, &path);
-        match ui.context_menu(at, &MenuOpts::default(), "pxui-scope-context", &items) {
+        match ui.context_menu(p32(at), &MenuOpts::default(), "pxui-scope-context", &items) {
             MenuResult::Open => {}
             MenuResult::Dismiss => { t.context = None; },
             MenuResult::Pick(i) => {
@@ -1003,8 +1003,8 @@ pub fn wire_pull(t: &mut Pane, ui: &mut Ui, ctx: &Ctx, z: f64, mouse: (f64, f64)
             if let (Some(tg), Some(from)) = (&wi.target, &wi.from) {
                 for b in ctx.hits(i) {
                     let sg = ui.signal(&b);
-                    let (px, py) = sg.pointer;
-                    let (qx, qy) = sg.press_point;
+                    let (px, py) = p64(sg.pointer);
+                    let (qx, qy) = p64(sg.press_point);
                     if sg.held && left_button(&sg) && (px - qx).hypot(py - qy) > 6.0 {
                         let lift = if ui.press_keys(&b).contains(&Key::Alt) { vec![(tg.0.clone(), tg.1.clone())] } else { Vec::new() };
                         found = Some((i, from.clone(), lift));
@@ -1045,7 +1045,7 @@ pub fn wire_pull(t: &mut Pane, ui: &mut Ui, ctx: &Ctx, z: f64, mouse: (f64, f64)
                 for b in ctx.hits(i) {
                     let sg = ui.signal(&b);
                     if sg.released && left_button(&sg) {
-                        from_wire = Some((i, sg.release_point));
+                        from_wire = Some((i, p64(sg.release_point)));
                         break 'b;
                     }
                 }
@@ -1093,9 +1093,9 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
             { (t.selected, t.selected_wire, t.drag) = (selected, None, Some(Drag::Moving { paths, dx: 0.0, dy: 0.0, moved: false })); };
         }
         if s.double_clicked && left_button(s) && t.context.is_none() && t.editing.is_none() {
-            let (_, top, _, _) = ui.rect(&tl.tile);
+            let (_, top, _, _) = ui.rect(&tl.tile).f64();
             match &pl.item {
-                Item::Item(n) if !n.synthetic && s.press_point.1 < top + (p::HEAD_HEIGHT * z) => {
+                Item::Item(n) if !n.synthetic && f64::from(s.press_point.1) < top + (p::HEAD_HEIGHT * z) => {
                     t.editing = Some(Editing::Name(pl.path.clone()));
                 }
                 // a folded function or loop opens in place; anything else follows what it references
@@ -1114,8 +1114,8 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
         if let Some(Drag::Moving { paths, dx, dy, moved }) = t.drag.clone() {
             if s.held && left_button(s) && t.selected.contains(&pl.path) {
                 let (ddx, ddy) = s.drag;
-                let ndx = dx + (ddx / z);
-                let ndy = dy + (ddy / z);
+                let ndx = dx + (f64::from(ddx) / z);
+                let ndy = dy + (f64::from(ddy) / z);
                 { t.drag = Some(Drag::Moving { paths, dx: ndx, dy: ndy, moved: moved || ndx.hypot(ndy) > 3.0 / z }); };
             }
         }
@@ -1161,9 +1161,9 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
                     }
                     Tap::Track if bs.pressed || bs.held => {
                         let count = count_of(t, &n.path);
-                        let (x, _, wd, _) = ui.rect(b);
+                        let (x, _, wd, _) = ui.rect(b).f64();
                         if count > 0 && wd > 0.0 {
-                            let px = if bs.released { bs.release_point.0 } else { bs.pointer.0 };
+                            let px = if bs.released { f64::from(bs.release_point.0) } else { f64::from(bs.pointer.0) };
                             let index = 0.max((count - 1).min((((px - x) / wd) * count as f64) as i64));
                             if index != t.saved.probe(&n.path) {
                                 emit.push(Change::ProbeSet { zone: n.path.clone(), index });
@@ -1211,13 +1211,13 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
                     }
                     acc
                 };
-                let (x, y, wd, h) = ui.rect(b);
+                let (x, y, wd, h) = ui.rect(b).f64();
                 { t.drag = Some(Drag::Wiring(Wiring { src: src.clone(), ty: ty.clone(), iter, from: (x + (wd / 2.0), y + (h / 2.0)), lift })); };
             }
             if bs.released && left_button(&bs) {
                 match t.drag.clone() {
                     Some(Drag::Wiring(wg)) => {
-                        finish_wire(t, ui, z, mouse, emit, tiles, &wg, &pl.path, bs.release_point);
+                        finish_wire(t, ui, z, mouse, emit, tiles, &wg, &pl.path, p64(bs.release_point));
                     }
                     _ => { t.drag = None; },
                 }
@@ -1252,9 +1252,9 @@ pub fn pointer_step(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &U
     t.panning_grab = panning_grab;
     if panning {
         let (dx, dy) = if canvas_signal.held || canvas_signal.released {
-            canvas_signal.drag
+            p64(canvas_signal.drag)
         } else {
-            tiles.iter().fold((0.0, 0.0), |(dx, dy), tl| (dx + tl.sig.drag.0, dy + tl.sig.drag.1))
+            tiles.iter().fold((0.0, 0.0), |(dx, dy), tl| (dx + f64::from(tl.sig.drag.0), dy + f64::from(tl.sig.drag.1)))
         };
         (t.pan_x, t.pan_y) = (t.pan_x + dx, t.pan_y + dy);
     }
@@ -1289,8 +1289,8 @@ pub fn pointer_step(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &U
     // the rubber band selects the nodes of one scope it touches
     if let Some(Drag::Marquee { base }) = t.drag.clone() {
         if canvas_signal.held || canvas_signal.released {
-            let (px, py) = if canvas_signal.released { canvas_signal.release_point } else { canvas_signal.pointer };
-            let (x0, y0) = canvas_signal.press_point;
+            let (px, py) = if canvas_signal.released { p64(canvas_signal.release_point) } else { p64(canvas_signal.pointer) };
+            let (x0, y0) = p64(canvas_signal.press_point);
             let rw = (px - x0).abs();
             let rh = (py - y0).abs();
             let selected: PathSet = if rw < 3.0 && rh < 3.0 { base } else { base.union(&marquee_hits(t, (x0.min(px), y0.min(py), rw, rh))).cloned().collect() };
@@ -1338,7 +1338,7 @@ pub fn hover_step(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &
     });
     let port_centre = |ui: &mut Ui, b: &UiBox| -> Option<(f64, f64)> {
         if ui.hovered_within(b) {
-            let (x, y, wd, h) = ui.rect(b);
+            let (x, y, wd, h) = ui.rect(b).f64();
             Some((x + (wd / 2.0), y + (h / 2.0)))
         } else {
             None
@@ -1442,7 +1442,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
             { t.drag = Some(Drag::Sizing { scope: scope.clone(), index: i as i64, dw: 0.0, dh: 0.0 }); };
         } else {
             match t.drag.clone() {
-                None if ts.held && left_button(&ts) && t.editing.is_none() && (ts.pointer.0 - ts.press_point.0).hypot(ts.pointer.1 - ts.press_point.1) > 3.0 => {
+                None if ts.held && left_button(&ts) && t.editing.is_none() && (f64::from(ts.pointer.0) - f64::from(ts.press_point.0)).hypot(f64::from(ts.pointer.1) - f64::from(ts.press_point.1)) > 3.0 => {
                     // a drag by the title (a click or a double-click stays one): the nodes of the scope whose
                     // centres lie inside the frame travel with it
                     let (ox, oy) = t.geo.origins.iter().find(|(q, _)| *q == scope).map(|(_, o)| *o).unwrap_or((0.0, 0.0));
@@ -1464,14 +1464,14 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
                             paths.insert(0, pl.path.clone());
                         }
                     }
-                    let dx = (ts.pointer.0 - ts.press_point.0) / z;
-                    let dy = (ts.pointer.1 - ts.press_point.1) / z;
+                    let dx = (f64::from(ts.pointer.0) - f64::from(ts.press_point.0)) / z;
+                    let dy = (f64::from(ts.pointer.1) - f64::from(ts.press_point.1)) / z;
                     { t.drag = Some(Drag::Carrying { scope: scope.clone(), index: i as i64, paths, dx, dy }); };
                 }
                 Some(Drag::Carrying { scope: cs, index, paths, dx, dy }) if cs == scope && index == i as i64 && (ts.held || ts.released) => {
                     let (ddx, ddy) = ts.drag;
-                    let ndx = dx + (ddx / z);
-                    let ndy = dy + (ddy / z);
+                    let ndx = dx + (f64::from(ddx) / z);
+                    let ndy = dy + (f64::from(ddy) / z);
                     { t.drag = Some(Drag::Carrying { scope: cs.clone(), index, paths: paths.clone(), dx: ndx, dy: ndy }); };
                     if ts.released {
                         if ndx.hypot(ndy) > 3.0 / z {
@@ -1483,7 +1483,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
                     }
                 }
                 Some(Drag::Sizing { scope: ss, index, dw, dh }) if ss == scope && index == i as i64 && (rs.held || rs.released) => {
-                    let (dx, dy) = rs.drag;
+                    let (dx, dy) = p64(rs.drag);
                     { t.drag = Some(Drag::Sizing { scope: scope.clone(), index: i as i64, dw: dw + (dx / z), dh: dh + (dy / z) }); };
                     if rs.released {
                         emit.push(Change::FramesSet { scope: scope.clone(), frames: frame_list(t, &scope) });
@@ -1498,7 +1498,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
 
 /// Measure with the UI's fonts, remembering the width for the pane's outside-a-frame queries.
 fn measure_ui(ui: &mut Ui, t: &Pane, size: i64, text: &str) -> f64 {
-    let v = ui.text_width(Some(size), text);
+    let v = f64::from(ui.text_width(Some(size), text));
     t.measured.borrow_mut().insert((size, text.to_owned()), v);
     v
 }
@@ -1532,7 +1532,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
         let snap = snapshot.clone();
         let zone_slots: Vec<usize> = zones.to_vec();
         let wires: Vec<usize> = wires_in_view.to_vec();
-        ui.draw(layer, move |paint, rect| {
+        ui.draw(layer, move |paint, rect| { let rect = rect.f64();
             sp::paint_background(paint, &snap, rect, &wires, &zone_slots);
         });
     }
@@ -1574,7 +1574,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
                 None => false,
             };
         }
-        ui.draw(&tl.tile, move |paint, rect| {
+        ui.draw(&tl.tile, move |paint, rect| { let rect = rect.f64();
             let (pl, _, _) = &snap.geo.items[slot];
             let (x, y, w, h) = rect;
             match &pl.item {
@@ -1594,12 +1594,12 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
                             let o = sp::NodeOpts { footer: footer.clone(), lens_step, hovered, carry, out_wired, shown: pl.shown, failed: failed.clone() };
                             sp::paint_node(paint, &snap, z, fs, &o, pl, n, isel, rh, rect);
                             if dim {
-                                paint.fill(x, y, w, h, color::with_alpha(snap.theme.panel, 150));
+                                paint.fill(x as f32, y as f32, w as f32, h as f32, color::with_alpha(snap.theme.panel, 150));
                             }
                         }
                     }
                     if recede {
-                        paint.fill(x, y, w, h, color::with_alpha(snap.theme.panel, 170));
+                        paint.fill(x as f32, y as f32, w as f32, h as f32, color::with_alpha(snap.theme.panel, 170));
                     }
                 }
             }
@@ -1637,7 +1637,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
             if matches!(pl.item, Item::Item(_)) && pl.shown != Level::Point {
                 let fx = sx(t, *ax) + ((pl.w - sp::HEAD_PAD - 12.0) * z);
                 let fy = sy(t, *ay) + (6.0 * z);
-                let over = contains((fx, fy, 12.0 * z, 12.0 * z), mouse);
+                let over = contains(Rect::new(fx as f32, fy as f32, (12.0 * z) as f32, (12.0 * z) as f32), p32(mouse));
                 tip_at = Some((sx(t, *ax) + (116.0 * z), sy(t, *ay) + (32.0 * z)));
                 tip_open = over && ui.hover_delay("scope-flag");
             }
@@ -1681,21 +1681,21 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
         None => None,
     };
     let snap = snapshot;
-    let press_point = canvas_signal.press_point;
-    ui.draw_over(canvas, move |paint, rect| {
+    let press_point = p64(canvas_signal.press_point);
+    ui.draw_over(canvas, move |paint, rect| { let rect = rect.f64();
         let (cx, cy, cw, ch) = rect;
         let refused = theme::invalid();
         let hint_chip = |paint: &mut pxui::ui::Paint, bg: color::T, at: (f64, f64), letter: &str| {
             let letter = letter.to_uppercase();
             let size = 8.max(font_size - 2);
-            let lw = 14.0f64.max(paint.text_width(Some(size), &letter) + 6.0);
-            paint.fill(at.0 - 7.0, at.1 - 7.0, lw, 14.0, bg);
-            let tw = paint.text_width(Some(size), &letter);
-            let ty = paint.text_top(Some(size), at.1 - 7.0, 14.0);
-            paint.text_s((at.0 - 7.0 + ((lw - tw) / 2.0), ty), size, snap.theme.foreground, &letter);
+            let lw = 14.0f64.max(f64::from(paint.text_width(Some(size), &letter)) + 6.0);
+            paint.fill((at.0 - 7.0) as f32, (at.1 - 7.0) as f32, lw as f32, 14.0, bg);
+            let tw = f64::from(paint.text_width(Some(size), &letter));
+            let ty = f64::from(paint.text_top(Some(size), (at.1 - 7.0) as f32, 14.0));
+            paint.text_s(((at.0 - 7.0 + ((lw - tw) / 2.0)) as f32, ty as f32), size, snap.theme.foreground, &letter);
         };
         if let Some(ok) = canvas_hot {
-            paint.dashed_rect(cx + 1.5, cy + 1.5, cw - 3.0, ch - 3.0, if ok { snap.theme.accent } else { refused });
+            paint.dashed_rect((cx + 1.5) as f32, (cy + 1.5) as f32, (cw - 3.0) as f32, (ch - 3.0) as f32, if ok { snap.theme.accent } else { refused });
         }
         for ((x, y, w, h), letter, hot) in &marks {
             let color = match hot {
@@ -1704,9 +1704,9 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
             };
             // a drop target: a dashed accent edge on the card
             if hot.is_some() {
-                paint.dashed_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, color);
+                paint.dashed_rect((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32, color);
             } else {
-                paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, color);
+                paint.stroke((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32, color);
             }
             // a letter of the key route: the hint colour under ink, at the card's top left (-7, -7)
             if let Some(letter) = letter {
@@ -1725,10 +1725,10 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
         if let Some((fx, fy)) = live_tip {
             let size = 4.max(font_size - 2);
             let label = "t  live: reads time or input, re-cooked every frame";
-            let tw = paint.text_width(Some(size), label) + 14.0;
+            let tw = f64::from(paint.text_width(Some(size), label)) + 14.0;
             sp::frame_in(paint, fx, fy, tw, 20.0, Some(snap.theme.input), theme::edge(&snap.theme));
-            let ty = paint.text_top(Some(size), fy, 20.0);
-            paint.text_s((fx + 7.0, ty), size, snap.theme.foreground, label);
+            let ty = f64::from(paint.text_top(Some(size), fy as f32, 20.0));
+            paint.text_s(((fx + 7.0) as f32, ty as f32), size, snap.theme.foreground, label);
         }
         // the displayed node's tip, once the pointer has rested on its flag
         if tip_open {
@@ -1736,25 +1736,25 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
                 let size = 4.max(font_size - 2);
                 let label = "displayed";
                 let key = "V";
-                let lw = paint.text_width(Some(size), label);
-                let kw = paint.text_width(Some(size), key);
+                let lw = f64::from(paint.text_width(Some(size), label));
+                let kw = f64::from(paint.text_width(Some(size), key));
                 let tw = 2.0 + 12.0 + lw + 6.0 + kw;
                 sp::frame_in(paint, fx, fy, tw, 20.0, Some(snap.theme.input), theme::edge(&snap.theme));
-                let ty = paint.text_top(Some(size), fy, 20.0);
-                paint.text_s((fx + 7.0, ty), size, snap.theme.foreground, label);
-                paint.text_s((fx + 7.0 + lw + 6.0, ty), size, theme::ink_3(&snap.theme), key);
+                let ty = f64::from(paint.text_top(Some(size), fy as f32, 20.0));
+                paint.text_s(((fx + 7.0) as f32, ty as f32), size, snap.theme.foreground, label);
+                paint.text_s(((fx + 7.0 + lw + 6.0) as f32, ty as f32), size, theme::ink_3(&snap.theme), key);
             }
         }
         for wi in &snap.highlighted {
             let pts: Vec<(f64, f64)> = wi.pts.iter().map(|(x, y)| (sx(&snap, *x), sy(&snap, *y))).collect();
             sp::paint_polyline((cx, cy, cw, ch), paint, 2.0, snap.theme.foreground, &pts);
             for (x, y) in [wi.a, wi.b] {
-                paint.circle((sx(&snap, x), sy(&snap, y)), 6.0, None, Some(snap.theme.foreground));
+                paint.circle(((sx(&snap, x)) as f32, (sy(&snap, y)) as f32), 6.0, None, Some(snap.theme.foreground));
             }
         }
         if let Some(wg) = &band {
             if let Some((a, b)) = clip_segment(wg.from, mouse, (cx, cy, cw, ch)) {
-                paint.line_w(a, b, 1.5, sp::ty_color(&snap, wg.ty.as_ref()));
+                paint.line_w(p32(a), p32(b), 1.5, sp::ty_color(&snap, wg.ty.as_ref()));
             }
         }
         if let Some(Drag::Marquee { .. }) = &snap.drag {
@@ -1764,11 +1764,11 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
         }
         if let Some((full, x, y)) = &hover_tip {
             let size = 4.max(fs - 2);
-            let wd = paint.text_width(Some(size), full) + (12.0 * z);
+            let wd = f64::from(paint.text_width(Some(size), full)) + (12.0 * z);
             if wd > sp::FIELD_W * z {
                 sp::frame_in(paint, *x, y + (2.0 * z), wd, 20.0 * z, Some(snap.theme.input), theme::edge(&snap.theme));
-                let ty = paint.text_top(Some(size), y + (2.0 * z), 20.0 * z);
-                paint.text_s((x + (6.0 * z), ty), size, snap.theme.foreground, full);
+                let ty = f64::from(paint.text_top(Some(size), (y + (2.0 * z)) as f32, (20.0 * z) as f32));
+                paint.text_s(((x + (6.0 * z)) as f32, ty as f32), size, snap.theme.foreground, full);
             }
         }
     });
@@ -1783,16 +1783,16 @@ pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame,
     }
     let canvas = ui.box_(
         "pxui-scope",
-        BoxOpts::default().flags(CLICKABLE | SCROLL | CLIP | BLOCKING).w(Size::Px(t.width as f64)).h(Size::Px(t.height as f64)).at((t.x as f64, t.y as f64)),
+        BoxOpts::default().flags(CLICKABLE | SCROLL | CLIP | BLOCKING).w(Size::Px((t.width as f64) as f32)).h(Size::Px((t.height as f64) as f32)).at(((t.x as f64) as f32, (t.y as f64) as f32)),
     );
     let canvas_signal = ui.signal(&canvas);
     step_hints(t, pressed, canvas_signal.subtree_press.is_some(), changes);
     // the grid, zones and wires paint in a child, so the canvas's clip holds them too
     let saved = ui.enter(&canvas);
-    let layer = ui.box_("pxui-scope-layer", BoxOpts::default().w(Size::Px(t.width as f64)).h(Size::Px(t.height as f64)).at((0.0, 0.0)));
+    let layer = ui.box_("pxui-scope-layer", BoxOpts::default().w(Size::Px((t.width as f64) as f32)).h(Size::Px((t.height as f64) as f32)).at((0.0, 0.0)));
     ui.leave(saved);
     {
-        let (_, wheel) = canvas_signal.scroll;
+        let (_, wheel) = p64(canvas_signal.scroll);
         let pinch = canvas_signal.pinch;
         if !((wheel == 0.0 && pinch == 1.0) || t.context.is_some()) {
             let (mx, my) = frame.input.pointer;

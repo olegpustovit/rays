@@ -13,7 +13,7 @@ use flow_syntax::syntax::{Node as SNode, Syntax};
 use flow_syntax::ty::{self, Ty};
 use pxui::theme::{self, Theme};
 use pxui::ui_core::{ellipsis, Paint};
-use rays_math::color::{self, T as Color};
+use pxui::geom::{color::{self, T as Color}, p32};
 
 type S = Syntax;
 
@@ -58,33 +58,33 @@ fn frame_list(t: &Pane, scope: &[Symbol]) -> Vec<Fr> {
 
 pub fn fitted<'a>(paint: &mut Paint, size: i64, width: f64, text: &'a str) -> Cow<'a, str> {
     // as before, the mark alone when not even it fits
-    if paint.text_width(Some(size), text) <= width {
+    if f64::from(paint.text_width(Some(size), text)) <= width {
         return Cow::Borrowed(text);
     }
-    let t = ellipsis(&mut |s: &str| paint.text_width(Some(size), s), width, text);
+    let t = ellipsis(&mut |s: &str| paint.text_width(Some(size), s), width as f32, text);
     if t.is_empty() { Cow::Borrowed("\u{2026}") } else { t }
 }
 
 fn dashed_line(paint: &mut Paint, width: f64, color: Color, a: (f64, f64), b: (f64, f64)) {
-    paint.dashed_w(a, b, width, color);
+    paint.dashed_w(p32(a), p32(b), width as f32, color);
 }
 
 /// A 1-point frame inside the box, on whole points: a stroke is centred on its rectangle.
 pub fn frame_in(paint: &mut Paint, x: f64, y: f64, w: f64, h: f64, fill: Option<Color>, color: Color) {
     if let Some(f) = fill {
-        paint.fill(x, y, w, h, f);
+        paint.fill(x as f32, y as f32, w as f32, h as f32, f);
     }
-    paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, color);
+    paint.stroke((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32, color);
 }
 
 /// The same, dashed (a drop target, a dashed zone).
 pub fn dashed_frame_in(paint: &mut Paint, x: f64, y: f64, w: f64, h: f64, color: Color) {
-    paint.dashed_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, color);
+    paint.dashed_rect((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32, color);
 }
 
 /// Crisp 1-point lines on the pixel grid.
 pub fn hline(paint: &mut Paint, x: f64, y: f64, w: f64, color: Color) {
-    paint.fill(x, y, w, 1.0, color);
+    paint.fill(x as f32, y as f32, w as f32, 1.0, color);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -105,8 +105,8 @@ pub fn draw_chevron(paint: &mut Paint, z: f64, at: (f64, f64), direction: Dir4, 
         Dir4::Left => ((2.0, -4.0), (2.0, 4.0), (-2.0, 0.0)),
     };
     let pt = |d: (f64, f64)| (cx + d.0 * z, cy + d.1 * z);
-    paint.line(pt(a), pt(tip), color);
-    paint.line(pt(tip), pt(b), color);
+    paint.line(p32(pt(a)), p32(pt(tip)), color);
+    paint.line(p32(pt(tip)), p32(pt(b)), color);
 }
 
 pub fn zone_style(theme: &Theme, kind: ZoneKind) -> Zone {
@@ -124,11 +124,11 @@ pub fn zone_style(theme: &Theme, kind: ZoneKind) -> Zone {
 pub fn paint_zone(paint: &mut Paint, taken: bool, theme: &Theme, kind: ZoneKind, rect: (f64, f64, f64, f64)) {
     let (x, y, w, h) = rect;
     let s = if kind == ZoneKind::Branch { zone_branch(theme, taken) } else { zone_style(theme, kind) };
-    paint.fill(x, y, w, h, s.fill);
+    paint.fill(x as f32, y as f32, w as f32, h as f32, s.fill);
     if s.dashed {
         dashed_frame_in(paint, x, y, w, h, s.edge);
     } else {
-        paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, s.edge);
+        paint.stroke((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32, s.edge);
     }
 }
 
@@ -168,7 +168,7 @@ pub fn paint_socket(paint: &mut Paint, theme: &Theme, ty: Option<&Ty>, connected
         for k in -n..n {
             let hw = half - (k as f64 + 0.5).abs();
             if hw > 0.0 {
-                paint.fill(cx - hw, cy + k as f64, 2.0 * hw, 1.0, colour);
+                paint.fill((cx - hw) as f32, (cy + k as f64) as f32, (2.0 * hw) as f32, 1.0, colour);
             }
         }
     };
@@ -182,9 +182,9 @@ pub fn paint_socket(paint: &mut Paint, theme: &Theme, ty: Option<&Ty>, connected
         }
         Some(Ty::Record(_)) => frame_in(paint, cx - 5.0 * z, cy - 3.0 * z, 10.0 * z, 6.0 * z, Some(fill), color),
         _ => {
-            paint.circle((cx, cy), r, Some(color), None);
+            paint.circle((cx as f32, cy as f32), r as f32, Some(color), None);
             if !connected {
-                paint.circle((cx, cy), r - 1.0, Some(theme.input), None);
+                paint.circle((cx as f32, cy as f32), (r - 1.0) as f32, Some(theme.input), None);
             }
         }
     }
@@ -192,17 +192,17 @@ pub fn paint_socket(paint: &mut Paint, theme: &Theme, ty: Option<&Ty>, connected
 
 /// Kit text centred in a row: its top is `text_top`, scaled by the zoom through `h`.
 pub fn text_in(paint: &mut Paint, size: i64, color: Color, x: f64, y: f64, h: f64, text: &str) {
-    let top = paint.text_top(Some(size), y, h);
-    paint.text_s((x, top), size, color, text);
+    let top = f64::from(paint.text_top(Some(size), y as f32, h as f32));
+    paint.text_s((x as f32, top as f32), size, color, text);
 }
 
 /// A label: upper case, tracked by a point; returns its width.
 pub fn cap_in(paint: &mut Paint, size: i64, color: Color, x: f64, y: f64, h: f64, label: &str) -> f64 {
     let label = label.to_ascii_uppercase();
     let tracking = 0.08 * size as f64;
-    let top = paint.text_top(Some(size), y, h);
-    paint.text_with((x, top), Some(size), tracking, Some(color), &label);
-    paint.text_width(Some(size), &label) + (label.len() as f64 * tracking)
+    let top = f64::from(paint.text_top(Some(size), y as f32, h as f32));
+    paint.text_with((x as f32, top as f32), Some(size), tracking as f32, Some(color), &label);
+    f64::from(paint.text_width(Some(size), &label)) + (label.len() as f64 * tracking)
 }
 
 pub fn kind_label(k: ZoneKind) -> &'static str {
@@ -250,14 +250,14 @@ pub fn marks(execution: Option<&Execution>, n: &p::Node) -> Vec<String> {
 }
 
 pub fn marks_width(paint: &mut Paint, size: i64, gap: f64, marks: &[String]) -> f64 {
-    marks.iter().fold(0.0, |a, m| a + paint.text_width(Some(size), m) + gap)
+    marks.iter().fold(0.0, |a, m| a + f64::from(paint.text_width(Some(size), m)) + gap)
 }
 
 /// Marks right-aligned at `right`, accent, label size.
 pub fn paint_marks(paint: &mut Paint, theme: &Theme, size: i64, gap: f64, right: f64, y: f64, h: f64, marks: &[String]) {
     let mut x = right;
     for m in marks {
-        let wd = paint.text_width(Some(size), m);
+        let wd = f64::from(paint.text_width(Some(size), m));
         text_in(paint, size, theme.accent, x - wd, y, h, m);
         x = x - wd - gap;
     }
@@ -328,13 +328,13 @@ pub fn live_numbers(z: f64, r: &p::Row) -> bool {
 /// line of a ranged number is 2 points above the hairline.
 pub fn paint_field(paint: &mut Paint, z: f64, ls: i64, theme: &Theme, x: f64, y: f64, wd: f64, left: bool, fraction: Option<f64>, chevron: bool, color: Color, text: &str) {
     let h = FIELD_H * z;
-    paint.fill(x, y + h - 1.0, wd, 1.0, theme::edge(theme));
+    paint.fill(x as f32, (y + h - 1.0) as f32, wd as f32, 1.0, theme::edge(theme));
     if let Some(f) = fraction {
-        paint.fill(x, y + h - 3.0, wd * f, 2.0, theme::ink_2(theme));
+        paint.fill(x as f32, (y + h - 3.0) as f32, (wd * f) as f32, 2.0, theme::ink_2(theme));
     }
     let room = wd - (4.0 * z) - if chevron { 10.0 * z } else { 0.0 };
     let text = fitted(paint, ls, room, text);
-    let tw = paint.text_width(Some(ls), &text);
+    let tw = f64::from(paint.text_width(Some(ls), &text));
     let tx = if left || chevron { x + 2.0 * z } else { x + wd - (2.0 * z) - tw };
     text_in(paint, ls, color, tx, y, h, &text);
     if chevron {
@@ -344,13 +344,7 @@ pub fn paint_field(paint: &mut Paint, z: f64, ls: i64, theme: &Theme, x: f64, y:
 
 pub fn paint_switch(paint: &mut Paint, theme: &Theme, z: f64, x: f64, y: f64, on: bool) {
     frame_in(paint, x, y, SWITCH_W * z, SWITCH_H * z, Some(if on { theme.input } else { theme.track }), theme::border(theme));
-    paint.fill(
-        x + (if on { 17.0 } else { 3.0 } * z),
-        y + (3.0 * z),
-        8.0 * z,
-        8.0 * z,
-        if on { theme.accent } else { theme::ink_3(theme) },
-    );
+    paint.fill((x + (if on { 17.0 } else { 3.0 } * z)) as f32, (y + (3.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32, if on { theme.accent } else { theme::ink_3(theme) });
 }
 
 /// The cells of a vector: each element is a field, its number right-aligned, anything else the
@@ -471,8 +465,8 @@ pub fn paint_value(paint: &mut Paint, t: &Pane, z: f64, fs: i64, size: Option<i6
             let s = wired_name(r, s);
             let gap = 6.0 * z;
             let arrow = "\u{2190}";
-            let aw = paint.text_width(Some(fs), arrow);
-            let (left, fw, room, livev, live_w) = wired_geo(&mut |size, s| paint.text_width(Some(size), s), t, z, fs, x, wd, fold, &s);
+            let aw = f64::from(paint.text_width(Some(fs), arrow));
+            let (left, fw, room, livev, live_w) = wired_geo(&mut |size, s| f64::from(paint.text_width(Some(size), s)), t, z, fs, x, wd, fold, &s);
             let s = fitted(paint, fs, room, &s);
             if fold {
                 text_in(paint, fs, theme.accent, left - fw, y, rh, FOLD_GLYPH);
@@ -485,7 +479,7 @@ pub fn paint_value(paint: &mut Paint, t: &Pane, z: f64, fs: i64, size: Option<i6
         }
         p::Chip::Inline { glyph, text } => {
             let glyph = shown_glyph(glyph);
-            let gw = paint.text_width(Some(ls), &glyph) + (6.0 * z);
+            let gw = f64::from(paint.text_width(Some(ls), &glyph)) + (6.0 * z);
             text_in(paint, ls, theme.accent, fx, y, rh, &glyph);
             let fit = fitted(paint, ls, (FIELD_W * z) - gw, text);
             text_in(paint, ls, theme::ink_2(&theme), fx + gw, y, rh, &fit);
@@ -511,10 +505,10 @@ pub fn value_room(paint: &mut Paint, t: &Pane, z: f64, fs: i64, wd: f64, fold: b
         p::Chip::Name(s) => {
             let s = wired_name(r, s);
             let live = live_value(t, &s);
-            let aw = paint.text_width(Some(fs), "\u{2190}");
-            let sw = paint.text_width(Some(fs), &s).min(wd * 0.4);
+            let aw = f64::from(paint.text_width(Some(fs), "\u{2190}"));
+            let sw = f64::from(paint.text_width(Some(fs), &s)).min(wd * 0.4);
             let lw = match &live {
-                Some(v) => paint.text_width(Some(fs), v) + (6.0 * z),
+                Some(v) => f64::from(paint.text_width(Some(fs), v)) + (6.0 * z),
                 None => 0.0,
             };
             wd - ((LABEL_X + HEAD_PAD) * z) - aw - sw - lw - (12.0 * z) - if fold { 14.0 * z } else { 0.0 }
@@ -538,7 +532,7 @@ pub fn paint_rows(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64, 
                 let fold = t.folds.contains_key(&(n.path.clone(), *i));
                 let target = carry && selected_row == Some(*i);
                 if selected_row == Some(*i) {
-                    paint.fill(x + 1.0, ry, wd - 2.0, rh, if target { theme::hover_fill(&theme) } else { theme::faint_border(&theme) });
+                    paint.fill((x + 1.0) as f32, ry as f32, (wd - 2.0) as f32, rh as f32, if target { theme::hover_fill(&theme) } else { theme::faint_border(&theme) });
                 }
                 // a carried value over a row: the row takes the hover fill, an ink label and an accent underline
                 if target {
@@ -577,7 +571,7 @@ pub fn paint_outputs(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f6
         let ry = y + ((nlines + j) as f64 * rh);
         text_in(paint, fs, colors(t).record, x + (LABEL_X * z), ry, rh, &format!("\u{2192} {}", name));
         let label = ty::to_string(ty);
-        let lw = paint.text_width(Some(ls), &label);
+        let lw = f64::from(paint.text_width(Some(ls), &label));
         text_in(paint, ls, theme::ink_2(&theme), x + wd - (HEAD_PAD * z) - lw, ry, rh, &label);
         paint_socket(paint, &theme, Some(ty), true, z, (x + wd, ry + (12.0 * z)));
     }
@@ -619,7 +613,7 @@ pub fn paint_rail(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64, 
             let room = 0.0f64.max(x + wd - ((if expanded { 24.0 } else { 8.0 }) * z) - exx);
             if sym {
                 text_in(paint, ls, theme.accent, exx, ry, rh, "\u{2190}");
-                let aw = paint.text_width(Some(ls), "\u{2190} ");
+                let aw = f64::from(paint.text_width(Some(ls), "\u{2190} "));
                 let f = fitted(paint, ls, 0.0f64.max(room - aw), &shown);
                 text_in(paint, ls, theme::ink_2(&theme), exx + aw, ry, rh, &f);
             } else {
@@ -667,7 +661,7 @@ pub fn paint_zone_label(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y:
     let name = fitted(paint, fs, room, &name);
     text_in(paint, fs, theme.foreground, nx, y, hh, &name);
     if let Some(ex) = in_ {
-        let ix = nx + paint.text_width(Some(fs), &name) + gap;
+        let ix = nx + f64::from(paint.text_width(Some(fs), &name)) + gap;
         let input = format!("in {}", ex);
         let f = fitted(paint, fs, 0.0f64.max(x + wd - (9.0 * z) - ix), &input);
         text_in(paint, fs, theme::ink_2(&theme), ix, y, hh, &f);
@@ -688,10 +682,10 @@ pub fn selector_geo(measure: &mut dyn FnMut(i64, &str) -> f64, z: f64, fs: i64, 
 pub fn paint_selector(paint: &mut Paint, t: &Pane, z: f64, fs: i64, count: i64, probe: i64, at: (f64, f64, f64)) {
     let theme = t.theme;
     let (x, y, wd) = at;
-    let (sx0, sy0, sw, sh, read) = selector_geo(&mut |size, s| paint.text_width(Some(size), s), z, fs, wd, count, probe);
+    let (sx0, sy0, sw, sh, read) = selector_geo(&mut |size, s| f64::from(paint.text_width(Some(size), s)), z, fs, wd, count, probe);
     let sx0 = x + sx0;
     let sy0 = y + sy0;
-    paint.fill(sx0, sy0, sw, sh, theme.input);
+    paint.fill(sx0 as f32, sy0 as f32, sw as f32, sh as f32, theme.input);
     // the sheet's `.seg` children are ink-3
     let ink = theme::ink_3(&theme);
     draw_chevron(paint, z, (sx0 + (3.0 * z), sy0 + (sh / 2.0)), Dir4::Left, ink);
@@ -733,7 +727,7 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
     } else {
         ty_color(t, Some(&n.ty))
     };
-    paint.fill(x + (HEAD_PAD * z), y + (8.0 * z), 8.0 * z, 8.0 * z, square);
+    paint.fill((x + (HEAD_PAD * z)) as f32, (y + (8.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32, square);
     if let Some(r) = &o.head {
         paint_socket(paint, &theme, r.ty.as_ref(), wired(r), z, (x + (1.0 * z), y + (PORT_Y * z)));
     }
@@ -748,7 +742,7 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
         let fx = right - (12.0 * z);
         let fy = y + (6.0 * z);
         frame_in(paint, fx, fy, 12.0 * z, 12.0 * z, Some(theme.input), theme::border(&theme));
-        paint.fill(fx + (3.0 * z), fy + (3.0 * z), 6.0 * z, 6.0 * z, theme.accent);
+        paint.fill((fx + (3.0 * z)) as f32, (fy + (3.0 * z)) as f32, (6.0 * z) as f32, (6.0 * z) as f32, theme.accent);
         right = fx - (6.0 * z);
     }
     let m = marks(o.execution.as_ref(), n);
@@ -767,12 +761,12 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
     };
     let name = fitted(paint, fs, 0.0f64.max(right - name_x), &title);
     text_in(paint, fs, name_color, name_x, y, hh, &name);
-    let mut name_end = name_x + paint.text_width(Some(fs), &name);
+    let mut name_end = name_x + f64::from(paint.text_width(Some(fs), &name));
     // a chip: how many rows have something written, in the kind's place at the right
     if o.shown == Level::Chip && p::set_count(n) > 0 {
         let text = format!("+{}", p::set_count(n));
         text_in(paint, ls, theme::ink_2(&theme), name_end + (9.0 * z), y, hh, &text);
-        name_end = name_end + (9.0 * z) + paint.text_width(Some(ls), &text);
+        name_end = name_end + (9.0 * z) + f64::from(paint.text_width(Some(ls), &text));
     }
     // where the name and the kind meet, the kind yields; a value card has its field there instead
     let kind_text: Option<String> = match &o.failed {
@@ -790,9 +784,9 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
     };
     if let Some(text) = kind_text {
         let room = right - (name_end + (6.0 * z));
-        if room >= 3.0 * paint.text_width(Some(ls), "m") {
+        if room >= 3.0 * f64::from(paint.text_width(Some(ls), "m")) {
             let kind = fitted(paint, ls, room, &text);
-            let kw = paint.text_width(Some(ls), &kind);
+            let kw = f64::from(paint.text_width(Some(ls), &kind));
             text_in(paint, ls, theme::ink_2(&theme), right - kw, y, hh, &kind);
         }
     }
@@ -806,13 +800,13 @@ pub fn paint_footer(paint: &mut Paint, t: &Pane, z: f64, fs: i64, f: &Footer, ty
     let ls = 4.max(fs - 2);
     let fh = p::FOOT_HEIGHT * z;
     let fy = y + h - (pad * z) - fh;
-    paint.fill(x + 1.0, fy, wd - 2.0, 1.0, theme::faint_border(&theme));
+    paint.fill((x + 1.0) as f32, fy as f32, (wd - 2.0) as f32, 1.0, theme::faint_border(&theme));
     let ink_2 = theme::ink_2(&theme);
     let ty0 = fy + 1.0;
     let th = fh - 1.0;
     let mut right = x + wd - (HEAD_PAD * z);
     let put_right = |paint: &mut Paint, color: Color, s: &str, right: &mut f64| {
-        let tw = paint.text_width(Some(ls), s);
+        let tw = f64::from(paint.text_width(Some(ls), s));
         text_in(paint, ls, color, *right - tw, ty0, th, s);
         *right = *right - tw - (6.0 * z);
     };
@@ -860,11 +854,11 @@ pub fn paint_footer(paint: &mut Paint, t: &Pane, z: f64, fs: i64, f: &Footer, ty
         let mut i = 0;
         while i + 1 < n {
             let j = (n - 1).min(i + step);
-            paint.line_w((px(i), py(values[i])), (px(j), py(values[j])), 1.0, ty_color(t, Some(ty)));
+            paint.line_w(((px(i)) as f32, (py(values[i])) as f32), ((px(j)) as f32, (py(values[j])) as f32), 1.0, ty_color(t, Some(ty)));
             i = j;
         }
         let a = *at as usize;
-        paint.fill(px(a) - (1.5 * z), py(values[a]) - (1.5 * z), 3.0 * z, 3.0 * z, theme.accent);
+        paint.fill((px(a) - (1.5 * z)) as f32, (py(values[a]) - (1.5 * z)) as f32, (3.0 * z) as f32, (3.0 * z) as f32, theme.accent);
         right = sx0 - (6.0 * z);
     }
     let fit = fitted(paint, ls, 0.0f64.max(right - left), &f.value);
@@ -898,13 +892,13 @@ pub fn paint_lens(paint: &mut Paint, t: &Pane, z: f64, fs: i64, l: &p::Lens, ste
     let theme = t.theme;
     let (x, y, wd) = at;
     let ls = 4.max(fs - 2);
-    paint.fill(x + 1.0, y, wd - 2.0, 1.0, theme::faint_border(&theme));
+    paint.fill((x + 1.0) as f32, y as f32, (wd - 2.0) as f32, 1.0, theme::faint_border(&theme));
     let len = l.steps.len() as i64;
     for i in 0..=len {
         let ((bx, by), (bw, bh)) = lens_button_box(len, i);
         let on = i == step;
         if on {
-            paint.fill(x + ((bx + 2.0) * z), y + ((by + bh) * z) - 1.0, (bw - 4.0) * z, 1.0, theme.foreground);
+            paint.fill((x + ((bx + 2.0) * z)) as f32, (y + ((by + bh) * z) - 1.0) as f32, ((bw - 4.0) * z) as f32, 1.0, theme.foreground);
         }
         let label = if i == 0 {
             "call".to_owned()
@@ -913,7 +907,7 @@ pub fn paint_lens(paint: &mut Paint, t: &Pane, z: f64, fs: i64, l: &p::Lens, ste
         } else {
             i.to_string()
         };
-        let tw = paint.text_width(Some(ls), &label);
+        let tw = f64::from(paint.text_width(Some(ls), &label));
         text_in(paint, ls, if on { theme.foreground } else { theme::ink_3(&theme) }, x + ((bx + (bw / 2.0)) * z) - (tw / 2.0), y + (by * z), bh * z, &label);
     }
     let text: String = if step >= len {
@@ -926,7 +920,7 @@ pub fn paint_lens(paint: &mut Paint, t: &Pane, z: f64, fs: i64, l: &p::Lens, ste
         if k < 16 {
             let src = if k == 15 && lines.len() > 16 { format!("{} \u{2026}", line) } else { (*line).to_owned() };
             let fit = fitted(paint, fs, wd - (20.0 * z), &src);
-            paint.text_s((x + (10.0 * z), y + ((p::ROW_HEIGHT + 4.0 + (k as f64 * 20.0)) * z)), fs, theme.foreground, &fit);
+            paint.text_s(((x + (10.0 * z)) as f32, (y + ((p::ROW_HEIGHT + 4.0 + (k as f64 * 20.0)) * z)) as f32), fs, theme.foreground, &fit);
         }
     }
     let ((rx, ry), (rw, rh)) = lens_replace_box(lh);
@@ -946,7 +940,7 @@ pub fn paint_lens(paint: &mut Paint, t: &Pane, z: f64, fs: i64, l: &p::Lens, ste
             }
         }
     };
-    let tw = paint.text_width(Some(ls), &reading);
+    let tw = f64::from(paint.text_width(Some(ls), &reading));
     let fit = fitted(paint, ls, wd - ((rx + rw + 24.0) * z), &reading);
     text_in(paint, ls, theme::muted(&theme), x + wd - (HEAD_PAD * z) - tw, y + (ry * z), rh * z, &fit);
 }
@@ -958,8 +952,8 @@ pub fn card_edge(t: &Pane, fill: Color, selected: bool) -> Color {
 
 /// The card: its fill and a 1-point border inside its box (a stroke is centred on its rectangle).
 pub fn paint_card(paint: &mut Paint, x: f64, y: f64, wd: f64, h: f64, fill: Color, edge: Color) {
-    paint.fill(x, y, wd, h, fill);
-    paint.stroke(x + 0.5, y + 0.5, wd - 1.0, h - 1.0, edge);
+    paint.fill(x as f32, y as f32, wd as f32, h as f32, fill);
+    paint.stroke((x + 0.5) as f32, (y + 0.5) as f32, (wd - 1.0) as f32, (h - 1.0) as f32, edge);
 }
 
 /// A point: the 14-point disc in the node's colour with its name beside it (a compound is a ring with a
@@ -975,10 +969,10 @@ pub fn paint_point(paint: &mut Paint, t: &Pane, z: f64, fs: i64, pl: &Placed, fa
     };
     let color = if failed.is_some() { theme::invalid() } else { ty_color(t, Some(&ty)) };
     if macro_ {
-        paint.circle(c, 7.0 * z, Some(theme.panel), Some(color));
-        paint.circle(c, 2.0 * z, Some(color), None);
+        paint.circle(p32(c), (7.0 * z) as f32, Some(theme.panel), Some(color));
+        paint.circle(p32(c), (2.0 * z) as f32, Some(color), None);
     } else {
-        paint.circle(c, 7.0 * z, Some(color), None);
+        paint.circle(p32(c), (7.0 * z) as f32, Some(color), None);
     }
     let name_color = if failed.is_some() {
         theme::invalid()
@@ -991,10 +985,10 @@ pub fn paint_point(paint: &mut Paint, t: &Pane, z: f64, fs: i64, pl: &Placed, fa
     if viewed {
         let fy = y + (21.0 * z);
         frame_in(paint, x, fy, 12.0 * z, 12.0 * z, Some(theme.input), theme::border(&theme));
-        paint.fill(x + (3.0 * z), fy + (3.0 * z), 6.0 * z, 6.0 * z, theme.accent);
+        paint.fill((x + (3.0 * z)) as f32, (fy + (3.0 * z)) as f32, (6.0 * z) as f32, (6.0 * z) as f32, theme.accent);
     }
     if selected {
-        paint.brackets(x, y, 14.0 * z, 14.0 * z, 5.0, 6.0, 2.0, theme.accent);
+        paint.brackets(x as f32, y as f32, (14.0 * z) as f32, (14.0 * z) as f32, 5.0, 6.0, 2.0, theme.accent);
     }
 }
 
@@ -1052,7 +1046,7 @@ pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl
     let edge = if o.failed.is_some() { theme::invalid() } else { card_edge(t, fill, selected) };
     if n.expr {
         // an expression written in its reader's input: a dashed card, its `expr` mark in the header
-        paint.fill(x, y, wd, h, fill);
+        paint.fill(x as f32, y as f32, wd as f32, h as f32, fill);
         dashed_frame_in(paint, x, y, wd, h, edge);
     } else {
         paint_card(paint, x, y, wd, h, fill, edge);
@@ -1113,7 +1107,7 @@ pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl
     if shown != Level::Chip {
         if let Some(note) = &n.note {
             let (bg, ink) = note_colors(&theme);
-            paint.fill(x + 1.0, body_y, wd - 2.0, p::ROW_HEIGHT * z, bg);
+            paint.fill((x + 1.0) as f32, body_y as f32, (wd - 2.0) as f32, (p::ROW_HEIGHT * z) as f32, bg);
             let first = match note.find('\n') {
                 Some(i) => &note[..i],
                 None => note.as_str(),
@@ -1151,7 +1145,7 @@ pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl
         }
     }
     if selected {
-        paint.brackets(x, y, wd, h, 3.0, 8.0, 2.0, theme.accent);
+        paint.brackets(x as f32, y as f32, wd as f32, h as f32, 3.0, 8.0, 2.0, theme.accent);
     }
 }
 
@@ -1228,8 +1222,8 @@ pub fn paint_zone_frame(paint: &mut Paint, t: &Pane, z: f64, fs: i64, footer: Op
             let edge = zone_style(&theme, zn.kind).edge;
             let ls = 4.max(fs - 2);
             let ink = theme::ink_3(&theme);
-            paint.fill(x + (20.0 * z), top, 1.0, bh, edge);
-            paint.fill(x + wd - (21.0 * z), top, 1.0, bh, edge);
+            paint.fill((x + (20.0 * z)) as f32, top as f32, 1.0, bh as f32, edge);
+            paint.fill((x + wd - (21.0 * z)) as f32, top as f32, 1.0, bh as f32, edge);
             let air = y + ((p::rail_top(n) - 22.0) * z);
             if let Some(r) = &label {
                 if zone_uses(zn, &r.names) {
@@ -1237,7 +1231,7 @@ pub fn paint_zone_frame(paint: &mut Paint, t: &Pane, z: f64, fs: i64, footer: Op
                 }
             }
             let yl = if zn.kind == ZoneKind::Fold || zn.kind == ZoneKind::Scan { format!("{} \u{21ba}", zn.yield_label) } else { zn.yield_label.clone() };
-            let ylw = paint.text_width(Some(ls), &yl);
+            let ylw = f64::from(paint.text_width(Some(ls), &yl));
             text_in(paint, ls, ink, x + wd - (32.0 * z) - ylw, air, 16.0 * z, &yl);
             let (ex, ey) = w::end_port(n, wd / z);
             paint_socket(paint, &theme, Some(&n.ty), true, z, (x + (ex * z), y + (ey * z)));
@@ -1248,7 +1242,7 @@ pub fn paint_zone_frame(paint: &mut Paint, t: &Pane, z: f64, fs: i64, footer: Op
     }
     paint_rail(paint, t, z, fs, x, y + (p::HEAD_HEIGHT * z), wd, true, &p::extra_rails(zn));
     if selected {
-        paint.brackets(x, y, wd, h, 3.0, 8.0, 2.0, theme.accent);
+        paint.brackets(x as f32, y as f32, wd as f32, h as f32, 3.0, 8.0, 2.0, theme.accent);
     }
 }
 
@@ -1258,7 +1252,7 @@ pub fn paint_input(paint: &mut Paint, t: &Pane, z: f64, fs: i64, i: &p::Input, s
     let (x, y, wd, h) = rect;
     let hh = p::HEAD_HEIGHT * z;
     paint_card(paint, x, y, wd, h, theme.input, card_edge(t, theme.input, selected));
-    paint.fill(x + (HEAD_PAD * z), y + (8.0 * z), 8.0 * z, 8.0 * z, ty_color(t, Some(&i.ty)));
+    paint.fill((x + (HEAD_PAD * z)) as f32, (y + (8.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32, ty_color(t, Some(&i.ty)));
     let fx = x + (value_x(p::NODE_WIDTH) * z);
     let nm = fitted(paint, fs, 0.0f64.max(fx - (6.0 * z) - (x + (23.0 * z))), &i.name);
     text_in(paint, fs, theme.foreground, x + (23.0 * z), y, hh, &nm);
@@ -1278,7 +1272,7 @@ pub fn paint_input(paint: &mut Paint, t: &Pane, z: f64, fs: i64, i: &p::Input, s
     }
     paint_socket(paint, &theme, Some(&i.ty), true, z, (x + wd - (1.0 * z), y + (PORT_Y * z)));
     if selected {
-        paint.brackets(x, y, wd, h, 3.0, 8.0, 2.0, theme.accent);
+        paint.brackets(x as f32, y as f32, wd as f32, h as f32, 3.0, 8.0, 2.0, theme.accent);
     }
 }
 
@@ -1288,7 +1282,7 @@ pub fn paint_return(paint: &mut Paint, t: &Pane, z: f64, fs: i64, s: &p::Scope, 
     let hh = p::HEAD_HEIGHT * z;
     let rh = p::ROW_HEIGHT * z;
     paint_card(paint, x, y, wd, h, theme.input, card_edge(t, theme.input, selected));
-    paint.fill(x + (HEAD_PAD * z), y + (8.0 * z), 8.0 * z, 8.0 * z, theme.foreground);
+    paint.fill((x + (HEAD_PAD * z)) as f32, (y + (8.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32, theme.foreground);
     text_in(paint, fs, theme.foreground, x + (23.0 * z), y, hh, "return");
     let ry = y + (p::BODY_TOP * z);
     text_in(paint, fs, theme::ink_2(&theme), x + (LABEL_X * z), ry, rh, "result");
@@ -1296,10 +1290,10 @@ pub fn paint_return(paint: &mut Paint, t: &Pane, z: f64, fs: i64, s: &p::Scope, 
     match &s.result {
         p::ScopeResult::Link(l) => {
             let arrow = "\u{2190}";
-            let aw = paint.text_width(Some(fs), arrow);
+            let aw = f64::from(paint.text_width(Some(fs), arrow));
             let gap = 6.0 * z;
             let l = fitted(paint, fs, wd * 0.5, l);
-            let lw = paint.text_width(Some(fs), &l);
+            let lw = f64::from(paint.text_width(Some(fs), &l));
             text_in(paint, fs, theme.accent, right - lw - gap - aw, ry, rh, arrow);
             text_in(paint, fs, theme::ink_2(&theme), right - lw, ry, rh, &l);
         }
@@ -1307,21 +1301,21 @@ pub fn paint_return(paint: &mut Paint, t: &Pane, z: f64, fs: i64, s: &p::Scope, 
         p::ScopeResult::Literal(ex) => {
             let flat = lisp::flat(ex);
             let text = fitted(paint, fs, wd * 0.5, &flat);
-            let tw = paint.text_width(Some(fs), &text);
+            let tw = f64::from(paint.text_width(Some(fs), &text));
             text_in(paint, fs, theme.foreground, right - tw, ry, rh, &text);
         }
     }
     let nil = matches!(&s.result, p::ScopeResult::Literal(ex) if matches!(&ex.node, SNode::Sym(n) if ex.name(*n) == "nil"));
     paint_socket(paint, &theme, None, !nil, z, (x, ry + (12.0 * z)));
     if selected {
-        paint.brackets(x, y, wd, h, 3.0, 8.0, 2.0, theme.accent);
+        paint.brackets(x as f32, y as f32, wd as f32, h as f32, 3.0, 8.0, 2.0, theme.accent);
     }
 }
 
 pub fn paint_polyline(clip: (f64, f64, f64, f64), paint: &mut Paint, width: f64, color: Color, pts: &[(f64, f64)]) {
     for pair in pts.windows(2) {
         if let Some((a, b)) = clip_segment(pair[0], pair[1], clip) {
-            paint.line_w(a, b, width, color);
+            paint.line_w(p32(a), p32(b), width as f32, color);
         }
     }
 }
@@ -1353,8 +1347,8 @@ pub fn paint_background(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f
     // a dot every 24 points, thinned by powers of two so the dots stay 24 screen points apart or more
     let thin = if z >= 1.0 { 1.0 } else { 2.0f64.powf(((1.0 / z).log2() - 1e-9).ceil()) };
     let spacing = 24.0 * z * thin;
-    paint.fill(vx, vy, vw, vh, theme.panel);
-    paint.grid(vx, vy, vw, vh, (vx + (t.pan_x % spacing) - 1.0, vy + (t.pan_y % spacing) - 1.0), spacing, 2.0, color::with_alpha(theme.foreground, 66));
+    paint.fill(vx as f32, vy as f32, vw as f32, vh as f32, theme.panel);
+    paint.grid(vx as f32, vy as f32, vw as f32, vh as f32, ((vx + (t.pan_x % spacing) - 1.0) as f32, (vy + (t.pan_y % spacing) - 1.0) as f32), spacing as f32, 2.0, color::with_alpha(theme.foreground, 66));
     if z >= 0.5 {
         let px = 480.0 * z;
         let py = 192.0 * z;
@@ -1369,8 +1363,8 @@ pub fn paint_background(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f
         while cx < vx + vw {
             let mut cy = y0;
             while cy < vy + vh {
-                paint.fill(cx - 4.0, cy, 9.0, 1.0, line);
-                paint.fill(cx, cy - 4.0, 1.0, 9.0, line);
+                paint.fill((cx - 4.0) as f32, cy as f32, 9.0, 1.0, line);
+                paint.fill(cx as f32, (cy - 4.0) as f32, 1.0, 9.0, line);
                 cy += py;
             }
             cx += px;
@@ -1392,12 +1386,12 @@ pub fn paint_background(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f
             let y = sy(t, oy + fy);
             frame_in(paint, x, y, fw * z, fh * z, Some(color::with_alpha(theme.foreground, 8)), theme::edge(&theme));
             let fsz = 7.max((10.0 * z) as i64);
-            paint.text_s((x + 6.0, y + 4.0), fsz, theme::muted(&theme), &title);
+            paint.text_s(((x + 6.0) as f32, (y + 4.0) as f32), fsz, theme::muted(&theme), &title);
             // delete cross top right, resize grip bottom right
-            paint.text_s((x + (fw * z) - 14.0, y + 4.0), fsz, theme::muted(&theme), "x");
+            paint.text_s(((x + (fw * z) - 14.0) as f32, (y + 4.0) as f32), fsz, theme::muted(&theme), "x");
             let ink = theme::ink_3(&theme);
-            paint.fill(x + (fw * z) - 4.0, y + (fh * z) - 11.0, 1.0, 8.0, ink);
-            paint.fill(x + (fw * z) - 11.0, y + (fh * z) - 4.0, 8.0, 1.0, ink);
+            paint.fill((x + (fw * z) - 4.0) as f32, (y + (fh * z) - 11.0) as f32, 1.0, 8.0, ink);
+            paint.fill((x + (fw * z) - 11.0) as f32, (y + (fh * z) - 4.0) as f32, 8.0, 1.0, ink);
         }
     }
     let chain = st::chains_of(t);
@@ -1439,12 +1433,12 @@ pub fn paint_background(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f
             let (ax, ay) = (sx(t, wi.a.0), sy(t, wi.a.1));
             let (bx, by) = (sx(t, wi.b.0), sy(t, wi.b.1));
             let stub = 14.0 * z;
-            paint.line_w((ax, ay), (ax + stub, ay), width, color);
-            paint.line_w((bx - stub, by), (bx, by), width, color);
+            paint.line_w((ax as f32, ay as f32), ((ax + stub) as f32, ay as f32), width as f32, color);
+            paint.line_w(((bx - stub) as f32, by as f32), (bx as f32, by as f32), width as f32, color);
             let name = tag_name(t, wi);
-            let tw = paint.text_width(Some(tag_size), &name);
+            let tw = f64::from(paint.text_width(Some(tag_size), &name));
             let ink = if lit == Some(false) { color::with_alpha(theme::ink_2(&theme), 60) } else { theme::ink_2(&theme) };
-            paint.text_s((bx - stub - 4.0 - tw, by - (tag_size as f64 / 2.0) - 1.0), tag_size, ink, &name);
+            paint.text_s(((bx - stub - 4.0 - tw) as f32, (by - (tag_size as f64 / 2.0) - 1.0) as f32), tag_size, ink, &name);
         } else if layout == Some(false) {
             paint_dashed_polyline(paint, width, color, &pts);
         } else {
