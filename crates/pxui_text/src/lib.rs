@@ -396,6 +396,11 @@ impl Text {
         }
     }
 
+    /// The CPU mirror of an atlas, `atlas_size` texels, rows tightly packed (for CPU compositing).
+    pub fn atlas_pixels(&self, kind: AtlasKind) -> &[u8] {
+        &self.atlases[idx(kind)].px
+    }
+
     pub fn atlas_size(&self, kind: AtlasKind) -> (u32, u32) {
         let a = &self.atlases[idx(kind)];
         (a.w, a.h)

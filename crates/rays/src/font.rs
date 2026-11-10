@@ -173,7 +173,111 @@ pub fn get_ascent(font: &Font) -> Result<i64, String> {
     }
 }
 
+
+// Sketch text: pxui_text shapes and rasterises into its atlases; the glyph quads are composited on the
+// CPU into one straight-alpha RGBA image per string (the scene's existing textured-quad path).
+// ponytail: one image per string, like the SDL_ttf path; glyph quads straight into the scene
+// pass when text lowering gets an instanced route.
+const SYSTEM_FONTS: [&str; 8] = [
+    "/System/Library/Fonts/SFNSMono.ttf",
+    "/System/Library/Fonts/SFNS.ttf",
+    "/System/Library/Fonts/SFCompact.ttf",
+    "/System/Library/Fonts/HelveticaNeue.ttc",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/System/Library/Fonts/LucidaGrande.ttc",
+    "C:\\Windows\\Fonts\\segoeui.ttf",
+    "C:\\Windows\\Fonts\\arial.ttf",
+];
+const BUNDLED: &[u8] = include_bytes!("../../../assets/fonts/Pragmasevka-Regular.ttf");
+
+thread_local! {
+    // Text is shaped on whichever thread lowers the scene; cosmic-text is deterministic, so every
+    // thread's instance agrees.
+    static TEXT: RefCell<Option<pxui_text::Text>> = const { RefCell::new(None) };
+}
+
+fn text_engine() -> pxui_text::Text {
+    let system = SYSTEM_FONTS.iter().find_map(|p| std::fs::read(p).ok());
+    let mut fonts: Vec<&[u8]> = system.iter().map(|v| v.as_slice()).collect();
+    fonts.push(BUNDLED);
+    pxui_text::Text::new(&fonts)
+}
+
+/// `over` of straight-alpha `src` onto `dst`.
+fn over(dst: &mut [u8], src: [u8; 4]) {
+    let (sa, da) = (src[3] as u32, dst[3] as u32);
+    let oa = sa * 255 + da * (255 - sa);
+    if oa == 0 {
+        return;
+    }
+    for i in 0..3 {
+        dst[i] = ((src[i] as u32 * sa * 255 + dst[i] as u32 * da * (255 - sa)) / oa) as u8;
+    }
+    dst[3] = ((oa + 127) / 255) as u8;
+}
+
+fn paint_text(density: i64, wrap: Option<i64>, align: Alignment, size: i64, text: &str, mode: RenderMode) -> Result<image::Image, String> {
+    use pxui_text::{AtlasKind, Style, Wrap};
+    if text.is_empty() {
+        return image::create(1, 1, None);
+    }
+    let RenderMode::Blended(c) = mode;
+    let (ink, ca, scale) = ([c.r as u8, c.g as u8, c.b as u8], c.a as u32, density as f32);
+    let style = Style {
+        size: size as f32,
+        wrap: if wrap.is_some() { Wrap::Word } else { Wrap::None },
+        align: match align {
+            Alignment::Left => pxui_text::Align::Left,
+            Alignment::Center => pxui_text::Align::Center,
+            Alignment::Right => pxui_text::Align::Right,
+        },
+        ..Style::default()
+    };
+    TEXT.with(|t| {
+        let mut t = t.borrow_mut();
+        let t = t.get_or_insert_with(text_engine);
+        let m = t.layout(0, text, &style, wrap.map_or(0.0, |w| w as f32));
+        // a wrapped string is as wide as its wrap width, so alignment has room to work
+        let w = wrap.map_or((m.w * scale).ceil() as i64, |w| w * density).max(1);
+        let h = ((m.h * scale).ceil() as i64).max(1);
+        let mut px = vec![0u8; (w * h * 4) as usize];
+        let mut quads = Vec::new();
+        t.glyphs(0, (0.0, 0.0), scale, &mut |g| quads.push(g));
+        t.drain_uploads(&mut |_, _, _, _, _, _, _| {});
+        for g in quads {
+            let (aw, ah) = t.atlas_size(g.atlas);
+            let atlas = t.atlas_pixels(g.atlas);
+            let (u, v) = ((g.uv.x * aw as f32).round() as i64, (g.uv.y * ah as f32).round() as i64);
+            let (gw, gh, gx, gy) = (g.rect.w as i64, g.rect.h as i64, g.rect.x as i64, g.rect.y as i64);
+            for row in 0..gh {
+                let y = gy + row;
+                if y < 0 || y >= h {
+                    continue;
+                }
+                for col in 0..gw {
+                    let x = gx + col;
+                    if x < 0 || x >= w {
+                        continue;
+                    }
+                    let at = (v + row) * aw as i64 + u + col;
+                    let src = match g.atlas {
+                        AtlasKind::Mask => [ink[0], ink[1], ink[2], ((atlas[at as usize] as u32 * ca + 127) / 255) as u8],
+                        AtlasKind::Color => {
+                            let i = at as usize * 4;
+                            [atlas[i], atlas[i + 1], atlas[i + 2], ((atlas[i + 3] as u32 * ca + 127) / 255) as u8]
+                        }
+                    };
+                    let o = ((y * w + x) * 4) as usize;
+                    over(&mut px[o..o + 4], src);
+                }
+            }
+        }
+        image::upload_rgba(None, w, h, &px)
+    })
+}
+
 pub mod raster {
+    use super::paint_text;
     use super::*;
 
     struct AutomaticEntry {
@@ -184,7 +288,6 @@ pub mod raster {
 
     struct ContextData {
         automatic_cache: RefCell<Table>,
-        automatic_fonts: RefCell<Table>,
         automatic_references: Cell<i64>,
     }
 
@@ -198,7 +301,6 @@ pub mod raster {
     }
 
     const CAPACITY: i64 = 256;
-    const FONT_CAPACITY: i64 = 32;
 
     thread_local! {
         static CURRENT_CACHE: RefCell<Option<CacheContext>> = const { RefCell::new(None) };
@@ -219,18 +321,6 @@ pub mod raster {
                     }
                 }),
                 CAPACITY,
-            )),
-            // count only: an open font per size, its memory in the font library
-            automatic_fonts: RefCell::new(side_lru::create(
-                lru::cache("rays.font.auto"),
-                true,
-                side_lru::UNBOUNDED_BYTES,
-                Box::new(|_key, item| {
-                    if let Ok(font) = item.downcast::<super::Font>() {
-                        super::destroy(&font);
-                    }
-                }),
-                FONT_CAPACITY,
             )),
             automatic_references: Cell::new(0),
         }))
@@ -253,18 +343,6 @@ pub mod raster {
 
     pub fn clear_cache_context(context: &CacheContext) {
         side_lru::clear(&mut context.0.automatic_cache.borrow_mut());
-        side_lru::clear(&mut context.0.automatic_fonts.borrow_mut());
-    }
-
-    fn font(context: &CacheContext, size: i64) -> Result<super::Font, String> {
-        let k = TableKey::Int(size);
-        if let Some(item) = side_lru::find(&mut context.0.automatic_fonts.borrow_mut(), &k)
-            && let Ok(value) = item.downcast::<super::Font>() {
-                return Ok((*value).clone());
-            }
-        let value = system(Some(size))?;
-        side_lru::add(&mut context.0.automatic_fonts.borrow_mut(), 0, k, Rc::new(value.clone()));
-        Ok(value)
     }
 
     pub(crate) fn borrow_automatic(
@@ -280,10 +358,7 @@ pub mod raster {
         let k = key(wrap, align, density, size, text, mode);
         let context = CURRENT_CACHE.with(|c| c.borrow().clone());
         let Some(context) = context else {
-            let font = system(Some(size))?;
-            let painted = paint(density, wrap, align, &font, text, mode);
-            destroy(&font);
-            return painted.map(|image| Automatic {
+            return paint_text(density, wrap, align, size, text, mode).map(|image| Automatic {
                 entry: Rc::new(AutomaticEntry { image, references: Cell::new(1), cached: Cell::new(false) }),
                 context: None,
                 released: Cell::new(false),
@@ -297,8 +372,7 @@ pub mod raster {
                 context.0.automatic_references.set(context.0.automatic_references.get() + 1);
                 return Ok(Automatic { entry, context: Some(context), released: Cell::new(false) });
             }
-        let font = font(&context, size)?;
-        let image = paint(density, wrap, align, &font, text, mode)?;
+        let image = paint_text(density, wrap, align, size, text, mode)?;
         // Borrowed entries remain pinned until their scene is released.
         let can_cache = side_lru::length(&mut context.0.automatic_cache.borrow_mut()) < CAPACITY
             || side_lru::find_first(&mut context.0.automatic_cache.borrow_mut(), &|_, item| {
@@ -352,16 +426,12 @@ pub mod raster {
         }
     }
 
-    /// (cached texts, open fonts, outstanding borrows) of the current context.
-    pub fn automatic_counts() -> (i64, i64, i64) {
+    /// (cached texts, outstanding borrows) of the current context.
+    pub fn automatic_counts() -> (i64, i64) {
         let context = CURRENT_CACHE.with(|c| c.borrow().clone());
         match context {
-            None => (0, 0, 0),
-            Some(context) => (
-                side_lru::length(&mut context.0.automatic_cache.borrow_mut()),
-                side_lru::length(&mut context.0.automatic_fonts.borrow_mut()),
-                context.0.automatic_references.get(),
-            ),
+            None => (0, 0),
+            Some(context) => (side_lru::length(&mut context.0.automatic_cache.borrow_mut()), context.0.automatic_references.get()),
         }
     }
 

@@ -69,7 +69,7 @@ fn window_resources_scene_parity() {
                 require(RImage::pixels(&image).is_err(), "released owned staged image");
             }
         }
-        let (_, _, references) = font::raster::automatic_counts();
+        let (_, references) = font::raster::automatic_counts();
         require(references == 0, "released scene kept an automatic text reference");
     });
 }
@@ -143,6 +143,9 @@ fn window_resources_automatic_text_cache() {
             let pixels = RImage::pixels(&image).expect("pixels");
             match (&first_identity, &first_pixels) {
                 (None, None) => {
+                    let (w, h) = RImage::size(&image).expect("size");
+                    require(w > 80 && (10..40).contains(&h), "automatic text size");
+                    require(pixels.chunks(4).any(|p| p[3] > 200 && p[..3] == [12, 34, 56]), "automatic text ink colour");
                     first_identity = Some(identity);
                     first_pixels = Some(pixels);
                 }
@@ -154,8 +157,8 @@ fn window_resources_automatic_text_cache() {
             }
             layer::release(&s);
         }
-        let (entries, fonts, references) = font::raster::automatic_counts();
-        require(entries == 1 && fonts == 1 && references == 0, "stable automatic cache ownership");
+        let (entries, references) = font::raster::automatic_counts();
+        require(entries == 1 && references == 0, "stable automatic cache ownership");
         let retina = vec![scene::text((0, 0), Some(color::rgb(12, 34, 56)), Some(16), "density")];
         let staged = |density: i64| -> (std::rc::Rc<render_ir::RenderIr>, (i64, i64)) {
             let st = layer::stage_native_render_checked(Some(density), 64, 32, &retina).map_err(|_| "stage").expect("stage");
@@ -182,14 +185,14 @@ fn window_resources_automatic_text_cache() {
             automatic_stage(&s);
             layer::release(&s);
         }
-        let (entries, fonts, references) = font::raster::automatic_counts();
-        require(entries == 256 && fonts == 1 && references == 0, "automatic LRU capacity");
+        let (entries, references) = font::raster::automatic_counts();
+        require(entries == 256 && references == 0, "automatic LRU capacity");
         // If all 256 cached entries are pinned, the next value is transient rather than
         // invalidating an image still borrowed by an active scene.
         let scenes: Vec<Vec<scene::Node>> = (0..257).map(|i| vec![scene::text((0, 0), None, Some(16), &format!("pinned-{i:03}"))]).collect();
         let images: Vec<RImage::Image> = scenes.iter().map(|s| automatic_stage(s).1).collect();
-        let (entries, fonts, references) = font::raster::automatic_counts();
-        require(entries == 256 && fonts == 1 && references == 257, "pinned cache overflow policy");
+        let (entries, references) = font::raster::automatic_counts();
+        require(entries == 256 && references == 257, "pinned cache overflow policy");
         for image in &images {
             require(RImage::pixels(image).is_ok(), "pinned image invalidated");
         }
@@ -208,7 +211,7 @@ fn window_resources_automatic_text_cache() {
         require(RImage::pixels(&image).is_ok(), "explicit cached text shortened");
         font::destroy(&font_);
         require(RImage::pixels(&image).is_err(), "explicit font cache not destroyed");
-        let (_, _, references) = font::raster::automatic_counts();
+        let (_, references) = font::raster::automatic_counts();
         require(references == 0, "automatic references outlived their scenes");
     });
 }

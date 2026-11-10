@@ -563,6 +563,7 @@ dependencies = [
  "ogpu_metal",
  "ogpu_vulkan",
  "parallel",
+ "pxui_text",
  "rays_math",
  "renderer",
  "runtime",
