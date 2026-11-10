@@ -43,6 +43,14 @@ fn device() -> Option<(Device, Queue)> {
     DEVICE.with(|d| d.get_or_init(open).clone())
 }
 
+/// Releases the shared device before the process exits (Vulkan crashes on exit with a live device).
+pub fn finish() {
+    DEVICE.with(|d| if let Some(Some((device, queue))) = d.get() {
+        ok(be::destroy_queue(queue));
+        ok(be::destroy_device(device));
+    });
+}
+
 /// Whether this platform has a GPU backend to render on.
 pub fn available() -> bool {
     device().is_some()

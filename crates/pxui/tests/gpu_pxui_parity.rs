@@ -13,4 +13,5 @@ mod support;
 
 fn main() {
     run::run(gpu_parity::CASES);
+    gpu::finish();
 }
