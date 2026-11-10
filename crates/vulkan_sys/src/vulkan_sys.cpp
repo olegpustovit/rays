@@ -9,6 +9,16 @@
 #define VK_USE_PLATFORM_WAYLAND_KHR
 #include <unistd.h>
 #endif
+#ifdef __linux__
+#include <cerrno>
+#include <cstdio>
+#include <fcntl.h>
+#include <linux/dma-buf.h>
+#include <poll.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/utsname.h>
+#endif
 #include "vendor/volk.h"
 #include "vendor/vk_mem_alloc.h"
 #include <algorithm>
@@ -82,6 +92,7 @@ struct Command {
   VkDeviceSize index_offset{};
   bool rendering{};
   uint32_t target_height{};
+  uint64_t external_mark{};
 };
 struct Queue {
   Device *device{};
@@ -108,6 +119,12 @@ struct Device {
   std::atomic<int64_t> held{};
   VkSemaphore ticks{};
   uint64_t next_tick{1};
+  // Compositor hooks (Linux): enabled extensions, imported dmabuf textures, pending acquire fences.
+  bool dmabuf{}, modifiers{}, foreign{}, sync_export{}, sync_import{}, dmabuf_sync{};
+  Texture *externals{};
+  uint64_t external_serial{};
+  VkSemaphore waits[8]{};
+  uint32_t wait_count{};
   Garbage *garbage{};
   Chunk *free_chunks{};
   std::recursive_mutex qlock;
@@ -134,6 +151,11 @@ struct Texture {
   VkImageAspectFlags aspect{};
   uint32_t width{}, height{}, depth{}, mips{}, samples{};
   VmaAllocationInfo info{};
+  // An imported dmabuf owns its memory (one per disjoint plane) instead of a VMA allocation.
+  VkDeviceMemory memories[4]{};
+  uint32_t memory_count{};
+  Texture *next_external{};
+  uint64_t serial{};
 };
 struct Surface {
   Device *device{};
@@ -283,7 +305,7 @@ int create_device(bool validation, bool fatal, Device **out) {
   if (!failure) vkEnumerateDeviceExtensionProperties(d->physical, nullptr, &available_count, available);
   const char *required[] = {VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME};
   const char *ray_extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
-  const char *enabled[12]; uint32_t enabled_count = 0;
+  const char *enabled[20]; uint32_t enabled_count = 0;
   for (const char *name : required) {
     if (!failure && !has_extension(available, available_count, name)) failure = RV_MISSING;
     enabled[enabled_count++] = name;
@@ -304,6 +326,27 @@ int create_device(bool validation, bool fatal, Device **out) {
   if (has_extension(available, available_count, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
     enabled[enabled_count++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME; d->budget = true;
   }
+#ifdef __linux__
+  // Compositor hooks, as wlroots render/vulkan/vulkan.c enables them; each degrades to a false caps flag.
+  auto optional = [&](const char *name) { bool found = has_extension(available, available_count, name); if (found) enabled[enabled_count++] = name; return found; };
+  if (has_extension(available, available_count, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME) && has_extension(available, available_count, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME)) {
+    d->dmabuf = optional(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME) && optional(VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
+    d->modifiers = optional(VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME);
+    d->foreign = optional(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
+  }
+  if (optional(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME)) {
+    VkPhysicalDeviceExternalSemaphoreInfo si{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO}; si.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+    VkExternalSemaphoreProperties sp{VK_STRUCTURE_TYPE_EXTERNAL_SEMAPHORE_PROPERTIES}; vkGetPhysicalDeviceExternalSemaphoreProperties(d->physical, &si, &sp);
+    d->sync_export = sp.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT;
+    d->sync_import = sp.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT;
+  }
+  // wlroots render/dmabuf_linux.c: the sync_file ioctls exist from Linux 5.20 (6.0); no better probe exists.
+  utsname name{};
+  if (!uname(&name) && !strcmp(name.sysname, "Linux")) {
+    unsigned major = 0, minor = 0; sscanf(name.release, "%u.%u", &major, &minor);
+    d->dmabuf_sync = major > 5 || (major == 5 && minor >= 20);
+  }
+#endif
   int main_family = family_with(d, VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 0);
   int transfer_family = family_with(d, VK_QUEUE_TRANSFER_BIT, VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT |
       VK_QUEUE_VIDEO_DECODE_BIT_KHR | VK_QUEUE_VIDEO_ENCODE_BIT_KHR);
@@ -369,6 +412,7 @@ int create_device(bool validation, bool fatal, Device **out) {
   if (validation) { static bool registered = false; if (!registered) { atexit(leave_device); registered = true; } d->next_live = exit_devices; exit_devices = d; }
   *out = d; return VK_SUCCESS;
 }
+void destroy_semaphore_now(Device *d, void *payload) { vkDestroySemaphore(d->device, reinterpret_cast<VkSemaphore>(payload), nullptr); }
 void defer(Device *d, void (*destroy)(Device *, void *), void *payload) {
   auto *g = new (std::nothrow) Garbage{nullptr, 0, destroy, payload};
   if (!g) return; // ponytail: OOM leaks a possibly in-flight resource; preallocate garbage nodes if this occurs.
@@ -416,6 +460,32 @@ void full_barrier(VkCommandBuffer cb) {
   b.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
   VkDependencyInfo info{VK_STRUCTURE_TYPE_DEPENDENCY_INFO}; info.memoryBarrierCount = 1; info.pMemoryBarriers = &b; vkCmdPipelineBarrier2(cb, &info);
 }
+// Imported dmabufs belong to the foreign (kernel/other device) queue family between our command buffers:
+// each command buffer acquires them first and releases them last, as wlroots render/vulkan/pass.c does
+// per render pass. A texture imported after a command buffer began is left out of it on both ends.
+VkImageMemoryBarrier2 external_barrier(Device *d, VkImage image, bool acquire, VkImageLayout old) {
+  uint32_t foreign = d->foreign ? VK_QUEUE_FAMILY_FOREIGN_EXT : VK_QUEUE_FAMILY_EXTERNAL;
+  VkImageMemoryBarrier2 b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+  b.srcStageMask = acquire ? VK_PIPELINE_STAGE_2_NONE : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  b.srcAccessMask = acquire ? 0 : VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+  b.dstStageMask = acquire ? VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT : VK_PIPELINE_STAGE_2_NONE;
+  b.dstAccessMask = acquire ? VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT : 0;
+  b.oldLayout = old; b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+  b.srcQueueFamilyIndex = acquire ? foreign : d->main_family; b.dstQueueFamilyIndex = acquire ? d->main_family : foreign;
+  b.image = image; b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}; return b;
+}
+void external_barriers(Command *c, bool acquire) {
+  Device *d = c->queue->device; if (!d->externals) return;
+  std::lock_guard<std::recursive_mutex> lock(d->qlock);
+  VkImageMemoryBarrier2 batch[16]{}; uint32_t n = 0;
+  auto flush = [&] { VkDependencyInfo info{VK_STRUCTURE_TYPE_DEPENDENCY_INFO}; info.imageMemoryBarrierCount = n; info.pImageMemoryBarriers = batch; if (n) vkCmdPipelineBarrier2(c->cb, &info); n = 0; };
+  for (Texture *t = d->externals; t; t = t->next_external) {
+    if (t->serial > c->external_mark) continue;
+    batch[n++] = external_barrier(d, t->image, acquire, VK_IMAGE_LAYOUT_GENERAL);
+    if (n == 16) flush();
+  }
+  flush();
+}
 Command *cmd_take(Queue *q) {
   Device *d = q->device; Command *c = q->free_list;
   if (c) { q->free_list = c->next; c->next = nullptr; vkResetCommandBuffer(c->cb, 0); }
@@ -429,7 +499,8 @@ Command *cmd_take(Queue *q) {
   memset(c->slots, 0, sizeof c->slots); c->pipeline = nullptr; c->dirty = c->dispatched = false; c->rendering = false; c->index_buffer = VK_NULL_HANDLE;
   VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO}; bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   if (vkBeginCommandBuffer(c->cb, &bi) != VK_SUCCESS) return nullptr;
-  vkCmdResetQueryPool(c->cb, c->timestamps, 0, 2); vkCmdWriteTimestamp2(c->cb, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, c->timestamps, 0); return c;
+  vkCmdResetQueryPool(c->cb, c->timestamps, 0, 2); vkCmdWriteTimestamp2(c->cb, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, c->timestamps, 0);
+  { std::lock_guard<std::recursive_mutex> lock(d->qlock); c->external_mark = d->external_serial; } external_barriers(c, true); return c;
 }
 void cmd_recycle(Command *c) {
   Queue *q = c->queue; chunks_release(q->device, c->chunks); c->chunks = nullptr;
@@ -452,7 +523,7 @@ Command *upload_cmd(Device *d) {
 }
 VkResult submit_locked(Device *d, Queue *q, Command *c, uint64_t epoch, VkSemaphore wait, VkSemaphore signal, uint64_t *tick) {
   VkCommandBufferSubmitInfo cbs[2]{}; uint32_t cbn = 0; Command *upload = d->upload;
-  if (upload) { full_barrier(upload->cb); VkResult r = vkEndCommandBuffer(upload->cb); if (r != VK_SUCCESS) return r;
+  if (upload) { full_barrier(upload->cb); external_barriers(upload, false); VkResult r = vkEndCommandBuffer(upload->cb); if (r != VK_SUCCESS) return r;
     cbs[cbn] = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}; cbs[cbn++].commandBuffer = upload->cb; }
   if (c) { cbs[cbn] = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO}; cbs[cbn++].commandBuffer = c->cb; }
   VkSemaphoreSubmitInfo sigs[3]{};
@@ -460,11 +531,14 @@ VkResult submit_locked(Device *d, Queue *q, Command *c, uint64_t epoch, VkSemaph
   uint32_t sn = 1;
   if (q) { sigs[sn] = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO}; sigs[sn].semaphore = q->timeline; sigs[sn].value = epoch; sigs[sn++].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; }
   if (signal) { sigs[sn] = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO}; sigs[sn].semaphore = signal; sigs[sn++].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; }
-  VkSemaphoreSubmitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO}; wi.semaphore = wait; wi.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-  VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2}; si.waitSemaphoreInfoCount = wait ? 1 : 0; si.pWaitSemaphoreInfos = &wi;
+  // Acquire fences imported since the last submit gate this one (wlroots render_pass_wait_sync_file).
+  VkSemaphoreSubmitInfo wi[9]{}; uint32_t wn = 0;
+  if (wait) { wi[wn] = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO}; wi[wn].semaphore = wait; wi[wn++].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; }
+  for (uint32_t i = 0; i < d->wait_count; ++i) { wi[wn] = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO}; wi[wn].semaphore = d->waits[i]; wi[wn++].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; }
+  VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2}; si.waitSemaphoreInfoCount = wn; si.pWaitSemaphoreInfos = wi;
   si.commandBufferInfoCount = cbn; si.pCommandBufferInfos = cbs; si.signalSemaphoreInfoCount = sn; si.pSignalSemaphoreInfos = sigs;
   VkResult r = vkQueueSubmit2(d->main_queue, 1, &si, VK_NULL_HANDLE);
-  if (r == VK_SUCCESS) { *tick = d->next_tick++; if (upload) { d->upload = nullptr; if (c) c->attached_upload = upload; else { upload->tick = *tick; upload->next = d->upload_queue->flight_head; d->upload_queue->flight_head = upload; } } }
+  if (r == VK_SUCCESS) { *tick = d->next_tick++; for (uint32_t i = 0; i < d->wait_count; ++i) defer(d, destroy_semaphore_now, reinterpret_cast<void *>(d->waits[i])); d->wait_count = 0; if (upload) { d->upload = nullptr; if (c) c->attached_upload = upload; else { upload->tick = *tick; upload->next = d->upload_queue->flight_head; d->upload_queue->flight_head = upload; } } }
   return r;
 }
 void queue_free(Queue *q) {
@@ -495,7 +569,7 @@ void reap(Queue *q) {
 }
 int64_t commit_cmd(Command *c, VkSemaphore wait, VkSemaphore signal) {
   Queue *q = c->queue; Device *d = q->device; full_barrier(c->cb); vkCmdWriteTimestamp2(c->cb, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, c->timestamps, 1);
-  VkResult r = vkEndCommandBuffer(c->cb); if (r != VK_SUCCESS) return r; uint64_t epoch = q->next_epoch;
+  external_barriers(c, false); VkResult r = vkEndCommandBuffer(c->cb); if (r != VK_SUCCESS) return r; uint64_t epoch = q->next_epoch;
   { std::lock_guard<std::recursive_mutex> lock(d->qlock); r = submit_locked(d, q, c, epoch, wait, signal, &c->tick); }
   if (r != VK_SUCCESS) return r; q->next_epoch = epoch + 1; c->epoch = epoch; c->next = nullptr;
   if (q->flight_tail) q->flight_tail->next = c; else q->flight_head = c; q->flight_tail = c; return static_cast<int64_t>(epoch);
@@ -558,6 +632,7 @@ void rv_device_destroy(void *handle) {
   if (d->upload) { vkEndCommandBuffer(d->upload->cb); cmd_recycle(d->upload); d->upload = nullptr; }
   reap_uploads(d);
   while (d->garbage) { Garbage *g = d->garbage; d->garbage = g->next; g->destroy(d, g->payload); delete g; }
+  for (uint32_t i = 0; i < d->wait_count; ++i) vkDestroySemaphore(d->device, d->waits[i], nullptr);
   if (d->upload_queue) queue_free(d->upload_queue);
   while (d->free_chunks) { Chunk *c = d->free_chunks; d->free_chunks = c->next; vmaDestroyBuffer(d->allocator, c->buffer, c->allocation); delete c; }
   vkDestroyFence(d->device, d->transfer_fence, nullptr); vkDestroyCommandPool(d->device, d->transfer_pool, nullptr);
@@ -810,8 +885,17 @@ int32_t rv_texture_create(void *device, const rv_texture_desc *desc, void **out)
   if (r != VK_SUCCESS) { vkDestroyImageView(d->device,t->view,nullptr); d->held.fetch_sub(static_cast<int64_t>(t->info.size),std::memory_order_relaxed); vmaDestroyImage(d->allocator,t->image,t->allocation); delete t; return r; }
   *out = t; return VK_SUCCESS;
 }
-void destroy_texture_now(Device *d, void *payload) { auto *t = static_cast<Texture *>(payload); vkDestroyImageView(d->device,t->view,nullptr); vmaDestroyImage(d->allocator,t->image,t->allocation); delete t; }
-void rv_texture_destroy(void *texture) { auto *t = static_cast<Texture *>(texture); t->device->held.fetch_sub(static_cast<int64_t>(t->info.size), std::memory_order_relaxed); defer(t->device,destroy_texture_now,t); }
+void destroy_texture_now(Device *d, void *payload) {
+  auto *t = static_cast<Texture *>(payload); vkDestroyImageView(d->device,t->view,nullptr);
+  if (t->memory_count) { vkDestroyImage(d->device,t->image,nullptr); for (uint32_t i=0;i<t->memory_count;++i) vkFreeMemory(d->device,t->memories[i],nullptr); }
+  else vmaDestroyImage(d->allocator,t->image,t->allocation);
+  delete t;
+}
+void rv_texture_destroy(void *texture) {
+  auto *t = static_cast<Texture *>(texture); Device *d = t->device; d->held.fetch_sub(static_cast<int64_t>(t->info.size), std::memory_order_relaxed);
+  if (t->memory_count) { std::lock_guard<std::recursive_mutex> lock(d->qlock); for (Texture **at = &d->externals; *at; at = &(*at)->next_external) if (*at == t) { *at = t->next_external; break; } }
+  defer(d,destroy_texture_now,t);
+}
 int32_t rv_texture_read(void *texture, void *bytes, uint64_t row, uint32_t texel) {
   auto *t = static_cast<Texture *>(texture); Device *d = t->device; VkResult r = flush_uploads_wait(d); if (r != VK_SUCCESS) return r;
   VkDeviceSize total = row * t->height; VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO}; bi.size = total; bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -1008,6 +1092,160 @@ void rv_surface_destroy(void *surface) {
   for(auto sem:s->rendered)if(sem)vkDestroySemaphore(d->device,sem,nullptr);for(auto sem:s->acquired)if(sem)vkDestroySemaphore(d->device,sem,nullptr);
   if(s->swapchain)vkDestroySwapchainKHR(d->device,s->swapchain,nullptr);vkDestroySurfaceKHR(d->instance,s->surface,nullptr);delete s;
 }
+#ifdef __linux__
+// Compositor hooks. Format/modifier query, dmabuf import and sync_file handling are ported from wlroots 0.20.2
+// (MIT; specification/licenses.md): render/vulkan/pixel_format.c, texture.c, renderer.c, pass.c, render/dmabuf_linux.c.
+struct rv_dmabuf_plane { int32_t fd; uint32_t offset, stride; };
+struct rv_dmabuf { uint32_t width, height; int32_t format; uint32_t plane_count; uint64_t modifier; rv_dmabuf_plane planes[4]; };
+struct rv_dmabuf_modifier { uint64_t modifier; uint32_t planes, max_width, max_height; uint8_t texture, render; };
+struct rv_external { uint8_t dmabuf, modifiers, sync_export, sync_import, dmabuf_sync; };
+// wlroots vulkan_dma_tex_usage and vulkan_render_usage, plus transfer-source so either can be read back.
+constexpr VkImageUsageFlags RV_TEXTURE_USAGE = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+constexpr VkImageUsageFlags RV_RENDER_USAGE = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+constexpr VkFormatFeatureFlags RV_TEXTURE_FEATURES = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+constexpr VkFormatFeatureFlags RV_RENDER_FEATURES = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+// The modifiers of `format` (wlroots vulkan_format_props_query). Without VK_EXT_image_drm_format_modifier only
+// linear exists: a single plane in a VK_IMAGE_TILING_LINEAR image.
+static uint32_t rv_modifier_list(Device *d, VkFormat format, VkDrmFormatModifierPropertiesEXT *out, uint32_t capacity) {
+  if (!d->modifiers) { VkFormatProperties p{}; vkGetPhysicalDeviceFormatProperties(d->physical, format, &p); out[0] = {0, 1, p.linearTilingFeatures}; return 1; }
+  VkDrmFormatModifierPropertiesListEXT list{VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT}; list.drmFormatModifierCount = capacity; list.pDrmFormatModifierProperties = out;
+  VkFormatProperties2 p{VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2}; p.pNext = &list; vkGetPhysicalDeviceFormatProperties2(d->physical, format, &p);
+  return std::min(list.drmFormatModifierCount, capacity);
+}
+// wlroots query_modifier_usage_support: whether a dmabuf image of this format, modifier and usage can be
+// imported, and its largest extent.
+static bool rv_modifier_usage(Device *d, VkFormat format, uint64_t modifier, VkImageUsageFlags usage, VkExtent3D *max) {
+  VkPhysicalDeviceImageDrmFormatModifierInfoEXT mi{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT}; mi.drmFormatModifier = modifier; mi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  VkPhysicalDeviceExternalImageFormatInfo ei{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO}; ei.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT; ei.pNext = d->modifiers ? &mi : nullptr;
+  VkPhysicalDeviceImageFormatInfo2 fi{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2}; fi.pNext = &ei; fi.format = format; fi.type = VK_IMAGE_TYPE_2D; fi.usage = usage;
+  fi.tiling = d->modifiers ? VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT : VK_IMAGE_TILING_LINEAR;
+  VkExternalImageFormatProperties ep{VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES}; VkImageFormatProperties2 ip{VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2}; ip.pNext = &ep;
+  if (vkGetPhysicalDeviceImageFormatProperties2(d->physical, &fi, &ip) != VK_SUCCESS || !(ep.externalMemoryProperties.externalMemoryFeatures & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) return false;
+  *max = ip.imageFormatProperties.maxExtent; return true;
+}
+// wlroots is_dmabuf_disjoint: planes in different buffers need one allocation each.
+static bool rv_disjoint(const rv_dmabuf *a) {
+  struct stat first{}; if (a->plane_count < 2) return false; if (fstat(a->planes[0].fd, &first)) return true;
+  for (uint32_t i = 1; i < a->plane_count; ++i) { struct stat plane{}; if (fstat(a->planes[i].fd, &plane) || plane.st_ino != first.st_ino) return true; }
+  return false;
+}
+static int rv_ioctl(int fd, unsigned long request, void *arg) { int r; do r = ioctl(fd, request, arg); while (r == -1 && (errno == EINTR || errno == EAGAIN)); return r; }
+void rv_device_external(void *device, rv_external *out) {
+  auto *d = static_cast<Device *>(device); *out = {d->dmabuf, d->modifiers, d->sync_export, d->sync_import, d->dmabuf_sync};
+}
+int32_t rv_dmabuf_modifiers(void *device, int32_t format, rv_dmabuf_modifier *out, uint32_t capacity, uint32_t *count) {
+  auto *d = static_cast<Device *>(device); *count = 0; if (!d->dmabuf) return VK_SUCCESS;
+  VkFormat vk = rv_color_format(format); VkDrmFormatModifierPropertiesEXT mods[64]; uint32_t n = rv_modifier_list(d, vk, mods, 64);
+  for (uint32_t i = 0; i < n && *count < capacity; ++i) {
+    const VkDrmFormatModifierPropertiesEXT &m = mods[i]; VkExtent3D tex{}, ren{};
+    bool texture = (m.drmFormatModifierTilingFeatures & RV_TEXTURE_FEATURES) == RV_TEXTURE_FEATURES && rv_modifier_usage(d, vk, m.drmFormatModifier, RV_TEXTURE_USAGE, &tex);
+    bool render = (m.drmFormatModifierTilingFeatures & RV_RENDER_FEATURES) == RV_RENDER_FEATURES && rv_modifier_usage(d, vk, m.drmFormatModifier, RV_RENDER_USAGE, &ren);
+    if (!texture && !render) continue;
+    VkExtent3D max = !render ? tex : !texture ? ren : VkExtent3D{std::min(tex.width, ren.width), std::min(tex.height, ren.height), 1};
+    out[(*count)++] = {m.drmFormatModifier, m.drmFormatModifierPlaneCount, max.width, max.height, texture, render};
+  }
+  return VK_SUCCESS;
+}
+// wlroots vulkan_import_dmabuf. Ownership of the fds stays with the caller: each memory imports a duplicate.
+int32_t rv_dmabuf_import(void *device, const rv_dmabuf *a, bool render, void **out) {
+  auto *d = static_cast<Device *>(device); if (!d->dmabuf) return VK_ERROR_EXTENSION_NOT_PRESENT;
+  if (!a->plane_count || a->plane_count > 4 || !a->width || !a->height) return VK_ERROR_VALIDATION_FAILED_EXT;
+  VkFormat format = rv_color_format(a->format); VkDrmFormatModifierPropertiesEXT mods[64], *m = nullptr; uint32_t n = rv_modifier_list(d, format, mods, 64);
+  for (uint32_t i = 0; i < n; ++i) if (mods[i].drmFormatModifier == a->modifier) m = &mods[i];
+  VkImageUsageFlags usage = render ? RV_RENDER_USAGE : RV_TEXTURE_USAGE; VkFormatFeatureFlags features = render ? RV_RENDER_FEATURES : RV_TEXTURE_FEATURES; VkExtent3D max{};
+  if (!m || (m->drmFormatModifierTilingFeatures & features) != features || !rv_modifier_usage(d, format, a->modifier, usage, &max)) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+  if (a->width > max.width || a->height > max.height || m->drmFormatModifierPlaneCount != a->plane_count) return VK_ERROR_VALIDATION_FAILED_EXT;
+  bool disjoint = rv_disjoint(a); if (disjoint && !(m->drmFormatModifierTilingFeatures & VK_FORMAT_FEATURE_DISJOINT_BIT)) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+  // Without explicit modifiers the driver picks the linear layout itself: accept the buffer only where it agrees.
+  if (!d->modifiers && a->planes[0].offset) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+  VkSubresourceLayout layouts[4]{}; for (uint32_t i = 0; i < a->plane_count; ++i) { layouts[i].offset = a->planes[i].offset; layouts[i].rowPitch = a->planes[i].stride; }
+  VkImageDrmFormatModifierExplicitCreateInfoEXT mi{VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT}; mi.drmFormatModifier = a->modifier; mi.drmFormatModifierPlaneCount = a->plane_count; mi.pPlaneLayouts = layouts;
+  VkExternalMemoryImageCreateInfo ei{VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO}; ei.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT; ei.pNext = d->modifiers ? &mi : nullptr;
+  VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO}; ii.pNext = &ei; ii.flags = disjoint ? VK_IMAGE_CREATE_DISJOINT_BIT : 0; ii.imageType = VK_IMAGE_TYPE_2D; ii.format = format;
+  ii.extent = {a->width, a->height, 1}; ii.mipLevels = ii.arrayLayers = 1; ii.samples = VK_SAMPLE_COUNT_1_BIT; ii.usage = usage; ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  ii.tiling = d->modifiers ? VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT : VK_IMAGE_TILING_LINEAR;
+  auto *t = new (std::nothrow) Texture{}; if (!t) return VK_ERROR_OUT_OF_HOST_MEMORY;
+  t->device = d; t->format = format; t->aspect = VK_IMAGE_ASPECT_COLOR_BIT; t->width = a->width; t->height = a->height; t->depth = t->mips = t->samples = 1;
+  VkResult r = vkCreateImage(d->device, &ii, nullptr, &t->image); if (r != VK_SUCCESS) { delete t; return r; }
+  auto fail = [&](VkResult code) { vkDestroyImage(d->device, t->image, nullptr); for (uint32_t i = 0; i < t->memory_count; ++i) vkFreeMemory(d->device, t->memories[i], nullptr); delete t; return code; };
+  if (!d->modifiers) { VkImageSubresource sub{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0}; VkSubresourceLayout l{}; vkGetImageSubresourceLayout(d->device, t->image, &sub, &l);
+    if (l.offset || l.rowPitch != a->planes[0].stride) return fail(VK_ERROR_FORMAT_NOT_SUPPORTED); }
+  static const VkImageAspectFlagBits planes[] = {VK_IMAGE_ASPECT_MEMORY_PLANE_0_BIT_EXT, VK_IMAGE_ASPECT_MEMORY_PLANE_1_BIT_EXT, VK_IMAGE_ASPECT_MEMORY_PLANE_2_BIT_EXT, VK_IMAGE_ASPECT_MEMORY_PLANE_3_BIT_EXT};
+  uint32_t count = disjoint ? a->plane_count : 1; VkBindImageMemoryInfo binds[4]{}; VkBindImagePlaneMemoryInfo plane_binds[4]{};
+  for (uint32_t i = 0; i < count; ++i) {
+    VkMemoryFdPropertiesKHR fp{VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR}; r = vkGetMemoryFdPropertiesKHR(d->device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, a->planes[i].fd, &fp);
+    if (r != VK_SUCCESS) return fail(r);
+    VkImagePlaneMemoryRequirementsInfo pr{VK_STRUCTURE_TYPE_IMAGE_PLANE_MEMORY_REQUIREMENTS_INFO}; pr.planeAspect = planes[i];
+    VkImageMemoryRequirementsInfo2 ri{VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2}; ri.image = t->image; ri.pNext = disjoint ? &pr : nullptr;
+    VkMemoryRequirements2 req{VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2}; vkGetImageMemoryRequirements2(d->device, &ri, &req);
+    uint32_t bits = req.memoryRequirements.memoryTypeBits & fp.memoryTypeBits; if (!bits) return fail(VK_ERROR_FORMAT_NOT_SUPPORTED);
+    int dup = fcntl(a->planes[i].fd, F_DUPFD_CLOEXEC, 0); if (dup < 0) return fail(VK_ERROR_TOO_MANY_OBJECTS);
+    // wlroots also passes a dedicated-allocation record for disjoint images; the spec forbids that (VUID-VkMemoryDedicatedAllocateInfo-image-01797).
+    VkMemoryDedicatedAllocateInfo dedicated{VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO}; dedicated.image = t->image;
+    VkImportMemoryFdInfoKHR import{VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR}; import.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT; import.fd = dup; import.pNext = disjoint ? nullptr : &dedicated;
+    VkMemoryAllocateInfo mai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO}; mai.pNext = &import; mai.allocationSize = req.memoryRequirements.size; mai.memoryTypeIndex = static_cast<uint32_t>(__builtin_ctz(bits));
+    r = vkAllocateMemory(d->device, &mai, nullptr, &t->memories[i]); if (r != VK_SUCCESS) { close(dup); return fail(r); }
+    t->memory_count = i + 1; binds[i] = {VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO}; binds[i].image = t->image; binds[i].memory = t->memories[i];
+    if (disjoint) { plane_binds[i] = {VK_STRUCTURE_TYPE_BIND_IMAGE_PLANE_MEMORY_INFO}; plane_binds[i].planeAspect = planes[i]; binds[i].pNext = &plane_binds[i]; }
+  }
+  r = vkBindImageMemory2(d->device, count, binds); if (r != VK_SUCCESS) return fail(r);
+  VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO}; vi.image = t->image; vi.viewType = VK_IMAGE_VIEW_TYPE_2D; vi.format = format; vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  r = vkCreateImageView(d->device, &vi, nullptr, &t->view); if (r != VK_SUCCESS) return fail(r);
+  // The image's one layout transition, first in submission order: the pending upload commands run before
+  // anything recorded after this import. Every later acquire and release keeps GENERAL. A render target's
+  // contents may be discarded here (wlroots transitions it from UNDEFINED); a client texture's must survive.
+  // ponytail: a client texture with a compressed (non-linear) modifier keeps GENERAL, which the validation
+  // layer reports as a layout mismatch; VK_EXT_external_memory_acquire_unmodified is the clean fix.
+  std::lock_guard<std::recursive_mutex> lock(d->qlock);
+  Command *u = upload_cmd(d); if (!u) { vkDestroyImageView(d->device, t->view, nullptr); return fail(VK_ERROR_OUT_OF_HOST_MEMORY); }
+  VkImageLayout old = render || a->modifier == 0 ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL;
+  VkImageMemoryBarrier2 first[2] = {external_barrier(d, t->image, true, old), external_barrier(d, t->image, false, VK_IMAGE_LAYOUT_GENERAL)};
+  for (VkImageMemoryBarrier2 &b : first) { VkDependencyInfo info{VK_STRUCTURE_TYPE_DEPENDENCY_INFO}; info.imageMemoryBarrierCount = 1; info.pImageMemoryBarriers = &b; vkCmdPipelineBarrier2(u->cb, &info); }
+  t->serial = ++d->external_serial; t->next_external = d->externals; d->externals = t;
+  *out = t; return VK_SUCCESS;
+}
+// wlroots vulkan_sync_render_pass_release: a binary semaphore signalled after everything submitted so far,
+// exported as a sync_file (vkGetSemaphoreFdKHR resets it).
+int32_t rv_sync_file_export(void *device, int32_t *fd) {
+  auto *d = static_cast<Device *>(device); if (!d->sync_export) return VK_ERROR_EXTENSION_NOT_PRESENT;
+  VkExportSemaphoreCreateInfo ei{VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO}; ei.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+  VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO}; si.pNext = &ei; VkSemaphore sem{}; VkResult r = vkCreateSemaphore(d->device, &si, nullptr, &sem); if (r != VK_SUCCESS) return r;
+  std::lock_guard<std::recursive_mutex> lock(d->qlock); uint64_t tick = 0;
+  r = submit_locked(d, nullptr, nullptr, 0, VK_NULL_HANDLE, sem, &tick);
+  if (r == VK_SUCCESS) { VkSemaphoreGetFdInfoKHR fi{VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR}; fi.semaphore = sem; fi.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT; r = vkGetSemaphoreFdKHR(d->device, &fi, fd); }
+  defer(d, destroy_semaphore_now, reinterpret_cast<void *>(sem)); return r;
+}
+int32_t rv_sync_file_wait(int32_t fd, int32_t timeout_ms, uint8_t *ready) {
+  // ponytail: EINTR restarts the full timeout; track the deadline if a signal-heavy host needs exact waits.
+  pollfd p{fd, POLLIN, 0}; int r; do r = poll(&p, 1, timeout_ms); while (r < 0 && errno == EINTR);
+  if (r < 0) return VK_ERROR_UNKNOWN;
+  *ready = r > 0; return VK_SUCCESS;
+}
+// wlroots render_pass_wait_sync_file: a temporary SYNC_FD import gates the next submit. Without semaphore
+// import the CPU waits instead. Takes the fd in every case.
+int32_t rv_sync_file_import(void *device, int32_t fd) {
+  auto *d = static_cast<Device *>(device);
+  if (!d->sync_import) { uint8_t ready = 0; int32_t r = rv_sync_file_wait(fd, -1, &ready); close(fd); return r; }
+  VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO}; VkSemaphore sem{}; VkResult r = vkCreateSemaphore(d->device, &si, nullptr, &sem);
+  if (r != VK_SUCCESS) { close(fd); return r; }
+  VkImportSemaphoreFdInfoKHR ii{VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR}; ii.semaphore = sem; ii.flags = VK_SEMAPHORE_IMPORT_TEMPORARY_BIT; ii.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT; ii.fd = fd;
+  r = vkImportSemaphoreFdKHR(d->device, &ii); if (r != VK_SUCCESS) { close(fd); vkDestroySemaphore(d->device, sem, nullptr); return r; }
+  std::lock_guard<std::recursive_mutex> lock(d->qlock); uint64_t tick = 0;
+  if (d->wait_count == 8) { r = submit_locked(d, nullptr, nullptr, 0, VK_NULL_HANDLE, VK_NULL_HANDLE, &tick); if (r != VK_SUCCESS) { vkDestroySemaphore(d->device, sem, nullptr); return r; } }
+  d->waits[d->wait_count++] = sem; return VK_SUCCESS;
+}
+// wlroots render/dmabuf_linux.c: implicit-sync interop for consumers that do not take explicit fences.
+int32_t rv_dmabuf_sync_file_export(int32_t dmabuf, bool write, int32_t *fd) {
+  dma_buf_export_sync_file data{static_cast<__u32>(write ? DMA_BUF_SYNC_WRITE : DMA_BUF_SYNC_READ), -1};
+  if (rv_ioctl(dmabuf, DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &data)) return errno == ENOTTY || errno == EINVAL ? VK_ERROR_FORMAT_NOT_SUPPORTED : VK_ERROR_UNKNOWN;
+  *fd = data.fd; return VK_SUCCESS;
+}
+int32_t rv_dmabuf_sync_file_import(int32_t dmabuf, int32_t sync, bool write) {
+  dma_buf_import_sync_file data{static_cast<__u32>(write ? DMA_BUF_SYNC_WRITE : DMA_BUF_SYNC_READ), sync};
+  if (rv_ioctl(dmabuf, DMA_BUF_IOCTL_IMPORT_SYNC_FILE, &data)) return errno == ENOTTY || errno == EINVAL ? VK_ERROR_FORMAT_NOT_SUPPORTED : VK_ERROR_UNKNOWN;
+  return VK_SUCCESS;
+}
+#endif
 struct rv_geometry { int32_t kind; void *buffer; uint64_t offset, stride; uint32_t count; uint8_t opaque, duplicate; };
 struct rv_accel_sizes_t { uint64_t structure, build_scratch, update_scratch; };
 static VkDeviceAddress rv_buffer_address(Device *d, VkBuffer buffer) {

@@ -77,6 +77,33 @@ impl Device {
     }
 }
 
+/// Compositor hooks: dmabuf textures and render targets, the DRM format table, sync_file fences.
+#[cfg(target_os = "linux")]
+impl Device {
+    pub fn external(&self) -> ogpu_core::dmabuf::External { self.0.external() }
+    pub fn dmabuf_formats(&self) -> Result<Vec<ogpu_core::dmabuf::Format>, Error> { self.0.dmabuf_formats().map_err(|failure| error("dmabuf_formats", failure)) }
+    pub fn import_dmabuf(&self, admitted: &ogpu_core::validation::AdmittedTexture, dmabuf: &ogpu_core::dmabuf::Dmabuf, render: bool) -> Result<Texture, Error> {
+        self.0.import_dmabuf(admitted, dmabuf, render).map_err(|failure| error("dmabuf_import", failure)).map(Texture)
+    }
+    pub fn export_sync_file(&self) -> Result<std::os::fd::OwnedFd, Error> { self.0.export_sync_file().map_err(|failure| error("sync_file_export", failure)) }
+    pub fn import_sync_file(&self, fence: std::os::fd::OwnedFd) -> Result<(), Error> { self.0.import_sync_file(fence).map_err(|failure| error("sync_file_import", failure)) }
+}
+/// Blocks until `fence` signals or `timeout` passes (`None`: forever); true when it signalled.
+#[cfg(target_os = "linux")]
+pub fn wait_sync_file(fence: std::os::fd::BorrowedFd<'_>, timeout: Option<std::time::Duration>) -> Result<bool, Error> {
+    sys::wait_sync_file(fence, timeout).map_err(|failure| error("sync_file_wait", failure))
+}
+/// Implicit-sync interop (DMA_BUF_IOCTL_EXPORT_SYNC_FILE): the dmabuf's pending fences as one sync_file.
+#[cfg(target_os = "linux")]
+pub fn dmabuf_export_sync_file(dmabuf: std::os::fd::BorrowedFd<'_>, write: bool) -> Result<std::os::fd::OwnedFd, Error> {
+    sys::dmabuf_export_sync_file(dmabuf, write).map_err(|failure| error("dmabuf_export_sync_file", failure))
+}
+/// Implicit-sync interop (DMA_BUF_IOCTL_IMPORT_SYNC_FILE): attaches `fence` to the dmabuf.
+#[cfg(target_os = "linux")]
+pub fn dmabuf_import_sync_file(dmabuf: std::os::fd::BorrowedFd<'_>, fence: std::os::fd::BorrowedFd<'_>, write: bool) -> Result<(), Error> {
+    sys::dmabuf_import_sync_file(dmabuf, fence, write).map_err(|failure| error("dmabuf_import_sync_file", failure))
+}
+
 pub struct Queue(sys::Queue);
 impl Queue {
     pub fn begin(&self) -> Result<Commands, Error> { self.0.begin().map_err(|failure| error("commands_begin", failure)).map(Commands) }

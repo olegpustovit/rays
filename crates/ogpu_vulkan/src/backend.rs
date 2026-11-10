@@ -1537,6 +1537,16 @@ impl DriverQueue for NativeQueue {
     fn gpu_duration(&self, epoch: i64) -> Option<f64> {
         self.state.native(QUEUE_OP).ok().and_then(|queue| queue.duration(epoch as u64))
     }
+    #[cfg(target_os = "linux")]
+    fn export_sync_file(&self) -> Result<std::os::fd::OwnedFd, Error> {
+        const OP: &str = "Ogpu_vulkan.export_sync_file";
+        self.dev.device(OP)?.export_sync_file().map_err(|failure| of_vk(OP, failure))
+    }
+    #[cfg(target_os = "linux")]
+    fn import_sync_file(&self, fence: std::os::fd::OwnedFd) -> Result<(), Error> {
+        const OP: &str = "Ogpu_vulkan.import_sync_file";
+        self.dev.device(OP)?.import_sync_file(fence).map_err(|failure| of_vk(OP, failure))
+    }
     fn destroy_queue(&self) -> Result<(), Error> {
         let completed = self.state.native(QUEUE_OP)?.completed().map_or(-1, |done| done as i64);
         if completed < self.state.submitted.get() {
@@ -1708,6 +1718,24 @@ impl DriverDevice for VulkanDevice {
     }
     fn create_surface(&self, configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn DriverSurface>, Error> {
         create_surface(&self.dev, configuration)
+    }
+    #[cfg(target_os = "linux")]
+    fn external(&self) -> ogpu_core::dmabuf::External {
+        self.dev.device("Ogpu_vulkan.external").map_or_else(|_| Default::default(), |device| device.external())
+    }
+    #[cfg(target_os = "linux")]
+    fn dmabuf_formats(&self) -> Vec<ogpu_core::dmabuf::Format> {
+        self.dev.device("Ogpu_vulkan.dmabuf_formats").ok().and_then(|device| device.dmabuf_formats().ok()).unwrap_or_default()
+    }
+    #[cfg(target_os = "linux")]
+    fn import_dmabuf(&self, descriptor: &AdmittedTexture, dmabuf: &ogpu_core::dmabuf::Dmabuf, render: bool) -> Result<Box<dyn DriverResource>, Error> {
+        const OP: &str = "Ogpu_vulkan.import_dmabuf";
+        if !descriptor.admitted_for(&self.capabilities) {
+            return Err(fail(OP, ErrorKind::CrossDevice, "descriptor was admitted for different device capabilities"));
+        }
+        let texture = self.dev.device(OP)?.import_dmabuf(descriptor, dmabuf, render).map_err(|failure| of_vk(OP, failure))?;
+        live_add(1);
+        Ok(Box::new(TextureResource { id: self.dev.token(), profile: descriptor.clone(), entry: Rc::new(TextureEntry { texture, descriptor: descriptor.clone() }) }))
     }
     fn destroy_device(&self) -> Result<(), Error> {
         if self.dev.queues.get() != 0 {

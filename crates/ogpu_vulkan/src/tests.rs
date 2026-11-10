@@ -1610,3 +1610,209 @@ fn gpu_wayland_surface_swapchain_present() {
     queue.wait(epoch).unwrap();
     assert_eq!(vk::Device::validation_messages(), 0);
 }
+
+/// The device's dmabuf hooks, or None after a printed skip where it has none.
+#[cfg(target_os = "linux")]
+fn dmabuf_device() -> Option<(Device, ogpu_core::dmabuf::External)> {
+    let device = open()?;
+    let external = be::external(&device);
+    eprintln!("dmabuf hooks: {external:?}");
+    if !external.dmabuf {
+        eprintln!("RAYS_TEST_SKIP: dmabuf (Vulkan): device lacks VK_EXT_external_memory_dma_buf or VK_KHR_external_memory_fd");
+        assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "RAYS_ALLOW_SKIP=1 explicitly permits skipping");
+        require(be::dmabuf_formats(&device).is_empty(), "a device without dmabuf import lists formats");
+        finish(&device);
+        return None;
+    }
+    Some((device, external))
+}
+
+/// The linux-dmabuf format table: every listed modifier is importable somehow, linear RGBA8 is both
+/// texture and render target, and without VK_EXT_image_drm_format_modifier only linear is listed.
+#[cfg(target_os = "linux")]
+#[test]
+fn gpu_dmabuf_format_table() {
+    use ogpu_core::dmabuf;
+    let Some((device, external)) = dmabuf_device() else { return };
+    let formats = be::dmabuf_formats(&device);
+    for format in &formats {
+        let text = String::from_utf8_lossy(&format.fourcc.to_le_bytes()).into_owned();
+        eprintln!("dmabuf format {text}: {:?}", format.modifiers);
+        require(dmabuf::texture_format(format.fourcc).is_some(), "a listed format has no texture format");
+        for m in &format.modifiers {
+            require((m.texture || m.render) && m.planes >= 1 && m.max_width > 0 && m.max_height > 0, "a listed modifier is unusable");
+            require(external.drm_modifiers || (m.modifier == dmabuf::MOD_LINEAR && m.planes == 1), "only linear exists without explicit modifiers");
+        }
+    }
+    let abgr = formats.iter().find(|f| f.fourcc == dmabuf::ABGR8888).expect("ABGR8888 is listed");
+    require(abgr.modifiers.iter().any(|m| m.modifier == dmabuf::MOD_LINEAR && m.texture && m.render && m.max_width >= 4),
+        "linear ABGR8888 imports as texture and render target");
+    finish(&device);
+}
+
+/// P8 exit: a buffer allocated with no display server imports as a render target, takes a clear and a
+/// quad, signals a sync_file, then imports as a sampled texture of the same memory. The memory itself, both
+/// imports and a sampled copy all hold the same pixels.
+#[cfg(target_os = "linux")]
+#[test]
+fn gpu_dmabuf_render_target_fence_and_texture() {
+    use ogpu_core::dmabuf::{self, Dmabuf, Plane};
+    use std::{os::{fd::AsFd, unix::fs::FileExt}, time::Duration};
+    const SIZE: usize = 64;
+    const ROW: usize = SIZE * 4;
+    let Some((device, external)) = dmabuf_device() else { return };
+    // The buffer: shared memory in a file. Without GBM, a DRM node or /dev/udmabuf (WSL has none) and with
+    // lavapipe exporting no dmabufs, this is what the CPU driver imports as one: it maps the fd.
+    // ponytail: GPU drivers need a real dmabuf; allocate through /dev/udmabuf or GBM when this runs on hardware.
+    let path = std::env::temp_dir().join(format!("rays-dmabuf-{}", std::process::id()));
+    let memory = std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path).expect("buffer file");
+    std::fs::remove_file(&path).unwrap();
+    memory.set_len((ROW * SIZE) as u64).unwrap();
+    let planes = [Plane { fd: memory.as_fd(), offset: 0, stride: ROW as u32 }];
+    let shape = Dmabuf { width: SIZE as u32, height: SIZE as u32, fourcc: dmabuf::ABGR8888, modifier: dmabuf::MOD_LINEAR, planes: &planes };
+    let target = match be::import_dmabuf(&device, &shape, true) {
+        Ok(target) => target,
+        Err(failure) if failure.kind == ErrorKind::Io => {
+            eprintln!("RAYS_TEST_SKIP: dmabuf (Vulkan): this driver needs a kernel dmabuf, not shared memory ({})", error::to_string(&failure));
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "RAYS_ALLOW_SKIP=1 explicitly permits skipping");
+            finish(&device);
+            return;
+        }
+        Err(failure) => die(failure),
+    };
+    refused(be::import_dmabuf(&device, &Dmabuf { modifier: 0x0100_0000_0000_0001, ..shape }, true).err(), ErrorKind::Unsupported,
+        "an unlisted modifier was imported");
+
+    let queue = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
+    let stage = |binding: i64, kind: BindingKind, stage: Stage| Binding { group: 0, binding, kind, visibility: vec![stage] };
+    let vertex = make_shader("dmabuf", shader_bytes("flat_vertex"), &[("flat_vertex", Stage::Vertex)], vec![stage(0, BindingKind::StorageBuffer, Stage::Vertex)]);
+    let flat = make_shader("dmabuf", shader_bytes("flat_fragment"), &[("flat_fragment", Stage::Fragment)], vec![stage(1, BindingKind::UniformBuffer, Stage::Fragment)]);
+    let textured = make_shader("dmabuf", shader_bytes("textured_fragment"), &[("textured_fragment", Stage::Fragment)],
+        vec![stage(1, BindingKind::SampledTexture, Stage::Fragment), stage(2, BindingKind::Sampler, Stage::Fragment)]);
+    let capabilities = be::capabilities(&device);
+    let layout = |entries: &[LayoutEntry]| {
+        let group = binding::create_layout(entries).unwrap_or_else(|failure| die(failure));
+        binding::create_pipeline_layout(be::device_handle(&device), &capabilities, &[(0, group)]).unwrap_or_else(|failure| die(failure))
+    };
+    let vertex_entry = LayoutEntry { binding: 0, kind: LayoutKind::Buffer, visibility: vec![LayoutStage::Vertex] };
+    let pipeline = |layout: &binding::PipelineLayout, fragment: &Shader, entry: &str| be::create_render_pipeline(&device, &RenderDescriptor {
+        backend: "vulkan".to_owned(), label: Some("dmabuf".to_owned()), layout: layout.clone(), vertex: vertex.clone(),
+        vertex_entry: "flat_vertex".to_owned(), fragment: Some(fragment.clone()), fragment_entry: Some(entry.to_owned()),
+        color_format: ColorFormat::Rgba8Unorm, depth_format: DepthFormat::NoDepth, sample_count: 1,
+    }, None, None, None).unwrap_or_else(|failure| die(failure));
+    let flat_pipeline = pipeline(&layout(&[vertex_entry.clone(), LayoutEntry { binding: 1, kind: LayoutKind::Buffer, visibility: vec![LayoutStage::Fragment] }]), &flat, "flat_fragment");
+    let textured_pipeline = pipeline(&layout(&[vertex_entry, LayoutEntry { binding: 1, kind: LayoutKind::Texture, visibility: vec![LayoutStage::Fragment] },
+        LayoutEntry { binding: 2, kind: LayoutKind::Sampler, visibility: vec![LayoutStage::Fragment] }]), &textured, "textured_fragment");
+    // The full-screen triangle moved by (+1, +1) covers one 2x2 quadrant: the quad.
+    let quadrant = float_buffer(&device, "quadrant", &[1., 1.]);
+    let centred = float_buffer(&device, "centred", &[0., 0.]);
+    let color = make_buffer(&device, "color", 16, &[BufferUsage::Uniform]);
+    be::write_buffer(&color, 0, &color_bytes(1., 0., 0., 1.)).unwrap_or_else(|failure| die(failure));
+
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = be::render_encoder(&commands, &render_target(&target, Load::Clear, Store::Store, (0., 0., 1., 1.))).unwrap_or_else(|failure| die(failure));
+    be::set_render_pipeline(&encoder, &flat_pipeline).unwrap_or_else(|failure| die(failure));
+    be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &quadrant).unwrap_or_else(|failure| die(failure));
+    be::set_stage_buffer(&encoder, ShaderStage::Fragment, 1, None, &color).unwrap_or_else(|failure| die(failure));
+    be::draw(&encoder, Primitive::TriangleList, 0, 3, None).unwrap_or_else(|failure| die(failure));
+    be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+    let rendered = be::commit(&commands).unwrap_or_else(|failure| die(failure));
+
+    // Release fence: a sync_file for everything submitted so far, waited on with a timeout; then the same,
+    // signalled fence imported as the acquire fence of the next submit.
+    if external.sync_file_export {
+        let fence = be::export_sync_file(&queue).unwrap_or_else(|failure| die(failure));
+        require(crate::vulkan::wait_sync_file(fence.as_fd(), Some(Duration::from_secs(10))).unwrap(), "render fence did not signal");
+        be::import_sync_file(&queue, fence).unwrap_or_else(|failure| die(failure));
+    } else {
+        eprintln!("note: no SYNC_FD semaphore export here; the render epoch is polled (gpu_sync_file_fences reports the skip)");
+    }
+    poll_epoch(&queue, rendered);
+
+    let texture = be::import_dmabuf(&device, &shape, false).unwrap_or_else(|failure| die(failure));
+    let copy = be::create_texture(&device, texture_descriptor("dmabuf-copy", SIZE as i64, &[TextureUsage::RenderAttachment, TextureUsage::TextureCopySrc]))
+        .unwrap_or_else(|failure| die(failure));
+    let sampler = be::create_sampler(&device, SamplerDescriptor {
+        label: None, min_filter: SamplerFilter::Nearest, mag_filter: SamplerFilter::Nearest, mip_filter: MipFilter::NoMip,
+        address_u: AddressMode::ClampToEdge, address_v: AddressMode::ClampToEdge, lod_min: 0., lod_max: 0., max_anisotropy: 1,
+    }).unwrap_or_else(|failure| die(failure));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = be::render_encoder(&commands, &render_target(&copy, Load::Clear, Store::Store, (0., 0., 0., 0.))).unwrap_or_else(|failure| die(failure));
+    be::set_render_pipeline(&encoder, &textured_pipeline).unwrap_or_else(|failure| die(failure));
+    be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &centred).unwrap_or_else(|failure| die(failure));
+    be::set_stage_texture(&encoder, ShaderStage::Fragment, 1, &texture).unwrap_or_else(|failure| die(failure));
+    be::set_stage_sampler(&encoder, ShaderStage::Fragment, 2, &sampler).unwrap_or_else(|failure| die(failure));
+    be::draw(&encoder, Primitive::TriangleList, 0, 3, None).unwrap_or_else(|failure| die(failure));
+    be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
+
+    // Blue everywhere but one red quadrant: the buffer's memory, read straight from the fd, then each view
+    // read back (the sampled copy may be flipped vertically).
+    let check = |label: &str, pixels: &[u8]| {
+        let red: Vec<(usize, usize)> = (0..SIZE * SIZE).filter(|i| pixels[i * 4..i * 4 + 4] == [255, 0, 0, 255]).map(|i| (i % SIZE, i / SIZE)).collect();
+        let blue = (0..SIZE * SIZE).filter(|i| pixels[i * 4..i * 4 + 4] == [0, 0, 255, 255]).count();
+        let half = |axis: &dyn Fn(&(usize, usize)) -> usize| red.iter().all(|p| axis(p) < SIZE / 2) || red.iter().all(|p| axis(p) >= SIZE / 2);
+        require(red.len() == SIZE * SIZE / 4 && blue == SIZE * SIZE * 3 / 4 && half(&|p| p.0) && half(&|p| p.1),
+            &format!("{label}: {} red and {blue} blue pixels, expected one red quadrant", red.len()));
+    };
+    let mut mapped = vec![0; ROW * SIZE];
+    memory.read_exact_at(&mut mapped, 0).unwrap();
+    check("dmabuf memory", &mapped);
+    for (label, view) in [("render target", &target), ("texture import", &texture), ("sampled copy", &copy)] {
+        check(label, &be::read_texture(view, ROW as i64).unwrap_or_else(|failure| die(failure)));
+    }
+    for texture in [&copy, &texture, &target] { be::destroy_texture(texture).unwrap_or_else(|failure| die(failure)); }
+    for buffer in [&color, &centred, &quadrant] { be::destroy_buffer(buffer).unwrap_or_else(|failure| die(failure)); }
+    be::destroy_sampler(&sampler).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&textured_pipeline).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&flat_pipeline).unwrap_or_else(|failure| die(failure));
+    be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
+    finish(&device);
+}
+
+/// sync_file fences. On any device: the blocking wait times out on an unsignalled fd and returns on a
+/// signalled one (a pipe stands in for the fence), and without SYNC_FD semaphore import an acquire fence is
+/// waited on the CPU. With SYNC_FD export: a fence taken after a submit signals, and imported back it gates
+/// the next submit on the GPU.
+#[cfg(target_os = "linux")]
+#[test]
+fn gpu_sync_file_fences() {
+    use std::{io::Write, os::fd::AsFd, time::Duration};
+    let Some(device) = open() else { return };
+    let external = be::external(&device);
+    let queue = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
+    let (reader, mut writer) = std::io::pipe().expect("pipe");
+    require(!crate::vulkan::wait_sync_file(reader.as_fd(), Some(Duration::from_millis(10))).unwrap(), "an unsignalled fd reported ready");
+    writer.write_all(&[1]).unwrap();
+    require(crate::vulkan::wait_sync_file(reader.as_fd(), Some(Duration::from_secs(1))).unwrap(), "a signalled fd timed out");
+    if !external.sync_file_import {
+        be::import_sync_file(&queue, reader.into()).unwrap_or_else(|failure| die(failure));
+    }
+    if !external.sync_file_export {
+        refused(be::export_sync_file(&queue).err(), ErrorKind::Unsupported, "sync_file export without SYNC_FD semaphores");
+        be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
+        finish(&device);
+        eprintln!("RAYS_TEST_SKIP: sync_file fences (Vulkan): device lacks VK_KHR_external_semaphore_fd SYNC_FD export/import; only the CPU wait and its fallback ran");
+        assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "RAYS_ALLOW_SKIP=1 explicitly permits skipping");
+        return;
+    }
+    let target = be::create_texture(&device, texture_descriptor("fenced", 4, &[TextureUsage::RenderAttachment, TextureUsage::TextureCopySrc]))
+        .unwrap_or_else(|failure| die(failure));
+    let clear = |rgba: (f64, f64, f64, f64)| {
+        let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+        let encoder = be::render_encoder(&commands, &render_target(&target, Load::Clear, Store::Store, rgba)).unwrap_or_else(|failure| die(failure));
+        be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+        be::commit(&commands).unwrap_or_else(|failure| die(failure))
+    };
+    let first = clear((1., 0., 0., 1.));
+    let fence = be::export_sync_file(&queue).unwrap_or_else(|failure| die(failure));
+    require(crate::vulkan::wait_sync_file(fence.as_fd(), Some(Duration::from_secs(10))).unwrap(), "fence did not signal");
+    be::import_sync_file(&queue, fence).unwrap_or_else(|failure| die(failure));
+    let second = clear((0., 1., 0., 1.));
+    poll_epoch(&queue, first);
+    poll_epoch(&queue, second);
+    require(be::read_texture(&target, 16).unwrap_or_else(|failure| die(failure))[..4] == [0, 255, 0, 255], "the gated submit did not run");
+    be::destroy_texture(&target).unwrap_or_else(|failure| die(failure));
+    be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
+    finish(&device);
+}

@@ -310,7 +310,7 @@ impl Device {
         Ok(ShaderModule{raw:nonnull(raw)?,device:self.inner.clone()})
     }
     pub fn texture(&self, admitted: &ogpu_core::validation::AdmittedTexture) -> Result<Texture, Error> {
-        use ogpu_core::types::{StorageMode, Swizzle, TextureFormat, TextureKind, TextureUsage};
+        use ogpu_core::types::{StorageMode, Swizzle, TextureKind, TextureUsage};
         if !admitted.admitted_for(&self.facts()?.capabilities()) { return Err(Error::WrongDevice); }
         if admitted.storage == StorageMode::Memoryless {
             return Err(Error::Unsupported("this device has no tile memory"));
@@ -327,11 +327,7 @@ impl Device {
         let descriptor = TextureDescriptor {
             width: extent(admitted.width)?, height: extent(admitted.height)?, depth: extent(admitted.depth)?,
             mip_levels: extent(admitted.mip_levels)?, samples: extent(admitted.sample_count)?,
-            format: match admitted.format {
-                TextureFormat::R8Unorm => 0, TextureFormat::Rgba8Unorm => 1, TextureFormat::Bgra8Unorm => 2,
-                TextureFormat::Bgra8UnormSrgb => 3, TextureFormat::Rgba16Float => 4,
-                TextureFormat::Rgba32Float => 5, TextureFormat::Depth32Float => 6,
-            },
+            format: format_code(admitted.format),
             storage: admitted.usage.contains(&TextureUsage::StorageBinding),
             attachment: admitted.usage.contains(&TextureUsage::RenderAttachment),
         };
@@ -376,6 +372,14 @@ impl Device {
     pub fn zeroed_view(&self,count:usize)->Result<ZeroedView,Error>{ZeroedView::new(count)}
     fn raw(&self)->*mut c_void{self.inner.raw.as_ptr()}
     fn check_device(&self,device:&Arc<DeviceInner>)->Result<(),Error>{if Arc::ptr_eq(&self.inner,device){Ok(())}else{Err(Error::WrongDevice)}}
+}
+fn format_code(format:ogpu_core::types::TextureFormat)->i32{
+    use ogpu_core::types::TextureFormat;
+    match format {
+        TextureFormat::R8Unorm => 0, TextureFormat::Rgba8Unorm => 1, TextureFormat::Bgra8Unorm => 2,
+        TextureFormat::Bgra8UnormSrgb => 3, TextureFormat::Rgba16Float => 4,
+        TextureFormat::Rgba32Float => 5, TextureFormat::Depth32Float => 6,
+    }
 }
 fn nonnull(raw:*mut c_void)->Result<NonNull<c_void>,Error>{NonNull::new(raw).ok_or(Error::InvalidHandle)}
 
@@ -647,4 +651,118 @@ fn acceleration(raw:NonNull<c_void>,device:Arc<DeviceInner>,buffers:Vec<Arc<Buff
 impl AccelerationStructure {
     pub fn sizes(&self)->AccelerationSizes{let mut s=NativeAccelSizes{structure:0,build_scratch:0,update_scratch:0};unsafe{rv_accel_sizes(self.raw.as_ptr(),&mut s)};AccelerationSizes{structure_bytes:s.structure,build_scratch_bytes:s.build_scratch,update_scratch_bytes:s.update_scratch}}
     fn raw(&self)->*mut c_void{self.raw.as_ptr()}
+}
+
+// Compositor hooks (Linux): dmabuf import and allocation, the DRM format query, sync_file fences.
+#[cfg(target_os = "linux")]
+pub use linux::*;
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::{nonnull, format_code, Device, Error, Texture, TextureDescriptor, TextureOwner};
+    use ogpu_core::dmabuf;
+    use std::ffi::c_void;
+    use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct NativePlane { fd: i32, offset: u32, stride: u32 }
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct NativeDmabuf { width: u32, height: u32, format: i32, plane_count: u32, modifier: u64, planes: [NativePlane; 4] }
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct NativeModifier { modifier: u64, planes: u32, max_width: u32, max_height: u32, texture: u8, render: u8 }
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct NativeExternal { dmabuf: u8, modifiers: u8, sync_export: u8, sync_import: u8, dmabuf_sync: u8 }
+
+    unsafe extern "C" {
+        fn rv_device_external(device: *mut c_void, out: *mut NativeExternal);
+        fn rv_dmabuf_modifiers(device: *mut c_void, format: i32, out: *mut NativeModifier, capacity: u32, count: *mut u32) -> i32;
+        fn rv_dmabuf_import(device: *mut c_void, dmabuf: *const NativeDmabuf, render: bool, out: *mut *mut c_void) -> i32;
+        fn rv_sync_file_export(device: *mut c_void, fd: *mut i32) -> i32;
+        fn rv_sync_file_import(device: *mut c_void, fd: i32) -> i32;
+        fn rv_sync_file_wait(fd: i32, timeout_ms: i32, ready: *mut u8) -> i32;
+        fn rv_dmabuf_sync_file_export(dmabuf: i32, write: bool, fd: *mut i32) -> i32;
+        fn rv_dmabuf_sync_file_import(dmabuf: i32, sync: i32, write: bool) -> i32;
+    }
+
+    fn status(code: i32) -> Result<(), Error> {
+        match code {
+            -7 => Err(Error::Unsupported("the device lacks the Vulkan extension")),
+            -11 => Err(Error::Unsupported("format, modifier or plane layout is not importable")),
+            -1000011001 => Err(Error::InvalidInput("dmabuf does not match its format, modifier or size limits")),
+            code => Error::status(code),
+        }
+    }
+
+    impl Device {
+        pub fn external(&self) -> dmabuf::External {
+            let mut e = NativeExternal::default();
+            unsafe { rv_device_external(self.raw(), &mut e) };
+            dmabuf::External { dmabuf: e.dmabuf != 0, drm_modifiers: e.modifiers != 0, sync_file_export: e.sync_export != 0, sync_file_import: e.sync_import != 0, dmabuf_sync_file: e.dmabuf_sync != 0 }
+        }
+        /// Every format of the portable table with at least one importable modifier.
+        pub fn dmabuf_formats(&self) -> Result<Vec<dmabuf::Format>, Error> {
+            let mut formats = Vec::new();
+            for (fourcc, format) in dmabuf::FORMATS {
+                let mut native = [NativeModifier::default(); 64];
+                let mut count = 0;
+                status(unsafe { rv_dmabuf_modifiers(self.raw(), format_code(format), native.as_mut_ptr(), 64, &mut count) })?;
+                let modifiers: Vec<_> = native[..count as usize].iter().map(|m| dmabuf::Modifier {
+                    modifier: m.modifier, planes: m.planes, texture: m.texture != 0, render: m.render != 0, max_width: m.max_width, max_height: m.max_height,
+                }).collect();
+                if !modifiers.is_empty() { formats.push(dmabuf::Format { fourcc, modifiers }); }
+            }
+            Ok(formats)
+        }
+        /// Imports `buffer` with the shape `admitted` describes; the fds are duplicated, never taken.
+        pub fn import_dmabuf(&self, admitted: &ogpu_core::validation::AdmittedTexture, buffer: &dmabuf::Dmabuf, render: bool) -> Result<Texture, Error> {
+            if !admitted.admitted_for(&self.facts()?.capabilities()) { return Err(Error::WrongDevice); }
+            if dmabuf::texture_format(buffer.fourcc) != Some(admitted.format) || admitted.width != i64::from(buffer.width) || admitted.height != i64::from(buffer.height) {
+                return Err(Error::InvalidInput("admitted texture does not describe the dmabuf"));
+            }
+            if buffer.planes.is_empty() || buffer.planes.len() > 4 { return Err(Error::InvalidInput("a dmabuf has one to four planes")); }
+            let format = format_code(admitted.format);
+            let mut native = NativeDmabuf { width: buffer.width, height: buffer.height, format, plane_count: buffer.planes.len() as u32, modifier: buffer.modifier, ..Default::default() };
+            for (dst, plane) in native.planes.iter_mut().zip(buffer.planes) {
+                *dst = NativePlane { fd: plane.fd.as_raw_fd(), offset: plane.offset, stride: plane.stride };
+            }
+            let mut raw = std::ptr::null_mut();
+            status(unsafe { rv_dmabuf_import(self.raw(), &native, render, &mut raw) })?;
+            let raw = nonnull(raw)?;
+            let descriptor = TextureDescriptor { width: buffer.width, height: buffer.height, depth: 1, mip_levels: 1, samples: 1, format, storage: false, attachment: render };
+            Ok(Texture { raw, device: self.inner.clone(), descriptor, _owner: Arc::new(TextureOwner { raw }) })
+        }
+        /// A sync_file that signals once everything submitted to this device so far completes.
+        pub fn export_sync_file(&self) -> Result<OwnedFd, Error> {
+            let mut fd = -1;
+            status(unsafe { rv_sync_file_export(self.raw(), &mut fd) })?;
+            Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+        }
+        /// The next submit waits for `fence` on the GPU; without SYNC_FD semaphore import this waits on the CPU now.
+        pub fn import_sync_file(&self, fence: OwnedFd) -> Result<(), Error> {
+            status(unsafe { rv_sync_file_import(self.raw(), fence.into_raw_fd()) })
+        }
+    }
+
+    /// Waits for a sync_file (any pollable fd) to signal; `None` waits forever. True when it signalled in time.
+    pub fn wait_sync_file(fence: BorrowedFd<'_>, timeout: Option<Duration>) -> Result<bool, Error> {
+        let ms = timeout.map_or(-1, |t| i32::try_from(t.as_nanos().div_ceil(1_000_000)).unwrap_or(i32::MAX));
+        let mut ready = 0;
+        status(unsafe { rv_sync_file_wait(fence.as_raw_fd(), ms, &mut ready) })?;
+        Ok(ready != 0)
+    }
+    /// The dmabuf's implicit fences as a sync_file: its writers for a reader (`write == false`), all for a writer.
+    pub fn dmabuf_export_sync_file(buffer: BorrowedFd<'_>, write: bool) -> Result<OwnedFd, Error> {
+        let mut fd = -1;
+        status(unsafe { rv_dmabuf_sync_file_export(buffer.as_raw_fd(), write, &mut fd) })?;
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    }
+    /// Adds `fence` to the dmabuf's implicit fences, as a reader or a writer.
+    pub fn dmabuf_import_sync_file(buffer: BorrowedFd<'_>, fence: BorrowedFd<'_>, write: bool) -> Result<(), Error> {
+        status(unsafe { rv_dmabuf_sync_file_import(buffer.as_raw_fd(), fence.as_raw_fd(), write) })
+    }
 }
