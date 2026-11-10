@@ -378,17 +378,18 @@ Command/Ctrl-Z, Shift-Command/Ctrl-Z, and Ctrl-Y step it.
 
 ## Graph zones
 
-The graph pane of a workspace document adds tokens only: `Theme.zone_for`,
-`zone_fold`, `zone_sum`, `zone_fn` and `zone_let` (fill, edge, dashed; light
-and dark from the study's palette), and `Theme.ports` entries `text`, `fn`
-and `record` (a list draws its element colour on a stacked socket, a function
-a diamond, a record a wide pill). `Theme.dark` tells the two palettes apart.
+The graph pane of a workspace document adds tokens only, outside the engine
+theme in `rays_graph::scope_paint`: `zone_for`, `zone_fold`, `zone_sum`,
+`zone_fn` and `zone_let` (fill, edge, dashed; light and dark from the study's
+palette), and `ports` entries `text`, `fn` and `record` (a list draws its
+element colour on a stacked socket, a function a diamond, a record a wide
+pill). `theme::dark` tells the two palettes apart.
 `test_ui_parity` guards them with `fixtures/kit_zones_2x.png`. The
 iteration selector is built from ordinary boxes; no widget was added to `Ui`.
 The footers (value, sparkline, tags) are painted
 the same way: no new token or widget.
 
-Conditional arms use `Theme.zone_branch ~taken`: a solid hairline and a warm
+Conditional arms use `zone_branch ~taken`: a solid hairline and a warm
 wash, stronger for the selected arm. These zones have a condition rail and no
 iteration selector. The 2x zone golden covers both taken and untaken states.
 
