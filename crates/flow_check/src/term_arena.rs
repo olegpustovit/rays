@@ -326,7 +326,7 @@ pub struct TermBuilder {
     tables: Tables,
     names: NamesBuilder,
     syntax: SyntaxBuilder,
-    paths: FastMap<Vec<NameId>, PathId>,
+    paths: FastMap<Vec<Symbol>, PathId>,
     imports: FastMap<(u64, u32), TermId>,
     source_forms: FastMap<SyntaxId, Syntax>,
     scratch: Vec<TermId>,
@@ -520,12 +520,12 @@ impl TermBuilder {
         range
     }
     pub fn path(&mut self, path: &[Symbol]) -> PathId {
+        if let Some(&id) = self.paths.get(path) { return id; }
         let names: Vec<NameId> = path.iter().map(|name| self.intern(name)).collect();
-        if let Some(&id) = self.paths.get(&names) { return id; }
         let range = self.name_range(&names);
         let id = PathId(std::num::NonZeroU32::new(index(self.tables.paths.len()).checked_add(1).expect("term path limit")).unwrap());
         self.tables.paths.push(range);
-        self.paths.insert(names, id);
+        self.paths.insert(path.to_vec(), id);
         id
     }
     pub fn type_id(&mut self, ty: &Ty) -> TypeId {
