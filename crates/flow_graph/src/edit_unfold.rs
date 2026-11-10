@@ -21,7 +21,7 @@ pub fn unfold_in(used: &mut Vec<String>, name: Option<&str>, sx: &S, leaf: &str,
                 } else {
                     format!("{}_{}", base, if h == "sum" { "total" } else { "each" })
                 }
-            } else if h == "let*" {
+            } else if matches!(h.as_str(), "let" | "let*") {
                 "block".to_owned()
             } else {
                 value_base(&h)

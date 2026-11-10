@@ -188,3 +188,26 @@ fn gesture_smoke() {
     assert!(has(&text_of(&edit(&d, Op::InlineDefn { node: path(&["g", "b"]) })), "b (+ a 2.0)"));
     assert!(has(&tx(Op::FoldInto { node: path(&["g", "b"]) }), "c (* (+ a 2.0) 3.0)"));
 }
+
+#[test]
+fn inferred_context_and_let_alias_keep_projection_and_direct_edits() {
+    let src = parse("(workspace demo (graph g (let [radius 12.5] (draw/circle [20 30] radius :fill \"#5aaaf0\"))))");
+    let ws = check(&src);
+    assert_eq!(ws.graphs[0].context, flow_syntax::context::draw());
+    let scope = p::of_graph(&catalog(), &ws, "g").unwrap();
+    assert!(find_head("draw/circle", &scope).is_some());
+    let (changed, checked) = apply_checked(&catalog(), &src, &Op::Rename { node: path(&["g", "radius"]), to_: "size".into() }).unwrap();
+    let text = text_of(&changed);
+    assert!(text.contains("(let [size 12.5]") && !text.contains(":context"), "{text}");
+    assert_eq!(checked.graphs[0].context, flow_syntax::context::draw());
+    assert!(p::of_graph(&catalog(), &checked, "g").is_ok());
+    for source in [
+        "(workspace demo (graph g (circle 12.5)) (defn circle [(radius : float)] (draw/circle [20 30] radius)))",
+        "(workspace demo (graph g (ref picture)) (graph picture (draw/merge)))",
+    ] {
+        let forms = parse(source);
+        let workspace = check(&forms);
+        assert_eq!(workspace.graphs[0].context, flow_syntax::context::draw());
+        assert!(p::of_graph(&catalog(), &workspace, "g").is_ok());
+    }
+}

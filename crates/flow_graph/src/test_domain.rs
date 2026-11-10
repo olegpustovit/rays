@@ -30,7 +30,7 @@ fn lookup(scope: &p::Scope) -> Option<p::Node> {
     find_head("array/nth", scope)
 }
 fn int_array(v: &[i64]) -> Value {
-    Value::Int_array(Arc::new(v.to_vec()))
+    Value::IntArray(Arc::new(v.to_vec()))
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn lookup_of_text() {
     assert_eq!(card.ty, Ty::Text);
     let (_, edited) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(1), num("2"))).unwrap();
     let t = "é日本😀".as_bytes().to_vec();
-    assert_eq!(result(&edited, 0.0), Value::Text_array(Arc::new(vec![t.clone(), t.clone(), t].into())));
+    assert_eq!(result(&edited, 0.0), Value::TextArray(Arc::new(vec![t.clone(), t.clone(), t].into())));
 }
 
 #[test]

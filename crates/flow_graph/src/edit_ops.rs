@@ -278,7 +278,7 @@ fn source_root(src:&[S],name:&str)->Option<S>{
     }
     None
 }
-fn source_scope(e:&S)->bool{let l=e.children();e.meta().is_empty()&&matches!(e.node,Node::List(_))&&l.len()==3&&base::head_sym(e)==Some("let*")&&matches!(e.arena().row(l[1]).node,Node::Vec(_))&&e.arena().children(l[1]).len()%2==0}
+fn source_scope(e:&S)->bool{let l=e.children();e.meta().is_empty()&&matches!(e.node,Node::List(_))&&l.len()==3&&base::head_sym(e).is_some_and(|head| matches!(head, "let" | "let*"))&&matches!(e.arena().row(l[1]).node,Node::Vec(_))&&e.arena().children(l[1]).len()%2==0}
 fn source_node(e:&S,leaf:&str)->Option<S>{
     let(base,keys)=syntax_ids::split_leaf(leaf).ok()?;let mut out=if source_scope(e){let l=e.children();if base=="@result"{e.child(l[2])}else{let p=e.arena().children(l[1]).chunks_exact(2).find(|p|base::pat_key(&e.child(p[0]))==base)?;e.child(p[1])}}else if base=="@result"{e.clone()}else{return None;};
     for key in keys{out=arg_of(&out,&key)?;}Some(out)
@@ -1052,7 +1052,7 @@ fn move_step(src: &[S], node: &[Symbol], earlier: bool, builder: &mut SyntaxBuil
 
 fn toggle_bypass(src:&[S],node:&[Symbol],builder:&mut SyntaxBuilder)->R<Vec<S>>{
     let(sp,leaf)=split_node(node)?;edit_scope(src,&sp,&mut |sx,builder|{let e=get_node(sx,&leaf,builder)?;
-        match(node_of(&e,builder),head_sym(&e,builder)){(Node::List(_),Some(h)) if !is_zone(&e,builder)&&h!="let*"&&h!="fn"=>{},_=>return Err(fail("Only an operator or function call can be bypassed."))}
+        match(node_of(&e,builder),head_sym(&e,builder)){(Node::List(_),Some(h)) if !is_zone(&e,builder)&&!matches!(h,"let"|"let*")&&h!="fn"=>{},_=>return Err(fail("Only an operator or function call can be bypassed."))}
         let mut lines=meta(&e,builder).to_vec();if lines.iter().any(|m|m=="bypass"){lines.retain(|m|m!="bypass");}else{lines.push("bypass".into());}let e=with_meta(&e,lines,builder);set_node(sx,&leaf,e,builder)
     },builder)
 }

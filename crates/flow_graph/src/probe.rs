@@ -226,7 +226,7 @@ fn describe_value(v: &Value) -> String {
             } else {
                 match &xs[0] {
                     Value::Deferred(Ty::Named(g), _) if g == "geometry" => "geometry".to_owned(),
-                    Value::No_geo => "geometry".to_owned(),
+                    Value::NoGeo => "geometry".to_owned(),
                     Value::Text(_) => "text".to_owned(),
                     Value::Vec2(..) => "vec2".to_owned(),
                     Value::Vec3(..) => "vec3".to_owned(),
@@ -240,12 +240,12 @@ fn describe_value(v: &Value) -> String {
             };
             format!("{} × {}", n, what)
         }
-        Value::Int_array(xs) => format!("{} × int", xs.len()),
-        Value::Text_array(xs) => format!("{} × text", xs.len()),
+        Value::IntArray(xs) => format!("{} × int", xs.len()),
+        Value::TextArray(xs) => format!("{} × text", xs.len()),
         Value::Floats(_, _) => String::from_utf8(flow_syntax::value::show_with(&Clone::clone, v)).expect("array description is UTF-8"),
         Value::Record(fs) => format!("{{{}}}", fs.iter().map(|(f, v)| format!("{} {}", f, describe_value(v))).collect::<Vec<_>>().join(" · ")),
         Value::Deferred(t, _) => ty::to_string(t),
-        Value::No_geo => "nil".to_owned(),
+        Value::NoGeo => "nil".to_owned(),
         Value::Struct(g) | Value::Source(g) => g.name.clone(),
         Value::Fn(_) => "function".to_owned(),
         Value::Residual(_) => "?".to_owned(),

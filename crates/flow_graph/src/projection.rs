@@ -501,7 +501,7 @@ fn binder(p: &str, e: &S) -> bool {
     let here = match e.node {
         SNode::List(range) => {
             let items = e.range(range);
-            items.first().is_some_and(|head| matches!(e.arena().row(*head).node, SNode::Sym(h) if is_zone_head(e.name(h)) || e.name(h) == "let*"))
+            items.first().is_some_and(|head| matches!(e.arena().row(*head).node, SNode::Sym(h) if is_zone_head(e.name(h)) || matches!(e.name(h), "let" | "let*")))
                 && items[1..].iter().any(|id| match e.arena().row(*id).node {
                     SNode::Vec(range) => e.range(range).chunks_exact(2).any(|pair| unquoted(&e.child(pair[0]))),
                     _ => false,
@@ -708,7 +708,7 @@ fn call_rows(c: &Cx, e: &S, h: &str, args: &[SyntaxId]) -> Vec<Row> {
             rows.push(row(c, "else", ArgKey::Arm(-1), kw_find("else")));
             rows
         }
-        "map" | "filter" | "reduce" | "sort-by" => {
+        "map" | "filter" | "reduce" | "sort_by" => {
             let input_ty = |i: usize, fallback: Option<Ty>| -> Option<Ty> {
                 match c.forms.get(&e.id) {
                     Some(Info { node: Slim::Hof { inputs, .. }, .. }) => match inputs.get(i) {
@@ -880,7 +880,7 @@ fn scope_form(e: &S) -> Option<(&[flow_syntax::arena::SyntaxId], S)> {
     }
     if let SNode::List(range) = e.node {
         let items = e.range(range);
-        if items.len() == 3 && s::head(e) == Some("let*") {
+        if items.len() == 3 && s::head(e) .is_some_and(|head| matches!(head, "let" | "let*")) {
             if let SNode::Vec(range) = e.arena().row(items[1]).node {
                 let bindings = e.range(range);
                 if bindings.len() % 2 == 0 {
@@ -902,7 +902,7 @@ fn zone_kind(e: &S) -> Option<ZoneKind> {
         Some("scan") => Some(ZoneKind::Scan),
         Some("sum") => Some(ZoneKind::Sum),
         Some("state") => Some(ZoneKind::State),
-        Some("let*") if scope_form(e).is_some() => Some(ZoneKind::Let),
+        Some("let" | "let*") if scope_form(e).is_some() => Some(ZoneKind::Let),
         Some("fn") => Some(ZoneKind::Fn),
         _ => None,
     }
@@ -1203,7 +1203,7 @@ fn node_of(c: &Cx, folded: &dyn Fn(&[Symbol]) -> bool, visible: &[String], expr:
         }
     }
     let head = match kind {
-        Some(ZoneKind::Let) => "let*".to_owned(),
+        Some(ZoneKind::Let) => s::head(e).unwrap_or("let").to_owned(),
         Some(_) => s::head(e).unwrap_or("").to_owned(),
         None => {
             if nested_leaf.is_some() && eb::context_sym(e) { "t".to_owned() } else { head_label(e) }

@@ -82,8 +82,8 @@ pub use ids::{dedup, fresh_among, has_prefix, nested, nested_leaf, root_of, valu
 pub fn sym_of(e:&S)->Option<&str>{match e.node{Node::Sym(n)=>Some(e.name(n)),_=>None}}
 pub fn head_sym(e:&S)->Option<&str>{s::head(e)}
 pub fn context_sym(e:&S)->bool{sym_of(e)==Some("t")}
-pub fn node_call(e:&S)->bool{match head_sym(e){Some("fn"|"map"|"filter"|"reduce"|"sort-by"|"iterate"|"if"|"cond"|"case"|"with_error"|"error_rows"|"exact")=>true,Some(h)=>h.len()>1&&h.contains('/'),None=>false}}
-pub fn value_call(e:&S)->bool{!node_call(e) && !(e.meta().is_empty() && matches!(head_sym(e),Some("for"|"fold"|"scan"|"sum"|"state"|"fn"))) && head_sym(e).is_some_and(|h|h!="list"&&h!="let*"&&value_ops().contains(h))}
+pub fn node_call(e:&S)->bool{match head_sym(e){Some("fn"|"map"|"filter"|"reduce"|"sort_by"|"iterate"|"if"|"cond"|"case"|"with_error"|"error_rows"|"exact")=>true,Some(h)=>h.len()>1&&h.contains('/'),None=>false}}
+pub fn value_call(e:&S)->bool{!node_call(e) && !(e.meta().is_empty() && matches!(head_sym(e),Some("for"|"fold"|"scan"|"sum"|"state"|"fn"))) && head_sym(e).is_some_and(|h|h!="list"&&!matches!(h,"let"|"let*")&&value_ops().contains(h))}
 pub fn pat_key(e:&S)->String{lisp::flat(e)}
 pub fn pat_names(e:&S)->Vec<String>{
     fn go(a:&flow_syntax::syntax::SyntaxArena,id:flow_syntax::syntax::SyntaxId,out:&mut Vec<String>){match a.row(id).node{Node::Sym(n)=>out.push(a.name(n).into()),Node::Vec(_)=>for &c in a.children(id){go(a,c,out);},Node::Map(_)=>for &c in a.children(id){if matches!(a.row(c).node,Node::Vec(_)){for &x in a.children(c){go(a,x,out);}}},_=>{}}}
@@ -100,7 +100,7 @@ fn declared(e:&S)->Vec<String>{
         if matches!(e.node,Node::List(_)){
             let bound=|id,out:&mut Vec<String>|{let x=e.child(id);if matches!(x.node,Node::Vec(_)){for p in x.children().chunks_exact(2){out.extend(pat_names(&x.child(p[0])));}}};
             match head_sym(e){
-                Some("let*"|"for"|"scan"|"sum"|"state") if l.len()>=2=>{bound(l[1],out);done=true;},
+                Some("let"|"let*"|"for"|"scan"|"sum"|"state") if l.len()>=2=>{bound(l[1],out);done=true;},
                 Some("fold") if l.len()>=3=>{bound(l[2],out);bound(l[1],out);done=true;},
                 Some("fn") if l.len()>=2 && matches!(e.arena().row(l[1]).node,Node::Vec(_))=>{for &p in e.arena().children(l[1]){let p=e.child(p);if matches!(p.node,Node::List(_)) && p.children().first().is_some_and(|&id|sym_of(&p.child(id)).is_some()){out.push(sym_of(&p.child(p.children()[0])).unwrap().into());}else{out.extend(pat_names(&p));}}done=true;},_=>{}
             }
@@ -415,7 +415,7 @@ fn declared_into(e:&S,acc:&mut Vec<String>,b:&SyntaxBuilder){
     if matches!(node_of(e,b),Node::List(_)) {
         let l=children(e,b);let head=l.first().and_then(|x|sym_of(x,b));let mut done=false;
         match head {
-            Some("let*"|"for"|"scan"|"sum"|"state") if l.len()>=2=>{bound(&l[1],acc,b);done=true;},
+            Some("let"|"let*"|"for"|"scan"|"sum"|"state") if l.len()>=2=>{bound(&l[1],acc,b);done=true;},
             Some("fold") if l.len()>=3=>{bound(&l[2],acc,b);bound(&l[1],acc,b);done=true;},
             Some("fn") if l.len()>=2 && matches!(node_of(&l[1],b),Node::Vec(_))=>{
                 for p in children(&l[1],b){let pl=children(p,b);if matches!(node_of(p,b),Node::List(_)) && pl.first().and_then(|x|sym_of(x,b)).is_some(){acc.push(sym_of(&pl[0],b).unwrap().into());}else{acc.extend(pat_names(p,b));}}done=true;
@@ -666,7 +666,7 @@ pub fn arg_set(e:&S,key:&ArgKey,v:Option<S>,b:&mut SyntaxBuilder)->R<S>{
 pub struct Scope {pub form:S,pub vec:S,pub ps:Vec<(S,S)>,pub res:S}
 pub fn scope_of(e:&S,b:&SyntaxBuilder)->Option<Scope>{
     if !meta(e,b).is_empty(){return None;}let l=children(e,b);
-    if matches!(node_of(e,b),Node::List(_)) && l.len()==3 && sym_of(&l[0],b)==Some("let*") && matches!(node_of(&l[1],b),Node::Vec(_)){
+    if matches!(node_of(e,b),Node::List(_)) && l.len()==3 && sym_of(&l[0],b).is_some_and(|head| matches!(head, "let" | "let*")) && matches!(node_of(&l[1],b),Node::Vec(_)){
         let bs=children(&l[1],b);if bs.len()%2==0{return Some(Scope{form:*e,vec:l[1],ps:pairs(bs),res:l[2]});}
     }None
 }
@@ -678,7 +678,7 @@ pub fn collapse(sc:&Scope,ps:&[(S,S)],res:S,b:&mut SyntaxBuilder)->S{if ps.is_em
 
 pub fn node_call(e: &S, b: &SyntaxBuilder) -> bool {
     match head_sym(e, b) {
-        Some("fn" | "map" | "filter" | "reduce" | "sort-by" | "iterate" | "if" | "cond" | "case" | "with_error" | "error_rows" | "exact") => true,
+        Some("fn" | "map" | "filter" | "reduce" | "sort_by" | "iterate" | "if" | "cond" | "case" | "with_error" | "error_rows" | "exact") => true,
         Some(h) => h.len() > 1 && h.contains('/'),
         None => false,
     }
@@ -913,7 +913,7 @@ pub fn value_call(e: &S, b: &SyntaxBuilder) -> bool {
     !node_call(e, b)
         && !is_zone(e, b)
         && match head_sym(e, b) {
-            Some(h) => h != "list" && h != "let*" && value_ops().contains(h),
+            Some(h) => h != "list" && !matches!(h, "let" | "let*") && value_ops().contains(h),
             None => false,
         }
 }
@@ -1160,7 +1160,7 @@ pub fn literals(e:&S,b:&SyntaxBuilder)->Vec<(Vec<i64>,S)>{
     let mut out=Vec::new();go(e,&mut Vec::new(),&mut out,b);out
 }
 pub fn fn_names(root:&S,b:&SyntaxBuilder)->Vec<String>{
-    fn go(e:&S,acc:&mut Vec<String>,b:&SyntaxBuilder){let l=children(e,b);if matches!(node_of(e,b),Node::List(_)) && l.len()>=2 && sym_of(&l[0],b)==Some("let*") && matches!(node_of(&l[1],b),Node::Vec(_)){for p in children(&l[1],b).chunks_exact(2){if head_sym(&p[1],b)==Some("fn"){acc.extend(pat_names(&p[0],b));}}}for c in children(e,b){go(c,acc,b);}}
+    fn go(e:&S,acc:&mut Vec<String>,b:&SyntaxBuilder){let l=children(e,b);if matches!(node_of(e,b),Node::List(_)) && l.len()>=2 && sym_of(&l[0],b).is_some_and(|head| matches!(head, "let" | "let*")) && matches!(node_of(&l[1],b),Node::Vec(_)){for p in children(&l[1],b).chunks_exact(2){if head_sym(&p[1],b)==Some("fn"){acc.extend(pat_names(&p[0],b));}}}for c in children(e,b){go(c,acc,b);}}
     let mut out=Vec::new();go(root,&mut out,b);out
 }
 pub enum Target{At(usize),Result}
