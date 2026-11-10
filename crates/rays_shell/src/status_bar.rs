@@ -201,7 +201,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
     if height <= 0 {
         return;
     }
-    let theme = ui.theme();
+    let theme = ui.tokens();
     match &o.leader {
         Some(pending) => {
             // an open leader: the file and its state, a rule, the pending prefix in the accent and
@@ -341,7 +341,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
 pub fn tips(ui: &mut Ui, bounds: (i64, i64, i64, i64), avoid: &[(f32, f32, f32, f32)], tips: &[(String, TipKind)]) {
     let (x, y, width, height) = bounds;
     if width > 0 && height > 0 && !tips.is_empty() {
-        let theme = ui.theme();
+        let theme = ui.tokens();
         let count = tips.len();
         for (index, (text, kind)) in tips.iter().enumerate() {
             let extra = match kind {

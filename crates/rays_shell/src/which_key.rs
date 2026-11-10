@@ -173,7 +173,7 @@ pub fn panel(
     focus: &Panel,
     focus_name: &str,
 ) {
-    let theme = ui.theme();
+    let theme = ui.tokens();
     let describe: &dyn Fn(&str) -> Option<String> = describe.unwrap_or(&no_describe);
     let order: &dyn Fn(&str) -> Vec<String> = order.unwrap_or(&no_order);
     let sections: Sections = match category {
@@ -289,7 +289,7 @@ pub fn sheet(
     let cap = kit::cap_size(ui);
     let context = context.to_string();
     let open = ui.modal(Some(572.0), "guide-keys", &mut |ui| {
-        let theme = ui.theme();
+        let theme = ui.tokens();
         let mut closed = false;
         // the title row: 4 above, then 24: the label, what has the focus (ink-2 at 70 percent, as
         // written) 8 before the close button, which ends 8 from the edge

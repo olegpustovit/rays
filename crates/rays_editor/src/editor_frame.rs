@@ -280,7 +280,7 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
             };
             let b = ui.box_("split-pending", BoxOpts::default().flags(CLICKABLE).w(Size::Px((frame_.input.size.0 as f64) as f32)).h(Size::Px((frame_.input.size.1 as f64) as f32)).at((0.0, 0.0)));
             ui.to_front(900, &b);
-            let theme = ui.theme();
+            let theme = ui.tokens();
             let painted = leaf.clone();
             let name = panels::name(&panel).to_uppercase();
             ui.draw_over(&b, move |paint, _| {

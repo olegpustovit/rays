@@ -26,7 +26,7 @@ fn view_layer(ui: &mut Ui, bounds: Rect, key: &str) -> UiBox {
 }
 
 /// A label in the row at `y`; `pl` and `pr` points of ground beside it; its width.
-fn label(paint: &mut Paint, theme: &theme::Theme, rh: f32, x: f32, y: f32, pl: f32, pr: f32, color: Option<Color>, text: &str) -> f32 {
+fn label(paint: &mut Paint, theme: &theme::Tokens, rh: f32, x: f32, y: f32, pl: f32, pr: f32, color: Option<Color>, text: &str) -> f32 {
     let w = paint.cap_width(text);
     paint.fill(x - pl, y, w + pl + pr, rh, theme.panel);
     let cy = kit::cap_y_paint(paint, y, rh);
@@ -42,7 +42,7 @@ fn field(node: &kind_graph::Node, name: &str) -> Option<f64> {
 }
 
 /// The draw of the traced readout of a viewport (its samples are the caption's "n/cap spp").
-fn traced_readout(paint: &mut Paint, theme: &theme::Theme, rh: f32, narrow: bool, (x, y, w, h): (f32, f32, f32, f32), t: &Trace) {
+fn traced_readout(paint: &mut Paint, theme: &theme::Tokens, rh: f32, narrow: bool, (x, y, w, h): (f32, f32, f32, f32), t: &Trace) {
     if !(w > 200.0 && h > 120.0) {
         return;
     }
@@ -88,7 +88,7 @@ fn traced_readout(paint: &mut Paint, theme: &theme::Theme, rh: f32, narrow: bool
     paint.cap((ox, cy), None, &text);
 }
 
-fn camera_readout(paint: &mut Paint, theme: &theme::Theme, rh: f32, (x, y, w, _h): (f32, f32, f32, f32), node: &kind_graph::Node) {
+fn camera_readout(paint: &mut Paint, theme: &theme::Tokens, rh: f32, (x, y, w, _h): (f32, f32, f32, f32), node: &kind_graph::Node) {
     // the render camera: its name, its lens and focus as a two-column grid whose labels and values
     // both end at their column's right edge, 10 apart
     let mut rows: Vec<(String, String)> = vec![("Camera".to_string(), node.label.clone())];
@@ -136,7 +136,7 @@ pub fn draw_viewport_pane<'a>(
     if let (Some(text), Some(leaf)) = (&caption, active) {
         // a label on the ground, like every readout over the view
         let layer = view_layer(ui, leaf.body, "viewport-caption");
-        let theme = ui.theme();
+        let theme = ui.tokens();
         let text = text.clone();
         ui.draw(&layer, move |paint, pxui::geom::Rect { x, y, h, .. }| {
             let (px, py) = (x + 12.0, y + h - 24.0);
@@ -149,7 +149,7 @@ pub fn draw_viewport_pane<'a>(
     // readout at the upper left, the render camera at the upper right, the selected object's
     // brackets and name, and the scene's size and the frame rate at the lower right; every label is
     // a row high and sits on a patch of the ground
-    let theme = ui.theme();
+    let theme = ui.tokens();
     let rh = ui.row_height() as f32;
     // a viewport window labels its frame at the top left: the shading and the camera ("Wire . top")
     for (leaf, _) in roots {

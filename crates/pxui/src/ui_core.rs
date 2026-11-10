@@ -4,7 +4,7 @@
 //! it stops declaring it. Input uses prior-frame rectangles; layout follows construction and painting
 //! packs instance lists. Canvas closures live in the frame arena and run after layout. Between builds
 //! the `patch_*` functions rewrite one node's instances in place (layer 1 of specification/pxui.md).
-use crate::theme::{self, Theme};
+use crate::theme;
 pub use crate::geom::Rect;
 pub(crate) use crate::geom::p32;
 use input::{Event, Key, MouseButton, Platform, ScrollPhase};
@@ -217,54 +217,56 @@ pub enum UndoKind {
 
 pub type HitFn = Rc<dyn Fn(Rect) -> Rect>;
 
-/// A drop shadow under a node: none while `color` is transparent.
+pub use crate::theme::{Font, Look, Ring, Shadow, State, States, Theme, Tokens};
+
+/// Where a node's look, text and mark sit in its laid-out rectangle: `inset` in from each side, then
+/// at most `w` wide (at the left, or the right with `end`) and `h` high (centred), when finite. The
+/// whole rectangle by default; a widget's background whose width is known only after layout.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Shadow {
+pub struct Place {
+    pub inset: Edges,
+    pub w: f32,
+    pub h: f32,
+    pub end: bool,
+}
+
+impl Place {
+    pub const ALL: Place = Place { inset: Edges { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }, w: f32::INFINITY, h: f32::INFINITY, end: false };
+    /// The placed rectangle in `r`.
+    pub fn rect(&self, r: Rect) -> Rect {
+        let Edges { l, t, r: right, b } = self.inset;
+        let (x, y, w, h) = (r.x + l, r.y + t, r.w - l - right, r.h - t - b);
+        let pw = if self.w.is_finite() { self.w.min(w).max(1.0) } else { w };
+        let ph = if self.h.is_finite() { self.h } else { h };
+        let px = if self.end { x + w - pw } else { x };
+        let py = if self.h.is_finite() { y + ((h - ph) / 2.0).floor() } else { y };
+        Rect::new(px, py, pw, ph)
+    }
+}
+
+/// A drawn mark centred in a node's placed rectangle, in its look's text colour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mark {
+    None,
+    Chevron(Dir),
+}
+
+/// A scroll node's thumb: `width` points wide, `gap` from the right edge, between `margin` points of
+/// the top and bottom; `whole` keeps it on whole points (a panel's).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bar {
     pub color: Color,
-    pub offset: (f32, f32),
-    pub blur: f32,
-    pub spread: f32,
-}
-
-/// Node text: `size` points (0: the UI's font size), `tracking` points after every glyph, `caps`
-/// upper-cases it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Font {
-    pub size: i64,
-    pub tracking: f32,
-    pub caps: bool,
-}
-
-/// What a node looks like, as plain data the engine paints with no closure, in this order: the
-/// shadow, the fill, a `border_w` border inside the box, `radius` on every corner, then the node's
-/// text in `text` and `font`. Transparent colours paint nothing.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Look {
-    pub fill: Color,
-    pub border: Color,
-    pub border_w: f32,
     pub radius: f32,
-    pub shadow: Shadow,
-    pub text: Color,
-    pub font: Font,
-}
-
-const CLEAR: Color = Color { r: 0, g: 0, b: 0, a: 0 };
-
-impl Look {
-    pub const NONE: Look = Look {
-        fill: CLEAR,
-        border: CLEAR,
-        border_w: 0.0,
-        radius: 0.0,
-        shadow: Shadow { color: CLEAR, offset: (0.0, 0.0), blur: 0.0, spread: 0.0 },
-        text: CLEAR,
-        font: Font { size: 0, tracking: 0.0, caps: false },
-    };
+    pub width: f32,
+    pub gap: f32,
+    pub margin: f32,
+    pub whole: bool,
 }
 
 /// A node's layout inputs and look. `at` places it outside the flow at an offset from the parent's
-/// origin; `max_h` caps a `Fit` height; `inset` is where its text sits inside it.
+/// origin; `max_h` caps a `Fit` height; `place` is where its look sits in it and `inset` where its text
+/// sits in that; `mark` is drawn over its text; `bar` gives a scroll node its thumb; `state` is what
+/// the look was picked for (a change of state starts the theme's transition).
 #[derive(Clone, Copy, Debug)]
 pub struct Node {
     pub flags: Flags,
@@ -277,6 +279,10 @@ pub struct Node {
     pub scroll_step: f32,
     pub look: Look,
     pub inset: Edges,
+    pub place: Place,
+    pub mark: Mark,
+    pub bar: Option<Bar>,
+    pub state: State,
 }
 
 impl Node {
@@ -291,6 +297,10 @@ impl Node {
         scroll_step: 24.0,
         look: Look::NONE,
         inset: Edges { l: 0.0, t: 0.0, r: 0.0, b: 0.0 },
+        place: Place::ALL,
+        mark: Mark::None,
+        bar: None,
+        state: State { hovered: false, pressed: false, focused: false, disabled: false, checked: false },
     };
 }
 
@@ -346,6 +356,8 @@ struct ViewRec {
     parent: u32,
     revision: u64,
     epoch: u64,
+    /// the `themed` override it was built under (0: none)
+    theme: u32,
     /// frames it was last built, kept (build skipped) and reached by the paint
     built: i64,
     kept: i64,
@@ -395,6 +407,7 @@ impl ViewRec {
             parent: 0,
             revision: 0,
             epoch: 0,
+            theme: 0,
             built: -1,
             kept: -1,
             visited: -1,
@@ -704,6 +717,12 @@ fn caret_x(t: &mut Text, size: i64, text: &str, index: usize) -> f32 {
 
 pub struct Ui {
     theme: Theme,
+    /// `themed` overrides in effect (`themes[..theme_depth]`, storage kept), the distinct themes views
+    /// were built under (an id is an index) and the id in effect
+    themes: Vec<Theme>,
+    theme_depth: usize,
+    theme_ids: Vec<Theme>,
+    theme_id: u32,
     font_size: i64,
     platform: Platform,
     /// the text engine; `Paint` holds it while a frame paints
@@ -758,7 +777,7 @@ pub struct Ui {
     /// What the host last charged to its memory ledger for this UI; PXUI never reads it.
     pub charged: Bytes,
     pub(crate) text_rows_seen: Vec<(Option<usize>, String, Rc<Vec<(usize, usize, usize)>>)>,
-    pub(crate) text_colors_seen: Vec<(Theme, String, Rc<Vec<(i64, i64, Color)>>)>,
+    pub(crate) text_colors_seen: Vec<(Tokens, String, Rc<Vec<(i64, i64, Color)>>)>,
     pub(crate) edit_redo: Vec<(String, usize, usize)>,
     pub(crate) edit_group: i64,
     pub(crate) edit_shelf: Vec<ShelfEntry>,
@@ -863,7 +882,11 @@ impl Ui {
             panic!("Ui.create: font_size must be positive");
         }
         Ui {
-            theme: theme::default(),
+            theme: Theme::default(),
+            themes: Vec::new(),
+            theme_depth: 0,
+            theme_ids: Vec::new(),
+            theme_id: 0,
             font_size,
             platform,
             text: Some(text),
@@ -991,15 +1014,54 @@ impl Ui {
         }
     }
 
-    pub fn theme(&self) -> Theme {
-        self.theme
+    /// The theme in effect: the UI's own, or the innermost `themed` override while building in one.
+    pub fn theme(&self) -> &Theme {
+        if self.theme_depth > 0 { &self.themes[self.theme_depth - 1] } else { &self.theme }
     }
 
+    /// The theme in effect's tokens, by value: what a canvas closure captures.
+    pub fn tokens(&self) -> Tokens {
+        self.theme().tokens
+    }
+
+    /// Swap the UI's theme (light, dark, high contrast, an accent: each is a `Theme` value). A change
+    /// rebuilds every view. Between frames, or inside one for what is built after it.
+    // ponytail: a swap snaps; transitioning every node's look to the new theme's needs the swap to
+    // re-resolve each node's state against the new States (a rebuild already does) plus a tween per
+    // node; add when a host wants animated theme swaps.
     pub fn set_theme(&mut self, theme: Theme) {
         if theme != self.theme {
             self.epoch += 1;
+            self.theme = theme;
         }
-        self.theme = theme;
+    }
+
+    /// Build `f` under `theme` (a scoped override: what `f` builds reads `theme()` as `theme`). A view
+    /// built inside rebuilds when the override it was built under changes.
+    pub fn themed(&mut self, theme: &Theme, f: &mut dyn FnMut(&mut Ui)) {
+        let saved = self.theme_id;
+        // ponytail: ids by linear search over the distinct themes seen (at most 32, the last slot reused
+        // past that); a theme revision supplied by the caller if apps juggle many themes.
+        self.theme_id = match self.theme_ids.iter().position(|t| t == theme) {
+            Some(i) => i as u32 + 1,
+            None => {
+                if self.theme_ids.len() >= 32 {
+                    self.theme_ids.pop();
+                    self.epoch += 1;
+                }
+                self.theme_ids.push(*theme);
+                self.theme_ids.len() as u32
+            }
+        };
+        if self.theme_depth == self.themes.len() {
+            self.themes.push(*theme);
+        } else {
+            self.themes[self.theme_depth] = *theme;
+        }
+        self.theme_depth += 1;
+        f(self);
+        self.theme_depth -= 1;
+        self.theme_id = saved;
     }
 
     pub fn font_size(&self) -> i64 {
@@ -2899,7 +2961,7 @@ pub struct Paint {
     /// the view table index instances take
     view: u16,
     pub clip_rect: Rect,
-    pub theme: Theme,
+    pub theme: Tokens,
     pub font_size: i64,
     pub row_height: i64,
     /// device pixels per point
@@ -2970,40 +3032,137 @@ impl Paint {
         }
     }
 
-    /// A node's look and text in `r`: what the engine paints for it with no closure.
-    fn look(&mut self, r: Rect, node: &Node, text: &str) {
-        let Look { fill, border, border_w, radius, shadow, text: ink, font } = node.look;
-        let Rect { x, y, w, h } = r;
-        let corners = [x, y, x + w, y + h];
-        if shadow.color.a > 0 && w > 0.0 && h > 0.0 {
-            self.push(Instance::shadow(corners, [radius; 4], rgba(shadow.color), [shadow.offset.0, shadow.offset.1], shadow.blur, shadow.spread, false));
+    /// Bands `width` wide inside `r` on `sides` (0: all four, the stroke `frame_w` draws).
+    fn bands(&mut self, Rect { x, y, w, h }: Rect, width: f32, sides: u8, color: Color) {
+        use crate::draw::flags::{BOTTOM, LEFT, RIGHT, TOP};
+        if sides & 0xf0 == 0 || sides & 0xf0 == 0xf0 {
+            self.frame_w(x, y, w, h, width, color);
+            return;
         }
-        let bordered = border_w > 0.0 && border.a > 0;
-        if radius > 0.0 {
-            if (fill.a > 0 || bordered) && w > 0.0 && h > 0.0 {
-                let shape = Instance::rect(corners, rgba(fill)).radii([radius; 4]);
-                self.push(if bordered { shape.border(border_w, rgba(border)) } else { shape });
+        if sides & TOP != 0 {
+            self.fill(x, y, w, width, color);
+        }
+        if sides & RIGHT != 0 {
+            self.fill(x + w - width, y, width, h, color);
+        }
+        if sides & BOTTOM != 0 {
+            self.fill(x, y + h - width, w, width, color);
+        }
+        if sides & LEFT != 0 {
+            self.fill(x, y, width, h, color);
+        }
+    }
+
+    /// A node's look, text and mark in `r` (its ring too when `focused`): what the engine paints for it
+    /// with no closure. Square, solid looks paint as hard rectangles on the pixel grid; rounded,
+    /// gradient and shadowed ones as distance fields. `steady` (a running transition) emits the same
+    /// instances whatever the colours, so each step rewrites the node's range in place.
+    fn look(&mut self, r: Rect, node: &Node, look: &Look, text: &str, focused: bool, steady: bool) {
+        let placed = node.place.rect(r);
+        let Rect { x, y, w, h } = placed;
+        let o = look.opacity.clamp(0.0, 1.0);
+        let fade = |c: Color| if o < 1.0 { Color { a: (c.a as f32 * o).round() as i64, ..c } } else { c };
+        let corners = [x, y, x + w, y + h];
+        let radii = look.radius;
+        let area = w > 0.0 && h > 0.0;
+        let shown = |c: Color| c.a > 0 || steady;
+        let round = steady || look.gradient.is_some() || radii.iter().any(|r| *r > 0.0) || look.shadows.iter().any(|s| shown(s.color));
+        let shadow = |s: &Shadow| Instance::shadow(corners, radii, rgba(fade(s.color)), [s.offset.0, s.offset.1], s.blur / 2.0, s.spread, s.inner);
+        let bordered = look.border_w > 0.0 && shown(look.border);
+        if area {
+            for s in &look.shadows {
+                if !s.inner && shown(s.color) {
+                    self.push(shadow(s));
+                }
             }
-        } else {
-            if fill.a > 0 {
-                self.fill(x, y, w, h, fill);
-            }
-            if bordered {
-                self.frame_w(x, y, w, h, border_w, border);
+            let inner = look.shadows.iter().any(|s| s.inner && shown(s.color));
+            if round {
+                let mut shape = Instance::rect(corners, rgba(fade(look.fill))).radii(radii);
+                if let Some(to) = look.gradient {
+                    let (dx, dy) = (look.angle.to_radians().sin(), -look.angle.to_radians().cos());
+                    shape = shape.linear([0.5 - dx / 2.0, 0.5 - dy / 2.0], [0.5 + dx / 2.0, 0.5 + dy / 2.0], rgba(fade(to)));
+                }
+                let edge = Instance::rect(corners, [0; 4]).radii(radii).border(look.border_w, rgba(fade(look.border))).sides(look.sides);
+                if bordered && !inner {
+                    shape = Instance { width: edge.width, color2: edge.color2, flags: shape.flags & 0x0f | edge.flags & 0xf0, ..shape };
+                }
+                if shown(look.fill) || look.gradient.is_some() || (bordered && !inner) {
+                    self.push(shape);
+                }
+                for s in &look.shadows {
+                    if s.inner && shown(s.color) {
+                        self.push(shadow(s));
+                    }
+                }
+                if bordered && inner {
+                    self.push(edge);
+                }
+            } else {
+                if look.fill.a > 0 {
+                    self.fill(x, y, w, h, fade(look.fill));
+                }
+                if bordered {
+                    self.bands(placed, look.border_w, look.sides, fade(look.border));
+                }
             }
         }
         if !text.is_empty() {
-            let size = if font.size > 0 { font.size } else { self.font_size };
+            let size = look.font.points(self.font_size);
             let inset = node.inset;
             let at = (x + inset.l, text_top_for(self.font_size, Some(size), y + inset.t, h - inset.t - inset.b));
-            if font.caps {
+            let style = Style { font: look.font.family, size: size as f32, weight: look.font.weight, tracking: look.font.tracking * size as f32, ..Style::default() };
+            let ink = Some(fade(look.text));
+            if look.font.caps {
                 let mut buffer = std::mem::take(&mut self.label);
                 buffer.clear();
                 buffer.extend(text.chars().map(|c| c.to_ascii_uppercase()));
-                self.text_with(at, Some(size), font.tracking, Some(ink), &buffer);
+                self.text_styled(at, &style, 0.0, ink, &buffer);
                 self.label = buffer;
             } else {
-                self.text_with(at, Some(size), font.tracking, Some(ink), text);
+                self.text_styled(at, &style, 0.0, ink, text);
+            }
+        }
+        if let Mark::Chevron(direction) = node.mark {
+            self.chevron((x + w / 2.0, y + h / 2.0), direction, fade(look.text));
+        }
+        let ring = look.ring;
+        if focused && area && ring.width > 0.0 && ring.color.a > 0 {
+            if round {
+                self.push(Instance::rect(corners, [0; 4]).radii(radii).border(ring.width, rgba(fade(ring.color))).sides(ring.sides));
+            } else {
+                self.bands(placed, ring.width, ring.sides, fade(ring.color));
+            }
+        }
+    }
+
+    /// A scroll node's thumb (`Node::bar`) for box `index` at `r`, where its content and scroll put it.
+    fn bar(&mut self, r: Rect, index: usize, slot: usize, bar: &Bar) {
+        let content = self.l_content[index];
+        let (w, gap) = (bar.width, bar.gap);
+        let thumb = if bar.whole {
+            // a panel's thumb lands on whole points, as its integer layout did
+            let (x, y, width, height) = (r.x as i64, r.y as i64, r.w as i64, r.h as i64);
+            let (content, margin) = (content as i64, bar.margin as i64);
+            let maximum = 0.max(content - height);
+            (maximum > 0).then(|| {
+                let track_h = 1.max(height - 2 * margin);
+                let thumb_h = track_h.min(20.max(track_h * height / 1.max(content)));
+                let thumb_y = y + margin + self.scroll_y[slot] as i64 * (track_h - thumb_h) / maximum;
+                Rect::new((x + width) as f32 - gap - w, thumb_y as f32, w, thumb_h as f32)
+            })
+        } else {
+            (content > r.h).then(|| {
+                let track_h = 1.0f32.max(r.h - 2.0 * bar.margin);
+                let thumb_h = track_h.min(20.0f32.max(track_h * r.h / content));
+                let thumb_y = r.y + bar.margin + self.scroll_y[slot] * (track_h - thumb_h) / (content - r.h);
+                Rect::new(r.x + r.w - gap - w, thumb_y, w, thumb_h)
+            })
+        };
+        if let Some(t) = thumb {
+            if bar.radius > 0.0 {
+                self.push(Instance::rect([t.x, t.y, t.x + t.w, t.y + t.h], rgba(bar.color)).radii([bar.radius; 4]));
+            } else {
+                self.fill(t.x, t.y, t.w, t.h, bar.color);
             }
         }
     }
@@ -3388,13 +3547,20 @@ impl Ui {
         }
     }
 
+    /// The node marks its own focus (`FOCUS_MARK`) and holds it: its look's ring shows.
+    fn marks_focus(&self, slot: usize) -> bool {
+        let s = &self.slots[slot];
+        s.key != 0 && s.key == self.focus && s.node.flags & FOCUS_MARK != 0
+    }
+
     /// Paint the node's look and text, recording the instance range a patch rewrites.
     fn paint_node(&mut self, paint: &mut Paint, index: usize, clip_rect: Rect) {
         paint.clip_rect = clip_rect;
         let slot = self.boxes[index].slot;
         let start = paint.layers[paint.layer].instances.len() as u32;
         let s = &self.slots[slot];
-        paint.look(self.screen(index), &s.node, &s.text);
+        let focused = self.marks_focus(slot);
+        paint.look(self.screen(index), &s.node, &s.node.look, &s.text, focused, false);
         let s = &mut self.slots[slot];
         // scratch positions until `settle` places them
         s.range = (start, paint.layers[paint.layer].instances.len() as u32);
@@ -3464,11 +3630,19 @@ impl Ui {
             }
             if shown {
                 self.run_painters(self.boxes[index].over.0, index, clip_rect, paint);
+                if let Some(bar) = self.nd(index).bar {
+                    paint.clip_rect = clip_rect;
+                    paint.bar(screen_rect, index, slot, &bar);
+                }
             }
             if shown && self.keyboard_focus && self.focus == self.boxes[index].key && flags & FOCUS_MARK == 0 {
+                // a node that marks its own focus draws its look's ring; any other gets the theme's
                 paint.clip_rect = clip_rect;
-                let accent = self.theme.accent;
-                paint.frame(self.l_x[index], self.l_y[index], 0.0f32.max(self.l_w[index]), 0.0f32.max(self.l_h[index]), accent);
+                let ring = self.theme.ring;
+                let r = Rect::new(self.l_x[index], self.l_y[index], 0.0f32.max(self.l_w[index]), 0.0f32.max(self.l_h[index]));
+                if ring.width > 0.0 && ring.color.a > 0 {
+                    paint.bands(r, ring.width, ring.sides, ring.color);
+                }
             }
         } else {
             // Culled: keep retained rectangles current for `rect` queries.
@@ -3530,7 +3704,7 @@ impl Ui {
             layer: usize::MAX,
             view: 0,
             clip_rect: clip,
-            theme: self.theme,
+            theme: self.theme.tokens,
             font_size: self.font_size,
             row_height: self.kit_row_height,
             density: self.density,
@@ -3572,7 +3746,8 @@ impl Ui {
         let mut paint = self.paint_begin(scratch, self.slots[slot].clip);
         paint.view = self.views[self.views[owner as usize].xf as usize].index;
         let s = &self.slots[slot];
-        paint.look(Rect::new(s.rx, s.ry, s.rw, s.rh), &s.node, &s.text);
+        let focused = self.marks_focus(slot);
+        paint.look(Rect::new(s.rx, s.ry, s.rw, s.rh), &s.node, &s.node.look, &s.text, focused, false);
         let scratch = self.paint_end(paint);
         let fresh = &scratch[0].instances;
         // ponytail: a colour glyph in the patch, or a texture break inside the node, needs the
@@ -3700,7 +3875,7 @@ impl Ui {
         // kit overlays [07]: a white 20-point chip with the payload in body-size ink, and under it
         // the sheet's tip with the key that drops it
         let ghost = self.box_("ui-carry-ghost", BoxOpts::default().w(Size::Px(width)).h(Size::Px(20.0)).at((px + 14.0, py + 14.0)));
-        let theme = self.theme;
+        let theme = self.theme.tokens;
         let size = self.font_size;
         let small = 8.max(size - 2);
         let tip_text = "drop to put";
@@ -3709,7 +3884,7 @@ impl Ui {
         let tw2 = self.text_width(Some(small), tip_key);
         let tip_w = 2.0 + 12.0 + tw1 + 6.0 + tw2;
         let tip = self.box_("ui-carry-tip", BoxOpts::default().w(Size::Px(tip_w)).h(Size::Px(20.0)).at((px + 14.0, py + 14.0 + 20.0 + 8.0)));
-        let look = Look { fill: theme.input, text: theme.foreground, font: Font { size, tracking: 0.0, caps: false }, ..Look::NONE };
+        let look = Look { fill: theme.input, text: theme.foreground, font: Font { size, ..Font::BODY }, ..Look::NONE };
         self.slots[ghost.box_slot].node.look = look;
         self.slots[ghost.box_slot].node.inset.l = 6.0;
         self.text(&ghost, &payload.value);
@@ -3771,9 +3946,9 @@ impl Ui {
         self.out.paste = false;
         self.out.background = None;
         // the window's title bar shows the ground the UI is painted on
-        if self.window_ground != Some(self.theme.panel) {
-            self.window_ground = Some(self.theme.panel);
-            self.out.background = Some(self.theme.panel);
+        if self.window_ground != Some(self.theme.tokens.panel) {
+            self.window_ground = Some(self.theme.tokens.panel);
+            self.out.background = Some(self.theme.tokens.panel);
         }
         self.route(frame);
         self.mark_input();
@@ -3784,6 +3959,7 @@ impl Ui {
         self.clear_frame_callbacks();
         self.count = 0;
         self.closed_section = NONE;
+        (self.theme_depth, self.theme_id) = (0, 0);
         self.building = true;
         self.parents.clear();
         self.seeds.clear();
@@ -3923,7 +4099,7 @@ impl Ui {
         let saved = self.enter_root();
         let tip = self.box_("ui-tooltip", BoxOpts::default().w(Size::Px(width)).h(Size::Px(height)).at((x, y)));
         self.overlays.push(tip.index);
-        let theme = self.theme;
+        let theme = self.theme.tokens;
         self.draw(&tip, move |paint, Rect { x, y, w, h }| {
             paint.fill(x, y, w, h, theme.input);
             paint.frame(x, y, w, h, theme::edge(&theme));
@@ -4037,7 +4213,7 @@ impl Ui {
         let xf = if self.views[v as usize].index != 0 { v } else { self.views[parent as usize].xf };
         let r = &mut self.views[v as usize];
         (r.parent, r.xf) = (parent, xf);
-        let clean = r.built >= 0 && r.valid && !r.dirty && !r.escapes && r.revision == revision && r.epoch == self.epoch;
+        let clean = r.built >= 0 && r.valid && !r.dirty && !r.escapes && r.revision == revision && r.epoch == self.epoch && r.theme == self.theme_id;
         if clean && !self.verify {
             r.kept = self.frame_number;
             self.boxes[b.index].kept = true;
@@ -4051,7 +4227,7 @@ impl Ui {
         self.leave(saved);
         self.view_cur = parent;
         let r = &mut self.views[v as usize];
-        (r.revision, r.epoch, r.built, r.patched) = (revision, self.epoch, self.frame_number, false);
+        (r.revision, r.epoch, r.theme, r.built, r.patched) = (revision, self.epoch, self.theme_id, self.frame_number, false);
         r.dirty = r.escapes;
         if r.escapes && parent != 0 {
             self.views[parent as usize].escapes = true;

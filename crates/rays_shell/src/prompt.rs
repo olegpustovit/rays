@@ -41,7 +41,7 @@ pub fn name(ui: &mut Ui, key: &str, title: &str, description: &str, label: &str,
         ui.label(title);
         spacer(ui, "prompt-above", 8.0);
         let line = ui.box_("prompt-description", BoxOpts::default().w(Size::Grow).h(Size::Px(24.0)));
-        let theme = ui.theme();
+        let theme = ui.tokens();
         let description = description.to_string();
         ui.draw(&line, move |paint, Rect { x, y, w, h }| {
             let ty = paint.text_top(None, y, h);

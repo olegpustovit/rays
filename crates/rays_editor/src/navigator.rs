@@ -14,7 +14,7 @@ use flow_syntax::syntax::{self as s, Node, Syntax};
 use flow_syntax::ty::{self, ColorKind, Ty};
 use flow_syntax::value::Value;
 use input::Key;
-use pxui::theme::{self, Theme};
+use pxui::theme::{self, Tokens as Theme};
 use pxui::ui::*;
 use rays_shell::kit::{self, ButtonOpts};
 use pxui::geom::color::{self, T as Color};
@@ -1047,7 +1047,7 @@ fn input_sliders(
 
 /// Draw the panel in `bounds` (scrolling, searching, sliders).
 pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params) -> (State, Vec<Intent>) {
-    let theme = ui.theme();
+    let theme = ui.tokens();
     let rh = ui.row_height() as f32;
     let (x, y, w, h) = bounds;
     let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);

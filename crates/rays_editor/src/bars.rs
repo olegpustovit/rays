@@ -89,7 +89,7 @@ pub fn rule(ui: &mut Ui, key: &str, header: Header, from: f32) {
         key,
         BoxOpts::default().w(UiSize::Px(1.0)).h(UiSize::Px(12.0)).at((hx as f32 + from - 13.0, hy as f32 + ((hh - 12) as f32 / 2.0))),
     );
-    let border = pxui::theme::border(&ui.theme());
+    let border = pxui::theme::border(&ui.tokens());
     ui.draw(&b, move |paint, pxui::geom::Rect { x, y, w, h }| paint.fill(x, y, w, h, border));
 }
 

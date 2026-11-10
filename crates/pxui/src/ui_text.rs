@@ -5,7 +5,7 @@
 //! the word keys move and delete by words, Command-arrows (Apple) and Home/End move by lines,
 //! Command-A/C/X/V select all, copy, cut and paste, and Command-Z, Shift-Command-Z (or Command-Y)
 //! undo and redo the focused text.
-use crate::theme::{self, Theme};
+use crate::theme;
 use crate::ui_core::*;
 use crate::ui_kit::*;
 use input::{Event, Key, MouseButton};
@@ -937,7 +937,7 @@ impl Ui {
         let composition = self.composition().to_owned();
         let shown = if typed_is_some || signal.held || signal.released { value.clone() } else { o.display.clone().unwrap_or_else(|| value.clone()) };
         let invalid = self.state(&bx, 1) & 1 == 0;
-        let theme = self.theme();
+        let theme = self.tokens();
         let o = o.clone();
         let size = o.size;
         self.draw(&bx, move |paint, rect| {
@@ -1056,7 +1056,7 @@ impl Ui {
             (if buttons { y_buttons + 20.0 } else { y_detail + line }) + 8.0 + 1.0
         };
         let header = self.box_(key, BoxOpts::default().flags(CLIP).w(Size::Grow).h(Size::Px(height)));
-        let theme = self.theme();
+        let theme = self.tokens();
         let renaming = rename.is_some();
         let title_shown = match &rename {
             Some(valid) => {
@@ -1174,7 +1174,7 @@ impl Ui {
         if enabled && signal.clicked {
             *pressed = Some(index);
         }
-        let theme = self.theme();
+        let theme = self.tokens();
         let font_size = self.font_size();
         let small = 8.max(font_size - 2);
         let label = label.to_owned();
@@ -1222,7 +1222,7 @@ impl Ui {
             None
         };
         let changed = edit.as_ref().filter(|e| e.text != value).map(|e| e.text.clone());
-        let theme = self.theme();
+        let theme = self.tokens();
         let shown = self.cached_label(&row, 0, shown(text));
         let composition = if focused { self.composition().to_owned() } else { String::new() };
         let hovered = signal.hovered;
@@ -1293,7 +1293,7 @@ impl Ui {
         if signal.hovered {
             self.request_cursor(Cursor::Text);
         }
-        let theme = self.theme();
+        let theme = self.tokens();
         let composition = self.composition().to_owned();
         let font_size = self.font_size();
         let placeholder = placeholder.to_owned();
@@ -1596,7 +1596,7 @@ impl Ui {
     /// A language's colours for a text, kept like its rows: one list a pane on screen. A theme is
     /// part of the colours. ponytail: 8 panes showing text; a ninth colours again.
     pub fn text_colors(&mut self, language: &Language, text: &str) -> Rc<Vec<(i64, i64, Color)>> {
-        let theme = self.theme();
+        let theme = self.tokens();
         if let Some((_, _, colors)) = self.text_colors_seen.iter().find(|(seen, known, _)| *seen == theme && known == text) {
             return colors.clone();
         }
@@ -2328,7 +2328,7 @@ impl Ui {
         }
         // painted where the shared elastic scroll puts the content, overshoot included
         let offset = self.scroll_position(&body);
-        let theme = self.theme();
+        let theme = self.tokens();
         let composition = self.composition().to_owned();
         // the language's colours and the bracket pair at the caret, once per frame
         let colors: Rc<Vec<(i64, i64, Color)>> = match &language {
@@ -2468,7 +2468,7 @@ struct AreaPaint {
     offset: f32,
     horizontal: f32,
     gutter: f32,
-    theme: Theme,
+    theme: Tokens,
 }
 
 impl AreaPaint {
@@ -2781,7 +2781,7 @@ impl Ui {
         let count = rows.len() as i64;
         let length = o.limit.min(count);
         let start = if length == count { 0 } else { 0.max((count - length).min(cursor - length / 2)) };
-        let theme = self.theme();
+        let theme = self.tokens();
         let composition = self.composition().to_owned();
         let placeholder = display(label);
         let font_size = self.font_size();
@@ -2964,7 +2964,7 @@ impl Ui {
     fn menu_rows(&mut self, m: &MenuRows) -> (Option<i64>, Option<i64>) {
         let mut hovered = None;
         let mut picked = None;
-        let theme = self.theme();
+        let theme = self.tokens();
         let font_size = self.font_size();
         let lead_of = |index: i64| if m.selected.is_none() || index < m.lead_from { 0 } else { 14 };
         for (index, (text, enabled)) in m.items.iter().enumerate() {
@@ -3097,7 +3097,7 @@ impl Ui {
             n += sub.rows.len() as i64;
         }
         let keep: Vec<Rect> = o.submenus.iter().map(|s| sub_geometry(self, s)).collect();
-        let theme = self.theme();
+        let theme = self.tokens();
         let stroke = theme::edge(&theme);
         let related = if o.submenus.is_empty() { Vec::new() } else { vec![submenu_key] };
         let popts = PopupOpts { stroke: Some(stroke), keep, related, ..PopupOpts::default() };

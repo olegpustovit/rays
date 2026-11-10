@@ -19,7 +19,7 @@ pub enum Intent {
 /// gutter over it.
 pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, frame: i64, time: f64, max_frame: i64) -> Vec<Intent> {
     let (x, y, width, height) = bounds;
-    let theme = ui.theme();
+    let theme = ui.tokens();
     let (fx, fy, fw, fh) = (x as f32, y as f32, width as f32, height as f32);
     let bar = ui.box_("workspace-timeline", BoxOpts::default().flags(CLIP | CLICKABLE).w(Size::Px(fw)).h(Size::Px(fh)).at((fx, fy)));
     let top = if edge { 1.0 } else { 0.0 };

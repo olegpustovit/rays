@@ -47,7 +47,7 @@ fn render(density: i64, height: i64, build: &mut dyn FnMut(&mut Ui)) -> (canvas:
 /// The graph pane zone tokens: for, fold, sum, a hollow dashed fn zone, a let scope and the
 /// branches, with the socket colours of text, functions and records.
 fn zones(ui: &mut Ui) {
-    let t = ui.theme();
+    let t = ui.tokens();
     let b = ui.box_("zones", BoxOpts::default().w(Size::Px(320.0)).h(Size::Px(390.0)).at((0.0, 0.0)));
     ui.draw(&b, move |paint, _| {
         let list = [

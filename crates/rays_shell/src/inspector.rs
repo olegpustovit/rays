@@ -70,7 +70,7 @@ fn text_of(bytes: &[u8]) -> String {
 /// Everything the row builders share.
 struct Ctx {
     width: f32,
-    theme: theme::Theme,
+    theme: theme::Tokens,
     ink_2: Color,
     ink_3: Color,
     pins: bool,
@@ -533,7 +533,7 @@ fn build(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), expanded: &[St
 pub fn flow_fields(ui: &mut Ui, o: &FlowOpts, on_choice: Option<&dyn Fn(&str, &UiBox)>, rows: &[FlowRow]) -> Vec<FlowChange> {
     // the rows fill the panel they are built in
     let width = o.width.unwrap_or_else(|| ui.inspector_width());
-    let theme = ui.theme();
+    let theme = ui.tokens();
     let cx = Ctx {
         width,
         theme,

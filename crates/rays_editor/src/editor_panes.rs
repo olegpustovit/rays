@@ -718,7 +718,7 @@ pub fn draw_other_graph_panes<'a>(
                 let (x, y, width, height) = leaf.body;
                 if stored_projection(&pane) == GraphView && graph_name(&pane).is_some() {
                     ui.within(hosted, &mut |ui| {
-                        let theme = ui.theme();
+                        let theme = ui.tokens();
                         let theme = if leaf.floating { sheet_theme(&theme) } else { theme };
                         scope::with_guide(false, &mut active.view);
                         scope::with_theme(theme, &mut active.view);
@@ -847,7 +847,7 @@ pub fn draw_graph_pane<'a>(
         let failed = failed_nodes(value);
         let pressed = pressed_keys(value, shortcut_frame);
         ui.within(graph_root, &mut |ui| {
-            let theme = ui.theme();
+            let theme = ui.tokens();
             let theme = match graph_host {
                 Some(leaf) if leaf.floating => sheet_theme(&theme),
                 _ => theme,

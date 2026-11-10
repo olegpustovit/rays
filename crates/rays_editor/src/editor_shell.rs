@@ -6,7 +6,7 @@ use editor_core::panels::{self, Panel};
 use editor_document::document::{Level, Origin, T as Document};
 use editor_document::workspace_doc;
 use flow_syntax::context;
-use pxui::theme::Theme;
+use pxui::theme::Tokens as Theme;
 use pxui::ui::{PanelOpts, Ui};
 use rays_graph::scope_state as scope;
 use rays_shell::inspector::FlowRow;
@@ -419,10 +419,8 @@ pub fn on_sheet(ui: &mut Ui, floating: bool, build: &mut dyn FnMut(&mut Ui)) {
         build(ui);
         return;
     }
-    let theme = ui.theme();
-    ui.set_theme(sheet_theme(&theme));
-    build(ui);
-    ui.set_theme(theme);
+    let sheet = pxui::Theme::from_tokens(sheet_theme(&ui.tokens()));
+    ui.themed(&sheet, build);
 }
 
 pub fn inspector_panel(window: bool, ui: &mut Ui, bounds: layout::Bounds, build: &mut dyn FnMut(&mut Ui)) {

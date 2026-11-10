@@ -4,7 +4,7 @@
 use flow_check::op::{self, Op};
 use flow_syntax::context::{self, Context};
 use flow_syntax::ty::{self, ColorKind, Ty};
-use pxui::theme::{self, Theme};
+use pxui::theme::{self, Tokens as Theme};
 use pxui::ui::{fuzzy_match, Axis, BoxOpts, Pick, PickerOpts, Size, Ui, BLOCKING, CLICKABLE};
 use pxui::geom::{color::T as Color, Rect};
 use std::cell::RefCell;
@@ -216,7 +216,7 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
     let out = result.clone();
     let m = menu.clone();
     let open = ui.popup(
-        Some(theme::border(&ui.theme())),
+        Some(theme::border(&ui.tokens())),
         None,
         true,
         false,
@@ -225,7 +225,7 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
         height as f32,
         "pxui-graph-menu",
         &mut |ui: &mut Ui| {
-            let theme = ui.theme();
+            let theme = ui.tokens();
             // the title row: the label at 12 and, right-aligned 8 from the edge in ink-2 at the label
             // size, the node the new one goes after
             let title = ui.box_("pxui-graph-menu-title", BoxOpts::default().w(Size::Grow).h(Size::Px(((4 + row) as f64) as f32)));
@@ -264,7 +264,7 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
                 BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(20.0)).h(Size::Px(20.0)).at((((x + width - 25) as f64) as f32, ((y + 1 + row + 4 + 4) as f64) as f32)),
             );
             if !query.is_empty() {
-                let muted = theme::muted(&ui.theme());
+                let muted = theme::muted(&ui.tokens());
                 ui.draw(&clear, move |paint, Rect { x: cx, y: cy, w: _, h: _ }| { let (cx, cy) = (cx as f64, cy as f64);
                     let ty = f64::from(paint.text_top(None, cy as f32, 20.0));
                     paint.text_c(((cx + 6.5) as f32, ty as f32), muted, "\u{d7}");

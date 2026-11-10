@@ -11,7 +11,7 @@ use flow_graph::projection::{Item, Level, Placed, ZoneKind};
 use flow_syntax::lisp;
 use flow_syntax::syntax::{Node as SNode, Syntax};
 use flow_syntax::ty::{self, Ty};
-use pxui::theme::{self, Theme};
+use pxui::theme::{self, Tokens as Theme};
 use pxui::ui_core::{ellipsis, Paint};
 use pxui::geom::{color::{self, T as Color}, p32};
 

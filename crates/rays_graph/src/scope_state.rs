@@ -11,7 +11,7 @@ use flow_graph::projection as p;
 use flow_graph::projection::{Item, Level, Placed};
 use flow_syntax::syntax::{Node as SNode, Syntax};
 use flow_syntax::ty::Ty;
-use pxui::theme::{self, Theme};
+use pxui::theme::{self, Tokens as Theme};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;

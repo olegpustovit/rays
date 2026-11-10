@@ -291,7 +291,7 @@ fn no_groups(_: &Leaf) -> Vec<f32> {
     Vec::new()
 }
 
-fn edge_color(theme: &theme::Theme, moving: &Rc<RefCell<Option<Path>>>, path: &Path) -> pxui::geom::color::T {
+fn edge_color(theme: &theme::Tokens, moving: &Rc<RefCell<Option<Path>>>, path: &Path) -> pxui::geom::color::T {
     if moving.borrow().as_ref() == Some(path) { theme.accent } else { theme::border(theme) }
 }
 
@@ -328,7 +328,7 @@ pub fn update(
     let title: &dyn Fn(&Leaf) -> String = title.unwrap_or(&default_title);
     let groups: &dyn Fn(&Leaf) -> Vec<f32> = groups.unwrap_or(&no_groups);
     let geometry = geometry(Some(state), Some(hidden), tree, frame);
-    let theme = ui.theme();
+    let theme = ui.tokens();
     // the window being carried: its edge is the accent and four brackets stand round it
     let moving: Rc<RefCell<Option<Path>>> = Rc::new(RefCell::new(None));
     for (order, l) in geometry.leaves.iter().enumerate() {
@@ -737,7 +737,7 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
         // only the pane under the pointer shows its four bars; the nearest turns accent and the
         // half it would take is tinted
         let under = pane_hovered || edges.iter().any(|e| e.3);
-        let theme = ui.theme();
+        let theme = ui.tokens();
         let (fx, fy, fw, fh) = (x as f32, y as f32, w as f32, h as f32);
         for (side, suffix, boxed, hovered) in edges {
             if under {
@@ -778,7 +778,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
     let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
     let mut intents: Vec<Intent> = Vec::new();
     let geo = geometry(Some(state), hidden, tree, frame);
-    let theme = ui.theme();
+    let theme = ui.tokens();
     for (n, s) in geo.splitters.iter().enumerate() {
         let Some(node) = &s.node else {
             continue;

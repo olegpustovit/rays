@@ -347,7 +347,7 @@ fn drop_of(offset: f32) -> DropAt {
 /// One box takes every pointer gesture; rows are found from the pointer, so only the visible
 /// slice is painted. `title` leads the header, e.g. the level's breadcrumb.
 pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i64, i64, i64), title: &str, columns: &[String], rows: &[Row], selected: &[i64], intents: &mut Vec<Intent>) {
-    let theme = ui.theme();
+    let theme = ui.tokens();
     let height = ui.row_height() as f32;
     let (x, y, w, h) = (bounds.0 as f32, bounds.1 as f32, bounds.2 as f32, bounds.3 as f32);
     let shown = visible(t, rows);

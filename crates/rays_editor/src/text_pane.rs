@@ -7,7 +7,7 @@ use flow_syntax::lisp::{self, Spans};
 use flow_syntax::syntax::{self as s, Draft, Node, Syntax, SyntaxBuilder, SyntaxId};
 use rays_diagnostic::{self as diagnostic, Diagnostic, Severity, Span};
 use crate::lisp_text::{self, Names, Vocab};
-use pxui::theme::{self, Theme};
+use pxui::theme::{self, Tokens as Theme};
 use pxui::ui::*;
 use rays_shell::kit::{self, ButtonOpts};
 use rays_shell::layout;
@@ -1767,7 +1767,7 @@ fn first_line(message: &str) -> String {
 /// new literal while it is edited; `None` once the popup is dismissed.
 fn colour_popup(ui: &mut Ui, at: (f32, f32), text: &str, range: (i64, i64)) -> Option<String> {
     let (a, b) = range;
-    let theme = ui.theme();
+    let theme = ui.tokens();
     let literal = sub(text, a + 1, b - a - 2);
     let colour = color::hex(&literal).unwrap_or(color::white());
     let (r, g, bl, _) = color::to_floats(colour);
@@ -2442,7 +2442,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
     let (x, y, width, height) = bounds;
     let row = ui.row_height() as f32;
     let (x, y, width, height) = (x as f32, y as f32, width as f32, height as f32);
-    let theme = ui.theme();
+    let theme = ui.tokens();
     let emit: Emit = Rc::new(RefCell::new(Vec::new()));
     // the printed document is made here, once a frame, never inside a token scrub
     let _ = shown.applied.text()?;

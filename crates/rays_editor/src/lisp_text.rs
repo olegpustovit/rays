@@ -17,7 +17,7 @@ use std::sync::{Arc, OnceLock};
 use flow_check::lisp_scan::{self as scan, Kind, Token};
 use flow_check::{op, workspace};
 use flow_sop::catalog::Descriptor;
-use pxui::theme::{self, Theme};
+use pxui::theme::{self, Tokens as Theme};
 use pxui::ui::{CodeContext, Completion, Language};
 use sop::edit_graph::InputRequirement;
 

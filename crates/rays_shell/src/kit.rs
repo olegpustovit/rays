@@ -8,7 +8,7 @@ use pxui::geom::color::{self, T as Color};
 /// The chrome's three graph inks, the same as `rays_graph::scope_paint::ports` (which the chrome
 /// may not reach): an int port's green for a checked file, a float port's blue for an expression,
 /// the port hint's yellow for a tip.
-pub fn port_ink(theme: &theme::Theme, port: Port) -> Color {
+pub fn port_ink(theme: &theme::Tokens, port: Port) -> Color {
     let (light, night) = match port {
         Port::Int => ("#3b7d4e", "#74c28e"),
         Port::Float => ("#285f77", "#72b3cf"),
@@ -82,7 +82,7 @@ impl Default for ButtonOpts {
 /// or a stop square before the label. True on a click.
 pub fn button(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, o: &ButtonOpts, label: &str) -> bool {
     let (bx, by) = at;
-    let theme = ui.theme();
+    let theme = ui.tokens();
     let boxed = ui.box_(key, BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(w)).h(Size::Px(o.h)).at((bx, by)));
     let signal = ui.signal(&boxed);
     let held = o.enabled && signal.held;
@@ -133,7 +133,7 @@ fn cap_y_of(paint: &Paint, y: f32, h: f32) -> f32 {
 pub fn colour(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, swatch: Color, hex: &str) -> String {
     let (x, y) = at;
     let boxed = ui.box_fmt(format_args!("swatch-{key}"), BoxOpts::default().at((x, y)).w(Size::Px(20.0)).h(Size::Px(20.0)));
-    let edge = theme::edge(&ui.theme());
+    let edge = theme::edge(&ui.tokens());
     ui.draw(&boxed, move |paint, Rect { x: sx, y: sy, w: sw, h: sh }| {
         // a 20-point square with its border inside
         paint.fill(sx, sy, sw, sh, swatch);
@@ -150,7 +150,7 @@ pub fn switch(ui: &mut Ui, key: &str, at: (f32, f32), on: bool) -> bool {
     let (sx, sy) = at;
     let boxed = ui.box_(key, BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(28.0)).h(Size::Px(14.0)).at((sx, sy)));
     let signal = ui.signal(&boxed);
-    let theme = ui.theme();
+    let theme = ui.tokens();
     ui.draw(&boxed, move |paint, Rect { x, y, w: _, h: _ }| paint_switch(paint, &theme, x, y, on));
     signal.clicked
 }
@@ -159,7 +159,7 @@ pub fn switch(ui: &mut Ui, key: &str, at: (f32, f32), on: bool) -> bool {
 /// from `right`; the index clicked and where the row starts.
 pub fn segments(ui: &mut Ui, key: &str, right: f32, y: f32, labels: &[String], active: i64) -> (Option<i64>, f32) {
     let h = 20.0;
-    let theme = ui.theme();
+    let theme = ui.tokens();
     let total = 12.0 * (labels.len() as i64 - 1).max(0) as f32 + labels.iter().map(|label| ui.text_width(None, label)).sum::<f32>();
     let mut x = right - total;
     let mut clicked = None;
@@ -200,7 +200,7 @@ pub fn vector(ui: &mut Ui, boxed: &UiBox, at: (f32, f32), w: f32, reserve: f32, 
     let (cx, cy) = at;
     let n = axes.len() as f32;
     let cell_w = (w - reserve - (8.0 * (n - 1.0))) / n;
-    let theme = ui.theme();
+    let theme = ui.tokens();
     let cap = cap_size(ui);
     for (index, axis) in axes.iter().enumerate() {
         // the cells' edges land on whole points, as the sheet's do

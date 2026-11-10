@@ -82,7 +82,7 @@ fn run_menu() {
         "a list or a scene is not coloured as the graph pane colours it",
     );
     // the chrome repeats three port inks it may not import
-    for th in [th, pxui::theme::Theme { panel: pxui::geom::color::rgb(20, 20, 20), ..th }] {
+    for th in [th, pxui::theme::Tokens { panel: pxui::geom::color::rgb(20, 20, 20), ..th }] {
         let (ports, ink) = (rays_graph::scope_paint::ports(&th), |p| rays_shell::kit::port_ink(&th, p));
         check(ink(rays_shell::kit::Port::Int) == ports.int && ink(rays_shell::kit::Port::Float) == ports.float && ink(rays_shell::kit::Port::Hint) == ports.hint, "the chrome's port inks drifted from the graph's");
     }

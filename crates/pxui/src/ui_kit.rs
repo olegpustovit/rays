@@ -2,7 +2,7 @@
 //! each side, a label column (0.3 of the panel less 16, for inspector rows), 20-point controls and
 //! the kit face. A field is a value on a hairline, a button is its text; nothing has a radius or an
 //! ink fill. Widgets must be built inside a `panel`.
-use crate::theme::{self, Theme};
+use crate::theme::{self, Tokens as Theme};
 use crate::ui_core::*;
 use input::{Event, Key};
 use crate::geom::Rgba as Color;
@@ -47,7 +47,7 @@ impl Ui {
             let width = 72.0f32.max(self.text_width(None, header) + 24.0);
             stops[i + 1] = stops[i] + width;
         }
-        let theme = self.theme();
+        let theme = self.tokens();
         let root = self.box_(label, BoxOpts::default().flags(CLIP).at(at).w(Size::Px(w)).h(Size::Px(h)));
         let saved = self.enter(&root);
         let header = self.box_fmt(format_args!("{}-header", label), BoxOpts::default().w(Size::Px(w)).h(Size::Px(row_h)));
@@ -355,7 +355,7 @@ impl Ui {
             Some(height) => Size::Px(height),
             None => Size::Fit,
         };
-        let theme = self.theme();
+        let theme = self.tokens();
         let stroke = opts.stroke;
         // a floating sheet (a menu, a window) is the input white; a docked panel is the ground
         let look = Look { fill: if stroke.is_some() { theme.input } else { theme.panel }, ..Look::NONE };
@@ -446,7 +446,7 @@ impl Ui {
         let pin = if window { None } else { pin };
         self.lead_gap();
         let row = self.box_(key, BoxOpts::default().flags(CLICKABLE).w(Size::Grow).h(Size::Px(self.row_height() as f32)));
-        let theme = self.theme();
+        let theme = self.tokens();
         let hovered = self.hovered_within(&row);
         let label = self.cached_label(&row, 0, label);
         let font_size = self.font_size();
@@ -485,7 +485,7 @@ impl Ui {
         if !open {
             self.set_closed_section(title.index);
         }
-        let theme = self.theme();
+        let theme = self.tokens();
         let label = self.cached_label(&title, 0, label);
         self.draw(&title, move |paint, Rect { x, y, w, h }| {
             let (y, h) = (y + gap, h - gap);
@@ -511,7 +511,7 @@ impl Ui {
     pub fn inspector_toggle_value(&mut self, key: &str, at: (f32, f32), value: bool) -> bool {
         let control = self.box_(key, BoxOpts::default().flags(CLICKABLE | TAB_STOP).at(at).w(Size::Px(28.0)).h(Size::Px(20.0)));
         let value = if self.signal(&control).clicked { !value } else { value };
-        let theme = self.theme();
+        let theme = self.tokens();
         self.draw(&control, move |paint, Rect { x, y, w: _, h: _ }| paint_switch(paint, &theme, x, y + 3.0, value));
         value
     }
@@ -530,7 +530,7 @@ impl Ui {
         self.lead_gap();
         let row = self.box_(key, BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Grow).h(Size::Px(self.row_height() as f32)));
         let signal = self.signal(&row);
-        let theme = self.theme();
+        let theme = self.tokens();
         let font_size = self.font_size();
         let label = self.cached_label(&row, 0, label);
         self.draw(&row, move |paint, Rect { x, y, w, h }| {
@@ -546,7 +546,7 @@ impl Ui {
     /// A read-only value in the same responsive inspector row.
     pub fn inspector_readout(&mut self, width: Option<f32>, key: &str, label: &str, value: &str) {
         let (row, control_x, _, control_width) = self.inspector_row(width, None, key, label);
-        let theme = self.theme();
+        let theme = self.tokens();
         let font_size = self.font_size();
         let value = self.cached_label(&row, 1, value);
         self.draw(&row, move |paint, Rect { x, y, w: _, h }| {
@@ -565,7 +565,7 @@ impl Ui {
             "inspector-body",
             BoxOpts::default().flags(SCROLL | CLIP | OVER_THUMB).w(Size::Grow).h(Size::Grow).axis(Axis::Column).scroll_step(rh),
         );
-        let theme = self.theme();
+        let theme = self.tokens();
         let index = body.index;
         let slot = body.box_slot;
         self.draw_over(&body, move |paint, Rect { x, y, w, h }| {
@@ -591,7 +591,7 @@ impl Ui {
         let font_size = self.font_size();
         let line = self.row_height() as f32;
         let bar = self.box_("inspector-bar", BoxOpts::default().w(Size::Grow).h(Size::Px(line + 1.0)));
-        let theme = self.theme();
+        let theme = self.tokens();
         let hints = hints.to_vec();
         self.draw(&bar, move |paint, Rect { x, y, w, h: _ }| {
             paint.fill(x, y, w, 1.0, theme::edge(&theme));
@@ -618,7 +618,7 @@ impl Ui {
     pub fn inspector_message(&mut self, key: &str, message: &str) {
         self.lead_gap();
         let row = self.box_(key, BoxOpts::default().w(Size::Grow).h(Size::Px(self.row_height() as f32)));
-        let theme = self.theme();
+        let theme = self.tokens();
         let font_size = self.font_size();
         let row_height = self.row_height();
         let message = message.to_owned();
@@ -708,7 +708,7 @@ impl Ui {
         let (view_w, view_h) = self.view_size();
         let x = (0.0f32.max((view_w - width) / 2.0)).round();
         let y = (0.0f32.max((view_h - height) / 2.0)).round();
-        let stroke = theme::border(&self.theme());
+        let stroke = theme::border(&self.tokens());
         self.popup(Some(stroke), Some(48.0f32.max(view_h - 32.0)), false, false, (x, y), width, height, label, f)
     }
 
@@ -717,7 +717,7 @@ impl Ui {
     pub fn label(&mut self, text: &str) {
         let gap = if self.last_child_of_parent() == NONE { 4.0 } else { 0.0 };
         let size = 8.max(self.font_size() - 2);
-        let look = Look { text: theme::ink_2(&self.theme()), font: Font { size, tracking: 0.08 * size as f32, caps: true }, ..Look::NONE };
+        let look = Look { text: theme::ink_2(&self.tokens()), font: Font { size, tracking: 0.08, caps: true, ..Font::BODY }, ..Look::NONE };
         let row = self.node(
             text,
             Node { h: Size::Px(gap + self.row_height() as f32), look, inset: Edges { l: SIDE as f32, t: gap, r: 0.0, b: 0.0 }, ..Node::DEFAULT },
@@ -729,7 +729,7 @@ impl Ui {
     /// followed by what it does in ink-2, 8 points apart, and `right` (a key or a count) at the end.
     pub fn footer(&mut self, right: Option<&str>, hints: &[(String, String)]) {
         let row = self.box_("footer", BoxOpts::default().flags(NO_FLAGS).w(Size::Grow).h(Size::Px(5.0 + self.row_height() as f32)));
-        let theme = self.theme();
+        let theme = self.tokens();
         let size = 8.max(self.font_size() - 2);
         let hints = hints.to_vec();
         let right = right.map(|s| s.to_owned());
@@ -775,7 +775,7 @@ impl Ui {
         self.cached_hit(&row, (width.to_bits() as u64) << 1 | at_end as u64, || Rc::new(extent));
         let shown = self.cached_label(&row, 0, shown(text));
         let signal = self.signal(&row);
-        let theme = self.theme();
+        let theme = self.tokens();
         let focus = self.focused(&row);
         self.draw(&row, move |paint, rect| {
             let Rect { x, y, w, h } = rect;
@@ -816,7 +816,7 @@ impl Ui {
         let row = self.kit_row(Some(CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY), Some(control_hit(toggle_control)), text);
         let signal = self.signal(&row);
         let value = if signal.clicked { !value } else { value };
-        let theme = self.theme();
+        let theme = self.tokens();
         let shown = self.cached_label(&row, 0, shown(text));
         let hovered = signal.hovered;
         let font_size = self.font_size();
