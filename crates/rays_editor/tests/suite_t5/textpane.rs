@@ -480,9 +480,9 @@ pub fn editor_literal_scrub() {
         scrubbed(&s, "wider");
         let valid = env.ws();
         let points = fe::arg_text(&valid.source, &g_a, &pts).expect("points");
-        check(matches!(points.node, Node::Num(n) if points.name(n) == "45"), "a growing token lost its repaired span");
+        check(matches!(points.node, Node::Num(n) if points.name(n) == "38"), "a growing token lost its repaired span");
         let set = |v: &str| fe::Op::SetArg { node: g_a.clone(), key: pts.clone(), sub: vec![], value: num(v) };
-        let (source, checked) = fe::apply_checked(&catalog, &before.source, &set("45")).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+        let (source, checked) = fe::apply_checked(&catalog, &before.source, &set("38")).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
         let mut alt = valid.clone();
         alt.source = source;
         alt.checked = std::sync::Arc::new(checked);
@@ -492,8 +492,8 @@ pub fn editor_literal_scrub() {
         drag(&mut env, 20.);
         let ws = env.ws();
         let points = fe::arg_text(&ws.source, &g_a, &pts).expect("points");
-        check(matches!(points.node, Node::Num(n) if points.name(n) == "5"), &format!("text token scrub in tab {tab_index} did not apply its latest number: {} (at {nx:.1},{ny:.1}; text {:?})", flow_syntax::lisp::flat(&points), shown.text));
-        let (source, checked) = fe::apply_checked(&catalog, &before.source, &set("5")).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+        check(matches!(points.node, Node::Num(n) if points.name(n) == "4"), &format!("text token scrub in tab {tab_index} did not apply its latest number: {} (at {nx:.1},{ny:.1}; text {:?})", flow_syntax::lisp::flat(&points), shown.text));
+        let (source, checked) = fe::apply_checked(&catalog, &before.source, &set("4")).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
         let mut alt = ws.clone();
         alt.source = source;
         alt.checked = std::sync::Arc::new(checked);
