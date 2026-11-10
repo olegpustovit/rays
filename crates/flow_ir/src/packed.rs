@@ -1285,7 +1285,7 @@ impl TS {
             return Ok(v);
         }
         let value = self.uvalue(i, fo)?;
-        if value::ty_of(&value) != *ty {
+        if !value::ty_is(&value, ty) {
             return Err(fail("E_ARRAY_TYPE", "Kernel lookup table changed its packed element type."));
         }
         value::validate(&value)?;
@@ -2081,7 +2081,7 @@ fn integer_range(residual: ResidualId, term: &Term) -> Option<(ResidualId, Term)
 }
 
 fn cached_ty(sh: &TS, i: i64, ty: &Ty) -> bool {
-    matches!(sh.prepared[i as usize].get(), Some(v) if value::ty_of(v) == *ty)
+    matches!(sh.prepared[i as usize].get(), Some(v) if value::ty_is(v, ty))
 }
 
 fn cached_table(sh: &TS, register: i64) -> Option<&Value> {
@@ -3065,7 +3065,7 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
                 // a settled value (a captured array per iterate step) is read, not compiled
                 Some((_, v)) if !E::is_live(v) => return match dispatch {
                     Some(d) => d(residual, term),
-                    None if value::ty_of(v) == *term.ty() => Ok(v.clone()),
+                    None if value::ty_is(v, term.ty()) => Ok(v.clone()),
                     None => eval_term(run, residual, term),
                 },
                 _ => None,
@@ -3357,10 +3357,10 @@ pub mod host {
         CURRENT.with(|c| c.borrow().is_none())
     }
 
-    fn argument_index(v: &Value) -> Result<Option<(Ty, i64)>, Diagnostic> {
+    fn argument_index(v: &Value) -> Result<Option<(&Ty, i64)>, Diagnostic> {
         match v {
             Value::Source(g) if g.name == "$core/argument" => match (g.fields.len(), g.fields.get_str("index")) {
-                (1, Some(Value::Int(index))) => Ok(Some((g.ty.clone(), *index))),
+                (1, Some(Value::Int(index))) => Ok(Some((&g.ty, *index))),
                 _ => Err(value::fail("E_CORE_ARGUMENT", "Invalid compiled argument declaration.")),
             },
             _ => Ok(None),
@@ -3377,9 +3377,10 @@ pub mod host {
                     return Err(value::fail("E_CORE_ARGUMENT", "Invalid compiled argument index."));
                 }
                 match types.get(&index) {
-                    Some(old) if *old != ty => return Err(value::fail("E_CORE_ARGUMENT", "Compiled argument types disagree.")),
-                    _ => {
-                        types.insert(index, ty);
+                    Some(old) if old != ty => return Err(value::fail("E_CORE_ARGUMENT", "Compiled argument types disagree.")),
+                    Some(_) => {}
+                    None => {
+                        types.insert(index, ty.clone());
                     }
                 }
                 return Ok(());
@@ -3441,7 +3442,7 @@ pub mod host {
             return Err(value::fail("E_CORE_ARGUMENT", "Compiled region argument count differs from its declaration."));
         }
         for (index, v) in arguments.iter().enumerate() {
-            if value::ty_of(v) != types[index] {
+            if !value::ty_is(v, &types[index]) {
                 return Err(value::fail("E_CORE_ARGUMENT", "Compiled region argument storage differs from its declared type."));
             }
             if validate {
@@ -4005,7 +4006,7 @@ pub mod host {
             }
         };
         for (index, value) in arrays.iter().enumerate() {
-            if value::ty_of(value) != *t.sources[index].1.ty() {
+            if !value::ty_is(value, t.sources[index].1.ty()) {
                 return Err(fail("E_ARRAY_TYPE", "Kernel input changed its packed element type."));
             }
         }

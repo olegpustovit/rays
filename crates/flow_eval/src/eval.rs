@@ -1093,7 +1093,7 @@ fn construction_decision(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term) -> 
     if let Some(value) = &value {
         a.decisions += 1;
         value::validate(value)?; check_value_nesting(value)?;
-        if value::ty_of(value) != *term.ty() { return Err(error("E_TYPE", "A construction decision has the wrong type.")); }
+        if !value::ty_is(value, term.ty()) { return Err(error("E_TYPE", "A construction decision has the wrong type.")); }
     }
     Ok(value)
 }
@@ -2030,12 +2030,18 @@ fn diagnostic_payload(diagnostic: &Diagnostic) -> Value {
     ].into())
 }
 fn is_cancelled(diagnostic: &Diagnostic) -> bool { diagnostic.code == "cancelled" || diagnostic.code == "E_CANCELLED" }
+fn source_type_ok(source: &Value, value: &Value) -> bool {
+    match source {
+        Value::Source(g) | Value::Struct(g) => g.ty == Ty::Any || value::ty_is(value, &g.ty),
+        _ => { let ty = value::ty_of(source); ty == Ty::Any || value::ty_is(value, &ty) }
+    }
+}
 fn resolve_source(a: &mut Arena, source: &Value) -> Result<Value, Diagnostic> {
     let resolve = a.resolve.clone().ok_or_else(|| error("E_DATA_SOURCE", "This data source needs its host's cooked data."))?;
     let value = lend(a, || resolve(source))?;
     check_value_nesting(&value)?;
     if value.is_data_source() { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
-    if value::ty_of(source) != Ty::Any && value::ty_of(source) != value::ty_of(&value) { return eval_error("E_DATA_SOURCE", "The host returned a data source of the wrong type."); }
+    if !source_type_ok(source, &value) { return eval_error("E_DATA_SOURCE", "The host returned a data source of the wrong type."); }
     value::validate(&value)?;
     Ok(value)
 }
@@ -2508,7 +2514,7 @@ fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: F
     {
         let id = id.expect("a static map has its residual");
         if let Some(candidate) = current_residual_handlers().and_then(|handlers| handlers.bulk).and_then(|bulk| call_lent(a, id, &|id| bulk(id))) {
-            if value::ty_of(&candidate) == *term.ty() && array_len(&candidate).ok() == Some(count) {
+            if value::ty_is(&candidate, term.ty()) && array_len(&candidate).ok() == Some(count) {
                 reserve_function_calls(a, function, count);
                 progress.completed = true;
                 return Ok(candidate);
@@ -2527,7 +2533,7 @@ fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: F
         let trusted = current_residual_handlers().is_some_and(|handlers| handlers.trusted && (!a.record || !c.record || (handlers.replay && function_replayable(a, function))));
         if trusted {
             if let Some(candidate) = current_residual_handlers().and_then(|handlers| handlers.bulk).and_then(|bulk| call_lent(a, id, &|id| bulk(id))) {
-                if value::ty_of(&candidate) == *term.ty() && array_len(&candidate).ok() == Some(count) {
+                if value::ty_is(&candidate, term.ty()) && array_len(&candidate).ok() == Some(count) {
                     reserve_function_calls(a, function, count);
                     progress.completed = true;
                     return Ok(candidate);
@@ -3056,7 +3062,7 @@ fn resolve_source_with(resolve: &Arc<dyn Fn(&Value) -> Result<Value, Diagnostic>
     let value = resolve(source)?;
     check_value_nesting(&value)?;
     if value.is_data_source() { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
-    if value::ty_of(source) != Ty::Any && value::ty_of(source) != value::ty_of(&value) { return eval_error("E_DATA_SOURCE", "The host returned a data source of the wrong type."); }
+    if !source_type_ok(source, &value) { return eval_error("E_DATA_SOURCE", "The host returned a data source of the wrong type."); }
     value::validate(&value)?;
     Ok(value)
 }
@@ -3557,7 +3563,7 @@ pub mod residual {
         let value = outside_handler(|| observe(projected))?;
         if let Some(value) = &value {
             value::validate(value)?;
-            if value::ty_of(value) != *term.ty() { return Err(error("E_TYPE", "A construction decision has the wrong type.")); }
+            if !value::ty_is(value, term.ty()) { return Err(error("E_TYPE", "A construction decision has the wrong type.")); }
         }
         Ok(value)
     }
