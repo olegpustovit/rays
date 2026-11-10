@@ -357,8 +357,8 @@ pub mod router {
             }
             let idle = state == State::Idle;
             let prefix = match &state {
-                State::Pending(prefix) => prefix.clone(),
-                State::Idle => String::new(),
+                State::Pending(prefix) => prefix.as_str(),
+                State::Idle => "",
             };
             match event {
                 // Tab cancels leader routing and runs its exact-modifier binding, or passes to
@@ -409,8 +409,7 @@ pub mod router {
                     };
                     let typed = format!("{}{}", prefix, character.to_ascii_lowercase());
                     let commands: Vec<&Command> = keymap.iter().copied().filter(|command| visible(command, focus)).collect();
-                    let exact = Trigger::Leader(typed.clone());
-                    if let Some(command) = commands.iter().find(|command| command.trigger.as_ref() == Some(&exact)) {
+                    if let Some(command) = commands.iter().find(|command| matches!(&command.trigger, Some(Trigger::Leader(sequence)) if sequence == &typed)) {
                         actions.push((*command).clone());
                         state = State::Idle;
                     } else if commands.iter().any(|command| {
