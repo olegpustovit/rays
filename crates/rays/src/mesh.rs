@@ -80,7 +80,7 @@ pub struct device {
 pub struct Mesh {
     mode: mode,
     vertices: Vec3_buffer,
-    indices: Arc<Vec<i64>>,
+    indices: Arc<Vec<u32>>,
     normals: Option<Vec3_buffer>,
     colors: Option<Arc<Vec<color::T>>>,
     tex_coords: Option<Arc<Vec<vec2::T>>>,
@@ -164,8 +164,16 @@ fn uv_attribute(vertex_count: i64, values: Option<Vec<vec2::T>>) -> Result<Optio
     }
 }
 
-fn first_bad_index(indices: &[i64], vertex_count: i64) -> Option<i64> {
-    indices.iter().copied().find(|&index| index < 0 || index >= vertex_count)
+fn first_bad_index(indices: &[u32], vertex_count: i64) -> Option<i64> {
+    indices.iter().copied().find(|&index| i64::from(index) >= vertex_count).map(i64::from)
+}
+
+/// Lisp index arrays are i64: reject negative or above-u32 values before they become u32 mesh indices.
+fn narrow_indices(indices: Vec<i64>) -> Result<Vec<u32>, String> {
+    indices
+        .into_iter()
+        .map(|index| u32::try_from(index).map_err(|_| format!("Mesh.create: index {index} is outside the vertex array")))
+        .collect()
 }
 
 pub(crate) fn create_owned_full(
@@ -177,7 +185,10 @@ pub(crate) fn create_owned_full(
     vertices: &[vec3::T],
 ) -> Result<Mesh, String> {
     let vertex_count = vertices.len() as i64;
-    let indices = indices.unwrap_or_else(|| (0..vertex_count).collect());
+    let indices = match indices {
+        Some(indices) => narrow_indices(indices)?,
+        None => (0..u32::try_from(vertex_count).map_err(|_| "Mesh.create: too many vertices".to_owned())?).collect(),
+    };
     if let Some(index) = first_bad_index(&indices, vertex_count) {
         return Err(format!("Mesh.create: index {index} is outside the vertex array"));
     }
@@ -213,6 +224,7 @@ pub(crate) fn create_packed_owned(
 ) -> Result<Mesh, String> {
     let colors = colors.map(Arc::new);
     let tex_coords = tex_coords.map(Arc::new);
+    let indices = indices.map(narrow_indices).transpose()?;
     create_packed_arcs(mode_, indices.map(Arc::new), normals, colors, tex_coords, vertices)
 }
 
@@ -220,14 +232,17 @@ pub(crate) fn create_packed_owned(
 /// retained and may be shared with another immutable value.
 pub(crate) fn create_packed_arcs(
     mode_: Option<mode>,
-    indices: Option<Arc<Vec<i64>>>,
+    indices: Option<Arc<Vec<u32>>>,
     normals: Option<Vec3_buffer>,
     colors: Option<Arc<Vec<color::T>>>,
     tex_coords: Option<Arc<Vec<vec2::T>>>,
     vertices: Vec3_buffer,
 ) -> Result<Mesh, String> {
     let vertex_count = vertices.length();
-    let indices: Arc<Vec<i64>> = indices.unwrap_or_else(|| Arc::new((0..vertex_count).collect()));
+    let indices: Arc<Vec<u32>> = match indices {
+        Some(indices) => indices,
+        None => Arc::new((0..u32::try_from(vertex_count).map_err(|_| "Mesh.create: too many vertices".to_owned())?).collect()),
+    };
     if let Some(index) = first_bad_index(&indices, vertex_count) {
         return Err(format!("Mesh.create: index {index} is outside the vertex array"));
     }
@@ -405,8 +420,8 @@ pub fn plane(width: f64, height: f64) -> Result<Mesh, String> {
     create_owned_full(None, Some(vec![0, 1, 3, 0, 3, 2]), Some(normals), None, Some(tex_coords), &vertices)
 }
 
-static DEVICE_IDENTITY: Mutex<Option<Arc<Vec<i64>>>> = Mutex::new(None);
-static DEVICE_CHECKED: Mutex<Option<(Arc<Vec<i64>>, i64)>> = Mutex::new(None);
+static DEVICE_IDENTITY: Mutex<Option<Arc<Vec<u32>>>> = Mutex::new(None);
+static DEVICE_CHECKED: Mutex<Option<(Arc<Vec<u32>>, i64)>> = Mutex::new(None);
 
 pub mod view {
     use super::*;
@@ -435,7 +450,7 @@ pub mod view {
     pub struct packed_view {
         pub mode: mode,
         pub vertices: vec3_view,
-        pub indices: Arc<Vec<i64>>,
+        pub indices: Arc<Vec<u32>>,
         pub normals: Option<vec3_view>,
         pub colors: Option<Arc<Vec<color::T>>>,
         pub tex_coords: Option<Arc<Vec<vec2::T>>>,
@@ -478,7 +493,7 @@ pub mod view {
     /// retains the supplied arrays and may share them with another immutable value.
     pub fn create_packed_shared(
         mode_: Option<mode>,
-        indices: Option<Arc<Vec<i64>>>,
+        indices: Option<Arc<Vec<u32>>>,
         normals: Option<vec3_view>,
         colors: Option<Arc<Vec<color::T>>>,
         tex_coords: Option<Arc<Vec<vec2::T>>>,
@@ -491,7 +506,7 @@ pub mod view {
     #[derive(Default)]
     pub struct device_args {
         pub mode: Option<mode>,
-        pub indices: Option<Arc<Vec<i64>>>,
+        pub indices: Option<Arc<Vec<u32>>>,
         pub colors: Option<Vec<color::T>>,
         pub tex_coords: Option<Vec<vec2::T>>,
         pub host: Option<Rc<dyn Fn() -> Result<Mesh, String>>>,
@@ -528,7 +543,7 @@ pub mod view {
         let mode_ = mode_.unwrap_or(mode::Triangles);
         // a frame's device mesh has the last one's indices: the same cloud identity, the same
         // topology's corners, so neither is made or checked again
-        let indices: Arc<Vec<i64>> = match indices {
+        let indices: Arc<Vec<u32>> = match indices {
             Some(indices) => indices,
             None if device_index_count.is_some() => Arc::new(Vec::new()),
             None => {
@@ -539,7 +554,7 @@ pub mod view {
                         let length = usize::try_from(count).map_err(|_| "Mesh.create_device: identity exceeds native address space".to_string())?;
                         let mut made = Vec::new();
                         made.try_reserve_exact(length).map_err(|_| "Mesh.create_device: identity exceeds available memory".to_string())?;
-                        made.extend(0..count);
+                        made.extend(0..length as u32);
                         let made = Arc::new(made);
                         *identity = Some(made.clone());
                         made

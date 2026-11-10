@@ -345,7 +345,7 @@ pub fn scene3_result(
         let view = mesh::view::packed_view(&m)?;
         let mut drawings = Vec::with_capacity(surface.batches.len());
         for (material, offsets) in &surface.batches {
-            let indices: Vec<i64> = offsets.iter().map(|&o| view.indices[o as usize]).collect();
+            let indices: Vec<u32> = offsets.iter().map(|&o| view.indices[o as usize]).collect();
             let batch = mesh::view::create_packed_shared(
                 Some(view.mode),
                 Some(std::sync::Arc::new(indices)),

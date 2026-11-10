@@ -27,7 +27,7 @@ fn f32_at(bytes: &[u8], offset: usize) -> f32 {
     f32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
 }
 
-pub type made = (mesh::Vec3_buffer, mesh::Vec3_buffer, Arc<Vec<i64>>, Vec<color::T>);
+pub type made = (mesh::Vec3_buffer, mesh::Vec3_buffer, Arc<Vec<u32>>, Vec<color::T>);
 
 pub fn make(colors: Vec<color::T>) -> made {
     let vertices = mesh::Vec3_buffer::of_planes(vec![-0.70000001, 0.60000001, 0.10000001], vec![-0.60000001, -0.50000001, 0.80000001], vec![0., 0., 0.]);

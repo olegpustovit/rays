@@ -315,7 +315,7 @@ fn gpu_rays_float32_attribute_stream() {
         let colors = vec![color::rgb(255, 0, 0), color::rgb(0, 255, 0), color::rgb(0, 0, 255)];
         let vertices = mesh::Vec3_buffer::of_planes(vec![-0.70000001, 0.60000001, 0.10000001], vec![-0.60000001, -0.50000001, 0.80000001], vec![0., 0., 0.]);
         let normals = mesh::Vec3_buffer::of_planes(vec![0., 0., 0.], vec![0., 0., 0.], vec![1., 1., 1.]);
-        let indices = Arc::new(vec![0i64, 1, 2]);
+        let indices = Arc::new(vec![0u32, 1, 2]);
         let make = |colors: Vec<color::T>| {
             mesh::view::create_packed_shared(None, Some(indices.clone()), Some(normals.clone()), Some(Arc::new(colors)), None, vertices.clone()).expect("mesh")
         };

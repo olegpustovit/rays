@@ -90,18 +90,18 @@ fn source_has_vertex(s: &Option<Source>) -> bool {
 }
 
 /// Index `i` of an expanded array: a point source reads through the corner's point.
-fn source_index(source: &Source, vertex_points: &[i64], vertex: usize) -> usize {
+fn source_index(source: &Source, vertex_points: &[u32], vertex: usize) -> usize {
     match source {
         Source::Point(_) => vertex_points[vertex] as usize,
         Source::Vertex(_) => vertex,
     }
 }
 
-fn vertex_points_of(topo: &topology::T) -> Result<Arc<Vec<i64>>, String> {
+fn vertex_points_of(topo: &topology::T) -> Result<Arc<Vec<u32>>, String> {
     Ok(topology::view::view(topo).map_err(text)?.vertex_points)
 }
 
-fn expanded_vec3(vertex_points: &[i64], count: usize, source: &Source) -> Result<Vec3_buffer, String> {
+fn expanded_vec3(vertex_points: &[u32], count: usize, source: &Source) -> Result<Vec3_buffer, String> {
     let values = match source {
         Source::Point(Planes::F3(v)) | Source::Vertex(Planes::F3(v)) => v,
         _ => unreachable!("position and normal sources are Float3"),
@@ -117,7 +117,7 @@ fn expanded_vec3(vertex_points: &[i64], count: usize, source: &Source) -> Result
     Ok(Vec3_buffer::of_planes(x, y, z))
 }
 
-fn color_array(expanded: bool, vertex_points: &[i64], count: usize, source: &Source) -> Vec<color::T> {
+fn color_array(expanded: bool, vertex_points: &[u32], count: usize, source: &Source) -> Vec<color::T> {
     let values = match source {
         Source::Point(Planes::F4(v)) | Source::Vertex(Planes::F4(v)) => v,
         _ => unreachable!("color sources are Float4"),
@@ -134,7 +134,7 @@ fn color_array(expanded: bool, vertex_points: &[i64], count: usize, source: &Sou
         .collect()
 }
 
-fn tex_coord_array(expanded: bool, vertex_points: &[i64], count: usize, source: &Source) -> Vec<vec2::T> {
+fn tex_coord_array(expanded: bool, vertex_points: &[u32], count: usize, source: &Source) -> Vec<vec2::T> {
     let values = match source {
         Source::Point(Planes::F2(v)) | Source::Vertex(Planes::F2(v)) => v,
         _ => unreachable!("tex-coord sources are Float2"),
@@ -159,7 +159,7 @@ fn all_curves(kinds: &[PrimitiveKind]) -> bool {
     kinds.iter().all(|k| *k != PrimitiveKind::Polygon)
 }
 
-fn curve_indices(topo: &topology::T, kinds: &[PrimitiveKind], expanded: bool) -> Result<Vec<i64>, String> {
+fn curve_indices(topo: &topology::T, kinds: &[PrimitiveKind], expanded: bool) -> Result<Vec<u32>, String> {
     let vertex_points = vertex_points_of(topo)?;
     let mut edge_count = 0i64;
     for (p, kind) in kinds.iter().enumerate() {
@@ -167,7 +167,7 @@ fn curve_indices(topo: &topology::T, kinds: &[PrimitiveKind], expanded: bool) ->
         edge_count += size - 1 + i64::from(*kind == PrimitiveKind::ClosedPolyline);
     }
     let mut indices = Vec::with_capacity((edge_count.max(0) * 2) as usize);
-    let index = |vertex: i64| if expanded { vertex } else { vertex_points[vertex as usize] };
+    let index = |vertex: i64| if expanded { vertex as u32 } else { vertex_points[vertex as usize] };
     for (p, kind) in kinds.iter().enumerate() {
         let (first, last) = topology::primitive_vertex_range(topo, p as i64).map_err(text)?;
         for vertex in first..last - 1 {
@@ -206,7 +206,7 @@ fn shared_normals(normals: Option<Source>) -> Result<Option<Vec3_buffer>, String
 }
 
 fn expanded_normals(
-    vertex_points: &[i64],
+    vertex_points: &[u32],
     count: usize,
     normals: &Option<Source>,
 ) -> Result<Option<Vec3_buffer>, String> {
@@ -228,7 +228,7 @@ fn curve_mesh(g: &geometry::T, kinds: &[PrimitiveKind]) -> Result<mesh::Mesh, St
     if expand {
         let positions = expanded_vec3(&vertex_points, count, &Source::Point(Planes::F3(geometry::positions(g).clone())))?;
         let normals = expanded_normals(&vertex_points, count, &normals)?;
-        mesh::view::create_packed_owned(Some(mesh::mode::Lines), Some(indices), normals, colors_out, tex_out, positions)
+        mesh::view::create_packed_shared(Some(mesh::mode::Lines), Some(Arc::new(indices)), normals, colors_out.map(Arc::new), tex_out.map(Arc::new), positions)
     } else {
         let positions = mesh_vec3(&packed::float3::view::view(geometry::positions(g)).map_err(text)?);
         let normals = shared_normals(normals)?;
@@ -279,7 +279,7 @@ fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::Mesh, String> {
         } else {
             mesh::view::create_packed_shared(
                 Some(mesh::mode::Triangles),
-                Some(Arc::new(vertex_points.to_vec())),
+                Some(vertex_points.clone()),
                 normals,
                 colors,
                 tex_coords,
@@ -351,7 +351,7 @@ fn of_mesh_raw_impl(m: &mesh::Mesh) -> Result<geometry::T, String> {
                 Err("Rdk.Rays_mesh.of_mesh: malformed triangle index count".to_owned())
             } else {
                 let primitive_count = view.indices.len() / 3;
-                let offsets: Vec<i64> = (0..=primitive_count as i64).map(|i| i * 3).collect();
+                let offsets: Vec<u32> = (0..=primitive_count as u32).map(|i| i * 3).collect();
                 topology::polygons_owned(point_count, view.indices.to_vec(), offsets).map_err(text)
             }?;
             let mut attributes = Vec::new();
