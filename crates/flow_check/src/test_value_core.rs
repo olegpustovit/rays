@@ -28,8 +28,6 @@ fn value_keys_contexts_and_symbols() {
 fn coercions_follow_the_port_rules() {
     let cases = [
         (PortType::Float, PortValue::Int(3), PortValue::Float(3.0)),
-        (PortType::Int, PortValue::Float(1.5), PortValue::Int(2)),
-        (PortType::Int, PortValue::Float(-1.5), PortValue::Int(-1)),
         (PortType::Bool, PortValue::Float(-0.0), PortValue::Bool(false)),
         (PortType::Bool, PortValue::Int(-1), PortValue::Bool(true)),
         (PortType::Float, PortValue::Bool(true), PortValue::Float(1.0)),
@@ -37,13 +35,15 @@ fn coercions_follow_the_port_rules() {
         (PortType::Vec3, PortValue::Bool(true), PortValue::Vec3(1.0, 1.0, 1.0)),
         (PortType::Vec3, PortValue::Int(2), PortValue::Vec3(2.0, 2.0, 2.0)),
         (PortType::Vec3, PortValue::Float(3.0), PortValue::Vec3(3.0, 3.0, 3.0)),
-        (PortType::Int, PortValue::Float(1e100), PortValue::Int(i64::MAX)),
-        (PortType::Int, PortValue::Float(-1e100), PortValue::Int(i64::MIN)),
         (PortType::Int, PortValue::Int(i64::MAX), PortValue::Int(i64::MAX)),
         (PortType::Vec3, PortValue::Vec3(1.0, 2.0, 3.0), PortValue::Vec3(1.0, 2.0, 3.0)),
     ];
     for (target, input, expected) in cases {
         assert_eq!(coerce(&target, input), Ok(expected));
+    }
+    for number in [1.0, 1.5, -1.5, 1e100, -1e100] {
+        assert!(!can_connect(&PortType::Float, &PortType::Int));
+        assert_eq!(coerce(&PortType::Int, PortValue::Float(number)).unwrap_err().code, "E_TYPE");
     }
     for target in [PortType::Float, PortType::Int, PortType::Bool, PortType::Geometry] {
         assert!(coerce(&target, PortValue::Vec3(1.0, 2.0, 3.0)).is_err());
@@ -59,7 +59,7 @@ fn coercions_follow_the_port_rules() {
 }
 
 #[test]
-fn hard_bounds_clamp_a_coerced_integer() {
+fn hard_bounds_clamp_an_integer_without_implicit_float_conversion() {
     let schema = param::schema(
         "bounded".into(),
         vec![param::field(
@@ -70,7 +70,7 @@ fn hard_bounds_clamp_a_coerced_integer() {
         .unwrap()],
     )
     .unwrap();
-    let value = match coerce(&PortType::Int, PortValue::Float(1e100)).unwrap() {
+    let value = match coerce(&PortType::Int, PortValue::Int(i64::MAX)).unwrap() {
         PortValue::Int(value) => value,
         _ => panic!("Int expected"),
     };

@@ -279,7 +279,7 @@ fn num_param(source: &str) -> Option<param::Value> {
 
 fn opaque_head(name: &str) -> bool {
     [
-        "fn", "map", "filter", "reduce", "sort-by", "iterate", "if", "cond", "case",
+        "fn", "map", "filter", "reduce", "sort_by", "iterate", "if", "cond", "case",
         "with_error", "error_rows", "exact",
     ]
     .contains(&name)
@@ -1133,7 +1133,7 @@ impl Checker {
      };
      let (mut term, mut value) = match head {
          Some((h @ ("for" | "fold" | "scan" | "sum"), args)) => self.zone(&inner, x, h, args, Some(id)),
-         Some(("let*", args)) => self.let_scope(&inner, x, args, id),
+         Some(("let" | "let*", args)) => self.let_scope(&inner, x, args, id),
          Some(("state", args)) => self.state(&inner, x, args, Some(id)),
          Some(("fn", args)) => self.make_fn(&inner, x, args, "fn", Some(id)),
          _ => self.infer(&inner, x),
@@ -1152,7 +1152,7 @@ impl Checker {
  fn body(&mut self, cx: &Cx, form: &Syntax) -> (TermId, Info) {
      if let SNode::List(items) = &form.node {
          let items = form.range(*items);
-         if items.first().is_some_and(|id| matches!(form.arena().row(*id).node, SNode::Sym(name) if form.name(name) == "let*"))
+         if items.first().is_some_and(|id| matches!(form.arena().row(*id).node, SNode::Sym(name) if matches!(form.name(name), "let" | "let*")))
              && form.meta().is_empty()
          {
              return self.let_scope(cx, form, &items[1..], cx.path);
@@ -1184,7 +1184,7 @@ impl Checker {
      let path = self.path(path);
      let inner = cx.with_path(path);
      let (mut term, value) = self.body(&inner, form);
-     if syntax::head(form) != Some("let*") {
+     if syntax::head(form) .is_none_or(|head| !matches!(head, "let" | "let*")) {
          term = self.make_term(form, value.ty.clone(), Draft::Let(Vec::new(), term));
      }
      term = self.set_path(term, path);
@@ -1192,8 +1192,8 @@ impl Checker {
      (term, value)
  }
  fn call(&mut self,cx:&Cx,f:&Syntax,name:&str,args:&[SyntaxId])->(TermId,Info){match name{
-   "let*"=>{let base=self.inline_path(cx,"~let");self.let_scope(cx,f,args,base)},"state"=>self.state(cx,f,args,None),"for"|"fold"|"scan"|"sum"=>self.zone(cx,f,name,args,None),"fn"=>self.make_fn(cx,f,args,"fn",None),
-   "if"=>self.if_form(cx,f,args),"cond"=>self.cond_form(cx,f,name,args),"case"=>self.cond_form(cx,f,name,args),"values"=>self.record(cx,f,args,"values"),"list"=>self.list(cx,f,args),"concat"=>self.concat(cx,f,args),"str"=>self.str_form(cx,f,args),"get"=>self.get(cx,f,args),"assoc"=>self.assoc(cx,f,args),"map"|"filter"|"reduce"|"sort-by"=>self.hof(cx,f,name,args),"iterate"=>self.iterate(cx,f,args),"ref"=>self.ref_form(cx,f,args),"with_error"=>self.with_error(cx,f,args),"error_rows"=>self.error_rows(cx,f,args),
+   "let"|"let*"=>{let base=self.inline_path(cx,"~let");self.let_scope(cx,f,args,base)},"state"=>self.state(cx,f,args,None),"for"|"fold"|"scan"|"sum"=>self.zone(cx,f,name,args,None),"fn"=>self.make_fn(cx,f,args,"fn",None),
+   "if"=>self.if_form(cx,f,args),"cond"=>self.cond_form(cx,f,name,args),"case"=>self.cond_form(cx,f,name,args),"values"=>self.record(cx,f,args,"values"),"list"=>self.list(cx,f,args),"concat"=>self.concat(cx,f,args),"str"=>self.str_form(cx,f,args),"get"=>self.get(cx,f,args),"assoc"=>self.assoc(cx,f,args),"map"|"filter"|"reduce"|"sort_by"=>self.hof(cx,f,name,args),"iterate"=>self.iterate(cx,f,args),"ref"=>self.ref_form(cx,f,args),"with_error"=>self.with_error(cx,f,args),"error_rows"=>self.error_rows(cx,f,args),
    "quote"|"quasiquote"|"unquote"|"unquote-splicing"=>self.fail_term(f,"E_QUOTE",&format!("{name} belongs in a defmacro template (`…).")),"workspace"|"graph"|"defn"|"defnode"|"defmacro"=>self.fail_term(f,"E_FORM",&format!("{name} is a top-level form of a workspace.")),
    _=>self.call_named(cx,f,name,args)
  }}
@@ -1602,7 +1602,7 @@ impl Checker {
      }
      let acc_ty = init.as_ref().map(|(_, _, iv)| iv.ty.clone());
      if let Some(at) = &acc_ty {
-         if !ty::fits(self.terms.ty(bt), at) {
+         if !ty::fits(self.terms.ty(bt), at) && !matches!((at, self.terms.ty(bt)), (Ty::Int, Ty::Float)) {
              self.error(form, "E_ACC_TYPE", &format!("{name} body must return the accumulator type {}; it returns {}.", show(at), show(self.terms.ty(bt))));
          }
      }
@@ -1979,17 +1979,23 @@ impl Checker {
              let args = self.args_of(cx, form, forms, None, &fn_slot);
              self.apply_kind(cx, form, &kind, &args)
          }
-         Err((code, message)) => {
-             let suggestions = catalog::suggestions(name, &self.catalog);
+         Err((mut code, message)) => {
+             let mut names = crate::registry::names(&self.catalog);
+             names.extend(self.ops.iter().map(|operator| operator.name.clone()));
+             let suggestions = catalog::suggestions_from(name, &names);
+             if code == "E_NAMESPACE" && name.split_once('/').is_some_and(|(prefix, _)| self.ops.iter().any(|operator| operator.name.split_once('/').is_some_and(|(namespace, _)| namespace == prefix))) {
+                 code = "E_UNKNOWN_KIND".into();
+             }
              let index = self.diags.len();
-             let result = if code == "E_UNKNOWN_KIND" && message.starts_with(&format!("Unknown node {name}.")) {
-                 let suffix = &message[format!("Unknown node {name}.").len()..];
+             let result = if code == "E_UNKNOWN_KIND" {
+                 let suffix = suggestions.first().map_or_else(String::new, |hint| format!(" Did you mean {hint}?"));
                  self.fail_term(form, &code, &format!("Unknown operator “{name}”.{suffix}"))
              } else {
                  self.fail_term(form, &code, &message)
              };
              if let Some(diagnostic) = self.diags.get_mut(index) {
                  diagnostic.signature = suggestions.first().and_then(|name| crate::registry::signature(name)
+                     .or_else(|| self.ops.iter().find(|operator| &operator.name == name).map(crate::registry::op_signature))
                      .or_else(|| self.catalog.kinds.iter().find(|kind| &kind.qualified == name).map(crate::registry::kind_signature)));
                  diagnostic.suggest = suggestions;
              }
@@ -2245,7 +2251,13 @@ impl Checker {
              self.error(form, "E_TYPE", &format!("{} needs matching vector widths; got {widths}.", operator.name));
          }
      }
-     let typed = named.iter().map(|(name, term)| ((*name).into(), self.terms.ty(*term).clone(), literal_param(&self.terms, *term))).collect::<Vec<_>>();
+     let typed = named.iter().map(|(name, term)| {
+         let have = self.terms.ty(*term);
+         let want = operator.signature.pos.iter().chain(&operator.signature.opt).chain(&operator.signature.kw)
+             .find(|(argument, _)| argument == name).or(operator.signature.rest.as_ref()).map(|(_, ty)| ty);
+         let ty = if operator.any_num { have.clone() } else { want.map_or_else(|| have.clone(), |want| ty::coerce(have, want)) };
+         ((*name).into(), ty, literal_param(&self.terms, *term))
+     }).collect::<Vec<_>>();
      let result = match op::result_type(operator, &typed) {
          Ok(ty) => ty,
          Err(mut problem) => {
@@ -2409,14 +2421,14 @@ impl Checker {
          "linspace" if positional.len() == 3 && integer(positional[2]).is_some_and(|count| count > MAX_ITERATIONS as i64) => {
              error(form, "E_ITER_BOUND", "linspace exceeds 4,096 values.");
          }
-         "ui/split" | "ui/split-at" => {
+         "ui/split" | "ui/split_at" => {
              if let Some(axis) = positional.first().and_then(|argument| text(argument)) {
                  let choices = operator.choices.iter().find(|(name, _)| name == "axis").map(|(_, values)| values);
                  if choices.is_some_and(|choices| !choices.iter().any(|choice| choice == axis)) {
                      error(form, "E_RANGE", "Split axis is horizontal or vertical.");
                  }
              }
-             if operator.name == "ui/split-at" && positional.len() > 1 && number(positional[1]).is_some_and(|value| !(0.1..=0.9).contains(&value)) {
+             if operator.name == "ui/split_at" && positional.len() > 1 && number(positional[1]).is_some_and(|value| !(0.1..=0.9).contains(&value)) {
                  error(form, "E_RANGE", "Split ratio is 0.1–0.9.");
              }
              let mut fixed = Vec::new();
@@ -2721,14 +2733,14 @@ fn value_arg(&mut self, x: &Syntax, v: &Info) -> Arg {
     Arg { key: None, form: x.clone(), term: self.make_term(x, v.ty.clone(), Draft::RefBinding("_".into(), Vec::new())), info: v.clone() }
 }
 fn hof(&mut self, cx: &Cx, x: &Syntax, name: &str, forms: &[packed::SyntaxId]) -> (TermId, Info) {
-     let (lo, hi) = match name { "map" => (2, 4), "filter" | "sort-by" => (2, 2), _ => (3, 3) };
+     let (lo, hi) = match name { "map" => (2, 4), "filter" | "sort_by" => (2, 2), _ => (3, 3) };
      let n = forms.len();
      if n < lo || n > hi {
          return self.fail_term(x, "E_ARITY", match name {
              "map" => "map is (map f list …) with 1–3 lists.",
              "filter" => "filter is (filter pred list).",
              "reduce" => "reduce is (reduce f init list).",
-             _ => "sort-by is (sort-by key list).",
+             _ => "sort_by is (sort_by key list).",
          });
      }
     let f_form = x.child(forms[0]);
@@ -2795,14 +2807,14 @@ fn hof(&mut self, cx: &Cx, x: &Syntax, name: &str, forms: &[packed::SyntaxId]) -
              if !ty::fits(&rv.ty, &Ty::Bool) { self.error(x, "E_TYPE", &format!("filter's predicate returns bool; it returns {}.", show(&rv.ty))); }
              (HofKind::Filter, l0.ty, any_len || rv.live)
          }
-         "sort-by" => {
-             if !matches!(rv.ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Any) { self.error(x, "E_TYPE", &format!("sort-by's key returns a number; it returns {}.", show(&rv.ty))); }
+         "sort_by" => {
+             if !matches!(rv.ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Any) { self.error(x, "E_TYPE", &format!("sort_by's key returns a number; it returns {}.", show(&rv.ty))); }
              (HofKind::SortBy, l0.ty, any_len)
          }
          _ => {
              let it = init.as_ref().map(|(_, iv)| iv.ty.clone()).unwrap_or(Ty::Any);
              self.no_fn(x, &rv.ty, "The reduce result");
-             if !ty::fits(&rv.ty, &it) {
+             if !ty::fits(&rv.ty, &it) && !matches!((&it, &rv.ty), (Ty::Int, Ty::Float)) {
                  self.error(x, "E_TYPE", &format!("reduce's function must return the accumulator type {}; it returns {}.", show(&it), show(&rv.ty)));
              }
              let out = ty::join(&it, &rv.ty).unwrap_or(it);
@@ -2884,7 +2896,7 @@ fn iterate(&mut self, cx: &Cx, f: &Syntax, forms: &[packed::SyntaxId]) -> (TermI
      let arg_iv = self.value_arg(f, &plain(&iv));
      let (result, rv) = self.apply_callable(cx, f, &fv, std::slice::from_ref(&arg_iv));
      self.no_fn(f, &rv.ty, "The iterate result");
-     if !ty::fits(&rv.ty, &iv.ty) {
+     if !ty::fits(&rv.ty, &iv.ty) && !matches!((&iv.ty, &rv.ty), (Ty::Int, Ty::Float)) {
          self.error(f, "E_TYPE", &format!("iterate's function must return the value type {}; it returns {}.", show(&iv.ty), show(&rv.ty)));
      }
      let ty = ty::join(&iv.ty, &rv.ty).unwrap_or(iv.ty.clone());
@@ -3111,40 +3123,80 @@ impl Checker {
         }
     }
 
-    fn parse_signature(&mut self, form: &Syntax, head: &str, name: &str) -> Option<Sig> {
+    fn infer_context(&self, form: &Syntax, declarations: &[(String, String, Syntax)], depth: usize) -> Option<Context> {
+        let depth = depth.checked_sub(1)?;
+        if let Some(head) = syntax::head(form) {
+            let referenced = if head == "ref" {
+                form.children().get(1).and_then(|&id| match form.child(id).node { SNode::Sym(name) => Some(form.name(name)), _ => None })
+            } else { Some(head) };
+            if let Some((_, _, declaration)) = declarations.iter().find(|(kind, name, _)|
+                referenced == Some(name.as_str()) && if head == "ref" { kind == "graph" } else { kind == "defn" }) {
+                let items = declaration.children();
+                if items.get(2).is_some_and(|&id| matches!(declaration.child(id).node, SNode::Kw(key) if declaration.name(key) == "context")) {
+                    return items.get(3).and_then(|&id| match declaration.child(id).node {
+                        SNode::Sym(name) => context::of_string(declaration.name(name)).ok(), _ => None,
+                    });
+                }
+                return items.last().and_then(|&id| self.infer_context(&declaration.child(id), declarations, depth));
+            }
+            if let Some(definition) = self.defs_get(head) { return Some(definition.ctx); }
+            if let Some(operator) = op::find_ref(&self.ops, head, &context::value()) { return Some(operator.ctx); }
+            let candidates: BTreeSet<_> = self.catalog.kinds.iter()
+                .filter(|kind| kind.qualified == head || catalog::short(&kind.qualified) == head)
+                .map(|kind| context::name(kind.context)).collect();
+            if candidates.len() == 1 { return context::of_string(candidates.first().copied()?).ok(); }
+            if matches!(head, "let" | "let*") {
+                let children = form.children();
+                if let Some(&body) = children.last() {
+                    if let Some(ctx) = self.infer_context(&form.child(body), declarations, depth) { return Some(ctx); }
+                }
+            }
+        }
+        let mut contexts = BTreeSet::new();
+        for &child in form.children() {
+            if let Some(ctx) = self.infer_context(&form.child(child), declarations, depth) {
+                if ctx != context::value() { contexts.insert(context::name(ctx)); }
+            }
+        }
+        if contexts.len() == 1 { return context::of_string(contexts.first().copied()?).ok(); }
+        if !contexts.is_empty() { return None; }
+        match form.node {
+            SNode::Num(_) | SNode::Str(_) | SNode::Vec(_) | SNode::Map(_) => Some(context::value()),
+            _ => None,
+        }
+    }
+
+    fn parse_signature(&mut self, form: &Syntax, head: &str, name: &str, declarations: &[(String, String, Syntax)]) -> Option<Sig> {
         let SNode::List(items) = form.node else {
             self.error(form, "E_SHAPE", "Expected a graph or defn declaration.");
             return None;
         };
         let items = form.range(items);
-        if items.len() < 5 || !matches!(form.arena().row(items[2]).node, SNode::Kw(key) if form.name(key) == "context") {
-            self.error(form, "E_SHAPE", &format!("Invalid shape for {head}: expected ({head} {name} :context ctx [params] body)."));
-            return None;
-        }
-        let SNode::Sym(context_name) = form.arena().row(items[3]).node else {
-            self.error(form, "E_CONTEXT_UNKNOWN", "Unknown context.");
-            return None;
+        let explicit = items.get(2).is_some_and(|&id| matches!(form.arena().row(id).node, SNode::Kw(key) if form.name(key) == "context"));
+        let start = if explicit { 4 } else { 2 };
+        let tail = &items[start.min(items.len())..];
+        let (parameters, body): (&[packed::SyntaxId], packed::SyntaxId) = match tail {
+            [body] if head == "graph" => (&[], *body),
+            [parameters, body] => match form.arena().row(*parameters).node {
+                SNode::Vec(range) => (form.range(range), *body),
+                _ => { self.error(form, "E_SHAPE", "Graph/function inputs must be a parameter vector."); return None; }
+            },
+            _ => { self.error(form, "E_SHAPE", &format!("Invalid shape: expected ({head} {name} [:context ctx] [params] body).")); return None; }
         };
-        let ctx = match context::of_string(form.name(context_name)) {
-            Ok(ctx) => ctx,
-            Err(problem) => { self.diags.push(problem); return None; }
-        };
-        let (parameters, body): (&[packed::SyntaxId], packed::SyntaxId) = if head == "graph" && items.len() == 5 {
-            (&[], items[4])
-        } else if let SNode::Vec(parameters) = form.arena().row(items[4]).node {
-            if items.len() != 6 {
-                self.error(form, "E_SHAPE", &format!("Invalid shape for {head}: expected ({head} {name} :context ctx [params] body)."));
-                return None;
+        let ctx = if explicit {
+            let SNode::Sym(context_name) = form.arena().row(items[3]).node else {
+                self.error(form, "E_CONTEXT_UNKNOWN", "Unknown context."); return None;
+            };
+            match context::of_string(form.name(context_name)) {
+                Ok(ctx) => ctx,
+                Err(problem) => { self.diags.push(problem); return None; }
             }
-            (form.range(parameters), items[5])
         } else {
-            self.error(form, "E_SHAPE", &format!("Invalid shape for {head}: expected ({head} {name} :context ctx [params] body)."));
-            return None;
+            match self.infer_context(&form.child(body), declarations, 64) {
+                Some(ctx) => ctx,
+                None => { self.error(form, "E_CONTEXT_INFER", "The body does not identify exactly one context; write :context explicitly."); return None; }
+            }
         };
-        if head == "defn" && items.len() != 6 {
-            self.error(form, "E_SHAPE", &format!("defn {name} needs a parameter vector."));
-            return None;
-        }
         let mut params = Vec::new();
         let mut seen = BTreeSet::new();
         for id in parameters {
@@ -3451,7 +3503,7 @@ impl Checker {
             if head != "graph" && head != "defn" {
                 continue;
             }
-            let Some(signature) = self.parse_signature(form, head, name) else { continue };
+            let Some(signature) = self.parse_signature(form, head, name, &declarations) else { continue };
             if head == "graph" {
                 self.graphs.insert(name.clone(), signature);
                 self.graph_order.push(name.clone());

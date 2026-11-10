@@ -21,7 +21,7 @@ pub struct Token {
     pub stop: usize,
 }
 
-pub const BINDERS: &[&str] = &["let*", "for", "fold", "scan", "sum", "state", "fn"];
+pub const BINDERS: &[&str] = &["let", "let*", "for", "fold", "scan", "sum", "state", "fn"];
 
 fn closer_of(open: char) -> char {
     match open {
@@ -351,7 +351,18 @@ pub fn context_of(text: &str, tokens: &[Token], open_stack: &[(char, usize)]) ->
         if i + 1 < tokens.len() && tokens[i + 1].kind == Kind::Head {
             let head = word(text, &tokens[i + 1]);
             if head == "graph" || head == "defn" {
-                return kw_value(text, tokens, i, ":context").unwrap_or_else(|| "sop".to_owned());
+                if let Some(context) = kw_value(text, tokens, i, ":context") { return context; }
+                let depth = match tokens[i].kind { Kind::Open(depth) => depth, _ => 0 };
+                for token in tokens.iter().skip(i + 2).take_while(|token| token.kind != Kind::Close(depth)) {
+                    if token.kind != Kind::Head { continue; }
+                    let name = word(text, token);
+                    let context = crate::op::find_ref(&[], &name, &flow_syntax::context::value()).map(|operator| operator.ctx)
+                        .or_else(|| flow_syntax::context::of_qualified(&name));
+                    if let Some(context) = context.filter(|context| *context != flow_syntax::context::value()) {
+                        return flow_syntax::context::name(context).to_owned();
+                    }
+                }
+                return "value".to_owned();
             }
         }
     }
@@ -421,5 +432,15 @@ mod tests {
         assert_eq!(indent("(let* [a 1]", 5), "  ");
         assert_eq!(indent("(f é", 4), "   ");
         assert_eq!(indent("(sop/merge\nx", 12), " ");
+    }
+}
+
+#[cfg(test)]
+mod inferred_context_tests {
+    #[test]
+    fn completion_infers_context_through_let_without_an_annotation() {
+        let source = "(workspace example (graph picture (let [width (frame/width)] (draw/circle [0 0] 3";
+        let (tokens, _, stack) = super::lex(source);
+        assert_eq!(super::context_of(source, &tokens, &stack), "draw");
     }
 }

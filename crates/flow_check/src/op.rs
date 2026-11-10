@@ -37,8 +37,8 @@ pub struct Arithmetic { pub apply: Arc<ArithmeticFn> }
 #[derive(Clone)]
 pub struct Op {
     pub name: String,
-    pub doc: String,
-    pub example: String,
+    pub doc: Arc<str>,
+    pub example: Arc<str>,
     pub ctx: Context,
     pub signature: Signature,
     pub out: Out,
@@ -116,19 +116,19 @@ builtin_delegates!(
     (del_image_load, "image/load"), (del_image_render, "image/render"), (del_image_map, "image/map"),
 );
 gpu_stage_only!(
-    (gpu_err_fwidth, "gpu/fwidth"), (gpu_err_float_bits, "gpu/float-bits"), (gpu_err_sample, "gpu/sample"), (gpu_err_sample_level, "gpu/sample-level"),
-    (gpu_err_read, "gpu/read"), (gpu_err_texture_size, "gpu/texture-size"), (gpu_err_instance_id, "gpu/instance-id"), (gpu_err_front_facing, "gpu/front-facing"),
-    (gpu_err_depth, "gpu/depth"), (gpu_err_fragment_x, "gpu/fragment-x"), (gpu_err_fragment_y, "gpu/fragment-y"),
-    (gpu_err_trace_triangles, "gpu/trace-triangles"), (gpu_err_trace_any, "gpu/trace-any"), (gpu_err_trace_curves, "gpu/trace-curves"),
-    (gpu_err_trace_curves_any, "gpu/trace-curves-any"), (gpu_err_scene_vertex, "gpu/scene-vertex"), (gpu_err_scene_vertex_end, "gpu/scene-vertex-end"),
-    (gpu_err_scene_instance, "gpu/scene-instance"), (gpu_err_scene_sphere, "gpu/scene-sphere"), (gpu_err_scene_strand, "gpu/scene-strand"),
-    (gpu_err_scene_spheres, "gpu/scene-spheres"), (gpu_err_scene_strands, "gpu/scene-strands"), (gpu_err_group_scan, "gpu/group-scan"),
-    (gpu_err_store, "gpu/store"), (gpu_err_store_int, "gpu/store-int"),
+    (gpu_err_fwidth, "gpu/fwidth"), (gpu_err_float_bits, "gpu/float_bits"), (gpu_err_sample, "gpu/sample"), (gpu_err_sample_level, "gpu/sample_level"),
+    (gpu_err_read, "gpu/read"), (gpu_err_texture_size, "gpu/texture_size"), (gpu_err_instance_id, "gpu/instance_id"), (gpu_err_front_facing, "gpu/front_facing"),
+    (gpu_err_depth, "gpu/depth"), (gpu_err_fragment_x, "gpu/fragment_x"), (gpu_err_fragment_y, "gpu/fragment_y"),
+    (gpu_err_trace_triangles, "gpu/trace_triangles"), (gpu_err_trace_any, "gpu/trace_any"), (gpu_err_trace_curves, "gpu/trace_curves"),
+    (gpu_err_trace_curves_any, "gpu/trace_curves_any"), (gpu_err_scene_vertex, "gpu/scene_vertex"), (gpu_err_scene_vertex_end, "gpu/scene_vertex_end"),
+    (gpu_err_scene_instance, "gpu/scene_instance"), (gpu_err_scene_sphere, "gpu/scene_sphere"), (gpu_err_scene_strand, "gpu/scene_strand"),
+    (gpu_err_scene_spheres, "gpu/scene_spheres"), (gpu_err_scene_strands, "gpu/scene_strands"), (gpu_err_group_scan, "gpu/group_scan"),
+    (gpu_err_store, "gpu/store"), (gpu_err_store_int, "gpu/store_int"),
 );
 fn mk(name: &str, ctx: Context, signature: Signature, out: Out, body: Body) -> Op {
     let doc = crate::registry::description(name, &signature);
     let example = crate::registry::example(name, &signature);
-    Op { name:name.into(), doc, example, ctx, signature, out, out_args:None, any_num:false, choices:Vec::new(), shape:Shape::Scalar, live:false, check:EMPTY_CHECK.clone(), body, category:"Math".into(), arithmetic:None, packed_extension:None }
+    Op { name:name.into(), doc:doc.into(), example:example.into(), ctx, signature, out, out_args:None, any_num:false, choices:Vec::new(), shape:Shape::Scalar, live:false, check:EMPTY_CHECK.clone(), body, category:"Math".into(), arithmetic:None, packed_extension:None }
 }
 fn with_defaults(mut op: Op, category: &str) -> Op { op.category=category.into(); op }
 fn output_const(ty: Ty) -> Out { Arc::new(move |_| Ok(ty.clone())) }
@@ -259,17 +259,17 @@ fn builtin_packed_kind(op:&Op)->Option<PackedKind>{
         Some(P::Numeric(x)) => Some(PackedKind::Binary(x)),
         Some(P::Math(x)) => Some(PackedKind::Unary(x)),
         Some(P::Integer(x)) => Some(PackedKind::Integer(x)),
-        Some(P::Integer_compare(x)) => Some(PackedKind::IntegerCompare(x)),
-        Some(P::Float_convert) => Some(PackedKind::Convert(C::ToFloat)),
-        Some(P::Int_convert) => Some(PackedKind::Convert(C::Truncate)),
+        Some(P::IntegerCompare(x)) => Some(PackedKind::IntegerCompare(x)),
+        Some(P::FloatConvert) => Some(PackedKind::Convert(C::ToFloat)),
+        Some(P::IntConvert) => Some(PackedKind::Convert(C::Truncate)),
         Some(P::Floor) => Some(PackedKind::Convert(C::Floor)),
         Some(P::Ceil) => Some(PackedKind::Convert(C::Ceil)),
         Some(P::Round) => Some(PackedKind::Convert(C::Round)),
         Some(P::Fma) => Some(PackedKind::Fma),
-        Some(P::Checked_mul) => Some(PackedKind::CheckedMul),
-        Some(P::Checked_fma) => Some(PackedKind::CheckedFma),
-        Some(P::Rand_at) => Some(PackedKind::RandAt),
-        Some(P::Array_nth) => Some(PackedKind::Gather),
+        Some(P::CheckedMul) => Some(PackedKind::CheckedMul),
+        Some(P::CheckedFma) => Some(PackedKind::CheckedFma),
+        Some(P::RandAt) => Some(PackedKind::RandAt),
+        Some(P::ArrayNth) => Some(PackedKind::Gather),
         Some(P::Noise3) => Some(PackedKind::Noise3),
         _ => None,
     };
@@ -301,10 +301,10 @@ fn joined<T:Copy>(a:&[T],b:&[T])->Result<Vec<T>,Diagnostic>{
 fn segment_buffer<T>(count:usize)->Result<Mutex<Vec<Option<T>>>,Diagnostic>{
     let mut result=value::array_buffer(count)?;result.resize_with(count,||None);Ok(Mutex::new(result))
 }
-fn value_width(v:&Value)->Result<usize,Diagnostic>{match v{Value::Int_array(_)=>Ok(1),Value::Floats(width @ 1..=4, _)=>Ok(*width),_=>Err(array_type_error())}}
+fn value_width(v:&Value)->Result<usize,Diagnostic>{match v{Value::IntArray(_)=>Ok(1),Value::Floats(width @ 1..=4, _)=>Ok(*width),_=>Err(array_type_error())}}
 fn offsets(values:Option<&Value>,count:usize)->Result<Option<Vec<i64>>,Diagnostic>{
     let Some(values)=values else{return Ok(None)};
-    let Value::Int_array(xs)=values else{return Err(fail("E_ARRAY_TYPE","Segment offsets must be an integer array."))};
+    let Value::IntArray(xs)=values else{return Err(fail("E_ARRAY_TYPE","Segment offsets must be an integer array."))};
     if xs.is_empty()||xs[0]!=0||xs[xs.len()-1] as i128!=count as i128||xs.windows(2).any(|w|w[1]<w[0]){
         return Err(fail("E_ARRAY_OFFSETS","Segment offsets must start at zero, be nondecreasing and end at the value count."));
     }
@@ -319,9 +319,9 @@ fn dispatch_rows(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Send+Syn
 pub fn reduce_array(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Send+Sync)>,operation:Reduction,offsets_value:Option<&Value>,values:&Value)->Result<Value,Diagnostic>{
     let count=value::array_length(values)?;let offsets=offsets(offsets_value,count)?;
     let segments=offsets.as_ref().map_or(1,|o|o.len()-1);
-    let (width,int)=match values{Value::Int_array(_)=>(1,true),Value::Floats(width @ 1..=4, _)=>(*width,false),_=>return Err(array_type_error())};
+    let (width,int)=match values{Value::IntArray(_)=>(1,true),Value::Floats(width @ 1..=4, _)=>(*width,false),_=>return Err(array_type_error())};
     if width==1&&int {
-        let Value::Int_array(data)=values else{return Err(array_type_error())};
+        let Value::IntArray(data)=values else{return Err(array_type_error())};
         let reduce=|first:usize,finish:usize|->Result<i64,Diagnostic>{
             if operation!=Reduction::Sum&&first==finish{return Err(fail("E_ARRAY_EMPTY","An extremum needs at least one array value."))}
             let mut result=if operation==Reduction::Sum{0}else{data[first]};
@@ -335,7 +335,7 @@ pub fn reduce_array(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Send+
             dispatch_rows(rows,segments,work)?;
             let mut output=output.into_inner().unwrap_or_else(|e|e.into_inner());let mut result=value::array_buffer(segments)?;
             for item in output.iter_mut(){match item.take(){Some(Ok(value))=>result.push(value),Some(Err(error))=>return Err(error),None=>return Err(fail("E_ARRAY_OFFSETS","Segment row dispatcher did not visit every row."))}}
-            return Ok(Value::Int_array(Arc::new(result)))
+            return Ok(Value::IntArray(Arc::new(result)))
         }
         return Ok(Value::Int(reduce(0,count)?))
     }
@@ -363,22 +363,22 @@ pub fn segment_argmax(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Sen
     let count=value::array_length(values)?;let offsets=offsets(Some(offset_value),count)?.ok_or_else(array_type_error)?;
     let segments=offsets.len()-1;let output=segment_buffer::<Result<i64,Diagnostic>>(segments)?;
     match values{
-        Value::Int_array(data)=>{let work: &(dyn Fn(i64)+Send+Sync)=&|row|{if row>=0&&(row as u128)<segments as u128{let row=row as usize;let first=offsets[row] as usize;let finish=offsets[row+1] as usize;let value=if first==finish{-1}else{let mut best=first;for i in first+1..finish{if data[i]>data[best]{best=i}}best as i64};output.lock().unwrap_or_else(|e|e.into_inner())[row]=Some(Ok(value))}};dispatch_rows(rows,segments,work)?},
+        Value::IntArray(data)=>{let work: &(dyn Fn(i64)+Send+Sync)=&|row|{if row>=0&&(row as u128)<segments as u128{let row=row as usize;let first=offsets[row] as usize;let finish=offsets[row+1] as usize;let value=if first==finish{-1}else{let mut best=first;for i in first+1..finish{if data[i]>data[best]{best=i}}best as i64};output.lock().unwrap_or_else(|e|e.into_inner())[row]=Some(Ok(value))}};dispatch_rows(rows,segments,work)?},
         Value::Floats(1, data)=>{let work: &(dyn Fn(i64)+Send+Sync)=&|row|{if row>=0&&(row as u128)<segments as u128{let row=row as usize;let first=offsets[row] as usize;let finish=offsets[row+1] as usize;let value=if first==finish{Ok(-1)}else{(||{fin("array/segment_argmax",data[first])?;let mut best=first;for i in first+1..finish{let x=fin("array/segment_argmax",data[i])?;if x>data[best]{best=i}}Ok(best as i64)})()};output.lock().unwrap_or_else(|e|e.into_inner())[row]=Some(value)}};dispatch_rows(rows,segments,work)?},
         _=>return Err(fail("E_ARRAY_TYPE","array/segment_argmax needs an int or float array.")),
     }
     let mut output=output.into_inner().unwrap_or_else(|e|e.into_inner());let mut result=value::array_buffer(segments)?;
     for item in output.iter_mut(){match item.take(){Some(Ok(value))=>result.push(value),Some(Err(error))=>return Err(error),None=>return Err(fail("E_ARRAY_OFFSETS","Segment row dispatcher did not visit every row."))}}
-    Ok(Value::Int_array(Arc::new(result)))
+    Ok(Value::IntArray(Arc::new(result)))
 }
 fn scatter_add(indices:&Value,values:&Value,size_value:&Value)->Result<Value,Diagnostic>{
-    let Value::Int_array(indices)=indices else{return Err(fail("E_ARRAY_TYPE","Scatter indices must be an integer array."))};
+    let Value::IntArray(indices)=indices else{return Err(fail("E_ARRAY_TYPE","Scatter indices must be an integer array."))};
     let n=value::array_length(values)?;let width=value_width(values)?;let size=match size_value{Value::Int(_)=>array_count(None,"array/scatter_add",size_value)?,_=>return Err(fail("E_ARRAY_TYPE","Scatter size must be an integer."))};
     if indices.len()!=n{return Err(fail("E_ARRAY_COUNT","Scatter indices and values must have equal lengths."))}
-    if matches!(values,Value::Int_array(_)){
-        let Value::Int_array(source)=values else{return Err(array_type_error())};let mut result=value::array_buffer(size)?;result.resize(size,0i64);
+    if matches!(values,Value::IntArray(_)){
+        let Value::IntArray(source)=values else{return Err(array_type_error())};let mut result=value::array_buffer(size)?;result.resize(size,0i64);
         for row in 0..n{let ix=indices[row];if ix<0||ix as u128>=size as u128{return Err(fail("E_ARRAY_RANGE","Scatter index is outside its output length."))}let i=ix as usize;result[i]=packed_ops::integer_apply(packed_ops::Integer::Iadd,result[i],source[row])?}
-        return Ok(Value::Int_array(Arc::new(result)))
+        return Ok(Value::IntArray(Arc::new(result)))
     }
     let data=match values{Value::Floats(1..=4, x)=>x,_=>return Err(fail("E_ARRAY_TYPE","Scatter values must be int, float or vector arrays."))};
     let slots=size.checked_mul(width).ok_or_else(array_memory_error)?;let mut result=value::array_buffer(slots)?;result.resize(slots,0.);
@@ -386,24 +386,24 @@ fn scatter_add(indices:&Value,values:&Value,size_value:&Value)->Result<Value,Dia
     Ok(Value::Floats(width, Arc::new(result)))
 }
 fn grade(values:&Value,descending:bool)->Result<Value,Diagnostic>{
-    let n=match values{Value::Int_array(x)=>x.len(),Value::Floats(1, x)=>{for v in x.iter(){fin("array/grade",*v)?;}x.len()},Value::Text_array(x)=>x.len(),_=>return Err(fail("E_ARRAY_TYPE","Grade keys must be int, float or text arrays."))};
+    let n=match values{Value::IntArray(x)=>x.len(),Value::Floats(1, x)=>{for v in x.iter(){fin("array/grade",*v)?;}x.len()},Value::TextArray(x)=>x.len(),_=>return Err(fail("E_ARRAY_TYPE","Grade keys must be int, float or text arrays."))};
     let mut order=value::array_buffer(n)?;order.extend((0..n).map(|i|i as i64));
     let cmp=|a:i64,b:i64|match values{
-        Value::Int_array(x)=>x[a as usize].cmp(&x[b as usize]),
+        Value::IntArray(x)=>x[a as usize].cmp(&x[b as usize]),
         Value::Floats(1, x)=>if x[a as usize]<x[b as usize]{std::cmp::Ordering::Less}else if x[a as usize]>x[b as usize]{std::cmp::Ordering::Greater}else{std::cmp::Ordering::Equal},
-        Value::Text_array(x)=>x[a as usize].cmp(&x[b as usize]),
+        Value::TextArray(x)=>x[a as usize].cmp(&x[b as usize]),
         _=>unreachable!(),
     };
     // An explicit original-index tie break preserves stable grading without sort's scratch allocation.
     order.sort_unstable_by(|a,b|{let c=if descending{cmp(*b,*a)}else{cmp(*a,*b)};c.then(a.cmp(b))});
-    Ok(Value::Int_array(Arc::new(order)))
+    Ok(Value::IntArray(Arc::new(order)))
 }
 fn index_of(keys:&Value,queries:&Value)->Result<Value,Diagnostic>{
     let result=match (keys,queries){
-        (Value::Int_array(k),Value::Int_array(q))=>{let mut map=std::collections::HashMap::new();map.try_reserve(k.len()).map_err(|_|array_memory_error())?;for (i,x) in k.iter().enumerate(){map.entry(*x).or_insert(i as i64);}let mut result=value::array_buffer(q.len())?;result.extend(q.iter().map(|x|*map.get(x).unwrap_or(&-1)));result},
-        (Value::Text_array(k),Value::Text_array(q))=>{let mut map=std::collections::HashMap::new();map.try_reserve(k.len()).map_err(|_|array_memory_error())?;for (i,x) in k.iter().enumerate(){map.entry(x).or_insert(i as i64);}let mut result=value::array_buffer(q.len())?;result.extend(q.iter().map(|x|*map.get(x).unwrap_or(&-1)));result},
+        (Value::IntArray(k),Value::IntArray(q))=>{let mut map=std::collections::HashMap::new();map.try_reserve(k.len()).map_err(|_|array_memory_error())?;for (i,x) in k.iter().enumerate(){map.entry(*x).or_insert(i as i64);}let mut result=value::array_buffer(q.len())?;result.extend(q.iter().map(|x|*map.get(x).unwrap_or(&-1)));result},
+        (Value::TextArray(k),Value::TextArray(q))=>{let mut map=std::collections::HashMap::new();map.try_reserve(k.len()).map_err(|_|array_memory_error())?;for (i,x) in k.iter().enumerate(){map.entry(x).or_insert(i as i64);}let mut result=value::array_buffer(q.len())?;result.extend(q.iter().map(|x|*map.get(x).unwrap_or(&-1)));result},
         _=>return Err(fail("E_ARRAY_TYPE","Index lookup needs matching int or text arrays."))};
-    Ok(Value::Int_array(Arc::new(result)))
+    Ok(Value::IntArray(Arc::new(result)))
 }
 pub fn check_noise_octaves(octaves:i64)->Result<(),Diagnostic>{if (1..=64).contains(&octaves){Ok(())}else{Err(fail("E_NOISE_RANGE","Noise octaves are 1 to 64."))}}
 pub fn check_noise_fractal(lacunarity:f64,gain:f64)->Result<(),Diagnostic>{
@@ -457,26 +457,26 @@ fn frame_value(f:&Frame)->Value{
 fn event_value(event:&Event,fields:&[(&str,Ty)])->Value{
     let point=|p:(f64,f64)|Value::Vec3(p.0,p.1,0.);
     let (kind,values):(&str,Vec<(&str,Value)>)=match event{
-        Event::Key_pressed(k)=>("key-pressed",vec![("key",text(&input::key_name(*k)))]),
-        Event::Key_released(k)=>("key-released",vec![("key",text(&input::key_name(*k)))]),
-        Event::Pointer_moved(p)=>("pointer-moved",vec![("position",point(*p))]),
-        Event::Pointer_pressed(b,p)=>("pointer-pressed",vec![("button",text(input::button_name(*b))),("position",point(*p))]),
-        Event::Pointer_released(b,p)=>("pointer-released",vec![("button",text(input::button_name(*b))),("position",point(*p))]),
-        Event::Pointer_cancelled(b)=>("pointer-cancelled",vec![("button",text(input::button_name(*b)))]),
+        Event::KeyPressed(k)=>("key-pressed",vec![("key",text(&input::key_name(*k)))]),
+        Event::KeyReleased(k)=>("key-released",vec![("key",text(&input::key_name(*k)))]),
+        Event::PointerMoved(p)=>("pointer-moved",vec![("position",point(*p))]),
+        Event::PointerPressed(b,p)=>("pointer-pressed",vec![("button",text(input::button_name(*b))),("position",point(*p))]),
+        Event::PointerReleased(b,p)=>("pointer-released",vec![("button",text(input::button_name(*b))),("position",point(*p))]),
+        Event::PointerCancelled(b)=>("pointer-cancelled",vec![("button",text(input::button_name(*b)))]),
         Event::Scrolled(p)=>("scrolled",vec![("delta",point(*p))]),
-        Event::Text_input(s)=>("text-input",vec![("text",text(s))]),
-        Event::Text_editing{text: s,start,length}=>("text-editing",vec![("text",text(s)),("start",Value::Int(*start)),("length",Value::Int(*length))]),
-        Event::File_dropped(s)=>("file-dropped",vec![("text",text(s))]),
-        Event::File_drag_moved(p)=>("file-drag-moved",vec![("position",point(*p))]),
-        Event::File_drag_ended=>("file-drag-ended",vec![]),
+        Event::TextInput(s)=>("text-input",vec![("text",text(s))]),
+        Event::TextEditing{text: s,start,length}=>("text-editing",vec![("text",text(s)),("start",Value::Int(*start)),("length",Value::Int(*length))]),
+        Event::FileDropped(s)=>("file-dropped",vec![("text",text(s))]),
+        Event::FileDragMoved(p)=>("file-drag-moved",vec![("position",point(*p))]),
+        Event::FileDragEnded=>("file-drag-ended",vec![]),
         Event::Pinched(x)=>("pinched",vec![("scale",Value::Float(*x))]),
-        Event::File_dialog{id,result}=>("file-dialog",std::iter::once(("id",Value::Int(*id))).chain(match result {Ok(xs)=>vec![("paths",Value::List(Arc::new(xs.iter().map(|s|text(s)).collect())))],Err(s)=>vec![("error",text(s))]}).collect()),
-        Event::Dialog_opened(id)=>("dialog-opened",vec![("id",Value::Int(*id))]),
+        Event::FileDialog{id,result}=>("file-dialog",std::iter::once(("id",Value::Int(*id))).chain(match result {Ok(xs)=>vec![("paths",Value::List(Arc::new(xs.iter().map(|s|text(s)).collect())))],Err(s)=>vec![("error",text(s))]}).collect()),
+        Event::DialogOpened(id)=>("dialog-opened",vec![("id",Value::Int(*id))]),
         Event::Resized((w,h))=>("resized",vec![("width",Value::Int(*w)),("height",Value::Int(*h))]),
-        Event::Focus_lost=>("focus-lost",vec![]),Event::Focus_gained=>("focus-gained",vec![]),Event::Closed=>("closed",vec![]),
-        Event::Pixel_size_changed((w,h))=>("pixel-size-changed",vec![("width",Value::Int(*w)),("height",Value::Int(*h))]),
-        Event::Visibility_changed(_)=>("visibility-changed",vec![]),
-        Event::Trackpad_scrolled{delta,phase,time}=>("trackpad-scrolled",vec![("delta",point(*delta)),("phase",text(input::scroll_phase_name(*phase))),("time",Value::Float(*time))]),
+        Event::FocusLost=>("focus-lost",vec![]),Event::FocusGained=>("focus-gained",vec![]),Event::Closed=>("closed",vec![]),
+        Event::PixelSizeChanged((w,h))=>("pixel-size-changed",vec![("width",Value::Int(*w)),("height",Value::Int(*h))]),
+        Event::VisibilityChanged(_)=>("visibility-changed",vec![]),
+        Event::TrackpadScrolled{delta,phase,time}=>("trackpad-scrolled",vec![("delta",point(*delta)),("phase",text(input::scroll_phase_name(*phase))),("time",Value::Float(*time))]),
     };
     Value::Record(fields.iter().map(|(name,ty)|((*name).into(),if *name=="kind"{text(kind)}else if let Some((_,v))=values.iter().find(|(n,_)|n==name){v.clone()}else{match ty{Ty::Int=>Value::Int(0),Ty::Float=>Value::Float(0.),Ty::Vec3=>Value::Vec3(0.,0.,0.),Ty::List(_)=>Value::List(Arc::new(vec![])),_=>text("")}})).collect::<Vec<_>>().into())
 }
@@ -581,7 +581,7 @@ fn array_limit(element:&str)->Option<usize>{value::array_max_length(&match eleme
 fn array_constructor(ty:Ty,count:usize,fill:&Value)->Result<Value,Diagnostic>{
     if ty==Ty::Text{
         let Value::Text(bytes)=fill else{return Err(fail("E_ARRAY_TYPE","Text arrays contain text values."))};
-        let mut values=text_buffer(count)?;for _ in 0..count{values.try_push(bytes).map_err(|_|array_memory_error())?;}return Ok(Value::Text_array(Arc::new(values)))
+        let mut values=text_buffer(count)?;for _ in 0..count{values.try_push(bytes).map_err(|_|array_memory_error())?;}return Ok(Value::TextArray(Arc::new(values)))
     }
     let count=i64::try_from(count).map_err(|_|fail("E_ARRAY_RANGE","Array length is outside native storage bounds."))?;
     value::array_init(&ty,count,&|_|fill.clone())
@@ -604,7 +604,7 @@ fn array_ops()->Vec<Op>{
     let range_body:Body=Arc::new(|_,_,args|{
         let ty=match args.opt_arg("type"){None=>Ty::Float,Some(v) if text_string(v)?=="int"=>Ty::Int,Some(v) if text_string(v)?=="float"=>Ty::Float,_=>return Err(fail("E_ARRAY_TYPE","array/range type is float or int."))};
         let count=array_count(None,"array/range",args.get_arg("count")?)?;
-        if ty==Ty::Int{let mut values=value::array_buffer(count)?;values.extend((0..count).map(|i|i as i64));Ok(Value::Int_array(Arc::new(values)))}else{let mut values=value::array_buffer(count)?;values.extend((0..count).map(|i|i as f64));Ok(Value::Floats(1, Arc::new(values)))}
+        if ty==Ty::Int{let mut values=value::array_buffer(count)?;values.extend((0..count).map(|i|i as i64));Ok(Value::IntArray(Arc::new(values)))}else{let mut values=value::array_buffer(count)?;values.extend((0..count).map(|i|i as f64));Ok(Value::Floats(1, Arc::new(values)))}
     });
     let mut range=op_with("array/range",context::value(),vec![("count",Ty::Int)],vec![],None,vec![("type",Ty::Text)],arr(Ty::Float),"Array",range_body);
     range.choices=vec![("type".into(),vec!["float".into(),"int".into()])];
@@ -621,12 +621,12 @@ fn array_ops()->Vec<Op>{
     let slice_out:Out=Arc::new(|ts|Ok(ts.first().filter(|t|matches!(t,Ty::Array(_))).cloned().unwrap_or(arr(Ty::Any))));
     ops.push(with_defaults(mk("array/slice",context::value(),signature(vec![("array",arr(Ty::Any)),("first",Ty::Int),("count",Ty::Int)],vec![],None,vec![]),slice_out,Arc::new(|_,_,a|{
         let source=a.get_arg("array")?;let first=array_count(None,"array/slice",a.get_arg("first")?)?;let count=array_count(None,"array/slice",a.get_arg("count")?)?;let n=value::array_length(source)?;if first>n||count>n-first{return Err(fail("E_ARRAY_RANGE","An array slice must be within its source."))}
-        match source{Value::Int_array(x)=>Ok(Value::Int_array(Arc::new(copied(&x[first..first+count])?))),Value::Text_array(x)=>Ok(Value::Text_array(Arc::new(copied_text(x,first,count)?))),Value::Floats(width, x)=>Ok(Value::Floats(*width, Arc::new(copied(&x[first*width..(first+count)*width])?))),_=>Err(fail("E_TYPE","Expected a packed array."))}
+        match source{Value::IntArray(x)=>Ok(Value::IntArray(Arc::new(copied(&x[first..first+count])?))),Value::TextArray(x)=>Ok(Value::TextArray(Arc::new(copied_text(x,first,count)?))),Value::Floats(width, x)=>Ok(Value::Floats(*width, Arc::new(copied(&x[first*width..(first+count)*width])?))),_=>Err(fail("E_TYPE","Expected a packed array."))}
     })),"Array"));
     let concat_out:Out=Arc::new(|ts|Ok(ts.first().filter(|t|matches!(t,Ty::Array(_))).cloned().unwrap_or(arr(Ty::Any))));
     ops.push(with_defaults(mk("array/concat",context::value(),signature(vec![("first",arr(Ty::Any)),("second",arr(Ty::Any))],vec![],None,vec![]),concat_out,Arc::new(|_,_,a|{let x=a.get_arg("first")?;let y=a.get_arg("second")?;concat_arrays(x,y)})),"Array"));
     let sum_out:Out=Arc::new(|ts|match ts.first(){Some(Ty::Array(t))=>Ok(t.as_ref().clone()),Some(Ty::Any)=>Ok(Ty::Any),_=>Ok(Ty::Any)});
-    ops.push(with_defaults(mk("array/sum",context::value(),signature(vec![("array",arr(Ty::Any))],vec![],None,vec![]),sum_out,Arc::new(|_,_,a|{let xs=a.get_arg("array")?;if matches!(xs,Value::Text_array(_)){return Err(fail("E_TYPE","array/sum adds numbers or matching-width vectors."))}if let Value::Int_array(values)=xs{let mut sum=0i64;for v in values.iter(){sum=packed_ops::integer_apply(packed_ops::Integer::Iadd,sum,*v)?}return Ok(Value::Int(sum))}let n=value::array_length(xs)?;let mut sum=match xs{Value::Int_array(_)=>Value::Int(0),Value::Floats(2, _)=>Value::Vec2(0.,0.),Value::Floats(3, _)=>Value::Vec3(0.,0.,0.),Value::Floats(4, _)=>Value::Vec4(0.,0.,0.,0.),_=>Value::Float(0.)};for i in 0..n{sum=value::arith("array/sum",&|x,y|x+y,&sum,&value::array_get(xs,i as i64)?)?}Ok(sum)})),"Array"));
+    ops.push(with_defaults(mk("array/sum",context::value(),signature(vec![("array",arr(Ty::Any))],vec![],None,vec![]),sum_out,Arc::new(|_,_,a|{let xs=a.get_arg("array")?;if matches!(xs,Value::TextArray(_)){return Err(fail("E_TYPE","array/sum adds numbers or matching-width vectors."))}if let Value::IntArray(values)=xs{let mut sum=0i64;for v in values.iter(){sum=packed_ops::integer_apply(packed_ops::Integer::Iadd,sum,*v)?}return Ok(Value::Int(sum))}let n=value::array_length(xs)?;let mut sum=match xs{Value::IntArray(_)=>Value::Int(0),Value::Floats(2, _)=>Value::Vec2(0.,0.),Value::Floats(3, _)=>Value::Vec3(0.,0.,0.),Value::Floats(4, _)=>Value::Vec4(0.,0.,0.,0.),_=>Value::Float(0.)};for i in 0..n{sum=value::arith("array/sum",&|x,y|x+y,&sum,&value::array_get(xs,i as i64)?)?}Ok(sum)})),"Array"));
     for (name,op) in [("array/min",Reduction::Minimum),("array/max",Reduction::Maximum)]{
         let out:Out=Arc::new(|ts|match ts.first(){Some(Ty::Array(t)) if matches!(t.as_ref(),Ty::Int|Ty::Float|Ty::Vec2|Ty::Vec3|Ty::Vec4|Ty::Any)=>Ok(t.as_ref().clone()),_=>Err(fail("E_ARRAY_TYPE","Array reductions need int, float or vector arrays."))});
         ops.push(with_defaults(mk(name,context::value(),signature(vec![("array",arr(Ty::Any))],vec![],None,vec![]),out,Arc::new(move |_,_,a|reduce_array(None,op,None,a.get_arg("array")?))),"Array"));
@@ -639,8 +639,8 @@ fn array_ops()->Vec<Op>{
     ops.push(with_defaults(mk("array/segment_argmax",context::value(),signature(vec![("values",arr(Ty::Any)),("offsets",arr(Ty::Int))],vec![],None,vec![]),argmax_out,Arc::new(|_,_,a|segment_argmax(None,a.get_arg("offsets")?,a.get_arg("values")?))),"Array"));
     let scatter_out:Out=Arc::new(|ts|scatter_type(ts));
     ops.push(with_defaults(mk("array/scatter_add",context::value(),signature(vec![("indices",arr(Ty::Int)),("values",arr(Ty::Any)),("size",Ty::Int)],vec![],None,vec![]),scatter_out,Arc::new(|_,_,a|scatter_add(a.get_arg("indices")?,a.get_arg("values")?,a.get_arg("size")?))),"Array"));
-    ops.push(value_op("array/compact",vec![("mask",arr(Ty::Int))],vec![],None,vec![],arr(Ty::Int),"Array",Arc::new(|_,_,a|{let Value::Int_array(mask)=a.get_arg("mask")? else{return Err(fail("E_ARRAY_TYPE","Compaction needs an integer mask array."))};if mask.iter().any(|x|*x!=0&&*x!=1){return Err(fail("E_ARRAY_MASK","Compact mask entries must be 0 or 1."))}let mut result=value::array_buffer(mask.iter().filter(|x|**x==1).count())?;result.extend(mask.iter().enumerate().filter_map(|(i,x)|if *x==1{Some(i as i64)}else{None}));Ok(Value::Int_array(Arc::new(result)))})));
-    ops.push(value_op("array/scan_sum",vec![("array",arr(Ty::Int))],vec![],None,vec![],arr(Ty::Int),"Array",Arc::new(|_,_,a|{let Value::Int_array(xs)=a.get_arg("array")? else{return Err(fail("E_ARRAY_TYPE","Prefix sum needs an integer array."))};let mut out=value::array_buffer(xs.len().checked_add(1).ok_or_else(array_memory_error)?)?;let mut sum=0i64;out.push(sum);for x in xs.iter(){sum=packed_ops::integer_apply(packed_ops::Integer::Iadd,sum,*x)?;out.push(sum)}Ok(Value::Int_array(Arc::new(out)))})));
+    ops.push(value_op("array/compact",vec![("mask",arr(Ty::Int))],vec![],None,vec![],arr(Ty::Int),"Array",Arc::new(|_,_,a|{let Value::IntArray(mask)=a.get_arg("mask")? else{return Err(fail("E_ARRAY_TYPE","Compaction needs an integer mask array."))};if mask.iter().any(|x|*x!=0&&*x!=1){return Err(fail("E_ARRAY_MASK","Compact mask entries must be 0 or 1."))}let mut result=value::array_buffer(mask.iter().filter(|x|**x==1).count())?;result.extend(mask.iter().enumerate().filter_map(|(i,x)|if *x==1{Some(i as i64)}else{None}));Ok(Value::IntArray(Arc::new(result)))})));
+    ops.push(value_op("array/scan_sum",vec![("array",arr(Ty::Int))],vec![],None,vec![],arr(Ty::Int),"Array",Arc::new(|_,_,a|{let Value::IntArray(xs)=a.get_arg("array")? else{return Err(fail("E_ARRAY_TYPE","Prefix sum needs an integer array."))};let mut out=value::array_buffer(xs.len().checked_add(1).ok_or_else(array_memory_error)?)?;let mut sum=0i64;out.push(sum);for x in xs.iter(){sum=packed_ops::integer_apply(packed_ops::Integer::Iadd,sum,*x)?;out.push(sum)}Ok(Value::IntArray(Arc::new(out)))})));
     let grade_out:Out=Arc::new(|ts|grade_type(ts));
     ops.push(with_defaults(mk("array/grade",context::value(),signature(vec![("keys",arr(Ty::Any))],vec![],None,vec![("descending",Ty::Bool)]),grade_out,Arc::new(|_,_,a|grade(a.get_arg("keys")?,a.opt_arg("descending").map(truthy).transpose()?.unwrap_or(false))),),"Array"));
     let index_out:Out=Arc::new(|ts|index_type(ts));
@@ -659,17 +659,17 @@ fn draw_ops()->Vec<Op>{
         ("draw/background",vec![("color",Ty::Color)],vec![],None,vec![]),
         ("draw/point",vec![("at",Ty::Vec3)],vec![],None,vec![("color",Ty::Color)]),
         ("draw/points",vec![("positions",arr(Ty::Vec3))],vec![],None,vec![("color",Ty::Color)]),
-        ("draw/line",vec![("from",Ty::Vec3),("to",Ty::Vec3)],vec![],None,vec![("color",Ty::Color),("width",Ty::Int)]),
+        ("draw/line",vec![("from",Ty::Vec3),("to",Ty::Vec3)],vec![],None,vec![("color",Ty::Color),("width",Ty::Float)]),
         ("draw/rect",vec![("at",Ty::Vec3),("size",Ty::Vec3)],vec![],None,vec![("fill",Ty::Color),("stroke",Ty::Color)]),
-        ("draw/circle",vec![("at",Ty::Vec3),("radius",Ty::Int)],vec![],None,vec![("fill",Ty::Color),("stroke",Ty::Color)]),
+        ("draw/circle",vec![("at",Ty::Vec3),("radius",Ty::Float)],vec![],None,vec![("fill",Ty::Color),("stroke",Ty::Color)]),
         ("draw/circles",vec![("positions",arr(Ty::Vec3))],vec![],None,vec![("radius",Ty::Any),("fill",Ty::Any),("stroke",Ty::Any)]),
         ("draw/rects",vec![("positions",arr(Ty::Vec3)),("sizes",Ty::Any)],vec![],None,vec![("fill",Ty::Any),("stroke",Ty::Any)]),
         ("draw/lines",vec![("from",arr(Ty::Vec3)),("to",arr(Ty::Vec3))],vec![],None,vec![("color",Ty::Any),("width",Ty::Float)]),
-        ("draw/text",vec![("at",Ty::Vec3),("text",Ty::Text)],vec![],None,vec![("color",Ty::Color),("size",Ty::Int)]),
+        ("draw/text",vec![("at",Ty::Vec3),("text",Ty::Text)],vec![],None,vec![("color",Ty::Color),("size",Ty::Float)]),
         ("draw/translate",vec![("offset",Ty::Vec3),("drawing",drawing.clone())],vec![],None,vec![]),
         ("draw/rotate",vec![("angle",Ty::Float),("drawing",drawing.clone())],vec![],None,vec![]),
         ("draw/scale",vec![("factor",Ty::Any),("drawing",drawing.clone())],vec![],None,vec![]),
-        ("draw/rounded_rect",vec![("at",Ty::Vec3),("size",Ty::Vec3)],vec![],None,vec![("radius",Ty::Int),("fill",Ty::Color),("stroke",Ty::Color)]),
+        ("draw/rounded_rect",vec![("at",Ty::Vec3),("size",Ty::Vec3)],vec![],None,vec![("radius",Ty::Float),("fill",Ty::Color),("stroke",Ty::Color)]),
         ("draw/polygon",vec![("points",arr(Ty::Vec3))],vec![],None,vec![("fill",Ty::Color),("stroke",Ty::Color)]),
         ("draw/polyline",vec![("points",arr(Ty::Vec3))],vec![],None,vec![("color",Ty::Color)]),
         ("draw/merge",vec![],vec![],Some(("drawing",Ty::Any)),vec![]),
@@ -716,18 +716,18 @@ fn stage_ops()->Vec<Op>{
     let hit=rec(vec![("t",Ty::Float),("prim",Ty::Int),("u",Ty::Float),("v",Ty::Float),("hit",Ty::Bool),("instance",Ty::Int)]);
     let trace=vec![("origin",Ty::Vec3),("dir",Ty::Vec3),("tmin",Ty::Float),("tmax",Ty::Float),("time",Ty::Float)];
     let mut ops=vec![
-        ("gpu/fwidth",vec![("x",Ty::Float)],Ty::Float),("gpu/float-bits",vec![("bits",Ty::Int)],Ty::Float),
-        ("gpu/sample",vec![("texture",Ty::Int),("uv",Ty::Vec2)],Ty::Vec4),("gpu/sample-level",vec![("texture",Ty::Int),("uv",Ty::Vec2),("level",Ty::Float)],Ty::Vec4),
-        ("gpu/read",vec![("texture",Ty::Int),("texel",Ty::Vec2)],Ty::Vec4),("gpu/texture-size",vec![("texture",Ty::Int)],Ty::Vec2),
-        ("gpu/instance-id",vec![],Ty::Int),("gpu/front-facing",vec![],Ty::Bool),("gpu/depth",vec![],Ty::Float),("gpu/fragment-x",vec![],Ty::Float),("gpu/fragment-y",vec![],Ty::Float),
-        ("gpu/trace-triangles",trace.clone(),hit),("gpu/trace-any",trace.clone(),Ty::Bool),
-        ("gpu/trace-curves",vec![("origin",Ty::Vec3),("dir",Ty::Vec3),("tmin",Ty::Float),("tmax",Ty::Float)],rec(vec![("t",Ty::Float),("prim",Ty::Int),("u",Ty::Float),("hit",Ty::Bool)])),
-        ("gpu/trace-curves-any",vec![("origin",Ty::Vec3),("dir",Ty::Vec3),("tmin",Ty::Float),("tmax",Ty::Float)],Ty::Bool),
-        ("gpu/scene-vertex",vec![("instance",Ty::Int),("prim",Ty::Int),("corner",Ty::Int)],Ty::Vec3),("gpu/scene-vertex-end",vec![("instance",Ty::Int),("prim",Ty::Int),("corner",Ty::Int)],Ty::Vec3),
-        ("gpu/scene-instance",vec![("instance",Ty::Int),("row",Ty::Int)],Ty::Float),("gpu/scene-sphere",vec![("sphere",Ty::Int)],Ty::Vec4),("gpu/scene-strand",vec![("strand",Ty::Int),("end",Ty::Int)],Ty::Vec4),
-        ("gpu/scene-spheres",vec![],Ty::Int),("gpu/scene-strands",vec![],Ty::Int),
-        ("gpu/group-scan",vec![("x",Ty::Int)],rec(vec![("before",Ty::Int),("total",Ty::Int)])),
-        ("gpu/store",vec![("buffer",arr(Ty::Float)),("index",Ty::Int),("value",Ty::Float)],Ty::Int),("gpu/store-int",vec![("buffer",arr(Ty::Int)),("index",Ty::Int),("value",Ty::Int)],Ty::Int),
+        ("gpu/fwidth",vec![("x",Ty::Float)],Ty::Float),("gpu/float_bits",vec![("bits",Ty::Int)],Ty::Float),
+        ("gpu/sample",vec![("texture",Ty::Int),("uv",Ty::Vec2)],Ty::Vec4),("gpu/sample_level",vec![("texture",Ty::Int),("uv",Ty::Vec2),("level",Ty::Float)],Ty::Vec4),
+        ("gpu/read",vec![("texture",Ty::Int),("texel",Ty::Vec2)],Ty::Vec4),("gpu/texture_size",vec![("texture",Ty::Int)],Ty::Vec2),
+        ("gpu/instance_id",vec![],Ty::Int),("gpu/front_facing",vec![],Ty::Bool),("gpu/depth",vec![],Ty::Float),("gpu/fragment_x",vec![],Ty::Float),("gpu/fragment_y",vec![],Ty::Float),
+        ("gpu/trace_triangles",trace.clone(),hit),("gpu/trace_any",trace.clone(),Ty::Bool),
+        ("gpu/trace_curves",vec![("origin",Ty::Vec3),("dir",Ty::Vec3),("tmin",Ty::Float),("tmax",Ty::Float)],rec(vec![("t",Ty::Float),("prim",Ty::Int),("u",Ty::Float),("hit",Ty::Bool)])),
+        ("gpu/trace_curves_any",vec![("origin",Ty::Vec3),("dir",Ty::Vec3),("tmin",Ty::Float),("tmax",Ty::Float)],Ty::Bool),
+        ("gpu/scene_vertex",vec![("instance",Ty::Int),("prim",Ty::Int),("corner",Ty::Int)],Ty::Vec3),("gpu/scene_vertex_end",vec![("instance",Ty::Int),("prim",Ty::Int),("corner",Ty::Int)],Ty::Vec3),
+        ("gpu/scene_instance",vec![("instance",Ty::Int),("row",Ty::Int)],Ty::Float),("gpu/scene_sphere",vec![("sphere",Ty::Int)],Ty::Vec4),("gpu/scene_strand",vec![("strand",Ty::Int),("end",Ty::Int)],Ty::Vec4),
+        ("gpu/scene_spheres",vec![],Ty::Int),("gpu/scene_strands",vec![],Ty::Int),
+        ("gpu/group_scan",vec![("x",Ty::Int)],rec(vec![("before",Ty::Int),("total",Ty::Int)])),
+        ("gpu/store",vec![("buffer",arr(Ty::Float)),("index",Ty::Int),("value",Ty::Float)],Ty::Int),("gpu/store_int",vec![("buffer",arr(Ty::Int)),("index",Ty::Int),("value",Ty::Int)],Ty::Int),
     ].into_iter().map(|(name,pos,out)|{let mut op=value_op(name,pos,vec![],None,vec![],out,"Raster",delegate_body(gpu_stage_body(name)));op.live=true;op}).collect::<Vec<_>>();
     let scene_ty=rec(vec![("t",Ty::Float),("prim",Ty::Int),("u",Ty::Float),("v",Ty::Float),("normal",Ty::Vec3),("hit",Ty::Bool),("instance",Ty::Int)]);
     let body:Body=Arc::new(|_,_,args|{
@@ -750,8 +750,6 @@ fn eq_fn(a:&Value,b:&Value)->Option<bool>{
         _=>Some(a==b),
     }
 }
-fn float_div(a:f64,b:f64)->f64{if b==0.{0.}else{a/b}}
-fn float_mod(a:f64,b:f64)->f64{if b==0.{0.}else{(a%b+b)%b}}
 fn binary_op(name:&'static str,operation:fn(f64,f64)->f64)->Op{
     let body:Body=Arc::new(move |_,_,a|{if a.len()!=2{return Err(failf("E_ARITY",format!("{name} got the wrong number of inputs.")))}value::arith(name,&operation,a.get_arg("a")?,a.get_arg("b")?)});
     let mut op=value_op(name,vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",body);
@@ -763,18 +761,15 @@ fn binary_op(name:&'static str,operation:fn(f64,f64)->f64)->Op{
 }
 fn unary_math_ops()->Vec<Op>{
     let mut ops=Vec::new();
-    let entries:[(&str,fn(f64)->f64);10]=[
-        ("tan",rays_math::libm::tan),("asin",rays_math::libm::asin),("acos",rays_math::libm::acos),("log",f64::ln),
-        ("sign",|x|if x>0.{1.}else if x<0.{-1.}else{x}),("rsqrt",|x|1./x.abs().sqrt()),
-        ("exp",f64::exp),("sin",rays_math::libm::sin),("cos",rays_math::libm::cos),("abs",f64::abs),
-    ];
-    for (name,f) in entries{
-        let body:Body=Arc::new(move |_,_,a|{let x=num(a.get_arg("x")?)?;Ok(Value::Float(fin(name,f(x))?))});
+    for row in packed_ops::MATH_PRIMS {
+        let packed_ops::Cpu::F1(f) = row.cpu else { continue };
+        if row.output != packed_ops::MathOutput::Float { continue; }
+        let name = row.name;
+        let body:Body=Arc::new(move |_,_,a|{let x=num(a.get_arg("x")?)?;let y=f(x);Ok(Value::Float(if name=="sqrt" { y } else { fin(name,y)? }))});
         let mut op=value_op(name,vec![("x",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",body);
-        if name=="abs"{op.out=Arc::new(|ts|Ok(if ts.first()==Some(&Ty::Int){Ty::Int}else{Ty::Float}));op.body=Arc::new(|_,_,a|match a.get_arg("x")?{Value::Int(x)=>Ok(Value::Int(x.wrapping_abs())),v=>Ok(Value::Float(num(v)?.abs()))})}
+        if name=="abs"{op.any_num=true;op.out=Arc::new(|ts|match ts.first(){Some(Ty::Int)=>Ok(Ty::Int),Some(Ty::Float|Ty::Bool|Ty::Any)=>Ok(Ty::Float),_=>Err(fail("E_TYPE","abs needs a number."))});op.body=Arc::new(|_,_,a|match a.get_arg("x")?{Value::Int(x)=>Ok(Value::Int(x.wrapping_abs())),v=>Ok(Value::Float(num(v)?.abs()))})}
         ops.push(op)
     }
-    let sqrt=value_op("sqrt",vec![("x",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,a|Ok(Value::Float(num(a.get_arg("x")?)?.abs().sqrt()))));ops.push(sqrt);
     for (name,rounding,out_ty) in [("floor",0,Ty::Int),("ceil",1,Ty::Int),("round",2,Ty::Int),("int",3,Ty::Int),("float",4,Ty::Float)]{
         let body:Body=Arc::new(move |_,_,a|{let x=num(a.get_arg("x")?)?;Ok(if rounding==4{Value::Float(x)}else{Value::Int(value::to_int(name,match rounding{0=>x.floor(),1=>x.ceil(),2=>x.round(),_=>x.trunc()})?)})});
         ops.push(value_op(name,vec![("x",Ty::Float)],vec![],None,vec![],out_ty,"Convert",body));
@@ -789,19 +784,30 @@ fn ldexp_op()->Op{
 }
 fn special_value_ops()->Vec<Op>{
     let mut ops=Vec::new();
-    for (name,f) in [("atan2",rays_math::libm::atan2 as fn(f64,f64)->f64),("hypot",f64::hypot)]{
+    for row in packed_ops::MATH_PRIMS {
+        let packed_ops::Cpu::F2(f) = row.cpu else { continue };
+        if row.output != packed_ops::MathOutput::Float || row.name == "ldexp" { continue; }
+        let name = row.name;
         ops.push(value_op(name,vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(move |_,_,a|Ok(Value::Float(fin(name,f(num(a.get_arg("a")?)?,num(a.get_arg("b")?)?))?)))));
     }
     ops.push(ldexp_op());
-    for (name,fun) in [("+",(|a:f64,b:f64|a+b) as fn(f64,f64)->f64),("-",|a:f64,b:f64|a-b),("*",|a:f64,b:f64|a*b),("/",float_div),("mod",float_mod),("pow",|a:f64,b:f64|a.abs().powf(b)),("min",packed_ops::float_min),("max",packed_ops::float_max)]{ops.push(binary_op(name,fun))}
+    for row in packed_ops::MATH_PRIMS {
+        if row.output == packed_ops::MathOutput::Arithmetic {
+            if let packed_ops::Cpu::F2(cpu) = row.cpu { ops.push(binary_op(row.name,cpu)); }
+        }
+    }
     for (operation,name) in [(packed_ops::Integer::Iadd,"int/add"),(packed_ops::Integer::Isub,"int/sub"),(packed_ops::Integer::Imul,"int/mul"),(packed_ops::Integer::Idiv,"int/div"),(packed_ops::Integer::Imod,"int/mod"),(packed_ops::Integer::Iand,"int/and"),(packed_ops::Integer::Ior,"int/or"),(packed_ops::Integer::Ixor,"int/xor"),(packed_ops::Integer::Ishl,"int/shl"),(packed_ops::Integer::Ishr,"int/shr")]{
         ops.push(value_op(name,vec![("a",Ty::Int),("b",Ty::Int)],vec![],None,vec![],Ty::Int,"Integer",Arc::new(move |_,_,a|Ok(Value::Int(packed_ops::integer_apply(operation,int_of(a.get_arg("a")?)?,int_of(a.get_arg("b")?)?)?)))));
     }
     for (operation,name) in [(packed_ops::Comparison::Ilt,"int/lt"),(packed_ops::Comparison::Ile,"int/le"),(packed_ops::Comparison::Igt,"int/gt"),(packed_ops::Comparison::Ige,"int/ge"),(packed_ops::Comparison::Ieq,"int/eq")]{
         ops.push(value_op(name,vec![("a",Ty::Int),("b",Ty::Int)],vec![],None,vec![],Ty::Bool,"Integer",Arc::new(move |_,_,a|Ok(Value::Bool(packed_ops::comparison_apply(operation,int_of(a.get_arg("a")?)?,int_of(a.get_arg("b")?)?))))));
     }
-    let compares:[(&str,fn(f64,f64)->bool);5]=[("<",|a,b|a<b),(">",|a,b|a>b),("<=",|a,b|a<=b),(">=",|a,b|a>=b),("=",|a,b|a==b)];
-    for (name,pred) in compares{ops.push(value_op(name,vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(move |_,_,a|Ok(Value::Bool(pred(num(a.get_arg("a")?)?,num(a.get_arg("b")?)?))))));}
+    for row in packed_ops::MATH_PRIMS {
+        let packed_ops::Cpu::F2(pred) = row.cpu else { continue };
+        if row.output != packed_ops::MathOutput::Bool || matches!(row.name, "and" | "or") { continue; }
+        let name = row.name;
+        ops.push(value_op(name,vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(move |_,_,a|Ok(Value::Bool(pred(num(a.get_arg("a")?)?,num(a.get_arg("b")?)?) != 0.0)))));
+    }
     ops.push(value_op("and",vec![("a",Ty::Bool),("b",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(truthy(a.get_arg("a")?)?&&truthy(a.get_arg("b")?)?)))));
     ops.push(value_op("or",vec![("a",Ty::Bool),("b",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(truthy(a.get_arg("a")?)?||truthy(a.get_arg("b")?)?)))));
     ops.push(value_op("not",vec![("a",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(!truthy(a.get_arg("a")?)?)))));
@@ -837,8 +843,8 @@ fn text_ops()->Vec<Op>{
     ops.push(value_op("text/trim",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;Ok(Value::Text(b.trim_ascii().into()))})));
     ops.push(value_op("text/lower",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_bytes(a.get_arg("text")?)?.iter().map(u8::to_ascii_lowercase).collect::<std::sync::Arc<[u8]>>())))));
     ops.push(value_op("text/repr",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_repr(text_bytes(a.get_arg("text")?)?).into())))));
-    ops.push(value_op("text/split",vec![("text",Ty::Text),("separator",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let source=text_bytes(a.get_arg("text")?)?;let separator=text_bytes(a.get_arg("separator")?)?;if separator.is_empty(){return Err(fail("E_TEXT_SEPARATOR","text/split needs a nonempty separator."))}Ok(Value::Text_array(Arc::new(bytes_split(source,separator)?)))})));
-    ops.push(value_op("text/tokens",vec![("text",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;let mut out=TextArray::new();let mut start=0;for i in 0..=b.len(){if i==b.len()||matches!(b[i],b' '|b','|b'\t'|b'\n'){if i>start{out.try_push(&b[start..i]).map_err(|_|array_memory_error())?}start=i+1}}Ok(Value::Text_array(Arc::new(out)))})));
+    ops.push(value_op("text/split",vec![("text",Ty::Text),("separator",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let source=text_bytes(a.get_arg("text")?)?;let separator=text_bytes(a.get_arg("separator")?)?;if separator.is_empty(){return Err(fail("E_TEXT_SEPARATOR","text/split needs a nonempty separator."))}Ok(Value::TextArray(Arc::new(bytes_split(source,separator)?)))})));
+    ops.push(value_op("text/tokens",vec![("text",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;let mut out=TextArray::new();let mut start=0;for i in 0..=b.len(){if i==b.len()||matches!(b[i],b' '|b','|b'\t'|b'\n'){if i>start{out.try_push(&b[start..i]).map_err(|_|array_memory_error())?}start=i+1}}Ok(Value::TextArray(Arc::new(out)))})));
     for (name,float_result) in [("text/to_float",true),("text/to_int",false)]{
         let result=if float_result{Ty::Float}else{Ty::Int};
         ops.push(value_op(name,vec![("text",Ty::Text)],vec![],None,vec![],rec(vec![("value",result.clone()),("valid",Ty::Bool)]),"Text",Arc::new(move |_,_,a|{
@@ -936,7 +942,7 @@ fn panel_ops()->Vec<Op>{
     split.choices=vec![("axis".into(),vec!["horizontal".into(),"vertical".into()])];split.check=split_check;ops.push(split);
     let axis_choices=vec!["horizontal".to_owned(),"vertical".to_owned()];
     let split_at:Check=Arc::new(move |a|{one_of(a,"axis","Split axis",&axis_choices)?;if let Some(v)=a.opt_arg("ratio"){if !matches!(v,Value::Residual(_)){let r=num(v)?;if r<0.1||r>0.9{return Err(range_error("Split ratio is 0.1–0.9."))}}}Ok(())});
-    let mut split=structure_op("ui/split-at",context::editor(),vec![("axis",Ty::Text),("ratio",Ty::Float),("first",panel.clone()),("second",panel.clone())],vec![],None,vec![],panel.clone(),false,"Editor");
+    let mut split=structure_op("ui/split_at",context::editor(),vec![("axis",Ty::Text),("ratio",Ty::Float),("first",panel.clone()),("second",panel.clone())],vec![],None,vec![],panel.clone(),false,"Editor");
     split.choices=vec![("axis".into(),vec!["horizontal".into(),"vertical".into()])];split.check=split_at;ops.push(split);
     let tile_check:Check=Arc::new(|a|{if a.is_empty()||a.len()>16{Err(range_error("A tile holds 1–16 panels."))}else{Ok(())}});
     let mut tile=structure_op("ui/tile",context::editor(),vec![],vec![],Some(("panel",panel.clone())),vec![],panel.clone(),true,"Editor");tile.check=tile_check;ops.push(tile);
@@ -964,14 +970,8 @@ fn builtins()->Vec<Op>{
     available.extend(text_ops());
     available.extend(list_ops());
     available.extend(misc_value_ops());
-    append_operators(&mut ops,&mut available,&[
-        "tan","asin","acos","log","sign","rsqrt","atan2","hypot","ldexp","dot","cross","normalize","length",
-        "fma","float/next_after","float/mul_checked","float/fma_checked","rand/at","equal?","live?",
-        "text/blank?","text/trim","text/lower","text/repr","text/split","text/tokens","text/to_float","text/to_int","error","text/table_decode","text/table_encode",
-        "exp","exact","+","-","*","/","mod","pow","min","max","sin","cos","sqrt","floor","ceil","round","int","float","abs",
-        "<",">","<=",">=","=","and","or","not","value/rand","value/hsv","value/lerp","value/polar",
-        "range","linspace","count","first","last","rest","nth","reverse","take","drop",
-    ]);
+    for row in packed_ops::MATH_PRIMS { append_operators(&mut ops,&mut available,&[row.name]); }
+    append_operators(&mut ops,&mut available,&["dot", "cross", "normalize", "length", "fma", "float/next_after", "float/mul_checked", "float/fma_checked", "rand/at", "equal?", "live?", "text/blank?", "text/trim", "text/lower", "text/repr", "text/split", "text/tokens", "text/to_float", "text/to_int", "error", "text/table_decode", "text/table_encode", "exact", "floor", "ceil", "round", "int", "float", "value/rand", "value/hsv", "value/lerp", "value/polar", "range", "linspace", "count", "first", "last", "rest", "nth", "reverse", "take", "drop"]);
     ops.extend(panel_ops());
     ops.push(noise_op());
     ops.extend(color_ops());
@@ -1021,16 +1021,16 @@ mod tests{
         let typed=vec![("type".into(),arr(Ty::Int),Some(param::Value::Text(b"int".as_slice().into())))];
         assert_eq!(result_type(&range,&typed).unwrap(),arr(Ty::Int));
         let sum=find(&[],"array/segment_sum",&value_context).expect("segment sum operator");
-        let values=Value::Int_array(Arc::new(vec![2,4,7]));
-        let offsets=Value::Int_array(Arc::new(vec![0,2,2,3]));
-        assert_eq!((sum.body)(&input::at_time(0.),&|_,_|Err(fail("E_NODE","unexpected node")), &vec![("values".into(),values),("offsets".into(),offsets)]).unwrap(),Value::Int_array(Arc::new(vec![6,0,7])));
+        let values=Value::IntArray(Arc::new(vec![2,4,7]));
+        let offsets=Value::IntArray(Arc::new(vec![0,2,2,3]));
+        assert_eq!((sum.body)(&input::at_time(0.),&|_,_|Err(fail("E_NODE","unexpected node")), &vec![("values".into(),values),("offsets".into(),offsets)]).unwrap(),Value::IntArray(Arc::new(vec![6,0,7])));
         assert_eq!(all().len(),199);
         let names=all().iter().map(|op|op.name.as_str()).collect::<std::collections::HashSet<_>>();
         assert_eq!(names.len(),all().len());
         let row_dispatch=|start:i64,finish:i64,work:&(dyn Fn(i64)+Send+Sync)|{for row in start..=finish{work(row)}};
-        let offsets=Value::Int_array(Arc::new(vec![0,2,2,3]));
-        let values=Value::Int_array(Arc::new(vec![2,4,7]));
-        assert_eq!(reduce_array(Some(&row_dispatch),Reduction::Sum,Some(&offsets),&values).unwrap(),Value::Int_array(Arc::new(vec![6,0,7])));
+        let offsets=Value::IntArray(Arc::new(vec![0,2,2,3]));
+        let values=Value::IntArray(Arc::new(vec![2,4,7]));
+        assert_eq!(reduce_array(Some(&row_dispatch),Reduction::Sum,Some(&offsets),&values).unwrap(),Value::IntArray(Arc::new(vec![6,0,7])));
         assert_eq!(all().iter().filter(|op|op.name=="ui/graph").count(),1);
     }
 }
@@ -1048,7 +1048,9 @@ mod operator_schema {
                 match &o.signature.rest{None=>"-".to_owned(),Some((n,t))=>format!("{}:{}",n,ty::to_string(t))},sg(&o.signature.kw),
                 o.choices.iter().map(|(n,c)|format!("{}={}",n,c.join("/"))).collect::<Vec<_>>().join(";"),o.any_num,o.live,o.arithmetic.is_some(),derive_packed_kind(o).is_some()));
         }
-        let golden=std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),"/golden/ops.txt")).unwrap().replace("\r\n","\n");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"),"/golden/ops.txt");
+        if std::env::var("RAYS_UPDATE_FIXTURES").as_deref() == Ok("1") { std::fs::write(path, &out).unwrap(); }
+        let golden=std::fs::read_to_string(path).unwrap().replace("\r\n","\n");
         assert!(out==golden,"operator declarations differ from golden/ops.txt");
     }
 }
@@ -1056,8 +1058,8 @@ mod operator_schema {
 fn concat_arrays(x:&Value,y:&Value)->Result<Value,Diagnostic>{
     value::array_length(x)?;value::array_length(y)?;
     match (x,y){
-        (Value::Int_array(a),Value::Int_array(b))=>Ok(Value::Int_array(Arc::new(joined(a,b)?))),
-        (Value::Text_array(a),Value::Text_array(b))=>{let mut result=text_buffer(a.len().checked_add(b.len()).ok_or_else(array_memory_error)?)?;for text in a.iter().chain(b.iter()){result.try_push(text).map_err(|_|array_memory_error())?;}Ok(Value::Text_array(Arc::new(result)))},
+        (Value::IntArray(a),Value::IntArray(b))=>Ok(Value::IntArray(Arc::new(joined(a,b)?))),
+        (Value::TextArray(a),Value::TextArray(b))=>{let mut result=text_buffer(a.len().checked_add(b.len()).ok_or_else(array_memory_error)?)?;for text in a.iter().chain(b.iter()){result.try_push(text).map_err(|_|array_memory_error())?;}Ok(Value::TextArray(Arc::new(result)))},
         (Value::Floats(aw, a),Value::Floats(bw, b)) if aw==bw=>Ok(Value::Floats(*aw, Arc::new(joined(a,b)?))),
         _=>Err(fail("E_ARRAY_TYPE","Concatenated arrays must have the same element type.")),
     }

@@ -483,6 +483,9 @@ pub(crate) fn distance(left: &str, right: &str) -> usize {
 }
 
 pub fn suggestion(word: &str, candidates: &[String]) -> String {
+    if let Some(name) = crate::registry::renamed(word).filter(|name| candidates.iter().any(|candidate| candidate == name)) {
+        return format!(" Did you mean {name}?");
+    }
     let mut best: Option<(usize, &str)> = None;
     for candidate in candidates {
         let candidate = candidate.as_str();
@@ -494,12 +497,18 @@ pub fn suggestion(word: &str, candidates: &[String]) -> String {
     best.map_or_else(String::new, |(_, candidate)| format!(" Did you mean {candidate}?"))
 }
 pub fn suggestions(word: &str, catalog: &Catalog) -> Vec<String> {
-    let mut candidates: Vec<_> = crate::registry::names(catalog).into_iter().filter_map(|name| {
+    suggestions_from(word, &crate::registry::names(catalog))
+}
+
+pub fn suggestions_from(word: &str, names: &[String]) -> Vec<String> {
+    if let Some(name) = crate::registry::renamed(word).filter(|name| names.iter().any(|candidate| candidate == name || short_name(candidate) == *name)) { return vec![name.to_owned()]; }
+    let mut candidates: Vec<_> = names.iter().filter_map(|name| {
         let compared = if word.contains('/') { name.as_str() } else { short_name(&name) };
         let score = distance(word, compared);
-        (score <= 2).then_some((score, name))
+        (score <= 2).then_some((score, name.clone()))
     }).collect();
     candidates.sort_by(|a,b| (a.0, a.1.contains('/'), &a.1).cmp(&(b.0, b.1.contains('/'), &b.1)));
+    candidates.dedup();
     candidates.into_iter().take(3).map(|(_, name)| name).collect()
 }
 fn suggestion_catalog(word: &str, catalog: &Catalog) -> String {
@@ -512,7 +521,7 @@ pub fn parameters_of_fields(fields: &[FieldView]) -> Result<Vec<Parameter>, Stri
     for group in groups {
         let Some(first) = group.first() else { return Err("Empty parameter field group".into()); };
         let (name, ty, unit) = match &first.vec3 {
-            Some((group, _)) => (group.clone(), Some(PortType::Vec3), None),
+            Some((name, _)) => (name.clone(), Some(PortType::Vec3), first.unit.clone().filter(|unit| group.iter().all(|field| field.unit.as_ref() == Some(unit)))),
             None => (first.name.clone(), port_type::of_field_kind(&first.kind), first.unit.clone()),
         };
         result.push(Parameter {
@@ -564,7 +573,7 @@ fn validate_range(report: &mut dyn FnMut(Severity, &str, &str), parameter: &Para
         (KindView::Integer(range), Some(number)) => {
             if number.fract() == 0.0 {
                 if range.hard_min.is_some_and(|bound| number < bound as f64) || range.hard_max.is_some_and(|bound| number > bound as f64) {
-                    report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} = {} is outside its hard range {:?}..={:?}", parameter.name, number, range.hard_min, range.hard_max));
+                    report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} = {} is outside its hard range {}..={}", parameter.name, number, range.hard_min.map_or_else(|| "-infinity".into(), |bound| bound.to_string()), range.hard_max.map_or_else(|| "infinity".into(), |bound| bound.to_string())));
                 } else if number < range.soft_min as f64 || number > range.soft_max as f64 {
                     report(Severity::Warning, "W_SOFT_RANGE", &format!(":{} {} is outside the slider range {}–{}. Allowed, but check it", parameter.name, param::float_text(number), range.soft_min, range.soft_max));
                 }
@@ -573,7 +582,7 @@ fn validate_range(report: &mut dyn FnMut(Severity, &str, &str), parameter: &Para
         (KindView::Floating(range), Some(number)) => {
             if !number.is_finite() { report(Severity::ErrorSeverity, "E_NONFINITE", &format!(":{} must be finite", parameter.name)); }
             else if range.hard_min.is_some_and(|bound| number < bound) || range.hard_max.is_some_and(|bound| number > bound) {
-                report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} = {} is outside its hard range {:?}..={:?}", parameter.name, number, range.hard_min, range.hard_max));
+                report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} = {} is outside its hard range {}..={}", parameter.name, number, range.hard_min.map_or_else(|| "-infinity".into(), |bound| bound.to_string()), range.hard_max.map_or_else(|| "infinity".into(), |bound| bound.to_string())));
             } else if number < range.soft_min || number > range.soft_max {
                 report(Severity::Warning, "W_SOFT_RANGE", &format!(":{} {} is outside the slider range {}–{}. Allowed, but check it", parameter.name, param::float_text(number), param::float_text(range.soft_min), param::float_text(range.soft_max)));
             }

@@ -61,6 +61,7 @@ pub fn can_connect(source: &PortType, target: &PortType) -> bool {
         }
         (PortType::Image | PortType::Fn(_), _) | (_, PortType::Image | PortType::Fn(_)) => false,
         (PortType::Geometry, _) | (_, PortType::Geometry) | (PortType::Vec3, _) => false,
+        (PortType::Float, PortType::Int) => false,
         (PortType::Float | PortType::Int | PortType::Bool,
          PortType::Float | PortType::Int | PortType::Bool | PortType::Vec3) => true,
     }
@@ -89,11 +90,7 @@ pub fn coerce(target: &PortType, value: PortValue) -> Result<PortValue, Diagnost
         PortType::Bool => Ok(PortValue::Bool(number != 0.0)),
         PortType::Vec3 => Ok(PortValue::Vec3(number, number, number)),
         PortType::Int => {
-            if !number.is_finite() {
-                return Err(error("A non-finite value cannot drive Int".into()));
-            }
-            let rounded = (number + 0.5).floor();
-            Ok(PortValue::Int(rounded as i64)) // saturating
+            Ok(PortValue::Int(number as i64))
         }
         PortType::Geometry | PortType::Image | PortType::Fn(_) => {
             Err(error(format!("Cannot drive {} with {}", name(target), name(&source))))
@@ -106,11 +103,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn coercion_rounds_ties_saturates_and_rejects_non_finite() {
-        assert_eq!(coerce(&PortType::Int, PortValue::Float(1.5)), Ok(PortValue::Int(2)));
-        assert_eq!(coerce(&PortType::Int, PortValue::Float(-1.5)), Ok(PortValue::Int(-1)));
+    fn float_connections_to_integer_slots_are_rejected() {
+        assert_eq!(coerce(&PortType::Int, PortValue::Float(1.5)), Err(error("Cannot drive Int with Float".into())));
+        assert_eq!(coerce(&PortType::Int, PortValue::Float(-1.5)), Err(error("Cannot drive Int with Float".into())));
         assert_eq!(coerce(&PortType::Int, PortValue::Float(f64::INFINITY)).unwrap_err().code, "E_TYPE");
-        assert_eq!(coerce(&PortType::Int, PortValue::Float(f64::MAX)), Ok(PortValue::Int(i64::MAX)));
+        assert_eq!(coerce(&PortType::Int, PortValue::Float(f64::MAX)), Err(error("Cannot drive Int with Float".into())));
     }
 
     #[test]

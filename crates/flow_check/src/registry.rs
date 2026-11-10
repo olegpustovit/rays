@@ -13,6 +13,7 @@ pub struct Entry {
 }
 
 pub const FORMS: &[(&str, &str, &str, &str)] = &[
+    ("->", "value (operator arguments...) ...", "Thread a value into the first input of each following call.", "(-> 2 (* 3) (+ 1))"),
     ("workspace", "name declarations...", "Group graphs and reusable definitions into a workspace.", "(workspace demo (graph value :context value 1))"),
     ("graph", "name [:context context] [inputs] body", "Declare a named, reactive graph.", "(graph picture :context draw (draw/background \"#182838\"))"),
     ("defn", "name [:context context] [inputs] body", "Define a reusable function with typed inputs.", "(defn twice :context value [(x : float)] (* x 2))"),
@@ -22,13 +23,13 @@ pub const FORMS: &[(&str, &str, &str, &str)] = &[
     ("let*", "[name expression ...] body", "Bind names sequentially; equivalent to let.", "(let* [x 2] (+ x 1))"),
     ("ref", "graph :input value ...", "Read another graph with optional input overrides.", "(ref picture)"),
     ("for", "[name collection ...] body", "Collect a result for each item in a bounded collection.", "(for [x (range 3)] (* x 2))"),
-    ("fold", "[acc initial name collection] body", "Accumulate a result over a bounded collection.", "(fold [acc 0 x (range 3)] (+ acc x))"),
-    ("scan", "[acc initial name collection] body", "Collect intermediate accumulator values.", "(scan [acc 0 x (range 3)] (+ acc x))"),
+    ("fold", "[acc initial name collection] body", "Accumulate a result over a bounded collection.", "(fold [acc 0] [x (range 3)] (+ acc x))"),
+    ("scan", "[acc initial name collection] body", "Collect intermediate accumulator values.", "(scan [acc 0] [x (range 3)] (+ acc x))"),
     ("sum", "[name collection] body", "Add the numeric results of a bounded iteration.", "(sum [x (range 3)] x)"),
     ("state", "[name initial] body", "Retain a value between frames and compute its next value.", "(state [n 0] (+ n 1))"),
     ("if", "condition then else", "Choose one of two values using a boolean condition.", "(if true 1 2)"),
-    ("with_error", "protected mapper", "Map a runtime diagnostic to a recovery value.", "(with_error 1 (fn [error] 0))"),
-    ("error_rows", "value", "Expose deferred diagnostics as data rows.", "(error_rows 1)"),
+    ("with_error", "protected mapper", "Map a runtime diagnostic to a recovery value.", "(with_error 1 (fn [error] error))"),
+    ("error_rows", "rows mapper [:policy text]", "Turn flagged integer rows into geometry diagnostics.", "(error_rows (array/int 1 0) (fn [row] {:code \"E_ROW\" :message \"Invalid row\" :cause (list \"source\")}))"),
     ("values", "value ...", "Return multiple named outputs from a node.", "(values :geometry nil)"),
     ("fn", "[parameters] body", "Create a pure anonymous function.", "(fn [x] (+ x 1))"),
     ("cond", "test result ... :else result", "Select the result of the first true condition.", "(cond true 1 :else 2)"),
@@ -41,12 +42,12 @@ pub const FORMS: &[(&str, &str, &str, &str)] = &[
     ("map", "function collection ...", "Apply a pure function to corresponding collection elements.", "(map (fn [x] (* x 2)) (range 3))"),
     ("filter", "predicate collection", "Keep elements for which a predicate returns true.", "(filter (fn [x] (> x 0)) (range 3))"),
     ("reduce", "function initial collection", "Reduce a collection into one accumulator value.", "(reduce (fn [a x] (+ a x)) 0 (range 3))"),
-    ("sort_by", "function collection", "Sort a collection by a numeric key.", "(sort_by (fn [x] (- x)) (range 3))"),
+    ("sort_by", "function collection", "Sort a collection by a numeric key.", "(sort_by (fn [x] (- 0 x)) (range 3))"),
     ("iterate", "count initial function [:until predicate]", "Apply a pure function repeatedly with a fixed maximum count.", "(iterate 3 1 (fn [x] (* x 2)))"),
-    ("quote", "syntax", "Return syntax without evaluating it.", "(quote x)"),
-    ("quasiquote", "syntax", "Build macro syntax with unquoted substitutions.", "(quasiquote (+ 1 2))"),
-    ("unquote", "expression", "Insert evaluated syntax inside quasiquote.", "(defmacro identity [x] `(unquote x))"),
-    ("unquote-splicing", "expression", "Insert a sequence of syntax forms inside quasiquote.", "(defmacro call [f args] `(~f ~@args))"),
+    ("quote", "syntax", "Macro templates use quasiquote (`); plain quote is reserved.", "(defmacro two [] `2)"),
+    ("quasiquote", "syntax", "Build macro syntax with unquoted substitutions.", "(defmacro plus_one [x] `(+ ~x 1))"),
+    ("unquote", "expression", "Insert evaluated syntax inside quasiquote.", "(defmacro plus_one [x] `(+ ~x 1))"),
+    ("unquote-splicing", "expression", "Insert a sequence of syntax forms inside quasiquote.", "(defmacro call [f & args] `(~f ~@args))"),
 ];
 
 pub fn op_signature(operator: &op::Op) -> String {
@@ -80,19 +81,40 @@ fn sample(ty: &Ty) -> String {
         Ty::Text => "\"example\"".into(), Ty::Color => "\"#5aaaf0\"".into(),
         Ty::Vec2 => "[1 1]".into(), Ty::Vec3 => "[1 1 0]".into(), Ty::Vec4 => "[1 1 1 1]".into(),
         Ty::List(element) => format!("(list {})", sample(element)),
-        Ty::Array(element) => format!("(array/{} 1 {})", ty::to_string(element), sample(element)),
+        Ty::Array(element) => format!("(array/{} 3 {})", if **element == Ty::Any { "float".into() } else { ty::to_string(element) }, sample(element)),
         Ty::Record(fields) => format!("{{{}}}", fields.iter().map(|(name, ty)| format!(":{name} {}", sample(ty))).collect::<Vec<_>>().join(" ")),
-        Ty::Fn(_) => "(fn [x] x)".into(),
+        Ty::Fn(Some(signature)) => format!("(fn [{}] {})", signature.params.iter().enumerate().map(|(i, ty)| format!("(x{i} : {})", ty::to_string(ty))).collect::<Vec<_>>().join(" "), sample(&signature.result)),
+        Ty::Fn(None) => "(fn [x] x)".into(),
         Ty::Named(name) => match name.as_str() {
             "geometry" => "nil".into(), "drawing" => "(draw/merge)".into(),
             "image" => "(image/noise :width 1 :height 1)".into(),
-            "panel" => "(ui/canvas (draw/merge))".into(),
+            "scene" => "(scene/merge)".into(), "world" => "(world/gradient)".into(),
+            "panel" => "(ui/graph)".into(),
+            "sample" => "(audio/synth :duration 0.1)".into(),
             _ => "nil".into(),
         },
     }
 }
 
 pub fn example(name: &str, sig: &op::Signature) -> String {
+    match name {
+        "sop/with_attr" => return "(sop/with_attr nil :P (array/vec3 1 [0 0 0]))".into(),
+        "sop/count" => return "(sop/count nil \"points\")".into(),
+        "sop/mesh" => return "(sop/mesh :points (array/vec3 0) :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))".into(),
+        "sop/mesh_planes" => return "(sop/mesh_planes :points {:x (array/float 0) :y (array/float 0) :z (array/float 0)} :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))".into(),
+        "sop/context_seed" | "sop/provenance_base" | "sop/context_frame" | "sop/context_time" => {
+            let call = if name == "sop/context_seed" { "(sop/context_seed \"example\")".to_owned() } else { format!("({name})") };
+            return format!("(workspace context_example (defnode sop/context_example :label \"Context example\" [] (let [value {call}] nil)) (graph result :context sop (sop/context_example)))");
+        }
+        "array/index_of" => return "(array/index_of (array/int 3 1) (array/int 3 1))".into(),
+        "host/dialog" => return "(host/dialog \"open_file\" false)".into(),
+        "image/render" => return "(workspace render_example (graph picture :context draw (draw/circle [20 20] 10 :fill \"#5aaaf0\")) (graph image :context host (image/render (ref picture))))".into(),
+        "ui/canvas" => return "(workspace canvas_example (graph picture :context draw (draw/merge)) (graph editor :context editor (ui/workspace (ui/canvas (ref picture)))))".into(),
+        "ui/viewport" => return "(workspace viewport_example (defn preview :context editor [(scene : scene)] (ui/viewport scene)) (graph example :context host 0))".into(),
+        "ui/split" => return "(ui/split \"horizontal\" (ui/graph) (ui/inspector))".into(),
+        "ui/split_at" => return "(ui/split_at \"horizontal\" 0.5 (ui/graph) (ui/inspector))".into(),
+        _ => (),
+    }
     if name == "draw/circle" { return "(draw/circle [320 180] 42.5 :fill \"#5aaaf0\")".into(); }
     let mut parts = vec![name.to_owned()];
     parts.extend(sig.pos.iter().map(|(_, ty)| sample(ty)));
@@ -119,10 +141,12 @@ pub fn description(name: &str, sig: &op::Signature) -> String {
     }
 }
 
-pub fn entries(catalog: &catalog::Catalog) -> Vec<Entry> {
-    let mut entries: Vec<_> = op::all().iter().map(|operator| Entry {
+pub fn entries(catalog: &catalog::Catalog) -> Vec<Entry> { entries_with_ops(catalog, &[]) }
+
+pub fn entries_with_ops(catalog: &catalog::Catalog, extra: &[op::Op]) -> Vec<Entry> {
+    let mut entries: Vec<_> = op::all().iter().chain(extra).map(|operator| Entry {
         name: operator.name.clone(), context: Some(operator.ctx), signature: op_signature(operator),
-        doc: operator.doc.clone(), example: operator.example.clone(),
+        doc: operator.doc.to_string(), example: operator.example.to_string(),
         hidden: operator.name.starts_with("int/") || operator.name.starts_with("array/") && ["array/nth", "array/count"].contains(&operator.name.as_str()),
     }).collect();
     entries.extend(FORMS.iter().map(|&(name, args, doc, example)| Entry {
@@ -132,7 +156,15 @@ pub fn entries(catalog: &catalog::Catalog) -> Vec<Entry> {
     entries.extend(catalog.kinds.iter().map(|kind| Entry {
         name: kind.qualified.clone(), context: Some(kind.context), signature: kind_signature(kind),
         doc: kind.description.clone(),
-        example: format!("({}{})", kind.qualified, kind.slots.iter().filter(|slot| slot.required && !slot.rest).map(|slot| format!(" {}", sample(&crate::workspace::slot_ty(Some(slot), kind)))).collect::<String>()),
+        example: if kind.qualified == "scene/world" {
+            "(workspace world_example (graph sky :context world (world/gradient)) (graph scene :context scene (scene/world (ref sky))))".into()
+        } else { format!("({}{}{})", kind.qualified,
+            kind.slots.iter().filter(|slot| slot.required && !slot.rest).map(|slot| format!(" {}", sample(&crate::workspace::slot_ty(Some(slot), kind)))).collect::<String>(),
+            kind.parameters.iter().filter_map(|parameter| match &parameter.ty {
+                Some(crate::port_type::PortType::Fn(signature)) => Some(format!(" :{} {}", parameter.name, sample(&Ty::Fn(Some(Box::new(signature.clone())))))),
+                Some(crate::port_type::PortType::Image) => Some(format!(" :{} {}", parameter.name, sample(&Ty::Named("image".into())))),
+                _ => None,
+            }).collect::<String>()) },
         hidden: false,
     }));
     entries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -170,7 +202,105 @@ mod tests {
             assert!(diagnostic.signature.is_some(), "{diagnostic:?}");
             if code == "E_UNKNOWN_KIND" { assert_eq!(diagnostic.suggest.first().map(String::as_str), Some("frame/width")); }
         }
+        let mut custom = op::all().iter().find(|operator| operator.name == "frame/width").unwrap().clone();
+        custom.name = "custom/width".into();
+        let forms = flow_syntax::syntax::parse("(workspace probe (graph picture :context draw (custom/widht)))").unwrap();
+        let (_, diagnostics) = crate::workspace::check(&[custom], false, false, None, &catalog, &forms);
+        let diagnostic = diagnostics.iter().find(|diagnostic| diagnostic.code == "E_UNKNOWN_KIND").unwrap_or_else(|| panic!("{diagnostics:?}"));
+        assert_eq!(diagnostic.suggest.first().map(String::as_str), Some("custom/width"));
+        assert!(diagnostic.signature.as_deref().is_some_and(|signature| signature.contains("custom/width")));
         let entries = entries(&catalog);
         assert!(entries.iter().all(|entry| !entry.doc.is_empty() && !entry.example.is_empty()));
+    }
+}
+
+/// Previous public spellings are diagnosed for one migration release.
+pub fn renamed(name: &str) -> Option<&'static str> {
+    match name {
+        "rotation" => Some("rotate"),
+        "rotation_x" => Some("rotate_x"),
+        "rotation_y" => Some("rotate_y"),
+        "rotation_z" => Some("rotate_z"),
+        "rotation_order" => Some("rotate_order"),
+        "pivot_rotation" => Some("pivot_rotate"),
+        "pivot_rotation_x" => Some("pivot_rotate_x"),
+        "pivot_rotation_y" => Some("pivot_rotate_y"),
+        "pivot_rotation_z" => Some("pivot_rotate_z"),
+        "gpu/float-bits" => Some("gpu/float_bits"),
+        "gpu/fragment-x" => Some("gpu/fragment_x"),
+        "gpu/fragment-y" => Some("gpu/fragment_y"),
+        "gpu/front-facing" => Some("gpu/front_facing"),
+        "gpu/group-scan" => Some("gpu/group_scan"),
+        "gpu/instance-id" => Some("gpu/instance_id"),
+        "gpu/sample-level" => Some("gpu/sample_level"),
+        "gpu/scene-instance" => Some("gpu/scene_instance"),
+        "gpu/scene-sphere" => Some("gpu/scene_sphere"),
+        "gpu/scene-spheres" => Some("gpu/scene_spheres"),
+        "gpu/scene-strand" => Some("gpu/scene_strand"),
+        "gpu/scene-strands" => Some("gpu/scene_strands"),
+        "gpu/scene-vertex" => Some("gpu/scene_vertex"),
+        "gpu/scene-vertex-end" => Some("gpu/scene_vertex_end"),
+        "gpu/store-int" => Some("gpu/store_int"),
+        "gpu/texture-size" => Some("gpu/texture_size"),
+        "gpu/trace-any" => Some("gpu/trace_any"),
+        "gpu/trace-curves" => Some("gpu/trace_curves"),
+        "gpu/trace-curves-any" => Some("gpu/trace_curves_any"),
+        "gpu/trace-triangles" => Some("gpu/trace_triangles"),
+        "sort-by" => Some("sort_by"),
+        "ui/split-at" => Some("ui/split_at"),
+        "x_divisions" => Some("divisions_x"),
+        "y_divisions" => Some("divisions_y"),
+        "z_divisions" => Some("divisions_z"),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod example_tests {
+    #[test]
+    fn all_builtin_examples_check() {
+        use super::*;
+        let catalog = catalog::Catalog { version: 0, kinds: vec![] };
+        let mut failures = Vec::new();
+        for operator in op::all() {
+            let ctx = if operator.ctx == context::value() { context::host() } else { operator.ctx };
+            let example = if operator.ctx == context::sop() {
+                format!("(let [result {}] nil)", operator.example)
+            } else if operator.ctx == context::editor() && operator.name != "ui/workspace" {
+                format!("(ui/workspace {})", operator.example)
+            } else { operator.example.to_string() };
+            let source = if operator.example.starts_with("(workspace ") { operator.example.to_string() }
+                else { format!("(workspace example (graph result :context {} {example}))", context::name(ctx)) };
+            let forms = flow_syntax::syntax::parse(&source).unwrap();
+            let (_, diagnostics) = crate::workspace::check(&[], false, false, None, &catalog, &forms);
+            let errors = diagnostics.iter().filter(|d| d.severity == rays_diagnostic::Severity::ErrorSeverity).collect::<Vec<_>>();
+            if !errors.is_empty() { failures.push(format!("{}: {} -> {}", operator.name, operator.example, errors.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("; "))); }
+        }
+        assert!(failures.is_empty(), "Invalid registry examples:\n{}", failures.join("\n"));
+    }
+}
+
+#[cfg(test)]
+mod form_example_tests {
+    #[test]
+    fn all_special_form_examples_check() {
+        use super::*;
+        let catalog = catalog::Catalog { version: 0, kinds: vec![] };
+        let mut failures = Vec::new();
+        for &(name, _, _, example) in FORMS {
+            let source = match name {
+                "workspace" => example.to_owned(),
+                "graph" => format!("(workspace example {example})"),
+                "defn" | "defnode" | "defmacro" | "quote" | "quasiquote" | "unquote" | "unquote-splicing" => format!("(workspace example {example} (graph result :context host 0))"),
+                "ref" => format!("(workspace example (graph picture :context draw (draw/merge)) (graph result :context host {example}))"),
+                "fn" => format!("(workspace example (graph result :context host (map {example} (range 3))))"),
+                _ => format!("(workspace example (graph result :context host {example}))"),
+            };
+            let forms = flow_syntax::syntax::parse(&source).unwrap();
+            let (_, diagnostics) = crate::workspace::check(&[], false, false, None, &catalog, &forms);
+            let errors = diagnostics.iter().filter(|d| d.severity == rays_diagnostic::Severity::ErrorSeverity).collect::<Vec<_>>();
+            if !errors.is_empty() { failures.push(format!("{name}: {example} -> {}", errors.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("; "))); }
+        }
+        assert!(failures.is_empty(), "Invalid form examples:\n{}", failures.join("\n"));
     }
 }
