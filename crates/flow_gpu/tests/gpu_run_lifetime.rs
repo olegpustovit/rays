@@ -25,7 +25,7 @@ macro_rules! forward {
 struct Faulty<T: ?Sized> { inner: Box<T>, f: Rc<Faults>, size: i64 }
 fn wrap<T: ?Sized>(inner: Box<T>, f: &Rc<Faults>, size: i64) -> Faulty<T> { Faulty { inner, f: f.clone(), size } }
 impl b::DriverResource for Faulty<dyn b::DriverResource> {
-    forward! { token() -> b::Token; destroy() -> Result<(), E>; }
+    forward! { token() -> b::Token; as_any() -> &dyn std::any::Any; destroy() -> Result<(), E>; }
     fn write(&self, offset: i64, bytes: &[u8]) -> Result<(), E> {
         let (size, w) = (self.size, &self.f);
         if size == 2048 {
@@ -72,7 +72,7 @@ impl b::DriverCommands for Faulty<dyn b::DriverCommands> {
         accel_encoder() -> Result<Box<dyn b::DriverAccelEncoder>, E>;
         blit_encoder() -> Result<Box<dyn b::DriverBlitEncoder>, E>;
         render_encoder(target: &b::DriverRenderTarget) -> Result<Box<dyn b::DriverRenderEncoder>, E>;
-        commit_present(source: b::Token, frame: b::DriverFrame) -> Result<b::Receipt, E>;
+        commit_present(source: &dyn b::DriverResource, frame: b::DriverFrame) -> Result<b::Receipt, E>;
         abandon() -> Result<(), E>;
     }
     // The native encoder and real pipeline limits are deliberately untouched.

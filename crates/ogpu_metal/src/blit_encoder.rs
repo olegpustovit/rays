@@ -2,7 +2,7 @@
 use crate::native;
 use crate::{command_control::{CommandContext, OpenEncoder}};
 use ogpu_core::error::Error;
-use ogpu_core::{backend::{DriverBlitEncoder, Token}, types::{Extent, Origin}};
+use ogpu_core::{backend::{DriverBlitEncoder, DriverResource}, types::{Extent, Origin}};
 use std::rc::Rc;
 
 struct Blit {
@@ -17,12 +17,12 @@ pub fn create(context: &Rc<CommandContext>) -> Result<Box<dyn DriverBlitEncoder>
 }
 
 impl DriverBlitEncoder for Blit {
-    fn buffer_to_texture(&self, src: Token, offset: i64, bytes_per_row: i64, bytes_per_image: i64, dst: Token, mip: i64, origin: Origin, extent: Extent) -> Result<(), Error> {
+    fn buffer_to_texture(&self, src: &dyn DriverResource, offset: i64, bytes_per_row: i64, bytes_per_image: i64, dst: &dyn DriverResource, mip: i64, origin: Origin, extent: Extent) -> Result<(), Error> {
         let c = &self.context;
         let source = c.find_buffer(src)?;
         let destination = c.find_texture(dst)?;
-        c.keep_buffer(&source)?;
-        c.keep_texture(&destination)?;
+        c.keep_buffer(source)?;
+        c.keep_texture(destination)?;
         self.encoder.copy_buffer_to_texture(
             source.metal(),
             offset as u64,

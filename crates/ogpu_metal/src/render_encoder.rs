@@ -2,7 +2,7 @@
 use crate::native;
 use ogpu_core::error::Error;
 use crate::{
-    command_control::{CommandContext, OpenEncoder, Resource},
+    command_control::{CommandContext, OpenEncoder},
     device::{fail},
     pipeline::Native,
 };
@@ -11,7 +11,7 @@ use crate::native::{
     RenderEncoder, RenderPassDescriptor,
 };
 use ogpu_core::{
-    backend::{DepthState, DriverBatchDraw, DriverPipeline, DriverRenderEncoder, DriverRenderTarget, DriverSampler, ShaderStage, Token, Winding as OgpuWinding},
+    backend::{DepthState, DriverBatchDraw, DriverPipeline, DriverRenderEncoder, DriverRenderTarget, DriverResource, DriverSampler, ShaderStage, Token, Winding as OgpuWinding},
     error::ErrorKind,
     render_pass::{Cull, IndexType as OgpuIndex, Primitive as OgpuPrimitive, Rect},
 };
@@ -30,30 +30,30 @@ fn render_pipeline(context: &CommandContext, pipeline: &dyn DriverPipeline) -> R
     }
 }
 
-struct ResolvedDraw {
+struct ResolvedDraw<'a> {
     /// The portable pipeline's identity, to skip rebinding it.
     token: *const (),
     native: native::RenderPipeline,
-    buffers: Vec<(ShaderStage, i64, crate::buffer::Buffer, i64)>,
-    index: Option<(OgpuIndex, crate::buffer::Buffer, i64, i64)>,
+    buffers: Vec<(ShaderStage, i64, &'a crate::buffer::Buffer, i64)>,
+    index: Option<(OgpuIndex, &'a crate::buffer::Buffer, i64, i64)>,
 }
 
 // ponytail: indexed batches issue one native draw at a time; add batched native draws only when measured workloads justify it.
 fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[DriverBatchDraw]) -> Result<(), Error> {
-    let mut resolved: Vec<ResolvedDraw> = Vec::with_capacity(draws.len());
+    let mut resolved: Vec<ResolvedDraw<'_>> = Vec::with_capacity(draws.len());
     for d in draws {
         let native = render_pipeline(context, &*d.batch_pipeline)?;
         let mut buffers = Vec::with_capacity(d.batch_buffers.len());
-        for (stage, slot, token, offset) in &d.batch_buffers {
-            let buffer = context.find_buffer(*token)?;
-            context.keep_buffer(&buffer)?;
+        for (stage, slot, resource, offset) in &d.batch_buffers {
+            let buffer = context.find_buffer(&**resource)?;
+            context.keep_buffer(buffer)?;
             buffers.push((*stage, *slot, buffer, *offset));
         }
         let index = match &d.batch_index {
             None => None,
-            Some((kind, token, offset, count)) => {
-                let index_buffer = context.find_buffer(*token)?;
-                context.keep_buffer(&index_buffer)?;
+            Some((kind, resource, offset, count)) => {
+                let index_buffer = context.find_buffer(&**resource)?;
+                context.keep_buffer(index_buffer)?;
                 Some((*kind, index_buffer, *offset, *count))
             }
         };
@@ -88,24 +88,23 @@ fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[Driver
 
 /// Declares residency once per pass: `declared` holds the tokens this encoder already uses (a pass
 /// shared by several batches repeats their atlases).
-fn use_resources(context: &CommandContext, encoder: &RenderEncoder, tokens: &[i64], declared: &mut Vec<i64>) -> Result<(), Error> {
+fn use_resources(context: &CommandContext, encoder: &RenderEncoder, resources: &[Rc<dyn DriverResource>], declared: &mut Vec<i64>) -> Result<(), Error> {
     let mut buffers: Vec<RenderResource> = Vec::new();
     let mut textures: Vec<RenderResource> = Vec::new();
-    for token in tokens {
-        if declared.contains(token) {
+    for resource in resources {
+        let token = resource.token();
+        if declared.contains(&token) {
             continue;
         }
-        declared.push(*token);
-        match context.resource(*token) {
-            Some(Resource::Buffer(buffer)) => {
-                context.keep_buffer(&buffer)?;
-                buffers.push(RenderResource::Buffer(buffer.metal().clone()));
-            }
-            Some(Resource::Texture(texture)) => {
-                context.keep_texture(&texture)?;
-                textures.push(RenderResource::Texture(texture.metal().clone()));
-            }
-            None => return Err(fail(context.operation, ErrorKind::InvalidArgument, "resource graph is incomplete")),
+        declared.push(token);
+        if let Some(buffer) = crate::backend::metal_buffer(&**resource) {
+            context.keep_buffer(buffer)?;
+            buffers.push(RenderResource::Buffer(buffer.metal().clone()));
+        } else if let Some(texture) = crate::backend::metal_texture(&**resource) {
+            context.keep_texture(texture)?;
+            textures.push(RenderResource::Texture(texture.metal().clone()));
+        } else {
+            return Err(fail(context.operation, ErrorKind::InvalidArgument, "resource graph is incomplete"));
         }
     }
     if !buffers.is_empty() {
@@ -127,16 +126,16 @@ struct Render {
 
 pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Result<Box<dyn DriverRenderEncoder>, Error> {
     let color = &target.target_colors[0];
-    let color_texture = context.find_texture(color.color)?;
-    let resolve = match color.color_resolve {
+    let color_texture = context.find_texture(&*color.color)?;
+    let resolve = match &color.color_resolve {
         None => None,
-        Some(token) => Some(context.find_texture(token)?),
+        Some(resource) => Some(context.find_texture(&**resource)?),
     };
     let depth = match &target.target_depth {
         None => None,
-        Some(d) => Some(context.find_texture(d.depth)?),
+        Some(d) => Some(context.find_texture(&*d.depth)?),
     };
-    context.keep_texture(&color_texture)?;
+    context.keep_texture(color_texture)?;
     for texture in resolve.iter().chain(depth.iter()) {
         context.keep_texture(texture)?;
     }
@@ -161,20 +160,20 @@ impl DriverRenderEncoder for Render {
         self.encoder.set_pipeline(&native)
     }
 
-    fn set_stage_buffer(&self, stage: ShaderStage, index: i64, offset: i64, token: Token) -> Result<(), Error> {
+    fn set_stage_buffer(&self, stage: ShaderStage, index: i64, offset: i64, resource: &dyn DriverResource) -> Result<(), Error> {
         let c = &self.context;
-        let buffer = c.find_buffer(token)?;
-        c.keep_buffer(&buffer)?;
+        let buffer = c.find_buffer(resource)?;
+        c.keep_buffer(buffer)?;
         match stage {
             ShaderStage::Vertex => self.encoder.set_vertex_buffer(index as usize, offset as u64, buffer.metal()),
             ShaderStage::Fragment => self.encoder.set_fragment_buffer(index as usize, offset as u64, buffer.metal()),
         }
     }
 
-    fn set_stage_texture(&self, stage: ShaderStage, index: i64, token: Token) -> Result<(), Error> {
+    fn set_stage_texture(&self, stage: ShaderStage, index: i64, resource: &dyn DriverResource) -> Result<(), Error> {
         let c = &self.context;
-        let texture = c.find_texture(token)?;
-        c.keep_texture(&texture)?;
+        let texture = c.find_texture(resource)?;
+        c.keep_texture(texture)?;
         match stage {
             ShaderStage::Vertex => self.encoder.set_vertex_texture(index as usize, texture.metal()),
             ShaderStage::Fragment => self.encoder.set_fragment_texture(index as usize, texture.metal()),
@@ -224,10 +223,10 @@ impl DriverRenderEncoder for Render {
         self.encoder.draw_primitives(primitive, first as usize, count as usize, instances as usize)
     }
 
-    fn draw_indexed(&self, primitive: OgpuPrimitive, index_type: OgpuIndex, token: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
+    fn draw_indexed(&self, primitive: OgpuPrimitive, index_type: OgpuIndex, resource: &dyn DriverResource, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
         let c = &self.context;
-        let buffer = c.find_buffer(token)?;
-        c.keep_buffer(&buffer)?;
+        let buffer = c.find_buffer(resource)?;
+        c.keep_buffer(buffer)?;
         self.encoder.draw_indexed(
             primitive,
             index_type,
@@ -238,12 +237,12 @@ impl DriverRenderEncoder for Render {
         )
     }
 
-    fn draw_indexed_indirect(&self, primitive: OgpuPrimitive, index_type: OgpuIndex, token: Token, offset: i64, arguments_token: Token, arguments_offset: i64) -> Result<(), Error> {
+    fn draw_indexed_indirect(&self, primitive: OgpuPrimitive, index_type: OgpuIndex, resource: &dyn DriverResource, offset: i64, arguments: &dyn DriverResource, arguments_offset: i64) -> Result<(), Error> {
         let c = &self.context;
-        let buffer = c.find_buffer(token)?;
-        let arguments = c.find_buffer(arguments_token)?;
-        c.keep_buffer(&buffer)?;
-        c.keep_buffer(&arguments)?;
+        let buffer = c.find_buffer(resource)?;
+        let arguments = c.find_buffer(arguments)?;
+        c.keep_buffer(buffer)?;
+        c.keep_buffer(arguments)?;
         self.encoder.draw_indexed_indirect(
             primitive,
             index_type,
@@ -258,8 +257,8 @@ impl DriverRenderEncoder for Render {
         draw_batch(&self.context, &self.encoder, draws)
     }
 
-    fn use_resources(&self, tokens: &[Token]) -> Result<(), Error> {
-        use_resources(&self.context, &self.encoder, tokens, &mut self.declared.borrow_mut())
+    fn use_resources(&self, resources: &[Rc<dyn DriverResource>]) -> Result<(), Error> {
+        use_resources(&self.context, &self.encoder, resources, &mut self.declared.borrow_mut())
     }
 
     fn execute_icb(&self, token: Token, location: i64, length: i64) -> Result<(), Error> {

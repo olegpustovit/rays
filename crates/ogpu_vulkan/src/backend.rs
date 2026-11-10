@@ -64,6 +64,8 @@ pub(crate) fn of_vk(op: &str, failure: vk::Error) -> Error {
 struct BufferEntry {
     buffer: RefCell<vk::Buffer>,
     size: i64,
+    /// Argument slices bound through this buffer, by offset.
+    arguments: RefCell<HashMap<i64, ArgumentCell>>,
 }
 
 struct TextureEntry {
@@ -81,13 +83,13 @@ struct PipelineEntry {
 #[derive(Clone)]
 enum IcbDraw {
     Draw { primitive: Primitive, first: i64, count: i64, instances: i64 },
-    Indexed { primitive: Primitive, index_type: IndexType, buffer: Token, offset: i64, count: i64, instances: i64 },
+    Indexed { primitive: Primitive, index_type: IndexType, buffer: Rc<BufferEntry>, offset: i64, count: i64, instances: i64 },
 }
 
 #[derive(Clone, Default)]
 struct IcbCommand {
     pipeline: Option<Rc<PipelineEntry>>,
-    buffers: Vec<(i64, i64, Token)>,
+    buffers: Vec<(i64, i64, Rc<BufferEntry>)>,
     draw: Option<IcbDraw>,
 }
 
@@ -175,10 +177,7 @@ fn validation_mode() -> (bool, bool) {
 struct Dev {
     device: RefCell<Option<Rc<vk::Device>>>,
     next: Cell<i64>,
-    buffers: RefCell<HashMap<i64, Rc<BufferEntry>>>,
-    textures: RefCell<HashMap<i64, Rc<TextureEntry>>>,
     icbs: RefCell<HashMap<i64, Rc<RefCell<Vec<IcbCommand>>>>>,
-    arguments: RefCell<HashMap<(i64, i64), ArgumentCell>>,
     frames: RefCell<HashMap<i64, Rc<RefCell<Option<vk::Surface>>>>>,
     accels: RefCell<HashMap<i64, Rc<vk::AccelerationStructure>>>,
     accel_resources: RefCell<HashMap<i64, Vec<Box<dyn DriverResource>>>>,
@@ -197,18 +196,6 @@ impl Dev {
         match self.device.borrow().as_ref() {
             Some(device) => Ok(device.clone()),
             None => Err(fail(op, ErrorKind::StaleHandle, "device is destroyed")),
-        }
-    }
-    fn find_buffer(&self, op: &str, id: Token) -> Result<Rc<BufferEntry>, Error> {
-        match self.buffers.borrow().get(&id) {
-            Some(buffer) => Ok(buffer.clone()),
-            None => Err(fail(op, ErrorKind::InvalidArgument, "buffer graph is incomplete")),
-        }
-    }
-    fn find_texture(&self, op: &str, id: Token) -> Result<Rc<TextureEntry>, Error> {
-        match self.textures.borrow().get(&id) {
-            Some(texture) => Ok(texture.clone()),
-            None => Err(fail(op, ErrorKind::InvalidArgument, "texture graph is incomplete")),
         }
     }
     fn find_accel(&self, op: &str, id: Token) -> Result<Rc<vk::AccelerationStructure>, Error> {
@@ -231,34 +218,50 @@ fn buffer_read_into(op: &str, entry: &BufferEntry, offset: i64, destination: &mu
 }
 
 struct BufferResource {
-    dev: Rc<Dev>,
     id: Token,
     op: &'static str,
+    entry: Rc<BufferEntry>,
+}
+
+/// The native buffer behind a portable resource, or the graph-incomplete error.
+fn buffer_entry<'a>(op: &str, resource: &'a dyn DriverResource) -> Result<&'a Rc<BufferEntry>, Error> {
+    match resource.as_any().downcast_ref::<BufferResource>() {
+        Some(buffer) => Ok(&buffer.entry),
+        None => Err(fail(op, ErrorKind::InvalidArgument, "buffer graph is incomplete")),
+    }
+}
+
+/// The native texture behind a portable resource, or the graph-incomplete error.
+fn texture_entry<'a>(op: &str, resource: &'a dyn DriverResource) -> Result<&'a Rc<TextureEntry>, Error> {
+    match resource.as_any().downcast_ref::<TextureResource>() {
+        Some(texture) => Ok(&texture.entry),
+        None => Err(fail(op, ErrorKind::InvalidArgument, "texture graph is incomplete")),
+    }
 }
 
 impl DriverResource for BufferResource {
     fn token(&self) -> Token {
         self.id
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn write(&self, offset: i64, bytes: &[u8]) -> Result<(), Error> {
-        let entry = self.dev.find_buffer(self.op, self.id)?;
+        let entry = &self.entry;
         if !in_range(entry.size, offset, bytes.len()) {
             return Err(fail(self.op, ErrorKind::InvalidArgument, "write range is invalid"));
         }
         entry.buffer.borrow_mut().write(offset as u64, bytes).map_err(|failure| of_vk(self.op, failure))
     }
     fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, Error> {
-        let entry = self.dev.find_buffer(self.op, self.id)?;
         let mut bytes = vec![0u8; length];
-        buffer_read_into(self.op, &entry, offset, &mut bytes, 0, length)?;
+        buffer_read_into(self.op, &self.entry, offset, &mut bytes, 0, length)?;
         Ok(bytes)
     }
     fn read_into(&self, offset: i64, destination: &mut [u8], at: usize, length: usize) -> Result<(), Error> {
-        let entry = self.dev.find_buffer(self.op, self.id)?;
-        buffer_read_into(self.op, &entry, offset, destination, at, length)
+        buffer_read_into(self.op, &self.entry, offset, destination, at, length)
     }
     fn destroy(&self) -> Result<(), Error> {
-        self.dev.buffers.borrow_mut().remove(&self.id);
         live_add(-1);
         Ok(())
     }
@@ -268,8 +271,7 @@ fn register_buffer(dev: &Rc<Dev>, op: &'static str, created: Result<vk::Buffer, 
     let native = created.map_err(|failure| of_vk(op, failure))?;
     live_add(1);
     let id = dev.token();
-    dev.buffers.borrow_mut().insert(id, Rc::new(BufferEntry { buffer: RefCell::new(native), size }));
-    Ok(BufferResource { dev: dev.clone(), id, op })
+    Ok(BufferResource { id, op, entry: Rc::new(BufferEntry { buffer: RefCell::new(native), size, arguments: RefCell::default() }) })
 }
 
 /// Both kinds are device-local: a Shared buffer in host memory is read by kernels over PCIe, 100x
@@ -282,7 +284,7 @@ fn create_buffer(dev: &Rc<Dev>, memory: Memory, descriptor: &BufferDescriptor) -
     let device = dev.device(OP)?;
     let resource = register_buffer(dev, OP, device.buffer(descriptor.size as u64, vk::BufferKind::DeviceLocal), descriptor.size)?;
     if memory == Memory::Shared {
-        let zeroed = dev.find_buffer(OP, resource.id).and_then(|entry| entry.buffer.borrow().zero().map_err(|failure| of_vk(OP, failure)));
+        let zeroed = resource.entry.buffer.borrow().zero().map_err(|failure| of_vk(OP, failure));
         if let Err(failure) = zeroed {
             let _ = resource.destroy();
             return Err(failure);
@@ -307,13 +309,12 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<
     let device = dev.device(MAPPED_OP)?;
     let size = descriptor.size;
     let resource = register_buffer(dev, MAPPED_OP, device.buffer(size as u64, vk::BufferKind::DeviceLocal), size)?;
-    let id = resource.id;
-    if let Err(failure) = dev.find_buffer(MAPPED_OP, id).and_then(|entry| entry.buffer.borrow().zero().map_err(|failure| of_vk(MAPPED_OP, failure))) {
+    if let Err(failure) = resource.entry.buffer.borrow().zero().map_err(|failure| of_vk(MAPPED_OP, failure)) {
         let _ = resource.destroy();
         return Err(failure);
     }
   // Native staged reads serialize under the device qlock; readback retains the allocation only.
-    let readback_buffer = dev.find_buffer(MAPPED_OP, id)?.buffer.borrow().clone();
+    let readback_buffer = resource.entry.buffer.borrow().clone();
     let readback: ogpu_core::backend::OwnedReadback = std::sync::Arc::new(move |offset, length| {
         let offset = u64::try_from(offset).map_err(|_| fail(MAPPED_OP, ErrorKind::InvalidArgument, "negative read offset"))?;
         if offset > readback_buffer.size() || length as u64 > readback_buffer.size() - offset {
@@ -332,14 +333,17 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<
 const TEXTURE_OP: &str = "Ogpu_vulkan.create_texture";
 
 struct TextureResource {
-    dev: Rc<Dev>,
     id: Token,
     profile: AdmittedTexture,
+    entry: Rc<TextureEntry>,
 }
 
 impl DriverResource for TextureResource {
     fn token(&self) -> Token {
         self.id
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
     fn write(&self, _offset: i64, _bytes: &[u8]) -> Result<(), Error> {
         Err(fail(TEXTURE_OP, ErrorKind::Unsupported, "use a transfer pass for textures"))
@@ -352,9 +356,8 @@ impl DriverResource for TextureResource {
     }
     fn read_texture(&self, read: &TextureRead) -> Result<Vec<u8>, Error> {
         let mut bytes = vec![0; read.length()];
-        let entry = self.dev.find_texture(TEXTURE_OP, self.id)?;
         if !read.belongs_to(&self.profile) { return Err(fail(TEXTURE_OP, ErrorKind::InvalidArgument, "transfer belongs to another admitted texture")); }
-        entry.texture.read(&mut bytes, read.bytes_per_row() as u64, types::texel_bytes(self.profile.format) as u32)
+        self.entry.texture.read(&mut bytes, read.bytes_per_row() as u64, types::texel_bytes(self.profile.format) as u32)
             .map_err(|failure| of_vk(TEXTURE_OP, failure))?;
         Ok(bytes)
     }
@@ -364,12 +367,10 @@ impl DriverResource for TextureResource {
         if !read.belongs_to(&self.profile) {
             return Err(fail(TEXTURE_OP, ErrorKind::InvalidArgument, "transfer belongs to another admitted texture"));
         }
-        let entry = self.dev.find_texture(TEXTURE_OP, self.id)?;
-        entry.texture.read(destination, read.bytes_per_row() as u64, types::texel_bytes(self.profile.format) as u32)
+        self.entry.texture.read(destination, read.bytes_per_row() as u64, types::texel_bytes(self.profile.format) as u32)
             .map_err(|failure| of_vk(TEXTURE_OP, failure))
     }
     fn destroy(&self) -> Result<(), Error> {
-        self.dev.textures.borrow_mut().remove(&self.id);
         live_add(-1);
         Ok(())
     }
@@ -389,8 +390,7 @@ fn register_texture(dev: &Rc<Dev>, descriptor: &AdmittedTexture) -> Result<Box<d
     })?;
     live_add(1);
     let id = dev.token();
-    dev.textures.borrow_mut().insert(id, Rc::new(TextureEntry { texture: native, descriptor: descriptor.clone() }));
-    Ok(Box::new(TextureResource { dev: dev.clone(), id, profile: descriptor.clone() }))
+    Ok(Box::new(TextureResource { id, profile: descriptor.clone(), entry: Rc::new(TextureEntry { texture: native, descriptor: descriptor.clone() }) }))
 }
 
 struct OwnedPipeline {
@@ -627,17 +627,19 @@ impl DriverIcb for IndirectCommands {
         let entry = pipeline_entry(ICB_OP, pipeline)?;
         self.at(index, &mut |c| c.pipeline = Some(entry.clone()))
     }
-    fn icb_set_buffer(&self, index: ogpu_core::validation::AdmittedIcbIndex, _stage: ShaderStage, slot: i64, offset: i64, buffer: Token) -> Result<(), Error> {
-        self.at(index, &mut |c| c.buffers.insert(0, (slot, offset, buffer)))
+    fn icb_set_buffer(&self, index: ogpu_core::validation::AdmittedIcbIndex, _stage: ShaderStage, slot: i64, offset: i64, buffer: &dyn DriverResource) -> Result<(), Error> {
+        let entry = buffer_entry(ICB_OP, buffer)?;
+        self.at(index, &mut |c| c.buffers.insert(0, (slot, offset, entry.clone())))
     }
     fn icb_draw(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
         self.at(index, &mut |c| c.draw = Some(IcbDraw::Draw { primitive, first, count, instances }))
     }
-    fn icb_draw_indexed(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, buffer: Token, range:&ogpu_core::validation::AdmittedIndexRange) -> Result<(), Error> {
+    fn icb_draw_indexed(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, buffer: &dyn DriverResource, range:&ogpu_core::validation::AdmittedIndexRange) -> Result<(), Error> {
+        let buffer = buffer_entry(ICB_OP, buffer)?;
         let (Ok(offset),Ok(count),Ok(instances))=(i64::try_from(range.offset()),i64::try_from(range.count()),i64::try_from(range.instances())) else {
             return Err(fail(ICB_OP,ErrorKind::InvalidArgument,"indexed command exceeds the native cache integer bounds"));
         };
-        self.at(index, &mut |c| c.draw = Some(IcbDraw::Indexed { primitive,index_type:range.index_type(),buffer,offset,count,instances }))
+        self.at(index, &mut |c| c.draw = Some(IcbDraw::Indexed { primitive,index_type:range.index_type(),buffer:buffer.clone(),offset,count,instances }))
     }
     fn destroy_icb(&self) -> Result<(), Error> {
         self.dev.icbs.borrow_mut().remove(&self.id);
@@ -656,9 +658,7 @@ fn create_icb(dev: &Rc<Dev>, profile: &ogpu_core::validation::AdmittedIcb) -> Re
 
 const ARGUMENT_OP: &str = "Ogpu_vulkan.argument";
 
-struct ArgumentSlices {
-    dev: Rc<Dev>,
-}
+struct ArgumentSlices;
 
 impl DriverArgument for ArgumentSlices {
     fn argument_length(&self) -> i64 {
@@ -667,14 +667,14 @@ impl DriverArgument for ArgumentSlices {
     fn argument_alignment(&self) -> i64 {
         16
     }
-    fn argument_texture(&self, buffer: Token, offset: i64, _slot: i64, texture: Token) -> Result<(), Error> {
-        let texture = self.dev.find_texture(ARGUMENT_OP, texture)?;
-        self.dev.arguments.borrow_mut().entry((buffer, offset)).or_default().0 = Some(texture);
+    fn argument_texture(&self, buffer: &dyn DriverResource, offset: i64, _slot: i64, texture: &dyn DriverResource) -> Result<(), Error> {
+        let texture = texture_entry(ARGUMENT_OP, texture)?.clone();
+        buffer_entry(ARGUMENT_OP, buffer)?.arguments.borrow_mut().entry(offset).or_default().0 = Some(texture);
         Ok(())
     }
-    fn argument_sampler(&self, buffer: Token, offset: i64, _slot: i64, sampler: &dyn DriverSampler) -> Result<(), Error> {
+    fn argument_sampler(&self, buffer: &dyn DriverResource, offset: i64, _slot: i64, sampler: &dyn DriverSampler) -> Result<(), Error> {
         let sampler = native_sampler(ARGUMENT_OP, sampler)?;
-        self.dev.arguments.borrow_mut().entry((buffer, offset)).or_default().1 = Some(sampler);
+        buffer_entry(ARGUMENT_OP, buffer)?.arguments.borrow_mut().entry(offset).or_default().1 = Some(sampler);
         Ok(())
     }
     fn destroy_argument(&self) -> Result<(), Error> {
@@ -682,21 +682,20 @@ impl DriverArgument for ArgumentSlices {
     }
 }
 
-fn create_argument(dev: &Rc<Dev>) -> Result<Box<dyn DriverArgument>, Error> {
-    Ok(Box::new(ArgumentSlices { dev: dev.clone() }))
+fn create_argument() -> Result<Box<dyn DriverArgument>, Error> {
+    Ok(Box::new(ArgumentSlices))
 }
 
-fn read_bytes(dev: &Dev, op: &str, token: Token, offset: i64, length: i64) -> Result<Vec<u8>, Error> {
-    let buffer = dev.find_buffer(op, token)?;
+fn read_bytes(op: &str, buffer: &BufferEntry, offset: i64, length: i64) -> Result<Vec<u8>, Error> {
     if offset < 0 || length < 0 || offset > buffer.size || length > buffer.size - offset {
         return Err(fail(op, ErrorKind::InvalidArgument, "read range is invalid"));
     }
     let mut bytes = vec![0u8; length as usize];
-    buffer_read_into(op, &buffer, offset, &mut bytes, 0, length as usize)?;
+    buffer_read_into(op, buffer, offset, &mut bytes, 0, length as usize)?;
     Ok(bytes)
 }
 
-fn generated_buffer(dev: &Rc<Dev>, generated: &mut Vec<Box<dyn DriverResource>>, bytes: &[u8]) -> Result<Token, Error> {
+fn generated_buffer(dev: &Rc<Dev>, generated: &mut Vec<Box<dyn DriverResource>>, bytes: &[u8]) -> Result<Rc<BufferEntry>, Error> {
     let resource = create_buffer(
         dev,
         Memory::DeviceLocal,
@@ -708,9 +707,9 @@ fn generated_buffer(dev: &Rc<Dev>, generated: &mut Vec<Box<dyn DriverResource>>,
     )?;
     match resource.write(0, bytes) {
         Ok(()) => {
-            let token = resource.token();
+            let entry = buffer_entry("Ogpu_vulkan.accel", &*resource)?.clone();
             generated.push(resource);
-            Ok(token)
+            Ok(entry)
         }
         Err(failure) => {
             let _ = resource.destroy();
@@ -758,14 +757,14 @@ fn motion_triangle_boxes(
     dev: &Rc<Dev>,
     op: &str,
     generated: &mut Vec<Box<dyn DriverResource>>,
-    keyframes: &[(Token, i64)],
+    keyframes: &[(Rc<BufferEntry>, i64)],
     stride: i64,
     vertices: i64,
 ) -> Result<GeomRecord, Error> {
     let length = (vertices - 1) * stride + 12;
     let mut frames = Vec::new();
-    for &(token, offset) in keyframes {
-        frames.push(read_bytes(dev, op, token, offset, length)?);
+    for (entry, offset) in keyframes {
+        frames.push(read_bytes(op, entry, *offset, length)?);
     }
     let triangles = (vertices / 3).max(0) as usize;
     let mut boxes = vec![0u8; triangles * 24];
@@ -788,8 +787,7 @@ fn motion_triangle_boxes(
             put_float(&mut boxes, triangle * 24 + 12 + axis * 4, *high);
         }
     }
-    let token = generated_buffer(dev, generated, &boxes)?;
-    let entry = dev.find_buffer(op, token)?;
+    let entry = generated_buffer(dev, generated, &boxes)?;
     Ok(box_geometry(entry, vertices / 3))
 }
 
@@ -799,7 +797,7 @@ fn accel_i64(value:u64) -> Result<i64,Error> {
 fn accel_u32(value:u64) -> Result<u32,Error> {
     u32::try_from(value).map_err(|_|fail("Ogpu_vulkan.accel",ErrorKind::InvalidArgument,"acceleration count exceeds Vulkan uint32 bounds"))
 }
-fn geometry_records(dev:&Rc<Dev>, generated:&mut Vec<Box<dyn DriverResource>>, profile:&AdmittedBuild, buffers:&[Token]) -> Result<Vec<GeomRecord>,Error> {
+fn geometry_records(dev:&Rc<Dev>, generated:&mut Vec<Box<dyn DriverResource>>, profile:&AdmittedBuild, buffers:&[Rc<dyn DriverResource>]) -> Result<Vec<GeomRecord>,Error> {
     const OP:&str="Ogpu_vulkan.accel";
     let BuildLayout::Primitive { geometries,fast_build,.. }=profile.layout() else {
         return Err(fail(OP,ErrorKind::InvalidArgument,"Vulkan BLAS requires a primitive descriptor"));
@@ -813,15 +811,15 @@ fn geometry_records(dev:&Rc<Dev>, generated:&mut Vec<Box<dyn DriverResource>>, p
                 let vertex_count=triangle_count.checked_mul(3).ok_or_else(||fail(OP,ErrorKind::InvalidArgument,"Vulkan vertex count overflows"))?;
                 let count=accel_u32(vertex_count)?;
                 if vertices.len()==1 {
-                    GeomRecord { kind:vk::GeometryKind::Triangles,buffer:dev.find_buffer(OP,buffers[vertices[0].binding])?,
+                    GeomRecord { kind:vk::GeometryKind::Triangles,buffer:buffer_entry(OP,&*buffers[vertices[0].binding])?.clone(),
                         offset:vertices[0].offset,stride:*vertex_stride,count,opaque:common.opaque,duplicate:common.duplicate_intersection }
                 } else {
-                    let keyframes=vertices.iter().map(|r|Ok((buffers[r.binding],accel_i64(r.offset)?))).collect::<Result<Vec<_>,Error>>()?;
+                    let keyframes=vertices.iter().map(|r|Ok((buffer_entry(OP,&*buffers[r.binding])?.clone(),accel_i64(r.offset)?))).collect::<Result<Vec<_>,Error>>()?;
                     motion_triangle_boxes(dev,OP,generated,&keyframes,accel_i64(*vertex_stride)?,i64::from(count))?
                 }
             }
             BuildGeometry::BoundingBoxes { boxes,stride,count,common } if boxes.len()==1 => GeomRecord {
-                kind:vk::GeometryKind::Boxes,buffer:dev.find_buffer(OP,buffers[boxes[0].binding])?,offset:boxes[0].offset,
+                kind:vk::GeometryKind::Boxes,buffer:buffer_entry(OP,&*buffers[boxes[0].binding])?.clone(),offset:boxes[0].offset,
                 stride:*stride,count:accel_u32(*count)?,opaque:common.opaque,duplicate:common.duplicate_intersection,
             },
             BuildGeometry::BoundingBoxes { .. } | BuildGeometry::Curves { .. } =>
@@ -885,15 +883,15 @@ fn motion_instance_geometries(
     dev: &Rc<Dev>,
     op: &str,
     generated: &mut Vec<Box<dyn DriverResource>>,
-    instances: Token,
+    instances: &BufferEntry,
     offset: i64,
     count: i64,
     structures: &[Token],
-    transforms: (Token, i64, i64),
+    transforms: (&BufferEntry, i64, i64),
 ) -> Result<(Vec<GeomRecord>, Vec<u8>), Error> {
-    let records = read_bytes(dev, op, instances, offset, count * 44)?;
-    let (transform_token, transform_offset, transform_count) = transforms;
-    let transform_data = read_bytes(dev, op, transform_token, transform_offset, transform_count * 48)?;
+    let records = read_bytes(op, instances, offset, count * 44)?;
+    let (transform_buffer, transform_offset, transform_count) = transforms;
+    let transform_data = read_bytes(op, transform_buffer, transform_offset, transform_count * 48)?;
     let mut built = Vec::new();
     for index in 0..count {
         let base = index as usize * 44;
@@ -937,8 +935,7 @@ fn motion_instance_geometries(
                 put_float(&mut bytes, box_at + 12 + axis * 4, *high);
             }
         }
-        let token = generated_buffer(dev, generated, &bytes)?;
-        let entry = dev.find_buffer(op, token)?;
+        let entry = generated_buffer(dev, generated, &bytes)?;
         built.push((box_geometry(entry, keys - 1), structure, mask, user_id));
     }
     let mut native = vec![0u8; count as usize * 68];
@@ -974,13 +971,12 @@ fn build_accel(dev:&Rc<Dev>,op:&str,descriptor:&DriverAccelDescriptor,generated:
             }
             BuildLayout::Instances { instances,count,kind,motion_transforms,.. } => {
                 let count32=accel_u32(*count)?;
-                let token=buffers[instances.binding];
+                let instance_source=buffer_entry(op,&*buffers[instances.binding])?;
                 if matches!(kind,InstanceKind::MotionInstances) {
                     let (transforms,transform_count)=motion_transforms.as_ref().ok_or_else(||fail(op,ErrorKind::InvalidArgument,"motion instances require transform keyframes"))?;
-                    let (proxies,instance_records)=motion_instance_geometries(dev,op,generated,token,accel_i64(instances.offset)?,
-                        i64::from(count32),structures,(buffers[transforms.binding],accel_i64(transforms.offset)?,accel_i64(*transform_count)?))?;
-                    let instance_token=generated_buffer(dev,generated,&instance_records)?;
-                    let instance_buffer=dev.find_buffer(op,instance_token)?;
+                    let (proxies,instance_records)=motion_instance_geometries(dev,op,generated,instance_source,accel_i64(instances.offset)?,
+                        i64::from(count32),structures,(buffer_entry(op,&*buffers[transforms.binding])?,accel_i64(transforms.offset)?,accel_i64(*transform_count)?))?;
+                    let instance_buffer=generated_buffer(dev,generated,&instance_records)?;
                     let mut children=Vec::new();
                     for proxy in &proxies {
                         children.push(device.acceleration_blas(&native_geometries(std::slice::from_ref(proxy)),false).map_err(|failure|of_vk(op,failure))?);
@@ -988,7 +984,7 @@ fn build_accel(dev:&Rc<Dev>,op:&str,descriptor:&DriverAccelDescriptor,generated:
                     let buffer=instance_buffer.buffer.borrow();
                     device.acceleration_tlas(&buffer,0,count32,&children,true).map_err(|failure|of_vk(op,failure))
                 } else {
-                    let buffer=dev.find_buffer(op,token)?;
+                    let buffer=instance_source;
                     let handles=structures.iter().map(|t|dev.find_accel(op,*t)).collect::<Result<Vec<_>,_>>()?;
                     let refs=handles.iter().map(|h|(**h).clone()).collect::<Vec<_>>();
                     let buffer=buffer.buffer.borrow();
@@ -1106,16 +1102,16 @@ impl DriverComputeEncoder for ComputePass {
         self.local.set(entry.local);
         self.cmds.run(QUEUE_OP, &mut |c| c.set_pipeline(&entry.pipeline))
     }
-    fn set_buffer(&self, index: i64, offset: i64, id: Token) -> Result<(), Error> {
-        let entry = self.cmds.dev.find_buffer(QUEUE_OP, id)?;
+    fn set_buffer(&self, index: i64, offset: i64, buffer: &dyn DriverResource) -> Result<(), Error> {
+        let entry = buffer_entry(QUEUE_OP, buffer)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.set_buffer(index as u32, offset as u64, &entry.buffer.borrow()))
     }
     fn set_bytes(&self, index: i64, admitted: ogpu_core::validation::AdmittedBytes, bytes: &[u8]) -> Result<(), Error> {
         admitted.bind(bytes.len())?;
         self.cmds.run(QUEUE_OP, &mut |c| c.set_bytes(index as u32, bytes))
     }
-    fn set_texture(&self, index: i64, id: Token) -> Result<(), Error> {
-        let entry = self.cmds.dev.find_texture(QUEUE_OP, id)?;
+    fn set_texture(&self, index: i64, texture: &dyn DriverResource) -> Result<(), Error> {
+        let entry = texture_entry(QUEUE_OP, texture)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.set_texture(index as u32, &entry.texture))
     }
     fn set_accel(&self, index: i64, id: Token) -> Result<(), Error> {
@@ -1130,8 +1126,8 @@ impl DriverComputeEncoder for ComputePass {
             Ok(())
         })
     }
-    fn dispatch_indirect(&self, id: Token, offset: i64, _threadgroup: (i64, i64, i64)) -> Result<(), Error> {
-        let entry = self.cmds.dev.find_buffer(QUEUE_OP, id)?;
+    fn dispatch_indirect(&self, buffer: &dyn DriverResource, offset: i64, _threadgroup: (i64, i64, i64)) -> Result<(), Error> {
+        let entry = buffer_entry(QUEUE_OP, buffer)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.dispatch_indirect(&entry.buffer.borrow(), offset as u64))
     }
     fn compute_use_accels(&self, _accels: &[Token]) -> Result<(), Error> {
@@ -1158,9 +1154,9 @@ struct AccelPass {
 }
 
 impl DriverAccelEncoder for AccelPass {
-    fn build(&self, id: Token, scratch: Token, scratch_offset: i64) -> Result<(), Error> {
+    fn build(&self, id: Token, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
         let accel = self.cmds.dev.find_accel(QUEUE_OP, id)?;
-        let scratch = self.cmds.dev.find_buffer(QUEUE_OP, scratch)?;
+        let scratch = buffer_entry(QUEUE_OP, scratch)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.build_acceleration(&accel, &scratch.buffer.borrow(), scratch_offset as u64))
     }
     fn compact(&self, src: Token, dst: Token) -> Result<(), Error> {
@@ -1177,14 +1173,14 @@ impl DriverAccelEncoder for AccelPass {
         }
         Ok(())
     }
-    fn write_compacted_size(&self, id: Token, dst: Token, output: ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> {
+    fn write_compacted_size(&self, id: Token, dst: &dyn DriverResource, output: ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> {
         let accel = self.cmds.dev.find_accel(QUEUE_OP, id)?;
-        let buffer = self.cmds.dev.find_buffer(QUEUE_OP, dst)?;
+        let buffer = buffer_entry(QUEUE_OP, dst)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.write_compacted_size(&accel, &buffer.buffer.borrow(), output))
     }
-    fn refit(&self, id: Token, descriptor: &DriverAccelDescriptor, scratch: Token, scratch_offset: i64) -> Result<(), Error> {
+    fn refit(&self, id: Token, descriptor: &DriverAccelDescriptor, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
         let accel = self.cmds.dev.find_accel(QUEUE_OP, id)?;
-        let scratch = self.cmds.dev.find_buffer(QUEUE_OP, scratch)?;
+        let scratch = buffer_entry(QUEUE_OP, scratch)?;
         let DriverAccelDescriptor::Build { profile,buffers,.. } = descriptor else {
             return Err(fail(QUEUE_OP, ErrorKind::InvalidArgument, "Vulkan refit requires a BLAS descriptor"));
         };
@@ -1227,17 +1223,17 @@ struct BlitPass {
 impl DriverBlitEncoder for BlitPass {
     fn buffer_to_texture(
         &self,
-        src: Token,
+        src: &dyn DriverResource,
         offset: i64,
         bytes_per_row: i64,
         _bytes_per_image: i64,
-        dst: Token,
+        dst: &dyn DriverResource,
         mip: i64,
         origin: types::Origin,
         extent: types::Extent,
     ) -> Result<(), Error> {
-        let buffer = self.cmds.dev.find_buffer(QUEUE_OP, src)?;
-        let texture = self.cmds.dev.find_texture(QUEUE_OP, dst)?;
+        let buffer = buffer_entry(QUEUE_OP, src)?;
+        let texture = texture_entry(QUEUE_OP, dst)?;
         let texel = types::texel_bytes(texture.descriptor.format);
         let args = vk::BlitDescriptor {
             buffer_offset: offset as u64,
@@ -1274,14 +1270,8 @@ impl Render {
     fn bind_pipeline(&self, entry: &PipelineEntry) -> Result<(), Error> {
         self.cmds.run(QUEUE_OP, &mut |c| c.set_pipeline(&entry.pipeline))
     }
-}
-
-impl DriverRenderEncoder for Render {
-    fn render_set_pipeline(&self, pipeline: &dyn DriverPipeline) -> Result<(), Error> {
-        self.bind_pipeline(&pipeline_entry(QUEUE_OP, pipeline)?)
-    }
-    fn set_stage_buffer(&self, _stage: ShaderStage, index: i64, offset: i64, id: Token) -> Result<(), Error> {
-        let argument = self.cmds.dev.arguments.borrow().get(&(id, offset)).cloned();
+    fn bind_buffer(&self, index: i64, offset: i64, entry: &BufferEntry) -> Result<(), Error> {
+        let argument = entry.arguments.borrow().get(&offset).cloned();
         match argument {
             Some((texture, sampler)) => {
                 let (Some(texture), Some(sampler)) = (texture, sampler) else {
@@ -1290,14 +1280,33 @@ impl DriverRenderEncoder for Render {
                 self.cmds.run(QUEUE_OP, &mut |c| c.set_texture(index as u32, &texture.texture))?;
                 self.cmds.run(QUEUE_OP, &mut |c| c.set_sampler(index as u32 + 1, &sampler))
             }
-            None => {
-                let entry = self.cmds.dev.find_buffer(QUEUE_OP, id)?;
-                self.cmds.run(QUEUE_OP, &mut |c| c.set_buffer(index as u32, offset as u64, &entry.buffer.borrow()))
-            }
+            None => self.cmds.run(QUEUE_OP, &mut |c| c.set_buffer(index as u32, offset as u64, &entry.buffer.borrow())),
         }
     }
-    fn set_stage_texture(&self, _stage: ShaderStage, index: i64, id: Token) -> Result<(), Error> {
-        let entry = self.cmds.dev.find_texture(QUEUE_OP, id)?;
+    fn draw_indexed_entry(&self, primitive: Primitive, index_type: IndexType, entry: &BufferEntry, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
+        self.cmds.run(QUEUE_OP, &mut |c| {
+            c.draw_indexed(
+                &entry.buffer.borrow(),
+                primitive_index(primitive),
+                index_kind(index_type),
+                offset as u64,
+                count as u32,
+                instances as u32,
+            )
+        })
+    }
+}
+
+impl DriverRenderEncoder for Render {
+    fn render_set_pipeline(&self, pipeline: &dyn DriverPipeline) -> Result<(), Error> {
+        let entry = pipeline_entry(QUEUE_OP, pipeline)?;
+        self.bind_pipeline(&entry)
+    }
+    fn set_stage_buffer(&self, _stage: ShaderStage, index: i64, offset: i64, buffer: &dyn DriverResource) -> Result<(), Error> {
+        self.bind_buffer(index, offset, buffer_entry(QUEUE_OP, buffer)?)
+    }
+    fn set_stage_texture(&self, _stage: ShaderStage, index: i64, texture: &dyn DriverResource) -> Result<(), Error> {
+        let entry = texture_entry(QUEUE_OP, texture)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.set_texture(index as u32, &entry.texture))
     }
     fn set_stage_sampler(&self, _stage: ShaderStage, index: i64, sampler: &dyn DriverSampler) -> Result<(), Error> {
@@ -1339,30 +1348,20 @@ impl DriverRenderEncoder for Render {
     fn draw(&self, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
         self.cmds.run(QUEUE_OP, &mut |c| c.draw(primitive_index(primitive), first as u32, count as u32, instances as u32))
     }
-    fn draw_indexed(&self, primitive: Primitive, index_type: IndexType, id: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
-        let entry = self.cmds.dev.find_buffer(QUEUE_OP, id)?;
-        self.cmds.run(QUEUE_OP, &mut |c| {
-            c.draw_indexed(
-                &entry.buffer.borrow(),
-                primitive_index(primitive),
-                index_kind(index_type),
-                offset as u64,
-                count as u32,
-                instances as u32,
-            )
-        })
+    fn draw_indexed(&self, primitive: Primitive, index_type: IndexType, buffer: &dyn DriverResource, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
+        self.draw_indexed_entry(primitive, index_type, buffer_entry(QUEUE_OP, buffer)?, offset, count, instances)
     }
     fn draw_indexed_indirect(
         &self,
         primitive: Primitive,
         index_type: IndexType,
-        id: Token,
+        buffer: &dyn DriverResource,
         offset: i64,
-        arguments_buffer: Token,
+        arguments_buffer: &dyn DriverResource,
         arguments_offset: i64,
     ) -> Result<(), Error> {
-        let entry = self.cmds.dev.find_buffer(QUEUE_OP, id)?;
-        let arguments = self.cmds.dev.find_buffer(QUEUE_OP, arguments_buffer)?;
+        let entry = buffer_entry(QUEUE_OP, buffer)?;
+        let arguments = buffer_entry(QUEUE_OP, arguments_buffer)?;
         self.cmds.run(QUEUE_OP, &mut |c| {
             c.draw_indexed_indirect(
                 &entry.buffer.borrow(),
@@ -1377,19 +1376,19 @@ impl DriverRenderEncoder for Render {
     fn draw_batch(&self, draws: &[DriverBatchDraw]) -> Result<(), Error> {
         for draw in draws {
             self.render_set_pipeline(&*draw.batch_pipeline)?;
-            for &(stage, index, buffer, offset) in &draw.batch_buffers {
-                self.set_stage_buffer(stage, index, offset, buffer)?;
+            for (stage, index, buffer, offset) in &draw.batch_buffers {
+                self.set_stage_buffer(*stage, *index, *offset, &**buffer)?;
             }
-            match draw.batch_index {
+            match &draw.batch_index {
                 Some((index_type, buffer, offset, count)) => {
-                    self.draw_indexed(draw.batch_primitive, index_type, buffer, offset, count, draw.batch_instances)?
+                    self.draw_indexed(draw.batch_primitive, *index_type, &**buffer, *offset, *count, draw.batch_instances)?
                 }
                 None => self.draw(draw.batch_primitive, draw.batch_vertex_start, draw.batch_vertex_count, draw.batch_instances)?,
             }
         }
         Ok(())
     }
-    fn use_resources(&self, _resources: &[Token]) -> Result<(), Error> {
+    fn use_resources(&self, _resources: &[Rc<dyn DriverResource>]) -> Result<(), Error> {
         Ok(())
     }
     fn execute_icb(&self, id: Token, location: i64, length: i64) -> Result<(), Error> {
@@ -1405,13 +1404,13 @@ impl DriverRenderEncoder for Render {
             if let Some(entry) = &command.pipeline {
                 self.bind_pipeline(entry)?;
             }
-            for &(slot, offset, buffer) in &command.buffers {
-                self.set_stage_buffer(ShaderStage::Vertex, slot, offset, buffer)?;
+            for (slot, offset, buffer) in &command.buffers {
+                self.bind_buffer(*slot, *offset, buffer)?;
             }
             match command.draw {
                 Some(IcbDraw::Draw { primitive, first, count, instances }) => self.draw(primitive, first, count, instances)?,
                 Some(IcbDraw::Indexed { primitive, index_type, buffer, offset, count, instances }) => {
-                    self.draw_indexed(primitive, index_type, buffer, offset, count, instances)?
+                    self.draw_indexed_entry(primitive, index_type, &buffer, offset, count, instances)?
                 }
                 None => (),
             }
@@ -1428,19 +1427,18 @@ impl DriverRenderEncoder for Render {
 
 fn render_encoder(cmds: &Rc<Cmds>, target: &DriverRenderTarget) -> Result<Box<dyn DriverRenderEncoder>, Error> {
     const OP: &str = QUEUE_OP;
-    let dev = &cmds.dev;
     let mut colors = Vec::new();
     for color in &target.target_colors {
-        let texture = dev.find_texture(OP, color.color)?;
-        let resolve = match color.color_resolve {
+        let texture = texture_entry(OP, &*color.color)?.clone();
+        let resolve = match &color.color_resolve {
             None => None,
-            Some(id) => Some(dev.find_texture(OP, id)?),
+            Some(resolve) => Some(texture_entry(OP, &**resolve)?.clone()),
         };
         colors.push((texture, resolve, color.color_load, color.color_store, color.color_clear));
     }
     let depth = match &target.target_depth {
         None => None,
-        Some(depth) => Some((dev.find_texture(OP, depth.depth)?, depth.depth_load, depth.depth_store, depth.depth_clear)),
+        Some(depth) => Some((texture_entry(OP, &*depth.depth)?.clone(), depth.depth_load, depth.depth_store, depth.depth_clear)),
     };
     let attachments: Vec<vk::ColorAttachment> = colors
         .iter()
@@ -1487,8 +1485,8 @@ impl DriverCommands for CommandsHandle {
             None => Err(vk::Error { operation: "commands_commit", kind: vk::ErrorKind::InvalidHandle }),
         })
     }
-    fn commit_present(&self, source: Token, frame: DriverFrame) -> Result<Receipt, Error> {
-        let source = self.cmds.dev.find_texture(QUEUE_OP, source)?;
+    fn commit_present(&self, source: &dyn DriverResource, frame: DriverFrame) -> Result<Receipt, Error> {
+        let source = texture_entry(QUEUE_OP, source)?;
         let surface = self.cmds.dev.frames.borrow().get(&frame.frame_token).cloned();
         let Some(surface) = surface else {
             return Err(fail(QUEUE_OP, ErrorKind::InvalidState, "frame token is stale"));
@@ -1699,7 +1697,7 @@ impl DriverDevice for VulkanDevice {
         create_icb(&self.dev, profile)
     }
     fn create_argument(&self, _pipeline: &dyn DriverPipeline, _stage: ShaderStage, _index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
-        create_argument(&self.dev)
+        create_argument()
     }
     fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error> {
         create_queue(&self.dev)
@@ -1713,10 +1711,7 @@ impl DriverDevice for VulkanDevice {
         }
         self.device_live.set(false);
         // Natives leaked past their owners go with the device.
-        self.dev.buffers.borrow_mut().clear();
-        self.dev.textures.borrow_mut().clear();
         self.dev.icbs.borrow_mut().clear();
-        self.dev.arguments.borrow_mut().clear();
         self.dev.frames.borrow_mut().clear();
         self.dev.accels.borrow_mut().clear();
         self.dev.accel_geometries.borrow_mut().clear();
@@ -1744,10 +1739,7 @@ fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> Resu
     let dev = Rc::new(Dev {
         device: RefCell::new(Some(Rc::new(device))),
         next: Cell::new(1),
-        buffers: RefCell::default(),
-        textures: RefCell::default(),
         icbs: RefCell::default(),
-        arguments: RefCell::default(),
         frames: RefCell::default(),
         accels: RefCell::default(),
         accel_resources: RefCell::default(),

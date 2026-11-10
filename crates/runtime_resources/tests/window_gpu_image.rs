@@ -17,6 +17,7 @@ impl Counted {
 }
 impl DriverResource for Counted {
     fn token(&self) -> b::Token { self.inner.token() }
+    fn as_any(&self) -> &dyn std::any::Any { self.inner.as_any() }
     fn write(&self, offset: i64, bytes: &[u8]) -> Result<(), ogpu_core::error::Error> { self.inner.write(offset, bytes) }
     fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, ogpu_core::error::Error> { self.gate()?; self.inner.read(offset, length) }
     fn read_into(&self, offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), ogpu_core::error::Error> {
@@ -46,7 +47,7 @@ impl DriverDevice for Dev {
         create_sampler(descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn b::DriverSampler>, ogpu_core::error::Error>;
         create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn b::DriverPipeline>, ogpu_core::error::Error>;
         create_icb(profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn b::DriverIcb>, ogpu_core::error::Error>;
-        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn b::DriverArgument>, ogpu_core::error::Error>;
+        create_argument(pipeline: &dyn b::DriverPipeline, stage: b::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn b::DriverArgument>, ogpu_core::error::Error>;
         create_queue() -> Result<Box<dyn b::DriverQueue>, ogpu_core::error::Error>;
         create_surface(configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn b::DriverSurface>, ogpu_core::error::Error>;
         destroy_device() -> Result<(), ogpu_core::error::Error>;

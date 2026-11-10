@@ -6,7 +6,7 @@ use crate::{
     acceleration::{self, Acceleration},
     blit_encoder, buffer,
     buffer::Buffer,
-    command_control::{CommandContext, IcbEntry, OpenEncoder, Resource, Tables},
+    command_control::{CommandContext, IcbEntry, OpenEncoder, Tables},
     compute_encoder,
     device::{fail, Device},
     library::{self, Library},
@@ -85,6 +85,9 @@ impl DriverResource for MetalBuffer {
     fn token(&self) -> Token {
         self.id
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn write(&self, offset: i64, bytes: &[u8]) -> Result<(), Error> {
         self.value.write_bytes(&self.dev.device, offset, bytes)
     }
@@ -100,16 +103,23 @@ impl DriverResource for MetalBuffer {
         Ok(())
     }
     fn destroy(&self) -> Result<(), Error> {
-        self.dev.t.resources.borrow_mut().remove(&self.id);
-        self.value.destroy()?;
-        Ok(())
+        self.value.destroy()
     }
+}
+
+/// The Metal buffer behind a portable resource.
+pub(crate) fn metal_buffer(resource: &dyn DriverResource) -> Option<&Buffer> {
+    resource.as_any().downcast_ref::<MetalBuffer>().map(|b| &b.value)
+}
+
+/// The Metal texture behind a portable resource.
+pub(crate) fn metal_texture(resource: &dyn DriverResource) -> Option<&Texture> {
+    resource.as_any().downcast_ref::<MetalTexture>().map(|t| &t.value)
 }
 
 fn register_buffer(dev: &Rc<Dev>, created: Result<Buffer, Error>) -> Result<MetalBuffer, Error> {
     let value = created?;
     let id = dev.t.token();
-    dev.t.resources.borrow_mut().insert(id, Resource::Buffer(value.clone()));
     Ok(MetalBuffer { dev: dev.clone(), value, id })
 }
 
@@ -141,9 +151,10 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &AdmittedBuffer) -> Result<Dr
     })
 }
 
-struct MetalTexture { dev: Rc<Dev>, value: Texture, id: i64 }
+struct MetalTexture { value: Texture, id: i64 }
 impl DriverResource for MetalTexture {
     fn token(&self) -> Token { self.id }
+    fn as_any(&self) -> &dyn std::any::Any { self }
     fn write(&self, _: i64, _: &[u8]) -> Result<(), Error> {
         Err(fail("Ogpu_metal.Backend.texture.write", ErrorKind::Unsupported, "use a transfer pass for textures"))
     }
@@ -158,16 +169,13 @@ impl DriverResource for MetalTexture {
         self.value.read_bytes_into(read, destination)
     }
     fn destroy(&self) -> Result<(), Error> {
-        self.dev.t.resources.borrow_mut().remove(&self.id);
-        self.value.destroy()?;
-        Ok(())
+        self.value.destroy()
     }
 }
 fn create_texture(dev: &Rc<Dev>, descriptor: &AdmittedTexture) -> Result<Box<dyn DriverResource>, Error> {
     let value = texture::create(&dev.device, descriptor)?;
     let id = dev.t.token();
-    dev.t.resources.borrow_mut().insert(id, Resource::Texture(value.clone()));
-    Ok(Box::new(MetalTexture { dev: dev.clone(), value, id }))
+    Ok(Box::new(MetalTexture { value, id }))
 }
 
 fn max_threads(pipeline: &Pipeline) -> i64 {
@@ -252,11 +260,8 @@ impl DriverAccel for MetalAccel {
 
 fn create_accel(dev: &Rc<Dev>, descriptor: &DriverAccelDescriptor) -> Result<Box<dyn DriverAccel>, Error> {
     const OP: &str = "Ogpu_metal.Backend.create_accel";
-    let resolve_buffer = |token: Token| -> Result<Buffer, Error> {
-        match dev.t.resource(token) {
-            Some(Resource::Buffer(b)) => Ok(b),
-            _ => Err(fail(OP, ErrorKind::InvalidArgument, "acceleration buffer graph is incomplete")),
-        }
+    let resolve_buffer = |resource: &dyn DriverResource| -> Result<Buffer, Error> {
+        metal_buffer(resource).cloned().ok_or_else(|| fail(OP, ErrorKind::InvalidArgument, "acceleration buffer graph is incomplete"))
     };
     let resolve_structure = |token: Token| -> Result<Acceleration, Error> {
         match dev.t.accels.borrow().get(&token) {
@@ -328,11 +333,8 @@ impl MetalIcb {
         Ok(c)
     }
 
-    fn find_buffer(&self, token: Token) -> Result<Buffer, Error> {
-        match self.dev.t.resource(token) {
-            Some(Resource::Buffer(b)) => Ok(b),
-            _ => Err(fail(ICB_OP, ErrorKind::InvalidArgument, "buffer graph is incomplete")),
-        }
+    fn find_buffer<'a>(&self, resource: &'a dyn DriverResource) -> Result<&'a Buffer, Error> {
+        metal_buffer(resource).ok_or_else(|| fail(ICB_OP, ErrorKind::InvalidArgument, "buffer graph is incomplete"))
     }
 }
 
@@ -349,9 +351,9 @@ impl DriverIcb for MetalIcb {
             Native::Render(native) => self.command(index)?.set_pipeline(native),
         }
     }
-    fn icb_set_buffer(&self, index: ogpu_core::validation::AdmittedIcbIndex, stage: ShaderStage, slot: i64, offset: i64, token: Token) -> Result<(), Error> {
+    fn icb_set_buffer(&self, index: ogpu_core::validation::AdmittedIcbIndex, stage: ShaderStage, slot: i64, offset: i64, resource: &dyn DriverResource) -> Result<(), Error> {
         let command = self.command(index)?;
-        let buffer = self.find_buffer(token)?;
+        let buffer = self.find_buffer(resource)?;
         match stage {
             ShaderStage::Vertex => command.set_vertex_buffer(slot as usize, offset as u64, buffer.metal()),
             ShaderStage::Fragment => command.set_fragment_buffer(slot as usize, offset as u64, buffer.metal()),
@@ -360,9 +362,9 @@ impl DriverIcb for MetalIcb {
     fn icb_draw(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
         self.command(index)?.draw_primitives(primitive, first as usize, count as usize, Some(instances as usize))
     }
-    fn icb_draw_indexed(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, token: Token, range:&ogpu_core::validation::AdmittedIndexRange) -> Result<(), Error> {
+    fn icb_draw_indexed(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, resource: &dyn DriverResource, range:&ogpu_core::validation::AdmittedIndexRange) -> Result<(), Error> {
         let command = self.command(index)?;
-        let index_buffer = self.find_buffer(token)?;
+        let index_buffer = self.find_buffer(resource)?;
         command.draw_indexed(primitive,index_buffer.metal(),range)
     }
     fn destroy_icb(&self) -> Result<(), Error> {
@@ -389,7 +391,6 @@ fn create_icb(dev: &Rc<Dev>, profile: &ogpu_core::validation::AdmittedIcb) -> Re
 const ARGUMENT_OP: &str = "Ogpu_metal.Backend.create_argument";
 
 struct MetalArgument {
-    dev: Rc<Dev>,
     pipeline: Pipeline,
     index: ogpu_core::validation::AdmittedSlot,
     encoder: RefCell<native::ShaderArgumentEncoder>,
@@ -400,8 +401,8 @@ struct MetalArgument {
 impl MetalArgument {
     /// A Metal argument encoder keeps its last-set resources alive; encode each slice through a
     /// short-lived encoder so evicted textures can be released.
-    fn encode(&self, buffer: Token, offset: i64, resource: native::ShaderArgumentResource, slot: i64) -> Result<(), Error> {
-        let Some(Resource::Buffer(buffer)) = self.dev.t.resource(buffer) else {
+    fn encode(&self, buffer: &dyn DriverResource, offset: i64, resource: native::ShaderArgumentResource, slot: i64) -> Result<(), Error> {
+        let Some(buffer) = metal_buffer(buffer) else {
             return Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "buffer graph is incomplete"));
         };
         let mut scratch = self.pipeline.argument_encoder(self.index)?;
@@ -420,13 +421,13 @@ impl DriverArgument for MetalArgument {
     fn argument_alignment(&self) -> i64 {
         self.alignment
     }
-    fn argument_texture(&self, buffer: Token, offset: i64, slot: i64, texture: Token) -> Result<(), Error> {
-        match self.dev.t.resource(texture) {
-            Some(Resource::Texture(texture)) => self.encode(buffer, offset, native::ShaderArgumentResource::Texture(texture.metal().clone()), slot),
+    fn argument_texture(&self, buffer: &dyn DriverResource, offset: i64, slot: i64, texture: &dyn DriverResource) -> Result<(), Error> {
+        match metal_texture(texture) {
+            Some(texture) => self.encode(buffer, offset, native::ShaderArgumentResource::Texture(texture.metal().clone()), slot),
             _ => Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "texture graph is incomplete")),
         }
     }
-    fn argument_sampler(&self, buffer: Token, offset: i64, slot: i64, sampler: &dyn DriverSampler) -> Result<(), Error> {
+    fn argument_sampler(&self, buffer: &dyn DriverResource, offset: i64, slot: i64, sampler: &dyn DriverSampler) -> Result<(), Error> {
         match sampler.as_any().downcast_ref::<MetalSampler>() {
             Some(sampler) => self.encode(buffer, offset, native::ShaderArgumentResource::Sampler(sampler.value.metal().clone()), slot),
             None => Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "sampler graph is incomplete")),
@@ -442,7 +443,7 @@ pub(crate) fn metal_pipeline(pipeline: &dyn DriverPipeline) -> Option<&Pipeline>
     pipeline.as_any().downcast_ref::<MetalPipeline>().map(|p| &p.pipeline)
 }
 
-fn create_argument(dev: &Rc<Dev>, pipeline: &dyn DriverPipeline, stage: ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
+fn create_argument(pipeline: &dyn DriverPipeline, stage: ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
     let Some(pipeline) = metal_pipeline(pipeline).cloned() else {
         return Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "pipeline graph is incomplete"));
     };
@@ -451,7 +452,7 @@ fn create_argument(dev: &Rc<Dev>, pipeline: &dyn DriverPipeline, stage: ShaderSt
     }
     let encoder = RefCell::new(pipeline.argument_encoder(index)?);
     let (length, alignment) = (encoder.borrow().encoded_length() as i64, encoder.borrow().alignment() as i64);
-    Ok(Box::new(MetalArgument { dev: dev.clone(), pipeline, index, encoder, length, alignment }))
+    Ok(Box::new(MetalArgument { pipeline, index, encoder, length, alignment }))
 }
 
 struct AccelRecorder {
@@ -466,13 +467,13 @@ fn accel_encoder(context: &Rc<CommandContext>) -> Result<Box<dyn DriverAccelEnco
 }
 
 impl DriverAccelEncoder for AccelRecorder {
-    fn build(&self, token: Token, scratch: Token, scratch_offset: i64) -> Result<(), Error> {
+    fn build(&self, token: Token, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
         let c = &self.context;
         let structure = c.find_accel(token)?;
         let scratch = c.find_buffer(scratch)?;
         c.keep_accel(&structure)?;
-        c.keep_buffer(&scratch)?;
-        structure.encode_build(&self.encoder, &scratch, scratch_offset)
+        c.keep_buffer(scratch)?;
+        structure.encode_build(&self.encoder, scratch, scratch_offset)
     }
     fn compact(&self, src: Token, dst: Token) -> Result<(), Error> {
         let c = &self.context;
@@ -481,26 +482,26 @@ impl DriverAccelEncoder for AccelRecorder {
         c.keep_accel(&dst)?;
         Acceleration::encode_compact(&self.encoder, &src, &dst)
     }
-    fn write_compacted_size(&self, token: Token, dst: Token, output: ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> {
+    fn write_compacted_size(&self, token: Token, dst: &dyn DriverResource, output: ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> {
         let c = &self.context;
         let structure = c.find_accel(token)?;
         let destination = c.find_buffer(dst)?;
         c.keep_accel(&structure)?;
-        c.keep_buffer(&destination)?;
-        structure.encode_compacted_size(&self.encoder, &destination, output)
+        c.keep_buffer(destination)?;
+        structure.encode_compacted_size(&self.encoder, destination, output)
     }
-    fn refit(&self, token: Token, descriptor: &DriverAccelDescriptor, scratch: Token, scratch_offset: i64) -> Result<(), Error> {
+    fn refit(&self, token: Token, descriptor: &DriverAccelDescriptor, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
         let c = &self.context;
         let structure = c.find_accel(token)?;
         let scratch = c.find_buffer(scratch)?;
         c.keep_accel(&structure)?;
-        c.keep_buffer(&scratch)?;
-        let resolve = |token: Token| -> Result<Buffer, Error> {
-            let b = c.find_buffer(token)?;
-            c.keep_buffer(&b)?;
-            Ok(b)
+        c.keep_buffer(scratch)?;
+        let resolve = |resource: &dyn DriverResource| -> Result<Buffer, Error> {
+            let b = c.find_buffer(resource)?;
+            c.keep_buffer(b)?;
+            Ok(b.clone())
         };
-        structure.encode_refit(&self.encoder, &c.device, descriptor, &resolve, &scratch, scratch_offset)
+        structure.encode_refit(&self.encoder, &c.device, descriptor, &resolve, scratch, scratch_offset)
     }
     fn end_accel(&self) -> Result<(), Error> {
         *self.context.open_encoder.borrow_mut() = None;
@@ -539,7 +540,7 @@ impl DriverCommands for MetalCommands {
             Ok(receipt) => Ok(Receipt { epoch: receipt.epoch }),
         }
     }
-    fn commit_present(&self, source: Token, frame: DriverFrame) -> Result<Receipt, Error> {
+    fn commit_present(&self, source: &dyn DriverResource, frame: DriverFrame) -> Result<Receipt, Error> {
         let context = &self.context;
         let source = context.find_texture(source)?;
         let Some((surface, native_frame)) = self.dev.acquired_frames.borrow().get(&frame.frame_token).cloned() else {
@@ -774,7 +775,7 @@ impl DriverDevice for MetalDevice {
         create_icb(&self.dev, profile)
     }
     fn create_argument(&self, pipeline: &dyn DriverPipeline, stage: ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
-        create_argument(&self.dev, pipeline, stage, index)
+        create_argument(pipeline, stage, index)
     }
     fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error> {
         create_queue(&self.dev)

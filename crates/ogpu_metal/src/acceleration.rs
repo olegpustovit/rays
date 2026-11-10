@@ -6,7 +6,7 @@ use crate::{
 };
 use crate::native::acceleration as ma;
 use ogpu_core::{
-    backend::{DriverAccelDescriptor, Token},
+    backend::{DriverAccelDescriptor, DriverResource, Token},
     error::{Error, ErrorKind},
 };
 use std::{
@@ -29,14 +29,14 @@ struct AccelInner {
 pub struct Acceleration(Rc<AccelInner>);
 
 fn primitive_build(operation:&str, device:&Device, descriptor:&DriverAccelDescriptor,
-    resolve:&dyn Fn(Token)->Result<Buffer,Error>) -> Result<(ma::BuildDescriptor,Vec<Buffer>),Error> {
+    resolve:&dyn Fn(&dyn DriverResource)->Result<Buffer,Error>) -> Result<(ma::BuildDescriptor,Vec<Buffer>),Error> {
     let DriverAccelDescriptor::Build { profile,buffers,structures }=descriptor else {
         return Err(fail(operation,ErrorKind::InvalidArgument,"a primitive descriptor is required"));
     };
     if !matches!(profile.layout(),ogpu_core::acceleration::BuildLayout::Primitive { .. }) || !structures.is_empty() {
         return Err(fail(operation,ErrorKind::InvalidArgument,"a primitive descriptor is required"));
     }
-    let buffers=buffers.iter().map(|token|resolve(*token)).collect::<Result<Vec<_>,_>>()?;
+    let buffers=buffers.iter().map(|r|resolve(&**r)).collect::<Result<Vec<_>,_>>()?;
     let build=ma::BuildDescriptor::create(device.metal(),profile.clone(),buffers.iter().map(|b|b.metal().clone()).collect(),Vec::new())?;
     Ok((build,buffers))
 }
@@ -56,11 +56,11 @@ fn allocate(device: &Device, descriptor: Option<ma::BuildDescriptor>, sizes: ma:
     })))
 }
 
-pub(crate) fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffer: &dyn Fn(Token) -> Result<Buffer, Error>, resolve_structure: &dyn Fn(Token) -> Result<Acceleration, Error>) -> Result<Acceleration, Error> {
+pub(crate) fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffer: &dyn Fn(&dyn DriverResource) -> Result<Buffer, Error>, resolve_structure: &dyn Fn(Token) -> Result<Acceleration, Error>) -> Result<Acceleration, Error> {
     let operation = "Ogpu_metal.Acceleration.create";
     match descriptor {
         DriverAccelDescriptor::Build { profile,buffers,structures } => {
-            let buffers=buffers.iter().map(|t|resolve_buffer(*t)).collect::<Result<Vec<_>,_>>()?;
+            let buffers=buffers.iter().map(|r|resolve_buffer(&**r)).collect::<Result<Vec<_>,_>>()?;
             let structures=structures.iter().map(|t|resolve_structure(*t)).collect::<Result<Vec<_>,_>>()?;
             let build=ma::BuildDescriptor::create(device.metal(),profile.clone(),
                 buffers.iter().map(|b|b.metal().clone()).collect(),structures.iter().map(|s|s.0.metal.clone()).collect())?;
@@ -118,7 +118,7 @@ impl Acceleration {
     }
 
     /// The structure keeps the refit's descriptor (its buffers are the ones a later refit replaces).
-    pub(crate) fn encode_refit(&self, encoder: &ma::AccelerationEncoder, device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffer: &dyn Fn(Token) -> Result<Buffer, Error>, scratch: &Buffer, scratch_offset: i64) -> Result<(), Error> {
+    pub(crate) fn encode_refit(&self, encoder: &ma::AccelerationEncoder, device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffer: &dyn Fn(&dyn DriverResource) -> Result<Buffer, Error>, scratch: &Buffer, scratch_offset: i64) -> Result<(), Error> {
         let operation = "Ogpu_metal.Acceleration.encode_refit";
         let (build, buffers) = primitive_build(operation, device, descriptor, resolve_buffer)?;
         match encoder.refit_with(&self.0.metal, &build, scratch.metal(), scratch_offset as u64) {

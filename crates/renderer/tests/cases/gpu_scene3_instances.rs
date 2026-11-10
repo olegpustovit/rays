@@ -405,6 +405,7 @@ struct Observed<T: ?Sized> { inner: Box<T>, seen: Seen }
 impl backend::DriverResource for Observed<dyn backend::DriverResource> {
     forward! {
         token() -> backend::Token;
+        as_any() -> &dyn std::any::Any;
         read(offset: i64, length: usize) -> Result<Vec<u8>, E>;
         read_into(offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), E>;
         destroy() -> Result<(), E>;
@@ -418,7 +419,7 @@ impl backend::DriverResource for Observed<dyn backend::DriverResource> {
 impl backend::DriverRenderEncoder for Observed<dyn backend::DriverRenderEncoder> {
     forward! {
         render_set_pipeline(pipeline: &dyn backend::DriverPipeline) -> Result<(), E>;
-        set_stage_texture(stage: backend::ShaderStage, index: i64, texture: backend::Token) -> Result<(), E>;
+        set_stage_texture(stage: backend::ShaderStage, index: i64, texture: &dyn backend::DriverResource) -> Result<(), E>;
         set_stage_sampler(stage: backend::ShaderStage, index: i64, sampler: &dyn backend::DriverSampler) -> Result<(), E>;
         set_viewport(rect: ogpu_core::render_pass::AdmittedViewport) -> Result<(), E>;
         set_scissor(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
@@ -426,25 +427,25 @@ impl backend::DriverRenderEncoder for Observed<dyn backend::DriverRenderEncoder>
         set_winding(winding: backend::Winding) -> Result<(), E>;
         set_depth_state(state: Option<backend::DepthState>) -> Result<(), E>;
         draw(primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), E>;
-        draw_indexed(primitive: Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: backend::Token, offset: i64, count: i64, instances: i64) -> Result<(), E>;
-        draw_indexed_indirect(primitive: Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: backend::Token, offset: i64, arguments: backend::Token, arguments_offset: i64) -> Result<(), E>;
-        use_resources(resources: &[backend::Token]) -> Result<(), E>;
+        draw_indexed(primitive: Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: &dyn backend::DriverResource, offset: i64, count: i64, instances: i64) -> Result<(), E>;
+        draw_indexed_indirect(primitive: Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: &dyn backend::DriverResource, offset: i64, arguments: &dyn backend::DriverResource, arguments_offset: i64) -> Result<(), E>;
+        use_resources(resources: &[Rc<dyn backend::DriverResource>]) -> Result<(), E>;
         execute_icb(icb: backend::Token, location: i64, length: i64) -> Result<(), E>;
         end_render() -> Result<(), E>;
     }
-    fn set_stage_buffer(&self, stage: backend::ShaderStage, slot: i64, offset: i64, token: backend::Token) -> Result<(), E> {
-        self.inner.set_stage_buffer(stage, slot, offset, token)?;
+    fn set_stage_buffer(&self, stage: backend::ShaderStage, slot: i64, offset: i64, buffer: &dyn backend::DriverResource) -> Result<(), E> {
+        self.inner.set_stage_buffer(stage, slot, offset, buffer)?;
         if stage == backend::ShaderStage::Vertex {
-            self.seen.borrow_mut().bindings.push((slot, token, offset));
+            self.seen.borrow_mut().bindings.push((slot, buffer.token(), offset));
         }
         Ok(())
     }
     fn draw_batch(&self, draws: &[backend::DriverBatchDraw]) -> Result<(), E> {
         self.inner.draw_batch(draws)?;
         for draw in draws {
-            for &(stage, slot, token, offset) in &draw.batch_buffers {
-                if stage == backend::ShaderStage::Vertex {
-                    self.seen.borrow_mut().bindings.push((slot, token, offset));
+            for (stage, slot, buffer, offset) in &draw.batch_buffers {
+                if *stage == backend::ShaderStage::Vertex {
+                    self.seen.borrow_mut().bindings.push((*slot, buffer.token(), *offset));
                 }
             }
         }
@@ -457,7 +458,7 @@ impl backend::DriverCommands for Observed<dyn backend::DriverCommands> {
         accel_encoder() -> Result<Box<dyn backend::DriverAccelEncoder>, E>;
         blit_encoder() -> Result<Box<dyn backend::DriverBlitEncoder>, E>;
         commit() -> Result<backend::Receipt, E>;
-        commit_present(source: backend::Token, frame: backend::DriverFrame) -> Result<backend::Receipt, E>;
+        commit_present(source: &dyn backend::DriverResource, frame: backend::DriverFrame) -> Result<backend::Receipt, E>;
         abandon() -> Result<(), E>;
     }
     fn render_encoder(&self, target: &backend::DriverRenderTarget) -> Result<Box<dyn backend::DriverRenderEncoder>, E> {

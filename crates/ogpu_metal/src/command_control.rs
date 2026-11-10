@@ -13,7 +13,7 @@ use crate::{
 };
 use crate::native::{DepthStencil, DepthStencilDescriptor};
 use ogpu_core::{
-    backend::DepthState,
+    backend::{DepthState, DriverResource},
     error::ErrorKind,
     render_pass::Comparison,
 };
@@ -23,12 +23,6 @@ use std::{
     rc::Rc,
 };
 
-#[derive(Clone)]
-pub enum Resource {
-    Buffer(Buffer),
-    Texture(Texture),
-}
-
 pub struct IcbEntry {
     pub icb: native::IndirectCommandBuffer,
     pub commands: RefCell<Vec<Option<native::RenderCommand>>>,
@@ -36,7 +30,6 @@ pub struct IcbEntry {
 
 /// The token tables of one device.
 pub struct Tables {
-    pub resources: RefCell<HashMap<i64, Resource>>,
     pub accels: RefCell<HashMap<i64, Acceleration>>,
     pub icbs: RefCell<HashMap<i64, Rc<IcbEntry>>>,
     /// Every depth-stencil state, made with the device (`create_depth_states`): eight comparisons
@@ -48,7 +41,6 @@ pub struct Tables {
 impl Tables {
     pub fn new() -> Tables {
         Tables {
-            resources: RefCell::new(HashMap::new()),
             accels: RefCell::new(HashMap::new()),
             icbs: RefCell::new(HashMap::new()),
             depth_states: RefCell::new(Vec::new()),
@@ -60,10 +52,6 @@ impl Tables {
         let x = self.next.get();
         self.next.set(x + 1);
         x
-    }
-
-    pub fn resource(&self, token: i64) -> Option<Resource> {
-        self.resources.borrow().get(&token).cloned()
     }
 
     /// Fill `depth_states` once, when the device is made.
@@ -150,11 +138,8 @@ impl CommandContext {
         Ok(())
     }
 
-    pub fn find_buffer(&self, token: i64) -> Result<Buffer, Error> {
-        match self.tables.resource(token) {
-            Some(Resource::Buffer(buffer)) => Ok(buffer),
-            _ => Err(fail(self.operation, ErrorKind::InvalidArgument, "buffer graph is incomplete")),
-        }
+    pub fn find_buffer<'a>(&self, resource: &'a dyn DriverResource) -> Result<&'a Buffer, Error> {
+        crate::backend::metal_buffer(resource).ok_or_else(|| fail(self.operation, ErrorKind::InvalidArgument, "buffer graph is incomplete"))
     }
 
     pub fn find_accel(&self, token: i64) -> Result<Acceleration, Error> {
@@ -175,11 +160,8 @@ impl CommandContext {
         Ok(())
     }
 
-    pub fn find_texture(&self, token: i64) -> Result<Texture, Error> {
-        match self.tables.resource(token) {
-            Some(Resource::Texture(texture)) => Ok(texture),
-            _ => Err(fail(self.operation, ErrorKind::InvalidArgument, "texture graph is incomplete")),
-        }
+    pub fn find_texture<'a>(&self, resource: &'a dyn DriverResource) -> Result<&'a Texture, Error> {
+        crate::backend::metal_texture(resource).ok_or_else(|| fail(self.operation, ErrorKind::InvalidArgument, "texture graph is incomplete"))
     }
 
     /// One retain per texture per command buffer, however many bindings reference it.
@@ -196,10 +178,6 @@ impl CommandContext {
             self.retained.borrow_mut().push(Retained::Sampler(sampler.clone()));
         }
         Ok(())
-    }
-
-    pub fn resource(&self, token: i64) -> Option<Resource> {
-        self.tables.resource(token)
     }
 
     pub fn icb(&self, token: i64) -> Option<native::IndirectCommandBuffer> {

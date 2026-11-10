@@ -215,6 +215,7 @@ struct MockResource {
 
 impl DriverResource for MockResource {
     fn token(&self) -> i64 { self.id }
+    fn as_any(&self) -> &dyn std::any::Any { self }
     fn write(&self, offset: i64, source: &[u8]) -> Result<(), Error> {
         let mut data = self.bytes.lock().unwrap();
         if !in_range(data.len(), offset, source.len() as i64) {
@@ -334,6 +335,7 @@ struct MockDepthTexture { c: Shared, id: i64 }
 
 impl DriverResource for MockDepthTexture {
     fn token(&self) -> i64 { self.id }
+    fn as_any(&self) -> &dyn std::any::Any { self }
     fn write(&self, _: i64, _: &[u8]) -> Result<(), Error> {
         Err(fail("Backend_mock.depth.write", ErrorKind::Unsupported, "depth textures are not host writable"))
     }
@@ -435,8 +437,8 @@ impl MockCommands {
 struct MockBlit(Rc<RefCell<Vec<BufferToTexture>>>);
 
 impl DriverBlitEncoder for MockBlit {
-    fn buffer_to_texture(&self, src: i64, offset: i64, row: i64, image: i64, dst: i64, mip: i64, origin: Origin, extent: Extent) -> Result<(), Error> {
-        self.0.borrow_mut().push(BufferToTexture { src, offset, row, image, dst, mip, origin, extent });
+    fn buffer_to_texture(&self, src: &dyn DriverResource, offset: i64, row: i64, image: i64, dst: &dyn DriverResource, mip: i64, origin: Origin, extent: Extent) -> Result<(), Error> {
+        self.0.borrow_mut().push(BufferToTexture { src: src.token(), offset, row, image, dst: dst.token(), mip, origin, extent });
         Ok(())
     }
     fn end_blit(&self) -> Result<(), Error> { Ok(()) }
@@ -462,11 +464,11 @@ impl DriverCommands for MockCommands {
         add(&self.c, format!("commit:{}:{}", self.id, self.epoch.get()));
         Ok(Receipt { epoch: self.epoch.get() })
     }
-    fn commit_present(&self, source: i64, frame: DriverFrame) -> Result<Receipt, Error> {
+    fn commit_present(&self, source: &dyn DriverResource, frame: DriverFrame) -> Result<Receipt, Error> {
         self.submit("Backend_mock.commit_present")?;
         self.run()?;
         self.epoch.set(self.epoch.get() + 1);
-        add(&self.c, format!("commit-present:{}:{source}:{}:{}", self.id, frame.frame_token, self.epoch.get()));
+        add(&self.c, format!("commit-present:{}:{}:{}:{}", self.id, source.token(), frame.frame_token, self.epoch.get()));
         Ok(Receipt { epoch: self.epoch.get() })
     }
     fn abandon(&self) -> Result<(), Error> {

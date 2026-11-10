@@ -52,6 +52,7 @@ fn wrap<T: ?Sized>(inner: Box<T>, st: &Rc<State>) -> Box<Wrapped<T>> { Box::new(
 impl b::DriverResource for Wrapped<dyn b::DriverResource> {
     forward! {
         token() -> b::Token;
+        as_any() -> &dyn std::any::Any;
         write(offset: i64, bytes: &[u8]) -> Result<(), E>;
         read_into(offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), E>;
         destroy() -> Result<(), E>;
@@ -77,18 +78,18 @@ impl b::DriverPipeline for Wrapped<dyn b::DriverPipeline> {
 impl b::DriverRenderEncoder for Wrapped<dyn b::DriverRenderEncoder> {
     forward! {
         render_set_pipeline(pipeline: &dyn b::DriverPipeline) -> Result<(), E>;
-        set_stage_buffer(stage: b::ShaderStage, index: i64, offset: i64, buffer: b::Token) -> Result<(), E>;
-        set_stage_texture(stage: b::ShaderStage, index: i64, texture: b::Token) -> Result<(), E>;
+        set_stage_buffer(stage: b::ShaderStage, index: i64, offset: i64, buffer: &dyn b::DriverResource) -> Result<(), E>;
+        set_stage_texture(stage: b::ShaderStage, index: i64, texture: &dyn b::DriverResource) -> Result<(), E>;
         set_stage_sampler(stage: b::ShaderStage, index: i64, sampler: &dyn b::DriverSampler) -> Result<(), E>;
         set_viewport(rect: ogpu_core::render_pass::AdmittedViewport) -> Result<(), E>;
         set_scissor(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
         set_cull(cull: ogpu_core::render_pass::Cull) -> Result<(), E>;
         set_winding(winding: b::Winding) -> Result<(), E>;
         set_depth_state(state: Option<b::DepthState>) -> Result<(), E>;
-        draw_indexed(primitive: ogpu_core::render_pass::Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: b::Token, offset: i64, count: i64, instances: i64) -> Result<(), E>;
-        draw_indexed_indirect(primitive: ogpu_core::render_pass::Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: b::Token, offset: i64, arguments: b::Token, arguments_offset: i64) -> Result<(), E>;
+        draw_indexed(primitive: ogpu_core::render_pass::Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: &dyn b::DriverResource, offset: i64, count: i64, instances: i64) -> Result<(), E>;
+        draw_indexed_indirect(primitive: ogpu_core::render_pass::Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: &dyn b::DriverResource, offset: i64, arguments: &dyn b::DriverResource, arguments_offset: i64) -> Result<(), E>;
         draw_batch(draws: &[b::DriverBatchDraw]) -> Result<(), E>;
-        use_resources(resources: &[b::Token]) -> Result<(), E>;
+        use_resources(resources: &[Rc<dyn b::DriverResource>]) -> Result<(), E>;
         execute_icb(icb: b::Token, location: i64, length: i64) -> Result<(), E>;
     }
     fn draw(&self, primitive: ogpu_core::render_pass::Primitive, first: i64, count: i64, instances: i64) -> Result<(), E> {
@@ -106,7 +107,7 @@ impl b::DriverCommands for Wrapped<dyn b::DriverCommands> {
         compute_encoder() -> Result<Box<dyn b::DriverComputeEncoder>, E>;
         accel_encoder() -> Result<Box<dyn b::DriverAccelEncoder>, E>;
         blit_encoder() -> Result<Box<dyn b::DriverBlitEncoder>, E>;
-        commit_present(source: b::Token, frame: b::DriverFrame) -> Result<b::Receipt, E>;
+        commit_present(source: &dyn b::DriverResource, frame: b::DriverFrame) -> Result<b::Receipt, E>;
     }
     fn commit(&self) -> Result<b::Receipt, E> {
         self.st.order.borrow_mut().push("commit");

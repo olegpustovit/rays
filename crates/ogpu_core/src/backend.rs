@@ -30,6 +30,7 @@ pub struct Receipt { pub epoch: i64 }
 
 pub trait DriverResource {
     fn token(&self) -> Token;
+    fn as_any(&self) -> &dyn std::any::Any;
     fn write(&self, offset: i64, bytes: &[u8]) -> Result<(), Error>;
     fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, Error>;
     fn read_into(&self, offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), Error>;
@@ -97,7 +98,7 @@ pub struct AccelSizes {
 
 #[derive(Clone)]
 pub enum DriverAccelDescriptor {
-    Build { profile:acceleration::AdmittedBuild, buffers:Vec<Token>, structures:Vec<Token> },
+    Build { profile:acceleration::AdmittedBuild, buffers:Vec<Rc<dyn DriverResource>>, structures:Vec<Token> },
     Sized { size:std::num::NonZeroU64, template:Token },
 }
 
@@ -116,26 +117,26 @@ pub struct Instance {
 
 pub trait DriverComputeEncoder {
     fn set_pipeline(&self, pipeline: &dyn DriverPipeline) -> Result<(), Error>;
-    fn set_buffer(&self, index: i64, offset: i64, buffer: Token) -> Result<(), Error>;
+    fn set_buffer(&self, index: i64, offset: i64, buffer: &dyn DriverResource) -> Result<(), Error>;
     fn set_bytes(&self, index: i64, admitted: crate::validation::AdmittedBytes, bytes: &[u8]) -> Result<(), Error>;
-    fn set_texture(&self, index: i64, texture: Token) -> Result<(), Error>;
+    fn set_texture(&self, index: i64, texture: &dyn DriverResource) -> Result<(), Error>;
     fn set_accel(&self, index: i64, accel: Token) -> Result<(), Error>;
     fn dispatch_threads(&self, threads: (i64, i64, i64), threadgroup: (i64, i64, i64)) -> Result<(), Error>;
-    fn dispatch_indirect(&self, arguments: Token, offset: i64, threadgroup: (i64, i64, i64)) -> Result<(), Error>;
+    fn dispatch_indirect(&self, arguments: &dyn DriverResource, offset: i64, threadgroup: (i64, i64, i64)) -> Result<(), Error>;
     fn compute_use_accels(&self, accels: &[Token]) -> Result<(), Error>;
     fn end_compute(&self) -> Result<(), Error>;
 }
 
 pub trait DriverAccelEncoder {
-    fn build(&self, accel: Token, scratch: Token, offset: i64) -> Result<(), Error>;
+    fn build(&self, accel: Token, scratch: &dyn DriverResource, offset: i64) -> Result<(), Error>;
     fn compact(&self, source: Token, destination: Token) -> Result<(), Error>;
-    fn write_compacted_size(&self, accel: Token, destination: Token, output: crate::validation::AdmittedCompactedSize) -> Result<(), Error>;
-    fn refit(&self, accel: Token, descriptor: &DriverAccelDescriptor, scratch: Token, offset: i64) -> Result<(), Error>;
+    fn write_compacted_size(&self, accel: Token, destination: &dyn DriverResource, output: crate::validation::AdmittedCompactedSize) -> Result<(), Error>;
+    fn refit(&self, accel: Token, descriptor: &DriverAccelDescriptor, scratch: &dyn DriverResource, offset: i64) -> Result<(), Error>;
     fn end_accel(&self) -> Result<(), Error>;
 }
 
 pub trait DriverBlitEncoder {
-    fn buffer_to_texture(&self, source: Token, offset: i64, row: i64, image: i64, destination: Token, mip: i64, origin: Origin, extent: Extent) -> Result<(), Error>;
+    fn buffer_to_texture(&self, source: &dyn DriverResource, offset: i64, row: i64, image: i64, destination: &dyn DriverResource, mip: i64, origin: Origin, extent: Extent) -> Result<(), Error>;
     fn end_blit(&self) -> Result<(), Error>;
 }
 
@@ -146,24 +147,24 @@ pub enum Winding { Clockwise, CounterClockwise }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DepthState { pub depth_compare: Comparison, pub depth_write: bool }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct DriverColorAttachment {
-    pub color: Token,
-    pub color_resolve: Option<Token>,
+    pub color: Rc<dyn DriverResource>,
+    pub color_resolve: Option<Rc<dyn DriverResource>>,
     pub color_load: Load,
     pub color_store: Store,
     pub color_clear: (f64, f64, f64, f64),
 }
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct DriverDepthAttachment {
-    pub depth: Token,
+    pub depth: Rc<dyn DriverResource>,
     pub depth_load: Load,
     pub depth_store: Store,
     pub depth_clear: f64,
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct DriverRenderTarget(DriverRenderProfile);
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct DriverRenderProfile {
     pub target_colors: Vec<DriverColorAttachment>,
     pub target_depth: Option<DriverDepthAttachment>,
@@ -182,9 +183,9 @@ impl DriverRenderTarget {
 #[derive(Clone)]
 pub struct DriverBatchDraw {
     pub batch_pipeline: Rc<dyn DriverPipeline>,
-    pub batch_buffers: Vec<(ShaderStage, i64, Token, i64)>,
+    pub batch_buffers: Vec<(ShaderStage, i64, Rc<dyn DriverResource>, i64)>,
     pub batch_primitive: Primitive,
-    pub batch_index: Option<(IndexType, Token, i64, i64)>,
+    pub batch_index: Option<(IndexType, Rc<dyn DriverResource>, i64, i64)>,
     pub batch_vertex_start: i64,
     pub batch_vertex_count: i64,
     pub batch_instances: i64,
@@ -192,8 +193,8 @@ pub struct DriverBatchDraw {
 
 pub trait DriverRenderEncoder {
     fn render_set_pipeline(&self, pipeline: &dyn DriverPipeline) -> Result<(), Error>;
-    fn set_stage_buffer(&self, stage: ShaderStage, index: i64, offset: i64, buffer: Token) -> Result<(), Error>;
-    fn set_stage_texture(&self, stage: ShaderStage, index: i64, texture: Token) -> Result<(), Error>;
+    fn set_stage_buffer(&self, stage: ShaderStage, index: i64, offset: i64, buffer: &dyn DriverResource) -> Result<(), Error>;
+    fn set_stage_texture(&self, stage: ShaderStage, index: i64, texture: &dyn DriverResource) -> Result<(), Error>;
     fn set_stage_sampler(&self, stage: ShaderStage, index: i64, sampler: &dyn DriverSampler) -> Result<(), Error>;
     fn set_viewport(&self, rect: crate::render_pass::AdmittedViewport) -> Result<(), Error>;
     fn set_scissor(&self, rect: Rect) -> Result<(), Error>;
@@ -201,10 +202,10 @@ pub trait DriverRenderEncoder {
     fn set_winding(&self, winding: Winding) -> Result<(), Error>;
     fn set_depth_state(&self, state: Option<DepthState>) -> Result<(), Error>;
     fn draw(&self, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error>;
-    fn draw_indexed(&self, primitive: Primitive, index_type: IndexType, buffer: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error>;
-    fn draw_indexed_indirect(&self, primitive: Primitive, index_type: IndexType, buffer: Token, offset: i64, arguments: Token, arguments_offset: i64) -> Result<(), Error>;
+    fn draw_indexed(&self, primitive: Primitive, index_type: IndexType, buffer: &dyn DriverResource, offset: i64, count: i64, instances: i64) -> Result<(), Error>;
+    fn draw_indexed_indirect(&self, primitive: Primitive, index_type: IndexType, buffer: &dyn DriverResource, offset: i64, arguments: &dyn DriverResource, arguments_offset: i64) -> Result<(), Error>;
     fn draw_batch(&self, draws: &[DriverBatchDraw]) -> Result<(), Error>;
-    fn use_resources(&self, resources: &[Token]) -> Result<(), Error>;
+    fn use_resources(&self, resources: &[Rc<dyn DriverResource>]) -> Result<(), Error>;
     fn execute_icb(&self, icb: Token, location: i64, length: i64) -> Result<(), Error>;
     fn end_render(&self) -> Result<(), Error>;
 }
@@ -217,17 +218,17 @@ pub trait DriverSampler {
 pub trait DriverIcb {
     fn icb_token(&self) -> Token;
     fn icb_set_pipeline(&self, index: crate::validation::AdmittedIcbIndex, pipeline: &dyn DriverPipeline) -> Result<(), Error>;
-    fn icb_set_buffer(&self, index: crate::validation::AdmittedIcbIndex, stage: ShaderStage, slot: i64, offset: i64, buffer: Token) -> Result<(), Error>;
+    fn icb_set_buffer(&self, index: crate::validation::AdmittedIcbIndex, stage: ShaderStage, slot: i64, offset: i64, buffer: &dyn DriverResource) -> Result<(), Error>;
     fn icb_draw(&self, index: crate::validation::AdmittedIcbIndex, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error>;
-    fn icb_draw_indexed(&self, index: crate::validation::AdmittedIcbIndex, primitive: Primitive, buffer: Token, range:&crate::validation::AdmittedIndexRange) -> Result<(), Error>;
+    fn icb_draw_indexed(&self, index: crate::validation::AdmittedIcbIndex, primitive: Primitive, buffer: &dyn DriverResource, range:&crate::validation::AdmittedIndexRange) -> Result<(), Error>;
     fn destroy_icb(&self) -> Result<(), Error>;
 }
 
 pub trait DriverArgument {
     fn argument_length(&self) -> i64;
     fn argument_alignment(&self) -> i64;
-    fn argument_texture(&self, buffer: Token, offset: i64, slot: i64, texture: Token) -> Result<(), Error>;
-    fn argument_sampler(&self, buffer: Token, offset: i64, slot: i64, sampler: &dyn DriverSampler) -> Result<(), Error>;
+    fn argument_texture(&self, buffer: &dyn DriverResource, offset: i64, slot: i64, texture: &dyn DriverResource) -> Result<(), Error>;
+    fn argument_sampler(&self, buffer: &dyn DriverResource, offset: i64, slot: i64, sampler: &dyn DriverSampler) -> Result<(), Error>;
     fn destroy_argument(&self) -> Result<(), Error>;
 }
 
@@ -240,7 +241,7 @@ pub trait DriverCommands {
     fn blit_encoder(&self) -> Result<Box<dyn DriverBlitEncoder>, Error>;
     fn render_encoder(&self, target: &DriverRenderTarget) -> Result<Box<dyn DriverRenderEncoder>, Error>;
     fn commit(&self) -> Result<Receipt, Error>;
-    fn commit_present(&self, source: Token, frame: DriverFrame) -> Result<Receipt, Error>;
+    fn commit_present(&self, source: &dyn DriverResource, frame: DriverFrame) -> Result<Receipt, Error>;
     fn abandon(&self) -> Result<(), Error>;
 }
 
@@ -341,7 +342,7 @@ struct DeviceInner {
 #[derive(Clone)]
 struct Resource(Rc<ResourceInner>);
 struct ResourceInner {
-    raw: RefCell<Option<Box<dyn DriverResource>>>,
+    raw: RefCell<Option<Rc<dyn DriverResource>>>,
     mapping: RefCell<Option<Box<dyn DriverMapping>>>,
     mapped: RefCell<Option<MappedHost>>,
     token: Token,
@@ -412,6 +413,7 @@ impl DeviceInner {
     fn raw(&self) -> std::cell::Ref<'_, dyn DriverDevice> { std::cell::Ref::map(self.raw.borrow(), |raw| raw.as_deref().expect("live device payload")) }
 }
 impl ResourceInner {
+    fn shared(&self) -> Rc<dyn DriverResource> { self.raw.borrow().clone().expect("live resource payload") }
     fn raw(&self) -> std::cell::Ref<'_, dyn DriverResource> { std::cell::Ref::map(self.raw.borrow(), |raw| raw.as_deref().expect("live resource payload")) }
 }
 impl PipelineInner {
@@ -477,7 +479,7 @@ fn live(operation: &str, device: &Device) -> Result<(), Error> {
 fn make_resource(device: &Device, raw: Box<dyn DriverResource>) -> Resource {
     Resource(Rc::new(ResourceInner {
         token: raw.token(),
-        raw: RefCell::new(Some(raw)),
+        raw: RefCell::new(Some(raw.into())),
         mapping: RefCell::new(None),
         mapped: RefCell::new(None),
         handle: handle::create(&device.0.handle),
@@ -1117,7 +1119,7 @@ fn admitted_descriptors(device:&Device, descriptor:&AccelDescriptor, refit:bool)
             let portable=PortableDescriptor::Build { profile:profile.clone(),
                 buffers:buffers.iter().map(|b|b.resource.0.handle.clone()).collect(),
                 structures:structures.iter().map(|a|acceleration::handle(&a.0.portable.borrow())).collect() };
-            let driver=DriverAccelDescriptor::Build { profile,buffers:buffers.iter().map(|b|b.resource.0.token).collect(),
+            let driver=DriverAccelDescriptor::Build { profile,buffers:buffers.iter().map(|b|b.resource.0.shared()).collect(),
                 structures:structures.iter().map(|a|a.0.token).collect() };
             Ok((portable,driver))
         }
@@ -1240,7 +1242,7 @@ pub fn set_buffer(encoder: &ComputeEncoder, index: i64, buffer: &Buffer) -> Resu
     let device = commands_device(&encoder.0.commands);
     resource_check(OP, &device, &buffer.resource)?;
     if buffer.buffer_descriptor.size <= 0 { return Err(make_error(OP, ErrorKind::InvalidArgument, "buffer is empty")); }
-    encoder.0.raw().set_buffer(index, 0, buffer.resource.0.token)
+    encoder.0.raw().set_buffer(index, 0, &*buffer.resource.0.raw())
 }
 pub fn set_bytes(encoder: &ComputeEncoder, index: i64, bytes: &[u8]) -> Result<(), Error> {
     const OP: &str = "Backend.set_bytes";
@@ -1257,7 +1259,7 @@ pub fn set_texture(encoder: &ComputeEncoder, index: i64, texture: &Texture) -> R
     if !texture.texture_descriptor.usage.iter().any(|usage| matches!(usage, TextureUsage::TextureBinding | TextureUsage::StorageBinding)) {
         return Err(make_error(OP, ErrorKind::InvalidArgument, "texture lacks shader binding usage"));
     }
-    encoder.0.raw().set_texture(index, texture.resource.0.token)
+    encoder.0.raw().set_texture(index, &*texture.resource.0.raw())
 }
 pub fn set_accel(encoder: &ComputeEncoder, index: i64, accel: &Accel) -> Result<(), Error> {
     const OP: &str = "Backend.set_accel";
@@ -1297,7 +1299,7 @@ pub fn dispatch_threadgroups_indirect(
     if offset < 0 || offset % 4 != 0 || offset > arguments.buffer_descriptor.size - 12 {
         return Err(make_error(OP, ErrorKind::InvalidArgument, "indirect arguments range is invalid"));
     }
-    encoder.0.raw().dispatch_indirect(arguments.resource.0.token, offset, group)
+    encoder.0.raw().dispatch_indirect(&*arguments.resource.0.raw(), offset, group)
 }
 pub fn end_compute(encoder: &ComputeEncoder) -> Result<(), Error> {
     const OP: &str = "Backend.end_compute";
@@ -1340,7 +1342,7 @@ pub fn build_accel(encoder: &AccelEncoder, accel: &Accel, scratch: &Buffer, scra
     let offset = scratch_offset.unwrap_or(0);
     check_scratch(OP, &device, scratch, offset)?;
     acceleration::validate_build(&device.0.handle, &accel.0.portable.borrow())?;
-    encoder.0.raw().build(accel.0.token, scratch.resource.0.token, offset)?;
+    encoder.0.raw().build(accel.0.token, &*scratch.resource.0.raw(), offset)?;
     acceleration::mark_built(&mut accel.0.portable.borrow_mut());
     Ok(())
 }
@@ -1361,7 +1363,7 @@ pub fn refit_accel(
     check_scratch(OP, &device, scratch, offset)?;
     let (portable,driver)=admitted_descriptors(&device,&descriptor,true)?;
     acceleration::refit(&device.0.handle, &mut accel.0.portable.borrow_mut(), &portable)?;
-    encoder.0.raw().refit(accel.0.token, &driver, scratch.resource.0.token, offset)
+    encoder.0.raw().refit(accel.0.token, &driver, &*scratch.resource.0.raw(), offset)
 }
 pub fn compact_accel(encoder: &AccelEncoder, src: &Accel, dst: &Accel) -> Result<(), Error> {
     const OP: &str = "Backend.compact_accel";
@@ -1388,7 +1390,7 @@ pub fn write_compacted_size(encoder: &AccelEncoder, accel: &Accel, dst: &Buffer,
     let output=crate::validation::admit_compacted_size_write(OP,offset,dst.buffer_descriptor.size as u64,crate::validation::CompactedSizeType::Uint64)
         .map_err(|_|make_error(OP,ErrorKind::InvalidArgument,"compacted size destination needs eight aligned bytes"))?;
     acceleration::compacted_size(&device.0.handle, &accel.0.portable.borrow())?;
-    encoder.0.raw().write_compacted_size(accel.0.token, dst.resource.0.token, output)
+    encoder.0.raw().write_compacted_size(accel.0.token, &*dst.resource.0.raw(), output)
 }
 pub fn end_accel(encoder: &AccelEncoder) -> Result<(), Error> {
     const OP: &str = "Backend.end_accel";
@@ -1552,7 +1554,7 @@ pub fn icb_set_buffer(
     resource_check(OP, &icb.0.device, &buffer.resource)?;
     let offset = offset.unwrap_or(0);
     if offset < 0 || offset >= buffer.buffer_descriptor.size { return Err(make_error(OP, ErrorKind::InvalidArgument, "buffer offset is out of range")); }
-    icb.0.raw().icb_set_buffer(index, stage, slot, offset, buffer.resource.0.token)
+    icb.0.raw().icb_set_buffer(index, stage, slot, offset, &*buffer.resource.0.raw())
 }
 fn valid_draw(operation: &str, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
     if first < 0 || count <= 0 || instances <= 0 { return Err(make_error(operation, ErrorKind::InvalidArgument, "draw range is invalid")); }
@@ -1610,7 +1612,7 @@ pub fn icb_draw_indexed(
     let index = check_icb(OP, icb, index)?;
     let instances = instances.unwrap_or(1);
     let range=valid_indexed(OP, &icb.0.device, primitive, index_type, buffer, offset, count, instances)?;
-    icb.0.raw().icb_draw_indexed(index, primitive, buffer.resource.0.token, &range)
+    icb.0.raw().icb_draw_indexed(index, primitive, &*buffer.resource.0.raw(), &range)
 }
 pub fn destroy_icb(icb: &Icb) -> Result<(), Error> {
     if icb.0.dead.get() { return Ok(()); }
@@ -1648,7 +1650,7 @@ pub fn argument_texture(argument: &Argument, buffer: &Buffer, offset: i64, slot:
     argument_target(OP, argument, buffer, offset)?;
     if slot < 0 { return Err(make_error(OP, ErrorKind::InvalidArgument, "argument slot is negative")); }
     resource_check(OP, &argument.0.device, &texture.resource)?;
-    argument.0.raw().argument_texture(buffer.resource.0.token, offset, slot, texture.resource.0.token)
+    argument.0.raw().argument_texture(&*buffer.resource.0.raw(), offset, slot, &*texture.resource.0.raw())
 }
 pub fn argument_sampler(argument: &Argument, buffer: &Buffer, offset: i64, slot: i64, sampler: &Sampler) -> Result<(), Error> {
     const OP: &str = "Backend.argument_sampler";
@@ -1656,7 +1658,7 @@ pub fn argument_sampler(argument: &Argument, buffer: &Buffer, offset: i64, slot:
     if slot < 0 { return Err(make_error(OP, ErrorKind::InvalidArgument, "argument slot is negative")); }
     if sampler.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "sampler is destroyed")); }
     if !Rc::ptr_eq(&sampler.0.device.0, &argument.0.device.0) { return Err(make_error(OP, ErrorKind::CrossDevice, "sampler belongs to another device")); }
-    argument.0.raw().argument_sampler(buffer.resource.0.token, offset, slot, &*sampler.0.raw())
+    argument.0.raw().argument_sampler(&*buffer.resource.0.raw(), offset, slot, &*sampler.0.raw())
 }
 pub fn destroy_argument(argument: &Argument) -> Result<(), Error> {
     if argument.0.dead.get() { return Ok(()); }
@@ -1734,12 +1736,12 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
     })?;
     let driver_target = DriverRenderTarget(DriverRenderProfile {
         target_colors: vec![DriverColorAttachment {
-            color: color.texture.resource.0.token,
-            color_resolve: color.resolve.as_ref().map(|texture| texture.resource.0.token),
+            color: color.texture.resource.0.shared(),
+            color_resolve: color.resolve.as_ref().map(|texture| texture.resource.0.shared()),
             color_load: color.load, color_store: color.store, color_clear: color.clear,
         }],
         target_depth: target.depth.as_ref().map(|depth| DriverDepthAttachment {
-            depth: depth.depth_texture.resource.0.token,
+            depth: depth.depth_texture.resource.0.shared(),
             depth_load: depth.depth_load, depth_store: depth.depth_store, depth_clear: depth.depth_clear,
         }),
         target_width: width, target_height: height, target_samples: samples, clear_color, actions,
@@ -1793,7 +1795,7 @@ pub fn set_stage_buffer(
     resource_check(OP, &render_device(encoder), &buffer.resource)?;
     let offset = offset.unwrap_or(0);
     if offset < 0 || offset >= buffer.buffer_descriptor.size { return Err(make_error(OP, ErrorKind::InvalidArgument, "buffer offset is out of range")); }
-    encoder.0.raw().set_stage_buffer(stage, index, offset, buffer.resource.0.token)
+    encoder.0.raw().set_stage_buffer(stage, index, offset, &*buffer.resource.0.raw())
 }
 pub fn set_stage_texture(encoder: &RenderEncoder, stage: ShaderStage, index: i64, texture: &Texture) -> Result<(), Error> {
     const OP: &str = "Backend.set_stage_texture";
@@ -1803,7 +1805,7 @@ pub fn set_stage_texture(encoder: &RenderEncoder, stage: ShaderStage, index: i64
     if !texture.texture_descriptor.usage.contains(&TextureUsage::TextureBinding) {
         return Err(make_error(OP, ErrorKind::InvalidArgument, "texture lacks Texture_binding usage"));
     }
-    encoder.0.raw().set_stage_texture(stage, index, texture.resource.0.token)
+    encoder.0.raw().set_stage_texture(stage, index, &*texture.resource.0.raw())
 }
 pub fn set_stage_sampler(encoder: &RenderEncoder, stage: ShaderStage, index: i64, sampler: &Sampler) -> Result<(), Error> {
     const OP: &str = "Backend.set_stage_sampler";
@@ -1871,7 +1873,7 @@ pub fn draw_indexed(
     if !encoder.0.pipeline_set.get() { return Err(make_error(OP, ErrorKind::InvalidState, "no render pipeline is set")); }
     let instances = instances.unwrap_or(1);
     valid_indexed(OP, &render_device(encoder), primitive, index_type, buffer, offset, count, instances)?;
-    encoder.0.raw().draw_indexed(primitive, index_type, buffer.resource.0.token, offset, count, instances)
+    encoder.0.raw().draw_indexed(primitive, index_type, &*buffer.resource.0.raw(), offset, count, instances)
 }
 pub fn draw_indexed_indirect(
     encoder: &RenderEncoder, primitive: Primitive, index_type: IndexType, buffer: &Buffer,
@@ -1891,8 +1893,8 @@ pub fn draw_indexed_indirect(
         return Err(make_error(OP, ErrorKind::InvalidArgument, "indirect arguments range is invalid"));
     }
     encoder.0.raw().draw_indexed_indirect(
-        primitive, index_type, buffer.resource.0.token, offset,
-        arguments.resource.0.token, arguments_offset,
+        primitive, index_type, &*buffer.resource.0.raw(), offset,
+        &*arguments.resource.0.raw(), arguments_offset,
     )
 }
 pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Error> {
@@ -1903,7 +1905,7 @@ pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Er
     // lowered into storage kept between batches: the outer list and the inner buffer lists (a batch
     // per pass per frame allocated a list per draw); an error leaves the scratch to be made again.
     // Only the lists are kept; the driver handles in them are dropped with the batch.
-    thread_local! { static LOWERED: std::cell::RefCell<(Vec<DriverBatchDraw>, Vec<Vec<(ShaderStage, i64, Token, i64)>>)> = const { std::cell::RefCell::new((Vec::new(), Vec::new())) }; }
+    thread_local! { static LOWERED: std::cell::RefCell<(Vec<DriverBatchDraw>, Vec<Vec<(ShaderStage, i64, Rc<dyn DriverResource>, i64)>>)> = const { std::cell::RefCell::new((Vec::new(), Vec::new())) }; }
     let (mut lowered, mut lists) = LOWERED.with(|l| std::mem::take(&mut *l.borrow_mut()));
     lowered.clear();
     for draw in draws {
@@ -1920,11 +1922,11 @@ pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Er
             if *offset < 0 || *offset >= buffer.buffer_descriptor.size {
                 return Err(make_error(OP, ErrorKind::InvalidArgument, "buffer offset is out of range"));
             }
-            buffers.push((*stage, *index, buffer.resource.0.token, *offset));
+            buffers.push((*stage, *index, buffer.resource.0.shared(), *offset));
         }
         let index = if let Some((index_type, buffer, offset, count)) = &draw.index {
             valid_indexed(OP, &device, draw.primitive, *index_type, buffer, *offset, *count, draw.instances)?;
-            Some((*index_type, buffer.resource.0.token, *offset, *count))
+            Some((*index_type, buffer.resource.0.shared(), *offset, *count))
         } else {
             valid_draw(OP, draw.primitive, draw.vertex_start, draw.vertex_count, draw.instances)?;
             None
@@ -1940,7 +1942,7 @@ pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Er
         });
     }
     let result = encoder.0.raw().draw_batch(&lowered);
-    lists.extend(lowered.drain(..).map(|draw| draw.batch_buffers));
+    lists.extend(lowered.drain(..).map(|draw| { let mut buffers = draw.batch_buffers; buffers.clear(); buffers }));
     LOWERED.with(|l| *l.borrow_mut() = (lowered, lists));
     result?;
     encoder.0.pipeline_set.set(true);
@@ -1954,8 +1956,8 @@ pub fn use_resources(encoder: &RenderEncoder, resources: &[ResourceUse]) -> Resu
     let mut tokens = Vec::with_capacity(resources.len());
     for resource in resources {
         match resource {
-            ResourceUse::Buffer(buffer) => { resource_check(OP, &device, &buffer.resource)?; tokens.push(buffer.resource.0.token); }
-            ResourceUse::Texture(texture) => { resource_check(OP, &device, &texture.resource)?; tokens.push(texture.resource.0.token); }
+            ResourceUse::Buffer(buffer) => { resource_check(OP, &device, &buffer.resource)?; tokens.push(buffer.resource.0.shared()); }
+            ResourceUse::Texture(texture) => { resource_check(OP, &device, &texture.resource)?; tokens.push(texture.resource.0.shared()); }
         }
     }
     encoder.0.raw().use_resources(&tokens)
@@ -2039,7 +2041,7 @@ pub fn buffer_to_texture(
     let origin = origin.unwrap_or(Origin { x: 0, y: 0, z: 0 });
     buffer_texture_region(OP, BufferUsage::CopySrc, TextureUsage::TextureCopyDst, src, offset, bytes_per_row, bytes_per_image, dst, mip, origin, extent)?;
     encoder.0.raw().buffer_to_texture(
-        src.resource.0.token, offset, bytes_per_row, bytes_per_image, dst.resource.0.token, mip, origin, extent,
+        &*src.resource.0.raw(), offset, bytes_per_row, bytes_per_image, &*dst.resource.0.raw(), mip, origin, extent,
     )
 }
 
@@ -2073,7 +2075,7 @@ pub fn commit_present(commands: &Commands, source: &Texture, frame: &Frame) -> R
     recording(OP, commands)?;
     validate_present(OP, &commands.0.queue, source, frame)?;
     admit(OP, &commands.0.queue)?;
-    let receipt = commands.0.raw().commit_present(source.resource.0.token, frame.0.raw.clone())?;
+    let receipt = commands.0.raw().commit_present(&*source.resource.0.raw(), frame.0.raw.clone())?;
     commands.0.queue.0.borrow_mut().submitted = receipt.epoch;
     commands.0.state.set(CommandsState::Committed);
     commands.0.raw.borrow_mut().take();
@@ -2095,6 +2097,7 @@ mod ownership_tests {
     }
     impl DriverResource for Payload {
         fn token(&self) -> Token { 42 }
+        fn as_any(&self) -> &dyn std::any::Any { self }
         fn write(&self, _: i64, _: &[u8]) -> Result<(), Error> { Ok(()) }
         fn read(&self, _: i64, length: usize) -> Result<Vec<u8>, Error> { Ok(vec![7; length]) }
         fn read_into(&self, _: i64, destination: &mut [u8], offset: usize, length: usize) -> Result<(), Error> { destination[offset..offset + length].fill(7); Ok(()) }
@@ -2106,14 +2109,14 @@ mod ownership_tests {
         fn destroy_pipeline(&self) -> Result<(), Error> { self.terminal("test.destroy") }
     }
     impl DriverBlitEncoder for Payload {
-        fn buffer_to_texture(&self, _: Token, _: i64, _: i64, _: i64, _: Token, _: i64, _: Origin, _: Extent) -> Result<(), Error> { unreachable!() }
+        fn buffer_to_texture(&self, _: &dyn DriverResource, _: i64, _: i64, _: i64, _: &dyn DriverResource, _: i64, _: Origin, _: Extent) -> Result<(), Error> { unreachable!() }
         fn end_blit(&self) -> Result<(), Error> { self.terminal("test.end") }
     }
     impl DriverAccelEncoder for Payload {
-        fn build(&self, _: Token, _: Token, _: i64) -> Result<(), Error> { self.terminal("test.build") }
+        fn build(&self, _: Token, _: &dyn DriverResource, _: i64) -> Result<(), Error> { self.terminal("test.build") }
         fn compact(&self, _: Token, _: Token) -> Result<(), Error> { self.terminal("test.compact") }
-        fn write_compacted_size(&self, _: Token, _: Token, _: crate::validation::AdmittedCompactedSize) -> Result<(), Error> { unreachable!() }
-        fn refit(&self, _: Token, _: &DriverAccelDescriptor, _: Token, _: i64) -> Result<(), Error> { unreachable!() }
+        fn write_compacted_size(&self, _: Token, _: &dyn DriverResource, _: crate::validation::AdmittedCompactedSize) -> Result<(), Error> { unreachable!() }
+        fn refit(&self, _: Token, _: &DriverAccelDescriptor, _: &dyn DriverResource, _: i64) -> Result<(), Error> { unreachable!() }
         fn end_accel(&self) -> Result<(), Error> { self.terminal("test.end") }
     }
     impl DriverCommands for Payload {
@@ -2122,18 +2125,18 @@ mod ownership_tests {
         fn blit_encoder(&self) -> Result<Box<dyn DriverBlitEncoder>, Error> { unreachable!() }
         fn render_encoder(&self, _: &DriverRenderTarget) -> Result<Box<dyn DriverRenderEncoder>, Error> { unreachable!() }
         fn commit(&self) -> Result<Receipt, Error> { self.terminal("test.commit").map(|()| Receipt { epoch: 1 }) }
-        fn commit_present(&self, _: Token, _: DriverFrame) -> Result<Receipt, Error> { unreachable!() }
+        fn commit_present(&self, _: &dyn DriverResource, _: DriverFrame) -> Result<Receipt, Error> { unreachable!() }
         fn abandon(&self) -> Result<(), Error> { self.terminal("test.abandon") }
     }
     // Invalid input must stop at the portable boundary, before a backend sees a token.
     impl DriverComputeEncoder for Payload {
         fn set_pipeline(&self, _: &dyn DriverPipeline) -> Result<(), Error> { Ok(()) }
-        fn set_buffer(&self, _: i64, _: i64, _: Token) -> Result<(), Error> { Ok(()) }
+        fn set_buffer(&self, _: i64, _: i64, _: &dyn DriverResource) -> Result<(), Error> { Ok(()) }
         fn set_bytes(&self, _: i64, _: crate::validation::AdmittedBytes, _: &[u8]) -> Result<(), Error> { panic!("invalid bytes reached driver") }
-        fn set_texture(&self, _: i64, _: Token) -> Result<(), Error> { unreachable!() }
+        fn set_texture(&self, _: i64, _: &dyn DriverResource) -> Result<(), Error> { unreachable!() }
         fn set_accel(&self, _: i64, _: Token) -> Result<(), Error> { unreachable!() }
         fn dispatch_threads(&self, _: (i64, i64, i64), _: (i64, i64, i64)) -> Result<(), Error> { Ok(()) }
-        fn dispatch_indirect(&self, _: Token, _: i64, _: (i64, i64, i64)) -> Result<(), Error> { panic!("invalid indirect dispatch reached driver") }
+        fn dispatch_indirect(&self, _: &dyn DriverResource, _: i64, _: (i64, i64, i64)) -> Result<(), Error> { panic!("invalid indirect dispatch reached driver") }
         fn compute_use_accels(&self, _: &[Token]) -> Result<(), Error> { unreachable!() }
         fn end_compute(&self) -> Result<(), Error> { Ok(()) }
     }

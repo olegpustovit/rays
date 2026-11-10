@@ -2,11 +2,11 @@
 use crate::native;
 use ogpu_core::error::Error;
 use crate::{
-    command_control::{CommandContext, OpenEncoder, Resource},
+    command_control::{CommandContext, OpenEncoder},
     device::{fail},
     pipeline::Native,
 };
-use ogpu_core::{backend::{DriverComputeEncoder, DriverPipeline, Token}, error::ErrorKind};
+use ogpu_core::{backend::{DriverComputeEncoder, DriverPipeline, DriverResource, Token}, error::ErrorKind};
 use std::rc::Rc;
 
 fn size(t: (i64, i64, i64)) -> (usize, usize, usize) {
@@ -39,10 +39,10 @@ impl DriverComputeEncoder for Compute {
         }
     }
 
-    fn set_buffer(&self, index: i64, offset: i64, token: Token) -> Result<(), Error> {
+    fn set_buffer(&self, index: i64, offset: i64, resource: &dyn DriverResource) -> Result<(), Error> {
         let c = &self.context;
-        let buffer = c.find_buffer(token)?;
-        c.keep_buffer(&buffer)?;
+        let buffer = c.find_buffer(resource)?;
+        c.keep_buffer(buffer)?;
         self.encoder.set_buffer(index as usize, offset as u64, buffer.metal())
     }
 
@@ -50,15 +50,11 @@ impl DriverComputeEncoder for Compute {
         self.encoder.set_bytes(index as usize, admitted, bytes)
     }
 
-    fn set_texture(&self, index: i64, token: Token) -> Result<(), Error> {
+    fn set_texture(&self, index: i64, resource: &dyn DriverResource) -> Result<(), Error> {
         let c = &self.context;
-        match c.resource(token) {
-            Some(Resource::Texture(texture)) => {
-                c.keep_texture(&texture)?;
-                self.encoder.set_texture(index as usize, texture.metal())
-            }
-            _ => Err(fail(c.operation, ErrorKind::InvalidArgument, "texture graph is incomplete")),
-        }
+        let texture = c.find_texture(resource)?;
+        c.keep_texture(texture)?;
+        self.encoder.set_texture(index as usize, texture.metal())
     }
 
     fn set_accel(&self, index: i64, token: Token) -> Result<(), Error> {
@@ -72,10 +68,10 @@ impl DriverComputeEncoder for Compute {
         self.encoder.dispatch_threads(size(threads), size(threadgroup))
     }
 
-    fn dispatch_indirect(&self, token: Token, offset: i64, threadgroup: (i64, i64, i64)) -> Result<(), Error> {
+    fn dispatch_indirect(&self, resource: &dyn DriverResource, offset: i64, threadgroup: (i64, i64, i64)) -> Result<(), Error> {
         let c = &self.context;
-        let buffer = c.find_buffer(token)?;
-        c.keep_buffer(&buffer)?;
+        let buffer = c.find_buffer(resource)?;
+        c.keep_buffer(buffer)?;
         self.encoder.dispatch_threadgroups_indirect(buffer.metal(), offset as u64, size(threadgroup))
     }
 
