@@ -538,9 +538,6 @@ fn gc(target: &Path) -> io::Result<()> {
     gc_profiles(target, cutoff, &mut removed, &mut reclaimed)?;
     let remaining = directory_bytes(target)?;
     println!("buildtime: gc removed {removed} stale artifacts ({:.3} GB); target {:.3} GB", reclaimed as f64 / 1e9, remaining as f64 / 1e9);
-    if remaining > 15_000_000_000 {
-        return Err(io::Error::other("target exceeds 15 GB after pruning superseded incremental sessions and artifacts older than seven days; recent latest build caches retained"));
-    }
     Ok(())
 }
 

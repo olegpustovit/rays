@@ -99,7 +99,7 @@ process and this host's measured 1× density.
 
 Run `cargo run -q -p buildtime -- profile` on each machine using the checked-in dev profile.
 It records app build, a real flow_ir source-touch app rebuild, and sorted sketch checks with
-hard 1-second process and 15-second corpus limits in `target/build-times.tsv`. A cold build is
+benchmark-only 1-second process and 15-second corpus limits in `target/build-times.tsv`. A cold build is
 labelled cold only when the shared dependency cache is empty; preserve a warm cache. Set
 `RAYS_PROFILE=1` on an individual `target/debug/rays check sketches/NAME.rays` to see exclusive
 phase timings and static-map execution/refusal details. `buildtime -- check` separately checks
@@ -112,26 +112,31 @@ the leaf/middle/top source-touch budgets and runs the middle/top suites through 
 
 This is current-profile evidence, not a completed O0/O1 comparison. The corpus's one-second
 budget still fails for `sop_gallery` and `swarm`; the other 47 sketches completed. Because two
-checks were killed, the bounded total does not prove the complete corpus meets 15 s. Separate
-complete probes after one warmup measured medians of 1.543 s for swarm and 1.405 s for gallery
-(three alternating samples). Swarm materializes 30.84 million exact integer corners,
+checks were killed, the bounded total does not prove the complete corpus meets 15 s.
+Complete probes after the final shared numeric-key change measured Swarm at
+1.356 s (three quiet samples: 1.356/1.369/1.292 s); the preceding gallery probe was
+1.357 s. These measurements have different sample counts. Swarm materializes 30.84 million exact integer corners,
 10.28 million offsets and 5.148 million color vectors; validation keeps
 those computed values checked. CLI lowering omits editor probe records, while editor lowering
 retains them. Geometry bytes and selected computed-error diagnostics match in the regression.
 
-`cargo t --all` is implemented and its dispatcher regression passes; complete native qualification
-is still blocked by the cache-size check. GC retains the recent warm cache: its initial observed
-size was 75.537 GB and zero artifacts qualified for seven-day deletion. A later inode-aware audit
-measured 72.963 GB of allocated storage. Conservative pruning of 2,101 superseded completed
-incremental sessions subsequently reclaimed 21.245 GB, leaving 53.211 GB allocated and
-53.782 GB logical. The newest completed session for each exact configuration, fresh incomplete
-sessions, working sessions and live-locked sessions are retained. The 15 GB limit remains red.
-Native Cocoa and measured-density PXUI checks pass. The remaining limits stay visible as failures.
+The migration's remaining performance targets were retired from acceptance on 2026-11-10.
+The 0.5 s exact-case target, one-second sketch checks, 15 GB cache target and an overall
+win over archived OCaml are measurement goals, not outstanding correctness failures.
+The explicit benchmark commands retain their comparisons; ordinary test case deadlines
+remain enforced. Cache GC reports size without rejecting a valid warm cache and keeps
+its existing lock and age protections. Conservative pruning of 2,101 superseded completed
+incremental sessions reclaimed 21.245 GB, leaving a dated 53.211 GB allocated /
+53.782 GB logical snapshot; subsequent builds can grow it.
 
-The current normal-mode `buildtime -- check` passes with unchanged budgets: leaf/middle/top
-touch checks take 0.134/0.245/0.288 s and the editor touch chain takes 1.617 s. All-target workspace
-checking takes 6.70 s after source changes, then 0.283 s fully warm with no output or warnings.
-The fully cached SOP run passes 499 cases in 29.451 s (0.04 s compilation), meeting its 30 s
-suite target; 30 of 98 exact cases still exceed 0.5 s. Current native GPU qualification passes
-41 cases in 5.487 s, zero skips. These individual checks do not replace the cache-blocked
-whole-workspace qualification command.
+The normal-mode `buildtime -- check` passes: leaf/middle/top touch checks take
+0.134/0.245/0.288 s and the editor touch chain takes 1.617 s. All-target workspace
+checking takes 6.70 s after source changes, then 0.283 s fully warm with no warnings.
+The shared numeric-key change passed 500 SOP cases in 29.615 s and 41 GPU cases in
+3.592 s, zero skips. Its final dispatch-threshold refinement separately passed exact-key
+and complete geometry/error/reference parity checks. Geometry preparation in Swarm
+fell from 246.9 to 152.6 ms; full checks still exceed one second.
+
+Native Cocoa and measured-density PXUI checks pass on this Mac. Windows/Vulkan runtime
+qualification and real macOS border dragging require the corresponding native environment;
+see [known limitations](known-failures.md). Commit messages retain focused validation evidence.

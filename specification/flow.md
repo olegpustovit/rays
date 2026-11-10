@@ -2162,7 +2162,7 @@ Rules from the root `AGENTS.md` apply. What the code holds itself to:
 - The value lane does no work for networks without drives.
 - A frame never re-lowers.
 
-Use `cargo t -p rays_editor` for bounded editor regressions; record focused timing changes in `PROGRESS.md`.
+Use `cargo t -p rays_editor` for bounded editor regressions; record focused timing changes with the checked commit.
 
 ## 16. Tests
 
