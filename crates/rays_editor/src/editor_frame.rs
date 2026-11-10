@@ -999,7 +999,7 @@ pub fn update_frame(
         leaves.sort_by(|a, b| a.0.cmp(&b.0));
         leaves.dedup_by(|a, b| a.0 == b.0);
         let active = panel_map::key(&value.panes);
-        let active_leaf = panel_map::leaf(&value.panes);
+        let active_leaf = panel_map::leaf(&value.panes).cloned();
         // An inactive projection may consume its own deferred selection, not the active model's.
         let select_later = value.select_later.clone();
         for (key, path) in leaves {

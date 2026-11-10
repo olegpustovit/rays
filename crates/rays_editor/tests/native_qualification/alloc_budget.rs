@@ -36,9 +36,10 @@ const FRAMES: i64 = 30;
 // Z1: one memoised shell geometry per frame, box labels formatted into a reused buffer, stack-chunked
 // Metal residency lists, no layout intent work without intents: basic 858 / 91,365; empty 609 / 36,159;
 // bare 723 / 46,059.
-const BASIC: (u64, u64) = (858, 91_365);
-const EMPTY: (u64, u64) = (609, 36_159);
-const BARE: (u64, u64) = (723, 46_059);
+// Z1: borrowed graph path and title crumbs: basic 855 / 91,347; empty 538 / 34,724; bare 693 / 45,448.
+const BASIC: (u64, u64) = (855, 91_347);
+const EMPTY: (u64, u64) = (538, 34_724);
+const BARE: (u64, u64) = (693, 45_448);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");

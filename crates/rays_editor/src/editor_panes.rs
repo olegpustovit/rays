@@ -285,8 +285,13 @@ pub fn graph_of_object(value: &EditorModel, id: i64) -> Option<String> {
 }
 
 pub fn graph_name<'a>(value: &ModelView<'a>) -> Option<String> {
-    let path = value.doc.shell.as_ref().and_then(|_| graph_path(value));
-    graph_name_at(&value.doc, pane_level(value), pane_shown(value).map(String::as_str), path.as_deref())
+    let owned;
+    let path = match value.doc.shell.as_ref().map(|_| graph_path_known(value)) {
+        Some(None) => { owned = graph_path(value); owned.as_deref() }
+        Some(Some(path)) => Some(path.as_slice()),
+        None => None,
+    };
+    graph_name_at(&value.doc, pane_level(value), pane_shown(value).map(String::as_str), path)
 }
 
 pub fn graph_name_at(doc: &doc_mod::T, level: Level, shown: Option<&str>, path: Option<&[usize]>) -> Option<String> {
@@ -296,11 +301,11 @@ pub fn graph_name_at(doc: &doc_mod::T, level: Level, shown: Option<&str>, path: 
             || (name.len() > 4 && &name[..4] == "def:" && ws.checked.defs.iter().any(|g| format!("def:{}", g.name) == name))
     };
     // the graph the pane's own leaf pins
-    let named = || doc.shell.as_ref().and_then(|s| path.and_then(|path| s.named.iter().find(|(p, _)| p.as_slice() == path).map(|(_, n)| n.clone())));
-    let chosen = shown.map(str::to_owned).or_else(named);
+    let named = || doc.shell.as_ref().and_then(|s| path.and_then(|path| s.named.iter().find(|(p, _)| p.as_slice() == path).map(|(_, n)| n.as_str())));
+    let chosen = shown.or_else(named);
     let kind = |id| doc_mod::scene_graph(doc).into_iter().find(|node| node.id == id).map(|node| node.kind);
     match (chosen, level) {
-        (Some(name), _) if exists(&name) => Some(name),
+        (Some(name), _) if exists(name) => Some(name.to_owned()),
         (_, Level::Inside(id)) if kind(id).as_deref() == Some("geometry") => match doc_mod::object_graph(doc, id) {
             Some(name) => Some(name),
             None => kind_graph::find(&doc_mod::scene_graph(doc), id).and_then(|node| if exists(&node.label) { Some(node.label.clone()) } else { None }),

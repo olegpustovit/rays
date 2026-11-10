@@ -264,17 +264,25 @@ pub fn graph_leaves<'a>(value: &ModelView<'a>) -> Vec<(flow_check::workspace::Pa
 /// The leaf of the pane in use: where its panel was last seen when that is still its leaf (no
 /// walk: this is read many times a frame), else found again, else the first graph leaf.
 pub fn graph_path<'a>(value: &ModelView<'a>) -> Option<layout::Path> {
-    if value.key == panel_map::key_ref(&value.model.panes) {
-        if let (Some(key), Some(path)) = (value.key, panel_map::leaf(&value.model.panes)) {
-            let tree = shell_tree(&value, &value.workspace);
-            if matches!(panels::at_ref(&path, &tree), Some(panels::Panels::Leaf(Panel::Graph))) && key_is(key, &panel_key_ref(&value.doc, &path)) {
-                return Some(path);
-            }
-        }
+    if let Some(path) = graph_path_known(value) {
+        return Some(path.clone());
     }
     let leaves = graph_leaves(value);
     value.key.and_then(|key| leaves.iter().find(|(k, _)| k == key).map(|(_, path)| path.clone()))
         .or_else(|| leaves.into_iter().next().map(|(_, path)| path))
+}
+
+/// `graph_path` when the pane's remembered leaf still holds it: borrowed, no walk.
+pub fn graph_path_known<'a>(value: &ModelView<'a>) -> Option<&'a layout::Path> {
+    if value.key == panel_map::key_ref(&value.model.panes) {
+        if let (Some(key), Some(path)) = (value.key, panel_map::leaf(&value.model.panes)) {
+            let tree = shell_tree(&value, &value.workspace);
+            if matches!(panels::at_ref(path, &tree), Some(panels::Panels::Leaf(Panel::Graph))) && key_is(key, &panel_key_ref(&value.doc, path)) {
+                return Some(path);
+            }
+        }
+    }
+    None
 }
 
 /// What a graph leaf's own keywords open it with: its `:view`, else the canvas when it pins a graph.

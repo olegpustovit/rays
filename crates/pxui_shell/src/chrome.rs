@@ -85,68 +85,62 @@ impl std::fmt::Display for PathKey<'_> {
 }
 
 /// a title's path is its parts joined by " / "; a bare slash ("fixed dt 1/60") is part of a word
-fn split_crumbs(sub: &str) -> Vec<String> {
-    let bytes = sub.as_bytes();
-    let n = bytes.len();
-    let mut out: Vec<String> = Vec::new();
-    let mut from = 0;
-    let mut i = 0;
-    loop {
-        if i + 3 > n {
-            out.push(sub[from..].to_string());
-            break;
-        }
-        if &bytes[i..i + 3] == b" / " {
-            out.push(sub[from..i].to_string());
-            from = i + 3;
-            i += 3;
-        } else {
-            i += 1;
-        }
-    }
-    out.into_iter().map(|s| s.trim().to_string()).collect()
+fn crumbs(sub: &str) -> impl Iterator<Item = &str> {
+    sub.split(" / ").map(str::trim)
 }
 
-/// a path too long for its room loses its head, not its subject: "… / sop". Each part keeps its
-/// index in the title; the dropped head is (-1, "…")
-fn fit_crumbs(width: &mut dyn FnMut(&str) -> f64, room: f64, parts: &[String]) -> Vec<(i64, String)> {
-    let dots = (-1i64, "\u{2026}".to_string());
-    let mut parts: Vec<(i64, String)> = parts.iter().enumerate().map(|(i, p)| (i as i64, p.clone())).collect();
+/// A path too long for its room loses its head, not its subject: "… / sop". The parts shown are
+/// `from` on, behind a "…" when `dots`; each keeps its index in the title, the dots are -1.
+struct Fit {
+    dots: bool,
+    from: usize,
+}
+
+impl Fit {
+    fn parts<'a>(&self, sub: &'a str) -> impl Iterator<Item = (i64, &'a str)> {
+        self.dots.then_some((-1i64, "\u{2026}")).into_iter().chain(crumbs(sub).enumerate().skip(self.from).map(|(i, p)| (i as i64, p)))
+    }
+
+    fn len(&self, sub: &str) -> usize {
+        self.dots as usize + crumbs(sub).count() - self.from
+    }
+}
+
+fn fit_crumbs(width: &mut dyn FnMut(&str) -> f64, room: f64, sub: &str) -> Fit {
+    let mut fit = Fit { dots: false, from: 0 };
     loop {
-        let mut row = ((parts.len() as f64 - 1.0) * (width("/") + 8.0)) - 8.0;
-        for (_, part) in &parts {
+        let len = fit.len(sub);
+        let mut row = ((len as f64 - 1.0) * (width("/") + 8.0)) - 8.0;
+        for (_, part) in fit.parts(sub) {
             row = row + width(part) + 8.0;
         }
         let over = row > room;
-        if over && parts.len() == 2 && parts[0] == dots {
-            return vec![parts[1].clone()];
+        if over && len == 2 && fit.dots {
+            fit.dots = false;
+            return fit;
         }
-        if over && parts.len() >= 3 && parts[0] == dots {
-            let mut next = vec![dots.clone()];
-            next.extend_from_slice(&parts[2..]);
-            parts = next;
+        if over && len >= 3 && fit.dots {
+            fit.from += 1;
             continue;
         }
-        if over && parts.len() >= 2 {
-            let mut next = vec![dots.clone()];
-            next.extend_from_slice(&parts[1..]);
-            parts = next;
+        if over && len >= 2 {
+            fit = Fit { dots: true, from: 1 };
             continue;
         }
-        return parts;
+        return fit;
     }
 }
 
 /// "Title<TAB>a / b": the kind and its breadcrumb
-fn split_title(text: &str) -> (String, String) {
+fn split_title(text: &str) -> (&str, &str) {
     match text.find('\t') {
-        Some(i) => (text[..i].to_string(), text[i + 1..].to_string()),
-        None => (text.to_string(), String::new()),
+        Some(i) => (&text[..i], &text[i + 1..]),
+        None => (text, ""),
     }
 }
 
 fn has_crumbs(sub: &str) -> bool {
-    split_crumbs(sub).len() > 1
+    sub.contains(" / ")
 }
 
 fn retypes() -> Vec<(&'static str, Panel)> {
@@ -551,16 +545,17 @@ pub fn update(
             let focused = focus == Some(&l.path);
             let limit = header_slots(l, &groups(l)).1;
             let mut tx = x as f64 + 12.0 + (if focused { 12.0 } else { 0.0 }) + kit::cap_width(ui, &main) + 8.0;
-            let parts = fit_crumbs(&mut |p| ui.text_width(None, p), limit - tx, &split_crumbs(&sub));
-            for (n, (index, part)) in parts.iter().enumerate() {
+            let fit = fit_crumbs(&mut |p| ui.text_width(None, p), limit - tx, sub);
+            let count = fit.len(sub);
+            for (n, (index, part)) in fit.parts(sub).enumerate() {
                 let pw = ui.text_width(None, part);
-                if *index >= 0 && n + 1 < parts.len() && tx + pw <= limit {
+                if index >= 0 && n + 1 < count && tx + pw <= limit {
                     let b = floating(ui, CLICKABLE, (tx as i64, y, pw.ceil() as i64, h), format_args!("workspace-crumb-{name}{path}-{index}"));
                     if l.floating {
                         ui.to_front(order, &b);
                     }
                     if ui.signal(&b).clicked {
-                        intents.push(Intent::Crumb(l.path.clone(), *index));
+                        intents.push(Intent::Crumb(l.path.clone(), index));
                     }
                 }
                 tx = tx + pw + 8.0 + (ui.text_width(None, "/") + 8.0);
@@ -663,12 +658,11 @@ pub fn update(
                     let shown = cut(paint, Some(size), limit - tx, &sub);
                     paint.text_s((tx, cy), size, rays_math::color::with_alpha(ink_2, 179), &shown);
                 } else if !sub.is_empty() && !collapsed {
-                    let parts = split_crumbs(&sub);
-                    let fitted = fit_crumbs(&mut |p| paint.text_width(None, p), limit - tx, &parts);
-                    let count = fitted.len();
-                    for (i, (_, part)) in fitted.iter().enumerate() {
+                    let fit = fit_crumbs(&mut |p| paint.text_width(None, p), limit - tx, sub);
+                    let count = fit.len(sub);
+                    for (i, (_, part)) in fit.parts(sub).enumerate() {
                         if i + 1 == count {
-                            put(paint, &mut tx, if has_crumbs(&sub) { theme.foreground } else { ink_2 }, part);
+                            put(paint, &mut tx, if has_crumbs(sub) { theme.foreground } else { ink_2 }, part);
                         } else {
                             put(paint, &mut tx, ink_2, part);
                             put(paint, &mut tx, ink_3, "/");
@@ -708,7 +702,7 @@ pub fn tools_start(ui: &mut Ui, focused: bool, floating: bool, collapsed: bool, 
         let size = kit::cap_size(ui);
         x = x + 8.0 + ui.text_width(Some(size), &sub);
     } else {
-        for (i, part) in split_crumbs(&sub).iter().enumerate() {
+        for (i, part) in crumbs(sub).enumerate() {
             if i > 0 {
                 x = x + 8.0 + ui.text_width(None, "/");
             }

@@ -45,8 +45,8 @@ pub fn key_ref(t: &PanelMap) -> Option<&Key> {
 pub fn key(t: &PanelMap) -> Option<Key> { key_ref(t).cloned() }
 
 /// Where that panel's leaf was at the last frame.
-pub fn leaf(t: &PanelMap) -> Option<Path> {
-    t.at.clone()
+pub fn leaf(t: &PanelMap) -> Option<&Path> {
+    t.at.as_ref()
 }
 
 pub fn set_leaf(t: &mut PanelMap, at: Option<Path>) {
