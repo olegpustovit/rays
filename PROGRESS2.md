@@ -18,10 +18,10 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | B | 8 | 7 | 1 | 0 |
 | A | 4 | 4 | 0 | 0 |
 | D | 12 | 12 | 0 | 0 |
-| Z | 11 | 3 | 4 | 4 |
+| Z | 11 | 3 | 5 | 3 |
 | R | 10 | 10 | 0 | 0 |
 | G | 7 | 1 | 2 | 4 |
-| **All** | **58** | **43** | **7** | **8** |
+| **All** | **58** | **43** | **8** | **7** |
 
 ## Items
 
@@ -67,7 +67,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Z7 | Z | active | Baseline at `9deaa70d`: actual warmed Orrery567lower calls; zero-call guard fails before implementation | Original12animated/30idle checks preserved; body-shape binding/residual interning and actual0-call proof remain |
 | Z8 | Z | done | `2c8ea1de` — platform-byte capacities, fallible bulk/COW/native owners and exact JS counts; intentional fixtures/spec refreshed | Foundations572, SOP493, geometry495, Web/Shader/Graph186, exports226, FlowGPU94, native/current strict frames and unchanged shape/deps pass |
 | Z9 | Z | pending | — | Z0 warm-cook guards on subdivide, boolean and scatter |
-| Z10 | Z | pending | — | Z0; per-crate clone count tracked in PROGRESS.md |
+| Z10 | Z | active | `cebc8739` stdlib formatter cleanup; ba056fc5 baseline: 11,571 literal clones and151 Clippy candidates inventoried | Existing formatter regression passes; per-crate ledger in PROGRESS.md; full ownership review and unchanged Z0 qualification remain |
 | R1 | R | done | `c1617a45` — shared captures/paths/persistent iteration; consumers borrow; allocation guards lowered | 451 evaluator/IR +40 sequential/parallel +zero-view/native/three-kernel allocation checks pass |
 | R2 | R | done | `25c98948` `37321263` — immutable parent cache layers; snapshot isolation; iterative destruction; lexical gate false positives removed | IR346, 10000-layer/drop guard, bench digest c4bbf006c82014c7, workspace all-targets, native/three-kernel guards pass |
 | R3 | R | done | `608c3385` — immutable lexical free-name ranges; global/per-evaluation caches removed; bypass active-input semantics preserved | Flow490, parallel40, zero-allocation reads, lowered idle/sea/three-kernel caps and workspace check pass |
@@ -78,7 +78,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | R8 | R | done | `70a05621` — thirty mutable Pane operations, all64 Pane rebuilds/with_pane removed; three mutable Tree operations | Graph/shell67, reducer10, editor51, idle3/sea pass; empty cap lowered1198/81820 and confirmed |
 | R9 | R | done | `dbacce38` — existing Arc<Document> retained through reducer/layout/World/adopt; snapshots only on changes | 109 distinct editor/native/warm cases pass; idle helper21→0 allocations; all native caps lowered and confirmed |
 | R10 | R | done | `1f52f3db` — u128 renderer hashes, framed components and explicit GPU name/index fields; Mesh96→88B | Renderer54 collective/Rays33/native idle+sea/warm pass; hashes9216→0 allocations; sea cap lowered51365/2805000 |
-| G1 | G | active | `3541e92f` `fff7ce6c` `d70effc7` `c3169e12` `29707ae1` — Core admission, successful state transitions and non-borrowing count/layout proofs | Mac62/current strict frames pass; four proof shape findings removed493 remain; advanced immutable descriptor admission and exact Windows remain |
+| G1 | G | active | `ba056fc5` plus prior stages — immutable Core geometry admission shared by Driver/Sys; raw storage prepared once; 484 net lines removed | Mac64 conformance, workspace and unchanged idle/sea guards pass; shape492 unchanged; remaining native logical predicates and exact Windows stay open |
 | G2 | G | done | `9556c305` — metal crate deleted; real work/tests moved to ogpu_metal; 25 mirror enums/error graph removed | Local57 plus real LineStrip; workspace/deps/gate; exact Windows30/30 with fatal validation pass |
 | G3 | G | pending | — | ogpu_core/metal gpu tests; Windows ogpu_vulkan |
 | G4 | G | pending | — | Destroy-in-flight cases, live_handles delta 0 |
@@ -538,3 +538,28 @@ All commands use the normal shared target and `cargo t`, without RAYS_SLOW/deadl
 
 `git diff --check` and all causal fixture scripts pass. Capture-only temporary writers/dump hooks were restored before final tests and the source commit; ignored/filtered tests are excluded from every executed count above. Full command/capture details are in `/tmp/rays-z6-evidence.md`; Z7 exact baseline provenance is `/tmp/rays-z7-baseline-evidence.md`.
 - Artifactv40 published and verified:43done/7active/8pending, exact downloaded HTML and all58 live/embedded/tracked records equal. Tracker immediate/live/offline regression and diff check pass. Fresh Windows peer read remains offline, LastSeen00:46:16.1Z; no remote writes. Full goal stays active.
+
+
+### G1 immutable descriptor stage and Z10 audit baseline
+
+- **G1 stage committed** `ba056fc5910945e6b198be5bcbbf69dd6fab5557`: exactly 10 owned source paths, 821 insertions / 1,305 deletions (net −484). Root independently checked paths and reviewed Core/Sys/Metal/Vulkan flow. One private immutable Core admission carries u64 layouts/subranges, ordinal buffer bindings and actual Caps; Driver and Sys geometry/motion mirrors are retired. Existing Sys raw storage is prepared once and borrowed for sizes/build. The owning native constructor binds real handle kinds/device/allocation extents and native instance ABI. Indexed-u16 offset 2, flags, fast-build, motion/curve/instance fields and declared subranges remain expressible. No dependency or descriptor-cache framework added.
+- Actual terminal qualification and exact commands:
+
+| Command | Result | Wall / runner or Cargo |
+|---|---|---:|
+| `cargo check -p ogpu_core -p ogpu_mock -p ogpu_metal -p metal_sys -p ogpu_vulkan --all-targets` | first installed check, exit 0 | 5.16 / 5.10 s |
+| `cargo t -p ogpu_core acceleration -- --nocapture` | 5/5, exit 0 | 3.66 / 3.409 s |
+| `cargo t -p ogpu_metal --test gpu_all gpu_acceleration_admission -- --nocapture` | indexed-u16/flags/build/refit/binding errors; 1/1, exit 0; case 0.642 s | 5.43 / 5.207 s |
+| `cargo t -p ogpu_core -p ogpu_mock -p ogpu_metal -- --nocapture` | 64/64, exit 0; slowest admission 0.294 s | 7.91 / 7.643 s |
+| `cargo check --workspace --all-targets` | exit 0 | 9.25 / 9.13 s |
+| `cargo t -p rays_editor --test gpu_editor alloc_budget -- --nocapture` | 4/4, exit 0; slowest basic 0.417 s | 21.33 / 21.058 s |
+| `cargo t -p rays_editor --test gpu_editor native_sea_frames -- --nocapture` | 1/1, exit 0; case 1.014 s | 10.52 / 10.123 s |
+| `cargo run -p gate -- deps` | exit 0 | 0.41 s |
+| `cargo run -p gate -- shape` | historical exit 1; exact same 492 findings, zero additions/removals | 0.55 s |
+| same scoped all-targets check, warm | exit 0 | 0.08 / 0.03 s |
+
+- Logs and exact before/after commands: `/tmp/rays-g1-advanced-stage.md`. Warm old check 0.16 / 0.10 s and new 0.08 / 0.03 s are single samples; no compile-speed claim. Ray case 0.379 → 0.277 s is likewise not a speedup proof. All native caps, warm-up, frame counts and deadlines stay unchanged. Idle exact allocations/bytes: basic 971/100129, empty 841/51000, bare 1090/67083. Sea maximum: 13,521 allocations / 1,091,818 B; zero host uploads/payload reads, 24 B bounds/frame, close 1.435 ms. Historical sea spike and Z0/Z1 zero/O(1) targets remain open.
+- macOS qualifies Core/Mock/Metal/Sys and the non-Windows Vulkan package surface; it does not compile cfg(windows) lowering. Fresh Tailscale read still reports kyiv-win offline, LastSeen `2026-11-10T00:46:16.1Z`; no remote writes. G1 stays ACTIVE for remaining native logical predicates and exact Windows qualification. Diff checks pass; index contained only the 10 owned source paths at commit.
+- Z7's new public residual-identity regression fails before implementation: exit 101, 5.82 s wall / 5.413 s runner / 0.055 s case. Repeated with_bindings produces IDs (4,1) vs (5,1); signed-zero and distinct-array-owner checks follow the first assertion. Parent now implements evaluator/interner; child implements body/binding-shape preparation, preserving nested scopes and worker captures. No after/zero-lower success is claimed yet.
+- **Z10 started:** baseline `ba056fc5` has 11,571 literal clone occurrences across 50 crate source trees, recorded per crate in PROGRESS.md. The first uncapped Clippy run exits 101 in 5.301 s at an existing Report formatter wrapper. Root's committed stdlib cleanup `cebc8739` removes it; its existing formatting regression passes in 2.50 s, case 0.022 s. The second uncapped audit exits 101 in 7.915 s at an existing approximate-PI lint, with 59 candidates seen. A separate `--cap-lints warn` inventory completes in 17.068 s with 151 candidates across 20 crates. This is not clean-lint qualification and changes no repository lint policy. Ownership review and unchanged Z0 qualification remain required.
+- Artifact v41 published and verified: **43 done / 8 active / 7 pending (74.1%)**. Downloaded HTML matches tracked bytes; all 58 live DB, embedded and tracked seed records agree. Tracker immediate/live/offline checks and `git diff --check` pass. This goal turn makes progress through the qualified G1 source commit, the tested stdlib cleanup and the reproducible Z10 inventory; the full 58-item objective remains active.

@@ -160,8 +160,8 @@
     "note": ""
   },
   "Z10": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "cebc8739 stdlib formatter cleanup; ba056fc5 baseline: 11,571 literal clones and151 Clippy candidates inventoried"
   },
   "R1": {
     "status": "done",
@@ -205,7 +205,7 @@
   },
   "G1": {
     "status": "active",
-    "note": "3541e92f fff7ce6c d70effc7 c3169e12 29707ae1 \u2014 Core admission, successful state transitions and non-borrowing count/layout proofs"
+    "note": "ba056fc5 plus prior stages \u2014 immutable Core geometry admission shared by Driver/Sys; raw storage prepared once; 484 net lines removed"
   },
   "G2": {
     "status": "done",

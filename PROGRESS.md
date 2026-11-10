@@ -493,3 +493,67 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 - 2026-11-08: A7 `rdk_core` trim helper; B4 buildtime W1 editor chain; `cargo check -p buildtime`.
 - 2026-11-08: A7 surface_index → `point_triangle_barycentric_into`; `rdk_core::ocaml_trim`; rdk_ops + sop OCaml blank-name checks; `cargo t -p rdk_geom surface` 9 pass (~7s).
 - 2026-11-08: `30623d6e` A2 closed — dead enums/`NumericKind` in `da178e93`; PROGRESS + `cargo t -p sop` 52 pass (~19s).
+
+
+## Second simplification Z10 — clone review
+
+This is the active second plan's Z10 ledger; the completed port plan above is unchanged. Baseline source: `ba056fc5910945e6b198be5bcbbf69dd6fab5557` (2026-11-10). Counts are literal `.clone()` occurrences in committed `crates/*/src/**/*.rs`, including inline tests, comments and strings; integration tests, examples and build scripts are excluded. They inventory review scope, not redundant operations. Total: **11,571 across 50 crates**. Reproduce with `git grep -o -F '.clone()' ba056fc5 -- crates`, grouping only those source paths. The artifact's original estimate was 11,707; this different-time count proves no runtime savings.
+
+The exact command `cargo clippy --workspace --lib --message-format=json -- -W clippy::redundant_clone` initially exits 101 in 5.301 s at the existing default-denied `mem::Report::to_string` wrapper, before emitting any redundant-clone diagnostics. Commit `cebc8739` removes that wrapper; standard ToString delegates to the same Display implementation. All callers were traced. Existing `cargo t -p mem owner_bytes_drive_report_and_formatting` passes: 2.50 s wall / 2.135 s runner / 0.022 s case.
+
+The second exact Clippy run exits 101 in 7.915 s at the existing approximate-PI literal in `sop_topology.rs`, after 59 redundant-clone diagnostics. A separate inventory-only command, `cargo clippy --workspace --lib --message-format=json -- --cap-lints warn -W clippy::redundant_clone`, exits 0 in 17.068 s and emits **151 candidates across 20 crates**. This is an inventory, not clean-lint qualification; no repository lint policy changes. Raw results and exact commands are in `/tmp/rays-z10-clippy-{before,after-report,audit}.{jsonl,stderr,result.json}`. Clippy's library build excludes conditional test code, while the literal source census includes inline tests. Zero candidates does not prove that every remaining ownership choice is appropriate.
+
+| Crate | Baseline clones | Current clones | Clippy candidates | Ownership review |
+|---|---:|---:|---:|---|
+| cfmt | 0 | 0 | 0 | Pending review |
+| editor_core | 47 | 47 | 0 | Pending review |
+| editor_document | 642 | 642 | 4 | Pending review |
+| flow_check | 538 | 538 | 9 | Pending review |
+| flow_eval | 646 | 646 | 1 | Pending review |
+| flow_gpu | 293 | 293 | 6 | Pending review |
+| flow_graph | 389 | 389 | 2 | Pending review |
+| flow_ir | 1472 | 1472 | 7 | Pending review |
+| flow_native | 311 | 311 | 2 | Pending review |
+| flow_shader | 119 | 119 | 0 | Pending review |
+| flow_sop | 1348 | 1348 | 16 | Pending review |
+| flow_sop_catalog | 147 | 147 | 0 | Pending review |
+| flow_syntax | 141 | 141 | 0 | Pending review |
+| flow_web | 71 | 71 | 0 | Pending review |
+| input | 26 | 26 | 0 | Pending review |
+| lru | 52 | 52 | 0 | Pending review |
+| mem | 61 | 61 | 0 | Pending review |
+| mem_sys | 0 | 0 | 0 | Pending review |
+| metal_sys | 3 | 3 | 0 | Pending review |
+| native_layer_token_sys | 3 | 3 | 0 | Pending review |
+| ogpu_core | 113 | 113 | 0 | Pending review |
+| ogpu_metal | 137 | 137 | 1 | Pending review |
+| ogpu_mock | 23 | 23 | 0 | Pending review |
+| ogpu_vulkan | 102 | 102 | 0 | Pending review |
+| parallel | 2 | 2 | 0 | Pending review |
+| param | 115 | 115 | 0 | Pending review |
+| pxui | 100 | 100 | 0 | Pending review |
+| pxui_graph | 357 | 357 | 3 | Pending review |
+| pxui_shell | 112 | 112 | 3 | Pending review |
+| rays | 325 | 325 | 3 | Pending review |
+| rays_bin | 1 | 1 | 0 | Pending review |
+| rays_diagnostic | 2 | 2 | 0 | Pending review |
+| rays_editor | 1734 | 1734 | 55 | Pending review |
+| rays_math | 1 | 1 | 0 | Pending review |
+| rays_math_sys | 0 | 0 | 0 | Pending review |
+| rays_pathtracer | 235 | 235 | 5 | Pending review |
+| rdk_boolean | 93 | 93 | 1 | Pending review |
+| rdk_core | 135 | 135 | 0 | Pending review |
+| rdk_geom | 116 | 116 | 3 | Pending review |
+| rdk_ops | 642 | 642 | 14 | Pending review |
+| rdk_rays | 61 | 61 | 0 | Pending review |
+| renderer | 289 | 289 | 3 | Pending review |
+| runtime | 2 | 2 | 0 | Pending review |
+| runtime_resources | 32 | 32 | 0 | Pending review |
+| scene_command | 22 | 22 | 0 | Pending review |
+| sdl3 | 8 | 8 | 0 | Pending review |
+| sdl3_sys | 1 | 1 | 0 | Pending review |
+| sop | 428 | 428 | 9 | Pending review |
+| vulkan_sys | 18 | 18 | 0 | Pending review |
+| web_export | 56 | 56 | 4 | Pending review |
+
+Z10 remains ACTIVE. Crate-by-crate ownership review, necessary fixes and unchanged Z0 runtime guards are required before completion. Changes owned by other active stages are not counted as Z10 savings.
