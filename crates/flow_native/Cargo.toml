@@ -57,3 +57,6 @@ harness = false
 [[test]]
 name = "gpu_workspace_images"
 harness = false
+
+[lints]
+workspace = true

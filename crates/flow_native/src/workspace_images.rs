@@ -213,7 +213,7 @@ pub struct Data {
     freshness: RefCell<Vec<(bool, deps::T)>>,
     qualification: RefCell<Option<(PlanId, Paths, Vec<Option<Path>>)>>,
     arguments: RefCell<Vec<Option<I::Program>>>,
-    drawings: RefCell<Vec<Option<Rc<drawing::prepared>>>>,
+    drawings: RefCell<Vec<Option<Rc<drawing::Prepared>>>>,
     maps: RefCell<Vec<Option<(i64, i64, FnId, image_kernel::T)>>>,
     sizes: RefCell<Vec<(bool, bool)>>,
     resolved: RefCell<Vec<Option<EntryRef>>>,
@@ -1289,7 +1289,7 @@ fn compute_entry(
         let resolver_data = t_.clone();
         let (state2, live2, pid2, _gpu2, temporary2) = (state.clone(), live.clone(), ctx.pid, ctx.gpu.clone(), temporary.clone());
         let plan_rc: Rc<e::Plan> = d.plan.borrow().clone().expect("plan");
-        let image_cb: drawing::image_resolver = Rc::new(move |child_value| {
+        let image_cb: drawing::ImageResolver = Rc::new(move |child_value| {
             let ctx = Ctx { gpu: None, state: state2.clone(), live: live2.clone(), pid: pid2 };
             let child = resolve(&resolver_data, &ctx, None, display, &plan_rc, child_value)?;
             let dd = &*resolver_data;

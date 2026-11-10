@@ -64,9 +64,9 @@ fn drawing_resolves_its_images_through_the_owner() {
     let state = e::create_state();
     let live = input::Frame { size: (320, 240), ..input::at_time(0.) };
     let (images2, state2, live2, plan2) = (images.clone(), state.clone(), live.clone(), Rc::new(plan.clone()));
-    let image: drawing::image_resolver = Rc::new(move |value| wi::image(None, false, &images2, &state2, &live2, &plan2, value));
+    let image: drawing::ImageResolver = Rc::new(move |value| wi::image(None, false, &images2, &state2, &live2, &plan2, value));
     let s = ok(drawing::render_prepared(&prepared, &live, (320, 240), &drawing::RenderOptions { state: Some(state), image: Some(image), ..Default::default() }));
-    assert!(s.iter().any(|n| matches!(n, scene::node::Image(_))), "the image is drawn");
+    assert!(s.iter().any(|n| matches!(n, scene::Node::Image(_))), "the image is drawn");
     wi::close(&images);
     workspace_resources::close(&resources);
     workspace_gpu::close(&ws);

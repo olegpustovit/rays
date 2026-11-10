@@ -6,7 +6,7 @@ use rays_diagnostic::Diagnostic;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub struct data {
+pub struct Data {
     pub samples: Vec<(String, Rc<RefCell<sample::Sample>>)>,
     pub images: Vec<(crate::workspace_images::ImageKey, image::Image)>,
     pub audio: Option<Rc<audio::Audio>>,
@@ -19,10 +19,10 @@ pub struct data {
 
 /// The host and image owner share handle semantics over the same resource table.
 #[derive(Clone)]
-pub struct WorkspaceResources(pub Rc<RefCell<data>>);
+pub struct WorkspaceResources(pub Rc<RefCell<Data>>);
 
 pub fn create() -> WorkspaceResources {
-    WorkspaceResources(Rc::new(RefCell::new(data {
+    WorkspaceResources(Rc::new(RefCell::new(Data {
         samples: Vec::new(),
         images: Vec::new(),
         audio: None,

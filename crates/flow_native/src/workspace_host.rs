@@ -15,7 +15,7 @@ use rays::audio::sample;
 use rays::sketch;
 use rays_diagnostic::Diagnostic;
 
-pub struct prepared {
+pub struct Prepared {
     pub plan: e::Plan,
     /// the plan's identity (see `workspace_images::plan_id`), not its value
     pub plan_id: u64,
@@ -28,7 +28,7 @@ pub struct WorkspaceHost {
     pub resources: workspace_resources::WorkspaceResources,
     pub images: workspace_images::WorkspaceImages,
     pub gpu: workspace_gpu::WorkspaceGpu,
-    pub prepared: Option<prepared>,
+    pub prepared: Option<Prepared>,
     /// newest first
     pub pending_saves: Vec<String>,
     pub quit_requested: bool,
@@ -92,7 +92,7 @@ pub fn effects(workspace: &workspace_doc::T, plan: &e::Plan) -> Option<Value> {
     }
 }
 
-pub fn prepare(plan: &e::Plan, effects: &Value) -> Result<prepared, Diagnostic> {
+pub fn prepare(plan: &e::Plan, effects: &Value) -> Result<Prepared, Diagnostic> {
     let options = I::CompileOptions::default();
     let effects = I::compile(effects, &options)?;
     let mut args = Vec::with_capacity(plan.nodes.len());
@@ -103,11 +103,11 @@ pub fn prepare(plan: &e::Plan, effects: &Value) -> Result<prepared, Diagnostic> 
             args.push(None);
         }
     }
-    Ok(prepared { plan: plan.clone(), plan_id: workspace_images::plan_id(plan), effects, edges: vec![false; plan.nodes.len()], args })
+    Ok(Prepared { plan: plan.clone(), plan_id: workspace_images::plan_id(plan), effects, edges: vec![false; plan.nodes.len()], args })
 }
 
 /// A rising-edge effect: its node id, `when`, kind and arguments.
-pub struct request {
+pub struct Request {
     pub id: i64,
     pub when_: bool,
     pub kind: String,
@@ -118,7 +118,7 @@ fn force(program: &I::Program, state: &e::State, reference: bool, live: &Frame) 
     I::force(program, &I::ForceOptions { state: Some(state.clone()), reference, ..Default::default() }, live)
 }
 
-fn collect(plan: &e::Plan, prepared: &prepared, state: &e::State, reference: bool, live: &Frame, value: &Value, out: &mut Vec<request>) -> Result<(), Diagnostic> {
+fn collect(plan: &e::Plan, prepared: &Prepared, state: &e::State, reference: bool, live: &Frame, value: &Value, out: &mut Vec<Request>) -> Result<(), Diagnostic> {
     match value {
         Value::List(values) => {
             for x in values.iter() {
@@ -130,7 +130,7 @@ fn collect(plan: &e::Plan, prepared: &prepared, state: &e::State, reference: boo
             let forced = force(prepared.args[*id as usize].as_ref().expect("effect program"), state, reference, live)?;
             let Value::Record(args) = forced else { unreachable!("assert false") };
             let when_ = v::truthy(args.get_str("when").expect("when"))?;
-            out.push(request { id: *id, when_, kind: plan.nodes[*id as usize].kind.clone(), args });
+            out.push(Request { id: *id, when_, kind: plan.nodes[*id as usize].kind.clone(), args });
             Ok(())
         }
         _ => Err(v::fail("E_EFFECT", "Workspace effects are host effect nodes.")),
@@ -138,16 +138,16 @@ fn collect(plan: &e::Plan, prepared: &prepared, state: &e::State, reference: boo
 }
 
 /// The effects whose `when` rose this frame.
-pub fn requests(host: &mut WorkspaceHost, reference: bool, state: &e::State, live: &Frame, workspace: &workspace_doc::T, plan: &e::Plan) -> Result<Vec<request>, Diagnostic> {
+pub fn requests(host: &mut WorkspaceHost, reference: bool, state: &e::State, live: &Frame, workspace: &workspace_doc::T, plan: &e::Plan) -> Result<Vec<Request>, Diagnostic> {
     let Some(value) = effects(workspace, plan) else { return Ok(Vec::new()) };
     let id = workspace_images::plan_id(plan);
     if !host.prepared.as_ref().is_some_and(|p| p.plan_id == id) {
         host.prepared = Some(prepare(plan, &value)?);
     }
     let prepared = host.prepared.as_mut().expect("prepared");
-    let mut result: Vec<request> = Vec::new();
+    let mut result: Vec<Request> = Vec::new();
     {
-        let prepared_ref: &prepared = prepared;
+        let prepared_ref: &Prepared = prepared;
         e::transaction(state, &mut || {
             let forced = force(&prepared_ref.effects, state, reference, live)?;
             let mut collected = Vec::new();
@@ -156,7 +156,7 @@ pub fn requests(host: &mut WorkspaceHost, reference: bool, state: &e::State, liv
             Ok(())
         })?;
     }
-    let rising: Vec<request> = result.iter().filter(|r| r.when_ && !prepared.edges[r.id as usize]).map(|r| request { id: r.id, when_: r.when_, kind: r.kind.clone(), args: r.args.clone() }).collect();
+    let rising: Vec<Request> = result.iter().filter(|r| r.when_ && !prepared.edges[r.id as usize]).map(|r| Request { id: r.id, when_: r.when_, kind: r.kind.clone(), args: r.args.clone() }).collect();
     for r in &result {
         prepared.edges[r.id as usize] = r.when_;
     }
@@ -194,10 +194,10 @@ fn sample(host: &WorkspaceHost, state: &e::State, live: &Frame, value: &Value) -
                     let wave = text_of("waveform", "sine")?;
                     let (frequency, duration, volume) = (number("frequency", 440.)?, number("duration", 0.1)?, number("volume", 1.)?);
                     let waveform = match wave.as_str() {
-                        "sine" => sample::waveform::Sine,
-                        "square" => sample::waveform::Square,
-                        "triangle" => sample::waveform::Triangle,
-                        "sawtooth" => sample::waveform::Saw,
+                        "sine" => sample::Waveform::Sine,
+                        "square" => sample::Waveform::Square,
+                        "triangle" => sample::Waveform::Triangle,
+                        "sawtooth" => sample::Waveform::Saw,
                         _ => return Err(audio_error("Unknown audio waveform.")),
                     };
                     let key = format!("synth:{wave}:{:x}:{:x}:{:x}", frequency.to_bits(), duration.to_bits(), volume.to_bits());
@@ -210,7 +210,7 @@ fn sample(host: &WorkspaceHost, state: &e::State, live: &Frame, value: &Value) -
     }
 }
 
-fn perform(host: &mut WorkspaceHost, state: &e::State, live: &Frame, requests: &[request]) -> Result<(), Diagnostic> {
+fn perform(host: &mut WorkspaceHost, state: &e::State, live: &Frame, requests: &[Request]) -> Result<(), Diagnostic> {
     for r in requests {
         host.fired += 1;
         let arg = |name: &str| r.args.get_str(name).expect("effect argument");
@@ -233,10 +233,10 @@ fn perform(host: &mut WorkspaceHost, state: &e::State, live: &Frame, requests: &
             }
             "host/dialog" => {
                 let kind = match text(arg("kind"))?.as_str() {
-                    "open_file" => sketch::dialog::Open_file,
-                    "open_files" => sketch::dialog::Open_files,
-                    "save_file" => sketch::dialog::Save_file,
-                    "open_folder" => sketch::dialog::Open_folder,
+                    "open_file" => sketch::Dialog::OpenFile,
+                    "open_files" => sketch::Dialog::OpenFiles,
+                    "save_file" => sketch::Dialog::SaveFile,
+                    "open_folder" => sketch::Dialog::OpenFolder,
                     _ => return Err(v::fail("E_EFFECT", "Unknown file dialog kind.")),
                 };
                 let filters: Option<Vec<(String, Vec<String>)>> = match r.args.get_str("filters") {
@@ -266,7 +266,7 @@ fn perform(host: &mut WorkspaceHost, state: &e::State, live: &Frame, requests: &
                 };
                 let default_location = r.args.get_str("default").map(text).transpose()?;
                 let id = sketch::show_file_dialog(filters.as_deref(), default_location.as_deref(), kind).map_err(|m| v::fail("E_EFFECT", &m))?;
-                host.pending_events.insert(0, Event::Dialog_opened(id));
+                host.pending_events.insert(0, Event::DialogOpened(id));
             }
             other => return Err(v::fail("E_EFFECT", &format!("Unknown host effect {other}"))),
         }

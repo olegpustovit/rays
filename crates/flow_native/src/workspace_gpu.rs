@@ -27,9 +27,9 @@ use std::time::{Duration, Instant};
 type Packed = flow_ir::packed::T;
 
 /// The workspace owner's immutable execution policy.
-pub type policy = G::Config;
+pub type Policy = G::Config;
 
-pub fn default_policy() -> policy {
+pub fn default_policy() -> Policy {
     G::default()
 }
 
@@ -286,7 +286,7 @@ fn median3(mut runs: Vec<f64>) -> f64 {
 /// identities to charge upload. Shape-only probes use zeroed inputs and power-of-two counts. The
 /// 64-entry cache distinguishes both modes and binding layouts. A failed prepared frame is not
 /// cached.
-fn measure(d: &Data, prepared: Option<&phost_inputs>, fast: bool, packed: &Packed, count: i64) -> Option<f64> {
+fn measure(d: &Data, prepared: Option<&PhostInputs>, fast: bool, packed: &Packed, count: i64) -> Option<f64> {
     let count = if prepared.is_some() {
         count
     } else {
@@ -314,9 +314,9 @@ fn measure(d: &Data, prepared: Option<&phost_inputs>, fast: bool, packed: &Packe
     let entry = entry?;
     let view = phost::view(packed);
     let indices = phost::index_sources(packed);
-    let inputs: phost_inputs = match prepared {
+    let inputs: PhostInputs = match prepared {
         Some(inputs) => inputs.clone(),
-        None => phost_inputs {
+        None => PhostInputs {
             arrays: view.widths.iter().map(|_| Arc::new(Vec::new())).collect(),
             uniforms: view.uniform_widths.iter().map(|w| vec![0.; *w]).collect(),
             tables: view.uniform_widths.iter().map(|_| Arc::new(vec![0.; 4])).collect(),
@@ -362,7 +362,7 @@ fn measure(d: &Data, prepared: Option<&phost_inputs>, fast: bool, packed: &Packe
     }
     let inputs = match prepared {
         Some(_) => inputs,
-        None => phost_inputs {
+        None => PhostInputs {
             arrays: view.widths.iter().enumerate().map(|(i, width)| Arc::new(if indices[i] { Vec::new() } else { vec![0.; (count * width) as usize] })).collect(),
             ..inputs
         },
@@ -405,8 +405,8 @@ fn measure(d: &Data, prepared: Option<&phost_inputs>, fast: bool, packed: &Packe
     seconds
 }
 
-#[allow(non_camel_case_types)]
-type phost_inputs = flow_ir::packed::host::Inputs;
+
+type PhostInputs = flow_ir::packed::host::Inputs;
 
 /// The owner's real backend: it serves the service `0` on the owner thread only.
 struct OwnerBackend(i64);
@@ -422,7 +422,7 @@ impl G::Backend for OwnerBackend {
             Err(_) => None,
         }
     }
-    fn cost(&self, inputs: Option<&phost_inputs>, fast: bool, packed: &Packed, count: i64) -> Option<f64> {
+    fn cost(&self, inputs: Option<&PhostInputs>, fast: bool, packed: &Packed, count: i64) -> Option<f64> {
         let d = service(self.0)?;
         measure(&d, inputs, fast, packed, count)
     }
@@ -663,7 +663,7 @@ struct ProxyKernel {
 }
 
 impl G::Kernel for ProxyKernel {
-    fn run(&self, inputs: &phost_inputs) -> Result<G::Value, Diagnostic> {
+    fn run(&self, inputs: &PhostInputs) -> Result<G::Value, Diagnostic> {
         let (inputs, k) = (inputs.clone(), self.kernel.clone());
         route(&self.shared, false, move || k.run(&inputs)).and_then(|r| r)
     }
@@ -709,7 +709,7 @@ impl G::Backend for ProxyBackend {
         };
         Some(Box::new(ProxyResidency { shared, guard, executor, incidence }))
     }
-    fn cost(&self, inputs: Option<&phost_inputs>, fast: bool, packed: &Packed, count: i64) -> Option<f64> {
+    fn cost(&self, inputs: Option<&PhostInputs>, fast: bool, packed: &Packed, count: i64) -> Option<f64> {
         let (inputs, packed, r) = (inputs.cloned(), packed.clone(), self.real.clone());
         route(&self.shared, false, move || r.cost(inputs.as_ref(), fast, &packed, count)).ok().flatten()
     }
@@ -855,13 +855,13 @@ pub fn with_backend(t_: &WorkspaceGpu, fast: bool, run: &mut dyn FnMut(&G::Confi
 
 /// Inside `with_backend(fast = true)`, a resident fold for one drawing on this workspace's host,
 /// and its mark attributes over the arrays it keeps after its loop (`host::show`).
-pub fn resident(gpu: &G::Config, t_: &WorkspaceGpu) -> Option<drawing::resident> {
+pub fn resident(gpu: &G::Config, t_: &WorkspaceGpu) -> Option<drawing::Resident> {
     if !gpu.fast {
         return None;
     }
     let (_, host) = owner(&t_.0).ok()?;
     let show_host = host.clone();
-    let show: drawing::show = Rc::new(move |packed: &Packed, live: &Frame| h::show(&show_host, packed, live));
+    let show: drawing::Show = Rc::new(move |packed: &Packed, live: &Frame| h::show(&show_host, packed, live));
     Some((h::resident(false, gpu.fast, &host), show))
 }
 
@@ -902,9 +902,9 @@ pub fn image(t_: &WorkspaceGpu, key: &crate::workspace_images::ImageKey, width: 
 
 /// One `Marks`-family source per GPU mark set of a frame, numbered in drawing order (at most 64),
 /// each owning the uploads of its CPU attributes and borrowing its GPU ones.
-pub fn marks(t_: &WorkspaceGpu) -> Rc<marks_scene::gpu> {
+pub fn marks(t_: &WorkspaceGpu) -> Rc<marks_scene::Gpu> {
     let id = t_.0.id;
-    Rc::new(move |slot: i64, kind: i64, count: i64, attributes: &[marks_scene::attribute]| {
+    Rc::new(move |slot: i64, kind: i64, count: i64, attributes: &[marks_scene::Attribute]| {
         let d = service(id).ok_or_else(|| error("Workspace GPU resources require their open initial-domain owner."))?;
         let (gpu, host) = owner(&d)?;
         let found = d.mark_sets.borrow_mut().find(&|k, _| *k == slot).cloned();
@@ -918,7 +918,7 @@ pub fn marks(t_: &WorkspaceGpu) -> Rc<marks_scene::gpu> {
         };
         let mut outputs: Vec<(G::Value, run::Output)> = Vec::new();
         for a in attributes {
-            if let marks_scene::source::Device(value) = &a.source {
+            if let marks_scene::Source::Device(value) = &a.source {
                 match h::output(&host, value)? {
                     None => return Err(error("GPU display output is closed or superseded.")),
                     Some(output) => outputs.push((value.clone(), output)),
@@ -931,8 +931,8 @@ pub fn marks(t_: &WorkspaceGpu) -> Rc<marks_scene::gpu> {
         let sources: Vec<x::MarksSource> = attributes
             .iter()
             .map(|a| match &a.source {
-                marks_scene::source::Bytes(bytes) => x::MarksSource::Host(renderer::scene_execution::new_bytes(bytes.clone()), a.stride),
-                marks_scene::source::Device(value) => {
+                marks_scene::Source::Bytes(bytes) => x::MarksSource::Host(renderer::scene_execution::new_bytes(bytes.clone()), a.stride),
+                marks_scene::Source::Device(value) => {
                     let output = output_of(value);
                     x::MarksSource::Device(Rc::new(move || output.as_ref().and_then(|o| run::buffer(o, None))), a.stride)
                 }
@@ -941,7 +941,7 @@ pub fn marks(t_: &WorkspaceGpu) -> Rc<marks_scene::gpu> {
         // positions a fast kernel wrote come with its count record: the set's instance count is
         // the one the device wrote, drawn indirect
         let indirect: Option<(Rc<dyn Fn() -> Option<ob::Buffer>>, i64)> = match &attributes[0].source {
-            marks_scene::source::Device(value) => {
+            marks_scene::Source::Device(value) => {
                 let output = output_of(value);
                 if output.as_ref().and_then(run::count_record).is_some() {
                     Some((Rc::new(move || output.as_ref().and_then(run::count_record)), 4))

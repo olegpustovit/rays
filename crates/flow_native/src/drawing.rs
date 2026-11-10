@@ -1,6 +1,6 @@
 //! native Scene lowering of Flow's typed deferred drawing plan.
 //! Uses the workspace evaluator and the environment's fold state.
-use crate::marks_scene::{self, attribute};
+use crate::marks_scene::{self, Attribute};
 use flow_check::workspace::Paths;
 use flow_eval as e;
 use flow_ir::core_exec::{self as c, Buffers};
@@ -23,12 +23,12 @@ static DRAWINGS: AtomicI64 = AtomicI64::new(0);
 
 /// A resident fold, and how a mark attribute over the arrays it kept after its loop is drawn
 /// (`Workspace_gpu::resident`): one host does both.
-pub type show = Rc<dyn Fn(&Packed, &Frame) -> Option<Option<G::Value>>>;
-pub type resident = (Arc<dyn c::Resident>, show);
+pub type Show = Rc<dyn Fn(&Packed, &Frame) -> Option<Option<G::Value>>>;
+pub type Resident = (Arc<dyn c::Resident>, Show);
 
 type Core = (c::Prepared, Option<ResidualId>, Buffers);
 
-pub struct prepared {
+pub struct Prepared {
     id: i64,
     states: I::Program,
     plan: e::Plan,
@@ -37,7 +37,7 @@ pub struct prepared {
     fast: bool,
     core: OnceCell<Result<Core, Diagnostic>>,
     whole: bool,
-    cache: marks_scene::cache,
+    cache: marks_scene::Cache,
     display: Arc<I::RegionDisplay>,
     readback: Arc<I::RegionReadback>,
     /// the last scene's mark sets bind GPU outputs a later draw replaces
@@ -55,7 +55,7 @@ pub struct PrepareOptions {
 }
 
 /// Prepare each drawing argument's IR program once for playback or export.
-pub fn prepare(o: &PrepareOptions, plan: &e::Plan, root: &Value) -> Result<prepared, Diagnostic> {
+pub fn prepare(o: &PrepareOptions, plan: &e::Plan, root: &Value) -> Result<Prepared, Diagnostic> {
     let gpu = o.gpu.clone().unwrap_or_else(G::default);
     let approx = o.approx.clone().unwrap_or_default();
     let states = I::compile(&Value::List(std::sync::Arc::new(o.states.clone())), &I::CompileOptions { profile: o.profile.clone(), ..Default::default() })?;
@@ -84,7 +84,7 @@ pub fn prepare(o: &PrepareOptions, plan: &e::Plan, root: &Value) -> Result<prepa
         }
     }
     let whole = static_(plan, &mut known, root);
-    Ok(prepared {
+    Ok(Prepared {
         id: DRAWINGS.fetch_add(1, Ordering::SeqCst),
         states,
         plan: plan.clone(),
@@ -101,7 +101,7 @@ pub fn prepare(o: &PrepareOptions, plan: &e::Plan, root: &Value) -> Result<prepa
     })
 }
 
-fn core(p: &prepared) -> &Result<Core, Diagnostic> {
+fn core(p: &Prepared) -> &Result<Core, Diagnostic> {
     p.core.get_or_init(|| match core_draw::lower(None, &p.plan, &p.root) {
         Ok((program, residual)) => Ok((c::prepare(&program, false, true, &p.approx, p.fast), residual, Buffers::create())),
         Err(name) => Err(v::fail("E_DRAW_KIND", &format!("The drawing cannot be lowered to the core path ({name})."))),
@@ -110,23 +110,23 @@ fn core(p: &prepared) -> &Result<Core, Diagnostic> {
 
 /// The last rendered scene binds GPU outputs (a mark set's `Device` attributes) that the next
 /// render replaces: after a failed render it is stale and must not be shown again.
-pub fn borrows_gpu(p: &prepared) -> bool {
+pub fn borrows_gpu(p: &Prepared) -> bool {
     p.borrows.get()
 }
 
-pub type image_resolver = Rc<dyn Fn(&Value) -> Result<rays::image::Image, Diagnostic>>;
+pub type ImageResolver = Rc<dyn Fn(&Value) -> Result<rays::image::Image, Diagnostic>>;
 
 /// The optional arguments of [`render_prepared`].
 #[derive(Clone, Default)]
 pub struct RenderOptions {
     pub state: Option<e::State>,
-    pub image: Option<image_resolver>,
-    pub gpu: Option<Rc<marks_scene::gpu>>,
-    pub resident: Option<resident>,
+    pub image: Option<ImageResolver>,
+    pub gpu: Option<Rc<marks_scene::Gpu>>,
+    pub resident: Option<Resident>,
 }
 
 struct ImageFrame {
-    resolve: image_resolver,
+    resolve: ImageResolver,
     images: Vec<rays::image::Image>,
 }
 
@@ -146,7 +146,7 @@ impl Drop for PopImages {
 
 /// The draw program runs into a mark table which `Marks_scene` adapts. Retention is whole-program:
 /// a fully static draw graph is kept per size; the fold states still advance.
-fn render_core(core: &Core, state: &e::State, p: &prepared, live: &Frame, size: (i64, i64), o: &RenderOptions) -> Result<scene::Scene, Diagnostic> {
+fn render_core(core: &Core, state: &e::State, p: &Prepared, live: &Frame, size: (i64, i64), o: &RenderOptions) -> Result<scene::Scene, Diagnostic> {
     let (program, root, buffers) = core;
     let (resident, show) = match &o.resident {
         Some((r, s)) => (Some(r.clone()), Some(s.clone())),
@@ -188,8 +188,8 @@ fn render_core(core: &Core, state: &e::State, p: &prepared, live: &Frame, size: 
         // A region offered as a mark attribute may stay on the GPU; each runs at most once a
         // frame, since a second dispatch would overwrite the first's output.
         let id = p.id;
-        let gpu_wrapped: Option<Box<marks_scene::gpu>> = o.gpu.clone().map(|gpu| {
-            let f: Box<marks_scene::gpu> = Box::new(move |slot, kind, count, attributes: &[attribute]| gpu(slot | (id << 20), kind, count, attributes));
+        let gpu_wrapped: Option<Box<marks_scene::Gpu>> = o.gpu.clone().map(|gpu| {
+            let f: Box<marks_scene::Gpu> = Box::new(move |slot, kind, count, attributes: &[Attribute]| gpu(slot | (id << 20), kind, count, attributes));
             f
         });
         let devices: Rc<RefCell<Vec<G::Value>>> = Rc::new(RefCell::new(Vec::new()));
@@ -268,7 +268,7 @@ fn render_core(core: &Core, state: &e::State, p: &prepared, live: &Frame, size: 
 /// only the positions, sizes, radius, from or to of a mark set stays on the GPU when its backend
 /// places it there, and that mark set is drawn by the `Marks` family with the region's buffer bound
 /// directly. Without a configured GPU, or off the backend, nothing differs from the CPU path.
-pub fn render_prepared(p: &prepared, live: &Frame, size: (i64, i64), o: &RenderOptions) -> Result<scene::Scene, Diagnostic> {
+pub fn render_prepared(p: &Prepared, live: &Frame, size: (i64, i64), o: &RenderOptions) -> Result<scene::Scene, Diagnostic> {
     let state = o.state.clone().unwrap_or_else(e::create_state);
     match core(p) {
         Ok(core) => render_core(core, &state, p, live, size, o),

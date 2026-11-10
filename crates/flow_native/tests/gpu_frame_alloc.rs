@@ -38,7 +38,7 @@ fn frame() {
         wg::with_backend(&ws, true, &mut |gpu| {
             let (resident, show) = wg::resident(gpu, &ws).expect("resident GPU scope");
             let shown = shown.clone();
-            let show: drawing::show = if read_back { Rc::new(|_, _| Some(None)) } else { Rc::new(move |packed, live| {
+            let show: drawing::Show = if read_back { Rc::new(|_, _| Some(None)) } else { Rc::new(move |packed, live| {
                 let result = show(packed, live);
                 if matches!(&result, Some(Some(_))) { shown.set(shown.get() + 1); }
                 result

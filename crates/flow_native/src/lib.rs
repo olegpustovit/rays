@@ -1,6 +1,6 @@
-//! Port of lib/flow_native: native Flow drawing, marks, workspace execution and live-frame glue.
+//! native Flow drawing, marks, workspace execution and live-frame glue.
 //! Uses the UI-free document model and renderer, never PXUI or the editor.
-#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, clippy::too_many_arguments, clippy::type_complexity, clippy::new_without_default)]
+#![allow(clippy::too_many_arguments, clippy::type_complexity, clippy::new_without_default)]
 pub mod live_frame;
 pub mod probe_run;
 pub mod marks_scene;

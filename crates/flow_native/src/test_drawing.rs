@@ -28,14 +28,14 @@ fn render(body: &str, size: (i64, i64)) -> scene::Scene {
 fn a_draw_graph_becomes_a_scene() {
     let s = render(r##"(draw/merge (draw/rect [1 2 0] [30 40 0] :fill "#f00") (draw/circle [10 20 0] 4) (draw/line [0 0 0] [5 5 0]))"##, (100, 100));
     assert_eq!(s.len(), 3);
-    assert!(s.iter().all(|n| matches!(n, scene::node::Shapes(_))));
+    assert!(s.iter().all(|n| matches!(n, scene::Node::Shapes(_))));
 }
 
 #[test]
 fn transforms_and_clips_nest() {
     let s = render("(draw/translate [1 2 0] (draw/merge (draw/point [0 0 0]) (draw/point [1 1 0])))", (10, 10));
     assert_eq!(s.len(), 1);
-    assert!(matches!(&s[0], scene::node::Affine(_, children) if children.len() == 2));
+    assert!(matches!(&s[0], scene::Node::Affine(_, children) if children.len() == 2));
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn marks_scene_adapts_a_table_and_caches_constant_sets() {
     let table = vec![rect_set(2), Entry::PushClip { x: 0., y: 0., width: 5., height: 5. }, rect_set(1), Entry::PopClip, Entry::Text { x: 1, y: 2, size: 12, color: -1, text: b"hi".to_vec() }];
     let a = ok(marks_scene::scene(&buffers, None, None, Some(&cache), None, &table));
     assert_eq!(a.len(), 3);
-    assert!(matches!(&a[1], scene::node::Clip(0, 0, 5, 5, children) if children.len() == 1));
+    assert!(matches!(&a[1], scene::Node::Clip(0, 0, 5, 5, children) if children.len() == 1));
     assert_eq!(marks_scene::cache_size(&cache), 2);
     let b = ok(marks_scene::scene(&buffers, None, None, Some(&cache), None, &table));
     assert!(scene::same(&a, &b));

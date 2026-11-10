@@ -27,7 +27,7 @@ fn find_picks_the_longest_covering_site() {
     assert_eq!(other.seconds, None);
     assert!(probe_run::find(&reports, Some(1), &path(&["g", "a"]), &[]).is_none());
     // a nested node `holder#input` is covered by its holder's leaf
-    let nested = vec![report(&["g"], vec![(-1, path(&["g", "x"]), Vec::new())], Tier::Cpu_kernel)];
+    let nested = vec![report(&["g"], vec![(-1, path(&["g", "x"]), Vec::new())], Tier::CpuKernel)];
     assert_eq!(probe_run::find(&nested, None, &path(&["g", "x#in"]), &[]).expect("found").tier, "CPU");
 }
 

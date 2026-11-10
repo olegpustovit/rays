@@ -194,7 +194,7 @@ struct StubResident(Calls);
 impl Resident for StubResident {
     fn fill(&self, _: &Ty, _: i64, _: &Value) -> Result<Option<Value>, Diagnostic> {
         self.0.hit();
-        Ok(Some(Value::Int_array(Arc::new(vec![0]))))
+        Ok(Some(Value::IntArray(Arc::new(vec![0]))))
     }
     fn compact(&self, value: &Value) -> Result<Option<Value>, Diagnostic> {
         self.0.hit();
@@ -221,7 +221,7 @@ impl Resident for StubResident {
     }
     fn range(&self, _: &Ty, _: &Value, _: i64, _: i64) -> Result<Option<Value>, Diagnostic> {
         self.0.hit();
-        Ok(Some(Value::Int_array(Arc::new(vec![0]))))
+        Ok(Some(Value::IntArray(Arc::new(vec![0]))))
     }
 }
 
@@ -244,7 +244,7 @@ fn a_worker_reaches_the_resident_scope_only_through_the_owner_pump() {
             let _finish = Finish(&done);
             let scope = gpu.backend.as_ref().unwrap().residency(true).expect("residency");
             let r = scope.executor();
-            let value = Value::Int_array(Arc::new(vec![0]));
+            let value = Value::IntArray(Arc::new(vec![0]));
             let array_int = Ty::Array(Box::new(Ty::Int));
             r.settle().unwrap();
             assert_eq!(r.compact(&value).unwrap(), Some(value.clone()));

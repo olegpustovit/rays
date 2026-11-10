@@ -17,37 +17,37 @@ use std::sync::Arc;
 /// One attribute of a `Marks`-family draw: float32 elements (or `0xRRGGBBAA` words for a colour) of
 /// `stride` elements per instance, 0 for one constant, or a GPU region's output.
 #[derive(Clone)]
-pub enum source {
+pub enum Source {
     Bytes(Vec<u8>),
     Device(G::Value),
 }
 
 #[derive(Clone)]
-pub struct attribute {
-    pub source: source,
+pub struct Attribute {
+    pub source: Source,
     pub stride: i64,
 }
 
 /// Registers one mark set drawn by the `Marks` family: the `slot` numbers the frame's GPU sets from
 /// 0, `kind` is the `Ui_batch` kind word (rect 0, circle 4, line 5) and the attributes are
 /// position, extent, fill, stroke and width.
-pub type gpu = dyn Fn(i64, i64, i64, &[attribute]) -> Result<m::GpuToken, Diagnostic>;
+pub type Gpu = dyn Fn(i64, i64, i64, &[Attribute]) -> Result<m::GpuToken, Diagnostic>;
 
 type Kept = List<(i64, i64), (Arc<Vec<f64>>, Vec<u8>)>;
 
 /// The nodes built for the mark sets of the last frame, by position in the table: at most 1024
 /// nodes and 4096 converted attribute arrays are kept, the least recently used going first.
-pub struct cache {
-    nodes: RefCell<List<i64, (Entry, Vec<Arc<Vec<f64>>>, scene::node)>>,
+pub struct Cache {
+    nodes: RefCell<List<i64, (Entry, Vec<Arc<Vec<f64>>>, scene::Node)>>,
     converted: RefCell<Kept>,
 }
 
-pub fn cache_new() -> cache {
-    cache { nodes: RefCell::new(List::new(1024, Box::new(|_, _| {}))), converted: RefCell::new(List::new(4096, Box::new(|_, _| {}))) }
+pub fn cache_new() -> Cache {
+    Cache { nodes: RefCell::new(List::new(1024, Box::new(|_, _| {}))), converted: RefCell::new(List::new(4096, Box::new(|_, _| {}))) }
 }
 
 /// The nodes held.
-pub fn cache_size(c: &cache) -> i64 {
+pub fn cache_size(c: &Cache) -> i64 {
     c.nodes.borrow().length() as i64
 }
 
@@ -161,14 +161,14 @@ fn word_bytes(n: usize, f: &dyn Fn(usize) -> i32) -> Vec<u8> {
     b
 }
 
-fn host(bytes: Vec<u8>, stride: i64) -> attribute {
-    attribute { source: source::Bytes(bytes), stride }
+fn host(bytes: Vec<u8>, stride: i64) -> Attribute {
+    Attribute { source: Source::Bytes(bytes), stride }
 }
 
 /// The bytes of a host array are kept while the array is physically the same: a static attribute
 /// of a device set is converted once, and the unchanged bytes are not uploaded again. Keyed by the
 /// set's slot and the attribute's place in it.
-fn kept(converted: Option<&cache>, slot: i64, place: i64, d: &Arc<Vec<f64>>, build: &dyn Fn() -> Result<Vec<u8>, Diagnostic>) -> Result<Vec<u8>, Diagnostic> {
+fn kept(converted: Option<&Cache>, slot: i64, place: i64, d: &Arc<Vec<f64>>, build: &dyn Fn() -> Result<Vec<u8>, Diagnostic>) -> Result<Vec<u8>, Diagnostic> {
     match converted {
         None => build(),
         Some(c) => {
@@ -189,7 +189,7 @@ fn kept(converted: Option<&cache>, slot: i64, place: i64, d: &Arc<Vec<f64>>, bui
 type Device<'a> = &'a dyn Fn(i64) -> Result<G::Value, Diagnostic>;
 
 /// Floats of `width` per instance: constant pairs and scalars take stride 0.
-fn vectors(buffers: &Buffers, device: Device, c: Option<&cache>, slot: i64, place: i64, count: i64, a: &PairAttr) -> Result<attribute, Diagnostic> {
+fn vectors(buffers: &Buffers, device: Device, c: Option<&Cache>, slot: i64, place: i64, count: i64, a: &PairAttr) -> Result<Attribute, Diagnostic> {
     match a {
         PairAttr::Constant((x, y)) => Ok(host(float_bytes(3, &|i| match i { 0 => *x, 1 => *y, _ => 0. })?, 0)),
         PairAttr::Buffer(b) => {
@@ -198,11 +198,11 @@ fn vectors(buffers: &Buffers, device: Device, c: Option<&cache>, slot: i64, plac
             let bytes = kept(c, slot, place, &d, &|| float_bytes(n, &|i| d.get(i).copied().unwrap_or(f64::NAN)))?;
             Ok(host(bytes, b.width))
         }
-        PairAttr::Device(b) => Ok(attribute { source: source::Device(device(b.id)?), stride: b.width }),
+        PairAttr::Device(b) => Ok(Attribute { source: Source::Device(device(b.id)?), stride: b.width }),
     }
 }
 
-fn scalars(buffers: &Buffers, device: Device, c: Option<&cache>, slot: i64, place: i64, count: i64, a: &ScalarAttr) -> Result<attribute, Diagnostic> {
+fn scalars(buffers: &Buffers, device: Device, c: Option<&Cache>, slot: i64, place: i64, count: i64, a: &ScalarAttr) -> Result<Attribute, Diagnostic> {
     match a {
         ScalarAttr::Constant(x) => Ok(host(float_bytes(1, &|_| *x)?, 0)),
         ScalarAttr::Buffer(b) => {
@@ -210,12 +210,12 @@ fn scalars(buffers: &Buffers, device: Device, c: Option<&cache>, slot: i64, plac
             let bytes = kept(c, slot, place, &d, &|| float_bytes(count as usize, &|i| d.get(i).copied().unwrap_or(f64::NAN)))?;
             Ok(host(bytes, 1))
         }
-        ScalarAttr::Device(b) => Ok(attribute { source: source::Device(device(b.id)?), stride: 1 }),
+        ScalarAttr::Device(b) => Ok(Attribute { source: Source::Device(device(b.id)?), stride: 1 }),
     }
 }
 
 /// A device colour is float r, g, b (the shader's mode 1); a host one is packed words (mode 0).
-fn words(buffers: &Buffers, device: Device, c: Option<&cache>, slot: i64, place: i64, count: i64, a: &ColorAttr) -> Result<attribute, Diagnostic> {
+fn words(buffers: &Buffers, device: Device, c: Option<&Cache>, slot: i64, place: i64, count: i64, a: &ColorAttr) -> Result<Attribute, Diagnostic> {
     match a {
         ColorAttr::Constant(x) => Ok(host(word_bytes(1, &|_| *x), 0)),
         ColorAttr::Buffer(b) => {
@@ -230,12 +230,12 @@ fn words(buffers: &Buffers, device: Device, c: Option<&cache>, slot: i64, place:
             })?;
             Ok(host(bytes, 1))
         }
-        ColorAttr::Device(b) => Ok(attribute { source: source::Device(device(b.id)?), stride: b.width }),
+        ColorAttr::Device(b) => Ok(Attribute { source: Source::Device(device(b.id)?), stride: b.width }),
     }
 }
 
 /// Rect, circle and line sets with a device attribute: position, extent, fill, stroke, width.
-fn gpu_set(buffers: &Buffers, device: Device, gpu_: &gpu, c: Option<&cache>, slot: i64, count: i64, kind: &Kind) -> Result<scene::node, Diagnostic> {
+fn gpu_set(buffers: &Buffers, device: Device, gpu_: &Gpu, c: Option<&Cache>, slot: i64, count: i64, kind: &Kind) -> Result<scene::Node, Diagnostic> {
     let (kind_word, attributes) = match kind {
         Kind::Rect { position, size, fill, stroke, .. } => (
             0,
@@ -316,7 +316,7 @@ fn packed1(buffers: &Buffers, a: &ScalarAttr) -> Result<(Arc<Vec<f64>>, i64), Di
 
 /// A set with constant colours is written by the builder from the arrays themselves, with no
 /// allocation per mark; a per-instance colour goes mark by mark through `drawing_color`.
-fn shapes(buffers: &Buffers, count: i64, kind: &Kind) -> Result<scene::node, Diagnostic> {
+fn shapes(buffers: &Buffers, count: i64, kind: &Kind) -> Result<scene::Node, Diagnostic> {
     let mut b = Builder::with_capacity(count);
     match kind {
         Kind::Rect { position, size, fill: ColorAttr::Constant(fill), stroke: ColorAttr::Constant(stroke), .. } => {
@@ -366,7 +366,7 @@ fn shapes(buffers: &Buffers, count: i64, kind: &Kind) -> Result<scene::node, Dia
 }
 
 /// Point instances retain their logical subpixel positions in `Ui_batch`.
-fn points(buffers: &Buffers, count: i64, position: &PairAttr, fill: i32) -> Result<Option<scene::node>, Diagnostic> {
+fn points(buffers: &Buffers, count: i64, position: &PairAttr, fill: i32) -> Result<Option<scene::Node>, Diagnostic> {
     let position = pairs(buffers, position)?;
     let ink = rgba(&color(fill));
     let mut batch = Builder::with_capacity(count);
@@ -407,7 +407,7 @@ fn arrays(buffers: &Buffers, kind: &Kind) -> Result<Vec<Arc<Vec<f64>>>, Diagnost
 
 /// The scene node of a mark set, kept while its description and the physical attribute arrays are
 /// the same as the previous frame's: a batch whose data did not change is not built again.
-fn cached(c: Option<&cache>, buffers: &Buffers, ordinal: i64, entry: &Entry, kind: &Kind, build: &dyn Fn() -> Result<Option<scene::node>, Diagnostic>) -> Result<Option<scene::node>, Diagnostic> {
+fn cached(c: Option<&Cache>, buffers: &Buffers, ordinal: i64, entry: &Entry, kind: &Kind, build: &dyn Fn() -> Result<Option<scene::Node>, Diagnostic>) -> Result<Option<scene::Node>, Diagnostic> {
     let Some(c) = c else { return build() };
     let data = arrays(buffers, kind)?;
     if let Some((previous, old, node)) = c.nodes.borrow_mut().find(&|k, _| *k == ordinal) {
@@ -439,8 +439,8 @@ enum Close {
 pub fn scene(
     buffers: &Buffers,
     image: Option<&dyn Fn(i64) -> rays::image::Image>,
-    gpu_: Option<&gpu>,
-    cache_: Option<&cache>,
+    gpu_: Option<&Gpu>,
+    cache_: Option<&Cache>,
     device: Option<Device>,
     marks: &[Entry],
 ) -> Result<scene::Scene, Diagnostic> {
@@ -450,8 +450,8 @@ pub fn scene(
     let no_dev = |_: i64| -> Result<G::Value, Diagnostic> { Err(no_device()) };
     let device: Device = device.unwrap_or(&no_dev);
     // Open pushes, innermost first, each with the nodes drawn inside it.
-    let mut stack: Vec<(Close, Vec<scene::node>)> = Vec::new();
-    let mut top: Vec<scene::node> = Vec::new();
+    let mut stack: Vec<(Close, Vec<scene::Node>)> = Vec::new();
+    let mut top: Vec<scene::Node> = Vec::new();
     let (mut slot, mut sets) = (0i64, 0i64);
     for entry in marks {
         match entry {

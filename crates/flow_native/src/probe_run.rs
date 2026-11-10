@@ -11,22 +11,22 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// The profile of the executed groups (a snapshot of at most 512).
-pub type reports = Vec<flow_ir::flow_ir::Execution>;
+pub type Reports = Vec<flow_ir::flow_ir::Execution>;
 
 pub fn report_count(profile: &profile::T) -> usize {
     profile::execution_count(profile)
 }
 
-pub fn reports(profile: &profile::T) -> reports {
+pub fn reports(profile: &profile::T) -> Reports {
     profile::executions(profile)
 }
 
-pub fn no_reports() -> reports {
+pub fn no_reports() -> Reports {
     Vec::new()
 }
 
 /// A probe that first runs adds a group: the count is what tells a footer to refresh.
-pub fn same_count(a: &reports, b: &reports) -> bool {
+pub fn same_count(a: &Reports, b: &Reports) -> bool {
     a.len() == b.len()
 }
 
@@ -78,7 +78,7 @@ fn prefix(xs: &[i64], ys: &[i64]) -> bool {
 }
 
 /// Where the node at a path ran, in the given graph instance at the given iterations.
-pub fn find(reports: &reports, instance: Option<i64>, path: &[Symbol], probes: &[i64]) -> Option<ProbeExecution> {
+pub fn find(reports: &Reports, instance: Option<i64>, path: &[Symbol], probes: &[i64]) -> Option<ProbeExecution> {
     let mut best: Option<(i64, &flow_ir::flow_ir::Execution)> = None;
     for report in reports {
         for (origin, site, iter) in &report.sites {
@@ -96,10 +96,10 @@ pub fn find(reports: &reports, instance: Option<i64>, path: &[Symbol], probes: &
         tier: match report.tier {
             Tier::Interp => "Interp",
             Tier::Core => "Core",
-            Tier::Cpu_kernel => "CPU",
+            Tier::CpuKernel => "CPU",
             Tier::Gpu => "GPU",
-            Tier::Gpu_compile => "Gpu_compile",
-            Tier::Gpu_readback => "Readback",
+            Tier::GpuCompile => "Gpu_compile",
+            Tier::GpuReadback => "Readback",
         }
         .to_owned(),
         group: report.owner.0.clone(),
