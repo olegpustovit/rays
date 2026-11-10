@@ -960,6 +960,8 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         // Rust merges OCaml's ogpu_metal_native into ogpu_metal.
         ("ogpu_metal", &["ogpu_core", "metal_sys", "native_layer_token_sys"][..]),
         ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys", "rays_math"][..]),
+        // The UI painter: only the portable GPU API, so it moves to the PXUI repository unchanged.
+        ("pxui_render", &["ogpu_core"][..]),
         ("pxui", &["rays", "rays_math", "param", "mem", "scene_command"][..]),
         ("pxui_shell", &["rays", "rays_math", "editor_core", "pxui"][..]),
         ("pxui_graph", &[
@@ -1078,6 +1080,8 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     forbid("editor_core", &["pxui", "pxui_shell", "pxui_graph", "rays_editor", "sop"]);
     forbid("editor_document", &["pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
     forbid("pxui", &["editor_core", "pxui_shell", "sop", "pxui_graph", "rays_editor"]);
+    forbid("pxui_render", &upper_no_gpu);
+    forbid("pxui_render", &["scene_command", "scene_core", "rays_math", "mem", "mem_sys", "lru", "input", "sdl3", "metal_sys", "vulkan_sys", "ogpu_metal", "ogpu_vulkan", "ogpu_mock"]);
     forbid("pxui_shell", &["sop", "pxui_graph", "rays_editor"]);
     forbid("pxui_graph", &["sop", "pxui_shell", "rays_editor"]);
     forbid("rays_pathtracer", &[
