@@ -6,3 +6,6 @@ license.workspace = true
 
 [dependencies]
 mem_sys = { path = "../mem_sys" }
+
+[lints]
+workspace = true
