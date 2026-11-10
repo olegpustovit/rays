@@ -265,6 +265,16 @@ pub trait DriverQueue {
     /// The GPU seconds of a just-completed epoch; asked once, when the core completes it.
     fn gpu_duration(&self, epoch: i64) -> Option<f64>;
     fn destroy_queue(&self) -> Result<(), Error>;
+    /// A sync_file that signals once all work submitted so far completes.
+    #[cfg(unix)]
+    fn export_sync_file(&self) -> Result<std::os::fd::OwnedFd, Error> {
+        Err(error::make("Backend.export_sync_file", ErrorKind::Unsupported, "backend has no sync_file fences"))
+    }
+    /// Makes the next submitted work wait for `fence`.
+    #[cfg(unix)]
+    fn import_sync_file(&self, _fence: std::os::fd::OwnedFd) -> Result<(), Error> {
+        Err(error::make("Backend.import_sync_file", ErrorKind::Unsupported, "backend has no sync_file fences"))
+    }
 }
 
 pub trait DriverDevice {
@@ -288,6 +298,15 @@ pub trait DriverDevice {
     fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error>;
     fn create_surface(&self, configuration: &surface::AdmittedConfiguration) -> Result<Box<dyn DriverSurface>, Error>;
     fn destroy_device(&self) -> Result<(), Error>;
+    #[cfg(unix)]
+    fn external(&self) -> crate::dmabuf::External { crate::dmabuf::External::default() }
+    #[cfg(unix)]
+    fn dmabuf_formats(&self) -> Vec<crate::dmabuf::Format> { Vec::new() }
+    /// `descriptor` is the admitted shape of `dmabuf`; `render` imports it as a render target.
+    #[cfg(unix)]
+    fn import_dmabuf(&self, _descriptor: &AdmittedTexture, _dmabuf: &crate::dmabuf::Dmabuf, _render: bool) -> Result<Box<dyn DriverResource>, Error> {
+        Err(error::make("Backend.import_dmabuf", ErrorKind::Unsupported, "backend cannot import dmabufs"))
+    }
 }
 
 pub trait Driver {
@@ -717,6 +736,52 @@ pub fn create_depth_texture(device: &Device, descriptor: TextureDescriptor) -> R
 }
 pub fn create_memoryless_texture(device: &Device, depth: bool, descriptor: TextureDescriptor) -> Result<Texture, Error> {
     create_texture_kind("Backend.create_memoryless_texture", device, descriptor, depth, true)
+}
+
+/// Which compositor hooks (dmabuf import, sync_file fences) this device has.
+#[cfg(unix)]
+pub fn external(device: &Device) -> crate::dmabuf::External {
+    if device.0.dead.get() { crate::dmabuf::External::default() } else { device.0.raw().external() }
+}
+/// The DRM formats and modifiers a compositor can advertise; only formats with a `TextureFormat`.
+#[cfg(unix)]
+pub fn dmabuf_formats(device: &Device) -> Vec<crate::dmabuf::Format> {
+    if device.0.dead.get() { return Vec::new(); }
+    device.0.raw().dmabuf_formats().into_iter().filter(|format| crate::dmabuf::texture_format(format.fourcc).is_some()).collect()
+}
+/// Imports a dmabuf as a sampled texture or, with `render_target`, as a render attachment. Both can be
+/// read back. The fds stay the caller's; the texture keeps its own references to the memory.
+#[cfg(unix)]
+pub fn import_dmabuf(device: &Device, dmabuf: &crate::dmabuf::Dmabuf, render_target: bool) -> Result<Texture, Error> {
+    const OP: &str = "Backend.import_dmabuf";
+    live(OP, device)?;
+    let Some(format) = crate::dmabuf::texture_format(dmabuf.fourcc) else {
+        return Err(make_error(OP, ErrorKind::Unsupported, "DRM format has no texture format"));
+    };
+    if dmabuf.planes.is_empty() || dmabuf.planes.len() > crate::dmabuf::MAX_PLANES {
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "a dmabuf has one to four planes"));
+    }
+    let usage = vec![if render_target { TextureUsage::RenderAttachment } else { TextureUsage::TextureBinding }, TextureUsage::TextureCopySrc];
+    let profile = crate::validation::TextureProfile::descriptor_2d(format, dmabuf.width as usize, dmabuf.height as usize, StorageMode::Private, usage, None);
+    let descriptor = crate::validation::admit_texture(&device.0.capabilities, profile)?;
+    let raw = device.0.raw().import_dmabuf(&descriptor, dmabuf, render_target)?;
+    device.0.children.set(device.0.children.get() + 1);
+    Ok(Texture { resource: make_resource(device, raw), texture_descriptor: descriptor })
+}
+/// A sync_file fence that signals once everything submitted so far, on any queue of this device, completes.
+#[cfg(unix)]
+pub fn export_sync_file(queue: &Queue) -> Result<std::os::fd::OwnedFd, Error> {
+    let q = queue.0.borrow();
+    if q.dead { return Err(make_error("Backend.export_sync_file", ErrorKind::StaleHandle, "queue is destroyed")); }
+    q.raw().export_sync_file()
+}
+/// Makes the next submitted work wait for `fence` (a client's acquire fence) on the GPU, or on the CPU
+/// before returning when `external(device).sync_file_import` is false.
+#[cfg(unix)]
+pub fn import_sync_file(queue: &Queue, fence: std::os::fd::OwnedFd) -> Result<(), Error> {
+    let q = queue.0.borrow();
+    if q.dead { return Err(make_error("Backend.import_sync_file", ErrorKind::StaleHandle, "queue is destroyed")); }
+    q.raw().import_sync_file(fence)
 }
 
 pub fn create_queue(device: &Device) -> Result<Queue, Error> {

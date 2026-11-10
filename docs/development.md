@@ -183,6 +183,13 @@ cargo t -p ogpu_vulkan && cargo t -p pxui_render && cargo t -p pxui_wayland
 
 A changed `PATH` reruns the shader build step. Build in the Linux filesystem, not under `/mnt/c`.
 
+Compositor hooks (`ogpu_core::dmabuf`, `backend::{external, dmabuf_formats, import_dmabuf, export_sync_file,
+import_sync_file}`, Linux only) degrade through `backend::external(device)`. Lavapipe in WSL imports dmabufs
+(linear only: no `VK_EXT_image_drm_format_modifier`) but exports none, and has no SYNC_FD semaphores; WSL has
+no `/dev/dri` or `/dev/udmabuf`. `gpu_dmabuf_render_target_fence_and_texture` therefore imports a shared-memory
+file, which the CPU driver maps like a dmabuf, and `gpu_sync_file_fences` prints `RAYS_TEST_SKIP` for its GPU
+half: run the suite with `RAYS_ALLOW_SKIP=1` there.
+
 `pxui_wayland` (the Wayland window host) links `libwayland-client` and `libxkbcommon` (`libwayland-dev`,
 `libxkbcommon-dev`). Its protocol glue is checked in under `crates/pxui_wayland/protocol`; regenerating it needs
 `wayland-scanner` and the `wayland-protocols` XML (`apt-get download wayland-protocols`, `dpkg -x` into `~/vk/root`).
