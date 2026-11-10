@@ -145,7 +145,7 @@ fn near(a: [u8; 4], b: [u8; 4], tolerance: i32) -> bool { a.iter().zip(b).all(|(
 /// Metal handles live on the process main thread, which libtest never gives a test: this target is
 /// `harness = false` and speaks just enough of libtest's protocol (`--list`, names to filter).
 fn main() {
-    let cases: [(&str, fn()); 7] = [
+    let cases: [(&str, fn()); 8] = [
         ("gpu_scene_golden_and_spot_checks", gpu_scene_golden_and_spot_checks),
         ("gpu_one_draw_per_layer", gpu_one_draw_per_layer),
         ("gpu_warm_frame_allocates_nothing", gpu_warm_frame_allocates_nothing),
@@ -153,6 +153,7 @@ fn main() {
         ("gpu_per_side_borders", gpu_per_side_borders),
         ("gpu_ramp_gradient", gpu_ramp_gradient),
         ("gpu_retained_layer_writes_only_dirty_ranges", gpu_retained_layer_writes_only_dirty_ranges),
+        ("gpu_backdrop_blur", gpu_backdrop_blur),
     ];
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--ignored") { return; }
@@ -411,3 +412,59 @@ fn gpu_retained_layer_writes_only_dirty_ranges() {
     drop(painter);
     finish(device, queue);
 }
+
+/// Red channel along the middle row of a `w`-texel-wide RGBA texture readback.
+fn middle_row(pixels: &[u8], w: usize) -> Vec<i32> {
+    let y = pixels.len() / 4 / w / 2;
+    (0..w).map(|x| pixels[(y * w + x) * 4] as i32).collect()
+}
+
+/// A black/white edge at texel `edge` blurred with `sigma` texels: monotonic, 10-90% width 2.56 sigma, far field untouched.
+fn assert_ramp(row: &[i32], edge: usize, sigma: f32, what: &str) {
+    assert!(row.windows(2).all(|p| p[0] <= p[1]), "{what}: monotonic {row:?}");
+    assert_eq!((row[0], row[row.len() - 1]), (0, 255), "{what}: far field unchanged");
+    let first = |level: i32| row.iter().position(|v| *v >= level).unwrap() as f32;
+    let width = first(230) - first(26);
+    assert!((width - 2.56 * sigma).abs() <= 1.5, "{what}: 10-90% width {width}, expected {}", 2.56 * sigma);
+    assert!((row[edge - 1] - 102).abs() <= 14 && (row[edge] - 153).abs() <= 14, "{what}: the two texels at the edge straddle 50%: {} {}", row[edge - 1], row[edge]);
+}
+
+fn gpu_backdrop_blur() {
+    let Some(device) = open() else { return };
+    let queue = ok(be::create_queue(&device));
+    let mut painter = painter(&device);
+    let source = target(&device);
+    let size = [W * SCALE, H * SCALE];
+    let edge = [Instance::rect([0.0, 0.0, 64.0, 96.0], [0, 0, 0, 255]), Instance::rect([64.0, 0.0, 128.0, 96.0], [255, 255, 255, 255])];
+    painter.begin_frame();
+    pass(&queue, &source, &mut |encoder| ok(painter.draw(encoder, size, SCALE as f32, &edge, &[])));
+    // Whole source, sigma 4 px: halved (sigma 2 texels), edge at texel 64 of 128.
+    let blurred = ok(painter.blur(&queue, &source, [0, 0, size[0], size[1]], 4.0)).clone();
+    // The blurred texture drawn as an image through a break, tinted white, into a fresh target.
+    let shown = target(&device);
+    let image = [Instance::image([0.0, 0.0, 128.0, 96.0], [0.0, 0.0, 1.0, 1.0], [255, 255, 255, 255])];
+    pass(&queue, &shown, &mut |encoder| ok(painter.draw(encoder, size, SCALE as f32, &image, &[Break { at_instance: 0, texture: Some(&blurred) }])));
+    let direct = ok(be::read_texture(&blurred, (blurred_width(&blurred) * 4) as i64));
+    let shown_pixels = ok(be::read_texture(&shown, (size[0] * 4) as i64));
+    assert_eq!(blurred_width(&blurred), 128);
+    let row = middle_row(&direct, 128);
+    assert_ramp(&row, 64, 2.0, "x2 downsample");
+    let (top, bottom) = (&direct[(10 * 128 + 60) * 4..][..32], &direct[(80 * 128 + 60) * 4..][..32]);
+    assert!(top.iter().zip(bottom).all(|(a, b)| a.abs_diff(*b) <= 1), "an edge blurred horizontally is the same on every row");
+    assert_eq!(at(&shown_pixels, 20.0, 20.0)[0] as i32, row[20], "drawn image shows the blurred texel");
+    assert_eq!(at(&shown_pixels, 65.5, 48.0)[..3], [row[65] as u8; 3], "drawn image shows the blurred texel next to the edge");
+
+    // Right three quarters, sigma 8 px: the scratch targets are replaced (x4 downsample, 48 texels, edge at 16).
+    let blurred = ok(painter.blur(&queue, &source, [64, 0, size[0], size[1]], 8.0)).clone();
+    painter.begin_frame();
+    pass(&queue, &shown, &mut |_| {});
+    assert_eq!(blurred_width(&blurred), 48);
+    let row = middle_row(&ok(be::read_texture(&blurred, 48 * 4)), 48);
+    assert_ramp(&row, 16, 2.0, "x4 downsample");
+    assert!(painter.blur(&queue, &source, [0, 0, size[0] + 1, size[1]], 4.0).is_err(), "region outside the source is refused");
+    for texture in [&source, &shown] { ok(be::destroy_texture(texture)); }
+    drop(painter);
+    finish(device, queue);
+}
+
+fn blurred_width(texture: &Texture) -> u32 { be::texture_descriptor(texture).width as u32 }
