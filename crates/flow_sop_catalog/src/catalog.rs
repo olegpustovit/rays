@@ -55,7 +55,7 @@ pub fn descriptor(factory: &Factory) -> Descriptor {
         .collect();
     Descriptor {
         qualified: format!("sop/{}", edit_graph::factory_key(factory)),
-        description: format!("{} geometry operation.", edit_graph::factory_label(factory)),
+        description: edit_graph::factory_description(factory).to_owned(),
         key: edit_graph::factory_key(factory).to_owned(),
         operation: edit_graph::factory_operation(factory).to_owned(),
         label: edit_graph::factory_label(factory).to_owned(),
@@ -619,6 +619,7 @@ fn check_embedded(ops: &[Op], library_flag: bool, catalog: &Catalog, forms: &[Sy
     }
     let positions: Vec<i64> = reached.iter().map(|i| library.entries[*i].base).collect();
     let make = || {
+        let _phase = flow_syntax::phase_timer::measure("check.library");
         let catalog = without_kinds(catalog, &|kind| {
             reached.iter().any(|i| {
                 let e = &library.entries[*i];
@@ -676,6 +677,7 @@ fn check_workspace_raw(
     }
     let positions: Vec<i64> = kept.iter().map(|i| bases[*i].1).collect();
     let make = || {
+        let _phase = flow_syntax::phase_timer::measure("check.library");
         let catalog = without_kinds(catalog, &|kind| nodes.iter().any(|node| node.kind.qualified == kind.qualified));
         let sources: Vec<Syntax> =
             kept.iter().zip(&positions).map(|(i, base)| syntax::renumber(*base, &supplied[*i]).0).collect();
@@ -811,10 +813,7 @@ fn kind_of_descriptor(entry: &Descriptor, facts: Option<flow_catalog::KernelFact
                 fields: port.fields.iter().map(|f| (f.name.clone(), f.kind.clone(), f.default.clone())).collect(),
                 folder: first.map_or(Vec::new(), |f| f.folder.clone()),
                 primary: first.is_some_and(|f| f.primary),
-                unit: match port.fields.as_slice() {
-                    [f] => f.unit.clone(),
-                    _ => None,
-                },
+                unit: first.filter(|field| port.fields.iter().all(|component| component.unit == field.unit)).and_then(|field| field.unit.clone()),
             }
         })
         .collect();

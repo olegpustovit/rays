@@ -88,7 +88,7 @@ pub fn find_parameter(parameters: &[Parameter], path: &str) -> Result<Parameter,
         return Ok(found.clone());
     }
     for parameter in parameters {
-        if let Some(found) = components(parameter).into_iter().find(|c| c.path == path) {
+        if let Some(found) = components(parameter).into_iter().find(|c| c.path == path || c.fields[0].name == path) {
             return Ok(found);
         }
     }
@@ -223,6 +223,19 @@ pub fn color_of_text(text: &str) -> Option<(f64, f64, f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grouped_ports_resolve_authored_component_names() {
+        let fields = ["direction_x", "direction_y", "direction_z"].iter().enumerate().map(|(axis, name)| {
+            param::field((*name).into(), param::floating(-1., 1., None, None).unwrap(), Value::Float(0.)).unwrap().vec3("direction".into(), axis as i64).unwrap()
+        }).collect();
+        let schema = param::schema("direction".into(), fields).unwrap();
+        let ports = parameters(false, &schema.view(schema.default()).unwrap()).unwrap();
+        let component = find_parameter(&ports, "direction_x").unwrap();
+        assert_eq!(component, find_parameter(&ports, "direction.x").unwrap());
+        assert_eq!(literal_changes(&component, &Literal::Scalar(Value::Float(0.5))).unwrap(), vec![("direction_x".into(), Value::Float(0.5))]);
+        assert!(find_parameter(&ports, "unknown_x").is_err());
+    }
 
     #[test]
     fn colors() {

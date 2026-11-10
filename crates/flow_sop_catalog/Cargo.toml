@@ -15,3 +15,6 @@ rays_diagnostic = { path = "../rays_diagnostic" }
 rays_math = { path = "../rays_math" }
 input = { path = "../input" }
 mem = { path = "../mem" }
+
+[lints]
+workspace = true
