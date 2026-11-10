@@ -1,0 +1,16 @@
+[package]
+name = "pxui_atspi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The Linux AT-SPI2 bridge: serves pxui's accessibility tree on the accessibility bus through raw libdbus-1.
+# A leaf over pxui's plain-data tree (pxui::a11y); on other targets only the mapping tables build.
+[dependencies]
+pxui = { path = "../pxui" }
+
+[build-dependencies]
+cc = "1"
+
+[lints]
+workspace = true

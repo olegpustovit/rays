@@ -42,6 +42,8 @@ pub fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("pxui_sdl", &["sdl3", "input", "native_layer_token_sys"][..]), // pxui
         // Its Wayland sibling: libwayland-client and xkbcommon through its own C shim, no other crate.
         ("pxui_wayland", &["input", "native_layer_token_sys"][..]), // pxui
+        // The Linux AT-SPI2 bridge: libdbus-1 through its own C shim, over pxui's plain-data accessibility tree.
+        ("pxui_atspi", &["pxui"][..]), // pxui
         ("runtime", &["pxui_sdl", "sdl3", "ogpu_core", "input"][..]),
         ("runtime_resources", &["sdl3", "ogpu_core"][..]),
         ("renderer", &["ogpu_core", "scene_command", "runtime", "lru", "rays_math", "runtime_resources", "scene_core"][..]),
@@ -141,6 +143,7 @@ pub fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     forbid("runtime", &upper);
     forbid("pxui_sdl", &["ogpu_core", "runtime", "renderer"]); // pxui
     forbid("pxui_wayland", &["sdl3", "pxui_sdl", "ogpu_core", "runtime", "renderer", "pxui", "pxui_render"]); // pxui
+    forbid("pxui_atspi", &["sdl3", "pxui_sdl", "pxui_wayland", "ogpu_core", "runtime", "renderer", "pxui_render"]); // pxui
     forbid("flow_native", &["pxui", "rays_shell", "rays_graph", "rays_editor"]);
     forbid("flow_ir", &[
         "rays", "pxui", "rays_shell", "rays_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops",
@@ -236,4 +239,5 @@ pub const DOCS_CHECKS: &[(&str, &str, Option<&str>)] = &[
 pub const UNSAFE_CRATES: &[&str] = &[
     "parallel",
     "pxui_wayland", // pxui: owns its C shim and the extern block over it, like a *_sys crate
+    "pxui_atspi", // pxui: likewise, over libdbus-1
 ];

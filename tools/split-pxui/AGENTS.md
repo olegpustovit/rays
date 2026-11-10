@@ -1,7 +1,7 @@
 # PXUI development guide
 
 PXUI is a Rust native UI engine: `pxui` (layout, widgets, draw list), `pxui_text`, `pxui_render`,
-window hosts (`pxui_sdl`, `pxui_wayland`) and the portable GPU layer under them (`ogpu_*`, `*_sys`).
+window hosts (`pxui_sdl`, `pxui_wayland`), the AT-SPI2 bridge (`pxui_atspi`) and the portable GPU layer under them (`ogpu_*`, `*_sys`).
 The Cargo workspace is the repository root; `crates/` holds everything, `tools/` the test runner and
 the gate, `fixtures/` the goldens, `specification/` the design contracts. Rays embeds this repository
 as its `pxui/` submodule through path dependencies: every crate must build and test here alone, and

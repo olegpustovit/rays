@@ -30,6 +30,8 @@ pub fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         // The window hosts are leaves: SDL, the input types and the native layer token.
         ("pxui_sdl", &["sdl3", "input", "native_layer_token_sys"][..]),
         ("pxui_wayland", &["input", "native_layer_token_sys"][..]),
+        // The Linux AT-SPI2 bridge: libdbus-1 through its own C shim, over pxui's accessibility tree.
+        ("pxui_atspi", &["pxui"][..]),
     ])
 }
 
@@ -44,10 +46,11 @@ pub fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     };
     // GPU backends know nothing about windows, the UI or each other.
     for library in ["ogpu_core", "ogpu_mock", "metal_sys", "vulkan_sys", "ogpu_metal", "ogpu_vulkan"] {
-        forbid(library, &["sdl3", "sdl3_sys", "pxui", "pxui_text", "pxui_render", "pxui_sdl", "pxui_wayland"]);
+        forbid(library, &["sdl3", "sdl3_sys", "pxui", "pxui_text", "pxui_render", "pxui_sdl", "pxui_wayland", "pxui_atspi"]);
     }
     forbid("pxui_sdl", &["ogpu_core"]);
     forbid("pxui_wayland", &["sdl3", "pxui_sdl", "ogpu_core", "pxui", "pxui_render"]);
+    forbid("pxui_atspi", &["sdl3", "pxui_sdl", "pxui_wayland", "ogpu_core", "pxui_render"]);
     forbid("pxui", &["sdl3", "ogpu_core"]);
     forbid("pxui_render", &["sdl3", "metal_sys", "vulkan_sys", "ogpu_metal", "ogpu_vulkan", "ogpu_mock", "mem_sys"]);
     rules
@@ -67,4 +70,4 @@ pub const TESTS_INCLUDED_FORBIDDEN: &[&str] = &["sdl3", "sdl3_sys", "pxui_sdl"];
 pub const DOCS_CHECKS: &[(&str, &str, Option<&str>)] = &[];
 
 /// Crates besides `*_sys` that may use `unsafe`.
-pub const UNSAFE_CRATES: &[&str] = &["pxui_wayland"]; // owns its C shim and the extern block over it, like a *_sys crate
+pub const UNSAFE_CRATES: &[&str] = &["pxui_wayland", "pxui_atspi"]; // own their C shims and the extern blocks over them, like *_sys crates
