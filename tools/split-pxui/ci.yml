@@ -13,7 +13,7 @@ jobs:
       - run: brew install pkgconf sdl3
       - run: cargo check --workspace --tests --locked
       - run: cargo run -q -p gate -- deps
-      # Known failures carried over from Rays (arena unsafe, lifetime structs in the engine): visible, not blocking, until the engine work lands.
+      # Known failures: 14 shape violations left in crates/pxui/src/ui_core.rs and theme.rs (engine owner); make this blocking once `gate shape` is clean.
       - run: cargo run -q -p gate -- shape
         continue-on-error: true
       - run: cargo t -p pxui_text -p pxui_render -p pxui -p ogpu_core -p ogpu_mock -p ogpu_metal -p pxui_sdl -p input -p cfmt
@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: cargo check --workspace --tests --locked
       - run: cargo run -q -p gate -- deps
-      # Known failures carried over from Rays (arena unsafe, lifetime structs in the engine): visible, not blocking, until the engine work lands.
+      # Known failures: 14 shape violations left in crates/pxui/src/ui_core.rs and theme.rs (engine owner); make this blocking once `gate shape` is clean.
       - run: cargo run -q -p gate -- shape
         continue-on-error: true
       - run: cargo t -p pxui_text -p ogpu_core -p ogpu_mock -p input -p cfmt
