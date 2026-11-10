@@ -2906,11 +2906,12 @@ mod tests {
 
     #[test]
     fn native_parameters_survive_reordering_the_spec() {
-        let original = node_of(&clean::factory(), &[fixture()]);
+        let source = fixture();
+        let original = node_of(&clean::factory(), &[source.clone()]);
         let mut specs = clean::specs();
         specs.reverse();
         let reversed = decl::native(&clean::META, specs, clean::operator);
-        let reordered = node_of(&reversed, &[fixture()]);
+        let reordered = node_of(&reversed, &[source]);
         let mut session = session(8);
         let expected = geometry_of(&cook(&mut session, 1, &original));
         let actual = geometry_of(&cook(&mut session, 1, &reordered));

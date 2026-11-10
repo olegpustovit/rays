@@ -97,7 +97,7 @@ fn render(factory: &Factory) -> String {
     let fields: Vec<String> = edit_graph::factory_fields(factory)
         .iter()
         .map(|f| {
-            assert!(f.unit.is_none(), "{key}: unit rendering is not supported by this check yet");
+            let unit = f.unit.as_ref().map_or(String::new(), |unit| format!(" (unit {})", quoted(unit)));
             let folder: String = f.folder.iter().map(|p| format!(" {}", quoted(p))).collect();
             let vec3 = f.vec3.as_ref().map_or("(vec3)".to_owned(), |(g, i)| format!("(vec3 {} {i})", quoted(g)));
             let description = f.description.as_ref().map_or(String::new(), |d| format!(" (description {})", quoted(d)));
@@ -107,7 +107,7 @@ fn render(factory: &Factory) -> String {
                 param::Impact::Export => " (impact export)",
             };
             format!(
-                "(field {} {} (folder{folder}) {} {} (primary {}) {vec3}{description}{impact})",
+                "(field {} {} (folder{folder}) {} {} (primary {}) {vec3}{unit}{description}{impact})",
                 quoted(&f.name),
                 quoted(&f.label),
                 render_kind(&f.kind),
@@ -117,11 +117,12 @@ fn render(factory: &Factory) -> String {
         })
         .collect();
     format!(
-        "(kind {} (key {}) (operation {}) (label {}) (category {}) (slots {}) (fields {}) (outputs (output \"geo\" geometry)) {})",
+        "(kind {} (key {}) (operation {}) (label {}) (description {}) (category {}) (slots {}) (fields {}) (outputs (output \"geo\" geometry)) {})",
         quoted(&format!("sop/{key}")),
         quoted(key),
         quoted(edit_graph::factory_operation(factory)),
         quoted(edit_graph::factory_label(factory)),
+        quoted(edit_graph::factory_description(factory)),
         edit_graph::factory_category(factory).iter().map(|c| quoted(c)).collect::<Vec<_>>().join(" "),
         slots.join(" "),
         fields.join(" "),
