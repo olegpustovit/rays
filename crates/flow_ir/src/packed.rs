@@ -1131,7 +1131,7 @@ fn fast_chunk(sh: &TS, f: &Fast, chunk: usize, base: usize, outs: &mut [Option<&
 /// Everything one `force` carries through its nested evaluations.
 #[derive(Clone)]
 struct Run {
-    t: T,
+    t: Arc<T>,
     live: Live,
     state: State,
     elems: Option<Vec<(Symbol, Value)>>,
@@ -1217,7 +1217,7 @@ fn trace_field(field: i64, h: &ray_host::Hit) -> f64 {
 }
 
 struct TS {
-    t: T,
+    t: Arc<T>,
     live: Live,
     inputs: Vec<Value>,
     borrowed: Vec<Option<Vec<Column>>>,
@@ -3086,7 +3086,7 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
     match compile_impl(false, t.fusion, t.dynamic, &t.count_source, residual, term) {
         Ok(program) => {
             let inner = Run {
-                t: program,
+                t: program.into(),
                 live: run.live.clone(),
                 state: run.state.clone(),
                 elems: run.elems.clone(),
@@ -3289,7 +3289,7 @@ pub struct ForceOptions {
 
 fn make_run(t: &T, live: &Live, o: &ForceOptions, column_source: Option<ColumnSource>, expected_count: Option<usize>) -> Run {
     Run {
-        t: t.clone(),
+        t: t.clone().into(),
         live: live.clone(),
         state: o.state.clone().unwrap_or_else(E::create_state),
         elems: o.elems.clone(),
@@ -3748,7 +3748,7 @@ pub mod host {
 
     fn pv_run(pv: &Pv, resolve: &Option<Resolve>) -> Run {
         Run {
-            t: pv.t.clone(),
+            t: pv.t.clone().into(),
             live: pv.live.clone(),
             state: pv.state.clone(),
             elems: None,
@@ -3800,7 +3800,7 @@ pub mod host {
 
     fn pv_force(pv: &Pv, resolve: &Option<Resolve>, program: &T) -> Result<Value, Diagnostic> {
         let mut run = pv_run(pv, resolve);
-        run.t = program.clone();
+        run.t = program.clone().into();
         force_one(&run, None)
     }
 
