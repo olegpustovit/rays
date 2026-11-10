@@ -3,7 +3,7 @@ use rays_math::mat4;
 use rays_math::vec3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum projection {
+pub enum Projection {
     Perspective { fov_y: f64, near: f64, far: f64 },
     Orthographic { height: f64, near: f64, far: f64 },
 }
@@ -12,13 +12,13 @@ pub enum projection {
 /// radius in scene units (0, the default, is a pinhole); `focus_distance` is the sharp distance
 /// along the view direction, or `None` to focus on `target`. Raster views ignore the lens.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct lens {
+pub struct Lens {
     pub aperture: f64,
     pub focus_distance: Option<f64>,
 }
 
-pub fn pinhole() -> lens {
-    lens { aperture: 0., focus_distance: None }
+pub fn pinhole() -> Lens {
+    Lens { aperture: 0., focus_distance: None }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,8 +26,8 @@ pub struct Camera {
     position: vec3::T,
     target: vec3::T,
     up: vec3::T,
-    projection: projection,
-    lens: lens,
+    projection: Projection,
+    lens: Lens,
 }
 
 fn validate_view(position: vec3::T, target: vec3::T, up: vec3::T) -> Result<(), String> {
@@ -40,7 +40,7 @@ fn validate_view(position: vec3::T, target: vec3::T, up: vec3::T) -> Result<(), 
     Ok(())
 }
 
-fn create(position: vec3::T, target: vec3::T, up: vec3::T, projection: projection) -> Result<Camera, String> {
+fn create(position: vec3::T, target: vec3::T, up: vec3::T, projection: Projection) -> Result<Camera, String> {
     validate_view(position, target, up)?;
     Ok(Camera { position, target, up: vec3::normalize(up), projection, lens: pinhole() })
 }
@@ -51,7 +51,7 @@ pub fn perspective(fov_y: Option<f64>, near: Option<f64>, far: Option<f64>, at: 
     let near = near.unwrap_or(0.1);
     let far = far.unwrap_or(1000.);
     mat4::perspective(fov_y, 1., near, far)?;
-    create(at, target, vec3::unit_y(), projection::Perspective { fov_y, near, far })
+    create(at, target, vec3::unit_y(), Projection::Perspective { fov_y, near, far })
 }
 
 pub fn orthographic(height: f64, at: vec3::T, target: vec3::T) -> Result<Camera, String> {
@@ -60,7 +60,7 @@ pub fn orthographic(height: f64, at: vec3::T, target: vec3::T) -> Result<Camera,
     if !height.is_finite() || height <= 0. {
         return Err("Camera.orthographic: height must be finite and positive".to_string());
     }
-    create(at, target, vec3::unit_y(), projection::Orthographic { height, near, far })
+    create(at, target, vec3::unit_y(), Projection::Orthographic { height, near, far })
 }
 
 pub fn position(camera: &Camera) -> vec3::T {
@@ -75,11 +75,11 @@ pub fn up(camera: &Camera) -> vec3::T {
     camera.up
 }
 
-pub fn projection(camera: &Camera) -> projection {
+pub fn projection(camera: &Camera) -> Projection {
     camera.projection
 }
 
-pub fn lens(camera: &Camera) -> lens {
+pub fn lens(camera: &Camera) -> Lens {
     camera.lens
 }
 
@@ -92,7 +92,7 @@ pub fn focus_distance(camera: &Camera) -> f64 {
 }
 
 /// Errors for a negative or non-finite aperture or a non-positive focus distance.
-pub fn with_lens(lens: lens, camera: &Camera) -> Result<Camera, String> {
+pub fn with_lens(lens: Lens, camera: &Camera) -> Result<Camera, String> {
     if !lens.aperture.is_finite() || lens.aperture < 0. {
         return Err("Camera.with_lens: aperture must be finite and non-negative".to_string());
     }
@@ -129,8 +129,8 @@ fn projection_matrix(viewport: (i64, i64, i64, i64), camera: &Camera) -> Result<
     let (width, height) = viewport_size(viewport)?;
     let aspect = width / height;
     match camera.projection {
-        projection::Perspective { fov_y, near, far } => mat4::perspective(fov_y, aspect, near, far),
-        projection::Orthographic { height, near, far } => {
+        Projection::Perspective { fov_y, near, far } => mat4::perspective(fov_y, aspect, near, far),
+        Projection::Orthographic { height, near, far } => {
             let half_height = height / 2.;
             let half_width = half_height * aspect;
             mat4::orthographic(-half_width, half_width, -half_height, half_height, near, far)

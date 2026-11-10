@@ -21,14 +21,14 @@ use std::f64::consts::PI as pi;
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock, Mutex};
 
-pub type rgb = linear::T;
+pub type Rgb = linear::T;
 
-pub fn rgb(r: f64, g: f64, b: f64) -> rgb {
+pub fn rgb(r: f64, g: f64, b: f64) -> Rgb {
     linear::rgb(r, g, b)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum emit {
+pub enum Emit {
     /// Baked into both maps.
     Dome,
     /// Also extracted as rect area lights; it stays in the camera map and is left out of the
@@ -37,7 +37,7 @@ pub enum emit {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum shape {
+pub enum Shape {
     /// `width` x `height` angular box around its centre.
     Rect,
     /// A band along the parallel at `elevation`: `width` radians of azimuth (>= 2pi is a full
@@ -50,28 +50,28 @@ pub enum shape {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum layer {
+pub enum Layer {
     /// Base. Weight `1 - (1 - |y|) ** sharpness` from the horizon color toward zenith (y > 0) or
     /// nadir.
-    Gradient { zenith: rgb, horizon: rgb, nadir: rgb, sharpness: f64 },
+    Gradient { zenith: Rgb, horizon: Rgb, nadir: Rgb, sharpness: f64 },
     /// Base. Nishita single scattering lit by the World sun; below the horizon it fades to a
     /// ground of 0.3 x the horizon color. Baked at 128x64 and bilinearly upsampled.
     Sky { turbidity: f64, intensity: f64 },
     /// A disc of radiance `intensity * tint` in the camera map only; lighting gets it through
     /// `baked.sun`. Dropped when the sun is below the horizon.
-    Sun { angular_radius: f64, intensity: f64, tint: rgb },
+    Sun { angular_radius: f64, intensity: f64, tint: Rgb },
     /// Adds `color * intensity`, falling off with a smoothstep over `softness` radians outside
     /// the edge.
     Shape {
-        shape: shape,
+        shape: Shape,
         azimuth: f64,
         elevation: f64,
         width: f64,
         height: f64,
         softness: f64,
-        color: rgb,
+        color: Rgb,
         intensity: f64,
-        emit: emit,
+        emit: Emit,
     },
     /// `count` soft round blobs, all from `seed` only. `mirror` adds each blob reflected below
     /// the horizon at 0.25 x radiance; mirrors are always `Dome`.
@@ -82,10 +82,10 @@ pub enum layer {
         elevation_max: f64,
         size_min: f64,
         size_max: f64,
-        palette: Vec<rgb>,
+        palette: Vec<Rgb>,
         intensity: f64,
         mirror: bool,
-        emit: emit,
+        emit: Emit,
     },
     /// Base. The interior of a box seen from the origin with a ceiling grid of panels.
     Room {
@@ -96,29 +96,29 @@ pub enum layer {
         columns: i64,
         panel: f64,
         intensity: f64,
-        wall: rgb,
+        wall: Rgb,
         cove: f64,
-        emit: emit,
+        emit: Emit,
     },
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct entry {
+pub struct Entry {
     pub name: String,
-    pub layer: layer,
+    pub layer: Layer,
     pub visible: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum background {
+pub enum Background {
     /// Show the camera map.
     Environment,
-    Color(rgb),
+    Color(Rgb),
     Transparent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum sun_mode {
+pub enum SunMode {
     /// Uses the linked sun direction.
     Linked,
     Manual(f64, f64),
@@ -129,9 +129,9 @@ pub struct World {
     /// Bottom to top. A base layer (Gradient, Sky, Room) replaces everything below it; the others
     /// add radiance. Invisible entries are skipped, and anything below the topmost visible base
     /// layer is dropped (no maps, no lights).
-    pub layers: Vec<entry>,
+    pub layers: Vec<Entry>,
     /// Not baked: renderers read it at bounce 0.
-    pub background: background,
+    pub background: Background,
     pub rotation: f64,
     /// Stops, not baked: carried to the renderers.
     pub exposure: f64,
@@ -140,80 +140,80 @@ pub struct World {
     /// Radians, north positive.
     pub latitude: f64,
     pub day_of_year: i64,
-    pub sun: sun_mode,
+    pub sun: SunMode,
 }
 
 /// Row-major RGB, 3 floats per texel, equirectangular as above.
 #[derive(Clone, Debug)]
-pub struct map {
+pub struct Map {
     pub width: i64,
     pub height: i64,
     pub pixels: Arc<Vec<f64>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct light {
+pub struct Light {
     pub position: vec3::T,
     /// Emitting side; faces the origin.
     pub normal: vec3::T,
     /// Half-extent axes: the rect is `position +- u +- v`.
     pub u: vec3::T,
     pub v: vec3::T,
-    pub radiance: rgb,
+    pub radiance: Rgb,
 }
 
 /// `direction` points toward the sun; `radiance` is the disc's.
 #[derive(Clone, Debug, PartialEq)]
-pub struct sun {
+pub struct Sun {
     pub direction: vec3::T,
-    pub radiance: rgb,
+    pub radiance: Rgb,
     pub angular_radius: f64,
 }
 
 /// Importance sampling of the lighting map by luminance x sin theta. A row or map with zero
 /// weight is uniform.
 #[derive(Clone, Debug)]
-pub struct cdf {
+pub struct Cdf {
     /// `height + 1` entries, 0 .. 1.
     pub marginal: Arc<Vec<f64>>,
     /// `height` rows of `width + 1`, 0 .. 1.
     pub conditional: Arc<Vec<f64>>,
 }
 
-type lazy_sh9 = LazyLock<Vec<rgb>, Box<dyn FnOnce() -> Vec<rgb> + Send + Sync>>;
-type lazy_specular = LazyLock<Vec<map>, Box<dyn FnOnce() -> Vec<map> + Send + Sync>>;
+type LazySh9 = LazyLock<Vec<Rgb>, Box<dyn FnOnce() -> Vec<Rgb> + Send + Sync>>;
+type LazySpecular = LazyLock<Vec<Map>, Box<dyn FnOnce() -> Vec<Map> + Send + Sync>>;
 
 #[derive(Clone)]
-pub struct baked {
+pub struct Baked {
     /// Everything, sun disc included: what the eye sees.
-    pub camera: map,
+    pub camera: Map,
     /// `camera` minus the `Light` emitters and the sun disc.
-    pub lighting: map,
-    pub cdf: cdf,
-    sh9: Arc<lazy_sh9>,
-    specular: Arc<lazy_specular>,
-    pub lights: Vec<light>,
-    pub sun: Option<sun>,
-    pub background: background,
+    pub lighting: Map,
+    pub cdf: Cdf,
+    sh9: Arc<LazySh9>,
+    specular: Arc<LazySpecular>,
+    pub lights: Vec<Light>,
+    pub sun: Option<Sun>,
+    pub background: Background,
     pub exposure: f64,
 }
 
-impl baked {
+impl Baked {
     /// Irradiance-ready SH: the lighting map's coefficients on the real basis, already multiplied
     /// by the cosine-lobe factors pi, 2pi/3, pi/4 (Ramamoorthi-Hanrahan). Computed when first
     /// forced.
-    pub fn sh9(&self) -> &Vec<rgb> {
+    pub fn sh9(&self) -> &Vec<Rgb> {
         &self.sh9
     }
 
     /// 6 GGX-prefiltered lighting mips for roughness 0, 0.2, .., 1: 128x64, 64x32, .., 4x2. Mip 0
     /// is a box downsample. Computed when first forced.
-    pub fn specular(&self) -> &Vec<map> {
+    pub fn specular(&self) -> &Vec<Map> {
         &self.specular
     }
 }
 
-impl std::fmt::Debug for baked {
+impl std::fmt::Debug for Baked {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "baked {{ camera: {}x{}, lights: {} }}", self.camera.width, self.camera.height, self.lights.len())
     }
@@ -225,11 +225,11 @@ fn clamp1(x: f64) -> f64 {
     fmin(1., fmax(-1., x))
 }
 
-fn white() -> rgb {
+fn white() -> Rgb {
     rgb(1., 1., 1.)
 }
 
-fn scale_rgb(k: f64, c: rgb) -> rgb {
+fn scale_rgb(k: f64, c: Rgb) -> Rgb {
     linear::T { r: k * c.r, g: k * c.g, b: k * c.b }
 }
 
@@ -293,7 +293,7 @@ fn smooth_edge(soft: f64, dist: f64) -> f64 {
 
 // ---- bilinear sampling ----
 
-fn sample_into(m: &map, u: f64, v: f64) -> [f64; 3] {
+fn sample_into(m: &Map, u: f64, v: f64) -> [f64; 3] {
     let fx = (u * m.width as f64) - 0.5;
     let fy = (v * m.height as f64) - 0.5;
     let x0 = fx.floor();
@@ -395,7 +395,7 @@ fn nishita(turbidity: f64, intensity: f64, s: vec3::T, dx: f64, dy: f64, dz: f64
 
 // ponytail: the sky is baked at a fixed 128x64 and upsampled; a sharper Mie halo or horizon needs
 // a larger sky map.
-fn sky_map(turbidity: f64, intensity: f64, sun: vec3::T) -> map {
+fn sky_map(turbidity: f64, intensity: f64, sun: vec3::T) -> Map {
     let w = 128_i64;
     let h = 64_i64;
     let column = move |i: i64| (((i as f64 + 0.5) / w as f64) - 0.5) * TWO_PI;
@@ -423,14 +423,14 @@ fn sky_map(turbidity: f64, intensity: f64, sun: vec3::T) -> map {
         }
         row
     });
-    map { width: w, height: h, pixels: Arc::new(rows.concat()) }
+    Map { width: w, height: h, pixels: Arc::new(rows.concat()) }
 }
 
 // ---- layer preparation ----
 
 /// A soft round emitter: disc (ring = false) or annulus, in local space.
 #[derive(Clone)]
-struct round {
+struct Round {
     cx: f64,
     cy: f64,
     cz: f64,
@@ -441,16 +441,16 @@ struct round {
     half: f64,
     ring: bool,
     soft: f64,
-    color: rgb,
+    color: Rgb,
     promote: bool,
 }
 
-enum prepared {
+enum Prepared {
     /// one rgb per row
     Fill(Vec<f64>),
-    Sky_map(map),
-    Disc { x: f64, y: f64, z: f64, cos_r: f64, color: rgb },
-    Rounds(Vec<round>),
+    SkyMap(Map),
+    Disc { x: f64, y: f64, z: f64, cos_r: f64, color: Rgb },
+    Rounds(Vec<Round>),
     Box {
         c: vec3::T,
         t: vec3::T,
@@ -459,7 +459,7 @@ enum prepared {
         hh: f64,
         soft: f64,
         cos_bound: f64,
-        color: rgb,
+        color: Rgb,
         promote: bool,
     },
     Band {
@@ -470,10 +470,10 @@ enum prepared {
         soft: f64,
         y_lo: f64,
         y_hi: f64,
-        color: rgb,
+        color: Rgb,
         promote: bool,
     },
-    Box_room {
+    BoxRoom {
         hw: f64,
         hh: f64,
         hd: f64,
@@ -481,19 +481,19 @@ enum prepared {
         columns: i64,
         panel: f64,
         intensity: f64,
-        ambient: rgb,
+        ambient: Rgb,
         cove: f64,
         promote: bool,
     },
 }
 
-fn is_base(l: &layer) -> bool {
-    matches!(l, layer::Gradient { .. } | layer::Sky { .. } | layer::Room { .. })
+fn is_base(l: &Layer) -> bool {
+    matches!(l, Layer::Gradient { .. } | Layer::Sky { .. } | Layer::Room { .. })
 }
 
 /// Visible entries from the topmost visible base layer up.
-fn effective(world: &World) -> Vec<layer> {
-    let mut kept: Vec<layer> = Vec::new();
+fn effective(world: &World) -> Vec<Layer> {
+    let mut kept: Vec<Layer> = Vec::new();
     for e in &world.layers {
         if !e.visible {
             continue;
@@ -510,8 +510,8 @@ fn effective(world: &World) -> Vec<layer> {
 
 fn local_sun(world: &World) -> vec3::T {
     match world.sun {
-        sun_mode::Linked => sun_direction(world.latitude, world.day_of_year, world.time_of_day),
-        sun_mode::Manual(azimuth, elevation) => direction(azimuth, elevation),
+        SunMode::Linked => sun_direction(world.latitude, world.day_of_year, world.time_of_day),
+        SunMode::Manual(azimuth, elevation) => direction(azimuth, elevation),
     }
 }
 
@@ -523,10 +523,10 @@ fn bitangent(azimuth: f64, elevation: f64) -> vec3::T {
     vec3::create(-elevation.sin() * azimuth.sin(), elevation.cos(), elevation.sin() * azimuth.cos())
 }
 
-fn make_round(azimuth: f64, elevation: f64, radius: f64, half: f64, ring: bool, soft: f64, color: rgb, promote: bool) -> round {
+fn make_round(azimuth: f64, elevation: f64, radius: f64, half: f64, ring: bool, soft: f64, color: Rgb, promote: bool) -> Round {
     let c = direction(azimuth, elevation);
     let bound = fmin(pi, radius + half + soft);
-    round {
+    Round {
         cx: c.x,
         cy: c.y,
         cz: c.z,
@@ -543,7 +543,7 @@ fn make_round(azimuth: f64, elevation: f64, radius: f64, half: f64, ring: bool, 
 }
 
 /// Blob `k` of a scatter, keyed only by seed and index: (azimuth, elevation, size, color).
-fn blobs(seed: i64, count: i64, elevation_min: f64, elevation_max: f64, size_min: f64, size_max: f64, palette: &[rgb]) -> Vec<(f64, f64, f64, rgb)> {
+fn blobs(seed: i64, count: i64, elevation_min: f64, elevation_max: f64, size_min: f64, size_max: f64, palette: &[Rgb]) -> Vec<(f64, f64, f64, Rgb)> {
     let rng = rand::seed(seed);
     (0..count.max(0))
         .map(|k| {
@@ -567,9 +567,9 @@ fn room_ambient(intensity: f64, panel: f64) -> f64 {
     intensity * panel * panel * 0.5
 }
 
-fn prepare(height: i64, sun: vec3::T, l: &layer) -> Option<prepared> {
+fn prepare(height: i64, sun: vec3::T, l: &Layer) -> Option<Prepared> {
     match l {
-        layer::Gradient { zenith, horizon, nadir, sharpness } => {
+        Layer::Gradient { zenith, horizon, nadir, sharpness } => {
             let mut rows = vec![0.; (height * 3) as usize];
             for j in 0..height {
                 let y = ((j as f64 + 0.5) / height as f64 * pi).cos();
@@ -580,31 +580,31 @@ fn prepare(height: i64, sun: vec3::T, l: &layer) -> Option<prepared> {
                 rows[o + 1] = horizon.g + (w * (far.g - horizon.g));
                 rows[o + 2] = horizon.b + (w * (far.b - horizon.b));
             }
-            Some(prepared::Fill(rows))
+            Some(Prepared::Fill(rows))
         }
-        layer::Sky { turbidity, intensity } => Some(prepared::Sky_map(sky_map(*turbidity, *intensity, sun))),
-        layer::Sun { angular_radius, intensity, tint } => {
+        Layer::Sky { turbidity, intensity } => Some(Prepared::SkyMap(sky_map(*turbidity, *intensity, sun))),
+        Layer::Sun { angular_radius, intensity, tint } => {
             if sun.y <= 0. {
                 None
             } else {
                 // The camera disc is at least 1.5 texels wide so it never vanishes at preview
                 // resolution.
                 let r = fmax(*angular_radius, 1.5 * pi / height as f64);
-                Some(prepared::Disc { x: sun.x, y: sun.y, z: sun.z, cos_r: r.cos(), color: scale_rgb(*intensity, *tint) })
+                Some(Prepared::Disc { x: sun.x, y: sun.y, z: sun.z, cos_r: r.cos(), color: scale_rgb(*intensity, *tint) })
             }
         }
-        layer::Shape { shape: shape_, azimuth, elevation, width, height: sh, softness, color, intensity, emit: emit_ } => {
+        Layer::Shape { shape: shape_, azimuth, elevation, width, height: sh, softness, color, intensity, emit: emit_ } => {
             let color = scale_rgb(*intensity, *color);
-            let promote = *emit_ == emit::Light;
+            let promote = *emit_ == Emit::Light;
             let soft = fmax(0., *softness);
             match shape_ {
-                shape::Circle => Some(prepared::Rounds(vec![make_round(*azimuth, *elevation, width / 2., 0., false, soft, color, promote)])),
-                shape::Ring => Some(prepared::Rounds(vec![make_round(*azimuth, *elevation, width / 2., sh / 2., true, soft, color, promote)])),
-                shape::Rect => {
+                Shape::Circle => Some(Prepared::Rounds(vec![make_round(*azimuth, *elevation, width / 2., 0., false, soft, color, promote)])),
+                Shape::Ring => Some(Prepared::Rounds(vec![make_round(*azimuth, *elevation, width / 2., sh / 2., true, soft, color, promote)])),
+                Shape::Rect => {
                     let a = (width / 2.) + soft;
                     let b = (sh / 2.) + soft;
                     let cos_bound = if a >= pi / 2. || b >= pi / 2. { 0. } else { (a.tan().hypot(b.tan())).atan().cos() };
-                    Some(prepared::Box {
+                    Some(Prepared::Box {
                         c: direction(*azimuth, *elevation),
                         t: tangent(*azimuth),
                         b: bitangent(*azimuth, *elevation),
@@ -616,10 +616,10 @@ fn prepare(height: i64, sun: vec3::T, l: &layer) -> Option<prepared> {
                         promote,
                     })
                 }
-                shape::Strip => {
+                Shape::Strip => {
                     let lo = elevation - (sh / 2.) - soft;
                     let hi = elevation + (sh / 2.) + soft;
-                    Some(prepared::Band {
+                    Some(Prepared::Band {
                         azimuth: *azimuth,
                         hw: width / 2.,
                         elevation: *elevation,
@@ -633,8 +633,8 @@ fn prepare(height: i64, sun: vec3::T, l: &layer) -> Option<prepared> {
                 }
             }
         }
-        layer::Scatter { seed, count, elevation_min, elevation_max, size_min, size_max, palette, intensity, mirror, emit: emit_ } => {
-            let promote = *emit_ == emit::Light;
+        Layer::Scatter { seed, count, elevation_min, elevation_max, size_min, size_max, palette, intensity, mirror, emit: emit_ } => {
+            let promote = *emit_ == Emit::Light;
             let items = blobs(*seed, *count, *elevation_min, *elevation_max, *size_min, *size_max, palette);
             let mut rounds = Vec::new();
             for (azimuth, elevation, size, c) in items {
@@ -646,9 +646,9 @@ fn prepare(height: i64, sun: vec3::T, l: &layer) -> Option<prepared> {
                     rounds.push(blob(elevation, 1., promote));
                 }
             }
-            Some(prepared::Rounds(rounds))
+            Some(Prepared::Rounds(rounds))
         }
-        layer::Room { width, depth, height: rh, rows, columns, panel, intensity, wall, cove, emit: emit_ } => Some(prepared::Box_room {
+        Layer::Room { width, depth, height: rh, rows, columns, panel, intensity, wall, cove, emit: emit_ } => Some(Prepared::BoxRoom {
             hw: width / 2.,
             hh: rh / 2.,
             hd: depth / 2.,
@@ -657,7 +657,7 @@ fn prepare(height: i64, sun: vec3::T, l: &layer) -> Option<prepared> {
             panel: *panel,
             intensity: *intensity,
             cove: *cove,
-            promote: *emit_ == emit::Light,
+            promote: *emit_ == Emit::Light,
             ambient: scale_rgb(room_ambient(*intensity, *panel), *wall),
         }),
     }
@@ -666,7 +666,7 @@ fn prepare(height: i64, sun: vec3::T, l: &layer) -> Option<prepared> {
 // ---- per-texel evaluation ----
 
 /// acc: 0..2 lighting, 3..5 promoted (camera-only) radiance.
-fn add(acc: &mut [f64; 12], promote: bool, k: f64, c: rgb) {
+fn add(acc: &mut [f64; 12], promote: bool, k: f64, c: Rgb) {
     let o = if promote { 3 } else { 0 };
     acc[o] += k * c.r;
     acc[o + 1] += k * c.g;
@@ -683,7 +683,7 @@ fn base(acc: &mut [f64; 12], r: f64, g: f64, b: f64) {
 }
 
 /// The texel arrives in acc 6..11 (u, v, phi, x, y, z). `rounds` is the row's culled round items.
-fn eval(acc: &mut [f64; 12], j: i64, prep: &prepared, rounds: Option<&[usize]>) {
+fn eval(acc: &mut [f64; 12], j: i64, prep: &Prepared, rounds: Option<&[usize]>) {
     let u = acc[6];
     let v = acc[7];
     let phi = acc[8];
@@ -691,20 +691,20 @@ fn eval(acc: &mut [f64; 12], j: i64, prep: &prepared, rounds: Option<&[usize]>) 
     let y = acc[10];
     let z = acc[11];
     match prep {
-        prepared::Fill(rows) => {
+        Prepared::Fill(rows) => {
             let o = (j * 3) as usize;
             base(acc, rows[o], rows[o + 1], rows[o + 2]);
         }
-        prepared::Sky_map(m) => {
+        Prepared::SkyMap(m) => {
             let p = sample_into(m, u, v);
             base(acc, p[0], p[1], p[2]);
         }
-        prepared::Disc { x: dx, y: dy, z: dz, cos_r, color } => {
+        Prepared::Disc { x: dx, y: dy, z: dz, cos_r, color } => {
             if (x * dx) + (y * dy) + (z * dz) >= *cos_r {
                 add(acc, true, 1., *color);
             }
         }
-        prepared::Rounds(items) => {
+        Prepared::Rounds(items) => {
             let indices = rounds.unwrap_or(&[]);
             for &k in indices {
                 let it = &items[k];
@@ -719,7 +719,7 @@ fn eval(acc: &mut [f64; 12], j: i64, prep: &prepared, rounds: Option<&[usize]>) 
                 }
             }
         }
-        prepared::Box { c, t, b, hw, hh, soft, cos_bound, color, promote } => {
+        Prepared::Box { c, t, b, hw, hh, soft, cos_bound, color, promote } => {
             let dc = (x * c.x) + (y * c.y) + (z * c.z);
             if dc > 0. && dc >= *cos_bound {
                 let a = (((x * t.x) + (y * t.y) + (z * t.z)) / dc).atan();
@@ -730,7 +730,7 @@ fn eval(acc: &mut [f64; 12], j: i64, prep: &prepared, rounds: Option<&[usize]>) 
                 }
             }
         }
-        prepared::Band { azimuth, hw, elevation, hh, soft, y_lo, y_hi, color, promote } => {
+        Prepared::Band { azimuth, hw, elevation, hh, soft, y_lo, y_hi, color, promote } => {
             if y >= *y_lo && y <= *y_hi {
                 let el = clamp1(y).asin();
                 let da = ((phi - azimuth + (3. * pi)) % TWO_PI) - pi;
@@ -741,7 +741,7 @@ fn eval(acc: &mut [f64; 12], j: i64, prep: &prepared, rounds: Option<&[usize]>) 
                 }
             }
         }
-        prepared::Box_room { hw, hh, hd, rows, columns, panel, intensity, ambient, cove, promote } => {
+        Prepared::BoxRoom { hw, hh, hd, rows, columns, panel, intensity, ambient, cove, promote } => {
             let ax = x.abs();
             let ay = y.abs();
             let az = z.abs();
@@ -772,11 +772,11 @@ fn eval(acc: &mut [f64; 12], j: i64, prep: &prepared, rounds: Option<&[usize]>) 
 
 // ---- extracted lights ----
 
-fn rect_light(rotation: f64, radius: f64, azimuth: f64, elevation: f64, half_w: f64, half_h: f64, radiance: rgb) -> light {
+fn rect_light(rotation: f64, radius: f64, azimuth: f64, elevation: f64, half_w: f64, half_h: f64, radiance: Rgb) -> Light {
     let c = direction(azimuth, elevation);
     let cap = |a: f64| fmin(a, 1.4);
     let rot = |d: vec3::T| rotate(rotation, d);
-    light {
+    Light {
         position: rot(vec3::scale(c, radius)),
         normal: rot(vec3::neg(c)),
         u: rot(vec3::scale(tangent(azimuth), radius * cap(half_w).tan())),
@@ -787,20 +787,20 @@ fn rect_light(rotation: f64, radius: f64, azimuth: f64, elevation: f64, half_w: 
 
 // ponytail: every emitter becomes rect lights of its angular extent; round shapes scale radiance
 // by area ratio (small-angle), softness is ignored.
-fn extract(rotation: f64, radius: f64, l: &layer) -> Vec<light> {
+fn extract(rotation: f64, radius: f64, l: &Layer) -> Vec<Light> {
     let rect = |azimuth, elevation, half_w, half_h, c| rect_light(rotation, radius, azimuth, elevation, half_w, half_h, c);
     match l {
-        layer::Shape { emit: emit::Light, shape: shape_, azimuth, elevation, width, height, color, intensity, .. } => {
+        Layer::Shape { emit: Emit::Light, shape: shape_, azimuth, elevation, width, height, color, intensity, .. } => {
             let c = scale_rgb(*intensity, *color);
             match shape_ {
-                shape::Rect => vec![rect(*azimuth, *elevation, width / 2., height / 2., c)],
-                shape::Circle => vec![rect(*azimuth, *elevation, width / 2., width / 2., scale_rgb(pi / 4., c))],
-                shape::Ring => {
+                Shape::Rect => vec![rect(*azimuth, *elevation, width / 2., height / 2., c)],
+                Shape::Circle => vec![rect(*azimuth, *elevation, width / 2., width / 2., scale_rgb(pi / 4., c))],
+                Shape::Ring => {
                     let outer = (width / 2.) + (height / 2.);
                     let k = TWO_PI * (width / 2.) * height / (4. * outer * outer);
                     vec![rect(*azimuth, *elevation, outer, outer, scale_rgb(k, c))]
                 }
-                shape::Strip => {
+                Shape::Strip => {
                     let span = fmin(*width, TWO_PI);
                     let n = std::cmp::max(1, int_of_float((span / (pi / 3.)).ceil()));
                     (0..n)
@@ -812,13 +812,13 @@ fn extract(rotation: f64, radius: f64, l: &layer) -> Vec<light> {
                 }
             }
         }
-        layer::Scatter { emit: emit::Light, seed, count, elevation_min, elevation_max, size_min, size_max, palette, intensity, .. } => {
+        Layer::Scatter { emit: Emit::Light, seed, count, elevation_min, elevation_max, size_min, size_max, palette, intensity, .. } => {
             blobs(*seed, *count, *elevation_min, *elevation_max, *size_min, *size_max, palette)
                 .into_iter()
                 .map(|(azimuth, elevation, size, c)| rect(azimuth, elevation, size / 2., size / 2., scale_rgb(0.3 * pi * intensity, c)))
                 .collect()
         }
-        layer::Room { emit: emit::Light, width, depth, height, rows, columns, panel, intensity, .. } => {
+        Layer::Room { emit: Emit::Light, width, depth, height, rows, columns, panel, intensity, .. } => {
             let rows = std::cmp::max(1, *rows);
             let columns = std::cmp::max(1, *columns);
             let cw = width / columns as f64;
@@ -828,7 +828,7 @@ fn extract(rotation: f64, radius: f64, l: &layer) -> Vec<light> {
                 .map(|k| {
                     let i = k % columns;
                     let j = k / columns;
-                    light {
+                    Light {
                         position: rot(vec3::create((-width / 2.) + ((i as f64 + 0.5) * cw), height / 2., (-depth / 2.) + ((j as f64 + 0.5) * cd))),
                         normal: rot(vec3::create(0., -1., 0.)),
                         u: rot(vec3::create(cw * panel / 2., 0., 0.)),
@@ -866,7 +866,7 @@ fn lobe() -> [f64; 9] {
 }
 
 /// Per-row partial sums, then a fixed-order total: same bits on any domain count.
-fn project_sh(m: &map) -> Vec<rgb> {
+fn project_sh(m: &Map) -> Vec<Rgb> {
     let rows = par_rows(m.height, 4, &|j| {
         let mut sums = vec![0.; 27];
         let mut y = [0.; 9];
@@ -906,7 +906,7 @@ fn normalise(a: &mut [f64], o: usize, n: usize, total: f64) {
     a[o + n] = 1.;
 }
 
-fn build_cdf(m: &map) -> cdf {
+fn build_cdf(m: &Map) -> Cdf {
     let w = m.width as usize;
     let h = m.height as usize;
     let rows = par_rows(m.height, 8, &|j| {
@@ -931,11 +931,11 @@ fn build_cdf(m: &map) -> cdf {
         marginal[j + 1] = sum;
     }
     normalise(&mut marginal, 0, h, sum);
-    cdf { marginal: Arc::new(marginal), conditional: Arc::new(conditional) }
+    Cdf { marginal: Arc::new(marginal), conditional: Arc::new(conditional) }
 }
 
 /// Box average when shrinking, bilinear when growing.
-fn resample(src: &map, w: i64, h: i64) -> map {
+fn resample(src: &Map, w: i64, h: i64) -> Map {
     let rows = par_rows(h, 8, &|j| {
         let mut row = vec![0.; (w * 3) as usize];
         for i in 0..w {
@@ -962,7 +962,7 @@ fn resample(src: &map, w: i64, h: i64) -> map {
         }
         row
     });
-    map { width: w, height: h, pixels: Arc::new(rows.concat()) }
+    Map { width: w, height: h, pixels: Arc::new(rows.concat()) }
 }
 
 fn radical_inverse(i: i64) -> f64 {
@@ -981,7 +981,7 @@ fn radical_inverse(i: i64) -> f64 {
 
 // ponytail: 32 fixed Hammersley GGX samples per texel from the previous box level (Karis
 // split-sum, N = V = R); fine-grained lobes alias above that.
-fn prefilter(src: &map, roughness: f64, w: i64, h: i64) -> map {
+fn prefilter(src: &Map, roughness: f64, w: i64, h: i64) -> Map {
     let samples = 32_usize;
     let a = roughness * roughness;
     // Half vectors in the (t, b, n) frame.
@@ -1041,11 +1041,11 @@ fn prefilter(src: &map, roughness: f64, w: i64, h: i64) -> map {
         }
         row
     });
-    map { width: w, height: h, pixels: Arc::new(rows.concat()) }
+    Map { width: w, height: h, pixels: Arc::new(rows.concat()) }
 }
 
-fn specular_chain(box_: &map) -> Vec<map> {
-    let mut boxes: Vec<map> = vec![box_.clone()];
+fn specular_chain(box_: &Map) -> Vec<Map> {
+    let mut boxes: Vec<Map> = vec![box_.clone()];
     for k in 1..6 {
         let next = resample(&boxes[k - 1], 128 >> k, 64 >> k);
         boxes.push(next);
@@ -1061,7 +1061,7 @@ fn specular_chain(box_: &map) -> Vec<map> {
 /// rect lights at distance `light_radius` (default 10.) of angular size preserved
 /// (`2 R tan half-angle`); strips split into segments of at most 60 degrees; room panels stay at
 /// their true position in the box.
-pub fn bake(domains: Option<i64>, light_radius: Option<f64>, width: i64, height: i64, world: &World) -> Result<baked, String> {
+pub fn bake(domains: Option<i64>, light_radius: Option<f64>, width: i64, height: i64, world: &World) -> Result<Baked, String> {
     let light_radius = light_radius.unwrap_or(10.);
     if width < 1 || height < 1 {
         return Err("World.bake: empty map".to_string());
@@ -1069,12 +1069,12 @@ pub fn bake(domains: Option<i64>, light_radius: Option<f64>, width: i64, height:
     let sun_ = local_sun(world);
     let layers = effective(world);
     let rotation = world.rotation;
-    let lights: Vec<light> = layers.iter().flat_map(|l| extract(rotation, light_radius, l)).collect();
+    let lights: Vec<Light> = layers.iter().flat_map(|l| extract(rotation, light_radius, l)).collect();
     let mut sun_out = None;
     for l in &layers {
-        if let layer::Sun { angular_radius, intensity, tint } = l
+        if let Layer::Sun { angular_radius, intensity, tint } = l
             && sun_.y > 0. {
-                sun_out = Some(sun { direction: rotate(rotation, sun_), angular_radius: *angular_radius, radiance: scale_rgb(*intensity, *tint) });
+                sun_out = Some(Sun { direction: rotate(rotation, sun_), angular_radius: *angular_radius, radiance: scale_rgb(*intensity, *tint) });
             }
     }
     // Local azimuth per column: layers are evaluated at phi - rotation.
@@ -1088,7 +1088,7 @@ pub fn bake(domains: Option<i64>, light_radius: Option<f64>, width: i64, height:
     let cos_phis: Vec<f64> = phis.iter().map(|p| p.cos()).collect();
     let produced: RefCell<Option<(Vec<f64>, Vec<f64>)>> = RefCell::new(None);
     parallel::run_unit(domains, &|| {
-        let prepared_layers: Vec<prepared> = layers.iter().filter_map(|l| prepare(height, sun_, l)).collect();
+        let prepared_layers: Vec<Prepared> = layers.iter().filter_map(|l| prepare(height, sun_, l)).collect();
         let rows = par_rows(height, 4, &|j| {
             let v = (j as f64 + 0.5) / height as f64;
             let theta = v * pi;
@@ -1098,7 +1098,7 @@ pub fn bake(domains: Option<i64>, light_radius: Option<f64>, width: i64, height:
             let row: Vec<Option<Vec<usize>>> = prepared_layers
                 .iter()
                 .map(|p| match p {
-                    prepared::Rounds(items) => {
+                    Prepared::Rounds(items) => {
                         Some((0..items.len()).filter(|&k| (theta - items[k].theta).abs() <= items[k].bound).collect())
                     }
                     _ => None,
@@ -1138,34 +1138,34 @@ pub fn bake(domains: Option<i64>, light_radius: Option<f64>, width: i64, height:
         Ok(())
     })?;
     let (lighting, camera) = produced.into_inner().ok_or_else(|| "World.bake: no result".to_string())?;
-    let lighting = map { width, height, pixels: Arc::new(lighting) };
+    let lighting = Map { width, height, pixels: Arc::new(lighting) };
     // ponytail: SH9 is projected from the 128x64 box level, not the full map; exact enough for 9
     // coefficients.
     let cdf_ = parallel_cdf(domains, &lighting)?;
     // ponytail: the raster products are forced on one domain at a time (the raster lowering); the
     // path tracer never reads them
     let box_source = lighting.clone();
-    let box_: Arc<LazyLock<map, Box<dyn FnOnce() -> map + Send + Sync>>> = Arc::new(LazyLock::new(Box::new(move || resample(&box_source, 128, 64))));
+    let box_: Arc<LazyLock<Map, Box<dyn FnOnce() -> Map + Send + Sync>>> = Arc::new(LazyLock::new(Box::new(move || resample(&box_source, 128, 64))));
     let box_sh = box_.clone();
     let box_spec = box_;
-    let sh9: Arc<lazy_sh9> = Arc::new(LazyLock::new(Box::new(move || {
-        let out: RefCell<Vec<rgb>> = RefCell::new(Vec::new());
+    let sh9: Arc<LazySh9> = Arc::new(LazyLock::new(Box::new(move || {
+        let out: RefCell<Vec<Rgb>> = RefCell::new(Vec::new());
         let _ = parallel::run_unit(domains, &|| {
             *out.borrow_mut() = project_sh(&box_sh);
             Ok(())
         });
         out.into_inner()
     })));
-    let specular: Arc<lazy_specular> = Arc::new(LazyLock::new(Box::new(move || {
-        let out: RefCell<Vec<map>> = RefCell::new(Vec::new());
+    let specular: Arc<LazySpecular> = Arc::new(LazyLock::new(Box::new(move || {
+        let out: RefCell<Vec<Map>> = RefCell::new(Vec::new());
         let _ = parallel::run_unit(domains, &|| {
             *out.borrow_mut() = specular_chain(&box_spec);
             Ok(())
         });
         out.into_inner()
     })));
-    Ok(baked {
-        camera: map { width, height, pixels: Arc::new(camera) },
+    Ok(Baked {
+        camera: Map { width, height, pixels: Arc::new(camera) },
         lighting,
         cdf: cdf_,
         sh9,
@@ -1177,8 +1177,8 @@ pub fn bake(domains: Option<i64>, light_radius: Option<f64>, width: i64, height:
     })
 }
 
-fn parallel_cdf(domains: Option<i64>, lighting: &map) -> Result<cdf, String> {
-    let out: RefCell<Option<cdf>> = RefCell::new(None);
+fn parallel_cdf(domains: Option<i64>, lighting: &Map) -> Result<Cdf, String> {
+    let out: RefCell<Option<Cdf>> = RefCell::new(None);
     parallel::run_unit(domains, &|| {
         *out.borrow_mut() = Some(build_cdf(lighting));
         Ok(())
@@ -1186,25 +1186,25 @@ fn parallel_cdf(domains: Option<i64>, lighting: &map) -> Result<cdf, String> {
     out.into_inner().ok_or_else(|| "World.bake: no cdf".to_string())
 }
 
-struct context_data {
+struct ContextData {
     cache: RefCell<Table>,
 }
 
 /// A run-owned LRU of capacity 4 for `bake_cached`.
 #[derive(Clone)]
-pub struct cache_context(Rc<context_data>);
+pub struct CacheContext(Rc<ContextData>);
 
 thread_local! {
-    static CURRENT_CACHE: RefCell<Option<cache_context>> = const { RefCell::new(None) };
+    static CURRENT_CACHE: RefCell<Option<CacheContext>> = const { RefCell::new(None) };
 }
 
-pub fn create_cache_context() -> cache_context {
-    cache_context(Rc::new(context_data {
+pub fn create_cache_context() -> CacheContext {
+    CacheContext(Rc::new(ContextData {
         cache: RefCell::new(side_lru::create(lru::cache("rays.world"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), 4)),
     }))
 }
 
-struct Restore(Option<cache_context>);
+struct Restore(Option<CacheContext>);
 
 impl Drop for Restore {
     fn drop(&mut self) {
@@ -1214,32 +1214,32 @@ impl Drop for Restore {
 }
 
 pub mod private {
-    pub use super::cache_context;
+    pub use super::CacheContext;
     pub use super::create_cache_context;
 
-    pub fn with_cache_context(context: &cache_context, f: &mut dyn FnMut()) {
+    pub fn with_cache_context(context: &CacheContext, f: &mut dyn FnMut()) {
         let previous = super::CURRENT_CACHE.with(|c| c.borrow_mut().replace(context.clone()));
         let _restore = super::Restore(previous);
         f()
     }
 }
 
-fn baked_bytes(b: &baked) -> i64 {
-    let map_bytes = |m: &map| (m.pixels.len() * 8) as i64;
+fn baked_bytes(b: &Baked) -> i64 {
+    let map_bytes = |m: &Map| (m.pixels.len() * 8) as i64;
     map_bytes(&b.camera) + map_bytes(&b.lighting) + ((b.cdf.marginal.len() + b.cdf.conditional.len()) * 8) as i64
 }
 
 /// `bake` behind a run-owned LRU of capacity 4 keyed structurally; changing only `background` or
 /// `exposure` is a hit.
-pub fn bake_cached(width: i64, height: i64, world: &World) -> Result<baked, String> {
+pub fn bake_cached(width: i64, height: i64, world: &World) -> Result<Baked, String> {
     let light_radius = 10.;
-    let plain = World { background: background::Environment, exposure: 0., ..world.clone() };
+    let plain = World { background: Background::Environment, exposure: 0., ..world.clone() };
     let key = TableKey::Str(format!("{plain:?}|{width}|{height}|{light_radius:?}"));
     let context = CURRENT_CACHE.with(|c| c.borrow().clone());
     let baked_ = match context {
         None => bake(None, Some(light_radius), width, height, &plain)?,
         Some(context) => {
-            let found = side_lru::find(&mut context.0.cache.borrow_mut(), &key).and_then(|item| item.downcast::<baked>().ok());
+            let found = side_lru::find(&mut context.0.cache.borrow_mut(), &key).and_then(|item| item.downcast::<Baked>().ok());
             match found {
                 Some(b) => (*b).clone(),
                 None => {
@@ -1250,25 +1250,25 @@ pub fn bake_cached(width: i64, height: i64, world: &World) -> Result<baked, Stri
             }
         }
     };
-    Ok(baked { background: world.background, exposure: world.exposure, ..baked_ })
+    Ok(Baked { background: world.background, exposure: world.exposure, ..baked_ })
 }
 
 // ---- presets ----
 
-fn entry_(name: &str, layer: layer) -> entry {
-    entry { name: name.to_string(), layer, visible: true }
+fn entry_(name: &str, layer: Layer) -> Entry {
+    Entry { name: name.to_string(), layer, visible: true }
 }
 
-fn base_world(layers: Vec<entry>) -> World {
+fn base_world(layers: Vec<Entry>) -> World {
     World {
         layers,
-        background: background::Environment,
+        background: Background::Environment,
         rotation: 0.,
         exposure: 0.,
         time_of_day: 14.,
         latitude: 0.7,
         day_of_year: 172,
-        sun: sun_mode::Linked,
+        sun: SunMode::Linked,
     }
 }
 
@@ -1276,15 +1276,15 @@ fn base_world(layers: Vec<entry>) -> World {
 pub fn default() -> World {
     base_world(vec![entry_(
         "studio",
-        layer::Gradient { zenith: rgb(0.8, 0.8, 0.8), horizon: rgb(0.5, 0.5, 0.5), nadir: rgb(0.2, 0.2, 0.2), sharpness: 1. },
+        Layer::Gradient { zenith: rgb(0.8, 0.8, 0.8), horizon: rgb(0.5, 0.5, 0.5), nadir: rgb(0.2, 0.2, 0.2), sharpness: 1. },
     )])
 }
 
-fn strip(name: &str, elevation: f64, color: rgb, emit_: emit) -> entry {
+fn strip(name: &str, elevation: f64, color: Rgb, emit_: Emit) -> Entry {
     entry_(
         name,
-        layer::Shape {
-            shape: shape::Strip,
+        Layer::Shape {
+            shape: Shape::Strip,
             azimuth: 0.,
             elevation,
             width: TWO_PI,
@@ -1305,12 +1305,12 @@ pub fn presets() -> Vec<(String, World)> {
             base_world(vec![
                 entry_(
                     "dark",
-                    layer::Gradient { zenith: rgb(0.01, 0.005, 0.02), horizon: rgb(0.02, 0.01, 0.03), nadir: rgb(0.005, 0.005, 0.01), sharpness: 2. },
+                    Layer::Gradient { zenith: rgb(0.01, 0.005, 0.02), horizon: rgb(0.02, 0.01, 0.03), nadir: rgb(0.005, 0.005, 0.01), sharpness: 2. },
                 ),
-                strip("magenta high", 0.45, rgb(1., 0.1, 0.6), emit::Light),
-                strip("cyan high", 0.25, rgb(0.1, 0.8, 1.), emit::Light),
-                strip("cyan low", -0.25, rgb(0.1, 0.8, 1.), emit::Dome),
-                strip("magenta low", -0.45, rgb(1., 0.1, 0.6), emit::Dome),
+                strip("magenta high", 0.45, rgb(1., 0.1, 0.6), Emit::Light),
+                strip("cyan high", 0.25, rgb(0.1, 0.8, 1.), Emit::Light),
+                strip("cyan low", -0.25, rgb(0.1, 0.8, 1.), Emit::Dome),
+                strip("magenta low", -0.45, rgb(1., 0.1, 0.6), Emit::Dome),
             ]),
         ),
         (
@@ -1318,11 +1318,11 @@ pub fn presets() -> Vec<(String, World)> {
             base_world(vec![
                 entry_(
                     "dusk",
-                    layer::Gradient { zenith: rgb(0.05, 0.04, 0.08), horizon: rgb(0.12, 0.08, 0.1), nadir: rgb(0.03, 0.03, 0.04), sharpness: 1.5 },
+                    Layer::Gradient { zenith: rgb(0.05, 0.04, 0.08), horizon: rgb(0.12, 0.08, 0.1), nadir: rgb(0.03, 0.03, 0.04), sharpness: 1.5 },
                 ),
                 entry_(
                     "blobs",
-                    layer::Scatter {
+                    Layer::Scatter {
                         seed: 7,
                         count: 24,
                         elevation_min: 0.05,
@@ -1332,7 +1332,7 @@ pub fn presets() -> Vec<(String, World)> {
                         palette: vec![rgb(1., 0.6, 0.7), rgb(0.6, 0.8, 1.), rgb(1., 0.9, 0.6), rgb(0.7, 1., 0.8)],
                         intensity: 4.,
                         mirror: true,
-                        emit: emit::Dome,
+                        emit: Emit::Dome,
                     },
                 ),
             ]),
@@ -1341,7 +1341,7 @@ pub fn presets() -> Vec<(String, World)> {
             "white room".to_string(),
             base_world(vec![entry_(
                 "room",
-                layer::Room {
+                Layer::Room {
                     width: 8.,
                     depth: 12.,
                     height: 4.,
@@ -1351,26 +1351,26 @@ pub fn presets() -> Vec<(String, World)> {
                     intensity: 8.,
                     wall: rgb(0.8, 0.8, 0.8),
                     cove: 2.,
-                    emit: emit::Light,
+                    emit: Emit::Light,
                 },
             )]),
         ),
         (
             "daylight".to_string(),
             base_world(vec![
-                entry_("sky", layer::Sky { turbidity: 1., intensity: 1. }),
-                entry_("sun", layer::Sun { angular_radius: 0.02, intensity: 2000., tint: rgb(1., 0.95, 0.9) }),
+                entry_("sky", Layer::Sky { turbidity: 1., intensity: 1. }),
+                entry_("sun", Layer::Sun { angular_radius: 0.02, intensity: 2000., tint: rgb(1., 0.95, 0.9) }),
             ]),
         ),
     ]
 }
 
 /// Update baked background/exposure while sharing the retained products.
-pub fn with_background(b: &baked, background: background, exposure: Option<f64>) -> baked {
-    baked { background, exposure: exposure.unwrap_or(b.exposure), ..b.clone() }
+pub fn with_background(b: &Baked, background: Background, exposure: Option<f64>) -> Baked {
+    Baked { background, exposure: exposure.unwrap_or(b.exposure), ..b.clone() }
 }
 
 /// `{ baked with sun }`.
-pub fn with_sun(b: &baked, sun: Option<sun>) -> baked {
-    baked { sun, ..b.clone() }
+pub fn with_sun(b: &Baked, sun: Option<Sun>) -> Baked {
+    Baked { sun, ..b.clone() }
 }

@@ -3,32 +3,32 @@ use rays_math::color;
 use rays_math::vec3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct attenuation {
+pub struct Attenuation {
     pub constant: f64,
     pub quadratic: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum kind {
+pub enum Kind {
     Directional { direction: vec3::T },
-    Point { position: vec3::T, attenuation: attenuation },
-    Spot { position: vec3::T, direction: vec3::T, cutoff: f64, concentration: f64, attenuation: attenuation },
-    Area { position: vec3::T, direction: vec3::T, width: f64, height: f64, samples: i64, attenuation: attenuation },
+    Point { position: vec3::T, attenuation: Attenuation },
+    Spot { position: vec3::T, direction: vec3::T, cutoff: f64, concentration: f64, attenuation: Attenuation },
+    Area { position: vec3::T, direction: vec3::T, width: f64, height: f64, samples: i64, attenuation: Attenuation },
 }
 
 /// `diffuse` tints both the diffuse and the specular response.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Light {
-    pub kind: kind,
+    pub kind: Kind,
     pub diffuse: color::T,
     pub intensity: f64,
 }
 
-const NO_ATTENUATION: attenuation = attenuation { constant: 1., quadratic: 0. };
+const NO_ATTENUATION: Attenuation = Attenuation { constant: 1., quadratic: 0. };
 
 /// Falloff divisor `constant + quadratic * distance^2`. Both coefficients must be finite and
 /// non-negative, with at least one non-zero.
-pub fn attenuation(constant: Option<f64>, quadratic: Option<f64>) -> Result<attenuation, String> {
+pub fn attenuation(constant: Option<f64>, quadratic: Option<f64>) -> Result<Attenuation, String> {
     let constant = constant.unwrap_or(1.);
     let quadratic = quadratic.unwrap_or(0.);
     if constant < 0. || quadratic < 0. || !constant.is_finite() || !quadratic.is_finite() {
@@ -37,10 +37,10 @@ pub fn attenuation(constant: Option<f64>, quadratic: Option<f64>) -> Result<atte
     if constant == 0. && quadratic == 0. {
         return Err("Light.attenuation: at least one coefficient must be non-zero".to_string());
     }
-    Ok(attenuation { constant, quadratic })
+    Ok(Attenuation { constant, quadratic })
 }
 
-fn make(diffuse: Option<color::T>, intensity: Option<f64>, kind: kind) -> Result<Light, String> {
+fn make(diffuse: Option<color::T>, intensity: Option<f64>, kind: Kind) -> Result<Light, String> {
     let intensity = intensity.unwrap_or(1.);
     if !intensity.is_finite() || intensity < 0. {
         return Err("Light: intensity must be finite and non-negative".to_string());
@@ -56,18 +56,18 @@ fn direction(value: vec3::T) -> Result<vec3::T, String> {
 }
 
 pub fn directional(diffuse: Option<color::T>, intensity: Option<f64>, value: vec3::T) -> Result<Light, String> {
-    make(diffuse, intensity, kind::Directional { direction: direction(value)? })
+    make(diffuse, intensity, Kind::Directional { direction: direction(value)? })
 }
 
-pub fn point(diffuse: Option<color::T>, intensity: Option<f64>, attenuation: Option<attenuation>, at: vec3::T) -> Result<Light, String> {
-    make(diffuse, intensity, kind::Point { position: at, attenuation: attenuation.unwrap_or(NO_ATTENUATION) })
+pub fn point(diffuse: Option<color::T>, intensity: Option<f64>, attenuation: Option<Attenuation>, at: vec3::T) -> Result<Light, String> {
+    make(diffuse, intensity, Kind::Point { position: at, attenuation: attenuation.unwrap_or(NO_ATTENUATION) })
 }
 
 /// `cutoff` is the cone half-angle in radians.
 pub fn spot(
     diffuse: Option<color::T>,
     intensity: Option<f64>,
-    attenuation: Option<attenuation>,
+    attenuation: Option<Attenuation>,
     at: vec3::T,
     value: vec3::T,
     cutoff: f64,
@@ -82,7 +82,7 @@ pub fn spot(
     make(
         diffuse,
         intensity,
-        kind::Spot {
+        Kind::Spot {
             position: at,
             direction: direction(value)?,
             cutoff,
@@ -96,7 +96,7 @@ pub fn spot(
 pub fn area(
     diffuse: Option<color::T>,
     intensity: Option<f64>,
-    attenuation: Option<attenuation>,
+    attenuation: Option<Attenuation>,
     samples: Option<i64>,
     at: vec3::T,
     value: vec3::T,
@@ -113,7 +113,7 @@ pub fn area(
     make(
         diffuse,
         intensity,
-        kind::Area {
+        Kind::Area {
             position: at,
             direction: direction(value)?,
             width,
