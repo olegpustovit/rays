@@ -66,8 +66,8 @@ mod tests {
         assert_eq!(float_at(seed(0), 5).to_bits(), 0x3fd4f2e7c31d1fa8); state = after;
         let (value, after) = next(state); assert_eq!(value, 0x2c829abe1f4532e1);
         assert_eq!(float_at(seed(0), 6).to_bits(), 0x3fc6414d5f0fa298); state = after;
-        let (value, after) = next(state); assert_eq!(value, 0xc584133ac916ab3c);
-        assert_eq!(float_at(seed(0), 7).to_bits(), 0x3fe8b082675922d5); state = after;
+        let (value, _) = next(state); assert_eq!(value, 0xc584133ac916ab3c);
+        assert_eq!(float_at(seed(0), 7).to_bits(), 0x3fe8b082675922d5);
         assert_eq!(float_at_int(0, 0).to_bits(), 0x3fec4415072f63b9);
         assert_eq!(float_at_int(1, 0).to_bits(), 0x3fe22145bd91204b);
         assert_eq!(float_at_int(-1, 0).to_bits(), 0x3fec9b2e2ee36ca5);
