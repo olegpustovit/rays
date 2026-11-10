@@ -1,7 +1,7 @@
 // UI primitive encoding and ownership assertions.
 use crate::render_ir::{self, Command, Transform};
 use crate::shape2;
-use crate::ui_batch::{self, Builder, Table};
+use crate::ui_batch::{self, Builder};
 
 type Attr<'a> = (&'a [f64], i64);
 
@@ -135,16 +135,7 @@ fn published_batch_validation_is_remembered_and_builder_refuses_bad_input() {
     assert!(Builder::create().circle(f64::NAN, 1.0, 1.0, None, None, 0.0).is_err());
 }
 
-#[test]
-#[ignore = "PARITY: a packed Ui_batch copy cannot be tampered with bytes from outside the crate (instances() is read-only); refusals of the same bytes are checked through the builder instead"]
-fn tampered_packed_copies_are_refused() {
-    let mut builder = Builder::create();
-    builder.shape_rect(1.0, 1.0, 2.0, 2.0, -1, 0).unwrap();
-    let good: Table = builder.publish().unwrap();
-    assert!(ui_batch::valid_shapes(&good));
-    assert!(Builder::create().circle(f64::NAN, 0.0, 1.0, None, None, 0.0).is_err());
-    assert!(Builder::create().shape_rect(0.0, 0.0, -1.0, 2.0, -1, 0).is_err());
-}
+
 
 #[test]
 fn published_batches_do_not_change_when_the_builder_grows() {

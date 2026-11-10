@@ -9,3 +9,6 @@ path = "src/lib.rs"
 
 [dependencies]
 rays_math = { path = "../rays_math" }
+
+[lints]
+workspace = true

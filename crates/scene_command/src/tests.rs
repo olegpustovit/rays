@@ -10,7 +10,6 @@ fn pair(x: f64, y: f64) -> marks::PairAttr { marks::PairAttr::Constant((x, y)) }
 fn scalar(value: f64) -> marks::ScalarAttr { marks::ScalarAttr::Constant(value) }
 fn color(value: i32) -> marks::ColorAttr { marks::ColorAttr::Constant(value) }
 fn pair_buffer(id: i64, count: i64, width: i64) -> marks::PairAttr { marks::PairAttr::Buffer(marks::Buffer { id, count, width }) }
-fn scalar_buffer(id: i64, count: i64, width: i64) -> marks::ScalarAttr { marks::ScalarAttr::Buffer(marks::Buffer { id, count, width }) }
 fn color_buffer(id: i64, count: i64, width: i64) -> marks::ColorAttr { marks::ColorAttr::Buffer(marks::Buffer { id, count, width }) }
 fn pair_device(id: i64, count: i64, width: i64) -> marks::PairAttr { marks::PairAttr::Device(marks::Buffer { id, count, width }) }
 fn scalar_device(id: i64, count: i64, width: i64) -> marks::ScalarAttr { marks::ScalarAttr::Device(marks::Buffer { id, count, width }) }

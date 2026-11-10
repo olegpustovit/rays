@@ -321,7 +321,7 @@ impl Builder {
 mod tests {
     use super::*;
 
-    // lib/scene_command/test_ui_batch.ml: packed coordinates, clipping, batches and reset.
+    // : packed coordinates, clipping, batches and reset.
     #[test]
     fn logical_coordinates_clipped_chords_and_immutable_reset() {
         let mut builder = Builder::with_capacity(1);
