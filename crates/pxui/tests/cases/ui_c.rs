@@ -620,7 +620,7 @@ pub fn window_pxui_modal_4() {
     let under = move |k: i64| -> Vec<scene::Node> {
         if k == fk { vec![scene::rect((0, 0), 100, 60, Some(color::black()), None).unwrap()] } else { Vec::new() }
     };
-    let nodes = ui.scene(Some(&under));
+    let nodes = rays_shell::host::scene(&ui, Some(&under));
     match layer::stage_native(320, 240, &nodes) {
         Ok(staged) => {
             let ok = matches!(
@@ -791,12 +791,12 @@ pub fn window_pxui_carry() {
     }
     // an idle frame after a carry builds nothing new
     carried(&mut ui, vec![]);
-    let idle = ui.scene(None).len();
+    let idle = rays_shell::host::scene(&ui, None).len();
     ui.carry(None, "sop", "(ref shards)");
     carried(&mut ui, vec![move_to((50, 50))]);
     ui.cancel_carry();
     carried(&mut ui, vec![]);
-    if ui.scene(None).len() != idle {
+    if rays_shell::host::scene(&ui, None).len() != idle {
         fail("an idle frame painted a ghost");
     }
     ui.destroy();

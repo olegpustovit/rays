@@ -38,7 +38,7 @@ pub fn window_pxui_picker() {
         } else {
             vec![]
         };
-        ui.frame(&frame_at(keys, 1.0, 0.0, events), &mut |ui| {
+        rays_shell::host::frame(ui, &frame_at(keys, 1.0, 0.0, events), &mut |ui| {
             ui.panel(PanelOpts::default().at(0.0, 0.0).width(240.0), "p", &mut |ui| {
                 let off: Rc<dyn Fn(i64) -> bool> = {
                     let (off_index, all_off) = (off_index.clone(), all_off.clone());
@@ -68,6 +68,7 @@ pub fn window_pxui_picker() {
         *query.borrow_mut() = String::new();
         rays::clipboard::set_text("del").unwrap_or_else(|m| fail(&m));
         pick(&mut ui, true, false, vec![key_down(kc('v'))]);
+        pick(&mut ui, false, false, vec![]);
         if *query.borrow() != "del" {
             fail("picker did not paste the search query");
         }
@@ -92,6 +93,7 @@ pub fn window_pxui_picker() {
             fail("picker did not cut the selection");
         }
         pick(&mut ui, true, false, vec![key_down(kc('v'))]);
+        pick(&mut ui, false, false, vec![]);
         if *query.borrow() != "delta" {
             fail("picker pasted outside the caret");
         }
@@ -267,7 +269,7 @@ impl Rig {
         };
         let area = &mut self.area;
         let submitted = &mut self.submitted;
-        self.ui.frame(&frame_at(o.keys, 1.0, self.time, events), &mut |ui| {
+        rays_shell::host::frame(&mut self.ui, &frame_at(o.keys, 1.0, self.time, events), &mut |ui| {
             let (text, submit) = ui.text_area_submit((0.0, 0.0), 300.0, 96.0, &opts, "area", area);
             *area = text;
             *submitted = submit;
@@ -283,7 +285,7 @@ impl Rig {
     }
 
     pub fn region(&self) -> (i64, i64) {
-        match &layer::text_regions(&self.ui.scene(None))[..] {
+        match &layer::text_regions(&rays_shell::host::scene(&self.ui, None))[..] {
             [(_, y, _, _, true, cursor)] => (*y, *cursor),
             _ => fail("text area lost its IME region"),
         }
@@ -349,6 +351,7 @@ pub fn text_area_start(platform: Platform) -> Rig {
         fail("text area cut lost the text");
     }
     rig.keyed(vec![command_key], vec![key_down(kc('v'))]);
+    rig.plain(vec![]);
     rig.expect("paste keeps the newline", "_abX\nc\u{e9}");
     // copy and cut with no selection take the caret line: of an empty area, nothing
     rig.area = String::new();

@@ -47,7 +47,7 @@ fn render(height: i64, build: &mut dyn FnMut(&mut Ui)) -> canvas::Canvas {
     }
     let canvas_ = canvas::create(WIDTH * scale(), height * scale()).expect("canvas");
     let mut nodes = vec![scene::clear(color::rgb(228, 139, 161))];
-    nodes.extend(ui.scene(None));
+    nodes.extend(rays_shell::host::scene(&ui, None));
     canvas::render(Some(scale()), &canvas_, &nodes).expect("Canvas.render");
     ui.destroy();
     canvas_
@@ -206,7 +206,7 @@ fn gpu_parity_commands() {
                 f.pixel_scale = (density, density);
                 ui.frame(&f, &mut |ui| build(ui));
             }
-            let staged = rays::scene::layer::stage_native(WIDTH, *height, &ui.scene(None)).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let staged = rays::scene::layer::stage_native(WIDTH, *height, &rays_shell::host::scene(&ui, None)).unwrap_or_else(|e| panic!("{name}: {e}"));
             let mut packets = 0;
             for layer in &staged.layers {
                 if let rays::scene::layer::NativeLayer::UiLayer(batch, _) = layer {

@@ -2,7 +2,7 @@
 use crate::theme::{self, Theme};
 use input::{Event, Key, MouseButton, Platform, ScrollPhase};
 use rays_math::hash;
-use rays::{frame as rframe, scene, sketch};
+use input::frame as rframe;
 use rays_math::color::{self, T as Color};
 use scene_command::ui_batch::{self, Clip};
 use std::any::Any;
@@ -411,6 +411,35 @@ pub struct Raster {
     pub alpha: Vec<u8>,
 }
 
+/// One paint layer: the base UI, then a layer per floating root (`key` is its box key; 0 for the
+/// base). `images` binds every texture id the batch samples.
+pub struct Layer {
+    pub key: i64,
+    pub batch: ui_batch::Table,
+    pub images: Vec<(i64, Image)>,
+}
+
+/// What the frame asks of the window system; the host applies it after the frame.
+#[derive(Default)]
+pub struct PlatformOut {
+    /// the pointer shape a hovered or captured control asked for
+    pub cursor: Option<Cursor>,
+    /// the focused text's input area and the caret's offset in it, for the input method
+    pub ime: Option<((i64, i64, i64, i64), i64)>,
+    /// the ground the UI is painted on, on the frame it changed (the macOS title bar)
+    pub background: Option<Color>,
+    /// text to put on the clipboard
+    pub clipboard: Option<String>,
+    /// the UI wants the clipboard's text: the host sends `Event::Paste` with the next frame
+    pub paste: bool,
+}
+
+/// The completed frame: its paint layers and the platform requests.
+pub struct FrameOut<'a> {
+    pub draw: &'a [Layer],
+    pub platform: &'a PlatformOut,
+}
+
 /// What PXUI needs from the host's text and texture services.
 // ponytail: a function table until pxui_text (P3) and pxui_render (P2) own glyphs and textures.
 pub struct Backend {
@@ -797,7 +826,6 @@ pub struct Ui {
     dropped: Option<(Payload, i64)>,
     carry_latch: Option<i64>,
     passed_undo: Option<UndoKind>,
-    requested_cursor: Option<Cursor>,
     frame_events: Vec<Event>,
     input_frame: Option<rframe::Frame>,
     routed_events: Vec<(i64, Event, (f64, f64))>,
@@ -814,12 +842,11 @@ pub struct Ui {
     chain_key: i64,
     chain: Vec<i64>,
     batch_builder: Option<ui_batch::Builder>,
-    regions: Vec<scene::Node>,
     label: String,
     painted_layers: Vec<(i64, ui_batch::Table)>,
-    scene_layers: Vec<(i64, Vec<scene::Node>)>,
+    draw: Vec<Layer>,
+    out: PlatformOut,
     borrowed_images: Vec<(i64, Image)>,
-    scene: Vec<scene::Node>,
     destroyed: bool,
 }
 
@@ -927,7 +954,6 @@ impl Ui {
             dropped: None,
             carry_latch: None,
             passed_undo: None,
-            requested_cursor: None,
             frame_events: Vec::new(),
             input_frame: None,
             routed_events: Vec::new(),
@@ -944,12 +970,11 @@ impl Ui {
             chain_key: 0,
             chain: Vec::new(),
             batch_builder: Some(ui_batch::Builder::with_capacity(1024)),
-            regions: Vec::new(),
             label: String::new(),
             painted_layers: Vec::new(),
-            scene_layers: Vec::new(),
+            draw: Vec::new(),
+            out: PlatformOut::default(),
             borrowed_images: Vec::new(),
-            scene: Vec::new(),
             destroyed: false,
         }
     }
@@ -971,10 +996,8 @@ impl Ui {
             }
             self.fonts.destroy();
             self.borrowed_images.clear();
-            self.scene.clear();
-            self.scene_layers.clear();
+            self.draw.clear();
             self.painted_layers.clear();
-            self.regions.clear();
             self.boxes.clear();
             for slot in &mut self.slots { slot.labels.clear(); }
             self.count = 0;
@@ -1004,21 +1027,18 @@ impl Ui {
         self.kit_row_height = 24.max(size + 11);
     }
 
-    /// The most recently completed frame, including text-input regions. `under` inserts a host
-    /// scene immediately before a floating root's paint, addressed by its box key.
-    pub fn scene(&self, under: Option<&dyn Fn(i64) -> Vec<scene::Node>>) -> Vec<scene::Node> {
-        match under {
-            None => self.scene.clone(),
-            Some(under) => {
-                let mut out = Vec::new();
-                for (key, layer) in &self.scene_layers {
-                    out.extend(under(*key));
-                    out.extend(layer.iter().cloned());
-                }
-                out.extend(self.regions.iter().cloned());
-                out
-            }
-        }
+    /// The most recently completed frame.
+    pub fn output(&self) -> FrameOut<'_> {
+        FrameOut { draw: &self.draw, platform: &self.out }
+    }
+
+    /// Ask the host for the clipboard's text; it arrives as `Event::Paste` with the next frame.
+    pub(crate) fn request_paste(&mut self) {
+        self.out.paste = true;
+    }
+
+    pub(crate) fn copy(&mut self, text: &str) {
+        self.out.clipboard = Some(text.to_owned());
     }
 
     /// How many keys the retained cache holds (live slots).
@@ -1341,7 +1361,7 @@ impl Ui {
 
     fn route(&mut self, frame: &rframe::Frame) {
         self.signals.clear();
-        self.requested_cursor = None;
+        self.out.cursor = None;
         self.frame_events = frame.input.events.clone();
         self.input_frame = Some(frame.clone());
         self.routed_events.clear();
@@ -1402,7 +1422,7 @@ impl Ui {
                 Event::KeyPressed(Key::Tab) if !command => {
                     (if self.focus == 0 { ROOT_KEY } else { self.focus }, (0.0, 0.0))
                 }
-                Event::KeyPressed(_) | Event::KeyReleased(_) | Event::TextInput(_) | Event::TextEditing { .. } => {
+                Event::KeyPressed(_) | Event::KeyReleased(_) | Event::TextInput(_) | Event::TextEditing { .. } | Event::Paste(_) => {
                     (self.focus, (0.0, 0.0))
                 }
                 _ => (0, (0.0, 0.0)),
@@ -1614,7 +1634,7 @@ impl Ui {
                     self.edit_focus = 0;
                     self.keyboard_focus = false;
                 }
-                Event::KeyPressed(_) | Event::KeyReleased(_) | Event::TextInput(_) | Event::TextEditing { .. } => {
+                Event::KeyPressed(_) | Event::KeyReleased(_) | Event::TextInput(_) | Event::TextEditing { .. } | Event::Paste(_) => {
                     if self.focus != 0 {
                         let focus = self.focus;
                         let mods = modifiers.clone();
@@ -1665,13 +1685,9 @@ impl Ui {
         self.hot != 0 || self.active.is_some_and(|a| a != 0)
     }
 
-    pub fn cursor(&self) -> Option<Cursor> {
-        self.requested_cursor
-    }
-
     /// Cursor requested by a hovered or captured PXUI control; the last request of a frame wins.
     pub fn request_cursor(&mut self, shape: Cursor) {
-        self.requested_cursor = Some(shape);
+        self.out.cursor = Some(shape);
     }
 
     pub fn text_input_focused(&self) -> bool {
@@ -2741,7 +2757,8 @@ pub struct Paint {
     pub row_height: i64,
     pub fonts: Fonts,
     pub borrowed_images: Vec<(i64, Image)>,
-    pub regions: Vec<scene::Node>,
+    /// the focused text's input area and caret offset
+    pub ime: Option<((i64, i64, i64, i64), i64)>,
     label: String,
     /// the horizontal scroll of the focused text; painters adjust it
     pub edit_scroll_x: f64,
@@ -3072,16 +3089,11 @@ impl Paint {
         self.cap(at, Some(accent), &format!("{} / {}", first, second));
     }
 
-    pub fn input_region(&mut self, cursor: f64, x: f64, y: f64, w: f64, h: f64, focused: bool) {
-        let region = scene::text_input_region(
-            (x as i64, y as i64),
-            w as i64,
-            h as i64,
-            Some(focused),
-            Some(0.max(cursor.round() as i64)),
-        )
-        .expect("Ui.Paint.input_region");
-        self.regions.push(region);
+    /// The focused text's input area, for the input method; the first one painted wins.
+    pub fn input_region(&mut self, cursor: f64, x: f64, y: f64, w: f64, h: f64) {
+        if self.ime.is_none() {
+            self.ime = Some(((x as i64, y as i64, w as i64, h as i64), 0.max(cursor.round() as i64)));
+        }
     }
 }
 
@@ -3194,7 +3206,6 @@ impl Ui {
     fn paint_all(&mut self, frame: &rframe::Frame) -> Vec<(i64, ui_batch::Table)> {
         let mut builder = self.batch_builder.take().expect("Ui: painting re-entered");
         builder.reset();
-        self.regions.clear();
         self.hit_count = 0;
         self.chain_key = 0;
         self.fonts.density = self.density;
@@ -3208,7 +3219,7 @@ impl Ui {
             row_height: self.kit_row_height,
             fonts: std::mem::replace(&mut self.fonts, placeholder),
             borrowed_images: std::mem::take(&mut self.borrowed_images),
-            regions: std::mem::take(&mut self.regions),
+            ime: None,
             label: std::mem::take(&mut self.label),
             edit_scroll_x: self.edit_scroll_x,
             l_content: std::mem::take(&mut self.l_content),
@@ -3223,7 +3234,7 @@ impl Ui {
         self.batch_builder = Some(paint.builder);
         self.fonts = paint.fonts;
         self.borrowed_images = paint.borrowed_images;
-        self.regions = paint.regions;
+        self.out.ime = paint.ime;
         self.label = paint.label;
         self.edit_scroll_x = paint.edit_scroll_x;
         self.l_content = paint.l_content;
@@ -3290,10 +3301,11 @@ impl Ui {
     /// Route the frame's ordered events, run the builder, lay out, and paint. Tab/Shift-Tab
     /// traverse visible focusable boxes in presentation order, restricted to an open popup.
     /// Enter/Space activate controls.
-    pub fn frame(&mut self, frame: &rframe::Frame, f: &mut dyn FnMut(&mut Ui)) {
+    pub fn frame(&mut self, frame: &rframe::Frame, f: &mut dyn FnMut(&mut Ui)) -> FrameOut<'_> {
         self.begin_frame(frame);
         f(self);
         self.end_frame(frame);
+        self.output()
     }
 
     pub fn begin_frame(&mut self, frame: &rframe::Frame) {
@@ -3310,10 +3322,13 @@ impl Ui {
         self.density = 1.max(scale_x.max(scale_y).round() as i64);
         self.fonts.density = self.density;
         self.frame_number += 1;
-        // the window's title bar shows the ground the UI is painted on; no window, no effect
+        self.out.clipboard = None;
+        self.out.paste = false;
+        self.out.background = None;
+        // the window's title bar shows the ground the UI is painted on
         if self.window_ground != Some(self.theme.panel) {
             self.window_ground = Some(self.theme.panel);
-            let _ = sketch::set_window_background(self.theme.panel);
+            self.out.background = Some(self.theme.panel);
         }
         self.route(frame);
         self.modal_key = None;
@@ -3390,41 +3405,31 @@ impl Ui {
         }
         let backend = self.fonts.backend;
         self.fonts.atlas.publish(backend);
-        let mut scene_layers = std::mem::take(&mut self.scene_layers);
+        let mut draw = std::mem::take(&mut self.draw);
         let layer_count = layers.len();
         for (position, (key, batch)) in layers.drain(..).enumerate() {
+            if position == draw.len() {
+                draw.push(Layer { key, batch: ui_batch::empty(), images: Vec::new() });
+            }
+            let layer = &mut draw[position];
             let textures = batch.textures();
-            let mut images: Vec<(i64, Image)> = Vec::new();
+            layer.key = key;
+            layer.images.clear();
             if let Some(atlas_image) = &self.fonts.atlas.image {
                 if !textures.is_empty() {
-                    images.push((1, atlas_image.clone()));
+                    layer.images.push((1, atlas_image.clone()));
                 }
             }
             for (id, img) in &self.borrowed_images {
                 if textures.contains(id) {
-                    images.push((*id, img.clone()));
+                    layer.images.push((*id, img.clone()));
                 }
             }
-            let batch = if images.is_empty() && !textures.is_empty() { ui_batch::empty() } else { batch };
-            if position == scene_layers.len() {
-                scene_layers.push((key, Vec::new()));
-            }
-            let (layer_key, layer) = &mut scene_layers[position];
-            *layer_key = key;
-            layer.clear();
-            if batch.count() != 0 {
-                let images = images.iter().filter_map(|(id, img)| img.handle.downcast_ref::<rays::image::Image>().map(|i| (*id, i.clone()))).collect();
-                layer.push(scene::layer::ui(Some(images), batch).expect("Ui.frame: layer"));
-            }
+            layer.batch = if layer.images.is_empty() && !textures.is_empty() { ui_batch::empty() } else { batch };
         }
-        scene_layers.truncate(layer_count);
+        draw.truncate(layer_count);
         self.painted_layers = layers;
-        self.scene_layers = scene_layers;
-        self.scene.clear();
-        for (_, layer) in &self.scene_layers {
-            self.scene.extend(layer.iter().cloned());
-        }
-        self.scene.extend(self.regions.iter().cloned());
+        self.draw = draw;
         // Layout, hit rectangles and painting are published data now. The callbacks can capture
         // whole document versions, so keep them only while building.
         self.clear_frame_callbacks();

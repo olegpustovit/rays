@@ -246,6 +246,7 @@ fn event_text(e: &Event) -> String {
         Event::PointerCancelled(b) => format!("cancel {}", button_name(b)),
         Event::Scrolled((x, y)) => format!("scroll {x:.2},{y:.2}"),
         Event::TextInput(t) => format!("text {t:?}"),
+        Event::Paste(t) => format!("paste {} bytes", t.len()),
         Event::TextEditing { text, .. } => format!("ime {text:?}"),
         Event::FileDialog { id, result: Ok(paths) } => format!("dialog {id} {}", paths.len()),
         Event::FileDialog { id, result: Err(message) } => format!("dialog {id} failed {message:?}"),

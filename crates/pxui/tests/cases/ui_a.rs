@@ -128,7 +128,7 @@ fn scale_3(scale: f64) {
     // a cancelled pointer ends the capture.
     *compact.borrow_mut() = "0".to_owned();
     let mut ui2 = field_ui();
-    let mut tick = |ui: &mut Ui, time: f64, events: Vec<Event>| ui.frame(&frame_at(vec![], scale, time, events), &mut build);
+    let mut tick = |ui: &mut Ui, time: f64, events: Vec<Event>| { ui.frame(&frame_at(vec![], scale, time, events), &mut build); };
     tick(&mut ui2, 0.0, vec![]);
     tick(&mut ui2, 0.5, vec![press((50, 30))]);
     tick(&mut ui2, 1.0, vec![move_to((400, 30))]);
@@ -218,7 +218,7 @@ fn scale_6(scale: f64) {
     let clock = Cell::new(0.0);
     let fstep = |ui: &mut Ui, keys: Vec<Key>, dt: f64, events: Vec<Event>, build: &mut dyn FnMut(&mut Ui)| {
         clock.set(clock.get() + dt);
-        ui.frame(&frame_at(keys, scale, clock.get(), events), build);
+        rays_shell::host::frame(ui, &frame_at(keys, scale, clock.get(), events), build);
     };
     let open_field = |ui: &mut Ui, build: &mut dyn FnMut(&mut Ui)| {
         fstep(ui, vec![], 0.5, vec![press((70, 30)), release((70, 30))], build);
@@ -569,7 +569,7 @@ fn scale_9(scale: f64) {
 }
 
 fn ime_cursor(ui: &Ui, lab: &dyn Fn(&str) -> String) -> i64 {
-    match &layer::text_regions(&ui.scene(None))[..] {
+    match &layer::text_regions(&rays_shell::host::scene(&ui, None))[..] {
         [(_, _, _, _, true, cursor)] => *cursor,
         _ => fail(&lab("focused text field lost its IME region")),
     }
@@ -737,12 +737,12 @@ fn scale_11(scale: f64) {
     let field_time = Cell::new(0.0);
     let field_step = |ui: &mut Ui, keys: Vec<Key>, events: Vec<Event>, build: &mut dyn FnMut(&mut Ui)| {
         field_time.set(field_time.get() + 0.5);
-        ui.frame(&frame_at(keys, scale, field_time.get(), events), build);
+        rays_shell::host::frame(ui, &frame_at(keys, scale, field_time.get(), events), build);
     };
     field_step(&mut ui, vec![], vec![], &mut build);
     field_step(&mut ui, vec![], vec![press((40, 30)), release((40, 30))], &mut build);
     let cursor = |ui: &Ui| -> i64 {
-        match &layer::text_regions(&ui.scene(None))[..] {
+        match &layer::text_regions(&rays_shell::host::scene(&ui, None))[..] {
             [(_, _, _, _, true, cursor)] => *cursor,
             regions => fail(&lab(&format!("long field lost its IME region ({})", regions.len()))),
         }
@@ -893,11 +893,11 @@ pub fn window_pxui_hover_cursor() {
     };
     field_ui.frame(&frame_at(vec![], 1.0, 0.6, vec![]), &mut field);
     field_ui.frame(&frame_at(vec![], 1.0, 0.7, vec![move_to((150, row(0)))]), &mut field);
-    if field_ui.cursor() != Some(Cursor::Text) {
+    if field_ui.output().platform.cursor != Some(Cursor::Text) {
         fail("a text field did not request the I-beam");
     }
     field_ui.frame(&frame_at(vec![], 1.0, 0.8, vec![move_to((300, 200))]), &mut field);
-    if field_ui.cursor().is_some() {
+    if field_ui.output().platform.cursor.is_some() {
         fail("the I-beam outlived hover");
     }
     let mut area_ui = new_ui(Some(11));
@@ -906,7 +906,7 @@ pub fn window_pxui_hover_cursor() {
     };
     area_ui.frame(&frame_at(vec![], 1.0, 0.9, vec![]), &mut area);
     area_ui.frame(&frame_at(vec![], 1.0, 1.0, vec![move_to((50, 30))]), &mut area);
-    if area_ui.cursor() != Some(Cursor::Text) {
+    if area_ui.output().platform.cursor != Some(Cursor::Text) {
         fail("a text area did not request the I-beam");
     }
     area_ui.destroy();
@@ -946,7 +946,7 @@ pub fn window_pxui_batches() {
             ui.button("Quit");
         });
     });
-    match layer::stage_native(320, 240, &ui.scene(None)) {
+    match layer::stage_native(320, 240, &rays_shell::host::scene(&ui, None)) {
         Ok(staged) => {
             let mut batches = 0;
             for layer in &staged.layers {

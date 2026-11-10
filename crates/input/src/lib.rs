@@ -65,6 +65,8 @@ pub enum Event {
     PointerCancelled(MouseButton),
     Scrolled((f64, f64)),
     TextInput(String),
+    /// The clipboard's text, sent by the host with the frame after the UI asked for it.
+    Paste(String),
     TextEditing { text: String, start: i64, length: i64 },
     FileDropped(String),
     FileDragMoved((f64, f64)),
@@ -338,6 +340,7 @@ fn put_event(out: &mut String, event: &Event) {
         Event::PointerCancelled(button) => { put_byte(out, 5); put_button(out, *button); }
         Event::Scrolled(p) => { put_byte(out, 6); put_pair(out, *p); }
         Event::TextInput(text) => { put_byte(out, 7); put_str(out, text); }
+        Event::Paste(text) => { put_byte(out, 22); put_str(out, text); }
         Event::TextEditing { text, start, length } => { put_byte(out, 8); put_str(out, text); put_int(out, *start); put_int(out, *length); }
         Event::FileDropped(path) => { put_byte(out, 9); put_str(out, path); }
         Event::FileDragMoved(p) => { put_byte(out, 10); put_pair(out, *p); }
@@ -378,7 +381,7 @@ fn event_eq(a: &Event, b: &Event) -> bool {
         (PointerMoved(a), PointerMoved(b)) | (Scrolled(a), Scrolled(b)) | (FileDragMoved(a), FileDragMoved(b)) => pair_eq(*a, *b),
         (PointerPressed(ab, ap), PointerPressed(bb, bp)) | (PointerReleased(ab, ap), PointerReleased(bb, bp)) => ab == bb && pair_eq(*ap, *bp),
         (PointerCancelled(a), PointerCancelled(b)) => a == b,
-        (TextInput(a), TextInput(b)) | (FileDropped(a), FileDropped(b)) => a == b,
+        (TextInput(a), TextInput(b)) | (Paste(a), Paste(b)) | (FileDropped(a), FileDropped(b)) => a == b,
         (TextEditing { text: at, start: as_, length: al }, TextEditing { text: bt, start: bs, length: bl }) => at == bt && as_ == bs && al == bl,
         (FileDragEnded, FileDragEnded) | (FocusLost, FocusLost) | (FocusGained, FocusGained) | (Closed, Closed) => true,
         (Pinched(a), Pinched(b)) => float_eq(*a, *b),
@@ -458,7 +461,7 @@ pub mod gate {
             | Event::TrackpadScrolled { .. })
     }
     fn key_event(event: &Event) -> bool {
-        matches!(event, Event::KeyPressed(_) | Event::KeyReleased(_) | Event::TextInput(_) | Event::TextEditing { .. })
+        matches!(event, Event::KeyPressed(_) | Event::KeyReleased(_) | Event::TextInput(_) | Event::TextEditing { .. } | Event::Paste(_))
     }
 
     pub fn gate(g: &Gate, live: &Frame) -> (Frame, Vec<Key>) {

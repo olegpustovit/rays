@@ -262,7 +262,7 @@ fn frame_helpers() {
 
 /// `Ui.input` needs a completed PXUI frame: an empty one stands for the panes.
 fn prime(value: &EditorModel, frame: &frame::Frame) {
-    value.ui.borrow_mut().frame(frame, &mut |_| {});
+    rays_shell::host::frame(&mut value.ui.borrow_mut(), frame, &mut |_| {});
 }
 
 #[test]

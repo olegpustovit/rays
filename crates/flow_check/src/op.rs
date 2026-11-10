@@ -465,6 +465,7 @@ fn event_value(event:&Event,fields:&[(&str,Ty)])->Value{
         Event::PointerCancelled(b)=>("pointer-cancelled",vec![("button",text(input::button_name(*b)))]),
         Event::Scrolled(p)=>("scrolled",vec![("delta",point(*p))]),
         Event::TextInput(s)=>("text-input",vec![("text",text(s))]),
+        Event::Paste(s)=>("paste",vec![("text",text(s))]),
         Event::TextEditing{text: s,start,length}=>("text-editing",vec![("text",text(s)),("start",Value::Int(*start)),("length",Value::Int(*length))]),
         Event::FileDropped(s)=>("file-dropped",vec![("text",text(s))]),
         Event::FileDragMoved(p)=>("file-drag-moved",vec![("position",point(*p))]),

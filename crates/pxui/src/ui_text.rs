@@ -502,46 +502,44 @@ impl Ui {
             }
             Some('c') => {
                 let (start, stop) = text_selection(edit);
-                let _ = rays::clipboard::set_text(if selected(edit) { &edit.text[start..stop] } else { &edit.text });
+                let copied = if selected(edit) { &edit.text[start..stop] } else { &edit.text };
+                self.copy(copied);
                 return false;
             }
             Some('x') => {
                 let (start, stop) = text_selection(edit);
-                let copied = if selected(edit) { edit.text[start..stop].to_owned() } else { edit.text.clone() };
-                if rays::clipboard::set_text(&copied).is_ok() {
-                    self.remember(edit, false);
-                    if selected(edit) {
-                        replace_text(edit, "");
-                    } else {
-                        edit.text.clear();
-                        edit.caret = 0;
-                        edit.anchor = 0;
-                    }
-                    return true;
+                self.copy(if selected(edit) { &edit.text[start..stop] } else { &edit.text });
+                // the cut is one undo step: text the clipboard did not take comes back with Undo
+                self.remember(edit, false);
+                if selected(edit) {
+                    replace_text(edit, "");
+                } else {
+                    edit.text.clear();
+                    edit.caret = 0;
+                    edit.anchor = 0;
                 }
-                return false;
+                return true;
             }
             Some('v') => {
-                // a field of one line takes a copied line without its break
-                return match rays::clipboard::get_text() {
-                    Ok(text) => {
-                        let text: String = if multiline { text } else { text.chars().filter(|c| *c != '\n' && *c != '\r').collect() };
-                        if accept(&text) {
-                            self.remember(edit, false);
-                            replace_text(edit, &text);
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                    Err(_) => false,
-                };
+                self.request_paste();
+                return false;
             }
             Some('z') => return self.pass_undo(edit, shift),
             Some('y') => return self.pass_undo(edit, true),
             _ => {}
         }
         match event {
+            // a field of one line takes a copied line without its break
+            Event::Paste(text) => {
+                let text: String = if multiline { text.clone() } else { text.chars().filter(|c| *c != '\n' && *c != '\r').collect() };
+                if accept(&text) {
+                    self.remember(edit, false);
+                    replace_text(edit, &text);
+                    true
+                } else {
+                    false
+                }
+            }
             Event::TextInput(text) if accept(text) => {
                 let typing = !text.chars().any(|c| c == ' ' || c == '\t' || c == '\n');
                 self.remember(edit, typing);
@@ -665,7 +663,7 @@ pub fn paint_text_edit(
     let origin = if right && full <= visible { (cx + cw - 2) as f64 - full } else { cx as f64 + inset };
     let text_x = origin - scroll;
     let caret_x = text_x + caret_width;
-    paint.input_region(caret_x - cx as f64, cx as f64, cy as f64, cw as f64, ch as f64, true);
+    paint.input_region(caret_x - cx as f64, cx as f64, cy as f64, cw as f64, ch as f64);
     let previous_clip = paint.clip_rect;
     paint.clip_rect = intersect(previous_clip, (cx as f64, cy as f64, cw as f64, ch as f64));
     if edit.caret != edit.anchor {
@@ -1276,7 +1274,7 @@ impl Ui {
             let bounds = ints(rect);
             let (x, y, _, h) = bounds;
             let control = value_control(bounds);
-            let (cx, cy, cw, ch) = control;
+            let cx = control.0;
             if hovered {
                 hover_row(paint, &theme, bounds);
             }
@@ -1285,7 +1283,6 @@ impl Ui {
             if focused {
                 paint_text_edit(paint, None, false, 2.0, true, control, label_y(font_size, y, h), &composition, &edit);
             } else {
-                paint.input_region(0.0, cx as f64, cy as f64, cw as f64, ch as f64, false);
                 kit_text(paint, Some(theme.foreground), cx + 2, label_y(font_size, y, h), &shown_value);
             }
         });
@@ -1827,7 +1824,8 @@ impl Ui {
                 Event::KeyPressed(Key::KeyChar(key @ ('x' | 'X' | 'c' | 'C'))) if command && edit.caret == edit.anchor => {
                     let s = line_start(&edit.text, edit.caret);
                     let e = edit.text.len().min(line_end(&edit.text, edit.caret) + 1);
-                    if rays::clipboard::set_text(&edit.text[s..e]).is_ok() && (*key == 'x' || *key == 'X') {
+                    self.copy(&edit.text[s..e]);
+                    if *key == 'x' || *key == 'X' {
                         self.change(edit, st);
                         edit.anchor = s;
                         edit.caret = e;
@@ -2698,10 +2696,8 @@ impl AreaPaint {
             let y = by - offset + pad + slot_of(&self.notes, caret_line) as f64 * row;
             let ls = start_of(rows, caret_line);
             let caret_x = text_x + width(paint, &final_text[ls..edit.caret]);
-            paint.input_region(caret_x - bx, bx, y, bw, row, true);
+            paint.input_region(caret_x - bx, bx, y, bw, row);
             paint.fill(caret_x.round(), y + 2.0, 1.0, row - 4.0, theme.accent);
-        } else {
-            paint.input_region(0.0, bx, by, bw, bh, false);
         }
         paint.clip_rect = previous;
     }

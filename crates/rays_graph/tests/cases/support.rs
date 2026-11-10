@@ -141,7 +141,7 @@ pub fn rect_center(r: (f64, f64, f64, f64)) -> (i64, i64) {
 /// The instances the pane drew (`scope_paint`).
 pub fn scope_paint(ui: &mut Ui, view: Pane) -> i64 {
     let _ = scope_step(ui, view, &frame0());
-    match layer::stage_native(1000, 700, &ui.scene(None)) {
+    match layer::stage_native(1000, 700, &rays_shell::host::scene(&ui, None)) {
         Err(message) => fail(&message),
         Ok(staged) => staged
             .layers

@@ -52,7 +52,7 @@ fn moved(p: (f64, f64)) -> Event {
 fn instances(f: &mut dyn FnMut(&mut Ui)) -> i64 {
     let mut ui = new_ui();
     ui.frame(&base(), f);
-    let staged = layer::stage_native(400, 300, &ui.scene(None)).unwrap_or_else(|e| panic!("{e}"));
+    let staged = layer::stage_native(400, 300, &rays_shell::host::scene(&ui, None)).unwrap_or_else(|e| panic!("{e}"));
     let mut total = 0;
     for layer in &staged.layers {
         if let layer::NativeLayer::UiLayer(batch, _) = layer {
@@ -102,7 +102,7 @@ pub fn window_shell_splitter_hit_area() {
     };
     chrome_frame(&mut ui, vec![]);
     chrome_frame(&mut ui, vec![moved(((divider_x - 2) as f64, 100.0))]);
-    assert!(ui.cursor() == Some(Cursor::HorizontalResize), "thin splitter lost its wider resize hit area");
+    assert!(ui.output().platform.cursor == Some(Cursor::HorizontalResize), "thin splitter lost its wider resize hit area");
     ui.destroy();
 }
 
@@ -304,7 +304,7 @@ pub fn window_shell_status_and_guide_draw() {
         let o = status_bar::Opts { text: "Overlay".into(), ..status_bar::Opts::default() };
         status_bar::draw(ui, (0, 272, 400, 28), &o);
     });
-    assert!(!ui.scene(None).is_empty(), "PXUI did not draw the status bar");
+    assert!(!rays_shell::host::scene(&ui, None).is_empty(), "PXUI did not draw the status bar");
     ui.destroy();
 }
 
@@ -419,7 +419,7 @@ pub fn window_shell_status_rule_drags() {
             let p = (x as f64, 285.0);
             strip(ui, p, vec![moved(p)]);
             strip(ui, p, vec![]);
-            if ui.cursor() == Some(Cursor::HorizontalResize) {
+            if ui.output().platform.cursor == Some(Cursor::HorizontalResize) {
                 return x;
             }
             x += 1;

@@ -29,20 +29,24 @@ pub fn label(scale: f64, message: &str) -> String {
 
 pub fn step(scale: f64, ui: &mut Ui, events: Vec<Event>, build: &mut dyn FnMut(&mut Ui)) {
     let t = advance();
-    ui.frame(&frame_at(vec![], scale, t, events), &mut |ui| {
+    rays_shell::host::frame(ui, &frame_at(vec![], scale, t, events), &mut |ui| {
         ui.panel(PanelOpts::default().at(0.0, 0.0).width(240.0), "panel", &mut |ui| build(ui));
     });
 }
 
 pub fn modified_step(scale: f64, ui: &mut Ui, modifiers: Vec<Key>, k: Key, build: &mut dyn FnMut(&mut Ui)) {
     let t = advance();
-    ui.frame(&frame_at(modifiers, scale, t, vec![key_down(k)]), &mut |ui| {
+    rays_shell::host::frame(ui, &frame_at(modifiers, scale, t, vec![key_down(k)]), &mut |ui| {
         ui.panel(PanelOpts::default().at(0.0, 0.0).width(240.0), "panel", &mut |ui| build(ui));
     });
 }
 
 pub fn command_step(scale: f64, ui: &mut Ui, c: char, build: &mut dyn FnMut(&mut Ui)) {
     modified_step(scale, ui, vec![Key::Meta], Key::KeyChar(c), build);
+    // the host sends the clipboard's text with the next frame
+    if c == 'v' {
+        step(scale, ui, vec![], build);
+    }
 }
 
 pub fn settle(scale: f64, ui: &mut Ui, build: &mut dyn FnMut(&mut Ui)) {

@@ -71,6 +71,7 @@ fn apply(value: &mut RuntimeInput, event: &Event) {
         }
         Event::VisibilityChanged(visible) => value.visible = visible,
         Event::TextInput(_)
+        | Event::Paste(_)
         | Event::TextEditing { .. }
         | Event::FileDropped(_)
         | Event::FileDragMoved(_)

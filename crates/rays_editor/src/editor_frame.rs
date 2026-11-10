@@ -1368,7 +1368,7 @@ pub fn update_frame(
             built = Some(FrameResult { prompt: prompt_next, prompt_intent: prompt_intent_, ..result });
         };
         let ui_handle = value.ui.clone();
-        ui_handle.borrow_mut().frame(frame_, &mut build_and_prompt);
+        rays_shell::host::frame(&mut ui_handle.borrow_mut(), frame_, &mut build_and_prompt);
     }
     let result = match built {
         Some(result) => result,

@@ -1,7 +1,53 @@
-//! PXUI's host services from Rays: SDL_ttf faces, GPU images.
-use pxui::ui::{Backend, Font, Image, Raster};
-use rays::{font, image};
+//! PXUI's host services from Rays: SDL_ttf faces and GPU images in, scene layers and platform
+//! requests out.
+use input::{frame::Frame, Event};
+use pxui::ui::{Backend, Font, Image, Raster, Ui};
+use rays::{clipboard, font, image, scene, sketch};
 use std::rc::Rc;
+
+/// Run a frame as the Rays host does: the clipboard text the last frame asked for arrives first,
+/// and the clipboard and window-ground requests apply after.
+pub fn frame(ui: &mut Ui, frame: &Frame, f: &mut dyn FnMut(&mut Ui)) {
+    let pasted = if ui.output().platform.paste { clipboard::get_text().ok() } else { None };
+    match pasted {
+        Some(text) => {
+            let mut with = frame.clone();
+            with.input.events.insert(0, Event::Paste(text));
+            ui.frame(&with, f);
+        }
+        None => {
+            ui.frame(frame, f);
+        }
+    }
+    let out = ui.output().platform;
+    if let Some(text) = &out.clipboard {
+        let _ = clipboard::set_text(text);
+    }
+    // no window, no effect
+    if let Some(ground) = out.background {
+        let _ = sketch::set_window_background(ground);
+    }
+}
+
+/// The last frame as scene nodes: each layer after what `under` puts beneath its floating root
+/// (by box key), then the focused text's input-method area.
+pub fn scene(ui: &Ui, under: Option<&dyn Fn(i64) -> Vec<scene::Node>>) -> Vec<scene::Node> {
+    let out = ui.output();
+    let mut nodes = Vec::new();
+    for layer in out.draw {
+        if let Some(under) = under {
+            nodes.extend(under(layer.key));
+        }
+        if layer.batch.count() != 0 {
+            let images = layer.images.iter().filter_map(|(id, i)| as_rays_image(i).map(|r| (*id, r.clone()))).collect();
+            nodes.push(scene::layer::ui(Some(images), layer.batch.clone()).expect("PXUI layer"));
+        }
+    }
+    if let Some(((x, y, w, h), caret)) = out.platform.ime {
+        nodes.push(scene::text_input_region((x, y), w, h, Some(true), Some(caret)).expect("PXUI input area"));
+    }
+    nodes
+}
 
 fn face(f: &Font) -> &font::Font {
     f.0.downcast_ref::<font::Font>().expect("PXUI font from another backend")
