@@ -71,7 +71,7 @@ impl Device {
         let structures = structures.iter().map(|a| &a.0).collect::<Vec<_>>();
         self.0.acceleration_tlas(&instances.0, offset, count, &structures, build_children).map_err(|failure| error("accel_create_tlas", failure)).map(AccelerationStructure)
     }
-    pub fn acceleration_sized(&self, size: u64, template: &AccelerationStructure) -> Result<AccelerationStructure, Error> {
+    pub fn acceleration_sized(&self, size: std::num::NonZeroU64, template: &AccelerationStructure) -> Result<AccelerationStructure, Error> {
         self.0.acceleration_sized(size, &template.0).map_err(|failure| error("accel_create_sized", failure)).map(AccelerationStructure)
     }
 }

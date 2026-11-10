@@ -118,7 +118,7 @@ pub struct DriverMotion {
 pub enum DriverAccelDescriptor {
     Blas { geometries: Vec<DriverGeometry>, motion: Option<DriverMotion>, refit: bool },
     Tlas { instances: Token, offset: i64, instance_count: i64, kind: InstanceKind, structures: Vec<Token>, motion_transforms: Option<(Token, i64, i64)> },
-    Sized { size: i64, template: Token },
+    Sized { size: std::num::NonZeroU64, template: Token },
 }
 
 pub trait DriverAccel {
@@ -1025,8 +1025,8 @@ fn portable_geometry(geometry: &Geometry) -> AccelGeometry {
             },
     }
 }
-fn portable_of(device: &Device, descriptor: &AccelDescriptor) -> PortableDescriptor {
-    match descriptor {
+fn portable_of(device: &Device, descriptor: &AccelDescriptor) -> Result<PortableDescriptor,Error> {
+    Ok(match descriptor {
         AccelDescriptor::Blas { geometries } =>
             PortableDescriptor::Blas { geometries: geometries.iter().map(portable_geometry).collect(), motion_keyframes: None },
         AccelDescriptor::MotionBlas { geometries, motion } =>
@@ -1041,8 +1041,10 @@ fn portable_of(device: &Device, descriptor: &AccelDescriptor) -> PortableDescrip
             }
         }
         AccelDescriptor::Sized { size, template } =>
-            PortableDescriptor::Sized { size: *size, template: acceleration::handle(&template.0.portable.borrow()) },
-    }
+            PortableDescriptor::Sized { size: crate::validation::admit_acceleration_size("Ogpu.Acceleration.create",
+                u64::try_from(*size).map_err(|_| make_error("Ogpu.Acceleration.create",ErrorKind::InvalidArgument,"structure size must be positive"))?)?,
+                template: acceleration::handle(&template.0.portable.borrow()) },
+    })
 }
 fn driver_keyframes(keyframes: &[Keyframe]) -> Vec<DriverKeyframe> {
     keyframes.iter().map(|keyframe| (keyframe.buffer.resource.0.token, keyframe.offset)).collect()
@@ -1067,7 +1069,7 @@ fn driver_geometry(geometry: &Geometry) -> DriverGeometry {
             },
     }
 }
-fn driver_of(refit: bool, descriptor: &AccelDescriptor) -> DriverAccelDescriptor {
+fn driver_of(refit: bool, descriptor: &AccelDescriptor, portable: &PortableDescriptor) -> DriverAccelDescriptor {
     match descriptor {
         AccelDescriptor::Blas { geometries } =>
             DriverAccelDescriptor::Blas { geometries: geometries.iter().map(driver_geometry).collect(), motion: None, refit },
@@ -1085,8 +1087,10 @@ fn driver_of(refit: bool, descriptor: &AccelDescriptor) -> DriverAccelDescriptor
                 structures: structures.iter().map(|structure| structure.0.token).collect(),
                 motion_transforms: motion_transforms.as_ref().map(|(buffer, offset, count)| (buffer.resource.0.token, *offset, *count)),
             },
-        AccelDescriptor::Sized { size, template } =>
-            DriverAccelDescriptor::Sized { size: *size, template: template.0.token },
+        AccelDescriptor::Sized { template, .. } => {
+            let PortableDescriptor::Sized {size,..}=portable else {unreachable!("admitted sized descriptor")};
+            DriverAccelDescriptor::Sized {size:*size,template:template.0.token}
+        },
     }
 }
 fn descriptor_buffers(descriptor: &AccelDescriptor) -> Vec<Buffer> {
@@ -1157,9 +1161,9 @@ pub fn create_accel(device: &Device, descriptor: AccelDescriptor, refit: bool) -
         _ => true,
     };
     if !motion_valid { return Err(make_error(OP, ErrorKind::InvalidArgument, "motion keyframes, time range, or transform range is invalid")); }
-    let portable_descriptor = portable_of(device, &descriptor);
+    let portable_descriptor = portable_of(device, &descriptor)?;
     let portable = acceleration::create(&device.0.handle, true, refit, portable_descriptor)?;
-    let raw = match device.0.raw().create_accel(&driver_of(refit, &descriptor)) {
+    let raw = match device.0.raw().create_accel(&driver_of(refit, &descriptor, acceleration::descriptor(&portable))) {
         Ok(raw) => raw,
         Err(error) => { acceleration::destroy(&portable); return Err(error); }
     };
@@ -1348,8 +1352,9 @@ pub fn refit_accel(
     // The new native descriptor determines refit scratch extent; the original size can be stale.
     // Core admits the logical buffer/offset; the native backend checks the newly queried extent.
     check_scratch(OP, &device, scratch, offset)?;
-    acceleration::refit(&device.0.handle, &mut accel.0.portable.borrow_mut(), portable_of(&device, &descriptor))?;
-    encoder.0.raw().refit(accel.0.token, &driver_of(true, &descriptor), scratch.resource.0.token, offset)
+    let portable=portable_of(&device,&descriptor)?;
+    acceleration::refit(&device.0.handle, &mut accel.0.portable.borrow_mut(), &portable)?;
+    encoder.0.raw().refit(accel.0.token, &driver_of(true, &descriptor, &portable), scratch.resource.0.token, offset)
 }
 pub fn compact_accel(encoder: &AccelEncoder, src: &Accel, dst: &Accel) -> Result<(), Error> {
     const OP: &str = "Backend.compact_accel";
@@ -2346,7 +2351,7 @@ mod ownership_tests {
             geometries:vec![AccelGeometry::Triangles {vertices:range,vertex_stride:12,vertex_count:3}],motion_keyframes:None,
         }).unwrap();
         let destination=acceleration::create(&device.0.handle,true,false,PortableDescriptor::Sized {
-            size:64,template:acceleration::handle(&portable),
+            size:std::num::NonZeroU64::new(64).unwrap(),template:acceleration::handle(&portable),
         }).unwrap();
         let make=|token,portable| Accel(Rc::new(AccelInner {
             token,raw:RefCell::new(None),sizes:AccelSizes {structure_size:64,build_scratch_size:64,refit_scratch_size:32},

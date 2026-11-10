@@ -1021,7 +1021,7 @@ fn build_accel(
         }
         DriverAccelDescriptor::Sized { size, template } => {
             let template = dev.find_accel(op, *template)?;
-            device.acceleration_sized(*size as u64, &template).map_err(|failure| of_vk(op, failure))
+            device.acceleration_sized(*size, &template).map_err(|failure| of_vk(op, failure))
         }
     }
 }

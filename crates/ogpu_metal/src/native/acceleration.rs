@@ -24,20 +24,17 @@ impl Drop for AccelerationStructureInner {
 #[derive(Clone)]
 pub struct AccelerationStructure(Arc<AccelerationStructureInner>);
 impl AccelerationStructure {
-    pub fn create(device: &Device, size: u64) -> Result<Self, Error> {
+    pub fn create(device: &Device, size: std::num::NonZeroU64) -> Result<Self, Error> {
         const OP: &str = "Metal.Acceleration_structure.create";
         enter_main(OP)?;
         device.ensure_live(OP)?;
-        if size == 0 {
-            return Err(error(OP, ErrorKind::InvalidArgument, "size must be positive"));
-        }
         let raw = metal_sys::registry::acceleration_structure_create(device.raw(), size).map_err(|failure| sys_error(OP, failure))?;
         device.attach_child(OP)?;
         Ok(Self(Arc::new(AccelerationStructureInner {
             raw,
             lifetime: Lifetime::new(),
             device: device.clone(),
-            size,
+            size:size.get(),
             device_attached: AtomicBool::new(true),
         })))
     }

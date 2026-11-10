@@ -58,7 +58,7 @@ pub enum Descriptor {
         structures: Vec<ResourceHandle>,
     },
     Sized {
-        size: i64,
+        size: std::num::NonZeroU64,
         template: ResourceHandle,
     },
 }
@@ -279,16 +279,7 @@ fn validate_descriptor(device: &Device, descriptor: &Descriptor) -> Result<(), E
             }
             Ok(())
         }
-        Descriptor::Sized { size, template } => {
-            if *size <= 0 {
-                Err(invalid(
-                    "Ogpu.Acceleration.create",
-                    "structure size must be positive",
-                ))
-            } else {
-                handle::validate_for("Ogpu.Acceleration.create", device, template)
-            }
-        }
+        Descriptor::Sized { template, .. } => handle::validate_for("Ogpu.Acceleration.create", device, template),
     }
 }
 
@@ -431,9 +422,9 @@ pub(crate) fn mark_built(value: &mut Acceleration) { value.state = State::Built;
 pub fn refit(
     device: &Device,
     value: &mut Acceleration,
-    descriptor: Descriptor,
+    descriptor: &Descriptor,
 ) -> Result<(), Error> {
-    value.refit(device, &descriptor)
+    value.refit(device, descriptor)
 }
 
 pub(crate) fn validate_compaction(device: &Device, source: &Acceleration, destination: &Acceleration) -> Result<(), Error> {

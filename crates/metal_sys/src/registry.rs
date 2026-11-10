@@ -587,7 +587,8 @@ pub fn compute_pipeline_max_total_threads(receiver: &Handle) -> Result<u64, Erro
     Ok(unsafe { output.assume_init() })
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_compute_pipeline_max_total_threads"] fn ffi_rays_metal_compute_pipeline_max_total_threads(receiver: *mut super::NativeHandle, output: *mut u64, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn acceleration_structure_create(receiver: &Handle, arg0: u64) -> Result<Handle, Error> {
+pub fn acceleration_structure_create(receiver: &Handle, size: std::num::NonZeroU64) -> Result<Handle, Error> {
+    let arg0=size.get();
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     let mut output: MaybeUninit<*mut super::NativeHandle> = MaybeUninit::uninit();

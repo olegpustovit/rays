@@ -229,6 +229,8 @@ fn native_function_sampler_pass_and_layer_arguments_are_admitted_in_core() {
     assert!(pass::admit_clear_color([0.,0.,f64::NAN,1.]).is_err());
     let mut layer=surface::LayerProfile::default(4,4); surface::admit_layer("test",layer).unwrap();
     layer.maximum_drawables=1; assert!(surface::admit_layer("test",layer).is_err());
+    assert_eq!(validation::admit_acceleration_size("test",0).unwrap_err().kind,ErrorKind::InvalidArgument);
+    assert_eq!(validation::admit_acceleration_size("test",u64::MAX).unwrap().get(),u64::MAX);
     for index in [-1,31,i64::MAX] {
         assert_eq!(validation::admit_slot("test",index).unwrap_err().kind,ErrorKind::InvalidArgument);
     }

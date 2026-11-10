@@ -71,31 +71,31 @@ fn acceleration_lifecycle_validation() {
     expect(ErrorKind::Unsupported, acceleration::create(&d1, false, false, descriptor.clone()).err());
     // Refit: only a built refittable primitive structure, from a descriptor of its shape.
     let mut refittable = acceleration::create(&d1, true, true, descriptor.clone()).unwrap_or_else(|failure| die(failure));
-    expect(ErrorKind::InvalidState, acceleration::refit(&d1, &mut refittable, descriptor.clone()).err());
+    expect(ErrorKind::InvalidState, acceleration::refit(&d1, &mut refittable, &descriptor).err());
     acceleration::validate_build(&d1, &refittable).unwrap_or_else(|failure| die(failure));
     acceleration::mark_built(&mut refittable);
-    acceleration::refit(&d1, &mut refittable, descriptor.clone()).unwrap_or_else(|failure| die(failure));
-    acceleration::refit(&d1, &mut refittable, descriptor.clone()).unwrap_or_else(|failure| die(failure));
+    acceleration::refit(&d1, &mut refittable, &descriptor).unwrap_or_else(|failure| die(failure));
+    acceleration::refit(&d1, &mut refittable, &descriptor).unwrap_or_else(|failure| die(failure));
     expect(
         ErrorKind::InvalidArgument,
-        acceleration::refit(&d1, &mut refittable, blas(vec![triangles(&range, 3)], None)).err(),
+        acceleration::refit(&d1, &mut refittable, &blas(vec![triangles(&range, 3)], None)).err(),
     );
-    expect(ErrorKind::CrossDevice, acceleration::refit(&d2, &mut refittable, descriptor.clone()).err());
+    expect(ErrorKind::CrossDevice, acceleration::refit(&d2, &mut refittable, &descriptor).err());
     let mut value = make(descriptor.clone()).unwrap_or_else(|failure| die(failure));
     acceleration::validate_build(&d1, &value).unwrap_or_else(|failure| die(failure));
     acceleration::mark_built(&mut value);
-    expect(ErrorKind::InvalidState, acceleration::refit(&d1, &mut value, descriptor.clone()).err());
+    expect(ErrorKind::InvalidState, acceleration::refit(&d1, &mut value, &descriptor).err());
     expect(
         ErrorKind::InvalidArgument,
         acceleration::create(
             &d1,
             true,
             true,
-            Descriptor::Sized { size: 512, template: acceleration::handle(&value) },
+            Descriptor::Sized { size: std::num::NonZeroU64::new(512).unwrap(), template: acceleration::handle(&value) },
         ).err(),
     );
     expect(ErrorKind::CrossDevice, acceleration::compacted_size(&d2, &value).err());
-    let mut sized = make(Descriptor::Sized { size: 512, template: acceleration::handle(&value) }).unwrap_or_else(|failure| die(failure));
+    let mut sized = make(Descriptor::Sized { size: std::num::NonZeroU64::new(512).unwrap(), template: acceleration::handle(&value) }).unwrap_or_else(|failure| die(failure));
     expect(ErrorKind::InvalidState, acceleration::validate_build(&d1, &sized).err());
     acceleration::compacted_size(&d1, &value).unwrap_or_else(|failure| die(failure));
     acceleration::validate_compaction(&d1, &value, &sized).unwrap_or_else(|failure| die(failure));

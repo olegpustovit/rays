@@ -312,9 +312,9 @@ impl Device {
         let children=structures.iter().map(|a|a.inner.clone()).collect();
         Ok(acceleration(raw,self.inner.clone(),buffers,children))
     }
-    pub fn acceleration_sized(&self,size:u64,template:&AccelerationStructure)->Result<AccelerationStructure,Error>{
-        self.check_device(&template.device)?;if size==0{return Err(Error::InvalidInput("acceleration structure size must be nonzero"));}
-        let mut raw=std::ptr::null_mut();Error::status(unsafe{rv_accel_create_sized(self.raw(),size,template.raw(),&mut raw)})?;
+    pub fn acceleration_sized(&self,size:std::num::NonZeroU64,template:&AccelerationStructure)->Result<AccelerationStructure,Error>{
+        self.check_device(&template.device)?;
+        let mut raw=std::ptr::null_mut();Error::status(unsafe{rv_accel_create_sized(self.raw(),size.get(),template.raw(),&mut raw)})?;
         let raw=nonnull(raw)?;Ok(acceleration(raw,self.inner.clone(),Vec::new(),Vec::new()))
     }
     pub fn zeroed_view(&self,count:usize)->Result<ZeroedView,Error>{ZeroedView::new(count)}

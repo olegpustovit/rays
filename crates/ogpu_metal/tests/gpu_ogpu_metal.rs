@@ -1044,6 +1044,12 @@ fn ray_tracing(device: &Device) {
     let size_bytes = be::read_buffer(&size_buffer, 0, 8).unwrap_or_else(|failure| die(failure));
     let compact_size = i64::from_le_bytes(size_bytes[..8].try_into().unwrap());
     require(compact_size > 0 && compact_size <= sizes.structure_size, "compacted size is out of range");
+    for size in [0, -1] {
+        let failure = be::create_accel(&device, AccelDescriptor::Sized { size, template: blas.clone() }, false).err().unwrap();
+        assert_eq!(failure.kind, ErrorKind::InvalidArgument);
+        assert_eq!(failure.operation, "Ogpu.Acceleration.create");
+        assert_eq!(failure.message, "structure size must be positive");
+    }
     let compacted = be::create_accel(&device, AccelDescriptor::Sized { size: compact_size, template: blas.clone() }, false).unwrap_or_else(|failure| die(failure));
     let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = be::accel_encoder(&commands).unwrap_or_else(|failure| die(failure));

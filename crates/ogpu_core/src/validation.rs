@@ -530,3 +530,7 @@ pub fn admit_slot(operation: &str, index: i64) -> Result<AdmittedSlot, Error> {
     if !(0..31).contains(&index) { Err(invalid(operation, "binding slot is out of range")) }
     else { Ok(AdmittedSlot(index as u8)) }
 }
+
+pub fn admit_acceleration_size(operation: &str, size: u64) -> Result<std::num::NonZeroU64, Error> {
+    std::num::NonZeroU64::new(size).ok_or_else(|| invalid(operation,"structure size must be positive"))
+}

@@ -150,8 +150,8 @@ fn primitive_build(operation: &str, device: &Device, descriptor: &DriverAccelDes
     }
 }
 
-fn allocate(device: &Device, descriptor: Option<ma::BuildDescriptor>, sizes: ma::Sizes, buffers: Vec<Buffer>, structures: Vec<Acceleration>) -> Result<Acceleration, Error> {
-    let metal = ma::AccelerationStructure::create(device.metal(), sizes.acceleration_structure_size)?;
+fn allocate(device: &Device, descriptor: Option<ma::BuildDescriptor>, sizes: ma::Sizes, size: std::num::NonZeroU64, buffers: Vec<Buffer>, structures: Vec<Acceleration>) -> Result<Acceleration, Error> {
+    let metal = ma::AccelerationStructure::create(device.metal(), size)?;
     device.attach_resource();
     Ok(Acceleration(Rc::new(AccelInner {
         device: device.clone(),
@@ -177,7 +177,7 @@ pub(crate) fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolv
                     let _ = build.destroy();
                     Err(e)
                 }
-                Ok(sizes) => allocate(device, Some(build), sizes, buffers, Vec::new()),
+                Ok(sizes) => allocate(device, Some(build), sizes, ogpu_core::validation::admit_acceleration_size(operation,sizes.acceleration_structure_size)?, buffers, Vec::new()),
             }
         }
         DriverAccelDescriptor::Tlas { instances, offset, instance_count, kind, structures, motion_transforms } => {
@@ -208,14 +208,14 @@ pub(crate) fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolv
                     if let Some((b, _, _)) = transforms {
                         buffers.push(b);
                     }
-                    allocate(device, Some(build), sizes, buffers, structures)
+                    allocate(device, Some(build), sizes, ogpu_core::validation::admit_acceleration_size(operation,sizes.acceleration_structure_size)?, buffers, structures)
                 }
             }
         }
         DriverAccelDescriptor::Sized { size, template } => {
             let template = resolve_structure(*template)?;
-            let sizes = ma::Sizes { acceleration_structure_size: *size as u64, ..template.0.sizes };
-            allocate(device, None, sizes, template.0.buffers.borrow().clone(), template.0.structures.clone())
+            let sizes = ma::Sizes { acceleration_structure_size: size.get(), ..template.0.sizes };
+            allocate(device, None, sizes, *size, template.0.buffers.borrow().clone(), template.0.structures.clone())
         }
     }
 }
