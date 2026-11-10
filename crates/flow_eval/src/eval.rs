@@ -786,7 +786,7 @@ fn index_remove(a: &mut Arena, key: u64, id: ResidualId) {
 fn residual_id(a: &mut Arena,residual: ResidualData) -> ResidualId {
     let key=residual_key(&residual);
     if let Some(id)=index_find(a,key,&residual) { return id; }
-    let id=new_rid(a);insert_residual(a,id,residual);id
+    let id=new_rid(a);insert_residual(a,id,residual,key);id
 }
 fn store_residual(a: &mut Arena, id: ResidualId, residual: ResidualData) {
     let old_key = a.residuals.get(&id).map(residual_key);
@@ -798,12 +798,15 @@ fn store_residual(a: &mut Arena, id: ResidualId, residual: ResidualData) {
     let key = residual_key(&residual);
     a.residuals.insert(id, residual);
     match old_key {
-        Some(old_key) => reindex_residual(a, id, old_key),
+        Some(old_key) if old_key != key => { index_remove(a, old_key, id); index_add(a, key, id); }
+        Some(_) => (),
         None => index_add(a, key, id),
     }
 }
-fn insert_residual(a: &mut Arena, id: ResidualId, residual: ResidualData) {
-    store_residual(a, id, residual);
+fn insert_residual(a: &mut Arena, id: ResidualId, residual: ResidualData, key: u64) {
+    debug_assert!(!a.residuals.contains_key(&id));
+    a.residuals.insert(id, residual);
+    index_add(a, key, id);
     a.res_log.push(id);
 }
 fn reindex_residual(a: &mut Arena,id: ResidualId,old_key: u64) {
@@ -1412,7 +1415,7 @@ fn replay_inline(a: &mut Arena, c: &ExecCtx, e: &InlineEntry, inputs: &[i64]) ->
         let key = residual_key(&residual);
         let canonical = index_find(a, key, &residual);
         if let Some(id) = canonical { reloc.rmap.insert(*old, id); }
-        else { insert_residual(a, reloc.rmap[old], residual); }
+        else { insert_residual(a, reloc.rmap[old], residual, key); }
     }
     let nodes: Vec<Node> = e.nodes.iter().map(|n| Node {
         id: reloc.id(n.id), inst: c.inst, site: reloc.path(&n.site), iter: reloc.iter(&n.iter), kind: n.kind.clone(), ty: n.ty.clone(), args: n.args.iter().map(|(name, value)| (*name, reloc.value(value))).collect(), error: n.error.clone(),
