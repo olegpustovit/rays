@@ -190,7 +190,8 @@ fn run() -> i32 {
         target_dir: target_dir.clone(),
         timings: Vec::new(),
     };
-    let lock = match acquire_lock(&target_dir, run_started, timeout) {
+    // Queueing behind another runner is build/setup time, not this crate's test execution.
+    let lock = match acquire_lock(&target_dir, run_started, Some(BUILD_TIMEOUT)) {
         Ok(lock) => lock,
         Err(error) => {
             eprintln!("rays-t: could not lock {}: {error}", target_dir.display());
@@ -518,6 +519,8 @@ fn run_test_case(
     let test_started = Instant::now();
     let mut command = Command::new(&case.executable);
     command.args(&args.test_args).arg("--nocapture").arg("--exact").arg(&case.name);
+    // Resource regressions exercise playback through SDL's deterministic, silent test backend.
+    command.env("SDL_AUDIODRIVER", "dummy");
     let mut skipped = false;
     let (elapsed, failure_code, whole_timeout) =
         match run_command(&mut command, run_started, timeout, Some(args.test_timeout), true) {
@@ -580,7 +583,7 @@ fn run_test_case(
 fn run_gpu_group(cases: Vec<TestCase>, args: &Args, run_started: Instant, timeout: Option<Duration>) -> Vec<TestOutcome> {
     use std::io::BufRead;
     let mut command = Command::new(&cases[0].executable);
-    command.arg("--rays-group").args(cases.iter().map(|case| &case.name));
+    command.arg("--rays-group").args(cases.iter().map(|case| &case.name)).env("SDL_AUDIODRIVER", "dummy");
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
     let spawned = mem_sys::windows_process::Job::spawn(&mut command);
@@ -1274,6 +1277,31 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn qualification_runs_crates_in_order_and_stops_at_first_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_path("qualification");
+        fs::create_dir_all(&root).unwrap();
+        let fixture = root.join("case");
+        fs::write(&fixture, "#!/bin/sh\ncase \"$*\" in *--list*--ignored*) exit 0;; *--list*) echo 'fixture: test';; *) exit 0;; esac\n").unwrap();
+        let red = root.join("red");
+        fs::write(&red, "#!/bin/sh\ncase \"$*\" in *--list*--ignored*) exit 0;; *--list*) echo 'fixture: test';; *) exit 1;; esac\n").unwrap();
+        let cargo = root.join("cargo");
+        let artifact = |name: &str, path: &Path| format!(r#"{{"reason":"compiler-artifact","package_id":"path+file:///fixture#{name}@0.1.0","target":{{"name":"{name}","test":true}},"executable":"{}"}}"#, path.display());
+        fs::write(&cargo, format!("#!/bin/sh\ncase \"$1\" in run) exit 0;; metadata) echo '{{\"packages\":[{{\"name\":\"green\"}},{{\"name\":\"red\"}},{{\"name\":\"unreached\"}}]}}';; test) case \"$*\" in *red*) echo '{}';; *) echo '{}';; esac;; esac\n", artifact("red", &red), artifact("green", &fixture))).unwrap();
+        for path in [&fixture, &red, &cargo] { fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap(); }
+        let path = env::join_paths(std::iter::once(root.clone()).chain(env::split_paths(&env::var_os("PATH").unwrap_or_default()))).unwrap();
+        let output = Command::new(default_target_dir().join("debug/rays-t"))
+            .args(["--all", "--target-dir"]).arg(root.join("target")).env("PATH", path).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{stderr}");
+        let summary = stderr.split("qualification summary").nth(1).expect("summary");
+        assert!(summary.find("green\t").unwrap() < summary.find("red\t").unwrap());
+        assert!(!summary.contains("unreached"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn skipping_case_fails_by_default_and_is_counted_when_allowed() {
         use std::os::unix::fs::PermissionsExt;
         let root = temp_path("skip");
@@ -1328,6 +1356,17 @@ mod tests {
         let executables = test_executables(output).unwrap();
         assert_eq!(executables.len(), 1);
         assert_eq!(executables[0].crate_name, "runtime");
+    }
+
+    #[test]
+    fn cargo_json_manifest_disambiguates_shared_gpu_target_names() {
+        let root = temp_path("manifest");
+        fs::create_dir_all(&root).unwrap();
+        let manifest = root.join("Cargo.toml");
+        fs::write(&manifest, "[package]\nname = \"flow_gpu\"\n").unwrap();
+        let output = format!(r#"{{"reason":"compiler-artifact","package_id":"path+file:///workspace#0.1.0","manifest_path":"{}","target":{{"name":"gpu_all","test":true}},"executable":"target/debug/deps/gpu_all-123"}}"#, manifest.display());
+        assert_eq!(test_executables(output.as_bytes()).unwrap()[0].crate_name, "flow_gpu");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1528,6 +1567,7 @@ mod tests {
     fn timing_log_writes_header_and_escaped_durations() {
         let target_dir = temp_path("times");
         fs::create_dir_all(&target_dir).unwrap();
+        fs::write(target_dir.join("t-times.tsv"), "date\tcrate\ttest\tseconds\n1970-01-01\told\tcase\t9.0\n").unwrap();
         append_timings(
             &target_dir,
             &[TestTiming {
@@ -1540,6 +1580,7 @@ mod tests {
         .unwrap();
         let output = fs::read_to_string(target_dir.join("t-times.tsv")).unwrap();
         let rows: Vec<_> = output.lines().collect();
+        assert_eq!(rows.len(), 2, "timings older than 30 days must be pruned");
         assert_eq!(rows[0], "date\tcrate\ttest\tseconds\tstatus\tcommit");
         let (date, row) = rows[1].split_once('\t').unwrap();
         assert_eq!(date.len(), 10);

@@ -872,7 +872,10 @@ fn package_targets(dir: &Path, manifest: &ParsedManifest) -> Result<(bool, bool)
         let first = components.next().and_then(|part| part.as_os_str().to_str());
         let second = components.next().and_then(|part| part.as_os_str().to_str());
         has_binary |= first == Some("src") && second == Some("bin");
-        has_gpu_dev_targets |= matches!(first, Some("examples" | "benches"));
+        // Manifest regeneration evaluates Lisp and writes a text fixture; it never starts a GPU.
+        let manifest_writer = manifest.package_name.as_deref() == Some("web_export")
+            && relative == Path::new("examples/refresh_manifest.rs");
+        has_gpu_dev_targets |= matches!(first, Some("examples" | "benches")) && !manifest_writer;
         // Same native target convention as rays-t; ordinary unit/e2e tests may use GPU types
         // without creating a device. Explicit targets are recorded while parsing the manifest.
         has_gpu_dev_targets |= first == Some("tests") && components.next().is_none()
@@ -904,7 +907,8 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("lru", &["mem"][..]),
         ("param", &["cfmt"][..]),
         ("input", &[][..]),
-        ("rays_math", &[][..]),
+        ("rays_math_sys", &[][..]),
+        ("rays_math", &["rays_math_sys"][..]),
         ("scene_command", &["rays_math"][..]),
         ("parallel", &[][..]),
         ("sdl3_sys", &["native_layer_token_sys"][..]),
@@ -1015,7 +1019,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let foundational = [
         "cfmt",
         "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
-        "lru", "param", "input", "rays_math", "parallel", "scene_command", "sdl3",
+        "lru", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3",
         "metal_sys", "vulkan_sys", "ogpu_core",
         "rdk_core",
     ];
@@ -1718,6 +1722,12 @@ mod tests {
         assert_eq!(roles(), (true, false), "additional binaries retain strict startup checks");
         fs::write(&manifest, "[package]\nname = \"app\"\n[[test]]\nname = \"gpu_first\"\n[[test]]\nname = \"cpu_last\"\n").unwrap();
         assert_eq!(roles(), (false, true), "all explicit targets count, not just the last table");
+        fs::write(&manifest, "[package]\nname = \"web_export\"\n").unwrap();
+        fs::create_dir_all(root.join("examples")).unwrap();
+        fs::write(root.join("examples/refresh_manifest.rs"), "fn main() {}").unwrap();
+        assert_eq!(roles(), (false, false), "the text manifest generator requires no device");
+        fs::write(root.join("examples/interactive.rs"), "fn main() {}").unwrap();
+        assert_eq!(roles(), (false, true), "additional examples retain native backend requirements");
         fs::remove_dir_all(&root).unwrap();
     }
 }

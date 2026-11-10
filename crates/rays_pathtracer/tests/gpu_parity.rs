@@ -74,12 +74,8 @@ fn spread(a: &[(usize, usize)], b: &[(usize, usize)]) -> f64 {
     one(a, b).max(one(b, a))
 }
 
-fn parity() {
+fn parity(preset: usize) {
     if !common::gpu() {
-        return;
-    }
-    if std::env::var_os("RAYS_SLOW").is_none() {
-        println!("skipped: the preset sweep is a RAYS_SLOW=1 case (about 15 s warm)");
         return;
     }
     let baseline = pt::live_handles();
@@ -109,7 +105,7 @@ fn parity() {
     assert_eq!(presets.len(), 4);
     let camera = view_camera();
     let mut failures = Vec::new();
-    for (name, definition) in presets {
+    for (name, definition) in presets.into_iter().skip(preset).take(1) {
         let baked = get(world::bake(Some(1), None, 128, 64, &definition));
         get(p::set_world(&mut tracer, Some(&baked)));
         p::reset(&mut tracer);
@@ -146,4 +142,12 @@ fn parity() {
     println!("raster/path tracer parity: all rendered presets within bounds");
 }
 
-pub const CASES: &[(&str, fn())] = &[("parity", parity)];
+// Keep the original 256 samples and image tolerances; each preset has its own hard case limit.
+fn neon_corridor() { parity(0); }
+fn soft_blobs() { parity(1); }
+fn white_room() { parity(2); }
+fn daylight() { parity(3); }
+pub const CASES: &[(&str, fn())] = &[
+    ("parity_neon_corridor", neon_corridor), ("parity_soft_blobs", soft_blobs),
+    ("parity_white_room", white_room), ("parity_daylight", daylight),
+];
