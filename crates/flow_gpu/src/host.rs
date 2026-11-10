@@ -1420,8 +1420,7 @@ impl Scope {
         };
         // from 256 elements a level's device work (no wait) is cheaper than the CPU's, and a site
         // whose deeper levels went to the device keeps its small ones there too, so its arrays never
-        // cross; a capacity past 64M (upper bounds double with each level) settles the counts on
-        // the host instead
+        // cross. Native count widths and the actual device allocation limits bound storage.
         if n == 0 || !(held_ || n >= 256 || site.slots.borrow().iter().any(|s| s.capacity.get() > 0)) {
             return Ok(None);
         }
@@ -1441,26 +1440,28 @@ impl Scope {
                 return Ok(None);
             }
         }
-        if n > 1 << 26 {
-            return Ok(self.off(packed, "over 64M elements").map(|v| vec![v]));
-        }
-        let Ok((commands, encoder)) = self.commands() else { return Ok(None) };
         let width = |ty: &Ty| match ty {
             Ty::Array(i) if **i == Ty::Vec2 => 2,
             Ty::Array(i) if **i == Ty::Vec3 => 3,
             Ty::Array(i) if **i == Ty::Vec4 => 4,
             _ => 1,
         };
+        let widest = tys.iter().map(width).max().unwrap_or(1);
+        if n < 0 || n > i32::MAX as i64 || length < 0 || length > u32::MAX as i64 / widest / steps.max(1) {
+            return Err(value::fail("E_GPU", "Resident output exceeds native 32-bit GPU addressing."));
+        }
+        let Ok((commands, encoder)) = self.commands() else { return Ok(None) };
         // an output and a count cell for each type, all or none
         let mut made: Vec<((Buffer, i64), (Buffer, i64))> = vec![];
         for ty in tys {
             match (self.alloc(&slot, 4.max(length * width(ty) * 4 * 1.max(steps))), self.alloc(&slot, 24)) {
                 (Ok(o), Ok(c)) => made.push((o, c)),
                 (a, b_) => {
+                    let failure = a.as_ref().err().or_else(|| b_.as_ref().err()).unwrap().clone();
                     for x in [a, b_].into_iter().flatten().chain(made.into_iter().flat_map(|(o, c)| [o, c])) {
                         self.give_back(&slot, x);
                     }
-                    return Ok(None);
+                    return Err(failure);
                 }
             }
         }
@@ -1947,7 +1948,7 @@ impl Scope {
             (Ty::Array(t), Value::Vec4(x,y,z,w)) if **t == Ty::Vec4 => vec![*x,*y,*z,*w],
             _ => Vec::new(),
         };
-        if !row.is_empty() && (0..=1 << 26).contains(&length) && row.iter().all(|x| (*x as f32).is_finite()) {
+        if !row.is_empty() && length >= 0 && length <= u32::MAX as i64 / row.len() as i64 && row.iter().all(|x| (*x as f32).is_finite()) {
             let slot = self.range_slot();
             if !self.s.borrow().extra_slots.iter().any(|s| Rc::ptr_eq(s, &slot)) {
                 self.s.borrow_mut().extra_slots.push(slot.clone());
@@ -1960,7 +1961,7 @@ impl Scope {
             };
         }
         match (ty, v) {
-            (Ty::Array(i), Value::Int(x)) if **i == Ty::Int && self.uint32 && *x >= 0 && *x <= 4294967295 && length >= 0 && length <= run::MAX_STRING / 4 => {
+            (Ty::Array(i), Value::Int(x)) if **i == Ty::Int && self.uint32 && *x >= 0 && *x <= 4294967295 && length >= 0 && length <= u32::MAX as i64 => {
                 let slot = self.range_slot();
                 {
                     let mut s = self.s.borrow_mut();
@@ -2561,7 +2562,7 @@ pub fn triangle_indices(t: &T, positions: (&Buffer, i64), vertices: (&Buffer, i6
         return error("GPU host is closed or called from another domain.");
     }
     let (nv, np) = (vertices.1, kinds.1);
-    if np <= 0 || np > 1 << 28 || nv < 3 * np || nv > 4 * np || nv > run::MAX_STRING / 12 {
+    if np <= 0 || np > u32::MAX as i64 - 1 || nv < 3 * np || nv > 4 * np || nv > u32::MAX as i64 || 3 * (nv - 2 * np) > u32::MAX as i64 {
         return Err(value::fail("E_GPU_DISPLAY_TRIANGLES", "Resident display requires nonempty triangle/quad topology."));
     }
     let status = validation_status(t)?;

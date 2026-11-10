@@ -2,7 +2,7 @@
 use flow_syntax::symbol::Symbol;
 use crate::packed;
 use crate::test_support::*;
-use flow_check::op::{self, MAX_WOSIZE};
+use flow_check::op;
 use flow_check::workspace as w;
 use flow_eval as e;
 use flow_syntax::value::{self as v, Value};
@@ -23,8 +23,8 @@ fn value(body: &str) -> Value {
 }
 
 fn limits() -> Vec<(&'static str, i64)> {
-    let m = MAX_WOSIZE as i64;
-    vec![("int", m), ("text", m), ("float", m), ("vec2", m / 2), ("vec3", m / 3), ("vec4", m / 4)]
+    let slots = isize::MAX as i64 / size_of::<f64>() as i64;
+    vec![("int", slots), ("text", isize::MAX as i64 / size_of::<usize>() as i64 - 1), ("float", slots), ("vec2", slots / 2), ("vec3", slots / 3), ("vec4", slots / 4)]
 }
 fn literal(kind: &str) -> String {
     format!("(array/max_length :type {kind})")
@@ -44,7 +44,7 @@ fn op_direct_and_literal_selectors() {
     let op = op::find(&[], "array/max_length", &context::value()).unwrap();
     let direct = |args: Vec<(Symbol, Value)>| (op.body)(&input::at_time(0.), &|_, _| panic!("node"), &args);
     assert!(op.signature.pos.is_empty() && op.signature.kw == vec![("type".into(), Ty::Text)]);
-    let m = MAX_WOSIZE as i64;
+    let m = isize::MAX as i64 / size_of::<f64>() as i64;
     assert_eq!(direct(vec![]).unwrap(), Value::Int(m));
     assert_eq!(value("(array/max_length)"), Value::Int(m));
     assert_eq!(op::result_type(&op, &[]).unwrap(), Ty::Int);
@@ -137,14 +137,11 @@ fn statically_folded_float_conversion_has_no_int_bank() {
     }
 }
 
-// Product defect: v::array_init (flow_syntax value.rs) does not reject count > native bound before
-// Vec::with_capacity, so limit+1 aborts the process with "memory allocation of ... bytes failed".
-// OCaml raises E_ARRAY_RANGE (Flow.Value.array_init ty (limit + 1)).
 #[test]
-fn array_init_past_the_native_bound_is_a_range_error() {
+fn array_init_past_the_native_bound_is_a_memory_error() {
     for (kind, limit) in limits() {
         let element = ty::of_string(kind).unwrap();
-        failure("E_ARRAY_RANGE", v::array_init(&element, limit + 1, &|_| panic!("element built")));
+        failure("E_ARRAY_MEMORY", v::array_init(&element, limit + 1, &|_| panic!("element built")));
     }
 }
 
@@ -155,5 +152,25 @@ fn direct_non_text_type_is_array_type() {
     let op = op::find(&[], "array/max_length", &context::value()).unwrap();
     for arg in [Value::Int(1), Value::Bool(true), Value::Text_array(std::sync::Arc::new(vec![b"float".to_vec()].into()))] {
         failure("E_ARRAY_TYPE", (op.body)(&input::at_time(0.), &|_, _| panic!("node"), &vec![("type".into(), arg)]));
+    }
+}
+
+#[test]
+fn oversized_virtual_ranges_report_typed_memory_in_core_and_packed() {
+    let count = isize::MAX as usize / size_of::<i64>() + 1;
+    for body in [
+        format!("(map (fn [x] (int/add x (frame/index))) (array/range (int/add {count} (frame/index)) :type int))"),
+        format!("(map (fn [x y z] (int/add x (frame/index))) (array/range (int/add {count} (frame/index)) :type int) (array/range (int/add {count} (frame/index)) :type int) (array/range (int/add {count} (frame/index)) :type int))"),
+    ] {
+        let val = value(&body);
+        let r = residual(&val);
+        let core = lower_strict(r).unwrap_or_else(|f| panic!("{f}"));
+        let compiled = executor_compile(&val, true);
+        let live = live_frame(0., 0);
+        failure("E_ARRAY_MEMORY", force_reference(&val, &live));
+        failure("E_ARRAY_MEMORY", run(Some(r), true, None, None, &core, &live));
+        for domains in [1, 4] {
+            with_domains(domains, &|| failure("E_ARRAY_MEMORY", executor_force(&compiled, true, &live)));
+        }
     }
 }

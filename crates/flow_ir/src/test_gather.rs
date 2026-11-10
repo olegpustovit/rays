@@ -19,7 +19,6 @@ use std::sync::{Arc, Mutex};
 
 const MAX_INT: i64 = i64::MAX;
 const MIN_INT: i64 = i64::MIN;
-const MAX_ARRAY: i64 = (1 << 54) - 1;
 
 fn source(ty: &Ty) -> Op {
     let mut o = op::all().iter().find(|o| o.name == "noise3").expect("noise3").clone();
@@ -176,7 +175,7 @@ fn helper_function_and_index_errors() {
     let table = int_table();
     let helper = instantiate_with(Some(table.clone()), "lookup (fn [(table : (array int)) (index : int)] (array/nth table index))", &arr(Ty::Int), "(fn [(index : int)] (lookup data (int/mod index 3)))", (0..2049).collect());
     assert_eq!(bits(&ok(force(&pk(&helper), &live_at(0.)))), bits(&ok(force_reference(&helper, &live_at(0.)))));
-    for index in [-1, 3, MAX_ARRAY + 1, MAX_INT] {
+    for index in [-1, 3, isize::MAX as i64 / size_of::<f64>() as i64 + 1, MAX_INT] {
         let value = instantiate(Some(&table), &arr(Ty::Int), "(fn [(index : int)] (array/nth data index))", vec![index]);
         same_error(&force(&pk(&value), &live_at(0.)), &force_reference(&value, &live_at(0.)));
     }

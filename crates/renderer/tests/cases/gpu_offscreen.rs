@@ -210,6 +210,7 @@ fn gpu_offscreen_transactions() {
     let succeeded = native::begin_submission(&e).unwrap();
     let succeeded_batch = lower(&succeeded, &resolve, &image_ir).unwrap();
     let expected = image::pixels(&image).unwrap();
+    replace();
     native::step(None, None, None, &succeeded, &[succeeded_batch]).unwrap();
     let submitted = renderer::capture(&e).unwrap();
     assert_eq!(&submitted[0..4], &expected[0..4], "successful transaction changed snapshot pixels");

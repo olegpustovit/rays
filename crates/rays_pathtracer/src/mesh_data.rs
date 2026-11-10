@@ -7,8 +7,6 @@ use ogpu_core::backend as b;
 use rays_math::mat4;
 use std::sync::Arc;
 
-const MAX_INT: i64 = (1i64 << 62) - 1;
-
 fn add_f32(builder: &mut Vec<u8>, value: f64) {
     builder.extend_from_slice(&(value as f32).to_le_bytes());
 }
@@ -216,27 +214,27 @@ pub fn put_transform_record(bytes: &mut [u8], base: usize, transform: &[f64], no
     }
 }
 
-fn blank_record() -> b::InstanceRecord {
-    b::InstanceRecord { instance: b::Instance { transform: vec![], mask: 0, structure_index: 0 }, user_id: 0 }
-}
-
 /// Packs placements into TLAS records (structure index = part), shader transform records, and the
 /// per-instance (first triangle, material) table.
 pub fn layout_mesh(objects: Vec<i64>, placed: Vec<mat4::T>, locals: Vec<mat4::T>, base: MeshData, parts: Vec<Part>, placements: Vec<(mat4::T, i64, i64)>) -> Result<MeshData, String> {
     let count = placements.len();
-    let mut records = vec![blank_record(); count];
-    let mut shader_bytes = vec![0u8; count * 84];
-    let mut table = vec![0u8; count * 8];
+    let length = count.checked_mul(84).ok_or_else(|| "path tracer transform storage overflows".to_string())?;
+    let mut records = flow_syntax::value::array_buffer(count).map_err(|error| error.message)?;
+    let mut shader_bytes = runtime_resources::byte_buffer("Path_tracer.layout_mesh", length).map_err(|error| ogpu_core::error::to_string(&error))?;
+    shader_bytes.resize(length, 0);
+    let mut table = runtime_resources::byte_buffer("Path_tracer.layout_mesh", count * 8).map_err(|error| ogpu_core::error::to_string(&error))?;
+    table.resize(count * 8, 0);
     for index in 0..count {
         let (matrix, part_index, material) = &placements[index];
         let columns = transform_columns(matrix)?;
-        records[index] = b::InstanceRecord { instance: b::Instance { transform: columns.0.clone(), mask: 0xFFFF_FFFF, structure_index: *part_index }, user_id: 0 };
+        records.push(b::InstanceRecord { instance: b::Instance { transform: columns.0.clone(), mask: 0xFFFF_FFFF, structure_index: *part_index }, user_id: 0 });
         put_transform_record(&mut shader_bytes, index * 84, &columns.0, &columns.1);
         let Part::TrianglePart(first, _) = parts[*part_index as usize];
         put_u32(&mut table, index * 8, first / 3);
         put_u32(&mut table, index * 8 + 4, *material);
     }
-    let matrices = placements.iter().map(|(m, _, _)| m.clone()).collect();
+    let mut matrices = flow_syntax::value::array_buffer(count).map_err(|error| error.message)?;
+    matrices.extend(placements.iter().map(|(m, _, _)| m.clone()));
     Ok(MeshData {
         instances: Some(Instances { records, shader_bytes, motion_transforms: None, motion_end: None, matrices }),
         scene: Some(Layout { parts, placements, table, objects, placed, locals }),
@@ -258,31 +256,39 @@ pub fn mesh(extras: Extras, materials: Vec<Material>, source_meshes: &[rays::mes
 pub fn pack_instances(materials: usize, motion: Option<&[mat4::T]>, transforms: &[mat4::T]) -> Result<Instances, String> {
     let count = transforms.len();
     let stride = if motion.is_none() { 84 } else { 168 };
-    let mut records = vec![blank_record(); count];
-    let mut shader_bytes = vec![0u8; count * stride];
-    let mut motion_transforms: Vec<Vec<f64>> = vec![vec![]; 2 * count];
+    let length = count.checked_mul(stride).ok_or_else(|| "path tracer transform storage overflows".to_string())?;
+    let mut records = flow_syntax::value::array_buffer(count).map_err(|error| error.message)?;
+    let mut shader_bytes = runtime_resources::byte_buffer("Path_tracer.pack_instances", length).map_err(|error| ogpu_core::error::to_string(&error))?;
+    shader_bytes.resize(length, 0);
+    let mut motion_transforms = if motion.is_some() { flow_syntax::value::array_buffer(count * 2).map_err(|error| error.message)? } else { Vec::new() };
     for instance in 0..count {
         let start = transform_columns(&transforms[instance])?;
-        let finish = match motion {
-            None => start.clone(),
-            Some(ends) => transform_columns(&ends[instance])?,
-        };
-        records[instance] = b::InstanceRecord {
+        records.push(b::InstanceRecord {
             instance: b::Instance { transform: start.0.clone(), mask: 0xFFFF_FFFF, structure_index: 0 },
             user_id: if materials == 0 { 0 } else { 1 + instance as i64 },
-        };
+        });
         put_transform_record(&mut shader_bytes, instance * stride, &start.0, &start.1);
-        if motion.is_some() {
+        if let Some(ends) = motion {
+            let finish = transform_columns(&ends[instance])?;
             put_transform_record(&mut shader_bytes, instance * stride + 84, &finish.0, &finish.1);
+            motion_transforms.push(start.0);
+            motion_transforms.push(finish.0);
         }
-        motion_transforms[2 * instance] = start.0;
-        motion_transforms[2 * instance + 1] = finish.0;
     }
+    let mut matrices = flow_syntax::value::array_buffer(count).map_err(|error| error.message)?;
+    matrices.extend_from_slice(transforms);
+    let motion_end = match motion {
+        None => None,
+        Some(ends) => {
+            let mut copied = flow_syntax::value::array_buffer(ends.len()).map_err(|error| error.message)?;
+            copied.extend_from_slice(ends); Some(copied)
+        }
+    };
     Ok(Instances {
         records,
         shader_bytes,
-        matrices: transforms.to_vec(),
-        motion_end: motion.map(|m| m.to_vec()),
+        matrices,
+        motion_end,
         motion_transforms: if motion.is_none() { None } else { Some(motion_transforms) },
     })
 }
@@ -295,9 +301,9 @@ pub fn mesh_instanced(prototype: &MeshData, materials: Option<&[Material]>, moti
     let count = transforms.len() as i64;
     if count == 0 {
         Err("path tracer instancing needs at least one transform".to_string())
-    } else if prototype.triangles > MAX_INT / count {
+    } else if prototype.triangles.checked_mul(count).is_none() {
         Err("path tracer instanced triangle count overflows".to_string())
-    } else if count > MAX_INT / 168 {
+    } else if transforms.len().checked_mul(if motion.is_some() { 168 } else { 84 }).is_none_or(|n| n > isize::MAX as usize) {
         Err("path tracer transform storage overflows".to_string())
     } else if !materials.is_empty() && materials.len() as i64 != count {
         Err("path tracer instance materials must match the transform count".to_string())
@@ -305,7 +311,9 @@ pub fn mesh_instanced(prototype: &MeshData, materials: Option<&[Material]>, moti
         Err("path tracer motion transforms must match the transform count".to_string())
     } else {
         let packed = pack_instances(materials.len(), motion, transforms)?;
-        let mut mesh_materials = prototype.materials.clone();
+        let length = prototype.materials.len().checked_add(materials.len()).ok_or_else(|| "path tracer material storage overflows".to_string())?;
+        let mut mesh_materials = flow_syntax::value::array_buffer(length).map_err(|error| error.message)?;
+        mesh_materials.extend(prototype.materials.iter().cloned());
         mesh_materials.extend(materials.iter().cloned());
         Ok(MeshData { triangles: prototype.triangles * count, materials: mesh_materials, instances: Some(packed), ..prototype.clone() })
     }
@@ -323,7 +331,8 @@ pub fn shutter_midpoint(m: &MeshData) -> Result<MeshData, String> {
                 mat4::of_rows(row(0), row(1), row(2), row(3))
             };
             let used = instances.records.iter().any(|r| r.user_id != 0);
-            let mids: Vec<mat4::T> = instances.matrices.iter().enumerate().map(|(i, a)| mid(a, &ends[i])).collect();
+            let mut mids = flow_syntax::value::array_buffer(instances.matrices.len()).map_err(|error| error.message)?;
+            mids.extend(instances.matrices.iter().enumerate().map(|(i, a)| mid(a, &ends[i])));
             let packed = pack_instances(if used { 1 } else { 0 }, None, &mids)?;
             Ok(MeshData { instances: Some(packed), ..m.clone() })
         }

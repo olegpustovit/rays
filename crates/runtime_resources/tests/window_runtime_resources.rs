@@ -47,6 +47,10 @@ fn atomic_file_writes() {
 }
 
 fn image_and_canvas() {
+    assert_eq!(byte_buffer("test", usize::MAX).unwrap_err().kind, ErrorKind::Capacity);
+    let failure = canvas::create(i64::MAX / 4, 1).err().expect("impossible canvas allocation succeeded");
+    assert_eq!(failure.kind, ErrorKind::Capacity);
+    assert_eq!(failure.operation, "Canvas.create");
     let original = b"\x11\x22\x33\xff\x44\x55\x66\xff\x77\x88\x99\xff\xaa\xbb\xcc\xff".to_vec();
     let kept = original.clone();
     let mut caller = original;
@@ -146,6 +150,13 @@ fn image_and_canvas() {
     image::release_snapshot(&mut lease2);
     image::release_snapshot(&mut lease2);
     image::destroy(&leased_image).unwrap();
+    let released_image = image::create(1, 1, b"\x12\x34\x56\x78").unwrap();
+    let (_, _, _, retained_bytes, mut released_lease) = image::borrow_snapshot(&released_image).unwrap();
+    image::release_snapshot(&mut released_lease);
+    image::replace(&released_image, 1, 1, b"\xaa\xbb\xcc\xff").unwrap();
+    assert_eq!(&retained_bytes[..], b"\x12\x34\x56\x78", "released snapshot copy was overwritten");
+    assert_eq!(image::pixels(&released_image).unwrap(), b"\xaa\xbb\xcc\xff", "shared current buffer was not replaced");
+    image::destroy(&released_image).unwrap();
     let destroy_leased = image::create(1, 1, b"\x12\x34\x56\x78").unwrap();
     let (_, _, _, destroy_bytes, mut destroy_lease) = image::borrow_snapshot(&destroy_leased).unwrap();
     image::destroy(&destroy_leased).unwrap();

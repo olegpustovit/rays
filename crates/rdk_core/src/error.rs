@@ -19,6 +19,7 @@ macro_rules! codes {
 }
 
 codes! {
+    ArrayMemory = "E_ARRAY_MEMORY",
     AmbiguousClassification = "ambiguous_classification",
     AttributeStorageMismatch = "attribute_storage_mismatch",
     Cancelled = "cancelled",

@@ -11,7 +11,6 @@ use rdk_core::error::Code;
 
 const OPERATION: &str = "materialize_instances";
 const NAME: &str = "Rdk.Instance_copy.materialize_instances";
-/// `Sys.max_array_length` on a 64-bit OCaml.
 const DEFAULT_GRAIN: i64 = 16_384;
 
 

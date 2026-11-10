@@ -639,10 +639,19 @@ pub fn int_array_put(data: &mut [i64], index: usize, value: &Value) -> Result<()
     }
     Ok(())
 }
-const MAX_ARRAY_LENGTH: u128 = (1u128 << 54) - 1; // OCaml 5: Sys.max_array_length = Sys.max_floatarray_length
-fn allocation_count_ok(count: i64, width: usize) -> Result<usize, Diagnostic> {
-    if count < 0 || (count as u128) > MAX_ARRAY_LENGTH / width as u128 { Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds.")) }
-    else { Ok(count as usize) }
+/// Logical element capacity of one native allocation, not a promise of available memory.
+pub fn array_max_length(element: &Ty) -> Option<usize> {
+    let width = match element {
+        Ty::Text => return Some(isize::MAX as usize / size_of::<usize>() - 1),
+        Ty::Int | Ty::Float => 1,
+        Ty::Vec2 => 2, Ty::Vec3 => 3, Ty::Vec4 => 4,
+        _ => return None,
+    };
+    Some(isize::MAX as usize / size_of::<f64>() / width)
+}
+fn allocation_count(count: i64) -> Result<usize, Diagnostic> {
+    if count < 0 { return Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds.")); }
+    usize::try_from(count).map_err(|_| fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))
 }
 /// Reserve a user-sized result before filling it; allocation failure is a Lisp diagnostic.
 /// This cannot recover from an OS killing the process after an overcommitted allocation.
@@ -653,13 +662,13 @@ pub fn array_buffer<T>(count: usize) -> Result<Vec<T>, Diagnostic> {
 }
 pub fn array_init(element: &Ty, count: i64, f: &dyn Fn(usize) -> Value) -> Result<Value, Diagnostic> {
     if *element == Ty::Text {
-        let count = allocation_count_ok(count, 1)?;
+        let count = allocation_count(count)?;
         let mut values = TextArray::try_with_capacity(count).map_err(|_| fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
-        for index in 0..count { match f(index) { Value::Text(text) => values.push(&text), _ => return Err(fail("E_ARRAY_TYPE", "Text arrays contain text values.")) } }
+        for index in 0..count { match f(index) { Value::Text(text) => values.try_push(&text).map_err(|_| fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?, _ => return Err(fail("E_ARRAY_TYPE", "Text arrays contain text values.")) } }
         return Ok(Value::Text_array(Arc::new(values)));
     }
     if *element == Ty::Int {
-        let count = allocation_count_ok(count, 1)?;
+        let count = allocation_count(count)?;
         let mut values = array_buffer(count)?;
         values.resize(count, 0);
         for (index, slot) in values.iter_mut().enumerate() { *slot = match coerce_to(&Ty::Int, &f(index))? { Value::Int(value) => value, _ => return Err(fail("E_ARRAY_TYPE", "Packed integer arrays contain integer values.")) }; }
@@ -673,7 +682,7 @@ pub fn array_init(element: &Ty, count: i64, f: &dyn Fn(usize) -> Value) -> Resul
         },
         _ => return Err(fail("E_ARRAY_TYPE", "Packed arrays contain float, vec2, vec3 or vec4 values.")),
     };
-    let count = allocation_count_ok(count, width)?;
+    let count = allocation_count(count)?;
     let slots = count.checked_mul(width).ok_or_else(|| fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
     let mut values = array_buffer(slots)?;
     values.resize(slots, 0.0);
@@ -789,6 +798,21 @@ pub fn diagnose_rows(select: &dyn Fn(&Value, i64) -> i64, map: &dyn Fn(Value) ->
 #[cfg(test)]
 mod tests {
     #[test]
+    fn array_capacities_use_platform_bytes_and_oversize_is_typed_memory() {
+        let slots = isize::MAX as usize / size_of::<f64>();
+        for (element, expected) in [
+            (Ty::Int, slots), (Ty::Float, slots), (Ty::Vec2, slots / 2),
+            (Ty::Vec3, slots / 3), (Ty::Vec4, slots / 4),
+            (Ty::Text, isize::MAX as usize / size_of::<usize>() - 1),
+        ] {
+            assert_eq!(array_max_length(&element), Some(expected));
+            assert_eq!(array_init(&element, expected as i64 + 1, &|_| panic!("oversized array initialized an element")).unwrap_err().code, "E_ARRAY_MEMORY");
+        }
+        assert_eq!(array_max_length(&Ty::Bool), None);
+        assert_eq!(array_buffer::<u8>(usize::MAX).unwrap_err().code, "E_ARRAY_MEMORY");
+    }
+
+    #[test]
     fn shared_sorted_records_preserve_authored_order_and_first_duplicate() {
         let binary: Arc<[u8]> = (0..65536).map(|i| [0, 255, 65, 128][i % 4]).collect();
         let z = symbol::intern("z");
@@ -868,7 +892,8 @@ mod tests {
         assert_eq!(array_init(&Ty::Text, 0, &|_| unreachable!()).unwrap(), Value::Text_array(Arc::new(TextArray::new())));
         assert_eq!(array_init(&Ty::Text, 2, &|index| Value::Text(vec![0xff, index as u8].into())).unwrap(), Value::Text_array(Arc::new(vec![vec![0xff, 0], vec![0xff, 1]].into())));
         assert_eq!(array_init(&Ty::Text, 1, &|_| Value::Int(0)).unwrap_err().code, "E_ARRAY_TYPE");
-        for count in [-1, i64::MAX] { assert_eq!(array_init(&Ty::Int, count, &|_| unreachable!()).unwrap_err().code, "E_ARRAY_RANGE"); }
+        assert_eq!(array_init(&Ty::Int, -1, &|_| unreachable!()).unwrap_err().code, "E_ARRAY_RANGE");
+        assert_eq!(array_init(&Ty::Int, i64::MAX, &|_| unreachable!()).unwrap_err().code, "E_ARRAY_MEMORY");
         for element in [Ty::Int, Ty::Float, Ty::Vec2, Ty::Vec3, Ty::Vec4, Ty::Text] {
             assert_eq!(array_init(&element, (1_i64 << 52) - 1, &|_| unreachable!("allocation must fail before initialization")).unwrap_err().code, "E_ARRAY_MEMORY");
         }

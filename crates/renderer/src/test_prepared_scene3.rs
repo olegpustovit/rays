@@ -86,7 +86,7 @@ fn borrowed_vertices_reuse_indices_with_fresh_empty_host_planes() {
     next.vertices = new_bytes(vec![1]);
     assert!(!same_bytes(&next, &Some(source.clone())));
     next.vertices = empty_bytes();
-    next.indices = Rc::from(&source.indices[..]);
+    next.indices = new_bytes(source.indices.to_vec());
     assert!(!same_bytes(&next, &Some(source)), "new index storage still needs content validation");
 }
 
@@ -123,7 +123,35 @@ fn published_shapes_retain_immutable_vertices_without_copying() {
     assert_ne!(vertex_hash(&owned.draw.mesh),hash,"owned mesh mutation stopped reaching its source");
     owned.draw.mesh.shared_vertices=Some(Arc::new(vec![0;72]));
     invalid(owned);
-    assert_eq!(std::mem::size_of::<super::Mesh>(),88,"hot mesh owner layout (two fat Rc<[u8]> byte buffers)");
+    assert_eq!(std::mem::size_of::<super::Mesh>(),72,"hot mesh owner layout (two thin Rc<Vec<u8>> byte buffers)");
+}
+
+#[test]
+fn retained_texture_bytes_charge_actual_capacity() {
+    use crate::renderer_lowering as lowering;
+    let mut pixels = Vec::with_capacity(lowering::SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY as usize + 1);
+    pixels.extend_from_slice(&[255;4]);
+    let mut texture = (*lowering::ui_white_texture()).clone();
+    texture.levels = Rc::new(vec![TextureLevel { width:1, height:1, bytes:new_bytes(pixels) }]);
+    assert_eq!(texture.levels[0].bytes.len(),4);
+    assert!(lowering::sampled_texture_bytes(&texture) > lowering::SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY);
+    let mut draw = entry();
+    let mut levels = Rc::try_unwrap(texture.levels).ok().unwrap();
+    let mut vertices = Rc::try_unwrap(levels.pop().unwrap().bytes).unwrap();
+    vertices.clear();
+    vertices.resize(72,0);
+    draw.draw.mesh.vertices = new_bytes(vertices);
+    let logical = draw_bytes(&draw);
+    let retained = draw.draw.mesh.retained_vertex_bytes();
+    assert!(retained > lowering::SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY);
+    assert!(source_for_trust(&draw.draw.mesh, logical).is_none());
+    assert!(prepared_bytes_of(&[Rc::new(draw.clone())]) >= retained);
+    let vertices = std::mem::replace(&mut draw.draw.mesh.vertices, empty_bytes());
+    draw.draw.mesh.shared_vertices = Some(Arc::new(Rc::try_unwrap(vertices).unwrap()));
+    assert_eq!(draw.draw.mesh.vertex_bytes_len(),72);
+    assert_eq!(draw_bytes(&draw),logical);
+    assert!(source_for_trust(&draw.draw.mesh, logical).is_none());
+    assert!(prepared_bytes_of(&[Rc::new(draw)]) >= retained);
 }
 
 #[test]
@@ -166,6 +194,6 @@ fn numeric_hash_parts_and_typed_gpu_keys() {
     assert_ne!(content_hash(&a, b"changed"), expected);
     a.indices = new_bytes(vec![1;12]);
     assert_ne!(content_hash(&a, b"uniform"), expected);
-    assert_eq!(std::mem::size_of::<Mesh>(), 88);
+    assert_eq!(std::mem::size_of::<Mesh>(), 72);
     eprintln!("R10 cache layouts: mesh={} texture={}", std::mem::size_of::<Cached>(), std::mem::size_of::<CachedTexture>());
 }

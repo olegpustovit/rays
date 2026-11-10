@@ -76,7 +76,7 @@ fn bytes_of(i: &simage::T) -> Vec<u8> {
 fn rgba(i: &simage::T) -> Vec<u8> {
     match simage::rgba8(i) {
         Some(b) => b.to_vec(),
-        None => simage::storage(i).iter().map(|v| (v * 255.).round() as u8).collect(),
+        None => simage::storage(i).unwrap().iter().map(|v| (v * 255.).round() as u8).collect(),
     }
 }
 

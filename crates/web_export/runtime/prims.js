@@ -366,25 +366,25 @@ export function sequence_build(count, width, type, cooked = false) {
   if (type === 'text') {
     if (width === undefined || intOf(width) !== 1n) err('E_ARRAY_TYPE', 'Typed builders require width one.');
     const n = intOf(count);
-    return n < 0n || n > MAX_LENGTH ? err('E_ARRAY_RANGE', 'Array length is outside native storage bounds.')
+    return n < 0n ? err('E_ARRAY_RANGE', 'Array length is outside native storage bounds.')
       : array_text(n);
   }
   if (type === 'int' && (width === undefined || intOf(width) !== 1n))
     err('E_ARRAY_TYPE', 'Core packed width is one to four; integers require width one.');
   if (type === 'int') {
     const n = intOf(count);
-    return n < 0n || n > MAX_LENGTH ? err('E_ARRAY_RANGE', 'Array length is outside native storage bounds.') : buildInt(Number(n), () => 0n);
+    return n < 0n ? err('E_ARRAY_RANGE', 'Array length is outside native storage bounds.') : buildInt(n, () => 0n);
   }
   const n = intOf(count);
   if (width !== undefined) { // packed storage: no list cap
     const w = Number(intOf(width));
     if (w < 1 || w > 4) err('E_ARRAY_TYPE', 'Core packed width is one to four; integers require width one.');
-    return n < 0n || n > MAX_LENGTH / BigInt(w) ? err('E_ARRAY_RANGE', 'Array length is outside native storage bounds.')
-      : new PArray(w, new Float64Array(Number(n) * w));
+    return n < 0n ? err('E_ARRAY_RANGE', 'Array length is outside native storage bounds.')
+      : new PArray(w, allocateArray(Float64Array, n * BigInt(w)));
   }
   if (typeof cooked !== 'boolean') err('E_TYPE', 'Core cooked collection flag must be boolean.');
-  return n < 0n || n > (cooked ? MAX_LENGTH : 4096n)
-    ? err('E_ITER_BOUND', 'Core list length exceeds its bound.') : new Array(Number(n)).fill(null);
+  return n < 0n || (!cooked && n > 4096n)
+    ? err('E_ITER_BOUND', 'Core list length exceeds its bound.') : allocateArray(Array, n).fill(null);
 }
 // Private typed geometry-list construction; no authored list operator exposes it.
 export const sequence_cooked = values => list(values).slice();
@@ -446,27 +446,48 @@ export const truthy = v => truth(v);
 export const fail = (code, message, cause, hints, trace) => err(code, message, cause, hints, trace);
 
 // ---- packed arrays ----
-const MAX_LENGTH = 2n ** 54n - 1n; // Sys.max_floatarray_length
-// Logical native element capacity, not an allocation or browser TypedArray limit.
+const NATIVE_STORAGE_BYTES = (1n << 63n) - 1n;
+// Logical capacity of the native 64-bit target, not a promise of available browser memory.
 export function array_max_length(type = 'float') {
   switch (type) {
-    case 'int': case 'text': case 'float': return MAX_LENGTH;
-    case 'vec2': return MAX_LENGTH / 2n;
-    case 'vec3': return MAX_LENGTH / 3n;
-    case 'vec4': return MAX_LENGTH / 4n;
+    case 'int': case 'float': return NATIVE_STORAGE_BYTES / 8n;
+    case 'text': return NATIVE_STORAGE_BYTES / 8n - 1n;
+    case 'vec2': return NATIVE_STORAGE_BYTES / 16n;
+    case 'vec3': return NATIVE_STORAGE_BYTES / 24n;
+    case 'vec4': return NATIVE_STORAGE_BYTES / 32n;
     default: return err('E_ARRAY_TYPE', 'Array capacity type is the literal int, text, float, vec2, vec3 or vec4.');
   }
 }
 
 function count(name, v) {
+  const invalid = () => err('E_ARRAY_RANGE', `${name} needs a non-negative whole length.`);
   if (typeof v === 'bigint') {
-    if (v < 0n || v > MAX_LENGTH) err('E_ARRAY_RANGE', `${name} needs a non-negative whole length.`);
-    return Number(v);
+    if (v < 0n || BigInt.asIntN(64, v) !== v) invalid();
+    return v;
   }
   const n = num(v);
-  return n < 0 || n !== Math.floor(n) || n > Number(MAX_LENGTH)
-    ? err('E_ARRAY_RANGE', `${name} needs a non-negative whole length.`) : n;
+  if (!Number.isFinite(n) || n < 0 || n !== Math.floor(n) || n >= 2 ** 63) invalid();
+  return BigInt(n);
 }
+// One allocation boundary for primitives and the runtime's ordinary packed outputs.
+export function allocateArray(ArrayType, count) {
+  const memory = () => err('E_ARRAY_MEMORY', 'Frame data exceeds available memory.');
+  if (typeof count !== 'bigint') {
+    if (!Number.isSafeInteger(count) || count < 0) memory();
+    count = BigInt(count);
+  }
+  if (count < 0n || count > NATIVE_STORAGE_BYTES / BigInt(ArrayType.BYTES_PER_ELEMENT ?? 8)
+      || count > BigInt(Number.MAX_SAFE_INTEGER)) memory();
+  return arrayAllocation(() => new ArrayType(Number(count)));
+}
+function arrayAllocation(make) {
+  try { return make(); }
+  catch (error) {
+    if (error instanceof RangeError) err('E_ARRAY_MEMORY', 'Frame data exceeds available memory.');
+    throw error;
+  }
+}
+
 function length(a) {
   if (a instanceof TextArray) return a.data.length;
   if (!(a instanceof PArray)) err('E_ARRAY_TYPE', 'Expected a packed array.');
@@ -475,9 +496,8 @@ function length(a) {
   return a.data.length / a.width;
 }
 function build(width, n, element) {
-  if (BigInt(n) > MAX_LENGTH / BigInt(width)) err('E_ARRAY_RANGE', 'Array length is outside native storage bounds.');
-  const data = new Float64Array(n * width);
-  for (let i = 0; i < n; i++) {
+  const data = allocateArray(Float64Array, n * BigInt(width));
+  for (let i = 0; i < data.length / width; i++) {
     const v = element(i), at = i * width;
     if (width === 1) data[at] = fin('array', num(v));
     else if (isVec(v) && v.length === width) v.forEach((c, j) => { data[at + j] = fin('array', c); });
@@ -488,9 +508,8 @@ function build(width, n, element) {
   return new PArray(width, data);
 }
 function buildInt(n, element) {
-  if (BigInt(n) > MAX_LENGTH) err('E_ARRAY_RANGE', 'Array length is outside native storage bounds.');
-  const data = new BigInt64Array(n);
-  for (let i = 0; i < n; i++) {
+  const data = allocateArray(BigInt64Array, n);
+  for (let i = 0; i < data.length; i++) {
     const value = element(i);
     if (!isNum(value) && typeof value !== 'boolean') err('E_ARRAY_TYPE', 'Packed integer arrays contain integer values.');
     data[i] = typeof value === 'bigint' ? wrap(value) : intOf(value);
@@ -504,7 +523,7 @@ export const array_int = (n, value = 0n) => buildInt(count('array/int', n), () =
 export const array_text = (n, value = '') => {
   const length = count('array/text', n);
   if (typeof value !== 'string') err('E_ARRAY_TYPE', 'Text arrays contain text values.');
-  return new TextArray(new Array(length).fill(value));
+  return new TextArray(allocateArray(Array, length).fill(value));
 };
 export const array_float = (n, value = 0) => build(1, count('array/float', n), () => value);
 export const array_vec3 = (n, value = new Float64Array(3)) => build(3, count('array/vec3', n), () => value);
@@ -542,7 +561,7 @@ function arrayReduce(operation, a, offsets) {
   };
   if (!segmented) return width === 1 ? reduce(0, count, 0)
     : Float64Array.from({ length: width }, (_, c) => reduce(0, count, c));
-  const result = integer ? new BigInt64Array(segments) : new Float64Array(segments * width);
+  const result = allocateArray(integer ? BigInt64Array : Float64Array, segments * width);
   for (let row = 0; row < segments; row++) for (let c = 0; c < width; c++)
     result[row * width + c] = reduce(Number(offsets.data[row]), Number(offsets.data[row + 1]), c);
   return new PArray(width, result);
@@ -556,7 +575,7 @@ export function array_segment_argmax(a, offsets) {
   for (let i = 1; i < n; i++) if (o[i] < o[i - 1]) bad();
   if (!(a instanceof PArray) || a.width !== 1) err('E_ARRAY_TYPE', 'array/segment_argmax needs an int or float array.');
   const integer = a.data instanceof BigInt64Array;
-  const result = new BigInt64Array(n - 1).fill(-1n);
+  const result = allocateArray(BigInt64Array, n - 1).fill(-1n);
   for (let row = 0; row < n - 1; row++) {
     const first = Number(o[row]), finish = Number(o[row + 1]);
     if (first >= finish) continue;
@@ -581,12 +600,12 @@ export function array_grade(keys, descending = false) {
     for (const value of keys.data) fin('array/grade', value);
     data = keys.data;
   } else err('E_ARRAY_TYPE', 'Grade keys must be int, float or text arrays.');
-  const order = Array.from({length:data.length}, (_, i) => i);
+  const order = arrayAllocation(() => Array.from({length:data.length}, (_, i) => i));
   order.sort((a, b) => {
     const x = data[a], y = data[b], compared = x < y ? -1 : x > y ? 1 : 0;
     return compared === 0 ? a - b : descending ? -compared : compared;
   });
-  return new PArray(1, BigInt64Array.from(order, BigInt));
+  return new PArray(1, arrayAllocation(() => BigInt64Array.from(order, BigInt)));
 }
 export function array_index_of(keys, queries) {
   let source, wanted;
@@ -598,7 +617,7 @@ export function array_index_of(keys, queries) {
   } else err('E_ARRAY_TYPE', 'Index lookup needs matching int or text arrays.');
   const table = new Map();
   for (let i = 0; i < source.length; i++) if (!table.has(source[i])) table.set(source[i], BigInt(i));
-  return new PArray(1, BigInt64Array.from(wanted, key => table.get(key) ?? -1n));
+  return new PArray(1, arrayAllocation(() => BigInt64Array.from(wanted, key => table.get(key) ?? -1n)));
 }
 export function array_compact(mask) {
   if (!(mask instanceof PArray) || mask.width !== 1 || !(mask.data instanceof BigInt64Array))
@@ -608,7 +627,7 @@ export function array_compact(mask) {
     if (value === 1n) kept++;
     else if (value !== 0n) err('E_ARRAY_MASK', 'Compact mask entries must be 0 or 1.');
   }
-  const result = new BigInt64Array(kept);
+  const result = allocateArray(BigInt64Array, kept);
   for (let i = 0, at = 0; i < mask.data.length; i++) if (mask.data[i] === 1n) result[at++] = BigInt(i);
   return new PArray(1, result);
 }
@@ -616,8 +635,7 @@ export function array_scan_sum(array) {
   if (!(array instanceof PArray) || array.width !== 1 || !(array.data instanceof BigInt64Array))
     err('E_ARRAY_TYPE', 'Prefix sum needs an integer array.');
   const n = array.data.length;
-  if (BigInt(n) >= MAX_LENGTH) err('E_ARRAY_RANGE', 'Scan output length is outside native storage bounds.');
-  const result = new BigInt64Array(n + 1);
+  const result = allocateArray(BigInt64Array, n + 1);
   for (let i = 0; i < n; i++) result[i + 1] = wrap(result[i] + array.data[i]);
   return new PArray(1, result);
 }
@@ -630,10 +648,10 @@ export function array_scatter_add(indices, values, size) {
     err('E_ARRAY_TYPE', 'Scatter values must be int, float or vector arrays.');
   const integer = values.data instanceof BigInt64Array, width = values.width;
   if (typeof size !== 'bigint') err('E_ARRAY_TYPE', 'Scatter size must be an integer.');
-  if (size < 0n || size > MAX_LENGTH / BigInt(width))
+  if (size < 0n || BigInt.asIntN(64, size) !== size)
     err('E_ARRAY_RANGE', 'array/scatter_add needs a non-negative whole length.');
   if (indices.data.length !== n) err('E_ARRAY_COUNT', 'Scatter indices and values must have equal lengths.');
-  const result = integer ? new BigInt64Array(Number(size)) : new Float64Array(Number(size) * width);
+  const result = allocateArray(integer ? BigInt64Array : Float64Array, size * BigInt(width));
   for (let row = 0; row < n; row++) {
     const index = indices.data[row];
     if (index < 0n || index >= size) err('E_ARRAY_RANGE', 'Scatter index is outside its output length.');
@@ -665,27 +683,26 @@ export function array_sum(a) {
   return a.width === 1 ? total[0] : total;
 }
 export function array_nth(a, index) {
-  const i = count('array/nth', index), n = length(a);
-  if (i >= n) err('E_ARRAY_RANGE', 'Array index is outside its length.');
+  const at = count('array/nth', index), n = length(a);
+  if (at >= BigInt(n)) err('E_ARRAY_RANGE', 'Array index is outside its length.');
+  const i = Number(at);
   if (a instanceof TextArray) return a.data[i];
   return a.width === 1 ? a.data[i] : a.data.slice(i * a.width, (i + 1) * a.width);
 }
 export function array_slice(a, first, n) {
   const f = count('array/slice', first), c = count('array/slice', n);
-  if (a instanceof TextArray) {
-    if (f > a.data.length || c > a.data.length - f) err('E_ARRAY_RANGE', 'An array slice must be within its source.');
-    return new TextArray(a.data.slice(f, f + c));
-  }
-  if (!(a instanceof PArray)) err('E_TYPE', 'Expected a packed array.');
-  const len = Math.floor(a.data.length / a.width);
-  if (f > len || c > len - f) err('E_ARRAY_RANGE', 'An array slice must be within its source.');
-  return new PArray(a.width, a.data.slice(f * a.width, (f + c) * a.width));
+  if (!(a instanceof PArray || a instanceof TextArray)) err('E_TYPE', 'Expected a packed array.');
+  const width = a instanceof TextArray ? 1 : a.width, length = BigInt(Math.floor(a.data.length / width));
+  if (f > length || c > length - f) err('E_ARRAY_RANGE', 'An array slice must be within its source.');
+  const data = arrayAllocation(() => a.data.slice(Number(f) * width, Number(f + c) * width));
+  return a instanceof TextArray ? new TextArray(data) : new PArray(width, data);
 }
+
 export function array_concat(a, b) {
-  if (a instanceof TextArray && b instanceof TextArray) return new TextArray(a.data.concat(b.data));
+  if (a instanceof TextArray && b instanceof TextArray) return new TextArray(arrayAllocation(() => a.data.concat(b.data)));
   if (!(a instanceof PArray && b instanceof PArray && a.width === b.width && a.data.constructor === b.data.constructor))
     err('E_ARRAY_TYPE', 'Concatenated arrays must have the same element type.');
-  const data = new a.data.constructor(a.data.length + b.data.length);
+  const data = allocateArray(a.data.constructor, a.data.length + b.data.length);
   data.set(a.data); data.set(b.data, a.data.length);
   return new PArray(a.width, data);
 }

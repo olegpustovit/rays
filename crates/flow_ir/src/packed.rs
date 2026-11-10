@@ -37,10 +37,6 @@ pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 /// `(region, seconds, reference)`.
 pub type Report = Arc<dyn Fn(&T, f64, bool) + Send + Sync>;
 
-/// OCaml `max_int` (2^62 - 1): the iteration-count overflow bound of a product.
-/// OCaml `Sys.max_array_length` = `Sys.max_floatarray_length` on 64 bits.
-const MAX_ARRAY: usize = op::MAX_WOSIZE;
-
 #[derive(Clone)]
 pub struct Measure {
     pub clock: Clock,
@@ -1306,7 +1302,7 @@ impl TS {
 }
 
 fn row(array: &Value, index: i64) -> K<usize> {
-    if index < 0 || index as usize > MAX_ARRAY {
+    if index < 0 {
         return Err(fail("E_ARRAY_RANGE", "array/nth needs a non-negative whole length."));
     }
     if index as usize >= array_len_k(array)? {
@@ -2102,7 +2098,7 @@ fn valid_indices(sh: &TS, regs: &region::Registers, tc: &TC, length: usize, guar
     while j < length
         && (!tc.selected(regs, bs, j, guards) || {
             let index = tc.integer[index as usize * bs + j];
-            index >= 0 && index as usize <= MAX_ARRAY && (index as usize) < count
+            index >= 0 && (index as usize) < count
         })
     {
         j += 1;
@@ -2425,7 +2421,7 @@ fn run_typed(
             match integer_range(*r, term) {
                 Some((rr, count)) => {
                     let count_value = evaluate(rr, &Arc::new(count))?;
-                    ranges[i] = Some(op::array_count(Some(MAX_ARRAY), "array/range", &count_value)?);
+                    ranges[i] = Some(op::array_count(None, "array/range", &count_value)?);
                     Value::No_geo
                 }
                 None => evaluate(*r, term)?,
@@ -2535,16 +2531,11 @@ fn run_typed(
         n
     };
     let count = count as usize;
-    for (_, term) in t.stages.iter() {
-        if let Ty::Array(ty) = term.ty() {
-            if packed_ops::scalar_width(ty).is_some_and(|w| count > MAX_ARRAY / w) {
-                return Err(fail("E_ARRAY_RANGE", "Kernel intermediate exceeds native storage bounds."));
-            }
-        }
-    }
     let mut strides = vec![1usize; nsrc];
-    for i in (0..nsrc.saturating_sub(1)).rev() {
-        strides[i] = strides[i + 1] * lengths[i + 1];
+    if t.iteration == Iteration::Product && count > 0 {
+        for i in (0..nsrc.saturating_sub(1)).rev() {
+            strides[i] = strides[i + 1] * lengths[i + 1];
+        }
     }
     let mut skip: Vec<usize> = t.skip.iter().filter(|i| **i >= 0 && (**i as usize) < count).map(|i| *i as usize).collect();
     skip.sort_unstable();
@@ -2585,20 +2576,13 @@ fn run_typed(
         for k in 0..n_out {
             let width = t.outputs[k].len();
             if text_outputs[k] {
-                if kept > MAX_ARRAY {
-                    return Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds."));
-                }
-                tvec[k] = if kept == 0 { Vec::new() } else { vec![Arc::from([]); kept] };
+                tvec[k] = value::array_buffer(kept)?;
+                if kept > 0 { tvec[k].resize(kept, Arc::from([])); }
             } else if integer_outputs[k] {
-                if kept > MAX_ARRAY {
-                    return Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds."));
-                }
-                ivec[k] = region::ints_for(t, kept);
+                ivec[k] = region::ints_for(t, kept)?;
             } else {
-                if kept > MAX_ARRAY / width {
-                    return Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds."));
-                }
-                fvec[k] = region::floats_for(t, kept * width);
+                let slots = kept.checked_mul(width).ok_or_else(|| fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
+                fvec[k] = region::floats_for(t, slots)?;
             }
         }
     }
@@ -2828,14 +2812,15 @@ fn run_typed(
         (0..n_out)
             .map(|k| {
                 if sh.text_outputs[k] {
-                    Value::Text_array(Arc::new(rays_math::text_array::TextArray::from(std::mem::take(&mut tvec[k]))))
+                    let rows = std::mem::take(&mut tvec[k]);
+                    value::array_init(&Ty::Text, rows.len() as i64, &|i| Value::Text(rows[i].clone()))
                 } else if sh.integer_outputs[k] {
-                    Value::Int_array(Arc::new(std::mem::take(&mut ivec[k])))
+                    Ok(Value::Int_array(Arc::new(std::mem::take(&mut ivec[k]))))
                 } else {
-                    float_value_of(t.outputs[k].len(), std::mem::take(&mut fvec[k]))
+                    Ok(float_value_of(t.outputs[k].len(), std::mem::take(&mut fvec[k])))
                 }
             })
-            .collect()
+            .collect::<Result<_, Diagnostic>>()?
     } else {
         let acc = sh.accumulator.lock().unwrap().clone();
         vec![if kept == 0 {
@@ -3971,8 +3956,7 @@ pub mod host {
                 (None, true) => match index_range(*residual, term) {
                     Some((r, n)) => match evaluate(r, &n)? {
                         value @ Value::Int(_) => {
-                            let limit = MAX_ARRAY;
-                            match op::array_count(Some(limit), "array/range", &value) {
+                            match op::array_count(None, "array/range", &value) {
                                 Ok(n) => Some(n),
                                 Err(_) => {
                                     pv_eval_term(pv, resolve, *residual, term)?;
@@ -4449,7 +4433,7 @@ mod tests {
 
     #[test]
     fn integer_range_views_match_the_reference() {
-        let max_array = MAX_ARRAY + 1;
+        let max_array = value::array_max_length(&Ty::Int).unwrap() + 1;
         for body in [
             "(map (fn [x] (int/add x (int t))) (array/range (int/add 2100 (int t)) :type int))".to_owned(),
             "(let* [n (int/add 2100 (int t)) xs (array/range n :type int)] (map (fn [x] (int/sub x (int t))) xs))".to_owned(),

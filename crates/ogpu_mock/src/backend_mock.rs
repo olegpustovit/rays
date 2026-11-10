@@ -87,12 +87,10 @@ fn zeroed(size: i64) -> Option<Vec<u8>> {
 
 fn texture_level_size(d: &TextureDescriptor, mip: i64) -> Option<i64> {
     let texels = (mip_extent(d.width, mip) as i128)
-        * (mip_extent(d.height, mip) as i128)
-        * (mip_extent(d.depth, mip) as i128);
+        .checked_mul(mip_extent(d.height, mip) as i128)?
+        .checked_mul(mip_extent(d.depth, mip) as i128)?;
     let texel = types::texel_bytes(d.format) as i128;
-    // Sys.max_string_length on 64-bit OCaml.
-    let max_string_length: i128 = (1 << 57) - 9;
-    if texels > max_string_length / texel { None } else { i64::try_from(texels * texel).ok() }
+    i64::try_from(texels.checked_mul(texel)?).ok()
 }
 
 /// A blit recorded by the mock encoder and replayed at commit.

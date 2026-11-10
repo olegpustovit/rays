@@ -636,9 +636,16 @@ pub fn generate_point_ranges(
     }
     let count = usize::try_from(count)
         .map_err(|_| geometry_error("Geometry.generate_point_ranges: point count is too large".to_owned()))?;
-    let mut x = vec![0.0; count];
-    let mut y = vec![0.0; count];
-    let mut z = vec![0.0; count];
+    let memory = || error::new("geometry", Code::ArrayMemory, "Point storage exceeds available memory.".to_owned());
+    let mut x = Vec::new();
+    x.try_reserve_exact(count).map_err(|_| memory())?;
+    x.resize(count, 0.0);
+    let mut y = Vec::new();
+    y.try_reserve_exact(count).map_err(|_| memory())?;
+    y.resize(count, 0.0);
+    let mut z = Vec::new();
+    z.try_reserve_exact(count).map_err(|_| memory())?;
+    z.resize(count, 0.0);
     let grain = 16_384usize;
     // ponytail: serial whole-plane callbacks avoid aliasing; use disjoint slices if generation becomes a bottleneck.
     for first in (0..count).step_by(grain) {
@@ -789,6 +796,15 @@ mod tests {
         .err().unwrap();
         assert_eq!(error::code(&error), Code::InvalidGeometry);
     }
+    #[test]
+    fn point_range_capacity_fails_before_fill() {
+        let oversized = (isize::MAX as usize / std::mem::size_of::<f64>() + 1) as i64;
+        let failure = generate_point_ranges(oversized, &mut |_, _, _, _, _| panic!("oversized point storage reached fill")).err().unwrap();
+        assert_eq!(error::code(&failure), Code::ArrayMemory);
+        let invalid = generate_point_ranges(-1, &mut |_, _, _, _, _| panic!("negative count reached fill")).err().unwrap();
+        assert_eq!(error::code(&invalid), Code::InvalidGeometry);
+    }
+
     #[test]
     fn point_range_generator_keeps_fixed_plane_lengths() {
         let count = 16_385i64;

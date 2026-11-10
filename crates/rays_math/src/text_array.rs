@@ -27,9 +27,18 @@ impl TextArray {
     /// Reserves for `rows` rows, reporting allocation failure instead of aborting.
     pub fn try_with_capacity(rows: usize) -> Result<Self, std::collections::TryReserveError> {
         let mut offsets = Vec::new();
-        offsets.try_reserve_exact(rows + 1)?;
+        offsets.try_reserve_exact(rows.saturating_add(1))?;
         offsets.push(0);
         Ok(Self { offsets, bytes: Vec::new(), rows: 0 })
+    }
+
+    pub fn try_clone(&self) -> Result<Self, std::collections::TryReserveError> {
+        let (mut offsets, mut bytes) = (Vec::new(), Vec::new());
+        offsets.try_reserve_exact(self.offsets.len())?;
+        bytes.try_reserve_exact(self.bytes.len())?;
+        offsets.extend_from_slice(&self.offsets);
+        bytes.extend_from_slice(&self.bytes);
+        Ok(Self { offsets, bytes, rows: self.rows })
     }
 
     pub fn len(&self) -> usize { self.rows }
@@ -46,6 +55,13 @@ impl TextArray {
 
     pub fn get(&self, index: usize) -> Option<&[u8]> { (index < self.len()).then(|| &self[index]) }
 
+    pub fn try_push(&mut self, row: &[u8]) -> Result<(), std::collections::TryReserveError> {
+        self.offsets.try_reserve(self.rows.saturating_add(2).saturating_sub(self.offsets.len()))?;
+        self.bytes.try_reserve(row.len())?;
+        self.push(row);
+        Ok(())
+    }
+
     pub fn push(&mut self, row: &[u8]) {
         self.offsets.resize(self.rows + 1, self.bytes.len());
         self.bytes.extend_from_slice(row);
@@ -56,6 +72,19 @@ impl TextArray {
     /// Replaces row `index` in place: a row of the same length overwrites its bytes; a row whose
     /// successors are all empty appends (filling in order is linear); another shifts the bytes and
     /// boundaries after it.
+    pub fn try_replace(&mut self, index: usize, row: &[u8]) -> Result<(), std::collections::TryReserveError> {
+        assert!(index < self.rows, "TextArray row {index} is outside its {} rows", self.rows);
+        let (start, end) = (self.bound(index), self.bound(index + 1));
+        if end - start != row.len() {
+            self.bytes.try_reserve(row.len().saturating_sub(end - start))?;
+            if start == self.bytes.len() {
+                self.offsets.try_reserve(index.saturating_add(2).saturating_sub(self.offsets.len()))?;
+            }
+        }
+        self.replace(index, row);
+        Ok(())
+    }
+
     pub fn replace(&mut self, index: usize, row: &[u8]) {
         assert!(index < self.rows, "TextArray row {index} is outside its {} rows", self.rows);
         let (start, end) = (self.bound(index), self.bound(index + 1));
@@ -128,6 +157,12 @@ mod tests {
     use super::TextArray;
 
     #[test]
+    fn oversized_row_capacity_returns_an_allocation_error() {
+        assert!(TextArray::try_with_capacity(usize::MAX).is_err());
+        assert!(TextArray::try_with_capacity(isize::MAX as usize).is_err());
+    }
+
+    #[test]
     fn rows_round_trip_with_empty_and_binary_rows() {
         let rows: Vec<Vec<u8>> = vec![b"abc".to_vec(), Vec::new(), vec![0xff, 0, 0x80], Vec::new()];
         let array: TextArray = rows.clone().into();
@@ -139,6 +174,23 @@ mod tests {
         assert_eq!(array.iter().rev().next(), Some(&b""[..]));
         assert_eq!(array.gather([2, 0, 0]), vec![vec![0xff, 0, 0x80], b"abc".to_vec(), b"abc".to_vec()]);
         assert!(TextArray::new().is_empty() && TextArray::default().len() == 0);
+    }
+
+    #[test]
+    fn fallible_growth_preserves_virtual_empty_and_binary_rows() {
+        let mut array = TextArray { rows: 5, ..TextArray::new() };
+        array.try_replace(4, b"").unwrap();
+        assert_eq!(array.offsets, [0]);
+        array.try_replace(0, &[255, 0]).unwrap();
+        let mut copy = array.try_clone().unwrap();
+        assert_eq!(copy.offsets, array.offsets, "copy preserves compressed empty rows");
+        copy.try_replace(0, b"copy").unwrap();
+        assert_eq!(&array[0], &[255, 0]);
+        array.try_replace(2, b"middle").unwrap();
+        array.try_replace(0, b"a").unwrap();
+        array.try_replace(1, b"xy").unwrap();
+        array.try_push(&[0, 128]).unwrap();
+        assert_eq!(array, vec![&b"a"[..], b"xy", b"middle", b"", b"", &[0, 128]]);
     }
 
     #[test]

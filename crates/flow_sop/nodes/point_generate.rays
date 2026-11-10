@@ -42,7 +42,7 @@
 (defnode sop/point_generate :label "Point Generate" :version 1
   :category ["Create" "Points"]
   :validate (and (and (and (int/le total (array/max_length :type int))
-                           (<= points_per_point 18014398509481984.0))
+                           (< points_per_point 9223372036854775808.0))
                       (and (and (not (text/blank? source_point_attribute)) (not (equal? source_point_attribute "P")))
                            (and (not (text/blank? source_index_attribute)) (not (equal? source_index_attribute "P")))))
                  (and (and (not (equal? source_point_attribute source_index_attribute))
@@ -89,7 +89,7 @@
              probabilities (if probabilistic (pg_float_attribute in0 probability_attribute) (array/float points 0.0))
              bad_weights (if per_point
                            (array/sum (exact (map (fn [(w : float) (s : int)]
-                             (if (and (int/eq s 1) (or (< w 0.0) (> (* points_per_point w) 18014398509481984.0))) 1 0))
+                             (if (and (int/eq s 1) (or (< w 0.0) (>= (* points_per_point w) 9223372036854775808.0))) 1 0))
                              weights selected)))
                            0)
              bad_probability (if probabilistic

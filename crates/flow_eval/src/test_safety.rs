@@ -38,12 +38,12 @@ fn safety_cases() {
     assert_eq!(ok(static_eval(&workspace)).results[0].1, Value::Int(7));
 
     for constructor in ["float", "int", "vec4", "text"] {
-        let source = format!("(workspace w (graph g :context host (array/{constructor} 4503599627370495)))");
+        let source = format!("(workspace w (graph g :context host (array/{constructor} 9223372036854775807)))");
         let workspace = check(&source);
         let diagnostic = static_eval(&workspace).err().expect("impossible allocation must be refused");
         assert_eq!(diagnostic.code, "E_ARRAY_MEMORY", "{constructor}: {diagnostic:?}");
     }
-    for body in ["(array/range 4503599627370495)", "(array/range 4503599627370495 :type int)", "(array/scatter_add (array/int 0) (array/float 0) 4503599627370495)"] {
+    for body in ["(array/range 9223372036854775807)", "(array/range 9223372036854775807 :type int)", "(array/scatter_add (array/int 0) (array/float 0) 9223372036854775807)"] {
         let workspace = check(&format!("(workspace w (graph g :context host {body}))"));
         assert_eq!(static_eval(&workspace).err().unwrap().code, "E_ARRAY_MEMORY");
     }

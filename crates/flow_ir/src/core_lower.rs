@@ -22,7 +22,6 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
-const MAX_ARRAY: i64 = (1i64 << 54) - 1;
 
 /// OCaml's `Unsupported` and `Diagnostic.Error`.
 #[derive(Clone, Debug)]
@@ -867,8 +866,7 @@ impl Lowerer {
                 let mut body = s.fork();
                 f(self, &mut body, &Computed(index, Ty::Int), &Computed(item, ty))?;
                 let limit = match self.type_of(&sequence) {
-                    Ty::Array(e) if matches!(*e, Ty::Int | Ty::Text) => MAX_ARRAY,
-                    Ty::Array(element) => MAX_ARRAY / PO::scalar_width(&element).unwrap_or(1) as i64,
+                    Ty::Array(_) => i64::MAX,
                     _ => 4096,
                 };
                 s.st.push(statement(id, source, C::StatementNode::Iterate { sequence: sequence_id, index, item, limit, body: body.st }));
@@ -2129,9 +2127,9 @@ impl Lowerer {
                 }
                 let result = self.primitive(s, source, ty, C::Primitive::Sequence_build, build_args)?;
                 let kept = self.hold(s, source, None, &int(0))?;
-                let limit = if *ty == Ty::Array(Box::new(Ty::Int)) || *ty == Ty::Array(Box::new(Ty::Text)) { MAX_ARRAY }
-                    else if width > 0 { MAX_ARRAY }
-                    else if geometry_collection(ty) { MAX_ARRAY }
+                let limit = if *ty == Ty::Array(Box::new(Ty::Int)) || *ty == Ty::Array(Box::new(Ty::Text)) { i64::MAX }
+                    else if width > 0 { i64::MAX }
+                    else if geometry_collection(ty) { i64::MAX }
                     else { 4096 };
                 self.counted(limit, None, s, source, &int(0), &count, &mut |l, sc, index| {
                     let mut args = Vec::new();
@@ -2327,7 +2325,7 @@ impl Lowerer {
                 count = self.branch(s, zone_source, &Ty::Int, &zero,
                     &mut |_, _| Ok(int(0)),
                     &mut |l, sc| {
-                        let limit = l.primitive(sc, zone_source, &Ty::Int, C::Primitive::Integer(PO::Integer::Idiv), vec![("a", int(MAX_ARRAY)), ("b", size.clone())])?;
+                        let limit = l.primitive(sc, zone_source, &Ty::Int, C::Primitive::Integer(PO::Integer::Idiv), vec![("a", int(i64::MAX)), ("b", size.clone())])?;
                         let over = l.primitive(sc, zone_source, &Ty::Bool, C::Primitive::Integer_compare(PO::Comparison::Igt), vec![("a", old_count.clone()), ("b", limit)])?;
                         l.branch(sc, zone_source, &Ty::Int, &over,
                             &mut |l, sc| l.primitive(sc, zone_source, &Ty::Int, C::Primitive::Fail("E_ARRAY_COUNT".into(), "Array count is too large.".into()), vec![]),

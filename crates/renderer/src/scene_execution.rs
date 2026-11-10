@@ -22,7 +22,7 @@ use std::sync::{Arc, OnceLock};
 pub use runtime_resources::bytes;
 
 pub fn new_bytes(value: Vec<u8>) -> bytes {
-    Rc::from(value)
+    Rc::new(value)
 }
 
 pub fn empty_bytes() -> bytes {
@@ -33,8 +33,6 @@ fn blen(value: &bytes) -> usize {
     value.len()
 }
 
-/// OCaml `Sys.max_string_length` on 64-bit.
-const MAX_STRING_LENGTH: i64 = 144115188075855863;
 
 
 fn failure_error(operation: &str, kind: ErrorKind, text: &str) -> Error {
@@ -114,17 +112,18 @@ pub fn register_gpu_vertices(
     let registry_has = owner.borrow().gpu_vertex_registry.contains_key(key);
     let invalid = key.is_empty()
         || vertex_count <= 0
-        || vertex_count > 1 << 30
-        || (extra.is_empty() && backend::buffer_size(buffer) < vertex_count * stride)
+        || vertex_count > i32::MAX as i64
+        || stride <= 0
+        || (extra.is_empty() && vertex_count.checked_mul(stride).is_none_or(|n| backend::buffer_size(buffer) < n))
         || std::iter::once(buffer).chain(extra.iter()).any(|b| backend::buffer_size(b) <= 0)
         || match &indirect {
-            Some((b, offset)) => *offset < 0 || offset + 20 > backend::buffer_size(b),
+            Some((b, offset)) => *offset < 0 || offset.checked_add(20).is_none_or(|n| n > backend::buffer_size(b)),
             None => false,
         }
         || match &indices {
             Some((b, count)) => {
                 *count <= 0
-                    || *count > MAX_STRING_LENGTH / 4
+                    || *count > u32::MAX as i64
                     || backend::buffer_size(b) < count * 4
                     || indirect.is_some()
             }
@@ -201,6 +200,9 @@ pub struct Mesh {
 impl Mesh {
     pub fn vertex_bytes_len(&self) -> usize {
         self.shared_vertices.as_ref().map_or_else(|| blen(&self.vertices), |bytes| bytes.len())
+    }
+    pub fn retained_vertex_bytes(&self) -> i64 {
+        (self.vertices.capacity() as i64).saturating_add(self.shared_vertices.as_ref().map_or(0, |bytes| bytes.capacity() as i64))
     }
 }
 
@@ -727,7 +729,7 @@ fn valid_vertex_attributes(entry: &SampledDraw) -> bool {
             let mesh = &entry.draw.mesh;
             !key.is_empty()
                 && mesh.vertex_count >= 0
-                && mesh.vertex_count <= MAX_STRING_LENGTH / 24
+                && mesh.vertex_count.checked_mul(24).is_some()
                 && match &mesh.key {
                     MeshKey::GpuVertices { .. } => mesh.vertex_bytes_len() == 0,
                     MeshKey::Host(_) => mesh.vertex_bytes_len() as i64 == mesh.vertex_count * 24,
@@ -743,7 +745,7 @@ fn valid_vertex_attributes(entry: &SampledDraw) -> bool {
 
 fn valid_index_length(mesh: &Mesh) -> bool {
     mesh.index_count >= 0
-        && mesh.index_count <= MAX_STRING_LENGTH / 4
+        && mesh.index_count.checked_mul(4).is_some()
         && (blen(&mesh.indices) as i64 == mesh.index_count * 4
             || match &mesh.key {
                 MeshKey::GpuVertices { .. } => blen(&mesh.indices) == 0,
@@ -1019,7 +1021,7 @@ fn digest(hash: u128, data: &[u8]) -> u128 {
 fn source_for_trust(mesh: &Mesh, bytes: i64) -> Option<Mesh> {
     // Keep extra CPU retention within the already bounded GPU payload budget, even when an indexed
     // mesh contains a large unused vertex plane.
-    let (v, i) = (mesh.vertex_bytes_len() as i64, blen(&mesh.indices) as i64);
+    let (v, i) = (mesh.retained_vertex_bytes(), mesh.indices.capacity() as i64);
     if i <= bytes && v <= bytes - i { Some(mesh.clone()) } else { None }
 }
 
@@ -1157,7 +1159,11 @@ fn prepare_upload(
     let vertices = mesh.shared_vertices.as_ref().map_or(&owned_vertices[..], |bytes| bytes.as_slice());
     let indices = &mesh.indices;
     let (vertex_count, index_count) = (mesh.vertex_count, mesh.index_count);
-    let total = (vertices.len() + indices.len() + uniform_bytes.len()) as i64;
+    let operation = "Scene_execution.prepare";
+    let vertex_index_bytes = vertices.len().checked_add(indices.len())
+        .ok_or_else(|| failure_error(operation, ErrorKind::Capacity, "mesh storage exceeds native address space"))?;
+    let total = vertex_index_bytes.checked_add(uniform_bytes.len()).and_then(|n| i64::try_from(n).ok())
+        .ok_or_else(|| failure_error(operation, ErrorKind::Capacity, "mesh storage exceeds native address space"))?;
     if mesh_key_string(&mesh.key).is_empty()
         || vertex_count <= 0
         || index_count <= 0
@@ -1167,8 +1173,9 @@ fn prepare_upload(
         return Err(failure_error("Scene_execution.prepare", ErrorKind::InvalidArgument, "mesh payload or transform uniforms are malformed"));
     }
     let payload_hash = if vertex_stable { None } else { Some(content_hash(mesh, uniform_bytes)) };
-    let uniform_offset = uniforms.map(|_| (vertices.len() + indices.len()) as i64);
-    let uniform_copy: Vec<u8> = uniform_bytes.to_vec();
+    let uniform_offset = uniforms.map(|_| vertex_index_bytes as i64);
+    let mut uniform_copy = runtime_resources::byte_buffer(operation, uniform_bytes.len())?;
+    uniform_copy.extend_from_slice(uniform_bytes);
     let reserved = |item: &CachedRef| scratch_mem_mesh(&value.prepared_scratch, item);
     let reusable: Option<CachedRef> = match &existing {
         Some(item) if item.borrow().bytes == total && !reserved(item) => Some(item.clone()),
@@ -1185,7 +1192,7 @@ fn prepare_upload(
     };
     match reusable {
         Some(item) => {
-            let mut packed = Vec::with_capacity(total as usize);
+            let mut packed = runtime_resources::byte_buffer(operation, total as usize)?;
             packed.extend_from_slice(vertices);
             packed.extend_from_slice(&indices);
             packed.extend_from_slice(uniform_bytes);
@@ -1554,10 +1561,7 @@ fn prepare_texture(value: &mut SceneExecution, defer: &mut Vec<Deferred>, source
         Some(item) => {
             let hash = levels_hash(source);
             if item.borrow().hash == Some(hash) {
-                let mut b = item.borrow_mut();
-                b.levels = source.levels.clone();
-                b.used = value.frame;
-                drop(b);
+                rebind_texture_source(value, &item, source);
                 Ok(item)
             } else {
                 upload_texture(value, defer, source, Some(hash), None)
@@ -1570,6 +1574,26 @@ fn prepare_texture(value: &mut SceneExecution, defer: &mut Vec<Deferred>, source
             upload_texture(value, defer, source, hash, None)
         }
     }
+}
+
+fn rebind_texture_source(value: &mut SceneExecution, item: &CachedTextureRef, source: &SampledTexture) {
+    let (changed, charge) = {
+        let b = item.borrow();
+        let old_cpu = b.levels.iter().fold(0i64, |n, level| n.saturating_add(level.bytes.capacity() as i64));
+        let charge = b.bytes.max(crate::renderer_lowering::sampled_texture_bytes(source));
+        (b.key != source.key || b.bytes.max(old_cpu) != charge, charge)
+    };
+    if changed {
+        let old_key = item.borrow().key.clone();
+        // Taking preserves the reused native allocation; remove/add would retire it.
+        side_lru::take(&mut value.texture_cache, &skey(&old_key));
+        item.borrow_mut().key = source.key.clone();
+        let item_any: Item = item.clone();
+        side_lru::add(&mut value.texture_cache, charge, skey(&source.key), item_any);
+    }
+    let mut b = item.borrow_mut();
+    b.levels = source.levels.clone();
+    b.used = value.frame;
 }
 
 fn upload_texture(
@@ -1623,7 +1647,9 @@ fn upload_texture(
     }
     let last = offsets.len() - 1;
     let total = offsets[last] + rows[last] * source.levels[last].height;
-    let cacheable = total <= TEXTURE_CACHE_BYTE_CAPACITY;
+    // Each retained CPU/GPU bank fits this charge; their combined storage may be twice it.
+    let charge = total.max(crate::renderer_lowering::sampled_texture_bytes(source));
+    let cacheable = charge <= TEXTURE_CACHE_BYTE_CAPACITY;
     let (texture, created) = match &reusable {
         Some(item) if cacheable => (item.borrow().texture.clone(), false),
         _ => (backend::create_texture(&value.device, descriptor)?, true),
@@ -1694,19 +1720,8 @@ fn upload_texture(
     value.uploaded += total;
     match reusable {
         Some(item) if backend::texture_id(&item.borrow().texture) == backend::texture_id(&texture) => {
-            let old_key = item.borrow().key.clone();
-            if old_key != source.key {
-                side_lru::take(&mut value.texture_cache, &skey(&old_key));
-                let bytes_ = item.borrow().bytes;
-                item.borrow_mut().key = source.key.clone();
-                let item_any: Item = item.clone();
-                side_lru::add(&mut value.texture_cache, bytes_, skey(&source.key), item_any);
-            }
-            let mut b = item.borrow_mut();
-            b.hash = hash;
-            b.levels = source.levels.clone();
-            b.used = value.frame;
-            drop(b);
+            item.borrow_mut().hash = hash;
+            rebind_texture_source(value, &item, source);
             Ok(item)
         }
         _ => {
@@ -1723,7 +1738,7 @@ fn upload_texture(
                 defer.push(Deferred::Texture(texture));
             } else {
                 let item_any: Item = item.clone();
-                side_lru::add(&mut value.texture_cache, total, skey(&source.key), item_any);
+                side_lru::add(&mut value.texture_cache, charge, skey(&source.key), item_any);
             }
             Ok(item)
         }
@@ -1737,7 +1752,17 @@ fn prepare_storage(value: &mut SceneExecution, key: &str, bytes_: &bytes) -> Res
             return Ok(item);
         }
         if item.borrow().copy == *bytes_ {
-            item.borrow_mut().source = bytes_.clone();
+            let old_charge = item.borrow().copy.capacity();
+            {
+                let mut b = item.borrow_mut();
+                b.copy = bytes_.clone();
+                b.source = bytes_.clone();
+            }
+            if old_charge != bytes_.capacity() {
+                side_lru::take(&mut value.auxiliary_cache, &skey(key));
+                let item_any: Item = item.clone();
+                side_lru::add(&mut value.auxiliary_cache, bytes_.capacity() as i64, skey(key), item_any);
+            }
             return Ok(item);
         }
     }
@@ -1758,7 +1783,7 @@ fn prepare_storage(value: &mut SceneExecution, key: &str, bytes_: &bytes) -> Res
         source: bytes_.clone(),
     }));
     let item_any: Item = item.clone();
-    side_lru::add(&mut value.auxiliary_cache, data.len() as i64, skey(key), item_any);
+    side_lru::add(&mut value.auxiliary_cache, data.capacity() as i64, skey(key), item_any);
     value.uploaded += data.len() as i64;
     Ok(item)
 }
@@ -1812,9 +1837,9 @@ fn combine_meshes(meshes: &[&Mesh]) -> Result<Mesh, Error> {
         {
             return Err(failure_error(operation, ErrorKind::InvalidArgument, "packed mesh cardinality is inconsistent"));
         }
-        if vertex_bytes > MAX_STRING_LENGTH - vlen
+        if vertex_bytes.checked_add(vlen).is_none()
             || vertex_count > i32::MAX as i64 - mesh.vertex_count
-            || index_count > MAX_STRING_LENGTH / 4 - mesh.index_count
+            || index_count.checked_add(mesh.index_count).is_none_or(|n| n > u32::MAX as i64)
         {
             return Err(failure_error(operation, ErrorKind::Capacity, "combined mesh exceeds packed representation limits"));
         }
@@ -1823,8 +1848,10 @@ fn combine_meshes(meshes: &[&Mesh]) -> Result<Mesh, Error> {
         index_count += mesh.index_count;
         identity = digest(identity, &mesh_identity(mesh).to_le_bytes());
     }
-    let mut vertices = vec![0u8; vertex_bytes as usize];
-    let mut indices = vec![0u8; (index_count * 4) as usize];
+    let mut vertices = runtime_resources::byte_buffer(operation, usize::try_from(vertex_bytes).map_err(|_| failure_error(operation, ErrorKind::Capacity, "vertex bytes exceed native address space"))?)?;
+    vertices.resize(vertex_bytes as usize, 0);
+    let mut indices = runtime_resources::byte_buffer(operation, usize::try_from(index_count * 4).map_err(|_| failure_error(operation, ErrorKind::Capacity, "index bytes exceed native address space"))?)?;
+    indices.resize((index_count * 4) as usize, 0);
     let (mut vertex_offset, mut vertex_base, mut index_offset) = (0usize, 0i64, 0usize);
     for mesh in meshes {
         let owned = &mesh.vertices;
@@ -1937,7 +1964,18 @@ fn coalesce_draws(draws: &[Draw]) -> Result<Vec<Draw>, Error> {
 }
 
 fn prepared_bytes_of(draws: &[Draw]) -> i64 {
-    draws.iter().map(|entry| draw_bytes(entry)).sum()
+    draws.iter().fold(0i64, |total, entry| total.saturating_add(retained_draw_bytes(entry)))
+}
+
+pub(crate) fn retained_draw_bytes(entry: &SampledDraw) -> i64 {
+    let texture_bytes = crate::renderer_lowering::sampled_texture_bytes;
+    entry.draw.mesh.retained_vertex_bytes()
+        .saturating_add(entry.draw.mesh.indices.capacity() as i64)
+        .saturating_add(entry.vertex_attributes.as_ref().map_or(0, |(_, b)| b.capacity() as i64))
+        .saturating_add(entry.draw.state.transform_uniforms.as_ref().map_or(0, |b| b.capacity() as i64))
+        .saturating_add(entry.texture.as_ref().map_or(0, |texture| texture_bytes(texture)))
+        .saturating_add(entry.auxiliary.as_ref().map_or(0, |a| (a.buffer.capacity() as i64)
+            .saturating_add(texture_bytes(&a.texture)).saturating_add(a.environment.as_ref().map_or(0, texture_bytes))))
 }
 
 fn resolve_prepared(value: &mut SceneExecution, prepared: &Option<(String, i64)>, draws: &[Draw]) -> Result<Vec<Draw>, Error> {

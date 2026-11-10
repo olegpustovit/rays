@@ -363,6 +363,7 @@ fn materials_motion() {
         assert!(moving_pixels != static_pixels);
     }
     assert!(p::mesh_instanced(&prepared(&sphere, red.clone()), Some(&[red.clone()]), None, &[place(0.), place(1.)]).is_err(), "mismatched instance material count was accepted");
+    assert_eq!(p::mesh_instanced(&instance_prototype, Some(&[red.clone()]), Some(&[place(0.)]), &[place(0.),place(1.)]).err().unwrap(), "path tracer instance materials must match the transform count");
     assert!(p::mesh_instanced(&prepared(&sphere, red), None, Some(&[place(0.)]), &[place(0.), place(1.)]).is_err(), "mismatched motion transform count was accepted");
     p::destroy(&mut tracer);
     println!("pathtracer: spheres, instance materials, motion ok");

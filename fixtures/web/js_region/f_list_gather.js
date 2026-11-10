@@ -9,7 +9,7 @@ function region(inputs, uniforms, outputs, start, stop) {
     if (data.length % width !== 0) fail('E_ARRAY_TYPE', `Packed vec${width} storage has ${['','','two','three','four'][width]} coordinates per element.`);
     if (!integer) for (const x of data) if (!Number.isFinite(x)) fail('E_NONFINITE', 'array input produced a nonfinite value.');
     tables.set(slot, data); return data; };
-  const row = (array, index, width) => { if (index < 0n || index > 18014398509481983n) fail('E_ARRAY_RANGE', 'array/nth needs a non-negative whole length.');
+  const row = (array, index, width) => { if (index < 0n) fail('E_ARRAY_RANGE', 'array/nth needs a non-negative whole length.');
     if (index >= BigInt(array.length / width)) fail('E_ARRAY_RANGE', 'Array index is outside its length.'); return Number(index); };
   const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? BigInt(Math.trunc(x)) : fail('E_NONFINITE', name + ' produced a nonfinite value.');
   const divide = (a, b, mod) => b === 0n ? fail('E_RANGE', 'Integer division by zero.') : wrap(mod ? a % b : a / b);

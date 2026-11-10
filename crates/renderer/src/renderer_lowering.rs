@@ -200,19 +200,7 @@ const UI_SLOT_CAPACITY: i64 = 256;
 pub const SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY: i64 = 1024 * 1024;
 
 pub fn sampled_texture_bytes(texture: &SampledTexture) -> i64 {
-    if texture.gpu.is_some() {
-        return 0;
-    }
-    let mut total: i64 = 0;
-    for level in texture.levels.iter() {
-        let bytes_ = level.bytes.len() as i64;
-        if total > SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY - bytes_ {
-            total = SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY + 1;
-        } else {
-            total += bytes_;
-        }
-    }
-    total
+    texture.levels.iter().fold(0i64, |total, level| total.saturating_add(level.bytes.capacity() as i64))
 }
 
 pub struct Lowering {
@@ -241,13 +229,19 @@ pub fn ui_affine(transform: &Transform) -> bytes {
     new_bytes(target)
 }
 
-pub fn ui_index_bytes(value: &mut Lowering, count: i64) -> bytes {
-    let needed = (count * 24) as usize;
+pub fn ui_index_bytes(value: &mut Lowering, count: i64) -> Result<bytes, Error> {
+    let operation = "Renderer.ui_index_bytes";
+    if count < 0 || count > i32::MAX as i64 / 4 {
+        return Err(error::make(operation, ErrorKind::Capacity, "UI indices exceed signed 32-bit vertex addressing"));
+    }
+    let needed = usize::try_from(count * 24).map_err(|_| error::make(operation, ErrorKind::Capacity, "UI indices exceed native address space"))?;
     let length = value.ui_indices_scratch.len();
     if length < needed {
-        let capacity = needed.max(2 * length);
-        // built in place: a Vec moved into the shared buffer would allocate the table twice
-        let mut shared: bytes = std::iter::repeat_n(0u8, capacity).collect();
+        let maximum = (i32::MAX as usize / 4).saturating_mul(24);
+        let capacity = needed.max(length.saturating_mul(2).min(maximum));
+        let mut data = runtime_resources::byte_buffer(operation, capacity)?;
+        data.resize(capacity, 0);
+        let mut shared = new_bytes(data);
         let data = Rc::get_mut(&mut shared).expect("a fresh buffer is unique");
         for quad in 0..capacity / 24 {
             let base = (quad * 4) as i32;
@@ -259,9 +253,9 @@ pub fn ui_index_bytes(value: &mut Lowering, count: i64) -> bytes {
         value.ui_indices_scratch = shared;
     }
     if value.ui_indices_scratch.len() == needed {
-        value.ui_indices_scratch.clone()
+        Ok(value.ui_indices_scratch.clone())
     } else {
-        Rc::from(&value.ui_indices_scratch[..needed])
+        runtime_resources::copy_bytes(operation, &value.ui_indices_scratch[..needed])
     }
 }
 
@@ -515,7 +509,10 @@ pub fn lower_scene2(
                         if !s.vertices.is_empty() { s.vertices=empty_bytes(); }
                         s.source=s.vertices.clone();
                         if s.indices.len() as i64 != count * 24 {
-                            s.indices = ui_index_bytes(state_, count);
+                            s.indices = match ui_index_bytes(state_, count) {
+                                Ok(indices) => indices,
+                                Err(error) => { drop(s); rollback(); return Err(error); }
+                            };
                         }
                         let affine = ui_affine(&render_transform(transforms.last().expect("transform")));
                         if s.affine != affine {

@@ -33,7 +33,7 @@ fn fail_error(operation: &str, kind: ErrorKind, message: &str) -> Error {
 }
 
 fn resource_error_value(operation: &str, value: &Error) -> Error {
-    fail_error(operation, ErrorKind::InvalidState, &oerror::to_string(value))
+    fail_error(operation, if value.kind == ErrorKind::Capacity { ErrorKind::Capacity } else { ErrorKind::InvalidState }, &oerror::to_string(value))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -758,7 +758,7 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
             let e = entry.borrow();
             e.width == width && e.height == height
         });
-        let bytes_ = if copy { Rc::from(&pixels[..]) } else { pixels.clone() };
+        let bytes_ = if copy { runtime_resources::copy_bytes(operation, pixels)? } else { pixels.clone() };
         match same_shape {
             Some(entry) => {
                 let mut e = entry.borrow_mut();
@@ -782,7 +782,7 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
                     sampler: scene_image_sampler(),
                     gpu: None,
                 });
-                let size = bytes_.len() as i64;
+                let size = bytes_.capacity() as i64;
                 store(key, generation, width, height, texture.clone(), size);
                 Ok((width, height, texture))
             }
@@ -807,12 +807,13 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
                     match image::borrow_snapshot(&image) {
                         Err(e) => Err(resource_error_value(operation, &e)),
                         Ok((width, height, borrowed_generation, pixels, mut lease)) => {
-                            let size = pixels.len() as i64;
+                            let size = pixels.capacity() as i64;
                             let cacheable = size <= SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY;
                             let bytes_ = if cacheable {
-                                let copy = Rc::from(&pixels[..]);
+                                // Shared image storage stays immutable through copy-on-write,
+                                // including after the bounded snapshot lease is released.
                                 image::release_snapshot(&mut lease);
-                                copy
+                                pixels
                             } else {
                                 match policy_ {
                                     lease_policy::RetainImageSnapshots(leases) => {
@@ -820,9 +821,9 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
                                         pixels
                                     }
                                     lease_policy::CopyImageSnapshots => {
-                                        let copy = Rc::from(&pixels[..]);
+                                        let copy = runtime_resources::copy_bytes(operation, &pixels);
                                         image::release_snapshot(&mut lease);
-                                        copy
+                                        copy?
                                     }
                                 }
                             };
@@ -836,7 +837,7 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
                                 gpu: None,
                             });
                             if cacheable {
-                                store(&key, borrowed_generation, width, height, texture.clone(), bytes_.len() as i64);
+                                store(&key, borrowed_generation, width, height, texture.clone(), size);
                             }
                             Ok((width, height, texture))
                         }
@@ -1197,16 +1198,7 @@ fn lower_scene2_submission(submission_: &Submission, density: i64, resource_: &d
 }
 
 fn retained_scene2_segment_bytes(draws: &[Draw]) -> i64 {
-    draws
-        .iter()
-        .map(|d| {
-            let value = &d.draw;
-            (value.mesh.vertex_bytes_len() + value.mesh.indices.len()) as i64
-                + value.state.transform_uniforms.as_ref().map_or(0, |b| b.len() as i64)
-                + d.texture.as_ref().map_or(0, |tx| renderer_lowering::sampled_texture_bytes(tx))
-                + d.auxiliary.as_ref().map_or(0, |a| a.buffer.len() as i64 + renderer_lowering::sampled_texture_bytes(&a.texture))
-        })
-        .sum()
+    draws.iter().fold(0i64, |total, draw| total.saturating_add(scene_execution::retained_draw_bytes(draw)))
 }
 
 fn lower_scene2_segment(
@@ -1329,10 +1321,10 @@ fn lower_ui(submission_: &Submission, density: i64, resource_: &dyn Fn(i64) -> O
             let slot = renderer_lowering::find_ui_slot(&mut lowering, slot_key);
             let mut s = slot.borrow_mut();
             if s.vertices.len() != length || !renderer_lowering::same_bytes_range(instances, first, &s.vertices) {
-                s.vertices = Rc::from(&instances[first..first + length]);
+                s.vertices = runtime_resources::copy_bytes("Renderer.ui_vertices", &instances[first..first + length])?;
             }
             if s.indices.len() as i64 != batch_.count * 24 {
-                s.indices = renderer_lowering::ui_index_bytes(&mut lowering, batch_.count);
+                s.indices = renderer_lowering::ui_index_bytes(&mut lowering, batch_.count)?;
             }
             if s.affine != affine {
                 s.affine = affine;

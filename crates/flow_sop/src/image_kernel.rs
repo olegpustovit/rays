@@ -7,7 +7,7 @@ use flow_eval as e;
 use flow_ir::flow_ir::{executor, Sink};
 use flow_ir::packed;
 use flow_syntax::ty::{FnSignature, Ty};
-use flow_syntax::value::{FnId, Value};
+use flow_syntax::value::{self as V, FnId, Value};
 use rays_diagnostic::Diagnostic;
 use sop::node::{self, build, CookMode, Cooked};
 use sop::{context, payload};
@@ -31,9 +31,6 @@ fn error<R>(message: &str) -> Result<R, Diagnostic> {
     Err(flow_syntax::value::fail("E_IMAGE", message))
 }
 
-// OCaml: min Sys.max_floatarray_length Sys.max_string_length, on a 64-bit build.
-const MAX_STORAGE: i64 = (1_i64 << 54) - 1;
-
 /// Retains one immutable pixel-center UV grid and the actual compiled body. Display qualification
 /// uses the authored `path`; absent provenance stays CPU-only. `node` always cooks an exact CPU
 /// snapshot.
@@ -51,15 +48,14 @@ pub fn prepare(
     if width <= 0 || height <= 0 {
         return error("Image dimensions must be positive.");
     }
-    if width > MAX_STORAGE / 4 / height {
-        return error("Image dimensions exceed native storage bounds.");
-    }
+    let channels = sop::image::channel_count(width, height, std::mem::size_of::<f64>())?;
     let vec4_body = e::residual::function_body(function).is_some_and(|(_, body)| *body.ty() == Ty::Vec4);
     if !vec4_body {
         return error("Image map needs an instantiated vec4 pixel body.");
     }
     let origins = attribute_kernel::source_origins(sources, inputs)?;
-    let mut uv = vec![0.0; (width * height * 2) as usize];
+    let mut uv = V::array_buffer::<f64>(channels / 2)?;
+    uv.resize(channels / 2, 0.0);
     for y in 0..height {
         let v = (y as f64 + 0.5) / height as f64;
         for x in 0..width {
@@ -257,8 +253,8 @@ mod tests {
     #[test]
     fn dimensions_and_unsupported_bodies_refuse() {
         let f = function(GRADIENT);
-        for (width, height) in [(0, 1), (1, 0), (i64::MAX >> 1, 2), (1, i64::MAX >> 1)] {
-            assert!(prepare(None, None, None, 0, width, height, f, &[], &[]).is_err(), "{width}x{height}");
+        for (width, height, code) in [(0, 1, "E_IMAGE"), (1, 0, "E_IMAGE"), (i64::MAX >> 1, 2, "E_ARRAY_MEMORY"), (1, i64::MAX >> 1, "E_ARRAY_MEMORY")] {
+            assert_eq!(prepare(None, None, None, 0, width, height, f, &[], &[]).err().unwrap().code, code, "{width}x{height}");
         }
         let unsupported = function("(workspace w (graph img :context image (image/map (fn [uv] [(value/rand uv.x) 0 0 1]))))");
         assert!(prepare(None, None, None, 0, 1, 1, unsupported, &[], &[]).is_err());

@@ -41,7 +41,7 @@ fn picture(width: i64, height: i64) -> node::T {
 fn image_is_immutable_and_converts_exactly() {
     let source = [0.1, 0.2, 0.3, 1.0];
     let image = image::create(1, 1, &source).unwrap();
-    assert_eq!(image::storage(&image), source.to_vec());
+    assert_eq!(image::storage(&image).unwrap(), source.to_vec());
     let conversion = |n: i64| {
         let context = domains(n);
         let channels = [-1.0, 0.0, 0.5 / 255.0, 1.5 / 255.0, 2.5 / 255.0, 127.5 / 255.0, 254.5 / 255.0, 2.0];
@@ -68,14 +68,20 @@ fn image_is_immutable_and_converts_exactly() {
         assert_eq!(*c, expected[i % 8]);
     }
     assert_eq!(image::payload_bytes(&one), converted.len() as i64);
-    let mut expanded = image::storage(&one);
+    let mut expanded = image::storage(&one).unwrap();
     assert!(expanded[3] == 2.0 / 255.0 && expanded[5] == 128.0 / 255.0);
     expanded[3] = 0.0;
-    assert_eq!(image::storage(&one)[3], 2.0 / 255.0);
+    assert_eq!(image::storage(&one).unwrap()[3], 2.0 / 255.0);
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert!(image::of_vec4(&domains(1), 1, 1, &[bad, 0.0, 0.0, 1.0]).is_err());
     }
-    assert!(image::of_owned_rgba8((1_i64 << 62) - 1, 2, Vec::new()).is_err());
+    // Above the retired bounds, representable dimensions reach cardinality validation without allocation.
+    assert_eq!(image::of_owned_rgba8(1_i64 << 55, 1, Vec::new()).err().unwrap().code, "E_IMAGE");
+    assert_eq!(image::of_owned_rgba(1_i64 << 52, 1, Vec::new()).err().unwrap().code, "E_IMAGE");
+    assert_eq!(image::of_owned_rgba8(i64::MAX, 2, Vec::new()).err().unwrap().code, "E_ARRAY_MEMORY");
+    assert_eq!(image::create(0, i64::MAX, &[]).err().unwrap().code, "E_IMAGE");
+    assert_eq!(image::channel_count(1_i64 << 52, 1, 8).unwrap(), 1usize << 54);
+    assert_eq!(image::channel_count(i64::MAX, i64::MAX, 1).unwrap_err().code, "E_ARRAY_MEMORY");
     assert!(image::of_owned_rgba8(1, 1, Vec::new()).is_err());
     let token = Arc::new(rdk_core::cancel::create());
     rdk_core::cancel::cancel(&token);
@@ -84,6 +90,8 @@ fn image_is_immutable_and_converts_exactly() {
         Err(d) => assert_eq!(d.code, "E_CANCELLED"),
         Ok(_) => panic!("cancelled conversion succeeded"),
     }
+    assert_eq!(image::of_vec4(&cancelled, 1, 1, &[]).err().unwrap().code, "E_IMAGE");
+    assert_eq!(image::of_vec4(&cancelled, 1, 1, &[f64::NAN, 0.0, 0.0, 1.0]).err().unwrap().code, "E_CANCELLED");
     for (width, height, rgba) in [
         (0, 1, vec![]),
         ((1_i64 << 62) - 1, 2, vec![]),
@@ -103,7 +111,7 @@ fn session_accounting_and_geometry_refusal() {
     let first = session::cook(&mut one, None, &ctx(1), &node).unwrap();
     let parallel = session::cook(&mut eight, None, &ctx(8), &node).unwrap();
     let image = payload::image(&first.payload).unwrap();
-    let bytes = |i: &image::T| (image::width(i), image::height(i), image::storage(i));
+    let bytes = |i: &image::T| (image::width(i), image::height(i), image::storage(i).unwrap());
     assert_eq!(bytes(&image), bytes(&payload::image(&parallel.payload).unwrap()));
     assert_eq!(session::stats(&one).retained_payload_bytes, 32 * 24 * 4 * 8);
     let second = session::cook(&mut one, None, &ctx(1), &node).unwrap();

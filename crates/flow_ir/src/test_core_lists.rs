@@ -176,6 +176,28 @@ fn cooked_builders_have_their_own_length_guard() {
     assert!(matches!(ts::run(None, true, None, None, &program(4096, false), &live), Ok(Value::List(xs)) if xs.len() == 4096));
 }
 
+#[test]
+fn oversized_core_builders_report_typed_memory() {
+    for (element, width) in [(Ty::Float, 1), (Ty::Vec2, 2), (Ty::Vec3, 3), (Ty::Vec4, 4), (Ty::Int, 1), (Ty::Text, 1), (ty::geometry(), 0)] {
+        let count = if width == 0 { isize::MAX as usize / size_of::<Value>() + 1 }
+            else { flow_syntax::value::array_max_length(&element).unwrap() + 1 };
+        let mut constants = vec![C::Literal::Int(count as i64), C::Literal::Int(width), C::Literal::Bool(true)];
+        let mut args = vec![("count".into(), 0)];
+        if width == 0 { args.push(("cooked".into(), 2)); }
+        else {
+            args.push(("width".into(), 1));
+            if element == Ty::Int || element == Ty::Text {
+                constants.push(C::Literal::Text(ty::to_string(&element).into_bytes().into()));
+                args.push(("type".into(), 3));
+            }
+        }
+        let mut body = (0..constants.len()).map(|id| C::Statement { id: id as i64, source: builder_source(), node: C::StatementNode::Assign(id as i64, C::Expr::Constant(id as i64)) }).collect::<Vec<_>>();
+        body.push(C::Statement { id: 4, source: builder_source(), node: C::StatementNode::Assign(4, C::Expr::Prim(C::Primitive::Sequence_build, args)) });
+        let program = C::Program { constants, locals: vec![Ty::Int, Ty::Int, Ty::Bool, Ty::Text, if width == 0 { Ty::List(Box::new(element)) } else { Ty::Array(Box::new(element)) }], body, results: vec![4], state_slots: vec![], regions: vec![], call_slots: 0 };
+        assert_eq!(ts::run_simple(&program, &input::at_time(0.)).unwrap_err().code, "E_ARRAY_MEMORY");
+    }
+}
+
 fn captured(ty: &str, body: &str, value: Value) -> ResidualId {
     let default = if ty == "geometry" { "(list nil)" } else { "(list 1)" };
     let source = format!("(workspace captures (graph g :context host [(parts : (list {ty}) {default})] (let* [clock t tested {body}] 0.)))");

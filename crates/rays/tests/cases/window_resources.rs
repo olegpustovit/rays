@@ -82,6 +82,8 @@ fn window_resources_scene_parity() {
 fn window_resources_images_canvas() {
     let context = layer::create_cache_context();
     layer::with_cache_context(&context, &mut || {
+        let failure = image::create(i64::MAX / 4, 1, None).err().expect("impossible image allocation succeeded");
+        assert!(failure.ends_with("pixel storage exceeds available memory"), "{failure}");
         let img = image::create(2, 2, Some(color::rgba(1, 2, 3, 4))).expect("image");
         require(image::get_size(&img) == Ok((2, 2)) && image::pixels(&img).expect("pixels") == [1, 2, 3, 4].repeat(4), "Image snapshot");
         let rgba = vec![42u8; 16];

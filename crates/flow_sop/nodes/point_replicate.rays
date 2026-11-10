@@ -167,7 +167,7 @@
     geo))
 
 (defnode sop/point_replicate :label "Point Replicate" :category ["Create" "Points"]
-  :validate (and (and (and (>= points_per_point 0.0) (<= points_per_point 18014398509481984.0))
+  :validate (and (and (and (>= points_per_point 0.0) (< points_per_point 9223372036854775808.0))
                       (and (and (>= size_x 0.0) (>= size_y 0.0)) (and (>= size_z 0.0) (>= uniform_scale 0.0))))
                  (and (and (and (>= noise_roughness 0.0) (<= noise_roughness 1.0))
                            (and (> noise_attenuation 0.0) (int/ge noise_turbulence 1)))
@@ -270,7 +270,7 @@
          selected (if (text/blank? group_name) (array/int pts 1) (sop/group input :name group_name :owner "point"))
          weights (pr_float_or_ones input scale_name pts)
          bad_weights (array/sum (exact (map (fn [(w : float) (s : int)]
-                       (if (and (int/eq s 1) (or (< w 0.0) (> (* points_per_point w) 18014398509481984.0))) 1 0))
+                       (if (and (int/eq s 1) (or (< w 0.0) (>= (* points_per_point w) 9223372036854775808.0))) 1 0))
                        weights selected)))
          problem (cond
                    (and custom (not has_custom)) 2

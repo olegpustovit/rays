@@ -174,7 +174,7 @@ pub fn run_array_capacity_menu() {
     check(row.control == flow_graph::projection::Control::Choice && !row.socket, "Array capacity selector lost its literal choice row");
     let eval = flow_eval::r#static(&ws.checked, true, None).expect("static eval");
     let value = &eval.records.iter().find(|(path, _)| *path == card.path).expect("record").1[0].1;
-    check(matches!(value, flow_eval::Value::Int(n) if *n == (1i64 << 54) - 1), "Array capacity menu lost exact native Int");
+    check(matches!(value, flow_eval::Value::Int(n) if *n == isize::MAX as i64 / size_of::<f64>() as i64), "Array capacity menu lost exact native Int");
     r.close();
 }
 

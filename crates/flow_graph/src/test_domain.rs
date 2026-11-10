@@ -16,7 +16,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-const MAX_ARRAY_LENGTH: i64 = (1i64 << 54) - 1;
+const NUMERIC_SLOTS: i64 = isize::MAX as i64 / size_of::<f64>() as i64;
 
 fn num(n: &str) -> s::Syntax {
     s::make(s::Draft::Num(n.into()))
@@ -436,12 +436,12 @@ fn array_capacities() {
     let selector = card.rows.iter().find(|row| row.key == ArgKey::Kw("type".into())).unwrap();
     assert!(selector.ty == Some(Ty::Text) && selector.control == p::Control::Choice && !selector.socket);
     for (kind, expected) in [
-        ("int", MAX_ARRAY_LENGTH),
-        ("text", MAX_ARRAY_LENGTH),
-        ("float", MAX_ARRAY_LENGTH),
-        ("vec2", MAX_ARRAY_LENGTH / 2),
-        ("vec3", MAX_ARRAY_LENGTH / 3),
-        ("vec4", MAX_ARRAY_LENGTH / 4),
+        ("int", NUMERIC_SLOTS),
+        ("text", isize::MAX as i64 / size_of::<usize>() as i64 - 1),
+        ("float", NUMERIC_SLOTS),
+        ("vec2", NUMERIC_SLOTS / 2),
+        ("vec3", NUMERIC_SLOTS / 3),
+        ("vec4", NUMERIC_SLOTS / 4),
     ] {
         let (changed, checked) =
             apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Kw("type".into()), s::make(s::Draft::Sym(kind.into())))).unwrap();
@@ -453,7 +453,7 @@ fn array_capacities() {
     for text in ["\"unknown\"", "1"] {
         assert!(is_error(&source, set_arg(&card.path, ArgKey::Kw("type".into()), parse(text).remove(0))), "{}", text);
     }
-    assert_eq!(result(&checked, 0.0), Value::Int(MAX_ARRAY_LENGTH));
+    assert_eq!(result(&checked, 0.0), Value::Int(NUMERIC_SLOTS));
 }
 
 

@@ -774,29 +774,30 @@ pub fn bind(t_: &WorkspaceImages, lowered: &l::T) {
     }
 }
 
-fn bytes_of_image(image: &sop::image::T) -> Vec<u8> {
+fn bytes_of_image(image: &sop::image::T) -> Result<Vec<u8>, Diagnostic> {
+    let count = sop::image::channel_count(sop::image::width(image), sop::image::height(image), 1)?;
+    let mut out = v::array_buffer(count)?;
     match sop::image::rgba8(image) {
-        Some(bytes) => bytes.to_vec(),
+        Some(bytes) => out.extend_from_slice(bytes),
         None => {
-            // clamp, scale, round ties to even: the same bytes Sop.Image.of_vec4 writes
-            sop::image::storage(image)
-                .iter()
-                .map(|x| {
-                    let q = x.min(1.).max(0.) * 255.;
-                    let n = q.floor() as i64;
-                    let f = q - n as f64;
-                    (if f > 0.5 || (f == 0.5 && n & 1 == 1) { n + 1 } else { n }) as u8
-                })
-                .collect()
+            // Clamp, scale, round ties to even: the same bytes Sop.Image.of_vec4 writes.
+            out.extend(sop::image::storage(image)?.iter().map(|x| {
+                let q = x.min(1.).max(0.) * 255.;
+                let n = q.floor() as i64;
+                let f = q - n as f64;
+                (if f > 0.5 || (f == 0.5 && n & 1 == 1) { n + 1 } else { n }) as u8
+            }));
         }
     }
+    Ok(out)
 }
 
 fn cpu_of_image(image_: &image::Image) -> Result<sop::image::T, Diagnostic> {
     let bytes = message(image::pixels(image_))?;
     let (width, height) = image::dimensions(image_);
-    let rgba: Vec<f64> = bytes.iter().map(|b| *b as f64 / 255.).collect();
-    sop::image::of_owned_rgba(width, height, rgba).map_err(|d| error(&d.message))
+    let mut rgba = v::array_buffer::<f64>(bytes.len())?;
+    rgba.extend(bytes.iter().map(|b| *b as f64 / 255.));
+    sop::image::of_owned_rgba(width, height, rgba)
 }
 
 fn texture_slot(payload: &sop::image::T) -> Rc<TextureSlot> {
@@ -808,8 +809,9 @@ fn force_texture(slot: &TextureSlot) -> Result<texture::Texture, String> {
         TextureSlot::Ready(tex) => Ok(tex.clone()),
         TextureSlot::Lazy(payload, cell) => cell
             .get_or_init(|| {
-                let bytes = bytes_of_image(payload);
-                let pixels = bytes.chunks(4).map(|c| rays_math::color::rgba(c[0] as i64, c[1] as i64, c[2] as i64, c[3] as i64)).collect();
+                let bytes = bytes_of_image(payload).map_err(|d| format!("{}: {}", d.code, d.message))?;
+                let mut pixels = v::array_buffer(bytes.len() / 4).map_err(|d| format!("{}: {}", d.code, d.message))?;
+                pixels.extend(bytes.chunks(4).map(|c| rays_math::color::rgba(c[0] as i64, c[1] as i64, c[2] as i64, c[3] as i64)));
                 texture::create_owned(sop::image::width(payload), sop::image::height(payload), pixels)
             })
             .clone(),
@@ -1182,9 +1184,10 @@ fn compute_entry(
     }
     let upload = |width: i64, height: i64, payload: &sop::image::T| -> Result<image::Image, Diagnostic> {
         let existing = entry.borrow().image.clone();
+        let bytes = bytes_of_image(payload)?;
         match existing {
-            Some(image_) => message(image::upload_rgba(Some(&image_), width, height, &bytes_of_image(payload))),
-            None => workspace_resources::image(&d.resources, key, &|| image::upload_rgba(None, width, height, &bytes_of_image(payload))),
+            Some(image_) => message(image::upload_rgba(Some(&image_), width, height, &bytes)),
+            None => workspace_resources::image(&d.resources, key, &|| image::upload_rgba(None, width, height, &bytes)),
         }
     };
     if node.kind == "image/map" {
@@ -1277,10 +1280,10 @@ fn compute_entry(
     } else if node.kind == "image/render" {
         let width = int_arg(args, "width", live.size.0)?;
         let height = int_arg(args, "height", live.size.1)?;
-        // OCaml: Sys.max_string_length / 4 / height
-        if width <= 0 || height <= 0 || width > ((1i64 << 57) - 9) / 4 / height {
+        if width <= 0 || height <= 0 {
             return Err(error("Image dimensions exceed native storage bounds."));
         }
+        sop::image::channel_count(width, height, 1)?;
         let drawing_ = args.get_str("drawing").expect("drawing").clone();
         let known = d.drawings.borrow()[id as usize].clone();
         let prepared = match known {
@@ -1311,18 +1314,19 @@ fn compute_entry(
             if display_stamp.as_ref().is_some_and(|s| Rc::ptr_eq(s, &cpu_stamp)) {
                 return Ok(child_image.expect("child image"));
             }
+            let bytes = bytes_of_image(&payload)?;
             match child_image {
                 Some(image_) if matches!(runtime_resources::image::gpu_snapshot(&image::resource(&image_)), Ok(None)) => {
                     child.borrow_mut().display = None;
-                    message(image::upload_rgba(Some(&image_), width, height, &bytes_of_image(&payload)))
+                    message(image::upload_rgba(Some(&image_), width, height, &bytes))
                 }
                 None => {
-                    let image_ = workspace_resources::image(&dd.resources, &child_key, &|| image::upload_rgba(None, width, height, &bytes_of_image(&payload)))?;
+                    let image_ = workspace_resources::image(&dd.resources, &child_key, &|| image::upload_rgba(None, width, height, &bytes))?;
                     child.borrow_mut().image = Some(image_.clone());
                     Ok(image_)
                 }
                 Some(_) => {
-                    let image_ = message(image::upload_rgba(None, width, height, &bytes_of_image(&payload)))?;
+                    let image_ = message(image::upload_rgba(None, width, height, &bytes))?;
                     temporary2.borrow_mut().push(image_.clone());
                     Ok(image_)
                 }
@@ -1342,7 +1346,7 @@ fn compute_entry(
                 let attempt = (|| -> Result<(), Diagnostic> {
                     message(canvas::render(None, &canvas_, &scene))?;
                     let (w, h, source) = message(canvas::gpu_source(&canvas_))?;
-                    publish(d, key, &entry, w, h, Rc::from(source))?;
+                    publish(d, key, &entry, w, h, Rc::new(source))?;
                     entry.borrow_mut().canvas = Some(canvas_.clone());
                     Ok(())
                 })();
@@ -1448,9 +1452,10 @@ pub fn image(gpu: Option<&G::Config>, display: bool, t_: &WorkspaceImages, state
         return Ok(existing.expect("image"));
     }
     let (width, height) = (sop::image::width(&cpu.payload), sop::image::height(&cpu.payload));
+    let bytes = bytes_of_image(&cpu.payload)?;
     let image_ = match existing {
-        Some(image_) => message(image::upload_rgba(Some(&image_), width, height, &bytes_of_image(&cpu.payload)))?,
-        None => workspace_resources::image(&d.resources, &key, &|| image::upload_rgba(None, width, height, &bytes_of_image(&cpu.payload)))?,
+        Some(image_) => message(image::upload_rgba(Some(&image_), width, height, &bytes))?,
+        None => workspace_resources::image(&d.resources, &key, &|| image::upload_rgba(None, width, height, &bytes))?,
     };
     let mut e = entry.borrow_mut();
     e.image = Some(image_.clone());

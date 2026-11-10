@@ -22,10 +22,6 @@ struct Data {
 #[derive(Clone)]
 pub struct T(Arc<Data>);
 
-/// OCaml `Sys.max_string_length` and `Sys.max_floatarray_length` on 64-bit.
-const MAX_STRING_LENGTH: i64 = (1_i64 << 57) - 9;
-const MAX_FLOATARRAY_LENGTH: i64 = (1_i64 << 54) - 1;
-
 pub fn width(image: &T) -> i64 {
     image.0.width
 }
@@ -49,11 +45,15 @@ pub fn payload_bytes(image: &T) -> i64 {
 }
 
 /// Float samples; an owned copy (materialized for an RGBA8 image, retained nowhere).
-pub fn storage(image: &T) -> Vec<f64> {
+pub fn storage(image: &T) -> Result<Vec<f64>, Diagnostic> {
+    let count = channel_count(width(image), height(image), std::mem::size_of::<f64>())?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(count).map_err(|_| code_error("E_ARRAY_MEMORY", "Image storage allocation failed."))?;
     match &image.0.storage {
-        Storage::Floats(rgba) => rgba.clone(),
-        Storage::Rgba8(bytes) => bytes.iter().map(|b| f64::from(*b) / 255.0).collect(),
+        Storage::Floats(rgba) => out.extend_from_slice(rgba),
+        Storage::Rgba8(bytes) => out.extend(bytes.iter().map(|b| f64::from(*b) / 255.0)),
     }
+    Ok(out)
 }
 
 /// Borrowed immutable bytes when the image has RGBA8 storage.
@@ -72,20 +72,23 @@ fn error(message: &str) -> Diagnostic {
     code_error("E_IMAGE", message)
 }
 
-fn dimensions(width: i64, height: i64, limit: i64) -> Result<(), Diagnostic> {
+/// Checked four-channel storage size; representability is independent of available memory.
+#[doc(hidden)]
+pub fn channel_count(width: i64, height: i64, bytes_per_sample: usize) -> Result<usize, Diagnostic> {
     if width <= 0 || height <= 0 {
-        Err(error("Image dimensions must be positive."))
-    } else if width > limit / 4 / height {
-        Err(error("Image dimensions exceed native storage bounds."))
-    } else {
-        Ok(())
+        return Err(error("Image dimensions must be positive."));
     }
+    usize::try_from(width).ok()
+        .and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .filter(|count| bytes_per_sample > 0 && *count <= isize::MAX as usize / bytes_per_sample)
+        .ok_or_else(|| code_error("E_ARRAY_MEMORY", "Image dimensions exceed native storage bounds."))
 }
 
 /// Transfers sole ownership after checking dimensions and byte cardinality.
 pub fn of_owned_rgba8(width: i64, height: i64, bytes: Vec<u8>) -> Result<T, Diagnostic> {
-    dimensions(width, height, MAX_STRING_LENGTH)?;
-    if bytes.len() as i64 != width * height * 4 {
+    let count = channel_count(width, height, 1)?;
+    if bytes.len() != count {
         return Err(error("Image RGBA8 storage must contain four bytes per pixel."));
     }
     Ok(T(Arc::new(Data { width, height, storage: Storage::Rgba8(bytes), data_id: rdk_core::geometry::fresh_data_id() })))
@@ -93,8 +96,8 @@ pub fn of_owned_rgba8(width: i64, height: i64, bytes: Vec<u8>) -> Result<T, Diag
 
 /// Transfers sole ownership after validating dimensions and samples.
 pub fn of_owned_rgba(width: i64, height: i64, rgba: Vec<f64>) -> Result<T, Diagnostic> {
-    dimensions(width, height, MAX_FLOATARRAY_LENGTH)?;
-    if rgba.len() as i64 != width * height * 4 {
+    let count = channel_count(width, height, std::mem::size_of::<f64>())?;
+    if rgba.len() != count {
         return Err(error("Image RGBA storage must contain four samples per pixel."));
     }
     if !rgba.iter().all(|sample| sample.is_finite() && *sample >= 0.0 && *sample <= 1.0) {
@@ -104,15 +107,22 @@ pub fn of_owned_rgba(width: i64, height: i64, rgba: Vec<f64>) -> Result<T, Diagn
 }
 
 pub fn create(width: i64, height: i64, rgba: &[f64]) -> Result<T, Diagnostic> {
-    of_owned_rgba(width, height, rgba.to_vec())
+    let count = channel_count(width, height, std::mem::size_of::<f64>())?;
+    if rgba.len() != count {
+        return Err(error("Image RGBA storage must contain four samples per pixel."));
+    }
+    let mut owned = Vec::new();
+    owned.try_reserve_exact(count).map_err(|_| code_error("E_ARRAY_MEMORY", "Image storage allocation failed."))?;
+    owned.extend_from_slice(rgba);
+    of_owned_rgba(width, height, owned)
 }
 
 /// Convert finite packed channels to one owned RGBA8 buffer: clamp to [0,1], scale by 255, round
 /// ties to even. Disjoint 16,384-pixel chunks run in the caller's shared pool; cancellation is
 /// checked between chunks.
 pub fn of_vec4(context: &context::T, width: i64, height: i64, rgba: &[f64]) -> Result<T, Diagnostic> {
-    dimensions(width, height, MAX_STRING_LENGTH.min(MAX_FLOATARRAY_LENGTH))?;
-    if rgba.len() as i64 != width * height * 4 {
+    let channels = channel_count(width, height, std::mem::size_of::<f64>())?;
+    if rgba.len() != channels {
         return Err(error("Image kernel must return four channels per pixel."));
     }
     if context::cancelled(context) {
@@ -122,7 +132,9 @@ pub fn of_vec4(context: &context::T, width: i64, height: i64, rgba: &[f64]) -> R
     let grain: i64 = 16_384;
     let invalid = AtomicBool::new(false);
     let last = (count - 1) / grain;
-    let mut bytes = vec![0u8; rgba.len()];
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(channels).map_err(|_| code_error("E_ARRAY_MEMORY", "Image storage allocation failed."))?;
+    bytes.resize(channels, 0u8);
     let windows = rdk_core::support::Windows::even(&mut bytes, grain * 4);
     let chunk = |k: i64| -> Result<(), String> {
         if context::cancelled(context) {

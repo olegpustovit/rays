@@ -169,7 +169,7 @@ pub fn convert(t: &T, width: i64, height: i64, input: &run::Output) -> Result<Ou
     if d.closed.get() || std::thread::current().id() != d.domain {
         return error("E_GPU", "Image sink is closed or called from another domain.");
     }
-    if width <= 0 || height <= 0 || width > run::MAX_STRING / 4 / height {
+    if width <= 0 || height <= 0 || width.checked_mul(height).and_then(|n| n.checked_mul(4)).is_none() {
         return error("E_IMAGE", "Image dimensions exceed native storage bounds.");
     }
     if run::width(input) != 4 || run::count(input) != width * height {

@@ -9,7 +9,7 @@ function region(inputs, uniforms, outputs, start, stop) {
     if (data.length % width !== 0) fail('E_ARRAY_TYPE', `Packed vec${width} storage has ${['','','two','three','four'][width]} coordinates per element.`);
     if (!integer) for (const x of data) if (!Number.isFinite(x)) fail('E_NONFINITE', 'array input produced a nonfinite value.');
     tables.set(slot, data); return data; };
-  const row = (array, index, width) => { if (index < 0n || index > 18014398509481983n) fail('E_ARRAY_RANGE', 'array/nth needs a non-negative whole length.');
+  const row = (array, index, width) => { if (index < 0n) fail('E_ARRAY_RANGE', 'array/nth needs a non-negative whole length.');
     if (index >= BigInt(array.length / width)) fail('E_ARRAY_RANGE', 'Array index is outside its length.'); return Number(index); };
   const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? BigInt(Math.trunc(x)) : fail('E_NONFINITE', name + ' produced a nonfinite value.');
   const divide = (a, b, mod) => b === 0n ? fail('E_RANGE', 'Integer division by zero.') : wrap(mod ? a % b : a / b);
@@ -35,78 +35,71 @@ function region(inputs, uniforms, outputs, start, stop) {
     r6 = (r3 >= r5 ? 1 : 0);
     if (!Number.isFinite(r6)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
     let r7;
-    r7 = 18014398509481983n;
-    let r8;
-    r8 = (r3 <= r7 ? 1 : 0);
-    if (!Number.isFinite(r8)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
-    let r9;
-    r9 = (r6 !== 0 && r8 !== 0 ? 1 : 0);
-    let r10;
-    if (r9 === 0) {
-    r10 = fail("E_ARRAY_RANGE", "array/slice needs a non-negative whole length.");
+    if (r6 === 0) {
+    r7 = fail("E_ARRAY_RANGE", "array/slice needs a non-negative whole length.");
     }
+    let r8;
+    r8 = r6 !== 0 ? r3 : r7;
+    let r9;
+    r9 = wrap(r4 - r8);
+    let r10;
+    r10 = 3n;
     let r11;
-    r11 = r9 !== 0 ? r3 : r10;
+    r11 = (r10 <= r9 ? 1 : 0);
+    if (!Number.isFinite(r11)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
     let r12;
-    r12 = wrap(r4 - r11);
+    r12 = (r8 <= r4 ? 1 : 0);
+    if (!Number.isFinite(r12)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
     let r13;
-    r13 = 3n;
+    r13 = (r12 !== 0 && r11 !== 0 ? 1 : 0);
     let r14;
-    r14 = (r13 <= r12 ? 1 : 0);
-    if (!Number.isFinite(r14)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
+    if (r13 === 0) {
+    r14 = fail("E_ARRAY_RANGE", "An array slice must be within its source.");
+    }
     let r15;
-    r15 = (r11 <= r4 ? 1 : 0);
-    if (!Number.isFinite(r15)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
+    r15 = r13 !== 0 ? r5 : r14;
     let r16;
-    r16 = (r15 !== 0 && r14 !== 0 ? 1 : 0);
+    r16 = wrap(r8 + r5);
     let r17;
-    if (r16 === 0) {
-    r17 = fail("E_ARRAY_RANGE", "An array slice must be within its source.");
+    if (r13 !== 0) {
+    r17 = r1[row(r1, r16, 1)];
     }
     let r18;
-    r18 = r16 !== 0 ? r5 : r17;
+    r18 = 1n;
     let r19;
-    r19 = wrap(r11 + r5);
+    r19 = wrap(r8 + r18);
     let r20;
-    if (r16 !== 0) {
+    if (r13 !== 0) {
     r20 = r1[row(r1, r19, 1)];
     }
     let r21;
-    r21 = 1n;
+    r21 = 2n;
     let r22;
-    r22 = wrap(r11 + r21);
+    r22 = wrap(r8 + r21);
     let r23;
-    if (r16 !== 0) {
+    if (r13 !== 0) {
     r23 = r1[row(r1, r22, 1)];
     }
     let r24;
-    r24 = 2n;
+    r24 = wrap(r15 + r17);
     let r25;
-    r25 = wrap(r11 + r24);
+    r25 = wrap(r24 + r20);
     let r26;
-    if (r16 !== 0) {
-    r26 = r1[row(r1, r25, 1)];
-    }
+    r26 = wrap(r25 + r23);
     let r27;
-    r27 = wrap(r18 + r20);
+    r27 = uniforms[2][27];
     let r28;
-    r28 = wrap(r27 + r23);
+    r28 = Number(r26);
+    if (!Number.isFinite(r28)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
     let r29;
-    r29 = wrap(r28 + r26);
+    r29 = Number(r27);
+    if (!Number.isFinite(r29)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
     let r30;
-    r30 = uniforms[2][30];
+    r30 = r28 + r29;
+    if (!Number.isFinite(r30)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
     let r31;
-    r31 = Number(r29);
-    if (!Number.isFinite(r31)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
-    let r32;
-    r32 = Number(r30);
-    if (!Number.isFinite(r32)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
-    let r33;
-    r33 = r31 + r32;
-    if (!Number.isFinite(r33)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
-    let r34;
-    r34 = convert("+", Math.floor(r33 + 0.5));
-    out0[o * 1 + 0] = r34;
+    r31 = convert("+", Math.floor(r30 + 0.5));
+    out0[o * 1 + 0] = r31;
   }
   return 0;
 }

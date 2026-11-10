@@ -526,6 +526,9 @@ pub mod view {
             normals,
             keep,
         } = args;
+        if key.is_empty() || count <= 0 {
+            return Err("Mesh.create_device: a device mesh has vertices".to_string());
+        }
         let mode_ = mode_.unwrap_or(mode::Triangles);
         // a frame's device mesh has the last one's indices: the same cloud identity, the same
         // topology's corners, so neither is made or checked again
@@ -537,7 +540,11 @@ pub mod view {
                 match identity.as_ref() {
                     Some(known) if known.len() as i64 == count => known.clone(),
                     _ => {
-                        let made = Arc::new((0..count.max(0)).collect::<Vec<i64>>());
+                        let length = usize::try_from(count).map_err(|_| "Mesh.create_device: identity exceeds native address space".to_string())?;
+                        let mut made = Vec::new();
+                        made.try_reserve_exact(length).map_err(|_| "Mesh.create_device: identity exceeds available memory".to_string())?;
+                        made.extend(0..count);
+                        let made = Arc::new(made);
                         *identity = Some(made.clone());
                         made
                     }
@@ -557,12 +564,8 @@ pub mod view {
                 }
             }
         };
-        let max_string_length: i64 = 144115188075855863;
-        if key.is_empty() || count <= 0 {
-            return Err("Mesh.create_device: a device mesh has vertices".to_string());
-        }
         let bad_indices = match device_index_count {
-            Some(n) => n <= 0 || n > max_string_length / 4 || n % 3 != 0 || mode_ != mode::Triangles || !indices.is_empty(),
+            Some(n) => n <= 0 || n > u32::MAX as i64 || n % 3 != 0 || mode_ != mode::Triangles || !indices.is_empty(),
             None => false,
         };
         if bad_indices || ![0, 3, 4].contains(&device_color_width) || (device_color_width != 0 && (colors.is_some() || tex_coords.is_some())) {

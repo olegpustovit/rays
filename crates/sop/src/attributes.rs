@@ -113,7 +113,7 @@ pub mod image_texels {
             Arc::new(|_, _, inputs| {
                 let image = payload::image(&inputs[0])?;
                 let width = crate::image::width(&image);
-                let rgba = crate::image::storage(&image);
+                let rgba = crate::image::storage(&image)?;
                 let count = width * crate::image::height(&image);
                 let fail = |message: String| support::diagnostic("invalid_image_texels", &message);
                 let mut geometry_value = geometry::generate_point_ranges(count, &mut |first, last, x, y, z| {
@@ -124,9 +124,14 @@ pub mod image_texels {
                         z[index] = width as f64;
                     }
                 })
-                .map_err(|e| fail(rdk_core::error::to_string(&e)))?;
-                let plane = |k: usize| (0..count as usize).map(|i| rgba[4 * i + k]).collect::<Vec<f64>>();
-                let values = packed::float4::of_owned(plane(0), plane(1), plane(2), plane(3))
+                .map_err(|e| if rdk_core::error::code(&e) == rdk_core::error::Code::ArrayMemory { support::structured_rdk_error(&e) } else { fail(rdk_core::error::to_string(&e)) })?;
+                let plane = |k: usize| -> Result<Vec<f64>, rays_diagnostic::Diagnostic> {
+                    let mut values = Vec::new();
+                    values.try_reserve_exact(count as usize).map_err(|_| support::diagnostic("E_ARRAY_MEMORY", "Image texel allocation failed."))?;
+                    values.extend((0..count as usize).map(|i| rgba[4 * i + k]));
+                    Ok(values)
+                };
+                let values = packed::float4::of_owned(plane(0)?, plane(1)?, plane(2)?, plane(3)?)
                     .map_err(|e| fail(rdk_core::error::to_string(&e)))?;
                 let attribute_value = attribute::create_owned("rgba", attribute::Owner::Point, attribute::Storage::Float4(values))
                     .map_err(|e| fail(rdk_core::error::to_string(&e)))?;

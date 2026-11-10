@@ -32,7 +32,8 @@ const FRAMES: i64 = 30;
 // basic 1,232 / 141,996; empty 916 / 53,361; bare 1,156 / 69,746.
 // Never raise.
 // Z2 shared immutable Text, sorted Record fields and Symbol paths; measured idle guard pairs.
-const BASIC: (u64, u64) = (972, 131_161);
+// Z8 retains immutable image cache storage instead of copying it during every frame.
+const BASIC: (u64, u64) = (971, 100_129);
 const EMPTY: (u64, u64) = (841, 51_000);
 const BARE: (u64, u64) = (1_090, 67_083);
 

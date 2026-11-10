@@ -239,3 +239,36 @@ console.log('composition primitives passed');
 "#;
     assert_eq!(run_ok(&script).trim(), "composition primitives passed");
 }
+
+#[test]
+fn platform_array_capacity_and_typed_allocation_failures() {
+    let capacities = [("int", Ty::Int), ("text", Ty::Text), ("float", Ty::Float),
+        ("vec2", Ty::Vec2), ("vec3", Ty::Vec3), ("vec4", Ty::Vec4)]
+        .iter().map(|(name, ty)| format!("['{name}',{}n]", flow_syntax::value::array_max_length(ty).unwrap())).collect::<Vec<_>>().join(",");
+    let script = format!("import * as p from {};import assert from 'node:assert/strict';\nconst capacities=[{capacities}];\n", json_string(&runtime_url("prims.js"))) + r#"
+const memory = f => assert.throws(f, e => e instanceof p.Fail && e.code === 'E_ARRAY_MEMORY');
+const range = f => assert.throws(f, e => e instanceof p.Fail && e.code === 'E_ARRAY_RANGE');
+for (const [kind, maximum] of capacities) {
+  assert.equal(p.array_max_length(kind), maximum);
+  const count = maximum + 1n;
+  const build = kind === 'int' ? () => p.array_int(count) : kind === 'text' ? () => p.array_text(count)
+    : kind === 'float' ? () => p.array_float(count) : kind === 'vec2' ? () => p.sequence_build(count, 2n)
+    : kind === 'vec3' ? () => p.array_vec3(count) : () => p.array_vec4(count);
+  memory(build);
+}
+// An actual Array constructor rejection is translated, without allocating enormous storage.
+memory(() => p.array_text(1n << 32n));
+for (const build of [n => p.array_range(n), n => p.array_range(n, 'int'), n => p.array_float(n),
+    n => p.array_int(n), n => p.array_text(n), n => p.array_vec3(n), n => p.array_vec4(n),
+    n => p.sequence_build(n, 1n, 'int'), n => p.sequence_build(n, 4n), n => p.sequence_build(n, undefined, undefined, true)])
+  memory(() => build((1n << 63n) - 1n));
+for (const invalid of [-1n, -0.5, NaN, Infinity, 2 ** 63]) range(() => p.array_float(invalid));
+for (const get of [() => p.array_nth(p.array_int(1n), 9007199254740993n),
+    () => p.array_slice(p.array_int(1n), 0n, 9007199254740993n)]) range(get);
+assert.deepEqual([...p.array_range(3n, 'int').data], [0n, 1n, 2n]);
+assert.deepEqual([...p.array_vec3(2n, new Float64Array([1, -0, 3])).data], [1, -0, 3, 1, -0, 3]);
+assert.deepEqual(p.array_text(2n, '\0é').data, ['\0é', '\0é']);
+console.log('platform allocation passed');
+"#;
+    assert_eq!(run_ok(&script).trim(), "platform allocation passed");
+}

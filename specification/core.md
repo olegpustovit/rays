@@ -723,26 +723,35 @@ An imported vector storage length not divisible by its width is
 `E_ARRAY_TYPE`. Input validation checks every stored component for finiteness.
 This validation happens at the input boundary, not on every slice or read.
 
-The count/index conversion first converts the source number to binary64,
-then requires a non-negative whole value no greater than
-`Sys.max_floatarray_length`; failure is `E_ARRAY_RANGE` with
-"<operator> needs a non-negative whole length." It then truncates to Int.
-This is distinct from `coerce` and the narrower `4e18` conversion. The native
-maximum is the platform storage ceiling; exported counts also obey the
-chosen target's allocation and dispatch limits, with located refusals before
-allocation. Neither ceiling permits truncating a requested array.
+Counts and indices must be non-negative whole numbers in the signed 64-bit
+Int domain; Int inputs retain all their bits. Float inputs must be finite,
+whole and strictly below 2^63 before conversion. Invalid conversion is
+`E_ARRAY_RANGE` with "<operator> needs a non-negative whole length."
+This is distinct from `coerce` and its narrower `4e18` conversion. Indexing
+and slicing then validate against the actual source length; they have no
+additional artificial array ceiling.
 
-The ceiling is checked twice. The count/index conversion above compares the
-count with `Sys.max_floatarray_length` (2^54-1 on 64-bit) and fails with the
-"needs a non-negative whole length" message. A builder (`array/*` construction
-and `sequence/build` with a width) then requires `count <= ceiling / width`;
-a count just below the ceiling but above that quotient fails with `E_ARRAY_RANGE`
-"Array length is outside native storage bounds." (`value.ml` `array_init`).
-`sequence/build` with a width has only this second check.
+Native allocation uses the platform's `isize::MAX` byte layout limit. Numeric
+storage reserves `count * width` eight-byte slots with checked arithmetic;
+Text storage reserves its row offsets and byte payload separately. Capacity
+overflow and a failed reservation return `E_ARRAY_MEMORY` with "Frame data
+exceeds available memory." before filling the requested storage. Successful
+reservation is not a promise that an operating system will keep an
+overcommitted process alive. Ordinary bounded lists still have their 4,096
+limit; packed arrays and cooked geometry collections do not inherit it.
+
+A compiler-owned constant-array descriptor may retain a valid Int count and
+validated fill value without materializing its storage. Physical storage is
+reserved when the descriptor is realized; a count beyond that storage's
+layout limit is a typed memory error at that point. Exported arrays also obey
+the actual browser allocation and device dispatch limits. JavaScript keeps
+Int counts as BigInt until an exact, addressable allocation or in-bounds
+index is established, and translates constructor capacity failures into the
+same `E_ARRAY_MEMORY`; it never rounds a requested array into a smaller one.
 
 | Leaf | Behavior |
 | --- | --- |
-| `array/max_length(:type float\|int\|text\|vec2\|vec3\|vec4)` | Exact Int logical element capacity, with `float` default. Native `int` and `text` use `Sys.max_array_length`; numeric arrays use `Sys.max_floatarray_length / width`. The selector must be recognized literal Text (`E_ARRAY_TYPE`); the checker rejects non-Text with `E_TYPE`. On Apple64, width one is 18014398509481983; widths two, three and four are 9007199254740991, 6004799503160661 and 4503599627370495. JavaScript returns the identical BigInt. This is a pure value and allocates no array; it does not promise available RAM or browser TypedArray capacity. Constructor limits are unchanged. Ordinary exact Int instructions retain GPU refusal; explicit Float conversion and folding follow ordinary Float qualification. |
+| `array/max_length(:type float\|int\|text\|vec2\|vec3\|vec4)` | Exact Int element capacity of a single native allocation, with `float` default. Numeric types return `isize::MAX / (8 * width)`; Text returns `isize::MAX / size_of::<usize>() - 1` because its row-offset table includes one terminal boundary. The selector must be recognized literal Text (`E_ARRAY_TYPE`); the checker rejects non-Text with `E_TYPE`. On supported 64-bit native targets, Int/Float return 1152921504606846975, Text returns 1152921504606846974, and Vec2/3/4 return 576460752303423487, 384307168202282325 and 288230376151711743. JavaScript returns the same BigInt for this native-target query. The query allocates no array and promises neither available RAM nor browser TypedArray capacity. Ordinary exact Int instructions retain GPU refusal; explicit Float conversion and folding follow ordinary Float qualification. |
 | `array/range(count :type float\|int)` | Fresh width-1 storage containing values 0 through count-1. Default type is Float; explicit `int` retains exact integer storage. |
 | `array/int(count,value)` | Fresh exact integer storage, with Int zero when value is omitted. Values use the ordinary Int coercion boundary and must then be Int. |
 | `array/text(count,value)` | Fresh typed string-array storage, with empty text when value is omitted. Count/get/slice/concat preserve exact decoded string contents and copying ownership. Maps may collect immutable Text leaves in a separate region bank; Text transformations use structured compiled loops. Neither storage has the bounded-list cap. |
@@ -959,7 +968,7 @@ new collection of shader operations:
 | `Checked_mul(projection,a,b)`, `Checked_fma(projection,a,b,c)` | `Value` emits the finite binary64 result or positive zero; `Valid` emits exactly one or zero. Compiler-only record fields connect the two registers. Both projections use existing guards, so untaken branches do not execute. No nonfinite register is published. The single-destination representation computes each projection separately; duplicate FMA work is a measured optimization candidate, not a speed claim. GPU targets refuse these instructions. |
 | `Rand_at(seed,index)` | Exact signed 64-bit integer registers to the native `Rand.float_at` Float result. CPU and emitted JavaScript retain all integer bits; GPU qualification refuses this instruction explicitly. |
 | `Array_prepare(uniform,type)` | Lazily materialize a checked invariant Int/Float/Vec2/3/4/Text table at its argument's evaluation position. Its compiler-local handle is neither a numeric register nor an output. The table is separate from iteration sources and count/origin proofs. |
-| `Gather(table,index,width,component)`, `Int_gather(table,index)` | Read one component or exact signed 64-bit integer from a prepared immutable table. Check the integer element index against native bounds and row count before component address multiplication. GPU targets refuse table preparation and indexed reads, including Float-output kernels. |
+| `Gather(table,index,width,component)`, `Int_gather(table,index)` | Read one component or exact signed 64-bit integer from a prepared immutable table. Check the non-negative integer index against the actual row count before component address multiplication. GPU targets refuse table preparation and indexed reads, including Float-output kernels. |
 | `Text_const(text)`, `Text_input(source)`, `Text_uniform(capture)`, `Text_gather(table,index)`, `Text_select(condition,yes,no)` | Immutable Text leaves in Collect regions: constants, source/capture reads, exact indexed lookup and selected copying. Text has a separate register bank, not a numeric width. Outputs allocate a fresh string array while sharing immutable strings. Text arithmetic, transformations and reductions remain unsupported in regions and use structured Core where eligible. GPU targets refuse all Text registers. |
 | `Select(condition,yes,no)` | Selects by condition unequal to zero; branch instructions carry their execution guards. |
 | `Guarded(conditions,instruction)` | Executes the instruction and its finite checks only when every condition selects this branch. Metal and WGSL declare the result at the top of its scope (the kernel or loop body) and assign it inside one block shared by consecutive instructions with the same guards (`Kernel_layout.Scope`), so later selections retain the same lazy behavior. An unselected overflow is unevaluated; `min` and `max` still evaluate both arguments. |

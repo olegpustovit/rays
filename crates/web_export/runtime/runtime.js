@@ -185,7 +185,7 @@ export function createRuntime(program, { now = () => performance.now() / 1000, f
       const captures = binding ? {plan:binding, args, input, frameValue:binding.frameValue ? rt.frameValue(input) : null} : null;
       const ArrayType = r.integer ? BigInt64Array : Float64Array;
       let outputs;
-      try { outputs = [r.text ? Array(kept).fill('') : pool ? pool.alloc(kept * r.width, ArrayType) : new ArrayType(kept * r.width)]; }
+      try { outputs = [r.text ? prims.allocateArray(Array, kept).fill('') : pool ? pool.alloc(kept * r.width, ArrayType) : prims.allocateArray(ArrayType, BigInt(kept) * BigInt(r.width))]; }
       catch (error) { if (error instanceof RangeError) prims.fail('E_ARRAY_MEMORY', 'Frame data exceeds available memory.'); throw error; }
       let status;
       try { status = pool ? await pool.collect(id, inputs, uniforms, outputs, count, skip, captures)

@@ -16,8 +16,6 @@ use crate::subdivide_refine::{
 
 const OPERATION: &str = "Rdk_mesh.Remesh.remesh";
 
-/// OCaml `Sys.max_array_length` on a 64-bit build.
-
 /// `fail message = Error (operation ^ ": " ^ message)`.
 pub(crate) fn fail(message: &str) -> error::T {
     error::new("remesh", Code::InvalidRemesh, format!("{OPERATION}: {message}"))

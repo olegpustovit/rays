@@ -117,9 +117,7 @@ export async function sourceInputs(plan, args, input, rt) {
   }
   const skip = [...new Set(plan.skip.filter(i => i >= 0 && BigInt(i) < count))].sort((a,b) => a-b);
   const kept = count - BigInt(skip.length);
-  if (kept > plan.arrayLimit / BigInt(plan.width))
-    p.fail('E_ARRAY_RANGE', 'Array length is outside native storage bounds.');
-  // A logical language cap is not a promise that JS can address or allocate that buffer.
+  // Iteration indices must remain exact in the JavaScript target.
   if (count > BigInt(Number.MAX_SAFE_INTEGER))
     p.fail('E_ARRAY_MEMORY', 'Frame data exceeds available memory.');
   return {inputs, count:Number(count), kept:Number(kept), skip};

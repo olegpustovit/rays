@@ -2,7 +2,6 @@
 use flow_syntax::symbol::Symbol;
 use crate::flow_ir::executor;
 use crate::test_support::*;
-use flow_check::op::MAX_WOSIZE;
 use flow_eval as e;
 use flow_syntax::ty::Ty;
 use flow_syntax::value::{Value, source_value};
@@ -103,10 +102,11 @@ fn malformed_inputs() {
     for index in [-1, 1, 9007199254740993, MAX_INT] {
         reject("E_ARRAY_RANGE", scatter(ints(&[index]), ints(&[1]), Value::Int(1)));
     }
-    for size in [-1, MAX_WOSIZE as i64 + 1, MAX_INT] {
-        reject("E_ARRAY_RANGE", scatter(ints(&[]), ints(&[]), Value::Int(size)));
+    reject("E_ARRAY_RANGE", scatter(ints(&[]), ints(&[]), Value::Int(-1)));
+    for size in [isize::MAX as i64 / size_of::<i64>() as i64 + 1, MAX_INT] {
+        reject("E_ARRAY_MEMORY", scatter(ints(&[]), ints(&[]), Value::Int(size)));
     }
-    reject("E_ARRAY_RANGE", scatter(ints(&[]), Value::Floats(4, Arc::new(vec![])), Value::Int(MAX_WOSIZE as i64 / 4 + 1)));
+    reject("E_ARRAY_MEMORY", scatter(ints(&[]), Value::Floats(4, Arc::new(vec![])), Value::Int(isize::MAX as i64 / size_of::<f64>() as i64 / 4 + 1)));
     reject("E_ARRAY_COUNT", scatter(ints(&[0]), ints(&[]), Value::Int(1)));
     reject("E_ARRAY_TYPE", scatter(floats(&[0.]), floats(&[1.]), Value::Int(1)));
     reject("E_ARRAY_TYPE", scatter(ints(&[]), Value::Text_array(Arc::new(Vec::<Vec<u8>>::new().into())), Value::Int(1)));

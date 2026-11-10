@@ -15,10 +15,6 @@ use crate::node::{self, build, Cooked, CookMode};
 use crate::payload;
 use crate::support;
 
-/// `Sys.max_floatarray_length` on a 64-bit OCaml: the bound checked before the sample array is
-/// allocated.
-const MAX_FLOATARRAY_LENGTH: i64 = (1_i64 << 54) - 1;
-
 /// The `parameters` record of `image/noise`; field order is the schema's field order.
 #[derive(Clone, Debug, PartialEq)]
 struct Parameters {
@@ -66,12 +62,15 @@ fn cook_noise(context: &context::T, p: &Parameters) -> Result<Cooked, Diagnostic
     if context::cancelled(context) {
         return Err(cancelled_error());
     }
-    if p.width <= 0 || p.height <= 0 || p.width > MAX_FLOATARRAY_LENGTH / 4 / p.height {
+    if p.width <= 0 || p.height <= 0 {
         return Err(support::diagnostic("E_IMAGE", "Image dimensions exceed native storage bounds."));
     }
     let (width, height) = (p.width, p.height);
+    let channels = image::channel_count(width, height, std::mem::size_of::<f64>())?;
     let field = noise::create(p.seed);
-    let mut rgba = vec![0.0_f64; (width * height * 4) as usize];
+    let mut rgba = Vec::new();
+    rgba.try_reserve_exact(channels).map_err(|_| support::diagnostic("E_ARRAY_MEMORY", "Image storage allocation failed."))?;
+    rgba.resize(channels, 0.0_f64);
     for pixel in 0..width * height {
         if pixel % width == 0 && context::cancelled(context) {
             return Err(cancelled_error());
@@ -163,7 +162,7 @@ mod tests {
         let out = cook(&mut s, 1, &small);
         let image = payload::image(&out.payload).unwrap();
         assert_eq!((image::width(&image), image::height(&image)), (4, 3));
-        let storage = image::storage(&image);
+        let storage = image::storage(&image).unwrap();
         assert_eq!(storage.len(), 4 * 3 * 4);
         assert!(storage.chunks(4).all(|texel| texel[0] == texel[1] && texel[1] == texel[2] && texel[3] == 1.0));
         crate::session::close(&mut s);

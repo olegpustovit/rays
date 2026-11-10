@@ -444,22 +444,26 @@ pub mod region {
         T { destination: Some(destination), ..t.clone() }
     }
 
-    pub fn floats_for(t: &T, length: usize) -> Vec<f64> {
+    pub fn floats_for(t: &T, length: usize) -> Result<Vec<f64>, Diagnostic> {
+        let mut values = value::array_buffer(length)?;
         if let Some(d) = &t.destination {
             if let Value::Floats(1, data) = &d.buffer {
-                if data.len() == length && t.outputs.len() == 1 { return (**data).clone(); }
+                if data.len() == length && t.outputs.len() == 1 { values.extend_from_slice(data); return Ok(values); }
             }
         }
-        vec![0.0; length]
+        values.resize(length, 0.0);
+        Ok(values)
     }
 
-    pub fn ints_for(t: &T, length: usize) -> Vec<i64> {
+    pub fn ints_for(t: &T, length: usize) -> Result<Vec<i64>, Diagnostic> {
+        let mut values = value::array_buffer(length)?;
         if let Some(d) = &t.destination {
             if let Value::Int_array(data) = &d.buffer {
-                if data.len() == length && t.outputs.len() == 1 { return (**data).clone(); }
+                if data.len() == length && t.outputs.len() == 1 { values.extend_from_slice(data); return Ok(values); }
             }
         }
-        vec![0; length]
+        values.resize(length, 0);
+        Ok(values)
     }
 
     pub fn finished(t: &T, value: Value) {

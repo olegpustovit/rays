@@ -56,9 +56,6 @@ fn geometry_id(value: &Value) -> Option<i64> {
 fn float_array(v: Vec<f64>) -> Value {
     Value::Floats(1, Arc::new(v))
 }
-fn max_floats(width: usize) -> usize {
-    op::MAX_WOSIZE / width.max(1)
-}
 fn rerr(e: &rerror::T) -> String {
     rerror::message(e).to_owned()
 }
@@ -421,9 +418,14 @@ fn typed_storage(owner: Owner, name: &str, kind: &str, g: &geometry::T) -> Resul
 /// Fill `strides.len()` columns of `count * stride[c]` floats: `piece(first, last, columns)` writes
 /// the disjoint `(last - first) * stride[c]` window of each column for one grain-sized range on the
 /// shared pool, so the result is byte-identical to the sequential path.
-fn ranges(grain: i64, count: usize, strides: &[usize], piece: &(dyn Fn(usize, usize, &mut [&mut [f64]]) + Send + Sync)) -> Vec<Vec<f64>> {
+fn ranges(grain: i64, count: usize, strides: &[usize], piece: &(dyn Fn(usize, usize, &mut [&mut [f64]]) + Send + Sync)) -> Result<Vec<Vec<f64>>, Diagnostic> {
     let grain = grain.max(1);
-    let mut out: Vec<Vec<f64>> = strides.iter().map(|s| vec![0.0; count * s]).collect();
+    let mut out: Vec<Vec<f64>> = strides.iter().map(|s| {
+        let slots = count.checked_mul(*s).ok_or_else(|| V::fail("E_ARRAY_MEMORY", "Attribute storage exceeds native bounds."))?;
+        let mut column = V::array_buffer(slots)?;
+        column.resize(slots, 0.0);
+        Ok(column)
+    }).collect::<Result<_, Diagnostic>>()?;
     let windows: Vec<support::Windows<f64>> = out
         .iter_mut()
         .zip(strides)
@@ -437,7 +439,7 @@ fn ranges(grain: i64, count: usize, strides: &[usize], piece: &(dyn Fn(usize, us
         Ok(())
     })
     .expect("attribute_kernel ranges");
-    out
+    Ok(out)
 }
 
 /// A bounded ring keyed by the identity of a first plane (OCaml `Flow.Value.remember ()`): a hit
@@ -473,13 +475,13 @@ impl<X: Clone> Ring<X> {
     }
 }
 
-static INTERLEAVED: Ring<Value> = Ring::new();
+static INTERLEAVED: Ring<Result<Value, Diagnostic>> = Ring::new();
 static CHECKED_VALUES: Ring<Result<Value, Diagnostic>> = Ring::new();
 static CHECKED_VALID: Ring<Result<Value, Diagnostic>> = Ring::new();
 
 // ---- reading attributes as Flow values --------------------------------------------------------
 
-fn interleave(count: usize, planes: &[&[f64]], grain: i64) -> Value {
+fn interleave(count: usize, planes: &[&[f64]], grain: i64) -> Result<Value, Diagnostic> {
     let width = planes.len();
     let planes_owned: Vec<&[f64]> = planes.to_vec();
     let columns = ranges(grain, count, &[width], &move |first, last, cols| {
@@ -509,9 +511,9 @@ fn interleave(count: usize, planes: &[&[f64]], grain: i64) -> Value {
                 }
             }
         }
-    });
+    })?;
     let values = columns.into_iter().next().unwrap_or_default();
-    wide_array(width, values)
+    Ok(wide_array(width, values))
 }
 
 fn wide_array(width: usize, values: Vec<f64>) -> Value {
@@ -534,20 +536,17 @@ pub(crate) fn read(component: Option<&str>, owner: Owner, kind: &str, name: &str
     };
     let count = owner_count(g, owner);
     let width = planes.len();
-    if count > max_floats(width) {
-        return err("E_ATTR_COUNT", "Attribute buffer exceeds array limits.");
-    }
     if let Storage::Float(data) = storage {
         if data.len() == count {
             return Ok(Value::Floats(1, data.clone()));
         }
     }
-    if count * width > 4096 && planes.iter().all(|p| p.len() == count) {
+    if count.saturating_mul(width) > 4096 && planes.iter().all(|p| p.len() == count) {
         if let Some(arcs) = shared_planes(storage) {
-            return Ok(INTERLEAVED.recall(&arcs, &|| interleave(count, &planes, 16_384)));
+            return INTERLEAVED.recall(&arcs, &|| interleave(count, &planes, 16_384));
         }
     }
-    Ok(interleave(count, &planes, 16_384))
+    interleave(count, &planes, 16_384)
 }
 
 fn read_checked(component: &str, owner: Owner, kind: &str, name: &str, g: &geometry::T) -> Result<Value, Diagnostic> {
@@ -560,9 +559,6 @@ fn read_checked(component: &str, owner: Owner, kind: &str, name: &str, g: &geome
     let width = planes.len();
     if component != "values" && component != "valid" {
         return err("E_ATTR_TYPE", "Checked attribute component is values or valid.");
-    }
-    if count > max_floats(width) {
-        return err("E_ATTR_COUNT", "Attribute buffer exceeds array limits.");
     }
     let valid_only = component == "valid";
     let build = || -> Result<Value, Diagnostic> {
@@ -580,11 +576,15 @@ fn read_checked(component: &str, owner: Owner, kind: &str, name: &str, g: &geome
                     }
                 }
             }
-        });
+        })?;
         let data = columns.into_iter().next().unwrap_or_default();
-        Ok(if valid_only { Value::Int_array(Arc::new(data.into_iter().map(|x| x as i64).collect())) } else { wide_array(width, data) })
+        Ok(if valid_only {
+            let mut valid = V::array_buffer(data.len())?;
+            valid.extend(data.into_iter().map(|x| x as i64));
+            Value::Int_array(Arc::new(valid))
+        } else { wide_array(width, data) })
     };
-    if count * width <= 4096 {
+    if count.saturating_mul(width) <= 4096 {
         return build();
     }
     match shared_planes(storage) {
@@ -606,7 +606,12 @@ fn read_planes(component: &str, owner: Owner, name: &str, g: &geometry::T) -> Re
     let index = if component.len() == 1 { "xyzw".find(component) } else { None };
     match index {
         None => err("E_ATTR_TYPE", "Plane component is width, x, y, z or w."),
-        Some(c) => Ok(float_array(if c < planes.len() { planes[c].to_vec() } else { vec![0.0; owner_count(g, owner)] })),
+        Some(c) => {
+            let count = if c < planes.len() { planes[c].len() } else { owner_count(g, owner) };
+            let mut data = V::array_buffer(count)?;
+            if c < planes.len() { data.extend_from_slice(planes[c]); } else { data.resize(count, 0.0); }
+            Ok(float_array(data))
+        },
     }
 }
 
@@ -1264,7 +1269,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
             };
             let Some(values) = data else { return err("E_ATTR_TYPE", &format!("sop/with_attr requires {kind} storage.")) };
             let w = width(kind);
-            if count > max_floats(w) || values.len() / w != count || values.len() % w != 0 {
+            if values.len() / w != count || values.len() % w != 0 {
                 return err("E_ATTR_COUNT", &format!("{name} needs {count} {} values; got {}.", owner_name(owner), values.len() / w));
             }
             if w == 1 {
@@ -1290,7 +1295,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
                         col[i - first] = v;
                     }
                 }
-            });
+            })?;
             if !finite.load(Ordering::Relaxed) {
                 return err("E_NONFINITE", "Attribute values must be finite.");
             }
@@ -1343,9 +1348,9 @@ pub fn write_selected(grain: i64, owner: Owner, kind: &str, name: &str, values: 
     let count = owner_count(g, owner);
     let constant = constant_source(values);
     // (row data, constant count)
-    let vals: Option<(Vec<f64>, Option<usize>)> = match (kind, values) {
+    let vals: Option<(Arc<Vec<f64>>, Option<usize>)> = match (kind, values) {
         ("float", Value::Floats(1, d)) | ("vec2", Value::Floats(2, d)) | ("vec3", Value::Floats(3, d)) | ("vec4", Value::Floats(4, d)) => {
-            Some((d.to_vec(), None))
+            Some((d.clone(), None))
         }
         (_, Value::Source(..)) => match &constant {
             Some(Ok((operation, n, value))) if *operation == format!("array/{kind}") => {
@@ -1355,7 +1360,7 @@ pub fn write_selected(grain: i64, owner: Owner, kind: &str, name: &str, values: 
                     Value::Vec4(x, y, z, q) => vec![*x, *y, *z, *q],
                     _ => Vec::new(),
                 };
-                (row.len() == w && w > 0).then_some((row, Some(*n as usize)))
+                (row.len() == w && w > 0).then_some((Arc::new(row), Some(*n as usize)))
             }
             _ => None,
         },
@@ -1376,7 +1381,7 @@ pub fn write_selected(grain: i64, owner: Owner, kind: &str, name: &str, values: 
         };
     };
     let value_count = constant_count.unwrap_or(vals.len() / w);
-    if count > max_floats(w) || value_count != count || (constant_count.is_none() && vals.len() % w != 0) {
+    if value_count != count || (constant_count.is_none() && vals.len() % w != 0) {
         return err("E_ATTR_COUNT", &format!("{name} needs {count} {} values; got {value_count}.", owner_name(owner)));
     }
     if selection.len() != count {
@@ -1398,7 +1403,11 @@ pub fn write_selected(grain: i64, owner: Owner, kind: &str, name: &str, values: 
         None => None,
     };
     let planes: Vec<Vec<f64>> = if all_selected {
-        (0..w).map(|c| vec![vals[c]; count]).collect()
+        (0..w).map(|c| {
+            let mut plane = V::array_buffer(count)?;
+            plane.resize(count, vals[c]);
+            Ok(plane)
+        }).collect::<Result<_, Diagnostic>>()?
     } else {
         ranges(grain, count, &vec![1; w], &|first, last, cols| {
             for i in first..last {
@@ -1414,7 +1423,7 @@ pub fn write_selected(grain: i64, owner: Owner, kind: &str, name: &str, values: 
                     };
                 }
             }
-        })
+        })?
     };
     install(owner, kind, name, planes, g)
 }
@@ -1444,11 +1453,29 @@ pub fn write_constant_source(
     match (selection, default) {
         (Some(selection), Some(default)) => write_selected(grain, owner, kind, name, values, selection, default, g).map(Some),
         (None, None) => match &value {
-            Value::Int(n) => semantic_owned(owner, name, Storage::Int(Arc::new(vec![*n; count])), g).map(Some),
-            Value::Text(t) => semantic_owned(owner, name, Storage::Text(Arc::new(std::iter::repeat_n(t.as_ref(), count).collect())), g).map(Some),
-            Value::Float(x) => install(owner, kind, name, vec![vec![*x; count]], g).map(Some),
-            Value::Vec3(x, y, z) => install(owner, kind, name, [*x, *y, *z].iter().map(|v| vec![*v; count]).collect(), g).map(Some),
-            Value::Vec4(x, y, z, q) => install(owner, kind, name, [*x, *y, *z, *q].iter().map(|v| vec![*v; count]).collect(), g).map(Some),
+            Value::Int(n) => {
+                let mut data = V::array_buffer(count)?;
+                data.resize(count, *n);
+                semantic_owned(owner, name, Storage::Int(Arc::new(data)), g).map(Some)
+            }
+            Value::Text(_) => {
+                let Value::Text_array(data) = V::array_init(&Ty::Text, count as i64, &|_| value.clone())? else { unreachable!() };
+                semantic_owned(owner, name, Storage::Text(data), g).map(Some)
+            }
+            Value::Float(_) | Value::Vec3(..) | Value::Vec4(..) => {
+                let row = match &value {
+                    Value::Float(x) => [*x, 0.0, 0.0, 0.0],
+                    Value::Vec3(x,y,z) => [*x,*y,*z,0.0],
+                    Value::Vec4(x,y,z,w) => [*x,*y,*z,*w],
+                    _ => unreachable!(),
+                };
+                let planes = row[..width(kind)].iter().map(|&fill| {
+                    let mut plane = V::array_buffer(count)?;
+                    plane.resize(count, fill);
+                    Ok(plane)
+                }).collect::<Result<_, Diagnostic>>()?;
+                install(owner, kind, name, planes, g).map(Some)
+            }
             _ => err("E_ATTR_TYPE", "Constant array fill has the wrong storage."),
         },
         _ => err("E_ATTR_SELECTION", "Selected writes require both selection and default."),
@@ -1817,7 +1844,14 @@ fn write_planes(
             _ => false,
         })
         .collect();
-    let outputs = Arc::new(Mutex::new(vec![keep.iter().map(|k| if *k { None } else { Some(vec![0.0; count]) }).collect::<Vec<Option<Vec<f64>>>>()]));
+    let columns = keep.iter().map(|k| {
+        if *k { Ok(None) } else {
+            let mut data = V::array_buffer(count)?;
+            data.resize(count, 0.0);
+            Ok(Some(data))
+        }
+    }).collect::<Result<Vec<Option<Vec<f64>>>, Diagnostic>>()?;
+    let outputs = Arc::new(Mutex::new(vec![columns]));
     let options = executor::ForceOptions { state: state.cloned(), elems: elems.map(|e| e.to_vec()), resolve: Some(resolve.clone()), strict, ..Default::default() };
     let forced = executor::force_into(&options, gpu.cloned(), column_source, count as i64, outputs.clone(), program, live).map_err(|mut d| {
         if d.code == "E_ARRAY_COUNT" {
@@ -2231,7 +2265,11 @@ impl Kernel {
                         let _ = planes.settle();
                         let data = planes.materialise()?;
                         let values = match (k, data.len()) {
-                            ("int", 1) => Value::Int_array(Arc::new(data[0].iter().map(|x| *x as i64).collect())),
+                            ("int", 1) => {
+                                let mut values = V::array_buffer(data[0].len())?;
+                                values.extend(data[0].iter().map(|x| *x as i64));
+                                Value::Int_array(Arc::new(values))
+                            },
                             (_, 1) => float_array(data.into_iter().next().unwrap()),
                             _ => Value::Record(Vec::new().into()),
                         };
@@ -2500,6 +2538,17 @@ fn cancelled_err<X>() -> Result<X, Diagnostic> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_attribute_capacity_fails_before_fill() {
+        let count = V::array_max_length(&Ty::Float).unwrap() + 1;
+        assert_eq!(interleave(count, &[&[]], 97).unwrap_err().code, "E_ARRAY_MEMORY");
+        for (count, stride) in [(usize::MAX, 2), (isize::MAX as usize / 8 + 1, 1)] {
+            assert_eq!(ranges(97, count, &[stride], &|_, _, _| panic!("oversized storage reached fill")).unwrap_err().code, "E_ARRAY_MEMORY");
+        }
+        assert_eq!(ranges(97, 0, &[4], &|_, _, _| panic!("empty storage reached fill")).unwrap(), vec![Vec::<f64>::new()]);
+    }
+
     use rdk_core::topology;
 use rdk_ops::line_geometry;
 

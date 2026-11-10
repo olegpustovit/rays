@@ -931,32 +931,29 @@ program
   r3 = Int_uniform 1
   r4 = Int_const 0
   r5 = Int_compare int/ge 0 4
-  r6 = Int_const 18014398509481983
-  r7 = Int_compare int/le 0 6
-  r8 = Binary And 5 7
-  r9 = Guarded 8:false (Raise int "E_ARRAY_RANGE" "array/slice needs a non-negative whole length.")
-  r10 = Int_select 8 0 9
-  r11 = Int_binary int/sub 3 10
-  r12 = Int_const 3
-  r13 = Int_compare int/le 12 11
-  r14 = Int_compare int/le 10 3
-  r15 = Binary And 14 13
-  r16 = Guarded 15:false (Raise int "E_ARRAY_RANGE" "An array slice must be within its source.")
-  r17 = Int_select 15 4 16
-  r18 = Convert float 17
-  r19 = Int_binary int/add 10 4
-  r20 = Guarded 15:true (Gather 2 19 1 0)
-  r21 = Int_const 1
-  r22 = Int_binary int/add 10 21
-  r23 = Guarded 15:true (Gather 2 22 1 0)
-  r24 = Int_const 2
-  r25 = Int_binary int/add 10 24
-  r26 = Guarded 15:true (Gather 2 25 1 0)
-  r27 = Binary Add 18 20
-  r28 = Binary Add 27 23
-  r29 = Binary Add 28 26
+  r6 = Guarded 5:false (Raise int "E_ARRAY_RANGE" "array/slice needs a non-negative whole length.")
+  r7 = Int_select 5 0 6
+  r8 = Int_binary int/sub 3 7
+  r9 = Int_const 3
+  r10 = Int_compare int/le 9 8
+  r11 = Int_compare int/le 7 3
+  r12 = Binary And 11 10
+  r13 = Guarded 12:false (Raise int "E_ARRAY_RANGE" "An array slice must be within its source.")
+  r14 = Int_select 12 4 13
+  r15 = Convert float 14
+  r16 = Int_binary int/add 7 4
+  r17 = Guarded 12:true (Gather 2 16 1 0)
+  r18 = Int_const 1
+  r19 = Int_binary int/add 7 18
+  r20 = Guarded 12:true (Gather 2 19 1 0)
+  r21 = Int_const 2
+  r22 = Int_binary int/add 7 21
+  r23 = Guarded 12:true (Gather 2 22 1 0)
+  r24 = Binary Add 15 17
+  r25 = Binary Add 24 20
+  r26 = Binary Add 25 23
   widths [1]
-  output [29]
+  output [26]
   uniform_widths [1;1]
   collecting true
 ## case 31 fusion=false
@@ -967,32 +964,29 @@ program
   r3 = Int_uniform 1
   r4 = Int_const 0
   r5 = Int_compare int/ge 0 4
-  r6 = Int_const 18014398509481983
-  r7 = Int_compare int/le 0 6
-  r8 = Binary And 5 7
-  r9 = Guarded 8:false (Raise int "E_ARRAY_RANGE" "array/slice needs a non-negative whole length.")
-  r10 = Int_select 8 0 9
-  r11 = Int_binary int/sub 3 10
-  r12 = Int_const 3
-  r13 = Int_compare int/le 12 11
-  r14 = Int_compare int/le 10 3
-  r15 = Binary And 14 13
-  r16 = Guarded 15:false (Raise int "E_ARRAY_RANGE" "An array slice must be within its source.")
-  r17 = Int_select 15 4 16
-  r18 = Convert float 17
-  r19 = Int_binary int/add 10 4
-  r20 = Guarded 15:true (Gather 2 19 1 0)
-  r21 = Int_const 1
-  r22 = Int_binary int/add 10 21
-  r23 = Guarded 15:true (Gather 2 22 1 0)
-  r24 = Int_const 2
-  r25 = Int_binary int/add 10 24
-  r26 = Guarded 15:true (Gather 2 25 1 0)
-  r27 = Binary Add 18 20
-  r28 = Binary Add 27 23
-  r29 = Binary Add 28 26
+  r6 = Guarded 5:false (Raise int "E_ARRAY_RANGE" "array/slice needs a non-negative whole length.")
+  r7 = Int_select 5 0 6
+  r8 = Int_binary int/sub 3 7
+  r9 = Int_const 3
+  r10 = Int_compare int/le 9 8
+  r11 = Int_compare int/le 7 3
+  r12 = Binary And 11 10
+  r13 = Guarded 12:false (Raise int "E_ARRAY_RANGE" "An array slice must be within its source.")
+  r14 = Int_select 12 4 13
+  r15 = Convert float 14
+  r16 = Int_binary int/add 7 4
+  r17 = Guarded 12:true (Gather 2 16 1 0)
+  r18 = Int_const 1
+  r19 = Int_binary int/add 7 18
+  r20 = Guarded 12:true (Gather 2 19 1 0)
+  r21 = Int_const 2
+  r22 = Int_binary int/add 7 21
+  r23 = Guarded 12:true (Gather 2 22 1 0)
+  r24 = Binary Add 15 17
+  r25 = Binary Add 24 20
+  r26 = Binary Add 25 23
   widths [1]
-  output [29]
+  output [26]
   uniform_widths [1;1]
   collecting true
 ## case 32 fusion=true

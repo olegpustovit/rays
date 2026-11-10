@@ -527,11 +527,7 @@ pub fn region(fast: bool, program: &packed::T) -> Result<String, Diagnostic> {
             p.add("  const row = (array, index, width) => { if (index < 0 || index >= array.length / width) fail('E_ARRAY_RANGE', 'Array index is outside its length.'); return index; };\n");
         } else {
             p.add("    tables.set(slot, data); return data; };\n");
-            let _ = writeln!(
-                p.line,
-                "  const row = (array, index, width) => {{ if (index < 0n || index > {}n) fail('E_ARRAY_RANGE', 'array/nth needs a non-negative whole length.');",
-                flow_check::op::MAX_WOSIZE
-            );
+            p.add("  const row = (array, index, width) => { if (index < 0n) fail('E_ARRAY_RANGE', 'array/nth needs a non-negative whole length.');\n");
             p.add("    if (index >= BigInt(array.length / width)) fail('E_ARRAY_RANGE', 'Array index is outside its length.'); return Number(index); };\n");
         }
     }
@@ -1331,7 +1327,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
     let text = terminal.len() == 1 && region::text_register(&r.code[terminal[0] as usize]);
     let frame_facts: Vec<String> = r.code.iter().enumerate().flat_map(|(slot, i)| facts(slot, i)).collect();
     Ok(format!(
-        "{{source:{},argumentTypes:[{}],sources:[{}],captures:[{}],product:{},skip:[{}],frame:[{}],length:{},width:{},integer:{integer},text:{text},frameValue:{needs_frame_value},arrayLimit:{}n,countLimit:{}n,kernel:{},shapes:{}}}",
+        "{{source:{},argumentTypes:[{}],sources:[{}],captures:[{}],product:{},skip:[{}],frame:[{}],length:{},width:{},integer:{integer},text:{text},frameValue:{needs_frame_value},countLimit:{}n,kernel:{},shapes:{}}}",
         escape(&region(fast, packed)?),
         argument_types.iter().map(ty_json).collect::<Vec<_>>().join(","),
         sources.join(","),
@@ -1341,7 +1337,6 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
         frame_facts.join(","),
         r.code.len(),
         r.outputs[0].len(),
-        flow_check::op::MAX_WOSIZE,
         i64::MAX,
         match &kernel {
             Some(id) => escape(id),

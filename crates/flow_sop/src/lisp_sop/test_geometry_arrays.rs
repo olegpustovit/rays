@@ -208,9 +208,10 @@ fn plane_input_finite_count_and_scalar_capacity_boundaries(){
             assert_eq!(result.err().expect("nonfinite plane input accepted").code,"E_NONFINITE");
         }}
     }
-    let max=flow_check::op::MAX_WOSIZE;let n=max/3+1;assert!(n<=max&&n*3>max);
-    assert_eq!(flow_check::op::array_count(None,"array/float",&Value::Int(max as i64)).unwrap(),max);
-    assert_eq!(flow_check::op::array_count(None,"array/float",&Value::Int(max as i64+1)).unwrap_err().code,"E_ARRAY_RANGE");
+    let max=flow_syntax::value::array_max_length(&flow_syntax::ty::Ty::Vec3).unwrap();
+    assert_eq!(flow_check::op::array_count(None,"array/float",&Value::Int(i64::MAX)).unwrap(),i64::MAX as usize);
+    assert_eq!(flow_check::op::array_count(None,"array/float",&Value::Int(-1)).unwrap_err().code,"E_ARRAY_RANGE");
+    assert_eq!(flow_syntax::value::array_init(&flow_syntax::ty::Ty::Vec3,max as i64+1,&|_|unreachable!("oversized array must fail before filling")).unwrap_err().code,"E_ARRAY_MEMORY");
 }
 fn live_arrays(planes:bool,stateful:bool){
     let coordinate=if stateful{"(state [previous 0.0] (+ previous (frame/dt)))"}else{"t"};
@@ -370,3 +371,24 @@ fn attribute_identifiers_refuse_non_utf8() {
         assert_eq!((op.check)(&args).unwrap_err().code, code);
     }
 }
+
+fn density_count_case(name: &str) {
+    let run = |density: &str, weighted: bool| -> Result<geo::T, rays_diagnostic::Diagnostic> {
+        let mesh = format!("(sop/mesh :points (array/vec3 {}) :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))", usize::from(weighted));
+        let source = if weighted { format!("(sop/set_float {mesh} :name \"weight\" :value 2.0)") } else { mesh };
+        let text = format!("(workspace density (graph g :context sop (sop/{name} {source} :points_per_point {density} {})))", if weighted { ":scale_attribute \"weight\"" } else { "" });
+        let lowered = lower::workspace(None, vec![], Default::default(), &parse(&text))?;
+        let mut session = new_session(64, 64_000_000);
+        let result = try_cook(&mut session, &context(1, 97), &compile(&lowered));
+        session::close(&mut session);
+        result
+    };
+    assert_eq!(geo::point_count(&run("0.5", true).unwrap()), 1);
+    assert_eq!(geo::point_count(&run("18014398509481988.0", false).unwrap()), 0);
+    assert_eq!(run("1000000000000000000.0", true).err().unwrap().code, "E_ARRAY_MEMORY");
+    let invalid = run("9223372036854775808.0", false).err().unwrap();
+    assert_eq!(invalid.code, "E_LOWER");
+    assert_eq!(invalid.message, format!("sop/{name}: invalid parameters"));
+}
+#[test] fn point_generate_counts_use_the_full_integer_domain() { density_count_case("point_generate") }
+#[test] fn point_replicate_counts_use_the_full_integer_domain() { density_count_case("point_replicate") }

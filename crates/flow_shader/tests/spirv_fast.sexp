@@ -11,7 +11,7 @@
 (fast_list_gather 5564 64b4c13bfc56f130714e4505b97099cc)
 (fast_list_float_index 5028 c1404036467669a0a7fd725a800b825e)
 (fast_inner_map_sum 3164 667dbb7277bfe281871f1ae74a741211)
-(fast_inner_slice_sum 6804 0fee0769c6baccf1de92740933530d02)
+(fast_inner_slice_sum 6660 5cb434618809f2e0c9f676c9ee89e8d1)
 (fast_vec_gather 4600 da25c7def569587842d174802ee0193c)
 (fast_int_gather 3776 caa8753a52a7ea29a4f7ebf4d491349f)
 (fast_whole 4036 d410e2e081bd615ee1c0cf5279f46798)

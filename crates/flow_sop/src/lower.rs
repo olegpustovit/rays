@@ -5060,21 +5060,16 @@ pub fn field_calls(state: Option<&State>, live: &Frame, resolve: flow_ir::core_e
             continue;
         }
         let (Some((rx, ry, rz)), Some((lx, ly, lz)), Some((hx, hy, hz))) = (vector(&args, "resolution"), vector(&args, "min"), vector(&args, "max")) else { continue };
-        let limit = (1i64 << 54) / 3;
-        let valid = |n: f64| n.is_finite() && n >= 1.0 && n.floor() == n && n < limit as f64;
+        let limit = flow_syntax::value::array_max_length(&Ty::Vec3).unwrap() as i64;
+        let valid = |n: f64| n.is_finite() && n >= 1.0 && n.floor() == n && n < i64::MAX as f64;
         if !(valid(rx) && valid(ry) && valid(rz)) {
             continue;
         }
-        let (nx, ny, nz) = (rx as i64 + 1, ry as i64 + 1, rz as i64 + 1);
-        if nx > limit / ny || nx * ny > limit / nz {
-            continue;
-        }
-        let count = nx * ny * nz;
+        let (Some(nx), Some(ny), Some(nz)) = ((rx as i64).checked_add(1), (ry as i64).checked_add(1), (rz as i64).checked_add(1)) else { continue };
+        let Some(count) = nx.checked_mul(ny).and_then(|n| n.checked_mul(nz)).filter(|n| *n <= limit) else { continue };
         let start = offset;
-        if count > i64::MAX >> 1 - start {
-            continue;
-        }
-        offset = start + count;
+        let Some(next) = start.checked_add(count) else { continue };
+        offset = next;
         let (f, live, state, resolve) = (*f, live.clone(), state.clone(), resolve.clone());
         let roots = E::roots(std::iter::once(&Value::Fn(f)));
         let at: Arc<dyn Fn(i64) -> R<Vec<(W::Path, Vec<(Vec<i64>, Value)>)>> + Send + Sync> = Arc::new(move |k: i64| {

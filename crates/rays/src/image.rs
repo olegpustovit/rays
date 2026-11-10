@@ -37,12 +37,13 @@ pub fn load(path: &str) -> Result<Image, String> {
 
 pub fn create(width: i64, height: i64, color: Option<color::T>) -> Result<Image, String> {
     let color = color.unwrap_or_else(color::transparent);
-    const MAX_INT: i64 = (1 << 62) - 1;
-    if width <= 0 || height <= 0 || width > MAX_INT / 4 || height > MAX_INT / (width * 4) {
+    if width <= 0 || height <= 0 {
         return Err("Image.create: invalid image extent".to_string());
     }
+    let length = width.checked_mul(height).and_then(|n| n.checked_mul(4)).and_then(|n| usize::try_from(n).ok())
+        .filter(|n| *n <= isize::MAX as usize).ok_or_else(|| "Image.create: pixel storage exceeds native address space".to_string())?;
     let pixel = [color.r as u8, color.g as u8, color.b as u8, color.a as u8];
-    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    let mut rgba = runtime_resources::byte_buffer("Image.create", length).map_err(|error| message("Image.create", &error))?;
     for _ in 0..(width * height) {
         rgba.extend_from_slice(&pixel);
     }

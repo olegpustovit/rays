@@ -139,7 +139,7 @@ fn gpu_image() {
         TextureDescriptor { format: TextureFormat::Rgba16Float, ..descriptor.clone() },
         TextureDescriptor { format: TextureFormat::Rgba32Float, ..descriptor.clone() },
         TextureDescriptor { depth: 2, ..descriptor.clone() },
-        TextureDescriptor { sample_count: 4, ..descriptor.clone() },
+        TextureDescriptor { sample_count: 4, usage: vec![TextureUsage::RenderAttachment], ..descriptor.clone() },
         TextureDescriptor { usage: vec![TextureUsage::TextureCopySrc], ..descriptor.clone() },
         TextureDescriptor { usage: vec![TextureUsage::TextureBinding], ..descriptor.clone() },
     ];

@@ -9,8 +9,6 @@ use crate::point_clusters::Clusters;
 use crate::point_grid::{float_max, float_min};
 use rays_math::text_array::TextArray;
 
-const MAX_STRING_LENGTH: i64 = (1i64 << 57) - 9;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DefaultAttributes {
     KeepFirst,
@@ -619,19 +617,20 @@ fn concatenate_text(
     source: &TextArray,
     ordered_members: &[i64],
 ) -> Result<Vec<Vec<u8>>, error::T> {
-    let mut output = vec![Vec::new(); clusters.count as usize];
+    let memory = || error::new("Rdk_mesh.Fuse_rules", Code::ArrayMemory, "Concatenated text exceeds available memory.".to_owned());
+    let mut output = Vec::new();
+    output.try_reserve_exact(clusters.count as usize).map_err(|_| memory())?;
+    output.resize_with(clusters.count as usize, Vec::new);
     support::par_fill(cancel_value, grain, &mut output, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
-        let mut length = 0i64;
+        let mut length = 0usize;
         for slot in first..last {
-            let item = source[ordered_members[slot] as usize].len() as i64;
-            if item > MAX_STRING_LENGTH - length {
-                return Err(fail("concatenated text exceeds string limits".to_owned()));
-            }
-            length += item;
+            let item = source[ordered_members[slot] as usize].len();
+            length = length.checked_add(item).ok_or_else(memory)?;
         }
-        let mut bytes = Vec::with_capacity(length as usize);
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(length).map_err(|_| memory())?;
         for slot in first..last {
             bytes.extend_from_slice(&source[ordered_members[slot] as usize]);
         }
@@ -678,7 +677,11 @@ fn reduce_text(
             })
             .collect()),
         AttributeMethod::Concatenate | AttributeMethod::ConcatenateWeightOrder => {
-            Ok(concatenate_text(cancel_value, grain, clusters, source, ordered_members)?.iter().collect())
+            let rows = concatenate_text(cancel_value, grain, clusters, source, ordered_members)?;
+            let memory = || error::new("Rdk_mesh.Fuse_rules", Code::ArrayMemory, "Concatenated text exceeds available memory.".to_owned());
+            let mut packed = TextArray::try_with_capacity(rows.len()).map_err(|_| memory())?;
+            for row in rows { packed.try_push(&row).map_err(|_| memory())?; }
+            Ok(packed)
         }
         _ => Err(fail(format!("attribute {name:?} method is unsupported for text storage"))),
     }

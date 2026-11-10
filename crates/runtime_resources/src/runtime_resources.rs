@@ -14,11 +14,10 @@ pub type error = ogpu_core::error::Error;
 /// hand-over between canvases and images. Image and canvas storage is written in place only through
 /// [`unique`], which copies first when a lease or mirror still holds the buffer.
 #[allow(non_camel_case_types)]
-pub type bytes = Rc<[u8]>;
+pub type bytes = Rc<Vec<u8>>;
 
 
 const MAX_INT: i64 = i64::MAX;
-const MAX_STRING_LENGTH: i64 = 144115188075855863;
 
 pub fn pp_error(formatter: &mut dyn std::fmt::Write, e: &error) {
     oerror::pp(formatter, e)
@@ -29,16 +28,32 @@ fn err_value(operation: &str, kind: ErrorKind, message: &str) -> error {
 }
 
 fn new_bytes(v: Vec<u8>) -> bytes {
-    Rc::from(v)
+    Rc::new(v)
+}
+
+pub fn byte_buffer(operation: &str, length: usize) -> Result<Vec<u8>, error> {
+    let mut value = Vec::new();
+    value.try_reserve_exact(length).map_err(|_| err_value(operation, ErrorKind::Capacity, "pixel storage exceeds available memory"))?;
+    Ok(value)
+}
+
+pub fn copy_bytes(operation: &str, source: &[u8]) -> Result<bytes, error> {
+    Ok(new_bytes(copy_buffer(operation, source)?))
+}
+
+fn copy_buffer(operation: &str, source: &[u8]) -> Result<Vec<u8>, error> {
+    let mut value = byte_buffer(operation, source.len())?;
+    value.extend_from_slice(source);
+    Ok(value)
 }
 
 /// The buffer's bytes for writing: written in place when this is the only holder, else copied into
 /// a fresh buffer first.
-fn unique(b: &mut bytes) -> &mut [u8] {
+fn unique(b: &mut bytes) -> Result<&mut [u8], error> {
     if Rc::get_mut(b).is_none() {
-        *b = Rc::from(&b[..]);
+        *b = copy_bytes("Resources.unique", b)?;
     }
-    Rc::get_mut(b).expect("a fresh buffer is unique")
+    Ok(Rc::get_mut(b).expect("a fresh buffer is unique"))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -221,7 +236,7 @@ pub mod image {
             if !valid_storage(width, height, rgba.len()) {
                 Err(err_value("Image.create", ErrorKind::InvalidArgument, "invalid RGBA extent or storage"))
             } else {
-                Ok(owned(width, height, Rc::from(rgba)))
+                Ok(owned(width, height, copy_bytes("Image.create", rgba)?))
             }
     }
 
@@ -249,7 +264,7 @@ pub mod image {
     }
 
     fn validate_gpu(operation: &str, width: i64, height: i64, source: &gpu_source_fn) -> Result<Texture, error> {
-        if width <= 0 || height <= 0 || width > MAX_STRING_LENGTH / 4 / height {
+        if width <= 0 || height <= 0 || width.checked_mul(height).and_then(|n| n.checked_mul(4)).is_none() {
             return Err(err_value(operation, ErrorKind::InvalidArgument, "invalid GPU image extent"));
         }
         match source() {
@@ -285,7 +300,7 @@ pub mod image {
 
     fn gpu_pixels(operation: &str, x: &mut image_data) -> Result<Vec<u8>, error> {
         match x.gpu.clone() {
-            None => Ok(x.rgba.to_vec()),
+            None => copy_buffer(operation, &x.rgba),
             Some(source) => {
                 let texture = gpu_texture(operation, x, &source)?;
                 let pixels = backend::read_texture(&texture, x.width * 4)?;
@@ -341,7 +356,9 @@ pub mod image {
             }
         }
         if x.leases.len() < 2 {
-            Ok(new_bytes(vec![0; length]))
+            let mut value = byte_buffer("Image.borrow_snapshot", length)?;
+            value.resize(length, 0);
+            Ok(new_bytes(value))
         } else {
             Err(err_value("Image.borrow_snapshot", ErrorKind::InvalidArgument, "both bounded image snapshot buffers are leased"))
         }
@@ -406,7 +423,13 @@ pub mod image {
             if in_place {
                 d.rgba = new_bytes(Vec::new());
             }
-            unique(&mut b).copy_from_slice(rgba);
+            match unique(&mut b) {
+                Ok(destination) => destination.copy_from_slice(rgba),
+                Err(error) => {
+                    if in_place { d.rgba = b; }
+                    return Err(error);
+                }
+            }
             if in_place {
                 d.rgba = b;
             } else {
@@ -540,7 +563,7 @@ pub mod image {
     /// Current CPU bank and spare, excluding separately leased snapshots.
     pub fn cpu_storage_bytes(x: &Image) -> i64 {
         let d = x.0.borrow();
-        d.rgba.len() as i64 + d.spare.as_ref().map_or(0, |b| b.len() as i64)
+        d.rgba.capacity() as i64 + d.spare.as_ref().map_or(0, |b| b.capacity() as i64)
     }
 
     pub(crate) fn rgba_of(x: &image_data) -> bytes {
@@ -666,7 +689,10 @@ pub mod canvas {
         if width <= 0 || height <= 0 || width > MAX_INT / 4 || height > MAX_INT / (width * 4) {
             Err(err_value(operation, ErrorKind::InvalidArgument, "invalid canvas extent"))
         } else {
-            Ok(new_bytes(vec![0; (width * height * 4) as usize]))
+            let length = usize::try_from(width * height * 4).map_err(|_| err_value(operation, ErrorKind::Capacity, "pixel storage exceeds native address space"))?;
+            let mut value = byte_buffer(operation, length)?;
+            value.resize(length, 0);
+            Ok(new_bytes(value))
         }
     }
 
@@ -754,17 +780,17 @@ pub mod canvas {
         }
     }
 
-    fn detach_for_mutation(x: &mut canvas_data) {
+    fn detach_for_mutation(x: &mut canvas_data) -> Result<(), error> {
         match x.mirror.clone() {
             Some(image) if valid_mirror(x, &image) => {
                 let replacement = match x.spare.take() {
                     Some(mut spare) if spare.len() == x.rgba.len() => {
-                        unique(&mut spare).copy_from_slice(&x.rgba);
+                        unique(&mut spare)?.copy_from_slice(&x.rgba);
                         spare
                     }
                     other => {
                         x.spare = other;
-                        Rc::from(&x.rgba[..])
+                        copy_bytes("Canvas.mutate", &x.rgba)?
                     }
                 };
                 detach_mirror(x);
@@ -773,16 +799,19 @@ pub mod canvas {
             Some(_) => x.mirror = None,
             None => {}
         }
+        Ok(())
     }
 
-    fn detach_for_overwrite(x: &mut canvas_data) {
+    fn detach_for_overwrite(x: &mut canvas_data) -> Result<(), error> {
         match x.mirror.clone() {
             Some(image) if valid_mirror(x, &image) => {
                 let replacement = match x.spare.take() {
                     Some(spare) if spare.len() == x.rgba.len() => spare,
                     other => {
                         x.spare = other;
-                        new_bytes(vec![0; x.rgba.len()])
+                        let mut value = byte_buffer("Canvas.overwrite", x.rgba.len())?;
+                        value.resize(x.rgba.len(), 0);
+                        new_bytes(value)
                     }
                 };
                 detach_mirror(x);
@@ -791,6 +820,7 @@ pub mod canvas {
             Some(_) => x.mirror = None,
             None => {}
         }
+        Ok(())
     }
 
     fn sync_cpu(x: &mut canvas_data) -> Result<(), error> {
@@ -803,8 +833,8 @@ pub mod canvas {
                 Ok(())
             }
             Some(texture) => {
-                detach_for_overwrite(x);
-                backend::read_texture_into(&texture, x.width * 4, unique(&mut x.rgba))?;
+                detach_for_overwrite(x)?;
+                backend::read_texture_into(&texture, x.width * 4, unique(&mut x.rgba)?)?;
                 x.cpu_stale = false;
                 x.readbacks += 1;
                 Ok(())
@@ -827,9 +857,9 @@ pub mod canvas {
                 return Err(err_value("Canvas.set_pixel", ErrorKind::InvalidArgument, "pixel is out of bounds"));
             }
             cpu_mutates(d)?;
-            detach_for_mutation(d);
+            detach_for_mutation(d)?;
             let offset = (((py * d.width) + px) * 4) as usize;
-            unique(&mut d.rgba)[offset..offset + 4].copy_from_slice(&color.to_be_bytes());
+            unique(&mut d.rgba)?[offset..offset + 4].copy_from_slice(&color.to_be_bytes());
             d.generation += 1;
             Ok(())
     }
@@ -841,7 +871,7 @@ pub mod canvas {
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
             sync_cpu(d)?;
-            Ok((d.width, d.height, d.generation, d.rgba.to_vec()))
+            Ok((d.width, d.height, d.generation, copy_buffer("Canvas.snapshot", &d.rgba)?))
     }
 
     pub fn capture(x: &Canvas) -> Result<image::Image, error> {
@@ -856,8 +886,7 @@ pub mod canvas {
                 d.mirror = Some(image.clone());
                 image
             } else {
-                let pixels = d.rgba.to_vec();
-                image::create(d.width, d.height, &pixels)?
+                image::of_owned_rgba(d.width, d.height, copy_bytes("Canvas.capture", &d.rgba)?)
             };
             d.captures += 1;
             Ok(image)
@@ -968,7 +997,7 @@ pub mod text {
 
     pub fn pixels(x: &Text) -> Result<Vec<u8>, error> {
         check("Text.pixels", x)?;
-        Ok(x.rgba.to_vec())
+        copy_buffer("Text.pixels", &x.rgba)
     }
 
     pub fn destroy(x: &mut Text) -> Result<(), error> {

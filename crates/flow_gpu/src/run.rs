@@ -22,7 +22,6 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, Weak};
 use std::thread::ThreadId;
 
-pub const MAX_STRING: i64 = 144115188075855863;
 /// Idle bytes kept for reuse: the pool's free list, and a host's display storage.
 pub const free_budget: i64 = 256 << 20;
 const free_idle_drains: i64 = 1024;
@@ -53,7 +52,7 @@ pub fn size_class(bytes: i64) -> i64 {
         return bytes.max(256);
     }
     let step = (1i64 << (63 - (bytes - 1).leading_zeros())) / 8;
-    (bytes + step - 1) / step * step
+    bytes.checked_add(step - 1).map_or(bytes, |rounded| rounded / step * step)
 }
 
 pub(crate) fn admit(n: i64) -> Result<(), Diagnostic> {
@@ -590,9 +589,11 @@ pub(crate) fn pack_uint32(bytes: &mut [u8], offset: usize, v: f64) -> Result<(),
 }
 
 fn upload_uint32(buffer: &Buffer, slot: &mut Slot, source: &[f64], count: usize) -> Result<(), Diagnostic> {
-    let length = count * 4;
+    let length = count.checked_mul(4).ok_or_else(|| value::fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
     if slot.bytes.len() != length {
-        slot.bytes = vec![0; length];
+        let mut bytes = value::array_buffer(length)?;
+        bytes.resize(length, 0);
+        slot.bytes = bytes;
     }
     for i in 0..count {
         pack_uint32(&mut slot.bytes, i * 4, source[i])?;
@@ -622,9 +623,10 @@ fn pack_floats(floats: &b::Floats, values: &[f64], length: usize) -> Result<(), 
     Ok(())
 }
 
-pub(crate) fn unpack_array(bytes: &[u8], length: usize) -> (Vec<f64>, bool) {
+pub(crate) fn unpack_array(bytes: &[u8], length: usize) -> Result<(Vec<f64>, bool), Diagnostic> {
     let mut finite = true;
-    let values = (0..length)
+    let mut values = value::array_buffer(length)?;
+    values.extend((0..length)
         .map(|i| {
             let v = f32::from_bits(u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap()));
             if !v.is_finite() {
@@ -632,8 +634,8 @@ pub(crate) fn unpack_array(bytes: &[u8], length: usize) -> (Vec<f64>, bool) {
             }
             v as f64
         })
-        .collect();
-    (values, finite)
+        );
+    Ok((values, finite))
 }
 
 pub fn create_owned(pool_: Option<&Pool>, device: &Device, queue: &Queue, pipelines: &pipelines::T, kernel: &Kernel) -> T {
@@ -712,7 +714,7 @@ fn ensure(d: &Data, slot: &mut Slot, creations: &mut i64, mapped: bool, length: 
         }
     }
     // a slot that has asked for under a quarter of its size for this long comes back down
-    if length > 0 && length * 4 < slot.capacity && slot.capacity > slot_shrink_floor {
+    if length > 0 && length < slot.capacity / 4 && slot.capacity > slot_shrink_floor {
         slot.low += 1;
         if slot.low >= slot_shrink_after {
             if let Some(buffer) = &slot.buffer {
@@ -734,6 +736,12 @@ fn ensure(d: &Data, slot: &mut Slot, creations: &mut i64, mapped: bool, length: 
         if capacity >= 1 << 20 {
             admit(capacity)?;
         }
+        let mut bytes = if mapped { Vec::new() } else {
+            let capacity = usize::try_from(capacity).map_err(|_| value::fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
+            let mut bytes = value::array_buffer(capacity)?;
+            bytes.resize(capacity, 0);
+            bytes
+        };
         let fresh = if mapped {
             let buffer = gpu(b::create_mapped_buffer(&d.device, descriptor))?;
             created(&d.pool, capacity);
@@ -749,7 +757,7 @@ fn ensure(d: &Data, slot: &mut Slot, creations: &mut i64, mapped: bool, length: 
         slot.uploaded = None;
         slot.buffer = Some(fresh);
         slot.capacity = capacity;
-        slot.bytes = if mapped { Vec::new() } else { vec![0; capacity as usize] };
+        std::mem::swap(&mut slot.bytes, &mut bytes);
         slot.mapped = mapped;
         *creations += 1;
     }
@@ -854,8 +862,8 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
     if closed || me() != d.domain {
         return error("GPU program owner is closed or called from another domain.");
     }
-    let widest = kernel.output_widths.iter().copied().fold(1, i64::max);
-    if values.count < 0 || values.count > i32::MAX as i64 || values.count > MAX_STRING / 4 / widest {
+    let widest = kernel.output_widths.iter().chain(&kernel.input_widths).copied().fold(1, i64::max);
+    if values.count < 0 || values.count > i32::MAX as i64 || values.count > u32::MAX as i64 / widest {
         return error("GPU count exceeds native storage bounds.");
     }
     if kernel.scene.is_some() != o.scene.is_some()
@@ -1285,7 +1293,9 @@ pub fn read_uint32(queue: &Queue, buffer: &Buffer, epoch: i64, length: i64) -> R
         return Ok(vec![]);
     }
     let bytes = gpu(b::read_buffer(buffer, 0, length * 4))?;
-    Ok((0..length as usize).map(|i| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap()) as i64).collect())
+    let mut values = value::array_buffer(length as usize)?;
+    values.extend((0..length as usize).map(|i| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap()) as i64));
+    Ok(values)
 }
 
 fn uint32_values(output: &Output, index: Option<i64>) -> Result<Vec<i64>, Diagnostic> {
@@ -1310,19 +1320,19 @@ pub fn readback(output: &Output, index: Option<i64>) -> Result<Value, Diagnostic
         Contents::Floats(floats, width) => {
             let f = floats.borrow();
             let mut finite = true;
-            let values: Vec<f64> = f[..count * width as usize]
+            let mut values = value::array_buffer(count * width as usize)?;
+            values.extend(f[..count * width as usize]
                 .iter()
                 .map(|v| {
                     if !v.is_finite() {
                         finite = false;
                     }
                     *v as f64
-                })
-                .collect();
+                }));
             (values, finite, width)
         }
         Contents::Bytes(bytes, width) => {
-            let (values, finite) = unpack_array(&bytes, count * width as usize);
+            let (values, finite) = unpack_array(&bytes, count * width as usize)?;
             (values, finite, width)
         }
     };
@@ -1338,19 +1348,16 @@ fn to_planes(floats: &b::Floats, count: i64, width: i64, checked: bool) -> Resul
     let f = floats.borrow();
     let (count, width) = (count as usize, width as usize);
     let mut finite = true;
-    let planes: Vec<Vec<f64>> = (0..width)
-        .map(|component| {
-            (0..count)
-                .map(|i| {
-                    let v = f[i * width + component];
-                    if !checked && !v.is_finite() {
-                        finite = false;
-                    }
-                    v as f64
-                })
-                .collect()
-        })
-        .collect();
+    let mut planes = value::array_buffer(width)?;
+    for component in 0..width {
+        let mut plane = value::array_buffer(count)?;
+        for i in 0..count {
+            let v = f[i * width + component];
+            if !checked && !v.is_finite() { finite = false; }
+            plane.push(v as f64);
+        }
+        planes.push(plane);
+    }
     if finite { Ok(planes) } else { nonfinite_output() }
 }
 
@@ -1358,13 +1365,18 @@ fn to_planes(floats: &b::Floats, count: i64, width: i64, checked: bool) -> Resul
 /// `planes[c][i]`), with the finite check folded in.
 pub fn planes(output: &Output, index: Option<i64>) -> Result<Vec<Vec<f64>>, Diagnostic> {
     if uint32_output(output, index) {
-        return uint32_values(output, index).map(|v| vec![v.iter().map(|x| *x as f64).collect()]);
+        let values = uint32_values(output, index)?;
+        let mut plane = value::array_buffer(values.len())?;
+        plane.extend(values.iter().map(|x| *x as f64));
+        return Ok(vec![plane]);
     }
     match completed(output, index)? {
         Contents::Floats(floats, width) => to_planes(&floats, output.count, width, false),
         Contents::Bytes(bytes, width) => {
             let n = (output.count * width) as usize;
-            let floats: b::Floats = Rc::new(RefCell::new((0..n).map(|i| f32::from_bits(u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().unwrap()))).collect()));
+            let mut data = value::array_buffer(n)?;
+            data.extend((0..n).map(|i| f32::from_bits(u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().unwrap()))));
+            let floats: b::Floats = Rc::new(RefCell::new(data));
             to_planes(&floats, output.count, width, false)
         }
     }
@@ -1401,19 +1413,23 @@ fn thaw(kept: &Kept) {
 
 /// Only immutable native allocation access crosses threads. Fate serializes conversion against
 /// retirement/destruction, and settlement publishes completion before a foreign reader enters.
-fn materialise_owned(fate: &Fate, shared: &Shared, id: i64) -> Result<Arc<Vec<Vec<f64>>>, String> {
+fn materialise_owned(fate: &Fate, shared: &Shared, id: i64) -> Result<Arc<Vec<Vec<f64>>>, Diagnostic> {
     let _guard = fate.lock.lock().unwrap();
     if let Some(planes) = fate.planes() {
         return Ok(planes);
     }
     if fate.destroyed() {
-        return Err("Run.materialise: a device output was read after its free".to_owned());
+        return Err(e_gpu("Run.materialise: a device output was read after its free"));
     }
     let length = fate.count * fate.width;
     let mut readback = fate.readback.lock().unwrap();
-    let bytes = (readback.as_ref().ok_or("Run.materialise: storage was released")?)(0, (length * 4) as usize)
-        .map_err(|error| ogpu_core::error::to_string(&error))?;
-    let mut planes = vec![vec![0.0; fate.count as usize]; fate.width as usize];
+    let bytes = (readback.as_ref().ok_or_else(|| e_gpu("Run.materialise: storage was released"))?)(0, (length * 4) as usize)
+        .map_err(|error| diagnostic(&error))?;
+    let mut planes = value::array_buffer(fate.width as usize)?;
+    for _ in 0..fate.width {
+        let mut plane = value::array_buffer(fate.count as usize)?;
+        plane.resize(fate.count as usize, 0.0); planes.push(plane);
+    }
     for (i, word) in bytes.chunks_exact(4).enumerate() {
         let word = u32::from_le_bytes(word.try_into().unwrap());
         planes[i % fate.width as usize][i / fate.width as usize] =
@@ -1429,7 +1445,7 @@ fn materialise_owned(fate: &Fate, shared: &Shared, id: i64) -> Result<Arc<Vec<Ve
 }
 /// The planes, on the creating thread (from any thread once read). Once read, the holder no longer
 /// needs the buffer: it goes back to the pool at once, not at drop.
-fn materialise(kept: &Kept) -> Result<Arc<Vec<Vec<f64>>>, String> {
+fn materialise(kept: &Kept) -> Result<Arc<Vec<Vec<f64>>>, Diagnostic> {
     let t = &kept.owner;
     let d = &*t.0;
     if let Some(planes) = kept.fate.planes() {
@@ -1437,7 +1453,7 @@ fn materialise(kept: &Kept) -> Result<Arc<Vec<Vec<f64>>>, String> {
     }
     // a reader on the creating thread waits for the kernel itself
     if !kept.settled.load(Ordering::SeqCst) {
-        settle(t, kept.epoch, &kept.settled, &kept.fate).map_err(|diagnostic| rays_diagnostic::to_string(&diagnostic))?;
+        settle(t, kept.epoch, &kept.settled, &kept.fate)?;
     }
     materialise_owned(&kept.fate, &d.pool.0.shared, kept.id)
 }
@@ -1515,7 +1531,7 @@ fn bounds_of(kept: &Kept) -> Option<Vec<f64>> {
             }
         };
         gpu(b::complete_through(&d.queue, receipt.epoch))?;
-        let (bounds, finite) = unpack_array(&gpu(b::read_buffer(&input, 0, 24))?, 6);
+        let (bounds, finite) = unpack_array(&gpu(b::read_buffer(&input, 0, 24))?, 6)?;
         {
             let mut st = d.state.borrow_mut();
             st.readback_bytes += 24;
@@ -1562,13 +1578,13 @@ fn release_kept(shared: &Shared, fate: &Fate, id: i64, weak: Weak<Token>, held: 
 struct Request {
     owner: ThreadId,
     id: i64,
-    result: Mutex<Option<Result<Arc<Vec<Vec<f64>>>, String>>>,
+    result: Mutex<Option<Result<Arc<Vec<Vec<f64>>>, Diagnostic>>>,
     done: Condvar,
 }
 
 static REQUESTS: Mutex<Vec<Arc<Request>>> = Mutex::new(Vec::new());
 
-fn answer(request: &Request, result: Result<Arc<Vec<Vec<f64>>>, String>) {
+fn answer(request: &Request, result: Result<Arc<Vec<Vec<f64>>>, Diagnostic>) {
     *request.result.lock().unwrap() = Some(result);
     request.done.notify_all();
 }
@@ -1585,13 +1601,13 @@ pub fn service() {
     for request in mine {
         let result = match kept_of(request.id) {
             Some(kept) => materialise(&kept),
-            None => Err("Run.materialise: a device output was read after its owner closed".to_owned()),
+            None => Err(e_gpu("Run.materialise: a device output was read after its owner closed")),
         };
         answer(&request, result);
     }
 }
 
-fn token_planes(token: &Token) -> Result<Arc<Vec<Vec<f64>>>, String> {
+fn token_planes(token: &Token) -> Result<Arc<Vec<Vec<f64>>>, Diagnostic> {
     if let Some(p) = token.fate.planes() {
         return Ok(p);
     }
@@ -1601,7 +1617,7 @@ fn token_planes(token: &Token) -> Result<Arc<Vec<Vec<f64>>>, String> {
     if me() == token.owner {
         return match kept_of(token.id) {
             Some(kept) => materialise(&kept),
-            None => Err("Run.materialise: a device output was read after its owner closed".to_owned()),
+            None => Err(e_gpu("Run.materialise: a device output was read after its owner closed")),
         };
     }
     let request = Arc::new(Request { owner: token.owner, id: token.id, result: Mutex::new(None), done: Condvar::new() });
@@ -1618,7 +1634,14 @@ struct Held(Arc<Token>);
 
 impl gpu::PlanesOps for Held {
     fn materialise(&self) -> Result<Vec<Vec<f64>>, Diagnostic> {
-        token_planes(&self.0).map(|planes| (*planes).clone()).map_err(|message| e_gpu(&message))
+        token_planes(&self.0).and_then(|planes| {
+            let mut copied = value::array_buffer(planes.len())?;
+            for plane in &*planes {
+                let mut copy = value::array_buffer(plane.len())?;
+                copy.extend_from_slice(plane); copied.push(copy);
+            }
+            Ok(copied)
+        })
     }
     fn settle(&self) -> Result<(), Diagnostic> {
         let t = &self.0;
@@ -1815,10 +1838,15 @@ fn integer_holder(domain: ThreadId, planes: gpu::Planes, kept: Option<Rc<Kept>>)
         materialise: Arc::new(move || {
             // not under the lock: a foreign reader waits for the owner, who may be reading too
             if let Some(values) = &*cache.lock().unwrap() {
-                return Ok((**values).clone());
+                let mut copy = value::array_buffer(values.len())?;
+                copy.extend_from_slice(values); return Ok(copy);
             }
-            let values: Vec<i64> = m.materialise()?[0].iter().map(|v| *v as i64).collect();
-            *cache.lock().unwrap() = Some(Arc::new(values.clone()));
+            let planes = m.materialise()?;
+            let mut values = value::array_buffer(planes[0].len())?;
+            values.extend(planes[0].iter().map(|v| *v as i64));
+            let mut cached = value::array_buffer(values.len())?;
+            cached.extend_from_slice(&values);
+            *cache.lock().unwrap() = Some(Arc::new(cached));
             Ok(values)
         }),
         settle: Arc::new(move || s.settle()),
@@ -2223,8 +2251,8 @@ pub fn point_incidence(
 ) -> Result<(), Diagnostic> {
     let nv = vertices.1;
     let np = kinds.1;
-    if !(0..=1 << 30).contains(&point_count) || !(0..=1 << 30).contains(&nv)
-        || np < 0 || offsets.1 != np + 1 || (nv > 0 && (point_count == 0 || np == 0))
+    if !(0..=u32::MAX as i64).contains(&point_count) || !(0..=u32::MAX as i64).contains(&nv)
+        || !(0..=u32::MAX as i64).contains(&np) || offsets.1 != np + 1 || (nv > 0 && (point_count == 0 || np == 0))
         || b::buffer_size(blocks) < compact_blocks(nv) + 4
     {
         return Err(e_gpu("Point incidence requires validated, bounded topology."));
@@ -2361,7 +2389,8 @@ pub fn triangle_indices(
 ) -> Result<i64, Diagnostic> {
     let refuse = |m: &str| Err(value::fail("E_GPU_DISPLAY_TRIANGLES", m));
     let (points, nv, no, np) = (positions.1, vertices.1, offsets.1, kinds.1);
-    if points <= 0 || points > 1 << 30 || np <= 0 || np > 1 << 28 || no != np + 1 || nv < 3 * np || nv > 4 * np || nv > MAX_STRING / 12 {
+    if points <= 0 || points > u32::MAX as i64 / 3 || np <= 0 || np > u32::MAX as i64 - 1 || no != np + 1
+        || nv < 3 * np || nv > 4 * np || nv > u32::MAX as i64 || 3 * (nv - 2 * np) > u32::MAX as i64 {
         return refuse("Resident display requires nonempty triangle/quad topology.");
     }
     let count = 3 * (nv - 2 * np);
@@ -2497,7 +2526,7 @@ pub fn read_floats(queue: &Queue, buffer: &Buffer, epoch: i64, length: i64) -> R
     if length == 0 {
         return Ok(vec![]);
     }
-    Ok(unpack_array(&gpu(b::read_buffer(buffer, 0, length * 4))?, length as usize).0)
+    Ok(unpack_array(&gpu(b::read_buffer(buffer, 0, length * 4))?, length as usize)?.0)
 }
 
 // ---- the device scene of scene/trace
@@ -2809,7 +2838,7 @@ pub fn clear_thread_state() {
         mine
     };
     for request in mine {
-        answer(&request, Err("Run.materialise: a device output was read after its owner closed".to_owned()));
+        answer(&request, Err(e_gpu("Run.materialise: a device output was read after its owner closed")));
     }
 }
 
@@ -2822,6 +2851,8 @@ mod size_class_tests {
         assert_eq!(size_class(1 << 20), 1 << 20);
         assert_eq!(size_class(1 << 26), 1 << 26);
         assert_eq!(size_class((1 << 26) + 1), (1 << 26) + (1 << 23));
+        assert_eq!(size_class(i64::MAX), i64::MAX);
+        assert_eq!(super::unpack_array(&[],usize::MAX).unwrap_err().code,"E_ARRAY_MEMORY");
         for bytes in [(1 << 20) + 1, 3_000_000, 68_985_984, 134_217_729] {
             let c = size_class(bytes);
             assert!(c >= bytes && c - bytes <= bytes / 8, "{bytes} -> {c}");

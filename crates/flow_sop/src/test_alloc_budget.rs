@@ -244,7 +244,7 @@ fn attribute_map_output_buffers() {
 // Each pair is (allocations, peak B); changed-input peak excludes only newly owned output payload.
 const SUBDIVIDE_WARM: [(u64, i64); 2] = [(18, 3_752), (68_565, 3_445_100)];
 const BOOLEAN_WARM: [(u64, i64); 2] = [(25, 4_426), (26_695, 926_350)];
-const SCATTER_WARM: [(u64, i64); 2] = [(18, 5_360), (598_590, 12_985_200)];
+const SCATTER_WARM: [(u64, i64); 2] = [(18, 5_360), (598_565, 12_985_200)];
 
 // These are session cooks: lowering and input construction stay outside the counters.
 // Measure a cache hit, then a genuinely new input after the same-sized kernel has warmed.

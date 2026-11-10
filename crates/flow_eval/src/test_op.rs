@@ -245,7 +245,11 @@ fn large_array_constructors_defer_through_compiled_scalar_calls() {
     let invalid = checked(&[], "(array/int 1152921504606846976 0)");
     let expected = host::static_with_requests(None, false, None, &invalid).err().unwrap();
     let handlers = ResidualHandlers { defer: Some(Arc::new(|_| true)), ..Default::default() };
-    let actual = residual::handle(handlers, &mut || host::static_with_requests(None, false, None, &invalid)).err().unwrap();
+    let deferred = residual::handle(handlers, &mut || host::static_with_requests(None, false, None, &invalid)).unwrap();
+    let value = result_of(&deferred, "g");
+    assert!(matches!(value, Value::Residual(_)), "a virtual array must not reserve its materialized storage");
+    let actual = host::force_reference(&value, &input::at_time(0.), None, None, None).unwrap_err();
+    assert_eq!(actual.code, "E_ARRAY_MEMORY");
     assert_eq!((actual.code, actual.message), (expected.code, expected.message));
 }
 
@@ -466,14 +470,12 @@ fn constant_array_descriptors_match_dense_constructor_errors() {
             assert_eq!(actual, expected);
         }
     }
-    let max_floatarray_length = (1i64 << 54) - 1;
-    for count in [max_floatarray_length / 4 + 1] {
-        let args = vec![na("count", Value::Int(count)), na("value", t("unused"))];
-        let o = find("array/vec4", context::value());
-        let expected = capture(&|| (o.body)(&input::at_time(0.), &no_node, &args));
-        assert!(expected.is_err());
-        assert_eq!(capture(&|| op::constant_array_descriptor("array/vec4", &args)), expected);
-    }
+    let huge = i64::MAX;
+    let args = vec![na("count", Value::Int(huge)), na("value", Value::Vec4(0., 0., 0., 0.))];
+    let Value::Source(source) = op::constant_array_descriptor("array/vec4", &args).unwrap() else { panic!("virtual array descriptor") };
+    assert_eq!(source.fields.get_str("count"), Some(&Value::Int(huge)));
+    assert_eq!(capture(&|| (find("array/vec4", context::value()).body)(&input::at_time(0.), &no_node, &args)).unwrap_err().0, "E_ARRAY_MEMORY");
+    assert_eq!(capture(&|| op::constant_array_descriptor("array/vec4", &[na("count", Value::Int(huge)), na("value", t("unused"))])).unwrap_err().0, "E_ARRAY_TYPE");
     match op::constant_array_descriptor("array/vec4", &[na("count", Value::Int(0)), na("value", t("unused"))]) {
         Ok(Value::Source(g)) => assert_eq!(g.fields, vec![na("count", Value::Int(0)), na("value", Value::Vec4(0., 0., 0., 0.))].into()),
         other => panic!("{other:?}"),

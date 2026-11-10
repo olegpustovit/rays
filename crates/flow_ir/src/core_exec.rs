@@ -578,7 +578,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
             let index = arg(args, "index").unwrap();
             let slow = generic();
             Arc::new(move |st| match &st.values[ix(index)] {
-                Value::Int(i) if *i >= 0 && (*i as u64) <= op::MAX_WOSIZE as u64 => v::array_get(&st.values[ix(array)], *i),
+                Value::Int(i) if *i >= 0 => v::array_get(&st.values[ix(array)], *i),
                 _ => slow(st),
             })
         }
@@ -607,13 +607,15 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                         let limit = match cooked {
                             None => 4096,
                             Some(n) => match &st.values[ix(n)] {
-                                Value::Bool(true) => op::MAX_WOSIZE as i64,
+                                Value::Bool(true) => i64::MAX,
                                 Value::Bool(false) => 4096,
                                 _ => return Err(v::fail("E_TYPE", "Core cooked collection flag must be boolean.")),
                             },
                         };
                         if count < 0 || count > limit { return Err(v::fail("E_ITER_BOUND", "Core list length exceeds its bound.")); }
-                        Ok(Value::List(Arc::new(vec![Value::No_geo; count as usize])))
+                        let mut values = v::array_buffer(count as usize)?;
+                        values.resize(count as usize, Value::No_geo);
+                        Ok(Value::List(Arc::new(values)))
                     }
                     Some(width) => {
                         let width = v::int_of(&st.values[ix(width)])?;
@@ -625,11 +627,11 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                         } else if element == Ty::Text {
                             v::array_init(&Ty::Text, count, &|_| Value::Text(Vec::new().into()))
                         } else {
-                            if count < 0 || count > op::MAX_WOSIZE as i64 / width {
-                                return Err(v::fail("E_ARRAY_RANGE", "Array length is outside native storage bounds."));
-                            }
-                            let data = Arc::new(vec![0.0f64; (count * width) as usize]);
-                            Ok(Value::Floats(width as usize, data))
+                            if count < 0 { return Err(v::fail("E_ARRAY_RANGE", "Array length is outside native storage bounds.")); }
+                            let slots = (count as usize).checked_mul(width as usize).ok_or_else(|| v::fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
+                            let mut values = v::array_buffer(slots)?;
+                            values.resize(slots, 0.0);
+                            Ok(Value::Floats(width as usize, Arc::new(values)))
                         }
                     }
                 }
@@ -647,7 +649,9 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                 if first < 0 || count < 0 || first > len || count > len - first {
                     return Err(v::fail("E_LIST_RANGE", "A list slice must be within its source."));
                 }
-                Ok(Value::List(Arc::new(xs[first as usize..(first + count) as usize].to_vec())))
+                let mut values = v::array_buffer(count as usize)?;
+                values.extend_from_slice(&xs[first as usize..(first + count) as usize]);
+                Ok(Value::List(Arc::new(values)))
             })
         }
         Primitive::Sequence_concat => {
@@ -1839,7 +1843,7 @@ impl Ctx {
                     let mut result = None;
                     if let Some(r) = st.resident.clone() {
                         if st.resident_on && matches!(&program.locals[ix(n)], Ty::Array(t) if matches!(**t, Ty::Int | Ty::Float)) {
-                            let length = op::array_count(Some(op::MAX_WOSIZE), "array/range", &st.values[ix(count)])? as i64;
+                            let length = op::array_count(None, "array/range", &st.values[ix(count)])? as i64;
                             result = r.range(&program.locals[ix(n)], &Value::Int(length), 1, length)?;
                         }
                     }
@@ -1857,7 +1861,7 @@ impl Ctx {
                     let mut made = None;
                     if let Some(r) = st.resident.clone() {
                         if st.resident_on {
-                            let length = op::array_count(Some(op::MAX_WOSIZE), "array/int", &st.values[ix(count)])? as i64;
+                            let length = op::array_count(None, "array/int", &st.values[ix(count)])? as i64;
                             let initial = match initial { Some(i) => st.values[ix(i)].clone(), None => Value::Int(0) };
                             made = r.fill(&program.locals[ix(n)], length, &initial)?;
                         }
@@ -2152,7 +2156,7 @@ impl Ctx {
                     let i = v::int_of(&st.values[ix(index)])?;
                     // the builder is unpublished: take it, write in place, put it back
                     let x = st.values[ix(value)].clone();
-                    // drop alias slots sharing this builder so the buffer is uniquely owned (avoids Arc::make_mut copy on the next store)
+                    // drop alias slots sharing this builder so the buffer is uniquely owned (avoids a buffer copy on the next store)
                     for m in &aliases {
                         let same = match (&st.builders[ix(*m)], &st.builders[ix(sequence)]) {
                             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
@@ -2639,7 +2643,10 @@ fn store_value(target: &mut Value, i: i64, x: &Value) -> Result<(), Diagnostic> 
                 Value::Text(text) => {
                     // ponytail: a store that changes a row's length shifts the rows after it, O(n); keep
                     // per-row buffers in the builder if length-changing text stores get hot
-                    Arc::make_mut(data).replace(i as usize, text);
+                    if Arc::get_mut(data).is_none() {
+                        *data = Arc::new(data.try_clone().map_err(|_| v::fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?);
+                    }
+                    Arc::get_mut(data).unwrap().try_replace(i as usize, text).map_err(|_| v::fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
                 }
                 _ => return Err(v::fail("E_ARRAY_TYPE", "Text arrays contain text values.")),
             }
@@ -2647,15 +2654,30 @@ fn store_value(target: &mut Value, i: i64, x: &Value) -> Result<(), Diagnostic> 
         }
         Value::Int_array(data) => {
             if i < 0 || i as usize >= data.len() { return Err(range_error()); }
-            v::int_array_put(Arc::make_mut(data).as_mut_slice(), i as usize, x)
+            if Arc::get_mut(data).is_none() {
+                let mut copied = v::array_buffer(data.len())?;
+                copied.extend_from_slice(data);
+                *data = Arc::new(copied);
+            }
+            v::int_array_put(Arc::get_mut(data).unwrap().as_mut_slice(), i as usize, x)
         }
         Value::Floats(1..=4, data) => {
             if i < 0 || i as usize >= data.len() / width { return Err(range_error()); }
-            v::array_put(Arc::make_mut(data).as_mut_slice(), width, i as usize, x)
+            if Arc::get_mut(data).is_none() {
+                let mut copied = v::array_buffer(data.len())?;
+                copied.extend_from_slice(data);
+                *data = Arc::new(copied);
+            }
+            v::array_put(Arc::get_mut(data).unwrap().as_mut_slice(), width, i as usize, x)
         }
         Value::List(xs) => {
             if i < 0 || i as usize >= xs.len() { return Err(range_error()); }
-            Arc::make_mut(xs)[i as usize] = x.clone();
+            if Arc::get_mut(xs).is_none() {
+                let mut copied = v::array_buffer(xs.len())?;
+                copied.extend_from_slice(xs);
+                *xs = Arc::new(copied);
+            }
+            Arc::get_mut(xs).unwrap()[i as usize] = x.clone();
             Ok(())
         }
         other => {
@@ -2663,4 +2685,26 @@ fn store_value(target: &mut Value, i: i64, x: &Value) -> Result<(), Diagnostic> 
             Err(range_error())
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn builder_stores_preserve_shared_values_and_unique_buffers() {
+    let first = |value: &Value| match value { Value::List(xs) => xs[0].clone(), _ => v::array_get(value, 0).unwrap() };
+    for (source, replacement) in [
+        (Value::Int_array(Arc::new(vec![1, 2])), Value::Int(7)),
+        (Value::Floats(2, Arc::new(vec![1., -0., 2., 3.])), Value::Vec2(7., -0.)),
+        (Value::Text_array(Arc::new(vec![b"a".to_vec(), vec![]].into())), Value::Text(vec![255, 0].into())),
+        (Value::List(Arc::new(vec![Value::Int(1)])), Value::Int(7)),
+    ] {
+        let before = first(&source);
+        let mut target = source.clone();
+        store_value(&mut target, 0, &replacement).unwrap();
+        assert_eq!(first(&source), before);
+        assert_eq!(first(&target), replacement);
+    }
+    let mut unique = Value::Int_array(Arc::new(vec![1]));
+    let pointer = match &unique { Value::Int_array(data) => Arc::as_ptr(data), _ => unreachable!() };
+    store_value(&mut unique, 0, &Value::Int(7)).unwrap();
+    assert!(matches!(unique, Value::Int_array(data) if Arc::as_ptr(&data) == pointer && data[0] == 7));
 }

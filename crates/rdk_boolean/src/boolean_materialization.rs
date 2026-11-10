@@ -24,7 +24,6 @@ use crate::boolean_extract;
 use crate::boolean_seam;
 
 const OPERATION: &str = "boolean_materialization";
-const MAX_ARRAY_LENGTH: i64 = 18_014_398_509_481_983;
 
 type Positions = packed::float3::view::View;
 type TopologyView = topology::view::View;
@@ -1742,13 +1741,14 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
                     }
                 }
                 let count = if count == 0 { 1 } else { count };
-                if point_offsets[point] > MAX_ARRAY_LENGTH - count {
-                    return Err(inv("Boolean seam point cardinality exceeds array limits"));
-                }
-                point_offsets[point + 1] = point_offsets[point] + count;
+                point_offsets[point + 1] = point_offsets[point].checked_add(count)
+                    .filter(|n| *n <= (isize::MAX as usize / std::mem::size_of::<i64>()) as i64)
+                    .ok_or_else(|| make(Code::ArrayMemory, "Boolean seam point cardinality exceeds native storage bounds".to_owned()))?;
             }
             let output_points = point_offsets[point_count];
-            let mut point_map = vec![0i64; u(output_points)];
+            let mut point_map = Vec::new();
+            point_map.try_reserve_exact(u(output_points)).map_err(|_| make(Code::ArrayMemory, "Boolean seam point allocation failed".to_owned()))?;
+            point_map.resize(u(output_points), 0i64);
             let mut vertex_points = vec![0i64; vertex_count];
             let mut component_output = vec![-1i64; u(component_count)];
             component_stamps.iter_mut().for_each(|stamp| *stamp = -1);
@@ -1785,7 +1785,9 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
             );
             let source_positions = positions_view(geometry_value)?;
             let select = |source: &[f64]| -> Result<Vec<f64>, error::T> {
-                let mut values = vec![0.0_f64; point_map.len()];
+                let mut values = Vec::new();
+                values.try_reserve_exact(point_map.len()).map_err(|_| make(Code::ArrayMemory, "Boolean seam position allocation failed".to_owned()))?;
+                values.resize(point_map.len(), 0.0_f64);
                 support::par_fill(cx(cancel), grain, &mut values, &|output| Ok(source[u(point_map[output as usize])]))?;
                 Ok(values)
             };
@@ -1838,9 +1840,12 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
             };
             let split = geometry::create(positions, target_topology, Some(attributes), Some(groups), Some(edge_groups))
                 .map_err(|failure| inv(error::message(&failure)))?;
+            let mut point_sources = Vec::new();
+            point_sources.try_reserve_exact(point_map.len()).map_err(|_| make(Code::ArrayMemory, "Boolean seam source allocation failed".to_owned()))?;
+            point_sources.extend(point_map.iter().map(|point| cleanup.cleanup_point_sources[u(*point)]));
             Ok(Cleanup {
                 cleanup_geometry: split,
-                cleanup_point_sources: point_map.iter().map(|point| cleanup.cleanup_point_sources[u(*point)]).collect(),
+                cleanup_point_sources: point_sources,
                 cleanup_seam_edges: seam_edges,
                 ..cleanup.clone()
             })

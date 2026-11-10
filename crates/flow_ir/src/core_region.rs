@@ -2034,13 +2034,10 @@ impl Lower {
                     let failed = me.under(condition, false, I::Raise(Ty::Int, "E_ARRAY_RANGE".to_owned(), message.to_owned(), None))?;
                     me.emit(I::Int_select(condition, value, failed))
                 };
-                // both (compare Ige first (constant 0)) (compare Ile first (constant max_floatarray_length))
+                // The index domain is checked here; the source bounds are checked below.
                 let c0 = constant(self, 0)?;
                 let ge = self.emit(I::Int_compare(Comparison::Ige, first, c0))?;
-                let max_len = constant(self, MAX_FLOATARRAY_LENGTH)?;
-                let le = self.emit(I::Int_compare(Comparison::Ile, first, max_len))?;
-                let ok = self.emit(I::Binary(Binary::And, ge, le))?;
-                let first = require(self, ok, "array/slice needs a non-negative whole length.", first)?;
+                let first = require(self, ge, "array/slice needs a non-negative whole length.", first)?;
                 // valid = both (compare Ile first length) (compare Ile (constant n) (emit (Int_binary (Isub, length, first))))
                 let diff = self.emit(I::Int_binary(Integer::Isub, length, first))?;
                 let cn = constant(self, n)?;
@@ -2112,9 +2109,6 @@ impl Lower {
         result
     }
 }
-
-/// OCaml `Sys.max_floatarray_length` on 64-bit: `max_wosize`.
-const MAX_FLOATARRAY_LENGTH: i64 = (1 << 54) - 1;
 
 /// The unfused region of one form; `fusion` and `dynamic` are recorded on it.
 pub fn lower(fusion: bool, dynamic: bool, count_source: &CountSource, residual: ResidualId, term: &Term) -> Result<RegionT, Vec<Diagnostic>> {

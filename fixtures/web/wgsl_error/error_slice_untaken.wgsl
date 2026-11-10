@@ -1,4 +1,4 @@
-kernel_bbe32d6a866ab3a9cbe0aea014506981
+kernel_14351d5bdf6f26d6a4154ef41b161f88
 @group(0) @binding(0) var<storage, read> input0: array<f32>;
 @group(0) @binding(1) var<storage, read_write> outbuf: array<f32>;
 @group(0) @binding(2) var<uniform> uniforms: array<vec4<u32>, 2>;
@@ -69,7 +69,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_bbe32d6a866ab3a9cbe0aea014506981(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_14351d5bdf6f26d6a4154ef41b161f88(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].y != 0u) { n = min(n, count_in[0] * uniforms[0].w / uniforms[1].x); }
@@ -84,19 +84,16 @@ fn kernel_bbe32d6a866ab3a9cbe0aea014506981(@builtin(global_invocation_id) gid: v
   var r9: vec2<u32> = vec2<u32>(0u, 0u);
   let r10: u32 = 0u;
   var r11: f32 = 0.0;
-  let r12: vec2<u32> = vec2<u32>(4294967295u, 4194303u);
-  var r13: f32 = 0.0;
-  var r14: f32 = 0.0;
-  var r15: vec2<u32> = vec2<u32>(0u, 0u);
-  var r16: vec2<u32> = vec2<u32>(0u, 0u);
-  var r17: vec2<u32> = vec2<u32>(0u, 0u);
-  var r18: f32 = 0.0;
-  var r19: f32 = 0.0;
+  var r12: vec2<u32> = vec2<u32>(0u, 0u);
+  var r13: vec2<u32> = vec2<u32>(0u, 0u);
+  var r14: vec2<u32> = vec2<u32>(0u, 0u);
+  var r15: f32 = 0.0;
+  var r16: f32 = 0.0;
+  var r17: f32 = 0.0;
+  var r18: vec2<u32> = vec2<u32>(0u, 0u);
+  var r19: vec2<u32> = vec2<u32>(0u, 0u);
   var r20: f32 = 0.0;
-  var r21: vec2<u32> = vec2<u32>(0u, 0u);
-  var r22: vec2<u32> = vec2<u32>(0u, 0u);
-  var r23: f32 = 0.0;
-  var r24: f32 = 0.0;
+  var r21: f32 = 0.0;
   let r0: vec2<u32> = i64_from_f(input0[i]);
   let r1: f32 = bitcast<f32>(uniforms[0].z);
   let r3: f32 = select(0.0, 1.0, (r1 < r2));
@@ -106,29 +103,27 @@ fn kernel_bbe32d6a866ab3a9cbe0aea014506981(@builtin(global_invocation_id) gid: v
     r8 = i64_add(r0, vec2<u32>(17u, 0u));
     r9 = i64_from_f(bitcast<f32>(uniforms[0].y));
     r11 = select(0.0, 1.0, !i64_lt(r8, vec2<u32>(r10, 0u)));
-    r13 = select(0.0, 1.0, !i64_lt(r12, r8));
-    r14 = select(0.0, 1.0, (r11 != 0.0 && r13 != 0.0));
-    if (r14 == 0.0) {
-      r15 = vec2<u32>(0u, 0u);
+    if (r11 == 0.0) {
+      r12 = vec2<u32>(0u, 0u);
       sb |= 32u;
     }
-    r16 = select(r15, r8, r14 != 0.0);
-    r17 = i64_sub(r9, r16);
-        r18 = select(0.0, 1.0, !i64_lt(r17, vec2<u32>(r10, 0u)));
-    r19 = select(0.0, 1.0, !i64_lt(r9, r16));
-    r20 = select(0.0, 1.0, (r19 != 0.0 && r18 != 0.0));
-    if (r20 == 0.0) {
-      r21 = vec2<u32>(0u, 0u);
+    r13 = select(r12, r8, r11 != 0.0);
+    r14 = i64_sub(r9, r13);
+        r15 = select(0.0, 1.0, !i64_lt(r14, vec2<u32>(r10, 0u)));
+    r16 = select(0.0, 1.0, !i64_lt(r9, r13));
+    r17 = select(0.0, 1.0, (r16 != 0.0 && r15 != 0.0));
+    if (r17 == 0.0) {
+      r18 = vec2<u32>(0u, 0u);
       sb |= 16u;
     }
-    r22 = select(r21, vec2<u32>(r10, 0u), r20 != 0.0);
-    r23 = i64_to_f(r22);
+    r19 = select(r18, vec2<u32>(r10, 0u), r17 != 0.0);
+    r20 = i64_to_f(r19);
   }
   if (r3 == 0.0) {
-    r24 = i64_to_f(r0);
+    r21 = i64_to_f(r0);
   }
-  let r25: f32 = select(r24, r23, r3 != 0.0);
-  if (!wfinite(r25)) { sb |= 1u; }
+  let r22: f32 = select(r21, r20, r3 != 0.0);
+  if (!wfinite(r22)) { sb |= 1u; }
   if (sb != 0u) { atomicOr(&status, sb); }
-  outbuf[i * 1u + 0u] = r25;
+  outbuf[i * 1u + 0u] = r22;
 }

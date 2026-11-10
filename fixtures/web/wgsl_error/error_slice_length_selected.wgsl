@@ -1,4 +1,4 @@
-kernel_8a32c2e76226509ac970df4f3fc28af3
+kernel_5228e96f02fb044d0803ef5a250eb033
 @group(0) @binding(0) var<storage, read> input0: array<f32>;
 @group(0) @binding(1) var<storage, read_write> outbuf: array<f32>;
 @group(0) @binding(2) var<uniform> uniforms: array<vec4<u32>, 2>;
@@ -70,7 +70,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_8a32c2e76226509ac970df4f3fc28af3(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_5228e96f02fb044d0803ef5a250eb033(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].z != 0u) { n = min(n, count_in[0] * uniforms[1].x / uniforms[1].y); }
@@ -85,23 +85,20 @@ fn kernel_8a32c2e76226509ac970df4f3fc28af3(@builtin(global_invocation_id) gid: v
   var r9: vec2<u32> = vec2<u32>(0u, 0u);
   let r10: u32 = 0u;
   var r11: f32 = 0.0;
-  let r12: vec2<u32> = vec2<u32>(4294967295u, 4194303u);
-  var r13: f32 = 0.0;
-  var r14: f32 = 0.0;
-  var r15: vec2<u32> = vec2<u32>(0u, 0u);
-  var r16: vec2<u32> = vec2<u32>(0u, 0u);
-  var r17: vec2<u32> = vec2<u32>(0u, 0u);
-  let r18: u32 = 1u;
-  var r19: f32 = 0.0;
-  var r20: f32 = 0.0;
-  var r21: f32 = 0.0;
+  var r12: vec2<u32> = vec2<u32>(0u, 0u);
+  var r13: vec2<u32> = vec2<u32>(0u, 0u);
+  var r14: vec2<u32> = vec2<u32>(0u, 0u);
+  let r15: u32 = 1u;
+  var r16: f32 = 0.0;
+  var r17: f32 = 0.0;
+  var r18: f32 = 0.0;
+  var r19: vec2<u32> = vec2<u32>(0u, 0u);
+  var r20: vec2<u32> = vec2<u32>(0u, 0u);
+  var r21: u32 = 0u;
   var r22: vec2<u32> = vec2<u32>(0u, 0u);
   var r23: vec2<u32> = vec2<u32>(0u, 0u);
-  var r24: u32 = 0u;
-  var r25: vec2<u32> = vec2<u32>(0u, 0u);
-  var r26: vec2<u32> = vec2<u32>(0u, 0u);
-  var r27: f32 = 0.0;
-  var r28: f32 = 0.0;
+  var r24: f32 = 0.0;
+  var r25: f32 = 0.0;
   let r0: vec2<u32> = i64_from_f(input0[i]);
   let r1: f32 = bitcast<f32>(uniforms[0].z);
   let r3: f32 = select(0.0, 1.0, (r1 > r2));
@@ -111,34 +108,32 @@ fn kernel_8a32c2e76226509ac970df4f3fc28af3(@builtin(global_invocation_id) gid: v
     r8 = i64_sub(vec2<u32>(4294967295u, 4294967295u), r0);
     r9 = i64_from_f(bitcast<f32>(uniforms[0].y));
     r11 = select(0.0, 1.0, !i64_lt(r8, vec2<u32>(r10, 0u)));
-    r13 = select(0.0, 1.0, !i64_lt(r12, r8));
-    r14 = select(0.0, 1.0, (r11 != 0.0 && r13 != 0.0));
-    if (r14 == 0.0) {
-      r15 = vec2<u32>(0u, 0u);
+    if (r11 == 0.0) {
+      r12 = vec2<u32>(0u, 0u);
       sb |= 32u;
     }
-    r16 = select(r15, r8, r14 != 0.0);
-    r17 = i64_sub(r9, r16);
-        r19 = select(0.0, 1.0, !i64_lt(r17, vec2<u32>(r18, 0u)));
-    r20 = select(0.0, 1.0, !i64_lt(r9, r16));
-    r21 = select(0.0, 1.0, (r20 != 0.0 && r19 != 0.0));
-    if (r21 == 0.0) {
-      r22 = vec2<u32>(0u, 0u);
+    r13 = select(r12, r8, r11 != 0.0);
+    r14 = i64_sub(r9, r13);
+        r16 = select(0.0, 1.0, !i64_lt(r14, vec2<u32>(r15, 0u)));
+    r17 = select(0.0, 1.0, !i64_lt(r9, r13));
+    r18 = select(0.0, 1.0, (r17 != 0.0 && r16 != 0.0));
+    if (r18 == 0.0) {
+      r19 = vec2<u32>(0u, 0u);
       sb |= 16u;
     }
-    r23 = select(r22, vec2<u32>(r10, 0u), r21 != 0.0);
-    r24 = ((r16).x + r10);
-        if (r21 != 0.0) {
-      r25 = i64_from_f(gather0[u32(clamp(i32(bitcast<i32>(r24)), 0, max(i32(uniforms[0].w) - 1, 0))) * 1u + 0u]);
+    r20 = select(r19, vec2<u32>(r10, 0u), r18 != 0.0);
+    r21 = ((r13).x + r10);
+        if (r18 != 0.0) {
+      r22 = i64_from_f(gather0[u32(clamp(i32(bitcast<i32>(r21)), 0, max(i32(uniforms[0].w) - 1, 0))) * 1u + 0u]);
     }
-    r26 = i64_add(r23, r25);
-        r27 = i64_to_f(r26);
+    r23 = i64_add(r20, r22);
+        r24 = i64_to_f(r23);
   }
   if (r3 == 0.0) {
-    r28 = i64_to_f(r0);
+    r25 = i64_to_f(r0);
   }
-  let r29: f32 = select(r28, r27, r3 != 0.0);
-  if (!wfinite(r29)) { sb |= 1u; }
+  let r26: f32 = select(r25, r24, r3 != 0.0);
+  if (!wfinite(r26)) { sb |= 1u; }
   if (sb != 0u) { atomicOr(&status, sb); }
-  outbuf[i * 1u + 0u] = r29;
+  outbuf[i * 1u + 0u] = r26;
 }
