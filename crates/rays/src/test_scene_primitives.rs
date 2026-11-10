@@ -26,6 +26,8 @@ fn shapes_layout_finite_bounds_owned_commands() {
         assert_eq!(b.instances().len() as i64, 64 * count, "shape layout");
         let commands = layer::commands(None, &[scene::shapes(b.clone())]).expect("commands");
         assert_eq!(commands.len(), 1, "one packed command");
+        let Command::Shapes(shapes) = &commands[0] else { panic!("packed shapes command") };
+        assert!(std::sync::Arc::ptr_eq(&b.instances_shared(), &shapes.instances_shared()), "scene commands share published storage");
         assert!(b.valid_shapes(), "packed validation");
     }
     let line = || {

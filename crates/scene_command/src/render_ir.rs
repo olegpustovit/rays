@@ -15,23 +15,12 @@ pub struct Image { pub resource_id: i64, pub source: Rect, pub destination: Rect
 pub struct Glyph { pub glyph_id: i64, pub x: f64, pub y: f64 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Glyphs { pub resource_id: i64, pub color: i32, pub glyphs: Vec<Glyph> }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Command {
     Clear(i32), SetBlend(Blend), PushClip(Rect), PopClip,
     PushTransform(Transform), PopTransform, Geometry(Geometry), Shapes(Shapes), Image(Image), Glyphs(Glyphs),
 }
 
-impl Clone for Command {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Clear(v) => Self::Clear(*v), Self::SetBlend(v) => Self::SetBlend(*v),
-            Self::PushClip(v) => Self::PushClip(*v), Self::PopClip => Self::PopClip,
-            Self::PushTransform(v) => Self::PushTransform(*v), Self::PopTransform => Self::PopTransform,
-            Self::Geometry(v) => Self::Geometry(v.clone()), Self::Shapes(v) => Self::Shapes(v.copy()),
-            Self::Image(v) => Self::Image(*v), Self::Glyphs(v) => Self::Glyphs(v.clone()),
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct RenderIr { id: i64, commands: Vec<Command> }

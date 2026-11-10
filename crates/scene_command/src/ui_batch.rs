@@ -404,9 +404,14 @@ mod tests {
         assert!(full.shape_rect(0.0, 0.0, 1.0, 1.0, -1, 0).is_ok());
         let full_snapshot = published(&mut full);
         assert!(Arc::ptr_eq(&full.bytes, &full_snapshot.bytes));
+        let crate::render_ir::Command::Shapes(command_snapshot) = crate::render_ir::Command::Shapes(full_snapshot.clone()).clone() else { unreachable!() };
+        assert!(Arc::ptr_eq(&full_snapshot.bytes, &command_snapshot.bytes), "commands retain immutable published storage");
+        assert!(Arc::ptr_eq(&full_snapshot.shapes_checked, &command_snapshot.shapes_checked));
         assert!(full.shape_rect(2.0, 0.0, 1.0, 1.0, -1, 0).is_ok());
         assert!(!Arc::ptr_eq(&full.bytes, &full_snapshot.bytes));
         assert_eq!(full_snapshot.count(), 1);
+        assert_eq!(command_snapshot.count(), 1);
+        assert_eq!(command_snapshot.instances(), full_snapshot.instances());
         let mut partial = Builder::with_capacity(2);
         assert!(partial.shape_rect(0.0, 0.0, 1.0, 1.0, -1, 0).is_ok());
         let first = published(&mut partial);

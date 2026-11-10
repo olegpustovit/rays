@@ -698,7 +698,7 @@ pub mod layer {
                 match n {
                     node::Clear(c) => builder.values.push(Command::Clear(rgba(*c))),
                     node::Geometry(g) => builder.values.push(Command::Geometry((**g).clone())),
-                    node::Shapes(s) => builder.values.push(Command::Shapes(s.copy())),
+                    node::Shapes(s) => builder.values.push(Command::Shapes(s.clone())),
                     node::Display_list(d) => {
                         for c in render_ir::commands_readonly(display_list::render_ir(&d.segment)) {
                             builder.values.push(c.clone());
