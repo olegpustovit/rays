@@ -15,3 +15,6 @@ native_layer_token_sys = { path = "../native_layer_token_sys" }
 
 [target.'cfg(windows)'.dependencies]
 rays_math = { path = "../rays_math" }
+
+[lints]
+workspace = true

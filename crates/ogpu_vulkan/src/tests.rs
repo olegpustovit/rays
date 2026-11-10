@@ -167,7 +167,8 @@ fn open() -> Option<Device> {
     let driver = create_with_validation((true, true));
     match driver.create_device() {
         Err(failure) if failure.kind == ErrorKind::NoAdapter => {
-            eprintln!("OGPU conformance (Vulkan): skipped (no device)");
+            eprintln!("RAYS_TEST_SKIP: OGPU conformance (Vulkan): skipped (no device)");
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
             return None;
         }
         Err(failure) => panic!("{}", error::to_string(&failure)),
@@ -1509,7 +1510,8 @@ fn gpu_conformance_render() {
 fn gpu_out_of_device_memory_is_capacity() {
     let raw = match crate::vulkan::Device::create(true,true) {
         Err(failure) if failure.kind == crate::vulkan::ErrorKind::NoAdapter => {
-            eprintln!("OGPU conformance (Vulkan): skipped (no device)");
+            eprintln!("RAYS_TEST_SKIP: OGPU conformance (Vulkan): skipped (no device)");
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
             return;
         },
         Err(failure) => panic!("{failure}"),
