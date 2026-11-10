@@ -9,10 +9,10 @@ use input::{Event, Key, Platform};
 /// The scopes the tests use, as the panels they are.
 struct Scope;
 
-#[allow(non_upper_case_globals)]
+
 impl Scope {
-    const View: Panel = Panel::View(String::new());
-    const Graph: Panel = Panel::Graph;
+    const VIEW: Panel = Panel::View(String::new());
+    const GRAPH: Panel = Panel::Graph;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,7 +67,7 @@ fn chord(key: Key, modifiers: Vec<Key>) -> Option<Trigger> {
 fn bindings() -> Vec<Cmd> {
     vec![
         cmd("toggle", "toggle graph", leader("g"), None, Act::Toggle),
-        cmd("layout", "layout", leader("l"), Some(Scope::Graph), Act::Layout),
+        cmd("layout", "layout", leader("l"), Some(Scope::GRAPH), Act::Layout),
         cmd("undo", "undo", chord(Key::KeyChar('z'), vec![Key::Meta]), None, Act::Undo),
         cmd(
             "redo",
@@ -76,8 +76,8 @@ fn bindings() -> Vec<Cmd> {
             None,
             Act::Redo,
         ),
-        cmd("delete", "delete", chord(Key::Delete, vec![]), Some(Scope::Graph), Act::Delete),
-        cmd("frame", "frame", chord(Key::KeyChar('f'), vec![]), Some(Scope::Graph), Act::Frame),
+        cmd("delete", "delete", chord(Key::Delete, vec![]), Some(Scope::GRAPH), Act::Delete),
+        cmd("frame", "frame", chord(Key::KeyChar('f'), vec![]), Some(Scope::GRAPH), Act::Frame),
         cmd("add-light", "add light", leader("al"), None, Act::AddLight),
         // No trigger: palette only, never routed from a key.
         cmd("palette", "palette only", None, None, Act::Palette),
@@ -99,7 +99,7 @@ fn with_keys(mut frame: frame::Frame, keys: Vec<Key>) -> frame::Frame {
 }
 
 fn pressed(key: Key) -> Event {
-    Event::Key_pressed(key)
+    Event::KeyPressed(key)
 }
 
 fn refs(commands: &[Cmd]) -> Vec<&Cmd> {
@@ -131,8 +131,8 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         make(trigger, scope, Vec::new(), "alias", label, Act::Frame)
     };
     let meta = Some(Trigger::Chord(Key::KeyChar('c'), vec![Key::Meta]));
-    let view = alias(Some(Scope::View), meta.clone(), "view alias");
-    let graph = alias(Some(Scope::Graph), meta, "graph alias");
+    let view = alias(Some(Scope::VIEW), meta.clone(), "view alias");
+    let graph = alias(Some(Scope::GRAPH), meta, "graph alias");
     let ctrl = alias(None, chord(Key::KeyChar('c'), vec![Key::Ctrl]), "Ctrl alias");
     let qj = alias(None, leader("qj"), "first leader alias");
     let qq = alias(None, leader("qq"), "second leader alias");
@@ -141,7 +141,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         &[],
         Platform::Apple,
         &refs(&aliases),
-        &Scope::Graph,
+        &Scope::GRAPH,
         false,
         with_keys(frame_with(vec![pressed(Key::KeyChar('c'))]), vec![Key::Meta]),
         State::Idle,
@@ -151,7 +151,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         &[],
         Platform::Apple,
         &refs(&aliases),
-        &Scope::Graph,
+        &Scope::GRAPH,
         false,
         with_keys(frame_with(vec![pressed(Key::KeyChar('c'))]), vec![Key::Ctrl]),
         State::Idle,
@@ -161,7 +161,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         &[],
         Platform::Apple,
         &refs(&aliases),
-        &Scope::View,
+        &Scope::VIEW,
         false,
         frame_with(vec![
             pressed(Key::KeyChar('/')),
@@ -175,7 +175,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         &[],
         Platform::Apple,
         &refs(&b),
-        &Scope::View,
+        &Scope::VIEW,
         false,
         frame_with(vec![pressed(Key::Tab), pressed(Key::KeyChar('/'))]),
         State::Idle,
@@ -187,7 +187,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
     );
     let add = make(
         chord(Key::Tab, vec![]),
-        Some(Scope::View),
+        Some(Scope::VIEW),
         Vec::new(),
         "graph.add",
         "add",
@@ -197,12 +197,12 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         &[],
         Platform::Apple,
         &refs(std::slice::from_ref(&add)),
-        &Scope::View,
+        &Scope::VIEW,
         false,
         frame_with(vec![
             pressed(Key::Tab),
             pressed(Key::KeyChar('/')),
-            Event::Text_input(" ".into()),
+            Event::TextInput(" ".into()),
         ]),
         State::Pending(String::new()),
     );
@@ -210,13 +210,13 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         state == State::Idle
             && actions_of(&matched) == vec![Act::Add]
             && remaining.input.events
-                == vec![pressed(Key::KeyChar('/')), Event::Text_input(" ".into())]
+                == vec![pressed(Key::KeyChar('/')), Event::TextInput(" ".into())]
     );
     let (state, matched, remaining) = route_frame(
         &[],
         Platform::Apple,
         &refs(std::slice::from_ref(&add)),
-        &Scope::View,
+        &Scope::VIEW,
         false,
         frame_with(vec![pressed(Key::Shift), pressed(Key::Tab), pressed(Key::KeyChar('/'))]),
         State::Idle,
@@ -238,53 +238,53 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         )
     };
     let (state, actions, passed) =
-        step(Scope::View, false, State::Idle, vec![Key::KeyChar('/'), Key::KeyChar('g')]);
+        step(Scope::VIEW, false, State::Idle, vec![Key::KeyChar('/'), Key::KeyChar('g')]);
     assert!(state == State::Idle && actions == vec![Act::Toggle] && passed.is_empty());
     let (state, actions, _) = route(
         Platform::Apple,
         &bindings(),
-        Scope::View,
+        Scope::VIEW,
         false,
-        frame_with(vec![pressed(Key::KeyChar('/')), Event::Text_input(" ".into())]),
+        frame_with(vec![pressed(Key::KeyChar('/')), Event::TextInput(" ".into())]),
         State::Idle,
     );
     assert!(state == State::Pending(String::new()) && actions.is_empty());
     let (state, actions, passed) = route(
         Platform::Apple,
         &bindings(),
-        Scope::View,
+        Scope::VIEW,
         false,
-        frame_with(vec![pressed(Key::KeyChar('g')), Event::Text_input("g".into())]),
+        frame_with(vec![pressed(Key::KeyChar('g')), Event::TextInput("g".into())]),
         State::Pending(String::new()),
     );
     assert!(state == State::Idle && actions == vec![Act::Toggle] && passed.is_empty());
-    let (state, _, _) = step(Scope::View, false, State::Idle, vec![Key::KeyChar('/')]);
+    let (state, _, _) = step(Scope::VIEW, false, State::Idle, vec![Key::KeyChar('/')]);
     assert!(state == State::Pending(String::new()));
-    let (state, actions, passed) = step(Scope::View, false, state, vec![Key::Escape]);
+    let (state, actions, passed) = step(Scope::VIEW, false, state, vec![Key::Escape]);
     assert!(state == State::Idle && actions.is_empty() && passed.is_empty());
-    let (_, actions, _) = step(Scope::View, false, State::Idle, vec![Key::KeyChar('/'), Key::KeyChar('l')]);
+    let (_, actions, _) = step(Scope::VIEW, false, State::Idle, vec![Key::KeyChar('/'), Key::KeyChar('l')]);
     assert!(actions.is_empty());
-    let (_, actions, _) = step(Scope::Graph, false, State::Idle, vec![Key::KeyChar('/'), Key::KeyChar('l')]);
+    let (_, actions, _) = step(Scope::GRAPH, false, State::Idle, vec![Key::KeyChar('/'), Key::KeyChar('l')]);
     assert!(actions == vec![Act::Layout]);
     // Sequences: a proper prefix opens the next which-key page.
-    let (state, actions, _) = step(Scope::View, false, State::Idle, vec![Key::KeyChar('/'), Key::KeyChar('a')]);
+    let (state, actions, _) = step(Scope::VIEW, false, State::Idle, vec![Key::KeyChar('/'), Key::KeyChar('a')]);
     assert!(state == State::Pending("a".into()) && actions.is_empty());
-    let (state, actions, _) = step(Scope::View, false, state, vec![Key::KeyChar('L')]);
+    let (state, actions, _) = step(Scope::VIEW, false, state, vec![Key::KeyChar('L')]);
     assert!(state == State::Idle && actions == vec![Act::AddLight]);
     let (state, actions, _) = step(
-        Scope::View,
+        Scope::VIEW,
         false,
         State::Idle,
         vec![Key::KeyChar('/'), Key::KeyChar('a'), Key::KeyChar('q')],
     );
     assert!(state == State::Idle && actions.is_empty());
-    let (state, actions, passed) = step(Scope::View, true, State::Idle, vec![Key::KeyChar('/')]);
+    let (state, actions, passed) = step(Scope::VIEW, true, State::Idle, vec![Key::KeyChar('/')]);
     assert!(
         state == State::Idle && actions.is_empty() && passed.len() == 1
             && passed == vec![pressed(Key::KeyChar('/'))]
     );
-    let (state, _, _) = step(Scope::View, false, State::Idle, vec![Key::KeyChar('/')]);
-    let (state, actions, passed) = step(Scope::View, true, state, vec![Key::KeyChar('g')]);
+    let (state, _, _) = step(Scope::VIEW, false, State::Idle, vec![Key::KeyChar('/')]);
+    let (state, actions, passed) = step(Scope::VIEW, true, state, vec![Key::KeyChar('g')]);
     assert!(
         state == State::Idle && actions.is_empty() && passed == vec![pressed(Key::KeyChar('g'))]
     );
@@ -300,21 +300,21 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         )
     };
     let (_, matched, passed) = chord_route(
-        Scope::View,
+        Scope::VIEW,
         false,
         vec![Key::Meta],
-        vec![Event::Key_pressed(Key::KeyChar('Z')), Event::Text_input("z".into())],
+        vec![Event::KeyPressed(Key::KeyChar('Z')), Event::TextInput("z".into())],
     );
     assert!(actions_of(&matched) == vec![Act::Undo] && passed.input.events.is_empty());
     let (_, matched, _) = chord_route(
-        Scope::View,
+        Scope::VIEW,
         false,
         vec![Key::Meta, Key::Shift],
         vec![pressed(Key::KeyChar('z'))],
     );
     assert!(actions_of(&matched) == vec![Act::Redo]);
     let (_, matched, _) = chord_route(
-        Scope::View,
+        Scope::VIEW,
         false,
         vec![],
         vec![
@@ -322,14 +322,14 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
             pressed(Key::KeyChar('z')),
             pressed(Key::Shift),
             pressed(Key::KeyChar('z')),
-            Event::Key_released(Key::Shift),
+            Event::KeyReleased(Key::Shift),
             pressed(Key::KeyChar('z')),
-            Event::Key_released(Key::Meta),
+            Event::KeyReleased(Key::Meta),
         ],
     );
     assert!(actions_of(&matched) == vec![Act::Undo, Act::Redo, Act::Undo]);
     let (_, matched, _) = chord_route(
-        Scope::View,
+        Scope::VIEW,
         false,
         vec![Key::Meta],
         vec![pressed(Key::KeyChar('z')), pressed(Key::Meta)],
@@ -339,11 +339,11 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         &[Key::Meta],
         Platform::Apple,
         &refs(&b),
-        &Scope::View,
+        &Scope::VIEW,
         false,
         frame_with(vec![
             pressed(Key::KeyChar('z')),
-            Event::Focus_lost,
+            Event::FocusLost,
             pressed(Key::KeyChar('z')),
         ]),
         State::Idle,
@@ -353,7 +353,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         &[Key::Meta],
         Platform::Apple,
         &refs(&b),
-        &Scope::View,
+        &Scope::VIEW,
         false,
         with_keys(
             frame_with(vec![
@@ -370,46 +370,46 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         &[],
         Platform::Apple,
         &refs(&b),
-        &Scope::View,
+        &Scope::VIEW,
         false,
-        frame_with(vec![pressed(Key::KeyChar('z')), Event::Key_released(Key::Meta)]),
+        frame_with(vec![pressed(Key::KeyChar('z')), Event::KeyReleased(Key::Meta)]),
         State::Idle,
     );
     assert!(matched.is_empty());
-    let (_, matched, _) = chord_route(Scope::Graph, false, vec![], vec![pressed(Key::Delete)]);
+    let (_, matched, _) = chord_route(Scope::GRAPH, false, vec![], vec![pressed(Key::Delete)]);
     assert!(actions_of(&matched) == vec![Act::Delete]);
-    let (_, matched, _) = chord_route(Scope::Graph, false, vec![], vec![pressed(Key::KeyChar('F'))]);
+    let (_, matched, _) = chord_route(Scope::GRAPH, false, vec![], vec![pressed(Key::KeyChar('F'))]);
     assert!(actions_of(&matched) == vec![Act::Frame]);
     let (_, matched, passed) = chord_route(
-        Scope::Graph,
+        Scope::GRAPH,
         false,
         vec![Key::Meta],
         vec![pressed(Key::KeyChar('f'))],
     );
     assert!(matched.is_empty() && passed.input.events == vec![pressed(Key::KeyChar('f'))]);
-    let (_, matched, passed) = chord_route(Scope::View, false, vec![], vec![pressed(Key::Delete)]);
+    let (_, matched, passed) = chord_route(Scope::VIEW, false, vec![], vec![pressed(Key::Delete)]);
     assert!(matched.is_empty() && passed.input.events == vec![pressed(Key::Delete)]);
     let (_, matched, passed) = chord_route(
-        Scope::View,
+        Scope::VIEW,
         true,
         vec![Key::Meta],
         vec![pressed(Key::KeyChar('z'))],
     );
     assert!(matched.is_empty() && passed.input.events == vec![pressed(Key::KeyChar('z'))]);
-    let pointer = Event::Pointer_moved((4., 5.));
+    let pointer = Event::PointerMoved((4., 5.));
     let (ended, passed) = fly_frame(frame_with(vec![pressed(Key::KeyChar('w')), pointer.clone()]));
     assert!(!ended && passed.input.events == vec![pointer]);
     let (ended, passed) = fly_frame(frame_with(vec![
         pressed(Key::KeyChar('/')),
         pressed(Key::KeyChar('g')),
-        Event::Text_input("g".into()),
+        Event::TextInput("g".into()),
     ]));
     assert!(ended && passed.input.events == vec![pressed(Key::KeyChar('/'))]);
     let (state, actions, passed) = route_frame(
         &[],
         Platform::Apple,
         &refs(&b),
-        &Scope::View,
+        &Scope::VIEW,
         false,
         passed,
         State::Idle,
@@ -421,8 +421,8 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
     assert!(ended && passed.input.events.is_empty());
     let (ended, passed) = fly_frame(frame_with(vec![pressed(Key::Escape)]));
     assert!(ended && passed.input.events.is_empty());
-    let (ended, passed) = fly_frame(frame_with(vec![Event::Focus_lost]));
-    assert!(ended && passed.input.events == vec![Event::Focus_lost]);
+    let (ended, passed) = fly_frame(frame_with(vec![Event::FocusLost]));
+    assert!(ended && passed.input.events == vec![Event::FocusLost]);
     // E10: a focused text field keeps its own Command chords (undo, above) and lets the others
     // run, but only commands of every pane
     let save = make(
@@ -435,7 +435,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
     );
     let scoped = make(
         chord(Key::KeyChar('d'), vec![Key::Meta]),
-        Some(Scope::View),
+        Some(Scope::VIEW),
         Vec::new(),
         "dup",
         "duplicate",
@@ -448,7 +448,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
             &[],
             Platform::Apple,
             &refs(&typing_commands),
-            &Scope::View,
+            &Scope::VIEW,
             true,
             with_keys(frame_with(events), vec![Key::Meta]),
             State::Idle,
@@ -474,7 +474,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
             &[],
             Platform::Apple,
             &refs(&run_cmds),
-            &Scope::View,
+            &Scope::VIEW,
             false,
             frame_with(events),
             State::Idle,
@@ -504,7 +504,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         &[],
         Platform::Apple,
         &refs(&symbols),
-        &Scope::View,
+        &Scope::VIEW,
         false,
         frame_with(vec![
             pressed(Key::KeyChar('/')),
@@ -518,7 +518,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         &[],
         Platform::Apple,
         &refs(&symbols),
-        &Scope::View,
+        &Scope::VIEW,
         false,
         frame_with(vec![pressed(Key::KeyChar('/')), pressed(Key::KeyChar('/'))]),
         State::Idle,
@@ -528,7 +528,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         &[],
         Platform::Apple,
         &refs(std::slice::from_ref(&plus)),
-        &Scope::View,
+        &Scope::VIEW,
         false,
         with_keys(frame_with(vec![pressed(Key::KeyChar('='))]), vec![Key::Meta, Key::Shift]),
         State::Idle,
@@ -564,7 +564,7 @@ fn router_platform_modifier_and_labels() {
             &[],
             platform,
             &refs(&press_cmds),
-            &Scope::View,
+            &Scope::VIEW,
             false,
             frame,
             State::Idle,
@@ -592,7 +592,7 @@ fn router_platform_modifier_and_labels() {
 #[test]
 fn routing_borrows_unchanged_frames_and_owns_only_filtered_events() {
     use std::borrow::Cow;
-    let mut frame = frame_with(vec![Event::Pointer_moved((4., 5.))]);
+    let mut frame = frame_with(vec![Event::PointerMoved((4., 5.))]);
     frame.pixel_scale = (2., 3.);
     frame.fps = 120.;
     frame.mouse_delta = (1., 2.);
@@ -604,7 +604,7 @@ fn routing_borrows_unchanged_frames_and_owns_only_filtered_events() {
     let before = input::identity(&frame.input);
     let (state, _, routed) = router::step(&[], Platform::Apple, &[], &Panel::Graph, false, &frame, State::Idle);
     assert!(matches!(state, State::Pending(_)) && matches!(routed, Cow::Owned(_)));
-    assert_eq!(routed.input.events, [Event::Pointer_moved((4., 5.))]);
+    assert_eq!(routed.input.events, [Event::PointerMoved((4., 5.))]);
     assert_eq!((routed.pixel_scale, routed.fps, routed.mouse_delta), (frame.pixel_scale, frame.fps, frame.mouse_delta));
     assert_eq!(input::identity(&frame.input), before);
 }

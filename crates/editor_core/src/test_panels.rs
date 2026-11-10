@@ -89,3 +89,19 @@ fn leaves_put_floats_last_and_a_floats_own_before_its_floats() {
     assert!(each_leaf(&tree, &mut |path, p| { seen += 1; *p == Panel::Inspector && path == [0, 0, 1, 0] }));
     assert_eq!(seen, 3, "each_leaf stops at the first true");
 }
+
+#[test]
+fn panel_definitions_drive_names_commands_and_default_layout() {
+    use crate::panels::{self, PANELS};
+    let mut ids = std::collections::HashSet::new();
+    let mut shortcuts = std::collections::HashSet::new();
+    for entry in PANELS {
+        assert!(ids.insert(entry.id));
+        assert!(shortcuts.insert(entry.shortcut));
+        assert_eq!(entry.command, format!("panel.{}", entry.id));
+        assert_eq!(panels::name(&entry.panel), entry.heading);
+        assert!(std::ptr::eq(panels::definition(&entry.panel), entry));
+    }
+    assert_eq!(panels::to_string(&panels::default()), "(h view (h graph inspector))");
+    assert!(panels::valid(&panels::default()).is_ok());
+}

@@ -15,6 +15,36 @@ pub enum Panel {
     Timeline,
 }
 
+/// Shared pane metadata for names, commands, chrome and the initial layout.
+pub struct PanelDefinition {
+    pub panel: Panel,
+    pub id: &'static str,
+    pub title: &'static str,
+    pub menu_title: &'static str,
+    pub heading: &'static str,
+    pub icon: &'static str,
+    pub command: &'static str,
+    pub shortcut: &'static str,
+    pub binding: &'static str,
+    pub default_placement: Option<(usize, f64)>,
+}
+
+pub static PANELS: &[PanelDefinition] = &[
+    PanelDefinition { panel: Panel::Graph, id: "graph", title: "Graph", menu_title: "Graph", heading: "GRAPH", icon: "◇", command: "panel.graph", shortcut: "lg", binding: "network", default_placement: Some((1, 0.35)) },
+    PanelDefinition { panel: Panel::List, id: "list", title: "List", menu_title: "List", heading: "LIST", icon: "≡", command: "panel.list", shortcut: "ll", binding: "list", default_placement: None },
+    PanelDefinition { panel: Panel::Lisp, id: "lisp", title: "Lisp", menu_title: "Lisp", heading: "LISP", icon: "λ", command: "panel.lisp", shortcut: "lt", binding: "code", default_placement: None },
+    PanelDefinition { panel: Panel::Inspector, id: "inspector", title: "Inspector", menu_title: "Inspector", heading: "INSPECTOR", icon: "☷", command: "panel.inspector", shortcut: "li", binding: "inspector", default_placement: Some((2, 0.20)) },
+    PanelDefinition { panel: Panel::Spreadsheet, id: "spreadsheet", title: "Spreadsheet", menu_title: "Spreadsheet", heading: "SPREADSHEET", icon: "▦", command: "panel.spreadsheet", shortcut: "ls", binding: "spreadsheet", default_placement: None },
+    PanelDefinition { panel: Panel::Outline, id: "outline", title: "Outline", menu_title: "Outline", heading: "OUTLINE", icon: "☰", command: "panel.outline", shortcut: "lu", binding: "outline", default_placement: None },
+    PanelDefinition { panel: Panel::Timeline, id: "timeline", title: "Timeline", menu_title: "Timeline", heading: "TIMELINE", icon: "↔", command: "panel.timeline", shortcut: "lm", binding: "timeline", default_placement: None },
+    PanelDefinition { panel: Panel::View(String::new()), id: "viewport", title: "View", menu_title: "Viewport", heading: "VIEW", icon: "◈", command: "panel.viewport", shortcut: "lw", binding: "preview", default_placement: Some((0, 0.45)) },
+    PanelDefinition { panel: Panel::Canvas(String::new()), id: "canvas", title: "Canvas", menu_title: "Canvas", heading: "CANVAS", icon: "□", command: "panel.canvas", shortcut: "lc", binding: "canvas", default_placement: None },
+];
+
+pub fn definition(panel: &Panel) -> &'static PanelDefinition {
+    PANELS.iter().find(|entry| std::mem::discriminant(&entry.panel) == std::mem::discriminant(panel)).expect("registered panel")
+}
+
 /// `H puts a left of b, `V puts a above b.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Axis {
@@ -65,47 +95,22 @@ pub fn main() -> Panel {
 
 /// The three columns: view 45%, graph 35%, inspector 20%.
 pub fn default() -> Panels {
-    // graph and inspector widths of the default 45/35/20 columns
-    Panels::Split {
-        axis: Axis::H,
-        size: Size::Ratio(0.45),
-        a: Box::new(Panels::Leaf(main())),
-        b: Box::new(Panels::Split {
-            axis: Axis::H,
-            size: Size::Ratio(0.35 / 0.55),
-            a: Box::new(Panels::Leaf(Panel::Graph)),
-            b: Box::new(Panels::Leaf(Panel::Inspector)),
-        }),
+    let mut panels: Vec<_> = PANELS.iter().filter_map(|entry| entry.default_placement.map(|(order, share)| (order, share, if matches!(entry.panel, Panel::View(_)) { main() } else { entry.panel.clone() }))).collect();
+    panels.sort_by_key(|(order, _, _)| *order);
+    let (_, mut share, panel) = panels.pop().expect("default panel");
+    let mut tree = Panels::Leaf(panel);
+    for (_, next_share, panel) in panels.into_iter().rev() {
+        share += next_share;
+        tree = Panels::Split { axis: Axis::H, size: Size::Ratio(next_share / share), a: Box::new(Panels::Leaf(panel)), b: Box::new(tree) };
     }
+    tree
 }
 
-pub fn name(panel: &Panel) -> &'static str {
-    match panel {
-        Panel::Canvas(_) => "CANVAS",
-        Panel::View(_) => "VIEW",
-        Panel::Graph => "GRAPH",
-        Panel::List => "LIST",
-        Panel::Lisp => "LISP",
-        Panel::Inspector => "INSPECTOR",
-        Panel::Spreadsheet => "SPREADSHEET",
-        Panel::Outline => "OUTLINE",
-        Panel::Timeline => "TIMELINE",
-    }
-}
+pub fn name(panel: &Panel) -> &'static str { definition(panel).heading }
 
 /// `name` in lowercase, for box labels.
 pub fn lower_name(panel: &Panel) -> &'static str {
-    match panel {
-        Panel::Canvas(_) => "canvas",
-        Panel::View(_) => "view",
-        Panel::Graph => "graph",
-        Panel::List => "list",
-        Panel::Lisp => "lisp",
-        Panel::Inspector => "inspector",
-        Panel::Spreadsheet => "spreadsheet",
-        Panel::Outline => "outline",
-        Panel::Timeline => "timeline",
-    }
+    if matches!(panel, Panel::View(_)) { "view" } else { definition(panel).id }
 }
 
 // Leaves outside floats in tree order (`docked`), else only the floats met outside other floats.
@@ -239,19 +244,7 @@ pub fn to_string(tree: &Panels) -> String {
 
 // ---- layout names: a pure reading of the tree ----
 
-fn word(panel: &Panel) -> &'static str {
-    match panel {
-        Panel::Canvas(_) => "Canvas",
-        Panel::View(_) => "View",
-        Panel::Graph => "Graph",
-        Panel::List => "List",
-        Panel::Lisp => "Lisp",
-        Panel::Inspector => "Inspector",
-        Panel::Spreadsheet => "Spreadsheet",
-        Panel::Outline => "Outline",
-        Panel::Timeline => "Timeline",
-    }
-}
+fn word(panel: &Panel) -> &'static str { definition(panel).title }
 
 /// The tree without its floats; `None` when nothing is docked.
 fn docked(tree: &Panels) -> Option<Panels> {

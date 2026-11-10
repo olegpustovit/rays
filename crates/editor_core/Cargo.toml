@@ -11,3 +11,6 @@ flow_syntax = { path = "../flow_syntax" }
 
 [dev-dependencies]
 ogpu_mock = { path = "../ogpu_mock" }
+
+[lints]
+workspace = true

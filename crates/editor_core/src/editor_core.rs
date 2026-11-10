@@ -259,10 +259,10 @@ pub mod router {
     /// mode. Escape ends fly without opening a shortcut.
     pub fn fly(frame: &frame::Frame) -> (bool, Cow<'_, frame::Frame>) {
         let exits = frame.input.events.iter().any(|event| matches!(event,
-            Event::Key_pressed(Key::Escape | Key::Space | Key::KeyChar('/')) | Event::Focus_lost));
+            Event::KeyPressed(Key::Escape | Key::Space | Key::KeyChar('/')) | Event::FocusLost));
         let consumed = frame.input.events.iter().enumerate().filter_map(|(index, event)| match event {
-            Event::Key_pressed(Key::KeyChar('/')) | Event::Focus_lost => None,
-            Event::Key_pressed(_) | Event::Key_released(_) | Event::Text_input(_) | Event::Text_editing { .. } => Some(index),
+            Event::KeyPressed(Key::KeyChar('/')) | Event::FocusLost => None,
+            Event::KeyPressed(_) | Event::KeyReleased(_) | Event::TextInput(_) | Event::TextEditing { .. } => Some(index),
             _ => None,
         }).collect();
         (exits, without_events(frame, consumed))
@@ -307,7 +307,7 @@ pub mod router {
         for (index, event) in frame.input.events.iter().enumerate() {
             modifiers = input::keys_after(&modifiers, event);
             match event {
-                Event::Key_pressed(key)
+                Event::KeyPressed(key)
                     if !owned(*key) && (input::command_held(platform, &modifiers) || *key == Key::F12) =>
                 {
                     match chord(platform, &global, focus, &modifiers, *key) {
@@ -363,7 +363,7 @@ pub mod router {
             match event {
                 // Tab cancels leader routing and runs its exact-modifier binding, or passes to
                 // UI traversal.
-                Event::Key_pressed(Key::Tab) if !command => {
+                Event::KeyPressed(Key::Tab) if !command => {
                     traversing = true;
                     state = State::Idle;
                     match chord(platform, keymap, focus, &modifiers, Key::Tab) {
@@ -372,12 +372,12 @@ pub mod router {
                     }
                 }
                 // a bare / (no Shift, no Command) opens the leader
-                Event::Key_pressed(Key::KeyChar('/'))
+                Event::KeyPressed(Key::KeyChar('/'))
                     if idle && !text_focus && !command && !modifiers.contains(&Key::Shift) =>
                 {
                     state = State::Pending(String::new());
                 }
-                Event::Key_pressed(key) if idle && !text_focus => {
+                Event::KeyPressed(key) if idle && !text_focus => {
                     // Shift and a symbol key is the symbol it types, when a chord is bound to that
                     let typed = match key {
                         Key::KeyChar(c) if modifiers.contains(&Key::Shift) => {
@@ -391,15 +391,15 @@ pub mod router {
                     }
                     state = State::Idle;
                 }
-                Event::Text_input(_) if idle && !actions.is_empty() => {
+                Event::TextInput(_) if idle && !actions.is_empty() => {
                     state = State::Idle;
                 }
                 _ if idle => {
                     state = State::Idle;
                     pass = true;
                 }
-                Event::Key_pressed(key) if modifier(*key) => {}
-                Event::Key_pressed(Key::KeyChar(character)) => {
+                Event::KeyPressed(key) if modifier(*key) => {}
+                Event::KeyPressed(Key::KeyChar(character)) => {
                     // An exact sequence runs; a proper prefix opens the next page.
                     // / then Shift-/ is the sequence "?", as the sheets write it
                     let character = if modifiers.contains(&Key::Shift) {
@@ -420,11 +420,11 @@ pub mod router {
                         state = State::Idle;
                     }
                 }
-                Event::Text_input(_) | Event::Text_editing { .. } => {}
-                Event::Key_pressed(_) | Event::Pointer_pressed(..) => {
+                Event::TextInput(_) | Event::TextEditing { .. } => {}
+                Event::KeyPressed(_) | Event::PointerPressed(..) => {
                     state = State::Idle;
                 }
-                Event::Focus_lost => {
+                Event::FocusLost => {
                     state = State::Idle;
                     pass = true;
                 }
