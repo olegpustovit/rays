@@ -32,8 +32,6 @@
 //!
 //! Build cost (cosmic-text 0.19.0, M1, `nice -n 10` while the machine was in use): first cold debug
 //! build of the dependency closure 24.5 s wall (116 s CPU); 40 external crates + pxui_text.
-//! The macOS `-Wl,-stack_size` rustflag in `.cargo/config.toml` breaks proc-macro dylibs
-//! (bytemuck_derive) and must be scoped to executables before this crate joins a default build.
 
 use cosmic_text::{
     Align as CAlign, Attrs, Buffer, CacheKey, Cursor, Ellipsize, EllipsizeHeightLimit, Family, FontSystem, Metrics as CMetrics, Shaping,
