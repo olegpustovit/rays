@@ -3576,6 +3576,8 @@ impl Ui {
             if n.flags & SCROLL_X != 0 {
                 let key = self.boxes[index].key;
                 let delta = self.signals.get(&key).map_or(0.0, |v| v.scroll_x * n.scroll_step + v.scroll_drag_x);
+                // right to left the offset runs from the right edge: the content follows the fingers
+                let delta = if self.dir == Direction::Rtl { -delta } else { delta };
                 let max_x = 0.0f32.max(self.l_content_w[index] - self.l_w[index]);
                 self.scroll_xs[slot] = 0.0f32.max(max_x.min(self.scroll_xs[slot] - delta));
             }
@@ -4143,6 +4145,8 @@ pub struct Paint {
     /// the content width and horizontal scroll offset, as `l_content` and `scroll_y`
     pub l_content_w: Vec<f32>,
     pub scroll_x: Vec<f32>,
+    /// right to left: node text sits its start inset from the right, scroll thumbs mirror
+    pub rtl: bool,
 }
 
 impl Paint {
@@ -4294,15 +4298,18 @@ impl Paint {
             } else {
                 text
             };
-            if look.font.caps {
-                let mut buffer = std::mem::take(&mut self.label);
-                buffer.clear();
+            let mut buffer = std::mem::take(&mut self.label);
+            buffer.clear();
+            let text = if look.font.caps {
                 buffer.extend(text.chars().map(|c| c.to_ascii_uppercase()));
-                self.text_styled(at, &style, 0.0, ink, &buffer);
-                self.label = buffer;
+                &buffer
             } else {
-                self.text_styled(at, &style, 0.0, ink, text);
-            }
+                text
+            };
+            // right to left the start inset is at the right: the text ends there
+            let at = if self.rtl { (x + w - inset.l - lay_out(&mut self.text, &style, 0.0, text).1.w, at.1) } else { at };
+            self.text_styled(at, &style, 0.0, ink, text);
+            self.label = buffer;
         }
         if let Mark::Chevron(direction) = node.mark {
             self.chevron((x + w / 2.0, y + h / 2.0), direction, fade(look.text));
@@ -4330,14 +4337,15 @@ impl Paint {
                 let track_h = 1.max(height - 2 * margin);
                 let thumb_h = track_h.min(20.max(track_h * height / 1.max(content)));
                 let thumb_y = y + margin + self.scroll_y[slot] as i64 * (track_h - thumb_h) / maximum;
-                Rect::new((x + width) as f32 - gap - w, thumb_y as f32, w, thumb_h as f32)
+                let x = if self.rtl { (x as f32) + gap } else { (x + width) as f32 - gap - w };
+                Rect::new(x, thumb_y as f32, w, thumb_h as f32)
             })
         } else {
             (content > r.h).then(|| {
                 let track_h = 1.0f32.max(r.h - 2.0 * bar.margin);
                 let thumb_h = track_h.min(20.0f32.max(track_h * r.h / content));
                 let thumb_y = r.y + bar.margin + self.scroll_y[slot] * (track_h - thumb_h) / (content - r.h);
-                Rect::new(r.x + r.w - gap - w, thumb_y, w, thumb_h)
+                Rect::new(if self.rtl { r.x + gap } else { r.x + r.w - gap - w }, thumb_y, w, thumb_h)
             })
         };
         if let Some(t) = thumb {
@@ -4357,7 +4365,8 @@ impl Paint {
         }
         let track_w = 1.0f32.max(r.w - 2.0 * bar.margin);
         let thumb_w = track_w.min(20.0f32.max(track_w * r.w / content));
-        let x = r.x + bar.margin + self.scroll_x[slot] * (track_w - thumb_w) / (content - r.w);
+        let along = bar.margin + self.scroll_x[slot] * (track_w - thumb_w) / (content - r.w);
+        let x = if self.rtl { r.x + r.w - along - thumb_w } else { r.x + along };
         let t = Rect::new(x, r.y + r.h - bar.gap - bar.width, thumb_w, bar.width);
         if bar.radius > 0.0 {
             self.push(Instance::rect([t.x, t.y, t.x + t.w, t.y + t.h], rgba(bar.color)).radii([bar.radius; 4]));
@@ -4983,6 +4992,7 @@ impl Ui {
             scroll_y: std::mem::take(&mut self.scroll_y),
             l_content_w: std::mem::take(&mut self.l_content_w),
             scroll_x: std::mem::take(&mut self.scroll_xs),
+            rtl: self.dir == Direction::Rtl,
         };
         paint.next_layer(0);
         paint

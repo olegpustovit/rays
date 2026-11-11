@@ -476,7 +476,8 @@ axis; `ui.scroll_offset_x`); a `STICKY` flow child of a scroll box stops at its 
 its siblings. `CLIP | ROUND_CLIP` rounds the children's clip by the node look's radius (the instance
 `clip_radius`; square `CLIP` stays the default). `ui.set_dir(Direction::Rtl)` mirrors flow children
 inside their parents (start padding and `Justify::Start` at the right; text direction is
-cosmic-text's). `ui.split(label, axis, ratio, min_a, min_b, a, b) -> Option<f32>` is two `Grow`
+cosmic-text's; a node's text ends its start inset from the right; content wider than a `SCROLL_X` box starts at
+its right edge, the sideways wheel and fingers move it as they move, and both scroll thumbs mirror). `ui.split(label, axis, ratio, min_a, min_b, a, b) -> Option<f32>` is two `Grow`
 panes weighted `ratio : 1 - ratio` around a 1-point `ui.grip` (presses 3 points either side, resize
 cursor, accent while held), returning the dragged ratio; rays_shell's docked gutters use `ui.grip`.
 Responsive layout is a plain condition on `ui.width()`/`view_size`. The passes are O(nodes) per

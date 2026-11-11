@@ -416,6 +416,39 @@ fn widgets_scroll_view() {
     ui.destroy();
 }
 
+/// Right to left, content wider than its scroll view starts at the right edge (the logical start)
+/// and the sideways wheel brings its left part in; a node's text sits its start inset from the right.
+fn widgets_scroll_view_rtl() {
+    let mut ui = new_ui(None);
+    ui.set_dir(Direction::Rtl);
+    let (view, row) = (std::cell::Cell::new(None), std::cell::Cell::new(None));
+    let mut build = |ui: &mut Ui| {
+        view.set(Some(ui.scroll_view("Scroll", Size::Px(200.0), Size::Px(60.0), &mut |ui| {
+            let n = ui.node("wide", Node { w: Size::Px(400.0), h: Size::Px(24.0), inset: Edges { l: 8.0, ..Edges::ZERO }, ..Node::DEFAULT });
+            ui.text(&n, "alpha");
+            row.set(Some(n));
+        })));
+    };
+    for t in 0..2 {
+        ui.frame(&at(t as f64 * 0.1, vec![]), &mut build);
+    }
+    let (v, r) = (ui.rect(&view.get().unwrap()), ui.rect(&row.get().unwrap()));
+    check((r.x + r.w - (v.x + v.w - 1.0)).abs() < 0.01, &format!("the content ends at the view's right edge: {r:?} in {v:?}"));
+    // the text: the only mask instances, ending 8 points from the row's right edge
+    let glyphs: Vec<_> = ui.output().draw.iter().flat_map(|l| l.instances.iter()).filter(|i| i.kind == pxui::draw::kind::MASK).map(|i| i.rect).collect();
+    let right = glyphs.iter().map(|g| g[2]).fold(f32::MIN, f32::max);
+    check(!glyphs.is_empty() && right <= v.x + v.w - 1.0 - 8.0 + 0.5 && right > v.x + v.w - 40.0, &format!("the text sits at the start inset from the right: {right} in {v:?}"));
+    let p = ((v.x + 50.0) as i64, (v.y + 20.0) as i64);
+    ui.frame(&at(1.0, vec![move_to(p)]), &mut build);
+    for t in 0..10 {
+        ui.frame(&at(1.1 + t as f64 * 0.05, vec![Event::Scrolled((3.0, 0.0))]), &mut build);
+    }
+    let h = view.get().unwrap();
+    let moved = ui.rect(&row.get().unwrap());
+    check(ui.scroll_offset_x(&h) > 0.0 && moved.x > r.x, &format!("a swipe to the right brings the left part in: {} {moved:?}", ui.scroll_offset_x(&h)));
+    ui.destroy();
+}
+
 fn widgets_list() {
     let mut s = S::new();
     let mut ui = warm(&mut s);
@@ -663,6 +696,7 @@ pub const CASES: &[(&str, fn())] = &[
     ("widgets_menu_bar", widgets_menu_bar),
     ("widgets_tip_and_icon", widgets_tip_and_icon),
     ("widgets_scroll_view", widgets_scroll_view),
+    ("widgets_scroll_view_rtl", widgets_scroll_view_rtl),
     ("widgets_list", widgets_list),
     ("widgets_list_keys_multi", widgets_list_keys_multi),
     ("widgets_tree", widgets_tree),
