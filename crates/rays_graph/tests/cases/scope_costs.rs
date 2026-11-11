@@ -151,6 +151,8 @@ fn window_graph_costs() {
         let p = if i % 2 == 0 { c1 } else { c2 };
         go(ui, t, p, &[], vec![Event::PointerMoved(p)])
     });
+    go(&mut ui, &mut t, port, &[], vec![Event::PointerMoved(port)]);
+    let lit = t.highlighted.len();
     let port_hover = run(&mut table, "port hover", &mut ui, &mut t, n, &mut |ui, t, i| {
         let p = if i % 2 == 0 { port } else { c1 };
         go(ui, t, p, &[], vec![Event::PointerMoved(p)])
@@ -278,22 +280,26 @@ fn window_graph_costs() {
     quiet("zoom", zoom, 0, 0);
     // a card's ground, its row band and their partner on the card left
     quiet("card hover", card_hover, 0, 8 * INSTANCE);
-    // the hover's view of the lit wires
-    quiet("port hover", port_hover, 1, 128 * INSTANCE);
+    // the lit wires' views (each widened in place) under the cards, the wires view around them and
+    // the hover's view of their ends
+    quiet("port hover", port_hover, 2 + lit, 128 * INSTANCE);
     quiet("chip hover", chip_hover, 0, 8 * INSTANCE);
     assert!(first.views == 0 && first.bytes <= 8 * INSTANCE, "the first card hover after a build: {} views, {} bytes", first.views, first.bytes);
-    assert!(first_port.views <= 1 && first_port.bytes <= 128 * INSTANCE, "the first port hover after a build: {} views, {} bytes", first_port.views, first_port.bytes);
-    // a selection: the cards' looks, the chain's wires drawn again (its view)
+    assert!(first_port.views <= 2 + lit && first_port.bytes <= 128 * INSTANCE, "the first port hover after a build: {} views, {} bytes", first_port.views, first_port.bytes);
+    // a selection: the cards' looks, the views of the wires its chain lights or dims and the wires view
+    // around them
+    let wires = scope::inspect::anchored_views(&t);
     assert!(select.builds == 0, "select: {} content builds", select.builds);
-    assert!(select.views <= 1, "select: {} views built", select.views);
+    assert!(select.views <= 1 + wires, "select: {} views built", select.views);
     // the Selected intent carries nothing (the pane holds the selection), the selection, the move it may
     // begin and the chains of the selection are kept buffers, a press is routed with a kept list
     assert!(press_allocs == 0, "a selecting press allocated {press_allocs}");
     // a card's drag: its view's offset and the view of its wires
     quiet("card drag", drag, 1, 64 * INSTANCE);
-    // the pulled wire's view and the hover's (the wires the pointer passes light)
-    quiet("wire drag", wire, 2, 64 * INSTANCE);
-    assert!(band.builds == 0 && band.views <= 2, "the rubber band: {} content builds, {} views", band.builds, band.views);
+    // the pulled wire's view and the hover's, the wires view and the views of the wires the pointer
+    // passes (they light)
+    quiet("wire drag", wire, 3 + lit, 64 * INSTANCE);
+    assert!(band.builds == 0 && band.views <= 2 + wires, "the rubber band: {} content builds, {} views", band.builds, band.views);
     assert!(quiet_band == 0, "a band frame that selected nothing new allocated {quiet_band}");
     assert!(band.allocs == 0, "a band frame allocated {}", band.allocs);
     assert!(drop_builds == 1, "the drop built the content {drop_builds} times");

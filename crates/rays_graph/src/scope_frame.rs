@@ -1759,6 +1759,8 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
     (rev, t.busy_t.to_bits(), salt).hash(&mut hh);
     let key = hh.finish();
     let (cw, ch) = (Size::Px((w + 2.0 * ov.0) as f32), Size::Px((h + 2.0 * ov.1) as f32));
+    // what the views build at this key shows: the cards, wires, open zones and frames in view
+    crate::scope_hover::list(t, ov, key);
     let chain = chains_of(t);
     let selected = crate::scope_hover::selected_wire_index(t);
     let attached = crate::scope_hover::attached(t);
@@ -1766,18 +1768,8 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
     // the grid, the zones, the frames and the wires, under the cards: they build again with the
     // content and when the selection's chains or the selected wire change
     let mut hh = std::hash::DefaultHasher::new();
-    (key, chain.as_ref().map(|c| (Rc::as_ptr(c) as usize, c.rev)), selected, Rc::as_ptr(&attached) as usize).hash(&mut hh);
-    let (built, hovers) = (t.built.clone(), t.hovers.clone());
-    let wires = ui.view("graph-wires", hh.finish(), cw, ch, &mut |ui| {
-        let layer = ui.box_("pxui-scope-layer", BoxOpts::default().w(cw).h(ch).at((0.0, 0.0)));
-        let (built, hovers, chain, attached) = (built.clone(), hovers.clone(), chain.clone(), attached.clone());
-        ui.draw(&layer, move |paint, rect| {
-            let Some((kept, _)) = &*built.borrow() else { return };
-            let hv = hovers.borrow();
-            let sel = sp::Sel { chain: chain.clone(), wire: selected, skip: attached.clone() };
-            sp::paint_background(paint, kept, &sel, rect.f64(), &hv.reach, &hv.zones);
-        });
-    });
+    (key, chain.as_ref().map(|c| (Rc::as_ptr(c) as usize, c.rev)), selected, Rc::as_ptr(&attached) as usize, &t.highlighted).hash(&mut hh);
+    let wires = ui.view("graph-wires", hh.finish(), cw, ch, &mut |ui| crate::scope_hover::wires_view(t, ui, key, cw, ch, &chain, selected, &attached));
     ui.set_at(&wires, (-ov.0 as f32, -ov.1 as f32));
     // the wires a move of cards carries, where it puts them
     let under = ui.view("graph-drag-wires", crate::scope_hover::drag_wires_key(t) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::drag_wires(t, ui));
@@ -1848,25 +1840,8 @@ fn content(t: &mut Pane, ui: &mut Ui, canvas: &UiBox, ov: (f64, f64), rev: u64, 
     let z = t.zoom;
     // text follows the zoom down to 5 points (a 6-point row at zoom 0.25 holds it)
     let fs = font_of(z);
-    // the content box: the pane grown by the overscan
-    let (ox, oy) = ov;
-    let viewport = (t.x as f64 - ox, t.y as f64 - oy, t.width as f64 + 2.0 * ox, t.height as f64 + 2.0 * oy);
-    // what the content box shows, grown by `margin` screen points, in graph units: the indices answer it
-    let in_view = |t: &Pane, margin: f64| -> (f64, f64, f64, f64) {
-        ((-t.pan_x - ox - margin) / z, (-t.pan_y - oy - margin) / z, (t.width as f64 + ox - t.pan_x + margin) / z, (t.height as f64 + oy - t.pan_y + margin) / z)
-    };
-    let visible: Vec<usize> = index_query(&t.geo.tiles, in_view(t, 20.0))
-        .into_iter()
-        .filter(|&i| {
-            let (pl, ax, ay) = &t.geo.items[i];
-            let x = sx(t, *ax) - 20.0;
-            let y = sy(t, *ay) - 20.0;
-            let wd = (pl.w * z) + 40.0;
-            let h = (pl.h * z) + 40.0;
-            let (vx, vy, vw, vh) = viewport;
-            x < vx + vw && x + wd > vx && y < vy + vh && y + h > vy
-        })
-        .collect();
+    // the cards in view (`scope_hover::list`)
+    let visible = t.hovers.borrow().visible.clone();
     // footers: only for what is in view, and not when too small to read
     let mut footers: HashMap<Path, Footer> = HashMap::new();
     if let Some(records) = &t.records {
@@ -1893,15 +1868,7 @@ fn content(t: &mut Pane, ui: &mut Ui, canvas: &UiBox, ov: (f64, f64), rev: u64, 
         build_card(&mut ctx, t, ui, z, fs, i, &snap, &footers, rev, &mut built);
     }
     if !ui.verifying() {
-        let wires_in_view = index_query(&t.geo.reach, in_view(t, 4.0));
-        let zones = visible.iter().copied().filter(|&i| {
-            let (pl, _, _) = &t.geo.items[i];
-            matches!(&pl.item, Item::Item(n) if n.zone.is_some()) && !pl.collapsed
-        });
-        let mut hv = t.hovers.borrow_mut();
-        hv.end(t, ui);
-        hv.reach.extend_from_slice(&wires_in_view);
-        hv.zones.extend(zones);
+        t.hovers.borrow_mut().end(t, ui);
     }
     if ctx.finished {
         t.editing = None;

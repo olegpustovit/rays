@@ -244,3 +244,11 @@ pub fn wire_midpoint(t: &Pane, i: i64) -> Option<(f64, f64)> {
 pub fn content_builds(t: &Pane) -> u64 {
     t.hovers.borrow().builds
 }
+
+/// The views a full build of the pane at rest makes that a pan or zoom carries: the wires view (its
+/// ground, each open zone's body, each frame and each wire in view a view of its own), the content and
+/// each card's view in it.
+pub fn anchored_views(t: &Pane) -> usize {
+    let hv = t.hovers.borrow();
+    2 + 1 + hv.zones.len() + hv.frames.len() + hv.reach.len() + t.stats.drawn_items as usize
+}

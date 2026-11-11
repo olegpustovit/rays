@@ -179,12 +179,13 @@ fn workspace(name: &str, text: &str) {
         check(zoom.views == 0 && zoom.bytes == 0, &format!("zooming rebuilt {} views and wrote {} instance bytes a frame", zoom.views, zoom.bytes));
         let rest = measure(&mut r, 12, &|r, _| r.step(end, vec![]));
         report("empty graph zoom at rest", &rest, 12);
-        // (the graph's anchored views: its wires, its content and each card's view in it)
-        let cards = {
+        // (the graph's anchored views: its wires view with a view for its ground, each open zone, frame
+        // and wire in it, its content and each card's view in it)
+        let anchored = {
             let core: &rays_editor::editor_model::EditorModel = &r.e.core;
-            rays_graph::scope_pane::stats(rays_editor::editor_model::pane_view(&core.into())).drawn_items as usize
+            rays_graph::scope_pane::inspect::anchored_views(rays_editor::editor_model::pane_view(&core.into()))
         };
-        check(rest.views == 2 + cards, &format!("the rested zoom rebuilt {} views ({cards} cards)", rest.views));
+        check(rest.views == anchored, &format!("the rested zoom rebuilt {} views ({anchored} anchored)", rest.views));
     }
     r.close();
 }

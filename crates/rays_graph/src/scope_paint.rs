@@ -1322,16 +1322,8 @@ pub fn tag_name(t: &Pane, wi: &Wire) -> String {
     }
 }
 
-/// What the wires view paints that the content does not build: the chains of the selection, the
-/// selected wire (an index into `geo.wires`) and the wires a drag draws instead (`skip`).
-pub struct Sel {
-    pub chain: Option<std::rc::Rc<st::Chains>>,
-    pub wire: Option<usize>,
-    /// ascending
-    pub skip: std::rc::Rc<Vec<usize>>,
-}
-
-pub fn paint_background(paint: &mut Paint, t: &Pane, sel: &Sel, viewport: (f64, f64, f64, f64), wires: &[usize], zones: &[usize]) {
+/// The pane's ground under everything: its fill, the dot grid and the crosses.
+pub fn paint_ground(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f64)) {
     let theme = t.theme;
     let (vx, vy, vw, vh) = viewport;
     let z = t.zoom;
@@ -1369,35 +1361,36 @@ pub fn paint_background(paint: &mut Paint, t: &Pane, sel: &Sel, viewport: (f64, 
             cx += px;
         }
     }
-    for &slot in zones {
-        let (pl, ax, ay) = &t.geo.items[slot];
-        if let Item::Item(node) = &pl.item {
-            if let Some(zn) = &node.zone {
-                let taken = zone_taken(t, node, zn);
-                paint_zone(paint, taken, &theme, zn.kind, (sx(t, *ax), sy(t, *ay), pl.w * z, pl.h * z));
-            }
+}
+
+/// An open zone's body (item `slot`), under the frames and the wires.
+pub fn paint_zone_body(paint: &mut Paint, t: &Pane, slot: usize) {
+    let z = t.zoom;
+    let (pl, ax, ay) = &t.geo.items[slot];
+    if let Item::Item(node) = &pl.item {
+        if let Some(zn) = &node.zone {
+            let taken = zone_taken(t, node, zn);
+            paint_zone(paint, taken, &t.theme, zn.kind, (sx(t, *ax), sy(t, *ay), pl.w * z, pl.h * z));
         }
     }
-    // titled frames sit under the wires
-    for (scope_path, (ox, oy)) in t.geo.origins.iter() {
-        for (title, (fx, fy), (fw, fh)) in frame_list(t, scope_path) {
-            let x = sx(t, ox + fx);
-            let y = sy(t, oy + fy);
-            frame_in(paint, x, y, fw * z, fh * z, Some(color::with_alpha(theme.foreground, 8)), theme::edge(&theme));
-            let fsz = 7.max((10.0 * z) as i64);
-            paint.text_s(((x + 6.0) as f32, (y + 4.0) as f32), fsz, theme::muted(&theme), &title);
-            // delete cross top right, resize grip bottom right
-            paint.text_s(((x + (fw * z) - 14.0) as f32, (y + 4.0) as f32), fsz, theme::muted(&theme), "x");
-            let ink = theme::ink_3(&theme);
-            paint.fill((x + (fw * z) - 4.0) as f32, (y + (fh * z) - 11.0) as f32, 1.0, 8.0, ink);
-            paint.fill((x + (fw * z) - 11.0) as f32, (y + (fh * z) - 4.0) as f32, 8.0, 1.0, ink);
-        }
-    }
-    let tag_size = 5.max((11.0 * z).round() as i64);
-    for &i in wires {
-        if sel.skip.binary_search(&i).is_err() {
-            paint_wire(paint, t, z, &|q| (sx(t, q.0), sy(t, q.1)), &sel.chain, viewport, tag_size, &t.geo.wires[i], &t.geo.wires[i].pts, false, sel.wire == Some(i));
-        }
+}
+
+/// Frame `index` of the scope at `t.geo.origins[origin]`, under the wires.
+pub fn paint_frame(paint: &mut Paint, t: &Pane, origin: usize, index: usize) {
+    let theme = t.theme;
+    let z = t.zoom;
+    let (scope_path, (ox, oy)) = &t.geo.origins[origin];
+    if let Some((title, (fx, fy), (fw, fh))) = frame_list(t, scope_path).into_iter().nth(index) {
+        let x = sx(t, ox + fx);
+        let y = sy(t, oy + fy);
+        frame_in(paint, x, y, fw * z, fh * z, Some(color::with_alpha(theme.foreground, 8)), theme::edge(&theme));
+        let fsz = 7.max((10.0 * z) as i64);
+        paint.text_s(((x + 6.0) as f32, (y + 4.0) as f32), fsz, theme::muted(&theme), &title);
+        // delete cross top right, resize grip bottom right
+        paint.text_s(((x + (fw * z) - 14.0) as f32, (y + 4.0) as f32), fsz, theme::muted(&theme), "x");
+        let ink = theme::ink_3(&theme);
+        paint.fill((x + (fw * z) - 4.0) as f32, (y + (fh * z) - 11.0) as f32, 1.0, 8.0, ink);
+        paint.fill((x + (fw * z) - 11.0) as f32, (y + (fh * z) - 4.0) as f32, 8.0, 1.0, ink);
     }
 }
 

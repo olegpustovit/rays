@@ -92,6 +92,9 @@ fn cases() -> Vec<Case> {
         },
         Case { name: "zoom_half", text: SMALL, opts: ScopeOpts::default, setup: |t| { zoomed(t, 0.5); None } },
         Case { name: "zoom_double", text: SMALL, opts: ScopeOpts::default, setup: |t| { zoomed(t, 2.0); None } },
+        // a hovered out-port's wires lit: captured from the canvas-painted pane (d5d8a4278), the lit
+        // wire widened in place under the cards, not drawn again over its normal self
+        Case { name: "lit_wire", text: SMALL, opts: ScopeOpts::default, setup: |t| scope::inspect::output_socket(t, &path(&["g", "d"])) },
     ]
 }
 
@@ -224,8 +227,8 @@ fn window_graph_view_pan_zoom() {
         }
         check(t.pan_x == pan0.0 + 60.0 && t.pan_y == pan0.1, &format!("the drag panned {:?} -> {:?}", pan0, (t.pan_x, t.pan_y)));
         // past the overscan (half the pane each side): one build at the new pan of the anchored views
-        // (the wires, the content and each card's view in it)
-        let anchored = |t: &Pane| 2 + scope::stats(t).drawn_items as usize;
+        // (the wires view with its ground, zones, frames and wires, the content and each card's view)
+        let anchored = |t: &Pane| scope::inspect::anchored_views(t);
         p.0 += W as f64 / 2.0;
         let s = step(&mut ui, &mut t, p, &[MouseButton::RightButton], vec![Event::PointerMoved(p)]);
         check(verify || s.views == anchored(&t), &format!("crossing the overscan built {} views", s.views));
@@ -306,8 +309,9 @@ fn window_graph_hover() {
         let (hc, hd) = (head(&t, &c), head(&t, &d));
         let row = scope::inspect::row_center(&t, &c, 1).expect("a row of c");
         let canvas = (8.0, H as f64 - 8.0);
+        let port = scope::inspect::output_socket(&t, &d).expect("d's out-port");
         // warm: every place once
-        for at in [hc, row, hd, canvas, hc, canvas] {
+        for at in [hc, row, hd, canvas, port, canvas, hc, canvas] {
             to(&mut ui, &mut t, at);
         }
         let quiet = |s: &Step, what: &str, bytes: usize| {
@@ -324,13 +328,16 @@ fn window_graph_hover() {
         quiet(&to(&mut ui, &mut t, hd), "to another card", 2 * card);
         quiet(&to(&mut ui, &mut t, canvas), "off the cards", card);
         check(scope::hovered_row(&t).is_none(), "a row stayed hovered off the cards");
-        // a port lights its wires in the view over the content
-        let port = scope::inspect::output_socket(&t, &d).expect("d's out-port");
+        // a port lights its wires: each in its own view (widened, under the cards), their ends ringed
+        // in the view over the content
         let s = to(&mut ui, &mut t, port);
-        check(!t.highlighted.is_empty(), "the out-port lit no wire");
-        check(verify || s.views == 1, &format!("hovering a port built {} views (the hover's alone)", s.views));
-        to(&mut ui, &mut t, canvas);
+        let lit = t.highlighted.len();
+        check(lit > 0, "the out-port lit no wire");
+        check(verify || s.views == 2 + lit, &format!("hovering a port built {} views (the hover's, the wires view and the {lit} lit wires')", s.views));
+        check(verify || s.allocs == 0, &format!("hovering a port allocated {}", s.allocs));
+        let s = to(&mut ui, &mut t, canvas);
         check(t.highlighted.is_empty(), "wires stayed lit off the port");
+        check(verify || s.views == 2 + lit, &format!("leaving a port built {} views", s.views));
         // selecting a card: one content build
         step(&mut ui, &mut t, hc, vec![Event::PointerMoved(hc), Event::PointerPressed(MouseButton::LeftButton, hc)]);
         let s = step(&mut ui, &mut t, hc, vec![Event::PointerReleased(MouseButton::LeftButton, hc)]);

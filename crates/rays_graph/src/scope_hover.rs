@@ -87,9 +87,18 @@ pub struct Hovers {
     spare: Vec<Card>,
     /// the tiles' and ports' keys (what `Ui::root_at` answers among)
     pub keys: Vec<i64>,
-    /// the wires and the open zones in view, in the build's order
+    /// the wires and the open zones in view, in the build's order, and the frames (their scope's
+    /// place in the geometry's origins and their index there)
     pub reach: Vec<usize>,
     pub zones: Vec<usize>,
+    pub frames: Vec<(usize, usize)>,
+    /// the views of the open zones' bodies (by slot) and of the frames (as `frames`) the wires view
+    /// built or kept last
+    pub zone_views: Vec<(usize, UiBox)>,
+    /// the cards in view, and the key the lists were made for
+    pub visible: Vec<usize>,
+    listed: Option<u64>,
+    pub frame_views: Vec<UiBox>,
     /// the content builds so far (not counting verifying runs)
     pub builds: u64,
     /// the geometry the build read (its items and wires), by address
@@ -124,8 +133,6 @@ impl Hovers {
         std::mem::swap(&mut self.cards, &mut self.spare);
         self.cards.clear();
         self.keys.clear();
-        self.reach.clear();
-        self.zones.clear();
         self.geo = geo_key(t);
         self.sel = u64::MAX;
         self.hover = (0, None);
@@ -155,8 +162,10 @@ impl Hovers {
 
     /// The build is over: the cards it left are what presses and the hover find.
     pub fn end(&mut self, t: &Pane, ui: &mut Ui) {
-        // room for every wire near the pointer, so the hover never grows the list
-        self.near.reserve(t.geo.wires.len());
+        // room for every wire near the pointer and lit by it, so the hover never grows the lists
+        for v in [&mut self.near, &mut self.lit, &mut self.next] {
+            v.reserve(t.geo.wires.len());
+        }
         // a card no longer built shows its place again
         for c in self.spare.drain(..) {
             ui.view_offset(&c.view, 0.0, 0.0);
@@ -404,6 +413,7 @@ pub fn find(t: &mut Pane, ui: &mut Ui, canvas: &UiBox, mouse: (f64, f64)) -> Now
     }
     if !t.highlighted.iter().eq(next.iter().rev()) {
         t.highlighted.clear();
+        t.highlighted.reserve(t.geo.wires.len());
         t.highlighted.extend(next.iter().rev());
     }
     std::mem::swap(&mut next, &mut hv.lit);
@@ -621,7 +631,7 @@ pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
         hv.drawn.extend_from_slice(&t.highlighted);
     }
     let hovers = t.hovers.clone();
-    let (place, now, chain, selected) = (Place::of(t), *now, chains_of(t), selected_wire_index(t));
+    let (place, now) = (Place::of(t), *now);
     ui.draw(&b, move |paint, _| {
         let t = &*kept;
         let hv = hovers.borrow();
@@ -630,11 +640,7 @@ pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
         let at = |q: (f64, f64)| place.at(q);
         let pane = (place.x, place.y, t.width as f64, t.height as f64);
         let fs = font_of(z);
-        let tag_size = 5.max((11.0 * z).round() as i64);
-        for &i in &hv.drawn {
-            let wi = &t.geo.wires[i];
-            sp::paint_wire(paint, t, z, &at, &chain, pane, tag_size, wi, &wi.pts, true, selected == Some(i));
-        }
+        // (the lit wires themselves are widened in their own views, under the cards)
         for &i in &hv.drawn {
             let wi = &t.geo.wires[i];
             for pair in wi.pts.windows(2) {
@@ -774,4 +780,143 @@ pub fn drag_marks(t: &Pane, ui: &mut Ui, mouse: (f64, f64), press: (f64, f64)) {
         }
         _ => {}
     }
+}
+
+/// What the views built at `key` show, made once for it: the cards in view (the content box `ov`
+/// past each side of the pane, grown by 20 points), the wires in it (grown by 4), its open zones and
+/// every frame.
+pub fn list(t: &Pane, ov: (f64, f64), key: u64) {
+    let hovers = t.hovers.clone();
+    let mut hv = hovers.borrow_mut();
+    if hv.listed == Some(key) {
+        return;
+    }
+    hv.listed = Some(key);
+    let z = t.zoom;
+    let (ox, oy) = ov;
+    let viewport = (t.x as f64 - ox, t.y as f64 - oy, t.width as f64 + 2.0 * ox, t.height as f64 + 2.0 * oy);
+    // what the content box shows, grown by `margin` screen points, in graph units: the indices answer it
+    let in_view = |margin: f64| -> (f64, f64, f64, f64) {
+        ((-t.pan_x - ox - margin) / z, (-t.pan_y - oy - margin) / z, (t.width as f64 + ox - t.pan_x + margin) / z, (t.height as f64 + oy - t.pan_y + margin) / z)
+    };
+    let hv = &mut *hv;
+    index_query_into(&t.geo.tiles, in_view(20.0), &mut hv.visible);
+    hv.visible.retain(|&i| {
+        let (pl, ax, ay) = &t.geo.items[i];
+        let x = sx(t, *ax) - 20.0;
+        let y = sy(t, *ay) - 20.0;
+        let wd = (pl.w * z) + 40.0;
+        let h = (pl.h * z) + 40.0;
+        let (vx, vy, vw, vh) = viewport;
+        x < vx + vw && x + wd > vx && y < vy + vh && y + h > vy
+    });
+    index_query_into(&t.geo.reach, in_view(4.0), &mut hv.reach);
+    hv.zones.clear();
+    hv.zones.extend(hv.visible.iter().copied().filter(|&i| {
+        let (pl, _, _) = &t.geo.items[i];
+        matches!(&pl.item, Item::Item(n) if n.zone.is_some()) && !pl.collapsed
+    }));
+    hv.frames.clear();
+    for (origin, (scope, _)) in t.geo.origins.iter().enumerate() {
+        hv.frames.extend((0..t.saved.frames(scope).len()).map(|i| (origin, i)));
+    }
+}
+
+/// A view's label: `c` and the decimal digits of `n`, in `buf` (nothing allocated).
+fn label(buf: &mut [u8; 24], c: u8, n: usize) -> &str {
+    buf[0] = c;
+    let mut digits = [0u8; 20];
+    let (mut k, mut v) = (0, n);
+    loop {
+        digits[k] = b'0' + (v % 10) as u8;
+        k += 1;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    for j in 0..k {
+        buf[1 + j] = digits[k - 1 - j];
+    }
+    std::str::from_utf8(&buf[..1 + k]).unwrap_or("?")
+}
+
+/// The wires view's build, in the old single painting's order: the ground, each open zone's body,
+/// each frame, each wire in view, every one a view of its own over the whole content box, kept while
+/// what it shows stays (`key`: the content's build; a wire's own look: lit by the selection's chain,
+/// selected, lit for the pointer, carried by a move). A selection or a hover rebuilds the views of the
+/// wires whose look changes and writes only their instances.
+// ponytail: a view per wire takes one of the painter's 255 view table entries; past them views ride
+// their parent's entry and a moved card view rebuilds instead of offsetting. A view kind with no
+// entry of its own if graphs with hundreds of wires in view move slowly.
+pub fn wires_view(t: &Pane, ui: &mut Ui, key: u64, w: Size, h: Size, chain: &Option<Rc<Chains>>, selected: Option<usize>, skip: &[usize]) {
+    let layer = ui.box_("pxui-scope-layer", BoxOpts::default().w(w).h(h).at((0.0, 0.0)));
+    let saved = ui.enter(&layer);
+    let built = t.built.clone();
+    let full = |ui: &mut Ui, name: &str, rev: u64, paint: &mut dyn FnMut(&mut Ui, &UiBox)| -> UiBox {
+        let v = ui.view_flat(name, rev, w, h, &mut |ui| {
+            let b = ui.box_("p", BoxOpts::default().w(w).h(h).at((0.0, 0.0)));
+            paint(ui, &b);
+        });
+        ui.set_at(&v, (0.0, 0.0));
+        v
+    };
+    let kept = |built: &Rc<std::cell::RefCell<Option<(Rc<Pane>, u64)>>>| built.borrow().as_ref().map(|(p, _)| p.clone());
+    full(ui, "ground", key, &mut |ui, b| {
+        let built = built.clone();
+        ui.draw(b, move |paint, rect| {
+            if let Some(k) = kept(&built) {
+                sp::paint_ground(paint, &k, rect.f64());
+            }
+        });
+    });
+    let mut buf = [0u8; 24];
+    let hovers = t.hovers.clone();
+    let mut hv = hovers.borrow_mut();
+    let hv = &mut *hv;
+    hv.zone_views.clear();
+    for &slot in &hv.zones {
+        let v = full(ui, label(&mut buf, b'z', slot), key, &mut |ui, b| {
+            let built = built.clone();
+            ui.draw(b, move |paint, _| {
+                if let Some(k) = kept(&built) {
+                    sp::paint_zone_body(paint, &k, slot);
+                }
+            });
+        });
+        hv.zone_views.push((slot, v));
+    }
+    hv.frame_views.clear();
+    for (k, &(origin, index)) in hv.frames.iter().enumerate() {
+        let v = full(ui, label(&mut buf, b'f', k), key, &mut |ui, b| {
+            let built = built.clone();
+            ui.draw(b, move |paint, _| {
+                if let Some(k) = kept(&built) {
+                    sp::paint_frame(paint, &k, origin, index);
+                }
+            });
+        });
+        hv.frame_views.push(v);
+    }
+    for &i in &hv.reach {
+        let wi = &t.geo.wires[i];
+        let (lit, is_selected, lit_now, carried) = (chain.as_ref().map(|c| wire_lit(c, wi)), selected == Some(i), t.highlighted.contains(&i), skip.binary_search(&i).is_ok());
+        let mut hh = std::hash::DefaultHasher::new();
+        (key, lit, is_selected, lit_now, carried).hash(&mut hh);
+        full(ui, label(&mut buf, b'w', i), hh.finish(), &mut |ui, b| {
+            if carried {
+                return;
+            }
+            let (built, chain) = (built.clone(), chain.clone());
+            ui.draw(b, move |paint, rect| {
+                if let Some(k) = kept(&built) {
+                    let z = k.zoom;
+                    let tag_size = 5.max((11.0 * z).round() as i64);
+                    let wi = &k.geo.wires[i];
+                    sp::paint_wire(paint, &k, z, &|q| (sx(&k, q.0), sy(&k, q.1)), &chain, rect.f64(), tag_size, wi, &wi.pts, lit_now, is_selected);
+                }
+            });
+        });
+    }
+    ui.leave(saved);
 }
