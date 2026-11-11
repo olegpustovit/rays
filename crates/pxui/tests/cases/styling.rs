@@ -141,6 +141,85 @@ pub fn styling_transition_without_rebuild() {
     ui.destroy();
 }
 
+/// A theme swap rebuilds the views once and moves every look to the new theme's over its
+/// `motion.normal` through the patch path; at rest the instances equal a fresh build under the new
+/// theme, the gate idles, and a warm swap's steps allocate nothing. Reduced motion snaps.
+pub fn styling_theme_swap_transition() {
+    let dusk = Theme::parse(DUSK, &Theme::default()).expect("dusk");
+    let runs = Cell::new(0);
+    let mut build = |ui: &mut Ui| {
+        ui.view("v", 1, Size::Px(300.0), Size::Px(200.0), &mut |ui| {
+            runs.set(runs.get() + 1);
+            ui.panel(PanelOpts::default(), "p", &mut |ui| {
+                ui.label("Swap");
+                ui.button("Go");
+                ui.toggle("On", true);
+                ui.text_field("Name", "value");
+            });
+        });
+    };
+    // the drawn instances in order: a retained layer keeps blank slack where a patched run shrank
+    let instances = |ui: &Ui| ui.output().draw.iter().flat_map(|l| l.instances.iter().copied()).filter(|i| !(i.rect == [0.0; 4] && i.color[3] == 0 && i.color2[3] == 0)).collect::<Vec<_>>();
+    let fresh = |theme: Theme| {
+        let mut ui = new_ui(None);
+        ui.set_theme(theme);
+        let mut b = |ui: &mut Ui| {
+            ui.view("v", 1, Size::Px(300.0), Size::Px(200.0), &mut |ui| {
+                ui.panel(PanelOpts::default(), "p", &mut |ui| {
+                    ui.label("Swap");
+                    ui.button("Go");
+                    ui.toggle("On", true);
+                    ui.text_field("Name", "value");
+                });
+            });
+        };
+        ui.frame(&at(0.0, vec![]), &mut b);
+        ui.frame(&at(0.1, vec![]), &mut b);
+        let out = instances(&ui);
+        ui.destroy();
+        out
+    };
+    let mut ui = new_ui(None);
+    ui.frame(&at(0.0, vec![]), &mut build);
+    ui.frame(&at(0.1, vec![]), &mut build);
+    let mut t = 1.0;
+    // the Rays theme has no motion (a swap to it snaps); give it some
+    let mut rays = Theme::default();
+    rays.tokens.motion.normal = 0.2;
+    for (round, theme) in [dusk, rays, dusk].into_iter().enumerate() {
+        let duration = theme.tokens.motion.normal as f64;
+        let before = instances(&ui);
+        ui.set_theme(theme);
+        let built = runs.get();
+        ui.frame(&at(t, vec![]), &mut build);
+        check(runs.get() == built + 1, "the swap did not rebuild the view once");
+        check(ui.transitions() > 4, &format!("round {round}: {} transitions after a swap", ui.transitions()));
+        check(instances(&ui) != fresh(theme) && instances(&ui) != before, "the swap frame snapped");
+        mem_sys::local_reset();
+        let allocs = mem_sys::local_alloc_count();
+        let mut steps = 0;
+        while ui.wants_frame(&[], t) && steps < 100 {
+            t += 1.0 / 60.0;
+            ui.frame(&at(t, vec![]), &mut build);
+            steps += 1;
+        }
+        let allocs = mem_sys::local_alloc_count() - allocs;
+        check(round == 0 || allocs == 0, &format!("round {round}: {allocs} allocations in {steps} transition steps"));
+        check(runs.get() == built + 1, &format!("round {round}: the transition rebuilt the view"));
+        check((steps as f64) < duration * 60.0 + 3.0 && steps > 3, &format!("round {round}: {steps} steps for {duration} s"));
+        check(ui.transitions() == 0 && !ui.wants_frame(&[], t + 1.0), "the gate did not idle at rest");
+        check(instances(&ui) == fresh(theme), &format!("round {round}: at rest the pixels differ from a fresh build"));
+        t += 1.0;
+    }
+    // reduced motion snaps
+    let mut still = rays;
+    still.tokens.reduced_motion = true;
+    ui.set_theme(still);
+    ui.frame(&at(t, vec![]), &mut build);
+    check(ui.transitions() == 0 && instances(&ui) == fresh(still), "a reduced-motion swap did not snap");
+    ui.destroy();
+}
+
 /// `reduced_motion` zeroes the durations: a hover snaps.
 pub fn styling_reduced_motion() {
     let mut ui = new_ui(None);
@@ -278,5 +357,6 @@ pub const CASES: &[(&str, fn())] = &[
     ("styling_variant_states", styling_variant_states),
     ("styling_transition_without_rebuild", styling_transition_without_rebuild),
     ("styling_reduced_motion", styling_reduced_motion),
+    ("styling_theme_swap_transition", styling_theme_swap_transition),
     ("styling_animate_spring", styling_animate_spring),
 ];

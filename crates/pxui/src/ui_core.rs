@@ -1017,6 +1017,8 @@ pub struct Ui {
     foreground: Vec<(i64, usize)>,
     seeds: Vec<i64>,
     building: bool,
+    /// the frame a theme swap transitions in (`set_theme`)
+    swap_frame: i64,
     frame_number: i64,
     density: i64,
     kit_row_height: i64,
@@ -1210,6 +1212,7 @@ impl Ui {
             foreground: Vec::new(),
             seeds: Vec::new(),
             building: false,
+            swap_frame: -1,
             frame_number: 0,
             density: 1,
             kit_row_height: 24,
@@ -1331,13 +1334,22 @@ impl Ui {
     }
 
     /// Swap the UI's theme (light, dark, high contrast, an accent: each is a `Theme` value). A change
-    /// rebuilds every view. Between frames, or inside one for what is built after it.
-    // ponytail: a swap snaps; transitioning every node's look to the new theme's needs the swap to
-    // re-resolve each node's state against the new States (a rebuild already does) plus a tween per
-    // node; add when a host wants animated theme swaps.
+    /// rebuilds every view once (for the new geometry); every node shown before then moves from the
+    /// look it showed to the new one over the new theme's `motion.normal`, through the patch path
+    /// (no further rebuild); a theme that does not move (`reduced_motion`, or no durations) snaps.
+    /// Between frames, or inside one for what is built after it.
     pub fn set_theme(&mut self, theme: Theme) {
         if theme != self.theme {
             self.epoch += 1;
+            // what each node shows now is where its move starts (one pass over the slots per swap)
+            if theme.tokens.moves() {
+                self.swap_frame = self.frame_number + if self.building { 0 } else { 1 };
+                for s in &mut self.slots {
+                    if s.key != 0 {
+                        s.seen = s.node.look;
+                    }
+                }
+            }
             self.theme = theme;
         }
     }
@@ -4986,7 +4998,11 @@ impl Ui {
         paint.clip_rect = clip_rect;
         let slot = self.boxes[index].slot;
         let start = paint.layers[paint.layer].instances.len() as u32;
-        if let Some(curve) = self.slots[slot].node.transition.take() {
+        // a theme swap moves every node shown before it from the look it showed
+        let s = &self.slots[slot];
+        let swap = self.swap_frame == self.frame_number && s.painted >= 0 && s.seen != s.node.look;
+        let swap = swap.then(|| Curve::Bezier { duration: self.theme.tokens.motion.normal, points: self.theme.tokens.motion.ease });
+        if let Some(curve) = self.slots[slot].node.transition.take().or(swap) {
             let from = match self.tween_of(slot) {
                 Some(_) => self.pose(slot).0,
                 None => Pose { look: self.slots[slot].seen, ..self.rest(slot) },
