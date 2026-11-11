@@ -342,7 +342,7 @@ const ALIGN: [Align; 5] = [Align::Start, Align::Center, Align::End, Align::Stret
 
 /// `groups` groups of 20 nodes (a container and 19 children) cycling through every layout mode, in
 /// a wrapping row: 20 x `groups` + 1 nodes.
-fn stress(ui: &mut Ui, groups: usize) {
+pub fn stress(ui: &mut Ui, groups: usize) {
     let all = ui.node_keyed(int_key(9, 0), Node { w: Size::Px(2400.0), h: Size::Fit, axis: Axis::Row, wrap: true, gap: 2.0, row_gap: 2.0, ..Node::DEFAULT });
     let saved = ui.enter(&all);
     for g in 0..groups {
@@ -388,7 +388,7 @@ fn stress(ui: &mut Ui, groups: usize) {
 
 /// An anchored popup at the window's bottom edge (built outside the cached views: a popup at the
 /// root rebuilds the view that builds it).
-fn stress_popup(ui: &mut Ui) {
+pub fn stress_popup(ui: &mut Ui) {
     let popup = Placement { side: Side::Below, align: Align::Start, gap: 2.0, margin: 4.0, flip: true };
     ui.anchored("stress-pop", Rect::new(2300.0, 2390.0, 40.0, 20.0), popup, Size::Fit, Size::Fit, &mut |ui| {
         ui.node("pop-body", Node { look: Look { fill: color::white(), ..Look::NONE }, ..px(120.0, 60.0) });
@@ -396,7 +396,7 @@ fn stress_popup(ui: &mut Ui) {
     });
 }
 
-fn big_frame(t: f64) -> input::frame::Frame {
+pub fn big_frame(t: f64) -> input::frame::Frame {
     let mut f = frame_at(vec![], 1.0, t, vec![]);
     f.input.size = (2400, 2400);
     f

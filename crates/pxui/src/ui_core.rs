@@ -948,6 +948,8 @@ pub struct Ui {
     a11y_seen: (i64, Option<i64>),
     /// how long the last frame's layout passes took
     layout_time: std::time::Duration,
+    phases: [std::time::Duration; PHASES],
+    phase_at: std::time::Instant,
     /// `order_stack`'s scratch: (z, build position, box)
     z_order: Vec<(i16, u32, usize)>,
     // build state
@@ -1122,6 +1124,8 @@ impl Ui {
             dir: Direction::Ltr,
             z_order: Vec::new(),
             layout_time: std::time::Duration::ZERO,
+            phases: [std::time::Duration::ZERO; PHASES],
+            phase_at: std::time::Instant::now(),
             a11y: A11yTree::new(),
             a11y_next: A11yTree::new(),
             a11y_map: Vec::new(),
@@ -1474,6 +1478,18 @@ impl Ui {
                 self.emit_view(t, map, held);
             }
         }
+    }
+
+    /// The last frame's time in each of its phases, in `PHASE_NAMES` order (a clock read per
+    /// phase, always on): begin (input routing), build, intrinsic, arrange, paint, a11y, finish.
+    pub fn phase_times(&self) -> [std::time::Duration; PHASES] {
+        self.phases
+    }
+
+    fn phase(&mut self, i: usize) {
+        let now = std::time::Instant::now();
+        self.phases[i] = now - self.phase_at;
+        self.phase_at = now;
     }
 
     /// How long the last frame's layout (`intrinsic` and `arrange`) took.
@@ -2395,6 +2411,9 @@ impl Ui {
 /// `label` cut to `limit` points wide with an ellipsis, on a character boundary. `width` measures
 /// text as the sum of its characters, so one pass from the start measures each character once and
 /// stops at the first that does not fit: the cost follows what is shown, not the label's length.
+pub const PHASES: usize = 7;
+pub const PHASE_NAMES: [&str; PHASES] = ["begin", "build", "intrinsic", "arrange", "paint", "a11y", "finish"];
+
 pub fn ellipsis<'a>(width: &mut dyn FnMut(&str) -> f32, limit: f32, label: &'a str) -> Cow<'a, str> {
     let dots = width("\u{2026}");
     // `cut`: the longest prefix that fits with the ellipsis after it; -1 when the ellipsis alone does
@@ -5002,6 +5021,7 @@ impl Ui {
         if !frame.input.t.is_finite() {
             panic!("Ui.frame: time must be finite");
         }
+        self.phase_at = std::time::Instant::now();
         let (scale_x, scale_y) = frame.pixel_scale;
         let density = 1.max(scale_x.max(scale_y).round() as i64);
         let size = (frame.input.size.0 as f32, frame.input.size.1 as f32);
@@ -5041,6 +5061,7 @@ impl Ui {
         self.set_box(root, Node { w: Size::Px(w), h: Size::Px(h), at: Some((0.0, 0.0)), scroll_step: 0.0, ..Node::DEFAULT });
         self.parents.push(root);
         self.seeds.push(ROOT_KEY);
+        self.phase(0);
     }
 
     pub fn end_frame(&mut self, frame: &rframe::Frame) {
@@ -5078,12 +5099,16 @@ impl Ui {
             }
         }
         self.overlays.clear();
-        let laid = std::time::Instant::now();
+        self.phase(1);
         self.intrinsic();
+        self.phase(2);
         self.arrange(frame.input.t);
-        self.layout_time = laid.elapsed();
+        self.phase(3);
+        self.layout_time = self.phases[2] + self.phases[3];
         self.paint_all(frame);
+        self.phase(4);
         self.emit_a11y();
+        self.phase(5);
         self.step_tweens();
         self.text_mut().end_frame();
         // a glyph evicted from the atlas may be one a kept view's instances sample
@@ -5110,6 +5135,7 @@ impl Ui {
         // Layout, hit rectangles and painting are published data now. The callbacks can capture
         // whole document versions, so keep them only while building.
         self.clear_frame_callbacks();
+        self.phase(6);
     }
 
     // ------------------------------------------------------ layout helpers
