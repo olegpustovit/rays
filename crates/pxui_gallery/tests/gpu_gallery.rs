@@ -80,6 +80,7 @@ fn gpu_gallery_pages() {
                 });
                 let path = format!("{}/fixtures/gallery_{page_name}_{name}_{density}x.png", env!("CARGO_MANIFEST_DIR"));
                 let worst = compare(&path, (PAGE_W, PAGE_H), density, &pixels, true);
+                println!("PXUI gallery {page_name} {name} {density}x: max channel difference {worst}");
                 // drivers round blends differently by a level (lavapipe): 2 per channel, as pxui's goldens
                 assert!(worst <= 2, "gallery {page_name} under {name} at {density}x drifted: largest channel difference {worst}");
             }
