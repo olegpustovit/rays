@@ -419,7 +419,17 @@ pub fn on_sheet(ui: &mut Ui, floating: bool, build: &mut dyn FnMut(&mut Ui)) {
         build(ui);
         return;
     }
-    let sheet = pxui::Theme::from_tokens(sheet_theme(&ui.tokens()));
+    // the sheet theme is derived once per token change, not per call
+    thread_local! { static SHEET: std::cell::Cell<Option<(Theme, pxui::Theme)>> = const { std::cell::Cell::new(None) }; }
+    let tokens = ui.tokens();
+    let sheet = match SHEET.get() {
+        Some((from, sheet)) if from == tokens => sheet,
+        _ => {
+            let sheet = pxui::Theme::from_tokens(sheet_theme(&tokens));
+            SHEET.set(Some((tokens, sheet)));
+            sheet
+        }
+    };
     ui.themed(&sheet, build);
 }
 

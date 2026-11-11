@@ -130,3 +130,4 @@ workspace_ir_recursive_rectangles
 workspace_ir_voxel_wall
 workspace_ir_ws_kit
 workspace_start_errors
+run_ui_frames

@@ -80,6 +80,11 @@ pub fn inspect_panel<'a>(
     };
     let width = bounds.2.max(1) as f32;
     let mut result: Option<InspectorResult> = None;
+    // ponytail: the inspector builds at the root every frame, not in a cached view. Hidden inputs no
+    // model revision covers: the sketch's `camera_panel` returns its PanelResult only when built, the
+    // probe records (`laid.records`) are read through `borrow_mut` with the cook's live readouts, and
+    // `image` previews come from the renderer. Cache it once the cook carries a result revision and
+    // the panel result is kept with the view.
     on_sheet(ui, window, &mut |ui| {
         ui.within(inspector_root, &mut |ui| {
             let out: InspectorResult = if !inspector_visible {

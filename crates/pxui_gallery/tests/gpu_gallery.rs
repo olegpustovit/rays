@@ -61,7 +61,8 @@ fn ground(theme: &Theme) -> [u8; 4] {
 /// Every page at 1x and 2x under both themes against `fixtures/gallery_<page>_<theme>_<d>x.png`.
 fn gpu_gallery_pages() {
     let mut gpu = Gpu::open().expect("a GPU backend");
-    let image = gpu.image(96, 64, &gpu::test_card(96, 64));
+    // 100x60 so no nearest-sampled texel boundary falls on a pixel centre (96x64 into 40 points did: GPUs tie differently)
+    let image = gpu.image(100, 60, &gpu::test_card(100, 60));
     for (name, theme) in [("rays", Theme::default()), ("dusk", dusk())] {
         for (i, page_name) in PAGES.iter().enumerate() {
             for density in [1, 2] {

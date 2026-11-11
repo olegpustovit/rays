@@ -11,6 +11,7 @@ mod shell_a;
 mod shell_b;
 
 fn main() {
+    pxui::ui::Ui::verify_new_views(cfg!(debug_assertions));
     sdl3::init::init(&[sdl3::init::Subsystem::Video, sdl3::init::Subsystem::Events]).expect("SDL init");
     let mut cases: Vec<(&str, fn())> = Vec::new();
     cases.extend_from_slice(blur::CASES);

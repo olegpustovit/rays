@@ -1,12 +1,13 @@
 //! the status strip, the guide strip and the echo tips.
 use crate::kit;
 use std::borrow::Cow;
+use std::hash::Hash;
 use editor_core::guide_context;
 use pxui::theme;
 use pxui::ui::*;
 
 /// What the dot after the file says: checked and cooked, cooking, refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum State {
     Ok,
     Busy,
@@ -20,7 +21,7 @@ pub enum TipKind {
 }
 
 /// The optional arguments of `guide` and `draw`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct Opts {
     pub file: String,
     pub state: State,
@@ -30,7 +31,7 @@ pub struct Opts {
     pub notes: Vec<String>,
     pub readout: String,
     pub accent: bool,
-    pub extra: Vec<(String, String)>,
+    pub extra: Vec<(Cow<'static, str>, Cow<'static, str>)>,
     pub leader: Option<String>,
     pub kind: Option<String>,
     pub selection: Option<String>,
@@ -69,12 +70,12 @@ fn lead_plan<'a>(width: &mut dyn FnMut(&str) -> f32, x: f32, file: &str, limit: 
     (file_x, dot_x, tx, shown, after)
 }
 
-/// What every strip starts with: the file, a dot for the state (checked, cooking, refused) and
-/// the status line in ink-2, cut to `limit`; where the next thing goes.
+/// What every strip starts with: the file and a dot for the state (checked, cooking, refused); the
+/// status line after them is `line`'s. Where the next thing goes.
 fn lead(paint: &mut Paint, (x, y, h): (f32, f32, f32), file: &str, state: State, limit: f32, text: &str) -> f32 {
     let theme = paint.theme;
     let ty = paint.text_top(None, y, h);
-    let (file_x, dot_x, text_x, shown, after) = lead_plan(&mut |s| paint.text_width(None, s), x, file, limit, text);
+    let (file_x, dot_x, _, _, after) = lead_plan(&mut |s| paint.text_width(None, s), x, file, limit, text);
     if !file.is_empty() {
         paint.text_c((file_x, ty), theme.foreground, file);
     }
@@ -84,8 +85,31 @@ fn lead(paint: &mut Paint, (x, y, h): (f32, f32, f32), file: &str, state: State,
         State::Error => theme::invalid(),
     };
     paint.circle((dot_x + 3.0, y + (h / 2.0)), 3.0, Some(fill), None);
-    paint.text_c((text_x, ty), if state == State::Error { theme::invalid() } else { theme::ink_2(&theme) }, &shown);
     after
+}
+
+/// The status line in ink-2, cut to `limit`, in a small view of its own over the strip's: a readout
+/// that changes every frame (the frame cook) rebuilds only this. Returns where the lead ends, which
+/// the strip's revision takes in place of the text.
+fn line(ui: &mut Ui, label: &str, bounds: (i64, i64, i64, i64), file: &str, state: State, limit: f32, text: &str) -> f32 {
+    let (x, y, w, h) = bounds;
+    let (_, _, text_x, shown, after) = lead_plan(&mut |s| ui.text_width(None, s), x as f32, file, limit, text);
+    let rev = revision(&|hs| (bounds, state, text_x.to_bits(), &*shown).hash(hs));
+    let at = (text_x.floor() as i64).clamp(x, x + w);
+    strip(ui, label, (at, y, x + w - at, h), rev, &mut |ui, boxed| {
+        let shown = shown.to_string();
+        ui.draw(boxed, move |paint, b| {
+            let theme = paint.theme;
+            let ty = paint.text_top(None, b.y + 1.0, b.h - 1.0);
+            paint.text_c((text_x, ty), if state == State::Error { theme::invalid() } else { theme::ink_2(&theme) }, &shown);
+        });
+    });
+    after
+}
+
+/// what a strip's revision takes from its `Opts`: all of it but the status line (`line`'s)
+fn hash_sans_text(o: &Opts, h: &mut std::hash::DefaultHasher) {
+    (&o.file, o.state, &o.layout, o.fps, &o.notes, &o.readout, o.accent, &o.extra, &o.leader, &o.kind, &o.selection).hash(h);
 }
 
 /// where the end's parts start (the layout, then the frame rate), 12 from the edge, 8 apart
@@ -168,25 +192,46 @@ fn focus_end(ui: &mut Ui, after: f32, kind: Option<&str>, selection: Option<&str
     tx
 }
 
+/// The strip's paint, in a cached view of its own at `bounds`: `paint` builds the one painted box
+/// (`CLIP`, filling the view) only when `revision` (the hash of what it shows, with the bounds) changes.
+/// The strip's hit boxes stay at the root over it, so hovering or dragging them rebuilds nothing.
+fn strip(ui: &mut Ui, label: &str, bounds: (i64, i64, i64, i64), revision: u64, paint: &mut dyn FnMut(&mut Ui, &UiBox)) {
+    let (x, y, w, h) = bounds;
+    let view = ui.view(label, revision, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| {
+        let boxed = ui.box_(label, BoxOpts::default().flags(CLIP).w(Size::Grow).h(Size::Grow));
+        paint(ui, &boxed);
+    });
+    ui.set_at(&view, (x as f32, y as f32));
+}
+
+fn revision(parts: &dyn Fn(&mut std::hash::DefaultHasher)) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::hash::DefaultHasher::new();
+    parts(&mut hasher);
+    hasher.finish()
+}
+
 /// The status strip without the keys: the file, its state, the whole status line, the layout in
 /// use and the frame rate. `o.text` is the status line.
 pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts) {
-    let (x, y, width, height) = bounds;
+    let (x, _, width, height) = bounds;
     if height > 0 {
-        let boxed = ui.box_(
-            "workspace-status",
-            BoxOpts::default().flags(CLIP).w(Size::Px(width as f32)).h(Size::Px(height as f32)).at((x as f32, y as f32)),
-        );
-        let o = o.clone();
-        ui.draw(&boxed, move |paint, b| {
-            let Rect { x, y, w, h } = ground(paint, b);
-            let right = trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, o.fps);
-            let limit = if o.kind.is_none() && o.selection.is_none() { right } else { right - 160.0 };
-            let after = lead(paint, (x, y, h), &o.file, o.state, limit, &o.text);
-            if o.kind.is_some() || o.selection.is_some() {
-                focus_labels(paint, (y, h), true, false, after, o.kind.as_deref(), o.selection.as_deref());
-            }
+        let right = trail_start(ui, x as f32, width as f32, &o.notes, &o.readout, &o.layout, o.fps);
+        let limit = if o.kind.is_none() && o.selection.is_none() { right } else { right - 160.0 };
+        let after = lead_plan(&mut |s| ui.text_width(None, s), x as f32, &o.file, limit, &o.text).4;
+        let rev = revision(&|h| (bounds, after.to_bits(), hash_sans_text(o, h)).hash(h));
+        strip(ui, "workspace-status", bounds, rev, &mut |ui, boxed| {
+            let o = o.clone();
+            ui.draw(boxed, move |paint, b| {
+                let Rect { x, y, w, h } = ground(paint, b);
+                trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, o.fps);
+                lead(paint, (x, y, h), &o.file, o.state, limit, &o.text);
+                if o.kind.is_some() || o.selection.is_some() {
+                    focus_labels(paint, (y, h), true, false, after, o.kind.as_deref(), o.selection.as_deref());
+                }
+            });
         });
+        line(ui, "workspace-status-line", bounds, &o.file, o.state, limit, &o.text);
     }
 }
 
@@ -206,20 +251,22 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
         Some(pending) => {
             // an open leader: the file and its state, a rule, the pending prefix in the accent and
             // `waiting for a key`, the frame rate at the end
-            let boxed = ui.box_(
-                "workspace-guide",
-                BoxOpts::default().flags(CLIP).w(Size::Px(width as f32)).h(Size::Px(height as f32)).at((x as f32, y as f32)),
-            );
+            let limit = x as f32 + 320.0f32.min(width as f32 / 4.0);
+            let after = lead_plan(&mut |s| ui.text_width(None, s), x as f32, &o.file, limit, &o.text).4;
+            let rev = revision(&|h| (bounds, after.to_bits(), &pending, hash_sans_text(o, h)).hash(h));
+            strip(ui, "workspace-guide-leader", bounds, rev, &mut |ui, boxed| {
             let o = o.clone();
             let pending = pending.clone();
-            ui.draw(&boxed, move |paint, b| {
+            ui.draw(boxed, move |paint, b| {
                 let Rect { x, y, w, h } = ground(paint, b);
                 trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, o.fps);
-                let after = lead(paint, (x, y, h), &o.file, o.state, x + 320.0f32.min(w / 4.0), &o.text);
+                lead(paint, (x, y, h), &o.file, o.state, limit, &o.text);
                 let tx = focus_labels(paint, (y, h), true, true, after, Some(&pending), None);
                 let ty = paint.text_top(None, y, h);
                 paint.text_c((tx, ty), theme::ink_2(&theme), "waiting for a key");
             });
+            });
+            line(ui, "workspace-guide-line", bounds, &o.file, o.state, limit, &o.text);
         }
         None => {
             let bar = ui.box_(
@@ -230,17 +277,17 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                     .h(Size::Px(height as f32))
                     .at((x as f32, y as f32)),
             );
-            let keys = o.extra.clone();
+            let keys = &o.extra;
             let title = guide_context::name(context);
             // the kind and what is selected; a context that is no node's (the leader, a search) names itself
-            let kind: Option<String> = Some(o.kind.clone().unwrap_or_else(|| title.to_string()));
-            let selection: Option<String> = match context {
+            let kind: Option<&str> = Some(o.kind.as_deref().unwrap_or(title));
+            let selection: Option<&str> = match context {
                 guide_context::GuideContext::Canvas
                 | guide_context::GuideContext::Node
                 | guide_context::GuideContext::Multi
                 | guide_context::GuideContext::List
-                | guide_context::GuideContext::Text => o.selection.clone(),
-                _ => Some(title.to_string()),
+                | guide_context::GuideContext::Text => o.selection.as_deref(),
+                _ => Some(title),
             };
             let fx = x as f32;
             let fw = width as f32;
@@ -252,7 +299,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             let labels_w = focus_end(ui, 0.0, kind.as_deref(), selection.as_deref());
             let small = kit::cap_size(ui);
             let mut keys_w = 0.0;
-            for (k, l) in &keys {
+            for (k, l) in keys {
                 keys_w = keys_w + ui.text_width(Some(small), k) + ui.text_width(None, l) + 16.0;
             }
             let max_w = (limit - labels_w - 8.0 - fx).max(0.0);
@@ -294,22 +341,25 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                     None => (natural_limit, natural_end),
                 }
             };
+            let rev = revision(&|h| (bounds, context as u8, lead_limit.to_bits(), after_lead.to_bits(), hash_sans_text(o, h)).hash(h));
+            strip(ui, "workspace-guide-paint", bounds, rev, &mut |ui, boxed| {
             let labels_end = focus_end(ui, after_lead, kind.as_deref(), selection.as_deref());
             let mut pairs: Vec<(f32, String, String, f32)> = Vec::new();
             let mut tx = labels_end;
-            for (key, label) in &keys {
+            for (key, label) in keys {
                 let kw = ui.text_width(Some(small), key);
                 let lw = ui.text_width(None, label);
                 if tx + kw + 8.0 + lw > limit - 8.0 {
                     tx = f32::INFINITY;
                 } else {
-                    pairs.push((tx, key.clone(), label.clone(), kw));
+                    pairs.push((tx, key.to_string(), label.to_string(), kw));
                     tx = tx + kw + 8.0 + lw + 8.0;
                 }
             }
             let o2 = o.clone();
             let accent = o.accent;
-            ui.draw(&bar, move |paint, b| {
+            let (kind, selection) = (kind.map(str::to_owned), selection.map(str::to_owned));
+            ui.draw(boxed, move |paint, b| {
                 let Rect { x, y, w, h } = ground(paint, b);
                 trail(paint, (x, y, w, h), &o2.notes, &o2.readout, &o2.layout, o2.fps);
                 // the file and its state, to the rule, then the labels
@@ -327,8 +377,12 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                     paint.text_c((tx + kw + 8.0, ty), theme::ink_2(&theme), label);
                 }
             });
+            });
+            if has_lead {
+                line(ui, "workspace-guide-line", bounds, &o.file, o.state, lead_limit, &o.text);
+            }
             if ui.signal(&bar).hovered {
-                let names: Vec<String> = keys.iter().map(|(k, _)| k.clone()).collect();
+                let names: Vec<String> = keys.iter().map(|(k, _)| k.to_string()).collect();
                 ui.tooltip("guide-strip", &format!("{} \u{b7} {} \u{b7} / ?: all keys", title, names.join("  ")));
             }
         }
