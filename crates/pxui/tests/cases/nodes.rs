@@ -132,7 +132,39 @@ pub fn window_pxui_arena_first_frame() {
     ui.destroy();
 }
 
+/// Repeated labels take distinct keys in declaration order, the same every frame, with or without an
+/// explicitly keyed node between them: the n-th repeat keeps the n-th one's state.
+pub fn window_pxui_node_duplicate_keys() {
+    let mut ui = new_ui(None);
+    let keys = |ui: &mut Ui, t: f64, mark: bool| {
+        let out = std::cell::RefCell::new(Vec::new());
+        frame(ui, t, &mut |ui| {
+            for i in 0..6 {
+                let h = ui.node("x", Node::DEFAULT);
+                if i == 3 && mark {
+                    ui.set_state(&h, 42);
+                }
+                out.borrow_mut().push((h.box_key, ui.state(&h, 0)));
+                if i == 2 {
+                    ui.node("y", Node::DEFAULT);
+                }
+            }
+        });
+        out.into_inner()
+    };
+    let first = keys(&mut ui, 0.0, true);
+    let second = keys(&mut ui, 0.1, false);
+    let mut distinct: Vec<i64> = first.iter().map(|k| k.0).collect();
+    distinct.sort();
+    distinct.dedup();
+    check(distinct.len() == 6, &format!("repeated labels share keys: {first:?}"));
+    check(first.iter().map(|k| k.0).eq(second.iter().map(|k| k.0)), &format!("keys moved between frames: {first:?} / {second:?}"));
+    check(second.iter().map(|k| k.1).eq([0, 0, 0, 42, 0, 0]), &format!("the fourth repeat lost its state: {second:?}"));
+    ui.destroy();
+}
+
 pub const CASES: &[(&str, fn())] = &[
+    ("window_pxui_node_duplicate_keys", window_pxui_node_duplicate_keys),
     ("window_pxui_node_handles", window_pxui_node_handles),
     ("window_pxui_node_patch", window_pxui_node_patch),
     ("window_pxui_arena_closures", window_pxui_arena_closures),

@@ -639,6 +639,8 @@ struct Slot {
     /// bumped when the slot is freed: handles to the node it held are stale from then on
     generation: u32,
     touched: i64,
+    /// the frame and the key of the last duplicate of this key declared in it (`unique_key`)
+    dup: (i64, i64),
     node: Node,
     text: String,
     /// where the node's look was painted: the layer's key, the instance range, the clip, and the
@@ -695,6 +697,7 @@ impl Slot {
             key: 0,
             generation: 0,
             touched: -1,
+            dup: (-1, 0),
             node: Node::DEFAULT,
             text: String::new(),
             range_layer: 0,
@@ -1644,8 +1647,8 @@ impl Ui {
 
     // ----------------------------------------------------- retained slots
 
-    fn slot_of(&mut self, key: i64) -> usize {
-        if let Some(slot) = self.table.find(key) {
+    fn slot_of(&mut self, key: i64, found: Option<usize>) -> usize {
+        if let Some(slot) = found {
             return slot;
         }
         let slot = match self.free.pop() {
@@ -2634,20 +2637,36 @@ impl Ui {
         self.seeds.last().copied().unwrap_or(0)
     }
 
-    /// Two boxes with one key in a frame get distinct, order-stable keys.
-    fn unique_key(&self, key: i64) -> i64 {
-        let mut key = key;
+    /// Two boxes with one key in a frame get distinct, order-stable keys: the n-th takes the key's
+    /// n-th `#dup` hash. The first key's slot remembers the last duplicate taken this frame, so the
+    /// n-th starts there (n repeated labels cost n lookups, not n squared). With the key, its slot
+    /// when it has one.
+    fn unique_key(&mut self, first: i64) -> (i64, Option<usize>) {
+        let (mut key, mut head) = (first, None);
         loop {
             match self.table.find(key) {
                 Some(slot) if self.slots[slot].touched == self.frame_number => {
+                    let dup = self.slots[slot].dup;
+                    if head.is_none() {
+                        head = Some(slot);
+                        if dup.0 == self.frame_number {
+                            key = dup.1;
+                            continue;
+                        }
+                    }
                     key = hash_range(key, "#dup", 0, 4);
                 }
-                _ => return key,
+                found => {
+                    if let Some(head) = head {
+                        self.slots[head].dup = (self.frame_number, key);
+                    }
+                    return (key, found);
+                }
             }
         }
     }
 
-    fn append_box(&mut self, key: i64, parent: usize) -> usize {
+    fn append_box(&mut self, key: i64, found: Option<usize>, parent: usize) -> usize {
         let index = self.count;
         if index == self.boxes.len() {
             self.boxes.push(BoxRec::blank());
@@ -2660,7 +2679,7 @@ impl Ui {
             self.l_gutter.push(0.0);
         }
         self.count = index + 1;
-        let slot = self.slot_of(key);
+        let slot = self.slot_of(key, found);
         self.slots[slot].touched = self.frame_number;
         self.slots[slot].label_count = 0;
         self.slots[slot].owner = self.view_cur;
@@ -2711,9 +2730,9 @@ impl Ui {
     /// Declare a node under the current parent by its key.
     pub fn node_keyed(&mut self, key: i64, node: Node) -> Handle {
         self.require_building();
-        let key = self.unique_key(key);
+        let (key, found) = self.unique_key(key);
         let parent = self.current_parent();
-        let index = self.append_box(key, parent);
+        let index = self.append_box(key, found, parent);
         self.set_box(index, node);
         let slot = self.boxes[index].slot;
         UiBox { index, box_key: key, box_slot: slot, generation: self.slots[slot].generation }
@@ -5129,7 +5148,7 @@ impl Ui {
         let root = &mut self.views[0];
         std::mem::swap(&mut root.nodes, &mut root.prev);
         root.nodes.clear();
-        let root = self.append_box(ROOT_KEY, NONE);
+        let root = self.append_box(ROOT_KEY, self.table.find(ROOT_KEY), NONE);
         let (w, h) = (frame.input.size.0 as f32, frame.input.size.1 as f32);
         self.set_box(root, Node { w: Size::Px(w), h: Size::Px(h), at: Some((0.0, 0.0)), scroll_step: 0.0, ..Node::DEFAULT });
         self.parents.push(root);
