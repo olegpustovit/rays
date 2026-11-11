@@ -3288,6 +3288,16 @@ impl Ui {
 
     // ------------------------------------------------------------- carry
 
+    /// A box holds the pointer capture this frame (a press or drag in progress).
+    pub fn captured(&self) -> bool {
+        self.active.is_some()
+    }
+
+    /// The number of the frame being built (a revision part that rebuilds a view every frame).
+    pub fn frame_index(&self) -> u64 {
+        self.frame_number as u64
+    }
+
     pub fn carrying(&self) -> Option<Payload> {
         self.payload.as_ref().map(|(p, _)| p.clone())
     }

@@ -89,6 +89,10 @@ fn workspace(name: &str, text: &str) {
     // (a cook that publishes during the run, its timing the machine's, rebuilds what shows its results)
     check(idle.views <= idle.frames + 2 || name != "orrery", &format!("{name}: playing rebuilt {} views in {} frames", idle.views, idle.frames));
     check(hover.views == 0 || name != "empty", &format!("{name}: pointer motion rebuilt {} views", hover.views));
+    // with a floating window open the docked grounds stay a kept view (the window's ground is a view
+    // of its own): the pointer moving over the docked graph rebuilds nothing
+    check(hover.views == 0 || name != "floating", &format!("{name}: pointer motion rebuilt {} views", hover.views));
+    check(hover.built <= 15 || name != "floating", &format!("{name}: pointer motion built {} nodes a frame", hover.built));
     if name == "empty" {
         use editor_core::panels::Panel;
         // from one header's button to another's: the two header views (the one left, the one entered)
@@ -161,6 +165,7 @@ fn workspace(name: &str, text: &str) {
 pub fn run_ui_frames() {
     workspace("basic", &sketch("basic"));
     workspace("empty", include_str!("../../../rays_bin/src/empty.rays"));
+    workspace("floating", &with_editor("(let* [main (ui/graph) ins (ui/inspector) window (ui/floating ins) tiles (ui/tile main window)] (ui/workspace tiles))"));
     if std::env::var_os("RAYS_SLOW").is_some() {
         workspace("orrery", &case("orrery"));
     }

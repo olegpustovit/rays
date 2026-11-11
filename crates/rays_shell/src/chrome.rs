@@ -324,100 +324,105 @@ pub fn update(
     let theme = ui.tokens();
     // the window being carried: its edge is the accent and four brackets stand round it
     let moving: Rc<RefCell<Option<Path>>> = Rc::new(RefCell::new(None));
-    let mut grounds = |ui: &mut Ui| {
-        for (order, l) in geometry.leaves.iter().enumerate() {
-            let order = order as i64;
-            match &l.panel {
-                // a view paints its own picture; a window over one still has its line-3 edge and the
-                // sheet fill of its title row's margin
-                Panel::View(_) | Panel::Canvas(_) | Panel::Timeline if l.floating => {
-                    let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-window-edge{}", key(&l.path)));
-                    ui.to_front(order, &boxed);
-                    let l = l.clone();
-                    let moving = moving.clone();
-                    ui.draw_over(&boxed, move |paint, Rect { x, y, w, h }| {
-                        let line = edge_color(&theme, &moving, &l.path);
-                        let hy = l.header.1;
-                        let fy = l.frame.1;
-                        paint.fill(x, y, w, (hy - fy) as f32, theme.input);
-                        // a viewport window: the sheet's white round the picture and a line-2 frame on it
-                        if matches!(l.panel, Panel::View(_)) && l.body.2 > 0 {
-                            let (bx, by, bw, bh) = l.body;
-                            let (bx, by, bw, bh) = (bx as f32, by as f32, bw as f32, bh as f32);
-                            let hy = hy as f32;
-                            paint.fill(x, hy, w, by - hy, theme.input);
-                            paint.fill(x, by, bx - x, y + h - by, theme.input);
-                            paint.fill(bx + bw, by, x + w - bx - bw, y + h - by, theme.input);
-                            paint.fill(bx, by + bh, bw, y + h - by - bh, theme.input);
-                            paint.frame(bx, by, bw, bh, theme::edge(&theme));
-                        }
-                        paint.fill(x, y, w, 1.0, line);
-                        paint.fill(x, y, 1.0, h, line);
-                        paint.fill(x + w - 1.0, y, 1.0, h, line);
-                        paint.fill(x, y + h - 1.0, w, 1.0, line);
-                    });
-                }
-                // docked, its picture is only its body: the margin over its header is the ground every
-                // other pane stands on, not whatever the picture under the chrome shows
-                Panel::View(_) | Panel::Canvas(_) | Panel::Timeline => {
-                    let fy = l.frame.1;
+    // one pane's ground; a window's is raised by the view that holds it
+    let ground = |ui: &mut Ui, l: &Leaf| {
+        match &l.panel {
+            // a view paints its own picture; a window over one still has its line-3 edge and the
+            // sheet fill of its title row's margin
+            Panel::View(_) | Panel::Canvas(_) | Panel::Timeline if l.floating => {
+                let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-window-edge{}", key(&l.path)));
+                let l = l.clone();
+                let moving = moving.clone();
+                ui.draw_over(&boxed, move |paint, Rect { x, y, w, h }| {
+                    let line = edge_color(&theme, &moving, &l.path);
                     let hy = l.header.1;
-                    if hy > fy {
-                        let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-margin{}", key(&l.path)));
-                        ui.draw(&boxed, move |paint, Rect { x, y, w, h: _ }| {
-                            paint.fill(x, y, w, (hy - fy) as f32, theme.panel);
-                        });
+                    let fy = l.frame.1;
+                    paint.fill(x, y, w, (hy - fy) as f32, theme.input);
+                    // a viewport window: the sheet's white round the picture and a line-2 frame on it
+                    if matches!(l.panel, Panel::View(_)) && l.body.2 > 0 {
+                        let (bx, by, bw, bh) = l.body;
+                        let (bx, by, bw, bh) = (bx as f32, by as f32, bw as f32, bh as f32);
+                        let hy = hy as f32;
+                        paint.fill(x, hy, w, by - hy, theme.input);
+                        paint.fill(x, by, bx - x, y + h - by, theme.input);
+                        paint.fill(bx + bw, by, x + w - bx - bw, y + h - by, theme.input);
+                        paint.fill(bx, by + bh, bw, y + h - by - bh, theme.input);
+                        paint.frame(bx, by, bw, bh, theme::edge(&theme));
                     }
-                }
-                p => {
-                    let boxed = floating(
-                        ui,
-                        NO_FLAGS,
-                        l.frame,
-                        format_args!("workspace-{}{}", panels::lower_name(p), key(&l.path)),
-                    );
-                    if l.floating {
-                        ui.to_front(order, &boxed);
-                    }
-                    let is_floating = l.floating;
-                    let path = l.path.clone();
-                    let moving = moving.clone();
-                    ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
-                        // a window is a sheet with one line-3 edge; a docked panel is the ground
-                        if is_floating {
-                            paint.fill(x, y, w, h, theme.input);
-                            paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, edge_color(&theme, &moving, &path));
-                        } else {
-                            paint.fill(x, y, w, h, theme.panel);
-                        }
+                    paint.fill(x, y, w, 1.0, line);
+                    paint.fill(x, y, 1.0, h, line);
+                    paint.fill(x + w - 1.0, y, 1.0, h, line);
+                    paint.fill(x, y + h - 1.0, w, 1.0, line);
+                });
+            }
+            // docked, its picture is only its body: the margin over its header is the ground every
+            // other pane stands on, not whatever the picture under the chrome shows
+            Panel::View(_) | Panel::Canvas(_) | Panel::Timeline => {
+                let fy = l.frame.1;
+                let hy = l.header.1;
+                if hy > fy {
+                    let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-margin{}", key(&l.path)));
+                    ui.draw(&boxed, move |paint, Rect { x, y, w, h: _ }| {
+                        paint.fill(x, y, w, (hy - fy) as f32, theme.panel);
                     });
                 }
             }
+            p => {
+                let boxed = floating(
+                    ui,
+                    NO_FLAGS,
+                    l.frame,
+                    format_args!("workspace-{}{}", panels::lower_name(p), key(&l.path)),
+                );
+                let is_floating = l.floating;
+                let path = l.path.clone();
+                let moving = moving.clone();
+                ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
+                    // a window is a sheet with one line-3 edge; a docked panel is the ground
+                    if is_floating {
+                        paint.fill(x, y, w, h, theme.input);
+                        paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, edge_color(&theme, &moving, &path));
+                    } else {
+                        paint.fill(x, y, w, h, theme.panel);
+                    }
+                });
+            }
+        }
+    };
+    // The docked grounds and gutters are a cached view: they change with the docked geometry alone.
+    let revision = kit::revision(&|h| {
+        use std::hash::Hash;
+        for l in geometry.leaves.iter().filter(|l| !l.floating) {
+            (panels::lower_name(&l.panel), matches!(l.panel, Panel::View(_) | Panel::Canvas(_) | Panel::Timeline), &l.path, l.frame, l.header).hash(h);
+        }
+        for s in &geometry.splitters {
+            s.bounds.hash(h);
+        }
+        frame.input.size.hash(h);
+    });
+    kit::cached(ui, "workspace-grounds", revision, &mut |ui| {
+        for l in geometry.leaves.iter().filter(|l| !l.floating) {
+            ground(ui, l);
         }
         for (n, s) in geometry.splitters.iter().enumerate() {
             let boxed = floating(ui, NO_FLAGS, s.bounds, format_args!("workspace-gutter-{n}"));
             ui.draw(&boxed, move |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, theme::edge(&theme)));
         }
-    };
-    // Docked, the grounds and gutters are a cached view: they change with the geometry alone. A window
-    // stands in front of the rest (`to_front`), so with one open they are built at the root.
-    if geometry.leaves.iter().any(|l| l.floating) {
-        grounds(ui);
-    } else {
-        let revision = {
-            use std::hash::{Hash, Hasher};
-            let mut h = std::hash::DefaultHasher::new();
-            for l in &geometry.leaves {
-                (panels::lower_name(&l.panel), matches!(l.panel, Panel::View(_) | Panel::Canvas(_) | Panel::Timeline), &l.path, l.frame, l.header).hash(&mut h);
-            }
-            for s in &geometry.splitters {
-                s.bounds.hash(&mut h);
-            }
-            frame.input.size.hash(&mut h);
-            h.finish()
-        };
-        let view = ui.view("workspace-grounds", revision, Size::Px(frame.input.size.0 as f32), Size::Px(frame.input.size.1 as f32), &mut grounds);
-        ui.set_at(&view, (0.0, 0.0));
+    });
+    // A window's ground is a root-level view of its own, raised with the window (`to_front`), keyed
+    // by its place. Its edge is the accent while its header moves it (set as the headers build, read
+    // as it paints): while the pointer is captured or released it builds every frame.
+    let gesture = (ui.captured() || frame.input.events.iter().any(|e| matches!(e, input::Event::PointerReleased(..)))).then(|| ui.frame_index());
+    for (order, l) in geometry.leaves.iter().enumerate().filter(|(_, l)| l.floating) {
+        let revision = kit::revision(&|h| {
+            use std::hash::Hash;
+            (panels::lower_name(&l.panel), &l.path, l.frame, l.header, l.body, frame.input.size, gesture).hash(h)
+        });
+        let mut view = None;
+        kit::with_label(format_args!("workspace-window-ground{}", key(&l.path)), &mut |label| {
+            view = Some(kit::cached(ui, label, revision, &mut |ui| ground(ui, l)));
+        });
+        ui.to_front(order as i64, &view.expect("window ground view"));
     }
     let mut intents: Vec<Intent> = Vec::new();
     // where the drag tip goes: over the right of the window being moved
