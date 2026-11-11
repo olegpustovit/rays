@@ -386,7 +386,7 @@ impl Ui {
                 w: Size::Px(width),
                 h,
                 max_h,
-                padding: padding as f32,
+                padding: Edges::all(padding as f32),
                 at: Some((opts.x, opts.y)),
                 scroll_step: row_height as f32,
                 look,
@@ -807,5 +807,53 @@ impl Ui {
         self.node_mut(&k).state = on;
         self.leave(saved);
         value
+    }
+
+    /// A splitter's grip: a node across `axis` (`Row`: a vertical line between side-by-side panes)
+    /// taking presses 3 points either side of it, asking for the resize cursor while hovered or held
+    /// and filled with the accent while held. At `rect` (in its parent) when given,
+    /// else a 1-point flow child that fills its row or column across.
+    pub fn grip(&mut self, label: std::fmt::Arguments, axis: Axis, rect: Option<Rect>) -> (Handle, Signal) {
+        let row = axis == Axis::Row;
+        let mut opts = BoxOpts::default().flags(CLICKABLE | BLOCKING);
+        opts = match rect {
+            Some(r) => opts.at((r.x, r.y)).w(Size::Px(r.w)).h(Size::Px(r.h)),
+            None if row => opts.w(Size::Px(1.0)).h(Size::Grow),
+            None => opts.w(Size::Grow).h(Size::Px(1.0)),
+        };
+        let b = self.box_fmt(label, opts);
+        self.cached_hit(&b, row as u64, || if row { Rc::new(|r: Rect| Rect::new(r.x - 3.0, r.y, r.w + 6.0, r.h)) } else { Rc::new(|r: Rect| Rect::new(r.x, r.y - 3.0, r.w, r.h + 6.0)) });
+        let signal = self.signal(&b);
+        if signal.hovered || signal.held {
+            self.request_cursor(if row { Cursor::HorizontalResize } else { Cursor::VerticalResize });
+        }
+        let look = if signal.held { Look { fill: self.theme().tokens.accent, ..Look::NONE } } else if rect.is_none() { self.theme().separator.idle } else { Look::NONE };
+        self.set_look(&b, look, State { pressed: signal.held, ..State::default() });
+        (b, signal)
+    }
+
+    /// Two panes side by side (`Row`) or stacked (`Column`) filling the parent, `a` taking `ratio` of
+    /// the room the grip leaves and `b` the rest, neither below its minimum. Dragging the grip
+    /// returns the new ratio (the caller stores it); `None` otherwise.
+    pub fn split(&mut self, label: &str, axis: Axis, ratio: f32, min_a: f32, min_b: f32, a: &mut dyn FnMut(&mut Ui), b: &mut dyn FnMut(&mut Ui)) -> Option<f32> {
+        let row = axis == Axis::Row;
+        let split = self.node(label, Node { w: Size::Grow, h: Size::Grow, axis, ..Node::DEFAULT });
+        let saved = self.enter(&split);
+        let ratio = ratio.clamp(0.0, 1.0);
+        let pane = |grow: f32, min: f32| Node { w: Size::Grow, h: Size::Grow, grow, min_w: if row { min } else { 0.0 }, min_h: if row { 0.0 } else { min }, flags: CLIP, ..Node::DEFAULT };
+        let first = self.node("a", pane(ratio, min_a));
+        self.within(&first, a);
+        let (_, signal) = self.grip(format_args!("grip"), axis, None);
+        let second = self.node("b", pane(1.0 - ratio, min_b));
+        self.within(&second, b);
+        self.leave(saved);
+        if !(signal.held || signal.released) || (if row { signal.drag.0 } else { signal.drag.1 }) == 0.0 {
+            return None;
+        }
+        let r = self.rect(&split);
+        let (start, len, at) = if row { (r.x, r.w, signal.pointer.0) } else { (r.y, r.h, signal.pointer.1) };
+        let room = (len - 1.0).max(1.0);
+        let along = (at - start).clamp(min_a, (room - min_b).max(min_a));
+        Some(along / room)
     }
 }

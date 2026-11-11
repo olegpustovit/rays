@@ -784,22 +784,9 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
             continue;
         };
         let (x, y, width, height) = s.bounds;
-        let (gx, gy) = if s.axis == Axis::H { (3, 0) } else { (0, 3) };
-        let hit_rect = Rect::new((x - gx) as f32, (y - gy) as f32, (width + (2 * gx)) as f32, (height + (2 * gy)) as f32);
-        let mut opts = BoxOpts::default()
-            .flags(CLICKABLE | BLOCKING)
-            .at((x as f32, y as f32))
-            .w(Size::Px(width as f32))
-            .h(Size::Px(height as f32));
-        opts.hit = Some(Rc::new(move |_| hit_rect));
-        let boxed = ui.box_fmt(format_args!("workspace-grip-{n}"), opts);
-        let signal = ui.signal(&boxed);
-        if signal.hovered || signal.held {
-            ui.request_cursor(if s.axis == Axis::H { Cursor::HorizontalResize } else { Cursor::VerticalResize });
-        }
+        let grip_axis = if s.axis == Axis::H { pxui::ui::Axis::Row } else { pxui::ui::Axis::Column };
+        let (boxed, signal) = ui.grip(format_args!("workspace-grip-{n}"), grip_axis, Some(Rect::new(x as f32, y as f32, width as f32, height as f32)));
         if signal.held {
-            let accent = theme.accent;
-            ui.draw(&boxed, move |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, accent));
             // the ratio it makes, in a tip beside the gutter: "58 / 42"
             let (first, second) = sides(s);
             let a = (100.0 * first as f32 / (1.max(first + second)) as f32).round() as i64;

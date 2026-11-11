@@ -5,6 +5,7 @@ pub mod a11y;
 mod arena;
 pub mod draw;
 pub mod geom;
+pub mod layout;
 pub mod theme;
 pub mod ui_core;
 pub mod ui_kit;

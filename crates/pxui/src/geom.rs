@@ -13,6 +13,11 @@ pub struct Edges { pub l: f32, pub t: f32, pub r: f32, pub b: f32 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rgba { pub r: i64, pub g: i64, pub b: i64, pub a: i64 }
 
+impl Edges {
+    pub const ZERO: Edges = Edges { l: 0.0, t: 0.0, r: 0.0, b: 0.0 };
+    pub const fn all(v: f32) -> Edges { Edges { l: v, t: v, r: v, b: v } }
+}
+
 impl Rect {
     pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Rect { Rect { x, y, w, h } }
     /// The rectangle as Rays f64 data at the boundary.

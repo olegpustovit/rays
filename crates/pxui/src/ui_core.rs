@@ -12,6 +12,7 @@ use crate::geom::hash;
 use input::frame as rframe;
 use crate::geom::{color, Rgba as Color};
 use crate::draw::{Break, Instance};
+use crate::layout::MAX_TRACKS;
 pub use crate::draw::Fit;
 use crate::arena::{self, Arena};
 pub use crate::geom::Edges;
@@ -151,6 +152,9 @@ impl Size {
 pub enum Axis {
     Row,
     Column,
+    /// children overlap at the padding origin, in `z` order (equal `z`: build order); `justify`
+    /// places them across, `align` down
+    Stack,
 }
 
 pub const NO_FLAGS: Flags = 0;
@@ -180,7 +184,15 @@ pub const TAB_STOP_MARKED: Flags = TAB_STOP | FOCUS_MARK;
 /// The node's text is cut with an ellipsis to the room its look leaves (the placed width less the
 /// text inset) when it does not fit.
 pub const FIT_TEXT: Flags = 16384;
-const HIT_FLAGS: Flags = CLICKABLE | FOCUSABLE | SCROLL | BLOCKING | CAPTURE_UNCLAIMED;
+/// scrolls sideways (the wheel's and the trackpad's horizontal motion); with `SCROLL` on both axes
+pub const SCROLL_X: Flags = 32768;
+/// a flow child of a scroll box that stops at its top edge instead of scrolling out (CSS sticky);
+/// it paints over its siblings
+pub const STICKY: Flags = 65536;
+/// with `CLIP`: the children's clip takes the corner radius of the node's look (CSS `overflow:
+/// hidden` with `border-radius`); without it a clip is square
+pub const ROUND_CLIP: Flags = 131072;
+const HIT_FLAGS: Flags = CLICKABLE | FOCUSABLE | SCROLL | SCROLL_X | BLOCKING | CAPTURE_UNCLAIMED;
 
 /// What a carry holds: a `kind` and a `value`, both strings.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -222,6 +234,7 @@ pub enum UndoKind {
 pub type HitFn = Rc<dyn Fn(Rect) -> Rect>;
 
 pub use crate::theme::{Curve, Font, Look, Ring, Shadow, State, States, Theme, Tokens};
+pub use crate::layout::{place_anchored, Align, Anchor, Cell, Direction, Grid, Justify, Placement, Side, Track};
 
 /// Where a node's look, text and mark sit in its laid-out rectangle: `inset` in from each side, then
 /// at most `w` wide (at the left, or the right with `end`) and `h` high (centred), when finite. The
@@ -267,18 +280,42 @@ pub struct Bar {
     pub whole: bool,
 }
 
-/// A node's layout inputs and look. `at` places it outside the flow at an offset from the parent's
-/// origin; `max_h` caps a `Fit` height; `place` is where its look sits in it and `inset` where its text
-/// sits in that; `mark` is drawn over its text; `bar` gives a scroll node its thumb; `state` is what
-/// the look was picked for (a change of state starts the theme's transition).
+/// A node's layout inputs and look. Sizes: `w`, `h` clamped to `min_*`/`max_*` (min wins); `aspect`
+/// (w / h, 0 none) derives a `Fit` side from the other; a `Grow` size takes `grow` shares of the room
+/// its line leaves, and when the line overflows a child gives up room by `shrink` times its size.
+/// Children: `axis` (row, column or stack), or a `grid`; `padding` inside, `margin` outside (`l` is
+/// the start edge), `gap` between children (`row_gap` between wrapped lines and grid rows), `justify`
+/// along the axis, `align` across it (`align_self` overrides it for this node), `wrap` breaks a
+/// flow into lines; `cell` is its place in a parent grid, `z` its order in a stack. `at` places it
+/// outside the flow at an offset from the parent's origin, `anchor` by a window rectangle (a popup).
+/// `place` is where its look sits in it and `inset` where its text sits in that; `mark` is drawn
+/// over its text; `bar` gives a scroll node its thumb; `state` is what the look was picked for (a
+/// change of state starts the theme's transition).
 #[derive(Clone, Copy, Debug)]
 pub struct Node {
     pub flags: Flags,
     pub w: Size,
     pub h: Size,
+    pub min_w: f32,
+    pub min_h: f32,
+    pub max_w: f32,
     pub max_h: f32,
+    pub grow: f32,
+    pub shrink: f32,
+    pub aspect: f32,
     pub axis: Axis,
-    pub padding: f32,
+    pub padding: Edges,
+    pub margin: Edges,
+    pub gap: f32,
+    pub row_gap: f32,
+    pub justify: Justify,
+    pub align: Align,
+    pub align_self: Option<Align>,
+    pub wrap: bool,
+    pub grid: Option<Grid>,
+    pub cell: Cell,
+    pub z: i16,
+    pub anchor: Option<Anchor>,
     pub at: Option<(f32, f32)>,
     pub scroll_step: f32,
     pub look: Look,
@@ -296,9 +333,26 @@ impl Node {
         flags: NO_FLAGS,
         w: Size::Grow,
         h: Size::Fit,
+        min_w: 0.0,
+        min_h: 0.0,
+        max_w: f32::INFINITY,
         max_h: f32::INFINITY,
+        grow: 1.0,
+        shrink: 0.0,
+        aspect: 0.0,
         axis: Axis::Column,
-        padding: 0.0,
+        padding: Edges::ZERO,
+        margin: Edges::ZERO,
+        gap: 0.0,
+        row_gap: 0.0,
+        justify: Justify::Start,
+        align: Align::Start,
+        align_self: None,
+        wrap: false,
+        grid: None,
+        cell: Cell::DEFAULT,
+        z: 0,
+        anchor: None,
         at: None,
         scroll_step: 24.0,
         look: Look::NONE,
@@ -599,6 +653,7 @@ struct Slot {
     range_layer: i64,
     range: (u32, u32),
     clip: Rect,
+    clip_radius: f32,
     painted: i64,
     /// the view that declares the node, and the view the node holds (`NO_VIEW`)
     owner: u32,
@@ -646,6 +701,7 @@ impl Slot {
             range_layer: 0,
             range: (0, 0),
             clip: Rect::new(0.0, 0.0, 0.0, 0.0),
+            clip_radius: 0.0,
             painted: -1,
             owner: 0,
             view: NO_VIEW,
@@ -712,6 +768,8 @@ pub struct Accumulator {
     /// whether they touched or lifted this frame
     pub scroll_wheel: f32,
     pub scroll_drag: f32,
+    /// the fingers' sideways points (a `SCROLL_X` box)
+    pub scroll_drag_x: f32,
     pub scroll_touch: bool,
     pub scroll_lift: bool,
     /// product of this frame's pinch factors
@@ -869,7 +927,13 @@ pub struct Ui {
     l_w: Vec<f32>,
     l_h: Vec<f32>,
     l_content: Vec<f32>,
+    l_content_w: Vec<f32>,
     l_gutter: Vec<f32>,
+    /// the horizontal scroll of each retained slot (`SCROLL_X`)
+    scroll_xs: Vec<f32>,
+    /// boxes the last layout ran over; row flow direction
+    arranged: usize,
+    dir: Direction,
     // build state
     parents: Vec<usize>,
     overlays: Vec<usize>,
@@ -1035,7 +1099,11 @@ impl Ui {
             l_w: Vec::new(),
             l_h: Vec::new(),
             l_content: Vec::new(),
+            l_content_w: Vec::new(),
             l_gutter: Vec::new(),
+            scroll_xs: Vec::new(),
+            arranged: 0,
+            dir: Direction::Ltr,
             parents: Vec::new(),
             overlays: Vec::new(),
             foreground: Vec::new(),
@@ -1235,6 +1303,23 @@ impl Ui {
         self.count
     }
 
+    /// Nodes the last frame's layout ran over: a kept view's are not among them.
+    pub fn arranged_nodes(&self) -> usize {
+        self.arranged
+    }
+
+    /// The row flow direction (`Rtl` mirrors flow children); every view rebuilds when it changes.
+    pub fn set_dir(&mut self, dir: Direction) {
+        if dir != self.dir {
+            self.dir = dir;
+            self.epoch += 1;
+        }
+    }
+
+    pub fn dir(&self) -> Direction {
+        self.dir
+    }
+
     /// Re-run every clean view's build and panic, naming the view, when its output differs from the
     /// kept one (a revision the app forgot to bump). For tests: it builds every view every frame.
     pub fn verify_views(&mut self, on: bool) {
@@ -1328,6 +1413,7 @@ impl Ui {
             None => {
                 self.slots.push(Slot::fresh());
                 self.scroll_y.push(0.0);
+                self.scroll_xs.push(0.0);
                 self.slots.len() - 1
             }
         };
@@ -1341,6 +1427,7 @@ impl Ui {
         s.key = key;
         s.touched = self.frame_number;
         self.scroll_y[slot] = 0.0;
+        self.scroll_xs[slot] = 0.0;
         self.table.add(key, slot);
         slot
     }
@@ -1435,6 +1522,7 @@ impl Ui {
                     keys: Vec::new(),
                     scroll_wheel: 0.0,
                     scroll_drag: 0.0,
+                    scroll_drag_x: 0.0,
                     scroll_touch: false,
                     scroll_lift: false,
                     press_keys,
@@ -1540,7 +1628,7 @@ impl Ui {
             if self.hit_contains(i, point) {
                 let flags = self.hits[i].flags;
                 let key = self.hits[i].key;
-                if flags & SCROLL != 0 {
+                if flags & (SCROLL | SCROLL_X) != 0 {
                     return if blocker == 0 || self.hit_within(blocker, key) { key } else { 0 };
                 } else if blocker == 0 && flags & BLOCKING != 0 {
                     blocker = key;
@@ -1848,7 +1936,7 @@ impl Ui {
                     }
                     self.lift();
                 }
-                Event::TrackpadScrolled { delta: (_, vertical), phase, time } => {
+                Event::TrackpadScrolled { delta: (horizontal, vertical), phase, time } => {
                     if *phase == ScrollPhase::Touched || self.gesture_key == 0 {
                         let scroll = self.scroll_target(self.pointer);
                         self.gesture_key = self.modal_target(scroll);
@@ -1866,6 +1954,7 @@ impl Ui {
                             value.scroll_lift = false;
                         }
                         value.scroll_drag += *vertical as f32;
+                        value.scroll_drag_x += *horizontal as f32;
                     }
                 }
                 // a trackpad pinch goes where the wheel goes
@@ -2295,6 +2384,7 @@ impl Ui {
             self.l_w.push(0.0);
             self.l_h.push(0.0);
             self.l_content.push(0.0);
+            self.l_content_w.push(0.0);
             self.l_gutter.push(0.0);
         }
         self.count = index + 1;
@@ -2361,7 +2451,7 @@ impl Ui {
 
     pub fn box_keyed(&mut self, key: i64, opts: BoxOpts) -> UiBox {
         let BoxOpts { flags, w, h, max_h, axis, padding, at, scroll_step, hit, hit_rect } = opts;
-        let b = self.node_keyed(key, Node { flags, w, h, max_h, axis, padding, at, scroll_step, ..Node::DEFAULT });
+        let b = self.node_keyed(key, Node { flags, w, h, max_h, axis, padding: Edges::all(padding), at, scroll_step, ..Node::DEFAULT });
         self.boxes[b.index].hit = hit;
         self.boxes[b.index].hit_rect = hit_rect;
         b
@@ -2687,6 +2777,15 @@ impl Ui {
         self.scroll_y[b.box_slot] + self.slots[b.box_slot].scroll_visual as f32
     }
 
+    /// The horizontal scroll of a `SCROLL_X` box.
+    pub fn scroll_offset_x(&self, b: &UiBox) -> f32 {
+        self.scroll_xs[b.box_slot]
+    }
+
+    pub fn set_scroll_offset_x(&mut self, b: &UiBox, value: f32) {
+        self.scroll_xs[b.box_slot] = value;
+    }
+
     pub fn set_scroll_offset(&mut self, b: &UiBox, value: f32) {
         self.scroll_y[b.box_slot] = value;
         let s = &mut self.slots[b.box_slot];
@@ -2821,44 +2920,181 @@ impl Ui {
     // ------------------------------------------------------------- layout
 
     fn flow(&self, index: usize) -> bool {
-        self.nd(index).at.is_none()
+        let n = self.nd(index);
+        n.at.is_none() && n.anchor.is_none()
+    }
+
+    /// The first flow child at or after `child` in its parent's list.
+    fn next_flow(&self, mut child: usize) -> usize {
+        while child != NONE && !self.flow(child) {
+            child = self.boxes[child].next;
+        }
+        child
     }
 
     /// Bottom-up: fixed and fit sizes. Children follow their parent in build order, so a reverse
     /// sweep sees every child first.
     fn intrinsic(&mut self) {
         for index in (0..self.count).rev() {
-            let padding = self.nd(index).padding;
-            let row = self.nd(index).axis == Axis::Row;
-            let mut along = 0.0;
-            let mut across: f32 = 0.0;
-            let mut next = self.boxes[index].first;
-            while next != NONE {
-                let child = next;
-                if self.flow(child) {
-                    let cw = self.l_w[child];
-                    let ch = self.l_h[child];
-                    if row {
-                        along += cw;
-                        across = across.max(ch);
-                    } else {
-                        along += ch;
-                        across = across.max(cw);
-                    }
-                }
-                next = self.boxes[child].next;
+            let n = *self.nd(index);
+            if n.axis == Axis::Stack {
+                self.order_stack(index);
             }
-            let content_w = (if row { along } else { across }) + 2.0 * padding;
-            let content_h = (if row { across } else { along }) + 2.0 * padding;
-            self.l_content[index] = content_h;
+            let (content_w, content_h) = match n.grid {
+                Some(grid) => {
+                    let (cols, nc, rows, nr) = self.grid_tracks(index, &n, &grid, None);
+                    (span(&cols[..nc], n.gap), span(&rows[..nr], n.row_gap))
+                }
+                None => self.flow_extent(index, &n),
+            };
+            let pad = n.padding;
+            let (cw, ch) = (content_w + pad.l + pad.r, content_h + pad.t + pad.b);
+            self.l_content[index] = ch;
+            self.l_content_w[index] = cw;
             let resolve = |kind: &Size, content: f32| match kind {
                 Size::Px(value) => *value,
                 Size::Fit => content,
                 _ => 0.0,
             };
-            self.l_w[index] = resolve(&self.nd(index).w, content_w);
-            self.l_h[index] = self.nd(index).max_h.min(resolve(&self.nd(index).h, content_h));
+            let (mut w, mut h) = (resolve(&n.w, cw), resolve(&n.h, ch));
+            if n.aspect > 0.0 {
+                match (n.w, n.h) {
+                    (Size::Px(_), Size::Fit) => h = w / n.aspect,
+                    (Size::Fit, Size::Px(_)) => w = h * n.aspect,
+                    _ => {}
+                }
+            }
+            self.l_w[index] = clamp(w, n.min_w, n.max_w);
+            self.l_h[index] = clamp(h, n.min_h, n.max_h);
         }
+    }
+
+    /// The extent of a row, column or stack's flow children (margins and gaps in, padding out). A
+    /// wrapping flow breaks its lines at its fixed main size.
+    // ponytail: a wrapping flow whose main size comes from its parent measures as one line (its Fit
+    // cross size is that line's); give it a Px main size, or measure from the laid-out width, if a
+    // wrapping Fit box nests in a Grow one.
+    fn flow_extent(&self, index: usize, n: &Node) -> (f32, f32) {
+        let row = n.axis == Axis::Row;
+        let stack = n.axis == Axis::Stack;
+        let limit = match (n.wrap, row, n.w, n.h) {
+            (true, true, Size::Px(w), _) => w - n.padding.l - n.padding.r,
+            (true, false, _, Size::Px(h)) => h - n.padding.t - n.padding.b,
+            _ => f32::INFINITY,
+        };
+        let (mut along, mut across, mut line_main, mut line_cross, mut count) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0);
+        let mut child = self.next_flow(self.boxes[index].first);
+        while child != NONE {
+            let m = self.nd(child).margin;
+            let (ow, oh) = (self.l_w[child] + m.l + m.r, self.l_h[child] + m.t + m.b);
+            child = self.next_flow(self.boxes[child].next);
+            if stack {
+                (along, across) = (along.max(ow), across.max(oh));
+                continue;
+            }
+            let (cm, cc) = if row { (ow, oh) } else { (oh, ow) };
+            if count > 0 && line_main + n.gap + cm > limit {
+                along = along.max(line_main);
+                across += line_cross + n.row_gap;
+                (line_main, line_cross, count) = (0.0, 0.0, 0);
+            }
+            line_main += if count > 0 { n.gap } else { 0.0 } + cm;
+            line_cross = line_cross.max(cc);
+            count += 1;
+        }
+        if stack {
+            return (along, across);
+        }
+        along = along.max(line_main);
+        across += line_cross;
+        if row { (along, across) } else { (across, along) }
+    }
+
+    /// A stack's children in `z` order (stable): paint and hit order follow the list.
+    fn order_stack(&mut self, index: usize) {
+        let mut sorted = NONE;
+        let mut child = self.boxes[index].first;
+        if child == NONE || {
+            let mut c = child;
+            let mut plain = true;
+            while c != NONE {
+                plain &= self.nd(c).z == 0;
+                c = self.boxes[c].next;
+            }
+            plain
+        } {
+            return;
+        }
+        // insertion sort of the singly linked list: small child lists
+        while child != NONE {
+            let next = self.boxes[child].next;
+            let z = self.nd(child).z;
+            if sorted == NONE || self.nd(sorted).z > z {
+                self.boxes[child].next = sorted;
+                sorted = child;
+            } else {
+                let mut at = sorted;
+                while self.boxes[at].next != NONE && self.nd(self.boxes[at].next).z <= z {
+                    at = self.boxes[at].next;
+                }
+                self.boxes[child].next = self.boxes[at].next;
+                self.boxes[at].next = child;
+            }
+            child = next;
+        }
+        self.boxes[index].first = sorted;
+        let mut last = sorted;
+        while self.boxes[last].next != NONE {
+            last = self.boxes[last].next;
+        }
+        self.boxes[index].last = last;
+    }
+
+    /// The grid's column and row sizes: a content-sized track takes its largest single-span child
+    /// (as does a fractional one when measuring, `room` None); with `room` (inner w, h) the
+    /// fractional tracks share what the others leave.
+    fn grid_tracks(&self, index: usize, n: &Node, g: &Grid, room: Option<(f32, f32)>) -> ([f32; MAX_TRACKS], usize, [f32; MAX_TRACKS], usize) {
+        let nc = g.cols.len().clamp(1, MAX_TRACKS);
+        let mut nr = g.rows.len().min(MAX_TRACKS);
+        let (mut colc, mut rowc) = ([0.0f32; MAX_TRACKS], [0.0f32; MAX_TRACKS]);
+        let mut cursor = (0, 0);
+        let mut child = self.next_flow(self.boxes[index].first);
+        while child != NONE {
+            let cn = self.nd(child);
+            let (c, r, cs, rs) = next_cell(cn.cell, &mut cursor, nc);
+            nr = nr.max(r + rs);
+            if cs == 1 {
+                colc[c] = colc[c].max(self.l_w[child] + cn.margin.l + cn.margin.r);
+            }
+            if rs == 1 {
+                rowc[r] = rowc[r].max(self.l_h[child] + cn.margin.t + cn.margin.b);
+            }
+            child = self.next_flow(self.boxes[child].next);
+        }
+        let size = |tracks: &[Track], n: usize, content: &[f32; MAX_TRACKS], room: Option<f32>, gap: f32| {
+            let mut out = [0.0f32; MAX_TRACKS];
+            let (mut fixed, mut fr) = (0.0, 0.0);
+            for i in 0..n {
+                match (tracks.get(i).copied().unwrap_or(Track::Fit), room) {
+                    (Track::Px(v), _) => out[i] = v,
+                    (Track::Fr(f), Some(_)) => fr += f,
+                    _ => out[i] = content[i],
+                }
+                fixed += out[i];
+            }
+            if let Some(room) = room {
+                let free = (room - fixed - gap * n.saturating_sub(1) as f32).max(0.0);
+                for i in 0..n {
+                    if let Some(Track::Fr(f)) = tracks.get(i) {
+                        out[i] = if fr > 0.0 { free * f / fr } else { 0.0 };
+                    }
+                }
+            }
+            out
+        };
+        let cols = size(g.cols, nc, &colc, room.map(|r| r.0), n.gap);
+        let rows = size(g.rows, nr, &rowc, room.map(|r| r.1), n.row_gap);
+        (cols, nc, rows, nr)
     }
 
     fn pull(&mut self, slot: usize, max_scroll: f64, height: f64, past: f64, delta: f64) {
@@ -2971,91 +3207,437 @@ impl Ui {
         }
     }
 
-    /// Top-down: relative sizes, grow shares, scrolling, scroll gutters, and positions.
+    /// Top-down: relative sizes, grow and shrink shares, alignment, scrolling, scroll gutters and
+    /// positions. A kept view's nodes are not in the build, so their layout is not run again.
     fn arrange(&mut self, time: f64) {
         self.l_x[0] = 0.0;
         self.l_y[0] = 0.0;
         for index in 0..self.count {
-            let padding = self.nd(index).padding;
-            let row = self.nd(index).axis == Axis::Row;
-            let flags = self.nd(index).flags;
-            let scrolls = flags & SCROLL != 0;
+            let n = *self.nd(index);
+            let pad = n.padding;
+            let scrolls = n.flags & SCROLL != 0;
             let max_scroll = 0.0f32.max(self.l_content[index] - self.l_h[index]);
-            let gutter = if scrolls && max_scroll > 0.0 && flags & OVER_THUMB == 0 { 10.0 } else { 0.0 };
+            let gutter = if scrolls && max_scroll > 0.0 && n.flags & OVER_THUMB == 0 { 10.0 } else { 0.0 };
             self.l_gutter[index] = gutter;
             let slot = self.boxes[index].slot;
             if scrolls {
                 self.apply_scroll(false, time, index);
                 self.scroll_y[slot] = 0.0f32.max(max_scroll.min(self.scroll_y[slot]));
             }
-            let inner_w = self.l_w[index] - 2.0 * padding - gutter;
-            let inner_h = self.l_h[index] - 2.0 * padding;
+            if n.flags & SCROLL_X != 0 {
+                let key = self.boxes[index].key;
+                let delta = self.signals.get(&key).map_or(0.0, |v| v.scroll_x * n.scroll_step + v.scroll_drag_x);
+                let max_x = 0.0f32.max(self.l_content_w[index] - self.l_w[index]);
+                self.scroll_xs[slot] = 0.0f32.max(max_x.min(self.scroll_xs[slot] - delta));
+            }
+            let inner_w = self.l_w[index] - pad.l - pad.r - gutter;
+            let inner_h = self.l_h[index] - pad.t - pad.b;
             let relative = |kind: &Size, inner: f32, current: f32| match kind {
                 Size::Pct(fraction) => inner * fraction,
                 Size::Rel(f) => f(inner),
                 _ => current,
             };
-            let mut fixed = 0.0;
-            let mut grow_count = 0;
             let mut next = self.boxes[index].first;
             while next != NONE {
-                let child = next;
-                self.l_w[child] = relative(&self.nd(child).w, inner_w, self.l_w[child]);
-                self.l_h[child] = self.nd(child).max_h.min(relative(&self.nd(child).h, inner_h, self.l_h[child]));
-                if self.flow(child) {
-                    let grows = if row { self.nd(child).w.is_grow() } else { self.nd(child).h.is_grow() };
-                    if grows {
-                        grow_count += 1;
-                    } else {
-                        fixed += if row { self.l_w[child] } else { self.l_h[child] };
-                    }
-                }
-                next = self.boxes[child].next;
+                let c = *self.nd(next);
+                self.l_w[next] = clamp(relative(&c.w, inner_w, self.l_w[next]), c.min_w, c.max_w);
+                self.l_h[next] = clamp(relative(&c.h, inner_h, self.l_h[next]), c.min_h, c.max_h);
+                next = self.boxes[next].next;
             }
-            let share = if grow_count == 0 {
-                0.0
-            } else {
-                0.0f32.max(((if row { inner_w } else { inner_h }) - fixed) / grow_count as f32)
-            };
-            let mut cursor = padding;
-            let scroll_offset = if scrolls { self.scroll_y[slot] + self.slots[slot].scroll_visual as f32 } else { 0.0 };
             let (bake_x, bake_y) = self.baked(index);
             let (origin_x, origin_y) = (self.l_x[index] + bake_x, self.l_y[index] + bake_y);
+            let inner_at = (origin_x + pad.l, origin_y + pad.t);
+            match (n.grid, n.axis) {
+                (Some(grid), _) => self.arrange_grid(index, &n, &grid, (inner_w, inner_h), inner_at),
+                (None, Axis::Stack) => self.arrange_stack(index, &n, (inner_w, inner_h), inner_at),
+                (None, _) => self.arrange_flow(index, &n, (inner_w, inner_h), inner_at),
+            }
+            let scroll_y = if scrolls { self.scroll_y[slot] + self.slots[slot].scroll_visual as f32 } else { 0.0 };
+            let scroll_x = if n.flags & SCROLL_X != 0 { self.scroll_xs[slot] } else { 0.0 };
+            let rtl = self.dir == Direction::Rtl;
+            let (root_w, root_h) = (self.l_w[0], self.l_h[0]);
+            let last = self.boxes[index].last;
+            let mut stuck = false;
             next = self.boxes[index].first;
             while next != NONE {
                 let child = next;
-                if row {
-                    if self.nd(child).w.is_grow() && self.flow(child) {
-                        self.l_w[child] = share;
-                    }
-                    if self.nd(child).h.is_grow() {
-                        self.l_h[child] = self.nd(child).max_h.min(inner_h);
-                    }
-                } else {
-                    if self.nd(child).h.is_grow() && self.flow(child) {
-                        self.l_h[child] = self.nd(child).max_h.min(share);
-                    }
-                    if self.nd(child).w.is_grow() {
-                        self.l_w[child] = inner_w;
-                    }
-                }
+                let c = *self.nd(child);
                 if self.flow(child) {
-                    if row {
-                        self.l_x[child] = origin_x + cursor;
-                        self.l_y[child] = origin_y + padding - scroll_offset;
-                        cursor += self.l_w[child];
-                    } else {
-                        self.l_x[child] = origin_x + padding;
-                        self.l_y[child] = origin_y + cursor - scroll_offset;
-                        cursor += self.l_h[child];
+                    self.l_y[child] -= scroll_y;
+                    self.l_x[child] -= scroll_x;
+                    if rtl {
+                        self.l_x[child] = 2.0 * origin_x + self.l_w[index] - self.l_x[child] - self.l_w[child];
                     }
+                    if c.flags & STICKY != 0 && scrolls {
+                        self.l_y[child] = self.l_y[child].max(inner_at.1 + c.margin.t);
+                        stuck = true;
+                    }
+                } else if let Some(a) = c.anchor {
+                    let r = place_anchored(a.rect, (self.l_w[child], self.l_h[child]), a.placement, Rect::new(0.0, 0.0, root_w, root_h));
+                    (self.l_x[child], self.l_y[child]) = (r.x, r.y);
                 } else {
-                    let (at_x, at_y) = self.nd(child).at.unwrap_or((0.0, 0.0));
+                    // an `at` child's Grow size fills the parent across its axis (along it, none)
+                    if n.axis == Axis::Row && c.h.is_grow() {
+                        self.set_main(false, child, inner_h);
+                    } else if n.axis != Axis::Row && c.w.is_grow() {
+                        self.set_main(true, child, inner_w);
+                    }
+                    let (at_x, at_y) = c.at.unwrap_or((0.0, 0.0));
                     self.l_x[child] = origin_x + at_x;
                     self.l_y[child] = origin_y + at_y;
                 }
                 next = self.boxes[child].next;
             }
+            // stuck headers paint (and take input) over the rows scrolling under them
+            if stuck {
+                let mut child = self.boxes[index].first;
+                while child != NONE {
+                    let next = self.boxes[child].next;
+                    if self.nd(child).flags & STICKY != 0 && child != self.boxes[index].last {
+                        self.unlink(index, child);
+                        let end = self.boxes[index].last;
+                        self.boxes[end].next = child;
+                        self.boxes[index].last = child;
+                    }
+                    if child == last {
+                        break;
+                    }
+                    child = next;
+                }
+            }
+        }
+        self.arranged = self.count;
+    }
+
+    /// Take `child` out of `index`'s child list.
+    fn unlink(&mut self, index: usize, child: usize) {
+        let mut previous = NONE;
+        let mut at = self.boxes[index].first;
+        while at != child {
+            previous = at;
+            at = self.boxes[at].next;
+        }
+        let next = self.boxes[child].next;
+        if previous == NONE {
+            self.boxes[index].first = next;
+        } else {
+            self.boxes[previous].next = next;
+        }
+        if self.boxes[index].last == child {
+            self.boxes[index].last = previous;
+        }
+        self.boxes[child].next = NONE;
+    }
+
+    fn main(&self, row: bool, c: usize) -> f32 {
+        if row { self.l_w[c] } else { self.l_h[c] }
+    }
+
+    fn set_main(&mut self, row: bool, c: usize, v: f32) {
+        let n = self.nd(c);
+        if row {
+            self.l_w[c] = clamp(v, n.min_w, n.max_w);
+        } else {
+            self.l_h[c] = clamp(v, n.min_h, n.max_h);
+        }
+    }
+
+    fn set_cross(&mut self, row: bool, c: usize, v: f32) {
+        self.set_main(!row, c, v);
+    }
+
+    /// The distance from a node's top to its first text baseline (its height when it has no text).
+    // ponytail: a node without text of its own does not take its first child's baseline.
+    fn baseline(&mut self, c: usize) -> f32 {
+        let slot = self.boxes[c].slot;
+        let h = self.l_h[c];
+        if self.slots[slot].text.is_empty() {
+            return h;
+        }
+        let (look, inset) = (self.slots[slot].node.look, self.slots[slot].node.inset);
+        let size = look.font.points(self.font_size);
+        let style = Style { font: look.font.family, size: size as f32, weight: look.font.weight, tracking: look.font.tracking * size as f32, ..Style::default() };
+        let text = self.text.as_mut().expect("Ui: the text engine is lent out");
+        let (_, m) = lay_out(text, &style, 0.0, &self.slots[slot].text);
+        text_top_for(self.font_size, Some(size), inset.t, h - inset.t - inset.b) + m.baseline
+    }
+
+    /// A row or column: lines (one unless it wraps), each sharing its room by grow and shrink
+    /// weights, placed along by `justify` and across by `align`.
+    fn arrange_flow(&mut self, index: usize, n: &Node, inner: (f32, f32), at: (f32, f32)) {
+        let row = n.axis == Axis::Row;
+        let (main_room, cross_room) = if row { inner } else { (inner.1, inner.0) };
+        let main_margins = |m: Edges| if row { (m.l, m.r) } else { (m.t, m.b) };
+        let cross_margins = |m: Edges| if row { (m.t, m.b) } else { (m.l, m.r) };
+        let grows = |c: &Node| if row { c.w.is_grow() } else { c.h.is_grow() };
+        let mut start = self.next_flow(self.boxes[index].first);
+        let mut cross_at = 0.0;
+        while start != NONE {
+            // the line: its children, their bases and the room they take
+            let (mut used, mut count, mut end) = (0.0f32, 0usize, start);
+            while end != NONE {
+                let c = *self.nd(end);
+                // a one-line flow knows its children's stretched cross sizes now, and an aspect
+                // child's Fit main size follows from them
+                let (cs, ce) = cross_margins(c.margin);
+                let cross_size = if row { c.h } else { c.w };
+                if !n.wrap && (cross_size.is_grow() || (c.align_self.unwrap_or(n.align) == Align::Stretch && matches!(cross_size, Size::Fit))) {
+                    self.set_cross(row, end, cross_room - cs - ce);
+                }
+                if c.aspect > 0.0 && matches!(if row { c.w } else { c.h }, Size::Fit) {
+                    let cross = self.main(!row, end);
+                    self.set_main(row, end, if row { cross * c.aspect } else { cross / c.aspect });
+                }
+                // a Grow child starts from nothing (its minimum holds in `grow_line`)
+                let basis = if grows(&c) { 0.0 } else { self.main(row, end) };
+                let (ms, me) = main_margins(c.margin);
+                let outer = basis + ms + me;
+                if n.wrap && count > 0 && used + n.gap + outer > main_room {
+                    break;
+                }
+                used += if count > 0 { n.gap } else { 0.0 } + outer;
+                count += 1;
+                self.set_main(row, end, basis);
+                end = self.next_flow(self.boxes[end].next);
+            }
+            let free = main_room - used;
+            self.grow_line(row, start, end, free);
+            if free < 0.0 {
+                self.shrink_line(row, start, end, -free);
+            }
+            // across: stretched, aspect-derived, the line's extent and its baseline
+            let (mut line_cross, mut base_max) = (0.0f32, 0.0f32);
+            let mut c = start;
+            while c != end {
+                let cn = *self.nd(c);
+                let (cs, ce) = cross_margins(cn.margin);
+                let a = cn.align_self.unwrap_or(n.align);
+                let fit = matches!(if row { cn.h } else { cn.w }, Size::Fit);
+                if cn.aspect > 0.0 && fit {
+                    let main = self.main(row, c);
+                    self.set_cross(row, c, if row { main / cn.aspect } else { main * cn.aspect });
+                }
+                line_cross = line_cross.max(self.main(!row, c) + cs + ce);
+                if a == Align::Baseline {
+                    base_max = base_max.max(cs + self.baseline(c));
+                }
+                c = self.next_flow(self.boxes[c].next);
+            }
+            if !n.wrap {
+                line_cross = cross_room;
+            }
+            let mut used = 0.0;
+            c = start;
+            while c != end {
+                let (ms, me) = main_margins(self.nd(c).margin);
+                used += self.main(row, c) + ms + me;
+                c = self.next_flow(self.boxes[c].next);
+            }
+            let rem = main_room - used - n.gap * count.saturating_sub(1) as f32;
+            let k = count as f32;
+            let (mut pos, between) = match n.justify {
+                Justify::Start => (0.0, n.gap),
+                Justify::Center => (rem / 2.0, n.gap),
+                Justify::End => (rem, n.gap),
+                Justify::SpaceBetween if rem > 0.0 && count > 1 => (0.0, n.gap + rem / (k - 1.0)),
+                Justify::SpaceAround if rem > 0.0 => (rem / k / 2.0, n.gap + rem / k),
+                Justify::SpaceEvenly if rem > 0.0 => (rem / (k + 1.0), n.gap + rem / (k + 1.0)),
+                _ => (0.0, n.gap),
+            };
+            c = start;
+            while c != end {
+                let cn = *self.nd(c);
+                let (ms, me) = main_margins(cn.margin);
+                let (cs, ce) = cross_margins(cn.margin);
+                let a = cn.align_self.unwrap_or(n.align);
+                let cross_size = if row { cn.h } else { cn.w };
+                if n.wrap && (cross_size.is_grow() || (a == Align::Stretch && matches!(cross_size, Size::Fit))) {
+                    self.set_cross(row, c, line_cross - cs - ce);
+                }
+                let outer = self.main(!row, c) + cs + ce;
+                let off = match a {
+                    Align::Center => (line_cross - outer) / 2.0,
+                    Align::End => line_cross - outer,
+                    Align::Baseline => base_max - cs - self.baseline(c),
+                    _ => 0.0,
+                } + cs;
+                let main_at = pos + ms;
+                if row {
+                    (self.l_x[c], self.l_y[c]) = (at.0 + main_at, at.1 + cross_at + off);
+                } else {
+                    (self.l_x[c], self.l_y[c]) = (at.0 + cross_at + off, at.1 + main_at);
+                }
+                pos = main_at + self.main(row, c) + me + between;
+                c = self.next_flow(self.boxes[c].next);
+            }
+            cross_at += line_cross + n.row_gap;
+            start = end;
+        }
+    }
+
+    /// Share `free` points among the line's `Grow` children by their `grow` weights; a child held
+    /// at its minimum or maximum leaves the rest to the others. With nothing free they keep their
+    /// minimum.
+    // ponytail: the freeze loop is O(children x clamped), and past 64 children in a line the later
+    // ones are never frozen; fine for the short lines UI has.
+    fn grow_line(&mut self, row: bool, start: usize, end: usize, mut free: f32) {
+        let mut frozen = 0u64;
+        loop {
+            let (mut total, mut i, mut c) = (0.0, 0, start);
+            while c != end {
+                let n = self.nd(c);
+                if (if row { n.w.is_grow() } else { n.h.is_grow() }) && n.grow > 0.0 && frozen & (1 << i.min(63)) == 0 {
+                    total += n.grow;
+                }
+                (i, c) = (i + 1, self.next_flow(self.boxes[c].next));
+            }
+            if total <= 0.0 {
+                return;
+            }
+            let unit = free.max(0.0) / total;
+            let mut capped = false;
+            (i, c) = (0, start);
+            while c != end {
+                let n = *self.nd(c);
+                let (min, max) = if row { (n.min_w, n.max_w) } else { (n.min_h, n.max_h) };
+                if (if row { n.w.is_grow() } else { n.h.is_grow() }) && n.grow > 0.0 && frozen & (1 << i.min(63)) == 0 {
+                    let v = unit * n.grow;
+                    if v < min || v > max {
+                        let held = clamp(v, min, max);
+                        free -= held;
+                        self.set_main(row, c, held);
+                        frozen |= 1 << i.min(63);
+                        capped = true;
+                    }
+                }
+                (i, c) = (i + 1, self.next_flow(self.boxes[c].next));
+            }
+            if !capped {
+                (i, c) = (0, start);
+                while c != end {
+                    let n = *self.nd(c);
+                    if (if row { n.w.is_grow() } else { n.h.is_grow() }) && n.grow > 0.0 && frozen & (1 << i.min(63)) == 0 {
+                        self.set_main(row, c, unit * n.grow);
+                    }
+                    (i, c) = (i + 1, self.next_flow(self.boxes[c].next));
+                }
+                return;
+            }
+        }
+    }
+
+    /// Take `over` points from the line's children by `shrink` times their size, none below its
+    /// minimum.
+    fn shrink_line(&mut self, row: bool, start: usize, end: usize, mut over: f32) {
+        let min = |ui: &Ui, c: usize| if row { ui.nd(c).min_w } else { ui.nd(c).min_h };
+        loop {
+            let mut total = 0.0;
+            let mut c = start;
+            while c != end {
+                if self.nd(c).shrink > 0.0 && self.main(row, c) > min(self, c) {
+                    total += self.nd(c).shrink * self.main(row, c);
+                }
+                c = self.next_flow(self.boxes[c].next);
+            }
+            if total <= 0.0 || over <= 0.0 {
+                return;
+            }
+            let ratio = over / total;
+            let mut capped = false;
+            c = start;
+            while c != end {
+                let (s, v, lo) = (self.nd(c).shrink, self.main(row, c), min(self, c));
+                if s > 0.0 && v > lo && v - ratio * s * v < lo {
+                    over -= v - lo;
+                    self.set_main(row, c, lo);
+                    capped = true;
+                }
+                c = self.next_flow(self.boxes[c].next);
+            }
+            if !capped {
+                c = start;
+                while c != end {
+                    let (s, v, lo) = (self.nd(c).shrink, self.main(row, c), min(self, c));
+                    if s > 0.0 && v > lo {
+                        self.set_main(row, c, v - ratio * s * v);
+                    }
+                    c = self.next_flow(self.boxes[c].next);
+                }
+                return;
+            }
+        }
+    }
+
+    /// A stack: every flow child at the inner origin, `Grow` sizes filling it, placed across by
+    /// `justify` and down by `align`.
+    fn arrange_stack(&mut self, index: usize, n: &Node, inner: (f32, f32), at: (f32, f32)) {
+        let mut c = self.next_flow(self.boxes[index].first);
+        while c != NONE {
+            let cn = *self.nd(c);
+            let m = cn.margin;
+            if cn.w.is_grow() {
+                self.set_main(true, c, inner.0 - m.l - m.r);
+            }
+            if cn.h.is_grow() {
+                self.set_main(false, c, inner.1 - m.t - m.b);
+            }
+            if cn.aspect > 0.0 && matches!(cn.h, Size::Fit) {
+                self.set_main(false, c, self.l_w[c] / cn.aspect);
+            }
+            let ow = self.l_w[c] + m.l + m.r;
+            let oh = self.l_h[c] + m.t + m.b;
+            let x = match n.justify {
+                Justify::Center => (inner.0 - ow) / 2.0,
+                Justify::End => inner.0 - ow,
+                _ => 0.0,
+            };
+            let y = match cn.align_self.unwrap_or(n.align) {
+                Align::Center => (inner.1 - oh) / 2.0,
+                Align::End => inner.1 - oh,
+                _ => 0.0,
+            };
+            (self.l_x[c], self.l_y[c]) = (at.0 + x + m.l, at.1 + y + m.t);
+            c = self.next_flow(self.boxes[c].next);
+        }
+    }
+
+    /// A grid: tracks sized by `grid_tracks`, each child in its cell (a `Grow` size fills the cell;
+    /// `align` places it down).
+    fn arrange_grid(&mut self, index: usize, n: &Node, g: &Grid, inner: (f32, f32), at: (f32, f32)) {
+        let (cols, nc, rows, nr) = self.grid_tracks(index, n, g, Some(inner));
+        let (mut col_x, mut row_y) = ([0.0f32; MAX_TRACKS + 1], [0.0f32; MAX_TRACKS + 1]);
+        for i in 0..nc {
+            col_x[i + 1] = col_x[i] + cols[i] + n.gap;
+        }
+        for i in 0..nr {
+            row_y[i + 1] = row_y[i] + rows[i] + n.row_gap;
+        }
+        let mut cursor = (0, 0);
+        let mut c = self.next_flow(self.boxes[index].first);
+        while c != NONE {
+            let cn = *self.nd(c);
+            let m = cn.margin;
+            let (col, row, cs, rs) = next_cell(cn.cell, &mut cursor, nc);
+            let span_w = col_x[col + cs] - col_x[col] - n.gap;
+            let span_h = row_y[row + rs] - row_y[row] - n.row_gap;
+            let a = cn.align_self.unwrap_or(n.align);
+            if cn.w.is_grow() {
+                self.set_main(true, c, span_w - m.l - m.r);
+            }
+            if cn.h.is_grow() || (a == Align::Stretch && matches!(cn.h, Size::Fit)) {
+                self.set_main(false, c, span_h - m.t - m.b);
+            }
+            if cn.aspect > 0.0 && matches!(cn.h, Size::Fit) {
+                self.set_main(false, c, self.l_w[c] / cn.aspect);
+            }
+            let oh = self.l_h[c] + m.t + m.b;
+            let y = match a {
+                Align::Center => (span_h - oh) / 2.0,
+                Align::End => span_h - oh,
+                _ => 0.0,
+            };
+            (self.l_x[c], self.l_y[c]) = (at.0 + col_x[col] + m.l, at.1 + row_y[row] + y + m.t);
+            c = self.next_flow(self.boxes[c].next);
         }
     }
 
@@ -3070,6 +3652,34 @@ impl Ui {
     pub(crate) fn set_l_content(&mut self, b: &UiBox, v: f32) {
         self.l_content[b.index] = v;
     }
+}
+
+/// `v` held to `[min, max]`; the minimum wins.
+fn clamp(v: f32, min: f32, max: f32) -> f32 {
+    v.min(max).max(min)
+}
+
+/// Tracks' total extent with `gap` between them.
+fn span(tracks: &[f32], gap: f32) -> f32 {
+    tracks.iter().sum::<f32>() + gap * tracks.len().saturating_sub(1) as f32
+}
+
+/// A grid child's (column, row, column span, row span): its own cell, or the next free one along
+/// the rows from `cursor` (auto placement; explicit cells are not avoided).
+fn next_cell(c: Cell, cursor: &mut (usize, usize), cols: usize) -> (usize, usize, usize, usize) {
+    let cs = (c.col_span.max(1) as usize).min(cols);
+    let (col, row) = if c.col == Cell::AUTO {
+        if cursor.0 + cs > cols {
+            *cursor = (0, cursor.1 + 1);
+        }
+        let at = *cursor;
+        cursor.0 += cs;
+        at
+    } else {
+        ((c.col as usize).min(cols - 1), c.row as usize)
+    };
+    let row = row.min(MAX_TRACKS - 1);
+    (col, row, cs.min(cols - col), (c.row_span.max(1) as usize).min(MAX_TRACKS - row))
 }
 
 // Scrolling as NSScrollView does it, the constants fitted to a recording of one. Past an edge
@@ -3136,6 +3746,8 @@ pub struct Paint {
     /// the view table index instances take
     view: u16,
     pub clip_rect: Rect,
+    /// the corner radius of `clip_rect` (a rounded `CLIP` node's children)
+    pub clip_radius: f32,
     pub theme: Tokens,
     pub font_size: i64,
     pub row_height: i64,
@@ -3151,6 +3763,9 @@ pub struct Paint {
     pub l_content: Vec<f32>,
     /// the scroll offset of each retained slot
     pub scroll_y: Vec<f32>,
+    /// the content width and horizontal scroll offset, as `l_content` and `scroll_y`
+    pub l_content_w: Vec<f32>,
+    pub scroll_x: Vec<f32>,
 }
 
 impl Paint {
@@ -3190,7 +3805,8 @@ impl Paint {
     /// Append `instance` under the current clip and view.
     fn push(&mut self, instance: Instance) {
         let clip = clip_of(self.clip_rect);
-        self.layers[self.layer].instances.push(Instance { clip, view: self.view, ..instance });
+        let clip_radius = if self.clip_radius > 0.0 { crate::draw::f16(self.clip_radius) } else { 0 };
+        self.layers[self.layer].instances.push(Instance { clip, clip_radius, view: self.view, ..instance });
     }
 
     /// An edge at `v` points as the rasteriser covers pixel centres (`a <= centre < b`): snapped
@@ -3353,6 +3969,23 @@ impl Paint {
             } else {
                 self.fill(t.x, t.y, t.w, t.h, bar.color);
             }
+        }
+    }
+
+    /// A `SCROLL_X` node's thumb along its bottom edge, as `bar` along the right.
+    fn bar_x(&mut self, r: Rect, index: usize, slot: usize, bar: &Bar) {
+        let content = self.l_content_w[index];
+        if content <= r.w {
+            return;
+        }
+        let track_w = 1.0f32.max(r.w - 2.0 * bar.margin);
+        let thumb_w = track_w.min(20.0f32.max(track_w * r.w / content));
+        let x = r.x + bar.margin + self.scroll_x[slot] * (track_w - thumb_w) / (content - r.w);
+        let t = Rect::new(x, r.y + r.h - bar.gap - bar.width, thumb_w, bar.width);
+        if bar.radius > 0.0 {
+            self.push(Instance::rect([t.x, t.y, t.x + t.w, t.y + t.h], rgba(bar.color)).radii([bar.radius; 4]));
+        } else {
+            self.fill(t.x, t.y, t.w, t.h, bar.color);
         }
     }
 
@@ -3804,6 +4437,7 @@ impl Ui {
         // scratch positions until `settle` places them
         s.range = (start, paint.layers[paint.layer].instances.len() as u32);
         s.clip = clip_rect;
+        s.clip_radius = paint.clip_radius;
         s.painted = self.frame_number;
         self.painted_nodes.push((slot, paint.layer));
     }
@@ -3852,12 +4486,21 @@ impl Ui {
                 self.run_painters(self.boxes[index].paint.0, index, clip_rect, paint);
             }
             let child_clip = if flags & CLIP != 0 {
-                let padding = self.nd(index).padding;
-                intersect(clip_rect, Rect::new(x + padding, y + padding, 0.0f32.max(w - 2.0 * padding), 0.0f32.max(h - 2.0 * padding)))
+                let p = self.nd(index).padding;
+                intersect(clip_rect, Rect::new(x + p.l, y + p.t, 0.0f32.max(w - p.l - p.r), 0.0f32.max(h - p.t - p.b)))
             } else {
                 clip_rect
             };
             let parent_hit = if has_hit { self.boxes[index].key } else { parent_hit };
+            // a `ROUND_CLIP` node's corner radius rounds its children's clip; a square clip inside a
+            // rounded one drops the rounding
+            // ponytail: one radius (the largest corner's) for the clip, and a cached view inside takes
+            // its outer clip square from the view table; per-corner radii when a design asks.
+            let outer_radius = paint.clip_radius;
+            if flags & CLIP != 0 {
+                let r = self.nd(index).look.radius;
+                paint.clip_radius = if flags & ROUND_CLIP != 0 { r[0].max(r[1]).max(r[2]).max(r[3]) } else { 0.0 };
+            }
             if view != NO_VIEW {
                 self.visit_view(paint, index, view, child_clip, parent_hit);
             } else {
@@ -3867,11 +4510,17 @@ impl Ui {
                     child = self.boxes[child].next;
                 }
             }
+            paint.clip_radius = outer_radius;
             if shown {
                 self.run_painters(self.boxes[index].over.0, index, clip_rect, paint);
                 if let Some(bar) = self.nd(index).bar {
                     paint.clip_rect = clip_rect;
-                    paint.bar(screen_rect, index, slot, &bar);
+                    if flags & SCROLL != 0 || flags & SCROLL_X == 0 {
+                        paint.bar(screen_rect, index, slot, &bar);
+                    }
+                    if flags & SCROLL_X != 0 {
+                        paint.bar_x(screen_rect, index, slot, &bar);
+                    }
                 }
             }
             if shown && self.keyboard_focus && self.focus == self.boxes[index].key && flags & FOCUS_MARK == 0 {
@@ -3944,6 +4593,7 @@ impl Ui {
             layer: usize::MAX,
             view: 0,
             clip_rect: clip,
+            clip_radius: 0.0,
             theme: self.theme.tokens,
             font_size: self.font_size,
             row_height: self.kit_row_height,
@@ -3954,17 +4604,21 @@ impl Ui {
             edit_scroll_x: self.edit_scroll_x,
             l_content: std::mem::take(&mut self.l_content),
             scroll_y: std::mem::take(&mut self.scroll_y),
+            l_content_w: std::mem::take(&mut self.l_content_w),
+            scroll_x: std::mem::take(&mut self.scroll_xs),
         };
         paint.next_layer(0);
         paint
     }
 
     fn paint_end(&mut self, paint: Paint) -> Vec<Layer> {
-        let Paint { layers, text, label, l_content, scroll_y, .. } = paint;
+        let Paint { layers, text, label, l_content, scroll_y, l_content_w, scroll_x, .. } = paint;
         self.text = Some(text);
         self.label = label;
         self.l_content = l_content;
         self.scroll_y = scroll_y;
+        self.l_content_w = l_content_w;
+        self.scroll_xs = scroll_x;
         layers
     }
 
@@ -3984,6 +4638,7 @@ impl Ui {
         let owner = self.slots[slot].owner;
         let scratch = std::mem::take(&mut self.patch_layers);
         let mut paint = self.paint_begin(scratch, self.slots[slot].clip);
+        paint.clip_radius = self.slots[slot].clip_radius;
         paint.view = self.views[self.views[owner as usize].xf as usize].index;
         let (pose, steady) = self.pose(slot);
         let focused = self.marks_focus(slot);
@@ -4351,6 +5006,19 @@ impl Ui {
         }
         self.leave(inner);
         self.leave(saved);
+    }
+
+    /// A popup placed by `anchor` (window points, e.g. `ui.rect(&field)` or a point's empty rect):
+    /// on the placement's side, flipped to the other when it does not fit there, kept inside the
+    /// window. Its size may be `Fit`: placement runs in layout, after the size is known. Built at the
+    /// root wherever it is called, and painted over the rest.
+    pub fn anchored(&mut self, label: &str, anchor: Rect, placement: Placement, w: Size, h: Size, f: &mut dyn FnMut(&mut Ui)) -> Handle {
+        let saved = self.enter_root_parent();
+        let b = self.node(label, Node { w, h, anchor: Some(Anchor { rect: anchor, placement }), ..Node::DEFAULT });
+        self.overlays.push(b.index);
+        self.within(&b, f);
+        self.leave(saved);
+        b
     }
 
     pub fn col(&mut self, padding: f32, label: &str, f: &mut dyn FnMut(&mut Ui)) {

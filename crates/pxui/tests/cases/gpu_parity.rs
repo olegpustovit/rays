@@ -321,7 +321,28 @@ fn gpu_retained_bytes() {
     println!("PXUI retained: 0 bytes kept, 64 bytes per copy for a one-instance patch");
 }
 
+/// `ROUND_CLIP`: a child filling a rounded clipping node is cut at the node's corners.
+fn gpu_round_clip() {
+    if !gpu::available() {
+        return;
+    }
+    let red = pxui::geom::color::rgb(220, 20, 20);
+    let (pixels, _) = render(1, 80, &mut |ui| {
+        let clip = ui.node("clip", Node { flags: CLIP | ROUND_CLIP, w: Size::Px(100.0), h: Size::Px(60.0), at: Some((10.0, 10.0)), look: Look { radius: [16.0; 4], ..Look::NONE }, ..Node::DEFAULT });
+        ui.within(&clip, &mut |ui| {
+            ui.node("fill", Node { w: Size::Grow, h: Size::Grow, look: Look { fill: red, ..Look::NONE }, ..Node::DEFAULT });
+        });
+    });
+    let at = |x: usize, y: usize| &pixels[(y * WIDTH as usize + x) * 4..][..3];
+    assert_eq!(at(60, 40), &[220, 20, 20], "the middle is the child's");
+    assert_eq!(at(11, 11), &[228, 139, 161], "the corner is cut");
+    assert_eq!(at(108, 68), &[228, 139, 161], "the far corner is cut");
+    assert_eq!(at(60, 11), &[220, 20, 20], "the straight edge is not");
+    println!("PXUI round clip: corners cut");
+}
+
 pub const CASES: &[(&str, fn())] = &[
+    ("gpu_round_clip", gpu_round_clip),
     ("gpu_patch", gpu_patch),
     ("gpu_view_kept_pixels", gpu_view_kept_pixels),
     ("gpu_view_offset_pixels", gpu_view_offset_pixels),
