@@ -4378,8 +4378,9 @@ impl Paint {
                 text
             };
             // right to left the start inset is at the right: the text ends there
-            let at = if self.rtl { (x + w - inset.l - lay_out(&mut self.text, &style, 0.0, text).1.w, at.1) } else { at };
-            self.text_styled(at, &style, 0.0, ink, text);
+            let (key, m) = lay_out(&mut self.text, &style, 0.0, text);
+            let at = if self.rtl { (x + w - inset.l - m.w, at.1) } else { at };
+            self.text_laid(at, &style, ink, key, m);
             self.label = buffer;
         }
         if let Mark::Chevron(direction) = node.mark {
@@ -4631,6 +4632,11 @@ impl Paint {
     /// keep their own colours under its alpha.
     pub fn text_styled(&mut self, at: (f32, f32), style: &Style, width: f32, color: Option<Color>, text: &str) -> Metrics {
         let (key, m) = lay_out(&mut self.text, style, width, text);
+        self.text_laid(at, style, color, key, m)
+    }
+
+    /// `text_styled` for a layout already made (`lay_out`'s key and metrics).
+    fn text_laid(&mut self, at: (f32, f32), style: &Style, color: Option<Color>, key: u64, m: Metrics) -> Metrics {
         let d = self.density as f32;
         let snap = |v: f32| (v * d).round() / d;
         let baseline = snap(at.1 + self.text.ascent(style.font) * style.size);
