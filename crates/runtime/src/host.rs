@@ -11,28 +11,12 @@ pub use pxui_wayland::{clipboard_get_text, clipboard_set_text, CursorShape, Dial
 #[cfg(target_os = "linux")]
 pub fn configure_native_process() -> Result<(), String> {
     use std::os::unix::process::CommandExt;
-    #[repr(C)]
-    struct Rlimit {
-        cur: u64,
-        max: u64,
-    }
-    unsafe extern "C" {
-        fn getrlimit(resource: i32, limit: *mut Rlimit) -> i32;
-        fn setrlimit(resource: i32, limit: *const Rlimit) -> i32;
-    }
-    const RLIMIT_STACK: i32 = 3;
-    const STACK: u64 = 256 << 20;
-    let mut limit = Rlimit { cur: 0, max: 0 };
-    // SAFETY: plain out-parameter.
-    if unsafe { getrlimit(RLIMIT_STACK, &mut limit) } == 0 && limit.cur < STACK && limit.cur < limit.max {
-        limit.cur = STACK.min(limit.max);
-        // SAFETY: plain in-parameter. The exec only returns on failure; the raised limit then still lets the
-        // stack grow up to the gap the kernel left at exec.
-        if unsafe { setrlimit(RLIMIT_STACK, &limit) } == 0 {
-            let mut args = std::env::args_os();
-            let argv0 = args.next().unwrap_or_default();
-            let _ = std::process::Command::new("/proc/self/exe").arg0(argv0).args(args).exec();
-        }
+    // The exec only returns on failure; the raised limit then still lets the stack grow up to the gap the
+    // kernel left at exec.
+    if mem_sys::raise_stack_limit(256 << 20) {
+        let mut args = std::env::args_os();
+        let argv0 = args.next().unwrap_or_default();
+        let _ = std::process::Command::new("/proc/self/exe").arg0(argv0).args(args).exec();
     }
     pxui_wayland::configure_native_process()
 }

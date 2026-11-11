@@ -48,7 +48,7 @@ pub fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("pxui_gallery", &[
             "pxui", "input", "mem_sys", "ogpu_core", "pxui_render", "ogpu_metal", "ogpu_vulkan", "pxui_sdl", "sdl3", "pxui_wayland", "pxui_atspi",
         ][..]), // pxui
-        ("runtime", &["pxui_sdl", "pxui_wayland", "sdl3", "ogpu_core", "input"][..]),
+        ("runtime", &["pxui_sdl", "pxui_wayland", "sdl3", "ogpu_core", "input", "mem_sys"][..]),
         ("runtime_resources", &["sdl3", "ogpu_core"][..]),
         ("renderer", &["ogpu_core", "scene_command", "runtime", "lru", "rays_math", "runtime_resources", "scene_core"][..]),
         ("flow_syntax", &["param", "rays_diagnostic", "input", "rays_math"][..]),

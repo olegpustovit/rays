@@ -180,3 +180,27 @@ pub fn physical_ram() -> i64 {
     unsafe { mem_sys_physical_ram() }
 }
 
+
+/// Linux: raise the soft RLIMIT_STACK to `bytes` (capped by the hard limit) when it is below both;
+/// true when it was raised, so the caller re-execs for the main thread's stack to take it.
+#[cfg(target_os = "linux")]
+pub fn raise_stack_limit(bytes: u64) -> bool {
+    #[repr(C)]
+    struct Rlimit {
+        cur: u64,
+        max: u64,
+    }
+    unsafe extern "C" {
+        fn getrlimit(resource: i32, limit: *mut Rlimit) -> i32;
+        fn setrlimit(resource: i32, limit: *const Rlimit) -> i32;
+    }
+    const RLIMIT_STACK: i32 = 3;
+    let mut limit = Rlimit { cur: 0, max: 0 };
+    // SAFETY: plain out-parameter.
+    if unsafe { getrlimit(RLIMIT_STACK, &mut limit) } == 0 && limit.cur < bytes && limit.cur < limit.max {
+        limit.cur = bytes.min(limit.max);
+        // SAFETY: plain in-parameter.
+        return unsafe { setrlimit(RLIMIT_STACK, &limit) } == 0;
+    }
+    false
+}
