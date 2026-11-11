@@ -1226,6 +1226,8 @@ pub struct Ui {
     /// (slot, scratch layer) of every node the frame painted, and the compaction buffer
     painted_nodes: Vec<(usize, usize)>,
     compact: Vec<Instance>,
+    /// the kept runs a compaction moves (from, to, where to), applied together
+    moves: Vec<(u32, u32, u32)>,
     temp_breaks: Vec<Break>,
     temp_images: Vec<Image>,
     evictions: u64,
@@ -1412,6 +1414,7 @@ impl Ui {
             view_prev: Vec::new(),
             painted_nodes: Vec::new(),
             compact: Vec::new(),
+            moves: Vec::new(),
             temp_breaks: Vec::new(),
             temp_images: Vec::new(),
             evictions: 0,
@@ -6793,6 +6796,7 @@ impl Ui {
     fn compact_layer(&mut self, s: &mut Layer, d: &mut Layer, old_len: usize) {
         let mut out = std::mem::take(&mut self.compact);
         out.clear();
+        self.moves.clear();
         for k in 0..s.pieces.len() {
             let p = s.pieces[k];
             if p.view == NO_VIEW {
@@ -6809,8 +6813,10 @@ impl Ui {
             let to = out.len() as u32;
             out.extend_from_slice(&d.instances[a as usize..b as usize]);
             s.pieces[k].at = to;
-            self.move_run(d.key, a, b, to);
+            self.moves.push((a, b, to));
         }
+        self.moves.sort_unstable_by_key(|m| m.0);
+        self.move_runs(d.key);
         for i in 0..out.len().max(old_len) {
             let (old, new) = (d.instances.get(i).copied(), out.get(i).copied());
             if old != new {
@@ -6830,16 +6836,26 @@ impl Ui {
     /// A kept run `a..b` of layer `key` moved to `to`: the runs inside it and the ranges of nodes
     /// painted into it follow.
     // ponytail: scans every view and node, O(views + nodes), on compaction only.
-    fn move_run(&mut self, key: i64, a: u32, b: u32, to: u32) {
-        let shift = |v: u32| v - a + to;
+    fn move_runs(&mut self, key: i64) {
+        // each by the one kept run that held it before any moved (a run nested in another moves with
+        // it, once): the runs are in layer order and do not overlap
+        let moves = &self.moves;
+        let shift = |(a0, b0): (u32, u32)| {
+            let k = moves.partition_point(|m| m.1 < b0);
+            moves.get(k).filter(|&&(a, b, _)| a0 >= a && b0 <= b).map(|&(a, _, to)| (a0 - a + to, b0 - a + to))
+        };
         for r in &mut self.views[1..] {
-            if r.valid && r.built != self.painted && r.layer == key && r.run.0 >= a && r.run.1 <= b {
-                r.run = (shift(r.run.0), shift(r.run.1));
+            if r.valid && r.built != self.painted && r.layer == key {
+                if let Some(run) = shift(r.run) {
+                    r.run = run;
+                }
             }
         }
         for s in &mut self.slots {
-            if s.key != 0 && s.painted != self.painted && s.range_layer == key && s.range.0 >= a && s.range.1 <= b {
-                s.range = (shift(s.range.0), shift(s.range.1));
+            if s.key != 0 && s.painted != self.painted && s.range_layer == key {
+                if let Some(range) = shift(s.range) {
+                    s.range = range;
+                }
             }
         }
     }

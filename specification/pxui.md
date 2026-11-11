@@ -467,7 +467,8 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
    rebuilt (`window_pxui_view_fit`).
    Landed (P5 commit 2, engine): layers are retained (`Layer::id`, `Layer::dirty` gathered until
    `ui.drawn(i)`; hosts draw with `Painter::draw_retained`); fresh pieces are written in place, kept runs
-   stay put, slack and compaction when they do not fit. `FrameOut::damage` is the union of changed
+   stay put, slack and compaction when they do not fit (a compaction moves each kept run and node range once,
+by the kept run that held it before any moved: a view nested in a moved one moves with it). `FrameOut::damage` is the union of changed
    instance bounds; `FrameOut::views` the table entries (`ViewEntry { offset, opacity, clip }`) that
    `view_offset`, `view_opacity`, `view_clip` change between frames without a rebuild (hit testing and
    `rect` follow; past 255 views the offset is baked by a rebuild). `ui.list(label, count, row_h, f)`

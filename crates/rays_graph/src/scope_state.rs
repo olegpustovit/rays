@@ -276,6 +276,8 @@ pub struct Pane {
     /// a move of cards by their views' offsets let go, until the geometry has them where it put
     /// them: the cards (slots), the move and the frame it ended
     pub dropped: Option<(Vec<usize>, f64, f64, u64)>,
+    /// the rubber band's hits (kept: a band frame allocates nothing)
+    pub marquee: Vec<usize>,
     pub editing: Option<Editing>,
     pub context: Option<((f64, f64), Path)>,
     pub stats: Stats,
@@ -293,7 +295,8 @@ pub struct Pane {
     /// text width in points, from the last built frame
     pub measure: Rc<dyn Fn(i64, &str) -> f64>,
     /// widths measured by the last built frames (a pane outside a frame has no `Ui` to ask)
-    pub measured: Rc<RefCell<HashMap<(i64, String), f64>>>,
+    /// (by the size and a hash of the text: asking allocates nothing)
+    pub measured: Rc<RefCell<HashMap<(i64, u64), f64>>>,
     /// a long wire is a named tag at its use site, unless its chain is lit (flow.md 6.4)
     pub tags: bool,
     /// one slot: the chains of the last selection over the last wires
@@ -363,18 +366,26 @@ pub fn keep_built(t: &Pane, rev: u64) {
 }
 
 
+/// A measured width's key: the text size and a hash of the text.
+pub fn text_key(size: i64, text: &str) -> (i64, u64) {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    text.hash(&mut h);
+    (size, h.finish())
+}
+
 /// The font size a zoom draws text in.
 pub fn font_of(zoom: f64) -> i64 {
     5.max((13.0 * zoom).round() as i64)
 }
 
-pub fn regeo(t: &mut Pane, scope: &p::Scope, layout: &p::Layout, shift: &dyn Fn(&[Symbol]) -> (f64, f64)) {
+pub fn regeo(t: &mut Pane, scope: &p::Scope, layout: &Rc<p::Layout>, shift: &dyn Fn(&[Symbol]) -> (f64, f64)) {
     let fs = font_of(t.zoom);
     let measured = t.measured.clone();
     let zoom = t.zoom;
     let cold = std::cell::Cell::new(false);
     let geo = w::compute(
-        &|s: &str| match measured.borrow().get(&(fs, s.to_owned())) {
+        &|s: &str| match measured.borrow().get(&text_key(fs, s)) {
             Some(v) => *v / zoom,
             None => {
                 cold.set(true);
@@ -385,12 +396,13 @@ pub fn regeo(t: &mut Pane, scope: &p::Scope, layout: &p::Layout, shift: &dyn Fn(
         scope,
         layout,
         shift,
+        &t.geo,
     );
     (t.geo_fs, t.geo, t.geo_cold) = (fs, geo, cold.get());
 }
 
 pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
-    let measured: Rc<RefCell<HashMap<(i64, String), f64>>> = Rc::new(RefCell::new(HashMap::new()));
+    let measured: Rc<RefCell<HashMap<(i64, u64), f64>>> = Rc::new(RefCell::new(HashMap::new()));
     let shared = measured.clone();
     Pane {
         x: 0,
@@ -426,6 +438,7 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         drag: None,
         press: None,
         dropped: None,
+        marquee: Vec::new(),
         editing: None,
         context: None,
         stats: Stats::default(),
@@ -435,7 +448,7 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         failed: Vec::new(),
         hinting: None,
         back: Vec::new(),
-        measure: Rc::new(move |size, s| match shared.borrow().get(&(size, s.to_owned())) {
+        measure: Rc::new(move |size, s| match shared.borrow().get(&text_key(size, s)) {
             Some(v) => *v,
             None => 0.6 * (size * s.len() as i64) as f64,
         }),
@@ -933,7 +946,16 @@ pub fn with_arguments(changes: &[(Path, ArgKey, S)], t: &mut Pane) {
         p::Layout { placed, ..layout.clone() }
     }
     let layout = patch_layout(&t.layout, &nodes, &mut places);
-    let items: Vec<w::Item3> = t.geo.items.iter().map(|(pl, x, y)| (places.get(&pl.path).cloned().unwrap_or_else(|| pl.clone()), *x, *y)).collect();
+    // the changed nodes in the items as the geometry shows them (their level's size kept)
+    let items: Vec<w::Item3> = t
+        .geo
+        .items
+        .iter()
+        .map(|(pl, x, y)| match places.get(&pl.path) {
+            Some(np) => (Rc::new(Placed { item: np.item.clone(), lines: np.lines.clone(), inner: np.inner.clone(), ..(**pl).clone() }), *x, *y),
+            None => (pl.clone(), *x, *y),
+        })
+        .collect();
     let geo = Geo { items: Rc::new(items), ..t.geo.clone() };
     (t.scope, t.layout, t.geo) = (Some(scope), Rc::new(layout), geo);
 }

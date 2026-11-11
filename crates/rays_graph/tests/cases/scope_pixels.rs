@@ -344,4 +344,46 @@ fn window_graph_hover() {
     }
 }
 
-pub const CASES: &[(&str, fn())] = &[("gpu_graph_pixels", gpu_graph_pixels), ("window_graph_view_pan_zoom", window_graph_view_pan_zoom), ("window_graph_hover", window_graph_hover)];
+/// A folded zone and a chip show their hover through the patch path as a card does: no view built,
+/// their ground's instances alone written, nothing allocated (checked with `verify_views` too).
+fn window_graph_folded_hover() {
+    for verify in [true, false] {
+        let text = "(workspace w (graph g :context value (let* [k 6.0 ys (for [i (range 4)] (let* [a (* k (float i)) b (+ a 1.0)] b)) n (reduce (fn [acc x] (+ acc x)) 0.0 ys)] n)))";
+        let ws = checked(text);
+        let sc = Rc::new(flow_graph::projection::of_graph(&scope_catalog(), &ws, "g").unwrap_or_else(|e| panic!("{e}")));
+        let mut t = scope::create(Some(W), Some(H));
+        let saved = TestSaved { collapsed: vec![path(&["g", "ys"])], level: vec![(path(&["g", "k"]), (flow_graph::projection::Level::Chip, true))], ..Default::default() };
+        scope::with_scope(saved_opts(saved), "g", sc, &mut t);
+        scope::with_records(recorded(&ws), &mut t);
+        let mut ui = golden_ui();
+        ui.verify_views(verify);
+        let count = std::cell::Cell::new(0);
+        let to = |ui: &mut Ui, t: &mut Pane, at: (f64, f64)| {
+            let fr = frame_at(count.get(), 1, at, vec![Event::PointerMoved(at)]);
+            count.set(count.get() + 1);
+            measured(ui, t, &fr)
+        };
+        let away = (-100.0, -100.0);
+        for _ in 0..4 {
+            to(&mut ui, &mut t, away);
+        }
+        let head = |t: &Pane, name: &str| {
+            let (x, y, w, _) = scope::inspect::box_of(t, &path(&["g", name])).expect("card");
+            (x + w / 2.0, y + 6.0)
+        };
+        let (zone, chip) = (head(&t, "ys"), head(&t, "k"));
+        for at in [zone, away, chip, away] {
+            to(&mut ui, &mut t, at);
+        }
+        let ground = 5 * std::mem::size_of::<pxui::draw::Instance>();
+        for (at, what) in [(zone, "onto the folded zone"), (away, "off it"), (chip, "onto the chip"), (away, "off it")] {
+            let s = to(&mut ui, &mut t, at);
+            check(verify || s.views == 0, &format!("{what}: {} views built", s.views));
+            check(verify || s.bytes <= ground, &format!("{what}: {} instance bytes", s.bytes));
+            check(verify || s.allocs == 0, &format!("{what}: {} allocations", s.allocs));
+        }
+        ui.destroy();
+    }
+}
+
+pub const CASES: &[(&str, fn())] = &[("gpu_graph_pixels", gpu_graph_pixels), ("window_graph_view_pan_zoom", window_graph_view_pan_zoom), ("window_graph_hover", window_graph_hover), ("window_graph_folded_hover", window_graph_folded_hover)];

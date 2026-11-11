@@ -111,7 +111,7 @@ pub fn fkey(pt: (f64, f64)) -> (u64, u64) {
     ((pt.0 + 0.0).to_bits(), (pt.1 + 0.0).to_bits())
 }
 
-pub type Item3 = (Placed, f64, f64);
+pub type Item3 = (Rc<Placed>, f64, f64);
 
 #[derive(Clone, Debug)]
 pub struct Geo {
@@ -128,6 +128,9 @@ pub struct Geo {
     pub reach: Rc<Index>,
     /// the points a wire starts from: an out-port there is wired
     pub read: Rc<HashSet<(u64, u64)>>,
+    /// the layout it was computed from (a geometry again from the same layout keeps the items that
+    /// did not change)
+    pub layout: Rc<p::Layout>,
 }
 
 pub fn empty_geo() -> Geo {
@@ -140,6 +143,7 @@ pub fn empty_geo() -> Geo {
         tiles: Rc::new(Index::default()),
         reach: Rc::new(Index::default()),
         read: Rc::new(HashSet::new()),
+        layout: Rc::new(p::Layout { placed: Vec::new(), w: 0.0, h: 0.0 }),
     }
 }
 
@@ -396,6 +400,8 @@ struct Out {
 }
 
 struct Walk {
+    /// the items of a geometry from the same layout, by path
+    prev: Option<Geo>,
     items: Vec<Item3>,
     slot: HashMap<Path, usize>,
     origins: Vec<(Path, (f64, f64))>,
@@ -407,20 +413,23 @@ fn walk(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, shift: &
         let ax = ox + pl.x + dx;
         let ay = oy + pl.y + dy;
         let lv = shown(pl);
-        let mut q = pl.clone();
-        let mut ay2 = ay;
-        q.shown = lv;
+        let (mut qw, mut qh, mut ay2) = (pl.w, pl.h, ay);
         match lv {
             Level::Point => {
-                q.w = point_box_w(name_w, &point_name(pl));
-                q.h = p::POINT_SIZE;
+                (qw, qh) = (point_box_w(name_w, &point_name(pl)), p::POINT_SIZE);
                 ay2 = if pl.level == Level::Point && !matches!(pl.item, Item::Input(_)) { ay } else { ay + 5.0 };
             }
             Level::Chip => {
-                q.h = p::HEAD_HEIGHT;
+                qh = p::HEAD_HEIGHT;
             }
             _ => {}
         }
+        // the item the geometry before made of the same placed card, when it is shown the same
+        let kept = w.prev.as_ref().and_then(|g| g.slot.get(&pl.path).map(|&k| &g.items[k].0)).filter(|q| (q.shown, q.w, q.h) == (lv, qw, qh));
+        let q = match kept {
+            Some(q) => q.clone(),
+            None => Rc::new(Placed { shown: lv, w: qw, h: qh, ..pl.clone() }),
+        };
         w.slot.insert(q.path.clone(), w.items.len());
         if let (Some(inner), Item::Item(n)) = (&pl.inner, &pl.item) {
             w.items.push((q, ax, ay2));
@@ -547,7 +556,7 @@ fn add_wire(items: &Items, out: &mut Out, target: Option<Target>, refers: bool, 
     } else if drop || (b.0 - s.pos.0).abs() > TAG_SPAN {
         curve_into(drop, s.pos, b, &mut pts);
     } else {
-        route_into(&mut |r, found| index_query_into(&items.tiles, r, found), &|i| { let (pl, x, y) = &items.items[i]; (pl, *x, *y) }, s.pos, b, &s.owner, &Some(into.clone()), &mut out.scratch, &mut pts);
+        route_into(&mut |r, found| index_query_into(&items.tiles, r, found), &|i| { let (pl, x, y) = &items.items[i]; (&**pl, *x, *y) }, s.pos, b, &s.owner, &Some(into.clone()), &mut out.scratch, &mut pts);
     }
     out.wires.push(Wire { a: s.pos, b, ty: s.ty.clone(), target, pts, refers, from: s.owner.clone(), into: Some(into.clone()), drop });
 }
@@ -567,7 +576,7 @@ pub fn reroute(geo: &Geo, i: usize, moving: &[usize], d: (f64, f64), s: &mut Scr
     let at = |k: usize| {
         let (pl, x, y) = &geo.items[k];
         let (dx, dy) = shift(Some(k));
-        (pl, x + dx, y + dy)
+        (&**pl, x + dx, y + dy)
     };
     if let (Some(o), Some(k)) = (o, k) {
         if let Some(corners) = spine_at(at(o), at(k), a, b) {
@@ -787,8 +796,9 @@ fn scope_wires(items: &Items, out: &mut Out, chain: &mut Vec<Table>, sc: &p::Sco
 /// The geometry of a scope: one item per node at the level it is shown, the wires between ports, and
 /// the indices over them. `shift` moves a placed item by its path (a drag in progress); a zone's
 /// children follow through the origin they are laid out from.
-pub fn compute(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, scope: &p::Scope, layout: &p::Layout, shift: &dyn Fn(&[Symbol]) -> (f64, f64)) -> Geo {
-    let mut w = Walk { items: Vec::new(), slot: HashMap::new(), origins: vec![(scope.path.clone(), (0.0, 0.0))] };
+pub fn compute(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, scope: &p::Scope, layout: &Rc<p::Layout>, shift: &dyn Fn(&[Symbol]) -> (f64, f64), prev: &Geo) -> Geo {
+    let prev = Rc::ptr_eq(&prev.layout, layout).then(|| prev.clone());
+    let mut w = Walk { prev, items: Vec::new(), slot: HashMap::new(), origins: vec![(scope.path.clone(), (0.0, 0.0))] };
     walk(name_w, shown, shift, &mut w, 0.0, 0.0, layout);
     // Later authored origins paint and hit-test before ancestors.
     let mut origins = w.origins;
@@ -833,5 +843,5 @@ pub fn compute(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, s
         read.insert(fkey(wi.a));
     }
     let Items { items: its, slot, tiles } = items;
-    Geo { items: Rc::new(its), wires: Rc::new(wires), origins: Rc::new(origins), inside: Rc::new(inside), slot: Rc::new(slot), tiles: Rc::new(tiles), reach: Rc::new(reach), read: Rc::new(read) }
+    Geo { items: Rc::new(its), wires: Rc::new(wires), origins: Rc::new(origins), inside: Rc::new(inside), slot: Rc::new(slot), tiles: Rc::new(tiles), reach: Rc::new(reach), read: Rc::new(read), layout: layout.clone() }
 }

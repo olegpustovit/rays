@@ -890,32 +890,26 @@ impl Ui {
             alt_to_edit: slider,
             align_right: false,
         };
-        let current_value = value.to_owned();
+        // (an idle field allocates nothing but the value it returns)
         let (typed, editing) = self.numeric_editor(
             &np,
             &|_| true,
             &bx,
             &signal,
             &keys,
-            &move || current_value.clone(),
+            &|| value.to_owned(),
             &|text| if valid(text) { Some(text.to_owned()) } else { None },
         );
         if editing {
             self.set_flags_of_box(&bx, CLICKABLE | FOCUSABLE | BLOCKING | CLIP);
         }
-        let origin = if signal.pressed {
+        if signal.pressed {
             self.scrub_origin = Some((bx.box_key, value.to_owned()));
-            value.to_owned()
-        } else {
-            match &self.scrub_origin {
-                Some((key, origin)) if *key == bx.box_key => origin.clone(),
-                _ => value.to_owned(),
-            }
-        };
+        }
         let press_keys = self.press_keys(&bx);
         let typed_is_some = typed.is_some();
-        let value: String = match typed {
-            Some(text) => text,
+        let value: std::borrow::Cow<str> = match typed {
+            Some(text) => std::borrow::Cow::Owned(text),
             None if !editing
                 && (signal.pressed || signal.held || signal.released)
                 && signal.button == Some(MouseButton::LeftButton)
@@ -923,25 +917,30 @@ impl Ui {
             {
                 let pointer = if signal.released { signal.release_point } else { signal.pointer };
                 match (&o.slide, &o.scrub) {
-                    (Some(slide), _) => slide(fraction_at(bounds, pointer.0)),
-                    (None, Some(scrub)) => scrub(&origin, pointer.0 - signal.press_point.0, press_keys.contains(&Key::Shift)),
-                    (None, None) => value.to_owned(),
+                    (Some(slide), _) => std::borrow::Cow::Owned(slide(fraction_at(bounds, pointer.0))),
+                    (None, Some(scrub)) => {
+                        let origin = match &self.scrub_origin {
+                            Some((key, origin)) if *key == bx.box_key => origin.clone(),
+                            _ => value.to_owned(),
+                        };
+                        std::borrow::Cow::Owned(scrub(&origin, pointer.0 - signal.press_point.0, press_keys.contains(&Key::Shift)))
+                    }
+                    (None, None) => std::borrow::Cow::Borrowed(value),
                 }
             }
-            None => value.to_owned(),
+            None => std::borrow::Cow::Borrowed(value),
         };
         if !signal.held && self.scrub_origin.as_ref().is_some_and(|(key, _)| *key == bx.box_key) {
             self.scrub_origin = None;
         }
-        let buffer = self.text_state(&bx);
         let focused_now = self.focused(&bx);
         let edit = if editing && focused_now {
-            self.load_text_edit(bx.box_key, buffer.as_deref().unwrap_or(&value))
+            let buffer = self.text_state(&bx);
+            Some((self.load_text_edit(bx.box_key, buffer.as_deref().unwrap_or(&value)), self.composition().to_owned()))
         } else {
-            TextEdit { text: value.clone(), caret: 0, anchor: 0 }
+            None
         };
-        let composition = self.composition().to_owned();
-        let shown = if typed_is_some || signal.held || signal.released { value.clone() } else { o.display.clone().unwrap_or_else(|| value.clone()) };
+        let shown: &str = if typed_is_some || signal.held || signal.released { &value } else { o.display.as_deref().unwrap_or(&value) };
         let invalid = self.state(&bx, 1) & 1 == 0;
         let t = self.theme();
         let field = if invalid { t.field_invalid.idle } else { *t.field.pick(State { focused: editing, ..State::default() }) };
@@ -965,7 +964,7 @@ impl Ui {
         let ink = |look: Look| Look { font: Font { size: points, ..look.font }, ..look };
         let saved = self.enter(&bx);
         let k = |n: i64| int_key(bx.box_key, n);
-        if editing && focused_now {
+        if let Some((edit, composition)) = edit {
             let ty = y as i64 + 0.max((h as i64 - size.unwrap_or(fs)) / 2);
             let (selection, caret) = (field.selection, field.caret);
             self.canvas(&bx, move |paint, rect| {
@@ -985,11 +984,11 @@ impl Ui {
                     self.text_part(k(1), (2.0, text_y), pw, ink(placeholder), p);
                 }
                 (None, None) => {
-                    let width = text_w(self, &shown);
+                    let width = text_w(self, shown);
                     let tx = if o.left { 2.0 } else { w - 2.0 - width };
                     let em = size.unwrap_or(fs) as f32;
                     let look = ink(value_look);
-                    self.text_part(k(1), (tx, text_y), width, Look { font: Font { tracking: tracking / em, ..look.font }, ..look }, &shown);
+                    self.text_part(k(1), (tx, text_y), width, Look { font: Font { tracking: tracking / em, ..look.font }, ..look }, shown);
                 }
                 _ => {
                     // a lead (the expression's f) and a trail (its live value) frame the value: 6 between
@@ -1008,7 +1007,7 @@ impl Ui {
                         None => 0.0,
                     };
                     // with no lead the value sits against its trail (a unit: [35 mm])
-                    let fitted = self.fit_text(size.unwrap_or(fs), w - 4.0 - lead_w - trail_w, &shown);
+                    let fitted = self.fit_text(size.unwrap_or(fs), w - 4.0 - lead_w - trail_w, shown);
                     let fw = text_w(self, &fitted);
                     let value_x = if o.lead.is_none() && !o.left { w - 2.0 - trail_w - fw } else { 2.0 + lead_w };
                     self.text_part(k(1), (value_x, text_y), fw, ink(value_look), &fitted);
@@ -1016,7 +1015,7 @@ impl Ui {
             }
         }
         self.leave(saved);
-        (value, editing)
+        (value.into_owned(), editing)
     }
 
     /// The head block of a panel, from the kit's inspector sheet: 12 above, a chips row (the kind

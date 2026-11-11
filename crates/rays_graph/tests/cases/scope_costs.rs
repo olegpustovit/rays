@@ -209,6 +209,27 @@ fn window_graph_costs() {
     let end = (port.0 + 9.0 + 3.0 * (n + 1) as f64, port.1 + 6.0 + 2.0 * (n + 1) as f64);
     go(&mut ui, &mut t, end, &[], vec![Event::PointerReleased(MouseButton::LeftButton, end)]);
     rest(&mut ui, &mut t, &mut go);
+    // a rubber band from the ground above n3 across n3 and n4: the band's view, the selection it
+    // makes through the patch path (and the chains' wires); a frame that changes no selection
+    // allocates nothing
+    let from = (c1.0 - 90.0, c1.1 - 30.0);
+    go(&mut ui, &mut t, from, &[], vec![Event::PointerMoved(from)]);
+    go(&mut ui, &mut t, from, &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, from)]);
+    assert!(matches!(t.drag, Some(Drag::Marquee { .. })), "the press above n3 did not start a rubber band");
+    let mut quiet_band = 0;
+    let band = run(&mut table, "marquee", &mut ui, &mut t, n, &mut |ui, t, i| {
+        let p = (from.0 + 20.0 * (i + 1) as f64, from.1 + 6.0 * (i + 1) as f64);
+        let before = scope::selected(t).len();
+        let c = go(ui, t, p, &[MouseButton::LeftButton], vec![Event::PointerMoved(p)]);
+        if scope::selected(t).len() == before {
+            quiet_band = quiet_band.max(c.allocs);
+        }
+        c
+    });
+    assert!(scope::selected(&t).contains(&path("n3")) && scope::selected(&t).contains(&path("n4")), "the band did not select n3 and n4");
+    let end = (from.0 + 20.0 * (n + 1) as f64, from.1 + 6.0 * (n + 1) as f64);
+    go(&mut ui, &mut t, end, &[], vec![Event::PointerReleased(MouseButton::LeftButton, end)]);
+    rest(&mut ui, &mut t, &mut go);
     // an edit applied by the host (a value a sketch or the inspector changed): one content build
     let value = flow_syntax::syntax::parse("[7 0 0]").expect("vector").remove(0);
     let key = flow_graph::edit_tree::ArgKey::Kw("translate".to_owned());
@@ -245,8 +266,14 @@ fn window_graph_costs() {
     quiet("card drag", drag, 1, 64 * INSTANCE);
     // the pulled wire's view and the hover's (the wires the pointer passes light)
     quiet("wire drag", wire, 2, 64 * INSTANCE);
+    assert!(band.builds == 0 && band.views <= 2, "the rubber band: {} content builds, {} views", band.builds, band.views);
+    assert!(quiet_band == 0, "a band frame that selected nothing new allocated {quiet_band}");
     assert!(drop_builds == 1, "the drop built the content {drop_builds} times");
     assert!(edit_builds == 1, "the edit built the content {edit_builds} times");
+    // (the drop's: the geometry again at the cards' new place, the wires routed; the edit's: the
+    // cards built again, their fields' values)
+    let (drop_allocs, edit_allocs) = (drop.iter().map(|c| c.allocs).sum::<u64>(), edit.iter().map(|c| c.allocs).sum::<u64>());
+    assert!(drop_allocs <= 2000 && edit_allocs <= 700, "the drop allocated {drop_allocs}, the edit {edit_allocs}");
     ui.destroy();
 }
 

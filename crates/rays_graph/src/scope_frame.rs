@@ -53,15 +53,15 @@ pub fn num_field(ui: &mut Ui, at: (f64, f64), w: f64, h: f64, size: Option<i64>,
             }
         }
     };
-    let valid: Rc<dyn Fn(&str) -> bool> = Rc::new(move |s: &str| match s::number_value(s) {
+    let valid = move |s: &str| match s::number_value(s) {
         Some(f) => f.is_finite() || nonfinite,
         None => false,
-    });
+    };
     let mut o = ValueFieldOpts::default();
     o.size = size;
     o.fraction = range.and_then(|r| param::number::fraction(r, text)).map(|f| f as f32);
     o.scrub = Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, range, origin, dx as f64, fine)));
-    let text2 = ui.value_field(p32(at), w as f32, h as f32, &o, &*valid, label, text).0;
+    let text2 = ui.value_field(p32(at), w as f32, h as f32, &o, &valid, label, text).0;
     if text2 != text && valid(&text2) { Some(text2) } else { None }
 }
 
@@ -103,27 +103,30 @@ pub fn row_at(header: f64, pl: &Placed, n: &p::Node, shown: Level, px: f64, py: 
     }
 }
 
-/// The nodes of one scope a rubber band touches (an expanded zone only when it is inside it).
-pub fn marquee_hits(t: &Pane, r: (f64, f64, f64, f64)) -> PathSet {
+/// The nodes of one scope a rubber band touches (an expanded zone only when it is inside it), by
+/// their slots, into `hits` (cleared first; nothing allocated once it has room).
+pub fn marquee_hits(t: &Pane, r: (f64, f64, f64, f64), hits: &mut Vec<usize>) {
     let (rx, ry, rw, rh) = r;
     let z = t.zoom;
-    let mut hits: Vec<Path> = Vec::new();
-    for (pl, ax, ay) in t.geo.items.iter() {
+    hits.clear();
+    for (k, (pl, ax, ay)) in t.geo.items.iter().enumerate() {
         if let Item::Item(_) = pl.item {
             let (x, y, w, h) = (sx(t, *ax), sy(t, *ay), pl.w * z, pl.h * z);
             let touches = x < rx + rw && x + w > rx && y < ry + rh && y + h > ry;
             let inside = x >= rx && y >= ry && x + w <= rx + rw && y + h <= ry + rh;
             if ((pl.inner.is_none() || pl.collapsed) && touches) || inside {
-                hits.push(pl.path.clone());
+                hits.push(k);
             }
         }
     }
-    match hits.first() {
-        None => PathSet::new(),
-        Some(first) => {
-            let scope = scope_of_path(first);
-            hits.iter().filter(|q| scope_of_path(q) == scope).cloned().collect()
-        }
+    // one scope: the first hit's
+    let scope_of = |k: usize| {
+        let q = &t.geo.items[k].0.path;
+        &q[..q.len().saturating_sub(1)]
+    };
+    if let Some(&first) = hits.first() {
+        let first = scope_of(first);
+        hits.retain(|&k| scope_of(k) == first);
     }
 }
 
@@ -334,12 +337,12 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                         let cy = p::HEAD_HEIGHT + (i as f64 * p::ROW_HEIGHT) + 12.0;
                         if r.role != p::Role::Capture {
                             let pos = begin_port(n, zn, *ri);
-                            let b = bxz(ui, z, PORT, &format!("rail:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                            let b = bxzf(ui, z, PORT, format_args!("rail:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
                             out(b, r.names.first().cloned().unwrap_or_default(), r.ty.clone());
                         }
                         // wired rail rows can be disconnected from their socket
                         if r.key.is_some() {
-                            let b = bxz(ui, z, PORT, &format!("rd:{}", i), (0.0 - 7.0, cy - 7.0), (14.0, 14.0));
+                            let b = bxzf(ui, z, PORT, format_args!("rd:{}", i), (0.0 - 7.0, cy - 7.0), (14.0, 14.0));
                             let del = match (&r.key, &r.expr) {
                                 (Some(key), Some(ex)) if !e::free_names(ex).is_empty() => Some(Del::Disconnect(key.clone())),
                                 _ => None,
@@ -367,7 +370,7 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                     for (i, r) in zn.rail.iter().enumerate() {
                         if r.key.is_some() || r.role == p::Role::Capture {
                             let pos = (0.0, p::BODY_TOP + ((i as f64 + 0.5) * p::ROW_HEIGHT));
-                            let b = bxz(ui, z, PORT, &format!("rd:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                            let b = bxzf(ui, z, PORT, format_args!("rd:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
                             inputs.push(Port { b, kind: PortKind::In(None) });
                         }
                     }
@@ -387,7 +390,7 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                                 let len = l.steps.len() as i64;
                                 for i in 0..=len {
                                     let ((bxx, byy), size) = sp::lens_button_box(len, i);
-                                    let b = bxz(ui, z, CLICKABLE, &format!("ls{}", i), (bxx, top + byy), size);
+                                    let b = bxzf(ui, z, CLICKABLE, format_args!("ls{}", i), (bxx, top + byy), size);
                                     taps.push((b, Tap::LensStep(i)));
                                 }
                                 let ((rx, ry), size) = sp::lens_replace_box(lh);
@@ -402,14 +405,14 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                         for (j, (f, ty)) in n.outputs.iter().enumerate() {
                             let src = if n.binds.len() == 1 && n.binds[0] == n.name { format!("{}.{}", n.name, f) } else { f.clone() };
                             let pos = (pl.w, top + (((nlines + j) as f64 + 0.5) * p::ROW_HEIGHT));
-                            let b = bxz(ui, z, PORT, &format!("o:{}", j), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                            let b = bxzf(ui, z, PORT, format_args!("o:{}", j), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
                             out(b, src, Some(ty.clone()));
                         }
                         for (k, line) in pl.lines.iter().enumerate() {
                             if let p::Line::Row(i, r) = line {
                                 let ry = top + (k as f64 * p::ROW_HEIGHT);
                                 if r.socket {
-                                    let sink = bxz(ui, z, PORT, &format!("d:{}", i), (0.0 - 7.0, ry + 12.0 - 7.0), (14.0, 14.0));
+                                    let sink = bxzf(ui, z, PORT, format_args!("d:{}", i), (0.0 - 7.0, ry + 12.0 - 7.0), (14.0, 14.0));
                                     ui.a11y_name(&sink, &r.label);
                                     inputs.push(Port { b: sink, kind: PortKind::In(wired(r).then_some(Del::Unwire(*i))) });
                                 }
@@ -1279,6 +1282,7 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
                     emit.push(Change::Selected(Vec::new()));
                 }
                 let base = if additive { t.selected.clone() } else { PathSet::new() };
+                t.marquee.reserve(t.geo.items.len());
                 (t.selected, t.selected_wire, t.drag) = (base.clone(), None, Some(Drag::Marquee { base }));
             }
         }
@@ -1290,11 +1294,22 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
             let (x0, y0) = p64(sig.press_point);
             let rw = (px - x0).abs();
             let rh = (py - y0).abs();
-            let selected: PathSet = if rw < 3.0 && rh < 3.0 { base.clone() } else { base.union(&marquee_hits(t, (x0.min(px), y0.min(py), rw, rh))).cloned().collect() };
-            if selected != t.selected {
+            let mut hits = std::mem::take(&mut t.marquee);
+            if rw < 3.0 && rh < 3.0 {
+                hits.clear();
+            } else {
+                marquee_hits(t, (x0.min(px), y0.min(py), rw, rh), &mut hits);
+            }
+            // the selection it makes is the base and the hits: built only when it differs
+            let path = |k: usize| &t.geo.items[k].0.path;
+            let more = hits.iter().filter(|&&k| !base.contains(path(k))).count();
+            let same = base.len() + more == t.selected.len() && base.iter().all(|q| t.selected.contains(q)) && hits.iter().all(|&k| t.selected.contains(path(k)));
+            if !same {
+                let selected: PathSet = base.iter().cloned().chain(hits.iter().map(|&k| path(k).clone())).collect();
                 emit.push(Change::Selected(selected.iter().cloned().collect()));
                 t.selected = selected;
             }
+            t.marquee = hits;
             if sig.released {
                 t.drag = None;
             }
@@ -1502,7 +1517,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut 
 /// Measure with the UI's fonts, remembering the width for the pane's outside-a-frame queries.
 fn measure_ui(ui: &mut Ui, t: &Pane, size: i64, text: &str) -> f64 {
     let v = f64::from(ui.text_width(Some(size), text));
-    t.measured.borrow_mut().insert((size, text.to_owned()), v);
+    t.measured.borrow_mut().insert(text_key(size, text), v);
     v
 }
 
@@ -1969,5 +1984,10 @@ pub mod inspect {
 
 /// A tile-relative port or tap box: `pos` and `size` in card points, scaled by the zoom.
 fn bxz(ui: &mut Ui, z: f64, flags: Flags, name: &str, pos: (f64, f64), size: (f64, f64)) -> UiBox {
-    box_in(ui, flags, size.0 * z, size.1 * z, (pos.0 * z, pos.1 * z), name)
+    bxzf(ui, z, flags, format_args!("{name}"), pos, size)
+}
+
+/// `bxz` with a formatted name (nothing allocated for it).
+fn bxzf(ui: &mut Ui, z: f64, flags: Flags, name: std::fmt::Arguments, pos: (f64, f64), size: (f64, f64)) -> UiBox {
+    ui.box_fmt(name, BoxOpts::default().flags(flags | HOVER_FREE).w(Size::Px((size.0 * z) as f32)).h(Size::Px((size.1 * z) as f32)).at(((pos.0 * z) as f32, (pos.1 * z) as f32)))
 }
