@@ -3234,21 +3234,19 @@ impl Ui {
     /// sweep sees every child first.
     fn intrinsic(&mut self) {
         for index in (0..self.count).rev() {
-            let n = *self.nd(index);
-            if n.axis == Axis::Stack {
+            if self.nd(index).axis == Axis::Stack {
                 self.order_stack(index);
             }
+            let n = self.nd(index);
             let (content_w, content_h) = match n.grid {
                 Some(grid) => {
-                    let (cols, nc, rows, nr) = self.grid_tracks(index, &n, &grid, None);
+                    let (cols, nc, rows, nr) = self.grid_tracks(index, n, &grid, None);
                     (span(&cols[..nc], n.gap), span(&rows[..nr], n.row_gap))
                 }
-                None => self.flow_extent(index, &n),
+                None => self.flow_extent(index, n),
             };
             let pad = n.padding;
             let (cw, ch) = (content_w + pad.l + pad.r, content_h + pad.t + pad.b);
-            self.l_content[index] = ch;
-            self.l_content_w[index] = cw;
             let resolve = |kind: &Size, content: f32| match kind {
                 Size::Px(value) => *value,
                 Size::Fit => content,
@@ -3262,8 +3260,9 @@ impl Ui {
                     _ => {}
                 }
             }
-            self.l_w[index] = clamp(w, n.min_w, n.max_w);
-            self.l_h[index] = clamp(h, n.min_h, n.max_h);
+            let (w, h) = (clamp(w, n.min_w, n.max_w), clamp(h, n.min_h, n.max_h));
+            (self.l_content[index], self.l_content_w[index]) = (ch, cw);
+            (self.l_w[index], self.l_h[index]) = (w, h);
         }
     }
 
@@ -3521,9 +3520,10 @@ impl Ui {
             };
             let mut next = self.boxes[index].first;
             while next != NONE {
-                let c = *self.nd(next);
-                self.l_w[next] = clamp(relative(&c.w, inner_w, self.l_w[next]), c.min_w, c.max_w);
-                self.l_h[next] = clamp(relative(&c.h, inner_h, self.l_h[next]), c.min_h, c.max_h);
+                let c = self.nd(next);
+                let w = clamp(relative(&c.w, inner_w, self.l_w[next]), c.min_w, c.max_w);
+                let h = clamp(relative(&c.h, inner_h, self.l_h[next]), c.min_h, c.max_h);
+                (self.l_w[next], self.l_h[next]) = (w, h);
                 next = self.boxes[next].next;
             }
             let (bake_x, bake_y) = self.baked(index);
@@ -3543,7 +3543,8 @@ impl Ui {
             next = self.boxes[index].first;
             while next != NONE {
                 let child = next;
-                let c = *self.nd(child);
+                let c = self.nd(child);
+                let c = Placed { flags: c.flags, margin_t: c.margin.t, anchor: c.anchor, w_grow: c.w.is_grow(), h_grow: c.h.is_grow(), at: c.at };
                 if self.flow(child) {
                     self.l_y[child] -= scroll_y;
                     self.l_x[child] -= scroll_x;
@@ -3551,7 +3552,7 @@ impl Ui {
                         self.l_x[child] = 2.0 * origin_x + self.l_w[index] - self.l_x[child] - self.l_w[child];
                     }
                     if c.flags & STICKY != 0 && scrolls {
-                        self.l_y[child] = self.l_y[child].max(inner_at.1 + c.margin.t);
+                        self.l_y[child] = self.l_y[child].max(inner_at.1 + c.margin_t);
                         stuck = true;
                     }
                 } else if let Some(a) = c.anchor {
@@ -3559,9 +3560,9 @@ impl Ui {
                     (self.l_x[child], self.l_y[child]) = (r.x, r.y);
                 } else {
                     // an `at` child's Grow size fills the parent across its axis (along it, none)
-                    if n.axis == Axis::Row && c.h.is_grow() {
+                    if n.axis == Axis::Row && c.h_grow {
                         self.set_main(false, child, inner_h);
-                    } else if n.axis != Axis::Row && c.w.is_grow() {
+                    } else if n.axis != Axis::Row && c.w_grow {
                         self.set_main(true, child, inner_w);
                     }
                     let (at_x, at_y) = c.at.unwrap_or((0.0, 0.0));
@@ -3937,6 +3938,16 @@ impl Ui {
 }
 
 /// `v` held to `[min, max]`; the minimum wins.
+/// What `arrange` reads of a child while placing it (not the whole node).
+struct Placed {
+    flags: Flags,
+    margin_t: f32,
+    anchor: Option<Anchor>,
+    w_grow: bool,
+    h_grow: bool,
+    at: Option<(f32, f32)>,
+}
+
 fn clamp(v: f32, min: f32, max: f32) -> f32 {
     v.min(max).max(min)
 }
