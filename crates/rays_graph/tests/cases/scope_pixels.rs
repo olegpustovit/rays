@@ -131,6 +131,9 @@ fn gpu_graph_pixels() {
         return;
     }
     let update = std::env::var("RAYS_UPDATE_FIXTURES").as_deref() == Ok("1");
+    // Metal rasterises the goldens: exact. Vulkan blends and filters a channel off by 1-2 (the
+    // renderer's own sampler tests allow the same on vulkan), so there a pixel differs past 2.
+    let tolerance = if ogpu_core::impl_::backend().expect("backend") == "vulkan" { 2 } else { 0 };
     let mut failures = Vec::new();
     for c in cases() {
         for density in [1, 2] {
@@ -142,7 +145,7 @@ fn gpu_graph_pixels() {
             let actual = image::pixels(&canvas::to_image(&canvas_).expect("to_image")).expect("pixels");
             let expected = image::pixels(&image::load(&golden).expect("golden")).expect("pixels");
             let worst = actual.iter().zip(&expected).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
-            let different = actual.chunks(4).zip(expected.chunks(4)).filter(|(a, b)| a != b).count();
+            let different = actual.chunks(4).zip(expected.chunks(4)).filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > tolerance)).count();
             if actual.len() != expected.len() || different != 0 {
                 failures.push(format!("{} at {density}x: {different} pixels differ (max channel {worst})", c.name));
                 let _ = canvas::save_png(&canvas_, &format!("{}/graph_{}_{density}x.actual.png", std::env::temp_dir().display(), c.name));

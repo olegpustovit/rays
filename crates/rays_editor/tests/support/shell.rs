@@ -119,8 +119,18 @@ pub fn idle_frame(count: i64) -> frame::Frame {
 pub fn editor(text: &str) -> editor::Editor {
     editor_with(text, editor::Create::default())
 }
+/// A preferences file of the test's own with the guide strip off (the node budgets of the frame-cost
+/// cases count the plain status strip): a case does not read this machine's `~/.rays/preferences.rays`,
+/// whose saved `guide` swaps the strip (+2 nodes a frame with it on).
+fn no_preferences() -> Option<String> {
+    let file = std::env::temp_dir().join("rays-editor-test-preferences.rays");
+    // (cases run in parallel processes: renamed into place, never read half written)
+    let part = file.with_extension(format!("{}", std::process::id()));
+    let _ = std::fs::write(&part, "(settings :guide false)").and_then(|_| std::fs::rename(&part, &file));
+    Some(file.to_string_lossy().to_string())
+}
 pub fn editor_with(text: &str, options: editor::Create) -> editor::Editor {
-    let options = editor::Create { await_: Some(true), ui_text_size: Some(11), platform: Some(input::Platform::Apple), domains: options.domains.or(Some(1)), ..options };
+    let options = editor::Create { await_: Some(true), ui_text_size: Some(11), platform: Some(input::Platform::Apple), domains: options.domains.or(Some(1)), preferences: options.preferences.or_else(no_preferences), ..options };
     match editor::create(options, &of_text(text), None, editor::prepare_fn(), editor::draw_fn()) {
         Ok(e) => e,
         Err(m) => fail(&m),
