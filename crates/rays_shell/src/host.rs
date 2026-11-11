@@ -1,13 +1,13 @@
 //! PXUI's host services from Rays: the kit font and GPU images in, scene layers and platform
 //! requests out.
 use input::{frame::Frame, Event};
-use ogpu_core::backend::{self, Texture};
+use ogpu_core::backend::{self, RenderEncoder, Texture};
 use ogpu_core::error::{self, Error, ErrorKind};
 use ogpu_core::pipeline::{ColorFormat, DepthFormat};
 use ogpu_core::types::{Extent, Origin, TextureDescriptor, TextureFormat, TextureUsage};
 use pxui::text::{self, Text};
-use pxui::ui::{Image, Ui};
-use pxui_render::{AtlasKind, Break, Painter, View};
+use pxui::ui::{BlurOut, Image, Ui};
+use pxui_render::{AtlasKind, Break, Instance, Painter, View};
 use rays::{clipboard, image, scene, sketch};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -174,15 +174,6 @@ fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Er
             });
         }
         sync_atlas(s, ui)?;
-        // ponytail: `out.blurs` (views asking for a blurred backdrop) is not fulfilled. The sequence is
-        // proven in pxui_render's `gpu_backdrop_blur_panel` (draw backdrop, end pass, `Painter::blur`,
-        // reopen with `Load::Load`, draw the image under a rounded clip) but needs a renderer hook that
-        // `UiPass` lacks: `encode_frame` records every batch into ONE uncommitted command buffer, while
-        // `Painter::blur` takes a `Queue` and submits its own commands, so it would read the target before
-        // this frame's earlier batches ran. Needed: `UiPass` exposing the frame's command buffer plus the
-        // target texture and a "split the pass here" callback (end the encoder, let the painter encode its
-        // two blur passes into the same commands, reopen with Load::Load); `Painter::blur` then takes
-        // commands instead of a queue. Do it when an editor view asks for a backdrop blur.
         for (index, v) in ui.output().views {
             s.painter.set_view(*index, View { offset: v.offset, opacity: v.opacity, clip: v.clip, scale: v.scale, transform: v.transform, pivot: v.pivot })?;
         }
@@ -197,7 +188,8 @@ fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Er
         let all = [(0, l.instances.len() as u32)];
         let dirty: &[(u32, u32)] = if s.retained[id] == owner { &l.dirty } else { &all };
         s.retained[id] = owner;
-        let result = if l.breaks.is_empty() {
+        let blurs: Vec<&BlurOut> = out.blurs.iter().filter(|b| b.layer == layer && (b.at_instance as usize) < l.instances.len()).collect();
+        let result = if l.breaks.is_empty() && blurs.is_empty() {
             s.painter.draw_retained(pass.encoder, pass.size_px, pass.scale, l.id, &l.instances, dirty, &[])
         } else {
             for image in &l.images {
@@ -207,14 +199,51 @@ fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Er
                 let id = as_rays_image(i).map_or(0, image::identity);
                 s.images.iter().find(|(key, ..)| *key == id).map(|(_, _, texture, _)| texture).expect("image texture")
             }).collect();
-            let breaks: Vec<Break> = l.breaks.iter().map(|b| Break { at_instance: b.at_instance, texture: (b.image != pxui::draw::ATLAS).then(|| textures[b.image as usize]) }).collect();
-            s.painter.draw_retained(pass.encoder, pass.size_px, pass.scale, l.id, &l.instances, dirty, &breaks)
+            let mut breaks: Vec<Break> = l.breaks.iter().map(|b| Break { at_instance: b.at_instance, texture: (b.image != pxui::draw::ATLAS).then(|| textures[b.image as usize]) }).collect();
+            // a blur splits the layer where its view's run starts: a break there that keeps the texture in force
+            let mut splits: Vec<u32> = blurs.iter().map(|b| b.at_instance).collect();
+            splits.sort_unstable();
+            splits.dedup();
+            for &at in &splits {
+                if !breaks.iter().any(|b| b.at_instance == at) {
+                    let i = breaks.partition_point(|b| b.at_instance < at);
+                    breaks.insert(i, Break { at_instance: at, texture: i.checked_sub(1).and_then(|j| breaks[j].texture) });
+                }
+            }
+            s.painter.draw_retained_split(pass.encoder, pass.size_px, pass.scale, l.id, &l.instances, dirty, &breaks, &splits, &mut |painter, at| {
+                let mut reopened = None;
+                for b in blurs.iter().filter(|b| b.at_instance == at) {
+                    reopened = backdrop_blur(painter, pass, b)?.or(reopened);
+                }
+                Ok(reopened)
+            })
         };
         if result.is_ok() {
             ui.drawn(layer);
         }
         result
     })
+}
+
+/// Blurs what the frame holds behind `b.rect` and draws it there, in a pass split off the scene's: the
+/// pass to go on in, or `None` when the rectangle is off the target.
+// ponytail: the record carries no corner radius or opacity, so the blurred image fills its rectangle and
+// the view's own instances (drawn next) shape the glass; add them to `BlurOut` to round the blur itself.
+fn backdrop_blur(painter: &mut Painter, pass: &scene::UiPass, b: &BlurOut) -> Result<Option<RenderEncoder>, Error> {
+    let [w, h] = pass.size_px;
+    let (x0, y0) = ((b.rect.x * pass.scale).floor().max(0.0) as u32, (b.rect.y * pass.scale).floor().max(0.0) as u32);
+    let (x1, y1) = (((b.rect.x + b.rect.w) * pass.scale).ceil().clamp(0.0, w as f32) as u32, ((b.rect.y + b.rect.h) * pass.scale).ceil().clamp(0.0, h as f32) as u32);
+    if x0 >= x1 || y0 >= y1 || !(b.sigma > 0.0) {
+        return Ok(None);
+    }
+    let mut blurred = None;
+    let encoder = pass.split(&mut |commands, target| {
+        blurred = Some(painter.blur_in(commands, target, [x0, y0, x1, y1], b.sigma * pass.scale)?.clone());
+        Ok(())
+    })?;
+    let rect = [x0, y0, x1, y1].map(|v| v as f32 / pass.scale);
+    painter.draw(&encoder, pass.size_px, pass.scale, &[Instance::image(rect, [0.0, 0.0, 1.0, 1.0], [255, 255, 255, 255])], &[Break { at_instance: 0, texture: blurred.as_ref() }])?;
+    Ok(Some(encoder))
 }
 
 /// The UI's glyph atlases into the painter's: the rectangles rasterised since the last upload, or
