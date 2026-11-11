@@ -942,6 +942,10 @@ pub struct Ui {
     a11y_next: A11yTree,
     a11y_map: Vec<u32>,
     a11y_pending: Vec<A11yAction>,
+    /// something the tree shows may have changed outside the root's build (a view built, moved or
+    /// was patched, an action came in), and the focus and capture the last walk saw
+    a11y_dirty: bool,
+    a11y_seen: (i64, Option<i64>),
     /// how long the last frame's layout passes took
     layout_time: std::time::Duration,
     /// `order_stack`'s scratch: (z, build position, box)
@@ -1122,6 +1126,8 @@ impl Ui {
             a11y_next: A11yTree::new(),
             a11y_map: Vec::new(),
             a11y_pending: Vec::new(),
+            a11y_dirty: true,
+            a11y_seen: (0, None),
             parents: Vec::new(),
             overlays: Vec::new(),
             foreground: Vec::new(),
@@ -1380,15 +1386,22 @@ impl Ui {
             }
             self.mark_key(key);
         }
+        self.a11y_dirty |= !pending.is_empty();
         pending.clear();
         self.a11y_pending = pending;
     }
 
     /// Walk the views' declared nodes (a kept view's from its last build) into the next tree and
     /// publish it when it differs: an unchanged frame leaves the published tree and its revision.
-    // ponytail: the walk and compare run every frame, O(nodes); skip them when no view rebuilt and
-    // no node's state changed if trees get large.
+    // ponytail: a frame that rebuilds anything (or whose root declares roles, as the kit without
+    // views does) walks and compares the whole tree, O(nodes); per-view subtrees if trees get large.
     fn emit_a11y(&mut self) {
+        // nothing a kept view shows changed and the root declared no role: the tree stands
+        let seen = (self.focus, self.active);
+        if !self.a11y_dirty && seen == self.a11y_seen && self.views[0].nodes.iter().all(|s| self.slots[*s].node.role == Role::Unknown) {
+            return;
+        }
+        (self.a11y_dirty, self.a11y_seen) = (false, seen);
         let mut t = std::mem::replace(&mut self.a11y_next, A11yTree::new());
         let mut map = std::mem::take(&mut self.a11y_map);
         t.begin();
@@ -1518,6 +1531,11 @@ impl Ui {
 
     pub fn row_height(&self) -> i64 {
         self.kit_row_height
+    }
+
+    /// The window's width in points: responsive layout is `if ui.width() < 600.0 { .. }`.
+    pub fn width(&self) -> f32 {
+        self.view_w
     }
 
     pub fn view_size(&self) -> (f32, f32) {
@@ -4864,6 +4882,7 @@ impl Ui {
         self.patch_layers = scratch;
         self.views[owner as usize].patched = true;
         self.draw_revision += 1;
+        self.a11y_dirty = true;
         true
     }
 
@@ -5412,6 +5431,7 @@ impl Ui {
         r.verify = clean;
         r.escapes = false;
         r.nodes.clear();
+        self.a11y_dirty = true;
         self.view_cur = v;
         let saved = self.enter(&b);
         f(self);
@@ -5539,6 +5559,7 @@ impl Ui {
     /// A view's entry changed: between frames the table and the damage update now; a view with no
     /// table index bakes its offset into layout, so it rebuilds next frame.
     fn view_changed(&mut self, v: u32) {
+        self.a11y_dirty = true;
         if self.views[v as usize].index == 0 {
             // ponytail: past 255 views the offset is baked by a rebuild (opacity and clip are not
             // applied); a larger table or nested tables if that many views move.

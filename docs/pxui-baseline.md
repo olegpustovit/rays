@@ -63,3 +63,44 @@ The kept frame is mostly the per-slot scans (`prune`, `next_repaint`), O(nodes) 
 `alloc_budget` unchanged: empty/basic/bare 445/652/600 allocations per frame. `gpu_retained_bytes`
 asserts an all-kept frame writes 0 instance bytes to the painter and a one-instance patch 64 bytes in
 each of the painter's three frame copies.
+
+## After P5 layout and accessibility
+
+`layout_stress_zero_alloc` and `layout_scaling` (`crates/pxui/tests/cases/layout.rs`): a tree of
+groups of 20 nodes cycling through every layout mode (flex weights and shrink, min/max, aspect, gap,
+per-edge padding and margin, every justify and align mode with baseline, wrap, a fixed + fr + fit grid
+with a span, a z-ordered stack, a both-axis scroll box with a sticky header), right to left, with an
+anchored popup outside the cached view, in a 2,400-point window; `Ui::frame` only, 1x, warm, best of
+alternating rounds. Debug is the `dev` profile (O1); release is `cargo t --release -p pxui layout_s`.
+
+| Measure | Debug | Release |
+| --- | --- | --- |
+| Full rebuild + layout + paint, 2,006 nodes | 1.05 to 1.15 ms per frame (about 525 to 570 ns per node) | 1.14 ms (568 ns per node) |
+| Layout alone (`intrinsic` + `arrange`), 2,006 nodes | 210 to 240 us (105 to 120 ns per node) | 186 us (93 ns per node) |
+| The 2,006-node view cached | 14 us per frame | 14 us |
+| Cached, one 42-node view rebuilt | 35 to 39 us per frame | 35 us |
+| Allocations, any of the above, warm | 0 | 0 |
+| Per node at 506 / 2,006 / 8,006 nodes, rebuild | 570 / 580 / 650 ns | 534 / 530 / 614 ns |
+| Per node at 506 / 2,006 / 8,006 nodes, layout | 118 / 118 / 145 ns | 91 / 89 / 108 ns |
+
+Release is barely faster than the O1 debug profile here: the frame is dominated by text-key hashing,
+glyph emission and the instance placement, which O1 already optimises. The 8,000-node tree is about
+1.15x the smaller per node (cache misses; the scaling case allows 1.5x). Layout is O(nodes): wrap,
+grid content tracks, baseline and aspect read each child's measured size once per pass; text is
+never re-shaped in layout (a baseline is a pxui_text layout-cache hit); stack order sorts in a kept
+scratch vector. Two allocation sources were found and removed on the way: building at the root
+(`enter_root`, popups, tooltips, `ui.anchored`) replaced the parent and seed stacks (two allocations
+per call), and pxui_text dropped every layout not laid out in the frame, so a view kept for one frame
+re-shaped its text on its next rebuild (now kept `KEEP_FRAMES` = 600 frames after last use).
+`a11y_warm_zero_alloc` asserts the accessibility walk (every frame, published only when it differs)
+allocates nothing on the kit panel.
+
+`window_pxui_view_costs` after layout and accessibility (debug, 2x, alone on the machine; before in
+brackets): all ten views kept 9.6 to 10.0 us (6.4 to 8.0), one 50-widget view rebuilt 68 to 71 us
+(42 to 48), all 500 widgets rebuilt 490 to 520 us (370 to 490); 0 allocations throughout. Nodes
+declared went from 61 / 511 to 86 / 761: a button is now a padded row laid out by alignment holding
+the clickable box (it was one node with a placed look and a hit closure). The rest of the rebuilt
+frames' growth is the accessibility walk, which covers every view's nodes on a frame that rebuilds any
+view; a frame that rebuilds nothing and whose root declares no role skips the walk (without that gate
+the all-kept frame was 29 us). Editor `alloc_budget` (RAYS_SLOW=1): empty/basic/bare 443/652/596
+allocations per frame (445/652/598 before).

@@ -429,8 +429,8 @@ index, size, weight, tracking in ems, caps), `opacity`, focus `ring`, `selection
 is the Rays look; `ui.theme() -> &Theme`, `ui.tokens()`, `ui.set_theme` (rebuilds views; snaps),
 `ui.themed(&theme, f)` (a view rebuilds when the override it was built under changes),
 `ui.button_with(text, &States)`. Every kit widget declares nodes and picks their looks
-(`ui.set_look`, `ui.style`); a node's `place` puts its look in a sub-rectangle known after layout,
-`mark` draws a chevron, `bar` a scroll thumb, `FIT_TEXT` ellipsizes its text. Canvas closures remain
+(`ui.set_look`, `ui.style`); a node's look fills its laid-out box (parts that sit at a row's end are
+flow children of a row laid out from its end), `mark` draws a chevron, `bar` a scroll thumb, `FIT_TEXT` ellipsizes its text. Canvas closures remain
 for the text widgets' caret, selection and composition and the text area's code painter. Looks
 interpolate between states over the theme's motion (a transition record per node, painted steady and
 stepped through the patch path: a kept view is not rebuilt; `repaint_at` asks for frames until it
@@ -442,6 +442,55 @@ Vec<ThemeError>>`, `Theme::write`): `tokens.*` keys re-derive the looks, then `P
 `view_scale` (hit testing through the inverse) and `view_backdrop_blur` (`FrameOut::blurs`, fulfilled by
 the host); `Paint::image_fit`, `image_nine` and `icon` draw images and icon glyphs. Content filters,
 group opacity, blend modes, 3D transforms, filled paths and a selector engine are left out on purpose.
+
+**Layout (P5, landed).** All plain data on `Node`, no allocation per frame, no selector engine:
+`w`/`h` (`Px`, `Pct`, `Rel(fn)`, `Grow`, `Fit`) held to `min_*`/`max_*` (min wins); `aspect` (w / h)
+derives a `Fit` side; a `Grow` size takes `grow` weighted shares of what its line leaves (a child held
+at a bound leaves the rest to the others), and an overflowing line takes room back by `shrink` times
+each child's size. `axis`: `Row`, `Column`, or `Stack` (children overlap, `z` orders paint and hits;
+`justify` places across, `align` down); or `grid: Some(Grid { cols, rows })` with `Track::{Px, Fr,
+Fit}` (`&'static` lists, at most 16 each; implicit rows fit their content; `cell: Cell::at(c,
+r).span(cs, rs)` or auto placement; spans do not size content tracks). `padding` and `margin` are
+`Edges` (`l` is the start edge); `gap` between children, `row_gap` between wrapped lines and grid
+rows; `justify` (`Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround`, `SpaceEvenly`), `align`
+and `align_self` (`Start`, `Center`, `End`, `Stretch`, `Baseline`: first text baselines from
+pxui_text metrics, a node without text aligns its bottom); `wrap` breaks a row or column into lines
+(a wrapping `Fit` box measures its lines at its own `Px` main size). `at` places a node at an offset
+from its parent (physical, outside the flow); `anchor: Some(Anchor { rect, placement })` places it
+by a window rectangle in layout, after its size is known: `place_anchored(anchor, size, Placement {
+side, align, gap, margin, flip }, bounds)` opens on `side`, flips to the opposite side when it does
+not fit there, and keeps it inside; `ui.anchored(label, rect, placement, w, h, f)` builds such a
+popup at the root (the kit's menus, submenus, completions and tooltips use `place_anchored`).
+`SCROLL` scrolls down, `SCROLL_X` sideways (wheel and trackpad; a thumb from the node's `bar` on each
+axis; `ui.scroll_offset_x`); a `STICKY` flow child of a scroll box stops at its top and paints over
+its siblings. `CLIP | ROUND_CLIP` rounds the children's clip by the node look's radius (the instance
+`clip_radius`; square `CLIP` stays the default). `ui.set_dir(Direction::Rtl)` mirrors flow children
+inside their parents (start padding and `Justify::Start` at the right; text direction is
+cosmic-text's). `ui.split(label, axis, ratio, min_a, min_b, a, b) -> Option<f32>` is two `Grow`
+panes weighted `ratio : 1 - ratio` around a 1-point `ui.grip` (presses 3 points either side, resize
+cursor, accent while held), returning the dragged ratio; rays_shell's docked gutters use `ui.grip`.
+Responsive layout is a plain condition on `ui.width()`/`view_size`. The passes are O(nodes) per
+rebuilt view (a kept view's nodes are not laid out: `ui.arranged_nodes()`), allocation-free when
+warm, with stack order sorted in a kept scratch vector; `layout_stress_zero_alloc` (2,006 nodes, every
+mode, RTL) asserts zero allocations for a full rebuild and for a cached frame, `layout_scaling` flat
+cost per node from 500 to 8,000 nodes. The kit reads `control_h` and the spacing scale at the theme's
+density (`ui.control_h()`, `ui.space(i)`). Left out on purpose: float layout, multi-column text,
+automatic table layout, a selector engine.
+
+**Accessibility (engine half, landed).** `Node::role` (`a11y::Role`; `Unknown` is not in the tree)
+and `Node::a11y` (widget states: CHECKABLE, CHECKED, EXPANDABLE, EXPANDED, EDITABLE, MULTILINE,
+SELECTED, MODAL), `ui.set_role`, `ui.a11y_name` (the text by default), `ui.a11y_value(h, text,
+selection)`. Each view keeps the slots its last build declared, so the walk after paint reaches a
+kept view's nodes; nodes with a role are pushed under their nearest pushed ancestor with
+`node_id(slot, generation)`, the resolved rect, FOCUSABLE/FOCUSED/PRESSED/ENABLED/VISIBLE and the
+actions their flags allow. `FrameOut::a11y` changes `revision` only when the content did (no
+allocation warm). `ui.inject_a11y(&[A11yAction])` applies next frame as input: Press clicks, Focus
+focuses, Scroll scrolls, SetValue arrives as `Signal::a11y_value` (the text field applies it as one
+change), Expand/Collapse click a disclosure whose state differs. Kit roles: panel/window, dialog,
+menu, menu item, separator, label, heading (sections), toggle, button, text field, text area, list
+and list item (`ui.list`, picker, completions), tooltip, status bar (footer, inspector bar), scroll
+area, table, splitter. The Linux host wiring (`pxui_atspi::Bridge::update(out.a11y)` after a frame,
+`inject_a11y(bridge.pump())` before the next) belongs to the gallery's Wayland host loop.
 
 Composition closures are called immediately; standard widgets carry a `Look` (plain data); only `canvas`
 closures outlive the build, and they live in the frame arena. Public functions take concrete types or
