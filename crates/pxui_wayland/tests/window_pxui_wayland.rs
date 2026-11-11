@@ -96,7 +96,8 @@ fn window_wayland_present() {
 
     gpu.close();
     window.destroy().unwrap();
-    assert!(pxui_wayland::clipboard_get_text().is_err(), "no open window, no clipboard");
+    pxui_wayland::clipboard_set_text("local").unwrap();
+    assert_eq!(pxui_wayland::clipboard_get_text().unwrap(), "local", "without a window the clipboard is process-local");
     assert!(window.set_cursor(CursorShape::Default).is_err(), "a destroyed window refuses calls");
     let mut events = Vec::new();
     assert!(!window.pump(&mut events));

@@ -75,21 +75,28 @@ pub fn configure_native_process() -> Result<(), Error> {
 thread_local! {
     /// The open windows' shim handles, newest last: the clipboard free functions use the newest.
     static OPEN: std::cell::RefCell<Vec<NonNull<c_void>>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The clipboard while no window is open: a Wayland client reaches the selection only through a surface.
+    // ponytail: process-local until a window opens (not handed to it); a windowless clipboard needs a seat focus anyway.
+    static LOCAL: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
-fn newest() -> Result<*mut c_void, Error> {
-    OPEN.with(|open| open.borrow().last().map(|w| w.as_ptr())).ok_or_else(|| "the clipboard needs an open Wayland window".to_owned())
+fn newest() -> Option<*mut c_void> {
+    OPEN.with(|open| open.borrow().last().map(|w| w.as_ptr()))
 }
 
-/// Offers `text` as the clipboard selection through the newest open window.
+/// Offers `text` as the clipboard selection through the newest open window; without one it stays in this process.
 pub fn clipboard_set_text(text: &str) -> Result<(), Error> {
-    clipboard_set(newest()?, text)
+    match newest() {
+        Some(raw) => clipboard_set(raw, text),
+        None if text.contains('\0') => Err("clipboard text contains a NUL byte".to_owned()),
+        None => Ok(LOCAL.with(|local| *local.borrow_mut() = text.to_owned())),
+    }
 }
 
 /// The clipboard's text, read synchronously through the newest open window (waiting at most a second for the
 /// owning client); empty when the clipboard holds no text. `Window::request_paste` is the non-blocking form.
 pub fn clipboard_get_text() -> Result<String, Error> {
-    let raw = newest()?;
+    let Some(raw) = newest() else { return Ok(LOCAL.with(|local| local.borrow().clone())) };
     // SAFETY: a live window from the registry; the returned text is copied, then released to the shim.
     let text = unsafe { rw_clipboard_get(raw, 1000) };
     if text.is_null() {
