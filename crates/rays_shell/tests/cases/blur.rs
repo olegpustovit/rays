@@ -26,12 +26,13 @@ fn frame_at(count: i64) -> frame::Frame {
 /// RGBA pixels of a frame with a hard black/white edge at x = 160 behind a view at (80, 40, 160, 80)
 /// asking for `blur`, and a red square drawn after the UI layer; the UI's draw calls and the pass
 /// splits the render made.
-fn render(blur: f32) -> (Vec<u8>, u64, u64) {
-    render_at(blur, 80.0, 0.0)
+fn render(canvas_: &canvas::Canvas, blur: f32) -> (Vec<u8>, u64, u64) {
+    render_at(canvas_, blur, 80.0, 0.0)
 }
 
-/// `render` with the view at x `left` and its box's look rounded by `radius`.
-fn render_at(blur: f32, left: f32, radius: f32) -> (Vec<u8>, u64, u64) {
+/// `render` with the view at x `left` and its box's look rounded by `radius`. The renders share one
+/// canvas: each canvas builds its own pipelines, which a CPU driver compiles for a second or more.
+fn render_at(canvas_: &canvas::Canvas, blur: f32, left: f32, radius: f32) -> (Vec<u8>, u64, u64) {
     let path = format!("{}/../../pxui/assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
     let ui = Rc::new(RefCell::new(Ui::create(Platform::Apple, None, rays_shell::host::text(Some(&path)))));
     let view = Cell::new(None);
@@ -51,15 +52,13 @@ fn render_at(blur: f32, left: f32, radius: f32) -> (Vec<u8>, u64, u64) {
             ui.view_backdrop_blur(&view.get().unwrap(), blur);
         }
     }
-    let canvas_ = canvas::create(W, H).expect("canvas");
     let mut nodes = vec![scene::clear(color::rgb(255, 255, 255)), scene::rect((0, 0), 160, H, Some(color::black()), None).unwrap()];
     nodes.extend(rays_shell::host::scene(&ui, None));
     nodes.push(scene::rect((10, 150), 40, 40, Some(color::rgb(255, 0, 0)), None).unwrap());
     let (calls, splits) = (rays_shell::host::draw_calls(), scene::ui_splits());
-    canvas::render(Some(1), &canvas_, &nodes).expect("Canvas.render");
-    let result = (image::pixels(&canvas::to_image(&canvas_).expect("to_image")).expect("pixels"), rays_shell::host::draw_calls() - calls, scene::ui_splits() - splits);
+    canvas::render(Some(1), canvas_, &nodes).expect("Canvas.render");
+    let result = (image::pixels(&canvas::to_image(canvas_).expect("to_image")).expect("pixels"), rays_shell::host::draw_calls() - calls, scene::ui_splits() - splits);
     ui.borrow_mut().destroy();
-    let _ = canvas::destroy(&canvas_);
     result
 }
 
@@ -67,9 +66,10 @@ fn window_host_backdrop_blur() {
     if !common::gpu() {
         return;
     }
-    let (plain, plain_calls, plain_splits) = render(0.0);
+    let canvas_ = canvas::create(W, H).expect("canvas");
+    let (plain, plain_calls, plain_splits) = render(&canvas_, 0.0);
     assert_eq!((plain_calls, plain_splits), (1, 0), "a frame with no blur draws its layer once and splits no pass");
-    let (blurred, calls, splits) = render(8.0);
+    let (blurred, calls, splits) = render(&canvas_, 8.0);
     assert_eq!(splits, 1, "one blur splits the pass once");
     assert_eq!(calls, 3, "the layer before the blur, the blurred image, the layer after it");
     let red = |pixels: &[u8], x: usize, y: usize| pixels[(y * W as usize + x) * 4] as i32;
@@ -82,11 +82,12 @@ fn window_host_backdrop_blur() {
     assert!(ramp.windows(2).all(|w| w[0] < w[1]) && ramp[0] > 0 && ramp[4] < 255 && (40..215).contains(&ramp[2]), "a soft ramp across the hard edge: {ramp:?}");
     assert!(red(&plain, 150, 80) == 0 && red(&plain, 170, 80) >= 253, "the same frame unblurred keeps its hard edge");
     // the view's right corners on the edge: a rounded record leaves its corners unblurred
-    let (square, _, _) = render_at(8.0, 5.0, 0.0);
-    let (round, _, _) = render_at(8.0, 5.0, 16.0);
+    let (square, _, _) = render_at(&canvas_, 8.0, 5.0, 0.0);
+    let (round, _, _) = render_at(&canvas_, 8.0, 5.0, 16.0);
     assert!(red(&square, 163, 41) < 250, "a square blur reaches its corner: {}", red(&square, 163, 41));
     assert!(red(&round, 163, 41) >= 253, "a rounded blur leaves its corner unblurred: {}", red(&round, 163, 41));
     assert_eq!(red(&round, 163, 80), red(&square, 163, 80), "inside the corners the blur is the same");
+    let _ = canvas::destroy(&canvas_);
 }
 
 pub const CASES: &[(&str, fn())] = &[("window_host_backdrop_blur", window_host_backdrop_blur)];

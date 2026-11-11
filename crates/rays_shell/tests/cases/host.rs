@@ -76,12 +76,15 @@ fn zones(ui: &mut Ui) {
     });
 }
 
-/// The zone tokens through the Rays renderer at 1x and 2x match their goldens exactly
+/// The zone tokens through the Rays renderer at 1x and 2x match their goldens (exactly on Metal)
 /// (`RAYS_UPDATE_FIXTURES=1` rewrites them), in one draw call.
 fn window_host_zones_parity() {
     if !common::gpu() {
         return;
     }
+    // Metal rasterises the goldens: exact. Vulkan blends a channel off by 1-2 (NVIDIA and lavapipe round
+    // straight-alpha blends differently; gpu_graph_pixels allows the same), so there a pixel differs past 2.
+    let tolerance = if ogpu_core::impl_::backend().expect("backend") == "vulkan" { 2 } else { 0 };
     for density in [1, 2] {
         let (canvas_, calls) = render(density, 390, &mut zones);
         assert_eq!(calls, 1, "the zones layer drew in {calls} draw calls");
@@ -91,7 +94,7 @@ fn window_host_zones_parity() {
         }
         let actual = image::pixels(&canvas::to_image(&canvas_).expect("to_image")).expect("pixels");
         let expected = image::pixels(&image::load(&golden).expect("golden")).expect("pixels");
-        let different = actual.chunks(4).zip(expected.chunks(4)).filter(|(a, b)| a != b).count();
+        let different = actual.chunks(4).zip(expected.chunks(4)).filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > tolerance)).count();
         assert!(actual.len() == expected.len() && different == 0, "zones at {density}x: {different} pixels differ from {golden}");
         let _ = canvas::destroy(&canvas_);
     }
