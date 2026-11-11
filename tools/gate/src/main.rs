@@ -894,7 +894,9 @@ fn package_targets(dir: &Path, manifest: &ParsedManifest) -> Result<(bool, bool)
 }
 
 fn crate_name(package_name: &str, lib_name: Option<&str>) -> String {
-    lib_name.unwrap_or(package_name).replace('-', "_")
+    let name = lib_name.unwrap_or(package_name).replace('-', "_");
+    // The private pxui_abi rlib and the pxui_dylib cdylib are both libraries named `pxui`; the graph knows them by package.
+    if matches!(package_name, "pxui_abi" | "pxui_dylib") && name == "pxui" { package_name.to_owned() } else { name }
 }
 
 fn is_pxui_private(package: &Package, workspace: &Path) -> bool {
@@ -1094,15 +1096,8 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
         if by_package.insert(package.package_name.clone(), index).is_some() {
             errors.push(format!("{}: duplicate workspace package `{}`", package.manifest.display(), package.package_name));
         }
-        if let Some(previous) = by_crate.insert(package.crate_name.clone(), index) {
-            let previous = &packages[previous];
-            let pxui_abi_alias = package.crate_name == "pxui"
-                && package.external
-                && previous.external
-                && matches!((package.package_name.as_str(), previous.package_name.as_str()), ("pxui", "pxui_abi") | ("pxui_abi", "pxui"));
-            if !pxui_abi_alias {
-                errors.push(format!("{}: duplicate crate name `{}`", package.manifest.display(), package.crate_name));
-            }
+        if by_crate.insert(package.crate_name.clone(), index).is_some() {
+            errors.push(format!("{}: duplicate crate name `{}`", package.manifest.display(), package.crate_name));
         }
     }
     let mut graph: HashMap<String, Vec<String>> = HashMap::new();
