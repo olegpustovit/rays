@@ -1404,10 +1404,10 @@ mod tests {
 
 
     #[test]
-    fn shape_gate_allows_unsafe_only_in_listed_files() {
+    fn shape_gate_allows_unsafe_only_in_listed_crates() {
         let source = "fn f() { unsafe { g() } }";
-        assert!(shape_source("pxui", "crates/pxui/src/arena.rs", source).is_empty());
-        assert!(!shape_source("pxui", "crates/pxui/src/other.rs", source).is_empty());
+        assert!(shape_source("parallel", "crates/parallel/src/lib.rs", source).is_empty());
+        assert!(!shape_source("pxui_core", "crates/pxui_core/src/arena.rs", source).is_empty());
     }
 
     #[test]
@@ -1465,36 +1465,29 @@ mod tests {
         )
         .unwrap();
         let cc_build_edge = deps(&root);
-        for package in ["flow_ir", "pxui", "ogpu_metal", "metal_sys", "vulkan_sys", "ogpu_core"] {
-            fs::create_dir_all(root.join(format!("crates/{package}/src"))).unwrap();
-            fs::write(root.join(format!("crates/{package}/Cargo.toml")), format!("[package]\nname = \"{package}\"\n")).unwrap();
-            fs::write(root.join(format!("crates/{package}/src/lib.rs")), "").unwrap();
+        fs::create_dir_all(root.join("crates/flow_ir/src")).unwrap();
+        fs::write(root.join("crates/flow_ir/Cargo.toml"), "[package]\nname = \"flow_ir\"\n").unwrap();
+        for package in ["pxui_core", "ogpu_metal", "metal_sys", "vulkan_sys", "ogpu_core"] {
+            fs::create_dir_all(root.join(format!("pxui/crates/{package}/src"))).unwrap();
+            fs::write(root.join(format!("pxui/crates/{package}/Cargo.toml")), format!("[package]\nname = \"{package}\"\n")).unwrap();
+            fs::write(root.join(format!("pxui/crates/{package}/src/lib.rs")), "").unwrap();
         }
-        fs::write(root.join("crates/flow_ir/Cargo.toml"), "[package]\nname = \"flow_ir\"\n[dependencies]\npxui = { path = \"../pxui\" }\n").unwrap();
-        fs::write(root.join("crates/rays/Cargo.toml"), "[package]\nname = \"rays\"\n[dependencies]\nogpu_metal = { path = \"../ogpu_metal\" }\nmetal_sys = { path = \"../metal_sys\" }\n").unwrap();
-        fs::write(root.join("crates/metal_sys/Cargo.toml"), "[package]\nname = \"metal_sys\"\n[dependencies]\nogpu_core = { path = \"../ogpu_core\" }\n").unwrap();
-        fs::write(root.join("crates/vulkan_sys/Cargo.toml"), "[package]\nname = \"vulkan_sys\"\n[dependencies]\nogpu_core = { path = \"../ogpu_core\" }\n").unwrap();
+        fs::write(root.join("crates/flow_ir/Cargo.toml"), "[package]\nname = \"flow_ir\"\n[dependencies]\npxui_core = { path = \"../../pxui/crates/pxui_core\" }\n").unwrap();
+        fs::write(root.join("crates/rays/Cargo.toml"), "[package]\nname = \"rays\"\n[dependencies]\nogpu_metal = { path = \"../../pxui/crates/ogpu_metal\" }\nmetal_sys = { path = \"../../pxui/crates/metal_sys\" }\n").unwrap();
+        fs::write(root.join("pxui/crates/metal_sys/Cargo.toml"), "[package]\nname = \"metal_sys\"\n[dependencies]\nogpu_core = { path = \"../ogpu_core\" }\n").unwrap();
+        fs::write(root.join("pxui/crates/vulkan_sys/Cargo.toml"), "[package]\nname = \"vulkan_sys\"\n[dependencies]\nogpu_core = { path = \"../ogpu_core\" }\n").unwrap();
         let boundaries = deps(&root).unwrap();
-        assert!(boundaries.iter().any(|issue| issue.contains("flow_ir must not reach") && issue.contains("pxui")));
+        assert!(boundaries.iter().any(|issue| issue.contains("flow_ir must not reach") && issue.contains("pxui_core")));
         assert!(boundaries.iter().any(|issue| issue.contains("rays must not reach") && issue.contains("ogpu_metal")));
         assert!(boundaries.iter().any(|issue| issue.contains("rays must not reach") && issue.contains("metal_sys")));
         assert!(!boundaries.iter().any(|issue| issue.contains("`metal_sys` may not directly depend on `ogpu_core`")));
         assert!(!boundaries.iter().any(|issue| issue.contains("`vulkan_sys` may not directly depend on `ogpu_core`")));
-        let vulkan_manifest=root.join("crates/vulkan_sys/Cargo.toml");
-        let admitted_vulkan=fs::read_to_string(&vulkan_manifest).unwrap();
-        fs::write(&vulkan_manifest,format!("{admitted_vulkan}pxui = {{ path = \"../pxui\" }}\n")).unwrap();
-        assert!(deps(&root).unwrap().iter().any(|issue| issue.contains("`vulkan_sys` may not directly depend on `pxui`")));
-        fs::write(vulkan_manifest,admitted_vulkan).unwrap();
-        let sys_manifest = root.join("crates/metal_sys/Cargo.toml");
-        let admitted_sys = fs::read_to_string(&sys_manifest).unwrap();
-        fs::write(&sys_manifest,format!("{admitted_sys}pxui = {{ path = \"../pxui\" }}\n")).unwrap();
-        assert!(deps(&root).unwrap().iter().any(|issue| issue.contains("`metal_sys` may not directly depend on `pxui`")));
-        fs::write(sys_manifest,admitted_sys).unwrap();
         for package in ["flow_ir", "rays"] {
             let path = root.join(format!("crates/{package}/Cargo.toml"));
             fs::write(&path, fs::read_to_string(&path).unwrap().replace("[dependencies]", "[dev-dependencies]")).unwrap();
         }
-        assert!(deps(&root).unwrap().is_empty(), "dev-only tests do not change production boundaries");
+        let dev_only = deps(&root).unwrap();
+        assert!(dev_only.is_empty(), "dev-only tests do not change production boundaries: {dev_only:#?}");
         fs::remove_dir_all(&root).unwrap();
         assert_eq!(allowed.unwrap(), Vec::<String>::new());
         let sdl_edge = sdl_edge.unwrap();

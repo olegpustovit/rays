@@ -26,5 +26,5 @@ a browser, never product code and never a web fallback.
 (the Workspace sheet, 1440 x 900) and layout 1 (the Graph sheet beside the Inspector sheet:
 render at 1581 x 784).
 
-Run `cargo t -p pxui gpu_parity` for native framebuffer parity. The checked-in
+Run `cargo t -p pxui_core gpu_parity` for native framebuffer parity. The checked-in
 HTML sheets remain visual references; they are not the native rendering path.

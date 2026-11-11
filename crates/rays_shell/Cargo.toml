@@ -12,7 +12,7 @@ path = "src/lib.rs"
 rays = { path = "../rays" }
 rays_math = { path = "../rays_math" }
 editor_core = { path = "../editor_core" }
-pxui = { path = "../../pxui/crates/pxui" }
+pxui = { package = "pxui_core", path = "../../pxui/crates/pxui_core" }
 pxui_render = { path = "../../pxui/crates/pxui_render" }
 ogpu_core = { path = "../../pxui/crates/ogpu_core" }
 cfmt = { path = "../../pxui/crates/cfmt" }

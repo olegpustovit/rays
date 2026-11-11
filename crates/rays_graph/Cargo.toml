@@ -16,7 +16,7 @@ rays_math = { path = "../rays_math" }
 param = { path = "../param" }
 cfmt = { path = "../../pxui/crates/cfmt" }
 input = { path = "../../pxui/crates/input" }
-pxui = { path = "../../pxui/crates/pxui" }
+pxui = { package = "pxui_core", path = "../../pxui/crates/pxui_core" }
 editor_core = { path = "../editor_core" }
 flow_syntax = { path = "../flow_syntax" }
 flow_check = { path = "../flow_check" }

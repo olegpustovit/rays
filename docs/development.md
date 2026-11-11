@@ -34,7 +34,7 @@ cover past machines and settings, not current defaults.
 ## The pxui submodule and validation
 
 PXUI, `ogpu_*`, the window hosts, `sdl3` and `cargo t` itself live in the `pxui/` submodule
-(`git@github.com:olegpustovit/pxui.git`). After a clone: `git submodule update --init`. `cargo t -p pxui`
+(`git@github.com:olegpustovit/pxui.git`). After a clone: `git submodule update --init`. `cargo t -p pxui_core`
 and the other PXUI crates run from the Rays root (the alias builds `pxui/tools/t` into this `target/`).
 To change PXUI: edit in `pxui/`, `pxui/tools/validate.sh` there, commit and push in `pxui/`, then commit
 the pointer here; `cargo run -p gate -- pxui` refuses a pointer that is not on the remote.
