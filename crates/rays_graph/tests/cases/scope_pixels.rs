@@ -163,6 +163,7 @@ struct Step {
 }
 
 fn measured(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Step {
+    mem_sys::local_reset();
     let before = mem_sys::local_alloc_count();
     let mut changes = Vec::new();
     ui.frame(fr, &mut |ui: &mut Ui| {
@@ -254,7 +255,7 @@ fn window_graph_view_pan_zoom() {
             let (x, y, w, h) = scope::inspect::box_of(&t, &card).expect("c");
             let at = (x + w / 2.0, y + h.min(24.0 * z) / 2.0);
             let s = step(&mut ui, &mut t, at, &[], vec![Event::PointerMoved(at)]);
-            check(t.zoom == rested.2 || s.views <= 1, "a zoom built more than once");
+            check(verify || t.zoom == rested.2 || s.views <= 1, &format!("a zoom built {} views", s.views));
             step(&mut ui, &mut t, at, &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, at)]);
             let s = step(&mut ui, &mut t, at, &[], vec![Event::PointerReleased(MouseButton::LeftButton, at)]);
             let picked = s.changes.iter().any(|c| matches!(c, Change::Selected(p) if p.contains(&card)));
@@ -269,4 +270,76 @@ fn window_graph_view_pan_zoom() {
     }
 }
 
-pub const CASES: &[(&str, fn())] = &[("gpu_graph_pixels", gpu_graph_pixels), ("window_graph_view_pan_zoom", window_graph_view_pan_zoom)];
+/// The pointer over the pane builds no content: a card's hover is its ground's look and its row's
+/// highlight, patched (that card's instances only, nothing allocated warm); a port's lit wires are a
+/// small view over the content; selecting builds the content once.
+fn window_graph_hover() {
+    for verify in [true, false] {
+        let ws = checked(SMALL);
+        let sc = Rc::new(flow_graph::projection::of_graph(&scope_catalog(), &ws, "g").unwrap_or_else(|e| panic!("{e}")));
+        let mut t = scope::create(Some(W), Some(H));
+        scope::with_scope(ScopeOpts::default(), "g", sc, &mut t);
+        scope::with_records(recorded(&ws), &mut t);
+        let mut ui = golden_ui();
+        ui.verify_views(verify);
+        let count = std::cell::Cell::new(0);
+        let step = |ui: &mut Ui, t: &mut Pane, at: (f64, f64), events: Vec<Event>| {
+            let fr = frame_at(count.get(), 1, at, events);
+            count.set(count.get() + 1);
+            measured(ui, t, &fr)
+        };
+        let to = |ui: &mut Ui, t: &mut Pane, at: (f64, f64)| step(ui, t, at, vec![Event::PointerMoved(at)]);
+        let away = (-100.0, -100.0);
+        for _ in 0..4 {
+            to(&mut ui, &mut t, away);
+        }
+        let (c, d) = (path(&["g", "c"]), path(&["g", "d"]));
+        let head = |t: &Pane, p: &[flow_syntax::symbol::Symbol]| {
+            let (x, y, w, _) = scope::inspect::box_of(t, p).expect("card");
+            (x + w / 2.0, y + 6.0)
+        };
+        let (hc, hd) = (head(&t, &c), head(&t, &d));
+        let row = scope::inspect::row_center(&t, &c, 1).expect("a row of c");
+        let canvas = (8.0, H as f64 - 8.0);
+        // warm: every place once
+        for at in [hc, row, hd, canvas, hc, canvas] {
+            to(&mut ui, &mut t, at);
+        }
+        let quiet = |s: &Step, what: &str, bytes: usize| {
+            check(verify || s.views == 0, &format!("{what}: {} views built", s.views));
+            check(verify || s.bytes <= bytes, &format!("{what}: {} instance bytes written (at most {bytes})", s.bytes));
+            check(verify || s.allocs == 0, &format!("{what}: {} allocations", s.allocs));
+        };
+        // a card's ground (its fill and edge) and its row band; a row, the band moved and filled
+        let card = 5 * std::mem::size_of::<pxui::draw::Instance>();
+        quiet(&to(&mut ui, &mut t, hc), "onto a card", card);
+        quiet(&to(&mut ui, &mut t, (hc.0 + 3.0, hc.1)), "within a card", 0);
+        quiet(&to(&mut ui, &mut t, row), "onto its row", 3 * std::mem::size_of::<pxui::draw::Instance>());
+        check(scope::hovered_row(&t).is_some_and(|(p, _)| p == c), "the hovered row is not c's");
+        quiet(&to(&mut ui, &mut t, hd), "to another card", 2 * card);
+        quiet(&to(&mut ui, &mut t, canvas), "off the cards", card);
+        check(scope::hovered_row(&t).is_none(), "a row stayed hovered off the cards");
+        // a port lights its wires in the view over the content
+        let port = scope::inspect::output_socket(&t, &d).expect("d's out-port");
+        let s = to(&mut ui, &mut t, port);
+        check(!t.highlighted.is_empty(), "the out-port lit no wire");
+        check(verify || s.views == 1, &format!("hovering a port built {} views (the hover's alone)", s.views));
+        to(&mut ui, &mut t, canvas);
+        check(t.highlighted.is_empty(), "wires stayed lit off the port");
+        // selecting a card: one content build
+        step(&mut ui, &mut t, hc, vec![Event::PointerMoved(hc), Event::PointerPressed(MouseButton::LeftButton, hc)]);
+        let s = step(&mut ui, &mut t, hc, vec![Event::PointerReleased(MouseButton::LeftButton, hc)]);
+        check(scope::selected(&t).contains(&c), "the click did not select c");
+        check(verify || s.views <= 1, &format!("the release built {} views", s.views));
+        // to a screen reader the cards are groups named by their titles, their ports buttons
+        ui.set_a11y(true);
+        to(&mut ui, &mut t, away);
+        let tree = ui.output().a11y;
+        let named = |name: &str, role: pxui::a11y::Role| tree.nodes.iter().any(|n| n.role == role && &tree.strings[n.name.start as usize..n.name.end as usize] == name);
+        check(named("c", pxui::a11y::Role::Group) && named("d", pxui::a11y::Role::Group), "the cards are not named groups");
+        check(named("targets", pxui::a11y::Role::Button), "c's targets port is not a named button");
+        ui.destroy();
+    }
+}
+
+pub const CASES: &[(&str, fn())] = &[("gpu_graph_pixels", gpu_graph_pixels), ("window_graph_view_pan_zoom", window_graph_view_pan_zoom), ("window_graph_hover", window_graph_hover)];

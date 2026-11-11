@@ -1009,11 +1009,13 @@ pub struct NodeOpts {
     pub out_wired: bool,
     pub shown: Level,
     pub failed: Option<String>,
+    /// the card's fill and edge are its tile's look (`scope_hover::ground`), not painted here
+    pub ground: bool,
 }
 
 impl Default for NodeOpts {
     fn default() -> NodeOpts {
-        NodeOpts { footer: None, lens_step: None, hovered: false, carry: false, out_wired: true, shown: Level::Card, failed: None }
+        NodeOpts { footer: None, lens_step: None, hovered: false, carry: false, out_wired: true, shown: Level::Card, failed: None, ground: false }
     }
 }
 
@@ -1044,7 +1046,8 @@ pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl
     let h = if shown == Level::Chip && z_.is_none() { p::HEAD_HEIGHT * z } else { h };
     let fill = if o.hovered && !selected { theme::hover_fill(&theme) } else { theme.input };
     let edge = if o.failed.is_some() { theme::invalid() } else { card_edge(t, fill, selected) };
-    if n.expr {
+    if o.ground {
+    } else if n.expr {
         // an expression written in its reader's input: a dashed card, its `expr` mark in the header
         paint.fill(x as f32, y as f32, wd as f32, h as f32, fill);
         dashed_frame_in(paint, x, y, wd, h, edge);
@@ -1405,13 +1408,21 @@ pub fn paint_background(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f
     let chain = st::chains_of(t);
     let tag_size = 5.max((11.0 * z).round() as i64);
     for &i in wires {
-        let wi = &t.geo.wires[i];
+        paint_wire(paint, t, &chain, viewport, tag_size, &t.geo.wires[i], false);
+    }
+}
+
+/// One wire as the pane draws it, cut to `clip`; `is_highlighted`: widened for the pointer over it
+/// or over one of its ports (drawn over the content by `scope_hover`).
+pub fn paint_wire(paint: &mut Paint, t: &Pane, chain: &Option<st::Chains>, clip: (f64, f64, f64, f64), tag_size: i64, wi: &Wire, is_highlighted: bool) {
+    let theme = t.theme;
+    let z = t.zoom;
+    {
         let pts: Vec<(f64, f64)> = wi.pts.iter().map(|(x, y)| (sx(t, *x), sy(t, *y))).collect();
         let is_selected = match (&t.selected_wire, &wi.target) {
             (Some((sp, sk, _)), Some((tp, tk, _))) => sp == tp && sk == tk,
             _ => false,
         };
-        let is_highlighted = t.highlighted.contains(wi);
         let lit = chain.as_ref().map(|c| st::wire_lit(c, wi));
         let mut width = if is_highlighted || lit == Some(true) { 2.0f64.max(2.4 * z) } else { 1.0f64.max(1.5 * z) };
         // a switch's active wire is solid and accented, the others dashed grey
@@ -1450,7 +1461,7 @@ pub fn paint_background(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f
         } else if layout == Some(false) {
             paint_dashed_polyline(paint, width, color, &pts);
         } else {
-            paint_polyline(viewport, paint, width, color, &pts);
+            paint_polyline(clip, paint, width, color, &pts);
         }
     }
 }

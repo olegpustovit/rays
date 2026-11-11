@@ -250,7 +250,7 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
     };
     match command {
         Command::Delete => {
-            if let Some((path, key)) = &t.hovered_row {
+            if let Some((path, key)) = &st::hovered_row(t) {
                 let hit = st::node_of(t, path).map(|n| n.rows.iter().any(|r| r.key == *key && (wired(r) || r.kind == p::RowKind::Rest))).unwrap_or(false);
                 if hit {
                     // a wire comes off; an item of a variadic input (a list's, a merge's) goes with what it holds
@@ -275,7 +275,7 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
             if parent != n.path {
                 return edit(Op::Unfold { node: parent, key: ArgKey::Arm(arm), sub: Vec::new() });
             }
-            if let Some((pp, key)) = &t.hovered_row {
+            if let Some((pp, key)) = &st::hovered_row(t) {
                 if *pp == n.path {
                     return edit(Op::Unfold { node: n.path.clone(), key: key.clone(), sub: Vec::new() });
                 }
@@ -394,7 +394,7 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
             }
         }),
         Command::ItemUp | Command::ItemDown => {
-            if let Some((path, ArgKey::Pos(i))) = &t.hovered_row {
+            if let Some((path, ArgKey::Pos(i))) = &st::hovered_row(t) {
                 if matches!(st::node_of(t, path), Some(n) if p::reorderable(&n)) {
                     return edit(Op::MoveItem { node: path.clone(), pos: if command == Command::ItemUp { *i } else { *i + 1 } });
                 }

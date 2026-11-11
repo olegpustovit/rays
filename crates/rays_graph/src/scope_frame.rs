@@ -265,13 +265,19 @@ pub struct Tile {
     pub ax: f64,
     pub ay: f64,
     pub tile: UiBox,
+    /// what the card's painter draws on: the tile, or for a card whose ground is the tile's look
+    /// (`ground`), a child over its row highlight
+    pub card: UiBox,
+    pub ground: Option<crate::scope_hover::Ground>,
+    pub whole: bool,
     pub sig: Signal,
     pub sub: Sub,
     pub fields: Vec<Change>,
 }
 
+/// A box over the content: no hover of it changes what the content builds (`scope_hover`).
 fn box_in(ui: &mut Ui, flags: Flags, w: f64, h: f64, at: (f64, f64), name: &str) -> UiBox {
-    ui.box_(name, BoxOpts::default().flags(flags).w(Size::Px(w as f32)).h(Size::Px(h as f32)).at(p32(at)))
+    ui.box_(name, BoxOpts::default().flags(flags | HOVER_FREE).w(Size::Px(w as f32)).h(Size::Px(h as f32)).at(p32(at)))
 }
 
 /// A tile's ports and taps: out-ports, deletable inputs, zone controls.
@@ -310,6 +316,7 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                 if n.zone.is_none() {
                     let pos = if shown == Level::Point { (0.0, p::POINT_SIZE / 2.0) } else { (1.0, sp::PORT_Y) };
                     let sink = bxz(ui, z, "d:head", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                    ui.a11y_name(&sink, &n.rows[hi].label);
                     inputs.insert(0, sink);
                     if wired(&n.rows[hi]) {
                         dels.insert(0, (sink, Del::Unwire(hi)));
@@ -422,6 +429,7 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                                 let ry = top + (k as f64 * p::ROW_HEIGHT);
                                 if r.socket {
                                     let sink = bxz(ui, z, &format!("d:{}", i), (0.0 - 7.0, ry + 12.0 - 7.0), (14.0, 14.0));
+                                    ui.a11y_name(&sink, &r.label);
                                     inputs.insert(0, sink);
                                     if wired(r) {
                                         dels.insert(0, (sink, Del::Unwire(*i)));
@@ -476,7 +484,7 @@ pub fn row_fields_of(ui: &mut Ui, z: f64, pl: &Placed, n: &p::Node, r: &p::Row, 
                 SNode::Sym(b) if matches!(ex.name(*b), "true" | "false") => {
                     let toggle = ui.box_(
                         &format!("b{}", name),
-                        BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px((sp::SWITCH_W * z) as f32)).h(Size::Px((sp::SWITCH_H * z) as f32)).at((((pl.w - sp::HEAD_PAD - sp::SWITCH_W) * z) as f32, ((ry + 5.0) * z) as f32)),
+                        BoxOpts::default().flags(CLICKABLE | TAB_STOP | HOVER_FREE).w(Size::Px((sp::SWITCH_W * z) as f32)).h(Size::Px((sp::SWITCH_H * z) as f32)).at((((pl.w - sp::HEAD_PAD - sp::SWITCH_W) * z) as f32, ((ry + 5.0) * z) as f32)),
                     );
                     if ui.signal(&toggle).clicked {
                         let mut builder = flow_syntax::arena::SyntaxBuilder::new();
@@ -538,7 +546,7 @@ pub fn wire_boxes(c: &mut Ctx, t: &Pane, ui: &mut Ui, origin: (f64, f64), name: 
                 let x1 = ax + ((bx - ax) * u1);
                 let y1 = ay + ((by - ay) * u1);
                 count += 1;
-                let b = ui.box_fmt(format_args!("{}{}", prefix, count), BoxOpts::default().flags(CLICKABLE).at(((x0.min(x1) - 4.0 - origin.0) as f32, (y0.min(y1) - 4.0 - origin.1) as f32)).w(Size::Px(((x1 - x0).abs() + 8.0) as f32)).h(Size::Px(((y1 - y0).abs() + 8.0) as f32)));
+                let b = ui.box_fmt(format_args!("{}{}", prefix, count), BoxOpts::default().flags(CLICKABLE | HOVER_FREE).at(((x0.min(x1) - 4.0 - origin.0) as f32, (y0.min(y1) - 4.0 - origin.1) as f32)).w(Size::Px(((x1 - x0).abs() + 8.0) as f32)).h(Size::Px(((y1 - y0).abs() + 8.0) as f32)));
                 c.wire_hits.entry(i).or_default().insert(0, b);
             }
         }
@@ -567,7 +575,38 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
     let w = pl.w * z;
     let h = pl.h * z;
     let shown = pl.shown;
-    let tile = box_in(ui, CLICKABLE, w, h, c.local(t, (bx, by)), &key);
+    // a card whose hover is its ground's and its rows' (`scope_hover`): the ground is the tile's look,
+    // a row highlight and the card's painting are its first children. A card painted whole on hover
+    // (a chip, a folded zone, an expression card) builds again for it (`Now::whole`).
+    let ground = match &pl.item {
+        Item::Item(n) if n.zone.is_none() && !n.expr && (shown == Level::Card || shown == Level::Full) => {
+            Some(crate::scope_hover::ground(t, t.selected.contains(&pl.path), t.failed.iter().any(|(q, _)| *q == n.path)))
+        }
+        _ => None,
+    };
+    let painted_whole = match &pl.item {
+        Item::Item(n) => ground.is_none() && shown != Level::Point && (n.zone.is_none() || pl.collapsed),
+        _ => false,
+    };
+    let at = c.local(t, (bx, by));
+    let tile = box_in(ui, CLICKABLE, w, h, at, &key);
+    let (card, ground) = match (ground, &pl.item) {
+        (Some((idle, hover)), Item::Item(n)) => {
+            ui.set_look(&tile, idle, State::default());
+            let saved = ui.enter(&tile);
+            // the first row line's band, behind the card's text; idle it is the ground's colour
+            let first = pl.lines.iter().position(|l| matches!(l, p::Line::Row(..)));
+            let row = first.map(|k| {
+                let ry = (rows_top(n, 0.0) + (k as f64 * p::ROW_HEIGHT)) * z;
+                let hl = ui.node("hl", Node { w: Size::Px((w - 2.0) as f32), h: Size::Px((p::ROW_HEIGHT * z) as f32), at: Some((1.0, ry as f32)), look: Look { fill: idle.fill, ..Look::NONE }, ..Node::DEFAULT });
+                (hl, k, (p::ROW_HEIGHT * z) as f32)
+            });
+            let card = ui.box_("card", BoxOpts::default().w(Size::Px(w as f32)).h(Size::Px(h as f32)).at((0.0, 0.0)));
+            ui.leave(saved);
+            (card, Some(crate::scope_hover::Ground { idle, hover, row }))
+        }
+        _ => (tile, None),
+    };
     // an expanded zone's tile covers its body: the wires that end inside it get their boxes again here,
     // over the tile and under the cards built after it
     if let Item::Item(n) = &pl.item {
@@ -584,6 +623,21 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
         }
     }
     let sub = tile_ports(t, ui, z, fs, pl, &tile);
+    // to a screen reader a card is a group named by its title, its ports buttons named by what they carry
+    let title = match &pl.item {
+        Item::Item(n) => p::title(n),
+        Item::Input(i) => i.name.clone(),
+        Item::Return => "return".to_owned(),
+    };
+    ui.set_role(&tile, pxui::a11y::Role::Group, if t.selected.contains(&pl.path) { pxui::a11y::state::SELECTED } else { 0 });
+    ui.a11y_name(&tile, &title);
+    for (b, name, _) in &sub.outs {
+        ui.set_role(b, pxui::a11y::Role::Button, 0);
+        ui.a11y_name(b, name);
+    }
+    for b in &sub.inputs {
+        ui.set_role(b, pxui::a11y::Role::Button, 0);
+    }
     // fields, inside the tile
     let mut fields: Vec<Change> = Vec::new();
     match &pl.item {
@@ -634,7 +688,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                     let b = ui.box_(
                         &format!("a{}", i),
                         BoxOpts::default()
-                            .flags(CLICKABLE | TAB_STOP)
+                            .flags(CLICKABLE | TAB_STOP | HOVER_FREE)
                             .w(Size::Px((if r.kind == p::RowKind::Add { (pl.w - sp::LABEL_X - sp::HEAD_PAD) * z } else { 24.0 * z }) as f32))
                             .h(Size::Px((16.0 * z) as f32))
                             .at((((if r.kind == p::RowKind::Add { sp::LABEL_X } else { sp::value_x(pl.w) }) * z) as f32, row_y as f32)),
@@ -643,7 +697,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                     // subject: the holder stays selected, the row is `holder @ [":" ^ label]`
                     let mut subject: Vec<Change> = Vec::new();
                     if let p::Chip::Inline { .. } = r.chip {
-                        let cb = ui.box_fmt(format_args!("ex{}", i), BoxOpts::default().flags(CLICKABLE).w(Size::Px(((sp::FIELD_W - 24.0) * z) as f32)).h(Size::Px((16.0 * z) as f32)).at((((sp::value_x(pl.w) + 24.0) * z) as f32, row_y as f32)));
+                        let cb = ui.box_fmt(format_args!("ex{}", i), BoxOpts::default().flags(CLICKABLE | HOVER_FREE).w(Size::Px(((sp::FIELD_W - 24.0) * z) as f32)).h(Size::Px((16.0 * z) as f32)).at((((sp::value_x(pl.w) + 24.0) * z) as f32, row_y as f32)));
                         let sg = ui.signal(&cb);
                         // a double click expands the call in place, as the glyph does
                         if sg.double_clicked {
@@ -698,7 +752,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                 } else if let (p::Chip::Name(nm), true) = (&r.chip, t.folds.contains_key(&(n.path.clone(), i))) {
                     // the fold button of a wired row, where `paint_value` draws its glyph
                     let (left, fw, _, _, _) = sp::wired_geo(&mut |size, text| measure_ui(ui, t, size, text), t, z, fs, 0.0, pl.w * z, true, &sp::wired_name(r, nm));
-                    let b = ui.box_fmt(format_args!("fold{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(fw as f32)).h(Size::Px((16.0 * z) as f32)).at(((left - fw - (2.0 * z)) as f32, row_y as f32)));
+                    let b = ui.box_fmt(format_args!("fold{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP | HOVER_FREE).w(Size::Px(fw as f32)).h(Size::Px((16.0 * z) as f32)).at(((left - fw - (2.0 * z)) as f32, row_y as f32)));
                     if ui.signal(&b).clicked {
                         add_clicks.push(Change::SyntaxEdit(e::Op::FoldInto { node: t.folds[&(n.path.clone(), i)].clone() }));
                     }
@@ -721,7 +775,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                             let mut m = |size: i64, text: &str| measure_ui(ui, t, size, text);
                             let (left, _, room, _, _) = sp::wired_geo(&mut m, t, z, fs, 0.0, pl.w * z, false, nm);
                             let width = m(fs, "\u{2190}") + (6.0 * z) + m(fs, nm).min(room);
-                            let b = ui.box_fmt(format_args!("ref{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(width as f32)).h(Size::Px((16.0 * z) as f32)).at((left as f32, row_y as f32)));
+                            let b = ui.box_fmt(format_args!("ref{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP | HOVER_FREE).w(Size::Px(width as f32)).h(Size::Px((16.0 * z) as f32)).at((left as f32, row_y as f32)));
                             if ui.signal(&b).clicked {
                                 add_clicks.push(Change::Selected(vec![cand]));
                             }
@@ -778,7 +832,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                 if let p::Line::Row(i, r) = line {
                     if let (p::RowKind::Rest, ArgKey::Pos(j)) = (r.kind, &r.key) {
                         if *j >= 1 {
-                            let b = ui.box_fmt(format_args!("mv{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px((16.0 * z) as f32)).h(Size::Px((16.0 * z) as f32)).at((((pl.w - 22.0) * z) as f32, ((top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z) as f32)));
+                            let b = ui.box_fmt(format_args!("mv{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP | HOVER_FREE).w(Size::Px((16.0 * z) as f32)).h(Size::Px((16.0 * z) as f32)).at((((pl.w - 22.0) * z) as f32, ((top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z) as f32)));
                             if ui.signal(&b).clicked {
                                 movers.push(Change::SyntaxEdit(e::Op::MoveItem { node: n.path.clone(), pos: *j }));
                             }
@@ -800,7 +854,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                     if let p::Line::Row(i, r) = line {
                         if let ArgKey::Pos(j) = &r.key {
                             if r.kind != p::RowKind::Add && *j != *active {
-                                let b = ui.box_fmt(format_args!("sw{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(((pl.w - 24.0) * z) as f32)).h(Size::Px((16.0 * z) as f32)).at(((12.0 * z) as f32, ((top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z) as f32)));
+                                let b = ui.box_fmt(format_args!("sw{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP | HOVER_FREE).w(Size::Px(((pl.w - 24.0) * z) as f32)).h(Size::Px((16.0 * z) as f32)).at(((12.0 * z) as f32, ((top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z) as f32)));
                                 if ui.signal(&b).clicked {
                                     switchers.push(Change::LayoutActive { graph: t.key.clone(), index: *j });
                                 }
@@ -818,7 +872,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
     all.extend(movers);
     all.extend(switchers);
     let sig = ui.signal(&tile);
-    Tile { slot, ax, ay, tile, sig, sub, fields: all }
+    Tile { slot, ax, ay, tile, card, ground, whole: painted_whole, sig, sub, fields: all }
 }
 
 /// A payload in flight: the innermost node under the pointer (a zone's tile covers its body), else the
@@ -1306,86 +1360,6 @@ pub fn pointer_step(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &U
     }
 }
 
-pub struct Hover {
-    pub slot: usize,
-    pub ax: f64,
-    pub ay: f64,
-    pub i: usize,
-}
-
-pub fn hover_step(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[Tile], ctx: &Ctx, wires_in_view: &[usize]) -> Option<Hover> {
-    // hovered row and chip expansion
-    let mut hover: Option<Hover> = None;
-    for tl in tiles {
-        let (pl, ax, ay) = &t.geo.items[tl.slot];
-        if let Item::Item(n) = &pl.item {
-            if n.zone.is_none() && ui.hovered_within(&tl.tile) {
-                let px = (mouse.0 - sx(t, *ax)) / z;
-                let py = (mouse.1 - sy(t, *ay)) / z;
-                match row_at(14.0, pl, n, pl.shown, px, py) {
-                    Some(i) if i < n.rows.len() => {
-                        hover = Some(Hover { slot: tl.slot, ax: *ax, ay: *ay, i });
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    let hovered_row = hover.as_ref().map(|h| {
-        let n = match &t.geo.items[h.slot].0.item {
-            Item::Item(n) => n,
-            _ => unreachable!("hover is over a node"),
-        };
-        (n.path.clone(), n.rows[h.i].key.clone())
-    });
-    let port_centre = |ui: &mut Ui, b: &UiBox| -> Option<(f64, f64)> {
-        if ui.hovered_within(b) {
-            let (x, y, wd, h) = ui.rect(b).f64();
-            Some((x + (wd / 2.0), y + (h / 2.0)))
-        } else {
-            None
-        }
-    };
-    let mut hovered_port: Option<(f64, f64)> = None;
-    'p: for tl in tiles {
-        for (b, _, _) in &tl.sub.outs {
-            if let Some(pc) = port_centre(ui, b) {
-                hovered_port = Some(pc);
-                break 'p;
-            }
-        }
-        for b in &tl.sub.inputs {
-            if let Some(pc) = port_centre(ui, b) {
-                hovered_port = Some(pc);
-                break 'p;
-            }
-        }
-    }
-    let same_port = |point: (f64, f64)| -> bool {
-        match hovered_port {
-            None => false,
-            Some((x, y)) => (sx(t, point.0) - x).abs() <= (1.5 * z) + 0.5 && (sy(t, point.1) - y).abs() <= (1.5 * z) + 0.5,
-        }
-    };
-    let mut highlighted: Vec<Wire> = Vec::new();
-    for &i in wires_in_view {
-        let wi = &t.geo.wires[i];
-        let mut any = false;
-        for b in ctx.hits(i) {
-            if ui.hovered_within(&b) {
-                any = true;
-                break;
-            }
-        }
-        if t.context.is_none() && (any || same_port(wi.a) || same_port(wi.b)) {
-            highlighted.insert(0, wi.clone());
-        }
-    }
-    (t.hovered_row, t.highlighted) = (hovered_row, highlighted);
-    hover
-}
-
 pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut Vec<Change>) {
     // frames: a title strip, a delete cross and a resize corner, over the tiles (a zone's tile covers its
     // whole body) and clear of the nodes, which keep 12 points inside the frame
@@ -1506,15 +1480,17 @@ fn measure_ui(ui: &mut Ui, t: &Pane, size: i64, text: &str) -> f64 {
 type Marks = Vec<((f64, f64, f64, f64), Option<String>, Option<bool>)>;
 
 /// The frame's paint: grid and wires under the cards, the cards, then the overlays.
-pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: &UiBox, canvas_signal: &Signal, tiles: &[Tile], zones: &[usize], wires_in_view: &[usize], footers: &HashMap<Path, Footer>, chain: &Option<Chains>, mouse: (f64, f64), hover: &Option<Hover>) -> (i64, i64) {
+pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: &UiBox, canvas_signal: &Signal, tiles: &[Tile], zones: &[usize], wires_in_view: &[usize], footers: &HashMap<Path, Footer>, chain: &Option<Chains>, mouse: (f64, f64)) -> (i64, i64) {
     let snapshot: Rc<Pane> = Rc::new(t.clone());
-    let row_hover: Option<(Path, usize)> = hover.as_ref().map(|h| {
-        let n = match &t.geo.items[h.slot].0.item {
-            Item::Item(n) => n,
-            _ => unreachable!("hover is over a node"),
-        };
-        (n.path.clone(), h.i)
-    });
+    // the hovered row is the row highlight's (`scope_hover`), but for a carried value over it: the
+    // carry builds every frame and marks its target row here
+    let row_hover: Option<(Path, usize)> = match (hovered_row(t), &t.carry_hot) {
+        (Some((path, key)), Some((hot, _))) if path == *hot => match t.item_at(&path).map(|(pl, _, _)| &pl.item) {
+            Some(Item::Item(n)) => n.rows.iter().position(|r| r.key == key).map(|i| (path.clone(), i)),
+            _ => None,
+        },
+        _ => None,
+    };
     // a scene object nothing reads (taken out of its merge) is dimmed; a wire from it brings it back
     let read = t.geo.read.clone();
     let dimmed = |n: &p::Node| -> bool {
@@ -1540,7 +1516,9 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: 
         let (pl, ax, ay) = &t.geo.items[tl.slot];
         let (ax, ay) = (*ax, *ay);
         let isel = t.selected.contains(&pl.path);
-        let hovered = t.drag.is_none() && t.carry_hot.is_none() && ui.hovered_within(&tl.tile);
+        // a card painted whole on hover reads it here (its hover builds again); a ground's is patched
+        let hovered = tl.ground.is_none() && t.drag.is_none() && t.carry_hot.is_none() && ui.hovered_within(&tl.tile);
+        let ground = tl.ground.is_some();
         let snap = snapshot.clone();
         let slot = tl.slot;
         // the per-item facts the painter needs, decided here
@@ -1574,7 +1552,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: 
                 None => false,
             };
         }
-        ui.draw(&tl.tile, move |paint, rect| { let rect = rect.f64();
+        ui.draw(&tl.card, move |paint, rect| { let rect = rect.f64();
             let (pl, _, _) = &snap.geo.items[slot];
             let (x, y, w, h) = rect;
             match &pl.item {
@@ -1591,7 +1569,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: 
                             sp::paint_zone_frame(paint, &snap, z, fs, footer.as_ref(), n, zn, isel, out_wired, rect, probe, count);
                         }
                         _ => {
-                            let o = sp::NodeOpts { footer: footer.clone(), lens_step, hovered, carry, out_wired, shown: pl.shown, failed: failed.clone() };
+                            let o = sp::NodeOpts { footer: footer.clone(), lens_step, hovered, carry, out_wired, shown: pl.shown, failed: failed.clone(), ground };
                             sp::paint_node(paint, &snap, z, fs, &o, pl, n, isel, rh, rect);
                             if dim {
                                 paint.fill(x as f32, y as f32, w as f32, h as f32, color::with_alpha(snap.theme.panel, 150));
@@ -1629,57 +1607,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: 
         Some((q, ok)) if q.len() == 1 && q[0] == t.key => Some(*ok),
         _ => None,
     };
-    // the view flag of the displayed node: a tip below it after the pointer rests there
-    let mut tip_at: Option<(f64, f64)> = None;
-    let mut tip_open = false;
-    if let Some(path) = &t.display {
-        if let Some((pl, ax, ay)) = t.item_at(path) {
-            if matches!(pl.item, Item::Item(_)) && pl.shown != Level::Point {
-                let fx = sx(t, *ax) + ((pl.w - sp::HEAD_PAD - 12.0) * z);
-                let fy = sy(t, *ay) + (6.0 * z);
-                let over = contains(Rect::new(fx as f32, fy as f32, (12.0 * z) as f32, (12.0 * z) as f32), p32(mouse));
-                tip_at = Some((sx(t, *ax) + (116.0 * z), sy(t, *ay) + (32.0 * z)));
-                tip_open = over && ui.hover_delay("scope-flag");
-            }
-        }
-    }
-    // the red `t` of a header: a tip after the pointer rests on it, saying what it is
-    let mut live_tip: Option<(f64, f64)> = None;
-    for tl in tiles {
-        let (pl, ax, ay) = &t.geo.items[tl.slot];
-        if let Item::Item(n) = &pl.item {
-            if n.live && pl.shown != Level::Point && ui.hovered_within(&tl.tile) {
-                let right = sx(t, *ax) + ((pl.w - sp::HEAD_PAD) * z);
-                let (mx, my) = mouse;
-                let top = sy(t, *ay);
-                if mx >= right - (14.0 * z) && mx <= right + (2.0 * z) && my >= top && my < top + (p::HEAD_HEIGHT * z) && ui.hover_delay("scope-live") {
-                    live_tip = Some((right - 150.0, top + (p::HEAD_HEIGHT * z) + 2.0));
-                    break;
-                }
-            }
-        }
-    }
     let font_size = ui.font_size();
-    // the text hovering over an expression row: its glyph and text in a box
-    let hover_tip: Option<(String, f64, f64)> = match hover {
-        Some(h) => {
-            let (pl, _, _) = &t.geo.items[h.slot];
-            match &pl.item {
-                Item::Item(n) => match &n.rows[h.i].chip {
-                    p::Chip::Inline { glyph, text } => {
-                        let full = format!("{} {}", sp::shown_glyph(glyph), text);
-                        let k = line_of_row(&pl.lines).get(&h.i).copied().unwrap_or(0);
-                        let x = sx(t, h.ax + sp::value_x(p::NODE_WIDTH));
-                        let y = sy(t, rows_top(n, h.ay) + (k as f64 * p::ROW_HEIGHT));
-                        Some((full, x, y))
-                    }
-                    _ => None,
-                },
-                _ => None,
-            }
-        }
-        None => None,
-    };
     let snap = snapshot;
     let press_point = p64(canvas_signal.press_point);
     // over the cards, in the content box (it moves with them); what is the pane's is the pane's rectangle
@@ -1724,36 +1652,6 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: 
                 }
             }
         }
-        if let Some((fx, fy)) = live_tip {
-            let size = 4.max(font_size - 2);
-            let label = "t  live: reads time or input, re-cooked every frame";
-            let tw = f64::from(paint.text_width(Some(size), label)) + 14.0;
-            sp::frame_in(paint, fx, fy, tw, 20.0, Some(snap.theme.input), theme::edge(&snap.theme));
-            let ty = f64::from(paint.text_top(Some(size), fy as f32, 20.0));
-            paint.text_s(((fx + 7.0) as f32, ty as f32), size, snap.theme.foreground, label);
-        }
-        // the displayed node's tip, once the pointer has rested on its flag
-        if tip_open {
-            if let Some((fx, fy)) = tip_at {
-                let size = 4.max(font_size - 2);
-                let label = "displayed";
-                let key = "V";
-                let lw = f64::from(paint.text_width(Some(size), label));
-                let kw = f64::from(paint.text_width(Some(size), key));
-                let tw = 2.0 + 12.0 + lw + 6.0 + kw;
-                sp::frame_in(paint, fx, fy, tw, 20.0, Some(snap.theme.input), theme::edge(&snap.theme));
-                let ty = f64::from(paint.text_top(Some(size), fy as f32, 20.0));
-                paint.text_s(((fx + 7.0) as f32, ty as f32), size, snap.theme.foreground, label);
-                paint.text_s(((fx + 7.0 + lw + 6.0) as f32, ty as f32), size, theme::ink_3(&snap.theme), key);
-            }
-        }
-        for wi in &snap.highlighted {
-            let pts: Vec<(f64, f64)> = wi.pts.iter().map(|(x, y)| (sx(&snap, *x), sy(&snap, *y))).collect();
-            sp::paint_polyline((cx, cy, cw, ch), paint, 2.0, snap.theme.foreground, &pts);
-            for (x, y) in [wi.a, wi.b] {
-                paint.circle(((sx(&snap, x)) as f32, (sy(&snap, y)) as f32), 6.0, None, Some(snap.theme.foreground));
-            }
-        }
         if let Some(wg) = &band {
             if let Some((a, b)) = clip_segment(wg.from, mouse, (cx, cy, cw, ch)) {
                 paint.line_w(p32(a), p32(b), 1.5, sp::ty_color(&snap, wg.ty.as_ref()));
@@ -1763,15 +1661,6 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: 
             let (x0, y0) = press_point;
             let (mx, my) = mouse;
             sp::frame_in(paint, x0.min(mx), y0.min(my), (mx - x0).abs(), (my - y0).abs(), Some(theme::tint(&snap.theme)), snap.theme.accent);
-        }
-        if let Some((full, x, y)) = &hover_tip {
-            let size = 4.max(fs - 2);
-            let wd = f64::from(paint.text_width(Some(size), full)) + (12.0 * z);
-            if wd > sp::FIELD_W * z {
-                sp::frame_in(paint, *x, y + (2.0 * z), wd, 20.0 * z, Some(snap.theme.input), theme::edge(&snap.theme));
-                let ty = f64::from(paint.text_top(Some(size), (y + (2.0 * z)) as f32, (20.0 * z) as f32));
-                paint.text_s(((x + (6.0 * z)) as f32, ty as f32), size, snap.theme.foreground, full);
-            }
         }
     });
     (drawn_items, drawn_zones)
@@ -1830,14 +1719,14 @@ fn canvas_box(t: &Pane, ui: &mut Ui) -> UiBox {
 
 /// The pan and zoom a build of the content used: those of the kept pane.
 fn anchor_of(t: &Pane) -> Option<(f64, f64, f64)> {
-    t.built.borrow().as_ref().map(|(last, _, _)| (last.pan_x, last.pan_y, last.zoom))
+    t.built.borrow().as_ref().map(|(last, _)| (last.pan_x, last.pan_y, last.zoom))
 }
 
 /// `update` with the canvas in the pane root (built every frame: one box) and everything on it in a
 /// cached view, built again only when the pane differs from what its last build left
-/// (`scope_state::revision`, which leaves the pan and zoom out), when input reaches its boxes, while
-/// the pointer moves over a card, a port or a wire (hovered rows, wires and tips follow it), while
-/// keys are pressed (letter hints), the canvas is pressed or released, or a payload is carried.
+/// (`scope_state::revision`, which leaves the pan, zoom and hover out), when input reaches its
+/// boxes, while keys are pressed (letter hints), the canvas is pressed or released, or a payload is
+/// carried. The hover is `scope_hover`'s: patched looks and a view over the content.
 /// Kept, the pane is unchanged and no changes are emitted. The view holds the pane and an overscan
 /// past each side (`overscan`) at the pan and zoom it was built at; a pan offsets it and a zoom
 /// scales it about the pan (`view_offset`, `view_transform`: hit testing follows), so a drag or a
@@ -1876,10 +1765,9 @@ pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fr
         // at the zoom it builds at, before the revision reads the geometry
         refont(t, ui);
     }
+    // what the pointer is over, from the boxes the last build left (a carry's target row is the build's)
+    let now = crate::scope_hover::find(t, ui, frame.input.pointer);
     let rev = if moved { revision(t).wrapping_add(1) } else { revision(t) };
-    let (mx, my) = frame.input.pointer;
-    // the pointer over the bare canvas shows nothing of where it is: only over a card, a port or a wire
-    let inside = !sig.hovered && mx >= t.x as f64 && my >= t.y as f64 && mx < t.x as f64 + w && my < t.y as f64 + h;
     // what the canvas's input does beyond a pan is the build's
     let busy = sig.pressed || sig.released || sig.clicked || sig.double_clicked || (sig.held && left_button(&sig)) || !pressed.is_empty() || ui.carrying().is_some();
     // (kept after the busy frame: the frame after it builds only if something else changed)
@@ -1887,7 +1775,7 @@ pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fr
         t.busy_t = frame.input.t;
     }
     let mut hh = std::hash::DefaultHasher::new();
-    (rev, inside.then(|| (mx.to_bits(), my.to_bits())), t.busy_t.to_bits()).hash(&mut hh);
+    (rev, t.busy_t.to_bits(), now.whole).hash(&mut hh);
     let mut built = None;
     let saved = ui.enter(&canvas);
     let view = ui.view(label, hh.finish(), Size::Px((w + 2.0 * ov.0) as f32), Size::Px((h + 2.0 * ov.1) as f32), &mut |ui| {
@@ -1916,7 +1804,7 @@ pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fr
     if let Some((at, before)) = built {
         let mut kept = before.unwrap_or_else(|| t.clone());
         (kept.pan_x, kept.pan_y, kept.zoom) = at;
-        keep_built(&kept, rev, canvas);
+        keep_built(&kept, rev);
     }
     // the content where the pan and zoom now put it
     // (about the window's corner: a built point p shows at k (p + o), the pane's pan point where the
@@ -1927,6 +1815,14 @@ pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fr
         ui.view_offset(&view, shift(t.x as f64, t.pan_x, bx) as f32, shift(t.y as f64, t.pan_y, by) as f32);
         ui.view_transform_about(&view, k as f32, [1.0, 0.0, 0.0, 1.0], (0.0, 0.0));
     }
+    // the hover: the hovered card's ground and row through the patch path, and over the cards a
+    // view of its own that builds only when what it shows changes
+    crate::scope_hover::show(t, ui, &now);
+    let font_size = ui.font_size();
+    let saved = ui.enter(&canvas);
+    let over = ui.view("graph-hover", crate::scope_hover::overlay_key(t, &now), Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::overlay(t, ui, &now, font_size));
+    ui.leave(saved);
+    ui.set_at(&over, (0.0, 0.0));
 }
 
 /// The graph canvas for one frame, built in full; its canvas box.
@@ -1939,8 +1835,12 @@ pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame,
     let canvas = canvas_box(t, ui);
     let sig = ui.signal(&canvas);
     view_step(t, &sig, frame);
+    let now = crate::scope_hover::find(t, ui, frame.input.pointer);
     let saved = ui.enter(&canvas);
     content(pressed, t, ui, frame, &canvas, &sig, (0.0, 0.0), changes);
+    crate::scope_hover::show(t, ui, &now);
+    let font_size = ui.font_size();
+    crate::scope_hover::overlay(t, ui, &now, font_size);
     ui.leave(saved);
     canvas
 }
@@ -2032,6 +1932,22 @@ fn content(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, ca
     for &i in &visible {
         tiles.push(build_tile(&mut ctx, t, ui, z, fs, i));
     }
+    // what the hover reads between builds (a verifying run leaves the kept build's)
+    t.hovers.borrow_mut().declared();
+    if !ui.verifying() {
+        let hovers = t.hovers.clone();
+        let mut hv = hovers.borrow_mut();
+        hv.clear(t);
+        for tl in &tiles {
+            hv.cards.push(crate::scope_hover::Card { slot: tl.slot, tile: tl.tile, ground: tl.ground, whole: tl.whole });
+            hv.ports.extend(tl.sub.outs.iter().map(|(b, _, _)| *b));
+            hv.ports.extend(tl.sub.inputs.iter().copied());
+        }
+        for (&i, boxes) in &ctx.wire_hits {
+            hv.wires.extend(boxes.iter().map(|b| (*b, i)));
+        }
+        hv.reach.extend_from_slice(&wires_in_view);
+    }
     if ctx.finished {
         t.editing = None;
     }
@@ -2041,12 +1957,11 @@ fn content(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, ca
     frames_step(t, ui, &mut ctx, z, changes);
     if ctx.finished { t.editing = None; }
     if let Some(editing) = ctx.opened.take() { t.editing = Some(editing); }
-    let hover = hover_step(t, ui, z, mouse, &tiles, &ctx, &wires_in_view);
     pointer_step(t, ui, frame, canvas, canvas_signal, &tiles, &ctx, &wires_in_view, changes);
     wire_pull(t, ui, &ctx, z, mouse, &tiles, &wires_in_view, changes);
     let (lens_next, lens_changed) = tile_gestures(t, ui, z, mouse, &tiles, changes);
     context_step(t, ui, &tiles, canvas_signal, changes);
-    let (drawn_items, drawn_zones) = paint_frame(t, ui, z, fs, &layer, &host, canvas_signal, &tiles, &zones, &wires_in_view, &footers, &chain, mouse, &hover);
+    let (drawn_items, drawn_zones) = paint_frame(t, ui, z, fs, &layer, &host, canvas_signal, &tiles, &zones, &wires_in_view, &footers, &chain, mouse);
     { t.stats = Stats { drawn_items, drawn_zones, ..t.stats }; };
     // an opened or stepped expansion panel changes its card's size: lay out again for the next frame
     if lens_changed {

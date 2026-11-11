@@ -1199,6 +1199,8 @@ pub struct Ui {
     painted: i64,
     /// the scratch layer a patch paints one node into
     patch_layers: Vec<Layer>,
+    /// nodes of kept views patched while building: rewritten after the paint
+    repatch: Vec<usize>,
     /// views by id (0: the root); free ids and painter table indices; the table index's view
     views: Vec<ViewRec>,
     free_views: Vec<u32>,
@@ -1389,6 +1391,7 @@ impl Ui {
             draw_revision: 0,
             painted: -1,
             patch_layers: Vec::new(),
+            repatch: Vec::new(),
             views: vec![ViewRec::new()],
             free_views: Vec::new(),
             free_indices: (1..=255u16).rev().collect(),
@@ -5373,8 +5376,18 @@ impl Ui {
     /// the count is unchanged, else the layer's later instances, node ranges and breaks shift.
     /// While building nothing is rewritten: the frame's paint emits the node anyway.
     fn repaint_node(&mut self, slot: usize) -> bool {
-        if self.building || !self.range_valid(slot) {
-            // not on screen (or about to be painted): the record holds the patch
+        if self.building {
+            // the record holds the patch: a view built this frame paints it; a kept view's node is
+            // rewritten after the paint. Either view's next check (`verify_views`) is off.
+            let owner = self.slots[slot].owner as usize;
+            self.views[owner].patched = true;
+            if self.range_valid(slot) && !self.repatch.contains(&slot) {
+                self.repatch.push(slot);
+            }
+            return true;
+        }
+        if !self.range_valid(slot) {
+            // not on screen: the record holds the patch
             return true;
         }
         let (key, (start, end)) = (self.slots[slot].range_layer, self.slots[slot].range);
@@ -5678,6 +5691,11 @@ impl Ui {
         self.phase(4);
         self.emit_a11y();
         self.phase(5);
+        let mut repatch = std::mem::take(&mut self.repatch);
+        for slot in repatch.drain(..) {
+            self.repaint_node(slot);
+        }
+        self.repatch = repatch;
         self.step_tweens();
         self.text_mut().end_frame();
         // a glyph evicted from the atlas may be one a kept view's instances sample
@@ -6108,7 +6126,9 @@ impl Ui {
         self.leave(saved);
         self.view_cur = parent;
         let r = &mut self.views[v as usize];
-        (r.revision, r.epoch, r.theme, r.built, r.patched) = (revision, self.epoch, self.theme_id, self.frame_number, false);
+        (r.revision, r.epoch, r.theme, r.built) = (revision, self.epoch, self.theme_id, self.frame_number);
+        // a verifying run keeps what was patched since the kept build (it is not checked against it)
+        r.patched &= r.verify;
         r.dirty = r.escapes;
         // the next build fills `prev`: room now, so a view's second build does not grow it
         r.prev.reserve(r.nodes.len().saturating_sub(r.prev.len()));

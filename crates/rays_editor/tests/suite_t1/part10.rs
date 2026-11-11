@@ -1,6 +1,7 @@
 //! UI frame costs of the whole editor (P5 views): nodes built, PXUI CPU, views rebuilt, instance
 //! bytes written and allocations per frame, idle, hovering, playing, hovering from button to button,
-//! scrubbing an inspector value and panning the graph (its content view offset, nothing built). Prints a table; asserts the frame gate and
+//! scrubbing an inspector value, panning and zooming the graph (its content view offset and scaled,
+//! nothing built until the zoom rests). Prints a table; asserts the frame gate and
 //! which views each gesture rebuilds.
 use super::support::*;
 use input::{Event, MouseButton};
@@ -161,6 +162,17 @@ fn workspace(name: &str, text: &str) {
         check(pan.views == 0 && pan.bytes == 0, &format!("panning rebuilt {} views and wrote {} instance bytes a frame", pan.views, pan.bytes));
         let end = (gx - 2.0 * (n + 1) as f64, gy);
         r.step(end, vec![Event::PointerReleased(MouseButton::RightButton, end)]);
+        // zooming it: wheel steps scale the content view (built again once the zoom rests 0.1 s)
+        for _ in 0..12 {
+            to(&mut r, end);
+        }
+        let zoom = measure(&mut r, n, &|r, _| r.step(end, vec![Event::Scrolled((0.0, 1.0))]));
+        report("empty graph zoom", &zoom, n);
+        // (the instances it writes are the chrome's zoom readout; the graph's own are window_graph_view_pan_zoom's)
+        check(zoom.views == 0, &format!("zooming rebuilt {} views", zoom.views));
+        let rest = measure(&mut r, 12, &|r, _| r.step(end, vec![]));
+        report("empty graph zoom at rest", &rest, 12);
+        check(rest.views == 1, &format!("the rested zoom rebuilt {} views", rest.views));
     }
     r.close();
 }

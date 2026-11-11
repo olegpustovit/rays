@@ -17,6 +17,8 @@ mod scope_d;
 mod scope_e;
 #[path = "cases/scope_pixels.rs"]
 mod scope_pixels;
+#[path = "cases/scope_costs.rs"]
+mod scope_costs;
 
 fn main() {
     pxui::ui::Ui::verify_new_views(cfg!(debug_assertions));
@@ -31,5 +33,6 @@ fn main() {
     cases.extend_from_slice(scope_d::CASES);
     cases.extend_from_slice(scope_e::CASES);
     cases.extend_from_slice(scope_pixels::CASES);
+    cases.extend_from_slice(scope_costs::CASES);
     common::window::run(&cases);
 }

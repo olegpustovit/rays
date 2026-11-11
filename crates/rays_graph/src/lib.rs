@@ -7,4 +7,5 @@ pub mod node_menu;
 pub mod scope_paint;
 pub mod scope_commands;
 pub mod scope_frame;
+pub mod scope_hover;
 pub mod scope_pane;

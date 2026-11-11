@@ -346,6 +346,23 @@ the title bar of a PXUI host is the ground its chrome is painted on.
   marquee (a left drag on empty canvas), titled frames (Shift-G) and inline name, input-default
   and frame-title fields, all built from `Ui.box` and `Ui.value_field`
   (`specification/flow.md` §6 and §7).
+  Views (`update_cached`, the editor's): the canvas box (the bare ground's hit box, clip and wheel)
+  is built in the pane root every frame; everything on it is one cached content view holding the
+  pane and an overscan of half the pane past each side (at most 400 points), built at a pan and
+  zoom. A right drag on the canvas pans and the wheel or a pinch zooms before anything is built;
+  the view's entry shows the content where they put it (`view_offset`, `view_transform_about` the
+  window's corner, exact at scale 1; hit testing through it), so neither builds. The content builds
+  again at the pan and zoom when the pane would show past the overscan, once the zoom has rested
+  0.1 s (text shaped and strokes snapped at the zoom's size), when the pane's state differs
+  (`scope_state::revision`: graph, selection, drag, edit, marks; not pan, zoom or hover), when
+  input reaches its boxes, the canvas is pressed or released, keys are down or a payload is
+  carried. Its boxes are `HOVER_FREE`; the hover is `scope_hover`'s: a card or full card's ground
+  is its tile's look (fill and edge, idle and hovered; selected and refused variants) and its row
+  band a node behind its painting, both patched; the lit wires, an expression row's full text and
+  the tips are a view over the content keyed by what they show. A chip, a folded zone and an
+  expression card are painted whole on their canvas and rebuild the content when hovered. Cards are
+  accessible groups named by their titles, their ports named buttons. Goldens:
+  `crates/rays_graph/fixtures/graph_*_{1,2}x.png` (`gpu_graph_pixels`).
 - `Ui.popup` uses the last laid-out rectangle for outside-press dismissal;
   an estimated height is used only until the first layout. `Ui.modal` and
   `Ui.context_menu` share that dismissal path. `Ui.modal` centers a panel
@@ -443,7 +460,11 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
    `view_offset`, `view_opacity`, `view_clip` change between frames without a rebuild (hit testing and
    `rect` follow; past 255 views the offset is baked by a rebuild). `ui.list(label, count, row_h, f)`
    builds only visible rows plus 4 each side; `ui.verify_views(true)` re-runs clean views and panics
-   naming one whose output changed. `ui.built_nodes()` counts the last build's declared nodes, `ui.rebuilt_views()` the views it built rather than kept.
+   naming one whose output changed (`ui.verifying()` tells a build it is such a run; a view patched
+   since its build is not checked). A node flagged `HOVER_FREE` dirties no view when the hover
+   enters or leaves it (the app reads `hovered_within` and patches); a patch made while building
+   reaches a kept view's node after the paint; `view_transform_about` scales about a fixed window
+   point. `ui.built_nodes()` counts the last build's declared nodes, `ui.rebuilt_views()` the views it built rather than kept.
 
 **Styling (P5 commit 2, styling half, landed).** `pxui::theme`: `Tokens` (colour roles, `space`,
 `radius` small/medium/large, type sizes, `motion` fast/normal/slow + cubic-bezier `ease`,
