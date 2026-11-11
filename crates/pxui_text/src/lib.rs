@@ -76,8 +76,8 @@ impl Hasher for FastHasher {
         self.write_u64(n as u64);
     }
 }
-/// A `HashMap` keyed through `FastHasher`.
-pub type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FastHasher>>;
+/// `HashMap`'s hasher parameter for `FastHasher`.
+pub type Fast = BuildHasherDefault<FastHasher>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Wrap {
@@ -227,10 +227,10 @@ pub struct Text {
     swash: SwashCache,
     names: Vec<String>,
     ascents: Vec<f32>,
-    entries: FastMap<u64, Entry>,
+    entries: HashMap<u64, Entry, Fast>,
     frame: u32,
     atlases: [Atlas; 2],
-    slots: FastMap<CacheKey, Slot>,
+    slots: HashMap<CacheKey, Slot, Fast>,
     dirty: Vec<(AtlasKind, u32, u32, u32, u32)>,
     evictions: u64,
 }
@@ -247,10 +247,10 @@ impl Text {
             swash: SwashCache::new(),
             names: Vec::new(),
             ascents: Vec::new(),
-            entries: FastMap::default(),
+            entries: HashMap::default(),
             frame: 1,
             atlases: [Atlas::new(MASK_SIZE, 1), Atlas::new(COLOR_SIZE, 4)],
-            slots: FastMap::default(),
+            slots: HashMap::default(),
             dirty: Vec::new(),
             evictions: 0,
         };
