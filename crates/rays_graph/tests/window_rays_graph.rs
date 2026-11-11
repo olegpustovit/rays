@@ -15,6 +15,8 @@ mod scope_c;
 mod scope_d;
 #[path = "cases/scope_e.rs"]
 mod scope_e;
+#[path = "cases/scope_pixels.rs"]
+mod scope_pixels;
 
 fn main() {
     pxui::ui::Ui::verify_new_views(cfg!(debug_assertions));
@@ -28,5 +30,6 @@ fn main() {
     cases.extend_from_slice(scope_c::CASES);
     cases.extend_from_slice(scope_d::CASES);
     cases.extend_from_slice(scope_e::CASES);
+    cases.extend_from_slice(scope_pixels::CASES);
     common::window::run(&cases);
 }
