@@ -161,7 +161,7 @@ fn near(a: [u8; 4], b: [u8; 4], tolerance: i32) -> bool { a.iter().zip(b).all(|(
 /// Metal handles live on the process main thread, which libtest never gives a test: this target is
 /// `harness = false` and speaks just enough of libtest's protocol (`--list`, names to filter).
 fn main() {
-    let cases: [(&str, fn()); 11] = [
+    let cases: [(&str, fn()); 12] = [
         ("gpu_scene_golden_and_spot_checks", gpu_scene_golden_and_spot_checks),
         ("gpu_one_draw_per_layer", gpu_one_draw_per_layer),
         ("gpu_warm_frame_allocates_nothing", gpu_warm_frame_allocates_nothing),
@@ -170,6 +170,7 @@ fn main() {
         ("gpu_ramp_gradient", gpu_ramp_gradient),
         ("gpu_retained_layer_writes_only_dirty_ranges", gpu_retained_layer_writes_only_dirty_ranges),
         ("gpu_backdrop_blur", gpu_backdrop_blur),
+        ("gpu_smooth_image", gpu_smooth_image),
         ("gpu_backdrop_blur_panel", gpu_backdrop_blur_panel),
         ("fit_modes_place_and_crop", fit_modes_place_and_crop),
         ("nine_slice_corners_stay_and_centre_stretches", nine_slice_corners_stay_and_centre_stretches),
@@ -450,6 +451,53 @@ fn assert_ramp(row: &[i32], edge: usize, sigma: f32, what: &str) {
     let width = first(230) - first(26);
     assert!((width - 2.56 * sigma).abs() <= 1.5, "{what}: 10-90% width {width}, expected {}", 2.56 * sigma);
     assert!((row[edge - 1] - 102).abs() <= 14 && (row[edge] - 153).abs() <= 14, "{what}: the two texels at the edge straddle 50%: {} {}", row[edge - 1], row[edge]);
+}
+
+/// A picture with a hard texel edge (black | white, 2x1 texels) scaled across the target: with
+/// `flags::SMOOTH` the edge is a smooth monotonic ramp (no texel tie for a GPU to break), without
+/// it a hard step; drawn 1:1 on whole pixels (a 4x4 checker into 4x4 pixels) SMOOTH returns the
+/// texels exactly.
+fn gpu_smooth_image() {
+    let Some(device) = open() else { return };
+    let queue = ok(be::create_queue(&device));
+    let mut painter = painter(&device);
+    let edge = texture(&device, 2, 1, &[TextureUsage::TextureBinding, TextureUsage::TextureCopyDst]);
+    ok(be::write_texture(&edge, None, Origin { x: 0, y: 0, z: 0 }, Extent { width: 2, height: 1, depth: 1 }, 8, &[0, 0, 0, 255, 255, 255, 255, 255]));
+    let shown = target(&device);
+    let size = [W * SCALE, H * SCALE];
+    let row = |painter: &mut Painter, flags: u8| {
+        let image = [Instance { flags, ..Instance::image([0.0, 0.0, W as f32, H as f32], [0.0, 0.0, 1.0, 1.0], [255; 4]) }];
+        painter.begin_frame();
+        pass(&queue, &shown, &mut |encoder| ok(painter.draw(encoder, size, SCALE as f32, &image, &[Break { at_instance: 0, texture: Some(&edge) }])));
+        middle_row(&ok(be::read_texture(&shown, (size[0] * 4) as i64)), size[0] as usize)
+    };
+    let (w, smooth, hard) = (size[0] as usize, row(&mut painter, flags::SMOOTH), row(&mut painter, 0));
+    assert!(smooth.windows(2).all(|p| p[0] <= p[1]), "smooth: monotonic {smooth:?}");
+    // texel centres at a quarter and three quarters: clamped outside, linear between
+    assert!(smooth[..w / 4 - 1].iter().all(|v| *v <= 2) && smooth[3 * w / 4 + 1..].iter().all(|v| *v >= 253), "smooth: flat beyond the texel centres {smooth:?}");
+    for x in (w / 4 + 2..3 * w / 4 - 2).step_by(7) {
+        let expected = 255.0 * ((x as f32 + 0.5) / w as f32 * 2.0 - 0.5);
+        assert!((smooth[x] as f32 - expected).abs() <= 2.0, "smooth: pixel {x} is {} not {expected}", smooth[x]);
+    }
+    assert!(hard[..w / 2].iter().all(|v| *v == 0) && hard[w / 2..].iter().all(|v| *v == 255), "nearest: a hard step {hard:?}");
+    // 1:1 on whole pixels: the checker's texels exactly, either filter
+    let checker = texture(&device, 4, 4, &[TextureUsage::TextureBinding, TextureUsage::TextureCopyDst]);
+    let texels: Vec<u8> = (0..16).flat_map(|i| if (i % 4 + i / 4) % 2 == 0 { [255, 0, 0, 255] } else { [0, 0, 255, 255] }).collect();
+    ok(be::write_texture(&checker, None, Origin { x: 0, y: 0, z: 0 }, Extent { width: 4, height: 4, depth: 1 }, 16, &texels));
+    let one = |painter: &mut Painter, flags: u8| {
+        let s = SCALE as f32;
+        let image = [Instance { flags, ..Instance::image([10.0, 10.0, 10.0 + 4.0 / s, 10.0 + 4.0 / s], [0.0, 0.0, 1.0, 1.0], [255; 4]) }];
+        painter.begin_frame();
+        pass(&queue, &shown, &mut |encoder| ok(painter.draw(encoder, size, s, &image, &[Break { at_instance: 0, texture: Some(&checker) }])));
+        let px = ok(be::read_texture(&shown, (size[0] * 4) as i64));
+        (0..16).map(|i| at(&px, 10.0 + ((i % 4) as f32 + 0.5) / s, 10.0 + ((i / 4) as f32 + 0.5) / s)).collect::<Vec<_>>()
+    };
+    let (a, b) = (one(&mut painter, flags::SMOOTH), one(&mut painter, 0));
+    assert_eq!(a, b, "1:1 on whole pixels, linear equals nearest");
+    assert!(a.iter().zip(texels.chunks(4)).all(|(p, t)| p[..] == *t), "1:1 shows the texels: {a:?}");
+    for texture in [&edge, &checker, &shown] { ok(be::destroy_texture(texture)); }
+    drop(painter);
+    finish(device, queue);
 }
 
 fn gpu_backdrop_blur() {

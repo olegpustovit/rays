@@ -29,6 +29,15 @@ fn window_visibility() {
     assert!(window.pump(&mut events));
     assert!(!events.iter().any(|e| matches!(e, input::Event::Closed)));
     assert!(window.time() >= 0.);
+    // wait sleeps to its deadline when nothing arrives (drain what the show and resize queued first)
+    for _ in 0..20 {
+        window.pump(&mut events);
+    }
+    let start = window.time();
+    window.wait(Some(start + 0.05));
+    let slept = window.time() - start;
+    assert!(slept < 1.0, "wait overslept its deadline: {slept} s");
+    window.wait(Some(start - 1.0)); // a passed deadline returns at once
     window.destroy().unwrap();
     assert!(window.show().is_err());
     println!("pxui_sdl visibility: hidden/show flags passed");

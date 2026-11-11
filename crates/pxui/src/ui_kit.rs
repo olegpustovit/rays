@@ -65,8 +65,9 @@ impl Ui {
     }
 
     /// Step `i` of the theme's spacing scale (4, 8, 12, 16 by default) at its density.
-    // ponytail: the hit shapes of the value and switch rows (`value_control`, `toggle_control`) keep
-    // the default 12-point sides; parameterise them when a density other than 1 ships.
+    // ponytail: the value row's hit shape and width (`value_control`, `value_control_w`, plain fns for
+    // `Size::Rel`) keep the default 12-point sides; at another density the field's box and its hit
+    // shape differ by the side's rounding (2 points at 0.84). A Rel with a captured side fixes it.
     pub fn space(&self, i: usize) -> f32 {
         let t = self.theme();
         (t.tokens.space[i.min(3)] * t.tokens.density).round()
@@ -217,8 +218,13 @@ pub fn value_control_w(inner: f32) -> f32 {
 }
 
 pub fn toggle_control(r: IRect) -> IRect {
+    toggle_control_at(r, SIDE)
+}
+
+/// `toggle_control` with the switch `side` points from the row's end.
+pub fn toggle_control_at(r: IRect, side: i64) -> IRect {
     let (x, y, w, h) = r;
-    (x + w - SIDE - 28, y + (h - 14) / 2, 28, 14)
+    (x + w - side - 28, y + (h - 14) / 2, 28, 14)
 }
 
 /// The hit shape of a control on its row; one closure per shape for the thread's life.
@@ -857,7 +863,10 @@ impl Ui {
 
     /// A switch on its row: the label and the 28 x 14 switch at the end.
     pub fn toggle(&mut self, text: &str, value: bool) -> bool {
-        let row = self.kit_row(Some(CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY), Some(control_hit(toggle_control)), text);
+        // the switch's hit shape sits where the switch does: `space(2)` from the end at any density
+        let side = self.space(2) as i64;
+        let row = self.kit_row(Some(CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY), None, text);
+        self.cached_hit(&row, side as u64, &mut || Rc::new(move |r| floats(toggle_control_at(ints(r), side))));
         let signal = self.signal(&row);
         let value = if signal.clicked { !value } else { value };
         let t = self.theme();

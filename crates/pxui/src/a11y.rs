@@ -249,6 +249,33 @@ impl A11yTree {
         index
     }
 
+    /// Append `from.nodes[span]`, a run whose parents are inside it or `outside` (an index of this
+    /// tree), with its strings: a kept view's nodes as the last walk left them, without recomputing.
+    pub fn copy_span(&mut self, from: &A11yTree, span: std::ops::Range<u32>, outside: u32) {
+        let nodes = &from.nodes[span.start as usize..span.end as usize];
+        let (Some(first), Some(last)) = (nodes.first(), nodes.last()) else { return };
+        // a walk interns each node's strings in order: the run's strings are one slice
+        let end = |n: &A11yNode| match n.value {
+            Value::Text(s) => s.end.max(n.name.end).max(n.description.end),
+            _ => n.name.end.max(n.description.end),
+        };
+        let (lo, hi) = (first.name.start, end(last));
+        let delta = self.strings.len() as i64 - lo as i64;
+        self.strings.push_str(&from.strings[lo as usize..hi as usize]);
+        let moved = |s: Str| Str { start: (s.start as i64 + delta) as u32, end: (s.end as i64 + delta) as u32 };
+        let base = self.nodes.len() as u32;
+        for n in nodes {
+            let parent = if n.parent != NO_PARENT && n.parent >= span.start { n.parent - span.start + base } else { outside };
+            let i = self.push(parent, n.id, n.role, n.rect) as usize;
+            let value = match n.value {
+                Value::Text(s) => Value::Text(moved(s)),
+                v => v,
+            };
+            let m = &mut self.nodes[i];
+            (m.name, m.description, m.value, m.states, m.actions, m.selection) = (moved(n.name), if n.description == Str::default() { n.description } else { moved(n.description) }, value, n.states, n.actions, n.selection);
+        }
+    }
+
     fn intern(&mut self, text: &str) -> Str {
         let start = self.strings.len() as u32;
         self.strings.push_str(text);

@@ -3,7 +3,7 @@
 //! patches with no rebuild, and virtual list, tree and table building only visible rows of 100,000.
 use crate::support::*;
 use input::{Event, Key};
-use pxui::a11y::{state, A11yAction, A11yNode, A11yTree, Action, Role};
+use pxui::a11y::{state, A11yAction, A11yNode, A11yTree, Action, Role, Value};
 use pxui::ui::*;
 use std::rc::Rc;
 
@@ -12,6 +12,7 @@ pub const H: i64 = 760;
 pub const NAMES: [&str; 8] = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"];
 pub const MENUS: [(&str, &[&str]); 2] = [("File", &["New", "Open", "Quit"]), ("Edit", &["Undo", "Redo", "Cut", "Copy"])];
 pub const BIG: usize = 100_000;
+pub const TOAST_SECONDS: f64 = 5.0;
 
 fn at_keys(keys: Vec<Key>, t: f64, events: Vec<Event>) -> input::frame::Frame {
     let mut f = frame_at(keys, 1.0, t, events);
@@ -100,7 +101,7 @@ pub fn all(ui: &mut Ui, s: &mut S) {
 /// The toasts, at the root (outside any cached view).
 pub fn toasts(ui: &mut Ui, s: &mut S) {
     let toasts = ["Saved", "Exported"];
-    if let Some(i) = ui.toasts("toasts", &toasts[..s.toasts]) {
+    if let Some(i) = ui.toasts("toasts", &toasts[..s.toasts], TOAST_SECONDS) {
         s.gone = Some(i);
     }
 }
@@ -249,10 +250,12 @@ fn widgets_slider() {
     keys(&mut ui, &mut s, 3.0, &[Key::Home, Key::ArrowRight, Key::ArrowRight]);
     check((s.slider - 0.02).abs() < 1e-4, &format!("Home then two steps: {}", s.slider));
     let n = node(&ui, Role::Slider, "Level");
-    check(ui.output().a11y.value_text(&n) == "0.02", &format!("the value in the tree: {:?}", ui.output().a11y.value_text(&n)));
+    let Value::Number { now, min, max, step } = n.value else { panic!("the slider's value is not a number: {:?}", n.value) };
+    check((now - 0.02).abs() < 1e-6 && (min, max) == (0.0, 1.0) && (step - 0.01).abs() < 1e-6, &format!("the value in the tree: {:?}", n.value));
     ui.inject_a11y(&[A11yAction { id: n.id, action: Action::SetValue, payload: 0.5 }]);
     ui.frame(&at(4.0, vec![]), &mut |ui| all(ui, &mut s));
     check(s.slider == 0.5, "SetValue moves it");
+    check(matches!(node(&ui, Role::Slider, "Level").value, Value::Number { now: 0.5, .. }), "the number follows");
     // right to left: the end is at the left
     ui.set_dir(Direction::Rtl);
     for t in 0..2 {
@@ -285,7 +288,7 @@ fn widgets_busy_patches() {
     }
     let tree = ui.output().a11y;
     let done = find(tree, Role::Progress, "Done").expect("determinate");
-    check(tree.value_text(done) == "50", "a half bar reads 50");
+    check(done.value == Value::Number { now: 50.0, min: 0.0, max: 100.0, step: 1.0 }, &format!("a half bar reads 50 of 100: {:?}", done.value));
     check(find(tree, Role::Progress, "Busy").unwrap().states & state::BUSY != 0, "the sweep is busy");
     let busy = s.busy.clone();
     let revision = ui.draw_revision();
@@ -326,6 +329,13 @@ fn widgets_tabs_segmented() {
     tab_to(&mut ui, &mut s, 2.0, Role::TabList, "Tabs");
     keys(&mut ui, &mut s, 3.0, &[Key::ArrowRight]);
     check(s.tab == 0, "Right wraps to Alpha");
+    // on the release frame itself only the clicked tab reads as selected (no stale Alpha)
+    let p = centre(&node(&ui, Role::Tab, "Gamma"));
+    for (i, e) in [vec![move_to(p)], vec![press(p)], vec![release(p)]].into_iter().enumerate() {
+        ui.frame(&at(3.5 + i as f64 * 0.05, e), &mut |ui| all(ui, &mut s));
+    }
+    let selected: Vec<_> = ["Alpha", "Beta", "Gamma"].into_iter().filter(|t| node(&ui, Role::Tab, t).states & state::SELECTED != 0).collect();
+    check(s.tab == 2 && selected == ["Gamma"], &format!("the release frame's selection: {selected:?}"));
     { let p = centre(&node(&ui, Role::Radio, "B")); click(&mut ui, &mut s, 4.0, p); }
     check(s.seg == 1, "a click picks segment B");
     tab_to(&mut ui, &mut s, 5.0, Role::Group, "Mode");
@@ -410,6 +420,61 @@ fn widgets_scroll_view() {
     let scroll = s.scroll.expect("scroll view");
     check(ui.scroll_offset(&scroll) > 0.0, &format!("the wheel scrolls it down: {}", ui.scroll_offset(&scroll)));
     check(ui.scroll_offset_x(&scroll) > 0.0, &format!("and sideways: {}", ui.scroll_offset_x(&scroll)));
+    ui.destroy();
+}
+
+/// Right to left, content wider than its scroll view starts at the right edge (the logical start)
+/// and the sideways wheel brings its left part in; a node's text sits its start inset from the right.
+fn widgets_scroll_view_rtl() {
+    let mut ui = new_ui(None);
+    ui.set_dir(Direction::Rtl);
+    let (view, row) = (std::cell::Cell::new(None), std::cell::Cell::new(None));
+    let mut build = |ui: &mut Ui| {
+        view.set(Some(ui.scroll_view("Scroll", Size::Px(200.0), Size::Px(60.0), &mut |ui| {
+            let n = ui.node("wide", Node { w: Size::Px(400.0), h: Size::Px(24.0), inset: Edges { l: 8.0, ..Edges::ZERO }, ..Node::DEFAULT });
+            ui.text(&n, "alpha");
+            row.set(Some(n));
+        })));
+    };
+    for t in 0..2 {
+        ui.frame(&at(t as f64 * 0.1, vec![]), &mut build);
+    }
+    let (v, r) = (ui.rect(&view.get().unwrap()), ui.rect(&row.get().unwrap()));
+    check((r.x + r.w - (v.x + v.w - 1.0)).abs() < 0.01, &format!("the content ends at the view's right edge: {r:?} in {v:?}"));
+    // the text: the only mask instances, ending 8 points from the row's right edge
+    let glyphs: Vec<_> = ui.output().draw.iter().flat_map(|l| l.instances.iter()).filter(|i| i.kind == pxui::draw::kind::MASK).map(|i| i.rect).collect();
+    let right = glyphs.iter().map(|g| g[2]).fold(f32::MIN, f32::max);
+    check(!glyphs.is_empty() && right <= v.x + v.w - 1.0 - 8.0 + 0.5 && right > v.x + v.w - 40.0, &format!("the text sits at the start inset from the right: {right} in {v:?}"));
+    let p = ((v.x + 50.0) as i64, (v.y + 20.0) as i64);
+    ui.frame(&at(1.0, vec![move_to(p)]), &mut build);
+    for t in 0..10 {
+        ui.frame(&at(1.1 + t as f64 * 0.05, vec![Event::Scrolled((3.0, 0.0))]), &mut build);
+    }
+    let h = view.get().unwrap();
+    let moved = ui.rect(&row.get().unwrap());
+    check(ui.scroll_offset_x(&h) > 0.0 && moved.x > r.x, &format!("a swipe to the right brings the left part in: {} {moved:?}", ui.scroll_offset_x(&h)));
+    ui.destroy();
+}
+
+/// At a compact density the switch sits `space(2)` from its row's end and its hit shape follows it.
+fn widgets_compact_toggle_hit() {
+    let mut ui = new_ui(None);
+    ui.set_a11y(true);
+    let mut theme = Theme::default();
+    theme.tokens.density = 0.84;
+    ui.set_theme(theme);
+    let on = std::cell::Cell::new(false);
+    let mut build = |ui: &mut Ui| ui.panel(PanelOpts::default(), "panel", &mut |ui| on.set(ui.toggle("Animate", on.get())));
+    for t in 0..2 {
+        ui.frame(&at(t as f64 * 0.1, vec![]), &mut build);
+    }
+    let row = node(&ui, Role::Toggle, "Animate");
+    // inside the switch 10 points from the end (space(2) at 0.84), outside where a 12-point side put it
+    let p = ((row.rect.x + row.rect.w - 11.0) as i64, (row.rect.y + row.rect.h / 2.0) as i64);
+    for (i, e) in [vec![move_to(p)], vec![press(p)], vec![release(p)], vec![]].into_iter().enumerate() {
+        ui.frame(&at(1.0 + i as f64 * 0.1, e), &mut build);
+    }
+    check(on.get(), "a click on the compact switch toggles it");
     ui.destroy();
 }
 
@@ -542,6 +607,44 @@ fn widgets_toast_and_search() {
     ui.destroy();
 }
 
+/// A toast goes by itself: the UI asks for the frame at its expiry and reports it then.
+fn widgets_toast_expires() {
+    let mut s = S::new();
+    s.toasts = 2;
+    let mut ui = warm(&mut s); // frames at 0.0 and 0.1: both toasts showed at 0.0
+    check(ui.repaint_at() == Some(TOAST_SECONDS), &format!("the expiry is the next frame: {:?}", ui.repaint_at()));
+    check(!ui.wants_frame(&[], TOAST_SECONDS - 0.01) && s.gone.is_none(), "nothing before it");
+    ui.frame(&at(TOAST_SECONDS, vec![]), &mut |ui| all(ui, &mut s));
+    check(s.gone == Some(0), &format!("the first toast went at its time: {:?}", s.gone));
+    // the app drops it; the other keeps its own time (keyed by text, not place)
+    (s.toasts, s.gone) = (0, None);
+    ui.frame(&at(TOAST_SECONDS + 0.1, vec![]), &mut |ui| all(ui, &mut s));
+    check(ui.repaint_at().is_none(), &format!("no toast, no timer: {:?}", ui.repaint_at()));
+    ui.destroy();
+}
+
+/// Keyboard focus asks for no frames, and a click focuses as on macOS: what edits or selects
+/// (slider, list, search field) takes the focus, buttons and boxes do not.
+fn widgets_focus_idle_and_click() {
+    let mut s = S::new();
+    let mut ui = warm(&mut s);
+    let focused = |ui: &Ui, role: Role, name: &str| node(ui, role, name).states & state::FOCUSED != 0;
+    tab_to(&mut ui, &mut s, 1.0, Role::CheckBox, "Check");
+    ui.frame(&at(2.0, vec![]), &mut |ui| all(ui, &mut s));
+    check(ui.repaint_at().is_none() && !ui.wants_frame(&[], 100.0), &format!("a focused checkbox asks for frames: {:?}", ui.repaint_at()));
+    { let p = centre(&node(&ui, Role::TextField, "Search")); click(&mut ui, &mut s, 3.0, p); }
+    check(focused(&ui, Role::TextField, "Search"), "a click focuses the search field");
+    check(ui.repaint_at().is_none() && !ui.wants_frame(&[], 100.0), &format!("a focused text field asks for frames: {:?}", ui.repaint_at()));
+    { let p = centre(&node(&ui, Role::CheckBox, "Check")); click(&mut ui, &mut s, 4.0, p); }
+    check(!focused(&ui, Role::CheckBox, "Check") && !focused(&ui, Role::TextField, "Search"), "a click on a checkbox takes no focus and drops the field's");
+    { let p = centre(&node(&ui, Role::Slider, "Level")); click(&mut ui, &mut s, 5.0, p); }
+    check(focused(&ui, Role::Slider, "Level"), "a click focuses the slider");
+    let row = *ui.output().a11y.nodes.iter().find(|n| n.role == Role::ListItem).expect("a list row");
+    click(&mut ui, &mut s, 6.0, centre(&row));
+    check(s.list_frame.is_some_and(|b| ui.focused(&b)), "a click on a row focuses its list");
+    ui.destroy();
+}
+
 fn widgets_image() {
     let mut s = S::new();
     s.image = Some(Image { handle: Rc::new(()), width: 64, height: 32 });
@@ -550,6 +653,19 @@ fn widgets_image() {
     check(n.rect.w == 48.0 && n.rect.h == 32.0, &format!("the image box: {:?}", n.rect));
     let images: usize = ui.output().draw.iter().map(|l| l.breaks.iter().filter(|b| b.image != pxui::draw::ATLAS).count()).sum();
     check(images == 1, &format!("one image break: {images}"));
+    let picture = |ui: &Ui| *ui.output().draw.iter().flat_map(|l| l.instances.iter()).find(|i| i.kind == pxui::draw::kind::IMAGE).expect("the picture");
+    check(picture(&ui).clip_radius == 0, "a square frame clips nothing");
+    // a rounded frame rounds the picture: a clip of the radius inside the 1-point border
+    let mut ui = ui;
+    let mut theme = Theme::default();
+    theme.image.idle.radius = [6.0; 4];
+    ui.set_theme(theme);
+    for t in 0..2 {
+        ui.frame(&at(1.0 + t as f64 * 0.1, vec![]), &mut |ui| all(ui, &mut s));
+    }
+    let p = picture(&ui);
+    check(p.clip_radius == pxui::draw::f16(5.0), &format!("the picture's clip radius: {}", p.clip_radius));
+    ui.destroy();
 }
 
 /// Tab visits each widget's one stop in build order, and Shift-Tab goes back.
@@ -610,6 +726,21 @@ fn widgets_zero_alloc() {
         check(!keep || ui.built_nodes() < 12, &format!("the kept view rebuilt: {} nodes", ui.built_nodes()));
     }
     ui.destroy();
+    // the second frame of a fresh UI (a kept view, an image break) allocates nothing either: the
+    // double-buffered lists (a view's nodes, the view table, the layer's breaks) got their room on
+    // the first
+    let mut ui = new_ui(None);
+    for t in 0..2 {
+        let frame = at(t as f64 * 0.1, vec![]);
+        mem_sys::local_reset();
+        ui.frame(&frame, &mut |ui| {
+            ui.view("all", 1, Size::Px(W as f32), Size::Px(H as f32), &mut |ui| body(ui, &mut s));
+            toasts(ui, &mut s);
+        });
+    }
+    let allocs = mem_sys::local_alloc_count();
+    check(allocs == 0, &format!("{allocs} allocations in a fresh UI's second frame"));
+    ui.destroy();
 }
 
 pub const CASES: &[(&str, fn())] = &[
@@ -622,12 +753,16 @@ pub const CASES: &[(&str, fn())] = &[
     ("widgets_menu_bar", widgets_menu_bar),
     ("widgets_tip_and_icon", widgets_tip_and_icon),
     ("widgets_scroll_view", widgets_scroll_view),
+    ("widgets_scroll_view_rtl", widgets_scroll_view_rtl),
+    ("widgets_compact_toggle_hit", widgets_compact_toggle_hit),
     ("widgets_list", widgets_list),
     ("widgets_list_keys_multi", widgets_list_keys_multi),
     ("widgets_tree", widgets_tree),
     ("widgets_table", widgets_table),
     ("widgets_dialog", widgets_dialog),
     ("widgets_toast_and_search", widgets_toast_and_search),
+    ("widgets_toast_expires", widgets_toast_expires),
+    ("widgets_focus_idle_and_click", widgets_focus_idle_and_click),
     ("widgets_image", widgets_image),
     ("widgets_tab_order", widgets_tab_order),
     ("widgets_zero_alloc", widgets_zero_alloc),

@@ -36,7 +36,7 @@
 
 use cosmic_text::{
     Align as CAlign, Attrs, Buffer, CacheKey, Cursor, Ellipsize, EllipsizeHeightLimit, Family, FontSystem, Metrics as CMetrics, Shaping,
-    Style as CStyle, SwashCache, SwashContent, Weight, Wrap as CWrap, fontdb,
+    Style as CStyle, SubpixelBin, SwashCache, SwashContent, Weight, Wrap as CWrap, fontdb,
 };
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -213,6 +213,118 @@ impl Atlas {
     }
 }
 
+/// A glyph of a layout as `glyphs` replays it: its cache key (with the subpixel bin it had), its
+/// position before `physical` (`x + x_offset`, `y - y_offset`, its run's `line_y`) and its slot.
+#[derive(Clone, Copy)]
+struct CachedGlyph {
+    key: CacheKey,
+    x: f32,
+    y: f32,
+    line_y: f32,
+    slot: Slot,
+    uv: Rect,
+}
+
+/// Layouts stop keeping glyph lists past this many bytes in all (a list goes with its layout).
+pub const CACHE_BYTES: usize = 4 << 20;
+
+/// The parts of `Text` a glyph emission touches (fonts, rasteriser, atlases and their slots), a field
+/// of their own so `glyphs` borrows them beside a layout entry.
+struct Glyphs {
+    fs: FontSystem,
+    swash: SwashCache,
+    atlases: [Atlas; 2],
+    slots: HashMap<CacheKey, Slot, Fast>,
+    dirty: Vec<(AtlasKind, u32, u32, u32, u32)>,
+    evictions: u64,
+    /// `Text::frame`, for the shelves' use marks
+    frame: u32,
+}
+
+impl Glyphs {
+    /// The atlas slot of a glyph, rasterised on a miss. A zero-sized slot draws nothing (also the
+    /// answer for a glyph without an image); `None` when the atlas has no room this frame.
+    fn slot(&mut self, key: CacheKey) -> Option<Slot> {
+        if let Some(s) = self.slots.get(&key) {
+            return Some(*s);
+        }
+        let empty = Slot { kind: AtlasKind::Mask, shelf: 0, x: 0, y: 0, w: 0, h: 0, left: 0, top: 0 };
+        let Some(img) = self.swash.get_image_uncached(&mut self.fs, key) else { return Some(empty) };
+        let (w, h) = (img.placement.width, img.placement.height);
+        let kind = match img.content {
+            SwashContent::Mask => AtlasKind::Mask,
+            SwashContent::Color => AtlasKind::Color,
+            SwashContent::SubpixelMask => return Some(empty),
+        };
+        let a = &mut self.atlases[idx(kind)];
+        let bpp = a.bpp;
+        let mut s = Slot { kind, shelf: 0, x: 0, y: 0, w, h, left: img.placement.left, top: img.placement.top };
+        if w > 0 && h > 0 {
+            if img.data.len() != (w * h * bpp) as usize {
+                return Some(empty);
+            }
+            let (x, y, shelf, evicted) = a.alloc(w, h, self.frame)?;
+            for row in 0..h {
+                let src = (row * w * bpp) as usize;
+                let dst = (((y + row) * a.w + x) * bpp) as usize;
+                a.px[dst..dst + (w * bpp) as usize].copy_from_slice(&img.data[src..src + (w * bpp) as usize]);
+            }
+            if evicted {
+                self.evictions += 1;
+                self.slots.retain(|_, o| !(o.kind == kind && o.shelf == shelf));
+            }
+            self.dirty.push((kind, x, y, w, h));
+            (s.shelf, s.x, s.y) = (shelf, x, y);
+        }
+        self.slots.insert(key, s);
+        Some(s)
+    }
+
+    /// One quad for `slot` with its pen at device pixel (`x`, `y`); marks the slot's shelf used.
+    fn emit(&mut self, slot: Slot, x: i32, y: i32, f: &mut dyn FnMut(Glyph)) {
+        if slot.w == 0 || slot.h == 0 {
+            return;
+        }
+        self.atlases[idx(slot.kind)].shelves[slot.shelf as usize].used = self.frame;
+        f(Glyph {
+            rect: Rect { x: (x + slot.left) as f32, y: (y - slot.top) as f32, w: slot.w as f32, h: slot.h as f32 },
+            uv: self.uv(&slot),
+            atlas: slot.kind,
+        });
+    }
+
+    /// The slot's texel rectangle normalised by its atlas's size.
+    fn uv(&self, slot: &Slot) -> Rect {
+        let a = &self.atlases[idx(slot.kind)];
+        let (aw, ah) = (a.w as f32, a.h as f32);
+        Rect { x: slot.x as f32 / aw, y: slot.y as f32 / ah, w: slot.w as f32 / aw, h: slot.h as f32 / ah }
+    }
+}
+
+/// `cosmic_text::SubpixelBin::new`, inlined: the replay must bin exactly as `physical` does.
+#[inline]
+fn subpixel_bin(pos: f32) -> (i32, SubpixelBin) {
+    let trunc = pos as i32;
+    let fract = pos - trunc as f32;
+    if pos.is_sign_negative() {
+        match fract {
+            f if f > -0.125 => (trunc, SubpixelBin::Zero),
+            f if f > -0.375 => (trunc - 1, SubpixelBin::Three),
+            f if f > -0.625 => (trunc - 1, SubpixelBin::Two),
+            f if f > -0.875 => (trunc - 1, SubpixelBin::One),
+            _ => (trunc - 1, SubpixelBin::Zero),
+        }
+    } else {
+        match fract {
+            f if f < 0.125 => (trunc, SubpixelBin::Zero),
+            f if f < 0.375 => (trunc, SubpixelBin::One),
+            f if f < 0.625 => (trunc, SubpixelBin::Two),
+            f if f < 0.875 => (trunc, SubpixelBin::Three),
+            _ => (trunc + 1, SubpixelBin::Zero),
+        }
+    }
+}
+
 struct Entry {
     buf: Buffer,
     text: String,
@@ -220,19 +332,24 @@ struct Entry {
     width: u32,
     frame: u32,
     m: Metrics,
+    /// The glyph list `glyphs` replays: valid while `cached`, for `cached_scale` (f32 bits), until
+    /// the atlas evicts past `cached_evictions`.
+    glyphs: Vec<CachedGlyph>,
+    cached: bool,
+    cached_scale: u32,
+    cached_evictions: u64,
 }
 
 pub struct Text {
-    fs: FontSystem,
-    swash: SwashCache,
+    g: Glyphs,
     names: Vec<String>,
     ascents: Vec<f32>,
     entries: HashMap<u64, Entry, Fast>,
     frame: u32,
-    atlases: [Atlas; 2],
-    slots: HashMap<CacheKey, Slot, Fast>,
-    dirty: Vec<(AtlasKind, u32, u32, u32, u32)>,
-    evictions: u64,
+    walks: u64,
+    cache_on: bool,
+    /// Capacity of every layout's glyph list, in bytes.
+    cache_bytes: usize,
 }
 
 fn idx(kind: AtlasKind) -> usize {
@@ -243,16 +360,22 @@ impl Text {
     pub fn new(fonts: &[&[u8]]) -> Text {
         let mut t = Text {
             // not new_with_fonts: that calls load_system_fonts. ponytail: fixed locale; pass one in when per-locale fallback matters.
-            fs: FontSystem::new_with_locale_and_db("en-US".into(), fontdb::Database::new()),
-            swash: SwashCache::new(),
+            g: Glyphs {
+                fs: FontSystem::new_with_locale_and_db("en-US".into(), fontdb::Database::new()),
+                swash: SwashCache::new(),
+                atlases: [Atlas::new(MASK_SIZE, 1), Atlas::new(COLOR_SIZE, 4)],
+                slots: HashMap::default(),
+                dirty: Vec::new(),
+                evictions: 0,
+                frame: 1,
+            },
             names: Vec::new(),
             ascents: Vec::new(),
             entries: HashMap::default(),
             frame: 1,
-            atlases: [Atlas::new(MASK_SIZE, 1), Atlas::new(COLOR_SIZE, 4)],
-            slots: HashMap::default(),
-            dirty: Vec::new(),
-            evictions: 0,
+            walks: 0,
+            cache_on: true,
+            cache_bytes: 0,
         };
         for f in fonts {
             t.add_font(f);
@@ -263,9 +386,9 @@ impl Text {
     /// Loads a font (copies the bytes); returns its index for `Style::font`. Existing layouts keep
     /// their old shaping until their text, width or style changes.
     pub fn add_font(&mut self, bytes: &[u8]) -> usize {
-        let ids = self.fs.db_mut().load_font_source(fontdb::Source::Binary(Arc::new(bytes.to_vec())));
-        let name = ids.first().and_then(|id| self.fs.db().face(*id)).and_then(|f| f.families.first()).map(|f| f.0.clone()).unwrap_or_default();
-        let ascent = ids.first().and_then(|id| self.fs.get_font(*id, Weight::NORMAL)).map_or(0.0, |f| {
+        let ids = self.g.fs.db_mut().load_font_source(fontdb::Source::Binary(Arc::new(bytes.to_vec())));
+        let name = ids.first().and_then(|id| self.g.fs.db().face(*id)).and_then(|f| f.families.first()).map(|f| f.0.clone()).unwrap_or_default();
+        let ascent = ids.first().and_then(|id| self.g.fs.get_font(*id, Weight::NORMAL)).map_or(0.0, |f| {
             let m = f.as_swash().metrics(&[]);
             m.ascent / m.units_per_em as f32
         });
@@ -296,8 +419,13 @@ impl Text {
             width: 0,
             frame,
             m: Metrics::default(),
+            glyphs: Vec::new(),
+            cached: false,
+            cached_scale: 0,
+            cached_evictions: 0,
         });
         e.frame = frame;
+        e.cached = false;
         e.style = *style;
         e.width = width.to_bits();
         e.text.clear();
@@ -325,7 +453,7 @@ impl Text {
             Align::Right => CAlign::Right,
         };
         b.set_text(text, &attrs, Shaping::Advanced, Some(align));
-        b.shape_until_scroll(&mut self.fs, true);
+        b.shape_until_scroll(&mut self.g.fs, true);
         let mut m = Metrics::default();
         for run in b.layout_runs() {
             if m.lines == 0 {
@@ -394,66 +522,77 @@ impl Text {
         }
     }
 
+    /// Emits the layout's glyph quads at `origin` (points) for `scale`. The first walk through
+    /// cosmic-text's runs keeps each glyph's line-relative position, subpixel bin and atlas slot in the
+    /// layout's entry; later calls at any origin replay that list with the same float operations as
+    /// `LayoutGlyph::physical`, so the quads equal a walk's. A glyph whose bin differs at the new
+    /// origin (a fractional origin) looks its slot up as a walk would. The list is rebuilt when the
+    /// layout is re-shaped, the scale changes or the atlas evicted a shelf.
     pub fn glyphs(&mut self, key: u64, origin: (f32, f32), scale: f32, f: &mut dyn FnMut(Glyph)) {
-        let Text { fs, swash, entries, frame, atlases, slots, dirty, evictions, .. } = self;
-        let Some(e) = entries.get(&key) else { return };
-        for run in e.buf.layout_runs() {
-            for g in run.glyphs {
-                let p = g.physical((origin.0 * scale, (origin.1 + run.line_y) * scale), scale);
-                let slot = match slots.get(&p.cache_key) {
-                    Some(s) => *s,
-                    None => {
-                        let Some(img) = swash.get_image_uncached(fs, p.cache_key) else { continue };
-                        let (w, h) = (img.placement.width, img.placement.height);
-                        let kind = match img.content {
-                            SwashContent::Mask => AtlasKind::Mask,
-                            SwashContent::Color => AtlasKind::Color,
-                            SwashContent::SubpixelMask => continue,
-                        };
-                        let a = &mut atlases[idx(kind)];
-                        let bpp = a.bpp;
-                        let mut s = Slot { kind, shelf: 0, x: 0, y: 0, w, h, left: img.placement.left, top: img.placement.top };
-                        if w > 0 && h > 0 {
-                            if img.data.len() != (w * h * bpp) as usize {
-                                continue;
-                            }
-                            let Some((x, y, shelf, evicted)) = a.alloc(w, h, *frame) else { continue };
-                            for row in 0..h {
-                                let src = (row * w * bpp) as usize;
-                                let dst = (((y + row) * a.w + x) * bpp) as usize;
-                                a.px[dst..dst + (w * bpp) as usize].copy_from_slice(&img.data[src..src + (w * bpp) as usize]);
-                            }
-                            if evicted {
-                                *evictions += 1;
-                                slots.retain(|_, o| !(o.kind == kind && o.shelf == shelf));
-                            }
-                            dirty.push((kind, x, y, w, h));
-                            (s.shelf, s.x, s.y) = (shelf, x, y);
-                        }
-                        slots.insert(p.cache_key, s);
-                        s
+        let Text { g, entries, walks, cache_on, cache_bytes, .. } = self;
+        let Some(e) = entries.get_mut(&key) else { return };
+        if e.cached && e.cached_scale == scale.to_bits() && e.cached_evictions == g.evictions {
+            let (ox, start) = (origin.0 * scale, g.evictions);
+            for c in &e.glyphs {
+                let (x, bin) = subpixel_bin(c.x.mul_add(scale, ox));
+                // y is whole after `trunc`: its bin is zero and its pixel the truncation
+                let y = c.y.mul_add(scale, (origin.1 + c.line_y) * scale).trunc() as i32;
+                if bin == c.key.x_bin && g.evictions == start {
+                    if c.slot.w > 0 && c.slot.h > 0 {
+                        g.atlases[idx(c.slot.kind)].shelves[c.slot.shelf as usize].used = g.frame;
+                        let s = &c.slot;
+                        f(Glyph { rect: Rect { x: (x + s.left) as f32, y: (y - s.top) as f32, w: s.w as f32, h: s.h as f32 }, uv: c.uv, atlas: s.kind });
                     }
-                };
-                if slot.w == 0 || slot.h == 0 {
-                    continue;
+                } else if let Some(slot) = g.slot(CacheKey { x_bin: bin, ..c.key }) {
+                    // a bin the list does not hold, or a slot an eviction during this call may have moved
+                    g.emit(slot, x, y, f);
                 }
-                let a = &mut atlases[idx(slot.kind)];
-                a.shelves[slot.shelf as usize].used = *frame;
-                let (aw, ah) = (a.w as f32, a.h as f32);
-                f(Glyph {
-                    rect: Rect { x: (p.x + slot.left) as f32, y: (p.y - slot.top) as f32, w: slot.w as f32, h: slot.h as f32 },
-                    uv: Rect { x: slot.x as f32 / aw, y: slot.y as f32 / ah, w: slot.w as f32 / aw, h: slot.h as f32 / ah },
-                    atlas: slot.kind,
-                });
             }
+            return;
+        }
+        *walks += 1;
+        let start = g.evictions;
+        let keep = *cache_on && *cache_bytes < CACHE_BYTES;
+        *cache_bytes -= e.glyphs.capacity() * size_of::<CachedGlyph>();
+        e.glyphs.clear();
+        e.cached = keep;
+        for run in e.buf.layout_runs() {
+            for lg in run.glyphs {
+                let p = lg.physical((origin.0 * scale, (origin.1 + run.line_y) * scale), scale);
+                let Some(slot) = g.slot(p.cache_key) else {
+                    e.cached = false; // the atlas has no room this frame: walk again next time
+                    continue;
+                };
+                if keep {
+                    let (x, y) = (lg.x + lg.font_size * lg.x_offset, lg.y - lg.font_size * lg.y_offset);
+                    e.glyphs.push(CachedGlyph { key: p.cache_key, x, y, line_y: run.line_y, slot, uv: g.uv(&slot) });
+                }
+                g.emit(slot, p.x, p.y, f);
+            }
+        }
+        *cache_bytes += e.glyphs.capacity() * size_of::<CachedGlyph>();
+        (e.cached_scale, e.cached_evictions) = (scale.to_bits(), start);
+    }
+
+    /// Walks through cosmic-text's runs so far (a warm frame of unchanged text adds none).
+    pub fn glyph_walks(&self) -> u64 {
+        self.walks
+    }
+
+    /// Turns the per-layout glyph lists off (`glyphs` walks every time) or back on; for tests that
+    /// compare the two paths.
+    pub fn set_glyph_cache(&mut self, on: bool) {
+        self.cache_on = on;
+        for e in self.entries.values_mut() {
+            e.cached = false;
         }
     }
 
     /// Hands out every texel rectangle written since the last call; `data` starts at the rectangle's
     /// first texel in the CPU mirror, `stride` bytes per row.
     pub fn drain_uploads(&mut self, f: &mut dyn FnMut(AtlasKind, u32, u32, u32, u32, &[u8], usize)) {
-        for (kind, x, y, w, h) in self.dirty.drain(..) {
-            let a = &self.atlases[idx(kind)];
+        for (kind, x, y, w, h) in self.g.dirty.drain(..) {
+            let a = &self.g.atlases[idx(kind)];
             let stride = (a.w * a.bpp) as usize;
             let start = (y as usize) * stride + (x * a.bpp) as usize;
             let end = start + (h as usize - 1) * stride + (w * a.bpp) as usize;
@@ -463,22 +602,28 @@ impl Text {
 
     /// The CPU mirror of an atlas, `atlas_size` texels, rows tightly packed (for CPU compositing).
     pub fn atlas_pixels(&self, kind: AtlasKind) -> &[u8] {
-        &self.atlases[idx(kind)].px
+        &self.g.atlases[idx(kind)].px
     }
 
     pub fn atlas_size(&self, kind: AtlasKind) -> (u32, u32) {
-        let a = &self.atlases[idx(kind)];
+        let a = &self.g.atlases[idx(kind)];
         (a.w, a.h)
     }
 
-    /// Heap held by the atlas mirrors (layout buffers are cosmic-text's and not counted).
+    /// Heap held by the atlas mirrors and the layouts' glyph lists (`CACHE_BYTES` plus at most one
+    /// list); cosmic-text's layout buffers are not counted.
     pub fn bytes(&self) -> usize {
-        self.atlases.iter().map(|a| a.px.len()).sum()
+        self.g.atlases.iter().map(|a| a.px.len()).sum::<usize>() + self.cache_bytes
+    }
+
+    /// The glyph lists' part of `bytes`.
+    pub fn glyph_list_bytes(&self) -> usize {
+        self.cache_bytes
     }
 
     /// Shelves evicted so far: glyph instances made before an eviction may sample another glyph.
     pub fn evictions(&self) -> u64 {
-        self.evictions
+        self.g.evictions
     }
 
     /// Call once per frame: drops layouts not laid out in the last `KEEP_FRAMES` frames. A cached
@@ -490,8 +635,16 @@ impl Text {
     // if that spike shows.
     pub fn end_frame(&mut self) {
         let frame = self.frame;
+        self.g.frame = frame + 1;
         if frame % SWEEP_FRAMES == 0 {
-            self.entries.retain(|_, e| frame.wrapping_sub(e.frame) < KEEP_FRAMES);
+            let bytes = &mut self.cache_bytes;
+            self.entries.retain(|_, e| {
+                let keep = frame.wrapping_sub(e.frame) < KEEP_FRAMES;
+                if !keep {
+                    *bytes -= e.glyphs.capacity() * size_of::<CachedGlyph>();
+                }
+                keep
+            });
         }
         self.frame += 1;
     }

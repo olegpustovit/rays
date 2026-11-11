@@ -191,6 +191,35 @@ fn gpu_parity_commands() {
     println!("PXUI layers: three parity fixtures at 1x/2x");
 }
 
+/// Cached glyph lists emit the instances a walk through cosmic-text emits, byte for byte, for the
+/// parity fixtures at 1x, 2x and 1.5x; a warm rebuild walks no layout.
+fn glyph_lists_match_walks() {
+    let fixtures: [(&str, fn(&mut Ui)); 3] = [("overlays", overlays), ("table", table), ("panel", new_panel)];
+    for density in [1.0, 2.0, 1.5] {
+        for (name, build) in fixtures.iter() {
+            let frames = |cache: bool| {
+                let mut ui = Ui::create(Platform::Apple, None, crate::support::golden_text());
+                ui.text_mut().set_glyph_cache(cache);
+                let mut walks = 0;
+                for count in 0..3 {
+                    let mut f = frame_at(count, 300, 1);
+                    f.pixel_scale = (density, density);
+                    walks = ui.text_mut().glyph_walks();
+                    ui.frame(&f, &mut |ui| build(ui));
+                }
+                let walks = ui.text_mut().glyph_walks() - walks;
+                let draw: Vec<Vec<pxui::draw::Instance>> = ui.output().draw.iter().map(|l| l.instances.clone()).collect();
+                ui.destroy();
+                (draw, walks)
+            };
+            let ((cached, warm), (walked, _)) = (frames(true), frames(false));
+            assert!(cached == walked, "{name} at {density}x: cached glyph instances differ from a walk");
+            assert_eq!(warm, 0, "{name} at {density}x: a warm frame walked {warm} layouts");
+        }
+    }
+    println!("PXUI glyph lists: three fixtures at 1x, 2x and 1.5x equal a walk");
+}
+
 /// One draw call per UI layer: the kit panel, and the table, a clipped scroll list whose clips
 /// ride in the instances.
 fn gpu_parity_draw_calls() {
@@ -377,6 +406,7 @@ pub const CASES: &[(&str, fn())] = &[
     ("gpu_view_offset_pixels", gpu_view_offset_pixels),
     ("gpu_retained_bytes", gpu_retained_bytes),
     ("gpu_parity_commands", gpu_parity_commands),
+    ("glyph_lists_match_walks", glyph_lists_match_walks),
     ("gpu_parity_draw_calls", gpu_parity_draw_calls),
     ("gpu_parity_overlays", gpu_parity_overlays),
     ("gpu_parity_table", gpu_parity_table),

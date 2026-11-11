@@ -532,6 +532,13 @@ struct ViewRec {
     transform: [f32; 4],
     pivot: (f32, f32),
     blur: f32,
+    /// when its last build asked to be rebuilt (`Ui::repaint_after`; infinity: never)
+    wake: f64,
+    /// its nodes' run in the published accessibility tree (nested views inside it), valid while
+    /// `a11y_gen` is the tree's, and the shift its rects were taken under
+    a11y_span: (u32, u32),
+    a11y_gen: u64,
+    a11y_shift: (f32, f32),
     /// the composed entry and the screen rectangle it shows
     shift: (f32, f32),
     alpha: f32,
@@ -578,6 +585,10 @@ impl ViewRec {
             transform: [1.0, 0.0, 0.0, 1.0],
             pivot: (0.0, 0.0),
             blur: 0.0,
+            wake: f64::INFINITY,
+            a11y_span: (0, 0),
+            a11y_gen: 0,
+            a11y_shift: (0.0, 0.0),
             shift: (0.0, 0.0),
             alpha: 1.0,
             outer: UNBOUNDED,
@@ -691,6 +702,8 @@ struct Slot {
     a11y_name: String,
     a11y_value: String,
     a11y_selection: (u32, u32),
+    /// a numeric value (now, min, max, step), over the text one
+    a11y_number: Option<[f64; 4]>,
 }
 
 impl Slot {
@@ -737,6 +750,7 @@ impl Slot {
             parent_slot: NONE,
             a11y_name: String::new(),
             a11y_value: String::new(),
+            a11y_number: None,
             a11y_selection: (0, 0),
         }
     }
@@ -960,6 +974,11 @@ pub struct Ui {
     /// something the tree shows may have changed outside the root's build (a view built, moved or
     /// was patched, an action came in), and the focus and capture the last walk saw
     a11y_dirty: bool,
+    /// the published tree's generation (views' spans in it are valid while theirs matches), a
+    /// change no span can carry (a view moved), and the nodes the last walk computed (not copied)
+    a11y_gen: u64,
+    a11y_full: bool,
+    a11y_written: usize,
     a11y_on: bool,
     timing: bool,
     a11y_seen: (i64, Option<i64>),
@@ -1072,14 +1091,20 @@ pub struct Ui {
     arena: Arena,
     painting: bool,
     frame_requested: bool,
+    /// views built (not kept) this frame
+    rebuilt: usize,
+    /// the earliest `repaint_after` the root asked for this frame
+    wake: f64,
     out: PlatformOut,
     destroyed: bool,
 }
 
-/// Bytes a UI holds: the glyph atlases' CPU mirrors and the text undo stacks and shelf.
+/// Bytes a UI holds: the glyph atlases' CPU mirrors, the text layouts' glyph lists, and the text undo
+/// stacks and shelf.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Bytes {
     pub atlas: i64,
+    pub glyph_lists: i64,
     pub text_undo: i64,
 }
 
@@ -1150,6 +1175,9 @@ impl Ui {
             a11y_map: Vec::new(),
             a11y_pending: Vec::new(),
             a11y_dirty: true,
+            a11y_gen: 1,
+            a11y_full: true,
+            a11y_written: 0,
             a11y_on: false,
             timing: false,
             a11y_seen: (0, None),
@@ -1243,6 +1271,8 @@ impl Ui {
             arena: Arena::default(),
             painting: false,
             frame_requested: false,
+            rebuilt: 0,
+            wake: f64::INFINITY,
             out: PlatformOut::default(),
             destroyed: false,
         }
@@ -1346,15 +1376,15 @@ impl Ui {
         }
     }
 
-    /// Views (besides the root) the last frame built rather than kept.
-    pub fn rebuilt_views(&self) -> usize {
-        self.views[1..].iter().filter(|r| r.built == self.frame_number).count()
-    }
-
     /// Nodes declared by the last build (a kept view counts as its one box): what a view or a
     /// virtual list saves.
     pub fn built_nodes(&self) -> usize {
         self.count
+    }
+
+    /// Views (`Ui::view`) the last frame built rather than kept; the root is not counted.
+    pub fn rebuilt_views(&self) -> usize {
+        self.rebuilt
     }
 
     /// Declare what a node built this frame is to a screen reader, and the states its widget knows
@@ -1383,6 +1413,14 @@ impl Ui {
             s.a11y_value.clear();
             s.a11y_value.push_str(value);
             s.a11y_selection = selection;
+        }
+    }
+
+    /// The node's accessible value as a number in `min..=max` moved by `step` (`a11y::Value::Number`:
+    /// a slider, a determinate progress bar); it wins over a text value.
+    pub fn a11y_number(&mut self, b: &Handle, now: f64, min: f64, max: f64, step: f64) {
+        if self.live(b) {
+            self.slots[b.box_slot].a11y_number = Some([now, min, max, step]);
         }
     }
 
@@ -1427,7 +1465,7 @@ impl Ui {
     pub fn set_a11y(&mut self, on: bool) {
         if on != self.a11y_on {
             self.a11y_on = on;
-            self.a11y_dirty = true;
+            (self.a11y_dirty, self.a11y_full) = (true, true);
             if !on {
                 (self.a11y, self.a11y_next) = (A11yTree::new(), A11yTree::new());
             }
@@ -1454,17 +1492,52 @@ impl Ui {
         if map.len() < self.slots.len() {
             map.resize(self.slots.len(), NO_PARENT);
         }
+        self.a11y_written = 0;
         self.emit_view(&mut t, &mut map, 0);
         if t.nodes != self.a11y.nodes || t.strings != self.a11y.strings {
             t.revision = self.a11y.revision;
             t.end();
             std::mem::swap(&mut t, &mut self.a11y);
         }
+        // the spans recorded this walk hold in the published tree (it equals the walk's when unchanged)
+        (self.a11y_gen, self.a11y_full) = (self.a11y_gen + 1, false);
         self.a11y_next = t;
         self.a11y_map = map;
     }
 
+    /// Nodes the last accessibility walk computed; a kept view's nodes are copied from the published
+    /// tree, not counted.
+    pub fn a11y_written(&self) -> usize {
+        self.a11y_written
+    }
+
     fn emit_view(&mut self, t: &mut A11yTree, map: &mut [u32], v: u32) {
+        let next_gen = self.a11y_gen + 1;
+        let r = &self.views[v as usize];
+        let shift = self.views[r.xf as usize].shift;
+        if v != 0 && r.built != self.frame_number && r.a11y_gen == self.a11y_gen && r.a11y_shift == shift && !self.a11y_full {
+            // kept and unmoved: its run of the published tree, nested views included, as it was
+            let (s0, s1) = r.a11y_span;
+            let base = t.nodes.len() as u32;
+            t.copy_span(&self.a11y, s0..s1, map[r.slot]);
+            for w in self.views.iter_mut().skip(1) {
+                if w.a11y_gen == self.a11y_gen && w.a11y_span.0 >= s0 && w.a11y_span.1 <= s1 {
+                    w.a11y_span = (w.a11y_span.0 - s0 + base, w.a11y_span.1 - s0 + base);
+                    w.a11y_gen = next_gen;
+                }
+            }
+            let r = &mut self.views[v as usize];
+            (r.a11y_span, r.a11y_gen) = ((base, base + (s1 - s0)), next_gen);
+            return;
+        }
+        let start = t.nodes.len() as u32;
+        self.emit_nodes(t, map, v);
+        let end = t.nodes.len() as u32;
+        let r = &mut self.views[v as usize];
+        (r.a11y_span, r.a11y_gen, r.a11y_shift) = ((start, end), next_gen, shift);
+    }
+
+    fn emit_nodes(&mut self, t: &mut A11yTree, map: &mut [u32], v: u32) {
         for k in 0..self.views[v as usize].nodes.len() {
             let slot = self.views[v as usize].nodes[k];
             let s = &self.slots[slot];
@@ -1507,13 +1580,16 @@ impl Ui {
                 }
                 let i = t.push(parent, crate::a11y::node_id(slot, s.generation), n.role, rect);
                 t.set_name(i, if s.a11y_name.is_empty() { &s.text } else { &s.a11y_name });
-                if !s.a11y_value.is_empty() || n.a11y & a11y_state::EDITABLE != 0 {
+                if let Some([now, min, max, step]) = s.a11y_number {
+                    t.set_value_number(i, now, min, max, step);
+                } else if !s.a11y_value.is_empty() || n.a11y & a11y_state::EDITABLE != 0 {
                     t.set_value(i, &s.a11y_value);
                     t.set_selection(i, s.a11y_selection.0, s.a11y_selection.1);
                 }
                 t.set_states(i, states);
                 t.set_actions(i, acts);
                 map[slot] = i;
+                self.a11y_written += 1;
             }
             let held = self.slots[slot].view;
             if held != NO_VIEW && held != v {
@@ -1624,7 +1700,8 @@ impl Ui {
         if self.destroyed {
             Bytes::default()
         } else {
-            Bytes { atlas: self.text.as_ref().map_or(0, |t| t.bytes()) as i64, text_undo: self.text_undo_held }
+            let (all, lists) = self.text.as_ref().map_or((0, 0), |t| (t.bytes(), t.glyph_list_bytes()));
+            Bytes { atlas: (all - lists) as i64, glyph_lists: lists as i64, text_undo: self.text_undo_held }
         }
     }
 
@@ -1670,6 +1747,8 @@ impl Ui {
                 self.slots.push(Slot::fresh());
                 self.scroll_y.push(0.0);
                 self.scroll_xs.push(0.0);
+                // the free list can take every slot: freeing never grows it (amortised with `slots`)
+                self.free.reserve(self.slots.capacity().saturating_sub(self.free.len()));
                 self.slots.len() - 1
             }
         };
@@ -1719,6 +1798,10 @@ impl Ui {
         }
         self.moving = moving;
         let mut gone = std::mem::take(&mut self.gone);
+        // room for every rebuilt view's next `prev` too, so the frame after a view's first build
+        // does not grow the list
+        let room = self.views.iter().filter(|r| r.built == self.frame_number).map(|r| r.nodes.len().max(r.prev.len())).sum::<usize>();
+        gone.reserve(room.saturating_sub(gone.len()));
         for v in 0..self.views.len() {
             if self.views[v].built == self.frame_number {
                 gone.extend_from_slice(&self.views[v].prev);
@@ -2114,10 +2197,20 @@ impl Ui {
                     }
                     let flags = self.flags_of_key(target);
                     if *button == MouseButton::LeftButton {
+                        // the nearest focusable box at or around the press takes the focus unless
+                        // it is a Tab stop only (buttons, as on macOS); a list takes it from its rows
+                        let mut holder = 0;
+                        if flags & KEEP_FOCUS == 0 {
+                            self.hit_ancestors(target, &mut |key| {
+                                if holder == 0 && self.flags_of_key(key) & FOCUSABLE != 0 {
+                                    holder = key;
+                                }
+                            });
+                        }
                         let focus = if flags & KEEP_FOCUS != 0 {
                             self.focus
-                        } else if flags & FOCUSABLE != 0 && flags & TAB_ONLY == 0 {
-                            target
+                        } else if holder != 0 && self.flags_of_key(holder) & TAB_ONLY == 0 {
+                            holder
                         } else {
                             0
                         };
@@ -2448,11 +2541,17 @@ impl Ui {
         out
     }
 
-    /// When the last frame's UI needs another frame with no input: at once for a gesture,
-    /// focused text, a scroll in motion or a requested frame, at the end of a running hover
-    /// delay; `None` when time alone changes nothing.
+    /// When the last frame's UI needs another frame with no input: at once for a gesture, a
+    /// running transition, a scroll in motion or a requested frame; at the end of a running hover
+    /// delay or the earliest `repaint_after`; `None` when time alone changes nothing. Keyboard
+    /// focus alone asks for nothing (no caret blinks).
     pub fn repaint_at(&self) -> Option<f64> {
-        if self.frame_requested { Some(f64::NEG_INFINITY) } else { self.out.repaint_at }
+        if self.frame_requested {
+            Some(f64::NEG_INFINITY)
+        } else {
+            // a `repaint_after` made between frames
+            Some(self.out.repaint_at.unwrap_or(f64::INFINITY).min(self.wake)).filter(|t| t.is_finite())
+        }
     }
 
     /// The frame gate: build, lay out and paint only for input or a due repaint. A host that gets
@@ -2476,19 +2575,40 @@ impl Ui {
         }
     }
 
+    /// Ask for a frame `seconds` after this frame's time (a timer: a toast's expiry, a delayed
+    /// reveal), building the view that asks again then; `repaint_at_time` takes the frame clock's
+    /// time. A request stands until its time (a view's until the view rebuilds); the earliest is
+    /// `repaint_at`.
+    pub fn repaint_after(&mut self, seconds: f64) {
+        self.repaint_at_time(self.now + seconds.max(0.0));
+    }
+
+    /// The time of the frame being built (the last frame's between frames), in the frame clock's
+    /// seconds.
+    pub fn now(&self) -> f64 {
+        self.now
+    }
+
+    /// `repaint_after` at the frame clock's `time`.
+    pub fn repaint_at_time(&mut self, time: f64) {
+        if self.building && self.view_cur != 0 {
+            let r = &mut self.views[self.view_cur as usize];
+            r.wake = r.wake.min(time);
+        } else {
+            self.wake = self.wake.min(time);
+        }
+    }
+
     fn next_repaint(&self, now: f64) -> Option<f64> {
-        if self.frame_requested
-            || self.active.is_some()
-            || self.focus != 0
-            || !self.tweens.is_empty()
-            || !self.moving.is_empty()
-        {
+        if self.frame_requested || self.active.is_some() || !self.tweens.is_empty() || !self.moving.is_empty() {
             return Some(now);
         }
-        match &self.hover_rest {
-            Some((_, _, start, seen)) if *seen == self.frame_number && now - start < HOVER_SECONDS => Some(start + HOVER_SECONDS),
-            _ => None,
-        }
+        let wake = self.views.iter().skip(1).fold(self.wake, |w, r| w.min(r.wake));
+        let hover = match &self.hover_rest {
+            Some((_, _, start, seen)) if *seen == self.frame_number && now - start < HOVER_SECONDS => start + HOVER_SECONDS,
+            _ => f64::INFINITY,
+        };
+        Some(wake.min(hover)).filter(|t| t.is_finite())
     }
 }
 
@@ -2733,6 +2853,7 @@ impl Ui {
         s.a11y_name.clear();
         s.a11y_value.clear();
         s.a11y_selection = (0, 0);
+        s.a11y_number = None;
     }
 
     /// The layout inputs and look of build box `index`.
@@ -3521,6 +3642,8 @@ impl Ui {
             if n.flags & SCROLL_X != 0 {
                 let key = self.boxes[index].key;
                 let delta = self.signals.get(&key).map_or(0.0, |v| v.scroll_x * n.scroll_step + v.scroll_drag_x);
+                // right to left the offset runs from the right edge: the content follows the fingers
+                let delta = if self.dir == Direction::Rtl { -delta } else { delta };
                 let max_x = 0.0f32.max(self.l_content_w[index] - self.l_w[index]);
                 self.scroll_xs[slot] = 0.0f32.max(max_x.min(self.scroll_xs[slot] - delta));
             }
@@ -4088,6 +4211,8 @@ pub struct Paint {
     /// the content width and horizontal scroll offset, as `l_content` and `scroll_y`
     pub l_content_w: Vec<f32>,
     pub scroll_x: Vec<f32>,
+    /// right to left: node text sits its start inset from the right, scroll thumbs mirror
+    pub rtl: bool,
 }
 
 impl Paint {
@@ -4239,15 +4364,19 @@ impl Paint {
             } else {
                 text
             };
-            if look.font.caps {
-                let mut buffer = std::mem::take(&mut self.label);
-                buffer.clear();
+            let mut buffer = std::mem::take(&mut self.label);
+            buffer.clear();
+            let text = if look.font.caps {
                 buffer.extend(text.chars().map(|c| c.to_ascii_uppercase()));
-                self.text_styled(at, &style, 0.0, ink, &buffer);
-                self.label = buffer;
+                &buffer
             } else {
-                self.text_styled(at, &style, 0.0, ink, text);
-            }
+                text
+            };
+            // right to left the start inset is at the right: the text ends there
+            let (key, m) = lay_out(&mut self.text, &style, 0.0, text);
+            let at = if self.rtl { (x + w - inset.l - m.w, at.1) } else { at };
+            self.text_laid(at, &style, ink, key, m);
+            self.label = buffer;
         }
         if let Mark::Chevron(direction) = node.mark {
             self.chevron((x + w / 2.0, y + h / 2.0), direction, fade(look.text));
@@ -4275,14 +4404,15 @@ impl Paint {
                 let track_h = 1.max(height - 2 * margin);
                 let thumb_h = track_h.min(20.max(track_h * height / 1.max(content)));
                 let thumb_y = y + margin + self.scroll_y[slot] as i64 * (track_h - thumb_h) / maximum;
-                Rect::new((x + width) as f32 - gap - w, thumb_y as f32, w, thumb_h as f32)
+                let x = if self.rtl { (x as f32) + gap } else { (x + width) as f32 - gap - w };
+                Rect::new(x, thumb_y as f32, w, thumb_h as f32)
             })
         } else {
             (content > r.h).then(|| {
                 let track_h = 1.0f32.max(r.h - 2.0 * bar.margin);
                 let thumb_h = track_h.min(20.0f32.max(track_h * r.h / content));
                 let thumb_y = r.y + bar.margin + self.scroll_y[slot] * (track_h - thumb_h) / (content - r.h);
-                Rect::new(r.x + r.w - gap - w, thumb_y, w, thumb_h)
+                Rect::new(if self.rtl { r.x + gap } else { r.x + r.w - gap - w }, thumb_y, w, thumb_h)
             })
         };
         if let Some(t) = thumb {
@@ -4302,7 +4432,8 @@ impl Paint {
         }
         let track_w = 1.0f32.max(r.w - 2.0 * bar.margin);
         let thumb_w = track_w.min(20.0f32.max(track_w * r.w / content));
-        let x = r.x + bar.margin + self.scroll_x[slot] * (track_w - thumb_w) / (content - r.w);
+        let along = bar.margin + self.scroll_x[slot] * (track_w - thumb_w) / (content - r.w);
+        let x = if self.rtl { r.x + r.w - along - thumb_w } else { r.x + along };
         let t = Rect::new(x, r.y + r.h - bar.gap - bar.width, thumb_w, bar.width);
         if bar.radius > 0.0 {
             self.push(Instance::rect([t.x, t.y, t.x + t.w, t.y + t.h], rgba(bar.color)).radii([bar.radius; 4]));
@@ -4332,12 +4463,12 @@ impl Paint {
     }
 
     /// An image placed in the box as CSS `object-fit` places it, its texels multiplied by `tint`
-    /// (white keeps it; see `Instance::image`).
+    /// (white keeps it; see `Instance::image`), filtered linearly when scaled (`flags::SMOOTH`).
     pub fn image_fit(&mut self, x: f32, y: f32, w: f32, h: f32, image: &Image, fit: Fit, tint: Color) {
         if w > 0.0 && h > 0.0 {
             self.bind(image);
             let (rect, uv) = crate::draw::fit(fit, [image.width as f32, image.height as f32], [x, y, x + w, y + h], [0.0, 0.0, 1.0, 1.0]);
-            self.push(Instance::image(rect, uv, rgba(tint)));
+            self.push(Instance { flags: crate::draw::flags::SMOOTH, ..Instance::image(rect, uv, rgba(tint)) });
         }
     }
 
@@ -4347,7 +4478,7 @@ impl Paint {
         if w > 0.0 && h > 0.0 {
             self.bind(image);
             for i in crate::draw::nine_slice([x, y, x + w, y + h], [0.0, 0.0, 1.0, 1.0], [image.width as f32, image.height as f32], inset, rgba(tint)) {
-                self.push(i);
+                self.push(Instance { flags: crate::draw::flags::SMOOTH, ..i });
             }
         }
     }
@@ -4496,6 +4627,11 @@ impl Paint {
     /// keep their own colours under its alpha.
     pub fn text_styled(&mut self, at: (f32, f32), style: &Style, width: f32, color: Option<Color>, text: &str) -> Metrics {
         let (key, m) = lay_out(&mut self.text, style, width, text);
+        self.text_laid(at, style, color, key, m)
+    }
+
+    /// `text_styled` for a layout already made (`lay_out`'s key and metrics).
+    fn text_laid(&mut self, at: (f32, f32), style: &Style, color: Option<Color>, key: u64, m: Metrics) -> Metrics {
         let d = self.density as f32;
         let snap = |v: f32| (v * d).round() / d;
         let baseline = snap(at.1 + self.text.ascent(style.font) * style.size);
@@ -4816,8 +4952,9 @@ impl Ui {
             let parent_hit = if has_hit { self.boxes[index].key } else { parent_hit };
             // a `ROUND_CLIP` node's corner radius rounds its children's clip; a square clip inside a
             // rounded one drops the rounding
-            // ponytail: one radius (the largest corner's) for the clip, and a cached view inside takes
-            // its outer clip square from the view table; per-corner radii when a design asks.
+            // one radius (the largest corner's) for the clip: the instance's `clip_radius` is its one
+            // f16 in the 64-byte budget (specification/pxui.md, the designed limit); a cached view
+            // inside takes its outer clip square from the view table
             let outer_radius = paint.clip_radius;
             if flags & CLIP != 0 {
                 let r = self.nd(index).look.radius;
@@ -4928,6 +5065,7 @@ impl Ui {
             scroll_y: std::mem::take(&mut self.scroll_y),
             l_content_w: std::mem::take(&mut self.l_content_w),
             scroll_x: std::mem::take(&mut self.scroll_xs),
+            rtl: self.dir == Direction::Rtl,
         };
         paint.next_layer(0);
         paint
@@ -5030,6 +5168,7 @@ impl Ui {
         self.draw[layer] = target;
         self.patch_layers = scratch;
         self.views[owner as usize].patched = true;
+        self.views[owner as usize].a11y_gen = 0;
         self.draw_revision += 1;
         self.a11y_dirty = true;
         true
@@ -5173,12 +5312,23 @@ impl Ui {
         self.route(frame);
         self.apply_a11y();
         self.mark_input();
+        // views whose `repaint_after` is due rebuild now (the root rebuilds anyway)
+        if self.wake <= frame.input.t {
+            self.wake = f64::INFINITY;
+        }
+        for v in 1..self.views.len() {
+            if self.views[v].wake <= frame.input.t {
+                self.views[v].wake = f64::INFINITY;
+                self.mark_view(v as u32);
+            }
+        }
         self.views[0].built = self.frame_number;
         self.modal_key = None;
         self.modal_extra.clear();
         // Also release callbacks left by a build that raised before publishing.
         self.clear_frame_callbacks();
         self.count = 0;
+        self.rebuilt = 0;
         self.closed_section = NONE;
         (self.theme_depth, self.theme_id) = (0, 0);
         (self.now, self.motion) = (frame.input.t, self.theme.tokens.moves());
@@ -5199,6 +5349,8 @@ impl Ui {
     pub fn end_frame(&mut self, frame: &rframe::Frame) {
         self.carry_ghost();
         self.building = false;
+        let root = &mut self.views[0];
+        root.prev.reserve(root.nodes.len().saturating_sub(root.prev.len()));
         self.parents.clear();
         self.seeds.clear();
         // Move popups to the end of the root's children, oldest first.
@@ -5588,6 +5740,8 @@ impl Ui {
         }
         r.verify = clean;
         r.escapes = false;
+        self.rebuilt += 1;
+        r.wake = f64::INFINITY;
         std::mem::swap(&mut r.nodes, &mut r.prev);
         r.nodes.clear();
         self.a11y_dirty = true;
@@ -5599,6 +5753,8 @@ impl Ui {
         let r = &mut self.views[v as usize];
         (r.revision, r.epoch, r.theme, r.built, r.patched) = (revision, self.epoch, self.theme_id, self.frame_number, false);
         r.dirty = r.escapes;
+        // the next build fills `prev`: room now, so a view's second build does not grow it
+        r.prev.reserve(r.nodes.len().saturating_sub(r.prev.len()));
         if r.escapes && parent != 0 {
             self.views[parent as usize].escapes = true;
         }
@@ -5718,7 +5874,7 @@ impl Ui {
     /// A view's entry changed: between frames the table and the damage update now; a view with no
     /// table index bakes its offset into layout, so it rebuilds next frame.
     fn view_changed(&mut self, v: u32) {
-        self.a11y_dirty = true;
+        (self.a11y_dirty, self.a11y_full) = (true, true);
         if self.views[v as usize].index == 0 {
             // ponytail: past 255 views the offset is baked by a rebuild (opacity and clip are not
             // applied); a larger table or nested tables if that many views move.
@@ -5861,6 +6017,8 @@ impl Ui {
         }
         let changed = out != self.view_out;
         self.view_prev = std::mem::replace(&mut self.view_out, out);
+        // the next refresh writes into `view_prev`: room now, not on the second frame
+        self.view_prev.reserve(self.view_out.len().saturating_sub(self.view_prev.len()));
         changed
     }
 
@@ -6251,6 +6409,9 @@ impl Ui {
         let changed = breaks != d.breaks || images.len() != d.images.len() || images.iter().zip(&d.images).any(|(a, b)| !Rc::ptr_eq(&a.handle, &b.handle));
         std::mem::swap(&mut breaks, &mut d.breaks);
         std::mem::swap(&mut images, &mut d.images);
+        // the next rebuild fills these: room for this frame's count now, not on the second frame
+        breaks.reserve(d.breaks.len().saturating_sub(breaks.len()));
+        images.reserve(d.images.len().saturating_sub(images.len()));
         self.temp_breaks = breaks;
         self.temp_images = images;
         changed

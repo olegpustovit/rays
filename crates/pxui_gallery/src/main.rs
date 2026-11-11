@@ -1,7 +1,7 @@
 //! The PXUI kit gallery as a window app: `cargo run -p pxui_gallery`. On macOS a `pxui_sdl` window
 //! on Metal, on Windows `pxui_sdl` on Vulkan, on Linux a `pxui_wayland` window on Vulkan with the
 //! `pxui_atspi` bridge when an accessibility bus answers. The loop honours the frame gate: it builds a
-//! frame only for input, a due `repaint_at`, a toast's expiry or the theme file's once-a-second poll,
+//! frame only for input, a due `repaint_at` (a toast's expiry among them) or the theme file's once-a-second poll,
 //! draws only when the draw revision moved (a frame, or the busy widgets' patches), and otherwise
 //! sleeps in the host's wait.
 //!
@@ -37,10 +37,8 @@ mod host {
     }
 
     /// Sleep until an event arrives or `deadline` (window time) passes.
-    // ponytail: pxui_sdl has no `wait` (pxui_wayland's `Window::wait`); SDL's own wait stands in.
-    pub fn wait(win: &Window, deadline: Option<f64>) {
-        let ms = deadline.map_or(-1, |at| ((at - win.time()).max(0.0) * 1000.0).ceil().min(i32::MAX as f64) as i32);
-        let _ = if ms < 0 { sdl3::event::wait(i32::MAX) } else { sdl3::event::wait(ms) };
+    pub fn wait(win: &mut Window, deadline: Option<f64>) {
+        win.wait(deadline);
     }
 
     pub fn cursor(win: &mut Window, c: Option<pxui::ui::Cursor>) {
@@ -221,7 +219,6 @@ fn main() {
             break;
         }
         let now = win.time();
-        s.now = now;
         // the second theme's file, polled once a second; a changed modification time reloads it
         if now >= next_poll || s.reload {
             next_poll = now + 1.0;
@@ -232,11 +229,10 @@ fn main() {
                 if s.dusk {
                     s.host_dirty = true;
                 }
-                s.toast("Theme file reloaded", 2.0);
+                s.toast("Theme file reloaded");
                 force = true;
             }
         }
-        let (expired, deadline) = s.expire(now);
         if s.host_dirty {
             ui.set_theme(s.theme(&dusk));
             ui.set_dir(if s.rtl { pxui::ui::Direction::Rtl } else { pxui::ui::Direction::Ltr });
@@ -264,7 +260,7 @@ fn main() {
             target = gpu.target(extent.drawable.0 as u32, extent.drawable.1 as u32);
             force = true;
         }
-        let built = force || expired || ui.wants_frame(&events, now);
+        let built = force || ui.wants_frame(&events, now);
         if built {
             force = false;
             if ui.output().platform.paste {
@@ -289,14 +285,11 @@ fn main() {
             last = now;
             let a0 = mem_sys::local_alloc_count();
             let t0 = Instant::now();
-            let revs = (s.page_rev, s.chrome_rev);
             ui.frame(&frame, &mut |ui| app(ui, &mut s));
-            // a page switch inside the frame: build once more so the views and the accessibility tree show the new state
-            force |= (s.page_rev, s.chrome_rev) != revs;
             cost.us = t0.elapsed().as_secs_f64() * 1e6;
             cost.allocs = Some(mem_sys::local_alloc_count() - a0);
             events = std::mem::take(&mut frame.input.events);
-            (cost.nodes, cost.laid_out) = (ui.built_nodes(), ui.arranged_nodes());
+            (cost.nodes, cost.views, cost.laid_out) = (ui.built_nodes(), ui.rebuilt_views(), ui.arranged_nodes());
             frames += 1;
             cost.frames = frames;
             if started.elapsed().as_secs_f64() > 0.5 {
@@ -352,9 +345,9 @@ fn main() {
         if exit_after.is_some_and(|secs| now >= secs) {
             break;
         }
-        // nothing to do: sleep until input, the UI's repaint time, a toast's end, the theme poll
+        // nothing to do: sleep until input, the UI's repaint time (a toast's end), the theme poll
         // or the next animation step
-        let mut wake = ui.repaint_at().unwrap_or(f64::INFINITY).min(next_poll).min(deadline.unwrap_or(f64::INFINITY));
+        let mut wake = ui.repaint_at().unwrap_or(f64::INFINITY).min(next_poll);
         if animating {
             wake = wake.min(now + 1.0 / 60.0);
         }

@@ -20,6 +20,8 @@ pub const PAGES: [&str; 4] = ["Kit", "Controls", "Collections", "Overlays"];
 pub const MENUS: [(&str, &[&str]); 2] = [("File", &["Reload theme", "Toast", "Quit"]), ("View", &PAGES)];
 const NAMES: [&str; 12] = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu"];
 pub const ROWS: usize = 100_000;
+/// How long a toast shows.
+pub const TOAST_SECONDS: f64 = 3.0;
 
 /// What the gallery holds between frames. `page_rev` and `chrome_rev` are the views' revisions: an
 /// app change that input did not cause bumps them.
@@ -68,9 +70,8 @@ pub struct Gallery {
     pub menu_at: Option<(f32, f32)>,
     pub picker: bool,
     pub said: &'static str,
-    /// toasts and when each goes (window time)
-    pub toasts: Vec<(&'static str, f64)>,
-    pub now: f64,
+    /// the toasts shown (each goes `TOAST_SECONDS` after it showed, or when clicked)
+    pub toasts: Vec<&'static str>,
     /// the busy widgets of the last build of the page (for `busy_step`) and the readout
     pub busy: Vec<Handle>,
     pub readout: Option<Handle>,
@@ -85,7 +86,7 @@ impl Gallery {
             check: true, radio: 1, slider: 0.4, tab: 0, segment: 1, choice: 2, search: String::new(), adds: 0, image: None,
             list: vec![false; ROWS], nodes: (0..ROWS).map(|i| TreeNode { depth: [0, 1, 2, 2, 1, 2][i % 6], children: matches!(i % 6, 0 | 1 | 4) }).collect(),
             open: (0..ROWS).map(|i| i < 6).collect(), tree_sel: Some(2), visible: Vec::with_capacity(ROWS), widths: [96.0, 72.0, 72.0], table_sel: Some(1), sort: (0, true), split: 0.34,
-            dialog: false, menu_at: None, picker: false, said: "", toasts: Vec::with_capacity(8), now: 0.0, busy: Vec::with_capacity(4), readout: None,
+            dialog: false, menu_at: None, picker: false, said: "", toasts: Vec::with_capacity(8), busy: Vec::with_capacity(4), readout: None,
         }
     }
 
@@ -97,19 +98,12 @@ impl Gallery {
         t
     }
 
-    /// Add a toast that goes `secs` from now.
-    pub fn toast(&mut self, text: &'static str, secs: f64) {
+    /// Add a toast (the UI times it out).
+    pub fn toast(&mut self, text: &'static str) {
         if self.toasts.len() == self.toasts.capacity() {
             self.toasts.remove(0);
         }
-        self.toasts.push((text, self.now + secs));
-    }
-
-    /// Drop the toasts whose time is up; the next one's deadline.
-    pub fn expire(&mut self, now: f64) -> (bool, Option<f64>) {
-        let before = self.toasts.len();
-        self.toasts.retain(|(_, at)| *at > now);
-        (self.toasts.len() != before, self.toasts.iter().map(|(_, at)| *at).reduce(f64::min))
+        self.toasts.push(text);
     }
 }
 
@@ -271,7 +265,7 @@ pub fn overlays_page(ui: &mut Ui, s: &mut Gallery) {
             s.picker = true;
         }
         if ui.button("Show a toast") {
-            s.toast("Saved to disk", 3.0);
+            s.toast("Saved to disk");
         }
         let row = ui.node("tip-row", Node { h: Size::Px(28.0), axis: Axis::Row, align: Align::Center, padding: Edges { l: 12.0, ..Edges::ZERO }, ..Node::DEFAULT });
         ui.within(&row, &mut |ui| {
@@ -334,7 +328,7 @@ pub fn app(ui: &mut Ui, s: &mut Gallery) {
     ui.within(&window, &mut |ui| {
         match ui.menu_bar("menus", &MENUS) {
             Some((0, 0)) => s.reload = true,
-            Some((0, 1)) => s.toast("Hello from the menu", 3.0),
+            Some((0, 1)) => s.toast("Hello from the menu"),
             Some((0, _)) => s.quit = true,
             Some((_, i)) if i != s.page => (s.page, s.page_rev, s.chrome_rev) = (i, s.page_rev + 1, s.chrome_rev + 1),
             _ => {}
@@ -344,7 +338,7 @@ pub fn app(ui: &mut Ui, s: &mut Gallery) {
             ui.view("chrome", s.chrome_rev, Size::Grow, Size::Px(CHROME_H), &mut |ui| {
                 let page = ui.tabs("Pages", &PAGES, s.page);
                 if page != s.page {
-                    (s.page, s.page_rev, s.chrome_rev) = (page, s.page_rev + 1, s.chrome_rev + 1); // the chrome shows the tab: rebuild it too
+                    (s.page, s.page_rev) = (page, s.page_rev + 1); // the tabs show the click in this build
                 }
                 let row = ui.node("switches", Node { h: Size::Px(24.0), axis: Axis::Row, ..Node::DEFAULT });
                 ui.within(&row, &mut |ui| {
@@ -369,11 +363,7 @@ pub fn app(ui: &mut Ui, s: &mut Gallery) {
             });
         });
     });
-    let mut texts = [""; 8];
-    for (slot, (text, _)) in texts.iter_mut().zip(&s.toasts) {
-        *slot = text;
-    }
-    if let Some(i) = ui.toasts("toasts", &texts[..s.toasts.len().min(8)]) {
+    if let Some(i) = ui.toasts("toasts", &s.toasts, TOAST_SECONDS) {
         s.toasts.remove(i);
     }
 }
@@ -383,6 +373,7 @@ pub fn app(ui: &mut Ui, s: &mut Gallery) {
 pub struct Cost {
     pub us: f64,
     pub nodes: usize,
+    pub views: usize,
     pub laid_out: usize,
     pub bytes: u64,
     pub allocs: Option<u64>,
@@ -392,7 +383,7 @@ pub struct Cost {
 /// The readout's text, written into `out` (kept, so a warm frame does not allocate).
 pub fn readout(out: &mut String, c: &Cost) {
     out.clear();
-    let _ = write!(out, "frame {:.0} us   nodes built {}   laid out {}   instance bytes {}   frames {}", c.us, c.nodes, c.laid_out, c.bytes, c.frames);
+    let _ = write!(out, "frame {:.0} us   views built {}   nodes built {}   laid out {}   instance bytes {}   frames {}", c.us, c.views, c.nodes, c.laid_out, c.bytes, c.frames);
     if let Some(a) = c.allocs {
         let _ = write!(out, "   allocs {a}");
     }

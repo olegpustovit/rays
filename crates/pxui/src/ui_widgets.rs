@@ -5,7 +5,8 @@
 //! looks from one `States` of the theme and lays its parts out as flow children, so a theme file
 //! restyles it and `set_dir(Rtl)` mirrors it. No standard appearance paints with a closure (the
 //! image is a texture, the search field's caret the text widgets' canvas). Keyboard: every widget
-//! is one Tab stop (`TAB_ONLY`, as the kit's buttons: the pointer does not take the focus);
+//! is one Tab stop. As on macOS, a click focuses what edits or holds a selection (the slider, the
+//! list, tree and table, the search field) and leaves buttons, boxes, tabs and menus `TAB_ONLY`;
 //! Enter/Space activate, the arrows move within a group, Escape leaves. A warm frame allocates
 //! nothing. Progress and spinner animate through patches (`busy_step`) without rebuilding their view.
 use crate::a11y::state as st;
@@ -14,7 +15,6 @@ use crate::geom::color;
 use crate::ui_core::*;
 use crate::ui_kit::{text_only, SIDE};
 use input::{Event, Key};
-use std::fmt::Write;
 use std::ops::RangeInclusive;
 
 /// A node of a tree, in preorder: its depth (0 at the top) and whether it has children.
@@ -30,33 +30,6 @@ pub enum DialogOut {
     Open,
     Closed,
     Button(usize),
-}
-
-/// A number written into a stack buffer: an accessible value without a heap string.
-struct Num {
-    bytes: [u8; 32],
-    len: usize,
-}
-
-impl Write for Num {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        let n = s.len().min(self.bytes.len() - self.len);
-        self.bytes[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
-        self.len += n;
-        Ok(())
-    }
-}
-
-fn number(v: f32) -> Num {
-    let mut n = Num { bytes: [0; 32], len: 0 };
-    let _ = write!(n, "{}", (v * 1000.0).round() / 1000.0);
-    n
-}
-
-impl Num {
-    fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.bytes[..self.len]).unwrap_or("")
-    }
 }
 
 /// The key presses of `keys` (a focused node's signal), in order.
@@ -201,7 +174,7 @@ impl Ui {
         let label_look = self.theme().row.idle;
         let saved = self.enter(&row);
         self.text_leaf(int_key(key, 0), rh, label_look, shown(text));
-        let track = self.node_keyed(int_key(key, 1), Node { flags: STOP_FLAGS, h: Size::Px(ch), axis: Axis::Stack, align: Align::Center, role: Role::Slider, ..Node::DEFAULT });
+        let track = self.node_keyed(int_key(key, 1), Node { flags: CLICKABLE | FOCUSABLE | BLOCKING, h: Size::Px(ch), axis: Axis::Stack, align: Align::Center, role: Role::Slider, ..Node::DEFAULT });
         let s = self.signal(&track);
         let mut v = value.clamp(lo.min(hi), hi.max(lo));
         let step = span / 100.0;
@@ -228,7 +201,7 @@ impl Ui {
         let v = v.clamp(lo.min(hi), hi.max(lo));
         let f = ((v - lo) / span).clamp(0.0, 1.0);
         self.a11y_name(&track, shown(text));
-        self.a11y_value(&track, number(v).as_str(), (0, 0));
+        self.a11y_number(&track, v as f64, lo.min(hi) as f64, hi.max(lo) as f64, step as f64);
         let t = self.theme();
         let (rail, fill, thumb) = (t.separator.idle, t.mark.idle, t.slider);
         let inner = self.enter(&track);
@@ -262,7 +235,7 @@ impl Ui {
             Some(v) => {
                 let v = v.clamp(0.0, 1.0);
                 self.node_keyed(int_key(track.box_key, 0), Node { w: Size::Pct(v), h: Size::Grow, look: bar, ..Node::DEFAULT });
-                self.a11y_value(&track, number(v * 100.0).as_str(), (0, 0));
+                self.a11y_number(&track, (v * 100.0) as f64, 0.0, 100.0, 1.0);
             }
             None => {
                 self.node_keyed(int_key(track.box_key, 1), Node { w: Size::Pct(0.3), h: Size::Grow, look: bar, ..Node::DEFAULT });
@@ -332,6 +305,7 @@ impl Ui {
             k => sel = wrap(sel, self.along(k), tabs.len()),
         });
         let saved = self.enter(&bar);
+        let (before, mut old) = (sel, None);
         for (i, tab) in tabs.iter().enumerate() {
             let w = self.text_width(None, tab);
             let n = self.node_keyed(int_key(bar.box_key, i as i64), Node { flags: ROW_FLAGS, w: Size::Px(w), h: Size::Grow, role: Role::Tab, ..Node::DEFAULT });
@@ -339,9 +313,18 @@ impl Ui {
             if ts.clicked {
                 sel = i;
             }
-            self.style(&n, &states, State { hovered: ts.hovered, pressed: ts.held, checked: sel == i, ..State::default() });
+            let state = State { hovered: ts.hovered, pressed: ts.held, ..State::default() };
+            if i == before {
+                old = Some((n, state));
+            }
+            self.style(&n, &states, State { checked: sel == i, ..state });
             self.set_role(&n, Role::Tab, st::SELECTABLE | if sel == i { st::SELECTED } else { 0 });
             self.text(&n, tab);
+        }
+        // a click on a later tab unselects the earlier one in this frame, not the next
+        if let Some((n, state)) = old.filter(|_| sel != before) {
+            self.style(&n, &states, state);
+            self.set_role(&n, Role::Tab, st::SELECTABLE);
         }
         self.leave(saved);
         sel
@@ -614,7 +597,7 @@ impl Ui {
     pub fn list_view(&mut self, label: &str, count: usize, multi: bool, selected: &mut [bool], text: &dyn Fn(usize, &mut dyn FnMut(&str))) -> Option<usize> {
         let count = count.min(selected.len());
         let rh = self.row_height() as f32;
-        let frame = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY | CLIP, w: Size::Grow, h: Size::Grow, look: self.theme().scroll_view.idle, padding: Edges::all(1.0), ..Node::DEFAULT });
+        let frame = self.node(label, Node { flags: FOCUSABLE | CLIP, w: Size::Grow, h: Size::Grow, look: self.theme().scroll_view.idle, padding: Edges::all(1.0), ..Node::DEFAULT });
         let s = self.signal(&frame);
         let focused = self.focused(&frame);
         let page = (self.rect(&frame).h / rh).floor().max(1.0) as i64;
@@ -693,7 +676,7 @@ impl Ui {
         };
         flatten(visible, open);
         let rh = self.row_height() as f32;
-        let frame = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY | CLIP, w: Size::Grow, h: Size::Grow, look: self.theme().scroll_view.idle, padding: Edges::all(1.0), ..Node::DEFAULT });
+        let frame = self.node(label, Node { flags: FOCUSABLE | CLIP, w: Size::Grow, h: Size::Grow, look: self.theme().scroll_view.idle, padding: Edges::all(1.0), ..Node::DEFAULT });
         let s = self.signal(&frame);
         let focused = self.focused(&frame);
         let page = (self.rect(&frame).h / rh).floor().max(1.0) as i64;
@@ -790,7 +773,7 @@ impl Ui {
         let t = self.theme();
         let (frame_look, head_look, column, chevron, states) = (t.scroll_view.idle, t.table_head.idle, t.column, t.chevron.idle, t.listbox);
         let bar = self.thumb();
-        let frame = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY | SCROLL_X | CLIP, w: Size::Grow, h: Size::Grow, look: frame_look, bar: Some(bar), padding: Edges::all(1.0), role: Role::Table, ..Node::DEFAULT });
+        let frame = self.node(label, Node { flags: FOCUSABLE | SCROLL_X | CLIP, w: Size::Grow, h: Size::Grow, look: frame_look, bar: Some(bar), padding: Edges::all(1.0), role: Role::Table, ..Node::DEFAULT });
         self.a11y_name(&frame, shown(label));
         let s = self.signal(&frame);
         let focused = self.focused(&frame);
@@ -892,9 +875,10 @@ impl Ui {
     }
 
     /// Toasts stacked in the window's lower end corner (the newest lowest), 12 points from its
-    /// edges. The caller owns them and their timers (it drops a toast when it expires and wakes the
-    /// host then). Returns the toast clicked away.
-    pub fn toasts(&mut self, label: &str, items: &[&str]) -> Option<usize> {
+    /// edges. Each goes `seconds` after it first showed: the engine keeps that time by the toast's
+    /// text and asks for the frame (`repaint_after`), so the host needs no timer. Returns a toast
+    /// clicked away or expired (one a frame; the caller drops it).
+    pub fn toasts(&mut self, label: &str, items: &[&str], seconds: f64) -> Option<usize> {
         if items.is_empty() {
             return None;
         }
@@ -904,14 +888,20 @@ impl Ui {
         let (look, states) = (self.theme().toast.idle, self.theme().toast);
         let rh = self.row_height() as f32;
         let mut gone = None;
+        let now = self.now();
         let stack = self.anchored(label, Rect::new(x, h - 12.0, 0.0, 0.0), place, Size::Px(260.0), Size::Fit, &mut |ui| {
             for (i, item) in items.iter().enumerate() {
-                let n = ui.node_keyed(int_key(ui.current_seed(), i as i64), Node { flags: ROW_FLAGS | FIT_TEXT, h: Size::Px(rh + 12.0), look, inset: Edges { l: SIDE as f32, r: SIDE as f32, ..Edges::ZERO }, role: Role::StatusBar, ..Node::DEFAULT });
+                // keyed by text, so dropping one keeps the others' times
+                let n = ui.node_keyed(key_of(ui.current_seed(), item), Node { flags: ROW_FLAGS | FIT_TEXT, h: Size::Px(rh + 12.0), look, inset: Edges { l: SIDE as f32, r: SIDE as f32, ..Edges::ZERO }, role: Role::StatusBar, ..Node::DEFAULT });
                 let s = ui.signal(&n);
                 ui.style(&n, &states, State { hovered: s.hovered, ..State::default() });
                 ui.text(&n, item);
-                if s.clicked {
-                    gone = Some(i);
+                let born = f64::from_bits(ui.state(&n, now.to_bits() as i64) as u64);
+                ui.set_state(&n, born.to_bits() as i64);
+                if s.clicked || now >= born + seconds {
+                    gone = gone.or(Some(i));
+                } else {
+                    ui.repaint_at_time(born + seconds);
                 }
             }
         });
@@ -1026,7 +1016,17 @@ impl Ui {
         let n = self.node(label, Node { w, h, look, padding: Edges::all(1.0), role: Role::Image, ..Node::DEFAULT });
         self.a11y_name(&n, shown(label));
         let image = image.clone();
-        self.canvas(&n, move |p, r| p.image_fit(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0, &image, fit, color::white()));
+        // the picture takes its frame's rounded corners: a round clip inside the frame's border
+        let radius = look.radius.iter().fold(0.0f32, |a, b| a.max(*b)) - 1.0;
+        self.canvas(&n, move |p, r| {
+            let (clip, round) = (p.clip_rect, p.clip_radius);
+            let inner = Rect::new(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0);
+            if radius > 0.0 {
+                (p.clip_rect, p.clip_radius) = (clip.intersect(inner), radius);
+            }
+            p.image_fit(inner.x, inner.y, inner.w, inner.h, &image, fit, color::white());
+            (p.clip_rect, p.clip_radius) = (clip, round);
+        });
         n
     }
 }

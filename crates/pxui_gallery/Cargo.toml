@@ -27,12 +27,10 @@ pxui_render = { path = "../pxui_render" }
 [target.'cfg(target_os = "macos")'.dependencies]
 ogpu_metal = { path = "../ogpu_metal" }
 pxui_sdl = { path = "../pxui_sdl" }
-sdl3 = { path = "../sdl3" }
 
 [target.'cfg(windows)'.dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 pxui_sdl = { path = "../pxui_sdl" }
-sdl3 = { path = "../sdl3" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }

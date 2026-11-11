@@ -26,7 +26,9 @@
 //! - Borders are inside the rect (CSS `box-sizing: border-box`) and composite over the fill. Today's
 //!   kit strokes centre a border of width w on the edge: emit the rect grown by w/2 (radius + w/2).
 //! - Mask glyphs: colour with alpha × R8 coverage. Images: colour (tint) × RGBA texel, straight alpha.
-//!   uv are normalised (0..1) for both atlases. The sampler is nearest/clamp, as today.
+//!   uv are normalised (0..1) for both atlases. Sampling is nearest/clamp; an image with
+//!   [`flags::SMOOTH`] samples linear/clamp (a scaled picture: no texel ties between GPUs, no blocks).
+//!   At 1:1 on whole pixels a sample lands on a texel centre, where linear returns the texel.
 //!
 //! # Instance layout (64 bytes, little-endian; f16 = IEEE half bits, see [`f16`])
 //! | bytes | field         | Rect (0)                  | Mask (1) / Image (2) | Shadow (3)                   | Line (4)              | Arc (5)                   | Curve (6)          |
@@ -39,7 +41,7 @@
 //! | 40–47 | `radii` f16×4 | corners tl tr br bl       | image corners        | caster corners               | –                     | –                         | –                  |
 //! | 48–49 | `width` f16   | border width              | –                    | –                            | stroke width          | stroke width              | stroke width       |
 //! | 50    | `kind` u8     | see [`kind`]                                                                                                                              |||||||
-//! | 51    | `flags` u8    | bits 0–1 gradient (1 linear, 2 radial, 3 conic); bits 4–7 border sides [`flags::TOP`]… | –   | [`flags::INNER`]           | [`flags::ROUND`] caps | [`flags::ROUND`] caps     | (always round)     |
+//! | 51    | `flags` u8    | bits 0–1 gradient (1 linear, 2 radial, 3 conic); bits 4–7 border sides [`flags::TOP`]… | image: [`flags::SMOOTH`] | [`flags::INNER`]           | [`flags::ROUND`] caps | [`flags::ROUND`] caps     | (always round)     |
 //! | 52–53 | `view` u16    | index into the view table; 0 = identity                                                                                                   |||||||
 //! | 54–55 | `clip_radius` f16 | corner radius of `clip`                                                                                                               |||||||
 //! | 56–63 | `extra`       | gradient geometry f16×4   | –                    | offset x y, sigma, spread f16 | –                    | start, sweep f32 (radians, + = clockwise) | control x y f32 |
@@ -156,6 +158,8 @@ pub struct Painter {
     device: Device,
     pipeline: Pipeline,
     sampler: Sampler,
+    /// linear, for `flags::SMOOTH` images (scaled pictures); glyphs and the atlas stay nearest
+    smooth: Sampler,
     mask: Texture,
     color: Texture,
     depth: bool,
@@ -224,15 +228,16 @@ fn atlas(device: &Device, label: &str, format: TextureFormat, (width, height): (
 
 /// (binding, shader kind, layout kind, stage).
 type Slot = (i64, BindingKind, LayoutKind, Stage);
-/// The painter: two vertex storage buffers, two textures, a sampler and the colour atlas again (always
-/// the atlas, for gradient ramps, even inside a break).
-const UI_SLOTS: [Slot; 6] = [
+/// The painter: two vertex storage buffers, two textures, the nearest sampler, the colour atlas again
+/// (always the atlas, for gradient ramps, even inside a break) and the linear sampler (`flags::SMOOTH`).
+const UI_SLOTS: [Slot; 7] = [
     (0, BindingKind::StorageBuffer, LayoutKind::Buffer, Stage::Vertex),
     (1, BindingKind::StorageBuffer, LayoutKind::Buffer, Stage::Vertex),
     (2, BindingKind::SampledTexture, LayoutKind::Texture, Stage::Fragment),
     (3, BindingKind::SampledTexture, LayoutKind::Texture, Stage::Fragment),
     (4, BindingKind::Sampler, LayoutKind::Sampler, Stage::Fragment),
     (5, BindingKind::SampledTexture, LayoutKind::Texture, Stage::Fragment),
+    (6, BindingKind::Sampler, LayoutKind::Sampler, Stage::Fragment),
 ];
 /// The blur: one vertex storage buffer (params), the source texture and a sampler.
 const BLUR_SLOTS: [Slot; 3] = [
@@ -268,17 +273,18 @@ impl Painter {
     /// `color_size` RGBA8 atlas (both zeroed).
     pub fn new(device: &Device, format: ColorFormat, depth: DepthFormat, samples: i64, mask_size: (u32, u32), color_size: (u32, u32)) -> Result<Painter, Error> {
         let pipeline = pipeline(device, format, depth, samples, (MSL, VERT_SPV, FRAG_SPV), ["ui_vertex", "ui_fragment"], &UI_SLOTS, Blend::Alpha)?;
-        let sampler = backend::create_sampler(device, SamplerDescriptor {
-            label: Some("pxui_render".into()), min_filter: SamplerFilter::Nearest, mag_filter: SamplerFilter::Nearest,
+        let filtered = |filter: SamplerFilter| backend::create_sampler(device, SamplerDescriptor {
+            label: Some("pxui_render".into()), min_filter: filter, mag_filter: filter,
             mip_filter: MipFilter::NoMip, address_u: AddressMode::ClampToEdge, address_v: AddressMode::ClampToEdge,
             lod_min: 0.0, lod_max: 0.0, max_anisotropy: 1,
-        })?;
+        });
+        let (sampler, smooth) = (filtered(SamplerFilter::Nearest)?, filtered(SamplerFilter::Linear)?);
         let mask = atlas(device, "pxui_render.mask", TextureFormat::R8Unorm, mask_size)?;
         let color = atlas(device, "pxui_render.color", TextureFormat::Rgba8Unorm, color_size)?;
         let region_size = 4096 * 64;
         let (ring, ring_ptr) = host_ring(device, region_size)?;
         Ok(Painter {
-            device: device.clone(), pipeline, sampler, mask, color, depth: depth != DepthFormat::NoDepth,
+            device: device.clone(), pipeline, sampler, smooth, mask, color, depth: depth != DepthFormat::NoDepth,
             ring, ring_ptr, region_size, region: 0, cursor: 0, retired: Vec::new(),
             views: [View::IDENTITY; MAX_VIEWS], views_len: 1, draw_calls: 0, layers: Vec::new(), retained_bytes: 0, blur: None, retired_textures: Vec::new(),
         })
@@ -362,6 +368,7 @@ impl Painter {
         backend::set_stage_buffer(pass, ShaderStage::Vertex, 1, Some(start as i64), &self.ring)?;
         backend::set_stage_texture(&pass, ShaderStage::Fragment, 2, &self.mask)?;
         backend::set_stage_sampler(pass, ShaderStage::Fragment, 4, &self.sampler)?;
+        backend::set_stage_sampler(pass, ShaderStage::Fragment, 6, &self.smooth)?;
         backend::set_stage_texture(&pass, ShaderStage::Fragment, 5, &self.color)
     }
 
@@ -603,6 +610,7 @@ impl Drop for Painter {
     fn drop(&mut self) {
         let _ = backend::destroy_pipeline(&self.pipeline);
         let _ = backend::destroy_sampler(&self.sampler);
+        let _ = backend::destroy_sampler(&self.smooth);
         let _ = backend::destroy_texture(&self.mask);
         let _ = backend::destroy_texture(&self.color);
         let _ = backend::destroy_buffer(&self.ring);

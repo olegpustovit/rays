@@ -524,7 +524,6 @@ dependencies = [
  "pxui_render",
  "pxui_sdl",
  "pxui_wayland",
- "sdl3",
 ]
 
 [[package]]

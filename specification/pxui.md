@@ -79,7 +79,10 @@ signed-distance fragment stage:
   test biases the sample point by +10⁻³ toward +x/+y, reproducing the
   top-left rule on half-integer edges at every integer density. Rounded
   rects, circles, and borders on them use an anti-aliased rounded-box SDF.
-- **Textured.** Glyphs and images sample one texture with nearest filtering.
+- **Textured.** Glyphs and images sample one texture with nearest filtering; a picture drawn through
+  `Paint::image_fit` or `image_nine` carries `flags::SMOOTH` and samples linearly (a scaled image has
+  no texel ties for GPUs to break differently, and at 1:1 on whole pixels a sample lands on a texel
+  centre, so it equals nearest).
   Instances carry texel coordinates, normalized by the texture's size in the
   fragment stage, so the atlas can grow without invalidating earlier
   instances.
@@ -199,7 +202,13 @@ fonts from bytes into the `Text` it hands `Ui::create` (font 0 is the kit face,
 the bundled Pragmasevka unless `RAYS_UI_FONT` names another); nothing scans the
 system. A text draw or measure is keyed by a hash of its text and style, so an
 unchanged label is a layout-cache hit; `Ui::frame` ends the text frame, which
-drops layouts the frame did not use. A run's first baseline sits the font's
+drops layouts the frame did not use. A layout keeps its glyph list (each glyph's line-relative
+position, subpixel bin and atlas slot, independent of where it is drawn) after its first emission;
+drawing it again at any origin replays the list with the float operations of cosmic-text's
+`physical`, so the quads equal a walk's, with no walk through the layout runs and no glyph-cache
+lookup (a glyph whose bin differs at a fractional origin looks its slot up). The list goes when the
+layout is re-shaped, the density changes or the atlas evicts a shelf; all lists together stop
+growing at `pxui_text::CACHE_BYTES` (4 MiB, `Ui::bytes().glyph_lists`). A run's first baseline sits the font's
 ascent below its top, on a device pixel. Carets, hit tests and selection
 spans of the text widgets come from the same layouts. `Paint::text_styled` and
 `Ui::text_metrics` take any `pxui::text::Style`: wrap, ellipsis, line limit,
@@ -378,11 +387,15 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
 
 - No callback into the platform. Paste arrives as an event the frame after `paste_request`.
 - `repaint_at` is the time of the next needed frame; `Ui::wants_frame(&events, now)` lets a host skip
-  `frame` entirely. Idle costs zero builds, layouts and draws.
+  `frame` entirely. Idle costs zero builds, layouts and draws. A frame is due at once for a held
+  pointer, a running transition or animation, a moving scroll or `request_frame`; at the end of a
+  hover delay; at the earliest `ui.repaint_after(seconds)` / `ui.repaint_at_time(t)` (a timer: the view
+  that asked rebuilds then). Keyboard focus alone asks for nothing (no caret blinks): a focused button
+  or text field idles at zero frames.
 - A target is an image, not a swapchain: `pxui_render::Painter::draw(&mut pass, out.draw)` draws into a
   pass the caller opened (window swapchain image, display buffer, or the pass Rays already has open).
 - There is no `Host` trait. Each host crate (`pxui_sdl`, later `pxui_wayland`) exposes the same functions
-  (`open`, `pump`, `size`, `scale`, `time`, `target`, `apply`); the app links the one it wants.
+  (`open`, `pump`, `wait(deadline)`, `size`, `scale`, `time`, `target`, `apply`); the app links the one it wants.
 - `pxui` may depend only on `input`, `cfmt` and plain types of its own: `Point`, `Rect`, `Edges`,
   `Rgba`, all `f32`. It knows no GPU, window system, `rays`, `param` or `mem`. Memory is reported as bytes
   (`Ui::bytes()`); the embedder charges its own ledger. Enforced by `cargo run -p gate -- deps`.
@@ -417,7 +430,7 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
    `view_offset`, `view_opacity`, `view_clip` change between frames without a rebuild (hit testing and
    `rect` follow; past 255 views the offset is baked by a rebuild). `ui.list(label, count, row_h, f)`
    builds only visible rows plus 4 each side; `ui.verify_views(true)` re-runs clean views and panics
-   naming one whose output changed. `ui.built_nodes()` counts the last build's declared nodes.
+   naming one whose output changed. `ui.built_nodes()` counts the last build's declared nodes, `ui.rebuilt_views()` the views it built rather than kept.
 
 **Styling (P5 commit 2, styling half, landed).** `pxui::theme`: `Tokens` (colour roles, `space`,
 `radius` small/medium/large, type sizes, `motion` fast/normal/slow + cubic-bezier `ease`,
@@ -440,7 +453,7 @@ Vec<ThemeError>>`, `Theme::write`): `tokens.*` keys re-derive the looks, then `P
 `PART.FIELD` keys override them; `crates/pxui/themes/rays.theme` is the default written out and
 `dusk.theme` a second theme (golden `kit_dusk_{1,2}x.png`). Views also take `view_transform` /
 `view_scale` (hit testing through the inverse) and `view_backdrop_blur` (`FrameOut::blurs`, fulfilled by
-the host); `Paint::image_fit`, `image_nine` and `icon` draw images and icon glyphs. Content filters,
+the host); `Paint::image_fit`, `image_nine` and `icon` draw images and icon glyphs; `ui.image` clips its picture to its frame's rounded corners (the largest corner's radius less the border, on the image instance's `clip_radius`). Content filters,
 group opacity, blend modes, 3D transforms, filled paths and a selector engine are left out on purpose.
 
 **Layout (P5, landed).** All plain data on `Node`, no allocation per frame, no selector engine:
@@ -464,9 +477,11 @@ popup at the root (the kit's menus, submenus, completions and tooltips use `plac
 `SCROLL` scrolls down, `SCROLL_X` sideways (wheel and trackpad; a thumb from the node's `bar` on each
 axis; `ui.scroll_offset_x`); a `STICKY` flow child of a scroll box stops at its top and paints over
 its siblings. `CLIP | ROUND_CLIP` rounds the children's clip by the node look's radius (the instance
-`clip_radius`; square `CLIP` stays the default). `ui.set_dir(Direction::Rtl)` mirrors flow children
+`clip_radius`: one radius, the largest corner's, by design: the 64-byte instance has room for one
+f16, so per-corner clip radii are left out; square `CLIP` stays the default). `ui.set_dir(Direction::Rtl)` mirrors flow children
 inside their parents (start padding and `Justify::Start` at the right; text direction is
-cosmic-text's). `ui.split(label, axis, ratio, min_a, min_b, a, b) -> Option<f32>` is two `Grow`
+cosmic-text's; a node's text ends its start inset from the right; content wider than a `SCROLL_X` box starts at
+its right edge, the sideways wheel and fingers move it as they move, and both scroll thumbs mirror). `ui.split(label, axis, ratio, min_a, min_b, a, b) -> Option<f32>` is two `Grow`
 panes weighted `ratio : 1 - ratio` around a 1-point `ui.grip` (presses 3 points either side, resize
 cursor, accent while held), returning the dragged ratio; rays_shell's docked gutters use `ui.grip`.
 Responsive layout is a plain condition on `ui.width()`/`view_size`. The passes are O(nodes) per
@@ -480,11 +495,15 @@ automatic table layout, a selector engine.
 **Accessibility (engine half, landed).** `Node::role` (`a11y::Role`; `Unknown` is not in the tree)
 and `Node::a11y` (widget states: CHECKABLE, CHECKED, EXPANDABLE, EXPANDED, EDITABLE, MULTILINE,
 SELECTED, MODAL), `ui.set_role`, `ui.a11y_name` (the text by default), `ui.a11y_value(h, text,
-selection)`. Each view keeps the slots its last build declared, so the walk after paint reaches a
+selection)`, `ui.a11y_number(h, now, min, max, step)` (`Value::Number`, over the text: the slider, a
+determinate progress bar in percent). Each view keeps the slots its last build declared, so the walk after paint reaches a
 kept view's nodes; nodes with a role are pushed under their nearest pushed ancestor with
 `node_id(slot, generation)`, the resolved rect, FOCUSABLE/FOCUSED/PRESSED/ENABLED/VISIBLE and the
 actions their flags allow. The tree is built only after `ui.set_a11y(true)` (off by default: empty
-tree, no walk); the walk runs on frames that rebuilt a view or moved focus, over every view's nodes.
+tree, no walk); the walk runs on frames that rebuilt a view or moved focus. Each view keeps its run of the published
+tree (nested views inside it): a kept, unmoved, unpatched view's run is copied as it stands (`A11yTree::copy_span`),
+only rebuilt views' nodes are computed (`ui.a11y_written()`); a moved view (`view_offset` and friends) walks
+everything once.
 `FrameOut::a11y` changes `revision` only when the content did (no allocation warm). `ui.inject_a11y(&[A11yAction])` applies next frame as input: Press clicks, Focus
 focuses, Scroll scrolls, SetValue arrives as `Signal::a11y_value` (the text field applies it as one
 change), Expand/Collapse click a disclosure whose state differs. Kit roles: panel/window, dialog,
@@ -508,11 +527,14 @@ Down, Enter, Escape), `tip(&h, text)`, `scroll_view(label, w, h, f)` (both axes)
 `list_view(label, count, multi, &mut [bool], text)`, `tree(label, &[TreeNode], &mut open, &mut selected,
 &mut visible, text)` and `table_view(label, titles, &mut widths, rows, sort, &mut selected, cell)`
 (virtual through `ui.list`; the table's header stays, grips resize columns, a header click is the sort
-intent), `dialog(title, buttons, body) -> DialogOut`, `toasts(label, &[&str])` (the lower end corner;
-the caller owns the timers), `icon_button(label, glyph)`, `badge(label, text) -> Handle`,
+intent), `dialog(title, buttons, body) -> DialogOut`, `toasts(label, &[&str], seconds)` (the lower end corner;
+each goes `seconds` after it first showed, timed by the engine through `repaint_at_time` and keyed by
+its text, and is returned once for the caller to drop), `icon_button(label, glyph)`, `badge(label, text) -> Handle`,
 `search_field(label, icon, value, placeholder)` and `image(label, &Image, Fit, w, h)`. Every widget is
-one Tab stop (`TAB_ONLY`, as the kit's buttons: the pointer does not take the focus, so a click never
-starts the focused-repaint loop); arrows move inside groups and mirror under `Rtl`. Row text is in
+one Tab stop. A click focuses as on macOS: the nearest focusable box at or around the press takes the
+keyboard focus unless it is `TAB_ONLY` (buttons, checkboxes, radios, tabs, segments, dropdowns, menus,
+icon buttons: the kit's buttons and toggles keep that rule); text fields, the search field, the slider
+and the list, tree and table (from a press on a row) take it; arrows move inside groups and mirror under `Rtl`. Row text is in
 leaves as wide as their text, so right to left puts it at the start. `crates/pxui_gallery` shows every
 kit widget on four cached-view pages (`cargo run -p pxui_gallery`) with the Rays and `dusk.theme`
 themes (the file polled once a second through the host's wait and reloaded on a new mtime), density,
