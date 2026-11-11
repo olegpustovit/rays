@@ -542,6 +542,31 @@ pub struct EditorModel {
     /// the active viewport's header: looking through, and its renderer (0 solid, 1 wire, 2 traced);
     /// none for a 2D view
     pub view_tools: Option<(bool, i64)>,
+    /// revisions of what the panels read (see `Revs`)
+    pub revs: Revs,
+}
+
+/// Revisions of what the panels read, bumped where the data changes: a cached view keys on these
+/// numbers, never on the data. `doc` by `set_doc`; `laid` where a graph pane lays its graph out
+/// (`editor_scope`); `views` where the zone probes, the viewport previews or the canvas preview change;
+/// `panel` is the camera panel's, set by the host loop each frame (none while a sketch builds its own
+/// widgets there: they have no revision, so the inspector is built every frame).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Revs {
+    pub doc: u64,
+    pub laid: u64,
+    pub views: u64,
+    pub panel: Option<u64>,
+}
+
+impl EditorModel {
+    /// The one way the document changes: a different snapshot bumps `revs.doc`.
+    pub fn set_doc(&mut self, doc: Arc<Document>) {
+        if !Arc::ptr_eq(&self.doc, &doc) {
+            self.revs.doc += 1;
+        }
+        self.doc = doc;
+    }
 }
 
 /// A frame reads the shared model with the pane and transient UI state it is showing.

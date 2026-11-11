@@ -95,6 +95,9 @@ pub fn sync_views(value: &mut EditorModel) {
     };
     let evaluated = lowered.evaluated.clone();
     value.view_key = Some((evaluated, value.probes.clone(), previews.clone(), canvas_preview.clone()));
+    if value.previews != previews || value.canvas_preview != canvas_preview {
+        value.revs.views += 1;
+    }
     value.previews = previews;
     value.viewed = viewed;
     value.canvas_preview = canvas_preview;
@@ -118,6 +121,7 @@ pub fn view_node(value: &mut EditorModel, path: &[Symbol]) {
     match owner {
         Some(owner) => {
             value.previews.insert(owner, Preview { path: path.to_vec(), chain });
+            value.revs.views += 1;
             sync_views(value)
         }
         None => {
@@ -411,6 +415,7 @@ pub fn sync_scope(value: &mut EditorModel) {
         fresh_last: fresh,
     };
     pane_mut(value).laid = Some(Rc::new(key));
+    value.revs.laid += 1;
 }
 
 fn node_owner<'a>(value: &ModelView<'a>, node_id: i64) -> Option<i64> {

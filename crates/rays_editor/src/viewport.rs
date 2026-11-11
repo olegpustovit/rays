@@ -549,6 +549,34 @@ pub fn panel(ui: &mut Ui, control_: &Control, camera_: &Camera, extra_: &Extra, 
     PanelOut { control: control_out, camera: camera_out, requests, extra: next, inspected }
 }
 
+/// What `panel` shows of its inputs: the control, the camera's shown fields, the viewport switches
+/// and the scene root. Compared frame to frame by `panel_revision`.
+#[derive(Clone, PartialEq)]
+pub struct PanelKey {
+    control: Control,
+    camera: [u64; 4],
+    inertia: bool,
+    look: bool,
+    following: Option<bool>,
+    show: Show,
+    root: root::Parameters,
+}
+
+/// The camera panel's revision: `seen` keeps what the panel showed and its number, bumped when the
+/// panel would show something else (compared in place; copied only on a change).
+pub fn panel_revision(seen: &mut Option<(PanelKey, u64)>, control_: &Control, camera_: &Camera, extra_: &Extra) -> u64 {
+    let camera = [easy_camera::fov_y(camera_).to_bits(), easy_camera::distance(camera_).to_bits(), easy_camera::near(camera_).to_bits(), easy_camera::far(camera_).to_bits()];
+    let (inertia, look) = (easy_camera::inertia(camera_), look_through(extra_));
+    let same = seen.as_ref().is_some_and(|(k, _)| {
+        k.camera == camera && k.inertia == inertia && k.look == look && k.following == extra_.following && k.show == extra_.show && k.control == *control_ && k.root == extra_.root
+    });
+    if !same {
+        let next = seen.as_ref().map_or(0, |(_, rev)| rev + 1);
+        *seen = Some((PanelKey { control: control_.clone(), camera, inertia, look, following: extra_.following, show: extra_.show, root: extra_.root.clone() }, next));
+    }
+    seen.as_ref().map_or(0, |(_, rev)| *rev)
+}
+
 /// The values serialized by `section`, without constructing a syntax arena on an idle poll.
 pub fn section_key(camera_: &Camera, extra_: &Extra) -> ([u64; 7], bool, renderer::Mode) {
     let camera = easy_camera::camera(camera_).expect("viewport form");

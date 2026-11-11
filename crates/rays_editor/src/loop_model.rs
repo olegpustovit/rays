@@ -134,6 +134,8 @@ pub struct LoopModel {
     pub host: Rc<std::cell::RefCell<workspace_host::WorkspaceHost>>,
     /// when this frame's update ended, and the meshes it draws for the first time
     pub presenting: Option<(f64, Vec<rdk_core::geometry::T>)>,
+    /// what the camera panel last showed, and its revision (`viewport::panel_revision`)
+    pub panel_seen: Option<(V::PanelKey, u64)>,
 }
 
 /// Scene objects a sketch starts with: its lights as light objects.
@@ -245,6 +247,7 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
             let opened = document::text(&core.doc);
             let saved_doc = std::sync::Arc::downgrade(&core.doc);
             Ok(LoopModel {
+                panel_seen: None,
                 core: Rc::new(core),
                 rest: None,
                 camera,
@@ -349,6 +352,7 @@ pub fn with_core(value: LoopModel, core: m::EditorModel) -> LoopModel {
 pub fn set_probe(value: LoopModel, zone: &[Symbol], index: i64) -> LoopModel {
     let mut core = (*value.core).clone();
     core.probes.insert(zone.to_vec(), index);
+    core.revs.views += 1;
     with_core(value, core)
 }
 

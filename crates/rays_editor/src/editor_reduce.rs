@@ -1156,7 +1156,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     };
     let value2 = owned;
     value2.timeline_frames = timeline_frames;
-    value2.doc = doc.clone();
+    value2.set_doc(doc.clone());
     value2.lisp_vocab = vocab;
     value2.workspace = workspace;
     pane_mut(value2).at = level;
@@ -1182,7 +1182,10 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     value2.menu = result.menu.clone();
     value2.tree = result.tree.clone();
-    value2.probes = probes;
+    if value2.probes != probes {
+        value2.revs.views += 1;
+        value2.probes = probes;
+    }
     value2.open_import = scope_changes
         .iter()
         .find_map(|c| match c {
@@ -1416,7 +1419,7 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &EditorM
             hint: None,
             preview: Some(CarryPreview::Showing { place: carry_mod::Place::Graph(String::new()), doc: doc.clone(), what: String::new() }),
         });
-        value.doc = doc;
+        value.set_doc(doc);
     }
     let selection = match select {
         Some(ids) => selection::select_nodes(ids),

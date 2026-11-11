@@ -268,6 +268,7 @@ pub fn create(opts: CreateOpts, workspace: &workspace_doc::T, prepare: cook::Pre
         clock,
         traces: Vec::new(),
         view_tools: None,
+        revs: Revs::default(),
         gates: Vec::new(),
         selected_box: None,
         file,

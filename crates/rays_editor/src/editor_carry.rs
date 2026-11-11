@@ -163,7 +163,7 @@ pub fn carry_cancel(value: &mut EditorModel, c: &Carry, notice: (NoticeKind, Str
     }
     value.carry = None;
     value.workspace = unrestore(&value.doc, &doc, value.workspace.clone());
-    value.doc = doc;
+    value.set_doc(doc);
     value.notice = Some(notice);
     pane_mut(value).at = level;
 }
@@ -307,7 +307,7 @@ pub fn carry_step<'a>(value: &mut EditorModel, text_focus: bool, frame_: &'a fra
     let level = document::resolve_level(&shown, pane_level(&(&*value).into()));
     value.lisp_vocab = vocabulary_for(value, &shown);
     value.workspace = unrestore(&value.doc, &shown, value.workspace.clone());
-    value.doc = shown;
+    value.set_doc(shown);
     pane_mut(value).at = level;
     (taken, true)
 }

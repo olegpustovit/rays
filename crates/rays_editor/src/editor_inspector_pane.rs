@@ -79,14 +79,38 @@ pub fn inspect_panel<'a>(
         bounds
     };
     let width = bounds.2.max(1) as f32;
+    // The inspector is one cached view keyed by the revisions of what it reads: the document, the laid
+    // out graph and its probe records, the zone probes and previews, the cook's results, the camera
+    // panel's inputs, the selection and the image it previews (that image's identity and generation,
+    // re-read every frame: a traced or animated image changes without the document). Input on its
+    // boxes rebuilds it, and its intents arrive on that frame; a kept frame hands back no requests.
+    // While a payload is carried, or a sketch builds its own widgets under the camera panel (no
+    // revision), it is built every frame.
+    let previewed = ui.state(inspector_root, -1);
+    let preview_key = (previewed >= 0).then(|| image(previewed)).flatten().map(|im| (rays::image::identity(&im), rays::image::generation(&im)));
+    // the cook's results show only for a selected node (its counts, its compiled arguments)
+    let cook_rev = if selected_ids.is_empty() && scope_selected.is_empty() { 0 } else { value.cook.results };
+    let revision = rays_shell::kit::revision(&|h| {
+        use std::hash::Hash;
+        let level_key = match level {
+            Level::Scene => (0u8, 0i64),
+            Level::Inside(id) => (1, id),
+        };
+        (value.revs, cook_rev, preview_key, inspector_visible, window, bounds, scope_active, value.live_cook).hash(h);
+        (level_key, &pane(value).shown, selected_ids.as_slice(), selection_.primary, &scope_view.selected, value.carry.is_some()).hash(h);
+    });
+    let cacheable = value.revs.panel.is_some() && value.carry.is_none();
+    let shown_image: std::cell::Cell<Option<i64>> = std::cell::Cell::new(None);
+    let image_seen = |id: i64| {
+        let im = image(id);
+        if im.is_some() {
+            shown_image.set(Some(id));
+        }
+        im
+    };
+    let image: &dyn Fn(i64) -> Option<rays::image::Image> = &image_seen;
     let mut result: Option<InspectorResult> = None;
-    // ponytail: the inspector builds at the root every frame, not in a cached view. Hidden inputs no
-    // model revision covers: the sketch's `camera_panel` returns its PanelResult only when built, the
-    // probe records (`laid.records`) are read through `borrow_mut` with the cook's live readouts, and
-    // `image` previews come from the renderer. Cache it once the cook carries a result revision and
-    // the panel result is kept with the view.
-    on_sheet(ui, window, &mut |ui| {
-        ui.within(inspector_root, &mut |ui| {
+    let mut build = |ui: &mut Ui| {
             let out: InspectorResult = if !inspector_visible {
                 (None, vec![], vec![], value.live_cook, vec![], vec![])
             } else if !scope_selected.is_empty() {
@@ -202,9 +226,25 @@ pub fn inspect_panel<'a>(
                 (None, changes, vec![], value.live_cook, vec![], vec![])
             };
             result = Some(out);
+    };
+    let mut built = false;
+    on_sheet(ui, window, &mut |ui| {
+        ui.within(inspector_root, &mut |ui| {
+            if cacheable {
+                rays_shell::kit::cached(ui, "inspector-view", revision, &mut |ui| {
+                    built = true;
+                    build(ui);
+                });
+            } else {
+                built = true;
+                build(ui);
+            }
         });
     });
-    result.expect("inspector drawn")
+    if built {
+        ui.set_state(inspector_root, shown_image.get().unwrap_or(-1));
+    }
+    result.unwrap_or_else(|| (None, vec![], vec![], value.live_cook, vec![], vec![]))
 }
 
 /// `workspace_inspector` for a node of the graph pane, gathering the places the choice controls

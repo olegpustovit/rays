@@ -70,7 +70,7 @@ pub fn scene_edit(value: &mut EditorModel, mode: SceneMode, active_camera: Optio
             };
             // camera bookkeeping is not unsaved work: a document that was the file's still is
             let filed = if same_text(&value.doc, &value.filed) { document::text(&doc) } else { value.filed.clone() };
-            value.doc = doc;
+            value.set_doc(doc);
             value.history = history;
             value.filed = filed;
         }
@@ -102,7 +102,7 @@ pub fn set_settings(value: &mut EditorModel, new_settings: &settings::T) {
             let doc = adopt(&value.history, Arc::new(doc));
             let history = commit(&doc, Some("Settings"), None, value.history.clone());
             value.cook = std::rc::Rc::new(cook::force(&value.cook));
-            value.doc = doc;
+            value.set_doc(doc);
             value.history = history;
         }
     }
@@ -122,7 +122,7 @@ pub fn set_root(value: &mut EditorModel, root: &objects::root::Parameters) {
         Ok(Some((doc, _))) => {
             let doc = adopt(&value.history, Arc::new(doc));
             let history = commit(&doc, Some("Render settings"), Some(Merge::Gesture("render settings".to_string())), value.history.clone());
-            value.doc = doc;
+            value.set_doc(doc);
             value.history = history;
         }
     }
@@ -213,7 +213,7 @@ pub fn edit_node(value: &mut EditorModel, level: Level, node_id: i64, values: &[
         let doc = adopt(&value.history, Arc::new(doc));
         cook::set_volatile(&value.cook, flow_sop::lower::is_volatile(&doc.workspace.lowered));
         let history = commit(&doc, Some(label), Some(Merge::Gesture(parameter_gesture(label, level, node_id, values))), value.history.clone());
-        value.doc = doc;
+        value.set_doc(doc);
         value.history = history;
     };
     let failed = |value: &mut EditorModel, message: String| {
@@ -366,6 +366,7 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut EditorModel, origin: vec3
                     }
                     let in_pane = root == laid_graph(&*value);
                     value.probes = probes;
+                    value.revs.views += 1;
                     value.select_later = if in_pane { Vec::new() } else { vec![shown.clone()] };
                     if in_pane { rays_graph::scope_state::select(vec![shown.clone()], &mut pane_mut(value).view); };
                 }

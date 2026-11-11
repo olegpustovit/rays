@@ -55,7 +55,7 @@ pub fn install(value: &mut EditorModel, doc: Document, label: &str, merge: Merge
     let level = document::resolve_level(&doc, pane_level(&(&*value).into()));
     value.lisp_vocab = vocabulary_for(value, &doc);
     value.workspace = unrestore(&value.doc, &doc, value.workspace.clone());
-    value.doc = doc.clone();
+    value.set_doc(doc.clone());
     cook::set_volatile(&value.cook, flow_sop::lower::is_volatile(&doc.workspace.lowered));
     value.history = commit(&doc, Some(label), Some(merge), value.history.clone());
     let pane = crate::panel_map::active_mut(&mut value.panes);
@@ -121,6 +121,7 @@ pub fn select_source(value: &mut EditorModel, path: &[Symbol]) {
     let found = pane_laid(&(&*value).into()).is_some_and(|k| k.graph == graph.as_str() && (fproj::find(&k.scope, path).is_some() || k.scope.inputs.iter().any(|input| input.path == path)));
     if !found && path.len() > 1 {
         *crate::panel_map::active_mut(&mut value.panes) = previous.0;
+        value.revs.views += 1;
         value.previews = previous.1;
         value.viewed = previous.2;
         value.canvas_preview = previous.3;

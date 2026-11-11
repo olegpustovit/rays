@@ -172,6 +172,9 @@ pub struct Cook {
     pub summaries: Vec<Summary>,
     /// same bounded optional cook targets as summaries
     pub sources: Vec<Source>,
+    /// bumped each time a cook publishes: a completed or awaited job, a recompiled or re-resolved
+    /// graph, a changed error. What a cached view of the results keys on.
+    pub results: u64,
 }
 
 pub struct UpdateResult {
@@ -295,6 +298,7 @@ pub fn create(
         quiet: 0,
         summaries: Vec::new(),
         sources: Vec::new(),
+        results: 0,
     })
 }
 
@@ -809,7 +813,10 @@ pub fn update(
             }
         }
     };
+    let resolved_again = applied.len() != value.applied.len() || applied.iter().zip(value.applied.iter()).any(|((a, r), (b, s))| a != b || !edit_graph::ptr_eq(&r.geometry, &s.geometry));
+    let published = completed || changed || resolved_again || prepared_changed || error != value.error || seconds != value.seconds;
     let cook = Cook {
+        results: value.results + u64::from(published),
         schedule,
         pieces,
         settings: Some(settings.clone()),
