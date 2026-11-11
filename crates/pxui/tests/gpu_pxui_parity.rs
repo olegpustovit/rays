@@ -10,6 +10,9 @@ mod run;
 #[path = "cases/support.rs"]
 #[allow(dead_code)]
 mod support;
+#[path = "cases/widgets.rs"]
+#[allow(dead_code)]
+mod widgets;
 
 fn main() {
     run::run(gpu_parity::CASES);

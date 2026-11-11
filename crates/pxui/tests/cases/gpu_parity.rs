@@ -341,7 +341,36 @@ fn gpu_round_clip() {
     println!("PXUI round clip: corners cut");
 }
 
+/// One draw call per layer for a frame of every new widget (the menu bar open and the toasts up:
+/// overlays in the base layer, clips in the instances).
+fn gpu_widgets_draw_calls() {
+    if !gpu::available() {
+        return;
+    }
+    use crate::widgets::{all, S, H, W};
+    let mut s = S::new();
+    s.toasts = 2;
+    let mut ui = Ui::create(Platform::Apple, None, crate::support::golden_text());
+    let at = |count: i64, events: Vec<Event>| {
+        let mut f = frame_at(count, H, 2);
+        f.input.size = (W, H);
+        f.input.events = events;
+        f
+    };
+    let file = (20.0, 12.0);
+    for (count, events) in [(0, vec![]), (1, vec![]), (2, vec![Event::PointerMoved(file)]), (3, vec![Event::PointerPressed(input::MouseButton::LeftButton, file)]), (4, vec![Event::PointerReleased(input::MouseButton::LeftButton, file)]), (5, vec![])] {
+        ui.frame(&at(count, events), &mut |ui| all(ui, &mut s));
+    }
+    let layers = ui.output().draw.len() as u64;
+    let (pixels, calls) = gpu::render(&mut ui, (W as u32, H as u32), 2, [228, 139, 161, 255]);
+    assert!(calls == layers, "{layers} layers drew in {calls} draw calls");
+    assert!(pixels.chunks(4).any(|p| p[..3] != [228, 139, 161]), "nothing drawn");
+    ui.destroy();
+    println!("PXUI widgets: {layers} layers, {calls} draw calls");
+}
+
 pub const CASES: &[(&str, fn())] = &[
+    ("gpu_widgets_draw_calls", gpu_widgets_draw_calls),
     ("gpu_round_clip", gpu_round_clip),
     ("gpu_patch", gpu_patch),
     ("gpu_view_kept_pixels", gpu_view_kept_pixels),
