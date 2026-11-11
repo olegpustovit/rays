@@ -534,6 +534,11 @@ struct ViewRec {
     blur: f32,
     /// when its last build asked to be rebuilt (`Ui::repaint_after`; infinity: never)
     wake: f64,
+    /// its nodes' run in the published accessibility tree (nested views inside it), valid while
+    /// `a11y_gen` is the tree's, and the shift its rects were taken under
+    a11y_span: (u32, u32),
+    a11y_gen: u64,
+    a11y_shift: (f32, f32),
     /// the composed entry and the screen rectangle it shows
     shift: (f32, f32),
     alpha: f32,
@@ -581,6 +586,9 @@ impl ViewRec {
             pivot: (0.0, 0.0),
             blur: 0.0,
             wake: f64::INFINITY,
+            a11y_span: (0, 0),
+            a11y_gen: 0,
+            a11y_shift: (0.0, 0.0),
             shift: (0.0, 0.0),
             alpha: 1.0,
             outer: UNBOUNDED,
@@ -971,6 +979,11 @@ pub struct Ui {
     /// something the tree shows may have changed outside the root's build (a view built, moved or
     /// was patched, an action came in), and the focus and capture the last walk saw
     a11y_dirty: bool,
+    /// the published tree's generation (views' spans in it are valid while theirs matches), a
+    /// change no span can carry (a view moved), and the nodes the last walk computed (not copied)
+    a11y_gen: u64,
+    a11y_full: bool,
+    a11y_written: usize,
     a11y_on: bool,
     timing: bool,
     a11y_seen: (i64, Option<i64>),
@@ -1167,6 +1180,9 @@ impl Ui {
             a11y_map: Vec::new(),
             a11y_pending: Vec::new(),
             a11y_dirty: true,
+            a11y_gen: 1,
+            a11y_full: true,
+            a11y_written: 0,
             a11y_on: false,
             timing: false,
             a11y_seen: (0, None),
@@ -1454,7 +1470,7 @@ impl Ui {
     pub fn set_a11y(&mut self, on: bool) {
         if on != self.a11y_on {
             self.a11y_on = on;
-            self.a11y_dirty = true;
+            (self.a11y_dirty, self.a11y_full) = (true, true);
             if !on {
                 (self.a11y, self.a11y_next) = (A11yTree::new(), A11yTree::new());
             }
@@ -1481,17 +1497,52 @@ impl Ui {
         if map.len() < self.slots.len() {
             map.resize(self.slots.len(), NO_PARENT);
         }
+        self.a11y_written = 0;
         self.emit_view(&mut t, &mut map, 0);
         if t.nodes != self.a11y.nodes || t.strings != self.a11y.strings {
             t.revision = self.a11y.revision;
             t.end();
             std::mem::swap(&mut t, &mut self.a11y);
         }
+        // the spans recorded this walk hold in the published tree (it equals the walk's when unchanged)
+        (self.a11y_gen, self.a11y_full) = (self.a11y_gen + 1, false);
         self.a11y_next = t;
         self.a11y_map = map;
     }
 
+    /// Nodes the last accessibility walk computed; a kept view's nodes are copied from the published
+    /// tree, not counted.
+    pub fn a11y_written(&self) -> usize {
+        self.a11y_written
+    }
+
     fn emit_view(&mut self, t: &mut A11yTree, map: &mut [u32], v: u32) {
+        let next_gen = self.a11y_gen + 1;
+        let r = &self.views[v as usize];
+        let shift = self.views[r.xf as usize].shift;
+        if v != 0 && r.built != self.frame_number && r.a11y_gen == self.a11y_gen && r.a11y_shift == shift && !self.a11y_full {
+            // kept and unmoved: its run of the published tree, nested views included, as it was
+            let (s0, s1) = r.a11y_span;
+            let base = t.nodes.len() as u32;
+            t.copy_span(&self.a11y, s0..s1, map[r.slot]);
+            for w in self.views.iter_mut().skip(1) {
+                if w.a11y_gen == self.a11y_gen && w.a11y_span.0 >= s0 && w.a11y_span.1 <= s1 {
+                    w.a11y_span = (w.a11y_span.0 - s0 + base, w.a11y_span.1 - s0 + base);
+                    w.a11y_gen = next_gen;
+                }
+            }
+            let r = &mut self.views[v as usize];
+            (r.a11y_span, r.a11y_gen) = ((base, base + (s1 - s0)), next_gen);
+            return;
+        }
+        let start = t.nodes.len() as u32;
+        self.emit_nodes(t, map, v);
+        let end = t.nodes.len() as u32;
+        let r = &mut self.views[v as usize];
+        (r.a11y_span, r.a11y_gen, r.a11y_shift) = ((start, end), next_gen, shift);
+    }
+
+    fn emit_nodes(&mut self, t: &mut A11yTree, map: &mut [u32], v: u32) {
         for k in 0..self.views[v as usize].nodes.len() {
             let slot = self.views[v as usize].nodes[k];
             let s = &self.slots[slot];
@@ -1543,6 +1594,7 @@ impl Ui {
                 t.set_states(i, states);
                 t.set_actions(i, acts);
                 map[slot] = i;
+                self.a11y_written += 1;
             }
             let held = self.slots[slot].view;
             if held != NO_VIEW && held != v {
@@ -5114,6 +5166,7 @@ impl Ui {
         self.draw[layer] = target;
         self.patch_layers = scratch;
         self.views[owner as usize].patched = true;
+        self.views[owner as usize].a11y_gen = 0;
         self.draw_revision += 1;
         self.a11y_dirty = true;
         true
@@ -5819,7 +5872,7 @@ impl Ui {
     /// A view's entry changed: between frames the table and the damage update now; a view with no
     /// table index bakes its offset into layout, so it rebuilds next frame.
     fn view_changed(&mut self, v: u32) {
-        self.a11y_dirty = true;
+        (self.a11y_dirty, self.a11y_full) = (true, true);
         if self.views[v as usize].index == 0 {
             // ponytail: past 255 views the offset is baked by a rebuild (opacity and clip are not
             // applied); a larger table or nested tables if that many views move.

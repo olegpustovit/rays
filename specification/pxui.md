@@ -499,7 +499,10 @@ determinate progress bar in percent). Each view keeps the slots its last build d
 kept view's nodes; nodes with a role are pushed under their nearest pushed ancestor with
 `node_id(slot, generation)`, the resolved rect, FOCUSABLE/FOCUSED/PRESSED/ENABLED/VISIBLE and the
 actions their flags allow. The tree is built only after `ui.set_a11y(true)` (off by default: empty
-tree, no walk); the walk runs on frames that rebuilt a view or moved focus, over every view's nodes.
+tree, no walk); the walk runs on frames that rebuilt a view or moved focus. Each view keeps its run of the published
+tree (nested views inside it): a kept, unmoved, unpatched view's run is copied as it stands (`A11yTree::copy_span`),
+only rebuilt views' nodes are computed (`ui.a11y_written()`); a moved view (`view_offset` and friends) walks
+everything once.
 `FrameOut::a11y` changes `revision` only when the content did (no allocation warm). `ui.inject_a11y(&[A11yAction])` applies next frame as input: Press clicks, Focus
 focuses, Scroll scrolls, SetValue arrives as `Signal::a11y_value` (the text field applies it as one
 change), Expand/Collapse click a disclosure whose state differs. Kit roles: panel/window, dialog,

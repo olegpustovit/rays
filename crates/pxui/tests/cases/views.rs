@@ -341,6 +341,16 @@ pub fn window_pxui_budget_counts() {
         }
     });
     check(n == 0, &format!("{n} allocations in 20 one-view rebuilds with the tree on"));
+    // a one-view rebuild computes that view's 50 nodes; the nine kept views keep their runs
+    check(ui.a11y_written() == 50, &format!("a one-view rebuild computed {} accessible nodes", ui.a11y_written()));
+    let (nodes, strings, revision) = (ui.output().a11y.nodes.clone(), ui.output().a11y.strings.clone(), ui.output().a11y.revision);
+    step(&mut ui, true);
+    check(ui.output().a11y.revision == revision, "an unchanged rebuild bumped the revision");
+    // the incremental tree is the tree a full walk builds
+    ui.set_a11y(false);
+    ui.set_a11y(true);
+    step(&mut ui, false);
+    check(ui.a11y_written() == 500 && ui.output().a11y.nodes == nodes && ui.output().a11y.strings == strings, "a full walk differs from the incremental tree");
     ui.destroy();
 }
 
