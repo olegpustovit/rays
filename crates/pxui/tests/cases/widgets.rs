@@ -329,6 +329,13 @@ fn widgets_tabs_segmented() {
     tab_to(&mut ui, &mut s, 2.0, Role::TabList, "Tabs");
     keys(&mut ui, &mut s, 3.0, &[Key::ArrowRight]);
     check(s.tab == 0, "Right wraps to Alpha");
+    // on the release frame itself only the clicked tab reads as selected (no stale Alpha)
+    let p = centre(&node(&ui, Role::Tab, "Gamma"));
+    for (i, e) in [vec![move_to(p)], vec![press(p)], vec![release(p)]].into_iter().enumerate() {
+        ui.frame(&at(3.5 + i as f64 * 0.05, e), &mut |ui| all(ui, &mut s));
+    }
+    let selected: Vec<_> = ["Alpha", "Beta", "Gamma"].into_iter().filter(|t| node(&ui, Role::Tab, t).states & state::SELECTED != 0).collect();
+    check(s.tab == 2 && selected == ["Gamma"], &format!("the release frame's selection: {selected:?}"));
     { let p = centre(&node(&ui, Role::Radio, "B")); click(&mut ui, &mut s, 4.0, p); }
     check(s.seg == 1, "a click picks segment B");
     tab_to(&mut ui, &mut s, 5.0, Role::Group, "Mode");

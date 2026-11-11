@@ -305,6 +305,7 @@ impl Ui {
             k => sel = wrap(sel, self.along(k), tabs.len()),
         });
         let saved = self.enter(&bar);
+        let (before, mut old) = (sel, None);
         for (i, tab) in tabs.iter().enumerate() {
             let w = self.text_width(None, tab);
             let n = self.node_keyed(int_key(bar.box_key, i as i64), Node { flags: ROW_FLAGS, w: Size::Px(w), h: Size::Grow, role: Role::Tab, ..Node::DEFAULT });
@@ -312,9 +313,18 @@ impl Ui {
             if ts.clicked {
                 sel = i;
             }
-            self.style(&n, &states, State { hovered: ts.hovered, pressed: ts.held, checked: sel == i, ..State::default() });
+            let state = State { hovered: ts.hovered, pressed: ts.held, ..State::default() };
+            if i == before {
+                old = Some((n, state));
+            }
+            self.style(&n, &states, State { checked: sel == i, ..state });
             self.set_role(&n, Role::Tab, st::SELECTABLE | if sel == i { st::SELECTED } else { 0 });
             self.text(&n, tab);
+        }
+        // a click on a later tab unselects the earlier one in this frame, not the next
+        if let Some((n, state)) = old.filter(|_| sel != before) {
+            self.style(&n, &states, state);
+            self.set_role(&n, Role::Tab, st::SELECTABLE);
         }
         self.leave(saved);
         sel
