@@ -205,6 +205,9 @@ pub const STICKY: Flags = 65536;
 /// with `CLIP`: the children's clip takes the corner radius of the node's look (CSS `overflow:
 /// hidden` with `border-radius`); without it a clip is square
 pub const ROUND_CLIP: Flags = 131072;
+/// Nothing the node's view builds follows its hover: the pointer moving onto or off it dirties no
+/// view (the app reads `hovered_within` between frames and patches what shows it).
+pub const HOVER_FREE: Flags = 262144;
 const HIT_FLAGS: Flags = CLICKABLE | FOCUSABLE | SCROLL | SCROLL_X | BLOCKING | CAPTURE_UNCLAIMED;
 
 /// What a carry holds: a `kind` and a `value`, both strings.
@@ -559,10 +562,12 @@ struct ViewRec {
     offset: (f32, f32),
     opacity: f32,
     clip: Option<Rect>,
-    /// its 2D transform about `pivot` (from its box's corner) and its backdrop blur (0: none)
+    /// its 2D transform about `pivot` (from its box's corner, or a window point with `pivot_fixed`)
+    /// and its backdrop blur (0: none)
     scale: f32,
     transform: [f32; 4],
     pivot: (f32, f32),
+    pivot_fixed: bool,
     blur: f32,
     /// when its last build asked to be rebuilt (`Ui::repaint_after`; infinity: never)
     wake: f64,
@@ -625,6 +630,7 @@ impl ViewRec {
             scale: 1.0,
             transform: [1.0, 0.0, 0.0, 1.0],
             pivot: (0.0, 0.0),
+            pivot_fixed: false,
             blur: 0.0,
             wake: f64::INFINITY,
             a11y_span: (0, 0),
@@ -721,7 +727,7 @@ impl ViewRec {
     fn own_entry(&self) -> ViewEntry {
         let c = clip_of(self.outer);
         let b = self.built_rect;
-        let pivot = [b.x + self.shift.0 + self.pivot.0, b.y + self.shift.1 + self.pivot.1];
+        let pivot = if self.pivot_fixed { [self.pivot.0, self.pivot.1] } else { [b.x + self.shift.0 + self.pivot.0, b.y + self.shift.1 + self.pivot.1] };
         ViewEntry {
             offset: [self.shift.0, self.shift.1],
             opacity: self.alpha,
@@ -1531,6 +1537,13 @@ impl Ui {
         self.rebuilt
     }
 
+    /// The view being built is clean and runs again only to be checked (`verify_views`): a build
+    /// that reads state its revision leaves out (a pan the view's offset shows) reads it as of the
+    /// kept build.
+    pub fn verifying(&self) -> bool {
+        self.building && self.view_cur != 0 && self.views[self.view_cur as usize].verify
+    }
+
     /// Declare what a node built this frame is to a screen reader, and the states its widget knows
     /// (`a11y::state` bits).
     pub fn set_role(&mut self, b: &Handle, role: Role, states: u32) {
@@ -2071,8 +2084,10 @@ impl Ui {
             return false;
         }
         if self.chain_key != key {
-            let mut chain = Vec::new();
-            self.hit_ancestors(key, &mut |k| chain.insert(0, k));
+            // the kept list, refilled: a hover moving between nodes allocates nothing
+            let mut chain = std::mem::take(&mut self.chain);
+            chain.clear();
+            self.hit_ancestors(key, &mut |k| chain.push(k));
             self.chain_key = key;
             self.chain = chain;
         }
@@ -6219,8 +6234,10 @@ impl Ui {
     /// nothing is rebuilt or rewritten. Hit testing and `rect` follow it.
     pub fn view_offset(&mut self, b: &Handle, dx: f32, dy: f32) {
         if let Some(v) = self.view_id(b) {
-            self.views[v as usize].offset = (dx, dy);
-            self.view_changed(v);
+            if self.views[v as usize].offset != (dx, dy) {
+                self.views[v as usize].offset = (dx, dy);
+                self.view_changed(v);
+            }
         }
     }
 
@@ -6248,8 +6265,21 @@ impl Ui {
     pub fn view_transform(&mut self, b: &Handle, scale: f32, transform: [f32; 4], pivot: (f32, f32)) {
         if let Some(v) = self.view_id(b) {
             let r = &mut self.views[v as usize];
-            (r.scale, r.transform, r.pivot) = (scale, transform, pivot);
+            (r.scale, r.transform, r.pivot, r.pivot_fixed) = (scale, transform, pivot, false);
             self.view_changed(v);
+        }
+    }
+
+    /// `view_transform` about the window point `pivot`, which stays put when the view moves: about
+    /// `(0, 0)` with the move in `view_offset`, a scale of one leaves every point exact (the painter
+    /// maps `pivot + scale * (p - pivot)` in floats). Unchanged values change nothing.
+    pub fn view_transform_about(&mut self, b: &Handle, scale: f32, transform: [f32; 4], pivot: (f32, f32)) {
+        if let Some(v) = self.view_id(b) {
+            let r = &mut self.views[v as usize];
+            if (r.scale, r.transform, r.pivot, r.pivot_fixed) != (scale, transform, pivot, true) {
+                (r.scale, r.transform, r.pivot, r.pivot_fixed) = (scale, transform, pivot, true);
+                self.view_changed(v);
+            }
         }
     }
 
@@ -6332,8 +6362,14 @@ impl Ui {
         marks.extend(self.signals.keys().copied());
         let (hot, focus, keyboard, carrying) = self.seen;
         let now = (self.hot, self.focus, self.keyboard_focus, self.payload.is_some());
-        if now.0 != hot || now.3 != carrying {
+        if now.3 != carrying {
             marks.extend([hot, now.0]);
+        } else if now.0 != hot {
+            for key in [hot, now.0] {
+                if !self.table.find(key).is_some_and(|slot| self.slots[slot].node.flags & HOVER_FREE != 0) {
+                    marks.push(key);
+                }
+            }
         }
         if now.1 != focus || now.2 != keyboard {
             marks.push(focus);

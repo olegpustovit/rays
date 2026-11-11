@@ -241,6 +241,10 @@ pub struct Pane {
     pub pan_x: f64,
     pub pan_y: f64,
     pub zoom: f64,
+    /// the frame time of the last zoom step: the zoom rests 0.1 s after it
+    pub zoom_t: f64,
+    /// the frame time of the last frame whose canvas input or keys the cached view's build takes
+    pub busy_t: f64,
     pub selected: PathSet,
     pub selected_wire: Option<(Path, ArgKey, Option<S>)>,
     pub panning_grab: bool,
@@ -274,16 +278,16 @@ pub struct Pane {
     pub built: Rc<RefCell<Option<(Box<Pane>, u64, pxui::ui::UiBox)>>>,
 }
 
-/// Whether two panes build the same frame: the same graph, layout, geometry, records and settings
-/// (shared parts by identity; the last build's copy keeps them alive, so an address is never reused
-/// under it), and the same view, selection, hover, drag, edit and marks. Text measurements, the
+/// Whether two panes build the same frame but for the pan and zoom (a cached pane's view moves its
+/// content for them): the same graph, layout, geometry, records and settings (shared parts by
+/// identity; the last build's copy keeps them alive, so an address is never reused under it), and the
+/// same selection, hover, drag, edit and marks (the pan's pointer grab is no part of what it shows). Text measurements, the
 /// chain memo and the stats are caches or outputs, not inputs.
 pub fn builds_same(a: &Pane, b: &Pane) -> bool {
     let (g, h) = (&a.geo, &b.geo);
     let geo = Rc::ptr_eq(&g.items, &h.items) && Rc::ptr_eq(&g.wires, &h.wires) && Rc::ptr_eq(&g.origins, &h.origins) && Rc::ptr_eq(&g.inside, &h.inside)
         && Rc::ptr_eq(&g.slot, &h.slot) && Rc::ptr_eq(&g.tiles, &h.tiles) && Rc::ptr_eq(&g.reach, &h.reach) && Rc::ptr_eq(&g.read, &h.read);
     geo && (a.x, a.y, a.width, a.height, a.guide, a.framed, a.geo_fs, a.geo_cold, a.tags) == (b.x, b.y, b.width, b.height, b.guide, b.framed, b.geo_fs, b.geo_cold, b.tags)
-        && (a.pan_x.to_bits(), a.pan_y.to_bits(), a.zoom.to_bits(), a.panning_grab) == (b.pan_x.to_bits(), b.pan_y.to_bits(), b.zoom.to_bits(), b.panning_grab)
         && a.theme == b.theme && a.key == b.key && a.scope.as_ref().map(Rc::as_ptr) == b.scope.as_ref().map(Rc::as_ptr) && Rc::ptr_eq(&a.saved, &b.saved) && a.records.as_ref().map(Rc::as_ptr) == b.records.as_ref().map(Rc::as_ptr)
         && Rc::ptr_eq(&a.chains, &b.chains) && Rc::ptr_eq(&a.folds, &b.folds) && Rc::ptr_eq(&a.counts, &b.counts) && Rc::ptr_eq(&a.layout, &b.layout)
         && a.lens == b.lens && a.display == b.display && a.selected == b.selected && a.selected_wire == b.selected_wire && a.hovered_row == b.hovered_row
@@ -366,6 +370,8 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         pan_x: 12.0,
         pan_y: 12.0,
         zoom: 1.0,
+        zoom_t: f64::NEG_INFINITY,
+        busy_t: 0.0,
         selected: PathSet::new(),
         selected_wire: None,
         panning_grab: false,

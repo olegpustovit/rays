@@ -4,7 +4,8 @@
 //! retained pane replaced, so they are refreshed only for a documented fix.
 use crate::common;
 use crate::support::*;
-use input::{Event, Platform};
+use input::{Event, MouseButton, Platform};
+use rays_graph::scope_state::Change;
 use pxui::ui::*;
 use rays::{canvas, frame as rframe, image, scene};
 use rays_graph::scope_pane as scope;
@@ -27,11 +28,13 @@ fn frame_at(count: i64, density: i64, pointer: (f64, f64), events: Vec<Event>) -
 }
 
 /// One editor-like frame: the pane in a root box, cached as the editor caches it.
-pub fn pane_frame(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) {
+pub fn pane_frame(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Vec<Change> {
+    let mut changes = Vec::new();
     ui.frame(fr, &mut |ui: &mut Ui| {
         let root = ui.box_("graph-root", BoxOpts::default().w(Size::Px(W as f32)).h(Size::Px(H as f32)).at((0.0, 0.0)));
-        ui.within(&root, &mut |ui| scope::update_cached("graph-view", &[], t, ui, fr, &mut Vec::new()));
+        ui.within(&root, &mut |ui| scope::update_cached("graph-view", &[], t, ui, fr, &mut changes));
     });
+    changes
 }
 
 pub fn golden_ui() -> Ui {
@@ -150,4 +153,120 @@ fn gpu_graph_pixels() {
     assert!(failures.is_empty(), "graph pane pixels: {}", failures.join("; "));
 }
 
-pub const CASES: &[(&str, fn())] = &[("gpu_graph_pixels", gpu_graph_pixels)];
+/// A frame of the pane: the views it built, the instance bytes it wrote, what it allocated and the
+/// changes it emitted.
+struct Step {
+    views: usize,
+    bytes: usize,
+    allocs: u64,
+    changes: Vec<Change>,
+}
+
+fn measured(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Step {
+    let before = mem_sys::local_alloc_count();
+    let mut changes = Vec::new();
+    ui.frame(fr, &mut |ui: &mut Ui| {
+        let root = ui.box_("graph-root", BoxOpts::default().w(Size::Px(W as f32)).h(Size::Px(H as f32)).at((0.0, 0.0)));
+        ui.within(&root, &mut |ui| scope::update_cached("graph-view", &[], t, ui, fr, &mut changes));
+    });
+    let allocs = mem_sys::local_alloc_count() - before;
+    let out = ui.output();
+    let bytes = out.draw.iter().flat_map(|l| l.dirty.iter()).map(|(a, b)| (b - a) as usize).sum::<usize>() * std::mem::size_of::<pxui::draw::Instance>();
+    for i in 0..out.draw.len() {
+        ui.drawn(i);
+    }
+    Step { views: ui.rebuilt_views(), bytes, allocs, changes }
+}
+
+/// The pane's content is one cached view that a pan offsets and a zoom scales: a right drag on the
+/// bare canvas or a wheel step builds no view, writes no instance and allocates nothing until the
+/// pane would show past the overscan (one build) or the zoom has rested 0.1 s (one build at the
+/// zoom), and a click finds a card through the moved and scaled content at zoom 0.5, 1, 1.5 and 2.
+/// Run twice: checking every kept build (`verify_views`), then counting.
+fn window_graph_view_pan_zoom() {
+    for verify in [true, false] {
+        let ws = checked(SMALL);
+        let sc = Rc::new(flow_graph::projection::of_graph(&scope_catalog(), &ws, "g").unwrap_or_else(|e| panic!("{e}")));
+        let mut t = scope::create(Some(W), Some(H));
+        scope::with_scope(ScopeOpts::default(), "g", sc, &mut t);
+        scope::with_records(recorded(&ws), &mut t);
+        let mut ui = golden_ui();
+        ui.verify_views(verify);
+        let count = std::cell::Cell::new(0);
+        let step = |ui: &mut Ui, t: &mut Pane, pointer: (f64, f64), buttons: &[MouseButton], events: Vec<Event>| {
+            let mut fr = frame_at(count.get(), 1, pointer, events);
+            fr.input.buttons = buttons.to_vec();
+            count.set(count.get() + 1);
+            measured(ui, t, &fr)
+        };
+        let quiet = |s: &Step, what: &str| {
+            // (a verifying run builds every kept view again)
+            check(verify || s.views == 0, &format!("{what}: {} views built", s.views));
+            check(s.bytes == 0, &format!("{what}: {} instance bytes written", s.bytes));
+            check(verify || s.allocs == 0, &format!("{what}: {} allocations", s.allocs));
+        };
+        let away = (-100.0, -100.0);
+        for _ in 0..4 {
+            step(&mut ui, &mut t, away, &[], vec![Event::PointerMoved(away)]);
+        }
+        // a right drag on the bare canvas, 2 points a frame
+        let mut p = (8.0, H as f64 - 8.0);
+        step(&mut ui, &mut t, p, &[MouseButton::RightButton], vec![Event::PointerMoved(p), Event::PointerPressed(MouseButton::RightButton, p)]);
+        let pan0 = (t.pan_x, t.pan_y);
+        for i in 0..30 {
+            p.0 += 2.0;
+            let s = step(&mut ui, &mut t, p, &[MouseButton::RightButton], vec![Event::PointerMoved(p)]);
+            quiet(&s, &format!("pan frame {i}"));
+        }
+        check(t.pan_x == pan0.0 + 60.0 && t.pan_y == pan0.1, &format!("the drag panned {:?} -> {:?}", pan0, (t.pan_x, t.pan_y)));
+        // past the overscan (half the pane each side): one build at the new pan
+        p.0 += W as f64 / 2.0;
+        let s = step(&mut ui, &mut t, p, &[MouseButton::RightButton], vec![Event::PointerMoved(p)]);
+        check(verify || s.views == 1, &format!("crossing the overscan built {} views", s.views));
+        p.0 += 2.0;
+        quiet(&step(&mut ui, &mut t, p, &[MouseButton::RightButton], vec![Event::PointerMoved(p)]), "a pan frame after the build");
+        step(&mut ui, &mut t, p, &[], vec![Event::PointerReleased(MouseButton::RightButton, p)]);
+        for _ in 0..2 {
+            step(&mut ui, &mut t, p, &[], vec![]);
+        }
+        // wheel steps at the pointer: scaled, then one build once the zoom rests
+        let z0 = t.zoom;
+        for _ in 0..3 {
+            let s = step(&mut ui, &mut t, p, &[], vec![Event::Scrolled((0.0, 1.0))]);
+            quiet(&s, "a wheel step");
+        }
+        check(t.zoom > z0, "the wheel did not zoom");
+        let mut built = 0;
+        for _ in 0..8 {
+            built += step(&mut ui, &mut t, p, &[], vec![]).views;
+        }
+        check(verify || built == 1, &format!("the rested zoom built {built} views"));
+        // a click on a card through the content scaled to each zoom (not rested: the view's transform)
+        for z in [0.5, 1.0, 1.5, 2.0] {
+            scope::frame_all(&mut t);
+            for _ in 0..8 {
+                step(&mut ui, &mut t, away, &[], vec![Event::PointerMoved(away)]);
+            }
+            let rested = (t.pan_x, t.pan_y, t.zoom);
+            zoomed(&mut t, z);
+            t.zoom_t = count.get() as f64 / 60.0;
+            let card = path(&["g", "c"]);
+            let (x, y, w, h) = scope::inspect::box_of(&t, &card).expect("c");
+            let at = (x + w / 2.0, y + h.min(24.0 * z) / 2.0);
+            let s = step(&mut ui, &mut t, at, &[], vec![Event::PointerMoved(at)]);
+            check(t.zoom == rested.2 || s.views <= 1, "a zoom built more than once");
+            step(&mut ui, &mut t, at, &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, at)]);
+            let s = step(&mut ui, &mut t, at, &[], vec![Event::PointerReleased(MouseButton::LeftButton, at)]);
+            let picked = s.changes.iter().any(|c| matches!(c, Change::Selected(p) if p.contains(&card)));
+            check(x > 0.0 && x + w < W as f64, &format!("zoom {z}: the card is not in the pane"));
+            check(picked || scope::selected(&t).contains(&card), &format!("a click at zoom {z} (shown at {:.2}) did not find the card", t.zoom));
+            scope::clear_selection(&mut t);
+            for _ in 0..8 {
+                step(&mut ui, &mut t, away, &[], vec![Event::PointerMoved(away)]);
+            }
+        }
+        ui.destroy();
+    }
+}
+
+pub const CASES: &[(&str, fn())] = &[("gpu_graph_pixels", gpu_graph_pixels), ("window_graph_view_pan_zoom", window_graph_view_pan_zoom)];

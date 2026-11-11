@@ -1347,8 +1347,10 @@ pub fn paint_background(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f
     // a dot every 24 points, thinned by powers of two so the dots stay 24 screen points apart or more
     let thin = if z >= 1.0 { 1.0 } else { 2.0f64.powf(((1.0 / z).log2() - 1e-9).ceil()) };
     let spacing = 24.0 * z * thin;
+    // the lattices are anchored at the pane's corner, so a content box past the pane draws them in place
+    let (ox, oy) = (t.x as f64, t.y as f64);
     paint.fill(vx as f32, vy as f32, vw as f32, vh as f32, theme.panel);
-    paint.grid(vx as f32, vy as f32, vw as f32, vh as f32, ((vx + (t.pan_x % spacing) - 1.0) as f32, (vy + (t.pan_y % spacing) - 1.0) as f32), spacing as f32, 2.0, color::with_alpha(theme.foreground, 66));
+    paint.grid(vx as f32, vy as f32, vw as f32, vh as f32, ((ox + (t.pan_x % spacing) - 1.0) as f32, (oy + (t.pan_y % spacing) - 1.0) as f32), spacing as f32, 2.0, color::with_alpha(theme.foreground, 66));
     if z >= 0.5 {
         let px = 480.0 * z;
         let py = 192.0 * z;
@@ -1356,8 +1358,14 @@ pub fn paint_background(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f
             let r = v % m;
             if r < 0.0 { r + m } else { r }
         };
-        let x0 = vx + rem(t.pan_x + (84.0 * z), px);
-        let y0 = vy + rem(t.pan_y + (84.0 * z), py);
+        let mut x0 = ox + rem(t.pan_x + (84.0 * z), px);
+        let mut y0 = oy + rem(t.pan_y + (84.0 * z), py);
+        while x0 - px >= vx {
+            x0 -= px;
+        }
+        while y0 - py >= vy {
+            y0 -= py;
+        }
         let line = theme::border(&theme);
         let mut cx = x0;
         while cx < vx + vw {

@@ -499,15 +499,23 @@ pub struct Ctx {
     pub finished: bool,
     pub opened: Option<Editing>,
     pub fs: i64,
+    /// the overscan the content reaches past each side of the pane
+    pub ov: (f64, f64),
 }
 
 impl Ctx {
     pub fn hits(&self, i: usize) -> Vec<UiBox> {
         self.wire_hits.get(&i).cloned().unwrap_or_default()
     }
+
+    /// A window point in the pane's points (the content box's origin is the pane's corner).
+    fn local(&self, t: &Pane, pt: (f64, f64)) -> (f64, f64) {
+        (pt.0 - t.x as f64, pt.1 - t.y as f64)
+    }
 }
 
-/// A wire's hit boxes: its segments cut to `clip`, as 16-point rectangles in the shared hit tree.
+/// A wire's hit boxes: its segments cut to `clip` (content points), as 16-point rectangles in the shared
+/// hit tree, placed from `origin`.
 pub fn wire_boxes(c: &mut Ctx, t: &Pane, ui: &mut Ui, origin: (f64, f64), name: &str, clip: (f64, f64, f64, f64), i: usize) {
     let (cx, cy, cw, ch) = clip;
     let wi = &t.geo.wires[i];
@@ -519,7 +527,7 @@ pub fn wire_boxes(c: &mut Ctx, t: &Pane, ui: &mut Ui, origin: (f64, f64), name: 
     for (j, seg) in wi.pts.windows(2).enumerate() {
         let (ax, ay) = seg[0];
         let (bx, by) = seg[1];
-        if let Some(((ax, ay), (bx, by))) = clip_segment((sx(t, ax) - t.x as f64, sy(t, ay) - t.y as f64), (sx(t, bx) - t.x as f64, sy(t, by) - t.y as f64), (cx - 4.0, cy - 4.0, cw + 8.0, ch + 8.0)) {
+        if let Some(((ax, ay), (bx, by))) = clip_segment(c.local(t, (sx(t, ax), sy(t, ay))), c.local(t, (sx(t, bx), sy(t, by))), (cx - 4.0, cy - 4.0, cw + 8.0, ch + 8.0)) {
             let steps = if ax == bx || ay == by { 1 } else { 1.max(((bx - ax).hypot(by - ay) / 16.0) as i64) };
             let prefix = format!("{}{}-", prefix, j);
             for st in 0..steps {
@@ -550,10 +558,6 @@ pub fn edit_field(c: &mut Ctx, ui: &mut Ui, at: (f64, f64), w: f64, h: f64, key:
     if !open && v != current && valid(&v) { vec![commit(v)] } else { Vec::new() }
 }
 
-fn local(t: &Pane, pt: (f64, f64)) -> (f64, f64) {
-    (pt.0 - t.x as f64, pt.1 - t.y as f64)
-}
-
 /// One visible node: its tile box, its ports and the live widgets of its rows.
 pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize) -> Tile {
     let (pl, ax, ay) = &t.geo.items[slot];
@@ -563,15 +567,15 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
     let w = pl.w * z;
     let h = pl.h * z;
     let shown = pl.shown;
-    let tile = box_in(ui, CLICKABLE, w, h, local(t, (bx, by)), &key);
+    let tile = box_in(ui, CLICKABLE, w, h, c.local(t, (bx, by)), &key);
     // an expanded zone's tile covers its body: the wires that end inside it get their boxes again here,
     // over the tile and under the cards built after it
     if let Item::Item(n) = &pl.item {
         if n.zone.is_some() && !pl.collapsed {
-            let (lx, ly) = local(t, (bx, by));
-            let x0 = lx.max(0.0);
-            let y0 = ly.max(0.0);
-            let clip = (x0, y0, (t.width as f64).min(lx + w) - x0, (t.height as f64).min(ly + h) - y0);
+            let (lx, ly) = c.local(t, (bx, by));
+            let x0 = lx.max(-c.ov.0);
+            let y0 = ly.max(-c.ov.1);
+            let clip = (x0, y0, (t.width as f64 + c.ov.0).min(lx + w) - x0, (t.height as f64 + c.ov.1).min(ly + h) - y0);
             let saved = ui.enter(&tile);
             for i in t.geo.inside.get(&pl.path).cloned().unwrap_or_default() {
                 wire_boxes(c, t, ui, (lx, ly), "zwire", clip, i);
@@ -1251,12 +1255,11 @@ pub fn pointer_step(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &U
     }
     t.panning_grab = panning_grab;
     if panning {
-        let (dx, dy) = if canvas_signal.held || canvas_signal.released {
-            p64(canvas_signal.drag)
-        } else {
-            tiles.iter().fold((0.0, 0.0), |(dx, dy), tl| (dx + f64::from(tl.sig.drag.0), dy + f64::from(tl.sig.drag.1)))
-        };
-        (t.pan_x, t.pan_y) = (t.pan_x + dx, t.pan_y + dy);
+        // a drag on the bare canvas panned in `view_step`, before the build
+        if !(canvas_signal.held || canvas_signal.released) {
+            let (dx, dy) = tiles.iter().fold((0.0, 0.0), |(dx, dy), tl| (dx + f64::from(tl.sig.drag.0), dy + f64::from(tl.sig.drag.1)));
+            (t.pan_x, t.pan_y) = (t.pan_x + dx, t.pan_y + dy);
+        }
     }
     let tile_pressed = tiles.iter().any(|tl| tl.sig.pressed);
     let mut wire_pressed: Option<usize> = None;
@@ -1383,7 +1386,7 @@ pub fn hover_step(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &
     hover
 }
 
-pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &UiBox, emit: &mut Vec<Change>) {
+pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut Vec<Change>) {
     // frames: a title strip, a delete cross and a resize corner, over the tiles (a zone's tile covers its
     // whole body) and clear of the nodes, which keep 12 points inside the frame
     struct FrameBox {
@@ -1396,7 +1399,6 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
         rb: UiBox,
     }
     let mut frame_boxes: Vec<FrameBox> = Vec::new();
-    let saved = ui.enter(canvas);
     for (scope, (ox, oy)) in t.geo.origins.iter() {
         for (i, (title, (fx, fy), (fw, fh))) in t.saved.frames(scope).iter().enumerate() {
             let x = sx(t, ox + fx);
@@ -1404,7 +1406,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
             let wd = fw * z;
             let h = fh * z;
             let mk = |ui: &mut Ui, k: &str, pos: (f64, f64), size: (f64, f64)| {
-                box_in(ui, CLICKABLE, size.0, size.1, local(t, pos), &format!("fr:{}:{}:{}", flow_syntax::symbol::join_path(&scope, "/"), i, k))
+                box_in(ui, CLICKABLE, size.0, size.1, ctx.local(t, pos), &format!("fr:{}:{}:{}", flow_syntax::symbol::join_path(&scope, "/"), i, k))
             };
             let tb = mk(ui, "t", (x, y), ((wd - 20.0).max(8.0), 18.0 * z));
             let xb = mk(ui, "x", (x + wd - 18.0, y + 2.0), (16.0, 16.0));
@@ -1412,7 +1414,6 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
             frame_boxes.push(FrameBox { scope: scope.clone(), i, title: title.clone(), rect: (x, y, wd, h), tb, xb, rb });
         }
     }
-    ui.leave(saved);
     for fb in frame_boxes {
         let FrameBox { scope, i, title, rect: (x, y, wd, _), tb, xb, rb } = fb;
         let ts = ui.signal(&tb);
@@ -1421,16 +1422,15 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
         let all = t.saved.frames(&scope);
         if let Some(Editing::Title(sp_, k)) = &t.editing {
             if *sp_ == scope && *k == i as i64 {
-                let saved = ui.enter(canvas);
                 let all2 = all.clone();
                 let scope2 = scope.clone();
-                let ch = edit_field(ctx, ui, local(t, (x + 4.0, y + 2.0)), (wd - 24.0).max(40.0), 16.0 * z, &format!("frt{}", i), &title, &|s: &str| !s.is_empty() && !s.contains('"'), &move |v| {
+                let at = ctx.local(t, (x + 4.0, y + 2.0));
+                let ch = edit_field(ctx, ui, at, (wd - 24.0).max(40.0), 16.0 * z, &format!("frt{}", i), &title, &|s: &str| !s.is_empty() && !s.contains('"'), &move |v| {
                     Change::FramesSet {
                         scope: scope2.clone(),
                         frames: all2.iter().enumerate().map(|(j, f)| if j == i { (v.clone(), f.1, f.2) } else { f.clone() }).collect(),
                     }
                 });
-                ui.leave(saved);
                 emit.extend(ch);
             }
         }
@@ -1506,7 +1506,7 @@ fn measure_ui(ui: &mut Ui, t: &Pane, size: i64, text: &str) -> f64 {
 type Marks = Vec<((f64, f64, f64, f64), Option<String>, Option<bool>)>;
 
 /// The frame's paint: grid and wires under the cards, the cards, then the overlays.
-pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas: &UiBox, canvas_signal: &Signal, tiles: &[Tile], zones: &[usize], wires_in_view: &[usize], footers: &HashMap<Path, Footer>, chain: &Option<Chains>, mouse: (f64, f64), hover: &Option<Hover>) -> (i64, i64) {
+pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: &UiBox, canvas_signal: &Signal, tiles: &[Tile], zones: &[usize], wires_in_view: &[usize], footers: &HashMap<Path, Footer>, chain: &Option<Chains>, mouse: (f64, f64), hover: &Option<Hover>) -> (i64, i64) {
     let snapshot: Rc<Pane> = Rc::new(t.clone());
     let row_hover: Option<(Path, usize)> = hover.as_ref().map(|h| {
         let n = match &t.geo.items[h.slot].0.item {
@@ -1682,8 +1682,10 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
     };
     let snap = snapshot;
     let press_point = p64(canvas_signal.press_point);
-    ui.draw_over(canvas, move |paint, rect| { let rect = rect.f64();
-        let (cx, cy, cw, ch) = rect;
+    // over the cards, in the content box (it moves with them); what is the pane's is the pane's rectangle
+    let pane = (t.x as f64, t.y as f64, t.width as f64, t.height as f64);
+    ui.draw_over(host, move |paint, _| {
+        let (cx, cy, cw, ch) = pane;
         let refused = theme::invalid();
         let hint_chip = |paint: &mut pxui::ui::Paint, bg: color::T, at: (f64, f64), letter: &str| {
             let letter = letter.to_uppercase();
@@ -1775,73 +1777,9 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
     (drawn_items, drawn_zones)
 }
 
-/// `update` in a cached view as large as the window: built again only when the pane differs from what
-/// its last build left (`scope_state::revision`), when input reaches its boxes, while the pointer moves
-/// over the canvas (hovered rows, wires and tips follow it) or keys are pressed (letter hints).
-/// Kept, the pane is unchanged and no changes are emitted.
-// ponytail: a pan or zoom rebuilds the whole canvas (its tiles sit at panned positions, culled to the
-// pane, and the grid and wires paint in the pane's rect): a view_offset would leave the edges empty
-// and move the canvas's clip and hit box. Upgrade when a large graph pans slowly: tiles in a nested
-// content view laid out in graph units with an overscan margin, the grid and clip outside it.
-pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) {
-    use std::hash::{Hash, Hasher};
-    let rev = revision(t);
-    let (mx, my) = frame.input.pointer;
-    // the pointer over the bare canvas shows nothing of where it is: only over a card, a port or a wire
-    let bare = built_canvas(t).is_some_and(|canvas| ui.signal(&canvas).hovered);
-    let inside = !bare && mx >= t.x as f64 && my >= t.y as f64 && mx < (t.x + t.width) as f64 && my < (t.y + t.height) as f64;
-    let mut h = std::hash::DefaultHasher::new();
-    (rev, inside.then(|| (mx.to_bits(), my.to_bits())), (!pressed.is_empty()).then(|| frame.input.t.to_bits())).hash(&mut h);
-    let (w, hh) = ui.view_size();
-    let mut canvas = None;
-    let view = ui.view(label, h.finish(), Size::Px(w), Size::Px(hh), &mut |ui| {
-        let before = t.clone();
-        let built = update(pressed, t, ui, frame, changes);
-        // a build that changed the pane (a press selected, a wheel zoomed) painted part of it from the
-        // state before: it is kept as of before, so the next frame builds again from the state now
-        let settled = builds_same(&before, t);
-        if !settled {
-            ui.request_frame();
-        }
-        canvas = Some((built, if settled { None } else { Some(before) }));
-    });
-    ui.set_at(&view, (0.0, 0.0));
-    if let Some((canvas, before)) = canvas {
-        keep_built(before.as_ref().unwrap_or(t), rev, canvas);
-    }
-}
-
-/// The graph canvas for one frame; its canvas box.
-pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) -> UiBox {
-    // the first view shows the whole graph, at zoom 1 when it fits (Home frames everything)
-    if !t.framed {
-        frame_all(t);
-        t.framed = true;
-    }
-    let canvas = ui.box_(
-        "pxui-scope",
-        BoxOpts::default().flags(CLICKABLE | SCROLL | CLIP | BLOCKING).w(Size::Px((t.width as f64) as f32)).h(Size::Px((t.height as f64) as f32)).at(((t.x as f64) as f32, (t.y as f64) as f32)),
-    );
-    let canvas_signal = ui.signal(&canvas);
-    step_hints(t, pressed, canvas_signal.subtree_press.is_some(), changes);
-    // the grid, zones and wires paint in a child, so the canvas's clip holds them too
-    let saved = ui.enter(&canvas);
-    let layer = ui.box_("pxui-scope-layer", BoxOpts::default().w(Size::Px((t.width as f64) as f32)).h(Size::Px((t.height as f64) as f32)).at((0.0, 0.0)));
-    ui.leave(saved);
-    {
-        let (_, wheel) = p64(canvas_signal.scroll);
-        let pinch = canvas_signal.pinch;
-        if !((wheel == 0.0 && pinch == 1.0) || t.context.is_some()) {
-            let (mx, my) = frame.input.pointer;
-            // the wheel steps by a tenth; a pinch carries its own factor
-            let zoom = 0.25f64.max(2.5f64.min(t.zoom * (1.0 + (wheel * 0.1)) * pinch));
-            let k = zoom / t.zoom;
-            let pan_x = mx - t.x as f64 - ((mx - t.x as f64 - t.pan_x) * k);
-            let pan_y = my - t.y as f64 - ((my - t.y as f64 - t.pan_y) * k);
-            (t.zoom, t.pan_x, t.pan_y) = (zoom, pan_x, pan_y);
-        }
-    }
-    // a point's box is as wide as its name, drawn at the zoom's font
+/// A point's box is as wide as its name, drawn at the zoom's font: measured again when the font
+/// changes.
+fn refont(t: &mut Pane, ui: &mut Ui) {
     if let Some(scope) = t.scope.clone() {
         let fs0 = font_of(t.zoom);
         if fs0 != t.geo_fs || t.geo_cold {
@@ -1857,6 +1795,168 @@ pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame,
             }
         }
     }
+}
+
+/// The overscan of a cached pane's content: half the pane past each side, at most 400 points.
+fn overscan(t: &Pane) -> (f64, f64) {
+    ((t.width as f64 / 2.0).min(400.0).round(), (t.height as f64 / 2.0).min(400.0).round())
+}
+
+/// The pane's view, before anything is built: a non-left drag on the bare canvas pans, the wheel (a
+/// tenth a step) and a pinch zoom at the pointer. The content follows by its view's transform.
+fn view_step(t: &mut Pane, sig: &Signal, frame: &rframe::Frame) {
+    if (sig.held || sig.released) && sig.button.is_some_and(|b| b != MouseButton::LeftButton) {
+        let (dx, dy) = p64(sig.drag);
+        (t.pan_x, t.pan_y) = (t.pan_x + dx, t.pan_y + dy);
+    }
+    let (_, wheel) = p64(sig.scroll);
+    if !((wheel == 0.0 && sig.pinch == 1.0) || t.context.is_some()) {
+        let (mx, my) = frame.input.pointer;
+        let zoom = 0.25f64.max(2.5f64.min(t.zoom * (1.0 + (wheel * 0.1)) * sig.pinch));
+        let k = zoom / t.zoom;
+        let pan_x = mx - t.x as f64 - ((mx - t.x as f64 - t.pan_x) * k);
+        let pan_y = my - t.y as f64 - ((my - t.y as f64 - t.pan_y) * k);
+        (t.zoom, t.pan_x, t.pan_y, t.zoom_t) = (zoom, pan_x, pan_y, frame.input.t);
+    }
+}
+
+/// The pane's canvas: the bare ground's hit box (presses, pans, the wheel), clipping what it holds.
+fn canvas_box(t: &Pane, ui: &mut Ui) -> UiBox {
+    ui.box_(
+        "pxui-scope",
+        BoxOpts::default().flags(CLICKABLE | SCROLL | CLIP | BLOCKING).w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at((t.x as f32, t.y as f32)),
+    )
+}
+
+/// The pan and zoom a build of the content used: those of the kept pane.
+fn anchor_of(t: &Pane) -> Option<(f64, f64, f64)> {
+    t.built.borrow().as_ref().map(|(last, _, _)| (last.pan_x, last.pan_y, last.zoom))
+}
+
+/// `update` with the canvas in the pane root (built every frame: one box) and everything on it in a
+/// cached view, built again only when the pane differs from what its last build left
+/// (`scope_state::revision`, which leaves the pan and zoom out), when input reaches its boxes, while
+/// the pointer moves over a card, a port or a wire (hovered rows, wires and tips follow it), while
+/// keys are pressed (letter hints), the canvas is pressed or released, or a payload is carried.
+/// Kept, the pane is unchanged and no changes are emitted. The view holds the pane and an overscan
+/// past each side (`overscan`) at the pan and zoom it was built at; a pan offsets it and a zoom
+/// scales it about the pan (`view_offset`, `view_transform`: hit testing follows), so a drag or a
+/// wheel on the canvas builds nothing. It is built again at the new pan and zoom once the pane would
+/// show past its overscan, and once the zoom has rested 0.1 s (text shaped and strokes snapped at
+/// the zoom's own size).
+pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) {
+    use std::hash::{Hash, Hasher};
+    if !t.framed {
+        frame_all(t);
+        t.framed = true;
+    }
+    let canvas = canvas_box(t, ui);
+    let sig = ui.signal(&canvas);
+    view_step(t, &sig, frame);
+    let ov = overscan(t);
+    let (w, h) = (t.width as f64, t.height as f64);
+    // rebuilt at the pan and zoom now: the zoom rested, or the pane shows past the content's edge
+    let moved = match anchor_of(t) {
+        None => true,
+        Some((bx, by, bz)) => {
+            let k = t.zoom / bz;
+            // the pane's corners in the content's points (pane-relative) as it was built
+            let back = |q: f64, pan: f64, built: f64| built + ((q - pan) / k);
+            (t.zoom != bz && frame.input.t - t.zoom_t >= 0.1)
+                || back(0.0, t.pan_x, bx) < -ov.0
+                || back(w, t.pan_x, bx) > w + ov.0
+                || back(0.0, t.pan_y, by) < -ov.1
+                || back(h, t.pan_y, by) > h + ov.1
+        }
+    };
+    if t.zoom != anchor_of(t).map_or(t.zoom, |a| a.2) && !moved {
+        ui.repaint_after(0.1);
+    }
+    if moved {
+        // at the zoom it builds at, before the revision reads the geometry
+        refont(t, ui);
+    }
+    let rev = if moved { revision(t).wrapping_add(1) } else { revision(t) };
+    let (mx, my) = frame.input.pointer;
+    // the pointer over the bare canvas shows nothing of where it is: only over a card, a port or a wire
+    let inside = !sig.hovered && mx >= t.x as f64 && my >= t.y as f64 && mx < t.x as f64 + w && my < t.y as f64 + h;
+    // what the canvas's input does beyond a pan is the build's
+    let busy = sig.pressed || sig.released || sig.clicked || sig.double_clicked || (sig.held && left_button(&sig)) || !pressed.is_empty() || ui.carrying().is_some();
+    // (kept after the busy frame: the frame after it builds only if something else changed)
+    if busy {
+        t.busy_t = frame.input.t;
+    }
+    let mut hh = std::hash::DefaultHasher::new();
+    (rev, inside.then(|| (mx.to_bits(), my.to_bits())), t.busy_t.to_bits()).hash(&mut hh);
+    let mut built = None;
+    let saved = ui.enter(&canvas);
+    let view = ui.view(label, hh.finish(), Size::Px((w + 2.0 * ov.0) as f32), Size::Px((h + 2.0 * ov.1) as f32), &mut |ui| {
+        // a verifying run of the kept view builds as the kept build did
+        let now = (t.pan_x, t.pan_y, t.zoom);
+        if ui.verifying() {
+            if let Some(a) = anchor_of(t) {
+                (t.pan_x, t.pan_y, t.zoom) = a;
+            }
+        }
+        let before = t.clone();
+        let at = content(pressed, t, ui, frame, &canvas, &sig, ov, changes);
+        // a build that changed the pane (a press selected) painted part of it from the state before: it
+        // is kept as of before, so the next frame builds again from the state now
+        let settled = builds_same(&before, t);
+        if !settled {
+            ui.request_frame();
+        }
+        if ui.verifying() {
+            (t.pan_x, t.pan_y, t.zoom) = now;
+        }
+        built = Some((at, if settled { None } else { Some(before) }));
+    });
+    ui.leave(saved);
+    ui.set_at(&view, (-ov.0 as f32, -ov.1 as f32));
+    if let Some((at, before)) = built {
+        let mut kept = before.unwrap_or_else(|| t.clone());
+        (kept.pan_x, kept.pan_y, kept.zoom) = at;
+        keep_built(&kept, rev, canvas);
+    }
+    // the content where the pan and zoom now put it
+    // (about the window's corner: a built point p shows at k (p + o), the pane's pan point where the
+    // build had it scaled by k about it; with k one, p + o exactly)
+    if let Some((bx, by, bz)) = anchor_of(t) {
+        let k = t.zoom / bz;
+        let shift = |o: f64, pan: f64, built: f64| if k == 1.0 { pan - built } else { (o + pan) / k - (o + built) };
+        ui.view_offset(&view, shift(t.x as f64, t.pan_x, bx) as f32, shift(t.y as f64, t.pan_y, by) as f32);
+        ui.view_transform_about(&view, k as f32, [1.0, 0.0, 0.0, 1.0], (0.0, 0.0));
+    }
+}
+
+/// The graph canvas for one frame, built in full; its canvas box.
+pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) -> UiBox {
+    // the first view shows the whole graph, at zoom 1 when it fits (Home frames everything)
+    if !t.framed {
+        frame_all(t);
+        t.framed = true;
+    }
+    let canvas = canvas_box(t, ui);
+    let sig = ui.signal(&canvas);
+    view_step(t, &sig, frame);
+    let saved = ui.enter(&canvas);
+    content(pressed, t, ui, frame, &canvas, &sig, (0.0, 0.0), changes);
+    ui.leave(saved);
+    canvas
+}
+
+/// Everything on the canvas, in a content box `ov` past each side of the pane: the grid, zones,
+/// wires, cards and what is over them, and the gestures they take. The pan and zoom it was built at.
+fn content(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, canvas_signal: &Signal, ov: (f64, f64), changes: &mut Vec<Change>) -> (f64, f64, f64) {
+    let (cw, ch) = ((t.width as f64 + 2.0 * ov.0) as f32, (t.height as f64 + 2.0 * ov.1) as f32);
+    let at = (t.pan_x, t.pan_y, t.zoom);
+    // at the pane's corner, so its children land where they would on the canvas (to the bit)
+    let host = ui.box_("pxui-scope-content", BoxOpts::default().w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at((ov.0 as f32, ov.1 as f32)));
+    let saved = ui.enter(&host);
+    step_hints(t, pressed, canvas_signal.subtree_press.is_some(), changes);
+    // the grid, zones and wires paint in a child, under the cards
+    let layer = ui.box_("pxui-scope-layer", BoxOpts::default().w(Size::Px(cw)).h(Size::Px(ch)).at((-ov.0 as f32, -ov.1 as f32)));
+    refont(t, ui);
     // a drag in progress moves its items in a fresh geometry
     if let Some(scope) = t.scope.clone() {
         match t.drag.clone() {
@@ -1876,10 +1976,12 @@ pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame,
     let z = t.zoom;
     // text follows the zoom down to 5 points (a 6-point row at zoom 0.25 holds it)
     let fs = font_of(z);
-    let viewport = (t.x as f64, t.y as f64, t.width as f64, t.height as f64);
-    // what the pane shows, grown by `margin` screen points, in graph units: the indices answer it
+    // the content box: the pane grown by the overscan
+    let (ox, oy) = ov;
+    let viewport = (t.x as f64 - ox, t.y as f64 - oy, t.width as f64 + 2.0 * ox, t.height as f64 + 2.0 * oy);
+    // what the content box shows, grown by `margin` screen points, in graph units: the indices answer it
     let in_view = |t: &Pane, margin: f64| -> (f64, f64, f64, f64) {
-        ((-t.pan_x - margin) / z, (-t.pan_y - margin) / z, (t.width as f64 - t.pan_x + margin) / z, (t.height as f64 - t.pan_y + margin) / z)
+        ((-t.pan_x - ox - margin) / z, (-t.pan_y - oy - margin) / z, (t.width as f64 + ox - t.pan_x + margin) / z, (t.height as f64 + oy - t.pan_y + margin) / z)
     };
     let visible: Vec<usize> = index_query(&t.geo.tiles, in_view(t, 20.0))
         .into_iter()
@@ -1907,12 +2009,10 @@ pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame,
     // precedence. A segment is cut to `clip` (pane points) first, so what is out of view costs one clip;
     // a diagonal is then a run of 16-point boxes.
     let chain = chains_of(t);
-    let mut ctx = Ctx { wire_hits: HashMap::new(), finished: false, opened: None, fs };
-    let saved = ui.enter(&canvas);
+    let mut ctx = Ctx { wire_hits: HashMap::new(), finished: false, opened: None, fs, ov };
     for &i in &wires_in_view {
-        wire_boxes(&mut ctx, t, ui, (0.0, 0.0), "wire", (0.0, 0.0, t.width as f64, t.height as f64), i);
+        wire_boxes(&mut ctx, t, ui, (0.0, 0.0), "wire", (-ox, -oy, viewport.2, viewport.3), i);
     }
-    ui.leave(saved);
     // footers: only for what is in view, and not when too small to read
     let mut footers: HashMap<Path, Footer> = HashMap::new();
     if let Some(records) = &t.records {
@@ -1928,34 +2028,33 @@ pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame,
         }
     }
     // tiles
-    let saved = ui.enter(&canvas);
     let mut tiles: Vec<Tile> = Vec::new();
     for &i in &visible {
         tiles.push(build_tile(&mut ctx, t, ui, z, fs, i));
     }
-    ui.leave(saved);
     if ctx.finished {
         t.editing = None;
     }
-    if let Some(c) = drop_change(t, ui, &canvas, &tiles) {
+    if let Some(c) = drop_change(t, ui, canvas, &tiles) {
         changes.push(c);
     }
-    frames_step(t, ui, &mut ctx, z, &canvas, changes);
+    frames_step(t, ui, &mut ctx, z, changes);
     if ctx.finished { t.editing = None; }
     if let Some(editing) = ctx.opened.take() { t.editing = Some(editing); }
     let hover = hover_step(t, ui, z, mouse, &tiles, &ctx, &wires_in_view);
-    pointer_step(t, ui, frame, &canvas, &canvas_signal, &tiles, &ctx, &wires_in_view, changes);
+    pointer_step(t, ui, frame, canvas, canvas_signal, &tiles, &ctx, &wires_in_view, changes);
     wire_pull(t, ui, &ctx, z, mouse, &tiles, &wires_in_view, changes);
     let (lens_next, lens_changed) = tile_gestures(t, ui, z, mouse, &tiles, changes);
-    context_step(t, ui, &tiles, &canvas_signal, changes);
-    let (drawn_items, drawn_zones) = paint_frame(t, ui, z, fs, &layer, &canvas, &canvas_signal, &tiles, &zones, &wires_in_view, &footers, &chain, mouse, &hover);
+    context_step(t, ui, &tiles, canvas_signal, changes);
+    let (drawn_items, drawn_zones) = paint_frame(t, ui, z, fs, &layer, &host, canvas_signal, &tiles, &zones, &wires_in_view, &footers, &chain, mouse, &hover);
     { t.stats = Stats { drawn_items, drawn_zones, ..t.stats }; };
     // an opened or stepped expansion panel changes its card's size: lay out again for the next frame
     if lens_changed {
         t.lens = lens_next;
         relayout(None, t);
     }
-    canvas
+    ui.leave(saved);
+    at
 }
 
 #[doc(hidden)]

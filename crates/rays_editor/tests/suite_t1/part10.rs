@@ -1,6 +1,6 @@
 //! UI frame costs of the whole editor (P5 views): nodes built, PXUI CPU, views rebuilt, instance
 //! bytes written and allocations per frame, idle, hovering, playing, hovering from button to button,
-//! scrubbing an inspector value and panning the graph. Prints a table; asserts the frame gate and
+//! scrubbing an inspector value and panning the graph (its content view offset, nothing built). Prints a table; asserts the frame gate and
 //! which views each gesture rebuilds.
 use super::support::*;
 use input::{Event, MouseButton};
@@ -150,12 +150,15 @@ fn workspace(name: &str, text: &str) {
         r.step(end, vec![Event::PointerMoved(end), Event::PointerReleased(MouseButton::LeftButton, end)]);
         // panning the graph: a right drag over its empty canvas
         let (gx, gy) = (graph.0 - 40.0, graph.1 + 120.0);
-        r.stepb(&[MouseButton::RightButton], (gx, gy), vec![Event::PointerMoved((gx, gy)), Event::PointerPressed(MouseButton::RightButton, (gx, gy))]);
+        // (measured, so its writes are not counted in the drag's first frame)
+        measure(&mut r, 1, &|r, _| r.stepb(&[MouseButton::RightButton], (gx, gy), vec![Event::PointerMoved((gx, gy)), Event::PointerPressed(MouseButton::RightButton, (gx, gy))]));
         let pan = measure(&mut r, n, &|r, i| {
             let p = (gx - 2.0 * (i + 1) as f64, gy);
             r.stepb(&[MouseButton::RightButton], p, vec![Event::PointerMoved(p)]);
         });
         report("empty graph pan", &pan, n);
+        // the graph's content is a kept view the pan offsets: no view built, no instance written
+        check(pan.views == 0 && pan.bytes == 0, &format!("panning rebuilt {} views and wrote {} instance bytes a frame", pan.views, pan.bytes));
         let end = (gx - 2.0 * (n + 1) as f64, gy);
         r.step(end, vec![Event::PointerReleased(MouseButton::RightButton, end)]);
     }
