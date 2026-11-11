@@ -13,7 +13,7 @@ contracts. Historical port evidence lives in `docs/history/` and records known u
 - Clone with `git clone --recurse-submodules` (or `git submodule update --init`). The pinned commit is
   the one Rays was tested with; `pxui/` is a normal checkout, so edit engine code there and `cargo
   check` here sees it through the shared `target/`.
-- To change PXUI: commit and push in `pxui/` (main), then commit the new pointer here (`git add pxui`).
+- To change PXUI: commit and push in `pxui/` (dev), then commit the new pointer here (`git add pxui`).
   `cargo run -p gate -- pxui` (tools/check-pxui-remote.sh, also part of `gate -- all`) refuses a pointer
   that is not on the PXUI remote; `RAYS_OFFLINE=1` skips it.
 - Goldens of the PXUI crates are refreshed in `pxui/`; Rays refreshes its own. PXUI crates must build
