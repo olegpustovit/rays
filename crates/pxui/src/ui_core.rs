@@ -396,7 +396,8 @@ struct Pose {
     opacity: f32,
 }
 
-/// A running transition of slot `slot` (while it has `generation`) from `from` to `to`.
+/// A running transition of slot `slot` (while it has `generation`) from `from` to `to`, through
+/// the keyframes `keys` (an index into `Ui::keyframes`, `NO_KEYS` for none) when it has them.
 #[derive(Clone, Copy)]
 struct Tween {
     slot: usize,
@@ -405,6 +406,22 @@ struct Tween {
     curve: Curve,
     from: Pose,
     to: Pose,
+    keys: u32,
+}
+
+const NO_KEYS: u32 = u32::MAX;
+
+/// Most keyframes one `animate_keys` run holds.
+pub const MAX_KEYS: usize = 8;
+
+/// A keyframed run's stops: the pose reached at each time (seconds from the start) and the curve of
+/// the segment that ends there.
+#[derive(Clone, Copy)]
+struct Keys {
+    n: usize,
+    t: [f32; MAX_KEYS],
+    pose: [Pose; MAX_KEYS],
+    curve: [Curve; MAX_KEYS],
 }
 
 /// What `Ui::animate` moves a node to.
@@ -959,6 +976,9 @@ pub struct Ui {
     theme_id: u32,
     /// running transitions, the frame's time, and whether a theme in effect animates
     tweens: Vec<Tween>,
+    /// keyframe stops of running `animate_keys` runs, and the free ones (reused: no allocation warm)
+    keyframes: Vec<Keys>,
+    free_keyframes: Vec<u32>,
     now: f64,
     motion: bool,
     font_size: i64,
@@ -1169,6 +1189,8 @@ impl Ui {
             theme_ids: Vec::new(),
             theme_id: 0,
             tweens: Vec::new(),
+            keyframes: Vec::new(),
+            free_keyframes: Vec::new(),
             now: 0.0,
             motion: false,
             font_size,
@@ -5678,18 +5700,34 @@ impl Ui {
             None => (self.rest(slot), false),
             Some(i) => {
                 let t = &self.tweens[i];
-                let p = t.curve.at((self.now - t.start) as f32);
+                let elapsed = (self.now - t.start) as f32;
+                let (from, to, p) = match self.keyframes.get(t.keys as usize) {
+                    None => (&t.from, &t.to, t.curve.at(elapsed)),
+                    Some(k) => {
+                        // the segment the run is in: from the stop before (the start for the first)
+                        let j = k.t[..k.n].iter().position(|&end| elapsed < end).unwrap_or(k.n - 1);
+                        let (from, t0) = if j == 0 { (&t.from, 0.0) } else { (&k.pose[j - 1], k.t[j - 1]) };
+                        let curve = match k.curve[j] {
+                            Curve::Bezier { points, .. } => Curve::Bezier { duration: k.t[j] - t0, points },
+                            spring => spring,
+                        };
+                        (from, &k.pose[j], curve.at(elapsed - t0))
+                    }
+                };
                 let f = |a: f32, b: f32| a + (b - a) * p;
-                let pose = Pose { look: t.from.look.lerp(&t.to.look, p), dx: f(t.from.dx, t.to.dx), dy: f(t.from.dy, t.to.dy), opacity: f(t.from.opacity, t.to.opacity) };
+                let pose = Pose { look: from.look.lerp(&to.look, p), dx: f(from.dx, to.dx), dy: f(from.dy, to.dy), opacity: f(from.opacity, to.opacity) };
                 (pose, true)
             }
         }
     }
 
     fn start_tween(&mut self, slot: usize, curve: Curve, from: Pose, to: Pose) {
-        let tween = Tween { slot, generation: self.slots[slot].generation, start: self.now, curve, from, to };
+        let tween = Tween { slot, generation: self.slots[slot].generation, start: self.now, curve, from, to, keys: NO_KEYS };
         match self.tween_of(slot) {
-            Some(i) => self.tweens[i] = tween,
+            Some(i) => {
+                self.free_keys(i);
+                self.tweens[i] = tween;
+            }
             None => {
                 self.slots[slot].tween = self.tweens.len() as u32;
                 self.tweens.push(tween);
@@ -5727,7 +5765,16 @@ impl Ui {
         };
     }
 
+    /// Give tween `i`'s keyframes back.
+    fn free_keys(&mut self, i: usize) {
+        let k = std::mem::replace(&mut self.tweens[i].keys, NO_KEYS);
+        if k != NO_KEYS {
+            self.free_keyframes.push(k);
+        }
+    }
+
     fn drop_tween(&mut self, i: usize) {
+        self.free_keys(i);
         let slot = self.tweens[i].slot;
         if self.slots[slot].tween == i as u32 {
             self.slots[slot].tween = NO_TWEEN;
@@ -5745,7 +5792,6 @@ impl Ui {
     /// rebuild); the frame gate asks for frames until it rests. An animated look holds until the
     /// node's next declaration (as `patch_look`); offset and opacity hold until animated again. The
     /// theme's `reduced_motion` makes it a jump. `false` for a stale handle.
-    // ponytail: from -> to only, no keyframe lists; chain calls when a run ends if one is needed.
     // Offset and opacity move the node's own look and text, not its children (a view's offset and
     // opacity move a group), and hit testing stays where layout put it.
     pub fn animate(&mut self, b: &Handle, target: Target, curve: Curve) -> bool {
@@ -5765,6 +5811,52 @@ impl Ui {
             Target::Opacity(o) => to.opacity = o.clamp(0.0, 1.0),
         }
         self.start_tween(slot, curve, from, to);
+        if !self.building {
+            self.frame_requested = true;
+        }
+        true
+    }
+
+    /// Animate a node through up to `MAX_KEYS` keyframes from where it shows now: each `(t, target,
+    /// curve)` reaches `target` `t` seconds after the start (times ascending), its segment shaped by
+    /// `curve` (a Bezier's duration is the segment's; a spring that has not settled by the next stop
+    /// jumps to it). A target sets its channel and keeps the others from the stop before. Driven as
+    /// `animate` is (patch path, no rebuild, no allocation once warm; reduced motion jumps to the
+    /// last stop); `animate` is the one-key case. `false` for a stale handle.
+    pub fn animate_keys(&mut self, b: &Handle, keys: &[(f32, Target, Curve)]) -> bool {
+        assert!(!keys.is_empty() && keys.len() <= MAX_KEYS, "Ui.animate_keys: 1 to {MAX_KEYS} keyframes, not {}", keys.len());
+        assert!(keys.windows(2).all(|w| w[0].0 <= w[1].0) && keys[0].0 >= 0.0, "Ui.animate_keys: keyframe times ascend from 0");
+        if !self.live(b) {
+            return false;
+        }
+        let slot = b.box_slot;
+        let from = self.pose(slot).0;
+        let mut k = Keys { n: keys.len(), t: [0.0; MAX_KEYS], pose: [from; MAX_KEYS], curve: [Curve::Bezier { duration: 0.0, points: [0.0, 0.0, 1.0, 1.0] }; MAX_KEYS] };
+        let mut at = from;
+        for (j, &(t, target, curve)) in keys.iter().enumerate() {
+            match target {
+                Target::Look(look) => at.look = look,
+                Target::Offset(dx, dy) => (at.dx, at.dy) = (dx, dy),
+                Target::Opacity(o) => at.opacity = o.clamp(0.0, 1.0),
+            }
+            (k.t[j], k.pose[j], k.curve[j]) = (t, at, curve);
+        }
+        let last = if self.theme().tokens.reduced_motion { 0.0 } else { k.t[k.n - 1] };
+        self.start_tween(slot, Curve::Bezier { duration: last, points: [0.0, 0.0, 1.0, 1.0] }, from, at);
+        if last > 0.0 {
+            let id = match self.free_keyframes.pop() {
+                Some(id) => {
+                    self.keyframes[id as usize] = k;
+                    id
+                }
+                None => {
+                    self.keyframes.push(k);
+                    self.keyframes.len() as u32 - 1
+                }
+            };
+            let i = self.tween_of(slot).expect("the run just started");
+            self.tweens[i].keys = id;
+        }
         if !self.building {
             self.frame_requested = true;
         }

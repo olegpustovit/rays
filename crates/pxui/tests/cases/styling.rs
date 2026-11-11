@@ -272,6 +272,55 @@ pub fn styling_animate_spring() {
     ui.destroy();
 }
 
+/// Keyframes: each stop reached at its time along its segment's curve, channels kept between stops;
+/// the run rests on the last stop without rebuilding its view, and a warm run allocates nothing.
+pub fn styling_animate_keys() {
+    let mut ui = new_ui(None);
+    let chip = Cell::new(None);
+    let runs = Cell::new(0);
+    let mut build = |ui: &mut Ui| {
+        ui.view("v", 1, Size::Px(200.0), Size::Px(100.0), &mut |ui| {
+            runs.set(runs.get() + 1);
+            let look = Look { fill: color::rgb(200, 40, 40), ..Look::NONE };
+            chip.set(Some(ui.node("chip", Node { w: Size::Px(40.0), h: Size::Px(20.0), look, ..Node::DEFAULT })));
+        });
+    };
+    ui.frame(&at(0.0, vec![]), &mut build);
+    ui.frame(&at(0.1, vec![]), &mut build);
+    let chip = chip.get().expect("chip");
+    let shown = |ui: &Ui| ui.output().draw[0].instances.iter().find(|i| i.color[0] == 200).map(|i| (i.rect[0], i.color[3] as i32));
+    let linear = Curve::Bezier { duration: 0.0, points: [0.0, 0.0, 1.0, 1.0] };
+    let keys = [(0.1, Target::Opacity(0.0), linear), (0.3, Target::Opacity(1.0), linear), (0.4, Target::Offset(20.0, 0.0), linear)];
+    let built = runs.get();
+    let mut t0 = 0.1;
+    for round in 0..2 {
+        check(ui.animate_keys(&chip, &keys), "animate_keys refused");
+        let frames: Vec<_> = [0.05, 0.1, 0.2, 0.35, 0.5].iter().map(|dt| at(t0 + dt, vec![])).collect();
+        let mut seen = Vec::with_capacity(frames.len());
+        mem_sys::local_reset();
+        let allocs = mem_sys::local_alloc_count();
+        for f in &frames {
+            ui.frame(f, &mut build);
+            seen.push(shown(&ui));
+        }
+        let allocs = mem_sys::local_alloc_count() - allocs;
+        let near = |s: Option<(f32, i32)>, x: f32, a: i32| s.is_some_and(|(sx, sa)| (sx - x).abs() < 0.01 && (sa - a).abs() <= 2);
+        check(near(seen[0], 0.0, 128), &format!("halfway to transparent: {seen:?}"));
+        check(seen[1].is_none_or(|(_, a)| a == 0), &format!("transparent at the first stop: {seen:?}"));
+        check(near(seen[2], 0.0, 128), &format!("halfway back to opaque: {seen:?}"));
+        check(near(seen[3], 10.0, 255), &format!("halfway along the offset segment, opacity kept: {seen:?}"));
+        check(near(seen[4], 20.0, 255) && ui.transitions() == 0, &format!("rests on the last stop: {seen:?}"));
+        check(!ui.wants_frame(&[], t0 + 1.0), "the gate did not idle after the keyframes");
+        check(round == 0 || allocs == 0, &format!("a warm keyframed run allocated {allocs} times"));
+        // the next run starts where this one rested: back to 0 first
+        ui.animate(&chip, Target::Offset(0.0, 0.0), Curve::Bezier { duration: 0.0, points: [0.0, 0.0, 1.0, 1.0] });
+        ui.frame(&at(t0 + 0.6, vec![]), &mut build);
+        t0 += 0.6;
+    }
+    check(runs.get() == built, "keyframes rebuilt the view");
+    ui.destroy();
+}
+
 /// A scaled view: its entry carries the transform, and hit testing goes through the inverse.
 pub fn styling_view_transform_hits() {
     let mut ui = new_ui(None);
@@ -359,4 +408,5 @@ pub const CASES: &[(&str, fn())] = &[
     ("styling_reduced_motion", styling_reduced_motion),
     ("styling_theme_swap_transition", styling_theme_swap_transition),
     ("styling_animate_spring", styling_animate_spring),
+    ("styling_animate_keys", styling_animate_keys),
 ];
