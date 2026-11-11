@@ -75,8 +75,8 @@ pub fn renderer_scene3_world_matches_owned_printer_fixture() {
 }
 
 pub fn ogpu_metal_present_matches_owned_printer_fixture() {
-    // only present.metal was captured (the SPIR-V presenter is not a golden)
-    let compared = compare("ogpu_metal", "ogpu_metal", "ogpu_metal", &["present.vert.spv", "present.frag.spv"]);
+    // only present.metal was captured (the SPIR-V presenter is not a golden); shader and golden live in the pxui submodule
+    let compared = compare("ogpu_metal", "../pxui/crates/ogpu_metal", "../../pxui/fixtures/shaders/ogpu_metal", &["present.vert.spv", "present.frag.spv"]);
     assert_eq!(compared, vec!["present.metal".to_owned()]);
 }
 

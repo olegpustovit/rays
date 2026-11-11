@@ -209,7 +209,9 @@ fn instanced() {
     let transforms: Vec<Vec<f64>> = vec![
         vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         vec![m[0], m[1], m[2], 0.3, m[3], m[4], m[5], 0.2, m[6], m[7], m[8], 1.0],
-        vec![0.4, 0.0, 0.0, -1.0, 0.0, 0.4, 0.0, -0.8, 0.0, 0.0, 0.4, -0.5],
+        // x -0.98, not -1: at -1 the prototype's right edge lies on the sample grid's x = -0.6, where a hit
+        // is the driver's tie-break (lavapipe misses it, NVIDIA and the CPU hit it)
+        vec![0.4, 0.0, 0.0, -0.98, 0.0, 0.4, 0.0, -0.8, 0.0, 0.0, 0.4, -0.5],
     ];
     // the shutter's end: the first instance tilts and slides, the second squashes, the third
     // stays; x=0.42 keeps the sample grid off the prototype's exact outer edge.
