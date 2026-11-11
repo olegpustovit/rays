@@ -310,7 +310,33 @@ pub fn layout_warm_zero_alloc() {
     ui.destroy();
 }
 
+/// A row's right-anchored control follows a width change on the frame of the change (the kit lays
+/// it out from the row's end; no last-frame width).
+pub fn layout_kit_resize_same_frame() {
+    let mut ui = new_ui(None);
+    let width = std::cell::Cell::new(280.0);
+    let mut build = |ui: &mut Ui| ui.panel(PanelOpts::default().width(width.get()), "panel", &mut |ui| {
+        ui.text_field("Caption", "value");
+        ui.toggle("Wire", true);
+    });
+    let control = |ui: &Ui, row: &str, n: i64| {
+        let panel = key_of(0x2c1b3c6d, "panel");
+        ui.rect(&ui.box_of_key(int_key(key_of(panel, row), n)).unwrap())
+    };
+    for (t, w) in [(0.0, 280.0), (0.1, 280.0), (0.2, 340.0)] {
+        width.set(w);
+        ui.frame(&at(t, vec![]), &mut build);
+        let (cx, _, cw, _) = value_control((12, 0, w as i64, 24));
+        let field = control(&ui, "Caption", 0);
+        check(field.x == cx as f32 && field.w == cw as f32, &format!("width {w}: field control {field:?}, expected x {cx} w {cw}"));
+        let switch = control(&ui, "Wire", 0);
+        check(switch.x == 12.0 + w - 12.0 - 28.0, &format!("width {w}: switch {switch:?}"));
+    }
+    ui.destroy();
+}
+
 pub const CASES: &[(&str, fn())] = &[
+    ("layout_kit_resize_same_frame", layout_kit_resize_same_frame),
     ("layout_warm_zero_alloc", layout_warm_zero_alloc),
     ("layout_grow_shrink", layout_grow_shrink),
     ("layout_min_max_aspect", layout_min_max_aspect),

@@ -236,32 +236,7 @@ pub type HitFn = Rc<dyn Fn(Rect) -> Rect>;
 pub use crate::theme::{Curve, Font, Look, Ring, Shadow, State, States, Theme, Tokens};
 pub use crate::layout::{place_anchored, Align, Anchor, Cell, Direction, Grid, Justify, Placement, Side, Track};
 
-/// Where a node's look, text and mark sit in its laid-out rectangle: `inset` in from each side, then
-/// at most `w` wide (at the left, or the right with `end`) and `h` high (centred), when finite. The
-/// whole rectangle by default; a widget's background whose width is known only after layout.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Place {
-    pub inset: Edges,
-    pub w: f32,
-    pub h: f32,
-    pub end: bool,
-}
-
-impl Place {
-    pub const ALL: Place = Place { inset: Edges { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }, w: f32::INFINITY, h: f32::INFINITY, end: false };
-    /// The placed rectangle in `r`.
-    pub fn rect(&self, r: Rect) -> Rect {
-        let Edges { l, t, r: right, b } = self.inset;
-        let (x, y, w, h) = (r.x + l, r.y + t, r.w - l - right, r.h - t - b);
-        let pw = if self.w.is_finite() { self.w.min(w).max(1.0) } else { w };
-        let ph = if self.h.is_finite() { self.h } else { h };
-        let px = if self.end { x + w - pw } else { x };
-        let py = if self.h.is_finite() { y + ((h - ph) / 2.0).floor() } else { y };
-        Rect::new(px, py, pw, ph)
-    }
-}
-
-/// A drawn mark centred in a node's placed rectangle, in its look's text colour.
+/// A drawn mark centred in a node's rectangle, in its look's text colour.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mark {
     None,
@@ -288,7 +263,7 @@ pub struct Bar {
 /// along the axis, `align` across it (`align_self` overrides it for this node), `wrap` breaks a
 /// flow into lines; `cell` is its place in a parent grid, `z` its order in a stack. `at` places it
 /// outside the flow at an offset from the parent's origin, `anchor` by a window rectangle (a popup).
-/// `place` is where its look sits in it and `inset` where its text sits in that; `mark` is drawn
+/// `inset` is where its text sits in it; `mark` is drawn
 /// over its text; `bar` gives a scroll node its thumb; `state` is what the look was picked for (a
 /// change of state starts the theme's transition).
 #[derive(Clone, Copy, Debug)]
@@ -320,7 +295,6 @@ pub struct Node {
     pub scroll_step: f32,
     pub look: Look,
     pub inset: Edges,
-    pub place: Place,
     pub mark: Mark,
     pub bar: Option<Bar>,
     pub state: State,
@@ -357,7 +331,6 @@ impl Node {
         scroll_step: 24.0,
         look: Look::NONE,
         inset: Edges { l: 0.0, t: 0.0, r: 0.0, b: 0.0 },
-        place: Place::ALL,
         mark: Mark::None,
         bar: None,
         state: State { hovered: false, pressed: false, focused: false, disabled: false, checked: false },
@@ -2890,6 +2863,10 @@ impl Ui {
         }
     }
 
+    pub(crate) fn node_at(&self, index: usize) -> &Node {
+        self.nd(index)
+    }
+
     pub(crate) fn box_parent(&self, index: usize) -> usize {
         self.boxes[index].parent
     }
@@ -3849,7 +3826,7 @@ impl Paint {
     /// gradient and shadowed ones as distance fields. `steady` (a running transition) emits the same
     /// instances whatever the colours, so each step rewrites the node's range in place.
     fn look(&mut self, r: Rect, node: &Node, look: &Look, text: &str, focused: bool, steady: bool) {
-        let placed = node.place.rect(r);
+        let placed = r;
         let Rect { x, y, w, h } = placed;
         let o = look.opacity.clamp(0.0, 1.0);
         let fade = |c: Color| if o < 1.0 { Color { a: (c.a as f32 * o).round() as i64, ..c } } else { c };
@@ -4991,9 +4968,10 @@ impl Ui {
         }
         let width = width.min(14.0 + widest);
         let height = 20.0 + 14.0 * (lines.len() as f32 - 1.0);
+        // 12 right of the pointer and 20 below it, or 8 above it when that does not fit
         let (px, py) = self.pointer;
-        let x = 8.0f32.max((px + 12.0).min(self.view_w - width - 8.0));
-        let y = if py + height + 24.0 <= self.view_h { py + 20.0 } else { 8.0f32.max(py - height - 8.0) };
+        let placement = Placement { side: Side::Below, align: Align::Start, gap: 0.0, margin: 8.0, flip: true };
+        let Rect { x, y, .. } = place_anchored(Rect::new(px + 12.0, py - 8.0, 0.0, 28.0), (width, height), placement, Rect::new(0.0, 0.0, self.view_w, self.view_h));
         let saved = self.enter_root();
         let tip = self.box_("ui-tooltip", BoxOpts::default().w(Size::Px(width)).h(Size::Px(height)).at((x, y)));
         self.overlays.push(tip.index);

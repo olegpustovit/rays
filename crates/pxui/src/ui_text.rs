@@ -1135,8 +1135,8 @@ impl Ui {
                 let tracking = 0.04 * small as f32;
                 let count = text.bytes().filter(|b| b & 0xc0 != 0x80).count();
                 let tw = self.text_width(Some(small), text);
-                let place = Place { inset: Edges { r: 8.0 + tracking * count as f32, ..Edges::default() }, w: tw, end: true, ..Place::ALL };
-                self.placed_part(k(2), at, small as f32, place, index_look, text);
+                self.end_row(&header, 0.0);
+                self.flow_part(k(2), tw, small as f32, Edges { t: at, r: 8.0 + tracking * count as f32, ..Edges::ZERO }, index_look, text);
             }
         }
         if !renaming {
@@ -1172,7 +1172,7 @@ impl Ui {
         let saved = self.enter(header);
         let b = self.box_(
             &format!("{}-button-{}", key, index),
-            BoxOpts::default().flags(if enabled { CLICKABLE | TAB_STOP } else { NO_FLAGS }).at((x, y_buttons)).w(Size::Px(w)).h(Size::Px(20.0)),
+            BoxOpts::default().flags(if enabled { CLICKABLE | TAB_STOP } else { NO_FLAGS }).at((x, y_buttons)).w(Size::Px(w)).h(Size::Px(self.control_h())),
         );
         let signal = self.signal(&b);
         if enabled && signal.clicked {
@@ -1192,7 +1192,7 @@ impl Ui {
             let font_size = self.font_size();
             let at = 1.0 + pad + mono_width(0.0, font_size, label) + 6.0;
             let hw = self.text_width(Some(key_look.font.points(font_size)), hint);
-            let n = self.node_keyed(int_key(b.box_key, 0), Node { w: Size::Px(hw.max(1.0)), h: Size::Px(20.0), at: Some((at, 0.0)), look: key_look, ..Node::DEFAULT });
+            let n = self.node_keyed(int_key(b.box_key, 0), Node { w: Size::Px(hw.max(1.0)), h: Size::Px(self.control_h()), at: Some((at, 0.0)), look: key_look, ..Node::DEFAULT });
             self.text(&n, hint);
             self.leave(inner);
         }
@@ -1226,7 +1226,6 @@ impl Ui {
         let composition = if focused { self.composition().to_owned() } else { String::new() };
         let hovered = signal.hovered;
         // the I-beam over the value, as in any text field
-        let width = self.row_width(&row);
         {
             let (px, py) = self.pointer();
             let (cx, cy, cw, ch) = value_control(ints(self.rect(&row)));
@@ -1240,11 +1239,12 @@ impl Ui {
         self.set_look(&row, look, hover);
         self.node_mut(&row).inset = Edges { l: SIDE as f32, ..Edges::default() };
         self.text(&row, shown(text));
-        // the value on its hairline in the control column
+        // the value on its hairline in the control column (`value_control` of the row, from its end)
         let rh = self.row_height() as f32;
-        let (cx, _, cw, _) = value_control((0, 0, width as i64, rh as i64));
+        let pad = (rh - self.control_h()) / 2.0;
+        self.end_row(&row, self.space(2));
         let saved = self.enter(&row);
-        let control = self.part(int_key(row.box_key, 0), (cx as f32, 2.0), Size::Px(cw as f32), rh - 4.0, field, Edges { l: 2.0, ..Edges::default() }, "");
+        let control = self.node_keyed(int_key(row.box_key, 0), Node { w: Size::Rel(value_control_w), h: Size::Px(rh - 2.0 * pad), margin: Edges { t: pad, ..Edges::ZERO }, look: field, inset: Edges { l: 2.0, ..Edges::ZERO }, ..Node::DEFAULT });
         self.node_mut(&control).state = State { focused, ..State::default() };
         match edit {
             Some(edit) => {
@@ -2387,14 +2387,10 @@ impl Ui {
             let (ls, le) = (start_of(&rows, line), stop_of(&rows, line));
             let anchor = text_x0 + self.caret_x(None, &final_text[ls..le], index.min(le) - ls);
             let (view_w, view_h) = self.view_size();
-            let px = 8.0f32.max((anchor - 8.0).min(view_w - width - 8.0));
-            let below = by - offset + pad + (slot_of(&notes, caret_line) + 1) as f32 * row;
-            let py = if below + height <= view_h - 8.0 {
-                below
-            } else {
-                8.0f32.max(by - offset + pad + slot_of(&notes, caret_line) as f32 * row - height)
-            };
-            self.set_at(container, (px, py));
+            let line_top = by - offset + pad + slot_of(&notes, caret_line) as f32 * row;
+            let placement = Placement { side: Side::Below, align: Align::Start, gap: 0.0, margin: 8.0, flip: true };
+            let r = place_anchored(Rect::new(anchor - 8.0, line_top, 0.0, row), (*width, *height), placement, Rect::new(0.0, 0.0, view_w, view_h));
+            self.set_at(container, (r.x, r.y));
             let selected = st.selected;
             let t = self.theme();
             let (sheet, list, hint) = (t.popup.idle, t.list, t.hint.idle);
@@ -2415,8 +2411,9 @@ impl Ui {
                 self.text(r, &c.label);
                 let dw = self.text_width(None, &c.detail) as i64 as f32;
                 let rh = self.row_height() as f32;
+                self.end_row(r, self.space(2));
                 let saved = self.enter(r);
-                self.placed_part(int_key(r.box_key, 0), 0.0, rh, Place { inset: Edges { r: SIDE as f32, ..Edges::default() }, w: dw, end: true, ..Place::ALL }, hint, &c.detail);
+                self.flow_part(int_key(r.box_key, 0), dw, rh, Edges::ZERO, hint, &c.detail);
                 self.leave(saved);
             }
         }
@@ -2721,7 +2718,9 @@ impl Ui {
         let off = |i: i64| o.off.as_ref().map(|f| f(i)).unwrap_or(false);
         let mut rows = rows_of(query);
         // the search row: a 20-point field in 4 points of padding, a [/] before the query
-        let search = self.box_(label, BoxOpts::default().flags(CLICKABLE | FOCUSABLE | BLOCKING | FOCUS_MARK).w(Size::Grow).h(Size::Px(28.0)));
+        // a 20-point field in 4 points of margin
+        let search = self.box_(label, BoxOpts::default().flags(CLICKABLE | FOCUSABLE | BLOCKING | FOCUS_MARK).w(Size::Grow).h(Size::Px(self.control_h())));
+        self.node_mut(&search).margin = Edges::all(4.0);
         if self.focus_key() == 0 || self.slot_rw(search.box_slot) == 0.0 {
             self.focus_box(&search);
         }
@@ -2801,22 +2800,20 @@ impl Ui {
         let (hint, place_look) = (t.hint.idle, t.placeholder.idle);
         // the search row: a 20-point field in 4 points of padding
         self.set_look(&search, Look { text: CLEAR, ..field }, state);
-        self.node_mut(&search).place = Place { inset: Edges { l: 4.0, t: 4.0, r: 4.0, b: 4.0 }, ..Place::ALL };
         {
             let saved = self.enter(&search);
             if slash {
-                self.part(int_key(search.box_key, 1), (4.0, 4.0), Size::Px(prefix as f32), 20.0, hint, Edges { l: 2.0, ..Edges::default() }, "/");
+                self.part(int_key(search.box_key, 1), (0.0, 0.0), Size::Px(prefix as f32), self.control_h(), hint, Edges { l: 2.0, ..Edges::default() }, "/");
             }
             if edit.text.is_empty() {
                 let pw = self.text_width(None, &placeholder);
-                self.part(int_key(search.box_key, 2), (4.0 + prefix as f32, 4.0), Size::Px(pw + inset), 20.0, place_look, Edges { l: inset, ..Edges::default() }, &placeholder);
+                self.part(int_key(search.box_key, 2), (prefix as f32, 0.0), Size::Px(pw + inset), self.control_h(), place_look, Edges { l: inset, ..Edges::default() }, &placeholder);
             }
             self.leave(saved);
             let edit = edit.clone();
             let marks = if edit.text.is_empty() { None } else { Some((field.selection, field.caret)) };
             self.canvas_over(&search, move |paint, rect| {
-                let (x, y, w, h) = ints(rect);
-                let (cx, cy, cw, ch) = (x + 4, y + 4, 1.max(w - 8), 1.max(h - 8));
+                let (cx, cy, cw, ch) = ints(rect);
                 let control = (cx + prefix, cy, 1.max(cw - prefix), ch);
                 paint_text_edit(paint, None, false, inset, marks, control, label_y(font_size, cy, ch), &composition, &edit);
             });
@@ -2850,7 +2847,7 @@ impl Ui {
             let ink = if doomed { look.text } else if unavailable { t.list.disabled.text } else { t.list.idle.text };
             let (matched, key_look, detail_look) = (t.matched.idle.text, t.key.idle, if unavailable { t.placeholder.idle } else { t.hint.idle });
             self.set_look(&row, look, state);
-            let width = self.row_width(&row);
+            let width = self.width_of(&row);
             let rk = |n: i64| int_key(row.box_key, n);
             let inner = self.enter(&row);
             let rh = row_height as f32;
@@ -2905,14 +2902,11 @@ impl Ui {
                 start = stop;
                 flag = following;
             }
-            let edge = |r: f32, w: f32| Place { inset: Edges { r, ..Edges::default() }, w, end: true, ..Place::ALL };
-            let detail_right = if current {
-                self.placed_part(rk(1), 0.0, rh, edge(SIDE as f32, kw), key_look, key_text);
-                SIDE as f32 + kw + 8.0
-            } else {
-                SIDE as f32
-            };
-            self.placed_part(rk(2), 0.0, rh, edge(detail_right, dw), detail_look, detail);
+            self.end_row(&row, self.space(2));
+            self.flow_part(rk(2), dw, rh, Edges::ZERO, detail_look, detail);
+            if current {
+                self.flow_part(rk(1), kw, rh, Edges { l: 8.0, ..Edges::ZERO }, key_look, key_text);
+            }
             self.leave(inner);
         }
         self.leave(saved);
@@ -2979,9 +2973,10 @@ impl Ui {
             let t = self.theme();
             if text.is_empty() {
                 let look = t.separator.idle;
-                let line = self.box_fmt(format_args!("separator-{}", index), BoxOpts::default().flags(BLOCKING).w(Size::Grow).h(Size::Px(m.gap)));
+                // a hairline 4 points down in a `gap`-point space
+                let line = self.box_fmt(format_args!("separator-{}", index), BoxOpts::default().flags(BLOCKING).w(Size::Grow).h(Size::Px(1.0)));
                 self.set_look(&line, look, State::default());
-                self.node_mut(&line).place = Place { inset: Edges { t: 4.0, b: m.gap - 5.0, ..Edges::default() }, ..Place::ALL };
+                self.node_mut(&line).margin = Edges { t: 4.0, b: m.gap - 5.0, ..Edges::ZERO };
             } else {
                 let enabled = *enabled;
                 let danger = m.danger.contains(&index);
@@ -2999,6 +2994,7 @@ impl Ui {
                 self.node_mut(&row).inset = Edges { l: SIDE as f32 + lead + m.swatch_pad, ..Edges::default() };
                 self.text(&row, &display(text));
                 let k = |n: i64| int_key(row.box_key, n);
+                self.end_row(&row, 0.0);
                 let saved = self.enter(&row);
                 // the current choice: a 6-point accent square before the label
                 if m.selected == Some(index) {
@@ -3008,14 +3004,12 @@ impl Ui {
                     self.part(k(1), (SIDE as f32 + lead, rh / 2.0 - 4.0), Size::Px(8.0), 8.0, Look { fill: color, ..swatch_look }, Edges::default(), "");
                 }
                 if chevron {
-                    let place = Place { inset: Edges { r: 15.25 - 3.0, ..Edges::default() }, w: 6.0, end: true, ..Place::ALL };
-                    let c = self.placed_part(k(2), 0.0, rh, place, chevron_look, "");
+                    let c = self.flow_part(k(2), 6.0, rh, Edges { r: 15.25 - 3.0, ..Edges::ZERO }, chevron_look, "");
                     self.node_mut(&c).mark = Mark::Chevron(Dir::Right);
                 }
                 if let Some(key) = m.keys.get(index as usize).filter(|k| !k.is_empty()) {
                     let kw = self.text_width(Some(key_look.font.points(font_size)), key);
-                    let place = Place { inset: Edges { r: SIDE as f32, ..Edges::default() }, w: kw, end: true, ..Place::ALL };
-                    self.placed_part(k(3), 0.0, rh, place, key_look, key);
+                    self.flow_part(k(3), kw, rh, Edges { r: SIDE as f32, ..Edges::ZERO }, key_look, key);
                 }
                 self.leave(saved);
                 if enabled && signal.clicked && !chevron && picked.is_none() {
@@ -3066,8 +3060,9 @@ impl Ui {
         let width = view_w.min(self.menu_measure(lead, &o.keys, &chevrons, o.width.unwrap_or(150.0), items, swatch_pad, key_size));
         let height_of = |items: &[(String, bool)]| items.iter().fold(14.0, |h, (text, _)| h + if text.is_empty() { gap } else { row_height });
         let height = height_of(items);
-        let x = 0.0f32.max(x.min(view_w - width));
-        let y = 0.0f32.max(y.min(view_h - height));
+        // a menu opens at the point, moved inside the window
+        let bounds = Rect::new(0.0, 0.0, view_w, view_h);
+        let Rect { x, y, .. } = place_anchored(Rect::new(x, y, 0.0, 0.0), (width, height), Placement { flip: false, ..Placement::BELOW }, bounds);
         // the submenu of a row: a second menu overlapping this one by a point, level with its row
         let row_top = |index: i64| {
             y + 7.0 + items.iter().take(0.max(index) as usize).fold(0.0, |top, (text, _)| top + if text.is_empty() { gap } else { row_height })
@@ -3075,9 +3070,9 @@ impl Ui {
         let sub_geometry = |ui: &mut Ui, sub: &Submenu| -> Rect {
             let sub_width = view_w.min(ui.menu_measure(if sub.current.is_none() { 0.0 } else { 14.0 }, &sub.keys, &[], 0.0, &sub.rows, swatch_pad, key_size));
             let sub_height = height_of(&sub.rows);
-            let sx = if x + width - 1.0 + sub_width <= view_w { x + width - 1.0 } else { x - sub_width + 1.0 };
-            let sy = 0.0f32.max((row_top(sub.row) - 7.0).min(view_h - sub_height));
-            Rect::new(sx, sy, sub_width, sub_height)
+            // beside the menu, overlapping it by a point, level with its row; left when no room right
+            let beside = Placement { side: Side::Right, align: Align::Start, gap: -1.0, margin: 0.0, flip: true };
+            place_anchored(Rect::new(x, row_top(sub.row) - 7.0, width, 0.0), (sub_width, sub_height), beside, bounds)
         };
         // the rows of the submenus are numbered after those of this menu, in order
         let mut bases = Vec::new();

@@ -27,11 +27,54 @@ impl Ui {
         self.part(key, at, Size::Px(w.max(1.0)), size, look, Edges::default(), text)
     }
 
-    /// A part across its parent's whole width whose look sits where `place` puts it.
-    pub(crate) fn placed_part(&mut self, key: i64, y: f32, h: f32, place: Place, look: Look, text: &str) -> Handle {
-        let n = self.node_keyed(key, Node { h: Size::Px(h), at: Some((0.0, y)), look, place, ..Node::DEFAULT });
+    /// A flow part `w` x `h` with `look` and `text`, `margin` round it: in a row laid out from the
+    /// end (`end_row`), what sits at a row's right edge.
+    pub(crate) fn flow_part(&mut self, key: i64, w: f32, h: f32, margin: Edges, look: Look, text: &str) -> Handle {
+        let n = self.node_keyed(key, Node { w: Size::Px(w.max(1.0)), h: Size::Px(h), margin, look, ..Node::DEFAULT });
         self.text(&n, text);
         n
+    }
+
+    /// The width `b` (declared this frame) will be laid out at, from its ancestors' declarations:
+    /// a `Px` width less the padding and margins down to it, through `Grow` widths across columns.
+    /// Anything else (a share of a row, `Pct`, `Rel`, `Fit`) is known only after layout: last frame's.
+    // ponytail: a scroll gutter that appears with overflow is not taken off; a picker list in a
+    // scrolling panel cuts its labels 10 points late on the frame its scrollbar appears.
+    pub(crate) fn width_of(&self, b: &UiBox) -> f32 {
+        let mut index = b.index;
+        let mut less = 0.0;
+        while index != NONE && index != 0 {
+            let n = *self.node_at(index);
+            match n.w {
+                Size::Px(w) => return (w - less).max(0.0),
+                Size::Grow if self.node_at(self.box_parent(index)).axis != Axis::Row => {}
+                _ => break,
+            }
+            index = self.box_parent(index);
+            let p = self.node_at(index);
+            less += n.margin.l + n.margin.r + p.padding.l + p.padding.r;
+        }
+        self.rect(b).w
+    }
+
+    /// A control's height (`Theme::control_h`) at the theme's density.
+    pub fn control_h(&self) -> f32 {
+        let t = self.theme();
+        (t.control_h * t.tokens.density).round()
+    }
+
+    /// Step `i` of the theme's spacing scale (4, 8, 12, 16 by default) at its density.
+    // ponytail: the hit shapes of the value and switch rows (`value_control`, `toggle_control`) keep
+    // the default 12-point sides; parameterise them when a density other than 1 ships.
+    pub fn space(&self, i: usize) -> f32 {
+        let t = self.theme();
+        (t.tokens.space[i.min(3)] * t.tokens.density).round()
+    }
+
+    /// Lay `row`'s flow children out from its end, `end` points in from it.
+    pub(crate) fn end_row(&mut self, row: &Handle, end: f32) {
+        let n = self.node_mut(row);
+        (n.axis, n.justify, n.padding.r) = (Axis::Row, Justify::End, end);
     }
 
     /// `text` cut with an ellipsis to `width` at `size` points (the ellipsis alone when nothing fits).
@@ -40,13 +83,6 @@ impl Ui {
         if shown.is_empty() && !(text.is_empty() && width >= 0.0) { Cow::Borrowed("\u{2026}") } else { shown }
     }
 
-    /// The width a row being built was laid out at last frame (`inspector_width` before its first).
-    // ponytail: a widget whose layout depends on its row's width reads last frame's; a resize shows
-    // one frame of the old layout. Layout-time placement rules if that frame shows.
-    pub(crate) fn row_width(&self, row: &UiBox) -> f32 {
-        let w = self.rect(row).w;
-        if w > 0.0 { w } else { self.inspector_width() }
-    }
 
     pub(crate) fn kit_row(&mut self, flags: Option<Flags>, hit: Option<HitFn>, label: &str) -> UiBox {
         let flags = flags.unwrap_or(CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY);
@@ -169,6 +205,13 @@ pub fn value_control(r: IRect) -> IRect {
     let (x, y, w, h) = r;
     let cx = x + SIDE + value_column(w) + 8;
     (cx, y + 2, 1.max(x + w - SIDE - cx), 1.max(h - 4))
+}
+
+/// The width of `value_control`'s control as a flow child of a row laid out from its end
+/// (`end_row(row, SIDE)`): `inner` is the row's width less that `SIDE`.
+pub fn value_control_w(inner: f32) -> f32 {
+    let w = inner as i64 + SIDE;
+    1.max(w - 2 * SIDE - 8 - value_column(w)) as f32
 }
 
 pub fn toggle_control(r: IRect) -> IRect {
@@ -481,8 +524,9 @@ impl Ui {
         self.set_look(&title, look, State::default());
         self.node_mut(&title).inset = Edges { l: SIDE as f32, t: gap, ..Edges::default() };
         self.text(&title, label);
+        self.end_row(&title, self.space(2));
         let saved = self.enter(&title);
-        let mark = self.placed_part(int_key(title.box_key, 0), gap, rh, Place { inset: Edges { r: SIDE as f32, ..Edges::default() }, w: 6.0, end: true, ..Place::ALL }, chevron, "");
+        let mark = self.flow_part(int_key(title.box_key, 0), 6.0, rh, Edges { t: gap, ..Edges::ZERO }, chevron, "");
         self.node_mut(&mark).mark = Mark::Chevron(if open { Dir::Down } else { Dir::Right });
         self.leave(saved);
         if open {
@@ -500,7 +544,7 @@ impl Ui {
 
     /// The value control inside an inspector row.
     pub fn inspector_toggle_value(&mut self, key: &str, at: (f32, f32), value: bool) -> bool {
-        let control = self.box_(key, BoxOpts::default().flags(CLICKABLE | TAB_STOP).at(at).w(Size::Px(28.0)).h(Size::Px(20.0)));
+        let control = self.box_(key, BoxOpts::default().flags(CLICKABLE | TAB_STOP).at(at).w(Size::Px(28.0)).h(Size::Px(self.control_h())));
         let value = if self.signal(&control).clicked { !value } else { value };
         let on = State { checked: value, ..State::default() };
         let (track, knob) = (*self.theme().switch.pick(on), *self.theme().knob.pick(on));
@@ -527,16 +571,18 @@ impl Ui {
     /// A text button on a row of its own.
     pub fn inspector_button(&mut self, key: &str, label: &str) -> bool {
         self.lead_gap();
-        let row = self.node(key, Node { flags: CLICKABLE | TAB_STOP | FIT_TEXT, h: Size::Px(self.row_height() as f32), ..Node::DEFAULT });
+        let pad = (self.row_height() as f32 - self.control_h()) / 2.0;
+        let row = self.node(key, Node { flags: CLICKABLE | TAB_STOP, h: Size::Px(self.row_height() as f32), axis: Axis::Row, padding: Edges { l: 6.0, t: pad, r: 6.0, b: pad }, ..Node::DEFAULT });
         let signal = self.signal(&row);
         // the ground is the label and 6 points each side, from 6 in; the label is cut to the row less 24
         let tw = self.text_width(None, label);
         let state = State { hovered: signal.hovered, pressed: signal.held, ..State::default() };
         let look = Look { ring: Ring::NONE, ..*self.theme().button.pick(state) };
-        self.set_look(&row, look, state);
-        let n = self.node_mut(&row);
-        (n.place, n.inset) = (Place { inset: Edges { l: 6.0, t: 2.0, r: 6.0, b: 2.0 }, w: tw + 12.0, ..Place::ALL }, Edges { l: 6.0, r: 6.0, ..Edges::default() });
-        self.text(&row, label);
+        let saved = self.enter(&row);
+        let ground = self.node_keyed(int_key(row.box_key, 0), Node { flags: FIT_TEXT, w: Size::Px(tw + 12.0), shrink: 1.0, min_w: 1.0, h: Size::Grow, inset: Edges { l: 6.0, r: 6.0, ..Edges::ZERO }, ..Node::DEFAULT });
+        self.leave(saved);
+        self.set_look(&ground, look, state);
+        self.text(&ground, label);
         signal.clicked
     }
 
@@ -586,9 +632,9 @@ impl Ui {
         let text = format!("{} on card", count);
         // the sheet's tracking follows the last letter too: the ink ends that much before the 12
         let label_w = self.cap_width(&text) + 0.08 * small as f32;
-        self.placed_part(int_key(bar.box_key, -1), 1.0, line, Place { inset: Edges { r: 12.0, ..Edges::default() }, w: label_w, end: true, ..Place::ALL }, label, &text);
-        let edge = Edges { r: 12.0 + label_w + 8.0, ..Edges::default() };
-        self.placed_part(int_key(bar.box_key, -2), 1.0 + line / 2.0 - 3.0, 6.0, Place { inset: edge, w: 6.0, end: true, ..Place::ALL }, dot, "");
+        self.end_row(&bar, 12.0);
+        self.flow_part(int_key(bar.box_key, -2), 6.0, 6.0, Edges { t: 1.0 + line / 2.0 - 3.0, r: 8.0, ..Edges::ZERO }, dot, "");
+        self.flow_part(int_key(bar.box_key, -1), label_w, line, Edges { t: 1.0, ..Edges::ZERO }, label, &text);
         self.leave(saved);
     }
 
@@ -706,21 +752,23 @@ impl Ui {
         let rh = self.row_height() as f32;
         let t = self.theme();
         let (rule, key, hint, label) = (t.footer.idle, t.key.idle, t.hint.idle, t.label.idle);
-        let row = self.node("footer", Node { h: Size::Px(5.0 + rh), look: rule, place: Place { inset: Edges { t: 4.0, ..Edges::default() }, ..Place::ALL }, ..Node::DEFAULT });
+        // the hairline 4 points under what is above
+        let row = self.node("footer", Node { h: Size::Px(1.0 + rh), margin: Edges { t: 4.0, ..Edges::ZERO }, look: rule, ..Node::DEFAULT });
         let size = key.font.points(self.font_size());
         let saved = self.enter(&row);
         let mut pen = SIDE as f32;
         for (i, (k, what)) in hints.iter().enumerate() {
             let kw = self.text_width(Some(size), k);
-            self.part(int_key(row.box_key, 2 * i as i64), (pen, 5.0), Size::Px(kw.max(1.0)), rh, key, Edges::default(), k);
+            self.part(int_key(row.box_key, 2 * i as i64), (pen, 1.0), Size::Px(kw.max(1.0)), rh, key, Edges::default(), k);
             pen += kw + 8.0;
             let ww = self.text_width(None, what);
-            self.part(int_key(row.box_key, 2 * i as i64 + 1), (pen, 5.0), Size::Px(ww.max(1.0)), rh, hint, Edges::default(), what);
+            self.part(int_key(row.box_key, 2 * i as i64 + 1), (pen, 1.0), Size::Px(ww.max(1.0)), rh, hint, Edges::default(), what);
             pen += ww + 8.0;
         }
         if let Some(text) = right {
             let cw = self.cap_width(text);
-            self.placed_part(int_key(row.box_key, -1), 5.0, rh, Place { inset: Edges { r: SIDE as f32, ..Edges::default() }, w: cw, end: true, ..Place::ALL }, label, text);
+            self.end_row(&row, self.space(2));
+            self.flow_part(int_key(row.box_key, -1), cw, rh, Edges { t: 1.0, ..Edges::ZERO }, label, text);
         }
         self.leave(saved);
     }
@@ -756,14 +804,17 @@ impl Ui {
         let measure = self.text_width(None, shown(text));
         // the box: a 1-point edge and 6 points of padding (4 when `bare`) round the text; an `icon`
         // is the 20-point control square with its glyph centred
-        let width = if icon { 20.0 } else { measure + if bare { 10.0 } else { 14.0 } };
-        let extent = move |r: Rect| {
-            let Rect { x, y, w, h } = r;
-            let bx = if at_end { x + w - 8.0 - width } else { x + 5.0 };
-            Rect::new(bx, y + 2.0, 1.0f32.max(width.min(w - 10.0)), h - 4.0)
-        };
-        let row = self.kit_row(Some(CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY | FOCUS_MARK), None, text);
-        self.cached_hit(&row, (width.to_bits() as u64) << 1 | at_end as u64, || Rc::new(extent));
+        let control_h = self.control_h();
+        let width = if icon { control_h } else { measure + if bare { 10.0 } else { 14.0 } };
+        // the row lays the box out: 5 in from the start (8 from the end with `at_end`), the control
+        // centred in the row's height; the box is the button (its key, its hit area)
+        let key = key_of(self.current_seed(), text);
+        let pad = (self.row_height() as f32 - control_h) / 2.0;
+        let line = Node { h: Size::Px(self.row_height() as f32), axis: Axis::Row, justify: if at_end { Justify::End } else { Justify::Start }, padding: Edges { l: 5.0, t: pad, r: if at_end { 8.0 } else { 5.0 }, b: pad }, ..Node::DEFAULT };
+        let line = self.node_keyed(int_key(key, 0x6c69), line);
+        let saved = self.enter(&line);
+        let row = self.node_keyed(key, Node { flags: CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY | FOCUS_MARK, w: Size::Px(width), shrink: 1.0, min_w: 1.0, h: Size::Grow, ..Node::DEFAULT });
+        self.leave(saved);
         let signal = self.signal(&row);
         let state = State { hovered: signal.hovered, pressed: signal.held, focused: self.focused(&row), ..State::default() };
         self.style(&row, states, state);
@@ -776,7 +827,6 @@ impl Ui {
             _ => None,
         };
         let n = self.node_mut(&row);
-        n.place = Place { inset: Edges { l: 5.0, t: 2.0, r: if at_end { 8.0 } else { 5.0 }, b: 2.0 }, w: width, end: at_end, ..Place::ALL };
         n.inset = Edges { l: pad, ..Edges::default() };
         match direction {
             Some(d) => n.mark = Mark::Chevron(d),
@@ -799,12 +849,14 @@ impl Ui {
         self.text(&row, shown(text));
         // the 28 x 14 switch 12 from the row's end, the knob 3 in from its side
         let top = ((self.row_height() - 14) / 2) as f32;
+        self.end_row(&row, self.space(2));
         let saved = self.enter(&row);
-        let edge = |r: f32, w: f32| Place { inset: Edges { r, ..Edges::default() }, w, end: true, ..Place::ALL };
-        let s = self.placed_part(int_key(row.box_key, 0), top, 14.0, edge(SIDE as f32, 28.0), track, "");
+        let s = self.flow_part(int_key(row.box_key, 0), 28.0, 14.0, Edges { t: top, ..Edges::ZERO }, track, "");
         self.node_mut(&s).state = on;
-        let k = self.placed_part(int_key(row.box_key, 1), top + 3.0, 8.0, edge(SIDE as f32 + if value { 3.0 } else { 17.0 }, 8.0), knob, "");
+        let inner = self.enter(&s);
+        let k = self.part(int_key(row.box_key, 1), (if value { 17.0 } else { 3.0 }, 3.0), Size::Px(8.0), 8.0, knob, Edges::default(), "");
         self.node_mut(&k).state = on;
+        self.leave(inner);
         self.leave(saved);
         value
     }
