@@ -23,10 +23,11 @@ fn frame_at(count: i64, size: (i64, i64), density: i64) -> frame::Frame {
     frame::Frame { input, pixel_scale: (density as f64, density as f64), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
 
-/// The second frame of a fresh UI over the golden face, in `theme`, drawn over `ground`.
-fn shoot(gpu: &mut Gpu, theme: &Theme, size: (i64, i64), density: i64, ground: [u8; 4], build: &mut dyn FnMut(&mut Ui)) -> Vec<u8> {
+/// The second frame of a fresh UI over the golden face, in `theme` and `dir`, drawn over `ground`.
+fn shoot(gpu: &mut Gpu, theme: &Theme, dir: Direction, size: (i64, i64), density: i64, ground: [u8; 4], build: &mut dyn FnMut(&mut Ui)) -> Vec<u8> {
     let mut ui = Ui::create(Platform::Apple, None, pxui::text::Text::new(&[DEPARTURE_MONO]));
     ui.set_theme(*theme);
+    ui.set_dir(dir);
     for count in 0..2 {
         ui.frame(&frame_at(count, size, density), build);
     }
@@ -58,22 +59,26 @@ fn ground(theme: &Theme) -> [u8; 4] {
     [c.r as u8, c.g as u8, c.b as u8, 255]
 }
 
-/// Every page at 1x and 2x under both themes against `fixtures/gallery_<page>_<theme>_<d>x.png`.
+/// Every page at 1x and 2x under both themes against `fixtures/gallery_<page>_<theme>_<d>x.png`, and
+/// the layout page right to left (`gallery_layout_rtl_<theme>_<d>x.png`).
 fn gpu_gallery_pages() {
     let mut gpu = Gpu::open().expect("a GPU backend");
     // 100x60 so no nearest-sampled texel boundary falls on a pixel centre (96x64 into 40 points did: GPUs tie differently)
     let image = gpu.image(100, 60, &gpu::test_card(100, 60));
+    let shots = PAGES.iter().enumerate().map(|(i, p)| (i, p.to_lowercase(), Direction::Ltr)).chain([(4, "layout_rtl".to_owned(), Direction::Rtl)]);
+    let shots: Vec<_> = shots.collect();
     for (name, theme) in [("rays", Theme::default()), ("dusk", dusk())] {
-        for (i, page_name) in PAGES.iter().enumerate() {
+        for (i, page_name, dir) in &shots {
+            let i = *i;
             for density in [1, 2] {
                 let mut s = Gallery::new();
                 s.image = Some(image.clone());
                 // the overlays page with its dialog and context menu open
                 (s.dialog, s.menu_at) = (i == 3, (i == 3).then_some((360.0, 40.0)));
-                let pixels = shoot(&mut gpu, &theme, (PAGE_W, PAGE_H), density, ground(&theme), &mut |ui| {
+                let pixels = shoot(&mut gpu, &theme, *dir, (PAGE_W, PAGE_H), density, ground(&theme), &mut |ui| {
                     ui.view("page", 1, Size::Grow, Size::Grow, &mut |ui| page(ui, &mut s, i));
                 });
-                let path = format!("{}/fixtures/gallery_{}_{name}_{density}x.png", env!("CARGO_MANIFEST_DIR"), page_name.to_lowercase());
+                let path = format!("{}/fixtures/gallery_{page_name}_{name}_{density}x.png", env!("CARGO_MANIFEST_DIR"));
                 let worst = compare(&path, (PAGE_W, PAGE_H), density, &pixels, true);
                 // drivers round blends differently by a level (lavapipe): 2 per channel, as pxui's goldens
                 assert!(worst <= 2, "gallery {page_name} under {name} at {density}x drifted: largest channel difference {worst}");
@@ -81,7 +86,7 @@ fn gpu_gallery_pages() {
         }
     }
     gpu.close();
-    println!("PXUI gallery: 4 pages x 2 themes x 2 densities match their goldens");
+    println!("PXUI gallery: {} pages x 2 themes x 2 densities match their goldens", shots.len());
 }
 
 /// The exit criterion: the kit page under the default theme, in the kit golden's window, is pxui's
@@ -90,7 +95,7 @@ fn gpu_gallery_kit_is_kit_panel() {
     let mut gpu = Gpu::open().expect("a GPU backend");
     for density in [1, 2] {
         let mut s = Gallery::new();
-        let pixels = shoot(&mut gpu, &Theme::default(), (320, 300), density, [228, 139, 161, 255], &mut |ui| {
+        let pixels = shoot(&mut gpu, &Theme::default(), Direction::Ltr, (320, 300), density, [228, 139, 161, 255], &mut |ui| {
             ui.view("page", 1, Size::Grow, Size::Grow, &mut |ui| kit_page(ui, &mut s));
         });
         let path = format!("{}/../pxui/fixtures/kit_panel_{density}x.png", env!("CARGO_MANIFEST_DIR"));
