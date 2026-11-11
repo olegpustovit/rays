@@ -9,6 +9,8 @@ use input::{Event, MouseButton};
 struct Cost {
     built: usize,
     views: usize,
+    /// of `views`, the inspector's (its view and its sections')
+    inspector: usize,
     frames: usize,
     cpu_us: f64,
     bytes: usize,
@@ -18,7 +20,7 @@ struct Cost {
 /// `n` frames of `step` after the run's frames so far: per-frame averages over the frames the UI
 /// actually built; `views` is the sum of the views each frame rebuilt
 fn measure(r: &mut Run, n: usize, step: &dyn Fn(&mut Run, usize)) -> Cost {
-    let mut c = Cost { views: 0, built: 0, frames: 0, cpu_us: 0.0, bytes: 0, allocs: 0 };
+    let mut c = Cost { views: 0, inspector: 0, built: 0, frames: 0, cpu_us: 0.0, bytes: 0, allocs: 0 };
     // what frames before this left to draw is theirs, not the first measured frame's
     {
         let mut ui = r.e.core.ui.borrow_mut();
@@ -38,6 +40,7 @@ fn measure(r: &mut Run, n: usize, step: &dyn Fn(&mut Run, usize)) -> Cost {
             c.frames += 1;
             c.built += ui.built_nodes();
             c.views += ui.rebuilt_views();
+            c.inspector += ui.rebuilt_named("inspector-view") + ui.rebuilt_named("flow-section-");
             c.cpu_us += cpu.as_secs_f64() * 1e6;
         }
         let out = ui.output();
@@ -54,7 +57,7 @@ fn measure(r: &mut Run, n: usize, step: &dyn Fn(&mut Run, usize)) -> Cost {
 }
 
 fn report(name: &str, c: &Cost, n: usize) {
-    eprintln!("ui_frames {name}: {}/{n} frames built, {} nodes/frame, {} view rebuilds in all, {:.0} us UI/frame, {} instance bytes/frame, {} allocs/frame", c.frames, c.built, c.views, c.cpu_us, c.bytes, c.allocs);
+    eprintln!("ui_frames {name}: {}/{n} frames built, {} nodes/frame, {} view rebuilds in all ({} the inspector's), {:.0} us UI/frame, {} instance bytes/frame, {} allocs/frame", c.frames, c.built, c.views, c.inspector, c.cpu_us, c.bytes, c.allocs);
 }
 
 /// The window points of a pane's header collapse button and of the middle of its title.
@@ -246,7 +249,88 @@ fn workspace(name: &str, text: &str) {
     r.close();
 }
 
+/// Scrubbing a number of the document in the inspector (a node's `:width`): each frame of the drag
+/// writes the document (the viewport and the graph follow), the inspector stays kept (its field
+/// patched, `kept_drag`), and the whole scrub is one undo step back to the value it started from.
+fn document_scrub() {
+    use input::Key;
+    let text = include_str!("../../../rays_bin/src/empty.rays")
+        .replace(r##"(draw/background "#11151c")"##, r##"(let* [stroke (draw/line [0 0 0] [5 5 0] :color "#0f0" :width 3.0)] stroke)"##)
+        .replace(":second_size 280", ":second_size 520");
+    let mut r = Run::new(editor(&text));
+    r.e.core.ui.borrow_mut().verify_views(false);
+    r.e = rays_editor::reduce::select_path(r.e.clone(), &["picture".into(), "stroke".into()]);
+    r.e.core.ui.borrow_mut().set_a11y(true);
+    for i in 0..30 {
+        r.step((450. + (i % 2) as f64, 300.), vec![]);
+    }
+    let n = 20;
+    let width = |r: &Run| r.source().split(":width ").nth(1).and_then(|t| t.split([' ', ')']).next()).unwrap_or("").to_owned();
+    // the inspector's row (the card's row has a pin of that name)
+    let ix = r.panes().inspector.0 as f32;
+    let row = {
+        let ui = r.e.core.ui.borrow();
+        let tree = ui.output().a11y;
+        tree.nodes.iter().find(|n| &tree.strings[n.name.start as usize..n.name.end as usize] == "width" && n.rect.x >= ix).map(|n| ((n.rect.x + n.rect.w / 2.0) as f64, (n.rect.y + n.rect.h / 2.0) as f64))
+    };
+    let row = row.unwrap_or_else(|| fail("the width row"));
+    let at = (row.0 + 90.0, row.1);
+    let to = |r: &mut Run, p: (f64, f64)| r.step(p, vec![Event::PointerMoved(p)]);
+    to(&mut r, at);
+    let hover = measure(&mut r, n, &|r, i| to(r, (at.0 + (i % 2) as f64, at.1)));
+    report("document pointer", &hover, n);
+    let (start, history) = (width(&r), r.undo_label());
+    // the scrub: a press, two frames the drag takes in, then the measured frames
+    r.stepb(&[MouseButton::LeftButton], at, vec![Event::PointerMoved(at), Event::PointerPressed(MouseButton::LeftButton, at)]);
+    for i in 0..2 {
+        let p = (at.0 + 1.0 + i as f64, at.1);
+        r.stepb(&[MouseButton::LeftButton], p, vec![Event::PointerMoved(p)]);
+    }
+    let scrub = measure(&mut r, n, &|r, i| {
+        let p = (at.0 + 3.0 + 2.0 * i as f64, at.1);
+        r.stepb(&[MouseButton::LeftButton], p, vec![Event::PointerMoved(p)]);
+    });
+    report("document scrub inspector value", &scrub, n);
+    let scrubbed = width(&r);
+    let end = (at.0 + 3.0 + 2.0 * n as f64, at.1);
+    r.step(end, vec![Event::PointerMoved(end), Event::PointerReleased(MouseButton::LeftButton, end)]);
+    for _ in 0..4 {
+        to(&mut r, end);
+    }
+    let released = width(&r);
+    eprintln!("ui_frames document scrub: width {start} -> {scrubbed} (released {released})");
+    check(scrubbed.parse::<f64>().is_ok_and(|v| v > 3.0), &format!("the scrub did not write the document live: width {scrubbed}"));
+    // the release, 2 points on from the last of 41, moves it as far as 2 points do: the drag keeps
+    // the soft range it had at the press (a literal's range follows its value; it once sped up)
+    let (from, last, end_value) = (3.0, scrubbed.parse::<f64>().unwrap_or(0.0), released.parse::<f64>().unwrap_or(0.0));
+    check(end_value > last && end_value - last < (last - from) / 10.0, &format!("the release jumped: width {scrubbed} -> {released}"));
+    // one scrub, one undo step back to where it started
+    check(r.undo_label() != history, "the scrub left no history entry");
+    r.step_full(&[], &[Key::Meta], end, vec![ch('z')]);
+    for _ in 0..4 {
+        to(&mut r, end);
+    }
+    check(width(&r) == start && r.undo_label() == history, &format!("one undo did not restore the scrubbed width: {} ({:?})", width(&r), r.undo_label()));
+    // what the document's edit costs alone: the same edits written by the host, a pointer frame each
+    let edit = measure(&mut r, n, &|r, i| {
+        let op = flow_graph::flow_edit::Op::SetArg { node: vec!["picture".into(), "stroke".into()], key: flow_graph::flow_edit::ArgKey::Kw("width".into()), sub: vec![], value: flow_syntax::syntax::make(flow_syntax::syntax::Draft::Num(format!("{}.5", 3 + i))) };
+        r.e = rays_editor::editor::edit(r.e.clone(), &op).unwrap_or_else(|m: String| fail(&m));
+        to(r, (end.0 + (i % 2) as f64, end.1));
+    });
+    report("document edit by the host", &edit, n);
+    // the scrub's frames rebuild no view of the inspector (kept: the field patched; the card and
+    // the viewport follow the document by their own revisions), and build and allocate no more than
+    // a pointer frame and the document's edit by the host (which rebuilds the inspector's view and
+    // the edited section)
+    check(scrub.inspector == 0, &format!("scrubbing rebuilt {} of the inspector's views in {n} frames", scrub.inspector));
+    check(edit.inspector == 2 * n, &format!("the host's edits rebuilt {} of the inspector's views in {n} frames", edit.inspector));
+    check(scrub.built <= edit.built, &format!("scrubbing built {} nodes a frame (the host's edits {})", scrub.built, edit.built));
+    check(scrub.allocs <= edit.allocs, &format!("scrubbing allocated {} a frame (the host's edits {})", scrub.allocs, edit.allocs));
+    r.close();
+}
+
 pub fn run_ui_frames() {
+    document_scrub();
     workspace("basic", &sketch("basic"));
     workspace("empty", include_str!("../../../rays_bin/src/empty.rays"));
     workspace("floating", &with_editor("(let* [main (ui/graph) ins (ui/inspector) window (ui/floating ins) tiles (ui/tile main window)] (ui/workspace tiles))"));

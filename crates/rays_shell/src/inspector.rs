@@ -39,12 +39,74 @@ pub struct FlowOpts {
     pub pin_click: bool,
     pub chips: Vec<(String, Color)>,
     pub kind_label: Option<String>,
+    /// the numbers are `kept_drag` fields: their owner follows a drag between builds (`pressed`,
+    /// `dragging`, `dragged`), the rows' views kept
+    pub kept_drag: bool,
 }
 
 impl Default for FlowOpts {
     fn default() -> FlowOpts {
-        FlowOpts { expanded: Vec::new(), width: None, pins: false, pin_click: false, chips: Vec::new(), kind_label: None }
+        FlowOpts { expanded: Vec::new(), width: None, pins: false, pin_click: false, chips: Vec::new(), kind_label: None, kept_drag: false }
     }
+}
+
+/// The `kept_drag` number the pointer holds, as its press built it: its field's key, its field's
+/// name, how it scrubs and shows, the text the scrub starts from and the last text it wrote.
+struct Held {
+    field: i64,
+    name: String,
+    kind: param::number::Kind,
+    range: Option<(f64, f64)>,
+    trail: Option<(String, Color)>,
+    origin: String,
+    last: String,
+    /// pressed in the build `pressed` has not yet been asked about
+    fresh: bool,
+}
+
+thread_local! {
+    // ponytail: one held number per thread (the pointer holds one field); keyed by its field, so
+    // a second `Ui` on the thread cannot follow it
+    static HELD: std::cell::RefCell<Option<Held>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The name of the `kept_drag` number (`FlowChange::Edited`'s) pressed in the rows built since the
+/// last call: its owner makes then what a drag of it edits (`dragged`).
+pub fn pressed() -> Option<String> {
+    HELD.with(|h| h.borrow_mut().as_mut().filter(|h| h.fresh).map(|h| {
+        h.fresh = false;
+        h.name.clone()
+    }))
+}
+
+/// The held `kept_drag` number is dragged this frame (`Ui::field_drag`): its rows' views stay kept.
+pub fn dragging(ui: &Ui) -> bool {
+    HELD.with(|h| h.borrow().as_ref().is_some_and(|h| ui.box_of_key(h.field).is_some_and(|b| ui.field_drag(&b).is_some())))
+}
+
+/// After a frame that kept the held number's view: its drag read as its build reads it, the field
+/// patched, and the edit when the value moved (`FlowChange::Edited`'s name and value). `None` when
+/// it is not dragged; `Some((false, _))` when a patch cannot show it (build its view next frame).
+pub fn dragged(ui: &mut Ui) -> Option<(bool, Option<(String, Value)>)> {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        let h = h.as_mut()?;
+        let field = ui.box_of_key(h.field)?;
+        let (_, dx) = ui.field_drag(&field)?;
+        let fine = ui.press_keys(&field).contains(&input::Key::Shift);
+        let text = param::number::scrub(h.kind, h.range, &h.origin, dx as f64, fine);
+        if text == h.last {
+            return Some((true, None));
+        }
+        let opts = ValueFieldOpts { fraction: h.range.and_then(|r| param::number::fraction(r, &text).map(|f| f as f32)), trail: h.trail.clone(), ..ValueFieldOpts::default() };
+        let patched = ui.patch_field(&field, &opts, &text);
+        let value = match h.kind {
+            param::number::Kind::Int => text.parse::<i64>().ok().map(Value::Int),
+            param::number::Kind::Float => text.parse::<f64>().ok().map(Value::Float),
+        };
+        h.last = text;
+        Some((patched, value.map(|v| (h.name.clone(), v))))
+    })
 }
 
 /// Sections are one level deep: the top folder of a parameter, never the vector's own folder (its
@@ -76,6 +138,7 @@ struct Ctx {
     pins: bool,
     pin_click: bool,
     chips: Vec<(String, Color)>,
+    kept: bool,
 }
 
 impl Ctx {
@@ -140,7 +203,7 @@ fn numeric(
     convert: &dyn Fn(&str) -> Option<Value>,
     field: &FieldView,
     path: &str,
-    key: &str,
+    (row, key): (&UiBox, &str),
     ranged: bool,
     edit: bool,
     (x, y, w): (f32, f32, f32),
@@ -148,17 +211,40 @@ fn numeric(
     // the kit's number field: a drag changes the value from the one it had, by the step of its
     // kind and soft range (a vector's cell has none), so a click without a drag writes nothing
     let range = if ranged { range } else { None };
+    let kept = cx.kept && !expression(text);
+    // a held number scrubs by the range it had at the press: a literal's range follows its value
+    // (`num_range`), and a drag measured from the press must not speed up as the value grows
+    let held = pxui::ui_core::key_of(row.box_key, key);
+    let scrub_range = if kept { HELD.with(|h| h.borrow().as_ref().filter(|h| h.field == held).map_or(range, |h| h.range)) } else { range };
     let opts = ValueFieldOpts {
+        kept_drag: kept,
         display,
         edit,
         left: expression(text),
         trail: field.unit.clone().map(|unit| (unit, cx.ink_3)),
         fraction: range.and_then(|r| param::number::fraction(r, text).map(|f| f as f32)),
-        scrub: Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, range, origin, dx as f64, fine))),
+        scrub: Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, scrub_range, origin, dx as f64, fine))),
         ..ValueFieldOpts::default()
     };
     let valid = move |t: &str| param::number::valid(kind, t) || expression(t);
     let changed = ui.value_field((x, y), w, 20.0, &opts, &valid, key, text).0;
+    if kept {
+        // a press holds the number: its owner follows its drag while its view stays kept; the
+        // release (or any build of it not held) lets it go
+        let (pressed, holding) = ui.box_of_key(held).map(|b| ui.signal(&b)).map_or((false, false), |s| (s.pressed, s.held));
+        HELD.with(|h| {
+            let mut h = h.borrow_mut();
+            match h.as_mut() {
+                _ if pressed => {
+                    let (origin, last) = (text.to_owned(), changed.clone());
+                    *h = Some(Held { field: held, name: field.name.clone(), kind, range, trail: opts.trail.clone(), origin, last, fresh: true });
+                }
+                Some(mine) if mine.field == held && holding => mine.last = changed.clone(),
+                Some(mine) if mine.field == held => *h = None,
+                _ => {}
+            }
+        });
+    }
     if changed == text {
         Vec::new()
     } else if expression(&changed) {
@@ -178,7 +264,7 @@ fn input(
     on_choice: &dyn Fn(&str, &UiBox),
     ranged: bool,
     field: &FieldView,
-    path: &str,
+    (row, path): (&UiBox, &str),
     edit: bool,
     (x, y, w): (f32, f32, f32),
 ) -> Vec<FlowChange> {
@@ -195,7 +281,7 @@ fn input(
             &|text| text.parse::<i64>().ok().map(Value::Int),
             field,
             path,
-            &key,
+            (row, &key),
             ranged,
             edit,
             (x, y, w),
@@ -212,7 +298,7 @@ fn input(
                 &|text| (text).parse::<f64>().ok().map(Value::Float),
                 field,
                 path,
-                &key,
+                (row, &key),
                 ranged,
                 edit,
                 (x, y, w),
@@ -370,7 +456,7 @@ fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), path: &str, t
             BoxOpts::default().flags(CLICKABLE).at((label_x, 2.0)).w(Size::Px(1.0f32.max(control_x - label_x - 8.0))).h(Size::Px(20.0)),
         );
         let edit = ui.signal(&label).double_clicked;
-        let edits = input(ui, cx, on_choice, true, field, path, edit, (control_x, control_y, control_w));
+        let edits = input(ui, cx, on_choice, true, field, (&boxed, path), edit, (control_x, control_y, control_w));
         let pinned = cx.pin_click && action(ui, cx, &format!("pin-{path}"), "pin", 0.0, control_y, true);
         out = pin_change(ui, cx, &boxed, path, shown, pinned, edits);
     });
@@ -497,7 +583,7 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
         kit::vector(ui, &boxed, (control_x, control_y), control_w, 0.0, &["x", "y", "z"], &mut |ui, index, x, w| {
             if let Some(field) = row.fields.get(index) {
                 let axis = ["x", "y", "z"][index];
-                edits.extend(input(ui, cx, on_choice, false, field, &format!("{}.{}", row.path, axis), false, (x, control_y, w)));
+                edits.extend(input(ui, cx, on_choice, false, field, (&boxed, &format!("{}.{}", row.path, axis)), false, (x, control_y, w)));
             }
         });
         let pin = cx.pin_click && action(ui, cx, &format!("pin-{}", row.path), "pin", 0.0, control_y, !row.locked);
@@ -552,6 +638,7 @@ pub fn flow_fields(ui: &mut Ui, o: &FlowOpts, on_choice: Option<&dyn Fn(&str, &U
         pins: o.pins,
         pin_click: o.pin_click,
         chips: o.chips.clone(),
+        kept: o.kept_drag,
     };
     let on_choice: &dyn Fn(&str, &UiBox) = on_choice.unwrap_or(&no_choice);
     if rows.is_empty() {

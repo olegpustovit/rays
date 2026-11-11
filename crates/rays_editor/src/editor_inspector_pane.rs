@@ -35,6 +35,32 @@ use crate::text_pane;
 /// settings changes, the live-cook flag, the probe moves and the places a carried payload hovers.
 pub type InspectorResult = (Option<PanelResult>, Vec<Change>, Vec<(String, Value)>, bool, Vec<scope::Change>, Vec<(carry::Place, bool)>);
 
+/// What a drag of the inspector's held number edits, made by the build its press built.
+pub type Follow = Rc<dyn Fn(&Value) -> Change>;
+
+/// The inspector's held number (`insp::FlowOpts::kept_drag`): what its drag edits, the inspector
+/// whose build made it (its root's key; `presses` counts the builds that made one), the revision
+/// that inspector was last declared with, and whether the last frame followed the drag by a patch.
+struct Followed {
+    edit: Option<Follow>,
+    presses: u64,
+    root: i64,
+    revision: u64,
+    held: bool,
+}
+
+thread_local! {
+    static FOLLOWED: RefCell<Followed> = const { RefCell::new(Followed { edit: None, presses: 0, root: 0, revision: 0, held: false }) };
+}
+
+/// The build of a press on a number of the rows: what its drag edits (`None`: nothing to follow).
+pub fn follow(edit: Option<Follow>) {
+    FOLLOWED.with(|f| {
+        let mut f = f.borrow_mut();
+        (f.edit, f.presses) = (edit, f.presses + 1);
+    });
+}
+
 /// The inspector panel inside `inspector_root` at `bounds`.
 #[allow(clippy::too_many_arguments)]
 pub fn inspect_panel<'a>(
@@ -93,7 +119,7 @@ pub fn inspect_panel<'a>(
     let preview_key = (previewed >= 0).then(|| image(previewed)).flatten().map(|im| (rays::image::identity(&im), rays::image::generation(&im)));
     // the cook's results show only for a selected node (its counts, its compiled arguments)
     let cook_rev = if selected_ids.is_empty() && scope_selected.is_empty() { 0 } else { value.cook.results };
-    let revision = rays_shell::kit::revision(&|h| {
+    let live = rays_shell::kit::revision(&|h| {
         use std::hash::Hash;
         let level_key = match level {
             Level::Scene => (0u8, 0i64),
@@ -103,6 +129,17 @@ pub fn inspect_panel<'a>(
         (level_key, &pane(value).shown, selected_ids.as_slice(), selection_.primary, scope_view.selected.as_slice(), value.carry.is_some()).hash(h);
     });
     let cacheable = value.revs.panel.is_some() && value.carry.is_none();
+    // while a number of the rows is dragged and followed by patches (below) the inspector stays as it
+    // was declared: the document and the cook move with the drag's own edits; its release builds it
+    // as they are now
+    // ponytail: an edit from elsewhere landing mid-drag (a host's) shows at the release; key the
+    // revision by what the drag's edit leaves out if that ever matters
+    let (root, presses) = (inspector_root.box_key, FOLLOWED.with(|f| f.borrow().presses));
+    let dragging = cacheable && FOLLOWED.with(|f| f.borrow().root == root) && insp::dragging(ui);
+    let revision = FOLLOWED.with(|f| {
+        let f = f.borrow();
+        if dragging && f.held { f.revision } else { live }
+    });
     let shown_image: std::cell::Cell<Option<i64>> = std::cell::Cell::new(None);
     let image_seen = |id: i64| {
         let im = image(id);
@@ -249,7 +286,25 @@ pub fn inspect_panel<'a>(
     if built {
         ui.set_state(inspector_root, shown_image.get().unwrap_or(-1));
     }
-    result.unwrap_or_else(|| (None, vec![], vec![], value.live_cook, vec![], vec![]))
+    // a kept frame of the drag: the field patched and its edit made here
+    let mut followed = Vec::new();
+    let held = !built && dragging && match insp::dragged(ui) {
+        Some((patched, edit)) => {
+            FOLLOWED.with(|f| followed.extend(f.borrow().edit.as_ref().zip(edit).map(|(follow, (_, v))| follow(&v))));
+            patched
+        }
+        None => false,
+    };
+    FOLLOWED.with(|f| {
+        let mut f = f.borrow_mut();
+        if f.presses != presses {
+            f.root = root;
+        }
+        if f.root == root {
+            (f.revision, f.held) = (revision, held);
+        }
+    });
+    result.unwrap_or_else(|| (None, followed, vec![], value.live_cook, vec![], vec![]))
 }
 
 /// `workspace_inspector` for a node of the graph pane, gathering the places the choice controls
@@ -351,8 +406,12 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                 let mut expanded: Vec<String> = fields.iter().filter_map(|f| f.folder.first().cloned()).collect();
                 expanded.sort();
                 expanded.dedup();
-                let opts = insp::FlowOpts { expanded, width: Some(inspector_width), kind_label: Some(kind_label(&kind_)), ..Default::default() };
-                for ev in insp::flow_fields(ui, &opts, None, &rows) {
+                let opts = insp::FlowOpts { expanded, width: Some(inspector_width), kind_label: Some(kind_label(&kind_)), kept_drag: true, ..Default::default() };
+                let events = insp::flow_fields(ui, &opts, None, &rows);
+                if let Some(path) = insp::pressed() {
+                    follow(Some(Rc::new(move |v: &Value| Change::SetParameter { node: node_id, path: path.clone(), value: v.clone() })));
+                }
+                for ev in events {
                     match ev {
                         insp::FlowChange::Edited(path, v) => body.push(Change::SetParameter { node: node_id, path, value: v }),
                         insp::FlowChange::Expression(path, text) => {

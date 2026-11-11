@@ -29,6 +29,7 @@ use sop::edit_graph;
 use sop::node;
 
 use crate::cook;
+use crate::editor_inspector_pane::Follow;
 use crate::editor_model::{Change, flow_catalog, Preview, ScopeKey, EditorModel as Model, ModelView};
 use crate::navigator;
 use crate::text_pane;
@@ -678,31 +679,9 @@ pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(
             let chip = if sub.is_empty() { r.chip.clone() } else { p::Chip::Const };
             follow_row(source, n, &p::Row { expr, chip, ..r })
         }),
-        insp::FlowChange::Edited(name, edited) => arg_row(name).and_then(|(r, sub)| {
-            let component = if name.ends_with(".x") {
-                Some(0)
-            } else if name.ends_with(".y") {
-                Some(1)
-            } else if name.ends_with(".z") {
-                Some(2)
-            } else {
-                None
-            };
-            let syntax = match edited {
-                Value::Float(f) => Some(num(&lisp::float(*f))),
-                Value::Int(i) => Some(num(&i.to_string())),
-                Value::Bool(b) => Some(sym(if *b { "true" } else { "false" })),
-                Value::Text(t) => Some(s::make(s::Draft::Str(t.to_vec()))),
-                Value::Choice(t) => Some(string(t)),
-            };
-            syntax.map(|value| {
-                let mut sub2 = sub.clone();
-                if let Some(i) = component {
-                    sub2.push(i);
-                }
-                Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub: sub2, value })
-            })
-        }),
+        insp::FlowChange::Edited(name, edited) => {
+            arg_row(name).map(|(r, sub)| Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: r.key, sub: arg_sub(name, sub), value: syntax_of_value(edited) }))
+        }
         insp::FlowChange::Expression(path, text) => arg_row(path).map(|(r, sub)| match expression_text(text) {
             Ok(value) => Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub, value }),
             Err(message) => Change::Declined(message),
@@ -836,6 +815,52 @@ fn syntax_of_value(v: &Value) -> S {
     }
 }
 
+/// The cells an argument row's edit writes: its sub-path, then the component a `.x`, `.y` or `.z`
+/// row edits.
+fn arg_sub(name: &str, mut sub: Vec<i64>) -> Vec<i64> {
+    if let Some(i) = [".x", ".y", ".z"].iter().position(|axis| name.ends_with(axis)) {
+        sub.push(i as i64);
+    }
+    sub
+}
+
+/// What a drag of an argument row's number edits (`arg_request`'s `Edited`).
+fn arg_follow(node: &[Symbol], name: &str, arg_row: &dyn Fn(&str) -> Option<(p::Row, Vec<i64>)>) -> Option<Follow> {
+    let (r, sub) = arg_row(name)?;
+    let (node, sub) = (node.to_vec(), arg_sub(name, sub));
+    Some(Rc::new(move |v: &Value| Change::SyntaxEdit(fe::Op::SetArg { node: node.clone(), key: r.key.clone(), sub: sub.clone(), value: syntax_of_value(v) })))
+}
+
+/// The parameter a field of the rows belongs to, and the field's place in it.
+fn parameter_of<'p>(parameters: &'p [port::Parameter], name: &str) -> Option<(&'p port::Parameter, usize)> {
+    parameters.iter().find_map(|pm| pm.fields.iter().position(|f| f.name == name).map(|index| (pm, index)))
+}
+
+/// A parameter's field edited: the argument written whole (a vector with its other cells as they are).
+fn parameter_edit(node: &[Symbol], parameter: &port::Parameter, index: usize, edited: &Value) -> Change {
+    let syntax = syntax_of_value(edited);
+    let syntax = if parameter.fields.len() != 3 {
+        syntax
+    } else {
+        let mut builder = s::SyntaxBuilder::new();
+        let items = parameter.fields.iter().enumerate().map(|(i, f)| {
+            if i == index {
+                builder.import(&syntax)
+            } else {
+                let text = match &f.current {
+                    Value::Float(x) => lisp::float(*x),
+                    Value::Int(x) => lisp::float(*x as f64),
+                    _ => "0.0".to_owned(),
+                };
+                builder.push_draft(0, s::Draft::Num(text), Default::default(), None)
+            }
+        }).collect();
+        let id = builder.push_draft(0, s::Draft::Vec(items), Default::default(), None);
+        builder.freeze().handle(id)
+    };
+    Change::SyntaxEdit(fe::Op::SetArg { node: node.to_vec(), key: ArgKey::Kw(parameter.path.clone()), sub: vec![], value: syntax })
+}
+
 fn ref_form(name: &str) -> S {
     let mut builder = s::SyntaxBuilder::new();
     let items = [s::Draft::Sym("ref".into()), s::Draft::Sym(name.into())].into_iter()
@@ -888,8 +913,20 @@ pub fn field_edits<'a>(
         },
         None => Vec::new(),
     };
-    let opts = insp::FlowOpts { expanded: expanded.to_vec(), width: Some(width), pins: true, pin_click: true, chips, kind_label: Some(kind_label(&n.head)) };
+    let opts = insp::FlowOpts { expanded: expanded.to_vec(), width: Some(width), pins: true, pin_click: true, chips, kind_label: Some(kind_label(&n.head)), kept_drag: true };
     let events = insp::flow_fields(ui, &opts, on_choice, rows);
+    // a number pressed: what its drag edits, followed while the inspector stays kept
+    if let Some(name) = insp::pressed() {
+        let edit = if name.starts_with(ARG_PREFIX) {
+            arg_follow(&n.path, &name, arg_row)
+        } else {
+            parameter_of(parameters, &name).map(|(parameter, index)| {
+                let (node, parameter) = (n.path.clone(), parameter.clone());
+                Rc::new(move |v: &Value| parameter_edit(&node, &parameter, index, v)) as Follow
+            })
+        };
+        crate::editor_inspector_pane::follow(edit);
+    }
     let ws = &value.doc.workspace.ws;
     let source: &[S] = &ws.source;
     let mut out = Vec::new();
@@ -954,30 +991,8 @@ pub fn field_edits<'a>(
                         _ => {}
                     }
                 } else {
-                    for parameter in parameters {
-                        let Some(index) = parameter.fields.iter().position(|f| f.name == *name) else { continue };
-                        let syntax = syntax_of_value(edited);
-                        let syntax = if parameter.fields.len() != 3 {
-                            syntax
-                        } else {
-                            let mut builder = s::SyntaxBuilder::new();
-                            let items = parameter.fields.iter().enumerate().map(|(i, f)| {
-                                if i == index {
-                                    builder.import(&syntax)
-                                } else {
-                                    let text = match &f.current {
-                                        Value::Float(x) => lisp::float(*x),
-                                        Value::Int(x) => lisp::float(*x as f64),
-                                        _ => "0.0".to_owned(),
-                                    };
-                                    builder.push_draft(0, s::Draft::Num(text), Default::default(), None)
-                                }
-                            }).collect();
-                            let id = builder.push_draft(0, s::Draft::Vec(items), Default::default(), None);
-                            builder.freeze().handle(id)
-                        };
-                        out.push(Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: ArgKey::Kw(parameter.path.clone()), sub: vec![], value: syntax }));
-                        break;
+                    if let Some((parameter, index)) = parameter_of(parameters, name) {
+                        out.push(parameter_edit(&n.path, parameter, index, edited));
                     }
                 }
             }
@@ -1273,10 +1288,13 @@ pub fn expression_inspector(ui: &mut Ui, width: f32, value: &Model, holder: &p::
             requests.push(Change::SyntaxEdit(fe::Op::Unfold { node: holder.path.clone(), key: r.key.clone(), sub: vec![] }));
         }
         if !entries.is_empty() {
-            let opts = insp::FlowOpts { width: Some(width), kind_label: Some(kind_label(&op)), ..Default::default() };
+            let opts = insp::FlowOpts { width: Some(width), kind_label: Some(kind_label(&op)), kept_drag: true, ..Default::default() };
             let rows: Vec<insp::FlowRow> = entries.iter().map(|(_, _, _, ir)| ir.clone()).collect();
             let events = insp::flow_fields(ui, &opts, None, &rows);
             let find = |name: &str| arg_row_in(&entries, name);
+            if let Some(name) = insp::pressed() {
+                crate::editor_inspector_pane::follow(arg_follow(&holder.path, &name, &find));
+            }
             for ev in events {
                 if let Some(c) = arg_request(source, holder, &find, &ev) {
                     requests.push(c);
