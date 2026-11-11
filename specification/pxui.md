@@ -79,7 +79,10 @@ signed-distance fragment stage:
   test biases the sample point by +10⁻³ toward +x/+y, reproducing the
   top-left rule on half-integer edges at every integer density. Rounded
   rects, circles, and borders on them use an anti-aliased rounded-box SDF.
-- **Textured.** Glyphs and images sample one texture with nearest filtering.
+- **Textured.** Glyphs and images sample one texture with nearest filtering; a picture drawn through
+  `Paint::image_fit` or `image_nine` carries `flags::SMOOTH` and samples linearly (a scaled image has
+  no texel ties for GPUs to break differently, and at 1:1 on whole pixels a sample lands on a texel
+  centre, so it equals nearest).
   Instances carry texel coordinates, normalized by the texture's size in the
   fragment stage, so the atlas can grow without invalidating earlier
   instances.

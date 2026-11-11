@@ -4404,12 +4404,12 @@ impl Paint {
     }
 
     /// An image placed in the box as CSS `object-fit` places it, its texels multiplied by `tint`
-    /// (white keeps it; see `Instance::image`).
+    /// (white keeps it; see `Instance::image`), filtered linearly when scaled (`flags::SMOOTH`).
     pub fn image_fit(&mut self, x: f32, y: f32, w: f32, h: f32, image: &Image, fit: Fit, tint: Color) {
         if w > 0.0 && h > 0.0 {
             self.bind(image);
             let (rect, uv) = crate::draw::fit(fit, [image.width as f32, image.height as f32], [x, y, x + w, y + h], [0.0, 0.0, 1.0, 1.0]);
-            self.push(Instance::image(rect, uv, rgba(tint)));
+            self.push(Instance { flags: crate::draw::flags::SMOOTH, ..Instance::image(rect, uv, rgba(tint)) });
         }
     }
 
@@ -4419,7 +4419,7 @@ impl Paint {
         if w > 0.0 && h > 0.0 {
             self.bind(image);
             for i in crate::draw::nine_slice([x, y, x + w, y + h], [0.0, 0.0, 1.0, 1.0], [image.width as f32, image.height as f32], inset, rgba(tint)) {
-                self.push(i);
+                self.push(Instance { flags: crate::draw::flags::SMOOTH, ..i });
             }
         }
     }

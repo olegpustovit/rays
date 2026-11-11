@@ -16,6 +16,9 @@ pub mod flags {
     pub const LINEAR: u8 = 1;
     pub const RADIAL: u8 = 2;
     pub const CONIC: u8 = 3;
+    /// An image (kind 2) sampled with the painter's linear filter: a picture drawn at any size
+    /// (`Paint::image_fit`). Without it images sample nearest, as glyphs do.
+    pub const SMOOTH: u8 = 1;
     pub const INNER: u8 = 4;
     pub const ROUND: u8 = 8;
     /// Rect border sides (bits 4–7); none set, or all four, borders every side.
