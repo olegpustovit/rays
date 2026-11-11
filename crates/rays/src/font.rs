@@ -39,7 +39,7 @@ fn key(wrap: Option<i64>, align: Alignment, density: i64, size: i64, text: &str,
 // CPU into one straight-alpha RGBA image per string (the scene's existing textured-quad path).
 // ponytail: one image per string; glyph quads straight into the scene
 // pass when text lowering gets an instanced route.
-const SYSTEM_FONTS: [&str; 8] = [
+const SYSTEM_FONTS: [&str; 11] = [
     "/System/Library/Fonts/SFNSMono.ttf",
     "/System/Library/Fonts/SFNS.ttf",
     "/System/Library/Fonts/SFCompact.ttf",
@@ -48,6 +48,9 @@ const SYSTEM_FONTS: [&str; 8] = [
     "/System/Library/Fonts/LucidaGrande.ttc",
     "C:\\Windows\\Fonts\\segoeui.ttf",
     "C:\\Windows\\Fonts\\arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
 ];
 
 thread_local! {

@@ -202,3 +202,54 @@ fractional scale, cursor shape, xdg-decoration or text-input-v3, so those paths 
 `dbus-daemon`. A libatspi client walk runs too when `/usr/bin/python3` imports `gi` with the Atspi typelib: unpack
 `gir1.2-atspi-2.0` and `gir1.2-freedesktop` into `~/vk/root` and set
 `GI_TYPELIB_PATH=~/vk/root/usr/lib/x86_64-linux-gnu/girepository-1.0`.
+
+### The Rays editor on Linux
+
+`rays` runs as a Wayland client: `runtime` hosts its window through `pxui_wayland` on Linux (`pxui_sdl`
+elsewhere) and renders through `ogpu_vulkan`. SDL3 stays linked for image decoding, audio, the preferences
+path and the SDL event translation `runtime` shares, so the workspace needs SDL3, SDL3_image and SDL3_mixer
+(the `packaging/sdl3.lock` versions), which Ubuntu 24.04 does not package. Build them into `~/vk/root` (needs
+`cmake`, a C compiler, and `libwayland-dev`, `libxkbcommon-dev`, `libdecor-0-dev`, `libpulse-dev`/`libasound2-dev`,
+`libpng-dev` for the backends you want; the system `.pc` files must be on `PKG_CONFIG_PATH` while configuring):
+
+```sh
+export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+P=~/vk/root/usr L=lib/x86_64-linux-gnu   # sources: the release tarballs from github.com/libsdl-org
+cmake -S SDL3-3.4.18 -B b-sdl -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$P -DCMAKE_INSTALL_LIBDIR=$L \
+  -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_X11_XTEST=OFF && cmake --build b-sdl -j && cmake --install b-sdl
+cmake -S SDL3_image-3.4.6 -B b-img -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$P -DCMAKE_INSTALL_LIBDIR=$L \
+  -DCMAKE_PREFIX_PATH=$P -DSDLIMAGE_VENDORED=OFF -DSDLIMAGE_AVIF=OFF -DSDLIMAGE_JXL=OFF -DSDLIMAGE_TIF=OFF \
+  -DSDLIMAGE_WEBP=OFF && cmake --build b-img -j && cmake --install b-img
+cmake -S SDL3_mixer-3.2.4 -B b-mix -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$P -DCMAKE_INSTALL_LIBDIR=$L \
+  -DCMAKE_PREFIX_PATH=$P -DSDLMIXER_VENDORED=OFF -DSDLMIXER_GME=OFF -DSDLMIXER_MOD=OFF -DSDLMIXER_MIDI=OFF \
+  -DSDLMIXER_OPUS=OFF -DSDLMIXER_WAVPACK=OFF -DSDLMIXER_FLAC_LIBFLAC=OFF -DSDLMIXER_VORBIS_VORBISFILE=OFF \
+  -DSDLMIXER_MP3_MPG123=OFF && cmake --build b-mix -j && cmake --install b-mix
+```
+
+Then, with the environment above (its `LD_LIBRARY_PATH` also finds the SDL libraries at run time):
+
+```sh
+export PKG_CONFIG_PATH=~/vk/root/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+ulimit -s 262144   # tests: the 256 MB main-thread stack macOS and Windows get from the linker
+cargo run -p rays_bin -- sketches/pxui.rays
+RAYS_ALLOW_SKIP=1 RAYS_SLOW=1 cargo t -p renderer   # lavapipe needs the 60 s limit for the heavier cases
+```
+
+On Linux the main-thread stack is the `RLIMIT_STACK` the process was exec'd with (the ELF header is ignored), so
+`rays` raises the soft limit to 256 MB and re-execs itself once at startup; tests take it from `ulimit -s`.
+Sketch text uses DejaVu Sans, Noto Sans or Liberation Sans when installed, else the bundled Pragmasevka. The
+preferences live in SDL's `~/.local/share/rays/editor`. What the Wayland host does differently:
+
+- File dialogs return a typed `Unsupported` error (`pxui_wayland::NO_FILE_DIALOG`): there is no
+  `org.freedesktop.portal.FileChooser` call yet, and WSL has no portal anyway. The editor keeps working.
+- The clipboard is read synchronously through the newest window (its own selection, else the offer through a
+  pipe, one second at most); with no window open it is process-local.
+- Relative mouse uses pointer-constraints-v1 and relative-pointer-v1 (WSLg offers both), degrading to absolute
+  motion deltas without them. An unthrottled (`vsync: false`) swapchain is MAILBOX on Wayland, else FIFO.
+
+Known lavapipe (Mesa 25.2, WSL2) failures, unresolved; the first two pass on Windows/NVIDIA from the same tree:
+exact-byte goldens differ by one in blended pixels (`rays_shell` `window_host_zones_parity`); `renderer`
+`gpu_scene3_resident_colors3/4` and `gpu_scene3_borrowed_stream_guards` differ on device-resident colours (an
+extra primitive's pixels, and off-by-one channels); `rays_editor` `instanced` and `run_instances` segfault on a
+driver worker thread; `native_isogrid_viewport_recipe_1` differs in its shadow pixels and the other isogrid
+qualification cases exceed even the 60 s limit, so the whole `RAYS_SLOW=1` editor run hits the 600 s cap.

@@ -50,6 +50,73 @@ impl Protocols {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialogKind {
+    OpenFile,
+    OpenFiles,
+    SaveFile,
+    OpenFolder,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DialogFilter {
+    pub name: String,
+    pub pattern: String,
+}
+
+/// What `show_dialog` answers: Wayland has no file dialog of its own; it comes from the XDG desktop portal.
+pub const NO_FILE_DIALOG: &str = "file dialogs need the XDG desktop portal (org.freedesktop.portal.FileChooser), which this host does not call yet";
+
+/// Native binary startup policy: nothing to configure for a Wayland client.
+pub fn configure_native_process() -> Result<(), Error> {
+    Ok(())
+}
+
+thread_local! {
+    /// The open windows' shim handles, newest last: the clipboard free functions use the newest.
+    static OPEN: std::cell::RefCell<Vec<NonNull<c_void>>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The clipboard while no window is open: a Wayland client reaches the selection only through a surface.
+    // ponytail: process-local until a window opens (not handed to it); a windowless clipboard needs a seat focus anyway.
+    static LOCAL: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+fn newest() -> Option<*mut c_void> {
+    OPEN.with(|open| open.borrow().last().map(|w| w.as_ptr()))
+}
+
+/// Offers `text` as the clipboard selection through the newest open window; without one it stays in this process.
+pub fn clipboard_set_text(text: &str) -> Result<(), Error> {
+    match newest() {
+        Some(raw) => clipboard_set(raw, text),
+        None if text.contains('\0') => Err("clipboard text contains a NUL byte".to_owned()),
+        None => Ok(LOCAL.with(|local| *local.borrow_mut() = text.to_owned())),
+    }
+}
+
+/// The clipboard's text, read synchronously through the newest open window (waiting at most a second for the
+/// owning client); empty when the clipboard holds no text. `Window::request_paste` is the non-blocking form.
+pub fn clipboard_get_text() -> Result<String, Error> {
+    let Some(raw) = newest() else { return Ok(LOCAL.with(|local| local.borrow().clone())) };
+    // SAFETY: a live window from the registry; the returned text is copied, then released to the shim.
+    let text = unsafe { rw_clipboard_get(raw, 1000) };
+    if text.is_null() {
+        return Ok(String::new());
+    }
+    let copied = unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned();
+    unsafe { rw_event_free(text) };
+    Ok(copied)
+}
+
+fn clipboard_set(raw: *mut c_void, text: &str) -> Result<(), Error> {
+    let text = CString::new(text).map_err(|_| "clipboard text contains a NUL byte".to_owned())?;
+    // SAFETY: a live window; the shim copies the text.
+    match unsafe { rw_clipboard_set(raw, text.as_ptr()) } {
+        0 => Ok(()),
+        1 => Err("the compositor offers no wl_data_device_manager".to_owned()),
+        _ => Err("out of memory".to_owned()),
+    }
+}
+
 /// Where a requested paste reads from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PasteSource {
@@ -90,6 +157,7 @@ const PREEDIT: i32 = 11;
 const COMMIT: i32 = 12;
 const PASTE: i32 = 13;
 const VISIBLE: i32 = 14;
+const RELATIVE: i32 = 15;
 
 unsafe extern "C" {
     fn rw_open(title: *const c_char, width: i32, height: i32, error: *mut i32) -> *mut c_void;
@@ -107,6 +175,8 @@ unsafe extern "C" {
     fn rw_set_text_input(window: *mut c_void, enabled: i32, x: i32, y: i32, width: i32, height: i32) -> i32;
     fn rw_clipboard_set(window: *mut c_void, text: *const c_char) -> i32;
     fn rw_request_paste(window: *mut c_void) -> i32;
+    fn rw_clipboard_get(window: *mut c_void, timeout_ms: i32) -> *mut c_char;
+    fn rw_set_relative(window: *mut c_void, enabled: i32) -> i32;
 }
 
 unsafe extern "C" fn keep(_: *mut c_void) {}
@@ -136,6 +206,12 @@ pub struct Window {
     text_input: bool,
     cursor_shape: Option<CursorShape>,
     visible: bool,
+    /// Opened hidden and not yet `show`n. A Wayland surface maps at its first present, so this is the caller's
+    /// promise to present only after `show`, as Rays does.
+    hidden: bool,
+    /// Relative mode: `Some(true)` with relative-pointer-v1 deltas, `Some(false)` degraded to absolute motion.
+    relative: Option<bool>,
+    motion: (f64, f64),
     started: Instant,
 }
 
@@ -145,10 +221,9 @@ impl Window {
         Window::open_with(title, width, height, true, false, true)
     }
 
-    /// `high_density` false keeps the drawable at the logical size. `hidden` is accepted for pxui_sdl parity:
-    /// a Wayland window is not shown until its first present anyway.
+    /// `high_density` false keeps the drawable at the logical size. A `hidden` window reports `visible() == false`
+    /// until `show`; any Wayland window appears with its first present.
     pub fn open_with(title: &str, width: i64, height: i64, vsync: bool, hidden: bool, high_density: bool) -> Result<Window, Error> {
-        let _ = hidden;
         let (w, h) = (dimension(width)?, dimension(height)?);
         let title = CString::new(title).map_err(|_| "title contains a NUL byte".to_owned())?;
         let mut error = 0;
@@ -189,8 +264,12 @@ impl Window {
             text_input: false,
             cursor_shape: None,
             visible: true,
+            hidden,
+            relative: None,
+            motion: (0.0, 0.0),
             started: Instant::now(),
         };
+        OPEN.with(|open| open.borrow_mut().push(raw));
         window.read_state();
         window.reported = window.extent;
         Ok(window)
@@ -269,6 +348,9 @@ impl Window {
                 }
             }
             MOTION => {
+                if self.relative == Some(false) {
+                    self.motion = (self.motion.0 + raw.x - self.pointer.0, self.motion.1 + raw.y - self.pointer.1);
+                }
                 self.pointer = (raw.x, raw.y);
                 events.push(Event::PointerMoved(self.pointer));
             }
@@ -297,6 +379,7 @@ impl Window {
             }
             COMMIT => events.push(Event::TextInput(text)),
             PASTE => events.push(Event::Paste(text)),
+            RELATIVE => self.motion = (self.motion.0 + raw.x, self.motion.1 + raw.y),
             VISIBLE => {
                 self.visible = raw.a != 0;
                 events.push(Event::VisibilityChanged(self.visible));
@@ -418,14 +501,7 @@ impl Window {
 
     /// Offers `text` as the clipboard selection. Fails without a data device.
     pub fn clipboard_set_text(&mut self, text: &str) -> Result<(), Error> {
-        let raw = self.live()?;
-        let text = CString::new(text).map_err(|_| "clipboard text contains a NUL byte".to_owned())?;
-        // SAFETY: a live window; the shim copies the text.
-        match unsafe { rw_clipboard_set(raw, text.as_ptr()) } {
-            0 => Ok(()),
-            1 => Err("the compositor offers no wl_data_device_manager".to_owned()),
-            _ => Err("out of memory".to_owned()),
-        }
+        clipboard_set(self.live()?, text)
     }
 
     /// Asks for the clipboard's text: exactly one `Event::Paste` arrives with a later `pump` (empty when the
@@ -439,15 +515,64 @@ impl Window {
         })
     }
 
-    /// False while the compositor has suspended the window (xdg_toplevel `suspended`, e.g. fully hidden).
+    /// Hide the cursor, lock the pointer and report relative motion (fly cameras) through `take_motion`. Without
+    /// pointer-constraints-v1 and relative-pointer-v1 the deltas degrade to absolute motion, which stops at the edge.
+    pub fn set_relative_mouse(&mut self, enabled: bool) -> Result<(), Error> {
+        // SAFETY: a live window.
+        let missing = unsafe { rw_set_relative(self.live()?, i32::from(enabled)) };
+        self.relative = enabled.then_some(missing & 2 == 0);
+        self.motion = (0.0, 0.0);
+        Ok(())
+    }
+
+    /// The pointer motion (logical points) accumulated in relative mode since the last call.
+    pub fn take_motion(&mut self) -> (f64, f64) {
+        std::mem::take(&mut self.motion)
+    }
+
+    /// Accepted for pxui_sdl parity: a Wayland client draws its whole surface, so there is no native background.
+    pub fn set_background(&mut self, color: (f64, f64, f64)) -> Result<(), Error> {
+        let _ = color;
+        self.live().map(drop)
+    }
+
+    /// Ends `hidden`: a Wayland window appears with its first present.
+    pub fn show(&mut self) -> Result<(), Error> {
+        self.live()?;
+        self.hidden = false;
+        Ok(())
+    }
+
+    /// Accepted for pxui_sdl parity: `pump` re-reads size and scale every time.
+    pub fn announce_change(&mut self) {}
+
+    /// Re-reads size and scale.
+    pub fn sync(&mut self) -> Result<(), Error> {
+        self.live()?;
+        self.read_state();
+        Ok(())
+    }
+
+    /// Always fails with `NO_FILE_DIALOG`; the editor keeps working without dialogs.
+    // ponytail: no portal call; org.freedesktop.portal.FileChooser over D-Bus (OpenFile/SaveFile, then its Response
+    // signal read in the pump) is ~300 lines with libdbus marshalling. Add it when a Linux desktop with a portal is a target.
+    pub fn show_dialog(&mut self, filters: &[DialogFilter], default_location: Option<&str>, kind: DialogKind) -> Result<i64, Error> {
+        let _ = (filters, default_location, kind);
+        self.live()?;
+        Err(NO_FILE_DIALOG.to_owned())
+    }
+
+    /// False while opened hidden and not shown, or while the compositor has suspended the window (xdg_toplevel
+    /// `suspended`, e.g. fully covered).
     pub fn visible(&mut self) -> Result<bool, Error> {
         self.live()?;
-        Ok(self.visible)
+        Ok(self.visible && !self.hidden)
     }
 
     /// Invalidates the token and closes the window. GPU surfaces made from the token must be destroyed first.
     pub fn destroy(&mut self) -> Result<(), Error> {
         if let Some(raw) = self.raw.take() {
+            OPEN.with(|open| open.borrow_mut().retain(|w| *w != raw));
             self.token.invalidate();
             // SAFETY: the window is live and no longer reachable from self.
             unsafe { rw_close(raw.as_ptr()) };

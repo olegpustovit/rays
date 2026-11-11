@@ -179,7 +179,7 @@ fn main() {
     if let Err(error) = runtime::configure_native_process() {
         die(&format!("rays: {error}"));
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     ogpu_core::impl_::select(ogpu_vulkan::impl_::implementation());
     #[cfg(target_os = "macos")]
     ogpu_core::impl_::select(ogpu_metal::impl_::implementation());

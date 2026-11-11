@@ -19,10 +19,12 @@
 #include "../protocol/fractional-scale-v1.h"
 #include "../protocol/cursor-shape-v1.h"
 #include "../protocol/text-input-unstable-v3.h"
+#include "../protocol/relative-pointer-unstable-v1.h"
+#include "../protocol/pointer-constraints-unstable-v1.h"
 
 /* Mirrors translate::Raw on the Rust side. */
 enum { RW_KEY = 1, RW_MOTION, RW_BUTTON, RW_AXIS, RW_AXIS_DISCRETE, RW_AXIS_SOURCE, RW_AXIS_STOP, RW_FRAME,
-       RW_FOCUS, RW_CLOSE, RW_PREEDIT, RW_COMMIT, RW_PASTE, RW_VISIBLE };
+       RW_FOCUS, RW_CLOSE, RW_PREEDIT, RW_COMMIT, RW_PASTE, RW_VISIBLE, RW_RELATIVE };
 /* Protocol bits reported by rw_protocols. */
 enum { HAS_VIEWPORTER = 1, HAS_FRACTIONAL = 2, HAS_CURSOR_SHAPE = 4, HAS_DECORATION = 8, HAS_TEXT_INPUT = 16,
        HAS_DATA_DEVICE = 32, HAS_SEAT = 64, HAS_POINTER = 128, HAS_KEYBOARD = 256, SERVER_DECORATED = 512 };
@@ -54,6 +56,8 @@ typedef struct rw {
   struct wp_cursor_shape_manager_v1 *cursor_manager;
   struct zxdg_decoration_manager_v1 *decoration_manager;
   struct zwp_text_input_manager_v3 *text_manager;
+  struct zwp_relative_pointer_manager_v1 *relative_manager;
+  struct zwp_pointer_constraints_v1 *constraints;
   uint32_t compositor_version, seat_version;
 
   struct wl_surface *surface;
@@ -64,6 +68,9 @@ typedef struct rw {
   struct zxdg_toplevel_decoration_v1 *decoration;
   struct wp_cursor_shape_device_v1 *cursor_device;
   struct zwp_text_input_v3 *text_input;
+  struct zwp_relative_pointer_v1 *relative_pointer;
+  struct zwp_locked_pointer_v1 *locked_pointer;
+  int relative;
 
   struct { struct wl_output *output; uint32_t name; int32_t scale; int entered; } outputs[MAX_OUTPUTS];
   int output_count;
@@ -223,6 +230,7 @@ static const struct wl_output_listener output_listener = {
 /* ---- pointer ---- */
 
 static void set_cursor_now(rw *w) {
+  if (w->relative && w->pointer && w->pointer_serial) { wl_pointer_set_cursor(w->pointer, w->pointer_serial, NULL, 0, 0); return; }
   if (!w->cursor_manager || !w->pointer || !w->pointer_serial) return;
   if (!w->cursor_device) w->cursor_device = wp_cursor_shape_manager_v1_get_pointer(w->cursor_manager, w->pointer);
   wp_cursor_shape_device_v1_set_shape(w->cursor_device, w->pointer_serial, (uint32_t)w->cursor_shape);
@@ -340,6 +348,8 @@ static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps) {
     w->pointer = wl_seat_get_pointer(seat);
     wl_pointer_add_listener(w->pointer, &pointer_listener, w);
   } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && w->pointer) {
+    if (w->locked_pointer) { zwp_locked_pointer_v1_destroy(w->locked_pointer); w->locked_pointer = NULL; }
+    if (w->relative_pointer) { zwp_relative_pointer_v1_destroy(w->relative_pointer); w->relative_pointer = NULL; }
     if (w->cursor_device) { wp_cursor_shape_device_v1_destroy(w->cursor_device); w->cursor_device = NULL; }
     wl_pointer_destroy(w->pointer);
     w->pointer = NULL;
@@ -516,6 +526,15 @@ static void service(rw *w) {
   }
 }
 
+/* ---- relative pointer ---- */
+
+static void relative_motion(void *data, struct zwp_relative_pointer_v1 *p, uint32_t hi, uint32_t lo, wl_fixed_t dx, wl_fixed_t dy,
+                            wl_fixed_t udx, wl_fixed_t udy) {
+  (void)p; (void)hi; (void)udx; (void)udy;
+  push_kind(data, RW_RELATIVE, 0, 0, lo / 1000, wl_fixed_to_double(dx), wl_fixed_to_double(dy));
+}
+static const struct zwp_relative_pointer_v1_listener relative_listener = {.relative_motion = relative_motion};
+
 /* ---- registry ---- */
 
 static uint32_t at_most(uint32_t offered, uint32_t wanted) { return offered < wanted ? offered : wanted; }
@@ -550,6 +569,10 @@ static void registry_global(void *data, struct wl_registry *r, uint32_t name, co
     w->decoration_manager = wl_registry_bind(r, name, &zxdg_decoration_manager_v1_interface, 1);
   } else if (!strcmp(interface, zwp_text_input_manager_v3_interface.name)) {
     w->text_manager = wl_registry_bind(r, name, &zwp_text_input_manager_v3_interface, 1);
+  } else if (!strcmp(interface, zwp_relative_pointer_manager_v1_interface.name)) {
+    w->relative_manager = wl_registry_bind(r, name, &zwp_relative_pointer_manager_v1_interface, 1);
+  } else if (!strcmp(interface, zwp_pointer_constraints_v1_interface.name)) {
+    w->constraints = wl_registry_bind(r, name, &zwp_pointer_constraints_v1_interface, 1);
   }
 }
 static void registry_remove(void *data, struct wl_registry *r, uint32_t name) {
@@ -630,6 +653,8 @@ void rw_close(rw *w) {
   if (w->selection) wl_data_offer_destroy(w->selection);
   if (w->data_device) wl_data_device_destroy(w->data_device);
   if (w->text_input) zwp_text_input_v3_destroy(w->text_input);
+  if (w->locked_pointer) zwp_locked_pointer_v1_destroy(w->locked_pointer);
+  if (w->relative_pointer) zwp_relative_pointer_v1_destroy(w->relative_pointer);
   free(w->preedit_pending); free(w->preedit_shown); free(w->commit_pending);
   if (w->cursor_device) wp_cursor_shape_device_v1_destroy(w->cursor_device);
   if (w->decoration) zxdg_toplevel_decoration_v1_destroy(w->decoration);
@@ -643,6 +668,8 @@ void rw_close(rw *w) {
   for (int i = 0; i < w->output_count; ++i) wl_output_destroy(w->outputs[i].output);
   if (w->seat) wl_seat_destroy(w->seat);
   if (w->text_manager) zwp_text_input_manager_v3_destroy(w->text_manager);
+  if (w->relative_manager) zwp_relative_pointer_manager_v1_destroy(w->relative_manager);
+  if (w->constraints) zwp_pointer_constraints_v1_destroy(w->constraints);
   if (w->decoration_manager) zxdg_decoration_manager_v1_destroy(w->decoration_manager);
   if (w->cursor_manager) wp_cursor_shape_manager_v1_destroy(w->cursor_manager);
   if (w->fractional_manager) wp_fractional_scale_manager_v1_destroy(w->fractional_manager);
@@ -767,4 +794,52 @@ int32_t rw_request_paste(rw *w) {
   }
   push(w, (rw_event){.kind = RW_PASTE, .text = copy(w->source_text)});
   return w->source_text ? 1 : 2;
+}
+/* Synchronous clipboard text: this window's own selection, else the offer read through a pipe until EOF or timeout_ms.
+ * NULL when there is no text. The writer is another client, so nothing here needs this connection dispatched. */
+char *rw_clipboard_get(rw *w, int32_t timeout_ms) {
+  if (w->source_text) return copy(w->source_text);
+  intptr_t mimes = w->selection ? (intptr_t)wl_data_offer_get_user_data(w->selection) : 0;
+  for (int i = 0; i < TEXT_MIMES; ++i) {
+    int fds[2];
+    if (!(mimes & (1 << i)) || pipe2(fds, O_CLOEXEC) != 0) continue;
+    wl_data_offer_receive(w->selection, text_mimes[i], fds[1]);
+    close(fds[1]);
+    wl_display_flush(w->display);
+    char *text = NULL;
+    size_t len = 0;
+    struct pollfd fd = {.fd = fds[0], .events = POLLIN};
+    while (poll(&fd, 1, timeout_ms) > 0) {
+      char chunk[4096];
+      ssize_t n = read(fds[0], chunk, sizeof chunk);
+      if (n < 0 && errno == EINTR) continue;
+      if (n <= 0) break;
+      char *grown = realloc(text, len + (size_t)n + 1);
+      if (!grown) break;
+      memcpy(grown + len, chunk, (size_t)n);
+      len += (size_t)n;
+      grown[len] = 0;
+      text = grown;
+    }
+    close(fds[0]);
+    return text ? text : copy("");
+  }
+  return NULL;
+}
+/* Relative pointer mode: hide the cursor, lock the pointer in place and report RW_RELATIVE motion.
+ * Returns which halves are missing: 1 no pointer constraints (the pointer is not locked), 2 no relative pointer. */
+int32_t rw_set_relative(rw *w, int32_t enabled) {
+  w->relative = enabled;
+  if (w->locked_pointer) { zwp_locked_pointer_v1_destroy(w->locked_pointer); w->locked_pointer = NULL; }
+  if (w->relative_pointer) { zwp_relative_pointer_v1_destroy(w->relative_pointer); w->relative_pointer = NULL; }
+  if (enabled && w->pointer && w->constraints)
+    w->locked_pointer = zwp_pointer_constraints_v1_lock_pointer(w->constraints, w->surface, w->pointer, NULL,
+                                                                ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+  if (enabled && w->pointer && w->relative_manager) {
+    w->relative_pointer = zwp_relative_pointer_manager_v1_get_relative_pointer(w->relative_manager, w->pointer);
+    zwp_relative_pointer_v1_add_listener(w->relative_pointer, &relative_listener, w);
+  }
+  set_cursor_now(w);
+  wl_display_flush(w->display);
+  return (enabled && !w->locked_pointer ? 1 : 0) | (enabled && !w->relative_pointer ? 2 : 0);
 }

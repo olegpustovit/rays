@@ -33,7 +33,7 @@ runtime_resources = { path = "../runtime_resources" }
 scene_command = { path = "../scene_command" }
 mem_sys = { path = "../mem_sys" }
 
-[target.'cfg(windows)'.dev-dependencies]
+[target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

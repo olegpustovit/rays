@@ -834,6 +834,7 @@ dependencies = [
  "ogpu_core",
  "ogpu_mock",
  "pxui_sdl",
+ "pxui_wayland",
  "sdl3",
 ]
 

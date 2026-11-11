@@ -9,7 +9,7 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
         return;
     }
-    let protocols = ["xdg-shell", "xdg-decoration-unstable-v1", "viewporter", "fractional-scale-v1", "cursor-shape-v1", "tablet-v2", "text-input-unstable-v3"];
+    let protocols = ["xdg-shell", "xdg-decoration-unstable-v1", "viewporter", "fractional-scale-v1", "cursor-shape-v1", "tablet-v2", "text-input-unstable-v3", "relative-pointer-unstable-v1", "pointer-constraints-unstable-v1"];
     let mut build = cc::Build::new();
     build.file("src/shim.c").warnings(true);
     for protocol in protocols {

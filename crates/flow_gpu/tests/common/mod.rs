@@ -31,7 +31,7 @@ fn select() {
     #[cfg(not(target_os = "macos"))]
     use ogpu_core::impl_::Impl;
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     ogpu_core::impl_::select(Impl {
         backend: ogpu_vulkan::impl_::BACKEND,
         create_driver: || ogpu_vulkan::backend::create_with_validation((true, true)),
@@ -39,7 +39,7 @@ fn select() {
     });
     #[cfg(target_os = "macos")]
     ogpu_core::impl_::select(ogpu_metal::impl_::implementation());
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     let _ = Impl { backend: "", create_driver: || panic!("no implementation"), live_handles: || 0 };
 }
 
@@ -47,7 +47,7 @@ pub fn gpu() -> bool {
     if KEEP.with(|k| k.borrow().is_some()) {
         return true;
     }
-    if !cfg!(any(windows, target_os = "macos")) {
+    if !cfg!(any(windows, target_os = "linux", target_os = "macos")) {
         println!("RAYS_TEST_SKIP: skipped: no native OGPU implementation on this platform");
         assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
         return false;

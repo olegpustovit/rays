@@ -82,12 +82,22 @@ fn window_wayland_present() {
         };
         println!("pxui_wayland: paste via {source:?}");
         assert_eq!(pasted, text);
+        assert_eq!(pxui_wayland::clipboard_get_text().unwrap(), text, "the synchronous read of the newest window");
     } else {
         assert!(window.clipboard_set_text(text).is_err());
     }
 
+    // Relative mode: motion accumulates only while it is on (no pointer moves here, so none arrives).
+    window.set_relative_mouse(true).unwrap();
+    window.pump(&mut events);
+    window.set_relative_mouse(false).unwrap();
+    assert_eq!(window.take_motion(), (0.0, 0.0));
+    assert_eq!(window.show_dialog(&[], None, pxui_wayland::DialogKind::OpenFile), Err(pxui_wayland::NO_FILE_DIALOG.to_owned()));
+
     gpu.close();
     window.destroy().unwrap();
+    pxui_wayland::clipboard_set_text("local").unwrap();
+    assert_eq!(pxui_wayland::clipboard_get_text().unwrap(), "local", "without a window the clipboard is process-local");
     assert!(window.set_cursor(CursorShape::Default).is_err(), "a destroyed window refuses calls");
     let mut events = Vec::new();
     assert!(!window.pump(&mut events));

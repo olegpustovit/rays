@@ -24,7 +24,7 @@ cfmt = { path = "../cfmt" }
 ogpu_mock = { path = "../ogpu_mock" }
 mem_sys = { path = "../mem_sys" }
 
-[target.'cfg(windows)'.dev-dependencies]
+[target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

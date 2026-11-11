@@ -30,7 +30,7 @@ param = { path = "../param" }
 [dev-dependencies]
 runtime = { path = "../runtime" }
 
-[target.'cfg(windows)'.dev-dependencies]
+[target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
