@@ -68,11 +68,14 @@ mod host {
 
     /// No accessibility bridge on this platform yet.
     pub struct A11y;
-    pub fn a11y() -> Option<A11y> {
+    pub fn a11y(_: &mut Window) -> Option<A11y> {
         None
     }
+    pub fn a11y_gone(_: &mut Window) {}
     pub fn a11y_update(_: &mut A11y, _: &pxui::a11y::A11yTree) {}
-    pub fn a11y_pump(_: &mut A11y, _: &mut Vec<pxui::a11y::A11yAction>) {}
+    pub fn a11y_pump(_: &mut A11y, _: &mut Vec<pxui::a11y::A11yAction>) -> bool {
+        true
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -111,14 +114,21 @@ mod host {
 
     pub use pxui_atspi::Bridge as A11y;
     /// The AT-SPI2 bridge when the session has an accessibility bus.
-    pub fn a11y() -> Option<A11y> {
-        A11y::connect("PXUI gallery").ok()
+    pub fn a11y(win: &mut Window) -> Option<A11y> {
+        let bridge = A11y::connect("PXUI gallery").ok()?;
+        win.set_wake_fd(bridge.fd()); // a screen reader's call wakes the idle wait
+        Some(bridge)
+    }
+    /// The bridge is being dropped: stop sleeping on its descriptor.
+    pub fn a11y_gone(win: &mut Window) {
+        win.set_wake_fd(-1);
     }
     pub fn a11y_update(b: &mut A11y, tree: &pxui::a11y::A11yTree) {
         b.update(tree);
     }
-    pub fn a11y_pump(b: &mut A11y, out: &mut Vec<pxui::a11y::A11yAction>) {
-        b.pump(out);
+    /// False once the bus has gone.
+    pub fn a11y_pump(b: &mut A11y, out: &mut Vec<pxui::a11y::A11yAction>) -> bool {
+        b.pump(out)
     }
 }
 
@@ -187,7 +197,7 @@ fn main() {
     let mut painter = gpu.painter(&mut ui);
     let mut extent = win.extent();
     let mut target = gpu.target(extent.drawable.0 as u32, extent.drawable.1 as u32);
-    let mut a11y = host::a11y();
+    let mut a11y = host::a11y(&mut win);
     ui.set_a11y(a11y.is_some()); // the tree costs nothing unless a bridge is listening
     let mut actions = Vec::with_capacity(16);
     let mut a11y_seen = 0;
@@ -234,10 +244,15 @@ fn main() {
         }
         if let Some(bridge) = a11y.as_mut() {
             actions.clear();
-            host::a11y_pump(bridge, &mut actions);
+            let alive = host::a11y_pump(bridge, &mut actions);
             if !actions.is_empty() {
                 ui.inject_a11y(&actions);
                 force = true;
+            }
+            if !alive {
+                host::a11y_gone(&mut win);
+                (a11y, a11y_seen) = (None, 0);
+                ui.set_a11y(false); // the bus is gone: no tree, and nothing left to wake the wait
             }
         }
         if win.extent() != extent {
