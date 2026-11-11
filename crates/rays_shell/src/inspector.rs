@@ -84,9 +84,11 @@ pub fn dragging(ui: &Ui) -> bool {
     HELD.with(|h| h.borrow().as_ref().is_some_and(|h| ui.box_of_key(h.field).is_some_and(|b| ui.field_drag(&b).is_some())))
 }
 
-/// After a frame that kept the held number's view: its drag read as its build reads it, the field
-/// patched, and the edit when the value moved (`FlowChange::Edited`'s name and value). `None` when
-/// it is not dragged; `Some((false, _))` when a patch cannot show it (build its view next frame).
+/// After a frame of the held number's drag: its drag read as its build reads it, the field patched
+/// (also after a build: a kept view's verifying build sees the patch, not a stale revision), and
+/// the edit when the value moved past what a build or this wrote (`FlowChange::Edited`'s name and
+/// value). `None` when it is not dragged; `Some((false, _))` when a patch cannot show it (build its
+/// view next frame).
 pub fn dragged(ui: &mut Ui) -> Option<(bool, Option<(String, Value)>)> {
     HELD.with(|h| {
         let mut h = h.borrow_mut();
@@ -95,11 +97,11 @@ pub fn dragged(ui: &mut Ui) -> Option<(bool, Option<(String, Value)>)> {
         let (_, dx) = ui.field_drag(&field)?;
         let fine = ui.press_keys(&field).contains(&input::Key::Shift);
         let text = param::number::scrub(h.kind, h.range, &h.origin, dx as f64, fine);
-        if text == h.last {
-            return Some((true, None));
-        }
         let opts = ValueFieldOpts { fraction: h.range.and_then(|r| param::number::fraction(r, &text).map(|f| f as f32)), trail: h.trail.clone(), ..ValueFieldOpts::default() };
         let patched = ui.patch_field(&field, &opts, &text);
+        if text == h.last {
+            return Some((patched, None));
+        }
         let value = match h.kind {
             param::number::Kind::Int => text.parse::<i64>().ok().map(Value::Int),
             param::number::Kind::Float => text.parse::<f64>().ok().map(Value::Float),
@@ -665,13 +667,14 @@ pub fn flow_fields(ui: &mut Ui, o: &FlowOpts, on_choice: Option<&dyn Fn(&str, &U
 }
 
 /// One inspector row per field inside the current panel; folders become sections, open when their
-/// "/"-joined path is in `expanded`. Returns this frame's edits, empty when nothing changed.
-pub fn fields(ui: &mut Ui, expanded: &[String], width: Option<f32>, views: Vec<FieldView>) -> Vec<(String, Value)> {
+/// "/"-joined path is in `expanded`; `kept_drag` as `FlowOpts`'. Returns this frame's edits, empty
+/// when nothing changed.
+pub fn fields(ui: &mut Ui, expanded: &[String], width: Option<f32>, kept_drag: bool, views: Vec<FieldView>) -> Vec<(String, Value)> {
     let rows: Vec<FlowRow> = views
         .into_iter()
         .map(|field| FlowRow { path: field.name.clone(), fields: vec![field], shown: false, locked: true, drive: None, live: None })
         .collect();
-    let o = FlowOpts { expanded: expanded.to_vec(), width, ..FlowOpts::default() };
+    let o = FlowOpts { expanded: expanded.to_vec(), width, kept_drag, ..FlowOpts::default() };
     flow_fields(ui, &o, None, &rows)
         .into_iter()
         .filter_map(|change| match change {
@@ -684,6 +687,6 @@ pub fn fields(ui: &mut Ui, expanded: &[String], width: Option<f32>, views: Vec<F
 /// `fields` over a typed record, edits applied through `Schema::apply_all`.
 pub fn record(ui: &mut Ui, schema: &Schema, values: &[Value]) -> Result<(Vec<Value>, Effects), String> {
     let views = schema.view(values)?;
-    let changes = fields(ui, &[], None, views);
+    let changes = fields(ui, &[], None, false, views);
     if changes.is_empty() { Ok((values.to_vec(), param::NO_EFFECTS)) } else { schema.apply_all(values, &changes) }
 }

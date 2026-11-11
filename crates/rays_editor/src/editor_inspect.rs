@@ -828,7 +828,9 @@ fn arg_sub(name: &str, mut sub: Vec<i64>) -> Vec<i64> {
 fn arg_follow(node: &[Symbol], name: &str, arg_row: &dyn Fn(&str) -> Option<(p::Row, Vec<i64>)>) -> Option<Follow> {
     let (r, sub) = arg_row(name)?;
     let (node, sub) = (node.to_vec(), arg_sub(name, sub));
-    Some(Rc::new(move |v: &Value| Change::SyntaxEdit(fe::Op::SetArg { node: node.clone(), key: r.key.clone(), sub: sub.clone(), value: syntax_of_value(v) })))
+    Some(Rc::new(move |v: &Value, changes: &mut Vec<Change>, _: &mut Vec<(String, Value)>| {
+        changes.push(Change::SyntaxEdit(fe::Op::SetArg { node: node.clone(), key: r.key.clone(), sub: sub.clone(), value: syntax_of_value(v) }))
+    }))
 }
 
 /// The parameter a field of the rows belongs to, and the field's place in it.
@@ -922,7 +924,7 @@ pub fn field_edits<'a>(
         } else {
             parameter_of(parameters, &name).map(|(parameter, index)| {
                 let (node, parameter) = (n.path.clone(), parameter.clone());
-                Rc::new(move |v: &Value| parameter_edit(&node, &parameter, index, v)) as Follow
+                Rc::new(move |v: &Value, changes: &mut Vec<Change>, _: &mut Vec<(String, Value)>| changes.push(parameter_edit(&node, &parameter, index, v))) as Follow
             })
         };
         crate::editor_inspector_pane::follow(edit);

@@ -35,8 +35,9 @@ use crate::text_pane;
 /// settings changes, the live-cook flag, the probe moves and the places a carried payload hovers.
 pub type InspectorResult = (Option<PanelResult>, Vec<Change>, Vec<(String, Value)>, bool, Vec<scope::Change>, Vec<(carry::Place, bool)>);
 
-/// What a drag of the inspector's held number edits, made by the build its press built.
-pub type Follow = Rc<dyn Fn(&Value) -> Change>;
+/// What a drag of the inspector's held number edits, made by the build its press built: the
+/// frame's changes, or its settings changes.
+pub type Follow = Rc<dyn Fn(&Value, &mut Vec<Change>, &mut Vec<(String, Value)>)>;
 
 /// The inspector's held number (`insp::FlowOpts::kept_drag`): what its drag edits, the inspector
 /// whose build made it (its root's key; `presses` counts the builds that made one), the revision
@@ -224,7 +225,10 @@ pub fn inspect_panel<'a>(
                             let shown = rays_shell::kit::debug_revision(&(&fields, bounds.2));
                             ui.scope("sketch-settings", &mut |ui| {
                                 ui.inspector_section_view("sketch-settings-section", shown, true, None, "Settings", &mut |ui| {
-                                    changes = insp::fields(ui, &[], Some(bounds.2 as f32), std::mem::take(&mut fields));
+                                    changes = insp::fields(ui, &[], Some(bounds.2 as f32), true, std::mem::take(&mut fields));
+                                    if let Some(name) = insp::pressed() {
+                                        follow(Some(Rc::new(move |v: &Value, _: &mut Vec<Change>, settings: &mut Vec<(String, Value)>| settings.push((name.clone(), v.clone())))));
+                                    }
                                 });
                             });
                         }
@@ -285,12 +289,21 @@ pub fn inspect_panel<'a>(
     });
     if built {
         ui.set_state(inspector_root, shown_image.get().unwrap_or(-1));
+        // a held number no row made a follow for: its drag edits nothing (not an older press's edit)
+        if insp::pressed().is_some() {
+            follow(None);
+        }
     }
-    // a kept frame of the drag: the field patched and its edit made here
-    let mut followed = Vec::new();
-    let held = !built && dragging && match insp::dragged(ui) {
+    // a frame of the drag: the field patched, and on a kept frame its edit made here (a build made
+    // it itself)
+    let (mut followed, mut settings) = (Vec::new(), Vec::new());
+    let held = dragging && match insp::dragged(ui) {
         Some((patched, edit)) => {
-            FOLLOWED.with(|f| followed.extend(f.borrow().edit.as_ref().zip(edit).map(|(follow, (_, v))| follow(&v))));
+            FOLLOWED.with(|f| {
+                if let (Some(follow), Some((_, v))) = (&f.borrow().edit, edit) {
+                    follow(&v, &mut followed, &mut settings);
+                }
+            });
             patched
         }
         None => false,
@@ -304,7 +317,7 @@ pub fn inspect_panel<'a>(
             (f.revision, f.held) = (revision, held);
         }
     });
-    result.unwrap_or_else(|| (None, followed, vec![], value.live_cook, vec![], vec![]))
+    result.unwrap_or_else(|| (None, followed, settings, value.live_cook, vec![], vec![]))
 }
 
 /// `workspace_inspector` for a node of the graph pane, gathering the places the choice controls
@@ -409,7 +422,7 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                 let opts = insp::FlowOpts { expanded, width: Some(inspector_width), kind_label: Some(kind_label(&kind_)), kept_drag: true, ..Default::default() };
                 let events = insp::flow_fields(ui, &opts, None, &rows);
                 if let Some(path) = insp::pressed() {
-                    follow(Some(Rc::new(move |v: &Value| Change::SetParameter { node: node_id, path: path.clone(), value: v.clone() })));
+                    follow(Some(Rc::new(move |v: &Value, changes: &mut Vec<Change>, _: &mut Vec<(String, Value)>| changes.push(Change::SetParameter { node: node_id, path: path.clone(), value: v.clone() }))));
                 }
                 for ev in events {
                     match ev {

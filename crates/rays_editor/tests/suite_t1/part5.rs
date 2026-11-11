@@ -47,6 +47,45 @@ pub fn run_root_section() {
     check(r.source() != before && has(&r.source(), "(scene/root all"), "the root stayed in the text, edited");
     r.step_full(&[], &[Key::Meta], (450., 300.), vec![ch('z')]);
     check(r.source() == before, "one undo returns the root");
+    // a drag of its width: the root follows every frame while the inspector stays kept (the field
+    // patched; its verifying builds see the patch), and the whole drag is one undo step
+    r.e.core.ui.borrow_mut().set_a11y(true);
+    for _ in 0..4 {
+        r.step((450., 300.), vec![]);
+    }
+    let named = |r: &Run, name: &str| {
+        let ui = r.e.core.ui.borrow();
+        let tree = ui.output().a11y;
+        tree.nodes.iter().find(|n| &tree.strings[n.name.start as usize..n.name.end as usize] == name && n.rect.x >= ix as f32).map(|n| ((ix + iw * 3 / 4) as f64, (n.rect.y + n.rect.h / 2.0) as f64))
+    };
+    // (its Size section opened)
+    let size = named(&r, "Size").unwrap_or_else(|| fail("the Size section"));
+    press(&mut r, size);
+    let at = named(&r, "width").unwrap_or_else(|| fail("the width row"));
+    // the drag twice: views verified, then as the app runs (verifying builds every view), counting
+    // the frames that kept the inspector
+    for verify in [true, false] {
+        r.e.core.ui.borrow_mut().verify_views(verify);
+        // (past a double click's time: a press soon after the last opens text entry)
+        for _ in 0..40 {
+            r.step(at, vec![Event::PointerMoved(at)]);
+        }
+        r.stepb(&[LB], at, vec![Event::PointerPressed(LB, at)]);
+        let mut kept = 0;
+        for i in 1..=12 {
+            let p = (at.0 + 3.0 * i as f64, at.1);
+            r.stepb(&[LB], p, vec![Event::PointerMoved(p)]);
+            kept += (i > 2 && r.e.core.ui.borrow().rebuilt_named("inspector-view") == 0) as usize;
+        }
+        let dragged = r.source();
+        let end = (at.0 + 36.0, at.1);
+        r.step(end, vec![Event::PointerReleased(LB, end)]);
+        r.step(end, vec![]);
+        check(verify || kept == 10, &format!("the width's drag rebuilt the inspector in {} of 10 frames", 10 - kept));
+        check(!has(&dragged, ":width 800") && has(&r.source(), "(scene/root all") && r.undo_label() == Some("Render settings".into()), &format!("the drag did not write the width live: {dragged}"));
+        r.step_full(&[], &[Key::Meta], end, vec![ch('z')]);
+        check(r.source() == before, &format!("one undo did not return the dragged root: {}", r.source()));
+    }
     r.close();
 }
 

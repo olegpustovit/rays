@@ -303,6 +303,8 @@ pub struct Extra {
     root_rows: Rc<RefCell<(Option<root::Parameters>, Vec<rays_shell::inspector::FlowRow>)>>,
     /// the Render section's edit
     pub root_request: Option<root::Parameters>,
+    /// the root a number of the Render section dragged on the kept inspector sets (its follow's)
+    root_drag: Rc<RefCell<Option<root::Parameters>>>,
     /// the ACTIVE camera follows the viewport
     pub following: Option<bool>,
     /// the Viewport panel's toggle, applied on the next update
@@ -537,6 +539,7 @@ pub fn init(mut core: Model, camera_: &easy_camera::EasyCamera) -> (Model, Extra
         root: core.doc.root.clone(),
         root_rows: Rc::new(RefCell::new((None, Vec::new()))),
         root_request: None,
+        root_drag: Rc::new(RefCell::new(None)),
         following: active_node(&core).map(|n| follows(&n)),
         follow_request: None,
         written: None,
@@ -611,10 +614,19 @@ pub fn panel(ui: &mut Ui, control_: &Control, camera_: &Camera, extra_: &Extra, 
         if cached.0.as_ref() != Some(&extra_.root) {
             return;
         }
-        let changes: Vec<_> = inspector::flow_fields(ui, &FlowOpts::default(), None, &cached.1).into_iter().filter_map(|change| match change {
+        let changes: Vec<_> = inspector::flow_fields(ui, &FlowOpts { kept_drag: true, ..FlowOpts::default() }, None, &cached.1).into_iter().filter_map(|change| match change {
             FlowChange::Edited(name, value) => Some((name, value)),
             _ => None,
         }).collect();
+        // a number pressed: its drag sets the root as it was then with that number (`on_view` takes it)
+        if let Some(name) = inspector::pressed() {
+            let (drag, pressed) = (extra_.root_drag.clone(), extra_.root.clone());
+            crate::editor_inspector_pane::follow(Some(Rc::new(move |v: &param::Value, _: &mut Vec<crate::editor_model::Change>, _: &mut Vec<(String, param::Value)>| {
+                if let Ok((values, _)) = root::parameters_schema().apply_all(&root::to_values(&pressed), &[(name.clone(), v.clone())]) {
+                    *drag.borrow_mut() = Some(root::from_values(values));
+                }
+            })));
+        }
         if !changes.is_empty() {
             if let Ok((values, _)) = root::parameters_schema().apply_all(&root::to_values(&extra_.root), &changes) {
                 root_ = root::from_values(values);
@@ -775,6 +787,11 @@ pub fn frame_bounds(min: vec3::T, max: vec3::T, camera_: &Camera) -> Camera {
 pub fn on_view(core: &mut Model, previous: &Camera, key: &str, camera_: Camera, extra_: Extra, stepped: bool, held: bool) -> (Camera, Extra) {
     // a change in the Render section: an authored root takes it; without one only the renderer is
     // the viewport's own choice, and any other setting writes the root
+    let dragged = extra_.root_drag.borrow_mut().take();
+    let extra_ = match dragged {
+        Some(root_) => Extra { root_request: Some(root_), ..extra_ },
+        None => extra_,
+    };
     let mut extra_ = match extra_.root_request.clone() {
         None => extra_,
         Some(root_) if root_renderer(&*core).is_none() && root::Parameters { renderer: core.doc.root.renderer, ..root_.clone() } == core.doc.root => {
