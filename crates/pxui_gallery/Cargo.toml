@@ -1,0 +1,49 @@
+[package]
+autotests = false
+name = "pxui_gallery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The kit gallery: every PXUI widget in a window app on the platform's host and GPU backend. The
+# page functions and the GPU half are the library, so the goldens render the same pages headless.
+[lib]
+name = "pxui_gallery"
+path = "src/lib.rs"
+test = false
+
+[[bin]]
+name = "pxui_gallery"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+input = { path = "../input" }
+mem_sys = { path = "../mem_sys" }
+ogpu_core = { path = "../ogpu_core" }
+pxui = { path = "../pxui" }
+pxui_render = { path = "../pxui_render" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+ogpu_metal = { path = "../ogpu_metal" }
+pxui_sdl = { path = "../pxui_sdl" }
+sdl3 = { path = "../sdl3" }
+
+[target.'cfg(windows)'.dependencies]
+ogpu_vulkan = { path = "../ogpu_vulkan" }
+pxui_sdl = { path = "../pxui_sdl" }
+sdl3 = { path = "../sdl3" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ogpu_vulkan = { path = "../ogpu_vulkan" }
+pxui_atspi = { path = "../pxui_atspi" }
+pxui_wayland = { path = "../pxui_wayland" }
+
+# Headless: the pages rendered offscreen into goldens; the idle case runs the app hidden.
+[[test]]
+name = "gpu_gallery"
+path = "tests/gpu_gallery.rs"
+harness = false
+
+[lints]
+workspace = true

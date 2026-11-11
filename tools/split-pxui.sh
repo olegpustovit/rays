@@ -38,7 +38,7 @@ scratch=$(mktemp -d)
 cleanup() { rc=$?; rm -rf "$scratch"; [ $rc -eq 0 ] || rm -rf "$out"; exit $rc; }
 trap cleanup EXIT
 
-CRATES="ogpu_core ogpu_mock ogpu_metal metal_sys ogpu_vulkan vulkan_sys native_layer_token_sys input sdl3 sdl3_sys mem_sys cfmt pxui pxui_text pxui_render pxui_sdl pxui_wayland pxui_atspi"
+CRATES="ogpu_core ogpu_mock ogpu_metal metal_sys ogpu_vulkan vulkan_sys native_layer_token_sys input sdl3 sdl3_sys mem_sys cfmt pxui pxui_text pxui_render pxui_sdl pxui_wayland pxui_atspi pxui_gallery"
 # Everything else the crates own, at the same repo-relative path.
 EXTRA="tools/t tools/cc-stack.sh tools/gate/Cargo.toml tools/gate/src/main.rs tools/gate/shape-allowlist.tsv
  assets/fonts fixtures/pxui_render fixtures/shaders/ogpu_metal packaging/sdl3.lock

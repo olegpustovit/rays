@@ -96,6 +96,13 @@ impl Ui {
         }
     }
 
+    /// The theme's scroll thumb, 2 points in from the ends.
+    fn thumb(&self) -> Bar {
+        let t = self.theme();
+        let thumb = t.scrollbar.idle;
+        Bar { color: thumb.fill, radius: thumb.radius[0], width: t.scrollbar_w, gap: t.scrollbar_gap, margin: 2.0, whole: true }
+    }
+
     /// A kit row `rh` high laid out as a row: `SIDE` in from both ends, children centred, 8 apart.
     fn kit_line(&mut self, key: i64, flags: Flags, role: Role) -> Handle {
         let rh = self.row_height() as f32;
@@ -244,8 +251,10 @@ impl Ui {
     pub fn progress(&mut self, label: &str, value: Option<f32>) -> Handle {
         let key = key_of(self.current_seed(), label);
         let row = self.kit_line(key, NO_FLAGS, Role::Unknown);
-        let (track_look, bar) = (self.theme().progress.idle, self.theme().mark.idle);
+        let (track_look, bar, label_look) = (self.theme().progress.idle, self.theme().mark.idle, self.theme().row.idle);
+        let rh = self.row_height() as f32;
         let saved = self.enter(&row);
+        self.text_leaf(int_key(key, 1), rh, label_look, shown(label));
         let track = self.node_keyed(int_key(key, 0), Node { flags: CLIP, h: Size::Px(4.0), look: track_look, role: Role::Progress, ..Node::DEFAULT });
         self.a11y_name(&track, shown(label));
         let inner = self.enter(&track);
@@ -546,10 +555,8 @@ impl Ui {
     /// A box `w` x `h` whose content (`f`'s children, laid out as a column) scrolls on both axes,
     /// with the theme's thumbs. Returns its node.
     pub fn scroll_view(&mut self, label: &str, w: Size, h: Size, f: &mut dyn FnMut(&mut Ui)) -> Handle {
-        let t = self.theme();
-        let thumb = t.scrollbar.idle;
-        let bar = Bar { color: thumb.fill, radius: thumb.radius[0], width: t.scrollbar_w, gap: t.scrollbar_gap, margin: 2.0, whole: true };
-        let look = t.scroll_view.idle;
+        let bar = self.thumb();
+        let look = self.theme().scroll_view.idle;
         let rh = self.row_height() as f32;
         let n = self.node(label, Node { flags: SCROLL | SCROLL_X | CLIP | BLOCKING, w, h, look, bar: Some(bar), scroll_step: rh, padding: Edges::all(1.0), role: Role::ScrollArea, ..Node::DEFAULT });
         self.a11y_name(&n, shown(label));
@@ -607,7 +614,7 @@ impl Ui {
     pub fn list_view(&mut self, label: &str, count: usize, multi: bool, selected: &mut [bool], text: &dyn Fn(usize, &mut dyn FnMut(&str))) -> Option<usize> {
         let count = count.min(selected.len());
         let rh = self.row_height() as f32;
-        let frame = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY | CLIP, w: Size::Grow, h: Size::Grow, ..Node::DEFAULT });
+        let frame = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY | CLIP, w: Size::Grow, h: Size::Grow, look: self.theme().scroll_view.idle, padding: Edges::all(1.0), ..Node::DEFAULT });
         let s = self.signal(&frame);
         let focused = self.focused(&frame);
         let page = (self.rect(&frame).h / rh).floor().max(1.0) as i64;
@@ -645,13 +652,13 @@ impl Ui {
             }
             let inner = ui.enter(&n);
             text(i, &mut |t| {
-                let leaf = ui.node("text", Node { flags: FIT_TEXT, h: Size::Grow, ..Node::DEFAULT });
-                ui.node_mut(&leaf).look = text_only(&ui.node_mut(&n).look);
-                ui.text(&leaf, t);
+                let (look, rh) = (ui.node_mut(&n).look, ui.row_height() as f32);
+                ui.text_leaf(int_key(n.box_key, 1), rh, look, t);
             });
             ui.leave(inner);
         });
         self.leave(saved);
+        self.node_mut(&body).bar = Some(self.thumb());
         self.set_role(&body, Role::List, if multi { st::SELECTABLE } else { 0 });
         self.a11y_name(&body, shown(label));
         if c != cursor {
@@ -686,7 +693,7 @@ impl Ui {
         };
         flatten(visible, open);
         let rh = self.row_height() as f32;
-        let frame = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY | CLIP, w: Size::Grow, h: Size::Grow, ..Node::DEFAULT });
+        let frame = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY | CLIP, w: Size::Grow, h: Size::Grow, look: self.theme().scroll_view.idle, padding: Edges::all(1.0), ..Node::DEFAULT });
         let s = self.signal(&frame);
         let focused = self.focused(&frame);
         let page = (self.rect(&frame).h / rh).floor().max(1.0) as i64;
@@ -740,9 +747,8 @@ impl Ui {
                 }
             }
             text(node, &mut |t| {
-                let leaf = ui.node("text", Node { flags: FIT_TEXT, h: Size::Grow, ..Node::DEFAULT });
-                ui.node_mut(&leaf).look = text_only(&ui.node_mut(&n).look);
-                ui.text(&leaf, t);
+                let (look, rh) = (ui.node_mut(&n).look, ui.row_height() as f32);
+                ui.text_leaf(int_key(n.box_key, 1), rh, look, t);
                 ui.a11y_name(&n, t);
             });
             ui.leave(inner);
@@ -760,6 +766,7 @@ impl Ui {
         if let Some(o) = toggled.and_then(|node| open.get_mut(node)) {
             *o = !*o;
         }
+        self.node_mut(&body).bar = Some(self.thumb());
         self.set_role(&body, Role::Tree, 0);
         self.a11y_name(&body, shown(label));
         if c != cursor {
@@ -782,8 +789,7 @@ impl Ui {
         let columns = titles.len().min(widths.len());
         let t = self.theme();
         let (frame_look, head_look, column, chevron, states) = (t.scroll_view.idle, t.table_head.idle, t.column, t.chevron.idle, t.listbox);
-        let thumb = t.scrollbar.idle;
-        let bar = Bar { color: thumb.fill, radius: thumb.radius[0], width: t.scrollbar_w, gap: t.scrollbar_gap, margin: 2.0, whole: true };
+        let bar = self.thumb();
         let frame = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY | SCROLL_X | CLIP, w: Size::Grow, h: Size::Grow, look: frame_look, bar: Some(bar), padding: Edges::all(1.0), role: Role::Table, ..Node::DEFAULT });
         self.a11y_name(&frame, shown(label));
         let s = self.signal(&frame);
@@ -797,25 +803,27 @@ impl Ui {
         let total: f32 = widths[..columns].iter().map(|w| w + 1.0).sum();
         let mut sorted = None;
         let saved = self.enter(&frame);
-        let sheet = self.node("sheet", Node { w: Size::Px(total), h: Size::Grow, ..Node::DEFAULT });
+        let sheet = self.node("sheet", Node { w: Size::Grow, min_w: total, h: Size::Grow, ..Node::DEFAULT });
         let inner = self.enter(&sheet);
         let head = self.node("head", Node { h: Size::Px(rh), axis: Axis::Row, look: head_look, ..Node::DEFAULT });
         let hs = self.enter(&head);
         for i in 0..columns {
-            let n = self.node_keyed(int_key(head.box_key, i as i64), Node { flags: ROW_FLAGS | FIT_TEXT, w: Size::Px(widths[i]), h: Size::Grow, axis: Axis::Row, align: Align::Center, justify: Justify::End, padding: Edges { r: 8.0, ..Edges::ZERO }, inset: Edges { l: 8.0, r: 20.0, ..Edges::ZERO }, role: Role::ColumnHeader, ..Node::DEFAULT });
+            let n = self.node_keyed(int_key(head.box_key, i as i64), Node { flags: ROW_FLAGS, w: Size::Px(widths[i]), h: Size::Grow, axis: Axis::Row, align: Align::Center, justify: Justify::SpaceBetween, padding: Edges { l: 8.0, r: 8.0, ..Edges::ZERO }, role: Role::ColumnHeader, ..Node::DEFAULT });
             let ns = self.signal(&n);
             if ns.clicked {
                 sorted = Some(i);
             }
             let by = sort.filter(|(col, _)| *col == i);
             self.style(&n, &column, State { hovered: ns.hovered, pressed: ns.held, checked: by.is_some(), ..State::default() });
-            self.text(&n, titles[i]);
+            self.a11y_name(&n, titles[i]);
+            let ms = self.enter(&n);
+            let look = self.node_mut(&n).look;
+            self.text_leaf(int_key(n.box_key, 0), rh, look, titles[i]);
             if let Some((_, ascending)) = by {
-                let ms = self.enter(&n);
                 let m = self.node("sort", Node { w: Size::Px(6.0), h: Size::Grow, look: chevron, ..Node::DEFAULT });
                 self.node_mut(&m).mark = Mark::Chevron(if ascending { Dir::Up } else { Dir::Down });
-                self.leave(ms);
             }
+            self.leave(ms);
             let (_, gs) = self.grip(format_args!("grip{}", i), Axis::Row, None);
             if gs.held && gs.drag.0 != 0.0 {
                 widths[i] = (widths[i] + if self.rtl() { -gs.drag.0 } else { gs.drag.0 }).max(32.0);
@@ -834,12 +842,16 @@ impl Ui {
             let inner = ui.enter(&n);
             for col in 0..columns {
                 cell(i, col, &mut |t| {
-                    let leaf = ui.node_keyed(int_key(n.box_key, col as i64), Node { flags: FIT_TEXT, w: Size::Px(w[col]), h: Size::Grow, look, inset: Edges { l: 8.0, r: 8.0, ..Edges::ZERO }, role: Role::Cell, ..Node::DEFAULT });
-                    ui.text(&leaf, t);
+                    let c = ui.node_keyed(int_key(n.box_key, col as i64), Node { w: Size::Px(w[col]), h: Size::Grow, axis: Axis::Row, align: Align::Center, padding: Edges { l: 8.0, r: 8.0, ..Edges::ZERO }, role: Role::Cell, ..Node::DEFAULT });
+                    ui.a11y_name(&c, t);
+                    let inner = ui.enter(&c);
+                    ui.text_leaf(int_key(c.box_key, 0), rh, look, t);
+                    ui.leave(inner);
                 });
             }
             ui.leave(inner);
         });
+        self.node_mut(&body).bar = Some(self.thumb());
         self.set_role(&body, Role::Unknown, 0);
         self.leave(inner);
         self.leave(saved);

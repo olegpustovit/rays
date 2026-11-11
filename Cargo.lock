@@ -511,6 +511,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pxui_gallery"
+version = "0.1.0"
+dependencies = [
+ "input",
+ "mem_sys",
+ "ogpu_core",
+ "ogpu_metal",
+ "ogpu_vulkan",
+ "pxui",
+ "pxui_atspi",
+ "pxui_render",
+ "pxui_sdl",
+ "pxui_wayland",
+ "sdl3",
+]
+
+[[package]]
 name = "pxui_render"
 version = "0.1.0"
 dependencies = [

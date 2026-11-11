@@ -32,4 +32,4 @@ esac
 cargo run -q -p gate -- deps
 # Known failures: shape violations left in crates/pxui/src (engine owner); informational until clean.
 cargo run -q -p gate -- shape || echo "validate: gate shape reported violations (informational)"
-cargo t -p pxui_text -p pxui_render -p pxui -p ogpu_core -p ogpu_mock -p ogpu_metal -p pxui_sdl -p input -p cfmt
+cargo t -p pxui_text -p pxui_render -p pxui -p ogpu_core -p ogpu_mock -p ogpu_metal -p pxui_sdl -p input -p cfmt -p pxui_gallery
