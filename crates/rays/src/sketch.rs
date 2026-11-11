@@ -120,6 +120,12 @@ pub fn quit() {
 
 const NO_SKETCH: &str = "no sketch is running";
 
+/// Whether a sketch is running: a best-effort caller on a per-frame path asks first, since the setters below
+/// build an error string (an allocation) when none is.
+pub fn running() -> bool {
+    ACTIVE_RUN.with(|r| r.borrow().is_some())
+}
+
 /// Capture and hide the pointer: `Frame.mouse_delta` then reports device motion even at the
 /// window edge (fly cameras). Released when the sketch stops; an error when no sketch is running.
 pub fn set_relative_mouse(enabled: bool) -> Result<(), String> {

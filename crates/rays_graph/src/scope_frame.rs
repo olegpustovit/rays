@@ -1199,7 +1199,7 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
     } else {
         t.panning_grab
     };
-    if grab != t.panning_grab {
+    if grab != t.panning_grab && rays::sketch::running() {
         let _ = rays::sketch::set_relative_mouse(grab);
     }
     t.panning_grab = grab;

@@ -663,7 +663,7 @@ pub fn with_bounds(x: i64, y: i64, width: i64, height: i64, t: &mut Pane) {
 
 /// The pane is not drawn this frame: nothing it began stays open, and the pointer is given back.
 pub fn suspend(t: &mut Pane) {
-    if t.panning_grab {
+    if t.panning_grab && rays::sketch::running() {
         let _ = rays::sketch::set_relative_mouse(false);
     }
     t.editing = None;
