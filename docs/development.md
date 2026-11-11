@@ -247,7 +247,9 @@ preferences live in SDL's `~/.local/share/rays/editor`. What the Wayland host do
 - Relative mouse uses pointer-constraints-v1 and relative-pointer-v1 (WSLg offers both), degrading to absolute
   motion deltas without them. An unthrottled (`vsync: false`) swapchain is MAILBOX on Wayland, else FIFO.
 
-Known lavapipe (Mesa 25.2, WSL2) failures, unresolved and not seen on hardware drivers: exact-byte goldens differ
-by one in blended pixels (`rays_shell` `window_host_zones_parity`); `renderer` `gpu_scene3_resident_colors3/4`
-and `gpu_scene3_borrowed_stream_guards` differ on device-resident colours; `rays_editor` `instanced` and
-`run_instances` segfault inside the driver; the isogrid qualification cases exceed even the 60 s limit.
+Known lavapipe (Mesa 25.2, WSL2) failures, unresolved; the first two pass on Windows/NVIDIA from the same tree:
+exact-byte goldens differ by one in blended pixels (`rays_shell` `window_host_zones_parity`); `renderer`
+`gpu_scene3_resident_colors3/4` and `gpu_scene3_borrowed_stream_guards` differ on device-resident colours (an
+extra primitive's pixels, and off-by-one channels); `rays_editor` `instanced` and `run_instances` segfault on a
+driver worker thread; `native_isogrid_viewport_recipe_1` differs in its shadow pixels and the other isogrid
+qualification cases exceed even the 60 s limit, so the whole `RAYS_SLOW=1` editor run hits the 600 s cap.
