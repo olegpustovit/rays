@@ -3717,9 +3717,9 @@ impl Ui {
     /// parent (Grow, Pct, Rel) stretches and bounces as a fixed one does.
     pub(crate) fn apply_scroll(&mut self, consume: bool, time: f64, index: usize) {
         let key = self.boxes[index].key;
-        let (wheel, drag) = self.signals.get(&key).map_or((0.0, 0.0), |v| (v.scroll_wheel, v.scroll_drag));
+        let (wheel, drag, touch, lift) = self.signals.get(&key).map_or((0.0, 0.0, false, false), |v| (v.scroll_wheel, v.scroll_drag, v.scroll_touch, v.scroll_lift));
         let max_scroll = 0.0f64.max(self.l_content[index] as f64 - self.l_h[index] as f64);
-        self.glide(0, time, index, max_scroll, wheel, drag);
+        self.glide(0, time, index, max_scroll, (wheel, drag, touch, lift));
         if consume {
             if let Some(value) = self.signals.get_mut(&key) {
                 value.scroll_wheel = 0.0;
@@ -3734,10 +3734,10 @@ impl Ui {
     /// right edge, so the wheel and the fingers move the content mirrored (it follows them).
     pub(crate) fn apply_scroll_x(&mut self, consume: bool, time: f64, index: usize) {
         let key = self.boxes[index].key;
-        let (wheel, drag) = self.signals.get(&key).map_or((0.0, 0.0), |v| (v.scroll_wheel_x, v.scroll_drag_x));
+        let (wheel, drag, touch, lift) = self.signals.get(&key).map_or((0.0, 0.0, false, false), |v| (v.scroll_wheel_x, v.scroll_drag_x, v.scroll_touch, v.scroll_lift));
         let max_scroll = 0.0f64.max(self.l_content_w[index] as f64 - self.l_w[index] as f64);
         let sign = if self.dir == Direction::Rtl { -1.0 } else { 1.0 };
-        self.glide(1, time, index, max_scroll, wheel * sign, drag * sign);
+        self.glide(1, time, index, max_scroll, (wheel * sign, drag * sign, touch, lift));
         if consume {
             if let Some(value) = self.signals.get_mut(&key) {
                 (value.scroll_wheel_x, value.scroll_drag_x, value.scroll_touch, value.scroll_lift) = (0.0, 0.0, false, false);
@@ -3747,11 +3747,14 @@ impl Ui {
 
     /// The scroll motion of axis `ax`: wheel steps and finger travel pull (stretching past an
     /// edge), fingers lifted in motion coast and bounce, a stretch left alone decays.
-    fn glide(&mut self, ax: usize, time: f64, index: usize, max_scroll: f64, wheel: f32, drag: f32) {
+    fn glide(&mut self, ax: usize, time: f64, index: usize, max_scroll: f64, (wheel, drag, touch, lift): (f32, f32, bool, bool)) {
         let slot = self.boxes[index].slot;
-        let key = self.boxes[index].key;
         let extent = if ax == 0 { self.l_h[index] } else { self.l_w[index] } as f64;
-        let (touch, lift) = self.signals.get(&key).map_or((false, false), |v| (v.scroll_touch, v.scroll_lift));
+        // at rest with no input: nothing moves (most scroll boxes, most frames)
+        if !touch && !lift && wheel == 0.0 && drag == 0.0 && !self.glides[ax][slot].moving() {
+            self.glides[ax][slot].frame_time = time;
+            return;
+        }
         let release = if ax == 0 { self.gesture_velocity.0 } else { self.gesture_velocity.1 };
         let release = if ax == 1 && self.dir == Direction::Rtl { -release } else { release };
         // any input catches a coast or a bounce where it is
@@ -4016,7 +4019,7 @@ impl Ui {
                     self.set_main(row, end, if row { cross * c.aspect } else { cross / c.aspect });
                 }
                 // in a column a wrapping row's width is known now; in a row, after the shares
-                if !row {
+                if !row && c.wrap {
                     self.rewrap(end);
                 }
                 // a Grow child starts from nothing (its minimum holds in `grow_line`)
@@ -4040,10 +4043,10 @@ impl Ui {
             let (mut line_cross, mut base_max) = (0.0f32, 0.0f32);
             let mut c = start;
             while c != end {
-                if row {
+                let cn = *self.nd(c);
+                if row && cn.wrap {
                     self.rewrap(c);
                 }
-                let cn = *self.nd(c);
                 let (cs, ce) = cross_margins(cn.margin);
                 let a = cn.align_self.unwrap_or(n.align);
                 let fit = matches!(if row { cn.h } else { cn.w }, Size::Fit);
@@ -4218,7 +4221,9 @@ impl Ui {
             if cn.aspect > 0.0 && matches!(cn.h, Size::Fit) {
                 self.set_main(false, c, self.l_w[c] / cn.aspect);
             }
-            self.rewrap(c);
+            if cn.wrap {
+                self.rewrap(c);
+            }
             let ow = self.l_w[c] + m.l + m.r;
             let oh = self.l_h[c] + m.t + m.b;
             let x = match n.justify {
