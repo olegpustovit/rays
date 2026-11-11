@@ -450,7 +450,8 @@ impl ViewEntry {
     }
 
     fn identity(&self) -> bool {
-        self.scale == 1.0 && self.transform == [1.0, 0.0, 0.0, 1.0]
+        let [a, b, c, d] = self.transform;
+        self.scale == 1.0 && a == 1.0 && b == 0.0 && c == 0.0 && d == 1.0
     }
 
     /// The window rectangle that covers `r` (view points, offset) once transformed.
@@ -587,7 +588,8 @@ impl ViewRec {
 
     /// No scale or transform.
     fn plain(&self) -> bool {
-        self.scale == 1.0 && self.transform == [1.0, 0.0, 0.0, 1.0]
+        let [a, b, c, d] = self.transform;
+        self.scale == 1.0 && a == 1.0 && b == 0.0 && c == 0.0 && d == 1.0
     }
 
     fn entry(&self) -> ViewEntry {
@@ -954,11 +956,12 @@ pub struct Ui {
     /// was patched, an action came in), and the focus and capture the last walk saw
     a11y_dirty: bool,
     a11y_on: bool,
+    timing: bool,
     a11y_seen: (i64, Option<i64>),
     /// how long the last frame's layout passes took
     layout_time: std::time::Duration,
     phases: [std::time::Duration; PHASES],
-    phase_at: std::time::Instant,
+    phase_at: Option<std::time::Instant>,
     /// `order_stack`'s scratch: (z, build position, box)
     z_order: Vec<(i16, u32, usize)>,
     // build state
@@ -1136,13 +1139,14 @@ impl Ui {
             z_order: Vec::new(),
             layout_time: std::time::Duration::ZERO,
             phases: [std::time::Duration::ZERO; PHASES],
-            phase_at: std::time::Instant::now(),
+            phase_at: None,
             a11y: A11yTree::new(),
             a11y_next: A11yTree::new(),
             a11y_map: Vec::new(),
             a11y_pending: Vec::new(),
             a11y_dirty: true,
             a11y_on: false,
+            timing: false,
             a11y_seen: (0, None),
             parents: Vec::new(),
             overlays: Vec::new(),
@@ -1508,19 +1512,28 @@ impl Ui {
         }
     }
 
-    /// The last frame's time in each of its phases, in `PHASE_NAMES` order (a clock read per
-    /// phase, always on): begin (input routing), build, intrinsic, arrange, paint, a11y, finish.
+    /// Time the frame's phases from the next frame on (`phase_times`, `layout_time`): a clock read
+    /// per phase, off by default.
+    pub fn set_timing(&mut self, on: bool) {
+        self.timing = on;
+        self.phases = [std::time::Duration::ZERO; PHASES];
+    }
+
+    /// The last frame's time in each of its phases, in `PHASE_NAMES` order, while `set_timing` is
+    /// on: begin (input routing), build, intrinsic, arrange, paint, a11y, finish.
     pub fn phase_times(&self) -> [std::time::Duration; PHASES] {
         self.phases
     }
 
     fn phase(&mut self, i: usize) {
-        let now = std::time::Instant::now();
-        self.phases[i] = now - self.phase_at;
-        self.phase_at = now;
+        if let Some(at) = self.phase_at {
+            let now = std::time::Instant::now();
+            self.phases[i] = now - at;
+            self.phase_at = Some(now);
+        }
     }
 
-    /// How long the last frame's layout (`intrinsic` and `arrange`) took.
+    /// How long the last frame's layout (`intrinsic` and `arrange`) took, while `set_timing` is on.
     pub fn layout_time(&self) -> std::time::Duration {
         self.layout_time
     }
@@ -5079,7 +5092,7 @@ impl Ui {
         if !frame.input.t.is_finite() {
             panic!("Ui.frame: time must be finite");
         }
-        self.phase_at = std::time::Instant::now();
+        self.phase_at = self.timing.then(std::time::Instant::now);
         let (scale_x, scale_y) = frame.pixel_scale;
         let density = 1.max(scale_x.max(scale_y).round() as i64);
         let size = (frame.input.size.0 as f32, frame.input.size.1 as f32);

@@ -404,6 +404,7 @@ pub fn big_frame(t: f64) -> input::frame::Frame {
 
 /// Per frame of `build` over `n` warm frames: (allocations, us per frame, us of layout per frame).
 fn costs(ui: &mut Ui, t: &mut f64, n: u32, build: &mut dyn FnMut(&mut Ui, u64)) -> (u64, f64, f64) {
+    ui.set_timing(true);
     for _ in 0..5 {
         *t += 1.0 / 60.0;
         let tick = (*t * 60.0).round() as u64;

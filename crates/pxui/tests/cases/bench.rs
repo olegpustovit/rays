@@ -2,6 +2,7 @@
 //! median of 7 rounds, with the per-phase breakdown (`Ui::phase_times`), for the kit baseline, ten
 //! 50-widget views and the 2,006-node layout stress tree (docs/pxui-baseline.md). Off by default.
 //! `PXUI_PROFILE=<case>` loops that case 8 s first: `sample <pid> 5 -file out.txt` while it runs.
+//! The phase clocks cost about 0.15 us a frame; `PXUI_NO_TIMING=1` measures without them.
 use crate::layout::{big_frame, stress, stress_popup};
 use crate::support::*;
 use pxui::ui::*;
@@ -12,6 +13,7 @@ const ROUNDS: usize = 7;
 /// `ROUNDS` rounds of `n` frames (after 10 warm-up): prints min / median us per frame, the median
 /// round's phases in us, and ns per node over `nodes()` (the frame's nodes; 0 skips it).
 fn bench(name: &str, ui: &mut Ui, n: u32, frame: &mut dyn FnMut(&mut Ui, u64), nodes: usize) {
+    ui.set_timing(std::env::var_os("PXUI_NO_TIMING").is_none());
     let mut tick = 1_000u64;
     for _ in 0..10 {
         tick += 1;
