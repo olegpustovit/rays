@@ -496,6 +496,11 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
         }
         None => (value.control.clone(), focused.camera.clone(), Vec::new(), extra, None),
     };
+    // a number of the camera panel dragged on its kept section: the camera follows by its patches
+    let (control, camera) = match V::dragged(&control, &mut ui.borrow_mut(), &camera) {
+        Some(dragged) => (V::Control { held: true, ..control }, dragged),
+        None => (V::Control { held: false, ..control }, camera),
+    };
     let (camera, extra) = match &update_.loaded_view {
         Some(json) => V::restore(&camera, &extra, json),
         None => (camera, extra),

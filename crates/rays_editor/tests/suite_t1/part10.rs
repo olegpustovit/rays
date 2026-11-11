@@ -147,16 +147,41 @@ fn workspace(name: &str, text: &str) {
         }
         let fov = named(&r, "FOV").expect("the FOV row");
         let at = (fov.0 + 90.0, fov.1);
-        r.stepb(&[MouseButton::LeftButton], at, vec![Event::PointerMoved(at), Event::PointerPressed(MouseButton::LeftButton, at)]);
-        let scrub = measure(&mut r, n, &|r, i| {
-            let p = (at.0 + 1.0 + i as f64, at.1);
-            r.stepb(&[MouseButton::LeftButton], p, vec![Event::PointerMoved(p)]);
-        });
+        // the same drag twice: the first warms the texts it shows (the values it passes through)
+        let mut scrub = None;
+        let mut fov = (0.0, 0.0);
+        for pass in 0..2 {
+            r.stepb(&[MouseButton::LeftButton], at, vec![Event::PointerMoved(at), Event::PointerPressed(MouseButton::LeftButton, at)]);
+            // (the drag's first frames: the inspector takes the held field's camera in)
+            for i in 0..2 {
+                let p = (at.0 - 2.0 + i as f64, at.1);
+                r.stepb(&[MouseButton::LeftButton], p, vec![Event::PointerMoved(p)]);
+            }
+            let before = rays::easy_camera::fov_y(&r.e.camera);
+            let cost = measure(&mut r, n, &|r, i| {
+                let p = (at.0 + 1.0 + i as f64 / 2.0, at.1);
+                r.stepb(&[MouseButton::LeftButton], p, vec![Event::PointerMoved(p)]);
+            });
+            fov = (before, rays::easy_camera::fov_y(&r.e.camera));
+            let end = (at.0 + 1.0 + n as f64 / 2.0, at.1);
+            r.step(end, vec![Event::PointerMoved(end), Event::PointerReleased(MouseButton::LeftButton, end)]);
+            for _ in 0..4 {
+                to(&mut r, end);
+            }
+            scrub = (pass == 1).then_some(cost);
+        }
+        let scrub = scrub.expect("the measured drag");
         report("empty scrub inspector value", &scrub, n);
-        check(scrub.views == 2 * n, &format!("scrubbing rebuilt {} views in {n} frames", scrub.views));
-        check(scrub.built <= 60, &format!("scrubbing built {} nodes a frame", scrub.built));
-        let end = (at.0 + 1.0 + n as f64, at.1);
-        r.step(end, vec![Event::PointerMoved(end), Event::PointerReleased(MouseButton::LeftButton, end)]);
+        // the field's drag rebuilds no view and builds no node past a pointer frame's (the camera
+        // section, its field `kept_drag`, stays kept and so does the inspector around it): the editor
+        // reads the drag after the frame and patches the field's value and line alone, allocating
+        // nothing past what a pointer frame does
+        eprintln!("ui_frames empty scrub: FOV {:.4} -> {:.4} rad", fov.0, fov.1);
+        check(fov.1 > fov.0, &format!("the scrub did not change the FOV: {fov:?}"));
+        check(scrub.views == 0, &format!("scrubbing rebuilt {} views in {n} frames", scrub.views));
+        check(scrub.built <= hover.built, &format!("scrubbing built {} nodes a frame (a pointer frame {})", scrub.built, hover.built));
+        check(scrub.bytes <= 8 * 64, &format!("scrubbing wrote {} instance bytes a frame (the field's value and line: at most 8 instances)", scrub.bytes));
+        check(scrub.allocs <= hover.allocs, &format!("scrubbing allocated {} a frame (a pointer frame {})", scrub.allocs, hover.allocs));
         // panning the graph: a right drag over its empty canvas
         let (gx, gy) = (graph.0 - 40.0, graph.1 + 120.0);
         // (measured, so its writes are not counted in the drag's first frame)

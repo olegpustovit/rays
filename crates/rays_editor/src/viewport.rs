@@ -53,9 +53,73 @@ pub mod cc {
         pub ui_visible: bool,
         pub filename: String,
         pub open_camera: Option<bool>,
+        /// the Camera section's number fields (FOV, distance, near and far clip) as it last built
+        /// them, and the revision it was last declared with: a drag of one follows by patches
+        pub fields: [i64; 4],
+        pub shown: u64,
+        /// the last frame patched a number's drag (`dragged`): the panel's revision leaves the
+        /// camera's numbers out meanwhile, so the inspector around the section stays kept
+        pub held: bool,
     }
 
     pub type Control = Visibility;
+
+    /// The Camera section's numbers: label, key and soft range.
+    const NUMBERS: [(&str, f64, f64); 4] = [("FOV", 15., 120.), ("Distance", 0.1, 100.), ("Near clip", 0.01, 10.), ("Far clip", 10., 5000.)];
+
+    /// The section's numbers of `camera`, FOV in degrees.
+    fn numbers(camera: &easy_camera::EasyCamera) -> [f64; 4] {
+        [easy_camera::fov_y(camera) * 180. / std::f64::consts::PI, easy_camera::distance(camera), easy_camera::near(camera), easy_camera::far(camera)]
+    }
+
+    /// `camera` with the section's numbers as edited (`edited`, FOV in degrees; a number left as it
+    /// was keeps the camera's own value), its inertia and a reset.
+    fn edited(camera: &easy_camera::EasyCamera, edited: [f64; 4], inertia: bool, reset: bool) -> easy_camera::EasyCamera {
+        let degrees = numbers(camera)[0];
+        let fov = if edited[0] == degrees { easy_camera::fov_y(camera) } else { edited[0] * std::f64::consts::PI / 180. };
+        let [_, distance, near, far] = edited;
+        let current = easy_camera::fov_y(camera);
+        let fov = if fov > 0. && fov < std::f64::consts::PI { fov } else { current };
+        let distance = if distance > 0. { distance } else { easy_camera::distance(camera) };
+        let near = if near > 0. { near } else { easy_camera::near(camera) };
+        let far = far.max(near + 0.01);
+        let built = easy_camera::with_fov_y(fov, camera)
+            .and_then(|c| easy_camera::with_distance(distance, &c))
+            .and_then(|c| easy_camera::with_clip(near, far, &c))
+            .map(|c| easy_camera::with_inertia(inertia, &c))
+            .unwrap_or_else(|_| camera.clone());
+        if reset { easy_camera::reset(&built) } else { built }
+    }
+
+    thread_local! {
+        /// the text a dragged number shows, kept from frame to frame
+        static DRAGGED: RefCell<String> = RefCell::new(String::with_capacity(32));
+    }
+
+    /// After a frame: a drag of one of the section's numbers while its view is kept (`kept_drag`:
+    /// the inspector's view around it kept too, nothing built), the field patched as its build would
+    /// show it, and the camera it sets; `None` when no field is dragged or a patch cannot show it
+    /// (the next frame builds the section).
+    pub fn dragged(control: &Control, ui: &mut Ui, camera: &easy_camera::EasyCamera) -> Option<easy_camera::EasyCamera> {
+        let now = numbers(camera);
+        for (i, &key) in control.fields.iter().enumerate() {
+            let Some((field, (fraction, _))) = ui.box_of_key(key).and_then(|b| ui.field_drag(&b).map(|d| (b, d))) else { continue };
+            let (_, low, high) = NUMBERS[i];
+            // the slide's text (as `number`'s slide spells it); the line shows the value the frame
+            // began with, as the build does
+            let opts = ValueFieldOpts { fraction: Some(((now[i] - low) / (high - low)) as f32), ..Default::default() };
+            let read = DRAGGED.with(|text| {
+                let mut text = text.borrow_mut();
+                cfmt::g_into(&mut text, low + fraction as f64 * (high - low), 6);
+                ui.patch_field(&field, &opts, &text).then(|| text.parse::<f64>().ok().filter(|n| n.is_finite()))
+            });
+            let Some(read) = read else { return None };
+            let mut values = now;
+            values[i] = read.unwrap_or(now[i]);
+            return Some(edited(camera, values, easy_camera::inertia(camera), false));
+        }
+        None
+    }
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct RenderRequest {
@@ -64,7 +128,7 @@ pub mod cc {
 
     pub fn make(prefix: &str) -> Visibility {
         assert!(!prefix.is_empty(), "Pxui camera control: prefix is empty");
-        Visibility { prefix: prefix.to_string(), ui_visible: true, filename: "_out/rays-render.png".to_string(), open_camera: None }
+        Visibility { prefix: prefix.to_string(), ui_visible: true, filename: "_out/rays-render.png".to_string(), open_camera: None, fields: [0; 4], shown: 0, held: false }
     }
 
     pub fn create() -> Control {
@@ -80,9 +144,13 @@ pub mod cc {
         Control { ui_visible: true, open_camera: Some(!control.ui_visible), ..control.clone() }
     }
 
-    pub fn number(ui: &mut Ui, key: &str, label: &str, low: f64, high: f64, value: f64) -> f64 {
+    /// A number row (`kept_drag`: its owner follows a drag between builds, `dragged`); the value and
+    /// the field's key.
+    pub fn number(ui: &mut Ui, key: &str, label: &str, low: f64, high: f64, value: f64, kept_drag: bool) -> (f64, i64) {
         let (row, x, y, w) = ui.inspector_row(None, None, key, label);
         let mut result = value;
+        let field = format!("{key}-value");
+        let field_key = pxui::ui_core::key_of(row.box_key, &field);
         ui.within(&row, &mut |ui| {
             let label_x = ui.inspector_label_x();
             let width = if y > 20. { w } else { (x - label_x - 8.).max(1.) };
@@ -93,9 +161,10 @@ pub mod cc {
                 fraction: Some(((value - low) / (high - low)) as f32),
                 slide: Some(Rc::new(move |fraction: f32| cfmt::g(low + fraction as f64 * (high - low), 6))),
                 edit,
+                kept_drag,
                 ..Default::default()
             };
-            let (text, _) = ui.value_field((x, y), w, 20., &opts, &|text: &str| text.parse::<f64>().is_ok_and(f64::is_finite), &format!("{key}-value"), &shown);
+            let (text, _) = ui.value_field((x, y), w, 20., &opts, &|text: &str| text.parse::<f64>().is_ok_and(f64::is_finite), &field, &shown);
             // the text shows 6 digits: an unedited field leaves the value as it is
             result = if text == shown {
                 value
@@ -106,7 +175,7 @@ pub mod cc {
                 }
             };
         });
-        result
+        (result, field_key)
     }
 
     pub fn text(ui: &mut Ui, key: &str, label: &str, value: &str) -> String {
@@ -148,31 +217,24 @@ pub mod cc {
             let mut result: Option<easy_camera::EasyCamera> = None;
             // the section shows the lens, the distance, the clip planes and the inertia
             let shown = [easy_camera::fov_y(camera).to_bits(), easy_camera::distance(camera).to_bits(), easy_camera::near(camera).to_bits(), easy_camera::far(camera).to_bits(), easy_camera::inertia(camera) as u64];
-            let revision = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&shown, h));
+            let live = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&shown, h));
+            // while a number's drag is followed between frames (`dragged`) the section stays as it
+            // was declared; its release builds it as the camera is now
+            let dragging = control.fields.iter().any(|&k| ui.box_of_key(k).is_some_and(|b| ui.field_drag(&b).is_some()));
+            let revision = if control.held && dragging { control.shown } else { live };
+            let mut fields = control.fields;
             camera_section(control, ui, revision, &mut |ui| {
-                let degrees = easy_camera::fov_y(camera) * 180. / std::f64::consts::PI;
-                let edited = number(ui, "FOV", "FOV", 15., 120., degrees);
-                let fov = if edited == degrees { easy_camera::fov_y(camera) } else { edited * std::f64::consts::PI / 180. };
-                let distance = number(ui, "Distance", "Distance", 0.1, 100., easy_camera::distance(camera));
-                let near = number(ui, "Near clip", "Near clip", 0.01, 10., easy_camera::near(camera));
-                let far = number(ui, "Far clip", "Far clip", 10., 5000., easy_camera::far(camera));
+                let mut values = numbers(camera);
+                for (i, (label, low, high)) in NUMBERS.iter().enumerate() {
+                    (values[i], fields[i]) = number(ui, label, label, *low, *high, values[i], true);
+                }
                 let inertia = ui.inspector_toggle("Inertia", "Inertia", easy_camera::inertia(camera));
                 let reset = ui.inspector_button("Reset camera", "Reset camera");
-                let current = easy_camera::fov_y(camera);
-                let fov = if fov > 0. && fov < std::f64::consts::PI { fov } else { current };
-                let distance = if distance > 0. { distance } else { easy_camera::distance(camera) };
-                let near = if near > 0. { near } else { easy_camera::near(camera) };
-                let far = far.max(near + 0.01);
-                let built = easy_camera::with_fov_y(fov, camera)
-                    .and_then(|c| easy_camera::with_distance(distance, &c))
-                    .and_then(|c| easy_camera::with_clip(near, far, &c))
-                    .map(|c| easy_camera::with_inertia(inertia, &c))
-                    .unwrap_or_else(|_| camera.clone());
-                result = Some(if reset { easy_camera::reset(&built) } else { built });
+                result = Some(edited(camera, values, inertia, reset));
             });
             out_camera = result.unwrap_or_else(|| camera.clone());
             let (c, s) = render_section(&Control { open_camera: None, ..control.clone() }, ui);
-            control_out = c;
+            control_out = Control { fields, shown: revision, ..c };
             saves = s;
         });
         (control_out, out_camera, saves.into_iter().map(|filename| RenderRequest { filename }).collect())
@@ -266,6 +328,9 @@ pub fn ui_visible(c: &Control) -> bool {
 }
 pub fn toggle_ui(c: &Control) -> Control {
     cc::toggle_ui(c)
+}
+pub fn dragged(c: &Control, ui: &mut Ui, camera: &Camera) -> Option<Camera> {
+    cc::dragged(c, ui, camera)
 }
 pub fn open_camera(c: &Control) -> Control {
     cc::open_camera(c)
@@ -581,12 +646,21 @@ pub struct PanelKey {
 pub fn panel_revision(seen: &mut Option<(PanelKey, u64)>, control_: &Control, camera_: &Camera, extra_: &Extra) -> u64 {
     let camera = [easy_camera::fov_y(camera_).to_bits(), easy_camera::distance(camera_).to_bits(), easy_camera::near(camera_).to_bits(), easy_camera::far(camera_).to_bits()];
     let (inertia, look) = (easy_camera::inertia(camera_), look_through(extra_));
+    // what the panel shows of its control: not the section's bookkeeping (its fields, the revision
+    // it was declared with, a drag followed between frames)
+    let shows = |a: &Control, b: &Control| (&a.prefix, a.ui_visible, &a.filename, a.open_camera) == (&b.prefix, b.ui_visible, &b.filename, b.open_camera);
     let same = seen.as_ref().is_some_and(|(k, _)| {
-        k.camera == camera && k.inertia == inertia && k.look == look && k.following == extra_.following && k.show == extra_.show && k.control == *control_ && k.root == extra_.root
+        k.inertia == inertia && k.look == look && k.following == extra_.following && k.show == extra_.show && shows(&k.control, control_) && k.root == extra_.root
     });
-    if !same {
-        let next = seen.as_ref().map_or(0, |(_, rev)| rev + 1);
-        *seen = Some((PanelKey { control: control_.clone(), camera, inertia, look, following: extra_.following, show: extra_.show, root: extra_.root.clone() }, next));
+    // a number's drag patched on the kept section changes the camera's numbers and nothing the
+    // panel shows otherwise: the key follows them, the revision stays
+    match seen {
+        Some((k, _)) if same && control_.held => k.camera = camera,
+        Some((k, _)) if same && k.camera == camera => {}
+        _ => {
+            let next = seen.as_ref().map_or(0, |(_, rev)| rev + 1);
+            *seen = Some((PanelKey { control: control_.clone(), camera, inertia, look, following: extra_.following, show: extra_.show, root: extra_.root.clone() }, next));
+        }
     }
     seen.as_ref().map_or(0, |(_, rev)| *rev)
 }
