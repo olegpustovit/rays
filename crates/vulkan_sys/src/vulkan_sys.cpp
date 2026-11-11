@@ -1022,7 +1022,17 @@ static VkResult rv_swapchain_build(Surface *s) {
   VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR}; ci.surface = s->surface; ci.minImageCount = minimum;
   ci.imageFormat = VK_FORMAT_B8G8R8A8_UNORM; ci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; ci.imageExtent = extent;
   ci.imageArrayLayers = 1; ci.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  ci.preTransform = caps.currentTransform; ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; ci.presentMode = s->mode; ci.clipped = VK_TRUE; ci.oldSwapchain = old;
+  // An unthrottled request takes a supported mode: IMMEDIATE, else MAILBOX, else FIFO (which every surface offers).
+  // Wayland compositors never tear, so there it is MAILBOX: Mesa 25.2's lavapipe segfaults in libwayland presenting
+  // IMMEDIATE to WSLg's Weston. ponytail: Wayland skips IMMEDIATE outright; retry it once Mesa's path is known good.
+  VkPresentModeKHR modes[8]; uint32_t mode_count = 8; vkGetPhysicalDeviceSurfacePresentModesKHR(d->physical,s->surface,&mode_count,modes);
+  auto offered = [&](VkPresentModeKHR m) { return std::find(modes, modes + mode_count, m) != modes + mode_count; };
+  VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
+  if (s->mode != VK_PRESENT_MODE_FIFO_KHR && offered(VK_PRESENT_MODE_MAILBOX_KHR)) mode = VK_PRESENT_MODE_MAILBOX_KHR;
+#ifdef _WIN32
+  if (s->mode != VK_PRESENT_MODE_FIFO_KHR && offered(VK_PRESENT_MODE_IMMEDIATE_KHR)) mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+#endif
+  ci.preTransform = caps.currentTransform; ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; ci.presentMode = mode; ci.clipped = VK_TRUE; ci.oldSwapchain = old;
   r = vkCreateSwapchainKHR(d->device,&ci,nullptr,&s->swapchain); if (old) vkDestroySwapchainKHR(d->device,old,nullptr); if (r != VK_SUCCESS) return r;
   s->image_count = 16; r = vkGetSwapchainImagesKHR(d->device,s->swapchain,&s->image_count,s->images); if (r != VK_SUCCESS) return r;
   VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
