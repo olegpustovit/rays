@@ -1331,7 +1331,12 @@ fn query(e: &mut Emitter, r: &[i64], any: bool) -> Vec<i64> {
             let p = e.result(uint, 6023, &[query, one]);
             let u_ = e.result(float, 81, &[barycentrics, 0]);
             let v = e.result(float, 81, &[barycentrics, 1]);
-            let instance = e.result(uint, 6020, &[query, one]);
+            // InstanceId reads the committed instance's node, which a miss does not have: lavapipe
+            // dereferences a null node there (SIGSEGV), so it is read only on a hit.
+            let instance = e.conditional(uint, hit, &mut |e: &mut Emitter| {
+                let (uint, one) = (e.uint, e.u(1));
+                e.result(uint, 6020, &[query, one])
+            }, &mut |e: &mut Emitter| e.u(0));
             vec![t, p, u_, v, hit, instance]
         }
     };
