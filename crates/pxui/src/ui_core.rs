@@ -1987,8 +1987,8 @@ impl Ui {
     fn route(&mut self, frame: &rframe::Frame) {
         self.signals.clear();
         self.out.cursor = None;
-        self.frame_events = frame.input.events.clone();
-        self.input_frame = Some(frame.clone());
+        self.frame_events.clone_from(&frame.input.events);
+        keep_frame(&mut self.input_frame, frame);
         self.routed_events.clear();
         self.cancelled.clear();
         self.dropped = None;
@@ -2003,7 +2003,7 @@ impl Ui {
         self.passed_undo = None;
         self.modal_in_frame = self.modal_key.is_some();
         let mut modifiers = input::keys_before(&self.previous_keys, &frame.input.keys, &frame.input.events);
-        self.previous_keys = frame.input.keys.clone();
+        self.previous_keys.clone_from(&frame.input.keys);
         self.view_w = frame.input.size.0 as f32;
         self.view_h = frame.input.size.1 as f32;
         // a trackpad's motion also arrives as wheel steps: in such a frame those only feed
@@ -3938,6 +3938,22 @@ impl Ui {
 }
 
 /// `v` held to `[min, max]`; the minimum wins.
+/// `kept` becomes a copy of `f` in the storage it already has (a frame with input allocated twice).
+fn keep_frame(kept: &mut Option<rframe::Frame>, f: &rframe::Frame) {
+    let Some(k) = kept else {
+        *kept = Some(f.clone());
+        return;
+    };
+    let rframe::Frame { input, pixel_scale, fps, mouse_delta } = f;
+    let input::Frame { t, dt, frame, tick, size, pointer, buttons, keys, events } = input;
+    let i = &mut k.input;
+    (i.t, i.dt, i.frame, i.tick, i.size, i.pointer) = (*t, *dt, *frame, *tick, *size, *pointer);
+    i.buttons.clone_from(buttons);
+    i.keys.clone_from(keys);
+    i.events.clone_from(events);
+    (k.pixel_scale, k.fps, k.mouse_delta) = (*pixel_scale, *fps, *mouse_delta);
+}
+
 /// What `arrange` reads of a child while placing it (not the whole node).
 struct Placed {
     flags: Flags,

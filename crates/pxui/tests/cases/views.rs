@@ -289,7 +289,155 @@ pub fn window_pxui_view_costs() {
     ui.destroy();
 }
 
+/// Allocations over `f`'s frames (the measuring thread's).
+fn allocs(f: &mut dyn FnMut()) -> u64 {
+    mem_sys::local_reset();
+    let before = mem_sys::local_alloc_count();
+    f();
+    mem_sys::local_alloc_count() - before
+}
+
+/// Exact work counters for ten 50-widget views: a kept frame declares and lays out the root and the
+/// ten view boxes only, a one-view rebuild adds that view's 75 nodes; the accessibility tree stays
+/// empty (nothing built) until asked for, then a one-view rebuild updates it without allocating.
+pub fn window_pxui_budget_counts() {
+    const NAMES: [&str; 10] = ["v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9"];
+    let rev = Cell::new(1u64);
+    let build = |ui: &mut Ui| {
+        for (v, name) in NAMES.iter().enumerate() {
+            ui.view(name, if v == 0 { rev.get() } else { 1 }, Size::Px(300.0), Size::Px(25.0 * 24.0), &mut |ui| {
+                for w in 0..25 {
+                    ui.label("LABEL");
+                    ui.button(if w % 2 == 0 { "Even" } else { "Odd" });
+                }
+            });
+        }
+    };
+    let mut ui = new_ui(None);
+    let mut t = 0.0;
+    let mut step = |ui: &mut Ui, bump: bool| {
+        t += 1.0 / 60.0;
+        if bump {
+            rev.set(rev.get() + 1);
+        }
+        ui.frame(&at(t, vec![]), &mut |ui| build(ui));
+    };
+    for _ in 0..3 {
+        step(&mut ui, false);
+    }
+    step(&mut ui, false);
+    check(ui.built_nodes() == 11 && ui.arranged_nodes() == 11, &format!("kept frame: {} built, {} arranged", ui.built_nodes(), ui.arranged_nodes()));
+    step(&mut ui, true);
+    check(ui.built_nodes() == 86 && ui.arranged_nodes() == 86, &format!("one view: {} built, {} arranged", ui.built_nodes(), ui.arranged_nodes()));
+    check(ui.output().a11y.nodes.is_empty() && ui.output().a11y.revision == 0, "the accessibility tree was built with nobody asking");
+    ui.set_a11y(true);
+    for _ in 0..3 {
+        step(&mut ui, true);
+    }
+    check(ui.output().a11y.nodes.len() == 500, &format!("{} accessible nodes", ui.output().a11y.nodes.len()));
+    let n = allocs(&mut || {
+        for _ in 0..20 {
+            step(&mut ui, true);
+        }
+    });
+    check(n == 0, &format!("{n} allocations in 20 one-view rebuilds with the tree on"));
+    ui.destroy();
+}
+
+/// A cached frame costs per view, not per node: twenty kept views of 10 nodes and of 200 nodes each
+/// take within 1.5x of each other (best of interleaved rounds, so load hits both alike).
+pub fn window_pxui_budget_cached_per_view() {
+    let sizes = [10usize, 200];
+    let mut uis: Vec<Ui> = sizes.iter().map(|_| new_ui(None)).collect();
+    let mut best = [f64::INFINITY; 2];
+    let mut t = 0.0;
+    for round in 0..8 {
+        for (k, ui) in uis.iter_mut().enumerate() {
+            let mut ns = 0u128;
+            for f in 0..30 {
+                t += 1.0 / 60.0;
+                let start = std::time::Instant::now();
+                ui.frame(&at(t, vec![]), &mut |ui| {
+                    for v in 0..20 {
+                        ui.view(&format!("v{v}"), 1, Size::Px(300.0), Size::Px(100.0), &mut |ui| {
+                            for i in 0..sizes[k] {
+                                ui.node_keyed(int_key(7, i as i64), Node { w: Size::Px(4.0), h: Size::Px(4.0), look: Look { fill: RED, ..Look::NONE }, ..Node::DEFAULT });
+                            }
+                        });
+                    }
+                });
+                if round > 0 && f > 0 {
+                    ns += start.elapsed().as_nanos();
+                }
+            }
+            if round > 0 {
+                best[k] = best[k].min(ns as f64 / 29.0);
+            }
+        }
+    }
+    for ui in &mut uis {
+        ui.destroy();
+    }
+    eprintln!("PXUI_BUDGET cached frame of 20 views: {:.0} ns at 10 nodes per view, {:.0} ns at 200", best[0], best[1]);
+    check(best[1] < best[0] * 1.5, &format!("a cached frame grew with the nodes per view: {:.0} -> {:.0} ns", best[0], best[1]));
+}
+
+/// No allocation once warm: a virtual list scrolled a row per frame, and a hover entering and leaving
+/// a kept view's button with the theme's transition running.
+pub fn window_pxui_budget_zero_alloc() {
+    const WORDS: [&str; 4] = ["alpha", "beta", "gamma", "delta"];
+    let mut ui = new_ui(None);
+    let mut list = |ui: &mut Ui| {
+        ui.list("rows", 10_000, 24.0, &mut |ui, i| ui.label(WORDS[i % 4]));
+    };
+    ui.frame(&at(0.0, vec![move_to((100, 100))]), &mut list);
+    // the frames are made up front: an event list allocates
+    let frames: Vec<_> = (1..=60).map(|t| at(t as f64, vec![Event::Scrolled((0.0, -1.0))])).collect();
+    for f in &frames[..30] {
+        ui.frame(f, &mut list);
+    }
+    let n = allocs(&mut || {
+        for f in &frames[30..] {
+            ui.frame(f, &mut list);
+        }
+    });
+    check(n == 0, &format!("{n} allocations scrolling a list 30 rows"));
+    ui.destroy();
+
+    let mut ui = new_ui(None);
+    let mut theme = Theme::default();
+    theme.tokens.motion.normal = 0.2;
+    ui.set_theme(theme);
+    let mut build = |ui: &mut Ui| {
+        ui.view("v", 1, Size::Px(200.0), Size::Px(100.0), &mut |ui| {
+            ui.panel(PanelOpts::default(), "p", &mut |ui| {
+                ui.button("Go");
+            });
+        });
+    };
+    // in and out of the button (its ground is (17, 14) to (49, 34) in the panel at (12, 12)), then
+    // eight steps of the transition, twice
+    let mut frames = Vec::new();
+    for (k, p) in [(24, 24), (300, 230), (24, 24), (300, 230)].into_iter().enumerate() {
+        frames.push(at(k as f64, vec![move_to(p)]));
+        frames.extend((1..=8).map(|i| at(k as f64 + 0.04 * i as f64, vec![])));
+    }
+    for f in &frames[..18] {
+        ui.frame(f, &mut build);
+    }
+    let n = allocs(&mut || {
+        for f in &frames[18..] {
+            ui.frame(f, &mut build);
+        }
+    });
+    check(n == 0, &format!("{n} allocations hovering in and out with a transition"));
+    ui.destroy();
+}
+
 pub const CASES: &[(&str, fn())] = &[
+    ("window_pxui_budget_counts", window_pxui_budget_counts),
+    ("window_pxui_budget_cached_per_view", window_pxui_budget_cached_per_view),
+    ("window_pxui_budget_zero_alloc", window_pxui_budget_zero_alloc),
     ("window_pxui_view_rebuilds_one", window_pxui_view_rebuilds_one),
     ("window_pxui_view_nested", window_pxui_view_nested),
     ("window_pxui_view_input", window_pxui_view_input),
