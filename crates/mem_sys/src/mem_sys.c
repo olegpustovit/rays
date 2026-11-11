@@ -136,10 +136,12 @@ void mem_sys_pressure_relief(void) { _heapmin(); }
 #include <string.h>
 #include <unistd.h>
 
-/* A /proc/self/status line in kB ("RssAnon:", "VmHWM:"), as bytes. The footprint is the anonymous resident set:
- * the process's own dirty memory, as macOS's phys_footprint and Windows' private usage count it. */
-static int status_bytes(const char *key, int64_t *out) {
-  FILE *file = fopen("/proc/self/status", "r");
+#include <time.h>
+
+/* A /proc line in kB ("RssAnon:", "VmHWM:", "MemAvailable:"), as bytes. The footprint is the anonymous resident
+ * set: the process's own dirty memory, as macOS's phys_footprint and Windows' private usage count it. */
+static int proc_bytes(const char *path, const char *key, int64_t *out) {
+  FILE *file = fopen(path, "r");
   if (file == NULL) return 0;
   char line[256];
   long long kib = -1;
@@ -152,10 +154,35 @@ static int status_bytes(const char *key, int64_t *out) {
   return 1;
 }
 
-int mem_sys_pressure_start(pressure_callback callback) { (void)callback; return 0; }
-int mem_sys_pressure_poll(void) { return -1; }
-int mem_sys_phys_footprint(int64_t *out) { return status_bytes("RssAnon:", out); }
-int mem_sys_peak_footprint(int64_t *out) { return status_bytes("VmHWM:", out); }
+static int pressure_seen;
+static int64_t pressure_checked_ns = -1;
+
+int mem_sys_pressure_start(pressure_callback callback) {
+  int64_t available;
+  store_pressure = callback;
+  return proc_bytes("/proc/meminfo", "MemAvailable:", &available);
+}
+
+/* Like Windows' low-memory notification, polled: warning below 10% of RAM available, critical below 5%.
+ * /proc/meminfo is read at most every 250 ms. */
+int mem_sys_pressure_poll(void) {
+  struct timespec now;
+  int64_t available, total;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  int64_t ns = (int64_t)now.tv_sec * 1000000000 + now.tv_nsec;
+  if (store_pressure == NULL || (pressure_checked_ns >= 0 && ns - pressure_checked_ns < 250000000)) return -1;
+  pressure_checked_ns = ns;
+  if (!proc_bytes("/proc/meminfo", "MemAvailable:", &available) || !proc_bytes("/proc/meminfo", "MemTotal:", &total) || total <= 0)
+    return -1;
+  int level = available * 20 < total ? 2 : (available * 10 < total ? 1 : 0);
+  if (level != pressure_seen) {
+    pressure_seen = level;
+    store_pressure(level);
+  }
+  return -1;
+}
+int mem_sys_phys_footprint(int64_t *out) { return proc_bytes("/proc/self/status", "RssAnon:", out); }
+int mem_sys_peak_footprint(int64_t *out) { return proc_bytes("/proc/self/status", "VmHWM:", out); }
 int mem_sys_instructions(int64_t *out) { (void)out; return 0; }
 int64_t mem_sys_physical_ram(void) {
   long pages = sysconf(_SC_PHYS_PAGES), size = sysconf(_SC_PAGE_SIZE);
