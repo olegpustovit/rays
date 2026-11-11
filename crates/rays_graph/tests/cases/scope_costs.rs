@@ -199,7 +199,8 @@ fn window_graph_costs() {
         let p = (c1.0, c1.1 + 6.0 + 2.0 * (i + 1) as f64);
         go(ui, t, p, &[MouseButton::LeftButton], vec![Event::PointerMoved(p)])
     });
-    assert!(matches!(t.drag, Some(Drag::Moving { moved: true, slow: false, .. })), "the drag did not move the card by its view");
+    assert!(matches!(t.drag, Some(Drag::Moving { moved: true, .. })), "the drag did not move the card by its view");
+
     let end = (c1.0, c1.1 + 6.0 + 2.0 * (n + 1) as f64);
     // the drop: the card stays where it was let go until the geometry has it there (the frame after
     // here, with no host to move it): one content build
@@ -265,6 +266,7 @@ fn window_graph_costs() {
     let edit = vec![go(&mut ui, &mut t, away, &[], vec![]), go(&mut ui, &mut t, away, &[], vec![])];
     table.push(Run::of("edit", &edit));
     let edit_builds: u64 = edit.iter().map(|c| c.builds).sum();
+    let (zone, frame) = zone_and_frame(&mut table);
     for line in &table {
         eprintln!("{}", line.line());
     }
@@ -277,6 +279,10 @@ fn window_graph_costs() {
         assert!(c.allocs == 0, "{name}: {} allocations", c.allocs);
     };
     quiet("pan", pan, 0, 0);
+    // a zone and a frame carried: the views of what they hold offset, the wires they carry drawn
+    // where they go (the drag's view and the wires view leaving them out)
+    quiet("zone drag", zone, 3, 160 * INSTANCE);
+    quiet("frame drag", frame, 3, 160 * INSTANCE);
     quiet("zoom", zoom, 0, 0);
     // a card's ground, its row band and their partner on the card left
     quiet("card hover", card_hover, 0, 8 * INSTANCE);
@@ -309,6 +315,70 @@ fn window_graph_costs() {
     let (drop_allocs, edit_allocs) = (drop.iter().map(|c| c.allocs).sum::<u64>(), edit.iter().map(|c| c.allocs).sum::<u64>());
     assert!(drop_allocs <= 2000 && edit_allocs <= 700, "the drop allocated {drop_allocs}, the edit {edit_allocs}");
     ui.destroy();
+}
+
+/// A zone dragged by its header and a frame by its title, over a graph with a loop, a fold and a
+/// branch in a titled frame: the measured frames of each drag (warm) and checks that the carried
+/// cards show where the drag puts them.
+fn zone_and_frame(table: &mut Vec<Run>) -> (Cost, Cost) {
+    let text = "(workspace w (graph g :context value (let* [k 6.0 ys (for [i (range 4)] (let* [a (* k (float i)) b (+ a 1.0)] b)) n (reduce (fn [acc x] (+ acc x)) 0.0 ys) x (cond false (+ 1 2) true (* 3 4) :else 5)] (+ n x))))";
+    let ws = checked(text);
+    let sc = Rc::new(flow_graph::projection::of_graph(&scope_catalog(), &ws, "g").unwrap_or_else(|e| panic!("{e}")));
+    let mut t = scope::create(Some(W), Some(H));
+    let mut saved = TestSaved::default();
+    saved.frames.push((path(&["g"]), vec![("inputs".to_owned(), (-20.0, -40.0), (300.0, 420.0))]));
+    scope::with_scope(saved_opts(saved), "g", sc, &mut t);
+    scope::with_records(recorded(&ws), &mut t);
+    let mut ui = Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None));
+    ui.verify_views(false);
+    let mut count = 1000;
+    let mut go = |ui: &mut Ui, t: &mut Pane, at: (f64, f64), buttons: &[MouseButton], events: Vec<Event>| {
+        count += 1;
+        one(ui, t, &frame(count, at, buttons, events))
+    };
+    let away = (-100.0, -100.0);
+    for _ in 0..24 {
+        go(&mut ui, &mut t, away, &[], vec![Event::PointerMoved(away)]);
+    }
+    let n = 30;
+    let mut drag = |ui: &mut Ui, t: &mut Pane, name: &str, at: (f64, f64), carried: &[flow_syntax::symbol::Symbol]| {
+        let before = scope::inspect::box_of(t, carried).expect("carried");
+        go(ui, t, at, &[], vec![Event::PointerMoved(at)]);
+        go(ui, t, at, &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, at)]);
+        for i in 0..4 {
+            let p = (at.0 + 2.0 * (i + 1) as f64, at.1 + (i + 1) as f64);
+            go(ui, t, p, &[MouseButton::LeftButton], vec![Event::PointerMoved(p)]);
+        }
+            let builds = scope::inspect::content_builds(t);
+        let costs: Vec<Cost> = (0..n).map(|i| {
+            let p = (at.0 + 8.0 + 2.0 * (i + 1) as f64, at.1 + 4.0 + (i + 1) as f64);
+            go(ui, t, p, &[MouseButton::LeftButton], vec![Event::PointerMoved(p)])
+        }).collect();
+        let (ends, drawn) = scope::inspect::carried_wires(t);
+        eprintln!("graph_costs {name}: {ends} wires end on what it carries, {drawn} drawn where the move puts them");
+        // the wires whose route meets what the cards sweep follow the move too (re-routed around them)
+        assert!(drawn > ends, "{name}: only the {ends} wires that end on what it carries were re-routed ({drawn})");
+        let end = (at.0 + 8.0 + 2.0 * n as f64, at.1 + 4.0 + n as f64);
+        let shown = scope::inspect::box_of(t, carried).expect("carried");
+        assert!((shown.0 - before.0 - (end.0 - at.0)).abs() < 0.01 && (shown.1 - before.1 - (end.1 - at.1)).abs() < 0.01, "{name}: the carried card shows at {shown:?}, from {before:?}");
+        assert!(scope::inspect::content_builds(t) == builds, "{name}: the content built");
+        go(ui, t, end, &[], vec![Event::PointerReleased(MouseButton::LeftButton, end)]);
+        for _ in 0..24 {
+            go(ui, t, away, &[], vec![Event::PointerMoved(away)]);
+        }
+        table.push(Run::of(name, &costs));
+        table.last().unwrap().worst
+    };
+    // the frame by its title: the cards whose centres lie in it go with it
+    let (ox, oy) = t.geo.origins.iter().find(|(q, _)| *q == path(&["g"])).map(|(_, o)| *o).expect("g's origin");
+    let title = (t.x as f64 + t.pan_x + (ox - 20.0) * t.zoom + 20.0, t.y as f64 + t.pan_y + (oy - 40.0) * t.zoom + 8.0);
+    let frame = drag(&mut ui, &mut t, "frame drag", title, &path(&["g", "k"]));
+    // the loop by its header: the cards inside it go with it
+    let (x, y, w, _) = scope::inspect::box_of(&t, &path(&["g", "ys"])).expect("ys");
+    let zone = drag(&mut ui, &mut t, "zone drag", (x + w / 2.0, y + 6.0), &path(&["g", "ys", "a"]));
+
+    ui.destroy();
+    (zone, frame)
 }
 
 pub const CASES: &[(&str, fn())] = &[("window_graph_costs", window_graph_costs)];

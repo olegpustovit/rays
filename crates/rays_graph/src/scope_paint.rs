@@ -1442,7 +1442,7 @@ pub fn wire_style(t: &Pane, z: f64, chain: &Option<std::rc::Rc<st::Chains>>, wi:
 /// One wire as the pane draws it along `pts` (graph units: its own, or where a drag puts it), placed
 /// on the window by `at` at zoom `z`, cut to `clip`; `is_highlighted`: widened for the pointer over it
 /// or over one of its ports.
-pub fn paint_wire(paint: &mut Paint, t: &Pane, z: f64, at: &dyn Fn((f64, f64)) -> (f64, f64), chain: &Option<std::rc::Rc<st::Chains>>, clip: (f64, f64, f64, f64), tag_size: i64, wi: &Wire, pts: &[(f64, f64)], is_highlighted: bool, is_selected: bool) {
+pub fn paint_wire(paint: &mut Paint, t: &Pane, z: f64, at: &dyn Fn((f64, f64)) -> (f64, f64), chain: &Option<std::rc::Rc<st::Chains>>, clip: (f64, f64, f64, f64), tag_size: i64, wi: &Wire, tag: &str, pts: &[(f64, f64)], is_highlighted: bool, is_selected: bool) {
     let theme = t.theme;
     let (width, color, stroke, lit) = wire_style(t, z, chain, wi, is_highlighted, is_selected);
     match stroke {
@@ -1453,10 +1453,10 @@ pub fn paint_wire(paint: &mut Paint, t: &Pane, z: f64, at: &dyn Fn((f64, f64)) -
             let stub = 14.0 * z;
             paint.line_w((ax as f32, ay as f32), ((ax + stub) as f32, ay as f32), width as f32, color);
             paint.line_w(((bx - stub) as f32, by as f32), (bx as f32, by as f32), width as f32, color);
-            let name = tag_name(t, wi);
-            let tw = f64::from(paint.text_width(Some(tag_size), &name));
+            let name = tag;
+            let tw = f64::from(paint.text_width(Some(tag_size), name));
             let ink = if lit == Some(false) { color::with_alpha(theme::ink_2(&theme), 60) } else { theme::ink_2(&theme) };
-            paint.text_s(((bx - stub - 4.0 - tw) as f32, (by - (tag_size as f64 / 2.0) - 1.0) as f32), tag_size, ink, &name);
+            paint.text_s(((bx - stub - 4.0 - tw) as f32, (by - (tag_size as f64 / 2.0) - 1.0) as f32), tag_size, ink, name);
         }
         Stroke::Dashed => {
             for pair in pts.windows(2) {

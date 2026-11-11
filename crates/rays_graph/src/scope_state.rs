@@ -229,17 +229,17 @@ pub struct Wiring {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Drag {
-    /// `slow`: a card holds others (a zone): the content builds the move; else the cards' views move
-    /// (the cards it carries are the pane's `moving`)
-    Moving { dx: f64, dy: f64, moved: bool, slow: bool },
+    /// the cards' views move, those inside a zone it carries with them (the cards it carries are the
+    /// pane's `moving`)
+    Moving { dx: f64, dy: f64, moved: bool },
     Wiring(Wiring),
     /// from the canvas press point to the pointer, screen space
     /// (what it adds to is the pane's `marquee_base`)
     Marquee {},
     /// a frame's corner
     Sizing { scope: Path, index: i64, dw: f64, dh: f64 },
-    /// a frame by its title, with the nodes inside it
-    Carrying { scope: Path, index: i64, paths: Vec<Path>, dx: f64, dy: f64 },
+    /// a frame by its title, with the nodes inside it (the pane's `moving`): their views move
+    Carrying { scope: Path, index: i64, dx: f64, dy: f64 },
 }
 
 /// The text field open over the pane: a node's name, a graph input's default, a frame's title.
@@ -422,11 +422,11 @@ pub struct Pane {
     pub hovers: Rc<RefCell<crate::scope_hover::Hovers>>,
 }
 
-/// A drag the content builds: a frame's (carried by its title or sized) and a move of cards that
-/// hold others (a zone); a move of plain cards is their views' offsets (`scope_frame`).
+/// A drag the content builds: a frame's corner; a move of cards (zones with what they hold) and a
+/// frame carried by its title are their views' offsets (`scope_hover::place_cards`).
 pub fn content_drag(d: &Option<Drag>) -> Option<&Drag> {
     match d {
-        Some(Drag::Moving { moved: true, slow: true, .. } | Drag::Carrying { .. } | Drag::Sizing { .. }) => d.as_ref(),
+        Some(Drag::Sizing { .. }) => d.as_ref(),
         _ => None,
     }
 }

@@ -1089,8 +1089,11 @@ pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &
 }
 
 /// Whether a move of these cards carries others with them (a zone's): the content builds it.
-fn holds_others(t: &Pane, paths: &[Path]) -> bool {
-    t.geo.items.iter().any(|(pl, _, _)| paths.iter().any(|q| pl.path.len() > q.len() && pl.path.starts_with(q)))
+/// A move let go: the cards (and what they carry) stay where it put them until the geometry has
+/// them there (`settle`).
+fn dropped(t: &mut Pane, ui: &Ui, dx: f64, dy: f64) {
+    let slots = t.moving.iter().filter_map(|q| t.geo.slot.get(q).copied()).collect();
+    t.dropped = Some((slots, dx, dy, ui.frame_index()));
 }
 
 /// The pointer on the content, before it builds: a press on a card selects it and starts its move, on
@@ -1143,8 +1146,7 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
                 let (moving, sel) = (&mut t.moving, &t.selected);
                 moving.assign(sel);
                 moving.retain(&mut |q| !sel.iter().any(|a| a.len() < q.len() && q.starts_with(a)));
-                let slow = holds_others(t, t.moving.as_slice());
-                (t.selected_wire, t.drag) = (None, Some(Drag::Moving { dx: 0.0, dy: 0.0, moved: false, slow }));
+                (t.selected_wire, t.drag) = (None, Some(Drag::Moving { dx: 0.0, dy: 0.0, moved: false }));
             }
             if sig.double_clicked && left && t.context.is_none() && t.editing.is_none() {
                 let (pl, _, ay) = &t.geo.items[*slot];
@@ -1168,29 +1170,24 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
             }
             let carried = t.selected.contains(path);
             let mut begin = false;
-            if let Some(Drag::Moving { dx, dy, moved, slow, .. }) = &mut t.drag {
+            if let Some(Drag::Moving { dx, dy, moved }) = &mut t.drag {
                 if sig.held && left && carried {
                     let (ddx, ddy) = sig.drag;
                     *dx += f64::from(ddx) / z;
                     *dy += f64::from(ddy) / z;
-                    let start = !*moved && dx.hypot(*dy) > 3.0 / z;
-                    *moved = *moved || start;
-                    begin = start && !*slow;
+                    begin = !*moved && dx.hypot(*dy) > 3.0 / z;
+                    *moved = *moved || begin;
                 }
             }
             if begin {
                 crate::scope_hover::begin_move(t);
             }
             if sig.released && left {
-                if let Some(Drag::Moving { dx, dy, moved, slow }) = t.drag.take() {
+                if let Some(Drag::Moving { dx, dy, moved }) = t.drag.take() {
                     if moved {
                         let mv: Vec<(Path, f64, f64)> = t.moving.iter().filter_map(|path| rel_at(t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + dx), p::snap(ry + dy)))).collect();
                         emit.push(Change::Moved(mv));
-                        if !slow {
-                            // the cards stay where they were let go until the geometry has them there
-                            let slots = t.hovers.borrow().moving.clone();
-                            t.dropped = Some((slots, dx, dy, ui.frame_index()));
-                        }
+                        dropped(t, ui, dx, dy);
                     }
                 }
             }
@@ -1275,6 +1272,54 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
                 if let Some(Drag::Wiring(wg)) = t.drag.clone() {
                     let src_path = t.geo.wires[*i].from.clone().unwrap_or_default();
                     finish_wire(t, ui, z, mouse, emit, &wg, &src_path, p64(sig.release_point));
+                }
+            }
+        }
+        On::Frame(k) => {
+            // a frame by its title: a double click edits the title; a drag past 3 points carries it with
+            // the nodes of its scope whose centres lie inside it (their views move)
+            let Some((origin, index)) = t.hovers.borrow().frames.get(*k).copied() else { return };
+            let scope = &t.geo.origins[origin].0;
+            let (px, py) = p64(sig.pointer);
+            let (qx, qy) = p64(sig.press_point);
+            if sig.double_clicked && left && t.editing.is_none() {
+                (t.drag, t.editing) = (None, Some(Editing::Title(scope.clone(), index as i64)));
+            } else if left && (sig.held || sig.released) && t.editing.is_none() {
+                let (dx, dy) = ((px - qx) / z, (py - qy) / z);
+                match &mut t.drag {
+                    None if sig.held && (px - qx).hypot(py - qy) > 3.0 => {
+                        let (ox, oy) = t.geo.origins[origin].1;
+                        if let Some((_, (fx, fy), (fw, fh))) = t.saved.frames(scope).get(index).cloned() {
+                            let inside = |pl: &Placed, bx: f64, by: f64| {
+                                let (cx, cy) = (bx + (pl.w / 2.0), by + (pl.h / 2.0));
+                                scope_of_path(&pl.path) == *scope && cx >= ox + fx && cx <= ox + fx + fw && cy >= oy + fy && cy <= oy + fy + fh
+                            };
+                            t.moving.clear();
+                            for (pl, bx, by) in t.geo.items.iter() {
+                                if inside(pl, *bx, *by) {
+                                    t.moving.insert(&pl.path);
+                                }
+                            }
+                            t.drag = Some(Drag::Carrying { scope: scope.clone(), index: index as i64, dx, dy });
+                            crate::scope_hover::begin_move(t);
+                        }
+                    }
+                    Some(Drag::Carrying { dx: cx, dy: cy, .. }) => (*cx, *cy) = (dx, dy),
+                    _ => {}
+                }
+                if sig.released {
+                    if let Some(Drag::Carrying { scope, dx, dy, .. }) = &t.drag {
+                        if dx.hypot(*dy) > 3.0 / z {
+                            let (scope, dx, dy) = (scope.clone(), *dx, *dy);
+                            let mv: Vec<(Path, f64, f64)> = t.moving.iter().filter_map(|path| rel_at(t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + dx), p::snap(ry + dy)))).collect();
+                            emit.push(Change::Moved(mv));
+                            emit.push(Change::FramesSet { scope: scope.clone(), frames: crate::scope_commands::frame_list(t, &scope) });
+                            dropped(t, ui, dx, dy);
+                        } else {
+                            crate::scope_hover::end_move(t);
+                        }
+                        t.drag = None;
+                    }
                 }
             }
         }
@@ -1416,7 +1461,6 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut 
         i: usize,
         title: String,
         rect: (f64, f64, f64, f64),
-        tb: UiBox,
         xb: UiBox,
         rb: UiBox,
     }
@@ -1427,18 +1471,25 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut 
             let y = sy(t, oy + fy);
             let wd = fw * z;
             let h = fh * z;
-            let mk = |ui: &mut Ui, k: &str, pos: (f64, f64), size: (f64, f64)| {
-                box_in(ui, CLICKABLE, size.0, size.1, ctx.local(t, pos), &format!("fr:{}:{}:{}", flow_syntax::symbol::join_path(&scope, "/"), i, k))
+            let mk = |ui: &mut Ui, flags: Flags, k: &str, pos: (f64, f64), size: (f64, f64)| {
+                box_in(ui, flags, size.0, size.1, ctx.local(t, pos), &format!("fr:{}:{}:{}", flow_syntax::symbol::join_path(&scope, "/"), i, k))
             };
-            let tb = mk(ui, "t", (x, y), ((wd - 20.0).max(8.0), 18.0 * z));
-            let xb = mk(ui, "x", (x + wd - 18.0, y + 2.0), (16.0, 16.0));
-            let rb = mk(ui, "r", (x + wd - 12.0, y + h - 12.0), (12.0, 12.0));
-            frame_boxes.push(FrameBox { scope: scope.clone(), i, title: title.clone(), rect: (x, y, wd, h), tb, xb, rb });
+            // the title strip takes no input of its own: the canvas carries the frame from it
+            // (`gestures`), so a carry builds nothing
+            let tb = mk(ui, BLOCKING | HOVER_FREE, "t", (x, y), ((wd - 20.0).max(8.0), 18.0 * z));
+            let xb = mk(ui, CLICKABLE, "x", (x + wd - 18.0, y + 2.0), (16.0, 16.0));
+            let rb = mk(ui, CLICKABLE, "r", (x + wd - 12.0, y + h - 12.0), (12.0, 12.0));
+            if !ui.verifying() {
+                let mut hv = t.hovers.borrow_mut();
+                let k = hv.frame_titles.len();
+                hv.keys.push(tb.box_key);
+                hv.frame_titles.push((tb.box_key, k));
+            }
+            frame_boxes.push(FrameBox { scope: scope.clone(), i, title: title.clone(), rect: (x, y, wd, h), xb, rb });
         }
     }
     for fb in frame_boxes {
-        let FrameBox { scope, i, title, rect: (x, y, wd, _), tb, xb, rb } = fb;
-        let ts = ui.signal(&tb);
+        let FrameBox { scope, i, title, rect: (x, y, wd, _), xb, rb } = fb;
         let xs = ui.signal(&xb);
         let rs = ui.signal(&rb);
         let all = t.saved.frames(&scope);
@@ -1458,52 +1509,10 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut 
         }
         if xs.clicked {
             emit.push(Change::FramesSet { scope: scope.clone(), frames: all.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, f)| f.clone()).collect() });
-        } else if ts.double_clicked && t.editing.is_none() {
-            (t.drag, t.editing) = (None, Some(Editing::Title(scope.clone(), i as i64)));
         } else if rs.pressed && left_button(&rs) {
             { t.drag = Some(Drag::Sizing { scope: scope.clone(), index: i as i64, dw: 0.0, dh: 0.0 }); };
         } else {
             match t.drag.clone() {
-                None if ts.held && left_button(&ts) && t.editing.is_none() && (f64::from(ts.pointer.0) - f64::from(ts.press_point.0)).hypot(f64::from(ts.pointer.1) - f64::from(ts.press_point.1)) > 3.0 => {
-                    // a drag by the title (a click or a double-click stays one): the nodes of the scope whose
-                    // centres lie inside the frame travel with it
-                    let (ox, oy) = t.geo.origins.iter().find(|(q, _)| *q == scope).map(|(_, o)| *o).unwrap_or((0.0, 0.0));
-                    let (_, (fx, fy), (fw, fh)) = t.saved.frames(&scope)[i].clone();
-                    let inside = |path: &Path| -> bool {
-                        scope_of_path(path) == scope
-                            && match box_at(t, path) {
-                                Some((bx, by, bw, bh)) => {
-                                    let cx = bx + (bw / 2.0);
-                                    let cy = by + (bh / 2.0);
-                                    cx >= ox + fx && cx <= ox + fx + fw && cy >= oy + fy && cy <= oy + fy + fh
-                                }
-                                None => false,
-                            }
-                    };
-                    let mut paths: Vec<Path> = Vec::new();
-                    for (pl, _, _) in t.geo.items.iter() {
-                        if inside(&pl.path) {
-                            paths.insert(0, pl.path.clone());
-                        }
-                    }
-                    let dx = (f64::from(ts.pointer.0) - f64::from(ts.press_point.0)) / z;
-                    let dy = (f64::from(ts.pointer.1) - f64::from(ts.press_point.1)) / z;
-                    { t.drag = Some(Drag::Carrying { scope: scope.clone(), index: i as i64, paths, dx, dy }); };
-                }
-                Some(Drag::Carrying { scope: cs, index, paths, dx, dy }) if cs == scope && index == i as i64 && (ts.held || ts.released) => {
-                    let (ddx, ddy) = ts.drag;
-                    let ndx = dx + (f64::from(ddx) / z);
-                    let ndy = dy + (f64::from(ddy) / z);
-                    { t.drag = Some(Drag::Carrying { scope: cs.clone(), index, paths: paths.clone(), dx: ndx, dy: ndy }); };
-                    if ts.released {
-                        if ndx.hypot(ndy) > 3.0 / z {
-                            let mv: Vec<(Path, f64, f64)> = paths.iter().filter_map(|path| rel_at(t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + ndx), p::snap(ry + ndy)))).collect();
-                            emit.push(Change::Moved(mv));
-                            emit.push(Change::FramesSet { scope: scope.clone(), frames: frame_list(t, &scope) });
-                        }
-                        t.drag = None;
-                    }
-                }
                 Some(Drag::Sizing { scope: ss, index, dw, dh }) if ss == scope && index == i as i64 && (rs.held || rs.released) => {
                     let (dx, dy) = p64(rs.drag);
                     { t.drag = Some(Drag::Sizing { scope: scope.clone(), index: i as i64, dw: dw + (dx / z), dh: dh + (dy / z) }); };
@@ -1736,20 +1745,6 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
     let now = crate::scope_hover::find(t, ui, &canvas, frame.input.pointer);
     gestures(t, ui, frame, &canvas, &sig, changes);
     context_menu(t, ui, changes);
-    // a move of cards that hold others, and a frame carried by its title, move their items in a fresh
-    // geometry the content builds
-    if let Some(scope) = t.scope.clone() {
-        let moving = match &t.drag {
-            Some(Drag::Moving { dx, dy, moved: true, slow: true }) => Some((t.moving.as_slice().to_vec(), *dx, *dy)),
-            Some(Drag::Carrying { paths, dx, dy, .. }) if dx.hypot(*dy) > 0.0 => Some((paths.clone(), *dx, *dy)),
-            _ => None,
-        };
-        if let Some((paths, dx, dy)) = moving {
-            let moving = PathSet::of(&paths);
-            let layout = t.layout.clone();
-            regeo(t, &scope, &layout, &|q: &[Symbol]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
-        }
-    }
     let rev = if moved { revision(t).wrapping_add(1) } else { revision(t) };
     // a carried payload's places follow the pointer: the content builds every frame of a carry
     if ui.carrying().is_some() {
@@ -1763,13 +1758,14 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
     crate::scope_hover::list(t, ov, key);
     let chain = chains_of(t);
     let selected = crate::scope_hover::selected_wire_index(t);
-    let attached = crate::scope_hover::attached(t);
+    // the wires a move draws in its own view
+    crate::scope_hover::carry_wires(t);
     let saved = ui.enter(&canvas);
     // the grid, the zones, the frames and the wires, under the cards: they build again with the
     // content and when the selection's chains or the selected wire change
     let mut hh = std::hash::DefaultHasher::new();
-    (key, chain.as_ref().map(|c| (Rc::as_ptr(c) as usize, c.rev)), selected, Rc::as_ptr(&attached) as usize, &t.highlighted).hash(&mut hh);
-    let wires = ui.view("graph-wires", hh.finish(), cw, ch, &mut |ui| crate::scope_hover::wires_view(t, ui, key, cw, ch, &chain, selected, &attached));
+    (key, chain.as_ref().map(|c| (Rc::as_ptr(c) as usize, c.rev)), selected, &t.highlighted, &t.hovers.borrow().skip).hash(&mut hh);
+    let wires = ui.view("graph-wires", hh.finish(), cw, ch, &mut |ui| crate::scope_hover::wires_view(t, ui, key, cw, ch, &chain, selected));
     ui.set_at(&wires, (-ov.0 as f32, -ov.1 as f32));
     // the wires a move of cards carries, where it puts them
     let under = ui.view("graph-drag-wires", crate::scope_hover::drag_wires_key(t) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::drag_wires(t, ui));
@@ -1912,8 +1908,11 @@ pub mod inspect {
         t.panning_grab
     }
 
+    /// Where an item shows, in window points: its box, moved by a move that carries it.
     pub fn box_of(t: &Pane, path: &[Symbol]) -> Option<(f64, f64, f64, f64)> {
-        box_at(t, path).map(|(x, y, w, h)| (sx(t, x), sy(t, y), w * t.zoom, h * t.zoom))
+        let carried = t.geo.slot.get(path).is_some_and(|k| t.hovers.borrow().moving.binary_search(k).is_ok());
+        let (dx, dy) = crate::scope_hover::drag_offset(t).filter(|_| carried).unwrap_or((0.0, 0.0));
+        box_at(t, path).map(|(x, y, w, h)| (sx(t, x + dx), sy(t, y + dy), w * t.zoom, h * t.zoom))
     }
 
     /// the nodes whose footer the pane draws: in view and not too small to read. A zone's run count reads

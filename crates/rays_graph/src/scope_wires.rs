@@ -455,6 +455,17 @@ pub struct Scratch {
     pts: Vec<(f64, f64)>,
 }
 
+impl Scratch {
+    /// Room for routes among `items` cards of up to `points` points each.
+    pub fn reserve(&mut self, items: usize, points: usize) {
+        self.cand.reserve(items);
+        self.blockers.reserve(items);
+        self.merged.reserve(items);
+        self.way.reserve(points);
+        self.pts.reserve(points);
+    }
+}
+
 /// The cards a wire from `a` to `b` bends clear of: `cards` lists those that may meet a rectangle,
 /// `item` is one card and where it sits. Appended to `out`.
 fn route_into<'g>(cards: &mut dyn FnMut((f64, f64, f64, f64), &mut Vec<usize>), item: &dyn Fn(usize) -> (&'g Placed, f64, f64), a: (f64, f64), b: (f64, f64), from: &Option<Path>, into: &Option<Path>, s: &mut Scratch, out: &mut Vec<(f64, f64)>) {

@@ -252,3 +252,10 @@ pub fn anchored_views(t: &Pane) -> usize {
     let hv = t.hovers.borrow();
     2 + 1 + hv.zones.len() + hv.frames.len() + hv.reach.len() + t.stats.drawn_items as usize
 }
+
+/// A move's wires: those that end on its cards, and all it draws in its own view (those and the
+/// wires whose route meets what its cards sweep).
+pub fn carried_wires(t: &Pane) -> (usize, usize) {
+    let hv = t.hovers.borrow();
+    (hv.attached.len(), hv.skip.len())
+}

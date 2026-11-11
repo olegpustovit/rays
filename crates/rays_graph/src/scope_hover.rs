@@ -113,12 +113,21 @@ pub struct Hovers {
     drawn: Vec<usize>,
     /// the wires near the pointer
     near: Vec<usize>,
-    /// a move of cards by their views: the cards (slots, ascending), the wires that end on them, the
-    /// offset the views show and the cards showing it
+    /// a move of cards by their views: the cards (slots, ascending; a zone's with the cards it holds),
+    /// the frames it carries (as `frames`), the wires that end on its cards (ascending), the wires the
+    /// drag's view draws (those and the wires whose route crosses where the cards were or are, kept
+    /// up to date by `carry_wires`), the offset the views show and the views showing it
     pub moving: Vec<usize>,
-    pub attached: Rc<Vec<usize>>,
+    moving_frames: Vec<usize>,
+    pub attached: Vec<usize>,
+    pub skip: Vec<usize>,
     shown_offset: Option<(f64, f64)>,
     offset: Vec<UiBox>,
+    /// the frames' title strips (their keys, as `frames`): a press there carries the frame
+    pub frame_titles: Vec<(i64, usize)>,
+    /// the name a long wire shows at its use site, by wire (empty for the others): made with the
+    /// content's build, read by the paintings of the wires
+    tags: Vec<String>,
     /// the drag's wires where it puts them: a run of `pts` per wire
     route: Scratch,
     runs: Vec<(usize, usize, usize)>,
@@ -133,6 +142,7 @@ impl Hovers {
         std::mem::swap(&mut self.cards, &mut self.spare);
         self.cards.clear();
         self.keys.clear();
+        self.frame_titles.clear();
         self.geo = geo_key(t);
         self.sel = u64::MAX;
         self.hover = (0, None);
@@ -162,6 +172,8 @@ impl Hovers {
 
     /// The build is over: the cards it left are what presses and the hover find.
     pub fn end(&mut self, t: &Pane, ui: &mut Ui) {
+        self.tags.clear();
+        self.tags.extend(t.geo.wires.iter().map(|wi| if wi.target.is_some() && (wi.b.0 - wi.a.0).abs() > TAG_SPAN { sp::tag_name(t, wi) } else { String::new() }));
         // room for every wire near the pointer and lit by it, so the hover never grows the lists
         for v in [&mut self.near, &mut self.lit, &mut self.next] {
             v.reserve(t.geo.wires.len());
@@ -214,12 +226,24 @@ pub enum On {
     Out(usize, String, Option<Ty>, (f64, f64)),
     In(usize, Option<Del>, (f64, f64, f64, f64)),
     Wire(usize),
+    /// a frame's title strip (as `Hovers::frames`)
+    Frame(usize),
     Ground,
 }
 
-/// Whether the move in progress is of cards by their views.
+/// Whether a move of cards by their views (a frame's too) is in progress.
 pub fn moving_fast(t: &Pane) -> bool {
-    matches!(t.drag, Some(Drag::Moving { moved: true, slow: false, .. }))
+    matches!(t.drag, Some(Drag::Moving { moved: true, .. } | Drag::Carrying { .. }))
+}
+
+/// The offset a move puts its cards at: while it drags, and after it let go until the geometry has
+/// them there.
+pub fn drag_offset(t: &Pane) -> Option<(f64, f64)> {
+    match (&t.drag, &t.dropped) {
+        (Some(Drag::Moving { dx, dy, moved: true } | Drag::Carrying { dx, dy, .. }), _) => Some((*dx, *dy)),
+        (_, Some((_, dx, dy, _))) => Some((*dx, *dy)),
+        _ => None,
+    }
 }
 
 /// The box of wire `i` the pointer is in, as the content's hit boxes were: its segments cut to `clip`
@@ -299,6 +323,10 @@ pub fn classify(t: &Pane, ui: &mut Ui, pt: (f64, f64)) -> On {
     let chain = chains_of(t);
     let fresh = hv.geo == geo_key(t);
     match ui.root_at(p32(pt), &hv.keys) {
+        Some(k) if hv.frame_titles.iter().any(|(key, _)| *key == k) => match hv.frame_titles.iter().find(|(key, _)| *key == k) {
+            Some(&(_, f)) if fresh => On::Frame(f),
+            _ => On::Ground,
+        },
         Some(k) => {
             if let Some((c, port)) = hv.cards.iter().find_map(|c| c.ports.iter().find(|q| q.b.box_key == k).map(|q| (c, q))) {
                 let Some(slot) = slot_now(t, &hv, c) else { return On::Ground };
@@ -523,15 +551,12 @@ pub fn show(t: &Pane, ui: &mut Ui, now: &Now) {
 }
 
 /// The cards a move carries show where it puts them: their views offset by the move (at the zoom the
-/// content was built at), the others where they were.
+/// content was built at), with the bodies of the zones and the frames it carries; the others where
+/// they were.
 pub fn place_cards(t: &Pane, ui: &mut Ui, built_zoom: f64) {
     let hovers = t.hovers.clone();
     let mut hv = hovers.borrow_mut();
-    let want = match (&t.drag, &t.dropped) {
-        (Some(Drag::Moving { dx, dy, moved: true, slow: false, .. }), _) => Some((*dx, *dy)),
-        (_, Some((_, dx, dy, _))) => Some((*dx, *dy)),
-        _ => None,
-    };
+    let want = drag_offset(t);
     if want == hv.shown_offset {
         return;
     }
@@ -541,41 +566,106 @@ pub fn place_cards(t: &Pane, ui: &mut Ui, built_zoom: f64) {
     }
     hv.offset.clear();
     if let Some((dx, dy)) = want {
+        let (x, y) = ((dx * built_zoom) as f32, (dy * built_zoom) as f32);
+        let moves = |slot: usize| hv.moving.binary_search(&slot).is_ok();
         for c in &hv.cards {
-            if hv.moving.binary_search(&c.slot).is_ok() {
-                ui.view_offset(&c.view, (dx * built_zoom) as f32, (dy * built_zoom) as f32);
+            if moves(c.slot) {
+                ui.view_offset(&c.view, x, y);
                 hv.offset.push(c.view);
+            }
+        }
+        for &(slot, v) in &hv.zone_views {
+            if moves(slot) {
+                ui.view_offset(&v, x, y);
+                hv.offset.push(v);
+            }
+        }
+        for &k in &hv.moving_frames {
+            if let Some(v) = hv.frame_views.get(k) {
+                ui.view_offset(v, x, y);
+                hv.offset.push(*v);
             }
         }
     }
     hv.shown_offset = want;
 }
 
-/// A move of cards by their views begins: the cards it carries (none holds another) and the wires
-/// that end on them, which the wires view leaves to the drag's own.
+/// A move of cards by their views begins: the cards it carries (the pane's `moving`, and every card
+/// inside a zone among them), the frames that go with them (in a zone it carries, or the frame a
+/// title drag carries) and the wires that end on them, which the wires view leaves to the drag's own.
 pub fn begin_move(t: &Pane) {
     let hovers = t.hovers.clone();
     let mut hv = hovers.borrow_mut();
+    let hv = &mut *hv;
     let paths = &t.moving;
+    let carried = |q: &Path| paths.iter().any(|a| q.starts_with(a));
     hv.moving.clear();
-    hv.moving.extend(paths.iter().filter_map(|q| t.geo.slot.get(q).copied()));
-    hv.moving.sort_unstable();
-    let on = |q: &Option<Path>| q.as_ref().is_some_and(|q| paths.contains(q));
-    hv.attached = Rc::new(t.geo.wires.iter().enumerate().filter(|(_, wi)| on(&wi.from) || on(&wi.into)).map(|(i, _)| i).collect());
+    hv.moving.extend(t.geo.items.iter().enumerate().filter(|(_, (pl, _, _))| carried(&pl.path)).map(|(k, _)| k));
+    hv.moving_frames.clear();
+    let frame = match &t.drag {
+        Some(Drag::Carrying { scope, index, .. }) => Some((scope, *index as usize)),
+        _ => None,
+    };
+    for (k, &(origin, index)) in hv.frames.iter().enumerate() {
+        let scope = &t.geo.origins[origin].0;
+        if carried(scope) || frame == Some((scope, index)) {
+            hv.moving_frames.push(k);
+        }
+    }
+    let moving = &hv.moving;
+    let on = |q: &Option<Path>| q.as_ref().and_then(|q| t.geo.slot.get(q)).is_some_and(|k| moving.binary_search(k).is_ok());
+    hv.attached.clear();
+    hv.attached.extend(t.geo.wires.iter().enumerate().filter(|(_, wi)| on(&wi.from) || on(&wi.into)).map(|(i, _)| i));
+    hv.skip.clear();
+    hv.skip.extend_from_slice(&hv.attached);
+    // room for every wire to join the drag, routed as long as it is now and twice as long again
+    let (wires, points) = (t.geo.wires.len(), t.geo.wires.iter().map(|wi| wi.pts.len()).sum::<usize>());
+    hv.skip.reserve(wires);
+    hv.runs.reserve(wires);
+    hv.pts.reserve(3 * points);
+    let longest = t.geo.wires.iter().map(|wi| wi.pts.len()).max().unwrap_or(0);
+    hv.buf.reserve(3 * longest + 8);
+    hv.route.reserve(t.geo.items.len(), 3 * longest + 8);
 }
 
-/// The move is over and the geometry has the cards where it put them.
+/// The move is over (and the geometry has the cards where it put them).
 pub fn end_move(t: &Pane) {
     let mut hv = t.hovers.borrow_mut();
     hv.moving.clear();
-    if !hv.attached.is_empty() {
-        hv.attached = Rc::new(Vec::new());
-    }
+    hv.moving_frames.clear();
+    hv.attached.clear();
+    hv.skip.clear();
 }
 
-/// The wires a move of cards draws itself (and the wires view leaves out), by identity.
-pub fn attached(t: &Pane) -> Rc<Vec<usize>> {
-    t.hovers.borrow().attached.clone()
+/// The wires a move draws in its own view, where it puts them: those that end on its cards and those
+/// whose route meets what its cards sweep (where they were and where they are now, in graph units),
+/// so every wire that would bend another way around them follows the move (a test of each route's
+/// segment boxes, nothing allocated once warm).
+pub fn carry_wires(t: &Pane) {
+    let Some((dx, dy)) = drag_offset(t) else { return };
+    let hovers = t.hovers.clone();
+    let mut hv = hovers.borrow_mut();
+    let hv = &mut *hv;
+    hv.skip.clear();
+    hv.skip.extend_from_slice(&hv.attached);
+    let swept = |k: usize| {
+        let (pl, x, y) = &t.geo.items[k];
+        (x.min(x + dx), y.min(y + dy), x.max(x + dx) + pl.w, y.max(y + dy) + pl.h)
+    };
+    for &i in &hv.reach {
+        if hv.attached.binary_search(&i).is_ok() {
+            continue;
+        }
+        let pts = &t.geo.wires[i].pts;
+        let crosses = hv.moving.iter().any(|&k| {
+            let (x0, y0, x1, y1) = swept(k);
+            pts.windows(2).any(|s| s[0].0.min(s[1].0) <= x1 && s[0].0.max(s[1].0) >= x0 && s[0].1.min(s[1].1) <= y1 && s[0].1.max(s[1].1) >= y0)
+        });
+        if crosses {
+            hv.skip.push(i);
+        }
+    }
+    hv.skip.sort_unstable();
 }
 
 /// Drawn over the cards for the hover, in the pane's points at the pan and zoom now: each lit wire
@@ -700,31 +790,22 @@ pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
 /// The wires a move of cards carries, where it puts them (`reroute`), at the pan and zoom now: under
 /// the cards. Built every frame of the move; empty otherwise.
 pub fn drag_wires_key(t: &Pane) -> u64 {
-    let d = match (&t.drag, &t.dropped) {
-        (Some(Drag::Moving { dx, dy, moved: true, slow: false, .. }), _) => Some((*dx, *dy)),
-        (_, Some((_, dx, dy, _))) => Some((*dx, *dy)),
-        _ => None,
-    };
-    let Some((dx, dy)) = d else { return 0 };
+    let Some((dx, dy)) = drag_offset(t) else { return 0 };
     let mut h = std::hash::DefaultHasher::new();
-    (dx.to_bits(), dy.to_bits(), t.pan_x.to_bits(), t.pan_y.to_bits(), t.zoom.to_bits(), revision(t), Rc::as_ptr(&attached(t)) as usize).hash(&mut h);
+    (dx.to_bits(), dy.to_bits(), t.pan_x.to_bits(), t.pan_y.to_bits(), t.zoom.to_bits(), revision(t), &t.hovers.borrow().skip).hash(&mut h);
     h.finish() | 1
 }
 
 pub fn drag_wires(t: &Pane, ui: &mut Ui) {
     let b = ui.box_("pxui-scope-drag-wires", BoxOpts::default().w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at((0.0, 0.0)));
-    let d = match (&t.drag, &t.dropped) {
-        (Some(Drag::Moving { dx, dy, moved: true, slow: false, .. }), _) => (*dx, *dy),
-        (_, Some((_, dx, dy, _))) => (*dx, *dy),
-        _ => return,
-    };
+    let Some(d) = drag_offset(t) else { return };
     let Some(kept) = kept(t) else { return };
     {
         let mut hv = t.hovers.borrow_mut();
         let hv = &mut *hv;
         hv.runs.clear();
         hv.pts.clear();
-        for &i in hv.attached.iter() {
+        for &i in hv.skip.iter() {
             reroute(&t.geo, i, &hv.moving, d, &mut hv.route, &mut hv.buf);
             let start = hv.pts.len();
             hv.pts.extend_from_slice(&hv.buf);
@@ -741,7 +822,7 @@ pub fn drag_wires(t: &Pane, ui: &mut Ui) {
         let pane = (place.x, place.y, t.width as f64, t.height as f64);
         let tag_size = 5.max((11.0 * z).round() as i64);
         for &(i, a, b) in &hv.runs {
-            sp::paint_wire(paint, t, z, &at, &chain, pane, tag_size, &t.geo.wires[i], &hv.pts[a..b], false, selected == Some(i));
+            sp::paint_wire(paint, t, z, &at, &chain, pane, tag_size, &t.geo.wires[i], hv.tags.get(i).map_or("", |s| s.as_str()), &hv.pts[a..b], false, selected == Some(i));
         }
     });
 }
@@ -849,20 +930,22 @@ fn label(buf: &mut [u8; 24], c: u8, n: usize) -> &str {
 // ponytail: a view per wire takes one of the painter's 255 view table entries; past them views ride
 // their parent's entry and a moved card view rebuilds instead of offsetting. A view kind with no
 // entry of its own if graphs with hundreds of wires in view move slowly.
-pub fn wires_view(t: &Pane, ui: &mut Ui, key: u64, w: Size, h: Size, chain: &Option<Rc<Chains>>, selected: Option<usize>, skip: &[usize]) {
+pub fn wires_view(t: &Pane, ui: &mut Ui, key: u64, w: Size, h: Size, chain: &Option<Rc<Chains>>, selected: Option<usize>) {
     let layer = ui.box_("pxui-scope-layer", BoxOpts::default().w(w).h(h).at((0.0, 0.0)));
     let saved = ui.enter(&layer);
     let built = t.built.clone();
-    let full = |ui: &mut Ui, name: &str, rev: u64, paint: &mut dyn FnMut(&mut Ui, &UiBox)| -> UiBox {
-        let v = ui.view_flat(name, rev, w, h, &mut |ui| {
+    // (a zone's body and a frame move with a drag: views with table entries of their own)
+    let full = |ui: &mut Ui, name: &str, rev: u64, moves: bool, paint: &mut dyn FnMut(&mut Ui, &UiBox)| -> UiBox {
+        let mut build = |ui: &mut Ui| {
             let b = ui.box_("p", BoxOpts::default().w(w).h(h).at((0.0, 0.0)));
             paint(ui, &b);
-        });
+        };
+        let v = if moves { ui.view(name, rev, w, h, &mut build) } else { ui.view_flat(name, rev, w, h, &mut build) };
         ui.set_at(&v, (0.0, 0.0));
         v
     };
     let kept = |built: &Rc<std::cell::RefCell<Option<(Rc<Pane>, u64)>>>| built.borrow().as_ref().map(|(p, _)| p.clone());
-    full(ui, "ground", key, &mut |ui, b| {
+    full(ui, "ground", key, false, &mut |ui, b| {
         let built = built.clone();
         ui.draw(b, move |paint, rect| {
             if let Some(k) = kept(&built) {
@@ -876,7 +959,7 @@ pub fn wires_view(t: &Pane, ui: &mut Ui, key: u64, w: Size, h: Size, chain: &Opt
     let hv = &mut *hv;
     hv.zone_views.clear();
     for &slot in &hv.zones {
-        let v = full(ui, label(&mut buf, b'z', slot), key, &mut |ui, b| {
+        let v = full(ui, label(&mut buf, b'z', slot), key, true, &mut |ui, b| {
             let built = built.clone();
             ui.draw(b, move |paint, _| {
                 if let Some(k) = kept(&built) {
@@ -888,7 +971,7 @@ pub fn wires_view(t: &Pane, ui: &mut Ui, key: u64, w: Size, h: Size, chain: &Opt
     }
     hv.frame_views.clear();
     for (k, &(origin, index)) in hv.frames.iter().enumerate() {
-        let v = full(ui, label(&mut buf, b'f', k), key, &mut |ui, b| {
+        let v = full(ui, label(&mut buf, b'f', k), key, true, &mut |ui, b| {
             let built = built.clone();
             ui.draw(b, move |paint, _| {
                 if let Some(k) = kept(&built) {
@@ -900,20 +983,21 @@ pub fn wires_view(t: &Pane, ui: &mut Ui, key: u64, w: Size, h: Size, chain: &Opt
     }
     for &i in &hv.reach {
         let wi = &t.geo.wires[i];
-        let (lit, is_selected, lit_now, carried) = (chain.as_ref().map(|c| wire_lit(c, wi)), selected == Some(i), t.highlighted.contains(&i), skip.binary_search(&i).is_ok());
+        let (lit, is_selected, lit_now, carried) = (chain.as_ref().map(|c| wire_lit(c, wi)), selected == Some(i), t.highlighted.contains(&i), hv.skip.binary_search(&i).is_ok());
         let mut hh = std::hash::DefaultHasher::new();
         (key, lit, is_selected, lit_now, carried).hash(&mut hh);
-        full(ui, label(&mut buf, b'w', i), hh.finish(), &mut |ui, b| {
+        full(ui, label(&mut buf, b'w', i), hh.finish(), false, &mut |ui, b| {
             if carried {
                 return;
             }
-            let (built, chain) = (built.clone(), chain.clone());
+            let (built, chain, hovers) = (built.clone(), chain.clone(), hovers.clone());
             ui.draw(b, move |paint, rect| {
                 if let Some(k) = kept(&built) {
                     let z = k.zoom;
                     let tag_size = 5.max((11.0 * z).round() as i64);
                     let wi = &k.geo.wires[i];
-                    sp::paint_wire(paint, &k, z, &|q| (sx(&k, q.0), sy(&k, q.1)), &chain, rect.f64(), tag_size, wi, &wi.pts, lit_now, is_selected);
+                    let hv = hovers.borrow();
+                    sp::paint_wire(paint, &k, z, &|q| (sx(&k, q.0), sy(&k, q.1)), &chain, rect.f64(), tag_size, wi, hv.tags.get(i).map_or("", |s| s.as_str()), &wi.pts, lit_now, is_selected);
                 }
             });
         });
