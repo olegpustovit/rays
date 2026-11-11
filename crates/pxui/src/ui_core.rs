@@ -3377,7 +3377,14 @@ impl Ui {
                     let (cols, nc, rows, nr) = self.grid_tracks(index, n, &grid, None);
                     (span(&cols[..nc], n.gap), span(&rows[..nr], n.row_gap))
                 }
-                None => self.flow_extent(index, n),
+                None => {
+                    let limit = match (n.wrap, n.axis == Axis::Row, n.w, n.h) {
+                        (true, true, Size::Px(w), _) => w - n.padding.l - n.padding.r,
+                        (true, false, _, Size::Px(h)) => h - n.padding.t - n.padding.b,
+                        _ => f32::INFINITY,
+                    };
+                    self.flow_extent(index, n, limit)
+                }
             };
             let pad = n.padding;
             let (cw, ch) = (content_w + pad.l + pad.r, content_h + pad.t + pad.b);
@@ -3401,18 +3408,11 @@ impl Ui {
     }
 
     /// The extent of a row, column or stack's flow children (margins and gaps in, padding out). A
-    /// wrapping flow breaks its lines at its fixed main size.
-    // ponytail: a wrapping flow whose main size comes from its parent measures as one line (its Fit
-    // cross size is that line's); give it a Px main size, or measure from the laid-out width, if a
-    // wrapping Fit box nests in a Grow one.
-    fn flow_extent(&self, index: usize, n: &Node) -> (f32, f32) {
+    /// wrapping flow breaks its lines at `limit`, its inner main size: its `Px` one when measuring
+    /// (else one line), the resolved one in `rewrap`.
+    fn flow_extent(&self, index: usize, n: &Node, limit: f32) -> (f32, f32) {
         let row = n.axis == Axis::Row;
         let stack = n.axis == Axis::Stack;
-        let limit = match (n.wrap, row, n.w, n.h) {
-            (true, true, Size::Px(w), _) => w - n.padding.l - n.padding.r,
-            (true, false, _, Size::Px(h)) => h - n.padding.t - n.padding.b,
-            _ => f32::INFINITY,
-        };
         let (mut along, mut across, mut line_main, mut line_cross, mut count) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0);
         let mut child = self.next_flow(self.boxes[index].first);
         while child != NONE {
@@ -3441,6 +3441,31 @@ impl Ui {
         if row { (along, across) } else { (across, along) }
     }
 
+    /// A wrapping `Fit` box whose main size its parent resolved (`Grow`, `Pct`, `Rel`, stretch):
+    /// its lines measured again at that size give its cross size, before the parent places it.
+    /// Called once per such child by its parent's pass, so layout stays O(nodes).
+    // ponytail: the parent's own Fit size and scroll extent (and a grid cell's row) were measured
+    // with one line; measure bottom-up again from the resolved width if a Fit column of wrapping
+    // Grow rows has to hug them.
+    fn rewrap(&mut self, c: usize) {
+        let n = *self.nd(c);
+        let row = n.axis == Axis::Row;
+        let (main, cross) = if row { (n.w, n.h) } else { (n.h, n.w) };
+        if !n.wrap || n.grid.is_some() || n.axis == Axis::Stack || matches!(main, Size::Px(_) | Size::Fit) || !matches!(cross, Size::Fit) {
+            return;
+        }
+        let pad = n.padding;
+        let limit = if row { self.l_w[c] - pad.l - pad.r } else { self.l_h[c] - pad.t - pad.b };
+        let (w, h) = self.flow_extent(c, &n, limit);
+        if row {
+            self.l_content[c] = h + pad.t + pad.b;
+            self.set_main(false, c, self.l_content[c]);
+        } else {
+            self.l_content_w[c] = w + pad.l + pad.r;
+            self.set_main(true, c, self.l_content_w[c]);
+        }
+    }
+
     /// A stack's children in `z` order (stable): paint and hit order follow the list. Sorted in a
     /// scratch vector kept between frames (no allocation once warm), O(k log k).
     fn order_stack(&mut self, index: usize) {
@@ -3462,14 +3487,16 @@ impl Ui {
         self.z_order = order;
     }
 
-    /// The grid's column and row sizes: a content-sized track takes its largest single-span child
-    /// (as does a fractional one when measuring, `room` None); with `room` (inner w, h) the
+    /// The grid's column and row sizes: a content-sized track takes its largest single-span child,
+    /// then what spanning children lack (`spread`; a fractional track measures as content, `room`
+    /// None, but takes no span's share); with `room` (inner w, h) the
     /// fractional tracks share what the others leave.
     fn grid_tracks(&self, index: usize, n: &Node, g: &Grid, room: Option<(f32, f32)>) -> ([f32; MAX_TRACKS], usize, [f32; MAX_TRACKS], usize) {
         let nc = g.cols.len().clamp(1, MAX_TRACKS);
         let mut nr = g.rows.len().min(MAX_TRACKS);
         let (mut colc, mut rowc) = ([0.0f32; MAX_TRACKS], [0.0f32; MAX_TRACKS]);
         let mut cursor = (0, 0);
+        let mut spans = false;
         let mut child = self.next_flow(self.boxes[index].first);
         while child != NONE {
             let cn = self.nd(child);
@@ -3481,7 +3508,23 @@ impl Ui {
             if rs == 1 {
                 rowc[r] = rowc[r].max(self.l_h[child] + cn.margin.t + cn.margin.b);
             }
+            spans |= cs > 1 || rs > 1;
             child = self.next_flow(self.boxes[child].next);
+        }
+        // a second walk: what a spanning child needs past its tracks goes to their Fit ones
+        if spans {
+            (cursor, child) = ((0, 0), self.next_flow(self.boxes[index].first));
+            while child != NONE {
+                let cn = self.nd(child);
+                let (c, r, cs, rs) = next_cell(cn.cell, &mut cursor, nc);
+                if cs > 1 {
+                    spread(g.cols, &mut colc, c, cs, self.l_w[child] + cn.margin.l + cn.margin.r, n.gap);
+                }
+                if rs > 1 {
+                    spread(g.rows, &mut rowc, r, rs, self.l_h[child] + cn.margin.t + cn.margin.b, n.row_gap);
+                }
+                child = self.next_flow(self.boxes[child].next);
+            }
         }
         let size = |tracks: &[Track], n: usize, content: &[f32; MAX_TRACKS], room: Option<f32>, gap: f32| {
             let mut out = [0.0f32; MAX_TRACKS];
@@ -3807,6 +3850,10 @@ impl Ui {
                     let cross = self.main(!row, end);
                     self.set_main(row, end, if row { cross * c.aspect } else { cross / c.aspect });
                 }
+                // in a column a wrapping row's width is known now; in a row, after the shares
+                if !row {
+                    self.rewrap(end);
+                }
                 // a Grow child starts from nothing (its minimum holds in `grow_line`)
                 let basis = if grows(&c) { 0.0 } else { self.main(row, end) };
                 let (ms, me) = main_margins(c.margin);
@@ -3828,6 +3875,9 @@ impl Ui {
             let (mut line_cross, mut base_max) = (0.0f32, 0.0f32);
             let mut c = start;
             while c != end {
+                if row {
+                    self.rewrap(c);
+                }
                 let cn = *self.nd(c);
                 let (cs, ce) = cross_margins(cn.margin);
                 let a = cn.align_self.unwrap_or(n.align);
@@ -4003,6 +4053,7 @@ impl Ui {
             if cn.aspect > 0.0 && matches!(cn.h, Size::Fit) {
                 self.set_main(false, c, self.l_w[c] / cn.aspect);
             }
+            self.rewrap(c);
             let ow = self.l_w[c] + m.l + m.r;
             let oh = self.l_h[c] + m.t + m.b;
             let x = match n.justify {
@@ -4107,6 +4158,28 @@ fn clamp(v: f32, min: f32, max: f32) -> f32 {
 /// Tracks' total extent with `gap` between them.
 fn span(tracks: &[f32], gap: f32) -> f32 {
     tracks.iter().sum::<f32>() + gap * tracks.len().saturating_sub(1) as f32
+}
+
+/// A child spanning `count` tracks from `at` needs `need` points: what its tracks (fixed and the
+/// content ones so far, with the gaps) lack is shared equally by its `Fit` tracks. A span over an
+/// `Fr` track sizes nothing (as in CSS: the fractions take the room).
+fn spread(tracks: &[Track], content: &mut [f32; MAX_TRACKS], at: usize, count: usize, need: f32, gap: f32) {
+    let (mut have, mut fits) = (gap * (count - 1) as f32, 0);
+    for i in at..at + count {
+        match tracks.get(i).copied().unwrap_or(Track::Fit) {
+            Track::Px(v) => have += v,
+            Track::Fr(_) => return,
+            Track::Fit => (have, fits) = (have + content[i], fits + 1),
+        }
+    }
+    if fits > 0 && need > have {
+        let each = (need - have) / fits as f32;
+        for i in at..at + count {
+            if matches!(tracks.get(i).copied().unwrap_or(Track::Fit), Track::Fit) {
+                content[i] += each;
+            }
+        }
+    }
 }
 
 /// A grid child's (column, row, column span, row span): its own cell, or the next free one along

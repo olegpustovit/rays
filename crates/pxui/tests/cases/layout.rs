@@ -136,6 +136,35 @@ pub fn layout_wrap() {
     eq(r[0], 0.0, 0.0, 100.0, 27.0, "fit height of two lines");
 }
 
+/// A wrapping Fit row whose width its parent gives (Grow, Pct) breaks its lines at that width.
+pub fn layout_wrap_resolved() {
+    let kid = px(40.0, 10.0);
+    let column = Node { w: Size::Px(100.0), h: Size::Px(200.0), ..Node::DEFAULT };
+    let wrapping = |w: Size| Node { w, h: Size::Fit, axis: Axis::Row, wrap: true, padding: Edges { t: 1.0, b: 2.0, ..Edges::ZERO }, ..Node::DEFAULT };
+    let mut ui = new_ui(None);
+    let r = lay(&mut ui, 0.0, vec![], &mut |ui| {
+        let p = ui.node("p", column);
+        let saved = ui.enter(&p);
+        let mut out = vec![];
+        for (k, w) in [Size::Grow, Size::Pct(0.5)].into_iter().enumerate() {
+            let row = ui.node(&format!("row{k}"), wrapping(w));
+            let inner = ui.enter(&row);
+            for i in 0..4 {
+                ui.node(&format!("k{i}"), kid);
+            }
+            ui.leave(inner);
+            out.push(row);
+        }
+        out.push(ui.node("after", kid));
+        ui.leave(saved);
+        out
+    });
+    eq(r[0], 0.0, 0.0, 100.0, 23.0, "two lines at the stretched width");
+    eq(r[1], 0.0, 23.0, 50.0, 43.0, "four lines at half the width");
+    eq(r[2], 0.0, 66.0, 40.0, 10.0, "the next sibling below them");
+    ui.destroy();
+}
+
 pub fn layout_grid() {
     const COLS: &[Track] = &[Track::Px(50.0), Track::Fr(1.0), Track::Fit];
     let grid = Node { w: Size::Px(300.0), h: Size::Fit, grid: Some(Grid { cols: COLS, rows: &[] }), gap: 10.0, row_gap: 4.0, ..Node::DEFAULT };
@@ -147,6 +176,27 @@ pub fn layout_grid() {
     eq(r[4], 0.0, 24.0, 220.0, 30.0, "a span covers two tracks and the gap");
     eq(r[5], 230.0, 58.0, 70.0, 20.0, "an explicit cell");
     eq(r[0], 0.0, 0.0, 300.0, 78.0, "fit height of three rows");
+}
+
+/// Spanning children size the content tracks they cross; fixed and fractional tracks keep theirs.
+pub fn layout_grid_spans() {
+    const COLS: &[Track] = &[Track::Fit, Track::Fit, Track::Px(30.0)];
+    let grid = Node { w: Size::Fit, h: Size::Fit, grid: Some(Grid { cols: COLS, rows: &[] }), gap: 10.0, row_gap: 4.0, ..Node::DEFAULT };
+    let r = once(grid, &[
+        Node { cell: Cell::at(0, 0), ..px(20.0, 10.0) },
+        Node { cell: Cell::at(0, 1).span(3, 1), ..px(120.0, 10.0) },
+        Node { cell: Cell::at(0, 2).span(1, 2), ..px(10.0, 50.0) },
+        Node { cell: Cell::at(1, 2), ..px(5.0, 10.0) },
+    ]);
+    // columns: 75 of 120 there (20 + 5 + 30 + two gaps), 22.5 more to each Fit column
+    eq(r[1], 0.0, 0.0, 20.0, 10.0, "single cell");
+    eq(r[2], 0.0, 14.0, 120.0, 10.0, "column span");
+    eq(r[4], 52.5, 28.0, 5.0, 10.0, "the second Fit column after the first's share");
+    // rows: 10 + 0 + a gap of the 50 spanned, 18 more to each
+    eq(r[0], 0.0, 0.0, 120.0, 10.0 + 10.0 + 28.0 + 18.0 + 12.0, "fit size of the grown tracks");
+    const FR: &[Track] = &[Track::Fr(1.0), Track::Fit];
+    let r = once(Node { w: Size::Px(300.0), grid: Some(Grid { cols: FR, rows: &[] }), ..grid }, &[Node { cell: Cell::DEFAULT.span(2, 1), ..px(280.0, 10.0) }, px(10.0, 10.0), px(40.0, 10.0)]);
+    eq(r[3], 300.0 - 40.0, 14.0, 40.0, 10.0, "a span over a fractional track leaves the Fit one at its content");
 }
 
 /// A stack overlaps its children and paints them in z order.
@@ -506,7 +556,9 @@ pub const CASES: &[(&str, fn())] = &[
     ("layout_justify_align", layout_justify_align),
     ("layout_baseline", layout_baseline),
     ("layout_wrap", layout_wrap),
+    ("layout_wrap_resolved", layout_wrap_resolved),
     ("layout_grid", layout_grid),
+    ("layout_grid_spans", layout_grid_spans),
     ("layout_stack_order", layout_stack_order),
     ("layout_anchored_flip", layout_anchored_flip),
     ("layout_scroll_sticky", layout_scroll_sticky),
