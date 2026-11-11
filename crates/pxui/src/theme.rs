@@ -131,7 +131,7 @@ pub fn invalid() -> Color {
 }
 
 pub fn dark(theme: &Tokens) -> bool {
-    theme.panel.r + theme.panel.g + theme.panel.b < 384
+    (theme.panel.r as u32 + theme.panel.g as u32 + theme.panel.b as u32) < 384
 }
 
 // ------------------------------------------------------------------ looks
@@ -229,7 +229,8 @@ impl Look {
     /// sides) is `to`'s from the start.
     pub fn lerp(&self, to: &Look, t: f32) -> Look {
         let c = |a: Color, b: Color| {
-            let m = |x: i64, y: i64| (x as f32 + (y - x) as f32 * t).round() as i64;
+            // an overshooting curve saturates at the channel's ends
+            let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
             Color { r: m(a.r, b.r), g: m(a.g, b.g), b: m(a.b, b.b), a: m(a.a, b.a) }
         };
         let f = |a: f32, b: f32| a + (b - a) * t;

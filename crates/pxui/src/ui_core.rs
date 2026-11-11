@@ -1088,7 +1088,7 @@ pub fn contains(rect: Rect, point: (f32, f32)) -> bool { rect.contains(point) }
 pub fn intersect(a: Rect, b: Rect) -> Rect { a.intersect(b) }
 
 fn rgba(c: Color) -> [u8; 4] {
-    [c.r as u8, c.g as u8, c.b as u8, c.a as u8]
+    [c.r, c.g, c.b, c.a]
 }
 
 /// Integer-derived child keys: no label string per frame.
@@ -4115,7 +4115,7 @@ impl Paint {
         let placed = r;
         let Rect { x, y, w, h } = placed;
         let o = look.opacity.clamp(0.0, 1.0);
-        let fade = |c: Color| if o < 1.0 { Color { a: (c.a as f32 * o).round() as i64, ..c } } else { c };
+        let fade = |c: Color| if o < 1.0 { Color { a: (c.a as f32 * o).round() as u8, ..c } } else { c };
         let corners = [x, y, x + w, y + h];
         let radii = look.radius;
         let area = w > 0.0 && h > 0.0;

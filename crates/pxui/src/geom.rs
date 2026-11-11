@@ -1,5 +1,5 @@
 //! PXUI's own plain f32 geometry, colour and key hash: the engine depends on nothing for them.
-//! Points and sizes are logical points; colour channels are 0..=255 as in the Rays colour.
+//! Points and sizes are logical points; colour channels are bytes, as in the Rays colour.
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Point { pub x: f32, pub y: f32 }
@@ -11,7 +11,7 @@ pub struct Rect { pub x: f32, pub y: f32, pub w: f32, pub h: f32 }
 pub struct Edges { pub l: f32, pub t: f32, pub r: f32, pub b: f32 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rgba { pub r: i64, pub g: i64, pub b: i64, pub a: i64 }
+pub struct Rgba { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }
 
 impl Edges {
     pub const ZERO: Edges = Edges { l: 0.0, t: 0.0, r: 0.0, b: 0.0 };
@@ -37,7 +37,7 @@ pub mod color {
     pub use super::Rgba as T;
     use super::Rgba;
 
-    fn clamp_byte(value: i64) -> i64 { value.clamp(0, 255) }
+    fn clamp_byte(value: i64) -> u8 { value.clamp(0, 255) as u8 }
     pub fn rgba(r: i64, g: i64, b: i64, a: i64) -> Rgba { Rgba { r: clamp_byte(r), g: clamp_byte(g), b: clamp_byte(b), a: clamp_byte(a) } }
     pub fn rgb(r: i64, g: i64, b: i64) -> Rgba { rgba(r, g, b, 255) }
     pub fn gray(v: i64) -> Rgba { rgb(v, v, v) }
@@ -46,7 +46,7 @@ pub mod color {
     pub fn transparent() -> Rgba { rgba(0, 0, 0, 0) }
     pub fn with_alpha(c: Rgba, alpha: i64) -> Rgba { Rgba { a: clamp_byte(alpha), ..c } }
     pub fn of_unit_floats(alpha: Option<f64>, r: f64, g: f64, b: f64) -> Rgba {
-        let byte = |v: f64| clamp_byte((v * 255.0).round() as i64);
+        let byte = |v: f64| (v * 255.0).round() as i64;
         rgba(byte(r), byte(g), byte(b), byte(alpha.unwrap_or(1.0)))
     }
     pub fn to_floats(c: Rgba) -> (f64, f64, f64, f64) { (c.r as f64 / 255.0, c.g as f64 / 255.0, c.b as f64 / 255.0, c.a as f64 / 255.0) }
@@ -72,7 +72,7 @@ pub mod color {
     pub fn blend(c1: Rgba, c2: Rgba, pct: f64) -> Rgba {
         let pct = pct.clamp(0.0, 1.0);
         let inv = 1.0 - pct;
-        let mix = |a: i64, b: i64| ((a as f64 * inv) + (b as f64 * pct) + 0.5) as i64;
+        let mix = |a: u8, b: u8| ((a as f64 * inv) + (b as f64 * pct) + 0.5) as u8;
         Rgba { r: mix(c1.r, c2.r), g: mix(c1.g, c2.g), b: mix(c1.b, c2.b), a: mix(c1.a, c2.a) }
     }
 }

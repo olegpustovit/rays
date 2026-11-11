@@ -55,6 +55,7 @@ pub fn pxui_bench() {
     if std::env::var_os("PXUI_BENCH").is_none() {
         return;
     }
+    eprintln!("PXUI_BENCH sizes: Node {} B, Look {} B, Instance {} B", size_of::<Node>(), size_of::<Look>(), size_of::<pxui::draw::Instance>());
     // the kit baseline (`window_pxui_baseline`)
     let mut ui = new_ui(Some(11));
     let t = Cell::new(0.0);

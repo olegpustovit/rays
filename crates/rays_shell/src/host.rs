@@ -40,7 +40,7 @@ pub fn frame(ui: &mut Ui, frame: &Frame, f: &mut dyn FnMut(&mut Ui)) {
     }
     // no window, no effect
     if let Some(ground) = out.background {
-        let _ = sketch::set_window_background(rays_math::color::rgba(ground.r, ground.g, ground.b, ground.a));
+        let _ = sketch::set_window_background(rays_math::color::rgba(ground.r as i64, ground.g as i64, ground.b as i64, ground.a as i64));
     }
     charge(ui);
 }
