@@ -215,3 +215,34 @@ the paint walk `visit` about 9%, `memmove` of node records about 6%, the layout-
 (`Text::layout`) about 4%, the instance compare about 4%; build is 16% of the frame by the phase clock.
 The replay is now a tight loop (two fused multiply-adds and a bin compare per glyph, no hash); what is
 left in it is the per-glyph `dyn FnMut` call and the instance write.
+
+## After the engine leftovers (grid spans, resolved-width wrap, sideways glide, grid_list, theme transitions, keyframes, nested transforms)
+
+`PXUI_BENCH=1 RAYS_SLOW=1 cargo t [--release] -p pxui pxui_bench`, M1, us per frame, min / median of 7
+rounds, `nice -n 10`, one cargo process of ours; the machine was shared with other builds (load 7 to
+34), so medians under contention are marked. Before = `685f2a46` (this session). The stress tree grew
+to 2,054 nodes (grid row spans, a column of wrapping `Grow` rows, a 100,000-cell `grid_list` of 48
+built nodes) and its small view to 90 nodes; the old 2,006-node tree on the new code measures 620 /
+620 us dev (arrange 144 us, as before).
+
+| Frame | Dev before | Dev after | Release before | Release after |
+| --- | --- | --- | --- | --- |
+| Kit baseline (panel, 4 widgets, 2x) | 3.1 / 3.1 | 3.1 / 3.1 | 2.8 / 2.8 | 2.8 / 2.8 |
+| 500 widgets, all ten views kept | 4.3 / 4.4 | 4.3 / 4.5 | 3.7 / 11.8 (loaded) | 3.7 / 3.8 |
+| 500 widgets, one 50-widget view rebuilt | 28.2 / 28.3 | 27.4 / 27.7 | 30.6 / 45.3 (loaded) | 25.2 / 25.3 |
+| 500 widgets, same, accessibility on | 36.1 / 36.3 | 35.1 / 35.4 | 32.7 / 33.1 | 31.7 / 31.8 |
+| 500 widgets, all rebuilt | 242.1 / 243.1 | 243.7 / 244.5 | 225.6 / 268.5 (loaded) | 215.4 / 216.0 |
+| Stress tree, full rebuild | 618 / 637 (2,006 nodes, 308 ns) | 683 / 685 (2,054 nodes, 332 ns); old tree 620 / 620 | 593 / 635 (296 ns) | 615 / 623 (300 ns) |
+| Stress tree cached | 1.3 / 1.3 | 1.3 / 1.3 | 1.1 / 1.2 | 1.1 / 1.1 |
+| Stress cached + one small view rebuilt | 13.4 / 13.8 (42 nodes) | 18.7 / 18.9 (90 nodes) | 12.5 / 12.7 (42) | 17.0 / 17.1 (90) |
+| Allocations, any of the above, warm | 0 | 0 | 0 | 0 |
+
+Two costs were found and taken out on the way: the nested-transform check in hit testing (0.6 us a
+frame over 500 hit rectangles; now one composed `flat` flag per view) and the slot record growing by
+a second scroll axis (the motion now lives beside the slots). A scroll axis at rest with no input
+returns after one signal lookup. The slot table rehashes through kept spare arrays, so keys that
+come and go (a scrolled `list` or `grid_list`) allocate nothing (`layout_grid_list`, 100 frames).
+New zero-allocation checks: `layout_grid_list`, `styling_theme_swap_transition` (a warm swap's
+steps), `styling_animate_keys` (a warm keyframed run); `layout_stress_zero_alloc` and
+`layout_scaling` (554 / 2,054 / 8,054 nodes: about 320 / 340 / 390 ns per node rebuilt, 104 / 109 /
+114 ns of layout) hold on the extended tree.

@@ -141,6 +141,85 @@ pub fn styling_transition_without_rebuild() {
     ui.destroy();
 }
 
+/// A theme swap rebuilds the views once and moves every look to the new theme's over its
+/// `motion.normal` through the patch path; at rest the instances equal a fresh build under the new
+/// theme, the gate idles, and a warm swap's steps allocate nothing. Reduced motion snaps.
+pub fn styling_theme_swap_transition() {
+    let dusk = Theme::parse(DUSK, &Theme::default()).expect("dusk");
+    let runs = Cell::new(0);
+    let mut build = |ui: &mut Ui| {
+        ui.view("v", 1, Size::Px(300.0), Size::Px(200.0), &mut |ui| {
+            runs.set(runs.get() + 1);
+            ui.panel(PanelOpts::default(), "p", &mut |ui| {
+                ui.label("Swap");
+                ui.button("Go");
+                ui.toggle("On", true);
+                ui.text_field("Name", "value");
+            });
+        });
+    };
+    // the drawn instances in order: a retained layer keeps blank slack where a patched run shrank
+    let instances = |ui: &Ui| ui.output().draw.iter().flat_map(|l| l.instances.iter().copied()).filter(|i| !(i.rect == [0.0; 4] && i.color[3] == 0 && i.color2[3] == 0)).collect::<Vec<_>>();
+    let fresh = |theme: Theme| {
+        let mut ui = new_ui(None);
+        ui.set_theme(theme);
+        let mut b = |ui: &mut Ui| {
+            ui.view("v", 1, Size::Px(300.0), Size::Px(200.0), &mut |ui| {
+                ui.panel(PanelOpts::default(), "p", &mut |ui| {
+                    ui.label("Swap");
+                    ui.button("Go");
+                    ui.toggle("On", true);
+                    ui.text_field("Name", "value");
+                });
+            });
+        };
+        ui.frame(&at(0.0, vec![]), &mut b);
+        ui.frame(&at(0.1, vec![]), &mut b);
+        let out = instances(&ui);
+        ui.destroy();
+        out
+    };
+    let mut ui = new_ui(None);
+    ui.frame(&at(0.0, vec![]), &mut build);
+    ui.frame(&at(0.1, vec![]), &mut build);
+    let mut t = 1.0;
+    // the Rays theme has no motion (a swap to it snaps); give it some
+    let mut rays = Theme::default();
+    rays.tokens.motion.normal = 0.2;
+    for (round, theme) in [dusk, rays, dusk].into_iter().enumerate() {
+        let duration = theme.tokens.motion.normal as f64;
+        let before = instances(&ui);
+        ui.set_theme(theme);
+        let built = runs.get();
+        ui.frame(&at(t, vec![]), &mut build);
+        check(runs.get() == built + 1, "the swap did not rebuild the view once");
+        check(ui.transitions() > 4, &format!("round {round}: {} transitions after a swap", ui.transitions()));
+        check(instances(&ui) != fresh(theme) && instances(&ui) != before, "the swap frame snapped");
+        mem_sys::local_reset();
+        let allocs = mem_sys::local_alloc_count();
+        let mut steps = 0;
+        while ui.wants_frame(&[], t) && steps < 100 {
+            t += 1.0 / 60.0;
+            ui.frame(&at(t, vec![]), &mut build);
+            steps += 1;
+        }
+        let allocs = mem_sys::local_alloc_count() - allocs;
+        check(round == 0 || allocs == 0, &format!("round {round}: {allocs} allocations in {steps} transition steps"));
+        check(runs.get() == built + 1, &format!("round {round}: the transition rebuilt the view"));
+        check((steps as f64) < duration * 60.0 + 3.0 && steps > 3, &format!("round {round}: {steps} steps for {duration} s"));
+        check(ui.transitions() == 0 && !ui.wants_frame(&[], t + 1.0), "the gate did not idle at rest");
+        check(instances(&ui) == fresh(theme), &format!("round {round}: at rest the pixels differ from a fresh build"));
+        t += 1.0;
+    }
+    // reduced motion snaps
+    let mut still = rays;
+    still.tokens.reduced_motion = true;
+    ui.set_theme(still);
+    ui.frame(&at(t, vec![]), &mut build);
+    check(ui.transitions() == 0 && instances(&ui) == fresh(still), "a reduced-motion swap did not snap");
+    ui.destroy();
+}
+
 /// `reduced_motion` zeroes the durations: a hover snaps.
 pub fn styling_reduced_motion() {
     let mut ui = new_ui(None);
@@ -193,6 +272,55 @@ pub fn styling_animate_spring() {
     ui.destroy();
 }
 
+/// Keyframes: each stop reached at its time along its segment's curve, channels kept between stops;
+/// the run rests on the last stop without rebuilding its view, and a warm run allocates nothing.
+pub fn styling_animate_keys() {
+    let mut ui = new_ui(None);
+    let chip = Cell::new(None);
+    let runs = Cell::new(0);
+    let mut build = |ui: &mut Ui| {
+        ui.view("v", 1, Size::Px(200.0), Size::Px(100.0), &mut |ui| {
+            runs.set(runs.get() + 1);
+            let look = Look { fill: color::rgb(200, 40, 40), ..Look::NONE };
+            chip.set(Some(ui.node("chip", Node { w: Size::Px(40.0), h: Size::Px(20.0), look, ..Node::DEFAULT })));
+        });
+    };
+    ui.frame(&at(0.0, vec![]), &mut build);
+    ui.frame(&at(0.1, vec![]), &mut build);
+    let chip = chip.get().expect("chip");
+    let shown = |ui: &Ui| ui.output().draw[0].instances.iter().find(|i| i.color[0] == 200).map(|i| (i.rect[0], i.color[3] as i32));
+    let linear = Curve::Bezier { duration: 0.0, points: [0.0, 0.0, 1.0, 1.0] };
+    let keys = [(0.1, Target::Opacity(0.0), linear), (0.3, Target::Opacity(1.0), linear), (0.4, Target::Offset(20.0, 0.0), linear)];
+    let built = runs.get();
+    let mut t0 = 0.1;
+    for round in 0..2 {
+        check(ui.animate_keys(&chip, &keys), "animate_keys refused");
+        let frames: Vec<_> = [0.05, 0.1, 0.2, 0.35, 0.5].iter().map(|dt| at(t0 + dt, vec![])).collect();
+        let mut seen = Vec::with_capacity(frames.len());
+        mem_sys::local_reset();
+        let allocs = mem_sys::local_alloc_count();
+        for f in &frames {
+            ui.frame(f, &mut build);
+            seen.push(shown(&ui));
+        }
+        let allocs = mem_sys::local_alloc_count() - allocs;
+        let near = |s: Option<(f32, i32)>, x: f32, a: i32| s.is_some_and(|(sx, sa)| (sx - x).abs() < 0.01 && (sa - a).abs() <= 2);
+        check(near(seen[0], 0.0, 128), &format!("halfway to transparent: {seen:?}"));
+        check(seen[1].is_none_or(|(_, a)| a == 0), &format!("transparent at the first stop: {seen:?}"));
+        check(near(seen[2], 0.0, 128), &format!("halfway back to opaque: {seen:?}"));
+        check(near(seen[3], 10.0, 255), &format!("halfway along the offset segment, opacity kept: {seen:?}"));
+        check(near(seen[4], 20.0, 255) && ui.transitions() == 0, &format!("rests on the last stop: {seen:?}"));
+        check(!ui.wants_frame(&[], t0 + 1.0), "the gate did not idle after the keyframes");
+        check(round == 0 || allocs == 0, &format!("a warm keyframed run allocated {allocs} times"));
+        // the next run starts where this one rested: back to 0 first
+        ui.animate(&chip, Target::Offset(0.0, 0.0), Curve::Bezier { duration: 0.0, points: [0.0, 0.0, 1.0, 1.0] });
+        ui.frame(&at(t0 + 0.6, vec![]), &mut build);
+        t0 += 0.6;
+    }
+    check(runs.get() == built, "keyframes rebuilt the view");
+    ui.destroy();
+}
+
 /// A scaled view: its entry carries the transform, and hit testing goes through the inverse.
 pub fn styling_view_transform_hits() {
     let mut ui = new_ui(None);
@@ -215,6 +343,58 @@ pub fn styling_view_transform_hits() {
     ui.view_scale(&view.get().unwrap(), 1.0);
     ui.frame(&at(0.3, vec![press((60, 30)), release((60, 30))]), &mut build);
     check(!clicked.get(), "an unscaled chip took a click at (60, 30)");
+    ui.destroy();
+}
+
+/// Nested views inherit the transform of the views around them: a button in a view inside a scaled
+/// and offset view is drawn, hit, reported by `rect` and damaged where the composed transform puts
+/// it; opacity composes too.
+pub fn styling_nested_view_transform() {
+    let mut ui = new_ui(None);
+    let (outer, btn, clicked) = (Cell::new(None), Cell::new(None), Cell::new(0));
+    let mut build = |ui: &mut Ui| {
+        outer.set(Some(ui.view("outer", 1, Size::Px(200.0), Size::Px(150.0), &mut |ui| {
+            ui.view("inner", 1, Size::Px(100.0), Size::Px(60.0), &mut |ui| {
+                let h = ui.node("btn", Node { flags: CLICKABLE, w: Size::Px(40.0), h: Size::Px(20.0), at: Some((10.0, 10.0)), look: Look { fill: color::rgb(9, 9, 9), ..Look::NONE }, ..Node::DEFAULT });
+                btn.set(Some(h));
+                if ui.signal(&h).clicked {
+                    clicked.set(clicked.get() + 1);
+                }
+            });
+        })));
+    };
+    ui.frame(&at(0.0, vec![]), &mut build);
+    ui.frame(&at(0.1, vec![]), &mut build);
+    let (outer, btn) = (outer.get().unwrap(), btn.get().unwrap());
+    // twice the size about the outer view's corner, after moving it by (30, 20); half as opaque
+    ui.view_offset(&outer, 30.0, 20.0);
+    ui.view_transform(&outer, 2.0, [1.0, 0.0, 0.0, 1.0], (0.0, 0.0));
+    ui.view_opacity(&outer, 0.5);
+    let drawn = Rect::new(50.0, 40.0, 80.0, 40.0);
+    let r = ui.rect(&btn);
+    check(r == drawn, &format!("rect {r:?}, drawn at {drawn:?}"));
+    // the painter's entry for the button's instance maps its rect to the drawn one
+    let out = ui.output();
+    let i = out.draw[0].instances.iter().find(|i| i.color[0] == 9).copied().expect("the button's instance");
+    let e = out.views.iter().find(|(k, _)| *k == i.view).map(|(_, e)| *e).expect("its entry");
+    let map = |x: f32, y: f32| {
+        let (px, py) = (x + e.offset[0] - e.pivot[0], y + e.offset[1] - e.pivot[1]);
+        let [a, b, c, d] = e.transform;
+        (e.pivot[0] + e.scale * (a * px + b * py), e.pivot[1] + e.scale * (c * px + d * py))
+    };
+    let (p0, p1) = (map(i.rect[0], i.rect[1]), map(i.rect[2], i.rect[3]));
+    let close = |a: f32, b: f32| (a - b).abs() < 0.01;
+    check(close(p0.0, 50.0) && close(p0.1, 40.0) && close(p1.0, 130.0) && close(p1.1, 80.0), &format!("the painter shows the button at {p0:?} to {p1:?}"));
+    check((e.opacity - 0.5).abs() < 1e-6, &format!("the inner entry's opacity {}", e.opacity));
+    // a patch damages the drawn rectangle
+    check(ui.patch_fill(&btn, color::rgb(9, 9, 10)), "patch refused");
+    let d = ui.output().damage.expect("a patch damages");
+    check(d.x <= 50.0 && d.y <= 40.0 && d.x + d.w >= 130.0 && d.y + d.h >= 80.0 && d.w <= 82.0 && d.h <= 42.0, &format!("damage {d:?}, drawn at {drawn:?}"));
+    // a click where it is drawn, outside where layout put it, hits it; one where layout put it misses
+    ui.frame(&at(0.2, vec![press((120, 70)), release((120, 70))]), &mut build);
+    check(clicked.get() == 1, "a click on the drawn button missed");
+    ui.frame(&at(0.3, vec![press((45, 35)), release((45, 35))]), &mut build);
+    check(clicked.get() == 1, "a click where layout put the button hit it");
     ui.destroy();
 }
 
@@ -278,5 +458,8 @@ pub const CASES: &[(&str, fn())] = &[
     ("styling_variant_states", styling_variant_states),
     ("styling_transition_without_rebuild", styling_transition_without_rebuild),
     ("styling_reduced_motion", styling_reduced_motion),
+    ("styling_theme_swap_transition", styling_theme_swap_transition),
     ("styling_animate_spring", styling_animate_spring),
+    ("styling_animate_keys", styling_animate_keys),
+    ("styling_nested_view_transform", styling_nested_view_transform),
 ];

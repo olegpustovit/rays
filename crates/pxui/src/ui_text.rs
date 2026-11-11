@@ -723,7 +723,7 @@ impl Ui {
         parse: &dyn Fn(&str) -> Option<String>,
     ) -> (Option<String>, bool) {
         let bounds = ints(self.rect(row));
-        let control = p.control.unwrap_or_else(|| value_control(bounds));
+        let control = p.control.unwrap_or_else(|| value_control_at(bounds, self.space(2) as i64));
         let inside_control = |point: (f32, f32)| contains(floats(control), point);
         let editing = self.text_state(row);
         let state = self.state(row, 1);
@@ -1205,13 +1205,16 @@ impl Ui {
     /// all, copy, cut and paste, and Command-Z, Shift-Command-Z (or Command-Y) undo and redo the
     /// focused text. The result is the new value on the frames that change it.
     pub fn text_field(&mut self, text: &str, value: &str) -> Option<String> {
-        let row = self.kit_row(Some(CLICKABLE | FOCUSABLE | BLOCKING | FOCUS_MARK), Some(control_hit(value_control)), text);
+        // the control, its hit shape and its text sit `space(2)` in from the row's ends at any density
+        let side = self.space(2) as i64;
+        let row = self.kit_row(Some(CLICKABLE | FOCUSABLE | BLOCKING | FOCUS_MARK), None, text);
+        self.cached_hit(&row, side as u64, &mut || Rc::new(move |r| floats(value_control_at(ints(r), side))));
         let signal = self.signal(&row);
         let focused = self.focused(&row);
         // an unfocused field paints `value` as it is (kept in its slot); only editing copies it
         let edit = if focused {
             let mut edit = self.load_text_edit(row.box_key, value);
-            let (cx, _, cw, _) = value_control(ints(self.rect(&row)));
+            let (cx, _, cw, _) = value_control_at(ints(self.rect(&row)), side);
             let shift = self.press_shift(&row);
             self.point_text_caret(None, &mut edit, &signal, shift, (cx + 2) as f32, (cx + cw - 2) as f32);
             for (event, modifiers) in self.key_events(&row) {
@@ -1240,7 +1243,7 @@ impl Ui {
         // the I-beam over the value, as in any text field
         {
             let (px, py) = self.pointer();
-            let (cx, cy, cw, ch) = value_control(ints(self.rect(&row)));
+            let (cx, cy, cw, ch) = value_control_at(ints(self.rect(&row)), side);
             if hovered && px >= cx as f32 && px < (cx + cw) as f32 && py >= cy as f32 && py < (cy + ch) as f32 {
                 self.request_cursor(Cursor::Text);
             }
@@ -1249,12 +1252,14 @@ impl Ui {
         let hover = State { hovered, ..State::default() };
         let (look, field) = (*t.row.pick(hover), *t.field.pick(State { focused, ..State::default() }));
         self.set_look(&row, look, hover);
-        self.node_mut(&row).inset = Edges { l: SIDE as f32, ..Edges::default() };
+        self.node_mut(&row).inset = Edges { l: side as f32, ..Edges::default() };
         self.text(&row, shown(text));
-        // the value on its hairline in the control column (`value_control` of the row, from its end)
+        // the value on its hairline in the control column (`value_control_at` of the row, from its
+        // end; the start padding only narrows the room `value_control_w` sees)
         let rh = self.row_height() as f32;
         let pad = (rh - self.control_h()) / 2.0;
-        self.end_row(&row, self.space(2));
+        self.end_row(&row, side as f32);
+        self.node_mut(&row).padding.l = side as f32;
         let saved = self.enter(&row);
         let control = self.node_keyed(int_key(row.box_key, 0), Node { w: Size::Rel(value_control_w), h: Size::Px(rh - 2.0 * pad), margin: Edges { t: pad, ..Edges::ZERO }, look: field, inset: Edges { l: 2.0, ..Edges::ZERO }, ..Node::DEFAULT });
         self.node_mut(&control).state = State { focused, ..State::default() };
@@ -2423,7 +2428,7 @@ impl Ui {
                 let state = State { hovered: self.signal(r).hovered, checked: first + i == selected, ..State::default() };
                 self.style(r, &list, state);
                 self.set_role(r, Role::ListItem, if first + i == selected { crate::a11y::state::SELECTED } else { 0 });
-                self.node_mut(r).inset = Edges { l: SIDE as f32, ..Edges::default() };
+                self.node_mut(r).inset = Edges { l: self.space(2), ..Edges::default() };
                 self.text(r, &c.label);
                 let dw = self.text_width(None, &c.detail) as i64 as f32;
                 let rh = self.row_height() as f32;
@@ -2873,18 +2878,18 @@ impl Ui {
             let rk = |n: i64| int_key(row.box_key, n);
             let inner = self.enter(&row);
             let rh = row_height as f32;
-            let text_x = if o.mark.is_none() { SIDE as f32 } else { SIDE as f32 + 16.0 };
+            let text_x = if o.mark.is_none() { self.space(2) } else { self.space(2) + 16.0 };
             // a label that would run into the detail is cut with an ellipsis
             let key_size = key_look.font.points(font_size);
             let key_text = "\u{21b5}";
             let kw = self.text_width(Some(key_size), key_text);
-            let right = if current { width - SIDE as f32 - kw - 8.0 } else { width - SIDE as f32 };
+            let right = if current { width - self.space(2) - kw - 8.0 } else { width - self.space(2) };
             let dw = self.text_width(None, detail);
             let limit = right - dw - 12.0 - text_x;
             let text = ellipsis(&mut |s| self.text_width(None, s), limit, text);
             if let Some(color) = swatch {
                 let fill = if unavailable { ink3 } else { color };
-                self.part(rk(0), (SIDE as f32, ((row_height - 8) / 2) as f32), Size::Px(8.0), 8.0, Look { fill, ..Look::NONE }, Edges::default(), "");
+                self.part(rk(0), (self.space(2), ((row_height - 8) / 2) as f32), Size::Px(8.0), 8.0, Look { fill, ..Look::NONE }, Edges::default(), "");
             }
             // the query's letters, matched in order, in the accent
             let q = query.to_ascii_lowercase();
@@ -3015,17 +3020,17 @@ impl Ui {
                 let state = State { hovered: signal.hovered || m.opened == Some(index), disabled: !enabled, ..State::default() };
                 self.style(&row, &states, state);
                 self.set_role(&row, Role::MenuItem, if m.selected == Some(index) { crate::a11y::state::CHECKED } else { 0 } | if chevron { crate::a11y::state::EXPANDABLE } else { 0 });
-                self.node_mut(&row).inset = Edges { l: SIDE as f32 + lead + m.swatch_pad, ..Edges::default() };
+                self.node_mut(&row).inset = Edges { l: self.space(2) + lead + m.swatch_pad, ..Edges::default() };
                 self.text(&row, &display(text));
                 let k = |n: i64| int_key(row.box_key, n);
                 self.end_row(&row, 0.0);
                 let saved = self.enter(&row);
                 // the current choice: a 6-point accent square before the label
                 if m.selected == Some(index) {
-                    self.part(k(0), (SIDE as f32, rh / 2.0 - 3.0), Size::Px(6.0), 6.0, mark, Edges::default(), "");
+                    self.part(k(0), (self.space(2), rh / 2.0 - 3.0), Size::Px(6.0), 6.0, mark, Edges::default(), "");
                 }
                 if let Some(color) = m.swatches.get(index as usize).copied().flatten() {
-                    self.part(k(1), (SIDE as f32 + lead, rh / 2.0 - 4.0), Size::Px(8.0), 8.0, Look { fill: color, ..swatch_look }, Edges::default(), "");
+                    self.part(k(1), (self.space(2) + lead, rh / 2.0 - 4.0), Size::Px(8.0), 8.0, Look { fill: color, ..swatch_look }, Edges::default(), "");
                 }
                 if chevron {
                     let c = self.flow_part(k(2), 6.0, rh, Edges { r: 15.25 - 3.0, ..Edges::ZERO }, chevron_look, "");
@@ -3033,7 +3038,7 @@ impl Ui {
                 }
                 if let Some(key) = m.keys.get(index as usize).filter(|k| !k.is_empty()) {
                     let kw = self.text_width(Some(key_look.font.points(font_size)), key);
-                    self.flow_part(k(3), kw, rh, Edges { r: SIDE as f32, ..Edges::ZERO }, key_look, key);
+                    self.flow_part(k(3), kw, rh, Edges { r: self.space(2), ..Edges::ZERO }, key_look, key);
                 }
                 self.leave(saved);
                 if enabled && signal.clicked && !chevron && picked.is_none() {

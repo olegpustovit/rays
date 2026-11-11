@@ -478,6 +478,33 @@ fn widgets_compact_toggle_hit() {
     ui.destroy();
 }
 
+/// At a compact density a text field's value control sits `space(2)` from its row's ends and its hit
+/// shape follows it: a click at the drawn control's end focuses the field.
+fn widgets_compact_field_hit() {
+    let mut ui = new_ui(None);
+    let mut theme = Theme::default();
+    theme.tokens.density = 0.84;
+    ui.set_theme(theme);
+    let mut build = |ui: &mut Ui| ui.panel(PanelOpts::default(), "panel", &mut |ui| {
+        ui.text_field("Caption", "value");
+    });
+    for t in 0..2 {
+        ui.frame(&at(t as f64 * 0.1, vec![]), &mut build);
+    }
+    let row_key = key_of(key_of(0x2c1b3c6d, "panel"), "Caption");
+    let row = ui.rect(&ui.box_of_key(row_key).unwrap());
+    let control = ui.rect(&ui.box_of_key(int_key(row_key, 0)).unwrap());
+    let (cx, _, cw, _) = value_control_at(ints(row), 10);
+    check(control.x == cx as f32 && control.w == cw as f32, &format!("control {control:?}, value_control_at x {cx} w {cw}"));
+    // inside the control 10 points from the row's end, outside where a 12-point side put it
+    let p = ((row.x + row.w - 11.0) as i64, (row.y + row.h / 2.0) as i64);
+    for (i, e) in [vec![move_to(p)], vec![press(p)], vec![release(p)], vec![]].into_iter().enumerate() {
+        ui.frame(&at(1.0 + i as f64 * 0.1, e), &mut build);
+    }
+    check(ui.text_input_focused(), "a click at the compact field's end focuses it");
+    ui.destroy();
+}
+
 fn widgets_list() {
     let mut s = S::new();
     let mut ui = warm(&mut s);
@@ -755,6 +782,7 @@ pub const CASES: &[(&str, fn())] = &[
     ("widgets_scroll_view", widgets_scroll_view),
     ("widgets_scroll_view_rtl", widgets_scroll_view_rtl),
     ("widgets_compact_toggle_hit", widgets_compact_toggle_hit),
+    ("widgets_compact_field_hit", widgets_compact_field_hit),
     ("widgets_list", widgets_list),
     ("widgets_list_keys_multi", widgets_list_keys_multi),
     ("widgets_tree", widgets_tree),

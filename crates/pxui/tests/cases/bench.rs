@@ -1,6 +1,6 @@
 //! `PXUI_BENCH=1 RAYS_SLOW=1 cargo t [--release] -p pxui pxui_bench`: the engine's frame costs, min and
 //! median of 7 rounds, with the per-phase breakdown (`Ui::phase_times`), for the kit baseline, ten
-//! 50-widget views and the 2,006-node layout stress tree (docs/pxui-baseline.md). Off by default.
+//! 50-widget views and the 2,054-node layout stress tree (docs/pxui-baseline.md). Off by default.
 //! `PXUI_PROFILE=<case>` loops that case 8 s first: `sample <pid> 5 -file out.txt` while it runs.
 //! The phase clocks cost about 0.15 us a frame; `PXUI_NO_TIMING=1` measures without them.
 use crate::layout::{big_frame, stress, stress_popup};
@@ -93,7 +93,7 @@ pub fn pxui_bench() {
     }
     ui.destroy();
 
-    // the 2,006-node layout stress tree (`layout_stress_zero_alloc`), right to left, 1x
+    // the 2,054-node layout stress tree (`layout_stress_zero_alloc`), right to left, 1x
     let mut ui = new_ui(None);
     ui.set_dir(Direction::Rtl);
     let stress_step = |ui: &mut Ui, f: &mut dyn FnMut(&mut Ui)| {
@@ -103,12 +103,12 @@ pub fn pxui_bench() {
     bench("stress, full rebuild", &mut ui, 20, &mut |ui, tick| stress_step(ui, &mut |ui| {
         ui.view("stress", tick, Size::Px(2400.0), Size::Px(2400.0), &mut |ui| stress(ui, 100));
         stress_popup(ui);
-    }), 2006);
+    }), 2054);
     bench("stress, cached", &mut ui, 100, &mut |ui, _| stress_step(ui, &mut |ui| {
         ui.view("stress", 1, Size::Px(2400.0), Size::Px(2400.0), &mut |ui| stress(ui, 100));
         stress_popup(ui);
     }), 0);
-    bench("stress cached + one 42-node view rebuilt", &mut ui, 100, &mut |ui, tick| stress_step(ui, &mut |ui| {
+    bench("stress cached + one 90-node view rebuilt", &mut ui, 100, &mut |ui, tick| stress_step(ui, &mut |ui| {
         ui.view("stress", 1, Size::Px(2400.0), Size::Px(2300.0), &mut |ui| stress(ui, 100));
         ui.view("small", tick, Size::Px(2400.0), Size::Px(100.0), &mut |ui| stress(ui, 2));
         stress_popup(ui);

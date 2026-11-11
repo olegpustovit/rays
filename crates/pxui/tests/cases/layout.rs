@@ -136,6 +136,35 @@ pub fn layout_wrap() {
     eq(r[0], 0.0, 0.0, 100.0, 27.0, "fit height of two lines");
 }
 
+/// A wrapping Fit row whose width its parent gives (Grow, Pct) breaks its lines at that width.
+pub fn layout_wrap_resolved() {
+    let kid = px(40.0, 10.0);
+    let column = Node { w: Size::Px(100.0), h: Size::Px(200.0), ..Node::DEFAULT };
+    let wrapping = |w: Size| Node { w, h: Size::Fit, axis: Axis::Row, wrap: true, padding: Edges { t: 1.0, b: 2.0, ..Edges::ZERO }, ..Node::DEFAULT };
+    let mut ui = new_ui(None);
+    let r = lay(&mut ui, 0.0, vec![], &mut |ui| {
+        let p = ui.node("p", column);
+        let saved = ui.enter(&p);
+        let mut out = vec![];
+        for (k, w) in [Size::Grow, Size::Pct(0.5)].into_iter().enumerate() {
+            let row = ui.node(&format!("row{k}"), wrapping(w));
+            let inner = ui.enter(&row);
+            for i in 0..4 {
+                ui.node(&format!("k{i}"), kid);
+            }
+            ui.leave(inner);
+            out.push(row);
+        }
+        out.push(ui.node("after", kid));
+        ui.leave(saved);
+        out
+    });
+    eq(r[0], 0.0, 0.0, 100.0, 23.0, "two lines at the stretched width");
+    eq(r[1], 0.0, 23.0, 50.0, 43.0, "four lines at half the width");
+    eq(r[2], 0.0, 66.0, 40.0, 10.0, "the next sibling below them");
+    ui.destroy();
+}
+
 pub fn layout_grid() {
     const COLS: &[Track] = &[Track::Px(50.0), Track::Fr(1.0), Track::Fit];
     let grid = Node { w: Size::Px(300.0), h: Size::Fit, grid: Some(Grid { cols: COLS, rows: &[] }), gap: 10.0, row_gap: 4.0, ..Node::DEFAULT };
@@ -147,6 +176,27 @@ pub fn layout_grid() {
     eq(r[4], 0.0, 24.0, 220.0, 30.0, "a span covers two tracks and the gap");
     eq(r[5], 230.0, 58.0, 70.0, 20.0, "an explicit cell");
     eq(r[0], 0.0, 0.0, 300.0, 78.0, "fit height of three rows");
+}
+
+/// Spanning children size the content tracks they cross; fixed and fractional tracks keep theirs.
+pub fn layout_grid_spans() {
+    const COLS: &[Track] = &[Track::Fit, Track::Fit, Track::Px(30.0)];
+    let grid = Node { w: Size::Fit, h: Size::Fit, grid: Some(Grid { cols: COLS, rows: &[] }), gap: 10.0, row_gap: 4.0, ..Node::DEFAULT };
+    let r = once(grid, &[
+        Node { cell: Cell::at(0, 0), ..px(20.0, 10.0) },
+        Node { cell: Cell::at(0, 1).span(3, 1), ..px(120.0, 10.0) },
+        Node { cell: Cell::at(0, 2).span(1, 2), ..px(10.0, 50.0) },
+        Node { cell: Cell::at(1, 2), ..px(5.0, 10.0) },
+    ]);
+    // columns: 75 of 120 there (20 + 5 + 30 + two gaps), 22.5 more to each Fit column
+    eq(r[1], 0.0, 0.0, 20.0, 10.0, "single cell");
+    eq(r[2], 0.0, 14.0, 120.0, 10.0, "column span");
+    eq(r[4], 52.5, 28.0, 5.0, 10.0, "the second Fit column after the first's share");
+    // rows: 10 + 0 + a gap of the 50 spanned, 18 more to each
+    eq(r[0], 0.0, 0.0, 120.0, 10.0 + 10.0 + 28.0 + 18.0 + 12.0, "fit size of the grown tracks");
+    const FR: &[Track] = &[Track::Fr(1.0), Track::Fit];
+    let r = once(Node { w: Size::Px(300.0), grid: Some(Grid { cols: FR, rows: &[] }), ..grid }, &[Node { cell: Cell::DEFAULT.span(2, 1), ..px(280.0, 10.0) }, px(10.0, 10.0), px(40.0, 10.0)]);
+    eq(r[3], 300.0 - 40.0, 14.0, 40.0, 10.0, "a span over a fractional track leaves the Fit one at its content");
 }
 
 /// A stack overlaps its children and paints them in z order.
@@ -208,6 +258,114 @@ pub fn layout_scroll_sticky() {
     eq(r[2], -30.0, 20.0 - 40.0, 300.0, 300.0, "content scrolled on both axes");
     eq(r[1], -30.0, 0.0, 300.0, 20.0, "the sticky header stays at the top, scrolled sideways");
     ui.destroy();
+}
+
+/// Sideways scrolling stretches past an edge and springs back, and coasts and bounces off the far
+/// edge, as down does; right to left the fingers move the content as they move.
+pub fn layout_scroll_x_elastic() {
+    use input::ScrollPhase::*;
+    let pad = |delta: f64, phase, time: f64| Event::TrackpadScrolled { delta: (delta, 0.0), phase, time };
+    for rtl in [false, true] {
+        let mut ui = new_ui(None);
+        if rtl {
+            ui.set_dir(Direction::Rtl);
+        }
+        let mut build = |ui: &mut Ui| {
+            let p = ui.node("p", Node { flags: SCROLL_X | CLIP, at: Some((0.0, 0.0)), ..px(100.0, 100.0) });
+            let saved = ui.enter(&p);
+            let body = ui.node("body", px(300.0, 100.0));
+            ui.leave(saved);
+            vec![body]
+        };
+        // where the content's start edge is: its left (right to left: its right, from the box's)
+        let start = |r: Rect| if rtl { 100.0 - (r.x + r.w) } else { r.x };
+        let s = if rtl { -1.0 } else { 1.0 };
+        lay(&mut ui, 0.0, vec![Event::PointerMoved((50.0, 50.0))], &mut build);
+        lay(&mut ui, 0.1, vec![pad(0.0, Touched, 0.1)], &mut build);
+        let r = lay(&mut ui, 0.12, vec![pad(40.0 * s, Moved, 0.12)], &mut build);
+        let pulled = start(r[0]);
+        check(pulled > 15.0 && pulled < 25.0, &format!("rtl {rtl}: 40 points past the start edge show as {pulled}"));
+        lay(&mut ui, 0.2, vec![pad(0.0, Lifted, 0.2)], &mut build);
+        let r = lay(&mut ui, 0.25, vec![], &mut build);
+        check(start(r[0]) > 0.0 && start(r[0]) < pulled, &format!("rtl {rtl}: springing back, at {}", start(r[0])));
+        let mut t = 0.25;
+        while ui.wants_frame(&[], t) && t < 3.0 {
+            t += 1.0 / 60.0;
+            lay(&mut ui, t, vec![], &mut build);
+        }
+        let r = lay(&mut ui, t, vec![], &mut build);
+        check(start(r[0]) == 0.0 && t < 1.5, &format!("rtl {rtl}: rests at the edge ({}) at {t}", start(r[0])));
+        // a flick: the fingers lift in motion and the content coasts into the far edge
+        let t0 = t + 1.0;
+        lay(&mut ui, t0, vec![pad(0.0, Touched, t0)], &mut build);
+        lay(&mut ui, t0 + 0.016, vec![pad(-20.0 * s, Moved, t0 + 0.016)], &mut build);
+        lay(&mut ui, t0 + 0.032, vec![pad(-20.0 * s, Moved, t0 + 0.032)], &mut build);
+        lay(&mut ui, t0 + 0.04, vec![pad(0.0, Lifted, t0 + 0.04)], &mut build);
+        let r = lay(&mut ui, t0 + 0.1, vec![], &mut build);
+        check(start(r[0]) < -60.0, &format!("rtl {rtl}: coasting, at {}", start(r[0])));
+        let mut t = t0 + 0.1;
+        while ui.wants_frame(&[], t) && t < t0 + 5.0 {
+            t += 1.0 / 60.0;
+            lay(&mut ui, t, vec![], &mut build);
+        }
+        let r = lay(&mut ui, t, vec![], &mut build);
+        check(start(r[0]) == -200.0, &format!("rtl {rtl}: rests at the far edge, at {}", start(r[0])));
+        ui.destroy();
+    }
+}
+
+/// A virtual grid of 100,000 cells builds only the lines in view and the overscan, wrapping either
+/// way, mirrored right to left, and allocates nothing while it scrolls once warm.
+pub fn layout_grid_list() {
+    for (sideways, rtl) in [(false, false), (false, true), (true, false), (true, true)] {
+        let mut ui = new_ui(None);
+        if rtl {
+            ui.set_dir(Direction::Rtl);
+        }
+        let built = std::cell::Cell::new((0usize, usize::MAX));
+        let probe = RefCell::new(None);
+        let mut build = |ui: &mut Ui| {
+            built.set((0, usize::MAX));
+            let mut f = |ui: &mut Ui, i: usize| {
+                let (n, first) = built.get();
+                built.set((n + 1, first.min(i)));
+                let h = ui.node("cell", Node { w: Size::Grow, h: Size::Grow, ..Node::DEFAULT });
+                if i == if sideways { 12_003 } else { 10_003 } {
+                    *probe.borrow_mut() = Some(h);
+                }
+            };
+            if sideways { ui.grid_list_x("g", 100_000, 30.0, 20.0, &mut f) } else { ui.grid_list("g", 100_000, 30.0, 20.0, &mut f) };
+        };
+        ui.frame(&at(0.0, vec![Event::PointerMoved((100.0, 100.0))]), &mut build);
+        // to line 1,000 (the wheel steps a line)
+        let lines = if sideways { 100_000.0 / 12.0 } else { 100_000.0 / 10.0 };
+        let step = if sideways { Event::Scrolled((-1000.0 * if rtl { -1.0 } else { 1.0 }, 0.0)) } else { Event::Scrolled((0.0, -1000.0)) };
+        ui.frame(&at(0.1, vec![step]), &mut build);
+        *probe.borrow_mut() = None;
+        ui.frame(&at(2.0, vec![]), &mut build);
+        let (n, first) = built.get();
+        let (per, in_view) = if sideways { (12, (320.0f32 / 30.0).ceil() as usize) } else { (10, 12) };
+        check(n <= (in_view + 1 + 8) * per, &format!("sideways {sideways} rtl {rtl}: built {n} cells of 100,000 ({lines} lines)"));
+        check(first == (1000 - 4) * per, &format!("sideways {sideways} rtl {rtl}: first built {first}"));
+        // the fourth cell of line 1,000, now the first line in view
+        let r = ui.rect(probe.borrow().as_ref().expect("the probed cell built"));
+        let (x, y) = if sideways { (if rtl { 290.0 } else { 0.0 }, 60.0) } else { (if rtl { 320.0 - 4.0 * 30.0 } else { 90.0 }, 0.0) };
+        eq(r, x, y, 30.0, 20.0, &format!("sideways {sideways} rtl {rtl}: line 1,000's fourth cell"));
+        let mut t = 2.0;
+        for _ in 0..60 {
+            t += 0.1;
+            ui.frame(&at(t, vec![Event::Scrolled(if sideways { (-1.0, 0.0) } else { (0.0, -1.0) })]), &mut build);
+        }
+        let frames: Vec<_> = (1..=100).map(|k| at(t + k as f64 * 0.1, vec![Event::Scrolled(if sideways { (-1.0, 0.0) } else { (0.0, -1.0) })])).collect();
+        mem_sys::local_reset();
+        let before = mem_sys::local_alloc_count();
+        for f in &frames {
+            ui.frame(f, &mut build);
+        }
+        let allocs = mem_sys::local_alloc_count() - before;
+        check(allocs == 0, &format!("sideways {sideways} rtl {rtl}: {allocs} allocations scrolling 100 frames"));
+        ui.destroy();
+    }
 }
 
 /// Right to left mirrors a row's flow and its start padding.
@@ -340,24 +498,37 @@ const STRESS_COLS: &[Track] = &[Track::Px(20.0), Track::Fr(1.0), Track::Fit, Tra
 const JUSTIFY: [Justify; 6] = [Justify::Start, Justify::Center, Justify::End, Justify::SpaceBetween, Justify::SpaceAround, Justify::SpaceEvenly];
 const ALIGN: [Align; 5] = [Align::Start, Align::Center, Align::End, Align::Stretch, Align::Baseline];
 
-/// `groups` groups of 20 nodes (a container and 19 children) cycling through every layout mode, in
-/// a wrapping row: 20 x `groups` + 1 nodes.
+/// `groups` groups of 20 nodes (a container and 19 children) cycling through every layout mode (grid
+/// spans over content tracks, a wrapping row whose width a column gives it), in a wrapping row after
+/// a virtual grid of 100,000 cells (48 nodes built): 20 x `groups` + 49 nodes.
 pub fn stress(ui: &mut Ui, groups: usize) {
     let all = ui.node_keyed(int_key(9, 0), Node { w: Size::Px(2400.0), h: Size::Fit, axis: Axis::Row, wrap: true, gap: 2.0, row_gap: 2.0, ..Node::DEFAULT });
     let saved = ui.enter(&all);
+    let cells = ui.node("stress-cells-box", px(100.0, 40.0));
+    let inner = ui.enter(&cells);
+    ui.grid_list("stress-cells", 100_000, 20.0, 10.0, &mut |_, _| {});
+    ui.leave(inner);
     for g in 0..groups {
-        let mode = g % 5;
+        let mode = g % 6;
         let look = Look { fill: color::rgb(40 + (g % 7) as i64 * 20, 90, 140), text: color::black(), ..Look::NONE };
         let n = match mode {
             0 => Node { axis: Axis::Row, justify: JUSTIFY[g / 5 % 6], align: ALIGN[g / 5 % 5], gap: 1.0, padding: Edges { l: 1.0, t: 2.0, r: 3.0, b: 4.0 }, ..px(110.0, 110.0) },
             1 => Node { axis: Axis::Row, wrap: true, gap: 2.0, row_gap: 1.0, align: Align::Baseline, ..px(110.0, 110.0) },
             2 => Node { grid: Some(Grid { cols: STRESS_COLS, rows: &[] }), gap: 1.0, row_gap: 1.0, ..px(110.0, 110.0) },
             3 => Node { axis: Axis::Stack, justify: Justify::Center, align: Align::End, ..px(110.0, 110.0) },
-            _ => Node { flags: SCROLL | SCROLL_X | CLIP, axis: Axis::Column, justify: Justify::SpaceBetween, ..px(110.0, 110.0) },
+            4 => Node { flags: SCROLL | SCROLL_X | CLIP, axis: Axis::Column, justify: Justify::SpaceBetween, ..px(110.0, 110.0) },
+            _ => Node { axis: Axis::Column, padding: Edges::all(2.0), ..px(110.0, 110.0) },
         };
         let p = ui.node_keyed(int_key(all.box_key, g as i64), Node { look, ..n });
         let inner = ui.enter(&p);
+        let mut nest = None;
         for i in 0..19usize {
+            // a column's first child: a wrapping row as wide as the column, holding the rest
+            if mode == 5 && i == 0 {
+                let w = ui.node_keyed(int_key(p.box_key, 0), Node { axis: Axis::Row, wrap: true, w: Size::Grow, h: Size::Fit, gap: 1.0, row_gap: 1.0, align: Align::Baseline, ..Node::DEFAULT });
+                nest = Some(ui.enter(&w));
+                continue;
+            }
             let f = i as f32;
             let mut c = Node {
                 w: if i % 3 == 0 { Size::Grow } else { Size::Px(4.0 + f) },
@@ -370,7 +541,11 @@ pub fn stress(ui: &mut Ui, groups: usize) {
                 margin: Edges { l: (i % 2) as f32, t: 1.0, r: 0.0, b: (i % 3) as f32 },
                 align_self: if i % 6 == 0 { Some(ALIGN[i % 5]) } else { None },
                 z: (i % 4) as i16,
-                cell: if i == 5 { Cell::DEFAULT.span(2, 2) } else { Cell::DEFAULT },
+                cell: match i {
+                    5 => Cell::DEFAULT.span(2, 2),
+                    9 => Cell::DEFAULT.span(1, 3),
+                    _ => Cell::DEFAULT,
+                },
                 flags: if mode == 4 && i == 0 { STICKY } else { 0 },
                 look: Look { font: Font { size: 10 + (i % 3) as i64 * 4, ..Font::BODY }, ..look },
                 ..Node::DEFAULT
@@ -380,6 +555,9 @@ pub fn stress(ui: &mut Ui, groups: usize) {
             }
             let h = ui.node_keyed(int_key(p.box_key, i as i64), c);
             ui.text(&h, WORDS[i % 4]);
+        }
+        if let Some(s) = nest {
+            ui.leave(s);
         }
         ui.leave(inner);
     }
@@ -425,7 +603,7 @@ fn costs(ui: &mut Ui, t: &mut f64, n: u32, build: &mut dyn FnMut(&mut Ui, u64)) 
     (allocs, total as f64 / n as f64 / 1e3, layout as f64 / n as f64 / 1e3)
 }
 
-/// Every layout mode in one 2,004-node tree, mirrored right to left: zero allocations for a full
+/// Every layout mode in one 2,054-node tree, mirrored right to left: zero allocations for a full
 /// rebuild + layout + paint and for a cached frame once warm; and the costs, printed.
 pub fn layout_stress_zero_alloc() {
     let mut ui = new_ui(None);
@@ -452,14 +630,14 @@ pub fn layout_stress_zero_alloc() {
         ui.view("stress", 1, Size::Px(2400.0), Size::Px(2400.0), &mut |ui| stress(ui, 100));
         stress_popup(ui);
     });
-    eprintln!("PXUI_LAYOUT cached 2,000-node view: {us:.1} us per frame, {allocs} allocations");
+    eprintln!("PXUI_LAYOUT cached 2,054-node view: {us:.1} us per frame, {allocs} allocations");
     check(allocs == 0, &format!("{allocs} allocations in 50 cached frames"));
     let (allocs, us, _) = costs(&mut ui, &mut t, 50, &mut |ui, tick| {
         ui.view("stress", 1, Size::Px(2400.0), Size::Px(2300.0), &mut |ui| stress(ui, 100));
         ui.view("small", tick, Size::Px(2400.0), Size::Px(100.0), &mut |ui| stress(ui, 2));
         stress_popup(ui);
     });
-    eprintln!("PXUI_LAYOUT 2,000 nodes cached + one 50-node view rebuilt: {us:.1} us per frame, {allocs} allocations");
+    eprintln!("PXUI_LAYOUT 2,054 nodes cached + one 90-node view rebuilt: {us:.1} us per frame, {allocs} allocations");
     check(allocs == 0, &format!("{allocs} allocations with one small view rebuilt"));
     ui.destroy();
 }
@@ -506,11 +684,15 @@ pub const CASES: &[(&str, fn())] = &[
     ("layout_justify_align", layout_justify_align),
     ("layout_baseline", layout_baseline),
     ("layout_wrap", layout_wrap),
+    ("layout_wrap_resolved", layout_wrap_resolved),
     ("layout_grid", layout_grid),
+    ("layout_grid_spans", layout_grid_spans),
     ("layout_stack_order", layout_stack_order),
     ("layout_anchored_flip", layout_anchored_flip),
     ("layout_scroll_sticky", layout_scroll_sticky),
     ("layout_rtl", layout_rtl),
+    ("layout_scroll_x_elastic", layout_scroll_x_elastic),
+    ("layout_grid_list", layout_grid_list),
     ("layout_split_drag", layout_split_drag),
     ("layout_cached_view_not_rerun", layout_cached_view_not_rerun),
 ];

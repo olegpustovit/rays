@@ -36,7 +36,8 @@ pub enum Direction {
     Rtl,
 }
 
-/// A grid track: fixed points, a share of the room left (`fr`), or its largest single-span child.
+/// A grid track: fixed points, a share of the room left (`fr`), or its content: its largest
+/// single-span child, plus an equal share of what a spanning child needs past its tracks.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Track {
     Px(f32),
@@ -46,8 +47,8 @@ pub enum Track {
 
 /// Grid tracks. `rows` empty: rows are added as children need them, each sized to its content.
 /// Gaps are the node's `gap` (between columns) and `row_gap`.
-// ponytail: at most MAX_TRACKS columns and rows (stack arrays in the passes); spanning children do
-// not grow content-sized tracks. Raise the cap or add span sizing when a grid needs them.
+// ponytail: at most MAX_TRACKS columns and rows (stack arrays in the passes, no allocation); raise
+// the cap when a grid needs more. Spans are spread in build order, not smallest span first as CSS.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Grid {
     pub cols: &'static [Track],

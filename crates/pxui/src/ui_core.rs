@@ -63,17 +63,21 @@ pub(crate) fn shown(text: &str) -> &str {
 
 // ------------------------------------------------------ retained cache
 
-/// Open addressing over int keys; 0 and 1 are the empty and tombstone marks.
+/// Open addressing over int keys; 0 and 1 are the empty and tombstone marks. A rehash that clears
+/// tombstones at the same capacity goes through the kept spare arrays: keys that come and go (a
+/// scrolled virtual list) allocate nothing.
 struct SlotTable {
     keys: Vec<i64>,
     slots: Vec<usize>,
+    spare_keys: Vec<i64>,
+    spare_slots: Vec<usize>,
     filled: usize,
     live: usize,
 }
 
 impl SlotTable {
     fn create() -> SlotTable {
-        SlotTable { keys: vec![0; 256], slots: vec![0; 256], filled: 0, live: 0 }
+        SlotTable { keys: vec![0; 256], slots: vec![0; 256], spare_keys: vec![0; 256], spare_slots: vec![0; 256], filled: 0, live: 0 }
     }
 
     fn index(&self, key: i64) -> usize {
@@ -98,14 +102,23 @@ impl SlotTable {
             let keys = std::mem::take(&mut self.keys);
             let slots = std::mem::take(&mut self.slots);
             let capacity = if 10 * self.live > 3 * keys.len() { 2 * keys.len() } else { keys.len() };
-            self.keys = vec![0; capacity];
-            self.slots = vec![0; capacity];
+            (self.keys, self.slots) = (std::mem::take(&mut self.spare_keys), std::mem::take(&mut self.spare_slots));
+            self.keys.clear();
+            self.keys.resize(capacity, 0);
+            self.slots.clear();
+            self.slots.resize(capacity, 0);
             self.filled = 0;
             self.live = 0;
             for (position, k) in keys.iter().enumerate() {
                 if *k != 0 && *k != 1 {
                     self.add(*k, slots[position]);
                 }
+            }
+            // a grown table's spares grow with it, so its next rehash allocates nothing either
+            if capacity == keys.len() {
+                (self.spare_keys, self.spare_slots) = (keys, slots);
+            } else {
+                (self.spare_keys, self.spare_slots) = (vec![0; capacity], vec![0; capacity]);
             }
         }
         let position = self.index(key);
@@ -383,7 +396,8 @@ struct Pose {
     opacity: f32,
 }
 
-/// A running transition of slot `slot` (while it has `generation`) from `from` to `to`.
+/// A running transition of slot `slot` (while it has `generation`) from `from` to `to`, through
+/// the keyframes `keys` (an index into `Ui::keyframes`, `NO_KEYS` for none) when it has them.
 #[derive(Clone, Copy)]
 struct Tween {
     slot: usize,
@@ -392,6 +406,22 @@ struct Tween {
     curve: Curve,
     from: Pose,
     to: Pose,
+    keys: u32,
+}
+
+const NO_KEYS: u32 = u32::MAX;
+
+/// Most keyframes one `animate_keys` run holds.
+pub const MAX_KEYS: usize = 8;
+
+/// A keyframed run's stops: the pose reached at each time (seconds from the start) and the curve of
+/// the segment that ends there.
+#[derive(Clone, Copy)]
+struct Keys {
+    n: usize,
+    t: [f32; MAX_KEYS],
+    pose: [Pose; MAX_KEYS],
+    curve: [Curve; MAX_KEYS],
 }
 
 /// What `Ui::animate` moves a node to.
@@ -545,7 +575,15 @@ struct ViewRec {
     outer: Rect,
     screen: Rect,
     stamp: u64,
+    /// the transforms of the views around it composed (`q = pa * p + pb`, window points), applied
+    /// after its own: identity unless an enclosing view is scaled or transformed
+    pa: [f32; 4],
+    pb: [f32; 2],
+    /// no transform of its own or around it (composed): hit testing skips the inverse
+    flat: bool,
 }
+
+const IDENTITY_2X2: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 
 impl ViewRec {
     fn new() -> ViewRec {
@@ -594,16 +632,90 @@ impl ViewRec {
             outer: UNBOUNDED,
             screen: Rect::new(0.0, 0.0, 0.0, 0.0),
             stamp: 0,
+            pa: IDENTITY_2X2,
+            pb: [0.0; 2],
+            flat: true,
         }
     }
 
-    /// No scale or transform.
+    /// No scale or transform of its own.
     fn plain(&self) -> bool {
         let [a, b, c, d] = self.transform;
         self.scale == 1.0 && a == 1.0 && b == 0.0 && c == 0.0 && d == 1.0
     }
 
+    /// No enclosing view transforms it.
+    fn parent_plain(&self) -> bool {
+        self.pa == IDENTITY_2X2 && self.pb == [0.0; 2]
+    }
+
+    /// Its own and its enclosing transforms as one affine `(a, b)`: `q = a * p + b` for `p` in
+    /// offset view points.
+    fn affine(&self) -> ([f32; 4], [f32; 2]) {
+        let e = self.own_entry();
+        let [m0, m1, m2, m3] = e.transform.map(|m| m * e.scale);
+        // own: q = m p + (I - m) pivot
+        let (b0, b1) = (e.pivot[0] - (m0 * e.pivot[0] + m1 * e.pivot[1]), e.pivot[1] - (m2 * e.pivot[0] + m3 * e.pivot[1]));
+        let [p0, p1, p2, p3] = self.pa;
+        let a = [p0 * m0 + p1 * m2, p0 * m1 + p1 * m3, p2 * m0 + p3 * m2, p2 * m1 + p3 * m3];
+        (a, [p0 * b0 + p1 * b1 + self.pb[0], p2 * b0 + p3 * b1 + self.pb[1]])
+    }
+
+    /// Where the painter shows offset view point `p`.
+    fn map(&self, p: (f32, f32)) -> (f32, f32) {
+        let q = self.own_entry().map(p);
+        if self.parent_plain() {
+            return q;
+        }
+        let [a, b, c, d] = self.pa;
+        (a * q.0 + b * q.1 + self.pb[0], c * q.0 + d * q.1 + self.pb[1])
+    }
+
+    /// The offset view point the painter shows at window point `q`; `None` without an inverse.
+    fn unmap(&self, q: (f32, f32)) -> Option<(f32, f32)> {
+        let q = if self.parent_plain() {
+            q
+        } else {
+            let [a, b, c, d] = self.pa;
+            let det = a * d - b * c;
+            if det == 0.0 || !det.is_finite() {
+                return None;
+            }
+            let (x, y) = (q.0 - self.pb[0], q.1 - self.pb[1]);
+            ((d * x - b * y) / det, (a * y - c * x) / det)
+        };
+        if self.plain() { Some(q) } else { self.own_entry().unmap(q) }
+    }
+
+    /// The window rectangle covering offset view rectangle `r` once transformed.
+    fn cover(&self, r: Rect) -> Rect {
+        if self.parent_plain() {
+            return if self.plain() { r } else { self.own_entry().cover(r) };
+        }
+        let pts = [(r.x, r.y), (r.x + r.w, r.y), (r.x, r.y + r.h), (r.x + r.w, r.y + r.h)].map(|p| self.map(p));
+        let (x0, y0) = pts.iter().fold((f32::INFINITY, f32::INFINITY), |m, p| (m.0.min(p.0), m.1.min(p.1)));
+        let (x1, y1) = pts.iter().fold((f32::NEG_INFINITY, f32::NEG_INFINITY), |m, p| (m.0.max(p.0), m.1.max(p.1)));
+        Rect::new(x0, y0, x1 - x0, y1 - y0)
+    }
+
+    /// The painter's entry: its own transform, or inside a transformed view the composed affine
+    /// about the origin, the offset carrying its translation (`a * (p + o) = a * p + b`).
     fn entry(&self) -> ViewEntry {
+        let e = self.own_entry();
+        if self.parent_plain() {
+            return e;
+        }
+        let (a, b) = self.affine();
+        let det = a[0] * a[3] - a[1] * a[2];
+        if det == 0.0 || !det.is_finite() {
+            return ViewEntry { opacity: 0.0, ..e };
+        }
+        let (x, y) = ((a[3] * b[0] - a[1] * b[1]) / det, (a[0] * b[1] - a[2] * b[0]) / det);
+        ViewEntry { offset: [e.offset[0] + x, e.offset[1] + y], scale: 1.0, transform: a, pivot: [0.0, 0.0], ..e }
+    }
+
+    /// Its entry with its own transform alone.
+    fn own_entry(&self) -> ViewEntry {
         let c = clip_of(self.outer);
         let b = self.built_rect;
         let pivot = [b.x + self.shift.0 + self.pivot.0, b.y + self.shift.1 + self.pivot.1];
@@ -670,15 +782,6 @@ struct Slot {
     ry: f32,
     rw: f32,
     rh: f32,
-    scroll_raw: f64,
-    scroll_visual: f64,
-    scroll_event_time: f64,
-    scroll_frame_time: f64,
-    /// a trackpad's coast or its bounce off an edge: 0 neither, 1 coast, 2 bounce
-    scroll_mode: i64,
-    scroll_velocity: f64,
-    scroll_start: f64,
-    scroll_from: f64,
     state_value: Option<i64>,
     text_value: Option<String>,
     labels: Vec<Rc<str>>,
@@ -726,14 +829,6 @@ impl Slot {
             ry: 0.0,
             rw: 0.0,
             rh: 0.0,
-            scroll_raw: 0.0,
-            scroll_visual: 0.0,
-            scroll_event_time: f64::NEG_INFINITY,
-            scroll_frame_time: 0.0,
-            scroll_mode: 0,
-            scroll_velocity: 0.0,
-            scroll_start: 0.0,
-            scroll_from: 0.0,
             state_value: None,
             text_value: None,
             labels: Vec::new(),
@@ -769,6 +864,28 @@ struct HitRec {
     view: u32,
 }
 
+/// One axis of a scroll box in motion: the overscroll (input travel `raw`, shown as `visual`), the
+/// last input and frame times, and a trackpad's coast or its bounce off an edge.
+#[derive(Clone, Copy)]
+struct Glide {
+    raw: f64,
+    visual: f64,
+    event_time: f64,
+    frame_time: f64,
+    /// 0 neither, 1 coast, 2 bounce
+    mode: i64,
+    velocity: f64,
+    start: f64,
+    from: f64,
+}
+
+impl Glide {
+    const REST: Glide = Glide { raw: 0.0, visual: 0.0, event_time: f64::NEG_INFINITY, frame_time: 0.0, mode: 0, velocity: 0.0, start: 0.0, from: 0.0 };
+    fn moving(&self) -> bool {
+        self.mode != 0 || self.visual != 0.0
+    }
+}
+
 /// What a press, a drag, a scroll or a key did to a box this frame.
 #[derive(Clone)]
 pub struct Accumulator {
@@ -789,6 +906,8 @@ pub struct Accumulator {
     /// what moves a scroll box: an unphased wheel's steps, the fingers' points on a trackpad, and
     /// whether they touched or lifted this frame
     pub scroll_wheel: f32,
+    /// an unphased wheel's sideways steps (a `SCROLL_X` box)
+    pub scroll_wheel_x: f32,
     pub scroll_drag: f32,
     /// the fingers' sideways points (a `SCROLL_X` box)
     pub scroll_drag_x: f32,
@@ -936,6 +1055,9 @@ pub struct Ui {
     theme_id: u32,
     /// running transitions, the frame's time, and whether a theme in effect animates
     tweens: Vec<Tween>,
+    /// keyframe stops of running `animate_keys` runs, and the free ones (reused: no allocation warm)
+    keyframes: Vec<Keys>,
+    free_keyframes: Vec<u32>,
     now: f64,
     motion: bool,
     font_size: i64,
@@ -962,6 +1084,9 @@ pub struct Ui {
     l_gutter: Vec<f32>,
     /// the horizontal scroll of each retained slot (`SCROLL_X`)
     scroll_xs: Vec<f32>,
+    /// each slot's scroll motion down (0) and sideways (1), beside the slots (scans of the slots
+    /// stay small)
+    glides: [Vec<Glide>; 2],
     /// boxes the last layout ran over; row flow direction
     arranged: usize,
     dir: Direction,
@@ -994,6 +1119,8 @@ pub struct Ui {
     foreground: Vec<(i64, usize)>,
     seeds: Vec<i64>,
     building: bool,
+    /// the frame a theme swap transitions in (`set_theme`)
+    swap_frame: i64,
     frame_number: i64,
     density: i64,
     kit_row_height: i64,
@@ -1019,7 +1146,8 @@ pub struct Ui {
     window_ground: Option<Color>,
     gesture_key: i64,
     gesture_time: f64,
-    gesture_velocity: f64,
+    /// the fingers' release velocity, down and sideways
+    gesture_velocity: (f64, f64),
     pub edit_undo: Vec<(String, usize, usize)>,
     pub(crate) text_undo_held: i64,
     /// What the host last charged to its memory ledger for this UI; PXUI never reads it.
@@ -1143,6 +1271,8 @@ impl Ui {
             theme_ids: Vec::new(),
             theme_id: 0,
             tweens: Vec::new(),
+            keyframes: Vec::new(),
+            free_keyframes: Vec::new(),
             now: 0.0,
             motion: false,
             font_size,
@@ -1164,6 +1294,7 @@ impl Ui {
             l_content_w: Vec::new(),
             l_gutter: Vec::new(),
             scroll_xs: Vec::new(),
+            glides: [Vec::new(), Vec::new()],
             arranged: 0,
             dir: Direction::Ltr,
             z_order: Vec::new(),
@@ -1186,6 +1317,7 @@ impl Ui {
             foreground: Vec::new(),
             seeds: Vec::new(),
             building: false,
+            swap_frame: -1,
             frame_number: 0,
             density: 1,
             kit_row_height: 24,
@@ -1210,7 +1342,7 @@ impl Ui {
             window_ground: None,
             gesture_key: 0,
             gesture_time: f64::NAN,
-            gesture_velocity: 0.0,
+            gesture_velocity: (0.0, 0.0),
             edit_undo: Vec::new(),
             text_undo_held: 0,
             charged: Bytes::default(),
@@ -1307,13 +1439,22 @@ impl Ui {
     }
 
     /// Swap the UI's theme (light, dark, high contrast, an accent: each is a `Theme` value). A change
-    /// rebuilds every view. Between frames, or inside one for what is built after it.
-    // ponytail: a swap snaps; transitioning every node's look to the new theme's needs the swap to
-    // re-resolve each node's state against the new States (a rebuild already does) plus a tween per
-    // node; add when a host wants animated theme swaps.
+    /// rebuilds every view once (for the new geometry); every node shown before then moves from the
+    /// look it showed to the new one over the new theme's `motion.normal`, through the patch path
+    /// (no further rebuild); a theme that does not move (`reduced_motion`, or no durations) snaps.
+    /// Between frames, or inside one for what is built after it.
     pub fn set_theme(&mut self, theme: Theme) {
         if theme != self.theme {
             self.epoch += 1;
+            // what each node shows now is where its move starts (one pass over the slots per swap)
+            if theme.tokens.moves() {
+                self.swap_frame = self.frame_number + if self.building { 0 } else { 1 };
+                for s in &mut self.slots {
+                    if s.key != 0 {
+                        s.seen = s.node.look;
+                    }
+                }
+            }
             self.theme = theme;
         }
     }
@@ -1474,8 +1615,9 @@ impl Ui {
 
     /// Walk the views' declared nodes (a kept view's from its last build) into the next tree and
     /// publish it when it differs: an unchanged frame leaves the published tree and its revision.
-    // ponytail: a frame that rebuilds anything (or whose root declares roles, as the kit without
-    // views does) walks and compares the whole tree, O(nodes); per-view subtrees if trees get large.
+    // ponytail: a frame that rebuilds anything (or whose root declares roles) copies kept views' runs
+    // and walks rebuilt views' nodes, but compares the whole next tree with the published one to
+    // decide publication, O(tree); a per-run changed flag if trees get large.
     fn emit_a11y(&mut self) {
         if !self.a11y_on {
             return;
@@ -1747,6 +1889,8 @@ impl Ui {
                 self.slots.push(Slot::fresh());
                 self.scroll_y.push(0.0);
                 self.scroll_xs.push(0.0);
+                self.glides[0].push(Glide::REST);
+                self.glides[1].push(Glide::REST);
                 // the free list can take every slot: freeing never grows it (amortised with `slots`)
                 self.free.reserve(self.slots.capacity().saturating_sub(self.free.len()));
                 self.slots.len() - 1
@@ -1763,6 +1907,7 @@ impl Ui {
         s.touched = self.frame_number;
         self.scroll_y[slot] = 0.0;
         self.scroll_xs[slot] = 0.0;
+        (self.glides[0][slot], self.glides[1][slot]) = (Glide::REST, Glide::REST);
         self.table.add(key, slot);
         slot
     }
@@ -1789,10 +1934,7 @@ impl Ui {
         }
         // a scroll in motion moves its view's layout every frame
         let mut moving = std::mem::take(&mut self.moving);
-        moving.retain(|slot| {
-            let s = &self.slots[*slot];
-            s.key != 0 && (s.scroll_mode != 0 || s.scroll_visual != 0.0)
-        });
+        moving.retain(|slot| self.slots[*slot].key != 0 && (self.glides[0][*slot].moving() || self.glides[1][*slot].moving()));
         for slot in &moving {
             self.mark_view(self.slots[*slot].owner);
         }
@@ -1887,6 +2029,7 @@ impl Ui {
                     pinch: 1.0,
                     keys: Vec::new(),
                     scroll_wheel: 0.0,
+                    scroll_wheel_x: 0.0,
                     scroll_drag: 0.0,
                     scroll_drag_x: 0.0,
                     a11y_value: None,
@@ -1939,7 +2082,7 @@ impl Ui {
         if !v.outer.contains(point) {
             return false;
         }
-        let local = if v.plain() { Some(point) } else { v.entry().unmap(point) };
+        let local = if v.flat { Some(point) } else { v.unmap(point) };
         local.is_some_and(|p| contains(Rect::new(h.x, h.y, h.w, h.h), (p.0 - v.shift.0, p.1 - v.shift.1)))
     }
 
@@ -2299,6 +2442,7 @@ impl Ui {
                         value.scroll_y_steps += *vertical as f32;
                         if !phased {
                             value.scroll_wheel += *vertical as f32;
+                            value.scroll_wheel_x += *horizontal as f32;
                         }
                     }
                 }
@@ -2309,7 +2453,7 @@ impl Ui {
                 Event::TrackpadScrolled { phase: ScrollPhase::Lifted, time, .. } => {
                     // fingers that rested before they lifted leave the content where it is
                     if time - self.gesture_time > 0.1 {
-                        self.gesture_velocity = 0.0;
+                        self.gesture_velocity = (0.0, 0.0);
                     }
                     self.lift();
                 }
@@ -2318,10 +2462,10 @@ impl Ui {
                         let scroll = self.scroll_target(self.pointer);
                         self.gesture_key = self.modal_target(scroll);
                         self.gesture_time = f64::NAN;
-                        self.gesture_velocity = 0.0;
+                        self.gesture_velocity = (0.0, 0.0);
                     }
-                    self.gesture_velocity =
-                        if *time > self.gesture_time { -vertical / (time - self.gesture_time) } else { 0.0 };
+                    let dt = time - self.gesture_time;
+                    self.gesture_velocity = if dt > 0.0 { (-vertical / dt, -horizontal / dt) } else { (0.0, 0.0) };
                     self.gesture_time = *time;
                     if self.gesture_key != 0 {
                         let key = self.gesture_key;
@@ -2355,7 +2499,7 @@ impl Ui {
                     }
                 }
                 Event::FocusLost => {
-                    self.gesture_velocity = 0.0;
+                    self.gesture_velocity = (0.0, 0.0);
                     self.lift();
                     self.payload = None;
                     released_carry = false;
@@ -3017,8 +3161,8 @@ impl Ui {
             return Rect::new(0.0, 0.0, 0.0, 0.0);
         }
         let s = &self.slots[b.box_slot];
-        let shift = self.views[self.views[s.owner as usize].xf as usize].shift;
-        Rect::new(s.rx + shift.0, s.ry + shift.1, s.rw, s.rh)
+        let v = &self.views[self.views[s.owner as usize].xf as usize];
+        v.cover(Rect::new(s.rx + v.shift.0, s.ry + v.shift.1, s.rw, s.rh))
     }
 
     /// What input did to the node this frame; a stale handle has no signal.
@@ -3202,7 +3346,7 @@ impl Ui {
 
     /// Current painted scroll position, including elastic edge movement.
     pub fn scroll_position(&self, b: &UiBox) -> f32 {
-        self.scroll_y[b.box_slot] + self.slots[b.box_slot].scroll_visual as f32
+        self.scroll_y[b.box_slot] + self.glides[0][b.box_slot].visual as f32
     }
 
     /// The horizontal scroll of a `SCROLL_X` box.
@@ -3212,14 +3356,12 @@ impl Ui {
 
     pub fn set_scroll_offset_x(&mut self, b: &UiBox, value: f32) {
         self.scroll_xs[b.box_slot] = value;
+        self.glides[1][b.box_slot] = Glide::REST;
     }
 
     pub fn set_scroll_offset(&mut self, b: &UiBox, value: f32) {
         self.scroll_y[b.box_slot] = value;
-        let s = &mut self.slots[b.box_slot];
-        s.scroll_raw = 0.0;
-        s.scroll_visual = 0.0;
-        s.scroll_mode = 0;
+        self.glides[0][b.box_slot] = Glide::REST;
     }
 
     /// Retained per-box scalar state for custom widgets.
@@ -3377,7 +3519,14 @@ impl Ui {
                     let (cols, nc, rows, nr) = self.grid_tracks(index, n, &grid, None);
                     (span(&cols[..nc], n.gap), span(&rows[..nr], n.row_gap))
                 }
-                None => self.flow_extent(index, n),
+                None => {
+                    let limit = match (n.wrap, n.axis == Axis::Row, n.w, n.h) {
+                        (true, true, Size::Px(w), _) => w - n.padding.l - n.padding.r,
+                        (true, false, _, Size::Px(h)) => h - n.padding.t - n.padding.b,
+                        _ => f32::INFINITY,
+                    };
+                    self.flow_extent(index, n, limit)
+                }
             };
             let pad = n.padding;
             let (cw, ch) = (content_w + pad.l + pad.r, content_h + pad.t + pad.b);
@@ -3401,18 +3550,11 @@ impl Ui {
     }
 
     /// The extent of a row, column or stack's flow children (margins and gaps in, padding out). A
-    /// wrapping flow breaks its lines at its fixed main size.
-    // ponytail: a wrapping flow whose main size comes from its parent measures as one line (its Fit
-    // cross size is that line's); give it a Px main size, or measure from the laid-out width, if a
-    // wrapping Fit box nests in a Grow one.
-    fn flow_extent(&self, index: usize, n: &Node) -> (f32, f32) {
+    /// wrapping flow breaks its lines at `limit`, its inner main size: its `Px` one when measuring
+    /// (else one line), the resolved one in `rewrap`.
+    fn flow_extent(&self, index: usize, n: &Node, limit: f32) -> (f32, f32) {
         let row = n.axis == Axis::Row;
         let stack = n.axis == Axis::Stack;
-        let limit = match (n.wrap, row, n.w, n.h) {
-            (true, true, Size::Px(w), _) => w - n.padding.l - n.padding.r,
-            (true, false, _, Size::Px(h)) => h - n.padding.t - n.padding.b,
-            _ => f32::INFINITY,
-        };
         let (mut along, mut across, mut line_main, mut line_cross, mut count) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0);
         let mut child = self.next_flow(self.boxes[index].first);
         while child != NONE {
@@ -3441,6 +3583,34 @@ impl Ui {
         if row { (along, across) } else { (across, along) }
     }
 
+    /// A wrapping `Fit` box whose main size its parent resolved (`Grow`, `Pct`, `Rel`, stretch):
+    /// its lines measured again at that size give its cross size, before the parent places it.
+    /// Called once per such child by its parent's pass, so layout stays O(nodes).
+    // ponytail: the parent's own Fit size and scroll extent (and a grid cell's row) were measured
+    // with one line; measure bottom-up again from the resolved width if a Fit column of wrapping
+    // Grow rows has to hug them.
+    fn rewrap(&mut self, c: usize) {
+        if !self.nd(c).wrap {
+            return;
+        }
+        let n = *self.nd(c);
+        let row = n.axis == Axis::Row;
+        let (main, cross) = if row { (n.w, n.h) } else { (n.h, n.w) };
+        if n.grid.is_some() || n.axis == Axis::Stack || matches!(main, Size::Px(_) | Size::Fit) || !matches!(cross, Size::Fit) {
+            return;
+        }
+        let pad = n.padding;
+        let limit = if row { self.l_w[c] - pad.l - pad.r } else { self.l_h[c] - pad.t - pad.b };
+        let (w, h) = self.flow_extent(c, &n, limit);
+        if row {
+            self.l_content[c] = h + pad.t + pad.b;
+            self.set_main(false, c, self.l_content[c]);
+        } else {
+            self.l_content_w[c] = w + pad.l + pad.r;
+            self.set_main(true, c, self.l_content_w[c]);
+        }
+    }
+
     /// A stack's children in `z` order (stable): paint and hit order follow the list. Sorted in a
     /// scratch vector kept between frames (no allocation once warm), O(k log k).
     fn order_stack(&mut self, index: usize) {
@@ -3462,14 +3632,16 @@ impl Ui {
         self.z_order = order;
     }
 
-    /// The grid's column and row sizes: a content-sized track takes its largest single-span child
-    /// (as does a fractional one when measuring, `room` None); with `room` (inner w, h) the
+    /// The grid's column and row sizes: a content-sized track takes its largest single-span child,
+    /// then what spanning children lack (`spread`; a fractional track measures as content, `room`
+    /// None, but takes no span's share); with `room` (inner w, h) the
     /// fractional tracks share what the others leave.
     fn grid_tracks(&self, index: usize, n: &Node, g: &Grid, room: Option<(f32, f32)>) -> ([f32; MAX_TRACKS], usize, [f32; MAX_TRACKS], usize) {
         let nc = g.cols.len().clamp(1, MAX_TRACKS);
         let mut nr = g.rows.len().min(MAX_TRACKS);
         let (mut colc, mut rowc) = ([0.0f32; MAX_TRACKS], [0.0f32; MAX_TRACKS]);
         let mut cursor = (0, 0);
+        let mut spans = false;
         let mut child = self.next_flow(self.boxes[index].first);
         while child != NONE {
             let cn = self.nd(child);
@@ -3481,7 +3653,23 @@ impl Ui {
             if rs == 1 {
                 rowc[r] = rowc[r].max(self.l_h[child] + cn.margin.t + cn.margin.b);
             }
+            spans |= cs > 1 || rs > 1;
             child = self.next_flow(self.boxes[child].next);
+        }
+        // a second walk: what a spanning child needs past its tracks goes to their Fit ones
+        if spans {
+            (cursor, child) = ((0, 0), self.next_flow(self.boxes[index].first));
+            while child != NONE {
+                let cn = self.nd(child);
+                let (c, r, cs, rs) = next_cell(cn.cell, &mut cursor, nc);
+                if cs > 1 {
+                    spread(g.cols, &mut colc, c, cs, self.l_w[child] + cn.margin.l + cn.margin.r, n.gap);
+                }
+                if rs > 1 {
+                    spread(g.rows, &mut rowc, r, rs, self.l_h[child] + cn.margin.t + cn.margin.b, n.row_gap);
+                }
+                child = self.next_flow(self.boxes[child].next);
+            }
         }
         let size = |tracks: &[Track], n: usize, content: &[f32; MAX_TRACKS], room: Option<f32>, gap: f32| {
             let mut out = [0.0f32; MAX_TRACKS];
@@ -3509,63 +3697,97 @@ impl Ui {
         (cols, nc, rows, nr)
     }
 
-    fn pull(&mut self, slot: usize, max_scroll: f64, height: f64, past: f64, delta: f64) {
-        let old = self.slots[slot].scroll_raw;
-        let next = self.scroll_y[slot] as f64 + old - delta;
+    /// The offset of `slot`'s scroll on axis `ax` (0 down, 1 sideways).
+    fn offset_mut(&mut self, ax: usize, slot: usize) -> &mut f32 {
+        if ax == 0 { &mut self.scroll_y[slot] } else { &mut self.scroll_xs[slot] }
+    }
+
+    fn pull(&mut self, ax: usize, slot: usize, max_scroll: f64, extent: f64, past: f64, delta: f64) {
+        let old = self.glides[ax][slot].raw;
+        let next = *self.offset_mut(ax, slot) as f64 + old - delta;
         let bounded = 0.0f64.max(max_scroll.min(next));
         let over = next - bounded;
         let raw = if max_scroll <= 0.0 || over == 0.0 { 0.0 } else { old + (over - old) * past };
-        self.scroll_y[slot] = bounded as f32;
-        self.slots[slot].scroll_raw = raw;
-        self.slots[slot].scroll_visual = scroll_stretch(raw, height);
+        *self.offset_mut(ax, slot) = bounded as f32;
+        self.glides[ax][slot].raw = raw;
+        self.glides[ax][slot].visual = scroll_stretch(raw, extent);
     }
 
     /// One scroll box, once its height is laid out (`arrange`): a height that comes from the
     /// parent (Grow, Pct, Rel) stretches and bounces as a fixed one does.
     pub(crate) fn apply_scroll(&mut self, consume: bool, time: f64, index: usize) {
-        let slot = self.boxes[index].slot;
         let key = self.boxes[index].key;
-        let height = self.l_h[index] as f64;
-        let max_scroll = 0.0f64.max(self.l_content[index] as f64 - height);
-        let (wheel, drag, touch, lift) = match self.signals.get(&key) {
-            Some(v) => (v.scroll_wheel, v.scroll_drag, v.scroll_touch, v.scroll_lift),
-            None => (0.0, 0.0, false, false),
-        };
+        let (wheel, drag, touch, lift) = self.signals.get(&key).map_or((0.0, 0.0, false, false), |v| (v.scroll_wheel, v.scroll_drag, v.scroll_touch, v.scroll_lift));
+        let max_scroll = 0.0f64.max(self.l_content[index] as f64 - self.l_h[index] as f64);
+        self.glide(0, time, index, max_scroll, (wheel, drag, touch, lift));
+        if consume {
+            if let Some(value) = self.signals.get_mut(&key) {
+                value.scroll_wheel = 0.0;
+                value.scroll_drag = 0.0;
+                value.scroll_touch = false;
+                value.scroll_lift = false;
+            }
+        }
+    }
+
+    /// A `SCROLL_X` box sideways, as `apply_scroll` down; right to left the offset runs from the
+    /// right edge, so the wheel and the fingers move the content mirrored (it follows them).
+    pub(crate) fn apply_scroll_x(&mut self, consume: bool, time: f64, index: usize) {
+        let key = self.boxes[index].key;
+        let (wheel, drag, touch, lift) = self.signals.get(&key).map_or((0.0, 0.0, false, false), |v| (v.scroll_wheel_x, v.scroll_drag_x, v.scroll_touch, v.scroll_lift));
+        let max_scroll = 0.0f64.max(self.l_content_w[index] as f64 - self.l_w[index] as f64);
+        let sign = if self.dir == Direction::Rtl { -1.0 } else { 1.0 };
+        self.glide(1, time, index, max_scroll, (wheel * sign, drag * sign, touch, lift));
+        if consume {
+            if let Some(value) = self.signals.get_mut(&key) {
+                (value.scroll_wheel_x, value.scroll_drag_x, value.scroll_touch, value.scroll_lift) = (0.0, 0.0, false, false);
+            }
+        }
+    }
+
+    /// The scroll motion of axis `ax`: wheel steps and finger travel pull (stretching past an
+    /// edge), fingers lifted in motion coast and bounce, a stretch left alone decays.
+    fn glide(&mut self, ax: usize, time: f64, index: usize, max_scroll: f64, (wheel, drag, touch, lift): (f32, f32, bool, bool)) {
+        let slot = self.boxes[index].slot;
+        let extent = if ax == 0 { self.l_h[index] } else { self.l_w[index] } as f64;
+        // at rest with no input: nothing moves (most scroll boxes, most frames)
+        if !touch && !lift && wheel == 0.0 && drag == 0.0 && !self.glides[ax][slot].moving() {
+            self.glides[ax][slot].frame_time = time;
+            return;
+        }
+        let release = if ax == 0 { self.gesture_velocity.0 } else { self.gesture_velocity.1 };
+        let release = if ax == 1 && self.dir == Direction::Rtl { -release } else { release };
         // any input catches a coast or a bounce where it is
         if touch || wheel != 0.0 || drag != 0.0 {
-            self.slots[slot].scroll_mode = 0;
+            self.glides[ax][slot].mode = 0;
         }
         if touch {
-            self.slots[slot].scroll_event_time = f64::INFINITY;
+            self.glides[ax][slot].event_time = f64::INFINITY;
         }
         if drag != 0.0 {
-            self.pull(slot, max_scroll, height, 1.0, drag as f64);
+            self.pull(ax, slot, max_scroll, extent, 1.0, drag as f64);
             // held by the fingers: it springs back when they lift
-            self.slots[slot].scroll_event_time = f64::INFINITY;
+            self.glides[ax][slot].event_time = f64::INFINITY;
         } else if wheel != 0.0 {
             let step = self.nd(index).scroll_step;
-            self.pull(slot, max_scroll, height, SCROLL_WHEEL_PAST, wheel as f64 * step as f64);
-            self.slots[slot].scroll_event_time = time;
+            self.pull(ax, slot, max_scroll, extent, SCROLL_WHEEL_PAST, wheel as f64 * step as f64);
+            self.glides[ax][slot].event_time = time;
         }
         if lift {
-            if self.slots[slot].scroll_visual != 0.0 {
-                self.slots[slot].scroll_event_time = f64::NEG_INFINITY;
-            } else if max_scroll > 0.0 && self.gesture_velocity.abs() >= SCROLL_MIN_VELOCITY {
-                let y = self.scroll_y[slot] as f64;
-                let s = &mut self.slots[slot];
-                s.scroll_mode = 1;
-                s.scroll_velocity = self.gesture_velocity;
-                s.scroll_start = time;
-                s.scroll_from = y;
+            if self.glides[ax][slot].visual != 0.0 {
+                self.glides[ax][slot].event_time = f64::NEG_INFINITY;
+            } else if max_scroll > 0.0 && release.abs() >= SCROLL_MIN_VELOCITY {
+                let from = *self.offset_mut(ax, slot) as f64;
+                let g = &mut self.glides[ax][slot];
+                (g.mode, g.velocity, g.start, g.from) = (1, release, time, from);
             }
         }
         if wheel == 0.0 && drag == 0.0 {
-            if self.slots[slot].scroll_mode == 1 {
+            let g = self.glides[ax][slot];
+            if g.mode == 1 {
                 // v(t) = v0 e^(-t/tau), so y(t) = y0 + v0 tau (1 - e^(-t/tau))
-                let velocity = self.slots[slot].scroll_velocity;
-                let from = self.slots[slot].scroll_from;
-                let at = |t: f64| from + velocity * SCROLL_COAST_TAU * (1.0 - (-t / SCROLL_COAST_TAU).exp());
-                let t = 0.0f64.max(time - self.slots[slot].scroll_start);
+                let at = |t: f64| g.from + g.velocity * SCROLL_COAST_TAU * (1.0 - (-t / SCROLL_COAST_TAU).exp());
+                let t = 0.0f64.max(time - g.start);
                 let y = at(t);
                 if y < 0.0 || y > max_scroll {
                     // the coast is monotonic: bisect for when it met the edge and bounce from then
@@ -3576,49 +3798,41 @@ impl Ui {
                         let mid = (early + late) / 2.0;
                         if (at(mid) - edge) * (y - edge) > 0.0 { late = mid } else { early = mid }
                     }
-                    let arrival = velocity * (-late / SCROLL_COAST_TAU).exp();
-                    self.scroll_y[slot] = edge as f32;
-                    let s = &mut self.slots[slot];
-                    s.scroll_mode = 2;
-                    s.scroll_start += late;
-                    s.scroll_velocity = SCROLL_BOUNCE_LAUNCH * arrival / (SCROLL_BOUNCE_B - SCROLL_BOUNCE_A);
+                    let arrival = g.velocity * (-late / SCROLL_COAST_TAU).exp();
+                    *self.offset_mut(ax, slot) = edge as f32;
+                    let g = &mut self.glides[ax][slot];
+                    g.mode = 2;
+                    g.start += late;
+                    g.velocity = SCROLL_BOUNCE_LAUNCH * arrival / (SCROLL_BOUNCE_B - SCROLL_BOUNCE_A);
                 } else {
                     // on whole device pixels, so text is sharp where the coast ends
                     let density = self.density as f64;
-                    self.scroll_y[slot] = ((y * density).round() / density) as f32;
-                    if (velocity * (-t / SCROLL_COAST_TAU).exp()).abs() < SCROLL_MIN_VELOCITY {
-                        self.slots[slot].scroll_mode = 0;
+                    *self.offset_mut(ax, slot) = ((y * density).round() / density) as f32;
+                    if (g.velocity * (-t / SCROLL_COAST_TAU).exp()).abs() < SCROLL_MIN_VELOCITY {
+                        self.glides[ax][slot].mode = 0;
                     }
                 }
             }
-            if self.slots[slot].scroll_mode == 2 {
-                let t = 0.0f64.max(time - self.slots[slot].scroll_start);
-                let visual = self.slots[slot].scroll_velocity
-                    * ((-SCROLL_BOUNCE_A * t).exp() - (-SCROLL_BOUNCE_B * t).exp());
+            let g = &mut self.glides[ax][slot];
+            if g.mode == 2 {
+                let t = 0.0f64.max(time - g.start);
+                let visual = g.velocity * ((-SCROLL_BOUNCE_A * t).exp() - (-SCROLL_BOUNCE_B * t).exp());
                 let settled = t > 1.0 / SCROLL_BOUNCE_A && visual.abs() < 0.25;
                 if settled {
-                    self.slots[slot].scroll_mode = 0;
+                    g.mode = 0;
                 }
-                self.slots[slot].scroll_visual = if settled { 0.0 } else { visual };
-                self.slots[slot].scroll_raw = scroll_travel(self.slots[slot].scroll_visual, height);
-            } else if self.slots[slot].scroll_visual != 0.0 && time - self.slots[slot].scroll_event_time > 0.08 {
-                let dt = 0.0f64.max(time - self.slots[slot].scroll_frame_time);
-                let visual = self.slots[slot].scroll_visual * (-dt / SCROLL_SPRING_TAU).exp();
-                self.slots[slot].scroll_visual = if visual.abs() < 0.25 { 0.0 } else { visual };
-                self.slots[slot].scroll_raw = scroll_travel(self.slots[slot].scroll_visual, height);
+                g.visual = if settled { 0.0 } else { visual };
+                g.raw = scroll_travel(g.visual, extent);
+            } else if g.visual != 0.0 && time - g.event_time > 0.08 {
+                let dt = 0.0f64.max(time - g.frame_time);
+                let visual = g.visual * (-dt / SCROLL_SPRING_TAU).exp();
+                g.visual = if visual.abs() < 0.25 { 0.0 } else { visual };
+                g.raw = scroll_travel(g.visual, extent);
             }
         }
-        self.slots[slot].scroll_frame_time = time;
-        if (self.slots[slot].scroll_mode != 0 || self.slots[slot].scroll_visual != 0.0) && !self.moving.contains(&slot) {
+        self.glides[ax][slot].frame_time = time;
+        if self.glides[ax][slot].moving() && !self.moving.contains(&slot) {
             self.moving.push(slot);
-        }
-        if consume {
-            if let Some(value) = self.signals.get_mut(&key) {
-                value.scroll_wheel = 0.0;
-                value.scroll_drag = 0.0;
-                value.scroll_touch = false;
-                value.scroll_lift = false;
-            }
         }
     }
 
@@ -3640,12 +3854,9 @@ impl Ui {
                 self.scroll_y[slot] = 0.0f32.max(max_scroll.min(self.scroll_y[slot]));
             }
             if n.flags & SCROLL_X != 0 {
-                let key = self.boxes[index].key;
-                let delta = self.signals.get(&key).map_or(0.0, |v| v.scroll_x * n.scroll_step + v.scroll_drag_x);
-                // right to left the offset runs from the right edge: the content follows the fingers
-                let delta = if self.dir == Direction::Rtl { -delta } else { delta };
+                self.apply_scroll_x(false, time, index);
                 let max_x = 0.0f32.max(self.l_content_w[index] - self.l_w[index]);
-                self.scroll_xs[slot] = 0.0f32.max(max_x.min(self.scroll_xs[slot] - delta));
+                self.scroll_xs[slot] = 0.0f32.max(max_x.min(self.scroll_xs[slot]));
             }
             let inner_w = self.l_w[index] - pad.l - pad.r - gutter;
             let inner_h = self.l_h[index] - pad.t - pad.b;
@@ -3670,8 +3881,8 @@ impl Ui {
                 (None, Axis::Stack) => self.arrange_stack(index, &n, (inner_w, inner_h), inner_at),
                 (None, _) => self.arrange_flow(index, &n, (inner_w, inner_h), inner_at),
             }
-            let scroll_y = if scrolls { self.scroll_y[slot] + self.slots[slot].scroll_visual as f32 } else { 0.0 };
-            let scroll_x = if n.flags & SCROLL_X != 0 { self.scroll_xs[slot] } else { 0.0 };
+            let scroll_y = if scrolls { self.scroll_y[slot] + self.glides[0][slot].visual as f32 } else { 0.0 };
+            let scroll_x = if n.flags & SCROLL_X != 0 { self.scroll_xs[slot] + self.glides[1][slot].visual as f32 } else { 0.0 };
             let rtl = self.dir == Direction::Rtl;
             let (root_w, root_h) = (self.l_w[0], self.l_h[0]);
             let last = self.boxes[index].last;
@@ -3807,6 +4018,10 @@ impl Ui {
                     let cross = self.main(!row, end);
                     self.set_main(row, end, if row { cross * c.aspect } else { cross / c.aspect });
                 }
+                // in a column a wrapping row's width is known now; in a row, after the shares
+                if !row && c.wrap {
+                    self.rewrap(end);
+                }
                 // a Grow child starts from nothing (its minimum holds in `grow_line`)
                 let basis = if grows(&c) { 0.0 } else { self.main(row, end) };
                 let (ms, me) = main_margins(c.margin);
@@ -3829,6 +4044,9 @@ impl Ui {
             let mut c = start;
             while c != end {
                 let cn = *self.nd(c);
+                if row && cn.wrap {
+                    self.rewrap(c);
+                }
                 let (cs, ce) = cross_margins(cn.margin);
                 let a = cn.align_self.unwrap_or(n.align);
                 let fit = matches!(if row { cn.h } else { cn.w }, Size::Fit);
@@ -4003,6 +4221,9 @@ impl Ui {
             if cn.aspect > 0.0 && matches!(cn.h, Size::Fit) {
                 self.set_main(false, c, self.l_w[c] / cn.aspect);
             }
+            if cn.wrap {
+                self.rewrap(c);
+            }
             let ow = self.l_w[c] + m.l + m.r;
             let oh = self.l_h[c] + m.t + m.b;
             let x = match n.justify {
@@ -4107,6 +4328,28 @@ fn clamp(v: f32, min: f32, max: f32) -> f32 {
 /// Tracks' total extent with `gap` between them.
 fn span(tracks: &[f32], gap: f32) -> f32 {
     tracks.iter().sum::<f32>() + gap * tracks.len().saturating_sub(1) as f32
+}
+
+/// A child spanning `count` tracks from `at` needs `need` points: what its tracks (fixed and the
+/// content ones so far, with the gaps) lack is shared equally by its `Fit` tracks. A span over an
+/// `Fr` track sizes nothing (as in CSS: the fractions take the room).
+fn spread(tracks: &[Track], content: &mut [f32; MAX_TRACKS], at: usize, count: usize, need: f32, gap: f32) {
+    let (mut have, mut fits) = (gap * (count - 1) as f32, 0);
+    for i in at..at + count {
+        match tracks.get(i).copied().unwrap_or(Track::Fit) {
+            Track::Px(v) => have += v,
+            Track::Fr(_) => return,
+            Track::Fit => (have, fits) = (have + content[i], fits + 1),
+        }
+    }
+    if fits > 0 && need > have {
+        let each = (need - have) / fits as f32;
+        for i in at..at + count {
+            if matches!(tracks.get(i).copied().unwrap_or(Track::Fit), Track::Fit) {
+                content[i] += each;
+            }
+        }
+    }
 }
 
 /// A grid child's (column, row, column span, row span): its own cell, or the next free one along
@@ -4869,7 +5112,11 @@ impl Ui {
         paint.clip_rect = clip_rect;
         let slot = self.boxes[index].slot;
         let start = paint.layers[paint.layer].instances.len() as u32;
-        if let Some(curve) = self.slots[slot].node.transition.take() {
+        // a theme swap moves every node shown before it from the look it showed
+        let s = &self.slots[slot];
+        let swap = self.swap_frame == self.frame_number && s.painted >= 0 && s.seen != s.node.look;
+        let swap = swap.then(|| Curve::Bezier { duration: self.theme.tokens.motion.normal, points: self.theme.tokens.motion.ease });
+        if let Some(curve) = self.slots[slot].node.transition.take().or(swap) {
             let from = match self.tween_of(slot) {
                 Some(_) => self.pose(slot).0,
                 None => Pose { look: self.slots[slot].seen, ..self.rest(slot) },
@@ -5545,18 +5792,34 @@ impl Ui {
             None => (self.rest(slot), false),
             Some(i) => {
                 let t = &self.tweens[i];
-                let p = t.curve.at((self.now - t.start) as f32);
+                let elapsed = (self.now - t.start) as f32;
+                let (from, to, p) = match self.keyframes.get(t.keys as usize) {
+                    None => (&t.from, &t.to, t.curve.at(elapsed)),
+                    Some(k) => {
+                        // the segment the run is in: from the stop before (the start for the first)
+                        let j = k.t[..k.n].iter().position(|&end| elapsed < end).unwrap_or(k.n - 1);
+                        let (from, t0) = if j == 0 { (&t.from, 0.0) } else { (&k.pose[j - 1], k.t[j - 1]) };
+                        let curve = match k.curve[j] {
+                            Curve::Bezier { points, .. } => Curve::Bezier { duration: k.t[j] - t0, points },
+                            spring => spring,
+                        };
+                        (from, &k.pose[j], curve.at(elapsed - t0))
+                    }
+                };
                 let f = |a: f32, b: f32| a + (b - a) * p;
-                let pose = Pose { look: t.from.look.lerp(&t.to.look, p), dx: f(t.from.dx, t.to.dx), dy: f(t.from.dy, t.to.dy), opacity: f(t.from.opacity, t.to.opacity) };
+                let pose = Pose { look: from.look.lerp(&to.look, p), dx: f(from.dx, to.dx), dy: f(from.dy, to.dy), opacity: f(from.opacity, to.opacity) };
                 (pose, true)
             }
         }
     }
 
     fn start_tween(&mut self, slot: usize, curve: Curve, from: Pose, to: Pose) {
-        let tween = Tween { slot, generation: self.slots[slot].generation, start: self.now, curve, from, to };
+        let tween = Tween { slot, generation: self.slots[slot].generation, start: self.now, curve, from, to, keys: NO_KEYS };
         match self.tween_of(slot) {
-            Some(i) => self.tweens[i] = tween,
+            Some(i) => {
+                self.free_keys(i);
+                self.tweens[i] = tween;
+            }
             None => {
                 self.slots[slot].tween = self.tweens.len() as u32;
                 self.tweens.push(tween);
@@ -5594,7 +5857,16 @@ impl Ui {
         };
     }
 
+    /// Give tween `i`'s keyframes back.
+    fn free_keys(&mut self, i: usize) {
+        let k = std::mem::replace(&mut self.tweens[i].keys, NO_KEYS);
+        if k != NO_KEYS {
+            self.free_keyframes.push(k);
+        }
+    }
+
     fn drop_tween(&mut self, i: usize) {
+        self.free_keys(i);
         let slot = self.tweens[i].slot;
         if self.slots[slot].tween == i as u32 {
             self.slots[slot].tween = NO_TWEEN;
@@ -5612,7 +5884,6 @@ impl Ui {
     /// rebuild); the frame gate asks for frames until it rests. An animated look holds until the
     /// node's next declaration (as `patch_look`); offset and opacity hold until animated again. The
     /// theme's `reduced_motion` makes it a jump. `false` for a stale handle.
-    // ponytail: from -> to only, no keyframe lists; chain calls when a run ends if one is needed.
     // Offset and opacity move the node's own look and text, not its children (a view's offset and
     // opacity move a group), and hit testing stays where layout put it.
     pub fn animate(&mut self, b: &Handle, target: Target, curve: Curve) -> bool {
@@ -5632,6 +5903,52 @@ impl Ui {
             Target::Opacity(o) => to.opacity = o.clamp(0.0, 1.0),
         }
         self.start_tween(slot, curve, from, to);
+        if !self.building {
+            self.frame_requested = true;
+        }
+        true
+    }
+
+    /// Animate a node through up to `MAX_KEYS` keyframes from where it shows now: each `(t, target,
+    /// curve)` reaches `target` `t` seconds after the start (times ascending), its segment shaped by
+    /// `curve` (a Bezier's duration is the segment's; a spring that has not settled by the next stop
+    /// jumps to it). A target sets its channel and keeps the others from the stop before. Driven as
+    /// `animate` is (patch path, no rebuild, no allocation once warm; reduced motion jumps to the
+    /// last stop); `animate` is the one-key case. `false` for a stale handle.
+    pub fn animate_keys(&mut self, b: &Handle, keys: &[(f32, Target, Curve)]) -> bool {
+        assert!(!keys.is_empty() && keys.len() <= MAX_KEYS, "Ui.animate_keys: 1 to {MAX_KEYS} keyframes, not {}", keys.len());
+        assert!(keys.windows(2).all(|w| w[0].0 <= w[1].0) && keys[0].0 >= 0.0, "Ui.animate_keys: keyframe times ascend from 0");
+        if !self.live(b) {
+            return false;
+        }
+        let slot = b.box_slot;
+        let from = self.pose(slot).0;
+        let mut k = Keys { n: keys.len(), t: [0.0; MAX_KEYS], pose: [from; MAX_KEYS], curve: [Curve::Bezier { duration: 0.0, points: [0.0, 0.0, 1.0, 1.0] }; MAX_KEYS] };
+        let mut at = from;
+        for (j, &(t, target, curve)) in keys.iter().enumerate() {
+            match target {
+                Target::Look(look) => at.look = look,
+                Target::Offset(dx, dy) => (at.dx, at.dy) = (dx, dy),
+                Target::Opacity(o) => at.opacity = o.clamp(0.0, 1.0),
+            }
+            (k.t[j], k.pose[j], k.curve[j]) = (t, at, curve);
+        }
+        let last = if self.theme().tokens.reduced_motion { 0.0 } else { k.t[k.n - 1] };
+        self.start_tween(slot, Curve::Bezier { duration: last, points: [0.0, 0.0, 1.0, 1.0] }, from, at);
+        if last > 0.0 {
+            let id = match self.free_keyframes.pop() {
+                Some(id) => {
+                    self.keyframes[id as usize] = k;
+                    id
+                }
+                None => {
+                    self.keyframes.push(k);
+                    self.keyframes.len() as u32 - 1
+                }
+            };
+            let i = self.tween_of(slot).expect("the run just started");
+            self.tweens[i].keys = id;
+        }
         if !self.building {
             self.frame_requested = true;
         }
@@ -5795,6 +6112,79 @@ impl Ui {
         body
     }
 
+    /// A scrolling grid of `count` cells `cell_w` by `cell_h`, filling its parent (`Grow` both ways):
+    /// as many columns as its width holds, in rows scrolling down, building only the rows in view
+    /// and `OVERSCAN` more past each edge. `f(ui, i)` builds cell `i` inside a cell box keyed by `i`
+    /// (its state stays while it is built); right to left the first cell is at the right. Returns the
+    /// grid's scroll box.
+    // ponytail: cells of one size; the columns come from last frame's width (the window's on the
+    // first), so a resize shows one frame of the old wrap, as `list` does with its rows.
+    pub fn grid_list(&mut self, label: &str, count: usize, cell_w: f32, cell_h: f32, f: &mut dyn FnMut(&mut Ui, usize)) -> Handle {
+        self.cells(label, count, (cell_w, cell_h), false, f)
+    }
+
+    /// `grid_list` turned: as many rows as its height holds, in columns scrolling sideways (`SCROLL_X`,
+    /// from the right edge right to left).
+    pub fn grid_list_x(&mut self, label: &str, count: usize, cell_w: f32, cell_h: f32, f: &mut dyn FnMut(&mut Ui, usize)) -> Handle {
+        self.cells(label, count, (cell_w, cell_h), true, f)
+    }
+
+    fn cells(&mut self, label: &str, count: usize, cell: (f32, f32), sideways: bool, f: &mut dyn FnMut(&mut Ui, usize)) -> Handle {
+        assert!(cell.0 > 0.0 && cell.1 > 0.0, "Ui.grid_list {label}: cells need a positive size");
+        let flags = CLIP | if sideways { SCROLL_X } else { SCROLL };
+        // `along` is the scrolling axis, `across` the one the cells wrap in
+        let (along, across) = if sideways { cell } else { (cell.1, cell.0) };
+        let body = self.node(label, Node { flags, w: Size::Grow, h: Size::Grow, scroll_step: along, role: Role::List, ..Node::DEFAULT });
+        let seen = (self.slots[body.box_slot].rw, self.slots[body.box_slot].rh);
+        let (w, h) = (if seen.0 > 0.0 { seen.0 } else { self.view_w }, if seen.1 > 0.0 { seen.1 } else { self.view_h });
+        let (room, room_across) = if sideways { (w, h) } else { (h, w) };
+        let per = ((room_across / across).floor() as usize).max(1);
+        let lines = count.div_ceil(per);
+        let extent = lines as f32 * along;
+        // the wheel and the trackpad move the grid before its lines are chosen (as `list` does)
+        (self.l_w[body.index], self.l_h[body.index]) = (w, h);
+        if sideways {
+            self.l_content_w[body.index] = extent;
+        } else {
+            self.l_content[body.index] = extent;
+        }
+        let offset = match (self.input_frame_time(), sideways) {
+            (Some(t), true) => {
+                self.apply_scroll_x(true, t, body.index);
+                self.scroll_offset_x(&body)
+            }
+            (Some(t), false) => {
+                self.apply_scroll(true, t, body.index);
+                self.scroll_offset(&body)
+            }
+            (None, true) => self.scroll_offset_x(&body),
+            (None, false) => self.scroll_offset(&body),
+        };
+        let top = (offset / along).floor().max(0.0) as usize;
+        let first = top.saturating_sub(OVERSCAN).min(lines);
+        let last = (top + (room / along).ceil() as usize + 1 + OVERSCAN).min(lines);
+        let rtl = self.dir == Direction::Rtl;
+        let saved = self.enter(&body);
+        let (ew, eh) = if sideways { (extent, per as f32 * across) } else { (per as f32 * across, extent) };
+        let holder = self.node_keyed(int_key(body.box_key, -1), Node { w: Size::Px(ew), h: Size::Px(eh), ..Node::DEFAULT });
+        let inner = self.enter(&holder);
+        for i in first * per..(last * per).min(count) {
+            let (line, k) = (i / per, i % per);
+            // the holder is a flow child, mirrored right to left; cells are `at` children, physical
+            let (mut x, y) = if sideways { (line as f32 * cell.0, k as f32 * cell.1) } else { (k as f32 * cell.0, line as f32 * cell.1) };
+            if rtl {
+                x = ew - x - cell.0;
+            }
+            let c = self.node_keyed(int_key(body.box_key, i as i64), Node { w: Size::Px(cell.0), h: Size::Px(cell.1), at: Some((x, y)), role: Role::ListItem, ..Node::DEFAULT });
+            let saved = self.enter(&c);
+            f(self, i);
+            self.leave(saved);
+        }
+        self.leave(inner);
+        self.leave(saved);
+        body
+    }
+
     /// The view `b` holds, if it is a live view.
     fn view_id(&self, b: &Handle) -> Option<u32> {
         if self.live(b) { Some(self.slots[b.box_slot].view).filter(|v| *v != NO_VIEW) } else { None }
@@ -5827,10 +6217,9 @@ impl Ui {
 
     /// Map a view's output through `pivot + scale * transform * (p - pivot)` (`transform` a row-major
     /// 2x2: rotation, skew, flip; `pivot` from its box's top-left corner): one table entry, no rebuild.
-    /// Hit testing follows through the inverse.
-    // ponytail: a view's transform applies to its own instances only, not to views nested in it (the
-    // painter's table is flat), and `rect` reports the untransformed box. Compose transforms down the
-    // view tree when nested transformed views are needed.
+    /// Views nested in it inherit it (their entries compose it with their own, as offset, opacity
+    /// and clip compose); hit testing goes through the inverse, and `rect` and the damage report
+    /// the window rectangle covering the transformed box.
     pub fn view_transform(&mut self, b: &Handle, scale: f32, transform: [f32; 4], pivot: (f32, f32)) {
         if let Some(v) = self.view_id(b) {
             let r = &mut self.views[v as usize];
@@ -5855,7 +6244,7 @@ impl Ui {
         for r in &self.views[1..] {
             if r.blur > 0.0 && r.valid && r.visited == self.painted {
                 if let Some(layer) = self.draw[..self.draw_len].iter().position(|l| l.key == r.layer) {
-                    let rect = r.entry().cover(r.screen);
+                    let rect = r.cover(r.screen);
                     let radii = self.slots[r.slot].node.look.radius;
                     self.blur_out.push(BlurOut { layer, at_instance: r.run.0, rect, sigma: r.blur, radii, opacity: r.alpha });
                 }
@@ -5976,20 +6365,25 @@ impl Ui {
         let parent = self.views[v as usize].parent;
         self.compose(parent);
         let pxf = self.views[parent as usize].xf;
-        let (pshift, palpha, pouter) = {
-            let p = &self.views[pxf as usize];
-            (p.shift, p.alpha, p.outer)
-        };
+        let p = &self.views[pxf as usize];
+        let (pshift, palpha, pouter) = (p.shift, p.alpha, p.outer);
+        // the enclosing transforms: none at the root, else the parent entry's composed with its own
+        let (pa, pb) = if pxf == 0 || (p.plain() && p.parent_plain()) { (IDENTITY_2X2, [0.0; 2]) } else { p.affine() };
+        let c = self.views[v as usize].box_clip;
+        let box_clip = p.cover(Rect::new(c.x + pshift.0, c.y + pshift.1, c.w, c.h));
         let r = &mut self.views[v as usize];
         r.stamp = stamp;
         if r.index == 0 {
             (r.shift, r.alpha, r.outer) = (pshift, palpha, pouter);
+            // its instances ride its parent's entry: the parent's own transform is not around it
+            (r.pa, r.pb) = (IDENTITY_2X2, [0.0; 2]);
         } else {
             r.shift = (pshift.0 + r.offset.0 + r.delta.0, pshift.1 + r.offset.1 + r.delta.1);
             r.alpha = palpha * r.opacity;
-            let c = r.box_clip;
-            r.outer = Rect::new(c.x + pshift.0, c.y + pshift.1, c.w, c.h).intersect(pouter).intersect(r.clip.unwrap_or(UNBOUNDED));
+            (r.pa, r.pb) = (pa, pb);
+            r.outer = box_clip.intersect(pouter).intersect(r.clip.unwrap_or(UNBOUNDED));
         }
+        r.flat = r.plain() && r.parent_plain();
         let b = r.built_rect;
         r.screen = Rect::new(b.x + r.shift.0, b.y + r.shift.1, b.w, b.h).intersect(r.outer);
     }
@@ -6004,13 +6398,13 @@ impl Ui {
             if self.views[v as usize].index == 0 || !self.shown(v) {
                 continue;
             }
-            let (old_entry, old_screen) = (self.views[v as usize].entry(), self.views[v as usize].screen);
+            let (old_entry, old_cover) = (self.views[v as usize].entry(), self.views[v as usize].cover(self.views[v as usize].screen));
             self.compose(v);
             let r = &self.views[v as usize];
             if r.entry() != old_entry {
-                let (screen, entry) = (r.screen, r.entry());
-                self.add_damage(old_entry.cover(old_screen));
-                self.add_damage(entry.cover(screen));
+                let cover = r.cover(r.screen);
+                self.add_damage(old_cover);
+                self.add_damage(cover);
             }
             let r = &self.views[v as usize];
             out.push((r.index, r.entry()));
@@ -6027,7 +6421,7 @@ impl Ui {
         if let Some(r) = bounds(i) {
             let v = &self.views[self.index_owner[i.view as usize] as usize];
             let r = Rect::new(r.x + v.shift.0, r.y + v.shift.1, r.w, r.h);
-            let r = if v.plain() { r } else { v.entry().cover(r) }.intersect(v.outer);
+            let r = v.cover(r).intersect(v.outer);
             self.add_damage(r);
         }
     }
