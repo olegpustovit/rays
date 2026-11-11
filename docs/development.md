@@ -253,3 +253,31 @@ exact-byte goldens differ by one in blended pixels (`rays_shell` `window_host_zo
 extra primitive's pixels, and off-by-one channels); `rays_editor` `instanced` and `run_instances` segfault on a
 driver worker thread; `native_isogrid_viewport_recipe_1` differs in its shadow pixels and the other isogrid
 qualification cases exceed even the 60 s limit, so the whole `RAYS_SLOW=1` editor run hits the 600 s cap.
+
+## The PXUI gallery on each platform
+
+`crates/pxui_gallery` shows every PXUI widget on four pages (Kit, Controls, Collections, Overlays) under the Rays theme
+and `crates/pxui/themes/dusk.theme` (reloaded when the file changes). It builds a frame only for input, a due repaint,
+a toast's expiry or the once-a-second theme poll, and sleeps in the host's wait otherwise.
+
+- macOS (`pxui_sdl` + Metal): `cargo run -p pxui_gallery`
+- Windows (`pxui_sdl` + Vulkan): the same command, from the MSYS2 UCRT64 shell with `TMP` set to a Windows path.
+- Linux (`pxui_wayland` + Vulkan, WSLg or any Wayland compositor): the environment above (`VK_ADD_LAYER_PATH` only
+  for validation), then the same command. The `pxui_atspi` bridge connects only when an accessibility bus answers
+  (`DBUS_SESSION_BUS_ADDRESS` or `AT_SPI_BUS_ADDRESS`); without one the gallery runs with the tree off. To walk it, start
+  a private `dbus-daemon --session --print-address`, `at-spi-bus-launcher --launch-immediately` on it, run the gallery
+  with `DBUS_SESSION_BUS_ADDRESS` set, and walk the application with `/usr/bin/python3` and
+  `GI_TYPELIB_PATH=~/vk/root/usr/lib/x86_64-linux-gnu/girepository-1.0` (`Atspi.get_desktop(0)`; `do_action(0)` presses).
+  Run python from a directory without stray `enum.py`/`re.py` files and not from the nix profile's python.
+
+Environment switches (all optional): `PXUI_GALLERY_PAGE=0..3`, `PXUI_GALLERY_DUSK=1`, `PXUI_GALLERY_RTL=1`,
+`PXUI_GALLERY_COMPACT=1`, `PXUI_GALLERY_THEME=path`, `PXUI_GALLERY_HIDDEN=1` (offscreen only, no window),
+`PXUI_GALLERY_SHOT=out.png` (save the third drawn frame, then exit 0), `PXUI_GALLERY_EXIT_AFTER=secs` and
+`PXUI_GALLERY_COUNT=1` (print `frames`, `draws` and `settled` on exit; `settled` counts frames built after the first half
+second and must stay 0 while idle). Example: `PXUI_GALLERY_PAGE=1 PXUI_GALLERY_DUSK=1 PXUI_GALLERY_SHOT=/tmp/p.png
+cargo run -p pxui_gallery`.
+
+`cargo t -p pxui_gallery` renders every page at 1x and 2x under both themes against `crates/pxui_gallery/fixtures` (tolerance
+2 per channel on every backend; lavapipe and NVIDIA stay within it) and checks the idle budget. The gallery's test image
+is 100x60 because the nearest-sampled texel boundaries of a 96x64 image under a 40-point box land exactly on pixel
+centres, which Metal and NVIDIA break differently (one texel row, 127 levels).
