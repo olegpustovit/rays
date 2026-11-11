@@ -183,7 +183,7 @@ fn main() {
     let mut dusk = load_theme(&theme_path);
     let mut stamp = modified(&theme_path);
     ui.set_theme(s.theme(&dusk));
-    s.image = Some(gpu.image(96, 64, &gpu::test_card(96, 64)));
+    s.image = Some(gpu.image(100, 60, &gpu::test_card(100, 60)));
     let mut painter = gpu.painter(&mut ui);
     let mut extent = win.extent();
     let mut target = gpu.target(extent.drawable.0 as u32, extent.drawable.1 as u32);
