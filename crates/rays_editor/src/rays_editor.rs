@@ -82,7 +82,15 @@ pub mod editor {
     /// `update`, also building sketch-owned kit widgets below the camera and render sections shown
     /// while no node is selected. The result is `None` on frames where that panel is not built.
     pub fn update_with(mut value: Editor, frame_: &frame::Frame, inspector: &dyn Fn(&mut pxui::ui::Ui) -> Rc<dyn Any>) -> (Editor, Option<Rc<dyn Any>>) {
-        let inspected = editor_loop::update_with(&mut value, frame_, inspector, false);
+        let inspected = editor_loop::update_with(&mut value, frame_, inspector, None);
+        (value, inspected)
+    }
+
+    /// `update_with` for widgets that show nothing but what `revision` stands for (the sketch bumps it
+    /// when that changes): the panel is a cached view kept while `revision` and the editor's own
+    /// sections stay, `inspector` not called; the result is `None` on frames it is kept.
+    pub fn update_with_revision(mut value: Editor, frame_: &frame::Frame, revision: u64, inspector: &dyn Fn(&mut pxui::ui::Ui) -> Rc<dyn Any>) -> (Editor, Option<Rc<dyn Any>>) {
+        let inspected = editor_loop::update_with(&mut value, frame_, inspector, Some(revision));
         (value, inspected)
     }
 

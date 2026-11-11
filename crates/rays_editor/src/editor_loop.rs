@@ -405,9 +405,9 @@ fn error_status_of(value: &LoopModel, image_errors: &[String]) -> Option<String>
     }
 }
 
-/// `cached`: `inspector` builds nothing of its own (the editor's loop), so the camera panel's revision
-/// stands for all it shows; a sketch's widgets have none, and the panel is built every frame.
-pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>, cached: bool) -> Option<Rc<dyn Any>> {
+/// `revision`: what `inspector` shows, mixed into the camera panel's revision (the editor's loop builds
+/// nothing of its own: `Some(0)`); a sketch's widgets with none are built every frame.
+pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>, revision: Option<u64>) -> Option<Rc<dyn Any>> {
     let drawn_before = value.drawn.clone();
     let followed = follow_focus(&value, &value.core, frame_);
     (value.viewing, value.camera, value.cameras) = (followed.viewing, followed.camera, followed.cameras);
@@ -418,7 +418,12 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let panel_control = value.control.clone();
     let panel_camera = value.camera.clone();
     let panel_extra = extra.clone();
-    let panel_rev = cached.then(|| V::panel_revision(&mut value.panel_seen, &value.control, &value.camera, &extra));
+    let panel_rev = revision.map(|own| {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::hash::DefaultHasher::new();
+        (V::panel_revision(&mut value.panel_seen, &value.control, &value.camera, &extra), own).hash(&mut h);
+        h.finish()
+    });
     Rc::make_mut(&mut value.core).revs.panel = panel_rev;
     let camera_panel = move |ui: &mut Ui| -> PanelResult { Rc::new(V::panel(ui, &panel_control, &panel_camera, &panel_extra, inspector)) };
     let handles_scene = editor_inspect::scene(&value.core).clone();
@@ -775,7 +780,7 @@ pub fn source_at_rest(value: &mut LoopModel, now: f64) -> bool {
 pub fn update(value: &mut LoopModel, frame_: &frame::Frame) {
     if rests(value, frame_).is_none() || !source_at_rest(value, frame_.input.t) {
         let before = value.rest.clone();
-        update_with(value, frame_, &|_ui| Rc::new(()), true);
+        update_with(value, frame_, &|_ui| Rc::new(()), Some(0));
         settle(&before, value, frame_);
     } else {
         let before_error = value.state_error.clone();

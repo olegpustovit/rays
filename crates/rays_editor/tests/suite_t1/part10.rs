@@ -186,6 +186,37 @@ fn workspace(name: &str, text: &str) {
             rays_graph::scope_pane::inspect::anchored_views(rays_editor::editor_model::pane_view(&core.into()))
         };
         check(rest.views == anchored, &format!("the rested zoom rebuilt {} views ({anchored} anchored)", rest.views));
+        // a sketch's panel: with a revision it is a kept view while the revision stays (its closure not
+        // called, no view built while the pointer moves), a new revision builds it once; without one it
+        // builds every frame
+        let built = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let sketch = |r: &mut Run, revision: Option<u64>, p: (f64, f64)| {
+            r.count += 1;
+            let f = frame_full(&[], &[], (0., 0.), p, vec![Event::PointerMoved(p)], r.count);
+            let b = built.clone();
+            let panel = move |ui: &mut pxui::ui::Ui| -> std::rc::Rc<dyn std::any::Any> {
+                b.set(b.get() + 1);
+                ui.inspector_toggle("sketch toggle", "Sketch", true);
+                std::rc::Rc::new(())
+            };
+            r.e = match revision {
+                Some(v) => rays_editor::editor::update_with_revision(r.e.clone(), &f, v, &panel).0,
+                None => rays_editor::editor::update_with(r.e.clone(), &f, &panel).0,
+            };
+        };
+        for i in 0..4 {
+            sketch(&mut r, Some(1), (450. + (i % 2) as f64, 300.));
+        }
+        built.set(0);
+        let kept = measure(&mut r, n, &|r, i| sketch(r, Some(1), (450. + (i % 2) as f64, 300.)));
+        report("empty sketch panel with a revision", &kept, n);
+        check(built.get() == 0 && kept.views == 0, &format!("a sketch panel with an unchanged revision built {} times ({} views)", built.get(), kept.views));
+        sketch(&mut r, Some(2), (450., 300.));
+        check(built.get() == 1, &format!("a new revision built the sketch panel {} times", built.get()));
+        built.set(0);
+        let every = measure(&mut r, n, &|r, i| sketch(r, None, (450. + (i % 2) as f64, 300.)));
+        report("empty sketch panel without a revision", &every, n);
+        check(built.get() == n, &format!("a sketch panel without a revision built {} times in {n} frames", built.get()));
     }
     r.close();
 }
