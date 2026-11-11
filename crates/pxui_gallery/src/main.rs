@@ -37,10 +37,8 @@ mod host {
     }
 
     /// Sleep until an event arrives or `deadline` (window time) passes.
-    // ponytail: pxui_sdl has no `wait` (pxui_wayland's `Window::wait`); SDL's own wait stands in.
-    pub fn wait(win: &Window, deadline: Option<f64>) {
-        let ms = deadline.map_or(-1, |at| ((at - win.time()).max(0.0) * 1000.0).ceil().min(i32::MAX as f64) as i32);
-        let _ = if ms < 0 { sdl3::event::wait(i32::MAX) } else { sdl3::event::wait(ms) };
+    pub fn wait(win: &mut Window, deadline: Option<f64>) {
+        win.wait(deadline);
     }
 
     pub fn cursor(win: &mut Window, c: Option<pxui::ui::Cursor>) {

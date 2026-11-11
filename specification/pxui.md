@@ -395,7 +395,7 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
 - A target is an image, not a swapchain: `pxui_render::Painter::draw(&mut pass, out.draw)` draws into a
   pass the caller opened (window swapchain image, display buffer, or the pass Rays already has open).
 - There is no `Host` trait. Each host crate (`pxui_sdl`, later `pxui_wayland`) exposes the same functions
-  (`open`, `pump`, `size`, `scale`, `time`, `target`, `apply`); the app links the one it wants.
+  (`open`, `pump`, `wait(deadline)`, `size`, `scale`, `time`, `target`, `apply`); the app links the one it wants.
 - `pxui` may depend only on `input`, `cfmt` and plain types of its own: `Point`, `Rect`, `Edges`,
   `Rgba`, all `f32`. It knows no GPU, window system, `rays`, `param` or `mem`. Memory is reported as bytes
   (`Ui::bytes()`); the embedder charges its own ledger. Enforced by `cargo run -p gate -- deps`.
