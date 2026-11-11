@@ -492,6 +492,32 @@ and list item (`ui.list`, picker, completions), tooltip, status bar (footer, ins
 area, table, splitter. The Linux host wiring (`pxui_atspi::Bridge::update(out.a11y)` after a frame,
 `inject_a11y(bridge.pump())` before the next) belongs to the gallery's Wayland host loop.
 
+**Widget set (P5, landed).** `ui_widgets.rs`, each a method over `&mut Ui` taking a value and returning
+the new value or an intent, one `States` entry each in the theme (`checkbox`, `radio`, `slider`,
+`progress`, `spinner`, `tab`, `segment`, `dropdown`, `menubar`, `scroll_view`, `listbox`, `tree`,
+`column`, `dialog`, `toast`, `icon_button`, `search`, `image`; dusk styles them): `checkbox(text, on)`,
+`radio(label, options, i)`, `slider(text, v, lo..=hi)` (drag, arrows a hundredth, Page a tenth,
+Home/End, SetValue; the value is the a11y value text), `progress(label, Some(f) | None) -> Handle`,
+`spinner(label) -> Handle` and `busy_step(&h, now) -> bool` (the indeterminate bar and the spinner move
+by `patch_rect`/`patch_look` between frames: no build, no allocation; reduced motion stops them),
+`tabs`, `segmented`, `dropdown(label, options, i)` (an anchored menu; Down/Up/Enter/Escape),
+`menu_bar(label, &[(title, items)]) -> Option<(menu, item)>` (hover switches an open menu; Left/Right,
+Down, Enter, Escape), `tip(&h, text)`, `scroll_view(label, w, h, f)` (both axes),
+`list_view(label, count, multi, &mut [bool], text)`, `tree(label, &[TreeNode], &mut open, &mut selected,
+&mut visible, text)` and `table_view(label, titles, &mut widths, rows, sort, &mut selected, cell)`
+(virtual through `ui.list`; the table's header stays, grips resize columns, a header click is the sort
+intent), `dialog(title, buttons, body) -> DialogOut`, `toasts(label, &[&str])` (the lower end corner;
+the caller owns the timers), `icon_button(label, glyph)`, `badge(label, text) -> Handle`,
+`search_field(label, icon, value, placeholder)` and `image(label, &Image, Fit, w, h)`. Every widget is
+one Tab stop (`TAB_ONLY`, as the kit's buttons: the pointer does not take the focus, so a click never
+starts the focused-repaint loop); arrows move inside groups and mirror under `Rtl`. Row text is in
+leaves as wide as their text, so right to left puts it at the start. `crates/pxui_gallery` shows every
+kit widget on four cached-view pages (`cargo run -p pxui_gallery`) with the Rays and `dusk.theme`
+themes (the file polled once a second through the host's wait and reloaded on a new mtime), density,
+direction and reduced-motion switches and a patched cost readout; its goldens are
+`crates/pxui_gallery/fixtures/gallery_<page>_<theme>_{1,2}x.png`, and its kit page renders
+`kit_panel_{1,2}x.png` exactly.
+
 Composition closures are called immediately; standard widgets carry a `Look` (plain data); only `canvas`
 closures outlive the build, and they live in the frame arena. Public functions take concrete types or
 `&mut dyn FnMut`; no proc macros, no generics-heavy public API.
