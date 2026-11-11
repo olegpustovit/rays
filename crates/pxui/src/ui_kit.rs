@@ -3,7 +3,6 @@
 //! the kit face. Every widget reads its appearance from the theme in effect (`Ui::theme`): it declares
 //! nodes, picks each node's look from its `States` for the node's state, and the engine paints them;
 //! no standard widget paints with a closure. Widgets must be built inside a `panel`.
-use crate::theme::{self, Tokens as Theme};
 use crate::ui_core::*;
 use crate::a11y::state as st;
 use input::{Event, Key};
@@ -254,38 +253,8 @@ pub fn fraction_at(r: IRect, pointer_x: f32) -> f32 {
     0.0f32.max(1.0f32.min((pointer_x - x as f32) / 1.max(w - 1) as f32))
 }
 
-/// The kit's 28 x 14 switch at a point, on or off: what `toggle` paints.
-pub fn paint_switch(paint: &mut Paint, theme: &Theme, x: f32, y: f32, value: bool) {
-    paint.fill(x, y, 28.0, 14.0, if value { theme.input } else { theme.track });
-    paint.stroke(x + 0.5, y + 0.5, 27.0, 13.0, theme::border(theme));
-    paint.fill(
-        x + if value { 17.0 } else { 3.0 },
-        y + 3.0,
-        8.0,
-        8.0,
-        if value { theme.accent } else { theme::ink_3(theme) },
-    );
-}
-
 pub fn cap_y(paint: &Paint, y: f32, h: f32) -> f32 {
     paint.text_top(Some(8.max(paint.font_size - 2)), y, h)
-}
-
-/// The ground of a button, the one painter of `button`, of the inspector's and of the shell's
-/// positioned buttons: a fill on press and hover, the control fill when `on`, a line-3 edge for the
-/// `primary`.
-pub fn paint_button_ground(paint: &mut Paint, theme: &Theme, held: bool, hovered: bool, on: bool, primary: bool, r: Rect) {
-    let Rect { x: cx, y: cy, w: cw, h: ch } = r;
-    if held {
-        paint.fill(cx, cy, cw, ch, theme::pressed_fill(theme));
-    } else if hovered {
-        paint.fill(cx, cy, cw, ch, theme::hover_fill(theme));
-    } else if on {
-        paint.fill(cx, cy, cw, ch, theme.control);
-    }
-    if primary {
-        paint.stroke(cx + 0.5, cy + 0.5, cw - 1.0, ch - 1.0, theme::border(theme));
-    }
 }
 
 /// The label column is 0.3 of the panel less 16 (98 at 380 wide, 80 at 320); a longer label
