@@ -75,7 +75,7 @@ impl Run {
     }
     fn line(&self) -> String {
         let w = self.worst;
-        format!("graph_costs {}: {:.0}/{:.0} us min/median, {} nodes, {} views, {} content builds, {} instance bytes, {} allocs (worst frame)", self.name, self.us[0], self.us[self.us.len() / 2], w.nodes, w.views, w.builds, w.bytes, w.allocs)
+        format!("graph_costs {}: {:.0}/{:.0}/{:.0} us min/median/max, {} nodes, {} views, {} content builds, {} instance bytes, {} allocs (worst frame)", self.name, self.us[0], self.us[self.us.len() / 2], self.us[self.us.len() - 1], w.nodes, w.views, w.builds, w.bytes, w.allocs)
     }
 }
 
