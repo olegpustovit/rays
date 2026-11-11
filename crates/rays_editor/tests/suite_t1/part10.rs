@@ -415,9 +415,62 @@ fn card_scrub() {
     r.close();
 }
 
+/// Scrubbing a graph input's slider in the Outline (`radius`): each frame of the drag sets the
+/// input's default (the canvas follows), the navigator's view stays kept (its field patched,
+/// `kept_drag`), and the scrub is one undo step. The first pass verifies the kept views.
+fn navigator_scrub() {
+    use editor_core::panels::Panel;
+    let text = r##"(workspace inputs (graph g :context draw [(radius : float 5)] (draw/circle [10 10 0] radius :fill "#00ffff")) (graph editor :context editor (let* [outline (ui/outline) main (ui/graph "g") view (ui/canvas (ref g))] (ui/workspace (ui/split "horizontal" outline (ui/split "vertical" view main) :first_size 216)))))"##;
+    let mut r = Run::new(editor(text));
+    for i in 0..30 {
+        r.step((450. + (i % 2) as f64, 300.), vec![]);
+    }
+    let n = 20;
+    let radius = |r: &Run| r.source().split("(radius : float ").nth(1).and_then(|t| t.split([' ', ')']).next()).unwrap_or("").to_owned();
+    // the slider: the middle of the radius row's field
+    let at = {
+        let f = frame_full(&[], &[], (0., 0.), (0., 0.), vec![], r.count);
+        let core: &rays_editor::editor_model::EditorModel = &r.e.core;
+        let g = rays_editor::editor_shell::geometry(&core.into(), &core.workspace, &f);
+        let body = g.leaves.iter().find(|l| l.panel == Panel::Outline).unwrap_or_else(|| fail("the outline")).body;
+        let pa = rays_editor::editor_panels::navigator_params(&core.into());
+        let rows = rays_editor::navigator::row_rects(&core.outline, &pa, body);
+        let (_, (x, y, w, h)) = rows.into_iter().find(|(row, _)| matches!(row, rays_editor::navigator::Row::InputRow { name, .. } if name == "radius")).unwrap_or_else(|| fail("the radius slider"));
+        // (a narrow sheet: 56 points of label)
+        ((x + 20.0 + 56.0 + (w - 32.0 - 56.0) / 2.0) as f64, (y + h / 2.0) as f64)
+    };
+    let (start, history) = (radius(&r), r.undo_label());
+    let mut scrubbed = None;
+    for pass in 0..2 {
+        r.e.core.ui.borrow_mut().verify_views(pass == 0);
+        r.step(at, vec![Event::PointerMoved(at)]);
+        let (cost, views, _) = scrub_at(&mut r, at, n, "navigator-view", &|_| 0);
+        let live = radius(&r);
+        check(live.parse::<f64>().is_ok_and(|v| v > 5.0), &format!("the slider scrub did not write the document: radius {live} ({})", r.source()));
+        undo_once(&mut r);
+        check(radius(&r) == start && r.undo_label() == history, &format!("one undo did not restore the scrubbed radius: {} ({:?})", radius(&r), r.undo_label()));
+        scrubbed = Some((cost, views, live));
+    }
+    let (scrub, views, live) = scrubbed.unwrap_or_else(|| fail("the measured scrub"));
+    report("navigator scrub", &scrub, n);
+    // the same edits written by the host (the navigator shows each: its view builds every frame)
+    let hosted = std::cell::Cell::new(0);
+    let edit = measure(&mut r, n, &|r, i| {
+        let op = flow_graph::flow_edit::Op::SetInputDefault { form: "g".into(), input: "radius".into(), value: flow_syntax::syntax::make(flow_syntax::syntax::Draft::Num(format!("{}.5", 5 + i))) };
+        r.e = rays_editor::editor::edit(r.e.clone(), &op).unwrap_or_else(|m: String| fail(&m));
+        r.step((450. + (i % 2) as f64, 300.), vec![Event::PointerMoved((450. + (i % 2) as f64, 300.))]);
+        hosted.set(hosted.get() + r.e.core.ui.borrow().rebuilt_named("navigator-view"));
+    });
+    report("navigator edit by the host", &edit, n);
+    eprintln!("ui_frames navigator scrub: radius {start} -> {live}, {views} rebuilds of the navigator's view in {n} frames (the host's edits {})", hosted.get());
+    check(views == 0 && hosted.get() == n, &format!("the slider scrub rebuilt the navigator's view {views} times in {n} frames (the host's edits {})", hosted.get()));
+    r.close();
+}
+
 pub fn run_ui_frames() {
     document_scrub();
     card_scrub();
+    navigator_scrub();
     workspace("basic", &sketch("basic"));
     workspace("empty", include_str!("../../../rays_bin/src/empty.rays"));
     workspace("floating", &with_editor("(let* [main (ui/graph) ins (ui/inspector) window (ui/floating ins) tiles (ui/tile main window)] (ui/workspace tiles))"));

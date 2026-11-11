@@ -997,6 +997,26 @@ fn paint_thumb(ui: &mut Ui, theme: Theme, total: f32, rh: f32, boxed: &UiBox) {
     });
 }
 
+/// An input's value as its slider shows it.
+fn show(integer: bool, v: f64) -> String {
+    if integer { format!("{}", v.round() as i64) } else { cfmt::g(v, 3) }
+}
+
+/// A slider's scrub from the value at the press, like a card's field: 1 per 6 points for an integer, a
+/// hundredth of the magnitude per point for a float, Shift is finer.
+fn scrub(integer: bool, origin: &str, dx: f32, shift: bool) -> String {
+    match origin.parse::<f64>().ok() {
+        None => origin.to_owned(),
+        Some(o) if integer => show(integer, o + (dx as f64 / if shift { 24.0 } else { 6.0 }).round()),
+        Some(o) => show(integer, o + (dx as f64 * 0.01 * o.abs().max(1.0) * if shift { 0.1 } else { 1.0 })),
+    }
+}
+
+/// A slider's field label (its key under the navigator's view).
+fn slider_label(graph: &str, name: &str) -> String {
+    format!("navigator-input-{}-{}", graph, name)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn input_sliders(
     ui: &mut Ui,
@@ -1020,21 +1040,14 @@ fn input_sliders(
             let ry = top + tops[k] - scroll;
             if ry >= top && ry + rh <= top + body {
                 let integer = *integer;
-                let show = move |v: f64| if integer { format!("{}", v.round() as i64) } else { cfmt::g(v, 3) };
-                // a scrub from the value at the press, like a card's field: 1 per 6 points for an integer, a hundredth of the
-                // magnitude per point for a float, Shift is finer
-                let scrub: Rc<dyn Fn(&str, f32, bool) -> String> = Rc::new(move |origin, dx, shift| match (origin).parse::<f64>().ok() {
-                    None => origin.to_owned(),
-                    Some(o) if integer => show(o + (dx as f64 / if shift { 24.0 } else { 6.0 }).round()),
-                    Some(o) => show(o + (dx as f64 * 0.01 * o.abs().max(1.0) * if shift { 0.1 } else { 1.0 })),
-                });
-                let text = show(*value);
-                let o = ValueFieldOpts { scrub: Some(scrub), edit: typed_row == Some(k), ..ValueFieldOpts::default() };
+                let scrub: Rc<dyn Fn(&str, f32, bool) -> String> = Rc::new(move |origin, dx, shift| scrub(integer, origin, dx, shift));
+                let text = show(integer, *value);
+                let o = ValueFieldOpts { scrub: Some(scrub), edit: typed_row == Some(k), kept_drag: true, ..ValueFieldOpts::default() };
                 let valid = move |t: &str| match (t).parse::<f64>().ok() {
                     Some(v) => v.is_finite() && (!integer || v.fract() == 0.0),
                     None => false,
                 };
-                let (changed, _) = ui.value_field((x + 20.0 + label_w, ry + 2.0), w - 32.0 - label_w, 20.0, &o, &valid, &format!("navigator-input-{}-{}", graph, name), &text);
+                let (changed, _) = ui.value_field((x + 20.0 + label_w, ry + 2.0), w - 32.0 - label_w, 20.0, &o, &valid, &slider_label(graph, name), &text);
                 if changed != text
                     && let Some(v) = (&changed).parse::<f64>().ok()
                 {
@@ -1045,15 +1058,136 @@ fn input_sliders(
     }
 }
 
-/// Draw the panel in `bounds` (scrolling, searching, sliders).
-pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params) -> (State, Vec<Intent>) {
+/// What a navigator's last build showed, by its pane's key (the caller's root): its state and rows,
+/// their revision, and the keys of the view and of its list box.
+struct Shown {
+    pane: i64,
+    state: State,
+    rows: Vec<Row>,
+    rev: u64,
+    view: i64,
+    list: i64,
+}
+
+/// The input slider a press holds (`kept_drag`), as its press built it: its pane, its field's key, its input,
+/// the text its scrub starts from, the last text it showed, and whether the last frame of its drag
+/// was shown by a patch.
+struct Held {
+    pane: i64,
+    field: i64,
+    graph: String,
+    input: String,
+    integer: bool,
+    origin: String,
+    last: String,
+    patched: bool,
+}
+
+thread_local! {
+    // ponytail: one entry per navigator pane ever shown, never pruned; prune with the pane when panes churn
+    static SHOWN: RefCell<Vec<Shown>> = const { RefCell::new(Vec::new()) };
+    // one held slider per thread (the pointer holds one field), found by its field's key
+    static HELD: RefCell<Option<Held>> = const { RefCell::new(None) };
+}
+
+/// The row of the list at window height `py` (`tops` from the list's top, `scroll` into it).
+fn row_of(tops: &[f32], top: f32, scroll: f32, py: f32) -> Option<usize> {
+    let off = py - top + scroll;
+    (py >= top && off < tops[tops.len() - 1]).then(|| tops.partition_point(|&t| t <= off).saturating_sub(1))
+}
+
+/// The held slider's scrub as its field reads it this frame (`dx` from the press).
+fn held_text(h: &Held, ui: &Ui, field: &UiBox, dx: f32) -> String {
+    scrub(h.integer, &h.origin, dx, ui.press_keys(field).contains(&Key::Shift))
+}
+
+/// Draw the panel in `bounds` (scrolling, searching, sliders) of the pane keyed `pane`, in a cached
+/// view: it builds when what it shows changes (its state and rows, the scroll, the hovered row, the
+/// keys it reads) or input reaches it. A held input slider (`kept_drag`) is followed between builds:
+/// each frame of its drag patches the field and sets the input's default, the view kept at the
+/// revision it was built with; its release builds it as the document is then.
+pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, pane: i64) -> (State, Vec<Intent>) {
+    use std::hash::Hash;
+    let rows = rows(bounds.2 >= 300, state, pa);
+    let dragged = HELD.with(|h| h.borrow().as_ref().filter(|h| h.pane == pane).and_then(|h| ui.box_of_key(h.field).filter(|b| ui.field_drag(b).is_some()).map(|_| h.patched)));
+    let (rev, list) = SHOWN.with(|s| {
+        let mut s = s.borrow_mut();
+        let k = s.iter().position(|e| e.pane == pane).unwrap_or_else(|| {
+            s.push(Shown { pane, state: state.clone(), rows: rows.clone(), rev: 0, view: 0, list: 0 });
+            s.len() - 1
+        });
+        let e = &mut s[k];
+        // while a held slider's drag is shown by patches its own edits change no revision
+        if dragged != Some(true) && (e.state != *state || e.rows != rows) {
+            (e.state, e.rows, e.rev) = (state.clone(), rows.clone(), e.rev + 1);
+        }
+        (e.rev, ui.box_of_key(e.list))
+    });
+    let scroll = list.map_or(0.0, |b| ui.scroll_position(&b));
+    let rh = ui.row_height() as f32;
+    let hovered = list.map(|b| ui.signal(&b)).filter(|sg| sg.hovered).and_then(|sg| row_of(&tops(rh, &rows), bounds.1 as f32 + SEARCH_HEIGHT, scroll, sg.pointer.1));
+    let keys = [Key::F2, Key::Delete, Key::Enter].map(|k| ui.key_pressed(k));
+    let revision = kit::revision(&|h| (rev, bounds, pa.scope.is_some(), pa.workspace.graphs.len(), scroll.to_bits(), hovered, keys).hash(h));
+    let (mut out, mut verified) = (None, false);
+    let v = kit::cached(ui, "navigator-view", revision, &mut |ui| {
+        verified = ui.verifying();
+        out = Some(build(state, ui, bounds, pa, rows.clone()));
+    });
+    let (state, mut intents) = match out {
+        Some((next, intents, list)) if !verified => {
+            SHOWN.with(|s| s.borrow_mut().iter_mut().filter(|e| e.pane == pane).for_each(|e| (e.view, e.list) = (v.box_key, list)));
+            // a press on a slider holds it; its release (or a build of it not held) lets it go
+            HELD.with(|h| {
+                let mut h = h.borrow_mut();
+                for row in &rows {
+                    let Row::InputRow { graph, name, integer, value } = row else { continue };
+                    let field = pxui::ui_core::key_of(v.box_key, &slider_label(graph, name));
+                    if ui.box_of_key(field).is_some_and(|b| ui.signal(&b).pressed) {
+                        let origin = show(*integer, *value);
+                        *h = Some(Held { pane, field, graph: graph.clone(), input: name.clone(), integer: *integer, last: origin.clone(), origin, patched: false });
+                    }
+                }
+                let signal = h.as_ref().and_then(|held| ui.box_of_key(held.field).map(|b| (b, ui.signal(&b))));
+                match (h.as_mut(), signal) {
+                    (Some(held), Some((b, sg))) if held.pane == pane && sg.held => (held.last, held.patched) = (held_text(held, ui, &b, sg.pointer.0 - sg.press_point.0), false),
+                    (Some(held), _) if held.pane == pane => *h = None,
+                    _ => {}
+                }
+            });
+            (next, intents)
+        }
+        // a verifying run of the kept view wrote the drag's default itself
+        Some((_, intents, _)) => (state.clone(), intents),
+        None => (state.clone(), Vec::new()),
+    };
+    // a frame of the held slider's drag on the kept view: the field patched (a patch that cannot show
+    // it builds the view next frame) and the default set
+    let followed = HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        let h = h.as_mut().filter(|h| h.pane == pane)?;
+        let field = ui.box_of_key(h.field)?;
+        let (_, dx) = ui.field_drag(&field)?;
+        let text = held_text(h, ui, &field, dx);
+        if text == h.last {
+            h.patched = true;
+            return None;
+        }
+        h.patched = ui.patch_field(&field, &ValueFieldOpts::default(), &text);
+        h.last = text;
+        h.last.parse::<f64>().ok().filter(|v| v.is_finite()).map(|value| Intent::SetDefault { graph: h.graph.clone(), input: h.input.clone(), value, integer: h.integer })
+    });
+    intents.extend(followed.filter(|_| !verified));
+    (state, intents)
+}
+
+fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, rows: Vec<Row>) -> (State, Vec<Intent>, i64) {
     let theme = ui.tokens();
     let rh = ui.row_height() as f32;
     let (x, y, w, h) = bounds;
     let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);
     let muted = theme::muted(&theme);
     // the search field above the list
-    let was_typing = state.typing;
+    let (was_typing, query_in) = (state.typing, state.query.clone());
     // the wide sheet's field leaves room for the add button; the narrow one has no button
     let field_w = if w >= 300.0 { w - 40.0 } else { w - 16.0 };
     let mut state = state.clone();
@@ -1090,7 +1224,8 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
             paint.text_c((px + 12.5, ty), theme::ink_3(&theme), &cut);
         });
     }
-    let rows = rows(w >= 300.0, &state, pa);
+    // (the search field's text moves the rows the frame it changes)
+    let rows = if state.query == query_in { rows } else { self::rows(w >= 300.0, &state, pa) };
     let tops = tops(rh, &rows);
     let total = tops[rows.len()];
     let top = y + SEARCH_HEIGHT;
@@ -1108,18 +1243,7 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
     let mut content: Option<UiBox> = None;
     ui.within(&boxed, &mut |ui: &mut Ui| content = Some(ui.box_("navigator-content", BoxOpts::default().w(Size::Px(w)).h(Size::Px(total + rh)))));
     let content = content.expect("navigator content");
-    let row_at = |(_, py): (f32, f32)| -> Option<usize> {
-        let off = py - top + scroll;
-        if py < top || off >= total {
-            None
-        } else {
-            let mut k = 0;
-            while tops[k + 1] <= off {
-                k += 1;
-            }
-            Some(k)
-        }
-    };
+    let row_at = |(_, py): (f32, f32)| row_of(&tops, top, scroll, py);
     let mut intents: Vec<Intent> = renamed;
     // the two sheets of the kit: a column under 300 points (the workspace) drops the details and keeps 56 points for an
     // input's label, a wide one (the outline sheet) shows them and keeps 112
@@ -1274,5 +1398,5 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
     if fold {
         state.scene_closed = !state.scene_closed;
     }
-    (state, intents)
+    (state, intents, boxed.box_key)
 }

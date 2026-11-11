@@ -702,7 +702,7 @@ pub fn draw_outline_panes(
             let mut result = None;
             on_sheet(ui, leaf.floating, &mut |ui| {
                 ui.within(&root, &mut |ui| {
-                    result = Some(navigator::view(state, ui, leaf.body, &params));
+                    result = Some(navigator::view(state, ui, leaf.body, &params, pxui::ui_core::key(&root)));
                 });
             });
             result.expect("outline drawn")
