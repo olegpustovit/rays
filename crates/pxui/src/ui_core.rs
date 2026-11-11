@@ -907,6 +907,10 @@ pub struct Ui {
     /// boxes the last layout ran over; row flow direction
     arranged: usize,
     dir: Direction,
+    /// how long the last frame's layout passes took
+    layout_time: std::time::Duration,
+    /// `order_stack`'s scratch: (z, build position, box)
+    z_order: Vec<(i16, u32, usize)>,
     // build state
     parents: Vec<usize>,
     overlays: Vec<usize>,
@@ -1077,6 +1081,8 @@ impl Ui {
             scroll_xs: Vec::new(),
             arranged: 0,
             dir: Direction::Ltr,
+            z_order: Vec::new(),
+            layout_time: std::time::Duration::ZERO,
             parents: Vec::new(),
             overlays: Vec::new(),
             foreground: Vec::new(),
@@ -1274,6 +1280,11 @@ impl Ui {
     /// virtual list saves.
     pub fn built_nodes(&self) -> usize {
         self.count
+    }
+
+    /// How long the last frame's layout (`intrinsic` and `arrange`) took.
+    pub fn layout_time(&self) -> std::time::Duration {
+        self.layout_time
     }
 
     /// Nodes the last frame's layout ran over: a kept view's are not among them.
@@ -2277,11 +2288,10 @@ impl BoxOpts {
     }
 }
 
-/// What `enter`, `scope` and `enter_root` change; `leave` puts it back. `enter` and `scope` only
-/// push, so they keep the depths; the roots replace the stacks and keep them whole.
+/// What `enter`, `scope` and `enter_root` change; `leave` puts it back. Each only pushes (a root
+/// pushes the root box), so the depths restore it with no allocation.
 pub enum Saved {
     Depths(usize, usize),
-    Stacks(Vec<usize>, Vec<i64>),
 }
 
 #[derive(Clone, Debug)]
@@ -2518,16 +2528,9 @@ impl Ui {
     }
 
     pub fn leave(&mut self, saved: Saved) {
-        match saved {
-            Saved::Depths(parents, seeds) => {
-                self.parents.truncate(parents);
-                self.seeds.truncate(seeds);
-            }
-            Saved::Stacks(parents, seeds) => {
-                self.parents = parents;
-                self.seeds = seeds;
-            }
-        }
+        let Saved::Depths(parents, seeds) = saved;
+        self.parents.truncate(parents);
+        self.seeds.truncate(seeds);
     }
 
     /// Build children of `b`.
@@ -2551,7 +2554,10 @@ impl Ui {
     /// built is laid out in the window, clipped by no pane.
     pub(crate) fn enter_root(&mut self) -> Saved {
         self.escape();
-        Saved::Stacks(std::mem::replace(&mut self.parents, vec![0]), std::mem::replace(&mut self.seeds, vec![ROOT_KEY]))
+        let saved = Saved::Depths(self.parents.len(), self.seeds.len());
+        self.parents.push(0);
+        self.seeds.push(ROOT_KEY);
+        saved
     }
 
     pub fn box_of_key(&self, key: i64) -> Option<UiBox> {
@@ -2987,44 +2993,25 @@ impl Ui {
         if row { (along, across) } else { (across, along) }
     }
 
-    /// A stack's children in `z` order (stable): paint and hit order follow the list.
+    /// A stack's children in `z` order (stable): paint and hit order follow the list. Sorted in a
+    /// scratch vector kept between frames (no allocation once warm), O(k log k).
     fn order_stack(&mut self, index: usize) {
-        let mut sorted = NONE;
+        let mut order = std::mem::take(&mut self.z_order);
+        order.clear();
         let mut child = self.boxes[index].first;
-        if child == NONE || {
-            let mut c = child;
-            let mut plain = true;
-            while c != NONE {
-                plain &= self.nd(c).z == 0;
-                c = self.boxes[c].next;
-            }
-            plain
-        } {
-            return;
-        }
-        // insertion sort of the singly linked list: small child lists
         while child != NONE {
-            let next = self.boxes[child].next;
-            let z = self.nd(child).z;
-            if sorted == NONE || self.nd(sorted).z > z {
-                self.boxes[child].next = sorted;
-                sorted = child;
-            } else {
-                let mut at = sorted;
-                while self.boxes[at].next != NONE && self.nd(self.boxes[at].next).z <= z {
-                    at = self.boxes[at].next;
-                }
-                self.boxes[child].next = self.boxes[at].next;
-                self.boxes[at].next = child;
+            order.push((self.nd(child).z, order.len() as u32, child));
+            child = self.boxes[child].next;
+        }
+        if order.iter().any(|o| o.0 != 0) {
+            order.sort_unstable();
+            for k in 0..order.len() {
+                self.boxes[order[k].2].next = order.get(k + 1).map_or(NONE, |o| o.2);
             }
-            child = next;
+            self.boxes[index].first = order[0].2;
+            self.boxes[index].last = order[order.len() - 1].2;
         }
-        self.boxes[index].first = sorted;
-        let mut last = sorted;
-        while self.boxes[last].next != NONE {
-            last = self.boxes[last].next;
-        }
-        self.boxes[index].last = last;
+        self.z_order = order;
     }
 
     /// The grid's column and row sizes: a content-sized track takes its largest single-span child
@@ -4879,8 +4866,10 @@ impl Ui {
             }
         }
         self.overlays.clear();
+        let laid = std::time::Instant::now();
         self.intrinsic();
         self.arrange(frame.input.t);
+        self.layout_time = laid.elapsed();
         self.paint_all(frame);
         self.step_tweens();
         self.text_mut().end_frame();
@@ -5985,7 +5974,9 @@ impl Ui {
     /// Popups live at the root: the parents are the root alone, the seeds stay.
     pub(crate) fn enter_root_parent(&mut self) -> Saved {
         self.escape();
-        Saved::Stacks(std::mem::replace(&mut self.parents, vec![0]), self.seeds.clone())
+        let saved = Saved::Depths(self.parents.len(), self.seeds.len());
+        self.parents.push(0);
+        saved
     }
 
     fn belongs(&mut self, target: i64, key: i64, related: &[i64]) -> bool {

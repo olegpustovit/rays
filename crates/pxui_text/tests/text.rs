@@ -141,8 +141,11 @@ fn end_frame_evicts_untouched_layouts() {
     t.layout(1, "abc", &Style::default(), 0.0);
     t.layout(2, "abc", &Style::default(), 0.0);
     t.end_frame();
-    t.layout(1, "abc", &Style::default(), 0.0);
-    t.end_frame();
+    for _ in 0..pxui_text::KEEP_FRAMES {
+        assert!(t.caret(2, 3).x > 0.0, "a layout outlives a short keep");
+        t.layout(1, "abc", &Style::default(), 0.0);
+        t.end_frame();
+    }
     assert!(t.caret(1, 3).x > 0.0);
     assert_eq!(t.caret(2, 3), Rect::default());
 }

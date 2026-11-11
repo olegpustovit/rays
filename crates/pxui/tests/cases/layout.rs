@@ -335,7 +335,154 @@ pub fn layout_kit_resize_same_frame() {
     ui.destroy();
 }
 
+const WORDS: [&str; 4] = ["x", "Mid", "a longer label", "Wq"];
+const STRESS_COLS: &[Track] = &[Track::Px(20.0), Track::Fr(1.0), Track::Fit, Track::Fr(2.0)];
+const JUSTIFY: [Justify; 6] = [Justify::Start, Justify::Center, Justify::End, Justify::SpaceBetween, Justify::SpaceAround, Justify::SpaceEvenly];
+const ALIGN: [Align; 5] = [Align::Start, Align::Center, Align::End, Align::Stretch, Align::Baseline];
+
+/// `groups` groups of 20 nodes (a container and 19 children) cycling through every layout mode, in
+/// a wrapping row: 20 x `groups` + 1 nodes.
+fn stress(ui: &mut Ui, groups: usize) {
+    let all = ui.node_keyed(int_key(9, 0), Node { w: Size::Px(2400.0), h: Size::Fit, axis: Axis::Row, wrap: true, gap: 2.0, row_gap: 2.0, ..Node::DEFAULT });
+    let saved = ui.enter(&all);
+    for g in 0..groups {
+        let mode = g % 5;
+        let look = Look { fill: color::rgb(40 + (g % 7) as i64 * 20, 90, 140), text: color::black(), ..Look::NONE };
+        let n = match mode {
+            0 => Node { axis: Axis::Row, justify: JUSTIFY[g / 5 % 6], align: ALIGN[g / 5 % 5], gap: 1.0, padding: Edges { l: 1.0, t: 2.0, r: 3.0, b: 4.0 }, ..px(110.0, 110.0) },
+            1 => Node { axis: Axis::Row, wrap: true, gap: 2.0, row_gap: 1.0, align: Align::Baseline, ..px(110.0, 110.0) },
+            2 => Node { grid: Some(Grid { cols: STRESS_COLS, rows: &[] }), gap: 1.0, row_gap: 1.0, ..px(110.0, 110.0) },
+            3 => Node { axis: Axis::Stack, justify: Justify::Center, align: Align::End, ..px(110.0, 110.0) },
+            _ => Node { flags: SCROLL | SCROLL_X | CLIP, axis: Axis::Column, justify: Justify::SpaceBetween, ..px(110.0, 110.0) },
+        };
+        let p = ui.node_keyed(int_key(all.box_key, g as i64), Node { look, ..n });
+        let inner = ui.enter(&p);
+        for i in 0..19usize {
+            let f = i as f32;
+            let mut c = Node {
+                w: if i % 3 == 0 { Size::Grow } else { Size::Px(4.0 + f) },
+                h: if i % 4 == 0 { Size::Fit } else { Size::Px(3.0 + f / 2.0) },
+                grow: 1.0 + (i % 3) as f32,
+                shrink: (i % 2) as f32,
+                min_w: if i % 5 == 0 { 2.0 } else { 0.0 },
+                max_w: if i % 7 == 0 { 30.0 } else { f32::INFINITY },
+                aspect: if i % 4 == 0 { 2.0 } else { 0.0 },
+                margin: Edges { l: (i % 2) as f32, t: 1.0, r: 0.0, b: (i % 3) as f32 },
+                align_self: if i % 6 == 0 { Some(ALIGN[i % 5]) } else { None },
+                z: (i % 4) as i16,
+                cell: if i == 5 { Cell::DEFAULT.span(2, 2) } else { Cell::DEFAULT },
+                flags: if mode == 4 && i == 0 { STICKY } else { 0 },
+                look: Look { font: Font { size: 10 + (i % 3) as i64 * 4, ..Font::BODY }, ..look },
+                ..Node::DEFAULT
+            };
+            if mode == 4 {
+                c.h = Size::Px(12.0);
+            }
+            let h = ui.node_keyed(int_key(p.box_key, i as i64), c);
+            ui.text(&h, WORDS[i % 4]);
+        }
+        ui.leave(inner);
+    }
+    ui.leave(saved);
+}
+
+/// An anchored popup at the window's bottom edge (built outside the cached views: a popup at the
+/// root rebuilds the view that builds it).
+fn stress_popup(ui: &mut Ui) {
+    let popup = Placement { side: Side::Below, align: Align::Start, gap: 2.0, margin: 4.0, flip: true };
+    ui.anchored("stress-pop", Rect::new(2300.0, 2390.0, 40.0, 20.0), popup, Size::Fit, Size::Fit, &mut |ui| {
+        ui.node("pop-body", Node { look: Look { fill: color::white(), ..Look::NONE }, ..px(120.0, 60.0) });
+        ui.node("pop-line", Node { w: Size::Grow, h: Size::Px(1.0), ..Node::DEFAULT });
+    });
+}
+
+fn big_frame(t: f64) -> input::frame::Frame {
+    let mut f = frame_at(vec![], 1.0, t, vec![]);
+    f.input.size = (2400, 2400);
+    f
+}
+
+/// Per frame of `build` over `n` warm frames: (allocations, us per frame, us of layout per frame).
+fn costs(ui: &mut Ui, t: &mut f64, n: u32, build: &mut dyn FnMut(&mut Ui, u64)) -> (u64, f64, f64) {
+    for _ in 0..5 {
+        *t += 1.0 / 60.0;
+        let tick = (*t * 60.0).round() as u64;
+        ui.frame(&big_frame(*t), &mut |ui| build(ui, tick));
+    }
+    mem_sys::local_reset();
+    let before = mem_sys::local_alloc_count();
+    let (mut total, mut layout) = (0u128, 0u128);
+    for _ in 0..n {
+        *t += 1.0 / 60.0;
+        let tick = (*t * 60.0).round() as u64;
+        let start = std::time::Instant::now();
+        ui.frame(&big_frame(*t), &mut |ui| build(ui, tick));
+        total += start.elapsed().as_nanos();
+        layout += ui.layout_time().as_nanos();
+    }
+    let allocs = mem_sys::local_alloc_count() - before;
+    (allocs, total as f64 / n as f64 / 1e3, layout as f64 / n as f64 / 1e3)
+}
+
+/// Every layout mode in one 2,004-node tree, mirrored right to left: zero allocations for a full
+/// rebuild + layout + paint and for a cached frame once warm; and the costs, printed.
+pub fn layout_stress_zero_alloc() {
+    let mut ui = new_ui(None);
+    ui.set_dir(Direction::Rtl);
+    let mut t = 0.0;
+    // rebuilt every frame: the revision is the frame's tick
+    let (allocs, us, layout_us) = costs(&mut ui, &mut t, 20, &mut |ui, tick| {
+        ui.view("stress", tick, Size::Px(2400.0), Size::Px(2400.0), &mut |ui| stress(ui, 100));
+        stress_popup(ui);
+    });
+    let nodes = ui.arranged_nodes();
+    check(nodes > 2000, &format!("{nodes} nodes"));
+    eprintln!("PXUI_LAYOUT full rebuild of {nodes} nodes: {us:.0} us per frame ({:.0} ns per node), layout {layout_us:.0} us ({:.0} ns per node), {allocs} allocations", us * 1e3 / nodes as f64, layout_us * 1e3 / nodes as f64);
+    check(allocs == 0, &format!("{allocs} allocations in 20 warm full rebuilds"));
+    let (allocs, us, _) = costs(&mut ui, &mut t, 50, &mut |ui, _| {
+        ui.view("stress", 1, Size::Px(2400.0), Size::Px(2400.0), &mut |ui| stress(ui, 100));
+        stress_popup(ui);
+    });
+    eprintln!("PXUI_LAYOUT cached 2,000-node view: {us:.1} us per frame, {allocs} allocations");
+    check(allocs == 0, &format!("{allocs} allocations in 50 cached frames"));
+    let (allocs, us, _) = costs(&mut ui, &mut t, 50, &mut |ui, tick| {
+        ui.view("stress", 1, Size::Px(2400.0), Size::Px(2300.0), &mut |ui| stress(ui, 100));
+        ui.view("small", tick, Size::Px(2400.0), Size::Px(100.0), &mut |ui| stress(ui, 2));
+        stress_popup(ui);
+    });
+    eprintln!("PXUI_LAYOUT 2,000 nodes cached + one 50-node view rebuilt: {us:.1} us per frame, {allocs} allocations");
+    check(allocs == 0, &format!("{allocs} allocations with one small view rebuilt"));
+    ui.destroy();
+}
+
+/// Layout cost per node holds across tree sizes: the same mix at 500, 2,000 and 8,000 nodes.
+pub fn layout_scaling() {
+    let mut per_node = Vec::new();
+    for groups in [25usize, 100, 400] {
+        let mut ui = new_ui(None);
+        let mut t = 0.0;
+        let mut best = (f64::INFINITY, f64::INFINITY);
+        for _ in 0..3 {
+            let (_, us, layout_us) = costs(&mut ui, &mut t, 8, &mut |ui, tick| {
+                ui.view("stress", tick, Size::Px(2400.0), Size::Px(2400.0), &mut |ui| stress(ui, groups));
+                stress_popup(ui);
+            });
+            best = (best.0.min(us), best.1.min(layout_us));
+        }
+        let nodes = ui.arranged_nodes() as f64;
+        let row = (nodes, best.0 * 1e3 / nodes, best.1 * 1e3 / nodes);
+        eprintln!("PXUI_LAYOUT scaling {} nodes: {:.0} ns per node rebuilt, {:.0} ns per node of layout", row.0, row.1, row.2);
+        per_node.push(row);
+        ui.destroy();
+    }
+    let (first, last) = (per_node[0], per_node[2]);
+    check(last.2 < first.2 * 1.5, &format!("layout per node grew from {:.0} to {:.0} ns", first.2, last.2));
+    check(last.1 < first.1 * 1.5, &format!("rebuild per node grew from {:.0} to {:.0} ns", first.1, last.1));
+}
+
 pub const CASES: &[(&str, fn())] = &[
+    ("layout_stress_zero_alloc", layout_stress_zero_alloc),
+    ("layout_scaling", layout_scaling),
     ("layout_kit_resize_same_frame", layout_kit_resize_same_frame),
     ("layout_warm_zero_alloc", layout_warm_zero_alloc),
     ("layout_grow_shrink", layout_grow_shrink),

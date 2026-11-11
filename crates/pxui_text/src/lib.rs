@@ -8,7 +8,7 @@
 //! let m = t.layout(node, "hello", &st, 200.0);                 // -> Metrics { w, h, lines, baseline }
 //! t.glyphs(node, (x, y), scale, &mut |g| quads.push(g));       // device-pixel quads + normalised uv
 //! t.drain_uploads(&mut |kind, x, y, w, h, data, stride| ..);   // upload only new glyph rects
-//! t.end_frame();                                               // evict layouts not laid out this frame
+//! t.end_frame();                                               // evict layouts unused for KEEP_FRAMES frames
 //! ```
 //!
 //! API (all geometry f32; inputs in logical points, glyph quads in device pixels = points * scale):
@@ -103,6 +103,9 @@ pub struct Glyph {
     pub uv: Rect,
     pub atlas: AtlasKind,
 }
+
+/// Frames a layout outlives its last use (`Text::end_frame`).
+pub const KEEP_FRAMES: u32 = 600;
 
 /// The bundled UI face (the PXUI default theme's font).
 pub const PRAGMASEVKA: &[u8] = include_bytes!("../../../assets/fonts/Pragmasevka-Regular.ttf");
@@ -438,10 +441,14 @@ impl Text {
         self.evictions
     }
 
-    /// Call once per frame: drops layouts not laid out since the previous call.
+    /// Call once per frame: drops layouts not laid out in the last `KEEP_FRAMES` frames. A cached
+    /// view's text is not laid out while the view is kept; its layouts outlive a short keep, so the
+    /// view's next rebuild is a cache hit, not a re-shape.
+    // ponytail: age-based, not size-based; a view kept past KEEP_FRAMES frames re-shapes its text (and
+    // allocates) on its next rebuild. An LRU with a byte budget if that shows.
     pub fn end_frame(&mut self) {
         let frame = self.frame;
-        self.entries.retain(|_, e| e.frame == frame);
+        self.entries.retain(|_, e| frame.wrapping_sub(e.frame) < KEEP_FRAMES);
         self.frame += 1;
     }
 }
