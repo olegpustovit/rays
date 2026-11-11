@@ -368,6 +368,7 @@ pub fn app(ui: &mut Ui, s: &mut Gallery) {
 pub struct Cost {
     pub us: f64,
     pub nodes: usize,
+    pub views: usize,
     pub laid_out: usize,
     pub bytes: u64,
     pub allocs: Option<u64>,
@@ -377,7 +378,7 @@ pub struct Cost {
 /// The readout's text, written into `out` (kept, so a warm frame does not allocate).
 pub fn readout(out: &mut String, c: &Cost) {
     out.clear();
-    let _ = write!(out, "frame {:.0} us   nodes built {}   laid out {}   instance bytes {}   frames {}", c.us, c.nodes, c.laid_out, c.bytes, c.frames);
+    let _ = write!(out, "frame {:.0} us   views built {}   nodes built {}   laid out {}   instance bytes {}   frames {}", c.us, c.views, c.nodes, c.laid_out, c.bytes, c.frames);
     if let Some(a) = c.allocs {
         let _ = write!(out, "   allocs {a}");
     }

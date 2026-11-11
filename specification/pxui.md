@@ -427,7 +427,7 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
    `view_offset`, `view_opacity`, `view_clip` change between frames without a rebuild (hit testing and
    `rect` follow; past 255 views the offset is baked by a rebuild). `ui.list(label, count, row_h, f)`
    builds only visible rows plus 4 each side; `ui.verify_views(true)` re-runs clean views and panics
-   naming one whose output changed. `ui.built_nodes()` counts the last build's declared nodes.
+   naming one whose output changed. `ui.built_nodes()` counts the last build's declared nodes, `ui.rebuilt_views()` the views it built rather than kept.
 
 **Styling (P5 commit 2, styling half, landed).** `pxui::theme`: `Tokens` (colour roles, `space`,
 `radius` small/medium/large, type sizes, `motion` fast/normal/slow + cubic-bezier `ease`,

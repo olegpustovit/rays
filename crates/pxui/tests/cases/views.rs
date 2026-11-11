@@ -326,9 +326,9 @@ pub fn window_pxui_budget_counts() {
         step(&mut ui, false);
     }
     step(&mut ui, false);
-    check(ui.built_nodes() == 11 && ui.arranged_nodes() == 11, &format!("kept frame: {} built, {} arranged", ui.built_nodes(), ui.arranged_nodes()));
+    check(ui.built_nodes() == 11 && ui.arranged_nodes() == 11 && ui.rebuilt_views() == 0, &format!("kept frame: {} built, {} arranged, {} views", ui.built_nodes(), ui.arranged_nodes(), ui.rebuilt_views()));
     step(&mut ui, true);
-    check(ui.built_nodes() == 86 && ui.arranged_nodes() == 86, &format!("one view: {} built, {} arranged", ui.built_nodes(), ui.arranged_nodes()));
+    check(ui.built_nodes() == 86 && ui.arranged_nodes() == 86 && ui.rebuilt_views() == 1, &format!("one view: {} built, {} arranged, {} views", ui.built_nodes(), ui.arranged_nodes(), ui.rebuilt_views()));
     check(ui.output().a11y.nodes.is_empty() && ui.output().a11y.revision == 0, "the accessibility tree was built with nobody asking");
     ui.set_a11y(true);
     for _ in 0..3 {

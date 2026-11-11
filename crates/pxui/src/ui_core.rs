@@ -1076,6 +1076,8 @@ pub struct Ui {
     arena: Arena,
     painting: bool,
     frame_requested: bool,
+    /// views built (not kept) this frame
+    rebuilt: usize,
     /// the earliest `repaint_after` the root asked for this frame
     wake: f64,
     out: PlatformOut,
@@ -1251,6 +1253,7 @@ impl Ui {
             arena: Arena::default(),
             painting: false,
             frame_requested: false,
+            rebuilt: 0,
             wake: f64::INFINITY,
             out: PlatformOut::default(),
             destroyed: false,
@@ -1359,6 +1362,11 @@ impl Ui {
     /// virtual list saves.
     pub fn built_nodes(&self) -> usize {
         self.count
+    }
+
+    /// Views (`Ui::view`) the last frame built rather than kept; the root is not counted.
+    pub fn rebuilt_views(&self) -> usize {
+        self.rebuilt
     }
 
     /// Declare what a node built this frame is to a screen reader, and the states its widget knows
@@ -5236,6 +5244,7 @@ impl Ui {
         // Also release callbacks left by a build that raised before publishing.
         self.clear_frame_callbacks();
         self.count = 0;
+        self.rebuilt = 0;
         self.closed_section = NONE;
         (self.theme_depth, self.theme_id) = (0, 0);
         (self.now, self.motion) = (frame.input.t, self.theme.tokens.moves());
@@ -5645,6 +5654,7 @@ impl Ui {
         }
         r.verify = clean;
         r.escapes = false;
+        self.rebuilt += 1;
         r.wake = f64::INFINITY;
         std::mem::swap(&mut r.nodes, &mut r.prev);
         r.nodes.clear();

@@ -276,7 +276,7 @@ fn main() {
             cost.us = t0.elapsed().as_secs_f64() * 1e6;
             cost.allocs = Some(mem_sys::local_alloc_count() - a0);
             events = std::mem::take(&mut frame.input.events);
-            (cost.nodes, cost.laid_out) = (ui.built_nodes(), ui.arranged_nodes());
+            (cost.nodes, cost.views, cost.laid_out) = (ui.built_nodes(), ui.rebuilt_views(), ui.arranged_nodes());
             frames += 1;
             cost.frames = frames;
             if started.elapsed().as_secs_f64() > 0.5 {
