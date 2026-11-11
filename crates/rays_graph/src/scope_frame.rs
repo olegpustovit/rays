@@ -1779,6 +1779,10 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
 /// its last build left (`scope_state::revision`), when input reaches its boxes, while the pointer moves
 /// over the canvas (hovered rows, wires and tips follow it) or keys are pressed (letter hints).
 /// Kept, the pane is unchanged and no changes are emitted.
+// ponytail: a pan or zoom rebuilds the whole canvas (its tiles sit at panned positions, culled to the
+// pane, and the grid and wires paint in the pane's rect): a view_offset would leave the edges empty
+// and move the canvas's clip and hit box. Upgrade when a large graph pans slowly: tiles in a nested
+// content view laid out in graph units with an overscan margin, the grid and clip outside it.
 pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) {
     use std::hash::{Hash, Hasher};
     let rev = revision(t);

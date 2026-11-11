@@ -86,6 +86,9 @@ pub fn inspect_panel<'a>(
     // boxes rebuilds it, and its intents arrive on that frame; a kept frame hands back no requests.
     // While a payload is carried, or a sketch builds its own widgets under the camera panel (no
     // revision), it is built every frame.
+    // ponytail: one view for the whole inspector, not one per section: a view takes its size from
+    // outside and a section's height is its content's (Fit). Scrubbing a value rebuilds the inspector
+    // (about 90 nodes). Upgrade with a content-sized view in the engine, or sections of known height.
     let previewed = ui.state(inspector_root, -1);
     let preview_key = (previewed >= 0).then(|| image(previewed)).flatten().map(|im| (rays::image::identity(&im), rays::image::generation(&im)));
     // the cook's results show only for a selected node (its counts, its compiled arguments)

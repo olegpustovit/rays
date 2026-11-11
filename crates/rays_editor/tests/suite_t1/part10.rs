@@ -69,7 +69,6 @@ fn workspace(name: &str, text: &str) {
     let mut r = Run::new(editor(text));
     // measured as the app runs: no verifying rebuilds
     r.e.core.ui.borrow_mut().verify_views(false);
-    r.e.core.ui.borrow_mut().set_a11y(true);
     for _ in 0..20 {
         r.step((450., 300.), vec![]);
     }
@@ -106,6 +105,9 @@ fn workspace(name: &str, text: &str) {
         check(within.views == n, &format!("hovering inside a header rebuilt {} views in {n} frames", within.views));
         // scrubbing a number of the inspector (the camera's FOV: the body scrolled to its section,
         // the section opened): the inspector's view alone, every frame of the drag
+        // the accessibility tree finds the rows (on from here: its walk costs the frames it runs in)
+        r.e.core.ui.borrow_mut().set_a11y(true);
+        to(&mut r, (451., 300.));
         let body = named(&r, "picture").expect("the inspector's first section");
         for _ in 0..12 {
             r.step(body, vec![Event::PointerMoved(body), Event::Scrolled((0.0, -3.0))]);
