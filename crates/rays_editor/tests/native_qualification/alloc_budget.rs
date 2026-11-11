@@ -142,6 +142,19 @@ fn paint_storage() {
     }
     let f = rays::frame::Frame { input: input::Frame { size: (100, 100), ..input::at_time(7.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
     rays_shell::host::build(&mut ui, &f, &mut |_| {});
+    // a retired box retains nothing of its cached label (the storage the library lent is released, not kept): a label large enough to
+    // see in the live byte count is cached by a box, and that box is dropped from the next build
+    let big = "x".repeat(256 * 1024);
+    let base = mem_sys::allocated_bytes();
+    let f = rays::frame::Frame { input: input::Frame { size: (100, 100), ..input::at_time(8.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
+    rays_shell::host::build(&mut ui, &f, &mut |ui| { let b = ui.box_("retiring", BoxOpts::default().w(Size::Px(20.)).h(Size::Px(20.))); assert_eq!(ui.cached_label(&b, 0, &big).len(), big.len()); });
+    let held = mem_sys::allocated_bytes();
+    assert!(held >= base + 200 * 1024, "the cached label is held while its box lives: {base} -> {held}");
+    let f = rays::frame::Frame { input: input::Frame { size: (100, 100), ..input::at_time(9.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
+    rays_shell::host::build(&mut ui, &f, &mut |_| {});
+    rays_shell::host::build(&mut ui, &f, &mut |_| {});
+    let released = mem_sys::allocated_bytes();
+    assert!(released + 200 * 1024 <= held, "a retired box retained its cached label: {held} -> {released}");
     rays_shell::host::destroy(&mut ui);
 }
 

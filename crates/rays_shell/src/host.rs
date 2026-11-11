@@ -349,9 +349,11 @@ impl std::ops::Deref for HostImage {
     }
 }
 
-/// The image on Rays' device as a handle PXUI draws; `None` until a frame has run and the device is known.
-// ponytail: an image shown before the first frame has no device to sit on and shows nothing until the UI builds again; the first
-// frame knows the device, so a thumbnail appears with the next rebuild. Create the device with the UI if that ever shows.
+/// Whether a frame has run, so the device the images sit on is known (`image` is `None` until then).
+pub fn ready() -> bool { DEVICE.with(|d| d.borrow().is_some()) }
+
+/// The image on Rays' device as a handle PXUI draws; `None` until a frame has run and the device is known (`ready`), and when the
+/// image cannot be made a texture. A caller that wants it shown asks for the next frame while not `ready`.
 pub fn image(i: &image::Image) -> Option<HostImage> {
     let (id, generation) = (image::identity(i), image::generation(i));
     let held = IMAGES.with(|images| images.borrow().iter().find(|(key, at, ..)| *key == id && *at == generation).and_then(|(_, _, owner, image)| owner.upgrade().map(|o| (o, *image))));
