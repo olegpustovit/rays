@@ -59,6 +59,13 @@ pub(super) fn draw(canvas: &canvas::Canvas, frame: &[scene::Node]) -> Vec<color:
     canvas::render(None, canvas, frame).unwrap();
     canvas::pixels(canvas).unwrap()
 }
+/// Equal pictures, else a panic naming how many pixels differ and the first (a 256x256 Debug diff takes
+/// longer to print than the case may run).
+pub(super) fn same(actual: &[color::T], expected: &[color::T], what: &str) {
+    let differ = actual.iter().zip(expected).filter(|(a, b)| a != b).count();
+    let first = actual.iter().zip(expected).position(|(a, b)| a != b);
+    assert!(actual.len() == expected.len() && differ == 0, "{what}: {differ} of {} pixels differ, the first at {first:?}", expected.len());
+}
 fn run(owner: &gpu::WorkspaceGpu, config: &ir_gpu::Config, workspace: &editor_document::workspace_doc::T, recipe: i64) {
     let publication = gpu::image_stats(owner).0;
     let (_lowered, node) = recipe_node(workspace, config, recipe);
@@ -170,24 +177,24 @@ fn run(owner: &gpu::WorkspaceGpu, config: &ir_gpu::Config, workspace: &editor_do
     rays_pathtracer::rays_pathtracer::mesh(None,None,&[(mesh.clone(),material)]).unwrap();
     assert_eq!(gpu::image_stats(owner).0.payload_readback_bytes,trace_start);
     let host_scene = rdk_rays::surface::scene3(None,None,&rdk_rays::surface::of_geometry(None,&geometry).unwrap()).unwrap();
-    assert_eq!(draw(&host_canvas,&frame(&camera,host_scene.clone())),pixels);
+    same(&draw(&host_canvas,&frame(&camera,host_scene.clone())),&pixels,"host picture");
     assert!(gpu::image_stats(owner).0.payload_readback_bytes > before.payload_readback_bytes);
     let read_for_trace = gpu::image_stats(owner).0.payload_readback_bytes;
     let host_mesh = scene3::walk::drawings(&host_scene)[0].mesh.clone();
     for mode in [scene3::RenderMode::Wireframe,scene3::RenderMode::Vertices] {
         let mode_frame = |mesh| frame(&camera,scene3::create(None,None,None,None,vec![scene3::mesh(None,None,Some(mode),Some(scene3::Cull::CullNone),None,mesh)]).unwrap());
-        assert_eq!(draw(&canvas,&mode_frame(mesh.clone())),draw(&host_canvas,&mode_frame(host_mesh.clone())));
+        same(&draw(&canvas,&mode_frame(mesh.clone())),&draw(&host_canvas,&mode_frame(host_mesh.clone())),&format!("{mode:?}"));
     }
     assert_eq!(gpu::image_stats(owner).0.payload_readback_bytes,read_for_trace);
     for (name,camera,shadow,expected) in variants {
         let adapted = if shadow { scene3::with_world(world.clone(),&host_scene) } else {host_scene.clone()};
-        assert_eq!(draw(&host_canvas,&frame(&camera,adapted)),expected,"recipe {recipe} {name}");
+        same(&draw(&host_canvas,&frame(&camera,adapted)),&expected,&format!("recipe {recipe} {name}"));
     }
     assert_eq!(bounds,rdk_rays::geometry_view::bounds(&geometry));
     let read = gpu::image_stats(owner).0.payload_readback_bytes;
-    assert_eq!(draw(&canvas,&original),pixels);
+    same(&draw(&canvas,&original),&pixels,"device picture again");
     assert_eq!(gpu::image_stats(owner).0.payload_readback_bytes,read);
-    assert_eq!(draw(&host_canvas,&frame(&camera,host_scene)),pixels);
+    same(&draw(&host_canvas,&frame(&camera,host_scene)),&pixels,"host picture again");
     if let Ok(directory) = std::env::var("RAYS_S9_IMAGES") {
         std::fs::create_dir_all(&directory).unwrap();
         canvas::save_png(&canvas,&std::path::Path::new(&directory).join(format!("recipe-{recipe}-device.png")).to_string_lossy()).unwrap();

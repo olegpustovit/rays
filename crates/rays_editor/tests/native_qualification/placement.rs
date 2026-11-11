@@ -252,7 +252,7 @@ fn retained_generations() {
         for i in 1..=200 {
             let next = cook(&mut session,&node,i as f64);
             isogrid::draw(&other,&next.2);
-            assert_eq!(isogrid::draw(&canvas,&previous.2),expected);
+            isogrid::same(&isogrid::draw(&canvas,&previous.2),&expected,"placement");
             gpu::frame(owner,Some(&[previous.1.clone(),next.1.clone()]));
             assert!(gpu::held_displays(owner)<=6);
             previous=next;
@@ -274,10 +274,10 @@ fn retained_generations() {
         match sop::session::cook(&mut session,Some(0),&context,&node) {Err(d)=>assert!(d.code=="E_CANCELLED" || d.code=="cancelled"),Ok(_)=>panic!("cancelled placement cook published geometry")}
         assert_eq!(gpu::image_stats(owner).0.payload_readback_bytes,0);
         let recovered=cook(&mut session,&node,201.);isogrid::draw(&other,&recovered.2);
-        assert_eq!(isogrid::draw(&canvas,&previous.2),expected);
+        isogrid::same(&isogrid::draw(&canvas,&previous.2),&expected,"placement");
         let (_,edited_node)=lower_source(&config,&source.replace("0.002","0.004"));
         let edited=cook(&mut session,&edited_node,202.);isogrid::draw(&other,&edited.2);
-        assert_eq!(isogrid::draw(&canvas,&previous.2),expected);
+        isogrid::same(&isogrid::draw(&canvas,&previous.2),&expected,"placement");
         assert_eq!(gpu::image_stats(owner).0.payload_readback_bytes,0);
         let read=|geometry: &g::T,time: f64,scale: f64| {
             let displacement=(0..16).fold(time,|x,_| x.sin())*0.01;
