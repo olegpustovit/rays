@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "tools/t", "tools/gate", "tools/buildtime"]
+members = ["crates/*", "tools/gate", "tools/buildtime"]
+exclude = ["pxui"]
 default-members = ["crates/rays_bin"]
 
 [workspace.package]

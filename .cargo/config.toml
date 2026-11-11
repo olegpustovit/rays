@@ -1,5 +1,5 @@
 [alias]
-t = "run -q -p rays-t --"
+t = "run -q --manifest-path pxui/tools/t/Cargo.toml --target-dir target --"
 
 # Windows-gnu: link with rustc's bundled ld.lld instead of mingw ld.bfd (flow_sop test exe: 3.8 s -> 1.8 s).
 # The -B path is the pinned toolchain's gcc-ld dir (rust-toolchain.toml); update it if the pin or user changes.
@@ -13,4 +13,4 @@ rustflags = ["-Clink-arg=-Wl,--stack,268435456", "-Clink-arg=-fuse-ld=lld", "-Cl
 # Linux: no link flag sets it (the kernel sizes the main stack from RLIMIT_STACK at exec, ignoring the ELF header);
 # `rays` re-execs itself with a 256 MB limit (runtime::configure_native_process) and tests run under `ulimit -s 262144`.
 [target.aarch64-apple-darwin]
-linker = "tools/cc-stack.sh"
+linker = "pxui/tools/cc-stack.sh"

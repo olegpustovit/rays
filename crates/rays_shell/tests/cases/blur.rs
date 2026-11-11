@@ -32,7 +32,7 @@ fn render(blur: f32) -> (Vec<u8>, u64, u64) {
 
 /// `render` with the view at x `left` and its box's look rounded by `radius`.
 fn render_at(blur: f32, left: f32, radius: f32) -> (Vec<u8>, u64, u64) {
-    let path = format!("{}/../../assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
+    let path = format!("{}/../../pxui/assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
     let ui = Rc::new(RefCell::new(Ui::create(Platform::Apple, None, rays_shell::host::text(Some(&path)))));
     let view = Cell::new(None);
     let mut build = |ui: &mut Ui| {

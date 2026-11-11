@@ -1,7 +1,7 @@
 # Native dependencies
 
 Use Cargo and the toolchain in `rust-toolchain.toml`. SDL floors and tested releases live in
-`sdl3.lock`; sdl3 sys build scripts enforce them. OCaml/opam packaging is retired.
+`pxui/packaging/sdl3.lock`; sdl3 sys build scripts enforce them. OCaml/opam packaging is retired.
 
 macOS:
 
@@ -14,7 +14,7 @@ Windows: use MSYS2 bash with `C:/msys64/mingw64/bin` on PATH, SDL3 development p
 a Vulkan SDK/driver. Build scripts accept `SDL3_DIR` or use pkg-config/MSYS2 discovery.
 The linker config uses the pinned toolchain's lld; update its path in `.cargo/config.toml`
 when changing toolchain/user installation. Native Vulkan sources and volk/VMA live in
-`crates/vulkan_sys/`; conformance shaders live in `crates/ogpu_vulkan/tests/shaders/`.
+`pxui/crates/vulkan_sys/`; conformance shaders live in `pxui/crates/ogpu_vulkan/tests/shaders/`.
 Install glslangValidator and spirv-link for those tests. Run with `RAYS_VULKAN_VALIDATION=fatal`.
 
 ```sh

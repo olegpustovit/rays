@@ -38,7 +38,7 @@ pub fn pane_frame(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Vec<Change> 
 }
 
 pub fn golden_ui() -> Ui {
-    let path = format!("{}/../../assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
+    let path = format!("{}/../../pxui/assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
     let mut ui = Ui::create(Platform::Apple, Some(11), rays_shell::host::text(Some(&path)));
     ui.verify_views(true);
     ui

@@ -140,7 +140,6 @@ crates/flow_sop/nodes/uv_project.rays	1	0
 crates/flow_sop/nodes/uv_sphere.rays	1	0
 crates/flow_sop/nodes/uv_transform.rays	1	0
 crates/flow_sop/nodes/uv_unitize.rays	1	0
-crates/ogpu_metal/shaders/present.rays	0	0
 crates/rays_bin/src/empty.rays	0	0
 crates/rays_pathtracer/pathtrace.rays	1	0
 crates/rays_pathtracer/pathtrace_helpers.rays	0	0

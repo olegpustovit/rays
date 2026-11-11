@@ -15,13 +15,13 @@ rays_math = { path = "../rays_math" }
 flow_sop = { path = "../flow_sop" }
 editor_document = { path = "../editor_document" }
 sop = { path = "../sop" }
-input = { path = "../input" }
+input = { path = "../../pxui/crates/input" }
 param = { path = "../param" }
 scene_command = { path = "../scene_command" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 
 [dev-dependencies]
-sdl3 = { path = "../sdl3", features = ["image"] }
+sdl3 = { path = "../../pxui/crates/sdl3", features = ["image"] }
 
 [[test]]
 name = "e2e"

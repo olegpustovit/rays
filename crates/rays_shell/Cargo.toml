@@ -12,26 +12,26 @@ path = "src/lib.rs"
 rays = { path = "../rays" }
 rays_math = { path = "../rays_math" }
 editor_core = { path = "../editor_core" }
-pxui = { path = "../pxui" }
-pxui_render = { path = "../pxui_render" }
-ogpu_core = { path = "../ogpu_core" }
-cfmt = { path = "../cfmt" }
-input = { path = "../input" }
+pxui = { path = "../../pxui/crates/pxui" }
+pxui_render = { path = "../../pxui/crates/pxui_render" }
+ogpu_core = { path = "../../pxui/crates/ogpu_core" }
+cfmt = { path = "../../pxui/crates/cfmt" }
+input = { path = "../../pxui/crates/input" }
 mem = { path = "../mem" }
 param = { path = "../param" }
 
 [dev-dependencies]
 renderer = { path = "../renderer" }
 rays_graph = { path = "../rays_graph" }
-sdl3 = { path = "../sdl3" }
+sdl3 = { path = "../../pxui/crates/sdl3" }
 
 # The host cases render through the Rays renderer and use the system clipboard (SDL main thread):
 # the window_ target runs its cases on its own main (the rays crate tests/common/window.rs).
 [target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
-ogpu_vulkan = { path = "../ogpu_vulkan" }
+ogpu_vulkan = { path = "../../pxui/crates/ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-ogpu_metal = { path = "../ogpu_metal" }
+ogpu_metal = { path = "../../pxui/crates/ogpu_metal" }
 
 [[test]]
 name = "window_rays_shell"

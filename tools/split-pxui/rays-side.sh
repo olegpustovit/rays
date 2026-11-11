@@ -67,7 +67,8 @@ awk '/^## Vulkan on Linux/{print "## Vulkan on Linux\n\nSee [pxui/docs/vulkan-li
      /^### The Rays editor on Linux/{skip=0; sub(/^### /,"## ")} /^## The PXUI gallery/{skip=1; next} /^## /&&!/^## The Rays editor/{skip=0} !skip' docs/development.md > docs/development.md.new && mv docs/development.md.new docs/development.md
 
 # Gate: rows tagged `// pxui` are the PXUI repository's; its shape exceptions go with it.
-sed -i.bak '/ \/\/ pxui/d' tools/gate/src/policy.rs && rm tools/gate/src/policy.rs.bak
+# (the gallery's multi-line entry first, then the comments that introduced tagged rows, then the rows)
+perl -0pi -e 's#(?m)^(?:[ \t]*//[^\n]*\n)*[ \t]*\("pxui_gallery", &\[\n[^\n]*\n[ \t]*\]\[\.\.\]\), // pxui\n##; s#(?m)^(?:[ \t]*//[^\n]*\n)+(?=[^\n]*// pxui\n)##g; s#(?m)^[^\n]*// pxui[^\n]*\n##g' tools/gate/src/policy.rs
 pat=$(echo "$CRATES" | tr ' ' '|')
 awk -F'\t' -v pat="^crates/($pat)/" '/^#/ || $1 !~ pat' tools/gate/shape-allowlist.tsv > tools/gate/shape-allowlist.new && mv tools/gate/shape-allowlist.new tools/gate/shape-allowlist.tsv
 

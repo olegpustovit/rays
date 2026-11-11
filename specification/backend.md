@@ -349,10 +349,10 @@ result is discarded. A subprocess regression checks both paths with
 The Rust dependency gate checks backend selection separately for Apple and
 Windows: mutually exclusive target dependencies do not count as two selections.
 An unconditional second backend or a missing platform backend remains an error.
-Raw Metal ABI declarations are checked in under `crates/metal_sys/src/`;
+Raw Metal ABI declarations are checked in under `pxui/crates/metal_sys/src/`;
 typed SDK calls are generated, while custom marshalling/ownership primitives
 are explicitly registered as `Native` entries. This does not change the OGPU
-boundary or expose the private raw ABI (see `specification/metal.md`).
+boundary or expose the private raw ABI (see `pxui/specification/metal.md`).
 The dependency-free `param` library owns typed parameter schemas under the
 single `Param` name, including canonical float text and vector grouping, so
 `Rays_shell.Inspector` renders SOP nodes and plain sketch records alike
@@ -1373,7 +1373,7 @@ records. `lib/ogpu_native` selects the platform's implementation; an executable 
   `Ray_tracing_curves` remains false because Vulkan has no native curve geometry; linear curves use per-segment swept AABBs with
   capsule candidate tests.
 - Math and text: `specification/core.md`, "Goldens across operating systems".
-- Facts about the tested card: `specification/vulkan/rtx2080ti.json`.
+- Facts about the tested card: `pxui/specification/vulkan/rtx2080ti.json`.
 
 OGPU has no barrier call: a serial encoder orders its dispatches, and each backend makes that true. So nothing
 above the backend can omit a barrier, and the mock has no such check to make; on Vulkan the backend inserts them

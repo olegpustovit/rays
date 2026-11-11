@@ -12,7 +12,7 @@ required ABI code with `cc`; metadata, headers and runtime versions must agree.
 Missing dependencies fail the build or return typed startup errors.
 
 Metal, QuartzCore, CoreGraphics, IOSurface and Foundation come from the macOS SDK.
-Metal ABI bindings are checked in under `crates/metal_sys/src/`; no external
+Metal ABI bindings are checked in under `pxui/crates/metal_sys/src/`; no external
 language generator is required at build time. Windows Vulkan loaders and memory
 allocation code live under the owning sys crate. Native resources and every SDL
 operation stay on the initial thread.

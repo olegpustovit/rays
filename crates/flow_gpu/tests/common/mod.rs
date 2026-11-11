@@ -1,7 +1,7 @@
 //! Native test helpers select Metal or fatal-validation Vulkan. Tests report device absence explicitly.
 #![allow(dead_code)]
 pub use flow_ir::test_support as test_program;
-#[path = "../../../../tools/t/window_harness.rs"]
+#[path = "../../../../pxui/tools/t/window_harness.rs"]
 pub mod window;
 
 use flow_ir::core_exec::{self, Packed};

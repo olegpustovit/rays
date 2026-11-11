@@ -13,9 +13,9 @@ editor_document = { path = "../editor_document" }
 flow_native = { path = "../flow_native" }
 rays = { path = "../rays" }
 rays_math = { path = "../rays_math" }
-input = { path = "../input" }
+input = { path = "../../pxui/crates/input" }
 runtime = { path = "../runtime" }
-sdl3 = { path = "../sdl3" }
+sdl3 = { path = "../../pxui/crates/sdl3" }
 rdk_rays = { path = "../rdk_rays" }
 rays_pathtracer = { path = "../rays_pathtracer" }
 sop = { path = "../sop" }
@@ -25,11 +25,11 @@ flow_eval = { path = "../flow_eval" }
 flow_sop = { path = "../flow_sop" }
 flow_graph = { path = "../flow_graph" }
 editor_core = { path = "../editor_core" }
-pxui = { path = "../pxui" }
+pxui = { path = "../../pxui/crates/pxui" }
 rays_shell = { path = "../rays_shell" }
 rays_graph = { path = "../rays_graph" }
 lru = { path = "../lru" }
-cfmt = { path = "../cfmt" }
+cfmt = { path = "../../pxui/crates/cfmt" }
 parallel = { path = "../parallel" }
 flow_ir = { path = "../flow_ir" }
 rdk_core = { path = "../rdk_core" }
@@ -41,19 +41,19 @@ flow_gpu = { path = "../flow_gpu" }
 [dev-dependencies]
 flow_shader = { path = "../flow_shader" }
 rdk_ops = { path = "../rdk_ops" }
-ogpu_core = { path = "../ogpu_core" }
+ogpu_core = { path = "../../pxui/crates/ogpu_core" }
 renderer = { path = "../renderer" }
 runtime_resources = { path = "../runtime_resources" }
-mem_sys = { path = "../mem_sys" }
+mem_sys = { path = "../../pxui/crates/mem_sys" }
 scene_command = { path = "../scene_command" }
 
 # Window smoke + merged editor suite (B3), split: `gpu_editor` (device cases, serialized) and `editor` (pure, parallel); harness = false, rays/tests/common/window.rs.
 
 [target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
-ogpu_vulkan = { path = "../ogpu_vulkan" }
+ogpu_vulkan = { path = "../../pxui/crates/ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-ogpu_metal = { path = "../ogpu_metal" }
+ogpu_metal = { path = "../../pxui/crates/ogpu_metal" }
 
 [[test]]
 name = "window_editor_smoke"

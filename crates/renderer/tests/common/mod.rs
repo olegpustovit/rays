@@ -58,5 +58,5 @@ pub fn words(values: &[i32]) -> Vec<u8> {
 pub fn floats(values: &[f32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
-#[path = "../../../../tools/t/window_harness.rs"]
+#[path = "../../../../pxui/tools/t/window_harness.rs"]
 pub mod window;

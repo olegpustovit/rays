@@ -13,7 +13,7 @@ use std::rc::Rc;
 const WIDTH: i64 = 320;
 
 fn golden_ui() -> Ui {
-    let path = format!("{}/../../assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
+    let path = format!("{}/../../pxui/assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
     Ui::create(Platform::Apple, None, rays_shell::host::text(Some(&path)))
 }
 

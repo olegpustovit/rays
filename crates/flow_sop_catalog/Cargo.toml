@@ -13,7 +13,7 @@ param = { path = "../param" }
 sop = { path = "../sop" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 rays_math = { path = "../rays_math" }
-input = { path = "../input" }
+input = { path = "../../pxui/crates/input" }
 mem = { path = "../mem" }
 
 [lints]

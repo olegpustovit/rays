@@ -494,46 +494,14 @@ version = "0.1.0"
 dependencies = [
  "cfmt",
  "input",
- "mem_sys",
- "ogpu_core",
- "ogpu_metal",
- "ogpu_vulkan",
- "pxui_render",
  "pxui_text",
-]
-
-[[package]]
-name = "pxui_atspi"
-version = "0.1.0"
-dependencies = [
- "cc",
- "pxui",
-]
-
-[[package]]
-name = "pxui_gallery"
-version = "0.1.0"
-dependencies = [
- "input",
- "mem_sys",
- "ogpu_core",
- "ogpu_metal",
- "ogpu_vulkan",
- "pxui",
- "pxui_atspi",
- "pxui_render",
- "pxui_sdl",
- "pxui_wayland",
 ]
 
 [[package]]
 name = "pxui_render"
 version = "0.1.0"
 dependencies = [
- "mem_sys",
  "ogpu_core",
- "ogpu_metal",
- "ogpu_vulkan",
  "pxui",
 ]
 
@@ -551,7 +519,6 @@ name = "pxui_text"
 version = "0.1.0"
 dependencies = [
  "cosmic-text",
- "mem_sys",
 ]
 
 [[package]]
@@ -561,9 +528,6 @@ dependencies = [
  "cc",
  "input",
  "native_layer_token_sys",
- "ogpu_core",
- "ogpu_vulkan",
- "pxui_render",
 ]
 
 [[package]]
@@ -600,13 +564,6 @@ dependencies = [
  "runtime_resources",
  "scene_command",
  "scene_core",
-]
-
-[[package]]
-name = "rays-t"
-version = "0.1.0"
-dependencies = [
- "mem_sys",
 ]
 
 [[package]]

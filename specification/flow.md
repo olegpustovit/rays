@@ -15,7 +15,7 @@ What is normative, and where:
 | The document, layout, exposure, the graph pane, its gestures and keys, carry, the views | this file, §3 to §10 | `Editor_document`, `Flow_graph.Flow_edit`, `Flow_graph.Projection`, `Rays_graph.Scope`, `Rays_editor` |
 | Lowering and live values | this file, §13 | `Flow_sop.Lower`, `Flow_sop.Value_lane` |
 | Materials | `workspace/materials.md` | |
-| The kit the pane is drawn with | `pxui.md` | `Pxui.Theme`, `Pxui.Ui` |
+| The kit the pane is drawn with | `pxui/specification/pxui.md` | `Pxui.Theme`, `Pxui.Ui` |
 
 Section numbers are stable because code comments cite them (§5.1, §6.4, §7.5, §7.7, §7.12,
 §11.11); a number whose section was removed is not reused.
@@ -682,7 +682,7 @@ a whole graph) prints nothing and the history label stands. The palette's "Copy 
 
 The key `y` is otherwise used only by Command-Y (redo). `Pxui.Ui` holds the
 payload on the handle (`Ui.carry`, `Ui.carrying`, `Ui.drop_target`, `Ui.cancel_carry`; see
-`pxui.md`), `Scope` reports the node or canvas under it (`Drop_over`, `Dropped`) and never edits,
+`pxui/specification/pxui.md`), `Scope` reports the node or canvas under it (`Drop_over`, `Dropped`) and never edits,
 and `Core` turns a drop into the put.
 
 ## 8. Views
@@ -2173,7 +2173,7 @@ Window-free logic tests in `runtest`: the reader, printer, macros, checker and e
 (`crates/rays_graph/tests/`), the document and its layout (`crates/editor_document/src/test_workspace_doc.rs`),
 lowering, zones and live values (`crates/editor_document/src/test_workspace_cook.rs`, `crates/flow_sop/src/lisp_sop/test_workspace_zone.rs`,
 `crates/flow_sop/src/`), the shell and its layout forms (`crates/rays_editor/tests/`),
-the text pane (`crates/rays_editor/src/test_text_pane.rs`), the carry (`crates/pxui/tests/`,
+the text pane (`crates/rays_editor/src/test_text_pane.rs`), the carry (`pxui/crates/pxui/tests/`,
 `crates/flow_native/tests/`, `crates/rays_editor/tests/`), and the gate. Visual checks are in
 `@runtest-native`.
 

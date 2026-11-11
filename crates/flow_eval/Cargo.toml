@@ -5,10 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-mem_sys = { path = "../mem_sys" }
+mem_sys = { path = "../../pxui/crates/mem_sys" }
 flow_syntax = { path = "../flow_syntax" }
 flow_check = { path = "../flow_check" }
-input = { path = "../input" }
+input = { path = "../../pxui/crates/input" }
 param = { path = "../param" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 rays_math = { path = "../rays_math" }

@@ -15,29 +15,29 @@ flow_check = { path = "../flow_check" }
 flow_eval = { path = "../flow_eval" }
 flow_ir = { path = "../flow_ir" }
 flow_shader = { path = "../flow_shader" }
-ogpu_core = { path = "../ogpu_core" }
+ogpu_core = { path = "../../pxui/crates/ogpu_core" }
 renderer = { path = "../renderer" }
 lru = { path = "../lru" }
 mem = { path = "../mem" }
 parallel = { path = "../parallel" }
 param = { path = "../param" }
 rays_math = { path = "../rays_math" }
-cfmt = { path = "../cfmt" }
-input = { path = "../input" }
+cfmt = { path = "../../pxui/crates/cfmt" }
+input = { path = "../../pxui/crates/input" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 
 [dev-dependencies]
-ogpu_mock = { path = "../ogpu_mock" }
+ogpu_mock = { path = "../../pxui/crates/ogpu_mock" }
 rdk_core = { path = "../rdk_core" }
 runtime_resources = { path = "../runtime_resources" }
 scene_command = { path = "../scene_command" }
-mem_sys = { path = "../mem_sys" }
+mem_sys = { path = "../../pxui/crates/mem_sys" }
 
 [target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
-ogpu_vulkan = { path = "../ogpu_vulkan" }
+ogpu_vulkan = { path = "../../pxui/crates/ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-ogpu_metal = { path = "../ogpu_metal" }
+ogpu_metal = { path = "../../pxui/crates/ogpu_metal" }
 
 [[test]]
 name = "gpu_all"

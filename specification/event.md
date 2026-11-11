@@ -8,7 +8,7 @@ Polling and held-input state are private to `Sketch`; there is no global query.
 
 ## Public events
 
-The typed event vocabulary is declared in `crates/input/src/lib.rs`; native translation lives under `crates/runtime_input`.
+The typed event vocabulary is declared in `pxui/crates/input/src/lib.rs`; native translation lives under `crates/runtime_input`.
 
 All strings are copied into owned application storage before SDL3 releases the native
 event payload.
@@ -16,7 +16,7 @@ event payload.
 ## Translation rules
 
 - SDL3 key-down/up events carry `Sdl3.Key.t`; `Runtime_input_sdl3` maps each to
-  `Input.key` using SDL's keycode macros (`specification/sdl3.md`): a letter or
+  `Input.key` using SDL's keycode macros (`pxui/specification/sdl3.md`): a letter or
   digit is `KeyChar` in lower case on any layout, an unlisted key is `Unknown`
   with SDL's keycode. Printable key meaning and text entry remain separate;
   committed text comes from the text-input event.
@@ -54,7 +54,7 @@ code may consume every ordered motion.
 `Sketch.run_state` polls once per frame and supplies the immutable event list in
 `Frame.input.events`. An update folds it explicitly:
 
-The typed event vocabulary is declared in `crates/input/src/lib.rs`; native translation lives under `crates/runtime_input`.
+The typed event vocabulary is declared in `pxui/crates/input/src/lib.rs`; native translation lives under `crates/runtime_input`.
 
 ## Ownership and domain contract
 

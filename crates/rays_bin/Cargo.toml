@@ -26,15 +26,15 @@ flow_sop = { path = "../flow_sop" }
 sop = { path = "../sop" }
 mem = { path = "../mem" }
 runtime = { path = "../runtime" }
-sdl3 = { path = "../sdl3", features = ["image"] }
+sdl3 = { path = "../../pxui/crates/sdl3", features = ["image"] }
 rays_diagnostic = { path = "../rays_diagnostic" }
-ogpu_core = { path = "../ogpu_core" }
+ogpu_core = { path = "../../pxui/crates/ogpu_core" }
 
 [target.'cfg(any(windows, target_os = "linux"))'.dependencies]
-ogpu_vulkan = { path = "../ogpu_vulkan" }
+ogpu_vulkan = { path = "../../pxui/crates/ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-ogpu_metal = { path = "../ogpu_metal" }
+ogpu_metal = { path = "../../pxui/crates/ogpu_metal" }
 
 [lints]
 workspace = true

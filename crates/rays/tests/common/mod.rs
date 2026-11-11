@@ -4,5 +4,5 @@
 mod native;
 #[allow(unused_imports)] // Shared test facade: each consuming target uses a different subset.
 pub use native::{floats, gpu, release_keepalive, words};
-#[path = "../../../../tools/t/window_harness.rs"]
+#[path = "../../../../pxui/tools/t/window_harness.rs"]
 pub mod window;

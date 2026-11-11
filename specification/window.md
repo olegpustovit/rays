@@ -95,7 +95,7 @@ frame to see it end. A visible window whose scene is the same as the last one pr
 as a native view keeps its last picture; without vsync to pace it the loop blocks on SDL's
 event queue for a frame, and after half a second of the same picture for up to 100 ms
 (`Sdl3.Event.wait`). A still editor on recursive_rectangles went from 60 presents and about
-45% CPU a second to three presents in ten seconds and 3% CPU. While an edge is dragged the last scene is redrawn at the new size (`specification/sdl3.md`, "Live resize"). Fullscreen, show/hide, minimize,
+45% CPU a second to three presents in ten seconds and 3% CPU. While an edge is dragged the last scene is redrawn at the new size (`pxui/specification/sdl3.md`, "Live resize"). Fullscreen, show/hide, minimize,
 maximize, restore, title, and position operations delegate to the owned native
 window.
 

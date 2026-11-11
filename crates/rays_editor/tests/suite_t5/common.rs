@@ -294,7 +294,7 @@ pub fn prepare_empty() -> rays_editor::cook::PrepareFn {
 /// The pointer scripts assume the golden face's advance: DepartureMono unless RAYS_UI_FONT says otherwise.
 pub fn ui_font() -> Option<String> {
     std::env::var("RAYS_UI_FONT").ok().or_else(|| {
-        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/DepartureMono-Regular.otf");
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../pxui/assets/fonts/DepartureMono-Regular.otf");
         p.canonicalize().ok().map(|p| p.to_string_lossy().trim_start_matches("\\?\\").to_string())
     })
 }

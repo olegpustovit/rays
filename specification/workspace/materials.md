@@ -83,7 +83,7 @@ re-pointed). Hovering a place applies the real edit on a scratch document that e
 (budget 500 ms, then only the strip says what it would write); release or `Enter` keeps it as
 one entry named `Put`; `Esc`, a release over nothing or a lost window focus restores the
 previous document. A refusal prints the checker's reason in the strip. The design and the table
-are `flow.md` §7.12; the PXUI payload is in `pxui.md`.
+are `flow.md` §7.12; the PXUI payload is in `pxui/specification/pxui.md`.
 
 `sketches/shattered_studio.rays` uses 12 noisy sheet cutters for a
 Boolean fracture, with piece-seeded groups and four referenced surfaces.

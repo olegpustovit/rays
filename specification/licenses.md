@@ -12,7 +12,7 @@ release legal review.
 | OGPU, OGPU Metal, scene execution, native runtime support, and low core | Original Rays Rust source under MIT. | No additional bundled third-party renderer implementation or shader binary is introduced by these libraries. |
 
 Generated binding output is mechanical Rays source: retained enum constants
-and typed direct calls. Metal declarations are checked in under `crates/metal_sys/src/`. It does not embed SDK header bodies,
+and typed direct calls. Metal declarations are checked in under `pxui/crates/metal_sys/src/`. It does not embed SDK header bodies,
 vendor framework binaries, or invoke Python glue. Handwritten ownership,
 lifetime, validation and callback policy remains distinguishable from generated
 mechanics in the source tree.
@@ -27,7 +27,7 @@ Release validation checks complete classifications, the MIT/zlib license and App
 SDK provenance boundaries, and requires an explicit non-bundled declaration
 for every staged surface. Final release artifact inspection remains separate.
 
-Vulkan (Windows): `crates/vulkan_sys/vendor` holds two unmodified third-party files, both MIT.
+Vulkan (Windows): `pxui/crates/vulkan_sys/vendor` holds two unmodified third-party files, both MIT.
 [volk](https://github.com/zeux/volk) (`volk.c`, `volk.h`), copyright Arseny Kapoulkine, loads Vulkan
 at run time. [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 v3.3.0 (`vk_mem_alloc.h`), copyright Advanced Micro Devices, suballocates. Their licence texts are in
@@ -37,11 +37,11 @@ are not distributed.
 Vulkan compositor hooks (Linux): the DRM format table, dmabuf import, the format/modifier query and the
 sync_file handling are ported from [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots) 0.20.2
 (commit `d783533489e1f75d6886c2ab5c5960090ef268f8`), MIT. Ported files: `render/vulkan/pixel_format.c`
-(format table, modifier usage query; in `crates/ogpu_core/src/dmabuf.rs` and `crates/vulkan_sys/src/vulkan_sys.cpp`),
+(format table, modifier usage query; in `pxui/crates/ogpu_core/src/dmabuf.rs` and `pxui/crates/vulkan_sys/src/vulkan_sys.cpp`),
 `render/vulkan/texture.c` (`vulkan_import_dmabuf`, disjoint planes), `render/vulkan/vulkan.c` (extension and
 SYNC_FD semaphore probing), `render/vulkan/renderer.c` and `render/vulkan/pass.c` (sync_file export and import,
 foreign queue ownership barriers) and `render/dmabuf_linux.c` (dmabuf sync_file ioctls), all into
-`crates/vulkan_sys/src/vulkan_sys.cpp`. Its notice:
+`pxui/crates/vulkan_sys/src/vulkan_sys.cpp`. Its notice:
 
 > Copyright (c) 2017, 2018 Drew DeVault
 > Copyright (c) 2014 Jari Vetoniemi
