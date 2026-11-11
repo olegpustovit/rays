@@ -178,3 +178,40 @@ for the one layer. The gallery (`crates/pxui_gallery/tests/gpu_gallery.rs`): the
 `kit_panel_{1,2}x.png` with a largest channel difference of 0 on Metal; run hidden with no input it
 built 1 frame in its first half second and 0 in the next two (`gpu_gallery_idle`); a changed theme file
 cost one frame.
+
+## After the engine follow-ups (cached text runs, incremental accessibility)
+
+`PXUI_BENCH=1 RAYS_SLOW=1 cargo t [--release] -p pxui pxui_bench`, M1, us per frame, min / median of 7
+rounds, `nice -n 10`, one cargo process. Before = commit `4f56e866` (the same harness, this session).
+
+| Frame | Dev before | Dev after | Release before | Release after |
+| --- | --- | --- | --- | --- |
+| Kit baseline (panel, 4 widgets, 2x) | 3.7 / 3.7 | 3.0 / 3.0 | 6.1 / 6.2 (loaded) | 2.8 / 2.8 |
+| 500 widgets, all ten views kept | 4.2 / 4.2 | 4.2 / 4.2 | 5.6 / 6.0 (loaded) | 3.6 / 3.6 |
+| 500 widgets, one 50-widget view rebuilt | 32.2 / 32.2 | 27.3 / 27.9 | 32.4 / 39.1 | 25.1 / 25.2 |
+| 500 widgets, same, accessibility on | 44.8 / 44.9 | 34.5 / 34.6 | 40.9 / 41.0 | 31.3 / 31.5 |
+| 500 widgets, all rebuilt | 291.5 / 292.0 | 238.7 / 245.9 | 260.4 / 271.9 | 216.1 / 224.2 |
+| 2,006-node stress tree, full rebuild | 765 / 766 (382 ns per node) | 616 / 623 (311) | 706 / 735 (366) | 571 / 584 (291) |
+| Stress tree cached | 1.3 / 1.3 | 1.2 / 1.3 | 1.1 / 1.1 | 1.2 / 1.2 |
+| Stress cached + one 42-node view rebuilt | 16.0 / 16.1 | 13.4 / 13.5 | 14.7 / 14.8 | 12.0 / 12.2 |
+| Allocations, any of the above, warm | 0 | 0 | 0 | 0 |
+
+Full-rebuild phases of the stress tree (median round, us; dev before -> after, release after): begin
+3.0 -> 3.0 (3.0); build 97 -> 99 (88); intrinsic 31 -> 30 (30); arrange 140 -> 142 (121); paint 482 ->
+334 (328); a11y 0 (off); finish 13 -> 15 (14). The accessibility phase of a one-view rebuild with the
+tree on: 12.7 -> 7.5 us (dev).
+
+What bought it: each text layout keeps its glyph list (line-relative position, subpixel bin, atlas
+slot) after its first emission and replays it at any origin with cosmic-text's own float operations
+(`glyph_lists_match_walks`: instances byte-equal to a walk at 1x, 2x and 1.5x; a warm rebuild walks no
+layout, `layout_stress_zero_alloc`); the accessibility walk copies kept views' runs of the tree and
+computes only rebuilt views' nodes (`Ui::a11y_written`). A fresh UI's second frame now allocates nothing
+either (`widgets_zero_alloc`): the double-buffered lists reserve on the first frame.
+
+Remaining hotspots of the full rebuild (`sample`, dev, 185 samples, so shares are coarse): glyph replay
+(`Text::glyphs` and the instance closure in `Paint::text_laid`) about 25%, `arrange` about 13% (23% by
+the phase clock with its callees), the layer's instance placement and compare in `end_frame` about 9%,
+the paint walk `visit` about 9%, `memmove` of node records about 6%, the layout-cache lookup
+(`Text::layout`) about 4%, the instance compare about 4%; build is 16% of the frame by the phase clock.
+The replay is now a tight loop (two fused multiply-adds and a bin compare per glyph, no hash); what is
+left in it is the per-glyph `dyn FnMut` call and the instance write.
