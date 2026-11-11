@@ -17,14 +17,14 @@ rays_diagnostic = { path = "../rays_diagnostic" }
 rays_math = { path = "../rays_math" }
 parallel = { path = "../parallel" }
 mem = { path = "../mem" }
-cfmt = { path = "../../pxui/crates/cfmt" }
+cfmt = { path = "../../pxui/crates/open/cfmt" }
 rdk_geom = { path = "../rdk_geom" }
 rdk_ops = { path = "../rdk_ops" }
-input = { path = "../../pxui/crates/input" }
+input = { path = "../../pxui/crates/open/input" }
 rdk_core = { path = "../rdk_core" }
 
 [dev-dependencies]
-mem_sys = { path = "../../pxui/crates/mem_sys" }
+mem_sys = { path = "../../pxui/crates/open/mem_sys" }
 flow_graph = { path = "../flow_graph" }
 flow_web = { path = "../flow_web" }
 

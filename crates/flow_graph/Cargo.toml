@@ -10,8 +10,8 @@ flow_check = { path = "../flow_check" }
 flow_eval = { path = "../flow_eval" }
 param = { path = "../param" }
 rays_diagnostic = { path = "../rays_diagnostic" }
-input = { path = "../../pxui/crates/input" }
-cfmt = { path = "../../pxui/crates/cfmt" }
+input = { path = "../../pxui/crates/open/input" }
+cfmt = { path = "../../pxui/crates/open/cfmt" }
 
 [lints]
 workspace = true

@@ -16,7 +16,7 @@ parallel = { path = "../parallel" }
 
 [dev-dependencies]
 rays_diagnostic = { path = "../rays_diagnostic" }
-input = { path = "../../pxui/crates/input" }
+input = { path = "../../pxui/crates/open/input" }
 
 [lints]
 workspace = true

@@ -62,7 +62,7 @@ contracts. Historical port evidence lives in `docs/history/` and records known u
 - Rays Flow follows `specification/flow.md`. New Lisp syntax ships with graph projection, direct editing
   gestures and a regression, never text-only syntax.
 - Required C/C++/Objective-C++ ABI code lives under its owning sys crate. Metal bindings are checked in
-  under `pxui/crates/metal_sys/src/`; no OCaml generator runs at build time.
+  under `pxui/crates/open/metal_sys/src/`; no OCaml generator runs at build time.
 
 Mark deliberate shortcuts with known ceilings using `ponytail:` and an upgrade trigger.
 Never shortcut correctness, input validation, lifetime safety, security or accessibility.

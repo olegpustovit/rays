@@ -9,7 +9,7 @@ scene_core = { path = "../scene_core" }
 rays_math = { path = "../rays_math" }
 sop = { path = "../sop" }
 param = { path = "../param" }
-input = { path = "../../pxui/crates/input" }
+input = { path = "../../pxui/crates/open/input" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 flow_syntax = { path = "../flow_syntax" }
 flow_check = { path = "../flow_check" }
@@ -19,7 +19,7 @@ flow_sop = { path = "../flow_sop" }
 flow_sop_catalog = { path = "../flow_sop_catalog" }
 flow_graph = { path = "../flow_graph" }
 editor_core = { path = "../editor_core" }
-cfmt = { path = "../../pxui/crates/cfmt" }
+cfmt = { path = "../../pxui/crates/open/cfmt" }
 
 [dev-dependencies]
 rdk_core = { path = "../rdk_core" }

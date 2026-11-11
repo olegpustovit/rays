@@ -12,7 +12,7 @@ test = false
 
 [dependencies]
 rays = { path = "../rays" }
-ogpu_core = { path = "../../pxui/crates/ogpu_core" }
+ogpu_core = { path = "../../pxui/crates/open/ogpu_core" }
 renderer = { path = "../renderer" }
 runtime_resources = { path = "../runtime_resources" }
 rays_math = { path = "../rays_math" }
@@ -22,19 +22,19 @@ flow_eval = { path = "../flow_eval" }
 flow_ir = { path = "../flow_ir" }
 flow_gpu = { path = "../flow_gpu" }
 flow_shader = { path = "../flow_shader" }
-input = { path = "../../pxui/crates/input" }
+input = { path = "../../pxui/crates/open/input" }
 rays_diagnostic = { path = "../rays_diagnostic" }
-cfmt = { path = "../../pxui/crates/cfmt" }
+cfmt = { path = "../../pxui/crates/open/cfmt" }
 param = { path = "../param" }
 
 [dev-dependencies]
 runtime = { path = "../runtime" }
 
 [target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
-ogpu_vulkan = { path = "../../pxui/crates/ogpu_vulkan" }
+ogpu_vulkan = { path = "../../pxui/crates/open/ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-ogpu_metal = { path = "../../pxui/crates/ogpu_metal" }
+ogpu_metal = { path = "../../pxui/crates/open/ogpu_metal" }
 
 [[test]]
 name = "gpu_all"

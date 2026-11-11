@@ -5,12 +5,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-input = { path = "../../pxui/crates/input" }
+input = { path = "../../pxui/crates/open/input" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 flow_syntax = { path = "../flow_syntax" }
 
 [dev-dependencies]
-ogpu_mock = { path = "../../pxui/crates/ogpu_mock" }
+ogpu_mock = { path = "../../pxui/crates/open/ogpu_mock" }
 
 [lints]
 workspace = true

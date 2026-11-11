@@ -5,18 +5,18 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-input = { path = "../../pxui/crates/input" }
-pxui_sdl = { path = "../../pxui/crates/pxui_sdl" }
-sdl3 = { path = "../../pxui/crates/sdl3" }
-ogpu_core = { path = "../../pxui/crates/ogpu_core" }
+input = { path = "../../pxui/crates/open/input" }
+pxui_sdl = { path = "../../pxui/crates/open/pxui_sdl" }
+sdl3 = { path = "../../pxui/crates/open/sdl3" }
+ogpu_core = { path = "../../pxui/crates/open/ogpu_core" }
 
 # The window host on Linux; pxui_sdl stays for its event translation (and SDL's image/audio/paths stay in use).
 [target.'cfg(target_os = "linux")'.dependencies]
-pxui_wayland = { path = "../../pxui/crates/pxui_wayland" }
-mem_sys = { path = "../../pxui/crates/mem_sys" }
+pxui_wayland = { path = "../../pxui/crates/open/pxui_wayland" }
+mem_sys = { path = "../../pxui/crates/open/mem_sys" }
 
 [dev-dependencies]
-ogpu_mock = { path = "../../pxui/crates/ogpu_mock" }
+ogpu_mock = { path = "../../pxui/crates/open/ogpu_mock" }
 
 # The window needs the SDL main thread, which libtest never gives a test: this target's own main runs it.
 [[test]]

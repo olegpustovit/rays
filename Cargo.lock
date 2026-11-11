@@ -474,12 +474,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "pxui"
+version = "0.1.0"
+dependencies = [
+ "pxui_abi",
+ "pxui_types",
+]
+
+[[package]]
+name = "pxui_abi"
+version = "0.1.0"
+dependencies = [
+ "input",
+ "ogpu_core",
+ "ogpu_metal",
+ "ogpu_vulkan",
+ "pxui_core",
+ "pxui_render",
+ "pxui_text",
+ "pxui_types",
+]
+
+[[package]]
 name = "pxui_core"
 version = "0.1.0"
 dependencies = [
  "cfmt",
  "input",
  "pxui_text",
+ "pxui_types",
 ]
 
 [[package]]
@@ -488,6 +511,7 @@ version = "0.1.0"
 dependencies = [
  "ogpu_core",
  "pxui_core",
+ "pxui_types",
 ]
 
 [[package]]
@@ -505,6 +529,10 @@ version = "0.1.0"
 dependencies = [
  "cosmic-text",
 ]
+
+[[package]]
+name = "pxui_types"
+version = "0.1.0"
 
 [[package]]
 name = "pxui_wayland"
@@ -542,7 +570,7 @@ dependencies = [
  "ogpu_metal",
  "ogpu_vulkan",
  "parallel",
- "pxui_text",
+ "pxui",
  "rays_math",
  "renderer",
  "runtime",
@@ -601,7 +629,7 @@ dependencies = [
  "ogpu_vulkan",
  "parallel",
  "param",
- "pxui_core",
+ "pxui",
  "rays",
  "rays_diagnostic",
  "rays_graph",
@@ -630,7 +658,7 @@ dependencies = [
  "flow_syntax",
  "input",
  "param",
- "pxui_core",
+ "pxui",
  "rays",
  "rays_math",
 ]
@@ -682,8 +710,7 @@ dependencies = [
  "ogpu_metal",
  "ogpu_vulkan",
  "param",
- "pxui_core",
- "pxui_render",
+ "pxui",
  "rays",
  "rays_graph",
  "rays_math",

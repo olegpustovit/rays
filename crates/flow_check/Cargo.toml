@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 flow_syntax = { path = "../flow_syntax" }
-input = { path = "../../pxui/crates/input" }
+input = { path = "../../pxui/crates/open/input" }
 lru = { path = "../lru" }
 param = { path = "../param" }
 rays_diagnostic = { path = "../rays_diagnostic" }

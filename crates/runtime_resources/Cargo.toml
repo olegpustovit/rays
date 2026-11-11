@@ -9,11 +9,11 @@ license.workspace = true
 test = false
 
 [dependencies]
-sdl3 = { path = "../../pxui/crates/sdl3", features = ["image", "mixer"] }
-ogpu_core = { path = "../../pxui/crates/ogpu_core" }
+sdl3 = { path = "../../pxui/crates/open/sdl3", features = ["image", "mixer"] }
+ogpu_core = { path = "../../pxui/crates/open/ogpu_core" }
 
 [dev-dependencies]
-ogpu_mock = { path = "../../pxui/crates/ogpu_mock" }
+ogpu_mock = { path = "../../pxui/crates/open/ogpu_mock" }
 
 [[test]]
 name = "window_all"

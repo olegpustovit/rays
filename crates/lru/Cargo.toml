@@ -8,7 +8,7 @@ license.workspace = true
 mem = { path = "../mem" }
 
 [dev-dependencies]
-mem_sys = { path = "../../pxui/crates/mem_sys" }
+mem_sys = { path = "../../pxui/crates/open/mem_sys" }
 
 [lints]
 workspace = true

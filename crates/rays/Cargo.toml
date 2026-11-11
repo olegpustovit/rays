@@ -8,8 +8,12 @@ license.workspace = true
 name = "rays"
 path = "src/lib.rs"
 
+[features]
+default = ["pxui-static"]
+pxui-static = ["pxui/static"]
+
 [dependencies]
-input = { path = "../../pxui/crates/input" }
+input = { path = "../../pxui/crates/open/input" }
 scene_core = { path = "../scene_core" }
 rays_math = { path = "../rays_math" }
 lru = { path = "../lru" }
@@ -19,15 +23,15 @@ scene_command = { path = "../scene_command" }
 renderer = { path = "../renderer" }
 parallel = { path = "../parallel" }
 mem = { path = "../mem" }
-ogpu_core = { path = "../../pxui/crates/ogpu_core" }
-cfmt = { path = "../../pxui/crates/cfmt" }
-pxui_text = { path = "../../pxui/crates/pxui_text" }
+ogpu_core = { path = "../../pxui/crates/open/ogpu_core" }
+cfmt = { path = "../../pxui/crates/open/cfmt" }
+pxui = { path = "../../pxui/crates/public/pxui", default-features = false }
 
 [target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
-ogpu_vulkan = { path = "../../pxui/crates/ogpu_vulkan" }
+ogpu_vulkan = { path = "../../pxui/crates/open/ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-ogpu_metal = { path = "../../pxui/crates/ogpu_metal" }
+ogpu_metal = { path = "../../pxui/crates/open/ogpu_metal" }
 
 # Resource operations need the SDL main thread, which libtest never gives a test: these targets'
 # own main runs their cases (tests/common/window.rs) in one process on one device each; gpu_*

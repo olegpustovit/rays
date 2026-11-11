@@ -12,7 +12,7 @@ path = "src/lib.rs"
 editor_document = { path = "../editor_document" }
 rays = { path = "../rays" }
 rays_math = { path = "../rays_math" }
-input = { path = "../../pxui/crates/input" }
+input = { path = "../../pxui/crates/open/input" }
 rdk_core = { path = "../rdk_core" }
 flow_syntax = { path = "../flow_syntax" }
 flow_check = { path = "../flow_check" }
@@ -24,7 +24,7 @@ flow_gpu = { path = "../flow_gpu" }
 flow_sop = { path = "../flow_sop" }
 scene_command = { path = "../scene_command" }
 renderer = { path = "../renderer" }
-ogpu_core = { path = "../../pxui/crates/ogpu_core" }
+ogpu_core = { path = "../../pxui/crates/open/ogpu_core" }
 runtime_resources = { path = "../runtime_resources" }
 parallel = { path = "../parallel" }
 sop = { path = "../sop" }
@@ -36,16 +36,16 @@ rays_diagnostic = { path = "../rays_diagnostic" }
 flow_ir = { path = "../flow_ir" }
 
 [target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
-ogpu_vulkan = { path = "../../pxui/crates/ogpu_vulkan" }
+ogpu_vulkan = { path = "../../pxui/crates/open/ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-ogpu_metal = { path = "../../pxui/crates/ogpu_metal" }
+ogpu_metal = { path = "../../pxui/crates/open/ogpu_metal" }
 
 [dev-dependencies.web_export]
 path = "../web_export"
 
 [dev-dependencies.mem_sys]
-path = "../../pxui/crates/mem_sys"
+path = "../../pxui/crates/open/mem_sys"
 
 # libtest never gives a test the process main thread, which SDL-backed resource operations need:
 # this target runs from its own main (tests/common/window.rs), one device per process, Vulkan

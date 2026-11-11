@@ -5,9 +5,9 @@ use ogpu_core::backend::{self, RenderEncoder, Texture};
 use ogpu_core::error::{self, Error, ErrorKind};
 use ogpu_core::pipeline::{ColorFormat, DepthFormat};
 use ogpu_core::types::{Extent, Origin, TextureDescriptor, TextureFormat, TextureUsage};
-use pxui::text::{self, Text};
+use pxui::engine_text::{self as text, Text};
 use pxui::ui::{BlurOut, Image, Ui};
-use pxui_render::{AtlasKind, Break, Instance, Painter, View};
+use pxui::render::{self, AtlasKind, Break, Instance, Painter, View};
 use rays::{clipboard, image, scene, sketch};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -142,7 +142,7 @@ struct Shared {
     /// image textures by identity, with their generation and the frame that last drew them
     images: Vec<(i64, i64, Texture, u64)>,
     /// the UI whose instances each retained painter layer holds (by `Layer::id`)
-    retained: [usize; pxui_render::MAX_LAYERS],
+    retained: [usize; render::MAX_LAYERS],
 }
 
 fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Error> {
@@ -157,7 +157,7 @@ fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Er
             let (mask, color) = (t.atlas_size(text::AtlasKind::Mask), t.atlas_size(text::AtlasKind::Color));
             let painter = Painter::new(pass.device, ColorFormat::Rgba8Unorm, DepthFormat::NoDepth, 1, mask, color)?;
             scene::on_device_release(release_painter);
-            *shared = Some(Shared { device, painter, owner: 0, frame: 0, images: Vec::new(), retained: [0; pxui_render::MAX_LAYERS] });
+            *shared = Some(Shared { device, painter, owner: 0, frame: 0, images: Vec::new(), retained: [0; render::MAX_LAYERS] });
         }
         let s = shared.as_mut().expect("painter");
         if s.frame != pass.frame {
@@ -180,7 +180,7 @@ fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Er
         let out = ui.output();
         let l = &out.draw[layer];
         let id = l.id as usize;
-        if id >= pxui_render::MAX_LAYERS {
+        if id >= render::MAX_LAYERS {
             return Err(error::make("Pxui.paint", ErrorKind::InvalidState, "more UI layers than the painter retains"));
         }
         // the painter's copy of this layer holds another UI's instances: all of it is new

@@ -28,7 +28,7 @@ pub fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("scene_core", &["rays_math", "lru", "parallel"][..]),
         ("rays", &[
             "input", "rays_math", "lru", "runtime_resources", "runtime", "scene_command", "renderer",
-            "parallel", "ogpu_core", "scene_core", "pxui_text",
+            "parallel", "ogpu_core", "scene_core", "pxui",
         ][..]),
         ("runtime", &["pxui_sdl", "pxui_wayland", "sdl3", "ogpu_core", "input", "mem_sys"][..]),
         ("runtime_resources", &["sdl3", "ogpu_core"][..]),
@@ -59,9 +59,9 @@ pub fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
             "flow_graph", "flow_ir", "flow_gpu", "flow_sop", "scene_command", "renderer", "lru", "runtime_resources",
             "parallel", "sop", "flow_shader", "ogpu_core", "rdk_core",
         ][..]),
-        ("rays_shell", &["rays", "rays_math", "editor_core", "pxui_core", "pxui_render", "ogpu_core", "mem"][..]),
+        ("rays_shell", &["rays", "rays_math", "editor_core", "pxui", "ogpu_core", "mem"][..]),
         ("rays_graph", &[
-            "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "flow_graph", "pxui_core", "editor_core",
+            "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "flow_graph", "pxui", "editor_core",
         ][..]),
         ("editor_core", &["param", "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "runtime_resources"][..]),
         ("web_export", &[

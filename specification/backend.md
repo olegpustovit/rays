@@ -349,7 +349,7 @@ result is discarded. A subprocess regression checks both paths with
 The Rust dependency gate checks backend selection separately for Apple and
 Windows: mutually exclusive target dependencies do not count as two selections.
 An unconditional second backend or a missing platform backend remains an error.
-Raw Metal ABI declarations are checked in under `pxui/crates/metal_sys/src/`;
+Raw Metal ABI declarations are checked in under `pxui/crates/open/metal_sys/src/`;
 typed SDK calls are generated, while custom marshalling/ownership primitives
 are explicitly registered as `Native` entries. This does not change the OGPU
 boundary or expose the private raw ABI (see `pxui/specification/metal.md`).

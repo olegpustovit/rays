@@ -574,7 +574,7 @@ struct Package {
     package_name: String,
     crate_name: String,
     product: bool,
-    /// A submodule crate (`pxui/crates/*`): in the graph so reach rules see through it, but policed by its own repository's gate.
+    /// A submodule crate (`pxui/crates/{public,private,open}/*`): in the graph so reach rules see through it, but policed by its own repository's gate.
     external: bool,
     deps: Vec<DepSpec>,
     has_binary: bool,
@@ -854,9 +854,12 @@ fn cargo_manifests(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
     }
     for entry in fs::read_dir(dir).map_err(|error| format!("cannot scan {}: {error}", dir.display()))? {
         let entry = entry.map_err(|error| format!("cannot scan {}: {error}", dir.display()))?;
-        let path = entry.path().join("Cargo.toml");
-        if path.is_file() {
-            files.push(path);
+        let path = entry.path();
+        let manifest = path.join("Cargo.toml");
+        if manifest.is_file() {
+            files.push(manifest);
+        } else if entry.file_type().map_err(|error| format!("cannot inspect {}: {error}", path.display()))?.is_dir() {
+            cargo_manifests(&path, files)?;
         }
     }
     Ok(())
@@ -892,6 +895,15 @@ fn package_targets(dir: &Path, manifest: &ParsedManifest) -> Result<(bool, bool)
 
 fn crate_name(package_name: &str, lib_name: Option<&str>) -> String {
     lib_name.unwrap_or(package_name).replace('-', "_")
+}
+
+fn is_pxui_private(package: &Package, workspace: &Path) -> bool {
+    package.external && package.manifest.strip_prefix(workspace).ok().is_some_and(|path| {
+        let mut parts = path.components();
+        parts.next().and_then(|part| part.as_os_str().to_str()) == Some("pxui")
+            && parts.next().and_then(|part| part.as_os_str().to_str()) == Some("crates")
+            && parts.next().and_then(|part| part.as_os_str().to_str()) == Some("private")
+    })
 }
 
 mod policy;
@@ -1082,8 +1094,15 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
         if by_package.insert(package.package_name.clone(), index).is_some() {
             errors.push(format!("{}: duplicate workspace package `{}`", package.manifest.display(), package.package_name));
         }
-        if by_crate.insert(package.crate_name.clone(), index).is_some() {
-            errors.push(format!("{}: duplicate crate name `{}`", package.manifest.display(), package.crate_name));
+        if let Some(previous) = by_crate.insert(package.crate_name.clone(), index) {
+            let previous = &packages[previous];
+            let pxui_abi_alias = package.crate_name == "pxui"
+                && package.external
+                && previous.external
+                && matches!((package.package_name.as_str(), previous.package_name.as_str()), ("pxui", "pxui_abi") | ("pxui_abi", "pxui"));
+            if !pxui_abi_alias {
+                errors.push(format!("{}: duplicate crate name `{}`", package.manifest.display(), package.crate_name));
+            }
         }
     }
     let mut graph: HashMap<String, Vec<String>> = HashMap::new();
@@ -1134,6 +1153,9 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
                 None
             };
             if let Some(target) = resolved {
+                if !package.external && is_pxui_private(target, workspace) {
+                    errors.push(format!("{path}:{}: `{}` depends directly on private PXUI crate `{}`; use the public `pxui` wrapper", dependency.line, package.crate_name, target.crate_name));
+                }
                 if dependency.kind != "dev-dependencies"
                     && policy::NO_DIRECT.iter().any(|(from, to, _)| *from == package.crate_name && *to == target.crate_name)
                 {
@@ -1154,7 +1176,13 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
                 }
             }
         }
-        let direct: Vec<String> = direct.into_iter().collect();
+        // Root gates treat libpxui as its public boundary. Its implementation intentionally
+        // reaches private PXUI crates; root consumers may depend on the public wrapper only.
+        let direct: Vec<String> = if package.external && package.crate_name == "pxui" {
+            Vec::new()
+        } else {
+            direct.into_iter().collect()
+        };
         graph.insert(package.crate_name.clone(), direct.clone());
         let runtime_direct: Vec<String> = runtime_direct.into_iter().collect();
         runtime_graph.insert(package.crate_name.clone(), runtime_direct);
@@ -1283,11 +1311,23 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{assignment_fields, dependency_path, deps, ogpu_selection_errors, shape_source, target_platform, toml_string, DepSpec, Package};
+    use super::{assignment_fields, dependency_path, deps, is_pxui_private, ogpu_selection_errors, shape_source, target_platform, toml_string, DepSpec, Package};
     use std::collections::HashMap;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn pxui_private_crates_are_only_available_through_the_public_wrapper() {
+        let workspace = PathBuf::from("/repo");
+        let package = |path: &str, external| Package {
+            manifest: workspace.join(path), package_name: "pxui_core".into(), crate_name: "pxui_core".into(),
+            product: true, external, deps: Vec::new(), has_binary: false, has_gpu_dev_targets: false,
+        };
+        assert!(is_pxui_private(&package("pxui/crates/private/pxui_core/Cargo.toml", true), &workspace));
+        assert!(!is_pxui_private(&package("pxui/crates/public/pxui/Cargo.toml", true), &workspace));
+        assert!(!is_pxui_private(&package("crates/pxui_core/Cargo.toml", false), &workspace));
+    }
 
     #[test]
     fn lib_unit_tests_disabled_includes_integration_only_libs() {
@@ -1468,14 +1508,15 @@ mod tests {
         fs::create_dir_all(root.join("crates/flow_ir/src")).unwrap();
         fs::write(root.join("crates/flow_ir/Cargo.toml"), "[package]\nname = \"flow_ir\"\n").unwrap();
         for package in ["pxui_core", "ogpu_metal", "metal_sys", "vulkan_sys", "ogpu_core"] {
-            fs::create_dir_all(root.join(format!("pxui/crates/{package}/src"))).unwrap();
-            fs::write(root.join(format!("pxui/crates/{package}/Cargo.toml")), format!("[package]\nname = \"{package}\"\n")).unwrap();
-            fs::write(root.join(format!("pxui/crates/{package}/src/lib.rs")), "").unwrap();
+            let tier = if package == "pxui_core" { "private" } else { "open" };
+            fs::create_dir_all(root.join(format!("pxui/crates/{tier}/{package}/src"))).unwrap();
+            fs::write(root.join(format!("pxui/crates/{tier}/{package}/Cargo.toml")), format!("[package]\nname = \"{package}\"\n")).unwrap();
+            fs::write(root.join(format!("pxui/crates/{tier}/{package}/src/lib.rs")), "").unwrap();
         }
-        fs::write(root.join("crates/flow_ir/Cargo.toml"), "[package]\nname = \"flow_ir\"\n[dependencies]\npxui_core = { path = \"../../pxui/crates/pxui_core\" }\n").unwrap();
-        fs::write(root.join("crates/rays/Cargo.toml"), "[package]\nname = \"rays\"\n[dependencies]\nogpu_metal = { path = \"../../pxui/crates/ogpu_metal\" }\nmetal_sys = { path = \"../../pxui/crates/metal_sys\" }\n").unwrap();
-        fs::write(root.join("pxui/crates/metal_sys/Cargo.toml"), "[package]\nname = \"metal_sys\"\n[dependencies]\nogpu_core = { path = \"../ogpu_core\" }\n").unwrap();
-        fs::write(root.join("pxui/crates/vulkan_sys/Cargo.toml"), "[package]\nname = \"vulkan_sys\"\n[dependencies]\nogpu_core = { path = \"../ogpu_core\" }\n").unwrap();
+        fs::write(root.join("crates/flow_ir/Cargo.toml"), "[package]\nname = \"flow_ir\"\n[dependencies]\npxui_core = { path = \"../../pxui/crates/private/pxui_core\" }\n").unwrap();
+        fs::write(root.join("crates/rays/Cargo.toml"), "[package]\nname = \"rays\"\n[dependencies]\nogpu_metal = { path = \"../../pxui/crates/open/ogpu_metal\" }\nmetal_sys = { path = \"../../pxui/crates/open/metal_sys\" }\n").unwrap();
+        fs::write(root.join("pxui/crates/open/metal_sys/Cargo.toml"), "[package]\nname = \"metal_sys\"\n[dependencies]\nogpu_core = { path = \"../ogpu_core\" }\n").unwrap();
+        fs::write(root.join("pxui/crates/open/vulkan_sys/Cargo.toml"), "[package]\nname = \"vulkan_sys\"\n[dependencies]\nogpu_core = { path = \"../ogpu_core\" }\n").unwrap();
         let boundaries = deps(&root).unwrap();
         assert!(boundaries.iter().any(|issue| issue.contains("flow_ir must not reach") && issue.contains("pxui_core")));
         assert!(boundaries.iter().any(|issue| issue.contains("rays must not reach") && issue.contains("ogpu_metal")));

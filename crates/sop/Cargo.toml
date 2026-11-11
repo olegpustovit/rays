@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 param = { path = "../param" }
-input = { path = "../../pxui/crates/input" }
+input = { path = "../../pxui/crates/open/input" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 rays_math = { path = "../rays_math" }
 rdk_core = { path = "../rdk_core" }
@@ -16,7 +16,7 @@ rdk_boolean = { path = "../rdk_boolean" }
 mem = { path = "../mem" }
 lru = { path = "../lru" }
 parallel = { path = "../parallel" }
-cfmt = { path = "../../pxui/crates/cfmt" }
+cfmt = { path = "../../pxui/crates/open/cfmt" }
 
 [lints]
 workspace = true

@@ -1,4 +1,4 @@
-//! Sketch text: pxui_text shapes and rasterises it into per-context cached images; String errors.
+//! Sketch text: PXUI shapes and rasterises it into per-context cached images; String errors.
 use crate::image;
 use renderer::side_lru::{self, Table, TableKey};
 use rays_math::color;
@@ -35,7 +35,7 @@ fn key(wrap: Option<i64>, align: Alignment, density: i64, size: i64, text: &str,
     TableKey::Str(format!("{density}|{size}|{wrap:?}|{align:?}|{r},{g},{b},{a}|{text}"))
 }
 
-// Sketch text: pxui_text shapes and rasterises into its atlases; the glyph quads are composited on the
+// Sketch text: PXUI shapes and rasterises into its atlases; the glyph quads are composited on the
 // CPU into one straight-alpha RGBA image per string (the scene's existing textured-quad path).
 // ponytail: one image per string; glyph quads straight into the scene
 // pass when text lowering gets an instanced route.
@@ -56,85 +56,38 @@ const SYSTEM_FONTS: [&str; 11] = [
 thread_local! {
     // Text is shaped on whichever thread lowers the scene; cosmic-text is deterministic, so every
     // thread's instance agrees.
-    static TEXT: RefCell<Option<pxui_text::Text>> = const { RefCell::new(None) };
+    static TEXT: RefCell<Option<Result<pxui::Text, String>>> = const { RefCell::new(None) };
 }
 
-fn text_engine() -> pxui_text::Text {
+fn text_engine() -> Option<pxui::Text> {
     let system = SYSTEM_FONTS.iter().find_map(|p| std::fs::read(p).ok());
     let mut fonts: Vec<&[u8]> = system.iter().map(|v| v.as_slice()).collect();
-    fonts.push(pxui_text::PRAGMASEVKA);
-    pxui_text::Text::new(&fonts)
-}
-
-/// `over` of straight-alpha `src` onto `dst`.
-fn over(dst: &mut [u8], src: [u8; 4]) {
-    let (sa, da) = (src[3] as u32, dst[3] as u32);
-    let oa = sa * 255 + da * (255 - sa);
-    if oa == 0 {
-        return;
-    }
-    for i in 0..3 {
-        dst[i] = ((src[i] as u32 * sa * 255 + dst[i] as u32 * da * (255 - sa)) / oa) as u8;
-    }
-    dst[3] = ((oa + 127) / 255) as u8;
+    fonts.push(pxui::text::PRAGMASEVKA);
+    pxui::Text::new(&fonts)
 }
 
 fn paint_text(density: i64, wrap: Option<i64>, align: Alignment, size: i64, text: &str, mode: RenderMode) -> Result<image::Image, String> {
-    use pxui_text::{AtlasKind, Style, Wrap};
     if text.is_empty() {
         return image::create(1, 1, None);
     }
     let RenderMode::Blended(c) = mode;
-    let (ink, ca, scale) = ([c.r as u8, c.g as u8, c.b as u8], c.a as u32, density as f32);
-    let style = Style {
-        size: size as f32,
-        wrap: if wrap.is_some() { Wrap::Word } else { Wrap::None },
+    let style = pxui::TextStyle {
+        size_points: size as f32,
+        wrap: if wrap.is_some() { pxui::TextStyle::WRAP_WORD } else { pxui::TextStyle::WRAP_NONE },
         align: match align {
-            Alignment::Left => pxui_text::Align::Left,
-            Alignment::Center => pxui_text::Align::Center,
-            Alignment::Right => pxui_text::Align::Right,
+            Alignment::Left => pxui::TextStyle::ALIGN_LEFT,
+            Alignment::Center => pxui::TextStyle::ALIGN_CENTER,
+            Alignment::Right => pxui::TextStyle::ALIGN_RIGHT,
         },
-        ..Style::default()
+        ..pxui::TextStyle::default()
     };
     TEXT.with(|t| {
         let mut t = t.borrow_mut();
-        let t = t.get_or_insert_with(text_engine);
-        let m = t.layout(0, text, &style, wrap.map_or(0.0, |w| w as f32));
-        // a wrapped string is as wide as its wrap width, so alignment has room to work
-        let w = wrap.map_or((m.w * scale).ceil() as i64, |w| w * density).max(1);
-        let h = ((m.h * scale).ceil() as i64).max(1);
-        let mut px = vec![0u8; (w * h * 4) as usize];
-        let mut quads = Vec::new();
-        t.glyphs(0, (0.0, 0.0), scale, &mut |g| quads.push(g));
-        t.drain_uploads(&mut |_, _, _, _, _, _, _| {});
-        for g in quads {
-            let (aw, ah) = t.atlas_size(g.atlas);
-            let atlas = t.atlas_pixels(g.atlas);
-            let (u, v) = ((g.uv.x * aw as f32).round() as i64, (g.uv.y * ah as f32).round() as i64);
-            let (gw, gh, gx, gy) = (g.rect.w as i64, g.rect.h as i64, g.rect.x as i64, g.rect.y as i64);
-            for row in 0..gh {
-                let y = gy + row;
-                if y < 0 || y >= h {
-                    continue;
-                }
-                for col in 0..gw {
-                    let x = gx + col;
-                    if x < 0 || x >= w {
-                        continue;
-                    }
-                    let at = (v + row) * aw as i64 + u + col;
-                    let src = match g.atlas {
-                        AtlasKind::Mask => [ink[0], ink[1], ink[2], ((atlas[at as usize] as u32 * ca + 127) / 255) as u8],
-                        AtlasKind::Color => {
-                            let i = at as usize * 4;
-                            [atlas[i], atlas[i + 1], atlas[i + 2], ((atlas[i + 3] as u32 * ca + 127) / 255) as u8]
-                        }
-                    };
-                    let o = ((y * w + x) * 4) as usize;
-                    over(&mut px[o..o + 4], src);
-                }
-            }
-        }
+        let t = t.get_or_insert_with(|| text_engine().ok_or_else(|| "PXUI text initialization failed".to_owned()))
+            .as_mut().map_err(|error| error.clone())?;
+        let (w, h, px) = t.rasterize_rgba(0, text, &style, wrap.map_or(0.0, |w| w as f32), density as f32,
+            [c.r as u8, c.g as u8, c.b as u8, c.a as u8]).map_err(|e| format!("PXUI text rasterization failed: {e:?}"))?;
+        let (w, h) = (i64::from(w), i64::from(h));
         image::upload_rgba(None, w, h, &px)
     })
 }

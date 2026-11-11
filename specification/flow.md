@@ -2173,7 +2173,7 @@ Window-free logic tests in `runtest`: the reader, printer, macros, checker and e
 (`crates/rays_graph/tests/`), the document and its layout (`crates/editor_document/src/test_workspace_doc.rs`),
 lowering, zones and live values (`crates/editor_document/src/test_workspace_cook.rs`, `crates/flow_sop/src/lisp_sop/test_workspace_zone.rs`,
 `crates/flow_sop/src/`), the shell and its layout forms (`crates/rays_editor/tests/`),
-the text pane (`crates/rays_editor/src/test_text_pane.rs`), the carry (`pxui/crates/pxui_core/tests/`,
+the text pane (`crates/rays_editor/src/test_text_pane.rs`), the carry (`pxui/crates/private/pxui_core/tests/`,
 `crates/flow_native/tests/`, `crates/rays_editor/tests/`), and the gate. Visual checks are in
 `@runtest-native`.
 

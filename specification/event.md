@@ -8,7 +8,7 @@ Polling and held-input state are private to `Sketch`; there is no global query.
 
 ## Public events
 
-The typed event vocabulary is declared in `pxui/crates/input/src/lib.rs`; native translation lives under `crates/runtime_input`.
+The typed event vocabulary is declared in `pxui/crates/open/input/src/lib.rs`; native translation lives under `crates/runtime_input`.
 
 All strings are copied into owned application storage before SDL3 releases the native
 event payload.
@@ -54,7 +54,7 @@ code may consume every ordered motion.
 `Sketch.run_state` polls once per frame and supplies the immutable event list in
 `Frame.input.events`. An update folds it explicitly:
 
-The typed event vocabulary is declared in `pxui/crates/input/src/lib.rs`; native translation lives under `crates/runtime_input`.
+The typed event vocabulary is declared in `pxui/crates/open/input/src/lib.rs`; native translation lives under `crates/runtime_input`.
 
 ## Ownership and domain contract
 
