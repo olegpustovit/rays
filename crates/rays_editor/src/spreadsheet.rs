@@ -42,7 +42,7 @@ pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), owner: i64, geometry: Opt
                 (h - 24).max(0) as f32,
                 &headers,
                 count(owner, geometry),
-                Rc::new(move |row, column| (cells[column as usize].1)(row)),
+                move |row, column| (cells[column as usize].1)(row),
                 "sheet-values",
             );
         }

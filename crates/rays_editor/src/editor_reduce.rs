@@ -793,7 +793,7 @@ pub fn view_input(value: &EditorModel, result: &FrameResult) -> frame::Frame {
         Some((key, _)) => Some(*key),
         None => result.pane_keys.iter().find_map(|(key, (panel, _))| if is_view(panel) { Some(*key) } else { None }),
     };
-    value.ui.borrow().input(owner)
+    rays_shell::host::input(&mut value.ui.borrow_mut(), owner)
 }
 
 pub fn timeline_step(value: &EditorModel, timeline: timeline::Timeline, timeline_changes: Vec<timeline::Change>, result: &FrameResult) -> (timeline::Timeline, Vec<timeline::Change>, i64) {

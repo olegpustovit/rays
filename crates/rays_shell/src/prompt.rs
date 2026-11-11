@@ -116,11 +116,11 @@ pub fn macro_(ui: &mut Ui, key: &str, title: &str, literals: &[String], free: &[
                 holes.push((*on, name.clone()));
             } else {
                 let on = ui.toggle(&format!("{}  {}", i + 1, literals[i]), *on);
-                let name = if on { ui.text_field(&format!("hole {}", i + 1), name).unwrap_or_else(|| name.clone()) } else { name.clone() };
+                let name = if on { ui.text_field(&format!("hole {}", i + 1), name).map_or_else(|| name.clone(), str::to_owned) } else { name.clone() };
                 holes.push((on, name));
             }
         }
-        let name = ui.text_field("Macro name", &m.name).unwrap_or_else(|| m.name.clone());
+        let name = ui.text_field("Macro name", &m.name).map_or_else(|| m.name.clone(), str::to_owned);
         let submit = ui.button("Create macro");
         out = Some((Macro { name, holes }, if submit || enter { MacroResult::Submit } else { MacroResult::None }));
     });

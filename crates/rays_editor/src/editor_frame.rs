@@ -880,7 +880,7 @@ pub fn undo_passed(value: &EditorModel, text_focus: bool, modal: bool) -> Vec<Ac
 pub fn hud_of<'a>(value: &ModelView<'a>, leader: &router::State, frame_: &frame::Frame, commands: &[Command]) -> Option<(String, f64)> {
     match commands.last() {
         Some(command) => {
-            let platform = value.ui.borrow().platform();
+            let platform = rays_shell::host::platform(&value.ui.borrow());
             Some((format!("{} \u{b7} {}", keymap::label(platform, command.trigger.as_ref().expect("a routed command has a trigger")), command.label), frame_.input.t + 1.5))
         }
         None => match leader {
@@ -900,7 +900,7 @@ pub fn live_keymap(all_ui_visible: bool, keymap: std::rc::Rc<Vec<Command>>) -> s
 }
 
 fn ui_platform(value: &EditorModel) -> input::Platform {
-    value.ui.borrow().platform()
+    rays_shell::host::platform(&value.ui.borrow())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -926,7 +926,7 @@ pub fn update_frame(
     follow_start(value);
     let (focus, focus_path) = if all_ui_visible {
         let roots: Vec<i64> = value.pane_keys.iter().map(|(k, _)| *k).collect();
-        let pressed = value.ui.borrow().last_press_within(frame_, &roots);
+        let pressed = rays_shell::host::last_press_within(&value.ui.borrow(), frame_, &roots);
         match pressed {
             Some(key) => value.pane_keys.iter().find(|(k, _)| *k == key).map(|(_, t)| t.clone()).unwrap_or((value.focus.clone(), value.focus_path.clone())),
             None => (value.focus.clone(), value.focus_path.clone()),
@@ -1145,7 +1145,7 @@ pub fn update_frame(
             let geo0 = geometry(&(&*value).into(), &workspace, frame_);
             let mut group_table: HashMap<layout::Path, Vec<f32>> = HashMap::new();
             let mut tools_table: HashMap<layout::Path, f32> = HashMap::new();
-            let platform_ui = ui.platform();
+            let platform_ui = rays_shell::host::platform(ui);
             let _ = platform_ui;
             for leaf in &geo0.leaves {
                 let text_ = match (&text_host, &text_shown) {

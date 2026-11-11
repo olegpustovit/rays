@@ -253,7 +253,7 @@ pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key],
     let (world_drag, engaged) = match (&signal, &view) {
         (Some(s), Some(box_)) => {
             let drag = match world_drag {
-                None if s.pressed && s.button == Some(MouseButton::LeftButton) => match world_operation(core, area, p64(s.press_point), ui.press_keys(box_).contains(&Key::Shift)) {
+                None if s.pressed && s.button == Some(MouseButton::LeftButton.code() as u8) => match world_operation(core, area, p64(s.press_point), ui.press_keys(box_).contains(&Key::Shift.code())) {
                     Some(operation) => { seal(core); Some(self::WorldDrag { operation, point: p64(s.press_point), area }) },
                     None => None,
                 },
@@ -757,7 +757,7 @@ pub fn rests(value: &LoopModel, frame_: &frame::Frame) -> Option<Rest> {
     match &value.rest {
         Some(rest_)
             if rest_.still >= REST_FRAMES
-                && !value.core.ui.borrow().wants_frame(&frame_.input.events, frame_.input.t)
+                && !rays_shell::host::wants_frame(&value.core.ui.borrow(), &frame_.input.events, frame_.input.t)
                 && same_input(&rest_.shown, frame_)
                 && frame_.input.t >= rest_.shown.input.t
                 && frame_.input.t - rest_.shown.input.t < REST_SECONDS =>

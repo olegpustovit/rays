@@ -1,5 +1,6 @@
 //! the leader sheet and the key table.
 //! Commands are `editor_core::command::Command`; their scope is a kind of panel, `Panel`.
+use crate::host;
 use crate::kit;
 use crate::layout;
 use editor_core::command;
@@ -179,8 +180,8 @@ pub fn panel(
     let sections: Sections = match category {
         Some(category) => by_category(keymap, prefix, focus, category, describe, order),
         None => vec![
-            ("Global".to_string(), page(ui.platform(), keymap, prefix, None)),
-            (focus_name.to_string(), page(ui.platform(), keymap, prefix, Some(focus))),
+            ("Global".to_string(), page(host::platform(ui), keymap, prefix, None)),
+            (focus_name.to_string(), page(host::platform(ui), keymap, prefix, Some(focus))),
         ]
         .into_iter()
         .filter(|(_, rows)| !rows.is_empty())
@@ -284,7 +285,7 @@ pub fn sheet(
     text_keys: &[(String, Trigger)],
     keymap: &[command::Command],
 ) -> bool {
-    let sections = sheet_sections(ui.platform(), category, text_keys, keymap);
+    let sections = sheet_sections(host::platform(ui), category, text_keys, keymap);
     let mut result: Option<bool> = None;
     let cap = kit::cap_size(ui);
     let context = context.to_string();

@@ -2,10 +2,9 @@
 
 Rays is a Rust creative-coding framework and native `.rays` Lisp workspace editor.
 The Cargo workspace is the repository root. `crates/` owns libraries, the `rays_bin` application, Lisp
-nodes and runtime assets. PXUI, the `ogpu_*` GPU layer, the window hosts (`pxui_sdl`, `pxui_wayland`),
-`input`, `sdl3`, the `*_sys` bindings, `mem_sys`, `cfmt`, the `cargo t` runner, the fonts and the PXUI
-goldens live in the `pxui/` submodule (its own repository, with its own AGENTS.md, gate and
-`tools/validate.sh`); Rays depends on its crates by path and is not a workspace member there.
+nodes and runtime assets. PXUI lives in the `pxui/` submodule (its own repository, with its own
+AGENTS.md, gate and `tools/validate.sh`) in three tiers, described below; Rays depends on its public and
+open crates by path and is not a workspace member there.
 `sketches/` owns runnable workspaces. `fixtures/` owns shared goldens; `specification/` owns design
 contracts. Historical port evidence lives in `docs/history/` and records known unfinished work.
 
@@ -22,6 +21,38 @@ contracts. Historical port evidence lives in `docs/history/` and records known u
 - There is no hosted CI and no GitHub Actions, in either repository: validate locally with
   `pxui/tools/validate.sh` (macOS; `--windows` and `--linux` print the commands for the Windows box
   and WSL) plus the Rays commands below and in `docs/development.md`.
+
+## How Rays uses PXUI
+
+The `pxui/` submodule has three tiers (see pxui/AGENTS.md):
+
+- **public** (`pxui`, `pxui_types`): the UI. Rays builds every panel, the graph and canvas text through
+  `pxui`. Every Rays crate links it with `features = ["static"]`, so the one Cargo build, incremental as
+  always, exercises the C ABI; a release build may drop the feature and load `libpxui`. The code is the
+  same in both.
+- **open** (`ogpu_*`, `input`, `sdl3`, `pxui_sdl`, `pxui_wayland`, `mem_sys`, `cfmt`): the GPU layer and
+  window hosts. Rays links them statically and owns the device, the queue, the swapchain and the window.
+- **private** (everything under `pxui/crates/private/`): never named by a Rays crate. A path containing
+  `crates/private` in a Rays Cargo.toml is always wrong; `cargo run -p gate -- deps` refuses it. To reach
+  something private, add an export, the wrapper method and the `pxui.h` line in `pxui/` first.
+
+Rules:
+- Rays creates the GPU device and hands its native handles to `pxui::Renderer` once (`rays_shell::host`).
+  Each frame with UI layers, the scene renderer calls the host's `begin` before it records its first pass
+  (`Renderer::prepare`: glyph uploads into the frame's command buffer); each UI layer is drawn into the
+  scene's open pass in its place between Rays' own nodes (`Renderer::draw_layer`), and a layer with a
+  backdrop blur splits the pass through `UiPass::split`. After PXUI draws, the host calls
+  `ogpu_core::backend::invalidate_state` on the pass. PXUI never submits, waits or presents.
+- Textures shown in the UI (images) cross as `native_texture` handles and live as long as the Rust value
+  that shows them (`host::HostImage`); the frame serials the scene renderer passes keep them alive until
+  their frames complete.
+- Keys, buttons and events cross as the numbering of `input::wire` (`Key::code`, `Event::raw`): the host
+  encodes a frame once; a call site that compares a key or a button uses `.code()`.
+- Text results from the UI are borrowed `&str` valid for the frame: copy what the document keeps.
+- A panic in UI-building code surfaces at the `ui.frame` call (`host::frame`). Do not catch it inside the
+  closure.
+- Drop a UI through `host::destroy` before its owner lets it go: the library refuses to destroy a `Ui`
+  while a renderer of it lives, and the UI would stay allocated.
 
 ## Fast iteration
 

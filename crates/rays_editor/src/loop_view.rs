@@ -29,11 +29,11 @@ type Nodes = Vec<scene_node>;
 
 /// The shape the editor asks of the platform for the pointer, or the default one while the UI is hidden.
 pub fn set_ui_cursor(ui: &Ui, visible: bool) -> Result<(), String> {
-    let shape = match if visible { ui.output().platform.cursor } else { None } {
-        Some(pxui::ui::Cursor::HorizontalResize) => sketch::Cursor::HorizontalResize,
-        Some(pxui::ui::Cursor::VerticalResize) => sketch::Cursor::VerticalResize,
-        Some(pxui::ui::Cursor::Text) => sketch::Cursor::Text,
-        None => sketch::Cursor::Default,
+    let shape = match if visible { Some(ui.output().platform).filter(|p| p.has_cursor != 0).map(|p| p.cursor) } else { None } {
+        Some(1) => sketch::Cursor::HorizontalResize,
+        Some(2) => sketch::Cursor::VerticalResize,
+        Some(3) => sketch::Cursor::Text,
+        _ => sketch::Cursor::Default,
     };
     sketch::set_cursor(shape)
 }

@@ -489,9 +489,19 @@ dependencies = [
  "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
+ "pxui_atspi",
  "pxui_core",
  "pxui_render",
  "pxui_text",
+ "pxui_types",
+]
+
+[[package]]
+name = "pxui_atspi"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "pxui_core",
  "pxui_types",
 ]
 

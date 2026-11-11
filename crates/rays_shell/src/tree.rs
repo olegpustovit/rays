@@ -3,6 +3,7 @@
 //! indent guides and sticky ancestors, toggle columns paint when dragged, and rows drag with a
 //! 4-point dead zone onto before/inside/after drop zones. The host owns rows and selection and
 //! applies the intents.
+use crate::host;
 use crate::kit;
 use crate::prompt;
 use editor_core::command;
@@ -399,9 +400,9 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
         if column < 0 { false } else { at(k).flags.get(column as usize).copied().unwrap_or(false) }
     };
     let is_selected = |id: i64| selected.contains(&id);
-    let left = signal.button == Some(MouseButton::LeftButton);
+    let left = signal.button == Some(MouseButton::LeftButton.code() as u8);
     let press_keys = ui.press_keys(&boxed);
-    let modifier = |key: Key| press_keys.contains(&key);
+    let modifier = |key: Key| press_keys.contains(&key.code());
     let first = intents.len();
     // Presses: select, start a row drag or a toggle paint.
     if signal.pressed && left {
@@ -435,7 +436,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
                             let selection = if modifier(Key::Shift) {
                                 let anchor = t.anchor.and_then(|a| position(rows, &shown, a)).unwrap_or(k);
                                 cons(row.id, without(&span(rows, &shown, anchor, k), row.id))
-                            } else if input::command_held(ui.platform(), &press_keys) {
+                            } else if input::command_held(host::platform(ui), &press_keys.iter().filter_map(|k| Key::from_code(*k)).collect::<Vec<_>>()) {
                                 if is_selected(row.id) { without(selected, row.id) } else { cons(row.id, selected.to_vec()) }
                             } else if is_selected(row.id) {
                                 cons(row.id, without(selected, row.id))
@@ -570,7 +571,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
             let rows: &[Row] = &rows_rc;
             let at = |k: usize| &rows[shown[k]];
             let is_selected = |id: i64| selected.contains(&id);
-            let scroll = paint.scroll_y[slot];
+            let scroll = paint.scroll_y(slot);
             let first = 0.max((scroll / height).floor() as i64);
             let last = (count as i64 - 1).min(((scroll + body) / height).ceil() as i64);
             let sticky = sticky_of(&sticky_rows, &shown, height, scroll);

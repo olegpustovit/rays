@@ -231,7 +231,7 @@ pub fn text_keys_are_handled() {
     assert!(!keys.is_empty(), "no text keys");
     for (label, trigger) in keys {
         let Trigger::Chord(k, mods) = trigger else { panic!("text key without a chord") };
-        let mut ui = pxui::ui::Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None));
+        let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
         let text = Rc::new(RefCell::new("(a (b c))\n(d (e))".to_string()));
         let sel = Rc::new(RefCell::new((0i64, 0i64)));
         let caret = Rc::new(RefCell::new(0i64));
@@ -239,7 +239,7 @@ pub fn text_keys_are_handled() {
             let mut f = frame_at((0., 0.), events, 0);
             f.input.keys = keys.to_vec();
             let (text, sel, caret, language) = (text.clone(), sel.clone(), caret.clone(), language.clone());
-            ui.frame(&f, &mut |ui: &mut pxui::ui::Ui| {
+            rays_shell::host::build(&mut ui, &f, &mut |ui: &mut pxui::ui::Ui| {
                 let (sel2, caret2) = (sel.clone(), caret.clone());
                 let o = pxui::ui_text::TextAreaOpts {
                     language: Some(language.clone()),
@@ -258,7 +258,7 @@ pub fn text_keys_are_handled() {
         step(&mods, vec![Event::KeyPressed(k)]);
         let after = (text.borrow().clone(), *sel.borrow(), *caret.borrow());
         assert!(before != after, "key sheet lists {label} but the text area ignores it");
-        ui.destroy();
+        rays_shell::host::destroy(&mut ui);
     }
 }
 

@@ -107,7 +107,7 @@ pub fn button(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, o: &ButtonOpts, la
     let boxed = ui.box_(key, BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(w)).h(Size::Px(o.h)).at((bx, by)));
     let signal = ui.signal(&boxed);
     let state = State { hovered: o.enabled && signal.hovered, pressed: o.enabled && signal.held, checked: o.active, ..State::default() };
-    ui.node_mut(&boxed).look = *button_states(&theme, o.primary).pick(state);
+    ui.node_mut(&boxed, |node| node.look = *button_states(&theme, o.primary).pick(state));
     let color = if o.enabled { theme.foreground } else { theme::ink_3(&theme) };
     let lw = ui.text_width(None, label);
     let tx = match o.icon {

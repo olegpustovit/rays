@@ -251,7 +251,7 @@ pub fn status_box<'a>(value: &ModelView<'a>, ui: &mut Ui, frame: &frame::Frame, 
         Panel::Outline => {
             let mut e = vec![pair("s", "filter"), pair("i", "enter")];
             let jump = editor_commands::keymap().iter().find(|c| c.id == "scene.jump").and_then(|c| c.trigger.as_ref());
-            e.extend(jump.map(|t| (Cow::Owned(keymap::label(ui.platform(), t)), Cow::Borrowed("jump"))));
+            e.extend(jump.map(|t| (Cow::Owned(keymap::label(rays_shell::host::platform(ui), t)), Cow::Borrowed("jump"))));
             e
         }
         Panel::Graph => vec![

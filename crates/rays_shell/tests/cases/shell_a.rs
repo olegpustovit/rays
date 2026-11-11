@@ -12,7 +12,7 @@ use rays::frame;
 
 pub fn new_ui() -> Ui {
     let path = format!("{}/../../pxui/assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
-    Ui::create(input::Platform::Apple, Some(11), rays_shell::host::text(Some(&path)))
+    rays_shell::host::create(input::Platform::Apple, Some(11), Some(&path))
 }
 
 /// Build a 400x300 logical frame unless sized, with the supplied pointer and events.
@@ -50,9 +50,9 @@ fn moved(p: (f64, f64)) -> Event {
 
 fn instances(f: &mut dyn FnMut(&mut Ui)) -> i64 {
     let mut ui = new_ui();
-    ui.frame(&base(), f);
-    let total = ui.output().draw.iter().map(|l| l.instances.len() as i64).sum();
-    ui.destroy();
+    rays_shell::host::build(&mut ui, &base(), f);
+    let total = ui.layers().map(|l| l.instances.len() as i64).sum();
+    rays_shell::host::destroy(&mut ui);
     total
 }
 
@@ -61,7 +61,7 @@ pub fn window_shell_pane_root() {
     let pane = |ui: &mut Ui, events: Vec<Event>| -> (Signal, Signal) {
         let mut out: Option<(Signal, Signal)> = None;
         let b = base();
-        ui.frame(&fr((400, 300), (0.0, 0.0), events), &mut |ui| {
+        rays_shell::host::build(ui, &fr((400, 300), (0.0, 0.0), events), &mut |ui| {
             let root = chrome::pane_root(ui, &b, (100, 20, 100, 80), "pane");
             let mut child: Option<UiBox> = None;
             ui.within(&root, &mut |ui| {
@@ -76,7 +76,7 @@ pub fn window_shell_pane_root() {
     assert!(root.subtree_press == Some(0) && child.pressed, "pane root missed its child control press");
     let (root, _) = pane(&mut ui, vec![left_release((115.0, 35.0)), left_press((5.0, 5.0))]);
     assert!(root.subtree_press.is_none(), "pane root accepted a press outside its hit bounds");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_splitter_hit_area() {
@@ -88,15 +88,15 @@ pub fn window_shell_splitter_hit_area() {
     let mut ui = new_ui();
     let chrome_frame = |ui: &mut Ui, events: Vec<Event>| {
         let f = fr((1000, 300), (0.0, 0.0), events);
-        ui.frame(&f, &mut |ui| {
+        rays_shell::host::build(ui, &f, &mut |ui| {
             chrome::update(None, None, None, None, None, None, &layout, ui, &wide);
             chrome::splitters(None, None, &layout, ui, &wide);
         });
     };
     chrome_frame(&mut ui, vec![]);
     chrome_frame(&mut ui, vec![moved(((divider_x - 2) as f64, 100.0))]);
-    assert!(ui.output().platform.cursor == Some(Cursor::HorizontalResize), "thin splitter lost its wider resize hit area");
-    ui.destroy();
+    assert!({ let p = ui.output().platform; p.has_cursor != 0 && p.cursor == 1 }, "thin splitter lost its wider resize hit area");
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_tools_start() {
@@ -110,13 +110,13 @@ pub fn window_shell_tools_start() {
     assert!((focused - plain - 12.0).abs() <= 1e-6 && plain > title + 25.0, "a header's tools do not start after its focus square, title and breadcrumb");
     let cap = rays_shell::kit::cap_width(&mut ui, "Graph");
     assert!((title - (12.0 + cap + 25.0)).abs() <= 1e-6, "a title alone is not 12 in, its label and 25 to the tools");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 fn chrome_frame(ui: &mut Ui, tree: &Panels, mouse: (f64, f64), events: Vec<Event>) -> Vec<Intent> {
     let f = fr((1000, 600), mouse, events);
     let mut out: Vec<Intent> = Vec::new();
-    ui.frame(&f, &mut |ui| {
+    rays_shell::host::build(ui, &f, &mut |ui| {
         let mut a = chrome::update(None, None, None, None, None, None, tree, ui, &f);
         a.extend(chrome::splitters(None, None, tree, ui, &f));
         out = a;
@@ -185,7 +185,7 @@ pub fn window_shell_splitter_drag_and_menus() {
     chrome_frame(&mut ui, &default, (985.0, 10.0), vec![moved((985.0, 10.0))]);
     let collapse = chrome_frame(&mut ui, &default, (985.0, 10.0), vec![left_press((985.0, 10.0)), left_release((985.0, 10.0))]);
     assert!(collapse.contains(&Intent::Toggle(vec![1, 1])), "the collapse button did not toggle the inspector");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_window_past_the_edge() {
@@ -198,7 +198,7 @@ pub fn window_shell_window_past_the_edge() {
     let windowed = |ui: &mut Ui, mouse: (f64, f64), events: Vec<Event>| -> Vec<Intent> {
         let f = fr((1000, 600), mouse, events);
         let mut out = Vec::new();
-        ui.frame(&f, &mut |ui| {
+        rays_shell::host::build(ui, &f, &mut |ui| {
             out = chrome::update(Some(&state), None, None, None, None, None, &tree, ui, &f);
         });
         out
@@ -215,7 +215,7 @@ pub fn window_shell_window_past_the_edge() {
         })
         .collect();
     assert!(got == vec![(600, 300)], "a window saved past the edge did not follow the pointer: {got:?}");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_breadcrumb_clicks() {
@@ -226,7 +226,7 @@ pub fn window_shell_breadcrumb_clicks() {
     let crumbed = |ui: &mut Ui, mouse: (f64, f64), events: Vec<Event>| -> Vec<Intent> {
         let f = fr((1000, 600), mouse, events);
         let mut out = Vec::new();
-        ui.frame(&f, &mut |ui| {
+        rays_shell::host::build(ui, &f, &mut |ui| {
             out = chrome::update(None, None, Some(&title), None, None, None, &tree, ui, &f);
         });
         out
@@ -247,7 +247,7 @@ pub fn window_shell_breadcrumb_clicks() {
     }
     hit.sort();
     assert!(hit == vec![0, 1, 2], "breadcrumb clicks reported {hit:?}, not the first three parts");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_drop_targets() {
@@ -260,7 +260,7 @@ pub fn window_shell_drop_targets() {
     let run = |ui: &mut Ui, mouse: (f64, f64), events: Vec<Event>, dragging: Option<(Vec<usize>, bool)>| -> Vec<Intent> {
         let f = fr((1000, 600), mouse, events);
         let mut out = Vec::new();
-        ui.frame(&f, &mut |ui| {
+        rays_shell::host::build(ui, &f, &mut |ui| {
             out = chrome::drop_targets(ui, dragging.clone(), &geometry, &state);
         });
         out
@@ -271,7 +271,7 @@ pub fn window_shell_drop_targets() {
     run(&mut ui, p, vec![moved(p)], Some((vec![1, 0], false)));
     let docked = run(&mut ui, p, vec![moved(p)], Some((vec![1, 0], true)));
     assert!(docked.contains(&Intent::DockPanel(vec![1, 0], vec![0], Side::Left)), "a release over an edge did not dock there: {docked:?}");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_status_and_guide_draw() {
@@ -293,19 +293,19 @@ pub fn window_shell_status_and_guide_draw() {
     };
     assert!(status(24) > 0 && status(0) == 0, "status strip visibility or drawing failed");
     let mut ui = new_ui();
-    ui.frame(&base(), &mut |ui| {
+    rays_shell::host::build(&mut ui, &base(), &mut |ui| {
         let o = status_bar::Opts { text: "Overlay".into(), ..status_bar::Opts::default() };
         status_bar::draw(ui, (0, 272, 400, 28), &o);
     });
-    assert!(ui.output().draw.iter().any(|l| !l.instances.is_empty()), "PXUI did not draw the status bar");
-    ui.destroy();
+    assert!(ui.layers().any(|l| !l.instances.is_empty()), "PXUI did not draw the status bar");
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_timeline_frame_field() {
     let mut ui = new_ui();
     let bar = |ui: &mut Ui, mouse: (f64, f64), events: Vec<Event>| -> Vec<timeline_bar::Intent> {
         let mut out = Vec::new();
-        ui.frame(&fr((400, 300), mouse, events), &mut |ui| {
+        rays_shell::host::build(ui, &fr((400, 300), mouse, events), &mut |ui| {
             out = timeline_bar::draw(ui, (0, 270, 400, 30), false, false, 12, 0.2, 240);
         });
         out
@@ -348,13 +348,13 @@ pub fn window_shell_timeline_frame_field() {
     assert!(enter(&mut ui, "-5", Key::Enter) == vec![0], "a negative frame did not clamp to 0");
     assert!(enter(&mut ui, "x", Key::Enter).is_empty(), "text that is not a frame was committed");
     bar(&mut ui, (0.0, 0.0), vec![Event::KeyPressed(Key::Escape)]);
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_prompts() {
     let mut ui = new_ui();
     let mut query = None;
-    ui.frame(&base(), &mut |ui| {
+    rays_shell::host::build(&mut ui, &base(), &mut |ui| {
         query = prompt::name(ui, "name", "Save", "Name it", "Name", "draft");
     });
     assert!(query == Some(("draft".to_string(), Pick::None)), "name prompt lost its initial query");
@@ -362,11 +362,11 @@ pub fn window_shell_prompts() {
     let m = Macro { name: "shifted".into(), holes: vec![(true, "p1".into()), (false, "p2".into()), (true, "p3".into())] };
     let literals = vec!["0.5".to_string(), "12".to_string(), "\"a\"".to_string()];
     let mut answer = None;
-    ui.frame(&base(), &mut |ui| {
+    rays_shell::host::build(&mut ui, &base(), &mut |ui| {
         answer = prompt::macro_(ui, "macro", "Make a macro", &literals, &["seed".to_string()], &m);
     });
     assert!(answer == Some((m.clone(), MacroResult::None)), "macro prompt changed its state or submitted on its own");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_echo_tips() {
@@ -393,7 +393,7 @@ pub fn window_shell_status_rule_drags() {
     // and hints leave (not a quarter of the strip), and the rule drags to resize it
     let mut ui = new_ui();
     let strip = |ui: &mut Ui, mouse: (f64, f64), events: Vec<Event>| {
-        ui.frame(&fr((1000, 300), mouse, events), &mut |ui| {
+        rays_shell::host::build(ui, &fr((1000, 300), mouse, events), &mut |ui| {
             let o = status_bar::Opts {
                 file: "a.rays".into(),
                 text: "t 10 live, 4 cached, cook 380 ms and a status line that is long".into(),
@@ -412,7 +412,7 @@ pub fn window_shell_status_rule_drags() {
             let p = (x as f64, 285.0);
             strip(ui, p, vec![moved(p)]);
             strip(ui, p, vec![]);
-            if ui.output().platform.cursor == Some(Cursor::HorizontalResize) {
+            if { let p = ui.output().platform; p.has_cursor != 0 && p.cursor == 1 } {
                 return x;
             }
             x += 1;
@@ -427,7 +427,7 @@ pub fn window_shell_status_rule_drags() {
     strip(&mut ui, b, vec![left_release(b)]);
     let x1 = rule_x(&mut ui);
     assert!((x1 - (x0 - 120)).abs() <= 8, "the status rule did not follow the drag: {x0} to {x1}");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub const CASES: &[(&str, fn())] = &[

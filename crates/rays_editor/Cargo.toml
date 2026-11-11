@@ -25,7 +25,7 @@ flow_eval = { path = "../flow_eval" }
 flow_sop = { path = "../flow_sop" }
 flow_graph = { path = "../flow_graph" }
 editor_core = { path = "../editor_core" }
-pxui = { path = "../../pxui/crates/public/pxui" }
+pxui = { path = "../../pxui/crates/public/pxui", features = ["static"] }
 rays_shell = { path = "../rays_shell" }
 rays_graph = { path = "../rays_graph" }
 lru = { path = "../lru" }

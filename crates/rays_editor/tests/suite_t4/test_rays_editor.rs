@@ -59,7 +59,7 @@ fn card_row((x, y, w, _): Rect) -> (i64, i64) {
 fn ui_bytes(ed: &editor::Editor) -> Vec<pxui::draw::Instance> {
     let ui = editor::private::ui(ed);
     let ui = ui.borrow();
-    ui.output().draw.iter().flat_map(|layer| layer.instances.iter().copied()).collect()
+    ui.layers().flat_map(|layer| layer.instances.iter().copied()).collect()
 }
 
 const TEXT: &str = r#"(workspace inspectable
@@ -188,10 +188,10 @@ pub fn layout_panes() {
     assert!(header == (0, 4, width(initial.view), 24), "workspace header is not a compact single line");
     assert!((width(initial.view) - 449).abs() <= 1 && (width(initial.graph) - 349).abs() <= 1 && (width(initial.inspector) - 200).abs() <= 1, "workspace defaults are not 45/35/20 after splitter space");
     let splitter_x = width(initial.view) + 2;
-    let mut ui = pxui::ui::Ui::create(input::Platform::Apple, Some(11), rays_shell::host::text(None));
+    let mut ui = rays_shell::host::create(input::Platform::Apple, Some(11), None);
     let mut step = |f: &frame::Frame| {
         let mut out = Vec::new();
-        ui.frame(f, &mut |ui| {
+        rays_shell::host::build(&mut ui, f, &mut |ui| {
             out = chrome::update(None, None, None, None, None, None, &workspace, ui, f);
             out.extend(chrome::splitters(None, None, &workspace, ui, f));
         });
@@ -209,7 +209,7 @@ pub fn layout_panes() {
     assert!(dragged.contains(&chrome::Intent::Settled) && resized != workspace && width(resized_panes.view) > width(initial.view) && width(resized_panes.graph) < width(initial.graph), "workspace splitter did not resize its adjacent columns");
     let wider = panes(None, &resized, &frame_ex(1200, 640, None, vec![], 3));
     assert!(width(wider.view) > width(resized_panes.view), "workspace splitter ratio did not survive a window resize");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
     let collapsed = panes(Some(&[panels::Panel::Timeline, panels::Panel::Inspector]), &resized, &fr(5));
     assert!(width(collapsed.inspector) == 0, "inspector toggle did not collapse the third column");
 }
@@ -548,7 +548,7 @@ pub fn workspace_walk() {
     assert!(centered(&ed), "display-node cook did not publish the graph's result");
     assert!(!editor::scene(&ed, &current_frame).is_empty(), "sketch environment produced an empty composed scene");
     // The whole workspace paints in a draw call per layer (and per image), not one per label.
-    let batches: usize = editor::private::ui(&ed).borrow().output().draw.iter().map(|l| 1 + l.breaks.len()).sum();
+    let batches: usize = editor::private::ui(&ed).borrow().layers().map(|l| 1 + l.breaks).sum();
     assert!(batches > 0 && batches <= 32, "workspace UI draws were not batched: {batches}");
     let (graph_x, graph_y, graph_width, graph_height) = editor::panes(&ed, &fr(229)).graph;
     let menu_point = (graph_x + graph_width / 2, graph_y + graph_height / 2);

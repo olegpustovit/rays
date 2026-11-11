@@ -533,8 +533,7 @@ fn header(
             intents.push(Intent::Window(l.path.clone(), None));
         }
         // the dock mark: a chevron-down in ink-2, as the sheet's window rows
-        let node = ui.node_mut(&dock);
-        (node.look, node.mark) = (*header_button(&theme, theme::ink_2(&theme)).pick(State { hovered: signal.hovered, ..State::default() }), Mark::Chevron(Dir::Down));
+        ui.node_mut(&dock, |node| (node.look, node.mark) = (*header_button(&theme, theme::ink_2(&theme)).pick(State { hovered: signal.hovered, ..State::default() }), Mark::Chevron(Dir::Down)));
         if ui.focused(&dock) {
             ui.draw_over(&dock, move |paint, Rect { x, y, w, h }| paint.fill(x, y + h - 1.0, w, 1.0, theme.accent));
         }
@@ -615,14 +614,14 @@ fn header(
         // the window's close mark is the label-size multiplication sign, centred in its button
         let cap = kit::cap_size(ui);
         let tw = ui.text_width(Some(cap), "\u{d7}");
-        let node = ui.node_mut(&button);
-        node.look = theme::Look { font: theme::Font { size: -2, ..theme::Font::BODY }, ..*header_button(&theme, theme::ink_2(&theme)).pick(collapse_state) };
-        node.inset = Edges { l: (size as f32 - tw) / 2.0, ..Edges::ZERO };
+        ui.node_mut(&button, |node| {
+            node.look = theme::Look { font: theme::Font { size: -2, ..theme::Font::BODY }, ..*header_button(&theme, theme::ink_2(&theme)).pick(collapse_state) };
+            node.inset = Edges { l: (size as f32 - tw) / 2.0, ..Edges::ZERO };
+        });
         ui.text(&button, "\u{d7}");
     } else {
         let collapsed_now = collapsed;
-        let node = ui.node_mut(&button);
-        (node.look, node.mark) = (*header_button(&theme, ink).pick(collapse_state), Mark::Chevron(if collapsed_now { Dir::Down } else { Dir::Left }));
+        ui.node_mut(&button, |node| (node.look, node.mark) = (*header_button(&theme, ink).pick(collapse_state), Mark::Chevron(if collapsed_now { Dir::Down } else { Dir::Left })));
     }
     // the keyboard's mark is the sheet's: an accent line over the last row of the button
     if ui.focused(&button) {

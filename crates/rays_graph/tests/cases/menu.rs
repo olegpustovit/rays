@@ -12,7 +12,7 @@ const BOUNDS: (i64, i64, i64, i64) = (20, 30, 800, 520);
 fn one_frame(ui: &mut Ui, menu: Menu, fr: &rframe::Frame) -> (Option<Menu>, Option<String>) {
     let mut cell = Some(menu);
     let mut out: Option<(Option<Menu>, Option<String>)> = None;
-    ui.frame(fr, &mut |ui: &mut Ui| {
+    rays_shell::host::build(ui, fr, &mut |ui: &mut Ui| {
         out = Some(node_menu::update(cell.take().expect("menu"), ui, BOUNDS));
     });
     out.expect("frame")

@@ -319,6 +319,16 @@ pub fn ui_splits() -> u64 {
 }
 
 impl UiPass<'_> {
+    /// The frame's command buffer.
+    pub fn commands(&self) -> &backend::Commands {
+        self.commands
+    }
+
+    /// The pass the layer draws into now: the one it was handed, or the last one a split reopened.
+    pub fn open_pass(&self) -> backend::RenderEncoder {
+        self.reopened.borrow().clone().unwrap_or_else(|| self.encoder.clone())
+    }
+
     /// Ends the open pass, runs `record` with the frame's command buffer and its colour target (RGBA8,
     /// sampleable, holding everything drawn so far: earlier batches and this layer up to here) so it can
     /// record passes of its own, then reopens a pass over the same target with `Load::Load` and the
@@ -339,6 +349,71 @@ impl UiPass<'_> {
         *self.reopened.borrow_mut() = Some(encoder.clone());
         Ok(encoder)
     }
+}
+
+thread_local! {
+    static FRAME_HOOKS: RefCell<Vec<FrameHook>> = const { RefCell::new(Vec::new()) };
+    /// presented frames not yet known to have finished: (serial, queue, epoch), on every scene execution of this thread
+    static IN_FLIGHT: RefCell<Vec<(u64, backend::Queue, i64)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// What a frame's UI painters get before any pass of the frame opens: the device, the frame's command buffer, this frame's serial
+/// and the last serial whose command buffer is known to have finished (at least `serial - 3`), and the painters of the frame's UI
+/// layers (each once).
+pub struct FrameStart {
+    pub device: Device,
+    pub commands: backend::Commands,
+    pub serial: u64,
+    pub completed: u64,
+    pub painters: Vec<UiPaint>,
+}
+
+/// Runs before a frame that has UI layers records its first pass, so the UI can record what must sit outside a pass (glyph uploads).
+pub type FrameHook = fn(&FrameStart) -> Result<(), Error>;
+
+/// Register `hook` (once) for this thread's scene executions.
+pub fn on_frame_begin(hook: FrameHook) {
+    FRAME_HOOKS.with(|h| {
+        let mut h = h.borrow_mut();
+        if !h.contains(&hook) {
+            h.push(hook);
+        }
+    });
+}
+
+/// The last serial before `serial` known to have finished. A presented frame of another scene execution still in flight bounds it;
+/// one older than three frames is waited for, so the bound never falls more than three behind.
+fn completed_before(serial: u64) -> Result<u64, Error> {
+    loop {
+        let oldest = IN_FLIGHT.with(|f| f.borrow().iter().min_by_key(|(s, ..)| *s).map(|(s, q, e)| (*s, q.clone(), *e)));
+        match oldest {
+            None => return Ok(serial - 1),
+            Some((s, queue, epoch)) if serial - (s - 1) > 3 => {
+                backend::complete_through(&queue, epoch)?;
+                IN_FLIGHT.with(|f| f.borrow_mut().retain(|(t, ..)| *t != s));
+            }
+            Some((s, ..)) => return Ok(s - 1),
+        }
+    }
+}
+
+fn run_frame_hooks(value: &SceneExecution, commands: &backend::Commands, batches: &[Rc<BatchPlan>]) -> Result<(), Error> {
+    let hooks = FRAME_HOOKS.with(|h| h.borrow().clone());
+    if hooks.is_empty() {
+        return Ok(());
+    }
+    let mut painters: Vec<UiPaint> = Vec::new();
+    for ui in batches.iter().filter_map(|b| b.ui.as_ref()) {
+        if !painters.iter().any(|p| Rc::ptr_eq(p, &ui.paint)) {
+            painters.push(ui.paint.clone());
+        }
+    }
+    if painters.is_empty() {
+        return Ok(());
+    }
+    let completed = completed_before(value.encoded_frame)?;
+    let start = FrameStart { device: value.device.clone(), commands: commands.clone(), serial: value.encoded_frame, completed, painters };
+    hooks.iter().try_for_each(|hook| hook(&start))
 }
 
 /// Paints layer `layer` of its owner's last UI frame (PXUI's painter, from the shell).
@@ -711,6 +786,8 @@ pub struct SceneExecution {
     sun: Option<SunMap>,
     sun_passes: i64,
     in_flight: Option<i64>,
+    /// the serial (`encoded_frame`) of the frame in flight, in `IN_FLIGHT` too
+    in_flight_serial: Option<u64>,
     /// this frame's process-wide number, for UI painters (`UiPass::frame`)
     encoded_frame: u64,
     dead: bool,
@@ -1091,6 +1168,7 @@ pub fn create(
                 sun: None,
                 sun_passes: 0,
                 in_flight: None,
+                in_flight_serial: None,
                 encoded_frame: 0,
                 dead: false,
             })
@@ -2357,9 +2435,16 @@ fn discard(frame: &Acquired) {
 /// Waiting here, before any preparation, keeps every resource the previous frame used alive until it
 /// completes, so retiring and destroying after the next submission stays safe.
 fn settle(value: &mut SceneExecution) -> Result<(), Error> {
+    let serial = value.in_flight_serial.take();
     match value.in_flight.take() {
         None => Ok(()),
-        Some(epoch) => backend::complete_through(&value.queue, epoch),
+        Some(epoch) => {
+            let done = backend::complete_through(&value.queue, epoch);
+            if let Some(serial) = serial {
+                IN_FLIGHT.with(|f| f.borrow_mut().retain(|(s, ..)| *s != serial));
+            }
+            done
+        }
     }
 }
 
@@ -2560,6 +2645,8 @@ fn submit_frame(value: &mut SceneExecution, frame: &Acquired, commands: &backend
         Ok(receipt) => match frame {
             Acquired::Presented(_) => {
                 value.in_flight = Some(receipt.epoch);
+                value.in_flight_serial = Some(value.encoded_frame);
+                IN_FLIGHT.with(|f| f.borrow_mut().push((value.encoded_frame, value.queue.clone(), receipt.epoch)));
                 Ok(())
             }
             Acquired::Offscreen => backend::complete_through(&value.queue, receipt.epoch),
@@ -2579,6 +2666,7 @@ fn encode_frame(value: &mut SceneExecution, frame: &Acquired, clear: (f64, f64, 
     static ENCODED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     value.encoded_frame = ENCODED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let encoded = (|| -> Result<(), Error> {
+        run_frame_hooks(value, &commands, batches)?;
         let mut open: Option<backend::RenderEncoder> = None;
         for (index, batch) in batches.iter().enumerate() {
             let later = &batches[index + 1..];

@@ -62,7 +62,7 @@ thread_local! {
 fn text_engine() -> Option<pxui::Text> {
     let system = SYSTEM_FONTS.iter().find_map(|p| std::fs::read(p).ok());
     let mut fonts: Vec<&[u8]> = system.iter().map(|v| v.as_slice()).collect();
-    fonts.push(pxui::text::PRAGMASEVKA);
+    fonts.push(pxui::text::pragmasevka());
     pxui::Text::new(&fonts)
 }
 

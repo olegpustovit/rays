@@ -185,7 +185,7 @@ fn scope_levels_b() {
 fn one_frame(ui: &mut Ui, key: Key, mut view: Pane) -> (Pane, Vec<Change>) {
     let f = frame((0, 0), vec![key.clone()], vec![]);
     let mut changes = Vec::new();
-    ui.frame(&f, &mut |ui: &mut Ui| {
+    rays_shell::host::build(ui, &f, &mut |ui: &mut Ui| {
         scope::update(&[key.clone()], &mut view, ui, &f, &mut changes);
     });
     (view, changes)

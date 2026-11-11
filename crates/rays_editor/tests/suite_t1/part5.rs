@@ -55,8 +55,7 @@ pub fn run_root_section() {
     }
     let named = |r: &Run, name: &str| {
         let ui = r.e.core.ui.borrow();
-        let tree = ui.output().a11y;
-        tree.nodes.iter().find(|n| &tree.strings[n.name.start as usize..n.name.end as usize] == name && n.rect.x >= ix as f32).map(|n| ((ix + iw * 3 / 4) as f64, (n.rect.y + n.rect.h / 2.0) as f64))
+                ui.a11y_nodes().iter().find(|n| ui.a11y_name_of(n) == name && n.rect.x >= ix as f32).map(|n| ((ix + iw * 3 / 4) as f64, (n.rect.y + n.rect.h / 2.0) as f64))
     };
     // (its Size section opened)
     let size = named(&r, "Size").unwrap_or_else(|| fail("the Size section"));

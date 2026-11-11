@@ -30,7 +30,7 @@ fn frame_at(count: i64, density: i64, pointer: (f64, f64), events: Vec<Event>) -
 /// One editor-like frame: the pane in a root box, cached as the editor caches it.
 pub fn pane_frame(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Vec<Change> {
     let mut changes = Vec::new();
-    ui.frame(fr, &mut |ui: &mut Ui| {
+    rays_shell::host::build(ui, fr, &mut |ui: &mut Ui| {
         let root = ui.box_("graph-root", BoxOpts::default().w(Size::Px(W as f32)).h(Size::Px(H as f32)).at((0.0, 0.0)));
         ui.within(&root, &mut |ui| scope::update_cached("graph-view", &[], t, ui, fr, &mut changes));
     });
@@ -39,7 +39,7 @@ pub fn pane_frame(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Vec<Change> 
 
 pub fn golden_ui() -> Ui {
     let path = format!("{}/../../pxui/assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
-    let mut ui = Ui::create(Platform::Apple, Some(11), rays_shell::host::text(Some(&path)));
+    let mut ui = rays_shell::host::create(Platform::Apple, Some(11), Some(&path));
     ui.verify_views(true);
     ui
 }
@@ -123,7 +123,7 @@ fn render(c: &Case, density: i64) -> canvas::Canvas {
     let mut nodes = vec![scene::clear(color::rgb(228, 139, 161))];
     nodes.extend(rays_shell::host::scene(&ui, None));
     canvas::render(Some(density), &canvas_, &nodes).expect("Canvas.render");
-    ui.borrow_mut().destroy();
+    rays_shell::host::destroy(&mut ui.borrow_mut());
     canvas_
 }
 
@@ -202,7 +202,7 @@ fn gpu_graph_cook_pixels() {
         let mut nodes = vec![scene::clear(color::rgb(228, 139, 161))];
         nodes.extend(rays_shell::host::scene(&ui, None));
         canvas::render(Some(density), &canvas_, &nodes).expect("Canvas.render");
-        ui.borrow_mut().destroy();
+        rays_shell::host::destroy(&mut ui.borrow_mut());
         let pixels = image::pixels(&canvas::to_image(&canvas_).expect("to_image")).expect("pixels");
         let _ = canvas::destroy(&canvas_);
         (pixels, patches, built)
@@ -229,14 +229,13 @@ fn measured(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Step {
     mem_sys::local_reset();
     let before = mem_sys::local_alloc_count();
     let mut changes = Vec::new();
-    ui.frame(fr, &mut |ui: &mut Ui| {
+    rays_shell::host::build(ui, fr, &mut |ui: &mut Ui| {
         let root = ui.box_("graph-root", BoxOpts::default().w(Size::Px(W as f32)).h(Size::Px(H as f32)).at((0.0, 0.0)));
         ui.within(&root, &mut |ui| scope::update_cached("graph-view", &[], t, ui, fr, &mut changes));
     });
     let allocs = mem_sys::local_alloc_count() - before;
-    let out = ui.output();
-    let bytes = out.draw.iter().flat_map(|l| l.dirty.iter()).map(|(a, b)| (b - a) as usize).sum::<usize>() * std::mem::size_of::<pxui::draw::Instance>();
-    for i in 0..out.draw.len() {
+    let bytes = ui.layers().flat_map(|l| l.dirty.iter()).map(|d| (d.end - d.start) as usize).sum::<usize>() * std::mem::size_of::<pxui::draw::Instance>();
+    for i in 0..ui.layer_count() {
         ui.drawn(i);
     }
     Step { views: ui.rebuilt_views(), bytes, allocs, changes }
@@ -331,7 +330,7 @@ fn window_graph_view_pan_zoom() {
                 step(&mut ui, &mut t, away, &[], vec![Event::PointerMoved(away)]);
             }
         }
-        ui.destroy();
+        rays_shell::host::destroy(&mut ui);
     }
 }
 
@@ -403,11 +402,10 @@ fn window_graph_hover() {
         // to a screen reader the cards are groups named by their titles, their ports buttons
         ui.set_a11y(true);
         to(&mut ui, &mut t, away);
-        let tree = ui.output().a11y;
-        let named = |name: &str, role: pxui::a11y::Role| tree.nodes.iter().any(|n| n.role == role && &tree.strings[n.name.start as usize..n.name.end as usize] == name);
+                let named = |name: &str, role: pxui::a11y::Role| ui.a11y_nodes().iter().any(|n| n.is_role(role) && ui.a11y_name_of(n) == name);
         check(named("c", pxui::a11y::Role::Group) && named("d", pxui::a11y::Role::Group), "the cards are not named groups");
         check(named("targets", pxui::a11y::Role::Button), "c's targets port is not a named button");
-        ui.destroy();
+        rays_shell::host::destroy(&mut ui);
     }
 }
 
@@ -449,7 +447,7 @@ fn window_graph_folded_hover() {
             check(verify || s.bytes <= ground, &format!("{what}: {} instance bytes", s.bytes));
             check(verify || s.allocs == 0, &format!("{what}: {} allocations", s.allocs));
         }
-        ui.destroy();
+        rays_shell::host::destroy(&mut ui);
     }
 }
 

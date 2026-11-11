@@ -169,7 +169,7 @@ fn drawn_iterations() {
     check(reports.borrow_mut().readouts(&zone_node, &[]).contains(&("tier".to_owned(), "CPU".to_owned())), "the inspector lost its execution tier");
     let paint_hash = |ui: &mut Ui, view: Pane| -> Vec<pxui::draw::Instance> {
         let _ = scope_step(ui, view, &frame0());
-        ui.output().draw.iter().flat_map(|l| l.instances.iter().copied()).collect::<Vec<_>>()
+        ui.layers().flat_map(|l| l.instances.iter().copied()).collect::<Vec<_>>()
     };
     let a = paint_hash(&mut ui, base.clone());
     let b = paint_hash(&mut ui, { let mut r8_view = base; scope::with_records(reports, &mut r8_view); r8_view });

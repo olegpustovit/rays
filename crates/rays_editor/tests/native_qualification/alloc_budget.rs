@@ -104,45 +104,45 @@ fn bare() { check("bare", "(workspace empty (graph g :context value 0))", BARE) 
 // paint, and changing the closure type at the same box/position remains safe.
 fn paint_storage() {
     use std::{cell::Cell, rc::Rc};
-    use pxui::ui::{BoxOpts, Paint, Rect, Size, Ui};
-    let mut ui = Ui::create(input::Platform::Apple, None, rays_shell::host::text(None));
+    use pxui::ui::{BoxOpts, Paint, Rect, Size};
+    let mut ui = rays_shell::host::create(input::Platform::Apple, None, None);
     let token = Rc::new(Cell::new(0));
-    let mut label_owner = None::<std::rc::Weak<str>>;
+    let mut label_at = None::<*const u8>;
     let painter = |token: Rc<Cell<i32>>| move |_: &mut Paint, _: Rect| token.set(token.get() + 1);
     for round in 0..6 {
         let f = rays::frame::Frame { input: input::Frame { size: (100, 100), ..input::at_time(round as f64) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
-        ui.begin_frame(&f);
-        let b = ui.box_("reuse", BoxOpts::default().w(Size::Px(20.)).h(Size::Px(20.)));
-        let before = mem_sys::alloc_count();
-        let previous = label_owner.as_ref().map(|previous| previous.upgrade().unwrap());
-        let label = ui.cached_label(&b, 0, if round < 4 { "Repeated label" } else { "Changed label" });
-        if let Some(previous) = previous {
-            if round == 4 {
-                assert!(!Rc::ptr_eq(&previous, &label), "changed text reused a stale label");
-                assert_eq!(previous.as_ref(), "Repeated label", "changing a label mutated its retained snapshot");
-            } else {
-                assert!(Rc::ptr_eq(&previous, &label), "unchanged label storage was replaced");
+        rays_shell::host::build(&mut ui, &f, &mut |ui| {
+            let b = ui.box_("reuse", BoxOpts::default().w(Size::Px(20.)).h(Size::Px(20.)));
+            let before = mem_sys::alloc_count();
+            let previous = label_at;
+            let label = ui.cached_label(&b, 0, if round < 4 { "Repeated label" } else { "Changed label" });
+            let (shows, at) = (label == if round < 4 { "Repeated label" } else { "Changed label" }, label.as_ptr());
+            assert!(shows, "the label shows its text");
+            if let Some(previous) = previous {
+                if round == 4 {
+                    assert_ne!(previous, at, "changed text reused a stale label");
+                } else {
+                    assert_eq!(previous, at, "unchanged label storage was replaced");
+                }
             }
-        }
-        label_owner = Some(Rc::downgrade(&label));
-        if round == 3 {
-            let token = token.clone();
-            ui.draw(&b, move |_: &mut Paint, _: Rect| token.set(token.get() + 1));
-        } else {
-            ui.draw(&b, painter(token.clone()));
-        }
-        ui.draw_over(&b, painter(token.clone()));
-        if [1, 2, 5].contains(&round) {
-            assert_eq!(mem_sys::alloc_count(), before, "warm callback storage allocated");
-        }
-        ui.end_frame(&f);
+            label_at = Some(at);
+            if round == 3 {
+                let token = token.clone();
+                ui.draw(&b, move |_: &mut Paint, _: Rect| token.set(token.get() + 1));
+            } else {
+                ui.draw(&b, painter(token.clone()));
+            }
+            ui.draw_over(&b, painter(token.clone()));
+            if [1, 2, 5].contains(&round) {
+                assert_eq!(mem_sys::alloc_count(), before, "warm callback storage allocated");
+            }
+        });
         assert_eq!(Rc::strong_count(&token), 1, "published frame retained a callback payload");
         assert_eq!(token.get(), (round + 1) * 2);
     }
     let f = rays::frame::Frame { input: input::Frame { size: (100, 100), ..input::at_time(7.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
-    ui.frame(&f, &mut |_| {});
-    assert!(label_owner.unwrap().upgrade().is_none(), "a retired box retained its cached label");
-    ui.destroy();
+    rays_shell::host::build(&mut ui, &f, &mut |_| {});
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn cases() -> Vec<(&'static str, fn())> { vec![("alloc_budget_paint_storage", paint_storage), ("alloc_budget_basic", basic), ("alloc_budget_empty", empty), ("alloc_budget_bare", bare)] }

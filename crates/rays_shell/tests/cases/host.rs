@@ -14,7 +14,7 @@ const WIDTH: i64 = 320;
 
 fn golden_ui() -> Ui {
     let path = format!("{}/../../pxui/assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
-    Ui::create(Platform::Apple, None, rays_shell::host::text(Some(&path)))
+    rays_shell::host::create(Platform::Apple, None, Some(&path))
 }
 
 fn frame_at(count: i64, height: i64, density: i64, events: Vec<Event>) -> frame::Frame {
@@ -32,7 +32,7 @@ fn frame_at(count: i64, height: i64, density: i64, events: Vec<Event>) -> frame:
 fn render(density: i64, height: i64, build: &mut dyn FnMut(&mut Ui)) -> (canvas::Canvas, u64) {
     let ui = Rc::new(RefCell::new(golden_ui()));
     for count in 0..2 {
-        ui.borrow_mut().frame(&frame_at(count, height, density, vec![Event::PointerMoved((-100.0, -100.0))]), build);
+        rays_shell::host::build(&mut ui.borrow_mut(), &frame_at(count, height, density, vec![Event::PointerMoved((-100.0, -100.0))]), build);
     }
     let canvas_ = canvas::create(WIDTH * density, height * density).expect("canvas");
     let mut nodes = vec![scene::clear(color::rgb(228, 139, 161))];
@@ -40,7 +40,7 @@ fn render(density: i64, height: i64, build: &mut dyn FnMut(&mut Ui)) -> (canvas:
     let before = rays_shell::host::draw_calls();
     canvas::render(Some(density), &canvas_, &nodes).expect("Canvas.render");
     let calls = rays_shell::host::draw_calls() - before;
-    ui.borrow_mut().destroy();
+    rays_shell::host::destroy(&mut ui.borrow_mut());
     (canvas_, calls)
 }
 
@@ -104,7 +104,7 @@ fn window_host_zones_parity() {
 fn window_host_layers_around_native_content() {
     let mut ui = golden_ui();
     let mut front_key = 0;
-    ui.frame(&frame_at(0, 240, 1, vec![]), &mut |ui| {
+    rays_shell::host::build(&mut ui, &frame_at(0, 240, 1, vec![]), &mut |ui| {
         let front = ui.box_("front", BoxOpts::default().flags(CLICKABLE).at((0.0, 0.0)).w(Size::Px(100.0)).h(Size::Px(60.0)));
         front_key = key(&front);
         ui.to_front(0, &front);
@@ -123,7 +123,7 @@ fn window_host_layers_around_native_content() {
         matches!(&staged.layers[..], [layer::NativeLayer::UiLayer(..), layer::NativeLayer::Scene2Layer(..), layer::NativeLayer::UiLayer(..)]),
         "native content was not between the background and floating controls"
     );
-    ui.borrow_mut().destroy();
+    rays_shell::host::destroy(&mut ui.borrow_mut());
 }
 
 /// Copy goes to the system clipboard after the frame; paste arrives from it with the next frame.
@@ -136,7 +136,7 @@ fn window_host_clipboard() {
         f.input.keys = keys;
         rays_shell::host::frame(ui, &f, &mut |ui| {
             let v = value.borrow().clone();
-            *value.borrow_mut() = ui.text_field("Caption", &v).unwrap_or(v);
+            *value.borrow_mut() = ui.text_field("Caption", &v).map(str::to_owned).unwrap_or(v);
         });
     };
     step(&mut ui, 0, vec![], vec![]);
@@ -153,7 +153,7 @@ fn window_host_clipboard() {
     }
     assert_eq!(copied.as_deref(), Ok("Functional UI"), "copy did not reach the clipboard");
     assert_eq!(*value.borrow(), "pasted", "paste did not arrive from the clipboard");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 /// The text area's integer scrub is param's rule (one per six points). Floats differ on purpose:

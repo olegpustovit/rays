@@ -220,7 +220,7 @@ fn scope_hidden_reports() {
     scope::with_records(hidden.clone(), &mut view);
     let (_, _) = scope_step(&mut ui, view, &frame0());
     assert_eq!(hidden.borrow().cached_footer_count(), 0, "offscreen graph built formatted footer reports");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 // ---------------------------------------------------------------- gestures 1

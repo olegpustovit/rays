@@ -60,7 +60,7 @@ pub fn frame_ev(mouse: (i64, i64), events: Vec<Event>) -> rframe::Frame {
 
 /// A UI over the default kit face at the 11-point kit size, as `Pxui.Ui.create ~platform:Apple ~font_size:11`.
 pub fn new_ui() -> Ui {
-    Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None))
+    rays_shell::host::create(Platform::Apple, Some(11), None)
 }
 
 pub const CASES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../specification/workspace/cases");
@@ -95,7 +95,7 @@ pub fn load_workspace(name: &str) -> Workspace {
 /// Run `f` over the pane inside one `Ui::frame` (the frame's closure returns nothing).
 pub fn in_frame(ui: &mut Ui, fr: &rframe::Frame, mut view: Pane) -> (Pane, Vec<Change>) {
     let mut changes = Vec::new();
-    ui.frame(fr, &mut |ui: &mut Ui| {
+    rays_shell::host::build(ui, fr, &mut |ui: &mut Ui| {
         scope::update(&[], &mut view, ui, fr, &mut changes);
     });
     (view, changes)
@@ -140,7 +140,7 @@ pub fn rect_center(r: (f64, f64, f64, f64)) -> (i64, i64) {
 /// The instances the pane drew (`scope_paint`).
 pub fn scope_paint(ui: &mut Ui, view: Pane) -> i64 {
     let _ = scope_step(ui, view, &frame0());
-    ui.output().draw.iter().map(|l| l.instances.len() as i64).sum()
+    ui.layers().map(|l| l.instances.len() as i64).sum()
 }
 
 /// `[n]` nodes in one scope: a chain with a long wire back at every seventh node.

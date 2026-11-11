@@ -24,7 +24,7 @@ fn measure(r: &mut Run, n: usize, step: &dyn Fn(&mut Run, usize)) -> Cost {
     // what frames before this left to draw is theirs, not the first measured frame's
     {
         let mut ui = r.e.core.ui.borrow_mut();
-        let layers = ui.output().draw.len();
+        let layers = ui.layer_count();
         for i in 0..layers {
             ui.drawn(i);
         }
@@ -43,9 +43,8 @@ fn measure(r: &mut Run, n: usize, step: &dyn Fn(&mut Run, usize)) -> Cost {
             c.inspector += ui.rebuilt_named("inspector-view") + ui.rebuilt_named("flow-section-");
             c.cpu_us += cpu.as_secs_f64() * 1e6;
         }
-        let out = ui.output();
-        c.bytes += out.draw.iter().flat_map(|l| l.dirty.iter()).map(|(a, b)| (b - a) as usize).sum::<usize>() * std::mem::size_of::<pxui::draw::Instance>();
-        let layers = out.draw.len();
+        c.bytes += ui.layers().flat_map(|l| l.dirty.iter()).map(|d| (d.end - d.start) as usize).sum::<usize>() * std::mem::size_of::<pxui::draw::Instance>();
+        let layers = ui.layer_count();
         for i in 0..layers {
             ui.drawn(i);
         }
@@ -73,8 +72,7 @@ fn header_points(r: &Run, panel: editor_core::panels::Panel) -> ((f64, f64), (f6
 /// The centre of the first accessible node named `name`.
 fn named(r: &Run, name: &str) -> Option<(f64, f64)> {
     let ui = r.e.core.ui.borrow();
-    let tree = ui.output().a11y;
-    tree.nodes.iter().find(|n| &tree.strings[n.name.start as usize..n.name.end as usize] == name).map(|n| ((n.rect.x + n.rect.w / 2.0) as f64, (n.rect.y + n.rect.h / 2.0) as f64))
+        ui.a11y_nodes().iter().find(|n| ui.a11y_name_of(n) == name).map(|n| ((n.rect.x + n.rect.w / 2.0) as f64, (n.rect.y + n.rect.h / 2.0) as f64))
 }
 
 fn workspace(name: &str, text: &str) {
@@ -270,8 +268,7 @@ fn document_scrub() {
     let ix = r.panes().inspector.0 as f32;
     let row = {
         let ui = r.e.core.ui.borrow();
-        let tree = ui.output().a11y;
-        tree.nodes.iter().find(|n| &tree.strings[n.name.start as usize..n.name.end as usize] == "width" && n.rect.x >= ix).map(|n| ((n.rect.x + n.rect.w / 2.0) as f64, (n.rect.y + n.rect.h / 2.0) as f64))
+                ui.a11y_nodes().iter().find(|n| ui.a11y_name_of(n) == "width" && n.rect.x >= ix).map(|n| ((n.rect.x + n.rect.w / 2.0) as f64, (n.rect.y + n.rect.h / 2.0) as f64))
     };
     let row = row.unwrap_or_else(|| fail("the width row"));
     let at = (row.0 + 90.0, row.1);

@@ -1098,7 +1098,7 @@ fn row_of(tops: &[f32], top: f32, scroll: f32, py: f32) -> Option<usize> {
 
 /// The held slider's scrub as its field reads it this frame (`dx` from the press).
 fn held_text(h: &Held, ui: &Ui, field: &UiBox, dx: f32) -> String {
-    scrub(h.integer, &h.origin, dx, ui.press_keys(field).contains(&Key::Shift))
+    scrub(h.integer, &h.origin, dx, ui.press_keys(field).contains(&Key::Shift.code()))
 }
 
 /// Draw the panel in `bounds` (scrolling, searching, sliders) of the pane keyed `pane`, in a cached

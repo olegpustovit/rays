@@ -35,7 +35,7 @@ pub fn sy(t: &Pane, gy: f64) -> f64 {
     t.y as f64 + t.pan_y + gy * t.zoom
 }
 fn left_button(sg: &Signal) -> bool {
-    sg.button == Some(MouseButton::LeftButton)
+    sg.button == Some(MouseButton::LeftButton.code() as u8)
 }
 
 /// The number field of a row, the kit's (`param::number`, as `Rays_shell.Kit.number`): the kind is the
@@ -121,7 +121,7 @@ fn follow_drag(ui: &mut Ui) -> Option<Change> {
         let h = h.as_mut()?;
         let field = ui.box_of_key(h.field)?;
         let (_, dx) = ui.field_drag(&field)?;
-        let fine = ui.press_keys(&field).contains(&Key::Shift);
+        let fine = ui.press_keys(&field).contains(&Key::Shift.code());
         let text = param::number::scrub(h.kind, h.range, &h.origin, dx as f64, fine);
         if text == h.last {
             h.patched = true;
@@ -1214,7 +1214,7 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
         On::Card(slot) => {
             let path = &items[*slot].0.path;
             if sig.pressed && left && t.context.is_none() {
-                let additive = ui.press_keys(canvas).contains(&Key::Shift);
+                let additive = ui.press_keys(canvas).contains(&Key::Shift.code());
                 if additive {
                     if !t.selected.remove(path) {
                         t.selected.insert(path);
@@ -1285,7 +1285,7 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
                 };
                 // Alt on an out-port lifts every wire it feeds
                 let path = slot_path(t, *slot);
-                let lift: Vec<(Path, ArgKey)> = if !ui.press_keys(canvas).contains(&Key::Alt) {
+                let lift: Vec<(Path, ArgKey)> = if !ui.press_keys(canvas).contains(&Key::Alt.code()) {
                     Vec::new()
                 } else {
                     let mut acc: Vec<(Path, ArgKey)> = Vec::new();
@@ -1338,7 +1338,7 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
             if t.drag.is_none() && t.context.is_none() && sig.held && left && (px - qx).hypot(py - qy) > 6.0 {
                 let wi = &t.geo.wires[*i];
                 if let (Some(tg), Some(from)) = (&wi.target, &wi.from) {
-                    let lift = if ui.press_keys(canvas).contains(&Key::Alt) { vec![(tg.0.clone(), tg.1.clone())] } else { Vec::new() };
+                    let lift = if ui.press_keys(canvas).contains(&Key::Alt.code()) { vec![(tg.0.clone(), tg.1.clone())] } else { Vec::new() };
                     let src = match t.item_at(from).map(|(pl, _, _)| &pl.item) {
                         Some(Item::Item(n)) if n.zone.is_none() && n.binds.len() == 1 && n.binds[0] == n.name => Some(n.name.clone()),
                         Some(Item::Input(inp)) => Some(inp.name.clone()),
@@ -1407,7 +1407,7 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
         }
         On::Ground => {
             if sig.pressed && left && t.context.is_none() {
-                let additive = ui.press_keys(canvas).contains(&Key::Shift);
+                let additive = ui.press_keys(canvas).contains(&Key::Shift.code());
                 if !additive && !t.selected.is_empty() {
                     emit.push(Change::Selected);
                 }
@@ -1715,7 +1715,7 @@ pub fn overscan(t: &Pane) -> (f64, f64) {
 /// The pane's view, before anything is built: a non-left drag on the bare canvas pans, the wheel (a
 /// tenth a step) and a pinch zoom at the pointer. The content follows by its view's transform.
 fn view_step(t: &mut Pane, sig: &Signal, frame: &rframe::Frame) {
-    if (sig.held || sig.released) && sig.button.is_some_and(|b| b != MouseButton::LeftButton) {
+    if (sig.held || sig.released) && sig.button.is_some_and(|b| u32::from(b) != MouseButton::LeftButton.code()) {
         let (dx, dy) = p64(sig.drag);
         (t.pan_x, t.pan_y) = (t.pan_x + dx, t.pan_y + dy);
     }

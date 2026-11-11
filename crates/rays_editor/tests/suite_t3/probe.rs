@@ -215,7 +215,7 @@ pub fn hoist() {
     let (x, y, tw, th) = scope::inspect::box_of(&view, &r).expect("r box");
     let (_, changes) = pg::scope_click(&mut ui, view, ((x + tw - 30. * z) as i64, (y + th - 10. * z) as i64));
     check(!changes.iter().any(|c| matches!(c, Change::SyntaxEdit(fe::Op::Hoist { .. }))), "r offered a hoist");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 /// a selection that an edit removed does not survive the next layout

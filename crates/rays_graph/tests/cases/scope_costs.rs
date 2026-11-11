@@ -44,7 +44,7 @@ fn one(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Cost {
     let builds = scope::inspect::content_builds(t);
     mem_sys::local_reset();
     let before = mem_sys::local_alloc_count();
-    ui.frame(fr, &mut |ui: &mut Ui| {
+    rays_shell::host::build(ui, fr, &mut |ui: &mut Ui| {
         let root = ui.box_("graph-root", BoxOpts::default().w(Size::Px(W as f32)).h(Size::Px(H as f32)).at((0.0, 0.0)));
         // the intents in a list kept from frame to frame, as the editor keeps its own
         CHANGES.with(|c| {
@@ -55,9 +55,8 @@ fn one(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Cost {
     });
     let allocs = mem_sys::local_alloc_count() - before;
     let us = ui.phase_times().iter().sum::<std::time::Duration>().as_secs_f64() * 1e6;
-    let out = ui.output();
-    let bytes = out.draw.iter().flat_map(|l| l.dirty.iter()).map(|(a, b)| (b - a) as usize).sum::<usize>() * INSTANCE;
-    for i in 0..out.draw.len() {
+    let bytes = ui.layers().flat_map(|l| l.dirty.iter()).map(|d| (d.end - d.start) as usize).sum::<usize>() * INSTANCE;
+    for i in 0..ui.layer_count() {
         ui.drawn(i);
     }
     Cost { us, nodes: ui.built_nodes(), views: ui.rebuilt_views(), builds: scope::inspect::content_builds(t) - builds, bytes, allocs }
@@ -94,7 +93,7 @@ fn window_graph_costs() {
     // one node is a chip
     scope::with_scope(saved_opts(TestSaved { level: vec![(path("n2"), (Level::Chip, true))], ..Default::default() }), "g", sc, &mut t);
     scope::with_records(recorded(&ws), &mut t);
-    let mut ui = Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None));
+    let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
     // measured as the app runs: no verifying rebuilds
     ui.verify_views(false);
     let mut count = 0;
@@ -364,7 +363,7 @@ fn window_graph_costs() {
     assert!(scrub.builds == 0 && card_views == 0, "the card scrub built the content {} times, n4's view {card_views} times", scrub.builds);
     let edit_worst = edit.iter().map(|c| c.allocs).max().unwrap_or(0);
     assert!(scrub.allocs <= edit_worst, "a card scrub frame allocated {} (the host's edit {edit_worst})", scrub.allocs);
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 /// A zone dragged by its header and a frame by its title, over a graph with a loop, a fold and a
@@ -379,7 +378,7 @@ fn zone_and_frame(table: &mut Vec<Run>) -> (Cost, Cost) {
     saved.frames.push((path(&["g"]), vec![("inputs".to_owned(), (-20.0, -40.0), (300.0, 420.0))]));
     scope::with_scope(saved_opts(saved), "g", sc, &mut t);
     scope::with_records(recorded(&ws), &mut t);
-    let mut ui = Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None));
+    let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
     ui.verify_views(false);
     let mut count = 1000;
     let mut go = |ui: &mut Ui, t: &mut Pane, at: (f64, f64), buttons: &[MouseButton], events: Vec<Event>| {
@@ -427,7 +426,7 @@ fn zone_and_frame(table: &mut Vec<Run>) -> (Cost, Cost) {
     let (x, y, w, _) = scope::inspect::box_of(&t, &path(&["g", "ys"])).expect("ys");
     let zone = drag(&mut ui, &mut t, "zone drag", (x + w / 2.0, y + 6.0), &path(&["g", "ys", "a"]));
 
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
     (zone, frame)
 }
 
@@ -447,7 +446,7 @@ fn cooks(table: &mut Vec<Run>) -> (Cost, usize, u64) {
     let mut t = scope::create(Some(W), Some(H));
     scope::with_scope(saved_opts(TestSaved { level: vec![(path(&["g", "a1"]), (Level::Full, true))], ..Default::default() }), "g", sc, &mut t);
     scope::with_records(records[0].clone(), &mut t);
-    let mut ui = Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None));
+    let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
     ui.verify_views(false);
     let mut count = 2000;
     let away = (-100.0, -100.0);
@@ -479,7 +478,7 @@ fn cooks(table: &mut Vec<Run>) -> (Cost, usize, u64) {
         let after = go(&mut ui, &mut t);
         assert!(after.bytes == 0 && after.views == 0, "the frame after a cook wrote {} bytes, built {} views", after.bytes, after.views);
     }
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
     table.push(Run::of("cook", &costs));
     (table.last().unwrap().worst, changed, patches)
 }

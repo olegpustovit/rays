@@ -1390,11 +1390,13 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
         ui.inspector_readout(Some(width), "image-size", "image", &format!("{w} \u{d7} {h}"));
         let height = 160.0f32.min(width * h as f32 / w as f32);
         let bx = ui.box_("image-thumbnail", pxui::ui::BoxOpts::default().w(pxui::ui::Size::Px(width)).h(pxui::ui::Size::Px(height)));
-        let image = rays_shell::host::image(&image);
-        ui.draw(&bx, move |paint, Rect { x, y, w: bw, h: bh }| {
-            let scale = (bw / w as f32).min(bh / h as f32);
-            paint.image(x, y, w as f32 * scale, h as f32 * scale, &image);
-        });
+        // none until a frame has run and the GPU device is known
+        if let Some(image) = rays_shell::host::image(&image) {
+            ui.draw(&bx, move |paint, Rect { x, y, w: bw, h: bh }| {
+                let scale = (bw / w as f32).min(bh / h as f32);
+                paint.image(x, y, w as f32 * scale, h as f32 * scale, &image);
+            });
+        }
     }
     // a loop or scope says what it is, then the rows of its rail
     let zone_text: Option<(&'static str, fn(&str) -> String)> = n.zone.as_ref().map(|z| zone_words(z.kind));

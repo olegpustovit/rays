@@ -25,7 +25,7 @@ pub fn window_shell_inspector_record() {
     let click = vec![left_press((115.0, 15.0)), left_release((115.0, 15.0))];
     let record = |ui: &mut Ui, events: Vec<Event>, value: bool| -> Result<(Vec<Value>, param::Effects), String> {
         let mut out = Err("not built".to_string());
-        ui.frame(&fr((400, 300), (0.0, 0.0), events), &mut |ui| {
+        rays_shell::host::build(ui, &fr((400, 300), (0.0, 0.0), events), &mut |ui| {
             ui.panel(PanelOpts::default().at(0.0, 0.0).width(260.0), "record", &mut |ui| {
                 out = inspector::record(ui, &schema, &[Value::Bool(value)]);
             });
@@ -40,7 +40,7 @@ pub fn window_shell_inspector_record() {
         Ok((values, effects)) if values == vec![Value::Bool(true)] && effects.cook => {}
         other => panic!("inspector toggle did not edit the record: {other:?}"),
     }
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_inspector_folder_order() {
@@ -59,14 +59,14 @@ pub fn window_shell_inspector_folder_order() {
         let mut ui = new_ui();
         let seen = RefCell::new(Vec::new());
         let opts = FlowOpts { kind_label: kind.map(str::to_owned), expanded: vec!["Root".into(), "Size".into(), "Other".into()], ..Default::default() };
-        ui.frame(&fr((400, 600), (0., 0.), vec![]), &mut |ui| {
+        rays_shell::host::build(&mut ui, &fr((400, 600), (0., 0.), vec![]), &mut |ui| {
             ui.panel(PanelOpts::default().at(0., 0.).width(260.), "folders", &mut |ui| {
                 let changes = inspector::flow_fields(ui, &opts, Some(&|name, _| seen.borrow_mut().push(name.to_owned())), &rows);
                 assert!(changes.is_empty());
             });
         });
         assert_eq!(*seen.borrow(), expected, "one-level folders changed row/merge order");
-        ui.destroy();
+        rays_shell::host::destroy(&mut ui);
     }
 }
 
@@ -88,7 +88,7 @@ fn cell(name: &str, index: i64) -> FieldView {
 
 fn build_rows(ui: &mut Ui, mouse: (f64, f64), events: Vec<Event>, label: &str, rows: &[FlowRow]) -> Vec<FlowChange> {
     let mut out = Vec::new();
-    ui.frame(&fr((400, 300), mouse, events), &mut |ui| {
+    rays_shell::host::build(ui, &fr((400, 300), mouse, events), &mut |ui| {
         ui.panel(PanelOpts::default().at(0.0, 0.0).width(260.0), label, &mut |ui| {
             out = inspector::flow_fields(ui, &FlowOpts::default(), None, rows);
         });
@@ -133,7 +133,7 @@ pub fn window_shell_vector_cells() {
             build_rows(&mut ui, (0.0, 0.0), vec![], "vector", &vector);
             found.push(!changes.is_empty());
         }
-        ui.destroy();
+        rays_shell::host::destroy(&mut ui);
         found
     };
     assert!(!pass(None).contains(&true), "a click on a vector's cell wrote a value");
@@ -157,7 +157,7 @@ fn ranged_float(drags: bool) {
         build_rows(&mut ui, at, vec![Event::PointerMoved(at)], "scalar", &rows);
         let mut found = build_rows(&mut ui, at, vec![left_press(at)], "scalar", &rows);
         found.extend(gesture(&mut ui, "scalar", &rows, at, by));
-        ui.destroy();
+        rays_shell::host::destroy(&mut ui);
         found
     };
     let floats = |changes: Vec<FlowChange>| -> Vec<f64> {
@@ -197,7 +197,7 @@ fn step(ui: &mut Ui, mut tree: T::Tree, mouse: (f64, f64), events: Vec<Event>, r
     let f = fr((400, 300), mouse, events);
     let prefix = Intent::Delete(vec![i64::MIN]);
     let mut intents = vec![prefix.clone()];
-    ui.frame(&f, &mut |ui| {
+    rays_shell::host::build(ui, &f, &mut |ui| {
         T::update(&mut tree, ui, &f, (0, 0, 400, 300), "", &["vis".to_string()], rows, &[], &mut intents);
     });
     assert_eq!(intents.remove(0), prefix, "tree update replaced earlier intents");
@@ -260,7 +260,7 @@ pub fn window_shell_tree_pointer_gestures() {
         intents.into_iter().filter(|i| matches!(i, Intent::Activate(_))).collect(),
         vec![Intent::Activate(4)],
     );
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_tree_shift_select() {
@@ -276,7 +276,7 @@ pub fn window_shell_tree_shift_select() {
         &rows,
     );
     expect("Shift selection uses the captured press keys", intents, vec![Intent::Select(vec![3, 1, 2])]);
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 pub fn window_shell_tree_scroll_and_sticky() {
@@ -287,7 +287,7 @@ pub fn window_shell_tree_scroll_and_sticky() {
             let f = fr((400, 300), pointer, events);
             let mut taken = Some(t);
             let mut out = None;
-            ui.frame(&f, &mut |ui| {
+            rays_shell::host::build(ui, &f, &mut |ui| {
                 out = Some({ let mut r8_tree = taken.take().unwrap(); let mut r8_intents = Vec::new(); T::update(&mut r8_tree, ui, &base(), (0, 0, 400, 96), "", &[], rows, &[], &mut r8_intents); (r8_tree, r8_intents) });
             });
             out.unwrap()
@@ -296,7 +296,7 @@ pub fn window_shell_tree_scroll_and_sticky() {
         t = run(&mut ui, t, (200.0, 60.0), vec![Event::PointerMoved((200.0, 60.0)), Event::Scrolled((0.0, -2.0))]).0;
         t = run(&mut ui, t, (200.0, 60.0), vec![]).0;
         let (_, intents) = run(&mut ui, t, at, vec![left_press(at)]);
-        ui.destroy();
+        rays_shell::host::destroy(&mut ui);
         intents
     };
     let scroll_rows: Vec<Row> = (0..20).map(|index| row(index + 1, 0, &(index + 1).to_string())).collect();

@@ -72,11 +72,11 @@ pub fn inspector_rows() {
     let schema = parameters_schema();
     let mut values = schema.default().to_vec();
     check(schema.fields().len() == 5, "sop_params defaults or ignored-field policy is incorrect");
-    let mut ui = Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None));
+    let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
     let mut step = |values: &Vec<Value>, time: f64, events: Vec<Event>| -> (Vec<Value>, param::Effects) {
         let mut out = (values.clone(), param::NO_EFFECTS);
         let v = values.clone();
-        ui.frame(&frame(time, events), &mut |ui: &mut Ui| {
+        rays_shell::host::build(&mut ui, &frame(time, events), &mut |ui: &mut Ui| {
             ui.panel(pxui::ui_kit::PanelOpts { x: 0., y: 0., width: 260., ..Default::default() }, "inspector", &mut |ui: &mut Ui| {
                 ui.scope("selected", &mut |ui: &mut Ui| {
                     ui.label("Selected shape");
@@ -115,7 +115,7 @@ pub fn inspector_rows() {
     check(effects.cook && get(&reset, "count") == Value::Int(2) && get(&reset, "mode") == Value::Choice("Cube".into()), "selected-node reset did not restore PPX defaults");
     let (normalized, _) = schema.apply_all(&schema.default().to_vec(), &[("count".to_string(), Value::Int(99))]).unwrap_or_else(|m| fail(&m));
     check(get(&normalized, "count") == Value::Int(10), "hard range normalization changed");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 /// The Flow inspector's rows: pin, reset, expression, hex, folders.
@@ -123,14 +123,14 @@ pub fn flow_rows() {
     let schema = parameters_schema();
     let views = schema.view(schema.default()).expect("view");
     let count = pxui_view_without_folder(views.iter().find(|v| v.name == "count").expect("count").clone());
-    let mut ui = Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None));
+    let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
     let row = |drive: Option<&str>, locked: bool| FlowRow { path: "count".into(), fields: vec![count.clone()], shown: true, locked, drive: drive.map(String::from), live: Some("3".into()) };
     let mut step = |opts: &FlowOpts, rows: &[FlowRow], events: Vec<Event>| -> Vec<FlowChange> {
         let mut out = Vec::new();
-        ui.frame(&frame(2., vec![]), &mut |ui: &mut Ui| {
+        rays_shell::host::build(&mut ui, &frame(2., vec![]), &mut |ui: &mut Ui| {
             inspector::flow_fields(ui, opts, None, rows);
         });
-        ui.frame(&frame(2., events), &mut |ui: &mut Ui| {
+        rays_shell::host::build(&mut ui, &frame(2., events), &mut |ui: &mut Ui| {
             out = inspector::flow_fields(ui, opts, None, rows);
         });
         out
@@ -153,7 +153,7 @@ pub fn flow_rows() {
     step(&open, &[folder_row.clone()], click(10, 16));
     check(step(&open, &[folder_row], click(14, 40)) == vec![FlowChange::Pinned("count".into(), false)], "Flow inspector folder did not reopen");
     drop(step);
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
 }
 
 fn pxui_view_without_folder(mut v: param::FieldView) -> param::FieldView {

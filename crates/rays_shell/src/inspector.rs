@@ -95,7 +95,7 @@ pub fn dragged(ui: &mut Ui) -> Option<(bool, Option<(String, Value)>)> {
         let h = h.as_mut()?;
         let field = ui.box_of_key(h.field)?;
         let (_, dx) = ui.field_drag(&field)?;
-        let fine = ui.press_keys(&field).contains(&input::Key::Shift);
+        let fine = ui.press_keys(&field).contains(&input::Key::Shift.code());
         let text = param::number::scrub(h.kind, h.range, &h.origin, dx as f64, fine);
         let opts = ValueFieldOpts { fraction: h.range.and_then(|r| param::number::fraction(r, &text).map(|f| f as f32)), trail: h.trail.clone(), ..ValueFieldOpts::default() };
         let patched = ui.patch_field(&field, &opts, &text);

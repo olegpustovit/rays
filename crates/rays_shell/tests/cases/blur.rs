@@ -34,18 +34,18 @@ fn render(canvas_: &canvas::Canvas, blur: f32) -> (Vec<u8>, u64, u64) {
 /// canvas: each canvas builds its own pipelines, which a CPU driver compiles for a second or more.
 fn render_at(canvas_: &canvas::Canvas, blur: f32, left: f32, radius: f32) -> (Vec<u8>, u64, u64) {
     let path = format!("{}/../../pxui/assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
-    let ui = Rc::new(RefCell::new(Ui::create(Platform::Apple, None, rays_shell::host::text(Some(&path)))));
+    let ui = Rc::new(RefCell::new(rays_shell::host::create(Platform::Apple, None, Some(&path))));
     let view = Cell::new(None);
     let mut build = |ui: &mut Ui| {
         ui.node("under", Node { w: Size::Px(4.0), h: Size::Px(1.0), look: Look { fill: pxui::geom::color::rgba(0, 0, 0, 1), ..Look::NONE }, ..Node::DEFAULT });
         let glass = ui.view("glass", 1, Size::Px(160.0), Size::Px(80.0), &mut |ui| {
             ui.node("pane", Node { w: Size::Px(160.0), h: Size::Px(80.0), look: Look { fill: pxui::geom::color::rgba(0, 0, 0, 1), ..Look::NONE }, ..Node::DEFAULT });
         });
-        ui.node_mut(&glass).look.radius = [radius; 4];
+        ui.node_mut(&glass, |node| node.look.radius = [radius; 4]);
         view.set(Some(glass));
     };
     for count in 0..2 {
-        ui.borrow_mut().frame(&frame_at(count), &mut build);
+        rays_shell::host::build(&mut ui.borrow_mut(), &frame_at(count), &mut build);
         if count == 0 {
             let mut ui = ui.borrow_mut();
             ui.view_offset(&view.get().unwrap(), left, 40.0);
@@ -58,7 +58,7 @@ fn render_at(canvas_: &canvas::Canvas, blur: f32, left: f32, radius: f32) -> (Ve
     let (calls, splits) = (rays_shell::host::draw_calls(), scene::ui_splits());
     canvas::render(Some(1), canvas_, &nodes).expect("Canvas.render");
     let result = (image::pixels(&canvas::to_image(canvas_).expect("to_image")).expect("pixels"), rays_shell::host::draw_calls() - calls, scene::ui_splits() - splits);
-    ui.borrow_mut().destroy();
+    rays_shell::host::destroy(&mut ui.borrow_mut());
     result
 }
 

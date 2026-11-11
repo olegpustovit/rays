@@ -1,62 +1,157 @@
 //! PXUI's host services from Rays: the kit font and GPU images in, scene layers and platform
 //! requests out.
+//!
+//! Rays owns the GPU. Each frame that has UI layers, the scene renderer calls [`begin`] before it records its first pass: PXUI's
+//! `Renderer` (made on Rays' own device, adopted through its native handles) records the glyph uploads into the frame's command
+//! buffer. Each UI layer is then drawn by [`draw_layer`] into Rays' open pass, between the scene nodes around it; PXUI never
+//! submits. A layer with a backdrop blur splits the pass through `UiPass::split`.
 use input::{frame::Frame, Event};
-use ogpu_core::backend::{self, RenderEncoder, Texture};
+use ogpu_core::backend::{self, Device, Texture};
 use ogpu_core::error::{self, Error, ErrorKind};
-use ogpu_core::pipeline::{ColorFormat, DepthFormat};
 use ogpu_core::types::{Extent, Origin, TextureDescriptor, TextureFormat, TextureUsage};
-use pxui::engine_text::{self as text, Text};
-use pxui::ui::{BlurOut, Image, Ui};
-use pxui::render::{self, AtlasKind, Break, Instance, Painter, View};
+use pxui::{Bytes, Commands, Gpu, Image, Input, Pass, Renderer, Slice, Str, TargetDesc, Ui};
 use rays::{clipboard, image, scene, sketch};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
-use std::sync::OnceLock;
 
-/// The kit's text engine: the face in the file at `path` (`RAYS_UI_FONT`), else the bundled
-/// Pragmasevka. Fonts come only from these bytes; nothing scans the system.
-pub fn text(path: Option<&str>) -> Text {
-    let bytes = path.and_then(|p| std::fs::read(p).ok());
-    Text::new(&[bytes.as_deref().unwrap_or(text::PRAGMASEVKA)])
+/// The bytes of the kit's font face: the file at `path` (`RAYS_UI_FONT`), else the bundled Pragmasevka.
+/// Fonts come only from these bytes; nothing scans the system.
+pub fn font(path: Option<&str>) -> Vec<u8> {
+    path.and_then(|p| std::fs::read(p).ok()).unwrap_or_else(|| pxui::text::pragmasevka().to_vec())
+}
+
+/// A UI on `platform` with the kit font at `path` (see [`font`]).
+pub fn create(platform: input::Platform, font_size: Option<i64>, path: Option<&str>) -> Ui {
+    let platform = if platform == input::Platform::Apple { pxui::Platform::Apple } else { pxui::Platform::Other };
+    Ui::create(platform, font_size, &[&font(path)])
+}
+
+/// The frame's input as the UI routed it to `owner` (a viewport's root key; `None`: the app's).
+pub fn input(ui: &mut Ui, owner: Option<i64>) -> Frame {
+    let routed = ui.routed_input(owner);
+    let raw = routed.input();
+    let events = routed.events().iter()
+        .filter_map(|e| Event::from_raw(&input::wire::Raw { kind: e.kind, code: e.code, x: e.x, y: e.y, value: e.value, text: Some(pxui::event_text(e)) }))
+        .collect();
+    Frame {
+        input: input::Frame {
+            t: raw.time, dt: raw.dt, frame: raw.frame, tick: raw.tick, size: (raw.logical_size[0], raw.logical_size[1]), pointer: (raw.pointer[0], raw.pointer[1]),
+            buttons: routed.buttons().iter().filter_map(|b| input::MouseButton::from_code(*b)).collect(),
+            keys: routed.keys().iter().filter_map(|k| input::Key::from_code(*k)).collect(),
+            events,
+        },
+        pixel_scale: (raw.pixel_scale[0], raw.pixel_scale[1]), fps: raw.fps, mouse_delta: (raw.mouse_delta[0], raw.mouse_delta[1]),
+    }
+}
+
+/// The frame gate: build only for input or a due repaint.
+pub fn wants_frame(ui: &Ui, events: &[Event], now: f64) -> bool {
+    !events.is_empty() || ui.wants_frame(&[], now)
+}
+
+/// The last root pressed by a pointer press among the frame's events, by the previous hit tree.
+pub fn last_press_within(ui: &Ui, frame: &Frame, roots: &[i64]) -> Option<i64> {
+    frame.input.events.iter().fold(None, |last, event| match event {
+        Event::PointerPressed(_, (x, y)) => ui.root_at((*x as f32, *y as f32), roots).or(last),
+        _ => last,
+    })
+}
+
+/// The platform whose editing conventions the UI follows, as `input` names it.
+pub fn platform(ui: &Ui) -> input::Platform {
+    if ui.platform() == pxui::Platform::Apple { input::Platform::Apple } else { input::Platform::Other }
+}
+
+/// What one frame's input takes on the wire: the events, held keys and buttons as the C ABI numbers them. Kept between frames so a
+/// settled frame allocates nothing.
+#[derive(Default)]
+struct Encoded {
+    events: Vec<pxui::Event>,
+    text: Vec<String>,
+    keys: Vec<u32>,
+    buttons: Vec<u32>,
+}
+
+thread_local! {
+    static ENCODED: Cell<Encoded> = Cell::new(Encoded::default());
+    /// What the ledger holds for each live UI (by `Ui::id`).
+    static LEDGER: RefCell<HashMap<usize, Bytes>> = RefCell::new(HashMap::new());
+}
+
+fn wire_event(event: &Event, scratch: &mut String) -> pxui::Event {
+    let raw = event.raw(scratch);
+    let text = raw.text.unwrap_or("");
+    pxui::Event { kind: raw.kind, code: raw.code, x: raw.x, y: raw.y, value: raw.value, text: Str { ptr: text.as_ptr(), len: text.len() } }
 }
 
 /// Run a frame as the Rays host does: the clipboard text the last frame asked for arrives first,
 /// and the clipboard and window-ground requests apply after.
 pub fn frame(ui: &mut Ui, frame: &Frame, f: &mut dyn FnMut(&mut Ui)) {
-    let pasted = if ui.output().platform.paste { clipboard::get_text().ok() } else { None };
-    match pasted {
-        Some(text) => {
-            let mut with = frame.clone();
-            with.input.events.insert(0, Event::Paste(text));
-            ui.frame(&with, f);
-        }
-        None => {
-            ui.frame(frame, f);
-        }
-    }
-    let out = ui.output().platform;
-    if let Some(text) = &out.clipboard {
+    let pasted = if ui.paste_requested() { clipboard::get_text().ok().map(Event::Paste) } else { None };
+    build_with(ui, frame, pasted, f);
+    if let Some(text) = ui.clipboard_request() {
         let _ = clipboard::set_text(text);
     }
     // no window, no effect
-    if let Some(ground) = out.background {
+    if let Some(ground) = ui.background_request() {
         let _ = sketch::set_window_background(rays_math::color::rgba(ground.r as i64, ground.g as i64, ground.b as i64, ground.a as i64));
     }
     charge(ui);
 }
 
-/// Destroy the UI and take what it held off the memory ledger.
+/// Build one frame of `frame`'s input with no host effect (no clipboard, no window ground, no ledger): what a case that only
+/// looks at the UI runs.
+pub fn build(ui: &mut Ui, frame: &Frame, f: &mut dyn FnMut(&mut Ui)) {
+    build_with(ui, frame, None, f);
+}
+
+fn build_with(ui: &mut Ui, frame: &Frame, pasted: Option<Event>, f: &mut dyn FnMut(&mut Ui)) {
+    let mut enc = ENCODED.take();
+    let events = pasted.iter().chain(&frame.input.events);
+    let count = events.clone().count();
+    enc.events.clear();
+    enc.text.resize(count, String::new());
+    for (event, text) in events.zip(enc.text.iter_mut()) {
+        enc.events.push(wire_event(event, text));
+    }
+    enc.keys.clear();
+    enc.keys.extend(frame.input.keys.iter().map(|k| k.code()));
+    enc.buttons.clear();
+    enc.buttons.extend(frame.input.buttons.iter().map(|b| b.code()));
+    let input = Input {
+        time: frame.input.t, dt: frame.input.dt, frame: frame.input.frame, tick: frame.input.tick,
+        logical_size: [frame.input.size.0, frame.input.size.1], pointer: [frame.input.pointer.0, frame.input.pointer.1],
+        keys: Slice { ptr: enc.keys.as_ptr(), len: enc.keys.len() }, buttons: Slice { ptr: enc.buttons.as_ptr(), len: enc.buttons.len() },
+        events: Slice { ptr: enc.events.as_ptr(), len: enc.events.len() },
+        pixel_scale: [frame.pixel_scale.0, frame.pixel_scale.1], mouse_delta: [frame.mouse_delta.0, frame.mouse_delta.1], fps: frame.fps,
+        ..Input::default()
+    };
+    let built = ui.input_frame(&input, f).map(|_| ());
+    ENCODED.set(enc);
+    built.map_err(|code| format!("PXUI frame failed ({code}): {}", ui.last_error())).expect("PXUI frame");
+}
+
+/// Take what the UI held off the memory ledger and let go of its renderer (the UI itself goes when its owner drops it).
 pub fn destroy(ui: &mut Ui) {
-    ui.destroy();
-    charge(ui);
+    let id = ui.id();
+    ENTRIES.with(|entries| entries.borrow_mut().retain(|e| e.id != id));
+    LEDGER.with(|ledger| ledger.borrow_mut().remove(&id));
+    let was = ui.bytes();
+    settle_ledger(was, Bytes::default());
 }
 
 /// The ledger follows what the UI reports holding (after every `frame`).
 pub fn charge(ui: &mut Ui) {
+    let now = ui.bytes();
+    let was = LEDGER.with(|ledger| ledger.borrow_mut().insert(ui.id(), now)).unwrap_or_default();
+    settle_ledger(was, now);
+}
+
+fn settle_ledger(was: Bytes, now: Bytes) {
+    use std::sync::OnceLock;
     static ATLAS: OnceLock<mem::Owner> = OnceLock::new();
     static TEXT_UNDO: OnceLock<mem::Owner> = OnceLock::new();
-    let now = ui.bytes();
-    let was = std::mem::replace(&mut ui.charged, now);
     for (owner, was, now) in [
         (ATLAS.get_or_init(|| mem::plan("pxui.atlas")), was.atlas, now.atlas),
         (TEXT_UNDO.get_or_init(|| mem::document("pxui.text_undo")), was.text_undo, now.text_undo),
@@ -67,245 +162,217 @@ pub fn charge(ui: &mut Ui) {
 }
 
 /// The last frame as scene nodes: each layer after what `under` puts beneath its floating root
-/// (by box key), then the focused text's input-method area. The renderer has `pxui_render`'s
-/// painter draw each layer, borrowed from the UI, in its place in the frame's pass.
+/// (by box key), then the focused text's input-method area. The renderer draws each layer, borrowed
+/// from the UI, in its place in the frame's pass.
 pub fn scene(ui: &Rc<RefCell<Ui>>, under: Option<&dyn Fn(i64) -> Vec<scene::Node>>) -> Vec<scene::Node> {
     let paint = painter(ui);
     let ui = ui.borrow();
-    let out = ui.output();
     let mut nodes = Vec::new();
-    for (index, layer) in out.draw.iter().enumerate() {
+    for (index, layer) in ui.layers().enumerate() {
         if let Some(under) = under {
             nodes.extend(under(layer.key));
         }
         if !layer.instances.is_empty() {
-            nodes.push(scene::layer::ui(paint.clone(), index, ui.draw_revision()));
+            nodes.push(scene::layer::ui(paint.clone(), index, ui.draw_revision() as i64));
         }
     }
-    if let Some(((x, y, w, h), caret)) = out.platform.ime {
+    if let Some(((x, y, w, h), caret)) = ui.ime() {
         nodes.push(scene::text_input_region((x, y), w, h, Some(true), Some(caret)).expect("PXUI input area"));
     }
     nodes
 }
 
+/// One live UI the scene draws: its paint closure (one per UI, so equal frames give equal scene nodes) and its renderer, made on
+/// the first frame that draws it.
+struct Entry {
+    ui: Weak<RefCell<Ui>>,
+    id: usize,
+    paint: scene::UiPaint,
+    renderer: Rc<RefCell<Option<Renderer>>>,
+}
+
 thread_local! {
-    /// One paint closure per live UI, so equal frames give equal scene nodes.
-    static PAINTS: RefCell<Vec<(Weak<RefCell<Ui>>, scene::UiPaint)>> = const { RefCell::new(Vec::new()) };
-    static PAINTER: RefCell<Option<Shared>> = const { RefCell::new(None) };
+    static ENTRIES: RefCell<Vec<Entry>> = const { RefCell::new(Vec::new()) };
+    /// Rays' device, the textures of UI images sit on it
+    static DEVICE: RefCell<Option<Device>> = const { RefCell::new(None) };
+    /// serial of the last frame prepared, and the textures dropped since, each waiting for the frames that might sample it
+    static LAST_SERIAL: Cell<u64> = const { Cell::new(0) };
+    static GRAVE: RefCell<Vec<(Texture, u64)>> = const { RefCell::new(Vec::new()) };
+    static IMAGES: RefCell<Vec<(i64, i64, Weak<Owned>, Image)>> = const { RefCell::new(Vec::new()) };
 }
 
 fn painter(ui: &Rc<RefCell<Ui>>) -> scene::UiPaint {
-    PAINTS.with(|paints| {
-        let mut paints = paints.borrow_mut();
+    scene::on_frame_begin(begin);
+    scene::on_device_release(release);
+    ENTRIES.with(|entries| {
+        let mut entries = entries.borrow_mut();
         let weak = Rc::downgrade(ui);
-        if let Some((_, paint)) = paints.iter().find(|(w, _)| w.ptr_eq(&weak)) {
-            return paint.clone();
+        if let Some(e) = entries.iter().find(|e| e.ui.ptr_eq(&weak)) {
+            return e.paint.clone();
         }
-        paints.retain(|(w, _)| w.strong_count() > 0);
-        let held = weak.clone();
-        let paint: scene::UiPaint = Rc::new(move |pass: &scene::UiPass, layer: usize| match held.upgrade() {
-            None => Ok(()),
-            Some(ui) => match ui.try_borrow_mut() {
-                Ok(mut ui) => paint_layer(&mut ui, pass, layer),
-                Err(_) => Err(error::make("Pxui.paint", ErrorKind::InvalidState, "the UI is being changed while its frame renders")),
-            },
-        });
-        paints.push((weak, paint.clone()));
+        entries.retain(|e| e.ui.strong_count() > 0);
+        let renderer: Rc<RefCell<Option<Renderer>>> = Rc::new(RefCell::new(None));
+        let (held, drawn) = (weak.clone(), renderer.clone());
+        let paint: scene::UiPaint = Rc::new(move |pass: &scene::UiPass, layer: usize| draw_layer(&held, &drawn, pass, layer));
+        entries.push(Entry { ui: weak, id: ui.borrow().id(), paint: paint.clone(), renderer });
         paint
     })
 }
 
-/// Free the painter's GPU objects (its pipeline and the glyph atlases' textures) and the image
-/// textures; the renderer calls this before it destroys a device. The next paint re-uploads.
-fn release_painter() {
-    if let Some(s) = PAINTER.with(|p| p.borrow_mut().take()) {
-        for (_, _, texture, _) in &s.images {
+/// A PXUI failure as an OGPU error, with the UI's own message.
+fn failure(ui: &Weak<RefCell<Ui>>, what: &str, code: i32) -> Error {
+    let message = ui.upgrade().and_then(|ui| ui.try_borrow().ok().map(|ui| ui.last_error().to_owned())).unwrap_or_default();
+    error::make("Pxui.paint", ErrorKind::InvalidState, &format!("{what} failed ({code}): {message}"))
+}
+
+/// Before a frame with UI layers records its first pass: the renderer of each UI it draws records the glyph rectangles rasterised
+/// since the last frame (and makes itself on first use).
+fn begin(frame: &scene::FrameStart) -> Result<(), Error> {
+    DEVICE.with(|d| *d.borrow_mut() = Some(frame.device.clone()));
+    LAST_SERIAL.set(frame.serial);
+    GRAVE.with(|g| g.borrow_mut().retain(|(texture, serial)| {
+        let gone = *serial <= frame.completed;
+        if gone {
             let _ = backend::destroy_texture(texture);
         }
+        !gone
+    }));
+    let native = backend::native_commands(&frame.commands)?;
+    let commands = Commands { vk_command_buffer: native.vk_command_buffer, mtl_command_buffer: native.mtl_command_buffer, ..Commands::default() };
+    for paint in &frame.painters {
+        let found = ENTRIES.with(|entries| entries.borrow().iter().find(|e| Rc::ptr_eq(&e.paint, paint)).map(|e| (e.ui.clone(), e.renderer.clone())));
+        let Some((ui, cell)) = found else { continue };
+        let Some(ui_rc) = ui.upgrade() else { continue };
+        let mut renderer = cell.borrow_mut();
+        if renderer.is_none() {
+            let ui = ui_rc.try_borrow().map_err(|_| error::make("Pxui.paint", ErrorKind::InvalidState, "the UI is being changed while its frame renders"))?;
+            *renderer = Some(make_renderer(&ui, &frame.device)?);
+        }
+        let prepared = renderer.as_mut().expect("renderer").prepare(&commands, frame.serial, frame.completed);
+        prepared.map_err(|code| failure(&ui, "renderer prepare", code))?;
     }
-}
-
-/// Draw calls the thread's painter has issued.
-pub fn draw_calls() -> u64 {
-    PAINTER.with(|shared| shared.borrow().as_ref().map_or(0, |s| s.painter.draw_calls()))
-}
-
-/// The thread's painter and what its atlases and textures hold.
-// ponytail: one painter per thread, re-uploading the glyph atlases when another UI paints; two UIs
-// drawn into one frame would share them. A painter per UI if that ever happens.
-struct Shared {
-    device: i64,
-    painter: Painter,
-    /// the UI whose glyph atlases the painter holds (0: none)
-    owner: usize,
-    frame: u64,
-    /// image textures by identity, with their generation and the frame that last drew them
-    images: Vec<(i64, i64, Texture, u64)>,
-    /// the UI whose instances each retained painter layer holds (by `Layer::id`)
-    retained: [usize; render::MAX_LAYERS],
-}
-
-fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Error> {
-    if ui.output().draw.get(layer).is_none() {
-        return Ok(());
-    }
-    PAINTER.with(|shared| {
-        let mut shared = shared.borrow_mut();
-        let device = ogpu_core::handle::device_id(backend::device_handle(pass.device));
-        if shared.as_ref().is_none_or(|s| s.device != device) {
-            let t = ui.text_mut();
-            let (mask, color) = (t.atlas_size(text::AtlasKind::Mask), t.atlas_size(text::AtlasKind::Color));
-            let painter = Painter::new(pass.device, ColorFormat::Rgba8Unorm, DepthFormat::NoDepth, 1, mask, color)?;
-            scene::on_device_release(release_painter);
-            *shared = Some(Shared { device, painter, owner: 0, frame: 0, images: Vec::new(), retained: [0; render::MAX_LAYERS] });
-        }
-        let s = shared.as_mut().expect("painter");
-        if s.frame != pass.frame {
-            s.frame = pass.frame;
-            s.painter.begin_frame();
-            // an image no frame drew for a while goes
-            let frame = pass.frame;
-            s.images.retain(|(_, _, texture, used)| {
-                let keep = frame.saturating_sub(*used) < 8;
-                if !keep {
-                    let _ = backend::destroy_texture(texture);
-                }
-                keep
-            });
-        }
-        sync_atlas(s, ui)?;
-        for (index, v) in ui.output().views {
-            s.painter.set_view(*index, View { offset: v.offset, opacity: v.opacity, clip: v.clip, scale: v.scale, transform: v.transform, pivot: v.pivot })?;
-        }
-        let out = ui.output();
-        let l = &out.draw[layer];
-        let id = l.id as usize;
-        if id >= render::MAX_LAYERS {
-            return Err(error::make("Pxui.paint", ErrorKind::InvalidState, "more UI layers than the painter retains"));
-        }
-        // the painter's copy of this layer holds another UI's instances: all of it is new
-        let owner = &*ui as *const Ui as usize;
-        let all = [(0, l.instances.len() as u32)];
-        let dirty: &[(u32, u32)] = if s.retained[id] == owner { &l.dirty } else { &all };
-        s.retained[id] = owner;
-        let blurs: Vec<&BlurOut> = out.blurs.iter().filter(|b| b.layer == layer && (b.at_instance as usize) < l.instances.len()).collect();
-        let result = if l.breaks.is_empty() && blurs.is_empty() {
-            s.painter.draw_retained(pass.encoder, pass.size_px, pass.scale, l.id, &l.instances, dirty, &[])
-        } else {
-            for image in &l.images {
-                image_texture(s, pass, image)?;
-            }
-            let textures: Vec<&Texture> = l.images.iter().map(|i| {
-                let id = as_rays_image(i).map_or(0, image::identity);
-                s.images.iter().find(|(key, ..)| *key == id).map(|(_, _, texture, _)| texture).expect("image texture")
-            }).collect();
-            let mut breaks: Vec<Break> = l.breaks.iter().map(|b| Break { at_instance: b.at_instance, texture: (b.image != pxui::draw::ATLAS).then(|| textures[b.image as usize]) }).collect();
-            // a blur splits the layer where its view's run starts: a break there that keeps the texture in force
-            let mut splits: Vec<u32> = blurs.iter().map(|b| b.at_instance).collect();
-            splits.sort_unstable();
-            splits.dedup();
-            for &at in &splits {
-                if !breaks.iter().any(|b| b.at_instance == at) {
-                    let i = breaks.partition_point(|b| b.at_instance < at);
-                    breaks.insert(i, Break { at_instance: at, texture: i.checked_sub(1).and_then(|j| breaks[j].texture) });
-                }
-            }
-            s.painter.draw_retained_split(pass.encoder, pass.size_px, pass.scale, l.id, &l.instances, dirty, &breaks, &splits, &mut |painter, at| {
-                let mut reopened = None;
-                for b in blurs.iter().filter(|b| b.at_instance == at) {
-                    reopened = backdrop_blur(painter, pass, b)?.or(reopened);
-                }
-                Ok(reopened)
-            })
-        };
-        if result.is_ok() {
-            ui.drawn(layer);
-        }
-        result
-    })
-}
-
-/// Blurs what the frame holds behind `b.rect` and draws it there, in a pass split off the scene's: the
-/// pass to go on in, or `None` when the rectangle is off the target.
-// ponytail: one corner radius (the largest of the record's) rounds the image, through its clip.
-fn backdrop_blur(painter: &mut Painter, pass: &scene::UiPass, b: &BlurOut) -> Result<Option<RenderEncoder>, Error> {
-    let [w, h] = pass.size_px;
-    let (x0, y0) = ((b.rect.x * pass.scale).floor().max(0.0) as u32, (b.rect.y * pass.scale).floor().max(0.0) as u32);
-    let (x1, y1) = (((b.rect.x + b.rect.w) * pass.scale).ceil().clamp(0.0, w as f32) as u32, ((b.rect.y + b.rect.h) * pass.scale).ceil().clamp(0.0, h as f32) as u32);
-    if x0 >= x1 || y0 >= y1 || !(b.sigma > 0.0) {
-        return Ok(None);
-    }
-    let mut blurred = None;
-    let encoder = pass.split(&mut |commands, target| {
-        blurred = Some(painter.blur_in(commands, target, [x0, y0, x1, y1], b.sigma * pass.scale)?.clone());
-        Ok(())
-    })?;
-    let rect = [x0, y0, x1, y1].map(|v| v as f32 / pass.scale);
-    let (alpha, radius) = ((255.0 * b.opacity.clamp(0.0, 1.0)).round() as u8, b.radii.iter().fold(0.0f32, |a, r| a.max(*r)));
-    let clip = [b.rect.x.floor(), b.rect.y.floor(), (b.rect.x + b.rect.w).ceil(), (b.rect.y + b.rect.h).ceil()].map(|v| v as i16);
-    let image = Instance::image(rect, [0.0, 0.0, 1.0, 1.0], [alpha; 4]).clip(clip, radius);
-    painter.draw(&encoder, pass.size_px, pass.scale, &[image], &[Break { at_instance: 0, texture: blurred.as_ref() }])?;
-    Ok(Some(encoder))
-}
-
-/// The UI's glyph atlases into the painter's: the rectangles rasterised since the last upload, or
-/// both atlases whole when the painter last held another UI's.
-fn sync_atlas(s: &mut Shared, ui: &mut Ui) -> Result<(), Error> {
-    let owner = ui as *const Ui as usize;
-    let t = ui.text_mut();
-    let kind = |k: text::AtlasKind| if k == text::AtlasKind::Mask { AtlasKind::Mask } else { AtlasKind::Color };
-    if s.owner != owner {
-        s.owner = owner;
-        for (k, texel) in [(text::AtlasKind::Mask, 1), (text::AtlasKind::Color, 4)] {
-            let (w, h) = t.atlas_size(k);
-            s.painter.upload(kind(k), 0, 0, w, h, t.atlas_pixels(k), w as usize * texel)?;
-        }
-        t.drain_uploads(&mut |_, _, _, _, _, _, _| {});
-        return Ok(());
-    }
-    let mut result = Ok(());
-    t.drain_uploads(&mut |k, x, y, w, h, bytes, stride| {
-        if result.is_ok() {
-            result = s.painter.upload(kind(k), x, y, w, h, bytes, stride);
-        }
-    });
-    result
-}
-
-/// A texture holding the image's pixels at their generation.
-// ponytail: images are read back to the CPU and uploaded once per generation (the inspector's
-// one thumbnail); sample a GPU image's own texture if UI images become many or large.
-fn image_texture(s: &mut Shared, pass: &scene::UiPass, i: &Image) -> Result<(), Error> {
-    let Some(rays_image) = as_rays_image(i) else {
-        return Err(error::make("Pxui.paint", ErrorKind::InvalidArgument, "PXUI image from another backend"));
-    };
-    let (id, generation) = (image::identity(rays_image), image::generation(rays_image));
-    if let Some(entry) = s.images.iter_mut().find(|(key, ..)| *key == id) {
-        entry.3 = pass.frame;
-        if entry.1 == generation {
-            return Ok(());
-        }
-        let _ = backend::destroy_texture(&entry.2);
-        s.images.retain(|(key, ..)| *key != id);
-    }
-    let (width, height) = image::dimensions(rays_image);
-    let pixels = image::pixels(rays_image).map_err(|m| error::make("Pxui.paint", ErrorKind::InvalidState, &m))?;
-    let texture = backend::create_texture(pass.device, TextureDescriptor {
-        label: Some("pxui.image".into()), width, height, depth: 1, mip_levels: 1, sample_count: 1,
-        format: TextureFormat::Rgba8Unorm, usage: vec![TextureUsage::TextureBinding, TextureUsage::TextureCopyDst],
-    })?;
-    backend::write_texture(&texture, None, Origin { x: 0, y: 0, z: 0 }, Extent { width, height, depth: 1 }, width * 4, &pixels)?;
-    s.images.push((id, generation, texture, pass.frame));
     Ok(())
 }
 
-/// A Rays image as PXUI's handle, for `Paint::image`.
-pub fn image(i: &image::Image) -> Image {
-    let (width, height) = image::dimensions(i);
-    Image { handle: Rc::new(i.clone()), width, height }
+/// A renderer for `ui` on Rays' device: it adopts the device's native handles (one lease, released with the renderer).
+fn make_renderer(ui: &Ui, device: &Device) -> Result<Renderer, Error> {
+    let native = backend::native_leased(device)?;
+    let gpu = Gpu {
+        size: native.size, backend: native.backend, instance: native.instance, physical_device: native.physical_device,
+        device: native.device, queue: native.queue, queue_family: native.queue_family, api_version: native.api_version,
+        features: native.features, get_instance_proc_addr: native.get_instance_proc_addr, pipeline_cache: native.pipeline_cache,
+        mtl_device: native.mtl_device, wl_display: native.wl_display, wl_surface: native.wl_surface, metal_layer: native.metal_layer,
+        hwnd: native.hwnd, owner_token: native.owner_token, release_owner: native.release_owner,
+    };
+    // the scene's UI pass is RGBA8, one sample, no depth
+    Renderer::new(ui, gpu, TargetDesc { format: 1, samples: 1 }).map_err(|message| error::make("Pxui.paint", ErrorKind::InvalidState, &message))
 }
 
-/// The Rays image behind a PXUI handle (`None` for another backend's).
-pub fn as_rays_image(i: &Image) -> Option<&image::Image> {
-    i.handle.downcast_ref::<image::Image>()
+/// Draws layer `layer` of the UI into the scene's open pass.
+fn draw_layer(ui: &Weak<RefCell<Ui>>, renderer: &Rc<RefCell<Option<Renderer>>>, pass: &scene::UiPass, layer: usize) -> Result<(), Error> {
+    if ui.strong_count() == 0 {
+        return Ok(());
+    }
+    let mut renderer = renderer.borrow_mut();
+    let Some(renderer) = renderer.as_mut() else {
+        return Err(error::make("Pxui.paint", ErrorKind::InvalidState, "the UI has no renderer: its frame was not prepared"));
+    };
+    let commands = backend::native_commands(pass.commands())?;
+    let open = backend::native_pass(pass.encoder)?;
+    let ui_pass = Pass {
+        vk_command_buffer: open.vk_command_buffer, mtl_render_encoder: open.mtl_render_encoder,
+        width_px: pass.size_px[0], height_px: pass.size_px[1], scale: pass.scale, mtl_command_buffer: commands.mtl_command_buffer,
+        ..Pass::default()
+    };
+    let mut split_error = None;
+    let drawn = renderer.draw_layer(&ui_pass, layer as u32, &mut |record| {
+        let reopened = pass.split(&mut |_, target| {
+            let native = backend::native_texture(target)?;
+            let image = Image { vk_image_view: native.vk_image_view, mtl_texture: native.mtl_texture, width: native.width, height: native.height, format: native.format, ..Image::default() };
+            record(&image).map_err(|code| error::make("Pxui.paint", ErrorKind::InvalidState, &format!("blur recording failed ({code})")))
+        });
+        let next = reopened.and_then(|encoder| backend::native_pass(&encoder));
+        match next {
+            Ok(next) => Ok(Pass { vk_command_buffer: next.vk_command_buffer, mtl_render_encoder: next.mtl_render_encoder, ..ui_pass }),
+            Err(e) => {
+                split_error = Some(e);
+                Err(-1)
+            }
+        }
+    });
+    if let Err(code) = drawn {
+        return Err(split_error.unwrap_or_else(|| failure(ui, "renderer draw", code)));
+    }
+    // PXUI leaves its own pipeline and bindings in the pass: Rays forgets what it cached before it draws more
+    backend::invalidate_state(&pass.open_pass())
+}
+
+/// Free the UI renderers (they adopted the device) and the image textures; the scene renderer calls this before it destroys a
+/// device. The next frame makes them again.
+fn release() {
+    ENTRIES.with(|entries| entries.borrow().iter().for_each(|e| drop(e.renderer.borrow_mut().take())));
+    IMAGES.with(|images| images.borrow_mut().clear());
+    GRAVE.with(|grave| grave.borrow_mut().drain(..).for_each(|(texture, _)| {
+        let _ = backend::destroy_texture(&texture);
+    }));
+    DEVICE.with(|d| d.borrow_mut().take());
+}
+
+/// Draw calls the thread's UI renderers have issued.
+pub fn draw_calls() -> u64 {
+    ENTRIES.with(|entries| entries.borrow().iter().map(|e| e.renderer.borrow().as_ref().map_or(0, Renderer::draw_calls)).sum())
+}
+
+/// A GPU texture holding a Rays image's pixels, owned by what shows it: it goes when the last holder drops, after the frames that
+/// might sample it have finished.
+struct Owned {
+    texture: Texture,
+}
+
+impl Drop for Owned {
+    fn drop(&mut self) {
+        GRAVE.with(|grave| grave.borrow_mut().push((self.texture.clone(), LAST_SERIAL.get())));
+    }
+}
+
+/// A Rays image as PXUI's handle, for `Paint::image`: it keeps the texture alive for as long as it is held.
+pub struct HostImage {
+    image: Image,
+    _texture: Rc<Owned>,
+}
+
+impl std::ops::Deref for HostImage {
+    type Target = Image;
+
+    fn deref(&self) -> &Image {
+        &self.image
+    }
+}
+
+/// The image on Rays' device as a handle PXUI draws; `None` until a frame has run and the device is known.
+// ponytail: an image shown before the first frame has no device to sit on and shows nothing until the UI builds again; the first
+// frame knows the device, so a thumbnail appears with the next rebuild. Create the device with the UI if that ever shows.
+pub fn image(i: &image::Image) -> Option<HostImage> {
+    let (id, generation) = (image::identity(i), image::generation(i));
+    let held = IMAGES.with(|images| images.borrow().iter().find(|(key, at, ..)| *key == id && *at == generation).and_then(|(_, _, owner, image)| owner.upgrade().map(|o| (o, *image))));
+    if let Some((owner, handle)) = held {
+        return Some(HostImage { image: handle, _texture: owner });
+    }
+    let device = DEVICE.with(|d| d.borrow().clone())?;
+    let (width, height) = image::dimensions(i);
+    let pixels = image::pixels(i).ok()?;
+    let texture = backend::create_texture(&device, TextureDescriptor {
+        label: Some("pxui.image".into()), width, height, depth: 1, mip_levels: 1, sample_count: 1,
+        format: TextureFormat::Rgba8Unorm, usage: vec![TextureUsage::TextureBinding, TextureUsage::TextureCopyDst],
+    }).ok()?;
+    backend::write_texture(&texture, None, Origin { x: 0, y: 0, z: 0 }, Extent { width, height, depth: 1 }, width * 4, &pixels).ok()?;
+    let native = backend::native_texture(&texture).ok()?;
+    let handle = Image { vk_image_view: native.vk_image_view, mtl_texture: native.mtl_texture, width: native.width, height: native.height, format: native.format, ..Image::default() };
+    let owner = Rc::new(Owned { texture });
+    IMAGES.with(|images| {
+        let mut images = images.borrow_mut();
+        images.retain(|(key, _, owner, _)| *key != id && owner.strong_count() > 0);
+        images.push((id, generation, Rc::downgrade(&owner), handle));
+    });
+    Some(HostImage { image: handle, _texture: owner })
 }

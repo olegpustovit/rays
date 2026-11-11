@@ -16,7 +16,6 @@ use flow_syntax::context;
 use flow_syntax::phase_timer;
 use flow_syntax::syntax::{self, Draft};
 use input::Platform;
-use pxui::ui::Ui;
 use rays_graph::scope_state as scope;
 use rays_shell::{layout, tree};
 use sop::edit_graph::Factory;
@@ -195,7 +194,7 @@ pub fn create(opts: CreateOpts, workspace: &workspace_doc::T, prepare: cook::Pre
     let state_name = lowering::sha256(&state_key);
     let doc = Arc::new(doc);
     let ui = {
-        let mut ui = Ui::create(platform, None, rays_shell::host::text(ui_font.as_deref()));
+        let mut ui = rays_shell::host::create(platform, None, ui_font.as_deref());
         ui.set_font_size(ui_text_size);
         ui
     };

@@ -90,7 +90,7 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
             BoxOpts::default().flags(CLICKABLE | BLOCKING).at((ruler_x, ruler_y)).w(Size::Px(ruler_w)).h(Size::Px(ruler_h)),
         );
         let signal = ui.signal(&ruler);
-        let scrub: Option<f32> = if signal.button == Some(MouseButton::LeftButton) && (signal.held || signal.released) && ruler_w > 1.0 {
+        let scrub: Option<f32> = if signal.button == Some(MouseButton::LeftButton.code() as u8) && (signal.held || signal.released) && ruler_w > 1.0 {
             let px = (if signal.released { signal.release_point } else { signal.pointer }).0;
             let rx = ui.rect(&ruler).x;
             Some((0.0f32.max(1.0f32.min((px - rx - inner_x) / span)) * range).round())

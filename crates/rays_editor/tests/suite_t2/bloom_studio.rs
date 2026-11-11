@@ -187,7 +187,7 @@ fn body(r: &mut Bloom) {
     assert!(matches.iter().any(|l| l.contains("wobble")) && !matches.iter().any(|l| l.contains("scene · scene")), "a search shows the matching bindings");
     // the toolbar: Defn makes a reusable function from the selection
     let header = graph_leaf(r).header;
-    let mut ui = pxui::ui::Ui::create(input::Platform::Apple, Some(11), rays_shell::host::text(None));
+    let mut ui = rays_shell::host::create(input::Platform::Apple, Some(11), None);
     let route = dump_line(&r.e, "route").split('>').map(|s| s.trim().to_owned()).collect::<Vec<_>>().join(" / ");
     let from = rays_shell::chrome::tools_start(&mut ui, true, false, false, &format!("Graph\t{route} / sop"));
     let tool = rays_editor::bars::tool_rect(false, &mut ui, header, from, rays_editor::bars::Tool::Defn).unwrap_or_else(|| panic!("the toolbar is cut off (header {header:?}, tools from {from:.0})"));
@@ -199,6 +199,6 @@ fn body(r: &mut Bloom) {
     assert_eq!(editor::undo_label(&r.e).as_deref(), Some("Make reusable function"), "the defn tool made a function: {:?} / {}", editor::undo_label(&r.e), dump_line(&r.e, "edit error"));
     assert!(source(&r.e).contains("(defn heart_2 :context sop []"), "a defn with its own name: {}", source(&r.e));
     assert!(source(&r.e) != before, "the text changed");
-    ui.destroy();
+    rays_shell::host::destroy(&mut ui);
     let _ = wd::to_text;
 }
