@@ -19,6 +19,14 @@ struct Cost {
 /// actually built; `views` is the sum of the views each frame rebuilt
 fn measure(r: &mut Run, n: usize, step: &dyn Fn(&mut Run, usize)) -> Cost {
     let mut c = Cost { views: 0, built: 0, frames: 0, cpu_us: 0.0, bytes: 0, allocs: 0 };
+    // what frames before this left to draw is theirs, not the first measured frame's
+    {
+        let mut ui = r.e.core.ui.borrow_mut();
+        let layers = ui.output().draw.len();
+        for i in 0..layers {
+            ui.drawn(i);
+        }
+    }
     let allocs = mem_sys::alloc_count();
     for i in 0..n {
         r.e.core.ui.borrow_mut().set_timing(true);
@@ -168,8 +176,7 @@ fn workspace(name: &str, text: &str) {
         }
         let zoom = measure(&mut r, n, &|r, _| r.step(end, vec![Event::Scrolled((0.0, 1.0))]));
         report("empty graph zoom", &zoom, n);
-        // (the instances it writes are the chrome's zoom readout; the graph's own are window_graph_view_pan_zoom's)
-        check(zoom.views == 0, &format!("zooming rebuilt {} views", zoom.views));
+        check(zoom.views == 0 && zoom.bytes == 0, &format!("zooming rebuilt {} views and wrote {} instance bytes a frame", zoom.views, zoom.bytes));
         let rest = measure(&mut r, 12, &|r, _| r.step(end, vec![]));
         report("empty graph zoom at rest", &rest, 12);
         // (the graph's anchored views: its wires, its content and each card's view in it)
