@@ -385,4 +385,3 @@ fn draw(gpu: &Gpu, painter: &mut pxui_render::Painter, ui: &mut Ui, target: &be:
     };
     be::complete_through(&gpu.queue, receipt.epoch).unwrap_or_else(|e| fail(e));
 }
-
