@@ -579,6 +579,8 @@ struct ViewRec {
     /// after its own: identity unless an enclosing view is scaled or transformed
     pa: [f32; 4],
     pb: [f32; 2],
+    /// no transform of its own or around it (composed): hit testing skips the inverse
+    flat: bool,
 }
 
 const IDENTITY_2X2: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
@@ -632,6 +634,7 @@ impl ViewRec {
             stamp: 0,
             pa: IDENTITY_2X2,
             pb: [0.0; 2],
+            flat: true,
         }
     }
 
@@ -2079,7 +2082,7 @@ impl Ui {
         if !v.outer.contains(point) {
             return false;
         }
-        let local = v.unmap(point);
+        let local = if v.flat { Some(point) } else { v.unmap(point) };
         local.is_some_and(|p| contains(Rect::new(h.x, h.y, h.w, h.h), (p.0 - v.shift.0, p.1 - v.shift.1)))
     }
 
@@ -6373,6 +6376,7 @@ impl Ui {
             (r.pa, r.pb) = (pa, pb);
             r.outer = box_clip.intersect(pouter).intersect(r.clip.unwrap_or(UNBOUNDED));
         }
+        r.flat = r.plain() && r.parent_plain();
         let b = r.built_rect;
         r.screen = Rect::new(b.x + r.shift.0, b.y + r.shift.1, b.w, b.h).intersect(r.outer);
     }
