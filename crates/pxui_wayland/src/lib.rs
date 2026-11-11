@@ -199,6 +199,9 @@ pub struct Window {
     text_input: bool,
     cursor_shape: Option<CursorShape>,
     visible: bool,
+    /// Opened hidden and not yet `show`n. A Wayland surface maps at its first present, so this is the caller's
+    /// promise to present only after `show`, as Rays does.
+    hidden: bool,
     /// Relative mode: `Some(true)` with relative-pointer-v1 deltas, `Some(false)` degraded to absolute motion.
     relative: Option<bool>,
     motion: (f64, f64),
@@ -211,10 +214,9 @@ impl Window {
         Window::open_with(title, width, height, true, false, true)
     }
 
-    /// `high_density` false keeps the drawable at the logical size. `hidden` is accepted for pxui_sdl parity:
-    /// a Wayland window is not shown until its first present anyway.
+    /// `high_density` false keeps the drawable at the logical size. A `hidden` window reports `visible() == false`
+    /// until `show`; any Wayland window appears with its first present.
     pub fn open_with(title: &str, width: i64, height: i64, vsync: bool, hidden: bool, high_density: bool) -> Result<Window, Error> {
-        let _ = hidden;
         let (w, h) = (dimension(width)?, dimension(height)?);
         let title = CString::new(title).map_err(|_| "title contains a NUL byte".to_owned())?;
         let mut error = 0;
@@ -255,6 +257,7 @@ impl Window {
             text_input: false,
             cursor_shape: None,
             visible: true,
+            hidden,
             relative: None,
             motion: (0.0, 0.0),
             started: Instant::now(),
@@ -526,9 +529,11 @@ impl Window {
         self.live().map(drop)
     }
 
-    /// Accepted for pxui_sdl parity: a Wayland window appears with its first present.
+    /// Ends `hidden`: a Wayland window appears with its first present.
     pub fn show(&mut self) -> Result<(), Error> {
-        self.live().map(drop)
+        self.live()?;
+        self.hidden = false;
+        Ok(())
     }
 
     /// Accepted for pxui_sdl parity: `pump` re-reads size and scale every time.
@@ -550,10 +555,11 @@ impl Window {
         Err(NO_FILE_DIALOG.to_owned())
     }
 
-    /// False while the compositor has suspended the window (xdg_toplevel `suspended`, e.g. fully hidden).
+    /// False while opened hidden and not shown, or while the compositor has suspended the window (xdg_toplevel
+    /// `suspended`, e.g. fully covered).
     pub fn visible(&mut self) -> Result<bool, Error> {
         self.live()?;
-        Ok(self.visible)
+        Ok(self.visible && !self.hidden)
     }
 
     /// Invalidates the token and closes the window. GPU surfaces made from the token must be destroyed first.
