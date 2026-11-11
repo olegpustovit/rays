@@ -893,7 +893,7 @@ fn card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, snap: 
         Item::Input(_) | Item::Return => (Some(sh::ground(t, false, false, false)), false, false),
     };
     let node = |ui: &mut Ui, name: &str, at: (f64, f64), size: (f64, f64), look: Look, flags: Flags| {
-        ui.node(name, Node { w: Size::Px(size.0 as f32), h: Size::Px(size.1 as f32), at: Some((at.0 as f32, at.1 as f32)), look, flags, ..Node::DEFAULT })
+        ui.node(name, Node { w: Size::Px(size.0 as f32), h: Size::Px(size.1 as f32), at: Some((at.0 as f32, at.1 as f32)).into(), look, flags, ..Node::DEFAULT })
     };
     let saved = ui.enter(&tile);
     if stack {

@@ -410,7 +410,7 @@ pub fn follow_graph(value: &mut EditorModel, focus: &Panel, focus_path: Option<&
 pub fn sheet_theme(theme: &Theme) -> Theme {
     let mut sheet = theme.clone();
     sheet.panel = theme.input;
-    sheet.ink_ground = Some(theme.ink_ground.unwrap_or(theme.panel));
+    sheet.ink_ground = Some(theme.ink_ground.get().unwrap_or(theme.panel)).into();
     sheet
 }
 

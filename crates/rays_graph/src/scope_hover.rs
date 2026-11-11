@@ -120,7 +120,7 @@ pub fn readout_nodes(t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, footer
         sp::readout(ui, t, z, fs, ghost, full, f, &ty, pad, (0.0, 0.0, pl.w * z, pl.h * z), &mut |ui, piece, text| {
             let (stamp, look, mark) = piece_node(piece, text);
             let [x, y, w, h] = stamp.rect;
-            let b = ui.node("r", Node { w: Size::Px(w), h: Size::Px(h), at: Some((x, y)), look, mark, ..Node::DEFAULT });
+            let b = ui.node("r", Node { w: Size::Px(w), h: Size::Px(h), at: Some((x, y)).into(), look, mark, ..Node::DEFAULT });
             ui.text(&b, text);
             nodes.push((b, stamp));
         });

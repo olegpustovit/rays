@@ -94,7 +94,7 @@ pub fn button_states(theme: &theme::Tokens, primary: bool) -> theme::States {
 
 /// A text node at `x` in its parent, `h` tall (the parent's height), in `look`'s ink at its font.
 fn text_node(ui: &mut Ui, key: i64, x: f32, w: f32, h: f32, look: theme::Look, text: &str) {
-    let node = ui.node_keyed(key, Node { w: Size::Px(w.max(1.0)), h: Size::Px(h), at: Some((x, 0.0)), look, ..Node::DEFAULT });
+    let node = ui.node_keyed(key, Node { w: Size::Px(w.max(1.0)), h: Size::Px(h), at: Some((x, 0.0)).into(), look, ..Node::DEFAULT });
     ui.text(&node, text);
 }
 
@@ -166,9 +166,9 @@ pub fn switch(ui: &mut Ui, key: &str, at: (f32, f32), on: bool) -> bool {
     let (sx, sy) = at;
     let checked = State { checked: on, ..State::default() };
     let (track, knob) = (*ui.theme().switch.pick(checked), *ui.theme().knob.pick(checked));
-    let boxed = ui.node(key, Node { flags: CLICKABLE | BLOCKING, w: Size::Px(28.0), h: Size::Px(14.0), at: Some((sx, sy)), look: track, ..Node::DEFAULT });
+    let boxed = ui.node(key, Node { flags: CLICKABLE | BLOCKING, w: Size::Px(28.0), h: Size::Px(14.0), at: Some((sx, sy)).into(), look: track, ..Node::DEFAULT });
     let saved = ui.enter(&boxed);
-    ui.node_keyed(pxui::ui_core::int_key(boxed.box_key, 0), Node { w: Size::Px(8.0), h: Size::Px(8.0), at: Some((if on { 17.0 } else { 3.0 }, 3.0)), look: knob, ..Node::DEFAULT });
+    ui.node_keyed(pxui::ui_core::int_key(boxed.box_key, 0), Node { w: Size::Px(8.0), h: Size::Px(8.0), at: Some((if on { 17.0 } else { 3.0 }, 3.0)).into(), look: knob, ..Node::DEFAULT });
     ui.leave(saved);
     ui.signal(&boxed).clicked
 }
@@ -198,7 +198,7 @@ pub fn segments(ui: &mut Ui, key: &str, right: f32, y: f32, labels: &[&str], act
         let saved = ui.enter(&boxed);
         text_node(ui, pxui::ui_core::int_key(boxed.box_key, 0), 4.0, w, h, theme::Look { text: ink, ..theme::Look::NONE }, label);
         if on {
-            ui.node_keyed(pxui::ui_core::int_key(boxed.box_key, 1), Node { w: Size::Px(w), h: Size::Px(1.0), at: Some((4.0, h - 1.0)), look: theme::Look { fill: theme.foreground, ..theme::Look::NONE }, ..Node::DEFAULT });
+            ui.node_keyed(pxui::ui_core::int_key(boxed.box_key, 1), Node { w: Size::Px(w), h: Size::Px(1.0), at: Some((4.0, h - 1.0)).into(), look: theme::Look { fill: theme.foreground, ..theme::Look::NONE }, ..Node::DEFAULT });
         }
         ui.leave(saved);
         x += w + 12.0;
