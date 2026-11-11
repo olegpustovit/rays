@@ -289,7 +289,10 @@ fn main() {
             last = now;
             let a0 = mem_sys::local_alloc_count();
             let t0 = Instant::now();
+            let revs = (s.page_rev, s.chrome_rev);
             ui.frame(&frame, &mut |ui| app(ui, &mut s));
+            // a page switch inside the frame: build once more so the views and the accessibility tree show the new state
+            force |= (s.page_rev, s.chrome_rev) != revs;
             cost.us = t0.elapsed().as_secs_f64() * 1e6;
             cost.allocs = Some(mem_sys::local_alloc_count() - a0);
             events = std::mem::take(&mut frame.input.events);
