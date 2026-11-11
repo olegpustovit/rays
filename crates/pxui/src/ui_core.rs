@@ -905,6 +905,11 @@ pub fn kit_style(size: i64, tracking: f32) -> Style {
 }
 
 /// Lay `text` out (a cache hit when unchanged) and return its key and metrics.
+/// Capacity for `n` elements in all, whatever `v` holds now (`reserve` counts from its length).
+fn room<T>(v: &mut Vec<T>, n: usize) {
+    v.reserve(n.saturating_sub(v.len()));
+}
+
 pub(crate) fn lay_out(t: &mut Text, style: &Style, width: f32, text: &str) -> (u64, Metrics) {
     let key = text_key(style, width, text);
     (key, t.layout(key, text, style, width))
@@ -1695,6 +1700,8 @@ impl Ui {
                 self.slots.push(Slot::fresh());
                 self.scroll_y.push(0.0);
                 self.scroll_xs.push(0.0);
+                // the free list can take every slot: freeing never grows it (amortised with `slots`)
+                room(&mut self.free, self.slots.capacity());
                 self.slots.len() - 1
             }
         };
@@ -1744,6 +1751,10 @@ impl Ui {
         }
         self.moving = moving;
         let mut gone = std::mem::take(&mut self.gone);
+        // room for every rebuilt view's next `prev` too, so the frame after a view's first build
+        // does not grow the list
+        let room = self.views.iter().filter(|r| r.built == self.frame_number).map(|r| r.nodes.len().max(r.prev.len())).sum();
+        crate::ui_core::room(&mut gone, room);
         for v in 0..self.views.len() {
             if self.views[v].built == self.frame_number {
                 gone.extend_from_slice(&self.views[v].prev);
@@ -5283,6 +5294,8 @@ impl Ui {
     pub fn end_frame(&mut self, frame: &rframe::Frame) {
         self.carry_ghost();
         self.building = false;
+        let root = &mut self.views[0];
+        room(&mut root.prev, root.nodes.len());
         self.parents.clear();
         self.seeds.clear();
         // Move popups to the end of the root's children, oldest first.
@@ -5685,6 +5698,8 @@ impl Ui {
         let r = &mut self.views[v as usize];
         (r.revision, r.epoch, r.theme, r.built, r.patched) = (revision, self.epoch, self.theme_id, self.frame_number, false);
         r.dirty = r.escapes;
+        // the next build fills `prev`: room now, so a view's second build does not grow it
+        room(&mut r.prev, r.nodes.len());
         if r.escapes && parent != 0 {
             self.views[parent as usize].escapes = true;
         }
@@ -5945,6 +5960,8 @@ impl Ui {
         }
         let changed = out != self.view_out;
         self.view_prev = std::mem::replace(&mut self.view_out, out);
+        // the next refresh writes into `view_prev`: room now, not on the second frame
+        room(&mut self.view_prev, self.view_out.len());
         changed
     }
 
@@ -6335,6 +6352,9 @@ impl Ui {
         let changed = breaks != d.breaks || images.len() != d.images.len() || images.iter().zip(&d.images).any(|(a, b)| !Rc::ptr_eq(&a.handle, &b.handle));
         std::mem::swap(&mut breaks, &mut d.breaks);
         std::mem::swap(&mut images, &mut d.images);
+        // the next rebuild fills these: room for this frame's count now, not on the second frame
+        room(&mut breaks, d.breaks.len());
+        room(&mut images, d.images.len());
         self.temp_breaks = breaks;
         self.temp_images = images;
         changed

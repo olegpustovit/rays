@@ -704,6 +704,21 @@ fn widgets_zero_alloc() {
         check(!keep || ui.built_nodes() < 12, &format!("the kept view rebuilt: {} nodes", ui.built_nodes()));
     }
     ui.destroy();
+    // the second frame of a fresh UI (a kept view, an image break) allocates nothing either: the
+    // double-buffered lists (a view's nodes, the view table, the layer's breaks) got their room on
+    // the first
+    let mut ui = new_ui(None);
+    for t in 0..2 {
+        let frame = at(t as f64 * 0.1, vec![]);
+        mem_sys::local_reset();
+        ui.frame(&frame, &mut |ui| {
+            ui.view("all", 1, Size::Px(W as f32), Size::Px(H as f32), &mut |ui| body(ui, &mut s));
+            toasts(ui, &mut s);
+        });
+    }
+    let allocs = mem_sys::local_alloc_count();
+    check(allocs == 0, &format!("{allocs} allocations in a fresh UI's second frame"));
+    ui.destroy();
 }
 
 pub const CASES: &[(&str, fn())] = &[
