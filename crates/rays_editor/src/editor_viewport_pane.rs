@@ -134,15 +134,21 @@ pub fn draw_viewport_pane<'a>(
 ) -> UiBox {
     // the iteration the selected node shows, over the viewport's lower left corner
     if let (Some(text), Some(leaf)) = (&caption, active) {
-        // a label on the ground, like every readout over the view
-        let layer = view_layer(ui, leaf.body, "viewport-caption");
-        let theme = ui.tokens();
-        let text = text.clone();
-        ui.draw(&layer, move |paint, pxui::geom::Rect { x, y, h, .. }| {
-            let (px, py) = (x + 12.0, y + h - 24.0);
-            let w = paint.cap_width(&text) + 8.0;
-            paint.fill(px - 4.0, py, w, 16.0, theme.panel);
-            paint.cap((px, py + 2.0), None, &text);
+        // a label on the ground, like every readout over the view; a cached view keyed by its text
+        let revision = kit::revision(&|h| {
+            use std::hash::Hash;
+            (text, leaf.body).hash(h)
+        });
+        kit::cached(ui, "viewport-caption-view", revision, &mut |ui| {
+            let layer = view_layer(ui, leaf.body, "viewport-caption");
+            let theme = ui.tokens();
+            let text = text.clone();
+            ui.draw(&layer, move |paint, pxui::geom::Rect { x, y, h, .. }| {
+                let (px, py) = (x + 12.0, y + h - 24.0);
+                let w = paint.cap_width(&text) + 8.0;
+                paint.fill(px - 4.0, py, w, 16.0, theme.panel);
+                paint.cap((px, py + 2.0), None, &text);
+            });
         });
     }
     // over each view, in the kit's marks (viewport.html): the render frame and its label, the traced
@@ -184,6 +190,42 @@ pub fn draw_viewport_pane<'a>(
         if !(w0 > 320 && h0 > 160) {
             continue;
         }
+        // the marks are a cached view keyed by what they show: the gate, the selected box, the document
+        // (root, camera), the cook's results (the counts), the trace and the frame rate; a playing
+        // sketch whose readouts stand still rebuilds nothing
+        let gate = value.gates.iter().find(|(k, _)| k == key).map(|(_, g)| *g);
+        let trace = value.traces.iter().find(|(k, _)| k == key).map(|(_, t)| (t.film, t.samples, t.cap, t.bounces, t.seconds.to_bits()));
+        let counts = scene_counts(value);
+        let revision = kit::revision(&|h| {
+            use std::hash::Hash;
+            (leaf.body, gate, &value.selected_box, value.revs.doc, counts, trace, value.status_fps, rh.to_bits()).hash(h)
+        });
+        kit::cached(ui, &format!("viewport-marks-view-{key}"), revision, &mut |ui| marks(ui, value, leaf, key, theme, rh, counts));
+    }
+    match active {
+        Some(leaf) => roots.iter().find(|(l, _)| l.path == leaf.path).map(|(_, b)| b.clone()).unwrap_or_else(|| none_root(ui)),
+        None => none_root(ui),
+    }
+}
+
+/// The triangles the scene draws, its objects and the points of the focused one: a polygon of n
+/// corners fans into n - 2 (exact for polygons, a count of corners and faces, not a walk of every
+/// face, for a frame's cost).
+fn scene_counts(value: &ModelView<'_>) -> (i64, usize, Option<i64>) {
+    let all = pieces(value);
+    let mut tris = 0;
+    for p in all {
+        if let sop::payload::T::Geometry(g) = &p.output.payload {
+            tris += rdk_rays::geometry_view::triangles(g);
+        }
+    }
+    let points = piece(value).and_then(|p| sop::payload::geometry(&p.output.payload).ok()).map(|g| rdk_rays::geometry_view::point_count(&g));
+    (tris, all.len(), points)
+}
+
+/// The marks over one view.
+fn marks(ui: &mut Ui, value: &ModelView<'_>, leaf: &Leaf, key: &str, theme: theme::Tokens, rh: f32, counts: (i64, usize, Option<i64>)) {
+    {
         let (_, _, bw, _) = leaf.body;
         let overlay = view_layer(ui, leaf.body, &format!("viewport-marks-{key}"));
         let gate = value.gates.iter().find(|(k, _)| k == key).map(|(_, g)| *g);
@@ -194,17 +236,7 @@ pub fn draw_viewport_pane<'a>(
         let root = value.doc.view_roots.iter().find(|(k, _)| k == key).map(|(_, r)| r.params.clone()).unwrap_or_else(|| value.doc.root.clone());
         let scene_graph = scene(value);
         let camera = value.doc.active_camera.and_then(|id| kind_graph::find(&scene_graph, id));
-        // the triangles the scene draws: a polygon of n corners fans into n - 2 (exact for polygons, a
-        // count of corners and faces, not a walk of every face, for a frame's cost)
-        let all = pieces(value);
-        let mut tris = 0;
-        for p in all {
-            if let sop::payload::T::Geometry(g) = &p.output.payload {
-                tris += rdk_rays::geometry_view::triangles(g);
-            }
-        }
-        let objects = all.len();
-        let points = piece(value).and_then(|p| sop::payload::geometry(&p.output.payload).ok()).map(|g| rdk_rays::geometry_view::point_count(&g));
+        let (tris, objects, points) = counts;
         // the traced readout: its samples are the caption's "n/cap spp"
         let traced = value.traces.iter().find(|(k, _)| k == key).map(|(_, t)| t.clone());
         // a body about as wide as the workspace sheet's follows that sheet: the narrow traced block, no
@@ -273,10 +305,6 @@ pub fn draw_viewport_pane<'a>(
                 at += paint.cap_width(text) + 12.0;
             }
         });
-    }
-    match active {
-        Some(leaf) => roots.iter().find(|(l, _)| l.path == leaf.path).map(|(_, b)| b.clone()).unwrap_or_else(|| none_root(ui)),
-        None => none_root(ui),
     }
 }
 

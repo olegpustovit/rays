@@ -234,3 +234,29 @@ fn single_draw_default_canvas_has_editable_layout() {
     assert!(!pictures[0].is_empty(), "the implicit canvas resolves and draws its graph");
     crate::editor::close(&live);
 }
+
+/// Each revision counter of `EditorModel::revs` bumps where its data changes, and only then.
+#[test]
+fn revisions_bump_on_their_mutation() {
+    let mut value = model();
+    let revs = value.revs;
+    // the same snapshot is no change; another one is
+    value.set_doc(value.doc.clone());
+    assert_eq!(value.revs, revs);
+    let edited = Arc::new((*value.doc).clone());
+    value.set_doc(edited);
+    assert_eq!(value.revs.doc, revs.doc + 1);
+    // the camera panel's: the same inputs keep it, a changed lens or switch bumps it
+    use crate::viewport as v;
+    let camera = v::default_camera();
+    let (_, extra) = v::init(model(), &camera);
+    let control = v::create_control();
+    let mut seen = None;
+    let first = v::panel_revision(&mut seen, &control, &camera, &extra);
+    assert_eq!(v::panel_revision(&mut seen, &control, &camera, &extra), first);
+    let wider = rays::easy_camera::with_fov_y(1.2, &camera).expect("fov");
+    assert_eq!(v::panel_revision(&mut seen, &control, &wider, &extra), first + 1);
+    let mut shown = extra.clone();
+    shown.show.axes = !extra.show.axes;
+    assert_eq!(v::panel_revision(&mut seen, &control, &wider, &shown), first + 2);
+}

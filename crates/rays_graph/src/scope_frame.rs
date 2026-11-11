@@ -1775,7 +1775,40 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
     (drawn_items, drawn_zones)
 }
 
-pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) {
+/// `update` in a cached view as large as the window: built again only when the pane differs from what
+/// its last build left (`scope_state::revision`), when input reaches its boxes, while the pointer moves
+/// over the canvas (hovered rows, wires and tips follow it) or keys are pressed (letter hints).
+/// Kept, the pane is unchanged and no changes are emitted.
+pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) {
+    use std::hash::{Hash, Hasher};
+    let rev = revision(t);
+    let (mx, my) = frame.input.pointer;
+    // the pointer over the bare canvas shows nothing of where it is: only over a card, a port or a wire
+    let bare = built_canvas(t).is_some_and(|canvas| ui.signal(&canvas).hovered);
+    let inside = !bare && mx >= t.x as f64 && my >= t.y as f64 && mx < (t.x + t.width) as f64 && my < (t.y + t.height) as f64;
+    let mut h = std::hash::DefaultHasher::new();
+    (rev, inside.then(|| (mx.to_bits(), my.to_bits())), (!pressed.is_empty()).then(|| frame.input.t.to_bits())).hash(&mut h);
+    let (w, hh) = ui.view_size();
+    let mut canvas = None;
+    let view = ui.view(label, h.finish(), Size::Px(w), Size::Px(hh), &mut |ui| {
+        let before = t.clone();
+        let built = update(pressed, t, ui, frame, changes);
+        // a build that changed the pane (a press selected, a wheel zoomed) painted part of it from the
+        // state before: it is kept as of before, so the next frame builds again from the state now
+        let settled = builds_same(&before, t);
+        if !settled {
+            ui.request_frame();
+        }
+        canvas = Some((built, if settled { None } else { Some(before) }));
+    });
+    ui.set_at(&view, (0.0, 0.0));
+    if let Some((canvas, before)) = canvas {
+        keep_built(before.as_ref().unwrap_or(t), rev, canvas);
+    }
+}
+
+/// The graph canvas for one frame; its canvas box.
+pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) -> UiBox {
     // the first view shows the whole graph, at zoom 1 when it fits (Home frames everything)
     if !t.framed {
         frame_all(t);
@@ -1918,6 +1951,7 @@ pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame,
         t.lens = lens_next;
         relayout(None, t);
     }
+    canvas
 }
 
 #[doc(hidden)]

@@ -269,6 +269,47 @@ pub struct Pane {
     pub tags: bool,
     /// one slot: the chains of the last selection over the last wires
     pub chain: Rc<RefCell<ChainCache>>,
+    /// the pane as its last build left it, and that build's revision: `revision` bumps it when the
+    /// pane differs from it in anything a build reads (shared by clones of the pane)
+    pub built: Rc<RefCell<Option<(Box<Pane>, u64, pxui::ui::UiBox)>>>,
+}
+
+/// Whether two panes build the same frame: the same graph, layout, geometry, records and settings
+/// (shared parts by identity; the last build's copy keeps them alive, so an address is never reused
+/// under it), and the same view, selection, hover, drag, edit and marks. Text measurements, the
+/// chain memo and the stats are caches or outputs, not inputs.
+pub fn builds_same(a: &Pane, b: &Pane) -> bool {
+    let (g, h) = (&a.geo, &b.geo);
+    let geo = Rc::ptr_eq(&g.items, &h.items) && Rc::ptr_eq(&g.wires, &h.wires) && Rc::ptr_eq(&g.origins, &h.origins) && Rc::ptr_eq(&g.inside, &h.inside)
+        && Rc::ptr_eq(&g.slot, &h.slot) && Rc::ptr_eq(&g.tiles, &h.tiles) && Rc::ptr_eq(&g.reach, &h.reach) && Rc::ptr_eq(&g.read, &h.read);
+    geo && (a.x, a.y, a.width, a.height, a.guide, a.framed, a.geo_fs, a.geo_cold, a.tags) == (b.x, b.y, b.width, b.height, b.guide, b.framed, b.geo_fs, b.geo_cold, b.tags)
+        && (a.pan_x.to_bits(), a.pan_y.to_bits(), a.zoom.to_bits(), a.panning_grab) == (b.pan_x.to_bits(), b.pan_y.to_bits(), b.zoom.to_bits(), b.panning_grab)
+        && a.theme == b.theme && a.key == b.key && a.scope.as_ref().map(Rc::as_ptr) == b.scope.as_ref().map(Rc::as_ptr) && Rc::ptr_eq(&a.saved, &b.saved) && a.records.as_ref().map(Rc::as_ptr) == b.records.as_ref().map(Rc::as_ptr)
+        && Rc::ptr_eq(&a.chains, &b.chains) && Rc::ptr_eq(&a.folds, &b.folds) && Rc::ptr_eq(&a.counts, &b.counts) && Rc::ptr_eq(&a.layout, &b.layout)
+        && a.lens == b.lens && a.display == b.display && a.selected == b.selected && a.selected_wire == b.selected_wire && a.hovered_row == b.hovered_row
+        && a.highlighted == b.highlighted && a.drag == b.drag && a.editing == b.editing && a.context == b.context && a.switches == b.switches
+        && a.carry_lit == b.carry_lit && a.carry_hot == b.carry_hot && a.failed == b.failed && a.hinting == b.hinting && a.back == b.back
+}
+
+/// The pane's revision for a cached view of it: the same number while it builds the same frame as
+/// the last build (compared in place, copied only after a build, `keep_built`).
+pub fn revision(t: &Pane) -> u64 {
+    match &*t.built.borrow() {
+        Some((last, rev, _)) if builds_same(last, t) => *rev,
+        Some((_, rev, _)) => rev + 1,
+        None => 0,
+    }
+}
+
+/// After a build at `rev`: the pane as it left it, and its canvas box.
+pub fn keep_built(t: &Pane, rev: u64, canvas: pxui::ui::UiBox) {
+    let kept = Pane { built: Rc::new(RefCell::new(None)), ..t.clone() };
+    *t.built.borrow_mut() = Some((Box::new(kept), rev, canvas));
+}
+
+/// The canvas box of the pane's last build.
+pub fn built_canvas(t: &Pane) -> Option<pxui::ui::UiBox> {
+    t.built.borrow().as_ref().map(|(_, _, canvas)| canvas.clone())
 }
 
 
@@ -347,6 +388,7 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         measured,
         tags: true,
         chain: Rc::new(RefCell::new(None)),
+        built: Rc::new(RefCell::new(None)),
     }
 }
 

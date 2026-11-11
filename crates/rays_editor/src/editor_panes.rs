@@ -572,13 +572,48 @@ pub fn draw_list_panes<'a>(
         };
         let selected_now: Vec<i64> = if mine { selected() } else { selection::selected_nodes(pane_selection(&pane)).to_vec() };
         let title = title_of(&pane);
+        // a cached view keyed by the rows (compared with the last build's, copied on a change), the
+        // selection, the title and columns, and the list's own state as its last build left it
         let draw = |ui: &mut Ui, mut state: tree::Tree| -> (tree::Tree, Vec<tree::Intent>) {
             let mut emitted = Vec::new();
+            let root_key = pxui::ui_core::key(&root);
+            let state_rev = LISTS.with(|l| {
+                let mut l = l.borrow_mut();
+                match l.iter_mut().find(|(k, _, _, _)| *k == root_key) {
+                    Some((_, seen, rows, rev)) if *seen == state && *rows == rows_now => *rev,
+                    Some((_, seen, rows, rev)) => {
+                        (*seen, *rows) = (state.clone(), rows_now.clone());
+                        *rev += 1;
+                        *rev
+                    }
+                    None => {
+                        l.push((root_key, state.clone(), rows_now.clone(), 0));
+                        0
+                    }
+                }
+            });
+            // the hovered row follows the pointer inside the list's one box
+            let pointer = ui.hovered_within(&root).then(|| shortcut_frame.input.pointer.1.to_bits());
+            let revision = kit::revision(&|h| {
+                use std::hash::Hash;
+                (state_rev, &selected_now, &title, &columns_now, leaf.body, pointer).hash(h)
+            });
+            let mut built = false;
             on_sheet(ui, leaf.floating, &mut |ui| {
                 ui.within(&root, &mut |ui| {
-                    tree::update(&mut state, ui, shortcut_frame, leaf.body, &title, &columns_now, &rows_now, &selected_now, &mut emitted);
+                    kit::cached(ui, "list-view", revision, &mut |ui| {
+                        built = true;
+                        tree::update(&mut state, ui, shortcut_frame, leaf.body, &title, &columns_now, &rows_now, &selected_now, &mut emitted);
+                    });
                 });
             });
+            if built {
+                LISTS.with(|l| {
+                    if let Some(entry) = l.borrow_mut().iter_mut().find(|(k, _, _, _)| *k == root_key) {
+                        entry.1 = state.clone();
+                    }
+                });
+            }
             (state, emitted)
         };
         if Some(key) == value.list_at.as_ref() {
@@ -596,6 +631,13 @@ pub fn draw_list_panes<'a>(
         }
     }
     (tree_state, intents, locals)
+}
+
+thread_local! {
+    /// each list's state as its last build left it and its rows, by its pane root's key, and their
+    /// revision: compared, never trusted, so two editors sharing a key only rebuild more
+    // ponytail: one entry per list pane ever shown, never pruned; prune with the pane when lists churn
+    static LISTS: std::cell::RefCell<Vec<(i64, tree::Tree, Vec<tree::Row>, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// The text panes: the one in use and the others, each with what it showed.
@@ -723,7 +765,7 @@ pub fn draw_other_graph_panes<'a>(
                         scope::with_guide(false, &mut active.view);
                         scope::with_theme(theme, &mut active.view);
                         scope::with_bounds(x, y, width.max(1), height.max(1), &mut active.view);
-                        rays_graph::scope_pane::update(&pressed_keys(value, shortcut_frame), &mut active.view, ui, shortcut_frame, &mut Vec::new());
+                        rays_graph::scope_pane::update_cached("graph-view", &pressed_keys(value, shortcut_frame), &mut active.view, ui, shortcut_frame, &mut Vec::new());
                     });
                 }
                 out.push((key.clone(), active));
@@ -866,7 +908,7 @@ pub fn draw_graph_pane<'a>(
             scope::with_theme(theme, scope_view);
             scope::with_bounds(gx, gy, gw.max(1), gh.max(1), scope_view);
             scope::with_carry(carry_lit.clone(), carry_hot.clone(), scope_view);
-            rays_graph::scope_pane::update(&pressed, scope_view, ui, shortcut_frame, scope_frame_changes);
+            rays_graph::scope_pane::update_cached("graph-view", &pressed, scope_view, ui, shortcut_frame, scope_frame_changes);
         });
     }
     let mut menu = menu;

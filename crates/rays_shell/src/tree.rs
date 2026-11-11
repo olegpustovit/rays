@@ -84,7 +84,7 @@ enum Drag {
 }
 
 /// The list's view state.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Tree {
     focus: Option<i64>,
     anchor: Option<i64>,
