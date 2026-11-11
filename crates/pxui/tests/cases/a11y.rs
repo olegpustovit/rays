@@ -34,6 +34,7 @@ fn kit(ui: &mut Ui, k: &mut Kit) {
 
 pub fn a11y_kit_tree() {
     let mut ui = new_ui(None);
+    ui.set_a11y(true);
     let mut k = Kit { on: false, caption: "Functional UI".to_owned(), quit: 0 };
     for t in 0..2 {
         ui.frame(&at(t as f64 * 0.1, vec![]), &mut |ui| kit(ui, &mut k));
@@ -72,6 +73,7 @@ pub fn a11y_kit_tree() {
 
 pub fn a11y_inject_actions() {
     let mut ui = new_ui(None);
+    ui.set_a11y(true);
     let mut k = Kit { on: false, caption: "Functional UI".to_owned(), quit: 0 };
     for t in 0..2 {
         ui.frame(&at(t as f64 * 0.1, vec![]), &mut |ui| kit(ui, &mut k));
@@ -97,6 +99,7 @@ pub fn a11y_inject_actions() {
 /// A warm frame with the tree unchanged allocates nothing.
 pub fn a11y_warm_zero_alloc() {
     let mut ui = new_ui(None);
+    ui.set_a11y(true);
     let mut k = Kit { on: true, caption: "Functional UI".to_owned(), quit: 0 };
     for t in 0..10 {
         ui.frame(&at(t as f64 * 0.1, vec![]), &mut |ui| kit(ui, &mut k));

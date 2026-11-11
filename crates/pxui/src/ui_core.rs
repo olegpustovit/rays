@@ -866,7 +866,8 @@ pub struct FrameOut<'a> {
     pub damage: Option<Rect>,
     pub views: &'a [(u16, ViewEntry)],
     pub blurs: &'a [BlurOut],
-    /// the accessibility tree: its `revision` changes only when its content did
+    /// the accessibility tree (empty unless `Ui::set_a11y(true)`): its `revision` changes only when
+    /// its content did
     pub a11y: &'a A11yTree,
 }
 
@@ -945,6 +946,7 @@ pub struct Ui {
     /// something the tree shows may have changed outside the root's build (a view built, moved or
     /// was patched, an action came in), and the focus and capture the last walk saw
     a11y_dirty: bool,
+    a11y_on: bool,
     a11y_seen: (i64, Option<i64>),
     /// how long the last frame's layout passes took
     layout_time: std::time::Duration,
@@ -1131,6 +1133,7 @@ impl Ui {
             a11y_map: Vec::new(),
             a11y_pending: Vec::new(),
             a11y_dirty: true,
+            a11y_on: false,
             a11y_seen: (0, None),
             parents: Vec::new(),
             overlays: Vec::new(),
@@ -1395,11 +1398,27 @@ impl Ui {
         self.a11y_pending = pending;
     }
 
+    /// Build the accessibility tree (`FrameOut::a11y`) from this frame on. Off by default, so a UI
+    /// nobody reads pays nothing for it; a host turns it on while an assistive technology listens
+    /// (the AT-SPI bridge connected and a client is present). Off publishes an empty tree.
+    pub fn set_a11y(&mut self, on: bool) {
+        if on != self.a11y_on {
+            self.a11y_on = on;
+            self.a11y_dirty = true;
+            if !on {
+                (self.a11y, self.a11y_next) = (A11yTree::new(), A11yTree::new());
+            }
+        }
+    }
+
     /// Walk the views' declared nodes (a kept view's from its last build) into the next tree and
     /// publish it when it differs: an unchanged frame leaves the published tree and its revision.
     // ponytail: a frame that rebuilds anything (or whose root declares roles, as the kit without
     // views does) walks and compares the whole tree, O(nodes); per-view subtrees if trees get large.
     fn emit_a11y(&mut self) {
+        if !self.a11y_on {
+            return;
+        }
         // nothing a kept view shows changed and the root declared no role: the tree stands
         let seen = (self.focus, self.active);
         if !self.a11y_dirty && seen == self.a11y_seen && self.views[0].nodes.iter().all(|s| self.slots[*s].node.role == Role::Unknown) {

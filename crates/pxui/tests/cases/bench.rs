@@ -73,7 +73,9 @@ pub fn pxui_bench() {
     // ten views of 50 kit widgets (`window_pxui_view_costs`)
     const NAMES: [&str; 10] = ["v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9"];
     let mut ui = new_ui(None);
-    for (name, bump) in [("500 widgets, all kept", 0u64), ("500 widgets, one view rebuilt", 1), ("500 widgets, all rebuilt", 10)] {
+    let cases = [("500 widgets, all kept", 0u64, false), ("500 widgets, one view rebuilt", 1, false), ("500 widgets, all rebuilt", 10, false), ("500 widgets, one view rebuilt, a11y on", 1, true)];
+    for (name, bump, a11y) in cases {
+        ui.set_a11y(a11y);
         bench(name, &mut ui, 100, &mut |ui, tick| step(ui, &mut |ui| {
             for (v, label) in NAMES.iter().enumerate() {
                 let rev = if (v as u64) < bump { tick } else { 1 };
