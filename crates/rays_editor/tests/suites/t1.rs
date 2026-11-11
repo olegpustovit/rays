@@ -20,6 +20,8 @@ pub mod part7;
 pub mod part8;
 #[path = "../suite_t1/part9.rs"]
 pub mod part9;
+#[path = "../suite_t1/part10.rs"]
+pub mod part10;
 
 macro_rules! cases {
     ($($name:ident => $path:path;)*) => {
@@ -30,6 +32,7 @@ macro_rules! cases {
 }
 
 cases! {
+    run_ui_frames => part10::run_ui_frames;
     run_lowering => part1::run_lowering;
     run_editor => part1::run_editor;
     run_frame_key => part1::run_frame_key;

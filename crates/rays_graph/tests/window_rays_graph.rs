@@ -17,6 +17,7 @@ mod scope_d;
 mod scope_e;
 
 fn main() {
+    pxui::ui::Ui::verify_new_views(cfg!(debug_assertions));
     // Headless, as the pxui window targets: the hint has to precede SDL initialisation.
     sdl3::hint::set(sdl3::hint::VIDEO_DRIVER, "dummy").expect("video driver hint");
     sdl3::init::init(&[sdl3::init::Subsystem::Video, sdl3::init::Subsystem::Events]).expect("SDL init");

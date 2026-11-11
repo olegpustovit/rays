@@ -23,6 +23,8 @@ mod suite_t6;
 mod natq;
 
 fn run_split(pure: bool) {
+    // a cached view whose revision misses an input panics, naming it (debug builds)
+    pxui::ui::Ui::verify_new_views(cfg!(debug_assertions));
     sdl3::hint::set(sdl3::hint::VIDEO_DRIVER, "dummy").expect("video driver hint");
     sdl3::init::init(&[sdl3::init::Subsystem::Video, sdl3::init::Subsystem::Events]).expect("SDL init");
     if natq::scrub_child() {

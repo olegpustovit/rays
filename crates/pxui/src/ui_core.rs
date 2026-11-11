@@ -630,6 +630,8 @@ pub struct UiBox {
 
 pub type Handle = UiBox;
 
+static VERIFY_NEW_VIEWS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub fn key(b: &UiBox) -> i64 {
     b.box_key
 }
@@ -1225,7 +1227,7 @@ impl Ui {
             view_cur: 0,
             paint_xf: 0,
             epoch: 0,
-            verify: false,
+            verify: VERIFY_NEW_VIEWS.load(std::sync::atomic::Ordering::Relaxed),
             stamp: 0,
             seen: (0, 0, false, false),
             marks: Vec::new(),
@@ -1342,6 +1344,11 @@ impl Ui {
         if let Some(layer) = self.draw[..self.draw_len].get_mut(index) {
             layer.dirty.clear();
         }
+    }
+
+    /// Views (besides the root) the last frame built rather than kept.
+    pub fn rebuilt_views(&self) -> usize {
+        self.views[1..].iter().filter(|r| r.built == self.frame_number).count()
     }
 
     /// Nodes declared by the last build (a kept view counts as its one box): what a view or a
@@ -1556,6 +1563,12 @@ impl Ui {
 
     pub fn dir(&self) -> Direction {
         self.dir
+    }
+
+    /// `verify_views(on)` for every `Ui` created from now on: a test harness turns it on once, for the
+    /// UIs its code under test creates.
+    pub fn verify_new_views(on: bool) {
+        VERIFY_NEW_VIEWS.store(on, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Re-run every clean view's build and panic, naming the view, when its output differs from the

@@ -52,6 +52,8 @@ fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     let gpu = flow_native::workspace_gpu::create(None);
     let mut editor = editor::create(editor::Create { gpu_owner: Some(gpu.clone()), await_: Some(true), ..Default::default() }, &doc, None, editor::prepare_fn(), editor::draw_fn()).unwrap();
     std::rc::Rc::make_mut(&mut editor.core).preferences = "x".repeat(100_000);
+    // measured as the app runs: no verifying rebuilds
+    editor.core.ui.borrow_mut().verify_views(false);
     let identity = editor.core.preferences.as_ptr();
     let mut tick = 0;
     let mut step = |editor: editor::Editor| {
