@@ -498,24 +498,37 @@ const STRESS_COLS: &[Track] = &[Track::Px(20.0), Track::Fr(1.0), Track::Fit, Tra
 const JUSTIFY: [Justify; 6] = [Justify::Start, Justify::Center, Justify::End, Justify::SpaceBetween, Justify::SpaceAround, Justify::SpaceEvenly];
 const ALIGN: [Align; 5] = [Align::Start, Align::Center, Align::End, Align::Stretch, Align::Baseline];
 
-/// `groups` groups of 20 nodes (a container and 19 children) cycling through every layout mode, in
-/// a wrapping row: 20 x `groups` + 1 nodes.
+/// `groups` groups of 20 nodes (a container and 19 children) cycling through every layout mode (grid
+/// spans over content tracks, a wrapping row whose width a column gives it), in a wrapping row after
+/// a virtual grid of 100,000 cells (48 nodes built): 20 x `groups` + 49 nodes.
 pub fn stress(ui: &mut Ui, groups: usize) {
     let all = ui.node_keyed(int_key(9, 0), Node { w: Size::Px(2400.0), h: Size::Fit, axis: Axis::Row, wrap: true, gap: 2.0, row_gap: 2.0, ..Node::DEFAULT });
     let saved = ui.enter(&all);
+    let cells = ui.node("stress-cells-box", px(100.0, 40.0));
+    let inner = ui.enter(&cells);
+    ui.grid_list("stress-cells", 100_000, 20.0, 10.0, &mut |_, _| {});
+    ui.leave(inner);
     for g in 0..groups {
-        let mode = g % 5;
+        let mode = g % 6;
         let look = Look { fill: color::rgb(40 + (g % 7) as i64 * 20, 90, 140), text: color::black(), ..Look::NONE };
         let n = match mode {
             0 => Node { axis: Axis::Row, justify: JUSTIFY[g / 5 % 6], align: ALIGN[g / 5 % 5], gap: 1.0, padding: Edges { l: 1.0, t: 2.0, r: 3.0, b: 4.0 }, ..px(110.0, 110.0) },
             1 => Node { axis: Axis::Row, wrap: true, gap: 2.0, row_gap: 1.0, align: Align::Baseline, ..px(110.0, 110.0) },
             2 => Node { grid: Some(Grid { cols: STRESS_COLS, rows: &[] }), gap: 1.0, row_gap: 1.0, ..px(110.0, 110.0) },
             3 => Node { axis: Axis::Stack, justify: Justify::Center, align: Align::End, ..px(110.0, 110.0) },
-            _ => Node { flags: SCROLL | SCROLL_X | CLIP, axis: Axis::Column, justify: Justify::SpaceBetween, ..px(110.0, 110.0) },
+            4 => Node { flags: SCROLL | SCROLL_X | CLIP, axis: Axis::Column, justify: Justify::SpaceBetween, ..px(110.0, 110.0) },
+            _ => Node { axis: Axis::Column, padding: Edges::all(2.0), ..px(110.0, 110.0) },
         };
         let p = ui.node_keyed(int_key(all.box_key, g as i64), Node { look, ..n });
         let inner = ui.enter(&p);
+        let mut nest = None;
         for i in 0..19usize {
+            // a column's first child: a wrapping row as wide as the column, holding the rest
+            if mode == 5 && i == 0 {
+                let w = ui.node_keyed(int_key(p.box_key, 0), Node { axis: Axis::Row, wrap: true, w: Size::Grow, h: Size::Fit, gap: 1.0, row_gap: 1.0, align: Align::Baseline, ..Node::DEFAULT });
+                nest = Some(ui.enter(&w));
+                continue;
+            }
             let f = i as f32;
             let mut c = Node {
                 w: if i % 3 == 0 { Size::Grow } else { Size::Px(4.0 + f) },
@@ -528,7 +541,11 @@ pub fn stress(ui: &mut Ui, groups: usize) {
                 margin: Edges { l: (i % 2) as f32, t: 1.0, r: 0.0, b: (i % 3) as f32 },
                 align_self: if i % 6 == 0 { Some(ALIGN[i % 5]) } else { None },
                 z: (i % 4) as i16,
-                cell: if i == 5 { Cell::DEFAULT.span(2, 2) } else { Cell::DEFAULT },
+                cell: match i {
+                    5 => Cell::DEFAULT.span(2, 2),
+                    9 => Cell::DEFAULT.span(1, 3),
+                    _ => Cell::DEFAULT,
+                },
                 flags: if mode == 4 && i == 0 { STICKY } else { 0 },
                 look: Look { font: Font { size: 10 + (i % 3) as i64 * 4, ..Font::BODY }, ..look },
                 ..Node::DEFAULT
@@ -538,6 +555,9 @@ pub fn stress(ui: &mut Ui, groups: usize) {
             }
             let h = ui.node_keyed(int_key(p.box_key, i as i64), c);
             ui.text(&h, WORDS[i % 4]);
+        }
+        if let Some(s) = nest {
+            ui.leave(s);
         }
         ui.leave(inner);
     }
@@ -583,7 +603,7 @@ fn costs(ui: &mut Ui, t: &mut f64, n: u32, build: &mut dyn FnMut(&mut Ui, u64)) 
     (allocs, total as f64 / n as f64 / 1e3, layout as f64 / n as f64 / 1e3)
 }
 
-/// Every layout mode in one 2,004-node tree, mirrored right to left: zero allocations for a full
+/// Every layout mode in one 2,054-node tree, mirrored right to left: zero allocations for a full
 /// rebuild + layout + paint and for a cached frame once warm; and the costs, printed.
 pub fn layout_stress_zero_alloc() {
     let mut ui = new_ui(None);
@@ -610,14 +630,14 @@ pub fn layout_stress_zero_alloc() {
         ui.view("stress", 1, Size::Px(2400.0), Size::Px(2400.0), &mut |ui| stress(ui, 100));
         stress_popup(ui);
     });
-    eprintln!("PXUI_LAYOUT cached 2,000-node view: {us:.1} us per frame, {allocs} allocations");
+    eprintln!("PXUI_LAYOUT cached 2,054-node view: {us:.1} us per frame, {allocs} allocations");
     check(allocs == 0, &format!("{allocs} allocations in 50 cached frames"));
     let (allocs, us, _) = costs(&mut ui, &mut t, 50, &mut |ui, tick| {
         ui.view("stress", 1, Size::Px(2400.0), Size::Px(2300.0), &mut |ui| stress(ui, 100));
         ui.view("small", tick, Size::Px(2400.0), Size::Px(100.0), &mut |ui| stress(ui, 2));
         stress_popup(ui);
     });
-    eprintln!("PXUI_LAYOUT 2,000 nodes cached + one 50-node view rebuilt: {us:.1} us per frame, {allocs} allocations");
+    eprintln!("PXUI_LAYOUT 2,054 nodes cached + one 90-node view rebuilt: {us:.1} us per frame, {allocs} allocations");
     check(allocs == 0, &format!("{allocs} allocations with one small view rebuilt"));
     ui.destroy();
 }
