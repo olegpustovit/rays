@@ -575,7 +575,13 @@ struct ViewRec {
     outer: Rect,
     screen: Rect,
     stamp: u64,
+    /// the transforms of the views around it composed (`q = pa * p + pb`, window points), applied
+    /// after its own: identity unless an enclosing view is scaled or transformed
+    pa: [f32; 4],
+    pb: [f32; 2],
 }
+
+const IDENTITY_2X2: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 
 impl ViewRec {
     fn new() -> ViewRec {
@@ -624,16 +630,89 @@ impl ViewRec {
             outer: UNBOUNDED,
             screen: Rect::new(0.0, 0.0, 0.0, 0.0),
             stamp: 0,
+            pa: IDENTITY_2X2,
+            pb: [0.0; 2],
         }
     }
 
-    /// No scale or transform.
+    /// No scale or transform of its own.
     fn plain(&self) -> bool {
         let [a, b, c, d] = self.transform;
         self.scale == 1.0 && a == 1.0 && b == 0.0 && c == 0.0 && d == 1.0
     }
 
+    /// No enclosing view transforms it.
+    fn parent_plain(&self) -> bool {
+        self.pa == IDENTITY_2X2 && self.pb == [0.0; 2]
+    }
+
+    /// Its own and its enclosing transforms as one affine `(a, b)`: `q = a * p + b` for `p` in
+    /// offset view points.
+    fn affine(&self) -> ([f32; 4], [f32; 2]) {
+        let e = self.own_entry();
+        let [m0, m1, m2, m3] = e.transform.map(|m| m * e.scale);
+        // own: q = m p + (I - m) pivot
+        let (b0, b1) = (e.pivot[0] - (m0 * e.pivot[0] + m1 * e.pivot[1]), e.pivot[1] - (m2 * e.pivot[0] + m3 * e.pivot[1]));
+        let [p0, p1, p2, p3] = self.pa;
+        let a = [p0 * m0 + p1 * m2, p0 * m1 + p1 * m3, p2 * m0 + p3 * m2, p2 * m1 + p3 * m3];
+        (a, [p0 * b0 + p1 * b1 + self.pb[0], p2 * b0 + p3 * b1 + self.pb[1]])
+    }
+
+    /// Where the painter shows offset view point `p`.
+    fn map(&self, p: (f32, f32)) -> (f32, f32) {
+        let q = self.own_entry().map(p);
+        if self.parent_plain() {
+            return q;
+        }
+        let [a, b, c, d] = self.pa;
+        (a * q.0 + b * q.1 + self.pb[0], c * q.0 + d * q.1 + self.pb[1])
+    }
+
+    /// The offset view point the painter shows at window point `q`; `None` without an inverse.
+    fn unmap(&self, q: (f32, f32)) -> Option<(f32, f32)> {
+        let q = if self.parent_plain() {
+            q
+        } else {
+            let [a, b, c, d] = self.pa;
+            let det = a * d - b * c;
+            if det == 0.0 || !det.is_finite() {
+                return None;
+            }
+            let (x, y) = (q.0 - self.pb[0], q.1 - self.pb[1]);
+            ((d * x - b * y) / det, (a * y - c * x) / det)
+        };
+        if self.plain() { Some(q) } else { self.own_entry().unmap(q) }
+    }
+
+    /// The window rectangle covering offset view rectangle `r` once transformed.
+    fn cover(&self, r: Rect) -> Rect {
+        if self.parent_plain() {
+            return if self.plain() { r } else { self.own_entry().cover(r) };
+        }
+        let pts = [(r.x, r.y), (r.x + r.w, r.y), (r.x, r.y + r.h), (r.x + r.w, r.y + r.h)].map(|p| self.map(p));
+        let (x0, y0) = pts.iter().fold((f32::INFINITY, f32::INFINITY), |m, p| (m.0.min(p.0), m.1.min(p.1)));
+        let (x1, y1) = pts.iter().fold((f32::NEG_INFINITY, f32::NEG_INFINITY), |m, p| (m.0.max(p.0), m.1.max(p.1)));
+        Rect::new(x0, y0, x1 - x0, y1 - y0)
+    }
+
+    /// The painter's entry: its own transform, or inside a transformed view the composed affine
+    /// about the origin, the offset carrying its translation (`a * (p + o) = a * p + b`).
     fn entry(&self) -> ViewEntry {
+        let e = self.own_entry();
+        if self.parent_plain() {
+            return e;
+        }
+        let (a, b) = self.affine();
+        let det = a[0] * a[3] - a[1] * a[2];
+        if det == 0.0 || !det.is_finite() {
+            return ViewEntry { opacity: 0.0, ..e };
+        }
+        let (x, y) = ((a[3] * b[0] - a[1] * b[1]) / det, (a[0] * b[1] - a[2] * b[0]) / det);
+        ViewEntry { offset: [e.offset[0] + x, e.offset[1] + y], scale: 1.0, transform: a, pivot: [0.0, 0.0], ..e }
+    }
+
+    /// Its entry with its own transform alone.
+    fn own_entry(&self) -> ViewEntry {
         let c = clip_of(self.outer);
         let b = self.built_rect;
         let pivot = [b.x + self.shift.0 + self.pivot.0, b.y + self.shift.1 + self.pivot.1];
@@ -1998,7 +2077,7 @@ impl Ui {
         if !v.outer.contains(point) {
             return false;
         }
-        let local = if v.plain() { Some(point) } else { v.entry().unmap(point) };
+        let local = v.unmap(point);
         local.is_some_and(|p| contains(Rect::new(h.x, h.y, h.w, h.h), (p.0 - v.shift.0, p.1 - v.shift.1)))
     }
 
@@ -3077,8 +3156,8 @@ impl Ui {
             return Rect::new(0.0, 0.0, 0.0, 0.0);
         }
         let s = &self.slots[b.box_slot];
-        let shift = self.views[self.views[s.owner as usize].xf as usize].shift;
-        Rect::new(s.rx + shift.0, s.ry + shift.1, s.rw, s.rh)
+        let v = &self.views[self.views[s.owner as usize].xf as usize];
+        v.cover(Rect::new(s.rx + v.shift.0, s.ry + v.shift.1, s.rw, s.rh))
     }
 
     /// What input did to the node this frame; a stale handle has no signal.
@@ -6125,10 +6204,9 @@ impl Ui {
 
     /// Map a view's output through `pivot + scale * transform * (p - pivot)` (`transform` a row-major
     /// 2x2: rotation, skew, flip; `pivot` from its box's top-left corner): one table entry, no rebuild.
-    /// Hit testing follows through the inverse.
-    // ponytail: a view's transform applies to its own instances only, not to views nested in it (the
-    // painter's table is flat), and `rect` reports the untransformed box. Compose transforms down the
-    // view tree when nested transformed views are needed.
+    /// Views nested in it inherit it (their entries compose it with their own, as offset, opacity
+    /// and clip compose); hit testing goes through the inverse, and `rect` and the damage report
+    /// the window rectangle covering the transformed box.
     pub fn view_transform(&mut self, b: &Handle, scale: f32, transform: [f32; 4], pivot: (f32, f32)) {
         if let Some(v) = self.view_id(b) {
             let r = &mut self.views[v as usize];
@@ -6153,7 +6231,7 @@ impl Ui {
         for r in &self.views[1..] {
             if r.blur > 0.0 && r.valid && r.visited == self.painted {
                 if let Some(layer) = self.draw[..self.draw_len].iter().position(|l| l.key == r.layer) {
-                    let rect = r.entry().cover(r.screen);
+                    let rect = r.cover(r.screen);
                     let radii = self.slots[r.slot].node.look.radius;
                     self.blur_out.push(BlurOut { layer, at_instance: r.run.0, rect, sigma: r.blur, radii, opacity: r.alpha });
                 }
@@ -6272,19 +6350,23 @@ impl Ui {
         let parent = self.views[v as usize].parent;
         self.compose(parent);
         let pxf = self.views[parent as usize].xf;
-        let (pshift, palpha, pouter) = {
-            let p = &self.views[pxf as usize];
-            (p.shift, p.alpha, p.outer)
-        };
+        let p = &self.views[pxf as usize];
+        let (pshift, palpha, pouter) = (p.shift, p.alpha, p.outer);
+        // the enclosing transforms: none at the root, else the parent entry's composed with its own
+        let (pa, pb) = if pxf == 0 || (p.plain() && p.parent_plain()) { (IDENTITY_2X2, [0.0; 2]) } else { p.affine() };
+        let c = self.views[v as usize].box_clip;
+        let box_clip = p.cover(Rect::new(c.x + pshift.0, c.y + pshift.1, c.w, c.h));
         let r = &mut self.views[v as usize];
         r.stamp = stamp;
         if r.index == 0 {
             (r.shift, r.alpha, r.outer) = (pshift, palpha, pouter);
+            // its instances ride its parent's entry: the parent's own transform is not around it
+            (r.pa, r.pb) = (IDENTITY_2X2, [0.0; 2]);
         } else {
             r.shift = (pshift.0 + r.offset.0 + r.delta.0, pshift.1 + r.offset.1 + r.delta.1);
             r.alpha = palpha * r.opacity;
-            let c = r.box_clip;
-            r.outer = Rect::new(c.x + pshift.0, c.y + pshift.1, c.w, c.h).intersect(pouter).intersect(r.clip.unwrap_or(UNBOUNDED));
+            (r.pa, r.pb) = (pa, pb);
+            r.outer = box_clip.intersect(pouter).intersect(r.clip.unwrap_or(UNBOUNDED));
         }
         let b = r.built_rect;
         r.screen = Rect::new(b.x + r.shift.0, b.y + r.shift.1, b.w, b.h).intersect(r.outer);
@@ -6300,13 +6382,13 @@ impl Ui {
             if self.views[v as usize].index == 0 || !self.shown(v) {
                 continue;
             }
-            let (old_entry, old_screen) = (self.views[v as usize].entry(), self.views[v as usize].screen);
+            let (old_entry, old_cover) = (self.views[v as usize].entry(), self.views[v as usize].cover(self.views[v as usize].screen));
             self.compose(v);
             let r = &self.views[v as usize];
             if r.entry() != old_entry {
-                let (screen, entry) = (r.screen, r.entry());
-                self.add_damage(old_entry.cover(old_screen));
-                self.add_damage(entry.cover(screen));
+                let cover = r.cover(r.screen);
+                self.add_damage(old_cover);
+                self.add_damage(cover);
             }
             let r = &self.views[v as usize];
             out.push((r.index, r.entry()));
@@ -6323,7 +6405,7 @@ impl Ui {
         if let Some(r) = bounds(i) {
             let v = &self.views[self.index_owner[i.view as usize] as usize];
             let r = Rect::new(r.x + v.shift.0, r.y + v.shift.1, r.w, r.h);
-            let r = if v.plain() { r } else { v.entry().cover(r) }.intersect(v.outer);
+            let r = v.cover(r).intersect(v.outer);
             self.add_damage(r);
         }
     }
