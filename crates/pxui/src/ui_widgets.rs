@@ -5,7 +5,8 @@
 //! looks from one `States` of the theme and lays its parts out as flow children, so a theme file
 //! restyles it and `set_dir(Rtl)` mirrors it. No standard appearance paints with a closure (the
 //! image is a texture, the search field's caret the text widgets' canvas). Keyboard: every widget
-//! is one Tab stop (`TAB_ONLY`, as the kit's buttons: the pointer does not take the focus);
+//! is one Tab stop. As on macOS, a click focuses what edits or holds a selection (the slider, the
+//! list, tree and table, the search field) and leaves buttons, boxes, tabs and menus `TAB_ONLY`;
 //! Enter/Space activate, the arrows move within a group, Escape leaves. A warm frame allocates
 //! nothing. Progress and spinner animate through patches (`busy_step`) without rebuilding their view.
 use crate::a11y::state as st;
@@ -201,7 +202,7 @@ impl Ui {
         let label_look = self.theme().row.idle;
         let saved = self.enter(&row);
         self.text_leaf(int_key(key, 0), rh, label_look, shown(text));
-        let track = self.node_keyed(int_key(key, 1), Node { flags: STOP_FLAGS, h: Size::Px(ch), axis: Axis::Stack, align: Align::Center, role: Role::Slider, ..Node::DEFAULT });
+        let track = self.node_keyed(int_key(key, 1), Node { flags: CLICKABLE | FOCUSABLE | BLOCKING, h: Size::Px(ch), axis: Axis::Stack, align: Align::Center, role: Role::Slider, ..Node::DEFAULT });
         let s = self.signal(&track);
         let mut v = value.clamp(lo.min(hi), hi.max(lo));
         let step = span / 100.0;
@@ -614,7 +615,7 @@ impl Ui {
     pub fn list_view(&mut self, label: &str, count: usize, multi: bool, selected: &mut [bool], text: &dyn Fn(usize, &mut dyn FnMut(&str))) -> Option<usize> {
         let count = count.min(selected.len());
         let rh = self.row_height() as f32;
-        let frame = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY | CLIP, w: Size::Grow, h: Size::Grow, look: self.theme().scroll_view.idle, padding: Edges::all(1.0), ..Node::DEFAULT });
+        let frame = self.node(label, Node { flags: FOCUSABLE | CLIP, w: Size::Grow, h: Size::Grow, look: self.theme().scroll_view.idle, padding: Edges::all(1.0), ..Node::DEFAULT });
         let s = self.signal(&frame);
         let focused = self.focused(&frame);
         let page = (self.rect(&frame).h / rh).floor().max(1.0) as i64;
@@ -693,7 +694,7 @@ impl Ui {
         };
         flatten(visible, open);
         let rh = self.row_height() as f32;
-        let frame = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY | CLIP, w: Size::Grow, h: Size::Grow, look: self.theme().scroll_view.idle, padding: Edges::all(1.0), ..Node::DEFAULT });
+        let frame = self.node(label, Node { flags: FOCUSABLE | CLIP, w: Size::Grow, h: Size::Grow, look: self.theme().scroll_view.idle, padding: Edges::all(1.0), ..Node::DEFAULT });
         let s = self.signal(&frame);
         let focused = self.focused(&frame);
         let page = (self.rect(&frame).h / rh).floor().max(1.0) as i64;
@@ -790,7 +791,7 @@ impl Ui {
         let t = self.theme();
         let (frame_look, head_look, column, chevron, states) = (t.scroll_view.idle, t.table_head.idle, t.column, t.chevron.idle, t.listbox);
         let bar = self.thumb();
-        let frame = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY | SCROLL_X | CLIP, w: Size::Grow, h: Size::Grow, look: frame_look, bar: Some(bar), padding: Edges::all(1.0), role: Role::Table, ..Node::DEFAULT });
+        let frame = self.node(label, Node { flags: FOCUSABLE | SCROLL_X | CLIP, w: Size::Grow, h: Size::Grow, look: frame_look, bar: Some(bar), padding: Edges::all(1.0), role: Role::Table, ..Node::DEFAULT });
         self.a11y_name(&frame, shown(label));
         let s = self.signal(&frame);
         let focused = self.focused(&frame);
@@ -892,9 +893,10 @@ impl Ui {
     }
 
     /// Toasts stacked in the window's lower end corner (the newest lowest), 12 points from its
-    /// edges. The caller owns them and their timers (it drops a toast when it expires and wakes the
-    /// host then). Returns the toast clicked away.
-    pub fn toasts(&mut self, label: &str, items: &[&str]) -> Option<usize> {
+    /// edges. Each goes `seconds` after it first showed: the engine keeps that time by the toast's
+    /// text and asks for the frame (`repaint_after`), so the host needs no timer. Returns a toast
+    /// clicked away or expired (one a frame; the caller drops it).
+    pub fn toasts(&mut self, label: &str, items: &[&str], seconds: f64) -> Option<usize> {
         if items.is_empty() {
             return None;
         }
@@ -904,14 +906,20 @@ impl Ui {
         let (look, states) = (self.theme().toast.idle, self.theme().toast);
         let rh = self.row_height() as f32;
         let mut gone = None;
+        let now = self.now();
         let stack = self.anchored(label, Rect::new(x, h - 12.0, 0.0, 0.0), place, Size::Px(260.0), Size::Fit, &mut |ui| {
             for (i, item) in items.iter().enumerate() {
-                let n = ui.node_keyed(int_key(ui.current_seed(), i as i64), Node { flags: ROW_FLAGS | FIT_TEXT, h: Size::Px(rh + 12.0), look, inset: Edges { l: SIDE as f32, r: SIDE as f32, ..Edges::ZERO }, role: Role::StatusBar, ..Node::DEFAULT });
+                // keyed by text, so dropping one keeps the others' times
+                let n = ui.node_keyed(key_of(ui.current_seed(), item), Node { flags: ROW_FLAGS | FIT_TEXT, h: Size::Px(rh + 12.0), look, inset: Edges { l: SIDE as f32, r: SIDE as f32, ..Edges::ZERO }, role: Role::StatusBar, ..Node::DEFAULT });
                 let s = ui.signal(&n);
                 ui.style(&n, &states, State { hovered: s.hovered, ..State::default() });
                 ui.text(&n, item);
-                if s.clicked {
-                    gone = Some(i);
+                let born = f64::from_bits(ui.state(&n, now.to_bits() as i64) as u64);
+                ui.set_state(&n, born.to_bits() as i64);
+                if s.clicked || now >= born + seconds {
+                    gone = gone.or(Some(i));
+                } else {
+                    ui.repaint_at_time(born + seconds);
                 }
             }
         });

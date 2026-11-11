@@ -532,6 +532,8 @@ struct ViewRec {
     transform: [f32; 4],
     pivot: (f32, f32),
     blur: f32,
+    /// when its last build asked to be rebuilt (`Ui::repaint_after`; infinity: never)
+    wake: f64,
     /// the composed entry and the screen rectangle it shows
     shift: (f32, f32),
     alpha: f32,
@@ -578,6 +580,7 @@ impl ViewRec {
             transform: [1.0, 0.0, 0.0, 1.0],
             pivot: (0.0, 0.0),
             blur: 0.0,
+            wake: f64::INFINITY,
             shift: (0.0, 0.0),
             alpha: 1.0,
             outer: UNBOUNDED,
@@ -1070,6 +1073,8 @@ pub struct Ui {
     arena: Arena,
     painting: bool,
     frame_requested: bool,
+    /// the earliest `repaint_after` the root asked for this frame
+    wake: f64,
     out: PlatformOut,
     destroyed: bool,
 }
@@ -1243,6 +1248,7 @@ impl Ui {
             arena: Arena::default(),
             painting: false,
             frame_requested: false,
+            wake: f64::INFINITY,
             out: PlatformOut::default(),
             destroyed: false,
         }
@@ -2104,10 +2110,20 @@ impl Ui {
                     }
                     let flags = self.flags_of_key(target);
                     if *button == MouseButton::LeftButton {
+                        // the nearest focusable box at or around the press takes the focus unless
+                        // it is a Tab stop only (buttons, as on macOS); a list takes it from its rows
+                        let mut holder = 0;
+                        if flags & KEEP_FOCUS == 0 {
+                            self.hit_ancestors(target, &mut |key| {
+                                if holder == 0 && self.flags_of_key(key) & FOCUSABLE != 0 {
+                                    holder = key;
+                                }
+                            });
+                        }
                         let focus = if flags & KEEP_FOCUS != 0 {
                             self.focus
-                        } else if flags & FOCUSABLE != 0 && flags & TAB_ONLY == 0 {
-                            target
+                        } else if holder != 0 && self.flags_of_key(holder) & TAB_ONLY == 0 {
+                            holder
                         } else {
                             0
                         };
@@ -2438,11 +2454,17 @@ impl Ui {
         out
     }
 
-    /// When the last frame's UI needs another frame with no input: at once for a gesture,
-    /// focused text, a scroll in motion or a requested frame, at the end of a running hover
-    /// delay; `None` when time alone changes nothing.
+    /// When the last frame's UI needs another frame with no input: at once for a gesture, a
+    /// running transition, a scroll in motion or a requested frame; at the end of a running hover
+    /// delay or the earliest `repaint_after`; `None` when time alone changes nothing. Keyboard
+    /// focus alone asks for nothing (no caret blinks).
     pub fn repaint_at(&self) -> Option<f64> {
-        if self.frame_requested { Some(f64::NEG_INFINITY) } else { self.out.repaint_at }
+        if self.frame_requested {
+            Some(f64::NEG_INFINITY)
+        } else {
+            // a `repaint_after` made between frames
+            Some(self.out.repaint_at.unwrap_or(f64::INFINITY).min(self.wake)).filter(|t| t.is_finite())
+        }
     }
 
     /// The frame gate: build, lay out and paint only for input or a due repaint. A host that gets
@@ -2466,19 +2488,40 @@ impl Ui {
         }
     }
 
+    /// Ask for a frame `seconds` after this frame's time (a timer: a toast's expiry, a delayed
+    /// reveal), building the view that asks again then; `repaint_at_time` takes the frame clock's
+    /// time. A request stands until its time (a view's until the view rebuilds); the earliest is
+    /// `repaint_at`.
+    pub fn repaint_after(&mut self, seconds: f64) {
+        self.repaint_at_time(self.now + seconds.max(0.0));
+    }
+
+    /// The time of the frame being built (the last frame's between frames), in the frame clock's
+    /// seconds.
+    pub fn now(&self) -> f64 {
+        self.now
+    }
+
+    /// `repaint_after` at the frame clock's `time`.
+    pub fn repaint_at_time(&mut self, time: f64) {
+        if self.building && self.view_cur != 0 {
+            let r = &mut self.views[self.view_cur as usize];
+            r.wake = r.wake.min(time);
+        } else {
+            self.wake = self.wake.min(time);
+        }
+    }
+
     fn next_repaint(&self, now: f64) -> Option<f64> {
-        if self.frame_requested
-            || self.active.is_some()
-            || self.focus != 0
-            || !self.tweens.is_empty()
-            || !self.moving.is_empty()
-        {
+        if self.frame_requested || self.active.is_some() || !self.tweens.is_empty() || !self.moving.is_empty() {
             return Some(now);
         }
-        match &self.hover_rest {
-            Some((_, _, start, seen)) if *seen == self.frame_number && now - start < HOVER_SECONDS => Some(start + HOVER_SECONDS),
-            _ => None,
-        }
+        let wake = self.views.iter().skip(1).fold(self.wake, |w, r| w.min(r.wake));
+        let hover = match &self.hover_rest {
+            Some((_, _, start, seen)) if *seen == self.frame_number && now - start < HOVER_SECONDS => start + HOVER_SECONDS,
+            _ => f64::INFINITY,
+        };
+        Some(wake.min(hover)).filter(|t| t.is_finite())
     }
 }
 
@@ -5163,6 +5206,16 @@ impl Ui {
         self.route(frame);
         self.apply_a11y();
         self.mark_input();
+        // views whose `repaint_after` is due rebuild now (the root rebuilds anyway)
+        if self.wake <= frame.input.t {
+            self.wake = f64::INFINITY;
+        }
+        for v in 1..self.views.len() {
+            if self.views[v].wake <= frame.input.t {
+                self.views[v].wake = f64::INFINITY;
+                self.mark_view(v as u32);
+            }
+        }
         self.views[0].built = self.frame_number;
         self.modal_key = None;
         self.modal_extra.clear();
@@ -5578,6 +5631,7 @@ impl Ui {
         }
         r.verify = clean;
         r.escapes = false;
+        r.wake = f64::INFINITY;
         std::mem::swap(&mut r.nodes, &mut r.prev);
         r.nodes.clear();
         self.a11y_dirty = true;

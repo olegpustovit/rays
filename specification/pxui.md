@@ -384,7 +384,11 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
 
 - No callback into the platform. Paste arrives as an event the frame after `paste_request`.
 - `repaint_at` is the time of the next needed frame; `Ui::wants_frame(&events, now)` lets a host skip
-  `frame` entirely. Idle costs zero builds, layouts and draws.
+  `frame` entirely. Idle costs zero builds, layouts and draws. A frame is due at once for a held
+  pointer, a running transition or animation, a moving scroll or `request_frame`; at the end of a
+  hover delay; at the earliest `ui.repaint_after(seconds)` / `ui.repaint_at_time(t)` (a timer: the view
+  that asked rebuilds then). Keyboard focus alone asks for nothing (no caret blinks): a focused button
+  or text field idles at zero frames.
 - A target is an image, not a swapchain: `pxui_render::Painter::draw(&mut pass, out.draw)` draws into a
   pass the caller opened (window swapchain image, display buffer, or the pass Rays already has open).
 - There is no `Host` trait. Each host crate (`pxui_sdl`, later `pxui_wayland`) exposes the same functions
@@ -514,11 +518,14 @@ Down, Enter, Escape), `tip(&h, text)`, `scroll_view(label, w, h, f)` (both axes)
 `list_view(label, count, multi, &mut [bool], text)`, `tree(label, &[TreeNode], &mut open, &mut selected,
 &mut visible, text)` and `table_view(label, titles, &mut widths, rows, sort, &mut selected, cell)`
 (virtual through `ui.list`; the table's header stays, grips resize columns, a header click is the sort
-intent), `dialog(title, buttons, body) -> DialogOut`, `toasts(label, &[&str])` (the lower end corner;
-the caller owns the timers), `icon_button(label, glyph)`, `badge(label, text) -> Handle`,
+intent), `dialog(title, buttons, body) -> DialogOut`, `toasts(label, &[&str], seconds)` (the lower end corner;
+each goes `seconds` after it first showed, timed by the engine through `repaint_at_time` and keyed by
+its text, and is returned once for the caller to drop), `icon_button(label, glyph)`, `badge(label, text) -> Handle`,
 `search_field(label, icon, value, placeholder)` and `image(label, &Image, Fit, w, h)`. Every widget is
-one Tab stop (`TAB_ONLY`, as the kit's buttons: the pointer does not take the focus, so a click never
-starts the focused-repaint loop); arrows move inside groups and mirror under `Rtl`. Row text is in
+one Tab stop. A click focuses as on macOS: the nearest focusable box at or around the press takes the
+keyboard focus unless it is `TAB_ONLY` (buttons, checkboxes, radios, tabs, segments, dropdowns, menus,
+icon buttons: the kit's buttons and toggles keep that rule); text fields, the search field, the slider
+and the list, tree and table (from a press on a row) take it; arrows move inside groups and mirror under `Rtl`. Row text is in
 leaves as wide as their text, so right to left puts it at the start. `crates/pxui_gallery` shows every
 kit widget on four cached-view pages (`cargo run -p pxui_gallery`) with the Rays and `dusk.theme`
 themes (the file polled once a second through the host's wait and reloaded on a new mtime), density,

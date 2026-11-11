@@ -1,7 +1,7 @@
 //! The PXUI kit gallery as a window app: `cargo run -p pxui_gallery`. On macOS a `pxui_sdl` window
 //! on Metal, on Windows `pxui_sdl` on Vulkan, on Linux a `pxui_wayland` window on Vulkan with the
 //! `pxui_atspi` bridge when an accessibility bus answers. The loop honours the frame gate: it builds a
-//! frame only for input, a due `repaint_at`, a toast's expiry or the theme file's once-a-second poll,
+//! frame only for input, a due `repaint_at` (a toast's expiry among them) or the theme file's once-a-second poll,
 //! draws only when the draw revision moved (a frame, or the busy widgets' patches), and otherwise
 //! sleeps in the host's wait.
 //!
@@ -211,7 +211,6 @@ fn main() {
             break;
         }
         let now = win.time();
-        s.now = now;
         // the second theme's file, polled once a second; a changed modification time reloads it
         if now >= next_poll || s.reload {
             next_poll = now + 1.0;
@@ -222,11 +221,10 @@ fn main() {
                 if s.dusk {
                     s.host_dirty = true;
                 }
-                s.toast("Theme file reloaded", 2.0);
+                s.toast("Theme file reloaded");
                 force = true;
             }
         }
-        let (expired, deadline) = s.expire(now);
         if s.host_dirty {
             ui.set_theme(s.theme(&dusk));
             ui.set_dir(if s.rtl { pxui::ui::Direction::Rtl } else { pxui::ui::Direction::Ltr });
@@ -249,7 +247,7 @@ fn main() {
             target = gpu.target(extent.drawable.0 as u32, extent.drawable.1 as u32);
             force = true;
         }
-        let built = force || expired || ui.wants_frame(&events, now);
+        let built = force || ui.wants_frame(&events, now);
         if built {
             force = false;
             if ui.output().platform.paste {
@@ -334,9 +332,9 @@ fn main() {
         if exit_after.is_some_and(|secs| now >= secs) {
             break;
         }
-        // nothing to do: sleep until input, the UI's repaint time, a toast's end, the theme poll
+        // nothing to do: sleep until input, the UI's repaint time (a toast's end), the theme poll
         // or the next animation step
-        let mut wake = ui.repaint_at().unwrap_or(f64::INFINITY).min(next_poll).min(deadline.unwrap_or(f64::INFINITY));
+        let mut wake = ui.repaint_at().unwrap_or(f64::INFINITY).min(next_poll);
         if animating {
             wake = wake.min(now + 1.0 / 60.0);
         }

@@ -12,6 +12,7 @@ pub const H: i64 = 760;
 pub const NAMES: [&str; 8] = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"];
 pub const MENUS: [(&str, &[&str]); 2] = [("File", &["New", "Open", "Quit"]), ("Edit", &["Undo", "Redo", "Cut", "Copy"])];
 pub const BIG: usize = 100_000;
+pub const TOAST_SECONDS: f64 = 5.0;
 
 fn at_keys(keys: Vec<Key>, t: f64, events: Vec<Event>) -> input::frame::Frame {
     let mut f = frame_at(keys, 1.0, t, events);
@@ -100,7 +101,7 @@ pub fn all(ui: &mut Ui, s: &mut S) {
 /// The toasts, at the root (outside any cached view).
 pub fn toasts(ui: &mut Ui, s: &mut S) {
     let toasts = ["Saved", "Exported"];
-    if let Some(i) = ui.toasts("toasts", &toasts[..s.toasts]) {
+    if let Some(i) = ui.toasts("toasts", &toasts[..s.toasts], TOAST_SECONDS) {
         s.gone = Some(i);
     }
 }
@@ -542,6 +543,44 @@ fn widgets_toast_and_search() {
     ui.destroy();
 }
 
+/// A toast goes by itself: the UI asks for the frame at its expiry and reports it then.
+fn widgets_toast_expires() {
+    let mut s = S::new();
+    s.toasts = 2;
+    let mut ui = warm(&mut s); // frames at 0.0 and 0.1: both toasts showed at 0.0
+    check(ui.repaint_at() == Some(TOAST_SECONDS), &format!("the expiry is the next frame: {:?}", ui.repaint_at()));
+    check(!ui.wants_frame(&[], TOAST_SECONDS - 0.01) && s.gone.is_none(), "nothing before it");
+    ui.frame(&at(TOAST_SECONDS, vec![]), &mut |ui| all(ui, &mut s));
+    check(s.gone == Some(0), &format!("the first toast went at its time: {:?}", s.gone));
+    // the app drops it; the other keeps its own time (keyed by text, not place)
+    (s.toasts, s.gone) = (0, None);
+    ui.frame(&at(TOAST_SECONDS + 0.1, vec![]), &mut |ui| all(ui, &mut s));
+    check(ui.repaint_at().is_none(), &format!("no toast, no timer: {:?}", ui.repaint_at()));
+    ui.destroy();
+}
+
+/// Keyboard focus asks for no frames, and a click focuses as on macOS: what edits or selects
+/// (slider, list, search field) takes the focus, buttons and boxes do not.
+fn widgets_focus_idle_and_click() {
+    let mut s = S::new();
+    let mut ui = warm(&mut s);
+    let focused = |ui: &Ui, role: Role, name: &str| node(ui, role, name).states & state::FOCUSED != 0;
+    tab_to(&mut ui, &mut s, 1.0, Role::CheckBox, "Check");
+    ui.frame(&at(2.0, vec![]), &mut |ui| all(ui, &mut s));
+    check(ui.repaint_at().is_none() && !ui.wants_frame(&[], 100.0), &format!("a focused checkbox asks for frames: {:?}", ui.repaint_at()));
+    { let p = centre(&node(&ui, Role::TextField, "Search")); click(&mut ui, &mut s, 3.0, p); }
+    check(focused(&ui, Role::TextField, "Search"), "a click focuses the search field");
+    check(ui.repaint_at().is_none() && !ui.wants_frame(&[], 100.0), &format!("a focused text field asks for frames: {:?}", ui.repaint_at()));
+    { let p = centre(&node(&ui, Role::CheckBox, "Check")); click(&mut ui, &mut s, 4.0, p); }
+    check(!focused(&ui, Role::CheckBox, "Check") && !focused(&ui, Role::TextField, "Search"), "a click on a checkbox takes no focus and drops the field's");
+    { let p = centre(&node(&ui, Role::Slider, "Level")); click(&mut ui, &mut s, 5.0, p); }
+    check(focused(&ui, Role::Slider, "Level"), "a click focuses the slider");
+    let row = *ui.output().a11y.nodes.iter().find(|n| n.role == Role::ListItem).expect("a list row");
+    click(&mut ui, &mut s, 6.0, centre(&row));
+    check(s.list_frame.is_some_and(|b| ui.focused(&b)), "a click on a row focuses its list");
+    ui.destroy();
+}
+
 fn widgets_image() {
     let mut s = S::new();
     s.image = Some(Image { handle: Rc::new(()), width: 64, height: 32 });
@@ -628,6 +667,8 @@ pub const CASES: &[(&str, fn())] = &[
     ("widgets_table", widgets_table),
     ("widgets_dialog", widgets_dialog),
     ("widgets_toast_and_search", widgets_toast_and_search),
+    ("widgets_toast_expires", widgets_toast_expires),
+    ("widgets_focus_idle_and_click", widgets_focus_idle_and_click),
     ("widgets_image", widgets_image),
     ("widgets_tab_order", widgets_tab_order),
     ("widgets_zero_alloc", widgets_zero_alloc),
