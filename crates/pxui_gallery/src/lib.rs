@@ -344,7 +344,7 @@ pub fn app(ui: &mut Ui, s: &mut Gallery) {
             ui.view("chrome", s.chrome_rev, Size::Grow, Size::Px(CHROME_H), &mut |ui| {
                 let page = ui.tabs("Pages", &PAGES, s.page);
                 if page != s.page {
-                    (s.page, s.page_rev) = (page, s.page_rev + 1);
+                    (s.page, s.page_rev, s.chrome_rev) = (page, s.page_rev + 1, s.chrome_rev + 1); // the chrome shows the tab: rebuild it too
                 }
                 let row = ui.node("switches", Node { h: Size::Px(24.0), axis: Axis::Row, ..Node::DEFAULT });
                 ui.within(&row, &mut |ui| {
