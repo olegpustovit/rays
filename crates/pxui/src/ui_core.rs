@@ -509,8 +509,10 @@ struct ViewRec {
     tex0: Option<Image>,
     breaks: Vec<(u32, Image)>,
     hits: Vec<HitRec>,
-    /// the slots its last build declared, in order (the accessibility walk)
+    /// the slots its last build declared, in order (the accessibility walk), and the build's
+    /// before (what `prune` frees from)
     nodes: Vec<usize>,
+    prev: Vec<usize>,
     hit_parent: i64,
     /// its box at its build (parent coordinates), how far layout has moved it since, and the clip
     /// at its box (parent coordinates)
@@ -542,6 +544,7 @@ impl ViewRec {
         ViewRec {
             name: String::new(),
             nodes: Vec::new(),
+            prev: Vec::new(),
             slot: NONE,
             parent: 0,
             revision: 0,
@@ -921,6 +924,10 @@ pub struct Ui {
     table: SlotTable,
     slots: Vec<Slot>,
     free: Vec<usize>,
+    /// slots whose scroll may be in motion (`apply_scroll` adds, `prune` drops the settled), and
+    /// `prune`'s scratch
+    moving: Vec<usize>,
+    gone: Vec<usize>,
     scroll_y: Vec<f32>,
     // per-frame boxes
     count: usize,
@@ -1111,6 +1118,8 @@ impl Ui {
             table: SlotTable::create(),
             slots: Vec::new(),
             free: Vec::new(),
+            moving: Vec::new(),
+            gone: Vec::new(),
             scroll_y: Vec::new(),
             count: 0,
             boxes: Vec::new(),
@@ -1662,46 +1671,73 @@ impl Ui {
         false
     }
 
-    /// Free the nodes this frame did not declare, unless a kept view holds them.
+    /// Free the nodes this frame did not declare, unless a kept view holds them: the nodes the
+    /// views built this frame (the root among them) declared in their build before and not now,
+    /// and with a view among those, every node it held. O(views + nodes built), not O(nodes).
     fn prune(&mut self) {
-        for slot in 0..self.slots.len() {
-            let label_count = self.slots[slot].label_count;
-            self.slots[slot].labels.truncate(label_count);
-            let key = self.slots[slot].key;
-            if key != 0 && (self.slots[slot].scroll_mode != 0 || self.slots[slot].scroll_visual != 0.0) {
-                // a scroll in motion moves its view's layout every frame
-                self.mark_view(self.slots[slot].owner);
+        for index in 0..self.count {
+            let s = &mut self.slots[self.boxes[index].slot];
+            s.labels.truncate(s.label_count);
+        }
+        // a scroll in motion moves its view's layout every frame
+        let mut moving = std::mem::take(&mut self.moving);
+        moving.retain(|slot| {
+            let s = &self.slots[*slot];
+            s.key != 0 && (s.scroll_mode != 0 || s.scroll_visual != 0.0)
+        });
+        for slot in &moving {
+            self.mark_view(self.slots[*slot].owner);
+        }
+        self.moving = moving;
+        let mut gone = std::mem::take(&mut self.gone);
+        for v in 0..self.views.len() {
+            if self.views[v].built == self.frame_number {
+                gone.extend_from_slice(&self.views[v].prev);
             }
-            if key != 0 && self.slots[slot].touched < self.frame_number && !self.kept_now(self.slots[slot].owner) {
-                let view = std::mem::replace(&mut self.slots[slot].view, NO_VIEW);
-                if view != NO_VIEW {
-                    self.free_view(view);
-                }
-                self.table.remove(key);
-                self.slots[slot].key = 0;
-                self.slots[slot].generation = self.slots[slot].generation.wrapping_add(1);
-                self.slots[slot].text_value = None;
-                self.slots[slot].labels.clear();
-                self.free.push(slot);
-                if self.focus == key {
-                    self.focus = 0;
-                    self.composition.clear();
-                    self.edit_focus = 0;
-                }
-                if self.active == Some(key) {
-                    self.cancelled.insert(0, self.active_button);
-                    self.active = None;
-                }
-                // the box that holds a carry's pointer is gone: the carry goes with it
-                if let Some((_, Origin::FromPointer(owner))) = &self.payload {
-                    if *owner == key {
-                        self.payload = None;
-                    }
-                }
-                if self.hot == key {
-                    self.hot = 0;
-                }
+        }
+        while let Some(slot) = gone.pop() {
+            let s = &self.slots[slot];
+            if s.key == 0 || s.touched == self.frame_number || self.kept_now(s.owner) {
+                continue;
             }
+            let view = std::mem::replace(&mut self.slots[slot].view, NO_VIEW);
+            if view != NO_VIEW {
+                let r = &self.views[view as usize];
+                gone.extend_from_slice(&r.nodes);
+                gone.extend_from_slice(&r.prev);
+                self.free_view(view);
+            }
+            self.free_slot(slot);
+        }
+        self.gone = gone;
+    }
+
+    fn free_slot(&mut self, slot: usize) {
+        let key = self.slots[slot].key;
+        self.table.remove(key);
+        let s = &mut self.slots[slot];
+        s.key = 0;
+        s.generation = s.generation.wrapping_add(1);
+        s.text_value = None;
+        s.labels.clear();
+        self.free.push(slot);
+        if self.focus == key {
+            self.focus = 0;
+            self.composition.clear();
+            self.edit_focus = 0;
+        }
+        if self.active == Some(key) {
+            self.cancelled.insert(0, self.active_button);
+            self.active = None;
+        }
+        // the box that holds a carry's pointer is gone: the carry goes with it
+        if let Some((_, Origin::FromPointer(owner))) = &self.payload {
+            if *owner == key {
+                self.payload = None;
+            }
+        }
+        if self.hot == key {
+            self.hot = 0;
         }
     }
 
@@ -2416,7 +2452,7 @@ impl Ui {
             || self.active.is_some()
             || self.focus != 0
             || !self.tweens.is_empty()
-            || self.slots.iter().any(|s| s.scroll_mode != 0 || s.scroll_visual != 0.0)
+            || !self.moving.is_empty()
         {
             return Some(now);
         }
@@ -3408,6 +3444,9 @@ impl Ui {
             }
         }
         self.slots[slot].scroll_frame_time = time;
+        if (self.slots[slot].scroll_mode != 0 || self.slots[slot].scroll_visual != 0.0) && !self.moving.contains(&slot) {
+            self.moving.push(slot);
+        }
         if consume {
             if let Some(value) = self.signals.get_mut(&key) {
                 value.scroll_wheel = 0.0;
@@ -5074,7 +5113,9 @@ impl Ui {
         self.building = true;
         self.parents.clear();
         self.seeds.clear();
-        self.views[0].nodes.clear();
+        let root = &mut self.views[0];
+        std::mem::swap(&mut root.nodes, &mut root.prev);
+        root.nodes.clear();
         let root = self.append_box(ROOT_KEY, NONE);
         let (w, h) = (frame.input.size.0 as f32, frame.input.size.1 as f32);
         self.set_box(root, Node { w: Size::Px(w), h: Size::Px(h), at: Some((0.0, 0.0)), scroll_step: 0.0, ..Node::DEFAULT });
@@ -5475,6 +5516,7 @@ impl Ui {
         }
         r.verify = clean;
         r.escapes = false;
+        std::mem::swap(&mut r.nodes, &mut r.prev);
         r.nodes.clear();
         self.a11y_dirty = true;
         self.view_cur = v;
@@ -5668,12 +5710,13 @@ impl Ui {
         if r.index != 0 {
             self.free_indices.push(r.index);
         }
-        let (mut name, mut breaks, mut hits, mut nodes) = (std::mem::take(&mut r.name), std::mem::take(&mut r.breaks), std::mem::take(&mut r.hits), std::mem::take(&mut r.nodes));
+        let (mut name, mut breaks, mut hits, mut nodes, mut prev) = (std::mem::take(&mut r.name), std::mem::take(&mut r.breaks), std::mem::take(&mut r.hits), std::mem::take(&mut r.nodes), std::mem::take(&mut r.prev));
         name.clear();
         breaks.clear();
         hits.clear();
         nodes.clear();
-        *r = ViewRec { name, breaks, hits, nodes, outer: Rect::new(0.0, 0.0, 0.0, 0.0), ..ViewRec::new() };
+        prev.clear();
+        *r = ViewRec { name, breaks, hits, nodes, prev, outer: Rect::new(0.0, 0.0, 0.0, 0.0), ..ViewRec::new() };
         self.free_views.push(v);
     }
 

@@ -8,7 +8,7 @@
 //! let m = t.layout(node, "hello", &st, 200.0);                 // -> Metrics { w, h, lines, baseline }
 //! t.glyphs(node, (x, y), scale, &mut |g| quads.push(g));       // device-pixel quads + normalised uv
 //! t.drain_uploads(&mut |kind, x, y, w, h, data, stride| ..);   // upload only new glyph rects
-//! t.end_frame();                                               // evict layouts unused for KEEP_FRAMES frames
+//! t.end_frame();                                               // evict layouts unused for KEEP_FRAMES frames (swept every SWEEP_FRAMES)
 //! ```
 //!
 //! API (all geometry f32; inputs in logical points, glyph quads in device pixels = points * scale):
@@ -142,8 +142,10 @@ pub struct Glyph {
     pub atlas: AtlasKind,
 }
 
-/// Frames a layout outlives its last use (`Text::end_frame`).
+/// Frames a layout outlives its last use (`Text::end_frame`), and how often the unused are swept: a
+/// layout goes between `KEEP_FRAMES` and `KEEP_FRAMES + SWEEP_FRAMES` frames after its last use.
 pub const KEEP_FRAMES: u32 = 600;
+pub const SWEEP_FRAMES: u32 = 64;
 
 /// The bundled UI face (the PXUI default theme's font).
 pub const PRAGMASEVKA: &[u8] = include_bytes!("../../../assets/fonts/Pragmasevka-Regular.ttf");
@@ -484,9 +486,13 @@ impl Text {
     /// view's next rebuild is a cache hit, not a re-shape.
     // ponytail: age-based, not size-based; a view kept past KEEP_FRAMES frames re-shapes its text (and
     // allocates) on its next rebuild. An LRU with a byte budget if that shows.
+    // ponytail: one frame in SWEEP_FRAMES walks every layout (about 5 ns each); an intrusive LRU list
+    // if that spike shows.
     pub fn end_frame(&mut self) {
         let frame = self.frame;
-        self.entries.retain(|_, e| frame.wrapping_sub(e.frame) < KEEP_FRAMES);
+        if frame % SWEEP_FRAMES == 0 {
+            self.entries.retain(|_, e| frame.wrapping_sub(e.frame) < KEEP_FRAMES);
+        }
         self.frame += 1;
     }
 }
