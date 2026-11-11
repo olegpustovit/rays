@@ -27,7 +27,7 @@ sdl3 = { path = "../sdl3" }
 
 # The host cases render through the Rays renderer and use the system clipboard (SDL main thread):
 # the window_ target runs its cases on its own main (the rays crate tests/common/window.rs).
-[target.'cfg(windows)'.dev-dependencies]
+[target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

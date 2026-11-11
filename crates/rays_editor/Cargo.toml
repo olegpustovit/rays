@@ -49,7 +49,7 @@ scene_command = { path = "../scene_command" }
 
 # Window smoke + merged editor suite (B3), split: `gpu_editor` (device cases, serialized) and `editor` (pure, parallel); harness = false, rays/tests/common/window.rs.
 
-[target.'cfg(windows)'.dev-dependencies]
+[target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

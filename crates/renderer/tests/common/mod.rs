@@ -14,14 +14,14 @@ pub fn release_keepalive() {
     }
 }
 
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 pub fn gpu() -> bool {
     if KEEP.with(|k| k.borrow().is_some()) {
         return true;
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     use ogpu_core::impl_::Impl;
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     ogpu_core::impl_::select(Impl {
         backend: ogpu_vulkan::impl_::BACKEND,
         create_driver: || ogpu_vulkan::backend::create_with_validation((true, true)),
@@ -44,7 +44,7 @@ pub fn gpu() -> bool {
     }
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub fn gpu() -> bool {
     println!("RAYS_TEST_SKIP: skipped: native renderer integration requires Windows Vulkan or macOS Metal");
     assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");

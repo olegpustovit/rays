@@ -10,6 +10,10 @@ pxui_sdl = { path = "../pxui_sdl" }
 sdl3 = { path = "../sdl3" }
 ogpu_core = { path = "../ogpu_core" }
 
+# The window host on Linux; pxui_sdl stays for its event translation (and SDL's image/audio/paths stay in use).
+[target.'cfg(target_os = "linux")'.dependencies]
+pxui_wayland = { path = "../pxui_wayland" }
+
 [dev-dependencies]
 ogpu_mock = { path = "../ogpu_mock" }
 

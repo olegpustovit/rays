@@ -1,9 +1,10 @@
 use ogpu_core::error::{self, Error, ErrorKind};
 use ogpu_core::surface;
-use pxui_sdl::{Extent, Window};
+use crate::host::{self, Extent, Window};
 use std::{cell::RefCell, rc::Rc};
 
-pub use pxui_sdl::{change_flag, clipboard_get_text, clipboard_set_text, CursorShape, DialogFilter, DialogKind};
+pub use crate::host::{clipboard_get_text, clipboard_set_text, CursorShape, DialogFilter, DialogKind};
+pub use pxui_sdl::change_flag;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameFacts {
@@ -29,7 +30,7 @@ pub struct PresentationFacts {
 /// One render target: a presenting `pxui_sdl` window, or (`window = None`) an owned offscreen
 /// texture's extent. Whoever opened it destroys it; the renderer only reads it.
 pub struct Runtime {
-    window: Option<Window>,
+    window: Option<Rc<RefCell<Window>>>,
     facts: FrameFacts,
     presentation: Option<PresentationFacts>,
     dead: bool,
@@ -76,7 +77,10 @@ pub fn create(
     }
     let window = Window::open_with(title.unwrap_or("Rays"), width, height, vsync.unwrap_or(true), hidden.unwrap_or(true), high_density.unwrap_or(true))
         .map_err(|text| fail_error(op, &text))?;
-    Ok(Runtime { facts: facts_of(window.extent()), window: Some(window), presentation: None, dead: false })
+    let facts = facts_of(window.extent());
+    let window = Rc::new(RefCell::new(window));
+    host::opened(&window);
+    Ok(Runtime { facts, window: Some(window), presentation: None, dead: false })
 }
 
 fn offscreen_facts(logical_width: i64, logical_height: i64, width: i64, height: i64) -> FrameFacts {
@@ -123,7 +127,8 @@ pub fn map_logical_rect(facts: &FrameFacts, rect: (i64, i64, i64, i64)) -> (i64,
 // (`window_changed`); an offscreen target changes only through `resize`. A frame costs no SDL
 // call while nothing was announced.
 pub fn sync_facts(value: &mut Runtime) -> Result<(), Error> {
-    let Some(window) = value.window.as_mut() else { return Ok(()) };
+    let Some(window) = value.window.as_ref() else { return Ok(()) };
+    let mut window = window.borrow_mut();
     window.sync().map_err(|text| fail_error("Runtime.facts", &text))?;
     value.facts = facts_of(window.extent());
     Ok(())
@@ -142,6 +147,7 @@ pub fn resize(value: &mut Runtime, width: i64, height: i64) -> Result<(), Error>
     value.presentation = None;
     match value.window.as_mut() {
         Some(window) => {
+            let mut window = window.borrow_mut();
             window.resize(width, height).map_err(|text| fail_error(op, &text))?;
             value.facts = facts_of(window.extent());
         }
@@ -157,16 +163,16 @@ pub fn frame_facts(value: &Runtime) -> FrameFacts {
 /// Window coordinates per logical point: 1 on macOS and offscreen, the monitor's scaling (1.5 at
 /// 150%) on Windows, whose SDL events and sizes are in pixels. Input divides by it.
 pub fn window_unit_of(value: &Runtime) -> f64 {
-    value.window.as_ref().map_or(1., |w| w.unit())
+    value.window.as_ref().map_or(1., |w| w.borrow().unit())
 }
 
 fn live_window(operation: &str, value: &mut Runtime, callback: &mut dyn FnMut(&mut Window) -> Result<(), String>) -> Result<(), Error> {
     if value.dead {
         return Err(stale_error(operation));
     }
-    match value.window.as_mut() {
+    match value.window.as_ref() {
         None => Err(error::make(operation, ErrorKind::Unsupported, "operation requires a window")),
-        Some(window) => callback(window).map_err(|text| fail_error(operation, &text)),
+        Some(window) => callback(&mut window.borrow_mut()).map_err(|text| fail_error(operation, &text)),
     }
 }
 
@@ -174,7 +180,7 @@ fn query_presentation(value: &Runtime) -> Result<PresentationFacts, Error> {
     let f = &value.facts;
     let pixel_density = match value.window.as_ref() {
         None => f.pixel_scale_x,
-        Some(w) => w.pixel_density().map_err(|text| fail_error("Runtime.presentation_facts", &text))?,
+        Some(w) => w.borrow().pixel_density().map_err(|text| fail_error("Runtime.presentation_facts", &text))?,
     };
     Ok(PresentationFacts {
         logical_width: f.logical_width,
@@ -209,8 +215,8 @@ pub fn presentation_facts(value: &mut Runtime) -> Result<PresentationFacts, Erro
 /// its facts. The window is not polled between announcements.
 pub fn window_changed(value: &mut Runtime) {
     if !value.dead {
-        if let Some(window) = value.window.as_mut() {
-            window.announce_change();
+        if let Some(window) = value.window.as_ref() {
+            window.borrow_mut().announce_change();
         }
     }
 }
@@ -260,6 +266,12 @@ pub fn show_dialog(
     live_window("Runtime.show_dialog", value, &mut |w| {
         id = w.show_dialog(filters.unwrap_or(&[]), default_location, kind)?;
         Ok(())
+    })
+    .map_err(|mut e| {
+        if host::DIALOGS_UNSUPPORTED && e.kind == ErrorKind::InvalidState {
+            e.kind = ErrorKind::Unsupported;
+        }
+        e
     })?;
     Ok(id)
 }
@@ -279,8 +291,8 @@ pub fn destroy(value: &mut Runtime) -> Result<(), Error> {
         return Ok(());
     }
     value.dead = true;
-    match value.window.as_mut() {
-        Some(window) => window.destroy().map_err(|text| fail_error("Runtime.destroy", &text)),
+    match value.window.as_ref() {
+        Some(window) => window.borrow_mut().destroy().map_err(|text| fail_error("Runtime.destroy", &text)),
         None => Ok(()),
     }
 }
@@ -290,12 +302,12 @@ pub fn is_window(value: &Runtime) -> bool {
 }
 
 pub fn surface_configuration(value: &mut Runtime) -> Result<surface::Configuration, Error> {
-    let layer = match value.window.as_mut() {
+    let layer = match value.window.as_ref() {
         None => None,
-        Some(w) => Some(w.token().map_err(|text| fail_error("Runtime.surface_configuration", &text))?),
+        Some(w) => Some(w.borrow_mut().token().map_err(|text| fail_error("Runtime.surface_configuration", &text))?),
     };
     let f = &value.facts;
-    let vsync = value.window.as_ref().is_some_and(|w| w.vsync());
+    let vsync = value.window.as_ref().is_some_and(|w| w.borrow().vsync());
     Ok(surface::Configuration {
         logical_width: f.logical_width,
         logical_height: f.logical_height,

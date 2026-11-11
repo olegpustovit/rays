@@ -23,7 +23,7 @@ ogpu_core = { path = "../ogpu_core" }
 cfmt = { path = "../cfmt" }
 pxui_text = { path = "../pxui_text" }
 
-[target.'cfg(windows)'.dev-dependencies]
+[target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

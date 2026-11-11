@@ -30,7 +30,7 @@ sdl3 = { path = "../sdl3", features = ["image"] }
 rays_diagnostic = { path = "../rays_diagnostic" }
 ogpu_core = { path = "../ogpu_core" }
 
-[target.'cfg(windows)'.dependencies]
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
