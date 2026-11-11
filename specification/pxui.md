@@ -267,7 +267,9 @@ own. Its model and constants are NSScrollView's as `../scriptc-ui`
 
 A positive vertical delta moves the content down, matching a downward natural
 trackpad or Magic Mouse gesture; an ordinary wheel follows SDL's normal
-direction. Horizontal steps do nothing. The scrollbar shows the bounded offset.
+direction. A `SCROLL_X` box moves sideways by the same model on its own axis (the wheel's
+horizontal steps, the fingers' sideways travel, stretch, spring-back, coast and bounce; right to
+left the content follows the fingers mirrored). The scrollbar shows the bounded offset.
 
 A `Ui` handle asks for its theme's `panel` colour as the window ground
 (`PlatformOut.background`, applied with `Sketch.set_window_background`) on its
@@ -439,7 +441,10 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
 index, size, weight, tracking in ems, caps), `opacity`, focus `ring`, `selection`, `caret`), `States`
 (idle, hover, pressed, focus, disabled, checked; `pick(State)`), and `Theme` (tokens, `row_h`,
 `control_h`, the default `ring`, scrollbar width and gap, one `States` per kit part). `Theme::default()`
-is the Rays look; `ui.theme() -> &Theme`, `ui.tokens()`, `ui.set_theme` (rebuilds views; snaps),
+is the Rays look; `ui.theme() -> &Theme`, `ui.tokens()`, `ui.set_theme` (rebuilds every view once; every node shown before moves from the look it showed to the
+new theme's over that theme's `motion.normal` through the patch path, no further rebuild, and rests on
+exactly a fresh build's instances; a theme that does not move, `reduced_motion` or no durations,
+snaps),
 `ui.themed(&theme, f)` (a view rebuilds when the override it was built under changes),
 `ui.button_with(text, &States)`. Every kit widget declares nodes and picks their looks
 (`ui.set_look`, `ui.style`); a node's look fills its laid-out box (parts that sit at a row's end are
@@ -448,11 +453,15 @@ for the text widgets' caret, selection and composition and the text area's code 
 interpolate between states over the theme's motion (a transition record per node, painted steady and
 stepped through the patch path: a kept view is not rebuilt; `repaint_at` asks for frames until it
 rests); `ui.animate(handle, Target::{Look, Offset, Opacity}, Curve::{Bezier, Spring})` drives the same
-path. A theme is a flat `key = value` file (`Theme::parse(text, &base) -> Result<Theme,
+path, and `ui.animate_keys(handle, &[(t, Target, Curve)])` runs up to `MAX_KEYS` (8) keyframes, each
+segment on its own curve (a Bezier's duration is the segment's), in reused fixed records (no
+allocation once warm). A theme is a flat `key = value` file (`Theme::parse(text, &base) -> Result<Theme,
 Vec<ThemeError>>`, `Theme::write`): `tokens.*` keys re-derive the looks, then `PART.STATE.FIELD` or
 `PART.FIELD` keys override them; `crates/pxui/themes/rays.theme` is the default written out and
 `dusk.theme` a second theme (golden `kit_dusk_{1,2}x.png`). Views also take `view_transform` /
-`view_scale` (hit testing through the inverse) and `view_backdrop_blur` (`FrameOut::blurs`, fulfilled by
+`view_scale` (hit testing through the inverse; nested views inherit the transforms around them, composed
+into their table entries as offset, opacity and clip are, and `rect`, hit testing and damage go through
+the composed map) and `view_backdrop_blur` (`FrameOut::blurs`, fulfilled by
 the host); `Paint::image_fit`, `image_nine` and `icon` draw images and icon glyphs; `ui.image` clips its picture to its frame's rounded corners (the largest corner's radius less the border, on the image instance's `clip_radius`). Content filters,
 group opacity, blend modes, 3D transforms, filled paths and a selector engine are left out on purpose.
 
@@ -462,20 +471,24 @@ derives a `Fit` side; a `Grow` size takes `grow` weighted shares of what its lin
 at a bound leaves the rest to the others), and an overflowing line takes room back by `shrink` times
 each child's size. `axis`: `Row`, `Column`, or `Stack` (children overlap, `z` orders paint and hits;
 `justify` places across, `align` down); or `grid: Some(Grid { cols, rows })` with `Track::{Px, Fr,
-Fit}` (`&'static` lists, at most 16 each; implicit rows fit their content; `cell: Cell::at(c,
-r).span(cs, rs)` or auto placement; spans do not size content tracks). `padding` and `margin` are
+Fit}` (`&'static` lists, at most `MAX_TRACKS` = 16 each, fixed arrays in the passes, no allocation;
+implicit rows fit their content; `cell: Cell::at(c, r).span(cs, rs)` or auto placement; what a spanning
+child needs past its tracks is shared equally by the `Fit` tracks it crosses, in build order, and a
+span over an `Fr` track sizes nothing). `padding` and `margin` are
 `Edges` (`l` is the start edge); `gap` between children, `row_gap` between wrapped lines and grid
 rows; `justify` (`Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround`, `SpaceEvenly`), `align`
 and `align_self` (`Start`, `Center`, `End`, `Stretch`, `Baseline`: first text baselines from
 pxui_text metrics, a node without text aligns its bottom); `wrap` breaks a row or column into lines
-(a wrapping `Fit` box measures its lines at its own `Px` main size). `at` places a node at an offset
+(a wrapping `Fit` box measures its lines at its own `Px` main size, and one whose main size its parent
+resolves, `Grow`, `Pct`, `Rel` or a stretch, measures them again at that size in its parent's pass,
+once; the parent's own `Fit` size and a grid row were measured with one line). `at` places a node at an offset
 from its parent (physical, outside the flow); `anchor: Some(Anchor { rect, placement })` places it
 by a window rectangle in layout, after its size is known: `place_anchored(anchor, size, Placement {
 side, align, gap, margin, flip }, bounds)` opens on `side`, flips to the opposite side when it does
 not fit there, and keeps it inside; `ui.anchored(label, rect, placement, w, h, f)` builds such a
 popup at the root (the kit's menus, submenus, completions and tooltips use `place_anchored`).
-`SCROLL` scrolls down, `SCROLL_X` sideways (wheel and trackpad; a thumb from the node's `bar` on each
-axis; `ui.scroll_offset_x`); a `STICKY` flow child of a scroll box stops at its top and paints over
+`SCROLL` scrolls down, `SCROLL_X` sideways (wheel and trackpad with the same stretch, coast and bounce;
+a thumb from the node's `bar` on each axis; `ui.scroll_offset_x`); a `STICKY` flow child of a scroll box stops at its top and paints over
 its siblings. `CLIP | ROUND_CLIP` rounds the children's clip by the node look's radius (the instance
 `clip_radius`: one radius, the largest corner's, by design: the 64-byte instance has room for one
 f16, so per-corner clip radii are left out; square `CLIP` stays the default). `ui.set_dir(Direction::Rtl)` mirrors flow children
@@ -484,12 +497,17 @@ cosmic-text's; a node's text ends its start inset from the right; content wider 
 its right edge, the sideways wheel and fingers move it as they move, and both scroll thumbs mirror). `ui.split(label, axis, ratio, min_a, min_b, a, b) -> Option<f32>` is two `Grow`
 panes weighted `ratio : 1 - ratio` around a 1-point `ui.grip` (presses 3 points either side, resize
 cursor, accent while held), returning the dragged ratio; rays_shell's docked gutters use `ui.grip`.
-Responsive layout is a plain condition on `ui.width()`/`view_size`. The passes are O(nodes) per
+`ui.grid_list(label, count, cell_w, cell_h, f)` is a virtual grid filling its parent: as many columns
+as its width holds, rows scrolling down, building only the rows in view and 4 more each side, each cell
+keyed by its index (`grid_list_x` wraps into rows and scrolls sideways); right to left the first cell
+is at the right. Responsive layout is a plain condition on `ui.width()`/`view_size`. The passes are O(nodes) per
 rebuilt view (a kept view's nodes are not laid out: `ui.arranged_nodes()`), allocation-free when
-warm, with stack order sorted in a kept scratch vector; `layout_stress_zero_alloc` (2,006 nodes, every
-mode, RTL) asserts zero allocations for a full rebuild and for a cached frame, `layout_scaling` flat
-cost per node from 500 to 8,000 nodes. The kit reads `control_h` and the spacing scale at the theme's
-density (`ui.control_h()`, `ui.space(i)`). Left out on purpose: float layout, multi-column text,
+warm, with stack order sorted in a kept scratch vector; `layout_stress_zero_alloc` (2,054 nodes, every
+mode with grid spans, wrapping rows sized by a column and a 100,000-cell `grid_list`, RTL) asserts zero allocations for a full rebuild and for a cached frame, `layout_scaling` flat
+cost per node from 500 to 8,000 nodes. The kit reads `control_h`, the row height and the spacing scale
+at the theme's density (`ui.control_h()`, `ui.space(i)`): row insets, the text field's control and its
+hit shape (`value_control_at`), menus, pickers, lists, trees, toasts and the table's rows; the inspector
+rows keep the reference grid's fixed points (`inspector_control_x`, shared with rays_shell). Left out on purpose: float layout, multi-column text,
 automatic table layout, a selector engine.
 
 **Accessibility (engine half, landed).** `Node::role` (`a11y::Role`; `Unknown` is not in the tree)
@@ -536,7 +554,9 @@ keyboard focus unless it is `TAB_ONLY` (buttons, checkboxes, radios, tabs, segme
 icon buttons: the kit's buttons and toggles keep that rule); text fields, the search field, the slider
 and the list, tree and table (from a press on a row) take it; arrows move inside groups and mirror under `Rtl`. Row text is in
 leaves as wide as their text, so right to left puts it at the start. `crates/pxui_gallery` shows every
-kit widget on four cached-view pages (`cargo run -p pxui_gallery`) with the Rays and `dusk.theme`
+kit widget and every layout mode on five cached-view pages (the Layout page also golden right to left,
+`gallery_layout_rtl_<theme>_{1,2}x.png`; its Bounce button runs a keyframed chip, the theme switch a
+theme transition) (`cargo run -p pxui_gallery`) with the Rays and `dusk.theme`
 themes (the file polled once a second through the host's wait and reloaded on a new mtime), density,
 direction and reduced-motion switches and a patched cost readout; its goldens are
 `crates/pxui_gallery/fixtures/gallery_<page>_<theme>_{1,2}x.png`, and its kit page renders
