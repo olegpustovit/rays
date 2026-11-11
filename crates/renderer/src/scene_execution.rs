@@ -294,12 +294,51 @@ pub struct SampledDraw {
 /// Where a UI layer is painted: the frame's open 1-sample, depth-free pass over its RGBA8 target
 /// (viewport and scissor cover it), `size_px` pixels at `scale` pixels per point. `frame` is
 /// distinct for every frame encoded in the process.
+///
+/// `encoder` is the pass as it was handed over; once [`UiPass::split`] has run, the pass to draw into
+/// is the one it returned.
 pub struct UiPass<'a> {
     pub encoder: &'a backend::RenderEncoder,
     pub device: &'a Device,
     pub size_px: [u32; 2],
     pub scale: f32,
     pub frame: u64,
+    commands: &'a backend::Commands,
+    target: &'a Texture,
+    /// viewport, scissor and cull of the batch, set again on a reopened pass
+    state: (Rect, Rect, Cull),
+    /// the pass after the last split
+    reopened: RefCell<Option<backend::RenderEncoder>>,
+}
+
+static UI_SPLITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// UI pass splits recorded in this process (a frame with no backdrop blur adds none).
+pub fn ui_splits() -> u64 {
+    UI_SPLITS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+impl UiPass<'_> {
+    /// Ends the open pass, runs `record` with the frame's command buffer and its colour target (RGBA8,
+    /// sampleable, holding everything drawn so far: earlier batches and this layer up to here) so it can
+    /// record passes of its own, then reopens a pass over the same target with `Load::Load` and the
+    /// batch's viewport, scissor and cull. Returns that pass; draw the rest of the layer into it. The
+    /// target must not be drawn into while `record` samples it.
+    pub fn split(&self, record: &mut dyn FnMut(&backend::Commands, &Texture) -> Result<(), Error>) -> Result<backend::RenderEncoder, Error> {
+        let open = self.reopened.borrow().clone().unwrap_or_else(|| self.encoder.clone());
+        backend::end_render(&open)?;
+        UI_SPLITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        record(self.commands, self.target)?;
+        let encoder = backend::render_encoder(self.commands, &RenderTarget {
+            colors: vec![ColorAttachment { texture: self.target.clone(), resolve: None, load: Load::Load, store: Store::Store, clear: (0.0, 0.0, 0.0, 0.0) }],
+            depth: None,
+        })?;
+        backend::set_viewport(&encoder, self.state.0)?;
+        backend::set_scissor(&encoder, self.state.1)?;
+        backend::set_cull(&encoder, self.state.2)?;
+        *self.reopened.borrow_mut() = Some(encoder.clone());
+        Ok(encoder)
+    }
 }
 
 /// Paints layer `layer` of its owner's last UI frame (PXUI's painter, from the shell).
@@ -2372,7 +2411,8 @@ fn begin_pass(
     backend::render_encoder(commands, &target)
 }
 
-fn encode_batch(value: &mut SceneExecution, encoder: &backend::RenderEncoder, batch: &BatchPlan) -> Result<(), Error> {
+/// Records `batch` into `encoder`; the pass to go on in when the batch's UI split it.
+fn encode_batch(value: &mut SceneExecution, encoder: &backend::RenderEncoder, commands: &backend::Commands, batch: &BatchPlan) -> Result<Option<backend::RenderEncoder>, Error> {
     let bound_w = value.configuration.physical_width;
     let bound_h = value.configuration.physical_height;
     // A viewport or scissor with no pixel on the target draws nothing. The viewport is passed
@@ -2385,9 +2425,10 @@ fn encode_batch(value: &mut SceneExecution, encoder: &backend::RenderEncoder, ba
         (Some(_), Some(scissor)) => (true, batch.state.viewport, scissor),
         _ => (false, (0, 0, bound_w.max(1), bound_h.max(1)), (0, 0, bound_w.max(1), bound_h.max(1))),
     };
-    backend::set_viewport(&encoder, Rect { x, y, width, height })?;
-    backend::set_scissor(&encoder, Rect { x: sx, y: sy, width: sw, height: sh })?;
-    backend::set_cull(&encoder, batch.state.cull)?;
+    let state = (Rect { x, y, width, height }, Rect { x: sx, y: sy, width: sw, height: sh }, batch.state.cull);
+    backend::set_viewport(&encoder, state.0)?;
+    backend::set_scissor(&encoder, state.1)?;
+    backend::set_cull(&encoder, state.2)?;
     // 3D meshes wind counter-clockwise: a fact of the family, never of a bound slot
     if has_depth(batch.family) {
         backend::set_winding(&encoder, backend::Winding::CounterClockwise)?;
@@ -2396,6 +2437,7 @@ fn encode_batch(value: &mut SceneExecution, encoder: &backend::RenderEncoder, ba
             Some(DepthState { depth_compare: batch.state.depth_compare, depth_write: batch.state.depth_write }),
         )?;
     }
+    let mut reopened = None;
     if let Some(ui) = &batch.ui {
         let pass = UiPass {
             encoder,
@@ -2403,9 +2445,15 @@ fn encode_batch(value: &mut SceneExecution, encoder: &backend::RenderEncoder, ba
             size_px: [bound_w as u32, bound_h as u32],
             scale: bound_w as f32 / value.configuration.logical_width.max(1) as f32,
             frame: value.encoded_frame,
+            commands,
+            target: &value.target,
+            state,
+            reopened: RefCell::new(None),
         };
         (ui.paint)(&pass, ui.layer)?;
+        reopened = pass.reopened.into_inner();
     }
+    let encoder = reopened.as_ref().unwrap_or(encoder);
     if !batch.draws.is_empty() && visible {
         if !batch.resources.is_empty() {
             backend::use_resources(&encoder, &batch.resources)?;
@@ -2455,7 +2503,7 @@ fn encode_batch(value: &mut SceneExecution, encoder: &backend::RenderEncoder, ba
             }
         }
     }
-    Ok(())
+    Ok(reopened)
 }
 
 fn build_icb(value: &mut SceneExecution, batch: &BatchPlan) -> Result<(), Error> {
@@ -2538,7 +2586,7 @@ fn encode_frame(value: &mut SceneExecution, frame: &Acquired, clear: (f64, f64, 
                 Some(encoder) => encoder,
                 None => begin_pass(value, &commands, clear, later, batch)?,
             };
-            encode_batch(value, &encoder, batch)?;
+            let encoder = encode_batch(value, &encoder, &commands, batch)?.unwrap_or(encoder);
             if joins_pass(batch) && later.first().is_some_and(|next| joins_pass(next)) {
                 open = Some(encoder);
             } else {

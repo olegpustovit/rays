@@ -73,7 +73,7 @@
 //! Not built, opt-in later and only if measured: group opacity (render a view to a texture and composite
 //! it once), texture-cached views and content filters on them, dashed curves.
 
-use ogpu_core::backend::{self, Buffer, ColorAttachment, Device, Pipeline, Queue, RenderEncoder, RenderTarget, Sampler, ShaderStage, Texture};
+use ogpu_core::backend::{self, Buffer, ColorAttachment, Commands, Device, Pipeline, Queue, RenderEncoder, RenderTarget, Sampler, ShaderStage, Texture};
 use ogpu_core::binding::{self, Kind as LayoutKind, LayoutEntry, Stage as LayoutStage};
 use ogpu_core::error::{self, Error, ErrorKind};
 use ogpu_core::pipeline::{Blend, ColorFormat, DepthFormat, RenderDescriptor};
@@ -360,9 +360,9 @@ impl Painter {
         backend::set_cull(pass, Cull::CullNone)?;
         if self.depth { backend::set_depth_state(pass, None)?; }
         backend::set_stage_buffer(pass, ShaderStage::Vertex, 1, Some(start as i64), &self.ring)?;
-        backend::set_stage_texture(pass, ShaderStage::Fragment, 2, &self.mask)?;
+        backend::set_stage_texture(&pass, ShaderStage::Fragment, 2, &self.mask)?;
         backend::set_stage_sampler(pass, ShaderStage::Fragment, 4, &self.sampler)?;
-        backend::set_stage_texture(pass, ShaderStage::Fragment, 5, &self.color)
+        backend::set_stage_texture(&pass, ShaderStage::Fragment, 5, &self.color)
     }
 
     fn write_floats(&self, at: usize, floats: &[f32]) {
@@ -409,7 +409,7 @@ impl Painter {
             self.write(at, bytes);
             let texture = texture.unwrap_or(&self.color);
             if bound != Some(texture as *const Texture) {
-                backend::set_stage_texture(pass, ShaderStage::Fragment, 3, texture)?;
+                backend::set_stage_texture(&pass, ShaderStage::Fragment, 3, texture)?;
                 bound = Some(texture);
             }
             backend::set_stage_buffer(pass, ShaderStage::Vertex, 0, Some(at as i64), &self.ring)?;
@@ -433,7 +433,7 @@ impl Painter {
     // ponytail: bilinear taps (D=4 skips source rows) and straight-alpha averaging assume an opaque backdrop;
     // a premultiplied/true-box downsample if translucent sources or fine detail matter. Needs the queue
     // to submit its own two passes; they order against the caller's by queue order, not a fence.
-    pub fn blur(&mut self, queue: &Queue, source: &Texture, src_rect_px: [u32; 4], sigma_px: f32) -> Result<&Texture, Error> {
+    pub fn blur_in(&mut self, commands: &Commands, source: &Texture, src_rect_px: [u32; 4], sigma_px: f32) -> Result<&Texture, Error> {
         const OP: &str = "Painter.blur";
         let d = backend::texture_descriptor(source);
         let (sw, sh) = (d.width as u32, d.height as u32);
@@ -472,8 +472,7 @@ impl Painter {
         backend::flush_host_range(&self.ring, start as i64, 2 * ALIGN)?;
         let blur = self.blur.as_ref().expect("created above");
         for (i, (src, dst)) in [(source, &blur.a), (&blur.a, &blur.b)].into_iter().enumerate() {
-            let commands = backend::begin_commands(queue)?;
-            let encoder = backend::render_encoder(&commands, &RenderTarget {
+            let encoder = backend::render_encoder(commands, &RenderTarget {
                 colors: vec![ColorAttachment { texture: dst.clone(), resolve: None, load: Load::DontCare, store: Store::Store, clear: (0.0, 0.0, 0.0, 0.0) }],
                 depth: None,
             })?;
@@ -484,9 +483,16 @@ impl Painter {
             backend::set_stage_sampler(&encoder, ShaderStage::Fragment, 2, &blur.sampler)?;
             backend::draw(&encoder, Primitive::TriangleList, 0, 3, Some(1))?;
             backend::end_render(&encoder)?;
-            backend::commit(&commands)?;
         }
         Ok(&blur.b)
+    }
+
+    /// [`Painter::blur_in`] in commands of its own, committed at once.
+    pub fn blur(&mut self, queue: &Queue, source: &Texture, src_rect_px: [u32; 4], sigma_px: f32) -> Result<&Texture, Error> {
+        let commands = backend::begin_commands(queue)?;
+        self.blur_in(&commands, source, src_rect_px, sigma_px)?;
+        backend::commit(&commands)?;
+        Ok(&self.blur.as_ref().expect("blur_in made it").b)
     }
 
     /// Like [`Painter::draw`] for a layer whose instances mostly stay the same between frames. The
@@ -506,7 +512,16 @@ impl Painter {
     // ponytail: one bounding range per copy (scattered edits rewrite the span between them); a range list
     // per copy if a layer is edited in two far-apart places every frame.
     pub fn draw_retained(&mut self, pass: &RenderEncoder, size_px: [u32; 2], scale: f32, layer: u32, instances: &[Instance], dirty: &[(u32, u32)], breaks: &[Break]) -> Result<(), Error> {
+        self.draw_retained_split(pass, size_px, scale, layer, instances, dirty, breaks, &[], &mut |_, _| Ok(None))
+    }
+
+    /// [`Painter::draw_retained`] that stops where the caller must end the pass: before the segment that
+    /// starts at each instance in `splits` (each must also be some break's `at_instance`; one at the
+    /// layer's end is ignored) it calls `split(self, at)`. The callback may record other passes and returns the
+    /// pass the rest of the layer draws into, or `None` to go on in the same one.
+    pub fn draw_retained_split(&mut self, pass: &RenderEncoder, size_px: [u32; 2], scale: f32, layer: u32, instances: &[Instance], dirty: &[(u32, u32)], breaks: &[Break], splits: &[u32], split: &mut dyn FnMut(&mut Painter, u32) -> Result<Option<RenderEncoder>, Error>) -> Result<(), Error> {
         const OP: &str = "Painter.draw_retained";
+        let mut pass = pass.clone();
         if !(scale > 0.0) || size_px[0] == 0 || size_px[1] == 0 { return Err(invalid(OP, "target size and scale must be positive")); }
         if layer as usize >= MAX_LAYERS { return Err(invalid(OP, "layer must be below MAX_LAYERS")); }
         let len = instances.len();
@@ -561,20 +576,23 @@ impl Painter {
         for k in 0..=breaks.len() {
             let from = if k == 0 { 0 } else { breaks[k - 1].at_instance as usize };
             let to = breaks.get(k).map_or(len, |b| b.at_instance as usize);
+            if k > 0 && splits.contains(&(from as u32)) && to != from {
+                if let Some(next) = split(self, from as u32)? { pass = next; bound = None; }
+            }
             if from == to { continue; }
             let start = self.reserve(header)?;
             // Bind 4-instance (256-byte) aligned and skip the remainder with the globals' first-instance field.
             self.write_header(start, size_px, scale, (from % 4) as u32);
             backend::flush_host_range(&self.ring, start as i64, header)?;
-            self.bind(pass, start)?;
+            self.bind(&pass, start)?;
             let texture = if k == 0 { None } else { breaks[k - 1].texture }.unwrap_or(&self.color);
             if bound != Some(texture as *const Texture) {
-                backend::set_stage_texture(pass, ShaderStage::Fragment, 3, texture)?;
+                backend::set_stage_texture(&pass, ShaderStage::Fragment, 3, texture)?;
                 bound = Some(texture);
             }
             let store = self.layers[layer].as_ref().expect("layer was just stored");
-            backend::set_stage_buffer(pass, ShaderStage::Vertex, 0, Some((store.stride * copy + from / 4 * 256) as i64), &store.buffer)?;
-            backend::draw(pass, Primitive::TriangleList, 0, 6, Some((to - from) as i64))?;
+            backend::set_stage_buffer(&pass, ShaderStage::Vertex, 0, Some((store.stride * copy + from / 4 * 256) as i64), &store.buffer)?;
+            backend::draw(&pass, Primitive::TriangleList, 0, 6, Some((to - from) as i64))?;
             self.draw_calls += 1;
         }
         Ok(())
