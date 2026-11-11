@@ -314,6 +314,60 @@ pub fn layout_scroll_x_elastic() {
     }
 }
 
+/// A virtual grid of 100,000 cells builds only the lines in view and the overscan, wrapping either
+/// way, mirrored right to left, and allocates nothing while it scrolls once warm.
+pub fn layout_grid_list() {
+    for (sideways, rtl) in [(false, false), (false, true), (true, false), (true, true)] {
+        let mut ui = new_ui(None);
+        if rtl {
+            ui.set_dir(Direction::Rtl);
+        }
+        let built = std::cell::Cell::new((0usize, usize::MAX));
+        let probe = RefCell::new(None);
+        let mut build = |ui: &mut Ui| {
+            built.set((0, usize::MAX));
+            let mut f = |ui: &mut Ui, i: usize| {
+                let (n, first) = built.get();
+                built.set((n + 1, first.min(i)));
+                let h = ui.node("cell", Node { w: Size::Grow, h: Size::Grow, ..Node::DEFAULT });
+                if i == if sideways { 12_003 } else { 10_003 } {
+                    *probe.borrow_mut() = Some(h);
+                }
+            };
+            if sideways { ui.grid_list_x("g", 100_000, 30.0, 20.0, &mut f) } else { ui.grid_list("g", 100_000, 30.0, 20.0, &mut f) };
+        };
+        ui.frame(&at(0.0, vec![Event::PointerMoved((100.0, 100.0))]), &mut build);
+        // to line 1,000 (the wheel steps a line)
+        let lines = if sideways { 100_000.0 / 12.0 } else { 100_000.0 / 10.0 };
+        let step = if sideways { Event::Scrolled((-1000.0 * if rtl { -1.0 } else { 1.0 }, 0.0)) } else { Event::Scrolled((0.0, -1000.0)) };
+        ui.frame(&at(0.1, vec![step]), &mut build);
+        *probe.borrow_mut() = None;
+        ui.frame(&at(2.0, vec![]), &mut build);
+        let (n, first) = built.get();
+        let (per, in_view) = if sideways { (12, (320.0f32 / 30.0).ceil() as usize) } else { (10, 12) };
+        check(n <= (in_view + 1 + 8) * per, &format!("sideways {sideways} rtl {rtl}: built {n} cells of 100,000 ({lines} lines)"));
+        check(first == (1000 - 4) * per, &format!("sideways {sideways} rtl {rtl}: first built {first}"));
+        // the fourth cell of line 1,000, now the first line in view
+        let r = ui.rect(probe.borrow().as_ref().expect("the probed cell built"));
+        let (x, y) = if sideways { (if rtl { 290.0 } else { 0.0 }, 60.0) } else { (if rtl { 320.0 - 4.0 * 30.0 } else { 90.0 }, 0.0) };
+        eq(r, x, y, 30.0, 20.0, &format!("sideways {sideways} rtl {rtl}: line 1,000's fourth cell"));
+        let mut t = 2.0;
+        for _ in 0..60 {
+            t += 0.1;
+            ui.frame(&at(t, vec![Event::Scrolled(if sideways { (-1.0, 0.0) } else { (0.0, -1.0) })]), &mut build);
+        }
+        let frames: Vec<_> = (1..=100).map(|k| at(t + k as f64 * 0.1, vec![Event::Scrolled(if sideways { (-1.0, 0.0) } else { (0.0, -1.0) })])).collect();
+        mem_sys::local_reset();
+        let before = mem_sys::local_alloc_count();
+        for f in &frames {
+            ui.frame(f, &mut build);
+        }
+        let allocs = mem_sys::local_alloc_count() - before;
+        check(allocs == 0, &format!("sideways {sideways} rtl {rtl}: {allocs} allocations scrolling 100 frames"));
+        ui.destroy();
+    }
+}
+
 /// Right to left mirrors a row's flow and its start padding.
 pub fn layout_rtl() {
     let mut ui = new_ui(None);
@@ -618,6 +672,7 @@ pub const CASES: &[(&str, fn())] = &[
     ("layout_scroll_sticky", layout_scroll_sticky),
     ("layout_rtl", layout_rtl),
     ("layout_scroll_x_elastic", layout_scroll_x_elastic),
+    ("layout_grid_list", layout_grid_list),
     ("layout_split_drag", layout_split_drag),
     ("layout_cached_view_not_rerun", layout_cached_view_not_rerun),
 ];

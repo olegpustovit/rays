@@ -63,17 +63,21 @@ pub(crate) fn shown(text: &str) -> &str {
 
 // ------------------------------------------------------ retained cache
 
-/// Open addressing over int keys; 0 and 1 are the empty and tombstone marks.
+/// Open addressing over int keys; 0 and 1 are the empty and tombstone marks. A rehash that clears
+/// tombstones at the same capacity goes through the kept spare arrays: keys that come and go (a
+/// scrolled virtual list) allocate nothing.
 struct SlotTable {
     keys: Vec<i64>,
     slots: Vec<usize>,
+    spare_keys: Vec<i64>,
+    spare_slots: Vec<usize>,
     filled: usize,
     live: usize,
 }
 
 impl SlotTable {
     fn create() -> SlotTable {
-        SlotTable { keys: vec![0; 256], slots: vec![0; 256], filled: 0, live: 0 }
+        SlotTable { keys: vec![0; 256], slots: vec![0; 256], spare_keys: vec![0; 256], spare_slots: vec![0; 256], filled: 0, live: 0 }
     }
 
     fn index(&self, key: i64) -> usize {
@@ -98,14 +102,23 @@ impl SlotTable {
             let keys = std::mem::take(&mut self.keys);
             let slots = std::mem::take(&mut self.slots);
             let capacity = if 10 * self.live > 3 * keys.len() { 2 * keys.len() } else { keys.len() };
-            self.keys = vec![0; capacity];
-            self.slots = vec![0; capacity];
+            (self.keys, self.slots) = (std::mem::take(&mut self.spare_keys), std::mem::take(&mut self.spare_slots));
+            self.keys.clear();
+            self.keys.resize(capacity, 0);
+            self.slots.clear();
+            self.slots.resize(capacity, 0);
             self.filled = 0;
             self.live = 0;
             for (position, k) in keys.iter().enumerate() {
                 if *k != 0 && *k != 1 {
                     self.add(*k, slots[position]);
                 }
+            }
+            // a grown table's spares grow with it, so its next rehash allocates nothing either
+            if capacity == keys.len() {
+                (self.spare_keys, self.spare_slots) = (keys, slots);
+            } else {
+                (self.spare_keys, self.spare_slots) = (vec![0; capacity], vec![0; capacity]);
             }
         }
         let position = self.index(key);
@@ -3598,12 +3611,17 @@ impl Ui {
 
     /// A `SCROLL_X` box sideways, as `apply_scroll` down; right to left the offset runs from the
     /// right edge, so the wheel and the fingers move the content mirrored (it follows them).
-    fn apply_scroll_x(&mut self, time: f64, index: usize) {
+    pub(crate) fn apply_scroll_x(&mut self, consume: bool, time: f64, index: usize) {
         let key = self.boxes[index].key;
         let (wheel, drag) = self.signals.get(&key).map_or((0.0, 0.0), |v| (v.scroll_wheel_x, v.scroll_drag_x));
         let max_scroll = 0.0f64.max(self.l_content_w[index] as f64 - self.l_w[index] as f64);
         let sign = if self.dir == Direction::Rtl { -1.0 } else { 1.0 };
         self.glide(1, time, index, max_scroll, wheel * sign, drag * sign);
+        if consume {
+            if let Some(value) = self.signals.get_mut(&key) {
+                (value.scroll_wheel_x, value.scroll_drag_x, value.scroll_touch, value.scroll_lift) = (0.0, 0.0, false, false);
+            }
+        }
     }
 
     /// The scroll motion of axis `ax`: wheel steps and finger travel pull (stretching past an
@@ -3712,7 +3730,7 @@ impl Ui {
                 self.scroll_y[slot] = 0.0f32.max(max_scroll.min(self.scroll_y[slot]));
             }
             if n.flags & SCROLL_X != 0 {
-                self.apply_scroll_x(time, index);
+                self.apply_scroll_x(false, time, index);
                 let max_x = 0.0f32.max(self.l_content_w[index] - self.l_w[index]);
                 self.scroll_xs[slot] = 0.0f32.max(max_x.min(self.scroll_xs[slot]));
             }
@@ -5886,6 +5904,79 @@ impl Ui {
         for i in first..last {
             let row = self.node_keyed(int_key(body.box_key, i as i64), Node { h: Size::Px(row_h), at: Some((0.0, i as f32 * row_h)), role: Role::ListItem, ..Node::DEFAULT });
             let saved = self.enter(&row);
+            f(self, i);
+            self.leave(saved);
+        }
+        self.leave(inner);
+        self.leave(saved);
+        body
+    }
+
+    /// A scrolling grid of `count` cells `cell_w` by `cell_h`, filling its parent (`Grow` both ways):
+    /// as many columns as its width holds, in rows scrolling down, building only the rows in view
+    /// and `OVERSCAN` more past each edge. `f(ui, i)` builds cell `i` inside a cell box keyed by `i`
+    /// (its state stays while it is built); right to left the first cell is at the right. Returns the
+    /// grid's scroll box.
+    // ponytail: cells of one size; the columns come from last frame's width (the window's on the
+    // first), so a resize shows one frame of the old wrap, as `list` does with its rows.
+    pub fn grid_list(&mut self, label: &str, count: usize, cell_w: f32, cell_h: f32, f: &mut dyn FnMut(&mut Ui, usize)) -> Handle {
+        self.cells(label, count, (cell_w, cell_h), false, f)
+    }
+
+    /// `grid_list` turned: as many rows as its height holds, in columns scrolling sideways (`SCROLL_X`,
+    /// from the right edge right to left).
+    pub fn grid_list_x(&mut self, label: &str, count: usize, cell_w: f32, cell_h: f32, f: &mut dyn FnMut(&mut Ui, usize)) -> Handle {
+        self.cells(label, count, (cell_w, cell_h), true, f)
+    }
+
+    fn cells(&mut self, label: &str, count: usize, cell: (f32, f32), sideways: bool, f: &mut dyn FnMut(&mut Ui, usize)) -> Handle {
+        assert!(cell.0 > 0.0 && cell.1 > 0.0, "Ui.grid_list {label}: cells need a positive size");
+        let flags = CLIP | if sideways { SCROLL_X } else { SCROLL };
+        // `along` is the scrolling axis, `across` the one the cells wrap in
+        let (along, across) = if sideways { cell } else { (cell.1, cell.0) };
+        let body = self.node(label, Node { flags, w: Size::Grow, h: Size::Grow, scroll_step: along, role: Role::List, ..Node::DEFAULT });
+        let seen = (self.slots[body.box_slot].rw, self.slots[body.box_slot].rh);
+        let (w, h) = (if seen.0 > 0.0 { seen.0 } else { self.view_w }, if seen.1 > 0.0 { seen.1 } else { self.view_h });
+        let (room, room_across) = if sideways { (w, h) } else { (h, w) };
+        let per = ((room_across / across).floor() as usize).max(1);
+        let lines = count.div_ceil(per);
+        let extent = lines as f32 * along;
+        // the wheel and the trackpad move the grid before its lines are chosen (as `list` does)
+        (self.l_w[body.index], self.l_h[body.index]) = (w, h);
+        if sideways {
+            self.l_content_w[body.index] = extent;
+        } else {
+            self.l_content[body.index] = extent;
+        }
+        let offset = match (self.input_frame_time(), sideways) {
+            (Some(t), true) => {
+                self.apply_scroll_x(true, t, body.index);
+                self.scroll_offset_x(&body)
+            }
+            (Some(t), false) => {
+                self.apply_scroll(true, t, body.index);
+                self.scroll_offset(&body)
+            }
+            (None, true) => self.scroll_offset_x(&body),
+            (None, false) => self.scroll_offset(&body),
+        };
+        let top = (offset / along).floor().max(0.0) as usize;
+        let first = top.saturating_sub(OVERSCAN).min(lines);
+        let last = (top + (room / along).ceil() as usize + 1 + OVERSCAN).min(lines);
+        let rtl = self.dir == Direction::Rtl;
+        let saved = self.enter(&body);
+        let (ew, eh) = if sideways { (extent, per as f32 * across) } else { (per as f32 * across, extent) };
+        let holder = self.node_keyed(int_key(body.box_key, -1), Node { w: Size::Px(ew), h: Size::Px(eh), ..Node::DEFAULT });
+        let inner = self.enter(&holder);
+        for i in first * per..(last * per).min(count) {
+            let (line, k) = (i / per, i % per);
+            // the holder is a flow child, mirrored right to left; cells are `at` children, physical
+            let (mut x, y) = if sideways { (line as f32 * cell.0, k as f32 * cell.1) } else { (k as f32 * cell.0, line as f32 * cell.1) };
+            if rtl {
+                x = ew - x - cell.0;
+            }
+            let c = self.node_keyed(int_key(body.box_key, i as i64), Node { w: Size::Px(cell.0), h: Size::Px(cell.1), at: Some((x, y)), role: Role::ListItem, ..Node::DEFAULT });
+            let saved = self.enter(&c);
             f(self, i);
             self.leave(saved);
         }
