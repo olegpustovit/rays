@@ -13,6 +13,7 @@ use rays_graph::scope_state as scope;
 use rays_shell::status_bar::{self, Opts, State};
 use rays::frame;
 use sop::async_cook::Status;
+use std::borrow::Cow;
 
 use crate::editor_commands;
 use crate::editor_inspect::{inspector_paths, kind, scene};
@@ -245,19 +246,12 @@ pub fn status_box<'a>(value: &ModelView<'a>, ui: &mut Ui, frame: &frame::Frame, 
     };
     let (layout_text, status_fps) = if floating > 0 || alone { (String::new(), None) } else { (layout_text, value.status_fps) };
     // the keys each pane's sheet lists, as short labels; Lisp, Timeline and Inspector have none
-    let jump = editor_commands::keymap().iter().find_map(|c| {
-        if c.id == "scene.jump" {
-            let platform = ui.platform();
-            c.trigger.as_ref().map(|t| (keymap::label(platform, t), "jump".to_string()))
-        } else {
-            None
-        }
-    });
-    let pair = |a: &str, b: &str| (a.to_string(), b.to_string());
-    let extra: Vec<(String, String)> = match &focus {
+    let pair = |a: &'static str, b: &'static str| (Cow::Borrowed(a), Cow::Borrowed(b));
+    let extra: Vec<(Cow<'static, str>, Cow<'static, str>)> = match &focus {
         Panel::Outline => {
             let mut e = vec![pair("s", "filter"), pair("i", "enter")];
-            e.extend(jump);
+            let jump = editor_commands::keymap().iter().find(|c| c.id == "scene.jump").and_then(|c| c.trigger.as_ref());
+            e.extend(jump.map(|t| (Cow::Owned(keymap::label(ui.platform(), t)), Cow::Borrowed("jump"))));
             e
         }
         Panel::Graph => vec![

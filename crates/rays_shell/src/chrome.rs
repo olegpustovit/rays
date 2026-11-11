@@ -429,6 +429,10 @@ pub fn update(
     let mut intents: Vec<Intent> = Vec::new();
     // where the drag tip goes: over the right of the window being moved
     let mut tip: Option<(i64, i64, i64)> = None;
+    // ponytail: the headers build at the root every frame, not as a view per header: each is built in
+    // two passes (its hit boxes here, its title child through `within(&hd.boxed)` after the drag tip
+    // and the moving brackets), and its menu anchors inside it. One pass per header, the menu built
+    // after, makes each header a view keyed by its leaf, state, title and focus.
     let mut headers: Vec<Header> = Vec::new();
     for (order, l) in geometry.leaves.iter().enumerate() {
         let order = order as i64;

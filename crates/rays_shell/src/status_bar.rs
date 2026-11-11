@@ -31,7 +31,7 @@ pub struct Opts {
     pub notes: Vec<String>,
     pub readout: String,
     pub accent: bool,
-    pub extra: Vec<(String, String)>,
+    pub extra: Vec<(Cow<'static, str>, Cow<'static, str>)>,
     pub leader: Option<String>,
     pub kind: Option<String>,
     pub selection: Option<String>,
@@ -277,17 +277,17 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                     .h(Size::Px(height as f32))
                     .at((x as f32, y as f32)),
             );
-            let keys = o.extra.clone();
+            let keys = &o.extra;
             let title = guide_context::name(context);
             // the kind and what is selected; a context that is no node's (the leader, a search) names itself
-            let kind: Option<String> = Some(o.kind.clone().unwrap_or_else(|| title.to_string()));
-            let selection: Option<String> = match context {
+            let kind: Option<&str> = Some(o.kind.as_deref().unwrap_or(title));
+            let selection: Option<&str> = match context {
                 guide_context::GuideContext::Canvas
                 | guide_context::GuideContext::Node
                 | guide_context::GuideContext::Multi
                 | guide_context::GuideContext::List
-                | guide_context::GuideContext::Text => o.selection.clone(),
-                _ => Some(title.to_string()),
+                | guide_context::GuideContext::Text => o.selection.as_deref(),
+                _ => Some(title),
             };
             let fx = x as f32;
             let fw = width as f32;
@@ -299,7 +299,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             let labels_w = focus_end(ui, 0.0, kind.as_deref(), selection.as_deref());
             let small = kit::cap_size(ui);
             let mut keys_w = 0.0;
-            for (k, l) in &keys {
+            for (k, l) in keys {
                 keys_w = keys_w + ui.text_width(Some(small), k) + ui.text_width(None, l) + 16.0;
             }
             let max_w = (limit - labels_w - 8.0 - fx).max(0.0);
@@ -346,19 +346,19 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             let labels_end = focus_end(ui, after_lead, kind.as_deref(), selection.as_deref());
             let mut pairs: Vec<(f32, String, String, f32)> = Vec::new();
             let mut tx = labels_end;
-            for (key, label) in &keys {
+            for (key, label) in keys {
                 let kw = ui.text_width(Some(small), key);
                 let lw = ui.text_width(None, label);
                 if tx + kw + 8.0 + lw > limit - 8.0 {
                     tx = f32::INFINITY;
                 } else {
-                    pairs.push((tx, key.clone(), label.clone(), kw));
+                    pairs.push((tx, key.to_string(), label.to_string(), kw));
                     tx = tx + kw + 8.0 + lw + 8.0;
                 }
             }
             let o2 = o.clone();
             let accent = o.accent;
-            let (kind, selection) = (kind.clone(), selection.clone());
+            let (kind, selection) = (kind.map(str::to_owned), selection.map(str::to_owned));
             ui.draw(boxed, move |paint, b| {
                 let Rect { x, y, w, h } = ground(paint, b);
                 trail(paint, (x, y, w, h), &o2.notes, &o2.readout, &o2.layout, o2.fps);
@@ -382,7 +382,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                 line(ui, "workspace-guide-line", bounds, &o.file, o.state, lead_limit, &o.text);
             }
             if ui.signal(&bar).hovered {
-                let names: Vec<String> = keys.iter().map(|(k, _)| k.clone()).collect();
+                let names: Vec<String> = keys.iter().map(|(k, _)| k.to_string()).collect();
                 ui.tooltip("guide-strip", &format!("{} \u{b7} {} \u{b7} / ?: all keys", title, names.join("  ")));
             }
         }
