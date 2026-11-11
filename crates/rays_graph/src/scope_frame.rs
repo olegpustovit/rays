@@ -792,12 +792,12 @@ fn build_card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, 
         return;
     }
     match rec {
-        Some((tile, ground, brackets, recede, ports)) => hv.card(slot, pl.path.clone(), view, tile, ground, brackets, recede, ports),
+        Some((tile, ground, brackets, recede, ports, readout)) => hv.card(slot, pl.path.clone(), view, tile, ground, brackets, recede, ports, readout),
         None => hv.keep(view),
     }
 }
 
-type CardRec = (UiBox, Option<crate::scope_hover::Ground>, [UiBox; 4], Option<UiBox>, Vec<crate::scope_hover::Port>);
+type CardRec = (UiBox, Option<crate::scope_hover::Ground>, [UiBox; 4], Option<UiBox>, Vec<crate::scope_hover::Port>, crate::scope_hover::Readout);
 
 fn card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, snap: &Rc<Pane>, footers: &HashMap<Path, Footer>, key: &str, built: &mut Vec<Built>) -> CardRec {
     use crate::scope_hover as sh;
@@ -839,6 +839,11 @@ fn card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, snap: 
     });
     let painted = ui.box_("card", BoxOpts::default().w(Size::Px(w as f32)).h(Size::Px(h as f32)).at((0.0, 0.0)));
     paint_card(t, ui, &painted, z, fs, slot, snap, footers);
+    // what it shows of its records, over its painting
+    let readout = crate::scope_hover::readout_nodes(t, ui, z, fs, slot, match &pl.item {
+        Item::Item(n) => footers.get(&n.path),
+        _ => None,
+    });
     // over the painting: the selection's brackets, a scene object's dimming, the recession
     let (bx, by, bw, bh, off, len, wid) = sp::brackets_of(pl, z, w, h);
     let corners = [(bx - off, by - off), (bx + bw + off - len, by - off), (bx - off, by + bh + off - len), (bx + bw + off - len, by + bh + off - len)];
@@ -867,7 +872,7 @@ fn card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, snap: 
     let fields = card_fields(c, t, ui, z, fs, pl, &tile);
     let _ = (ax, ay);
     built.push(Built { slot, taps, fields });
-    (tile, ground, brackets, recede, ports)
+    (tile, ground, brackets, recede, ports, readout)
 }
 
 /// A scene object nothing reads (taken out of its merge) is dimmed; a wire from it brings it back.
@@ -924,7 +929,7 @@ fn paint_card(t: &Pane, ui: &mut Ui, on: &UiBox, z: f64, fs: i64, slot: usize, s
                 }
             }
             Item::Item(n) => match &n.zone {
-                Some(zn) if !pl.collapsed => sp::paint_zone_frame(paint, &snap, z, fs, footer.as_ref(), n, zn, out_wired, rect, probe, count),
+                Some(zn) if !pl.collapsed => sp::paint_zone_frame(paint, &snap, z, fs, n, zn, out_wired, rect, probe, count),
                 _ => {
                     let o = sp::NodeOpts { footer: footer.clone(), lens_step, carry, out_wired, shown: pl.shown, failed: failed.clone() };
                     sp::paint_node(paint, &snap, z, fs, &o, pl, n, rh, rect);
@@ -1745,6 +1750,10 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
     let now = crate::scope_hover::find(t, ui, &canvas, frame.input.pointer);
     gestures(t, ui, frame, &canvas, &sig, changes);
     context_menu(t, ui, changes);
+    // a cook's values on the cards that show them; what no patch can show builds the content again
+    if !crate::scope_hover::cooked(t, ui) {
+        t.cook += 1;
+    }
     let rev = if moved { revision(t).wrapping_add(1) } else { revision(t) };
     // a carried payload's places follow the pointer: the content builds every frame of a carry
     if ui.carrying().is_some() {

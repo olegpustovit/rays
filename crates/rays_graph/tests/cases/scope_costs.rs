@@ -267,6 +267,7 @@ fn window_graph_costs() {
     table.push(Run::of("edit", &edit));
     let edit_builds: u64 = edit.iter().map(|c| c.builds).sum();
     let (zone, frame) = zone_and_frame(&mut table);
+    let (cook, changed, patches) = cooks(&mut table);
     for line in &table {
         eprintln!("{}", line.line());
     }
@@ -279,6 +280,10 @@ fn window_graph_costs() {
         assert!(c.allocs == 0, "{name}: {} allocations", c.allocs);
     };
     quiet("pan", pan, 0, 0);
+    // a cook: each value it changed on a card is one patch of that card's node; no view, no build
+    eprintln!("graph_costs cook: {changed} values changed, {patches} patches");
+    assert!(changed >= 4 && patches == changed as u64, "a cook changing {changed} values made {patches} patches");
+    quiet("cook", cook, 0, 64 * INSTANCE);
     // a zone and a frame carried: the views of what they hold offset, the wires they carry drawn
     // where they go (the drag's view and the wires view leaving them out)
     quiet("zone drag", zone, 3, 160 * INSTANCE);
@@ -379,6 +384,59 @@ fn zone_and_frame(table: &mut Vec<Run>) -> (Cost, Cost) {
 
     ui.destroy();
     (zone, frame)
+}
+
+/// Cooks of a graph whose input feeds some of its nodes, the records alternating between two values of
+/// the input (warm: each cooked twice before), one card at the full level (its footer's value): the
+/// frame after each cook, the values it changed and the patches they cost.
+fn cooks(table: &mut Vec<Run>) -> (Cost, usize, u64) {
+    use flow_syntax::value::Value;
+    let text = "(workspace w (graph g :context value [(x : float 1.0)] (let* [a1 (* x 1.0) a2 (* x 2.0) a3 (* x 3.0) c1 (+ 1.0 2.0) c2 (+ 2.0 3.0) c3 (+ 3.0 4.0) s1 (+ a1 a2) s2 (+ a3 c1) s3 (+ c2 c3) s4 (+ s1 s2) s (+ s4 s3)] s)))";
+    let ws = checked(text);
+    let sc = Rc::new(flow_graph::projection::of_graph(&scope_catalog(), &ws, "g").unwrap_or_else(|e| panic!("{e}")));
+    let cooked = |x: f64| {
+        let eval = flow_eval::r#static(&ws, true, Some(&[("g".into(), vec![("x".into(), Value::Float(x))])])).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+        Rc::new(std::cell::RefCell::new(flow_graph::probe::make(&eval, flow_graph::probe::Options::default())))
+    };
+    let records = [cooked(1.0), cooked(2.0)];
+    let mut t = scope::create(Some(W), Some(H));
+    scope::with_scope(saved_opts(TestSaved { level: vec![(path(&["g", "a1"]), (Level::Full, true))], ..Default::default() }), "g", sc, &mut t);
+    scope::with_records(records[0].clone(), &mut t);
+    let mut ui = Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None));
+    ui.verify_views(false);
+    let mut count = 2000;
+    let away = (-100.0, -100.0);
+    let mut go = |ui: &mut Ui, t: &mut Pane| {
+        count += 1;
+        one(ui, t, &frame(count, away, &[], vec![]))
+    };
+    for _ in 0..8 {
+        go(&mut ui, &mut t);
+    }
+    // the values the cards show that differ between the two (the result shows none: it is displayed)
+    let nodes = t.scope.clone().expect("scope").nodes.clone();
+    let changed = nodes.iter().filter(|n| scope::inspect::shows_records(&t, &n.path) && records[0].borrow_mut().footer(n, &[]).value != records[1].borrow_mut().footer(n, &[]).value).count();
+    let builds = scope::inspect::content_builds(&t);
+    for k in 0..4 {
+        scope::with_records(records[(k + 1) % 2].clone(), &mut t);
+        go(&mut ui, &mut t);
+        go(&mut ui, &mut t);
+    }
+    assert!(scope::inspect::content_builds(&t) == builds, "a cook built the content");
+    let mut costs = Vec::new();
+    let mut patches = 0;
+    for k in 0..10 {
+        scope::with_records(records[(k + 1) % 2].clone(), &mut t);
+        let before = scope::inspect::cook_patches(&t);
+        costs.push(go(&mut ui, &mut t));
+        patches = patches.max(scope::inspect::cook_patches(&t) - before);
+        // the frame after shows the cook as patched: nothing more
+        let after = go(&mut ui, &mut t);
+        assert!(after.bytes == 0 && after.views == 0, "the frame after a cook wrote {} bytes, built {} views", after.bytes, after.views);
+    }
+    ui.destroy();
+    table.push(Run::of("cook", &costs));
+    (table.last().unwrap().worst, changed, patches)
 }
 
 pub const CASES: &[(&str, fn())] = &[("window_graph_costs", window_graph_costs)];

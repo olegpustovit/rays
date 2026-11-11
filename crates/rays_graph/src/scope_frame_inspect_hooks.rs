@@ -259,3 +259,13 @@ pub fn carried_wires(t: &Pane) -> (usize, usize) {
     let hv = t.hovers.borrow();
     (hv.attached.len(), hv.skip.len())
 }
+
+/// The patches cooks made to the cards' record pieces so far.
+pub fn cook_patches(t: &Pane) -> u64 {
+    t.hovers.borrow().patches
+}
+
+/// Whether the card of `path` shows something of its records (a ghost value or a footer).
+pub fn shows_records(t: &Pane, path: &[Symbol]) -> bool {
+    t.hovers.borrow().cards.iter().any(|c| c.path.as_slice() == path && !c.readout.nodes.is_empty())
+}

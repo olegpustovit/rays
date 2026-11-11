@@ -357,6 +357,8 @@ pub struct Pane {
     pub folds: Rc<HashMap<(Path, usize), Path>>,
     /// iterations each zone ran, under the probes
     pub counts: Rc<HashMap<Path, i64>>,
+    /// bumped by a cook a patch cannot show: the content builds again
+    pub cook: u64,
     /// the node the viewport shows instead of the graph's result
     pub display: Option<Path>,
     pub framed: bool,
@@ -443,7 +445,7 @@ pub fn builds_same(a: &Pane, b: &Pane) -> bool {
     let geo = Rc::ptr_eq(&g.items, &h.items) && Rc::ptr_eq(&g.wires, &h.wires) && Rc::ptr_eq(&g.origins, &h.origins) && Rc::ptr_eq(&g.inside, &h.inside)
         && Rc::ptr_eq(&g.slot, &h.slot) && Rc::ptr_eq(&g.tiles, &h.tiles) && Rc::ptr_eq(&g.reach, &h.reach) && Rc::ptr_eq(&g.read, &h.read);
     geo && (a.x, a.y, a.width, a.height, a.guide, a.framed, a.geo_fs, a.geo_cold, a.tags) == (b.x, b.y, b.width, b.height, b.guide, b.framed, b.geo_fs, b.geo_cold, b.tags)
-        && a.theme == b.theme && a.key == b.key && a.scope.as_ref().map(Rc::as_ptr) == b.scope.as_ref().map(Rc::as_ptr) && Rc::ptr_eq(&a.saved, &b.saved) && a.records.as_ref().map(Rc::as_ptr) == b.records.as_ref().map(Rc::as_ptr)
+        && a.theme == b.theme && a.key == b.key && a.scope.as_ref().map(Rc::as_ptr) == b.scope.as_ref().map(Rc::as_ptr) && Rc::ptr_eq(&a.saved, &b.saved) && a.records.is_some() == b.records.is_some() && a.cook == b.cook
         && Rc::ptr_eq(&a.chains, &b.chains) && Rc::ptr_eq(&a.folds, &b.folds) && Rc::ptr_eq(&a.counts, &b.counts) && Rc::ptr_eq(&a.layout, &b.layout)
         && a.lens == b.lens && a.display == b.display && content_drag(&a.drag) == content_drag(&b.drag) && a.editing == b.editing && a.switches == b.switches
         && a.carry_lit == b.carry_lit && a.carry_hot == b.carry_hot && a.failed == b.failed && a.hinting == b.hinting && a.back == b.back
@@ -532,6 +534,7 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         chains: Rc::new(HashMap::new()),
         folds: Rc::new(HashMap::new()),
         counts: Rc::new(HashMap::new()),
+        cook: 0,
         display: None,
         framed: true,
         layout: Rc::new(p::Layout { placed: Vec::new(), w: 0.0, h: 0.0 }),
@@ -753,7 +756,10 @@ pub fn refresh(t: &mut Pane) {
     match (&t.scope, &t.records) {
         (Some(scope), Some(records)) => {
             let counts: HashMap<Path, i64> = records.borrow_mut().counts(scope, &|path: &[Symbol]| t.saved.probe(path)).into_iter().collect();
-            t.counts = Rc::new(counts);
+            // kept when equal: the content builds again only for counts that changed
+            if *t.counts != counts {
+                t.counts = Rc::new(counts);
+            }
         }
         _ => { t.counts = Rc::new(HashMap::new()); },
     }
@@ -1082,13 +1088,22 @@ pub fn with_arguments(changes: &[(Path, ArgKey, S)], t: &mut Pane) {
     (t.scope, t.layout, t.geo) = (Some(scope), Rc::new(layout), geo);
 }
 
+/// A cook's records. The cards' values follow by patches (`scope_hover::cook`): the content builds
+/// again only when what a patch cannot show changed (iteration counts, the tiers the marks show, the
+/// arms the branches took).
 pub fn with_records(records: Rc<RefCell<Probe>>, t: &mut Pane) {
     let first = t.records.is_none();
     let same = t.records.as_ref().is_some_and(|previous| previous.borrow().same_eval(&records.borrow()));
+    let fixed = if first || same { Vec::new() } else { crate::scope_hover::fixed(t) };
     t.records = Some(records);
     if !same {
+        let counts = t.counts.clone();
         refresh(t);
-        if first { relayout(None, t); }
+        if first {
+            relayout(None, t);
+        } else if !Rc::ptr_eq(&counts, &t.counts) || crate::scope_hover::fixed(t) != fixed || !crate::scope_hover::cook(t) {
+            t.cook += 1;
+        }
     }
 }
 

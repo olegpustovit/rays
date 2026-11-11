@@ -65,6 +65,194 @@ pub struct Card {
     pub recede: Option<UiBox>,
     pub ports: Vec<Port>,
     shown: Shown,
+    /// what it shows of its records (`sp::readout`): a node per piece and what the node shows, the
+    /// footer they show, the one a cook brought (`cooked` patches the pieces) and the zoom and text
+    /// size it was built at
+    pub readout: Readout,
+}
+
+/// A card's record pieces as `Card::readout` keeps them.
+#[derive(Default)]
+pub struct Readout {
+    pub nodes: Vec<(UiBox, Stamp)>,
+    pub footer: Option<flow_graph::probe::Footer>,
+    pub cooked: Option<flow_graph::probe::Footer>,
+    pub at: (f64, i64),
+}
+
+/// What a piece's node shows: its rectangle, colour, text (a hash) and a line's direction.
+#[derive(Clone, Copy, PartialEq)]
+pub struct Stamp {
+    rect: [f32; 4],
+    color: Color,
+    text: u64,
+    /// text, fill, a falling line, a rising one
+    kind: u8,
+}
+
+/// A piece's node: its rectangle, look, mark and text.
+fn piece_node(piece: sp::Piece<'_>) -> (Stamp, Look, Mark, &str) {
+    let hash = |s: &str| {
+        let mut h = std::hash::DefaultHasher::new();
+        s.hash(&mut h);
+        h.finish()
+    };
+    let r = |x: f64, y: f64, w: f64, h: f64| [x as f32, y as f32, w as f32, h as f32];
+    match piece {
+        sp::Piece::Text { x, y, w, h, size, color, text } => {
+            (Stamp { rect: r(x, y, w, h), color, text: hash(text), kind: 0 }, Look { text: color, font: Font { size, ..Font::BODY }, ..Look::NONE }, Mark::None, text)
+        }
+        // the line's ends half its width inside the node's rectangle (`Mark::Line`)
+        sp::Piece::Line { a, b, color } => {
+            let rising = (b.0 - a.0) * (b.1 - a.1) < 0.0;
+            let stamp = Stamp { rect: r(a.0.min(b.0) - 0.5, a.1.min(b.1) - 0.5, (b.0 - a.0).abs() + 1.0, (b.1 - a.1).abs() + 1.0), color, text: 0, kind: 2 + rising as u8 };
+            (stamp, Look { text: color, ..Look::NONE }, Mark::Line { width: 1.0, rising }, "")
+        }
+        sp::Piece::Fill { x, y, w, h, color } => (Stamp { rect: r(x, y, w, h), color, text: 0, kind: 1 }, Look { fill: color, ..Look::NONE }, Mark::None, ""),
+    }
+}
+
+/// A card's record pieces as nodes, in its tile.
+pub fn readout_nodes(t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, footer: Option<&flow_graph::probe::Footer>) -> Readout {
+    let mut nodes = Vec::new();
+    if let (Some(f), Some((ghost, full, pad, ty))) = (footer, readout_of(t, slot)) {
+        let (pl, _, _) = &t.geo.items[slot];
+        sp::readout(ui, t, z, fs, ghost, full, f, &ty, pad, (0.0, 0.0, pl.w * z, pl.h * z), &mut |ui, piece| {
+            let (stamp, look, mark, text) = piece_node(piece);
+            let [x, y, w, h] = stamp.rect;
+            let b = ui.node("r", Node { w: Size::Px(w), h: Size::Px(h), at: Some((x, y)), look, mark, ..Node::DEFAULT });
+            ui.text(&b, text);
+            nodes.push((b, stamp));
+        });
+    }
+    Readout { nodes, footer: footer.cloned(), cooked: None, at: (z, fs) }
+}
+
+/// What `sp::readout` shows of the item at `slot`: the ghost value, the full footer, the footer's
+/// padding (an open expansion panel under it) and the item's type; `None` for what shows nothing.
+fn readout_of(t: &Pane, slot: usize) -> Option<(bool, bool, f64, Ty)> {
+    let (pl, ax, ay) = &t.geo.items[slot];
+    match &pl.item {
+        Item::Item(n) if pl.shown != Level::Point && (n.zone.is_none() || pl.collapsed) => {
+            let out_wired = t.geo.read.contains(&crate::scope_wires::fkey(out_anchor(pl, *ax, *ay)));
+            let lh = match (&n.lens, lens_of(t, &n.path)) {
+                (Some(l), Some(step)) => p::lens_height(l, step),
+                _ => 0.0,
+            };
+            Some((sp::ghost_shown(t, n, pl.shown, out_wired), pl.shown == Level::Full, p::CARD_PAD + lh, n.ty.clone()))
+        }
+        _ => None,
+    }
+}
+
+/// Whether the item at `slot` lies in the pane and its overscan where the pan and zoom are now (a
+/// cook formats no footer for a card scrolled away: the content builds again before it shows).
+fn in_view(t: &Pane, slot: usize) -> bool {
+    let (pl, ax, ay) = &t.geo.items[slot];
+    let (ox, oy) = overscan(t);
+    let (x, y) = (sx(t, *ax) - t.x as f64, sy(t, *ay) - t.y as f64);
+    x + pl.w * t.zoom > -ox && y + pl.h * t.zoom > -oy && x < t.width as f64 + ox && y < t.height as f64 + oy
+}
+
+/// What a cook cannot patch, for the cards and open zones in view: the tiers their marks show
+/// and the arms the branches took (`with_records` builds the content again when it changes).
+pub fn fixed(t: &Pane) -> Vec<Option<String>> {
+    let hv = t.hovers.borrow();
+    let mut out = Vec::new();
+    for c in hv.cards.iter().filter(|c| in_view(t, c.slot)) {
+        if let Item::Item(n) = &t.geo.items[c.slot].0.item {
+            let tier = sp::execution_of(t, n).or_else(|| c.readout.footer.as_ref().and_then(|_| t.records.as_ref().and_then(|r| crate::scope_frame::footer_of(t, r, n).execution)));
+            out.push(tier.map(|e| e.tier));
+        }
+    }
+    for &z in &hv.zones {
+        if let Item::Item(n) = &t.geo.items[z].0.item {
+            if let Some(zn) = &n.zone {
+                out.push(sp::zone_taken(t, n, zn).then(String::new));
+            }
+        }
+    }
+    out
+}
+
+/// A cook's footers for the cards that show one, left for `cooked` where they changed. False when a
+/// card that shows one lies out of view (the content builds again, formatting only what shows).
+pub fn cook(t: &Pane) -> bool {
+    let Some(records) = &t.records else { return false };
+    let mut hv = t.hovers.borrow_mut();
+    if hv.cards.iter().any(|c| c.readout.footer.is_some() && !in_view(t, c.slot)) {
+        return false;
+    }
+    for c in hv.cards.iter_mut() {
+        if let (Item::Item(n), Some(shown)) = (&t.geo.items[c.slot].0.item, &c.readout.footer) {
+            let f = crate::scope_frame::footer_of(t, records, n);
+            c.readout.cooked = (f != *shown).then_some(f);
+        }
+    }
+    true
+}
+
+/// The footers a cook left (`cook`) on the cards' nodes: each piece that changed patched. False
+/// when a card's pieces no longer match its nodes (a tag or a sparkline came or went): nothing of
+/// that card is patched and the content builds again.
+pub fn cooked(t: &Pane, ui: &mut Ui) -> bool {
+    let hovers = t.hovers.clone();
+    let mut hv = hovers.borrow_mut();
+    let hv = &mut *hv;
+    let mut fits = true;
+    for c in hv.cards.iter_mut() {
+        let Some(f) = c.readout.cooked.take() else { continue };
+        let Some((ghost, full, pad, ty)) = readout_of(t, c.slot) else { continue };
+        let (z, fs) = c.readout.at;
+        let (pl, _, _) = &t.geo.items[c.slot];
+        let rect = (0.0, 0.0, pl.w * z, pl.h * z);
+        // the same pieces in the same order
+        let mut k = 0;
+        let mut same = true;
+        sp::readout(ui, t, z, fs, ghost, full, &f, &ty, pad, rect, &mut |_, piece| {
+            same &= c.readout.nodes.get(k).is_some_and(|(_, s)| s.kind.min(2) == piece_node(piece).0.kind.min(2));
+            k += 1;
+        });
+        if !same || k != c.readout.nodes.len() {
+            fits = false;
+            continue;
+        }
+        let mut k = 0;
+        let patches = &mut hv.patches;
+        sp::readout(ui, t, z, fs, ghost, full, &f, &ty, pad, rect, &mut |ui, piece| {
+            let (stamp, look, mark, text) = piece_node(piece);
+            let (b, was) = &mut c.readout.nodes[k];
+            k += 1;
+            if stamp == *was {
+                return;
+            }
+            let mut ok = true;
+            if stamp.text != was.text {
+                ok &= ui.patch_text(b, text);
+                *patches += 1;
+            }
+            if stamp.color != was.color {
+                ok &= ui.patch_look(b, &look);
+                *patches += 1;
+            }
+            if stamp.kind != was.kind {
+                ok &= ui.patch_mark(b, mark);
+                *patches += 1;
+            }
+            if stamp.rect != was.rect {
+                // where the view lays the node out: its tile's corner plus the piece's place
+                let [x, y, w, h] = stamp.rect;
+                let r = ui.local_rect(b);
+                let [x0, y0, _, _] = was.rect;
+                ok &= ui.patch_rect(b, pxui::geom::Rect::new(r.x - x0 + x, r.y - y0 + y, w, h));
+                *patches += 1;
+            }
+            fits &= ok;
+            *was = stamp;
+        });
+        c.readout.footer = Some(f);
+    }
+    fits
 }
 
 /// The sides of each bracket corner.
@@ -101,6 +289,8 @@ pub struct Hovers {
     pub frame_views: Vec<UiBox>,
     /// the content builds so far (not counting verifying runs)
     pub builds: u64,
+    /// the patches cooks made to the cards' record pieces (`cooked`)
+    pub patches: u64,
     /// the geometry the build read (its items and wires), by address
     pub geo: (usize, usize),
     /// the selection and hover the cards show (`show`)
@@ -149,8 +339,8 @@ impl Hovers {
     }
 
     /// A card built again: it shows no hover, selection or recession until `show` patches it.
-    pub fn card(&mut self, slot: usize, path: Path, view: UiBox, tile: UiBox, ground: Option<Ground>, brackets: [UiBox; 4], recede: Option<UiBox>, ports: Vec<Port>) {
-        self.cards.push(Card { slot, path, view, tile, ground, brackets, recede, ports, shown: Shown::default() });
+    pub fn card(&mut self, slot: usize, path: Path, view: UiBox, tile: UiBox, ground: Option<Ground>, brackets: [UiBox; 4], recede: Option<UiBox>, ports: Vec<Port>, readout: Readout) {
+        self.cards.push(Card { slot, path, view, tile, ground, brackets, recede, ports, shown: Shown::default(), readout });
     }
 
     /// A card whose view was kept: as the build before left it.

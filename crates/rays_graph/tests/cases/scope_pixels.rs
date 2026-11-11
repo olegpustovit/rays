@@ -163,6 +163,59 @@ fn gpu_graph_pixels() {
     assert!(failures.is_empty(), "graph pane pixels: {}", failures.join("; "));
 }
 
+/// A cook's values patched on the cards (a ghost value, a full card's footer value and its sparkline
+/// turned over) show what a pane built with those records shows, to the pixel: the graph built with
+/// k = 6 and cooked with k = -6 against one built with k = -6.
+fn gpu_graph_cook_pixels() {
+    if !common::gpu() {
+        return;
+    }
+    use flow_syntax::value::Value;
+    let text = "(workspace w (graph g :context value [(k : float 6.0)] (let* [ys (for [i (range 4)] (let* [a (* k (float i)) b (+ a 1.0)] b)) n (reduce (fn [acc x] (+ acc x)) 0.0 ys)] (* n k))))";
+    let ws = checked(text);
+    let cooked = |k: f64| {
+        let eval = flow_eval::r#static(&ws, true, Some(&[("g".into(), vec![("k".into(), Value::Float(k))])])).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+        Rc::new(RefCell::new(flow_graph::probe::make(&eval, flow_graph::probe::Options::default())))
+    };
+    let render = |cooks: &[f64], density: i64| {
+        let sc = Rc::new(flow_graph::projection::of_graph(&scope_catalog(), &ws, "g").unwrap_or_else(|e| panic!("{e}")));
+        let mut t = scope::create(Some(W), Some(H));
+        scope::with_scope(saved_opts(TestSaved { level: vec![(path(&["g", "ys", "a"]), (flow_graph::projection::Level::Full, true))], ..Default::default() }), "g", sc, &mut t);
+        // at zoom 1, where the cards show their values
+        (t.framed, t.zoom, t.pan_x, t.pan_y) = (true, 1.0, 40.0, 60.0);
+        let mut ui = golden_ui();
+        let away = (-100.0, -100.0);
+        let mut count = 0;
+        let mut builds = 0;
+        for &k in cooks {
+            scope::with_records(cooked(k), &mut t);
+            builds = scope::inspect::content_builds(&t);
+            for _ in 0..3 {
+                pane_frame(&mut ui, &mut t, &frame_at(count, density, away, vec![]));
+                count += 1;
+            }
+        }
+        let patches = scope::inspect::cook_patches(&t);
+        let built = scope::inspect::content_builds(&t) - builds;
+        let ui = Rc::new(RefCell::new(ui));
+        let canvas_ = canvas::create(W * density, H * density).expect("canvas");
+        let mut nodes = vec![scene::clear(color::rgb(228, 139, 161))];
+        nodes.extend(rays_shell::host::scene(&ui, None));
+        canvas::render(Some(density), &canvas_, &nodes).expect("Canvas.render");
+        ui.borrow_mut().destroy();
+        let pixels = image::pixels(&canvas::to_image(&canvas_).expect("to_image")).expect("pixels");
+        let _ = canvas::destroy(&canvas_);
+        (pixels, patches, built)
+    };
+    for density in [1, 2] {
+        let (patched, patches, built) = render(&[6.0, -6.0], density);
+        assert!(built == 0 && patches >= 3, "the cook built the content {built} times, patched {patches} pieces");
+        let (fresh, _, _) = render(&[-6.0], density);
+        let different = patched.chunks(4).zip(fresh.chunks(4)).filter(|(a, b)| a != b).count();
+        assert!(patched.len() == fresh.len() && different == 0, "a cook's patches at {density}x: {different} pixels differ from a build");
+    }
+}
+
 /// A frame of the pane: the views it built, the instance bytes it wrote, what it allocated and the
 /// changes it emitted.
 struct Step {
@@ -400,4 +453,4 @@ fn window_graph_folded_hover() {
     }
 }
 
-pub const CASES: &[(&str, fn())] = &[("gpu_graph_pixels", gpu_graph_pixels), ("window_graph_view_pan_zoom", window_graph_view_pan_zoom), ("window_graph_hover", window_graph_hover), ("window_graph_folded_hover", window_graph_folded_hover)];
+pub const CASES: &[(&str, fn())] = &[("gpu_graph_pixels", gpu_graph_pixels), ("gpu_graph_cook_pixels", gpu_graph_cook_pixels), ("window_graph_view_pan_zoom", window_graph_view_pan_zoom), ("window_graph_hover", window_graph_hover), ("window_graph_folded_hover", window_graph_folded_hover)];

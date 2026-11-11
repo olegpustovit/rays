@@ -12,7 +12,7 @@ use flow_syntax::lisp;
 use flow_syntax::syntax::{Node as SNode, Syntax};
 use flow_syntax::ty::{self, Ty};
 use pxui::theme::{self, Tokens as Theme};
-use pxui::ui_core::{ellipsis, Paint};
+use pxui::ui_core::{ellipsis, Paint, Ui};
 use pxui::geom::{color::{self, T as Color}, p32};
 
 type S = Syntax;
@@ -792,29 +792,55 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
     }
 }
 
-/// The footer row of a node card or a collapsed zone: the value at the probe, a sparkline across the
-/// innermost zone, the tags; label-size ink-2 over a line-1 hairline.
-pub fn paint_footer(paint: &mut Paint, t: &Pane, z: f64, fs: i64, f: &Footer, ty: &Ty, pad: f64, rect: (f64, f64, f64, f64)) {
+/// A piece of what a card shows of its records, in the tile's points: kit text in a row `h` high, a
+/// 1-point line, a fill. Each is a node of its own, so a cook patches it (`scope_hover::cooked`).
+#[derive(Clone, Copy)]
+pub enum Piece<'a> {
+    Text { x: f64, y: f64, w: f64, h: f64, size: i64, color: Color, text: &'a str },
+    Line { a: (f64, f64), b: (f64, f64), color: Color },
+    Fill { x: f64, y: f64, w: f64, h: f64, color: Color },
+}
+
+/// `fitted` measured by the UI.
+fn fit<'a>(ui: &mut Ui, size: i64, width: f64, text: &'a str) -> Cow<'a, str> {
+    if f64::from(ui.text_width(Some(size), text)) <= width {
+        return Cow::Borrowed(text);
+    }
+    let t = ellipsis(&mut |s: &str| ui.text_width(Some(size), s), width as f32, text);
+    if t.is_empty() { Cow::Borrowed("\u{2026}") } else { t }
+}
+
+/// What a card of `rect` (tile points) shows of its records: with `ghost` the value at the pinned
+/// iteration beside its out-port; at the full level (`full`) the footer row's texts and sparkline over
+/// its hairline (`paint_node` paints that): the value, a sparkline across the innermost zone, the tags,
+/// label-size ink-2.
+pub fn readout(ui: &mut Ui, t: &Pane, z: f64, fs: i64, ghost: bool, full: bool, f: &Footer, ty: &Ty, pad: f64, rect: (f64, f64, f64, f64), emit: &mut dyn FnMut(&mut Ui, Piece)) {
     let theme = t.theme;
     let (x, y, wd, h) = rect;
     let ls = 4.max(fs - 2);
+    if ghost {
+        let fit = fit(ui, ls, 72.0 * z, &f.value);
+        emit(ui, Piece::Text { x: x + wd + (8.0 * z), y: y + ((PORT_Y - 8.0) * z), w: 72.0 * z, h: 16.0 * z, size: ls, color: theme::ink_3(&theme), text: &fit });
+    }
+    if !full {
+        return;
+    }
     let fh = p::FOOT_HEIGHT * z;
     let fy = y + h - (pad * z) - fh;
-    paint.fill((x + 1.0) as f32, fy as f32, (wd - 2.0) as f32, 1.0, theme::faint_border(&theme));
     let ink_2 = theme::ink_2(&theme);
     let ty0 = fy + 1.0;
     let th = fh - 1.0;
     let mut right = x + wd - (HEAD_PAD * z);
-    let put_right = |paint: &mut Paint, color: Color, s: &str, right: &mut f64| {
-        let tw = f64::from(paint.text_width(Some(ls), s));
-        text_in(paint, ls, color, *right - tw, ty0, th, s);
+    let mut put_right = |ui: &mut Ui, color: Color, s: &str, right: &mut f64| {
+        let tw = f64::from(ui.text_width(Some(ls), s));
+        emit(ui, Piece::Text { x: *right - tw, y: ty0, w: tw, h: th, size: ls, color, text: s });
         *right = *right - tw - (6.0 * z);
     };
     if f.live {
-        put_right(paint, theme.accent, "t", &mut right);
+        put_right(ui, theme.accent, "t", &mut right);
     }
     if let Some(ex) = &f.execution {
-        put_right(paint, ink_2, &ex.tier, &mut right);
+        put_right(ui, ink_2, &ex.tier, &mut right);
     }
     let mut tags_v: Vec<String> = Vec::new();
     if let Some(b) = &f.branch {
@@ -833,8 +859,8 @@ pub fn paint_footer(paint: &mut Paint, t: &Pane, z: f64, fs: i64, f: &Footer, ty
     }
     let tags = tags_v.join(" \u{b7} ");
     if !tags.is_empty() {
-        let fit = fitted(paint, ls, 0.0f64.max(right - x) * 0.5, &tags);
-        put_right(paint, ink_2, &fit, &mut right);
+        let fit = fit(ui, ls, 0.0f64.max(right - x) * 0.5, &tags);
+        put_right(ui, ink_2, &fit, &mut right);
     }
     let left = x + (LABEL_X * z);
     if let Some((values, at)) = &f.spark {
@@ -854,15 +880,31 @@ pub fn paint_footer(paint: &mut Paint, t: &Pane, z: f64, fs: i64, f: &Footer, ty
         let mut i = 0;
         while i + 1 < n {
             let j = (n - 1).min(i + step);
-            paint.line_w(((px(i)) as f32, (py(values[i])) as f32), ((px(j)) as f32, (py(values[j])) as f32), 1.0, ty_color(t, Some(ty)));
+            emit(ui, Piece::Line { a: (px(i), py(values[i])), b: (px(j), py(values[j])), color: ty_color(t, Some(ty)) });
             i = j;
         }
         let a = *at as usize;
-        paint.fill((px(a) - (1.5 * z)) as f32, (py(values[a]) - (1.5 * z)) as f32, (3.0 * z) as f32, (3.0 * z) as f32, theme.accent);
+        emit(ui, Piece::Fill { x: px(a) - (1.5 * z), y: py(values[a]) - (1.5 * z), w: 3.0 * z, h: 3.0 * z, color: theme.accent });
         right = sx0 - (6.0 * z);
     }
-    let fit = fitted(paint, ls, 0.0f64.max(right - left), &f.value);
-    text_in(paint, ls, ink_2, left, ty0, th, &fit);
+    let fit = fit(ui, ls, 0.0f64.max(right - left), &f.value);
+    emit(ui, Piece::Text { x: left, y: ty0, w: 0.0f64.max(right - left).max(1.0), h: th, size: ls, color: ink_2, text: &fit });
+}
+
+/// Whether a card shows its value beside its out-port: below the full level, a node (not a zone) whose
+/// out-port is wired, not one that yields to its zone's end bar (the bar's port is there).
+pub fn ghost_shown(t: &Pane, n: &p::Node, shown: Level, out_wired: bool) -> bool {
+    shown != Level::Full
+        && shown != Level::Point
+        && n.zone.is_none()
+        && out_wired
+        && !t.geo.wires.iter().any(|wi: &Wire| {
+            wi.from.as_ref() == Some(&n.path)
+                && match &wi.into {
+                    Some(zone) => zone.len() < n.path.len() && n.path[..zone.len()] == zone[..],
+                    None => false,
+                }
+        })
 }
 
 /// The expansion panel under a macro call, in graph units relative to its top: step buttons on the first
@@ -1005,7 +1047,7 @@ pub fn paint_stack(paint: &mut Paint, t: &Pane, z: f64, rect: (f64, f64, f64, f6
 }
 
 /// The execution report of a node at the zones' pinned iterations.
-fn execution_of(t: &Pane, n: &p::Node) -> Option<Execution> {
+pub(crate) fn execution_of(t: &Pane, n: &p::Node) -> Option<Execution> {
     let records = t.records.as_ref()?;
     let chain: Vec<i64> = t.chains.get(&n.path).map(|c| c.iter().map(|x| t.saved.probe(x)).collect()).unwrap_or_default();
     let r = records.borrow().execution(&n.path, &chain);
@@ -1075,24 +1117,6 @@ pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl
     if o.out_wired || t.display.as_ref() != Some(&n.path) {
         paint_socket(paint, &theme, Some(&n.ty), o.out_wired, z, (x + wd - (1.0 * z), y + (PORT_Y * z)));
     }
-    // a ghost value: where the footer is not drawn, the value at the pinned iteration beside the out-port
-    if let Some(f) = &o.footer {
-        if shown != Level::Full && z_.is_none() && o.out_wired {
-            let yields = t.geo.wires.iter().any(|wi: &Wire| {
-                wi.from.as_ref() == Some(&n.path)
-                    && match &wi.into {
-                        Some(zone) => zone.len() < n.path.len() && n.path[..zone.len()] == zone[..],
-                        None => false,
-                    }
-            });
-            // not beside a card that yields to its zone's end bar: the bar's port is there
-            if !yields {
-                let ink_3 = theme::ink_3(&theme);
-                let fit = fitted(paint, ls, 72.0 * z, &f.value);
-                text_in(paint, ls, ink_3, x + wd + (8.0 * z), y + ((PORT_Y - 8.0) * z), 16.0 * z, &fit);
-            }
-        }
-    }
     // a literal binding is the header alone: its value in the field at the right
     if n.rows.len() == 1 && p::value_card(n) {
         let r = &n.rows[0];
@@ -1130,10 +1154,10 @@ pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl
             Some(zn) if pl.collapsed => paint_rail(paint, t, z, fs, x, body_y, wd, false, &zn.rail),
             Some(_) => {}
         }
-        if shown == Level::Full {
-            if let Some(f) = &o.footer {
-                paint_footer(paint, t, z, fs, f, &n.ty, p::CARD_PAD + lh, (x, y, wd, h));
-            }
+        // the footer's hairline; its texts and sparkline are nodes (`readout`)
+        if shown == Level::Full && o.footer.is_some() {
+            let fy = y + h - ((p::CARD_PAD + lh) * z) - (p::FOOT_HEIGHT * z);
+            paint.fill((x + 1.0) as f32, fy as f32, (wd - 2.0) as f32, 1.0, theme::faint_border(&theme));
         }
         if let Some((l, step)) = lens {
             paint_lens(paint, t, z, fs, l, step, (x, y + h - ((lh + p::CARD_PAD) * z), wd), lh);
@@ -1159,18 +1183,10 @@ pub fn zone_uses(zn: &p::Zone, names: &[String]) -> bool {
 
 /// The expanded zone's label row, selector, rail rows and ports, over its tint; the cards inside are
 /// wired directly across its edge.
-pub fn paint_zone_frame(paint: &mut Paint, t: &Pane, z: f64, fs: i64, footer: Option<&Footer>, n: &p::Node, zn: &p::Zone, out_wired: bool, rect: (f64, f64, f64, f64), probe: i64, count: i64) {
+pub fn paint_zone_frame(paint: &mut Paint, t: &Pane, z: f64, fs: i64, n: &p::Node, zn: &p::Zone, out_wired: bool, rect: (f64, f64, f64, f64), probe: i64, count: i64) {
     let theme = t.theme;
     let (x, y, wd, h) = rect;
     let execution = execution_of(t, n);
-    // the zone's own footer under its body
-    let h = match footer {
-        Some(f) => {
-            paint_footer(paint, t, z, fs, f, &n.ty, 0.0, (x, y, wd, h));
-            h - (p::FOOT_HEIGHT * z)
-        }
-        None => h,
-    };
     // the label clears the collection's in-port when a name feeds it
     let plain = zn.kind == ZoneKind::For;
     let label = p::label_row(zn);
@@ -1474,7 +1490,7 @@ pub fn paint_wire(paint: &mut Paint, t: &Pane, z: f64, at: &dyn Fn((f64, f64)) -
 }
 
 /// Whether a branch arm is the one the probes took.
-fn zone_taken(t: &Pane, node: &p::Node, zn: &p::Zone) -> bool {
+pub(crate) fn zone_taken(t: &Pane, node: &p::Node, zn: &p::Zone) -> bool {
     if zn.kind != ZoneKind::Branch {
         return false;
     }
