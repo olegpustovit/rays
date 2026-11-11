@@ -159,6 +159,10 @@ fn in_view(t: &Pane, slot: usize) -> bool {
 pub fn fixed(t: &Pane) -> Vec<Option<String>> {
     let hv = t.hovers.borrow();
     let mut out = Vec::new();
+    // the cards' slots are the build's geometry's (`cook` refuses another)
+    if hv.geo != geo_key(t) {
+        return out;
+    }
     for c in hv.cards.iter().filter(|c| in_view(t, c.slot)) {
         if let Item::Item(n) = &t.geo.items[c.slot].0.item {
             let tier = sp::execution_of(t, n).or_else(|| c.readout.footer.as_ref().and_then(|_| t.records.as_ref().and_then(|r| crate::scope_frame::footer_of(t, r, n).execution)));
@@ -180,7 +184,8 @@ pub fn fixed(t: &Pane) -> Vec<Option<String>> {
 pub fn cook(t: &Pane) -> bool {
     let Some(records) = &t.records else { return false };
     let mut hv = t.hovers.borrow_mut();
-    if hv.cards.iter().any(|c| c.readout.footer.is_some() && !in_view(t, c.slot)) {
+    // a geometry other than the build's: its cards' slots name other items (the content builds again)
+    if hv.geo != geo_key(t) || hv.cards.iter().any(|c| c.readout.footer.is_some() && !in_view(t, c.slot)) {
         return false;
     }
     for c in hv.cards.iter_mut() {
@@ -199,6 +204,11 @@ pub fn cooked(t: &Pane, ui: &mut Ui) -> bool {
     let hovers = t.hovers.clone();
     let mut hv = hovers.borrow_mut();
     let hv = &mut *hv;
+    if hv.geo != geo_key(t) {
+        // the content builds again on the new geometry: what a cook left is its
+        hv.cards.iter_mut().for_each(|c| c.readout.cooked = None);
+        return true;
+    }
     let mut fits = true;
     for c in hv.cards.iter_mut() {
         let Some(f) = c.readout.cooked.take() else { continue };
