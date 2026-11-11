@@ -65,9 +65,6 @@ impl Ui {
     }
 
     /// Step `i` of the theme's spacing scale (4, 8, 12, 16 by default) at its density.
-    // ponytail: the value row's hit shape and width (`value_control`, `value_control_w`, plain fns for
-    // `Size::Rel`) keep the default 12-point sides; at another density the field's box and its hit
-    // shape differ by the side's rounding (2 points at 0.84). A Rel with a captured side fixes it.
     pub fn space(&self, i: usize) -> f32 {
         let t = self.theme();
         (t.tokens.space[i.min(3)] * t.tokens.density).round()
@@ -115,7 +112,7 @@ impl Ui {
         if rows < 0 {
             panic!("Ui.table: negative row count");
         }
-        let row_h = 24.0;
+        let row_h = (self.theme().row_h * self.theme().tokens.density).round();
         let mut stops = vec![0.0; headers.len() + 1];
         for (i, header) in headers.iter().enumerate() {
             let width = 72.0f32.max(self.text_width(None, header) + 24.0);
@@ -201,20 +198,31 @@ pub fn label_y(font_size: i64, y: i64, h: i64) -> i64 {
 }
 
 pub fn value_column(w: i64) -> i64 {
-    112.min(0.max((w - 2 * SIDE - 8) / 2))
+    value_column_in(w - 2 * SIDE)
+}
+
+/// The label column of a row whose sides are taken off: `inner` is its width less both.
+fn value_column_in(inner: i64) -> i64 {
+    112.min(0.max((inner - 8) / 2))
 }
 
 pub fn value_control(r: IRect) -> IRect {
-    let (x, y, w, h) = r;
-    let cx = x + SIDE + value_column(w) + 8;
-    (cx, y + 2, 1.max(x + w - SIDE - cx), 1.max(h - 4))
+    value_control_at(r, SIDE)
 }
 
-/// The width of `value_control`'s control as a flow child of a row laid out from its end
-/// (`end_row(row, SIDE)`): `inner` is the row's width less that `SIDE`.
+/// `value_control` with `side` points at each end of the row (`Ui::space(2)`, the theme's density).
+pub fn value_control_at(r: IRect, side: i64) -> IRect {
+    let (x, y, w, h) = r;
+    let cx = x + side + value_column_in(w - 2 * side) + 8;
+    (cx, y + 2, 1.max(x + w - side - cx), 1.max(h - 4))
+}
+
+/// The width of `value_control_at`'s control as a flow child of a row padded by the side at both
+/// ends and laid out from its end: `inner` is the row's width less both sides, so one plain
+/// function serves every density.
 pub fn value_control_w(inner: f32) -> f32 {
-    let w = inner as i64 + SIDE;
-    1.max(w - 2 * SIDE - 8 - value_column(w)) as f32
+    let inner = inner as i64;
+    1.max(inner - 8 - value_column_in(inner)) as f32
 }
 
 pub fn toggle_control(r: IRect) -> IRect {
@@ -536,7 +544,7 @@ impl Ui {
         // the sheet has no hover state on a section header
         let (look, chevron) = (self.theme().section.idle, self.theme().chevron.idle);
         self.set_look(&title, look, State::default());
-        self.node_mut(&title).inset = Edges { l: SIDE as f32, t: gap, ..Edges::default() };
+        self.node_mut(&title).inset = Edges { l: self.space(2), t: gap, ..Edges::default() };
         self.text(&title, label);
         self.set_role(&title, Role::Heading, st::EXPANDABLE | if open { st::EXPANDED } else { 0 });
         self.end_row(&title, self.space(2));
@@ -766,7 +774,7 @@ impl Ui {
         let look = self.theme().label.idle;
         let row = self.node(
             text,
-            Node { h: Size::Px(gap + self.row_height() as f32), look, inset: Edges { l: SIDE as f32, t: gap, r: 0.0, b: 0.0 }, role: Role::Label, ..Node::DEFAULT },
+            Node { h: Size::Px(gap + self.row_height() as f32), look, inset: Edges { l: self.space(2), t: gap, r: 0.0, b: 0.0 }, role: Role::Label, ..Node::DEFAULT },
         );
         self.text(&row, shown(text));
     }
@@ -781,7 +789,7 @@ impl Ui {
         let row = self.node("footer", Node { h: Size::Px(1.0 + rh), margin: Edges { t: 4.0, ..Edges::ZERO }, look: rule, role: Role::StatusBar, ..Node::DEFAULT });
         let size = key.font.points(self.font_size());
         let saved = self.enter(&row);
-        let mut pen = SIDE as f32;
+        let mut pen = self.space(2);
         for (i, (k, what)) in hints.iter().enumerate() {
             let kw = self.text_width(Some(size), k);
             self.part(int_key(row.box_key, 2 * i as i64), (pen, 1.0), Size::Px(kw.max(1.0)), rh, key, Edges::default(), k);
@@ -874,7 +882,7 @@ impl Ui {
         let on = State { checked: value, ..State::default() };
         let (look, track, knob) = (*t.toggle.pick(hovered), *t.switch.pick(on), *t.knob.pick(on));
         self.set_look(&row, look, hovered);
-        self.node_mut(&row).inset = Edges { l: SIDE as f32, ..Edges::default() };
+        self.node_mut(&row).inset = Edges { l: side as f32, ..Edges::default() };
         self.text(&row, shown(text));
         self.set_role(&row, Role::Toggle, st::CHECKABLE | if value { st::CHECKED } else { 0 });
         // the 28 x 14 switch 12 from the row's end, the knob 3 in from its side

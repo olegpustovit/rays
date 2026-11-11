@@ -13,7 +13,7 @@ use crate::a11y::state as st;
 use crate::draw::Fit;
 use crate::geom::color;
 use crate::ui_core::*;
-use crate::ui_kit::{text_only, SIDE};
+use crate::ui_kit::text_only;
 use input::{Event, Key};
 use std::ops::RangeInclusive;
 
@@ -76,10 +76,10 @@ impl Ui {
         Bar { color: thumb.fill, radius: thumb.radius[0], width: t.scrollbar_w, gap: t.scrollbar_gap, margin: 2.0, whole: true }
     }
 
-    /// A kit row `rh` high laid out as a row: `SIDE` in from both ends, children centred, 8 apart.
+    /// A kit row `rh` high laid out as a row: `space(2)` in from both ends, children centred, 8 apart.
     fn kit_line(&mut self, key: i64, flags: Flags, role: Role) -> Handle {
         let rh = self.row_height() as f32;
-        let side = SIDE as f32;
+        let side = self.space(2);
         self.node_keyed(key, Node { flags, h: Size::Px(rh), axis: Axis::Row, align: Align::Center, padding: Edges { l: side, r: side, ..Edges::ZERO }, gap: self.space(1), role, ..Node::DEFAULT })
     }
 
@@ -295,7 +295,7 @@ impl Ui {
     pub fn tabs(&mut self, label: &str, tabs: &[&str], selected: usize) -> usize {
         let rh = self.row_height() as f32;
         let (bar_look, states) = (self.theme().header.idle, self.theme().tab);
-        let bar = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY, h: Size::Px(rh), axis: Axis::Row, padding: Edges { l: SIDE as f32, r: SIDE as f32, ..Edges::ZERO }, gap: self.space(2), look: bar_look, role: Role::TabList, ..Node::DEFAULT });
+        let bar = self.node(label, Node { flags: FOCUSABLE | TAB_ONLY, h: Size::Px(rh), axis: Axis::Row, padding: Edges { l: self.space(2), r: self.space(2), ..Edges::ZERO }, gap: self.space(2), look: bar_look, role: Role::TabList, ..Node::DEFAULT });
         self.a11y_name(&bar, shown(label));
         let s = self.signal(&bar);
         let mut sel = selected.min(tabs.len().saturating_sub(1));
@@ -369,7 +369,7 @@ impl Ui {
         let mut picked = None;
         let menu = self.anchored("menu", anchor, place, Size::Px(width), Size::Fit, &mut |ui| {
             for (i, item) in items.iter().enumerate() {
-                let n = ui.node_keyed(int_key(ui.current_seed(), i as i64), Node { flags: ROW_FLAGS, h: Size::Px(rh), inset: Edges { l: SIDE as f32, ..Edges::ZERO }, role: Role::MenuItem, ..Node::DEFAULT });
+                let n = ui.node_keyed(int_key(ui.current_seed(), i as i64), Node { flags: ROW_FLAGS, h: Size::Px(rh), inset: Edges { l: ui.space(2), ..Edges::ZERO }, role: Role::MenuItem, ..Node::DEFAULT });
                 let s = ui.signal(&n);
                 if s.clicked {
                     picked = Some(i);
@@ -553,7 +553,7 @@ impl Ui {
         if let Some(row) = self.box_of_key(self.current_seed()) {
             self.set_role(&row, Role::Unknown, 0);
         }
-        let n = self.node("row", Node { flags: ROW_FLAGS, h: Size::Px(rh), axis: Axis::Row, align: Align::Center, padding: Edges { l: inset, r: SIDE as f32, ..Edges::ZERO }, gap: 4.0, role, a11y, ..Node::DEFAULT });
+        let n = self.node("row", Node { flags: ROW_FLAGS, h: Size::Px(rh), axis: Axis::Row, align: Align::Center, padding: Edges { l: inset, r: self.space(2), ..Edges::ZERO }, gap: 4.0, role, a11y, ..Node::DEFAULT });
         let s = self.signal(&n);
         self.style(&n, states, State { hovered: s.hovered, pressed: s.held, checked, focused: cursor, ..State::default() });
         (n, s)
@@ -614,7 +614,7 @@ impl Ui {
         let states = self.theme().listbox;
         let saved = self.enter(&frame);
         let body = self.list("rows", count, rh, &mut |ui, i| {
-            let (n, rs) = ui.virtual_row(&states, selected[i], focused && i == c, SIDE as f32, Role::ListItem, st::SELECTABLE | if selected[i] { st::SELECTED } else { 0 });
+            let (n, rs) = ui.virtual_row(&states, selected[i], focused && i == c, ui.space(2), Role::ListItem, st::SELECTABLE | if selected[i] { st::SELECTED } else { 0 });
             if rs.clicked {
                 let keys = ui.press_keys(&n);
                 let command = ui.command_modifiers(&keys);
@@ -719,7 +719,7 @@ impl Ui {
             let (has, is_open) = (nodes[node].children, open.get(node).copied().unwrap_or(false));
             let on = *selected == Some(node);
             let a11y = st::SELECTABLE | if on { st::SELECTED } else { 0 } | if has { st::EXPANDABLE | if is_open { st::EXPANDED } else { 0 } } else { 0 };
-            let inset = SIDE as f32 + 14.0 * nodes[node].depth as f32;
+            let inset = ui.space(2) + 14.0 * nodes[node].depth as f32;
             let (n, rs) = ui.virtual_row(&states, on, focused && i == c, inset, Role::TreeItem, a11y);
             let inner = ui.enter(&n);
             let disclosure = ui.node("open", Node { flags: if has { ROW_FLAGS } else { NO_FLAGS }, w: Size::Px(10.0), h: Size::Grow, look: if has { chevron } else { Look::NONE }, ..Node::DEFAULT });
@@ -853,7 +853,7 @@ impl Ui {
             let t = ui.theme();
             let (bar, states) = (t.dialog.idle, t.button);
             let rh = ui.row_height() as f32;
-            let head = ui.node("title", Node { h: Size::Px(rh + 8.0), look: bar, inset: Edges { l: SIDE as f32, ..Edges::ZERO }, role: Role::Heading, ..Node::DEFAULT });
+            let head = ui.node("title", Node { h: Size::Px(rh + 8.0), look: bar, inset: Edges { l: ui.space(2), ..Edges::ZERO }, role: Role::Heading, ..Node::DEFAULT });
             ui.text(&head, shown(title));
             body(ui);
             let row = ui.node("buttons", Node { h: Size::Px(rh + 12.0), axis: Axis::Row, align: Align::Center, justify: Justify::End, gap: 4.0, padding: Edges { r: 8.0, ..Edges::ZERO }, ..Node::DEFAULT });
@@ -882,17 +882,17 @@ impl Ui {
         if items.is_empty() {
             return None;
         }
-        let (w, h) = self.view_size();
-        let x = if self.rtl() { 12.0 } else { w - 12.0 };
-        let place = Placement { side: Side::Above, align: if self.rtl() { Align::Start } else { Align::End }, gap: 0.0, margin: 12.0, flip: false };
+        let ((w, h), m) = (self.view_size(), self.space(2));
+        let x = if self.rtl() { m } else { w - m };
+        let place = Placement { side: Side::Above, align: if self.rtl() { Align::Start } else { Align::End }, gap: 0.0, margin: m, flip: false };
         let (look, states) = (self.theme().toast.idle, self.theme().toast);
         let rh = self.row_height() as f32;
         let mut gone = None;
         let now = self.now();
-        let stack = self.anchored(label, Rect::new(x, h - 12.0, 0.0, 0.0), place, Size::Px(260.0), Size::Fit, &mut |ui| {
+        let stack = self.anchored(label, Rect::new(x, h - m, 0.0, 0.0), place, Size::Px(260.0), Size::Fit, &mut |ui| {
             for (i, item) in items.iter().enumerate() {
                 // keyed by text, so dropping one keeps the others' times
-                let n = ui.node_keyed(key_of(ui.current_seed(), item), Node { flags: ROW_FLAGS | FIT_TEXT, h: Size::Px(rh + 12.0), look, inset: Edges { l: SIDE as f32, r: SIDE as f32, ..Edges::ZERO }, role: Role::StatusBar, ..Node::DEFAULT });
+                let n = ui.node_keyed(key_of(ui.current_seed(), item), Node { flags: ROW_FLAGS | FIT_TEXT, h: Size::Px(rh + 12.0), look, inset: Edges { l: ui.space(2), r: ui.space(2), ..Edges::ZERO }, role: Role::StatusBar, ..Node::DEFAULT });
                 let s = ui.signal(&n);
                 ui.style(&n, &states, State { hovered: s.hovered, ..State::default() });
                 ui.text(&n, item);
