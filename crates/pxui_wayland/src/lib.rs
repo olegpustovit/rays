@@ -167,6 +167,7 @@ unsafe extern "C" {
     fn rw_protocols(window: *mut c_void) -> i32;
     fn rw_state(window: *mut c_void, width: *mut i32, height: *mut i32, scale120: *mut i32, rate: *mut i32, delay: *mut i32);
     fn rw_dispatch(window: *mut c_void, timeout_ms: i32) -> i32;
+    fn rw_set_wake_fd(window: *mut c_void, fd: i32);
     fn rw_next(window: *mut c_void, out: *mut RawEvent) -> i32;
     fn rw_event_free(text: *mut c_char);
     fn rw_resize(window: *mut c_void, width: i32, height: i32);
@@ -387,6 +388,14 @@ impl Window {
             _ => {}
         }
         true
+    }
+
+    /// Also wake `wait` when `fd` (the accessibility bus connection) is readable; -1 stops.
+    pub fn set_wake_fd(&mut self, fd: i32) {
+        if let Ok(raw) = self.live() {
+            // SAFETY: a live window; the shim only polls the descriptor.
+            unsafe { rw_set_wake_fd(raw, fd) };
+        }
     }
 
     /// Sleeps until an event arrives, a key repeat is due or `deadline` (seconds on the `time` clock) passes;

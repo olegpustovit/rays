@@ -96,6 +96,7 @@ typedef struct rw {
   struct wl_data_source *source;
   char *source_text;
   int paste_fd;
+  int wake_fd; /* a descriptor the host also sleeps on (the accessibility bus), or -1 */
   char *paste_buf;
   size_t paste_len;
   struct { int fd; char *text; size_t at, len; } writes[MAX_WRITES];
@@ -597,6 +598,7 @@ rw *rw_open(const char *title, int32_t width, int32_t height, int32_t *error) {
   rw *w = calloc(1, sizeof *w);
   if (!w) { *error = 4; return NULL; }
   w->paste_fd = -1;
+  w->wake_fd = -1;
   w->width = width;
   w->height = height;
   w->cursor_shape = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
@@ -712,10 +714,12 @@ int32_t rw_dispatch(rw *w, int32_t timeout_ms) {
   while (wl_display_prepare_read(d) != 0)
     if (wl_display_dispatch_pending(d) < 0) return -1;
   if (wl_display_flush(d) < 0 && errno != EAGAIN) { wl_display_cancel_read(d); return -1; }
-  struct pollfd fds[2 + MAX_WRITES];
+  struct pollfd fds[3 + MAX_WRITES];
   int count = 0;
   fds[count++] = (struct pollfd){.fd = wl_display_get_fd(d), .events = POLLIN};
   if (w->paste_fd >= 0) fds[count++] = (struct pollfd){.fd = w->paste_fd, .events = POLLIN};
+  /* readable until the host serves it: waking is all poll has to do */
+  if (w->wake_fd >= 0) fds[count++] = (struct pollfd){.fd = w->wake_fd, .events = POLLIN};
   for (int i = 0; i < w->write_count; ++i) fds[count++] = (struct pollfd){.fd = w->writes[i].fd, .events = POLLOUT};
   /* Events queued by an earlier dispatch must not wait for the socket. */
   if (w->queue_len > w->queue_head) timeout_ms = 0;
@@ -731,6 +735,9 @@ int32_t rw_dispatch(rw *w, int32_t timeout_ms) {
   wl_display_flush(d);
   return w->failed ? -1 : 0;
 }
+
+/* Also wake rw_dispatch when fd is readable (-1: no such descriptor). */
+void rw_set_wake_fd(rw *w, int32_t fd) { w->wake_fd = fd; }
 
 /* Pops the oldest event into *out; 0 when the queue is empty. */
 int32_t rw_next(rw *w, rw_event *out) {
