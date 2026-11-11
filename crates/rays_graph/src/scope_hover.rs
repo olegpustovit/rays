@@ -303,6 +303,8 @@ pub struct Hovers {
     pub patches: u64,
     /// the geometry the build read (its items and wires), by address
     pub geo: (usize, usize),
+    /// the items `geo` names after `with_arguments` replaced the build's (kept alive while named)
+    items: Option<Rc<Vec<Item3>>>,
     /// the selection and hover the cards show (`show`)
     sel: u64,
     hover: (i64, Option<usize>),
@@ -343,7 +345,7 @@ impl Hovers {
         self.cards.clear();
         self.keys.clear();
         self.frame_titles.clear();
-        self.geo = geo_key(t);
+        (self.geo, self.items) = (geo_key(t), None);
         self.sel = u64::MAX;
         self.hover = (0, None);
     }
@@ -387,6 +389,15 @@ impl Hovers {
             self.keys.push(c.tile.box_key);
             self.keys.extend(c.ports.iter().map(|q| q.b.box_key));
         }
+    }
+}
+
+/// `with_arguments` replaced the items one for one (the same slots, sizes and wires): the cards the
+/// build left name the same items, so a cook and the hover go on reading them.
+pub fn same_slots(t: &Pane, items: &Rc<Vec<Item3>>) {
+    let mut hv = t.hovers.borrow_mut();
+    if hv.geo == geo_key(t) {
+        (hv.geo.0, hv.items) = (Rc::as_ptr(items) as *const u8 as usize, Some(items.clone()));
     }
 }
 

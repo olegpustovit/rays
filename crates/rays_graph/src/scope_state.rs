@@ -441,12 +441,18 @@ pub fn content_drag(d: &Option<Drag>) -> Option<&Drag> {
 /// (`scope_hover`); the pan's pointer grab is no part of what it shows. Text measurements, the
 /// chain memo and the stats are caches or outputs, not inputs.
 pub fn builds_same(a: &Pane, b: &Pane) -> bool {
+    Rc::ptr_eq(&a.geo.items, &b.geo.items) && a.scope.as_ref().map(Rc::as_ptr) == b.scope.as_ref().map(Rc::as_ptr) && Rc::ptr_eq(&a.layout, &b.layout) && same_but_arguments(a, b)
+}
+
+/// `builds_same` but for the arguments `with_arguments` wrote (the scope, layout and items it
+/// replaces one for one): what a kept build can follow by patches.
+pub fn same_but_arguments(a: &Pane, b: &Pane) -> bool {
     let (g, h) = (&a.geo, &b.geo);
-    let geo = Rc::ptr_eq(&g.items, &h.items) && Rc::ptr_eq(&g.wires, &h.wires) && Rc::ptr_eq(&g.origins, &h.origins) && Rc::ptr_eq(&g.inside, &h.inside)
+    let geo = Rc::ptr_eq(&g.wires, &h.wires) && Rc::ptr_eq(&g.origins, &h.origins) && Rc::ptr_eq(&g.inside, &h.inside)
         && Rc::ptr_eq(&g.slot, &h.slot) && Rc::ptr_eq(&g.tiles, &h.tiles) && Rc::ptr_eq(&g.reach, &h.reach) && Rc::ptr_eq(&g.read, &h.read);
     geo && (a.x, a.y, a.width, a.height, a.guide, a.framed, a.geo_fs, a.geo_cold, a.tags) == (b.x, b.y, b.width, b.height, b.guide, b.framed, b.geo_fs, b.geo_cold, b.tags)
-        && a.theme == b.theme && a.key == b.key && a.scope.as_ref().map(Rc::as_ptr) == b.scope.as_ref().map(Rc::as_ptr) && Rc::ptr_eq(&a.saved, &b.saved) && a.records.is_some() == b.records.is_some() && a.cook == b.cook
-        && Rc::ptr_eq(&a.chains, &b.chains) && Rc::ptr_eq(&a.folds, &b.folds) && Rc::ptr_eq(&a.counts, &b.counts) && Rc::ptr_eq(&a.layout, &b.layout)
+        && a.theme == b.theme && a.key == b.key && Rc::ptr_eq(&a.saved, &b.saved) && a.records.is_some() == b.records.is_some() && a.cook == b.cook
+        && Rc::ptr_eq(&a.chains, &b.chains) && Rc::ptr_eq(&a.folds, &b.folds) && Rc::ptr_eq(&a.counts, &b.counts)
         && a.lens == b.lens && a.display == b.display && content_drag(&a.drag) == content_drag(&b.drag) && a.editing == b.editing && a.switches == b.switches
         && a.carry_lit == b.carry_lit && a.carry_hot == b.carry_hot && a.failed == b.failed && a.hinting == b.hinting && a.back == b.back
 }
@@ -1084,7 +1090,9 @@ pub fn with_arguments(changes: &[(Path, ArgKey, S)], t: &mut Pane) {
             None => (pl.clone(), *x, *y),
         })
         .collect();
-    let geo = Geo { items: Rc::new(items), ..t.geo.clone() };
+    let items = Rc::new(items);
+    crate::scope_hover::same_slots(t, &items);
+    let geo = Geo { items, ..t.geo.clone() };
     (t.scope, t.layout, t.geo) = (Some(scope), Rc::new(layout), geo);
 }
 

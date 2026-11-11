@@ -1258,7 +1258,7 @@ pub fn input_inspector(ui: &mut Ui, graph: &str, width: f32, scope: &p::Scope, p
                     Ty::Float => Some(param::number::Kind::Float),
                     _ => None,
                 };
-                text = rays_graph::scope_frame::num_field(ui, (cx as f64, cy as f64), cw as f64, 20.0, None, kind, None, false, "ws-input-default-field", &shown).unwrap_or_else(|| shown.clone());
+                text = rays_graph::scope_frame::num_field(ui, (cx as f64, cy as f64), cw as f64, 20.0, None, kind, None, false, "ws-input-default-field", &shown, None).unwrap_or_else(|| shown.clone());
             }
             _ => {
                 let o = pxui::ui::ValueFieldOpts { left: float_of(&shown).is_none(), ..Default::default() };

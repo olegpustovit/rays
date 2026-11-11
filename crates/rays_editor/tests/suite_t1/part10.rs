@@ -329,8 +329,95 @@ fn document_scrub() {
     r.close();
 }
 
+/// A drag of `at` by `n` measured frames (after a press and two frames the drag takes in), its
+/// release and four frames after: the measured cost, how often the views named `name` rebuilt and
+/// how far `counter` moved in the measured frames.
+fn scrub_at(r: &mut Run, at: (f64, f64), n: usize, name: &'static str, counter: &dyn Fn(&Run) -> u64) -> (Cost, usize, u64) {
+    let rebuilt = std::cell::Cell::new(0);
+    r.stepb(&[MouseButton::LeftButton], at, vec![Event::PointerMoved(at), Event::PointerPressed(MouseButton::LeftButton, at)]);
+    for i in 0..2 {
+        let p = (at.0 + 1.0 + i as f64, at.1);
+        r.stepb(&[MouseButton::LeftButton], p, vec![Event::PointerMoved(p)]);
+    }
+    let before = counter(r);
+    let cost = measure(r, n, &|r, i| {
+        let p = (at.0 + 3.0 + 2.0 * i as f64, at.1);
+        r.stepb(&[MouseButton::LeftButton], p, vec![Event::PointerMoved(p)]);
+        rebuilt.set(rebuilt.get() + r.e.core.ui.borrow().rebuilt_named(name));
+    });
+    let counted = counter(r) - before;
+    let end = (at.0 + 3.0 + 2.0 * n as f64, at.1);
+    r.step(end, vec![Event::PointerMoved(end), Event::PointerReleased(MouseButton::LeftButton, end)]);
+    for _ in 0..4 {
+        r.step(end, vec![Event::PointerMoved(end)]);
+    }
+    (cost, rebuilt.get(), counted)
+}
+
+/// One undo (Cmd-Z) and four frames after it.
+fn undo_once(r: &mut Run) {
+    r.step_full(&[], &[input::Key::Meta], (450., 300.), vec![ch('z')]);
+    for _ in 0..4 {
+        r.step((450., 300.), vec![]);
+    }
+}
+
+/// Scrubbing a number on a graph card (a `sop/uv_sphere`'s `:radius`): each frame of the drag
+/// writes the document (the inspector follows), the card and the graph's content stay kept (the field
+/// patched, `kept_drag`), and the scrub is one undo step. The first pass verifies the kept views
+/// (`verify_views`), the second is measured as the app runs.
+fn card_scrub() {
+    let text = r#"(workspace cards (graph g :context sop (let* [ball (sop/uv_sphere :radius 0.5 :segments 8 :rings 4)] ball)) (graph editor :context editor (ui/workspace (ui/split "horizontal" (ui/graph "g") (ui/inspector) :second_size 260))))"#;
+    let mut r = Run::new(editor(text));
+    for i in 0..30 {
+        r.step((450. + (i % 2) as f64, 300.), vec![]);
+    }
+    let n = 20;
+    let radius = |r: &Run| r.source().split(":radius ").nth(1).and_then(|t| t.split([' ', ')']).next()).unwrap_or("").to_owned();
+    let ball: Vec<flow_syntax::symbol::Symbol> = vec!["g".into(), "ball".into()];
+    let pane = |r: &Run| {
+        let core: &rays_editor::editor_model::EditorModel = &r.e.core;
+        rays_editor::editor_model::pane_view(&core.into()).clone()
+    };
+    // the field: the row's middle, half a field in from the card's right edge
+    let at = {
+        let t = pane(&r);
+        let node = rays_graph::scope_state::node_of(&t, &ball).unwrap_or_else(|| fail("the ball card"));
+        let i = node.rows.iter().position(|r| r.label == "radius").unwrap_or_else(|| fail("the radius row"));
+        let (_, y) = rays_graph::scope_pane::inspect::row_center(&t, &ball, i).unwrap_or_else(|| fail("the radius row's place"));
+        let (x, _, w, _) = rays_graph::scope_pane::inspect::box_of(&t, &ball).unwrap_or_else(|| fail("the ball card's box"));
+        (x + w - (9.0 + 38.0) * t.zoom, y)
+    };
+    let (start, history) = (radius(&r), r.undo_label());
+    let mut scrubbed = None;
+    for pass in 0..2 {
+        r.e.core.ui.borrow_mut().verify_views(pass == 0);
+        r.step(at, vec![Event::PointerMoved(at)]);
+        let (cost, card, content) = scrub_at(&mut r, at, n, "t:g/ball", &|r| rays_graph::scope_pane::inspect::content_builds(&pane(r)));
+        let live = radius(&r);
+        check(live.parse::<f64>().is_ok_and(|v| v > 0.5), &format!("the card scrub did not write the document: radius {live}"));
+        undo_once(&mut r);
+        check(radius(&r) == start && r.undo_label() == history, &format!("one undo did not restore the card's scrubbed radius: {} ({:?})", radius(&r), r.undo_label()));
+        scrubbed = Some((cost, card, content, live));
+    }
+    let (scrub, card, content, live) = scrubbed.unwrap_or_else(|| fail("the measured scrub"));
+    report("card scrub", &scrub, n);
+    // the same edits written by the host, a pointer frame each
+    let edit = measure(&mut r, n, &|r, i| {
+        let op = flow_graph::flow_edit::Op::SetArg { node: vec!["g".into(), "ball".into()], key: flow_graph::flow_edit::ArgKey::Kw("radius".into()), sub: vec![], value: flow_syntax::syntax::make(flow_syntax::syntax::Draft::Num(format!("{:.2}", 0.6 + 0.1 * i as f64))) };
+        r.e = rays_editor::editor::edit(r.e.clone(), &op).unwrap_or_else(|m: String| fail(&m));
+        r.step((450. + (i % 2) as f64, 300.), vec![Event::PointerMoved((450. + (i % 2) as f64, 300.))]);
+    });
+    report("card edit by the host", &edit, n);
+    eprintln!("ui_frames card scrub: radius {start} -> {live}, {card} rebuilds of the card's view, {content} content builds in {n} frames");
+    check(card == 0 && content == 0, &format!("the card scrub rebuilt the card's view {card} times and the graph's content {content} times in {n} frames"));
+    check(scrub.allocs <= edit.allocs, &format!("the card scrub allocated {} a frame (the host's edits {})", scrub.allocs, edit.allocs));
+    r.close();
+}
+
 pub fn run_ui_frames() {
     document_scrub();
+    card_scrub();
     workspace("basic", &sketch("basic"));
     workspace("empty", include_str!("../../../rays_bin/src/empty.rays"));
     workspace("floating", &with_editor("(let* [main (ui/graph) ins (ui/inspector) window (ui/floating ins) tiles (ui/tile main window)] (ui/workspace tiles))"));

@@ -40,8 +40,10 @@ fn left_button(sg: &Signal) -> bool {
 
 /// The number field of a row, the kit's (`param::number`, as `Rays_shell.Kit.number`): the kind is the
 /// row's type, and only a literal with no typed row behind it is read by its spelling. `Some text` the
-/// frame the number changed.
-pub fn num_field(ui: &mut Ui, at: (f64, f64), w: f64, h: f64, size: Option<i64>, kind: Option<Kind>, range: Option<(f64, f64)>, nonfinite: bool, label: &str, text: &str) -> Option<String> {
+/// frame the number changed. With `follow` (the key of the box it is built in and the change a value
+/// makes) it is a `kept_drag` field: a press holds it and the pane follows its drag on kept cards
+/// (`follow_drag`).
+pub fn num_field(ui: &mut Ui, at: (f64, f64), w: f64, h: f64, size: Option<i64>, kind: Option<Kind>, range: Option<(f64, f64)>, nonfinite: bool, label: &str, text: &str, follow: Option<(i64, &dyn Fn(String) -> Change)>) -> Option<String> {
     let nonfinite = nonfinite && kind != Some(Kind::Int) && range.is_none();
     let kind = match kind {
         Some(k) => k,
@@ -57,12 +59,84 @@ pub fn num_field(ui: &mut Ui, at: (f64, f64), w: f64, h: f64, size: Option<i64>,
         Some(f) => f.is_finite() || nonfinite,
         None => false,
     };
+    let field = follow.map(|(seed, _)| pxui::ui_core::key_of(seed, label));
+    // a held number scrubs by the range it had at the press (a literal's range follows its value)
+    let scrub_range = HELD.with(|h| h.borrow().as_ref().filter(|h| Some(h.field) == field).map_or(range, |h| h.range));
     let mut o = ValueFieldOpts::default();
     o.size = size;
+    o.kept_drag = follow.is_some();
     o.fraction = range.and_then(|r| param::number::fraction(r, text)).map(|f| f as f32);
-    o.scrub = Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, range, origin, dx as f64, fine)));
+    o.scrub = Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, scrub_range, origin, dx as f64, fine)));
     let text2 = ui.value_field(p32(at), w as f32, h as f32, &o, &valid, label, text).0;
+    // (a verifying run of a kept card leaves the held number to the pane's patch)
+    if let (Some(field), Some((seed, edit)), false) = (field, follow, ui.verifying()) {
+        let (pressed, holding) = ui.box_of_key(field).map(|b| ui.signal(&b)).map_or((false, false), |s| (s.pressed, s.held));
+        HELD.with(|h| {
+            let mut h = h.borrow_mut();
+            match h.as_mut() {
+                _ if pressed => *h = Some(Held { field, tile: seed, kind, range, size, nonfinite, origin: text.to_owned(), last: text2.clone(), edit: edit(text.to_owned()), patched: false }),
+                Some(mine) if mine.field == field && holding => mine.last = text2.clone(),
+                Some(mine) if mine.field == field => *h = None,
+                _ => {}
+            }
+        });
+    }
     if text2 != text && valid(&text2) { Some(text2) } else { None }
+}
+
+/// The `kept_drag` number of a card the pointer holds, as its press built it: its field's key, the
+/// tile it is in, how it scrubs and shows, the text the scrub starts from, the last text it wrote,
+/// the change its press's value made, and whether the last frame of its drag was shown by a patch.
+struct Held {
+    field: i64,
+    tile: i64,
+    kind: Kind,
+    range: Option<(f64, f64)>,
+    size: Option<i64>,
+    nonfinite: bool,
+    origin: String,
+    last: String,
+    edit: Change,
+    patched: bool,
+}
+
+thread_local! {
+    // ponytail: one held number per thread (the pointer holds one field), found by its field's key
+    static HELD: std::cell::RefCell<Option<Held>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The held number is a card's of this pane and dragged this frame (`Ui::field_drag`).
+fn held_drag(t: &Pane, ui: &Ui) -> bool {
+    HELD.with(|h| {
+        h.borrow().as_ref().is_some_and(|h| t.hovers.borrow().cards.iter().any(|c| c.tile.box_key == h.tile) && ui.box_of_key(h.field).is_some_and(|b| ui.field_drag(&b).is_some()))
+    })
+}
+
+/// A frame of the held number's drag on kept cards: its value as its build would read it, the field
+/// patched (`patched` false when a patch cannot show it: the content builds next frame) and the
+/// change it makes, when the value moved.
+fn follow_drag(ui: &mut Ui) -> Option<Change> {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        let h = h.as_mut()?;
+        let field = ui.box_of_key(h.field)?;
+        let (_, dx) = ui.field_drag(&field)?;
+        let fine = ui.press_keys(&field).contains(&Key::Shift);
+        let text = param::number::scrub(h.kind, h.range, &h.origin, dx as f64, fine);
+        if text == h.last {
+            h.patched = true;
+            return None;
+        }
+        let o = ValueFieldOpts { size: h.size, fraction: h.range.and_then(|r| param::number::fraction(r, &text).map(|f| f as f32)), ..ValueFieldOpts::default() };
+        h.patched = ui.patch_field(&field, &o, &text);
+        let valid = s::number_value(&text).is_some_and(|f| f.is_finite() || h.nonfinite);
+        h.last = text.clone();
+        let mut edit = h.edit.clone();
+        if let Change::SyntaxEdit(e::Op::SetArg { value, .. } | e::Op::SetInputDefault { value, .. }) = &mut edit {
+            *value = number_syntax(text);
+        }
+        valid.then_some(edit)
+    })
 }
 
 /// What a row's field is: its type's kind (a vector's cells are floats).
@@ -440,7 +514,7 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
 }
 
 /// The live editors of a row: a number, a vector of numbers, a flag.
-pub fn row_fields_of(ui: &mut Ui, z: f64, pl: &Placed, n: &p::Node, r: &p::Row, name: &str, ry: f64, size: i64) -> Vec<Change> {
+pub fn row_fields_of(ui: &mut Ui, tile: i64, z: f64, pl: &Placed, n: &p::Node, r: &p::Row, name: &str, ry: f64, size: i64) -> Vec<Change> {
     let at = sp::value_x(pl.w) * z;
     let vw = sp::FIELD_W * z;
     let h = sp::FIELD_H * z;
@@ -451,7 +525,8 @@ pub fn row_fields_of(ui: &mut Ui, z: f64, pl: &Placed, n: &p::Node, r: &p::Row, 
         if let Some(ex) = &r.expr {
             match &ex.node {
                 SNode::Num(text) => {
-                    return match num_field(ui, (at, ay), vw, h, Some(size), kind_of(r), range_of(r), nonfinite, &format!("f{}", name), ex.name(*text)) {
+                    let edit = |t: String| set(Vec::new(), number_syntax(t));
+                    return match num_field(ui, (at, ay), vw, h, Some(size), kind_of(r), range_of(r), nonfinite, &format!("f{}", name), ex.name(*text), Some((tile, &edit))) {
                         Some(text2) => vec![set(Vec::new(), number_syntax(text2))],
                         None => Vec::new(),
                     };
@@ -466,7 +541,8 @@ pub fn row_fields_of(ui: &mut Ui, z: f64, pl: &Placed, n: &p::Node, r: &p::Row, 
                     let mut out = Vec::new();
                     for (c, &el) in elems.iter().enumerate() {
                         if let SNode::Num(text) = ex.arena().row(el).node {
-                            if let Some(text2) = num_field(ui, (at + (c as f64 * (cw + gap)), ay), cw, h, Some(size), kind_of(r), None, nonfinite, &format!("f{}.{}", name, c), ex.name(text)) {
+                            let edit = |t: String| set(vec![c as i64], number_syntax(t));
+                            if let Some(text2) = num_field(ui, (at + (c as f64 * (cw + gap)), ay), cw, h, Some(size), kind_of(r), None, nonfinite, &format!("f{}.{}", name, c), ex.name(text), Some((tile, &edit))) {
                                 out.push(set(vec![c as i64], number_syntax(text2)));
                             }
                         }
@@ -536,7 +612,7 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
             // a literal binding: its value is the field of its header, at body size
             let saved = ui.enter(&tile);
             for r in &n.rows {
-                fields.extend(row_fields_of(ui, z, pl, n, r, "v", 0.0, fs));
+                fields.extend(row_fields_of(ui, tile.box_key, z, pl, n, r, "v", 0.0, fs));
             }
             ui.leave(saved);
         }
@@ -545,7 +621,7 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
             let top = rows_top(n, 0.0);
             for (k, line) in pl.lines.iter().enumerate() {
                 if let p::Line::Row(i, r) = line {
-                    fields.extend(row_fields_of(ui, z, pl, n, r, &i.to_string(), top + (k as f64 * p::ROW_HEIGHT), 4.max(fs - 2)));
+                    fields.extend(row_fields_of(ui, tile.box_key, z, pl, n, r, &i.to_string(), top + (k as f64 * p::ROW_HEIGHT), 4.max(fs - 2)));
                 }
             }
             ui.leave(saved);
@@ -555,8 +631,9 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
                 if let SNode::Num(text) = &d.node {
                     // a value node: its number is a field in the header, at body size
                     let saved = ui.enter(&tile);
-                    if let Some(text2) = num_field(ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, Some(fs), None, None, false, "default", d.name(*text)) {
-                        fields.push(Change::SyntaxEdit(e::Op::SetInputDefault { form: i.path[0].to_string(), input: i.name.clone(), value: number_syntax(text2) }));
+                    let edit = |t: String| Change::SyntaxEdit(e::Op::SetInputDefault { form: i.path[0].to_string(), input: i.name.clone(), value: number_syntax(t) });
+                    if let Some(text2) = num_field(ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, Some(fs), None, None, false, "default", d.name(*text), Some((tile.box_key, &edit))) {
+                        fields.push(edit(text2));
                     }
                     ui.leave(saved);
                 }
@@ -1754,7 +1831,14 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
     if !crate::scope_hover::cooked(t, ui) {
         t.cook += 1;
     }
-    let rev = if moved { revision(t).wrapping_add(1) } else { revision(t) };
+    // a card's number dragged and followed by patches (below): the content stays as built while the
+    // pane differs from it only by the arguments the drag wrote; the release builds it as it is now
+    // ponytail: only a host that writes the drag by `with_arguments` keeps it (the editor's literal
+    // path: catalog nodes); one it lays out again (`with_scope`: a draw node's argument) builds the
+    // content every frame as before; diff the projections in `sync_scope` if those scrubs matter
+    let held = !moved && held_drag(t, ui);
+    let kept_rev = t.built.borrow().as_ref().filter(|(last, _)| held && HELD.with(|h| h.borrow().as_ref().is_some_and(|h| h.patched)) && same_but_arguments(last, t)).map(|(_, rev)| *rev);
+    let rev = if moved { revision(t).wrapping_add(1) } else { kept_rev.unwrap_or_else(|| revision(t)) };
     // a carried payload's places follow the pointer: the content builds every frame of a carry
     if ui.carrying().is_some() {
         t.busy_t = frame.input.t;
@@ -1779,8 +1863,9 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
     // the wires a move of cards carries, where it puts them
     let under = ui.view("graph-drag-wires", crate::scope_hover::drag_wires_key(t) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::drag_wires(t, ui));
     ui.set_at(&under, (0.0, 0.0));
-    let mut built = None;
+    let (mut built, mut verified) = (None, false);
     let view = ui.view(label, key, cw, ch, &mut |ui| {
+        verified = ui.verifying();
         // a verifying run of the kept view builds as the kept build did
         let now = (t.pan_x, t.pan_y, t.zoom);
         if ui.verifying() {
@@ -1802,10 +1887,20 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
         built = Some((at, if settled { None } else { Some(before) }));
     });
     ui.set_at(&view, (-ov.0 as f32, -ov.1 as f32));
+    let fresh = built.is_some() && !verified;
     if let Some((at, before)) = built {
         let mut kept = before.unwrap_or_else(|| t.clone());
         (kept.pan_x, kept.pan_y, kept.zoom) = at;
         keep_built(&kept, rev);
+    }
+    if held && fresh {
+        HELD.with(|h| h.borrow_mut().iter_mut().for_each(|h| h.patched = false));
+    } else if held {
+        // a verifying run of the kept content wrote the drag's change itself; it shows the patch
+        let edit = follow_drag(ui);
+        if !verified {
+            changes.extend(edit);
+        }
     }
     // a dragged wire or rubber band, over the cards
     let (mouse, press) = (frame.input.pointer, p64(sig.press_point));

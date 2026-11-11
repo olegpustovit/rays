@@ -266,6 +266,46 @@ fn window_graph_costs() {
     let edit = vec![go(&mut ui, &mut t, away, &[], vec![]), go(&mut ui, &mut t, away, &[], vec![])];
     table.push(Run::of("edit", &edit));
     let edit_builds: u64 = edit.iter().map(|c| c.builds).sum();
+    // scrubbing a card's number (n4's translate x), the host writing each frame's change as the
+    // editor does (`with_arguments`): the card keeps its view (the field patched), nothing builds
+    rest(&mut ui, &mut t, &mut go);
+    let n4 = path("n4");
+    let row = rays_graph::scope_state::node_of(&t, &n4).and_then(|n| n.rows.iter().position(|r| r.label == "translate")).expect("n4's translate");
+    let field = scope::inspect::row_center(&t, &n4, row).expect("the translate row");
+    let mut written: Vec<String> = Vec::new();
+    let host = |t: &mut Pane, written: &mut Vec<String>| {
+        let x = CHANGES.with(|c| c.borrow().iter().rev().find_map(|c| match c {
+            rays_graph::scope_state::Change::SyntaxEdit(flow_graph::flow_edit::Op::SetArg { node, sub, value, .. }) if *node == n4 && sub == &[0] => match value.node {
+                flow_syntax::syntax::Node::Num(n) => Some(value.name(n).to_owned()),
+                _ => None,
+            },
+            _ => None,
+        }));
+        if let Some(x) = x {
+            let value = flow_syntax::syntax::parse(&format!("[{x} 0 0]")).expect("vector").remove(0);
+            scope::with_arguments(&[(n4.clone(), flow_graph::edit_tree::ArgKey::Kw("translate".to_owned()), value)], t);
+            written.push(x);
+        }
+    };
+    go(&mut ui, &mut t, field, &[], vec![Event::PointerMoved(field)]);
+    go(&mut ui, &mut t, field, &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, field)]);
+    for i in 0..2 {
+        let p = (field.0 + 2.0 * (i + 1) as f64, field.1);
+        go(&mut ui, &mut t, p, &[MouseButton::LeftButton], vec![Event::PointerMoved(p)]);
+        host(&mut t, &mut written);
+    }
+    let mut card_views = 0;
+    let scrub = run(&mut table, "card scrub", &mut ui, &mut t, n, &mut |ui, t, i| {
+        let p = (field.0 + 4.0 + 2.0 * (i + 1) as f64, field.1);
+        let c = go(ui, t, p, &[MouseButton::LeftButton], vec![Event::PointerMoved(p)]);
+        card_views += ui.rebuilt_named("t:g/n4");
+        host(t, &mut written);
+        c
+    });
+    let end = (field.0 + 4.0 + 2.0 * (n + 1) as f64, field.1);
+    go(&mut ui, &mut t, end, &[], vec![Event::PointerReleased(MouseButton::LeftButton, end)]);
+    host(&mut t, &mut written);
+    rest(&mut ui, &mut t, &mut go);
     let (zone, frame) = zone_and_frame(&mut table);
     let (cook, changed, patches) = cooks(&mut table);
     for line in &table {
@@ -319,6 +359,11 @@ fn window_graph_costs() {
     // cards built again, their fields' values)
     let (drop_allocs, edit_allocs) = (drop.iter().map(|c| c.allocs).sum::<u64>(), edit.iter().map(|c| c.allocs).sum::<u64>());
     assert!(drop_allocs <= 2000 && edit_allocs <= 700, "the drop allocated {drop_allocs}, the edit {edit_allocs}");
+    eprintln!("graph_costs card scrub: translate x 4 -> {} over {} writes, {card_views} rebuilds of n4's view", written.last().map_or("-", |x| x.as_str()), written.len());
+    assert!(written.len() > n / 2 && written.last().and_then(|x| x.parse::<f64>().ok()).is_some_and(|x| x > 4.0), "the scrub did not write n4's translate live: {written:?}");
+    assert!(scrub.builds == 0 && card_views == 0, "the card scrub built the content {} times, n4's view {card_views} times", scrub.builds);
+    let edit_worst = edit.iter().map(|c| c.allocs).max().unwrap_or(0);
+    assert!(scrub.allocs <= edit_worst, "a card scrub frame allocated {} (the host's edit {edit_worst})", scrub.allocs);
     ui.destroy();
 }
 
