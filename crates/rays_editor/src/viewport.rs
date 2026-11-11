@@ -121,7 +121,8 @@ pub mod cc {
 
     pub fn render_section(control: &Control, ui: &mut Ui) -> (Control, Vec<String>) {
         let mut out = (control.filename.clone(), false);
-        ui.inspector_section("Render", false, None, "Render", &mut |ui| {
+        let revision = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&control.filename, h));
+        ui.inspector_section_view("Render", revision, false, None, "Render", &mut |ui| {
             let filename = text(ui, "Output", "Output", &control.filename);
             out = (filename, ui.inspector_button("Save", "Render / save PNG"));
         });
@@ -130,13 +131,13 @@ pub mod cc {
     }
 
     /// `open_camera` opens the section explicitly while hidden, otherwise it toggles.
-    pub fn camera_section(control: &Control, ui: &mut Ui, build: &mut dyn FnMut(&mut Ui)) -> bool {
+    pub fn camera_section(control: &Control, ui: &mut Ui, revision: u64, build: &mut dyn FnMut(&mut Ui)) -> bool {
         let set_expanded = match control.open_camera {
             None => None,
             Some(true) => Some(true),
             Some(false) => Some(!ui.expanded("Camera").unwrap_or(false)),
         };
-        ui.inspector_section("Camera", false, set_expanded, "Camera", build)
+        ui.inspector_section_view("Camera", revision, false, set_expanded, "Camera", build)
     }
 
     pub fn widgets(control: &Control, ui: &mut Ui, camera: &easy_camera::EasyCamera) -> (Control, easy_camera::EasyCamera, Vec<RenderRequest>) {
@@ -145,7 +146,10 @@ pub mod cc {
         let mut saves: Vec<String> = Vec::new();
         ui.scope(&control.prefix, &mut |ui| {
             let mut result: Option<easy_camera::EasyCamera> = None;
-            camera_section(control, ui, &mut |ui| {
+            // the section shows the lens, the distance, the clip planes and the inertia
+            let shown = [easy_camera::fov_y(camera).to_bits(), easy_camera::distance(camera).to_bits(), easy_camera::near(camera).to_bits(), easy_camera::far(camera).to_bits(), easy_camera::inertia(camera) as u64];
+            let revision = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&shown, h));
+            camera_section(control, ui, revision, &mut |ui| {
                 let degrees = easy_camera::fov_y(camera) * 180. / std::f64::consts::PI;
                 let edited = number(ui, "FOV", "FOV", 15., 120., degrees);
                 let fov = if edited == degrees { easy_camera::fov_y(camera) } else { edited * std::f64::consts::PI / 180. };
@@ -503,8 +507,10 @@ pub struct PanelOut {
 }
 
 pub fn panel(ui: &mut Ui, control_: &Control, camera_: &Camera, extra_: &Extra, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>) -> PanelOut {
-    let mut next = extra_.clone();
-    ui.inspector_section("Viewport", true, None, "Viewport", &mut |ui| {
+    // a kept section asks for nothing: no follow request
+    let mut next = Extra { follow_request: None, ..extra_.clone() };
+    let revision = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&(look_through(extra_), extra_.following, extra_.show.cameras, extra_.show.axes, extra_.show.handles), h));
+    ui.inspector_section_view("Viewport", revision, true, None, "Viewport", &mut |ui| {
         // the label column is 0.3 of the panel less 16: the rows say it short, their keys stay
         let through = ui.inspector_toggle("Look through render camera", "Look through", look_through(extra_));
         // The ACTIVE camera's own parameter, here so a look-through can be set up by orbiting: on,
@@ -524,13 +530,21 @@ pub fn panel(ui: &mut Ui, control_: &Control, camera_: &Camera, extra_: &Extra, 
     let (control_out, camera_out, requests) = cc::widgets(control_, ui, camera_);
     // the scene's root: renderer, size and samples
     let mut root_ = extra_.root.clone();
-    ui.inspector_section("renderer-section", true, None, "Scene root", &mut |ui| {
-        use rays_shell::inspector::{self, FlowChange, FlowOpts, FlowRow};
+    use rays_shell::inspector::{self, FlowChange, FlowOpts, FlowRow};
+    {
         let mut cached = extra_.root_rows.borrow_mut();
         if cached.0.as_ref() != Some(&extra_.root) {
-            let Ok(fields) = root::parameters_schema().view(&root::to_values(&extra_.root)) else { return; };
-            cached.1 = fields.into_iter().map(|field| FlowRow { path: field.name.clone(), fields: vec![field], shown: false, locked: true, drive: None, live: None }).collect();
-            cached.0 = Some(extra_.root.clone());
+            if let Ok(fields) = root::parameters_schema().view(&root::to_values(&extra_.root)) {
+                cached.1 = fields.into_iter().map(|field| FlowRow { path: field.name.clone(), fields: vec![field], shown: false, locked: true, drive: None, live: None }).collect();
+                cached.0 = Some(extra_.root.clone());
+            }
+        }
+    }
+    let revision = rays_shell::kit::debug_revision(&extra_.root_rows.borrow().0);
+    ui.inspector_section_view("renderer-section", revision, true, None, "Scene root", &mut |ui| {
+        let cached = extra_.root_rows.borrow();
+        if cached.0.as_ref() != Some(&extra_.root) {
+            return;
         }
         let changes: Vec<_> = inspector::flow_fields(ui, &FlowOpts::default(), None, &cached.1).into_iter().filter_map(|change| match change {
             FlowChange::Edited(name, value) => Some((name, value)),

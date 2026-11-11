@@ -513,7 +513,17 @@ fn no_choice(_: &str, _: &UiBox) {}
 #[allow(clippy::too_many_arguments)]
 fn build(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), expanded: &[String], kind_label: Option<&str>, rows: &[FlowRow], folder: &str, out: &mut Vec<FlowChange>) {
     let open = expanded.iter().any(|key| key == folder) || kind_label == Some(folder);
-    ui.inspector_section(&format!("flow-section-{folder}"), open, None, folder, &mut |ui| {
+    // the section's revision: its rows as they read (values, live readouts, drives, pins) and how
+    // they are laid out
+    let mine = |row: &&FlowRow| top_folder(row) == Some(folder) || (kind_label == Some(folder) && top_folder(row).is_none());
+    let shown = kit::revision(&|h| {
+        use std::hash::Hash;
+        for row in rows.iter().filter(mine) {
+            kit::debug_revision(row).hash(h);
+        }
+        (cx.width.to_bits(), cx.pins, cx.pin_click, kit::debug_revision(&cx.chips)).hash(h);
+    });
+    ui.inspector_section_view(&format!("flow-section-{folder}"), shown, open, None, folder, &mut |ui| {
         // The kind's ungrouped rows precede rows explicitly in its folder, as in the old tree.
         if kind_label == Some(folder) {
             for row in rows.iter().filter(|row| top_folder(row).is_none()) {

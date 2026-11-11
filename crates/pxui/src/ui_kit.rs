@@ -394,10 +394,10 @@ impl Default for PopupOpts {
 impl Ui {
     /// The space above a section header: 4 at the top of its parent (16 under a window's head), 16
     /// after anything else, none when this closed section directly follows a closed one.
-    fn section_gap(&self, next_closed: bool, last: usize) -> i64 {
-        if last == NONE {
+    fn section_gap(&self, next_closed: bool, (top, after_closed): (bool, bool)) -> i64 {
+        if top {
             if self.kit_window_flag() { 16 } else { 4 }
-        } else if last == self.closed_section_index() && next_closed {
+        } else if after_closed && next_closed {
             0
         } else {
             16
@@ -527,7 +527,44 @@ impl Ui {
 
     /// A collapsible inspector section. Returns whether it is open (and `f` ran).
     pub fn inspector_section(&mut self, key: &str, expanded: bool, set_expanded: Option<bool>, label: &str, f: &mut dyn FnMut(&mut Ui)) -> bool {
+        let at = self.section_place();
+        self.section_at(at, key, expanded, set_expanded, label, f)
+    }
+
+    /// Where a section starts: first in its parent, and right after a closed section.
+    fn section_place(&self) -> (bool, bool) {
         let last = self.last_child_of_parent();
+        (last == NONE, last != NONE && last == self.closed_section_index())
+    }
+
+    /// `inspector_section` as a content-sized cached view (`Ui::view`, `Fit` high): `f` runs only
+    /// when `revision` (what the section shows), its place among its siblings, its label or
+    /// `set_expanded` change, or input reaches it; kept, its rows hand back nothing. While a payload
+    /// is carried it builds every frame (its controls report their drop targets as they build).
+    /// `ui.expanded(key)` reads its state as it reads a plain section's.
+    pub fn inspector_section_view(&mut self, key: &str, revision: u64, expanded: bool, set_expanded: Option<bool>, label: &str, f: &mut dyn FnMut(&mut Ui)) -> bool {
+        let at = self.section_place();
+        let carrying = self.carry_frame();
+        let flags = at.0 as u64 | (at.1 as u64) << 1 | (expanded as u64) << 2 | (set_expanded.map_or(0, |o| 2 + o as u64)) << 3;
+        let revision = key_of(key_of(revision as i64 ^ (flags as i64).rotate_left(48) ^ carrying as i64, label), "") as u64;
+        let mut built = None;
+        let view = self.view(key, revision, Size::Grow, Size::Fit, &mut |ui| {
+            built = Some(ui.section_at(at, key, expanded, set_expanded, label, f));
+        });
+        let open = match built {
+            Some(open) => {
+                self.set_state(&view, open as i64);
+                open
+            }
+            None => self.state(&view, expanded as i64) != 0,
+        };
+        if !open {
+            self.set_closed_section(view.index);
+        }
+        open
+    }
+
+    fn section_at(&mut self, at: (bool, bool), key: &str, expanded: bool, set_expanded: Option<bool>, label: &str, f: &mut dyn FnMut(&mut Ui)) -> bool {
         let rh = self.row_height() as f32;
         let title = self.box_(key, BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Grow).h(Size::Px(rh)));
         let open = self.state(&title, if expanded { 1 } else { 0 }) != 0;
@@ -535,7 +572,7 @@ impl Ui {
         let signal = self.signal(&title);
         let open = if signal.clicked { !open } else { open };
         // the gap above depends on this section's own state, known only now
-        let gap = self.section_gap(!open, last) as f32;
+        let gap = self.section_gap(!open, at) as f32;
         self.set_box_h(&title, Size::Px(gap + rh));
         self.set_state(&title, if open { 1 } else { 0 });
         if !open {

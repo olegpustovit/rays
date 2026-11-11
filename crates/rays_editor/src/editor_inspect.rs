@@ -777,7 +777,8 @@ pub fn note_section(ui: &mut Ui, width: f32, n: &p::Node) -> Vec<Change> {
     }
     let current = n.note.clone().unwrap_or_default();
     let mut out: Vec<Change> = Vec::new();
-    ui.inspector_section("ws-note-section", false, None, "Note", &mut |ui| {
+    let shown = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&(&current, width.to_bits(), &n.path), h));
+    ui.inspector_section_view("ws-note-section", shown, false, None, "Note", &mut |ui| {
         if current.contains('\n') {
             ui.inspector_message("ws-note-lines", "A note of several lines is edited in the text pane.");
             return;
@@ -798,7 +799,8 @@ pub fn note_section(ui: &mut Ui, width: f32, n: &p::Node) -> Vec<Change> {
 /// What the cook made of a geometry node: read-out rows, as the sheet's Output section.
 pub fn output_section(ui: &mut Ui, width: f32, geo: Option<&probe::Geometry>) {
     if let Some(g) = geo {
-        ui.inspector_section("ws-output", true, None, "Output", &mut |ui| {
+        let shown = rays_shell::kit::debug_revision(&(g, width));
+        ui.inspector_section_view("ws-output", shown, true, None, "Output", &mut |ui| {
             ui.inspector_readout(Some(width), "ws-output-points", "points", &group_digits(g.points));
             ui.inspector_readout(Some(width), "ws-output-prims", "prims", &group_digits(g.prims));
             if let Some((x, y, z)) = g.extent {

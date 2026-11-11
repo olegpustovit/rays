@@ -444,12 +444,86 @@ pub fn window_pxui_budget_zero_alloc() {
     ui.destroy();
 }
 
+/// Content-sized views: a `Fit` view kept is laid out at the size its last build measured; one that
+/// rebuilds and grows or shrinks re-lays out its column in that frame, and the kept views after it
+/// move through their table entries (not rebuilt, no instance written, hit where they now show).
+pub fn window_pxui_view_fit() {
+    let mut ui = new_ui(None);
+    let (runs, rows_a) = ([Cell::new(0), Cell::new(0), Cell::new(0)], Cell::new(1usize));
+    let (views, last) = (Cell::new([None; 3]), Cell::new(None));
+    let mut build = |ui: &mut Ui| {
+        let col = ui.node("col", Node { w: Size::Px(200.0), h: Size::Px(400.0), ..Node::DEFAULT });
+        ui.within(&col, &mut |ui| {
+            let mut vs = [None; 3];
+            for (i, name) in ["a", "b", "c"].iter().enumerate() {
+                let (count, rev) = if i == 0 { (rows_a.get(), rows_a.get() as u64) } else { (2, 1) };
+                vs[i] = Some(ui.view(name, rev, Size::Grow, Size::Fit, &mut |ui| {
+                    runs[i].set(runs[i].get() + 1);
+                    for r in 0..count {
+                        let h = chip(ui, ["r0", "r1", "r2"][r], RED, CLICKABLE);
+                        if i == 2 {
+                            last.set(Some(h));
+                        }
+                    }
+                }));
+            }
+            views.set(vs);
+        });
+    };
+    ui.frame(&at(0.0, vec![move_to((300, 300))]), &mut build);
+    ui.frame(&at(0.1, vec![]), &mut build);
+    let rect = |ui: &Ui, i: usize| ui.rect(&views.get()[i].unwrap());
+    check(runs.iter().all(|r| r.get() == 1) && ui.rebuilt_views() == 0, &format!("a clean Fit view rebuilt {:?} {} {:?}", runs.iter().map(|r| r.get()).collect::<Vec<_>>(), ui.rebuilt_views(), rect(&ui, 0)));
+    check(rect(&ui, 0).h == 20.0 && rect(&ui, 1) == Rect::new(0.0, 20.0, 200.0, 40.0) && rect(&ui, 2).y == 60.0, &format!("kept Fit views laid out at {:?} {:?} {:?}", rect(&ui, 0), rect(&ui, 1), rect(&ui, 2)));
+    // the first growth past the slack after a's run compacts the layer once: grow and shrink
+    rows_a.set(3);
+    ui.frame(&at(0.15, vec![]), &mut build);
+    rows_a.set(1);
+    ui.frame(&at(0.17, vec![]), &mut build);
+    for i in 0..ui.output().draw.len() {
+        ui.drawn(i);
+    }
+    // a grows by two rows: b and c move down 40 in the same frame, kept
+    rows_a.set(3);
+    ui.frame(&at(0.2, vec![]), &mut build);
+    check(runs.iter().map(|r| r.get()).collect::<Vec<_>>() == [4, 1, 1] && ui.rebuilt_views() == 1, "growing one view rebuilt another");
+    check(rect(&ui, 0).h == 60.0 && rect(&ui, 1).y == 60.0 && rect(&ui, 2).y == 100.0, &format!("after growing {:?} {:?} {:?}", rect(&ui, 0), rect(&ui, 1), rect(&ui, 2)));
+    check(ui.built_nodes() == 1 + 1 + 3 + 3, &format!("growing declared {} nodes", ui.built_nodes()));
+    let written: usize = ui.output().draw.iter().flat_map(|l| l.dirty.iter()).map(|(a, b)| (b - a) as usize).sum();
+    check(written == 2, &format!("growing wrote {written} instances (a's two new rows)"));
+    check(ui.output().views.iter().any(|(_, e)| e.offset == [0.0, 40.0]), "the moved views ride no table offset");
+    for i in 0..ui.output().draw.len() {
+        ui.drawn(i);
+    }
+    // c's last row hits where it shows now; shrinking back moves it home
+    let c = last.get().unwrap();
+    check(ui.rect(&c) == Rect::new(0.0, 120.0, 40.0, 20.0), &format!("c's row at {:?}", ui.rect(&c)));
+    ui.frame(&at(0.3, vec![move_to((10, 130))]), &mut build);
+    check(ui.signal(&c).hovered, "the moved view's row missed the pointer");
+    ui.frame(&at(0.4, vec![move_to((10, 300))]), &mut build);
+    rows_a.set(1);
+    ui.frame(&at(0.5, vec![]), &mut build);
+    check(rect(&ui, 2).y == 60.0 && ui.rebuilt_views() == 1, &format!("after shrinking c at {:?}, {} views rebuilt", rect(&ui, 2), ui.rebuilt_views()));
+    // warm: growing and shrinking allocate nothing
+    let mut t = 0.6;
+    let n = allocs(&mut || {
+        for k in 0..20 {
+            rows_a.set(1 + 2 * (k % 2));
+            t += 0.1;
+            ui.frame(&at(t, vec![]), &mut build);
+        }
+    });
+    check(n == 0, &format!("{n} allocations growing and shrinking a Fit view"));
+    ui.destroy();
+}
+
 pub const CASES: &[(&str, fn())] = &[
     ("window_pxui_budget_counts", window_pxui_budget_counts),
     ("window_pxui_budget_cached_per_view", window_pxui_budget_cached_per_view),
     ("window_pxui_budget_zero_alloc", window_pxui_budget_zero_alloc),
     ("window_pxui_view_rebuilds_one", window_pxui_view_rebuilds_one),
     ("window_pxui_view_nested", window_pxui_view_nested),
+    ("window_pxui_view_fit", window_pxui_view_fit),
     ("window_pxui_view_input", window_pxui_view_input),
     ("window_pxui_view_offset", window_pxui_view_offset),
     ("window_pxui_view_damage", window_pxui_view_damage),

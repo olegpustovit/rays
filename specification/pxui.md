@@ -417,14 +417,25 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
    keys live in a per-frame bump arena.
 2. Hybrid views. `ui.view(label, revision, w, h, f) -> Handle` skips `f` while its revision is unchanged
    and nothing dirtied it; its nodes stay alive undeclared (a node lives until its view drops it), with
-   their layout, hit areas and instance run. Its size comes from outside (`Px`, `Pct`, `Rel`, `Grow`;
-   `Fit` panics). It also rebuilds on a theme, font size, density or window size change; when input
+   their layout, hit areas and instance run. Its size comes from outside (`Px`, `Pct`, `Rel`, `Grow`)
+   or from its content (`Fit`, see content-sized views below). It also rebuilds on a theme, font size, density or window size change; when input
    reaches one of its nodes (press, release, drag, wheel, keys); when the hovered or focused node enters
    or leaves it or carrying starts or stops over it; every frame it holds the keyboard focus or a scroll in
    motion; when its laid-out size changes (shown stale that frame); after a build that put boxes at the
    root, requested a frame or ran a hover delay. Pointer motion within one node rebuilds nothing. A
    rebuilt view rebuilds the views around it; clean views inside it stay kept. The root rebuilds every
    frame, so code without views behaves as before.
+   Content-sized views: on a `Fit` side a view's box measures its content when it builds and keeps
+   that measure (`ViewRec::fit`, padding in, before min/max) while it is kept, so its parent lays it
+   out at the retained size without declaring its nodes. A view that rebuilds is measured in that
+   frame's one layout pass; every view around it rebuilt with it (a rebuild rebuilds its enclosing
+   views, and only a rebuilding parent declares its children), so the ancestors from it up to the
+   root are re-arranged in the same frame, from their declared nodes only: no stale frame, and no
+   kept subtree is laid out again. A kept sibling whose position changed is not rebuilt: layout's
+   move rides its table entry (`delta`, composed with `view_offset`), and hit testing, `rect` and
+   damage follow (a view with no table index, past 255, rebuilds a frame later). A kept view whose
+   own laid-out size changes (a `Grow` side, a resized window) is still shown stale for one frame and
+   rebuilt (`window_pxui_view_fit`).
    Landed (P5 commit 2, engine): layers are retained (`Layer::id`, `Layer::dirty` gathered until
    `ui.drawn(i)`; hosts draw with `Painter::draw_retained`); fresh pieces are written in place, kept runs
    stay put, slack and compaction when they do not fit. `FrameOut::damage` is the union of changed

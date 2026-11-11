@@ -214,6 +214,22 @@ pub fn revision(parts: &dyn Fn(&mut std::hash::DefaultHasher)) -> u64 {
     hasher.finish()
 }
 
+/// A view's revision from anything `Debug`: its debug text hashed as it is written (no allocation),
+/// for data with floats and no `Hash`. Costs a formatting pass: called when the enclosing view builds.
+pub fn debug_revision(value: &dyn std::fmt::Debug) -> u64 {
+    use std::hash::Hasher;
+    struct Sink(std::hash::DefaultHasher);
+    impl std::fmt::Write for Sink {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            self.0.write(s.as_bytes());
+            Ok(())
+        }
+    }
+    let mut sink = Sink(std::hash::DefaultHasher::new());
+    let _ = std::fmt::write(&mut sink, format_args!("{value:?}"));
+    sink.0.finish()
+}
+
 /// A cached view as large as the window at its corner: `f` builds boxes at window positions, and runs
 /// only when `revision` changes or the view is dirtied (input on its boxes, hover entering or leaving
 /// them, the theme, the window's size).

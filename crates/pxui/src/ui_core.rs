@@ -548,6 +548,8 @@ struct ViewRec {
     /// its box at its build (parent coordinates), how far layout has moved it since, and the clip
     /// at its box (parent coordinates)
     built_rect: Rect,
+    /// its box's content size at its last build (the `Fit` sides' measure while it is kept)
+    fit: (f32, f32),
     delta: (f32, f32),
     box_clip: Rect,
     /// its painter table index (0: none, the table was full) and the view whose entry moves its
@@ -612,6 +614,7 @@ impl ViewRec {
             hits: Vec::new(),
             hit_parent: 0,
             built_rect: Rect::new(0.0, 0.0, 0.0, 0.0),
+            fit: (0.0, 0.0),
             delta: (0.0, 0.0),
             box_clip: UNBOUNDED,
             index: 0,
@@ -3529,7 +3532,14 @@ impl Ui {
                 }
             };
             let pad = n.padding;
-            let (cw, ch) = (content_w + pad.l + pad.r, content_h + pad.t + pad.b);
+            let (mut cw, mut ch) = (content_w + pad.l + pad.r, content_h + pad.t + pad.b);
+            // a view's box: kept, its content is the size its last build measured (its children are
+            // not declared); built, that measure is what it keeps
+            let v = self.boxes[index].view;
+            let kept = v != NO_VIEW && self.boxes[index].kept;
+            if kept {
+                (cw, ch) = self.views[v as usize].fit;
+            }
             let resolve = |kind: &Size, content: f32| match kind {
                 Size::Px(value) => *value,
                 Size::Fit => content,
@@ -3546,6 +3556,9 @@ impl Ui {
             let (w, h) = (clamp(w, n.min_w, n.max_w), clamp(h, n.min_h, n.max_h));
             (self.l_content[index], self.l_content_w[index]) = (ch, cw);
             (self.l_w[index], self.l_h[index]) = (w, h);
+            if v != NO_VIEW && !kept {
+                self.views[v as usize].fit = (cw, ch);
+            }
         }
     }
 
@@ -6013,8 +6026,11 @@ fn union(a: Option<Rect>, b: Rect) -> Rect {
 impl Ui {
     /// A cached subtree: `f` builds its children, and is skipped entirely while `revision` is the
     /// one it was last built with and nothing else dirtied it; its nodes, their layout, hit areas
-    /// and instance run stay as they were. Its size comes from outside (`Px`, `Pct`, `Rel` or
-    /// `Grow`, never `Fit`). Besides the revision it rebuilds when the theme, the font size, the
+    /// and instance run stay as they were. Its size comes from outside (`Px`, `Pct`, `Rel`, `Grow`)
+    /// or, on a `Fit` side, from its content: kept, it is laid out at the content size its last
+    /// build measured; rebuilt, it is measured in that frame's layout with the views around it
+    /// (which a rebuild always rebuilds), and kept views it moves follow through their table entries
+    /// (see `specification/pxui.md`, content-sized views). Besides the revision it rebuilds when the theme, the font size, the
     /// density or the window size change; when input reaches one of its nodes (press, release, drag,
     /// wheel, keys); when the hovered or focused node enters or leaves it, or carrying starts or
     /// stops over it; every frame it holds the keyboard focus or a scroll in motion; when its
@@ -6024,7 +6040,6 @@ impl Ui {
     /// position bumps its own revision. A rebuild of the view rebuilds the views around it; the
     /// views inside it may still be kept. Returns the view's box, for `view_offset` and friends.
     pub fn view(&mut self, label: &str, revision: u64, w: Size, h: Size, f: &mut dyn FnMut(&mut Ui)) -> Handle {
-        assert!(!matches!(w, Size::Fit) && !matches!(h, Size::Fit), "Ui.view {label}: a view's size comes from outside (Px, Pct, Rel or Grow), never Fit");
         let b = self.node(label, Node { w, h, ..Node::DEFAULT });
         let parent = self.view_cur;
         let v = match self.slots[b.box_slot].view {
@@ -6887,6 +6902,12 @@ impl Ui {
 
     pub(crate) fn closed_section_index(&self) -> usize {
         self.closed_section
+    }
+
+    /// The frame number while a payload is carried, else 0 (a revision part that rebuilds a view
+    /// every frame of a carry).
+    pub(crate) fn carry_frame(&self) -> u64 {
+        if self.payload.is_some() { self.frame_number as u64 } else { 0 }
     }
 
     pub(crate) fn set_closed_section(&mut self, index: usize) {

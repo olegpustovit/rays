@@ -85,10 +85,10 @@ pub fn inspect_panel<'a>(
     // re-read every frame: a traced or animated image changes without the document). Input on its
     // boxes rebuilds it, and its intents arrive on that frame; a kept frame hands back no requests.
     // While a payload is carried, or a sketch builds its own widgets under the camera panel (no
-    // revision), it is built every frame.
-    // ponytail: one view for the whole inspector, not one per section: a view takes its size from
-    // outside and a section's height is its content's (Fit). Scrubbing a value rebuilds the inspector
-    // (about 90 nodes). Upgrade with a content-sized view in the engine, or sections of known height.
+    // revision), it is built every frame. Inside it each section is a content-sized view of its own
+    // (`Ui::inspector_section_view`) keyed by what that section shows: input on one section (a
+    // scrubbed value) rebuilds that section and this view around it; the other sections are kept and
+    // move through their view offsets when one above them grows or shrinks.
     let previewed = ui.state(inspector_root, -1);
     let preview_key = (previewed >= 0).then(|| image(previewed)).flatten().map(|im| (rays::image::identity(&im), rays::image::generation(&im)));
     // the cook's results show only for a selected node (its counts, its compiled arguments)
@@ -177,14 +177,16 @@ pub fn inspect_panel<'a>(
                     ui.inspector_body(&mut |ui| {
                         // the row sits under a section named for the graph, as every row of the sheet does
                         let mut section_live = None;
-                        ui.inspector_section("live-cook-section", true, None, &title, &mut |ui| {
+                        let shown = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&value.live_cook, h));
+                        ui.inspector_section_view("live-cook-section", shown, true, None, &title, &mut |ui| {
                             section_live = Some(ui.inspector_toggle("live-cook", "Live update", value.live_cook));
                         });
                         live = section_live.unwrap_or(value.live_cook);
                         let mut fields: Vec<FieldView> = settings::fields(unchanged).into_iter().filter(|f| f.name != "renderer").collect();
                         if !fields.is_empty() {
+                            let shown = rays_shell::kit::debug_revision(&(&fields, bounds.2));
                             ui.scope("sketch-settings", &mut |ui| {
-                                ui.inspector_section("sketch-settings-section", true, None, "Settings", &mut |ui| {
+                                ui.inspector_section_view("sketch-settings-section", shown, true, None, "Settings", &mut |ui| {
                                     changes = insp::fields(ui, &[], Some(bounds.2 as f32), std::mem::take(&mut fields));
                                 });
                             });

@@ -104,7 +104,8 @@ fn workspace(name: &str, text: &str) {
         report("empty header button to its title", &within, n);
         check(within.views == n, &format!("hovering inside a header rebuilt {} views in {n} frames", within.views));
         // scrubbing a number of the inspector (the camera's FOV: the body scrolled to its section,
-        // the section opened): the inspector's view alone, every frame of the drag
+        // the section opened): the Camera section's view and the inspector's around it, every frame
+        // of the drag
         // the accessibility tree finds the rows (on from here: its walk costs the frames it runs in)
         r.e.core.ui.borrow_mut().set_a11y(true);
         to(&mut r, (451., 300.));
@@ -117,7 +118,17 @@ fn workspace(name: &str, text: &str) {
         }
         // its heading's foot: the head may lie under the clip of the body's top
         let camera = named(&r, "Camera").map(|(x, y)| (x, y + 14.0)).expect("the Camera section");
-        r.click_button(MouseButton::LeftButton, camera);
+        // opening the Camera section (one content-sized view) re-lays its siblings out in that
+        // frame: the Render section after it rebuilds (its gap follows an open section now), the
+        // Scene root section below moves without a rebuild
+        let root_before = named(&r, "Scene root").expect("the Scene root section");
+        to(&mut r, camera);
+        r.stepb(&[MouseButton::LeftButton], camera, vec![Event::PointerPressed(MouseButton::LeftButton, camera)]);
+        let open = measure(&mut r, 1, &|r, _| r.step(camera, vec![Event::PointerReleased(MouseButton::LeftButton, camera)]));
+        report("empty open a section", &open, 1);
+        let root_after = named(&r, "Scene root").expect("the Scene root section");
+        check(open.views == 3, &format!("opening a section rebuilt {} views (the inspector, Camera, Render)", open.views));
+        check(root_after.1 > root_before.1 + 100.0, &format!("the section below did not move: {root_before:?} -> {root_after:?}"));
         for _ in 0..4 {
             to(&mut r, camera);
         }
@@ -129,7 +140,8 @@ fn workspace(name: &str, text: &str) {
             r.stepb(&[MouseButton::LeftButton], p, vec![Event::PointerMoved(p)]);
         });
         report("empty scrub inspector value", &scrub, n);
-        check(scrub.views == n, &format!("scrubbing rebuilt {} views in {n} frames", scrub.views));
+        check(scrub.views == 2 * n, &format!("scrubbing rebuilt {} views in {n} frames", scrub.views));
+        check(scrub.built <= 60, &format!("scrubbing built {} nodes a frame", scrub.built));
         let end = (at.0 + 1.0 + n as f64, at.1);
         r.step(end, vec![Event::PointerMoved(end), Event::PointerReleased(MouseButton::LeftButton, end)]);
         // panning the graph: a right drag over its empty canvas
