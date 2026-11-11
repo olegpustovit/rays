@@ -212,7 +212,7 @@ Then, with the environment of [pxui/docs/vulkan-linux.md](../pxui/docs/vulkan-li
 export PKG_CONFIG_PATH=~/vk/root/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
 ulimit -s 262144   # tests: the 256 MB main-thread stack macOS and Windows get from the linker
 cargo run -p rays_bin -- sketches/pxui.rays
-RAYS_ALLOW_SKIP=1 RAYS_SLOW=1 cargo t -p renderer   # lavapipe needs the 60 s limit for the heavier cases
+RAYS_ALLOW_SKIP=1 RAYS_SLOW=1 cargo t -p renderer   # lavapipe needs the 60 s limit for the heavier cases (rays too)
 ```
 
 On Linux the main-thread stack is the `RLIMIT_STACK` the process was exec'd with (the ELF header is ignored), so
@@ -228,9 +228,7 @@ preferences live in SDL's `~/.local/share/rays/editor`. What the Wayland host do
 - Relative mouse uses pointer-constraints-v1 and relative-pointer-v1 (WSLg offers both), degrading to absolute
   motion deltas without them. An unthrottled (`vsync: false`) swapchain is MAILBOX on Wayland, else FIFO.
 
-Known lavapipe (Mesa 25.2, WSL2) failures, unresolved; the first two pass on Windows/NVIDIA from the same tree:
-exact-byte goldens differ by one in blended pixels (`rays_shell` `window_host_zones_parity`); `renderer`
-`gpu_scene3_resident_colors3/4` and `gpu_scene3_borrowed_stream_guards` differ on device-resident colours (an
-extra primitive's pixels, and off-by-one channels); `rays_editor` `instanced` and `run_instances` segfault on a
-driver worker thread; `native_isogrid_viewport_recipe_1` differs in its shadow pixels and the other isogrid
-qualification cases exceed even the 60 s limit, so the whole `RAYS_SLOW=1` editor run hits the 600 s cap.
+On lavapipe (Mesa 25.2, WSL2) every case passes, with `RAYS_SLOW=1` for `rays` and `renderer`: compiling their
+pipelines on the CPU takes `window_sketch_retained_view` 6 s and `gpu_execution_retained_eviction_textured300_boundary`
+5.0 s. The whole `RAYS_SLOW=1 cargo t -p rays_editor` run takes about 500 s of its 600 s cap. Pixel tests allow a CPU
+driver (`Caps::cpu_device`) one level more than Vulkan hardware.
