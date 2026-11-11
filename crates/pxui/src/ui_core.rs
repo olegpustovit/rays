@@ -670,15 +670,8 @@ struct Slot {
     ry: f32,
     rw: f32,
     rh: f32,
-    scroll_raw: f64,
-    scroll_visual: f64,
-    scroll_event_time: f64,
-    scroll_frame_time: f64,
-    /// a trackpad's coast or its bounce off an edge: 0 neither, 1 coast, 2 bounce
-    scroll_mode: i64,
-    scroll_velocity: f64,
-    scroll_start: f64,
-    scroll_from: f64,
+    /// the scroll's motion down (0) and sideways (1)
+    glide: [Glide; 2],
     state_value: Option<i64>,
     text_value: Option<String>,
     labels: Vec<Rc<str>>,
@@ -726,14 +719,7 @@ impl Slot {
             ry: 0.0,
             rw: 0.0,
             rh: 0.0,
-            scroll_raw: 0.0,
-            scroll_visual: 0.0,
-            scroll_event_time: f64::NEG_INFINITY,
-            scroll_frame_time: 0.0,
-            scroll_mode: 0,
-            scroll_velocity: 0.0,
-            scroll_start: 0.0,
-            scroll_from: 0.0,
+            glide: [Glide::REST; 2],
             state_value: None,
             text_value: None,
             labels: Vec::new(),
@@ -769,6 +755,28 @@ struct HitRec {
     view: u32,
 }
 
+/// One axis of a scroll box in motion: the overscroll (input travel `raw`, shown as `visual`), the
+/// last input and frame times, and a trackpad's coast or its bounce off an edge.
+#[derive(Clone, Copy)]
+struct Glide {
+    raw: f64,
+    visual: f64,
+    event_time: f64,
+    frame_time: f64,
+    /// 0 neither, 1 coast, 2 bounce
+    mode: i64,
+    velocity: f64,
+    start: f64,
+    from: f64,
+}
+
+impl Glide {
+    const REST: Glide = Glide { raw: 0.0, visual: 0.0, event_time: f64::NEG_INFINITY, frame_time: 0.0, mode: 0, velocity: 0.0, start: 0.0, from: 0.0 };
+    fn moving(&self) -> bool {
+        self.mode != 0 || self.visual != 0.0
+    }
+}
+
 /// What a press, a drag, a scroll or a key did to a box this frame.
 #[derive(Clone)]
 pub struct Accumulator {
@@ -789,6 +797,8 @@ pub struct Accumulator {
     /// what moves a scroll box: an unphased wheel's steps, the fingers' points on a trackpad, and
     /// whether they touched or lifted this frame
     pub scroll_wheel: f32,
+    /// an unphased wheel's sideways steps (a `SCROLL_X` box)
+    pub scroll_wheel_x: f32,
     pub scroll_drag: f32,
     /// the fingers' sideways points (a `SCROLL_X` box)
     pub scroll_drag_x: f32,
@@ -1019,7 +1029,8 @@ pub struct Ui {
     window_ground: Option<Color>,
     gesture_key: i64,
     gesture_time: f64,
-    gesture_velocity: f64,
+    /// the fingers' release velocity, down and sideways
+    gesture_velocity: (f64, f64),
     pub edit_undo: Vec<(String, usize, usize)>,
     pub(crate) text_undo_held: i64,
     /// What the host last charged to its memory ledger for this UI; PXUI never reads it.
@@ -1210,7 +1221,7 @@ impl Ui {
             window_ground: None,
             gesture_key: 0,
             gesture_time: f64::NAN,
-            gesture_velocity: 0.0,
+            gesture_velocity: (0.0, 0.0),
             edit_undo: Vec::new(),
             text_undo_held: 0,
             charged: Bytes::default(),
@@ -1791,7 +1802,7 @@ impl Ui {
         let mut moving = std::mem::take(&mut self.moving);
         moving.retain(|slot| {
             let s = &self.slots[*slot];
-            s.key != 0 && (s.scroll_mode != 0 || s.scroll_visual != 0.0)
+            s.key != 0 && (s.glide[0].moving() || s.glide[1].moving())
         });
         for slot in &moving {
             self.mark_view(self.slots[*slot].owner);
@@ -1887,6 +1898,7 @@ impl Ui {
                     pinch: 1.0,
                     keys: Vec::new(),
                     scroll_wheel: 0.0,
+                    scroll_wheel_x: 0.0,
                     scroll_drag: 0.0,
                     scroll_drag_x: 0.0,
                     a11y_value: None,
@@ -2299,6 +2311,7 @@ impl Ui {
                         value.scroll_y_steps += *vertical as f32;
                         if !phased {
                             value.scroll_wheel += *vertical as f32;
+                            value.scroll_wheel_x += *horizontal as f32;
                         }
                     }
                 }
@@ -2309,7 +2322,7 @@ impl Ui {
                 Event::TrackpadScrolled { phase: ScrollPhase::Lifted, time, .. } => {
                     // fingers that rested before they lifted leave the content where it is
                     if time - self.gesture_time > 0.1 {
-                        self.gesture_velocity = 0.0;
+                        self.gesture_velocity = (0.0, 0.0);
                     }
                     self.lift();
                 }
@@ -2318,10 +2331,10 @@ impl Ui {
                         let scroll = self.scroll_target(self.pointer);
                         self.gesture_key = self.modal_target(scroll);
                         self.gesture_time = f64::NAN;
-                        self.gesture_velocity = 0.0;
+                        self.gesture_velocity = (0.0, 0.0);
                     }
-                    self.gesture_velocity =
-                        if *time > self.gesture_time { -vertical / (time - self.gesture_time) } else { 0.0 };
+                    let dt = time - self.gesture_time;
+                    self.gesture_velocity = if dt > 0.0 { (-vertical / dt, -horizontal / dt) } else { (0.0, 0.0) };
                     self.gesture_time = *time;
                     if self.gesture_key != 0 {
                         let key = self.gesture_key;
@@ -2355,7 +2368,7 @@ impl Ui {
                     }
                 }
                 Event::FocusLost => {
-                    self.gesture_velocity = 0.0;
+                    self.gesture_velocity = (0.0, 0.0);
                     self.lift();
                     self.payload = None;
                     released_carry = false;
@@ -3202,7 +3215,7 @@ impl Ui {
 
     /// Current painted scroll position, including elastic edge movement.
     pub fn scroll_position(&self, b: &UiBox) -> f32 {
-        self.scroll_y[b.box_slot] + self.slots[b.box_slot].scroll_visual as f32
+        self.scroll_y[b.box_slot] + self.slots[b.box_slot].glide[0].visual as f32
     }
 
     /// The horizontal scroll of a `SCROLL_X` box.
@@ -3212,14 +3225,12 @@ impl Ui {
 
     pub fn set_scroll_offset_x(&mut self, b: &UiBox, value: f32) {
         self.scroll_xs[b.box_slot] = value;
+        self.slots[b.box_slot].glide[1] = Glide::REST;
     }
 
     pub fn set_scroll_offset(&mut self, b: &UiBox, value: f32) {
         self.scroll_y[b.box_slot] = value;
-        let s = &mut self.slots[b.box_slot];
-        s.scroll_raw = 0.0;
-        s.scroll_visual = 0.0;
-        s.scroll_mode = 0;
+        self.slots[b.box_slot].glide[0] = Glide::REST;
     }
 
     /// Retained per-box scalar state for custom widgets.
@@ -3552,63 +3563,89 @@ impl Ui {
         (cols, nc, rows, nr)
     }
 
-    fn pull(&mut self, slot: usize, max_scroll: f64, height: f64, past: f64, delta: f64) {
-        let old = self.slots[slot].scroll_raw;
-        let next = self.scroll_y[slot] as f64 + old - delta;
+    /// The offset of `slot`'s scroll on axis `ax` (0 down, 1 sideways).
+    fn offset_mut(&mut self, ax: usize, slot: usize) -> &mut f32 {
+        if ax == 0 { &mut self.scroll_y[slot] } else { &mut self.scroll_xs[slot] }
+    }
+
+    fn pull(&mut self, ax: usize, slot: usize, max_scroll: f64, extent: f64, past: f64, delta: f64) {
+        let old = self.slots[slot].glide[ax].raw;
+        let next = *self.offset_mut(ax, slot) as f64 + old - delta;
         let bounded = 0.0f64.max(max_scroll.min(next));
         let over = next - bounded;
         let raw = if max_scroll <= 0.0 || over == 0.0 { 0.0 } else { old + (over - old) * past };
-        self.scroll_y[slot] = bounded as f32;
-        self.slots[slot].scroll_raw = raw;
-        self.slots[slot].scroll_visual = scroll_stretch(raw, height);
+        *self.offset_mut(ax, slot) = bounded as f32;
+        self.slots[slot].glide[ax].raw = raw;
+        self.slots[slot].glide[ax].visual = scroll_stretch(raw, extent);
     }
 
     /// One scroll box, once its height is laid out (`arrange`): a height that comes from the
     /// parent (Grow, Pct, Rel) stretches and bounces as a fixed one does.
     pub(crate) fn apply_scroll(&mut self, consume: bool, time: f64, index: usize) {
+        let key = self.boxes[index].key;
+        let (wheel, drag) = self.signals.get(&key).map_or((0.0, 0.0), |v| (v.scroll_wheel, v.scroll_drag));
+        let max_scroll = 0.0f64.max(self.l_content[index] as f64 - self.l_h[index] as f64);
+        self.glide(0, time, index, max_scroll, wheel, drag);
+        if consume {
+            if let Some(value) = self.signals.get_mut(&key) {
+                value.scroll_wheel = 0.0;
+                value.scroll_drag = 0.0;
+                value.scroll_touch = false;
+                value.scroll_lift = false;
+            }
+        }
+    }
+
+    /// A `SCROLL_X` box sideways, as `apply_scroll` down; right to left the offset runs from the
+    /// right edge, so the wheel and the fingers move the content mirrored (it follows them).
+    fn apply_scroll_x(&mut self, time: f64, index: usize) {
+        let key = self.boxes[index].key;
+        let (wheel, drag) = self.signals.get(&key).map_or((0.0, 0.0), |v| (v.scroll_wheel_x, v.scroll_drag_x));
+        let max_scroll = 0.0f64.max(self.l_content_w[index] as f64 - self.l_w[index] as f64);
+        let sign = if self.dir == Direction::Rtl { -1.0 } else { 1.0 };
+        self.glide(1, time, index, max_scroll, wheel * sign, drag * sign);
+    }
+
+    /// The scroll motion of axis `ax`: wheel steps and finger travel pull (stretching past an
+    /// edge), fingers lifted in motion coast and bounce, a stretch left alone decays.
+    fn glide(&mut self, ax: usize, time: f64, index: usize, max_scroll: f64, wheel: f32, drag: f32) {
         let slot = self.boxes[index].slot;
         let key = self.boxes[index].key;
-        let height = self.l_h[index] as f64;
-        let max_scroll = 0.0f64.max(self.l_content[index] as f64 - height);
-        let (wheel, drag, touch, lift) = match self.signals.get(&key) {
-            Some(v) => (v.scroll_wheel, v.scroll_drag, v.scroll_touch, v.scroll_lift),
-            None => (0.0, 0.0, false, false),
-        };
+        let extent = if ax == 0 { self.l_h[index] } else { self.l_w[index] } as f64;
+        let (touch, lift) = self.signals.get(&key).map_or((false, false), |v| (v.scroll_touch, v.scroll_lift));
+        let release = if ax == 0 { self.gesture_velocity.0 } else { self.gesture_velocity.1 };
+        let release = if ax == 1 && self.dir == Direction::Rtl { -release } else { release };
         // any input catches a coast or a bounce where it is
         if touch || wheel != 0.0 || drag != 0.0 {
-            self.slots[slot].scroll_mode = 0;
+            self.slots[slot].glide[ax].mode = 0;
         }
         if touch {
-            self.slots[slot].scroll_event_time = f64::INFINITY;
+            self.slots[slot].glide[ax].event_time = f64::INFINITY;
         }
         if drag != 0.0 {
-            self.pull(slot, max_scroll, height, 1.0, drag as f64);
+            self.pull(ax, slot, max_scroll, extent, 1.0, drag as f64);
             // held by the fingers: it springs back when they lift
-            self.slots[slot].scroll_event_time = f64::INFINITY;
+            self.slots[slot].glide[ax].event_time = f64::INFINITY;
         } else if wheel != 0.0 {
             let step = self.nd(index).scroll_step;
-            self.pull(slot, max_scroll, height, SCROLL_WHEEL_PAST, wheel as f64 * step as f64);
-            self.slots[slot].scroll_event_time = time;
+            self.pull(ax, slot, max_scroll, extent, SCROLL_WHEEL_PAST, wheel as f64 * step as f64);
+            self.slots[slot].glide[ax].event_time = time;
         }
         if lift {
-            if self.slots[slot].scroll_visual != 0.0 {
-                self.slots[slot].scroll_event_time = f64::NEG_INFINITY;
-            } else if max_scroll > 0.0 && self.gesture_velocity.abs() >= SCROLL_MIN_VELOCITY {
-                let y = self.scroll_y[slot] as f64;
-                let s = &mut self.slots[slot];
-                s.scroll_mode = 1;
-                s.scroll_velocity = self.gesture_velocity;
-                s.scroll_start = time;
-                s.scroll_from = y;
+            if self.slots[slot].glide[ax].visual != 0.0 {
+                self.slots[slot].glide[ax].event_time = f64::NEG_INFINITY;
+            } else if max_scroll > 0.0 && release.abs() >= SCROLL_MIN_VELOCITY {
+                let from = *self.offset_mut(ax, slot) as f64;
+                let g = &mut self.slots[slot].glide[ax];
+                (g.mode, g.velocity, g.start, g.from) = (1, release, time, from);
             }
         }
         if wheel == 0.0 && drag == 0.0 {
-            if self.slots[slot].scroll_mode == 1 {
+            let g = self.slots[slot].glide[ax];
+            if g.mode == 1 {
                 // v(t) = v0 e^(-t/tau), so y(t) = y0 + v0 tau (1 - e^(-t/tau))
-                let velocity = self.slots[slot].scroll_velocity;
-                let from = self.slots[slot].scroll_from;
-                let at = |t: f64| from + velocity * SCROLL_COAST_TAU * (1.0 - (-t / SCROLL_COAST_TAU).exp());
-                let t = 0.0f64.max(time - self.slots[slot].scroll_start);
+                let at = |t: f64| g.from + g.velocity * SCROLL_COAST_TAU * (1.0 - (-t / SCROLL_COAST_TAU).exp());
+                let t = 0.0f64.max(time - g.start);
                 let y = at(t);
                 if y < 0.0 || y > max_scroll {
                     // the coast is monotonic: bisect for when it met the edge and bounce from then
@@ -3619,49 +3656,41 @@ impl Ui {
                         let mid = (early + late) / 2.0;
                         if (at(mid) - edge) * (y - edge) > 0.0 { late = mid } else { early = mid }
                     }
-                    let arrival = velocity * (-late / SCROLL_COAST_TAU).exp();
-                    self.scroll_y[slot] = edge as f32;
-                    let s = &mut self.slots[slot];
-                    s.scroll_mode = 2;
-                    s.scroll_start += late;
-                    s.scroll_velocity = SCROLL_BOUNCE_LAUNCH * arrival / (SCROLL_BOUNCE_B - SCROLL_BOUNCE_A);
+                    let arrival = g.velocity * (-late / SCROLL_COAST_TAU).exp();
+                    *self.offset_mut(ax, slot) = edge as f32;
+                    let g = &mut self.slots[slot].glide[ax];
+                    g.mode = 2;
+                    g.start += late;
+                    g.velocity = SCROLL_BOUNCE_LAUNCH * arrival / (SCROLL_BOUNCE_B - SCROLL_BOUNCE_A);
                 } else {
                     // on whole device pixels, so text is sharp where the coast ends
                     let density = self.density as f64;
-                    self.scroll_y[slot] = ((y * density).round() / density) as f32;
-                    if (velocity * (-t / SCROLL_COAST_TAU).exp()).abs() < SCROLL_MIN_VELOCITY {
-                        self.slots[slot].scroll_mode = 0;
+                    *self.offset_mut(ax, slot) = ((y * density).round() / density) as f32;
+                    if (g.velocity * (-t / SCROLL_COAST_TAU).exp()).abs() < SCROLL_MIN_VELOCITY {
+                        self.slots[slot].glide[ax].mode = 0;
                     }
                 }
             }
-            if self.slots[slot].scroll_mode == 2 {
-                let t = 0.0f64.max(time - self.slots[slot].scroll_start);
-                let visual = self.slots[slot].scroll_velocity
-                    * ((-SCROLL_BOUNCE_A * t).exp() - (-SCROLL_BOUNCE_B * t).exp());
+            let g = &mut self.slots[slot].glide[ax];
+            if g.mode == 2 {
+                let t = 0.0f64.max(time - g.start);
+                let visual = g.velocity * ((-SCROLL_BOUNCE_A * t).exp() - (-SCROLL_BOUNCE_B * t).exp());
                 let settled = t > 1.0 / SCROLL_BOUNCE_A && visual.abs() < 0.25;
                 if settled {
-                    self.slots[slot].scroll_mode = 0;
+                    g.mode = 0;
                 }
-                self.slots[slot].scroll_visual = if settled { 0.0 } else { visual };
-                self.slots[slot].scroll_raw = scroll_travel(self.slots[slot].scroll_visual, height);
-            } else if self.slots[slot].scroll_visual != 0.0 && time - self.slots[slot].scroll_event_time > 0.08 {
-                let dt = 0.0f64.max(time - self.slots[slot].scroll_frame_time);
-                let visual = self.slots[slot].scroll_visual * (-dt / SCROLL_SPRING_TAU).exp();
-                self.slots[slot].scroll_visual = if visual.abs() < 0.25 { 0.0 } else { visual };
-                self.slots[slot].scroll_raw = scroll_travel(self.slots[slot].scroll_visual, height);
+                g.visual = if settled { 0.0 } else { visual };
+                g.raw = scroll_travel(g.visual, extent);
+            } else if g.visual != 0.0 && time - g.event_time > 0.08 {
+                let dt = 0.0f64.max(time - g.frame_time);
+                let visual = g.visual * (-dt / SCROLL_SPRING_TAU).exp();
+                g.visual = if visual.abs() < 0.25 { 0.0 } else { visual };
+                g.raw = scroll_travel(g.visual, extent);
             }
         }
-        self.slots[slot].scroll_frame_time = time;
-        if (self.slots[slot].scroll_mode != 0 || self.slots[slot].scroll_visual != 0.0) && !self.moving.contains(&slot) {
+        self.slots[slot].glide[ax].frame_time = time;
+        if self.slots[slot].glide[ax].moving() && !self.moving.contains(&slot) {
             self.moving.push(slot);
-        }
-        if consume {
-            if let Some(value) = self.signals.get_mut(&key) {
-                value.scroll_wheel = 0.0;
-                value.scroll_drag = 0.0;
-                value.scroll_touch = false;
-                value.scroll_lift = false;
-            }
         }
     }
 
@@ -3683,12 +3712,9 @@ impl Ui {
                 self.scroll_y[slot] = 0.0f32.max(max_scroll.min(self.scroll_y[slot]));
             }
             if n.flags & SCROLL_X != 0 {
-                let key = self.boxes[index].key;
-                let delta = self.signals.get(&key).map_or(0.0, |v| v.scroll_x * n.scroll_step + v.scroll_drag_x);
-                // right to left the offset runs from the right edge: the content follows the fingers
-                let delta = if self.dir == Direction::Rtl { -delta } else { delta };
+                self.apply_scroll_x(time, index);
                 let max_x = 0.0f32.max(self.l_content_w[index] - self.l_w[index]);
-                self.scroll_xs[slot] = 0.0f32.max(max_x.min(self.scroll_xs[slot] - delta));
+                self.scroll_xs[slot] = 0.0f32.max(max_x.min(self.scroll_xs[slot]));
             }
             let inner_w = self.l_w[index] - pad.l - pad.r - gutter;
             let inner_h = self.l_h[index] - pad.t - pad.b;
@@ -3713,8 +3739,8 @@ impl Ui {
                 (None, Axis::Stack) => self.arrange_stack(index, &n, (inner_w, inner_h), inner_at),
                 (None, _) => self.arrange_flow(index, &n, (inner_w, inner_h), inner_at),
             }
-            let scroll_y = if scrolls { self.scroll_y[slot] + self.slots[slot].scroll_visual as f32 } else { 0.0 };
-            let scroll_x = if n.flags & SCROLL_X != 0 { self.scroll_xs[slot] } else { 0.0 };
+            let scroll_y = if scrolls { self.scroll_y[slot] + self.slots[slot].glide[0].visual as f32 } else { 0.0 };
+            let scroll_x = if n.flags & SCROLL_X != 0 { self.scroll_xs[slot] + self.slots[slot].glide[1].visual as f32 } else { 0.0 };
             let rtl = self.dir == Direction::Rtl;
             let (root_w, root_h) = (self.l_w[0], self.l_h[0]);
             let last = self.boxes[index].last;

@@ -260,6 +260,60 @@ pub fn layout_scroll_sticky() {
     ui.destroy();
 }
 
+/// Sideways scrolling stretches past an edge and springs back, and coasts and bounces off the far
+/// edge, as down does; right to left the fingers move the content as they move.
+pub fn layout_scroll_x_elastic() {
+    use input::ScrollPhase::*;
+    let pad = |delta: f64, phase, time: f64| Event::TrackpadScrolled { delta: (delta, 0.0), phase, time };
+    for rtl in [false, true] {
+        let mut ui = new_ui(None);
+        if rtl {
+            ui.set_dir(Direction::Rtl);
+        }
+        let mut build = |ui: &mut Ui| {
+            let p = ui.node("p", Node { flags: SCROLL_X | CLIP, at: Some((0.0, 0.0)), ..px(100.0, 100.0) });
+            let saved = ui.enter(&p);
+            let body = ui.node("body", px(300.0, 100.0));
+            ui.leave(saved);
+            vec![body]
+        };
+        // where the content's start edge is: its left (right to left: its right, from the box's)
+        let start = |r: Rect| if rtl { 100.0 - (r.x + r.w) } else { r.x };
+        let s = if rtl { -1.0 } else { 1.0 };
+        lay(&mut ui, 0.0, vec![Event::PointerMoved((50.0, 50.0))], &mut build);
+        lay(&mut ui, 0.1, vec![pad(0.0, Touched, 0.1)], &mut build);
+        let r = lay(&mut ui, 0.12, vec![pad(40.0 * s, Moved, 0.12)], &mut build);
+        let pulled = start(r[0]);
+        check(pulled > 15.0 && pulled < 25.0, &format!("rtl {rtl}: 40 points past the start edge show as {pulled}"));
+        lay(&mut ui, 0.2, vec![pad(0.0, Lifted, 0.2)], &mut build);
+        let r = lay(&mut ui, 0.25, vec![], &mut build);
+        check(start(r[0]) > 0.0 && start(r[0]) < pulled, &format!("rtl {rtl}: springing back, at {}", start(r[0])));
+        let mut t = 0.25;
+        while ui.wants_frame(&[], t) && t < 3.0 {
+            t += 1.0 / 60.0;
+            lay(&mut ui, t, vec![], &mut build);
+        }
+        let r = lay(&mut ui, t, vec![], &mut build);
+        check(start(r[0]) == 0.0 && t < 1.5, &format!("rtl {rtl}: rests at the edge ({}) at {t}", start(r[0])));
+        // a flick: the fingers lift in motion and the content coasts into the far edge
+        let t0 = t + 1.0;
+        lay(&mut ui, t0, vec![pad(0.0, Touched, t0)], &mut build);
+        lay(&mut ui, t0 + 0.016, vec![pad(-20.0 * s, Moved, t0 + 0.016)], &mut build);
+        lay(&mut ui, t0 + 0.032, vec![pad(-20.0 * s, Moved, t0 + 0.032)], &mut build);
+        lay(&mut ui, t0 + 0.04, vec![pad(0.0, Lifted, t0 + 0.04)], &mut build);
+        let r = lay(&mut ui, t0 + 0.1, vec![], &mut build);
+        check(start(r[0]) < -60.0, &format!("rtl {rtl}: coasting, at {}", start(r[0])));
+        let mut t = t0 + 0.1;
+        while ui.wants_frame(&[], t) && t < t0 + 5.0 {
+            t += 1.0 / 60.0;
+            lay(&mut ui, t, vec![], &mut build);
+        }
+        let r = lay(&mut ui, t, vec![], &mut build);
+        check(start(r[0]) == -200.0, &format!("rtl {rtl}: rests at the far edge, at {}", start(r[0])));
+        ui.destroy();
+    }
+}
+
 /// Right to left mirrors a row's flow and its start padding.
 pub fn layout_rtl() {
     let mut ui = new_ui(None);
@@ -563,6 +617,7 @@ pub const CASES: &[(&str, fn())] = &[
     ("layout_anchored_flip", layout_anchored_flip),
     ("layout_scroll_sticky", layout_scroll_sticky),
     ("layout_rtl", layout_rtl),
+    ("layout_scroll_x_elastic", layout_scroll_x_elastic),
     ("layout_split_drag", layout_split_drag),
     ("layout_cached_view_not_rerun", layout_cached_view_not_rerun),
 ];
