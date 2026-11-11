@@ -200,7 +200,9 @@ pub fn draw_viewport_pane<'a>(
             use std::hash::Hash;
             (leaf.body, gate, &value.selected_box, value.revs.doc, counts, trace, value.status_fps, rh.to_bits()).hash(h)
         });
-        kit::cached(ui, &format!("viewport-marks-view-{key}"), revision, &mut |ui| marks(ui, value, leaf, key, theme, rh, counts));
+        kit::with_label(format_args!("viewport-marks-view-{key}"), &mut |label| {
+            kit::cached(ui, label, revision, &mut |ui| marks(ui, value, leaf, key, theme, rh, counts));
+        });
     }
     match active {
         Some(leaf) => roots.iter().find(|(l, _)| l.path == leaf.path).map(|(_, b)| b.clone()).unwrap_or_else(|| none_root(ui)),

@@ -442,7 +442,12 @@ pub fn update(
         });
         let mut open_at: Option<(f32, f32)> = None;
         let mut built = |ui: &mut Ui| header(ui, l, &st, collapsed, focused, &text, limit_slots, frame, &theme, &mut intents, &mut tip, &moving, &mut open_at);
-        let view = ui.view(&format!("workspace-header-view-{}{}", panels::lower_name(&l.panel), key(&l.path)), revision, Size::Px(w as f32), Size::Px(h as f32), &mut built);
+        // keyed by the leaf, so a drag or a menu follows it when the layout reorders the leaves
+        let mut view = None;
+        kit::with_label(format_args!("workspace-header-view-{}{}", panels::lower_name(&l.panel), key(&l.path)), &mut |label| {
+            view = Some(ui.view(label, revision, Size::Px(w as f32), Size::Px(h as f32), &mut built));
+        });
+        let view = view.expect("header view");
         ui.set_at(&view, (x as f32, y as f32));
         if l.floating {
             ui.to_front(order as i64, &view);
@@ -522,18 +527,12 @@ fn header(
         if signal.clicked {
             intents.push(Intent::Window(l.path.clone(), None));
         }
-        let hovered = signal.hovered;
-        let focused = ui.focused(&dock);
-        ui.draw(&dock, move |paint, Rect { x, y, w, h }| {
-            if hovered {
-                paint.fill(x, y, w, h, theme::hover_fill(&theme));
-            }
-            if focused {
-                paint.fill(x, y + h - 1.0, w, 1.0, theme.accent);
-            }
-            // the dock mark: a chevron-down in ink-2, as the sheet's window rows
-            paint.chevron((x + (w / 2.0), y + (h / 2.0)), Dir::Down, theme::ink_2(&theme));
-        });
+        // the dock mark: a chevron-down in ink-2, as the sheet's window rows
+        let node = ui.node_mut(&dock);
+        (node.look, node.mark) = (*header_button(&theme, theme::ink_2(&theme)).pick(State { hovered: signal.hovered, ..State::default() }), Mark::Chevron(Dir::Down));
+        if ui.focused(&dock) {
+            ui.draw_over(&dock, move |paint, Rect { x, y, w, h }| paint.fill(x, y + h - 1.0, w, 1.0, theme.accent));
+        }
     }
     let grip = floating(ui, CLICKABLE | BLOCKING, (0, 0, 0.max(w - tools), h), format_args!("workspace-drag-{name}{path}"));
     let drag = ui.signal(&grip);
@@ -604,7 +603,22 @@ fn header(
             tx = tx + pw + 8.0 + (ui.text_width(None, "/") + 8.0);
         }
     }
-    let collapse_hovered = ui.signal(&button).hovered;
+    // the collapse chevron (a window's close cross) on the button's look: the hover fill under it
+    let collapse_state = State { hovered: ui.signal(&button).hovered, ..State::default() };
+    let ink = if l.floating { theme::ink_2(&theme) } else { theme.foreground };
+    if windowed {
+        // the window's close mark is the label-size multiplication sign, centred in its button
+        let cap = kit::cap_size(ui);
+        let tw = ui.text_width(Some(cap), "\u{d7}");
+        let node = ui.node_mut(&button);
+        node.look = theme::Look { font: theme::Font { size: -2, ..theme::Font::BODY }, ..*header_button(&theme, theme::ink_2(&theme)).pick(collapse_state) };
+        node.inset = Edges { l: (size as f32 - tw) / 2.0, ..Edges::ZERO };
+        ui.text(&button, "\u{d7}");
+    } else {
+        let collapsed_now = collapsed;
+        let node = ui.node_mut(&button);
+        (node.look, node.mark) = (*header_button(&theme, ink).pick(collapse_state), Mark::Chevron(if collapsed_now { Dir::Down } else { Dir::Left }));
+    }
     // the keyboard's mark is the sheet's: an accent line over the last row of the button
     if ui.focused(&button) {
         ui.draw_over(&button, move |paint, Rect { x, y, w, h }| paint.fill(x, y + h - 1.0, w, 1.0, theme.accent));
@@ -676,21 +690,14 @@ fn header(
                 put(paint, &mut tx, ink_3, "collapsed");
             }
         }
-        let cx = x + w - 18.0;
-        let cy = y + (h / 2.0);
-        if collapse_hovered {
-            paint.fill(cx - 10.0, cy - 10.0, 20.0, 20.0, theme::hover_fill(&theme));
-        }
-        if windowed {
-            // the window's close mark is the label-size multiplication sign, centred in its button
-            let size = cap;
-            let tw = paint.text_width(Some(size), "\u{d7}");
-            let ty = kit::cap_y_paint(paint, y, h);
-            paint.text_s((cx - (tw / 2.0), ty), size, ink_2, "\u{d7}");
-        } else {
-            paint.chevron((cx, cy), if collapsed { Dir::Down } else { Dir::Left }, if floating_ { ink_2 } else { theme.foreground });
-        }
     });
+}
+
+/// A header's 20-point button (collapse, dock, close) as `States`: the hover fill under its mark,
+/// drawn in `ink`.
+fn header_button(theme: &theme::Tokens, ink: pxui::geom::color::T) -> theme::States {
+    let idle = theme::Look { text: ink, ..theme::Look::NONE };
+    theme::States { hover: theme::Look { fill: theme::hover_fill(theme), ..idle }, ..theme::States::all(idle) }
 }
 
 /// where a header's tools begin: after its title, the 8-point gap, the 1 x 12 rule between two

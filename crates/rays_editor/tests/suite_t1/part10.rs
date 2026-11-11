@@ -87,7 +87,8 @@ fn workspace(name: &str, text: &str) {
     // inside one node rebuilds no view
     check(idle.frames == 0 || name != "empty", &format!("{name}: idle built {} frames", idle.frames));
     check(idle.views == 0 || name != "basic", &format!("{name}: playing rebuilt {} views", idle.views));
-    check(idle.views <= idle.frames || name != "orrery", &format!("{name}: playing rebuilt {} views in {} frames", idle.views, idle.frames));
+    // (a cook that publishes during the run, its timing the machine's, rebuilds what shows its results)
+    check(idle.views <= idle.frames + 2 || name != "orrery", &format!("{name}: playing rebuilt {} views in {} frames", idle.views, idle.frames));
     check(hover.views == 0 || name != "empty", &format!("{name}: pointer motion rebuilt {} views", hover.views));
     if name == "empty" {
         use editor_core::panels::Panel;

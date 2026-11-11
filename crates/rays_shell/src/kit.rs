@@ -77,27 +77,44 @@ impl Default for ButtonOpts {
     }
 }
 
-/// A button is its text and, in ink-3, its key: a fill on hover and press, the control fill
-/// while `active`; `primary` is the one outlined button of a panel. `icon` draws a play triangle
-/// or a stop square before the label. True on a click.
+/// The chrome's text button as `States`: a fill on hover and press, the control fill while it is
+/// checked (`active`), and for the `primary` (the one outlined button of a panel) a line-3 edge in
+/// every state. Its text is in its child nodes, not its look.
+pub fn button_states(theme: &theme::Tokens, primary: bool) -> theme::States {
+    let idle = if primary { theme::Look { border: theme::border(theme), border_w: 1.0, ..theme::Look::NONE } } else { theme::Look::NONE };
+    theme::States {
+        idle,
+        hover: theme::Look { fill: theme::hover_fill(theme), ..idle },
+        pressed: theme::Look { fill: theme::pressed_fill(theme), ..idle },
+        focus: idle,
+        disabled: idle,
+        checked: theme::Look { fill: theme.control, ..idle },
+    }
+}
+
+/// A text node at `x` in its parent, `h` tall (the parent's height), in `look`'s ink at its font.
+fn text_node(ui: &mut Ui, key: i64, x: f32, w: f32, h: f32, look: theme::Look, text: &str) {
+    let node = ui.node_keyed(key, Node { w: Size::Px(w.max(1.0)), h: Size::Px(h), at: Some((x, 0.0)), look, ..Node::DEFAULT });
+    ui.text(&node, text);
+}
+
+/// A button is its text and, in ink-3, its key: a node whose look `button_states` picks (a fill on
+/// hover and press, the control fill while `active`, the outline of the `primary`), its label and key
+/// child nodes. `icon` draws a play triangle or a stop square before the label. True on a click.
 pub fn button(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, o: &ButtonOpts, label: &str) -> bool {
     let (bx, by) = at;
     let theme = ui.tokens();
     let boxed = ui.box_(key, BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(w)).h(Size::Px(o.h)).at((bx, by)));
     let signal = ui.signal(&boxed);
-    let held = o.enabled && signal.held;
-    let hovered = o.enabled && signal.hovered;
-    let (enabled, active, primary, centered, icon) = (o.enabled, o.active, o.primary, o.centered, o.icon);
-    let label = ui.cached_label(&boxed, 0, label);
-    let hint = o.hint.as_ref().map(|hint| ui.cached_label(&boxed, 1, hint));
-    let size = cap_size(ui);
-    ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
-        paint_button_ground(paint, &theme, held, hovered, active, primary, Rect::new(x, y, w, h));
-        let color = if enabled { theme.foreground } else { theme::ink_3(&theme) };
-        let tx = match icon {
-            None if centered => x + ((w - paint.text_width(None, &label)) / 2.0).floor(),
-            None => x + 7.0,
-            Some(shape) => {
+    let state = State { hovered: o.enabled && signal.hovered, pressed: o.enabled && signal.held, checked: o.active, ..State::default() };
+    ui.node_mut(&boxed).look = *button_states(&theme, o.primary).pick(state);
+    let color = if o.enabled { theme.foreground } else { theme::ink_3(&theme) };
+    let lw = ui.text_width(None, label);
+    let tx = match o.icon {
+        None if o.centered => ((w - lw) / 2.0).floor(),
+        None => 7.0,
+        Some(shape) => {
+            ui.draw(&boxed, move |paint, Rect { x, y, w: _, h }| {
                 let cy = y + (h / 2.0);
                 match shape {
                     Icon::Play => {
@@ -110,22 +127,20 @@ pub fn button(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, o: &ButtonOpts, la
                     }
                     Icon::Stop => paint.fill(x + 7.0, cy - 4.0, 8.0, 8.0, color),
                 }
-                x + 20.0
-            }
-        };
-        let ty = paint.text_top(None, y, h);
-        paint.text_c((tx, ty), color, &label);
-        if let Some(hint) = &hint {
-            let hy = cap_y_of(paint, y, h);
-            let lw = paint.text_width(None, &label);
-            paint.text_s((tx + lw + 6.0, hy), size, theme::ink_3(&theme), hint);
+            });
+            20.0
         }
-    });
-    signal.clicked && enabled
-}
-
-fn cap_y_of(paint: &Paint, y: f32, h: f32) -> f32 {
-    cap_y_paint(paint, y, h)
+    };
+    let saved = ui.enter(&boxed);
+    text_node(ui, pxui::ui_core::int_key(boxed.box_key, 0), tx, lw, o.h, theme::Look { text: color, ..theme::Look::NONE }, label);
+    if let Some(hint) = &o.hint {
+        let size = cap_size(ui);
+        let hw = ui.text_width(Some(size), hint);
+        let font = theme::Font { size: -2, ..theme::Font::BODY };
+        text_node(ui, pxui::ui_core::int_key(boxed.box_key, 1), tx + lw + 6.0, hw, o.h, theme::Look { text: theme::ink_3(&theme), font, ..theme::Look::NONE }, hint);
+    }
+    ui.leave(saved);
+    signal.clicked && o.enabled
 }
 
 /// A colour: a 20-point swatch, then its hex field to the right edge of the control column; the
@@ -145,14 +160,17 @@ pub fn colour(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, swatch: Color, hex
 }
 
 /// The kit's switch: 28 x 14, a line-3 edge, an 8-point knob that is ink-3 on the track at the left
-/// and the accent on white at the right. True on a click.
+/// and the accent on white at the right: the theme's `switch` and `knob` looks, checked when on. True
+/// on a click.
 pub fn switch(ui: &mut Ui, key: &str, at: (f32, f32), on: bool) -> bool {
     let (sx, sy) = at;
-    let boxed = ui.box_(key, BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(28.0)).h(Size::Px(14.0)).at((sx, sy)));
-    let signal = ui.signal(&boxed);
-    let theme = ui.tokens();
-    ui.draw(&boxed, move |paint, Rect { x, y, w: _, h: _ }| paint_switch(paint, &theme, x, y, on));
-    signal.clicked
+    let checked = State { checked: on, ..State::default() };
+    let (track, knob) = (*ui.theme().switch.pick(checked), *ui.theme().knob.pick(checked));
+    let boxed = ui.node(key, Node { flags: CLICKABLE | BLOCKING, w: Size::Px(28.0), h: Size::Px(14.0), at: Some((sx, sy)), look: track, ..Node::DEFAULT });
+    let saved = ui.enter(&boxed);
+    ui.node_keyed(pxui::ui_core::int_key(boxed.box_key, 0), Node { w: Size::Px(8.0), h: Size::Px(8.0), at: Some((if on { 17.0 } else { 3.0 }, 3.0)), look: knob, ..Node::DEFAULT });
+    ui.leave(saved);
+    ui.signal(&boxed).clicked
 }
 
 /// Text tabs: the one in use is ink with a 1-point underline, the others ink-3. Laid out leftwards
@@ -173,16 +191,16 @@ pub fn segments(ui: &mut Ui, key: &str, right: f32, y: f32, labels: &[&str], act
         if signal.clicked {
             clicked = Some(index as i64);
         }
-        let hovered = signal.hovered;
-        let label = ui.cached_label(&boxed, 0, label);
-        ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
-            let on = index as i64 == active;
-            let ty = paint.text_top(None, y, h);
-            paint.text_c((x + 4.0, ty), if on || hovered { theme.foreground } else { theme::ink_3(&theme) }, &label);
-            if on {
-                paint.fill(x + 4.0, y + h - 1.0, w - 8.0, 1.0, theme.foreground);
-            }
-        });
+        // the one in use is ink with a 1-point underline 4 in from each side; another is ink-3, ink
+        // while hovered
+        let on = index as i64 == active;
+        let ink = if on || signal.hovered { theme.foreground } else { theme::ink_3(&theme) };
+        let saved = ui.enter(&boxed);
+        text_node(ui, pxui::ui_core::int_key(boxed.box_key, 0), 4.0, w, h, theme::Look { text: ink, ..theme::Look::NONE }, label);
+        if on {
+            ui.node_keyed(pxui::ui_core::int_key(boxed.box_key, 1), Node { w: Size::Px(w), h: Size::Px(1.0), at: Some((4.0, h - 1.0)), look: theme::Look { fill: theme.foreground, ..theme::Look::NONE }, ..Node::DEFAULT });
+        }
+        ui.leave(saved);
         x += w + 12.0;
     }
     (clicked, right - total)
@@ -204,6 +222,39 @@ pub fn cached(ui: &mut Ui, label: &str, revision: u64, f: &mut dyn FnMut(&mut Ui
     let view = ui.view(label, revision, Size::Px(w), Size::Px(h), f);
     ui.set_at(&view, (0.0, 0.0));
     view
+}
+
+/// `f` with `label` formatted on the stack (a heap string only past 96 bytes): a label made per frame
+/// without an allocation.
+pub fn with_label(label: std::fmt::Arguments, f: &mut dyn FnMut(&str)) {
+    struct Buf {
+        bytes: [u8; 96],
+        len: usize,
+        spill: Option<String>,
+    }
+    impl std::fmt::Write for Buf {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            match &mut self.spill {
+                Some(spill) => spill.push_str(s),
+                None if self.len + s.len() <= self.bytes.len() => {
+                    self.bytes[self.len..self.len + s.len()].copy_from_slice(s.as_bytes());
+                    self.len += s.len();
+                }
+                None => {
+                    let mut spill = std::str::from_utf8(&self.bytes[..self.len]).expect("utf-8").to_owned();
+                    spill.push_str(s);
+                    self.spill = Some(spill);
+                }
+            }
+            Ok(())
+        }
+    }
+    let mut buf = Buf { bytes: [0; 96], len: 0, spill: None };
+    let _ = std::fmt::Write::write_fmt(&mut buf, label);
+    match &buf.spill {
+        Some(spill) => f(spill),
+        None => f(std::str::from_utf8(&buf.bytes[..buf.len]).expect("utf-8")),
+    }
 }
 
 /// `cap_y` for a painter, which has the paint and not the handle.
