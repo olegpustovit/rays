@@ -490,7 +490,8 @@ automatic table layout, a selector engine.
 **Accessibility (engine half, landed).** `Node::role` (`a11y::Role`; `Unknown` is not in the tree)
 and `Node::a11y` (widget states: CHECKABLE, CHECKED, EXPANDABLE, EXPANDED, EDITABLE, MULTILINE,
 SELECTED, MODAL), `ui.set_role`, `ui.a11y_name` (the text by default), `ui.a11y_value(h, text,
-selection)`. Each view keeps the slots its last build declared, so the walk after paint reaches a
+selection)`, `ui.a11y_number(h, now, min, max, step)` (`Value::Number`, over the text: the slider, a
+determinate progress bar in percent). Each view keeps the slots its last build declared, so the walk after paint reaches a
 kept view's nodes; nodes with a role are pushed under their nearest pushed ancestor with
 `node_id(slot, generation)`, the resolved rect, FOCUSABLE/FOCUSED/PRESSED/ENABLED/VISIBLE and the
 actions their flags allow. The tree is built only after `ui.set_a11y(true)` (off by default: empty
