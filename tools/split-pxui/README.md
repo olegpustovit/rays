@@ -2,7 +2,7 @@
 
 A small, fast, native UI engine in Rust. Plain events go in, a draw list comes out; one instanced
 pipeline paints it on Metal (Apple Silicon) or Vulkan (Windows, Linux). It is the UI of
-[Rays](https://github.com/OlegHQ/rays), which embeds this repository as a submodule at `pxui/`, and it
+Rays, which embeds this repository as a submodule at `pxui/`, and it
 builds and tests on its own.
 
 Dependencies are std and `cc`; `pxui_text` alone adds cosmic-text for shaping and glyph rasterisation.

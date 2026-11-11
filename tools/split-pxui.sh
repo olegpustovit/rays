@@ -49,8 +49,15 @@ show() { git -C "$rays" show "$sha:$1"; }
 show LICENSE > "$scratch/LICENSE"
 show rust-toolchain.toml > "$scratch/rust-toolchain.toml"
 show Cargo.lock > "$scratch/Cargo.lock"
-show docs/development.md | awk '/^## Vulkan on Linux/{p=1; sub(/^## /,"# ")} /^## /&&!/^## Vulkan on Linux/{p=0} p' > "$scratch/vulkan-linux.md"
+# PXUI's share of docs/development.md: Vulkan on Linux (up to the Rays editor subsection) and the gallery section.
+show docs/development.md | awk '
+    /^## Vulkan on Linux/ {p=1; sub(/^## /,"# ")}
+    /^### The Rays editor on Linux/ {p=0}
+    /^## The PXUI gallery/ {p=1}
+    /^## / && !/^## The PXUI gallery/ {p=0}
+    p' > "$scratch/vulkan-linux.md"
 [ -s "$scratch/vulkan-linux.md" ] || die "docs/development.md has no 'Vulkan on Linux' section"
+grep -q '^## The PXUI gallery' "$scratch/vulkan-linux.md" || die "docs/development.md has no 'The PXUI gallery' section"
 
 git clone -q --no-local --no-checkout "$rays" "$out"
 cd "$out"

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Phase P6, step 2: the Rays side of the split, on a new branch of a clean Rays checkout.
+# Phase P6, step 2: the Rays side of the split, on a clean Rays checkout.
 #
 #   tools/split-pxui/rays-side.sh <rays-checkout> <pxui-url> [<pxui-commit>] [<branch>]
 #
 # Removes the PXUI paths, adds the submodule `pxui/` (<pxui-url>, at <pxui-commit>, default its HEAD),
 # rewrites manifests to path dependencies on pxui/crates/*, points the `t` alias, the macOS linker
 # wrapper and the sources that read moved assets at the submodule, trims the gate policy and leaves
-# the result UNCOMMITTED on <branch> (default pxui-submodule) for `cargo check --workspace --tests`.
+# the result staged, UNCOMMITTED, on <branch> (default: the branch already checked out; a named other
+# branch is created) for `cargo check --workspace --tests`.
 # `cargo run -p gate -- all` (tools/check-pxui-remote.sh) then refuses a pointer that is not on the PXUI remote.
 # Run it with the same <source-ref> checked out that tools/split-pxui.sh split.
 set -euo pipefail
@@ -14,11 +15,11 @@ set -euo pipefail
 die() { echo "rays-side: $*" >&2; exit 1; }
 [ $# -ge 2 ] || die "usage: $0 <rays-checkout> <pxui-url> [<pxui-commit>] [<branch>]"
 cd "$1"
-url=$2; commit=${3:-}; branch=${4:-pxui-submodule}
+url=$2; commit=${3:-}; branch=${4:-$(git branch --show-current)}
 [ -f Cargo.toml ] && [ -d crates ] || die "$1 is not a Rays checkout"
 [ ! -e pxui ] || die "pxui/ already exists"
 [ -z "$(git status --porcelain)" ] || die "the checkout has uncommitted changes"
-git switch -q -c "$branch"
+[ "$branch" = "$(git branch --show-current)" ] || git switch -q -c "$branch"
 
 CRATES="ogpu_core ogpu_mock ogpu_metal metal_sys ogpu_vulkan vulkan_sys native_layer_token_sys input sdl3 sdl3_sys mem_sys cfmt pxui pxui_text pxui_render pxui_sdl pxui_wayland pxui_atspi pxui_gallery"
 for c in $CRATES; do git rm -rqf "crates/$c"; rm -rf "crates/$c"; done
@@ -50,14 +51,20 @@ sed -i.bak -e 's#^t = .*#t = "run -q --manifest-path pxui/tools/t/Cargo.toml --t
     -e 's#linker = "tools/cc-stack.sh"#linker = "pxui/tools/cc-stack.sh"#' .cargo/config.toml && rm .cargo/config.toml.bak
 
 # Sources and docs that read moved assets and specs.
-find crates -name '*.rs' -exec sed -i.bak -E 's#\.\./\.\./assets/fonts#../../pxui/assets/fonts#g; s#\.\./\.\./\.\./\.\./tools/t/window_harness\.rs#../../../../pxui/tools/t/window_harness.rs#; s#\.\./\.\./\.\./tools/t/window_harness\.rs#../../../pxui/tools/t/window_harness.rs#' {} +
+find crates -name '*.rs' -exec sed -i.bak -E 's#\.\./\.\./assets/fonts#../../pxui/assets/fonts#g; s#\.\./\.\./\.\./\.\./tools/t/window_harness\.rs#../../../../pxui/tools/t/window_harness.rs#; s#\.\./\.\./\.\./tools/t/window_harness\.rs#../../../pxui/tools/t/window_harness.rs#; s#\.\./\.\./crates/sdl3/fixtures#../../pxui/crates/sdl3/fixtures#g' {} +
 find crates -name '*.rs.bak' -delete
+sed -i.bak "s#'crates/sdl3/fixtures'#'pxui/crates/sdl3/fixtures'#" tools/web/test/gpu_images_e2e.mjs && rm tools/web/test/gpu_images_e2e.mjs.bak
 sed -i.bak 's#\.\./\.\./assets/fonts#../../pxui/assets/fonts#g' specification/pxui-kit/*.html specification/pxui-kit/*.css && rm specification/pxui-kit/*.bak
-sed -i.bak -E 's#`specification/(sdl3|metal)\.md`#`pxui/specification/\1.md`#; s#`specification/vulkan/#`pxui/specification/vulkan/#' specification/event.md specification/backend.md specification/window.md && rm specification/*.bak
-sed -i.bak 's#`pxui\.md`#`pxui/specification/pxui.md`#g' specification/flow.md specification/workspace/materials.md && rm specification/flow.md.bak specification/workspace/materials.md.bak
-sed -i.bak 's#`sdl3.lock`#`pxui/packaging/sdl3.lock`#' packaging/README.md && rm packaging/README.md.bak
-# The Vulkan-on-Linux section moved to the PXUI repository.
-awk '/^## Vulkan on Linux/{print "## Vulkan on Linux\n\nSee [pxui/docs/vulkan-linux.md](../pxui/docs/vulkan-linux.md).\n"; skip=1; next} /^## /{skip=0} !skip' docs/development.md > docs/development.md.new && mv docs/development.md.new docs/development.md
+# Prose and comments naming moved paths: prefix them (docs/history records the past and stays as written).
+MOVED=$(echo "$CRATES" | tr ' ' '|')
+find specification docs packaging crates -maxdepth 6 \( -name '*.md' -o -name '*.rs' \) -not -path 'docs/history/*' -exec sed -i.bak -E \
+    -e "s#(^|[^/a-z_])crates/($MOVED)([/\`. ,;:)]|$)#\1pxui/crates/\2\3#g" \
+    -e 's#`specification/(pxui|sdl3|metal)\.md`#`pxui/specification/\1.md`#g; s#`specification/vulkan/#`pxui/specification/vulkan/#g; s#`pxui\.md`#`pxui/specification/pxui.md`#g' \
+    -e 's#(^|[^/a-z_])(docs/pxui-baseline\.md)#\1pxui/\2#g; s#`(packaging/)?sdl3\.lock`#`pxui/packaging/sdl3.lock`#g' {} +
+find specification docs packaging crates -name '*.bak' -delete
+# docs/development.md: Vulkan-on-Linux and the gallery moved to the PXUI repository; the Rays editor part stays.
+awk '/^## Vulkan on Linux/{print "## Vulkan on Linux\n\nSee [pxui/docs/vulkan-linux.md](../pxui/docs/vulkan-linux.md) (the PXUI repository), which also covers the PXUI gallery.\n"; skip=1; next}
+     /^### The Rays editor on Linux/{skip=0; sub(/^### /,"## ")} /^## The PXUI gallery/{skip=1; next} /^## /&&!/^## The Rays editor/{skip=0} !skip' docs/development.md > docs/development.md.new && mv docs/development.md.new docs/development.md
 
 # Gate: rows tagged `// pxui` are the PXUI repository's; its shape exceptions go with it.
 sed -i.bak '/ \/\/ pxui/d' tools/gate/src/policy.rs && rm tools/gate/src/policy.rs.bak
