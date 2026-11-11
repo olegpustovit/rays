@@ -29,7 +29,7 @@
 //!   Expand/Collapse -> `clicked` on the disclosure when its EXPANDED state differs.
 
 use crate::geom::Rect;
-use std::collections::HashMap;
+use pxui_text::FastMap;
 
 /// No parent: a top-level node (a window).
 pub const NO_PARENT: u32 = u32::MAX;
@@ -190,14 +190,14 @@ pub struct A11yTree {
     pub strings: String,
     /// bumped by `end`; equal revisions mean equal trees
     pub revision: u64,
-    index: HashMap<u64, u32>,
+    index: FastMap<u64, u32>,
     /// the top-level nodes: first, last, count
     top: (u32, u32, u32),
 }
 
 impl A11yTree {
     pub fn new() -> A11yTree {
-        A11yTree { nodes: Vec::new(), strings: String::new(), revision: 0, index: HashMap::new(), top: (NO_PARENT, NO_PARENT, 0) }
+        A11yTree { nodes: Vec::new(), strings: String::new(), revision: 0, index: FastMap::default(), top: (NO_PARENT, NO_PARENT, 0) }
     }
 
     /// Start a rebuild: clears the nodes and strings, keeping their capacity.

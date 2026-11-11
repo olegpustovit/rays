@@ -39,7 +39,45 @@ use cosmic_text::{
     Style as CStyle, SwashCache, SwashContent, Weight, Wrap as CWrap, fontdb,
 };
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::Arc;
+
+/// A multiply-rotate hasher for the engine's internal keys (glyph cache keys, node and layout keys):
+/// std's SipHash was a fifth of a full rebuild. Not DoS-resistant; no key here comes from outside.
+#[derive(Default, Clone, Copy)]
+pub struct FastHasher(u64);
+impl Hasher for FastHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        let mut chunks = bytes.chunks_exact(8);
+        for c in &mut chunks {
+            self.write_u64(u64::from_le_bytes(c.try_into().unwrap()));
+        }
+        let mut tail = [0u8; 8];
+        tail[..chunks.remainder().len()].copy_from_slice(chunks.remainder());
+        self.write_u64(u64::from_le_bytes(tail) ^ (bytes.len() as u64) << 56);
+    }
+    fn write_u8(&mut self, n: u8) {
+        self.write_u64(n as u64);
+    }
+    fn write_u16(&mut self, n: u16) {
+        self.write_u64(n as u64);
+    }
+    fn write_u32(&mut self, n: u32) {
+        self.write_u64(n as u64);
+    }
+    fn write_u64(&mut self, n: u64) {
+        // the final multiply spreads the low bits into the high bits hashbrown's control bytes read
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
+}
+/// A `HashMap` keyed through `FastHasher`.
+pub type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FastHasher>>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Wrap {
@@ -187,10 +225,10 @@ pub struct Text {
     swash: SwashCache,
     names: Vec<String>,
     ascents: Vec<f32>,
-    entries: HashMap<u64, Entry>,
+    entries: FastMap<u64, Entry>,
     frame: u32,
     atlases: [Atlas; 2],
-    slots: HashMap<CacheKey, Slot>,
+    slots: FastMap<CacheKey, Slot>,
     dirty: Vec<(AtlasKind, u32, u32, u32, u32)>,
     evictions: u64,
 }
@@ -207,10 +245,10 @@ impl Text {
             swash: SwashCache::new(),
             names: Vec::new(),
             ascents: Vec::new(),
-            entries: HashMap::new(),
+            entries: FastMap::default(),
             frame: 1,
             atlases: [Atlas::new(MASK_SIZE, 1), Atlas::new(COLOR_SIZE, 4)],
-            slots: HashMap::new(),
+            slots: FastMap::default(),
             dirty: Vec::new(),
             evictions: 0,
         };
