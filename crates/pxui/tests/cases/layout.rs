@@ -440,6 +440,14 @@ pub fn layout_stress_zero_alloc() {
     check(nodes > 2000, &format!("{nodes} nodes"));
     eprintln!("PXUI_LAYOUT full rebuild of {nodes} nodes: {us:.0} us per frame ({:.0} ns per node), layout {layout_us:.0} us ({:.0} ns per node), {allocs} allocations", us * 1e3 / nodes as f64, layout_us * 1e3 / nodes as f64);
     check(allocs == 0, &format!("{allocs} allocations in 20 warm full rebuilds"));
+    // a warm rebuild replays every text's glyph list: no walk through cosmic-text's layout runs
+    let walks = ui.text_mut().glyph_walks();
+    costs(&mut ui, &mut t, 2, &mut |ui, tick| {
+        ui.view("stress", tick, Size::Px(2400.0), Size::Px(2400.0), &mut |ui| stress(ui, 100));
+        stress_popup(ui);
+    });
+    let walked = ui.text_mut().glyph_walks() - walks;
+    check(walked == 0, &format!("a warm full rebuild walked {walked} text layouts"));
     let (allocs, us, _) = costs(&mut ui, &mut t, 50, &mut |ui, _| {
         ui.view("stress", 1, Size::Px(2400.0), Size::Px(2400.0), &mut |ui| stress(ui, 100));
         stress_popup(ui);

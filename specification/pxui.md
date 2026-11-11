@@ -199,7 +199,13 @@ fonts from bytes into the `Text` it hands `Ui::create` (font 0 is the kit face,
 the bundled Pragmasevka unless `RAYS_UI_FONT` names another); nothing scans the
 system. A text draw or measure is keyed by a hash of its text and style, so an
 unchanged label is a layout-cache hit; `Ui::frame` ends the text frame, which
-drops layouts the frame did not use. A run's first baseline sits the font's
+drops layouts the frame did not use. A layout keeps its glyph list (each glyph's line-relative
+position, subpixel bin and atlas slot, independent of where it is drawn) after its first emission;
+drawing it again at any origin replays the list with the float operations of cosmic-text's
+`physical`, so the quads equal a walk's, with no walk through the layout runs and no glyph-cache
+lookup (a glyph whose bin differs at a fractional origin looks its slot up). The list goes when the
+layout is re-shaped, the density changes or the atlas evicts a shelf; all lists together stop
+growing at `pxui_text::CACHE_BYTES` (4 MiB, `Ui::bytes().glyph_lists`). A run's first baseline sits the font's
 ascent below its top, on a device pixel. Carets, hit tests and selection
 spans of the text widgets come from the same layouts. `Paint::text_styled` and
 `Ui::text_metrics` take any `pxui::text::Style`: wrap, ellipsis, line limit,

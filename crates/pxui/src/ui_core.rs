@@ -1074,10 +1074,12 @@ pub struct Ui {
     destroyed: bool,
 }
 
-/// Bytes a UI holds: the glyph atlases' CPU mirrors and the text undo stacks and shelf.
+/// Bytes a UI holds: the glyph atlases' CPU mirrors, the text layouts' glyph lists, and the text undo
+/// stacks and shelf.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Bytes {
     pub atlas: i64,
+    pub glyph_lists: i64,
     pub text_undo: i64,
 }
 
@@ -1611,7 +1613,8 @@ impl Ui {
         if self.destroyed {
             Bytes::default()
         } else {
-            Bytes { atlas: self.text.as_ref().map_or(0, |t| t.bytes()) as i64, text_undo: self.text_undo_held }
+            let (all, lists) = self.text.as_ref().map_or((0, 0), |t| (t.bytes(), t.glyph_list_bytes()));
+            Bytes { atlas: (all - lists) as i64, glyph_lists: lists as i64, text_undo: self.text_undo_held }
         }
     }
 

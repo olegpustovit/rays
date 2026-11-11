@@ -174,6 +174,36 @@ fn warm_unchanged_frame_allocates_nothing() {
 }
 
 #[test]
+fn glyph_lists_replay_a_walk_at_any_origin() {
+    let text = "Cached \u{2192} runs, wrapped over lines at any origin";
+    let st = Style { wrap: Wrap::Word, size: 13.0, ..Style::default() };
+    let mut cached = Text::new(&[&pragma()]);
+    let mut walked = Text::new(&[&pragma()]);
+    walked.set_glyph_cache(false);
+    let emit = |t: &mut Text, o: (f32, f32), s: f32| {
+        t.layout(1, text, &st, 90.0);
+        let mut v = Vec::new();
+        t.glyphs(1, o, s, &mut |g| v.push(g));
+        v
+    };
+    for scale in [1.0, 2.0, 1.5] {
+        for o in [(0.0, 0.0), (17.0, 3.5), (100.25, 7.0), (-3.6, -9.3), (4.0 / 3.0, 2.0 / 3.0), (1999.5, 801.75)] {
+            assert_eq!(emit(&mut cached, o, scale), emit(&mut walked, o, scale), "origin {o:?} at {scale}x");
+        }
+    }
+    let walks = cached.glyph_walks();
+    assert!(walks <= 4, "one walk per scale, plus the first: {walks}");
+    let before = cached.bytes();
+    emit(&mut cached, (55.0, 66.0), 1.5);
+    assert_eq!(cached.glyph_walks(), walks, "a warm layout replays its list at a new origin");
+    assert!(before > walked.bytes(), "the lists are counted in bytes()");
+    cached.layout(1, "re-shaped", &st, 90.0);
+    let mut n = 0;
+    cached.glyphs(1, (0.0, 0.0), 1.5, &mut |_| n += 1);
+    assert_eq!((n, cached.glyph_walks()), (9, walks + 1), "re-shaping drops the list");
+}
+
+#[test]
 fn monospace_advances_tracking_and_ascent() {
     let mut t = Text::new(&[pxui_text::PRAGMASEVKA]);
     let st = Style { size: 13.0, ..Style::default() };
