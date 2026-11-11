@@ -36,17 +36,17 @@
 (defn unpack :context value [(w : int)]
   [(/ (float (int/and (int/shr w 24) 255)) 255.0) (/ (float (int/and (int/shr w 16) 255)) 255.0) (/ (float (int/and (int/shr w 8) 255)) 255.0) (/ (float (int/and w 255)) 255.0)])
 
-; Match the host mesh's 8-bit Color channels before interpolation.
-; FMA keeps the multiplication residual: float32 0.7 * 255 rounds to 178.5,
-; but its exact product is below the host's half-byte boundary.
+; Match the host mesh's 8-bit Color channels before interpolation: x * 255 rounded half up, exactly.
+; float32 x * 255 rounds (0.7 * 255 to 178.5, though the exact product is below the half-byte), and
+; Vulkan does not promise a fused fma (lavapipe splits it), so the candidate is checked against its
+; half-byte boundaries as x * 256 - (n -/+ 0.5) against x: x * 256 is exact, and so is the
+; difference wherever the comparison is close.
 (defn color-byte :context value [(v : float)]
   (let* [x (min 1.0 (max 0.0 v))
-         scaled (* x 255.0)
-         whole (floor scaled)
-         fraction (- scaled (float whole))
-         error (fma x 255.0 (* scaled -1.0))]
-    (int/add whole
-             (if (or (> fraction 0.5) (and (= fraction 0.5) (>= error 0.0))) 1 0))))
+         a (* x 256.0)
+         n (floor (+ (* x 255.0) 0.5))
+         low (if (< (- a (- (float n) 0.5)) x) (int/sub n 1) n)]
+    (if (>= (- a (+ (float low) 0.5)) x) (int/add low 1) low)))
 
 (defn resident-color :context value [(channels : (array float)) (at : int) (lanes : int)]
   (unpack (int/or (int/shl (color-byte (array/nth channels at)) 24)
