@@ -795,8 +795,9 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
 /// A piece of what a card shows of its records, in the tile's points: kit text in a row `h` high, a
 /// 1-point line, a fill. Each is a node of its own, so a cook patches it (`scope_hover::cooked`).
 #[derive(Clone, Copy)]
-pub enum Piece<'a> {
-    Text { x: f64, y: f64, w: f64, h: f64, size: i64, color: Color, text: &'a str },
+pub enum Piece {
+    /// (its text is beside it: `readout`'s `emit`)
+    Text { x: f64, y: f64, w: f64, h: f64, size: i64, color: Color },
     Line { a: (f64, f64), b: (f64, f64), color: Color },
     Fill { x: f64, y: f64, w: f64, h: f64, color: Color },
 }
@@ -814,13 +815,13 @@ fn fit<'a>(ui: &mut Ui, size: i64, width: f64, text: &'a str) -> Cow<'a, str> {
 /// iteration beside its out-port; at the full level (`full`) the footer row's texts and sparkline over
 /// its hairline (`paint_node` paints that): the value, a sparkline across the innermost zone, the tags,
 /// label-size ink-2.
-pub fn readout(ui: &mut Ui, t: &Pane, z: f64, fs: i64, ghost: bool, full: bool, f: &Footer, ty: &Ty, pad: f64, rect: (f64, f64, f64, f64), emit: &mut dyn FnMut(&mut Ui, Piece)) {
+pub fn readout(ui: &mut Ui, t: &Pane, z: f64, fs: i64, ghost: bool, full: bool, f: &Footer, ty: &Ty, pad: f64, rect: (f64, f64, f64, f64), emit: &mut dyn FnMut(&mut Ui, Piece, &str)) {
     let theme = t.theme;
     let (x, y, wd, h) = rect;
     let ls = 4.max(fs - 2);
     if ghost {
         let fit = fit(ui, ls, 72.0 * z, &f.value);
-        emit(ui, Piece::Text { x: x + wd + (8.0 * z), y: y + ((PORT_Y - 8.0) * z), w: 72.0 * z, h: 16.0 * z, size: ls, color: theme::ink_3(&theme), text: &fit });
+        emit(ui, Piece::Text { x: x + wd + (8.0 * z), y: y + ((PORT_Y - 8.0) * z), w: 72.0 * z, h: 16.0 * z, size: ls, color: theme::ink_3(&theme) }, &fit);
     }
     if !full {
         return;
@@ -833,7 +834,7 @@ pub fn readout(ui: &mut Ui, t: &Pane, z: f64, fs: i64, ghost: bool, full: bool, 
     let mut right = x + wd - (HEAD_PAD * z);
     let mut put_right = |ui: &mut Ui, color: Color, s: &str, right: &mut f64| {
         let tw = f64::from(ui.text_width(Some(ls), s));
-        emit(ui, Piece::Text { x: *right - tw, y: ty0, w: tw, h: th, size: ls, color, text: s });
+        emit(ui, Piece::Text { x: *right - tw, y: ty0, w: tw, h: th, size: ls, color }, s);
         *right = *right - tw - (6.0 * z);
     };
     if f.live {
@@ -880,15 +881,15 @@ pub fn readout(ui: &mut Ui, t: &Pane, z: f64, fs: i64, ghost: bool, full: bool, 
         let mut i = 0;
         while i + 1 < n {
             let j = (n - 1).min(i + step);
-            emit(ui, Piece::Line { a: (px(i), py(values[i])), b: (px(j), py(values[j])), color: ty_color(t, Some(ty)) });
+            emit(ui, Piece::Line { a: (px(i), py(values[i])), b: (px(j), py(values[j])), color: ty_color(t, Some(ty)) }, "");
             i = j;
         }
         let a = *at as usize;
-        emit(ui, Piece::Fill { x: px(a) - (1.5 * z), y: py(values[a]) - (1.5 * z), w: 3.0 * z, h: 3.0 * z, color: theme.accent });
+        emit(ui, Piece::Fill { x: px(a) - (1.5 * z), y: py(values[a]) - (1.5 * z), w: 3.0 * z, h: 3.0 * z, color: theme.accent }, "");
         right = sx0 - (6.0 * z);
     }
     let fit = fit(ui, ls, 0.0f64.max(right - left), &f.value);
-    emit(ui, Piece::Text { x: left, y: ty0, w: 0.0f64.max(right - left).max(1.0), h: th, size: ls, color: ink_2, text: &fit });
+    emit(ui, Piece::Text { x: left, y: ty0, w: 0.0f64.max(right - left).max(1.0), h: th, size: ls, color: ink_2 }, &fit);
 }
 
 /// Whether a card shows its value beside its out-port: below the full level, a node (not a zone) whose

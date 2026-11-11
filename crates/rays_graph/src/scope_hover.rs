@@ -91,7 +91,7 @@ pub struct Stamp {
 }
 
 /// A piece's node: its rectangle, look, mark and text.
-fn piece_node(piece: sp::Piece<'_>) -> (Stamp, Look, Mark, &str) {
+fn piece_node(piece: sp::Piece, text: &str) -> (Stamp, Look, Mark) {
     let hash = |s: &str| {
         let mut h = std::hash::DefaultHasher::new();
         s.hash(&mut h);
@@ -99,16 +99,16 @@ fn piece_node(piece: sp::Piece<'_>) -> (Stamp, Look, Mark, &str) {
     };
     let r = |x: f64, y: f64, w: f64, h: f64| [x as f32, y as f32, w as f32, h as f32];
     match piece {
-        sp::Piece::Text { x, y, w, h, size, color, text } => {
-            (Stamp { rect: r(x, y, w, h), color, text: hash(text), kind: 0 }, Look { text: color, font: Font { size, ..Font::BODY }, ..Look::NONE }, Mark::None, text)
+        sp::Piece::Text { x, y, w, h, size, color } => {
+            (Stamp { rect: r(x, y, w, h), color, text: hash(text), kind: 0 }, Look { text: color, font: Font { size, ..Font::BODY }, ..Look::NONE }, Mark::None)
         }
         // the line's ends half its width inside the node's rectangle (`Mark::Line`)
         sp::Piece::Line { a, b, color } => {
             let rising = (b.0 - a.0) * (b.1 - a.1) < 0.0;
             let stamp = Stamp { rect: r(a.0.min(b.0) - 0.5, a.1.min(b.1) - 0.5, (b.0 - a.0).abs() + 1.0, (b.1 - a.1).abs() + 1.0), color, text: 0, kind: 2 + rising as u8 };
-            (stamp, Look { text: color, ..Look::NONE }, Mark::Line { width: 1.0, rising }, "")
+            (stamp, Look { text: color, ..Look::NONE }, Mark::Line { width: 1.0, rising })
         }
-        sp::Piece::Fill { x, y, w, h, color } => (Stamp { rect: r(x, y, w, h), color, text: 0, kind: 1 }, Look { fill: color, ..Look::NONE }, Mark::None, ""),
+        sp::Piece::Fill { x, y, w, h, color } => (Stamp { rect: r(x, y, w, h), color, text: 0, kind: 1 }, Look { fill: color, ..Look::NONE }, Mark::None),
     }
 }
 
@@ -117,8 +117,8 @@ pub fn readout_nodes(t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, footer
     let mut nodes = Vec::new();
     if let (Some(f), Some((ghost, full, pad, ty))) = (footer, readout_of(t, slot)) {
         let (pl, _, _) = &t.geo.items[slot];
-        sp::readout(ui, t, z, fs, ghost, full, f, &ty, pad, (0.0, 0.0, pl.w * z, pl.h * z), &mut |ui, piece| {
-            let (stamp, look, mark, text) = piece_node(piece);
+        sp::readout(ui, t, z, fs, ghost, full, f, &ty, pad, (0.0, 0.0, pl.w * z, pl.h * z), &mut |ui, piece, text| {
+            let (stamp, look, mark) = piece_node(piece, text);
             let [x, y, w, h] = stamp.rect;
             let b = ui.node("r", Node { w: Size::Px(w), h: Size::Px(h), at: Some((x, y)), look, mark, ..Node::DEFAULT });
             ui.text(&b, text);
@@ -209,8 +209,8 @@ pub fn cooked(t: &Pane, ui: &mut Ui) -> bool {
         // the same pieces in the same order
         let mut k = 0;
         let mut same = true;
-        sp::readout(ui, t, z, fs, ghost, full, &f, &ty, pad, rect, &mut |_, piece| {
-            same &= c.readout.nodes.get(k).is_some_and(|(_, s)| s.kind.min(2) == piece_node(piece).0.kind.min(2));
+        sp::readout(ui, t, z, fs, ghost, full, &f, &ty, pad, rect, &mut |_, piece, text| {
+            same &= c.readout.nodes.get(k).is_some_and(|(_, s)| s.kind.min(2) == piece_node(piece, text).0.kind.min(2));
             k += 1;
         });
         if !same || k != c.readout.nodes.len() {
@@ -219,8 +219,8 @@ pub fn cooked(t: &Pane, ui: &mut Ui) -> bool {
         }
         let mut k = 0;
         let patches = &mut hv.patches;
-        sp::readout(ui, t, z, fs, ghost, full, &f, &ty, pad, rect, &mut |ui, piece| {
-            let (stamp, look, mark, text) = piece_node(piece);
+        sp::readout(ui, t, z, fs, ghost, full, &f, &ty, pad, rect, &mut |ui, piece, text| {
+            let (stamp, look, mark) = piece_node(piece, text);
             let (b, was) = &mut c.readout.nodes[k];
             k += 1;
             if stamp == *was {
