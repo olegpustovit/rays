@@ -15,7 +15,6 @@ use crate::geom::color;
 use crate::ui_core::*;
 use crate::ui_kit::{text_only, SIDE};
 use input::{Event, Key};
-use std::fmt::Write;
 use std::ops::RangeInclusive;
 
 /// A node of a tree, in preorder: its depth (0 at the top) and whether it has children.
@@ -31,33 +30,6 @@ pub enum DialogOut {
     Open,
     Closed,
     Button(usize),
-}
-
-/// A number written into a stack buffer: an accessible value without a heap string.
-struct Num {
-    bytes: [u8; 32],
-    len: usize,
-}
-
-impl Write for Num {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        let n = s.len().min(self.bytes.len() - self.len);
-        self.bytes[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
-        self.len += n;
-        Ok(())
-    }
-}
-
-fn number(v: f32) -> Num {
-    let mut n = Num { bytes: [0; 32], len: 0 };
-    let _ = write!(n, "{}", (v * 1000.0).round() / 1000.0);
-    n
-}
-
-impl Num {
-    fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.bytes[..self.len]).unwrap_or("")
-    }
 }
 
 /// The key presses of `keys` (a focused node's signal), in order.
@@ -229,7 +201,7 @@ impl Ui {
         let v = v.clamp(lo.min(hi), hi.max(lo));
         let f = ((v - lo) / span).clamp(0.0, 1.0);
         self.a11y_name(&track, shown(text));
-        self.a11y_value(&track, number(v).as_str(), (0, 0));
+        self.a11y_number(&track, v as f64, lo.min(hi) as f64, hi.max(lo) as f64, step as f64);
         let t = self.theme();
         let (rail, fill, thumb) = (t.separator.idle, t.mark.idle, t.slider);
         let inner = self.enter(&track);
@@ -263,7 +235,7 @@ impl Ui {
             Some(v) => {
                 let v = v.clamp(0.0, 1.0);
                 self.node_keyed(int_key(track.box_key, 0), Node { w: Size::Pct(v), h: Size::Grow, look: bar, ..Node::DEFAULT });
-                self.a11y_value(&track, number(v * 100.0).as_str(), (0, 0));
+                self.a11y_number(&track, (v * 100.0) as f64, 0.0, 100.0, 1.0);
             }
             None => {
                 self.node_keyed(int_key(track.box_key, 1), Node { w: Size::Pct(0.3), h: Size::Grow, look: bar, ..Node::DEFAULT });

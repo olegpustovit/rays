@@ -3,7 +3,7 @@
 //! patches with no rebuild, and virtual list, tree and table building only visible rows of 100,000.
 use crate::support::*;
 use input::{Event, Key};
-use pxui::a11y::{state, A11yAction, A11yNode, A11yTree, Action, Role};
+use pxui::a11y::{state, A11yAction, A11yNode, A11yTree, Action, Role, Value};
 use pxui::ui::*;
 use std::rc::Rc;
 
@@ -250,10 +250,12 @@ fn widgets_slider() {
     keys(&mut ui, &mut s, 3.0, &[Key::Home, Key::ArrowRight, Key::ArrowRight]);
     check((s.slider - 0.02).abs() < 1e-4, &format!("Home then two steps: {}", s.slider));
     let n = node(&ui, Role::Slider, "Level");
-    check(ui.output().a11y.value_text(&n) == "0.02", &format!("the value in the tree: {:?}", ui.output().a11y.value_text(&n)));
+    let Value::Number { now, min, max, step } = n.value else { panic!("the slider's value is not a number: {:?}", n.value) };
+    check((now - 0.02).abs() < 1e-6 && (min, max) == (0.0, 1.0) && (step - 0.01).abs() < 1e-6, &format!("the value in the tree: {:?}", n.value));
     ui.inject_a11y(&[A11yAction { id: n.id, action: Action::SetValue, payload: 0.5 }]);
     ui.frame(&at(4.0, vec![]), &mut |ui| all(ui, &mut s));
     check(s.slider == 0.5, "SetValue moves it");
+    check(matches!(node(&ui, Role::Slider, "Level").value, Value::Number { now: 0.5, .. }), "the number follows");
     // right to left: the end is at the left
     ui.set_dir(Direction::Rtl);
     for t in 0..2 {
@@ -286,7 +288,7 @@ fn widgets_busy_patches() {
     }
     let tree = ui.output().a11y;
     let done = find(tree, Role::Progress, "Done").expect("determinate");
-    check(tree.value_text(done) == "50", "a half bar reads 50");
+    check(done.value == Value::Number { now: 50.0, min: 0.0, max: 100.0, step: 1.0 }, &format!("a half bar reads 50 of 100: {:?}", done.value));
     check(find(tree, Role::Progress, "Busy").unwrap().states & state::BUSY != 0, "the sweep is busy");
     let busy = s.busy.clone();
     let revision = ui.draw_revision();
