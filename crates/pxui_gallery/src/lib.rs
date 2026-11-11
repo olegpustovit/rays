@@ -327,41 +327,46 @@ pub fn page(ui: &mut Ui, s: &mut Gallery, i: usize) {
 /// motion switches), the page in its view, the readout (patched by the host, never rebuilt) and
 /// the toasts.
 pub fn app(ui: &mut Ui, s: &mut Gallery) {
-    match ui.menu_bar("menus", &MENUS) {
-        Some((0, 0)) => s.reload = true,
-        Some((0, 1)) => s.toast("Hello from the menu", 3.0),
-        Some((0, _)) => s.quit = true,
-        Some((_, i)) if i != s.page => (s.page, s.page_rev, s.chrome_rev) = (i, s.page_rev + 1, s.chrome_rev + 1),
-        _ => {}
-    }
+    // one Window node holds the menu bar and the page: the screen reader's application -> window
     let (w, h) = ui.view_size();
-    let body = ui.node("body", Node { w: Size::Px(w), h: Size::Px(h - 24.0), at: Some((0.0, 24.0)), ..Node::DEFAULT });
-    ui.within(&body, &mut |ui| {
-        ui.view("chrome", s.chrome_rev, Size::Grow, Size::Px(CHROME_H), &mut |ui| {
-            let page = ui.tabs("Pages", &PAGES, s.page);
-            if page != s.page {
-                (s.page, s.page_rev) = (page, s.page_rev + 1);
-            }
-            let row = ui.node("switches", Node { h: Size::Px(24.0), axis: Axis::Row, ..Node::DEFAULT });
-            ui.within(&row, &mut |ui| {
-                let theme = ui.segmented("Theme", &["Rays", "Dusk"], s.dusk as usize) == 1;
-                let compact = ui.checkbox("Compact", s.compact);
-                let rtl = ui.checkbox("RTL", s.rtl);
-                let reduced = ui.checkbox("Still", s.reduced);
-                if (theme, compact, rtl, reduced) != (s.dusk, s.compact, s.rtl, s.reduced) {
-                    (s.dusk, s.compact, s.rtl, s.reduced, s.host_dirty) = (theme, compact, rtl, reduced, true);
+    let window = ui.node("window", Node { w: Size::Px(w), h: Size::Px(h), role: Role::Window, ..Node::DEFAULT });
+    ui.a11y_name(&window, "PXUI gallery");
+    ui.within(&window, &mut |ui| {
+        match ui.menu_bar("menus", &MENUS) {
+            Some((0, 0)) => s.reload = true,
+            Some((0, 1)) => s.toast("Hello from the menu", 3.0),
+            Some((0, _)) => s.quit = true,
+            Some((_, i)) if i != s.page => (s.page, s.page_rev, s.chrome_rev) = (i, s.page_rev + 1, s.chrome_rev + 1),
+            _ => {}
+        }
+        let body = ui.node("body", Node { w: Size::Px(w), h: Size::Px(h - 24.0), at: Some((0.0, 24.0)), ..Node::DEFAULT });
+        ui.within(&body, &mut |ui| {
+            ui.view("chrome", s.chrome_rev, Size::Grow, Size::Px(CHROME_H), &mut |ui| {
+                let page = ui.tabs("Pages", &PAGES, s.page);
+                if page != s.page {
+                    (s.page, s.page_rev) = (page, s.page_rev + 1);
                 }
+                let row = ui.node("switches", Node { h: Size::Px(24.0), axis: Axis::Row, ..Node::DEFAULT });
+                ui.within(&row, &mut |ui| {
+                    let theme = ui.segmented("Theme", &["Rays", "Dusk"], s.dusk as usize) == 1;
+                    let compact = ui.checkbox("Compact", s.compact);
+                    let rtl = ui.checkbox("RTL", s.rtl);
+                    let reduced = ui.checkbox("Still", s.reduced);
+                    if (theme, compact, rtl, reduced) != (s.dusk, s.compact, s.rtl, s.reduced) {
+                        (s.dusk, s.compact, s.rtl, s.reduced, s.host_dirty) = (theme, compact, rtl, reduced, true);
+                    }
+                });
             });
-        });
-        let rev = s.page_rev;
-        let index = s.page;
-        ui.view("page", rev, Size::Grow, Size::Grow, &mut |ui| page(ui, s, index));
-        ui.view("readout", 0, Size::Grow, Size::Px(24.0), &mut |ui| {
-            let look = ui.theme().footer.idle;
-            let hint = ui.theme().hint.idle;
-            let n = ui.node("readout", Node { h: Size::Px(24.0), look: Look { text: hint.text, font: hint.font, ..look }, inset: Edges { l: 12.0, t: 1.0, ..Edges::ZERO }, role: Role::StatusBar, ..Node::DEFAULT });
-            ui.text(&n, "-");
-            s.readout = Some(n);
+            let rev = s.page_rev;
+            let index = s.page;
+            ui.view("page", rev, Size::Grow, Size::Grow, &mut |ui| page(ui, s, index));
+            ui.view("readout", 0, Size::Grow, Size::Px(24.0), &mut |ui| {
+                let look = ui.theme().footer.idle;
+                let hint = ui.theme().hint.idle;
+                let n = ui.node("readout", Node { h: Size::Px(24.0), look: Look { text: hint.text, font: hint.font, ..look }, inset: Edges { l: 12.0, t: 1.0, ..Edges::ZERO }, role: Role::StatusBar, ..Node::DEFAULT });
+                ui.text(&n, "-");
+                s.readout = Some(n);
+            });
         });
     });
     let mut texts = [""; 8];
