@@ -52,10 +52,12 @@ fn workspace(name: &str, text: &str) {
     for _ in 0..20 {
         r.step((450., 300.), vec![]);
     }
-    let idle = measure(&mut r, 30, &|_| (450., 300.));
-    report(&format!("{name} idle"), &idle, 30);
-    let hover = measure(&mut r, 30, &|i| (450. + (i % 2) as f64, 300.));
-    report(&format!("{name} pointer"), &hover, 30);
+    // a cooking workspace (orrery) takes fewer frames: the case stays well under its 5 seconds
+    let n = if name == "orrery" { 12 } else { 30 };
+    let idle = measure(&mut r, n, &|_| (450., 300.));
+    report(&format!("{name} idle"), &idle, n);
+    let hover = measure(&mut r, n, &|i| (450. + (i % 2) as f64, 300.));
+    report(&format!("{name} pointer"), &hover, n);
     // the frame gate: an editor at rest builds no frames; one playing a clock (basic) rebuilds no
     // chrome view, and a pointer moving inside one node rebuilds no view
     check(idle.frames == 0 || name != "empty", &format!("{name}: idle built {} frames", idle.frames));
