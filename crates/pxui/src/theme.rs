@@ -463,6 +463,38 @@ widgets! {
     ghost,
     /// the text area: ground, gutter rule (`border`), selection and caret
     text_area,
+    /// a checkbox's box and a radio's ring (`checked` when on; the inner square is `mark`, the dot `notice`)
+    checkbox,
+    radio,
+    /// a slider's thumb (its rail is `separator`, the filled part `mark`)
+    slider,
+    /// a progress track (the bar is `mark`) and a spinner's dots (`checked` is the lead dot)
+    progress,
+    spinner,
+    /// a tab (`checked`: the one in use) and a segment of a segmented control
+    tab,
+    segment,
+    /// a dropdown's button (its menu is `popup` with `menu` rows)
+    dropdown,
+    /// a menu bar (its items are `menu` rows)
+    menubar,
+    /// a scroll view's frame
+    scroll_view,
+    /// a list row and a tree row (`checked`: selected; `focus`: the keyboard's row)
+    listbox,
+    tree,
+    /// a table's column header (`checked`: the sort column)
+    column,
+    /// a dialog's title bar
+    dialog,
+    /// a toast's sheet
+    toast,
+    /// a square button with a glyph
+    icon_button,
+    /// a search field's well
+    search,
+    /// an image's frame
+    image,
 }
 
 impl Default for Theme {
@@ -494,6 +526,26 @@ fn rays(t: &Tokens) -> Theme {
     let row = Look { text: ink_2(t), ..n };
     let field = Look { text: t.foreground, selection: tint(t), caret: t.accent, radius: [t.radius[0]; 4], ..line(edge(t), BOTTOM) };
     let dot = Look { radius: [3.0; 4], ..n };
+    let check = |r: f32| {
+        let idle = Look { fill: t.input, border: border(t), border_w: 1.0, radius: [r; 4], ..n };
+        States {
+            idle,
+            hover: Look { border: t.foreground, ..idle },
+            pressed: Look { fill: pressed_fill(t), border: t.foreground, ..idle },
+            focus: idle,
+            disabled: Look { border: edge(t), fill: t.track, ..idle },
+            checked: Look { border: t.accent, ..idle },
+        }
+    };
+    let thumb = Look { fill: t.input, border: border(t), border_w: 1.0, radius: [t.radius[0]; 4], ..n };
+    let segment = Look { text: ink_2(t), border: edge(t), border_w: 1.0, ..n };
+    let rows = States {
+        hover: Look { fill: faint_border(t), text: t.foreground, ..n },
+        checked: Look { fill: t.control, text: t.foreground, ..n },
+        focus: Look { text: t.foreground, ..line(t.accent, LEFT) },
+        disabled: ink(ink_3(t)),
+        ..States::all(ink(t.foreground))
+    };
     Theme {
         tokens: *t,
         row_h: 24.0,
@@ -560,6 +612,50 @@ fn rays(t: &Tokens) -> Theme {
         tooltip: States::all(Look { text: t.foreground, font: small, ..sheet(edge(t)) }),
         ghost: States::all(Look { fill: t.input, text: t.foreground, radius: [t.radius[1]; 4], ..n }),
         text_area: States::all(Look { fill: t.input, border: faint_border(t), text: t.foreground, selection: tint(t), caret: t.accent, ..n }),
+        checkbox: check(0.0),
+        radio: check(6.0),
+        slider: States {
+            hover: Look { border: t.foreground, ..thumb },
+            pressed: Look { fill: t.control, border: t.foreground, ..thumb },
+            disabled: Look { border: edge(t), ..thumb },
+            ..States::all(thumb)
+        },
+        progress: States::all(Look { fill: t.track, radius: [t.radius[0]; 4], ..n }),
+        spinner: States { checked: Look { fill: t.accent, radius: [1.5; 4], ..n }, ..States::all(Look { fill: border(t), radius: [1.5; 4], ..n }) },
+        tab: States {
+            hover: Look { text: t.foreground, ..ink(ink_2(t)) },
+            checked: Look { text: t.foreground, border: t.accent, border_w: 2.0, sides: BOTTOM, ..n },
+            disabled: ink(ink_3(t)),
+            ..States::all(ink(ink_2(t)))
+        },
+        segment: States {
+            hover: Look { fill: hover_fill(t), ..segment },
+            pressed: Look { fill: pressed_fill(t), ..segment },
+            checked: Look { fill: t.control, text: t.foreground, ..segment },
+            disabled: Look { text: ink_3(t), ..segment },
+            ..States::all(segment)
+        },
+        dropdown: States {
+            hover: Look { fill: hover_fill(t), ..field },
+            pressed: Look { fill: pressed_fill(t), ..field },
+            focus: Look { border: t.accent, ..field },
+            disabled: Look { text: ink_3(t), ..field },
+            ..States::all(field)
+        },
+        menubar: States::all(Look { fill: t.panel, text: t.foreground, ..line(edge(t), BOTTOM) }),
+        scroll_view: States::all(line(edge(t), 0)),
+        listbox: rows,
+        tree: rows,
+        column: States {
+            hover: Look { fill: hover_fill(t), text: t.foreground, ..n },
+            checked: ink(t.foreground),
+            ..States::all(ink(ink_2(t)))
+        },
+        dialog: States::all(Look { text: t.foreground, ..line(edge(t), BOTTOM) }),
+        toast: States { hover: Look { border: border(t), ..sheet(edge(t)) }, ..States::all(Look { text: t.foreground, ..sheet(edge(t)) }) },
+        icon_button: button(t.foreground),
+        search: States { focus: Look { border: t.accent, ..field }, ..States::all(field) },
+        image: States::all(line(edge(t), 0)),
     }
 }
 

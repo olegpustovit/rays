@@ -44,6 +44,10 @@ pub fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("pxui_wayland", &["input", "native_layer_token_sys"][..]), // pxui
         // The Linux AT-SPI2 bridge: libdbus-1 through its own C shim, over pxui's plain-data accessibility tree.
         ("pxui_atspi", &["pxui"][..]), // pxui
+        // The kit gallery app: the engine, the painter and the platform's window host and GPU backend.
+        ("pxui_gallery", &[
+            "pxui", "input", "mem_sys", "ogpu_core", "pxui_render", "ogpu_metal", "ogpu_vulkan", "pxui_sdl", "sdl3", "pxui_wayland", "pxui_atspi",
+        ][..]), // pxui
         ("runtime", &["pxui_sdl", "pxui_wayland", "sdl3", "ogpu_core", "input"][..]),
         ("runtime_resources", &["sdl3", "ogpu_core"][..]),
         ("renderer", &["ogpu_core", "scene_command", "runtime", "lru", "rays_math", "runtime_resources", "scene_core"][..]),

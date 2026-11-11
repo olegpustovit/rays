@@ -165,3 +165,16 @@ quads by origin was tried and dropped, since the same label at many origins (the
 and was slower. With accessibility on, a frame that rebuilds any view still walks every view's nodes
 (12 us for 761 nodes): per-view spans in the tree when trees get large. The host's `paint_layer` does
 per-frame work in views (view table) and dirty ranges, not in instances.
+## After P5 widget set and gallery
+
+`widgets_zero_alloc` (`crates/pxui/tests/cases/widgets.rs`): a 480 x 760 frame of every new widget
+(menu bar, checkbox, radio, slider, both progress bars, spinner, tabs, segmented, dropdown, icon
+button, badge, search, scroll view, image, a 100,000-row list, tree and table, two toasts), 30 warm
+frames after 10: 0 allocations rebuilt every frame (225 nodes declared) and 0 kept in a view (5
+nodes). `widgets_busy_patches`: 60 steps of the indeterminate bar and the spinner, 0 allocations, no
+frame wanted, the view's build skipped (2 nodes declared, the root and the view box). Virtual list,
+tree and table over 100,000 items build under 30 rows each. `gpu_widgets_draw_calls`: one draw call
+for the one layer. The gallery (`crates/pxui_gallery/tests/gpu_gallery.rs`): the kit page is
+`kit_panel_{1,2}x.png` with a largest channel difference of 0 on Metal; run hidden with no input it
+built 1 frame in its first half second and 0 in the next two (`gpu_gallery_idle`); a changed theme file
+cost one frame.

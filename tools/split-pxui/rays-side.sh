@@ -20,7 +20,7 @@ url=$2; commit=${3:-}; branch=${4:-pxui-submodule}
 [ -z "$(git status --porcelain)" ] || die "the checkout has uncommitted changes"
 git switch -q -c "$branch"
 
-CRATES="ogpu_core ogpu_mock ogpu_metal metal_sys ogpu_vulkan vulkan_sys native_layer_token_sys input sdl3 sdl3_sys mem_sys cfmt pxui pxui_text pxui_render pxui_sdl pxui_wayland pxui_atspi"
+CRATES="ogpu_core ogpu_mock ogpu_metal metal_sys ogpu_vulkan vulkan_sys native_layer_token_sys input sdl3 sdl3_sys mem_sys cfmt pxui pxui_text pxui_render pxui_sdl pxui_wayland pxui_atspi pxui_gallery"
 for c in $CRATES; do git rm -rqf "crates/$c"; rm -rf "crates/$c"; done
 git rm -rqf tools/t tools/cc-stack.sh assets/fonts fixtures/pxui_render fixtures/shaders/ogpu_metal \
     packaging/sdl3.lock specification/pxui.md specification/sdl3.md specification/metal.md \
