@@ -2986,7 +2986,7 @@ impl Ui {
 
     /// Give `b` the hit shape `make` builds, kept in its slot while `key` (the shape's parameters)
     /// is unchanged: no closure per frame.
-    pub(crate) fn cached_hit(&mut self, b: &UiBox, key: u64, make: impl FnOnce() -> HitFn) {
+    pub(crate) fn cached_hit(&mut self, b: &UiBox, key: u64, make: &mut dyn FnMut() -> HitFn) {
         let slot = &mut self.slots[b.box_slot];
         let hit = match &slot.hit {
             Some((k, hit)) if *k == key => hit.clone(),
@@ -5796,9 +5796,8 @@ impl Ui {
             }
             let new = pieces.iter().flat_map(|p| layer.instances[p.a as usize..p.b as usize].iter());
             let old = old.instances[r.run.0 as usize..r.run.1 as usize].iter();
-            if !old.filter(|i| **i != EMPTY).eq(new.filter(|i| **i != EMPTY)) {
-                panic!("Ui.verify_views: view {:?} built different output under an unchanged revision: its revision misses an input", r.name);
-            }
+            let same = old.filter(|i| **i != EMPTY).eq(new.filter(|i| **i != EMPTY));
+            assert!(same, "Ui.verify_views: view {:?} built different output under an unchanged revision: its revision misses an input", r.name);
         }
     }
 

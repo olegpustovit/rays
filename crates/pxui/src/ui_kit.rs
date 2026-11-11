@@ -896,7 +896,7 @@ impl Ui {
         };
         let b = self.box_fmt(label, opts);
         self.set_role(&b, Role::Splitter, if row { st::VERTICAL } else { st::HORIZONTAL });
-        self.cached_hit(&b, row as u64, || if row { Rc::new(|r: Rect| Rect::new(r.x - 3.0, r.y, r.w + 6.0, r.h)) } else { Rc::new(|r: Rect| Rect::new(r.x, r.y - 3.0, r.w, r.h + 6.0)) });
+        self.cached_hit(&b, row as u64, &mut || if row { Rc::new(|r: Rect| Rect::new(r.x - 3.0, r.y, r.w + 6.0, r.h)) } else { Rc::new(|r: Rect| Rect::new(r.x, r.y - 3.0, r.w, r.h + 6.0)) });
         let signal = self.signal(&b);
         if signal.hovered || signal.held {
             self.request_cursor(if row { Cursor::HorizontalResize } else { Cursor::VerticalResize });
