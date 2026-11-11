@@ -130,6 +130,39 @@ int64_t mem_sys_physical_ram(void) {
 
 void mem_sys_pressure_relief(void) { _heapmin(); }
 
+#elif defined(__linux__)
+#include <malloc.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+/* A /proc/self/status line in kB ("RssAnon:", "VmHWM:"), as bytes. The footprint is the anonymous resident set:
+ * the process's own dirty memory, as macOS's phys_footprint and Windows' private usage count it. */
+static int status_bytes(const char *key, int64_t *out) {
+  FILE *file = fopen("/proc/self/status", "r");
+  if (file == NULL) return 0;
+  char line[256];
+  long long kib = -1;
+  size_t length = strlen(key);
+  while (fgets(line, sizeof line, file) != NULL)
+    if (strncmp(line, key, length) == 0 && sscanf(line + length, "%lld", &kib) == 1) break;
+  fclose(file);
+  if (kib < 0 || kib > INT64_MAX / 1024) return 0;
+  *out = (int64_t)kib * 1024;
+  return 1;
+}
+
+int mem_sys_pressure_start(pressure_callback callback) { (void)callback; return 0; }
+int mem_sys_pressure_poll(void) { return -1; }
+int mem_sys_phys_footprint(int64_t *out) { return status_bytes("RssAnon:", out); }
+int mem_sys_peak_footprint(int64_t *out) { return status_bytes("VmHWM:", out); }
+int mem_sys_instructions(int64_t *out) { (void)out; return 0; }
+int64_t mem_sys_physical_ram(void) {
+  long pages = sysconf(_SC_PHYS_PAGES), size = sysconf(_SC_PAGE_SIZE);
+  return pages > 0 && size > 0 ? (int64_t)pages * size : 0;
+}
+void mem_sys_pressure_relief(void) { malloc_trim(0); }
+
 #else
 int mem_sys_pressure_start(pressure_callback callback) { (void)callback; return 0; }
 int mem_sys_pressure_poll(void) { return -1; }

@@ -1613,7 +1613,7 @@ mod tests {
         drop(block);
         assert!(report().live_bytes > 0);
     }
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     #[test]
     fn footprint_tracks_touched_allocations() {
         let _guard = setup();
