@@ -135,8 +135,12 @@ fn gpu_graph_pixels() {
     }
     let update = std::env::var("RAYS_UPDATE_FIXTURES").as_deref() == Ok("1");
     // Metal rasterises the goldens: exact. Vulkan blends and filters a channel off by 1-2 (the
-    // renderer's own sampler tests allow the same on vulkan), so there a pixel differs past 2.
-    let tolerance = if ogpu_core::impl_::backend().expect("backend") == "vulkan" { 2 } else { 0 };
+    // renderer's own sampler tests allow the same on vulkan), so there a pixel differs past 2; a CPU
+    // driver's blends round further (lavapipe: one pixel of 201,600 off by 3 in states at 1x).
+    let lease = renderer::renderer::acquire_gpu().expect("gpu");
+    let cpu = ogpu_core::backend::capabilities(&renderer::renderer::gpu_device(&lease)).cpu_device;
+    renderer::renderer::release_gpu(&lease);
+    let tolerance = if cpu { 3 } else if ogpu_core::impl_::backend().expect("backend") == "vulkan" { 2 } else { 0 };
     let mut failures = Vec::new();
     for c in cases() {
         for density in [1, 2] {
