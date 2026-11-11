@@ -188,6 +188,7 @@ fn main() {
     let mut extent = win.extent();
     let mut target = gpu.target(extent.drawable.0 as u32, extent.drawable.1 as u32);
     let mut a11y = host::a11y();
+    ui.set_a11y(a11y.is_some()); // the tree costs nothing unless a bridge is listening
     let mut actions = Vec::with_capacity(16);
     let mut a11y_seen = 0;
 

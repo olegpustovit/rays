@@ -171,6 +171,7 @@ pub fn body(ui: &mut Ui, s: &mut S) {
 /// A UI with `s` built over two frames.
 fn warm(s: &mut S) -> Ui {
     let mut ui = new_ui(None);
+    ui.set_a11y(true); // these cases read roles and values from the tree
     for t in 0..2 {
         ui.frame(&at(t as f64 * 0.1, vec![]), &mut |ui| all(ui, s));
     }
@@ -268,6 +269,7 @@ fn widgets_slider() {
 fn widgets_busy_patches() {
     let mut s = S::new();
     let mut ui = new_ui(None);
+    ui.set_a11y(true);
     let build = |ui: &mut Ui, s: &mut S| {
         ui.view("busy", 1, Size::Px(240.0), Size::Px(100.0), &mut |ui| {
             s.busy.clear();
@@ -496,6 +498,7 @@ fn widgets_table() {
 
 fn widgets_dialog() {
     let mut ui = new_ui(None);
+    ui.set_a11y(true);
     let mut out = DialogOut::Open;
     let mut run = |ui: &mut Ui, t: f64, events: Vec<Event>| {
         ui.frame(&at(t, events), &mut |ui| {
