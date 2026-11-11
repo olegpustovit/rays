@@ -1908,9 +1908,10 @@ pub mod inspect {
         t.panning_grab
     }
 
-    /// Where an item shows, in window points: its box, moved by a move that carries it.
+    /// Where an item shows, in window points: its box, moved by a move dragging it (let go, the
+    /// geometry has it where the move put it or will have it the next frame).
     pub fn box_of(t: &Pane, path: &[Symbol]) -> Option<(f64, f64, f64, f64)> {
-        let carried = t.geo.slot.get(path).is_some_and(|k| t.hovers.borrow().moving.binary_search(k).is_ok());
+        let carried = crate::scope_hover::moving_fast(t) && t.geo.slot.get(path).is_some_and(|k| t.hovers.borrow().moving.binary_search(k).is_ok());
         let (dx, dy) = crate::scope_hover::drag_offset(t).filter(|_| carried).unwrap_or((0.0, 0.0));
         box_at(t, path).map(|(x, y, w, h)| (sx(t, x + dx), sy(t, y + dy), w * t.zoom, h * t.zoom))
     }
