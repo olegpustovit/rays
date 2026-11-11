@@ -450,7 +450,7 @@ Vec<ThemeError>>`, `Theme::write`): `tokens.*` keys re-derive the looks, then `P
 `PART.FIELD` keys override them; `crates/pxui/themes/rays.theme` is the default written out and
 `dusk.theme` a second theme (golden `kit_dusk_{1,2}x.png`). Views also take `view_transform` /
 `view_scale` (hit testing through the inverse) and `view_backdrop_blur` (`FrameOut::blurs`, fulfilled by
-the host); `Paint::image_fit`, `image_nine` and `icon` draw images and icon glyphs. Content filters,
+the host); `Paint::image_fit`, `image_nine` and `icon` draw images and icon glyphs; `ui.image` clips its picture to its frame's rounded corners (the largest corner's radius less the border, on the image instance's `clip_radius`). Content filters,
 group opacity, blend modes, 3D transforms, filled paths and a selector engine are left out on purpose.
 
 **Layout (P5, landed).** All plain data on `Node`, no allocation per frame, no selector engine:

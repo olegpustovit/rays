@@ -624,6 +624,19 @@ fn widgets_image() {
     check(n.rect.w == 48.0 && n.rect.h == 32.0, &format!("the image box: {:?}", n.rect));
     let images: usize = ui.output().draw.iter().map(|l| l.breaks.iter().filter(|b| b.image != pxui::draw::ATLAS).count()).sum();
     check(images == 1, &format!("one image break: {images}"));
+    let picture = |ui: &Ui| *ui.output().draw.iter().flat_map(|l| l.instances.iter()).find(|i| i.kind == pxui::draw::kind::IMAGE).expect("the picture");
+    check(picture(&ui).clip_radius == 0, "a square frame clips nothing");
+    // a rounded frame rounds the picture: a clip of the radius inside the 1-point border
+    let mut ui = ui;
+    let mut theme = Theme::default();
+    theme.image.idle.radius = [6.0; 4];
+    ui.set_theme(theme);
+    for t in 0..2 {
+        ui.frame(&at(1.0 + t as f64 * 0.1, vec![]), &mut |ui| all(ui, &mut s));
+    }
+    let p = picture(&ui);
+    check(p.clip_radius == pxui::draw::f16(5.0), &format!("the picture's clip radius: {}", p.clip_radius));
+    ui.destroy();
 }
 
 /// Tab visits each widget's one stop in build order, and Shift-Tab goes back.

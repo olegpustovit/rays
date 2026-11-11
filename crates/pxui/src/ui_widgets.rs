@@ -1006,7 +1006,17 @@ impl Ui {
         let n = self.node(label, Node { w, h, look, padding: Edges::all(1.0), role: Role::Image, ..Node::DEFAULT });
         self.a11y_name(&n, shown(label));
         let image = image.clone();
-        self.canvas(&n, move |p, r| p.image_fit(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0, &image, fit, color::white()));
+        // the picture takes its frame's rounded corners: a round clip inside the frame's border
+        let radius = look.radius.iter().fold(0.0f32, |a, b| a.max(*b)) - 1.0;
+        self.canvas(&n, move |p, r| {
+            let (clip, round) = (p.clip_rect, p.clip_radius);
+            let inner = Rect::new(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0);
+            if radius > 0.0 {
+                (p.clip_rect, p.clip_radius) = (clip.intersect(inner), radius);
+            }
+            p.image_fit(inner.x, inner.y, inner.w, inner.h, &image, fit, color::white());
+            (p.clip_rect, p.clip_radius) = (clip, round);
+        });
         n
     }
 }
