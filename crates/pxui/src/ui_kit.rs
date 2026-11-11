@@ -5,6 +5,7 @@
 //! no standard widget paints with a closure. Widgets must be built inside a `panel`.
 use crate::theme::{self, Tokens as Theme};
 use crate::ui_core::*;
+use crate::a11y::state as st;
 use input::{Event, Key};
 use crate::geom::Rgba as Color;
 use std::rc::Rc;
@@ -123,6 +124,7 @@ impl Ui {
         let root = self.box_(label, BoxOpts::default().flags(CLIP).at(at).w(Size::Px(w)).h(Size::Px(h)));
         let saved = self.enter(&root);
         let header = self.box_fmt(format_args!("{}-header", label), BoxOpts::default().w(Size::Px(w)).h(Size::Px(row_h)));
+        self.set_role(&root, Role::Table, 0);
         self.set_look(&header, head_look, State::default());
         {
             let saved = self.enter(&header);
@@ -365,11 +367,13 @@ pub struct PopupOpts {
     pub attached: bool,
     pub keep: Vec<Rect>,
     pub related: Vec<i64>,
+    /// what the sheet is to a screen reader (a window by default; a menu, a dialog)
+    pub role: Role,
 }
 
 impl Default for PopupOpts {
     fn default() -> PopupOpts {
-        PopupOpts { stroke: None, look: None, max_height: None, dismiss_initial: true, attached: false, keep: Vec::new(), related: Vec::new() }
+        PopupOpts { stroke: None, look: None, max_height: None, dismiss_initial: true, attached: false, keep: Vec::new(), related: Vec::new(), role: Role::Window }
     }
 }
 
@@ -437,6 +441,8 @@ impl Ui {
                 ..Node::DEFAULT
             },
         );
+        self.set_role(&panel, if opts.window { Role::Window } else { Role::Panel }, 0);
+        self.a11y_name(&panel, shown(label));
         let previous = (self.row_height(), self.kit_window_flag());
         self.set_kit_row_height(row_height);
         self.set_kit_window(opts.window);
@@ -494,6 +500,8 @@ impl Ui {
         self.set_look(&row, look, State { hovered, ..State::default() });
         let shown = self.fit_text(self.font_size(), label_w, label);
         self.text(&row, &shown);
+        self.set_role(&row, Role::Label, 0);
+        self.a11y_name(&row, label);
         // the pin dot: filled ink when the row is on its card, an ink-3 ring when it is not
         if let Some(on) = pin {
             let saved = self.enter(&row);
@@ -524,6 +532,7 @@ impl Ui {
         self.set_look(&title, look, State::default());
         self.node_mut(&title).inset = Edges { l: SIDE as f32, t: gap, ..Edges::default() };
         self.text(&title, label);
+        self.set_role(&title, Role::Heading, st::EXPANDABLE | if open { st::EXPANDED } else { 0 });
         self.end_row(&title, self.space(2));
         let saved = self.enter(&title);
         let mark = self.flow_part(int_key(title.box_key, 0), 6.0, rh, Edges { t: gap, ..Edges::ZERO }, chevron, "");
@@ -546,6 +555,8 @@ impl Ui {
     pub fn inspector_toggle_value(&mut self, key: &str, at: (f32, f32), value: bool) -> bool {
         let control = self.box_(key, BoxOpts::default().flags(CLICKABLE | TAB_STOP).at(at).w(Size::Px(28.0)).h(Size::Px(self.control_h())));
         let value = if self.signal(&control).clicked { !value } else { value };
+        self.set_role(&control, Role::Toggle, st::CHECKABLE | if value { st::CHECKED } else { 0 });
+        self.a11y_name(&control, key);
         let on = State { checked: value, ..State::default() };
         let (track, knob) = (*self.theme().switch.pick(on), *self.theme().knob.pick(on));
         let saved = self.enter(&control);
@@ -583,6 +594,8 @@ impl Ui {
         self.leave(saved);
         self.set_look(&ground, look, state);
         self.text(&ground, label);
+        self.set_role(&row, Role::Button, 0);
+        self.a11y_name(&row, label);
         signal.clicked
     }
 
@@ -590,6 +603,7 @@ impl Ui {
     pub fn inspector_readout(&mut self, width: Option<f32>, key: &str, label: &str, value: &str) {
         let (row, control_x, _, control_width) = self.inspector_row(width, None, key, label);
         let look = self.theme().value.idle;
+        self.a11y_value(&row, value, (0, 0));
         let shown = self.fit_text(self.font_size(), control_width, value);
         let tw = self.text_width(None, &shown);
         let rh = self.row_height() as f32;
@@ -604,7 +618,7 @@ impl Ui {
         let rh = self.row_height() as f32;
         let t = self.theme();
         let bar = Bar { color: t.scrollbar.idle.fill, radius: t.scrollbar.idle.radius[0], width: t.scrollbar_w, gap: t.scrollbar_gap, margin: 6.0, whole: false };
-        let body = self.node("inspector-body", Node { flags: SCROLL | CLIP | OVER_THUMB, h: Size::Grow, scroll_step: rh, bar: Some(bar), ..Node::DEFAULT });
+        let body = self.node("inspector-body", Node { flags: SCROLL | CLIP | OVER_THUMB, h: Size::Grow, scroll_step: rh, bar: Some(bar), role: Role::ScrollArea, ..Node::DEFAULT });
         self.within(&body, f);
     }
 
@@ -619,6 +633,7 @@ impl Ui {
         let t = self.theme();
         let (rule, key, hint, label, dot) = (t.footer.idle, t.key.idle, t.hint.idle, t.label.idle, *t.pin.pick(State { checked: true, ..State::default() }));
         self.set_look(&bar, rule, State::default());
+        self.set_role(&bar, Role::StatusBar, 0);
         let saved = self.enter(&bar);
         let mut at = 12.0;
         for (i, (k, what)) in hints.iter().enumerate() {
@@ -642,7 +657,7 @@ impl Ui {
         self.lead_gap();
         let rh = self.row_height() as f32;
         let (dot, hint) = (self.theme().notice.idle, self.theme().hint.idle);
-        let row = self.node(key, Node { flags: FIT_TEXT, h: Size::Px(rh), look: hint, inset: Edges { l: 26.0, r: 12.0, ..Edges::default() }, ..Node::DEFAULT });
+        let row = self.node(key, Node { flags: FIT_TEXT, h: Size::Px(rh), look: hint, inset: Edges { l: 26.0, r: 12.0, ..Edges::default() }, role: Role::Label, ..Node::DEFAULT });
         self.text(&row, message);
         let saved = self.enter(&row);
         self.part(int_key(row.box_key, 0), (12.0, rh / 2.0 - 3.0), Size::Px(6.0), 6.0, dot, Edges::default(), "");
@@ -699,6 +714,10 @@ impl Ui {
         popts.max_height = opts.max_height;
         popts.padding = if opts.stroke.is_none() && opts.look.is_none() { 0 } else { 1 };
         self.panel(popts, label, f);
+        if let Some(sheet) = self.box_of_key(key) {
+            let modal = if opts.role == Role::Dialog { st::MODAL } else { 0 };
+            self.set_role(&sheet, opts.role, modal);
+        }
         self.leave(saved);
         self.push_overlay(index);
         if opts.attached {
@@ -710,7 +729,7 @@ impl Ui {
     }
 
     pub fn popup(&mut self, stroke: Option<Color>, max_height: Option<f32>, dismiss_initial: bool, attached: bool, at: (f32, f32), width: f32, height: f32, label: &str, f: &mut dyn FnMut(&mut Ui)) -> bool {
-        let opts = PopupOpts { stroke, look: None, max_height, dismiss_initial, attached, keep: Vec::new(), related: Vec::new() };
+        let opts = PopupOpts { stroke, look: None, max_height, dismiss_initial, attached, ..PopupOpts::default() };
         self.popup_with_related(opts, at, width, height, label, f)
     }
 
@@ -730,7 +749,7 @@ impl Ui {
         let x = (0.0f32.max((view_w - width) / 2.0)).round();
         let y = (0.0f32.max((view_h - height) / 2.0)).round();
         let look = self.theme().modal.idle;
-        let opts = PopupOpts { look: Some(look), max_height: Some(48.0f32.max(view_h - 32.0)), dismiss_initial: false, ..PopupOpts::default() };
+        let opts = PopupOpts { look: Some(look), max_height: Some(48.0f32.max(view_h - 32.0)), dismiss_initial: false, role: Role::Dialog, ..PopupOpts::default() };
         self.popup_with_related(opts, (x, y), width, height, label, f)
     }
 
@@ -741,7 +760,7 @@ impl Ui {
         let look = self.theme().label.idle;
         let row = self.node(
             text,
-            Node { h: Size::Px(gap + self.row_height() as f32), look, inset: Edges { l: SIDE as f32, t: gap, r: 0.0, b: 0.0 }, ..Node::DEFAULT },
+            Node { h: Size::Px(gap + self.row_height() as f32), look, inset: Edges { l: SIDE as f32, t: gap, r: 0.0, b: 0.0 }, role: Role::Label, ..Node::DEFAULT },
         );
         self.text(&row, shown(text));
     }
@@ -753,7 +772,7 @@ impl Ui {
         let t = self.theme();
         let (rule, key, hint, label) = (t.footer.idle, t.key.idle, t.hint.idle, t.label.idle);
         // the hairline 4 points under what is above
-        let row = self.node("footer", Node { h: Size::Px(1.0 + rh), margin: Edges { t: 4.0, ..Edges::ZERO }, look: rule, ..Node::DEFAULT });
+        let row = self.node("footer", Node { h: Size::Px(1.0 + rh), margin: Edges { t: 4.0, ..Edges::ZERO }, look: rule, role: Role::StatusBar, ..Node::DEFAULT });
         let size = key.font.points(self.font_size());
         let saved = self.enter(&row);
         let mut pen = SIDE as f32;
@@ -813,7 +832,8 @@ impl Ui {
         let line = Node { h: Size::Px(self.row_height() as f32), axis: Axis::Row, justify: if at_end { Justify::End } else { Justify::Start }, padding: Edges { l: 5.0, t: pad, r: if at_end { 8.0 } else { 5.0 }, b: pad }, ..Node::DEFAULT };
         let line = self.node_keyed(int_key(key, 0x6c69), line);
         let saved = self.enter(&line);
-        let row = self.node_keyed(key, Node { flags: CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY | FOCUS_MARK, w: Size::Px(width), shrink: 1.0, min_w: 1.0, h: Size::Grow, ..Node::DEFAULT });
+        let row = self.node_keyed(key, Node { flags: CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY | FOCUS_MARK, w: Size::Px(width), shrink: 1.0, min_w: 1.0, h: Size::Grow, role: Role::Button, ..Node::DEFAULT });
+        self.a11y_name(&row, shown(text));
         self.leave(saved);
         let signal = self.signal(&row);
         let state = State { hovered: signal.hovered, pressed: signal.held, focused: self.focused(&row), ..State::default() };
@@ -847,6 +867,7 @@ impl Ui {
         self.set_look(&row, look, hovered);
         self.node_mut(&row).inset = Edges { l: SIDE as f32, ..Edges::default() };
         self.text(&row, shown(text));
+        self.set_role(&row, Role::Toggle, st::CHECKABLE | if value { st::CHECKED } else { 0 });
         // the 28 x 14 switch 12 from the row's end, the knob 3 in from its side
         let top = ((self.row_height() - 14) / 2) as f32;
         self.end_row(&row, self.space(2));
@@ -874,6 +895,7 @@ impl Ui {
             None => opts.w(Size::Grow).h(Size::Px(1.0)),
         };
         let b = self.box_fmt(label, opts);
+        self.set_role(&b, Role::Splitter, if row { st::VERTICAL } else { st::HORIZONTAL });
         self.cached_hit(&b, row as u64, || if row { Rc::new(|r: Rect| Rect::new(r.x - 3.0, r.y, r.w + 6.0, r.h)) } else { Rc::new(|r: Rect| Rect::new(r.x, r.y - 3.0, r.w, r.h + 6.0)) });
         let signal = self.signal(&b);
         if signal.hovered || signal.held {

@@ -1222,7 +1222,19 @@ impl Ui {
         } else {
             None
         };
-        let changed = edit.as_ref().filter(|e| e.text != value).map(|e| e.text.clone());
+        // a screen reader's SetValue replaces the value (one change, one undo step for the host)
+        let changed = match signal.a11y_value {
+            Some(v) => Some(cfmt::g(v, 6)),
+            None => edit.as_ref().filter(|e| e.text != value).map(|e| e.text.clone()),
+        };
+        {
+            let shown_value = changed.as_deref().unwrap_or(value);
+            let chars = |at: usize| shown_value[..at.min(shown_value.len())].chars().count() as u32;
+            let selection = edit.as_ref().map_or((0, 0), |e| (chars(e.anchor), chars(e.caret)));
+            self.set_role(&row, Role::TextField, crate::a11y::state::EDITABLE);
+            self.a11y_name(&row, text);
+            self.a11y_value(&row, shown_value, selection);
+        }
         let composition = if focused { self.composition().to_owned() } else { String::new() };
         let hovered = signal.hovered;
         // the I-beam over the value, as in any text field
@@ -2002,6 +2014,8 @@ impl Ui {
         if o.select.is_some() {
             self.focus_box(&body);
         }
+        self.set_role(&body, Role::TextArea, crate::a11y::state::EDITABLE | crate::a11y::state::MULTILINE);
+        self.a11y_value(&body, text, (0, 0));
         let char_w = self.text_width(None, "0");
         // the sheet's code area: a 36-point gutter (wider only past 999 lines), the text at its
         // edge, 6 points of padding above the first row
@@ -2395,6 +2409,7 @@ impl Ui {
             let t = self.theme();
             let (sheet, list, hint) = (t.popup.idle, t.list, t.hint.idle);
             self.set_look(container, sheet, State::default());
+            self.set_role(container, Role::List, 0);
             let doc = &items[selected].doc;
             if !doc.is_empty() {
                 let saved = self.enter(container);
@@ -2407,6 +2422,7 @@ impl Ui {
                 let c = &items[first + i];
                 let state = State { hovered: self.signal(r).hovered, checked: first + i == selected, ..State::default() };
                 self.style(r, &list, state);
+                self.set_role(r, Role::ListItem, if first + i == selected { crate::a11y::state::SELECTED } else { 0 });
                 self.node_mut(r).inset = Edges { l: SIDE as f32, ..Edges::default() };
                 self.text(r, &c.label);
                 let dw = self.text_width(None, &c.detail) as i64 as f32;
@@ -2800,6 +2816,10 @@ impl Ui {
         let (hint, place_look) = (t.hint.idle, t.placeholder.idle);
         // the search row: a 20-point field in 4 points of padding
         self.set_look(&search, Look { text: CLEAR, ..field }, state);
+        self.set_role(&search, Role::TextField, crate::a11y::state::EDITABLE);
+        self.a11y_name(&search, label);
+        self.a11y_value(&search, &edit.text, (edit.text[..edit.anchor.min(edit.text.len())].chars().count() as u32, edit.text[..edit.caret.min(edit.text.len())].chars().count() as u32));
+        self.set_role(&list, Role::List, 0);
         {
             let saved = self.enter(&search);
             if slash {
@@ -2847,6 +2867,8 @@ impl Ui {
             let ink = if doomed { look.text } else if unavailable { t.list.disabled.text } else { t.list.idle.text };
             let (matched, key_look, detail_look) = (t.matched.idle.text, t.key.idle, if unavailable { t.placeholder.idle } else { t.hint.idle });
             self.set_look(&row, look, state);
+            self.set_role(&row, Role::ListItem, if current { crate::a11y::state::SELECTED } else { 0 });
+            self.a11y_name(&row, text);
             let width = self.width_of(&row);
             let rk = |n: i64| int_key(row.box_key, n);
             let inner = self.enter(&row);
@@ -2976,6 +2998,7 @@ impl Ui {
                 // a hairline 4 points down in a `gap`-point space
                 let line = self.box_fmt(format_args!("separator-{}", index), BoxOpts::default().flags(BLOCKING).w(Size::Grow).h(Size::Px(1.0)));
                 self.set_look(&line, look, State::default());
+                self.set_role(&line, Role::Separator, 0);
                 self.node_mut(&line).margin = Edges { t: 4.0, b: m.gap - 5.0, ..Edges::ZERO };
             } else {
                 let enabled = *enabled;
@@ -2991,6 +3014,7 @@ impl Ui {
                 let lead = lead_of(index) as f32;
                 let state = State { hovered: signal.hovered || m.opened == Some(index), disabled: !enabled, ..State::default() };
                 self.style(&row, &states, state);
+                self.set_role(&row, Role::MenuItem, if m.selected == Some(index) { crate::a11y::state::CHECKED } else { 0 } | if chevron { crate::a11y::state::EXPANDABLE } else { 0 });
                 self.node_mut(&row).inset = Edges { l: SIDE as f32 + lead + m.swatch_pad, ..Edges::default() };
                 self.text(&row, &display(text));
                 let k = |n: i64| int_key(row.box_key, n);
@@ -3084,7 +3108,7 @@ impl Ui {
         let keep: Vec<Rect> = o.submenus.iter().map(|s| sub_geometry(self, s)).collect();
         let sheet = self.theme().popup.idle;
         let related = if o.submenus.is_empty() { Vec::new() } else { vec![submenu_key] };
-        let popts = PopupOpts { look: Some(sheet), keep, related, ..PopupOpts::default() };
+        let popts = PopupOpts { look: Some(sheet), keep, related, role: Role::Menu, ..PopupOpts::default() };
         let mut opened: Option<i64> = None;
         let mut picked: Option<i64> = None;
         let menu_items = items.to_vec();
@@ -3131,7 +3155,7 @@ impl Ui {
                 let sub = o.submenus[si].clone();
                 let Rect { x: sx, y: sy, w: sw, h: sh } = sub_geometry(self, &sub);
                 let mut sub_picked: Option<i64> = None;
-                let sub_opts = PopupOpts { look: Some(sheet), attached: true, ..PopupOpts::default() };
+                let sub_opts = PopupOpts { look: Some(sheet), attached: true, role: Role::Menu, ..PopupOpts::default() };
                 self.popup_with_related(sub_opts, (sx, sy), sw, sh, &format!("{}-sub", label), &mut |ui: &mut Ui| {
                     ui.box_("menu-top", BoxOpts::default().flags(BLOCKING).w(Size::Grow).h(Size::Px(6.0)));
                     let m = MenuRows {

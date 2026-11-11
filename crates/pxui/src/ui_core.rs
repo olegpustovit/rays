@@ -234,6 +234,8 @@ pub enum UndoKind {
 pub type HitFn = Rc<dyn Fn(Rect) -> Rect>;
 
 pub use crate::theme::{Curve, Font, Look, Ring, Shadow, State, States, Theme, Tokens};
+pub use crate::a11y::{A11yAction, A11yTree, Role};
+use crate::a11y::{actions as a11y_actions, state as a11y_state, Action as A11yKind, NO_PARENT};
 pub use crate::layout::{place_anchored, Align, Anchor, Cell, Direction, Grid, Justify, Placement, Side, Track};
 
 /// A drawn mark centred in a node's rectangle, in its look's text colour.
@@ -291,6 +293,11 @@ pub struct Node {
     pub cell: Cell,
     pub z: i16,
     pub anchor: Option<Anchor>,
+    /// what the node is to a screen reader (`Unknown`: not in the accessibility tree) and the states
+    /// its widget declares (`a11y::state` bits: CHECKABLE, CHECKED, EXPANDABLE, EXPANDED, EDITABLE,
+    /// MULTILINE, SELECTED, MODAL); focus, press, enabled and visibility come from the engine
+    pub role: Role,
+    pub a11y: u32,
     pub at: Option<(f32, f32)>,
     pub scroll_step: f32,
     pub look: Look,
@@ -327,6 +334,8 @@ impl Node {
         cell: Cell::DEFAULT,
         z: 0,
         anchor: None,
+        role: Role::Unknown,
+        a11y: 0,
         at: None,
         scroll_step: 24.0,
         look: Look::NONE,
@@ -497,6 +506,8 @@ struct ViewRec {
     tex0: Option<Image>,
     breaks: Vec<(u32, Image)>,
     hits: Vec<HitRec>,
+    /// the slots its last build declared, in order (the accessibility walk)
+    nodes: Vec<usize>,
     hit_parent: i64,
     /// its box at its build (parent coordinates), how far layout has moved it since, and the clip
     /// at its box (parent coordinates)
@@ -527,6 +538,7 @@ impl ViewRec {
     fn new() -> ViewRec {
         ViewRec {
             name: String::new(),
+            nodes: Vec::new(),
             slot: NONE,
             parent: 0,
             revision: 0,
@@ -661,6 +673,12 @@ struct Slot {
     seen_state: State,
     tween: u32,
     pose: (f32, f32, f32),
+    /// the slot of the node it was declared under (`NONE` for the root); its accessible name and
+    /// value (the text when the name is empty) and its text selection (anchor, caret in chars)
+    parent_slot: usize,
+    a11y_name: String,
+    a11y_value: String,
+    a11y_selection: (u32, u32),
 }
 
 impl Slot {
@@ -703,6 +721,10 @@ impl Slot {
             seen_state: State::default(),
             tween: NO_TWEEN,
             pose: (0.0, 0.0, 1.0),
+            parent_slot: NONE,
+            a11y_name: String::new(),
+            a11y_value: String::new(),
+            a11y_selection: (0, 0),
         }
     }
 }
@@ -743,6 +765,8 @@ pub struct Accumulator {
     pub scroll_drag: f32,
     /// the fingers' sideways points (a `SCROLL_X` box)
     pub scroll_drag_x: f32,
+    /// a value an assistive technology set (`A11yAction` SetValue)
+    pub a11y_value: Option<f64>,
     pub scroll_touch: bool,
     pub scroll_lift: bool,
     /// product of this frame's pinch factors
@@ -839,6 +863,8 @@ pub struct FrameOut<'a> {
     pub damage: Option<Rect>,
     pub views: &'a [(u16, ViewEntry)],
     pub blurs: &'a [BlurOut],
+    /// the accessibility tree: its `revision` changes only when its content did
+    pub a11y: &'a A11yTree,
 }
 
 // -------------------------------------------------------------- text
@@ -907,6 +933,12 @@ pub struct Ui {
     /// boxes the last layout ran over; row flow direction
     arranged: usize,
     dir: Direction,
+    /// the published accessibility tree, the next one being built (published when it differs), the
+    /// slot-to-tree-index map of the walk, and the actions a bridge handed in for the next frame
+    a11y: A11yTree,
+    a11y_next: A11yTree,
+    a11y_map: Vec<u32>,
+    a11y_pending: Vec<A11yAction>,
     /// how long the last frame's layout passes took
     layout_time: std::time::Duration,
     /// `order_stack`'s scratch: (z, build position, box)
@@ -1083,6 +1115,10 @@ impl Ui {
             dir: Direction::Ltr,
             z_order: Vec::new(),
             layout_time: std::time::Duration::ZERO,
+            a11y: A11yTree::new(),
+            a11y_next: A11yTree::new(),
+            a11y_map: Vec::new(),
+            a11y_pending: Vec::new(),
             parents: Vec::new(),
             overlays: Vec::new(),
             foreground: Vec::new(),
@@ -1266,7 +1302,7 @@ impl Ui {
 
     /// The most recently completed frame.
     pub fn output(&self) -> FrameOut<'_> {
-        FrameOut { draw: &self.draw[..self.draw_len], platform: &self.out, damage: self.damage, views: &self.view_out, blurs: &self.blur_out }
+        FrameOut { draw: &self.draw[..self.draw_len], platform: &self.out, damage: self.damage, views: &self.view_out, blurs: &self.blur_out, a11y: &self.a11y }
     }
 
     /// The host drew layer `index` of the output with its `dirty` ranges: they start over empty.
@@ -1280,6 +1316,148 @@ impl Ui {
     /// virtual list saves.
     pub fn built_nodes(&self) -> usize {
         self.count
+    }
+
+    /// Declare what a node built this frame is to a screen reader, and the states its widget knows
+    /// (`a11y::state` bits).
+    pub fn set_role(&mut self, b: &Handle, role: Role, states: u32) {
+        if self.live(b) {
+            let n = &mut self.slots[b.box_slot].node;
+            (n.role, n.a11y) = (role, states);
+        }
+    }
+
+    /// The node's accessible name (its text by default), for a node declared this frame.
+    pub fn a11y_name(&mut self, b: &Handle, name: &str) {
+        if self.live(b) {
+            let s = &mut self.slots[b.box_slot].a11y_name;
+            s.clear();
+            s.push_str(name);
+        }
+    }
+
+    /// The node's accessible value (a field's text, a readout) and its selection (anchor and caret
+    /// in chars).
+    pub fn a11y_value(&mut self, b: &Handle, value: &str, selection: (u32, u32)) {
+        if self.live(b) {
+            let s = &mut self.slots[b.box_slot];
+            s.a11y_value.clear();
+            s.a11y_value.push_str(value);
+            s.a11y_selection = selection;
+        }
+    }
+
+    /// Actions from an assistive technology (`pxui_atspi::Bridge::pump`), applied at the start of
+    /// the next frame as input: Press clicks, Focus focuses, Scroll scrolls by `payload` points,
+    /// SetValue hands `payload` to the widget (`Signal::a11y_value`), Expand and Collapse click a
+    /// disclosure whose state differs. Ids of nodes that are gone are dropped.
+    pub fn inject_a11y(&mut self, actions: &[A11yAction]) {
+        self.a11y_pending.extend_from_slice(actions);
+    }
+
+    fn apply_a11y(&mut self) {
+        let mut pending = std::mem::take(&mut self.a11y_pending);
+        for a in &pending {
+            let (slot, generation) = ((a.id & 0xffff_ffff) as usize, (a.id >> 32) as u32);
+            let Some(s) = self.slots.get(slot).filter(|s| s.generation == generation && s.key != 0) else { continue };
+            let (key, expanded) = (s.key, s.node.a11y & a11y_state::EXPANDED != 0);
+            match a.action {
+                A11yKind::Press => self.accumulator(key).clicked = true,
+                A11yKind::Focus => {
+                    let b = UiBox { index: NONE, box_key: key, box_slot: slot, generation };
+                    self.focus_box(&b);
+                }
+                A11yKind::Scroll => self.scroll_y[slot] = (self.scroll_y[slot] + a.payload as f32).max(0.0),
+                A11yKind::SetValue => self.accumulator(key).a11y_value = Some(a.payload),
+                A11yKind::Expand | A11yKind::Collapse => {
+                    if expanded != (a.action == A11yKind::Expand) {
+                        self.accumulator(key).clicked = true;
+                    }
+                }
+            }
+            self.mark_key(key);
+        }
+        pending.clear();
+        self.a11y_pending = pending;
+    }
+
+    /// Walk the views' declared nodes (a kept view's from its last build) into the next tree and
+    /// publish it when it differs: an unchanged frame leaves the published tree and its revision.
+    // ponytail: the walk and compare run every frame, O(nodes); skip them when no view rebuilt and
+    // no node's state changed if trees get large.
+    fn emit_a11y(&mut self) {
+        let mut t = std::mem::replace(&mut self.a11y_next, A11yTree::new());
+        let mut map = std::mem::take(&mut self.a11y_map);
+        t.begin();
+        if map.len() < self.slots.len() {
+            map.resize(self.slots.len(), NO_PARENT);
+        }
+        self.emit_view(&mut t, &mut map, 0);
+        if t.nodes != self.a11y.nodes || t.strings != self.a11y.strings {
+            t.revision = self.a11y.revision;
+            t.end();
+            std::mem::swap(&mut t, &mut self.a11y);
+        }
+        self.a11y_next = t;
+        self.a11y_map = map;
+    }
+
+    fn emit_view(&mut self, t: &mut A11yTree, map: &mut [u32], v: u32) {
+        for k in 0..self.views[v as usize].nodes.len() {
+            let slot = self.views[v as usize].nodes[k];
+            let s = &self.slots[slot];
+            let parent = if s.parent_slot == NONE { NO_PARENT } else { map[s.parent_slot] };
+            map[slot] = parent;
+            if s.node.role != Role::Unknown {
+                let n = &s.node;
+                let shift = self.views[self.views[s.owner as usize].xf as usize].shift;
+                let rect = Rect::new(s.rx + shift.0, s.ry + shift.1, s.rw, s.rh);
+                let shown = Rect::new(s.rx, s.ry, s.rw, s.rh).intersect(s.clip);
+                let mut states = n.a11y;
+                let mut acts = 0;
+                if !n.state.disabled {
+                    states |= a11y_state::ENABLED;
+                }
+                if shown.w > 0.0 && shown.h > 0.0 {
+                    states |= a11y_state::VISIBLE;
+                }
+                if n.flags & FOCUSABLE != 0 {
+                    states |= a11y_state::FOCUSABLE;
+                    acts |= a11y_actions::FOCUS;
+                }
+                if s.key == self.focus {
+                    states |= a11y_state::FOCUSED;
+                }
+                if self.active == Some(s.key) {
+                    states |= a11y_state::PRESSED;
+                }
+                if n.flags & CLICKABLE != 0 {
+                    acts |= a11y_actions::PRESS;
+                }
+                if n.flags & (SCROLL | SCROLL_X) != 0 {
+                    acts |= a11y_actions::SCROLL;
+                }
+                if n.a11y & a11y_state::EDITABLE != 0 || n.role == Role::Slider {
+                    acts |= a11y_actions::SET_VALUE;
+                }
+                if n.a11y & a11y_state::EXPANDABLE != 0 {
+                    acts |= a11y_actions::EXPAND | a11y_actions::COLLAPSE;
+                }
+                let i = t.push(parent, crate::a11y::node_id(slot, s.generation), n.role, rect);
+                t.set_name(i, if s.a11y_name.is_empty() { &s.text } else { &s.a11y_name });
+                if !s.a11y_value.is_empty() || n.a11y & a11y_state::EDITABLE != 0 {
+                    t.set_value(i, &s.a11y_value);
+                    t.set_selection(i, s.a11y_selection.0, s.a11y_selection.1);
+                }
+                t.set_states(i, states);
+                t.set_actions(i, acts);
+                map[slot] = i;
+            }
+            let held = self.slots[slot].view;
+            if held != NO_VIEW && held != v {
+                self.emit_view(t, map, held);
+            }
+        }
     }
 
     /// How long the last frame's layout (`intrinsic` and `arrange`) took.
@@ -1507,6 +1685,7 @@ impl Ui {
                     scroll_wheel: 0.0,
                     scroll_drag: 0.0,
                     scroll_drag_x: 0.0,
+                    a11y_value: None,
                     scroll_touch: false,
                     scroll_lift: false,
                     press_keys,
@@ -2328,6 +2507,8 @@ pub struct Signal {
     pub pinch: f64,
     /// ordered key/text events while focused
     pub keys: Vec<Event>,
+    /// a value an assistive technology set this frame: the widget applies it as one edit
+    pub a11y_value: Option<f64>,
 }
 
 impl Ui {
@@ -2375,6 +2556,8 @@ impl Ui {
         self.slots[slot].touched = self.frame_number;
         self.slots[slot].label_count = 0;
         self.slots[slot].owner = self.view_cur;
+        self.slots[slot].parent_slot = if parent == NONE { NONE } else { self.boxes[parent].slot };
+        self.views[self.view_cur as usize].nodes.push(slot);
         let b = &mut self.boxes[index];
         b.key = key;
         b.slot = slot;
@@ -2407,6 +2590,9 @@ impl Ui {
         let s = &mut self.slots[b.slot];
         s.node = node;
         s.text.clear();
+        s.a11y_name.clear();
+        s.a11y_value.clear();
+        s.a11y_selection = (0, 0);
     }
 
     /// The layout inputs and look of build box `index`.
@@ -2598,6 +2784,7 @@ impl Ui {
                 scroll: (0.0, 0.0),
                 pinch: 1.0,
                 keys: Vec::new(),
+                a11y_value: None,
             },
             Some(value) => Signal {
                 hovered: self.hot == key,
@@ -2626,6 +2813,7 @@ impl Ui {
                 scroll: (value.scroll_x, value.scroll_y_steps),
                 pinch: value.pinch,
                 keys: value.keys.iter().map(|(e, _)| e.clone()).collect(),
+                a11y_value: value.a11y_value,
             },
         }
     }
@@ -4811,6 +4999,7 @@ impl Ui {
             self.out.background = Some(self.theme.tokens.panel);
         }
         self.route(frame);
+        self.apply_a11y();
         self.mark_input();
         self.views[0].built = self.frame_number;
         self.modal_key = None;
@@ -4824,6 +5013,7 @@ impl Ui {
         self.building = true;
         self.parents.clear();
         self.seeds.clear();
+        self.views[0].nodes.clear();
         let root = self.append_box(ROOT_KEY, NONE);
         let (w, h) = (frame.input.size.0 as f32, frame.input.size.1 as f32);
         self.set_box(root, Node { w: Size::Px(w), h: Size::Px(h), at: Some((0.0, 0.0)), scroll_step: 0.0, ..Node::DEFAULT });
@@ -4871,6 +5061,7 @@ impl Ui {
         self.arrange(frame.input.t);
         self.layout_time = laid.elapsed();
         self.paint_all(frame);
+        self.emit_a11y();
         self.step_tweens();
         self.text_mut().end_frame();
         // a glyph evicted from the atlas may be one a kept view's instances sample
@@ -4963,6 +5154,8 @@ impl Ui {
         let Rect { x, y, .. } = place_anchored(Rect::new(px + 12.0, py - 8.0, 0.0, 28.0), (width, height), placement, Rect::new(0.0, 0.0, self.view_w, self.view_h));
         let saved = self.enter_root();
         let tip = self.box_("ui-tooltip", BoxOpts::default().w(Size::Px(width)).h(Size::Px(height)).at((x, y)));
+        self.set_role(&tip, Role::Tooltip, 0);
+        self.a11y_name(&tip, text);
         self.overlays.push(tip.index);
         let look = self.theme().tooltip.idle;
         self.set_look(&tip, Look { text: CLEAR_INK, ..look }, State::default());
@@ -5215,6 +5408,7 @@ impl Ui {
         }
         r.verify = clean;
         r.escapes = false;
+        r.nodes.clear();
         self.view_cur = v;
         let saved = self.enter(&b);
         f(self);
@@ -5237,7 +5431,7 @@ impl Ui {
     // from the scroll position before layout: a fling past the overscan shows empty rows for a frame.
     pub fn list(&mut self, label: &str, count: usize, row_h: f32, f: &mut dyn FnMut(&mut Ui, usize)) -> Handle {
         assert!(row_h > 0.0, "Ui.list {label}: rows need a positive height");
-        let body = self.node(label, Node { flags: SCROLL | CLIP, w: Size::Grow, h: Size::Grow, scroll_step: row_h, ..Node::DEFAULT });
+        let body = self.node(label, Node { flags: SCROLL | CLIP, w: Size::Grow, h: Size::Grow, scroll_step: row_h, role: Role::List, ..Node::DEFAULT });
         let seen = self.slots[body.box_slot].rh;
         let height = if seen > 0.0 { seen } else { self.view_h };
         // the wheel and the trackpad move the list before its rows are chosen (as `table` does)
@@ -5253,7 +5447,7 @@ impl Ui {
         let extent = self.node_keyed(int_key(body.box_key, -1), Node { h: Size::Px(count as f32 * row_h), ..Node::DEFAULT });
         let inner = self.enter(&extent);
         for i in first..last {
-            let row = self.node_keyed(int_key(body.box_key, i as i64), Node { h: Size::Px(row_h), at: Some((0.0, i as f32 * row_h)), ..Node::DEFAULT });
+            let row = self.node_keyed(int_key(body.box_key, i as i64), Node { h: Size::Px(row_h), at: Some((0.0, i as f32 * row_h)), role: Role::ListItem, ..Node::DEFAULT });
             let saved = self.enter(&row);
             f(self, i);
             self.leave(saved);
@@ -5405,11 +5599,12 @@ impl Ui {
         if r.index != 0 {
             self.free_indices.push(r.index);
         }
-        let (mut name, mut breaks, mut hits) = (std::mem::take(&mut r.name), std::mem::take(&mut r.breaks), std::mem::take(&mut r.hits));
+        let (mut name, mut breaks, mut hits, mut nodes) = (std::mem::take(&mut r.name), std::mem::take(&mut r.breaks), std::mem::take(&mut r.hits), std::mem::take(&mut r.nodes));
         name.clear();
         breaks.clear();
         hits.clear();
-        *r = ViewRec { name, breaks, hits, outer: Rect::new(0.0, 0.0, 0.0, 0.0), ..ViewRec::new() };
+        nodes.clear();
+        *r = ViewRec { name, breaks, hits, nodes, outer: Rect::new(0.0, 0.0, 0.0, 0.0), ..ViewRec::new() };
         self.free_views.push(v);
     }
 

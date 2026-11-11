@@ -455,24 +455,30 @@ pub fn layout_stress_zero_alloc() {
     ui.destroy();
 }
 
-/// Layout cost per node holds across tree sizes: the same mix at 500, 2,000 and 8,000 nodes.
+/// Layout cost per node holds across tree sizes: the same mix at 500, 2,000 and 8,000 nodes,
+/// measured in alternating rounds (the best of each) so load on the machine hits every size alike.
 pub fn layout_scaling() {
-    let mut per_node = Vec::new();
-    for groups in [25usize, 100, 400] {
-        let mut ui = new_ui(None);
-        let mut t = 0.0;
-        let mut best = (f64::INFINITY, f64::INFINITY);
-        for _ in 0..3 {
-            let (_, us, layout_us) = costs(&mut ui, &mut t, 8, &mut |ui, tick| {
-                ui.view("stress", tick, Size::Px(2400.0), Size::Px(2400.0), &mut |ui| stress(ui, groups));
+    const GROUPS: [usize; 3] = [25, 100, 400];
+    let mut uis: Vec<Ui> = GROUPS.iter().map(|_| new_ui(None)).collect();
+    let mut t = 0.0;
+    let mut best = [(f64::INFINITY, f64::INFINITY); 3];
+    for _ in 0..5 {
+        for (k, ui) in uis.iter_mut().enumerate() {
+            let (_, us, layout_us) = costs(ui, &mut t, 6, &mut |ui, tick| {
+                ui.view("stress", tick, Size::Px(2400.0), Size::Px(2400.0), &mut |ui| stress(ui, GROUPS[k]));
                 stress_popup(ui);
             });
-            best = (best.0.min(us), best.1.min(layout_us));
+            best[k] = (best[k].0.min(us), best[k].1.min(layout_us));
         }
+    }
+    let mut per_node = Vec::new();
+    for (k, ui) in uis.iter_mut().enumerate() {
         let nodes = ui.arranged_nodes() as f64;
-        let row = (nodes, best.0 * 1e3 / nodes, best.1 * 1e3 / nodes);
+        let row = (nodes, best[k].0 * 1e3 / nodes, best[k].1 * 1e3 / nodes);
         eprintln!("PXUI_LAYOUT scaling {} nodes: {:.0} ns per node rebuilt, {:.0} ns per node of layout", row.0, row.1, row.2);
         per_node.push(row);
+    }
+    for ui in &mut uis {
         ui.destroy();
     }
     let (first, last) = (per_node[0], per_node[2]);
