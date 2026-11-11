@@ -53,8 +53,16 @@ pub fn index_of(n: usize, boxf: &dyn Fn(usize) -> (f64, f64, f64, f64)) -> Index
 
 /// The boxes that may meet the rectangle, in index order, each once.
 pub fn index_query(ix: &Index, r: (f64, f64, f64, f64)) -> Vec<usize> {
+    let mut found = Vec::new();
+    index_query_into(ix, r, &mut found);
+    found
+}
+
+/// `index_query` into a kept list (cleared first).
+pub fn index_query_into(ix: &Index, r: (f64, f64, f64, f64), found: &mut Vec<usize>) {
     let (x0, y0, x1, y1) = r;
-    let mut found: Vec<usize> = ix.large.clone();
+    found.clear();
+    found.extend_from_slice(&ix.large);
     if (cell(x1) - cell(x0) + 1) * (cell(y1) - cell(y0) + 1) >= ix.buckets.len() as i64 {
         for l in ix.buckets.values() {
             found.extend_from_slice(l);
@@ -70,7 +78,6 @@ pub fn index_query(ix: &Index, r: (f64, f64, f64, f64)) -> Vec<usize> {
     }
     found.sort_unstable();
     found.dedup();
-    found
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -95,6 +102,8 @@ pub struct Wire {
     /// the node (or zone) it reads from, and the one it ends at: the dataflow chains
     pub from: Option<Path>,
     pub into: Option<Path>,
+    /// it leaves a begin bar's port down the bar (`curve_points` with `drop`)
+    pub drop: bool,
 }
 
 /// A float point as a hash key (0.0 and -0.0 are one point).
@@ -262,16 +271,21 @@ fn bernstein(i: usize) -> (f64, f64, f64, f64) {
 /// A wire is a 12-point lead out of and into each port and a cubic between them whose pull is capped.
 /// `drop`: from a begin bar's port, down along the bar, then level into the row.
 pub fn curve_points(drop: bool, a: (f64, f64), b: (f64, f64)) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    curve_into(drop, a, b, &mut out);
+    out
+}
+
+/// `curve_points` appended to `out`.
+pub fn curve_into(drop: bool, a: (f64, f64), b: (f64, f64), out: &mut Vec<(f64, f64)>) {
     let (ax, ay) = a;
     let (bx, by) = b;
     if drop && by > ay + 12.0 && bx > ax {
         let k = (by - ay).min(bx - ax);
-        (0..17)
-            .map(|i| {
-                let (b0, b1, b2, b3) = bernstein(i);
-                (((b0 + b1) * ax) + (b2 * (bx - k)) + (b3 * bx), (b0 * ay) + (b1 * (ay + k)) + ((b2 + b3) * by))
-            })
-            .collect()
+        out.extend((0..17).map(|i| {
+            let (b0, b1, b2, b3) = bernstein(i);
+            (((b0 + b1) * ax) + (b2 * (bx - k)) + (b3 * bx), (b0 * ay) + (b1 * (ay + k)) + ((b2 + b3) * by))
+        }));
     } else {
         let dx = bx - ax;
         let lead = if dx.abs() < 24.0 { 0.0 } else { 12.0 };
@@ -284,19 +298,15 @@ pub fn curve_points(drop: bool, a: (f64, f64), b: (f64, f64)) -> Vec<(f64, f64)>
         } else {
             160.0f64.min(48.0f64.max((by - ay).abs() / 2.0))
         };
-        let cubic: Vec<(f64, f64)> = (0..17)
-            .map(|i| {
-                let (b0, b1, b2, b3) = bernstein(i);
-                ((b0 * x0) + (b1 * (x0 + k)) + (b2 * (x1 - k)) + (b3 * x1), ((b0 + b1) * ay) + ((b2 + b3) * by))
-            })
-            .collect();
-        if lead == 0.0 {
-            cubic
-        } else {
-            let mut out = vec![(ax, ay)];
-            out.extend(cubic);
+        if lead != 0.0 {
+            out.push((ax, ay));
+        }
+        out.extend((0..17).map(|i| {
+            let (b0, b1, b2, b3) = bernstein(i);
+            ((b0 * x0) + (b1 * (x0 + k)) + (b2 * (x1 - k)) + (b3 * x1), ((b0 + b1) * ay) + ((b2 + b3) * by))
+        }));
+        if lead != 0.0 {
             out.push((bx, by));
-            out
         }
     }
 }
@@ -310,32 +320,27 @@ fn toward(a: (f64, f64), b: (f64, f64), d: f64) -> (f64, f64) {
     (a.0 + (b.0 - a.0) * d / l, a.1 + (b.1 - a.1) * d / l)
 }
 
-/// A polyline of axis-aligned legs with its corners rounded (radius 8, less on short legs).
-pub fn rounded(pts: &[(f64, f64)]) -> Vec<(f64, f64)> {
-    let first = match pts.first() {
-        None => return Vec::new(),
-        Some(f) => *f,
-    };
-    let mut out = vec![first];
-    let mut cur: Vec<(f64, f64)> = pts.to_vec();
-    while cur.len() >= 3 {
-        let (pp, c, n) = (cur[0], cur[1], cur[2]);
+/// A polyline of axis-aligned legs with its corners rounded (radius 8, less on short legs), appended
+/// to `out`.
+pub fn rounded_into(pts: &[(f64, f64)], out: &mut Vec<(f64, f64)>) {
+    let Some(&first) = pts.first() else { return };
+    out.push(first);
+    let mut pp = first;
+    for k in 1..pts.len().saturating_sub(1) {
+        let (c, n) = (pts[k], pts[k + 1]);
         let r = 8.0f64.min(len(pp, c).min(len(c, n)) / 2.0);
         let i = toward(c, pp, r);
         let o = toward(c, n, r);
-        for k in 0..5 {
-            let t = k as f64 / 4.0;
+        for q in 0..5 {
+            let t = q as f64 / 4.0;
             let u = 1.0 - t;
             out.push((u * u * i.0 + 2.0 * u * t * c.0 + t * t * o.0, u * u * i.1 + 2.0 * u * t * c.1 + t * t * o.1));
         }
-        cur.remove(0);
-        cur[0] = o;
+        pp = o;
     }
-    // `_ :: rest -> rest`: the head of what is left is dropped
-    if cur.len() >= 2 {
-        out.extend_from_slice(&cur[1..]);
+    if pts.len() >= 2 {
+        out.push(pts[pts.len() - 1]);
     }
-    out
 }
 
 pub fn out_anchor(pl: &Placed, ax: f64, ay: f64) -> (f64, f64) {
@@ -387,6 +392,7 @@ impl Items {
 struct Out {
     wires: Vec<Wire>,
     bars: HashSet<(u64, u64)>,
+    scratch: Scratch,
 }
 
 struct Walk {
@@ -416,98 +422,114 @@ fn walk(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, shift: &
             _ => {}
         }
         w.slot.insert(q.path.clone(), w.items.len());
-        if let (Some(inner), Item::Item(n)) = (q.inner.clone(), q.item.clone()) {
+        if let (Some(inner), Item::Item(n)) = (&pl.inner, &pl.item) {
             w.items.push((q, ax, ay2));
             let pad = match &n.zone {
                 Some(z) => p::zone_pad_in(z),
                 None => p::ZONE_PAD_X,
             };
-            w.origins.push((n.path.clone(), (ax + pad, ay2 + p::rail_top(&n))));
-            walk(name_w, shown, shift, w, ax + pad, ay2 + p::rail_top(&n), &inner);
+            w.origins.push((n.path.clone(), (ax + pad, ay2 + p::rail_top(n))));
+            walk(name_w, shown, shift, w, ax + pad, ay2 + p::rail_top(n), inner);
         } else {
             w.items.push((q, ax, ay2));
         }
     }
 }
 
-fn route(items: &Items, a: (f64, f64), b: (f64, f64), from: &Option<Path>, into: &Option<Path>) -> Vec<(f64, f64)> {
+/// Lists kept between routes, so a drag re-routing its wires allocates nothing once warm.
+#[derive(Default)]
+pub struct Scratch {
+    cand: Vec<usize>,
+    blockers: Vec<(f64, f64, f64, f64)>,
+    merged: Vec<(f64, f64, f64, f64)>,
+    way: Vec<(f64, f64)>,
+    pts: Vec<(f64, f64)>,
+}
+
+/// The cards a wire from `a` to `b` bends clear of: `cards` lists those that may meet a rectangle,
+/// `item` is one card and where it sits. Appended to `out`.
+fn route_into<'g>(cards: &mut dyn FnMut((f64, f64, f64, f64), &mut Vec<usize>), item: &dyn Fn(usize) -> (&'g Placed, f64, f64), a: (f64, f64), b: (f64, f64), from: &Option<Path>, into: &Option<Path>, s: &mut Scratch, out: &mut Vec<(f64, f64)>) {
     let (ax, ay) = a;
     let (bx, by) = b;
     let inside = |pt: (f64, f64), pl: &Placed, cx: f64, cy: f64| pt.0 >= cx && pt.0 <= cx + pl.w && pt.1 >= cy && pt.1 <= cy + pl.h;
-    let mut blockers: Vec<(f64, f64, f64, f64)> = Vec::new();
-    let pts = curve_points(false, (ax, ay), (bx, by));
-    for i in index_query(&items.tiles, (ax.min(bx), ay.min(by), ax.max(bx), ay.max(by))) {
-        let (pl, cx, cy) = &items.items[i];
-        let (cx, cy) = (*cx, *cy);
+    s.pts.clear();
+    curve_into(false, (ax, ay), (bx, by), &mut s.pts);
+    s.blockers.clear();
+    cards((ax.min(bx), ay.min(by), ax.max(bx), ay.max(by)), &mut s.cand);
+    for &i in &s.cand {
+        let (pl, cx, cy) = item(i);
         if on_path(from, &pl.path) || on_path(into, &pl.path) || inside((ax, ay), pl, cx, cy) || inside((bx, by), pl, cx, cy) || matches!(pl.item, Item::Return) {
             continue;
         }
         // a zone a wire does not enter is an obstacle too, kept a lattice step clear
         let m = if pl.inner.is_some() { 12.0 } else { 0.0 };
         let boxr = (cx - m, cy - m, pl.w + 2.0 * m, pl.h + 2.0 * m);
-        if pts.windows(2).any(|w| clip_segment(w[0], w[1], (cx, cy, pl.w, pl.h)).is_some()) {
-            blockers.push(boxr);
+        if s.pts.windows(2).any(|w| clip_segment(w[0], w[1], (cx, cy, pl.w, pl.h)).is_some()) {
+            s.blockers.push(boxr);
         }
     }
-    blockers.sort_by(|x, y| x.0.total_cmp(&y.0));
+    // (blockers at one x merge into one obstacle whatever their order)
+    s.blockers.sort_unstable_by(|x, y| x.0.total_cmp(&y.0));
     // cards stacked in the same columns are one obstacle
-    let mut merged: Vec<(f64, f64, f64, f64)> = Vec::new();
-    for (cx, cy, w, h) in blockers {
-        match merged.last().copied() {
+    s.merged.clear();
+    for &(cx, cy, w, h) in &s.blockers {
+        match s.merged.last().copied() {
             Some((px, py, pw, ph)) if cx < px + pw => {
                 let x1 = (px + pw).max(cx + w);
                 let y1 = (py + ph).max(cy + h);
                 let y0 = py.min(cy);
-                *merged.last_mut().unwrap() = (px, y0, x1 - px, y1 - y0);
+                *s.merged.last_mut().unwrap() = (px, y0, x1 - px, y1 - y0);
             }
-            _ => merged.push((cx, cy, w, h)),
+            _ => s.merged.push((cx, cy, w, h)),
         }
     }
-    if merged.is_empty() {
-        return pts;
+    if s.merged.is_empty() {
+        out.extend_from_slice(&s.pts);
+        return;
     }
-    let mut way: Vec<(f64, f64)> = Vec::new();
-    for (cx, cy, w, h) in &merged {
+    s.way.clear();
+    for (cx, cy, w, h) in &s.merged {
         let mx = cx + w / 2.0;
         let line = if bx == ax { ay } else { ay + ((by - ay) * (mx - ax) / (bx - ax)) };
         let y = if line <= cy + h / 2.0 { cy - 12.0 } else { cy + h + 12.0 };
         // level past both sides of the card
-        way.push((cx - 12.0, y));
-        way.push((cx + w + 12.0, y));
+        s.way.push((cx - 12.0, y));
+        s.way.push((cx + w + 12.0, y));
     }
     // a stop behind an end would send the wire back
-    way.retain(|(x, _)| *x > ax + 12.0 && *x < bx - 12.0);
-    let mut out: Vec<(f64, f64)> = Vec::new();
+    s.way.retain(|(x, _)| *x > ax + 12.0 && *x < bx - 12.0);
     let mut from_pt = (ax, ay);
-    let mut first = true;
-    for w in way.iter().copied().chain(std::iter::once((bx, by))) {
-        let cp = curve_points(false, from_pt, w);
-        if first {
-            out.extend(cp);
-            first = false;
-        } else {
-            out.extend_from_slice(&cp[1..]);
+    for (k, w) in s.way.iter().copied().chain(std::iter::once((bx, by))).enumerate() {
+        // the first leg whole, each later one without its first point (the stop before it)
+        let start = out.len();
+        curve_into(false, from_pt, w, out);
+        if k > 0 {
+            out.remove(start);
         }
         from_pt = w;
     }
-    out
 }
 
-/// A card stacked above the card it feeds is joined to it by an elbow.
-fn spine(items: &Items, src: &Src, into: &Path, b: (f64, f64)) -> Option<Vec<(f64, f64)>> {
-    let o = src.owner.as_ref()?;
-    let (op, ox, oy) = items.at(o)?;
-    let (ip, ix, iy) = items.at(into)?;
-    if *ix < ox + op.w - 24.0 && ix + ip.w > ox + 24.0 && *iy >= oy + op.h && iy - (oy + op.h) <= 3.0 * p::LATTICE {
-        let (ax, ay) = src.pos;
+/// A card stacked above the card it feeds is joined to it by an elbow: its corners, from the source
+/// card `o` and the fed card `i` (each with where it sits).
+fn spine_at(o: (&Placed, f64, f64), i: (&Placed, f64, f64), a: (f64, f64), b: (f64, f64)) -> Option<[(f64, f64); 6]> {
+    let ((op, ox, oy), (ip, ix, iy)) = (o, i);
+    if ix < ox + op.w - 24.0 && ix + ip.w > ox + 24.0 && iy >= oy + op.h && iy - (oy + op.h) <= 3.0 * p::LATTICE {
+        let (ax, ay) = a;
         let (bx, by) = b;
         let x1 = ax + 12.0;
         let x2 = bx - 12.0;
         let gy = (oy + op.h + iy) / 2.0;
-        Some(rounded(&[(ax, ay), (x1, ay), (x1, gy), (x2, gy), (x2, by), (bx, by)]))
+        Some([(ax, ay), (x1, ay), (x1, gy), (x2, gy), (x2, by), (bx, by)])
     } else {
         None
     }
+}
+
+fn spine(items: &Items, src: &Src, into: &Path, b: (f64, f64)) -> Option<[(f64, f64); 6]> {
+    let o = items.at(src.owner.as_ref()?)?;
+    let i = items.at(into)?;
+    spine_at((&o.0, o.1, o.2), (&i.0, i.1, i.2), src.pos, b)
 }
 
 fn add_wire(items: &Items, out: &mut Out, target: Option<Target>, refers: bool, src: Option<&Src>, b: (f64, f64), into: &Path) {
@@ -515,16 +537,56 @@ fn add_wire(items: &Items, out: &mut Out, target: Option<Target>, refers: bool, 
         Some(s) => s,
         None => return,
     };
-    if let Some(pts) = spine(items, s, into, b) {
-        let a = pts[0];
-        let b = *pts.last().unwrap();
-        out.wires.push(Wire { a, b, ty: s.ty.clone(), target, pts, refers, from: s.owner.clone(), into: Some(into.clone()) });
+    let mut pts = Vec::new();
+    let drop = out.bars.contains(&fkey(s.pos));
+    if let Some(corners) = spine(items, s, into, b) {
+        rounded_into(&corners, &mut pts);
+        let (a, b) = (pts[0], *pts.last().unwrap());
+        out.wires.push(Wire { a, b, ty: s.ty.clone(), target, pts, refers, from: s.owner.clone(), into: Some(into.clone()), drop });
+        return;
+    } else if drop || (b.0 - s.pos.0).abs() > TAG_SPAN {
+        curve_into(drop, s.pos, b, &mut pts);
     } else {
-        let drop = out.bars.contains(&fkey(s.pos));
-        let into_o = Some(into.clone());
-        let pts = if drop || (b.0 - s.pos.0).abs() > TAG_SPAN { curve_points(drop, s.pos, b) } else { route(items, s.pos, b, &s.owner, &into_o) };
-        out.wires.push(Wire { a: s.pos, b, ty: s.ty.clone(), target, pts, refers, from: s.owner.clone(), into: into_o });
+        route_into(&mut |r, found| index_query_into(&items.tiles, r, found), &|i| { let (pl, x, y) = &items.items[i]; (pl, *x, *y) }, s.pos, b, &s.owner, &Some(into.clone()), &mut out.scratch, &mut pts);
     }
+    out.wires.push(Wire { a: s.pos, b, ty: s.ty.clone(), target, pts, refers, from: s.owner.clone(), into: Some(into.clone()), drop });
+}
+
+/// Wire `i` of `geo` with the cards at `moving` (slots, ascending; none inside another) moved by `d`:
+/// its ends follow their cards and it bends clear of the cards as `compute` would bend it, into
+/// `out` (cleared first). Allocates nothing once `s` and `out` are warm.
+pub fn reroute(geo: &Geo, i: usize, moving: &[usize], d: (f64, f64), s: &mut Scratch, out: &mut Vec<(f64, f64)>) {
+    out.clear();
+    let wi = &geo.wires[i];
+    let moves = |k: usize| moving.binary_search(&k).is_ok();
+    let slot = |path: &Option<Path>| path.as_ref().and_then(|q| geo.slot.get(q).copied());
+    let shift = |k: Option<usize>| if k.is_some_and(moves) { d } else { (0.0, 0.0) };
+    let (o, k) = (slot(&wi.from), slot(&wi.into));
+    let (fa, fb) = (shift(o), shift(k));
+    let (a, b) = ((wi.a.0 + fa.0, wi.a.1 + fa.1), (wi.b.0 + fb.0, wi.b.1 + fb.1));
+    let at = |k: usize| {
+        let (pl, x, y) = &geo.items[k];
+        let (dx, dy) = shift(Some(k));
+        (pl, x + dx, y + dy)
+    };
+    if let (Some(o), Some(k)) = (o, k) {
+        if let Some(corners) = spine_at(at(o), at(k), a, b) {
+            rounded_into(&corners, out);
+            return;
+        }
+    }
+    if wi.drop || (b.0 - a.0).abs() > TAG_SPAN {
+        curve_into(wi.drop, a, b, out);
+        return;
+    }
+    // the index holds the cards where they were: a moved card is asked for wherever it went
+    let mut cards = |r: (f64, f64, f64, f64), found: &mut Vec<usize>| {
+        index_query_into(&geo.tiles, r, found);
+        found.retain(|&k| !moves(k));
+        found.extend_from_slice(moving);
+        found.sort_unstable();
+    };
+    route_into(&mut cards, &at, a, b, &wi.from, &wi.into, s, out);
 }
 
 type Table = HashMap<String, Src>;
@@ -613,21 +675,20 @@ fn scope_wires(items: &Items, out: &mut Out, chain: &mut Vec<Table>, sc: &p::Sco
     chain.push(declared(items, sc));
     for n in &sc.nodes {
         let (pl, ax, ay) = match items.at(&n.path) {
-            Some((pl, ax, ay)) => (pl.clone_light(), *ax, *ay),
+            Some((pl, ax, ay)) => (pl, *ax, *ay),
             None => continue,
         };
         let w = pl.w;
         match &n.zone {
             None => {
-                let lines = line_of_row(&pl.lines);
                 for (i, r) in n.rows.iter().enumerate() {
                     let target_pos = if r.head {
-                        in_anchor(&pl, ax, ay)
+                        in_anchor(pl, ax, ay)
                     } else {
                         match pl.shown {
-                            Level::Point | Level::Chip => in_anchor(&pl, ax, ay),
-                            _ => match lines.get(&i) {
-                                Some(k) => (ax, rows_top(n, ay) + (*k as f64 * p::ROW_HEIGHT) + WIRE_ROW_Y),
+                            Level::Point | Level::Chip => in_anchor(pl, ax, ay),
+                            _ => match pl.lines.iter().position(|l| matches!(l, p::Line::Row(j, _) if *j == i)) {
+                                Some(k) => (ax, rows_top(n, ay) + (k as f64 * p::ROW_HEIGHT) + WIRE_ROW_Y),
                                 None => (ax, ay + WIRE_HEAD_Y),
                             },
                         }
@@ -723,16 +784,6 @@ fn scope_wires(items: &Items, out: &mut Out, chain: &mut Vec<Table>, sc: &p::Sco
     chain.pop();
 }
 
-/// A placed item without its inner layout (a copy to read while the wires are added).
-trait CloneLight {
-    fn clone_light(&self) -> Placed;
-}
-impl CloneLight for Placed {
-    fn clone_light(&self) -> Placed {
-        Placed { inner: None, ..self.clone() }
-    }
-}
-
 /// The geometry of a scope: one item per node at the level it is shown, the wires between ports, and
 /// the indices over them. `shift` moves a placed item by its path (a drag in progress); a zone's
 /// children follow through the origin they are laid out from.
@@ -747,7 +798,7 @@ pub fn compute(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, s
         (*ax, *ay, ax + pl.w, ay + pl.h)
     });
     let items = Items { items: w.items, slot: w.slot, tiles };
-    let mut out = Out { wires: Vec::new(), bars: HashSet::new() };
+    let mut out = Out { wires: Vec::new(), bars: HashSet::new(), scratch: Scratch::default() };
     let mut chain: Vec<Table> = Vec::new();
     scope_wires(&items, &mut out, &mut chain, scope);
     if !scope.inputs.is_empty() {

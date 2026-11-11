@@ -1,83 +1,189 @@
-//! The graph pane's hover between builds. The content view's boxes are `HOVER_FREE`: the pointer
-//! moving over cards, ports and wires builds nothing (a card painted whole for its hover is in the
-//! content's revision instead). What it is over comes from the hit boxes the
-//! last content build left (`Hovers`); a card's ground (its tile's look) and its row highlight change
-//! through the patch path (the theme's hover transition; the default theme's is instant), and what
-//! is drawn over the cards for it (the lit wires, the tips) is a small view of its own.
-use crate::scope_frame::{row_at, sx, sy};
+//! The graph pane between content builds. Nothing on the content takes input: its cards and ports
+//! are `BLOCKING | HOVER_FREE` boxes (the canvas captures a press on them) and its wires are only
+//! geometry, so the pointer moving, a press, a selection and a drag of cards build no content. What
+//! the pointer is over and what a press is on come from the boxes the last content build left
+//! (`Hovers`) and the geometry. A card's ground (fill and edge: idle, hovered, selected), its hovered
+//! row's band, its selection brackets and its recession behind a selected chain are nodes whose looks
+//! change through the patch path; a dragged card is its own view moved by its offset. The lit wires
+//! and tips are a view over the content keyed by what they show, and a drag's wires (under the
+//! cards) and its band or rubber band (over them) are views of their own.
+use crate::scope_frame::{overscan, row_at, sx, sy, Del};
 use crate::scope_paint as sp;
 use crate::scope_state::*;
 use crate::scope_wires::*;
+use flow_check::workspace::Path;
 use flow_graph::projection as p;
 use flow_graph::projection::{Item, Level};
-use pxui::geom::p32;
+use flow_syntax::ty::Ty;
+use pxui::draw::flags::{BOTTOM, LEFT, RIGHT, TOP};
+use pxui::geom::{color::T as Color, p32};
 use pxui::theme::{self, Look, State};
 use pxui::ui::*;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-/// A card the last build left: its item, its tile, and the ground when its tile's look is the card.
-pub struct Card {
-    pub slot: usize,
-    pub tile: UiBox,
-    pub ground: Option<Ground>,
-    /// painted whole for its hover (a chip, a folded zone, an expression card): the content builds
-    /// again when it is hovered or left
-    pub whole: bool,
+pub enum PortKind {
+    /// what it carries and its type
+    Out(String, Option<Ty>),
+    /// what a click on it takes off
+    In(Option<Del>),
 }
 
-/// A card's fill and edge, idle and hovered, and its row highlight: the node, the line it was built
-/// at and the row height it was built with.
+pub struct Port {
+    pub b: UiBox,
+    pub kind: PortKind,
+}
+
+/// A card's ground node with its looks (idle, hovered, selected, selected and hovered) and its row
+/// highlight: the node, the line it was built at and the row height it was built with.
 #[derive(Clone, Copy)]
 pub struct Ground {
-    pub idle: Look,
-    pub hover: Look,
+    pub node: UiBox,
+    pub looks: [Look; 4],
     pub row: Option<(UiBox, usize, f32)>,
+}
+
+/// What a card shows that the content does not build: patched since.
+#[derive(Clone, Copy, Default, PartialEq)]
+struct Shown {
+    selected: bool,
+    hovered: bool,
+    line: Option<usize>,
+    recede: bool,
+}
+
+/// A card the last build left: its item, its view and tile, the nodes its hover and selection patch.
+pub struct Card {
+    pub slot: usize,
+    pub path: Path,
+    pub view: UiBox,
+    pub tile: UiBox,
+    pub ground: Option<Ground>,
+    /// the corners of its selection brackets (top left, top right, bottom left, bottom right)
+    pub brackets: [UiBox; 4],
+    /// the fill that recedes it behind a selected chain (a node or a folded zone)
+    pub recede: Option<UiBox>,
+    pub ports: Vec<Port>,
+    shown: Shown,
+}
+
+/// The sides of each bracket corner.
+pub const CORNERS: [u8; 4] = [TOP | LEFT, TOP | RIGHT, BOTTOM | LEFT, BOTTOM | RIGHT];
+
+/// A bracket corner's look: its two arms, `width` thick, in `color` (clear when not selected).
+pub fn corner(sides: u8, width: f32, color: Color) -> Look {
+    Look { border: color, border_w: width, sides, ..Look::NONE }
+}
+
+/// The recession of a card behind the selected chain: the ground at 170 over it.
+pub fn recede_look(t: &Pane, on: bool) -> Look {
+    Look { fill: if on { pxui::geom::color::with_alpha(t.theme.panel, 170) } else { Look::NONE.fill }, ..Look::NONE }
 }
 
 #[derive(Default)]
 pub struct Hovers {
     pub cards: Vec<Card>,
-    /// out-ports, then in-ports, card by card
-    pub ports: Vec<UiBox>,
-    /// wire hit boxes and the wires in view, in the build's order
-    pub wires: Vec<(UiBox, usize)>,
+    /// the cards of the build before, while one builds
+    spare: Vec<Card>,
+    /// the tiles' and ports' keys (what `Ui::root_at` answers among)
+    pub keys: Vec<i64>,
+    /// the wires and the open zones in view, in the build's order
     pub reach: Vec<usize>,
+    pub zones: Vec<usize>,
+    /// the content builds so far (not counting verifying runs)
+    pub builds: u64,
     /// the geometry the build read (its items and wires), by address
     pub geo: (usize, usize),
-    /// the card shown hovered (its tile's key) and its hovered row's line; `fresh` after a build,
-    /// whose declarations put every card back to idle
-    shown: (i64, Option<usize>),
-    fresh: bool,
-    /// the wires lit for the hover, and a list to compare it with
+    /// the selection and hover the cards show (`show`)
+    sel: u64,
+    hover: (i64, Option<usize>),
+    /// the wires lit for the hover, and lists to compare it with
     lit: Vec<usize>,
     next: Vec<usize>,
-    hot: Vec<usize>,
+    /// the lit wires the hover view drew
+    drawn: Vec<usize>,
+    /// the wires near the pointer
+    near: Vec<usize>,
+    /// a move of cards by their views: the cards (slots, ascending), the wires that end on them, the
+    /// offset the views show and the cards showing it
+    pub moving: Vec<usize>,
+    pub attached: Rc<Vec<usize>>,
+    shown_offset: Option<(f64, f64)>,
+    offset: Vec<UiBox>,
+    /// the drag's wires where it puts them: a run of `pts` per wire
+    route: Scratch,
+    runs: Vec<(usize, usize, usize)>,
+    pts: Vec<(f64, f64)>,
+    buf: Vec<(f64, f64)>,
 }
 
 impl Hovers {
-    /// A build declared every card idle again (a verifying run too, which keeps the lists).
-    pub fn declared(&mut self) {
-        self.fresh = true;
+    /// A content build starts: the cards it keeps come from the build before.
+    pub fn begin(&mut self, t: &Pane) {
+        self.builds += 1;
+        std::mem::swap(&mut self.cards, &mut self.spare);
+        self.cards.clear();
+        self.keys.clear();
+        self.reach.clear();
+        self.zones.clear();
+        self.geo = geo_key(t);
+        self.sel = u64::MAX;
+        self.hover = (0, None);
     }
 
-    /// A build starts over (the lists keep their room).
-    pub fn clear(&mut self, t: &Pane) {
-        self.cards.clear();
-        self.ports.clear();
-        self.wires.clear();
-        self.reach.clear();
-        self.geo = (Rc::as_ptr(&t.geo.items) as *const u8 as usize, Rc::as_ptr(&t.geo.wires) as *const u8 as usize);
-        self.fresh = true;
+    /// A card built again: it shows no hover, selection or recession until `show` patches it.
+    pub fn card(&mut self, slot: usize, path: Path, view: UiBox, tile: UiBox, ground: Option<Ground>, brackets: [UiBox; 4], recede: Option<UiBox>, ports: Vec<Port>) {
+        self.cards.push(Card { slot, path, view, tile, ground, brackets, recede, ports, shown: Shown::default() });
+    }
+
+    /// A card whose view was kept: as the build before left it.
+    pub fn keep(&mut self, view: UiBox) {
+        if let Some(k) = self.spare.iter().position(|c| c.view.box_key == view.box_key) {
+            let c = self.spare.swap_remove(k);
+            self.cards.push(c);
+        }
+    }
+
+    /// A verifying run built a kept card again: it shows no hover or selection until `show` patches it
+    /// again (as when it was built).
+    pub fn redeclared(&mut self, view: UiBox) {
+        if let Some(c) = self.cards.iter_mut().find(|c| c.view.box_key == view.box_key) {
+            c.shown = Shown::default();
+            (self.sel, self.hover) = (u64::MAX, (0, None));
+        }
+    }
+
+    /// The build is over: the cards it left are what presses and the hover find.
+    pub fn end(&mut self, t: &Pane, ui: &mut Ui) {
+        // room for every wire near the pointer, so the hover never grows the list
+        self.near.reserve(t.geo.wires.len());
+        // a card no longer built shows its place again
+        for c in self.spare.drain(..) {
+            ui.view_offset(&c.view, 0.0, 0.0);
+        }
+        self.offset.retain(|v| self.cards.iter().any(|c| c.view.box_key == v.box_key));
+        for c in &self.cards {
+            self.keys.push(c.tile.box_key);
+            self.keys.extend(c.ports.iter().map(|q| q.b.box_key));
+        }
     }
 }
 
-/// The ground of a card painted as its tile's look: its fill and a one-point edge inside it
-/// (`paint_card`'s two instances); hovered, the hover fill unless selected. A refused node's edge is
-/// the invalid colour.
-pub fn ground(t: &Pane, selected: bool, failed: bool) -> (Look, Look) {
+fn geo_key(t: &Pane) -> (usize, usize) {
+    (Rc::as_ptr(&t.geo.items) as *const u8 as usize, Rc::as_ptr(&t.geo.wires) as *const u8 as usize)
+}
+
+/// The ground of a card painted as its node's look: its fill and a one-point edge inside it
+/// (`paint_card`'s two instances), dashed for an expression card; hovered, the hover fill unless
+/// selected (a graph input and the return card do not show the hover). A refused node's edge is the
+/// invalid colour.
+pub fn ground(t: &Pane, failed: bool, dashed: bool, hovers: bool) -> [Look; 4] {
     let theme = t.theme;
-    let look = |fill| Look { fill, border: if failed { theme::invalid() } else { sp::card_edge(t, fill, selected) }, border_w: 1.0, ..Look::NONE };
-    (look(theme.input), look(if selected { theme.input } else { theme::hover_fill(&theme) }))
+    let look = |hovered: bool, selected: bool| {
+        let fill = if hovered && hovers && !selected { theme::hover_fill(&theme) } else { theme.input };
+        Look { fill, border: if failed { theme::invalid() } else { sp::card_edge(t, fill, selected) }, border_w: 1.0, dashed, ..Look::NONE }
+    };
+    [look(false, false), look(true, false), look(false, true), look(true, true)]
 }
 
 /// What the pointer is over: the card shown hovered and its row's line, an expression row whose full
@@ -85,29 +191,158 @@ pub fn ground(t: &Pane, selected: bool, failed: bool) -> (Look, Look) {
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct Now {
     pub card: i64,
-    /// the card painted whole that is hovered (its tile's key; the content's revision reads it)
-    pub whole: i64,
     pub line: Option<usize>,
     pub tip: Option<(usize, usize)>,
     pub live: Option<usize>,
     pub flag: bool,
 }
 
+/// What a press is on: a card (its slot), an out-port (its card's slot, what it carries, its type and
+/// centre), an in-port (its card's slot, what a click takes off, its rectangle), a wire, the ground.
+#[derive(Clone, Debug, PartialEq)]
+pub enum On {
+    Card(usize),
+    Out(usize, String, Option<Ty>, (f64, f64)),
+    In(usize, Option<Del>, (f64, f64, f64, f64)),
+    Wire(usize),
+    Ground,
+}
+
+/// Whether the move in progress is of cards by their views.
+pub fn moving_fast(t: &Pane) -> bool {
+    matches!(t.drag, Some(Drag::Moving { moved: true, slow: false, .. }))
+}
+
+/// The box of wire `i` the pointer is in, as the content's hit boxes were: its segments cut to `clip`
+/// (window points, grown by 4) in 16-point steps, each a rectangle grown by 4. A wire drawn as a tag
+/// has none.
+fn wire_hit(t: &Pane, chain: &Option<Rc<Chains>>, i: usize, pt: (f64, f64), clip: (f64, f64, f64, f64)) -> bool {
+    let wi = &t.geo.wires[i];
+    if wi.target.is_none() || tagged_in(t.tags, chain, wi) {
+        return false;
+    }
+    let (cx, cy, cw, ch) = clip;
+    for seg in wi.pts.windows(2) {
+        let a = (sx(t, seg[0].0), sy(t, seg[0].1));
+        let b = (sx(t, seg[1].0), sy(t, seg[1].1));
+        if let Some(((ax, ay), (bx, by))) = clip_segment(a, b, (cx - 4.0, cy - 4.0, cw + 8.0, ch + 8.0)) {
+            let steps = if ax == bx || ay == by { 1 } else { 1.max(((bx - ax).hypot(by - ay) / 16.0) as i64) };
+            for st in 0..steps {
+                let u0 = st as f64 / steps as f64;
+                let u1 = (st + 1) as f64 / steps as f64;
+                let (x0, y0) = (ax + ((bx - ax) * u0), ay + ((by - ay) * u0));
+                let (x1, y1) = (ax + ((bx - ax) * u1), ay + ((by - ay) * u1));
+                let r = Rect::new((x0.min(x1) - 4.0) as f32, (y0.min(y1) - 4.0) as f32, ((x1 - x0).abs() + 8.0) as f32, ((y1 - y0).abs() + 8.0) as f32);
+                if contains(r, p32(pt)) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// The topmost wire at `pt`: the last of `order` hit (the one built last).
+fn wire_at(t: &Pane, chain: &Option<Rc<Chains>>, order: &[usize], pt: (f64, f64), clip: (f64, f64, f64, f64)) -> Option<usize> {
+    order.iter().rev().copied().find(|&i| wire_hit(t, chain, i, pt, clip))
+}
+
+/// The topmost wire at `pt` among the wires in view (`reach`, ascending): the last hit, of the wires
+/// whose bounds meet the point (`near`, a kept list).
+fn wire_on_canvas(t: &Pane, chain: &Option<Rc<Chains>>, reach: &[usize], near: &mut Vec<usize>, pt: (f64, f64), clip: (f64, f64, f64, f64)) -> Option<usize> {
+    let z = t.zoom;
+    let (gx, gy) = ((pt.0 - sx(t, 0.0)) / z, (pt.1 - sy(t, 0.0)) / z);
+    let m = 8.0 / z;
+    index_query_into(&t.geo.reach, (gx - m, gy - m, gx + m, gy + m), near);
+    near.iter().rev().copied().find(|&i| reach.binary_search(&i).is_ok() && wire_hit(t, chain, i, pt, clip))
+}
+
+/// What the content shows past each side of the pane, in window points.
+fn viewport(t: &Pane) -> (f64, f64, f64, f64) {
+    let (ox, oy) = overscan(t);
+    (t.x as f64 - ox, t.y as f64 - oy, t.width as f64 + 2.0 * ox, t.height as f64 + 2.0 * oy)
+}
+
+/// An open zone's body as a wire's hit boxes inside it are cut to: its card's rectangle in view.
+fn zone_clip(t: &Pane, slot: usize) -> Option<(f64, f64, f64, f64)> {
+    let (pl, ax, ay) = &t.geo.items[slot];
+    match &pl.item {
+        Item::Item(n) if n.zone.is_some() && !pl.collapsed => {
+            let (vx, vy, vw, vh) = viewport(t);
+            let (x, y) = (sx(t, *ax), sy(t, *ay));
+            let (x0, y0) = (x.max(vx), y.max(vy));
+            Some((x0, y0, (vx + vw).min(x + pl.w * t.zoom) - x0, (vy + vh).min(y + pl.h * t.zoom) - y0))
+        }
+        _ => None,
+    }
+}
+
+/// The slot of a card the last build left, in the geometry now.
+fn slot_now(t: &Pane, hv: &Hovers, c: &Card) -> Option<usize> {
+    if hv.geo == geo_key(t) { Some(c.slot) } else { t.geo.slot.get(&c.path).copied() }
+}
+
+/// What a press at `pt` is on: the innermost port or card under it in the last frame's hit list, a
+/// wire (over the bare canvas, or inside an open zone's body over its card), else the ground.
+pub fn classify(t: &Pane, ui: &mut Ui, pt: (f64, f64)) -> On {
+    let hovers = t.hovers.clone();
+    let hv = hovers.borrow();
+    let chain = chains_of(t);
+    let fresh = hv.geo == geo_key(t);
+    match ui.root_at(p32(pt), &hv.keys) {
+        Some(k) => {
+            if let Some((c, port)) = hv.cards.iter().find_map(|c| c.ports.iter().find(|q| q.b.box_key == k).map(|q| (c, q))) {
+                let Some(slot) = slot_now(t, &hv, c) else { return On::Ground };
+                if !fresh {
+                    return On::Card(slot);
+                }
+                let r = ui.rect(&port.b);
+                let (x, y, w, h) = (f64::from(r.x), f64::from(r.y), f64::from(r.w), f64::from(r.h));
+                return match &port.kind {
+                    PortKind::Out(src, ty) => On::Out(slot, src.clone(), ty.clone(), (x + w / 2.0, y + h / 2.0)),
+                    PortKind::In(del) => On::In(slot, del.clone(), (x, y, w, h)),
+                };
+            }
+            let Some(c) = hv.cards.iter().find(|c| c.tile.box_key == k) else { return On::Ground };
+            let Some(slot) = slot_now(t, &hv, c) else { return On::Ground };
+            if let Some(clip) = zone_clip(t, slot) {
+                // the wires that end inside a zone's body lie over its card
+                let empty = Vec::new();
+                let inside = t.geo.inside.get(&t.geo.items[slot].0.path).unwrap_or(&empty);
+                if let Some(i) = wire_at(t, &chain, inside, pt, clip) {
+                    return On::Wire(i);
+                }
+            }
+            On::Card(slot)
+        }
+        None => {
+            let mut near = Vec::new();
+            match wire_on_canvas(t, &chain, &hv.reach, &mut near, pt, viewport(t)) {
+                Some(i) if fresh => On::Wire(i),
+                _ => On::Ground,
+            }
+        }
+    }
+}
+
 /// Before the build: what the pointer is over, from the boxes the last build left; the pane's
 /// hovered row and lit wires follow it (rebuilt only when they change).
-pub fn find(t: &mut Pane, ui: &mut Ui, mouse: (f64, f64)) -> Now {
+pub fn find(t: &mut Pane, ui: &mut Ui, canvas: &UiBox, mouse: (f64, f64)) -> Now {
     let hovers = t.hovers.clone();
     let mut hv = hovers.borrow_mut();
     let mut now = Now::default();
     let z = t.zoom;
-    let same_geo = hv.geo == (Rc::as_ptr(&t.geo.items) as *const u8 as usize, Rc::as_ptr(&t.geo.wires) as *const u8 as usize);
-    if !same_geo {
-        // the geometry moved since the build (it builds this frame): nothing is hovered until then
+    if hv.geo != geo_key(t) || moving_fast(t) || t.dropped.is_some() {
+        // the geometry moved since the build (it builds this frame), or cards are carried: nothing
+        // is hovered until it settles
         t.hovered_at = None;
+        t.highlighted.clear();
+        hv.lit.clear();
         return now;
     }
     let free = t.drag.is_none() && t.carry_hot.is_none();
     let mut row: Option<(usize, usize)> = None;
+    let mut zone: Option<usize> = None;
     for c in &hv.cards {
         if !ui.hovered_within(&c.tile) {
             continue;
@@ -119,10 +354,9 @@ pub fn find(t: &mut Pane, ui: &mut Ui, mouse: (f64, f64)) -> Now {
                 if let Some(i) = row_at(14.0, pl, n, pl.shown, at.0, at.1).filter(|i| *i < n.rows.len()) {
                     row = Some((c.slot, i));
                 }
+            } else if ui.hovered_exactly(&c.tile) {
+                zone = Some(c.slot);
             }
-        }
-        if free && c.whole {
-            now.whole = c.tile.box_key;
         }
         if free && c.ground.is_some() {
             now.card = c.tile.box_key;
@@ -141,36 +375,39 @@ pub fn find(t: &mut Pane, ui: &mut Ui, mouse: (f64, f64)) -> Now {
             }
         }
     }
-    // the wires under the pointer, and those at the port under it
-    let port = hv.ports.iter().find(|b| ui.hovered_within(b)).map(|b| {
-        let r = ui.rect(b);
+    // the wire under the pointer (over the bare canvas, or in an open zone's body), and those at the
+    // port under it
+    let port = hv.cards.iter().flat_map(|c| c.ports.iter()).find(|q| ui.hovered_within(&q.b)).map(|q| {
+        let r = ui.rect(&q.b);
         (f64::from(r.x + r.w / 2.0), f64::from(r.y + r.h / 2.0))
     });
-    let mut hot = std::mem::take(&mut hv.hot);
-    hot.clear();
-    for (b, i) in &hv.wires {
-        if !hot.contains(i) && ui.hovered_within(b) {
-            hot.push(*i);
-        }
-    }
+    let chain = chains_of(t);
+    let hot = if ui.hovered_exactly(canvas) {
+        let hv = &mut *hv;
+        wire_on_canvas(t, &chain, &hv.reach, &mut hv.near, mouse, viewport(t))
+    } else {
+        zone.and_then(|slot| {
+            let clip = zone_clip(t, slot)?;
+            wire_at(t, &chain, t.geo.inside.get(&t.geo.items[slot].0.path)?, mouse, clip)
+        })
+    };
     let same_port = |pt: (f64, f64)| port.is_some_and(|(x, y)| (sx(t, pt.0) - x).abs() <= (1.5 * z) + 0.5 && (sy(t, pt.1) - y).abs() <= (1.5 * z) + 0.5);
     let mut next = std::mem::take(&mut hv.next);
     next.clear();
     if t.context.is_none() {
         for &i in &hv.reach {
             let wi = &t.geo.wires[i];
-            if hot.contains(&i) || same_port(wi.a) || same_port(wi.b) {
+            if hot == Some(i) || same_port(wi.a) || same_port(wi.b) {
                 next.push(i);
             }
         }
     }
-    // (against the pane's own list: clones of a pane share these records)
-    let same = t.highlighted.len() == next.len() && next.iter().rev().zip(&t.highlighted).all(|(&i, wi)| t.geo.wires[i] == *wi);
-    if !same {
-        t.highlighted = next.iter().rev().map(|&i| t.geo.wires[i].clone()).collect();
+    if !t.highlighted.iter().eq(next.iter().rev()) {
+        t.highlighted.clear();
+        t.highlighted.extend(next.iter().rev());
     }
     std::mem::swap(&mut next, &mut hv.lit);
-    (hv.hot, hv.next) = (hot, next);
+    hv.next = next;
     // the red `t` of a live card's header: a tip after the pointer rests on it, saying what it is
     for c in &hv.cards {
         let (pl, ax, ay) = &t.geo.items[c.slot];
@@ -200,16 +437,26 @@ pub fn find(t: &mut Pane, ui: &mut Ui, mouse: (f64, f64)) -> Now {
     now
 }
 
-/// After the build: the hovered card's ground and row highlight, through the patch path (a card the
-/// build declared again starts idle).
+/// The selection as the cards show it: what it holds, over which geometry.
+fn selection_key(t: &Pane) -> u64 {
+    let mut h = std::hash::DefaultHasher::new();
+    (geo_key(t), &t.selected).hash(&mut h);
+    h.finish()
+}
+
+/// After the build: the hovered card's ground and row highlight, and every card's selection
+/// brackets and recession behind the selected chain, through the patch path (a card the build
+/// declared again shows none of them until patched).
 pub fn show(t: &Pane, ui: &mut Ui, now: &Now) {
     let hovers = t.hovers.clone();
     let mut hv = hovers.borrow_mut();
-    let want = (now.card, now.line);
-    if hv.shown == want && !hv.fresh {
+    let hover = (now.card, now.line);
+    let sel = selection_key(t);
+    if hv.hover == hover && hv.sel == sel {
         return;
     }
-    let was = hv.shown.0;
+    let sel_changed = hv.sel != sel;
+    let chain = if sel_changed { chains_of(t) } else { None };
     let curve = ui.tokens().transition(State::default(), State { hovered: true, ..State::default() });
     let set = |ui: &mut Ui, b: &UiBox, look: Look| {
         if curve.instant() {
@@ -218,37 +465,146 @@ pub fn show(t: &Pane, ui: &mut Ui, now: &Now) {
             ui.animate(b, pxui::ui::Target::Look(look), curve);
         }
     };
-    for c in &hv.cards {
-        let key = c.tile.box_key;
-        let Some(g) = &c.ground else { continue };
-        if key != was && key != want.0 {
+    let accent = t.theme.accent;
+    for c in hv.cards.iter_mut() {
+        let hovered = c.ground.is_some() && c.tile.box_key == hover.0;
+        let (selected, recede) = if sel_changed {
+            let (pl, _, _) = &t.geo.items[c.slot];
+            let recede = match &chain {
+                Some(ch) => c.recede.is_some() && !node_lit(ch, &pl.path),
+                None => false,
+            };
+            (t.selected.contains(&pl.path), recede)
+        } else {
+            (c.shown.selected, c.shown.recede)
+        };
+        let next = Shown { selected, hovered, line: if hovered { hover.1 } else { None }, recede };
+        let was = c.shown;
+        if next == was {
             continue;
         }
-        let on = key == want.0;
-        set(ui, &c.tile, if on { g.hover } else { g.idle });
-        if let Some((hl, k0, rh)) = g.row {
-            let line = if on { want.1 } else { None };
-            let fill = if line.is_some() { theme::faint_border(&t.theme) } else if on { g.hover.fill } else { g.idle.fill };
-            set(ui, &hl, Look { fill, ..Look::NONE });
-            ui.animate(&hl, pxui::ui::Target::Offset(0.0, line.map_or(0.0, |k| (k as f32 - k0 as f32) * rh)), curve);
+        if let Some(g) = &c.ground {
+            let look = g.looks[2 * selected as usize + hovered as usize];
+            if (was.selected, was.hovered) != (selected, hovered) {
+                set(ui, &g.node, look);
+            }
+            if let Some((hl, k0, rh)) = g.row {
+                if (was.selected, was.hovered, was.line) != (selected, hovered, next.line) {
+                    let fill = if next.line.is_some() { theme::faint_border(&t.theme) } else { look.fill };
+                    set(ui, &hl, Look { fill, ..Look::NONE });
+                    ui.animate(&hl, pxui::ui::Target::Offset(0.0, next.line.map_or(0.0, |k| (k as f32 - k0 as f32) * rh)), curve);
+                }
+            }
+        }
+        if was.selected != selected {
+            for (b, sides) in c.brackets.iter().zip(CORNERS) {
+                ui.patch_look(b, &corner(sides, 2.0, if selected { accent } else { Look::NONE.fill }));
+            }
+            ui.set_role(&c.tile, pxui::a11y::Role::Group, if selected { pxui::a11y::state::SELECTED } else { 0 });
+        }
+        if was.recede != recede {
+            if let Some(b) = &c.recede {
+                ui.patch_look(b, &recede_look(t, recede));
+            }
+        }
+        c.shown = next;
+    }
+    (hv.hover, hv.sel) = (hover, sel);
+}
+
+/// The cards a move carries show where it puts them: their views offset by the move (at the zoom the
+/// content was built at), the others where they were.
+pub fn place_cards(t: &Pane, ui: &mut Ui, built_zoom: f64) {
+    let hovers = t.hovers.clone();
+    let mut hv = hovers.borrow_mut();
+    let want = match (&t.drag, &t.dropped) {
+        (Some(Drag::Moving { dx, dy, moved: true, slow: false, .. }), _) => Some((*dx, *dy)),
+        (_, Some((_, dx, dy, _))) => Some((*dx, *dy)),
+        _ => None,
+    };
+    if want == hv.shown_offset {
+        return;
+    }
+    let hv = &mut *hv;
+    for v in &hv.offset {
+        ui.view_offset(v, 0.0, 0.0);
+    }
+    hv.offset.clear();
+    if let Some((dx, dy)) = want {
+        for c in &hv.cards {
+            if hv.moving.binary_search(&c.slot).is_ok() {
+                ui.view_offset(&c.view, (dx * built_zoom) as f32, (dy * built_zoom) as f32);
+                hv.offset.push(c.view);
+            }
         }
     }
-    (hv.shown, hv.fresh) = (want, false);
+    hv.shown_offset = want;
+}
+
+/// A move of cards by their views begins: the cards it carries (none holds another) and the wires
+/// that end on them, which the wires view leaves to the drag's own.
+pub fn begin_move(t: &Pane, paths: &[Path]) {
+    let hovers = t.hovers.clone();
+    let mut hv = hovers.borrow_mut();
+    hv.moving.clear();
+    hv.moving.extend(paths.iter().filter_map(|q| t.geo.slot.get(q).copied()));
+    hv.moving.sort_unstable();
+    let on = |q: &Option<Path>| q.as_ref().is_some_and(|q| paths.contains(q));
+    hv.attached = Rc::new(t.geo.wires.iter().enumerate().filter(|(_, wi)| on(&wi.from) || on(&wi.into)).map(|(i, _)| i).collect());
+}
+
+/// The move is over and the geometry has the cards where it put them.
+pub fn end_move(t: &Pane) {
+    let mut hv = t.hovers.borrow_mut();
+    hv.moving.clear();
+    if !hv.attached.is_empty() {
+        hv.attached = Rc::new(Vec::new());
+    }
+}
+
+/// The wires a move of cards draws itself (and the wires view leaves out), by identity.
+pub fn attached(t: &Pane) -> Rc<Vec<usize>> {
+    t.hovers.borrow().attached.clone()
 }
 
 /// Drawn over the cards for the hover, in the pane's points at the pan and zoom now: each lit wire
 /// widened and ringed at its ends, the full text of a hovered expression row, a live card's tip and
 /// the displayed node's. Its key changes only with what it shows.
-pub fn overlay_key(t: &Pane, now: &Now) -> u64 {
-    use std::hash::{Hash, Hasher};
+pub fn overlay_key(t: &Pane, now: &Now, under: u64) -> u64 {
     let hv = t.hovers.borrow();
     let mut h = std::hash::DefaultHasher::new();
     let shown = !hv.lit.is_empty() || now.tip.is_some() || now.live.is_some() || now.flag;
     (&hv.lit, now.tip, now.live, now.flag).hash(&mut h);
     if shown {
-        (t.pan_x.to_bits(), t.pan_y.to_bits(), t.zoom.to_bits(), revision(t), t.x, t.y, t.width, t.height).hash(&mut h);
+        let chain = chains_of(t).map(|c| Rc::as_ptr(&c) as usize);
+        (t.pan_x.to_bits(), t.pan_y.to_bits(), t.zoom.to_bits(), under, t.x, t.y, t.width, t.height, chain, selected_wire_index(t)).hash(&mut h);
     }
     h.finish()
+}
+
+/// The pane's place now, for the views painted at the pan and zoom now from a kept pane.
+#[derive(Clone, Copy)]
+struct Place {
+    x: f64,
+    y: f64,
+    pan_x: f64,
+    pan_y: f64,
+    zoom: f64,
+}
+
+impl Place {
+    fn of(t: &Pane) -> Place {
+        Place { x: t.x as f64, y: t.y as f64, pan_x: t.pan_x, pan_y: t.pan_y, zoom: t.zoom }
+    }
+    fn at(&self, q: (f64, f64)) -> (f64, f64) {
+        (self.x + self.pan_x + q.0 * self.zoom, self.y + self.pan_y + q.1 * self.zoom)
+    }
+}
+
+/// The selected wire, by its index in the geometry.
+pub fn selected_wire_index(t: &Pane) -> Option<usize> {
+    let (sp_, sk, _) = t.selected_wire.as_ref()?;
+    t.geo.wires.iter().position(|wi| matches!(&wi.target, Some((tp, tk, _)) if tp == sp_ && tk == sk))
 }
 
 pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
@@ -256,29 +612,42 @@ pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
     if t.highlighted.is_empty() && now.tip.is_none() && now.live.is_none() && !now.flag {
         return;
     }
-    let snap = Rc::new(t.clone());
-    let now = *now;
-    let z = t.zoom;
-    let fs = font_of(z);
+    let Some(kept) = kept(t) else { return };
+    {
+        let mut hv = t.hovers.borrow_mut();
+        let hv = &mut *hv;
+        hv.drawn.clear();
+        hv.drawn.extend_from_slice(&t.highlighted);
+    }
+    let hovers = t.hovers.clone();
+    let (place, now, chain, selected) = (Place::of(t), *now, chains_of(t), selected_wire_index(t));
     ui.draw(&b, move |paint, _| {
-        let t = &*snap;
+        let t = &*kept;
+        let hv = hovers.borrow();
         let theme = t.theme;
-        let pane = (t.x as f64, t.y as f64, t.width as f64, t.height as f64);
-        let chain = chains_of(t);
+        let z = place.zoom;
+        let at = |q: (f64, f64)| place.at(q);
+        let pane = (place.x, place.y, t.width as f64, t.height as f64);
+        let fs = font_of(z);
         let tag_size = 5.max((11.0 * z).round() as i64);
-        for wi in &t.highlighted {
-            sp::paint_wire(paint, t, &chain, pane, tag_size, wi, true);
+        for &i in &hv.drawn {
+            let wi = &t.geo.wires[i];
+            sp::paint_wire(paint, t, z, &at, &chain, pane, tag_size, wi, &wi.pts, true, selected == Some(i));
         }
-        for wi in &t.highlighted {
-            let pts: Vec<(f64, f64)> = wi.pts.iter().map(|(x, y)| (sx(t, *x), sy(t, *y))).collect();
-            sp::paint_polyline(pane, paint, 2.0, theme.foreground, &pts);
-            for (x, y) in [wi.a, wi.b] {
-                paint.circle(((sx(t, x)) as f32, (sy(t, y)) as f32), 6.0, None, Some(theme.foreground));
+        for &i in &hv.drawn {
+            let wi = &t.geo.wires[i];
+            for pair in wi.pts.windows(2) {
+                if let Some((a, b)) = clip_segment(at(pair[0]), at(pair[1]), pane) {
+                    paint.line_w(p32(a), p32(b), 2.0, theme.foreground);
+                }
+            }
+            for q in [wi.a, wi.b] {
+                paint.circle(p32(at(q)), 6.0, None, Some(theme.foreground));
             }
         }
         if let Some(slot) = now.live {
             let (pl, ax, ay) = &t.geo.items[slot];
-            let (fx, fy) = (sx(t, *ax) + ((pl.w - sp::HEAD_PAD) * z) - 150.0, sy(t, *ay) + (p::HEAD_HEIGHT * z) + 2.0);
+            let (fx, fy) = (at((*ax, 0.0)).0 + ((pl.w - sp::HEAD_PAD) * z) - 150.0, at((0.0, *ay)).1 + (p::HEAD_HEIGHT * z) + 2.0);
             let size = 4.max(font_size - 2);
             let label = "t  live: reads time or input, re-cooked every frame";
             let tw = f64::from(paint.text_width(Some(size), label)) + 14.0;
@@ -288,7 +657,7 @@ pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
         }
         if now.flag {
             if let Some((_, ax, ay)) = t.display.as_ref().and_then(|path| t.item_at(path)) {
-                let (fx, fy) = (sx(t, *ax) + (116.0 * z), sy(t, *ay) + (32.0 * z));
+                let (fx, fy) = (at((*ax, 0.0)).0 + (116.0 * z), at((0.0, *ay)).1 + (32.0 * z));
                 let size = 4.max(font_size - 2);
                 let (label, key) = ("displayed", "V");
                 let lw = f64::from(paint.text_width(Some(size), label));
@@ -307,8 +676,7 @@ pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
                 if let p::Chip::Inline { glyph, text } = &n.rows[i].chip {
                     let full = format!("{} {}", sp::shown_glyph(glyph), text);
                     let k = pl.lines.iter().position(|l| matches!(l, p::Line::Row(j, _) if *j == i)).unwrap_or(0);
-                    let x = sx(t, ax + sp::value_x(p::NODE_WIDTH));
-                    let y = sy(t, rows_top(n, *ay) + (k as f64 * p::ROW_HEIGHT));
+                    let (x, y) = at((ax + sp::value_x(p::NODE_WIDTH), rows_top(n, *ay) + (k as f64 * p::ROW_HEIGHT)));
                     let size = 4.max(fs - 2);
                     let wd = f64::from(paint.text_width(Some(size), &full)) + (12.0 * z);
                     if wd > sp::FIELD_W * z {
@@ -320,4 +688,89 @@ pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
             }
         }
     });
+}
+
+/// The wires a move of cards carries, where it puts them (`reroute`), at the pan and zoom now: under
+/// the cards. Built every frame of the move; empty otherwise.
+pub fn drag_wires_key(t: &Pane) -> u64 {
+    let d = match (&t.drag, &t.dropped) {
+        (Some(Drag::Moving { dx, dy, moved: true, slow: false, .. }), _) => Some((*dx, *dy)),
+        (_, Some((_, dx, dy, _))) => Some((*dx, *dy)),
+        _ => None,
+    };
+    let Some((dx, dy)) = d else { return 0 };
+    let mut h = std::hash::DefaultHasher::new();
+    (dx.to_bits(), dy.to_bits(), t.pan_x.to_bits(), t.pan_y.to_bits(), t.zoom.to_bits(), revision(t), Rc::as_ptr(&attached(t)) as usize).hash(&mut h);
+    h.finish() | 1
+}
+
+pub fn drag_wires(t: &Pane, ui: &mut Ui) {
+    let b = ui.box_("pxui-scope-drag-wires", BoxOpts::default().w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at((0.0, 0.0)));
+    let d = match (&t.drag, &t.dropped) {
+        (Some(Drag::Moving { dx, dy, moved: true, slow: false, .. }), _) => (*dx, *dy),
+        (_, Some((_, dx, dy, _))) => (*dx, *dy),
+        _ => return,
+    };
+    let Some(kept) = kept(t) else { return };
+    {
+        let mut hv = t.hovers.borrow_mut();
+        let hv = &mut *hv;
+        hv.runs.clear();
+        hv.pts.clear();
+        for &i in hv.attached.iter() {
+            reroute(&t.geo, i, &hv.moving, d, &mut hv.route, &mut hv.buf);
+            let start = hv.pts.len();
+            hv.pts.extend_from_slice(&hv.buf);
+            hv.runs.push((i, start, hv.pts.len()));
+        }
+    }
+    let hovers = t.hovers.clone();
+    let (place, chain, selected) = (Place::of(t), chains_of(t), selected_wire_index(t));
+    ui.draw(&b, move |paint, _| {
+        let t = &*kept;
+        let hv = hovers.borrow();
+        let z = place.zoom;
+        let at = |q: (f64, f64)| place.at(q);
+        let pane = (place.x, place.y, t.width as f64, t.height as f64);
+        let tag_size = 5.max((11.0 * z).round() as i64);
+        for &(i, a, b) in &hv.runs {
+            sp::paint_wire(paint, t, z, &at, &chain, pane, tag_size, &t.geo.wires[i], &hv.pts[a..b], false, selected == Some(i));
+        }
+    });
+}
+
+/// Over the cards while dragging: the wire pulled from a port to the pointer and the rubber band.
+pub fn drag_marks_key(t: &Pane, mouse: (f64, f64), press: (f64, f64)) -> u64 {
+    let mut h = std::hash::DefaultHasher::new();
+    match &t.drag {
+        Some(Drag::Wiring(wg)) => (1u8, wg.from.0.to_bits(), wg.from.1.to_bits(), mouse.0.to_bits(), mouse.1.to_bits()).hash(&mut h),
+        Some(Drag::Marquee { .. }) => (2u8, press.0.to_bits(), press.1.to_bits(), mouse.0.to_bits(), mouse.1.to_bits()).hash(&mut h),
+        _ => return 0,
+    }
+    (t.x, t.y, t.width, t.height, revision(t)).hash(&mut h);
+    h.finish() | 1
+}
+
+pub fn drag_marks(t: &Pane, ui: &mut Ui, mouse: (f64, f64), press: (f64, f64)) {
+    let b = ui.box_("pxui-scope-drag-marks", BoxOpts::default().w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at((0.0, 0.0)));
+    let pane = (t.x as f64, t.y as f64, t.width as f64, t.height as f64);
+    let theme = t.theme;
+    match &t.drag {
+        Some(Drag::Wiring(wg)) => {
+            let (from, color) = (wg.from, sp::ty_color(t, wg.ty.as_ref()));
+            ui.draw(&b, move |paint, _| {
+                if let Some((a, b)) = clip_segment(from, mouse, pane) {
+                    paint.line_w(p32(a), p32(b), 1.5, color);
+                }
+            });
+        }
+        Some(Drag::Marquee { .. }) => {
+            let (x0, y0) = press;
+            let (mx, my) = mouse;
+            ui.draw(&b, move |paint, _| {
+                sp::frame_in(paint, x0.min(mx), y0.min(my), (mx - x0).abs(), (my - y0).abs(), Some(theme::tint(&theme)), theme.accent);
+            });
+        }
+        _ => {}
+    }
 }

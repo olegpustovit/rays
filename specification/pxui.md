@@ -347,20 +347,32 @@ the title bar of a PXUI host is the ground its chrome is painted on.
   and frame-title fields, all built from `Ui.box` and `Ui.value_field`
   (`specification/flow.md` §6 and §7).
   Views (`update_cached`, the editor's): the canvas box (the bare ground's hit box, clip and wheel)
-  is built in the pane root every frame; everything on it is one cached content view holding the
-  pane and an overscan of half the pane past each side (at most 400 points), built at a pan and
-  zoom. A right drag on the canvas pans and the wheel or a pinch zooms before anything is built;
-  the view's entry shows the content where they put it (`view_offset`, `view_transform_about` the
-  window's corner, exact at scale 1; hit testing through it), so neither builds. The content builds
-  again at the pan and zoom when the pane would show past the overscan, once the zoom has rested
-  0.1 s (text shaped and strokes snapped at the zoom's size), when the pane's state differs
-  (`scope_state::revision`: graph, selection, drag, edit, marks; not pan, zoom or hover), when
-  input reaches its boxes, the canvas is pressed or released, keys are down or a payload is
-  carried. Its boxes are `HOVER_FREE`; the hover is `scope_hover`'s: a card or full card's ground
-  is its tile's look (fill and edge, idle and hovered; selected and refused variants) and its row
-  band a node behind its painting, both patched; the lit wires, an expression row's full text and
-  the tips are a view over the content keyed by what they show. A chip, a folded zone and an
-  expression card are painted whole on their canvas and rebuild the content when hovered. Cards are
+  is built in the pane root every frame and takes every press on the content: cards and ports are
+  `BLOCKING | HOVER_FREE` boxes (in the hit list for the hover, not clickable; the canvas has
+  `CAPTURE_UNCLAIMED`) and wires are geometry, so the pane's gestures run before anything builds
+  (`gestures`), on what a press is on (`scope_hover::classify`: the innermost port or card under it in
+  the last frame's hit list, `Ui::root_at`, else a wire by its 16-point hit rectangles, else the
+  ground). On the canvas, in paint order: the wires view (grid, zones, frames, wires), a move's wires,
+  the content (the cards, each a view of its own), a pulled wire or rubber band, and the hover's view.
+  The wires view and the content hold the pane and an overscan of half the pane past each side (at
+  most 400 points), built at a pan and zoom; a right drag on the canvas pans and the wheel or a pinch
+  zooms before anything is built; their entries show them where they put it (`view_offset`,
+  `view_transform_about` the window's corner, exact at scale 1; hit testing through it), so neither
+  builds. The content builds again at the pan and zoom when the pane would show past the overscan,
+  once the zoom has rested 0.1 s (text shaped and strokes snapped at the zoom's size), when the
+  pane's content state differs (`scope_state::revision`: graph, edit, marks, a frame's drag and a move
+  of cards that hold others; not pan, zoom, hover, selection, the selected wire, a move of plain
+  cards, a pulled wire or band) or input reaches a widget on it (a field, a zone's control) or a
+  payload is carried; the wires view with it and when the selection's chains or the selected wire
+  change. Nothing on the content reads the selection or the hover: a card's ground (fill and edge,
+  idle, hovered, selected; a refused node's edge; an expression card's dashed, `Look::dashed`; a
+  folded zone's stack painted under it), its first row's band, its four selection bracket corners and
+  its recession behind the selected chain are nodes (`KEEP_ROOM`, so a patch never grows the layer),
+  patched by `scope_hover::show`. A move of plain cards offsets their views (`view_offset`) and
+  draws the wires that end on them where it puts them (`scope_wires::reroute`, the route `compute`
+  would give them, into kept lists: no allocation once warm) in a view under the cards, the wires
+  view leaving them out; the cards stay where they were let go until the geometry has them there
+  (the host's move, else the pane's own the frame after). Cards are
   accessible groups named by their titles, their ports named buttons. Goldens:
   `crates/rays_graph/fixtures/graph_*_{1,2}x.png` (`gpu_graph_pixels`).
 - `Ui.popup` uses the last laid-out rectangle for outside-press dismissal;
@@ -461,15 +473,17 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
    `rect` follow; past 255 views the offset is baked by a rebuild). `ui.list(label, count, row_h, f)`
    builds only visible rows plus 4 each side; `ui.verify_views(true)` re-runs clean views and panics
    naming one whose output changed (`ui.verifying()` tells a build it is such a run; a view patched
-   since its build is not checked). A node flagged `HOVER_FREE` dirties no view when the hover
-   enters or leaves it (the app reads `hovered_within` and patches); a patch made while building
+   since its build is not checked, nor a view holding one so patched). A node flagged `HOVER_FREE` dirties no view when the hover
+   enters or leaves it (the app reads `hovered_within`, or `hovered_exactly` for the topmost box
+itself, and patches); a node flagged `KEEP_ROOM` paints its square look's fill and border even
+clear, so a patch that shows them rewrites its range in place; a patch made while building
    reaches a kept view's node after the paint; `view_transform_about` scales about a fixed window
    point. `ui.built_nodes()` counts the last build's declared nodes, `ui.rebuilt_views()` the views it built rather than kept.
 
 **Styling (P5 commit 2, styling half, landed).** `pxui::theme`: `Tokens` (colour roles, `space`,
 `radius` small/medium/large, type sizes, `motion` fast/normal/slow + cubic-bezier `ease`,
 `reduced_motion`, `density`), `Look` (fill solid or a two-stop linear `gradient` at `angle`, `border`
-+ `border_w` on `sides`, per-corner `radius`, two `shadows` outer or inner, `text` + `Font` (family
++ `border_w` on `sides` (`dashed`: one point of 4-on, 3-off dashes), per-corner `radius`, two `shadows` outer or inner, `text` + `Font` (family
 index, size, weight, tracking in ems, caps), `opacity`, focus `ring`, `selection`, `caret`), `States`
 (idle, hover, pressed, focus, disabled, checked; `pick(State)`), and `Theme` (tokens, `row_h`,
 `control_h`, the default `ring`, scrollbar width and gap, one `States` per kit part). `Theme::default()`

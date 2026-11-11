@@ -188,7 +188,8 @@ impl Ring {
 /// inner shadows, a `border_w` border inside the box on `sides` (0: all four), `radius` per corner (top
 /// left, top right, bottom right, bottom left), the node's text in `text` and `font`, its mark, then
 /// `ring` while it holds the focus. `opacity` scales every alpha. `selection` and `caret` colour a text
-/// widget's editing marks. Transparent colours paint nothing.
+/// widget's editing marks. Transparent colours paint nothing. A `dashed` square border is one point
+/// of 4-on, 3-off dashes (a drop target, an expression card).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Look {
     pub fill: Color,
@@ -205,6 +206,7 @@ pub struct Look {
     pub ring: Ring,
     pub selection: Color,
     pub caret: Color,
+    pub dashed: bool,
 }
 
 impl Look {
@@ -223,6 +225,7 @@ impl Look {
         ring: Ring::NONE,
         selection: CLEAR,
         caret: CLEAR,
+        dashed: false,
     };
 
     /// The look `t` of the way from `self` to `to`: colours and sizes interpolate, the rest (font,
@@ -260,6 +263,7 @@ impl Look {
             ring: Ring { color: c(self.ring.color, to.ring.color), width: f(self.ring.width, to.ring.width), sides: to.ring.sides },
             selection: c(self.selection, to.selection),
             caret: c(self.caret, to.caret),
+            dashed: to.dashed,
         }
     }
 }

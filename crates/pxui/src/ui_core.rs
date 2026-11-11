@@ -208,6 +208,9 @@ pub const ROUND_CLIP: Flags = 131072;
 /// Nothing the node's view builds follows its hover: the pointer moving onto or off it dirties no
 /// view (the app reads `hovered_within` between frames and patches what shows it).
 pub const HOVER_FREE: Flags = 262144;
+/// The node's square look paints its fill and border instances even when they are clear, so a
+/// patch to a look that shows them rewrites its range in place (it never grows the layer).
+pub const KEEP_ROOM: Flags = 524288;
 const HIT_FLAGS: Flags = CLICKABLE | FOCUSABLE | SCROLL | SCROLL_X | BLOCKING | CAPTURE_UNCLAIMED;
 
 /// What a carry holds: a `kind` and a `value`, both strings.
@@ -3298,6 +3301,11 @@ impl Ui {
         self.focus = b.box_key;
     }
 
+    /// The box itself is the topmost under the pointer (none of its children are).
+    pub fn hovered_exactly(&self, b: &UiBox) -> bool {
+        b.box_key != 0 && self.hot == b.box_key
+    }
+
     /// The box or a hit descendant owns hover in the shared hit tree.
     pub fn hovered_within(&mut self, b: &UiBox) -> bool {
         let hot = self.hot;
@@ -4620,10 +4628,13 @@ impl Paint {
                     self.push(edge);
                 }
             } else {
-                if look.fill.a > 0 {
+                let room = node.flags & KEEP_ROOM != 0;
+                if look.fill.a > 0 || room {
                     self.fill(x, y, w, h, fade(look.fill));
                 }
-                if bordered {
+                if look.dashed && (bordered || room) {
+                    self.dashed_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, fade(look.border));
+                } else if bordered || (room && look.border_w > 0.0) {
                     self.bands(placed, look.border_w, look.sides, fade(look.border));
                 }
             }
@@ -6600,8 +6611,21 @@ impl Ui {
     /// Re-run each verified view's build check: its fresh instances (empty ones aside) equal the
     /// run it kept.
     fn verify_runs(&self, scratch: &[Layer]) {
-        for r in &self.views[1..] {
+        // a view's kept output holds the patches of the views inside it, which a fresh build does not
+        let within = |mut k: usize, v: usize| {
+            while k != 0 {
+                k = self.views[k].parent as usize;
+                if k == v {
+                    return true;
+                }
+            }
+            false
+        };
+        for (v, r) in self.views.iter().enumerate().skip(1) {
             if !(r.verify && r.valid && !r.patched && r.built == self.painted && r.visited == self.painted) {
+                continue;
+            }
+            if self.views.iter().enumerate().any(|(k, q)| q.patched && within(k, v)) {
                 continue;
             }
             let Some(old) = self.draw[..self.draw_len].iter().find(|l| l.key == r.layer) else { continue };

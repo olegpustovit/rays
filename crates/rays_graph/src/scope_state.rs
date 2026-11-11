@@ -132,7 +132,8 @@ pub struct Wiring {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Drag {
-    Moving { paths: Vec<Path>, dx: f64, dy: f64, moved: bool },
+    /// `slow`: a card holds others (a zone): the content builds the move; else the cards' views move
+    Moving { paths: Vec<Path>, dx: f64, dy: f64, moved: bool, slow: bool },
     Wiring(Wiring),
     /// from the canvas press point to the pointer, screen space
     Marquee { base: PathSet },
@@ -205,8 +206,25 @@ pub trait Saved {
 pub struct Nothing;
 impl Saved for Nothing {}
 
-pub type Chains = (PathSet, PathSet);
-pub type ChainCache = Option<(PathSet, Rc<Vec<Wire>>, Chains)>;
+/// The nodes upstream and downstream of the selection, by their slots in the geometry they were
+/// found in.
+pub struct Chains {
+    pub up: Vec<bool>,
+    pub down: Vec<bool>,
+    pub slot: Rc<HashMap<Path, usize>>,
+}
+
+impl Chains {
+    fn has(&self, side: &[bool], path: &Path) -> bool {
+        self.slot.get(path).is_some_and(|&k| side[k])
+    }
+    /// the paths of each side
+    pub fn paths(&self, items: &[w::Item3]) -> (Vec<Path>, Vec<Path>) {
+        let side = |s: &[bool]| items.iter().enumerate().filter(|(k, _)| s[*k]).map(|(_, (pl, _, _))| pl.path.clone()).collect();
+        (side(&self.up), side(&self.down))
+    }
+}
+pub type ChainCache = Option<(PathSet, Rc<Vec<Wire>>, Rc<Chains>)>;
 
 #[derive(Clone)]
 pub struct Pane {
@@ -250,8 +268,14 @@ pub struct Pane {
     pub panning_grab: bool,
     /// the row under the pointer: its item's slot in `geo.items` and its index (`hovered_row`)
     pub hovered_at: Option<(usize, usize)>,
-    pub highlighted: Vec<Wire>,
+    /// the wires lit for the pointer (indices into `geo.wires`)
+    pub highlighted: Vec<usize>,
     pub drag: Option<Drag>,
+    /// what the left press of the gesture in progress is on (`scope_hover::classify`)
+    pub press: Option<crate::scope_hover::On>,
+    /// a move of cards by their views' offsets let go, until the geometry has them where it put
+    /// them: the cards (slots), the move and the frame it ended
+    pub dropped: Option<(Vec<usize>, f64, f64, u64)>,
     pub editing: Option<Editing>,
     pub context: Option<((f64, f64), Path)>,
     pub stats: Stats,
@@ -274,18 +298,29 @@ pub struct Pane {
     pub tags: bool,
     /// one slot: the chains of the last selection over the last wires
     pub chain: Rc<RefCell<ChainCache>>,
-    /// the pane as its last build left it, and that build's revision: `revision` bumps it when the
-    /// pane differs from it in anything a build reads (shared by clones of the pane)
-    pub built: Rc<RefCell<Option<(Box<Pane>, u64)>>>,
+    /// the pane as its last content build left it (what the views over it paint from), and that
+    /// build's revision: `revision` bumps it when the pane differs from it in anything the content
+    /// reads (shared by clones of the pane)
+    pub built: Rc<RefCell<Option<(Rc<Pane>, u64)>>>,
     /// what the last content build left for the hover between builds (`scope_hover`)
     pub hovers: Rc<RefCell<crate::scope_hover::Hovers>>,
 }
 
-/// Whether two panes build the same frame but for the pan and zoom (a cached pane's view moves its
+/// A drag the content builds: a frame's (carried by its title or sized) and a move of cards that
+/// hold others (a zone); a move of plain cards is their views' offsets (`scope_frame`).
+pub fn content_drag(d: &Option<Drag>) -> Option<&Drag> {
+    match d {
+        Some(Drag::Moving { moved: true, slow: true, .. } | Drag::Carrying { .. } | Drag::Sizing { .. }) => d.as_ref(),
+        _ => None,
+    }
+}
+
+/// Whether two panes build the same content but for the pan and zoom (a cached pane's view moves its
 /// content for them): the same graph, layout, geometry, records and settings (shared parts by
 /// identity; the last build's copy keeps them alive, so an address is never reused under it), and the
-/// same selection, drag, edit and marks (the pan's pointer grab is no part of what it shows; the hover
-/// is `scope_hover`'s, between builds). Text measurements, the
+/// same edit, marks and content drag. The selection, the selected wire, a move of plain cards, a
+/// wire or rubber band being dragged, the context menu and the hover are drawn over the content
+/// (`scope_hover`); the pan's pointer grab is no part of what it shows. Text measurements, the
 /// chain memo and the stats are caches or outputs, not inputs.
 pub fn builds_same(a: &Pane, b: &Pane) -> bool {
     let (g, h) = (&a.geo, &b.geo);
@@ -294,12 +329,11 @@ pub fn builds_same(a: &Pane, b: &Pane) -> bool {
     geo && (a.x, a.y, a.width, a.height, a.guide, a.framed, a.geo_fs, a.geo_cold, a.tags) == (b.x, b.y, b.width, b.height, b.guide, b.framed, b.geo_fs, b.geo_cold, b.tags)
         && a.theme == b.theme && a.key == b.key && a.scope.as_ref().map(Rc::as_ptr) == b.scope.as_ref().map(Rc::as_ptr) && Rc::ptr_eq(&a.saved, &b.saved) && a.records.as_ref().map(Rc::as_ptr) == b.records.as_ref().map(Rc::as_ptr)
         && Rc::ptr_eq(&a.chains, &b.chains) && Rc::ptr_eq(&a.folds, &b.folds) && Rc::ptr_eq(&a.counts, &b.counts) && Rc::ptr_eq(&a.layout, &b.layout)
-        && a.lens == b.lens && a.display == b.display && a.selected == b.selected && a.selected_wire == b.selected_wire
-        && a.drag == b.drag && a.editing == b.editing && a.context == b.context && a.switches == b.switches
+        && a.lens == b.lens && a.display == b.display && content_drag(&a.drag) == content_drag(&b.drag) && a.editing == b.editing && a.switches == b.switches
         && a.carry_lit == b.carry_lit && a.carry_hot == b.carry_hot && a.failed == b.failed && a.hinting == b.hinting && a.back == b.back
 }
 
-/// The pane's revision for a cached view of it: the same number while it builds the same frame as
+/// The pane's revision for a cached view of it: the same number while it builds the same content as
 /// the last build (compared in place, copied only after a build, `keep_built`).
 pub fn revision(t: &Pane) -> u64 {
     match &*t.built.borrow() {
@@ -307,6 +341,11 @@ pub fn revision(t: &Pane) -> u64 {
         Some((_, rev)) => rev + 1,
         None => 0,
     }
+}
+
+/// The pane as the last content build left it: what the views over the content paint from.
+pub fn kept(t: &Pane) -> Option<Rc<Pane>> {
+    t.built.borrow().as_ref().map(|(p, _)| p.clone())
 }
 
 /// The row under the pointer: its node's path and the row's key.
@@ -320,7 +359,7 @@ pub fn hovered_row(t: &Pane) -> Option<(Path, ArgKey)> {
 /// After a build at `rev`: the pane as it left it.
 pub fn keep_built(t: &Pane, rev: u64) {
     let kept = Pane { built: Rc::new(RefCell::new(None)), ..t.clone() };
-    *t.built.borrow_mut() = Some((Box::new(kept), rev));
+    *t.built.borrow_mut() = Some((Rc::new(kept), rev));
 }
 
 
@@ -385,6 +424,8 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         hovered_at: None,
         highlighted: Vec::new(),
         drag: None,
+        press: None,
+        dropped: None,
         editing: None,
         context: None,
         stats: Stats::default(),
@@ -408,8 +449,9 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
 
 /// The nodes upstream and downstream of the selection (it included), along the wires; `None` with
 /// nothing selected. A wire is lit when both its ends are in the same side.
-/// ponytail: one pass over the wires per selection or geometry change; index them if a 10k-wire graph drags.
-pub fn chains_of(t: &Pane) -> Option<Chains> {
+/// ponytail: one pass over the wires per step of the walk, per selection or geometry change; index them
+/// by their ends if a 10k-wire graph drags.
+pub fn chains_of(t: &Pane) -> Option<Rc<Chains>> {
     if t.selected.is_empty() {
         return None;
     }
@@ -418,48 +460,52 @@ pub fn chains_of(t: &Pane) -> Option<Chains> {
             return Some(r.clone());
         }
     }
-    let reach = |upstream: bool| -> PathSet {
-        let mut seen = t.selected.clone();
-        let mut todo: Vec<Path> = t.selected.iter().cloned().collect();
-        while !todo.is_empty() {
-            let batch = std::mem::take(&mut todo);
-            for pth in batch {
-                for wi in t.geo.wires.iter() {
-                    if let (Some(into), Some(from)) = (&wi.into, &wi.from) {
-                        // `Some (from, into) when path_equal from p`: the first of the pair is matched
-                        // against the path, the second joins the set
-                        let (first, second) = if upstream { (into, from) } else { (from, into) };
-                        if *first == pth && !seen.contains(second) {
-                            seen.insert(second.clone());
-                            todo.push(second.clone());
-                        }
+    let n = t.geo.items.len();
+    let slot = |q: &Option<Path>| q.as_ref().and_then(|q| t.geo.slot.get(q).copied());
+    let reach = |upstream: bool| -> Vec<bool> {
+        let mut seen = vec![false; n];
+        let mut todo: Vec<usize> = t.selected.iter().filter_map(|q| t.geo.slot.get(q).copied()).collect();
+        for &k in &todo {
+            seen[k] = true;
+        }
+        while let Some(k) = todo.pop() {
+            for wi in t.geo.wires.iter() {
+                // the first of the pair is matched against the node, the second joins the side
+                let (first, second) = if upstream { (slot(&wi.into), slot(&wi.from)) } else { (slot(&wi.from), slot(&wi.into)) };
+                if let (Some(a), Some(b)) = (first, second) {
+                    if a == k && !seen[b] {
+                        seen[b] = true;
+                        todo.push(b);
                     }
                 }
             }
         }
         seen
     };
-    let up = reach(true);
-    let down = reach(false);
-    *t.chain.borrow_mut() = Some((t.selected.clone(), t.geo.wires.clone(), (up.clone(), down.clone())));
-    Some((up, down))
+    let r = Rc::new(Chains { up: reach(true), down: reach(false), slot: t.geo.slot.clone() });
+    *t.chain.borrow_mut() = Some((t.selected.clone(), t.geo.wires.clone(), r.clone()));
+    Some(r)
 }
 
 pub fn wire_lit(c: &Chains, wi: &Wire) -> bool {
-    let (up, down) = c;
     match (&wi.from, &wi.into) {
-        (Some(f), Some(i)) => (up.contains(f) && up.contains(i)) || (down.contains(f) && down.contains(i)),
+        (Some(f), Some(i)) => (c.has(&c.up, f) && c.has(&c.up, i)) || (c.has(&c.down, f) && c.has(&c.down, i)),
         _ => false,
     }
 }
 
 pub fn node_lit(c: &Chains, pth: &Path) -> bool {
-    c.0.contains(pth) || c.1.contains(pth)
+    c.has(&c.up, pth) || c.has(&c.down, pth)
 }
 
 /// A wire longer than three columns reads as a name tag at its use site unless its chain is lit (flow.md 6.4).
 pub fn tagged(t: &Pane, wi: &Wire) -> bool {
-    t.tags && wi.target.is_some() && (wi.b.0 - wi.a.0).abs() > w::TAG_SPAN && !matches!(chains_of(t), Some(c) if wire_lit(&c, wi))
+    tagged_in(t.tags, &chains_of(t), wi)
+}
+
+/// `tagged` with the chains in hand.
+pub fn tagged_in(tags: bool, chain: &Option<Rc<Chains>>, wi: &Wire) -> bool {
+    tags && wi.target.is_some() && (wi.b.0 - wi.a.0).abs() > w::TAG_SPAN && !matches!(chain, Some(c) if wire_lit(c, wi))
 }
 
 pub fn with_bounds(x: i64, y: i64, width: i64, height: i64, t: &mut Pane) {
@@ -474,8 +520,9 @@ pub fn suspend(t: &mut Pane) {
     t.editing = None;
     t.hinting = None;
     t.drag = None;
+    t.press = None;
     t.context = None;
-    t.highlighted = Vec::new();
+    t.highlighted.clear();
     t.panning_grab = false;
 }
 

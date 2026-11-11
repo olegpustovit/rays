@@ -957,8 +957,9 @@ pub fn paint_card(paint: &mut Paint, x: f64, y: f64, wd: f64, h: f64, fill: Colo
 }
 
 /// A point: the 14-point disc in the node's colour with its name beside it (a compound is a ring with a
-/// dot), brackets when selected; the displayed one wears its flag below the disc.
-pub fn paint_point(paint: &mut Paint, t: &Pane, z: f64, fs: i64, pl: &Placed, failed: Option<&str>, selected: bool, rect: (f64, f64, f64, f64)) {
+/// dot); the displayed one wears its flag below the disc. Its brackets when selected are nodes
+/// (`brackets_of`).
+pub fn paint_point(paint: &mut Paint, t: &Pane, z: f64, fs: i64, pl: &Placed, failed: Option<&str>, rect: (f64, f64, f64, f64)) {
     let theme = t.theme;
     let (x, y, _, _) = rect;
     let c = (x + (7.0 * z), y + (7.0 * z));
@@ -987,8 +988,19 @@ pub fn paint_point(paint: &mut Paint, t: &Pane, z: f64, fs: i64, pl: &Placed, fa
         frame_in(paint, x, fy, 12.0 * z, 12.0 * z, Some(theme.input), theme::border(&theme));
         paint.fill((x + (3.0 * z)) as f32, (fy + (3.0 * z)) as f32, (6.0 * z) as f32, (6.0 * z) as f32, theme.accent);
     }
-    if selected {
-        paint.brackets(x as f32, y as f32, (14.0 * z) as f32, (14.0 * z) as f32, 5.0, 6.0, 2.0, theme.accent);
+}
+
+/// Where a card's selection brackets go, relative to its box: `Paint::brackets`'s rectangle, offset,
+/// arm length and width (a point's are around its disc).
+pub fn brackets_of(pl: &Placed, z: f64, w: f64, h: f64) -> (f64, f64, f64, f64, f64, f64, f64) {
+    if pl.shown == Level::Point { (0.0, 0.0, 14.0 * z, 14.0 * z, 5.0, 6.0, 2.0) } else { (0.0, 0.0, w, h, 3.0, 8.0, 2.0) }
+}
+
+/// A collapsed zone's two cards stacked under it.
+pub fn paint_stack(paint: &mut Paint, t: &Pane, z: f64, rect: (f64, f64, f64, f64)) {
+    let (x, y, wd, h) = rect;
+    for d in [6.0, 3.0] {
+        paint_card(paint, x + (d * z), y + (d * z), wd, h, t.theme.input, card_edge(t, t.theme.input, false));
     }
 }
 
@@ -1004,26 +1016,25 @@ fn execution_of(t: &Pane, n: &p::Node) -> Option<Execution> {
 pub struct NodeOpts {
     pub footer: Option<Footer>,
     pub lens_step: Option<i64>,
-    pub hovered: bool,
     pub carry: bool,
     pub out_wired: bool,
     pub shown: Level,
     pub failed: Option<String>,
-    /// the card's fill and edge are its tile's look (`scope_hover::ground`), not painted here
-    pub ground: bool,
 }
 
 impl Default for NodeOpts {
     fn default() -> NodeOpts {
-        NodeOpts { footer: None, lens_step: None, hovered: false, carry: false, out_wired: true, shown: Level::Card, failed: None, ground: false }
+        NodeOpts { footer: None, lens_step: None, carry: false, out_wired: true, shown: Level::Card, failed: None }
     }
 }
 
-pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl: &Placed, n: &p::Node, selected: bool, row_hover: Option<usize>, rect: (f64, f64, f64, f64)) {
+/// A card over its ground: the fill and edge (hovered, selected) are its ground node's look and a
+/// collapsed zone's stack is under that (`scope_hover::ground`), the brackets are nodes over it.
+pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl: &Placed, n: &p::Node, row_hover: Option<usize>, rect: (f64, f64, f64, f64)) {
     let (x, y, wd, h) = rect;
     let shown = o.shown;
     if shown == Level::Point {
-        paint_point(paint, t, z, fs, pl, o.failed.as_deref(), selected, rect);
+        paint_point(paint, t, z, fs, pl, o.failed.as_deref(), rect);
         return;
     }
     let theme = t.theme;
@@ -1033,27 +1044,8 @@ pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl
         None => o.footer.as_ref().and_then(|f| f.execution.clone()),
     };
     let ls = 4.max(fs - 2);
-    let stacked = match z_ {
-        Some(_) => pl.collapsed,
-        None => false,
-    };
-    if stacked {
-        for d in [6.0, 3.0] {
-            paint_card(paint, x + (d * z), y + (d * z), wd, h, theme.input, card_edge(t, theme.input, false));
-        }
-    }
     // a chip is the header of a card that is laid out larger: the zoom, not the document, shrank it
     let h = if shown == Level::Chip && z_.is_none() { p::HEAD_HEIGHT * z } else { h };
-    let fill = if o.hovered && !selected { theme::hover_fill(&theme) } else { theme.input };
-    let edge = if o.failed.is_some() { theme::invalid() } else { card_edge(t, fill, selected) };
-    if o.ground {
-    } else if n.expr {
-        // an expression written in its reader's input: a dashed card, its `expr` mark in the header
-        paint.fill(x as f32, y as f32, wd as f32, h as f32, fill);
-        dashed_frame_in(paint, x, y, wd, h, edge);
-    } else {
-        paint_card(paint, x, y, wd, h, fill, edge);
-    }
     let lens = match (&n.lens, o.lens_step) {
         (Some(l), Some(step)) => Some((l, step)),
         _ => None,
@@ -1147,9 +1139,6 @@ pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl
             paint_lens(paint, t, z, fs, l, step, (x, y + h - ((lh + p::CARD_PAD) * z), wd), lh);
         }
     }
-    if selected {
-        paint.brackets(x as f32, y as f32, wd as f32, h as f32, 3.0, 8.0, 2.0, theme.accent);
-    }
 }
 
 /// Does anything inside the zone read this name (a loop variable shows its port only then)?
@@ -1170,7 +1159,7 @@ pub fn zone_uses(zn: &p::Zone, names: &[String]) -> bool {
 
 /// The expanded zone's label row, selector, rail rows and ports, over its tint; the cards inside are
 /// wired directly across its edge.
-pub fn paint_zone_frame(paint: &mut Paint, t: &Pane, z: f64, fs: i64, footer: Option<&Footer>, n: &p::Node, zn: &p::Zone, selected: bool, out_wired: bool, rect: (f64, f64, f64, f64), probe: i64, count: i64) {
+pub fn paint_zone_frame(paint: &mut Paint, t: &Pane, z: f64, fs: i64, footer: Option<&Footer>, n: &p::Node, zn: &p::Zone, out_wired: bool, rect: (f64, f64, f64, f64), probe: i64, count: i64) {
     let theme = t.theme;
     let (x, y, wd, h) = rect;
     let execution = execution_of(t, n);
@@ -1244,17 +1233,14 @@ pub fn paint_zone_frame(paint: &mut Paint, t: &Pane, z: f64, fs: i64, footer: Op
         paint_selector(paint, t, z, fs, count, probe, (x, y, wd));
     }
     paint_rail(paint, t, z, fs, x, y + (p::HEAD_HEIGHT * z), wd, true, &p::extra_rails(zn));
-    if selected {
-        paint.brackets(x as f32, y as f32, wd as f32, h as f32, 3.0, 8.0, 2.0, theme.accent);
-    }
 }
 
-/// A graph input is a value node: a header-only card with its value in a field at the right.
-pub fn paint_input(paint: &mut Paint, t: &Pane, z: f64, fs: i64, i: &p::Input, selected: bool, rect: (f64, f64, f64, f64)) {
+/// A graph input is a value node: a header-only card with its value in a field at the right (its
+/// ground is a node).
+pub fn paint_input(paint: &mut Paint, t: &Pane, z: f64, fs: i64, i: &p::Input, rect: (f64, f64, f64, f64)) {
     let theme = t.theme;
-    let (x, y, wd, h) = rect;
+    let (x, y, wd, _) = rect;
     let hh = p::HEAD_HEIGHT * z;
-    paint_card(paint, x, y, wd, h, theme.input, card_edge(t, theme.input, selected));
     paint.fill((x + (HEAD_PAD * z)) as f32, (y + (8.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32, ty_color(t, Some(&i.ty)));
     let fx = x + (value_x(p::NODE_WIDTH) * z);
     let nm = fitted(paint, fs, 0.0f64.max(fx - (6.0 * z) - (x + (23.0 * z))), &i.name);
@@ -1274,17 +1260,13 @@ pub fn paint_input(paint: &mut Paint, t: &Pane, z: f64, fs: i64, i: &p::Input, s
         None => paint_field(paint, z, fs, &theme, fx, y + (4.0 * z), FIELD_W * z, true, None, false, theme::ink_3(&theme), &ty::to_string(&i.ty)),
     }
     paint_socket(paint, &theme, Some(&i.ty), true, z, (x + wd - (1.0 * z), y + (PORT_Y * z)));
-    if selected {
-        paint.brackets(x as f32, y as f32, wd as f32, h as f32, 3.0, 8.0, 2.0, theme.accent);
-    }
 }
 
-pub fn paint_return(paint: &mut Paint, t: &Pane, z: f64, fs: i64, s: &p::Scope, selected: bool, rect: (f64, f64, f64, f64)) {
+pub fn paint_return(paint: &mut Paint, t: &Pane, z: f64, fs: i64, s: &p::Scope, rect: (f64, f64, f64, f64)) {
     let theme = t.theme;
-    let (x, y, wd, h) = rect;
+    let (x, y, wd, _) = rect;
     let hh = p::HEAD_HEIGHT * z;
     let rh = p::ROW_HEIGHT * z;
-    paint_card(paint, x, y, wd, h, theme.input, card_edge(t, theme.input, selected));
     paint.fill((x + (HEAD_PAD * z)) as f32, (y + (8.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32, theme.foreground);
     text_in(paint, fs, theme.foreground, x + (23.0 * z), y, hh, "return");
     let ry = y + (p::BODY_TOP * z);
@@ -1310,9 +1292,6 @@ pub fn paint_return(paint: &mut Paint, t: &Pane, z: f64, fs: i64, s: &p::Scope, 
     }
     let nil = matches!(&s.result, p::ScopeResult::Literal(ex) if matches!(&ex.node, SNode::Sym(n) if ex.name(*n) == "nil"));
     paint_socket(paint, &theme, None, !nil, z, (x, ry + (12.0 * z)));
-    if selected {
-        paint.brackets(x as f32, y as f32, wd as f32, h as f32, 3.0, 8.0, 2.0, theme.accent);
-    }
 }
 
 pub fn paint_polyline(clip: (f64, f64, f64, f64), paint: &mut Paint, width: f64, color: Color, pts: &[(f64, f64)]) {
@@ -1343,7 +1322,16 @@ pub fn tag_name(t: &Pane, wi: &Wire) -> String {
     }
 }
 
-pub fn paint_background(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f64), wires: &[usize], zones: &[usize]) {
+/// What the wires view paints that the content does not build: the chains of the selection, the
+/// selected wire (an index into `geo.wires`) and the wires a drag draws instead (`skip`).
+pub struct Sel {
+    pub chain: Option<std::rc::Rc<st::Chains>>,
+    pub wire: Option<usize>,
+    /// ascending
+    pub skip: std::rc::Rc<Vec<usize>>,
+}
+
+pub fn paint_background(paint: &mut Paint, t: &Pane, sel: &Sel, viewport: (f64, f64, f64, f64), wires: &[usize], zones: &[usize]) {
     let theme = t.theme;
     let (vx, vy, vw, vh) = viewport;
     let z = t.zoom;
@@ -1405,52 +1393,70 @@ pub fn paint_background(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f
             paint.fill((x + (fw * z) - 11.0) as f32, (y + (fh * z) - 4.0) as f32, 8.0, 1.0, ink);
         }
     }
-    let chain = st::chains_of(t);
     let tag_size = 5.max((11.0 * z).round() as i64);
     for &i in wires {
-        paint_wire(paint, t, &chain, viewport, tag_size, &t.geo.wires[i], false);
+        if sel.skip.binary_search(&i).is_err() {
+            paint_wire(paint, t, z, &|q| (sx(t, q.0), sy(t, q.1)), &sel.chain, viewport, tag_size, &t.geo.wires[i], &t.geo.wires[i].pts, false, sel.wire == Some(i));
+        }
     }
 }
 
-/// One wire as the pane draws it, cut to `clip`; `is_highlighted`: widened for the pointer over it
-/// or over one of its ports (drawn over the content by `scope_hover`).
-pub fn paint_wire(paint: &mut Paint, t: &Pane, chain: &Option<st::Chains>, clip: (f64, f64, f64, f64), tag_size: i64, wi: &Wire, is_highlighted: bool) {
+/// How a wire is drawn: its width and colour, as a tag at its use site, dashed, or a line.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Stroke {
+    Line,
+    Dashed,
+    Tag,
+}
+
+/// A wire's width, colour and stroke at zoom `z`, and whether the selection's chain lights it.
+pub fn wire_style(t: &Pane, z: f64, chain: &Option<std::rc::Rc<st::Chains>>, wi: &Wire, is_highlighted: bool, is_selected: bool) -> (f64, Color, Stroke, Option<bool>) {
     let theme = t.theme;
-    let z = t.zoom;
-    {
-        let pts: Vec<(f64, f64)> = wi.pts.iter().map(|(x, y)| (sx(t, *x), sy(t, *y))).collect();
-        let is_selected = match (&t.selected_wire, &wi.target) {
-            (Some((sp, sk, _)), Some((tp, tk, _))) => sp == tp && sk == tk,
-            _ => false,
-        };
-        let lit = chain.as_ref().map(|c| st::wire_lit(c, wi));
-        let mut width = if is_highlighted || lit == Some(true) { 2.0f64.max(2.4 * z) } else { 1.0f64.max(1.5 * z) };
-        // a switch's active wire is solid and accented, the others dashed grey
-        let layout: Option<bool> = match &wi.target {
-            Some((pth, e::ArgKey::Pos(k), _)) => t.switches.iter().find(|(x, _)| x == pth).map(|(_, a)| k == a),
-            _ => None,
-        };
-        let mut color = if is_selected {
-            theme.foreground
-        } else if layout == Some(true) {
-            theme.accent
-        } else if layout == Some(false) {
-            theme::muted(&theme)
-        } else {
-            ty_color(t, wi.ty.as_ref())
-        };
-        // a formula's reads rest thin and faint; selecting either end draws them in full
-        let faint = wi.refers && !(is_selected || is_highlighted || lit == Some(true));
-        if lit == Some(false) || faint {
-            color = color::with_alpha(color, if faint { 90 } else { 40 });
-        }
-        if faint {
-            width = 1.0f64.max(z);
-        }
-        if st::tagged(t, wi) && !is_selected {
+    let lit = chain.as_ref().map(|c| st::wire_lit(c, wi));
+    let mut width = if is_highlighted || lit == Some(true) { 2.0f64.max(2.4 * z) } else { 1.0f64.max(1.5 * z) };
+    // a switch's active wire is solid and accented, the others dashed grey
+    let layout: Option<bool> = match &wi.target {
+        Some((pth, e::ArgKey::Pos(k), _)) => t.switches.iter().find(|(x, _)| x == pth).map(|(_, a)| k == a),
+        _ => None,
+    };
+    let mut color = if is_selected {
+        theme.foreground
+    } else if layout == Some(true) {
+        theme.accent
+    } else if layout == Some(false) {
+        theme::muted(&theme)
+    } else {
+        ty_color(t, wi.ty.as_ref())
+    };
+    // a formula's reads rest thin and faint; selecting either end draws them in full
+    let faint = wi.refers && !(is_selected || is_highlighted || lit == Some(true));
+    if lit == Some(false) || faint {
+        color = color::with_alpha(color, if faint { 90 } else { 40 });
+    }
+    if faint {
+        width = 1.0f64.max(z);
+    }
+    let stroke = if st::tagged_in(t.tags, chain, wi) && !is_selected {
+        Stroke::Tag
+    } else if layout == Some(false) {
+        Stroke::Dashed
+    } else {
+        Stroke::Line
+    };
+    (width, color, stroke, lit)
+}
+
+/// One wire as the pane draws it along `pts` (graph units: its own, or where a drag puts it), placed
+/// on the window by `at` at zoom `z`, cut to `clip`; `is_highlighted`: widened for the pointer over it
+/// or over one of its ports.
+pub fn paint_wire(paint: &mut Paint, t: &Pane, z: f64, at: &dyn Fn((f64, f64)) -> (f64, f64), chain: &Option<std::rc::Rc<st::Chains>>, clip: (f64, f64, f64, f64), tag_size: i64, wi: &Wire, pts: &[(f64, f64)], is_highlighted: bool, is_selected: bool) {
+    let theme = t.theme;
+    let (width, color, stroke, lit) = wire_style(t, z, chain, wi, is_highlighted, is_selected);
+    match stroke {
+        Stroke::Tag => {
             // a long wire reads as a stub and the source's name at the use site
-            let (ax, ay) = (sx(t, wi.a.0), sy(t, wi.a.1));
-            let (bx, by) = (sx(t, wi.b.0), sy(t, wi.b.1));
+            let (ax, ay) = at(pts[0]);
+            let (bx, by) = at(pts[pts.len() - 1]);
             let stub = 14.0 * z;
             paint.line_w((ax as f32, ay as f32), ((ax + stub) as f32, ay as f32), width as f32, color);
             paint.line_w(((bx - stub) as f32, by as f32), (bx as f32, by as f32), width as f32, color);
@@ -1458,10 +1464,18 @@ pub fn paint_wire(paint: &mut Paint, t: &Pane, chain: &Option<st::Chains>, clip:
             let tw = f64::from(paint.text_width(Some(tag_size), &name));
             let ink = if lit == Some(false) { color::with_alpha(theme::ink_2(&theme), 60) } else { theme::ink_2(&theme) };
             paint.text_s(((bx - stub - 4.0 - tw) as f32, (by - (tag_size as f64 / 2.0) - 1.0) as f32), tag_size, ink, &name);
-        } else if layout == Some(false) {
-            paint_dashed_polyline(paint, width, color, &pts);
-        } else {
-            paint_polyline(clip, paint, width, color, &pts);
+        }
+        Stroke::Dashed => {
+            for pair in pts.windows(2) {
+                dashed_line(paint, width, color, at(pair[0]), at(pair[1]));
+            }
+        }
+        Stroke::Line => {
+            for pair in pts.windows(2) {
+                if let Some((a, b)) = clip_segment(at(pair[0]), at(pair[1]), clip) {
+                    paint.line_w(p32(a), p32(b), width as f32, color);
+                }
+            }
         }
     }
 }

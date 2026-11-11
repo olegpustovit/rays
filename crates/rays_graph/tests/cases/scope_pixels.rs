@@ -220,10 +220,12 @@ fn window_graph_view_pan_zoom() {
             quiet(&s, &format!("pan frame {i}"));
         }
         check(t.pan_x == pan0.0 + 60.0 && t.pan_y == pan0.1, &format!("the drag panned {:?} -> {:?}", pan0, (t.pan_x, t.pan_y)));
-        // past the overscan (half the pane each side): one build at the new pan
+        // past the overscan (half the pane each side): one build at the new pan of the anchored views
+        // (the wires, the content and each card's view in it)
+        let anchored = |t: &Pane| 2 + scope::stats(t).drawn_items as usize;
         p.0 += W as f64 / 2.0;
         let s = step(&mut ui, &mut t, p, &[MouseButton::RightButton], vec![Event::PointerMoved(p)]);
-        check(verify || s.views == 1, &format!("crossing the overscan built {} views", s.views));
+        check(verify || s.views == anchored(&t), &format!("crossing the overscan built {} views", s.views));
         p.0 += 2.0;
         quiet(&step(&mut ui, &mut t, p, &[MouseButton::RightButton], vec![Event::PointerMoved(p)]), "a pan frame after the build");
         step(&mut ui, &mut t, p, &[], vec![Event::PointerReleased(MouseButton::RightButton, p)]);
@@ -241,7 +243,7 @@ fn window_graph_view_pan_zoom() {
         for _ in 0..8 {
             built += step(&mut ui, &mut t, p, &[], vec![]).views;
         }
-        check(verify || built == 1, &format!("the rested zoom built {built} views"));
+        check(verify || built == anchored(&t), &format!("the rested zoom built {built} views"));
         // a click on a card through the content scaled to each zoom (not rested: the view's transform)
         for z in [0.5, 1.0, 1.5, 2.0] {
             scope::frame_all(&mut t);
@@ -255,7 +257,7 @@ fn window_graph_view_pan_zoom() {
             let (x, y, w, h) = scope::inspect::box_of(&t, &card).expect("c");
             let at = (x + w / 2.0, y + h.min(24.0 * z) / 2.0);
             let s = step(&mut ui, &mut t, at, &[], vec![Event::PointerMoved(at)]);
-            check(verify || t.zoom == rested.2 || s.views <= 1, &format!("a zoom built {} views", s.views));
+            check(verify || t.zoom == rested.2 || s.views == 0, &format!("a zoom built {} views", s.views));
             step(&mut ui, &mut t, at, &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, at)]);
             let s = step(&mut ui, &mut t, at, &[], vec![Event::PointerReleased(MouseButton::LeftButton, at)]);
             let picked = s.changes.iter().any(|c| matches!(c, Change::Selected(p) if p.contains(&card)));

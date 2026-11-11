@@ -252,26 +252,11 @@ pub enum Del {
     Disconnect(ArgKey),
 }
 
-pub struct Sub {
-    pub outs: Vec<(UiBox, String, Option<Ty>)>,
-    pub dels: Vec<(UiBox, Del)>,
-    pub taps: Vec<(UiBox, Tap)>,
-    pub inputs: Vec<UiBox>,
-}
-
-/// A visible item: its place in `t.geo.items`, its tile box and signal, its ports and the changes its fields asked for.
-pub struct Tile {
+/// What a card's build leaves for the content's gestures: its zone and lens controls and the
+/// changes its fields asked for.
+pub struct Built {
     pub slot: usize,
-    pub ax: f64,
-    pub ay: f64,
-    pub tile: UiBox,
-    /// what the card's painter draws on: the tile, or for a card whose ground is the tile's look
-    /// (`ground`), a child over its row highlight
-    pub card: UiBox,
-    pub ground: Option<crate::scope_hover::Ground>,
-    pub whole: bool,
-    pub sig: Signal,
-    pub sub: Sub,
+    pub taps: Vec<(UiBox, Tap)>,
     pub fields: Vec<Change>,
 }
 
@@ -280,23 +265,27 @@ fn box_in(ui: &mut Ui, flags: Flags, w: f64, h: f64, at: (f64, f64), name: &str)
     ui.box_(name, BoxOpts::default().flags(flags | HOVER_FREE).w(Size::Px(w as f32)).h(Size::Px(h as f32)).at(p32(at)))
 }
 
-/// A tile's ports and taps: out-ports, deletable inputs, zone controls.
-pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &UiBox) -> Sub {
+/// A port: in the hit list for the hover and for what a press is on, but the canvas takes its input.
+const PORT: Flags = BLOCKING;
+
+/// A tile's ports and taps: out-ports, inputs (with what a click on them takes off), zone controls.
+pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &UiBox, ports: &mut Vec<crate::scope_hover::Port>) -> Vec<(UiBox, Tap)> {
+    use crate::scope_hover::{Port, PortKind};
     let shown = pl.shown;
     let saved = ui.enter(tile);
-    let mut outs: Vec<(UiBox, String, Option<Ty>)> = Vec::new();
-    let mut dels: Vec<(UiBox, Del)> = Vec::new();
+    let mut outs: Vec<Port> = Vec::new();
+    let mut inputs: Vec<Port> = Vec::new();
     let mut taps: Vec<(UiBox, Tap)> = Vec::new();
-    let mut inputs: Vec<UiBox> = Vec::new();
+    let mut out = |b: UiBox, src: String, ty: Option<Ty>| outs.push(Port { b, kind: PortKind::Out(src, ty) });
     match &pl.item {
         Item::Input(i) => {
             let pos = if shown == Level::Point { (pl.w, p::POINT_SIZE / 2.0) } else { (pl.w - 1.0, sp::PORT_Y) };
-            let b = bxz(ui, z, "out", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-            outs.push((b, i.name.clone(), Some(i.ty.clone())));
+            let b = bxz(ui, z, PORT, "out", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+            out(b, i.name.clone(), Some(i.ty.clone()));
         }
         Item::Return => {
-            let b = bxz(ui, z, "in", (0.0 - 7.0, p::BODY_TOP + 12.0 - 7.0), (14.0, 14.0));
-            inputs.insert(0, b);
+            let b = bxz(ui, z, PORT, "in", (0.0 - 7.0, p::BODY_TOP + 12.0 - 7.0), (14.0, 14.0));
+            inputs.push(Port { b, kind: PortKind::In(None) });
         }
         Item::Item(n) => {
             let node_src = if n.binds.len() == 1 && n.binds[0] == n.name { Some(n.name.clone()) } else { None };
@@ -307,20 +296,17 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
             if let Some(src) = &node_src {
                 if !plain_for {
                     let pos = if shown == Level::Point { (pl.w, p::POINT_SIZE / 2.0) } else { (pl.w - 1.0, sp::PORT_Y) };
-                    let b = bxz(ui, z, "out", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-                    outs.push((b, src.clone(), Some(n.ty.clone())));
+                    let b = bxz(ui, z, PORT, "out", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                    out(b, src.clone(), Some(n.ty.clone()));
                 }
             }
             // the header's in-port: the first geometry slot
             if let Some(hi) = n.rows.iter().position(|r| r.head) {
                 if n.zone.is_none() {
                     let pos = if shown == Level::Point { (0.0, p::POINT_SIZE / 2.0) } else { (1.0, sp::PORT_Y) };
-                    let sink = bxz(ui, z, "d:head", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                    let sink = bxz(ui, z, PORT, "d:head", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
                     ui.a11y_name(&sink, &n.rows[hi].label);
-                    inputs.insert(0, sink);
-                    if wired(&n.rows[hi]) {
-                        dels.insert(0, (sink, Del::Unwire(hi)));
-                    }
+                    inputs.push(Port { b: sink, kind: PortKind::In(wired(&n.rows[hi]).then_some(Del::Unwire(hi))) });
                 }
             }
             match &n.zone {
@@ -330,18 +316,17 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                     if let Some(li) = label_index(zn) {
                         let r = &zn.rail[li];
                         if r.key.is_some() && zn.kind != p::ZoneKind::For {
-                            let sink = bxz(ui, z, "rd:label", (1.0 - 7.0, sp::PORT_Y - 7.0), (14.0, 14.0));
-                            inputs.insert(0, sink);
-                            if let (Some(key), Some(ex)) = (&r.key, &r.expr) {
-                                if !e::free_names(ex).is_empty() {
-                                    dels.insert(0, (sink, Del::Disconnect(key.clone())));
-                                }
-                            }
+                            let sink = bxz(ui, z, PORT, "rd:label", (1.0 - 7.0, sp::PORT_Y - 7.0), (14.0, 14.0));
+                            let del = match (&r.key, &r.expr) {
+                                (Some(key), Some(ex)) if !e::free_names(ex).is_empty() => Some(Del::Disconnect(key.clone())),
+                                _ => None,
+                            };
+                            inputs.push(Port { b: sink, kind: PortKind::In(del) });
                         }
                         if sp::zone_uses(zn, &r.names) {
                             let pos = begin_port(n, zn, li);
-                            let b = bxz(ui, z, "rail:label", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-                            outs.push((b, r.names.first().cloned().unwrap_or_default(), r.ty.clone()));
+                            let b = bxz(ui, z, PORT, "rail:label", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                            out(b, r.names.first().cloned().unwrap_or_default(), r.ty.clone());
                         }
                     }
                     for (i, ri) in extra_indices(zn).iter().enumerate() {
@@ -349,36 +334,32 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                         let cy = p::HEAD_HEIGHT + (i as f64 * p::ROW_HEIGHT) + 12.0;
                         if r.role != p::Role::Capture {
                             let pos = begin_port(n, zn, *ri);
-                            let b = bxz(ui, z, &format!("rail:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-                            outs.push((b, r.names.first().cloned().unwrap_or_default(), r.ty.clone()));
+                            let b = bxz(ui, z, PORT, &format!("rail:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                            out(b, r.names.first().cloned().unwrap_or_default(), r.ty.clone());
                         }
                         // wired rail rows can be disconnected from their socket
-                        let sink = if r.key.is_some() {
-                            let b = bxz(ui, z, &format!("rd:{}", i), (0.0 - 7.0, cy - 7.0), (14.0, 14.0));
-                            inputs.insert(0, b);
-                            Some(b)
-                        } else {
-                            None
-                        };
-                        if let (Some(key), Some(ex), Some(sink)) = (&r.key, &r.expr, sink) {
-                            if !e::free_names(ex).is_empty() {
-                                dels.insert(0, (sink, Del::Disconnect(key.clone())));
-                            }
+                        if r.key.is_some() {
+                            let b = bxz(ui, z, PORT, &format!("rd:{}", i), (0.0 - 7.0, cy - 7.0), (14.0, 14.0));
+                            let del = match (&r.key, &r.expr) {
+                                (Some(key), Some(ex)) if !e::free_names(ex).is_empty() => Some(Del::Disconnect(key.clone())),
+                                _ => None,
+                            };
+                            inputs.push(Port { b, kind: PortKind::In(del) });
                         }
                     }
                     if zn.kind != p::ZoneKind::Let && zn.kind != p::ZoneKind::State && zn.kind != p::ZoneKind::Branch {
                         // the selector of the label row: a button each side of the reading
                         let (selx, sely, selw, selh, _) = sp::selector_geo(&mut |size, text| measure_ui(ui, t, size, text), z, fs, pl.w * z, count_of(t, &n.path), t.saved.probe(&n.path));
                         let (selx, sely, selw, selh) = (selx / z, sely / z, selw / z, selh / z);
-                        let b = bxz(ui, z, "prev", (selx - 4.0, sely), (16.0, selh));
+                        let b = bxz(ui, z, CLICKABLE, "prev", (selx - 4.0, sely), (16.0, selh));
                         taps.push((b, Tap::Step(-1)));
-                        let b = bxz(ui, z, "next", (selx + selw - 12.0, sely), (16.0, selh));
+                        let b = bxz(ui, z, CLICKABLE, "next", (selx + selw - 12.0, sely), (16.0, selh));
                         taps.push((b, Tap::Step(1)));
-                        let b = bxz(ui, z, "track", (selx + 12.0, sely), (selw - 24.0, selh));
+                        let b = bxz(ui, z, CLICKABLE, "track", (selx + 12.0, sely), (selw - 24.0, selh));
                         taps.push((b, Tap::Track));
                     }
                     if zn.kind != p::ZoneKind::Let {
-                        let b = bxz(ui, z, "toggle", (0.0, 0.0), (64.0, p::HEAD_HEIGHT));
+                        let b = bxz(ui, z, CLICKABLE, "toggle", (0.0, 0.0), (64.0, p::HEAD_HEIGHT));
                         taps.push((b, Tap::Toggle));
                     }
                 }
@@ -386,19 +367,19 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                     for (i, r) in zn.rail.iter().enumerate() {
                         if r.key.is_some() || r.role == p::Role::Capture {
                             let pos = (0.0, p::BODY_TOP + ((i as f64 + 0.5) * p::ROW_HEIGHT));
-                            let b = bxz(ui, z, &format!("rd:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-                            inputs.insert(0, b);
+                            let b = bxz(ui, z, PORT, &format!("rd:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                            inputs.push(Port { b, kind: PortKind::In(None) });
                         }
                     }
                     if zn.kind != p::ZoneKind::Let {
-                        let b = bxz(ui, z, "toggle", (sp::HEAD_PAD, 0.0), (64.0, p::HEAD_HEIGHT));
+                        let b = bxz(ui, z, CLICKABLE, "toggle", (sp::HEAD_PAD, 0.0), (64.0, p::HEAD_HEIGHT));
                         taps.push((b, Tap::Toggle));
                     }
                 }
                 None => {
                     if let Some(l) = &n.lens {
                         if shown != Level::Point && shown != Level::Chip {
-                            let b = bxz(ui, z, "lens", (pl.w - 22.0, 2.0), (20.0, 20.0));
+                            let b = bxz(ui, z, CLICKABLE, "lens", (pl.w - 22.0, 2.0), (20.0, 20.0));
                             taps.push((b, Tap::Lens));
                             if let Some(step) = lens_of(t, &n.path) {
                                 let lh = p::lens_height(l, step);
@@ -406,11 +387,11 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                                 let len = l.steps.len() as i64;
                                 for i in 0..=len {
                                     let ((bxx, byy), size) = sp::lens_button_box(len, i);
-                                    let b = bxz(ui, z, &format!("ls{}", i), (bxx, top + byy), size);
+                                    let b = bxz(ui, z, CLICKABLE, &format!("ls{}", i), (bxx, top + byy), size);
                                     taps.push((b, Tap::LensStep(i)));
                                 }
                                 let ((rx, ry), size) = sp::lens_replace_box(lh);
-                                let b = bxz(ui, z, "lr", (rx, top + ry), size);
+                                let b = bxz(ui, z, CLICKABLE, "lr", (rx, top + ry), size);
                                 taps.push((b, Tap::Replace));
                             }
                         }
@@ -421,19 +402,16 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                         for (j, (f, ty)) in n.outputs.iter().enumerate() {
                             let src = if n.binds.len() == 1 && n.binds[0] == n.name { format!("{}.{}", n.name, f) } else { f.clone() };
                             let pos = (pl.w, top + (((nlines + j) as f64 + 0.5) * p::ROW_HEIGHT));
-                            let b = bxz(ui, z, &format!("o:{}", j), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-                            outs.push((b, src, Some(ty.clone())));
+                            let b = bxz(ui, z, PORT, &format!("o:{}", j), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                            out(b, src, Some(ty.clone()));
                         }
                         for (k, line) in pl.lines.iter().enumerate() {
                             if let p::Line::Row(i, r) = line {
                                 let ry = top + (k as f64 * p::ROW_HEIGHT);
                                 if r.socket {
-                                    let sink = bxz(ui, z, &format!("d:{}", i), (0.0 - 7.0, ry + 12.0 - 7.0), (14.0, 14.0));
+                                    let sink = bxz(ui, z, PORT, &format!("d:{}", i), (0.0 - 7.0, ry + 12.0 - 7.0), (14.0, 14.0));
                                     ui.a11y_name(&sink, &r.label);
-                                    inputs.insert(0, sink);
-                                    if wired(r) {
-                                        dels.insert(0, (sink, Del::Unwire(*i)));
-                                    }
+                                    inputs.push(Port { b: sink, kind: PortKind::In(wired(r).then_some(Del::Unwire(*i))) });
                                 }
                             }
                         }
@@ -443,8 +421,19 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
         }
     }
     ui.leave(saved);
-    dels.reverse();
-    Sub { outs, dels, taps, inputs }
+    // to a screen reader a port is a button named by what it carries
+    for q in &outs {
+        ui.set_role(&q.b, pxui::a11y::Role::Button, 0);
+        if let PortKind::Out(name, _) = &q.kind {
+            ui.a11y_name(&q.b, name);
+        }
+    }
+    for q in &inputs {
+        ui.set_role(&q.b, pxui::a11y::Role::Button, 0);
+    }
+    ports.extend(outs);
+    ports.extend(inputs);
+    taps
 }
 
 /// The live editors of a row: a number, a vector of numbers, a flag.
@@ -501,55 +490,19 @@ pub fn row_fields_of(ui: &mut Ui, z: f64, pl: &Placed, n: &p::Node, r: &p::Row, 
     Vec::new()
 }
 
-/// Frame-wide gesture state shared by wire hit testing and completion.
+/// Frame-wide state of the content's build: an edit field that closed or opened, the text size, and
+/// the overscan the content reaches past each side of the pane.
 pub struct Ctx {
-    pub wire_hits: HashMap<usize, Vec<UiBox>>,
     pub finished: bool,
     pub opened: Option<Editing>,
     pub fs: i64,
-    /// the overscan the content reaches past each side of the pane
     pub ov: (f64, f64),
 }
 
 impl Ctx {
-    pub fn hits(&self, i: usize) -> Vec<UiBox> {
-        self.wire_hits.get(&i).cloned().unwrap_or_default()
-    }
-
     /// A window point in the pane's points (the content box's origin is the pane's corner).
     fn local(&self, t: &Pane, pt: (f64, f64)) -> (f64, f64) {
         (pt.0 - t.x as f64, pt.1 - t.y as f64)
-    }
-}
-
-/// A wire's hit boxes: its segments cut to `clip` (content points), as 16-point rectangles in the shared
-/// hit tree, placed from `origin`.
-pub fn wire_boxes(c: &mut Ctx, t: &Pane, ui: &mut Ui, origin: (f64, f64), name: &str, clip: (f64, f64, f64, f64), i: usize) {
-    let (cx, cy, cw, ch) = clip;
-    let wi = &t.geo.wires[i];
-    if !(wi.target.is_some() && !tagged(t, wi)) {
-        return;
-    }
-    let mut count = 0;
-    let prefix = format!("{}:{}:", name, i);
-    for (j, seg) in wi.pts.windows(2).enumerate() {
-        let (ax, ay) = seg[0];
-        let (bx, by) = seg[1];
-        if let Some(((ax, ay), (bx, by))) = clip_segment(c.local(t, (sx(t, ax), sy(t, ay))), c.local(t, (sx(t, bx), sy(t, by))), (cx - 4.0, cy - 4.0, cw + 8.0, ch + 8.0)) {
-            let steps = if ax == bx || ay == by { 1 } else { 1.max(((bx - ax).hypot(by - ay) / 16.0) as i64) };
-            let prefix = format!("{}{}-", prefix, j);
-            for st in 0..steps {
-                let u0 = st as f64 / steps as f64;
-                let u1 = (st + 1) as f64 / steps as f64;
-                let x0 = ax + ((bx - ax) * u0);
-                let y0 = ay + ((by - ay) * u0);
-                let x1 = ax + ((bx - ax) * u1);
-                let y1 = ay + ((by - ay) * u1);
-                count += 1;
-                let b = ui.box_fmt(format_args!("{}{}", prefix, count), BoxOpts::default().flags(CLICKABLE | HOVER_FREE).at(((x0.min(x1) - 4.0 - origin.0) as f32, (y0.min(y1) - 4.0 - origin.1) as f32)).w(Size::Px(((x1 - x0).abs() + 8.0) as f32)).h(Size::Px(((y1 - y0).abs() + 8.0) as f32)));
-                c.wire_hits.entry(i).or_default().insert(0, b);
-            }
-        }
     }
 }
 
@@ -566,78 +519,11 @@ pub fn edit_field(c: &mut Ctx, ui: &mut Ui, at: (f64, f64), w: f64, h: f64, key:
     if !open && v != current && valid(&v) { vec![commit(v)] } else { Vec::new() }
 }
 
-/// One visible node: its tile box, its ports and the live widgets of its rows.
-pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize) -> Tile {
-    let (pl, ax, ay) = &t.geo.items[slot];
-    let (ax, ay) = (*ax, *ay);
-    let (bx, by) = (sx(t, ax), sy(t, ay));
-    let key = format!("t:{}", flow_syntax::symbol::join_path(&pl.path, "/"));
-    let w = pl.w * z;
-    let h = pl.h * z;
+/// The live widgets of a card's rows and header (value fields, switches, add and fold buttons, read
+/// names, reorder and layout buttons, an open name field): the changes they asked for this frame.
+fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &UiBox) -> Vec<Change> {
+    let tile = *tile;
     let shown = pl.shown;
-    // a card whose hover is its ground's and its rows' (`scope_hover`): the ground is the tile's look,
-    // a row highlight and the card's painting are its first children. A card painted whole on hover
-    // (a chip, a folded zone, an expression card) builds again for it (`Now::whole`).
-    let ground = match &pl.item {
-        Item::Item(n) if n.zone.is_none() && !n.expr && (shown == Level::Card || shown == Level::Full) => {
-            Some(crate::scope_hover::ground(t, t.selected.contains(&pl.path), t.failed.iter().any(|(q, _)| *q == n.path)))
-        }
-        _ => None,
-    };
-    let painted_whole = match &pl.item {
-        Item::Item(n) => ground.is_none() && shown != Level::Point && (n.zone.is_none() || pl.collapsed),
-        _ => false,
-    };
-    let at = c.local(t, (bx, by));
-    let tile = box_in(ui, CLICKABLE, w, h, at, &key);
-    let (card, ground) = match (ground, &pl.item) {
-        (Some((idle, hover)), Item::Item(n)) => {
-            ui.set_look(&tile, idle, State::default());
-            let saved = ui.enter(&tile);
-            // the first row line's band, behind the card's text; idle it is the ground's colour
-            let first = pl.lines.iter().position(|l| matches!(l, p::Line::Row(..)));
-            let row = first.map(|k| {
-                let ry = (rows_top(n, 0.0) + (k as f64 * p::ROW_HEIGHT)) * z;
-                let hl = ui.node("hl", Node { w: Size::Px((w - 2.0) as f32), h: Size::Px((p::ROW_HEIGHT * z) as f32), at: Some((1.0, ry as f32)), look: Look { fill: idle.fill, ..Look::NONE }, ..Node::DEFAULT });
-                (hl, k, (p::ROW_HEIGHT * z) as f32)
-            });
-            let card = ui.box_("card", BoxOpts::default().w(Size::Px(w as f32)).h(Size::Px(h as f32)).at((0.0, 0.0)));
-            ui.leave(saved);
-            (card, Some(crate::scope_hover::Ground { idle, hover, row }))
-        }
-        _ => (tile, None),
-    };
-    // an expanded zone's tile covers its body: the wires that end inside it get their boxes again here,
-    // over the tile and under the cards built after it
-    if let Item::Item(n) = &pl.item {
-        if n.zone.is_some() && !pl.collapsed {
-            let (lx, ly) = c.local(t, (bx, by));
-            let x0 = lx.max(-c.ov.0);
-            let y0 = ly.max(-c.ov.1);
-            let clip = (x0, y0, (t.width as f64 + c.ov.0).min(lx + w) - x0, (t.height as f64 + c.ov.1).min(ly + h) - y0);
-            let saved = ui.enter(&tile);
-            for i in t.geo.inside.get(&pl.path).cloned().unwrap_or_default() {
-                wire_boxes(c, t, ui, (lx, ly), "zwire", clip, i);
-            }
-            ui.leave(saved);
-        }
-    }
-    let sub = tile_ports(t, ui, z, fs, pl, &tile);
-    // to a screen reader a card is a group named by its title, its ports buttons named by what they carry
-    let title = match &pl.item {
-        Item::Item(n) => p::title(n),
-        Item::Input(i) => i.name.clone(),
-        Item::Return => "return".to_owned(),
-    };
-    ui.set_role(&tile, pxui::a11y::Role::Group, if t.selected.contains(&pl.path) { pxui::a11y::state::SELECTED } else { 0 });
-    ui.a11y_name(&tile, &title);
-    for (b, name, _) in &sub.outs {
-        ui.set_role(b, pxui::a11y::Role::Button, 0);
-        ui.a11y_name(b, name);
-    }
-    for b in &sub.inputs {
-        ui.set_role(b, pxui::a11y::Role::Button, 0);
-    }
     // fields, inside the tile
     let mut fields: Vec<Change> = Vec::new();
     match &pl.item {
@@ -871,19 +757,186 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
     all.extend(editors);
     all.extend(movers);
     all.extend(switchers);
-    let sig = ui.signal(&tile);
-    Tile { slot, ax, ay, tile, card, ground, whole: painted_whole, sig, sub, fields: all }
+    all
+}
+
+/// One visible card in a view of its own (a move of cards offsets it): its tile, its ground, row
+/// highlight and painting, its selection brackets, dimming and recession (nodes the hover and the
+/// selection patch), its ports and the live widgets of its rows. A card built this frame leaves its
+/// controls in `built`; a kept one is as it was.
+fn build_card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, snap: &Rc<Pane>, footers: &HashMap<Path, Footer>, rev: u64, built: &mut Vec<Built>) {
+    use std::hash::{Hash, Hasher};
+    let (pl, ax, ay) = &t.geo.items[slot];
+    let (w, h) = (pl.w * z, pl.h * z);
+    let at = c.local(t, (sx(t, *ax), sy(t, *ay)));
+    let key = format!("t:{}", flow_syntax::symbol::join_path(&pl.path, "/"));
+    let mut hh = std::hash::DefaultHasher::new();
+    (rev, slot).hash(&mut hh);
+    let mut rec = None;
+    let view = ui.view(&key, hh.finish(), Size::Px(w as f32), Size::Px(h as f32), &mut |ui| {
+        rec = Some(card(c, t, ui, z, fs, slot, snap, footers, &key, built));
+    });
+    ui.set_at(&view, p32(at));
+    let mut hv = t.hovers.borrow_mut();
+    if ui.verifying() {
+        if rec.is_some() {
+            hv.redeclared(view);
+        }
+        return;
+    }
+    match rec {
+        Some((tile, ground, brackets, recede, ports)) => hv.card(slot, pl.path.clone(), view, tile, ground, brackets, recede, ports),
+        None => hv.keep(view),
+    }
+}
+
+type CardRec = (UiBox, Option<crate::scope_hover::Ground>, [UiBox; 4], Option<UiBox>, Vec<crate::scope_hover::Port>);
+
+fn card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, snap: &Rc<Pane>, footers: &HashMap<Path, Footer>, key: &str, built: &mut Vec<Built>) -> CardRec {
+    use crate::scope_hover as sh;
+    let (pl, ax, ay) = &t.geo.items[slot];
+    let (ax, ay) = (*ax, *ay);
+    let (w, h) = (pl.w * z, pl.h * z);
+    let shown = pl.shown;
+    let tile = box_in(ui, BLOCKING, w, h, (0.0, 0.0), key);
+    let failed = |path: &Path| t.failed.iter().any(|(q, _)| q == path);
+    // the card's ground: its fill and edge as a node (a collapsed zone's stack painted under it); a
+    // point and an open zone have none
+    let (looks, band, stack) = match &pl.item {
+        _ if shown == Level::Point => (None, false, false),
+        Item::Item(n) if n.zone.is_some() && !pl.collapsed => (None, false, false),
+        Item::Item(n) => (Some(sh::ground(t, failed(&n.path), n.expr, true)), n.zone.is_none() && (shown == Level::Card || shown == Level::Full), n.zone.is_some()),
+        Item::Input(_) | Item::Return => (Some(sh::ground(t, false, false, false)), false, false),
+    };
+    let node = |ui: &mut Ui, name: &str, at: (f64, f64), size: (f64, f64), look: Look, flags: Flags| {
+        ui.node(name, Node { w: Size::Px(size.0 as f32), h: Size::Px(size.1 as f32), at: Some((at.0 as f32, at.1 as f32)), look, flags, ..Node::DEFAULT })
+    };
+    let saved = ui.enter(&tile);
+    if stack {
+        let st = ui.box_("stack", BoxOpts::default().w(Size::Px(w as f32)).h(Size::Px(h as f32)).at((0.0, 0.0)));
+        let snap = snap.clone();
+        ui.draw(&st, move |paint, rect| sp::paint_stack(paint, &snap, z, rect.f64()));
+    }
+    let ground = looks.map(|looks| {
+        let g = node(ui, "g", (0.0, 0.0), (w, h), looks[0], NO_FLAGS);
+        // the first row line's band, behind the card's text; idle it is the ground's colour
+        let row = match &pl.item {
+            Item::Item(n) if band => pl.lines.iter().position(|l| matches!(l, p::Line::Row(..))).map(|k| {
+                let ry = (rows_top(n, 0.0) + (k as f64 * p::ROW_HEIGHT)) * z;
+                let hl = node(ui, "hl", (1.0, ry), (w - 2.0, p::ROW_HEIGHT * z), Look { fill: looks[0].fill, ..Look::NONE }, NO_FLAGS);
+                (hl, k, (p::ROW_HEIGHT * z) as f32)
+            }),
+            _ => None,
+        };
+        sh::Ground { node: g, looks, row }
+    });
+    let painted = ui.box_("card", BoxOpts::default().w(Size::Px(w as f32)).h(Size::Px(h as f32)).at((0.0, 0.0)));
+    paint_card(t, ui, &painted, z, fs, slot, snap, footers);
+    // over the painting: the selection's brackets, a scene object's dimming, the recession
+    let (bx, by, bw, bh, off, len, wid) = sp::brackets_of(pl, z, w, h);
+    let corners = [(bx - off, by - off), (bx + bw + off - len, by - off), (bx - off, by + bh + off - len), (bx + bw + off - len, by + bh + off - len)];
+    let brackets: [UiBox; 4] = std::array::from_fn(|k| node(ui, "b", corners[k], (len, len), sh::corner(sh::CORNERS[k], wid as f32, Look::NONE.fill), KEEP_ROOM));
+    let mut recede = None;
+    if let Item::Item(n) = &pl.item {
+        if n.zone.is_none() || pl.collapsed {
+            if dimmed(t, n) {
+                node(ui, "dim", (0.0, 0.0), (w, h), Look { fill: color::with_alpha(t.theme.panel, 150), ..Look::NONE }, NO_FLAGS);
+            }
+            recede = Some(node(ui, "recede", (0.0, 0.0), (w, h), sh::recede_look(t, false), KEEP_ROOM));
+        }
+    }
+    ui.leave(saved);
+    // an expanded zone's tile covers its body; the wires that end inside it are hit over it
+    let mut ports = Vec::new();
+    let taps = tile_ports(t, ui, z, fs, pl, &tile, &mut ports);
+    // to a screen reader a card is a group named by its title
+    let title = match &pl.item {
+        Item::Item(n) => p::title(n),
+        Item::Input(i) => i.name.clone(),
+        Item::Return => "return".to_owned(),
+    };
+    ui.set_role(&tile, pxui::a11y::Role::Group, 0);
+    ui.a11y_name(&tile, &title);
+    let fields = card_fields(c, t, ui, z, fs, pl, &tile);
+    let _ = (ax, ay);
+    built.push(Built { slot, taps, fields });
+    (tile, ground, brackets, recede, ports)
+}
+
+/// A scene object nothing reads (taken out of its merge) is dimmed; a wire from it brings it back.
+fn dimmed(t: &Pane, n: &p::Node) -> bool {
+    !n.synthetic
+        && n.zone.is_none()
+        && n.head.starts_with("scene/")
+        && n.head != "scene/merge"
+        && n.head != "scene/root"
+        && match box_at(t, &n.path) {
+            Some((ax, ay, wd, _)) => !t.geo.read.contains(&fkey((ax + wd, ay + WIRE_HEAD_Y))),
+            None => false,
+        }
+}
+
+/// The card's painting over its ground: what the item shows at its level.
+fn paint_card(t: &Pane, ui: &mut Ui, on: &UiBox, z: f64, fs: i64, slot: usize, snap: &Rc<Pane>, footers: &HashMap<Path, Footer>) {
+    let (pl, ax, ay) = &t.geo.items[slot];
+    // the hovered row is the row highlight's (`scope_hover`), but for a carried value over it: the
+    // carry builds every frame and marks its target row here
+    let rh: Option<usize> = match (hovered_row(t), &t.carry_hot) {
+        (Some((path, key)), Some((hot, _))) if path == *hot && path == pl.path => match &pl.item {
+            Item::Item(n) => n.rows.iter().position(|r| r.key == key),
+            _ => None,
+        },
+        _ => None,
+    };
+    let mut footer: Option<Footer> = None;
+    let mut lens_step: Option<i64> = None;
+    let mut carry = false;
+    let mut out_wired = false;
+    let mut failed: Option<String> = None;
+    let mut probe = 0;
+    let mut count = 0;
+    if let Item::Item(n) = &pl.item {
+        footer = footers.get(&n.path).cloned();
+        lens_step = lens_of(t, &n.path);
+        carry = matches!(&t.carry_hot, Some((hp, _)) if *hp == n.path);
+        out_wired = t.geo.read.contains(&fkey(out_anchor(pl, *ax, *ay)));
+        failed = t.failed.iter().find(|(q, _)| *q == n.path).map(|(_, c)| c.clone());
+        probe = t.saved.probe(&n.path);
+        count = count_of(t, &n.path);
+    }
+    let snap = snap.clone();
+    ui.draw(on, move |paint, rect| {
+        let rect = rect.f64();
+        let (pl, _, _) = &snap.geo.items[slot];
+        match &pl.item {
+            Item::Input(_) if pl.shown == Level::Point => sp::paint_point(paint, &snap, z, fs, pl, None, rect),
+            Item::Input(i) => sp::paint_input(paint, &snap, z, fs, i, rect),
+            Item::Return => {
+                if let Some(s) = &snap.scope {
+                    sp::paint_return(paint, &snap, z, fs, s, rect);
+                }
+            }
+            Item::Item(n) => match &n.zone {
+                Some(zn) if !pl.collapsed => sp::paint_zone_frame(paint, &snap, z, fs, footer.as_ref(), n, zn, out_wired, rect, probe, count),
+                _ => {
+                    let o = sp::NodeOpts { footer: footer.clone(), lens_step, carry, out_wired, shown: pl.shown, failed: failed.clone() };
+                    sp::paint_node(paint, &snap, z, fs, &o, pl, n, rh, rect);
+                }
+            },
+        }
+    });
 }
 
 /// A payload in flight: the innermost node under the pointer (a zone's tile covers its body), else the
 /// canvas, is where it would be put; the host decides whether it takes it.
-pub fn drop_change(t: &Pane, ui: &mut Ui, canvas: &UiBox, tiles: &[Tile]) -> Option<Change> {
+pub fn drop_change(t: &Pane, ui: &mut Ui, canvas: &UiBox) -> Option<Change> {
     let on_canvas = ui.drop_target(canvas)?;
     let mut found: Option<(usize, Drop)> = None;
-    for tl in tiles {
-        let pl = &t.geo.items[tl.slot].0;
-        let d = ui.drop_target(&tl.tile);
-        if let Some(d) = d {
+    let hovers = t.hovers.clone();
+    let hv = hovers.borrow();
+    for c in &hv.cards {
+        let pl = &t.geo.items[c.slot].0;
+        if let Some(d) = ui.drop_target(&c.tile) {
             let skip = match &found {
                 Some((q, _)) => {
                     let qp = &t.geo.items[*q].0;
@@ -892,7 +945,7 @@ pub fn drop_change(t: &Pane, ui: &mut Ui, canvas: &UiBox, tiles: &[Tile]) -> Opt
                 None => false,
             };
             if !skip {
-                found = Some((tl.slot, d));
+                found = Some((c.slot, d));
             }
         }
     }
@@ -906,29 +959,8 @@ pub fn drop_change(t: &Pane, ui: &mut Ui, canvas: &UiBox, tiles: &[Tile]) -> Opt
     })
 }
 
-pub fn context_step(t: &mut Pane, ui: &mut Ui, tiles: &[Tile], canvas_signal: &Signal, emit: &mut Vec<Change>) {
-    // the context menu
-    if t.context.is_none() {
-        let mut found: Option<((f64, f64), Path)> = None;
-        for tl in tiles {
-            if context_clicked(&tl.sig) {
-                found = Some((p64(tl.sig.release_point), t.geo.items[tl.slot].0.path.clone()));
-                break;
-            }
-        }
-        if let Some(((x, y), path)) = found {
-            // the menu acts on the nodes: a wire selected before is no longer the selection
-            let selected = if t.selected.contains(&path) { t.selected.clone() } else { std::iter::once(path.clone()).collect() };
-            if selected != t.selected {
-                emit.push(Change::Selected(selected.iter().cloned().collect()));
-            }
-            (t.context, t.selected, t.selected_wire) = (Some(((x, y), path)), selected, None);
-        }
-    }
-    if t.context.is_none() && context_clicked(canvas_signal) {
-        let (x, y) = p64(canvas_signal.release_point);
-        emit.push(Change::MenuRequested(x, y));
-    }
+/// The open context menu, every frame it is open.
+pub fn context_menu(t: &mut Pane, ui: &mut Ui, emit: &mut Vec<Change>) {
     if let Some((at, path)) = t.context.clone() {
         let items = context_items(t, &path);
         match ui.context_menu(p32(at), &MenuOpts::default(), "pxui-scope-context", &items) {
@@ -945,86 +977,80 @@ pub fn context_step(t: &mut Pane, ui: &mut Ui, tiles: &[Tile], canvas_signal: &S
     }
 }
 
-/// Whether a tile's pointer is on it (a zone's tile covers its body).
-fn tile_hovered(ui: &mut Ui, tl: &Tile) -> bool {
-    ui.hovered_within(&tl.tile)
-}
-
 /// A wire let go: on an input row it connects; on empty canvas it opens the add menu after its source
 /// (pulled off an existing wire, the host inserts the new node on the selected wire).
-pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &mut Vec<Change>, tiles: &[Tile], w: &Wiring, src_path: &Path, release_point: (f64, f64)) {
+pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &mut Vec<Change>, w: &Wiring, src_path: &Path, release_point: (f64, f64)) {
     let mut target: Option<(Path, ArgKey)> = None;
-    for tl in tiles {
-        if !tile_hovered(ui, tl) {
-            continue;
-        }
-        let (tp, tax, tay) = &t.geo.items[tl.slot];
-        let (mx, my) = mouse;
-        let gx = (mx - sx(t, 0.0)) / z;
-        let gy = (my - sy(t, 0.0)) / z;
-        let lx = gx - tax;
-        let ly = gy - tay;
-        let found: Option<(Path, ArgKey)> = match &tp.item {
-            Item::Return => t.scope.as_ref().map(|s| {
-                let mut pth = s.path.clone();
-                pth.push("@result".into());
-                (pth, ArgKey::Whole)
-            }),
-            Item::Input(_) => None,
-            Item::Item(n) => match &n.zone {
-                None => {
-                    // anywhere on the header is the in-
-                    match row_at(f64::INFINITY, tp, n, tp.shown, lx, ly) {
-                        Some(i) if i < n.rows.len() => {
-                            let r = &n.rows[i];
-                            if r.socket { Some((n.path.clone(), r.key.clone())) } else { None }
-                        }
-                        _ => None,
-                    }
-                }
-                Some(zn) if tp.collapsed => {
-                    let i = ((ly - p::HEAD_HEIGHT) / p::ROW_HEIGHT) as i64;
-                    match if i >= 0 { zn.rail.get(i as usize) } else { None } {
-                        Some(r) if r.key.is_some() && ly >= p::HEAD_HEIGHT => Some((n.path.clone(), r.key.clone().unwrap())),
-                        _ => None,
-                    }
-                }
-                Some(zn) => {
-                    let extras = extra_indices(zn);
-                    if ly < p::HEAD_HEIGHT {
-                        match label_index(zn).map(|li| &zn.rail[li]) {
-                            Some(r) if r.key.is_some() && lx < 24.0 => Some((n.path.clone(), r.key.clone().unwrap())),
+    let mut any_hover = false;
+    {
+        let hovers = t.hovers.clone();
+        let hv = hovers.borrow();
+        for c in &hv.cards {
+            if !ui.hovered_within(&c.tile) {
+                continue;
+            }
+            any_hover = true;
+            let (tp, tax, tay) = &t.geo.items[c.slot];
+            let (mx, my) = mouse;
+            let gx = (mx - sx(t, 0.0)) / z;
+            let gy = (my - sy(t, 0.0)) / z;
+            let lx = gx - tax;
+            let ly = gy - tay;
+            let found: Option<(Path, ArgKey)> = match &tp.item {
+                Item::Return => t.scope.as_ref().map(|s| {
+                    let mut pth = s.path.clone();
+                    pth.push("@result".into());
+                    (pth, ArgKey::Whole)
+                }),
+                Item::Input(_) => None,
+                Item::Item(n) => match &n.zone {
+                    None => {
+                        // anywhere on the header is the in-
+                        match row_at(f64::INFINITY, tp, n, tp.shown, lx, ly) {
+                            Some(i) if i < n.rows.len() => {
+                                let r = &n.rows[i];
+                                if r.socket { Some((n.path.clone(), r.key.clone())) } else { None }
+                            }
                             _ => None,
                         }
-                    } else if ly < p::rail_top(n) - 28.0 {
+                    }
+                    Some(zn) if tp.collapsed => {
                         let i = ((ly - p::HEAD_HEIGHT) / p::ROW_HEIGHT) as i64;
-                        match if i >= 0 { extras.get(i as usize).map(|ri| &zn.rail[*ri]) } else { None } {
-                            Some(r) if r.key.is_some() && lx < 24.0 => Some((n.path.clone(), r.key.clone().unwrap())),
+                        match if i >= 0 { zn.rail.get(i as usize) } else { None } {
+                            Some(r) if r.key.is_some() && ly >= p::HEAD_HEIGHT => Some((n.path.clone(), r.key.clone().unwrap())),
                             _ => None,
                         }
-                    } else if lx > tp.w - 24.0 && ly >= p::rail_top(n) {
-                        let mut pth = zn.scope.path.clone();
-                        pth.push("@result".into());
-                        Some((pth, ArgKey::Whole))
-                    } else {
-                        None
                     }
-                }
-            },
-        };
-        if found.is_some() {
-            target = found;
-            break;
+                    Some(zn) => {
+                        let extras = extra_indices(zn);
+                        if ly < p::HEAD_HEIGHT {
+                            match label_index(zn).map(|li| &zn.rail[li]) {
+                                Some(r) if r.key.is_some() && lx < 24.0 => Some((n.path.clone(), r.key.clone().unwrap())),
+                                _ => None,
+                            }
+                        } else if ly < p::rail_top(n) - 28.0 {
+                            let i = ((ly - p::HEAD_HEIGHT) / p::ROW_HEIGHT) as i64;
+                            match if i >= 0 { extras.get(i as usize).map(|ri| &zn.rail[*ri]) } else { None } {
+                                Some(r) if r.key.is_some() && lx < 24.0 => Some((n.path.clone(), r.key.clone().unwrap())),
+                                _ => None,
+                            }
+                        } else if lx > tp.w - 24.0 && ly >= p::rail_top(n) {
+                            let mut pth = zn.scope.path.clone();
+                            pth.push("@result".into());
+                            Some((pth, ArgKey::Whole))
+                        } else {
+                            None
+                        }
+                    }
+                },
+            };
+            if found.is_some() {
+                target = found;
+                break;
+            }
         }
     }
     // a wire let go on empty canvas: the add menu there, after the node it came from
-    let mut any_hover = false;
-    for tl in tiles {
-        if tile_hovered(ui, tl) {
-            any_hover = true;
-            break;
-        }
-    }
     let on_canvas = target.is_none() && src_path.last().is_some_and(|name| name.as_str() == w.src) && !any_hover;
     // an Alt-drag moves the wire: it comes off the inputs it was lifted from
     let lifted: Vec<(Path, ArgKey)> = w.lift.iter().filter(|i| Some((*i).clone()) != target).cloned().collect();
@@ -1048,147 +1074,274 @@ pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &
         }
         None => emit.push(Change::Notice("Drop the wire on an input row".to_owned())),
     }
-    let selected = if on_canvas { std::iter::once(src_path.clone()).collect() } else { t.selected.clone() };
-    (t.drag, t.selected) = (None, selected);
+    if on_canvas {
+        t.selected = std::iter::once(src_path.clone()).collect();
+    }
+    t.drag = None;
 }
 
-pub fn wire_pull(t: &mut Pane, ui: &mut Ui, ctx: &Ctx, z: f64, mouse: (f64, f64), tiles: &[Tile], wires_in_view: &[usize], emit: &mut Vec<Change>) {
-    // a wire pulled past 6 points is a new wire from its source: the same drag as from the out-port
-    if t.drag.is_none() && t.context.is_none() {
-        let mut found: Option<(usize, Path, Vec<(Path, ArgKey)>)> = None;
-        'outer: for &i in wires_in_view {
-            let wi = &t.geo.wires[i];
-            if let (Some(tg), Some(from)) = (&wi.target, &wi.from) {
-                for b in ctx.hits(i) {
-                    let sg = ui.signal(&b);
-                    let (px, py) = p64(sg.pointer);
-                    let (qx, qy) = p64(sg.press_point);
-                    if sg.held && left_button(&sg) && (px - qx).hypot(py - qy) > 6.0 {
-                        let lift = if ui.press_keys(&b).contains(&Key::Alt) { vec![(tg.0.clone(), tg.1.clone())] } else { Vec::new() };
-                        found = Some((i, from.clone(), lift));
-                        break 'outer;
+/// Whether a move of these cards carries others with them (a zone's): the content builds it.
+fn holds_others(t: &Pane, paths: &[Path]) -> bool {
+    t.geo.items.iter().any(|(pl, _, _)| paths.iter().any(|q| pl.path.len() > q.len() && pl.path.starts_with(q)))
+}
+
+/// The pointer on the content, before it builds: a press on a card selects it and starts its move, on
+/// an out-port starts a wire, on an input with a wire takes it off when clicked, on a wire selects it
+/// (pulled, it is a new wire from its source), on the ground starts a rubber band; the moves, wires and
+/// bands that follow and their release; a double click and a right click. The canvas holds every
+/// press on the content (`scope_hover::classify` says what it is on).
+fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, sig: &Signal, emit: &mut Vec<Change>) {
+    use crate::scope_hover::On;
+    let z = t.zoom;
+    let mouse = frame.input.pointer;
+    let left = left_button(sig);
+    // the pan's pointer grab (a right or middle drag pans in `view_step`)
+    let non_left = sig.button.is_some() && !left;
+    let panning = (sig.held || sig.released) && non_left;
+    let lost = frame.input.events.iter().any(|ev| matches!(ev, Event::FocusLost));
+    let grab = if (sig.pressed && non_left) || panning {
+        true
+    } else if (sig.released && non_left) || lost || frame.input.buttons.is_empty() {
+        false
+    } else {
+        t.panning_grab
+    };
+    if grab != t.panning_grab {
+        let _ = rays::sketch::set_relative_mouse(grab);
+    }
+    t.panning_grab = grab;
+    if sig.pressed {
+        t.press = Some(crate::scope_hover::classify(t, ui, p64(sig.press_point)));
+    }
+    let Some(on) = t.press.take() else { return };
+    let slot_path = |t: &Pane, slot: usize| t.geo.items[slot].0.path.clone();
+    // (the items held apart from the pane, which the gestures change)
+    let items = t.geo.items.clone();
+    match &on {
+        On::Card(slot) => {
+            let path = &items[*slot].0.path;
+            if sig.pressed && left && t.context.is_none() {
+                let additive = ui.press_keys(canvas).contains(&Key::Shift);
+                let selected: PathSet = if additive {
+                    let mut sel = t.selected.clone();
+                    if !sel.remove(path) {
+                        sel.insert(path.clone());
+                    }
+                    sel
+                } else if t.selected.contains(path) && t.selected.iter().all(|q| t.geo.slot.contains_key(q)) {
+                    t.selected.clone()
+                } else {
+                    std::iter::once(path.clone()).collect()
+                };
+                emit.push(Change::Selected(selected.iter().cloned().collect()));
+                let paths = if selected.len() == 1 { selected.iter().cloned().collect() } else { parents_removed(&selected.iter().cloned().collect::<Vec<_>>()) };
+                let slow = holds_others(t, &paths);
+                (t.selected, t.selected_wire, t.drag) = (selected, None, Some(Drag::Moving { paths, dx: 0.0, dy: 0.0, moved: false, slow }));
+            }
+            if sig.double_clicked && left && t.context.is_none() && t.editing.is_none() {
+                let (pl, _, ay) = &t.geo.items[*slot];
+                let top = sy(t, *ay);
+                match &pl.item {
+                    Item::Item(n) if !n.synthetic && f64::from(sig.press_point.1) < top + (p::HEAD_HEIGHT * z) => {
+                        t.editing = Some(Editing::Name(pl.path.clone()));
+                    }
+                    // a folded function or loop opens in place; anything else follows what it references
+                    Item::Item(n) if n.zone.is_some() && t.saved.collapsed(&pl.path) => {
+                        emit.push(Change::ZoneCollapsed { zone: pl.path.clone(), collapsed: false });
+                    }
+                    Item::Item(n) if !n.synthetic => {
+                        emit.push(Change::Activated(pl.path.clone()));
+                    }
+                    Item::Input(_) => {
+                        t.editing = Some(Editing::Default(pl.path.clone()));
+                    }
+                    _ => {}
+                }
+            }
+            let carried = t.selected.contains(path);
+            let mut begin = false;
+            if let Some(Drag::Moving { dx, dy, moved, slow, .. }) = &mut t.drag {
+                if sig.held && left && carried {
+                    let (ddx, ddy) = sig.drag;
+                    *dx += f64::from(ddx) / z;
+                    *dy += f64::from(ddy) / z;
+                    let start = !*moved && dx.hypot(*dy) > 3.0 / z;
+                    *moved = *moved || start;
+                    begin = start && !*slow;
+                }
+            }
+            if begin {
+                if let Some(Drag::Moving { paths, .. }) = &t.drag {
+                    crate::scope_hover::begin_move(t, paths);
+                }
+            }
+            if sig.released && left {
+                if let Some(Drag::Moving { paths, dx, dy, moved, slow }) = t.drag.take() {
+                    if moved {
+                        let mv: Vec<(Path, f64, f64)> = paths.iter().filter_map(|path| rel_at(t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + dx), p::snap(ry + dy)))).collect();
+                        emit.push(Change::Moved(mv));
+                        if !slow {
+                            // the cards stay where they were let go until the geometry has them there
+                            let slots = t.hovers.borrow().moving.clone();
+                            t.dropped = Some((slots, dx, dy, ui.frame_index()));
+                        }
                     }
                 }
             }
         }
-        if let Some((i, from, lift)) = found {
-            let wi = &t.geo.wires[i];
-            let src_ty = wi.ty.clone();
-            let fromp = (sx(t, wi.a.0), sy(t, wi.a.1));
-            let src = match t.item_at(&from).map(|(pl, _, _)| &pl.item) {
-                Some(Item::Item(n)) if n.zone.is_none() && n.binds.len() == 1 && n.binds[0] == n.name => Some(n.name.clone()),
-                Some(Item::Input(inp)) => Some(inp.name.clone()),
-                _ => None,
-            };
-            if let Some(src) = src {
-                { t.drag = Some(Drag::Wiring(Wiring { src, ty: src_ty, iter: false, from: fromp, lift })); };
+        On::Out(slot, src, ty, at) => {
+            if sig.pressed && left {
+                let iter = match &t.scope {
+                    Some(scope) => p::zones(scope).iter().any(|n| match &n.zone {
+                        Some(zn) => zn.rail.iter().any(|r| r.role == p::Role::Var && r.names.contains(src)),
+                        None => false,
+                    }),
+                    None => false,
+                };
+                // Alt on an out-port lifts every wire it feeds
+                let path = slot_path(t, *slot);
+                let lift: Vec<(Path, ArgKey)> = if !ui.press_keys(canvas).contains(&Key::Alt) {
+                    Vec::new()
+                } else {
+                    let mut acc: Vec<(Path, ArgKey)> = Vec::new();
+                    for wi in t.geo.wires.iter() {
+                        if let (Some(f), Some((tp, key, _))) = (&wi.from, &wi.target) {
+                            if *f == path {
+                                acc.insert(0, (tp.clone(), key.clone()));
+                            }
+                        }
+                    }
+                    acc
+                };
+                t.drag = Some(Drag::Wiring(Wiring { src: src.clone(), ty: ty.clone(), iter, from: *at, lift }));
             }
-        }
-    }
-    // ...and let go, it finishes like an out-port's wire
-    if let (Some(Drag::Wiring(wg)), Some(_)) = (t.drag.clone(), t.selected_wire.clone()) {
-        let mut released = false;
-        'a: for &i in wires_in_view {
-            for b in ctx.hits(i) {
-                let sg = ui.signal(&b);
-                if sg.released && left_button(&sg) {
-                    released = true;
-                    break 'a;
+            if sig.released && left {
+                match t.drag.take() {
+                    Some(Drag::Wiring(wg)) => {
+                        let path = slot_path(t, *slot);
+                        finish_wire(t, ui, z, mouse, emit, &wg, &path, p64(sig.release_point));
+                    }
+                    _ => {}
                 }
             }
         }
-        if released {
-            let mut from_wire: Option<(usize, (f64, f64))> = None;
-            'b: for &i in wires_in_view {
-                for b in ctx.hits(i) {
-                    let sg = ui.signal(&b);
-                    if sg.released && left_button(&sg) {
-                        from_wire = Some((i, p64(sg.release_point)));
-                        break 'b;
+        On::In(slot, del, rect) => {
+            let (x, y, w, h) = *rect;
+            let inside = contains(Rect::new(x as f32, y as f32, w as f32, h as f32), sig.release_point);
+            if sig.clicked && inside {
+                let ops: Vec<e::Op> = match (del, &t.geo.items[*slot].0.item) {
+                    (Some(Del::Unwire(i)), Item::Item(n)) => unwire(t, n, &n.rows[*i]),
+                    (Some(Del::Disconnect(key)), Item::Item(n)) => vec![e::Op::Disconnect { node: n.path.clone(), key: key.clone(), fallback: None }],
+                    _ => Vec::new(),
+                };
+                for op in ops {
+                    emit.push(Change::SyntaxEdit(op));
+                }
+            }
+        }
+        On::Wire(i) => {
+            if sig.pressed && left && t.context.is_none() {
+                if !t.selected.is_empty() {
+                    emit.push(Change::Selected(Vec::new()));
+                }
+                let target = t.geo.wires[*i].target.clone();
+                (t.selected, t.selected_wire) = (PathSet::new(), target);
+            }
+            // a wire pulled past 6 points is a new wire from its source: the same drag as from the out-port
+            let (px, py) = p64(sig.pointer);
+            let (qx, qy) = p64(sig.press_point);
+            if t.drag.is_none() && t.context.is_none() && sig.held && left && (px - qx).hypot(py - qy) > 6.0 {
+                let wi = &t.geo.wires[*i];
+                if let (Some(tg), Some(from)) = (&wi.target, &wi.from) {
+                    let lift = if ui.press_keys(canvas).contains(&Key::Alt) { vec![(tg.0.clone(), tg.1.clone())] } else { Vec::new() };
+                    let src = match t.item_at(from).map(|(pl, _, _)| &pl.item) {
+                        Some(Item::Item(n)) if n.zone.is_none() && n.binds.len() == 1 && n.binds[0] == n.name => Some(n.name.clone()),
+                        Some(Item::Input(inp)) => Some(inp.name.clone()),
+                        _ => None,
+                    };
+                    if let Some(src) = src {
+                        t.drag = Some(Drag::Wiring(Wiring { src, ty: wi.ty.clone(), iter: false, from: (sx(t, wi.a.0), sy(t, wi.a.1)), lift }));
                     }
                 }
             }
-            if let Some((i, release_point)) = from_wire {
-                let src_path = t.geo.wires[i].from.clone().unwrap_or_default();
-                finish_wire(t, ui, z, mouse, emit, tiles, &wg, &src_path, release_point);
+            // ...and let go, it finishes like an out-port's wire
+            if sig.released && left && t.selected_wire.is_some() {
+                if let Some(Drag::Wiring(wg)) = t.drag.clone() {
+                    let src_path = t.geo.wires[*i].from.clone().unwrap_or_default();
+                    finish_wire(t, ui, z, mouse, emit, &wg, &src_path, p64(sig.release_point));
+                }
+            }
+        }
+        On::Ground => {
+            if sig.pressed && left && t.context.is_none() {
+                let additive = ui.press_keys(canvas).contains(&Key::Shift);
+                if !additive && !t.selected.is_empty() {
+                    emit.push(Change::Selected(Vec::new()));
+                }
+                let base = if additive { t.selected.clone() } else { PathSet::new() };
+                (t.selected, t.selected_wire, t.drag) = (base.clone(), None, Some(Drag::Marquee { base }));
             }
         }
     }
+    // the rubber band selects the nodes of one scope it touches
+    if let Some(Drag::Marquee { base }) = &t.drag {
+        if sig.held || sig.released {
+            let (px, py) = if sig.released { p64(sig.release_point) } else { p64(sig.pointer) };
+            let (x0, y0) = p64(sig.press_point);
+            let rw = (px - x0).abs();
+            let rh = (py - y0).abs();
+            let selected: PathSet = if rw < 3.0 && rh < 3.0 { base.clone() } else { base.union(&marquee_hits(t, (x0.min(px), y0.min(py), rw, rh))).cloned().collect() };
+            if selected != t.selected {
+                emit.push(Change::Selected(selected.iter().cloned().collect()));
+                t.selected = selected;
+            }
+            if sig.released {
+                t.drag = None;
+            }
+        }
+    }
+    // a right click: a card's menu, or the add menu on the ground
+    if t.context.is_none() && context_clicked(sig) {
+        match &on {
+            On::Card(slot) => {
+                let path = slot_path(t, *slot);
+                // the menu acts on the nodes: a wire selected before is no longer the selection
+                let selected = if t.selected.contains(&path) { t.selected.clone() } else { std::iter::once(path.clone()).collect() };
+                if selected != t.selected {
+                    emit.push(Change::Selected(selected.iter().cloned().collect()));
+                }
+                (t.context, t.selected, t.selected_wire) = (Some((p64(sig.release_point), path)), selected, None);
+            }
+            On::Ground => {
+                let (x, y) = p64(sig.release_point);
+                emit.push(Change::MenuRequested(x, y));
+            }
+            _ => {}
+        }
+    }
+    if !sig.released {
+        t.press = Some(on);
+    }
 }
 
-pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[Tile], emit: &mut Vec<Change>) -> (Vec<(Path, i64)>, bool) {
+/// The content's own controls on the cards built this frame: what their fields asked (a read name or an
+/// expression selects what it names), the zone and lens controls.
+fn card_gestures(t: &mut Pane, ui: &mut Ui, built: &[Built], emit: &mut Vec<Change>) -> (Vec<(Path, i64)>, bool) {
     let mut lens_next: Vec<(Path, i64)> = t.lens.clone();
     let mut lens_changed = false;
-    // tile presses select and start a move; sockets start a wire
-    for tl in tiles {
-        let geo = t.geo.clone();
-        let (pl, _, _) = &geo.items[tl.slot];
-        let s = &tl.sig;
-        let sub = &tl.sub;
-        emit.extend(tl.fields.iter().cloned());
-        // a click on a read name or an expression chip selects what it names
-        if let Some(paths) = tl.fields.iter().find_map(|c| match c {
+    for b in built {
+        let geo = t.geo.items.clone();
+        let (pl, _, _) = &geo[b.slot];
+        emit.extend(b.fields.iter().cloned());
+        if let Some(paths) = b.fields.iter().find_map(|c| match c {
             Change::Selected(paths) => Some(paths.clone()),
             _ => None,
         }) {
             select(paths, t);
         }
-        if s.pressed && left_button(s) && t.context.is_none() {
-            let additive = ui.press_keys(&tl.tile).contains(&Key::Shift);
-            let selected: PathSet = if additive {
-                let mut sel = t.selected.clone();
-                if !sel.remove(&pl.path) {
-                    sel.insert(pl.path.clone());
-                }
-                sel
-            } else if t.selected.contains(&pl.path) && t.selected.iter().all(|q| t.geo.slot.contains_key(q)) {
-                t.selected.clone()
-            } else {
-                std::iter::once(pl.path.clone()).collect()
-            };
-            emit.push(Change::Selected(selected.iter().cloned().collect()));
-            let paths = parents_removed(&selected.iter().cloned().collect::<Vec<_>>());
-            { (t.selected, t.selected_wire, t.drag) = (selected, None, Some(Drag::Moving { paths, dx: 0.0, dy: 0.0, moved: false })); };
-        }
-        if s.double_clicked && left_button(s) && t.context.is_none() && t.editing.is_none() {
-            let (_, top, _, _) = ui.rect(&tl.tile).f64();
-            match &pl.item {
-                Item::Item(n) if !n.synthetic && f64::from(s.press_point.1) < top + (p::HEAD_HEIGHT * z) => {
-                    t.editing = Some(Editing::Name(pl.path.clone()));
-                }
-                // a folded function or loop opens in place; anything else follows what it references
-                Item::Item(n) if n.zone.is_some() && t.saved.collapsed(&pl.path) => {
-                    emit.push(Change::ZoneCollapsed { zone: pl.path.clone(), collapsed: false });
-                }
-                Item::Item(n) if !n.synthetic => {
-                    emit.push(Change::Activated(pl.path.clone()));
-                }
-                Item::Input(_) => {
-                    t.editing = Some(Editing::Default(pl.path.clone()));
-                }
-                _ => {}
-            }
-        }
-        if let Some(Drag::Moving { paths, dx, dy, moved }) = t.drag.clone() {
-            if s.held && left_button(s) && t.selected.contains(&pl.path) {
-                let (ddx, ddy) = s.drag;
-                let ndx = dx + (f64::from(ddx) / z);
-                let ndy = dy + (f64::from(ddy) / z);
-                { t.drag = Some(Drag::Moving { paths, dx: ndx, dy: ndy, moved: moved || ndx.hypot(ndy) > 3.0 / z }); };
-            }
-        }
-        if let Some(Drag::Moving { paths, dx, dy, moved }) = t.drag.clone() {
-            if s.released && left_button(s) {
-                if moved {
-                    let mv: Vec<(Path, f64, f64)> = paths.iter().filter_map(|path| rel_at(t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + dx), p::snap(ry + dy)))).collect();
-                    emit.push(Change::Moved(mv));
-                }
-                t.drag = None;
-            }
-        }
         // zone controls
-        for (b, on) in &sub.taps {
-            let bs = ui.signal(b);
+        for (bx, on) in &b.taps {
+            let bs = ui.signal(bx);
             if let Item::Item(n) = &pl.item {
                 match on {
                     Tap::Toggle if bs.clicked => emit.push(Change::ZoneCollapsed { zone: n.path.clone(), collapsed: !pl.collapsed }),
@@ -1219,7 +1372,7 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
                     }
                     Tap::Track if bs.pressed || bs.held => {
                         let count = count_of(t, &n.path);
-                        let (x, _, wd, _) = ui.rect(b).f64();
+                        let (x, _, wd, _) = ui.rect(bx).f64();
                         if count > 0 && wd > 0.0 {
                             let px = if bs.released { f64::from(bs.release_point.0) } else { f64::from(bs.pointer.0) };
                             let index = 0.max((count - 1).min((((px - x) / wd) * count as f64) as i64));
@@ -1232,132 +1385,8 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
                 }
             }
         }
-        for (b, del) in &sub.dels {
-            if ui.signal(b).clicked {
-                let ops: Vec<e::Op> = match (del, &pl.item) {
-                    (Del::Unwire(i), Item::Item(n)) => unwire(t, n, &n.rows[*i]),
-                    (Del::Disconnect(key), Item::Item(n)) => vec![e::Op::Disconnect { node: n.path.clone(), key: key.clone(), fallback: None }],
-                    _ => Vec::new(),
-                };
-                for op in ops {
-                    emit.push(Change::SyntaxEdit(op));
-                }
-            }
-        }
-        // wires
-        for (b, src, ty) in &sub.outs {
-            let bs = ui.signal(b);
-            if bs.pressed && left_button(&bs) {
-                let iter = match &t.scope {
-                    Some(scope) => p::zones(scope).iter().any(|n| match &n.zone {
-                        Some(zn) => zn.rail.iter().any(|r| r.role == p::Role::Var && r.names.contains(src)),
-                        None => false,
-                    }),
-                    None => false,
-                };
-                // Alt on an out-port lifts every wire it feeds
-                let lift: Vec<(Path, ArgKey)> = if !ui.press_keys(b).contains(&Key::Alt) {
-                    Vec::new()
-                } else {
-                    let mut acc: Vec<(Path, ArgKey)> = Vec::new();
-                    for wi in t.geo.wires.iter() {
-                        if let (Some(f), Some((path, key, _))) = (&wi.from, &wi.target) {
-                            if *f == pl.path {
-                                acc.insert(0, (path.clone(), key.clone()));
-                            }
-                        }
-                    }
-                    acc
-                };
-                let (x, y, wd, h) = ui.rect(b).f64();
-                { t.drag = Some(Drag::Wiring(Wiring { src: src.clone(), ty: ty.clone(), iter, from: (x + (wd / 2.0), y + (h / 2.0)), lift })); };
-            }
-            if bs.released && left_button(&bs) {
-                match t.drag.clone() {
-                    Some(Drag::Wiring(wg)) => {
-                        finish_wire(t, ui, z, mouse, emit, tiles, &wg, &pl.path, p64(bs.release_point));
-                    }
-                    _ => { t.drag = None; },
-                }
-            }
-        }
     }
     (lens_next, lens_changed)
-}
-
-/// The pointer: pan, a press on a wire or the canvas, the rubber band.
-pub fn pointer_step(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, canvas_signal: &Signal, tiles: &[Tile], ctx: &Ctx, wires_in_view: &[usize], emit: &mut Vec<Change>) {
-    let non_left = |sg: &Signal| sg.button != Some(MouseButton::LeftButton) && sg.button.is_some();
-    let non_left_pressed = |sg: &Signal| sg.pressed && non_left(sg);
-    let non_left_held = |sg: &Signal| sg.held && non_left(sg);
-    let non_left_released = |sg: &Signal| sg.released && non_left(sg);
-    let mut all_signals: Vec<&Signal> = vec![canvas_signal];
-    all_signals.extend(tiles.iter().map(|tl| &tl.sig));
-    let panning = all_signals.iter().any(|sg| non_left_held(sg) || non_left_released(sg));
-    let pan_pressed = all_signals.iter().any(|sg| non_left_pressed(sg));
-    let pan_released = all_signals.iter().any(|sg| non_left_released(sg));
-    let lost = frame.input.events.iter().any(|ev| matches!(ev, Event::FocusLost));
-    let panning_grab = if pan_pressed || panning {
-        true
-    } else if pan_released || lost || frame.input.buttons.is_empty() {
-        false
-    } else {
-        t.panning_grab
-    };
-    if panning_grab != t.panning_grab {
-        let _ = rays::sketch::set_relative_mouse(panning_grab);
-    }
-    t.panning_grab = panning_grab;
-    if panning {
-        // a drag on the bare canvas panned in `view_step`, before the build
-        if !(canvas_signal.held || canvas_signal.released) {
-            let (dx, dy) = tiles.iter().fold((0.0, 0.0), |(dx, dy), tl| (dx + f64::from(tl.sig.drag.0), dy + f64::from(tl.sig.drag.1)));
-            (t.pan_x, t.pan_y) = (t.pan_x + dx, t.pan_y + dy);
-        }
-    }
-    let tile_pressed = tiles.iter().any(|tl| tl.sig.pressed);
-    let mut wire_pressed: Option<usize> = None;
-    if !(t.context.is_some() || tile_pressed || canvas_signal.subtree_press.is_none()) {
-        'o: for &i in wires_in_view {
-            for b in ctx.hits(i) {
-                let sg = ui.signal(&b);
-                if sg.pressed && left_button(&sg) {
-                    wire_pressed = Some(i);
-                    break 'o;
-                }
-            }
-        }
-    }
-    if let Some(i) = wire_pressed {
-        if !t.selected.is_empty() {
-            emit.push(Change::Selected(Vec::new()));
-        }
-        let target = t.geo.wires[i].target.clone();
-        (t.selected, t.selected_wire) = (PathSet::new(), target);
-    }
-    if canvas_signal.pressed && left_button(canvas_signal) && t.context.is_none() && !tile_pressed && wire_pressed.is_none() {
-        let additive = ui.press_keys(canvas).contains(&Key::Shift);
-        if !additive && !t.selected.is_empty() {
-            emit.push(Change::Selected(Vec::new()));
-        }
-        let base = if additive { t.selected.clone() } else { PathSet::new() };
-        { (t.selected, t.selected_wire, t.drag) = (base.clone(), None, Some(Drag::Marquee { base })); };
-    }
-    // the rubber band selects the nodes of one scope it touches
-    if let Some(Drag::Marquee { base }) = t.drag.clone() {
-        if canvas_signal.held || canvas_signal.released {
-            let (px, py) = if canvas_signal.released { p64(canvas_signal.release_point) } else { p64(canvas_signal.pointer) };
-            let (x0, y0) = p64(canvas_signal.press_point);
-            let rw = (px - x0).abs();
-            let rh = (py - y0).abs();
-            let selected: PathSet = if rw < 3.0 && rh < 3.0 { base } else { base.union(&marquee_hits(t, (x0.min(px), y0.min(py), rw, rh))).cloned().collect() };
-            if selected != t.selected {
-                emit.push(Change::Selected(selected.iter().cloned().collect()));
-            }
-            let drag = if canvas_signal.released { None } else { t.drag.clone() };
-            (t.selected, t.drag) = (selected, drag);
-        }
-    }
 }
 
 pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut Vec<Change>) {
@@ -1479,121 +1508,12 @@ fn measure_ui(ui: &mut Ui, t: &Pane, size: i64, text: &str) -> f64 {
 
 type Marks = Vec<((f64, f64, f64, f64), Option<String>, Option<bool>)>;
 
-/// The frame's paint: grid and wires under the cards, the cards, then the overlays.
-pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: &UiBox, canvas_signal: &Signal, tiles: &[Tile], zones: &[usize], wires_in_view: &[usize], footers: &HashMap<Path, Footer>, chain: &Option<Chains>, mouse: (f64, f64)) -> (i64, i64) {
-    let snapshot: Rc<Pane> = Rc::new(t.clone());
-    // the hovered row is the row highlight's (`scope_hover`), but for a carried value over it: the
-    // carry builds every frame and marks its target row here
-    let row_hover: Option<(Path, usize)> = match (hovered_row(t), &t.carry_hot) {
-        (Some((path, key)), Some((hot, _))) if path == *hot => match t.item_at(&path).map(|(pl, _, _)| &pl.item) {
-            Some(Item::Item(n)) => n.rows.iter().position(|r| r.key == key).map(|i| (path.clone(), i)),
-            _ => None,
-        },
-        _ => None,
-    };
-    // a scene object nothing reads (taken out of its merge) is dimmed; a wire from it brings it back
-    let read = t.geo.read.clone();
-    let dimmed = |n: &p::Node| -> bool {
-        !n.synthetic
-            && n.zone.is_none()
-            && n.head.starts_with("scene/")
-            && n.head != "scene/merge"
-            && n.head != "scene/root"
-            && match box_at(t, &n.path) {
-                Some((ax, ay, wd, _)) => !read.contains(&fkey((ax + wd, ay + WIRE_HEAD_Y))),
-                None => false,
-            }
-    };
-    {
-        let snap = snapshot.clone();
-        let zone_slots: Vec<usize> = zones.to_vec();
-        let wires: Vec<usize> = wires_in_view.to_vec();
-        ui.draw(layer, move |paint, rect| { let rect = rect.f64();
-            sp::paint_background(paint, &snap, rect, &wires, &zone_slots);
-        });
-    }
-    for tl in tiles {
-        let (pl, ax, ay) = &t.geo.items[tl.slot];
-        let (ax, ay) = (*ax, *ay);
-        let isel = t.selected.contains(&pl.path);
-        // a card painted whole on hover reads it here (its hover builds again); a ground's is patched
-        let hovered = tl.ground.is_none() && t.drag.is_none() && t.carry_hot.is_none() && ui.hovered_within(&tl.tile);
-        let ground = tl.ground.is_some();
-        let snap = snapshot.clone();
-        let slot = tl.slot;
-        // the per-item facts the painter needs, decided here
-        let mut footer: Option<Footer> = None;
-        let mut lens_step: Option<i64> = None;
-        let mut carry = false;
-        let mut out_wired = false;
-        let mut failed: Option<String> = None;
-        let mut dim = false;
-        let mut rh: Option<usize> = None;
-        let mut probe = 0;
-        let mut count = 0;
-        let mut recede = false;
-        if let Item::Item(n) = &pl.item {
-            footer = footers.get(&n.path).cloned();
-            lens_step = lens_of(t, &n.path);
-            carry = matches!(&t.carry_hot, Some((hp, _)) if *hp == n.path);
-            out_wired = read.contains(&fkey(out_anchor(pl, ax, ay)));
-            failed = t.failed.iter().find(|(q, _)| *q == n.path).map(|(_, c)| c.clone());
-            dim = n.zone.is_none() || pl.collapsed;
-            dim = dim && dimmed(n);
-            rh = match &row_hover {
-                Some((rp, i)) if *rp == n.path => Some(*i),
-                _ => None,
-            };
-            probe = t.saved.probe(&n.path);
-            count = count_of(t, &n.path);
-            // the chain of the selection stays; the rest of the cards recede
-            recede = match chain {
-                Some(c) => !node_lit(c, &pl.path) && (if n.zone.is_some() { pl.collapsed } else { true }),
-                None => false,
-            };
-        }
-        ui.draw(&tl.card, move |paint, rect| { let rect = rect.f64();
-            let (pl, _, _) = &snap.geo.items[slot];
-            let (x, y, w, h) = rect;
-            match &pl.item {
-                Item::Input(_) if pl.shown == Level::Point => sp::paint_point(paint, &snap, z, fs, pl, None, isel, rect),
-                Item::Input(i) => sp::paint_input(paint, &snap, z, fs, i, isel, rect),
-                Item::Return => {
-                    if let Some(s) = &snap.scope {
-                        sp::paint_return(paint, &snap, z, fs, s, isel, rect);
-                    }
-                }
-                Item::Item(n) => {
-                    match &n.zone {
-                        Some(zn) if !pl.collapsed => {
-                            sp::paint_zone_frame(paint, &snap, z, fs, footer.as_ref(), n, zn, isel, out_wired, rect, probe, count);
-                        }
-                        _ => {
-                            let o = sp::NodeOpts { footer: footer.clone(), lens_step, hovered, carry, out_wired, shown: pl.shown, failed: failed.clone(), ground };
-                            sp::paint_node(paint, &snap, z, fs, &o, pl, n, isel, rh, rect);
-                            if dim {
-                                paint.fill(x as f32, y as f32, w as f32, h as f32, color::with_alpha(snap.theme.panel, 150));
-                            }
-                        }
-                    }
-                    if recede {
-                        paint.fill(x as f32, y as f32, w as f32, h as f32, color::with_alpha(snap.theme.panel, 170));
-                    }
-                }
-            }
-        });
-    }
-    let drawn_items = tiles.len() as i64;
-    let drawn_zones = zones.len() as i64;
-    // the rubber band and the expanded chip, over the tiles
-    let band: Option<Wiring> = match &t.drag {
-        Some(Drag::Wiring(wg)) => Some(wg.clone()),
-        _ => None,
-    };
+/// Over the cards, in the content: a carried value's places and the one under it, the letter hints.
+fn paint_over(t: &Pane, ui: &mut Ui, z: f64, host: &UiBox, visible: &[usize]) {
     let mut marks: Marks = Vec::new();
     if !(t.carry_lit.is_empty() && t.carry_hot.is_none()) {
-        for tl in tiles {
-            let (pl, ax, ay) = &t.geo.items[tl.slot];
+        for &slot in visible {
+            let (pl, ax, ay) = &t.geo.items[slot];
             let rect = (sx(t, *ax), sy(t, *ay), pl.w * z, pl.h * z);
             let letter = t.carry_lit.iter().find(|(q, _)| *q == pl.path).map(|(_, l)| l.clone());
             match (&letter, &t.carry_hot) {
@@ -1607,9 +1527,11 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: 
         Some((q, ok)) if q.len() == 1 && q[0] == t.key => Some(*ok),
         _ => None,
     };
+    if marks.is_empty() && canvas_hot.is_none() && t.hinting.is_none() {
+        return;
+    }
     let font_size = ui.font_size();
-    let snap = snapshot;
-    let press_point = p64(canvas_signal.press_point);
+    let snap = Rc::new(t.clone());
     // over the cards, in the content box (it moves with them); what is the pane's is the pane's rectangle
     let pane = (t.x as f64, t.y as f64, t.width as f64, t.height as f64);
     ui.draw_over(host, move |paint, _| {
@@ -1652,18 +1574,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, host: 
                 }
             }
         }
-        if let Some(wg) = &band {
-            if let Some((a, b)) = clip_segment(wg.from, mouse, (cx, cy, cw, ch)) {
-                paint.line_w(p32(a), p32(b), 1.5, sp::ty_color(&snap, wg.ty.as_ref()));
-            }
-        }
-        if let Some(Drag::Marquee { .. }) = &snap.drag {
-            let (x0, y0) = press_point;
-            let (mx, my) = mouse;
-            sp::frame_in(paint, x0.min(mx), y0.min(my), (mx - x0).abs(), (my - y0).abs(), Some(theme::tint(&snap.theme)), snap.theme.accent);
-        }
     });
-    (drawn_items, drawn_zones)
 }
 
 /// A point's box is as wide as its name, drawn at the zoom's font: measured again when the font
@@ -1687,7 +1598,7 @@ fn refont(t: &mut Pane, ui: &mut Ui) {
 }
 
 /// The overscan of a cached pane's content: half the pane past each side, at most 400 points.
-fn overscan(t: &Pane) -> (f64, f64) {
+pub fn overscan(t: &Pane) -> (f64, f64) {
     ((t.width as f64 / 2.0).min(400.0).round(), (t.height as f64 / 2.0).min(400.0).round())
 }
 
@@ -1709,11 +1620,13 @@ fn view_step(t: &mut Pane, sig: &Signal, frame: &rframe::Frame) {
     }
 }
 
-/// The pane's canvas: the bare ground's hit box (presses, pans, the wheel), clipping what it holds.
+/// The canvas: the bare ground's hit box (presses, pans, the wheel), clipping what it holds. It takes
+/// the presses on the cards, ports and wires too (they are `BLOCKING`, not clickable), so a press, a
+/// drag or a selection on the content builds none of it.
 fn canvas_box(t: &Pane, ui: &mut Ui) -> UiBox {
     ui.box_(
         "pxui-scope",
-        BoxOpts::default().flags(CLICKABLE | SCROLL | CLIP | BLOCKING).w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at((t.x as f32, t.y as f32)),
+        BoxOpts::default().flags(CLICKABLE | SCROLL | CLIP | BLOCKING | CAPTURE_UNCLAIMED).w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at((t.x as f32, t.y as f32)),
     )
 }
 
@@ -1722,19 +1635,52 @@ fn anchor_of(t: &Pane) -> Option<(f64, f64, f64)> {
     t.built.borrow().as_ref().map(|(last, _)| (last.pan_x, last.pan_y, last.zoom))
 }
 
-/// `update` with the canvas in the pane root (built every frame: one box) and everything on it in a
-/// cached view, built again only when the pane differs from what its last build left
-/// (`scope_state::revision`, which leaves the pan, zoom and hover out), when input reaches its
-/// boxes, while keys are pressed (letter hints), the canvas is pressed or released, or a payload is
-/// carried. The hover is `scope_hover`'s: patched looks and a view over the content.
-/// Kept, the pane is unchanged and no changes are emitted. The view holds the pane and an overscan
-/// past each side (`overscan`) at the pan and zoom it was built at; a pan offsets it and a zoom
-/// scales it about the pan (`view_offset`, `view_transform`: hit testing follows), so a drag or a
-/// wheel on the canvas builds nothing. It is built again at the new pan and zoom once the pane would
-/// show past its overscan, and once the zoom has rested 0.1 s (text shaped and strokes snapped at
-/// the zoom's own size).
+/// Cards a move let go of stay where it put them (their views' offsets) until the geometry has them
+/// there: the host's move arrives with the next frame; with no host, the pane moves them itself then.
+fn settle(t: &mut Pane, ui: &Ui) {
+    let Some((slots, dx, dy, at)) = &t.dropped else { return };
+    let built = t.hovers.borrow().geo == (Rc::as_ptr(&t.geo.items) as *const u8 as usize, Rc::as_ptr(&t.geo.wires) as *const u8 as usize);
+    if built && ui.frame_index() <= *at {
+        return;
+    }
+    if built {
+        if let Some(scope) = t.scope.clone() {
+            let (dx, dy) = (*dx, *dy);
+            let moving: PathSet = slots.iter().map(|&k| t.geo.items[k].0.path.clone()).collect();
+            let layout = t.layout.clone();
+            regeo(t, &scope, &layout, &|q: &[Symbol]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
+        }
+    }
+    t.dropped = None;
+    crate::scope_hover::end_move(t);
+}
+
+/// `update` with the canvas in the pane root (built every frame: one box) and everything on it in
+/// cached views, in paint order: the wires (grid, zones, frames, wires), a move's wires, the content
+/// (one view of the cards, each card a view of its own), a dragged wire or rubber band, and the hover's
+/// view. The content builds again only when the pane differs from what its last build left
+/// (`scope_state::revision`: not the pan, zoom, hover, selection, a move of cards, a dragged wire or
+/// band) or input reaches a widget on it (a field, a zone's control); the wires when that or the
+/// selection's chains change. The pointer's gestures run before anything builds (`gestures`), from
+/// the boxes the last build left. Kept, the pane is unchanged and no changes are emitted. The anchored
+/// views hold the pane and an overscan past each side (`overscan`) at the pan and zoom they were built
+/// at; a pan offsets them and a zoom scales them about the pan (`view_offset`, `view_transform`: hit
+/// testing follows), so a drag or a wheel on the canvas builds nothing. They build again at the new pan
+/// and zoom once the pane would show past their overscan, and once the zoom has rested 0.1 s (text
+/// shaped and strokes snapped at the zoom's own size).
 pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) {
+    pane(label, 0, pressed, t, ui, frame, changes);
+}
+
+/// The graph canvas for one frame, every view of it built; its canvas box.
+pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) -> UiBox {
+    pane("graph-view", ui.frame_index(), pressed, t, ui, frame, changes)
+}
+
+/// The pane's views; with a `salt` changing every frame none is kept.
+fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) -> UiBox {
     use std::hash::{Hash, Hasher};
+    // the first view shows the whole graph, at zoom 1 when it fits (Home frames everything)
     if !t.framed {
         frame_all(t);
         t.framed = true;
@@ -1742,6 +1688,7 @@ pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fr
     let canvas = canvas_box(t, ui);
     let sig = ui.signal(&canvas);
     view_step(t, &sig, frame);
+    settle(t, ui);
     let ov = overscan(t);
     let (w, h) = (t.width as f64, t.height as f64);
     // rebuilt at the pan and zoom now: the zoom rested, or the pane shows past the content's edge
@@ -1765,20 +1712,59 @@ pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fr
         // at the zoom it builds at, before the revision reads the geometry
         refont(t, ui);
     }
+    step_hints(t, pressed, sig.subtree_press.is_some(), changes);
     // what the pointer is over, from the boxes the last build left (a carry's target row is the build's)
-    let now = crate::scope_hover::find(t, ui, frame.input.pointer);
+    let now = crate::scope_hover::find(t, ui, &canvas, frame.input.pointer);
+    gestures(t, ui, frame, &canvas, &sig, changes);
+    context_menu(t, ui, changes);
+    // a move of cards that hold others, and a frame carried by its title, move their items in a fresh
+    // geometry the content builds
+    if let Some(scope) = t.scope.clone() {
+        let moving = match &t.drag {
+            Some(Drag::Moving { paths, dx, dy, moved: true, slow: true }) => Some((paths.clone(), *dx, *dy)),
+            Some(Drag::Carrying { paths, dx, dy, .. }) if dx.hypot(*dy) > 0.0 => Some((paths.clone(), *dx, *dy)),
+            _ => None,
+        };
+        if let Some((paths, dx, dy)) = moving {
+            let moving: PathSet = paths.into_iter().collect();
+            let layout = t.layout.clone();
+            regeo(t, &scope, &layout, &|q: &[Symbol]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
+        }
+    }
     let rev = if moved { revision(t).wrapping_add(1) } else { revision(t) };
-    // what the canvas's input does beyond a pan is the build's
-    let busy = sig.pressed || sig.released || sig.clicked || sig.double_clicked || (sig.held && left_button(&sig)) || !pressed.is_empty() || ui.carrying().is_some();
-    // (kept after the busy frame: the frame after it builds only if something else changed)
-    if busy {
+    // a carried payload's places follow the pointer: the content builds every frame of a carry
+    if ui.carrying().is_some() {
         t.busy_t = frame.input.t;
     }
     let mut hh = std::hash::DefaultHasher::new();
-    (rev, t.busy_t.to_bits(), now.whole).hash(&mut hh);
-    let mut built = None;
+    (rev, t.busy_t.to_bits(), salt).hash(&mut hh);
+    let key = hh.finish();
+    let (cw, ch) = (Size::Px((w + 2.0 * ov.0) as f32), Size::Px((h + 2.0 * ov.1) as f32));
+    let chain = chains_of(t);
+    let selected = crate::scope_hover::selected_wire_index(t);
+    let attached = crate::scope_hover::attached(t);
     let saved = ui.enter(&canvas);
-    let view = ui.view(label, hh.finish(), Size::Px((w + 2.0 * ov.0) as f32), Size::Px((h + 2.0 * ov.1) as f32), &mut |ui| {
+    // the grid, the zones, the frames and the wires, under the cards: they build again with the
+    // content and when the selection's chains or the selected wire change
+    let mut hh = std::hash::DefaultHasher::new();
+    (key, chain.as_ref().map(|c| Rc::as_ptr(c) as usize), selected, Rc::as_ptr(&attached) as usize).hash(&mut hh);
+    let (built, hovers) = (t.built.clone(), t.hovers.clone());
+    let wires = ui.view("graph-wires", hh.finish(), cw, ch, &mut |ui| {
+        let layer = ui.box_("pxui-scope-layer", BoxOpts::default().w(cw).h(ch).at((0.0, 0.0)));
+        let (built, hovers, chain, attached) = (built.clone(), hovers.clone(), chain.clone(), attached.clone());
+        ui.draw(&layer, move |paint, rect| {
+            let Some((kept, _)) = &*built.borrow() else { return };
+            let hv = hovers.borrow();
+            let sel = sp::Sel { chain: chain.clone(), wire: selected, skip: attached.clone() };
+            sp::paint_background(paint, kept, &sel, rect.f64(), &hv.reach, &hv.zones);
+        });
+    });
+    ui.set_at(&wires, (-ov.0 as f32, -ov.1 as f32));
+    // the wires a move of cards carries, where it puts them
+    let under = ui.view("graph-drag-wires", crate::scope_hover::drag_wires_key(t) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::drag_wires(t, ui));
+    ui.set_at(&under, (0.0, 0.0));
+    let mut built = None;
+    let view = ui.view(label, key, cw, ch, &mut |ui| {
         // a verifying run of the kept view builds as the kept build did
         let now = (t.pan_x, t.pan_y, t.zoom);
         if ui.verifying() {
@@ -1787,9 +1773,9 @@ pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fr
             }
         }
         let before = t.clone();
-        let at = content(pressed, t, ui, frame, &canvas, &sig, ov, changes);
-        // a build that changed the pane (a press selected) painted part of it from the state before: it
-        // is kept as of before, so the next frame builds again from the state now
+        let at = content(t, ui, &canvas, ov, key, changes);
+        // a build that changed the pane (a field's click selected) painted part of it from the state
+        // before: it is kept as of before, so the next frame builds again from the state now
         let settled = builds_same(&before, t);
         if !settled {
             ui.request_frame();
@@ -1799,80 +1785,47 @@ pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fr
         }
         built = Some((at, if settled { None } else { Some(before) }));
     });
-    ui.leave(saved);
     ui.set_at(&view, (-ov.0 as f32, -ov.1 as f32));
     if let Some((at, before)) = built {
         let mut kept = before.unwrap_or_else(|| t.clone());
         (kept.pan_x, kept.pan_y, kept.zoom) = at;
         keep_built(&kept, rev);
     }
-    // the content where the pan and zoom now put it
+    // a dragged wire or rubber band, over the cards
+    let (mouse, press) = (frame.input.pointer, p64(sig.press_point));
+    let marks = ui.view("graph-drag-marks", crate::scope_hover::drag_marks_key(t, mouse, press) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::drag_marks(t, ui, mouse, press));
+    ui.set_at(&marks, (0.0, 0.0));
+    // the anchored views where the pan and zoom now put them
     // (about the window's corner: a built point p shows at k (p + o), the pane's pan point where the
     // build had it scaled by k about it; with k one, p + o exactly)
-    if let Some((bx, by, bz)) = anchor_of(t) {
+    let anchor = anchor_of(t);
+    if let Some((bx, by, bz)) = anchor {
         let k = t.zoom / bz;
         let shift = |o: f64, pan: f64, built: f64| if k == 1.0 { pan - built } else { (o + pan) / k - (o + built) };
-        ui.view_offset(&view, shift(t.x as f64, t.pan_x, bx) as f32, shift(t.y as f64, t.pan_y, by) as f32);
-        ui.view_transform_about(&view, k as f32, [1.0, 0.0, 0.0, 1.0], (0.0, 0.0));
+        for v in [&wires, &view] {
+            ui.view_offset(v, shift(t.x as f64, t.pan_x, bx) as f32, shift(t.y as f64, t.pan_y, by) as f32);
+            ui.view_transform_about(v, k as f32, [1.0, 0.0, 0.0, 1.0], (0.0, 0.0));
+        }
     }
-    // the hover: the hovered card's ground and row through the patch path, and over the cards a
-    // view of its own that builds only when what it shows changes
+    // a move of cards: their views offset; the hover's and the selection's looks through the patch
+    // path, and over the cards a view of the hover that builds only when what it shows changes
+    crate::scope_hover::place_cards(t, ui, anchor.map_or(t.zoom, |a| a.2));
     crate::scope_hover::show(t, ui, &now);
     let font_size = ui.font_size();
-    let saved = ui.enter(&canvas);
-    let over = ui.view("graph-hover", crate::scope_hover::overlay_key(t, &now), Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::overlay(t, ui, &now, font_size));
-    ui.leave(saved);
+    let over = ui.view("graph-hover", crate::scope_hover::overlay_key(t, &now, key) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::overlay(t, ui, &now, font_size));
     ui.set_at(&over, (0.0, 0.0));
-}
-
-/// The graph canvas for one frame, built in full; its canvas box.
-pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) -> UiBox {
-    // the first view shows the whole graph, at zoom 1 when it fits (Home frames everything)
-    if !t.framed {
-        frame_all(t);
-        t.framed = true;
-    }
-    let canvas = canvas_box(t, ui);
-    let sig = ui.signal(&canvas);
-    view_step(t, &sig, frame);
-    let now = crate::scope_hover::find(t, ui, frame.input.pointer);
-    let saved = ui.enter(&canvas);
-    content(pressed, t, ui, frame, &canvas, &sig, (0.0, 0.0), changes);
-    crate::scope_hover::show(t, ui, &now);
-    let font_size = ui.font_size();
-    crate::scope_hover::overlay(t, ui, &now, font_size);
     ui.leave(saved);
     canvas
 }
 
-/// Everything on the canvas, in a content box `ov` past each side of the pane: the grid, zones,
-/// wires, cards and what is over them, and the gestures they take. The pan and zoom it was built at.
-fn content(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, canvas_signal: &Signal, ov: (f64, f64), changes: &mut Vec<Change>) -> (f64, f64, f64) {
-    let (cw, ch) = ((t.width as f64 + 2.0 * ov.0) as f32, (t.height as f64 + 2.0 * ov.1) as f32);
+/// The cards on the canvas, in a content box `ov` past each side of the pane, and the gestures of the
+/// widgets on them. The pan and zoom it was built at.
+fn content(t: &mut Pane, ui: &mut Ui, canvas: &UiBox, ov: (f64, f64), rev: u64, changes: &mut Vec<Change>) -> (f64, f64, f64) {
     let at = (t.pan_x, t.pan_y, t.zoom);
     // at the pane's corner, so its children land where they would on the canvas (to the bit)
     let host = ui.box_("pxui-scope-content", BoxOpts::default().w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at((ov.0 as f32, ov.1 as f32)));
     let saved = ui.enter(&host);
-    step_hints(t, pressed, canvas_signal.subtree_press.is_some(), changes);
-    // the grid, zones and wires paint in a child, under the cards
-    let layer = ui.box_("pxui-scope-layer", BoxOpts::default().w(Size::Px(cw)).h(Size::Px(ch)).at((-ov.0 as f32, -ov.1 as f32)));
     refont(t, ui);
-    // a drag in progress moves its items in a fresh geometry
-    if let Some(scope) = t.scope.clone() {
-        match t.drag.clone() {
-            Some(Drag::Moving { paths, dx, dy, moved }) if moved => {
-                let moving: PathSet = paths.into_iter().collect();
-                let layout = t.layout.clone();
-                regeo(t, &scope, &layout, &|q: &[Symbol]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
-            }
-            Some(Drag::Carrying { paths, dx, dy, .. }) if dx.hypot(dy) > 0.0 => {
-                let moving: PathSet = paths.into_iter().collect();
-                let layout = t.layout.clone();
-                regeo(t, &scope, &layout, &|q: &[Symbol]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
-            }
-            _ => {}
-        }
-    }
     let z = t.zoom;
     // text follows the zoom down to 5 points (a 6-point row at zoom 0.25 holds it)
     let fs = font_of(z);
@@ -1895,24 +1848,6 @@ fn content(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, ca
             x < vx + vw && x + wd > vx && y < vy + vh && y + h > vy
         })
         .collect();
-    let wires_in_view = index_query(&t.geo.reach, in_view(t, 4.0));
-    let zones: Vec<usize> = visible
-        .iter()
-        .copied()
-        .filter(|&i| {
-            let (pl, _, _) = &t.geo.items[i];
-            matches!(&pl.item, Item::Item(n) if n.zone.is_some()) && !pl.collapsed
-        })
-        .collect();
-    let mouse = frame.input.pointer;
-    // Segment rectangles live in the shared hit tree, behind the cards; ports built below take hover
-    // precedence. A segment is cut to `clip` (pane points) first, so what is out of view costs one clip;
-    // a diagonal is then a run of 16-point boxes.
-    let chain = chains_of(t);
-    let mut ctx = Ctx { wire_hits: HashMap::new(), finished: false, opened: None, fs, ov };
-    for &i in &wires_in_view {
-        wire_boxes(&mut ctx, t, ui, (0.0, 0.0), "wire", (-ox, -oy, viewport.2, viewport.3), i);
-    }
     // footers: only for what is in view, and not when too small to read
     let mut footers: HashMap<Path, Footer> = HashMap::new();
     if let Some(records) = &t.records {
@@ -1927,42 +1862,41 @@ fn content(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, ca
             }
         }
     }
-    // tiles
-    let mut tiles: Vec<Tile> = Vec::new();
-    for &i in &visible {
-        tiles.push(build_tile(&mut ctx, t, ui, z, fs, i));
-    }
-    // what the hover reads between builds (a verifying run leaves the kept build's)
-    t.hovers.borrow_mut().declared();
+    // the cards, each a view of its own; what the hover and the gestures read between builds (a
+    // verifying run leaves the kept build's)
+    let snap = Rc::new(t.clone());
+    let mut ctx = Ctx { finished: false, opened: None, fs, ov };
+    let mut built: Vec<Built> = Vec::new();
     if !ui.verifying() {
-        let hovers = t.hovers.clone();
-        let mut hv = hovers.borrow_mut();
-        hv.clear(t);
-        for tl in &tiles {
-            hv.cards.push(crate::scope_hover::Card { slot: tl.slot, tile: tl.tile, ground: tl.ground, whole: tl.whole });
-            hv.ports.extend(tl.sub.outs.iter().map(|(b, _, _)| *b));
-            hv.ports.extend(tl.sub.inputs.iter().copied());
-        }
-        for (&i, boxes) in &ctx.wire_hits {
-            hv.wires.extend(boxes.iter().map(|b| (*b, i)));
-        }
+        t.hovers.borrow_mut().begin(t);
+    }
+    for &i in &visible {
+        build_card(&mut ctx, t, ui, z, fs, i, &snap, &footers, rev, &mut built);
+    }
+    if !ui.verifying() {
+        let wires_in_view = index_query(&t.geo.reach, in_view(t, 4.0));
+        let zones = visible.iter().copied().filter(|&i| {
+            let (pl, _, _) = &t.geo.items[i];
+            matches!(&pl.item, Item::Item(n) if n.zone.is_some()) && !pl.collapsed
+        });
+        let mut hv = t.hovers.borrow_mut();
+        hv.end(t, ui);
         hv.reach.extend_from_slice(&wires_in_view);
+        hv.zones.extend(zones);
     }
     if ctx.finished {
         t.editing = None;
     }
-    if let Some(c) = drop_change(t, ui, canvas, &tiles) {
+    if let Some(c) = drop_change(t, ui, canvas) {
         changes.push(c);
     }
     frames_step(t, ui, &mut ctx, z, changes);
     if ctx.finished { t.editing = None; }
     if let Some(editing) = ctx.opened.take() { t.editing = Some(editing); }
-    pointer_step(t, ui, frame, canvas, canvas_signal, &tiles, &ctx, &wires_in_view, changes);
-    wire_pull(t, ui, &ctx, z, mouse, &tiles, &wires_in_view, changes);
-    let (lens_next, lens_changed) = tile_gestures(t, ui, z, mouse, &tiles, changes);
-    context_step(t, ui, &tiles, canvas_signal, changes);
-    let (drawn_items, drawn_zones) = paint_frame(t, ui, z, fs, &layer, &host, canvas_signal, &tiles, &zones, &wires_in_view, &footers, &chain, mouse);
-    { t.stats = Stats { drawn_items, drawn_zones, ..t.stats }; };
+    let (lens_next, lens_changed) = card_gestures(t, ui, &built, changes);
+    paint_over(t, ui, z, &host, &visible);
+    let drawn_zones = visible.iter().filter(|&&i| matches!(&t.geo.items[i].0.item, Item::Item(n) if n.zone.is_some()) && !t.geo.items[i].0.collapsed).count() as i64;
+    t.stats = Stats { drawn_items: visible.len() as i64, drawn_zones, ..t.stats };
     // an opened or stepped expansion panel changes its card's size: lay out again for the next frame
     if lens_changed {
         t.lens = lens_next;
@@ -2034,6 +1968,6 @@ pub mod inspect {
 }
 
 /// A tile-relative port or tap box: `pos` and `size` in card points, scaled by the zoom.
-fn bxz(ui: &mut Ui, z: f64, name: &str, pos: (f64, f64), size: (f64, f64)) -> UiBox {
-    box_in(ui, CLICKABLE, size.0 * z, size.1 * z, (pos.0 * z, pos.1 * z), name)
+fn bxz(ui: &mut Ui, z: f64, flags: Flags, name: &str, pos: (f64, f64), size: (f64, f64)) -> UiBox {
+    box_in(ui, flags, size.0 * z, size.1 * z, (pos.0 * z, pos.1 * z), name)
 }

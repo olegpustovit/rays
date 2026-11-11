@@ -13,7 +13,7 @@ pub fn macro_step(t: &Pane, path: &[Symbol]) -> Option<i64> {
 }
 
 pub fn highlighted_connections(t: &Pane) -> Vec<((f64, f64), (f64, f64))> {
-    t.highlighted.iter().map(|wi| ((sx(t, wi.a.0), sy(t, wi.a.1)), (sx(t, wi.b.0), sy(t, wi.b.1)))).collect()
+    t.highlighted.iter().map(|&i| &t.geo.wires[i]).map(|wi| ((sx(t, wi.a.0), sy(t, wi.a.1)), (sx(t, wi.b.0), sy(t, wi.b.1)))).collect()
 }
 
 /// previous button, track, next button, in screen points
@@ -178,7 +178,7 @@ pub fn ports(t: &Pane, path: &[Symbol]) -> Vec<(f64, f64)> {
 
 /// the nodes upstream and downstream of the selection (it included); `None` with nothing selected
 pub fn chain(t: &Pane) -> Option<(Vec<Path>, Vec<Path>)> {
-    chains_of(t).map(|(up, down)| (up.into_iter().collect(), down.into_iter().collect()))
+    chains_of(t).map(|c| c.paths(&t.geo.items))
 }
 
 /// the wires drawn as a name tag at the use site: longer than three columns and not in a lit chain
@@ -238,4 +238,9 @@ pub fn wire_midpoint(t: &Pane, i: i64) -> Option<(f64, f64)> {
         }
         best.and_then(|q| at(q, 0.5))
     }
+}
+
+/// How many times the pane's content has been built (verifying runs aside).
+pub fn content_builds(t: &Pane) -> u64 {
+    t.hovers.borrow().builds
 }

@@ -172,7 +172,12 @@ fn workspace(name: &str, text: &str) {
         check(zoom.views == 0, &format!("zooming rebuilt {} views", zoom.views));
         let rest = measure(&mut r, 12, &|r, _| r.step(end, vec![]));
         report("empty graph zoom at rest", &rest, 12);
-        check(rest.views == 1, &format!("the rested zoom rebuilt {} views", rest.views));
+        // (the graph's anchored views: its wires, its content and each card's view in it)
+        let cards = {
+            let core: &rays_editor::editor_model::EditorModel = &r.e.core;
+            rays_graph::scope_pane::stats(rays_editor::editor_model::pane_view(&core.into())).drawn_items as usize
+        };
+        check(rest.views == 2 + cards, &format!("the rested zoom rebuilt {} views ({cards} cards)", rest.views));
     }
     r.close();
 }
