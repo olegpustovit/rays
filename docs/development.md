@@ -220,8 +220,9 @@ On Linux the main-thread stack is the `RLIMIT_STACK` the process was exec'd with
 Sketch text uses DejaVu Sans, Noto Sans or Liberation Sans when installed, else the bundled Pragmasevka. The
 preferences live in SDL's `~/.local/share/rays/editor`. What the Wayland host does differently:
 
-- File dialogs return a typed `Unsupported` error (`pxui_wayland::NO_FILE_DIALOG`): there is no
-  `org.freedesktop.portal.FileChooser` call yet, and WSL has no portal anyway. The editor keeps working.
+- File dialogs go through the XDG desktop portal (`org.freedesktop.portal.FileChooser` on the session bus); the
+  answer arrives as the same `FileDialog` event SDL sends. Without a portal (WSL runs none) `show_dialog` returns a
+  typed `Unsupported` error (`pxui_wayland::NO_FILE_DIALOG`) and the editor keeps working.
 - The clipboard is read synchronously through the newest window (its own selection, else the offer through a
   pipe, one second at most); with no window open it is process-local.
 - Relative mouse uses pointer-constraints-v1 and relative-pointer-v1 (WSLg offers both), degrading to absolute

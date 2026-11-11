@@ -262,13 +262,13 @@ pub fn show_dialog(
     default_location: Option<&str>,
     kind: DialogKind,
 ) -> Result<i64, Error> {
-    let mut id = 0;
+    let (mut id, mut unsupported) = (0, false);
     live_window("Runtime.show_dialog", value, &mut |w| {
-        id = w.show_dialog(filters.unwrap_or(&[]), default_location, kind)?;
+        id = w.show_dialog(filters.unwrap_or(&[]), default_location, kind).inspect_err(|e| unsupported = host::no_dialog(e))?;
         Ok(())
     })
     .map_err(|mut e| {
-        if host::DIALOGS_UNSUPPORTED && e.kind == ErrorKind::InvalidState {
+        if unsupported {
             e.kind = ErrorKind::Unsupported;
         }
         e

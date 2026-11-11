@@ -21,8 +21,15 @@ pub fn configure_native_process() -> Result<(), String> {
     pxui_wayland::configure_native_process()
 }
 
-/// `show_dialog` fails for want of a platform dialog (no portal call on Linux yet), not a bad state.
-pub const DIALOGS_UNSUPPORTED: bool = cfg!(target_os = "linux");
+/// `show_dialog` failed for want of a platform dialog (Linux: no XDG desktop portal on the session bus), not a bad state.
+#[cfg(target_os = "linux")]
+pub fn no_dialog(message: &str) -> bool {
+    message == pxui_wayland::NO_FILE_DIALOG
+}
+#[cfg(not(target_os = "linux"))]
+pub fn no_dialog(_message: &str) -> bool {
+    false
+}
 
 #[cfg(not(target_os = "linux"))]
 pub fn opened(_window: &std::rc::Rc<std::cell::RefCell<Window>>) {}
