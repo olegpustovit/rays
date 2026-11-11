@@ -31,6 +31,18 @@ same-machine replacement wins total edit/build/run time. Allocator counters alon
 Changing profiles must report compile AND debug runtime. [Historical measurements](history/build-speed.md)
 cover past machines and settings, not current defaults.
 
+## The pxui submodule and validation
+
+PXUI, `ogpu_*`, the window hosts, `sdl3` and `cargo t` itself live in the `pxui/` submodule
+(`git@github.com:olegpustovit/pxui.git`). After a clone: `git submodule update --init`. `cargo t -p pxui`
+and the other PXUI crates run from the Rays root (the alias builds `pxui/tools/t` into this `target/`).
+To change PXUI: edit in `pxui/`, `pxui/tools/validate.sh` there, commit and push in `pxui/`, then commit
+the pointer here; `cargo run -p gate -- pxui` refuses a pointer that is not on the remote.
+There is no hosted CI: validation is local. macOS (Metal) runs the Rays commands above and
+`pxui/tools/validate.sh`; the Windows box and WSL run the same commands, on a bundle-synced pair of
+checkouts when they have no GitHub access (`git config submodule.pxui.url <path of the PXUI clone>`,
+then `git -c protocol.file.allow=always submodule update --init`).
+
 ## OCaml comparison
 
 Annotated tag `ocaml-reference` points to `e92f94f0`, the complete mixed checkout before removal.
@@ -194,7 +206,7 @@ cmake -S SDL3_mixer-3.2.4 -B b-mix -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PR
   -DSDLMIXER_MP3_MPG123=OFF && cmake --build b-mix -j && cmake --install b-mix
 ```
 
-Then, with the environment above (its `LD_LIBRARY_PATH` also finds the SDL libraries at run time):
+Then, with the environment of [pxui/docs/vulkan-linux.md](../pxui/docs/vulkan-linux.md) (its `LD_LIBRARY_PATH` also finds the SDL libraries at run time):
 
 ```sh
 export PKG_CONFIG_PATH=~/vk/root/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
@@ -221,4 +233,3 @@ exact-byte goldens differ by one in blended pixels (`rays_shell` `window_host_zo
 extra primitive's pixels, and off-by-one channels); `rays_editor` `instanced` and `run_instances` segfault on a
 driver worker thread; `native_isogrid_viewport_recipe_1` differs in its shadow pixels and the other isogrid
 qualification cases exceed even the 60 s limit, so the whole `RAYS_SLOW=1` editor run hits the 600 s cap.
-
