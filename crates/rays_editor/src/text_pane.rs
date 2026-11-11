@@ -2454,7 +2454,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
     let active = tabs.iter().position(|(tab, _)| *tab == state.tab).unwrap_or(0) as i64;
     // `tabs_right` is where the header has room for them (`Chrome::header_slots`); none in a header too narrow
     if let Some(right) = tabs_right {
-        let labels: Vec<String> = tabs.iter().map(|(_, l)| l.clone()).collect();
+        let labels: Vec<&str> = tabs.iter().map(|(_, l)| l.as_str()).collect();
         let (hit, _) = kit::segments(ui, "text-tab", right, y - layout::HEADER_HEIGHT as f32 + 2.0, &labels, active);
         if let Some(index) = hit {
             push(&emit, Intent::Tab(tabs[index as usize].0));

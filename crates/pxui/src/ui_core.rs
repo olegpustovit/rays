@@ -5770,6 +5770,8 @@ impl Ui {
         }
         // the focused view paints the caret and the input method's area every frame
         marks.push(now.1);
+        // the view holding the pointer capture follows the gesture (and its keys) every frame
+        marks.extend(self.active);
         for key in &marks {
             self.mark_key(*key);
         }

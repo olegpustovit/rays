@@ -204,12 +204,7 @@ fn strip(ui: &mut Ui, label: &str, bounds: (i64, i64, i64, i64), revision: u64, 
     ui.set_at(&view, (x as f32, y as f32));
 }
 
-fn revision(parts: &dyn Fn(&mut std::hash::DefaultHasher)) -> u64 {
-    use std::hash::Hasher;
-    let mut hasher = std::hash::DefaultHasher::new();
-    parts(&mut hasher);
-    hasher.finish()
-}
+use crate::kit::revision;
 
 /// The status strip without the keys: the file, its state, the whole status line, the layout in
 /// use and the frame rate. `o.text` is the status line.

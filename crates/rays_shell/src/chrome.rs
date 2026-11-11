@@ -299,13 +299,6 @@ fn cut<'a>(paint: &mut Paint, size: Option<i64>, room: f32, part: &'a str) -> Co
     ellipsis(&mut |s| paint.text_width(size, s), room.max(0.0), part)
 }
 
-struct Header {
-    l: Leaf,
-    title: String,
-    boxed: UiBox,
-    button: UiBox,
-}
-
 /// A `title` is "Kind<TAB>a / b": the kind is the header's label, the rest its breadcrumb (the
 /// last part in ink), cut to the room `groups` (the widths `header_slots` takes) leave. The header
 /// of the `focus` leaf wears the accent square. A docked header ends in its collapse chevron, a
@@ -429,149 +422,32 @@ pub fn update(
     let mut intents: Vec<Intent> = Vec::new();
     // where the drag tip goes: over the right of the window being moved
     let mut tip: Option<(i64, i64, i64)> = None;
-    // ponytail: the headers build at the root every frame, not as a view per header: each is built in
-    // two passes (its hit boxes here, its title child through `within(&hd.boxed)` after the drag tip
-    // and the moving brackets), and its menu anchors inside it. One pass per header, the menu built
-    // after, makes each header a view keyed by its leaf, state, title and focus.
-    let mut headers: Vec<Header> = Vec::new();
+    // Each header is a cached view at its bounds, keyed by what it shows: its bounds, the title,
+    // where the title must end, the focus and the panel state. Hover, presses and drags on its boxes
+    // rebuild it (and so produce its intents); the menu is built after it, at the root, from the
+    // state the view's box keeps.
     for (order, l) in geometry.leaves.iter().enumerate() {
-        let order = order as i64;
         let (x, y, w, h) = l.header;
         if h <= 0 {
             continue;
         }
-        let (name, path) = (panels::lower_name(&l.panel), key(&l.path));
-        let boxed = floating(ui, CLICKABLE | CLIP, l.header, format_args!("workspace-header-{name}{path}"));
-        if l.floating {
-            ui.to_front(order, &boxed);
-        }
-        let size = h.min(20);
-        // docked: the collapse chevron, a 20-point button 8 points from the edge. A window: dock,
-        // then close.
-        let windowed = state(&l.path).window.is_some() && !state(&l.path).collapsed;
-        let button = floating(
-            ui,
-            TAB_STOP_MARKED | CLICKABLE,
-            (x + 0.max(w - 8 - size), y + ((h - size) / 2), size, size),
-            format_args!("workspace-collapse-{name}{path}"),
-        );
-        if l.floating {
-            ui.to_front(order, &button);
-        }
-        if ui.signal(&button).clicked {
-            intents.push(if windowed { Intent::ClosePanel(l.path.clone()) } else { Intent::Toggle(l.path.clone()) });
-        }
-        let tools = 8 + size + if windowed { size + 8 } else { 0 };
-        if windowed {
-            let dock = floating(
-                ui,
-                TAB_STOP_MARKED | CLICKABLE,
-                (x + 0.max(w - tools), y + ((h - size) / 2), size, size),
-                format_args!("workspace-dock-{name}{path}"),
-            );
-            ui.to_front(order, &dock);
-            let signal = ui.signal(&dock);
-            if signal.clicked {
-                intents.push(Intent::Window(l.path.clone(), None));
-            }
-            let hovered = signal.hovered;
-            let focused = ui.focused(&dock);
-            ui.draw(&dock, move |paint, Rect { x, y, w, h }| {
-                if hovered {
-                    paint.fill(x, y, w, h, theme::hover_fill(&theme));
-                }
-                if focused {
-                    paint.fill(x, y + h - 1.0, w, 1.0, theme.accent);
-                }
-                // the dock mark: a chevron-down in ink-2, as the sheet's window rows
-                paint.chevron((x + (w / 2.0), y + (h / 2.0)), Dir::Down, theme::ink_2(&theme));
-            });
-        }
-        let grip = floating(
-            ui,
-            CLICKABLE | BLOCKING,
-            (x, y, 0.max(w - tools), h),
-            format_args!("workspace-drag-{name}{path}"),
-        );
-        if l.floating {
-            ui.to_front(order, &grip);
-        }
-        let drag = ui.signal(&grip);
-        // a window is dragged from where it is drawn (the layout keeps it inside the frame, whatever
-        // its saved place says), with the size it has when it is not collapsed
-        let original = match state(&l.path).window {
-            Some((_, _, ww, wh)) if l.floating => (l.frame.0, l.frame.1, ww, wh),
-            Some(window) => window,
-            None => {
-                if l.floating {
-                    l.frame
-                } else {
-                    (x, y, 120.max(w), 80.max(h + l.body.3))
-                }
-            }
-        };
-        let (ox, oy, ow, oh) = drag_origin(ui, &grip, original, &drag);
-        // Escape puts the panel back where the drag began (a docked one stays docked)
-        let cancelled = (ui.state(&grip, 0) == 1 && !drag.pressed) || (drag.held && ui.key_pressed(Key::Escape));
-        ui.set_state(&grip, if cancelled && !drag.released { 1 } else { 0 });
-        if drag.held || drag.released {
-            let (px, py) = if drag.released { drag.release_point } else { drag.pointer };
-            let (sx, sy) = drag.press_point;
-            if (px - sx).hypot(py - sy) >= 4.0 {
-                if cancelled {
-                    if state(&l.path).window.is_some() {
-                        intents.push(Intent::WindowDrag(l.path.clone(), (ox, oy, ow, oh), drag.released));
-                    }
-                } else {
-                    intents.push(Intent::Dragging(l.path.clone(), drag.released));
-                    // as far as the layout shows it: a place past the edge would be saved and not
-                    // drawn, and the next drag would start from where the window is not
-                    let fw = frame.input.size.0;
-                    let fh = frame.input.size.1;
-                    let wx = 0.max((fw - fw.min(ow)).min(ox + ((px - sx).round() as i64)));
-                    let wy = 0.max((fh - HEADER_HEIGHT).min(oy + ((py - sy).round() as i64)));
-                    if !drag.released {
-                        tip = Some((wx, wy, ow));
-                        *moving.borrow_mut() = Some(l.path.clone());
-                    }
-                    intents.push(Intent::WindowDrag(l.path.clone(), (wx, wy, ow, oh), drag.released));
-                }
-            }
-        }
-        // the whole empty header drags; a click that did not move opens the menu
-        let still = (drag.release_point.0 - drag.press_point.0).hypot(drag.release_point.1 - drag.press_point.1) < 4.0;
-        let at = if context_clicked(&drag) {
-            Some(drag.release_point)
-        } else if drag.clicked && still {
-            Some((x as f32, (y + h) as f32))
-        } else {
-            None
-        };
-        intents.extend(panel_menu(Some(state), key_of, ui, l, &boxed, at));
-        // the parts of a docked breadcrumb before its last are buttons: a click is `Crumb` of its index
+        let st = state(&l.path);
         let text = title(l);
-        let (main, sub) = split_title(&text);
-        if !sub.is_empty() && !l.floating && !state(&l.path).collapsed && w as f32 >= 60.0 {
-            let focused = focus == Some(&l.path);
-            let limit = header_slots(l, &groups(l)).1;
-            let mut tx = x as f32 + 12.0 + (if focused { 12.0 } else { 0.0 }) + kit::cap_width(ui, &main) + 8.0;
-            let fit = fit_crumbs(&mut |p| ui.text_width(None, p), limit - tx, sub);
-            let count = fit.len(sub);
-            for (n, (index, part)) in fit.parts(sub).enumerate() {
-                let pw = ui.text_width(None, part);
-                if index >= 0 && n + 1 < count && tx + pw <= limit {
-                    let b = floating(ui, CLICKABLE, (tx as i64, y, pw.ceil() as i64, h), format_args!("workspace-crumb-{name}{path}-{index}"));
-                    if l.floating {
-                        ui.to_front(order, &b);
-                    }
-                    if ui.signal(&b).clicked {
-                        intents.push(Intent::Crumb(l.path.clone(), index));
-                    }
-                }
-                tx = tx + pw + 8.0 + (ui.text_width(None, "/") + 8.0);
-            }
+        let limit_slots = header_slots(l, &groups(l)).1;
+        let focused = focus == Some(&l.path);
+        let collapsed = st.collapsed || hidden.contains(&l.panel);
+        let revision = kit::revision(&|hs| {
+            use std::hash::Hash;
+            (l.header, l.frame, l.body.3, l.floating, &l.path, st.window, st.collapsed, collapsed, &text, limit_slots.to_bits(), focused).hash(hs)
+        });
+        let mut open_at: Option<(f32, f32)> = None;
+        let mut built = |ui: &mut Ui| header(ui, l, &st, collapsed, focused, &text, limit_slots, frame, &theme, &mut intents, &mut tip, &moving, &mut open_at);
+        let view = ui.view(&format!("workspace-header-view-{}{}", panels::lower_name(&l.panel), key(&l.path)), revision, Size::Px(w as f32), Size::Px(h as f32), &mut built);
+        ui.set_at(&view, (x as f32, y as f32));
+        if l.floating {
+            ui.to_front(order as i64, &view);
         }
-        headers.push(Header { l: l.clone(), title: text, boxed, button });
+        intents.extend(panel_menu(Some(state), key_of, ui, l, &view, open_at));
     }
     // the tip of a panel being moved: a 20-point sheet with a line-2 edge, the label size in ink
     if let Some((wx, wy, ww)) = tip {
@@ -604,102 +480,217 @@ pub fn update(
             }
         }
     }
-    for hd in &headers {
-        let l = &hd.l;
-        let collapse_hovered = ui.signal(&hd.button).hovered;
-        // the keyboard's mark is the sheet's: an accent line over the last row of the button
-        if ui.focused(&hd.button) {
-            ui.draw_over(&hd.button, move |paint, Rect { x, y, w, h }| paint.fill(x, y + h - 1.0, w, 1.0, theme.accent));
+    intents
+}
+
+/// One header in its view at `l.header` (its boxes placed from the view's corner): the collapse
+/// button (a window's dock and close), the drag grip, the breadcrumb's buttons and the painted title.
+/// Its intents go to `intents`; a drag puts the tip and the window being moved in `tip` and
+/// `moving`, a right click or a still click the menu's place in `open_at`.
+#[allow(clippy::too_many_arguments)]
+fn header(
+    ui: &mut Ui,
+    l: &Leaf,
+    st: &panels::State,
+    collapsed: bool,
+    focused: bool,
+    text: &str,
+    limit_slots: f32,
+    frame: &frame::Frame,
+    theme: &theme::Tokens,
+    intents: &mut Vec<Intent>,
+    tip: &mut Option<(i64, i64, i64)>,
+    moving: &Rc<RefCell<Option<Path>>>,
+    open_at: &mut Option<(f32, f32)>,
+) {
+    let theme = *theme;
+    let (x, y, w, h) = l.header;
+    let (name, path) = (panels::lower_name(&l.panel), key(&l.path));
+    let boxed = floating(ui, CLICKABLE | CLIP, (0, 0, w, h), format_args!("workspace-header-{name}{path}"));
+    let size = h.min(20);
+    // docked: the collapse chevron, a 20-point button 8 points from the edge. A window: dock,
+    // then close.
+    let windowed = st.window.is_some() && !st.collapsed;
+    let button = floating(ui, TAB_STOP_MARKED | CLICKABLE, (0.max(w - 8 - size), (h - size) / 2, size, size), format_args!("workspace-collapse-{name}{path}"));
+    if ui.signal(&button).clicked {
+        intents.push(if windowed { Intent::ClosePanel(l.path.clone()) } else { Intent::Toggle(l.path.clone()) });
+    }
+    let tools = 8 + size + if windowed { size + 8 } else { 0 };
+    if windowed {
+        let dock = floating(ui, TAB_STOP_MARKED | CLICKABLE, (0.max(w - tools), (h - size) / 2, size, size), format_args!("workspace-dock-{name}{path}"));
+        let signal = ui.signal(&dock);
+        if signal.clicked {
+            intents.push(Intent::Window(l.path.clone(), None));
         }
-        let panel_state = state(&l.path);
-        let collapsed = panel_state.collapsed || hidden.contains(&l.panel);
-        let windowed = panel_state.window.is_some() && !panel_state.collapsed;
-        let focused = focus == Some(&l.path);
-        let mut text_box: Option<UiBox> = None;
-        ui.within(&hd.boxed, &mut |ui| {
-            text_box = Some(ui.box_("header-text", BoxOpts::default().w(Size::Grow).h(Size::Grow)));
-        });
-        let text_box = text_box.expect("header-text");
-        let limit_slots = header_slots(l, &groups(l)).1;
-        let l = l.clone();
-        let text = hd.title.clone();
-        let cap = kit::cap_size(ui);
-        ui.draw(&text_box, move |paint, Rect { x, y, w, h }| {
-            paint.fill(x, y, w, h, if l.floating { theme.input } else { theme.panel });
-            let ink_2 = theme::ink_2(&theme);
-            let ink_3 = theme::ink_3(&theme);
-            // "Title<TAB>a / b": the kind as a label, then the breadcrumb, its last part in ink
-            let (main, sub) = split_title(&text);
-            if w >= 60.0 {
-                let mut tx = x + 12.0;
-                // the accent square marks the focused pane, docked or floating; the title ends
-                // before what follows it: the pane's tabs, then the window's tools; a square or a
-                // label with no room is left out whole, and the breadcrumb with it
-                let mut limit = limit_slots;
-                if focused {
-                    if tx + 6.0 <= limit {
-                        paint.fill(tx, y + (h / 2.0) - 3.0, 6.0, 6.0, theme.accent);
-                    }
-                    tx += 12.0;
-                }
-                let labelled = tx + paint.cap_width(&main) <= limit;
-                if !labelled {
-                    limit = tx;
-                }
-                if labelled {
-                    let cy = kit::cap_y_paint(paint, y, h);
-                    paint.cap((tx, cy), Some(if focused { theme.foreground } else { ink_2 }), &main);
-                }
-                tx += paint.cap_width(&main) + 8.0;
-                let ty = paint.text_top(None, y, h);
-                // put: cut to the room left, paint, and advance
-                let put = |paint: &mut Paint, tx: &mut f32, color: pxui::geom::color::T, part: &str| {
-                    let part = cut(paint, None, limit - *tx, part);
-                    if !part.is_empty() {
-                        paint.text_c((*tx, ty), color, &part);
-                    }
-                    *tx = *tx + paint.text_width(None, &part) + 8.0;
-                };
-                // a window's title row: the path is one string in ink-2 at the label size
-                if !sub.is_empty() && l.floating && !collapsed {
-                    // the subject follows the kind, 8 points on (windows.html's title row)
-                    let size = cap;
-                    let cy = kit::cap_y_paint(paint, y, h);
-                    let shown = cut(paint, Some(size), limit - tx, &sub);
-                    paint.text_s((tx, cy), size, pxui::geom::color::with_alpha(ink_2, 179), &shown);
-                } else if !sub.is_empty() && !collapsed {
-                    let fit = fit_crumbs(&mut |p| paint.text_width(None, p), limit - tx, sub);
-                    let count = fit.len(sub);
-                    for (i, (_, part)) in fit.parts(sub).enumerate() {
-                        if i + 1 == count {
-                            put(paint, &mut tx, if has_crumbs(sub) { theme.foreground } else { ink_2 }, part);
-                        } else {
-                            put(paint, &mut tx, ink_2, part);
-                            put(paint, &mut tx, ink_3, "/");
-                        }
-                    }
-                }
-                if collapsed {
-                    put(paint, &mut tx, ink_3, "collapsed");
-                }
+        let hovered = signal.hovered;
+        let focused = ui.focused(&dock);
+        ui.draw(&dock, move |paint, Rect { x, y, w, h }| {
+            if hovered {
+                paint.fill(x, y, w, h, theme::hover_fill(&theme));
             }
-            let cx = x + w - 18.0;
-            let cy = y + (h / 2.0);
-            if collapse_hovered {
-                paint.fill(cx - 10.0, cy - 10.0, 20.0, 20.0, theme::hover_fill(&theme));
+            if focused {
+                paint.fill(x, y + h - 1.0, w, 1.0, theme.accent);
             }
-            if windowed {
-                // the window's close mark is the label-size multiplication sign, centred in its button
-                let size = cap;
-                let tw = paint.text_width(Some(size), "\u{d7}");
-                let ty = kit::cap_y_paint(paint, y, h);
-                paint.text_s((cx - (tw / 2.0), ty), size, ink_2, "\u{d7}");
-            } else {
-                paint.chevron((cx, cy), if collapsed { Dir::Down } else { Dir::Left }, if l.floating { ink_2 } else { theme.foreground });
-            }
+            // the dock mark: a chevron-down in ink-2, as the sheet's window rows
+            paint.chevron((x + (w / 2.0), y + (h / 2.0)), Dir::Down, theme::ink_2(&theme));
         });
     }
-    intents
+    let grip = floating(ui, CLICKABLE | BLOCKING, (0, 0, 0.max(w - tools), h), format_args!("workspace-drag-{name}{path}"));
+    let drag = ui.signal(&grip);
+    // a window is dragged from where it is drawn (the layout keeps it inside the frame, whatever
+    // its saved place says), with the size it has when it is not collapsed
+    let original = match st.window {
+        Some((_, _, ww, wh)) if l.floating => (l.frame.0, l.frame.1, ww, wh),
+        Some(window) => window,
+        None => {
+            if l.floating {
+                l.frame
+            } else {
+                (x, y, 120.max(w), 80.max(h + l.body.3))
+            }
+        }
+    };
+    let (ox, oy, ow, oh) = drag_origin(ui, &grip, original, &drag);
+    // Escape puts the panel back where the drag began (a docked one stays docked)
+    let cancelled = (ui.state(&grip, 0) == 1 && !drag.pressed) || (drag.held && ui.key_pressed(Key::Escape));
+    ui.set_state(&grip, if cancelled && !drag.released { 1 } else { 0 });
+    if drag.held || drag.released {
+        let (px, py) = if drag.released { drag.release_point } else { drag.pointer };
+        let (sx, sy) = drag.press_point;
+        if (px - sx).hypot(py - sy) >= 4.0 {
+            if cancelled {
+                if st.window.is_some() {
+                    intents.push(Intent::WindowDrag(l.path.clone(), (ox, oy, ow, oh), drag.released));
+                }
+            } else {
+                intents.push(Intent::Dragging(l.path.clone(), drag.released));
+                // as far as the layout shows it: a place past the edge would be saved and not
+                // drawn, and the next drag would start from where the window is not
+                let fw = frame.input.size.0;
+                let fh = frame.input.size.1;
+                let wx = 0.max((fw - fw.min(ow)).min(ox + ((px - sx).round() as i64)));
+                let wy = 0.max((fh - HEADER_HEIGHT).min(oy + ((py - sy).round() as i64)));
+                if !drag.released {
+                    *tip = Some((wx, wy, ow));
+                    *moving.borrow_mut() = Some(l.path.clone());
+                }
+                intents.push(Intent::WindowDrag(l.path.clone(), (wx, wy, ow, oh), drag.released));
+            }
+        }
+    }
+    // the whole empty header drags; a click that did not move opens the menu
+    let still = (drag.release_point.0 - drag.press_point.0).hypot(drag.release_point.1 - drag.press_point.1) < 4.0;
+    *open_at = if context_clicked(&drag) {
+        Some(drag.release_point)
+    } else if drag.clicked && still {
+        Some((x as f32, (y + h) as f32))
+    } else {
+        None
+    };
+    // the parts of a docked breadcrumb before its last are buttons: a click is `Crumb` of its index
+    let (main, sub) = split_title(text);
+    if !sub.is_empty() && !l.floating && !st.collapsed && w as f32 >= 60.0 {
+        let mut tx = x as f32 + 12.0 + (if focused { 12.0 } else { 0.0 }) + kit::cap_width(ui, main) + 8.0;
+        let fit = fit_crumbs(&mut |p| ui.text_width(None, p), limit_slots - tx, sub);
+        let count = fit.len(sub);
+        for (n, (index, part)) in fit.parts(sub).enumerate() {
+            let pw = ui.text_width(None, part);
+            if index >= 0 && n + 1 < count && tx + pw <= limit_slots {
+                let b = floating(ui, CLICKABLE, (tx as i64 - x, 0, pw.ceil() as i64, h), format_args!("workspace-crumb-{name}{path}-{index}"));
+                if ui.signal(&b).clicked {
+                    intents.push(Intent::Crumb(l.path.clone(), index));
+                }
+            }
+            tx = tx + pw + 8.0 + (ui.text_width(None, "/") + 8.0);
+        }
+    }
+    let collapse_hovered = ui.signal(&button).hovered;
+    // the keyboard's mark is the sheet's: an accent line over the last row of the button
+    if ui.focused(&button) {
+        ui.draw_over(&button, move |paint, Rect { x, y, w, h }| paint.fill(x, y + h - 1.0, w, 1.0, theme.accent));
+    }
+    let mut text_box: Option<UiBox> = None;
+    ui.within(&boxed, &mut |ui| {
+        text_box = Some(ui.box_("header-text", BoxOpts::default().w(Size::Grow).h(Size::Grow)));
+    });
+    let text_box = text_box.expect("header-text");
+    let floating_ = l.floating;
+    let text = text.to_owned();
+    let cap = kit::cap_size(ui);
+    ui.draw(&text_box, move |paint, Rect { x, y, w, h }| {
+        paint.fill(x, y, w, h, if floating_ { theme.input } else { theme.panel });
+        let ink_2 = theme::ink_2(&theme);
+        let ink_3 = theme::ink_3(&theme);
+        // "Title<TAB>a / b": the kind as a label, then the breadcrumb, its last part in ink
+        let (main, sub) = split_title(&text);
+        if w >= 60.0 {
+            let mut tx = x + 12.0;
+            // the accent square marks the focused pane, docked or floating; the title ends
+            // before what follows it: the pane's tabs, then the window's tools; a square or a
+            // label with no room is left out whole, and the breadcrumb with it
+            let mut limit = limit_slots;
+            if focused {
+                if tx + 6.0 <= limit {
+                    paint.fill(tx, y + (h / 2.0) - 3.0, 6.0, 6.0, theme.accent);
+                }
+                tx += 12.0;
+            }
+            let labelled = tx + paint.cap_width(main) <= limit;
+            if !labelled {
+                limit = tx;
+            }
+            if labelled {
+                let cy = kit::cap_y_paint(paint, y, h);
+                paint.cap((tx, cy), Some(if focused { theme.foreground } else { ink_2 }), main);
+            }
+            tx += paint.cap_width(main) + 8.0;
+            let ty = paint.text_top(None, y, h);
+            // put: cut to the room left, paint, and advance
+            let put = |paint: &mut Paint, tx: &mut f32, color: pxui::geom::color::T, part: &str| {
+                let part = cut(paint, None, limit - *tx, part);
+                if !part.is_empty() {
+                    paint.text_c((*tx, ty), color, &part);
+                }
+                *tx = *tx + paint.text_width(None, &part) + 8.0;
+            };
+            // a window's title row: the path is one string in ink-2 at the label size
+            if !sub.is_empty() && floating_ && !collapsed {
+                // the subject follows the kind, 8 points on (windows.html's title row)
+                let size = cap;
+                let cy = kit::cap_y_paint(paint, y, h);
+                let shown = cut(paint, Some(size), limit - tx, sub);
+                paint.text_s((tx, cy), size, pxui::geom::color::with_alpha(ink_2, 179), &shown);
+            } else if !sub.is_empty() && !collapsed {
+                let fit = fit_crumbs(&mut |p| paint.text_width(None, p), limit - tx, sub);
+                let count = fit.len(sub);
+                for (i, (_, part)) in fit.parts(sub).enumerate() {
+                    if i + 1 == count {
+                        put(paint, &mut tx, if has_crumbs(sub) { theme.foreground } else { ink_2 }, part);
+                    } else {
+                        put(paint, &mut tx, ink_2, part);
+                        put(paint, &mut tx, ink_3, "/");
+                    }
+                }
+            }
+            if collapsed {
+                put(paint, &mut tx, ink_3, "collapsed");
+            }
+        }
+        let cx = x + w - 18.0;
+        let cy = y + (h / 2.0);
+        if collapse_hovered {
+            paint.fill(cx - 10.0, cy - 10.0, 20.0, 20.0, theme::hover_fill(&theme));
+        }
+        if windowed {
+            // the window's close mark is the label-size multiplication sign, centred in its button
+            let size = cap;
+            let tw = paint.text_width(Some(size), "\u{d7}");
+            let ty = kit::cap_y_paint(paint, y, h);
+            paint.text_s((cx - (tw / 2.0), ty), size, ink_2, "\u{d7}");
+        } else {
+            paint.chevron((cx, cy), if collapsed { Dir::Down } else { Dir::Left }, if floating_ { ink_2 } else { theme.foreground });
+        }
+    });
 }
 
 /// where a header's tools begin: after its title, the 8-point gap, the 1 x 12 rule between two
@@ -805,77 +796,102 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
     let mut intents: Vec<Intent> = Vec::new();
     let geo = geometry(Some(state), hidden, tree, frame);
     let theme = ui.tokens();
-    for (n, s) in geo.splitters.iter().enumerate() {
-        let Some(node) = &s.node else {
-            continue;
-        };
-        let (x, y, width, height) = s.bounds;
-        let grip_axis = if s.axis == Axis::H { pxui::ui::Axis::Row } else { pxui::ui::Axis::Column };
-        let (boxed, signal) = ui.grip(format_args!("workspace-grip-{n}"), grip_axis, Some(Rect::new(x as f32, y as f32, width as f32, height as f32)));
-        if signal.held {
-            // the ratio it makes, in a tip beside the gutter: "58 / 42"
-            let (first, second) = sides(s);
-            let a = (100.0 * first as f32 / (1.max(first + second)) as f32).round() as i64;
-            let tw = kit::cap_width(ui, &format!("{} / {}", a, 100 - a));
-            let (px, py) = signal.pointer;
-            let (tx, ty) = if s.axis == Axis::H { ((x + 8) as f32, py - 10.0) } else { (px + 8.0, (y + 8) as f32) };
-            let tip = ui.box_("workspace-gutter-tip", BoxOpts::default().w(Size::Px(tw)).h(Size::Px(20.0)).at((tx, ty)));
-            ui.to_front(i64::MAX, &tip);
-            ui.draw(&tip, move |paint, Rect { x, y, w: _, h }| {
-                let cy = kit::cap_y_paint(paint, y, h);
-                paint.ratio((x, cy), a, 100 - a);
-            });
-        }
-        let (dx, dy) = signal.drag;
-        if (signal.held || signal.released) && (if s.axis == Axis::H { dx } else { dy }) != 0.0 {
-            let (px, py) = signal.pointer;
-            let along = if s.axis == Axis::H { px } else { py };
-            // a fixed split is dragged in whole points of its fixed side, any other by ratio
+    // The grips are one cached view keyed by the gutters; a drag or a right click rebuilds it. The size
+    // menu is built after it, at the root: the view's box keeps which gutter it is for and where.
+    let revision = kit::revision(&|h| {
+        use std::hash::Hash;
+        for s in &geo.splitters {
             let size = match s.size {
-                PSize::Ratio(_) => PSize::Ratio((along as f64 - s.start as f64) / (1.max(s.span)) as f64),
-                PSize::First(_) => PSize::First(along.round() as i64 - s.start),
-                PSize::Second(_) => PSize::Second(s.start + s.span - SPLITTER_WIDTH - along.round() as i64),
+                PSize::Ratio(r) => (0u8, r.to_bits()),
+                PSize::First(n) => (1, n as u64),
+                PSize::Second(n) => (2, n as u64),
             };
-            intents.push(Intent::Resize { node: node.clone(), size: panels::clamp_size(size) });
+            (&s.node, s.axis == Axis::H, size, s.bounds, s.start, s.span).hash(h);
         }
-        if signal.released {
-            intents.push(Intent::Settled);
-        }
-        // a right-click sizes the split another way, keeping what it shows
-        let clicked = context_clicked(&signal);
-        // the menu opens where the gutter was clicked
-        if clicked {
-            let (px, py) = signal.release_point;
-            ui.set_text_state(&boxed, Some(format!("{} {}", cfmt::g(px as f64, 6), cfmt::g(py as f64, 6))));
-        }
-        let opened = ui.state(&boxed, 0) == 1 || clicked;
-        ui.set_state(&boxed, if opened { 1 } else { 0 });
-        if opened {
-            let default_at = (x as f32, y as f32);
-            let at = match ui.text_state(&boxed) {
-                Some(text) => {
-                    let parts: Vec<&str> = text.split(' ').collect();
-                    if parts.len() == 2 {
-                        match ((parts[0]).parse::<f32>().ok(), (parts[1]).parse::<f32>().ok()) {
-                            (Some(a), Some(b)) => (a, b),
-                            _ => default_at,
-                        }
-                    } else {
-                        default_at
-                    }
-                }
-                None => default_at,
+    });
+    let mut menu_at: Option<(usize, (f32, f32))> = None;
+    let mut tip: Option<((f32, f32), i64)> = None;
+    let view = kit::cached(ui, "workspace-grips", revision, &mut |ui| {
+        for (n, s) in geo.splitters.iter().enumerate() {
+            let Some(node) = &s.node else {
+                continue;
             };
-            match ui.context_menu(at, &MenuOpts::default(), &format!("workspace-size-menu-{n}"), &size_rows(s)) {
-                MenuResult::Open => {}
-                MenuResult::Dismiss => ui.set_state(&boxed, 0),
-                MenuResult::Pick(i) => {
-                    ui.set_state(&boxed, 0);
-                    intents.push(Intent::Resize { node: node.clone(), size: resized(s, SIZE_WAYS[i as usize]) });
-                    intents.push(Intent::Settled);
-                }
+            let (x, y, width, height) = s.bounds;
+            let grip_axis = if s.axis == Axis::H { pxui::ui::Axis::Row } else { pxui::ui::Axis::Column };
+            let (_, signal) = ui.grip(format_args!("workspace-grip-{n}"), grip_axis, Some(Rect::new(x as f32, y as f32, width as f32, height as f32)));
+            if signal.held {
+                // the ratio it makes, in a tip beside the gutter: "58 / 42"
+                let (first, second) = sides(s);
+                let a = (100.0 * first as f32 / (1.max(first + second)) as f32).round() as i64;
+                let (px, py) = signal.pointer;
+                tip = Some((if s.axis == Axis::H { ((x + 8) as f32, py - 10.0) } else { (px + 8.0, (y + 8) as f32) }, a));
+            }
+            let (dx, dy) = signal.drag;
+            if (signal.held || signal.released) && (if s.axis == Axis::H { dx } else { dy }) != 0.0 {
+                let (px, py) = signal.pointer;
+                let along = if s.axis == Axis::H { px } else { py };
+                // a fixed split is dragged in whole points of its fixed side, any other by ratio
+                let size = match s.size {
+                    PSize::Ratio(_) => PSize::Ratio((along as f64 - s.start as f64) / (1.max(s.span)) as f64),
+                    PSize::First(_) => PSize::First(along.round() as i64 - s.start),
+                    PSize::Second(_) => PSize::Second(s.start + s.span - SPLITTER_WIDTH - along.round() as i64),
+                };
+                intents.push(Intent::Resize { node: node.clone(), size: panels::clamp_size(size) });
+            }
+            if signal.released {
+                intents.push(Intent::Settled);
+            }
+            // a right-click sizes the split another way, keeping what it shows; the menu opens where
+            // the gutter was clicked
+            if context_clicked(&signal) {
+                menu_at = Some((n, signal.release_point));
             }
         }
+    });
+    // the tip stands at the root, over everything, while a gutter is held
+    if let Some(((tx, ty), a)) = tip {
+        let tw = kit::cap_width(ui, &format!("{} / {}", a, 100 - a));
+        let tip = ui.box_("workspace-gutter-tip", BoxOpts::default().w(Size::Px(tw)).h(Size::Px(20.0)).at((tx, ty)));
+        ui.to_front(i64::MAX, &tip);
+        ui.draw(&tip, move |paint, Rect { x, y, w: _, h }| {
+            let cy = kit::cap_y_paint(paint, y, h);
+            paint.ratio((x, cy), a, 100 - a);
+        });
+    }
+    if let Some((n, at)) = menu_at {
+        ui.set_state(&view, n as i64 + 1);
+        ui.set_text_state(&view, Some(format!("{} {}", cfmt::g(at.0 as f64, 6), cfmt::g(at.1 as f64, 6))));
+    }
+    let open = ui.state(&view, 0);
+    if let Some(s) = geo.splitters.get((open - 1).max(0) as usize).filter(|s| open > 0 && s.node.is_some()) {
+        let n = open - 1;
+        let default_at = (s.bounds.0 as f32, s.bounds.1 as f32);
+        let at = match ui.text_state(&view) {
+            Some(text) => {
+                let parts: Vec<&str> = text.split(' ').collect();
+                if parts.len() == 2 {
+                    match ((parts[0]).parse::<f32>().ok(), (parts[1]).parse::<f32>().ok()) {
+                        (Some(a), Some(b)) => (a, b),
+                        _ => default_at,
+                    }
+                } else {
+                    default_at
+                }
+            }
+            None => default_at,
+        };
+        match ui.context_menu(at, &MenuOpts::default(), &format!("workspace-size-menu-{n}"), &size_rows(s)) {
+            MenuResult::Open => {}
+            MenuResult::Dismiss => ui.set_state(&view, 0),
+            MenuResult::Pick(i) => {
+                ui.set_state(&view, 0);
+                let node = s.node.clone().expect("a sized gutter");
+                intents.push(Intent::Resize { node, size: resized(s, SIZE_WAYS[i as usize]) });
+                intents.push(Intent::Settled);
+            }
+        }
+    } else if open > 0 {
+        ui.set_state(&view, 0);
     }
     for (order, leaf) in geo.leaves.iter().enumerate() {
         let order = order as i64;

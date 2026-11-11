@@ -734,6 +734,8 @@ pub fn draw_other_graph_panes<'a>(
     out
 }
 
+const VIEW_TABS: [&str; 3] = ["Graph", "List", "Text"];
+
 /// What the graph header's tools and views ask this frame.
 pub type HeaderAsks = (Option<Action>, Option<Action>, Option<Projection>);
 
@@ -746,70 +748,77 @@ pub fn draw_graph_header<'a>(
     header_slots: &dyn Fn(&Leaf) -> Vec<Option<f32>>,
     tools_from: &dyn Fn(&Leaf) -> f32,
 ) -> HeaderAsks {
-    let tool_action = match graph_host {
-        Some(leaf) if projection_of(value) == GraphView && has_panel(value, &Panel::Graph) => {
-            let tools_scope = scope_name(value).is_some();
-            let has_selection = !scope::selected(pane_view(value)).is_empty();
-            let enabled = move |tool: bars::Tool| tool == bars::Tool::Outline || (tools_scope && (tool == bars::Tool::Add || has_selection));
-            match bars::graph_tools(!has_panel(value, &Panel::Outline), ui, leaf.header, tools_from(leaf), &enabled) {
-                Some(bars::Tool::Add) => Some(Action::AddNode),
-                Some(bars::Tool::Repeat) => Some(Action::ScopeCommand(scope::Command::WrapRepeat)),
-                Some(bars::Tool::Iterate) => Some(Action::ScopeCommand(scope::Command::WrapIterate)),
-                Some(bars::Tool::Fn) => Some(Action::ScopeCommand(scope::Command::MakeFn)),
-                Some(bars::Tool::Macro) => Some(Action::ScopeCommand(scope::Command::MakeMacro)),
-                Some(bars::Tool::Defn) => Some(Action::ScopeCommand(scope::Command::MakeDefn)),
-                Some(bars::Tool::Outline) => Some(Action::PanelSplitAt(leaf.path.clone(), panels::Axis::H, 0.7, Panel::Outline)),
-                None => None,
-            }
-        }
-        _ => None,
-    };
-    let view_pick = match graph_host {
-        Some(leaf) if has_panel(value, &Panel::Graph) => {
-            let (_, hy, _, hh) = leaf.header;
-            let active = match projection_of(value) {
-                GraphView => 0,
-                ListView => 1,
-                TextView => 2,
-            };
-            let slot = header_slots(leaf).first().cloned().flatten();
-            slot.and_then(|right| {
-                kit::segments(ui, "workspace-view", right, hy as f32 + ((hh - 20) as f32 / 2.0), &["Graph".to_owned(), "List".to_owned(), "Text".to_owned()], active).0
-            })
-            .map(|i| [GraphView, ListView, TextView][i as usize])
-        }
-        _ => None,
-    };
-    let view_action = match (active_view(value, g), &value.view_tools) {
-        (Some(leaf), Some((looks, mode))) if leaf.header.3 > 0 => {
-            let (hx, hy, hw, hh) = leaf.header;
-            let from = hx as f32 + tools_from(&leaf);
-            let modes = ["Solid".to_owned(), "Wire".to_owned(), "Traced".to_owned()];
-            let seg_w = modes.iter().fold(24.0, |w, label| w + ui.text_width(None, label));
-            let look_w = kit::button_width(ui, Some("C"), false, "Look through");
-            let ty = hy as f32 + ((hh - 20) as f32 / 2.0);
-            let frame_w = kit::button_width(ui, Some("F"), false, "Frame");
-            if from + seg_w + 8.0 + look_w + 8.0 + frame_w < (hx + hw - 36) as f32 {
-                bars::rule(ui, "workspace-view-rule", leaf.header, from - hx as f32);
-                let render = match kit::segments(ui, "workspace-render", from + seg_w, ty, &modes, *mode).0 {
-                    Some(i) if i != *mode => Some(Action::RenderMode(i)),
-                    _ => None,
-                };
-                let look = kit::button(ui, "workspace-look", (from + seg_w + 8.0, ty), look_w, &ButtonOpts { active: *looks, hint: Some("C".into()), ..Default::default() }, "Look through");
-                let framed = kit::button(ui, "workspace-frame", (from + seg_w + 8.0 + look_w + 8.0, ty), frame_w, &ButtonOpts { hint: Some("F".into()), ..Default::default() }, "Frame");
-                if framed {
-                    Some(Action::FrameCamera)
-                } else if look {
-                    Some(Action::LookThrough)
-                } else {
-                    render
+    use std::hash::Hash;
+    // The graph header's tools and views, and the viewport's render tabs, are two cached views keyed by
+    // what they show: input on a button rebuilds its view, which then reports the click.
+    let (mut tool_action, mut view_pick) = (None, None);
+    if let Some(leaf) = graph_host.as_ref().filter(|_| has_panel(value, &Panel::Graph)) {
+        let graph_view = projection_of(value) == GraphView;
+        let tools_scope = scope_name(value).is_some();
+        let has_selection = !pane_view(value).selected.is_empty();
+        let outline = !has_panel(value, &Panel::Outline);
+        let from = tools_from(leaf);
+        let active = match projection_of(value) {
+            GraphView => 0,
+            ListView => 1,
+            TextView => 2,
+        };
+        let slot = header_slots(leaf).first().cloned().flatten();
+        let revision = kit::revision(&|h| (leaf.header, &leaf.path, graph_view, tools_scope, has_selection, outline, from.to_bits(), active, slot.map(f32::to_bits)).hash(h));
+        kit::cached(ui, "workspace-graph-tools", revision, &mut |ui| {
+            tool_action = if graph_view {
+                let enabled = move |tool: bars::Tool| tool == bars::Tool::Outline || (tools_scope && (tool == bars::Tool::Add || has_selection));
+                match bars::graph_tools(outline, ui, leaf.header, from, &enabled) {
+                    Some(bars::Tool::Add) => Some(Action::AddNode),
+                    Some(bars::Tool::Repeat) => Some(Action::ScopeCommand(scope::Command::WrapRepeat)),
+                    Some(bars::Tool::Iterate) => Some(Action::ScopeCommand(scope::Command::WrapIterate)),
+                    Some(bars::Tool::Fn) => Some(Action::ScopeCommand(scope::Command::MakeFn)),
+                    Some(bars::Tool::Macro) => Some(Action::ScopeCommand(scope::Command::MakeMacro)),
+                    Some(bars::Tool::Defn) => Some(Action::ScopeCommand(scope::Command::MakeDefn)),
+                    Some(bars::Tool::Outline) => Some(Action::PanelSplitAt(leaf.path.clone(), panels::Axis::H, 0.7, Panel::Outline)),
+                    None => None,
                 }
             } else {
                 None
-            }
+            };
+            let (_, hy, _, hh) = leaf.header;
+            view_pick = slot
+                .and_then(|right| kit::segments(ui, "workspace-view", right, hy as f32 + ((hh - 20) as f32 / 2.0), &VIEW_TABS, active).0)
+                .map(|i| [GraphView, ListView, TextView][i as usize]);
+        });
+    }
+    let mut view_action = None;
+    if let (Some(leaf), Some((looks, mode))) = (active_view(value, g), &value.view_tools) {
+        if leaf.header.3 > 0 {
+            let from = tools_from(&leaf);
+            let revision = kit::revision(&|h| (leaf.header, from.to_bits(), *looks, *mode).hash(h));
+            kit::cached(ui, "workspace-view-tools", revision, &mut |ui| {
+                let (hx, hy, hw, hh) = leaf.header;
+                let from = hx as f32 + from;
+                let modes = ["Solid", "Wire", "Traced"];
+                let seg_w = modes.iter().fold(24.0, |w, label| w + ui.text_width(None, label));
+                let look_w = kit::button_width(ui, Some("C"), false, "Look through");
+                let ty = hy as f32 + ((hh - 20) as f32 / 2.0);
+                let frame_w = kit::button_width(ui, Some("F"), false, "Frame");
+                if from + seg_w + 8.0 + look_w + 8.0 + frame_w < (hx + hw - 36) as f32 {
+                    bars::rule(ui, "workspace-view-rule", leaf.header, from - hx as f32);
+                    let render = match kit::segments(ui, "workspace-render", from + seg_w, ty, &modes, *mode).0 {
+                        Some(i) if i != *mode => Some(Action::RenderMode(i)),
+                        _ => None,
+                    };
+                    let look = kit::button(ui, "workspace-look", (from + seg_w + 8.0, ty), look_w, &ButtonOpts { active: *looks, hint: Some("C".into()), ..Default::default() }, "Look through");
+                    let framed = kit::button(ui, "workspace-frame", (from + seg_w + 8.0 + look_w + 8.0, ty), frame_w, &ButtonOpts { hint: Some("F".into()), ..Default::default() }, "Frame");
+                    view_action = if framed {
+                        Some(Action::FrameCamera)
+                    } else if look {
+                        Some(Action::LookThrough)
+                    } else {
+                        render
+                    };
+                }
+            });
         }
-        _ => None,
-    };
+    }
     (tool_action, view_action, view_pick)
 }
 

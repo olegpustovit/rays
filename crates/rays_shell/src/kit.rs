@@ -157,7 +157,7 @@ pub fn switch(ui: &mut Ui, key: &str, at: (f32, f32), on: bool) -> bool {
 
 /// Text tabs: the one in use is ink with a 1-point underline, the others ink-3. Laid out leftwards
 /// from `right`; the index clicked and where the row starts.
-pub fn segments(ui: &mut Ui, key: &str, right: f32, y: f32, labels: &[String], active: i64) -> (Option<i64>, f32) {
+pub fn segments(ui: &mut Ui, key: &str, right: f32, y: f32, labels: &[&str], active: i64) -> (Option<i64>, f32) {
     let h = 20.0;
     let theme = ui.tokens();
     let total = 12.0 * (labels.len() as i64 - 1).max(0) as f32 + labels.iter().map(|label| ui.text_width(None, label)).sum::<f32>();
@@ -165,8 +165,8 @@ pub fn segments(ui: &mut Ui, key: &str, right: f32, y: f32, labels: &[String], a
     let mut clicked = None;
     for (index, label) in labels.iter().enumerate() {
         let w = ui.text_width(None, label);
-        let boxed = ui.box_(
-            &format!("{key}-{index}"),
+        let boxed = ui.box_fmt(
+            format_args!("{key}-{index}"),
             BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(w + 8.0)).h(Size::Px(h)).at((x - 4.0, y)),
         );
         let signal = ui.signal(&boxed);
@@ -186,6 +186,24 @@ pub fn segments(ui: &mut Ui, key: &str, right: f32, y: f32, labels: &[String], a
         x += w + 12.0;
     }
     (clicked, right - total)
+}
+
+/// A view's revision: the hash of what it shows (small values, hashed once a frame).
+pub fn revision(parts: &dyn Fn(&mut std::hash::DefaultHasher)) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::hash::DefaultHasher::new();
+    parts(&mut hasher);
+    hasher.finish()
+}
+
+/// A cached view as large as the window at its corner: `f` builds boxes at window positions, and runs
+/// only when `revision` changes or the view is dirtied (input on its boxes, hover entering or leaving
+/// them, the theme, the window's size).
+pub fn cached(ui: &mut Ui, label: &str, revision: u64, f: &mut dyn FnMut(&mut Ui)) -> Handle {
+    let (w, h) = ui.view_size();
+    let view = ui.view(label, revision, Size::Px(w), Size::Px(h), f);
+    ui.set_at(&view, (0.0, 0.0));
+    view
 }
 
 /// `cap_y` for a painter, which has the paint and not the handle.
