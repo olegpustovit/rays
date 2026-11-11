@@ -4951,8 +4951,9 @@ impl Ui {
             let parent_hit = if has_hit { self.boxes[index].key } else { parent_hit };
             // a `ROUND_CLIP` node's corner radius rounds its children's clip; a square clip inside a
             // rounded one drops the rounding
-            // ponytail: one radius (the largest corner's) for the clip, and a cached view inside takes
-            // its outer clip square from the view table; per-corner radii when a design asks.
+            // one radius (the largest corner's) for the clip: the instance's `clip_radius` is its one
+            // f16 in the 64-byte budget (specification/pxui.md, the designed limit); a cached view
+            // inside takes its outer clip square from the view table
             let outer_radius = paint.clip_radius;
             if flags & CLIP != 0 {
                 let r = self.nd(index).look.radius;

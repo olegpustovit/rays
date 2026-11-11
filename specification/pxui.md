@@ -477,7 +477,8 @@ popup at the root (the kit's menus, submenus, completions and tooltips use `plac
 `SCROLL` scrolls down, `SCROLL_X` sideways (wheel and trackpad; a thumb from the node's `bar` on each
 axis; `ui.scroll_offset_x`); a `STICKY` flow child of a scroll box stops at its top and paints over
 its siblings. `CLIP | ROUND_CLIP` rounds the children's clip by the node look's radius (the instance
-`clip_radius`; square `CLIP` stays the default). `ui.set_dir(Direction::Rtl)` mirrors flow children
+`clip_radius`: one radius, the largest corner's, by design: the 64-byte instance has room for one
+f16, so per-corner clip radii are left out; square `CLIP` stays the default). `ui.set_dir(Direction::Rtl)` mirrors flow children
 inside their parents (start padding and `Justify::Start` at the right; text direction is
 cosmic-text's; a node's text ends its start inset from the right; content wider than a `SCROLL_X` box starts at
 its right edge, the sideways wheel and fingers move it as they move, and both scroll thumbs mirror). `ui.split(label, axis, ratio, min_a, min_b, a, b) -> Option<f32>` is two `Grow`

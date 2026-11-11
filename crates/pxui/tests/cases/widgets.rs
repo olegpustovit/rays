@@ -456,6 +456,28 @@ fn widgets_scroll_view_rtl() {
     ui.destroy();
 }
 
+/// At a compact density the switch sits `space(2)` from its row's end and its hit shape follows it.
+fn widgets_compact_toggle_hit() {
+    let mut ui = new_ui(None);
+    ui.set_a11y(true);
+    let mut theme = Theme::default();
+    theme.tokens.density = 0.84;
+    ui.set_theme(theme);
+    let on = std::cell::Cell::new(false);
+    let mut build = |ui: &mut Ui| ui.panel(PanelOpts::default(), "panel", &mut |ui| on.set(ui.toggle("Animate", on.get())));
+    for t in 0..2 {
+        ui.frame(&at(t as f64 * 0.1, vec![]), &mut build);
+    }
+    let row = node(&ui, Role::Toggle, "Animate");
+    // inside the switch 10 points from the end (space(2) at 0.84), outside where a 12-point side put it
+    let p = ((row.rect.x + row.rect.w - 11.0) as i64, (row.rect.y + row.rect.h / 2.0) as i64);
+    for (i, e) in [vec![move_to(p)], vec![press(p)], vec![release(p)], vec![]].into_iter().enumerate() {
+        ui.frame(&at(1.0 + i as f64 * 0.1, e), &mut build);
+    }
+    check(on.get(), "a click on the compact switch toggles it");
+    ui.destroy();
+}
+
 fn widgets_list() {
     let mut s = S::new();
     let mut ui = warm(&mut s);
@@ -732,6 +754,7 @@ pub const CASES: &[(&str, fn())] = &[
     ("widgets_tip_and_icon", widgets_tip_and_icon),
     ("widgets_scroll_view", widgets_scroll_view),
     ("widgets_scroll_view_rtl", widgets_scroll_view_rtl),
+    ("widgets_compact_toggle_hit", widgets_compact_toggle_hit),
     ("widgets_list", widgets_list),
     ("widgets_list_keys_multi", widgets_list_keys_multi),
     ("widgets_tree", widgets_tree),
