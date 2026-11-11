@@ -27,20 +27,27 @@ fn frame_at(count: i64) -> frame::Frame {
 /// asking for `blur`, and a red square drawn after the UI layer; the UI's draw calls and the pass
 /// splits the render made.
 fn render(blur: f32) -> (Vec<u8>, u64, u64) {
+    render_at(blur, 80.0, 0.0)
+}
+
+/// `render` with the view at x `left` and its box's look rounded by `radius`.
+fn render_at(blur: f32, left: f32, radius: f32) -> (Vec<u8>, u64, u64) {
     let path = format!("{}/../../assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
     let ui = Rc::new(RefCell::new(Ui::create(Platform::Apple, None, rays_shell::host::text(Some(&path)))));
     let view = Cell::new(None);
     let mut build = |ui: &mut Ui| {
         ui.node("under", Node { w: Size::Px(4.0), h: Size::Px(1.0), look: Look { fill: pxui::geom::color::rgba(0, 0, 0, 1), ..Look::NONE }, ..Node::DEFAULT });
-        view.set(Some(ui.view("glass", 1, Size::Px(160.0), Size::Px(80.0), &mut |ui| {
+        let glass = ui.view("glass", 1, Size::Px(160.0), Size::Px(80.0), &mut |ui| {
             ui.node("pane", Node { w: Size::Px(160.0), h: Size::Px(80.0), look: Look { fill: pxui::geom::color::rgba(0, 0, 0, 1), ..Look::NONE }, ..Node::DEFAULT });
-        })));
+        });
+        ui.node_mut(&glass).look.radius = [radius; 4];
+        view.set(Some(glass));
     };
     for count in 0..2 {
         ui.borrow_mut().frame(&frame_at(count), &mut build);
         if count == 0 {
             let mut ui = ui.borrow_mut();
-            ui.view_offset(&view.get().unwrap(), 80.0, 40.0);
+            ui.view_offset(&view.get().unwrap(), left, 40.0);
             ui.view_backdrop_blur(&view.get().unwrap(), blur);
         }
     }
@@ -74,6 +81,12 @@ fn window_host_backdrop_blur() {
     let ramp: Vec<i32> = [148, 154, 160, 166, 172].iter().map(|x| red(&blurred, *x, 80)).collect();
     assert!(ramp.windows(2).all(|w| w[0] < w[1]) && ramp[0] > 0 && ramp[4] < 255 && (40..215).contains(&ramp[2]), "a soft ramp across the hard edge: {ramp:?}");
     assert!(red(&plain, 150, 80) == 0 && red(&plain, 170, 80) >= 253, "the same frame unblurred keeps its hard edge");
+    // the view's right corners on the edge: a rounded record leaves its corners unblurred
+    let (square, _, _) = render_at(8.0, 5.0, 0.0);
+    let (round, _, _) = render_at(8.0, 5.0, 16.0);
+    assert!(red(&square, 163, 41) < 250, "a square blur reaches its corner: {}", red(&square, 163, 41));
+    assert!(red(&round, 163, 41) >= 253, "a rounded blur leaves its corner unblurred: {}", red(&round, 163, 41));
+    assert_eq!(red(&round, 163, 80), red(&square, 163, 80), "inside the corners the blur is the same");
 }
 
 pub const CASES: &[(&str, fn())] = &[("window_host_backdrop_blur", window_host_backdrop_blur)];

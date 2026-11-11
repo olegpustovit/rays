@@ -227,8 +227,7 @@ fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Er
 
 /// Blurs what the frame holds behind `b.rect` and draws it there, in a pass split off the scene's: the
 /// pass to go on in, or `None` when the rectangle is off the target.
-// ponytail: the record carries no corner radius or opacity, so the blurred image fills its rectangle and
-// the view's own instances (drawn next) shape the glass; add them to `BlurOut` to round the blur itself.
+// ponytail: one corner radius (the largest of the record's) rounds the image, through its clip.
 fn backdrop_blur(painter: &mut Painter, pass: &scene::UiPass, b: &BlurOut) -> Result<Option<RenderEncoder>, Error> {
     let [w, h] = pass.size_px;
     let (x0, y0) = ((b.rect.x * pass.scale).floor().max(0.0) as u32, (b.rect.y * pass.scale).floor().max(0.0) as u32);
@@ -242,7 +241,10 @@ fn backdrop_blur(painter: &mut Painter, pass: &scene::UiPass, b: &BlurOut) -> Re
         Ok(())
     })?;
     let rect = [x0, y0, x1, y1].map(|v| v as f32 / pass.scale);
-    painter.draw(&encoder, pass.size_px, pass.scale, &[Instance::image(rect, [0.0, 0.0, 1.0, 1.0], [255, 255, 255, 255])], &[Break { at_instance: 0, texture: blurred.as_ref() }])?;
+    let (alpha, radius) = ((255.0 * b.opacity.clamp(0.0, 1.0)).round() as u8, b.radii.iter().fold(0.0f32, |a, r| a.max(*r)));
+    let clip = [b.rect.x.floor(), b.rect.y.floor(), (b.rect.x + b.rect.w).ceil(), (b.rect.y + b.rect.h).ceil()].map(|v| v as i16);
+    let image = Instance::image(rect, [0.0, 0.0, 1.0, 1.0], [alpha; 4]).clip(clip, radius);
+    painter.draw(&encoder, pass.size_px, pass.scale, &[image], &[Break { at_instance: 0, texture: blurred.as_ref() }])?;
     Ok(Some(encoder))
 }
 

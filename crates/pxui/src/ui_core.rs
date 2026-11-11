@@ -467,13 +467,16 @@ impl ViewEntry {
 
 /// A view that asked for its backdrop blurred (`Ui::view_backdrop_blur`): the host draws layer `layer`
 /// up to `at_instance`, blurs what is under `rect` (window points) by `sigma` points with
-/// `pxui_render::Painter::blur`, draws the result as an image there, then draws the rest.
+/// `pxui_render::Painter::blur`, draws the result as an image there (its corners rounded by `radii`,
+/// the view box look's, and its alpha scaled by the view's composed `opacity`), then draws the rest.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BlurOut {
     pub layer: usize,
     pub at_instance: u32,
     pub rect: Rect,
     pub sigma: f32,
+    pub radii: [f32; 4],
+    pub opacity: f32,
 }
 
 /// A cached subtree (`Ui::view`): when it was built, where its output lives and how it is shown.
@@ -5502,9 +5505,8 @@ impl Ui {
     }
 
     /// Ask the host to blur what is under a view by `sigma` points before drawing it (CSS
-    /// `backdrop-filter: blur`); 0 stops it. Reported in `FrameOut::blurs`.
-    // ponytail: rays_shell's host does not fulfil the record yet (it draws each layer in one call
-    // inside the scene pass); it needs the pass split at `at_instance` and a `Painter::blur` there.
+    /// `backdrop-filter: blur`); 0 stops it. Reported in `FrameOut::blurs`, with the view box's look
+    /// radius (`node_mut(&view).look.radius`) rounding the blurred image.
     pub fn view_backdrop_blur(&mut self, b: &Handle, sigma: f32) {
         if let Some(v) = self.view_id(b) {
             self.views[v as usize].blur = sigma.max(0.0);
@@ -5519,7 +5521,8 @@ impl Ui {
             if r.blur > 0.0 && r.valid && r.visited == self.painted {
                 if let Some(layer) = self.draw[..self.draw_len].iter().position(|l| l.key == r.layer) {
                     let rect = r.entry().cover(r.screen);
-                    self.blur_out.push(BlurOut { layer, at_instance: r.run.0, rect, sigma: r.blur });
+                    let radii = self.slots[r.slot].node.look.radius;
+                    self.blur_out.push(BlurOut { layer, at_instance: r.run.0, rect, sigma: r.blur, radii, opacity: r.alpha });
                 }
             }
         }
