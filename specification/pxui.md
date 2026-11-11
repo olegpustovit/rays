@@ -483,14 +483,16 @@ SELECTED, MODAL), `ui.set_role`, `ui.a11y_name` (the text by default), `ui.a11y_
 selection)`. Each view keeps the slots its last build declared, so the walk after paint reaches a
 kept view's nodes; nodes with a role are pushed under their nearest pushed ancestor with
 `node_id(slot, generation)`, the resolved rect, FOCUSABLE/FOCUSED/PRESSED/ENABLED/VISIBLE and the
-actions their flags allow. `FrameOut::a11y` changes `revision` only when the content did (no
-allocation warm). `ui.inject_a11y(&[A11yAction])` applies next frame as input: Press clicks, Focus
+actions their flags allow. The tree is built only after `ui.set_a11y(true)` (off by default: empty
+tree, no walk); the walk runs on frames that rebuilt a view or moved focus, over every view's nodes.
+`FrameOut::a11y` changes `revision` only when the content did (no allocation warm). `ui.inject_a11y(&[A11yAction])` applies next frame as input: Press clicks, Focus
 focuses, Scroll scrolls, SetValue arrives as `Signal::a11y_value` (the text field applies it as one
 change), Expand/Collapse click a disclosure whose state differs. Kit roles: panel/window, dialog,
 menu, menu item, separator, label, heading (sections), toggle, button, text field, text area, list
 and list item (`ui.list`, picker, completions), tooltip, status bar (footer, inspector bar), scroll
 area, table, splitter. The Linux host wiring (`pxui_atspi::Bridge::update(out.a11y)` after a frame,
-`inject_a11y(bridge.pump())` before the next) belongs to the gallery's Wayland host loop.
+`inject_a11y(bridge.pump())` before the next, `set_a11y(true)` while a client listens) belongs to the
+gallery's Wayland host loop.
 
 Composition closures are called immediately; standard widgets carry a `Look` (plain data); only `canvas`
 closures outlive the build, and they live in the frame arena. Public functions take concrete types or
@@ -504,7 +506,8 @@ closures outlive the build, and they live in the frame arena. Public functions t
 | Draw calls per UI layer | 1, plus one per external texture (clip rides in the instance) |
 | Atlas upload when dirty | changed rectangles only, R8 mask atlas (RGBA8 for colour glyphs) |
 | Frames built or drawn while idle | 0 |
-| Work when one view changes | that view only; the rest replays |
+| Work when one view changes | that view only; the rest replays (`window_pxui_budget_counts`) |
+| Cached frame | O(views), not O(nodes) (`window_pxui_budget_cached_per_view`) |
 | Text shaping | full shaping, cached per node (`pxui_text`) |
 | Warm `cargo check -p pxui` | under 1 s |
 | Clean debug build, PXUI repo | under 30 s (cosmic-text about 13 s of it) |

@@ -104,3 +104,64 @@ frames' growth is the accessibility walk, which covers every view's nodes on a f
 view; a frame that rebuilds nothing and whose root declares no role skips the walk (without that gate
 the all-kept frame was 29 us). Editor `alloc_budget` (RAYS_SLOW=1): empty/basic/bare 443/652/596
 allocations per frame (445/652/598 before).
+
+## After the P5 performance pass
+
+`PXUI_BENCH=1 RAYS_SLOW=1 cargo t [--release] -p pxui pxui_bench` (`crates/pxui/tests/cases/bench.rs`)
+prints min and median of 7 rounds (`Ui::frame` only, warm) and, with `Ui::set_timing`, the median
+round's phases; `PXUI_NO_TIMING=1` measures without the phase clocks (about 0.15 us a frame),
+`PXUI_PROFILE=<case>` loops one case 8 s for `sample <pid>`. M1, us per frame, min / median. Dev is
+the `dev` profile (opt-level 1); release is `cargo t --release` (opt-level 3, thin LTO, 16 codegen
+units), the truly optimised build. Before = commit `ffc9d7d5` (phase clocks always on).
+
+| Frame | Dev before | Dev after | Release before | Release after |
+| --- | --- | --- | --- | --- |
+| Kit baseline (panel, 4 widgets, 2x) | 5.7 / 5.8 | 3.4 / 3.6 | 5.2 / 5.2 | 3.3 / 3.4 |
+| 500 widgets, all ten views kept | 10.1 / 10.1 | 3.9 / 3.9 | 8.9 / 9.0 | 3.4 / 3.4 |
+| 500 widgets, one 50-widget view rebuilt | 67.8 / 67.9 | 30.9 / 31.0 | 60.1 / 61.9 | 29.4 / 30.1 |
+| 500 widgets, same, accessibility on | 67.8 / 67.9 (always on) | 43.2 / 43.3 | 60.1 / 61.9 | 40.1 / 41.3 |
+| 500 widgets, all rebuilt | 487 / 491 | 281 / 281 | 426 / 429 | 259 / 272 |
+| 2,006-node stress tree, full rebuild | 1154 / 1165 (575 ns per node) | 740 / 741 (369) | 1019 / 1024 (508) | 693 / 699 (346) |
+| Stress tree cached | 15.5 / 15.6 | 1.0 / 1.1 | 13.7 / 13.7 | 0.9 / 0.9 |
+| Stress cached + one 42-node view rebuilt | 45.5 / 46.5 | 15.4 / 15.4 | 39.1 / 39.1 | 14.5 / 14.6 |
+| Allocations, any of the above, warm | 0 | 0 | 0 | 0 |
+
+Full-rebuild phases of the stress tree (median round, us; dev before -> after, release after): begin
+2.9 -> 2.9 (2.9); build 117 -> 94 (83); intrinsic 62 -> 30 (29); arrange 178 -> 136 (115); paint 785
+-> 471 (468); a11y 5.8 -> 0 (0, off); finish 13.8 -> 13.0 (11.2). Layout alone 120 -> 83 ns per node
+(release 86 -> 72). Text has no phase of its own: `sample` puts glyph emission (`Paint::text_styled`
+with `pxui_text::Text::glyphs`, cosmic-text's run iteration and `LayoutGlyph::physical`, and instance
+construction) at about 41% of a full rebuild, the text layout-cache lookup (`lay_out`) at 7%.
+
+What bought it, in order: the accessibility tree only while `set_a11y(true)` (a one-view rebuild
+walked every view's nodes); pxui_text's layout and glyph caches and the a11y index on a multiply-
+rotate hasher (SipHash of glyph cache keys was 19% of a full rebuild); a cached frame walks no node
+(prune frees only from the rebuilt views' last builds, moving scrolls are listed, the text-layout
+sweep runs every 64 frames: it was 14 us of the 15.5); hit testing's view check without an
+out-of-line slice compare and the phase clocks behind `set_timing`; `Rgba` channels as bytes (Look
+408 -> 144 B, Node 720 -> 424 B, copied per node); repeated labels resolving their duplicate keys in
+one step (25 "LABEL"s probed the table 325 times); layout reading node fields in place instead of
+copying the Node per child; a frame with input events copying them into kept storage (2 to 3
+allocations per input frame).
+
+Why release was no faster than debug: it was a real optimised build (the `cargo t` runner passes
+`--release` through), but the frame was dominated by code whose speed does not depend on our
+opt-level: std's SipHash (precompiled, optimised in both) on every glyph cache key and text key,
+`memmove` of 720-byte nodes, and per-node scans over large slot records (cache misses). After the pass
+release is 6 to 10% faster than dev; what remains is mostly per-glyph emission, memory-bound walks of
+cosmic-text's layout runs.
+
+Asserted budgets (all load-independent): `window_pxui_budget_counts` (a kept frame of ten views
+declares and lays out 11 nodes, a one-view rebuild 86; the a11y tree stays empty with revision 0 until
+asked for; one-view rebuilds with it on allocate nothing), `window_pxui_budget_cached_per_view` (20 kept
+views of 200 nodes within 1.5x of 20 of 10 nodes; 6.3 us both), `window_pxui_budget_zero_alloc` (a
+virtual list scrolled a row a frame; hover in and out of a kept view's button with its transition),
+`window_pxui_node_duplicate_keys`; with the earlier `layout_stress_zero_alloc` (warm full rebuild,
+cached, one-view rebuild), `window_pxui_view_costs`, `styling_transition_without_rebuild` and
+`gpu_retained_bytes` (a cached frame writes 0 instance bytes, a one-instance patch 64 per frame copy).
+
+Not fixed: glyph emission (above), which repeats per glyph each rebuild; caching a text node's glyph
+quads by origin was tried and dropped, since the same label at many origins (the common case) missed
+and was slower. With accessibility on, a frame that rebuilds any view still walks every view's nodes
+(12 us for 761 nodes): per-view spans in the tree when trees get large. The host's `paint_layer` does
+per-frame work in views (view table) and dirty ranges, not in instances.
