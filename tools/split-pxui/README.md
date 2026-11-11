@@ -58,7 +58,10 @@ Input is data in, output is data out: there are no callbacks into the platform.
 cargo check -p pxui                 # inner loop
 cargo t -p pxui [filter]            # never raw `cargo test`: cases die at 5 s, runs at 60 s
 cargo run -p gate -- deps           # dependency boundaries (`shape` checks code shape)
+tools/validate.sh                   # all of it on macOS; --windows / --linux print the commands for those machines
 ```
+
+Validation is local; there is no hosted CI.
 
 macOS needs `brew install pkgconf sdl3`. Linux Vulkan setup is in [docs/vulkan-linux.md](docs/vulkan-linux.md).
 Contributor rules are in [AGENTS.md](AGENTS.md). [MIT license](LICENSE).
