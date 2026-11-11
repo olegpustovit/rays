@@ -134,7 +134,7 @@ fn selector_steps() {
         "the track did not map the pointer to an iteration",
     );
     let (_, changes) = scope_click(&mut ui, view.clone(), (10, 690));
-    check(changes.iter().all(|c| matches!(c, Change::Selected(_))), "a blank click made an edit");
+    check(changes.iter().all(|c| matches!(c, Change::Selected)), "a blank click made an edit");
     // the toggle collapses the zone; a collapsed zone has no selector
     let (tx, ty, _, _) = scope::inspect::box_of(&view, &zone).expect("box");
     let (_, changes) = scope_click(&mut ui, view, (tx as i64 + 10, ty as i64 + 10));
@@ -228,7 +228,7 @@ fn wire_and_delete() {
     let (hx, hy, _, _) = scope::inspect::box_of(&view, &heart).expect("box");
     let at = (hx as i64 + 60, hy as i64 + 8);
     let (menu, changes) = scope_step(&mut ui, view.clone(), &frame_ev(at, right_click(at)));
-    check(changes.contains(&Change::Selected(vec![heart.clone()])), "a right-click on a node did not emit Selected");
+    check(changes.contains(&Change::Selected) && scope::selected(&menu) == vec![heart.clone()], "a right-click on a node did not emit Selected");
     check(
         { let mut r8_view = menu; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Delete, &mut r8_changes); (r8_view, r8_changes) }.1.contains(&Change::SyntaxEdit(Op::DeleteNodes { nodes: vec![heart.clone()] })),
         "Delete after a right-click on a node removed the wire selected before",

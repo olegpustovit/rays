@@ -26,7 +26,7 @@ fn drop_last(q: &[Symbol]) -> Path {
 }
 
 pub fn parents_removed(paths: &[Path]) -> Vec<Path> {
-    let set: PathSet = paths.iter().cloned().collect();
+    let set = PathSet::of(paths);
     // a path above this one is among them
     fn under(q: &[Symbol], set: &PathSet) -> bool {
         if q.len() <= 1 {
@@ -724,7 +724,7 @@ pub fn run_command(t: &mut Pane, command: Command, emit: &mut Vec<Change>) {
                     Some((pl, _, _)) => {
                         let path = pl.path.clone();
                         st::select(vec![path.clone()], t);
-                        emit.push(Change::Selected(vec![path]));
+                        emit.push(Change::Selected);
                     }
                     None => {},
                 },
@@ -755,7 +755,7 @@ pub fn run_command(t: &mut Pane, command: Command, emit: &mut Vec<Change>) {
                     }
                     match best {
                         Some((_, path)) => { st::select(vec![path.clone()], t);
-                        emit.push(Change::Selected(vec![path])); },
+                        emit.push(Change::Selected); },
                         None => {},
                     }
                 }

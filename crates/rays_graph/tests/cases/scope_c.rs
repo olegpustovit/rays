@@ -133,8 +133,8 @@ fn scope_gestures_3() {
     let ys = p::find(&cscope, &path(&["g", "ys"])).expect("ys");
     let ri = ys.rows.iter().position(|r| r.chip == p::Chip::Name("xs".into())).expect("xs row");
     let (x, y) = scope::inspect::ref_chip(&cview, &path(&["g", "ys"]), ri).expect("chip");
-    let (_, changes) = g::scope_click(&mut ui, cview, (x as i64, y as i64));
-    check(changes.contains(&Change::Selected(vec![path(&["g", "xs"])])), "a click on a read name did not select its binding");
+    let (cview, changes) = g::scope_click(&mut ui, cview, (x as i64, y as i64));
+    check(changes.contains(&Change::Selected) && scope::selected(&cview) == vec![path(&["g", "xs"])], "a click on a read name did not select its binding");
     // a click on an expression chip selects its card and the row, [holder @ [":" ^ label]]
     let ew = checked("(workspace e (graph g :context value (let* [a 1.0 b (+ 2.0 (* 3.0 a))] (+ a b))))");
     let (eview, escope) = g::scope_view(&ew, "g");
@@ -145,7 +145,7 @@ fn scope_gestures_3() {
     let (x, y) = scope::inspect::expr_chip(&eview, &path(&["g", "b"]), ei).expect("chip");
     let (eview, changes) = g::scope_click(&mut ui, eview, (x as i64, y as i64));
     let want = vec![path(&["g", "b"]), vec!["g".into(), "b".into(), format!(":{}", label).into()]];
-    check(changes.contains(&Change::Selected(want.clone())), "a click on an expression chip did not select its row");
+    check(changes.contains(&Change::Selected) && scope::selected(&eview) == want, "a click on an expression chip did not select its row");
     check(scope::selected(&eview) == want, "the pane did not keep the row selected beside its card");
 }
 
@@ -265,7 +265,7 @@ fn scope_gestures_4() {
     let sel = scope::selected(&view);
     let covered: Vec<flow_check::workspace::Path> = sc.nodes.iter().map(|n| n.path.clone()).filter(|q| sel.contains(q)).collect();
     check(covered.len() >= 4 && covered.contains(&heart), "a marquee over the graph did not select its nodes");
-    check(changes.iter().any(|c| matches!(c, Change::Selected(l) if l.contains(&heart))), "a marquee did not emit Selected");
+    check(changes.iter().any(|c| matches!(c, Change::Selected)) && sel.contains(&heart), "a marquee did not emit Selected");
     let view = g::settled(&mut ui, { let mut r8_view = g::scope_view(&w, "flower").0; scope::select(vec![heart.clone()], &mut r8_view); r8_view });
     let (rx, ry, rw, rh) = scope::inspect::box_of(&view, &path(&["flower", "result"])).expect("result");
     let ra = ((rx - 4.0) as i64, (ry - 4.0) as i64);
@@ -298,7 +298,7 @@ fn scope_gestures_4() {
         for (a, b) in [(a, b), (b, a)] {
             let (selected, changes) = drag(&mut ui, view.clone(), false, a, b);
             check(scope::selected(&selected) == vec![result.clone()], "a crossing marquee skipped the unnamed result");
-            check(changes.iter().any(|c| matches!(c, Change::Selected(l) if l.len() == 1 && l[0] == result)), "a crossing marquee did not report the result selection");
+            check(changes.iter().any(|c| matches!(c, Change::Selected)) && scope::selected(&selected) == vec![result.clone()], "a crossing marquee did not report the result selection");
         }
         let (selected, _) = drag(&mut ui, { let mut r8_view = view.clone(); scope::select(vec![upstream.clone()], &mut r8_view); r8_view }, true, a, b);
         let sel = scope::selected(&selected);

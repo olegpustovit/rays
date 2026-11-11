@@ -17,7 +17,103 @@ use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
 pub type S = Syntax;
-pub type PathSet = BTreeSet<Path>;
+
+/// A set of paths in order that keeps its storage: a path taken out keeps its buffer past the end
+/// for the next one put in, so a selection that changes on a press allocates nothing once warm.
+#[derive(Default, Debug)]
+pub struct PathSet {
+    v: Vec<Path>,
+    n: usize,
+}
+
+impl PathSet {
+    pub fn new() -> PathSet {
+        PathSet::default()
+    }
+    pub fn len(&self) -> usize {
+        self.n
+    }
+    pub fn is_empty(&self) -> bool {
+        self.n == 0
+    }
+    pub fn as_slice(&self) -> &[Path] {
+        &self.v[..self.n]
+    }
+    pub fn iter(&self) -> std::slice::Iter<'_, Path> {
+        self.as_slice().iter()
+    }
+    fn find(&self, p: &[Symbol]) -> Result<usize, usize> {
+        self.as_slice().binary_search_by(|q| q.as_slice().cmp(p))
+    }
+    pub fn contains(&self, p: &[Symbol]) -> bool {
+        self.find(p).is_ok()
+    }
+    pub fn clear(&mut self) {
+        self.n = 0;
+    }
+    /// `false` when it was there
+    pub fn insert(&mut self, p: &[Symbol]) -> bool {
+        let Err(k) = self.find(p) else { return false };
+        if self.n == self.v.len() {
+            self.v.push(p.to_vec());
+        } else {
+            let spare = &mut self.v[self.n];
+            spare.clear();
+            spare.extend_from_slice(p);
+        }
+        self.v[k..=self.n].rotate_right(1);
+        self.n += 1;
+        true
+    }
+    /// `false` when it was not there
+    pub fn remove(&mut self, p: &[Symbol]) -> bool {
+        let Ok(k) = self.find(p) else { return false };
+        self.v[k..self.n].rotate_left(1);
+        self.n -= 1;
+        true
+    }
+    /// Holds what `other` holds (in the buffers it has).
+    pub fn assign(&mut self, other: &PathSet) {
+        self.clear();
+        for p in other.iter() {
+            self.insert(p);
+        }
+    }
+    /// Keeps the paths `keep` says to.
+    pub fn retain(&mut self, keep: &mut dyn FnMut(&Path) -> bool) {
+        let mut k = 0;
+        while k < self.n {
+            if keep(&self.v[k]) {
+                k += 1;
+            } else {
+                self.v[k..self.n].rotate_left(1);
+                self.n -= 1;
+            }
+        }
+    }
+}
+
+impl Clone for PathSet {
+    fn clone(&self) -> PathSet {
+        PathSet { v: self.as_slice().to_vec(), n: self.n }
+    }
+}
+
+impl PartialEq for PathSet {
+    fn eq(&self, other: &PathSet) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl PathSet {
+    pub fn of(paths: &[Path]) -> PathSet {
+        let mut s = PathSet::new();
+        for p in paths {
+            s.insert(p);
+        }
+        s
+    }
+}
 pub type Frame3 = (String, (f64, f64), (f64, f64));
 
 #[derive(Clone, Debug, PartialEq)]
@@ -27,7 +123,8 @@ pub enum Change {
     LayoutActive { graph: String, index: i64 },
     ProbeSet { zone: Path, index: i64 },
     ZoneCollapsed { zone: Path, collapsed: bool },
-    Selected(Vec<Path>),
+    /// the pane's selection changed: `selected` reads it
+    Selected,
     Moved(Vec<(Path, f64, f64)>),
     /// nodes opened or pointed: their new level (`None`: back to the default, `Card`) and whether it is pinned
     LevelSet(Vec<(Path, Option<Level>, bool)>),
@@ -133,10 +230,12 @@ pub struct Wiring {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Drag {
     /// `slow`: a card holds others (a zone): the content builds the move; else the cards' views move
-    Moving { paths: Vec<Path>, dx: f64, dy: f64, moved: bool, slow: bool },
+    /// (the cards it carries are the pane's `moving`)
+    Moving { dx: f64, dy: f64, moved: bool, slow: bool },
     Wiring(Wiring),
     /// from the canvas press point to the pointer, screen space
-    Marquee { base: PathSet },
+    /// (what it adds to is the pane's `marquee_base`)
+    Marquee {},
     /// a frame's corner
     Sizing { scope: Path, index: i64, dw: f64, dh: f64 },
     /// a frame by its title, with the nodes inside it
@@ -207,11 +306,15 @@ pub struct Nothing;
 impl Saved for Nothing {}
 
 /// The nodes upstream and downstream of the selection, by their slots in the geometry they were
-/// found in.
+/// found in; `rev` changes with every selection or geometry they were found for (they are worked out
+/// again in place when nothing else holds them).
+#[derive(Default)]
 pub struct Chains {
     pub up: Vec<bool>,
     pub down: Vec<bool>,
     pub slot: Rc<HashMap<Path, usize>>,
+    pub rev: u64,
+    todo: Vec<usize>,
 }
 
 impl Chains {
@@ -224,7 +327,14 @@ impl Chains {
         (side(&self.up), side(&self.down))
     }
 }
-pub type ChainCache = Option<(PathSet, Rc<Vec<Wire>>, Rc<Chains>)>;
+
+/// One slot: the chains of the last selection over the last wires.
+#[derive(Default)]
+pub struct ChainCache {
+    sel: PathSet,
+    wires: Option<Rc<Vec<Wire>>>,
+    chains: Option<Rc<Chains>>,
+}
 
 #[derive(Clone)]
 pub struct Pane {
@@ -278,6 +388,9 @@ pub struct Pane {
     pub dropped: Option<(Vec<usize>, f64, f64, u64)>,
     /// the rubber band's hits (kept: a band frame allocates nothing)
     pub marquee: Vec<usize>,
+    /// the selection a rubber band adds to, and the cards a move carries (kept buffers)
+    pub marquee_base: PathSet,
+    pub moving: PathSet,
     pub editing: Option<Editing>,
     pub context: Option<((f64, f64), Path)>,
     pub stats: Stats,
@@ -439,6 +552,8 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         press: None,
         dropped: None,
         marquee: Vec::new(),
+        marquee_base: PathSet::new(),
+        moving: PathSet::new(),
         editing: None,
         context: None,
         stats: Stats::default(),
@@ -454,7 +569,7 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         }),
         measured,
         tags: true,
-        chain: Rc::new(RefCell::new(None)),
+        chain: Rc::new(RefCell::new(ChainCache::default())),
         built: Rc::new(RefCell::new(None)),
         hovers: Rc::new(RefCell::new(Default::default())),
     }
@@ -468,17 +583,27 @@ pub fn chains_of(t: &Pane) -> Option<Rc<Chains>> {
     if t.selected.is_empty() {
         return None;
     }
-    if let Some((sel, wires, r)) = &*t.chain.borrow() {
-        if *sel == t.selected && Rc::ptr_eq(wires, &t.geo.wires) {
+    let mut c = t.chain.borrow_mut();
+    if let (Some(wires), Some(r)) = (&c.wires, &c.chains) {
+        if c.sel == t.selected && Rc::ptr_eq(wires, &t.geo.wires) {
             return Some(r.clone());
         }
     }
+    let rev = c.chains.as_ref().map_or(0, |r| r.rev + 1);
+    let mut r = match c.chains.take() {
+        Some(r) if Rc::strong_count(&r) == 1 && Rc::weak_count(&r) == 0 => r,
+        _ => Rc::new(Chains::default()),
+    };
+    let ch = Rc::get_mut(&mut r).expect("a chain no one else holds");
+    (ch.rev, ch.slot) = (rev, t.geo.slot.clone());
     let n = t.geo.items.len();
     let slot = |q: &Option<Path>| q.as_ref().and_then(|q| t.geo.slot.get(q).copied());
-    let reach = |upstream: bool| -> Vec<bool> {
-        let mut seen = vec![false; n];
-        let mut todo: Vec<usize> = t.selected.iter().filter_map(|q| t.geo.slot.get(q).copied()).collect();
-        for &k in &todo {
+    let reach = |upstream: bool, seen: &mut Vec<bool>, todo: &mut Vec<usize>| {
+        seen.clear();
+        seen.resize(n, false);
+        todo.clear();
+        todo.extend(t.selected.iter().filter_map(|q| t.geo.slot.get(q).copied()));
+        for &k in todo.iter() {
             seen[k] = true;
         }
         while let Some(k) = todo.pop() {
@@ -493,10 +618,12 @@ pub fn chains_of(t: &Pane) -> Option<Rc<Chains>> {
                 }
             }
         }
-        seen
     };
-    let r = Rc::new(Chains { up: reach(true), down: reach(false), slot: t.geo.slot.clone() });
-    *t.chain.borrow_mut() = Some((t.selected.clone(), t.geo.wires.clone(), r.clone()));
+    reach(true, &mut ch.up, &mut ch.todo);
+    reach(false, &mut ch.down, &mut ch.todo);
+    c.sel.assign(&t.selected);
+    c.wires = Some(t.geo.wires.clone());
+    c.chains = Some(r.clone());
     Some(r)
 }
 
@@ -564,7 +691,7 @@ pub fn editing(t: &Pane) -> bool {
 }
 
 pub fn select(paths: Vec<Path>, t: &mut Pane) {
-    t.selected = paths.into_iter().collect();
+    t.selected = PathSet::of(&paths);
     t.selected_wire = None;
 }
 
@@ -840,20 +967,15 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: &mut Pane) {
     }
     // an edit that removed or moved a node drops it from the selection
     refresh(t);
-    let kept: PathSet = t
-        .selected
-        .iter()
-        .filter(|pth| {
-            t.geo.slot.contains_key(*pth)
-                // a row of a node (the inspector's subject, `holder @ [":b"]`) lives while its holder does
-                || match pth.split_last() {
-                    Some((last, holder)) if !holder.is_empty() => last.starts_with(':') && t.geo.slot.contains_key(holder),
-                    _ => false,
-                }
-        })
-        .cloned()
-        .collect();
-    t.selected = kept;
+    let slots = t.geo.slot.clone();
+    t.selected.retain(&mut |pth| {
+        slots.contains_key(pth)
+            // a row of a node (the inspector's subject, `holder @ [":b"]`) lives while its holder does
+            || match pth.split_last() {
+                Some((last, holder)) if !holder.is_empty() => last.starts_with(':') && slots.contains_key(holder),
+                _ => false,
+            }
+    });
     let keep_wire = match &t.selected_wire {
         Some((sp, sk, _)) => t.geo.wires.iter().any(|wi| matches!(&wi.target, Some((tp, tk, _)) if sp == tp && sk == tk)),
         None => false,

@@ -901,7 +901,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         result.other_texts = Vec::new();
         result.menu_pick = None;
         result.tree_intents.retain(|i| matches!(i, tree::Intent::Select(_)));
-        result.scope_changes.retain(|c| matches!(c, scope::Change::Selected(_) | scope::Change::Activated(_) | scope::Change::DropOver { .. } | scope::Change::Dropped { .. } | scope::Change::Notice(_)));
+        result.scope_changes.retain(|c| matches!(c, scope::Change::Selected | scope::Change::Activated(_) | scope::Change::DropOver { .. } | scope::Change::Dropped { .. } | scope::Change::Notice(_)));
         result.prompt_intent = match result.prompt_intent.take() {
             Some(intent @ PromptIntent::Go(_)) => Some(intent),
             _ => None,

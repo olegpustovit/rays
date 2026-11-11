@@ -100,7 +100,7 @@ pub fn inspect_panel<'a>(
             Level::Inside(id) => (1, id),
         };
         (value.revs, cook_rev, preview_key, inspector_visible, window, bounds, scope_active, value.live_cook).hash(h);
-        (level_key, &pane(value).shown, selected_ids.as_slice(), selection_.primary, &scope_view.selected, value.carry.is_some()).hash(h);
+        (level_key, &pane(value).shown, selected_ids.as_slice(), selection_.primary, scope_view.selected.as_slice(), value.carry.is_some()).hash(h);
     });
     let cacheable = value.revs.panel.is_some() && value.carry.is_none();
     let shown_image: std::cell::Cell<Option<i64>> = std::cell::Cell::new(None);

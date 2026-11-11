@@ -37,6 +37,8 @@ fn frame(count: i64, pointer: (f64, f64), buttons: &[MouseButton], events: Vec<E
     rframe::Frame { input, pixel_scale: (2.0, 2.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
 
+thread_local! { static CHANGES: std::cell::RefCell<Vec<rays_graph::scope_state::Change>> = std::cell::RefCell::new(Vec::with_capacity(16)); }
+
 fn one(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Cost {
     ui.set_timing(true);
     let builds = scope::inspect::content_builds(t);
@@ -44,7 +46,12 @@ fn one(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Cost {
     let before = mem_sys::local_alloc_count();
     ui.frame(fr, &mut |ui: &mut Ui| {
         let root = ui.box_("graph-root", BoxOpts::default().w(Size::Px(W as f32)).h(Size::Px(H as f32)).at((0.0, 0.0)));
-        ui.within(&root, &mut |ui| scope::update_cached("graph-view", &[], t, ui, fr, &mut Vec::new()));
+        // the intents in a list kept from frame to frame, as the editor keeps its own
+        CHANGES.with(|c| {
+            let mut c = c.borrow_mut();
+            c.clear();
+            ui.within(&root, &mut |ui| scope::update_cached("graph-view", &[], t, ui, fr, &mut c));
+        });
     });
     let allocs = mem_sys::local_alloc_count() - before;
     let us = ui.phase_times().iter().sum::<std::time::Duration>().as_secs_f64() * 1e6;
@@ -152,8 +159,16 @@ fn window_graph_costs() {
         let p = if i % 2 == 0 { chip } else { c1 };
         go(ui, t, p, &[], vec![Event::PointerMoved(p)])
     });
-    // selecting: a press selects (the Selected intent and the set it holds are the press frame's
-    // allocations), the release nothing
+    // selecting: a press selects, the release nothing; neither allocates
+    // warm: each card selected once (the selection's and the chains' kept buffers grow to fit), then a
+    // rest past a double click's 0.35 s
+    for p in [c1, c2] {
+        go(&mut ui, &mut t, p, &[MouseButton::LeftButton], vec![Event::PointerMoved(p), Event::PointerPressed(MouseButton::LeftButton, p)]);
+        go(&mut ui, &mut t, p, &[], vec![Event::PointerReleased(MouseButton::LeftButton, p)]);
+    }
+    for _ in 0..3 {
+        rest(&mut ui, &mut t, &mut go);
+    }
     let mut presses = Vec::new();
     let select = run(&mut table, "select", &mut ui, &mut t, n, &mut |ui, t, i| {
         let p = if (i / 2) % 2 == 0 { c1 } else { c2 };
@@ -213,6 +228,18 @@ fn window_graph_costs() {
     // makes through the patch path (and the chains' wires); a frame that changes no selection
     // allocates nothing
     let from = (c1.0 - 90.0, c1.1 - 30.0);
+    let end = (from.0 + 20.0 * (n + 1) as f64, from.1 + 6.0 * (n + 1) as f64);
+    // warm: the band drawn once (the selection's kept buffers grow to what it selects)
+    go(&mut ui, &mut t, from, &[], vec![Event::PointerMoved(from)]);
+    go(&mut ui, &mut t, from, &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, from)]);
+    for i in 0..n {
+        let p = (from.0 + 20.0 * (i + 1) as f64, from.1 + 6.0 * (i + 1) as f64);
+        go(&mut ui, &mut t, p, &[MouseButton::LeftButton], vec![Event::PointerMoved(p)]);
+    }
+    go(&mut ui, &mut t, end, &[], vec![Event::PointerReleased(MouseButton::LeftButton, end)]);
+    for _ in 0..3 {
+        rest(&mut ui, &mut t, &mut go);
+    }
     go(&mut ui, &mut t, from, &[], vec![Event::PointerMoved(from)]);
     go(&mut ui, &mut t, from, &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, from)]);
     assert!(matches!(t.drag, Some(Drag::Marquee { .. })), "the press above n3 did not start a rubber band");
@@ -227,7 +254,6 @@ fn window_graph_costs() {
         c
     });
     assert!(scope::selected(&t).contains(&path("n3")) && scope::selected(&t).contains(&path("n4")), "the band did not select n3 and n4");
-    let end = (from.0 + 20.0 * (n + 1) as f64, from.1 + 6.0 * (n + 1) as f64);
     go(&mut ui, &mut t, end, &[], vec![Event::PointerReleased(MouseButton::LeftButton, end)]);
     rest(&mut ui, &mut t, &mut go);
     // an edit applied by the host (a value a sketch or the inspector changed): one content build
@@ -260,14 +286,16 @@ fn window_graph_costs() {
     // a selection: the cards' looks, the chain's wires drawn again (its view)
     assert!(select.builds == 0, "select: {} content builds", select.builds);
     assert!(select.views <= 1, "select: {} views built", select.views);
-    // (the Selected intent, the selection, the move it may begin and the chains of the selection)
-    assert!(press_allocs <= 20, "a selecting press allocated {press_allocs}");
+    // the Selected intent carries nothing (the pane holds the selection), the selection, the move it may
+    // begin and the chains of the selection are kept buffers, a press is routed with a kept list
+    assert!(press_allocs == 0, "a selecting press allocated {press_allocs}");
     // a card's drag: its view's offset and the view of its wires
     quiet("card drag", drag, 1, 64 * INSTANCE);
     // the pulled wire's view and the hover's (the wires the pointer passes light)
     quiet("wire drag", wire, 2, 64 * INSTANCE);
     assert!(band.builds == 0 && band.views <= 2, "the rubber band: {} content builds, {} views", band.builds, band.views);
     assert!(quiet_band == 0, "a band frame that selected nothing new allocated {quiet_band}");
+    assert!(band.allocs == 0, "a band frame allocated {}", band.allocs);
     assert!(drop_builds == 1, "the drop built the content {drop_builds} times");
     assert!(edit_builds == 1, "the edit built the content {edit_builds} times");
     // (the drop's: the geometry again at the cards' new place, the wires routed; the edit's: the

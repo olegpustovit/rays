@@ -500,6 +500,8 @@ pub struct Ctx {
     pub opened: Option<Editing>,
     pub fs: i64,
     pub ov: (f64, f64),
+    /// what a field's click selects (`Change::Selected` with it)
+    pub select: Option<Vec<Path>>,
 }
 
 impl Ctx {
@@ -594,7 +596,8 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
                         } else if sg.clicked {
                             let mut row = n.path.clone();
                             row.push(format!(":{}", r.label).into());
-                            subject = vec![Change::Selected(vec![n.path.clone(), row])];
+                            c.select = Some(vec![n.path.clone(), row]);
+                            subject = vec![Change::Selected];
                         }
                     }
                     fields.extend(Vec::new());
@@ -666,7 +669,8 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
                             let width = m(fs, "\u{2190}") + (6.0 * z) + m(fs, nm).min(room);
                             let b = ui.box_fmt(format_args!("ref{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP | HOVER_FREE).w(Size::Px(width as f32)).h(Size::Px((16.0 * z) as f32)).at((left as f32, row_y as f32)));
                             if ui.signal(&b).clicked {
-                                add_clicks.push(Change::Selected(vec![cand]));
+                                c.select = Some(vec![cand]);
+                                add_clicks.push(Change::Selected);
                             }
                         }
                     }
@@ -1071,14 +1075,15 @@ pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &
             }
         }
         None if on_canvas => {
-            emit.push(Change::Selected(vec![src_path.clone()]));
+            emit.push(Change::Selected);
             let (x, y) = release_point;
             emit.push(Change::MenuRequested(x, y));
         }
         None => emit.push(Change::Notice("Drop the wire on an input row".to_owned())),
     }
     if on_canvas {
-        t.selected = std::iter::once(src_path.clone()).collect();
+        t.selected.clear();
+        t.selected.insert(src_path);
     }
     t.drag = None;
 }
@@ -1125,21 +1130,21 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
             let path = &items[*slot].0.path;
             if sig.pressed && left && t.context.is_none() {
                 let additive = ui.press_keys(canvas).contains(&Key::Shift);
-                let selected: PathSet = if additive {
-                    let mut sel = t.selected.clone();
-                    if !sel.remove(path) {
-                        sel.insert(path.clone());
+                if additive {
+                    if !t.selected.remove(path) {
+                        t.selected.insert(path);
                     }
-                    sel
-                } else if t.selected.contains(path) && t.selected.iter().all(|q| t.geo.slot.contains_key(q)) {
-                    t.selected.clone()
-                } else {
-                    std::iter::once(path.clone()).collect()
-                };
-                emit.push(Change::Selected(selected.iter().cloned().collect()));
-                let paths = if selected.len() == 1 { selected.iter().cloned().collect() } else { parents_removed(&selected.iter().cloned().collect::<Vec<_>>()) };
-                let slow = holds_others(t, &paths);
-                (t.selected, t.selected_wire, t.drag) = (selected, None, Some(Drag::Moving { paths, dx: 0.0, dy: 0.0, moved: false, slow }));
+                } else if !(t.selected.contains(path) && t.selected.iter().all(|q| t.geo.slot.contains_key(q))) {
+                    t.selected.clear();
+                    t.selected.insert(path);
+                }
+                emit.push(Change::Selected);
+                // the move carries the selection but the cards inside others it holds
+                let (moving, sel) = (&mut t.moving, &t.selected);
+                moving.assign(sel);
+                moving.retain(&mut |q| !sel.iter().any(|a| a.len() < q.len() && q.starts_with(a)));
+                let slow = holds_others(t, t.moving.as_slice());
+                (t.selected_wire, t.drag) = (None, Some(Drag::Moving { dx: 0.0, dy: 0.0, moved: false, slow }));
             }
             if sig.double_clicked && left && t.context.is_none() && t.editing.is_none() {
                 let (pl, _, ay) = &t.geo.items[*slot];
@@ -1174,14 +1179,12 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
                 }
             }
             if begin {
-                if let Some(Drag::Moving { paths, .. }) = &t.drag {
-                    crate::scope_hover::begin_move(t, paths);
-                }
+                crate::scope_hover::begin_move(t);
             }
             if sig.released && left {
-                if let Some(Drag::Moving { paths, dx, dy, moved, slow }) = t.drag.take() {
+                if let Some(Drag::Moving { dx, dy, moved, slow }) = t.drag.take() {
                     if moved {
-                        let mv: Vec<(Path, f64, f64)> = paths.iter().filter_map(|path| rel_at(t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + dx), p::snap(ry + dy)))).collect();
+                        let mv: Vec<(Path, f64, f64)> = t.moving.iter().filter_map(|path| rel_at(t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + dx), p::snap(ry + dy)))).collect();
                         emit.push(Change::Moved(mv));
                         if !slow {
                             // the cards stay where they were let go until the geometry has them there
@@ -1245,10 +1248,10 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
         On::Wire(i) => {
             if sig.pressed && left && t.context.is_none() {
                 if !t.selected.is_empty() {
-                    emit.push(Change::Selected(Vec::new()));
+                    emit.push(Change::Selected);
                 }
-                let target = t.geo.wires[*i].target.clone();
-                (t.selected, t.selected_wire) = (PathSet::new(), target);
+                t.selected.clear();
+                t.selected_wire = t.geo.wires[*i].target.clone();
             }
             // a wire pulled past 6 points is a new wire from its source: the same drag as from the out-port
             let (px, py) = p64(sig.pointer);
@@ -1279,16 +1282,19 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
             if sig.pressed && left && t.context.is_none() {
                 let additive = ui.press_keys(canvas).contains(&Key::Shift);
                 if !additive && !t.selected.is_empty() {
-                    emit.push(Change::Selected(Vec::new()));
+                    emit.push(Change::Selected);
                 }
-                let base = if additive { t.selected.clone() } else { PathSet::new() };
+                if !additive {
+                    t.selected.clear();
+                }
+                t.marquee_base.assign(&t.selected);
                 t.marquee.reserve(t.geo.items.len());
-                (t.selected, t.selected_wire, t.drag) = (base.clone(), None, Some(Drag::Marquee { base }));
+                (t.selected_wire, t.drag) = (None, Some(Drag::Marquee {}));
             }
         }
     }
     // the rubber band selects the nodes of one scope it touches
-    if let Some(Drag::Marquee { base }) = &t.drag {
+    if let Some(Drag::Marquee {}) = &t.drag {
         if sig.held || sig.released {
             let (px, py) = if sig.released { p64(sig.release_point) } else { p64(sig.pointer) };
             let (x0, y0) = p64(sig.press_point);
@@ -1301,13 +1307,16 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
                 marquee_hits(t, (x0.min(px), y0.min(py), rw, rh), &mut hits);
             }
             // the selection it makes is the base and the hits: built only when it differs
-            let path = |k: usize| &t.geo.items[k].0.path;
+            let (items, base) = (&t.geo.items, &t.marquee_base);
+            let path = |k: usize| &items[k].0.path;
             let more = hits.iter().filter(|&&k| !base.contains(path(k))).count();
             let same = base.len() + more == t.selected.len() && base.iter().all(|q| t.selected.contains(q)) && hits.iter().all(|&k| t.selected.contains(path(k)));
             if !same {
-                let selected: PathSet = base.iter().cloned().chain(hits.iter().map(|&k| path(k).clone())).collect();
-                emit.push(Change::Selected(selected.iter().cloned().collect()));
-                t.selected = selected;
+                t.selected.assign(base);
+                for &k in &hits {
+                    t.selected.insert(path(k));
+                }
+                emit.push(Change::Selected);
             }
             t.marquee = hits;
             if sig.released {
@@ -1321,11 +1330,12 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
             On::Card(slot) => {
                 let path = slot_path(t, *slot);
                 // the menu acts on the nodes: a wire selected before is no longer the selection
-                let selected = if t.selected.contains(&path) { t.selected.clone() } else { std::iter::once(path.clone()).collect() };
-                if selected != t.selected {
-                    emit.push(Change::Selected(selected.iter().cloned().collect()));
+                if !t.selected.contains(&path) {
+                    t.selected.clear();
+                    t.selected.insert(&path);
+                    emit.push(Change::Selected);
                 }
-                (t.context, t.selected, t.selected_wire) = (Some((p64(sig.release_point), path)), selected, None);
+                (t.context, t.selected_wire) = (Some((p64(sig.release_point), path)), None);
             }
             On::Ground => {
                 let (x, y) = p64(sig.release_point);
@@ -1348,12 +1358,6 @@ fn card_gestures(t: &mut Pane, ui: &mut Ui, built: &[Built], emit: &mut Vec<Chan
         let geo = t.geo.items.clone();
         let (pl, _, _) = &geo[b.slot];
         emit.extend(b.fields.iter().cloned());
-        if let Some(paths) = b.fields.iter().find_map(|c| match c {
-            Change::Selected(paths) => Some(paths.clone()),
-            _ => None,
-        }) {
-            select(paths, t);
-        }
         // zone controls
         for (bx, on) in &b.taps {
             let bs = ui.signal(bx);
@@ -1661,7 +1665,7 @@ fn settle(t: &mut Pane, ui: &Ui) {
     if built {
         if let Some(scope) = t.scope.clone() {
             let (dx, dy) = (*dx, *dy);
-            let moving: PathSet = slots.iter().map(|&k| t.geo.items[k].0.path.clone()).collect();
+            let moving = PathSet::of(&slots.iter().map(|&k| t.geo.items[k].0.path.clone()).collect::<Vec<_>>());
             let layout = t.layout.clone();
             regeo(t, &scope, &layout, &|q: &[Symbol]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
         }
@@ -1736,12 +1740,12 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
     // geometry the content builds
     if let Some(scope) = t.scope.clone() {
         let moving = match &t.drag {
-            Some(Drag::Moving { paths, dx, dy, moved: true, slow: true }) => Some((paths.clone(), *dx, *dy)),
+            Some(Drag::Moving { dx, dy, moved: true, slow: true }) => Some((t.moving.as_slice().to_vec(), *dx, *dy)),
             Some(Drag::Carrying { paths, dx, dy, .. }) if dx.hypot(*dy) > 0.0 => Some((paths.clone(), *dx, *dy)),
             _ => None,
         };
         if let Some((paths, dx, dy)) = moving {
-            let moving: PathSet = paths.into_iter().collect();
+            let moving = PathSet::of(&paths);
             let layout = t.layout.clone();
             regeo(t, &scope, &layout, &|q: &[Symbol]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
         }
@@ -1762,7 +1766,7 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
     // the grid, the zones, the frames and the wires, under the cards: they build again with the
     // content and when the selection's chains or the selected wire change
     let mut hh = std::hash::DefaultHasher::new();
-    (key, chain.as_ref().map(|c| Rc::as_ptr(c) as usize), selected, Rc::as_ptr(&attached) as usize).hash(&mut hh);
+    (key, chain.as_ref().map(|c| (Rc::as_ptr(c) as usize, c.rev)), selected, Rc::as_ptr(&attached) as usize).hash(&mut hh);
     let (built, hovers) = (t.built.clone(), t.hovers.clone());
     let wires = ui.view("graph-wires", hh.finish(), cw, ch, &mut |ui| {
         let layer = ui.box_("pxui-scope-layer", BoxOpts::default().w(cw).h(ch).at((0.0, 0.0)));
@@ -1880,7 +1884,7 @@ fn content(t: &mut Pane, ui: &mut Ui, canvas: &UiBox, ov: (f64, f64), rev: u64, 
     // the cards, each a view of its own; what the hover and the gestures read between builds (a
     // verifying run leaves the kept build's)
     let snap = Rc::new(t.clone());
-    let mut ctx = Ctx { finished: false, opened: None, fs, ov };
+    let mut ctx = Ctx { finished: false, opened: None, fs, ov, select: None };
     let mut built: Vec<Built> = Vec::new();
     if !ui.verifying() {
         t.hovers.borrow_mut().begin(t);
@@ -1909,6 +1913,9 @@ fn content(t: &mut Pane, ui: &mut Ui, canvas: &UiBox, ov: (f64, f64), rev: u64, 
     if ctx.finished { t.editing = None; }
     if let Some(editing) = ctx.opened.take() { t.editing = Some(editing); }
     let (lens_next, lens_changed) = card_gestures(t, ui, &built, changes);
+    if let Some(paths) = ctx.select.take() {
+        select(paths, t);
+    }
     paint_over(t, ui, z, &host, &visible);
     let drawn_zones = visible.iter().filter(|&&i| matches!(&t.geo.items[i].0.item, Item::Item(n) if n.zone.is_some()) && !t.geo.items[i].0.collapsed).count() as i64;
     t.stats = Stats { drawn_items: visible.len() as i64, drawn_zones, ..t.stats };

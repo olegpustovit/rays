@@ -440,7 +440,7 @@ pub fn find(t: &mut Pane, ui: &mut Ui, canvas: &UiBox, mouse: (f64, f64)) -> Now
 /// The selection as the cards show it: what it holds, over which geometry.
 fn selection_key(t: &Pane) -> u64 {
     let mut h = std::hash::DefaultHasher::new();
-    (geo_key(t), &t.selected).hash(&mut h);
+    (geo_key(t), t.selected.as_slice()).hash(&mut h);
     h.finish()
 }
 
@@ -543,9 +543,10 @@ pub fn place_cards(t: &Pane, ui: &mut Ui, built_zoom: f64) {
 
 /// A move of cards by their views begins: the cards it carries (none holds another) and the wires
 /// that end on them, which the wires view leaves to the drag's own.
-pub fn begin_move(t: &Pane, paths: &[Path]) {
+pub fn begin_move(t: &Pane) {
     let hovers = t.hovers.clone();
     let mut hv = hovers.borrow_mut();
+    let paths = &t.moving;
     hv.moving.clear();
     hv.moving.extend(paths.iter().filter_map(|q| t.geo.slot.get(q).copied()));
     hv.moving.sort_unstable();
@@ -576,7 +577,7 @@ pub fn overlay_key(t: &Pane, now: &Now, under: u64) -> u64 {
     let shown = !hv.lit.is_empty() || now.tip.is_some() || now.live.is_some() || now.flag;
     (&hv.lit, now.tip, now.live, now.flag).hash(&mut h);
     if shown {
-        let chain = chains_of(t).map(|c| Rc::as_ptr(&c) as usize);
+        let chain = chains_of(t).map(|c| (Rc::as_ptr(&c) as usize, c.rev));
         (t.pan_x.to_bits(), t.pan_y.to_bits(), t.zoom.to_bits(), under, t.x, t.y, t.width, t.height, chain, selected_wire_index(t)).hash(&mut h);
     }
     h.finish()

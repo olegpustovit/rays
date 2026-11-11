@@ -130,7 +130,7 @@ fn scope_levels_a() {
     let (v, _) = scope_step(&mut ui, view.clone(), &frame_ev(start, vec![mouse_move(start), mouse_press(MouseButton::LeftButton, start)]));
     let (v, _) = scope_step(&mut ui, v, &frame_ev(empty, vec![mouse_move(empty)]));
     let (v, changes) = scope_step(&mut ui, v, &frame_ev(empty, vec![mouse_release(MouseButton::LeftButton, empty)]));
-    check(changes.contains(&Change::Selected(vec![b.clone()])) && menu_requested(&changes) && scope::selected(&v) == vec![b.clone()], "a wire let go on empty canvas did not ask for the node menu after its source");
+    check(changes.contains(&Change::Selected) && menu_requested(&changes) && scope::selected(&v) == vec![b.clone()], "a wire let go on empty canvas did not ask for the node menu after its source");
     // a wire itself pulled into empty canvas does the same, and stays selected: the host inserts on it
     let i = (0..scope::inspect::wire_count(&view)).find(|i| matches!(scope::inspect::wire_target(&view, *i), Some((n, _)) if n == c));
     let i = match i {
@@ -145,7 +145,7 @@ fn scope_levels_a() {
     let (v, _) = scope_step(&mut ui, v, &frame_ev(empty, vec![mouse_move(empty)]));
     let (v, changes) = scope_step(&mut ui, v, &frame_ev(empty, vec![mouse_release(MouseButton::LeftButton, empty)]));
     check(
-        changes.contains(&Change::Selected(vec![a.clone()])) && menu_requested(&changes) && scope::selected(&v) == vec![a.clone()] && scope::selected_wire(&v).map(|w| w.0) == Some(c.clone()),
+        changes.contains(&Change::Selected) && menu_requested(&changes) && scope::selected(&v) == vec![a.clone()] && scope::selected_wire(&v).map(|w| w.0) == Some(c.clone()),
         "a wire pulled into empty canvas did not ask for the node menu with the wire selected",
     );
     // a short press-release on the wire is still just a click
@@ -420,7 +420,7 @@ fn scope_carry() {
     check(drops(&changes).len() == 1, "one place under the pointer");
     let (view, changes) = scope_step(&mut ui, view, &frame_ev(over, vec![mouse_press(MouseButton::LeftButton, over)]));
     check(drops(&changes) == vec![(Drops::Dropped, heart.clone(), "material".to_owned(), "(ref cobalt)".to_owned())], "a put over a node did not emit Dropped with its path");
-    check(!changes.iter().any(|c| matches!(c, Change::SyntaxEdit(_) | Change::Selected(_) | Change::Moved(_))), "the pane edited, selected or moved on a put");
+    check(!changes.iter().any(|c| matches!(c, Change::SyntaxEdit(_) | Change::Selected | Change::Moved(_))), "the pane edited, selected or moved on a put");
     check(ui.carrying().is_none(), "the payload outlived its put");
     let (view, changes) = scope_step(&mut ui, view, &frame_ev(over, vec![mouse_release(MouseButton::LeftButton, over)]));
     check(drops(&changes).is_empty(), "the release after a put reported a drop");

@@ -263,7 +263,7 @@ fn window_graph_view_pan_zoom() {
             check(verify || t.zoom == rested.2 || s.views == 0, &format!("a zoom built {} views", s.views));
             step(&mut ui, &mut t, at, &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, at)]);
             let s = step(&mut ui, &mut t, at, &[], vec![Event::PointerReleased(MouseButton::LeftButton, at)]);
-            let picked = s.changes.iter().any(|c| matches!(c, Change::Selected(p) if p.contains(&card)));
+            let picked = s.changes.iter().any(|c| matches!(c, Change::Selected)) && scope::selected(&t).contains(&card);
             check(x > 0.0 && x + w < W as f64, &format!("zoom {z}: the card is not in the pane"));
             check(picked || scope::selected(&t).contains(&card), &format!("a click at zoom {z} (shown at {:.2}) did not find the card", t.zoom));
             scope::clear_selection(&mut t);
