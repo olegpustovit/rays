@@ -10,6 +10,9 @@ OS := $(shell uname -s)
 ifeq ($(OS),Darwin)
 LIBSO = libpxui.dylib
 LIBSONAME = libpxui.1.dylib
+else ifneq (,$(findstring NT-,$(OS)))
+# MSYS2 (uname -s is MINGW64_NT-...): pxui.dll and its import library land in target/<profile>; no soname link, the dll sits beside rays.exe.
+WINDOWS = 1
 else
 LIBSO = libpxui.so
 LIBSONAME = libpxui.so.1
@@ -20,19 +23,25 @@ endif
 lib:
 	@test -e pxui/Cargo.toml || git submodule update --init
 	cargo build $(CARGOFLAGS) --manifest-path pxui/Cargo.toml -p pxui_dylib --target-dir target
+ifndef WINDOWS
 	ln -sfn $(LIBSO) target/$(if $(filter release,$(PROFILE)),release,debug)/$(LIBSONAME)
+endif
 
 build: lib
 	cargo build $(CARGOFLAGS) -p rays_bin
 
-# macOS: a signed Rays.app in $(APPDIR) plus a `rays` command in $(PREFIX)/bin. Elsewhere: rays and libpxui under $(PREFIX)
-# (the binary's rpath is $$ORIGIN/../lib; Linux only, untested).
+# macOS: a signed Rays.app in $(APPDIR) plus a `rays` command in $(PREFIX)/bin. Linux: rays and libpxui under $(PREFIX) (the binary's
+# rpath is $$ORIGIN/../lib; SDL3 stays a system library). Windows (MSYS2): rays.exe, pxui.dll and the DLLs they load from the MSYS2
+# prefix (SDL3, its runtime) together in $(PREFIX)/bin, which runs from anywhere.
 install: PROFILE = release
 install: build
 	install -d $(PREFIX)/bin
 ifeq ($(OS),Darwin)
 	CODESIGN_IDENTITY='$(CODESIGN_IDENTITY)' packaging/bundle-macos.sh '$(APPDIR)'
 	ln -sfn '$(APPDIR)/Rays.app/Contents/MacOS/rays' $(PREFIX)/bin/rays
+else ifdef WINDOWS
+	install target/release/rays.exe target/release/pxui.dll $(PREFIX)/bin
+	ldd target/release/rays.exe | awk '/\/(ucrt64|mingw64|clang64)\//{print $$3}' | xargs -I{} install {} $(PREFIX)/bin
 else
 	install -d $(PREFIX)/lib
 	install target/release/rays $(PREFIX)/bin/rays
