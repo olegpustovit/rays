@@ -3,7 +3,6 @@
 Left open by the PXUI stable ABI work (plan: artifact `5y36bm8pvvg9`, section 15; merged 2026-11-12, PXUI `b37e8df`).
 
 - A7 plan targets not met; gates are at measured median + headroom, with the targets kept beside them in `abi_bench.rs` and `pxui/docs/abi-baseline.md` ("Deferred performance work"): static +0.5% to +3.1% (target 1%, gate 6%); dynamic +1.5% to +4.6% (target 3%, gate 6%); dynamic 5.9-7.0 us per 1000 nodes (target 5, gate 8.7); dynamic first frame within 8 ms of static (target 2); dynamic memory: private +272 KiB, shared code pages up to +1392 KiB (second OGPU copy, by design).
-- Known failure, budget unchanged: `rays_editor::window_graph_costs` (`RAYS_SLOW=1`): an edit allocates 754 against a budget of 700 (the drop 1764 against 2000, which passes), the same on macOS, Windows and WSL, static or dynamic. The dynamic library's allocations were once invisible to the budgets (a separate allocator copy; the test passed at a lower, partial count); `mem_sys` now adds the library's counters (`mem::set_peer`), so the count is the honest one. Where the extra 54 come from is not found.
 - Seen once under load, passed on reruns: `rays_editor::native_holder_frames` (Mac), `pxui_core::layout_scaling` (Windows).
 - Sketch text (`crates/rays/src/font.rs`) keeps its own per-thread text engine, as before this work.
 - The engine's picker and inspector header allocate about 14 times per frame while open (engine behaviour; the wrapper adds one).
