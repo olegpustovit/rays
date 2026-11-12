@@ -2,7 +2,7 @@
 
 Left open by the PXUI stable ABI work (plan: artifact `5y36bm8pvvg9`, section 15; merged 2026-11-12, PXUI `b37e8df`).
 
-- A7 plan targets not met; gates are at measured median + headroom, with the targets kept beside them in `abi_bench.rs` and `pxui/docs/abi-baseline.md` ("Deferred performance work"): static +0.5% to +3.1% (target 1%, gate 6%); dynamic +1.5% to +4.6% (target 3%, gate 6%); dynamic 5.9-7.0 us per 1000 nodes (target 5, gate 8.7); dynamic first frame within 8 ms of static (target 2); dynamic memory: private +272 KiB, shared code pages up to +1392 KiB (second OGPU copy, by design).
+- A7 frame-build targets met by the median on the pages of 100 nodes or more (static +0.6%/+0.7%, target 1%; dynamic +1.1%/+2.6%, target 3%), but one run moves by up to 0.8% on the loaded Mac, so those gates are the worst run + 25% (static 1.75%, dynamic 4.1%). Not met, gates at measured + headroom, targets beside them in `abi_bench.rs` and `pxui/docs/abi-baseline.md` ("Deferred performance work"): dynamic 4.4-5.6 us per 1000 nodes (target 5, gate 8.7); dynamic first frame within 8 ms of static (target 2); dynamic memory: private +272 KiB, shared code pages up to +1392 KiB (second OGPU copy, by design).
 - Seen once under load, passed on reruns: `rays_editor::native_holder_frames` (Mac), `pxui_core::layout_scaling` (Windows).
 - Sketch text (`crates/rays/src/font.rs`) keeps its own per-thread text engine, as before this work.
 - The engine's picker and inspector header allocate about 14 times per frame while open (engine behaviour; the wrapper adds one).
