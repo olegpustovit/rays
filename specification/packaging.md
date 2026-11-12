@@ -20,6 +20,8 @@ operation stay on the initial thread.
 The macOS release is `Rays.app`: `Contents/MacOS/rays`, `Contents/Frameworks` (`libpxui.1.dylib` and every
 non-system dylib, install names `@rpath/...`, no path into the build tree), `Info.plist` and the icon, signed inner
 libraries first and the app with the hardened runtime. Notarization is not done. Rays never links PXUI statically.
+The Linux install is `bin/rays` and `lib/libpxui.so.1` (rpath `$ORIGIN/../lib`, SDL3 a system library); the Windows install is
+`rays.exe`, `pxui.dll` and the MSYS2 DLLs they load in one directory. None carries a path into the build tree.
 
 Release validation must inspect the executable and its linked native artifacts,
 package assets, notices and generated-source provenance. A successful developer

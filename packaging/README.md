@@ -6,7 +6,8 @@ Use Cargo and the toolchain in `rust-toolchain.toml`. SDL floors and tested rele
 Rays loads `libpxui` dynamically: `make lib` (or `make build`) builds it for `cargo build`; see `docs/development.md`.
 `make install` assembles and signs `Rays.app` with `bundle-macos.sh`; its icon is `Rays.icns`, drawn by `icon.py`
 (`python3 packaging/icon.py` regenerates the checked-in file; install never runs it). On Linux it installs `rays` and
-`libpxui.so.1` under `$(PREFIX)` (rpath `$ORIGIN/../lib`).
+`libpxui.so.1` under `$(PREFIX)` (rpath `$ORIGIN/../lib`; SDL3 stays a system library). On Windows (MSYS2 `make`) it puts
+`rays.exe`, `pxui.dll` and the MSYS2 DLLs they load (`ldd`) together in `$(PREFIX)/bin`.
 
 macOS:
 

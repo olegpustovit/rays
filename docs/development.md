@@ -35,10 +35,13 @@ cover past machines and settings, not current defaults.
 
 Rays loads `libpxui` (the PXUI stable C ABI) at run time; nothing links it statically. Cargo does not order a
 cdylib before a dependent's link, so build it first: `make lib` (release; `make lib PROFILE=debug` for debug)
-puts `libpxui.dylib` and the `libpxui.1.dylib` link in `target/<profile>/`, and `make build` does that and
-builds `rays`. `cargo t` builds it for you. The binaries and tests carry rpaths to `target/<profile>`
-(macOS: `pxui/tools/cc-stack.sh`; Linux: `.cargo/config.toml`), so `cargo build -p rays_bin`, `cargo run` and
-`cargo check` then work without `DYLD_LIBRARY_PATH`; without the library a link fails with a hint. After a PXUI
+puts `libpxui.dylib` and the `libpxui.1.dylib` link (Linux: `libpxui.so`, `libpxui.so.1`; Windows: `pxui.dll` and its
+import library `libpxui.dll.a`) in `target/<profile>/`, and `make build` does that and builds `rays`. `cargo t` builds
+it for you. The binaries and tests find it there without `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH`: rpaths to
+`target/<profile>` (macOS: `pxui/tools/cc-stack.sh`; Linux: `$ORIGIN` in `.cargo/config.toml`), and on Windows the dll
+sits beside the exe (its MinGW runtime and SDL3 DLLs come from the MSYS2 `bin` on `PATH`). So `cargo build -p rays_bin`,
+`cargo run` and `cargo check` then work; without the library a link fails with a hint. On Windows (MSYS2 UCRT64 shell
+with `make`) the plain build is `make build PROFILE=debug`, the same command as on Linux. After a PXUI
 change rerun `make lib` (cargo does not rebuild the library for `cargo run`).
 
 `make install` (macOS) builds release, assembles `Rays.app` (`packaging/bundle-macos.sh`: binary, `libpxui`, SDL3 and
@@ -47,6 +50,17 @@ dylibs then the app (hardened runtime; a timestamp for Developer ID) and copies 
 with a `rays` link in `PREFIX/bin` (default `~/.local`). `CODESIGN_IDENTITY` picks the identity; empty means
 "Developer ID Application", else "Apple Development", else ad hoc (printed). The app is not notarized, so `spctl` rejects it.
 Runtime assets (fonts, themes, shaders, nodes) are embedded in the binary: Resources holds only the icon.
+
+`make install PREFIX=...` elsewhere: Linux puts `bin/rays` and `lib/libpxui.so.1` under `PREFIX` (rpath `$ORIGIN/../lib`,
+nothing into the build tree; SDL3 stays a system library found through pkg-config at build time and `ld.so` at run time,
+check with `ldd`). Windows (MSYS2) puts `rays.exe`, `pxui.dll` and every MSYS2 DLL they load (SDL3, SDL3_image, SDL3_mixer,
+libstdc++, libgcc, libwinpthread, libiconv) in `PREFIX/bin`, a directory that runs from anywhere. Both were run on the
+Windows (RTX 2080 Ti) and WSL2 (lavapipe) boxes.
+
+Allocation counts cross the library boundary: `libpxui` carries its own copy of `mem_sys`'s allocator, so `rays_shell::host::create`
+registers its `pxui_counter` export with `mem::set_peer`. `mem_sys::alloc_count`, `alloc_bytes_total`, `allocated_bytes`,
+`local_alloc_count`, `local_reset` and `local_peak_bytes` then cover the whole process (the peak is the sum of the two peaks, an
+upper bound); every budget and the memory ledger use them.
 
 ## The pxui submodule and validation
 
