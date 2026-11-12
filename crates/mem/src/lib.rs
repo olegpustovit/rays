@@ -1125,6 +1125,11 @@ pub fn pressure_start() -> bool {
     mem_sys::pressure_start()
 }
 
+/// Counts a library's own allocator (a dynamic libpxui) with this process's: its counter export, as `mem_sys::set_peer` takes it.
+pub fn set_peer(counter: fn(u32) -> u64) {
+    mem_sys::set_peer(counter)
+}
+
 pub fn allocated_bytes() -> i64 {
     mem_sys::allocated_bytes().min(i64::MAX as u64) as i64
 }
