@@ -17,4 +17,7 @@ Left open by the PXUI stable ABI work (plan: artifact `5y36bm8pvvg9`, section 15
   - Dynamic Layout time: the wrapper is +5.3 to +5.9% over the direct engine since `Ui` holds its body table in a `Box` (was +2.2 to +2.5%), with retired instructions identical (ratio 1.03788). Gates raised: `GATE_DYNAMIC_RATIO` 1.041 to 1.074, `GATE_DYNAMIC_US_PER_1000_NODES` 8.7 to 15.4. Unresolved whether it is the box or memory placement; needs alternating runs on a quiet machine.
   - `Ui` field placement decides per-node cost: growing `Ui` pushed hot fields past one aarch64 load's reach (found in B2). Move the 57 KB theme out of line or group the hot fields; estimated a few hundred to 2,000 instructions a Layout frame.
   - The gallery's Layout page copies the whole theme 10 times a frame (about 107k instructions, 11% of the frame), in both builds.
-  - Default bodies against before B1, direct-engine retired instructions after B2: Kit +0.10%, Controls +0.29%, Collections +0.10%, Overlays +0.01%, Layout +0.25% (plan: under 1%).
+  - Default bodies against before B1, direct-engine retired instructions after B4 (40 kinds): Kit +0.7%, Controls +0.77%, Collections +0.41%, Overlays +0.07%, Layout +0.23% (plan: under 1%).
+  - Dynamic Layout retired instructions: 3.84% over the direct engine since the container bodies (gate 3.8% to 3.9%; plan 3%).
+  - Static Layout time: +2.4 to +2.7% since the text bodies (was +0.9 to +1.4%), instructions unchanged (ratio 1.0016); `GATE_STATIC_RATIO` 1.0175 to 1.034. `Slot` lost 24 bytes (the hit closure); padding it back fixed one run and not another, so the cause is not pinned down.
+  - Tabs with a registered body: the previously selected tab keeps its selected look for the frame of the click (`ponytail:` in the engine).
