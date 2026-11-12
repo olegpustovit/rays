@@ -180,10 +180,33 @@ fn window_host_memory_ledger() {
     assert_eq!(mem::bytes(&owner), at_start, "destroying the UI releases its charge");
 }
 
+/// Destroying a UI destroys its renderer now, though the scene's cached layers still hold the paint closure (and so the
+/// renderer's cell): a renderer left to the closure keeps its lease on the device past the device's end.
+fn window_host_destroy_ends_renderer_under_cached_paint() {
+    if !common::gpu() {
+        return;
+    }
+    let ui = Rc::new(RefCell::new(golden_ui()));
+    rays_shell::host::build(&mut ui.borrow_mut(), &frame_at(0, 40, 1, vec![]), &mut |ui| {
+        let b = ui.box_("b", BoxOpts::default().w(Size::Px(20.0)).h(Size::Px(20.0)).at((0.0, 0.0)));
+        ui.draw(&b, |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, pxui::geom::color::white()));
+    });
+    let canvas_ = canvas::create(WIDTH, 40).expect("canvas");
+    let kept = rays_shell::host::scene(&ui, None); // what the native-stage cache keeps
+    canvas::render(Some(1), &canvas_, &kept).expect("Canvas.render");
+    let cell = rays_shell::host::renderer_probe(&ui.borrow()).expect("the UI has a scene entry");
+    assert!(cell.borrow().is_some(), "the frame made a renderer");
+    rays_shell::host::destroy(&mut ui.borrow_mut());
+    assert!(cell.borrow().is_none(), "destroy left the renderer to the cached paint closure");
+    drop(kept);
+    let _ = canvas::destroy(&canvas_);
+}
+
 pub const CASES: &[(&str, fn())] = &[
     ("window_host_zones_parity", window_host_zones_parity),
     ("window_host_layers_around_native_content", window_host_layers_around_native_content),
     ("window_host_clipboard", window_host_clipboard),
     ("window_host_scrub_rule", window_host_scrub_rule),
     ("window_host_memory_ledger", window_host_memory_ledger),
+    ("window_host_destroy_ends_renderer_under_cached_paint", window_host_destroy_ends_renderer_under_cached_paint),
 ];

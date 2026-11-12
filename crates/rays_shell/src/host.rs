@@ -135,7 +135,9 @@ fn build_with(ui: &mut Ui, frame: &Frame, pasted: Option<Event>, f: &mut dyn FnM
 /// Take what the UI held off the memory ledger and let go of its renderer (the UI itself goes when its owner drops it).
 pub fn destroy(ui: &mut Ui) {
     let id = ui.id();
-    ENTRIES.with(|entries| entries.borrow_mut().retain(|e| e.id != id));
+    // its renderer goes now, while the device lives: the scene's cached layers still hold the paint closure (and through it the
+    // renderer's cell), so dropping the entry alone would keep the renderer, and its lease on the device, past the device's end
+    ENTRIES.with(|entries| entries.borrow_mut().retain(|e| keep_or_end(e, e.id != id)));
     LEDGER.with(|ledger| ledger.borrow_mut().remove(&id));
     let was = ui.bytes();
     settle_ledger(was, Bytes::default());
@@ -201,6 +203,20 @@ thread_local! {
     static IMAGES: RefCell<Vec<(i64, i64, Weak<Owned>, Image)>> = const { RefCell::new(Vec::new()) };
 }
 
+/// The renderer cell of the UI's scene entry, for the regression that it is emptied by `destroy` however long a cached paint closure lives.
+pub fn renderer_probe(ui: &Ui) -> Option<Rc<RefCell<Option<Renderer>>>> {
+    let id = ui.id();
+    ENTRIES.with(|entries| entries.borrow().iter().find(|e| e.id == id).map(|e| e.renderer.clone()))
+}
+
+/// `retain`'s answer for an entry; one that goes has its renderer destroyed first.
+fn keep_or_end(entry: &Entry, keep: bool) -> bool {
+    if !keep {
+        entry.renderer.borrow_mut().take();
+    }
+    keep
+}
+
 fn painter(ui: &Rc<RefCell<Ui>>) -> scene::UiPaint {
     scene::on_frame_begin(begin);
     scene::on_device_release(release);
@@ -210,7 +226,7 @@ fn painter(ui: &Rc<RefCell<Ui>>) -> scene::UiPaint {
         if let Some(e) = entries.iter().find(|e| e.ui.ptr_eq(&weak)) {
             return e.paint.clone();
         }
-        entries.retain(|e| e.ui.strong_count() > 0);
+        entries.retain(|e| keep_or_end(e, e.ui.strong_count() > 0));
         let renderer: Rc<RefCell<Option<Renderer>>> = Rc::new(RefCell::new(None));
         let (held, drawn) = (weak.clone(), renderer.clone());
         let paint: scene::UiPaint = Rc::new(move |pass: &scene::UiPass, layer: usize| draw_layer(&held, &drawn, pass, layer));
