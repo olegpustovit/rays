@@ -24,6 +24,8 @@ pub fn font(path: Option<&str>) -> Vec<u8> {
 /// A UI on `platform` with the kit font at `path` (see [`font`]).
 pub fn create(platform: input::Platform, font_size: Option<i64>, path: Option<&str>) -> Ui {
     let platform = if platform == input::Platform::Apple { pxui::Platform::Apple } else { pxui::Platform::Other };
+    // libpxui allocates in its own allocator: its counters join this process's
+    mem_sys::set_peer(pxui::library_counter);
     Ui::create(platform, font_size, &[&font(path)])
 }
 

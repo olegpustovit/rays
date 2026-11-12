@@ -514,6 +514,7 @@ dependencies = [
  "editor_core",
  "input",
  "mem",
+ "mem_sys",
  "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",

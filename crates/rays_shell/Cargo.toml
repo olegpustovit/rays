@@ -16,6 +16,7 @@ pxui = { path = "../../pxui/crates/public/pxui" }
 ogpu_core = { path = "../../pxui/crates/open/ogpu_core" }
 cfmt = { path = "../../pxui/crates/open/cfmt" }
 input = { path = "../../pxui/crates/open/input" }
+mem_sys = { path = "../../pxui/crates/open/mem_sys" }
 mem = { path = "../mem" }
 param = { path = "../param" }
 
