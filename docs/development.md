@@ -31,6 +31,23 @@ same-machine replacement wins total edit/build/run time. Allocator counters alon
 Changing profiles must report compile AND debug runtime. [Historical measurements](history/build-speed.md)
 cover past machines and settings, not current defaults.
 
+## libpxui and installing
+
+Rays loads `libpxui` (the PXUI stable C ABI) at run time; nothing links it statically. Cargo does not order a
+cdylib before a dependent's link, so build it first: `make lib` (release; `make lib PROFILE=debug` for debug)
+puts `libpxui.dylib` and the `libpxui.1.dylib` link in `target/<profile>/`, and `make build` does that and
+builds `rays`. `cargo t` builds it for you. The binaries and tests carry rpaths to `target/<profile>`
+(macOS: `pxui/tools/cc-stack.sh`; Linux: `.cargo/config.toml`), so `cargo build -p rays_bin`, `cargo run` and
+`cargo check` then work without `DYLD_LIBRARY_PATH`; without the library a link fails with a hint. After a PXUI
+change rerun `make lib` (cargo does not rebuild the library for `cargo run`).
+
+`make install` (macOS) builds release, assembles `Rays.app` (`packaging/bundle-macos.sh`: binary, `libpxui`, SDL3 and
+their non-system dylibs in `Contents/Frameworks`, rpath `@executable_path/../Frameworks`, Info.plist, icon), signs inner
+dylibs then the app (hardened runtime; a timestamp for Developer ID) and copies it to `APPDIR` (default `/Applications`),
+with a `rays` link in `PREFIX/bin` (default `~/.local`). `CODESIGN_IDENTITY` picks the identity; empty means
+"Developer ID Application", else "Apple Development", else ad hoc (printed). The app is not notarized, so `spctl` rejects it.
+Runtime assets (fonts, themes, shaders, nodes) are embedded in the binary: Resources holds only the icon.
+
 ## The pxui submodule and validation
 
 PXUI, `ogpu_*`, the window hosts, `sdl3` and `cargo t` itself live in the `pxui/` submodule

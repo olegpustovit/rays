@@ -17,6 +17,10 @@ language generator is required at build time. Windows Vulkan loaders and memory
 allocation code live under the owning sys crate. Native resources and every SDL
 operation stay on the initial thread.
 
+The macOS release is `Rays.app`: `Contents/MacOS/rays`, `Contents/Frameworks` (`libpxui.1.dylib` and every
+non-system dylib, install names `@rpath/...`, no path into the build tree), `Info.plist` and the icon, signed inner
+libraries first and the app with the hardened runtime. Notarization is not done. Rays never links PXUI statically.
+
 Release validation must inspect the executable and its linked native artifacts,
 package assets, notices and generated-source provenance. A successful developer
 build does not establish relocatable-package correctness. Follow

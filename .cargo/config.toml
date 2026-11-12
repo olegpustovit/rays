@@ -14,3 +14,10 @@ rustflags = ["-Clink-arg=-Wl,--stack,268435456", "-Clink-arg=-fuse-ld=lld", "-Cl
 # `rays` re-execs itself with a 256 MB limit (runtime::configure_native_process) and tests run under `ulimit -s 262144`.
 [target.aarch64-apple-darwin]
 linker = "pxui/tools/cc-stack.sh"
+
+# The dynamic libpxui (Linux, untested here): next to the binary and in target/<profile> for dev builds and tests, in ../lib once installed.
+# macOS: the same through pxui/tools/cc-stack.sh; Windows: pxui.dll sits next to the exe.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-Clink-arg=-Wl,-rpath,$ORIGIN:$ORIGIN/..:$ORIGIN/../lib"]
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-Clink-arg=-Wl,-rpath,$ORIGIN:$ORIGIN/..:$ORIGIN/../lib"]

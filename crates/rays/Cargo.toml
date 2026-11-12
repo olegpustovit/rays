@@ -21,7 +21,7 @@ parallel = { path = "../parallel" }
 mem = { path = "../mem" }
 ogpu_core = { path = "../../pxui/crates/open/ogpu_core" }
 cfmt = { path = "../../pxui/crates/open/cfmt" }
-pxui = { path = "../../pxui/crates/public/pxui", features = ["static"] }
+pxui = { path = "../../pxui/crates/public/pxui" }
 
 [target.'cfg(any(windows, target_os = "linux"))'.dev-dependencies]
 ogpu_vulkan = { path = "../../pxui/crates/open/ogpu_vulkan" }

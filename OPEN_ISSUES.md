@@ -9,3 +9,4 @@ Left open by the PXUI stable ABI work (plan: artifact `5y36bm8pvvg9`, section 15
 - The engine's picker and inspector header allocate about 14 times per frame while open (engine behaviour; the wrapper adds one).
 - Not run: AT-SPI client walk, a real portal file dialog, the slow renderer suite, `abi_bench` timing on Windows/WSL, Asahi and native-Linux NVIDIA.
 - `painter: dirty ranges ... instance count` after several builds before a first draw was reported once and could not be reproduced; `shared_skipped_draws` covers it.
+- Dynamic `libpxui` packaging unverified: Linux (`$ORIGIN` rpaths, `make install` to `$(PREFIX)/lib`) and Windows (`pxui.dll` beside the exe; no `make lib`/install path) were not run; macOS signing with a real identity was not run in the agent session (keychain locked: `errSecInternalComponent`); the app is not notarized.

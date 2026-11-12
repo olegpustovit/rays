@@ -27,11 +27,14 @@ contracts. Historical port evidence lives in `docs/history/` and records known u
 The `pxui/` submodule has three tiers (see pxui/AGENTS.md):
 
 - **public** (`pxui`, `pxui_types`): the UI. Rays builds every panel, the graph and canvas text through
-  `pxui`. Every Rays crate links it with `features = ["static"]`, so the one Cargo build, incremental as
-  always, exercises the C ABI; a release build may drop the feature and load `libpxui`. The code is the
-  same in both.
+  `pxui`. Rays always links it dynamically (never the `static` feature): the `rays` binary loads `libpxui`
+  at run time, the stable ABI for the OS work. Cargo cannot order a cdylib before a dependent's link, so
+  `make lib` (`PROFILE=debug` for debug) or `cargo t` builds `libpxui` into `target/<profile>/` first; the
+  binaries' rpath finds it there (`pxui/tools/cc-stack.sh`; `.cargo/config.toml` on Linux). A plain
+  `cargo build -p rays_bin` works once that exists and otherwise fails with a one-line instruction.
+  `make install` assembles the release `Rays.app` (`packaging/bundle-macos.sh`).
 - **open** (`ogpu_*`, `input`, `sdl3`, `pxui_sdl`, `pxui_wayland`, `mem_sys`, `cfmt`): the GPU layer and
-  window hosts. Rays links them statically and owns the device, the queue, the swapchain and the window.
+  window hosts. Rays links them statically into the binary and owns the device, the queue, the swapchain and the window.
 - **private** (everything under `pxui/crates/private/`): never named by a Rays crate. A path containing
   `crates/private` in a Rays Cargo.toml is always wrong; `cargo run -p gate -- deps` refuses it. To reach
   something private, add an export, the wrapper method and the `pxui.h` line in `pxui/` first.
