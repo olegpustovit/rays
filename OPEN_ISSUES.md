@@ -33,12 +33,11 @@ Left open by the PXUI stable ABI work (plan: artifact `5y36bm8pvvg9`, section 15
 Measured with `rays mem FILE --frames N` on an M1, a million marks, (301 − 61 frames) / 240. `rays render`
 lowers with `reference: true` and never offers the device: it does not measure this path.
 
-- **The frame waits for each kernel.** `Flow_gpu.Host.output` (`crates/flow_gpu/src/host.rs`) waits for the
-  kernel's command buffer and reads its status before the mark set is registered, so the main thread stalls
-  once a device attribute a frame. Three kernels (position, size, colour) of a million marks: 7.8 ms of GPU
-  render and about 1 ms of kernels, 15.3 ms a frame. Checking the previous frame's status instead removes
-  the stall and reports a kernel error one frame late; the tests that expect the error in the same frame
-  need a decision first.
+- **A kernel's error arrives one frame late.** A mark set no longer waits for its kernel
+  (`Flow_gpu.Host.output_shown`); the status is read once the queue has passed it. The frame that drew the
+  bad values is shown first. No test covers the late error itself, only that the borrow does not wait.
+- **Tried and reverted: colours as two flat floats.** Unpacking them in the fragment cost about 5 ms for a
+  million marks, more than the varyings saved.
 - **Lines** are unchanged (25.8 ms a frame): they keep the generic fragment and its 18 floats.
 - **The antialias margin** is a whole logical point on each side. Three quarters of a device pixel is enough
   (a 2-point mark at density 2 would shade 30 pixels, not 64), but `Replace` and `Multiply` also write the
