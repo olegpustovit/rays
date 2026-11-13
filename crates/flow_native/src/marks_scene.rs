@@ -12,13 +12,16 @@ use scene_command::marks::{self as m, ColorAttr, Entry, Kind, PairAttr, ScalarAt
 use scene_command::render_ir::{Geometry, Transform};
 use scene_command::ui_batch::{self, Builder};
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 /// One attribute of a `Marks`-family draw: float32 elements (or `0xRRGGBBAA` words for a colour) of
 /// `stride` elements per instance, 0 for one constant, or a GPU region's output.
 #[derive(Clone)]
 pub enum Source {
-    Bytes(Vec<u8>),
+    /// shared: a kept conversion is the same allocation every frame, which the renderer recognises
+    /// without comparing or uploading it
+    Bytes(Rc<Vec<u8>>),
     Device(G::Value),
 }
 
@@ -33,7 +36,7 @@ pub struct Attribute {
 /// position, extent, fill, stroke and width.
 pub type Gpu = dyn Fn(i64, i64, i64, &[Attribute]) -> Result<m::GpuToken, Diagnostic>;
 
-type Kept = List<(i64, i64), (Arc<Vec<f64>>, Vec<u8>)>;
+type Kept = List<(i64, i64), (Arc<Vec<f64>>, Rc<Vec<u8>>)>;
 
 /// The nodes built for the mark sets of the last frame, by position in the table: at most 1024
 /// nodes and 4096 converted attribute arrays are kept, the least recently used going first.
@@ -162,15 +165,19 @@ fn word_bytes(n: usize, f: &dyn Fn(usize) -> i32) -> Vec<u8> {
 }
 
 fn host(bytes: Vec<u8>, stride: i64) -> Attribute {
+    shared(Rc::new(bytes), stride)
+}
+
+fn shared(bytes: Rc<Vec<u8>>, stride: i64) -> Attribute {
     Attribute { source: Source::Bytes(bytes), stride }
 }
 
 /// The bytes of a host array are kept while the array is physically the same: a static attribute
 /// of a device set is converted once, and the unchanged bytes are not uploaded again. Keyed by the
 /// set's slot and the attribute's place in it.
-fn kept(converted: Option<&Cache>, slot: i64, place: i64, d: &Arc<Vec<f64>>, build: &dyn Fn() -> Result<Vec<u8>, Diagnostic>) -> Result<Vec<u8>, Diagnostic> {
+fn kept(converted: Option<&Cache>, slot: i64, place: i64, d: &Arc<Vec<f64>>, build: &dyn Fn() -> Result<Vec<u8>, Diagnostic>) -> Result<Rc<Vec<u8>>, Diagnostic> {
     match converted {
-        None => build(),
+        None => build().map(Rc::new),
         Some(c) => {
             let key = (slot, place);
             if let Some((old, bytes)) = c.converted.borrow_mut().find(&|k, _| *k == key) {
@@ -178,7 +185,7 @@ fn kept(converted: Option<&Cache>, slot: i64, place: i64, d: &Arc<Vec<f64>>, bui
                     return Ok(bytes.clone());
                 }
             }
-            let bytes = build()?;
+            let bytes = Rc::new(build()?);
             c.converted.borrow_mut().remove(&|k, _| *k == key);
             c.converted.borrow_mut().add(key, (d.clone(), bytes.clone()));
             Ok(bytes)
@@ -231,7 +238,7 @@ fn ordered(buffers: &Buffers, c: Option<&Cache>, slot: i64, count: i64, b: &m::B
         let order = z_order(&d, width, n);
         float_bytes(width * n, &|i| d[order[i / width] as usize * width + i % width])
     })?;
-    Ok(host(bytes, b.width))
+    Ok(shared(bytes, b.width))
 }
 
 /// Floats of `width` per instance: constant pairs and scalars take stride 0.
@@ -242,7 +249,7 @@ fn vectors(buffers: &Buffers, device: Device, c: Option<&Cache>, slot: i64, plac
             let d = data(buffers, b)?;
             let n = (b.width * count) as usize;
             let bytes = kept(c, slot, place, &d, &|| float_bytes(n, &|i| d.get(i).copied().unwrap_or(f64::NAN)))?;
-            Ok(host(bytes, b.width))
+            Ok(shared(bytes, b.width))
         }
         PairAttr::Device(b) => Ok(Attribute { source: Source::Device(device(b.id)?), stride: b.width }),
     }
@@ -254,7 +261,7 @@ fn scalars(buffers: &Buffers, device: Device, c: Option<&Cache>, slot: i64, plac
         ScalarAttr::Buffer(b) => {
             let d = data(buffers, b)?;
             let bytes = kept(c, slot, place, &d, &|| float_bytes(count as usize, &|i| d.get(i).copied().unwrap_or(f64::NAN)))?;
-            Ok(host(bytes, 1))
+            Ok(shared(bytes, 1))
         }
         ScalarAttr::Device(b) => Ok(Attribute { source: Source::Device(device(b.id)?), stride: 1 }),
     }
@@ -274,7 +281,7 @@ fn words(buffers: &Buffers, device: Device, c: Option<&Cache>, slot: i64, place:
                 }
                 Ok(out)
             })?;
-            Ok(host(bytes, 1))
+            Ok(shared(bytes, 1))
         }
         ColorAttr::Device(b) => Ok(Attribute { source: Source::Device(device(b.id)?), stride: b.width }),
     }

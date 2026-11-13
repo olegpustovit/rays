@@ -931,7 +931,7 @@ pub fn marks(t_: &WorkspaceGpu) -> Rc<marks_scene::Gpu> {
         let sources: Vec<x::MarksSource> = attributes
             .iter()
             .map(|a| match &a.source {
-                marks_scene::Source::Bytes(bytes) => x::MarksSource::Host(renderer::scene_execution::new_bytes(bytes.clone()), a.stride),
+                marks_scene::Source::Bytes(bytes) => x::MarksSource::Host(bytes.clone(), a.stride),
                 marks_scene::Source::Device(value) => {
                     let output = output_of(value);
                     x::MarksSource::Device(Rc::new(move || output.as_ref().and_then(|o| run::buffer(o, None))), a.stride)
