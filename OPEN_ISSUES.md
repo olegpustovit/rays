@@ -49,4 +49,3 @@ lowers with `reference: true` and never offers the device: it does not measure t
 - **Unordered device sets.** A kernel's marks are drawn in index order; scattered ones cost the tiler about
   twice what coherent ones do. Only host sets of one colour are reordered.
 - **Windows and Vulkan were not run.** The SPIR-V stages pass `spirv-val`; the frame times are Metal only.
-
