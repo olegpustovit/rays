@@ -520,11 +520,15 @@ pub fn lower_scene2(
                         }
                     }
                     let s = slot.borrow();
-                    let family = if gpu_key.is_none() { PipelineFamily::Ui } else { PipelineFamily::Marks };
+                    let family = match &gpu_key {
+                        None => PipelineFamily::Ui,
+                        Some(key) if key.starts_with("marks-fill:") => PipelineFamily::MarksFill,
+                        Some(_) => PipelineFamily::Marks,
+                    };
                     let draw_: Draw = Rc::new(SampledDraw { ui: None,
                         family,
                         blend,
-                        texture: if family == PipelineFamily::Marks { None } else { Some(ui_white_texture()) },
+                        texture: if family == PipelineFamily::Ui { Some(ui_white_texture()) } else { None },
                         auxiliary: None,
                         vertex_attributes: None,
                         samples: 1,

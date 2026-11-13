@@ -172,6 +172,13 @@ fn shape_of(family: PipelineFamily) -> FamilyShape {
             shared: vec![],
             fragment_resources: vec![],
         },
+        MarksFill => FamilyShape {
+            source: shaders::MARKS_FILL,
+            entries: ("marks_vertex", "marks_fill_fragment"),
+            vertex_buffers: vec![1, 2, 3, 4, 5, 6],
+            shared: vec![],
+            fragment_resources: vec![],
+        },
     }
 }
 
@@ -186,6 +193,7 @@ fn spirv_of(family: PipelineFamily) -> (&'static [u8], &'static [u8]) {
         Scene3World => (SCENE3_WORLD_VERT, SCENE3_WORLD_FRAG),
         Ui => (UI_VERT, UI_FRAG),
         Marks => (MARKS_VERT, MARKS_FRAG),
+        MarksFill => (MARKS_FILL_VERT, MARKS_FILL_FRAG),
     }
 }
 
@@ -263,7 +271,7 @@ fn make_pipeline(backend_name: &str, backend_device: &Device, family: PipelineFa
             fragment_entry: Some(shape.entries.1.to_owned()),
             color_format: ColorFormat::Rgba8Unorm,
             depth_format: match family {
-                Scene2 | Scene2Textured | Ui | Marks => DepthFormat::NoDepth,
+                Scene2 | Scene2Textured | Ui | Marks | MarksFill => DepthFormat::NoDepth,
                 Scene3 | Scene3Points | Scene3Textured | Scene3World => DepthFormat::Depth32Float,
             },
             sample_count: samples,

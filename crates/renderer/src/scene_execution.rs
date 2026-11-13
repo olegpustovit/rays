@@ -239,6 +239,8 @@ pub enum PipelineFamily {
     Scene3World,
     Ui,
     Marks,
+    /// `Marks` for a rect or circle set without an outline: its fragment never reads the outline.
+    MarksFill,
 }
 use PipelineFamily::*;
 
@@ -876,7 +878,7 @@ fn resolve_gpu_vertices(value: &SceneExecution, entry: &SampledDraw) -> Result<O
                     // a device's packed float3 positions (and normals)
                     vertices_len != 0 || mesh.vertex_count != source.vertex_count
                 }
-                (Ui, 0) | (Marks, 5) => {
+                (Ui, 0) | (Marks | MarksFill, 5) => {
                     vertices_len != 0
                         || mesh.vertex_count != source.vertex_count
                         || mesh.vertex_count % 4 != 0
@@ -897,8 +899,8 @@ fn resolve_gpu_vertices(value: &SceneExecution, entry: &SampledDraw) -> Result<O
 /// Scene3 draws carry the 12-byte attribute record a vertex; 2D, UI and Marks draws carry none.
 fn valid_vertex_attributes(entry: &SampledDraw) -> bool {
     match (entry.family, &entry.vertex_attributes) {
-        (Scene2 | Scene2Textured | Ui | Marks, None) => true,
-        (Scene2 | Scene2Textured | Ui | Marks, Some(_)) | (Scene3 | Scene3Points | Scene3Textured | Scene3World, None) => false,
+        (Scene2 | Scene2Textured | Ui | Marks | MarksFill, None) => true,
+        (Scene2 | Scene2Textured | Ui | Marks | MarksFill, Some(_)) | (Scene3 | Scene3Points | Scene3Textured | Scene3World, None) => false,
         (_, Some((key, attributes))) => {
             let mesh = &entry.draw.mesh;
             !key.is_empty()
@@ -989,10 +991,10 @@ fn texture_descriptor(configuration: &Configuration) -> TextureDescriptor {
 
 const BLENDS: [Blend; 6] = [Blend::Replace, Blend::Alpha, Blend::Add, Blend::Multiply, Blend::Screen, Blend::Subtract];
 
-const FAMILIES: [PipelineFamily; 8] = [Scene2, Scene2Textured, Scene3, Scene3Points, Scene3Textured, Scene3World, Ui, Marks];
+const FAMILIES: [PipelineFamily; 9] = [Scene2, Scene2Textured, Scene3, Scene3Points, Scene3Textured, Scene3World, Ui, Marks, MarksFill];
 
 const BLEND_COUNT: i64 = 6;
-const PIPELINE_VARIANTS_PER_SAMPLE: i64 = 8 * BLEND_COUNT;
+const PIPELINE_VARIANTS_PER_SAMPLE: i64 = 9 * BLEND_COUNT;
 
 fn pipeline_slot(family: PipelineFamily, blend: Blend, samples: i64) -> i64 {
     let family = match family {
@@ -1004,6 +1006,7 @@ fn pipeline_slot(family: PipelineFamily, blend: Blend, samples: i64) -> i64 {
         Ui => 5,
         Scene3World => 6,
         Marks => 7,
+        MarksFill => 8,
     };
     let blend = match blend {
         Blend::Replace => 0,
@@ -2288,7 +2291,7 @@ fn clear_prepared_scratch(scratch: &mut PreparedScratch) {
 }
 
 fn has_depth(family: PipelineFamily) -> bool {
-    !matches!(family, Scene2 | Scene2Textured | Ui | Marks)
+    !matches!(family, Scene2 | Scene2Textured | Ui | Marks | MarksFill)
 }
 
 /// Attachments and encoder state for one render pass over `target`.
@@ -2879,7 +2882,7 @@ fn replay_plan(value: &mut SceneExecution, plan: &Rc<ReplayPlan>) -> Result<bool
 fn attachment_class(family: PipelineFamily) -> i64 {
     match family {
         Scene2 | Scene2Textured => 0,
-        Ui | Marks => 3,
+        Ui | Marks | MarksFill => 3,
         Scene3 | Scene3Points | Scene3Textured | Scene3World => 1,
     }
 }
@@ -2925,7 +2928,7 @@ fn plan_entry(value: &mut SceneExecution, index: usize) -> Result<PlanDraw, Erro
             return Err(failure_error("Renderer.submit", ErrorKind::StaleHandle, "GPU vertices are stale or closed"));
         }
     let scene2 = family == Scene2 || family == Scene2Textured;
-    let direct = scene2 || family == Ui || family == Marks;
+    let direct = scene2 || family == Ui || family == Marks || family == MarksFill;
     let variant = find_pipeline(value, family, blend, samples).expect("pipeline variant");
     let vertex_stage = ShaderStage::Vertex;
     let fragment_stage = ShaderStage::Fragment;
@@ -3085,7 +3088,7 @@ fn plan_entry(value: &mut SceneExecution, index: usize) -> Result<PlanDraw, Erro
             table.extend(base);
             regenerated(buffers, textures, samplers, &table, &[(1, 7), (4, 9), (8, 13), (9, 11)], &[(2, 8), (5, 10), (10, 12)])
         }
-        Marks => (buffers, textures, samplers),
+        Marks | MarksFill => (buffers, textures, samplers),
     };
     let gpu_indices = slot_gpu_vertices.as_ref().and_then(|source| source.indices.clone());
     let index = {
@@ -3476,7 +3479,7 @@ fn submit_prepared(
             let family = entry.family;
             let draw = &entry.draw;
             let scene2 = family == Scene2 || family == Scene2Textured;
-            let affine = (family == Ui || family == Marks)
+            let affine = (family == Ui || family == Marks || family == MarksFill)
                 && draw.state.transform_uniforms.as_ref().is_some_and(|b| blen(b) == 24 || blen(b) == 48);
             let scene3_transform = !scene2
                 && draw.state.transform_uniforms.as_ref().is_some_and(|b| blen(b) >= 5456 && (blen(b) - 5456).is_multiple_of(192));

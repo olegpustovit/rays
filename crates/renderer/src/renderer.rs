@@ -99,6 +99,7 @@ pub struct GpuMarksData {
     closed: Cell<bool>,
     stamp: Cell<i64>,
     count: Cell<i64>,
+    fill_only: Cell<bool>,
     owned: RefCell<Vec<Option<Buffer>>>,
     last: RefCell<Vec<Bytes>>,
     device: RefCell<Vec<(Rc<dyn Fn() -> Option<Buffer>>, Buffer)>>,
@@ -140,7 +141,8 @@ fn valid_gpu_marks(value: &GpuMarks) -> bool {
 }
 
 fn gpu_marks_key(value: &GpuMarks) -> String {
-    format!("marks:{}:{}", value.0.id, value.0.stamp.get())
+    // the key names the pipeline family: a set without an outline takes the fill-only fragment
+    format!("{}:{}:{}", if value.0.fill_only.get() { "marks-fill" } else { "marks" }, value.0.id, value.0.stamp.get())
 }
 
 fn unregister_marks(value: &GpuMarks) {
@@ -1622,6 +1624,7 @@ pub mod native {
             closed: Cell::new(false),
             stamp: Cell::new(0),
             count: Cell::new(0),
+            fill_only: Cell::new(false),
             owned: RefCell::new(vec![None; 6]),
             last: RefCell::new((0..6).map(|_| scene_execution::empty_bytes()).collect()),
             device: RefCell::new(Vec::new()),
@@ -1656,6 +1659,11 @@ pub mod native {
             return Err(fail_error(operation, ErrorKind::InvalidArgument, "a mark set has one to 1,000,000 instances and five attributes"));
         }
         let mut changed = v.registration.borrow().is_none() || v.count.get() != count;
+        // no outline: a rect or circle set whose stroke is the constant word 0
+        let fill_only = kind != 5 && matches!(&attributes[3], MarksSource::Host(data, 0) if data.len() >= 4 && data[..4] == [0u8; 4]);
+        if v.fill_only.replace(fill_only) != fill_only {
+            changed = true;
+        }
         let mut device: Vec<(Rc<dyn Fn() -> Option<Buffer>>, Buffer)> = Vec::new();
         let upload = |index: usize, data: &Bytes, changed: &mut bool| -> Result<Buffer, Error> {
             let owned = v.owned.borrow()[index].clone();

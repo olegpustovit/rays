@@ -5,6 +5,7 @@ pub const GEOMETRY: &str = include_str!("../../../fixtures/shaders/renderer/geom
 pub const QUAD: &str = include_str!("../../../fixtures/shaders/renderer/quad.metal");
 pub const UI: &str = include_str!("../../../fixtures/shaders/renderer/ui.metal");
 pub const MARKS: &str = include_str!("../../../fixtures/shaders/renderer/marks.metal");
+pub const MARKS_FILL: &str = include_str!("../../../fixtures/shaders/renderer/marks_fill.metal");
 pub const SCENE3: &str = include_str!("../../../fixtures/shaders/renderer/scene3.metal");
 pub const SCENE3_POINTS: &str = include_str!("../../../fixtures/shaders/renderer/scene3_points.metal");
 pub const SCENE3_TEXTURED: &str = include_str!("../../../fixtures/shaders/renderer/scene3_textured.metal");
@@ -15,6 +16,8 @@ pub const SCENE3_SUN_DEPTH: &str = include_str!("../../../fixtures/shaders/rende
 pub mod spirv {
     pub const MARKS_VERT: &[u8] = include_bytes!("../../../fixtures/shaders/renderer/marks.vert.spv");
     pub const MARKS_FRAG: &[u8] = include_bytes!("../../../fixtures/shaders/renderer/marks.frag.spv");
+    pub const MARKS_FILL_VERT: &[u8] = include_bytes!("../../../fixtures/shaders/renderer/marks_fill.vert.spv");
+    pub const MARKS_FILL_FRAG: &[u8] = include_bytes!("../../../fixtures/shaders/renderer/marks_fill.frag.spv");
     pub const UI_VERT: &[u8] = include_bytes!("../../../fixtures/shaders/renderer/ui.vert.spv");
     pub const UI_FRAG: &[u8] = include_bytes!("../../../fixtures/shaders/renderer/ui.frag.spv");
     pub const SCENE3_VERT: &[u8] = include_bytes!("../../../fixtures/shaders/renderer/scene3.vert.spv");

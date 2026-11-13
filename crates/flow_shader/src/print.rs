@@ -6,6 +6,7 @@ fn raster_table(owner: &str) -> Vec<(&'static str, &'static str, &'static str, &
     match owner {
         "renderer" => vec![
             ("marks", "marks", "marks-vertex", "marks-fragment", false),
+            ("marks_fill", "marks", "marks-vertex", "marks-fill-fragment", false),
             ("ui", "ui", "ui-vertex", "ui-fragment", false),
             ("scene3", "scene", "scene3-vertex", "scene3-fragment", false),
             ("scene3_points", "scene", "scene3-points-vertex", "scene3-fragment", false),
