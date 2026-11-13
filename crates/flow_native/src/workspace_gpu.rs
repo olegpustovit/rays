@@ -919,7 +919,7 @@ pub fn marks(t_: &WorkspaceGpu) -> Rc<marks_scene::Gpu> {
         let mut outputs: Vec<(G::Value, run::Output)> = Vec::new();
         for a in attributes {
             if let marks_scene::Source::Device(value) = &a.source {
-                match h::output(&host, value)? {
+                match h::output_shown(&host, value)? {
                     None => return Err(error("GPU display output is closed or superseded.")),
                     Some(output) => outputs.push((value.clone(), output)),
                 }

@@ -183,6 +183,8 @@ pub(crate) struct Data {
     gpu: renderer::renderer::Gpu,
     pipelines: pipelines::T,
     runners: RefCell<List<String, Rc<Runner>>>,
+    /// outputs a mark set drew without waiting for: their status is read once the queue is past them
+    shown_unsettled: RefCell<Vec<(Rc<Runner>, i64)>>,
     created: Cell<i64>,
     retired: Rc<RefCell<Stats>>,
     /// resident fold sites by their code
@@ -326,6 +328,7 @@ pub fn create(_clock: &dyn Fn() -> f64, gpu_: &renderer::renderer::Gpu) -> T {
         validation_bytes: Cell::new(0),
         validation_status: RefCell::new(None),
         showing: Cell::new(None),
+        shown_unsettled: RefCell::new(Vec::new()),
         discarding,
         domain: me(),
         shared: run::pool(),
@@ -412,6 +415,29 @@ fn current(t: &T, value: &G::Value) -> Option<(Rc<Runner>, run::Output)> {
     } else {
         None
     }
+}
+
+/// As [`output`] for a mark set, which only binds the buffer: the draw is queued behind the kernel,
+/// so nothing waits for it (the main thread stalled 2 to 3 ms a device attribute a frame). Its
+/// status is read when the queue has passed it, by the next call here: a kernel's error (a
+/// nonfinite or over-range value) is reported one frame after the frame that drew it.
+pub fn output_shown(t: &T, value: &G::Value) -> Result<Option<run::Output>, Diagnostic> {
+    let completed = b::completed_epoch(&queue_of(t));
+    let due: Vec<(Rc<Runner>, i64)> = {
+        let mut pending = t.0.shown_unsettled.borrow_mut();
+        let (due, later) = std::mem::take(&mut *pending).into_iter().partition(|(_, epoch)| *epoch <= completed);
+        *pending = later;
+        due
+    };
+    for (runner, epoch) in due {
+        run::private::check_status(&runner.run, epoch)?;
+    }
+    let Some((runner, output)) = current(t, value) else { return Ok(None) };
+    let epoch = run::epoch(&output);
+    if run::count(&output) > 0 && !t.0.shown_unsettled.borrow().iter().any(|(r, e)| Rc::ptr_eq(r, &runner) && *e == epoch) {
+        t.0.shown_unsettled.borrow_mut().push((runner, epoch));
+    }
+    Ok(Some(output))
 }
 
 pub fn output(t: &T, value: &G::Value) -> Result<Option<run::Output>, Diagnostic> {
@@ -2499,6 +2525,7 @@ pub fn close(t: &T) {
         return;
     }
     d.discarding.set(true);
+    d.shown_unsettled.borrow_mut().clear();
     d.runners.borrow_mut().clear();
     d.sites.borrow_mut().clear();
     if let Some(r) = d.ownership.borrow_mut().take() {

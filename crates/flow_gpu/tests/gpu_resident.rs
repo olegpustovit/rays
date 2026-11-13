@@ -361,6 +361,28 @@ fn compaction() {
     pipelines::close(&pipes);
 }
 
+/// A mark set's borrow neither waits for the kernel nor reads its status; a later borrow settles it
+/// once the queue has passed it.
+fn shown_borrow_settles_late() {
+    let Some(gpu) = start() else { return };
+    let h = host::create(&|| 0.0, &gpu);
+    let program = tp::fixtures(None, 1024).remove(0).1;
+    let inputs = tp::ok(phost::prepare(&program, &Default::default(), &input::at_time(1.0)));
+    let kernel = tp::ok(host::backend(&h).prepare(false, &program));
+    let value = tp::ok(kernel.run(&inputs));
+    let before = host::stats(&h).status_reads;
+    assert!(tp::ok(host::output_shown(&h, &value)).is_some());
+    assert_eq!(host::stats(&h).status_reads, before);
+    // the waiting borrow completes the queue; later shown borrows find the status settled
+    assert!(tp::ok(host::output(&h, &value)).is_some());
+    let settled = host::stats(&h).status_reads;
+    assert!(tp::ok(host::output_shown(&h, &value)).is_some());
+    assert!(tp::ok(host::output_shown(&h, &value)).is_some());
+    assert_eq!(host::stats(&h).status_reads, settled);
+    drop(kernel);
+    host::close(&h);
+}
+
 fn host_counters() {
     let Some(gpu) = start() else { return };
     drop(gpu);
@@ -433,6 +455,7 @@ fn resident_scenarios() {
     counted();
     compaction();
     host_counters();
+    shown_borrow_settles_late();
     common::release_keepalive();
     assert_eq!(ogpu_core::impl_::live_handles().expect("native handles"), baseline);
 }
