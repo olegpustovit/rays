@@ -52,6 +52,8 @@
        ; Dot weight: the share of a leaf's 16 by 16 samples that its source span lights.
        :weight (exact (map (fn [(i : int)] (int/add 25 (int (min 64.0 (floor (* 12.0 (log (+ 1.0 (max 1.0 (float (array/nth d.mass i)))))))))))
                            ids))
+       ; The zoom at which the smallest symbol fills most of the plate.
+       :deepest (max 180.0 (/ 0.7 (array/min (exact (map (fn [(i : int)] (array/nth d.size i)) ids)))))
        :files (sum [i ids] (if (or (= (array/nth d.kind i) 1) (= (array/nth d.kind i) 2)) 1 0))
        :symbols (sum [i ids] (if (or (= (array/nth d.kind i) 4) (= (array/nth d.kind i) 5)) 1 0))
        :lines (sum [i ids] (if (or (= (array/nth d.kind i) 1) (= (array/nth d.kind i) 2)) (array/nth d.last i) 0))}))
@@ -59,6 +61,7 @@
   (graph view :context host [(initial_zoom : float 1.0) (center : vec3 [0.5 0.5 0.0])]
     (let* [d (ref data)
            cell (get (ref field) :cell)
+           deepest (get (ref field) :deepest)
            p (plate (frame/width) (frame/height))
            input (frame/input)]
       (state [old {:cx center.x :cy center.y :zoom initial_zoom :tx center.x :ty center.y :tz initial_zoom
@@ -69,6 +72,9 @@
                extent (* p.side old.zoom)
                wx (+ old.cx (/ (- px p.ox) extent))
                wy (+ old.cy (/ (- py p.oy) extent))
+               ; the wheel turns about the point the pointer will be over once the camera settles
+               ax (+ old.tx (/ (- px p.ox) (* p.side old.tz)))
+               ay (+ old.ty (/ (- py p.oy) (* p.side old.tz)))
                left (pointer/down)
                wheel (fold [v 0.0] [event input.events]
                            (+ v (case event.kind "scrolled" (* event.delta.y 0.17)
@@ -93,14 +99,14 @@
                dive (and (and released old.press)
                          (and inside (and (not old.dragged) (< (+ (abs (- px old.press_x)) (abs (- py old.press_y))) 8.0))))
                clicked (if dive (locate cell d.child d.count wx wy) [0.0 0.0 0.0])
-               tile (int clicked.z)
+               tile (int clicked.y)
                target (array/nth cell tile)
                tile_size target.z
                ; Wheel: keep the world point under the pointer while the target zoom changes.
-               wheel_zoom (max 0.65 (min 180.0 (* old.tz (exp wheel))))
+               wheel_zoom (max 0.65 (min deepest (* old.tz (exp wheel))))
                zoomed (and inside (not (= wheel 0.0)))
                tz (cond reset 1.0
-                        dive (max 0.65 (min 180.0 (min (* old.zoom 3.2) (/ 0.7 tile_size))))
+                        dive (max 0.65 (min deepest (min (* old.zoom 3.2) (/ 0.7 tile_size))))
                         back (max 1.0 (/ old.zoom 2.8))
                         zoomed wheel_zoom
                         :else old.tz)
@@ -108,16 +114,20 @@
                slide_y (if pan (/ dy extent) 0.0)
                tx (cond reset 0.5
                         dive (+ target.x (* tile_size 0.5))
-                        zoomed (- (- wx (/ (- px p.ox) (* p.side wheel_zoom))) slide_x)
+                        zoomed (- (- ax (/ (- px p.ox) (* p.side wheel_zoom))) slide_x)
                         :else (- old.tx slide_x))
                ty (cond reset 0.5
                         dive (+ target.y (* tile_size 0.5))
-                        zoomed (- (- wy (/ (- py p.oy) (* p.side wheel_zoom))) slide_y)
+                        zoomed (- (- ay (/ (- py p.oy) (* p.side wheel_zoom))) slide_y)
                         :else (- old.ty slide_y))
                ease (- 1.0 (exp (* -11.0 (max 0.0 (min 0.1 (frame/dt))))))
-               zoom (if (< (abs (- tz old.zoom)) 0.00001) tz (+ old.zoom (* (- tz old.zoom) ease)))
-               cx (if (< (abs (- tx old.cx)) 0.00001) tx (+ old.cx (* (- tx old.cx) ease)))
-               cy (if (< (abs (- ty old.cy)) 0.00001) ty (+ old.cy (* (- ty old.cy) ease)))
+               ; Easing the centre and 1/zoom by the same factor keeps the anchored point under the
+               ; pointer on every frame of the way, not only at the end.
+               zoom (if (< (abs (- tz old.zoom)) (* 0.00001 tz)) tz
+                        (/ 1.0 (+ (/ 1.0 old.zoom) (* (- (/ 1.0 tz) (/ 1.0 old.zoom)) ease))))
+               near (* 0.00001 (/ 1.0 tz))
+               cx (if (< (abs (- tx old.cx)) near) tx (+ old.cx (* (- tx old.cx) ease)))
+               cy (if (< (abs (- ty old.cy)) near) ty (+ old.cy (* (- ty old.cy) ease)))
                still (and (and (= px old.px) (= py old.py)) (and (= zoom old.zoom) (and (= cx old.cx) (= cy old.cy))))
                found (if (or still (not inside)) [0.0 0.0 0.0]
                          (locate cell d.child d.count
@@ -137,9 +147,11 @@
   (defn ink :context value [(color : vec3) (alpha : float)]
     (+ [0.059 0.075 0.071] (* (- color [0.059 0.075 0.071]) alpha)))
 
-  ; A node on screen as [x y side]; the camera is [x offset, y offset, points per world unit].
-  (defn spot :context value [(cell : (array vec4)) (cam : vec3) (i : int)]
-    (let* [c (array/nth cell i)] [(+ cam.x (* c.x cam.z)) (+ cam.y (* c.y cam.z)) (* c.z cam.z)]))
+  ; A node on screen as [x y side]. The camera is [x offset, y offset, points per world unit] about
+  ; `pin`, a nearby world point that 32-bit floats hold exactly: subtracting it first keeps deep
+  ; zooms steady where a plain offset plus product would move in whole points.
+  (defn spot :context value [(cell : (array vec4)) (cam : vec3) (pin : vec3) (i : int)]
+    (let* [c (array/nth cell i)] [(+ cam.x (* (- c.x pin.x) cam.z)) (+ cam.y (* (- c.y pin.y) cam.z)) (* c.z cam.z)]))
 
   ; Inside the art: `lim` is its right and bottom edge.
   (defn seen :context value [(q : vec3) (lim : vec3)]
@@ -155,8 +167,8 @@
 
   ; What a node shows as itself: a point while collapsed, fading out as its children take over;
   ; a named scope keeps a centre mark from 8 points up.
-  (defn node-alpha :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (i : int)]
-    (let* [q (spot cell cam i) c (array/nth cell i)]
+  (defn node-alpha :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (pin : vec3) (i : int)]
+    (let* [q (spot cell cam pin i) c (array/nth cell i)]
       (* (chain parent cell cam i)
          (cond (and (= c.w 4.0) (> q.z 8.0)) (smooth 8.0 16.0 q.z)
                (>= c.w 5.0) (- 1.0 (smooth 1.0 4.0 q.z))
@@ -164,20 +176,20 @@
                :else (- 1.0 (smooth 2.0 4.0 q.z))))))
 
   ; Stipple levels 0 and 1 of leaf `i`: sample 3 of its four is the centre representative.
-  (defn coarse-alpha :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (i : int) (k : int)]
-    (let* [q (spot cell cam i)]
+  (defn coarse-alpha :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (pin : vec3) (i : int) (k : int)]
+    (let* [q (spot cell cam pin i)]
       (* (chain parent cell cam i) (if (= k 3) (smooth 1.0 4.0 q.z) (smooth 4.0 8.0 q.z)))))
 
   ; A cell outline: unindexed files are always hollow; with cells shown, every file and branch.
-  (defn frame-alpha :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (lim : vec3) (cells : bool) (i : int)]
-    (let* [q (spot cell cam i) c (array/nth cell i)]
+  (defn frame-alpha :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (pin : vec3) (lim : vec3) (cells : bool) (i : int)]
+    (let* [q (spot cell cam pin i) c (array/nth cell i)]
       (if (and (seen q lim) (cond (= c.w 2.0) (>= q.z 2.0) (= c.w 1.0) (and cells (> q.z 90.0)) :else (and cells (> q.z 12.0))))
           (chain parent cell cam i) 0.0)))
 
   ; One of the two segments of file-tree node `i` as [x1 y1 x2 y2]: the orthogonal path from its
   ; parent's centre, or with cells shown a branch's corner tick.
-  (defn limb :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (lim : vec3) (cells : bool) (i : int) (part : int)]
-    (let* [c (spot cell cam i) q (spot cell cam (array/nth parent i)) kind (array/nth cell i)
+  (defn limb :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (pin : vec3) (lim : vec3) (cells : bool) (i : int) (part : int)]
+    (let* [c (spot cell cam pin i) q (spot cell cam pin (array/nth parent i)) kind (array/nth cell i)
            cx (+ c.x (* c.z 0.5)) cy (+ c.y (* c.z 0.5))
            qx (+ q.x (* q.z 0.5)) qy (+ q.y (* q.z 0.5))
            x (+ (floor c.x) 2.0) y (+ (floor c.y) 2.0)
@@ -244,28 +256,28 @@
   ; `count` slots from `base`: `per` by `per` samples a slot, `step` grid cells apart; those of
   ; coarser levels belong to their own sets.
   (defn stipple :context draw [(owners : (array int)) (base : int) (count : int) (cell : (array vec4)) (lsp : (array int))
-                               (seed : (array int)) (weight : (array int)) (group : (array int)) (cam : vec3) (lim : vec3)
+                               (seed : (array int)) (weight : (array int)) (group : (array int)) (cam : vec3) (pin : vec3) (lim : vec3)
                                (pitch : float) (per : int) (step : int)]
     (let* [marks (array/range (int/mul count (int/mul per per)) :type int)]
       (draw/rects
         (map (fn [(m : int)]
                (let* [i (int (max 0 (array/nth owners (int/add base (int/div m (int/mul per per))))))
                       e (int/mod m (int/mul per per))]
-                 (dot-at (spot cell cam i) (or (= (array/nth lsp i) 12) (= (array/nth lsp i) 6))
+                 (dot-at (spot cell cam pin i) (or (= (array/nth lsp i) 12) (= (array/nth lsp i) 6))
                          (int/mul step (int/mod e per)) (int/mul step (int/div e per))))) marks)
         (map (fn [(m : int)]
                (let* [owner (array/nth owners (int/add base (int/div m (int/mul per per))))
                       i (int (max 0 owner))
                       e (int/mod m (int/mul per per))
                       a (int/mul step (int/mod e per)) b (int/mul step (int/div e per))
-                      q (spot cell cam i)]
+                      q (spot cell cam pin i)]
                  (dot-size q (or (= (array/nth lsp i) 12) (= (array/nth lsp i) 6))
                            (and (and (>= owner 0) (seen q lim))
                                 (and (not (and (= (int/mod a (int/mul step 2)) 0) (= (int/mod b (int/mul step 2)) 0)))
                                      (lit (array/nth seed i) (int/add a (int/mul b 16)) (array/nth weight i))))))) marks)
         :fill (map (fn [(m : int)]
                      (let* [i (int (max 0 (array/nth owners (int/add base (int/div m (int/mul per per))))))
-                            q (spot cell cam i)]
+                            q (spot cell cam pin i)]
                        (ink (tint (array/nth group i)) (smooth pitch (* pitch 2.0) q.z)))) marks))))
 
   (defn kind-name :context value [(kind : int) (lsp : int)]
@@ -281,31 +293,32 @@
            w (float (frame/width)) h (float (frame/height))
            p (plate w h)
            scale (* p.side view.zoom)
-           cam [(- p.ox (* view.cx scale)) (- p.oy (* view.cy scale)) scale]
+           pin [(/ (round (* view.cx 1048576.0)) 1048576.0) (/ (round (* view.cy 1048576.0)) 1048576.0) 0.0]
+           cam [(- p.ox (* (- view.cx pin.x) scale)) (- p.oy (* (- view.cy pin.y) scale)) scale]
            lim [p.right p.bottom 0.0]
            ids (array/range (array/count d.kind) :type int)
            paper [0.882 0.847 0.753]
 
            ; Every node once: the point a collapsed node is, or a named scope's centre mark.
            node_at (map (fn [(i : int)]
-                          (let* [q (spot cell cam i) half (if (and (= (array/nth d.kind i) 4) (> q.z 8.0)) 1.0 0.5)]
+                          (let* [q (spot cell cam pin i) half (if (and (= (array/nth d.kind i) 4) (> q.z 8.0)) 1.0 0.5)]
                             [(- (+ q.x (* q.z 0.5)) half) (- (+ q.y (* q.z 0.5)) half) 0.0])) ids)
            node_size (map (fn [(i : int)]
-                            (let* [q (spot cell cam i) side (if (and (= (array/nth d.kind i) 4) (> q.z 8.0)) 2.0 1.0)]
-                              (if (and (seen q lim) (> (node-alpha d.parent cell cam i) 0.004)) [side side 0.0] [0.0 0.0 0.0]))) ids)
+                            (let* [q (spot cell cam pin i) side (if (and (= (array/nth d.kind i) 4) (> q.z 8.0)) 2.0 1.0)]
+                              (if (and (seen q lim) (> (node-alpha d.parent cell cam pin i) 0.004)) [side side 0.0] [0.0 0.0 0.0]))) ids)
            node_fill (map (fn [(i : int)]
-                            (let* [q (spot cell cam i)]
+                            (let* [q (spot cell cam pin i)]
                               (ink (if (and (= (array/nth d.kind i) 4) (> q.z 8.0)) paper (tint (array/nth d.group i)))
-                                   (node-alpha d.parent cell cam i)))) ids)
+                                   (node-alpha d.parent cell cam pin i)))) ids)
 
            ; File-tree branches: orthogonal parent-child paths; with cells shown, corner ticks.
            tiles f.tiles
            limbs (array/range (int/mul (array/count tiles) 2) :type int)
-           limb_from (map (fn [(j : int)] (let* [l (limb d.parent cell cam lim view.cells (array/nth tiles (int/div j 2)) (int/mod j 2))] [l.x l.y 0.0])) limbs)
-           limb_to (map (fn [(j : int)] (let* [l (limb d.parent cell cam lim view.cells (array/nth tiles (int/div j 2)) (int/mod j 2))] [l.z l.w 0.0])) limbs)
+           limb_from (map (fn [(j : int)] (let* [l (limb d.parent cell cam pin lim view.cells (array/nth tiles (int/div j 2)) (int/mod j 2))] [l.x l.y 0.0])) limbs)
+           limb_to (map (fn [(j : int)] (let* [l (limb d.parent cell cam pin lim view.cells (array/nth tiles (int/div j 2)) (int/mod j 2))] [l.z l.w 0.0])) limbs)
            limb_color (map (fn [(j : int)]
                              (let* [parent (array/nth d.parent (array/nth tiles (int/div j 2)))
-                                    q (spot cell cam parent)]
+                                    q (spot cell cam pin parent)]
                                (if view.cells [0.506 0.537 0.463]
                                    (ink (if (< (array/nth d.depth parent) 2) [0.157 0.188 0.173] [0.247 0.278 0.247])
                                         (smooth 10.0 18.0 q.z))))) limbs)
@@ -314,40 +327,40 @@
            twigs f.twigs
            twig_ids (array/range (array/count twigs) :type int)
            twig_from (map (fn [(j : int)]
-                            (let* [q (spot cell cam (array/nth d.parent (array/nth twigs j)))]
+                            (let* [q (spot cell cam pin (array/nth d.parent (array/nth twigs j)))]
                               (if (and (> q.z 8.0) (seen q lim)) [(+ q.x (* q.z 0.5)) (+ q.y (* q.z 0.5)) 0.0] [0.0 0.0 0.0]))) twig_ids)
            twig_to (map (fn [(j : int)]
-                          (let* [i (array/nth twigs j) c (spot cell cam i) q (spot cell cam (array/nth d.parent i))]
+                          (let* [i (array/nth twigs j) c (spot cell cam pin i) q (spot cell cam pin (array/nth d.parent i))]
                             (if (and (> q.z 8.0) (seen q lim)) [(+ c.x (* c.z 0.5)) (+ c.y (* c.z 0.5)) 0.0] [0.0 0.0 0.0]))) twig_ids)
            twig_color (map (fn [(j : int)]
-                             (let* [i (array/nth twigs j) q (spot cell cam (array/nth d.parent i))]
+                             (let* [i (array/nth twigs j) q (spot cell cam pin (array/nth d.parent i))]
                                (ink (* (tint (array/nth d.group i)) 0.28) (smooth 8.0 16.0 q.z)))) twig_ids)
 
            ; Four one-point edges a cell: stroked rectangles are tessellated on the host.
            edges (array/range (int/mul (array/count tiles) 4) :type int)
            frame_at (map (fn [(j : int)]
-                           (let* [i (array/nth tiles (int/div j 4)) edge (int/mod j 4) q (spot cell cam i)
+                           (let* [i (array/nth tiles (int/div j 4)) edge (int/mod j 4) q (spot cell cam pin i)
                                   c (array/nth cell i)
                                   side (max 1.0 (- (max 1.0 (floor q.z)) (if (= c.w 1.0) 3.0 2.0)))]
                              [(+ (+ (floor q.x) 1.0) (if (= edge 3) (- side 1.0) 0.0))
                               (+ (+ (floor q.y) 1.0) (if (= edge 1) (- side 1.0) 0.0)) 0.0])) edges)
            frame_size (map (fn [(j : int)]
-                             (let* [i (array/nth tiles (int/div j 4)) q (spot cell cam i) c (array/nth cell i)
+                             (let* [i (array/nth tiles (int/div j 4)) q (spot cell cam pin i) c (array/nth cell i)
                                     side (max 1.0 (- (max 1.0 (floor q.z)) (if (= c.w 1.0) 3.0 2.0)))]
-                               (if (> (frame-alpha d.parent cell cam lim view.cells i) 0.004)
+                               (if (> (frame-alpha d.parent cell cam pin lim view.cells i) 0.004)
                                    (if (< (int/mod j 4) 2) [side 1.0 0.0] [1.0 side 0.0])
                                    [0.0 0.0 0.0]))) edges)
            frame_color (map (fn [(j : int)]
                               (let* [i (array/nth tiles (int/div j 4))]
                                 (if (= (array/nth d.kind i) 0)
                                     (if (= (int/mod (array/nth d.depth i) 2) 0) [0.212 0.243 0.200] [0.153 0.176 0.149])
-                                    (ink (* (tint (array/nth d.group i)) 0.35) (frame-alpha d.parent cell cam lim view.cells i))))) edges)
+                                    (ink (* (tint (array/nth d.group i)) 0.35) (frame-alpha d.parent cell cam pin lim view.cells i))))) edges)
            tile_ids (array/range (array/count tiles) :type int)
            corner_at (map (fn [(j : int)]
-                            (let* [q (spot cell cam (array/nth tiles j)) side (max 1.0 (floor q.z))]
+                            (let* [q (spot cell cam pin (array/nth tiles j)) side (max 1.0 (floor q.z))]
                               [(- (+ (floor q.x) side) 5.0) (- (+ (floor q.y) side) 5.0) 0.0])) tile_ids)
            corner_size (map (fn [(j : int)]
-                              (let* [i (array/nth tiles j) q (spot cell cam i)]
+                              (let* [i (array/nth tiles j) q (spot cell cam pin i)]
                                 (if (and (and view.cells (= (array/nth d.kind i) 0)) (and (> q.z 110.0) (seen q lim))) [2.0 2.0 0.0] [0.0 0.0 0.0]))) tile_ids)
 
            ; Stipple levels 0 and 1, four samples a leaf: its centre representative and three quarters.
@@ -355,16 +368,16 @@
            coarse (array/range (int/mul (array/count leaves) 4) :type int)
            coarse_at (map (fn [(j : int)]
                             (let* [i (array/nth leaves (int/div j 4)) k (int/mod j 4)]
-                              (dot-at (spot cell cam i) (or (= (array/nth d.lsp i) 12) (= (array/nth d.lsp i) 6))
+                              (dot-at (spot cell cam pin i) (or (= (array/nth d.lsp i) 12) (= (array/nth d.lsp i) 6))
                                       (int/mul 8 (int/mod k 2)) (int/mul 8 (int/div k 2))))) coarse)
            coarse_size (map (fn [(j : int)]
-                              (let* [i (array/nth leaves (int/div j 4)) k (int/mod j 4) q (spot cell cam i)]
+                              (let* [i (array/nth leaves (int/div j 4)) k (int/mod j 4) q (spot cell cam pin i)]
                                 (dot-size q (or (= (array/nth d.lsp i) 12) (= (array/nth d.lsp i) 6))
-                                          (and (and (seen q lim) (> (coarse-alpha d.parent cell cam i k) 0.004))
+                                          (and (and (seen q lim) (> (coarse-alpha d.parent cell cam pin i k) 0.004))
                                                (or (= k 3) (lit (array/nth d.seed i) (int/add (int/mul 8 (int/mod k 2)) (int/mul 128 (int/div k 2))) (array/nth f.weight i))))))) coarse)
            coarse_fill (map (fn [(j : int)]
                               (let* [i (array/nth leaves (int/div j 4))]
-                                (ink (tint (array/nth d.group i)) (coarse-alpha d.parent cell cam i (int/mod j 4))))) coarse)
+                                (ink (tint (array/nth d.group i)) (coarse-alpha d.parent cell cam pin i (int/mod j 4))))) coarse)
 
            eye [view.cx view.cy scale] mid [p.ox p.oy 0.0]
            owners (slots cell d.child d.count eye mid lim)
@@ -376,19 +389,19 @@
            ; Function leaves rule up to 12 lines from their file's line-length profile.
            rules (array/range (int/mul n16 12) :type int)
            rule_at (map (fn [(m : int)]
-                          (let* [i (int (max 0 (array/nth owners (int/add n8 (int/div m 12))))) q (spot cell cam i)
+                          (let* [i (int (max 0 (array/nth owners (int/add n8 (int/div m 12))))) q (spot cell cam pin i)
                                  rows (float (min 12 (max 1 (array/nth d.mass i))))]
                             [q.x (+ q.y (/ (* (float (int/mod m 12)) q.z) rows)) 0.0])) rules)
            rule_size (map (fn [(m : int)]
                             (let* [owner (array/nth owners (int/add n8 (int/div m 12))) i (int (max 0 owner)) row (int/mod m 12)
-                                   q (spot cell cam i)
+                                   q (spot cell cam pin i)
                                    width (array/nth widths (int/add (int/mul (array/nth d.file i) 32)
                                                                     (int/mod (int/add (int/add (array/nth d.first i) 31) row) 32)))]
                               (if (and (and (>= owner 0) (or (= (array/nth d.lsp i) 12) (= (array/nth d.lsp i) 6)))
                                        (and (> q.z 24.0) (< row (min 12 (max 1 (array/nth d.mass i))))))
                                   [(max 0.5 (/ (* q.z (float width)) 120.0)) 0.75 0.0] [0.0 0.0 0.0]))) rules)
            rule_fill (map (fn [(m : int)]
-                            (let* [i (int (max 0 (array/nth owners (int/add n8 (int/div m 12))))) q (spot cell cam i)]
+                            (let* [i (int (max 0 (array/nth owners (int/add n8 (int/div m 12))))) q (spot cell cam pin i)]
                               (ink (* (tint (array/nth d.group i)) 0.7) (smooth 24.0 40.0 q.z)))) rules)
 
            ; File names appear on cells over 180 points.
@@ -398,7 +411,7 @@
                     (let* [slot (int/add named (int (min k (int/sub n180 1))))
                            on (and (< k n180) (>= (array/nth owners slot) 0))
                            i (int (max 0 (array/nth owners slot)))
-                           q (spot cell cam i) side (max 1.0 (floor q.z))]
+                           q (spot cell cam pin i) side (max 1.0 (floor q.z))]
                       (draw/merge
                         (draw/rect [(+ (floor q.x) 6.0) (+ (floor q.y) 6.0) 0.0]
                                    (if on [(min (- side 12.0) (+ (* (float (array/nth d.chars i)) 7.0) 12.0)) 21.0 0.0] [0.0 0.0 0.0])
@@ -407,7 +420,7 @@
 
            hover view.hover
            h0 (int (max 0 hover))
-           hq (spot cell cam h0)
+           hq (spot cell cam pin h0)
            kind (array/nth d.kind h0)
            inspected (and (>= hover 0) (> kind 0))
            art (draw/merge
@@ -416,9 +429,9 @@
                  (draw/lines twig_from twig_to :color twig_color :width 1.0)
                  (draw/rects node_at node_size :fill node_fill)
                  (draw/rects coarse_at coarse_size :fill coarse_fill)
-                 (stipple owners 0 n8 cell d.lsp d.seed f.weight d.group cam lim 8.0 4 4)
-                 (stipple owners n8 n16 cell d.lsp d.seed f.weight d.group cam lim 16.0 8 2)
-                 (stipple owners (int/add n8 n16) n32 cell d.lsp d.seed f.weight d.group cam lim 32.0 16 1)
+                 (stipple owners 0 n8 cell d.lsp d.seed f.weight d.group cam pin lim 8.0 4 4)
+                 (stipple owners n8 n16 cell d.lsp d.seed f.weight d.group cam pin lim 16.0 8 2)
+                 (stipple owners (int/add n8 n16) n32 cell d.lsp d.seed f.weight d.group cam pin lim 32.0 16 1)
                  (draw/rects rule_at rule_size :fill rule_fill)
                  (draw/rects corner_at corner_size :fill "#e67543")
                  labels
@@ -432,7 +445,7 @@
            span (int/add (int/sub last first) 1)
            hundredths (int (round (* view.zoom 100.0)))
            ruler (for [k (range 17)]
-                   (let* [x (floor (+ cam.x (* (/ (float k) 16.0) scale))) on (and (> x 32.0) (< x p.right))]
+                   (let* [x (floor (+ cam.x (* (- (/ (float k) 16.0) pin.x) scale))) on (and (> x 32.0) (< x p.right))]
                      (draw/merge
                        (draw/line [x 64 0] [x (if on (if (= (int/mod k 4) 0) 72.0 68.0) 64.0) 0] :color "#818976" :width 1.0)
                        (draw/text [(+ x 4.0) 62 0] (if (and on (= (int/mod k 4) 0)) (case k 0 "00" 4 "04" 8 "08" 12 "0C" :else "10") "")

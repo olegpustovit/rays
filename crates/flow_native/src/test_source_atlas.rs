@@ -37,7 +37,7 @@ fn source_atlas_picking_eased_camera_and_native_only_table() {
     let ints = |name: &str| { let Value::IntArray(a) = data.get_str(name).unwrap() else { panic!("{name}") }; a.clone() };
     let floats = |name: &str| { let Value::Floats(1, a) = data.get_str(name).unwrap() else { panic!("{name}") }; a.clone() };
     let (kind, x, y, size) = (ints("kind"), floats("x"), floats("y"), floats("size"));
-    assert_eq!(kind.len(), 315);
+    assert_eq!(kind.len(), 302);
 
     // The plate at 1440 by 1000: a 302-point sidebar, art from 74 down to 856, a 772-point world.
     let (side, ox, oy) = (772., 569., 465.);
@@ -70,12 +70,22 @@ fn source_atlas_picking_eased_camera_and_native_only_table() {
     let target = n(&first, "tz");
     assert!((target - (0.17f64 * 4.).exp()).abs() < 1e-12);
     assert!(n(&first, "zoom") > n(&before, "zoom") && n(&first, "zoom") < target, "zoom is animated, not a jump");
-    let mut settled = first;
-    for _ in 0..240 { settled = force(&mut frame); }
-    assert_eq!(n(&settled, "zoom"), target, "easing snaps to its target");
     let world = |view: &value::Record, axis: &str, pointer: f64, origin: f64| n(view, axis) + (pointer - origin) / (side * n(view, "zoom"));
-    assert!((world(&before, "cx", 400., ox) - world(&settled, "cx", 400., ox)).abs() < 1e-9, "wheel anchor x");
-    assert!((world(&before, "cy", 300., oy) - world(&settled, "cy", 300., oy)).abs() < 1e-9, "wheel anchor y");
+    let anchored = |view: &value::Record, when: &str| {
+        assert!((world(&before, "cx", 400., ox) - world(view, "cx", 400., ox)).abs() < 1e-9, "wheel anchor x, {when}");
+        assert!((world(&before, "cy", 300., oy) - world(view, "cy", 300., oy)).abs() < 1e-9, "wheel anchor y, {when}");
+    };
+    // the point under the pointer stays there on every frame, and when the wheel turns again mid-way
+    anchored(&first, "first frame");
+    let mut settled = force(&mut frame);
+    anchored(&settled, "second frame");
+    frame.events = vec![input::Event::Scrolled((0., -1.))];
+    anchored(&force(&mut frame), "wheel turned back while easing");
+    frame.events.clear();
+    let target = (0.17f64 * 3.).exp();
+    for _ in 0..240 { settled = force(&mut frame); }
+    assert!((n(&settled, "zoom") - target).abs() < 1e-12, "easing snaps to its target");
+    anchored(&settled, "settled");
 
     // A click dives to the file-tree cell under the pointer; a right click steps back; R resets.
     let tile = (0..kind.len()).find(|&i| kind[i] == 1).unwrap();
@@ -84,7 +94,8 @@ fn source_atlas_picking_eased_camera_and_native_only_table() {
     frame.keys.clear();
     for _ in 0..240 { settled = force(&mut frame); }
     assert_eq!((n(&settled, "zoom"), n(&settled, "cx"), n(&settled, "cy")), (1., 0.5, 0.5));
-    frame.pointer = (ox + (x[tile] + size[tile] * 0.5 - 0.5) * side, oy + (y[tile] + size[tile] * 0.5 - 0.5) * side);
+    // in a file's margin the file itself is the named cell under the pointer; over a symbol it is the symbol
+    frame.pointer = (ox + (x[tile] + size[tile] * 0.01 - 0.5) * side, oy + (y[tile] + size[tile] * 0.01 - 0.5) * side);
     force(&mut frame);
     frame.buttons = vec![input::MouseButton::LeftButton];
     frame.events = vec![input::Event::PointerPressed(input::MouseButton::LeftButton, frame.pointer)];

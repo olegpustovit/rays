@@ -8,7 +8,8 @@ cargo run -p rays_bin -- sketches/source_atlas.rays
 A Lisp remake of the OCaml `code_quadtree` sketch ("Source Strata", last in `923dcecfe^`): the same
 plate, layout, marks and camera, over rust-analyzer symbols of Rays and the PXUI submodule.
 
-Scroll or pinch zooms toward the pointer, click dives into the cell under it, drag (left or middle)
+Scroll or pinch zooms about the pointer (the point under it stays there on every frame, down to the
+smallest symbol), click dives into the file or symbol under it, drag (left or middle)
 pans, right click steps back, `R` or Space resets, `T` shows cells instead of branches, `H` or Tab
 hides the overlay, `S` saves `_out/source-atlas.png`, Escape quits. The camera eases to its target.
 
@@ -18,7 +19,7 @@ The indexer requires `rust-analyzer` on PATH. It opens every `.rs` file as a det
 workspace, build or sysroot) and asks for `documentSymbol`. An unanswered request (`null`, while the
 server still loads) is retried and never stored: an earlier version cached it as "no symbols" for
 most of the repository. Generated output, historical copies, fixtures, vendor directories and
-symlinks are excluded; non-Rust files are rows without symbols and stay hollow. Real data and the
+symlinks are excluded. Only Rust files are indexed. Real data and the
 content-digest cache live in `_out/source_atlas/`, outside Git.
 
 `atlas.tsv` holds the whole tree in breadth-first rows, a node's children contiguous: the file
@@ -44,7 +45,7 @@ Marks have no alpha, so a fading mark is mixed into the ink; the art's clip is f
 its margins. A still camera reads nothing back; a moving one reads back the slot owners (about
 74 KB a frame at 1440 by 1000).
 
-`tree/` contains 40 tiny source files across Rays and the three PXUI tiers. `atlas.tsv` and
+`tree/` contains 32 tiny Rust files across Rays and the three PXUI tiers. `atlas.tsv` and
 `profile.tsv` are their real indexer output; `overview.png` and `zoom.png` are native GPU views at
 zoom 1 and 8.
 
@@ -64,5 +65,5 @@ and that a mark kernel calling a local function over a state stays a kernel. Set
 Measure the device path with `rays mem sketches/source_atlas.rays --frames 301`; `rays render` uses
 the CPU reference evaluator. `rays mem` holds the camera still, which the executor remembers: to time
 motion, make the scale follow `frame/index` in a copy, or run the full-table case above. On an
-Apple M1 at 1440 by 1000 with 69,163 nodes, a release build draws 11 ms a frame with the camera
+Apple M1 at 1440 by 1000 with about 69,000 nodes, a release build draws 11 ms a frame with the camera
 moving every frame (measured under heavy unrelated load; the full-table case enforces 16.7 ms).

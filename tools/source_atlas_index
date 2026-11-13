@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 
-EXTENSIONS = {'.rs', '.rays', '.c', '.h', '.cpp', '.hpp', '.mm', '.m', '.metal', '.wgsl', '.py', '.sh', '.toml'}
+EXTENSIONS = {'.rs'}
 EXCLUDED = {'.git', 'target', '_out', '_build', '_opam', 'node_modules', 'vendor', 'fixtures', 'history'}
 COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'), ('kind', 'int'), ('group', 'int'), ('depth', 'int'), ('child', 'int'), ('count', 'int'), ('owner', 'int'), ('file', 'int'), ('lsp', 'int'), ('first', 'int'), ('last', 'int'), ('mass', 'int'), ('seed', 'int'), ('bytes', 'int'), ('label', 'text'), ('tag', 'text'), ('path', 'text'), ('l0', 'text'), ('l1', 'text'), ('l2', 'text'), ('chars', 'int')]
 # A number comes last: a row never ends in the tab of an empty text cell.
@@ -132,7 +132,7 @@ def sources(root):
         dirs[:] = sorted(d for d in dirs if d not in EXCLUDED and not d.startswith('.') and not (Path(directory) / d).is_symlink())
         for name in sorted(files):
             path = Path(directory) / name
-            if not path.is_symlink() and (path.suffix in EXTENSIONS or path.name == 'source_atlas_index'):
+            if not path.is_symlink() and path.suffix in EXTENSIONS:
                 yield path
 
 

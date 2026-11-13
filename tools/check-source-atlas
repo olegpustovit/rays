@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
     output = work / 'atlas.tsv'
     command = [str(INDEX), '--root', str(fixture / 'tree'), '--output', str(output), '--cache', str(work / 'cache')]
     cold = subprocess.check_output(command, text=True)
-    assert '40 files, 224 symbols, 315 nodes, 0 cache hits' in cold, cold
+    assert '32 files, 224 symbols, 302 nodes, 0 cache hits' in cold, cold
     for name in ('atlas.tsv', 'profile.tsv'):
         assert (work / name).read_bytes() == (fixture / name).read_bytes(), f'{name}: fixture golden changed'
     # An unanswered request (null) is retried, never stored as a file without symbols.
@@ -26,9 +26,9 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
     assert output.read_bytes() == (fixture / 'atlas.tsv').read_bytes(), 'warm output changed'
     rows = [{k.split(':')[0]: v for k, v in r.items()} for r in csv.DictReader(output.open(), delimiter='\t', quoting=csv.QUOTE_NONE)]
     n = lambda row, name: (float if name in ('x', 'y', 'size') else int)(row[name])
-    assert len(rows) == 315 and sum(n(r, 'count') for r in rows) == 314, 'every node but the root is one child'
+    assert len(rows) == 302 and sum(n(r, 'count') for r in rows) == 301, 'every node but the root is one child'
     files = [r['path'] for r in rows if n(r, 'kind') in (1, 2)]
-    assert len(files) == len(set(files)) == 40, 'every file once'
+    assert len(files) == len(set(files)) == 32, 'every file once'
     for i, row in enumerate(rows):
         first, count = n(row, 'child'), n(row, 'count')
         assert count <= 4 and (i == 0 or n(row, 'parent') < i), 'breadth-first rows'
@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
                     scope = rows[n(scope, 'parent')]
                 if n(scope, 'kind') == 4:
                     assert n(scope, 'first') <= n(child, 'first') <= n(child, 'last') <= n(scope, 'last'), 'symbol outside its scope'
-    assert len((work / 'profile.tsv').read_text().splitlines()) == 1 + 40 * 32
+    assert len((work / 'profile.tsv').read_text().splitlines()) == 1 + 32 * 32
     # A file's digest, not its timestamp or size, keys the symbol cache.
     tiny = work / 'tree'
     tiny.mkdir()

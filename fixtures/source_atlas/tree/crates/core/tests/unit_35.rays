@@ -1,2 +1,0 @@
-; Non-Rust fixture 35
-(workspace sample_35 (graph picture :context draw (draw/background "#0e1211")))
