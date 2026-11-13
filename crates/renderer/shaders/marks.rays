@@ -14,33 +14,41 @@
   [(+ (+ (* (array/nth affine 0) p.x) (* (array/nth affine 1) p.y)) (array/nth affine 2))
    (+ (+ (* (array/nth affine 3) p.x) (* (array/nth affine 4) p.y)) (array/nth affine 5)) 0. 1.])
 
+; A mark's four corners carry its fill, its outline (a line: its direction) and, flat, its
+; half-size, border and kind; [local] is the corner relative to the mark's centre. A mark that
+; covers nothing (a line without length, an empty rect or circle without an outline) leaves the
+; clip volume, so it costs no rasterization.
 (defn marks-vertex :context value
   [(vid : int) (position : (array float)) (extent : (array float)) (fill : (array int)) (stroke : (array int))
    (width : (array float)) (q : (array int)) (affine : (array float))]
-  (let* [i (int/div vid 4) corner (int/mod vid 4)
+  (let* [i (int/shr vid 2) corner (int/and vid 3)
          cx (if (or (int/eq corner 1) (int/eq corner 2)) 1. 0.) cy (if (int/ge corner 2) 1. 0.)
          kind (array/nth q 0)
          at (int/mul i (array/nth q 1)) wide (int/mul i (array/nth q 2))
          a [(array/nth position at) (array/nth position (int/add at 1))]
          sw (array/nth width (int/mul i (array/nth q 5)))
-         stroke-word (colour stroke (int/mul i (array/nth q 4)) (array/nth q 7))]
+         stroke-word (colour stroke (int/mul i (array/nth q 4)) (array/nth q 7))
+         outside [2. 2. 0. 1.]]
     (if (int/eq kind 5)
       (let* [b [(array/nth extent wide) (array/nth extent (int/add wide 1))]
              d (- b a) len (sqrt (+ (* d.x d.x) (* d.y d.y)))
              dir (if (> len 0.000001) (/ d len) [1. 0.]) n [(- 0. dir.y) dir.x] h (+ (* sw 0.5) 1.5)
              s (- a (* dir h)) e (+ b (* dir h))
              p (+ (+ s (* (- e s) cx)) (* n (* (- (* cy 2.) 1.) h)))]
-        {:position (clip affine p) :color (unpack stroke-word) :color2 [0. 0. 0. 0.] :local p
-         :flat {:box [0. 0. 0. 0.] :params [0. sw 1. 5.] :extra [a.x a.y b.x b.y]}})
+        {:position (if (> len 0.000001) (clip affine p) outside) :local (- p (* (+ a b) 0.5))
+         :flat {:color (unpack stroke-word) :color2 [dir.x dir.y 0. 0.] :shape [(* len 0.5) (* sw 0.5) 0. 5.]}})
       (let* [r (if (int/eq kind 4)
                  (let* [rad (array/nth extent wide)] [(- a.x rad) (- a.y rad) (+ a.x rad) (+ a.y rad)])
                  [a.x a.y (+ a.x (array/nth extent wide)) (+ a.y (array/nth extent (int/add wide 1)))])
              border (if (int/eq stroke-word 0) 0. sw)
              grow (+ 1. (* border 0.5))
              g [(- r.x grow) (- r.y grow) (+ r.z grow) (+ r.w grow)]
-             p [(+ g.x (* (- g.z g.x) cx)) (+ g.y (* (- g.w g.y) cy))]]
-        {:position (clip affine p) :color (unpack (colour fill (int/mul i (array/nth q 3)) (array/nth q 6)))
-         :color2 (unpack stroke-word) :local p :flat {:box r :params [0. border 1. (float kind)] :extra [0. 0. 0. 0.]}}))))
+             p [(+ g.x (* (- g.z g.x) cx)) (+ g.y (* (- g.w g.y) cy))]
+             half [(* (- r.z r.x) 0.5) (* (- r.w r.y) 0.5)]
+             seen (or (> border 0.) (and (> half.x 0.) (> half.y 0.)))]
+        {:position (if seen (clip affine p) outside) :local (- p [(* (+ r.x r.z) 0.5) (* (+ r.y r.w) 0.5)])
+         :flat {:color (unpack (colour fill (int/mul i (array/nth q 3)) (array/nth q 6))) :color2 (unpack stroke-word)
+                :shape [half.x half.y border (float kind)]}}))))
 
 (defn len2 :context value [(v : vec2)] (sqrt (+ (* v.x v.x) (* v.y v.y))))
 (defn unit :context value [(x : float)] (min (max x 0.) 1.))
@@ -55,25 +63,20 @@
 ; a pixel's footprint in local units
 (defn footprint :context value [(p : vec2)] (len2 [(gpu/fwidth p.x) (gpu/fwidth p.y)]))
 
-; params.w is the kind, a whole float on a flat varying: kinds compare as floats, with no
+; shape.w is the kind, a whole float on a flat varying: kinds compare as floats, with no
 ; float-to-int conversion a fragment
-(defn marks-fragment :context value
-  [(color : vec4) (color2 : vec4) (local : vec2) (box : vec4) (params : vec4) (extra : vec4)]
-  (let* [kind params.w p local]
+(defn marks-fragment :context value [(color : vec4) (color2 : vec4) (local : vec2) (shape : vec4)]
+  (let* [kind shape.w half [shape.x shape.y]]
     (if (= kind 5.)
-      (let* [a [extra.x extra.y] b [extra.z extra.w] ab (- b a) len (len2 ab) dir (/ ab len)
-             q (- p (* (+ a b) 0.5))
-             d (round-box [(+ (* q.x dir.x) (* q.y dir.y)) (+ (* q.x (- 0. dir.y)) (* q.y dir.x))] [(* len 0.5) (* params.y 0.5)] 0.)
-             px (max (footprint p) 0.0001)]
-        {:discard (<= len 0.000001) :color [color.x color.y color.z (* color.w (unit (- 0.5 (/ d px))))]})
-      (let* [lo [box.x box.y] hi [box.z box.w] center (* (+ lo hi) 0.5) half (* (- hi lo) 0.5)
-             d (if (= kind 4.) (- (len2 (- p center)) half.x) (round-box (- p center) half 0.))
-             px (max (* (footprint p) 0.70710678) 0.0001)
+      (let* [d (round-box [(+ (* local.x color2.x) (* local.y color2.y)) (- (* local.y color2.x) (* local.x color2.y))] half 0.)
+             px (max (footprint local) 0.0001)]
+        [color.x color.y color.z (* color.w (unit (- 0.5 (/ d px))))])
+      (let* [d (if (= kind 4.) (- (len2 local) half.x) (round-box local half 0.))
+             px (max (* (footprint local) 0.70710678) 0.0001)
              fill [color.x color.y color.z (* color.w (unit (- 0.5 (/ d px))))]
-             border params.y]
-        {:discard false
-         :color (if (<= border 0.) fill
-                  (over [color2.x color2.y color2.z (* color2.w (unit (- 0.5 (/ (- (abs d) (* border 0.5)) px))))] fill))}))))
+             border shape.z]
+        (if (<= border 0.) fill
+          (over [color2.x color2.y color2.z (* color2.w (unit (- 0.5 (/ (- (abs d) (* border 0.5)) px))))] fill))))))
 
 ; Scene2's and the presenter's (lib/web_export/runtime/present.js) geometry and quad pipelines. A
 ; draw's constants (affine) hold the affine 0-5 (as marks'), the colour flag 6, the ink 8-11, the
