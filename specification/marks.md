@@ -303,7 +303,10 @@ A host-only set of 4,096 marks or more takes the `Marks` family too when there i
 20 bytes a mark, converted and uploaded once while the arrays are physically the previous frame's, where a
 `Ui_batch` is 64 bytes a mark that the scene compares and the renderer hashes every frame. Measured on an
 M1 with a million static rects (`rays mem`, 2026-11-13): 24.8 ms a frame and 5.3 ms of CPU as a batch,
-13.3 ms and 0.7 ms as marks. A point set whose positions are a device buffer is drawn the same way, as
+13.3 ms and 0.7 ms as marks. A host set whose only array is its positions (one colour, one size) is drawn along a Z-order
+curve over its bounds (`Marks_scene.z_order`): the picture does not depend on the order of marks of one
+colour, and a tile-based GPU bins coherent quads in less than half the time (a million static rects on
+a 1440 by 1000 canvas: 5.5 ms of GPU). A point set whose positions are a device buffer is drawn the same way, as
 the set of one-point rects the host route builds (285 ms a frame to 17 ms for a million points; the
 positions were read back). Every other mark set, including every set when there is no GPU host, stays a
 `Ui_batch`: the draw snapshots hash the CPU scene and do not change. The two routes agree to one step of

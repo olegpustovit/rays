@@ -27,3 +27,27 @@ Left open by the PXUI stable ABI work (plan: artifact `5y36bm8pvvg9`, section 15
   - Dynamic Layout retired instructions: the wrapper is 37,676 over the engine's 855,031 (4.41%; gate 4.5%, plan 3%). The ratio rose because the engine frame lost the theme copies; the wrapper's cost over it was 39,201 with the handle check and about 37,400 before it.
   - Static Layout time: +2.4 to +2.7% since the text bodies (was +0.9 to +1.4%), instructions unchanged (ratio 1.0016); `GATE_STATIC_RATIO` 1.0175 to 1.034. `Slot` lost 24 bytes (the hit closure); padding it back fixed one run and not another, so the cause is not pinned down.
   - Tabs with a registered body: the previously selected tab keeps its selected look for the frame of the click (`ponytail:` in the engine).
+
+## Marks: what the 2026-11-13 pass left (branch `fast-marks`)
+
+Measured with `rays mem FILE --frames N` on an M1, a million marks, (301 − 61 frames) / 240. `rays render`
+lowers with `reference: true` and never offers the device: it does not measure this path.
+
+- **The frame waits for each kernel.** `Flow_gpu.Host.output` (`crates/flow_gpu/src/host.rs`) waits for the
+  kernel's command buffer and reads its status before the mark set is registered, so the main thread stalls
+  once a device attribute a frame. Three kernels (position, size, colour) of a million marks: 7.8 ms of GPU
+  render and about 1 ms of kernels, 15.3 ms a frame. Checking the previous frame's status instead removes
+  the stall and reports a kernel error one frame late; the tests that expect the error in the same frame
+  need a decision first.
+- **Lines** are unchanged (25.8 ms a frame): they keep the generic fragment and its 18 floats.
+- **The antialias margin** is a whole logical point on each side. Three quarters of a device pixel is enough
+  (a 2-point mark at density 2 would shade 30 pixels, not 64), but `Replace` and `Multiply` also write the
+  margin, and `crates/renderer/tests/cases/gpu_draw.rs` compares the two routes under `Replace`. Tried and
+  reverted.
+- **A per-frame `filter` feeding a mark set** still reads back and cooks its consumers on the CPU (36 ms a
+  frame, 29 ms of it CPU, for 400,000 cells). Its memory is bounded now. A kernel that writes size 0 for a
+  hidden mark costs nothing to draw and is the shape to use.
+- **Unordered device sets.** A kernel's marks are drawn in index order; scattered ones cost the tiler about
+  twice what coherent ones do. Only host sets of one colour are reordered.
+- **Windows and Vulkan were not run.** The SPIR-V stages pass `spirv-val`; the frame times are Metal only.
+
