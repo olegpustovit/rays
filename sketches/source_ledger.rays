@@ -1,0 +1,176 @@
+; Source Ledger: every symbol of the repository in reading order, one tick each. A crate starts a
+; new line, a file leaves a gap, a tick's height is its source span, and the sheet reads like a
+; page of text whose words are functions.
+; Generate first: tools/source_atlas_index
+; Run: cargo run -p rays_bin -- sketches/source_ledger.rays
+; Hover a tick to read its symbol. Up, Down or a pinch change the size of a tick, the wheel scrolls,
+; R or Space fits the sheet again, C changes the inks, S saves _out/source-ledger.png, Escape quits.
+(workspace source_ledger
+  (graph data :context host (table/load "../_out/source_atlas/atlas.tsv"))
+  (graph crates :context host (table/load "../_out/source_atlas/crates.tsv"))
+
+  ; The field of ticks inside the sheet's margins: crate names go in the left one.
+  (defn sheet :context value [(w : float) (h : float)]
+    {:left 132.0 :top 100.0 :width (max 64.0 (- w 192.0)) :height (max 64.0 (- h 270.0))})
+
+  ; Static selections: computed once, never per frame.
+  (graph field :context host
+    (let* [d (ref data) crate (ref crates)
+           ids (array/range (array/count d.kind) :type int)
+           leaves (filter (fn [(i : int)] (= (array/nth d.kind i) 5)) ids)
+           leaf_ids (array/range (array/count leaves) :type int)
+           crate_ids (array/range (array/count crate.cells) :type int)
+           cells (exact (map (fn [(c : int)] (int (array/nth crate.cells c))) crate_ids))
+           ; offsets: a crate's first cell in the whole ledger
+           base (array/scan_sum cells)]
+      {:leaves leaves :cells cells :base base
+       ; The leaf at every cell of the ledger, plus one: zero is the gap between two files.
+       :at (array/scatter_add (exact (map (fn [(j : int)]
+                                            (let* [i (array/nth leaves j)] (int/add (array/nth base (array/nth d.crate i)) (array/nth d.cell i))))
+                                          leaf_ids))
+                              (exact (map (fn [(j : int)] (int/add (array/nth leaves j) 1)) leaf_ids))
+                              (int (array/sum cells)))}))
+
+  ; A tick's cell is `pitch` points wide and nine fifths as tall, both in half points. The sheet
+  ; opens at the largest pitch at which every crate's lines fit the field; from there the pitch
+  ; grows a half point a step and the wheel scrolls what no longer fits.
+  (graph zoom :context host
+    (let* [f (ref field)
+           s (sheet (float (frame/width)) (float (frame/height)))
+           cells f.cells
+           crate_ids (array/range (array/count cells) :type int)
+           input (frame/input)
+           tall (fn [(pitch : float)]
+                  (let* [cols (int (max 1.0 (floor (/ s.width pitch))))]
+                    (* (float (sum [c crate_ids] (int/div (int/add (array/nth cells c) (int/sub cols 1)) cols))) (/ (floor (* 3.6 pitch)) 2.0))))
+           fit (fold [best 2.0] [k (range 29)] (let* [p (+ 2.0 (* 0.5 (float k)))] (if (<= (tall p) s.height) p best)))]
+      (state [old {:step 0 :scroll 0.0 :up false :down false :pinch 0.0}]
+        (let* [up (key/down "up") down (key/down "down")
+               pinch (fold [v old.pinch] [event input.events] (+ v (case event.kind "pinched" (log (max 0.01 event.scale)) :else 0.0)))
+               wheel (fold [v 0.0] [event input.events]
+                           (+ v (case event.kind "scrolled" (* event.delta.y 42.0) "trackpad-scrolled" (* event.delta.y 3.0) :else 0.0)))
+               reset (or (key/down "r") (key/down "space"))
+               ; a fifth of a pinch's logarithm is one step
+               turn (cond (> pinch 0.2) 1 (< pinch -0.2) -1 (and up (not old.up)) 1 (and down (not old.down)) -1 :else 0)
+               step (if reset 0 (int (max 0 (min 28 (int/add old.step turn)))))
+               pitch (min 16.0 (+ fit (* 0.5 (float step))))
+               scroll (if reset 0.0 (max 0.0 (min (- (tall pitch) s.height) (- old.scroll wheel))))]
+          {:step step :scroll (/ (floor (* scroll 2.0)) 2.0) :up up :down down :pinch (if (= turn 0) pinch 0.0)
+           :pitch pitch :drop (/ (floor (* 3.6 pitch)) 2.0) :cols (int (max 1.0 (floor (/ s.width pitch))))}))))
+
+  ; Every crate's lines at that pitch, and the line each crate starts on.
+  (graph layout :context host
+    (let* [f (ref field) z (ref zoom)
+           cells f.cells cols z.cols
+           rows (exact (map (fn [(c : int)] (int/div (int/add (array/nth cells c) (int/sub cols 1)) cols)) (array/range (array/count cells) :type int)))]
+      {:cols cols :pitch z.pitch :drop z.drop :scroll z.scroll :rows rows :start (array/scan_sum rows)}))
+
+  (graph view :context host
+    (let* [d (ref data) f (ref field) l (ref layout)
+           s (sheet (float (frame/width)) (float (frame/height)))
+           crate_ids (array/range (array/count f.cells) :type int)]
+      (state [old {:hover -1 :palette 0 :key false}]
+        (let* [px (pointer/x) py (pointer/y)
+               col (int (floor (/ (- px s.left) l.pitch)))
+               row (int (floor (/ (+ (- py s.top) l.scroll) l.drop)))
+               inside (and (and (>= px s.left) (and (>= py s.top) (< py (+ s.top s.height)))) (< col l.cols))
+               ; the crate whose lines hold the pointer's row, then the cell, then the leaf there
+               crate (int/sub (sum [c crate_ids]
+                                (if (and (>= row (array/nth l.start c)) (< row (int/add (array/nth l.start c) (array/nth l.rows c)))) (int/add c 1) 0))
+                              1)
+               c (int (max 0 crate))
+               cell (int/add (int/mul (int/sub row (array/nth l.start c)) l.cols) col)
+               hover (if (and (and inside (>= crate 0)) (< cell (array/nth f.cells c)))
+                         (int/sub (array/nth f.at (int/add (array/nth f.base c) cell)) 1)
+                         -1)
+               key (key/down "c")]
+          {:hover hover :palette (if (and key (not old.key)) (int/sub 1 old.palette) old.palette) :key key}))))
+
+  ; A tick's ink: blues for a function, a method and a field, grey for the rest; a span of 40
+  ; lines is orange and one over 70 red. Or black and greys with the long spans in red.
+  (defn tone :context value [(palette : int) (lsp : int) (span : int)]
+    (if (= palette 1)
+        (cond (> span 70) [0.878 0.196 0.169] (>= span 40) [0.082 0.094 0.110]
+              (or (= lsp 12) (= lsp 6)) [0.247 0.275 0.302] (= lsp 8) [0.545 0.576 0.604] :else [0.749 0.773 0.788])
+        (cond (> span 70) [0.878 0.196 0.169] (>= span 40) [0.933 0.482 0.212]
+              (= lsp 12) [0.106 0.310 0.769] (= lsp 6) [0.239 0.525 0.875] (= lsp 8) [0.553 0.741 0.922] :else [0.604 0.635 0.663])))
+
+  ; A leaf's tick as [x y height]: centred in its cell's drop, a one-line symbol a dash. `top` is
+  ; the field's top less the scroll.
+  (defn tick :context value [(left : float) (top : float) (pitch : float) (drop : float) (cols : int) (row : int) (cell : int) (span : int)]
+    (let* [height (max 0.5 (/ (round (* (* (- drop 1.0) (+ 0.16 (* 0.84 (min 1.0 (sqrt (/ (float span) 40.0)))))) 2.0)) 2.0))]
+      [(+ left (* (float (int/mod cell cols)) pitch))
+       (+ (+ top (* (float (int/add row (int/div cell cols))) drop)) (/ (floor (- drop height)) 2.0))
+       height]))
+
+  (graph picture :context draw
+    (let* [d (ref data) crate (ref crates) f (ref field) l (ref layout) view (ref view)
+           w (float (frame/width)) h (float (frame/height))
+           s (sheet w h)
+           left s.left top (- s.top l.scroll) pitch l.pitch drop l.drop cols l.cols start l.start
+           floor_y (+ s.top s.height) wide (max 1.0 (/ (floor (* pitch 1.28)) 2.0))
+           palette view.palette
+           leaves f.leaves
+           leaf_ids (array/range (array/count leaves) :type int)
+           mark_at (map (fn [(j : int)]
+                          (let* [i (array/nth leaves j)
+                                 q (tick left top pitch drop cols (array/nth start (array/nth d.crate i)) (array/nth d.cell i) (array/nth d.mass i))]
+                            [q.x q.y 0.0])) leaf_ids)
+           mark_size (map (fn [(j : int)]
+                            (let* [i (array/nth leaves j)
+                                   q (tick left top pitch drop cols (array/nth start (array/nth d.crate i)) (array/nth d.cell i) (array/nth d.mass i))]
+                              (if (and (>= q.y s.top) (<= (+ q.y q.z) floor_y)) [wide q.z 0.0] [0.0 0.0 0.0]))) leaf_ids)
+           mark_fill (map (fn [(j : int)] (let* [i (array/nth leaves j)] (tone palette (array/nth d.lsp i) (array/nth d.mass i)))) leaf_ids)
+
+           ; A crate is named in the margin where its lines are 10 points or more.
+           ; ponytail: 96 crates.
+           names (for [k (range 96)]
+                   (let* [c (int (min k (int/sub (array/count crate.cells) 1)))
+                          y (+ (+ top (* (float (array/nth start c)) drop)) (- (* drop 0.5) 5.0))
+                          on (and (and (< k (array/count crate.cells)) (>= (* (float (array/nth l.rows c)) drop) 10.0))
+                                  (and (>= y (- s.top 4.0)) (< y (- floor_y 8.0))))]
+                     (draw/text [(- (- left 10.0) (* (float (array/nth crate.chars c)) 4.91)) y 0.0]
+                                (if on (array/nth crate.name c) "") :size 8 :color "#6b7278")))
+
+           hover view.hover
+           inspected (>= hover 0)
+           h0 (int (max 0 hover))
+           hq (tick left top pitch drop cols (array/nth start (array/nth d.crate h0)) (array/nth d.cell h0) (array/nth d.mass h0))
+           first (array/nth d.first h0) last (array/nth d.last h0)
+           foot (- h 150.0) half (floor (* w 0.5))
+           key (fn [(n : int) (label : text)]
+                 (draw/merge
+                   (draw/rect [(+ left (* (float n) 118.0)) (+ foot 1.0) 0.0] [3.0 9.0 0.0]
+                              :fill (case n 0 (tone palette 12 1) 1 (tone palette 6 1) 2 (tone palette 8 1) 3 (tone palette 0 1) 4 (tone palette 0 40) :else (tone palette 0 71)))
+                   (draw/text [(+ (+ left (* (float n) 118.0)) 10.0) foot 0.0] label :size 10 :color "#6b7278")))]
+      (draw/merge
+        (draw/background "#fdfdfc")
+        (draw/text [left 34 0] "SOURCE LEDGER" :size 22 :color "#15181c")
+        (draw/text [left 70 0] (str (array/count leaves) " SYMBOLS IN READING ORDER  /  ONE TICK EACH") :size 11 :color "#6b7278")
+        (draw/text [(- (+ left s.width) 55.3) 40 0] "PLATE 002" :size 10 :color "#15181c")
+        (draw/rects mark_at mark_size :fill mark_fill)
+        names
+        (draw/rect [(if inspected (- hq.x 2.0) -100.0) (- hq.y 2.0) 0.0] (if inspected [(+ wide 4.0) (+ hq.z 4.0) 0.0] [0.0 0.0 0.0]) :stroke "#15181c")
+        (key 0 "FUNCTION") (key 1 "METHOD") (key 2 "FIELD") (key 3 "OTHER") (key 4 "40+ LINES") (key 5 "OVER 70 LINES")
+        (draw/text [left (+ foot 22.0) 0] "A NEW LINE IS A CRATE  /  A GAP IS A FILE  /  HEIGHT IS SPAN        UP DOWN size   WHEEL scroll   R fit   C inks" :size 10 :color "#6b7278")
+        (draw/rect [left (+ foot 46.0) 0] [s.width 1.0 0] :fill "#d5dadd")
+        (draw/text [left (+ foot 60.0) 0] (if inspected (array/nth d.path h0) "SYMBOL INSPECTOR") :size (if inspected 11 10) :color "#e0432b")
+        (draw/text [left (+ foot 80.0) 0]
+                   (if inspected (str (array/nth d.label h0) "  /  " (array/nth crate.name (array/nth d.crate h0))) "Hover a tick to read its symbol")
+                   :size 16 :color "#15181c")
+        (draw/text [left (+ foot 108.0) 0]
+                   (if inspected (str "LINES " first "-" last "  /  " (array/nth d.mass h0) " LINES") (str (array/count crate.cells) " CRATES  /  " (array/count leaves) " SYMBOLS"))
+                   :size 11 :color "#6b7278")
+        (for [k (range 3)]
+          (draw/text [(max half (+ left 360.0)) (+ (+ foot 62.0) (* (float k) 18.0)) 0]
+                     (if (and inspected (< k (array/nth d.mass h0)))
+                         (str (int/add first k) "   " (case k 0 (array/nth d.l0 h0) 1 (array/nth d.l1 h0) :else (array/nth d.l2 h0)))
+                         "")
+                     :size 12 :color "#15181c")))))
+
+  (graph actions :context host
+    (list (host/save_png "_out/source-ledger.png" (key/down "s"))
+          (host/quit (key/down "escape"))))
+
+  (graph settings :context settings (settings/config :title "Rays / Source Ledger" :width 1180 :height 1000))
+  (graph editor :context editor (ui/workspace (ui/canvas (ref picture) :focus true) :effects (ref actions))))

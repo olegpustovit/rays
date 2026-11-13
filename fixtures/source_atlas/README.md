@@ -120,3 +120,18 @@ slice's rank among all slices, blue for the shortest lines of the repository thr
 median to orange for the longest. Bands are snapped to whole points, so a file under 32 points keeps
 the bands that land on one. Hover a block to read its file in the notes band; `C` changes the inks to
 one blue. Nothing moves, so nothing is read back. `strata.png` is its view.
+
+### Ledger
+
+```sh
+cargo run -p rays_bin -- sketches/source_ledger.rays
+```
+
+No tree: every leaf symbol in reading order, one tick each, like a page of text whose words are
+functions. A crate starts a new line and a file leaves a gap (the indexer's `cell`); a tick's height
+follows its span, a one-line symbol a dash; blues are a function, a method and a field, grey the rest,
+orange a span of 40 lines and red one over 70. A tick's cell is a pitch wide and nine fifths as tall,
+in half points. The sheet opens at the largest pitch at which every crate's lines fit; Up, Down or a
+pinch change it a half point a step, the wheel scrolls what no longer fits, `R` or Space fits again
+and `C` changes the inks to black, greys and red. A cell of the ledger holds its leaf, so the tick
+under the pointer is two divisions and a lookup. `ledger.png` is its view.
