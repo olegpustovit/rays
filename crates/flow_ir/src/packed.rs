@@ -3838,7 +3838,7 @@ pub mod host {
 
     type KErrOrDiag = KErr;
 
-    // An integer array's float copy, kept by the array's identity (8 arrays, charged to the ledger):
+    // An integer array's float copy, kept by the array's identity (64 arrays, charged to the ledger):
     // a source or table made once per topology (a CSR, a selection) is converted once, and stays the
     // array a device's identity check finds uploaded, instead of a fresh copy uploaded with every
     // prepare.
@@ -3846,7 +3846,9 @@ pub mod host {
         let same = |stored: &lru::Key, probe: &(dyn std::any::Any + Send + Sync)| {
             matches!((stored.as_any().downcast_ref::<Arc<Vec<i64>>>(), probe.downcast_ref::<Arc<Vec<i64>>>()), (Some(a), Some(b)) if Arc::ptr_eq(a, b))
         };
-        lru::IdentityList::new(lru::cache("flow_ir.int_floats"), 8, Arc::new(same))
+        // ponytail: 64 arrays by count, not bytes. A drawing over a table binds a dozen integer columns
+        // to each kernel; at 8 they evicted one another and every dispatch converted and compared them again.
+        lru::IdentityList::new(lru::cache("flow_ir.int_floats"), 64, Arc::new(same))
     });
 
     // Backend-owned integer arrays travel through the numeric input carrier by identity. Both

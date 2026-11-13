@@ -1836,6 +1836,7 @@ impl Ctx {
                 let value = self.expression(e);
                 let count = arg(args, "count").expect("count");
                 let n = *n;
+                let last: std::sync::Mutex<Option<(i64, Value)>> = std::sync::Mutex::new(None);
                 Arc::new(move |st| {
                     let mut result = None;
                     if let Some(r) = st.resident.clone() {
@@ -1844,7 +1845,22 @@ impl Ctx {
                             result = r.range(&program.locals[ix(n)], &Value::Int(length), 1, length)?;
                         }
                     }
-                    let x = match result { Some(x) => x, None => value(st)? };
+                    // A range is its count: the one made last frame is the same array, and handing it
+                    // back keeps its identity, so a kernel over it finds its input already uploaded
+                    // instead of converting and comparing every index again.
+                    let x = match result {
+                        Some(x) => x,
+                        None => match op::array_count(None, "array/range", &st.values[ix(count)]) {
+                            Ok(length) => {
+                                let mut last = last.lock().unwrap();
+                                match &*last {
+                                    Some((n, x)) if *n == length as i64 => x.clone(),
+                                    _ => { let x = value(st)?; *last = Some((length as i64, x.clone())); x }
+                                }
+                            }
+                            Err(_) => value(st)?,
+                        },
+                    };
                     st.values[ix(n)] = x;
                     Ok(())
                 })

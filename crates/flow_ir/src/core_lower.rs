@@ -1129,8 +1129,9 @@ impl Lowerer {
                 for (name, ty) in fields { out.push((name.clone(), self.emit(s, source, ty, C::Expr::Field(*id, name.clone())))); }
                 self.capture(s, source, parent, static_, sop, eager, arguments, &RecordFields(out))
             }
-            // a captured function's arrays follow the kernel's own rule
-            Known(Value::Fn(f)) if sop => {
+            // a captured function's arrays follow the kernel's own rule; in a drawing, what it read
+            // from a state (a camera) becomes the kernel's argument like any other capture
+            Known(Value::Fn(f)) if sop || self.has_draw => {
                 let mut replaced = Vec::new();
                 for (_, v) in E::residual::function_bindings(*f) {
                     let n = self.capture(s, source, parent, static_, sop, eager, arguments, &Known(v.clone()))?;
@@ -1182,7 +1183,13 @@ impl Lowerer {
                 }
             }
             let r = E::residual::with_bindings(parent, x, &bindings)?;
-            if E::state_dependent(&Value::Residual(r)) { return Ok(None); }
+            if E::state_dependent(&Value::Residual(r)) {
+                // in a drawing this is the interpreter, element by element: say so
+                if self.has_draw {
+                    *why = Some(vec![rays_diagnostic::error("E_PACKED_CAPTURE".into(), "a capture still reads a state after binding".into(), None, None, None, Vec::new(), Vec::new())]);
+                }
+                return Ok(None);
+            }
             let compiled = if matches!(x.node, Node::Vec(_)) { packed::compile_uniform(&self.options, r, x) } else { packed::compile_result(&self.options, r, x) };
             match compiled {
                 Err(d) => { *why = Some(d); Ok(None) }
