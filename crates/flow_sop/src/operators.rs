@@ -1314,10 +1314,11 @@ mod tests {
     #[test]
     fn declares_the_authored_operator_list_in_order() {
         let names: Vec<&str> = all().iter().map(|op| op.name.as_str()).collect();
-        assert_eq!(names.len(), 50);
-        assert_eq!(names[0], "sop/attr");
-        assert_eq!(names[28], "sop/provenance_base");
-        assert_eq!(names[49], "text/group_name_forced");
+        assert_eq!(names.len(), 51);
+        assert_eq!(names[0], "table/load");
+        assert_eq!(names[1], "sop/attr");
+        assert_eq!(names[29], "sop/provenance_base");
+        assert_eq!(names[50], "text/group_name_forced");
     }
 
     #[test]

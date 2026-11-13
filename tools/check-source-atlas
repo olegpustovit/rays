@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Small indexer regression: real rust-analyzer cold/warm runs and content invalidation."""
 import csv
+import json
 from pathlib import Path
 import runpy
 import subprocess
@@ -15,21 +16,37 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
     output = work / 'atlas.tsv'
     command = [str(INDEX), '--root', str(fixture / 'tree'), '--output', str(output), '--cache', str(work / 'cache')]
     cold = subprocess.check_output(command, text=True)
-    assert '40 files, 224 symbols, 0 cache hits' in cold, cold
-    assert output.read_bytes() == (fixture / 'atlas.tsv').read_bytes(), 'fixture golden changed'
+    assert '40 files, 224 symbols, 315 nodes, 0 cache hits' in cold, cold
+    for name in ('atlas.tsv', 'profile.tsv'):
+        assert (work / name).read_bytes() == (fixture / name).read_bytes(), f'{name}: fixture golden changed'
+    # An unanswered request (null) is retried, never stored as a file without symbols.
+    assert all(json.loads(saved.read_text()) for saved in (work / 'cache').iterdir()), 'an empty answer was cached'
     warm = subprocess.check_output(command, text=True)
     assert '32 cache hits' in warm, warm
     assert output.read_bytes() == (fixture / 'atlas.tsv').read_bytes(), 'warm output changed'
-    rows = list(csv.DictReader(output.open(), delimiter='\t'))
-    assert len(rows) == 264
-    assert sorted(int(r['order:int']) for r in rows) == list(range(len(rows)))
+    rows = [{k.split(':')[0]: v for k, v in r.items()} for r in csv.DictReader(output.open(), delimiter='\t', quoting=csv.QUOTE_NONE)]
+    n = lambda row, name: (float if name in ('x', 'y', 'size') else int)(row[name])
+    assert len(rows) == 315 and sum(n(r, 'count') for r in rows) == 314, 'every node but the root is one child'
+    files = [r['path'] for r in rows if n(r, 'kind') in (1, 2)]
+    assert len(files) == len(set(files)) == 40, 'every file once'
     for i, row in enumerate(rows):
-        parent, rank = int(row['parent:int']), int(row['rank:int'])
-        assert int(rows[rank]['order:int']) == i
-        assert int(row['lo:int']) <= rank < int(row['hi:int'])
-        assert parent == -1 or parent < i
-        if parent >= 0:
-            assert int(rows[parent]['first:int']) <= int(row['first:int']) <= int(row['last:int']) <= int(rows[parent]['last:int'])
+        first, count = n(row, 'child'), n(row, 'count')
+        assert count <= 4 and (i == 0 or n(row, 'parent') < i), 'breadth-first rows'
+        children = rows[first:first + count]
+        for k, child in enumerate(children):
+            assert n(child, 'parent') == i, 'children are contiguous'
+            x, y, size = n(child, 'x'), n(child, 'y'), n(child, 'size')
+            assert n(row, 'x') <= x and n(row, 'y') <= y and x + size <= n(row, 'x') + n(row, 'size') + 1e-12 and y + size <= n(row, 'y') + n(row, 'size') + 1e-12, 'child inside parent'
+            for other in children[:k]:
+                ox, oy, osize = n(other, 'x'), n(other, 'y'), n(other, 'size')
+                assert x + size <= ox + 1e-12 or ox + osize <= x + 1e-12 or y + size <= oy + 1e-12 or oy + osize <= y + 1e-12, 'siblings overlap'
+            if n(child, 'kind') in (4, 5) and n(row, 'kind') >= 3:
+                scope = row
+                while n(scope, 'kind') == 3:
+                    scope = rows[n(scope, 'parent')]
+                if n(scope, 'kind') == 4:
+                    assert n(scope, 'first') <= n(child, 'first') <= n(child, 'last') <= n(scope, 'last'), 'symbol outside its scope'
+    assert len((work / 'profile.tsv').read_text().splitlines()) == 1 + 40 * 32
     # A file's digest, not its timestamp or size, keys the symbol cache.
     tiny = work / 'tree'
     tiny.mkdir()
@@ -41,4 +58,4 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
     subprocess.check_call(tiny_command)
     assert 'after_' in output.read_text() and 'before' not in output.read_text()
     assert module['escape']('λ\tline\n\\\r') == 'λ\\tline\\n\\\\\\r'
-print('source_atlas_index: fixture, hierarchy, cache and content invalidation passed')
+print('source_atlas_index: fixture, tree, cache and content invalidation passed')

@@ -18,7 +18,10 @@ import time
 
 EXTENSIONS = {'.rs', '.rays', '.c', '.h', '.cpp', '.hpp', '.mm', '.m', '.metal', '.wgsl', '.py', '.sh', '.toml'}
 EXCLUDED = {'.git', 'target', '_out', '_build', '_opam', 'node_modules', 'vendor', 'fixtures', 'history'}
-COLUMNS = [('parent', 'int'), ('first', 'int'), ('last', 'int'), ('kind', 'int'), ('group', 'int'), ('seed', 'int'), ('label', 'text'), ('path', 'text'), ('signature', 'text'), ('rank', 'int'), ('order', 'int'), ('lo', 'int'), ('hi', 'int'), ('prefix', 'int'), ('depth', 'int'), ('leaf', 'int')]
+COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'), ('kind', 'int'), ('group', 'int'), ('depth', 'int'), ('child', 'int'), ('count', 'int'), ('owner', 'int'), ('file', 'int'), ('lsp', 'int'), ('first', 'int'), ('last', 'int'), ('mass', 'int'), ('seed', 'int'), ('bytes', 'int'), ('label', 'text'), ('tag', 'text'), ('path', 'text'), ('l0', 'text'), ('l1', 'text'), ('l2', 'text'), ('chars', 'int')]
+# A number comes last: a row never ends in the tab of an empty text cell.
+# Node kinds: the file quadtree, then each indexed file's nested symbol field.
+BRANCH, FILE, HOLLOW, PACK, SCOPE, LEAF, EMPTY = range(7)
 
 
 def digest(data):
@@ -26,17 +29,22 @@ def digest(data):
 
 
 def seed(text):
-    return int(digest(text.encode())[:6], 16)  # exactly representable by device floats
+    h = 216613626
+    for c in text.encode():
+        h = ((h ^ c) * 16777619) & 0x3fffffff
+    return h
 
 
 class Lsp:
-    def __init__(self, executable, root, timeout):
+    def __init__(self, executable, root, files, timeout):
         self.timeout = timeout
         self.serial = 0
         self.messages = queue.Queue()
         self.process = subprocess.Popen([executable], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         threading.Thread(target=self.read, daemon=True).start()
-        self.request('initialize', {'processId': os.getpid(), 'rootUri': root.as_uri(), 'capabilities': {'textDocument': {'documentSymbol': {'hierarchicalDocumentSymbolSupport': True}}}, 'initializationOptions': {'linkedProjects': [], 'checkOnSave': False, 'cargo': {'buildScripts': {'enable': False}}, 'procMacro': {'enable': False}}})
+        # Detached files need no Cargo workspace, build or sysroot: documentSymbol is syntactic.
+        options = {'linkedProjects': [], 'detachedFiles': [str(f) for f in files], 'checkOnSave': False, 'cargo': {'buildScripts': {'enable': False}, 'sysroot': None}, 'procMacro': {'enable': False}}
+        self.request('initialize', {'processId': os.getpid(), 'rootUri': root.as_uri(), 'capabilities': {'textDocument': {'documentSymbol': {'hierarchicalDocumentSymbolSupport': True}}}, 'initializationOptions': options})
         self.send('initialized', {})
 
     def read(self):
@@ -91,13 +99,20 @@ class Lsp:
         uri = path.as_uri()
         self.send('textDocument/didOpen', {'textDocument': {'uri': uri, 'languageId': 'rust', 'version': 1, 'text': text}})
         try:
-            # Opening a document races the server's syntax snapshot; ContentModified asks to retry.
-            for attempt in range(3):
+            # null means the server has not loaded the file yet (an empty file answers []), and
+            # ContentModified asks to retry: neither is ever a result, so neither is ever cached.
+            deadline = time.monotonic() + self.timeout
+            while True:
                 try:
-                    return self.request('textDocument/documentSymbol', {'textDocument': {'uri': uri}}) or []
+                    result = self.request('textDocument/documentSymbol', {'textDocument': {'uri': uri}})
+                    if result is not None:
+                        return result
                 except RuntimeError as error:
-                    if '-32801' not in str(error) or attempt == 2:
+                    if '-32801' not in str(error):
                         raise
+                if time.monotonic() > deadline:
+                    raise RuntimeError(f'{path}: rust-analyzer never answered documentSymbol')
+                time.sleep(0.05)
         finally:
             self.send('textDocument/didClose', {'textDocument': {'uri': uri}})
 
@@ -122,61 +137,138 @@ def sources(root):
 
 
 def group(path):
-    if '/tests/' in '/' + path or '/test_' in path:
-        return 4
-    if path.startswith('sketches/'):
-        return 5
-    if path.startswith('pxui/crates/public/'):
+    if '/tests/' in '/' + path or '/test_' in '/' + path:
         return 1
-    if path.startswith('pxui/crates/open/'):
+    if path.startswith('sketches/'):
         return 2
-    if path.startswith('pxui/crates/private/'):
+    if '/examples/' in '/' + path or '/pxui_gallery/' in path:
         return 3
+    if path.startswith('pxui/crates/open/'):
+        return 4
     return 0
 
 
-def rows_for(rows, parent, symbols, path, lines, depth):
-    for symbol in sorted(symbols, key=lambda s: (s.get('range', s.get('location', {}).get('range', {})).get('start', {}).get('line', 0), s['name'])):
-        span = symbol.get('range', symbol.get('location', {}).get('range'))
-        if span is None:
-            raise ValueError(f'{path}: symbol has no range')
-        first = span['start']['line'] + 1
-        last = span['end']['line'] + (span['end']['character'] > 0)
-        if not 1 <= first <= max(1, len(lines)) or last < first or last > max(1, len(lines)):
-            raise ValueError(f'{path}: invalid symbol span {first}:{last}')
-        row = len(rows)
-        children = symbol.get('children', [])
-        rows.append({'parent': parent, 'first': first, 'last': last, 'kind': symbol['kind'], 'group': group(path), 'seed': seed(path + ':' + symbol['name']), 'label': symbol['name'], 'path': path, 'signature': lines[first - 1].strip() if lines else '', 'depth': depth, 'leaf': int(not children)})
-        rows_for(rows, row, children, path, lines, depth + 1)
+def span(symbol, path, count):
+    r = symbol.get('range', symbol.get('location', {}).get('range'))
+    if r is None:
+        raise ValueError(f'{path}: symbol has no range')
+    first = r['start']['line'] + 1
+    last = r['end']['line'] + (r['end']['character'] > 0)
+    if not 1 <= first <= max(1, count) or last < first or last > max(1, count):
+        raise ValueError(f'{path}: invalid symbol span {first}:{last}')
+    return first, last
 
 
-def layout_columns(rows):
-    """Sibling addressing and integer prefix weights, never screen coordinates or layout."""
-    scopes = {}
-    for i, row in enumerate(rows):
-        scopes.setdefault(row['parent'], []).append(i)
-    order = [i for parent in sorted(scopes) for i in scopes[parent]]
-    cursor = 0
-    for parent in sorted(scopes):
-        siblings = scopes[parent]
-        lo, hi = cursor, cursor + len(siblings)
-        for i in siblings:
-            rows[i].update(rank=cursor, lo=lo, hi=hi)
-            cursor += 1
-    total = 0
-    for slot, i in enumerate(order):
-        total += 1 + math.isqrt(max(1, rows[i]['last'] - rows[i]['first'] + 1))
-        rows[slot].update(order=i, prefix=total)
+def cut(weights, a, b, target):
+    while a < b:
+        mid = (a + b) // 2
+        if weights[mid] < target:
+            a = mid + 1
+        else:
+            b = mid
+    return a
+
+
+def quadrants(weights, ratios, lo, hi, turn):
+    """Unequal, rotated quadrant budgets over prefix weights; every item lands in exactly one."""
+    n = min(4, hi - lo)
+    cursor, fraction = lo, 0.0
+    for i in range(n):
+        fraction += ratios[i]
+        limit = hi - (n - i - 1)
+        target = weights[lo] + fraction * (weights[hi] - weights[lo])
+        end = hi if i == n - 1 else max(cursor + 1, min(limit, cut(weights, cursor, hi, target)))
+        q = (i + turn) % 4
+        yield cursor, end, q % 2, q // 2
+        cursor = end
+
+
+def common_label(files, lo, hi):
+    a, b = files[lo]['path'], files[hi - 1]['path']
+    prefix = os.path.commonprefix([a, b])
+    return prefix[:prefix.rindex('/') + 1] if '/' in prefix else 'source'
+
+
+def file_tree(files):
+    weights = [0.0]
+    for f in files:
+        weights.append(weights[-1] + 1 + math.sqrt(len(f['lines'])))
+
+    def make(x, y, size, lo, hi, depth):
+        if hi - lo == 1:
+            f = files[lo]
+            node = {'x': x, 'y': y, 'size': size, 'kind': HOLLOW if f['symbols'] is None else FILE, 'depth': depth, 'children': [], **f['row']}
+            if f['symbols'] is not None:
+                inset = size * 0.025
+                node['children'] = [scope(f, x + inset, y + inset, size - 2 * inset, f['symbols'])]
+            return node
+        label = common_label(files, lo, hi)
+        turn = (seed(files[lo]['path']) ^ (hi - lo)) % 4
+        children = [make(x + qx * size / 2, y + qy * size / 2, size / 2, a, b, depth + 1)
+                    for a, b, qx, qy in quadrants(weights, (0.07, 0.15, 0.29, 0.49), lo, hi, turn)]
+        return {'x': x, 'y': y, 'size': size, 'kind': BRANCH, 'depth': depth, 'children': children, 'label': label, 'group': group(label)}
+
+    return make(0.0, 0.0, 1.0, 0, len(files), 0)
+
+
+def scope(f, x, y, size, symbols):
+    """One file's nested symbols: the same weighted packing, named scopes inset inside their symbol."""
+    count = len(f['lines'])
+    items = sorted(symbols, key=lambda s: (span(s, f['path'], count)[0], s['name']))
+    weights = [0.0]
+    for s in items:
+        first, last = span(s, f['path'], count)
+        weights.append(weights[-1] + math.sqrt(last - first + 1))
+
+    def pack(x, y, size, lo, hi):
+        base = {'x': x, 'y': y, 'size': size, 'group': f['row']['group'], 'path': f['path'], 'file': f['row']['file']}
+        if hi == lo:
+            return {**base, 'kind': EMPTY, 'children': [], 'seed': seed(f['path'])}
+        if hi - lo == 1:
+            s = items[lo]
+            first, last = span(s, f['path'], count)
+            inner = s.get('children', [])
+            children = [scope(f, x + size * 0.08, y + size * 0.08, size * 0.84, inner)] if inner else []
+            return {**base, 'kind': SCOPE if inner else LEAF, 'children': children, 'lsp': s['kind'], 'first': first, 'last': last,
+                    'mass': last - first + 1, 'seed': seed(s['name']), 'label': s['name'], **preview(f['lines'], first, last)}
+        children = [pack(x + qx * size / 2, y + qy * size / 2, size / 2, a, b)
+                    for a, b, qx, qy in quadrants(weights, (0.10, 0.18, 0.29, 0.43), lo, hi, seed(items[lo]['name']) % 4)]
+        return {**base, 'kind': PACK, 'children': children}
+
+    return pack(x, y, size, 0, len(items))
+
+
+def preview(lines, first, last):
+    rows = [line.replace('\t', '    ')[:132] for line in lines[first - 1:min(last, first + 2)]]
+    return {'l' + str(i): rows[i] if i < len(rows) else '' for i in range(3)}
+
+
+def table_rows(root):
+    """Breadth-first rows: a node's children are contiguous and follow it."""
+    rows, pending = [], [(root, 0, 0)]
+    while pending:
+        following = []
+        for node, parent, owner in pending:
+            i = len(rows)
+            owner = i if node['kind'] <= HOLLOW else owner
+            rows.append({'parent': parent, 'owner': owner, **node})
+            following.extend((child, i, owner) for child in node['children'])
+        pending = following
+    cursor = 1
+    for row in rows:
+        row['child'], row['count'] = cursor, len(row.pop('children'))
+        cursor += row['count']
+    return rows
 
 
 def escape(value):
     return str(value).replace('\\', '\\\\').replace('\t', '\\t').replace('\n', '\\n').replace('\r', '\\r')
 
 
-def write_table(path, rows):
+def write_table(path, columns, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = '\t'.join(name + ':' + kind for name, kind in COLUMNS) + '\n'
-    text += ''.join('\t'.join(escape(row[name]) for name, _ in COLUMNS) + '\n' for row in rows)
+    text = '\t'.join(name + ':' + kind for name, kind in columns) + '\n'
+    text += ''.join('\t'.join(escape(row.get(name, 0 if kind == 'int' else '')) for name, kind in columns) + '\n' for row in rows)
     temporary = path.with_suffix(path.suffix + '.tmp')
     temporary.write_text(text, encoding='utf-8')
     temporary.replace(path)
@@ -195,17 +287,17 @@ def main():
     cache = args.cache or root / '_out/source_atlas/symbols'
     cache.mkdir(parents=True, exist_ok=True)
     version = subprocess.check_output([args.lsp, '--version'], text=True).strip()
-    rows = []
     lsp = None
-    files = sorted(sources(root))
+    files = []
     hits = 0
     try:
-        for file in files:
+        found = sorted(sources(root), key=lambda p: p.relative_to(root).as_posix())
+        for file in found:
             path = file.relative_to(root).as_posix()
             raw = file.read_bytes()
             text = raw.decode('utf-8')
             lines = text.splitlines()
-            symbols = []
+            symbols = None
             if file.suffix == '.rs':
                 key = digest(version.encode() + b'\0' + raw)
                 saved = cache / (key + '.json')
@@ -214,19 +306,26 @@ def main():
                     hits += 1
                 else:
                     if lsp is None:
-                        lsp = Lsp(args.lsp, root, args.timeout)
+                        lsp = Lsp(args.lsp, root, [f for f in found if f.suffix == '.rs'], args.timeout)
                     symbols = lsp.symbols(file, text)
                     temporary = saved.with_suffix('.tmp')
                     temporary.write_text(json.dumps(symbols, ensure_ascii=False), encoding='utf-8')
                     temporary.replace(saved)
-            row = len(rows)
-            rows.append({'parent': -1, 'first': 1, 'last': max(1, len(lines)), 'kind': 0, 'group': group(path), 'seed': seed(path), 'label': file.name, 'path': path, 'signature': lines[0].strip() if lines else '', 'depth': 0, 'leaf': int(not symbols)})
-            rows_for(rows, row, symbols, path, lines, 1)
-        if not rows:
+            profile = [0] * 32
+            for n, line in enumerate(lines):
+                profile[n % 32] = max(profile[n % 32], min(120, len(line)))
+            name = file.name
+            row = {'group': group(path), 'file': len(files), 'first': 1, 'last': max(1, len(lines)), 'bytes': len(raw), 'label': name,
+                   'tag': name if len(name) <= 26 else name[:23] + '...', 'chars': min(26, len(name)), 'path': path, **preview(lines, 1, len(lines))}
+            files.append({'path': path, 'lines': lines, 'symbols': symbols, 'profile': profile, 'row': row})
+        if not files:
             raise ValueError('no source files found')
-        layout_columns(rows)
-        write_table(output, rows)
-        print(f'{len(files)} files, {len(rows) - len(files)} symbols, {hits} cache hits -> {output}')
+        rows = table_rows(file_tree(files))
+        write_table(output, COLUMNS, rows)
+        # Function marks read their file's 32-bin line-length profile: row = file * 32 + bin.
+        write_table(output.with_name('profile.tsv'), [('width', 'int')], [{'width': w} for f in files for w in f['profile']])
+        symbols = sum(row['kind'] in (SCOPE, LEAF) for row in rows)
+        print(f'{len(files)} files, {symbols} symbols, {len(rows)} nodes, {hits} cache hits -> {output}')
     finally:
         if lsp is not None:
             lsp.close()
