@@ -101,10 +101,13 @@ fn main() {
 // including changing hover/zoom, rather than the CPU reference render command.
 fn full_table_budget() {
     if !common::gpu() { return; }
-    for sketch in ["source_atlas", "source_netwerk"] { full_table_frames(sketch); }
+    // every sketch is timed before any is judged, so one slow frame does not hide the others' numbers
+    let slow: Vec<String> = ["source_atlas", "source_netwerk", "source_ledger"].into_iter().flat_map(full_table_frames).collect();
+    assert!(slow.is_empty(), "full table exceeded a 60 Hz frame budget: {slow:?}");
 }
 
-fn full_table_frames(sketch: &str) {
+fn full_table_frames(sketch: &str) -> Vec<String> {
+    let mut slow = Vec::new();
     let path = format!("{}/../../sketches/{sketch}.rays", env!("CARGO_MANIFEST_DIR"));
     let (_, doc) = web_export::web_export::load(&path);
     let doc = doc.unwrap_or_else(|ds| panic!("generate the table with tools/source_atlas_index: {ds:?}"));
@@ -133,9 +136,10 @@ fn full_table_frames(sketch: &str) {
         let milliseconds = start.elapsed().as_secs_f64() * 1000. / 32.;
         let after = wg::image_stats(&ws).0;
         println!("{sketch} 1440x1000, moving={moving}: {milliseconds:.3} ms/frame, payload readback {} B/frame", (after.payload_readback_bytes - before.payload_readback_bytes) / 32);
-        assert!(milliseconds < 16.7, "{sketch}: full table exceeded a 60 Hz frame budget: {milliseconds:.3} ms");
+        if milliseconds >= 16.7 { slow.push(format!("{sketch} moving={moving}: {milliseconds:.3} ms")); }
         assert_eq!(after.buffer_creations, before.buffer_creations, "moving={moving}: warm GPU buffer allocation");
     }
     canvas::destroy(&c).unwrap();
     wg::close(&ws);
+    slow
 }

@@ -28,8 +28,8 @@ file's nested symbol field (the same packing over `sqrt(span)`, a named scope in
 symbol). The layout is a transliteration of the OCaml `build` and `symbol_layout`; `x`, `y`, `size`
 are world units. `kind` is 0 branch, 1 file, 2 unindexed file, 3 packing node, 4 scope, 5 leaf
 symbol, 6 empty file. `crate` is a row of `crates.tsv` (the directory of the nearest `Cargo.toml`):
-its extent on the sheet, the corner of its longest file, its files, lines and name, and its `rank` by
-lines. A leaf's `cell` is its place in its crate's reading order, one cell skipped between files; a
+its extent on the sheet, the corner of its longest file, its files, lines, name and capital `title`,
+and its `rank` by lines. A leaf's `cell` is its place in its crate's reading order, one cell skipped between files; a
 file's `top` is the lines of the longer files of its crate. `profile.tsv` has two 32-bin line-length
 profiles a file, row `file * 32 + bin`: `width` hashes a line to its number modulo 32 and keeps the
 longest, `mean` cuts the file into 32 slices from first line to last and keeps each slice's mean.
@@ -79,7 +79,10 @@ moving every frame (measured under heavy unrelated load; the full-table case enf
 
 ## Sister sketches
 
-Four more sketches read the same tables; the atlas itself is unchanged.
+Four more sketches read the same tables; the atlas itself is unchanged. Each is a sheet in fixed
+units (a square of 1000, or 1000 by 1300 and 1000 by 1280) drawn as large as the window allows, with
+its lettering set through `draw/text :font :align :tracking` in the faces of `crates/rays/fonts`.
+None has an inspector: the sheet is the whole window.
 
 ### Netwerk
 
@@ -87,25 +90,36 @@ Four more sketches read the same tables; the atlas itself is unchanged.
 cargo run -p rays_bin -- sketches/source_netwerk.rays
 ```
 
-`sketches/source_netwerk.rays` is the atlas as a white map sheet, with the same tree, camera and
-picking. Per frame, device kernels project every node (its collapsed
-point or scope mark), every branch (the diagonal from a parent's centre in the file tree, straight
-lines between symbols), one square a leaf and the survey grid. A leaf's square is centred in its cell
-and its side is `0.2 + 0.62 sqrt(span / 70)` of the cell's, the span capped at 70 lines; its hue is
-its crate's (a golden-angle step a crate, drifting 70 degrees across the crate's extent), pale for a
-short span. The grid has 64 lines across a sheet 768 points wide and four times as many each time
-the scale quadruples; the same lines carry on as ticks outside the neatline, every fourth numbered in
-hex. Two lattices of slots are bounded by the screen, not by the table: at 16 points a slot looks up
-the leaf under its lattice point by descending the tree (the leaf's first lattice point owns it) and
-rules a function's square in paper from the `width` profile; at 180 points the same lookup names files.
-Crate names sit on the corner of the crate's longest file below five times. Picking is that same
-descent, once. Marks have no alpha, so a fading mark is mixed into the paper; the art's clip is flat
-paper drawn over its margins. A still camera reads nothing back; a moving one reads back the slot
-owners (about 19 KB a frame at 1440 by 1000).
-The keys are the atlas's, plus `C`, which changes the inks: the crate's hue; cobalt source and vermilion
-tests; blue short spans to orange long ones. The art window fills the frame and the title, the scale,
-the survey numbers and the inspector sit in the sheet's four margins. `netwerk_overview.png` and
-`netwerk_zoom.png` are its views.
+The atlas as a printed map sheet, with the same tree, camera and picking. The art is a square with
+the world in it; title, scale, the files, symbols and crates, and hex survey numbers on all four sides
+sit in the margins. Per frame, device kernels project every node (its collapsed point or scope mark),
+every branch (the diagonal from a parent's centre in the file tree, straight lines between symbols),
+one square a leaf and the survey grid. A leaf's square is centred in its cell and its side is
+`0.2 + 0.62 sqrt(span / 70)` of the cell's, the span capped at 70 lines; from 4.5 points it is
+outlined in a darker ink of its hue. The inks are computed once, in OKLCH: lightness `0.9 - 0.3 r`
+and chroma `0.07 + 0.15 r` for a reach `r`, at the crate's hue (a golden-angle step a crate, drifting
+70 degrees across the crate's extent). `C` changes them: the crate's hue; cobalt source and vermilion
+tests; blue short spans to orange long ones; and the dark plate with its small dots. The grid has 64
+lines across the sheet and four times as many each time the zoom quadruples; the same lines carry on
+as ticks outside the frame. The 16 largest crates are named on the corner of their longest file, and
+a 180-point lattice of slots names files once they are that large. Marks have no alpha, so a fading
+mark is mixed into the paper; the art's clip is flat paper drawn over the margins. Nothing is read
+back. `netwerk_overview.png` and `netwerk_zoom.png` are its views.
+
+### Ledger
+
+```sh
+cargo run -p rays_bin -- sketches/source_ledger.rays
+```
+
+No tree: every leaf symbol in reading order, one tick each, like a page of text whose words are
+functions. A crate starts a new line and a file leaves a gap (the indexer's `cell`); a tick's height
+follows its span, a one-line symbol a dash; blues are a function, a method and a field, grey the rest,
+orange a span of 40 lines and red one over 70. The layout is computed once: the fewest columns at
+which every crate's lines fit the field, a cell nine fifths as tall as it is wide. A frame only
+projects the ticks through the camera, which is the atlas's: the wheel zooms about the point under
+the pointer and eases there, a drag pans, `R` or Space resets. `C` changes the inks to greys with the
+long spans in black and red. On the full table it draws in about 3 ms. `ledger.png` is its view.
 
 ### Strata
 
@@ -117,24 +131,10 @@ A news page: the 30 largest crates as columns hung from one line, largest first.
 tall as its line count (the longer files of a crate on top, the indexer's `top`), cut into 32 bands
 from its first line to its last and coloured by the `mean` profile: a band's place on the scale is its
 slice's rank among all slices, blue for the shortest lines of the repository through pale at the
-median to orange for the longest. Bands are snapped to whole points, so a file under 32 points keeps
-the bands that land on one. Hover a block to read its file in the notes band; `C` changes the inks to
-one blue. Nothing moves, so nothing is read back. `strata.png` is its view.
-
-### Ledger
-
-```sh
-cargo run -p rays_bin -- sketches/source_ledger.rays
-```
-
-No tree: every leaf symbol in reading order, one tick each, like a page of text whose words are
-functions. A crate starts a new line and a file leaves a gap (the indexer's `cell`); a tick's height
-follows its span, a one-line symbol a dash; blues are a function, a method and a field, grey the rest,
-orange a span of 40 lines and red one over 70. A tick's cell is a pitch wide and nine fifths as tall,
-in half points. The sheet opens at the largest pitch at which every crate's lines fit; Up, Down or a
-pinch change it a half point a step, the wheel scrolls what no longer fits, `R` or Space fits again
-and `C` changes the inks to black, greys and red. A cell of the ledger holds its leaf, so the tick
-under the pointer is two divisions and a lookup. `ledger.png` is its view.
+median to orange for the longest. Both inks of every band are computed once. Bands are snapped to
+whole points, so a file under 32 points keeps the bands that land on one. The longest file is called
+out, and the notes band counts what the four largest crates hold and what the page leaves out. `C`
+changes the inks to one blue. `strata.png` is its view.
 
 ### Contour
 
@@ -142,12 +142,12 @@ under the pointer is two divisions and a lookup. `ledger.png` is its view.
 cargo run -p rays_bin -- sketches/source_contour.rays
 ```
 
-The atlas set in type, one ink on white. An 84 by 84 lattice lies over the quadtree; a lattice point
+The atlas set in type, one ink on white. A 104 by 104 lattice lies over the quadtree; a lattice point
 inside a leaf's square (the atlas descent, once a point) carries a digit, the whole part of log2 of the
 symbol's span: 0 is one line, 5 is 32 to 63, 9 is 512 and up. A digit is 3 by 5 square marks from a
-bit mask, so it needs no font. The digits' mass, blurred by three seven-point box passes each way, is
-contoured at ten levels by marching squares, and a cell with three or four digits at its corners is
-left to them, so the lines fill the gaps the symbols leave. All of that is computed once; a frame only
-scales about 13,000 segments and 45,000 marks to the window. Hover a digit to read its symbol; `C`
-changes the inks (cobalt; cobalt with spans of 64 lines and more in vermilion; black). `contour.png`
-is its view.
+bit mask: `draw/text` is one run a call, and nine thousand runs would not lower. The digits' mass,
+blurred by three seven-point box passes each way, is contoured at ten levels by marching squares, and
+a cell with three or four digits at its corners is left to them, so the lines fill the gaps the
+symbols leave. All of that is computed once; a frame only scales the segments and marks to the window.
+`C` changes the inks (cobalt; cobalt with spans of 64 lines and more in vermilion; black).
+`contour.png` is its view.

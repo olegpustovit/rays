@@ -1,21 +1,40 @@
 ; Source Strata: every Rust file stacked by crate, a block as tall as its file is long and banded
 ; from first line to last by the mean length of the lines there. A news page over the Source Atlas
-; tables: the largest crates hang from one line, ordered by size.
+; tables: the 30 largest crates hang from one line, ordered by size.
 ; Generate first: tools/source_atlas_index
 ; Run: cargo run -p rays_bin -- sketches/source_strata.rays
-; Hover a block to read its file, C changes the inks, S saves _out/source-strata.png, Escape quits.
+; C changes the inks, S saves _out/source-strata.png, Escape quits.
 (workspace source_strata
   (graph data :context host (table/load "../_out/source_atlas/atlas.tsv"))
   (graph crates :context host (table/load "../_out/source_atlas/crates.tsv"))
   (graph profile :context host (table/load "../_out/source_atlas/profile.tsv"))
 
-  ; The page: up to 30 columns hang from `top`; a line of source is `k` points.
-  (defn page :context value [(w : float) (h : float) (tallest : float) (crates : float)]
-    (let* [height (max 64.0 (- h 432.0))
-           columns (max 1.0 (min crates (min 30.0 (floor (/ (- w 136.0) 26.0)))))]
-      {:left 96.0 :top 300.0 :height height :columns columns :pitch (/ (- w 136.0) columns) :k (/ height tallest)}))
+  ; The page is 1000 by 1280 units, as large as the window allows: [x y u], `u` points a unit.
+  (defn page :context value [(w : float) (h : float)]
+    (let* [u (min (/ w 1000.0) (/ h 1280.0))] [(* (- w (* 1000.0 u)) 0.5) (* (- h (* 1280.0 u)) 0.5) u]))
 
-  ; Static selections: computed once, never per frame.
+  ; An OKLCH colour as sRGB, clipped to the gamut: lightness, chroma, hue in degrees.
+  (defn gamma :context value [(x : float)]
+    (let* [v (max 0.0 (min 1.0 x))] (if (<= v 0.0031308) (* 12.92 v) (- (* 1.055 (pow v 0.4166667)) 0.055))))
+  (defn oklch :context value [(l : float) (c : float) (h : float)]
+    (let* [a (* c (cos (* h 0.01745329))) b (* c (sin (* h 0.01745329)))
+           l1 (+ (+ l (* 0.3963377774 a)) (* 0.2158037573 b))
+           m1 (- (- l (* 0.1055613458 a)) (* 0.0638541728 b))
+           s1 (- (- l (* 0.0894841775 a)) (* 1.2914855480 b))
+           l3 (* (* l1 l1) l1) m3 (* (* m1 m1) m1) s3 (* (* s1 s1) s1)]
+      [(gamma (+ (- (* 4.0767416621 l3) (* 3.3077115913 m3)) (* 0.2309699292 s3)))
+       (gamma (- (- (* 2.6097574011 m3) (* 1.2684380046 l3)) (* 0.3413193965 s3)))
+       (gamma (- (- (* 1.7076147010 s3) (* 0.0041960863 l3)) (* 0.7034186147 m3)))]))
+
+  ; A band's colour at `heat`, -1 to 1: blue for short lines through pale to orange for long
+  ; ones, or one blue from pale to deep.
+  (defn shade :context value [(palette : int) (heat : float)]
+    (let* [deep (* 0.5 (+ heat 1.0)) blue (= palette 1)]
+      (oklch (if blue (- 0.94 (* 0.56 deep)) (- 0.93 (* 0.45 (abs heat))))
+             (if blue (+ 0.03 (* 0.16 deep)) (+ 0.015 (* 0.15 (abs heat))))
+             (if blue 264.0 (if (< heat 0.0) 252.0 55.0)))))
+
+  ; Static selections and both inks of every band: computed once, never per frame.
   (graph field :context host
     (let* [d (ref data) crate (ref crates) mean (get (ref profile) :mean)
            ids (array/range (array/count d.kind) :type int)
@@ -27,175 +46,162 @@
            crate_lines (exact (map (fn [(c : int)] (array/nth crate.lines c)) crate_ids))
            order (array/grade widths)
            rank (array/scatter_add order (array/range n :type int) n)
-           low (float (array/nth mean (array/nth order (int/div (int/mul n 5) 100))))
-           mid (float (array/nth mean (array/nth order (int/div n 2))))
-           high (float (array/nth mean (array/nth order (int/div (int/mul n 95) 100))))
-           bands (array/range (int/mul (array/count files) 32) :type int)]
-      {:files files :low low :mid mid :high high
-       ; A band's place on the scale is its slice's rank among all slices: -1 the shortest lines of
-       ; the repository, 0 the median, 1 the longest. Equal slices take neighbouring ranks.
-       :heat (exact (map (fn [(j : int)]
-                           (let* [file (array/nth d.file (array/nth files (int/div j 32)))]
-                             (- (/ (* 2.0 (float (array/nth rank (int/add (int/mul file 32) (int/mod j 32))))) (float n)) 1.0)))
-                         bands))
+           bands (array/range (int/mul (array/count files) 32) :type int)
+           ; A band's place on the scale is its slice's rank among all slices: -1 the shortest lines of
+           ; the repository, 0 the median, 1 the longest. Equal slices take neighbouring ranks.
+           heat (exact (map (fn [(j : int)]
+                              (let* [file (array/nth d.file (array/nth files (int/div j 32)))]
+                                (- (/ (* 2.0 (float (array/nth rank (int/add (int/mul file 32) (int/mod j 32))))) (float n)) 1.0)))
+                            bands))
+           longest (array/nth (array/grade (exact (map (fn [(i : int)] (array/nth d.last i)) files)) :descending true) 0)]
+      {:files files
+       :low (float (array/nth mean (array/nth order (int/div (int/mul n 5) 100))))
+       :mid (float (array/nth mean (array/nth order (int/div n 2))))
+       :high (float (array/nth mean (array/nth order (int/div (int/mul n 95) 100))))
+       :warm (exact (map (fn [(j : int)] (shade 0 (array/nth heat j))) bands))
+       :blue (exact (map (fn [(j : int)] (shade 1 (array/nth heat j))) bands))
        :by_rank (array/grade (exact (map (fn [(c : int)] (array/nth crate.rank c)) crate_ids)))
-       :longest (array/nth (array/grade (exact (map (fn [(i : int)] (array/nth d.last i)) files)) :descending true) 0)
+       :longest longest
+       ; the crates the longest file is longer than
+       :smaller (sum [c crate_ids] (if (< (array/nth crate.lines c) (array/nth d.last (array/nth files longest))) 1 0))
        :tallest (float (array/max crate_lines))
-       :lines (array/sum crate_lines)}))
+       :lines (int (array/sum crate_lines))}))
 
   (graph view :context host
-    (let* [d (ref data) crate (ref crates) f (ref field)
-           files f.files
-           p (page (float (frame/width)) (float (frame/height)) f.tallest (float (array/count crate.rank)))]
-      (state [old {:hover -1 :palette 0 :key false}]
-        (let* [px (pointer/x) py (pointer/y)
-               column (floor (/ (- px p.left) p.pitch))
-               within (- (- px p.left) (* column p.pitch))
-               line (/ (- py p.top) p.k)
-               inside (and (and (>= px p.left) (< column p.columns)) (and (and (>= within 3.0) (< within (- p.pitch 3.0))) (>= line 0.0)))
-               ; The file under the pointer: the one of that column's crate whose lines hold it.
-               hover (if inside
-                         (int/sub (sum [k (array/range (array/count files) :type int)]
-                                    (let* [i (array/nth files k) top (float (array/nth d.top i))]
-                                      (if (and (= (float (array/nth crate.rank (array/nth d.crate i))) column)
-                                               (and (>= line top) (< line (+ top (float (array/nth d.last i))))))
-                                          (int/add k 1) 0)))
-                                  1)
-                         -1)
-               key (key/down "c")]
-          {:hover hover :palette (if (and key (not old.key)) (int/sub 1 old.palette) old.palette) :key key}))))
+    (state [old {:palette 0 :key false}]
+      (let* [key (key/down "c")] {:palette (if (and key (not old.key)) (int/sub 1 old.palette) old.palette) :key key})))
 
-  ; A band's colour: blue for short lines through pale to orange for long ones, or one blue.
-  (defn shade :context value [(palette : int) (heat : float)]
-    (if (= palette 1)
-        (+ [0.870 0.900 0.970] (* (- [0.110 0.250 0.680] [0.870 0.900 0.970]) (* 0.5 (+ heat 1.0))))
-        (+ [0.930 0.930 0.910] (* (- (if (< heat 0.0) [0.170 0.370 0.620] [0.860 0.430 0.130]) [0.930 0.930 0.910]) (abs heat)))))
+  ; A count with its thousands apart, up to 999,999,999.
+  (defn grouped :context value [(n : int)]
+    (let* [pad (fn [(v : int)] (str (if (< v 100) "0" "") (if (< v 10) "0" "") v))]
+      (cond (< n 1000) (str n)
+            (< n 1000000) (str (int/div n 1000) "," (pad (int/mod n 1000)))
+            :else (str (int/div n 1000000) "," (pad (int/mod (int/div n 1000) 1000)) "," (pad (int/mod n 1000))))))
 
-  ; A file's column and vertical extent on the page as [x top height].
-  (defn block :context value [(left : float) (top : float) (pitch : float) (k : float) (rank : int) (above : int) (lines : int)]
-    [(+ (+ left (* (float rank) pitch)) 3.0) (+ top (* (float above) k)) (* (float lines) k)])
+  ; A file's block in page units as [x top height]: columns of `874 / 30` units from 86, hung from 372.
+  (defn block :context value [(k : float) (rank : int) (above : int) (lines : int)]
+    [(+ (+ 86.0 (* (float rank) 29.1333333)) 3.0) (+ 372.0 (* (float above) k)) (* (float lines) k)])
+
+  ; The page's lettering, set from a baseline in page units; `s` is [x y u].
+  (defn sans :context draw [(s : vec3) (x : float) (y : float) (label : text) (size : float) (align : text) (bold : bool) (mute : bool)]
+    (draw/text [(+ s.x (* s.z x)) (+ s.y (* s.z (- y (* size 1.02)))) 0.0] label :size (int (max 5.0 (round (* s.z size))))
+               :color (if mute "#666d74" "#15181c") :font (if bold "plex-condensed-semibold" "plex-condensed") :align align :tracking (if bold 0.08 0.0)))
+  (defn serif :context draw [(s : vec3) (x : float) (y : float) (label : text) (size : float) (align : text) (bold : bool) (mute : bool)]
+    (draw/text [(+ s.x (* s.z x)) (+ s.y (* s.z (- y (* size 0.98)))) 0.0] label :size (int (max 5.0 (round (* s.z size))))
+               :color (if mute "#666d74" "#15181c") :font (if bold "newsreader-semibold" "newsreader") :align align))
+  (defn figure :context draw [(s : vec3) (x : float) (y : float) (label : text) (align : text)]
+    (draw/text [(+ s.x (* s.z x)) (+ s.y (* s.z (- y 9.0))) 0.0] label :size (int (max 5.0 (round (* s.z 9.0)))) :color "#666d74" :font "plex-mono" :align align))
 
   (graph picture :context draw
     (let* [d (ref data) crate (ref crates) f (ref field) view (ref view)
            files f.files
            w (float (frame/width)) h (float (frame/height))
-           p (page w h f.tallest (float (array/count crate.rank)))
+           s (page w h)
+           u s.z
            palette view.palette
-           left p.left top p.top pitch p.pitch k p.k columns p.columns
+           count (array/count crate.rank)
+           columns (int (min 30 count))
+           k (/ 700.0 f.tallest)
 
-           ; 32 bands a file, snapped to whole points: a file under 32 points keeps the bands that land on one.
+           ; 32 bands a file; a band under a point still paints the points its edges land on.
            bands (array/range (int/mul (array/count files) 32) :type int)
            band_at (map (fn [(j : int)]
                           (let* [i (array/nth files (int/div j 32))
-                                 q (block left top pitch k (array/nth crate.rank (array/nth d.crate i)) (array/nth d.top i) (array/nth d.last i))]
-                            [q.x (floor (+ q.y (/ (* q.z (float (int/mod j 32))) 32.0))) 0.0])) bands)
+                                 q (block k (array/nth crate.rank (array/nth d.crate i)) (array/nth d.top i) (array/nth d.last i))]
+                            [(+ s.x (* u q.x)) (floor (+ s.y (* u (+ q.y (/ (* q.z (float (int/mod j 32))) 32.0))))) 0.0])) bands)
            band_size (map (fn [(j : int)]
                             (let* [i (array/nth files (int/div j 32)) rank (array/nth crate.rank (array/nth d.crate i))
-                                   q (block left top pitch k rank (array/nth d.top i) (array/nth d.last i))
+                                   q (block k rank (array/nth d.top i) (array/nth d.last i))
                                    b (float (int/mod j 32))]
-                              (if (< (float rank) columns)
-                                  [(- pitch 6.0) (- (floor (+ q.y (/ (* q.z (+ b 1.0)) 32.0))) (floor (+ q.y (/ (* q.z b) 32.0)))) 0.0]
+                              (if (< rank columns)
+                                  [(* u 23.1333333) (- (floor (+ s.y (* u (+ q.y (/ (* q.z (+ b 1.0)) 32.0))))) (floor (+ s.y (* u (+ q.y (/ (* q.z b) 32.0)))))) 0.0]
                                   [0.0 0.0 0.0]))) bands)
-           band_fill (map (fn [(j : int)] (shade palette (array/nth f.heat j))) bands)
+           ; (adding a colour types the stored one: a record's array is untyped where it is read)
+           band_fill (map (fn [(j : int)] (+ [0.0 0.0 0.0] (case palette 1 (array/nth f.blue j) :else (array/nth f.warm j)))) bands)
            ; A point of paper under every file four points or taller keeps the files apart.
            file_ids (array/range (array/count files) :type int)
            gap_at (map (fn [(j : int)]
-                         (let* [i (array/nth files j)
-                                q (block left top pitch k (array/nth crate.rank (array/nth d.crate i)) (array/nth d.top i) (array/nth d.last i))]
-                           [q.x (- (floor (+ q.y q.z)) 1.0) 0.0])) file_ids)
+                         (let* [i (array/nth files j) q (block k (array/nth crate.rank (array/nth d.crate i)) (array/nth d.top i) (array/nth d.last i))]
+                           [(+ s.x (* u q.x)) (- (floor (+ s.y (* u (+ q.y q.z)))) 1.0) 0.0])) file_ids)
            gap_size (map (fn [(j : int)]
                            (let* [i (array/nth files j) rank (array/nth crate.rank (array/nth d.crate i))]
-                             (if (and (< (float rank) columns) (>= (* (float (array/nth d.last i)) k) 4.0)) [(- pitch 6.0) 1.0 0.0] [0.0 0.0 0.0]))) file_ids)
+                             (if (and (< rank columns) (>= (* (* (float (array/nth d.last i)) k) u) 4.0)) [(* u 23.1333333) 1.0 0.0] [0.0 0.0 0.0]))) file_ids)
 
-           legend_ids (array/range 60 :type int)
-           legend_at (map (fn [(j : int)] [(+ 56.0 (* (float j) 2.0)) 180.0 0.0]) legend_ids)
-           legend_fill (map (fn [(j : int)] (shade palette (- (/ (float j) 29.5) 1.0))) legend_ids)
+           legend_ids (array/range 120 :type int)
+           legend_at (map (fn [(j : int)] [(+ s.x (* u (+ 58.0 (float j)))) (+ s.y (* u 262.0)) 0.0]) legend_ids)
+           legend_fill (map (fn [(j : int)] (shade palette (- (/ (float j) 59.5) 1.0))) legend_ids)
 
-           ; Column heads read upward; the scale counts lines.
+           name (fn [(rank : int)] (array/nth crate.name (array/nth f.by_rank (int (min rank (int/sub count 1))))))
+           ; Column heads read upward, the four largest in bold; the scale counts lines.
            heads (for [c (range 30)]
-                   (let* [on (< (float c) columns)
-                          name (array/nth crate.name (array/nth f.by_rank (int (min c (int/sub (array/count crate.rank) 1)))))]
-                     (draw/translate [(+ (+ left (* (+ (float c) 0.5) pitch)) (if on -6.0 100000.0)) (- top 10.0) 0.0]
-                                     (draw/rotate -1.5707963 (draw/text [0 0 0] name :size 10 :color "#15181c")))))
+                   (draw/translate [(+ s.x (* u (+ (+ 86.0 (* (+ (float c) 0.5) 29.1333333)) (if (< c columns) -4.5 100000.0)))) (+ s.y (* u 362.0)) 0.0]
+                                   (draw/rotate -1.5707963
+                                                (draw/text [0 0 0] (name c) :size (int (max 5.0 (round (* u 10.5)))) :color "#15181c"
+                                                           :font (if (< c 4) "plex-condensed-semibold" "plex-condensed")))))
            scale (for [n (range 8)]
-                   (let* [lines (int/mul n 10000) y (floor (+ top (* (float lines) k))) on (<= (float lines) (+ f.tallest 2000.0))]
+                   (let* [lines (int/mul n 10000) on (<= (float lines) f.tallest) y (+ 372.0 (* (float lines) k))]
                      (draw/merge
-                       (draw/rect [(- left 8.0) y 0.0] (if on [(+ (- (- w 40.0) left) 8.0) 1.0 0.0] [0.0 0.0 0.0]) :fill "#d5dadd")
-                       (draw/text [(- (- left 14.0) (* (if (= n 0) 1.0 5.0) 5.53)) (- y 5.0) 0.0] (if on (str lines) "") :size 9 :color "#666d74"))))
+                       (draw/rect [(+ s.x (* u 78.0)) (floor (+ s.y (* u y))) 0.0] (if on [(* u 882.0) 1.0 0.0] [0.0 0.0 0.0]) :fill "#d5dadd")
+                       (figure s 74.0 (+ y 3.0) (if on (grouped lines) "") "right"))))
 
-           ; The longest file is called out beside its block.
+           ; The longest file is called out: a leader from its block, across and down to its note.
            long (array/nth files f.longest)
-           lq (block left top pitch k (array/nth crate.rank (array/nth d.crate long)) (array/nth d.top long) (array/nth d.last long))
-           lx (+ lq.x (- pitch 6.0)) ly (floor (+ lq.y (* lq.z 0.5)))
-           ; its leader runs down its own column to the clear page under it
-           note (floor (max (+ (+ top (* (float (array/nth crate.lines (array/nth d.crate long))) k)) 22.0) (+ top (* p.height 0.55))))
+           lq (block k (array/nth crate.rank (array/nth d.crate long)) (array/nth d.top long) (array/nth d.last long))
+           ax (+ lq.x 29.1333333) ay (+ lq.y (* lq.z 0.5))
            callout (draw/merge
-                     (draw/rect [(- (floor (- lx (* pitch 0.5))) 3.0) ly 0.0] [1.0 (- note ly) 0.0] :fill "#15181c")
-                     (draw/rect [(- (floor (- lx (* pitch 0.5))) 3.0) note 0.0] [14.0 1.0 0.0] :fill "#15181c")
-                     (draw/text [(+ (floor (- lx (* pitch 0.5))) 17.0) (- note 14.0) 0.0] (array/nth d.tag long) :size 12 :color "#15181c")
-                     (draw/text [(+ (floor (- lx (* pitch 0.5))) 17.0) (+ note 4.0) 0.0] (str "The longest file: " (array/nth d.last long) " lines.") :size 11 :color "#666d74"))
+                     (draw/rect [(+ s.x (* u (+ lq.x 23.1333333))) (floor (+ s.y (* u ay))) 0.0] [(* u 32.0) 1.0 0.0] :fill "#15181c")
+                     (draw/rect [(floor (+ s.x (* u (+ ax 26.0)))) (floor (+ s.y (* u ay))) 0.0] [1.0 (* u 300.0) 0.0] :fill "#15181c")
+                     (draw/rect [(+ s.x (* u (+ ax 30.0))) (+ s.y (* u (+ ay 246.0))) 0.0] [(* u 170.0) (* u 48.0) 0.0] :fill "#fdfdfc")
+                     (sans s (+ ax 34.0) (+ ay 260.0) (array/nth d.label long) 12.0 "left" true false)
+                     (sans s (+ ax 34.0) (+ ay 274.0) (str "The longest file: " (grouped (array/nth d.last long)) " lines,") 11.0 "left" false true)
+                     (sans s (+ ax 34.0) (+ ay 287.0) (str "taller than " f.smaller " whole crates.") 11.0 "left" false true))
+           last_lines (array/nth crate.lines (array/nth f.by_rank (int/sub columns 1)))
+           aside (+ (+ 372.0 (* (float last_lines) k)) 266.0)
 
-           hover view.hover
-           inspected (>= hover 0)
-           h0 (array/nth files (int (max 0 hover)))
-           hq (block left top pitch k (array/nth crate.rank (array/nth d.crate h0)) (array/nth d.top h0) (array/nth d.last h0))
-           crate_ids (array/range (array/count crate.rank) :type int)
+           crate_ids (array/range count :type int)
            four (sum [c crate_ids] (if (< (array/nth crate.rank c) 4) (array/nth crate.lines c) 0))
-           shown (sum [c crate_ids] (if (< (float (array/nth crate.rank c)) columns) (array/nth crate.lines c) 0))
+           shown (sum [c crate_ids] (if (< (array/nth crate.rank c) columns) (array/nth crate.lines c) 0))
            rest (int/sub f.lines shown)
-           percent (fn [(part : int)] (int (round (/ (* 100.0 (float part)) (float f.lines)))))
-           note_y (- h 104.0) third (/ (- w 124.0) 3.0)
-           name (fn [(rank : int)] (array/nth crate.name (array/nth f.by_rank (int (min rank (int/sub (array/count crate.rank) 1))))))
-           notes (draw/merge
-                   (draw/text [62 note_y 0] (str "Four crates, " (percent four) "% of the lines") :size 13 :color "#15181c")
-                   (draw/text [62 (+ note_y 24.0) 0] (str (name 0) ", " (name 1) ", " (name 2) ", " (name 3) " hold") :size 10 :color "#666d74")
-                   (draw/text [62 (+ note_y 39.0) 0] (str four " of " f.lines " lines.") :size 10 :color "#666d74")
-                   (draw/text [(+ 62.0 third) note_y 0] (str "Median slice: " (int f.mid) " characters") :size 13 :color "#15181c")
-                   (draw/text [(+ 62.0 third) (+ note_y 24.0) 0] "A slice is a 32nd of a file, top to bottom." :size 10 :color "#666d74")
-                   (draw/text [(+ 62.0 third) (+ note_y 39.0) 0] (str "5% average under " (int f.low) " characters, 5% over " (int f.high) ".") :size 10 :color "#666d74")
-                   (draw/text [(+ 62.0 (* third 2.0)) note_y 0] "Not shown" :size 13 :color "#15181c")
-                   (draw/text [(+ 62.0 (* third 2.0)) (+ note_y 24.0) 0]
-                              (str "The other " (int/sub (array/count crate.rank) (int columns)) " crates hold " rest " lines,") :size 10 :color "#666d74")
-                   (draw/text [(+ 62.0 (* third 2.0)) (+ note_y 39.0) 0] (str (percent rest) "% of the total. C changes the inks.") :size 10 :color "#666d74"))
-           inspector (draw/merge
-                       (draw/text [62 note_y 0] (array/nth d.path h0) :size 11 :color "#e0432b")
-                       (draw/text [62 (+ note_y 20.0) 0] (str (array/nth d.label h0) "  /  " (array/nth d.last h0) " LINES") :size 15 :color "#15181c")
-                       (draw/text [62 (+ note_y 46.0) 0]
-                                  (str (array/nth crate.name (array/nth d.crate h0)) "  /  " (array/nth d.bytes h0) " BYTES") :size 11 :color "#666d74")
-                       (for [n (range 3)]
-                         (draw/text [(+ 62.0 third) (+ note_y (* (float n) 18.0)) 0]
-                                    (str (int/add n 1) "   " (case n 0 (array/nth d.l0 h0) 1 (array/nth d.l1 h0) :else (array/nth d.l2 h0)))
-                                    :size 12 :color "#15181c")))]
+           percent (fn [(part : int)] (int (round (/ (* 100.0 (float part)) (float f.lines)))))]
       (draw/merge
         (draw/background "#fdfdfc")
-        (draw/text [40 22 0] "SOURCE ATLAS" :size 10 :color "#15181c")
-        (draw/text [(- (- w 40.0) (* 6.14 (+ 25.0 (cond (< f.lines 100000) 5.0 (< f.lines 1000000) 6.0 :else 7.0)))) 22 0]
-                   (str "PLATE 003  /  " f.lines " LINES OF RUST") :size 10 :color "#666d74")
-        (draw/rect [40 44 0] [(- w 80.0) 1.0 0] :fill "#d5dadd")
-        (draw/text [(- (* w 0.5) 270.2) 58 0] "Where lines run long" :size 44 :color "#15181c")
-        (draw/text [(- (* w 0.5) 331.3) 118 0] "Every Rust file in the repository, stacked by crate. A block is as tall as its file" :size 13 :color "#666d74")
-        (draw/text [(- (* w 0.5) 307.3) 138 0] "is long, and banded from first line to last by the length of the lines there." :size 13 :color "#666d74")
-        (draw/text [56 166 0] "MEAN LINE LENGTH, CHARACTERS" :size 9 :color "#15181c")
-        (draw/rects legend_at [2.0 8.0 0.0] :fill legend_fill)
-        (draw/text [59 192 0] (str (int f.low)) :size 9 :color "#666d74")
-        (draw/text [110 192 0] (str (int f.mid)) :size 9 :color "#666d74")
-        (draw/text [163 192 0] (str (int f.high)) :size 9 :color "#666d74")
-        (draw/text [(- left 39.0) (- top 22.0) 0] "LINES" :size 9 :color "#666d74")
+        (sans s 40.0 34.0 "SOURCE ATLAS" 10.0 "left" true false)
+        (sans s 960.0 34.0 (str "PLATE 003  /  " (grouped f.lines) " LINES OF RUST") 10.0 "right" false true)
+        (draw/rect [(+ s.x (* u 40.0)) (+ s.y (* u 44.0)) 0.0] [(* u 920.0) (max 1.0 (* u 1.5)) 0.0] :fill "#dfe5ea")
+        (sans s 500.0 84.0 "RAYS AND PXUI" 12.0 "center" true false)
+        (draw/text [(+ s.x (* u 500.0)) (+ s.y (* u 92.0)) 0.0] "Where lines run long" :size (int (round (* u 60.0))) :color "#15181c" :font "newsreader-display" :align "center")
+        (serif s 500.0 178.0 "Every Rust file in the repository, stacked by crate. A block is as tall as" 15.0 "center" false true)
+        (serif s 500.0 198.0 "its file is long, and banded from first line to last by the length of the" 15.0 "center" false true)
+        (serif s 500.0 218.0 "lines there. The warmer the band, the wider the code." 15.0 "center" false true)
+        (sans s 58.0 254.0 "LINE LENGTH (CHARACTERS)" 9.0 "left" true false)
+        (draw/rects legend_at [(* u 1.2) (* u 8.0) 0.0] :fill legend_fill)
+        (figure s 64.0 282.0 (str (int f.low)) "center")
+        (figure s 118.0 282.0 (str (int f.mid)) "center")
+        (figure s 172.0 282.0 (str (int f.high)) "center")
+        (sans s 74.0 360.0 "LINES" 8.5 "right" true true)
         scale
         (draw/rects band_at band_size :fill band_fill)
         (draw/rects gap_at gap_size :fill "#fdfdfc")
         heads
         callout
-        (draw/rect [(floor hq.x) (floor hq.y) 0.0] (if inspected [(- pitch 6.0) (max 2.0 (floor hq.z)) 0.0] [0.0 0.0 0.0]) :stroke "#e0432b")
-        (draw/rect [40 (- h 122.0) 0] [(- w 80.0) 84.0 0] :fill "#eceff1")
-        (draw/translate [0 (if inspected 100000.0 0.0) 0] notes)
-        (draw/translate [0 (if inspected 0.0 100000.0) 0] inspector)
-        (draw/text [40 (- h 26.0) 0] "Source: every .rs file of Rays and PXUI, cut into 32 slices; rust-analyzer names the crates' symbols." :size 10 :color "#666d74")
-        (draw/text [(- w 114.0) (- h 26.0) 0] "RAYS GRAPHIC" :size 10 :color "#15181c"))))
+        (sans s 960.0 aside "Short columns are small crates," 11.0 "right" false true)
+        (sans s 960.0 (+ aside 13.0) "not missing data." 11.0 "right" false true)
+        (draw/rect [(+ s.x (* u 40.0)) (+ s.y (* u 1112.0)) 0.0] [(* u 920.0) (* u 120.0) 0.0] :fill "#eceff1")
+        (serif s 62.0 1146.0 (str "Four crates, " (percent four) "% of the lines") 16.0 "left" true false)
+        (sans s 62.0 1170.0 (str (name 0) ", " (name 1) ", " (name 2) ", " (name 3) " hold") 12.0 "left" false true)
+        (sans s 62.0 1186.0 (str (grouped four) " of " (grouped f.lines) " lines.") 12.0 "left" false true)
+        (serif s 368.0 1146.0 (str "Median slice: " (int f.mid) " characters") 16.0 "left" true false)
+        (sans s 368.0 1170.0 "The mean line of a slice. 5% of slices" 12.0 "left" false true)
+        (sans s 368.0 1186.0 (str "average under " (int f.low) ", 5% over " (int f.high) ".") 12.0 "left" false true)
+        (serif s 674.0 1146.0 "Not shown" 16.0 "left" true false)
+        (sans s 674.0 1170.0 (str "The other " (int/sub count columns) " crates hold " (grouped rest) " lines,") 12.0 "left" false true)
+        (sans s 674.0 1186.0 (str (percent rest) "% of the total.") 12.0 "left" false true)
+        (sans s 40.0 1256.0 "Source: every .rs file in Rays and PXUI, cut into 32 slices, mean line length of each." 10.0 "left" false true)
+        (sans s 960.0 1256.0 "RAYS GRAPHIC" 10.0 "right" true false))))
 
   (graph actions :context host
     (list (host/save_png "_out/source-strata.png" (key/down "s"))
           (host/quit (key/down "escape"))))
 
-  (graph settings :context settings (settings/config :title "Rays / Source Strata" :width 1280 :height 1000))
+  (graph settings :context settings (settings/config :title "Rays / Source Strata" :width 780 :height 1000))
   (graph editor :context editor (ui/workspace (ui/canvas (ref picture) :focus true) :effects (ref actions))))

@@ -1,10 +1,10 @@
-; Source Netwerk: the Source Atlas as a white map sheet. Every source file once in an asymmetric
-; quadtree, each indexed file a nested field of its real rust-analyzer symbols. A leaf is a square whose
-; side follows its source span; its hue is its crate; branches run on the diagonal.
+; Source Netwerk: the Source Atlas as a printed map sheet. Every source file once in an asymmetric
+; quadtree, each indexed file a nested field of its real rust-analyzer symbols. A leaf is a square
+; whose side follows its source span; its hue is its crate; branches run on the diagonal.
 ; Generate first: tools/source_atlas_index
 ; Run: cargo run -p rays_bin -- sketches/source_netwerk.rays
 ; Scroll zooms at the pointer, click dives, drag pans, right click steps back, R or Space resets,
-; C changes the inks, T shows cells, H or Tab hides the margins' text, S saves
+; C changes the inks (the last is the dark plate), T shows cells, H or Tab hides the margins' text, S saves
 ; _out/source-netwerk.png, Escape quits.
 (workspace source_netwerk
   (graph data :context host (table/load "../_out/source_atlas/atlas.tsv"))
@@ -13,14 +13,30 @@
   (defn smooth :context value [(low : float) (high : float) (v : float)]
     (let* [u (max 0.0 (min 1.0 (/ (- v low) (- high low))))] (* (* u u) (- 3.0 (* 2.0 u)))))
 
-  ; The sheet: the art window inside four margins, the world square centred in it. The kernels
-  ; below spell the window's left and top edge as 56 and 78.
+  ; The sheet is a square of 1000 units, as large as the window allows: `u` points a unit, its
+  ; corner at (x, y). The art is the square from (72, 78), 856 units a side, and holds the world.
   (defn plate :context value [(w : float) (h : float)]
-    (let* [right (- w 56.0) bottom (- h 104.0)]
-      {:left 56.0 :top 78.0 :right right :bottom bottom
-       :side (max 64.0 (- (min (- right 56.0) (- bottom 78.0)) 40.0))
-       :ox (* (+ 56.0 right) 0.5) :oy (* (+ 78.0 bottom) 0.5)}))
+    (let* [u (/ (min w h) 1000.0) x (* (- w (* 1000.0 u)) 0.5) y (* (- h (* 1000.0 u)) 0.5)]
+      {:u u :x x :y y :left (+ x (* 72.0 u)) :top (+ y (* 78.0 u)) :right (+ x (* 928.0 u)) :bottom (+ y (* 934.0 u))
+       :side (* 856.0 u) :ox (+ x (* 500.0 u)) :oy (+ y (* 506.0 u))}))
 
+  ; An OKLCH colour as sRGB, clipped to the gamut: lightness, chroma, hue in degrees.
+  (defn gamma :context value [(x : float)]
+    (let* [v (max 0.0 (min 1.0 x))] (if (<= v 0.0031308) (* 12.92 v) (- (* 1.055 (pow v 0.4166667)) 0.055))))
+  (defn oklch :context value [(l : float) (c : float) (h : float)]
+    (let* [a (* c (cos (* h 0.01745329))) b (* c (sin (* h 0.01745329)))
+           l1 (+ (+ l (* 0.3963377774 a)) (* 0.2158037573 b))
+           m1 (- (- l (* 0.1055613458 a)) (* 0.0638541728 b))
+           s1 (- (- l (* 0.0894841775 a)) (* 1.2914855480 b))
+           l3 (* (* l1 l1) l1) m3 (* (* m1 m1) m1) s3 (* (* s1 s1) s1)]
+      [(gamma (+ (- (* 4.0767416621 l3) (* 3.3077115913 m3)) (* 0.2309699292 s3)))
+       (gamma (- (- (* 2.6097574011 m3) (* 1.2684380046 l3)) (* 0.3413193965 s3)))
+       (gamma (- (- (* 1.7076147010 s3) (* 0.0041960863 l3)) (* 0.7034186147 m3)))]))
+
+  ; A leaf's square fills this share of the side its cell leaves it: the root of its span, capped
+  ; at 70 lines. Its heat runs from -1 at one line to 1 at about 512.
+  (defn reach :context value [(mass : int)] (sqrt (/ (min 70.0 (max 1.0 (float mass))) 70.0)))
+  (defn heat :context value [(mass : int)] (max -1.0 (min 1.0 (- (/ (log (max 1.0 (float mass))) 3.1191624) 1.0))))
   ; Child `k` of a node when it exists and holds the world point, else -1. A cell is [x y size kind].
   (defn holds :context value [(cell : (array vec4)) (first : int) (n : int) (k : int) (wx : float) (wy : float)]
     (let* [at (int (min (int/sub (array/count cell) 1) (int/add first k)))
@@ -50,7 +66,16 @@
   ; Static selections and weights: computed once, never per frame.
   (graph field :context host
     (let* [d (ref data) crate (ref crates)
-           ids (array/range (array/count d.kind) :type int)]
+           ids (array/range (array/count d.kind) :type int)
+           ; The crate's hue in degrees: a golden-angle step a crate, drifting 70 degrees across the
+           ; crate's own extent.
+           hue (exact (map (fn [(i : int)]
+                             (let* [c (array/nth d.crate i)
+                                    x0 (array/nth crate.x0 c) y0 (array/nth crate.y0 c)
+                                    half (* (array/nth d.size i) 0.5)
+                                    drift (* 0.5 (+ (/ (- (+ (array/nth d.x i) half) x0) (max 0.000001 (- (array/nth crate.x1 c) x0)))
+                                                    (/ (- (+ (array/nth d.y i) half) y0) (max 0.000001 (- (array/nth crate.y1 c) y0)))))]
+                               (mod (+ (+ (* (float c) 137.508) 343.0) (* drift 70.0)) 360.0))) ids))]
       {:cell (exact (map (fn [(i : int)] [(array/nth d.x i) (array/nth d.y i) (array/nth d.size i) (float (array/nth d.kind i))]) ids))
        :tiles (filter (fn [(i : int)] (< (array/nth d.kind i) 3)) ids)
        :twigs (filter (fn [(i : int)] (and (>= (array/nth d.kind i) 3) (= (array/nth d.kind (array/nth d.parent i)) 3))) ids)
@@ -58,15 +83,16 @@
        :hex (map (fn [(v : int)] (str (nibble (int/div v 16)) (nibble v))) (array/range 256 :type int))
        :leaves (filter (fn [(i : int)] (= (array/nth d.kind i) 5)) ids)
        ; A leaf's square fills this share of its cell's side: the root of its span, capped at 70 lines.
-       :reach (exact (map (fn [(i : int)] (sqrt (/ (min 70.0 (max 1.0 (float (array/nth d.mass i)))) 70.0))) ids))
-       ; Hue is the crate, a golden-angle step apart, drifting 70 degrees across the crate's own extent.
-       :hue (exact (map (fn [(i : int)]
-                          (let* [c (array/nth d.crate i)
-                                 x0 (array/nth crate.x0 c) y0 (array/nth crate.y0 c)
-                                 half (* (array/nth d.size i) 0.5)
-                                 drift (* 0.5 (+ (/ (- (+ (array/nth d.x i) half) x0) (max 0.000001 (- (array/nth crate.x1 c) x0)))
-                                             (/ (- (+ (array/nth d.y i) half) y0) (max 0.000001 (- (array/nth crate.y1 c) y0)))))]
-                            (/ (mod (+ (+ (* (float c) 137.508) 343.0) (* drift 70.0)) 360.0) 360.0))) ids))
+       :reach (exact (map (fn [(i : int)] (reach (array/nth d.mass i))) ids))
+       ; A leaf's three inks, fill then edge, as the proposal drew them in OKLCH. 0: the crate's hue.
+       ; 1: cobalt for source, vermilion for tests. 2: blue for a short span through to orange.
+       :fill0 (exact (map (fn [(i : int)] (let* [r (reach (array/nth d.mass i))] (oklch (- 0.9 (* 0.3 r)) (+ 0.07 (* 0.15 r)) (array/nth hue i)))) ids))
+       :edge0 (exact (map (fn [(i : int)] (oklch 0.45 0.14 (array/nth hue i))) ids))
+       :fill1 (exact (map (fn [(i : int)] (let* [r (reach (array/nth d.mass i))] (oklch (- 0.88 (* 0.42 r)) (+ 0.06 (* 0.16 r)) (if (= (array/nth d.group i) 1) 32.0 262.0)))) ids))
+       :edge1 (exact (map (fn [(i : int)] (oklch 0.4 0.16 (if (= (array/nth d.group i) 1) 32.0 262.0))) ids))
+       :fill2 (exact (map (fn [(i : int)] (let* [h (heat (array/nth d.mass i))] (oklch (- 0.93 (* 0.45 (abs h))) (+ 0.015 (* 0.15 (abs h))) (if (< h 0.0) 252.0 55.0)))) ids))
+       :edge2 (exact (map (fn [(i : int)] (oklch 0.42 0.1 (if (< (heat (array/nth d.mass i)) 0.0) 252.0 55.0))) ids))
+       :by_rank (array/grade (exact (map (fn [(c : int)] (int (array/nth crate.rank c))) (array/range (array/count crate.rank) :type int))))
        ; The zoom at which the smallest symbol fills most of the plate.
        :deepest (max 180.0 (/ 0.7 (array/min (exact (map (fn [(i : int)] (array/nth d.size i)) ids)))))
        :files (sum [i ids] (if (or (= (array/nth d.kind i) 1) (= (array/nth d.kind i) 2)) 1 0))
@@ -81,7 +107,7 @@
            input (frame/input)]
       (state [old {:cx center.x :cy center.y :zoom initial_zoom :tx center.x :ty center.y :tz initial_zoom
                    :px 0.0 :py 0.0 :press false :press_x 0.0 :press_y 0.0 :dragged false
-                   :ui true :cells false :palette 0 :key_ui false :key_cells false :key_palette false :hover -1}]
+                   :ui true :cells false :palette 0 :key_ui false :key_cells false :key_palette false}]
         (let* [px (pointer/x) py (pointer/y)
                inside (and (and (>= px p.left) (< px p.right)) (and (>= py p.top) (< py p.bottom)))
                extent (* p.side old.zoom)
@@ -143,37 +169,18 @@
                         (/ 1.0 (+ (/ 1.0 old.zoom) (* (- (/ 1.0 tz) (/ 1.0 old.zoom)) ease))))
                near (* 0.00001 (/ 1.0 tz))
                cx (if (< (abs (- tx old.cx)) near) tx (+ old.cx (* (- tx old.cx) ease)))
-               cy (if (< (abs (- ty old.cy)) near) ty (+ old.cy (* (- ty old.cy) ease)))
-               still (and (and (= px old.px) (= py old.py)) (and (= zoom old.zoom) (and (= cx old.cx) (= cy old.cy))))
-               found (if (or still (not inside)) [0.0 0.0 0.0]
-                         (locate cell d.child d.count
-                                 (+ cx (/ (- px p.ox) (* p.side zoom))) (+ cy (/ (- py p.oy) (* p.side zoom)))))
-               hover (cond (not inside) -1 still old.hover :else (int found.y))]
+               cy (if (< (abs (- ty old.cy)) near) ty (+ old.cy (* (- ty old.cy) ease)))]
           {:cx cx :cy cy :zoom zoom :tx tx :ty ty :tz tz :px px :py py
            :press (and press (not released)) :press_x press_x :press_y press_y :dragged (and dragged (not released))
            :ui (if (and key_ui (not old.key_ui)) (not old.ui) old.ui)
            :cells (if (and key_cells (not old.key_cells)) (not old.cells) old.cells)
-           :palette (if (and key_palette (not old.key_palette)) (int/mod (int/add old.palette 1) 3) old.palette)
-           :key_ui key_ui :key_cells key_cells :key_palette key_palette :hover hover}))))
-
-  ; A hue as a colour: three cosines a third of a turn apart.
-  (defn wheel :context value [(h : float)]
-    [(+ 0.5 (* 0.5 (cos (* 6.2831853 h)))) (+ 0.5 (* 0.5 (cos (* 6.2831853 (- h 0.3333333)))))
-     (+ 0.5 (* 0.5 (cos (* 6.2831853 (- h 0.6666667)))))])
-
-  ; A leaf's colour in one of three inks: 0 the crate's hue, 1 cobalt for source and vermilion for
-  ; tests, 2 blue for short spans through to orange for long ones. Small leaves are pale.
-  (defn dye :context value [(palette : int) (hue : float) (reach : float) (group : int)]
-    (let* [heat (- (* reach 2.0) 1.0)
-           pure (case palette 1 (if (= group 1) [0.878 0.263 0.169] [0.114 0.306 0.847])
-                              2 (if (< heat 0.0) [0.184 0.435 0.710] [0.910 0.490 0.180])
-                              :else (* (wheel hue) (- 1.0 (* 0.2 reach))))
-           strength (if (= palette 2) (+ 0.12 (* 0.88 (abs heat))) (+ 0.3 (* 0.7 reach)))]
-      (+ [0.93 0.94 0.94] (* (- pure [0.93 0.94 0.94]) strength))))
+           :palette (if (and key_palette (not old.key_palette)) (int/mod (int/add old.palette 1) 4) old.palette)
+           :key_ui key_ui :key_cells key_cells :key_palette key_palette}))))
 
   ; Marks have no alpha: a faded mark is mixed into the paper it sits on.
-  (defn ink :context value [(color : vec3) (alpha : float)]
-    (+ [0.992 0.992 0.988] (* (- color [0.992 0.992 0.988]) alpha)))
+  (defn paper :context value [(dark : bool)] (if dark [0.059 0.075 0.071] [0.992 0.992 0.988]))
+  (defn ink :context value [(dark : bool) (color : vec3) (alpha : float)]
+    (+ (paper dark) (* (- color (paper dark)) alpha)))
 
   ; A node on screen as [x y side]. The camera is [x offset, y offset, points per world unit] about
   ; `pin`, a nearby world point that 32-bit floats hold exactly: subtracting it first keeps deep
@@ -181,9 +188,9 @@
   (defn spot :context value [(cell : (array vec4)) (cam : vec3) (pin : vec3) (i : int)]
     (let* [c (array/nth cell i)] [(+ cam.x (* (- c.x pin.x) cam.z)) (+ cam.y (* (- c.y pin.y) cam.z)) (* c.z cam.z)]))
 
-  ; Inside the art window: `lim` is its right and bottom edge.
-  (defn seen :context value [(q : vec3) (lim : vec3)]
-    (and (and (>= (+ q.x q.z) 56.0) (>= (+ q.y q.z) 78.0)) (and (< q.x lim.x) (< q.y lim.y))))
+  ; Inside the art: `lim` is its left, top, right and bottom edge.
+  (defn seen :context value [(q : vec3) (lim : vec4)]
+    (and (and (>= (+ q.x q.z) lim.x) (>= (+ q.y q.z) lim.y)) (and (< q.x lim.z) (< q.y lim.w))))
 
   ; A collapsed node crossfades into its children between 2 and 4 points, so a node's opacity is
   ; the product over its ancestors. ponytail: three ancestors; a chain of more than three
@@ -204,7 +211,7 @@
                :else (- 1.0 (smooth 2.0 4.0 q.z))))))
 
   ; A cell outline: unindexed files are always hollow; with cells shown, every file and branch.
-  (defn frame-alpha :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (pin : vec3) (lim : vec3) (cells : bool) (i : int)]
+  (defn frame-alpha :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (pin : vec3) (lim : vec4) (cells : bool) (i : int)]
     (let* [q (spot cell cam pin i) c (array/nth cell i)]
       (if (and (seen q lim) (cond (= c.w 2.0) (>= q.z 2.0) (= c.w 1.0) (and cells (> q.z 90.0)) :else (and cells (> q.z 12.0))))
           (chain parent cell cam i) 0.0)))
@@ -212,7 +219,7 @@
   ; One of the two segments of file-tree node `i` as [x1 y1 x2 y2]: the diagonal from its parent's
   ; centre to its own (a quadrant's centre lies on its parent's diagonal), or with cells shown a
   ; branch's corner tick.
-  (defn limb :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (pin : vec3) (lim : vec3) (cells : bool) (i : int) (part : int)]
+  (defn limb :context value [(parent : (array int)) (cell : (array vec4)) (cam : vec3) (pin : vec3) (lim : vec4) (cells : bool) (i : int) (part : int)]
     (let* [c (spot cell cam pin i) q (spot cell cam pin (array/nth parent i)) kind (array/nth cell i)
            x (+ (floor c.x) 2.0) y (+ (floor c.y) 2.0)
            reach (min 15.0 (floor (/ (max 1.0 (floor c.z)) 8.0)))]
@@ -224,70 +231,70 @@
               [(+ q.x (* q.z 0.5)) (+ q.y (* q.z 0.5)) (+ c.x (* c.z 0.5)) (+ c.y (* c.z 0.5))]
               [0.0 0.0 0.0 0.0]))))
 
-  ; A leaf's square on screen as [x y side]: centred in its cell, never under a point.
-  (defn square :context value [(q : vec3) (reach : float)]
-    (let* [side (max 1.0 (* q.z (+ 0.2 (* 0.62 reach))))]
+  ; A leaf's square on screen as [x y side]: centred in its cell, never under 1.3 points.
+  (defn square :context value [(q : vec3) (reach : float) (dark : bool)]
+    (let* [side (max 1.3 (* (* q.z (+ 0.2 (* 0.62 reach))) (if dark 0.45 1.0)))]
       [(- (+ q.x (* q.z 0.5)) (* side 0.5)) (- (+ q.y (* q.z 0.5)) (* side 0.5)) side]))
 
   ; Lattice columns (or rows) of a `pitch`-point grid over `extent` points, one past each edge.
   (defn across :context value [(extent : float) (pitch : float)]
     (int/add (int (ceil (/ extent pitch))) 2))
 
-  ; The cell that owns each lattice point of two screen grids, or -1: leaves over 16 points for
-  ; their rules, then files over 180 points for labels. A cell larger than the pitch always holds
-  ; a lattice point and its first one owns it, so a bounded number of slots replaces a per-frame
-  ; filter over every node. `view` is [centre x, centre y, scale].
+  ; The file that owns each point of a 180-point screen lattice, or -1, for the file names. A cell
+  ; larger than the pitch always holds a lattice point and its first one owns it, so a bounded
+  ; number of slots replaces a per-frame filter over every node. `view` is [centre x, centre y, scale].
   (defn slots :context value [(cell : (array vec4)) (child : (array int)) (count : (array int))
-                              (view : vec3) (mid : vec3) (lim : vec3)]
-    (let* [n16 (int/mul (across (- lim.x 56.0) 16.0) (across (- lim.y 78.0) 16.0))
-           n180 (int/mul (across (- lim.x 56.0) 180.0) (across (- lim.y 78.0) 180.0))]
+                              (view : vec3) (mid : vec3) (lim : vec4)]
+    (let* [cols (across (- lim.z lim.x) 180.0)]
       (map (fn [(k : int)]
-             (let* [files (>= k n16)
-                    pitch (if files 180.0 16.0)
-                    slot (if files (int/sub k n16) k)
-                    cols (across (- lim.x 56.0) pitch)
-                    col (int/mod slot cols) row (int/div slot cols)
-                    wx (+ view.x (/ (- (+ 56.0 (* (float col) pitch)) mid.x) view.z))
-                    wy (+ view.y (/ (- (+ 78.0 (* (float row) pitch)) mid.y) view.z))
-                    before_x (+ view.x (/ (- (+ 56.0 (* (float (int/sub col 1)) pitch)) mid.x) view.z))
-                    before_y (+ view.y (/ (- (+ 78.0 (* (float (int/sub row 1)) pitch)) mid.y) view.z))
+             (let* [col (int/mod k cols) row (int/div k cols)
+                    wx (+ view.x (/ (- (+ lim.x (* (float col) 180.0)) mid.x) view.z))
+                    wy (+ view.y (/ (- (+ lim.y (* (float row) 180.0)) mid.y) view.z))
+                    before_x (+ view.x (/ (- (+ lim.x (* (float (int/sub col 1)) 180.0)) mid.x) view.z))
+                    before_y (+ view.y (/ (- (+ lim.y (* (float (int/sub row 1)) 180.0)) mid.y) view.z))
                     found (locate cell child count wx wy)
-                    n (int (if files found.z found.x))
+                    n (int found.z)
                     c (array/nth cell n)]
-               (if (and (and (if files (or (= c.w 1.0) (= c.w 2.0)) (= c.w 5.0)) (> (* c.z view.z) pitch))
+               (if (and (and (or (= c.w 1.0) (= c.w 2.0)) (> (* c.z view.z) 180.0))
                         (and (or (= col 0) (< before_x c.x)) (or (= row 0) (< before_y c.y))))
                    n -1)))
-           (array/range (int/add n16 n180) :type int))))
+           (array/range (int/mul cols (across (- lim.w lim.y) 180.0)) :type int))))
 
-  (defn kind-name :context value [(kind : int) (lsp : int)]
-    (case kind 1 "FILE" 2 "UNINDEXED FILE"
-      :else (case lsp 1 "FILE" 2 "MODULE" 3 "NAMESPACE" 4 "PACKAGE" 5 "CLASS" 6 "METHOD" 7 "PROPERTY" 8 "FIELD"
-                      9 "CONSTRUCTOR" 10 "ENUM" 11 "INTERFACE" 12 "FUNCTION" 13 "VARIABLE" 14 "CONSTANT" 15 "STRING"
-                      16 "NUMBER" 17 "BOOLEAN" 18 "ARRAY" 19 "OBJECT" 20 "KEY" 21 "NULL" 22 "ENUM MEMBER" 23 "STRUCT"
-                      24 "EVENT" 25 "OPERATOR" 26 "TYPE PARAMETER" :else "SYMBOL")))
+  ; A count with its thousands apart, up to 999,999,999.
+  (defn grouped :context value [(n : int)]
+    (let* [pad (fn [(v : int)] (str (if (< v 100) "0" "") (if (< v 10) "0" "") v))]
+      (cond (< n 1000) (str n)
+            (< n 1000000) (str (int/div n 1000) "," (pad (int/mod n 1000)))
+            :else (str (int/div n 1000000) "," (pad (int/mod (int/div n 1000) 1000)) "," (pad (int/mod n 1000))))))
+
+  ; The sheet's lettering, set from a baseline in sheet units; `s` is [x y u]. Caps are tracked.
+  (defn caps :context draw [(s : vec3) (x : float) (y : float) (label : text) (size : float) (align : text) (dark : bool)]
+    (draw/text [(+ s.x (* s.z x)) (+ s.y (* s.z (- y (* size 0.96)))) 0.0] label :size (int (max 5.0 (round (* s.z size))))
+               :color (if dark "#e1d8c0" "#15181c") :font "archivo-semibold" :align align :tracking 0.13))
 
   (graph picture :context draw
-    (let* [d (ref data) f (ref field) view (ref view) widths (get (ref profile) :width) crate (ref crates)
+    (let* [d (ref data) f (ref field) view (ref view) crate (ref crates)
            cell f.cell
            w (float (frame/width)) h (float (frame/height))
            p (plate w h)
+           u p.u s [p.x p.y p.u]
            scale (* p.side view.zoom)
            pin [(/ (round (* view.cx 1048576.0)) 1048576.0) (/ (round (* view.cy 1048576.0)) 1048576.0) 0.0]
            cam [(- p.ox (* (- view.cx pin.x) scale)) (- p.oy (* (- view.cy pin.y) scale)) scale]
-           lim [p.right p.bottom 0.0]
+           lim [p.left p.top p.right p.bottom]
            ids (array/range (array/count d.kind) :type int)
-           palette view.palette
+           palette view.palette dark (= palette 3)
 
-           ; The survey grid: 64 lines across a sheet 768 points wide, four times as many each time
-           ; the scale quadruples, so a line is 12 to 48 points from the next. Every fourth is firmer.
+           ; The survey grid: 64 lines across the sheet, four times as many each time the zoom
+           ; quadruples. Every fourth is firmer.
            world (spot cell cam pin 0)
-           level (max -1.0 (floor (/ (log (/ scale 768.0)) 1.3862944)))
+           level (max 0.0 (floor (/ (log (max 1.0 view.zoom)) 1.3862944)))
            pitch (/ scale (* 64.0 (pow 4.0 level)))
-           first_x (int (max 0.0 (ceil (/ (- 56.0 world.x) pitch))))
-           first_y (int (max 0.0 (ceil (/ (- 78.0 world.y) pitch))))
-           top (max 78.0 world.y) bottom (min p.bottom (+ world.y world.z))
-           left (max 56.0 world.x) right (min p.right (+ world.x world.z))
-           ; ponytail: 160 lines each way cover an art window up to about 1900 by 1900 points.
+           first_x (int (max 0.0 (ceil (/ (- p.left world.x) pitch))))
+           first_y (int (max 0.0 (ceil (/ (- p.top world.y) pitch))))
+           top (max p.top world.y) bottom (min p.bottom (+ world.y world.z))
+           left (max p.left world.x) right (min p.right (+ world.x world.z))
+           ; ponytail: 160 lines each way: 64 at rest, at most 256 across a zoomed window of a quarter.
            grid (array/range 320 :type int)
            grid_at (map (fn [(j : int)]
                           (let* [k (int/mod j 160)]
@@ -296,25 +303,29 @@
            grid_size (map (fn [(j : int)]
                             (let* [k (int/mod j 160)
                                    at (if (< j 160) (+ world.x (* (float (int/add first_x k)) pitch)) (+ world.y (* (float (int/add first_y k)) pitch)))
-                                   on (if (< j 160) (and (<= at right) (< at p.right)) (and (<= at bottom) (< at p.bottom)))]
+                                   on (if (< j 160) (<= at right) (<= at bottom))]
                               (if (and on (and (> bottom top) (> right left)))
                                   (if (< j 160) [1.0 (- bottom top) 0.0] [(- right left) 1.0 0.0])
                                   [0.0 0.0 0.0]))) grid)
            grid_fill (map (fn [(j : int)]
                             (if (= (int/mod (int/add (if (< j 160) first_x first_y) (int/mod j 160)) 4) 0)
-                                [0.835 0.855 0.867] [0.914 0.925 0.933])) grid)
-           ; The same lines carry on as ticks outside the neatline, long ones every fourth.
+                                (if dark [0.122 0.149 0.137] [0.835 0.855 0.867]) (if dark [0.086 0.110 0.102] [0.914 0.925 0.933]))) grid)
+           ; The same lines carry on as ticks outside the frame on all four sides, long ones every fourth.
+           ticks (array/range 640 :type int)
            tick_at (map (fn [(j : int)]
-                          (let* [k (int/mod j 160)
-                                 long (= (int/mod (int/add (if (< j 160) first_x first_y) k) 4) 0)]
-                            (if (< j 160) [(floor (+ world.x (* (float (int/add first_x k)) pitch))) (- 78.0 (if long 10.0 6.0)) 0.0]
-                                [(- 56.0 (if long 10.0 6.0)) (floor (+ world.y (* (float (int/add first_y k)) pitch))) 0.0]))) grid)
+                          (let* [side (int/div j 160) k (int/mod j 160) upright (< side 2)
+                                 long (= (int/mod (int/add (if upright first_x first_y) k) 4) 0)
+                                 length (* u (if long 7.0 3.0))
+                                 at (floor (+ (if upright world.x world.y) (* (float (int/add (if upright first_x first_y) k)) pitch)))]
+                            (case side 0 [at (- (- p.top (* 3.0 u)) length) 0.0] 1 [at (+ p.bottom (* 3.0 u)) 0.0]
+                                       2 [(- (- p.left (* 3.0 u)) length) at 0.0] :else [(+ p.right (* 3.0 u)) at 0.0]))) ticks)
            tick_size (map (fn [(j : int)]
-                            (let* [k (int/mod j 160)
-                                   long (= (int/mod (int/add (if (< j 160) first_x first_y) k) 4) 0)
-                                   at (if (< j 160) (+ world.x (* (float (int/add first_x k)) pitch)) (+ world.y (* (float (int/add first_y k)) pitch)))
-                                   on (if (< j 160) (and (<= at right) (< at p.right)) (and (<= at bottom) (< at p.bottom)))]
-                              (if on (if (< j 160) [1.0 (if long 7.0 3.0) 0.0] [(if long 7.0 3.0) 1.0 0.0]) [0.0 0.0 0.0]))) grid)
+                            (let* [side (int/div j 160) k (int/mod j 160) upright (< side 2)
+                                   long (= (int/mod (int/add (if upright first_x first_y) k) 4) 0)
+                                   length (* u (if long 7.0 3.0))
+                                   at (+ (if upright world.x world.y) (* (float (int/add (if upright first_x first_y) k)) pitch))
+                                   on (if upright (and (<= at right) (<= at p.right)) (and (<= at bottom) (<= at p.bottom)))]
+                              (if on (if upright [1.0 length 0.0] [length 1.0 0.0]) [0.0 0.0 0.0]))) ticks)
 
            ; Every node once: the point a collapsed node is, or a named scope's centre mark.
            node_at (map (fn [(i : int)]
@@ -325,8 +336,8 @@
                               (if (and (seen q lim) (> (node-alpha d.parent cell cam pin i) 0.004)) [side side 0.0] [0.0 0.0 0.0]))) ids)
            node_fill (map (fn [(i : int)]
                             (let* [q (spot cell cam pin i)]
-                              (ink (if (and (= (array/nth d.kind i) 4) (> q.z 8.0)) [0.082 0.094 0.110]
-                                       (dye palette (array/nth f.hue i) 0.6 (array/nth d.group i)))
+                              (ink dark (if (and (= (array/nth d.kind i) 4) (> q.z 8.0)) (if dark [0.882 0.847 0.753] [0.082 0.094 0.110])
+                                       (case palette 1 (array/nth f.edge1 i) 2 [0.365 0.396 0.424] 3 [0.659 0.694 0.690] :else (array/nth f.edge0 i)))
                                    (node-alpha d.parent cell cam pin i)))) ids)
 
            ; File-tree branches: the diagonal from a parent's centre; with cells shown, corner ticks.
@@ -337,9 +348,7 @@
            limb_color (map (fn [(j : int)]
                              (let* [parent (array/nth d.parent (array/nth tiles (int/div j 2)))
                                     q (spot cell cam pin parent)]
-                               (if view.cells [0.365 0.396 0.424]
-                                   (ink (if (< (array/nth d.depth parent) 2) [0.082 0.094 0.110] [0.227 0.255 0.282])
-                                        (smooth 10.0 18.0 q.z))))) limbs)
+                               (if view.cells [0.365 0.396 0.424] (ink dark (if dark [0.247 0.278 0.247] [0.227 0.255 0.282]) (smooth 10.0 18.0 q.z))))) limbs)
 
            ; Symbol branches: a packing node to each of its parts.
            twigs f.twigs
@@ -352,7 +361,7 @@
                             (if (and (> q.z 8.0) (seen q lim)) [(+ c.x (* c.z 0.5)) (+ c.y (* c.z 0.5)) 0.0] [0.0 0.0 0.0]))) twig_ids)
            twig_color (map (fn [(j : int)]
                              (let* [i (array/nth twigs j) q (spot cell cam pin (array/nth d.parent i))]
-                               (ink [0.560 0.590 0.615] (smooth 8.0 16.0 q.z)))) twig_ids)
+                               (ink dark (if dark [0.212 0.243 0.200] [0.560 0.590 0.615]) (smooth 8.0 16.0 q.z)))) twig_ids)
 
            ; Four one-point edges a cell: stroked rectangles are tessellated on the host.
            edges (array/range (int/mul (array/count tiles) 4) :type int)
@@ -371,8 +380,8 @@
            frame_color (map (fn [(j : int)]
                               (let* [i (array/nth tiles (int/div j 4))]
                                 (if (= (array/nth d.kind i) 0)
-                                    (if (= (int/mod (array/nth d.depth i) 2) 0) [0.560 0.590 0.615] [0.740 0.765 0.785])
-                                    (ink [0.365 0.396 0.424] (frame-alpha d.parent cell cam pin lim view.cells i))))) edges)
+                                    (if dark [0.212 0.243 0.200] (if (= (int/mod (array/nth d.depth i) 2) 0) [0.560 0.590 0.615] [0.740 0.765 0.785]))
+                                    (ink dark [0.365 0.396 0.424] (frame-alpha d.parent cell cam pin lim view.cells i))))) edges)
            tile_ids (array/range (array/count tiles) :type int)
            corner_at (map (fn [(j : int)]
                             (let* [q (spot cell cam pin (array/nth tiles j)) side (max 1.0 (floor q.z))]
@@ -381,172 +390,124 @@
                               (let* [i (array/nth tiles j) q (spot cell cam pin i)]
                                 (if (and (and view.cells (= (array/nth d.kind i) 0)) (and (> q.z 110.0) (seen q lim))) [2.0 2.0 0.0] [0.0 0.0 0.0]))) tile_ids)
 
-           ; One square a leaf.
+           ; One square a leaf: from 4.5 points a side it is its edge colour with the fill half a
+           ; point inside, as a print outlines its squares. The dark plate has no edges.
            leaves f.leaves
            leaf_ids (array/range (array/count leaves) :type int)
+           edge_at (map (fn [(j : int)]
+                          (let* [i (array/nth leaves j) e (square (spot cell cam pin i) (array/nth f.reach i) dark)] [e.x e.y 0.0])) leaf_ids)
+           edge_size (map (fn [(j : int)]
+                            (let* [i (array/nth leaves j) q (spot cell cam pin i) e (square q (array/nth f.reach i) dark)]
+                              (if (and (and (and (not dark) (> e.z 4.5)) (seen q lim)) (> (chain d.parent cell cam i) 0.004)) [e.z e.z 0.0] [0.0 0.0 0.0]))) leaf_ids)
+           edge_fill (map (fn [(j : int)]
+                            (let* [i (array/nth leaves j)]
+                              (ink dark (case palette 1 (array/nth f.edge1 i) 2 (array/nth f.edge2 i) :else (array/nth f.edge0 i)) (chain d.parent cell cam i)))) leaf_ids)
            leaf_at (map (fn [(j : int)]
-                          (let* [i (array/nth leaves j) s (square (spot cell cam pin i) (array/nth f.reach i))] [s.x s.y 0.0])) leaf_ids)
+                          (let* [i (array/nth leaves j) q (spot cell cam pin i) e (square q (array/nth f.reach i) dark)
+                                 inset (if (or dark (<= e.z 4.5)) 0.0 0.5)]
+                            [(+ e.x inset) (+ e.y inset) 0.0])) leaf_ids)
            leaf_size (map (fn [(j : int)]
-                            (let* [i (array/nth leaves j) q (spot cell cam pin i) s (square q (array/nth f.reach i))]
-                              (if (and (seen q lim) (> (chain d.parent cell cam i) 0.004)) [s.z s.z 0.0] [0.0 0.0 0.0]))) leaf_ids)
+                            (let* [i (array/nth leaves j) q (spot cell cam pin i) e (square q (array/nth f.reach i) dark)
+                                   side (if (or dark (<= e.z 4.5)) e.z (- e.z 1.0))]
+                              (if (and (seen q lim) (> (chain d.parent cell cam i) 0.004)) [side side 0.0] [0.0 0.0 0.0]))) leaf_ids)
            leaf_fill (map (fn [(j : int)]
                             (let* [i (array/nth leaves j)]
-                              (ink (dye palette (array/nth f.hue i) (array/nth f.reach i) (array/nth d.group i))
+                              (ink dark (case palette 1 (array/nth f.fill1 i) 2 (array/nth f.fill2 i)
+                                                      3 (if (> (array/nth f.reach i) 0.5) [0.882 0.847 0.753] [0.659 0.694 0.690])
+                                                      :else (array/nth f.fill0 i))
                                    (chain d.parent cell cam i)))) leaf_ids)
 
            eye [view.cx view.cy scale] mid [p.ox p.oy 0.0]
            owners (slots cell d.child d.count eye mid lim)
-           n16 (int/mul (across (- lim.x 56.0) 16.0) (across (- lim.y 78.0) 16.0))
-           n180 (int/sub (array/count owners) n16)
-
-           ; A function's square is ruled in paper, up to 12 lines from its file's line-length profile.
-           rules (array/range (int/mul n16 12) :type int)
-           rule_at (map (fn [(m : int)]
-                          (let* [i (int (max 0 (array/nth owners (int/div m 12))))
-                                 s (square (spot cell cam pin i) (array/nth f.reach i))
-                                 rows (float (min 12 (max 1 (array/nth d.mass i))))]
-                            [(+ s.x (* s.z 0.08)) (+ s.y (/ (* (+ (float (int/mod m 12)) 0.5) s.z) rows)) 0.0])) rules)
-           rule_size (map (fn [(m : int)]
-                            (let* [owner (array/nth owners (int/div m 12)) i (int (max 0 owner)) row (int/mod m 12)
-                                   q (spot cell cam pin i) s (square q (array/nth f.reach i))
-                                   width (array/nth widths (int/add (int/mul (array/nth d.file i) 32)
-                                                                    (int/mod (int/add (int/add (array/nth d.first i) 31) row) 32)))]
-                              (if (and (and (>= owner 0) (or (= (array/nth d.lsp i) 12) (= (array/nth d.lsp i) 6)))
-                                       (and (> q.z 24.0) (< row (min 12 (max 1 (array/nth d.mass i))))))
-                                  [(max 0.5 (/ (* (* s.z 0.84) (float width)) 120.0)) 1.0 0.0] [0.0 0.0 0.0]))) rules)
-           rule_fill (map (fn [(m : int)]
-                            (let* [i (int (max 0 (array/nth owners (int/div m 12)))) q (spot cell cam pin i)
-                                   own (dye palette (array/nth f.hue i) (array/nth f.reach i) (array/nth d.group i))]
-                              (+ own (* (- [0.992 0.992 0.988] own) (smooth 24.0 40.0 q.z))))) rules)
+           n180 (array/count owners)
 
            ; File names appear on cells over 180 points.
-           ; ponytail: 96 label slots cover an art area up to about 1900 by 1300 points.
-           labels (for [k (range 96)]
-                    (let* [slot (int/add n16 (int (min k (int/sub n180 1))))
+           ; ponytail: 64 label slots cover an art square up to about 1400 points a side.
+           labels (for [k (range 64)]
+                    (let* [slot (int (min k (int/sub n180 1)))
                            on (and (< k n180) (>= (array/nth owners slot) 0))
                            i (int (max 0 (array/nth owners slot)))
                            q (spot cell cam pin i) side (max 1.0 (floor q.z))]
                       (draw/merge
                         (draw/rect [(+ (floor q.x) 6.0) (+ (floor q.y) 6.0) 0.0]
-                                   (if on [(min (- side 12.0) (+ (* (float (array/nth d.chars i)) 7.0) 12.0)) 21.0 0.0] [0.0 0.0 0.0])
-                                   :fill "#fdfdfc")
-                        (draw/text [(+ (floor q.x) 11.0) (+ (floor q.y) 9.0) 0.0] (if on (array/nth d.tag i) "") :size 11 :color "#15181c"))))
-           ; Crate names sit on the corner of the crate's longest file until file names take over.
-           ; ponytail: 96 crates; the largest 16 at a glance, the rest from 1.6 times.
-           named (for [k (range 96)]
-                   (let* [c (int (min k (int/sub (array/count crate.rank) 1)))
+                                   (if on [(min (- side 12.0) (+ (* (float (array/nth d.chars i)) 6.2) 12.0)) 19.0 0.0] [0.0 0.0 0.0])
+                                   :fill (if dark "#0f1312" "#fdfdfc"))
+                        (draw/text [(+ (floor q.x) 11.0) (+ (floor q.y) 9.0) 0.0] (if on (array/nth d.tag i) "") :size 11 :color (if dark "#e1d8c0" "#15181c") :font "archivo-condensed-bold"))))
+           ; The 16 largest crates are named on the corner of their longest file, until file names take over.
+           named (for [k (range 16)]
+                   (let* [c (array/nth f.by_rank (int (min k (int/sub (array/count crate.rank) 1))))
                           x (floor (+ cam.x (* (- (array/nth crate.ax c) pin.x) scale)))
                           y (floor (+ cam.y (* (- (array/nth crate.ay c) pin.y) scale)))
                           on (and (and (< k (array/count crate.rank)) (< view.zoom 5.0))
-                                  (and (or (< (array/nth crate.rank c) 16) (> view.zoom 1.6))
-                                       (and (and (>= x 56.0) (>= y 78.0)) (and (< x (- p.right 60.0)) (< y (- p.bottom 14.0))))))]
+                                  (and (and (>= x p.left) (>= y p.top)) (and (< x (- p.right (* 60.0 u))) (< y (- p.bottom (* 14.0 u))))))]
                      (draw/merge
-                       (draw/rect [(+ x 3.0) (+ y 3.0) 0.0] (if on [(+ (* (float (array/nth crate.chars c)) 6.14) 8.0) 14.0 0.0] [0.0 0.0 0.0])
-                                  :fill "#fdfdfc")
-                       (draw/text [(+ x 7.0) (+ y 4.0) 0.0] (if on (array/nth crate.name c) "") :size 10 :color "#15181c"))))
+                       (draw/rect [(+ x (* 3.0 u)) (+ y (* 3.0 u)) 0.0]
+                                  (if on [(* u (+ (* (float (array/nth crate.chars c)) 5.3) 8.0)) (* 12.0 u) 0.0] [0.0 0.0 0.0]) :fill (if dark "#0f1312" "#fdfdfc"))
+                       (draw/text [(+ x (* 7.0 u)) (+ y (* 3.5 u)) 0.0] (if on (array/nth crate.title c) "")
+                                  :size (int (max 5.0 (round (* 8.5 u)))) :color (if dark "#e1d8c0" "#15181c") :font "archivo-condensed-bold" :tracking 0.08))))
 
-           hover view.hover
-           h0 (int (max 0 hover))
-           hq (spot cell cam pin h0)
-           kind (array/nth d.kind h0)
-           inspected (and (>= hover 0) (> kind 0))
            art (draw/merge
                  (draw/rects grid_at grid_size :fill grid_fill)
                  (draw/rects frame_at frame_size :fill frame_color)
-                 (draw/lines limb_from limb_to :color limb_color :width 1.0)
-                 (draw/lines twig_from twig_to :color twig_color :width 1.0)
+                 (draw/lines limb_from limb_to :color limb_color :width 0.6)
+                 (draw/lines twig_from twig_to :color twig_color :width 0.6)
                  (draw/rects node_at node_size :fill node_fill)
+                 (draw/rects edge_at edge_size :fill edge_fill)
                  (draw/rects leaf_at leaf_size :fill leaf_fill)
-                 (draw/rects rule_at rule_size :fill rule_fill)
                  (draw/rects corner_at corner_size :fill "#e0432b")
-                 (draw/rect [(floor world.x) (floor world.y) 0.0] [(floor world.z) (floor world.z) 0.0] :stroke "#15181c")
                  named
-                 labels
-                 (draw/rect [(floor hq.x) (floor hq.y) 0.0]
-                            (if inspected [(max 1.0 (floor hq.z)) (max 1.0 (floor hq.z)) 0.0] [0.0 0.0 0.0]) :stroke "#e0432b"))
+                 labels)
 
-           ; The margins' text. It is not clipped: the indexer keeps previews short.
-           split (max 296.0 (floor (* w 0.43)))
-           first (array/nth d.first h0) last (array/nth d.last h0)
-           span (int/add (int/sub last first) 1)
-           hundredths (int (round (* view.zoom 100.0)))
-           ; Every fourth line is numbered in hex along the top and down the left: the sheet's edges
-           ; read 00 to 40. ponytail: 28 numbers each way, an art window up to about 1340 points.
-           numbers (for [j (range 56)]
-                     (let* [k (int/mod j 28) upper (< j 28)
-                            n (int/mul 4 (int/add (int (ceil (/ (float (if upper first_x first_y)) 4.0))) k))
-                            at (floor (+ (if upper world.x world.y) (* (float n) pitch)))
-                            on (if upper (and (<= at right) (< at p.right)) (and (<= at bottom) (< at p.bottom)))
-                            chars (+ 2.0 (+ (if (>= n 256) 2.0 0.0) (if (>= n 65536) 2.0 0.0)))]
-                       (draw/text (if upper [(- at (* chars 2.45)) 55.0 0.0] [(- 43.0 (* chars 4.9)) (- at 5.0) 0.0])
+           ; Every fourth line is numbered in hex on all four sides: the sheet's edges read 00 to 40.
+           ; ponytail: 20 numbers a side.
+           numbers (for [j (range 80)]
+                     (let* [side (int/div j 20) k (int/mod j 20) upright (< side 2)
+                            n (int/mul 4 (int/add (int (ceil (/ (float (if upright first_x first_y)) 4.0))) k))
+                            at (+ (if upright world.x world.y) (* (float n) pitch))
+                            on (if upright (and (<= at right) (<= at p.right)) (and (<= at bottom) (<= at p.bottom)))
+                            size (int (max 5.0 (round (* 7.0 u))))]
+                       (draw/text (case side 0 [at (- p.top (* 22.0 u)) 0.0] 1 [at (+ p.bottom (* 13.0 u)) 0.0]
+                                             2 [(- p.left (* 14.0 u)) (- at (* 4.0 u)) 0.0] :else [(+ p.right (* 14.0 u)) (- at (* 4.0 u)) 0.0])
                                   (if (and on (>= n 0))
                                       (str (if (>= n 65536) (array/nth f.hex (int/mod (int/div n 65536) 256)) "")
                                            (if (>= n 256) (array/nth f.hex (int/mod (int/div n 256) 256)) "")
                                            (array/nth f.hex (int/mod n 256)))
-                                      "") :size 8 :color "#5d656c")))
-           left_x 56.0 right_x (+ split 20.0) base (+ p.bottom 22.0)
-           inspector (draw/merge
-                       (draw/text [left_x base 0] (if inspected (array/nth d.path h0) "SYMBOL INSPECTOR")
-                                  :size (if inspected 11 10) :color "#e0432b")
-                       (draw/text [left_x (+ base 20.0) 0]
-                                  (if inspected (str (kind-name kind (array/nth d.lsp h0)) "  /  " (array/nth d.label h0))
-                                      "Hover a square to inspect its symbol")
-                                  :size 16 :color "#15181c")
-                       (draw/text [left_x (+ base 48.0) 0]
-                                  (if inspected
-                                      (str "LINES " first "-" last "  /  " span " LINES"
-                                           (cond (= kind 4) "  /  NESTED SCOPE"
-                                                 (= kind 5) (str "  /  SIDE " (int (round (* 100.0 (+ 0.2 (* 0.62 (array/nth f.reach h0)))))) "/100")
-                                                 :else (str "  /  " (array/nth d.bytes h0) " BYTES")))
-                                      (str f.files " FILES  /  " f.symbols " SYMBOLS  /  " (array/count crate.rank) " CRATES"))
-                                  :size 11 :color "#5d656c")
-                       (draw/text [right_x base 0] (if inspected "SOURCE PREVIEW" "READING THE SHEET") :size 10 :color "#e0432b")
-                       (for [k (range 3)]
-                         (let* [number (int/add first k)]
-                           (draw/text [right_x (+ (+ base 20.0) (* (float k) 18.0)) 0]
-                                      (cond (not inspected)
-                                            (case k 0 "A square is a symbol; its side follows source span, capped at 70 lines."
-                                                    1 (case palette 1 "Cobalt is source, vermilion is tests."
-                                                                    2 "Blue is a short span, orange a long one."
-                                                                    :else "Hue is the crate, drifting across the crate's extent.")
-                                                    :else "SCROLL zoom   DRAG pan   CLICK dive   R reset   C inks   T cells   H hide")
-                                            (< k span)
-                                            (str (cond (< number 10) "    " (< number 100) "   " (< number 1000) "  " (< number 10000) " " :else "")
-                                                 number "   " (case k 0 (array/nth d.l0 h0) 1 (array/nth d.l1 h0) :else (array/nth d.l2 h0)))
-                                            :else "")
-                                      :size (if (and (not inspected) (= k 2)) 11 12)
-                                      :color (if (or inspected (= k 0)) "#15181c" "#5d656c")))))
-           scale_text (if (= hundredths 100) (str "1 SHEET  :  " f.lines " LINES")
-                          (str "MAGNIFICATION  " (if (< hundredths 1000) "0" "") (int/div hundredths 100) "."
-                               (if (< (int/mod hundredths 100) 10) "0" "") (int/mod hundredths 100) " X"))
-           ; Pragmasevka advances 0.614 of its size a character; the scale is set flush right.
-           scale_chars (if (= hundredths 100)
-                           (+ 19.0 (cond (< f.lines 10) 0.0 (< f.lines 100) 1.0 (< f.lines 1000) 2.0 (< f.lines 10000) 3.0 (< f.lines 100000) 4.0 (< f.lines 1000000) 5.0 :else 6.0))
-                           (if (< hundredths 10000) 22.0 23.0))
+                                      "")
+                                  :size size :color (if dark "#818976" "#5d656c") :font "archivo-semibold" :tracking 0.06
+                                  :align (case side 2 "right" 3 "left" :else "center"))))
+           hundredths (int (round (* view.zoom 100.0)))
            chrome (draw/merge
-                    (draw/text [56 18 0] "RAYS  /  SHEET 1" :size 10 :color "#15181c")
-                    (draw/text [(- (* w 0.5) 170.0) 18 0] "IMAGINARY TOPOGRAPHY OF A REPOSITORY" :size 10 :color "#5d656c")
-                    (draw/text [(+ (* w 0.5) 75.0) 9 0] "NETWERK" :size 22 :color "#15181c")
-                    (draw/text [(- p.right (* scale_chars 6.14)) 18 0] scale_text :size 10 :color "#15181c")
+                    (caps s 72.0 38.0 "SHEET 1" 8.5 "left" dark)
+                    (caps s 541.0 38.0 "IMAGINARY TOPOGRAPHY OF A REPOSITORY" 8.0 "right" dark)
+                    (draw/text [(+ p.x (* u 555.0)) (+ p.y (* u 25.5)) 0.0] "SOURCE ATLAS" :size (int (max 6.0 (round (* 15.0 u)))) :color (if dark "#e1d8c0" "#15181c")
+                               :font "archivo-expanded-extrabold" :tracking 0.1)
+                    (caps s 928.0 38.0
+                          (if (= hundredths 100) (str "1 SHEET  :  " (grouped f.lines) " LINES")
+                              (str "MAGNIFICATION  " (int/div hundredths 100) "." (if (< (int/mod hundredths 100) 10) "0" "") (int/mod hundredths 100) " X"))
+                          8.5 "right" dark)
                     numbers
-                    (draw/line [split (+ p.bottom 22.0) 0] [split (- h 22.0) 0] :color "#c9cfd2" :width 1.0)
-                    inspector)]
-      (draw/merge (draw/background "#fdfdfc") art
+                    (caps s 72.0 972.0 (str (grouped f.files) " FILES  /  " (grouped f.symbols) " SYMBOLS  /  " (array/count crate.rank) " CRATES") 8.0 "left" dark)
+                    (draw/text [(+ p.x (* u 500.0)) (+ p.y (* u 963.0)) 0.0]
+                               (case palette 1 "Square side follows source span, capped at 70 lines. Cobalt is source, vermilion tests."
+                                             2 "Square side follows source span, capped at 70 lines. Blue is a short span, orange a long one."
+                                             3 "Dot side follows source span, capped at 70 lines. The plate as it was."
+                                             :else "Square side follows source span, capped at 70 lines. Hue is the crate.")
+                               :size (int (max 6.0 (round (* 9.0 u)))) :color (if dark "#818976" "#5d656c") :font "archivo" :align "center")
+                    (caps s 928.0 972.0 "RUST-ANALYZER DOCUMENTSYMBOL" 8.0 "right" dark))]
+      (draw/merge (draw/background (if dark "#0f1312" "#fdfdfc")) art
                   ; Flat paper covers what the art's clip would cut.
-                  (draw/rect [0 0 0] [w 78 0] :fill "#fdfdfc")
-                  (draw/rect [0 p.bottom 0] [w (- h p.bottom) 0] :fill "#fdfdfc")
-                  (draw/rect [0 0 0] [56 h 0] :fill "#fdfdfc")
-                  (draw/rect [p.right 0 0] [(- w p.right) h 0] :fill "#fdfdfc")
-                  (draw/rects tick_at tick_size :fill "#15181c")
-                  (draw/rect [55 77 0] [(- p.right 54.0) (- p.bottom 76.0) 0] :stroke "#15181c")
+                  (draw/rect [0 0 0] [w p.top 0] :fill (if dark "#0f1312" "#fdfdfc"))
+                  (draw/rect [0 p.bottom 0] [w (- h p.bottom) 0] :fill (if dark "#0f1312" "#fdfdfc"))
+                  (draw/rect [0 0 0] [p.left h 0] :fill (if dark "#0f1312" "#fdfdfc"))
+                  (draw/rect [p.right 0 0] [(- w p.right) h 0] :fill (if dark "#0f1312" "#fdfdfc"))
+                  (draw/rects tick_at tick_size :fill (if dark "#818976" "#15181c"))
+                  (draw/rect [(- (floor p.left) 1.0) (- (floor p.top) 1.0) 0] [(+ (- (floor p.right) (floor p.left)) 1.0) (+ (- (floor p.bottom) (floor p.top)) 1.0) 0] :stroke (if dark "#363e33" "#15181c"))
                   ; H hides the margins' text by moving it off the canvas: the drawing keeps one shape.
                   (draw/translate [0 (if view.ui 0.0 100000.0) 0] chrome))))
-
-  (graph profile :context host (table/load "../_out/source_atlas/profile.tsv"))
 
   (graph actions :context host
     (list (host/save_png "_out/source-netwerk.png" (key/down "s"))
           (host/quit (key/down "escape"))))
 
-  (graph settings :context settings (settings/config :title "Rays / Source Netwerk" :width 1440 :height 1000))
+  (graph settings :context settings (settings/config :title "Rays / Source Netwerk" :width 1000 :height 1000))
   (graph editor :context editor (ui/workspace (ui/canvas (ref picture) :focus true) :effects (ref actions))))

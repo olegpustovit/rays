@@ -21,7 +21,7 @@ EXCLUDED = {'.git', 'target', '_out', '_build', '_opam', 'node_modules', 'vendor
 COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'), ('kind', 'int'), ('group', 'int'), ('depth', 'int'), ('child', 'int'), ('count', 'int'), ('owner', 'int'), ('file', 'int'), ('lsp', 'int'), ('first', 'int'), ('last', 'int'), ('mass', 'int'), ('seed', 'int'), ('bytes', 'int'), ('crate', 'int'), ('cell', 'int'), ('top', 'int'), ('label', 'text'), ('tag', 'text'), ('path', 'text'), ('l0', 'text'), ('l1', 'text'), ('l2', 'text'), ('chars', 'int')]
 # `crate` is a row of crates.tsv, whose `ax`, `ay` is the corner of the crate's longest file. `cell` is a leaf's place in its crate's reading order, one cell
 # skipped between files; `top` is the lines of the longer files of a file's crate.
-CRATES = [('x0', 'float'), ('y0', 'float'), ('x1', 'float'), ('y1', 'float'), ('ax', 'float'), ('ay', 'float'), ('files', 'int'), ('lines', 'int'), ('cells', 'int'), ('chars', 'int'), ('name', 'text'), ('rank', 'int')]
+CRATES = [('x0', 'float'), ('y0', 'float'), ('x1', 'float'), ('y1', 'float'), ('ax', 'float'), ('ay', 'float'), ('files', 'int'), ('lines', 'int'), ('cells', 'int'), ('chars', 'int'), ('name', 'text'), ('title', 'text'), ('rank', 'int')]
 # A number comes last: a row never ends in the tab of an empty text cell.
 # Node kinds: the file quadtree, then each indexed file's nested symbol field.
 BRANCH, FILE, HOLLOW, PACK, SCOPE, LEAF, EMPTY = range(7)
@@ -169,7 +169,7 @@ def crate_name(root, path, known):
 def crates(files, root_node):
     """Number the crates in path order and place every leaf and file within its crate."""
     names = list(dict.fromkeys(f['crate'] for f in files))
-    rows = [{'name': name, 'chars': len(name), 'x0': 1.0, 'y0': 1.0, 'x1': 0.0, 'y1': 0.0, 'files': 0, 'lines': 0, 'cells': 0} for name in names]
+    rows = [{'name': name, 'title': name.upper().replace('_', ' '), 'chars': len(name), 'x0': 1.0, 'y0': 1.0, 'x1': 0.0, 'y1': 0.0, 'files': 0, 'lines': 0, 'cells': 0} for name in names]
     nodes = {}
 
     def visit(node, file):
