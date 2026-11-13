@@ -295,6 +295,17 @@ fn has_device(kind: &Kind) -> bool {
     }
 }
 
+/// A host-only set this large goes to the `Marks` family too when there is a GPU: its attributes are
+/// 12 to 20 bytes a mark uploaded once, where a `Ui_batch` is 64 bytes a mark compared and hashed
+/// every frame (a million static rects on an M1: 5.3 ms of CPU and 21 ms of GPU a frame as a batch).
+const GPU_SET_MIN: i64 = 4096;
+/// The frame's sets share the host's 64 sources (`Workspace_gpu.mark_sets`); device sets come first.
+const GPU_SET_SLOTS: i64 = 32;
+
+fn on_gpu(gpu: bool, slot: i64, count: i64, kind: &Kind) -> bool {
+    has_device(kind) || (gpu && count >= GPU_SET_MIN && slot < GPU_SET_SLOTS)
+}
+
 fn int_coordinate(x: f64) -> Result<i64, Diagnostic> {
     if !x.is_finite() || x > i64::MAX as f64 || x < i64::MIN as f64 {
         Err(fail("E_DRAW_RANGE", "A drawing coordinate must fit an integer."))
@@ -465,14 +476,14 @@ pub fn scene(
     let (mut slot, mut sets) = (0i64, 0i64);
     for entry in marks {
         match entry {
-            Entry::MarkSet { count, kind: kind @ Kind::Point { position, fill } } if !has_device(kind) => {
+            Entry::MarkSet { count, kind: kind @ Kind::Point { position, fill } } if !on_gpu(gpu_.is_some(), slot, *count, kind) => {
                 sets += 1;
                 // A point set with no points has no node; it is never kept.
                 if let Some(node) = cached(cache_, buffers, sets, entry, kind, &|| points(buffers, *count, position, *fill))? {
                     top.push(node);
                 }
             }
-            Entry::MarkSet { count, kind } if has_device(kind) => {
+            Entry::MarkSet { count, kind } if on_gpu(gpu_.is_some(), slot, *count, kind) => {
                 let Some(gpu_) = gpu_ else { return Err(no_device()) };
                 top.push(gpu_set(buffers, device, gpu_, cache_, slot, *count, kind)?);
                 slot += 1;
