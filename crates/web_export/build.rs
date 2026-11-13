@@ -15,8 +15,8 @@ fn main() {
     let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../..");
     let mut files = Vec::new();
     for directory in ["crates", "sketches", "specification"] { sources(&root, &root.join(directory), &mut files); }
-    // Source Atlas reads a table an indexer generates outside Git: its check differs by checkout.
-    files.retain(|file| file != "sketches/source_atlas.rays");
+    // The Source Atlas sketches read tables an indexer generates outside Git: their checks differ by checkout.
+    files.retain(|file| !file.starts_with("sketches/source_"));
     files.sort();
     let mut generated = format!("const FILES: &[&str] = &{:?};\n", files);
     for file in files {

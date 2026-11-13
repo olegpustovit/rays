@@ -5,15 +5,13 @@ tools/source_atlas_index
 cargo run -p rays_bin -- sketches/source_atlas.rays
 ```
 
-A white map sheet over rust-analyzer symbols of Rays and the PXUI submodule: the layout and camera of
-the OCaml `code_quadtree` sketch ("Source Strata", last in `923dcecfe^`), redrawn with one square a
-symbol, a hue a crate, diagonal branches, a survey grid and the text in the sheet's four margins.
+A Lisp remake of the OCaml `code_quadtree` sketch ("Source Strata", last in `923dcecfe^`): the same
+plate, layout, marks and camera, over rust-analyzer symbols of Rays and the PXUI submodule.
 
 Scroll or pinch zooms about the pointer (the point under it stays there on every frame, down to the
 smallest symbol), click dives into the file or symbol under it, drag (left or middle)
-pans, right click steps back, `R` or Space resets, `C` changes the inks (crate hue; cobalt source and
-vermilion tests; blue short spans to orange long ones), `T` shows cells instead of branches, `H` or Tab
-hides the margins' text, `S` saves `_out/source-atlas.png`, Escape quits. The camera eases to its target.
+pans, right click steps back, `R` or Space resets, `T` shows cells instead of branches, `H` or Tab
+hides the overlay, `S` saves `_out/source-atlas.png`, Escape quits. The camera eases to its target.
 
 ## Data
 
@@ -46,24 +44,19 @@ repository on one machine); delete `_out/source_atlas/symbols` once if whole cra
 
 ## Drawing
 
-All of it is Lisp over the tables. Per frame, device kernels project every node (its collapsed
-point or scope mark), every branch (the diagonal from a parent's centre in the file tree, straight
-lines between symbols), one square a leaf and the survey grid. A leaf's square is centred in its cell
-and its side is `0.2 + 0.62 sqrt(span / 70)` of the cell's, the span capped at 70 lines; its hue is
-its crate's (a golden-angle step a crate, drifting 70 degrees across the crate's extent), pale for a
-short span. The grid has 64 lines across a sheet 768 points wide and four times as many each time
-the scale quadruples; the same lines carry on as ticks outside the neatline, every fourth numbered in
-hex. Two lattices of slots are bounded by the screen, not by the table: at 16 points a slot looks up
-the leaf under its lattice point by descending the tree (the leaf's first lattice point owns it) and
-rules a function's square in paper from the `width` profile; at 180 points the same lookup names files.
-Crate names sit on the corner of the crate's longest file below five times. Picking is that same
-descent, once. Marks have no alpha, so a fading mark is mixed into the paper; the art's clip is flat
-paper drawn over its margins. A still camera reads nothing back; a moving one reads back the slot
-owners (about 19 KB a frame at 1440 by 1000).
+All of it is Lisp over the table. Per frame, device kernels project every node (its collapsed point
+or scope mark), every branch (orthogonal paths in the file tree, straight ones between symbols) and
+four stipple samples a leaf. The finer stipple levels (16, 64 and 256 samples a leaf, visible from
+8, 16 and 32 points) are bounded by the screen, not by the table: a lattice of slots at that pitch
+looks up the leaf under each lattice point by descending the tree, and the leaf's first lattice
+point owns it. File labels use the same slots at 180 points. Picking is that same descent, once.
+Marks have no alpha, so a fading mark is mixed into the ink; the art's clip is flat ink drawn over
+its margins. A still camera reads nothing back; a moving one reads back the slot owners (about
+74 KB a frame at 1440 by 1000).
 
 `tree/` contains 32 tiny Rust files across Rays and the three PXUI tiers. `atlas.tsv`, `crates.tsv`
 and `profile.tsv` are their real indexer output; `overview.png` and `zoom.png` are native GPU views at
-zoom 1 and 8.
+zoom 1 and 8, and each sister sketch below has its own.
 
 ```sh
 tools/check-source-atlas
@@ -81,5 +74,35 @@ and that a mark kernel calling a local function over a state stays a kernel. Set
 Measure the device path with `rays mem sketches/source_atlas.rays --frames 301`; `rays render` uses
 the CPU reference evaluator. `rays mem` holds the camera still, which the executor remembers: to time
 motion, make the scale follow `frame/index` in a copy, or run the full-table case above. On an
-Apple M1 at 1440 by 1000 with about 69,000 nodes, the optimized test build draws 15 to 16.5 ms a frame
-with the camera moving every frame (the full-table case enforces 16.7 ms).
+Apple M1 at 1440 by 1000 with about 69,000 nodes, a release build draws 11 ms a frame with the camera
+moving every frame (measured under heavy unrelated load; the full-table case enforces 16.7 ms).
+
+## Sister sketches
+
+Four more sketches read the same tables; the atlas itself is unchanged.
+
+### Netwerk
+
+```sh
+cargo run -p rays_bin -- sketches/source_netwerk.rays
+```
+
+`sketches/source_netwerk.rays` is the atlas as a white map sheet, with the same tree, camera and
+picking. Per frame, device kernels project every node (its collapsed
+point or scope mark), every branch (the diagonal from a parent's centre in the file tree, straight
+lines between symbols), one square a leaf and the survey grid. A leaf's square is centred in its cell
+and its side is `0.2 + 0.62 sqrt(span / 70)` of the cell's, the span capped at 70 lines; its hue is
+its crate's (a golden-angle step a crate, drifting 70 degrees across the crate's extent), pale for a
+short span. The grid has 64 lines across a sheet 768 points wide and four times as many each time
+the scale quadruples; the same lines carry on as ticks outside the neatline, every fourth numbered in
+hex. Two lattices of slots are bounded by the screen, not by the table: at 16 points a slot looks up
+the leaf under its lattice point by descending the tree (the leaf's first lattice point owns it) and
+rules a function's square in paper from the `width` profile; at 180 points the same lookup names files.
+Crate names sit on the corner of the crate's longest file below five times. Picking is that same
+descent, once. Marks have no alpha, so a fading mark is mixed into the paper; the art's clip is flat
+paper drawn over its margins. A still camera reads nothing back; a moving one reads back the slot
+owners (about 19 KB a frame at 1440 by 1000).
+The keys are the atlas's, plus `C`, which changes the inks: the crate's hue; cobalt source and vermilion
+tests; blue short spans to orange long ones. The art window fills the frame and the title, the scale,
+the survey numbers and the inspector sit in the sheet's four margins. `netwerk_overview.png` and
+`netwerk_zoom.png` are its views.

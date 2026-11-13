@@ -1,4 +1,4 @@
-//! Two rendered fixture views plus the real native residency and warm allocation contract.
+//! Rendered fixture views of the atlas sketches plus the real native residency and warm allocation contract.
 //! A still camera reads nothing back; a moving one reads back only the stipple slots' owners.
 mod common;
 #[path = "../src/test_source_atlas.rs"]
@@ -9,8 +9,10 @@ use rays::{canvas, image};
 
 fn frame_views() {
     if !common::gpu() { return; }
-    for (name, zoom) in [("overview", 1.0), ("zoom", 8.0)] {
-        let (_, lowered) = atlas::fixture(zoom);
+    let netwerk = include_str!("../../../sketches/source_netwerk.rays");
+    let views = [("overview", None, 1.0), ("zoom", None, 8.0), ("netwerk_overview", Some(netwerk), 1.0), ("netwerk_zoom", Some(netwerk), 8.0)];
+    for (name, sketch, zoom) in views {
+        let (_, lowered) = match sketch { Some(sketch) => atlas::fixture_of(sketch, zoom), None => atlas::fixture(zoom) };
         let ws = wg::create(None);
         wg::qualification(&ws);
         let prepared = drawing::prepare(&drawing::PrepareOptions { gpu: Some(wg::config(&ws, true)), states: lowered.states.clone(), ..Default::default() },
@@ -96,8 +98,12 @@ fn main() {
 // including changing hover/zoom, rather than the CPU reference render command.
 fn full_table_budget() {
     if !common::gpu() { return; }
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../sketches/source_atlas.rays");
-    let (_, doc) = web_export::web_export::load(path);
+    for sketch in ["source_atlas", "source_netwerk"] { full_table_frames(sketch); }
+}
+
+fn full_table_frames(sketch: &str) {
+    let path = format!("{}/../../sketches/{sketch}.rays", env!("CARGO_MANIFEST_DIR"));
+    let (_, doc) = web_export::web_export::load(&path);
     let doc = doc.unwrap_or_else(|ds| panic!("generate the table with tools/source_atlas_index: {ds:?}"));
     let lowered = flow_sop::lower::of_checked(None, Default::default(), &doc.checked).unwrap();
     let ws = wg::create(None);
@@ -123,8 +129,8 @@ fn full_table_budget() {
         for k in 17..=48 { frame(if moving { k + 32 } else { k }, moving); }
         let milliseconds = start.elapsed().as_secs_f64() * 1000. / 32.;
         let after = wg::image_stats(&ws).0;
-        println!("Source Atlas 1440x1000, moving={moving}: {milliseconds:.3} ms/frame, payload readback {} B/frame", (after.payload_readback_bytes - before.payload_readback_bytes) / 32);
-        assert!(milliseconds < 16.7, "full table exceeded a 60 Hz frame budget: {milliseconds:.3} ms");
+        println!("{sketch} 1440x1000, moving={moving}: {milliseconds:.3} ms/frame, payload readback {} B/frame", (after.payload_readback_bytes - before.payload_readback_bytes) / 32);
+        assert!(milliseconds < 16.7, "{sketch}: full table exceeded a 60 Hz frame budget: {milliseconds:.3} ms");
         assert_eq!(after.buffer_creations, before.buffer_creations, "moving={moving}: warm GPU buffer allocation");
     }
     canvas::destroy(&c).unwrap();

@@ -5,8 +5,11 @@ use flow_syntax::value::Value;
 
 fn ok<T>(r: Result<T, rays_diagnostic::Diagnostic>) -> T { r.unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d))) }
 
-pub(crate) fn fixture(zoom: f64) -> (workspace_doc::T, lower::T) {
-    let source = include_str!("../../../sketches/source_atlas.rays").replace("../_out/source_atlas/", concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/source_atlas/")).replace("(initial_zoom : float 1.0)", &format!("(initial_zoom : float {zoom})")).replace("(center : vec3 [0.5 0.5 0.0])", if zoom > 1.0 { "(center : vec3 [0.625 0.625 0.0])" } else { "(center : vec3 [0.5 0.5 0.0])" });
+pub(crate) fn fixture(zoom: f64) -> (workspace_doc::T, lower::T) { fixture_of(include_str!("../../../sketches/source_atlas.rays"), zoom) }
+
+/// A sketch over the atlas tables, reading the fixture's; the two camera sketches start at `zoom`.
+pub(crate) fn fixture_of(sketch: &str, zoom: f64) -> (workspace_doc::T, lower::T) {
+    let source = sketch.replace("../_out/source_atlas/", concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/source_atlas/")).replace("(initial_zoom : float 1.0)", &format!("(initial_zoom : float {zoom})")).replace("(center : vec3 [0.5 0.5 0.0])", if zoom > 1.0 { "(center : vec3 [0.625 0.625 0.0])" } else { "(center : vec3 [0.5 0.5 0.0])" });
     let catalog = ok(kinds::shared(None));
     let doc = workspace_doc::of_text(&workspace_doc::TextOptions::default(), &catalog, &source).unwrap_or_else(|ds| panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("\n")));
     let lowered = ok(lower::of_checked(None, lower::Options { inputs: Some((*doc.inputs).clone()), ..Default::default() }, &doc.checked));
@@ -39,8 +42,8 @@ fn source_atlas_picking_eased_camera_and_native_only_table() {
     let (kind, x, y, size) = (ints("kind"), floats("x"), floats("y"), floats("size"));
     assert_eq!(kind.len(), 302);
 
-    // The sheet at 1440 by 1000: an art window from 56 to 1384 and from 78 down to 896, a 778-point world.
-    let (side, ox, oy) = (778., 720., 487.);
+    // The plate at 1440 by 1000: a 302-point sidebar, art from 74 down to 856, a 772-point world.
+    let (side, ox, oy) = (772., 569., 465.);
     let program = ok(I::compile(&result(&lowered, "view"), &Default::default()));
     let state = e::create_state();
     let mut tick = 0;
