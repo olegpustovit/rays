@@ -39,8 +39,8 @@ fn source_atlas_picking_eased_camera_and_native_only_table() {
     let (kind, x, y, size) = (ints("kind"), floats("x"), floats("y"), floats("size"));
     assert_eq!(kind.len(), 302);
 
-    // The plate at 1440 by 1000: a 302-point sidebar, art from 74 down to 856, a 772-point world.
-    let (side, ox, oy) = (772., 569., 465.);
+    // The sheet at 1440 by 1000: an art window from 56 to 1384 and from 78 down to 896, a 778-point world.
+    let (side, ox, oy) = (778., 720., 487.);
     let program = ok(I::compile(&result(&lowered, "view"), &Default::default()));
     let state = e::create_state();
     let mut tick = 0;

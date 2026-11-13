@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
     command = [str(INDEX), '--root', str(fixture / 'tree'), '--output', str(output), '--cache', str(work / 'cache')]
     cold = subprocess.check_output(command, text=True)
     assert '32 files, 224 symbols, 302 nodes, 0 cache hits' in cold, cold
-    for name in ('atlas.tsv', 'profile.tsv'):
+    for name in ('atlas.tsv', 'profile.tsv', 'crates.tsv'):
         assert (work / name).read_bytes() == (fixture / name).read_bytes(), f'{name}: fixture golden changed'
     # An unanswered request (null) is retried, never stored as a file without symbols.
     assert all(json.loads(saved.read_text()) for saved in (work / 'cache').iterdir()), 'an empty answer was cached'
@@ -47,6 +47,14 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
                 if n(scope, 'kind') == 4:
                     assert n(scope, 'first') <= n(child, 'first') <= n(child, 'last') <= n(scope, 'last'), 'symbol outside its scope'
     assert len((work / 'profile.tsv').read_text().splitlines()) == 1 + 32 * 32
+    # Every leaf has its own cell in its crate's reading order, and a crate's files stack without gaps.
+    crates = [{k.split(':')[0]: v for k, v in r.items()} for r in csv.DictReader((work / 'crates.tsv').open(), delimiter='\t', quoting=csv.QUOTE_NONE)]
+    assert sorted(int(c['rank']) for c in crates) == list(range(len(crates))) and sum(int(c['files']) for c in crates) == 32
+    for k, crate in enumerate(crates):
+        cells = [n(r, 'cell') for r in rows if n(r, 'kind') == 5 and n(r, 'crate') == k]
+        assert len(cells) == len(set(cells)) and max(cells) == int(crate['cells']) - 1, 'ledger cells'
+        tops = sorted((n(r, 'top'), n(r, 'last')) for r in rows if n(r, 'kind') in (1, 2) and n(r, 'crate') == k)
+        assert all(a + lines == b for (a, lines), (b, _) in zip(tops, tops[1:])) and tops[-1][0] + tops[-1][1] == int(crate['lines']), 'strata tops'
     # A file's digest, not its timestamp or size, keys the symbol cache.
     tiny = work / 'tree'
     tiny.mkdir()

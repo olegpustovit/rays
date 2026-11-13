@@ -1,0 +1,5 @@
+x0:float	y0:float	x1:float	y1:float	ax:float	ay:float	files:int	lines:int	cells:int	chars:int	name:text	rank:int
+0.0	0.0	1.0	1.0	0.5	0.5	13	143	51	4	core	0
+0.0	0.25	0.75	1.0	0.5	0.25	7	77	27	5	input	1
+0.125	0.5	0.5	1.0	0.125	0.875	6	66	23	2	ui	3
+0.0	0.5	0.25	0.75	0.0	0.625	6	66	23	4	pxui	2

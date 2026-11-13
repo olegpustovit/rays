@@ -18,7 +18,10 @@ import time
 
 EXTENSIONS = {'.rs'}
 EXCLUDED = {'.git', 'target', '_out', '_build', '_opam', 'node_modules', 'vendor', 'fixtures', 'history'}
-COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'), ('kind', 'int'), ('group', 'int'), ('depth', 'int'), ('child', 'int'), ('count', 'int'), ('owner', 'int'), ('file', 'int'), ('lsp', 'int'), ('first', 'int'), ('last', 'int'), ('mass', 'int'), ('seed', 'int'), ('bytes', 'int'), ('label', 'text'), ('tag', 'text'), ('path', 'text'), ('l0', 'text'), ('l1', 'text'), ('l2', 'text'), ('chars', 'int')]
+COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'), ('kind', 'int'), ('group', 'int'), ('depth', 'int'), ('child', 'int'), ('count', 'int'), ('owner', 'int'), ('file', 'int'), ('lsp', 'int'), ('first', 'int'), ('last', 'int'), ('mass', 'int'), ('seed', 'int'), ('bytes', 'int'), ('crate', 'int'), ('cell', 'int'), ('top', 'int'), ('label', 'text'), ('tag', 'text'), ('path', 'text'), ('l0', 'text'), ('l1', 'text'), ('l2', 'text'), ('chars', 'int')]
+# `crate` is a row of crates.tsv, whose `ax`, `ay` is the corner of the crate's longest file. `cell` is a leaf's place in its crate's reading order, one cell
+# skipped between files; `top` is the lines of the longer files of a file's crate.
+CRATES = [('x0', 'float'), ('y0', 'float'), ('x1', 'float'), ('y1', 'float'), ('ax', 'float'), ('ay', 'float'), ('files', 'int'), ('lines', 'int'), ('cells', 'int'), ('chars', 'int'), ('name', 'text'), ('rank', 'int')]
 # A number comes last: a row never ends in the tab of an empty text cell.
 # Node kinds: the file quadtree, then each indexed file's nested symbol field.
 BRANCH, FILE, HOLLOW, PACK, SCOPE, LEAF, EMPTY = range(7)
@@ -146,6 +149,61 @@ def group(path):
     if path.startswith('pxui/crates/open/'):
         return 4
     return 0
+
+
+def crate_name(root, path, known):
+    """The directory of the nearest Cargo.toml under the root, else the one above src, tests, examples or benches."""
+    parts = path.split('/')[:-1]
+    for n in range(len(parts), 0, -1):
+        directory = '/'.join(parts[:n])
+        if directory not in known:
+            known[directory] = (root / directory / 'Cargo.toml').is_file()
+        if known[directory]:
+            return parts[n - 1]
+    for n, part in enumerate(parts):
+        if part in ('src', 'tests', 'examples', 'benches') and n > 0:
+            return parts[n - 1]
+    return parts[0] if parts else 'source'
+
+
+def crates(files, root_node):
+    """Number the crates in path order and place every leaf and file within its crate."""
+    names = list(dict.fromkeys(f['crate'] for f in files))
+    rows = [{'name': name, 'chars': len(name), 'x0': 1.0, 'y0': 1.0, 'x1': 0.0, 'y1': 0.0, 'files': 0, 'lines': 0, 'cells': 0} for name in names]
+    nodes = {}
+
+    def visit(node, file):
+        if node['kind'] in (FILE, HOLLOW):
+            file = node['file']
+            nodes[file] = {'node': node, 'leaves': []}
+        if file is not None:
+            node['crate'] = names.index(files[file]['crate'])
+            if node['kind'] == LEAF:
+                nodes[file]['leaves'].append(node)
+        for child in node['children']:
+            visit(child, file)
+
+    visit(root_node, None)
+    for k, row in enumerate(rows):
+        members = [n for n, f in enumerate(files) if f['crate'] == row['name']]
+        for n in members:
+            node = nodes[n]['node']
+            if row['files']:
+                row['cells'] += 1
+            for leaf in sorted(nodes[n]['leaves'], key=lambda leaf: (leaf['first'], leaf['label'])):
+                leaf['cell'] = row['cells']
+                row['cells'] += 1
+            row['files'] += 1
+            row['x0'], row['y0'] = min(row['x0'], node['x']), min(row['y0'], node['y'])
+            row['x1'], row['y1'] = max(row['x1'], node['x'] + node['size']), max(row['y1'], node['y'] + node['size'])
+        for n in sorted(members, key=lambda n: (-len(files[n]['lines']), files[n]['path'])):
+            if not row['lines']:
+                row['ax'], row['ay'] = nodes[n]['node']['x'], nodes[n]['node']['y']
+            nodes[n]['node']['top'] = row['lines']
+            row['lines'] += max(1, len(files[n]['lines']))
+    for rank, k in enumerate(sorted(range(len(rows)), key=lambda k: (-rows[k]['lines'], rows[k]['name']))):
+        rows[k]['rank'] = rank
+    return rows
 
 
 def span(symbol, path, count):
@@ -289,6 +347,7 @@ def main():
     version = subprocess.check_output([args.lsp, '--version'], text=True).strip()
     lsp = None
     files = []
+    known = {}
     hits = 0
     try:
         found = sorted(sources(root), key=lambda p: p.relative_to(root).as_posix())
@@ -311,19 +370,27 @@ def main():
                     temporary = saved.with_suffix('.tmp')
                     temporary.write_text(json.dumps(symbols, ensure_ascii=False), encoding='utf-8')
                     temporary.replace(saved)
-            profile = [0] * 32
+            # `width` hashes a line to its number modulo 32 (the longest wins); `mean` cuts the file
+            # into 32 slices, first line to last, and keeps each slice's mean line length.
+            profile, total, held = [0] * 32, [0] * 32, [0] * 32
             for n, line in enumerate(lines):
                 profile[n % 32] = max(profile[n % 32], min(120, len(line)))
+                total[n * 32 // len(lines)] += len(line)
+                held[n * 32 // len(lines)] += 1
+            mean = [round(t / max(1, c)) for t, c in zip(total, held)]
             name = file.name
             row = {'group': group(path), 'file': len(files), 'first': 1, 'last': max(1, len(lines)), 'bytes': len(raw), 'label': name,
                    'tag': name if len(name) <= 26 else name[:23] + '...', 'chars': min(26, len(name)), 'path': path, **preview(lines, 1, len(lines))}
-            files.append({'path': path, 'lines': lines, 'symbols': symbols, 'profile': profile, 'row': row})
+            files.append({'path': path, 'lines': lines, 'symbols': symbols, 'profile': profile, 'mean': mean, 'crate': crate_name(root, path, known), 'row': row})
         if not files:
             raise ValueError('no source files found')
-        rows = table_rows(file_tree(files))
+        tree = file_tree(files)
+        write_table(output.with_name('crates.tsv'), CRATES, crates(files, tree))
+        rows = table_rows(tree)
         write_table(output, COLUMNS, rows)
-        # Function marks read their file's 32-bin line-length profile: row = file * 32 + bin.
-        write_table(output.with_name('profile.tsv'), [('width', 'int')], [{'width': w} for f in files for w in f['profile']])
+        # Two 32-bin line-length profiles a file: row = file * 32 + bin.
+        write_table(output.with_name('profile.tsv'), [('width', 'int'), ('mean', 'int')],
+                    [{'width': w, 'mean': m} for f in files for w, m in zip(f['profile'], f['mean'])])
         symbols = sum(row['kind'] in (SCOPE, LEAF) for row in rows)
         print(f'{len(files)} files, {symbols} symbols, {len(rows)} nodes, {hits} cache hits -> {output}')
     finally:
