@@ -2299,6 +2299,7 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
     let (device_ok, groups) = core_draw::device_groups(
         approx,
         fast,
+        true,
         &program,
         &|region| match program.regions[ix(region)].outputs.as_slice() {
             [output] => Some(output.len() as i64),

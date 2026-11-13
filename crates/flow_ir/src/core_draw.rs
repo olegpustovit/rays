@@ -16,8 +16,9 @@ use std::collections::HashMap;
 
 /// Regions read exclusively as compatible mark-set attributes, and their per-batch groups in
 /// argument order. `width` supplies each target's eligible single-output region width. Other
-/// attributes can remain on the CPU.
-pub fn device_regions(program: &C::Program, width: &dyn Fn(i64) -> Option<i64>) -> (Vec<bool>, Vec<Vec<i64>>) {
+/// attributes can remain on the CPU. With `points` a point set's positions are an attribute too (the
+/// native adapter draws them as a set of one-point rects; the web has no such route).
+pub fn device_regions(program: &C::Program, points: bool, width: &dyn Fn(i64) -> Option<i64>) -> (Vec<bool>, Vec<Vec<i64>>) {
     let widths: Vec<Option<i64>> = (0..program.regions.len() as i64).map(width).collect();
     let n = program.locals.len();
     let mut uses = vec![0i64; n];
@@ -26,6 +27,7 @@ pub fn device_regions(program: &C::Program, width: &dyn Fn(i64) -> Option<i64>) 
     let mut producers = vec![-1i64; n];
     let mut invokes: Vec<(i64, i64)> = Vec::new();
     let mut batches: Vec<(C::Mark, Vec<(Symbol, i64)>)> = Vec::new();
+    let mut point_sets: Vec<i64> = Vec::new();
     C::iter(
         &mut |statement| {
             for l in C::reads(statement) { uses[l as usize] += 1; }
@@ -36,6 +38,7 @@ pub fn device_regions(program: &C::Program, width: &dyn Fn(i64) -> Option<i64>) 
                     invokes.push((*region, *result));
                 }
                 C::StatementNode::Draw(C::Draw::Batch { mark, args }) => batches.push((*mark, args.clone())),
+                C::StatementNode::Draw(C::Draw::Points { positions, .. }) if points => point_sets.push(*positions),
                 _ => {}
             }
         },
@@ -64,6 +67,10 @@ pub fn device_regions(program: &C::Program, width: &dyn Fn(i64) -> Option<i64>) 
             }
         }
     }
+    for local in &point_sets {
+        let region = producers[*local as usize];
+        if region >= 0 && matches!(widths[region as usize], Some(2 | 3)) { attributes[*local as usize] += 1; }
+    }
     let mut eligible = vec![false; program.regions.len()];
     for (region, _) in &invokes { eligible[*region as usize] = widths[*region as usize].is_some(); }
     for (region, local) in &invokes {
@@ -78,6 +85,10 @@ pub fn device_regions(program: &C::Program, width: &dyn Fn(i64) -> Option<i64>) 
             if region >= 0 && eligible[region as usize] && !regions.contains(&region) { regions.push(region); }
         }
         if !regions.is_empty() { out.push(regions); }
+    }
+    for local in &point_sets {
+        let region = producers[*local as usize];
+        if region >= 0 && eligible[region as usize] { out.push(vec![region]); }
     }
     (eligible, out)
 }
@@ -189,8 +200,8 @@ fn scan_block(statements: &[C::Statement], blocks: &mut Vec<Vec<Item>>, info: &m
 /// groups remain single-output regions.
 /// Groups share a statement block and cross only infallible scalar setup. Delaying the
 /// earlier invocations to the last therefore preserves branches, side effects and errors.
-pub fn device_groups(approx: &Paths, fast: bool, program: &C::Program, width: &dyn Fn(i64) -> Option<i64>, legal: &dyn Fn(&C::RegionT) -> bool) -> (Vec<bool>, Vec<Group>) {
-    let (eligible, batches) = device_regions(program, width);
+pub fn device_groups(approx: &Paths, fast: bool, points: bool, program: &C::Program, width: &dyn Fn(i64) -> Option<i64>, legal: &dyn Fn(&C::RegionT) -> bool) -> (Vec<bool>, Vec<Group>) {
+    let (eligible, batches) = device_regions(program, points, width);
     if batches.is_empty() && program.regions.len() < 2 { return (eligible, Vec::new()); }
     let mut info: Vec<Option<Info>> = (0..program.regions.len()).map(|_| None).collect();
     let mut occurrences = vec![0i64; program.regions.len()];

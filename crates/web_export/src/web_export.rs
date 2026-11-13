@@ -425,7 +425,7 @@ struct Group {
 fn groups(fast: bool, program: &C::Program, entries: &[RegionEntry]) -> Vec<Group> {
     let width = |k: i64| entries[k as usize].kernel.as_ref().map(|_| entries[k as usize].width);
     let legal = |region: &C::RegionT| fixed_inputs(region).map(|f| web_kernel(&f).is_some()).unwrap_or(false);
-    let (_, found) = core_draw::device_groups(&Default::default(), fast, program, &width, &legal);
+    let (_, found) = core_draw::device_groups(&Default::default(), fast, false, program, &width, &legal);
     found
         .into_iter()
         .map(|group| {
@@ -631,7 +631,7 @@ impl Export<'_> {
             }
         }
         // a mark set's attributes go to the device from a fixed kernel or, in fast precision, a region bound per call
-        let (good, _) = core_draw::device_regions(program, &|k| {
+        let (good, _) = core_draw::device_regions(program, false, &|k| {
             let k = k as usize;
             if entries[k].kernel.is_some() || fast_kernels[k].is_some() { Some(entries[k].width) } else { None }
         });

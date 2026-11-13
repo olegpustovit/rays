@@ -267,7 +267,17 @@ fn gpu_set(buffers: &Buffers, device: Device, gpu_: &Gpu, c: Option<&Cache>, slo
                 scalars(buffers, device, c, slot, 4, count, stroke_width)?,
             ],
         ),
-        Kind::Point { .. } => unreachable!("assert false"),
+        // a point is the one-point rect the host route draws (`points`)
+        Kind::Point { position, fill } => (
+            0,
+            vec![
+                vectors(buffers, device, c, slot, 0, count, position)?,
+                host(float_bytes(2, &|_| 1.)?, 0),
+                host(word_bytes(1, &|_| *fill), 0),
+                host(word_bytes(1, &|_| 0), 0),
+                host(float_bytes(1, &|_| 1.)?, 0),
+            ],
+        ),
     };
     let token = gpu_(slot, kind_word, count, &attributes)?;
     Ok(scene::shapes(ui_batch::of_marks(token)))
@@ -281,7 +291,7 @@ fn has_device(kind: &Kind) -> bool {
         Kind::Rect { position, size, fill, stroke, .. } => p(position) || p(size) || c(fill) || c(stroke),
         Kind::Circle { position, radius, fill, stroke, stroke_width } => p(position) || s(radius) || s(stroke_width) || c(fill) || c(stroke),
         Kind::Line { position, end, stroke, stroke_width } => p(position) || p(end) || s(stroke_width) || c(stroke),
-        Kind::Point { .. } => false,
+        Kind::Point { position, .. } => p(position),
     }
 }
 
@@ -455,7 +465,7 @@ pub fn scene(
     let (mut slot, mut sets) = (0i64, 0i64);
     for entry in marks {
         match entry {
-            Entry::MarkSet { count, kind: kind @ Kind::Point { position, fill } } => {
+            Entry::MarkSet { count, kind: kind @ Kind::Point { position, fill } } if !has_device(kind) => {
                 sets += 1;
                 // A point set with no points has no node; it is never kept.
                 if let Some(node) = cached(cache_, buffers, sets, entry, kind, &|| points(buffers, *count, position, *fill))? {

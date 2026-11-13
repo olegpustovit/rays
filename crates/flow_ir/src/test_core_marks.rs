@@ -232,6 +232,14 @@ fn device_buffers_for_attributes_only_read_by_mark_sets() {
         },
         _ => panic!("line ends and colour are device buffers"),
     }
+    // A point set's positions stay on the device as well (the native adapter draws one-point rects).
+    match device_marks(&format!("(let* [{P}] (draw/points p :color \"#1e1e1e\"))")) {
+        (1, marks) => match marks.as_slice() {
+            [Entry::MarkSet { count: 3, kind: Kind::Point { position, .. } }] => assert!(device_pair(position, 3)),
+            _ => panic!("point positions are a device buffer"),
+        },
+        _ => panic!("point positions are a device buffer"),
+    }
     // The frame reads the colours too (their count), so they stay a host buffer.
     match device_marks(&format!("(let* [{P} {COLORS}] (draw/merge (draw/rects p [10 10 0] :fill c) (draw/text [0 0 0] (str (array/count c)))))")) {
         (1, marks) => match marks.as_slice() {
@@ -339,7 +347,7 @@ fn remembered_loops_never_answer_changed_inputs_from_the_cache() {
 fn group_sizes(groups: &[core_draw::Group]) -> Vec<usize> { groups.iter().map(|g| g.members.len()).collect() }
 
 fn groups(program: &C::Program, approx: &Paths, legal: &dyn Fn(&C::RegionT) -> bool) -> Vec<core_draw::Group> {
-    core_draw::device_groups(approx, false, program, &|k| Some(program.regions[k as usize].outputs[0].len() as i64), legal).1
+    core_draw::device_groups(approx, false, false, program, &|k| Some(program.regions[k as usize].outputs[0].len() as i64), legal).1
 }
 
 #[test]

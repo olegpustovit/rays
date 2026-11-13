@@ -32,9 +32,9 @@ fn gpu_attribute_regions_print_gpu_array_and_cpu_programs_are_unchanged() {
     };
     assert_eq!(program.regions.len(), 2);
     let width = |region: i64| Some(program.regions[region as usize].outputs[0].len() as i64);
-    let (eligible, batches) = core_draw::device_regions(&program, &width);
+    let (eligible, batches) = core_draw::device_regions(&program, false, &width);
     assert!(eligible == vec![true, true] && batches == vec![vec![0, 1]]);
-    let (eligible, batches) = core_draw::device_regions(&program, &|region| if region == 0 { None } else { width(region) });
+    let (eligible, batches) = core_draw::device_regions(&program, false, &|region| if region == 0 { None } else { width(region) });
     assert!(eligible == vec![false, true] && batches == vec![vec![1]]);
     let cpu = ((js::frame(&FrameOptions::default(), &program))).unwrap_or_else(|d| die(d));
     assert!(has(&cpu, "await rt.invoke(0, [])") && has(&cpu, "await rt.invoke(1, [])") && !has(&cpu, "gpuArray"));
