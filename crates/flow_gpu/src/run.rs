@@ -1191,12 +1191,10 @@ pub(crate) fn check_status(t: &T, epoch: i64) -> Result<(), Diagnostic> {
     if epoch > b::completed_epoch(&d.queue) {
         gpu(b::complete_through(&d.queue, epoch))?;
     }
-    if epoch < st.last_epoch {
-        return match st.verdicts.iter().rev().find(|(e, _)| *e == epoch) {
-            Some((_, diagnostic)) => Err(diagnostic.clone()),
-            None => Ok(()),
-        };
+    if let Some((_, diagnostic)) = st.verdicts.iter().rev().find(|(e, _)| *e == epoch) {
+        return Err(diagnostic.clone());
     }
+    if epoch < st.last_epoch { return Ok(()); }
     if !st.status_checked {
         let flags = gpu(b::read_buffer(st.status.buffer.as_ref().unwrap(), 0, 4))?;
         st.status_reads += 1;
@@ -1973,6 +1971,16 @@ pub fn close(t: &T, discard: bool) {
     assert!(me() == d.domain, "Run.close: creating domain required");
     if d.state.borrow().closed {
         return;
+    }
+    // A shown borrow may still have a status check queued when the LRU evicts this runner.
+    // Preserve its verdict before releasing the status buffer; the later borrow reports it.
+    let epoch = d.state.borrow().last_epoch;
+    if epoch > 0 && !d.state.borrow().status_checked {
+        if let Err(problem) = check_status(t, epoch) {
+            let mut st = d.state.borrow_mut();
+            st.verdicts.push((epoch, problem));
+            st.status_checked = true;
+        }
     }
     // a holder still alive reads its planes now, while its buffer exists. On a shared pool its
     // buffer outlives this runner: once settled it stays unread and the pool's, read only by a reader.

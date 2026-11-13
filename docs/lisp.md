@@ -32,7 +32,7 @@ Integers, floats, booleans, text, vectors, lists, arrays, records and functions 
 - A homogeneous list widens to the corresponding typed array.
 - Draw radii and line widths accept fractional values. Angles are radians.
 - Literal colours and choices are validated during checking.
-- `=`, `/`, `nth` and `count` are the public polymorphic forms.
+- `=` and `/` are polymorphic numeric forms. `nth` and `count` read lists; use `array/nth` and `array/count` for packed arrays, including text arrays.
 - Names use snake_case; axis suffixes come last, such as `divisions_x`.
 
 ## Forms
@@ -109,6 +109,7 @@ Each row is a lookup target and an example from its registry entry.
 | `scene/` | `(scene/camera)` |
 | `settings/` | `(settings/config)` |
 | `sop/` | `(sop/adjacency nil)` |
+| `table/` | `(table/load "fixtures/source_atlas/atlas.tsv")` |
 | `text/` | `(text/blank? "example")` |
 | `ui/` | `(workspace canvas_example (graph picture :context draw (draw/merge)) (graph editor :context editor (ui/workspace (ui/canvas (ref picture)))))` |
 | `value/` | `(* 1.0 1.0)` |

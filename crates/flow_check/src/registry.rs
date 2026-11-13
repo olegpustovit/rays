@@ -127,6 +127,7 @@ pub fn example(name: &str, sig: &op::Signature) -> String {
         "ui/split_at" => return "(ui/split_at \"horizontal\" 0.5 (ui/graph) (ui/inspector))".into(),
         _ => (),
     }
+    if name == "table/load" { return "(table/load \"fixtures/source_atlas/atlas.tsv\")".into(); }
     if name == "draw/circle" { return "(draw/circle [320 180] 42.5 :fill \"#5aaaf0\")".into(); }
     let mut parts = vec![name.to_owned()];
     parts.extend(sig.pos.iter().map(|(_, ty)| sample(ty)));
@@ -135,6 +136,7 @@ pub fn example(name: &str, sig: &op::Signature) -> String {
 
 pub fn description(name: &str, sig: &op::Signature) -> String {
     match name {
+        "table/load" => crate::table::DOC.into(),
         "draw/circle" => "Draw a filled or stroked circle in logical points.".into(),
         "draw/line" => "Draw a line between two positions in logical points.".into(),
         "draw/background" => "Fill the entire canvas with a color.".into(),

@@ -220,3 +220,27 @@ fn registry_metadata_contracts() {
     assert!(guide.lines().count() < 400);
     assert_eq!(guide, std::fs::read_to_string(root().join("docs/lisp.md")).unwrap());
 }
+
+#[test]
+fn table_load_is_relative_typed_and_refused_by_web() {
+    let directory = std::env::temp_dir().join(format!("rays-table-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let table = directory.join("sample.tsv");
+    let sketch = directory.join("sample.rays");
+    std::fs::write(&table, "x:float\tlabel:text\n2.5\tλ\\tcaption\n").unwrap();
+    std::fs::write(&sketch, "(workspace w (graph data :context host (table/load \"sample.tsv\")) (graph picture :context draw (let* [d (ref data)] (draw/text [(array/nth d.x 0) 10 0] (array/nth d.label 0)))))").unwrap();
+    let check = rays(&["check", "--json", sketch.to_str().unwrap()]);
+    assert!(check.status.success(), "{}", stdout(&check));
+    let formatted = rays(&["fmt", sketch.to_str().unwrap()]);
+    assert!(formatted.status.success() && stdout(&formatted).contains("\"sample.tsv\""));
+    let web = rays(&["web", sketch.to_str().unwrap(), "-o", directory.join("web").to_str().unwrap()]);
+    assert_eq!(web.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&web.stderr).contains("E_WEB_TABLE"));
+    for (source, code) in [("broken\n1\n", "E_TABLE_HEADER"), ("x:int\n1\t2\n", "E_TABLE_ROW")] {
+        std::fs::write(&table, source).unwrap();
+        let check = rays(&["check", "--json", sketch.to_str().unwrap()]);
+        assert_eq!(check.status.code(), Some(1));
+        assert!(stdout(&check).contains(code), "{}", stdout(&check));
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}

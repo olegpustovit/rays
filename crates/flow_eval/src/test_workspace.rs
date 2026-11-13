@@ -965,3 +965,13 @@ fn prelude_forks_share_storage_and_keep_paths_in_their_owner() {
     println!("8 warm cached checks: median {} ns / {} allocations", timings[3], allocation_samples[3]);
     assert_eq!(fingerprint(&check()), expected, "checking again changed prelude paths or ordering");
 }
+
+#[test]
+fn mark_colour_arrays_are_opaque_vec3_at_check_time() {
+    for call in ["(draw/rects (array/vec3 2) [1 1 0] :fill (array/vec4 2))",
+                 "(draw/circles (array/vec3 2) :stroke (array/vec4 2))",
+                 "(draw/lines (array/vec3 2) (array/vec3 2) :color (array/vec4 2))"] {
+        bad(&format!("(workspace w (graph picture :context draw {call}))"), "E_DRAW_COLOR");
+    }
+    good("(workspace w (graph picture :context draw (draw/rects (array/vec3 2) [1 1 0] :fill (array/vec3 2))))");
+}

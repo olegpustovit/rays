@@ -1,0 +1,239 @@
+; Source Atlas: real rust-analyzer scopes in a weighted, rotated quadtree.
+; Generate first: tools/source_atlas_index
+; Run: cargo run -p rays_bin -- sketches/source_atlas.rays
+; Wheel/pinch zoom at pointer; drag pans; click dives; right click goes out; R/Home resets.
+; Layout, camera, picking, labels and all mark kernels are Lisp. No source IO in the frame.
+(workspace source_atlas
+  (graph data :context host (table/load "../_out/source_atlas/atlas.tsv"))
+
+  ; Prefix sums and sibling addressing are data, computed by the indexer, not a native layout.
+  (defn prefix-before :context value [(prefix : (array int)) (i : int)]
+    (if (= i 0) 0 (array/nth prefix (int/sub i 1))))
+
+  (defn weighted-cut :context value [(prefix : (array int)) (lo : int) (hi : int) (target : float)]
+    (let* [search (iterate 24 {:a lo :b hi}
+                          (fn [s]
+                            (let* [mid (int/div (int/add s.a s.b) 2)]
+                              (if (< (float (prefix-before prefix mid)) target)
+                                  {:a (int/add mid 1) :b s.b}
+                                  {:a s.a :b mid})))
+                          :until (fn [previous s] (>= s.a s.b)))]
+      search.a))
+
+  ; Independent descent for one sibling. Integer weights and forced nonempty cuts preserve every
+  ; row once, even when one file outweighs the rest. Coordinates stay double precision on the host.
+  (defn pack-cell :context value [(row : int) (rank : (array int)) (starts : (array int)) (ends : (array int)) (prefix : (array int)) (order : (array int)) (seeds : (array int))]
+    (let* [index (array/nth rank row)
+           cell (iterate 48 {:lo (int (array/nth starts row)) :hi (int (array/nth ends row)) :x 0.0 :y 0.0 :size 1.0 :depth 0.0}
+                         (fn [s]
+                           (if (<= (int/sub s.hi s.lo) 1) s
+                           (let* [n (int/sub s.hi s.lo)
+                                  quadrants (int (min n 4))
+                                  base (prefix-before prefix s.lo)
+                                  mass (int/sub (prefix-before prefix s.hi) base)
+                                  choice (iterate 4 {:cursor s.lo :end s.lo :part 0 :fraction 0.0 :chosen false}
+                                                  (fn [q]
+                                                    (let* [ratio (case q.part 0 0.07 1 0.15 2 0.29 :else 0.49)
+                                                           fraction (+ q.fraction ratio)
+                                                           limit (int/sub s.hi (int/sub quadrants (int/add q.part 1)))
+                                                           finish (if (= q.part (int/sub quadrants 1))
+                                                                      s.hi
+                                                                      (max (int/add q.cursor 1)
+                                                                           (min limit (weighted-cut prefix (int/add q.cursor 1) limit
+                                                                                                    (+ (float base) (* fraction (float mass)))))))]
+                                                      {:cursor (if (< index finish) q.cursor (int finish))
+                                                       :end (int finish) :part (int/add q.part 1)
+                                                       :fraction fraction :chosen (< index finish)}))
+                                                  :until (fn [previous q] q.chosen))
+                                  turn (mod (int/add (array/nth seeds (array/nth order s.lo)) n) 4)
+                                  quadrant (mod (int/add (int/sub choice.part 1) turn) 4)
+                                  half (* s.size 0.5)]
+                             {:lo choice.cursor :hi choice.end
+                              :x (+ s.x (* (float (mod quadrant 2)) half))
+                              :y (+ s.y (* (float (int/div quadrant 2)) half))
+                              :size half :depth (+ s.depth 1.0)})))
+                         :until (fn [previous s] (<= (int/sub s.hi s.lo) 1)))]
+      [cell.x cell.y cell.size cell.depth]))
+
+  (graph cells :context host
+    (let* [d (ref data)
+           ids (array/range (array/count d.parent) :type int)]
+      (exact (map (fn [(i : int)]
+                    (let* [cell (iterate 32 {:row i :x 0.0 :y 0.0 :size 1.0 :depth 0.0}
+                                         (fn [s]
+                                           (let* [local (pack-cell s.row d.rank d.lo d.hi d.prefix d.order d.seed)
+                                                  parent (array/nth d.parent s.row)
+                                                  inset (if (= s.row i) 0.0 0.08)
+                                                  scale (if (= s.row i) 1.0 0.84)]
+                                             {:row parent
+                                              :x (+ local.x (* local.z (+ inset (* scale s.x))))
+                                              :y (+ local.y (* local.z (+ inset (* scale s.y))))
+                                              :size (* local.z (* scale s.size))
+                                              :depth (+ (+ s.depth local.w) 1.0)}))
+                                         :until (fn [previous s] (< s.row 0)))]
+                      [cell.x cell.y cell.size cell.depth])) ids))))
+
+  (defn atlas-pick :context value [(cells : (array vec4)) (x : float) (y : float)]
+    (reduce (fn [(best : int) (i : int)]
+              (let* [c (array/nth cells i)]
+                (if (and (and (>= x c.x) (< x (+ c.x c.z)))
+                         (and (>= y c.y) (< y (+ c.y c.z)))) i best)))
+            -1 (array/range (array/count cells) :type int)))
+
+  (graph view :context host [(initial_zoom : float 1.0) (center : vec3 [0.5 0.5 0.0])]
+    (let* [cells (ref cells)
+           side (float (max 1 (min (- (frame/width) 48) (- (frame/height) 196))))
+           left (/ (- (frame/width) side) 2.0)
+           top (+ 56.0 (/ (- (- (frame/height) 196) side) 2.0))
+           input (frame/input)]
+      (state [old {:x 0.0 :y 0.0 :zoom initial_zoom :px 0.0 :py 0.0 :down false :press_x 0.0 :press_y 0.0 :dragged false :hover -1 :width 0 :height 0}]
+        (let* [px (pointer/x) py (pointer/y)
+               down (pointer/down)
+               begin (and down (not old.down))
+               press_x (if begin px old.press_x)
+               press_y (if begin py old.press_y)
+               dragged (if begin false (or old.dragged (> (+ (abs (- px press_x)) (abs (- py press_y))) 4.0)))
+               release (and (and old.down (not down)) (not dragged))
+               wheel (fold [v 0.0] [event input.events]
+                           (+ v (case event.kind "scrolled" (* event.delta.y 0.12)
+                                                 "trackpad-scrolled" (* event.delta.y 0.012)
+                                                 "pinched" (log (max 0.01 event.scale)) :else 0.0)))
+               reset (or (= old.width 0) (or (key/down "r") (key/down "home")))
+               back (fold [v false] [event input.events]
+                          (or v (and (equal? event.kind "pointer-pressed") (equal? event.button "right"))))
+               target (if (and release (>= old.hover 0)) (array/nth cells old.hover) [0.0 0.0 1.0 0.0])
+               dive (and release (>= old.hover 0))
+               keyboard (* (frame/dt) (- (if (key/down "=") 2.0 0.0) (if (key/down "-") 2.0 0.0)))
+               factor (* (exp (+ wheel keyboard)) (if back 0.5 1.0))
+               zoom (if reset initial_zoom
+                        (if dive (min 1000000.0 (/ 0.84 target.z))
+                            (min 1000000.0 (max 0.65 (* old.zoom factor)))))
+               ratio (/ zoom old.zoom)
+               x (if reset (* side (- 0.5 (* initial_zoom center.x)))
+                     (if dive (* side (- 0.5 (* zoom (+ target.x (* target.z 0.5)))))
+                         (+ (- (- px left) (* ratio (- (- px left) old.x)))
+                            (if (and old.down down) (- px old.px) 0.0))))
+               y (if reset (* side (- 0.5 (* initial_zoom center.y)))
+                     (if dive (* side (- 0.5 (* zoom (+ target.y (* target.z 0.5)))))
+                         (+ (- (- py top) (* ratio (- (- py top) old.y)))
+                            (if (and old.down down) (- py old.py) 0.0))))
+               unchanged (and (= px old.px) (and (= py old.py) (and (= x old.x) (and (= y old.y)
+                              (and (= zoom old.zoom) (and (= old.width (frame/width)) (= old.height (frame/height))))))))
+               hover (if unchanged old.hover
+                         (if (and (> py 56.0) (< py (- (frame/height) 140)))
+                             (atlas-pick cells (/ (- (- px left) x) (* side zoom)) (/ (- (- py top) y) (* side zoom))) -1))]
+          {:x x :y y :zoom zoom :px px :py py :down down :press_x press_x :press_y press_y :dragged dragged :hover hover :width (frame/width) :height (frame/height)}))))
+
+  (defn palette :context value [(group : int)]
+    (case group 1 [0.47 0.75 0.73] 2 [0.65 0.70 0.68] 3 [0.77 0.63 0.48]
+                4 [0.59 0.62 0.59] 5 [0.85 0.85 0.77] :else [0.89 0.89 0.83]))
+
+  (defn stipple-hash :context value [(id : float) (salt : float)]
+    (abs (mod (* (sin (+ (* id 12.9898) (* salt 78.233))) 43758.5453) 1.0)))
+
+  (graph picture :context draw
+    (let* [d (ref data) cells (ref cells) view (ref view)
+           count (array/count d.parent)
+           ids (array/range count :type int)
+           side (float (max 1 (min (- (frame/width) 48) (- (frame/height) 196))))
+           left (+ (/ (- (frame/width) side) 2.0) view.x)
+           top (+ (+ 56.0 (/ (- (- (frame/height) 196) side) 2.0)) view.y)
+           scale (* side view.zoom)
+           background [0.055 0.071 0.067]
+           positions (map (fn [(i : int)]
+                            (let* [c (array/nth cells i)] [(+ left (* c.x scale)) (+ top (* c.y scale)) 0.0])) ids)
+           sizes (map (fn [(i : int)]
+                        (let* [c (array/nth cells i) s (* c.z scale)
+                               x (+ left (* c.x scale)) y (+ top (* c.y scale))
+                               visible (and (and (> s 2.0) (< x (frame/width)))
+                                            (and (> (+ x s) 0.0) (and (< y (- (frame/height) 140)) (> (+ y s) 56.0))))
+                               size (if visible (max 0.0 (- s 1.2)) 0.0)] [size size 0.0])) ids)
+           colors (map (fn [(i : int)]
+                         (let* [c (array/nth cells i)
+                                fade (min 1.0 (max 0.0 (/ (- (* c.z scale) 2.0) 18.0)))
+                                tint (* (palette (array/nth d.group i)) (+ 0.13 (* 0.018 (min c.w 10.0))))]
+                           (+ background (* (- tint background) fade)))) ids)
+           ; Fixed dot count: no expansion or per-frame filter, zero-sized hidden marks.
+           ; ponytail: 16 dots per row fits up to 65,536 rows; split sets if the index grows past that.
+           dots (array/range (* count 16) :type int)
+           dot_positions (map (fn [(j : int)]
+                                (let* [i (int/div j 16) c (array/nth cells i)
+                                       seed (+ (float j) (float (array/nth d.seed i)))
+                                       x (+ c.x (* c.z (+ 0.10 (* 0.80 (stipple-hash seed 1.0)))))
+                                       y (+ c.y (* c.z (+ 0.10 (* 0.80 (stipple-hash seed 2.0)))))]
+                                  [(+ left (* x scale)) (+ top (* y scale)) 0.0])) dots)
+           dot_sizes (map (fn [(j : int)]
+                            (let* [i (int/div j 16) c (array/nth cells i)
+                                   s (* c.z scale) x (+ left (* c.x scale)) y (+ top (* c.y scale))
+                                   lines (int/add (int/sub (array/nth d.last i) (array/nth d.first i)) 1)
+                                   visible (and (and (> (array/nth d.kind i) 0) (= (array/nth d.leaf i) 1))
+                                                (and (< (mod j 16) (min 16 lines))
+                                                     (and (> s 12.0) (and (< x (frame/width)) (and (> (+ x s) 0.0) (and (< y (- (frame/height) 140)) (> (+ y s) 56.0)))))))
+                                   radius (if visible (* 0.95 (min 1.0 (/ (- s 12.0) 36.0))) 0.0)]
+                              radius)) dots)
+           dot_colors (map (fn [(j : int)]
+                             (let* [i (int/div j 16) c (array/nth cells i)
+                                    fade (min 1.0 (max 0.0 (/ (- (* c.z scale) 12.0) 36.0)))]
+                               (+ background (* (- (palette (array/nth d.group i)) background) fade)))) dots)
+           ; Parent-child paths express containment, never calls or fabricated references.
+           edges (array/range (* count 2) :type int)
+           edge_from (map (fn [(j : int)]
+                            (let* [i (int/div j 2) parent (array/nth d.parent i)
+                                   c (array/nth cells i) p (array/nth cells (int (max 0 parent)))
+                                   x (+ left (* (+ c.x (* c.z 0.5)) scale))
+                                   y (+ top (* (+ c.y (* c.z 0.5)) scale))
+                                   px (+ left (* (+ p.x (* p.z 0.5)) scale))
+                                   py (+ top (* (+ p.y (* p.z 0.5)) scale))
+                                   visible (and (>= parent 0) (> (* c.z scale) 8.0))]
+                              (if visible [px (if (= (mod j 2) 0) py y) 0.0] [0.0 0.0 0.0]))) edges)
+           edge_to (map (fn [(j : int)]
+                          (let* [i (int/div j 2) parent (array/nth d.parent i)
+                                 c (array/nth cells i) p (array/nth cells (int (max 0 parent)))
+                                 x (+ left (* (+ c.x (* c.z 0.5)) scale))
+                                 y (+ top (* (+ c.y (* c.z 0.5)) scale))
+                                 px (+ left (* (+ p.x (* p.z 0.5)) scale))
+                                 visible (and (>= parent 0) (> (* c.z scale) 8.0))]
+                            (if visible [(if (= (mod j 2) 0) px x) y 0.0] [0.0 0.0 0.0]))) edges)
+           ; Stable 24 slots; only their text/position changes. Select the largest readable cells.
+           ; Label ranking changes only with the camera, never with the hover or clock.
+           label_state (state [old {:x 0.0 :y 0.0 :zoom 0.0 :width -1 :height -1
+                                    :scores (array/float count 0.0) :order (array/int count 0)}]
+                              (if (and (= old.x left) (and (= old.y top) (and (= old.zoom scale)
+                                       (and (= old.width (frame/width)) (= old.height (frame/height)))))) old
+                                  (let* [scores (exact (map (fn [(i : int)]
+                                                             (let* [c (array/nth cells i) x (+ left (* c.x scale)) y (+ top (* c.y scale))
+                                                                    size (* c.z scale)]
+                                                               (if (and (> size 110.0) (and (>= x 0.0) (and (< x (- (frame/width) 110)) (and (>= y 60.0) (< y (- (frame/height) 162)))))) size 0.0))) ids))]
+                                    {:x left :y top :zoom scale :width (frame/width) :height (frame/height)
+                                     :scores scores :order (array/grade scores :descending true)})))
+           hover view.hover
+           selected (array/nth cells (int (max 0 hover)))
+           selected_pos [(+ left (* selected.x scale)) (+ top (* selected.y scale)) 0.0]
+           selected_size [(* selected.z scale) (* selected.z scale) 0.0]
+           art (draw/merge (draw/rects positions sizes :fill colors :stroke "#4b514a")
+                           (draw/lines edge_from edge_to :color "#41483e" :width 0.65)
+                           (draw/circles dot_positions :radius dot_sizes :fill dot_colors)
+                           (for [slot (range 24)]
+                             (let* [i (if (< slot count) (array/nth label_state.order slot) -1)
+                                    c (array/nth cells (int (max 0 i)))
+                                    size (* c.z scale)
+                                    label (if (or (< i 0) (<= (array/nth label_state.scores (int (max 0 i))) 0.0)) "" (array/nth d.label i))]
+                               (draw/text [(+ (+ left (* c.x scale)) 5.0) (+ (+ top (* c.y scale)) 7.0) 0.0]
+                                          label :size 11 :color "#e1dec8")))
+                           (draw/rect selected_pos (if (>= hover 0) selected_size [0.0 0.0 0.0]) :stroke "#e7a375"))
+           info (if (< hover 0) "Move over a file or scope to inspect it." (str (array/nth d.path hover) ":" (array/nth d.first hover) "–" (array/nth d.last hover)))
+           name (if (< hover 0) "Rays + PXUI" (array/nth d.label hover))
+           signature (if (< hover 0) "" (array/nth d.signature hover))]
+      (draw/merge (draw/background "#0e1211") art
+                  ; Flat chrome covers off-canvas marks without a dynamic clip or text count.
+                  (draw/rect [0 0 0] [(frame/width) 56 0] :fill "#0e1211")
+                  (draw/rect [0 (- (frame/height) 140) 0] [(frame/width) 140 0] :fill "#0e1211")
+                  (draw/text [24 18 0] "SOURCE ATLAS" :size 18 :color "#e1dec8")
+                  (draw/text [250 22 0] (str count " files + scopes  /  RAYS · PXUI  /  ×" (int view.zoom)) :size 11 :color "#8c998d")
+                  (draw/text [24 (- (frame/height) 120) 0] name :size 17 :color "#e7a375")
+                  (draw/text [24 (- (frame/height) 90) 0] info :size 11 :color "#e1dec8")
+                  (draw/text [24 (- (frame/height) 66) 0] signature :size 11 :color "#8c998d")
+                  (draw/text [24 (- (frame/height) 28) 0] "Wheel / pinch: zoom · Drag: pan · Click: dive · Right click: back · R / Home: reset" :size 11 :color "#8c998d"))))
+
+  (graph settings :context settings (settings/config :title "Source Atlas · Rays + PXUI" :width 1280 :height 900))
+  (graph editor :context editor (ui/workspace (ui/canvas (ref picture) :focus true))))

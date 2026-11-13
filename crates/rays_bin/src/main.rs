@@ -31,7 +31,7 @@ fn native(text: Option<String>, path: &str) {
 
 fn mem_command(path: &str, frames: i64) {
     let text = std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_else(|e| die(&format!("rays: {e}")));
-    let loaded = rays_editor::source_file::read_imports(path, &text).and_then(|imports| workspace::load(None, imports, None, &text));
+    let loaded = workspace::load_file(path, &text);
     let workspace = loaded.unwrap_or_else(|ds| {
         for d in ds {
             eprintln!("{}", rays_diagnostic::report(path, &text, &d));
@@ -106,8 +106,9 @@ fn render_command(args: &[&str]) {
         rest = tail;
     }
     let output = output.unwrap_or_else(|| usage("render: missing -o PNG"));
+    eprintln!("render uses the CPU reference evaluator; use rays mem FILE --frames N to measure device frames.");
     let text = std::fs::read_to_string(file).unwrap_or_else(|e| die(&format!("rays: {file}: {e}")));
-    let doc = rays_editor::source_file::read_imports(file, &text).and_then(|imports| workspace::load(None, imports, None, &text)).unwrap_or_else(|ds| {
+    let doc = workspace::load_file(file, &text).unwrap_or_else(|ds| {
         for d in ds { eprintln!("{}", rays_diagnostic::report(file, &text, &d)); }
         std::process::exit(1)
     });

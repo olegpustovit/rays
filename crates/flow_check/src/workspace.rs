@@ -2378,6 +2378,14 @@ impl Checker {
          }
      }
      match operator.name.as_str() {
+         "draw/rects" | "draw/circles" | "draw/lines" => {
+             for argument in args {
+                 if matches!(argument.key.as_deref(), Some("fill" | "stroke" | "color"))
+                     && matches!(&argument.info.ty, Ty::Array(element) | Ty::List(element) if **element == Ty::Vec4) {
+                     error(&argument.form, "E_DRAW_COLOR", "Per-mark colours are opaque array:vec3 values; blend fades toward the background in the colour kernel.");
+                 }
+             }
+         },
          "sop/context_seed" => match positional.as_slice() {
              [argument] if text(argument).is_some_and(|value| !value.trim().is_empty()) => (),
              [argument] => error(&argument.form, "E_SEED_NAMESPACE", "Context seed requires a literal nonblank namespace."),

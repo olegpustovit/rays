@@ -66,12 +66,21 @@ fn check_meshes(lowered: &flow_sop::lower::T) -> Result<(), Diagnostic> {
 
 /// The checked document and every diagnostic to print; `allow` is `^:allow-warnings`.
 pub fn check_text(imports: Vec<(String, String)>, text: &str, lower: bool) -> Result<(Option<doc::T>, Vec<Diagnostic>, bool), Fail> {
+    check_text_at(None, imports, text, lower)
+}
+
+fn check_text_at(path: Option<&str>, imports: Vec<(String, String)>, text: &str, lower: bool) -> Result<(Option<doc::T>, Vec<Diagnostic>, bool), Fail> {
     let allow = match s::parse(text) {
         Ok(forms) => forms.iter().any(|f| s::head(f) == Some("workspace") && f.meta().iter().any(|m| m == "allow-warnings")),
         Err(_) => false,
     };
     let catalog = catalog()?;
-    let options = doc::TextOptions { imports, ..Default::default() };
+    let mut ops = flow_sop::operators::all().to_vec();
+    if let Some(path) = path {
+        let base = std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."));
+        if let Some(op) = ops.iter_mut().find(|op| op.name == "table/load") { *op = flow_check::table::operator(base.to_path_buf()); }
+    }
+    let options = doc::TextOptions { ops: Some(std::sync::Arc::new(ops)), imports, ..Default::default() };
     Ok(match doc::check_text(&options, &catalog, text) {
         Err(ds) => (None, ds, allow),
         Ok((workspace, warnings)) if !lower => (Some(workspace), warnings, allow),
@@ -109,7 +118,7 @@ pub fn check_diagnostics(path: &str, lower: bool) -> Result<(String, Option<doc:
         flow_ir::flow_ir::profile::create(std::sync::Arc::new(move || started.elapsed().as_secs_f64()))
     });
     let mut check = || match read_imports(path, &text) {
-        Ok(imports) => check_text(imports, &text, lower),
+        Ok(imports) => check_text_at(Some(path), imports, &text, lower),
         Err(ds) => Ok((None, ds, false)),
     };
     let (document, ds, allow) = if let Some(maps) = &maps { flow_ir::flow_ir::profile::sample(maps, &mut check) } else { check() }?;

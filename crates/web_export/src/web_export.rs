@@ -98,6 +98,15 @@ fn fixed_region(region: &C::RegionT) -> bool {
 }
 
 pub fn lower(d: &doc::T) -> R<Lowered> {
+    for graph in d.checked.graphs.iter().chain(d.checked.defs.iter()) {
+        let mut pending = vec![graph.body.clone()];
+        while let Some(term) = pending.pop() {
+            if let W::Node::Op(id) = term.node {
+                if term.name(term.arena().op(id).op) == "table/load" { return Err(err("E_WEB_TABLE", "table/load is a native resource and cannot be exported to the web.", None)); }
+            }
+            pending.extend(term.children().iter().map(|id| term.child(*id)));
+        }
+    }
     let draw = first_draw(d)?;
     if let Some((t, name, ctx)) = foreign(d, draw) {
         return Err(err(
@@ -895,7 +904,9 @@ pub fn load(path: &str) -> (String, Result<doc::T, Vec<Diagnostic>>) {
             }
         }
         let catalog = editor_document::kinds::catalog(flow_sop::manifest::VERSION, &sop::nodes::factories()).map_err(|d| vec![d])?;
-        let options = doc::TextOptions { imports, ..Default::default() };
+        let mut ops = flow_sop::operators::all().to_vec();
+        if let Some(op) = ops.iter_mut().find(|op| op.name == "table/load") { *op = flow_check::table::operator(dir); }
+        let options = doc::TextOptions { ops: Some(Arc::new(ops)), imports, ..Default::default() };
         doc::check_text(&options, &catalog, &text).map(|(t, _)| t)
     })();
     (text, result)

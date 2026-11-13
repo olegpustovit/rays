@@ -2069,8 +2069,10 @@ pub mod executor {
             }
             result
         };
+        // A draw rebinds the same code to a fresh residual each frame. Inputs above carry the
+        // current captures; the shader and its output buffers remain owned by this code.
         let kernel = match (cache.cached)() {
-            Some((previous, previous_fast, p, kernel)) if Arc::ptr_eq(&previous, &backend) && previous_fast == fast && p.residual == packed_region.residual && Arc::ptr_eq(&p.code, &packed_region.code) => kernel,
+            Some((previous, previous_fast, p, kernel)) if Arc::ptr_eq(&previous, &backend) && previous_fast == fast && Arc::ptr_eq(&p.code, &packed_region.code) => kernel,
             _ => {
                 let start = profile.as_ref().map(|p| (p.clock)());
                 let result = backend.prepare(fast, packed_region);

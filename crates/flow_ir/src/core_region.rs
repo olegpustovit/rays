@@ -925,7 +925,7 @@ impl Lower {
     fn carried_initial(&mut self, seed: &Term, ty: &Ty, value: &Expression) -> Res<Vec<i64>> {
         // ponytail: mixed carries stay in Core until Region retains their initial and later numeric kinds.
         if !same_carry_type(seed.ty(), ty) {
-            return Err(refusal(seed, "E_PACKED_TYPE", "Carried numeric widening requires the structured Core representation."));
+            return Err(refusal(seed, "E_PACKED_TYPE", &format!("Carried numeric widening requires the structured Core representation: {} -> {}.", ty::to_string(seed.ty()), ty::to_string(ty))));
         }
         Ok(self.leaves(seed, ty, value)?.into_iter().map(|(r, _)| r).collect())
     }

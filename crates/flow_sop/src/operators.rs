@@ -1210,6 +1210,7 @@ fn concat() -> Op {
 
 static ALL: LazyLock<Vec<Op>> = LazyLock::new(|| {
     let mut ops = vec![
+        flow_check::table::operator(std::path::PathBuf::new()),
         attr(),
         attr_checked(),
         with_attr(),

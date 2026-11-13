@@ -361,4 +361,21 @@ fn guarded_gather() {
     run::close(&r,false);ogpu_core::backend::destroy_buffer(&table).unwrap();pipelines::close(&pipes);
 }
 
-pub const CASES: &[(&str, fn())] = &[("guarded_gather",guarded_gather),("specialized_captures", specialized_captures), ("fixtures", fixtures), ("carried", carried), ("statuses", statuses), ("empty_and_outputs", empty_and_outputs), ("refusals", refusals), ("gather_and_region", gather_and_region), ("selected_outputs", selected_outputs)];
+// LRU eviction closes a runner while a shown borrow still has its status check queued.
+fn closed_runner_preserves_pending_status() {
+    let Some((lease, pipes)) = start() else { return };
+    for (source, bad) in [("(map (fn [x] (+ x t)) (array/range 8))", false), (STATUS[4].1, true)] {
+        let program = tp::compile(source);
+        let r = runner(&lease, &pipes, &program, true);
+        let output = tp::ok(dispatch_nowait(&r, &prepare(&program, true, 1.0)));
+        let epoch = run::epoch(&output);
+        run::close(&r, false);
+        for _ in 0..2 {
+            let verdict = run::private::check_status(&r, epoch);
+            assert_eq!(verdict.is_err(), bad, "late status survives runner close");
+        }
+    }
+    pipelines::close(&pipes);
+}
+
+pub const CASES: &[(&str, fn())] = &[("closed_runner_preserves_pending_status", closed_runner_preserves_pending_status), ("guarded_gather",guarded_gather),("specialized_captures", specialized_captures), ("fixtures", fixtures), ("carried", carried), ("statuses", statuses), ("empty_and_outputs", empty_and_outputs), ("refusals", refusals), ("gather_and_region", gather_and_region), ("selected_outputs", selected_outputs)];

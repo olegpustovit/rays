@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""Index source files with rust-analyzer documentSymbol; Python stdlib only.
+
+Run tools/source_atlas_index, then rays sketches/source_atlas.rays.
+Only the small fixture table is committed. Real output/cache live in _out/.
+"""
+import argparse
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import queue
+import subprocess
+import sys
+import threading
+import time
+
+EXTENSIONS = {'.rs', '.rays', '.c', '.h', '.cpp', '.hpp', '.mm', '.m', '.metal', '.wgsl', '.py', '.sh', '.toml'}
+EXCLUDED = {'.git', 'target', '_out', '_build', '_opam', 'node_modules', 'vendor', 'fixtures', 'history'}
+COLUMNS = [('parent', 'int'), ('first', 'int'), ('last', 'int'), ('kind', 'int'), ('group', 'int'), ('seed', 'int'), ('label', 'text'), ('path', 'text'), ('signature', 'text'), ('rank', 'int'), ('order', 'int'), ('lo', 'int'), ('hi', 'int'), ('prefix', 'int'), ('depth', 'int'), ('leaf', 'int')]
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def seed(text):
+    return int(digest(text.encode())[:6], 16)  # exactly representable by device floats
+
+
+class Lsp:
+    def __init__(self, executable, root, timeout):
+        self.timeout = timeout
+        self.serial = 0
+        self.messages = queue.Queue()
+        self.process = subprocess.Popen([executable], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        threading.Thread(target=self.read, daemon=True).start()
+        self.request('initialize', {'processId': os.getpid(), 'rootUri': root.as_uri(), 'capabilities': {'textDocument': {'documentSymbol': {'hierarchicalDocumentSymbolSupport': True}}}, 'initializationOptions': {'linkedProjects': [], 'checkOnSave': False, 'cargo': {'buildScripts': {'enable': False}}, 'procMacro': {'enable': False}}})
+        self.send('initialized', {})
+
+    def read(self):
+        try:
+            while True:
+                length = None
+                while True:
+                    line = self.process.stdout.readline()
+                    if not line:
+                        raise EOFError('rust-analyzer closed its output')
+                    if line == b'\r\n':
+                        break
+                    key, value = line.decode().split(':', 1)
+                    if key.lower() == 'content-length':
+                        length = int(value)
+                if length is None or length > 64 * 1024 * 1024:
+                    raise ValueError('invalid LSP content length')
+                payload = bytearray()
+                while len(payload) < length:
+                    chunk = self.process.stdout.read(length - len(payload))
+                    if not chunk:
+                        raise EOFError('truncated LSP message')
+                    payload.extend(chunk)
+                self.messages.put(json.loads(payload))
+        except Exception as error:
+            self.messages.put(error)
+
+    def send(self, method, params, request_id=None):
+        message = {'jsonrpc': '2.0', 'method': method, 'params': params}
+        if request_id is not None:
+            message['id'] = request_id
+        payload = json.dumps(message, ensure_ascii=False).encode()
+        self.process.stdin.write(f'Content-Length: {len(payload)}\r\n\r\n'.encode() + payload)
+        self.process.stdin.flush()
+
+    def request(self, method, params):
+        self.serial += 1
+        request_id = self.serial
+        self.send(method, params, request_id)
+        deadline = time.monotonic() + self.timeout
+        while True:
+            message = self.messages.get(timeout=max(0, deadline - time.monotonic()))
+            if isinstance(message, Exception):
+                raise message
+            if message.get('id') != request_id:
+                continue
+            if 'error' in message:
+                raise RuntimeError(f'{method}: {message["error"]}')
+            return message.get('result')
+
+    def symbols(self, path, text):
+        uri = path.as_uri()
+        self.send('textDocument/didOpen', {'textDocument': {'uri': uri, 'languageId': 'rust', 'version': 1, 'text': text}})
+        try:
+            # Opening a document races the server's syntax snapshot; ContentModified asks to retry.
+            for attempt in range(3):
+                try:
+                    return self.request('textDocument/documentSymbol', {'textDocument': {'uri': uri}}) or []
+                except RuntimeError as error:
+                    if '-32801' not in str(error) or attempt == 2:
+                        raise
+        finally:
+            self.send('textDocument/didClose', {'textDocument': {'uri': uri}})
+
+    def close(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+        self.process.stdin.close()
+        self.process.stdout.close()
+
+
+def sources(root):
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if d not in EXCLUDED and not d.startswith('.') and not (Path(directory) / d).is_symlink())
+        for name in sorted(files):
+            path = Path(directory) / name
+            if not path.is_symlink() and (path.suffix in EXTENSIONS or path.name == 'source_atlas_index'):
+                yield path
+
+
+def group(path):
+    if '/tests/' in '/' + path or '/test_' in path:
+        return 4
+    if path.startswith('sketches/'):
+        return 5
+    if path.startswith('pxui/crates/public/'):
+        return 1
+    if path.startswith('pxui/crates/open/'):
+        return 2
+    if path.startswith('pxui/crates/private/'):
+        return 3
+    return 0
+
+
+def rows_for(rows, parent, symbols, path, lines, depth):
+    for symbol in sorted(symbols, key=lambda s: (s.get('range', s.get('location', {}).get('range', {})).get('start', {}).get('line', 0), s['name'])):
+        span = symbol.get('range', symbol.get('location', {}).get('range'))
+        if span is None:
+            raise ValueError(f'{path}: symbol has no range')
+        first = span['start']['line'] + 1
+        last = span['end']['line'] + (span['end']['character'] > 0)
+        if not 1 <= first <= max(1, len(lines)) or last < first or last > max(1, len(lines)):
+            raise ValueError(f'{path}: invalid symbol span {first}:{last}')
+        row = len(rows)
+        children = symbol.get('children', [])
+        rows.append({'parent': parent, 'first': first, 'last': last, 'kind': symbol['kind'], 'group': group(path), 'seed': seed(path + ':' + symbol['name']), 'label': symbol['name'], 'path': path, 'signature': lines[first - 1].strip() if lines else '', 'depth': depth, 'leaf': int(not children)})
+        rows_for(rows, row, children, path, lines, depth + 1)
+
+
+def layout_columns(rows):
+    """Sibling addressing and integer prefix weights, never screen coordinates or layout."""
+    scopes = {}
+    for i, row in enumerate(rows):
+        scopes.setdefault(row['parent'], []).append(i)
+    order = [i for parent in sorted(scopes) for i in scopes[parent]]
+    cursor = 0
+    for parent in sorted(scopes):
+        siblings = scopes[parent]
+        lo, hi = cursor, cursor + len(siblings)
+        for i in siblings:
+            rows[i].update(rank=cursor, lo=lo, hi=hi)
+            cursor += 1
+    total = 0
+    for slot, i in enumerate(order):
+        total += 1 + math.isqrt(max(1, rows[i]['last'] - rows[i]['first'] + 1))
+        rows[slot].update(order=i, prefix=total)
+
+
+def escape(value):
+    return str(value).replace('\\', '\\\\').replace('\t', '\\t').replace('\n', '\\n').replace('\r', '\\r')
+
+
+def write_table(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = '\t'.join(name + ':' + kind for name, kind in COLUMNS) + '\n'
+    text += ''.join('\t'.join(escape(row[name]) for name, _ in COLUMNS) + '\n' for row in rows)
+    temporary = path.with_suffix(path.suffix + '.tmp')
+    temporary.write_text(text, encoding='utf-8')
+    temporary.replace(path)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--cache', type=Path)
+    parser.add_argument('--lsp', default='rust-analyzer')
+    parser.add_argument('--timeout', type=float, default=30)
+    args = parser.parse_args()
+    root = args.root.resolve()
+    output = args.output or root / '_out/source_atlas/atlas.tsv'
+    cache = args.cache or root / '_out/source_atlas/symbols'
+    cache.mkdir(parents=True, exist_ok=True)
+    version = subprocess.check_output([args.lsp, '--version'], text=True).strip()
+    rows = []
+    lsp = None
+    files = sorted(sources(root))
+    hits = 0
+    try:
+        for file in files:
+            path = file.relative_to(root).as_posix()
+            raw = file.read_bytes()
+            text = raw.decode('utf-8')
+            lines = text.splitlines()
+            symbols = []
+            if file.suffix == '.rs':
+                key = digest(version.encode() + b'\0' + raw)
+                saved = cache / (key + '.json')
+                if saved.exists():
+                    symbols = json.loads(saved.read_text())
+                    hits += 1
+                else:
+                    if lsp is None:
+                        lsp = Lsp(args.lsp, root, args.timeout)
+                    symbols = lsp.symbols(file, text)
+                    temporary = saved.with_suffix('.tmp')
+                    temporary.write_text(json.dumps(symbols, ensure_ascii=False), encoding='utf-8')
+                    temporary.replace(saved)
+            row = len(rows)
+            rows.append({'parent': -1, 'first': 1, 'last': max(1, len(lines)), 'kind': 0, 'group': group(path), 'seed': seed(path), 'label': file.name, 'path': path, 'signature': lines[0].strip() if lines else '', 'depth': 0, 'leaf': int(not symbols)})
+            rows_for(rows, row, symbols, path, lines, 1)
+        if not rows:
+            raise ValueError('no source files found')
+        layout_columns(rows)
+        write_table(output, rows)
+        print(f'{len(files)} files, {len(rows) - len(files)} symbols, {hits} cache hits -> {output}')
+    finally:
+        if lsp is not None:
+            lsp.close()
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError, queue.Empty, subprocess.SubprocessError) as error:
+        sys.exit(f'source_atlas_index: {error or "rust-analyzer timed out"}')

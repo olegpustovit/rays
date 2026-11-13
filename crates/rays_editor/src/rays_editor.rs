@@ -456,6 +456,15 @@ pub mod workspace {
         Process::default()
     }
 
+    /// Load resources relative to the authored workspace, independent of the process directory.
+    pub fn load_file(path: &str, text: &str) -> Result<workspace_doc::T, Vec<Diagnostic>> {
+        let imports = source_file::read_imports(path, text)?;
+        let mut ops = flow_sop::operators::all().to_vec();
+        let base = std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."));
+        if let Some(op) = ops.iter_mut().find(|op| op.name == "table/load") { *op = flow_check::table::operator(base.to_path_buf()); }
+        load(Some(ops), imports, None, text)
+    }
+
     /// Parse and check a `.rays` text against `workspace_catalog`.
     pub fn load(ops: Option<Vec<flow_check::op::Op>>, imports: Vec<(String, String)>, factories: Option<&[Factory]>, text: &str) -> Result<workspace_doc::T, Vec<Diagnostic>> {
         match workspace_catalog(factories) {
@@ -678,8 +687,7 @@ pub mod workspace {
                 .map_err(|e| vec![rays_diagnostic::error("E_IO".to_string(), e.to_string(), None, None, None, Vec::new(), Vec::new())])
                 .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())?,
         };
-        let imports = source_file::read_imports(path, &text)?;
-        let doc = load(None, imports, None, &text)?;
+        let doc = load_file(path, &text)?;
         run(None, None, Some(Source { path: path.to_string(), digest: lowering::sha256(&text) }), process.unwrap_or_default(), doc).map_err(|d| vec![d])
     }
 }

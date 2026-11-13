@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Small indexer regression: real rust-analyzer cold/warm runs and content invalidation."""
+import csv
+from pathlib import Path
+import runpy
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parent.parent
+INDEX = ROOT / 'tools/source_atlas_index'
+module = runpy.run_path(str(INDEX))
+fixture = ROOT / 'fixtures/source_atlas'
+with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
+    work = Path(temporary)
+    output = work / 'atlas.tsv'
+    command = [str(INDEX), '--root', str(fixture / 'tree'), '--output', str(output), '--cache', str(work / 'cache')]
+    cold = subprocess.check_output(command, text=True)
+    assert '40 files, 224 symbols, 0 cache hits' in cold, cold
+    assert output.read_bytes() == (fixture / 'atlas.tsv').read_bytes(), 'fixture golden changed'
+    warm = subprocess.check_output(command, text=True)
+    assert '32 cache hits' in warm, warm
+    assert output.read_bytes() == (fixture / 'atlas.tsv').read_bytes(), 'warm output changed'
+    rows = list(csv.DictReader(output.open(), delimiter='\t'))
+    assert len(rows) == 264
+    assert sorted(int(r['order:int']) for r in rows) == list(range(len(rows)))
+    for i, row in enumerate(rows):
+        parent, rank = int(row['parent:int']), int(row['rank:int'])
+        assert int(rows[rank]['order:int']) == i
+        assert int(row['lo:int']) <= rank < int(row['hi:int'])
+        assert parent == -1 or parent < i
+        if parent >= 0:
+            assert int(rows[parent]['first:int']) <= int(row['first:int']) <= int(row['last:int']) <= int(rows[parent]['last:int'])
+    # A file's digest, not its timestamp or size, keys the symbol cache.
+    tiny = work / 'tree'
+    tiny.mkdir()
+    source = tiny / 'change.rs'
+    source.write_text('fn before() {}\n')
+    tiny_command = [str(INDEX), '--root', str(tiny), '--output', str(output), '--cache', str(work / 'cache')]
+    subprocess.check_call(tiny_command)
+    source.write_text('fn after_() {}\n')
+    subprocess.check_call(tiny_command)
+    assert 'after_' in output.read_text() and 'before' not in output.read_text()
+    assert module['escape']('λ\tline\n\\\r') == 'λ\\tline\\n\\\\\\r'
+print('source_atlas_index: fixture, hierarchy, cache and content invalidation passed')

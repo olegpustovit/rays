@@ -60,3 +60,7 @@ harness = false
 
 [lints]
 workspace = true
+
+[[test]]
+name = "source_atlas"
+harness = false

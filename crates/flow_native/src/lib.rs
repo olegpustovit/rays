@@ -17,3 +17,6 @@ mod test_drawing;
 mod test_probe_run;
 #[cfg(test)]
 mod test_workspace_images;
+
+#[cfg(test)]
+mod test_source_atlas;
