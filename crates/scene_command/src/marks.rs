@@ -42,7 +42,8 @@ pub enum Entry {
     MarkSet { count: i64, kind: Kind },
     Geometry { vertices: Vec<f64>, indices: Vec<i64>, color: i32 },
     Image { resource: i64, x: i64, y: i64, scale: f64, angle: f64 },
-    Text { x: i64, y: i64, size: i64, color: i32, text: Vec<u8> },
+    /// `style` is `text_style` of the face, alignment and tracking; 0 is the default run.
+    Text { x: i64, y: i64, size: i64, color: i32, text: Vec<u8>, style: i64 },
     PushTransform { xx: f64, xy: f64, yx: f64, yy: f64, tx: f64, ty: f64 },
     PopTransform,
     PushClip { x: f64, y: f64, width: f64, height: f64 },
@@ -158,6 +159,23 @@ fn check_entry(i: usize, entry: &Entry) -> Result<(), String> {
     }
 }
 
+/// The faces a text run can name, numbered in this order; the first is the default.
+pub const FONTS: [&str; 12] = ["pragmasevka", "departure", "archivo", "archivo-semibold", "archivo-condensed-bold", "archivo-expanded-extrabold",
+    "newsreader", "newsreader-semibold", "newsreader-display", "plex-condensed", "plex-condensed-semibold", "plex-mono"];
+/// Where a text run's `at` is on its line: its left end, its middle or its right end.
+pub const ALIGNS: [&str; 3] = ["left", "center", "right"];
+
+/// A text run's style as one integer: the face, the alignment times 256, and the tracking in
+/// thousandths of the size (0 to 2000) times 65536. The message names what was not understood.
+pub fn text_style(font: &str, align: &str, tracking: f64) -> Result<i64, String> {
+    let font = FONTS.iter().position(|name| *name == font).ok_or_else(|| format!("Unknown font {font:?}; the fonts are {}.", FONTS.join(", ")))?;
+    let align = ALIGNS.iter().position(|name| *name == align).ok_or_else(|| format!("Unknown alignment {align:?}; text aligns left, center or right."))?;
+    if !(0.0..=2.0).contains(&tracking) { return Err("Text tracking is 0 to 2, in sizes.".to_owned()); }
+    Ok(font as i64 + 256 * align as i64 + 65536 * (tracking * 1000.0).round() as i64)
+}
+/// (face, alignment, tracking in sizes) of a style.
+pub fn text_style_parts(style: i64) -> (usize, usize, f64) { ((style & 255) as usize, ((style >> 8) & 255) as usize, (style >> 16) as f64 / 1000.0) }
+
 pub fn validate(table: &[Entry]) -> Result<(), String> {
     if table.len() > MAX_ENTRIES as usize { return Err(format!("more than {MAX_ENTRIES} entries")); }
     let (mut transforms, mut clips) = (0usize, 0usize);
@@ -243,8 +261,10 @@ pub fn serialize(table: &[Entry]) -> Vec<u8> {
             Entry::Image { resource, x, y, scale, angle } => {
                 put_u8(&mut out, 2); put_int(&mut out, *resource); put_int(&mut out, *x); put_int(&mut out, *y); put_float(&mut out, *scale); put_float(&mut out, *angle);
             }
-            Entry::Text { x, y, size, color, text } => {
-                put_u8(&mut out, 3); put_int(&mut out, *x); put_int(&mut out, *y); put_int(&mut out, *size); put_i32(&mut out, *color); put_int(&mut out, text.len() as i64); out.extend_from_slice(text);
+            Entry::Text { x, y, size, color, text, style } => {
+                // a styled run has its own tag, so a default run serializes as it always did
+                put_u8(&mut out, if *style == 0 { 3 } else { 8 }); put_int(&mut out, *x); put_int(&mut out, *y); put_int(&mut out, *size); put_i32(&mut out, *color); put_int(&mut out, text.len() as i64); out.extend_from_slice(text);
+                if *style != 0 { put_int(&mut out, *style); }
             }
             Entry::PushTransform { xx, xy, yx, yy, tx, ty } => {
                 put_u8(&mut out, 4); for &v in [xx, xy, yx, yy, tx, ty] { put_float(&mut out, v); }

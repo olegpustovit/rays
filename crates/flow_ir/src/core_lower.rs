@@ -276,7 +276,7 @@ fn constant_storage(mut program: C::Program) -> C::Program {
                     D::Point { at, ink } => for u in [*at, *ink] { unsafe_use(uses, u); },
                     D::Mark { args, .. } | D::Batch { args, .. } | D::Path { args, .. } => for (_, n) in args { unsafe_use(uses, *n); },
                     D::Points { positions, ink } => for u in [*positions, *ink] { unsafe_use(uses, u); },
-                    D::TextRun { at, text, ink, size } => for u in [*at, *text, *ink, *size] { unsafe_use(uses, u); },
+                    D::TextRun { at, text, ink, size, style } => { for u in [*at, *text, *ink, *size] { unsafe_use(uses, u); } if let Some((font, align, tracking)) = style { for u in [*font, *align, *tracking] { unsafe_use(uses, u); } } },
                     D::Image { at, scale, angle, .. } => for u in [*at, *scale, *angle] { unsafe_use(uses, u); },
                     D::Push(_, n) => unsafe_use(uses, *n),
                     D::Pop => {}

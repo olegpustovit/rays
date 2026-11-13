@@ -152,7 +152,7 @@ fn marks_validation_and_stable_encoding() {
         E::Geometry { vertices: vec![], indices: vec![], color: 0 },
         E::Geometry { vertices: vec![0.0, 0.0, 1.0, 0.0, 1.0, 1.0], indices: vec![0, 1, 2], color: 1 },
         E::Image { resource: 1, x: 0, y: 0, scale: 1.0, angle: 0.0 },
-        E::Text { x: 0, y: 0, size: 0, color: 0, text: Vec::new() },
+        E::Text { x: 0, y: 0, size: 0, color: 0, text: Vec::new(), style: 0 },
         E::PushTransform { xx: 1.0, xy: 0.0, yx: 0.0, yy: 1.0, tx: 0.0, ty: 0.0 },
         E::PushClip { x: 0.0, y: 0.0, width: 1.0, height: 1.0 }, E::PopClip, E::PopTransform,
     ];
@@ -188,11 +188,11 @@ fn marks_validation_and_stable_encoding() {
         vec![E::PushTransform { xx: 1.0, xy: 0.0, yx: 0.0, yy: 1.0, tx: 0.0, ty: 0.0 }, E::PopClip],
     ];
     for table in invalid { assert!(marks::validate(&table).is_err()); }
-    assert!(marks::validate(&vec![E::Text { x: 0, y: 0, size: 1, color: 0, text: Vec::new() }; marks::max_entries() as usize + 1]).is_err());
+    assert!(marks::validate(&vec![E::Text { x: 0, y: 0, size: 1, color: 0, text: Vec::new(), style: 0 }; marks::max_entries() as usize + 1]).is_err());
 
     let tiny = vec![
         E::MarkSet { count: 1, kind: K::Point { position: pair(1.0, 2.0), fill: 0x11223344 } },
-        E::Text { x: 1, y: 2, size: 3, color: 5, text: b"hi".to_vec() },
+        E::Text { x: 1, y: 2, size: 3, color: 5, text: b"hi".to_vec(), style: 0 },
     ];
     let mut expected = Vec::new();
     expected.extend_from_slice(&0x524d4b31i32.to_le_bytes());
@@ -204,7 +204,7 @@ fn marks_validation_and_stable_encoding() {
     assert_eq!(marks::serialize(&tiny), expected);
     assert_eq!(marks::serialize(&tiny), marks::serialize(&tiny));
     assert_eq!(&marks::serialize(&tiny)[..4], b"1KMR");
-    let opaque = marks::serialize(&[E::Text { x: 0, y: 0, size: 0, color: 0, text: vec![0xff] }]);
+    let opaque = marks::serialize(&[E::Text { x: 0, y: 0, size: 0, color: 0, text: vec![0xff], style: 0 }]);
     assert_eq!(opaque.last(), Some(&0xff));
     assert_eq!(marks::gpu_token(4, 2, 8).map(|token| (marks::gpu_identity(token), marks::gpu_count(token), marks::gpu_stamp(token))), Ok((4, 2, 8)));
     assert_eq!(marks::gpu_token(0, 2, 8), Err("Marks.gpu_token: invalid identity, count or stamp".into()));

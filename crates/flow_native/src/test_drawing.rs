@@ -67,7 +67,7 @@ fn rect_set(count: i64) -> Entry {
 fn marks_scene_adapts_a_table_and_caches_constant_sets() {
     let buffers = Buffers::create();
     let cache = marks_scene::cache_new();
-    let table = vec![rect_set(2), Entry::PushClip { x: 0., y: 0., width: 5., height: 5. }, rect_set(1), Entry::PopClip, Entry::Text { x: 1, y: 2, size: 12, color: -1, text: b"hi".to_vec() }];
+    let table = vec![rect_set(2), Entry::PushClip { x: 0., y: 0., width: 5., height: 5. }, rect_set(1), Entry::PopClip, Entry::Text { x: 1, y: 2, size: 12, color: -1, text: b"hi".to_vec(), style: 0 }];
     let a = ok(marks_scene::scene(&buffers, None, None, Some(&cache), None, &table));
     assert_eq!(a.len(), 3);
     assert!(matches!(&a[1], scene::Node::Clip(0, 0, 5, 5, children) if children.len() == 1));

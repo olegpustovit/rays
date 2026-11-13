@@ -666,7 +666,7 @@ fn draw_ops()->Vec<Op>{
         ("draw/circles",vec![("positions",arr(Ty::Vec3))],vec![],None,vec![("radius",Ty::Any),("fill",Ty::Any),("stroke",Ty::Any)]),
         ("draw/rects",vec![("positions",arr(Ty::Vec3)),("sizes",Ty::Any)],vec![],None,vec![("fill",Ty::Any),("stroke",Ty::Any)]),
         ("draw/lines",vec![("from",arr(Ty::Vec3)),("to",arr(Ty::Vec3))],vec![],None,vec![("color",Ty::Any),("width",Ty::Float)]),
-        ("draw/text",vec![("at",Ty::Vec3),("text",Ty::Text)],vec![],None,vec![("color",Ty::Color),("size",Ty::Float)]),
+        ("draw/text",vec![("at",Ty::Vec3),("text",Ty::Text)],vec![],None,vec![("color",Ty::Color),("size",Ty::Float),("font",Ty::Text),("align",Ty::Text),("tracking",Ty::Float)]),
         ("draw/translate",vec![("offset",Ty::Vec3),("drawing",drawing.clone())],vec![],None,vec![]),
         ("draw/rotate",vec![("angle",Ty::Float),("drawing",drawing.clone())],vec![],None,vec![]),
         ("draw/scale",vec![("factor",Ty::Any),("drawing",drawing.clone())],vec![],None,vec![]),

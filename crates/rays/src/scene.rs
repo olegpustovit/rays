@@ -38,6 +38,8 @@ pub struct TextNode {
     pub size: i64,
     pub wrap: Option<i64>,
     pub align: font::Alignment,
+    /// `scene_command::marks::text_style`: the face, where `x` is on the line, the tracking.
+    pub style: i64,
     automatic: RefCell<Option<font::raster::Automatic>>,
     rendered: RefCell<Option<image::Image>>,
 }
@@ -276,7 +278,10 @@ pub fn path(fill: Option<color::T>, value: &path_mod::t) -> Result<Node, String>
     Ok(Node::Group(Rc::new(geometry_nodes(geometries)?)))
 }
 
-pub fn text(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: &str) -> Node {
+pub fn text(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: &str) -> Node { styled_text(at, color_, size, value, 0) }
+
+/// Text in a face, alignment and tracking of `scene_command::marks::text_style`; 0 is `text`.
+pub fn styled_text(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: &str, style: i64) -> Node {
     Node::Text(Rc::new(TextNode {
         x: at.0,
         y: at.1,
@@ -285,6 +290,7 @@ pub fn text(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: 
         size: size.unwrap_or(16),
         wrap: None,
         align: font::Alignment::Left,
+        style,
         automatic: RefCell::new(None),
         rendered: RefCell::new(None),
     }))
@@ -640,7 +646,7 @@ pub mod layer {
         if let Some(img) = n.rendered.borrow().as_ref() {
             return Ok(img.clone());
         }
-        let automatic = font::raster::borrow_automatic(n.wrap, Some(n.align), Some(density), n.size, &n.value, font::RenderMode::Blended(n.color))?;
+        let automatic = font::raster::borrow_automatic(n.wrap, Some(n.align), Some(density), n.size, &n.value, font::RenderMode::Blended(n.color), n.style)?;
         let img = font::raster::automatic_image(&automatic);
         *n.automatic.borrow_mut() = Some(automatic);
         *n.rendered.borrow_mut() = Some(img.clone());
@@ -688,7 +694,12 @@ pub mod layer {
                     Node::Text(tn) => {
                         let scale = 1. / std::cmp::max(1, density) as f64;
                         let img = text_image(density, tn)?;
-                        image_command(builder, &img, tn.x, tn.y, scale, 0.);
+                        // a centred or right-aligned run hangs from its middle or its right end
+                        let x = match scene_command::marks::text_style_parts(tn.style).1 {
+                            0 => tn.x,
+                            align => { let width = (image::get_width(&img)? as f64 * scale).round() as i64; if align == 1 { tn.x - width / 2 } else { tn.x - width } }
+                        };
+                        image_command(builder, &img, x, tn.y, scale, 0.);
                     }
                     Node::Group(g) => nodes(builder, density, g)?,
                     Node::Translate(x, y, g) => {

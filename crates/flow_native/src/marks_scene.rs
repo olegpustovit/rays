@@ -584,8 +584,8 @@ pub fn scene(
                 Some(resolve) => top.push(scene::image(&resolve(*resource), (*x, *y), Some(*scale), Some(*angle)).map_err(|message| fail("E_DRAW_RANGE", &message))?),
                 None => return Err(fail("E_IMAGE", "Drawing images need an environment-owned image resolver.")),
             },
-            Entry::Text { x, y, size, color: c, text } => {
-                top.push(scene::text((*x, *y), Some(color(*c)), Some(*size), &String::from_utf8_lossy(text)));
+            Entry::Text { x, y, size, color: c, text, style } => {
+                top.push(scene::styled_text((*x, *y), Some(color(*c)), Some(*size), &String::from_utf8_lossy(text), *style));
             }
             Entry::PushTransform { xx, xy, yx, yy, tx, ty } => {
                 stack.push((Close::Transform(Transform { xx: *xx, xy: *xy, yx: *yx, yy: *yy, tx: *tx, ty: *ty }), std::mem::take(&mut top)));

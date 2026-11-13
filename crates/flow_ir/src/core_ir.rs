@@ -87,7 +87,8 @@ pub enum Draw {
     Batch { mark: Mark, args: Vec<(Symbol, i64)> },
     Points { positions: i64, ink: i64 },
     Path { path: PathKind, args: Vec<(Symbol, i64)> },
-    TextRun { at: i64, text: i64, ink: i64, size: i64 },
+    /// `style` is the (font, align, tracking) of a run whose call names any of them.
+    TextRun { at: i64, text: i64, ink: i64, size: i64, style: Option<(i64, i64, i64)> },
     Image { source: (Ty, i64), at: i64, scale: i64, angle: i64 },
     Push(Transform, i64),
     Pop,
@@ -1068,7 +1069,7 @@ pub fn reads(s: &Statement) -> Vec<i64> {
             Draw::Point { at, ink } => vec![*at, *ink],
             Draw::Mark { args, .. } | Draw::Batch { args, .. } | Draw::Path { args, .. } => pairs(args),
             Draw::Points { positions, ink } => vec![*positions, *ink],
-            Draw::TextRun { at, text, ink, size } => vec![*at, *text, *ink, *size],
+            Draw::TextRun { at, text, ink, size, style } => { let mut uses = vec![*at, *text, *ink, *size]; if let Some((font, align, tracking)) = style { uses.extend([*font, *align, *tracking]); } uses }
             Draw::Image { at, scale, angle, .. } => vec![*at, *scale, *angle],
             Draw::Pop => Vec::new(),
         }
@@ -1300,9 +1301,10 @@ pub fn pp(p: &Program) -> String {
                 o.push_str(&format!("draw/{}", path.name()));
                 args_line(o, args);
             }
-            Draw::TextRun { at, text, ink, size } => {
+            Draw::TextRun { at, text, ink, size, style } => {
                 o.push_str("draw/text at="); local(o, *at); o.push_str(" text="); local(o, *text);
                 o.push_str(" ink="); local(o, *ink); o.push_str(" size="); local(o, *size);
+                if let Some((font, align, tracking)) = style { o.push_str(" font="); local(o, *font); o.push_str(" align="); local(o, *align); o.push_str(" tracking="); local(o, *tracking); }
             }
             Draw::Image { source: (ty, id), at, scale, angle } => {
                 o.push_str(&format!("draw/image {}#{} at=", ty::to_string(ty), id));

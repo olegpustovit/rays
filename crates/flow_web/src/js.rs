@@ -860,7 +860,10 @@ fn draw(ctx: &mut Context, d: &Draw) -> String {
                 object_of(args)
             )
         }
-        Draw::TextRun { at, text, ink, size } => format!(
+        // ponytail: the web runtime has one face and left runs; a styled run fails there until it
+        // carries the faces. A default run exports as it always did.
+        Draw::TextRun { style: Some(_), .. } => "rt.fail(\"E_WEB_TEXT_STYLE\", \"Text fonts, alignment and tracking are native only.\");".to_owned(),
+        Draw::TextRun { at, text, ink, size, style: None } => format!(
             "if (typeof {t} !== \"string\") rt.fail(\"E_TYPE\", \"Drawing text is text.\"); else if ({t} !== \"\") {{ const [x, y] = point(rt, {}); emit(rt, {{type: \"text\", x, y, size: Number(rt.coerce(\"int\", {})), color: ink(rt, {}), text: {t}}}); }}",
             local(*at),
             local(*size),

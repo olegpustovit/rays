@@ -470,7 +470,13 @@ fn rule(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node, source: &C::Sour
             let text = need("text")?;
             let ink = default(ctx, source, locals, "color", &white)?;
             let size = default(ctx, source, locals, "size", &Value::Int(16))?;
-            emit(ctx, C::Draw::TextRun { at, text, ink, size });
+            // A run that names no face, alignment or tracking stays the default run it always was.
+            let style = if locals.iter().any(|(k, _)| k == "font" || k == "align" || k == "tracking") {
+                Some((default(ctx, source, locals, "font", &Value::Text(b"pragmasevka".to_vec().into()))?,
+                      default(ctx, source, locals, "align", &Value::Text(b"left".to_vec().into()))?,
+                      default(ctx, source, locals, "tracking", &Value::Float(0.))?))
+            } else { None };
+            emit(ctx, C::Draw::TextRun { at, text, ink, size, style });
         }
         "draw/image" => {
             let image = match n.args.iter().find(|(k, _)| k == "image") {

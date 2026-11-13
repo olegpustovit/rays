@@ -421,7 +421,7 @@ pub fn compile(draw: &Draw) -> Compiled {
             push(sink, Entry::MarkSet { count, kind: Kind::Point { position, fill } })
         }),
         Draw::Path { path: p, args } => Box::new(move |vals, sink| self::path(sink, p, &args, vals)),
-        Draw::TextRun { at, text, ink: i, size } => Box::new(move |vals, sink| {
+        Draw::TextRun { at, text, ink: i, size, style } => Box::new(move |vals, sink| {
             let text = match &vals[text as usize] {
                 Value::Text(s) => s.to_vec(),
                 _ => return Err(v::fail("E_TYPE", "Drawing text is text.")),
@@ -430,7 +430,15 @@ pub fn compile(draw: &Draw) -> Compiled {
                 let (x, y) = point(&vals[at as usize])?;
                 let size = v::int_of(&vals[size as usize])?;
                 let color = ink(&vals[i as usize])?;
-                push(sink, Entry::Text { x, y, size, color, text })?;
+                let style = match style {
+                    None => 0,
+                    Some((font, align, tracking)) => match (&vals[font as usize], &vals[align as usize]) {
+                        (Value::Text(font), Value::Text(align)) => scene_command::marks::text_style(&String::from_utf8_lossy(font), &String::from_utf8_lossy(align), v::num(&vals[tracking as usize])?)
+                            .map_err(|message| v::fail("E_TEXT_STYLE", &message))?,
+                        _ => return Err(v::fail("E_TYPE", "The font and align of a text run are text.")),
+                    },
+                };
+                push(sink, Entry::Text { x, y, size, color, text, style })?;
             }
             Ok(())
         }),
@@ -548,11 +556,11 @@ mod tests {
         let mut s = sink(None, (10, 10), &buffers);
         let values = vec![Value::Vec3(1.9, -2.5, 0.0), text("hi"), text("#abc"), Value::Int(20), Value::Vec3(12.7, 12.0, 0.0)];
         compile(&Draw::Push(Transform::Translate, 0))(&values, &mut s).unwrap();
-        compile(&Draw::TextRun { at: 4, text: 1, ink: 2, size: 3 })(&values, &mut s).unwrap();
+        compile(&Draw::TextRun { at: 4, text: 1, ink: 2, size: 3, style: None })(&values, &mut s).unwrap();
         compile(&Draw::Pop)(&values, &mut s).unwrap();
         let entries = finish(&s).unwrap();
         assert_eq!(entries[0], Entry::PushTransform { xx: 1.0, xy: 0.0, yx: 0.0, yy: 1.0, tx: 1.0, ty: -2.0 });
-        assert_eq!(entries[1], Entry::Text { x: 12, y: 12, size: 20, color: 0xaabbccffu32 as i32, text: b"hi".to_vec() });
+        assert_eq!(entries[1], Entry::Text { x: 12, y: 12, size: 20, color: 0xaabbccffu32 as i32, text: b"hi".to_vec(), style: 0 });
         assert_eq!(entries[2], Entry::PopTransform);
         assert!(is_device(&device_value(&s, 7, 3, 1)) && !is_device(&Value::Int(0)));
     }
