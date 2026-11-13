@@ -29,8 +29,9 @@ symbol). The layout is a transliteration of the OCaml `build` and `symbol_layout
 are world units. `kind` is 0 branch, 1 file, 2 unindexed file, 3 packing node, 4 scope, 5 leaf
 symbol, 6 empty file. `crate` is a row of `crates.tsv` (the directory of the nearest `Cargo.toml`):
 its extent on the sheet, the corner of its longest file, its files, lines, name and capital `title`,
-and its `rank` by lines. A leaf's `cell` is its place in its crate's reading order, one cell skipped between files; a
-file's `top` is the lines of the longer files of its crate. `profile.tsv` has two 32-bin line-length
+and its `rank` by lines. A leaf's `cell` is its place in its crate's reading order, one cell skipped between files; a file
+or a scope has the `cell` of its first leaf and the `cells` to its last, and a symbol's `level`
+counts the scopes around it. A file's `top` is the lines of the longer files of its crate. `profile.tsv` has two 32-bin line-length
 profiles a file, row `file * 32 + bin`: `width` hashes a line to its number modulo 32 and keeps the
 longest, `mean` cuts the file into 32 slices from first line to last and keeps each slice's mean.
 
@@ -82,7 +83,8 @@ moving every frame (measured under heavy unrelated load; the full-table case enf
 Four more sketches read the same tables; the atlas itself is unchanged. Each is a sheet in fixed
 units (a square of 1000, or 1000 by 1300 and 1000 by 1280) drawn as large as the window allows, with
 its lettering set through `draw/text :font :align :tracking` in the faces of `crates/rays/fonts`.
-None has an inspector: the sheet is the whole window.
+None has an inspector: the sheet is the whole window. Shift with `+` or `-` enlarges or shrinks the
+whole sheet a step about the pointer, lettering and all, and Shift with `0` fits it again.
 
 ### Netwerk
 
@@ -118,8 +120,12 @@ follows its span, a one-line symbol a dash; blues are a function, a method and a
 orange a span of 40 lines and red one over 70. The layout is computed once: the fewest columns at
 which every crate's lines fit the field, a cell nine fifths as tall as it is wide. A frame only
 projects the ticks through the camera, which is the atlas's: the wheel zooms about the point under
-the pointer and eases there, a drag pans, `R` or Space resets. `C` changes the inks to greys with the
-long spans in black and red. On the full table it draws in about 3 ms. `ledger.png` is its view.
+the pointer and eases there, a drag pans, `R` or Space resets. Zooming in shows the ledger's nesting:
+from 8 points a line each file is ruled over its ticks and each scope under them (a scope inside a
+scope a step higher, a rule carrying on along the next line where it runs over the end of one), and
+from 44 points a tick the symbols are named upward beside their ticks and a file over its first.
+A cell of the ledger holds its leaf, so a name is a lookup. `C` changes the inks to greys with the long
+spans in black and red. `ledger.png` is its view.
 
 ### Strata
 
@@ -133,8 +139,11 @@ from its first line to its last and coloured by the `mean` profile: a band's pla
 slice's rank among all slices, blue for the shortest lines of the repository through pale at the
 median to orange for the longest. Both inks of every band are computed once. Bands are snapped to
 whole points, so a file under 32 points keeps the bands that land on one. The longest file is called
-out, and the notes band counts what the four largest crates hold and what the page leaves out. `C`
-changes the inks to one blue. `strata.png` is its view.
+out, and the notes band counts what the four largest crates hold and what the page leaves out. The
+chart has the atlas's camera: the wheel zooms the columns about the pointer, a drag pans, `R` or Space
+resets; the scale counts every 1,000 lines from 4 times and every 100 from 32, and the 160 longest
+files are named in their blocks once those are large enough. `C` changes the inks to one blue.
+`strata.png` is its view.
 
 ### Contour
 
@@ -149,5 +158,5 @@ bit mask: `draw/text` is one run a call, and nine thousand runs would not lower.
 blurred by three seven-point box passes each way, is contoured at ten levels by marching squares, and
 a cell with three or four digits at its corners is left to them, so the lines fill the gaps the
 symbols leave. All of that is computed once; a frame only scales the segments and marks to the window.
-`C` changes the inks (cobalt; cobalt with spans of 64 lines and more in vermilion; black).
-`contour.png` is its view.
+The wheel or a pinch scales the sheet as Shift with `+` and `-` do. `C` changes the inks (cobalt; cobalt
+with spans of 64 lines and more in vermilion; black). `contour.png` is its view.

@@ -3,15 +3,19 @@
 ; tables: the 30 largest crates hang from one line, ordered by size.
 ; Generate first: tools/source_atlas_index
 ; Run: cargo run -p rays_bin -- sketches/source_strata.rays
-; C changes the inks, S saves _out/source-strata.png, Escape quits.
+; Scroll zooms the columns at the pointer, drag pans, R or Space resets; a file is named once its
+; block is large enough. C changes the inks. Shift with + or - enlarges or shrinks the whole page
+; about the pointer, Shift with 0 fits it again. S saves _out/source-strata.png, Escape quits.
 (workspace source_strata
   (graph data :context host (table/load "../_out/source_atlas/atlas.tsv"))
   (graph crates :context host (table/load "../_out/source_atlas/crates.tsv"))
   (graph profile :context host (table/load "../_out/source_atlas/profile.tsv"))
 
-  ; The page is 1000 by 1280 units, as large as the window allows: [x y u], `u` points a unit.
-  (defn page :context value [(w : float) (h : float)]
-    (let* [u (min (/ w 1000.0) (/ h 1280.0))] [(* (- w (* 1000.0 u)) 0.5) (* (- h (* 1280.0 u)) 0.5) u]))
+  ; The page is 1000 by 1280 units, as large as the window allows times `zoom.z`, moved by
+  ; (zoom.x, zoom.y): [x y u], `u` points a unit. The columns hang in the chart, from (80, 366) to
+  ; (966, 1100), whose middle is (523, 733).
+  (defn page :context value [(w : float) (h : float) (zoom : vec3)]
+    (let* [u (* zoom.z (min (/ w 1000.0) (/ h 1280.0)))] [(+ zoom.x (* (- w (* 1000.0 u)) 0.5)) (+ zoom.y (* (- h (* 1280.0 u)) 0.5)) u]))
 
   ; An OKLCH colour as sRGB, clipped to the gamut: lightness, chroma, hue in degrees.
   (defn gamma :context value [(x : float)]
@@ -61,15 +65,60 @@
        :warm (exact (map (fn [(j : int)] (shade 0 (array/nth heat j))) bands))
        :blue (exact (map (fn [(j : int)] (shade 1 (array/nth heat j))) bands))
        :by_rank (array/grade (exact (map (fn [(c : int)] (array/nth crate.rank c)) crate_ids)))
+       ; the files in order of length, for their names
+       :by_length (array/grade (exact (map (fn [(i : int)] (array/nth d.last i)) files)) :descending true)
        :longest longest
        ; the crates the longest file is longer than
        :smaller (sum [c crate_ids] (if (< (array/nth crate.lines c) (array/nth d.last (array/nth files longest))) 1 0))
        :tallest (float (array/max crate_lines))
        :lines (int (array/sum crate_lines))}))
 
+  ; The camera over the chart: [centre x, centre y, zoom] in page units, eased to its target. The
+  ; wheel turns about the point under the pointer, which stays there on every frame of the way.
   (graph view :context host
-    (state [old {:palette 0 :key false}]
-      (let* [key (key/down "c")] {:palette (if (and key (not old.key)) (int/sub 1 old.palette) old.palette) :key key})))
+    (let* [w (float (frame/width)) h (float (frame/height)) input (frame/input)]
+      (state [old {:cx 523.0 :cy 733.0 :zoom 1.0 :tx 523.0 :ty 733.0 :tz 1.0 :px 0.0 :py 0.0 :palette 0 :key false
+                   :page 1.0 :page_x 0.0 :page_y 0.0 :page_key false}]
+        (let* [px (pointer/x) py (pointer/y)
+               s (page w h [old.page_x old.page_y old.page])
+               u s.z ox (+ s.x (* u 523.0)) oy (+ s.y (* u 733.0))
+               inside (and (and (>= px (+ s.x (* u 80.0))) (< px (+ s.x (* u 966.0)))) (and (>= py (+ s.y (* u 366.0))) (< py (+ s.y (* u 1100.0)))))
+               ; Shift with + or - scales the whole sheet a step, about the point under the pointer;
+               ; Shift with 0 fits it again.
+               shift (key/down "shift")
+               page_key (and shift (or (or (key/down "=") (key/down "+")) (or (or (key/down "-") (key/down "_")) (or (key/down "0") (key/down ")")))))
+               turn (if (and page_key (not old.page_key)) (cond (or (key/down "=") (key/down "+")) 1.25 (or (key/down "-") (key/down "_")) 0.8 :else 0.0) 1.0)
+               page (if (= turn 0.0) 1.0 (max 1.0 (min 6.0 (* old.page turn))))
+               fit (min (/ w 1000.0) (/ h 1280.0))
+               ; the sheet unit under the pointer stays under it
+               page_x (if (= page 1.0) 0.0 (- (- (pointer/x) (* (/ (- (pointer/x) s.x) s.z) (* fit page))) (* (- w (* 1000.0 (* fit page))) 0.5)))
+               page_y (if (= page 1.0) 0.0 (- (- (pointer/y) (* (/ (- (pointer/y) s.y) s.z) (* fit page))) (* (- h (* 1280.0 (* fit page))) 0.5)))
+               ax (+ old.tx (/ (- px ox) (* u old.tz)))
+               ay (+ old.ty (/ (- py oy) (* u old.tz)))
+               wheel (fold [v 0.0] [event input.events]
+                           (+ v (case event.kind "scrolled" (* event.delta.y 0.17)
+                                                 "trackpad-scrolled" (* event.delta.y 0.012)
+                                                 "pinched" (log (max 0.01 event.scale)) :else 0.0)))
+               reset (or (key/down "r") (key/down "space"))
+               key (key/down "c")
+               dx (- px old.px) dy (- py old.py)
+               pan (and (and (or (pointer/down) (pointer/down "middle")) (and inside (not shift))) (or (not (= dx 0.0)) (not (= dy 0.0))))
+               wheel_zoom (max 1.0 (min 64.0 (* old.tz (exp wheel))))
+               zoomed (and inside (not (= wheel 0.0)))
+               tz (cond reset 1.0 zoomed wheel_zoom :else old.tz)
+               slide_x (if pan (/ dx (* u old.zoom)) 0.0)
+               slide_y (if pan (/ dy (* u old.zoom)) 0.0)
+               tx (cond reset 523.0 zoomed (- (- ax (/ (- px ox) (* u wheel_zoom))) slide_x) :else (- old.tx slide_x))
+               ty (cond reset 733.0 zoomed (- (- ay (/ (- py oy) (* u wheel_zoom))) slide_y) :else (- old.ty slide_y))
+               ease (- 1.0 (exp (* -11.0 (max 0.0 (min 0.1 (frame/dt))))))
+               zoom (if (< (abs (- tz old.zoom)) (* 0.00001 tz)) tz
+                        (/ 1.0 (+ (/ 1.0 old.zoom) (* (- (/ 1.0 tz) (/ 1.0 old.zoom)) ease))))
+               near (/ 0.001 tz)
+               cx (if (< (abs (- tx old.cx)) near) tx (+ old.cx (* (- tx old.cx) ease)))
+               cy (if (< (abs (- ty old.cy)) near) ty (+ old.cy (* (- ty old.cy) ease)))]
+          {:cx cx :cy cy :zoom zoom :tx tx :ty ty :tz tz :px px :py py
+           :palette (if (and key (not old.key)) (int/sub 1 old.palette) old.palette) :key key
+           :page page :page_x (if (= page old.page) old.page_x page_x) :page_y (if (= page old.page) old.page_y page_y) :page_key page_key}))))
 
   ; A count with its thousands apart, up to 999,999,999.
   (defn grouped :context value [(n : int)]
@@ -96,8 +145,12 @@
     (let* [d (ref data) crate (ref crates) f (ref field) view (ref view)
            files f.files
            w (float (frame/width)) h (float (frame/height))
-           s (page w h)
+           s (page w h [view.page_x view.page_y view.page])
            u s.z
+           ; a chart point (x, y) of the page is at cam.xy + (x, y) cam.z; at rest that is the page itself
+           cam [(- (+ s.x (* u 523.0)) (* (* view.cx view.zoom) u)) (- (+ s.y (* u 733.0)) (* (* view.cy view.zoom) u)) (* view.zoom u)]
+           still (and (= view.zoom 1.0) (and (= view.cx 523.0) (= view.cy 733.0)))
+           left (+ s.x (* u 80.0)) top (+ s.y (* u 366.0)) right (+ s.x (* u 966.0)) bottom (+ s.y (* u 1100.0))
            palette view.palette
            count (array/count crate.rank)
            columns (int (min 30 count))
@@ -108,13 +161,13 @@
            band_at (map (fn [(j : int)]
                           (let* [i (array/nth files (int/div j 32))
                                  q (block k (array/nth crate.rank (array/nth d.crate i)) (array/nth d.top i) (array/nth d.last i))]
-                            [(+ s.x (* u q.x)) (floor (+ s.y (* u (+ q.y (/ (* q.z (float (int/mod j 32))) 32.0))))) 0.0])) bands)
+                            [(+ cam.x (* cam.z q.x)) (floor (+ cam.y (* cam.z (+ q.y (/ (* q.z (float (int/mod j 32))) 32.0))))) 0.0])) bands)
            band_size (map (fn [(j : int)]
                             (let* [i (array/nth files (int/div j 32)) rank (array/nth crate.rank (array/nth d.crate i))
                                    q (block k rank (array/nth d.top i) (array/nth d.last i))
                                    b (float (int/mod j 32))]
                               (if (< rank columns)
-                                  [(* u 23.1333333) (- (floor (+ s.y (* u (+ q.y (/ (* q.z (+ b 1.0)) 32.0))))) (floor (+ s.y (* u (+ q.y (/ (* q.z b) 32.0)))))) 0.0]
+                                  [(* cam.z 23.1333333) (- (floor (+ cam.y (* cam.z (+ q.y (/ (* q.z (+ b 1.0)) 32.0))))) (floor (+ cam.y (* cam.z (+ q.y (/ (* q.z b) 32.0)))))) 0.0]
                                   [0.0 0.0 0.0]))) bands)
            ; (adding a colour types the stored one: a record's array is untyped where it is read)
            band_fill (map (fn [(j : int)] (+ [0.0 0.0 0.0] (case palette 1 (array/nth f.blue j) :else (array/nth f.warm j)))) bands)
@@ -122,27 +175,48 @@
            file_ids (array/range (array/count files) :type int)
            gap_at (map (fn [(j : int)]
                          (let* [i (array/nth files j) q (block k (array/nth crate.rank (array/nth d.crate i)) (array/nth d.top i) (array/nth d.last i))]
-                           [(+ s.x (* u q.x)) (- (floor (+ s.y (* u (+ q.y q.z)))) 1.0) 0.0])) file_ids)
+                           [(+ cam.x (* cam.z q.x)) (- (floor (+ cam.y (* cam.z (+ q.y q.z)))) 1.0) 0.0])) file_ids)
            gap_size (map (fn [(j : int)]
                            (let* [i (array/nth files j) rank (array/nth crate.rank (array/nth d.crate i))]
-                             (if (and (< rank columns) (>= (* (* (float (array/nth d.last i)) k) u) 4.0)) [(* u 23.1333333) 1.0 0.0] [0.0 0.0 0.0]))) file_ids)
+                             (if (and (< rank columns) (>= (* (* (float (array/nth d.last i)) k) cam.z) 4.0)) [(* cam.z 23.1333333) 1.0 0.0] [0.0 0.0 0.0]))) file_ids)
 
            legend_ids (array/range 120 :type int)
            legend_at (map (fn [(j : int)] [(+ s.x (* u (+ 58.0 (float j)))) (+ s.y (* u 262.0)) 0.0]) legend_ids)
            legend_fill (map (fn [(j : int)] (shade palette (- (/ (float j) 59.5) 1.0))) legend_ids)
 
            name (fn [(rank : int)] (array/nth crate.name (array/nth f.by_rank (int (min rank (int/sub count 1))))))
-           ; Column heads read upward, the four largest in bold; the scale counts lines.
+           ; Column heads read upward over their columns, the four largest in bold.
            heads (for [c (range 30)]
-                   (draw/translate [(+ s.x (* u (+ (+ 86.0 (* (+ (float c) 0.5) 29.1333333)) (if (< c columns) -4.5 100000.0)))) (+ s.y (* u 362.0)) 0.0]
-                                   (draw/rotate -1.5707963
-                                                (draw/text [0 0 0] (name c) :size (int (max 5.0 (round (* u 10.5)))) :color "#15181c"
-                                                           :font (if (< c 4) "plex-condensed-semibold" "plex-condensed")))))
-           scale (for [n (range 8)]
-                   (let* [lines (int/mul n 10000) on (<= (float lines) f.tallest) y (+ 372.0 (* (float lines) k))]
+                   (let* [x (+ cam.x (* cam.z (+ 86.0 (* (+ (float c) 0.5) 29.1333333))))]
+                     (draw/translate [(if (and (< c columns) (and (>= x left) (< x right))) (- x (* 4.5 u)) 100000.0) (+ s.y (* u 362.0)) 0.0]
+                                     (draw/rotate -1.5707963
+                                                  (draw/text [0 0 0] (name c) :size (int (max 5.0 (round (* u 10.5)))) :color "#15181c"
+                                                             :font (if (< c 4) "plex-condensed-semibold" "plex-condensed"))))))
+           ; The scale counts lines: every 10,000, every 1,000 from 4 times and every 100 from 32 times.
+           step (cond (< view.zoom 4.0) 10000 (< view.zoom 32.0) 1000 :else 100)
+           first_step (int (max 0.0 (ceil (/ (/ (- (/ (- top cam.y) cam.z) 372.0) k) (float step)))))
+           scale_lines (for [n (range 12)]
+                         (let* [lines (int/mul (int/add first_step n) step) y (floor (+ cam.y (* cam.z (+ 372.0 (* (float lines) k)))))
+                                on (and (<= (float lines) f.tallest) (and (>= y top) (< y bottom)))]
+                           (draw/rect [(+ s.x (* u 78.0)) y 0.0] (if on [(* u 882.0) 1.0 0.0] [0.0 0.0 0.0]) :fill "#d5dadd")))
+           scale_figures (for [n (range 12)]
+                           (let* [lines (int/mul (int/add first_step n) step) y (+ cam.y (* cam.z (+ 372.0 (* (float lines) k))))
+                                  on (and (<= (float lines) f.tallest) (and (>= y top) (< y bottom)))]
+                             (draw/text [(+ s.x (* u 74.0)) (- y (* u 6.0)) 0.0] (if on (grouped lines) "") :size (int (max 5.0 (round (* u 9.0))))
+                                        :color "#666d74" :font "plex-mono" :align "right")))
+           ; A file is named in its block once the block is 14 points tall and 56 wide.
+           ; ponytail: the 160 longest files; a shorter one stays unnamed however far the zoom.
+           names (for [n (range 160)]
+                   (let* [i (array/nth files (array/nth f.by_length (int (min n (int/sub (array/count files) 1)))))
+                          rank (array/nth crate.rank (array/nth d.crate i))
+                          q (block k rank (array/nth d.top i) (array/nth d.last i))
+                          x (+ cam.x (* cam.z q.x)) y (+ cam.y (* cam.z q.y))
+                          on (and (and (< n (array/count files)) (< rank columns))
+                                  (and (and (>= (* cam.z q.z) 14.0) (>= (* cam.z 23.1333333) 56.0))
+                                       (and (and (>= x left) (< (+ x 56.0) right)) (and (>= y top) (< (+ y 14.0) bottom)))))]
                      (draw/merge
-                       (draw/rect [(+ s.x (* u 78.0)) (floor (+ s.y (* u y))) 0.0] (if on [(* u 882.0) 1.0 0.0] [0.0 0.0 0.0]) :fill "#d5dadd")
-                       (figure s 74.0 (+ y 3.0) (if on (grouped lines) "") "right"))))
+                       (draw/rect [(+ x 2.0) (+ y 2.0) 0.0] (if on [(min (- (* cam.z 23.1333333) 4.0) (+ (* (float (array/nth d.chars i)) 5.4) 8.0)) 13.0 0.0] [0.0 0.0 0.0]) :fill "#fdfdfc")
+                       (draw/text [(+ x 5.0) (+ y 2.0) 0.0] (if on (array/nth d.tag i) "") :size 10 :color "#15181c" :font "plex-condensed-semibold"))))
 
            ; The longest file is called out: a leader from its block, across and down to its note.
            long (array/nth files f.longest)
@@ -165,6 +239,22 @@
            percent (fn [(part : int)] (int (round (/ (* 100.0 (float part)) (float f.lines)))))]
       (draw/merge
         (draw/background "#fdfdfc")
+        scale_lines
+        (draw/rects band_at band_size :fill band_fill)
+        (draw/rects gap_at gap_size :fill "#fdfdfc")
+        names
+        ; The call-out and the aside belong to the page at rest.
+        (draw/translate [0 (if still 0.0 100000.0) 0]
+                        (draw/merge callout
+                                    (sans s 960.0 aside "Short columns are small crates," 11.0 "right" false true)
+                                    (sans s 960.0 (+ aside 13.0) "not missing data." 11.0 "right" false true)))
+        ; Flat paper covers what the chart's clip would cut (nothing, where an enlarged page runs past the window).
+        (draw/rect [0 0 0] [w (max 0.0 top) 0] :fill "#fdfdfc")
+        (draw/rect [0 bottom 0] [w (max 0.0 (- h bottom)) 0] :fill "#fdfdfc")
+        (draw/rect [0 0 0] [(max 0.0 left) h 0] :fill "#fdfdfc")
+        (draw/rect [right 0 0] [(max 0.0 (- w right)) h 0] :fill "#fdfdfc")
+        heads
+        scale_figures
         (sans s 40.0 34.0 "SOURCE ATLAS" 10.0 "left" true false)
         (sans s 960.0 34.0 (str "PLATE 003  /  " (grouped f.lines) " LINES OF RUST") 10.0 "right" false true)
         (draw/rect [(+ s.x (* u 40.0)) (+ s.y (* u 44.0)) 0.0] [(* u 920.0) (max 1.0 (* u 1.5)) 0.0] :fill "#dfe5ea")
@@ -179,13 +269,6 @@
         (figure s 118.0 282.0 (str (int f.mid)) "center")
         (figure s 172.0 282.0 (str (int f.high)) "center")
         (sans s 74.0 360.0 "LINES" 8.5 "right" true true)
-        scale
-        (draw/rects band_at band_size :fill band_fill)
-        (draw/rects gap_at gap_size :fill "#fdfdfc")
-        heads
-        callout
-        (sans s 960.0 aside "Short columns are small crates," 11.0 "right" false true)
-        (sans s 960.0 (+ aside 13.0) "not missing data." 11.0 "right" false true)
         (draw/rect [(+ s.x (* u 40.0)) (+ s.y (* u 1112.0)) 0.0] [(* u 920.0) (* u 120.0) 0.0] :fill "#eceff1")
         (serif s 62.0 1146.0 (str "Four crates, " (percent four) "% of the lines") 16.0 "left" true false)
         (sans s 62.0 1170.0 (str (name 0) ", " (name 1) ", " (name 2) ", " (name 3) " hold") 12.0 "left" false true)

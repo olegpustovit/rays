@@ -3,16 +3,19 @@
 ; page of text whose words are functions.
 ; Generate first: tools/source_atlas_index
 ; Run: cargo run -p rays_bin -- sketches/source_ledger.rays
-; Scroll zooms at the pointer, drag pans, R or Space resets, C changes the inks, S saves
+; Zooming in rules each file over its ticks and each scope under them, then names the symbols.
+; Scroll zooms at the pointer, drag pans, R or Space resets, C changes the inks. Shift with + or -
+; enlarges or shrinks the whole sheet about the pointer, Shift with 0 fits it again. S saves
 ; _out/source-ledger.png, Escape quits.
 (workspace source_ledger
   (graph data :context host (table/load "../_out/source_atlas/atlas.tsv"))
   (graph crates :context host (table/load "../_out/source_atlas/crates.tsv"))
 
-  ; The sheet is 1000 by 1300 units, as large as the window allows: `u` points a unit, its corner
-  ; at (x, y). The field of ticks is 776 by 1020 units from (118, 128).
-  (defn sheet :context value [(w : float) (h : float)]
-    (let* [u (min (/ w 1000.0) (/ h 1300.0)) x (* (- w (* 1000.0 u)) 0.5) y (* (- h (* 1300.0 u)) 0.5)]
+  ; The sheet is 1000 by 1300 units, as large as the window allows times `page.z`, moved by
+  ; (page.x, page.y): `u` points a unit, its corner at (x, y). The field of ticks is 776 by 1020
+  ; units from (118, 128).
+  (defn sheet :context value [(w : float) (h : float) (page : vec3)]
+    (let* [u (* page.z (min (/ w 1000.0) (/ h 1300.0))) x (+ page.x (* (- w (* 1000.0 u)) 0.5)) y (+ page.y (* (- h (* 1300.0 u)) 0.5))]
       {:u u :x x :y y :left (+ x (* 118.0 u)) :top (+ y (* 128.0 u)) :right (+ x (* 894.0 u)) :bottom (+ y (* 1148.0 u))
        :ox (+ x (* 506.0 u)) :oy (+ y (* 638.0 u))}))
 
@@ -32,9 +35,19 @@
                         (if (and (= best 1022) (<= (* (float (lines_at n)) (* 1.8 (/ 776.0 (float n)))) 1020.0)) n best)))
            pitch (/ 776.0 (float cols)) drop (* 1.8 pitch)
            rows (exact (map (fn [(c : int)] (int/div (int/add (array/nth cells c) (int/sub cols 1)) cols)) crate_ids))
-           start (array/scan_sum rows)]
+           start (array/scan_sum rows)
+           base (array/scan_sum cells)
+           lines (int (array/sum rows))]
       {:leaves leaves :pitch pitch :drop drop :start start :rows rows :zoom initial_zoom :center center
-       :lines (int (array/sum rows))
+       :lines lines :cols cols :cells cells :base base
+       ; Files and scopes that hold a tick: the ledger's nesting, ruled over and under their ticks.
+       :groups (filter (fn [(i : int)] (and (or (= (array/nth d.kind i) 4) (or (= (array/nth d.kind i) 1) (= (array/nth d.kind i) 2))) (> (array/nth d.cells i) 0))) ids)
+       ; The crate of each line of the ledger, and the leaf at every cell plus one (zero is a gap).
+       :line_crate (exact (map (fn [(r : int)] (fold [best 0] [c crate_ids] (if (and (<= (array/nth start c) r) (> (array/nth rows c) 0)) c best)))
+                               (array/range lines :type int)))
+       :at (array/scatter_add (exact (map (fn [(j : int)] (let* [i (array/nth leaves j)] (int/add (array/nth base (array/nth d.crate i)) (array/nth d.cell i)))) leaf_ids))
+                              (exact (map (fn [(j : int)] (int/add (array/nth leaves j) 1)) leaf_ids))
+                              (int (array/sum cells)))
        ; A tick as [x y height]: centred in its cell's drop, a one-line symbol a dash.
        :tick (exact (map (fn [(j : int)]
                            (let* [i (array/nth leaves j) cell (array/nth d.cell i)
@@ -54,10 +67,21 @@
   ; about the point under the pointer, which stays there on every frame of the way.
   (graph view :context host
     (let* [f (ref field)
-           s (sheet (float (frame/width)) (float (frame/height)))
+           w (float (frame/width)) h (float (frame/height))
            input (frame/input)]
-      (state [old {:cx f.center.x :cy f.center.y :zoom f.zoom :tx f.center.x :ty f.center.y :tz f.zoom :px 0.0 :py 0.0 :palette 0 :key false}]
+      (state [old {:cx f.center.x :cy f.center.y :zoom f.zoom :tx f.center.x :ty f.center.y :tz f.zoom :px 0.0 :py 0.0 :palette 0 :key false
+                   :page 1.0 :page_x 0.0 :page_y 0.0 :page_key false}]
         (let* [px (pointer/x) py (pointer/y)
+               s (sheet w h [old.page_x old.page_y old.page])
+               ; Shift with + or - scales the whole sheet a step, about the point under the pointer.
+               shift (key/down "shift")
+               page_key (and shift (or (or (key/down "=") (key/down "+")) (or (or (key/down "-") (key/down "_")) (or (key/down "0") (key/down ")")))))
+               turn (if (and page_key (not old.page_key)) (cond (or (key/down "=") (key/down "+")) 1.25 (or (key/down "-") (key/down "_")) 0.8 :else 0.0) 1.0)
+               page (if (= turn 0.0) 1.0 (max 1.0 (min 6.0 (* old.page turn))))
+               fit (min (/ w 1000.0) (/ h 1300.0))
+               ; the sheet unit under the pointer stays under it
+               page_x (if (= page 1.0) 0.0 (- (- px (* (/ (- px s.x) s.u) (* fit page))) (* (- w (* 1000.0 (* fit page))) 0.5)))
+               page_y (if (= page 1.0) 0.0 (- (- py (* (/ (- py s.y) s.u) (* fit page))) (* (- h (* 1300.0 (* fit page))) 0.5)))
                inside (and (and (>= px s.left) (< px s.right)) (and (>= py s.top) (< py s.bottom)))
                ax (+ old.tx (/ (- px s.ox) (* s.u old.tz)))
                ay (+ old.ty (/ (- py s.oy) (* s.u old.tz)))
@@ -68,8 +92,8 @@
                reset (or (key/down "r") (key/down "space"))
                key (key/down "c")
                dx (- px old.px) dy (- py old.py)
-               pan (and (and (or (pointer/down) (pointer/down "middle")) inside) (or (not (= dx 0.0)) (not (= dy 0.0))))
-               wheel_zoom (max 1.0 (min 32.0 (* old.tz (exp wheel))))
+               pan (and (and (or (pointer/down) (pointer/down "middle")) (and inside (not shift))) (or (not (= dx 0.0)) (not (= dy 0.0))))
+               wheel_zoom (max 1.0 (min 48.0 (* old.tz (exp wheel))))
                zoomed (and inside (not (= wheel 0.0)))
                tz (cond reset 1.0 zoomed wheel_zoom :else old.tz)
                slide_x (if pan (/ dx (* s.u old.zoom)) 0.0)
@@ -84,7 +108,8 @@
                cx (if (< (abs (- tx old.cx)) near) tx (+ old.cx (* (- tx old.cx) ease)))
                cy (if (< (abs (- ty old.cy)) near) ty (+ old.cy (* (- ty old.cy) ease)))]
           {:cx cx :cy cy :zoom zoom :tx tx :ty ty :tz tz :px px :py py
-           :palette (if (and key (not old.key)) (int/sub 1 old.palette) old.palette) :key key}))))
+           :palette (if (and key (not old.key)) (int/sub 1 old.palette) old.palette) :key key
+           :page page :page_x (if (= page old.page) old.page_x page_x) :page_y (if (= page old.page) old.page_y page_y) :page_key page_key}))))
 
   ; A count with its thousands apart, up to 999,999.
   (defn grouped :context value [(n : int)]
@@ -98,7 +123,7 @@
   (graph picture :context draw
     (let* [d (ref data) crate (ref crates) f (ref field) view (ref view)
            w (float (frame/width)) h (float (frame/height))
-           p (sheet w h)
+           p (sheet w h [view.page_x view.page_y view.page])
            u p.u s [p.x p.y p.u]
            scale (* u view.zoom)
            cam [(- p.ox (* view.cx scale)) (- p.oy (* view.cy scale)) scale]
@@ -112,6 +137,63 @@
                             (let* [q (array/nth ticks j) x (+ cam.x (* q.x cam.z)) y (+ cam.y (* q.y cam.z)) tall (* q.z cam.z)]
                               (if (and (and (>= (+ x wide) lim.x) (< x lim.z)) (and (>= (+ y tall) lim.y) (< y lim.w))) [wide tall 0.0] [0.0 0.0 0.0]))) tick_ids)
            mark_fill (map (fn [(j : int)] (let* [i (array/nth f.leaves j)] (tone palette (array/nth d.lsp i) (array/nth d.mass i)))) tick_ids)
+
+           ; From 8 points a line the ledger shows its nesting: a rule over the ticks of each file,
+           ; a rule under those of each scope, a scope inside a scope a step higher. A rule that
+           ; runs over the end of a line carries on along the next.
+           ; ponytail: four lines a rule; a scope of more ticks than four lines hold keeps its first four.
+           groups f.groups
+           rules (array/range (int/mul (array/count groups) 4) :type int)
+           tall (* f.drop cam.z)
+           rule_at (map (fn [(j : int)]
+                          (let* [i (array/nth groups (int/div j 4)) part (int/mod j 4)
+                                 first (array/nth d.cell i)
+                                 line (int/add (int/add (array/nth f.start (array/nth d.crate i)) (int/div first f.cols)) part)
+                                 from (if (= part 0) (int/mod first f.cols) 0)
+                                 lift (if (= (array/nth d.kind i) 4) (- 0.965 (* 0.04 (float (min 1 (array/nth d.level i))))) 0.03)]
+                            [(+ cam.x (* (* (float from) f.pitch) cam.z)) (floor (+ cam.y (* (* (+ (float line) lift) f.drop) cam.z))) 0.0])) rules)
+           rule_size (map (fn [(j : int)]
+                            (let* [i (array/nth groups (int/div j 4)) part (int/mod j 4)
+                                   first (array/nth d.cell i) last (int/sub (int/add first (array/nth d.cells i)) 1)
+                                   crate_line (array/nth f.start (array/nth d.crate i))
+                                   line (int/add (int/add crate_line (int/div first f.cols)) part)
+                                   end (int/add crate_line (int/div last f.cols))
+                                   from (if (= part 0) (int/mod first f.cols) 0)
+                                   to (if (= line end) (int/mod last f.cols) (int/sub f.cols 1))
+                                   x (+ cam.x (* (* (float from) f.pitch) cam.z))
+                                   y (+ cam.y (* (* (float line) f.drop) cam.z))
+                                   width (* (* (+ (float (int/sub to from)) 0.64) f.pitch) cam.z)]
+                              (if (and (and (<= line end) (> tall 8.0))
+                                       (and (and (>= (+ x width) lim.x) (< x lim.z)) (and (>= (+ y tall) lim.y) (< y lim.w))))
+                                  [width (max 1.0 (floor (* tall 0.014))) 0.0] [0.0 0.0 0.0]))) rules)
+           rule_fill (map (fn [(j : int)]
+                            (let* [i (array/nth groups (int/div j 4))
+                                   own (if (= (array/nth d.kind i) 4) (if (> (array/nth d.level i) 0) [0.560 0.620 0.720] [0.300 0.380 0.520]) [0.300 0.330 0.360])
+                                   show (max 0.0 (min 1.0 (/ (- tall 8.0) 6.0)))]
+                              (+ [0.992 0.992 0.988] (* (- own [0.992 0.992 0.988]) show)))) rules)
+
+           ; From 44 points a tick the symbols are named, upward beside their ticks, and a file is
+           ; named over its first tick.
+           ; ponytail: 160 names, 16 ticks by 10 lines: the most a field shows at that size on a sheet 1500 points wide.
+           wide_cell (* f.pitch cam.z)
+           first_col (int (floor (/ (- p.left cam.x) wide_cell)))
+           first_line (int (floor (/ (- p.top cam.y) tall)))
+           named (for [k (range 160)]
+                   (let* [col (int/add first_col (int/mod k 16)) line (int/add first_line (int/div k 16))
+                          held (and (and (>= col 0) (< col f.cols)) (and (>= line 0) (< line f.lines)))
+                          crate_at (array/nth f.line_crate (int (max 0 (min (int/sub f.lines 1) line))))
+                          cell (int/add (int/mul (int/sub line (array/nth f.start crate_at)) f.cols) col)
+                          leaf (if (and (and held (> wide_cell 44.0)) (and (>= cell 0) (< cell (array/nth f.cells crate_at))))
+                                   (int/sub (array/nth f.at (int/add (array/nth f.base crate_at) cell)) 1) -1)
+                          i (int (max 0 leaf))
+                          file (array/nth d.owner i)
+                          x (+ cam.x (* (float col) wide_cell)) y (+ cam.y (* (float line) tall))
+                          on (and (>= leaf 0) (and (and (>= (+ x (* wide_cell 0.72)) p.left) (< (+ x (* wide_cell 0.95)) p.right)) (and (>= y p.top) (< (+ y tall) p.bottom))))]
+                     (draw/merge
+                       (draw/translate [(+ x (* wide_cell 0.72)) (+ y (* tall 0.88)) 0.0]
+                                       (draw/rotate -1.5707963 (draw/text [0 0 0] (if on (array/nth d.tag i) "") :size 9 :color "#15181c" :font "departure")))
+                       (draw/text [x (+ y (* tall 0.045)) 0.0] (if (and on (= (array/nth d.cell file) (array/nth d.cell i))) (array/nth d.tag file) "")
+                                  :size 9 :color "#e0432b" :font "departure"))))
 
            ; A crate of 2,500 lines and two rows or more is named in the margin, beside its first row.
            ; ponytail: 96 crates.
@@ -132,11 +214,13 @@
       (draw/merge
         (draw/background "#fdfdfc")
         (draw/rects mark_at mark_size :fill mark_fill)
-        ; Flat paper covers what the field's clip would cut.
-        (draw/rect [0 0 0] [w p.top 0] :fill "#fdfdfc")
-        (draw/rect [0 p.bottom 0] [w (- h p.bottom) 0] :fill "#fdfdfc")
-        (draw/rect [0 0 0] [p.left h 0] :fill "#fdfdfc")
-        (draw/rect [p.right 0 0] [(- w p.right) h 0] :fill "#fdfdfc")
+        (draw/rects rule_at rule_size :fill rule_fill)
+        named
+        ; Flat paper covers what the field's clip would cut (nothing, where an enlarged sheet runs past the window).
+        (draw/rect [0 0 0] [w (max 0.0 p.top) 0] :fill "#fdfdfc")
+        (draw/rect [0 p.bottom 0] [w (max 0.0 (- h p.bottom)) 0] :fill "#fdfdfc")
+        (draw/rect [0 0 0] [(max 0.0 p.left) h 0] :fill "#fdfdfc")
+        (draw/rect [p.right 0 0] [(max 0.0 (- w p.right)) h 0] :fill "#fdfdfc")
         names
         (mono s 118.0 70.0 "SOURCE LEDGER" 22.0 "left" false)
         (mono s 118.0 92.0 (str (grouped (array/count ticks)) " SYMBOLS IN READING ORDER / ONE TICK EACH") 11.0 "left" true)

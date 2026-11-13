@@ -3,7 +3,8 @@
 ; lines of the surrounding mass fill the gap.
 ; Generate first: tools/source_atlas_index
 ; Run: cargo run -p rays_bin -- sketches/source_contour.rays
-; C changes the inks, S saves _out/source-contour.png, Escape quits.
+; C changes the inks. The wheel, a pinch, or Shift with + or - enlarges or shrinks the whole sheet about
+; the pointer; Shift with 0 fits it again. S saves _out/source-contour.png, Escape quits.
 (workspace source_contour
   (graph data :context host (table/load "../_out/source_atlas/atlas.tsv"))
 
@@ -116,14 +117,31 @@
                     marks)
        :symbols (sum [i ids] (if (= (array/nth d.kind i) 5) 1 0))}))
 
-  ; The sheet is a square of 1000 units, as large as the window allows: [x y u], `u` points a unit.
-  ; The lattice is the square from (52, 44), 896 units a side.
-  (defn sheet :context value [(w : float) (h : float)]
-    (let* [u (/ (min w h) 1000.0)] [(* (- w (* 1000.0 u)) 0.5) (* (- h (* 1000.0 u)) 0.5) u]))
+  ; The sheet is a square of 1000 units, as large as the window allows times `page.z`, moved by
+  ; (page.x, page.y): [x y u], `u` points a unit. The lattice is the square from (52, 44), 896 units a side.
+  (defn sheet :context value [(w : float) (h : float) (page : vec3)]
+    (let* [u (* page.z (/ (min w h) 1000.0))] [(+ page.x (* (- w (* 1000.0 u)) 0.5)) (+ page.y (* (- h (* 1000.0 u)) 0.5)) u]))
 
   (graph view :context host
-    (state [old {:palette 0 :key false}]
-      (let* [key (key/down "c")] {:palette (if (and key (not old.key)) (int/mod (int/add old.palette 1) 3) old.palette) :key key})))
+    (let* [w (float (frame/width)) h (float (frame/height)) input (frame/input)]
+      (state [old {:palette 0 :key false :page 1.0 :page_x 0.0 :page_y 0.0 :page_key false}]
+        (let* [key (key/down "c")
+               s (sheet w h [old.page_x old.page_y old.page])
+               ; Shift with + or - scales the whole sheet a step, about the point under the pointer;
+               ; Shift with 0 fits it again.
+               shift (key/down "shift")
+               spin (fold [v 0.0] [event input.events]
+                          (+ v (case event.kind "scrolled" (* event.delta.y 0.17) "trackpad-scrolled" (* event.delta.y 0.012)
+                                                "pinched" (log (max 0.01 event.scale)) :else 0.0)))
+               page_key (and shift (or (or (key/down "=") (key/down "+")) (or (or (key/down "-") (key/down "_")) (or (key/down "0") (key/down ")")))))
+               turn (if (and page_key (not old.page_key)) (cond (or (key/down "=") (key/down "+")) 1.25 (or (key/down "-") (key/down "_")) 0.8 :else 0.0) (exp spin))
+               page (if (= turn 0.0) 1.0 (max 1.0 (min 6.0 (* old.page turn))))
+               fit (/ (min w h) 1000.0)
+               ; the sheet unit under the pointer stays under it
+               page_x (if (= page 1.0) 0.0 (- (- (pointer/x) (* (/ (- (pointer/x) s.x) s.z) (* fit page))) (* (- w (* 1000.0 (* fit page))) 0.5)))
+               page_y (if (= page 1.0) 0.0 (- (- (pointer/y) (* (/ (- (pointer/y) s.y) s.z) (* fit page))) (* (- h (* 1000.0 (* fit page))) 0.5)))]
+          {:palette (if (and key (not old.key)) (int/mod (int/add old.palette 1) 3) old.palette) :key key
+           :page page :page_x (if (= page old.page) old.page_x page_x) :page_y (if (= page old.page) old.page_y page_y) :page_key page_key}))))
 
   ; 0 one cobalt, 1 cobalt with spans of 64 lines and more in vermilion, 2 black.
   (defn tone :context value [(palette : int) (digit : int)]
@@ -133,7 +151,7 @@
     (let* [f (ref field) view (ref view)
            w (float (frame/width)) h (float (frame/height))
            n f.n
-           s (sheet w h)
+           s (sheet w h [view.page_x view.page_y view.page])
            u s.z
            ; the lattice's corner and pitch in points
            g [(+ s.x (* u 52.0)) (+ s.y (* u 44.0)) (/ (* u 896.0) (float (int/sub n 1)))]

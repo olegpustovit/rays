@@ -53,6 +53,15 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
     for k, crate in enumerate(crates):
         cells = [n(r, 'cell') for r in rows if n(r, 'kind') == 5 and n(r, 'crate') == k]
         assert len(cells) == len(set(cells)) and max(cells) == int(crate['cells']) - 1, 'ledger cells'
+        # a file or a scope spans the cells of its leaves, and a symbol's level counts the scopes around it
+        for i, r in enumerate(rows):
+            if n(r, 'crate') == k and n(r, 'kind') in (1, 4) and n(r, 'cells'):
+                held, pending = [], [i]
+                while pending:
+                    j = pending.pop()
+                    held += [n(rows[j], 'cell')] if n(rows[j], 'kind') == 5 else []
+                    pending += range(n(rows[j], 'child'), n(rows[j], 'child') + n(rows[j], 'count'))
+                assert (min(held), max(held) - min(held) + 1) == (n(r, 'cell'), n(r, 'cells')), 'a group spans its leaves'
         tops = sorted((n(r, 'top'), n(r, 'last')) for r in rows if n(r, 'kind') in (1, 2) and n(r, 'crate') == k)
         assert all(a + lines == b for (a, lines), (b, _) in zip(tops, tops[1:])) and tops[-1][0] + tops[-1][1] == int(crate['lines']), 'strata tops'
     # A file's digest, not its timestamp or size, keys the symbol cache.

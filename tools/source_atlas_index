@@ -18,9 +18,10 @@ import time
 
 EXTENSIONS = {'.rs'}
 EXCLUDED = {'.git', 'target', '_out', '_build', '_opam', 'node_modules', 'vendor', 'fixtures', 'history'}
-COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'), ('kind', 'int'), ('group', 'int'), ('depth', 'int'), ('child', 'int'), ('count', 'int'), ('owner', 'int'), ('file', 'int'), ('lsp', 'int'), ('first', 'int'), ('last', 'int'), ('mass', 'int'), ('seed', 'int'), ('bytes', 'int'), ('crate', 'int'), ('cell', 'int'), ('top', 'int'), ('label', 'text'), ('tag', 'text'), ('path', 'text'), ('l0', 'text'), ('l1', 'text'), ('l2', 'text'), ('chars', 'int')]
+COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'), ('kind', 'int'), ('group', 'int'), ('depth', 'int'), ('child', 'int'), ('count', 'int'), ('owner', 'int'), ('file', 'int'), ('lsp', 'int'), ('first', 'int'), ('last', 'int'), ('mass', 'int'), ('seed', 'int'), ('bytes', 'int'), ('crate', 'int'), ('cell', 'int'), ('cells', 'int'), ('level', 'int'), ('top', 'int'), ('label', 'text'), ('tag', 'text'), ('path', 'text'), ('l0', 'text'), ('l1', 'text'), ('l2', 'text'), ('chars', 'int')]
 # `crate` is a row of crates.tsv, whose `ax`, `ay` is the corner of the crate's longest file. `cell` is a leaf's place in its crate's reading order, one cell
-# skipped between files; `top` is the lines of the longer files of a file's crate.
+# skipped between files; a file or a scope has the `cell` of its first leaf and the `cells` to its last, and `level` counts the scopes
+# around a symbol. `top` is the lines of the longer files of a file's crate.
 CRATES = [('x0', 'float'), ('y0', 'float'), ('x1', 'float'), ('y1', 'float'), ('ax', 'float'), ('ay', 'float'), ('files', 'int'), ('lines', 'int'), ('cells', 'int'), ('chars', 'int'), ('name', 'text'), ('title', 'text'), ('rank', 'int')]
 # A number comes last: a row never ends in the tab of an empty text cell.
 # Node kinds: the file quadtree, then each indexed file's nested symbol field.
@@ -172,18 +173,25 @@ def crates(files, root_node):
     rows = [{'name': name, 'title': name.upper().replace('_', ' '), 'chars': len(name), 'x0': 1.0, 'y0': 1.0, 'x1': 0.0, 'y1': 0.0, 'files': 0, 'lines': 0, 'cells': 0} for name in names]
     nodes = {}
 
-    def visit(node, file):
+    def visit(node, file, level):
         if node['kind'] in (FILE, HOLLOW):
             file = node['file']
-            nodes[file] = {'node': node, 'leaves': []}
+            nodes[file] = {'node': node, 'leaves': [], 'groups': [node]}
         if file is not None:
             node['crate'] = names.index(files[file]['crate'])
+            if node['kind'] in (SCOPE, LEAF):
+                node['level'] = level
             if node['kind'] == LEAF:
                 nodes[file]['leaves'].append(node)
+            if node['kind'] == SCOPE:
+                nodes[file]['groups'].append(node)
         for child in node['children']:
-            visit(child, file)
+            visit(child, file, level + (node['kind'] == SCOPE))
 
-    visit(root_node, None)
+    def leaves_under(node):
+        return [node] if node['kind'] == LEAF else [leaf for child in node['children'] for leaf in leaves_under(child)]
+
+    visit(root_node, None, 0)
     for k, row in enumerate(rows):
         members = [n for n, f in enumerate(files) if f['crate'] == row['name']]
         for n in members:
@@ -193,6 +201,10 @@ def crates(files, root_node):
             for leaf in sorted(nodes[n]['leaves'], key=lambda leaf: (leaf['first'], leaf['label'])):
                 leaf['cell'] = row['cells']
                 row['cells'] += 1
+            for group in nodes[n]['groups']:
+                held = [leaf['cell'] for leaf in leaves_under(group)]
+                if held:
+                    group['cell'], group['cells'] = min(held), max(held) - min(held) + 1
             row['files'] += 1
             row['x0'], row['y0'] = min(row['x0'], node['x']), min(row['y0'], node['y'])
             row['x1'], row['y1'] = max(row['x1'], node['x'] + node['size']), max(row['y1'], node['y'] + node['size'])
@@ -288,7 +300,7 @@ def scope(f, x, y, size, symbols):
             inner = s.get('children', [])
             children = [scope(f, x + size * 0.08, y + size * 0.08, size * 0.84, inner)] if inner else []
             return {**base, 'kind': SCOPE if inner else LEAF, 'children': children, 'lsp': s['kind'], 'first': first, 'last': last,
-                    'mass': last - first + 1, 'seed': seed(s['name']), 'label': s['name'], **preview(f['lines'], first, last)}
+                    'mass': last - first + 1, 'seed': seed(s['name']), 'label': s['name'], 'tag': s['name'] if len(s['name']) <= 14 else s['name'][:12] + '..', **preview(f['lines'], first, last)}
         children = [pack(x + qx * size / 2, y + qy * size / 2, size / 2, a, b)
                     for a, b, qx, qy in quadrants(weights, (0.10, 0.18, 0.29, 0.43), lo, hi, seed(items[lo]['name']) % 4)]
         return {**base, 'kind': PACK, 'children': children}
