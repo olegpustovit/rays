@@ -1,0 +1,182 @@
+; Source Contour: the Source Atlas set in type. A lattice of digits over the same quadtree, one ink
+; on white: where a symbol's square sits, a digit says how long it is; where nothing sits, contour
+; lines of the surrounding mass fill the gap.
+; Generate first: tools/source_atlas_index
+; Run: cargo run -p rays_bin -- sketches/source_contour.rays
+; Hover a digit to read its symbol, C changes the inks, S saves _out/source-contour.png, Escape quits.
+(workspace source_contour
+  (graph data :context host (table/load "../_out/source_atlas/atlas.tsv"))
+
+  ; Child `k` of a node when it exists and holds the world point, else -1. A cell is [x y size kind].
+  (defn holds :context value [(cell : (array vec4)) (first : int) (n : int) (k : int) (wx : float) (wy : float)]
+    (let* [at (int (min (int/sub (array/count cell) 1) (int/add first k)))
+           c (array/nth cell at)]
+      (if (and (< k n) (and (and (>= wx c.x) (< wx (+ c.x c.z))) (and (>= wy c.y) (< wy (+ c.y c.z))))) at -1)))
+
+  ; The deepest node holding a world point. A node's children are contiguous rows, at most four.
+  (defn locate :context value [(cell : (array vec4)) (child : (array int)) (count : (array int)) (wx : float) (wy : float)]
+    (let* [walk (iterate 64 {:n 0 :done false}
+                         (fn [s]
+                           (let* [first (array/nth child s.n)
+                                  n (array/nth count s.n)
+                                  hit (int (max (max (holds cell first n 0 wx wy) (holds cell first n 1 wx wy))
+                                                (max (holds cell first n 2 wx wy) (holds cell first n 3 wx wy))))]
+                             (if (< hit 0) {:n s.n :done true} {:n hit :done false})))
+                         :until (fn [previous s] s.done))]
+      walk.n))
+
+  ; The mean of seven neighbours along a row or a column of an `n` by `n` lattice, held at its edges.
+  (defn box :context value [(source : (array float)) (n : int) (q : int) (down : bool)]
+    (let* [k (int/mod q n) j (int/div q n)
+           tap (fn [(o : int)]
+                 (array/nth source (if down (int/add (int/mul (int (max 0 (min (int/sub n 1) (int/add j o)))) n) k)
+                                       (int/add (int/mul j n) (int (max 0 (min (int/sub n 1) (int/add k o))))))))]
+      (/ (+ (+ (+ (tap -3) (tap -2)) (+ (tap -1) (tap 0))) (+ (+ (tap 1) (tap 2)) (tap 3))) 7.0)))
+
+  ; Marching squares: segment `part` of the isoline at `level` through lattice cell `at`, as
+  ; [x1 y1 x2 y2] in lattice units, or zeros. A cell with three or four digits at its corners is
+  ; left to them.
+  (defn segment :context value [(mass : (array float)) (digit : (array int)) (n : int) (at : int) (level : float) (part : int)]
+    (let* [i (int/mod at (int/sub n 1)) j (int/div at (int/sub n 1))
+           o (int/add (int/mul j n) i)
+           a (array/nth mass o) b (array/nth mass (int/add o 1))
+           c (array/nth mass (int/add (int/add o n) 1)) d (array/nth mass (int/add o n))
+           set (int/add (int/add (if (>= (array/nth digit o) 0) 1 0) (if (>= (array/nth digit (int/add o 1)) 0) 1 0))
+                        (int/add (if (>= (array/nth digit (int/add (int/add o n) 1)) 0) 1 0) (if (>= (array/nth digit (int/add o n)) 0) 1 0)))
+           k (int/add (int/add (if (> a level) 1 0) (if (> b level) 2 0)) (int/add (if (> c level) 4 0) (if (> d level) 8 0)))
+           x (float i) y (float j)
+           cut (fn [(from : float) (to : float)] (/ (- level from) (if (= to from) 1.0 (- to from))))
+           tx (+ x (cut a b)) ry (+ y (cut b c)) bx (+ x (cut d c)) ly (+ y (cut a d))
+           right (+ x 1.0) below (+ y 1.0)]
+      (cond (>= set 3) [0.0 0.0 0.0 0.0]
+            (and (= part 1) (= k 5)) [right ry bx below]
+            (and (= part 1) (= k 10)) [x ly bx below]
+            (= part 1) [0.0 0.0 0.0 0.0]
+            (or (or (= k 1) (= k 14)) (= k 5)) [x ly tx y]
+            (or (or (= k 2) (= k 13)) (= k 10)) [tx y right ry]
+            (or (= k 3) (= k 12)) [x ly right ry]
+            (or (= k 4) (= k 11)) [right ry bx below]
+            (or (= k 6) (= k 9)) [tx y bx below]
+            (or (= k 7) (= k 8)) [x ly bx below]
+            :else [0.0 0.0 0.0 0.0])))
+
+  ; A digit's 3 by 5 pixels, a bit a pixel, rows from the top.
+  (defn pixels :context value [(digit : int)]
+    (case digit 0 31599 1 29850 2 29671 3 31207 4 18925 5 31183 6 31695 7 18727 8 31727 :else 31215))
+
+  ; The lattice, its digits, the blurred mass and its isolines: computed once, never per frame.
+  ; ponytail: an 84 by 84 lattice whatever the window; a zooming camera would need it per frame.
+  (graph field :context host
+    (let* [d (ref data)
+           n 84
+           ids (array/range (array/count d.kind) :type int)
+           cell (exact (map (fn [(i : int)] [(array/nth d.x i) (array/nth d.y i) (array/nth d.size i) (float (array/nth d.kind i))]) ids))
+           points (array/range (int/mul n n) :type int)
+           ; The leaf whose square holds each lattice point, or -1: the square is the middle of the
+           ; leaf's cell, wider for a longer span.
+           owner (exact (map (fn [(q : int)]
+                               (let* [wx (/ (float (int/mod q n)) (float (int/sub n 1))) wy (/ (float (int/div q n)) (float (int/sub n 1)))
+                                      i (locate cell d.child d.count wx wy)
+                                      c (array/nth cell i)
+                                      reach (sqrt (/ (min 70.0 (max 1.0 (float (array/nth d.mass i)))) 70.0))
+                                      inset (* (* c.z (- 0.38 (* 0.38 reach))) 0.5)]
+                                 (int (if (and (= c.w 5.0) (and (and (>= wx (+ c.x inset)) (<= wx (- (+ c.x c.z) inset)))
+                                                                (and (>= wy (+ c.y inset)) (<= wy (- (+ c.y c.z) inset)))))
+                                          i -1)))) points))
+           ; A digit is the whole part of log2 of the symbol's span: 0 is one line, 9 is 512 and up.
+           digit (exact (map (fn [(q : int)]
+                               (let* [i (array/nth owner q)]
+                                 (int (if (< i 0) -1
+                                          (min 9.0 (floor (+ (/ (log (max 1.0 (float (array/nth d.mass (int (max 0 i)))))) 0.6931472) 0.0001)))))))
+                             points))
+           m0 (exact (map (fn [(q : int)] (if (< (array/nth digit q) 0) 0.0 (+ 1.0 (float (array/nth digit q))))) points))
+           m1 (exact (map (fn [(q : int)] (box m0 n q false)) points))
+           m2 (exact (map (fn [(q : int)] (box m1 n q true)) points))
+           m3 (exact (map (fn [(q : int)] (box m2 n q false)) points))
+           m4 (exact (map (fn [(q : int)] (box m3 n q true)) points))
+           m5 (exact (map (fn [(q : int)] (box m4 n q false)) points))
+           mass (exact (map (fn [(q : int)] (box m5 n q true)) points))
+           peak (array/max mass)
+           cells (int/mul (int/sub n 1) (int/sub n 1))
+           ; ten levels, two parts a cell: most are empty, and only the rest are kept
+           every (array/range (int/mul (int/mul cells 2) 10) :type int)
+           all (exact (map (fn [(s : int)]
+                             (segment mass digit n (int/mod (int/div s 2) cells)
+                                      (* peak (case (int/div s (int/mul cells 2)) 0 0.03 1 0.06 2 0.10 3 0.15 4 0.21 5 0.28 6 0.36 7 0.46 8 0.58 :else 0.72))
+                                      (int/mod s 2)))
+                           every))
+           kept (filter (fn [(s : int)] (let* [v (array/nth all s)] (or (not (= v.x v.z)) (not (= v.y v.w))))) every)
+           set (filter (fn [(q : int)] (>= (array/nth digit q) 0)) points)
+           marks (array/range (int/mul (array/count set) 15) :type int)]
+      {:n n :owner owner :digit digit :set set
+       :lines (exact (map (fn [(j : int)] (array/nth all (array/nth kept j))) (array/range (array/count kept) :type int)))
+       ; a lit pixel is its digit's place in `set` times 15, plus its bit
+       :lit (filter (fn [(m : int)]
+                      (= (int/mod (int/div (pixels (array/nth digit (array/nth set (int/div m 15)))) (int (round (pow 2.0 (float (int/mod m 15)))))) 2) 1))
+                    marks)
+       :symbols (sum [i ids] (if (= (array/nth d.kind i) 5) 1 0))}))
+
+  ; The field: a square under a small top margin, the words under it. [x y pitch].
+  (defn lattice :context value [(w : float) (h : float) (n : int)]
+    (let* [side (max 64.0 (min (- w 96.0) (- h 150.0)))]
+      [(floor (* (- w side) 0.5)) 36.0 (/ side (float (int/sub n 1)))]))
+
+  (graph view :context host
+    (let* [f (ref field)
+           g (lattice (float (frame/width)) (float (frame/height)) f.n)]
+      (state [old {:hover -1 :palette 0 :key false}]
+        (let* [k (int (round (/ (- (pointer/x) g.x) g.z))) j (int (round (/ (- (pointer/y) g.y) g.z)))
+               inside (and (and (>= k 0) (< k f.n)) (and (>= j 0) (< j f.n)))
+               key (key/down "c")]
+          {:hover (if inside (array/nth f.owner (int/add (int/mul (int (max 0 (min (int/sub f.n 1) j))) f.n) (int (max 0 (min (int/sub f.n 1) k))))) -1)
+           :palette (if (and key (not old.key)) (int/mod (int/add old.palette 1) 3) old.palette) :key key}))))
+
+  ; 0 one cobalt, 1 cobalt with spans of 64 lines and more in vermilion, 2 black.
+  (defn tone :context value [(palette : int) (digit : int)]
+    (case palette 1 (if (>= digit 6) [0.878 0.263 0.169] [0.114 0.306 0.847]) 2 [0.082 0.094 0.110] :else [0.114 0.306 0.847]))
+
+  (graph picture :context draw
+    (let* [d (ref data) f (ref field) view (ref view)
+           w (float (frame/width)) h (float (frame/height))
+           n f.n
+           g (lattice w h n)
+           palette view.palette
+           dot (max 1.0 (/ (floor (* g.z 0.3)) 2.0))
+           lines f.lines
+           line_ids (array/range (array/count lines) :type int)
+           line_from (map (fn [(j : int)] (let* [v (array/nth lines j)] [(+ g.x (* v.x g.z)) (+ g.y (* v.y g.z)) 0.0])) line_ids)
+           line_to (map (fn [(j : int)] (let* [v (array/nth lines j)] [(+ g.x (* v.z g.z)) (+ g.y (* v.w g.z)) 0.0])) line_ids)
+           lit f.lit
+           lit_ids (array/range (array/count lit) :type int)
+           dot_at (map (fn [(j : int)]
+                         (let* [m (array/nth lit j) q (array/nth f.set (int/div m 15)) bit (int/mod m 15)]
+                           [(+ (floor (- (+ g.x (* (float (int/mod q n)) g.z)) (* dot 1.5))) (* (float (int/mod bit 3)) dot))
+                            (+ (floor (- (+ g.y (* (float (int/div q n)) g.z)) (* dot 2.5))) (* (float (int/div bit 3)) dot)) 0.0])) lit_ids)
+           dot_fill (map (fn [(j : int)] (tone palette (array/nth f.digit (array/nth f.set (int/div (array/nth lit j) 15))))) lit_ids)
+           hover view.hover
+           inspected (>= hover 0)
+           h0 (int (max 0 hover))
+           side (* g.z (float (int/sub n 1)))
+           foot (+ (+ g.y side) 22.0)
+           ink (case palette 2 "#15181c" :else "#1d4ed8")]
+      (draw/merge
+        (draw/background "#fdfdfc")
+        (draw/lines line_from line_to :color (tone palette 0) :width 1.3)
+        (draw/rects dot_at [dot dot 0.0] :fill dot_fill)
+        (draw/text [g.x foot 0] "SOURCE CONTOUR" :size 20 :color ink)
+        (draw/text [g.x (+ foot 34.0) 0] (str f.symbols " SYMBOLS  /  PLATE 004") :size 10 :color ink)
+        (draw/text [(+ g.x 300.0) (+ foot 2.0) 0]
+                   (if inspected (array/nth d.path h0) "A DIGIT IS THE WHOLE PART OF LOG2 OF A SYMBOL'S LINE SPAN: 0 IS ONE LINE, 5 IS 32 TO 63")
+                   :size 10 :color (if inspected "#e0432b" ink))
+        (draw/text [(+ g.x 300.0) (+ foot 18.0) 0]
+                   (if inspected (str (array/nth d.label h0) "  /  LINES " (array/nth d.first h0) "-" (array/nth d.last h0) "  /  " (array/nth d.mass h0) " LINES")
+                       "A LINE IS AN ISOLINE OF THE MASS OF THE SYMBOLS AROUND IT, DRAWN WHERE NO DIGIT IS")
+                   :size 10 :color (if inspected "#15181c" ink))
+        (draw/text [(+ g.x 300.0) (+ foot 34.0) 0] (if inspected (array/nth d.l0 h0) "HOVER A DIGIT TO READ ITS SYMBOL  /  C CHANGES THE INKS") :size 10 :color (if inspected "#5d656c" ink)))))
+
+  (graph actions :context host
+    (list (host/save_png "_out/source-contour.png" (key/down "s"))
+          (host/quit (key/down "escape"))))
+
+  (graph settings :context settings (settings/config :title "Rays / Source Contour" :width 1000 :height 1000))
+  (graph editor :context editor (ui/workspace (ui/canvas (ref picture) :focus true) :effects (ref actions))))

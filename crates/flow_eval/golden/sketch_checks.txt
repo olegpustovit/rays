@@ -2616,6 +2616,9 @@ FILE source_atlas.rays
 D E_NAMESPACE: Unknown namespace table.
 D E_NAMESPACE: Unknown namespace table.
 NONE
+FILE source_contour.rays
+D E_NAMESPACE: Unknown namespace table.
+NONE
 FILE source_ledger.rays
 D E_NAMESPACE: Unknown namespace table.
 D E_NAMESPACE: Unknown namespace table.

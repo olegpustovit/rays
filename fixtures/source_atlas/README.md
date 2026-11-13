@@ -135,3 +135,19 @@ in half points. The sheet opens at the largest pitch at which every crate's line
 pinch change it a half point a step, the wheel scrolls what no longer fits, `R` or Space fits again
 and `C` changes the inks to black, greys and red. A cell of the ledger holds its leaf, so the tick
 under the pointer is two divisions and a lookup. `ledger.png` is its view.
+
+### Contour
+
+```sh
+cargo run -p rays_bin -- sketches/source_contour.rays
+```
+
+The atlas set in type, one ink on white. An 84 by 84 lattice lies over the quadtree; a lattice point
+inside a leaf's square (the atlas descent, once a point) carries a digit, the whole part of log2 of the
+symbol's span: 0 is one line, 5 is 32 to 63, 9 is 512 and up. A digit is 3 by 5 square marks from a
+bit mask, so it needs no font. The digits' mass, blurred by three seven-point box passes each way, is
+contoured at ten levels by marching squares, and a cell with three or four digits at its corners is
+left to them, so the lines fill the gaps the symbols leave. All of that is computed once; a frame only
+scales about 13,000 segments and 45,000 marks to the window. Hover a digit to read its symbol; `C`
+changes the inks (cobalt; cobalt with spans of 64 lines and more in vermilion; black). `contour.png`
+is its view.

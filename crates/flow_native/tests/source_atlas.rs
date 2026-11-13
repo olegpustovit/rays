@@ -12,7 +12,8 @@ fn frame_views() {
     let netwerk = include_str!("../../../sketches/source_netwerk.rays");
     let views = [("overview", None, 1.0), ("zoom", None, 8.0), ("netwerk_overview", Some(netwerk), 1.0), ("netwerk_zoom", Some(netwerk), 8.0),
                  ("strata", Some(include_str!("../../../sketches/source_strata.rays")), 1.0),
-                 ("ledger", Some(include_str!("../../../sketches/source_ledger.rays")), 1.0)];
+                 ("ledger", Some(include_str!("../../../sketches/source_ledger.rays")), 1.0),
+                 ("contour", Some(include_str!("../../../sketches/source_contour.rays")), 1.0)];
     for (name, sketch, zoom) in views {
         let (_, lowered) = match sketch { Some(sketch) => atlas::fixture_of(sketch, zoom), None => atlas::fixture(zoom) };
         let ws = wg::create(None);
