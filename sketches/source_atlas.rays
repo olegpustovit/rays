@@ -50,7 +50,7 @@
        :twigs (filter (fn [(i : int)] (and (>= (array/nth d.kind i) 3) (= (array/nth d.kind (array/nth d.parent i)) 3))) ids)
        :leaves (filter (fn [(i : int)] (>= (array/nth d.kind i) 5)) ids)
        ; Dot weight: the share of a leaf's 16 by 16 samples that its source span lights.
-       :weight (exact (map (fn [(i : int)] (int/add 25 (int (min 64.0 (floor (* 12.0 (log (+ 1.0 (max 1.0 (float (array/nth d.mass i)))))))))))
+       :weight (exact (map (fn [(i : int)] (int/add 25 (int (min 45.0 (floor (* 12.0 (log (+ 1.0 (max 1.0 (float (array/nth d.mass i)))))))))))
                            ids))
        ; The zoom at which the smallest symbol fills most of the plate.
        :deepest (max 180.0 (/ 0.7 (array/min (exact (map (fn [(i : int)] (array/nth d.size i)) ids)))))
@@ -209,14 +209,15 @@
            cube (int/mod (int/mul (int/mod (int/mul h h) 46337) h) 46337)]
       (< (int/mod (int/add cube id) 100) weight)))
 
-  ; One stipple dot at sample (a, b) of a leaf's 16 by 16 grid; functions and methods stand tall.
+  ; One stipple dot at sample (a, b) of a leaf's 16 by 16 grid; functions and methods stand tall,
+  ; one and a half dots: at two they met their neighbours and a long function read as solid bars.
   (defn dot-at :context value [(q : vec3) (tall : bool) (a : int) (b : int)]
     (let* [dot (max 0.75 (/ q.z 32.0))]
       [(- (+ q.x (* q.z (/ (+ (float a) 0.5) 16.0))) (* dot 0.5))
-       (- (+ q.y (* q.z (/ (+ (float b) 0.5) 16.0))) (* dot (if tall 1.0 0.5))) 0.0]))
+       (- (+ q.y (* q.z (/ (+ (float b) 0.5) 16.0))) (* dot (if tall 0.75 0.5))) 0.0]))
   (defn dot-size :context value [(q : vec3) (tall : bool) (keep : bool)]
     (let* [dot (max 0.75 (/ q.z 32.0))]
-      (if keep [dot (if tall (* dot 2.0) dot) 0.0] [0.0 0.0 0.0])))
+      (if keep [dot (if tall (* dot 1.5) dot) 0.0] [0.0 0.0 0.0])))
 
   ; Lattice columns (or rows) of a `pitch`-point grid over `extent` points, one past each edge.
   (defn across :context value [(extent : float) (pitch : float)]
