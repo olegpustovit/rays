@@ -46,3 +46,19 @@ fn same_view_tolerates_rounding_only() {
     assert!(V::same_view(&a, &b));
     assert!(!V::same_view(&a, &c));
 }
+
+/// A sketch in a canvas pane picks what is under the cursor: the pane's header and position are
+/// taken off the pointer and off every pointer event.
+#[test]
+fn canvas_pane_input_is_pane_local() {
+    use input::{Event, MouseButton};
+    let window = input::Frame {
+        size: (1440, 1000),
+        pointer: (300., 228.),
+        events: vec![Event::PointerPressed(MouseButton::LeftButton, (300., 228.)), Event::Scrolled((0., 1.)), Event::PointerReleased(MouseButton::LeftButton, (301., 230.))],
+        ..input::at_time(0.)
+    };
+    let pane = crate::editor_loop::pane_input(&window, (100, 28, 800, 600));
+    assert_eq!((pane.size, pane.pointer), ((800, 600), (200., 200.)));
+    assert_eq!(pane.events, vec![Event::PointerPressed(MouseButton::LeftButton, (200., 200.)), Event::Scrolled((0., 1.)), Event::PointerReleased(MouseButton::LeftButton, (201., 202.))]);
+}

@@ -83,6 +83,20 @@ fn host_images(value: &LoopModel) -> workspace_images::WorkspaceImages {
     value.host.borrow().images.clone()
 }
 
+/// The window's input as a canvas pane sees it: the pane's size, and the pointer and every pointer
+/// event measured from the pane's corner, so a sketch's picking lands under the cursor.
+pub fn pane_input(input: &input::Frame, (x, y, w, h): (i64, i64, i64, i64)) -> input::Frame {
+    let local = |p: (f64, f64)| (p.0 - x as f64, p.1 - y as f64);
+    let events = input.events.iter().map(|event| match event {
+        Event::PointerMoved(p) => Event::PointerMoved(local(*p)),
+        Event::PointerPressed(b, p) => Event::PointerPressed(*b, local(*p)),
+        Event::PointerReleased(b, p) => Event::PointerReleased(*b, local(*p)),
+        Event::FileDragMoved(p) => Event::FileDragMoved(local(*p)),
+        other => other.clone(),
+    }).collect();
+    input::Frame { size: (w, h), pointer: local(input.pointer), events, ..input.clone() }
+}
+
 /// each canvas panel's picture: reused while its plan, size and preview stand, else rendered
 pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: &input::Frame, raw_frame: &frame::Frame, core: &m::EditorModel, control: &V::Control) -> (Vec<(String, CanvasPicture)>, Option<String>) {
     let mut pictures: Vec<(String, CanvasPicture)> = Vec::new();
@@ -95,9 +109,9 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
             Panel::Canvas(key) => key.clone(),
             _ => continue,
         };
-        let (_, _, w, h) = if !V::ui_visible(control) && core.focus == Panel::Canvas(key.clone()) { (0, 0, raw_frame.input.size.0, raw_frame.input.size.1) } else { leaf.body };
-        // a picture's frame is its pane: frame/width and frame/height read the canvas, not the window
-        let input = input::Frame { size: (w, h), ..input.clone() };
+        let (x, y, w, h) = if !V::ui_visible(control) && core.focus == Panel::Canvas(key.clone()) { (0, 0, raw_frame.input.size.0, raw_frame.input.size.1) } else { leaf.body };
+        // a picture's frame is its pane: frame/width, frame/height and the pointer read the canvas, not the window
+        let input = pane_input(input, (x, y, w, h));
         let lowered = &core.doc.workspace.lowered;
         let drawing_value = match &core.doc.shell {
             Some(shell) => shell.canvases.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()),
