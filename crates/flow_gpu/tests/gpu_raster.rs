@@ -7,7 +7,8 @@ fn printed_spirv_is_valid() {
         return;
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/shaders");
-    for owner in ["flow_gpu", "renderer", "ogpu_metal"] {
+    // ogpu_metal's printed stages moved to the pxui repository with the crate
+    for owner in ["flow_gpu", "renderer"] {
         for entry in std::fs::read_dir(root.join(owner)).expect("printed shader directory") {
             let path = entry.expect("printed shader entry").path();
             if path.extension().is_some_and(|ext| ext == "spv") {

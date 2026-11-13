@@ -471,6 +471,23 @@ struct HostKernel {
     packed: Packed,
 }
 
+/// A prepared kernel's runners go with it. A region whose count moves every frame (a filter's
+/// consumers) is prepared again each frame under a new key, and the 64-runner list would otherwise
+/// keep 64 dead producers with their output and upload buffers: 1.5 GB for 400,000 marks, over
+/// the memory budget, where one live producer needs 30 MB.
+impl Drop for HostKernel {
+    fn drop(&mut self) {
+        // another domain, a closed host or a list in use: the list's own eviction still applies
+        let Some(t) = host_of(self.id).filter(live) else { return };
+        let Ok(mut runners) = t.0.runners.try_borrow_mut() else { return };
+        let typed = format!("{}:", self.key);
+        let mine = |k: &String, _: &Rc<Runner>| *k == self.key || k.starts_with(&typed);
+        while runners.peek(&mine).is_some() {
+            runners.remove(&mine);
+        }
+    }
+}
+
 impl HostKernel {
     fn runner(&self, t: &T, inputs: Option<&phost::Inputs>) -> Result<Rc<Runner>, Diagnostic> {
         let fast = self.fast;

@@ -378,9 +378,17 @@ fn host_counters() {
         assert!(tp::ok(host::output(&h, &value)).is_some());
         let initial = host::stats(&h);
         assert_eq!((initial.runners_created, initial.runners_released, initial.status_reads), (1, 0, 1));
+        // a dropped kernel releases its runner at once (a region prepared again every frame would
+        // otherwise leave 64 dead producers with their buffers)
+        drop(tp::ok(backend.prepare(false, &program)));
+        let dropped = host::stats(&h);
+        assert_eq!((dropped.runners_created, dropped.runners_released), (2, 1));
+        // 64 live kernels evict the first one's runner
+        let mut live = Vec::new();
         for _ in 0..64 {
             let kernel = tp::ok(backend.prepare(false, &program));
             tp::ok(kernel.run(&inputs));
+            live.push(kernel);
         }
         let evicted = host::stats(&h);
         assert!(evicted.runners_created >= 65);
