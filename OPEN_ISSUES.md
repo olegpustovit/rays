@@ -28,7 +28,7 @@ Left open by the PXUI stable ABI work (plan: artifact `5y36bm8pvvg9`, section 15
   - Static Layout time: +2.4 to +2.7% since the text bodies (was +0.9 to +1.4%), instructions unchanged (ratio 1.0016); `GATE_STATIC_RATIO` 1.0175 to 1.034. `Slot` lost 24 bytes (the hit closure); padding it back fixed one run and not another, so the cause is not pinned down.
   - Tabs with a registered body: the previously selected tab keeps its selected look for the frame of the click (`ponytail:` in the engine).
 
-## Marks: what the 2026-11-13 pass left (branch `fast-marks`)
+## Marks: what the 2026-11-13 pass left (on dev since `18599264c`)
 
 Measured with `rays mem FILE --frames N` on an M1, a million marks, (301 − 61 frames) / 240. `rays render`
 lowers with `reference: true` and never offers the device: it does not measure this path.
