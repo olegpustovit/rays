@@ -106,3 +106,17 @@ The keys are the atlas's, plus `C`, which changes the inks: the crate's hue; cob
 tests; blue short spans to orange long ones. The art window fills the frame and the title, the scale,
 the survey numbers and the inspector sit in the sheet's four margins. `netwerk_overview.png` and
 `netwerk_zoom.png` are its views.
+
+### Strata
+
+```sh
+cargo run -p rays_bin -- sketches/source_strata.rays
+```
+
+A news page: the 30 largest crates as columns hung from one line, largest first. A file is a block as
+tall as its line count (the longer files of a crate on top, the indexer's `top`), cut into 32 bands
+from its first line to its last and coloured by the `mean` profile: a band's place on the scale is its
+slice's rank among all slices, blue for the shortest lines of the repository through pale at the
+median to orange for the longest. Bands are snapped to whole points, so a file under 32 points keeps
+the bands that land on one. Hover a block to read its file in the notes band; `C` changes the inks to
+one blue. Nothing moves, so nothing is read back. `strata.png` is its view.

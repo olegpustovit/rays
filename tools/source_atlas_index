@@ -377,7 +377,8 @@ def main():
                 profile[n % 32] = max(profile[n % 32], min(120, len(line)))
                 total[n * 32 // len(lines)] += len(line)
                 held[n * 32 // len(lines)] += 1
-            mean = [round(t / max(1, c)) for t, c in zip(total, held)]
+            # a file under 32 lines leaves slices empty: each takes the line it would fall on
+            mean = [round(t / c) if c else len(lines[b * len(lines) // 32]) if lines else 0 for b, (t, c) in enumerate(zip(total, held))]
             name = file.name
             row = {'group': group(path), 'file': len(files), 'first': 1, 'last': max(1, len(lines)), 'bytes': len(raw), 'label': name,
                    'tag': name if len(name) <= 26 else name[:23] + '...', 'chars': min(26, len(name)), 'path': path, **preview(lines, 1, len(lines))}

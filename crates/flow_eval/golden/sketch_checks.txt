@@ -2621,6 +2621,11 @@ D E_NAMESPACE: Unknown namespace table.
 D E_NAMESPACE: Unknown namespace table.
 D E_NAMESPACE: Unknown namespace table.
 NONE
+FILE source_strata.rays
+D E_NAMESPACE: Unknown namespace table.
+D E_NAMESPACE: Unknown namespace table.
+D E_NAMESPACE: Unknown namespace table.
+NONE
 FILE swarm.rays
 D E_ONE_WORKSPACE: A file holds one workspace form.
 NONE
