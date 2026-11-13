@@ -298,18 +298,19 @@ so the instance count the draw uses is the one the device wrote, never batched i
 63 and matches the 63-rect `Ui_batch` pixel for pixel. The set rides in the scene
 as a `Marks.gpu_token` carried by `Ui_batch`, so transform, clip, blend and painter order are the ordinary
 ones. A rect's stroke width is the constant 1, as `Ui_batch.rect`'s; a line's fill is unused.
-Every other mark set, including every set when there is no GPU host, stays a `Ui_batch`:
-the draw snapshots hash the CPU scene and do not change. That includes a
-static set of any size. It could ride the `Marks` family with every attribute a host buffer
-(16 bytes of corners an instance instead of 64 twice), but not with the same pixels: the
-shader forms a circle's and a rect's corners in binary32 from binary32 inputs, where
-`Ui_batch` narrows the binary64 sum, so a position that is not a binary32 value moves a
-corner by one ulp. Measured 2026-10-11 with the static positions of `sketches/million_marks`
-as a host buffer beside a GPU radius, against the `Ui_batch` picture at 900 by 700: 85
-pixels differ at 2,000 marks, 643 at 20,000, 1,676 at 200,000 and 466 at 1,000,000, each by
-one step of one channel. The route needs the corners added on the host and a layout that takes
-them (see the end of this file), and a rule for the scene a static drawing keeps, whose token
-would only be valid while its GPU source lives. A mark set is
+A host-only set of 4,096 marks or more takes the `Marks` family too when there is a GPU host
+(`Marks_scene.on_gpu`; the first 32 sets of a frame, the host keeps 64 sources): its attributes are 12 to
+20 bytes a mark, converted and uploaded once while the arrays are physically the previous frame's, where a
+`Ui_batch` is 64 bytes a mark that the scene compares and the renderer hashes every frame. Measured on an
+M1 with a million static rects (`rays mem`, 2026-11-13): 24.8 ms a frame and 5.3 ms of CPU as a batch,
+13.3 ms and 0.7 ms as marks. A point set whose positions are a device buffer is drawn the same way, as
+the set of one-point rects the host route builds (285 ms a frame to 17 ms for a million points; the
+positions were read back). Every other mark set, including every set when there is no GPU host, stays a
+`Ui_batch`: the draw snapshots hash the CPU scene and do not change. The two routes agree to one step of
+one channel on an antialiased edge, not bit for bit: the mark stages place a fragment relative to its
+mark's centre in the vertex stage (below), and the shader forms a circle's and a rect's corners in
+binary32 from binary32 inputs where `Ui_batch` narrows the binary64 sum
+(`crates/renderer/tests/cases/gpu_marks_native.rs` bounds both). A mark set is
 never split: CPU and device attributes of one set share one draw. A region runs on the GPU
 only if every use of its result is a `positions`, `from`, `to`, `sizes`, `radius`, `fill`,
 `stroke` or `color` of a mark set, the region is placed `Gpu` by the current backend (site in
@@ -358,7 +359,16 @@ vertex buffers at bindings 0 to 5, then the affine at 6 (24 bytes, as for `Ui`).
 vertex stage reads instance `vid / 4`. No texture, sampler, depth or argument buffer;
 blending is the draw's blend as for `Ui`. Instance `i` of an attribute is element
 `i * stride` of its buffer; **stride 0 is a constant** (element 0 for every instance), so
-a constant and a buffer take the same code. The stages are `lib/renderer/shaders/marks.rays`; the web
+a constant and a buffer take the same code. The vertex stage hands the fragment 18 floats: the
+corner relative to the mark's centre (`local`), and flat the fill, the outline (a line: its direction)
+and `shape` (half-width, half-height, border, kind; a line: half-length, half-width). A varying the
+fragment reads is paid for by every primitive (about 0.4 ms a float for a million quads on an M1), so a
+rect or circle set whose stroke is the constant word 0 is drawn by the family `MarksFill`: the same vertex
+stage and a fragment that reads `local`, the fill and `shape` only (16.5 ms to 12.2 ms of GPU for a
+million rects). A mark that covers nothing leaves the clip volume in the vertex stage and costs no
+rasterization: a line without length, and a rect or circle without an outline whose width, height or
+radius is not positive, as `Ui_batch.rect` skips an empty rect. A kernel hides a mark by writing size 0
+(25 ms to 9 ms for a million hidden rects). The stages are `lib/renderer/shaders/marks.rays`; the web
 prints the same entries into `marks.wgsl` (below).
 
 | Binding | Attribute | Element | Rect | Circle | Line |
