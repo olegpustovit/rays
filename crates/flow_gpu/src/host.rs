@@ -209,6 +209,9 @@ pub(crate) struct Data {
     resident_buffers: Cell<i64>,
     resident_payload_bytes: Cell<i64>,
     adopted_uploads: Cell<i64>,
+    /// the large host arrays scopes uploaded and the buffers that hold them (weak: an array that
+    /// is gone is dropped from it), so a frame whose array repeats uploads nothing
+    adopted_cache: RefCell<Vec<(std::sync::Weak<Vec<f64>>, (Buffer, i64))>>,
     /// host arrays a resident scope uploaded once
     adopted_uploaded_bytes: Cell<i64>,
     count_bytes: Cell<i64>,
@@ -330,6 +333,7 @@ pub fn create(_clock: &dyn Fn() -> f64, gpu_: &renderer::renderer::Gpu) -> T {
         resident_buffers: Cell::new(0),
         resident_payload_bytes: Cell::new(0),
         adopted_uploads: Cell::new(0),
+        adopted_cache: RefCell::new(vec![]),
         adopted_uploaded_bytes: Cell::new(0),
         count_bytes: Cell::new(0),
         validation_bytes: Cell::new(0),
@@ -1033,28 +1037,53 @@ impl Scope {
             return None;
         }
         let slot = self.adopt_slot();
-        let b_ = self.alloc(&slot, 4 * f.len() as i64).ok()?;
-        // a constant array (a fill's zero planes) is filled on the device, not uploaded
-        let first = (f[0] as f32).to_bits();
-        let written = if f32::from_bits(first).is_finite() && f.iter().all(|x| (*x as f32).to_bits() == first) {
-            self.commands().and_then(|(_, encoder)| run::encode_float_fill(&encoder, &self.t.0.pipelines, &b_.0, f.len() as i64, &[f[0]])).is_ok()
-        } else {
-            let mut bytes = vec![0u8; 4 * f.len()];
-            for (k, x) in f.iter().enumerate() {
-                bytes[4 * k..4 * k + 4].copy_from_slice(&(*x as f32).to_le_bytes());
+        let t = &self.t;
+        // an array uploaded in an earlier scope is bound where it is: a host array never changes
+        // under its Arc (a weak count refuses in-place writes), and its buffer is the cache's, so
+        // no kernel takes it back as scratch
+        let cached = {
+            let mut cache = t.0.adopted_cache.borrow_mut();
+            let (live, dead): (Vec<_>, Vec<_>) = std::mem::take(&mut *cache).into_iter().partition(|(w, _)| w.strong_count() > 0);
+            *cache = live;
+            for (_, x) in dead {
+                self.give_back(&slot, x);
             }
-            let written = b::write_buffer(&b_.0, 0, &bytes).is_ok();
-            if written {
-                let t = &self.t;
-                t.0.adopted_uploads.set(t.0.adopted_uploads.get() + 1);
-                t.0.adopted_uploaded_bytes.set(t.0.adopted_uploaded_bytes.get() + bytes.len() as i64);
-            }
-            written
+            cache.iter().find(|(w, _)| w.upgrade().is_some_and(|a| Arc::ptr_eq(&a, f))).map(|(_, x)| x.clone())
         };
-        if !written {
-            self.give_back(&slot, b_);
-            return None;
-        }
+        let (b_, owned) = match cached {
+            Some(x) => (x, false),
+            None => {
+                let b_ = self.alloc(&slot, 4 * f.len() as i64).ok()?;
+                // a constant array (a fill's zero planes) is filled on the device, not uploaded
+                let first = (f[0] as f32).to_bits();
+                if f32::from_bits(first).is_finite() && f.iter().all(|x| (*x as f32).to_bits() == first) {
+                    if !self.commands().and_then(|(_, encoder)| run::encode_float_fill(&encoder, &self.t.0.pipelines, &b_.0, f.len() as i64, &[f[0]])).is_ok() {
+                        self.give_back(&slot, b_);
+                        return None;
+                    }
+                    (b_, true)
+                } else {
+                    let mut bytes = vec![0u8; 4 * f.len()];
+                    for (k, x) in f.iter().enumerate() {
+                        bytes[4 * k..4 * k + 4].copy_from_slice(&(*x as f32).to_le_bytes());
+                    }
+                    if b::write_buffer(&b_.0, 0, &bytes).is_err() {
+                        self.give_back(&slot, b_);
+                        return None;
+                    }
+                    t.0.adopted_uploads.set(t.0.adopted_uploads.get() + 1);
+                    t.0.adopted_uploaded_bytes.set(t.0.adopted_uploaded_bytes.get() + bytes.len() as i64);
+                    // ponytail: the 8 latest uploads are kept, whatever their bytes; a byte cap if tables over 100 MB are adopted
+                    let mut cache = t.0.adopted_cache.borrow_mut();
+                    if cache.len() >= 8 {
+                        let (_, x) = cache.remove(0);
+                        self.give_back(&slot, x);
+                    }
+                    cache.push((Arc::downgrade(f), b_.clone()));
+                    (b_, false)
+                }
+            }
+        };
         let kind = kind_of(v);
         let p = Rc::new(Placeholder {
             key: Arc::as_ptr(f) as usize,
@@ -1070,13 +1099,15 @@ impl Scope {
             clamped: i64::MAX,
             mul: 1,
             div: 1,
-            owned: Cell::new(true),
+            owned: Cell::new(owned),
             dead: Cell::new(false),
             origin: None,
         });
         let mut s = self.s.borrow_mut();
         s.table.push(p.clone());
-        slot.held.borrow_mut().push(p.clone());
+        if owned {
+            slot.held.borrow_mut().push(p.clone());
+        }
         s.adopted.push(p.key);
         Some(p)
     }
@@ -2261,7 +2292,7 @@ impl Scope {
         if let Some((_, holder)) = self.s.borrow().floats.iter().find(|(k, _)| *k == key) {
             return Some(share_planes(holder));
         }
-        let p = self.find(value_).filter(|p| !p.uint32 && p.kind > 0 && !self.s.borrow().durables.contains(&p.key))?;
+        let p = self.find(value_).filter(|p| !p.uint32 && p.kind > 0 && !self.s.borrow().durables.contains(&p.key) && !self.s.borrow().adopted.contains(&p.key))?;
         self.settle_inner().ok()?;
         let aliases: Vec<Rc<Placeholder>> = self.s.borrow().table.iter().rev().filter(|a| !a.dead.get() && same_buffer(&a.buffer.0, &p.buffer.0)).cloned().collect();
         let holder = run::adopt_float(&self.owner(), &p.buffer.0, self.count_of(&p).ok()?, p.kind).ok()?;
@@ -2641,6 +2672,9 @@ pub fn close(t: &T) {
         bs.iter().rev().for_each(|x| destroy_owned(&DISPLAY_OWNER, x));
     }
     d.tables.borrow_mut().clear();
+    for (_, x) in d.adopted_cache.borrow_mut().drain(..) {
+        destroy_resident(&x.0);
+    }
     purge(&d.adopt_slot);
     purge(&d.range_slot);
     pipelines::close(&d.pipelines);

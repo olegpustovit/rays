@@ -326,11 +326,67 @@ fn int_intermediate_is_exact() {
     wg::close(&ws);
 }
 
+// A large host table a resident region reads is uploaded once, not every frame: the frames after
+// the first bind the buffer an earlier scope filled, and the picture is the host's own.
+fn adopted_table_uploads_once() {
+    if !common::gpu() { return; }
+    let source = r##"(workspace adopted
+  (graph view :context host (state [old {:zoom 1.0}] {:zoom (+ old.zoom 0.01)}))
+  (graph big :context host (map (fn [(i : int)] [(float (int/mod i 64)) (float (int/div i 64)) 1.0 0.5]) (array/range 70000 :type int)))
+  (graph picture :context draw
+    (let* [view (ref view)
+           big (ref big)
+           ids (array/range 4096 :type int)
+           a (map (fn [(i : int)] (let* [p (array/nth big (int/mul i 17))] [(* view.zoom p.x) (* 0.5 p.y) p.z p.w])) ids)]
+      (draw/rects (map (fn [(i : int)] (let* [p (array/nth a i)] [p.x p.y 0.0])) ids)
+                  (map (fn [(i : int)] (let* [p (array/nth a i)] [p.z p.w 0.0])) ids) :fill "#e1d8c0"))))"##;
+    let catalog = editor_document::kinds::shared(None).unwrap();
+    let doc = editor_document::workspace_doc::of_text(&editor_document::workspace_doc::TextOptions::default(), &catalog, source).unwrap_or_else(|ds| panic!("{ds:?}"));
+    let lowered = flow_sop::lower::of_checked(None, flow_sop::lower::Options { inputs: Some((*doc.inputs).clone()), ..Default::default() }, &doc.checked).unwrap();
+    let ws = wg::create(None);
+    let prepare = |gpu| drawing::prepare(&drawing::PrepareOptions { gpu, states: lowered.states.clone(), ..Default::default() }, &lowered.evaluated.plan, &atlas::result(&lowered, "picture")).unwrap();
+    let (prepared, plain) = (prepare(Some(wg::config(&ws, true))), prepare(None));
+    let (state, reference) = (e::create_state(), e::create_state());
+    let size = (320, 240);
+    let (c, expected) = (canvas::create(size.0, size.1).unwrap(), canvas::create(size.0, size.1).unwrap());
+    let live = |k: i64| input::Frame { size, frame: k, tick: k, dt: 1. / 60., ..input::at_time(k as f64 / 60.) };
+    let frame = |k: i64| {
+        wg::with_backend(&ws, true, &mut |gpu| {
+            let scene = drawing::render_prepared(&prepared, &live(k), size, &drawing::RenderOptions { state: Some(state.clone()), gpu: Some(wg::marks(&ws)), resident: wg::resident(gpu, &ws), ..Default::default() }).unwrap();
+            canvas::render(None, &c, &scene).unwrap();
+        });
+        wg::frame(&ws, None);
+    };
+    let reference_frame = |k: i64| {
+        wg::with_backend(&ws, true, &mut |_| {
+            let scene = drawing::render_prepared(&plain, &live(k), size, &drawing::RenderOptions { state: Some(reference.clone()), ..Default::default() }).unwrap();
+            canvas::render(None, &expected, &scene).unwrap();
+        });
+        wg::frame(&ws, None);
+    };
+    for k in 1..=3 { frame(k); }
+    let before = wg::image_stats(&ws).0;
+    for k in 4..=8 { frame(k); }
+    let after = wg::image_stats(&ws).0;
+    for k in 1..=8 { reference_frame(k); }
+    assert!(after.resident_dispatches > before.resident_dispatches, "the region never ran on the device");
+    assert_eq!(after.input_uploads, before.input_uploads, "a warm frame uploaded the table again");
+    assert_eq!(after.buffer_creations, before.buffer_creations, "warm GPU buffer allocation");
+    let (drawn, exact) = (canvas::pixels(&c).unwrap(), canvas::pixels(&expected).unwrap());
+    assert!(drawn.iter().any(|p| *p != drawn[0]), "nothing drawn");
+    let differ = drawn.iter().zip(exact.iter()).filter(|(a, b)| (a.r - b.r).abs().max((a.g - b.g).abs()).max((a.b - b.b).abs()) > 24).count();
+    assert!(differ * 5000 < drawn.len(), "a cached table drew another picture: {differ} pixels");
+    canvas::destroy(&c).unwrap();
+    canvas::destroy(&expected).unwrap();
+    wg::close(&ws);
+}
+
 fn main() {
     let mut cases: Vec<(&str, fn())> = vec![("source_atlas_fixture_views", frame_views), ("source_netwerk_fixture_views", netwerk_views), ("local_function_reading_state_stays_a_kernel", local_function_kernel),
                                              ("intermediate_map_stays_on_the_device", intermediate_stays_resident),
                                              ("resident_map_is_reused", resident_map_is_reused),
                                              ("resident_int_map_is_reused", resident_int_map_is_reused),
+                                             ("adopted_table_uploads_once", adopted_table_uploads_once),
                                              ("int_intermediate_is_exact", int_intermediate_is_exact)];
     if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { cases.push(("source_atlas_full_table_budget", full_table_budget)); }
     common::window::run(&cases);
@@ -374,7 +430,8 @@ fn full_table_frames(sketch: &str) -> Vec<String> {
         for k in 17..=48 { frame(if moving { k + 32 } else { k }, moving); }
         let milliseconds = start.elapsed().as_secs_f64() * 1000. / 32.;
         let after = wg::image_stats(&ws).0;
-        println!("{sketch} 1440x1000, moving={moving}: {milliseconds:.3} ms/frame, payload readback {} B/frame, resident dispatches {}/frame", (after.payload_readback_bytes - before.payload_readback_bytes) / 32, (after.resident_dispatches - before.resident_dispatches) as f64 / 32.);
+        println!("{sketch} 1440x1000, moving={moving}: {milliseconds:.3} ms/frame, payload readback {} B/frame, resident dispatches {}/frame, uploads {} ({} B)/frame", (after.payload_readback_bytes - before.payload_readback_bytes) / 32, (after.resident_dispatches - before.resident_dispatches) as f64 / 32.,
+                 (after.input_uploads - before.input_uploads) as f64 / 32., (after.input_uploaded_bytes - before.input_uploaded_bytes) / 32);
         if milliseconds >= 16.7 { slow.push(format!("{sketch} moving={moving}: {milliseconds:.3} ms")); }
         assert_eq!(after.buffer_creations, before.buffer_creations, "moving={moving}: warm GPU buffer allocation");
     }
