@@ -1,51 +1,95 @@
 # Open issues
 
-Left open by the PXUI stable ABI work (plan: artifact `5y36bm8pvvg9`, section 15; merged 2026-11-12, PXUI `b37e8df`).
+Left over from the GPU-residency work on draw graphs (commits `4940b7338` through `825bdf7b0` on
+`dev`). Numbers come from `RAYS_SLOW=1 cargo t -p flow_native full_table_budget`, run against the
+real `_out/source_atlas` tables at 1440×1000 on Metal.
 
-- A7 frame-build targets met by the median on the pages of 100 nodes or more (static +0.6%/+0.7%, target 1%; dynamic +1.1%/+2.6%, target 3%), but one run moves by up to 0.8% on the loaded Mac, so those gates are the worst run + 25% (static 1.75%, dynamic 4.1%). Beside them, a retired-instruction gate (macOS) holds the plan's 1% and 3% on every page: met everywhere except static Kit (+1.04 to +1.21% over builds, gate 1.3%: the value field's and text area's owned results, copied once more than the engine's) and dynamic Layout (+3.74%, was +4.20%; gate 3.8%, was 4.3%), which stay open: a dynamic node call is 106 instructions over the engine (was 128; its check 45, was 61), and with the check removed the page is still +2.70% (401 library calls a frame at about 15 fixed each, labels' UTF-8 test, a cell callback 45), so the last 0.74% needs the node's scattered flags (optional tags, look flags) gathered into one word, an API change of `Node`/`Look`/`Shadow`/`Font` worth about 0.47% (`pxui/docs/abi-baseline.md`, "Dynamic Layout, second pass"). Dynamic first frame met: library cost over static is -0.75 to +1.78 ms in 14 runs, median +0.57 (exec and dyld load a steady +0.55 ms, main to first frame without the window about 0; paired medians, gate 2.5 ms, target 2; `pxui/docs/abi-baseline.md`). Not met, gates at measured + headroom, targets beside them in `abi_bench.rs` and the same doc ("Deferred performance work"): dynamic 2.9-5.6 us per 1000 nodes (target 5, gate 8.7; Layout 2.9 and 4.2 after the second pass, noise-dominated); dynamic memory: private +272 KiB, shared code pages up to +1392 KiB (second OGPU copy, by design).
-- Fails under load, passes alone and on a quiet rerun: `rays_editor::native_holder_frames` (Mac; again 2026-11-12 at load 14, then 3 of 3 alone and the full suite), `pxui_core::layout_scaling` (Windows, and once on the Mac at load 10), `pxui_gallery::abi_bench_start` (its first-frame timing gate).
-- Sketch text (`crates/rays/src/font.rs`) keeps its own per-thread text engine, as before this work.
-- The engine's picker and inspector header allocate about 14 times per frame while open (engine behaviour; the wrapper adds one).
-- Not run: AT-SPI client walk, a real portal file dialog, the slow renderer suite, `abi_bench` timing on Windows/WSL, Asahi and native-Linux NVIDIA.
-- `painter: dirty ranges ... instance count` after several builds before a first draw was reported once and could not be reproduced; `shared_skipped_draws` covers it.
-- Dynamic `libpxui` packaging: run on Linux (WSL2) and Windows (`make install`, `$ORIGIN/../lib` and DLLs beside the exe, from another directory) and on macOS; macOS signing with a real identity was not run in the agent session (keychain locked: `errSecInternalComponent`); the app is not notarized. Linux needs a system SDL3 (`libSDL3*.so.0`) at run time; none is bundled.
-- WSL2/lavapipe: `rays::window_sketch_retained_view` and `rays_bin::gpu_cli_render_canvas_fixed_clock_and_diagnostics` exceed the 5 s case limit under validation (pass with `RAYS_SLOW=1`).
-- Qualified on `a5036801e` / PXUI `cd374db` (Mac, Windows RTX 2080 Ti, WSL2 lavapipe): `RAYS_SLOW=1 cargo t -p rays_editor` 495/495 on all three. The unfiltered `cargo t -p rays_editor` without `RAYS_SLOW=1` exceeds the 60 s whole-run cap on all three (no case fails; the suite is qualification-sized, use a filter in the edit loop).
-- WSL2 skips two PXUI cases for what the environment lacks, not for a fault: `pxui_sdl` visibility (no SDL window under its x11 driver) and the Vulkan `sync_file` fences (lavapipe has no `VK_KHR_external_semaphore_fd` SYNC_FD; the CPU wait and its fallback ran). Both need a native Linux GPU session (the Asahi / NVIDIA runs above).
-- `make install` signing with the Developer ID identity is unverified: `codesign` returns `errSecInternalComponent` from an agent shell (login keychain locked to it). Run `make install` from a terminal session and check `spctl -a -vv /Applications/Rays.app`.
-- Widget bodies (plan xrfmqv01n00q), deferred performance work (budgets deferred by the user 2026-11-12; zero warm-frame allocations and byte-identical default bodies stay enforced):
-  - Dynamic Layout time: the wrapper is +5.3 to +5.9% over the direct engine since `Ui` holds its body table in a `Box` (was +2.2 to +2.5%), with retired instructions identical (ratio 1.03788). Gates raised: `GATE_DYNAMIC_RATIO` 1.041 to 1.074, `GATE_DYNAMIC_US_PER_1000_NODES` 8.7 to 15.4. Unresolved whether it is the box or memory placement; needs alternating runs on a quiet machine.
-  - `Ui` field placement: done 2026-11-12 (PXUI `ea25f36`): the theme is the last field of a `repr(C)` `Ui`, hot fields are under offset 4.7K (were 61.5K to 62K); 0.1 to 0.4% fewer instructions on every page. Not tried: the theme behind a `Box`.
-  - The gallery's Layout page copied the whole theme 10 times a frame: fixed 2026-11-12 (PXUI `1c0e1a9`), about 118k instructions a frame. `abi_bench_bodies` still compares Layout with its before-B1 constant measured with the copies (974,424; now 855,357), so that page's 1% gate is loose until the constant is measured again without the bodies work.
-  - Default bodies against before B1 (final, `abi_bench_bodies`, 40 kinds): Kit +0.73%, Controls +0.78%, Collections +0.42%, Overlays +0.03%, Layout +0.23% (plan: under 1%, gated); every kind overridden by a copy of its default costs at most +0.44% over the default (plan: under 2%, gated).
-  - ABI-wide risks of the B5 safety review: fixed 2026-11-12 (PXUI `4a19b74`): only the innermost callback's handle is usable in a frame (`Shared::current`, one compare per call; a stale outer handle, the owner mid-frame and any `PxuiUi` handle during a renderer's prepare or draw are refused with `PXUI_ERR_STATE`); scratch buffers are a pool (nested registered bodies allocate nothing once settled); a body name has one id per process. Left: the renderer refusals have no test (they need a GPU session in the ABI tests); the aliasing fix in the body trampolines has no failing-before test (no Miri here); a handle kept past its callback's return still dangles (nothing can check it). The check costs dynamic Layout +0.18% instructions (gate 3.9% to 4.1%) and static Overlays about 118 instructions (gate 1% to 1.1%).
-  - Not run on Windows or WSL2: the handle check, pooled scratch, process-wide body ids and the `Ui` reorder (PXUI `d8ff378..8dd52ac`) were qualified on the Mac only; Rays' own suites have not run on either against any widget-bodies pointer.
-  - The handle check changes behaviour: a call on the owner or an outer handle inside a frame now returns `PXUI_ERR_STATE` or a zero value. Rays' suites pass; a path they do not cover would show as an empty result, not a crash.
-  - A poisoned `Ui` (a caught library panic, until its next frame): fixed 2026-11-12 (PXUI `59d6f45`) where it crashed or looked like success: `Ui::theme()` and `output()` panic with the library's message instead of reading null, `view_size()` checks its status, `pxui_text_add_font`/`quads`/`rasterize_rgba` answer their error value, not 0. Left: getters that answer zero there without panicking (`font_size`, `row_height`, `frame_index`, `captured`, `text_input_focused`, `verifying`, `text_undo_bytes`, `inspector_width`, `inspector_label_x`, `platform`, `passed_undo`, `text_width`, `box_of_key`, `part_box`, `Renderer::draw_calls`): no memory risk; a check costs a library call on hot getters.
-  - Body names are numbered per process and never released, by design (a `Theme` is plain data that may still hold an id, so an id is never reused; reviewed 2026-11-12): at most 65,535 names a kind, refused cleanly past that; registering a name again keeps its id. Each `Ui`'s tables are indexed by id, so a `Ui` that registers a late name holds a slot for every earlier id (at most about 1.5 MB a kind); a compact per-`Ui` list would fix that if names are ever made at run time.
-  - `pxui/AGENTS.md` cites `specification/abi.md`, which does not exist.
-  - Dynamic Layout retired instructions: the wrapper is 37,676 over the engine's 855,031 (4.41%; gate 4.5%, plan 3%). The ratio rose because the engine frame lost the theme copies; the wrapper's cost over it was 39,201 with the handle check and about 37,400 before it.
-  - Static Layout time: +2.4 to +2.7% since the text bodies (was +0.9 to +1.4%), instructions unchanged (ratio 1.0016); `GATE_STATIC_RATIO` 1.0175 to 1.034. `Slot` lost 24 bytes (the hit closure); padding it back fixed one run and not another, so the cause is not pinned down.
-  - Tabs with a registered body: the previously selected tab keeps its selected look for the frame of the click (`ponytail:` in the engine).
+## Atlas still copies 768 B back per moving frame
 
-## Marks: what the 2026-11-13 pass left (on dev since `18599264c`)
+The 96 file-label slots in `sketches/source_atlas.rays` (`labels`, around line 411) each read
+`(array/nth owners slot)` twice on the host, because the label text needs the owner there:
+96 × 2 × 4 B. A still frame reads nothing back.
 
-Measured with `rays mem FILE --frames N` on an M1, a million marks, (301 − 61 frames) / 240. `rays render`
-lowers with `reference: true` and never offers the device: it does not measure this path.
+- **Cheap fix:** read each slot's owner once. That halves it to 384 B.
+- **Real fix:** read the label slots in one batched read of the owners array, or look the label up
+  on the device, so the host only receives text.
 
-- **A kernel's error arrives one frame late.** A mark set no longer waits for its kernel
-  (`Flow_gpu.Host.output_shown`); the status is read once the queue has passed it. The frame that drew the
-  bad values is shown first. No test covers the late error itself, only that the borrow does not wait.
-- **Tried and reverted: colours as two flat floats.** Unpacking them in the fragment cost about 5 ms for a
-  million marks, more than the varyings saved.
-- **Lines** are unchanged (25.8 ms a frame): they keep the generic fragment and its 18 floats.
-- **The antialias margin** is a whole logical point on each side. Three quarters of a device pixel is enough
-  (a 2-point mark at density 2 would shade 30 pixels, not 64), but `Replace` and `Multiply` also write the
-  margin, and `crates/renderer/tests/cases/gpu_draw.rs` compares the two routes under `Replace`. Tried and
-  reverted.
-- **A per-frame `filter` feeding a mark set** still reads back and cooks its consumers on the CPU (36 ms a
-  frame, 29 ms of it CPU, for 400,000 cells). Its memory is bounded now. A kernel that writes size 0 for a
-  hidden mark costs nothing to draw and is the shape to use.
-- **Unordered device sets.** A kernel's marks are drawn in index order; scattered ones cost the tiler about
-  twice what coherent ones do. Only host sets of one colour are reordered.
-- **Windows and Vulkan were not run.** The SPIR-V stages pass `spirv-val`; the frame times are Metal only.
+## Drawings with a resident loop store integers as 32-bit floats
+
+Loop-free drawings keep integer arrays exact as signed 32-bit words (`Resident::exact`). Drawings
+with a resident fold loop keep the float scope, so an integer array in them is a float32. Since
+`825bdf7b0`, a value past 2^24 there is a typed error (`E_GPU_FLOAT_RANGE`) rather than silently
+rounded. It is still not exact.
+
+- **Blocker:** `crates/flow_gpu/src/host.rs` `compact()` refuses a float mask in the uint32 scope
+  (`if self.uint32 && !p.uint32`). Putting loop drawings on the exact scope broke
+  `frame_alloc_recursive_signals`: 340 buffers and 11 MB per frame.
+- **Fix:** let the uint32 scope compact by a float mask (convert the mask in the kernel), then
+  choose the exact scope for every drawing.
+- **Watch for:** the float32 range check applies to every float32 integer output, so an existing
+  drawing that held integers past 2^24 now errors where it used to round.
+
+## Some fused regions still go through the CPU
+
+A fused sibling group is kept resident only when its members already read kept arrays. Fused
+groups over arrays that are not kept still take the old host-forced path (readback, then upload).
+The tails loop in `crates/flow_ir/src/core_exec.rs` `prepare` skips every fused region.
+
+- **Design:** allow tails for at-first, non-mark fused groups, and have the reuse wrapper clear
+  `fused_done` for the members it skipped.
+- **Missing first:** a test that actually shows the effect. A trial of this design compiled and
+  passed, but no test showed it doing anything, so it was reverted.
+
+## Netwerk uploads 49–55 KB and dispatches 3 kernels per frame, untraced
+
+Even in the budget test's still phase, `source_netwerk` uploads 6–8 buffers (48,756 B still,
+54,699 B moving) and runs 3 resident dispatches per frame. Atlas and Ledger upload 0 B. Not
+traced yet. Suspects:
+
+- per-frame host tables under the 65,536-element adoption cache threshold
+  (`crates/flow_gpu/src/host.rs` `adopt`);
+- the camera still easing during the "still" frames;
+- the deep-lattice `origin`/`index` arrays.
+
+## Integer storage is only verified on Metal
+
+Signed 32-bit word storage (`signed_words` in `crates/flow_shader/src/emit.rs` and `spirv.rs`,
+`pack_word` in `crates/flow_gpu/src/run.rs`) is implemented for SPIR-V but has only run on
+macOS/Metal. Run the suites on the Windows/Vulkan box and on WSL/lavapipe
+(`pxui/tools/validate.sh --windows` and `--linux` print the commands).
+
+## Frame budget
+
+`source_atlas_full_table_budget` (60 Hz, 16.7 ms) still fails, and it already failed before this
+work.
+
+| Sketch | ms per frame (still / moving) | Over budget |
+|---|---|---|
+| Netwerk | 53.0 / 51.3 | yes |
+| Atlas | 14.5 / 16.7 | sometimes |
+| Ledger | about 4.6 | no |
+
+Netwerk's cost breakdown:
+
+- about 20 ms for the old sheet (grid, frames, branches, labels);
+- about 17 ms for the atlas stipple (nodes, coarse level, three slot levels);
+- about 12 ms for the deep levels (about 860k marks in 32-point blocks).
+
+**First frame:** about 1 s of kernel compile, about 0.16 s per stipple level. A merged single-kernel
+stipple compiled slower (2.6 s), so the five levels stay separate calls.
+
+## A map reused while its inputs repeat can't be cached by the host memo
+
+Resident results are held while their inputs repeat (`reuse_device` in
+`crates/flow_ir/src/core_exec.rs`). The host loop memo (`remember`) still skips any statement that
+reads or writes a kept array. Anything new kept on the device has to go through `reuse_device`, or
+it reruns every frame.
+
+## Older and unrelated
+
+- `flow_check` `declarations_match_owned_schema` fails against `golden/ops.txt` on `dev`.
+- `cargo t -p rays_editor` exceeds the 60 s whole-run limit, with no failing case.
+- Netwerk's margin ticks (`tick_at`, `tick_size`) are interpreted on the CPU: "a capture still reads
+  a state after binding". The netwerk fixture test excludes them.
+- `tools/source_atlas_index` still writes `lines.tsv` and `chars.tsv` (about 450k rows), which no
+  sketch reads any more.
