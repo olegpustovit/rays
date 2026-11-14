@@ -1006,6 +1006,52 @@ fn resident_produce(r: &dyn Resident, st: &mut State, run: &Run, tail: &[i64]) -
     Ok(())
 }
 
+/// A resident region's result held on the device while what it reads is unchanged. Its inputs are
+/// compared as `remember` does, except a device array, which is the same only as the very placeholder
+/// (a result held earlier is one value from draw to draw). The result is taken off the scope
+/// (`keep`) only when its inputs repeat a draw, so a region over moving inputs adopts no buffer; the
+/// draw after that reuses it with no dispatch. `tail` is what a producer keeps for its draw.
+/// ponytail: one held result a statement, and a held result keeps its buffer until its inputs
+/// change; add a byte cap if the arrays held grow past tens of MB.
+fn reuse_device(reads: Vec<i64>, result: i64, tail: Vec<i64>, run: Run) -> Run {
+    #[derive(Default)]
+    struct Memo { last: Option<Vec<Value>>, held: Option<(Vec<Value>, Value)> }
+    let memo: Mutex<Memo> = Mutex::new(Memo::default());
+    Arc::new(move |st: &mut State| {
+        let r = match st.resident.clone() {
+            Some(r) if st.marks.is_some() && !st.resident_on => r,
+            _ => return run(st),
+        };
+        let key: Vec<Value> = reads.iter().map(|n| st.values[ix(*n)].clone()).collect();
+        let same = |old: &[Value], st: &State| {
+            reads.iter().zip(old.iter().zip(key.iter())).all(|(n, (a, b))| phys_eq(a, b) || (!st.kept.contains(n) && same_input(a, b)))
+        };
+        let held = memo.lock().unwrap().held.as_ref().filter(|(k, _)| same(k, st)).map(|(_, v)| v.clone());
+        if let Some(value) = held {
+            st.values[ix(result)] = value;
+            for n in &tail {
+                if !st.kept.contains(n) { st.kept.push(*n); }
+            }
+            return r.settle();
+        }
+        run(st)?;
+        let repeated = memo.lock().unwrap().last.as_ref().is_some_and(|k| same(k, st));
+        let kept = if repeated && st.kept.contains(&result) { r.keep(&st.values[ix(result)])? } else { None };
+        let mut m = memo.lock().unwrap();
+        match kept {
+            Some(value) => {
+                st.values[ix(result)] = value.clone();
+                m.held = Some((key, value));
+            }
+            None => {
+                m.held = None;
+                m.last = Some(key);
+            }
+        }
+        Ok(())
+    })
+}
+
 /// A resident loop's run: the arrays later statements read come back once, as it ends, or with a
 /// `tail` stay for the rest of the draw. An overflow discards its work, and it runs again from its
 /// start, sized by its bounds from the cut region on.
@@ -1703,9 +1749,13 @@ impl Ctx {
                     }
                     (None, None) => run,
                 };
-                match footprint(&self.program, s) {
-                    Some((reads, writes)) => remember(reads, writes, run),
-                    None => run,
+                let tail = self.tails.iter().find(|(a, _)| *a == addr(s)).map(|(_, k)| k.clone()).unwrap_or_default();
+                match (footprint(&self.program, s), &s.node) {
+                    (Some((reads, writes)), StatementNode::Invoke { result, .. }) if self.tails.iter().any(|(_, k)| k.contains(result)) => {
+                        remember(reads.clone(), writes, reuse_device(reads, *result, tail, run))
+                    }
+                    (Some((reads, writes)), _) => remember(reads, writes, run),
+                    (None, _) => run,
                 }
             } else {
                 self.statement(s)

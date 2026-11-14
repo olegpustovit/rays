@@ -57,6 +57,8 @@ pub struct Stats {
     pub held_buffers: i64,
     /// kept outputs whose owner freed them unread, never handed out
     pub freed: i64,
+    /// resident regions dispatched (a drawing's marks over their arrays are not counted)
+    pub resident_dispatches: i64,
 }
 
 pub fn zero() -> Stats {
@@ -224,6 +226,7 @@ pub(crate) struct Data {
     tables: RefCell<List<Arc<Vec<u32>>, Option<Vec<Buffer>>>>,
     /// the buffers scopes upload adopted host arrays into (`Scope::adopt`)
     adopt_slot: Rc<HSlot>,
+    dispatches: Cell<i64>,
 }
 
 #[derive(Clone)]
@@ -337,6 +340,7 @@ pub fn create(_clock: &dyn Fn() -> f64, gpu_: &renderer::renderer::Gpu) -> T {
         ownership: RefCell::new(None),
         tables: RefCell::new(List::new(8, tables_release)),
         adopt_slot: new_slot(true),
+        dispatches: Cell::new(0),
     });
     HOSTS.with(|h| h.borrow_mut().insert(id, Rc::downgrade(&data)));
     T(data)
@@ -1514,6 +1518,7 @@ impl Scope {
         let bound_table = |u: i64| bound_tables.get(u as usize).cloned().flatten();
         let opts = Options { uint32_cpu: self.uint32, commands: Some(commands), encoder: Some(encoder.clone()), reset_status: Some(reset_status), count: count.clone(), into: Some((output.0.clone(), cell.0.clone())), into_more: more, ..Options::default() };
         let r = run::dispatch(&run_, &opts, Some(&bound), Some(&bound_table), &inputs);
+        if r.is_ok() { self.t.0.dispatches.set(self.t.0.dispatches.get() + 1); }
         // the outputs past the first take a copy of its count cell, encoded after the dispatch
         let r = r.and_then(|o| {
             for (_, c) in &made[1..] {
@@ -2772,6 +2777,7 @@ pub fn stats(t: &T) -> Stats {
         pipeline_releases: pipelines::private::releases(&d.pipelines),
         held_buffers: if d.closed.get() { 0 } else { run::private::pool_held(&d.shared) },
         freed: run::private::pool_freed(&d.shared),
+        resident_dispatches: d.dispatches.get(),
         ..totals
     }
 }
