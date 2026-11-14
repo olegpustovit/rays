@@ -2,7 +2,7 @@ FILE audio.rays
 W audio graphs=5 defs=0 macros=0 nodes=0
 G notes host rec{active:int,effects:list:effect}
 G picture draw drawing
-G actions host any
+G actions host list:effect
 G editor editor editor
 G window settings settings
 L actions/@result
@@ -2624,8 +2624,6 @@ D E_NAMESPACE: Unknown namespace table.
 D E_NAMESPACE: Unknown namespace table.
 NONE
 FILE source_netwerk.rays
-D E_NAMESPACE: Unknown namespace table.
-D E_NAMESPACE: Unknown namespace table.
 D E_NAMESPACE: Unknown namespace table.
 D E_NAMESPACE: Unknown namespace table.
 NONE

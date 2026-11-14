@@ -2986,7 +2986,9 @@ fn ref_form(&mut self, cx: &Cx, x: &Syntax, forms: &[packed::SyntaxId]) -> (Term
             [y, ..] => { self.error(&x.child(*y), "E_ARGS", "ref takes a graph name, then :input value pairs."); break; }
          }
      }
-     let out = context::result(sg.ctx);
+     // A context that declares no result type (a host graph) gives what its body was inferred to be,
+     // so a field read through the ref keeps its type (a table picked per frame stays a kernel table).
+     let out = match context::result(sg.ctx) { Ty::Any => gv.ty.clone(), declared => declared };
      let mut info = Info::derive(out.clone(), &vs);
      info.groups.clear();
      info.approx = gv.approx;
@@ -3093,7 +3095,7 @@ fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Inf
      let body = arena.handle(roots.next().unwrap());
      let form = arena.syntax().handle(forms[0]);
      self.graph_terms.insert(name.to_owned(), Graph { name: name.to_owned(), context: sg.ctx, inputs, body, form });
-     let mut v = Info::leaf(want);
+     let mut v = Info::leaf(if want == Ty::Any { bv.ty.clone() } else { want });
      v.live = bv.live;
      v.approx = bv.approx;
      v.approx_sources = bv.approx_sources.clone();
