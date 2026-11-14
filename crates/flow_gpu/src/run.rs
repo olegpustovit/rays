@@ -543,6 +543,8 @@ fn kernel_status(flags: i32) -> Diagnostic {
         value::fail("E_ARRAY_RANGE", "An array slice must be within its source.")
     } else if flags & 64 != 0 {
         value::fail("E_GPU_UINT32_RANGE", "GPU uint32 value must be within [0, 4294967295].")
+    } else if flags & 128 != 0 {
+        value::fail("E_GPU_FLOAT_RANGE", "A GPU integer array held as float32 must stay within [-16777216, 16777216].")
     } else {
         value::fail("E_KERNEL", "GPU output contains a nonfinite value.")
     }

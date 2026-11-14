@@ -383,11 +383,71 @@ fn adopted_table_uploads_once() {
     wg::close(&ws);
 }
 
+// A drawing with a resident loop draws in the float scope, whose integer arrays are float32: an
+// integer array past 2^24 is E_GPU_FLOAT_RANGE, never a rounded word, and one within it is the
+// host's own evaluation. The loop carries an array of `start + i + steps`, read on the host afterwards.
+fn loop_integer_array_is_exact() {
+    loop_ints(1000, false);
+    loop_ints(16777216, true);
+}
+
+fn loop_ints(start: i64, refused: bool) {
+    if !common::gpu() { return; }
+    let source = format!(r##"(workspace loop_ints
+  (graph view :context host (state [old {{:zoom 1.0}}] {{:zoom (+ old.zoom 0.01)}}))
+  (graph picture :context draw
+    (let* [view (ref view)
+           ids (array/range 4096 :type int)
+           start (map (fn [(i : int)] (int/add {start} i)) ids)
+           carried (fold [a start] [d (range (int (* view.zoom 3.0)))] (map (fn [(v : int)] (int/add v 1)) a))
+           digits (map (fn [(i : int)] (int/mod (array/nth carried i) 10)) ids)]
+      (draw/rects (map (fn [(i : int)] [(+ (* 3.0 (float (int/mod i 64))) (* 0.1 view.zoom)) (* 3.0 (float (int/div i 64))) 0.0]) ids)
+                  (map (fn [(i : int)] [(+ 1.0 (float (array/nth digits i))) 1.0 0.0]) ids) :fill "#e1d8c0"))))"##);
+    let catalog = editor_document::kinds::shared(None).unwrap();
+    let doc = editor_document::workspace_doc::of_text(&editor_document::workspace_doc::TextOptions::default(), &catalog, &source).unwrap_or_else(|ds| panic!("{ds:?}"));
+    let lowered = flow_sop::lower::of_checked(None, flow_sop::lower::Options { inputs: Some((*doc.inputs).clone()), ..Default::default() }, &doc.checked).unwrap();
+    let ws = wg::create(None);
+    let prepare = |gpu| drawing::prepare(&drawing::PrepareOptions { gpu, states: lowered.states.clone(), ..Default::default() }, &lowered.evaluated.plan, &atlas::result(&lowered, "picture")).unwrap();
+    let (prepared, plain) = (prepare(Some(wg::config(&ws, true))), prepare(None));
+    let (state, reference) = (e::create_state(), e::create_state());
+    let size = (320, 240);
+    let (c, expected) = (canvas::create(size.0, size.1).unwrap(), canvas::create(size.0, size.1).unwrap());
+    let live = |k: i64| input::Frame { size, frame: k, tick: k, dt: 1. / 60., ..input::at_time(k as f64 / 60.) };
+    let mut refusals = 0;
+    for k in 1..=4 {
+        wg::with_backend(&ws, true, &mut |gpu| {
+            match drawing::render_prepared(&prepared, &live(k), size, &drawing::RenderOptions { state: Some(state.clone()), gpu: Some(wg::marks(&ws)), resident: wg::resident(gpu, &ws), ..Default::default() }) {
+                Ok(scene) => canvas::render(None, &c, &scene).unwrap(),
+                Err(d) => { assert!(refused && d.code == "E_GPU_FLOAT_RANGE", "unexpected {d:?}"); refusals += 1; }
+            }
+        });
+        wg::frame(&ws, None);
+        wg::with_backend(&ws, true, &mut |_| {
+            let scene = drawing::render_prepared(&plain, &live(k), size, &drawing::RenderOptions { state: Some(reference.clone()), ..Default::default() }).unwrap();
+            canvas::render(None, &expected, &scene).unwrap();
+        });
+        wg::frame(&ws, None);
+    }
+    assert!(wg::image_stats(&ws).0.resident_dispatches > 0, "the loop never ran on the device");
+    if refused {
+        assert!(refusals > 0, "an integer array past 2^24 was rounded, not refused");
+    } else {
+        let (drawn, exact) = (canvas::pixels(&c).unwrap(), canvas::pixels(&expected).unwrap());
+        assert!(drawn.iter().any(|p| *p != drawn[0]), "nothing drawn");
+        let differ = drawn.iter().zip(exact.iter()).filter(|(a, b)| (a.r - b.r).abs().max((a.g - b.g).abs()).max((a.b - b.b).abs()) > 24).count();
+        assert!(differ * 5000 < drawn.len(), "a loop's integer array drew another picture: {differ} pixels");
+    }
+    canvas::destroy(&c).unwrap();
+    canvas::destroy(&expected).unwrap();
+    wg::close(&ws);
+}
+
 fn main() {
     let mut cases: Vec<(&str, fn())> = vec![("source_atlas_fixture_views", frame_views), ("source_netwerk_fixture_views", netwerk_views), ("local_function_reading_state_stays_a_kernel", local_function_kernel),
                                              ("intermediate_map_stays_on_the_device", intermediate_stays_resident),
                                              ("resident_map_is_reused", resident_map_is_reused),
                                              ("resident_int_map_is_reused", resident_int_map_is_reused),
+                                             ("loop_integer_array_is_exact", loop_integer_array_is_exact),
                                              ("adopted_table_uploads_once", adopted_table_uploads_once),
                                              ("int_intermediate_is_exact", int_intermediate_is_exact)];
     if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { cases.push(("source_atlas_full_table_budget", full_table_budget)); }

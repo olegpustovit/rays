@@ -1132,6 +1132,16 @@ impl Gen {
                 body.push_str(&format!("  sb|=(({value})<0L||ulong({value})>0xffffffffUL)?64u:0u;\n"));
             }
         }
+        // an Int stored as float32 is exact to 2^24: a value past it is an error, never a rounded word
+        for (k, registers) in view.outputs.iter().enumerate() {
+            if !self.output_uint32(k) {
+                for slot in registers {
+                    if !self.integer_register(*slot) { continue; }
+                    let value = self.int_of(*slot);
+                    body.push_str(&format!("  sb|=(long({value})>16777216L||long({value})<-16777216L)?128u:0u;\n"));
+                }
+            }
+        }
         body.push_str(&format!("  {FLUSH_STATUS}\n"));
         let outputs = view.outputs.len();
         let output_name = |k: usize| if outputs == 1 { "output".to_owned() } else { format!("output{k}") };
