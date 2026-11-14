@@ -913,11 +913,13 @@ pub fn resident_live(program: &Program, s: &Statement) -> Option<Vec<i64>> {
 /// of it, and pass these to regions, each a mark attribute (`mark region`) or one whose array
 /// result stays under the same rule. The locals that may then hold device arrays, and each range
 /// local's source array and divisor.
+/// A top-level region that is not a mark attribute is a producer under the same rule: its array
+/// stays on the device for the regions after it.
 pub fn resident_tail(program: &Program, s: &Statement, mark: &dyn Fn(i64) -> bool) -> Option<(Vec<i64>, Vec<(i64, (i64, i64))>)> {
-    let live = match resident_live(program, s) {
-        None => return None,
-        Some(l) if l.is_empty() => return None,
-        Some(l) => l,
+    let live = match (&s.node, resident_live(program, s)) {
+        (StatementNode::Invoke { region, result, .. }, _) if !mark(*region) => vec![*result],
+        (_, Some(l)) if !l.is_empty() => l,
+        _ => return None,
     };
     let device_array = |n: i64| matches!(&program.locals[ix(n)], Ty::Array(inner) if matches!(**inner, Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4));
     let after: &[Statement] = {
@@ -987,6 +989,19 @@ fn release_kept(r: &dyn Resident, st: &mut State) -> Result<(), Diagnostic> {
     for n in kept {
         let value = r.finish(&st.values[ix(n)])?;
         st.values[ix(n)] = value;
+    }
+    Ok(())
+}
+
+/// A producer's run (`resident_tail` of a top-level region): its array joins those kept before it.
+/// Its count is its arguments' (a kept array's is settled), so no placeholder is cut short.
+fn resident_produce(r: &dyn Resident, st: &mut State, run: &Run, tail: &[i64]) -> Result<(), Diagnostic> {
+    st.resident_on = true;
+    let ran = run(st).and_then(|()| r.settle());
+    st.resident_on = false;
+    ran?;
+    for n in tail {
+        if !st.kept.contains(n) { st.kept.push(*n); }
     }
     Ok(())
 }
@@ -1067,7 +1082,7 @@ fn remember(reads: Vec<i64>, writes: Vec<i64>, run: Run) -> Run {
     let table: Mutex<Vec<(Vec<Value>, Vec<Value>)>> = Mutex::new(Vec::new());
     Arc::new(move |st: &mut State| {
         // a kept device array is a placeholder the next draw reuses: never a key
-        if !st.kept.is_empty() || st.resident_on {
+        if st.resident_on || reads.iter().any(|n| st.kept.contains(n)) {
             return run(st);
         }
         let key: Vec<Value> = reads.iter().map(|n| st.values[ix(*n)].clone()).collect();
@@ -1085,7 +1100,7 @@ fn remember(reads: Vec<i64>, writes: Vec<i64>, run: Run) -> Run {
                 let values: Vec<Value> = writes.iter().map(|n| st.values[ix(*n)].clone()).collect();
                 // a region left on the GPU names a buffer of this draw's mark table, cleared by the
                 // next; a kept device array lives as long as the draw
-                if st.kept.is_empty() && !values.iter().any(core_marks::is_device) {
+                if !writes.iter().any(|n| st.kept.contains(n)) && !values.iter().any(core_marks::is_device) {
                     let mut t = table.lock().unwrap();
                     t.push((key, values));
                     if t.len() > 4 { t.remove(0); }
@@ -1673,16 +1688,20 @@ impl Ctx {
             };
             let run = if remembered_kind && top && self.remember_loops && !fused_invoke {
                 let run = self.statement(s);
-                let run: Run = match resident_live(&self.program, s) {
-                    Some(live) => {
-                        let tail = self.tails.iter().find(|(a, _)| *a == addr(s)).map(|(_, k)| k.clone());
+                let tail = self.tails.iter().find(|(a, _)| *a == addr(s)).map(|(_, k)| k.clone());
+                let run: Run = match (resident_live(&self.program, s), tail) {
+                    (None, Some(tail)) => Arc::new(move |st: &mut State| match st.resident.clone() {
+                        Some(r) if st.marks.is_some() => resident_produce(&*r, st, &run, &tail),
+                        _ => run(st),
+                    }),
+                    (Some(live), tail) => {
                         let plain_run = run.clone();
                         Arc::new(move |st: &mut State| match st.resident.clone() {
                             Some(r) if st.marks.is_some() => resident_run(&*r, st, &plain_run, &live, &tail),
                             _ => plain_run(st),
                         })
                     }
-                    None => run,
+                    (None, None) => run,
                 };
                 match footprint(&self.program, s) {
                     Some((reads, writes)) => remember(reads, writes, run),
@@ -2331,11 +2350,16 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
         }
     }
     let static_ok = core_draw::static_invokes(&program);
-    // the resident loops whose arrays may stay on the device after them, and their ranges
+    // the resident loops and producers whose arrays may stay on the device after them, and their
+    // ranges; a static region keeps its first result, a fused one runs with its siblings and one
+    // an earlier tail holds is already there
     let mut tails: Vec<(usize, Vec<i64>)> = Vec::new();
     let mut tail_ranges: Vec<(i64, (i64, i64))> = Vec::new();
     if remember_loops {
         for s in &program.body {
+            if let StatementNode::Invoke { region, result, .. } = &s.node {
+                if static_ok[ix(*result)] || fused[ix(*region)].is_some() || tails.iter().any(|(_, kept)| kept.contains(result)) { continue; }
+            }
             if let Some((kept, ranges)) = resident_tail(&program, s, &|r| device_ok[ix(r)]) {
                 tail_ranges.extend(ranges);
                 tails.push((addr(s), kept));

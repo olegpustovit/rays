@@ -222,6 +222,8 @@ pub(crate) struct Data {
     ownership: RefCell<Option<run::T>>,
     /// a triangle mesh's corners and per-point corner CSR on the device, by its corners array
     tables: RefCell<List<Arc<Vec<u32>>, Option<Vec<Buffer>>>>,
+    /// the buffers scopes upload adopted host arrays into (`Scope::adopt`)
+    adopt_slot: Rc<HSlot>,
 }
 
 #[derive(Clone)]
@@ -334,6 +336,7 @@ pub fn create(_clock: &dyn Fn() -> f64, gpu_: &renderer::renderer::Gpu) -> T {
         shared: run::pool(),
         ownership: RefCell::new(None),
         tables: RefCell::new(List::new(8, tables_release)),
+        adopt_slot: new_slot(true),
     });
     HOSTS.with(|h| h.borrow_mut().insert(id, Rc::downgrade(&data)));
     T(data)
@@ -663,7 +666,6 @@ struct SState {
     appended: Vec<(i64, i64)>,
     durables: Vec<usize>,
     adopted: Vec<usize>,
-    adopt_slot: Option<Rc<HSlot>>,
     range_slot: Option<Rc<HSlot>>,
 }
 
@@ -836,9 +838,14 @@ impl Scope {
         Some(p)
     }
 
+    /// the host's, kept across scopes: an adopted array's buffer serves the next draw's upload
     fn adopt_slot(&self) -> Rc<HSlot> {
+        let slot = self.t.0.adopt_slot.clone();
         let mut s = self.s.borrow_mut();
-        s.adopt_slot.get_or_insert_with(|| new_slot(false)).clone()
+        if !s.extra_slots.iter().any(|x| Rc::ptr_eq(x, &slot)) {
+            s.extra_slots.push(slot.clone());
+        }
+        slot
     }
 
     fn range_slot(&self) -> Rc<HSlot> {
@@ -2361,7 +2368,6 @@ fn new_scope(t: &T, uint32: bool) -> (Rc<Scope>, Arc<Guard>) {
             appended: vec![],
             durables: vec![],
             adopted: vec![],
-            adopt_slot: None,
             range_slot: None,
         }),
     });
@@ -2547,6 +2553,7 @@ pub fn close(t: &T) {
         bs.iter().rev().for_each(|x| destroy_owned(&DISPLAY_OWNER, x));
     }
     d.tables.borrow_mut().clear();
+    purge(&d.adopt_slot);
     pipelines::close(&d.pipelines);
     HOSTS.with(|h| h.borrow_mut().remove(&d.id));
     d.closed.set(true);

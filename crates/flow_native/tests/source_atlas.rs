@@ -104,8 +104,69 @@ fn local_function_kernel() {
     wg::close(&ws);
 }
 
+// A map's array that later mark attributes read (`array/nth a i`) stays on the device: a frame
+// whose camera moves reads none of it back. It used to come back to the host, whole, every frame.
+fn intermediate_stays_resident() {
+    if !common::gpu() { return; }
+    let source = r##"(workspace intermediate
+  (graph view :context host (state [old {:zoom 1.0}] {:zoom (+ old.zoom 0.01)}))
+  (graph picture :context draw
+    (let* [view (ref view)
+           ids (array/range 8192 :type int)
+           a (map (fn [(i : int)] [(* view.zoom (float (int/mod i 64))) (float (int/div i 64)) 1.0 0.5]) ids)]
+      (draw/rects (map (fn [(i : int)] (let* [p (array/nth a i)] [p.x p.y 0.0])) ids)
+                  (map (fn [(i : int)] (let* [p (array/nth a i)] [p.z p.w 0.0])) ids) :fill "#e1d8c0"))))"##;
+    let catalog = editor_document::kinds::shared(None).unwrap();
+    let doc = editor_document::workspace_doc::of_text(&editor_document::workspace_doc::TextOptions::default(), &catalog, source).unwrap_or_else(|ds| panic!("{ds:?}"));
+    flow_ir::fallback::reset();
+    let lowered = flow_sop::lower::of_checked(None, flow_sop::lower::Options { inputs: Some((*doc.inputs).clone()), ..Default::default() }, &doc.checked).unwrap();
+    let ws = wg::create(None);
+    let prepared = drawing::prepare(&drawing::PrepareOptions { gpu: Some(wg::config(&ws, true)), states: lowered.states.clone(), ..Default::default() },
+                                    &lowered.evaluated.plan, &atlas::result(&lowered, "picture")).unwrap();
+    // the same frames with the intermediate read back, the reference picture
+    let plain = drawing::prepare(&drawing::PrepareOptions { gpu: Some(wg::config(&ws, true)), states: lowered.states.clone(), ..Default::default() },
+                                 &lowered.evaluated.plan, &atlas::result(&lowered, "picture")).unwrap();
+    let (state, reference) = (e::create_state(), e::create_state());
+    let size = (320, 240);
+    let (c, expected) = (canvas::create(size.0, size.1).unwrap(), canvas::create(size.0, size.1).unwrap());
+    let frame = |k: i64| {
+        let live = input::Frame { size, frame: k, tick: k, dt: 1. / 60., ..input::at_time(k as f64 / 60.) };
+        wg::with_backend(&ws, true, &mut |gpu| {
+            let scene = drawing::render_prepared(&prepared, &live, size, &drawing::RenderOptions { state: Some(state.clone()), gpu: Some(wg::marks(&ws)), resident: wg::resident(gpu, &ws), ..Default::default() }).unwrap();
+            assert!(drawing::borrows_gpu(&prepared), "mark attributes left the device");
+            canvas::render(None, &c, &scene).unwrap();
+        });
+        wg::frame(&ws, None);
+    };
+    for k in 1..=3 { frame(k); }
+    let before = wg::image_stats(&ws).0;
+    for k in 4..=7 { frame(k); }
+    let after = wg::image_stats(&ws).0;
+    for k in 1..=7 {
+        let live = input::Frame { size, frame: k, tick: k, dt: 1. / 60., ..input::at_time(k as f64 / 60.) };
+        wg::with_backend(&ws, true, &mut |_| {
+            let scene = drawing::render_prepared(&plain, &live, size, &drawing::RenderOptions { state: Some(reference.clone()), gpu: Some(wg::marks(&ws)), ..Default::default() }).unwrap();
+            canvas::render(None, &expected, &scene).unwrap();
+        });
+        wg::frame(&ws, None);
+    }
+    let drawn = canvas::pixels(&c).unwrap();
+    assert!(drawn.iter().any(|p| *p != drawn[0]), "nothing drawn");
+    assert!(drawn == canvas::pixels(&expected).unwrap(), "a resident intermediate drew another picture");
+    let read = after.payload_readback_bytes - before.payload_readback_bytes;
+    assert_eq!(after.buffer_creations, before.buffer_creations, "warm GPU buffer allocation");
+    // the 8192 vec4 are 131072 B a frame
+    assert!(read < 4 * 8192 * 16 / 8, "intermediate read back: {read} B over 4 frames");
+    let interpreted: Vec<_> = flow_ir::fallback::seen().into_iter().filter(|(_, reason, _)| reason.starts_with("no kernel")).collect();
+    assert!(interpreted.is_empty(), "{interpreted:?}");
+    canvas::destroy(&c).unwrap();
+    canvas::destroy(&expected).unwrap();
+    wg::close(&ws);
+}
+
 fn main() {
-    let mut cases: Vec<(&str, fn())> = vec![("source_atlas_fixture_views", frame_views), ("source_netwerk_fixture_views", netwerk_views), ("local_function_reading_state_stays_a_kernel", local_function_kernel)];
+    let mut cases: Vec<(&str, fn())> = vec![("source_atlas_fixture_views", frame_views), ("source_netwerk_fixture_views", netwerk_views), ("local_function_reading_state_stays_a_kernel", local_function_kernel),
+                                             ("intermediate_map_stays_on_the_device", intermediate_stays_resident)];
     if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { cases.push(("source_atlas_full_table_budget", full_table_budget)); }
     common::window::run(&cases);
 }
