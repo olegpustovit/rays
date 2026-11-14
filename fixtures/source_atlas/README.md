@@ -94,37 +94,32 @@ cargo run -p rays_bin -- sketches/source_netwerk.rays
 
 The atlas as a printed map sheet, with the same tree, camera and picking. The art is a square with
 the world in it; title, scale, the files, symbols and crates, and hex survey numbers on all four sides
-sit in the margins. Per frame, device kernels project every node (its collapsed point or scope mark),
-every branch (the diagonal from a parent's centre in the file tree, straight lines between symbols),
-one square a leaf and the survey grid. A leaf's square is centred in its cell and its side is
-`0.2 + 0.62 sqrt(span / 70)` of the cell's, the span capped at 70 lines; from 4.5 points it is
-outlined in a darker ink of its hue. The inks are computed once, in OKLCH: lightness `0.9 - 0.3 r`
-and chroma `0.07 + 0.15 r` for a reach `r`, at the crate's hue (a golden-angle step a crate, drifting
-70 degrees across the crate's extent). `C` changes them: the crate's hue; cobalt source and vermilion
-tests; blue short spans to orange long ones; and the dark plate with its small dots. The grid has 64
-lines across the sheet and four times as many each time the zoom quadruples; the same lines carry on
-as ticks outside the frame. The 16 largest crates are named on the corner of their longest file, and
-a 180-point lattice of slots names files once they are that large.
+sit in the margins. Per frame, device kernels project every node (its collapsed point), every branch
+(the diagonal from a parent's centre in the file tree, straight lines between symbols), a scope's
+outline and the survey grid. The inks are computed once, in OKLCH, four a node so a kernel picks the
+palette per element: the crate's hue (a golden-angle step a crate, drifting 70 degrees across the
+crate's extent); cobalt source and vermilion tests; blue short spans to orange long ones; and the dark
+plate. `C` changes them. The grid has 64 lines across the sheet and four times as many each time the
+zoom quadruples; the same lines carry on as ticks outside the frame. The 16 largest crates are named
+on the corner of their longest file, and a 180-point lattice of slots names files once they are that
+large.
 
-The tree goes on below the symbols, precomputed as tilings: `lines.tsv` is every leaf symbol's lines
-(up to 64) as tiles of the unit square, their lengths as weights. Four parts and more share their
-tile's quadrants by the indexer's quadrant rule; three are a half and two quarters and two are
-halves, so the parts of a tile always cover it. Rows are top down with parts contiguous. `chars.tsv`
-is every such tiling of 0 to 40 equal characters, 64 rows each (characters are counted, not read).
+A leaf is the atlas's stipple without a bottom. Its samples are one quadtree of lattices nested in its
+cell: sample `(a, b)` of the `2^n` lattice sits at `(a + 2^n / 32) / 2^n` of the cell, so each level's
+dots are among the next one's, and a sample is lit by a hash of its place on a `2^20` lattice under the
+leaf's weight (the share its span earns), so a dot keeps its state at every level. Below 64 points
+this is exactly the atlas: a point, then 4 samples, then 16, 64 and 256 from 8, 16 and 32 points, each
+level drawn for the leaves that own a slot of a lattice at its pitch. From 64 points the lattice is the
+one whose spacing is 2 to 4 points; the samples new at that level fade in as the spacing grows, so the
+picture at 4 points is the next level's at 2 and it divides at any zoom. That part is bounded by the
+screen: 32-point blocks, each drawing the lattices of the leaves at its four corners (a leaf of 64
+points that touches a block holds one), up to 16 by 16 samples each; a block's four lattices are
+worked out once a frame and read back small. Dots are 2 points (1.5 dots tall for functions and
+methods), smaller only while a leaf is under 64 points.
 
-On the sheet this is a level of detail in the game sense. A symbol's square is drawn until its cell
-is over 40 points; then the first 12 rows of its tiling stand in its place, and from 128 points the
-rest, a branch whose parts are not drawn yet being its whole tile. A line whose tile is over 96
-points gives way to the tiles of its characters. A tile is drawn less a gutter of a fiftieth of its
-longer side, which belongs to it and grows with the zoom: at each of these steps the new gutters are
-under a point wide, so a square and its tiles are one picture and the hand-over is not seen. Nothing
-fades, moves or is interpolated. The tilings are drawn for the symbols and lines that own a slot of
-a screen lattice, so their cost is bounded by the window; a slot's symbol is projected once and its
-rows read that. The crossfades of the atlas are gone too: every symbol is a square at every zoom, and
-a file's and a symbol's branches are drawn at full strength where they show. A scope is an outlined
-square. The dark plate draws all of it in its own inks. On the full table a frame with the camera
-moving takes 15 to 18 ms in a 1000-point window (a still frame is free), and loading takes about 5
-seconds: `lines.tsv` is 450,000 rows.
+On the full table at 1440 by 1000, a frame takes about 51 ms (the original Netwerk 20, the atlas 17;
+the 60 Hz budget check fails for both, as it did before), 12 of it the deep levels, with 47 KB read
+back. The first frame compiles the kernels, about a second.
 
 ### Ledger
 

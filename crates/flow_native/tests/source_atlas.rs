@@ -8,13 +8,26 @@ use flow_native::{drawing, workspace_gpu as wg};
 use rays::{canvas, image};
 
 fn frame_views() {
-    if !common::gpu() { return; }
+    views(&[("overview", None, 1.0), ("zoom", None, 8.0),
+            ("strata", Some(include_str!("../../../sketches/source_strata.rays")), 1.0),
+            ("ledger", Some(include_str!("../../../sketches/source_ledger.rays")), 1.0),
+            ("contour", Some(include_str!("../../../sketches/source_contour.rays")), 1.0)]);
+}
+
+// Netwerk compiles a stipple kernel set for each of its five dot levels: its own case.
+fn netwerk_views() {
     let netwerk = include_str!("../../../sketches/source_netwerk.rays");
-    let views = [("overview", None, 1.0), ("zoom", None, 8.0), ("netwerk_overview", Some(netwerk), 1.0), ("netwerk_zoom", Some(netwerk), 8.0),
-                 ("strata", Some(include_str!("../../../sketches/source_strata.rays")), 1.0),
-                 ("ledger", Some(include_str!("../../../sketches/source_ledger.rays")), 1.0),
-                 ("contour", Some(include_str!("../../../sketches/source_contour.rays")), 1.0)];
-    for (name, sketch, zoom) in views {
+    flow_ir::fallback::reset();
+    views(&[("netwerk_overview", Some(netwerk), 1.0), ("netwerk_zoom", Some(netwerk), 8.0)]);
+    // every mark stays a kernel: a palette picked per frame among stored ink tables included. Known
+    // and older than this check: the margin ticks are interpreted (a capture still reads a state).
+    let interpreted: Vec<_> = flow_ir::fallback::seen().into_iter().filter(|(site, reason, _)| reason.starts_with("no kernel") && !site.starts_with("picture/tick_")).collect();
+    assert!(interpreted.is_empty(), "{interpreted:?}");
+}
+
+fn views(views: &[(&str, Option<&str>, f64)]) {
+    if !common::gpu() { return; }
+    for &(name, sketch, zoom) in views {
         let (_, lowered) = match sketch { Some(sketch) => atlas::fixture_of(sketch, zoom), None => atlas::fixture(zoom) };
         let ws = wg::create(None);
         wg::qualification(&ws);
@@ -92,7 +105,7 @@ fn local_function_kernel() {
 }
 
 fn main() {
-    let mut cases: Vec<(&str, fn())> = vec![("source_atlas_fixture_views", frame_views), ("local_function_reading_state_stays_a_kernel", local_function_kernel)];
+    let mut cases: Vec<(&str, fn())> = vec![("source_atlas_fixture_views", frame_views), ("source_netwerk_fixture_views", netwerk_views), ("local_function_reading_state_stays_a_kernel", local_function_kernel)];
     if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { cases.push(("source_atlas_full_table_budget", full_table_budget)); }
     common::window::run(&cases);
 }
