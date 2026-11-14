@@ -56,6 +56,8 @@ fn views(views: &[(&str, Option<&str>, f64)]) {
         assert_eq!(after.payload_readback_bytes - before.payload_readback_bytes, labels, "{name}: frame payload readback");
         println!("{name}: warm payload readback {}, GPU buffers {}", after.payload_readback_bytes - before.payload_readback_bytes, after.buffer_creations - before.buffer_creations);
         assert_eq!(after.buffer_creations, before.buffer_creations, "{name}: warm GPU buffer allocation");
+        // a still camera: every resident region (the slot owners, the corners, their fused siblings) is held
+        assert_eq!(after.resident_dispatches, before.resident_dispatches, "{name}: a still camera dispatched a region");
         let path = format!("{}/../../fixtures/source_atlas/{name}.png", env!("CARGO_MANIFEST_DIR"));
         if std::env::var("RAYS_UPDATE_FIXTURES").as_deref() == Ok("1") { canvas::save_png(&c, &path).unwrap(); }
         let golden = image::load(&path).unwrap();

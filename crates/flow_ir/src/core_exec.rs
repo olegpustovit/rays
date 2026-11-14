@@ -1068,9 +1068,9 @@ fn on_device(r: &dyn Resident, v: &Value) -> bool {
 /// draw after that reuses it with no dispatch. `tail` is what a producer keeps for its draw.
 /// ponytail: one held result a statement, and a held result keeps its buffer until its inputs
 /// change; add a byte cap if the arrays held grow past tens of MB.
-fn reuse_device(reads: Vec<i64>, result: i64, tail: Vec<i64>, run: Run) -> Run {
+fn reuse_device(reads: Vec<i64>, results: Vec<i64>, tail: Vec<i64>, run: Run) -> Run {
     #[derive(Default)]
-    struct Memo { last: Option<Vec<Value>>, held: Option<(Vec<Value>, Value)> }
+    struct Memo { last: Option<Vec<Value>>, held: Option<(Vec<Value>, Vec<Value>)> }
     let memo: Mutex<Memo> = Mutex::new(Memo::default());
     Arc::new(move |st: &mut State| {
         let r = match st.resident.clone() {
@@ -1082,8 +1082,10 @@ fn reuse_device(reads: Vec<i64>, result: i64, tail: Vec<i64>, run: Run) -> Run {
             reads.iter().zip(old.iter().zip(key.iter())).all(|(n, (a, b))| phys_eq(a, b) || (!st.kept.contains(n) && same_input(a, b)))
         };
         let held = memo.lock().unwrap().held.as_ref().filter(|(k, _)| same(k, st)).map(|(_, v)| v.clone());
-        if let Some(value) = held {
-            st.values[ix(result)] = value;
+        if let Some(values) = held {
+            for (result, value) in results.iter().zip(values) {
+                st.values[ix(*result)] = value;
+            }
             for n in &tail {
                 if !st.kept.contains(n) { st.kept.push(*n); }
             }
@@ -1091,15 +1093,25 @@ fn reuse_device(reads: Vec<i64>, result: i64, tail: Vec<i64>, run: Run) -> Run {
         }
         run(st)?;
         let repeated = memo.lock().unwrap().last.as_ref().is_some_and(|k| same(k, st));
-        let kept = if repeated && st.kept.contains(&result) { r.keep(&st.values[ix(result)])? } else { None };
-        // a result the region left on the host (a small region, or a loop that read its array back)
-        // is held as it is: its inputs repeat, so it is the value the region would make again
-        let kept = kept.or_else(|| (repeated && !on_device(&*r, &st.values[ix(result)])).then(|| st.values[ix(result)].clone()));
+        let mut kept: Option<Vec<Value>> = repeated.then(Vec::new);
+        for result in results.iter().filter(|_| repeated) {
+            let value = st.values[ix(*result)].clone();
+            let one = if st.kept.contains(result) { r.keep(&value)? } else { None };
+            // a result the region left on the host (a small region, or a loop that read its array
+            // back) is held as it is: its inputs repeat, so it is the value the region would make again
+            let one = one.or_else(|| (!on_device(&*r, &value)).then_some(value));
+            kept = match (kept, one) {
+                (Some(mut all), Some(one)) => { all.push(one); Some(all) }
+                _ => None,
+            };
+        }
         let mut m = memo.lock().unwrap();
         match kept {
-            Some(value) => {
-                st.values[ix(result)] = value.clone();
-                m.held = Some((key, value));
+            Some(values) => {
+                for (result, value) in results.iter().zip(&values) {
+                    st.values[ix(*result)] = value.clone();
+                }
+                m.held = Some((key, values));
             }
             None => {
                 m.held = None;
@@ -1780,6 +1792,26 @@ impl Ctx {
         out
     }
 
+    /// A fused sibling group's top-level statement, when the arrays it makes stay on the device for
+    /// the draw: they are held while what the siblings read is unchanged (`reuse_device`), the group
+    /// skipped whole. The group runs where its last member is (its first member's statement does
+    /// nothing then), or its members each where they stand.
+    fn reuse_fused(&self, s: &Statement, run: Run) -> Run {
+        let StatementNode::Invoke { region, result, .. } = &s.node else { return run };
+        let Some(group) = &self.fused[ix(*region)] else { return run };
+        let results = if group.at_first { vec![*result] } else if group.members.last() == Some(region) { group.results.clone() } else { return run };
+        if !results.iter().all(|r| self.tails.iter().any(|(_, kept)| kept.contains(r))) { return run; }
+        let mut reads: Vec<i64> = vec![];
+        for t in self.program.body.iter().filter(|t| matches!(&t.node, StatementNode::Invoke { result, .. } if results.contains(result))) {
+            let Some((r, _)) = footprint(&self.program, t) else { return run };
+            reads.extend(r);
+        }
+        reads.sort();
+        reads.dedup();
+        reads.retain(|n| !results.contains(n));
+        reuse_device(reads, results, vec![], run)
+    }
+
     fn block(&self, statements: &[Statement], top_body: bool) -> Run {
         let in_loop = self.in_loop.get();
         let kept: Vec<&Statement> = if in_loop { statements.iter().filter(|s| !self.hoisted(s)).collect() } else { statements.iter().collect() };
@@ -1815,11 +1847,14 @@ impl Ctx {
                 let tail = self.tails.iter().find(|(a, _)| *a == addr(s)).map(|(_, k)| k.clone()).unwrap_or_default();
                 match (footprint(&self.program, s), &s.node) {
                     (Some((reads, writes)), StatementNode::Invoke { result, .. }) if self.tails.iter().any(|(_, k)| k.contains(result)) => {
-                        remember(reads.clone(), writes, reuse_device(reads, *result, tail, run))
+                        remember(reads.clone(), writes, reuse_device(reads, vec![*result], tail, run))
                     }
                     (Some((reads, writes)), _) => remember(reads, writes, run),
                     (None, _) => run,
                 }
+            } else if remembered_kind && top && self.remember_loops {
+                let run = self.statement(s);
+                self.reuse_fused(s, run)
             } else {
                 self.statement(s)
             };
