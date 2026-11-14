@@ -106,23 +106,25 @@ lines across the sheet and four times as many each time the zoom quadruples; the
 as ticks outside the frame. The 16 largest crates are named on the corner of their longest file, and
 a 180-point lattice of slots names files once they are that large.
 
-The tree goes on below the symbols, precomputed: `lines.tsv` is every leaf symbol's lines (up to 64)
-packed by the indexer's own quadrant rule, their lengths as weights, in the unit square of the
-symbol, rows top down with children contiguous; `chars.tsv` is every tree of 0 to 40 equal
-characters, 64 rows each. On the sheet a square divides as it grows, and the hand-over is not seen:
-a symbol's square is drawn until its cell is over 40 points; then the first 12 rows of its tree stand
-in its place, at first tiling it exactly and drawing apart to their own sizes over the next doubling
-of the zoom, which uncovers the diagonal branches under them (a line a square as large as the line is
-long, a branch whose parts are not drawn yet a square of nearly all its cell). From 128 points the
-rest of the tree's rows do the same inside those branches, and a line whose cell is over 96 points
-gives way to the tree of its characters, each a stable size of its own (characters are counted, not
-read). Nothing fades. The trees are drawn for the symbols and lines that own a slot of a screen
-lattice, so their cost is bounded by the window; a slot's symbol is projected once and its rows read
-that. The crossfades of the atlas are gone too: every symbol is a square at every zoom, and a file's
-and a symbol's branches are drawn at full strength where they show. A scope is an outlined square.
-The dark plate draws all of it in its own inks. On the full table a frame with the camera moving
-takes 17 to 23 ms in a 1000-point window (a still frame is free), and loading takes about 5 seconds:
-`lines.tsv` is 460,000 rows.
+The tree goes on below the symbols, precomputed as tilings: `lines.tsv` is every leaf symbol's lines
+(up to 64) as tiles of the unit square, their lengths as weights. Four parts and more share their
+tile's quadrants by the indexer's quadrant rule; three are a half and two quarters and two are
+halves, so the parts of a tile always cover it. Rows are top down with parts contiguous. `chars.tsv`
+is every such tiling of 0 to 40 equal characters, 64 rows each (characters are counted, not read).
+
+On the sheet this is a level of detail in the game sense. A symbol's square is drawn until its cell
+is over 40 points; then the first 12 rows of its tiling stand in its place, and from 128 points the
+rest, a branch whose parts are not drawn yet being its whole tile. A line whose tile is over 96
+points gives way to the tiles of its characters. A tile is drawn less a gutter of a fiftieth of its
+longer side, which belongs to it and grows with the zoom: at each of these steps the new gutters are
+under a point wide, so a square and its tiles are one picture and the hand-over is not seen. Nothing
+fades, moves or is interpolated. The tilings are drawn for the symbols and lines that own a slot of
+a screen lattice, so their cost is bounded by the window; a slot's symbol is projected once and its
+rows read that. The crossfades of the atlas are gone too: every symbol is a square at every zoom, and
+a file's and a symbol's branches are drawn at full strength where they show. A scope is an outlined
+square. The dark plate draws all of it in its own inks. On the full table a frame with the camera
+moving takes 15 to 18 ms in a 1000-point window (a still frame is free), and loading takes about 5
+seconds: `lines.tsv` is 450,000 rows.
 
 ### Ledger
 

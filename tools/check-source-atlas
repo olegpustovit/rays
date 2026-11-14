@@ -47,17 +47,19 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
                 if n(scope, 'kind') == 4:
                     assert n(scope, 'first') <= n(child, 'first') <= n(child, 'last') <= n(scope, 'last'), 'symbol outside its scope'
     assert len((work / 'profile.tsv').read_text().splitlines()) == 1 + 32 * 32
-    # Below every leaf symbol its lines are a tree of their own: children contiguous, inside their parent, a line a row.
+    # Below every leaf symbol its lines tile the symbol: a row a line, the parts of a tile contiguous and covering it.
     below = [{k.split(':')[0]: v for k, v in r.items()} for r in csv.DictReader((work / 'lines.tsv').open(), delimiter='\t', quoting=csv.QUOTE_NONE)]
     for row in rows:
         if n(row, 'kind') == 5:
             first, count = n(row, 'sub'), n(row, 'subs')
             tree = below[first:first + count]
             assert sum(int(t['kind']) == 1 for t in tree) == min(64, n(row, 'last') - n(row, 'first') + 1), 'a row a line'
+            assert [float(tree[0][k]) for k in 'xywh'] == [0.0, 0.0, 1.0, 1.0], 'a tree covers its symbol'
             for t in tree:
-                for child in below[int(t['child']):int(t['child']) + int(t['count'])]:
+                parts = below[int(t['child']):int(t['child']) + int(t['count'])]
+                if parts:
                     assert first <= int(t['child']) < first + count, 'a tree keeps to its rows'
-                    assert float(t['x']) <= float(child['x']) and float(child['x']) + float(child['size']) <= float(t['x']) + float(t['size']) + 1e-12, 'line child inside its parent'
+                    assert abs(sum(float(c['w']) * float(c['h']) for c in parts) - float(t['w']) * float(t['h'])) < 1e-12, 'parts cover their tile'
     assert len((work / 'chars.tsv').read_text().splitlines()) == 1 + 41 * 64
     # Every leaf has its own cell in its crate's reading order, and a crate's files stack without gaps.
     crates = [{k.split(':')[0]: v for k, v in r.items()} for r in csv.DictReader((work / 'crates.tsv').open(), delimiter='\t', quoting=csv.QUOTE_NONE)]

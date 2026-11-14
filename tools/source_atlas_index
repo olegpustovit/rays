@@ -24,13 +24,14 @@ COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'),
 # around a symbol. `top` is the lines of the longer files of a file's crate.
 CRATES = [('x0', 'float'), ('y0', 'float'), ('x1', 'float'), ('y1', 'float'), ('ax', 'float'), ('ay', 'float'), ('files', 'int'), ('lines', 'int'), ('cells', 'int'), ('chars', 'int'), ('name', 'text'), ('title', 'text'), ('rank', 'int')]
 # The tree goes on below a leaf symbol, outside this table: `sub` is the first of its `subs` rows of
-# lines.tsv, its lines packed as symbols are, in the unit square of the symbol's cell. A row there is
-# a cell [x y size], its parent's centre, `kind` 0 a branch or 1 a line, its children as contiguous
-# rows from `child` (absolute; `below` counts from the tree's first row), a line's `weight` in thousandths (the root of its length in 120
-# characters) and its `chars` up to 40. chars.tsv is every tree of 0 to 40 equal characters, 64 rows
-# each: kind 0 a branch, 2 a character, -1 no node.
-LINES = [('x', 'float'), ('y', 'float'), ('size', 'float'), ('px', 'float'), ('py', 'float'), ('kind', 'int'), ('child', 'int'), ('count', 'int'), ('weight', 'int'), ('chars', 'int'), ('below', 'int')]
-CHARS = [('x', 'float'), ('y', 'float'), ('size', 'float'), ('px', 'float'), ('py', 'float'), ('kind', 'int')]
+# lines.tsv, its lines as a tiling of the unit square of the symbol's square. A row there is a tile
+# [x y w h], `kind` 0 a branch or 1 a line, its parts as contiguous rows from `child` (absolute; `below`
+# counts from the tree's first row) and a line's `chars` up to 40. Four parts and more share their
+# tile's quadrants as symbols do; three are a half and two quarters, two are halves, so the parts of
+# a tile always cover it. chars.tsv is every such tiling of 0 to 40 equal characters, 64 rows each:
+# kind 0 a branch, 2 a character, -1 no row.
+LINES = [('x', 'float'), ('y', 'float'), ('w', 'float'), ('h', 'float'), ('kind', 'int'), ('child', 'int'), ('count', 'int'), ('chars', 'int'), ('below', 'int')]
+CHARS = [('x', 'float'), ('y', 'float'), ('w', 'float'), ('h', 'float'), ('kind', 'int')]
 LINE_CAP, CHAR_CAP, CHAR_ROWS = 64, 40, 64
 # A number comes last: a row never ends in the tab of an empty text cell.
 # Node kinds: the file quadtree, then each indexed file's nested symbol field.
@@ -340,23 +341,42 @@ def table_rows(root):
     return rows
 
 
-def packed(weights, turn_seed, leaf):
-    """Items packed by `quadrants` into the unit square, turned inward like a scope: breadth-first rows, children contiguous."""
+def tiled(weights, turn_seed, leaf):
+    """Items as a tiling of the unit square: breadth-first rows, the parts of a tile contiguous and covering it."""
     prefix = [0.0]
     for w in weights:
         prefix.append(prefix[-1] + w)
 
-    def pack(x, y, size, lo, hi, px, py):
-        node = {'x': x, 'y': y, 'size': size, 'px': px, 'py': py}
-        if hi - lo == 1:
+    def tile(x, y, w, h, lo, hi):
+        node = {'x': x, 'y': y, 'w': w, 'h': h}
+        n, turn = hi - lo, (turn_seed ^ (lo * 31 + hi)) % 4
+        if n == 1:
             return {**node, **leaf(lo), 'children': []}
-        centre = (x + size / 2, y + size / 2)
-        return {**node, 'kind': 0, 'children': [pack(x + qx * size / 2, y + qy * size / 2, size / 2, a, b, *centre)
-                                                for a, b, qx, qy in quadrants(prefix, (0.10, 0.18, 0.29, 0.43), lo, hi, (turn_seed ^ (lo * 31 + hi)) % 4)]}
+        if n >= 4:
+            parts = [tile(x + qx * w / 2, y + qy * h / 2, w / 2, h / 2, a, b) for a, b, qx, qy in quadrants(prefix, (0.10, 0.18, 0.29, 0.43), lo, hi, turn)]
+        else:
+            # two halves across the longer side (a square by its turn); of three, the heaviest keeps a half
+            across = w > h or (w == h and turn % 2 == 0)
+            first = (x, y, w / 2, h) if across else (x, y, w, h / 2)
+            second = (x + w / 2, y, w / 2, h) if across else (x, y + h / 2, w, h / 2)
+            if turn >= 2:
+                first, second = second, first
+            if n == 2:
+                parts = [tile(*first, lo, lo + 1), tile(*second, lo + 1, hi)]
+            else:
+                heavy = max(range(lo, hi), key=lambda k: weights[k])
+                if heavy == lo:
+                    parts = [tile(*first, lo, lo + 1), tile(*second, lo + 1, hi)]
+                elif heavy == hi - 1:
+                    parts = [tile(*first, lo, hi - 1), tile(*second, hi - 1, hi)]
+                else:
+                    # the middle one cannot keep a half and its neighbours stay contiguous: the first does
+                    parts = [tile(*first, lo, lo + 1), tile(*second, lo + 1, hi)]
+        return {**node, 'kind': 0, 'children': parts}
 
     if not weights:
         return []
-    rows, pending = [], [pack(0.08, 0.08, 0.84, 0, len(weights), 0.5, 0.5)]
+    rows, pending = [], [tile(0.0, 0.0, 1.0, 1.0, 0, len(weights))]
     while pending:
         following = []
         for node in pending:
@@ -377,8 +397,7 @@ def line_trees(files, rows):
         if row['kind'] != LEAF:
             continue
         lines = files[row['file']]['lines'][row['first'] - 1:row['last']][:LINE_CAP] or ['']
-        tree = packed([math.sqrt(1 + len(line)) for line in lines], row['seed'],
-                      lambda n: {'kind': 1, 'weight': round(1000 * min(1.0, math.sqrt(len(lines[n]) / 120))), 'chars': min(CHAR_CAP, len(lines[n]))})
+        tree = tiled([math.sqrt(1 + len(line)) for line in lines], row['seed'], lambda n: {'kind': 1, 'chars': min(CHAR_CAP, len(lines[n]))})
         row['sub'], row['subs'] = len(out), len(tree)
         for node in tree:
             node['below'] = node['child']
@@ -390,9 +409,9 @@ def line_trees(files, rows):
 def char_trees():
     out = []
     for n in range(CHAR_CAP + 1):
-        tree = packed([1.0] * n, n, lambda k: {'kind': 2})
+        tree = tiled([1.0] * n, n, lambda k: {'kind': 2})
         assert len(tree) <= CHAR_ROWS
-        out.extend(tree + [{'x': 0.0, 'y': 0.0, 'size': 0.0, 'px': 0.0, 'py': 0.0, 'kind': -1}] * (CHAR_ROWS - len(tree)))
+        out.extend(tree + [{'x': 0.0, 'y': 0.0, 'w': 0.0, 'h': 0.0, 'kind': -1}] * (CHAR_ROWS - len(tree)))
     return out
 
 

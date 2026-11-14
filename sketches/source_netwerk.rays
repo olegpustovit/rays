@@ -2,10 +2,10 @@
 ; quadtree, each indexed file a nested field of its real rust-analyzer symbols. A leaf is a square
 ; whose side follows its source span; its hue is its crate; branches run on the diagonal. A scope
 ; is an outlined square around its symbols. The tree goes on below the symbols, precomputed by
-; the indexer, and a square divides as it grows: a symbol's square gives way to the tree of its
-; lines, packed as symbols are, a square a line as large as the line is long, and a line's square
-; to the tree of its characters. Nothing fades or swaps in sight: at the moment a square gives
-; way its parts tile it exactly, and they draw apart to their own sizes as the zoom goes on.
+; the indexer as tilings: a symbol's square is the tiles of its lines, a larger tile a longer
+; line, and a line's tile the tiles of its characters. A square and its tiles are one picture
+; while the gutters between the tiles are under a point, so the hand-over is not seen; from
+; there the camera only magnifies what is there.
 ; Generate first: tools/source_atlas_index
 ; Run: cargo run -p rays_bin -- sketches/source_netwerk.rays
 ; Scroll zooms at the pointer, click dives, drag pans, right click steps back, R or Space resets,
@@ -118,20 +118,18 @@
        ; zoom at which that symbol fills most of the sheet.
        :deepest (* 24.0 (max 180.0 (/ 0.7 (array/min (exact (map (fn [(i : int)] (array/nth d.size i)) ids))))))
        :scopes (filter (fn [(i : int)] (= (array/nth d.kind i) 4)) ids)
-       ; The trees below the symbols as stored arrays, a node [x y side kind] in its symbol's square,
-       ; kind 1 a line and 2 or more a branch (2 plus the row of its first part, counted in its tree),
-       ; and [its parent's centre x, y, its weight, its characters]; and where a symbol's tree is,
-       ; [first row, rows, seed]. One array each: a kernel that reads a symbol from more arrays
-       ; than a handful leaves its fast path.
-       :sub (exact (map (fn [(r : int)] [(array/nth below.x r) (array/nth below.y r) (array/nth below.size r)
-                                         (if (= (array/nth below.kind r) 1) 1.0 (+ 2.0 (float (array/nth below.below r))))]) below_ids))
-       :stem (exact (map (fn [(r : int)] [(array/nth below.px r) (array/nth below.py r) (* 0.001 (float (array/nth below.weight r))) (float (array/nth below.chars r))]) below_ids))
+       ; The tilings below the symbols as stored arrays: a tile [x y w h] in its symbol's square,
+       ; what it is (1 a line, 2 or more a branch: 2 plus the row of its first part, counted in its
+       ; tree) with a line's characters, and where a symbol's tiling is, [first row, rows]. One
+       ; array each: a kernel that reads a symbol from more arrays than a handful leaves its fast path.
+       :sub (exact (map (fn [(r : int)] [(array/nth below.x r) (array/nth below.y r) (array/nth below.w r) (array/nth below.h r)]) below_ids))
+       :sort (exact (map (fn [(r : int)] [(if (= (array/nth below.kind r) 1) 1.0 (+ 2.0 (float (array/nth below.below r)))) (float (array/nth below.chars r)) 0.0]) below_ids))
        :sub_child (exact (map (fn [(r : int)] (int (array/nth below.child r))) below_ids))
        :sub_count (exact (map (fn [(r : int)] (int (array/nth below.count r))) below_ids))
-       :grain (exact (map (fn [(i : int)] [(float (array/nth d.sub i)) (float (array/nth d.subs i)) (float (int/mod (array/nth d.seed i) 46337)) 0.0]) ids))
-       ; every tree of 0 to 40 equal characters, 64 rows each
-       :glyph (exact (map (fn [(r : int)] [(array/nth letter.x r) (array/nth letter.y r) (array/nth letter.size r) (float (array/nth letter.kind r))]) (array/range (array/count letter.kind) :type int)))
-       :glyph_stem (exact (map (fn [(r : int)] [(array/nth letter.px r) (array/nth letter.py r) 0.0]) (array/range (array/count letter.kind) :type int)))
+       :grain (exact (map (fn [(i : int)] [(float (array/nth d.sub i)) (float (array/nth d.subs i)) 0.0]) ids))
+       ; every tiling of 0 to 40 equal characters, 64 rows each; a row's kind is 2 for a character
+       :glyph (exact (map (fn [(r : int)] [(array/nth letter.x r) (array/nth letter.y r) (array/nth letter.w r) (array/nth letter.h r)]) (array/range (array/count letter.kind) :type int)))
+       :glyph_kind (exact (map (fn [(r : int)] (float (array/nth letter.kind r))) (array/range (array/count letter.kind) :type int)))
        :files (sum [i ids] (if (or (= (array/nth d.kind i) 1) (= (array/nth d.kind i) 2)) 1 0))
        :symbols (sum [i ids] (if (or (= (array/nth d.kind i) 4) (= (array/nth d.kind i) 5)) 1 0))
        :lines (sum [i ids] (if (or (= (array/nth d.kind i) 1) (= (array/nth d.kind i) 2)) (array/nth d.last i) 0))}))
@@ -311,39 +309,29 @@
                    n -1)))
            (array/range (int/mul cols (across (- lim.w lim.y) pitch)) :type int))))
 
-  ; The deepest node of a symbol's tree of lines that holds the point (u, v) of the symbol's cell,
-  ; from the tree's first row: a node's children are contiguous rows, at most four.
+  ; Part `k` of a tile when it exists and holds the point (u, v), else -1. A tile is [x y w h].
+  (defn covers :context value [(sub : (array vec4)) (first : int) (n : int) (k : int) (u : float) (v : float)]
+    (let* [at (int (min (int/sub (array/count sub) 1) (int/add first k)))
+           c (array/nth sub at)]
+      (if (and (< k n) (and (and (>= u c.x) (< u (+ c.x c.z))) (and (>= v c.y) (< v (+ c.y c.w))))) at -1)))
+
+  ; The line of a symbol's tiling that holds the point (u, v) of the symbol's square, from the
+  ; tiling's first row: a tile's parts are contiguous rows, at most four.
   (defn line-under :context value [(sub : (array vec4)) (child : (array int)) (count : (array int)) (root : int) (u : float) (v : float)]
     (let* [walk (iterate 12 {:n root :done false}
                          (fn [k]
                            (let* [first (array/nth child k.n) n (array/nth count k.n)
-                                  hit (int (max (max (holds sub first n 0 u v) (holds sub first n 1 u v))
-                                                (max (holds sub first n 2 u v) (holds sub first n 3 u v))))]
+                                  hit (int (max (max (covers sub first n 0 u v) (covers sub first n 1 u v))
+                                                (max (covers sub first n 2 u v) (covers sub first n 3 u v))))]
                              (if (< hit 0) {:n k.n :done true} {:n hit :done false})))
                          :until (fn [previous k] k.done))]
       walk.n))
 
-  ; A part of a tree on screen as [x y side]: its parent's square is `e`, its cell `c` in the
-  ; unit square of the tree, `own` the share of its cell it takes at rest. At `apart` 0 the parts
-  ; tile their parent (the tree's field is the middle 84 hundredths, stretched over all of it), so
-  ; they are the square they came from; at 1 each is its own square in the middle of its cell.
-  (defn part :context value [(e : vec3) (c : vec4) (own : float) (apart : float)]
-    (let* [side (* (* c.z e.z) (+ (/ (- 1.0 apart) 0.84) (* apart own)))
-           tiled (/ (- c.x 0.08) 0.84) tiled_y (/ (- c.y 0.08) 0.84)
-           rest (- (+ c.x (* c.z 0.5)) (* (* c.z own) 0.5)) rest_y (- (+ c.y (* c.z 0.5)) (* (* c.z own) 0.5))]
-      [(+ e.x (* (+ tiled (* (- rest tiled) apart)) e.z)) (+ e.y (* (+ tiled_y (* (- rest_y tiled_y) apart)) e.z)) side]))
-
-  ; A part that shows after its tree's first rows tiles only its own cell at `apart` 0: the branch
-  ; it comes from is a square of that cell.
-  (defn later :context value [(e : vec3) (c : vec4) (own : float) (apart : float)]
-    (let* [share (+ (- 1.0 apart) (* apart own)) side (* (* c.z e.z) share)]
-      [(- (+ e.x (* (+ c.x (* c.z 0.5)) e.z)) (* side 0.5)) (- (+ e.y (* (+ c.y (* c.z 0.5)) e.z)) (* side 0.5)) side]))
-
-  ; A stable share of 100 for part `id` of something seeded: cubing modulo a prime under 2^15.5
-  ; mixes without leaving 32 bits, which the device's integers are.
-  (defn share :context value [(seed : int) (id : int)]
-    (let* [h (int/mod (int/add (int/mod seed 46337) (int/add (int/mul id 7919) 1)) 46337)]
-      (int/mod (int/add (int/mod (int/mul (int/mod (int/mul h h) 46337) h) 46337) id) 100)))
+  ; A tile on screen as [x y w h]: `c` in the unit square of the rectangle `e`, less a gutter of a
+  ; fiftieth of its longer side all round. The gutter belongs to the tile, so it grows with the zoom.
+  (defn tile :context value [(e : vec4) (c : vec4)]
+    (let* [gutter (* 0.02 (max (* c.z e.z) (* c.w e.w)))]
+      [(+ (+ e.x (* c.x e.z)) gutter) (+ (+ e.y (* c.y e.w)) gutter) (- (* c.z e.z) (* 2.0 gutter)) (- (* c.w e.w) (* 2.0 gutter))]))
 
   ; A count with its thousands apart, up to 999,999,999.
   (defn grouped :context value [(n : int)]
@@ -459,7 +447,7 @@
                               (let* [i (array/nth tiles j) q (spot cell cam pin i)]
                                 (if (and (and view.cells (= (array/nth d.kind i) 0)) (and (> q.z 110.0) (seen q lim))) [2.0 2.0 0.0] [0.0 0.0 0.0]))) tile_ids)
 
-           ; One square a leaf, until its cell is over 40 points and its tree stands in its place.
+           ; One square a leaf, until its cell is over 40 points and its tiling stands in its place.
            leaves f.leaves
            leaf_ids (array/range (array/count leaves) :type int)
            leaf_at (map (fn [(j : int)]
@@ -486,90 +474,67 @@
                             (let* [i (array/nth scopes (int/div j 4))]
                               (ink dark (case palette 1 (array/nth f.edge1 i) 2 [0.365 0.396 0.424] 3 [0.506 0.537 0.463] :else (array/nth f.edge0 i)) 0.55))) hoops)
 
-           ; The tree of a symbol's lines stands where the symbol's square was, in its ink: a branch
-           ; a diagonal from its parent's centre, a line a square in the middle of its cell, as
-           ; large as the line is long. The indexer stores a tree top down, so its first rows are its
-           ; largest parts: a symbol that owns a 40-point slot draws its first 12 rows, one that
-           ; owns a 128-point slot the rest, up to 100. A branch whose parts are not drawn yet is a
-           ; square of nearly all its cell, which those parts then tile. The parts come apart with
-           ; the zoom: over the first doubling after they show, from tiling their parent to their own sizes.
-           ; ponytail: 100 rows a symbol: 64 lines and the branches over them.
+           ; A symbol's tiling stands where its square was, in its ink: a tile a line, larger for a
+           ; longer line. The indexer stores a tiling top down, so its first rows are its largest
+           ; tiles: a symbol that owns a 40-point slot draws its first 12 rows, one that owns a
+           ; 128-point slot the rest, up to 108. A branch whose parts are not drawn yet is its
+           ; whole tile, which those parts cover. At each of these steps the new gutters are under
+           ; a point wide, so a square and its tiles are one picture; nothing fades or moves.
+           ; ponytail: 108 rows a symbol: 64 lines and the branches over them.
            near (slots cell d.child d.count eye mid lim 40.0 false)
-           ; a slot's symbol once, for all its rows: its square [x y side] with its cell's side, and
-           ; its tree [first row, rows, 0, the symbol]
+           ; a slot's symbol once, for all its rows: its square [x y side] with its cell's side (-1
+           ; for none), and its tiling [first row, rows, the symbol]
            near_box (map (fn [(n : int)]
                              (let* [i (int (max 0 (array/nth near n))) q (spot cell cam pin i) e (square q (array/nth f.reach i) dark)]
                                [e.x e.y e.z (if (and (>= (array/nth near n) 0) (seen q lim)) q.z -1.0)])) (array/range (array/count near) :type int))
-           near_tree (map (fn [(n : int)] (let* [i (int (max 0 (array/nth near n))) g (array/nth f.grain i)] [g.x g.y 0.0 (float i)]))
+           near_tree (map (fn [(n : int)] (let* [i (int (max 0 (array/nth near n))) g (array/nth f.grain i)] [g.x g.y (float i)]))
                               (array/range (array/count near) :type int))
            shoots (array/range (int/mul (array/count near) 12) :type int)
-           shoot_from (map (fn [(m : int)]
-                             (let* [e (array/nth near_box (int/div m 12)) g (array/nth near_tree (int/div m 12)) k (int/add 0 (int/mod m 12))
-                                    up (array/nth f.stem (int/add (int g.x) (int (max 0.0 (min (float k) (- g.y 1.0))))))]
-                               (if (and (>= e.w 0.0) (and (> k 0) (< (float k) g.y))) [(+ e.x (* up.x e.z)) (+ e.y (* up.y e.z)) 0.0] [0.0 0.0 0.0]))) shoots)
-           shoot_to (map (fn [(m : int)]
-                           (let* [e (array/nth near_box (int/div m 12)) g (array/nth near_tree (int/div m 12)) k (int/add 0 (int/mod m 12))
-                                  c (array/nth f.sub (int/add (int g.x) (int (max 0.0 (min (float k) (- g.y 1.0))))))]
-                             (if (and (>= e.w 0.0) (and (> k 0) (< (float k) g.y)))
-                                 [(+ e.x (* (+ c.x (* c.z 0.5)) e.z)) (+ e.y (* (+ c.y (* c.z 0.5)) e.z)) 0.0] [0.0 0.0 0.0]))) shoots)
            shoot_at (map (fn [(m : int)]
                          (let* [e (array/nth near_box (int/div m 12)) g (array/nth near_tree (int/div m 12)) k (int/add 0 (int/mod m 12))
-                                row (int/add (int g.x) (int (max 0.0 (min (float k) (- g.y 1.0)))))
-                                c (array/nth f.sub row) wt (array/nth f.stem row)
-                                a (part [e.x e.y e.z] c (if (= c.w 1.0) (+ 0.2 (* 0.62 wt.z)) 0.96) (smooth 40.0 80.0 e.w))]
+                                a (tile [e.x e.y e.z e.z] (array/nth f.sub (int/add (int g.x) (int (max 0.0 (min (float k) (- g.y 1.0)))))))]
                            [a.x a.y 0.0])) shoots)
            shoot_size (map (fn [(m : int)]
                            (let* [e (array/nth near_box (int/div m 12)) g (array/nth near_tree (int/div m 12)) k (int/add 0 (int/mod m 12))
                                   row (int/add (int g.x) (int (max 0.0 (min (float k) (- g.y 1.0)))))
-                                  c (array/nth f.sub row) wt (array/nth f.stem row)
-                                  a (part [e.x e.y e.z] c (if (= c.w 1.0) (+ 0.2 (* 0.62 wt.z)) 0.96) (smooth 40.0 80.0 e.w))]
-                             ; a line until its characters show; a branch where this lattice draws none of its parts
+                                  c (array/nth f.sub row) what (array/nth f.sort row)
+                                  a (tile [e.x e.y e.z e.z] c)]
+                             ; a line until its characters are drawn; a branch where this lattice draws none of its parts
                              (if (and (and (>= e.w 0.0) (< (float k) g.y))
-                                      (if (= c.w 1.0) (<= (* c.z e.z) 96.0) (>= (- c.w 2.0) (if (> e.w 128.0) 100.0 12.0))))
-                                 [a.z a.z 0.0] [0.0 0.0 0.0]))) shoots)
+                                      (if (= what.x 1.0) (<= (* (max c.z c.w) e.z) 96.0) (>= (- what.x 2.0) (if (> e.w 128.0) 108.0 12.0))))
+                                 [a.z a.w 0.0] [0.0 0.0 0.0]))) shoots)
            shoot_fill (map (fn [(m : int)]
-                           (let* [g (array/nth near_tree (int/div m 12)) i (int g.w)]
+                           (let* [g (array/nth near_tree (int/div m 12)) i (int g.z)]
                              (+ [0.0 0.0 0.0] (case palette 1 (array/nth f.fill1 i) 2 (array/nth f.fill2 i) 3 (array/nth f.fill3 i) :else (array/nth f.fill0 i))))) shoots)
            wide (slots cell d.child d.count eye mid lim 128.0 false)
-           ; a slot's symbol once, for all its rows: its square [x y side] with its cell's side, and
-           ; its tree [first row, rows, 0, the symbol]
+           ; a slot's symbol once, for all its rows: its square [x y side] with its cell's side (-1
+           ; for none), and its tiling [first row, rows, the symbol]
            wide_box (map (fn [(n : int)]
                              (let* [i (int (max 0 (array/nth wide n))) q (spot cell cam pin i) e (square q (array/nth f.reach i) dark)]
                                [e.x e.y e.z (if (and (>= (array/nth wide n) 0) (seen q lim)) q.z -1.0)])) (array/range (array/count wide) :type int))
-           wide_tree (map (fn [(n : int)] (let* [i (int (max 0 (array/nth wide n))) g (array/nth f.grain i)] [g.x g.y 0.0 (float i)]))
+           wide_tree (map (fn [(n : int)] (let* [i (int (max 0 (array/nth wide n))) g (array/nth f.grain i)] [g.x g.y (float i)]))
                               (array/range (array/count wide) :type int))
-           boughs (array/range (int/mul (array/count wide) 88) :type int)
-           bough_from (map (fn [(m : int)]
-                             (let* [e (array/nth wide_box (int/div m 88)) g (array/nth wide_tree (int/div m 88)) k (int/add 12 (int/mod m 88))
-                                    up (array/nth f.stem (int/add (int g.x) (int (max 0.0 (min (float k) (- g.y 1.0))))))]
-                               (if (and (>= e.w 0.0) (and (> k 0) (< (float k) g.y))) [(+ e.x (* up.x e.z)) (+ e.y (* up.y e.z)) 0.0] [0.0 0.0 0.0]))) boughs)
-           bough_to (map (fn [(m : int)]
-                           (let* [e (array/nth wide_box (int/div m 88)) g (array/nth wide_tree (int/div m 88)) k (int/add 12 (int/mod m 88))
-                                  c (array/nth f.sub (int/add (int g.x) (int (max 0.0 (min (float k) (- g.y 1.0))))))]
-                             (if (and (>= e.w 0.0) (and (> k 0) (< (float k) g.y)))
-                                 [(+ e.x (* (+ c.x (* c.z 0.5)) e.z)) (+ e.y (* (+ c.y (* c.z 0.5)) e.z)) 0.0] [0.0 0.0 0.0]))) boughs)
+           boughs (array/range (int/mul (array/count wide) 96) :type int)
            bough_at (map (fn [(m : int)]
-                         (let* [e (array/nth wide_box (int/div m 88)) g (array/nth wide_tree (int/div m 88)) k (int/add 12 (int/mod m 88))
-                                row (int/add (int g.x) (int (max 0.0 (min (float k) (- g.y 1.0)))))
-                                c (array/nth f.sub row) wt (array/nth f.stem row)
-                                a (later [e.x e.y e.z] c (if (= c.w 1.0) (+ 0.2 (* 0.62 wt.z)) 0.96) (smooth 128.0 256.0 e.w))]
+                         (let* [e (array/nth wide_box (int/div m 96)) g (array/nth wide_tree (int/div m 96)) k (int/add 12 (int/mod m 96))
+                                a (tile [e.x e.y e.z e.z] (array/nth f.sub (int/add (int g.x) (int (max 0.0 (min (float k) (- g.y 1.0)))))))]
                            [a.x a.y 0.0])) boughs)
            bough_size (map (fn [(m : int)]
-                           (let* [e (array/nth wide_box (int/div m 88)) g (array/nth wide_tree (int/div m 88)) k (int/add 12 (int/mod m 88))
+                           (let* [e (array/nth wide_box (int/div m 96)) g (array/nth wide_tree (int/div m 96)) k (int/add 12 (int/mod m 96))
                                   row (int/add (int g.x) (int (max 0.0 (min (float k) (- g.y 1.0)))))
-                                  c (array/nth f.sub row) wt (array/nth f.stem row)
-                                  a (later [e.x e.y e.z] c (if (= c.w 1.0) (+ 0.2 (* 0.62 wt.z)) 0.96) (smooth 128.0 256.0 e.w))]
-                             ; a line until its characters show; a branch where this lattice draws none of its parts
+                                  c (array/nth f.sub row) what (array/nth f.sort row)
+                                  a (tile [e.x e.y e.z e.z] c)]
+                             ; a line until its characters are drawn; a branch where this lattice draws none of its parts
                              (if (and (and (>= e.w 0.0) (< (float k) g.y))
-                                      (if (= c.w 1.0) (<= (* c.z e.z) 96.0) (>= (- c.w 2.0) (if (> e.w 128.0) 100.0 12.0))))
-                                 [a.z a.z 0.0] [0.0 0.0 0.0]))) boughs)
+                                      (if (= what.x 1.0) (<= (* (max c.z c.w) e.z) 96.0) (>= (- what.x 2.0) (if (> e.w 128.0) 108.0 12.0))))
+                                 [a.z a.w 0.0] [0.0 0.0 0.0]))) boughs)
            bough_fill (map (fn [(m : int)]
-                           (let* [g (array/nth wide_tree (int/div m 88)) i (int g.w)]
+                           (let* [g (array/nth wide_tree (int/div m 96)) i (int g.z)]
                              (+ [0.0 0.0 0.0] (case palette 1 (array/nth f.fill1 i) 2 (array/nth f.fill2 i) 3 (array/nth f.fill3 i) :else (array/nth f.fill0 i))))) boughs)
 
-           ; The tree of a line's characters stands where the line's square was: for every line
-           ; that owns a 96-point slot, the stored tree of as many equal parts as the line has
-           ; characters, 64 rows of it, each character a stable size of its own.
+           ; A line's tile gives way to the tiles of its characters: for every line that owns a
+           ; 96-point slot, the stored tiling of as many equal parts as the line has characters,
+           ; 64 rows of it.
            far_cols (across (- lim.z lim.x) 96.0)
            far (array/range (int/mul far_cols (across (- lim.w lim.y) 96.0)) :type int)
            far_symbol (map (fn [(n : int)]
@@ -583,44 +548,30 @@
                                   sx (+ lim.x (* (float (int/mod n far_cols)) 96.0)) sy (+ lim.y (* (float (int/div n far_cols)) 96.0))
                                   e (square (spot cell cam pin i) (array/nth f.reach i) dark) g (array/nth f.grain i)
                                   row (line-under f.sub f.sub_child f.sub_count (int g.x) (/ (- sx e.x) e.z) (/ (- sy e.y) e.z))
-                                  c (array/nth f.sub row)
+                                  c (array/nth f.sub row) what (array/nth f.sort row)
                                   x (+ e.x (* c.x e.z)) y (+ e.y (* c.y e.z))]
-                             ; a line whose cell is over the pitch belongs to the first lattice point in it
-                             (if (and (and (>= owner 0) (= c.w 1.0))
-                                      (and (> (* c.z e.z) 96.0) (and (and (>= sx x) (< (- sx 96.0) x)) (and (>= sy y) (< (- sy 96.0) y)))))
+                             ; a line whose tile is over the pitch belongs to the first lattice point in it
+                             (if (and (and (>= owner 0) (= what.x 1.0))
+                                      (and (> (* (max c.z c.w) e.z) 96.0)
+                                           (and (and (>= sx x) (< (- sx 96.0) x)) (and (and (>= sy y) (< sy (+ y (* c.w e.z)))) (< (- sy 96.0) y)))))
                                  row -1))) far)
-           ; a slot's line once, for all its characters: its square [x y side] and [its characters, its row, the symbol], -1 for none
+           ; a slot's line once, for all its characters: its tile on screen, and how many characters (-1 for none)
            far_box (map (fn [(n : int)]
-                          (let* [row (int (max 0 (array/nth far_line n))) i (int (max 0 (array/nth far_symbol n)))
-                                 e (square (spot cell cam pin i) (array/nth f.reach i) dark)
-                                 c (array/nth f.sub row) wt (array/nth f.stem row)
-                                 line (* (* c.z e.z) (+ 0.2 (* 0.62 wt.z)))]
-                            [(- (+ e.x (* (+ c.x (* c.z 0.5)) e.z)) (* line 0.5)) (- (+ e.y (* (+ c.y (* c.z 0.5)) e.z)) (* line 0.5)) line
-                             ; its characters, and as a fraction how far apart they have come
-                             (if (>= (array/nth far_line n) 0) (+ wt.w (* 0.99 (smooth 96.0 192.0 (* c.z e.z)))) -1.0)])) far)
+                          (let* [i (int (max 0 (array/nth far_symbol n))) e (square (spot cell cam pin i) (array/nth f.reach i) dark)]
+                            (tile [e.x e.y e.z e.z] (array/nth f.sub (int (max 0 (array/nth far_line n))))))) far)
+           far_chars (map (fn [(n : int)] (let* [what (array/nth f.sort (int (max 0 (array/nth far_line n))))] (if (>= (array/nth far_line n) 0) what.y -1.0))) far)
            motes (array/range (int/mul (array/count far) 64) :type int)
            mote_at (map (fn [(m : int)]
-                          (let* [l (array/nth far_box (int/div m 64))
-                                 c (array/nth f.glyph (int/add (int/mul (int (max 0.0 l.w)) 64) (int/mod m 64)))
-                                 a (part [l.x l.y l.z] c (+ 0.3 (* 0.005 (float (share (array/nth far_line (int/div m 64)) (int/mod m 64))))) (/ (- l.w (floor l.w)) 0.99))]
+                          (let* [a (tile (array/nth far_box (int/div m 64))
+                                         (array/nth f.glyph (int/add (int/mul (int (max 0.0 (array/nth far_chars (int/div m 64)))) 64) (int/mod m 64))))]
                             [a.x a.y 0.0])) motes)
            mote_size (map (fn [(m : int)]
-                            (let* [l (array/nth far_box (int/div m 64))
-                                   c (array/nth f.glyph (int/add (int/mul (int (max 0.0 l.w)) 64) (int/mod m 64)))
-                                   a (part [l.x l.y l.z] c (+ 0.3 (* 0.005 (float (share (array/nth far_line (int/div m 64)) (int/mod m 64))))) (/ (- l.w (floor l.w)) 0.99))]
-                              (if (and (>= l.w 0.0) (= c.w 2.0)) [a.z a.z 0.0] [0.0 0.0 0.0]))) motes)
+                            (let* [n (array/nth far_chars (int/div m 64)) at (int/add (int/mul (int (max 0.0 n)) 64) (int/mod m 64))
+                                   a (tile (array/nth far_box (int/div m 64)) (array/nth f.glyph at))]
+                              (if (and (>= n 0.0) (= (array/nth f.glyph_kind at) 2.0)) [a.z a.w 0.0] [0.0 0.0 0.0]))) motes)
            mote_fill (map (fn [(m : int)]
                             (let* [i (int (max 0 (array/nth far_symbol (int/div m 64))))]
                               (+ [0.0 0.0 0.0] (case palette 1 (array/nth f.fill1 i) 2 (array/nth f.fill2 i) 3 (array/nth f.fill3 i) :else (array/nth f.fill0 i))))) motes)
-           fleck_from (map (fn [(m : int)]
-                             (let* [l (array/nth far_box (int/div m 64)) at (int/add (int/mul (int (max 0.0 l.w)) 64) (int/mod m 64))
-                                    a (array/nth f.glyph at) up (array/nth f.glyph_stem at)]
-                               (if (and (>= l.w 0.0) (and (>= a.w 0.0) (> (int/mod m 64) 0))) [(+ l.x (* up.x l.z)) (+ l.y (* up.y l.z)) 0.0] [0.0 0.0 0.0]))) motes)
-           fleck_to (map (fn [(m : int)]
-                           (let* [l (array/nth far_box (int/div m 64))
-                                  a (array/nth f.glyph (int/add (int/mul (int (max 0.0 l.w)) 64) (int/mod m 64)))]
-                             (if (and (>= l.w 0.0) (and (>= a.w 0.0) (> (int/mod m 64) 0)))
-                                 [(+ l.x (* (+ a.x (* a.z 0.5)) l.z)) (+ l.y (* (+ a.y (* a.z 0.5)) l.z)) 0.0] [0.0 0.0 0.0]))) motes)
 
            ; File names appear on cells over 180 points.
            ; ponytail: 64 label slots cover an art square up to about 1400 points a side.
@@ -654,11 +605,8 @@
                  (draw/lines twig_from twig_to :color (if dark "#363e33" "#8f979d") :width 0.6)
                  (draw/rects leaf_at leaf_size :fill (case palette 1 f.leaf1 2 f.leaf2 3 f.leaf3 :else f.leaf0))
                  (draw/rects hoop_at hoop_size :fill hoop_fill)
-                 (draw/lines shoot_from shoot_to :color (if dark "#363e33" "#8f979d") :width 0.6)
                  (draw/rects shoot_at shoot_size :fill shoot_fill)
-                 (draw/lines bough_from bough_to :color (if dark "#363e33" "#8f979d") :width 0.6)
                  (draw/rects bough_at bough_size :fill bough_fill)
-                 (draw/lines fleck_from fleck_to :color (if dark "#363e33" "#8f979d") :width 0.6)
                  (draw/rects mote_at mote_size :fill mote_fill)
                  (draw/rects corner_at corner_size :fill "#e0432b")
                  named
