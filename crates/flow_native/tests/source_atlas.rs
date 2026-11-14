@@ -192,9 +192,11 @@ fn resident_int_map_is_reused() {
     (let* [view (ref view)
            slots (array/range 4000 :type int)
            lift (int view.zoom)
-           owners (map (fn [(j : int)] (int/add (int/mul (int/mod (int/add j lift) 4093) 3) (if (= (int/mod j 5) 0) -1 0))) slots)]
+           owners (map (fn [(j : int)] (int/add (int/mul (int/mod (int/add j lift) 4093) 3) (if (= (int/mod j 5) 0) -1 0))) slots)
+           ; a small region runs on the host: its array is held as it is
+           few (map (fn [(j : int)] (int/mul (int/add j lift) 2)) (array/range 16 :type int))]
       (draw/rects (map (fn [(i : int)] (let* [o (array/nth owners i)] [(float (int/mod (if (< o 0) 0 o) 64)) (float (int/div (if (< o 0) 0 o) 64)) 0.0])) slots)
-                  (map (fn [(i : int)] (let* [o (array/nth owners i)] [1.0 (float (int/mod o 7)) 0.0])) slots) :fill "#e1d8c0"))))"##);
+                  (map (fn [(i : int)] (let* [o (array/nth owners i)] [(float (array/nth few (int/mod i 16))) (float (int/mod o 7)) 0.0])) slots) :fill "#e1d8c0"))))"##);
 }
 
 fn reuse_case(source: &str) {
@@ -372,7 +374,7 @@ fn full_table_frames(sketch: &str) -> Vec<String> {
         for k in 17..=48 { frame(if moving { k + 32 } else { k }, moving); }
         let milliseconds = start.elapsed().as_secs_f64() * 1000. / 32.;
         let after = wg::image_stats(&ws).0;
-        println!("{sketch} 1440x1000, moving={moving}: {milliseconds:.3} ms/frame, payload readback {} B/frame", (after.payload_readback_bytes - before.payload_readback_bytes) / 32);
+        println!("{sketch} 1440x1000, moving={moving}: {milliseconds:.3} ms/frame, payload readback {} B/frame, resident dispatches {}/frame", (after.payload_readback_bytes - before.payload_readback_bytes) / 32, (after.resident_dispatches - before.resident_dispatches) as f64 / 32.);
         if milliseconds >= 16.7 { slow.push(format!("{sketch} moving={moving}: {milliseconds:.3} ms")); }
         assert_eq!(after.buffer_creations, before.buffer_creations, "moving={moving}: warm GPU buffer allocation");
     }

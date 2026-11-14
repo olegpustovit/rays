@@ -1050,6 +1050,17 @@ fn resident_produce(r: &dyn Resident, st: &mut State, run: &Run, tail: &[i64]) -
     Ok(())
 }
 
+/// whether a value is, or holds, an array this scope keeps on the device
+fn on_device(r: &dyn Resident, v: &Value) -> bool {
+    match v {
+        Value::Floats(1..=4, _) | Value::IntArray(_) => r.capacity(v).is_some(),
+        Value::List(xs) => xs.iter().any(|x| on_device(r, x)),
+        Value::Record(fs) => fs.iter().any(|(_, x)| on_device(r, x)),
+        Value::Struct(g) | Value::Source(g) => g.fields.iter().any(|(_, x)| on_device(r, x)),
+        _ => false,
+    }
+}
+
 /// A resident region's result held on the device while what it reads is unchanged. Its inputs are
 /// compared as `remember` does, except a device array, which is the same only as the very placeholder
 /// (a result held earlier is one value from draw to draw). The result is taken off the scope
@@ -1081,6 +1092,9 @@ fn reuse_device(reads: Vec<i64>, result: i64, tail: Vec<i64>, run: Run) -> Run {
         run(st)?;
         let repeated = memo.lock().unwrap().last.as_ref().is_some_and(|k| same(k, st));
         let kept = if repeated && st.kept.contains(&result) { r.keep(&st.values[ix(result)])? } else { None };
+        // a result the region left on the host (a small region, or a loop that read its array back)
+        // is held as it is: its inputs repeat, so it is the value the region would make again
+        let kept = kept.or_else(|| (repeated && !on_device(&*r, &st.values[ix(result)])).then(|| st.values[ix(result)].clone()));
         let mut m = memo.lock().unwrap();
         match kept {
             Some(value) => {
