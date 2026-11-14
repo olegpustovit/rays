@@ -50,7 +50,10 @@ fn views(views: &[(&str, Option<&str>, f64)]) {
         let before = wg::image_stats(&ws).0;
         for k in 9..=12 { frame(k); }
         let after = wg::image_stats(&ws).0;
-        assert_eq!(after.payload_readback_bytes, before.payload_readback_bytes, "{name}: frame payload readback");
+        // the Source Atlas sheet reads each of its 96 label slots' owner on the host, twice (a word
+        // each): the owners array itself stays on the device; no other sketch reads a word
+        let labels = if sketch.is_none() { 4 * 96 * 2 * 4 } else { 0 };
+        assert_eq!(after.payload_readback_bytes - before.payload_readback_bytes, labels, "{name}: frame payload readback");
         println!("{name}: warm payload readback {}, GPU buffers {}", after.payload_readback_bytes - before.payload_readback_bytes, after.buffer_creations - before.buffer_creations);
         assert_eq!(after.buffer_creations, before.buffer_creations, "{name}: warm GPU buffer allocation");
         let path = format!("{}/../../fixtures/source_atlas/{name}.png", env!("CARGO_MANIFEST_DIR"));
@@ -225,10 +228,90 @@ fn resident_map_is_reused() {
     wg::close(&ws);
 }
 
+// An integer intermediate stays on the device exactly: negatives and values up to 2^31 - 1, read
+// by later kernels as values and as indices into another table, drawn as the readback path draws
+// them, with no readback and no allocation in a warm frame.
+fn int_intermediate_is_exact() {
+    if !common::gpu() { return; }
+    let source = r##"(workspace exact_ints
+  (graph view :context host (state [old {:zoom 1.0}] {:zoom (+ old.zoom 0.01)}))
+  (defn lit :context value [(seed : int) (id : int) (weight : int)]
+    (let* [h (int/mod (int/add (int/mod seed 46337) (int/add (int/mul id 7919) 1)) 46337)
+           cube (int/mod (int/mul (int/mod (int/mul h h) 46337) h) 46337)]
+      (< (int/mod (int/add cube id) 100) weight)))
+  (graph picture :context draw
+    (let* [view (ref view)
+           ids (array/range 4096 :type int)
+           seeds (map (fn [(i : int)] (int/mod (int/mul i 2654435) 1000000007)) ids)
+           weights (map (fn [(i : int)] (int/mod (int/mul i 37) 100)) ids)
+           slots (array/range 4000 :type int)
+           table (map (fn [(i : int)] [(float (int/mod i 64)) (float (int/div i 64)) (* view.zoom 0.25) 0.5]) ids)
+           lift (int view.zoom)
+           base (int/add 3 lift)
+           owners (map (fn [(j : int)]
+                         (let* [i (int/add j lift)]
+                          (cond (= (int/mod i 5) 0) -1
+                               (= (int/mod i 7) 0) (int/sub 2147483647 (int/mod i 3))
+                               :else (int/add (int/mul (int/mod i 4093) (int/add 1 (int/mod i 2))) (int/mul (int/mod i 3) 100000)))))
+                       slots)
+           ; the exact words mean 2^31 - 1 - (i mod 3), whose remainders a float could not keep
+           digits (map (fn [(i : int)] (let* [o (array/nth owners i)] (if (< o 0) 0 (int/mod o 97)))) slots)]
+      (draw/rects (map (fn [(i : int)] (let* [o (array/nth owners i) p (array/nth table (int/mod (if (< o 0) 0 o) 4096))]
+                                         [(+ (* 5.0 (float (int/mod i 64))) (* 0.05 p.x)) (+ (* 3.8 (float (int/div i 64))) (* 0.05 p.y)) 0.0])) slots)
+                  (map (fn [(i : int)] (let* [o (array/nth owners (int/add base (int/div i 4))) p (array/nth table (int/mod (if (< o 0) 0 o) 4096))]
+                                         [(+ (if (lit (array/nth seeds (int/mod (if (< o 0) 0 o) 4096)) (int/add i (int/mul 16 lift)) (array/nth weights (int/mod (if (< o 0) 0 o) 4096))) 3.0 1.0) (* 0.03 (float (array/nth digits i)))) (+ 1.0 p.z) 0.0])) slots)
+                  :fill "#e1d8c0"))))"##;
+    let catalog = editor_document::kinds::shared(None).unwrap();
+    let doc = editor_document::workspace_doc::of_text(&editor_document::workspace_doc::TextOptions::default(), &catalog, source).unwrap_or_else(|ds| panic!("{ds:?}"));
+    flow_ir::fallback::reset();
+    let lowered = flow_sop::lower::of_checked(None, flow_sop::lower::Options { inputs: Some((*doc.inputs).clone()), ..Default::default() }, &doc.checked).unwrap();
+    let ws = wg::create(None);
+    let prepare = |gpu| drawing::prepare(&drawing::PrepareOptions { gpu, states: lowered.states.clone(), ..Default::default() }, &lowered.evaluated.plan, &atlas::result(&lowered, "picture")).unwrap();
+    // the reference is the host's own evaluation: 64-bit integers, no kernel
+    let (prepared, plain) = (prepare(Some(wg::config(&ws, true))), prepare(None));
+    let (state, reference) = (e::create_state(), e::create_state());
+    let size = (320, 240);
+    let (c, expected) = (canvas::create(size.0, size.1).unwrap(), canvas::create(size.0, size.1).unwrap());
+    let live = |k: i64| input::Frame { size, frame: k, tick: k, dt: 1. / 60., ..input::at_time(k as f64 / 60.) };
+    let frame = |k: i64| {
+        wg::with_backend(&ws, true, &mut |gpu| {
+            let scene = drawing::render_prepared(&prepared, &live(k), size, &drawing::RenderOptions { state: Some(state.clone()), gpu: Some(wg::marks(&ws)), resident: wg::resident(gpu, &ws), ..Default::default() }).unwrap();
+            assert!(drawing::borrows_gpu(&prepared), "mark attributes left the device");
+            canvas::render(None, &c, &scene).unwrap();
+        });
+        wg::frame(&ws, None);
+    };
+    let reference_frame = |k: i64| {
+        wg::with_backend(&ws, true, &mut |_| {
+            let scene = drawing::render_prepared(&plain, &live(k), size, &drawing::RenderOptions { state: Some(reference.clone()), ..Default::default() }).unwrap();
+            canvas::render(None, &expected, &scene).unwrap();
+        });
+        wg::frame(&ws, None);
+    };
+    for k in 1..=3 { frame(k); }
+    let before = wg::image_stats(&ws).0;
+    for k in 4..=7 { frame(k); }
+    let after = wg::image_stats(&ws).0;
+    for k in 1..=7 { reference_frame(k); }
+    let drawn = canvas::pixels(&c).unwrap();
+    assert!(drawn.iter().any(|p| *p != drawn[0]), "nothing drawn");
+    // the host's doubles and the device's floats place a rect a hair apart: count only visible differences (a wrong digit moves a rect by tens of pixels)
+    let exact = canvas::pixels(&expected).unwrap();
+    let differ = drawn.iter().zip(exact.iter()).filter(|(a, b)| (a.r - b.r).abs().max((a.g - b.g).abs()).max((a.b - b.b).abs()) > 24).count();
+    assert!(differ * 5000 < drawn.len(), "a resident integer intermediate drew another picture: {differ} pixels");
+    assert!(after.resident_dispatches > before.resident_dispatches, "the intermediate never ran on the device");
+    assert_eq!(after.payload_readback_bytes, before.payload_readback_bytes, "the integer intermediate came back to the host");
+    assert_eq!(after.buffer_creations, before.buffer_creations, "warm GPU buffer allocation");
+    canvas::destroy(&c).unwrap();
+    canvas::destroy(&expected).unwrap();
+    wg::close(&ws);
+}
+
 fn main() {
     let mut cases: Vec<(&str, fn())> = vec![("source_atlas_fixture_views", frame_views), ("source_netwerk_fixture_views", netwerk_views), ("local_function_reading_state_stays_a_kernel", local_function_kernel),
                                              ("intermediate_map_stays_on_the_device", intermediate_stays_resident),
-                                             ("resident_map_is_reused", resident_map_is_reused)];
+                                             ("resident_map_is_reused", resident_map_is_reused),
+                                             ("int_intermediate_is_exact", int_intermediate_is_exact)];
     if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { cases.push(("source_atlas_full_table_budget", full_table_budget)); }
     common::window::run(&cases);
 }

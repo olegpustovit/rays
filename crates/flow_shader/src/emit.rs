@@ -55,6 +55,8 @@ pub struct Kernel {
     pub uniform_layout: Vec<(String, i64, i64)>,
     pub uniform_bytes: i64,
     pub uint32_uniforms: Vec<i64>,
+    /// its uint32 words are signed 32-bit Ints
+    pub signed_words: bool,
     pub table_seeds: Vec<i64>,
     pub output_widths: Vec<i64>,
     pub output_uint32: Vec<bool>,
@@ -76,6 +78,8 @@ pub struct Options {
     pub curves: Option<Curves>,
     pub spheres: bool,
     pub uint32_scalars: bool,
+    /// uint32 words hold a signed 32-bit Int: an output below zero is exact, not a range error
+    pub signed_words: bool,
     pub uint32_outputs: Vec<i64>,
     pub uint32_inputs: Vec<i64>,
     pub uint32_tables: Vec<i64>,
@@ -92,6 +96,7 @@ impl Default for Options {
             curves: None,
             spheres: true,
             uint32_scalars: false,
+            signed_words: false,
             uint32_outputs: vec![],
             uint32_inputs: vec![],
             uint32_tables: vec![],
@@ -367,6 +372,7 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<Kernel, Diagnost
                     curves: o.curves.is_some(),
                     spheres: o.spheres,
                     uint32_scalars: o.uint32_scalars,
+                    signed_words: o.signed_words,
                     uint32_outputs: o.uint32_outputs.clone(),
                     uint32_inputs: o.uint32_inputs.clone(),
                     uint32_tables: o.uint32_tables.clone(),
@@ -404,6 +410,7 @@ struct Gen {
     gather_uint32: Vec<bool>,
     output_flags: Vec<bool>,
     uint32_uniforms: Vec<i64>,
+    signed_words: bool,
     references: Vec<i64>,
     referenced: Vec<(i64, Guards)>,
     defined: Vec<(i64, Guards)>,
@@ -455,6 +462,11 @@ impl Gen {
     }
 
     /// An expression as an Int register: a float through `rays_int` in 32-bit registers.
+    /// A uint32 word read as a float: its unsigned value, or its signed one when the words are Ints.
+    fn float_of_word(&self, word: &str) -> String {
+        if self.signed_words { format!("float(int({word}))") } else { format!("float({word})") }
+    }
+
     fn int_cast(&self, x: String, float: bool) -> String {
         if self.int32 && float { format!("rays_int({x})") } else { format!("{}({x})", self.lt()) }
     }
@@ -626,7 +638,7 @@ impl Gen {
         if integer {
             self.int_cast(value, !self.gather_uint32[u(k)])
         } else if self.gather_uint32[u(k)] {
-            format!("float({value})")
+            self.float_of_word(&value)
         } else {
             value
         }
@@ -898,7 +910,7 @@ impl Gen {
             Instruction::Input(input, width, component) => {
                 let value = format!("input{input}[i*{width}+{component}]");
                 if self.input_uint32[u(*input)] {
-                    format!("float({value})")
+                    self.float_of_word(&value)
                 } else {
                     value
                 }
@@ -907,7 +919,7 @@ impl Gen {
                 let offset = self.layout.uniforms[u(*index)] + component;
                 let value = self.uniform_word(offset);
                 if self.uint32_uniforms.contains(&(offset * 4)) {
-                    format!("float({value})")
+                    self.float_of_word(&value)
                 } else {
                     value
                 }
@@ -1111,7 +1123,7 @@ impl Gen {
         for (k, registers) in view.outputs.iter().enumerate() {
             // a 32-bit Int is out of uint32 range only when negative; a narrow register never is
             if self.output_uint32(k) && self.int32 {
-                if !self.narrow(registers[0]) {
+                if !self.narrow(registers[0]) && !self.signed_words {
                     let value = self.int_of(registers[0]);
                     body.push_str(&format!("  sb|=({value}<0)?64u:0u;\n"));
                 }
@@ -1368,7 +1380,8 @@ fn generate(o: &Options, raster: Option<Raster>, program: &packed::T) -> Result<
         for (k, (_, (index, width))) in layout.gathers.iter().enumerate() {
             if index == t && *width == 1 { gather_uint32[k] = true; found = true; }
         }
-        if !fast || !found {
+        // a table nothing gathers from (only its length read) has no buffer to type
+        if !fast || (!found && !o.signed_words) {
             return Err(fail_d("Uint32 table requires a scalar gathered buffer in fast precision."));
         }
     }
@@ -1425,6 +1438,7 @@ fn generate(o: &Options, raster: Option<Raster>, program: &packed::T) -> Result<
         gather_uint32: gather_uint32.clone(),
         output_flags: output_flags.clone(),
         uint32_uniforms: uint32_uniforms.clone(),
+        signed_words: o.signed_words,
         references: vec![0; size],
         referenced: vec![(-1, vec![]); size],
         defined: vec![(-1, vec![]); size],
@@ -1455,6 +1469,7 @@ fn generate(o: &Options, raster: Option<Raster>, program: &packed::T) -> Result<
             uniform_layout: vec![],
             uniform_bytes: 0,
             uint32_uniforms: vec![],
+            signed_words: false,
             table_seeds: vec![],
             output_widths: vec![],
             output_uint32: vec![],
@@ -1576,6 +1591,7 @@ fn generate(o: &Options, raster: Option<Raster>, program: &packed::T) -> Result<
         uniform_layout,
         uniform_bytes: layout.uniform_bytes,
         uint32_uniforms,
+        signed_words: o.signed_words,
         scene: layout.scene_binding,
         table_seeds: layout.table_seeds.clone(),
         output_widths: view.outputs.iter().map(|o| o.len() as i64).collect(),

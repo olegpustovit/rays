@@ -190,7 +190,7 @@ pub(crate) struct Data {
     created: Cell<i64>,
     retired: Rc<RefCell<Stats>>,
     /// resident fold sites by their code
-    sites: RefCell<List<(Arc<Vec<Instruction>>, bool), Rc<Site>>>,
+    sites: RefCell<List<(Arc<Vec<Instruction>>, u8), Rc<Site>>>,
     /// fast dispatches' epochs, oldest first
     flight: RefCell<Vec<i64>>,
     /// 0., 1., 2., ... on the device, for range sources
@@ -226,6 +226,8 @@ pub(crate) struct Data {
     tables: RefCell<List<Arc<Vec<u32>>, Option<Vec<Buffer>>>>,
     /// the buffers scopes upload adopted host arrays into (`Scope::adopt`)
     adopt_slot: Rc<HSlot>,
+    /// the buffers a drawing's scopes fill and range into (`Scope::range_slot`)
+    range_slot: Rc<HSlot>,
     dispatches: Cell<i64>,
 }
 
@@ -279,7 +281,7 @@ pub fn create(_clock: &dyn Fn() -> f64, gpu_: &renderer::renderer::Gpu) -> T {
     let retired = Rc::new(RefCell::new(zero()));
     let discarding = Rc::new(Cell::new(false));
     let (r1, d1) = (retired.clone(), discarding.clone());
-    let sites_release = Box::new(move |_: &(Arc<Vec<Instruction>>, bool), site: Rc<Site>| {
+    let sites_release = Box::new(move |_: &(Arc<Vec<Instruction>>, u8), site: Rc<Site>| {
         if let Some(r) = &site.run {
             run::close(r, d1.get());
             let s = add_run(&r1.borrow(), r);
@@ -340,6 +342,7 @@ pub fn create(_clock: &dyn Fn() -> f64, gpu_: &renderer::renderer::Gpu) -> T {
         ownership: RefCell::new(None),
         tables: RefCell::new(List::new(8, tables_release)),
         adopt_slot: new_slot(true),
+        range_slot: new_slot(true),
         dispatches: Cell::new(0),
     });
     HOSTS.with(|h| h.borrow_mut().insert(id, Rc::downgrade(&data)));
@@ -677,6 +680,8 @@ pub(crate) struct Scope {
     id: i64,
     t: T,
     uint32: bool,
+    /// with `uint32`, its words are signed 32-bit Ints: [-2^31, 2^31 - 1] exact, else E_GPU_UINT32_RANGE
+    signed: bool,
     queue: Queue,
     s: RefCell<SState>,
 }
@@ -852,7 +857,12 @@ impl Scope {
         slot
     }
 
+    /// a drawing's scope (`signed`) fills and ranges into the host's slot, kept across draws, so a
+    /// warm frame creates no buffer for them; any other scope's is its own, spent with it
     fn range_slot(&self) -> Rc<HSlot> {
+        if self.signed {
+            return self.t.0.range_slot.clone();
+        }
         let mut s = self.s.borrow_mut();
         s.range_slot.get_or_insert_with(|| new_slot(false)).clone()
     }
@@ -1082,15 +1092,15 @@ impl Scope {
         tables.sort();
         tables.dedup();
         emit::kernel(
-            &emit::Options { uint32_scalars: true, uint32_inputs: inputs, uint32_tables: tables, uint32_outputs: integer_outputs(packed), ..base },
+            &emit::Options { uint32_scalars: true, signed_words: self.signed, uint32_inputs: inputs, uint32_tables: tables, uint32_outputs: integer_outputs(packed), ..base },
             packed,
         )
     }
 
     fn site(&self, packed: &Packed) -> Rc<Site> {
         let code = packed.code.clone();
-        let uint32 = self.uint32;
-        if let Some(site) = self.t.0.sites.borrow().peek(&|(c, u), _| Arc::ptr_eq(c, &code) && *u == uint32) {
+        let mode = self.uint32 as u8 + self.signed as u8;
+        if let Some(site) = self.t.0.sites.borrow().peek(&|(c, u), _| Arc::ptr_eq(c, &code) && *u == mode) {
             return site.clone();
         }
         let ty = packed.term.ty();
@@ -1110,7 +1120,7 @@ impl Scope {
             shape: RefCell::new(None),
             inputs: RefCell::new(None),
         });
-        self.t.0.sites.borrow_mut().add((code, uint32), site.clone());
+        self.t.0.sites.borrow_mut().add((code, mode), site.clone());
         site
     }
 
@@ -1824,7 +1834,7 @@ impl Scope {
         let epoch = self.s.borrow().epoch;
         let t = &self.t;
         if p.uint32 {
-            let values = run::read_uint32(&self.queue, &p.buffer.0, epoch, length)?;
+            let values = run::read_uint32(&self.queue, &p.buffer.0, epoch, length, self.signed)?;
             t.0.resident_payload_bytes.set(t.0.resident_payload_bytes.get() + length * 4);
             return Ok(Value::IntArray(Arc::new(values)));
         }
@@ -2032,9 +2042,6 @@ impl Scope {
     /// buffers, its grid and count record from their device count, committed after the fold's last
     /// level. `None`: it reads none; `Some(None)`: it reads one but cannot run here.
     fn show(&self, packed: &Packed, live_: &Frame) -> Option<Option<G::Value>> {
-        if self.uint32 {
-            return Some(None);
-        }
         let held_ = |s: &phost::Shape| match s {
             phost::Shape::Value(v) | phost::Shape::Range(v, _, _) => self.find(v).is_some(),
             phost::Shape::Opaque(_) => false,
@@ -2068,7 +2075,8 @@ impl Scope {
                 let g = self.id;
                 Arc::new(move |v| scope_by(g).and_then(|s| s.capacity(v)).map(|c| c as usize))
             };
-            let values = phost::prepare_values(packed, &phost::PrepareOptions { lengths: Some(lengths), capacity: Some(capacity), ..Default::default() }, live_).ok()?;
+            let indices = phost::index_sources(packed);
+            let values = phost::prepare_values(packed, &phost::PrepareOptions { index: self.uint32, lengths: Some(lengths), capacity: Some(capacity), ..Default::default() }, live_).ok()?;
             if values.count == 0 {
                 return None;
             }
@@ -2078,7 +2086,7 @@ impl Scope {
                 match existing {
                     Some(r) => Some(r),
                     None => {
-                        let msl = emit::kernel(&emit::Options { spirv: is_vulkan(), fast: true, ..emit::Options::default() }, packed).ok()?;
+                        let msl = self.emit(None, packed).ok()?;
                         let runner = Rc::new(Runner {
                             identity: NEXT.fetch_add(1, Ordering::SeqCst),
                             run: run::create(Some(&t.0.shared), &t.0.gpu, &t.0.pipelines, &msl),
@@ -2095,7 +2103,8 @@ impl Scope {
             for i in 0..values.arrays.len() {
                 bound_inputs.push(match (self.bound(&values.arrays[i]), &sources[i]) {
                     (Some(b_), _) => Some(b_),
-                    (None, phost::Shape::Range(..)) => self.iota(None, values.count),
+                    (None, phost::Shape::Range(..)) => self.iota(Some(self.integer_source(&packed.code, i as i64)), values.count),
+                    (None, _) if self.uint32 && indices[i] => self.iota(Some(self.integer_source(&packed.code, i as i64)), values.count),
                     (None, _) => None,
                 });
             }
@@ -2113,7 +2122,7 @@ impl Scope {
             *runner.output.borrow_mut() = None;
             let bound = |i: i64| bound_inputs.get(i as usize).cloned().flatten();
             let bound_table = |u: i64| bound_tables.get(u as usize).cloned().flatten();
-            let output = run::dispatch(&runner.run, &Options { wait: Some(false), count, ..Options::default() }, Some(&bound), Some(&bound_table), &inputs).ok()?;
+            let output = run::dispatch(&runner.run, &Options { wait: Some(false), count, uint32_cpu: self.uint32, ..Options::default() }, Some(&bound), Some(&bound_table), &inputs).ok()?;
             record(t, run::epoch(&output));
             runner.stamp.set(runner.stamp.get() + 1);
             let v = gpu_value(&runner, &output);
@@ -2259,6 +2268,36 @@ impl Scope {
         Some(share_planes(&holder))
     }
 
+    /// element `i` of a placeholder, read alone: its words only, never its array
+    fn nth(&self, v: &Value, i: i64) -> Result<Option<Value>, Diagnostic> {
+        let Some(p) = self.find(v) else { return Ok(None) };
+        let held = |keys: &Vec<usize>| keys.contains(&p.key);
+        if held(&self.s.borrow().durables) || held(&self.s.borrow().adopted) || (p.kind == 0 && !p.uint32) {
+            return Ok(None);
+        }
+        self.settle_inner()?;
+        if i < 0 || i >= self.count_of(&p)? {
+            return Ok(None);
+        }
+        let width = p.kind.max(1);
+        let epoch = self.s.borrow().epoch;
+        if epoch > b::completed_epoch(&self.queue) {
+            gpu_r(b::complete_through(&self.queue, epoch))?;
+        }
+        let bytes = gpu_r(b::read_buffer(&p.buffer.0, i * width * 4, width * 4))?;
+        let word = |k: usize| u32::from_le_bytes(bytes[4 * k..4 * k + 4].try_into().unwrap());
+        let t = &self.t;
+        t.0.resident_payload_bytes.set(t.0.resident_payload_bytes.get() + width * 4);
+        let f = |k: usize| f32::from_bits(word(k)) as f64;
+        Ok(Some(match (p.uint32, width) {
+            (true, _) => Value::Int(if self.signed { word(0) as i32 as i64 } else { word(0) as i64 }),
+            (_, 1) => Value::Float(f(0)),
+            (_, 2) => Value::Vec2(f(0), f(1)),
+            (_, 3) => Value::Vec3(f(0), f(1), f(2)),
+            _ => Value::Vec4(f(0), f(1), f(2), f(3)),
+        }))
+    }
+
     /// a state step's array stays on the device: its holder lives as long as the placeholder a
     /// state stores (`Eval::Device`), read to the host only when host code asks
     fn keep(&self, v: &Value) -> Result<Option<Value>, Diagnostic> {
@@ -2344,7 +2383,7 @@ fn scope_by(id: i64) -> Option<Rc<Scope>> {
     SCOPES.with(|s| s.borrow().get(&id).cloned())
 }
 
-fn new_scope(t: &T, uint32: bool) -> (Rc<Scope>, Arc<Guard>) {
+fn new_scope(t: &T, uint32: bool, signed: bool) -> (Rc<Scope>, Arc<Guard>) {
     let queue = queue_of(t);
     if !t.0.retired_buffers.borrow().is_empty() {
         drain_retired(t, &queue);
@@ -2354,6 +2393,7 @@ fn new_scope(t: &T, uint32: bool) -> (Rc<Scope>, Arc<Guard>) {
         id,
         t: t.clone(),
         uint32,
+        signed,
         queue,
         s: RefCell::new(SState {
             table: vec![],
@@ -2386,7 +2426,17 @@ fn new_scope(t: &T, uint32: bool) -> (Rc<Scope>, Arc<Guard>) {
 /// them; a count that outgrew one reruns the loop exactly. `uint32` uses exact unsigned words for
 /// integer arrays and captures, with device-generated integer ranges.
 pub fn resident_scope(uint32: bool, _fast: bool, t: &T) -> HostResidency {
-    let (_, guard) = new_scope(t, uint32);
+    resident_words(uint32, false, t)
+}
+
+/// A drawing's resident scope: its integer arrays and captures are signed 32-bit words on the
+/// device, exact in [-2^31, 2^31 - 1]; a value outside it is E_GPU_UINT32_RANGE, never rounded.
+pub fn resident_exact(t: &T) -> HostResidency {
+    resident_words(true, true, t)
+}
+
+fn resident_words(uint32: bool, signed: bool, t: &T) -> HostResidency {
+    let (_, guard) = new_scope(t, uint32, signed);
     HostResidency { executor: Arc::new(HostResident(guard.clone())), guard, id: t.0.id, t: t.clone() }
 }
 
@@ -2444,6 +2494,12 @@ impl core_exec::Resident for HostResident {
     }
     fn range(&self, ty: &Ty, v: &Value, div: i64, length: i64) -> Result<Option<Value>, Diagnostic> {
         scope_of(&self.0).map_or(Ok(None), |s| s.range(ty, v, div, length))
+    }
+    fn nth(&self, v: &Value, i: i64) -> Result<Option<Value>, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(None), |s| s.nth(v, i))
+    }
+    fn exact(&self) -> Option<Arc<dyn core_exec::Resident>> {
+        scope_of(&self.0).and_then(|s| live(&s.t).then(|| resident_exact(&s.t).executor))
     }
 }
 
@@ -2559,6 +2615,7 @@ pub fn close(t: &T) {
     }
     d.tables.borrow_mut().clear();
     purge(&d.adopt_slot);
+    purge(&d.range_slot);
     pipelines::close(&d.pipelines);
     HOSTS.with(|h| h.borrow_mut().remove(&d.id));
     d.closed.set(true);
@@ -2798,7 +2855,7 @@ fn build_incidence(t: &T, points: i64, streams: [Arc<G::Integers>; 3]) -> Result
             None => { for (_, _, _, unpin) in pins { unpin(); } return Ok(None); }
         }
     }
-    let (scope, _guard) = new_scope(t, true);
+    let (scope, _guard) = new_scope(t, true, false);
     let slot = scope.range_slot();
     scope.s.borrow_mut().extra_slots.push(slot.clone());
     let mut retained: Vec<Arc<G::Integers>> = Vec::new();

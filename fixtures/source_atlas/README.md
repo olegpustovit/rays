@@ -52,8 +52,9 @@ four stipple samples a leaf. The finer stipple levels (16, 64 and 256 samples a 
 looks up the leaf under each lattice point by descending the tree, and the leaf's first lattice
 point owns it. File labels use the same slots at 180 points. Picking is that same descent, once.
 Marks have no alpha, so a fading mark is mixed into the ink; the art's clip is flat ink drawn over
-its margins. A still camera reads nothing back; a moving one reads back the slot owners (about
-74 KB a frame at 1440 by 1000).
+its margins. The slot owners stay on the device as exact 32-bit integers (-1 for no owner); the
+host reads only the 96 label slots' owners it needs for their text, two words a slot: 768 B a
+frame, still or moving, at 1440 by 1000.
 
 `tree/` contains 32 tiny Rust files across Rays and the three PXUI tiers. `atlas.tsv`, `crates.tsv`
 and `profile.tsv` are their real indexer output; `overview.png` and `zoom.png` are native GPU views at

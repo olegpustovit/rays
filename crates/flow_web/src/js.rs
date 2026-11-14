@@ -1304,8 +1304,8 @@ fn resident_statement(ctx: &mut Context, program: &C::Program, options: &FrameOp
             statement(ctx, program, 3, s)?;
             ctx.resident = false;
             // its arrays stay on the device when what follows only ranges over and draws them
-            let tail = core_exec::resident_tail(program, s, &|r| ctx.is_gpu(r));
-            if let Some((_, ranges)) = &tail {
+            let tail = core_exec::resident_tail(program, s, &|r| ctx.is_gpu(r), false).filter(|(_, _, exact)| exact.is_empty());
+            if let Some((_, ranges, _)) = &tail {
                 let mut merged = ranges.clone();
                 merged.extend(ctx.tail_ranges.iter().cloned());
                 ctx.tail_ranges = merged;

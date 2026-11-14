@@ -569,14 +569,22 @@ fn pack(bytes: &mut [u8], offset: usize, v: f64) -> Result<(), Diagnostic> {
 }
 
 pub(crate) fn pack_uint32(bytes: &mut [u8], offset: usize, v: f64) -> Result<(), Diagnostic> {
-    if !v.is_finite() || v.fract() != 0.0 || v < 0.0 || v > 4294967295.0 {
+    pack_word(bytes, offset, v, false)
+}
+
+/// An exact integer as a 32-bit word: unsigned in [0, 2^32 - 1], or `signed` (two's complement) in
+/// [-2^31, 2^31 - 1]. Anything else is E_GPU_UINT32_RANGE, never a rounded word.
+pub(crate) fn pack_word(bytes: &mut [u8], offset: usize, v: f64, signed: bool) -> Result<(), Diagnostic> {
+    let (low, high) = if signed { (-2147483648.0, 2147483647.0) } else { (0.0, 4294967295.0) };
+    if !v.is_finite() || v.fract() != 0.0 || v < low || v > high {
         return Err(kernel_status(64));
     }
-    bytes[offset..offset + 4].copy_from_slice(&(v as u32).to_le_bytes());
+    let word = if signed { (v as i32) as u32 } else { v as u32 };
+    bytes[offset..offset + 4].copy_from_slice(&word.to_le_bytes());
     Ok(())
 }
 
-fn upload_uint32(buffer: &Buffer, slot: &mut Slot, source: &[f64], count: usize) -> Result<(), Diagnostic> {
+fn upload_uint32(buffer: &Buffer, slot: &mut Slot, source: &[f64], count: usize, signed: bool) -> Result<(), Diagnostic> {
     let length = count.checked_mul(4).ok_or_else(|| value::fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
     if slot.bytes.len() != length {
         let mut bytes = value::array_buffer(length)?;
@@ -584,7 +592,7 @@ fn upload_uint32(buffer: &Buffer, slot: &mut Slot, source: &[f64], count: usize)
         slot.bytes = bytes;
     }
     for i in 0..count {
-        pack_uint32(&mut slot.bytes, i * 4, source[i])?;
+        pack_word(&mut slot.bytes, i * 4, source[i], signed)?;
     }
     if count > 0 {
         gpu(b::write_buffer(buffer, 0, &slot.bytes))?;
@@ -908,7 +916,7 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
                 for component in 0..width {
                     let at = offset + component * 4;
                     if kernel.uint32_uniforms.contains(&(at as i64)) {
-                        pack_uint32(&mut st.uniforms, at, values.uniforms[index][component])?;
+                        pack_word(&mut st.uniforms, at, values.uniforms[index][component], kernel.signed_words)?;
                     } else {
                         pack(&mut st.uniforms, at, values.uniforms[index][component])?;
                     }
@@ -932,7 +940,7 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
                     return Err(e_kernel("GPU frame uniform changed."));
                 }
                 if kernel.uint32_uniforms.contains(&(offset as i64)) {
-                    pack_uint32(&mut st.uniforms, offset, values.frame[index])?;
+                    pack_word(&mut st.uniforms, offset, values.frame[index], kernel.signed_words)?;
                 } else {
                     pack(&mut st.uniforms, offset, values.frame[index])?;
                 }
@@ -964,7 +972,7 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
                     // A failed write may have partially replaced the previous source.
                     st.inputs[index].uploaded = None;
                     if kernel.input_uint32[index] {
-                        upload_uint32(&buffer, &mut st.inputs[index], source, (length / 4) as usize)?;
+                        upload_uint32(&buffer, &mut st.inputs[index], source, (length / 4) as usize, kernel.signed_words)?;
                     } else {
                         pack_floats(&view(&buffer), source, (length / 4) as usize)?;
                         gpu(b::flush_mapped(&buffer, length))?;
@@ -1057,7 +1065,7 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
                 if !same {
                     st.gathers[k].uploaded = None;
                     if kernel.gather_uint32[k] {
-                        upload_uint32(&buffer, &mut st.gathers[k], source, source.len())?;
+                        upload_uint32(&buffer, &mut st.gathers[k], source, source.len(), kernel.signed_words)?;
                     } else {
                         pack_floats(&view(&buffer), source, source.len())?;
                         gpu(b::flush_mapped(&buffer, source.len() as i64 * 4))?;
@@ -1271,7 +1279,7 @@ fn uint32_output(output: &Output, index: Option<i64>) -> bool {
 }
 
 /// read a device buffer the queue has finished writing
-pub fn read_uint32(queue: &Queue, buffer: &Buffer, epoch: i64, length: i64) -> Result<Vec<i64>, Diagnostic> {
+pub fn read_uint32(queue: &Queue, buffer: &Buffer, epoch: i64, length: i64, signed: bool) -> Result<Vec<i64>, Diagnostic> {
     if epoch > b::completed_epoch(queue) {
         gpu(b::complete_through(queue, epoch))?;
     }
@@ -1280,7 +1288,10 @@ pub fn read_uint32(queue: &Queue, buffer: &Buffer, epoch: i64, length: i64) -> R
     }
     let bytes = gpu(b::read_buffer(buffer, 0, length * 4))?;
     let mut values = value::array_buffer(length as usize)?;
-    values.extend((0..length as usize).map(|i| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap()) as i64));
+    values.extend((0..length as usize).map(|i| {
+        let word = u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap());
+        if signed { word as i32 as i64 } else { word as i64 }
+    }));
     Ok(values)
 }
 
@@ -1289,7 +1300,7 @@ fn uint32_values(output: &Output, index: Option<i64>) -> Result<Vec<i64>, Diagno
     if output.count == 0 {
         return Ok(vec![]);
     }
-    let values = read_uint32(&output.owner.0.queue, buffer.as_ref().unwrap(), output.epoch, output.count)?;
+    let values = read_uint32(&output.owner.0.queue, buffer.as_ref().unwrap(), output.epoch, output.count, output.owner.0.kernel.signed_words)?;
     output.owner.0.state.borrow_mut().readback_bytes += output.count * 4;
     Ok(values)
 }
@@ -2854,4 +2865,19 @@ mod size_class_tests {
             assert!(c >= bytes && c - bytes <= bytes / 8, "{bytes} -> {c}");
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn a_signed_word_is_exact_over_the_whole_int32_range_and_nothing_past_it() {
+    let mut word = [0u8; 4];
+    for v in [-2147483648i64, -1, 0, 16777217, 2147483647] {
+        pack_word(&mut word, 0, v as f64, true).unwrap();
+        assert_eq!(i32::from_le_bytes(word) as i64, v);
+    }
+    for v in [-2147483649.0, 2147483648.0, 0.5, f64::NAN] {
+        assert!(pack_word(&mut word, 0, v, true).is_err(), "{v}");
+    }
+    assert!(pack_word(&mut word, 0, -1.0, false).is_err());
+    pack_word(&mut word, 0, 4294967295.0, false).unwrap();
 }

@@ -50,6 +50,7 @@ pub fn compaction() -> &'static Kernel {
             uniform_layout: vec![],
             uniform_bytes: 12,
             uint32_uniforms: vec![],
+            signed_words: false,
             table_seeds: vec![],
             output_widths: vec![1],
             output_uint32: vec![false],

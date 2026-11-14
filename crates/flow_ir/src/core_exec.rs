@@ -61,6 +61,11 @@ pub trait Resident: Send + Sync {
     fn close(&self) {}
     fn settle(&self) -> Result<(), Diagnostic> { Ok(()) }
     fn range(&self, _ty: &Ty, _value: &Value, _div: i64, _length: i64) -> Result<Option<Value>, Diagnostic> { Ok(None) }
+    /// a scope whose integer arrays are exact 32-bit words on the device (signed, [-2^31, 2^31 - 1];
+    /// a value outside it is a typed error, never rounded), for a drawing with no resident loop
+    fn exact(&self) -> Option<Arc<dyn Resident>> { None }
+    /// element `index` of an array the device holds, read alone; None: not held, or out of its count
+    fn nth(&self, _value: &Value, _index: i64) -> Result<Option<Value>, Diagnostic> { Ok(None) }
 }
 
 /// Materialise placeholders recursively through records, lists, structs and source arguments.
@@ -294,6 +299,8 @@ struct State {
     resident_on: bool,
     /// after a resident loop, the locals that may hold its device arrays (`resident_tail`)
     kept: Vec<i64>,
+    /// the resident is an `exact` scope: integer arrays may stay on the device
+    exact: bool,
 }
 
 type Run = Arc<dyn Fn(&mut State) -> Result<(), Diagnostic> + Send + Sync>;
@@ -330,6 +337,8 @@ pub struct Prepared {
     /// None when taken, as `pool`
     arena_pool: Mutex<Option<Arena>>,
     arena_kills: bool,
+    /// a drawing with no resident loop: its integer arrays may stay on the device (`Resident::exact`)
+    ints: bool,
 }
 
 /// A float-only scalar program (arithmetic, sin, cos over the frame clock and literals) runs on an
@@ -914,14 +923,15 @@ pub fn resident_live(program: &Program, s: &Statement) -> Option<Vec<i64>> {
 /// result stays under the same rule. The locals that may then hold device arrays, and each range
 /// local's source array and divisor.
 /// A top-level region that is not a mark attribute is a producer under the same rule: its array
-/// stays on the device for the regions after it.
-pub fn resident_tail(program: &Program, s: &Statement, mark: &dyn Fn(i64) -> bool) -> Option<(Vec<i64>, Vec<(i64, (i64, i64))>)> {
+/// stays on the device for the regions after it. An integer array counts only with `ints` (an
+/// `exact` scope: the float scope holds integers as floats, exact to 2^24 only).
+pub fn resident_tail(program: &Program, s: &Statement, mark: &dyn Fn(i64) -> bool, ints: bool) -> Option<(Vec<i64>, Vec<(i64, (i64, i64))>, Vec<i64>)> {
     let live = match (&s.node, resident_live(program, s)) {
         (StatementNode::Invoke { region, result, .. }, _) if !mark(*region) => vec![*result],
         (_, Some(l)) if !l.is_empty() => l,
         _ => return None,
     };
-    let device_array = |n: i64| matches!(&program.locals[ix(n)], Ty::Array(inner) if matches!(**inner, Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4));
+    let device_array = |n: i64| matches!(&program.locals[ix(n)], Ty::Array(inner) if matches!(**inner, Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4) || (ints && **inner == Ty::Int));
     let after: &[Statement] = {
         let at = program.body.iter().position(|t| t.id == s.id);
         match at { Some(i) => &program.body[i + 1..], None => &[] }
@@ -930,7 +940,10 @@ pub fn resident_tail(program: &Program, s: &Statement, mark: &dyn Fn(i64) -> boo
     let mut counts: BTreeMap<i64, (i64, i64)> = BTreeMap::new();
     let mut ranges: BTreeMap<i64, (i64, i64)> = BTreeMap::new();
     let mut constants: BTreeMap<i64, i64> = BTreeMap::new();
-    // its scalars need no device; an integer array (which the display path cannot bind) keeps the read back
+    // counts a later statement reads as a number (each its array's exact count, read from the device),
+    // and the elements it reads on the host: the locals those statements assign
+    let mut exact: BTreeSet<i64> = BTreeSet::new();
+    // its scalars need no device
     let live: Vec<i64> = live.into_iter().filter(|n| matches!(program.locals[ix(*n)], Ty::Array(_))).collect();
     if live.is_empty() || !live.iter().all(|n| device_array(*n)) { return None; }
     for n in &live { held.insert(*n); }
@@ -939,7 +952,7 @@ pub fn resident_tail(program: &Program, s: &Statement, mark: &dyn Fn(i64) -> boo
             held.contains(&n) || counts.contains_key(&n) || ranges.contains_key(&n)
         };
         let reads = mentions(Vec::new(), t);
-        let step = match &t.node {
+        let mut step = match &t.node {
             StatementNode::Assign(n, Expr::Constant(cn)) => {
                 if let c::Literal::Int(k) = &program.constants[ix(*cn)] {
                     if *k > 0 { constants.insert(*n, *k); }
@@ -948,6 +961,13 @@ pub fn resident_tail(program: &Program, s: &Statement, mark: &dyn Fn(i64) -> boo
             }
             StatementNode::Assign(n, Expr::Prim(Primitive::ArrayCount, args)) if args.len() == 1 && held.contains(&args[0].1) => {
                 counts.insert(*n, (args[0].1, 1));
+                true
+            }
+            // one element read on the host (`Resident::nth`), the array itself staying on the device
+            StatementNode::Assign(n, Expr::Prim(Primitive::ArrayNth, args))
+                if arg_names(args, &["array", "index"]) && held.contains(&args[0].1) && !tracked(args[1].1, &held, &counts, &ranges) =>
+            {
+                exact.insert(*n);
                 true
             }
             StatementNode::Assign(n, Expr::Prim(Primitive::Integer(flow_syntax::packed_ops::Integer::Idiv), args))
@@ -975,11 +995,35 @@ pub fn resident_tail(program: &Program, s: &Statement, mark: &dyn Fn(i64) -> boo
             }
             _ => !reads.iter().any(|n| tracked(*n, &held, &counts, &ranges)),
         };
+        // a count read as a number, not only through a range, is exact (`Resident::count`: the cell's
+        // four bytes), and its statement is then an ordinary one over a device array or none
+        if !step {
+            let counted: Vec<i64> = reads.iter().copied().filter(|n| counts.contains_key(n)).collect();
+            if !counted.is_empty() {
+                for n in &counted {
+                    counts.remove(n);
+                    exact.insert(*n);
+                }
+                step = match &t.node {
+                    StatementNode::Invoke { region, args, result } if args.iter().any(|a| tracked(*a, &held, &counts, &ranges)) => {
+                        if mark(*region) {
+                            true
+                        } else if device_array(*result) {
+                            held.insert(*result);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    _ => !reads.iter().any(|n| tracked(*n, &held, &counts, &ranges)),
+                };
+            }
+        }
         if !step { return None; }
     }
     let mut kept: Vec<i64> = held.iter().copied().collect();
     kept.extend(ranges.keys().copied());
-    Some((kept, ranges.into_iter().collect()))
+    Some((kept, ranges.into_iter().collect(), exact.into_iter().collect()))
 }
 
 /// A kept tail goes back to the host when a region over it cannot run on the device, or another
@@ -1492,6 +1536,8 @@ struct Ctx {
     static_ok: Vec<bool>,
     tails: Vec<(usize, Vec<i64>)>,
     tail_ranges: Vec<(i64, (i64, i64))>,
+    /// the counts and elements of kept arrays that later statements read on the host (`resident_tail`)
+    exact_counts: Vec<i64>,
     constants: Vec<Value>,
     slot_keys: Vec<SlotKey>,
     hoisted_writes: Vec<i64>,
@@ -1736,10 +1782,13 @@ impl Ctx {
                 let run = self.statement(s);
                 let tail = self.tails.iter().find(|(a, _)| *a == addr(s)).map(|(_, k)| k.clone());
                 let run: Run = match (resident_live(&self.program, s), tail) {
-                    (None, Some(tail)) => Arc::new(move |st: &mut State| match st.resident.clone() {
-                        Some(r) if st.marks.is_some() => resident_produce(&*r, st, &run, &tail),
-                        _ => run(st),
-                    }),
+                    (None, Some(tail)) => {
+                        let ints = tail.iter().any(|n| matches!(&self.program.locals[ix(*n)], Ty::Array(t) if **t == Ty::Int));
+                        Arc::new(move |st: &mut State| match st.resident.clone() {
+                            Some(r) if st.marks.is_some() && (st.exact || !ints) => resident_produce(&*r, st, &run, &tail),
+                            _ => run(st),
+                        })
+                    }
                     (Some(live), tail) => {
                         let plain_run = run.clone();
                         Arc::new(move |st: &mut State| match st.resident.clone() {
@@ -1953,15 +2002,37 @@ impl Ctx {
                     Ok(())
                 })
             }
+            StatementNode::Assign(n, e @ Expr::Prim(Primitive::ArrayNth, args)) if arg_names(args, &["array", "index"]) && self.exact_counts.contains(n) => {
+                // an element of a kept array is read alone; a count past it is the host's own read of
+                // that array alone, and an array the host holds is read as it is
+                let value = self.expression(e);
+                let (array, index, n) = (args[0].1, args[1].1, ix(*n));
+                Arc::new(move |st| {
+                    let mut made = None;
+                    if let Some(r) = st.resident.clone() {
+                        if let (true, Value::Int(i)) = (st.kept.contains(&array), &st.values[ix(index)]) {
+                            made = r.nth(&st.values[ix(array)], *i)?;
+                        }
+                        if made.is_none() && st.kept.contains(&array) {
+                            let host = r.finish(&st.values[ix(array)])?;
+                            st.values[ix(array)] = host;
+                        }
+                    }
+                    let x = match made { Some(x) => x, None => value(st)? };
+                    st.values[n] = x;
+                    Ok(())
+                })
+            }
             StatementNode::Assign(n, e @ Expr::Prim(Primitive::ArrayCount, args)) if args.len() == 1 => {
                 // a resident array's length is a capacity: its count is the host array's
                 let value = self.expression(e);
                 let arg = args[0].1;
+                let exact = self.exact_counts.contains(n);
                 let n = ix(*n);
                 Arc::new(move |st| {
                     let mut made = None;
                     if let Some(r) = st.resident.clone() {
-                        if st.resident_on { made = r.count(&st.values[ix(arg)])?; }
+                        if st.resident_on || (exact && st.kept.contains(&arg)) { made = r.count(&st.values[ix(arg)])?; }
                     }
                     let x = match made { Some(count) => Value::Int(count), None => value(st)? };
                     st.values[n] = x;
@@ -2404,14 +2475,19 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
     // ranges; a static region keeps its first result, a fused one runs with its siblings and one
     // an earlier tail holds is already there
     let mut tails: Vec<(usize, Vec<i64>)> = Vec::new();
+    let mut exact_counts: Vec<i64> = Vec::new();
+    // integers stay exact on the device only in a drawing with no resident loop: its loops run in
+    // the float scope, whose compaction and retyping the exact scope does not offer
+    let ints = remember_loops && !program.body.iter().any(|s| resident_live(&program, s).is_some());
     let mut tail_ranges: Vec<(i64, (i64, i64))> = Vec::new();
     if remember_loops {
         for s in &program.body {
             if let StatementNode::Invoke { region, result, .. } = &s.node {
                 if static_ok[ix(*result)] || fused[ix(*region)].is_some() || tails.iter().any(|(_, kept)| kept.contains(result)) { continue; }
             }
-            if let Some((kept, ranges)) = resident_tail(&program, s, &|r| device_ok[ix(r)]) {
+            if let Some((kept, ranges, exact)) = resident_tail(&program, s, &|r| device_ok[ix(r)], ints) {
                 tail_ranges.extend(ranges);
+                exact_counts.extend(exact);
                 tails.push((addr(s), kept));
             }
         }
@@ -2494,6 +2570,7 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
         static_ok,
         tails,
         tail_ranges,
+        exact_counts,
         constants,
         slot_keys,
         hoisted_writes: writes,
@@ -2517,6 +2594,7 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
         arena_plan: planned,
         arena_pool: Mutex::new(None),
         arena_kills: clobber,
+        ints,
     }
 }
 
@@ -2593,6 +2671,7 @@ fn new_state(prepared: &Prepared, values: Vec<Value>, arena: Option<Arena>, live
         resident: o.resident.clone(),
         resident_on: o.resident.is_some(),
         kept: Vec::new(),
+        exact: false,
     }
 }
 
@@ -2701,14 +2780,19 @@ pub fn draw(prepared: &Prepared, live: &Frame, size: (i64, i64), buffers: &Buffe
     let image = o.image.clone();
     let sink = core_marks::sink(image, size, buffers);
     let arena = arena_for(prepared, o.device.is_some() || o.resident.is_some());
-    let options = Options { root: o.root, force: o.force.clone(), resolve: o.resolve.clone(), resident: o.resident.clone(), ..Options::default() };
+    // a drawing with no resident loop draws in an exact scope when the host offers one
+    let exact = o.resident.as_ref().filter(|_| prepared.ints).and_then(|r| r.exact());
+    let resident = exact.clone().or_else(|| o.resident.clone());
+    let options = Options { root: o.root, force: o.force.clone(), resolve: o.resolve.clone(), resident: resident.clone(), ..Options::default() };
     let mut st = new_state(prepared, vec![Value::NoGeo; program.locals.len()], arena, live, &options);
+    st.exact = exact.is_some();
     st.host_source = None;
     st.marks = Some(sink);
     st.device = o.device.clone();
     st.resident_on = false;
     // a resident loop's kept arrays live until the draw ends (closing an idle one is a no-op)
     let ran = (prepared.body)(&mut st);
+    if let Some(r) = &resident { r.close(); }
     if let Some(r) = &o.resident { r.close(); }
     ran?;
     if let Some(mut a) = st.arena.take() {
