@@ -18,11 +18,20 @@ import time
 
 EXTENSIONS = {'.rs'}
 EXCLUDED = {'.git', 'target', '_out', '_build', '_opam', 'node_modules', 'vendor', 'fixtures', 'history'}
-COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'), ('kind', 'int'), ('group', 'int'), ('depth', 'int'), ('child', 'int'), ('count', 'int'), ('owner', 'int'), ('file', 'int'), ('lsp', 'int'), ('first', 'int'), ('last', 'int'), ('mass', 'int'), ('seed', 'int'), ('bytes', 'int'), ('crate', 'int'), ('cell', 'int'), ('cells', 'int'), ('level', 'int'), ('top', 'int'), ('label', 'text'), ('tag', 'text'), ('path', 'text'), ('l0', 'text'), ('l1', 'text'), ('l2', 'text'), ('chars', 'int')]
+COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'), ('kind', 'int'), ('group', 'int'), ('depth', 'int'), ('child', 'int'), ('count', 'int'), ('owner', 'int'), ('file', 'int'), ('lsp', 'int'), ('first', 'int'), ('last', 'int'), ('mass', 'int'), ('seed', 'int'), ('bytes', 'int'), ('crate', 'int'), ('cell', 'int'), ('cells', 'int'), ('level', 'int'), ('top', 'int'), ('sub', 'int'), ('subs', 'int'), ('label', 'text'), ('tag', 'text'), ('path', 'text'), ('l0', 'text'), ('l1', 'text'), ('l2', 'text'), ('chars', 'int')]
 # `crate` is a row of crates.tsv, whose `ax`, `ay` is the corner of the crate's longest file. `cell` is a leaf's place in its crate's reading order, one cell
 # skipped between files; a file or a scope has the `cell` of its first leaf and the `cells` to its last, and `level` counts the scopes
 # around a symbol. `top` is the lines of the longer files of a file's crate.
 CRATES = [('x0', 'float'), ('y0', 'float'), ('x1', 'float'), ('y1', 'float'), ('ax', 'float'), ('ay', 'float'), ('files', 'int'), ('lines', 'int'), ('cells', 'int'), ('chars', 'int'), ('name', 'text'), ('title', 'text'), ('rank', 'int')]
+# The tree goes on below a leaf symbol, outside this table: `sub` is the first of its `subs` rows of
+# lines.tsv, its lines packed as symbols are, in the unit square of the symbol's cell. A row there is
+# a cell [x y size], its parent's centre, `kind` 0 a branch or 1 a line, its children as contiguous
+# rows from `child` (absolute; `below` counts from the tree's first row), a line's `weight` in thousandths (the root of its length in 120
+# characters) and its `chars` up to 40. chars.tsv is every tree of 0 to 40 equal characters, 64 rows
+# each: kind 0 a branch, 2 a character, -1 no node.
+LINES = [('x', 'float'), ('y', 'float'), ('size', 'float'), ('px', 'float'), ('py', 'float'), ('kind', 'int'), ('child', 'int'), ('count', 'int'), ('weight', 'int'), ('chars', 'int'), ('below', 'int')]
+CHARS = [('x', 'float'), ('y', 'float'), ('size', 'float'), ('px', 'float'), ('py', 'float'), ('kind', 'int')]
+LINE_CAP, CHAR_CAP, CHAR_ROWS = 64, 40, 64
 # A number comes last: a row never ends in the tab of an empty text cell.
 # Node kinds: the file quadtree, then each indexed file's nested symbol field.
 BRANCH, FILE, HOLLOW, PACK, SCOPE, LEAF, EMPTY = range(7)
@@ -331,6 +340,62 @@ def table_rows(root):
     return rows
 
 
+def packed(weights, turn_seed, leaf):
+    """Items packed by `quadrants` into the unit square, turned inward like a scope: breadth-first rows, children contiguous."""
+    prefix = [0.0]
+    for w in weights:
+        prefix.append(prefix[-1] + w)
+
+    def pack(x, y, size, lo, hi, px, py):
+        node = {'x': x, 'y': y, 'size': size, 'px': px, 'py': py}
+        if hi - lo == 1:
+            return {**node, **leaf(lo), 'children': []}
+        centre = (x + size / 2, y + size / 2)
+        return {**node, 'kind': 0, 'children': [pack(x + qx * size / 2, y + qy * size / 2, size / 2, a, b, *centre)
+                                                for a, b, qx, qy in quadrants(prefix, (0.10, 0.18, 0.29, 0.43), lo, hi, (turn_seed ^ (lo * 31 + hi)) % 4)]}
+
+    if not weights:
+        return []
+    rows, pending = [], [pack(0.08, 0.08, 0.84, 0, len(weights), 0.5, 0.5)]
+    while pending:
+        following = []
+        for node in pending:
+            rows.append(node)
+            following.extend(node['children'])
+        pending = following
+    cursor = 1
+    for row in rows:
+        row['child'], row['count'] = cursor, len(row.pop('children'))
+        cursor += row['count']
+    return rows
+
+
+def line_trees(files, rows):
+    """The lines of every leaf symbol as a tree of its own, up to LINE_CAP lines; the leaf rows learn where theirs is."""
+    out = []
+    for row in rows:
+        if row['kind'] != LEAF:
+            continue
+        lines = files[row['file']]['lines'][row['first'] - 1:row['last']][:LINE_CAP] or ['']
+        tree = packed([math.sqrt(1 + len(line)) for line in lines], row['seed'],
+                      lambda n: {'kind': 1, 'weight': round(1000 * min(1.0, math.sqrt(len(lines[n]) / 120))), 'chars': min(CHAR_CAP, len(lines[n]))})
+        row['sub'], row['subs'] = len(out), len(tree)
+        for node in tree:
+            node['below'] = node['child']
+            node['child'] += len(out)
+        out.extend(tree)
+    return out
+
+
+def char_trees():
+    out = []
+    for n in range(CHAR_CAP + 1):
+        tree = packed([1.0] * n, n, lambda k: {'kind': 2})
+        assert len(tree) <= CHAR_ROWS
+        out.extend(tree + [{'x': 0.0, 'y': 0.0, 'size': 0.0, 'px': 0.0, 'py': 0.0, 'kind': -1}] * (CHAR_ROWS - len(tree)))
+    return out
+
+
 def escape(value):
     return str(value).replace('\\', '\\\\').replace('\t', '\\t').replace('\n', '\\n').replace('\r', '\\r')
 
@@ -400,6 +465,8 @@ def main():
         tree = file_tree(files)
         write_table(output.with_name('crates.tsv'), CRATES, crates(files, tree))
         rows = table_rows(tree)
+        write_table(output.with_name('lines.tsv'), LINES, line_trees(files, rows))
+        write_table(output.with_name('chars.tsv'), CHARS, char_trees())
         write_table(output, COLUMNS, rows)
         # Two 32-bin line-length profiles a file: row = file * 32 + bin.
         write_table(output.with_name('profile.tsv'), [('width', 'int'), ('mean', 'int')],

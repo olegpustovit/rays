@@ -106,16 +106,23 @@ lines across the sheet and four times as many each time the zoom quadruples; the
 as ticks outside the frame. The 16 largest crates are named on the corner of their longest file, and
 a 180-point lattice of slots names files once they are that large.
 
-The sheet has depth to explore. A scope is an outlined square around its symbols. From 46 points a
-symbol's square clears and opens into the lattice of its lines: up to 7 by 7 squares on thin lines,
-one a source line, as large as that line is long (the `width` profile). From 26 points a line's square
-pales and carries its words: up to 3 by 3, one for every 12 characters, each a stable size of its own.
-Both lattices are drawn for the leaves that own a slot of a screen lattice (56 and 360 points), so
-their cost is bounded by the window. A lattice kernel reads a symbol from one packed array: reading
-its file, first line, span and reach from four arrays beside the profile took the kernel off its fast
-path and tripled the frame. The zoom limit is 24 times the atlas's. Marks have no alpha, so a fading
-mark is mixed into the paper; the art's clip is flat paper drawn over the margins. Nothing is read
-back. `netwerk_overview.png` and `netwerk_zoom.png` are its views.
+The tree goes on below the symbols, precomputed: `lines.tsv` is every leaf symbol's lines (up to 64)
+packed by the indexer's own quadrant rule, their lengths as weights, in the unit square of the
+symbol, rows top down with children contiguous; `chars.tsv` is every tree of 0 to 40 equal
+characters, 64 rows each. On the sheet a square divides as it grows, and the hand-over is not seen:
+a symbol's square is drawn until its cell is over 40 points; then the first 12 rows of its tree stand
+in its place, at first tiling it exactly and drawing apart to their own sizes over the next doubling
+of the zoom, which uncovers the diagonal branches under them (a line a square as large as the line is
+long, a branch whose parts are not drawn yet a square of nearly all its cell). From 128 points the
+rest of the tree's rows do the same inside those branches, and a line whose cell is over 96 points
+gives way to the tree of its characters, each a stable size of its own (characters are counted, not
+read). Nothing fades. The trees are drawn for the symbols and lines that own a slot of a screen
+lattice, so their cost is bounded by the window; a slot's symbol is projected once and its rows read
+that. The crossfades of the atlas are gone too: every symbol is a square at every zoom, and a file's
+and a symbol's branches are drawn at full strength where they show. A scope is an outlined square.
+The dark plate draws all of it in its own inks. On the full table a frame with the camera moving
+takes 17 to 23 ms in a 1000-point window (a still frame is free), and loading takes about 5 seconds:
+`lines.tsv` is 460,000 rows.
 
 ### Ledger
 

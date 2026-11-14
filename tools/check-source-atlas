@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
     command = [str(INDEX), '--root', str(fixture / 'tree'), '--output', str(output), '--cache', str(work / 'cache')]
     cold = subprocess.check_output(command, text=True)
     assert '32 files, 224 symbols, 302 nodes, 0 cache hits' in cold, cold
-    for name in ('atlas.tsv', 'profile.tsv', 'crates.tsv'):
+    for name in ('atlas.tsv', 'profile.tsv', 'crates.tsv', 'lines.tsv', 'chars.tsv'):
         assert (work / name).read_bytes() == (fixture / name).read_bytes(), f'{name}: fixture golden changed'
     # An unanswered request (null) is retried, never stored as a file without symbols.
     assert all(json.loads(saved.read_text()) for saved in (work / 'cache').iterdir()), 'an empty answer was cached'
@@ -47,6 +47,18 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
                 if n(scope, 'kind') == 4:
                     assert n(scope, 'first') <= n(child, 'first') <= n(child, 'last') <= n(scope, 'last'), 'symbol outside its scope'
     assert len((work / 'profile.tsv').read_text().splitlines()) == 1 + 32 * 32
+    # Below every leaf symbol its lines are a tree of their own: children contiguous, inside their parent, a line a row.
+    below = [{k.split(':')[0]: v for k, v in r.items()} for r in csv.DictReader((work / 'lines.tsv').open(), delimiter='\t', quoting=csv.QUOTE_NONE)]
+    for row in rows:
+        if n(row, 'kind') == 5:
+            first, count = n(row, 'sub'), n(row, 'subs')
+            tree = below[first:first + count]
+            assert sum(int(t['kind']) == 1 for t in tree) == min(64, n(row, 'last') - n(row, 'first') + 1), 'a row a line'
+            for t in tree:
+                for child in below[int(t['child']):int(t['child']) + int(t['count'])]:
+                    assert first <= int(t['child']) < first + count, 'a tree keeps to its rows'
+                    assert float(t['x']) <= float(child['x']) and float(child['x']) + float(child['size']) <= float(t['x']) + float(t['size']) + 1e-12, 'line child inside its parent'
+    assert len((work / 'chars.tsv').read_text().splitlines()) == 1 + 41 * 64
     # Every leaf has its own cell in its crate's reading order, and a crate's files stack without gaps.
     crates = [{k.split(':')[0]: v for k, v in r.items()} for r in csv.DictReader((work / 'crates.tsv').open(), delimiter='\t', quoting=csv.QUOTE_NONE)]
     assert sorted(int(c['rank']) for c in crates) == list(range(len(crates))) and sum(int(c['files']) for c in crates) == 32
