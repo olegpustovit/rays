@@ -171,9 +171,8 @@ fn intermediate_stays_resident() {
 // runs no region and creates no buffer, and a changed input recomputes (the picture changes as the
 // readback path's does).
 fn resident_map_is_reused() {
-    if !common::gpu() { return; }
     // the zoom holds at 2 until the twelfth frame, then goes to 3
-    let source = r##"(workspace reuse
+    reuse_case(r##"(workspace reuse
   (graph ticks :context host (state [old 0] (+ old 1)))
   (graph view :context host (state [old {:zoom 2.0}] {:zoom (if (< (ref ticks) 12) 2.0 3.0)}))
   (graph picture :context draw
@@ -181,7 +180,25 @@ fn resident_map_is_reused() {
            ids (array/range 8192 :type int)
            a (map (fn [(i : int)] [(* view.zoom (float (int/mod i 64))) (float (int/div i 64)) 1.0 0.5]) ids)]
       (draw/rects (map (fn [(i : int)] (let* [p (array/nth a i)] [p.x p.y 0.0])) ids)
-                  (map (fn [(i : int)] (let* [p (array/nth a i)] [p.z p.w 0.0])) ids) :fill "#e1d8c0"))))"##;
+                  (map (fn [(i : int)] (let* [p (array/nth a i)] [p.z p.w 0.0])) ids) :fill "#e1d8c0"))))"##);
+}
+
+// The same for an integer producer (Atlas's slot owners): its exact words are held and reused.
+fn resident_int_map_is_reused() {
+    reuse_case(r##"(workspace reuse_ints
+  (graph ticks :context host (state [old 0] (+ old 1)))
+  (graph view :context host (state [old {:zoom 2.0}] {:zoom (if (< (ref ticks) 12) 2.0 3.0)}))
+  (graph picture :context draw
+    (let* [view (ref view)
+           slots (array/range 4000 :type int)
+           lift (int view.zoom)
+           owners (map (fn [(j : int)] (int/add (int/mul (int/mod (int/add j lift) 4093) 3) (if (= (int/mod j 5) 0) -1 0))) slots)]
+      (draw/rects (map (fn [(i : int)] (let* [o (array/nth owners i)] [(float (int/mod (if (< o 0) 0 o) 64)) (float (int/div (if (< o 0) 0 o) 64)) 0.0])) slots)
+                  (map (fn [(i : int)] (let* [o (array/nth owners i)] [1.0 (float (int/mod o 7)) 0.0])) slots) :fill "#e1d8c0"))))"##);
+}
+
+fn reuse_case(source: &str) {
+    if !common::gpu() { return; }
     let catalog = editor_document::kinds::shared(None).unwrap();
     let doc = editor_document::workspace_doc::of_text(&editor_document::workspace_doc::TextOptions::default(), &catalog, source).unwrap_or_else(|ds| panic!("{ds:?}"));
     let lowered = flow_sop::lower::of_checked(None, flow_sop::lower::Options { inputs: Some((*doc.inputs).clone()), ..Default::default() }, &doc.checked).unwrap();
@@ -311,6 +328,7 @@ fn main() {
     let mut cases: Vec<(&str, fn())> = vec![("source_atlas_fixture_views", frame_views), ("source_netwerk_fixture_views", netwerk_views), ("local_function_reading_state_stays_a_kernel", local_function_kernel),
                                              ("intermediate_map_stays_on_the_device", intermediate_stays_resident),
                                              ("resident_map_is_reused", resident_map_is_reused),
+                                             ("resident_int_map_is_reused", resident_int_map_is_reused),
                                              ("int_intermediate_is_exact", int_intermediate_is_exact)];
     if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { cases.push(("source_atlas_full_table_budget", full_table_budget)); }
     common::window::run(&cases);

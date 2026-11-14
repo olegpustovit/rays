@@ -1927,10 +1927,15 @@ pub fn adopt_float(t: &T, buffer: &Buffer, count: i64, width: i64) -> Result<gpu
 /// its element count, `valid` and `unpin`. Until `unpin` the pool neither reuses nor reads back the
 /// buffer. `None` for an unsettled, freed or unknown output. Creating thread.
 pub fn pin(placeholder: &Arc<Vec<f64>>) -> Option<Pin> {
+    pin_words(placeholder, false)
+}
+
+/// `pin` of a float array, or (`uint32`) of an integer array's words, which a holder's `integers` stand for.
+pub fn pin_words(placeholder: &Arc<Vec<f64>>, uint32: bool) -> Option<Pin> {
     bindable_live();
     let id = BINDABLE.with(|b| b.borrow().iter().rev().find(|(p, _, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, placeholder))).map(|(_, _, id, _)| *id))?;
     let kept = kept_of(id)?;
-    if kept.uint32 || kept.fate.destroyed() || !kept.settled.load(Ordering::SeqCst) {
+    if kept.uint32 != uint32 || kept.fate.destroyed() || !kept.settled.load(Ordering::SeqCst) {
         None
     } else {
         Some(borrow(&kept))

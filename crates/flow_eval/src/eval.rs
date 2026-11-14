@@ -3440,35 +3440,43 @@ pub fn interruptible(f: &mut dyn FnMut()) -> Result<(), Diagnostic> {
 }
 
 struct HeldArray {
-    data: Weak<Vec<f64>>,
+    data: Weak<dyn std::any::Any + Send + Sync>,
     read: Arc<dyn Fn() -> Value + Send + Sync>,
 }
 static HELD_ARRAYS: LazyLock<Mutex<HashMap<usize, HeldArray>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 pub mod device {
     use super::*;
     pub fn add(placeholder: &Value, read: Arc<dyn Fn() -> Value + Send + Sync>) -> Result<(), Diagnostic> {
-        let data = match placeholder {
-            Value::Floats(1..=4, data) => data,
+        // an integer array's placeholder is its id (and its count, for a view): one or two words
+        let (key, data): (usize, Weak<dyn std::any::Any + Send + Sync>) = match placeholder {
+            Value::Floats(1..=4, data) => (Arc::as_ptr(data) as usize, Arc::downgrade(data) as _),
+            Value::IntArray(data) if data.len() <= 2 => (Arc::as_ptr(data) as usize, Arc::downgrade(data) as _),
             _ => return Err(error("E_INVALID_ARGUMENT", "Eval.Device.add")),
         };
-        let key = Arc::as_ptr(data) as usize;
         let mut held = HELD_ARRAYS.lock().unwrap();
         held.retain(|_, entry| entry.data.strong_count() != 0);
-        held.insert(key, HeldArray { data: Arc::downgrade(data), read });
+        held.insert(key, HeldArray { data, read });
         Ok(())
     }
-    fn reader(data: &Arc<Vec<f64>>) -> Option<Arc<dyn Fn() -> Value + Send + Sync>> {
-        if data.len() > 4 { return None; }
-        let key = Arc::as_ptr(data) as usize;
+    /// the reader of a placeholder's allocation, while it lives (a dead entry's address cannot be
+    /// reused: its weak keeps the allocation)
+    fn reader(key: usize) -> Option<Arc<dyn Fn() -> Value + Send + Sync>> {
         let mut held = HELD_ARRAYS.lock().unwrap();
         let entry = held.get(&key)?;
-        if entry.data.upgrade().is_some_and(|owner| Arc::ptr_eq(&owner, data)) { return Some(entry.read.clone()); }
+        if entry.data.strong_count() != 0 { return Some(entry.read.clone()); }
         held.remove(&key);
         None
     }
+    fn small(value: &Value) -> Option<usize> {
+        match value {
+            Value::Floats(1..=4, data) if data.len() <= 4 => Some(Arc::as_ptr(data) as usize),
+            Value::IntArray(data) if data.len() <= 2 => Some(Arc::as_ptr(data) as usize),
+            _ => None,
+        }
+    }
     pub fn thaw(value: &Value) -> Value {
         match value {
-            Value::Floats(1..=4, data) => reader(data).map_or_else(|| value.clone(), |read| read()),
+            Value::Floats(..) | Value::IntArray(_) => small(value).and_then(reader).map_or_else(|| value.clone(), |read| read()),
             Value::List(values) => Value::List(Arc::new(values.iter().map(thaw).collect())),
             Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), thaw(value))).collect::<Vec<_>>().into()),
             Value::Struct(g) => value::struct_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| (name.clone(), thaw(value))).collect::<Vec<_>>().into()),
@@ -3476,7 +3484,7 @@ pub mod device {
         }
     }
     pub fn held_by_device(value: &Value) -> bool {
-        matches!(value, Value::Floats(1..=4, data) if reader(data).is_some())
+        small(value).and_then(reader).is_some()
     }
 }
 

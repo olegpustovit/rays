@@ -809,25 +809,34 @@ impl Scope {
             Value::Floats(1..=4, a) => {
                 self.lookup(Arc::as_ptr(a) as usize).or_else(|| self.durable(v))
             }
-            Value::IntArray(a) => self.lookup(Arc::as_ptr(a) as usize),
+            Value::IntArray(a) => self.lookup(Arc::as_ptr(a) as usize).or_else(|| self.durable(v)),
             _ => None,
         }
     }
 
     /// an array a device holds past its scope (`Eval::Device`), bound where it is
     fn durable(&self, v: &Value) -> Option<Rc<Placeholder>> {
-        let a = float_array(v)?;
         if !flow_eval::device::held_by_device(v) {
             return None;
         }
-        let (buffer, count, _, unpin) = run::pin(a)?;
+        // an integer array's words are signed ones: only an exact scope binds them
+        let (key, (buffer, count, _, unpin), uint32) = match v {
+            Value::IntArray(a) if self.signed => {
+                let (buffer, whole, valid, unpin) = run::pin_words(&flow_ir::packed::host::integer_input(a)?, true)?;
+                (Arc::as_ptr(a) as usize, (buffer, if a.len() == 2 { a[1] } else { whole }, valid, unpin), true)
+            }
+            _ => {
+                let a = float_array(v)?;
+                (Arc::as_ptr(a) as usize, run::pin(a)?, false)
+            }
+        };
         self.s.borrow_mut().on_close.push(Box::new(move || unpin()));
         let slot = self.adopt_slot();
         let p = Rc::new(Placeholder {
-            key: Arc::as_ptr(a) as usize,
+            key,
             hold: v.clone(),
-            kind: kind_of(v),
-            uint32: false,
+            kind: if uint32 { 0 } else { kind_of(v) },
+            uint32,
             buffer: (buffer.clone(), buffer_bytes(&buffer)),
             length: count,
             cell: None,
@@ -2199,7 +2208,7 @@ impl Scope {
         if let Some((_, holder)) = self.s.borrow().integers.iter().find(|(k, _)| *k == key) {
             return Some(holder.clone());
         }
-        let p = self.find(value_).filter(|p| p.uint32)?;
+        let p = self.find(value_).filter(|p| p.uint32 && !self.s.borrow().durables.contains(&p.key))?;
         self.settle_inner().ok()?;
         let aliases: Vec<(Rc<Placeholder>, i64)> = {
             let table = self.s.borrow().table.clone();
@@ -2210,7 +2219,12 @@ impl Scope {
             v
         };
         let length = aliases.iter().map(|(_, c)| *c).fold(0, i64::max);
-        let holder = run::adopt_uint32(&self.owner(), &p.buffer.0, length).ok()?;
+        let mut holder = run::adopt_uint32(&self.owner(), &p.buffer.0, length).ok()?;
+        if self.signed {
+            // the words are two's complement: the holder's reads (and its views') are signed
+            let read = holder.materialise.clone();
+            holder.materialise = Arc::new(move || read().map(|ws| ws.into_iter().map(|w| w as u32 as i32 as i64).collect()));
+        }
         if let Some((_, _, _, unpin)) = (holder.pin)() {
             self.s.borrow_mut().on_close.push(Box::new(move || unpin()));
         }
@@ -2272,16 +2286,20 @@ impl Scope {
     fn nth(&self, v: &Value, i: i64) -> Result<Option<Value>, Diagnostic> {
         let Some(p) = self.find(v) else { return Ok(None) };
         let held = |keys: &Vec<usize>| keys.contains(&p.key);
-        if held(&self.s.borrow().durables) || held(&self.s.borrow().adopted) || (p.kind == 0 && !p.uint32) {
+        // a held array is settled and complete: its words are read with no wait on this scope's work
+        let durable = held(&self.s.borrow().durables);
+        if (durable && !p.uint32) || held(&self.s.borrow().adopted) || (p.kind == 0 && !p.uint32) {
             return Ok(None);
         }
-        self.settle_inner()?;
+        if !durable {
+            self.settle_inner()?;
+        }
         if i < 0 || i >= self.count_of(&p)? {
             return Ok(None);
         }
         let width = p.kind.max(1);
         let epoch = self.s.borrow().epoch;
-        if epoch > b::completed_epoch(&self.queue) {
+        if !durable && epoch > b::completed_epoch(&self.queue) {
             gpu_r(b::complete_through(&self.queue, epoch))?;
         }
         let bytes = gpu_r(b::read_buffer(&p.buffer.0, i * width * 4, width * 4))?;
@@ -2307,6 +2325,15 @@ impl Scope {
         }
         if self.s.borrow().adopted.contains(&p.key) {
             return Ok(None);
+        }
+        if p.uint32 {
+            let Some(mut holder) = self.retain_uint32(v).filter(|_| self.signed) else { return Ok(None) };
+            let Some(placeholder) = holder.resident.take() else { return Ok(None) };
+            let h = Arc::new(holder);
+            // ponytail: the reader cannot fail, as the float one; a fallible reader in flow_eval
+            let read: Arc<dyn Fn() -> Value + Send + Sync> = Arc::new(move || Value::IntArray(Arc::new((h.materialise)().expect("a state's device array is read while its holder lives"))));
+            flow_eval::device::add(&placeholder, read)?;
+            return Ok(Some(placeholder));
         }
         let Some(mut holder) = self.retain_float(v) else { return Ok(None) };
         // The registry's reader must not own its own weakly keyed placeholder.
