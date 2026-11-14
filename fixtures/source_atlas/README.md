@@ -104,7 +104,16 @@ and chroma `0.07 + 0.15 r` for a reach `r`, at the crate's hue (a golden-angle s
 tests; blue short spans to orange long ones; and the dark plate with its small dots. The grid has 64
 lines across the sheet and four times as many each time the zoom quadruples; the same lines carry on
 as ticks outside the frame. The 16 largest crates are named on the corner of their longest file, and
-a 180-point lattice of slots names files once they are that large. Marks have no alpha, so a fading
+a 180-point lattice of slots names files once they are that large.
+
+The sheet has depth to explore. A scope is an outlined square around its symbols. From 46 points a
+symbol's square clears and opens into the lattice of its lines: up to 7 by 7 squares on thin lines,
+one a source line, as large as that line is long (the `width` profile). From 26 points a line's square
+pales and carries its words: up to 3 by 3, one for every 12 characters, each a stable size of its own.
+Both lattices are drawn for the leaves that own a slot of a screen lattice (56 and 360 points), so
+their cost is bounded by the window. A lattice kernel reads a symbol from one packed array: reading
+its file, first line, span and reach from four arrays beside the profile took the kernel off its fast
+path and tripled the frame. The zoom limit is 24 times the atlas's. Marks have no alpha, so a fading
 mark is mixed into the paper; the art's clip is flat paper drawn over the margins. Nothing is read
 back. `netwerk_overview.png` and `netwerk_zoom.png` are its views.
 

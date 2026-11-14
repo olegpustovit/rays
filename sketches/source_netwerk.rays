@@ -1,6 +1,8 @@
 ; Source Netwerk: the Source Atlas as a printed map sheet. Every source file once in an asymmetric
 ; quadtree, each indexed file a nested field of its real rust-analyzer symbols. A leaf is a square
-; whose side follows its source span; its hue is its crate; branches run on the diagonal.
+; whose side follows its source span; its hue is its crate; branches run on the diagonal. A scope
+; is an outlined square around its symbols. Closer in, a symbol's square opens into a lattice of
+; its lines, a square a line as large as the line is long, and closer still a line into its words.
 ; Generate first: tools/source_atlas_index
 ; Run: cargo run -p rays_bin -- sketches/source_netwerk.rays
 ; Scroll zooms at the pointer, click dives, drag pans, right click steps back, R or Space resets,
@@ -67,7 +69,7 @@
 
   ; Static selections and weights: computed once, never per frame.
   (graph field :context host
-    (let* [d (ref data) crate (ref crates)
+    (let* [d (ref data) crate (ref crates) width (get (ref profile) :width)
            ids (array/range (array/count d.kind) :type int)
            ; The crate's hue in degrees: a golden-angle step a crate, drifting 70 degrees across the
            ; crate's own extent.
@@ -98,7 +100,19 @@
        :edge2 (exact (map (fn [(i : int)] (oklch 0.42 0.1 (if (< (heat (array/nth d.mass i)) 0.0) 252.0 55.0))) ids))
        :by_rank (array/grade (exact (map (fn [(c : int)] (int (array/nth crate.rank c))) (array/range (array/count crate.rank) :type int))))
        ; The zoom at which the smallest symbol fills most of the plate.
-       :deepest (max 180.0 (/ 0.7 (array/min (exact (map (fn [(i : int)] (array/nth d.size i)) ids)))))
+       ; The zoom at which a word of a line of the smallest symbol is worth a look: 24 times the
+       ; zoom at which that symbol fills most of the sheet.
+       :deepest (* 24.0 (max 180.0 (/ 0.7 (array/min (exact (map (fn [(i : int)] (array/nth d.size i)) ids))))))
+       :scopes (filter (fn [(i : int)] (= (array/nth d.kind i) 4)) ids)
+       ; The files' line lengths as a stored array: a kernel that read the table's column itself
+       ; cost 4 ms a frame.
+       :widths (exact (map (fn [(j : int)] (int (array/nth width j))) (array/range (array/count width) :type int)))
+       ; What a lattice kernel needs of a symbol in one array: [its file's first profile bin, the
+       ; bin of its first line, its lines up to 49, its reach]. A kernel that read these from four
+       ; arrays and the profile ran three times slower.
+       :line (exact (map (fn [(i : int)]
+                           [(float (int/mul (array/nth d.file i) 32)) (float (int/mod (int/add (array/nth d.first i) 31) 32))
+                            (float (min 49 (max 1 (array/nth d.mass i)))) (reach (array/nth d.mass i))]) ids))
        :files (sum [i ids] (if (or (= (array/nth d.kind i) 1) (= (array/nth d.kind i) 2)) 1 0))
        :symbols (sum [i ids] (if (or (= (array/nth d.kind i) 4) (= (array/nth d.kind i) 5)) 1 0))
        :lines (sum [i ids] (if (or (= (array/nth d.kind i) 1) (= (array/nth d.kind i) 2)) (array/nth d.last i) 0))}))
@@ -257,25 +271,44 @@
   (defn across :context value [(extent : float) (pitch : float)]
     (int/add (int (ceil (/ extent pitch))) 2))
 
-  ; The file that owns each point of a 180-point screen lattice, or -1, for the file names. A cell
-  ; larger than the pitch always holds a lattice point and its first one owns it, so a bounded
+  ; The file (or the leaf) that owns each point of a screen lattice of `pitch` points, or -1. A
+  ; cell larger than the pitch always holds a lattice point and its first one owns it, so a bounded
   ; number of slots replaces a per-frame filter over every node. `view` is [centre x, centre y, scale].
   (defn slots :context value [(cell : (array vec4)) (child : (array int)) (count : (array int))
-                              (view : vec3) (mid : vec3) (lim : vec4)]
-    (let* [cols (across (- lim.z lim.x) 180.0)]
+                              (view : vec3) (mid : vec3) (lim : vec4) (pitch : float) (files : bool)]
+    (let* [cols (across (- lim.z lim.x) pitch)]
       (map (fn [(k : int)]
              (let* [col (int/mod k cols) row (int/div k cols)
-                    wx (+ view.x (/ (- (+ lim.x (* (float col) 180.0)) mid.x) view.z))
-                    wy (+ view.y (/ (- (+ lim.y (* (float row) 180.0)) mid.y) view.z))
-                    before_x (+ view.x (/ (- (+ lim.x (* (float (int/sub col 1)) 180.0)) mid.x) view.z))
-                    before_y (+ view.y (/ (- (+ lim.y (* (float (int/sub row 1)) 180.0)) mid.y) view.z))
+                    wx (+ view.x (/ (- (+ lim.x (* (float col) pitch)) mid.x) view.z))
+                    wy (+ view.y (/ (- (+ lim.y (* (float row) pitch)) mid.y) view.z))
+                    before_x (+ view.x (/ (- (+ lim.x (* (float (int/sub col 1)) pitch)) mid.x) view.z))
+                    before_y (+ view.y (/ (- (+ lim.y (* (float (int/sub row 1)) pitch)) mid.y) view.z))
                     found (locate cell child count wx wy)
-                    n (int found.z)
+                    n (int (if files found.z found.x))
                     c (array/nth cell n)]
-               (if (and (and (or (= c.w 1.0) (= c.w 2.0)) (> (* c.z view.z) 180.0))
+               (if (and (and (if files (or (= c.w 1.0) (= c.w 2.0)) (= c.w 5.0)) (> (* c.z view.z) pitch))
                         (and (or (= col 0) (< before_x c.x)) (or (= row 0) (< before_y c.y))))
                    n -1)))
-           (array/range (int/mul cols (across (- lim.w lim.y) 180.0)) :type int))))
+           (array/range (int/mul cols (across (- lim.w lim.y) pitch)) :type int))))
+
+  ; A symbol's lattice of lines inside its square `e`: [x y pitch side], up to 49 lines in a
+  ; square of `side` by `side`, read in rows.
+  (defn lattice :context value [(e : vec3) (mass : int)]
+    (let* [side (ceil (sqrt (float (min 49 (max 1 mass)))))]
+      [(+ e.x (* e.z 0.08)) (+ e.y (* e.z 0.08)) (/ (* e.z 0.84) side) side]))
+
+  ; Line `at` of a symbol as a square [x y side] on its lattice `l`: a quarter of the pitch for an
+  ; empty line up to 85 hundredths for one of 120 characters.
+  (defn line-square :context value [(l : vec4) (at : int) (width : int)]
+    (let* [side (* l.z (+ 0.25 (* 0.6 (/ (float width) 120.0))))]
+      [(- (+ l.x (* (+ (float (int/mod at (int l.w))) 0.5) l.z)) (* side 0.5))
+       (- (+ l.y (* (+ (float (int/div at (int l.w))) 0.5) l.z)) (* side 0.5)) side]))
+
+  ; A stable share of 100 for part `id` of something seeded: cubing modulo a prime under 2^15.5
+  ; mixes without leaving 32 bits, which the device's integers are.
+  (defn share :context value [(seed : int) (id : int)]
+    (let* [h (int/mod (int/add (int/mod seed 46337) (int/add (int/mul id 7919) 1)) 46337)]
+      (int/mod (int/add (int/mod (int/mul (int/mod (int/mul h h) 46337) h) 46337) id) 100)))
 
   ; A count with its thousands apart, up to 999,999,999.
   (defn grouped :context value [(n : int)]
@@ -290,7 +323,7 @@
                :color (if dark "#e1d8c0" "#15181c") :font "archivo-semibold" :align align :tracking 0.13))
 
   (graph picture :context draw
-    (let* [d (ref data) f (ref field) view (ref view) crate (ref crates)
+    (let* [d (ref data) f (ref field) view (ref view) crate (ref crates) widths f.widths
            cell f.cell
            w (float (frame/width)) h (float (frame/height))
            p (plate w h [view.page_x view.page_y view.page])
@@ -430,15 +463,123 @@
                                    side (if (or dark (<= e.z 4.5)) e.z (- e.z 1.0))]
                               (if (and (seen q lim) (> (chain d.parent cell cam i) 0.004)) [side side 0.0] [0.0 0.0 0.0]))) leaf_ids)
            leaf_fill (map (fn [(j : int)]
-                            (let* [i (array/nth leaves j)]
+                            (let* [i (array/nth leaves j) e (square (spot cell cam pin i) (array/nth f.reach i) dark)]
+                              ; from 46 to 64 points the fill clears: the square opens into its lattice
                               (ink dark (case palette 1 (array/nth f.fill1 i) 2 (array/nth f.fill2 i)
                                                       3 (if (> (array/nth f.reach i) 0.5) [0.882 0.847 0.753] [0.659 0.694 0.690])
                                                       :else (array/nth f.fill0 i))
-                                   (chain d.parent cell cam i)))) leaf_ids)
+                                   (* (chain d.parent cell cam i) (- 1.0 (smooth 46.0 64.0 e.z)))))) leaf_ids)
 
            eye [view.cx view.cy scale] mid [p.ox p.oy 0.0]
-           owners (slots cell d.child d.count eye mid lim)
+           owners (slots cell d.child d.count eye mid lim 180.0 true)
            n180 (array/count owners)
+
+           ; A scope is an outlined square around its symbols, from 6 points a side: four one-point edges.
+           scopes f.scopes
+           hoops (array/range (int/mul (array/count scopes) 4) :type int)
+           hoop_at (map (fn [(j : int)]
+                          (let* [q (spot cell cam pin (array/nth scopes (int/div j 4))) edge (int/mod j 4) side (max 1.0 (floor q.z))]
+                            [(+ (floor q.x) (if (= edge 3) (- side 1.0) 0.0)) (+ (floor q.y) (if (= edge 1) (- side 1.0) 0.0)) 0.0])) hoops)
+           hoop_size (map (fn [(j : int)]
+                            (let* [i (array/nth scopes (int/div j 4)) q (spot cell cam pin i) side (max 1.0 (floor q.z))]
+                              (if (and (and (> q.z 6.0) (seen q lim)) (> (chain d.parent cell cam i) 0.004))
+                                  (if (< (int/mod j 4) 2) [side 1.0 0.0] [1.0 side 0.0]) [0.0 0.0 0.0]))) hoops)
+           hoop_fill (map (fn [(j : int)]
+                            (let* [i (array/nth scopes (int/div j 4)) q (spot cell cam pin i)]
+                              (ink dark (case palette 1 (array/nth f.edge1 i) 2 [0.365 0.396 0.424] 3 [0.506 0.537 0.463] :else (array/nth f.edge0 i))
+                                   (* (* 0.55 (smooth 6.0 12.0 q.z)) (chain d.parent cell cam i))))) hoops)
+
+           ; The lattice of a symbol's lines, for every leaf that owns a 56-point slot: 7 by 7 places,
+           ; a square where the symbol has a line, as large as that line is long. From 26 points a
+           ; line's square pales to carry its words.
+           near (slots cell d.child d.count eye mid lim 56.0 false)
+           spots (array/range (int/mul (array/count near) 49) :type int)
+           spot_at (map (fn [(m : int)]
+                          (let* [i (int (max 0 (array/nth near (int/div m 49)))) v (array/nth f.line i) k (int/mod m 49)
+                                 l (lattice (square (spot cell cam pin i) v.w dark) (int v.z))
+                                 at (int/add (int/mul (int/div k 7) (int l.w)) (int/mod k 7))
+                                 width (array/nth widths (int/add (int v.x) (int/mod (int/add (int v.y) at) 32)))
+                                 e (line-square l at width)]
+                            [e.x e.y 0.0])) spots)
+           spot_size (map (fn [(m : int)]
+                            (let* [owner (array/nth near (int/div m 49)) i (int (max 0 owner)) v (array/nth f.line i) k (int/mod m 49)
+                                   q (spot cell cam pin i) own (square q v.w dark)
+                                   l (lattice own (int v.z))
+                                   at (int/add (int/mul (int/div k 7) (int l.w)) (int/mod k 7))
+                                   width (array/nth widths (int/add (int v.x) (int/mod (int/add (int v.y) at) 32)))
+                                   e (line-square l at width)]
+                              (if (and (and (>= owner 0) (> own.z 46.0))
+                                       (and (and (< (int/mod k 7) (int l.w)) (< at (int v.z))) (seen q lim)))
+                                  [e.z e.z 0.0] [0.0 0.0 0.0]))) spots)
+           spot_fill (map (fn [(m : int)]
+                            (let* [i (int (max 0 (array/nth near (int/div m 49)))) v (array/nth f.line i) k (int/mod m 49)
+                                   own (square (spot cell cam pin i) v.w dark)
+                                   l (lattice own (int v.z))
+                                   at (int/add (int/mul (int/div k 7) (int l.w)) (int/mod k 7))
+                                   width (array/nth widths (int/add (int v.x) (int/mod (int/add (int v.y) at) 32)))
+                                   e (line-square l at width)]
+                              (ink dark (case palette 1 (array/nth f.fill1 i) 2 (array/nth f.fill2 i) 3 [0.882 0.847 0.753] :else (array/nth f.fill0 i))
+                                   (* (smooth 46.0 64.0 own.z) (- 1.0 (* 0.8 (smooth 26.0 40.0 e.z))))))) spots)
+           ; Thin lines run through the lattice's rows and columns, as the print joins its squares.
+           wires (array/range (int/mul (array/count near) 14) :type int)
+           wire_at (map (fn [(m : int)]
+                          (let* [i (int (max 0 (array/nth near (int/div m 14)))) v (array/nth f.line i) k (int/mod m 7)
+                                 l (lattice (square (spot cell cam pin i) v.w dark) (int v.z))
+                                 across (floor (+ l.x (* (+ (float k) 0.5) l.z))) along (+ l.x (* 0.5 l.z))]
+                            (if (< (int/mod m 14) 7) [along (floor (+ l.y (* (+ (float k) 0.5) l.z))) 0.0] [across (+ l.y (* 0.5 l.z)) 0.0]))) wires)
+           wire_size (map (fn [(m : int)]
+                            (let* [owner (array/nth near (int/div m 14)) i (int (max 0 owner)) v (array/nth f.line i) k (int/mod m 7)
+                                   q (spot cell cam pin i) own (square q v.w dark)
+                                   l (lattice own (int v.z))
+                                   count (int (int v.z))
+                                   rows (int/div (int/add count (int/sub (int l.w) 1)) (int l.w))
+                                   flat (< (int/mod m 14) 7)
+                                   ; a row runs to its last line, a column down to its last
+                                   reach (if flat (if (= k (int/sub rows 1)) (int/sub count (int/mul k (int l.w))) (int l.w))
+                                             (if (< (int/add (int/mul (int/sub rows 1) (int l.w)) k) count) rows (int/sub rows 1)))]
+                              (if (and (and (>= owner 0) (> own.z 46.0)) (and (and (< k (if flat rows (int l.w))) (> reach 1)) (seen q lim)))
+                                  (if flat [(* (float (int/sub reach 1)) l.z) 1.0 0.0] [1.0 (* (float (int/sub reach 1)) l.z) 0.0])
+                                  [0.0 0.0 0.0]))) wires)
+           wire_fill (map (fn [(m : int)]
+                            (let* [i (int (max 0 (array/nth near (int/div m 14)))) v (array/nth f.line i)
+                                   own (square (spot cell cam pin i) v.w dark)]
+                              (ink dark (case palette 1 (array/nth f.edge1 i) 2 (array/nth f.edge2 i) 3 [0.506 0.537 0.463] :else (array/nth f.edge0 i))
+                                   (* 0.45 (smooth 46.0 64.0 own.z))))) wires)
+
+           ; The words of a line, for the leaves that own a 360-point slot: up to 9 a line, one
+           ; for every 12 characters, on the line's own lattice, each a stable size of its own.
+           close (slots cell d.child d.count eye mid lim 360.0 false)
+           words (array/range (int/mul (array/count close) 441) :type int)
+           word_at (map (fn [(m : int)]
+                          (let* [i (int (max 0 (array/nth close (int/div m 441)))) v (array/nth f.line i) at (int/mod (int/div m 9) 49) k (int/mod m 9)
+                                 l (lattice (square (spot cell cam pin i) v.w dark) (int v.z))
+                                 width (array/nth widths (int/add (int v.x) (int/mod (int/add (int v.y) at) 32)))
+                                 e (line-square l at width)
+                                 n (max 1 (min 9 (int/div (int/add width 11) 12)))
+                                 side (ceil (sqrt (float n))) step (/ (* e.z 0.84) side)
+                                 own (* step (+ 0.3 (* 0.005 (float (share (array/nth d.seed i) (int/add (int/mul at 9) k))))))]
+                            [(- (+ (+ e.x (* e.z 0.08)) (* (+ (float (int/mod k (int side))) 0.5) step)) (* own 0.5))
+                             (- (+ (+ e.y (* e.z 0.08)) (* (+ (float (int/div k (int side))) 0.5) step)) (* own 0.5)) 0.0])) words)
+           word_size (map (fn [(m : int)]
+                            (let* [owner (array/nth close (int/div m 441)) i (int (max 0 owner)) v (array/nth f.line i) at (int/mod (int/div m 9) 49) k (int/mod m 9)
+                                   q (spot cell cam pin i)
+                                   l (lattice (square q v.w dark) (int v.z))
+                                   width (array/nth widths (int/add (int v.x) (int/mod (int/add (int v.y) at) 32)))
+                                   e (line-square l at width)
+                                   n (max 1 (min 9 (int/div (int/add width 11) 12)))
+                                   side (ceil (sqrt (float n))) step (/ (* e.z 0.84) side)
+                                   own (* step (+ 0.3 (* 0.005 (float (share (array/nth d.seed i) (int/add (int/mul at 9) k))))))]
+                              (if (and (and (>= owner 0) (> e.z 26.0))
+                                       (and (and (< at (int v.z)) (< k n))
+                                            (and (and (>= (+ e.x e.z) lim.x) (< e.x lim.z)) (and (>= (+ e.y e.z) lim.y) (< e.y lim.w)))))
+                                  [own own 0.0] [0.0 0.0 0.0]))) words)
+           word_fill (map (fn [(m : int)]
+                            (let* [i (int (max 0 (array/nth close (int/div m 441)))) v (array/nth f.line i) at (int/mod (int/div m 9) 49)
+                                   l (lattice (square (spot cell cam pin i) v.w dark) (int v.z))
+                                   width (array/nth widths (int/add (int v.x) (int/mod (int/add (int v.y) at) 32)))
+                                   e (line-square l at width)]
+                              (ink dark (case palette 1 (array/nth f.edge1 i) 2 (array/nth f.edge2 i) 3 [0.882 0.847 0.753] :else (array/nth f.edge0 i))
+                                   (smooth 26.0 40.0 e.z)))) words)
 
            ; File names appear on cells over 180 points.
            ; ponytail: 64 label slots cover an art square up to about 1400 points a side.
@@ -473,6 +614,10 @@
                  (draw/rects node_at node_size :fill node_fill)
                  (draw/rects edge_at edge_size :fill edge_fill)
                  (draw/rects leaf_at leaf_size :fill leaf_fill)
+                 (draw/rects hoop_at hoop_size :fill hoop_fill)
+                 (draw/rects wire_at wire_size :fill wire_fill)
+                 (draw/rects spot_at spot_size :fill spot_fill)
+                 (draw/rects word_at word_size :fill word_fill)
                  (draw/rects corner_at corner_size :fill "#e0432b")
                  named
                  labels)
@@ -523,6 +668,8 @@
                   (draw/rect [(- (floor p.left) 1.0) (- (floor p.top) 1.0) 0] [(+ (- (floor p.right) (floor p.left)) 1.0) (+ (- (floor p.bottom) (floor p.top)) 1.0) 0] :stroke (if dark "#363e33" "#15181c"))
                   ; H hides the margins' text by moving it off the canvas: the drawing keeps one shape.
                   (draw/translate [0 (if view.ui 0.0 100000.0) 0] chrome))))
+
+  (graph profile :context host (table/load "../_out/source_atlas/profile.tsv"))
 
   (graph actions :context host
     (list (host/save_png "_out/source-netwerk.png" (key/down "s"))
