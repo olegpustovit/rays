@@ -76,11 +76,24 @@ fn gestures(doc: &document::T) -> Vec<le::Op> {
 
 #[test]
 fn layout_gestures_match_a_whole_rebuild_on_every_editor_sketch() {
-    // a sketch per shape of editor graph: views and a canvas, a switch, a viewport over another scene
-    // instance, a layout written after other graphs
+    // A canvas, a switch, a viewport over another scene instance, and a layout with effects.
+    let (checked, reused) = check_sketches(&["basic.rays", "particles.rays", "ws_variations.rays", "pxui.rays"]);
+    assert!(checked >= 8, "only {checked} gestures compared");
+    assert!(reused >= 4, "only {reused} gestures kept the plan");
+}
+
+#[test]
+fn layout_gestures_match_a_whole_rebuild_on_isogrid() {
+    // The larger scene shares no work with the other sketches. The runner can check it separately.
+    let (checked, reused) = check_sketches(&["isogrid.rays"]);
+    assert!(checked >= 3, "only {checked} gestures compared");
+    assert!(reused >= 3, "only {reused} gestures kept the plan");
+}
+
+fn check_sketches(names: &[&str]) -> (usize, usize) {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sketches");
     let (mut checked, mut reused) = (0, 0);
-    for name in ["isogrid.rays", "basic.rays", "particles.rays", "ws_variations.rays", "pxui.rays"] {
+    for name in names {
         let path = dir.join(name);
         let Some(doc) = load(&path) else { continue };
         for op in gestures(&doc) {
@@ -105,6 +118,5 @@ fn layout_gestures_match_a_whole_rebuild_on_every_editor_sketch() {
             }
         }
     }
-    assert!(checked >= 11, "only {checked} gestures compared");
-    assert!(reused >= 6, "only {reused} gestures kept the plan");
+    (checked, reused)
 }

@@ -382,9 +382,14 @@ fn same_evaluation(left: &flow_eval::State, right: &flow_eval::State, live: &inp
 /// over time, `cook` cooks every graph at 1 and 3 domains (the cooked count, 0 when skipped).
 /// The larger fixtures run the two halves as separate cases to stay inside the case budget.
 fn check_fixture(name: &str, compare: bool, cook: bool) -> usize {
-    let lowered = lower_case(name);
+    let mut source = case_text(name);
+    if name == "wave" && cook && std::env::var("RAYS_SLOW").as_deref() != Ok("1") {
+        // Keep all six strands and the polywire cook. Slow qualification cooks the authored grid.
+        source = source.replace("(samples : int 90)", "(samples : int 48)");
+    }
+    let lowered = lower_forms(lower::Options::default(), &parse(&source));
     let cat = catalog_of(&factories());
-    let forms = parse(&case_text(name));
+    let forms = parse(&source);
     let checked = match fcat::check_workspace(operators::all(), false, None, &cat, &forms) {
         (Some(c), _) => c,
         _ => panic!("{name} did not check"),
