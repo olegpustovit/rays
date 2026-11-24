@@ -12,8 +12,7 @@ use pxui::theme;
 use pxui::ui::*;
 use pxui::ui::Size;
 use rays::frame;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::cell::Cell;
 
 pub use editor_core::panels::Side;
 
@@ -55,6 +54,10 @@ fn floating(ui: &mut Ui, flags: Flags, (x, y, width, height): Bounds, label: std
 
 /// A pane's PXUI hit ancestor; children keep screen-space coordinates.
 pub fn pane_root(ui: &mut Ui, frame: &frame::Frame, bounds: Bounds, label: &str) -> UiBox {
+    pane_root_fmt(ui, frame, bounds, format_args!("{label}"))
+}
+
+pub fn pane_root_fmt(ui: &mut Ui, frame: &frame::Frame, bounds: Bounds, label: std::fmt::Arguments<'_>) -> UiBox {
     let (x, y, width, height) = bounds;
     let rect = Rect::new(x as f32, y as f32, width as f32, height as f32);
     let mut opts = BoxOpts::default()
@@ -63,7 +66,7 @@ pub fn pane_root(ui: &mut Ui, frame: &frame::Frame, bounds: Bounds, label: &str)
         .h(Size::Px(frame.input.size.1 as f32))
         .at((0.0, 0.0));
     opts.hit_rect = Some(rect);
-    ui.box_(label, opts)
+    ui.box_fmt(label, opts)
 }
 
 /// a panel's path as text, to key its boxes
@@ -154,17 +157,28 @@ fn retypes() -> Vec<(&'static str, Panel)> {
 }
 
 fn drag_origin(ui: &mut Ui, boxed: &UiBox, bounds: Bounds, signal: &Signal) -> Bounds {
-    if signal.pressed {
-        let (x, y, w, h) = bounds;
-        ui.set_text_state(boxed, Some(format!("{x} {y} {w} {h}")));
+    if !(signal.pressed || signal.held || signal.released) {
+        return bounds;
     }
-    match ui.text_state(boxed) {
-        Some(text) => {
-            let parts: Vec<i64> = text.split(' ').filter_map(|p| p.parse::<i64>().ok()).collect();
-            if parts.len() == 4 { (parts[0], parts[1], parts[2], parts[3]) } else { bounds }
+    let (x, y, w, h) = bounds;
+    let mut origin = [x, y, w, h];
+    // Each PXUI box has one numeric slot. The grip owns the four coordinates for the gesture.
+    ui.within(boxed, &mut |ui| {
+        for (label, value) in ["origin-x", "origin-y", "origin-w", "origin-h"].into_iter().zip(&mut origin) {
+            let state = ui.box_(label, BoxOpts::default().w(Size::Px(0.0)).h(Size::Px(0.0)).at((0.0, 0.0)));
+            if signal.pressed {
+                ui.set_state(&state, *value);
+            } else {
+                *value = ui.state(&state, *value);
+            }
         }
-        None => bounds,
-    }
+    });
+    (origin[0], origin[1], origin[2], origin[3])
+}
+
+fn point(text: &str) -> Option<(f32, f32)> {
+    let (x, y) = text.split_once(' ')?;
+    Some((x.parse().ok()?, y.parse().ok()?))
 }
 
 fn no_key(_: &str) -> String {
@@ -195,20 +209,7 @@ pub fn panel_menu(
     }
     let (x, y, _, h) = l.frame;
     let default_at = (x as f32, (y + h) as f32);
-    let at = match ui.text_state(boxed) {
-        Some(text) => {
-            let parts: Vec<&str> = text.split(' ').collect();
-            if parts.len() == 2 {
-                match ((parts[0]).parse::<f32>().ok(), (parts[1]).parse::<f32>().ok()) {
-                    (Some(mx), Some(my)) => (mx, my),
-                    _ => default_at,
-                }
-            } else {
-                default_at
-            }
-        }
-        None => default_at,
-    };
+    let at = ui.text_state(boxed).as_deref().and_then(point).unwrap_or(default_at);
     let kinds = retypes();
     let mut rows: Vec<(String, bool)> = vec![
         ("Split right".to_string(), true),
@@ -264,22 +265,28 @@ pub fn panel_menu(
 /// then its label and the focus square: tabs are how a pane is used, the title only names it); a
 /// group that would not fit in the header is left out, with those after it.
 pub fn header_slots(l: &Leaf, widths: &[f32]) -> (Vec<Option<f32>>, f32) {
+    let mut slots = vec![None; widths.len()];
+    let limit = header_slots_into(l, widths, &mut slots);
+    (slots, limit)
+}
+
+/// Lay out the groups without allocating. An empty output slice only computes the title limit.
+pub fn header_slots_into(l: &Leaf, widths: &[f32], slots: &mut [Option<f32>]) -> f32 {
     let (x, _, w, _) = l.header;
     let left = x as f32 + 4.0;
     let mut right = (x + w) as f32 - if l.floating { 64.0 } else { 36.0 };
-    let mut fits = true;
-    let mut slots = Vec::new();
-    for width in widths {
-        fits = fits && right - width >= left;
-        if fits {
-            let at = right;
-            right = at - width - 8.0;
-            slots.push(Some(at));
+    slots.fill(None);
+    for (i, width) in widths.iter().enumerate() {
+        if right - width >= left {
+            if let Some(slot) = slots.get_mut(i) {
+                *slot = Some(right);
+            }
+            right -= width + 8.0;
         } else {
-            slots.push(None);
+            break;
         }
     }
-    (slots, right)
+    right
 }
 
 fn default_title(l: &Leaf) -> String {
@@ -290,9 +297,7 @@ fn no_groups(_: &Leaf) -> Vec<f32> {
     Vec::new()
 }
 
-fn edge_color(theme: &theme::Tokens, moving: &Rc<RefCell<Option<Path>>>, path: &Path) -> pxui::geom::color::T {
-    if moving.borrow().as_ref() == Some(path) { theme.accent } else { theme::border(theme) }
-}
+thread_local! { static HEADER_TITLE: Cell<String> = const { Cell::new(String::new()) }; }
 
 fn cut<'a>(paint: &mut Paint, size: Option<i64>, room: f32, part: &'a str) -> Cow<'a, str> {
     ellipsis(&mut |s| paint.text_width(size, s), room.max(0.0), part)
@@ -320,15 +325,18 @@ pub fn update(
     let title: &dyn Fn(&Leaf) -> String = title.unwrap_or(&default_title);
     let groups: &dyn Fn(&Leaf) -> Vec<f32> = groups.unwrap_or(&no_groups);
     let geometry = geometry(Some(state), Some(hidden), tree, frame);
-    update_with_geometry(Some(state), Some(hidden), Some(title), Some(groups), key_of, focus, &geometry, ui, frame)
+    let mut describe = |_: &mut Ui, _: usize, leaf: &Leaf, text: &mut String| {
+        text.push_str(&title(leaf));
+        header_slots_into(leaf, &groups(leaf), &mut [])
+    };
+    update_with_geometry(Some(state), Some(hidden), &mut describe, key_of, focus, &geometry, ui, frame)
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn update_with_geometry(
     state: Option<&dyn Fn(&[usize]) -> panels::State>,
     hidden: Option<&[Panel]>,
-    title: Option<&dyn Fn(&Leaf) -> String>,
-    groups: Option<&dyn Fn(&Leaf) -> Vec<f32>>,
+    describe_header: &mut dyn FnMut(&mut Ui, usize, &Leaf, &mut String) -> f32,
     key_of: Option<&dyn Fn(&str) -> String>,
     focus: Option<&Path>,
     geometry: &Geometry,
@@ -338,28 +346,25 @@ pub fn update_with_geometry(
     let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
     let default_hidden = [Panel::Timeline];
     let hidden: &[Panel] = hidden.unwrap_or(&default_hidden);
-    let title: &dyn Fn(&Leaf) -> String = title.unwrap_or(&default_title);
-    let groups: &dyn Fn(&Leaf) -> Vec<f32> = groups.unwrap_or(&no_groups);
     let theme = ui.tokens();
-    // the window being carried: its edge is the accent and four brackets stand round it
-    let moving: Rc<RefCell<Option<Path>>> = Rc::new(RefCell::new(None));
-    // one pane's ground; a window's is raised by the view that holds it
+    let mut moving = None;
+    // One pane's ground. A floating window's view raises its ground with its header and body.
     let ground = |ui: &mut Ui, l: &Leaf| {
         match &l.panel {
             // a view paints its own picture; a window over one still has its line-3 edge and the
             // sheet fill of its title row's margin
             Panel::View(_) | Panel::Canvas(_) | Panel::Timeline if l.floating => {
                 let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-window-edge{}", key(&l.path)));
-                let l = l.clone();
-                let moving = moving.clone();
+                let is_view = matches!(l.panel, Panel::View(_));
+                let body = l.body;
+                let hy = l.header.1;
+                let fy = l.frame.1;
                 ui.draw_over(&boxed, move |paint, Rect { x, y, w, h }| {
-                    let line = edge_color(&theme, &moving, &l.path);
-                    let hy = l.header.1;
-                    let fy = l.frame.1;
+                    let line = theme::border(&theme);
                     paint.fill(x, y, w, (hy - fy) as f32, theme.input);
                     // a viewport window: the sheet's white round the picture and a line-2 frame on it
-                    if matches!(l.panel, Panel::View(_)) && l.body.2 > 0 {
-                        let (bx, by, bw, bh) = l.body;
+                    if is_view && body.2 > 0 {
+                        let (bx, by, bw, bh) = body;
                         let (bx, by, bw, bh) = (bx as f32, by as f32, bw as f32, bh as f32);
                         let hy = hy as f32;
                         paint.fill(x, hy, w, by - hy, theme.input);
@@ -394,13 +399,11 @@ pub fn update_with_geometry(
                     format_args!("workspace-{}{}", panels::lower_name(p), key(&l.path)),
                 );
                 let is_floating = l.floating;
-                let path = l.path.clone();
-                let moving = moving.clone();
                 ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
                     // a window is a sheet with one line-3 edge; a docked panel is the ground
                     if is_floating {
                         paint.fill(x, y, w, h, theme.input);
-                        paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, edge_color(&theme, &moving, &path));
+                        paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::border(&theme));
                     } else {
                         paint.fill(x, y, w, h, theme.panel);
                     }
@@ -429,13 +432,11 @@ pub fn update_with_geometry(
         }
     });
     // A window's ground is a root-level view of its own, raised with the window (`to_front`), keyed
-    // by its place. Its edge is the accent while its header moves it (set as the headers build, read
-    // as it paints): while the pointer is captured or released it builds every frame.
-    let gesture = (ui.captured() || frame.input.events.iter().any(|e| matches!(e, input::Event::PointerReleased(..)))).then(|| ui.frame_index());
+    // by its place.
     for (order, l) in geometry.leaves.iter().enumerate().filter(|(_, l)| l.floating) {
         let revision = kit::revision(&|h| {
             use std::hash::Hash;
-            (panels::lower_name(&l.panel), &l.path, l.frame, l.header, l.body, frame.input.size, gesture).hash(h)
+            (panels::lower_name(&l.panel), &l.path, l.frame, l.header, l.body, frame.input.size).hash(h)
         });
         let mut view = None;
         kit::with_label(format_args!("workspace-window-ground{}", key(&l.path)), &mut |label| {
@@ -450,14 +451,15 @@ pub fn update_with_geometry(
     // where the title must end, the focus and the panel state. Hover, presses and drags on its boxes
     // rebuild it (and so produce its intents); the menu is built after it, at the root, from the
     // state the view's box keeps.
+    let mut text = HEADER_TITLE.take();
     for (order, l) in geometry.leaves.iter().enumerate() {
         let (x, y, w, h) = l.header;
         if h <= 0 {
             continue;
         }
         let st = state(&l.path);
-        let text = title(l);
-        let limit_slots = header_slots(l, &groups(l)).1;
+        text.clear();
+        let limit_slots = describe_header(ui, order, l, &mut text);
         let focused = focus == Some(&l.path);
         let collapsed = st.collapsed || hidden.contains(&l.panel);
         let revision = kit::revision(&|hs| {
@@ -465,7 +467,7 @@ pub fn update_with_geometry(
             (l.header, l.frame, l.body.3, l.floating, &l.path, st.window, st.collapsed, collapsed, &text, limit_slots.to_bits(), focused).hash(hs)
         });
         let mut open_at: Option<(f32, f32)> = None;
-        let mut built = |ui: &mut Ui| header(ui, l, &st, collapsed, focused, &text, limit_slots, frame, &theme, &mut intents, &mut tip, &moving, &mut open_at);
+        let mut built = |ui: &mut Ui| header(ui, l, &st, collapsed, focused, &text, limit_slots, frame, &theme, &mut intents, &mut tip, &mut moving, &mut open_at);
         // keyed by the leaf, so a drag or a menu follows it when the layout reorders the leaves
         let mut view = None;
         kit::with_label(format_args!("workspace-header-view-{}{}", panels::lower_name(&l.panel), key(&l.path)), &mut |label| {
@@ -478,6 +480,7 @@ pub fn update_with_geometry(
         }
         intents.extend(panel_menu(Some(state), key_of, ui, l, &view, open_at));
     }
+    HEADER_TITLE.set(text);
     // the tip of a panel being moved: a 20-point sheet with a line-2 edge, the label size in ink
     if let Some((wx, wy, ww)) = tip {
         let words = "release to dock \u{b7} esc keeps it floating";
@@ -495,10 +498,16 @@ pub fn update_with_geometry(
             paint.text_s((x + 7.0, cy), size, theme.foreground, words);
         });
     }
-    let moving_path = moving.borrow().clone();
-    if let Some(path) = moving_path {
-        for l in &geometry.leaves {
+    if let Some(path) = moving {
+        for (order, l) in geometry.leaves.iter().enumerate() {
             if l.path == path {
+                if l.floating {
+                    let edge = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-moving-edge"));
+                    ui.to_front((order * 2) as i64, &edge);
+                    ui.draw(&edge, move |paint, Rect { x, y, w, h }| {
+                        paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme.accent);
+                    });
+                }
                 let (fx, fy, fw, fh) = l.frame;
                 let boxed = floating(ui, NO_FLAGS, (fx - 8, fy - 8, fw + 16, fh + 16), format_args!("workspace-moving"));
                 ui.to_front(i64::MAX - 1, &boxed);
@@ -529,7 +538,7 @@ fn header(
     theme: &theme::Tokens,
     intents: &mut Vec<Intent>,
     tip: &mut Option<(i64, i64, i64)>,
-    moving: &Rc<RefCell<Option<Path>>>,
+    moving: &mut Option<Path>,
     open_at: &mut Option<(f32, f32)>,
 ) {
     let theme = *theme;
@@ -594,7 +603,7 @@ fn header(
                 let wy = 0.max((fh - HEADER_HEIGHT).min(oy + ((py - sy).round() as i64)));
                 if !drag.released {
                     *tip = Some((wx, wy, ow));
-                    *moving.borrow_mut() = Some(l.path.clone());
+                    *moving = Some(l.path.clone());
                 }
                 intents.push(Intent::WindowDrag(l.path.clone(), (wx, wy, ow, oh), drag.released));
             }
@@ -933,20 +942,7 @@ fn splitter_controls(state: Option<&dyn Fn(&[usize]) -> panels::State>, geo: &Ge
     if let Some(s) = geo.splitters.get((open - 1).max(0) as usize).filter(|s| open > 0 && s.node.is_some()) {
         let n = open - 1;
         let default_at = (s.bounds.0 as f32, s.bounds.1 as f32);
-        let at = match ui.text_state(&view) {
-            Some(text) => {
-                let parts: Vec<&str> = text.split(' ').collect();
-                if parts.len() == 2 {
-                    match ((parts[0]).parse::<f32>().ok(), (parts[1]).parse::<f32>().ok()) {
-                        (Some(a), Some(b)) => (a, b),
-                        _ => default_at,
-                    }
-                } else {
-                    default_at
-                }
-            }
-            None => default_at,
-        };
+        let at = ui.text_state(&view).as_deref().and_then(point).unwrap_or(default_at);
         match ui.context_menu(at, &MenuOpts::default(), &format!("workspace-size-menu-{n}"), &size_rows(s)) {
             MenuResult::Open => {}
             MenuResult::Dismiss => ui.set_state(&view, 0),

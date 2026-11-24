@@ -41,9 +41,9 @@ const FRAMES: i64 = 30;
 // Z1: exact quad cache keys, single-field settings reads: basic 805 / 89,381; empty 538 / 34,724; bare 693 / 45,448.
 // Z1: shared shell tree, kept leaf list, borrowed level objects: basic 747 / 85,781; empty 462 / 31,882; bare 617 / 42,561.
 // Z1: wide-hash quad keys, no generic cache constructor: basic 747 / 85,098; empty 462 / 31,882; bare 617 / 42,561.
-const BASIC: (u64, u64) = (650, 94_768);
-const EMPTY: (u64, u64) = (307, 18_407);
-const BARE: (u64, u64) = (426, 30_306);
+const BASIC: (u64, u64) = (614, 91_933);
+const EMPTY: (u64, u64) = (194, 13_509);
+const BARE: (u64, u64) = (311, 25_101);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");

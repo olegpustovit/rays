@@ -123,21 +123,24 @@ pub fn panel_hosts<'a>(value: &ModelView<'a>) -> Vec<Host> {
         if !visible(&value.workspace, panel) || panel_state(value, path).collapsed {
             continue;
         }
-        let key = panel_key(&value.doc, &path);
-        let kind = match &panel {
-            Panel::List => Some(HostKind::List),
-            Panel::Lisp => Some(HostKind::Text),
-            Panel::Outline => Some(HostKind::Outline),
-            Panel::Graph => match projection_in(value, &pane_at(value, (&key, &path))) {
-                ListView => Some(HostKind::List),
-                TextView => Some(HostKind::Text),
-                GraphView => None,
-            },
-            Panel::View(_) | Panel::Canvas(_) | Panel::Inspector | Panel::Spreadsheet | Panel::Timeline => None,
+        let kind = match panel {
+            Panel::List => HostKind::List,
+            Panel::Lisp => HostKind::Text,
+            Panel::Outline => HostKind::Outline,
+            Panel::Graph => {
+                let graphs = graph_leaves(value);
+                let (key, _) = graphs.iter().find(|(_, p)| p == path).expect("graph leaf has a panel key");
+                let kind = match projection_in(value, &pane_at(value, (key, path))) {
+                    ListView => HostKind::List,
+                    TextView => HostKind::Text,
+                    GraphView => continue,
+                };
+                out.push((key.clone(), path.clone(), panel.clone(), kind));
+                continue;
+            }
+            _ => continue,
         };
-        if let Some(kind) = kind {
-            out.push((key, path.clone(), panel.clone(), kind));
-        }
+        out.push((panel_key(&value.doc, path), path.clone(), panel.clone(), kind));
     }
     out
 }
@@ -647,7 +650,7 @@ pub fn draw_text_panes(
     frame_: &frame::Frame,
     value: &EditorModel,
     root_at: &dyn Fn(&layout::Path) -> Option<(Leaf, UiBox)>,
-    header_slots: &dyn Fn(&Leaf) -> Vec<Option<f32>>,
+    tab_at: &dyn Fn(&Leaf) -> [Option<f32>; 2],
     text_host: &Option<Host>,
     text_shown: &Option<text_pane::Shown>,
     text: text_pane::State,
@@ -659,7 +662,7 @@ pub fn draw_text_panes(
     let view_text = |ui: &mut Ui, path: &layout::Path, state: &text_pane::State, shown: &text_pane::Shown| -> Vec<text_pane::Intent> {
         match root_at(path) {
             Some((leaf, root)) => {
-                let tabs_right = header_slots(&leaf).last().cloned().flatten();
+                let tabs_right = tab_at(&leaf)[1];
                 let mut out = Vec::new();
                 ui.within(&root, &mut |ui| {
                     out = text_pane::view(ui, leaf.body, tabs_right, vocab, &names, frame_.input.t, state, shown);
@@ -787,7 +790,7 @@ pub fn draw_graph_header<'a>(
     value: &ModelView<'a>,
     g: &layout::Geometry,
     graph_host: &Option<Leaf>,
-    header_slots: &dyn Fn(&Leaf) -> Vec<Option<f32>>,
+    tab_at: &dyn Fn(&Leaf) -> [Option<f32>; 2],
     tools_from: &dyn Fn(&Leaf) -> f32,
 ) -> HeaderAsks {
     use std::hash::Hash;
@@ -805,7 +808,7 @@ pub fn draw_graph_header<'a>(
             ListView => 1,
             TextView => 2,
         };
-        let slot = header_slots(leaf).first().cloned().flatten();
+        let slot = tab_at(leaf)[0];
         let revision = kit::revision(&|h| (leaf.header, &leaf.path, graph_view, tools_scope, has_selection, outline, from.to_bits(), active, slot.map(f32::to_bits)).hash(h));
         kit::cached(ui, "workspace-graph-tools", revision, &mut |ui| {
             tool_action = if graph_view {

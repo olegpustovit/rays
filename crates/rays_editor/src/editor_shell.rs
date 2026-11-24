@@ -152,13 +152,13 @@ pub fn unrestore(before: &Document, after: &Document, mut shell: Shell) -> Shell
 }
 
 /// the host bar above the panels: a document with an editor graph has one
-pub fn shell_hidden<'a>(value: &ModelView<'a>, shell: &Shell) -> Vec<Panel> {
+pub fn shell_hidden<'a>(value: &ModelView<'_>, shell: &'a Shell) -> &'a [Panel] {
     if shell.restored {
-        shell.hidden.clone()
-    } else if panel_state(value, &[HOST_BAR]).collapsed && !panels::each_leaf(&shell_tree(value, shell), &mut |_, p| *p == Panel::Timeline) {
-        vec![Panel::Timeline]
+        &shell.hidden
+    } else if panel_state(value, &[HOST_BAR]).collapsed && !shell_leaves(value, shell).iter().any(|(_, panel)| *panel == Panel::Timeline) {
+        &[Panel::Timeline]
     } else {
-        Vec::new()
+        &[]
     }
 }
 
@@ -188,6 +188,8 @@ impl GeoKey {
 
 /// The grip signal belongs to the previous layout. Its split extent can be read even if this
 /// frame will change the live size or the window dimensions.
+// ponytail: reuse the one-slot memo. Keep a previous layout per editor if a UI thread starts
+// alternating workspaces during a capture.
 pub fn last_geometry(value: &ModelView<'_>) -> Option<std::rc::Rc<layout::Geometry>> {
     let graph = workspace_doc::editor_graph_ref(&value.doc.workspace.ws).map_or("@default", |g| g.name.as_str());
     GEOMETRY.with(|cache| cache.borrow().as_ref().filter(|(k, _)| k.matches(value, value.workspace, graph)).map(|(_, g)| g.clone()))
@@ -205,7 +207,7 @@ pub fn geometry<'a>(value: &ModelView<'a>, shell: &Shell, frame: &frame::Frame) 
     let view = ModelView { workspace: shell, ..*value };
     let state = |path: &[usize]| panel_state(&view, path);
     let hidden = shell_hidden(&view, shell);
-    let g = std::rc::Rc::new(layout::geometry_with_resize(Some(&state), Some(&hidden), &shell_tree(value, shell), frame, shell.live.as_ref()));
+    let g = std::rc::Rc::new(layout::geometry_with_resize(Some(&state), Some(hidden), &shell_tree(value, shell), frame, shell.live.as_ref()));
     let key = GeoKey { size: frame.input.size, shell_doc: value.doc.shell.clone(), states: ws.layout.panels.clone(), graph: graph.to_owned(), workspace: shell.clone() };
     GEOMETRY.with(|cache| *cache.borrow_mut() = Some((key, g.clone())));
     g
@@ -262,10 +264,16 @@ pub fn view_visible<'a>(value: &ModelView<'a>) -> bool {
 
 // ---- graph panels: each [ui/graph] leaf is a pane of its own ----
 
-thread_local! { static LEAVES: std::cell::RefCell<Option<(panels::Panels, std::rc::Rc<Vec<(layout::Path, Panel)>>)>> = const { std::cell::RefCell::new(None) }; }
+type Leaves = std::rc::Rc<Vec<(layout::Path, Panel)>>;
+type GraphLeaves = std::rc::Rc<Vec<(panel_map::Key, layout::Path)>>;
+
+thread_local! {
+    static LEAVES: std::cell::RefCell<Option<(panels::Panels, Leaves)>> = const { std::cell::RefCell::new(None) };
+    static GRAPH_LEAVES: std::cell::RefCell<Option<(Leaves, Option<std::sync::Arc<editor_document::document::Shell>>, String, GraphLeaves)>> = const { std::cell::RefCell::new(None) };
+}
 
 /// `panels::leaves` of the tree shown, kept while the tree is the same: a frame reads it many times.
-pub fn shell_leaves(value: &EditorModel, shell: &Shell) -> std::rc::Rc<Vec<(layout::Path, Panel)>> {
+pub fn shell_leaves(value: &EditorModel, shell: &Shell) -> Leaves {
     let tree = shell_tree(value, shell);
     if let Some(found) = LEAVES.with(|cache| cache.borrow().as_ref().filter(|(seen, _)| *seen == *tree).map(|(_, leaves)| leaves.clone())) {
         return found;
@@ -275,9 +283,28 @@ pub fn shell_leaves(value: &EditorModel, shell: &Shell) -> std::rc::Rc<Vec<(layo
     leaves
 }
 
-/// The graph leaves of the tree shown, by panel key: walked once a frame (`follow_graph`).
-pub fn graph_leaves<'a>(value: &ModelView<'a>) -> Vec<(flow_check::workspace::Path, layout::Path)> {
-    shell_leaves(value, &value.workspace).iter().filter(|(_, p)| *p == Panel::Graph).map(|(path, _)| (panel_key(&value.doc, path), path.clone())).collect()
+/// The graph leaves, with the panel keys retained while the layout gives them the same identity.
+pub fn graph_leaves(value: &ModelView<'_>) -> GraphLeaves {
+    let leaves = shell_leaves(value, value.workspace);
+    let shell = &value.doc.shell;
+    let graph = workspace_doc::editor_graph_ref(&value.doc.workspace.ws).map_or("@default", |g| g.name.as_str());
+    GRAPH_LEAVES.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((previous_leaves, previous_shell, previous_graph, keys)) = cache.as_ref() {
+            let same_shell = match (previous_shell, shell) {
+                (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            };
+            if std::rc::Rc::ptr_eq(previous_leaves, &leaves) && same_shell && previous_graph == graph {
+                return keys.clone();
+            }
+        }
+        let keys: GraphLeaves = std::rc::Rc::new(leaves.iter().filter(|(_, panel)| *panel == Panel::Graph)
+            .map(|(path, _)| (panel_key(&value.doc, path), path.clone())).collect());
+        *cache = Some((leaves, shell.clone(), graph.to_owned(), keys.clone()));
+        keys
+    })
 }
 
 /// The leaf of the pane in use: where its panel was last seen when that is still its leaf (no
@@ -288,7 +315,7 @@ pub fn graph_path<'a>(value: &ModelView<'a>) -> Option<layout::Path> {
     }
     let leaves = graph_leaves(value);
     value.key.and_then(|key| leaves.iter().find(|(k, _)| k == key).map(|(_, path)| path.clone()))
-        .or_else(|| leaves.into_iter().next().map(|(_, path)| path))
+        .or_else(|| leaves.first().map(|(_, path)| path.clone()))
 }
 
 /// `graph_path` when the pane's remembered leaf still holds it: borrowed, no walk.
@@ -352,7 +379,7 @@ pub fn as_pane<'a>(value: &ModelView<'a>, (key, _path): (&flow_check::workspace:
 
 /// `as_pane` of a model owned: no copy.
 pub fn with_pane_in_use(value: &mut EditorModel, (key, path): (&flow_check::workspace::Path, &layout::Path)) {
-    if panel_map::key(&value.panes).as_ref() == Some(key) {
+    if panel_map::key_ref(&value.panes) == Some(key) {
         return;
     }
     let level = pane_level(&(&*value).into());
@@ -368,42 +395,42 @@ pub fn with_pane_in_use(value: &mut EditorModel, (key, path): (&flow_check::work
 }
 
 /// The graph leaf an inspector, list or lisp leaf is tied to by `:of`.
-pub fn tied<'a>(value: &ModelView<'a>, path: &[usize]) -> Option<(flow_check::workspace::Path, layout::Path)> {
+pub fn tied(value: &ModelView<'_>, path: &[usize]) -> Option<(flow_check::workspace::Path, layout::Path)> {
+    tied_path(value, path).map(|target| (panel_key(&value.doc, target), target.clone()))
+}
+
+fn tied_path<'a>(value: &ModelView<'a>, path: &[usize]) -> Option<&'a layout::Path> {
     if value.workspace.restored {
         return None;
     }
-    value.doc.shell.as_ref().and_then(|s| s.follows.iter().find(|(p, _)| p == path).map(|(_, target)| (panel_key(&value.doc, target), target.clone())))
+    value.doc.shell.as_ref().and_then(|s| s.follows.iter().find(|(p, _)| p == path).map(|(_, target)| target))
 }
 
 /// The pane in use follows the focus: the focused graph leaf, else the one it was, else the first
-/// one open.  The pane left keeps its canvas, selection, graph and route.
+/// one open. The pane left keeps its canvas, selection, graph and route.
 pub fn follow_graph(value: &mut EditorModel, focus: &Panel, focus_path: Option<&[usize]>) {
     let all = graph_leaves(&(&*value).into());
-    let at = panel_map::key(&value.panes).and_then(|key| all.iter().find(|(k, _)| *k == key).map(|(_, p)| p.clone()));
-    panel_map::set_leaf(&mut value.panes, at);
-    let leaves: Vec<(flow_check::workspace::Path, layout::Path)> = all.iter().filter(|(_, path)| !panel_state(&(&*value).into(), path).collapsed).cloned().collect();
-    // the focused graph leaf, or the one the focused leaf is tied to: its edits land there
+    let current = panel_map::key_ref(&value.panes);
+    let current_leaf = current.and_then(|key| all.iter().find(|(k, _)| k == key).map(|(_, path)| path));
+    if panel_map::leaf(&value.panes) != current_leaf {
+        panel_map::set_leaf(&mut value.panes, current_leaf.cloned());
+    }
+    let vw = ModelView::from(&*value);
     let focused = focus_path.and_then(|path| {
-        let path = if *focus == Panel::Graph { Some(path.to_vec()) } else { tied(&(&*value).into(), path).map(|(_, p)| p) };
-        path.and_then(|path| leaves.iter().find(|(_, p)| *p == path).cloned())
+        if *focus == Panel::Graph { Some(path) } else { tied_path(&vw, path).map(Vec::as_slice) }
     });
-    let current = panel_map::key(&value.panes);
-    let target = match (&focused, &current) {
-        (Some(leaf), _) => Some(leaf.clone()),
-        (None, Some(key)) if leaves.iter().any(|(k, _)| k == key) => None,
-        (None, _) => leaves.first().cloned(),
-    };
-    match (target, current) {
-        (None, _) => {},
-        (Some((key, _)), Some(current)) if key == current => {},
-        (Some((key, path)), None) => {
-            // the first pane: the state so far is its
-            panel_map::adopt(&mut value.panes, &key);
-            panel_map::set_leaf(&mut value.panes, Some(path));
-        }
-        (Some((key, path)), Some(_)) => {
-            // the pane left keeps its canvas, selection, graph and route in the map (bounded by MRU)
-            with_pane_in_use(value, (&key, &path));
+    let mut open = all.iter().filter(|(_, path)| !panel_state(&vw, path).collapsed);
+    let target = focused.and_then(|path| open.clone().find(|(_, p)| p == path)).or_else(|| {
+        if panel_map::key_ref(&value.panes).is_some_and(|key| open.clone().any(|(k, _)| k == key)) { None } else { open.next() }
+    });
+    if let Some((key, path)) = target {
+        match panel_map::key_ref(&value.panes) {
+            None => {
+                panel_map::adopt(&mut value.panes, key);
+                panel_map::set_leaf(&mut value.panes, Some(path.clone()));
+            }
+            Some(current) if current == key => {}
+            Some(_) => with_pane_in_use(value, (key, path)),
         }
     }
 }

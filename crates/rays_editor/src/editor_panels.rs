@@ -1,6 +1,8 @@
 //! Panels: titles, the navigator's inputs, the focused leaf, layout gestures, docking, and the
 //! clipboard commands.
 use flow_syntax::symbol::Symbol;
+use std::borrow::Cow;
+use std::fmt::Write;
 use std::rc::Rc;
 
 use editor_core::panels::{self, Panel};
@@ -25,7 +27,7 @@ use crate::editor_inspect::{inspector_paths, scene};
 use crate::editor_list::scene_rows;
 use crate::editor_model::*;
 use crate::editor_panes::{graph_name, graph_of_object, peek_target, route_in, shown_pane, graph_name_at};
-use crate::editor_shell::{layouts, panel_key, panel_state, shell_tree};
+use crate::editor_shell::{graph_leaves, layouts, panel_key, panel_state, shell_tree};
 use crate::editor_status::level_name_at;
 use crate::editor_add::add_target;
 use crate::navigator;
@@ -33,81 +35,118 @@ use crate::selection;
 use crate::text_pane;
 
 /// A panel header's title: its type, and where a looped panel comes from (register E1).
-pub fn panel_title<'a>(value: &ModelView<'a>, leaf: &Leaf) -> String {
-    // a graph panel's title is its own pane's
-    let (pane, path) = shown_pane(value, (&panel_key(&value.doc, &leaf.path), &leaf.path, &leaf.panel));
-    let graph = graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or_default();
-    let title = editor_core::panels::definition(&leaf.panel).menu_title;
-    let (name, sub): (&str, String) = match &leaf.panel {
-        Panel::Canvas(_) => (title, String::new()),
-        Panel::View(_) => {
-            // the scene it shows and its render camera: "scene / camera"
-            let scene_name = value.doc.workspace.ws.checked.graphs.iter().find(|g| g.context == context::scene()).map(|g| g.name.clone()).unwrap_or_default();
-            let camera = value.doc.active_camera.and_then(|id| kg::find(&scene(&value), id).map(|n| n.label));
-            let parts: Vec<String> = [scene_name, camera.unwrap_or_default()].into_iter().filter(|s| !s.is_empty()).collect();
-            (title, parts.join(" / "))
+pub fn panel_title(value: &ModelView<'_>, leaf: &Leaf) -> String {
+    let mut title = String::new();
+    write_panel_title(value, leaf, &mut title);
+    title
+}
+
+pub fn write_panel_title(value: &ModelView<'_>, leaf: &Leaf, title: &mut String) {
+    title.push_str(editor_core::panels::definition(&leaf.panel).menu_title);
+    let graph_pane = || {
+        if leaf.panel == Panel::Graph {
+            let leaves = graph_leaves(value);
+            let key = leaves.iter().find(|(_, path)| *path == leaf.path)
+                .map_or_else(|| Cow::Owned(panel_key(&value.doc, &leaf.path)), |(key, _)| Cow::Borrowed(key));
+            shown_pane(value, (&key, &leaf.path, &leaf.panel))
+        } else {
+            shown_pane(value, (&Vec::new(), &leaf.path, &leaf.panel))
         }
-        Panel::Graph => (
-            title,
-            if graph.is_empty() {
-                String::new()
-            } else {
-                let ctx = value.doc.workspace.ws.checked.graphs.iter().find(|g| g.name == graph).map(|g| flow_check::workspace::context_name(&g.context));
-                let head = if pane.route.is_empty() {
-                    graph.clone()
-                } else {
-                    route_in(value, &pane, path.as_deref()).split('>').map(|p| p.trim().to_string()).collect::<Vec<_>>().join(" / ")
-                };
-                head + &ctx.map(|c| format!(" / {c}")).unwrap_or_default()
-            },
-        ),
-        Panel::List => (title, level_name_at(value, pane.at)),
-        Panel::Lisp => (
-            title,
-            if leaf.frame.2 < 400 {
-                String::new() // the narrow sheet has the kind alone
-            } else if graph.is_empty() {
-                value.file.clone()
-            } else if value.file.is_empty() {
-                graph.clone()
-            } else {
-                format!("{} / {}", value.file, graph)
-            },
-        ),
-        Panel::Inspector => {
-            let paths = if pane.laid.is_none() { Vec::new() } else { inspector_paths(scope::selected(&pane.view)) };
-            let sub = match paths.as_slice() {
-                [path] if !graph.is_empty() => {
-                    // the node's title (a result is `result`, not `@result`); the narrow column has the node alone
-                    let title = match pane.laid.as_deref().and_then(|k| fproj::find(&k.scope, path)) {
-                        Some(n) => fproj::title(&n),
-                        None => {
-                            let last = path.last().map_or_else(String::new, ToString::to_string);
-                            match last.strip_prefix(':') {
-                                Some(rest) => rest.to_string(),
-                                None => last,
-                            }
-                        }
-                    };
-                    if leaf.frame.2 < 340 { title } else { format!("{graph} / {title}") }
-                }
-                _ => graph.clone(),
-            };
-            (title, sub)
-        }
-        Panel::Outline => (title, if leaf.frame.2 < 300 { String::new() } else { value.file.clone() }),
-        Panel::Spreadsheet => (title, graph.clone()),
-        Panel::Timeline => (
-            title,
-            // the real step of the sketch: the same step every frame is a fixed one
-            if value.steady >= 3 && value.last_dt > 0.0 { format!("fixed dt 1/{}", (1.0 / value.last_dt).round() as i64) } else { "realtime".to_string() },
-        ),
     };
-    let name = if sub.is_empty() { name.to_string() } else { format!("{name}\t{sub}") };
-    let origin = value.doc.shell.as_ref().and_then(|s| if value.workspace.restored { None } else { s.origins.iter().find(|(p, _)| *p == leaf.path).map(|(_, o)| o.clone()) });
-    match origin {
-        Some(Origin::Loop(from, _)) => format!("{name} \u{b7} from loop {}", document::describe(&value.doc.workspace.ws.source, &from)),
-        _ => name,
+    let graph_of = |pane: &GraphPane, path: Option<&[usize]>| graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path).unwrap_or_default();
+    let add = |title: &mut String, subtitle: &str| {
+        if !subtitle.is_empty() {
+            title.push('\t');
+            title.push_str(subtitle);
+        }
+    };
+    match &leaf.panel {
+        Panel::View(_) => {
+            let scene_name = value.doc.workspace.ws.checked.graphs.iter().find(|g| g.context == context::scene()).map_or("", |g| g.name.as_str());
+            let camera = value.doc.active_camera.and_then(|id| scene(value).iter().find(|node| node.id == id)).map_or("", |node| node.label.as_str());
+            if scene_name.is_empty() {
+                add(title, camera);
+            } else {
+                add(title, scene_name);
+                if !camera.is_empty() {
+                    let _ = write!(title, " / {camera}");
+                }
+            }
+        }
+        Panel::Graph => {
+            let (pane, path) = graph_pane();
+            let graph = graph_of(&pane, path.as_deref());
+            if !graph.is_empty() {
+                if pane.route.is_empty() {
+                    add(title, &graph);
+                } else {
+                    title.push('\t');
+                    let route = route_in(value, &pane, path.as_deref());
+                    for (i, part) in route.split('>').enumerate() {
+                        if i > 0 { title.push_str(" / "); }
+                        title.push_str(part.trim());
+                    }
+                }
+                if let Some(graph) = value.doc.workspace.ws.checked.graphs.iter().find(|g| g.name == graph) {
+                    let _ = write!(title, " / {}", flow_check::workspace::context_name(&graph.context));
+                }
+            }
+        }
+        Panel::List => {
+            let (pane, _) = graph_pane();
+            add(title, &level_name_at(value, pane.at));
+        }
+        Panel::Lisp if leaf.frame.2 >= 400 => {
+            let (pane, path) = graph_pane();
+            let graph = graph_of(&pane, path.as_deref());
+            if value.file.is_empty() {
+                add(title, &graph);
+            } else {
+                add(title, &value.file);
+                if !graph.is_empty() {
+                    let _ = write!(title, " / {graph}");
+                }
+            }
+        }
+        Panel::Inspector => {
+            let (pane, path) = graph_pane();
+            let graph = graph_of(&pane, path.as_deref());
+            if !graph.is_empty() {
+                let paths = if pane.laid.is_none() { Vec::new() } else { inspector_paths(scope::selected(&pane.view)) };
+                if let [path] = paths.as_slice() {
+                    let label = match pane.laid.as_deref().and_then(|k| fproj::find(&k.scope, path)) {
+                        Some(n) => fproj::title(&n),
+                        None => path.last().map_or_else(String::new, |last| {
+                            let last = last.as_str();
+                            last.strip_prefix(':').unwrap_or(last).to_owned()
+                        }),
+                    };
+                    if leaf.frame.2 >= 340 {
+                        add(title, &graph);
+                        let _ = write!(title, " / {label}");
+                    } else {
+                        add(title, &label);
+                    }
+                } else {
+                    add(title, &graph);
+                }
+            }
+        }
+        Panel::Outline if leaf.frame.2 >= 300 => add(title, &value.file),
+        Panel::Spreadsheet => {
+            let (pane, path) = graph_pane();
+            add(title, &graph_of(&pane, path.as_deref()));
+        }
+        Panel::Timeline if value.steady >= 3 && value.last_dt > 0.0 => {
+            let _ = write!(title, "\tfixed dt 1/{}", (1.0 / value.last_dt).round() as i64);
+        }
+        Panel::Timeline => add(title, "realtime"),
+        _ => {}
+    }
+    if !value.workspace.restored {
+        if let Some(Origin::Loop(from, _)) = value.doc.shell.as_ref().and_then(|shell| shell.origins.iter().find(|(p, _)| *p == leaf.path).map(|(_, origin)| origin)) {
+            let _ = write!(title, " · from loop {}", document::describe(&value.doc.workspace.ws.source, from));
+        }
     }
 }
 
@@ -339,7 +378,7 @@ pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &Shell, _leaf: Optio
             Some(graph) => vec![Change::LayoutEdit(make(graph.clone()))],
             None => {
                 let scene = scene_name(value);
-                let (text, _) = bars::tree_text("editor", &scene, &shell_tree(value, &Shell { live: None, ..workspace.clone() }));
+                let (text, _) = bars::tree_text("editor", &scene, &shell_tree(value, workspace));
                 match s::parse(&text) {
                     Ok(forms) if forms.len() == 1 => vec![set_editor_graph(forms[0].clone()), Change::LayoutEdit(make("editor".to_string()))],
                     _ => vec![Change::Declined("The layout could not be written as an editor graph.".to_string())],
@@ -389,11 +428,16 @@ pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &Shell, _leaf: Optio
 
 type Maker = Rc<dyn Fn(&flow_check::workspace::Path) -> le::Op>;
 
-pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &Shell, intents: &[chrome::Intent]) -> (Shell, Vec<Change>) {
+pub fn layout_intents(value: &ModelView<'_>, workspace: &Shell, intents: &[chrome::Intent]) -> (Shell, Vec<Change>) {
+    let (workspace, changes) = layout_intents_cow(value, workspace, intents);
+    (workspace.into_owned(), changes)
+}
+
+pub fn layout_intents_cow<'a>(value: &ModelView<'_>, workspace: &'a Shell, intents: &[chrome::Intent]) -> (Cow<'a, Shell>, Vec<Change>) {
     if intents.is_empty() {
-        return (workspace.clone(), Vec::new());
+        return (Cow::Borrowed(workspace), Vec::new());
     }
-    let base = shell_tree(value, &Shell { live: None, ..workspace.clone() }).into_owned();
+    let base = shell_tree(value, workspace);
     let editor = workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name);
     let shell_doc = if workspace.restored { None } else { value.doc.shell.as_ref() };
     let edit = |path: &layout::Path, make: Maker| -> Vec<Change> {
@@ -470,7 +514,7 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &Shell, intents: &[c
         prefix.push(Change::PanelState(path.clone(), state));
         prefix
     };
-    let mut w = workspace.clone();
+    let mut updated: Option<Shell> = None;
     let mut changes: Vec<Change> = Vec::new();
     for intent in intents {
         match intent {
@@ -481,18 +525,21 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &Shell, intents: &[c
             chrome::Intent::Window(path, window) => changes.extend(save_state(path, panels::State { window: *window, ..panel_state(value, path) })),
             chrome::Intent::WindowDrag(path, window, released) => {
                 if *released {
-                    w.window_live = None;
+                    updated.get_or_insert_with(|| workspace.clone()).window_live = None;
                     changes.extend(save_state(path, panels::State { window: Some(*window), ..panel_state(value, path) }));
                 } else {
-                    w.window_live = Some((path.clone(), *window));
+                    updated.get_or_insert_with(|| workspace.clone()).window_live = Some((path.clone(), *window));
                 }
             }
             chrome::Intent::Dragging(..) | chrome::Intent::Crumb(..) => {}
             chrome::Intent::DockPanel(source, target, side) => changes.push(Change::DockPanels(source.clone(), target.clone(), *side)),
-            chrome::Intent::Resize { node, size } => w.live = Some((node.clone(), *size)),
+            chrome::Intent::Resize { node, size } => updated.get_or_insert_with(|| workspace.clone()).live = Some((node.clone(), *size)),
             chrome::Intent::Settled => {
-                if let Some((node, size)) = w.live.take() {
-                    changes.extend(edit(&node, Rc::new(move |node: &flow_check::workspace::Path| le::Op::SetLayoutSize { node: node.clone(), size })));
+                if updated.as_ref().unwrap_or(workspace).live.is_some() {
+                    let next = updated.get_or_insert_with(|| workspace.clone());
+                    if let Some((node, size)) = next.live.take() {
+                        changes.extend(edit(&node, Rc::new(move |node: &flow_check::workspace::Path| le::Op::SetLayoutSize { node: node.clone(), size })));
+                    }
                 }
             }
             chrome::Intent::SplitPanel(path, axis) => {
@@ -529,7 +576,7 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &Shell, intents: &[c
             }
         }
     }
-    (w, changes)
+    (updated.map_or(Cow::Borrowed(workspace), Cow::Owned), changes)
 }
 
 pub fn dock_panels(factories: &[Factory], doc: &Document, source: &layout::Path, target: &layout::Path, side: Side) -> Result<Document, String> {
