@@ -38,6 +38,8 @@ pub enum Intent {
     /// second is a panel of the kind
     SplitPanelAt(Path, Axis, f64, Panel),
     ClosePanel(Path),
+    /// float or dock the panel in the layout (same action as `/ o f`)
+    FloatPanel(Path),
     /// `View ""` means a viewport
     RetypePanel(Path, Panel),
     /// a click on part `i` of a docked header's breadcrumb, not its last
@@ -182,7 +184,7 @@ pub fn panel_menu(
     boxed: &UiBox,
     at: Option<(f32, f32)>,
 ) -> Vec<Intent> {
-    let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
+    let _ = state;
     let key_of: &dyn Fn(&str) -> String = key_of.unwrap_or(&no_key);
     if let Some((x, y)) = at {
         ui.set_state(boxed, 1);
@@ -191,7 +193,7 @@ pub fn panel_menu(
     if ui.state(boxed, 0) != 1 {
         return Vec::new();
     }
-    let (x, y, w, h) = l.frame;
+    let (x, y, _, h) = l.frame;
     let default_at = (x as f32, (y + h) as f32);
     let at = match ui.text_state(boxed) {
         Some(text) => {
@@ -211,7 +213,7 @@ pub fn panel_menu(
     let mut rows: Vec<(String, bool)> = vec![
         ("Split right".to_string(), true),
         ("Split down".to_string(), true),
-        ((if state(&l.path).window.is_none() { "Float" } else { "Dock" }).to_string(), true),
+        ((if l.floating { "Dock" } else { "Float" }).to_string(), true),
         ("Close".to_string(), true),
         (String::new(), false),
     ];
@@ -248,10 +250,7 @@ pub fn panel_menu(
             vec![match i {
                 0 => Intent::SplitPanel(l.path.clone(), Axis::H),
                 1 => Intent::SplitPanel(l.path.clone(), Axis::V),
-                2 => Intent::Window(
-                    l.path.clone(),
-                    if state(&l.path).window.is_some() { None } else { Some((x, y, 120.max(w), 80.max(h))) },
-                ),
+                2 => Intent::FloatPanel(l.path.clone()),
                 3 => Intent::ClosePanel(l.path.clone()),
                 i => Intent::RetypePanel(l.path.clone(), kinds[(i - 5) as usize].1.clone()),
             }]
@@ -934,4 +933,52 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
         });
     }
     intents
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use input::{Event, MouseButton};
+
+    fn new_ui() -> Ui {
+        let path = format!("{}/../../pxui/assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
+        crate::host::create(input::Platform::Apple, Some(11), Some(&path))
+    }
+
+    fn fr(pointer: (f64, f64), events: Vec<Event>) -> frame::Frame {
+        let mut input = input::at_time(0.0);
+        input.size = (1000, 600);
+        input.pointer = pointer;
+        input.events = events;
+        frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 0.0, mouse_delta: (0.0, 0.0) }
+    }
+
+    #[test]
+    fn b8_header_menu_float_does_not_emit_window_state() {
+        let mut ui = new_ui();
+        let tree = Panels::Split {
+            axis: Axis::H,
+            size: PSize::Ratio(0.5),
+            a: Box::new(Panels::Leaf(Panel::Graph)),
+            b: Box::new(Panels::Leaf(Panel::Inspector)),
+        };
+        let mut step = |p: (f64, f64), events: Vec<Event>| -> Vec<Intent> {
+            let f = fr(p, events);
+            let mut out = Vec::new();
+            crate::host::build(&mut ui, &f, &mut |ui| {
+                out = update(None, None, None, None, None, None, &tree, ui, &f);
+            });
+            out
+        };
+        step((0.0, 0.0), vec![]);
+        step((100.0, 10.0), vec![Event::PointerMoved((100.0, 10.0))]);
+        step((100.0, 10.0), vec![Event::PointerPressed(MouseButton::RightButton, (100.0, 10.0))]);
+        step((100.0, 10.0), vec![Event::PointerReleased(MouseButton::RightButton, (100.0, 10.0))]);
+        // item 0 = Split right, 1 = Split down, 2 = Float (row height 24 -> ~10 + 18 + 2*24 = 76)
+        let pick_at = (120.0, 10.0 + 18.0 + 48.0);
+        step(pick_at, vec![Event::PointerMoved(pick_at)]);
+        let intents = step(pick_at, vec![Event::PointerPressed(MouseButton::LeftButton, pick_at), Event::PointerReleased(MouseButton::LeftButton, pick_at)]);
+        crate::host::destroy(&mut ui);
+        assert_eq!(intents, vec![Intent::FloatPanel(vec![0])], "B8: header menu Float should emit Intent::FloatPanel");
+    }
 }

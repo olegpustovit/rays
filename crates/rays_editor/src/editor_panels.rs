@@ -330,7 +330,7 @@ fn set_editor_graph(form: s::Syntax) -> Change {
 
 /// / [ and / n: the layouts of the switch and the floating windows, each one edit of the editor
 /// graph (written from the layout shown first, when the document has none).
-pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &Shell, leaf: Option<&Leaf>, actions: &[Action]) -> Vec<Change> {
+pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &Shell, _leaf: Option<&Leaf>, actions: &[Action]) -> Vec<Change> {
     let graph = workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name);
     let has_switch = value.doc.shell.as_ref().and_then(|s| s.switch.as_ref()).is_some();
     let edit = |make: &dyn Fn(String) -> le::Op| -> Vec<Change> {
@@ -377,10 +377,6 @@ pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &Shell, leaf: Option
             Action::Peek => match peek_target(value) {
                 Some(target) => window(&format!("graph:{target}")),
                 None => vec![Change::Declined("Nothing selected to peek at".to_string())],
-            },
-            Action::FloatToggle => match leaf {
-                Some(leaf) => edit(&|graph| le::Op::LayoutFloat { graph, at: leaf.path.iter().map(|i| *i as i64).collect() }),
-                None => Vec::new(),
             },
             Action::ToggleInspector if !panels::each_leaf(&shell_tree(value, workspace), &mut |_, p| *p == Panel::Inspector) => {
                 vec![Change::Notice("No inspector in this layout.".to_string())]
@@ -508,6 +504,26 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &Shell, intents: &[c
                 changes.extend(with_panel(panel_kind(kind), path, Rc::new(move |panel, node| le::Op::SplitPanel { node: node.clone(), axis, ratio, panel })));
             }
             chrome::Intent::ClosePanel(path) => changes.extend(edit(path, Rc::new(|node: &flow_check::workspace::Path| le::Op::ClosePanel { node: node.clone() }))),
+            chrome::Intent::FloatPanel(path) => {
+                let st = panel_state(value, path);
+                if st.window.is_some() {
+                    changes.extend(save_state(path, panels::State { window: None, ..st }));
+                } else {
+                    let at: Vec<i64> = path.iter().map(|i| *i as i64).collect();
+                    changes.extend(match &editor {
+                        _ if workspace.restored => vec![Change::Declined("The default layout is showing. / z returns to the editor graph.".to_string())],
+                        Some(graph) => vec![Change::LayoutEdit(le::Op::LayoutFloat { graph: graph.clone(), at })],
+                        None => {
+                            let scene = scene_name(value);
+                            let (text, _) = bars::tree_text("editor", &scene, &base);
+                            match s::parse(&text) {
+                                Ok(forms) if forms.len() == 1 => vec![set_editor_graph(forms[0].clone()), Change::LayoutEdit(le::Op::LayoutFloat { graph: "editor".to_string(), at })],
+                                _ => vec![Change::Declined("The layout could not be written as an editor graph.".to_string())],
+                            }
+                        }
+                    });
+                }
+            }
             chrome::Intent::RetypePanel(path, kind) => {
                 changes.extend(with_panel(panel_kind(kind), path, Rc::new(|panel, node| le::Op::SetPanelKind { node: node.clone(), panel })));
             }
@@ -743,6 +759,24 @@ mod tests {
                 changes.iter().any(|c| matches!(c, Change::Notice(m) | Change::Declined(m) if m.to_lowercase().contains("inspector"))),
                 "B13: /i with no inspector should emit a notice"
             );
+            editor_host::close(&value);
+        });
+    }
+
+    #[test]
+    fn b8_float_panel_intent_uses_layout_float_and_label() {
+        big_stack(|| {
+            let value = model_of(
+                r#"(workspace w
+                    (graph g :context sop (sop/box))
+                    (graph editor :context editor
+                      (let* [g1 (ui/graph "g") i1 (ui/inspector)]
+                        (ui/workspace (ui/split_at "horizontal" 0.5 g1 i1)))))"#,
+            );
+            let (_, changes) = layout_intents(&(&value).into(), &value.workspace, &[chrome::Intent::FloatPanel(vec![0])]);
+            assert_eq!(changes.len(), 1);
+            assert!(matches!(&changes[0], Change::LayoutEdit(le::Op::LayoutFloat { graph, at }) if graph == "editor" && at == &vec![0]));
+            assert_eq!(crate::editor_actions::intent_label(&changes[0]).as_deref(), Some("Float panel"));
             editor_host::close(&value);
         });
     }

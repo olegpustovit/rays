@@ -808,7 +808,12 @@ pub fn gated(value: &mut EditorModel, frame_: &frame::Frame, text_focus: bool, h
 /// close and retype.
 pub fn panel_intents<'a>(value: &ModelView<'a>, leaves: &[(layout::Path, Panel)], workspace: &Shell, frame_: &frame::Frame, focus: &Panel, focus_path: Option<&[usize]>, actions: &[Action]) -> Vec<chrome::Intent> {
     let panel_paths = |panel: &Panel| -> Vec<layout::Path> { leaves.iter().filter(|(_, p)| p == panel).map(|(path, _)| path.clone()).collect() };
-    let toggle = |panel: &Panel| -> Vec<chrome::Intent> { panel_paths(panel).into_iter().map(chrome::Intent::Toggle).collect() };
+    let toggle = |panel: &Panel| -> Vec<chrome::Intent> {
+        let paths = panel_paths(panel);
+        let collapsed = paths.iter().filter(|path| panel_state(value, path).collapsed).count();
+        let target_collapsed = paths.len() - collapsed >= collapsed;
+        paths.into_iter().filter(|path| panel_state(value, path).collapsed != target_collapsed).map(chrome::Intent::Toggle).collect()
+    };
     let expand = |panel: &Panel| -> Vec<chrome::Intent> { panel_paths(panel).into_iter().filter(|path| panel_state(value, path).collapsed).map(chrome::Intent::Toggle).collect() };
     let mut intents = Vec::new();
     for a in actions {
@@ -827,14 +832,15 @@ pub fn panel_intents<'a>(value: &ModelView<'a>, leaves: &[(layout::Path, Panel)]
             _ => {}
         }
     }
-    // / o ...: the focused panel's split, close and retype, as its header menu; the geometry only
-    // when one was asked for
-    let on_focused = actions.iter().any(|a| matches!(a, Action::PanelSplit(_) | Action::PanelClose | Action::PanelRetype(_)));
+    // / o ...: the focused panel's split, close, float and retype, as its header menu; the geometry
+    // only when one was asked for
+    let on_focused = actions.iter().any(|a| matches!(a, Action::PanelSplit(_) | Action::PanelClose | Action::FloatToggle | Action::PanelRetype(_)));
     if let Some(leaf) = on_focused.then(|| focused_leaf(&geometry(value, workspace, frame_), focus, focus_path)).flatten() {
         for a in actions {
             match a {
                 Action::PanelSplit(axis) => intents.push(chrome::Intent::SplitPanel(leaf.path.clone(), *axis)),
                 Action::PanelClose => intents.push(chrome::Intent::ClosePanel(leaf.path.clone())),
+                Action::FloatToggle => intents.push(chrome::Intent::FloatPanel(leaf.path.clone())),
                 // a view switch, below
                 Action::PanelRetype(Panel::Graph | Panel::List | Panel::Lisp) if leaf.panel == Panel::Graph => {}
                 Action::PanelRetype(panel) => intents.push(chrome::Intent::RetypePanel(leaf.path.clone(), panel.clone())),
@@ -1480,4 +1486,86 @@ pub fn update(
         value.edit_phases = phases;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cook;
+    use crate::editor_host;
+    use crate::editor_setup::{self, CreateOpts};
+    use editor_document::workspace_doc::TextOptions;
+
+    fn big_stack(body: fn()) {
+        std::thread::Builder::new().stack_size(256 << 20).spawn(body).unwrap().join().unwrap();
+    }
+
+    fn model_of(text: &str) -> EditorModel {
+        let catalog = editor_document::kinds::catalog(flow_sop::manifest::VERSION, &sop::nodes::factories()).expect("catalog");
+        let ws = workspace_doc::of_text(&TextOptions::default(), &catalog, text).expect("workspace");
+        let opts = CreateOpts {
+            preferences: Some(std::env::temp_dir().join("rays-editor-test-no-preferences.rays").to_string_lossy().to_string()),
+            presets: Some(std::env::temp_dir().join("rays-editor-test-presets").to_string_lossy().to_string()),
+            ui_text_size: 11,
+            await_: Some(true),
+            ..CreateOpts::default()
+        };
+        editor_setup::create(opts, &ws, Rc::new(cook::prepare)).expect("model")
+    }
+
+    fn idle_frame() -> frame::Frame {
+        let mut input = input::at_time(0.0);
+        input.size = (900, 640);
+        frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
+    }
+
+    #[test]
+    fn b9_toggle_graph_sets_all_to_one_state() {
+        big_stack(|| {
+            // Two graph panels: g1 open, g2 collapsed -> /g must bring both to one state.
+            let mut value = model_of(
+                r#"(workspace w
+                    (graph g :context sop (sop/box))
+                    (graph editor :context editor
+                      (let* [g1 (ui/graph "g") g2 (ui/graph "g")]
+                        (ui/workspace (ui/split_at "horizontal" 0.5 g1 g2)))))"#,
+            );
+            let k2 = panel_key(&value.doc, &[1]);
+            std::sync::Arc::make_mut(&mut value.doc).workspace.ws.layout.panels.insert(k2, panels::State { collapsed: true, window: None });
+            let leaves = shell_leaves(&value, &value.workspace);
+            let f = idle_frame();
+            let intents = panel_intents(&(&value).into(), &leaves, &value.workspace, &f, &Panel::Graph, None, &[Action::ToggleGraph]);
+            let toggled = |p: &[usize]| intents.iter().any(|i| matches!(i, chrome::Intent::Toggle(path) if path == p));
+            let after0 = panel_state(&(&value).into(), &[0]).collapsed ^ toggled(&[0]);
+            let after1 = panel_state(&(&value).into(), &[1]).collapsed ^ toggled(&[1]);
+            assert_eq!(after0, after1, "B9: /g flipped two graph panels into opposite states ({after0} vs {after1})");
+            assert!(after0, "B9: 1 open / 1 collapsed tie should collapse all");
+
+            // Three graph panels: 1 open, 2 collapsed -> majority is collapsed, so /g expands all.
+            let mut value3 = model_of(
+                r#"(workspace w
+                    (graph g :context sop (sop/box))
+                    (graph editor :context editor
+                      (let* [g1 (ui/graph "g") g2 (ui/graph "g") g3 (ui/graph "g")]
+                        (ui/workspace (ui/split_at "horizontal" 0.5 g1 (ui/split_at "horizontal" 0.5 g2 g3))))))"#,
+            );
+            let k2 = panel_key(&value3.doc, &[1, 0]);
+            let k3 = panel_key(&value3.doc, &[1, 1]);
+            {
+                let map = &mut std::sync::Arc::make_mut(&mut value3.doc).workspace.ws.layout.panels;
+                map.insert(k2, panels::State { collapsed: true, window: None });
+                map.insert(k3, panels::State { collapsed: true, window: None });
+            }
+            let leaves3 = shell_leaves(&value3, &value3.workspace);
+            let intents3 = panel_intents(&(&value3).into(), &leaves3, &value3.workspace, &f, &Panel::Graph, None, &[Action::ToggleGraph]);
+            let toggled3 = |p: &[usize]| intents3.iter().any(|i| matches!(i, chrome::Intent::Toggle(path) if path == p));
+            let states: Vec<bool> = [vec![0], vec![1, 0], vec![1, 1]]
+                .iter()
+                .map(|p| panel_state(&(&value3).into(), p).collapsed ^ toggled3(p))
+                .collect();
+            assert_eq!(states, vec![false, false, false], "B9: 1 open / 2 collapsed should expand all to open");
+            editor_host::close(&value);
+            editor_host::close(&value3);
+        });
+    }
 }
