@@ -256,9 +256,17 @@ pub fn jump_rows(ws: &Workspace) -> Vec<(String, String)> {
     grouped(ws).into_iter().flat_map(|(group, graphs)| graphs.into_iter().map(move |g| (g.name.clone(), group.to_owned()))).collect()
 }
 
-/// how many other graphs read `name`
-fn readers(ws: &Workspace, name: &str) -> i64 {
-    ws.graphs.iter().filter(|g| g.name != name && reads(&g.form).iter().any(|n| n == name)).count() as i64
+/// How many other graphs read each target. Visit each form once.
+fn reader_counts(ws: &Workspace) -> HashMap<String, i64> {
+    let mut counts = HashMap::new();
+    for graph in ws.graphs.iter() {
+        for target in reads(&graph.form) {
+            if target != graph.name {
+                *counts.entry(target).or_default() += 1;
+            }
+        }
+    }
+    counts
 }
 
 fn calls(ws: &Workspace, defs: &[&Graph], macros: &[&S], name: &str) -> i64 {
@@ -343,11 +351,10 @@ fn contains(query: &str, text: &str) -> bool {
     q.is_empty() || t.contains(&q)
 }
 
-fn graph_row(pa: &Params, g: &Graph, detail: String) -> Row {
-    let mut used = readers(&pa.workspace, &g.name);
+fn graph_row(pa: &Params, g: &Graph, detail: String, mut used: i64) -> Row {
     // the scene's own reference counts: its World object reads the graph
     if g.context == context::world() {
-        let objects = pa.objects.iter().filter(|o| o.letter == "W" && o.detail == format!("ref {}", g.name)).count() as i64;
+        let objects = pa.objects.iter().filter(|o| o.letter == "W" && o.detail.strip_prefix("ref ") == Some(g.name.as_str())).count() as i64;
         used = used.max(objects);
     }
     let unused = used == 0 && (g.context == context::material() || g.context == context::sop());
@@ -372,11 +379,12 @@ fn graph_row(pa: &Params, g: &Graph, detail: String) -> Row {
 
 fn search(state: &State, pa: &Params, defs: &[&Graph], chains: &Chains, counts: &[(Path, i64)]) -> Vec<Row> {
     let q = state.query.trim().to_owned();
+    let readers = reader_counts(&pa.workspace);
     let mut acc: Vec<Row> = Vec::new();
     let ws = &pa.workspace;
     for g in ws.graphs.iter() {
         if contains(&q, &g.name) {
-            acc.push(graph_row(pa, g, group_of(g.context).to_owned()));
+            acc.push(graph_row(pa, g, group_of(g.context).to_owned(), readers.get(&g.name).copied().unwrap_or(0)));
         }
     }
     for d in defs {
@@ -462,6 +470,7 @@ pub fn rows(wide: bool, state: &State, pa: &Params) -> Vec<Row> {
     };
     let nodes = |form: &S| count_where(&|f| matches!(s::head(f), Some(h) if h.contains('/')), form);
     let groups = grouped(ws);
+    let readers = reader_counts(ws);
     // the narrow sheet has no Layout section, and so none of the editor graphs
     let groups: Vec<(&str, Vec<&Graph>)> = if wide { groups } else { groups.into_iter().filter(|(g, _)| *g != "Layout").collect() };
     // the scene's first graph is the root row; its objects are its tree
@@ -487,7 +496,7 @@ pub fn rows(wide: bool, state: &State, pa: &Params) -> Vec<Row> {
                 } else {
                     w::context_name(&g.context)
                 };
-                acc.push(graph_row(pa, g, detail));
+                acc.push(graph_row(pa, g, detail, readers.get(&g.name).copied().unwrap_or(0)));
                 active_tree(acc, &g.name);
             }
         };
@@ -704,8 +713,8 @@ pub fn row_rects(state: &State, pa: &Params, bounds: (i64, i64, i64, i64)) -> Ve
 }
 
 struct PaintCtx {
-    rows: Vec<Row>,
-    tops: Vec<f32>,
+    rows: Rc<Vec<Row>>,
+    tops: Rc<Vec<f32>>,
     theme: Theme,
     muted: Color,
     hovered: Option<usize>,
@@ -1071,10 +1080,31 @@ fn input_sliders(
 struct Shown {
     pane: i64,
     state: State,
-    rows: Vec<Row>,
+    params: Params,
+    zones: Vec<(Path, i64)>,
+    wide: bool,
+    row_height: f32,
+    rows: Rc<Vec<Row>>,
+    tops: Rc<Vec<f32>>,
     rev: u64,
-    view: i64,
     list: i64,
+}
+
+fn same_rows(a: &Params, b: &Params) -> bool {
+    Arc::ptr_eq(&a.workspace, &b.workspace)
+        && a.scope.as_ref().map(Rc::as_ptr) == b.scope.as_ref().map(Rc::as_ptr)
+        && a.records.as_ref().map(Rc::as_ptr) == b.records.as_ref().map(Rc::as_ptr)
+        && a.active == b.active && a.selected == b.selected && a.chips == b.chips
+        && a.objects == b.objects && a.root_detail == b.root_detail && a.layouts == b.layouts && a.notes == b.notes
+}
+
+fn zone_picks(scope: &p::Scope, pa: &Params, out: &mut Vec<(Path, i64)>) {
+    for node in &scope.nodes {
+        if let Some(zone) = &node.zone {
+            out.push((node.path.clone(), (pa.probes)(&node.path)));
+            zone_picks(&zone.scope, pa, out);
+        }
+    }
 }
 
 /// The input slider a press holds (`kept_drag`), as its press built it: its pane, its field's key, its input,
@@ -1092,8 +1122,9 @@ struct Held {
 }
 
 thread_local! {
-    // ponytail: one entry per navigator pane ever shown, never pruned; prune with the pane when panes churn
+    // ponytail: keep the most recent 12 panes; move to pane-owned state if more are used together.
     static SHOWN: RefCell<Vec<Shown>> = const { RefCell::new(Vec::new()) };
+    static REVISION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     // one held slider per thread (the pointer holds one field), found by its field's key
     static HELD: RefCell<Option<Held>> = const { RefCell::new(None) };
 }
@@ -1116,38 +1147,47 @@ fn held_text(h: &Held, ui: &Ui, field: &UiBox, dx: f32) -> String {
 /// revision it was built with; its release builds it as the document is then.
 pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, pane: i64) -> (State, Vec<Intent>) {
     use std::hash::Hash;
-    let rows = rows(bounds.2 >= 300, state, pa);
+    let wide = bounds.2 >= 300;
+    let rh = ui.row_height() as f32;
     let dragged = HELD.with(|h| h.borrow().as_ref().filter(|h| h.pane == pane).and_then(|h| ui.box_of_key(h.field).filter(|b| ui.field_drag(b).is_some()).map(|_| h.patched)));
-    let (rev, list) = SHOWN.with(|s| {
+    let (rev, list, rows, tops) = SHOWN.with(|s| {
         let mut s = s.borrow_mut();
-        let k = s.iter().position(|e| e.pane == pane).unwrap_or_else(|| {
-            s.push(Shown { pane, state: state.clone(), rows: rows.clone(), rev: 0, view: 0, list: 0 });
-            s.len() - 1
-        });
-        let e = &mut s[k];
-        // while a held slider's drag is shown by patches its own edits change no revision
-        if dragged != Some(true) && (e.state != *state || e.rows != rows) {
-            (e.state, e.rows, e.rev) = (state.clone(), rows.clone(), e.rev + 1);
-        }
-        (e.rev, ui.box_of_key(e.list))
+        let last = s.iter().position(|e| e.pane == pane).map(|index| s.remove(index));
+        let e = match last {
+            Some(e) if dragged == Some(true) || (e.state == *state && e.wide == wide
+                && e.row_height == rh && same_rows(&e.params, pa)
+                && e.zones.iter().all(|(zone, pick)| (pa.probes)(zone) == *pick)) => e,
+            other => {
+                let rows = Rc::new(rows(wide, state, pa));
+                let tops = Rc::new(tops(rh, &rows));
+                let mut zones = Vec::new();
+                if let Some(scope) = &pa.scope { zone_picks(scope, pa, &mut zones); }
+                let list = other.map_or(0, |last| last.list);
+                let rev = REVISION.with(|r| { r.set(r.get().wrapping_add(1)); r.get() });
+                Shown { pane, state: state.clone(), params: pa.clone(), zones, wide, row_height: rh, rows, tops, rev, list }
+            }
+        };
+        let result = (e.rev, ui.box_of_key(e.list), e.rows.clone(), e.tops.clone());
+        if s.len() == 12 { s.remove(0); }
+        s.push(e);
+        result
     });
     let scroll = list.map_or(0.0, |b| ui.scroll_position(&b));
-    let rh = ui.row_height() as f32;
-    let hovered = list.map(|b| ui.signal(&b)).filter(|sg| sg.hovered).and_then(|sg| row_of(&tops(rh, &rows), bounds.1 as f32 + SEARCH_HEIGHT, scroll, sg.pointer.1));
+    let hovered = list.map(|b| ui.signal(&b)).filter(|sg| sg.hovered).and_then(|sg| row_of(&tops, bounds.1 as f32 + SEARCH_HEIGHT, scroll, sg.pointer.1));
     let keys = [Key::F2, Key::Delete, Key::Enter].map(|k| ui.key_pressed(k));
     let revision = kit::revision(&|h| (rev, bounds, pa.scope.is_some(), pa.workspace.graphs.len(), scroll.to_bits(), hovered, keys).hash(h));
     let (mut out, mut verified) = (None, false);
     let v = kit::cached(ui, "navigator-view", revision, &mut |ui| {
         verified = ui.verifying();
-        out = Some(build(state, ui, bounds, pa, rows.clone()));
+        out = Some(build(state, ui, bounds, pa, rows.clone(), tops.clone()));
     });
     let (state, mut intents) = match out {
         Some((next, intents, list)) if !verified => {
-            SHOWN.with(|s| s.borrow_mut().iter_mut().filter(|e| e.pane == pane).for_each(|e| (e.view, e.list) = (v.box_key, list)));
+            SHOWN.with(|s| s.borrow_mut().iter_mut().filter(|e| e.pane == pane).for_each(|e| e.list = list));
             // a press on a slider holds it; its release (or a build of it not held) lets it go
             HELD.with(|h| {
                 let mut h = h.borrow_mut();
-                for row in &rows {
+                for row in rows.iter() {
                     let Row::InputRow { graph, name, integer, value } = row else { continue };
                     let field = pxui::ui_core::key_of(v.box_key, &slider_label(graph, name));
                     if ui.box_of_key(field).is_some_and(|b| ui.signal(&b).pressed) {
@@ -1190,7 +1230,7 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
     (state, intents)
 }
 
-fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, rows: Vec<Row>) -> (State, Vec<Intent>, i64) {
+fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, rows: Rc<Vec<Row>>, tops: Rc<Vec<f32>>) -> (State, Vec<Intent>, i64) {
     let theme = ui.tokens();
     let rh = ui.row_height() as f32;
     let (x, y, w, h) = bounds;
@@ -1217,8 +1257,13 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
         });
     }
     // (the search field's text moves the rows the frame it changes)
-    let rows = if state.query == query_in { rows } else { self::rows(w >= 300.0, &state, pa) };
-    let tops = tops(rh, &rows);
+    let (rows, tops) = if state.query == query_in {
+        (rows, tops)
+    } else {
+        let rows = Rc::new(self::rows(w >= 300.0, &state, pa));
+        let tops = Rc::new(self::tops(rh, &rows));
+        (rows, tops)
+    };
     let total = tops[rows.len()];
     let top = y + SEARCH_HEIGHT;
     // the wide sheet closes with a hairline and a 24-point bar of its keys and the graph count

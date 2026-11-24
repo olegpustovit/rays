@@ -1,7 +1,6 @@
 //! The open level's list: its objects, the focused geometry object and its cook, and the list
 //! rows and intents.
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use editor_document::document::Level;
 use editor_document::kind_graph as kg;
@@ -331,24 +330,24 @@ pub fn trunk_rows(network: &net::Network, viewed: Option<i64>, flags: &dyn Fn(i6
 }
 
 /// The rows a level's list shows, and its flag columns, built when asked.
-pub type LazyRows = Rc<dyn Fn() -> (Vec<Row>, Vec<String>)>;
+pub type LazyRows<'a> = Box<dyn FnOnce() -> (Vec<Row>, Vec<String>) + 'a>;
 
 /// The open level's list: what it is made from, and its rows and flag columns when asked.
-pub fn rows<'a>(value: &ModelView<'a>) -> (RowSource, LazyRows) {
+pub fn rows<'a>(value: &ModelView<'a>) -> (RowSource, LazyRows<'a>) {
     match (pane_level(value), network(value)) {
         (Level::Scene, _) => {
-            let scene_graph = scene(value).clone();
+            let scene_graph = &value.doc.scene;
             let active = value.doc.active_camera;
-            (RowSource::Objects(scene_graph.clone()), Rc::new(move || (scene_rows(active, &scene_graph), vec!["v".to_string(), "r".to_string()])))
+            (RowSource::Objects(scene_graph.clone()), Box::new(move || (scene_rows(active, scene_graph), vec!["v".to_string(), "r".to_string()])))
         }
         (Level::Inside(_), Some(network)) => {
-            let graph = network.graph.clone();
+            let graph = &network.graph;
             let displayed = network.displayed;
             (
                 RowSource::Network(network.graph.clone()),
-                Rc::new(move || {
+                Box::new(move || {
                     (
-                        trunk_rows(&graph, displayed, &|node_id, node| match node {
+                        trunk_rows(graph, displayed, &|node_id, node| match node {
                             Some(_) => vec![Some(node_id) == displayed],
                             None => Vec::new(),
                         }),
@@ -358,8 +357,8 @@ pub fn rows<'a>(value: &ModelView<'a>) -> (RowSource, LazyRows) {
             )
         }
         (Level::Inside(_), None) => {
-            let layers = level_objects(value).into_owned();
-            (RowSource::Objects(layers.clone()), Rc::new(move || (layer_rows(&layers), vec!["v".to_string()])))
+            let layers = level_objects(value);
+            (RowSource::Objects(layers.to_vec()), Box::new(move || (layer_rows(&layers), vec!["v".to_string()])))
         }
     }
 }

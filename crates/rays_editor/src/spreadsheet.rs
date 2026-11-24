@@ -21,6 +21,18 @@ pub fn columns(owner: i64, geometry: &gv::T) -> Vec<gv::Column> {
 
 /// Draws the owner tabs and the table in `bounds`; the tab clicked.
 pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), owner: i64, geometry: Option<&gv::T>) -> Option<i64> {
+    use std::hash::Hash;
+    let revision = rays_shell::kit::revision(&|h| {
+        (bounds, owner, geometry.map(rdk_core::geometry::data_id)).hash(h);
+    });
+    let mut changed = None;
+    rays_shell::kit::cached(ui, "spreadsheet-view", revision, &mut |ui| {
+        changed = build(ui, bounds, owner, geometry);
+    });
+    changed
+}
+
+fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), owner: i64, geometry: Option<&gv::T>) -> Option<i64> {
     let (x, y, w, h) = bounds;
     let owner = owner.clamp(0, 3);
     let (changed, _) = rays_shell::kit::segments(ui, "sheet-owners", (x + w) as f32 - 8.0, y as f32 + 2.0, &LABELS, owner);

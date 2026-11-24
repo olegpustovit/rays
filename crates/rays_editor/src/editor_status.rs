@@ -85,6 +85,10 @@ pub fn carry_line(c: &Carry) -> String {
 }
 
 pub fn status_text<'a>(value: &ModelView<'a>, brief: bool) -> String {
+    status_text_with(value, brief, crate::cook::status(&value.cook), flow_ir::fallback::summary(), mem::status_line())
+}
+
+fn status_text_with(value: &ModelView<'_>, brief: bool, status: Status, fallback: Option<String>, memory: Option<String>) -> String {
     if let Some(c) = &value.carry {
         return carry_line(c);
     }
@@ -105,7 +109,7 @@ pub fn status_text<'a>(value: &ModelView<'a>, brief: bool) -> String {
             (None, None, None) => "Waiting for first cook".to_string(),
         }
     };
-    let cook = match crate::cook::status(&value.cook) {
+    let cook = match status {
         // playing and a newer frame is already waiting: frames are skipped
         Status::Cooking { seconds, queued: true, .. } if playing => format!("frame cook {} ms \u{b7} skipping frames", (seconds * 1000.0) as i64),
         // a frame-driven graph recooks every frame, so one is nearly always in flight: say what
@@ -114,17 +118,22 @@ pub fn status_text<'a>(value: &ModelView<'a>, brief: bool) -> String {
         Status::Cooking { seconds, queued, .. } => format!("Cooking\u{2026} {}s{}", cfmt::f(seconds, 1), if queued { " \u{b7} latest queued" } else { "" }),
         Status::Idle => idle(),
     };
-    let cook = match flow_ir::fallback::summary() {
+    let cook = match fallback {
         Some(off) => format!("{cook} \u{b7} {off}"),
         None => cook,
     };
-    let cook = match mem::status_line() {
+    let cook = match memory {
         Some(line) => format!("{cook} \u{b7} {line}"),
         None => cook,
     };
     let phases = phase_timer::summary(&value.edit_phases);
     let cook = if phases.is_empty() { cook } else { format!("{cook} \u{b7} {phases}") };
     // What the open level's keys do, so the World and the menu are findable.
+    if brief {
+        return if value.workspace.restored {
+            format!("Default layout · / z returns to the editor graph · {cook}")
+        } else { cook };
+    }
     let hint = match pane_level(value) {
         editor_document::document::Level::Scene => "i/double-click enter \u{b7} / a add \u{b7} / e World".to_string(),
         editor_document::document::Level::Inside(id) if kind(value, id).as_deref() == Some("world") => {
@@ -133,8 +142,7 @@ pub fn status_text<'a>(value: &ModelView<'a>, brief: bool) -> String {
         editor_document::document::Level::Inside(_) => "u up \u{b7} / a add \u{b7} / l panel kind".to_string(),
     };
     let lead = if value.workspace.restored { "Default layout \u{b7} / z returns to the editor graph \u{b7} " } else { "" };
-    let tail = if brief { String::new() } else { format!(" \u{b7} {} \u{b7} {hint}", level_name(value)) };
-    format!("{lead}{cook}{tail}")
+    format!("{lead}{cook} · {} · {hint}", level_name(value))
 }
 
 /// "ring · iteration 1 of 12": which iteration the viewport's highlight and the inspector show for
@@ -168,6 +176,48 @@ pub fn probe_caption<'a>(value: &ModelView<'a>) -> Option<String> {
 /// The status strip under the view: kit text on the ground, under a hairline.
 pub fn status_box<'a>(value: &ModelView<'a>, ui: &mut Ui, frame: &frame::Frame, render_status: Option<&str>, error_status: Option<&str>, context: guide_context::GuideContext) {
     let g = geometry(value, &value.workspace, frame);
+    if g.status_at.3 <= 0 {
+        return;
+    }
+    let status = crate::cook::status(&value.cook);
+    let fallback = flow_ir::fallback::summary();
+    let memory = mem::status_line();
+    let session_scope = pane_view(value);
+    let paint = &mut |ui: &mut Ui| {
+        build_box(value, ui, &g, render_status, error_status, context, status.clone(), fallback.clone(), memory.clone());
+    };
+    if value.carry.is_some() {
+        paint(ui);
+        return;
+    }
+    let revision = rays_shell::kit::revision(&|h| {
+        use std::hash::Hash;
+        let busy = match status {
+            Status::Idle => None,
+            Status::Cooking { seconds, queued, .. } => Some((seconds.to_bits(), queued)),
+        };
+        (g.status_at, value.revs, value.cook.seconds.map(f64::to_bits), busy, context as u8,
+         &value.file, editor_core::panels::name(value.focus), value.guide, value.status_fps, value.workspace.restored,
+         timeline::mode(&value.timeline) == timeline::Mode::Playing).hash(h);
+        (&value.edit_error, &value.cook.error, value.notice.as_ref().map(|(_, message)| message), render_status, error_status, &fallback, &memory).hash(h);
+        for phase in &value.edit_phases.entries {
+            (&phase.phase, phase.seconds.to_bits()).hash(h);
+        }
+        rays_shell::kit::debug_revision(&(value.leader, &value.workspace.window_live)).hash(h);
+        (session_scope.selected.as_slice(), scope::zoom(session_scope).to_bits()).hash(h);
+        value.selected_box.as_ref().map(|(_, _, name)| name).hash(h);
+        for leaf in &g.leaves {
+            (editor_core::panels::name(&leaf.panel), leaf.floating).hash(h);
+        }
+        if stored_projection(value) == TextView {
+            rays_shell::kit::debug_revision(&text_pane::first_error(&value.text)).hash(h);
+        }
+    });
+    rays_shell::kit::cached(ui, "editor-status-view", revision, paint);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_box(value: &ModelView<'_>, ui: &mut Ui, g: &rays_shell::layout::Geometry, render_status: Option<&str>, error_status: Option<&str>, context: guide_context::GuideContext, status: Status, fallback: Option<String>, memory: Option<String>) {
     // the pane really in use: the focus when a leaf of its kind is open, else the first leaf
     let focus: Panel = {
         let open = g.leaves.iter().any(|l| editor_commands::scope(&l.panel) == editor_commands::scope(&value.focus));
@@ -182,7 +232,7 @@ pub fn status_box<'a>(value: &ModelView<'a>, ui: &mut Ui, frame: &frame::Frame, 
     let state = if error_status.is_some() || value.edit_error.is_some() || value.cook.error.is_some() {
         State::Error
     } else {
-        match crate::cook::status(&value.cook) {
+        match status {
             Status::Cooking { .. } => State::Busy,
             Status::Idle => State::Ok,
         }
@@ -194,7 +244,7 @@ pub fn status_box<'a>(value: &ModelView<'a>, ui: &mut Ui, frame: &frame::Frame, 
     let line = match error_status {
         Some(error) => error.to_string(),
         None => {
-            let base = status_text(value, true);
+            let base = status_text_with(value, true, status, fallback, memory);
             match render_status {
                 None => base,
                 Some(status) => format!("{base} \u{b7} {status}"),

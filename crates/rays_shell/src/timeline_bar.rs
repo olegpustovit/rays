@@ -18,6 +18,16 @@ pub enum Intent {
 /// hairline and the ruler under it. `edge` draws the line-2 hairline above a strip that has no
 /// gutter over it.
 pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, frame: i64, time: f64, max_frame: i64) -> Vec<Intent> {
+    use std::hash::Hash;
+    let revision = kit::revision(&|h| (bounds, edge, playing, frame, time.to_bits(), max_frame).hash(h));
+    let mut intents = Vec::new();
+    kit::cached(ui, "timeline-view", revision, &mut |ui| {
+        intents = build(ui, bounds, edge, playing, frame, time, max_frame);
+    });
+    intents
+}
+
+fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, frame: i64, time: f64, max_frame: i64) -> Vec<Intent> {
     let (x, y, width, height) = bounds;
     let theme = ui.tokens();
     let (fx, fy, fw, fh) = (x as f32, y as f32, width as f32, height as f32);
@@ -113,6 +123,12 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
             paint.text_c((x + readout_x, ty), if tall { theme.foreground } else { theme::ink_2(&theme) }, &readout);
         });
         let cap = kit::cap_size(ui);
+        let tick_labels: [String; 10] = if tall {
+            std::array::from_fn(|tick| ((range * (tick * 10) as f32 / 100.0).round() as i64).to_string())
+        } else {
+            std::array::from_fn(|_| String::new())
+        };
+        let head_label = current.clone();
         ui.draw(&ruler, move |paint, Rect { x, y, w, h }| {
             paint.fill(x, y, w, h, theme.input);
             if !tall {
@@ -134,8 +150,7 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
                     paint.fill(tx, y + h - major_h, 1.0, major_h, theme::border(&theme));
                     if tall {
                         let cy = kit::cap_y_paint(paint, y + 16.0, 24.0);
-                        let number = (range * tick as f32 / minors as f32).round() as i64;
-                        paint.text_s((tx + 4.0, cy), cap, theme::ink_3(&theme), &number.to_string());
+                        paint.text_s((tx + 4.0, cy), cap, theme::ink_3(&theme), &tick_labels[(tick / every) as usize]);
                     }
                 } else {
                     paint.fill(tx, y + h - minor_h, 1.0, minor_h, theme::edge(&theme));
@@ -146,7 +161,7 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
             paint.fill(head, y, 2.0, h, theme.accent);
             let tag_h = if tall { 24.0 } else { 14.0 };
             let cy = kit::cap_y_paint(paint, y, tag_h);
-            paint.cap((head + 2.0, cy), Some(theme.accent), &frame.to_string());
+            paint.cap((head + 2.0, cy), Some(theme.accent), &head_label);
         });
         // a typed frame clamps to the timeline: 0 to the last frame
         if typed != current {

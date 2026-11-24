@@ -116,7 +116,9 @@ fn hash_sans_text(o: &Opts, h: &mut std::hash::DefaultHasher) {
 fn trail_start(ui: &mut Ui, x: f32, w: f32, notes: &[String], readout: &str, layout: &str, fps: Option<i64>) -> f32 {
     let mut right = x + w - 12.0;
     if let Some(fps) = fps {
-        right = right - kit::cap_width(ui, &format!("{fps} fps")) - 8.0;
+        kit::with_label(format_args!("{fps} fps"), &mut |label| {
+            right -= kit::cap_width(ui, label) + 8.0;
+        });
     }
     if !layout.is_empty() {
         right = right - kit::cap_width(ui, layout) - 8.0;
@@ -128,14 +130,13 @@ fn trail_start(ui: &mut Ui, x: f32, w: f32, notes: &[String], readout: &str, lay
 }
 
 /// the strip's end: the layout in use, then the frame rate in ink, 8 apart; where they start
-fn trail(paint: &mut Paint, (x, y, w, h): (f32, f32, f32, f32), notes: &[String], readout: &str, layout: &str, fps: Option<i64>) -> f32 {
+fn trail(paint: &mut Paint, (x, y, w, h): (f32, f32, f32, f32), notes: &[String], readout: &str, layout: &str, fps: Option<&str>) -> f32 {
     let theme = paint.theme;
     let cy = kit::cap_y_paint(paint, y, h);
     let mut right = x + w - 12.0;
     if let Some(fps) = fps {
-        let fps = format!("{fps} fps");
-        right -= paint.cap_width(&fps);
-        paint.cap((right, cy), Some(theme.foreground), &fps);
+        right -= paint.cap_width(fps);
+        paint.cap((right, cy), Some(theme.foreground), fps);
         right -= 8.0;
     }
     if !layout.is_empty() {
@@ -217,9 +218,10 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts) {
         let rev = revision(&|h| (bounds, after.to_bits(), hash_sans_text(o, h)).hash(h));
         strip(ui, "workspace-status", bounds, rev, &mut |ui, boxed| {
             let o = o.clone();
+            let fps = o.fps.map(|fps| format!("{fps} fps"));
             ui.draw(boxed, move |paint, b| {
                 let Rect { x, y, w, h } = ground(paint, b);
-                trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, o.fps);
+                trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, fps.as_deref());
                 lead(paint, (x, y, h), &o.file, o.state, limit, &o.text);
                 if o.kind.is_some() || o.selection.is_some() {
                     focus_labels(paint, (y, h), true, false, after, o.kind.as_deref(), o.selection.as_deref());
@@ -252,9 +254,10 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             strip(ui, "workspace-guide-leader", bounds, rev, &mut |ui, boxed| {
             let o = o.clone();
             let pending = pending.clone();
+            let fps = o.fps.map(|fps| format!("{fps} fps"));
             ui.draw(boxed, move |paint, b| {
                 let Rect { x, y, w, h } = ground(paint, b);
-                trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, o.fps);
+                trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, fps.as_deref());
                 lead(paint, (x, y, h), &o.file, o.state, limit, &o.text);
                 let tx = focus_labels(paint, (y, h), true, true, after, Some(&pending), None);
                 let ty = paint.text_top(None, y, h);
@@ -352,11 +355,12 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                 }
             }
             let o2 = o.clone();
+            let fps = o.fps.map(|fps| format!("{fps} fps"));
             let accent = o.accent;
             let (kind, selection) = (kind.map(str::to_owned), selection.map(str::to_owned));
             ui.draw(boxed, move |paint, b| {
                 let Rect { x, y, w, h } = ground(paint, b);
-                trail(paint, (x, y, w, h), &o2.notes, &o2.readout, &o2.layout, o2.fps);
+                trail(paint, (x, y, w, h), &o2.notes, &o2.readout, &o2.layout, fps.as_deref());
                 // the file and its state, to the rule, then the labels
                 if has_lead {
                     lead(paint, (x, y, h), &o2.file, o2.state, lead_limit, &o2.text);
