@@ -1369,8 +1369,13 @@ fn inspected_fields(value: &ModelView<'_>, graph: &str, n: &p::Node, compiled: O
     }
 }
 
+enum SharedNode {
+    Binding(Path),
+    Object(i64),
+}
+
 pub struct SharedTarget {
-    node: Result<Path, i64>,
+    node: SharedNode,
     rows: Vec<(Option<ArgKey>, insp::FlowRow)>,
 }
 
@@ -1401,13 +1406,13 @@ impl SharedTarget {
                 (Some(ArgKey::Kw(pm.path)), row)
             }).collect()
         };
-        Some(Self { node: Ok(path.to_vec()), rows })
+        Some(Self { node: SharedNode::Binding(path.to_vec()), rows })
     }
 
     pub fn object(n: &kind_graph::Node) -> Self {
         let rows = crate::editor_shell::object_rows(false, &kind_graph::fields(n))
             .unwrap_or_default().into_iter().map(|row| (None, row)).collect();
-        Self { node: Err(n.id), rows }
+        Self { node: SharedNode::Object(n.id), rows }
     }
 
     fn matching(&self, row: &insp::FlowRow) -> Option<&insp::FlowRow> {
@@ -1421,6 +1426,21 @@ impl SharedTarget {
 
     fn edit(&self, event: &insp::FlowChange, out: &mut Vec<Change>) {
         for (key, row) in &self.rows {
+            if let insp::FlowChange::Expression(name, text) = event {
+                // Component labels share the vector's argument key.
+                let sub = arg_sub(name, Vec::new());
+                let base = if sub.is_empty() { name.as_str() } else { &name[..name.len() - 2] };
+                if row.path != base { continue; }
+                match (expression_text(text), &self.node, key) {
+                    (Ok(value), SharedNode::Binding(path), Some(key)) => out.push(Change::SyntaxEdit(fe::Op::SetArg {
+                        node: path.clone(), key: key.clone(), sub, value,
+                    })),
+                    (Ok(expr), SharedNode::Object(id), _) => out.push(Change::ObjectArg { node: *id, key: row.path.clone(), sub, expr }),
+                    (Err(error), _, _) => out.push(Change::Declined(error)),
+                    _ => {}
+                }
+                break;
+            }
             let (values, edited) = match event {
                 insp::FlowChange::Edited(name, v) => {
                     let Some(index) = row.fields.iter().position(|f| f.name == *name) else { continue };
@@ -1431,11 +1451,11 @@ impl SharedTarget {
                 _ => continue,
             };
             match (&self.node, key) {
-                (Ok(path), Some(key)) => {
+                (SharedNode::Binding(path), Some(key)) => {
                     let value = if let [single] = values.as_slice() { syntax_of_value(single) } else { vector_syntax(values.iter()) };
                     out.push(Change::SyntaxEdit(fe::Op::SetArg { node: path.clone(), key: key.clone(), sub: vec![], value }));
                 }
-                (Err(id), _) => {
+                (SharedNode::Object(id), _) => {
                     out.extend(row.fields.iter().zip(values).enumerate().filter(|(i, _)| edited.is_none_or(|j| *i == j)).map(|(_, (f, value))| {
                         Change::SetParameter { node: *id, path: f.name.clone(), value }
                     }));
