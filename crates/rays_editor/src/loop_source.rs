@@ -211,6 +211,14 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     // ponytail: the last saved drafts are remembered per thread, one editor per thread; a field of LoopModel when two share one
     thread_local!(static SAVED_DRAFTS: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) });
     let drafts = editor_text::draft_signature(&value.core);
+    // a draft still being typed is not written: it must stand through one more poll (the write prints and
+    // checks the document, tens of ms on a big sketch)
+    thread_local!(static SEEN_DRAFTS: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) });
+    let settled = drafts == SEEN_DRAFTS.get();
+    SEEN_DRAFTS.set(drafts);
+    if !force && drafts.is_some() && drafts != SAVED_DRAFTS.get() && !settled {
+        return;
+    }
     // a preview document is never saved
     if (saved_same && key == value.saved_view_key && drafts == SAVED_DRAFTS.get()) || editor_host::carrying(&value.core) {
         return;

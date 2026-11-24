@@ -105,7 +105,8 @@ fn autosave_drafts() {
         core.text.draft = Some(draft);
         core.text.doc_base = Some(std::sync::Arc::new(ws));
     }
-    for _ in 0..45 { p.step(&[], vec![], click); }
+    // one poll sees the draft, the next finds it unchanged and writes
+    for _ in 0..75 { p.step(&[], vec![], click); }
     let state = std::fs::read_dir(dir.join("state")).expect("autosave wrote no recovery file").next().expect("a recovery file").unwrap().path();
     let saved = std::fs::read_to_string(&state).unwrap();
     assert!(saved.contains(":fov 0.5"), "the autosave left out the unapplied draft");

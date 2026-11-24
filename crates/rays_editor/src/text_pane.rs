@@ -2278,9 +2278,13 @@ fn editor_area(
         let moved = moved.clone();
         o.on_caret_move = Some(Rc::new(move |byte| moved.set(Some(byte))));
     }
-    let (text2, submitted) = ui.text_area_submit((c.x, ey), c.width, area_h, &o, key, text);
+    // an unchanged result is the input itself: nothing is copied for a frame that edited nothing
+    let (text2, submitted): (std::borrow::Cow<str>, bool) = {
+        let (area, submitted) = ui.text_area_submit_borrowed((c.x, ey), c.width, area_h, &o, key, text);
+        (if area.len() == text.len() && std::ptr::eq(area.as_ptr(), text.as_ptr()) { std::borrow::Cow::Borrowed(text) } else { std::borrow::Cow::Owned(area.to_owned()) }, submitted)
+    };
     // a paste or a tab typed in arrives as text: kept as the pane keeps text (B45)
-    let text2 = if phase.get().is_none() && text2 != text && text2.contains(['\r', '\t']) { normalized(&text2) } else { text2 };
+    let text2 = if phase.get().is_none() && text2 != text && text2.contains(['\r', '\t']) { std::borrow::Cow::Owned(normalized(&text2)) } else { text2 };
     // Command-click and F12 follow a (ref name) or a definition
     let follow = |byte: i64| {
         let target = match lisp_text::ref_at(text, byte.max(0) as usize) {
@@ -2320,7 +2324,7 @@ fn editor_area(
     }
     match phase.get() {
         Some(ScrubPhase::Live) => {
-            let fallback = scrub(text2.clone(), false);
+            let fallback = scrub(text2.to_string(), false);
             let literal = token.borrow().clone().and_then(|(range, replacement)| {
                 let (start, finish) = range;
                 if text != shown.text || start < 0 || finish > text.len() as i64 || text2 != format!("{}{}{}", sub(text, 0, start), replacement, sub(text, finish, text.len() as i64 - finish)) {
@@ -2337,10 +2341,10 @@ fn editor_area(
                 },
             );
         }
-        Some(ScrubPhase::Done) => push(emit, scrub(text2.clone(), true)),
+        Some(ScrubPhase::Done) => push(emit, scrub(text2.to_string(), true)),
         None => {
             if text2 != text {
-                push(emit, draft(text2.clone()));
+                push(emit, draft(text2.to_string()));
             }
         }
     }
@@ -2348,16 +2352,16 @@ fn editor_area(
     let text2 = match state.picker {
         Some((a, b, changed)) if b <= text2.len() as i64 && chips.iter().any(|(a2, b2, _)| a == *a2 && b == *b2) => {
             match colour_popup(ui, ((c.x).max(c.x + c.width - 310.0), ey + c.row), &text2, (a, b)) {
-                Some(edited) if edited != text2 => {
+                Some(edited) if edited != *text2 => {
                     push(emit, Intent::Picker(Some((a, b, true))));
                     push(emit, scrub(edited.clone(), false));
-                    edited
+                    std::borrow::Cow::Owned(edited)
                 }
                 Some(_) => text2,
                 None => {
                     push(emit, Intent::Picker(None));
                     if changed {
-                        push(emit, scrub(text2.clone(), true));
+                        push(emit, scrub(text2.to_string(), true));
                     }
                     text2
                 }
@@ -2458,7 +2462,7 @@ fn editor_area(
     let by = ty + 1.0 + ((c.bar - 20.0) / 2.0);
     let apply_opts = ButtonOpts { primary: true, enabled: can_apply, hint: Some(hint.into()), ..ButtonOpts::default() };
     if kit::button(ui, &format!("{}-apply", key), (c.x + 12.0, by), apply_w, &apply_opts, "Check and apply") || (submitted && can_apply) {
-        push(emit, apply(text2.clone()));
+        push(emit, apply(text2.to_string()));
     }
     let discard_hint = if c.narrow { None } else { Some("esc") };
     let discard_opts = ButtonOpts { enabled: can_apply, hint: discard_hint.map(Into::into), ..ButtonOpts::default() };
@@ -2587,7 +2591,7 @@ fn editor_area(
                     5 => push(emit, Intent::Command(Command::Find)),
                     6 => push(emit, Intent::Command(Command::Definition)),
                     7 => push(emit, Intent::Command(Command::References)),
-                    9 => push(emit, apply(text2.clone())),
+                    9 => push(emit, apply(text2.to_string())),
                     10 => push(emit, discard.clone()),
                     12 => push(emit, Intent::ToggleWrap),
                     _ => push(emit, Intent::ToggleParinfer),
