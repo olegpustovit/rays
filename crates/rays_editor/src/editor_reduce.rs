@@ -399,10 +399,14 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                 },
                 Change::LayoutEdit(op) => match document_edit::layout_op(Some(factories), &next, op) {
                     Ok(doc) => {
+                        // a plan the lowering kept (only the layout changed) has nothing new to cook
+                        let cook = doc.workspace.lowered.plan.id != next.workspace.lowered.plan.id;
                         next = Arc::new(doc);
                         result.label = layout_edit::label(op).to_string();
                         result.edit_error = None;
-                        result.effects = param::union_effects(result.effects, document_edit::cook_effects());
+                        if cook {
+                            result.effects = param::union_effects(result.effects, document_edit::cook_effects());
+                        }
                     }
                     Err(message) => g.refused = Some(message),
                 },
