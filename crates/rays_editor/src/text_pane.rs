@@ -896,11 +896,13 @@ pub fn graph_op(source: &[S], graph: &str, selection: Option<&[Symbol]>, text: &
     }
 }
 
-fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, selected: Option<&Path>, tab: Tab) -> Result<Shown, Diagnostic> {
+/// `printed` is the document's print when the caller has it (the selection moved, the document did not).
+fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, selected: Option<&Path>, tab: Tab, printed: Option<Printed>) -> Result<Shown, Diagnostic> {
     let source_arc = Arc::new(source.to_vec());
-    let printed = match workspace {
-        None => Printed::of_forms(source_arc.clone()),
-        Some(w) => Printed::of_workspace(w),
+    let printed = match (printed, workspace) {
+        (Some(printed), _) => printed,
+        (None, None) => Printed::of_forms(source_arc.clone()),
+        (None, Some(w)) => Printed::of_workspace(w),
     };
     let key: Path = match selected {
         Some(path) => path.clone(),
@@ -967,7 +969,7 @@ fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, 
 /// ancestor as a `let*` over the root bindings it reads (a note names the count and the graph
 /// inputs used) with the binding marked; Graph the whole graph form; Document the workspace form.
 pub fn make_shown(source: &[S], graph: &str, selected: Option<&Path>, tab: Tab) -> Result<Shown, Diagnostic> {
-    make_shown_with(None, source, graph, selected, tab)
+    make_shown_with(None, source, graph, selected, tab, None)
 }
 
 fn atoms(old: &S, next: &S) -> Option<Vec<S>> {
@@ -1108,9 +1110,15 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
         }
         _ => None,
     };
+    // the Selection tab prints the selected closure again; the document's print is the same while only
+    // the selection moved
+    let printed = match &state.cache {
+        Some(cache) if cache.0.graph == graph && cache.0.tab == state.tab && *cache.0.source == *source && same(&cache.0.workspace, workspace) => Some(cache.1.applied.clone()),
+        _ => None,
+    };
     let shown = match patched {
         Some(shown) => shown,
-        None => make_shown_with(workspace, source, graph, selected.as_ref(), state.tab)?,
+        None => make_shown_with(workspace, source, graph, selected.as_ref(), state.tab, printed)?,
     };
     let key = CacheKey {
         source: shown.source.clone(),
@@ -2344,19 +2352,27 @@ fn editor_area(
         }
         None => text2,
     };
-    // a draft that rests is parsed once: the debounce is the time the text has been the same
+    // a draft that rests is parsed once: the debounce is the time the text has been the same; the
+    // frame it is due in is asked for (B46), nothing polls
     if can_apply {
         match &state.live {
             Some(l) if l.seen == text => {
-                if l.found.is_none() && c.time - l.since >= LIVE_DELAY {
-                    let found = match s::parse(text) {
-                        Err(d) => vec![d],
-                        Ok(_) => Vec::new(),
-                    };
-                    push(emit, Intent::Live(Live { found: Some(found), ..l.clone() }));
+                if l.found.is_none() {
+                    if c.time - l.since >= LIVE_DELAY {
+                        let found = match s::parse(text) {
+                            Err(d) => vec![d],
+                            Ok(_) => Vec::new(),
+                        };
+                        push(emit, Intent::Live(Live { found: Some(found), ..l.clone() }));
+                    } else {
+                        ui.repaint_after(LIVE_DELAY - (c.time - l.since));
+                    }
                 }
             }
-            _ => push(emit, Intent::Live(Live { seen: text.to_owned(), since: c.time, found: None })),
+            _ => {
+                push(emit, Intent::Live(Live { seen: text.to_owned(), since: c.time, found: None }));
+                ui.repaint_after(LIVE_DELAY);
+            }
         }
     }
     let can_apply = can_apply || text2 != text;

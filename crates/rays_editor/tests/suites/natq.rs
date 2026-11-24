@@ -17,6 +17,8 @@ mod smoke;
 mod alloc_budget;
 #[path = "../native_qualification/click_budget.rs"]
 mod click_budget;
+#[path = "../native_qualification/typing_budget.rs"]
+mod typing_budget;
 #[path = "../native_qualification/inspector_l5.rs"]
 mod inspector_l5;
 #[path = "../native_qualification/list_l5.rs"]
@@ -37,6 +39,7 @@ pub fn cases() -> Vec<(&'static str, fn())> {
     cases.extend(smoke::cases());
     cases.extend(alloc_budget::cases());
     cases.extend(click_budget::cases());
+    cases.extend(typing_budget::cases());
     cases.extend(inspector_l5::cases());
     cases.extend(list_l5::cases());
     cases
