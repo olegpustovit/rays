@@ -4,7 +4,7 @@
 //! `editor_literal_scrub`, `editor_text_drop`, `editor_graph_drafts`, `editor_text_find`,
 //! `editor_fn_frames`) need `Rays_editor::Editor`: they live in tests/gpu_editor.rs (suite t3)
 //! (tests/suite_t3/textpane.rs; the unported ones are listed in port/parity_backlog.md).
-use crate::text_pane::{self as t, Find, Shown, Step, Tab};
+use crate::text_pane::{self as t, Find, Shown, ShownData, Step, Tab};
 use editor_document::kinds;
 use editor_document::workspace_doc::{self as doc, TextOptions};
 use flow_graph::flow_edit::{self as f, ArgKey, Op};
@@ -114,7 +114,7 @@ fn token_scrubs() {
     ids.dedup();
     assert_eq!(ids.len(), n, "document metadata reused source IDs after a structural edit");
     let base = t::make_shown(&d.source, "g", None, Tab::Document).unwrap();
-    let shown = Shown { text: printed.clone(), spans: std::sync::Arc::new(spans.clone()), ..base };
+    let shown = Shown::new(ShownData { text: printed.clone(), spans: std::sync::Arc::new(spans.clone()), ..ShownData::clone(&base) });
     let last: Span = spans.iter().find(|(_, sp)| t::sub(&printed, i64::from(sp.start), i64::from(sp.finish - sp.start)) == "999").map(|(_, sp)| sp.clone()).unwrap();
     assert!(t::scrub_op(&shown, (i64::from(last.start), i64::from(last.finish)), "1000").is_none(), "metadata token aliased a source literal");
 }
@@ -226,6 +226,14 @@ fn selection_text() {
 }
 
 /// the pure parts of find and go to: matches, stepping, replacing, symbols, lines
+#[test]
+fn find_folds_unicode_case() {
+    // B45: the fold is Unicode, the offsets are the text's own bytes
+    let text = "\u{c4}rger \u{e4}rger \u{c4}RGER";
+    assert_eq!(t::find_all(false, "\u{e4}rger", text), vec![(0, 6), (7, 13), (14, 20)]);
+    assert_eq!(t::find_all(true, "\u{e4}rger", text), vec![(7, 13)]);
+}
+
 #[test]
 fn find_pure() {
     let find = Find { query: "ab".into(), replace: "X".into(), case: false, replacing: true, at: 0, grab: false };

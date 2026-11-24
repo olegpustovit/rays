@@ -80,8 +80,31 @@ impl Printed {
     }
 }
 
+/// What a pane shows; cloning shares (a frame hands it around several times).
 #[derive(Clone, Debug)]
-pub struct Shown {
+pub struct Shown(Arc<ShownData>);
+
+impl std::ops::Deref for Shown {
+    type Target = ShownData;
+    fn deref(&self) -> &ShownData {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Shown {
+    fn deref_mut(&mut self) -> &mut ShownData {
+        Arc::make_mut(&mut self.0)
+    }
+}
+
+impl Shown {
+    pub fn new(data: ShownData) -> Shown {
+        Shown(Arc::new(data))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ShownData {
     /// the graph the Selection and Graph tabs read
     pub graph: String,
     pub text: String,
@@ -197,7 +220,7 @@ pub struct State {
     pub request: Option<Request>,
     /// raised to scroll the same offset into view again
     pub nonce: i64,
-    pub cache: Option<Box<(CacheKey, Shown)>>,
+    pub cache: Option<Arc<(CacheKey, Shown)>>,
 }
 
 pub fn no_errors() -> Checked {
@@ -886,7 +909,7 @@ fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, 
     Ok(match tab {
         Tab::Document => {
             let spans = printed.spans()?.clone();
-            Shown {
+            Shown::new(ShownData {
                 graph: graph.to_owned(),
                 text: printed.text()?.to_owned(),
                 mark: selected.and_then(|p| path_mark(source, &spans, p)),
@@ -896,10 +919,10 @@ fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, 
                 source: source_arc,
                 spans: Arc::new(spans),
                 applied_spans: printed,
-            }
+            })
         }
         Tab::Selection | Tab::Graph => match root_form(source, graph) {
-            None => Shown {
+            None => Shown::new(ShownData {
                 graph: graph.to_owned(),
                 text: String::new(),
                 mark: None,
@@ -909,7 +932,7 @@ fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, 
                 source: source_arc,
                 spans: Arc::new(Vec::new()),
                 applied_spans: printed,
-            },
+            }),
             Some(root) => {
                 let names: &[Symbol] = match selected {
                     Some(p) if !p.is_empty() => &p[1..],
@@ -924,7 +947,7 @@ fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, 
                 };
                 let (text, spans) = lisp::print(std::slice::from_ref(&form))?;
                 let body = if is_root { last(&root).unwrap_or(root) } else { form };
-                Shown {
+                Shown::new(ShownData {
                     graph: graph.to_owned(),
                     mark: selected.and_then(|p| path_mark(source, &spans, p)),
                     text,
@@ -934,7 +957,7 @@ fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, 
                     source: source_arc,
                     spans: Arc::new(spans),
                     applied_spans: printed,
-                }
+                })
             }
         },
     })
@@ -1021,7 +1044,7 @@ fn patched_shown(previous: &WorkspaceDoc, workspace: &WorkspaceDoc, shown: &Show
     };
     let mark = shown.mark.map(|(a, b)| (boundary(a).unwrap_or(a), boundary(b).unwrap_or(b)));
     let printed = Printed::ready(applied, applied_spans)?;
-    Ok(Some(Shown {
+    Ok(Some(Shown::new(ShownData {
         source: Arc::new(workspace.source.clone()),
         text,
         applied: printed.clone(),
@@ -1029,8 +1052,8 @@ fn patched_shown(previous: &WorkspaceDoc, workspace: &WorkspaceDoc, shown: &Show
         body: new_body,
         mark,
         spans: Arc::new(spans),
-        ..shown.clone()
-    }))
+        ..ShownData::clone(shown)
+    })))
 }
 
 /// Cache shown text by source, workspace, graph, selection and tab. ponytail: source equality may walk O(source); retain an identity owner end-to-end if profiling justifies it.
@@ -1079,7 +1102,7 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
         tab: state.tab,
     };
     let mut next = state.clone();
-    next.cache = Some(Box::new((key, shown.clone())));
+    next.cache = Some(Arc::new((key, shown.clone())));
     Ok((next, shown))
 }
 
@@ -1372,26 +1395,73 @@ pub fn merge3(base: &str, mine: &str, theirs: &str) -> Option<String> {
 
 // ---- find, symbols, lines ----
 
-/// The (start, stop) of every non-overlapping match, in order; ASCII letters fold together unless
-/// `case`.
+/// The (start, stop) of every non-overlapping match, in order; unless `case`, letters fold together by
+/// Unicode lowercase (the offsets are the text's own).
 pub fn find_all(case: bool, query: &str, text: &str) -> Vec<(i64, i64)> {
-    let n = query.len();
-    if n == 0 {
+    if query.is_empty() {
         return Vec::new();
     }
-    let (hay, needle) = if case { (text.as_bytes().to_vec(), query.as_bytes().to_vec()) } else { (text.to_ascii_lowercase().into_bytes(), query.to_ascii_lowercase().into_bytes()) };
+    let fold = |c: char| c.to_lowercase();
+    let needle: Vec<char> = if case { query.chars().collect() } else { query.chars().flat_map(fold).collect() };
     let mut out = Vec::new();
-    let mut from = 0;
-    while from + n <= hay.len() {
-        match (from..=hay.len() - n).find(|&i| hay[i..i + n] == needle[..]) {
-            Some(i) => {
-                out.push((i as i64, (i + n) as i64));
-                from = i + n;
+    let mut resume = 0;
+    for (start, _) in text.char_indices() {
+        if start < resume {
+            continue;
+        }
+        // walk the text's characters, each as its folded run, against the needle
+        let mut at = 0;
+        let mut end = start;
+        for c in text[start..].chars() {
+            end += c.len_utf8();
+            if case {
+                if needle.get(at) != Some(&c) {
+                    at = usize::MAX;
+                    break;
+                }
+                at += 1;
+            } else {
+                for f in fold(c) {
+                    if needle.get(at) != Some(&f) {
+                        at = usize::MAX;
+                        break;
+                    }
+                    at += 1;
+                }
+                if at == usize::MAX {
+                    break;
+                }
             }
-            None => break,
+            if at == needle.len() {
+                break;
+            }
+        }
+        if at == needle.len() {
+            out.push((start as i64, end as i64));
+            resume = end;
         }
     }
     out
+}
+
+/// `find_all` once per text revision: a frame with the find bar open asks again with the same text.
+fn find_all_shared(case: bool, query: &str, text: &str) -> Rc<Vec<(i64, i64)>> {
+    thread_local!(static LAST: RefCell<Option<(bool, String, Box<str>, Rc<Vec<(i64, i64)>>)>> = const { RefCell::new(None) });
+    thread_local!(static NONE: Rc<Vec<(i64, i64)>> = Rc::new(Vec::new()));
+    if query.is_empty() {
+        return NONE.with(Rc::clone);
+    }
+    LAST.with(|l| {
+        let mut l = l.borrow_mut();
+        if let Some((c, q, t, found)) = &*l
+            && *c == case && q == query && **t == *text
+        {
+            return found.clone();
+        }
+        let found = Rc::new(find_all(case, query, text));
+        *l = Some((case, query.to_owned(), text.into(), found.clone()));
+        found
+    })
 }
 
 /// The match the bar is on: the first at or after `at`, else the first.
@@ -1498,15 +1568,20 @@ pub fn graph_slot<'a>(state: &'a State, graph: &str) -> Option<&'a Slot> {
 
 /// What the tab shows and edits: its draft when it has one.
 pub fn current_text(state: &State, shown: &Shown) -> Result<String, Diagnostic> {
+    current_text_ref(state, shown).map(str::to_owned)
+}
+
+/// `current_text`, borrowed from the state or the shown text.
+fn current_text_ref<'a>(state: &'a State, shown: &'a Shown) -> Result<&'a str, Diagnostic> {
     Ok(match state.tab {
-        Tab::Document => match &state.draft { Some(draft) => draft.clone(), None => shown.applied.text()?.to_owned() },
+        Tab::Document => match &state.draft { Some(draft) => draft, None => shown.applied.text()? },
         Tab::Graph => match graph_slot(state, &shown.graph) {
-            Some(s) => s.gtext.clone(),
-            None => shown.text.clone(),
+            Some(s) => &s.gtext,
+            None => &shown.text,
         },
         Tab::Selection => match &state.binding_draft {
-            Some((k, t)) if *k == shown.key => t.clone(),
-            _ => shown.text.clone(),
+            Some((k, t)) if *k == shown.key => t,
+            _ => &shown.text,
         },
     })
 }
@@ -2022,11 +2097,11 @@ fn caret_select(text: &str, state: &State, shown: &Shown) -> Rc<dyn Fn(i64) -> O
             }
             let all_arc = Arc::new(all.clone());
             Some(match (tab, forms.as_slice()) {
-                (Tab::Document, _) => Shown { source: Arc::new(forms.clone()), spans: all_arc, body: None, ..shown.clone() },
-                (Tab::Graph, [form]) => Shown { spans: all_arc.clone(), body: last(form).map(|b| (Arc::new(b), all_arc)), ..shown.clone() },
+                (Tab::Document, _) => Shown::new(ShownData { source: Arc::new(forms.clone()), spans: all_arc, body: None, ..ShownData::clone(&shown) }),
+                (Tab::Graph, [form]) => Shown::new(ShownData { spans: all_arc.clone(), body: last(form).map(|b| (Arc::new(b), all_arc)), ..ShownData::clone(&shown) }),
                 (Tab::Selection, [form]) => {
                     let body = if matches!(s::head(form), Some("graph" | "defn")) { last(form).unwrap_or_else(|| form.clone()) } else { form.clone() };
-                    Shown { spans: all_arc.clone(), body: Some((Arc::new(body), all_arc)), ..shown.clone() }
+                    Shown::new(ShownData { spans: all_arc.clone(), body: Some((Arc::new(body), all_arc)), ..ShownData::clone(&shown) })
                 }
                 _ => shown.clone(),
             })
@@ -2082,8 +2157,8 @@ fn editor_area(
     };
     let area_h = c.row.max(eh - c.footer - find_h);
     let matches = match &state.find {
-        Some(f) => find_all(f.case, &f.query, text),
-        None => Vec::new(),
+        Some(f) => find_all_shared(f.case, &f.query, text),
+        None => find_all_shared(false, "", text),
     };
     let current = state.find.as_ref().and_then(|f| find_current(f, &matches));
     // every match is a band, the current one also a bar under it; the view goes to the current one
@@ -2102,28 +2177,8 @@ fn editor_area(
     let caret: Rc<Cell<Option<i64>>> = Rc::new(Cell::new(None));
     let token: Rc<RefCell<Option<((i64, i64), String)>>> = Rc::new(RefCell::new(None));
     let selection: Rc<Cell<Option<(i64, i64)>>> = Rc::new(Cell::new(None));
-    // Command-click and F12 follow a (ref name) or a definition
-    let follow: Rc<dyn Fn(i64)> = {
-        let (text, graphs, shown, emit) = (text.to_owned(), c.names.graphs.clone(), shown.clone(), emit.clone());
-        Rc::new(move |byte| {
-            let target = match lisp_text::ref_at(&text, byte.max(0) as usize) {
-                Some(name) if graphs.contains(&name) => Some(vec![name.into()]),
-                _ => {
-                    if text == shown.text {
-                        definition_at(&shown, byte)
-                    } else {
-                        None
-                    }
-                }
-            };
-            if let Some(path) = target {
-                if path_mark(&shown.source, &shown.spans, &path).is_none() {
-                    push(&emit, Intent::Tab(Tab::Document));
-                }
-                push(&emit, Intent::JumpDefinition(path));
-            }
-        })
-    };
+    // Command-click asks to follow the byte; the area has returned by then and `follow` reads the text
+    let followed: Rc<Cell<Option<i64>>> = Rc::new(Cell::new(None));
     let mut o = TextAreaOpts::default();
     o.wrap = state.wrap;
     o.errors = errors.iter().filter_map(|d| line_of(text, d)).collect();
@@ -2160,10 +2215,10 @@ fn editor_area(
     }
     {
         // Command-click follows a (ref name); a click on a colour literal opens the colour control
-        let (emit, follow, chips, caret_sel) = (emit.clone(), follow.clone(), chips.clone(), caret_sel.clone());
+        let (emit, followed, chips, caret_sel) = (emit.clone(), followed.clone(), chips.clone(), caret_sel.clone());
         o.on_click = Some(Rc::new(move |byte, command| {
             if command {
-                follow(byte)
+                followed.set(Some(byte))
             } else {
                 match chips.iter().find(|(a, b, _)| *a <= byte && byte < *b) {
                     Some((a, b, _)) => push(&emit, Intent::Picker(Some((*a, *b, false)))),
@@ -2192,6 +2247,28 @@ fn editor_area(
         }));
     }
     let (text2, submitted) = ui.text_area_submit((c.x, ey), c.width, area_h, &o, key, text);
+    // Command-click and F12 follow a (ref name) or a definition
+    let follow = |byte: i64| {
+        let target = match lisp_text::ref_at(text, byte.max(0) as usize) {
+            Some(name) if c.names.graphs.contains(&name) => Some(vec![name.into()]),
+            _ => {
+                if text == shown.text {
+                    definition_at(shown, byte)
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some(path) = target {
+            if path_mark(&shown.source, &shown.spans, &path).is_none() {
+                push(emit, Intent::Tab(Tab::Document));
+            }
+            push(emit, Intent::JumpDefinition(path));
+        }
+    };
+    if let Some(byte) = followed.get() {
+        follow(byte);
+    }
     match phase.get() {
         Some(ScrubPhase::Live) => {
             let fallback = scrub(text2.clone(), false);
@@ -2353,7 +2430,7 @@ fn editor_area(
         BoxOpts::default().flags(CLIP).w(Size::Px(c.width)).h(Size::Px(if c.narrow { 0.0 } else { c.row })).at((c.x, ty + c.bar + 2.0)),
     );
     if !c.narrow {
-        let (errors, text_c, message) = (errors.to_vec(), text.to_owned(), message.to_owned());
+        let (errors, text_c, message) = (errors.to_vec(), if errors.is_empty() { String::new() } else { text.to_owned() }, message.to_owned());
         let accent = theme.accent;
         let ink2 = theme::ink_2(&theme);
         let (state_label, cap_w) = {
@@ -2466,23 +2543,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
     let footer = if narrow { bar + 1.0 } else { bar + row + 2.0 };
     let body_y = y;
     let body_h = row.max(height);
-    let imports: Vec<(String, String)> = match &state.cache {
-        Some(cache) => match &cache.0.workspace {
-            Some(workspace) => workspace
-                .imports
-                .iter()
-                .flat_map(|(file, forms)| {
-                    forms.iter().filter_map(|form| match form.children().get(1).map(|&id| form.arena().row(id).node) {
-                        Some(Node::Sym(name)) => Some((form.name(name).to_owned(), file.clone())),
-                        _ => None,
-                    })
-                })
-                .collect(),
-            None => Vec::new(),
-        },
-        None => Vec::new(),
-    };
-    let language = lisp_text::language(Some(vocab.clone()), Some(names.clone()), Some(imports), state.parinfer, theme);
+    let language = shared_language(vocab, names, state, theme);
     let ctx = AreaCtx { x, width, row, theme, footer, narrow, bar, find_row, language, names: names.clone(), time };
     let message_of = |errors: &[Diagnostic], dirty: bool, clean: String| -> String {
         match real_errors(errors).first() {
@@ -2626,4 +2687,43 @@ mod printing_errors {
         assert_eq!(current_text(&State { draft: None, ..state.clone() }, &shown).unwrap_err(), error);
         assert_eq!(state.draft.as_deref(), Some("unsaved source"));
     }
+}
+
+/// The language of a pane, kept while its inputs are the same values: the vocabulary, the names, the
+/// imports of the shown document, parinfer and the theme.
+fn shared_language(vocab: &Rc<Vocab>, names: &Rc<Names>, state: &State, theme: Theme) -> Language {
+    type Entry = (Rc<Vocab>, Rc<Names>, Option<Arc<(CacheKey, Shown)>>, bool, Theme, Language);
+    thread_local!(static CACHE: RefCell<Vec<Entry>> = const { RefCell::new(Vec::new()) });
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        let same_cache = |a: &Option<Arc<(CacheKey, Shown)>>| match (a, &state.cache) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        if let Some(e) = c.iter().find(|e| Rc::ptr_eq(&e.0, vocab) && Rc::ptr_eq(&e.1, names) && same_cache(&e.2) && e.3 == state.parinfer && e.4 == theme) {
+            return e.5.clone();
+        }
+        let imports: Vec<(String, String)> = match &state.cache {
+            Some(cache) => match &cache.0.workspace {
+                Some(workspace) => workspace
+                    .imports
+                    .iter()
+                    .flat_map(|(file, forms)| {
+                        forms.iter().filter_map(|form| match form.children().get(1).map(|&id| form.arena().row(id).node) {
+                            Some(Node::Sym(name)) => Some((form.name(name).to_owned(), file.clone())),
+                            _ => None,
+                        })
+                    })
+                    .collect(),
+                None => Vec::new(),
+            },
+            None => Vec::new(),
+        };
+        let language = lisp_text::language(Some(vocab.clone()), Some(names.clone()), Some(imports), state.parinfer, theme);
+        // ponytail: four entries cover the panes on screen; one per pane when more are drawn
+        c.truncate(3);
+        c.insert(0, (vocab.clone(), names.clone(), state.cache.clone(), state.parinfer, theme, language.clone()));
+        language
+    })
 }

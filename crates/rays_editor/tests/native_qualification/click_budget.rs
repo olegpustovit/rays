@@ -110,7 +110,8 @@ impl P {
         let s = Instant::now();
         let e = editor::update(self.e.take().unwrap(), &f);
         assert!(e.context_error.is_none(), "{:?}", e.context_error);
-        rays::canvas::render(None, &self.canvas, &editor::scene(&e, &f)).unwrap();
+        let sc = editor::scene(&e, &f);
+        rays::canvas::render(None, &self.canvas, &sc).unwrap();
         self.e = Some(editor::after_present(e, &f));
         (s.elapsed().as_secs_f64() * 1e3, mem_sys::alloc_count() - n0)
     }

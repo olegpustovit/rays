@@ -115,7 +115,7 @@ pub fn editor_text() {
     let tab_graph = tab_at(gw < 400, gx + gw - 159, gy, 1);
     env.click(tab_graph);
     check(has(&env.dump(), "graph tab, draft no"), &format!("Graph tab\n{}", env.dump()));
-    let graph_text = T::make_shown(&original.source, "sunflower", None, T::Tab::Graph).unwrap().text;
+    let graph_text = T::make_shown(&original.source, "sunflower", None, T::Tab::Graph).unwrap().text.clone();
     check(has(&graph_text, "(graph sunflower"), "the Graph tab does not show the graph");
     env.click(area);
     env.step_k(&[Key::Meta], vec![ch('a')]);
@@ -144,7 +144,7 @@ pub fn editor_text() {
     check(has(&env.dump(), "graph tab, draft yes, error"), &format!("a refused graph left the pane\n{}", env.dump()));
     check(same_ws(&env.ws(), &applied_graph), "a refused Graph apply changed the document");
     env.click(discard);
-    let current_graph = T::make_shown(&env.ws().source, "sunflower", None, T::Tab::Graph).unwrap().text;
+    let current_graph = T::make_shown(&env.ws().source, "sunflower", None, T::Tab::Graph).unwrap().text.clone();
     type_text(&mut env, &replace(&current_graph, "(seeds : int 6)", "(seeds : int 3)"));
     env.step(vec![key(Key::Escape)]);
     env.step_k(&[Key::Meta], vec![ch('z')]);
@@ -546,7 +546,7 @@ pub fn editor_text_drop() {
     let original = env.ws();
     let history = env.undo();
     let point = |env: &Env, tab: T::Tab, needle: &str, after: usize| -> (f64, f64) {
-        let text = T::make_shown(&env.ws().source, "b", None, tab).unwrap().text;
+        let text = T::make_shown(&env.ws().source, "b", None, tab).unwrap().text.clone();
         let lines: Vec<&str> = text.split('\n').collect();
         let l = lines.iter().position(|l| has(l, needle)).expect("line");
         let col = lines[l].find(needle).expect("col");

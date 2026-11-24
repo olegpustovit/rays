@@ -169,7 +169,7 @@ fn put(mut text: text_pane::State, graph: &str, slot: Option<Slot>) -> text_pane
 }
 
 fn of_graph(graph: &str, ws: &WorkspaceDoc) -> Result<String, Diagnostic> {
-    text_pane::make_shown(&ws.source, graph, None, Tab::Graph).map(|shown| shown.text)
+    text_pane::make_shown(&ws.source, graph, None, Tab::Graph).map(|shown| shown.text.clone())
 }
 
 fn one_intent(value: &mut EditorModel, intent: &Intent) {
@@ -544,4 +544,23 @@ pub fn apply_drafts(except: Option<&str>, value: &mut EditorModel) -> bool {
         apply_text_at(value, &key, &draft_applies(except, &l.code));
     }
     !has_draft(except, value)
+}
+
+/// `completion_names`, kept while the checked document and the shell are the same values.
+pub fn shared_names(value: &EditorModel) -> std::rc::Rc<crate::lisp_text::Names> {
+    use std::{cell::RefCell, rc::Rc, sync::Arc};
+    type Entry = (Arc<flow_check::workspace::Workspace>, Option<Arc<editor_document::document::Shell>>, Rc<crate::lisp_text::Names>);
+    thread_local!(static CACHE: RefCell<Option<Entry>> = const { RefCell::new(None) });
+    let (checked, shell) = (&value.doc.workspace.ws.checked, &value.doc.shell);
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        match &*c {
+            Some((k, sh, names)) if Arc::ptr_eq(k, checked) && match (sh, shell) { (Some(a), Some(b)) => Arc::ptr_eq(a, b), (None, None) => true, _ => false } => names.clone(),
+            _ => {
+                let names = Rc::new(crate::editor_shell::completion_names(value));
+                *c = Some((checked.clone(), shell.clone(), names.clone()));
+                names
+            }
+        }
+    })
 }
