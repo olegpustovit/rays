@@ -164,7 +164,7 @@ pub struct Checked {
 #[derive(Clone)]
 pub struct Slot {
     pub gtext: String,
-    pub gbase: Option<WorkspaceDoc>,
+    pub gbase: Option<Arc<WorkspaceDoc>>,
     pub gerrors: Checked,
 }
 
@@ -180,7 +180,7 @@ pub struct Live {
 #[derive(Clone)]
 pub struct CacheKey {
     pub source: Arc<Vec<S>>,
-    pub workspace: Option<Box<WorkspaceDoc>>,
+    pub workspace: Option<Arc<WorkspaceDoc>>,
     pub graph: String,
     pub selected: Option<Path>,
     pub tab: Tab,
@@ -196,8 +196,8 @@ pub struct State {
     /// the Graph tab's unapplied texts: one slot per graph
     pub graphs: Vec<(String, Slot)>,
     /// base document of the draft
-    pub doc_base: Option<WorkspaceDoc>,
-    pub binding_base: Option<WorkspaceDoc>,
+    pub doc_base: Option<Arc<WorkspaceDoc>>,
+    pub binding_base: Option<Arc<WorkspaceDoc>>,
     /// of the last refused apply
     pub doc_errors: Checked,
     pub binding_errors: Checked,
@@ -1067,7 +1067,7 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
         (Tab::Document, _, Some(path)) => Some(path.clone()),
         _ => selected.cloned(),
     };
-    let same = |a: &Option<Box<WorkspaceDoc>>, b: Option<&WorkspaceDoc>| match (a, b) {
+    let same = |a: &Option<Arc<WorkspaceDoc>>, b: Option<&WorkspaceDoc>| match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => same_workspace(a, b),
         _ => false,
@@ -1076,6 +1076,24 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
         let (key, shown) = &**cache;
         if *key.source == *source && same(&key.workspace, workspace) && key.graph == graph && key.selected == selected && key.tab == state.tab {
             return Ok((state.clone(), shown.clone()));
+        }
+    }
+    // Only the selection moved: the Graph and Document texts are the same, the mark and the key follow it
+    // (the Selection tab prints the selected closure, so it prints again).
+    if let Some(cache) = &state.cache
+        && state.tab != Tab::Selection
+    {
+        let (key, shown) = &**cache;
+        if *key.source == *source && same(&key.workspace, workspace) && key.graph == graph && key.tab == state.tab {
+            let mut moved = shown.clone();
+            moved.key = match &selected {
+                Some(path) => path.clone(),
+                None => vec![graph.into()],
+            };
+            moved.mark = selected.as_ref().and_then(|p| path_mark(source, &moved.spans, p));
+            let mut next = state.clone();
+            next.cache = Some(Arc::new((CacheKey { selected, ..key.clone() }, moved.clone())));
+            return Ok((next, moved));
         }
     }
     let patched = match (&state.cache, workspace) {
@@ -1096,7 +1114,7 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
     };
     let key = CacheKey {
         source: shown.source.clone(),
-        workspace: workspace.map(|w| Box::new(w.clone())),
+        workspace: workspace.map(|w| Arc::new(w.clone())),
         graph: graph.to_owned(),
         selected,
         tab: state.tab,
@@ -2073,40 +2091,45 @@ fn find_bar(
     }
 }
 
-/// what the byte of a text maps to in the tabs' graph, for a text that is not the shown one
-fn caret_select(text: &str, state: &State, shown: &Shown) -> Rc<dyn Fn(i64) -> Option<Path>> {
+/// what the byte of a text maps to in the tabs' graph: the shown text's own spans when it is the
+/// shown text, else the parse of this text, made once per text
+pub(crate) fn caret_path(text: &str, tab: Tab, shown: &Shown, byte: i64) -> Option<Path> {
     if text == shown.text {
-        let shown = shown.clone();
-        return Rc::new(move |byte| binding_at(&shown, byte));
+        return binding_at(shown, byte);
     }
-    let (text, tab, shown) = (text.to_owned(), state.tab, shown.clone());
-    let mapped: Rc<std::cell::OnceCell<Option<Shown>>> = Rc::new(std::cell::OnceCell::new());
-    Rc::new(move |byte| {
-        let mapped = mapped.get_or_init(|| {
-            let forms = s::parse(&text).ok()?;
-            fn spans(out: &mut Spans, arena: &s::SyntaxArena, id: SyntaxId) {
-                let row = arena.row(id);
-                out.push((row.id, row.span.clone()));
-                for &child in arena.children(id) {
-                    spans(out, arena, child);
-                }
-            }
-            let mut all = Vec::new();
-            for form in &forms {
-                spans(&mut all, form.arena(), form.row_id());
-            }
-            let all_arc = Arc::new(all.clone());
-            Some(match (tab, forms.as_slice()) {
-                (Tab::Document, _) => Shown::new(ShownData { source: Arc::new(forms.clone()), spans: all_arc, body: None, ..ShownData::clone(&shown) }),
-                (Tab::Graph, [form]) => Shown::new(ShownData { spans: all_arc.clone(), body: last(form).map(|b| (Arc::new(b), all_arc)), ..ShownData::clone(&shown) }),
-                (Tab::Selection, [form]) => {
-                    let body = if matches!(s::head(form), Some("graph" | "defn")) { last(form).unwrap_or_else(|| form.clone()) } else { form.clone() };
-                    Shown::new(ShownData { spans: all_arc.clone(), body: Some((Arc::new(body), all_arc)), ..ShownData::clone(&shown) })
-                }
-                _ => shown.clone(),
-            })
-        });
-        mapped.as_ref().and_then(|m| binding_at(m, byte))
+    thread_local!(static PARSED: RefCell<Option<(Box<str>, Tab, Shown, Option<Shown>)>> = const { RefCell::new(None) });
+    PARSED.with(|p| {
+        let mut p = p.borrow_mut();
+        let hit = matches!(&*p, Some((t, tb, base, _)) if **t == *text && *tb == tab && Arc::ptr_eq(&base.0, &shown.0));
+        if !hit {
+            *p = Some((text.into(), tab, shown.clone(), parsed_shown(text, tab, shown)));
+        }
+        p.as_ref().and_then(|(_, _, _, m)| m.as_ref()).and_then(|m| binding_at(m, byte))
+    })
+}
+
+fn parsed_shown(text: &str, tab: Tab, shown: &Shown) -> Option<Shown> {
+    let forms = s::parse(text).ok()?;
+    fn spans(out: &mut Spans, arena: &s::SyntaxArena, id: SyntaxId) {
+        let row = arena.row(id);
+        out.push((row.id, row.span.clone()));
+        for &child in arena.children(id) {
+            spans(out, arena, child);
+        }
+    }
+    let mut all = Vec::new();
+    for form in &forms {
+        spans(&mut all, form.arena(), form.row_id());
+    }
+    let all_arc = Arc::new(all);
+    Some(match (tab, forms.as_slice()) {
+        (Tab::Document, _) => Shown::new(ShownData { source: Arc::new(forms.clone()), spans: all_arc, body: None, ..ShownData::clone(shown) }),
+        (Tab::Graph, [form]) => Shown::new(ShownData { spans: all_arc.clone(), body: last(form).map(|b| (Arc::new(b), all_arc)), ..ShownData::clone(shown) }),
+        (Tab::Selection, [form]) => {
+            let body = if matches!(s::head(form), Some("graph" | "defn")) { last(form).unwrap_or_else(|| form.clone()) } else { form.clone() };
+            Shown::new(ShownData { spans: all_arc.clone(), body: Some((Arc::new(body), all_arc)), ..ShownData::clone(shown) })
+        }
+        _ => shown.clone(),
     })
 }
 
@@ -2139,7 +2162,6 @@ fn editor_area(
     errors: &[Diagnostic],
     spans: Vec<(i64, i64)>,
     reveal: Option<i64>,
-    caret_sel: Rc<dyn Fn(i64) -> Option<Path>>,
     apply: &dyn Fn(String) -> Intent,
     discard: Intent,
     can_apply: bool,
@@ -2177,8 +2199,9 @@ fn editor_area(
     let caret: Rc<Cell<Option<i64>>> = Rc::new(Cell::new(None));
     let token: Rc<RefCell<Option<((i64, i64), String)>>> = Rc::new(RefCell::new(None));
     let selection: Rc<Cell<Option<(i64, i64)>>> = Rc::new(Cell::new(None));
-    // Command-click asks to follow the byte; the area has returned by then and `follow` reads the text
-    let followed: Rc<Cell<Option<i64>>> = Rc::new(Cell::new(None));
+    // clicks and caret moves are answered once the area has returned, with the text it returned
+    let clicked: Rc<Cell<Option<(i64, bool)>>> = Rc::new(Cell::new(None));
+    let moved: Rc<Cell<Option<i64>>> = Rc::new(Cell::new(None));
     let mut o = TextAreaOpts::default();
     o.wrap = state.wrap;
     o.errors = errors.iter().filter_map(|d| line_of(text, d)).collect();
@@ -2214,37 +2237,18 @@ fn editor_area(
         o.on_drop = Some(Rc::new(move |byte, drop| push(&emit, Intent::CarryOver(byte, matches!(drop, Drop::Dropped(_))))));
     }
     {
-        // Command-click follows a (ref name); a click on a colour literal opens the colour control
-        let (emit, followed, chips, caret_sel) = (emit.clone(), followed.clone(), chips.clone(), caret_sel.clone());
-        o.on_click = Some(Rc::new(move |byte, command| {
-            if command {
-                followed.set(Some(byte))
-            } else {
-                match chips.iter().find(|(a, b, _)| *a <= byte && byte < *b) {
-                    Some((a, b, _)) => push(&emit, Intent::Picker(Some((*a, *b, false)))),
-                    None => {
-                        // the caret in a binding selects its node
-                        if let Some(path) = caret_sel(byte) {
-                            push(&emit, Intent::SelectBinding(path));
-                        }
-                    }
-                }
-            }
-        }));
+        // Command-click follows a (ref name); a click on a colour literal opens the colour control; both
+        // are answered after the area, which has the text of this frame
+        let clicked = clicked.clone();
+        o.on_click = Some(Rc::new(move |byte, command| clicked.set(Some((byte, command)))));
     }
     {
         let caret = caret.clone();
         o.on_caret = Some(Rc::new(move |byte| caret.set(Some(byte))));
     }
     {
-        let (emit, caret_sel, shown_key) = (emit.clone(), caret_sel.clone(), shown.key.clone());
-        o.on_caret_move = Some(Rc::new(move |byte| {
-            if let Some(path) = caret_sel(byte)
-                && path != shown_key
-            {
-                push(&emit, Intent::SelectBinding(path));
-            }
-        }));
+        let moved = moved.clone();
+        o.on_caret_move = Some(Rc::new(move |byte| moved.set(Some(byte))));
     }
     let (text2, submitted) = ui.text_area_submit((c.x, ey), c.width, area_h, &o, key, text);
     // Command-click and F12 follow a (ref name) or a definition
@@ -2266,8 +2270,28 @@ fn editor_area(
             push(emit, Intent::JumpDefinition(path));
         }
     };
-    if let Some(byte) = followed.get() {
-        follow(byte);
+    // the caret moved by typing or keys: the binding it is in, in the text it is in now
+    // a number dragged live moves no caret: its text is the document's next, which is not parsed again here
+    if let Some(byte) = moved.get().filter(|_| phase.get().is_none())
+        && let Some(path) = caret_path(&text2, state.tab, shown, byte)
+        && path != shown.key
+    {
+        push(emit, Intent::SelectBinding(path));
+    }
+    if let Some((byte, command)) = clicked.get() {
+        if command {
+            follow(byte);
+        } else {
+            match chips.iter().find(|(a, b, _)| *a <= byte && byte < *b) {
+                Some((a, b, _)) => push(emit, Intent::Picker(Some((*a, *b, false)))),
+                // the caret in a binding selects its node
+                None => {
+                    if let Some(path) = caret_path(&text2, state.tab, shown, byte) {
+                        push(emit, Intent::SelectBinding(path));
+                    }
+                }
+            }
+        }
     }
     match phase.get() {
         Some(ScrubPhase::Live) => {
@@ -2561,7 +2585,6 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
     match state.tab {
         Tab::Document => {
             let errors = errors_of(state, &state.doc_errors, &text);
-            let cs = caret_select(&text, state, shown);
             let message = message_of(&errors, dirty, "Source matches the applied document.".to_owned());
             editor_area(
                 ui,
@@ -2575,7 +2598,6 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 &errors,
                 if dirty { Vec::new() } else { shown.mark.into_iter().collect() },
                 if dirty { None } else { shown.mark.map(|m| m.0) },
-                cs,
                 &|t| Intent::DocApply(t),
                 Intent::DocDiscard,
                 dirty,
@@ -2589,7 +2611,6 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
             let errors = errors_of(state, &slot.map(|s| s.gerrors.clone()).unwrap_or_else(no_errors), &text);
             let dirty = text != shown.text;
             let spans: Vec<(i64, i64)> = if dirty { Vec::new() } else { shown.mark.into_iter().collect() };
-            let cs = caret_select(&text, state, shown);
             let message = message_of(&errors, dirty, format!("Edit {} as text; Check and apply checks the whole workspace.", shown.graph));
             let graph = shown.graph.clone();
             let (g1, g2, g3) = (graph.clone(), graph.clone(), graph.clone());
@@ -2605,7 +2626,6 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 &errors,
                 spans,
                 if dirty { None } else { shown.mark.map(|m| m.0) },
-                cs,
                 &move |t| Intent::GraphApply(g1.clone(), t),
                 Intent::GraphDiscard(graph),
                 dirty,
@@ -2619,7 +2639,6 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
             let dirty = text != shown.text;
             let spans: Vec<(i64, i64)> = if dirty { Vec::new() } else { shown.mark.into_iter().collect() };
             let errors = errors_of(state, &state.binding_errors, &text);
-            let cs = caret_select(&text, state, shown);
             let message = message_of(&errors, dirty, "The selection with what it reads; Check and apply writes the bindings shown.".to_owned());
             let (k1, k2, k3) = (shown.key.clone(), shown.key.clone(), shown.key.clone());
             editor_area(
@@ -2634,7 +2653,6 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 &errors,
                 spans,
                 shown.mark.map(|m| m.0),
-                cs,
                 &move |t| Intent::BindingApply(k1.clone(), t),
                 Intent::BindingDiscard,
                 dirty,

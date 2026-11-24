@@ -188,7 +188,7 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
     };
     let doc = value.doc.clone();
     let workspace: &WorkspaceDoc = &doc.workspace.ws;
-    let base = |old: Option<WorkspaceDoc>| -> Option<WorkspaceDoc> { Some(old.unwrap_or_else(|| workspace.clone())) };
+    let base = |old: Option<Arc<WorkspaceDoc>>| -> Option<Arc<WorkspaceDoc>> { Some(old.unwrap_or_else(|| Arc::new(workspace.clone()))) };
     let slot_of = |text: &text_pane::State, graph: &str| -> Option<Slot> { text_pane::graph_slot(text, graph).cloned() };
     let failed = |text: &text_pane::State, graph: &str, draft: &str, errors: Vec<Diagnostic>| -> Option<Slot> {
         Some(Slot { gtext: draft.to_string(), gbase: base(slot_of(text, graph).and_then(|s| s.gbase)), gerrors: Checked { at: draft.to_string(), found: errors } })
@@ -308,7 +308,7 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
             text.doc_errors = text_pane::no_errors();
             value.text = text
         }
-        Intent::DocApply(draft) => match checked(true, &whole, draft, text.doc_base.as_ref(), &|d| document_edit::text_edit(None, Some(&value.factories), &value.doc, d)) {
+        Intent::DocApply(draft) => match checked(true, &whole, draft, text.doc_base.as_deref(), &|d| document_edit::text_edit(None, Some(&value.factories), &value.doc, d)) {
             Ok(doc) => {
                 install(value, doc, "Edit text", Merge::Step);
                 value.text = text_pane::State { draft: None, doc_base: None, doc_errors: text_pane::no_errors(), ..text };
@@ -351,7 +351,7 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
         }
         Intent::GraphApply(graph, draft) => {
             let gbase = slot_of(&text, graph).and_then(|s| s.gbase);
-            match checked(false, &|ws| of_graph(graph, ws), draft, gbase.as_ref(), &|d| graph_document(&*value, graph, d)) {
+            match checked(false, &|ws| of_graph(graph, ws), draft, gbase.as_deref(), &|d| graph_document(&*value, graph, d)) {
                 Ok(doc) => {
                     install(value, doc, "Edit text", Merge::Step);
                     value.text = put(text, graph, None);
@@ -362,7 +362,7 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
                 }
             }
         }
-        Intent::BindingApply(path, draft) => match checked_binding(path, draft, text.binding_base.as_ref(), &|d| binding_document(&*value, path, d)) {
+        Intent::BindingApply(path, draft) => match checked_binding(path, draft, text.binding_base.as_deref(), &|d| binding_document(&*value, path, d)) {
             Ok(doc) => {
                 install(value, doc, "Edit text", Merge::Step);
                 value.text = text_pane::State { binding_draft: None, binding_base: None, binding_errors: text_pane::no_errors(), ..text };
@@ -378,17 +378,17 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
         // (the gesture seals on release); the draft stays until the drag ends so the editor keeps
         // the text it is dragging in
         Intent::DocScrub(draft, done) => {
-            let result = if finished(*done, draft, text.doc_base.as_ref(), text.draft.as_deref()) {
+            let result = if finished(*done, draft, text.doc_base.as_deref(), text.draft.as_deref()) {
                 Ok(None)
             } else {
-                checked(true, &whole, draft, text.doc_base.as_ref(), &|d| scrub(&|d2| document_edit::text_edit(None, Some(&value.factories), &value.doc, d2), d)).map(Some)
+                checked(true, &whole, draft, text.doc_base.as_deref(), &|d| scrub(&|d2| document_edit::text_edit(None, Some(&value.factories), &value.doc, d2), d)).map(Some)
             };
             match result {
                 Ok(doc) => {
                     if let Some(doc) = doc {
                         install(value, doc, "Edit text", scrub_merge());
                     }
-                    let now = value.doc.workspace.ws.clone();
+                    let now = Arc::new(value.doc.workspace.ws.clone());
                     value.text = text_pane::State {
                         draft: if *done { None } else { Some(draft.clone()) },
                         doc_base: if *done { None } else { Some(now) },
@@ -410,10 +410,10 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
         Intent::GraphScrub(graph, draft, done) => {
             let gbase = slot_of(&text, graph).and_then(|s| s.gbase);
             let current = slot_of(&text, graph).map(|s| s.gtext);
-            let result = if finished(*done, draft, gbase.as_ref(), current.as_deref()) {
+            let result = if finished(*done, draft, gbase.as_deref(), current.as_deref()) {
                 Ok(None)
             } else {
-                checked(false, &|ws| of_graph(graph, ws), draft, gbase.as_ref(), &|d| scrub(&|d2| graph_document(&*value, graph, d2), d)).map(Some)
+                checked(false, &|ws| of_graph(graph, ws), draft, gbase.as_deref(), &|d| scrub(&|d2| graph_document(&*value, graph, d2), d)).map(Some)
             };
             match result {
                 Ok(doc) => {
@@ -423,7 +423,7 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
                     let kept = if *done {
                         None
                     } else {
-                        Some(Slot { gtext: draft.clone(), gbase: Some(value.doc.workspace.ws.clone()), gerrors: text_pane::no_errors() })
+                        Some(Slot { gtext: draft.clone(), gbase: Some(Arc::new(value.doc.workspace.ws.clone())), gerrors: text_pane::no_errors() })
                     };
                     let mut next = put(text.clone(), graph, kept);
                     next.scrubbing = scrubbed(*done);
@@ -443,17 +443,17 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
                 Some((p, d)) if p == path => Some(d.clone()),
                 _ => None,
             };
-            let result = if finished(*done, draft, text.binding_base.as_ref(), current.as_deref()) {
+            let result = if finished(*done, draft, text.binding_base.as_deref(), current.as_deref()) {
                 Ok(None)
             } else {
-                checked_binding(path, draft, text.binding_base.as_ref(), &|d| scrub(&|d2| binding_document(&*value, path, d2), d)).map(Some)
+                checked_binding(path, draft, text.binding_base.as_deref(), &|d| scrub(&|d2| binding_document(&*value, path, d2), d)).map(Some)
             };
             match result {
                 Ok(doc) => {
                     if let Some(doc) = doc {
                         install(value, doc, "Edit text", scrub_merge());
                     }
-                    let now = value.doc.workspace.ws.clone();
+                    let now = Arc::new(value.doc.workspace.ws.clone());
                     value.text = text_pane::State {
                         binding_draft: if *done { None } else { Some((path.clone(), draft.clone())) },
                         binding_base: if *done { None } else { Some(now) },

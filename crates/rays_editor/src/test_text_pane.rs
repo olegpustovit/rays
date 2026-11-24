@@ -227,6 +227,35 @@ fn selection_text() {
 
 /// the pure parts of find and go to: matches, stepping, replacing, symbols, lines
 #[test]
+fn moving_the_selection_does_not_print_again() {
+    // the Document text is the same whichever binding is selected: only the mark and the key follow
+    let source = s::parse("(workspace w (graph g :context sop (let* [a (sop/box) b (sop/box)] b)))").unwrap();
+    let state = t::State { tab: Tab::Document, ..t::initial() };
+    let path = |leaf: &str| -> Vec<flow_syntax::symbol::Symbol> { vec!["g".into(), leaf.into()] };
+    let (state, first) = t::shown(None, &state, &source, "g", Some(&path("a"))).unwrap();
+    let guard = SampleGuard::start_with_clock(Box::new(|| 0.0));
+    let (_, second) = t::shown(None, &state, &source, "g", Some(&path("b"))).unwrap();
+    let sample = guard.finish();
+    assert_eq!(flow_syntax::phase_timer::calls(&sample, "print"), 0, "the selection moved and the document printed again");
+    assert_eq!(first.text, second.text);
+    assert_eq!(second.key, path("b"));
+    assert_ne!(first.mark, second.mark);
+}
+
+#[test]
+fn caret_maps_into_the_text_it_is_in() {
+    // B47: a typed caret is looked up in the draft, not in the previous frame's text
+    let source = s::parse("(workspace w (graph g :context sop (let* [a (sop/box) b (sop/box :size 2)] b)))").unwrap();
+    let shown = t::make_shown(&source, "g", None, Tab::Document).unwrap();
+    let draft = format!(";; a comment typed above\n{}", shown.text);
+    let byte = draft.find(":size 2").unwrap() as i64;
+    let path: Vec<flow_syntax::symbol::Symbol> = vec!["g".into(), "b".into()];
+    assert_eq!(t::caret_path(&draft, Tab::Document, &shown, byte), Some(path.clone()));
+    // the same byte in the previous text is elsewhere
+    assert_ne!(t::caret_path(&shown.text, Tab::Document, &shown, byte), Some(path));
+}
+
+#[test]
 fn find_folds_unicode_case() {
     // B45: the fold is Unicode, the offsets are the text's own bytes
     let text = "\u{c4}rger \u{e4}rger \u{c4}RGER";

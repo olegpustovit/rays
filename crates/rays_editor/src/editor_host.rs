@@ -416,7 +416,7 @@ pub fn reload_failed(value: &mut EditorModel, name: &str, text: &str, diagnostic
     value.text = text_pane::State {
         tab: text_pane::Tab::Document,
         draft: Some(text.to_string()),
-        doc_base: Some(value.doc.workspace.ws.clone()),
+        doc_base: Some(std::sync::Arc::new(value.doc.workspace.ws.clone())),
         doc_errors: text_pane::Checked { at: text.to_string(), found: diagnostics.to_vec() },
         ..value.text.clone()
     };
