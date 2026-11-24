@@ -1033,6 +1033,7 @@ pub fn update_frame(
     // a panel's pane, laid out: the one in use, or one of the others
     let pane_of = |host: &Host| shown_as(&(&*value).into(), (&host.0, &host.1, &host.2));
     let in_use = |pane: &ModelView<'_>| pane.key == panel_map::key_ref(&value.panes);
+    text_pane::probe("pre-text_state"); // PROBE_TMP
     let ((text_host, text, text_shown, other_texts), text_error) =
         match text_state(&(&*value).into(), &actions, &pane_of, &hosted(HostKind::Text)) {
             Ok(state) => (state, None),
@@ -1229,7 +1230,9 @@ pub fn update_frame(
             let (graph_body, menu2, menu_pick) = draw_graph_pane(ui, frame_, &(&*value).into(), &shortcut_frame, &mut scope_view2, scope_active, guide, carry_lit.clone(), carry_hot.clone(), &graph_root, &graph_host, &workspace, menu.clone(), &open_menu, &mut scope_changes);
             // Each pane builder returns only its frame intents and updated pane-local state.
             let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &(&*value).into(), &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), &rows_, &columns, &host_rows, &selected, tree_value.clone(), list_intents.clone(), value.locals.clone());
+            text_pane::probe("pre-draw_text_panes"); // PROBE_TMP
             let (text2, text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &*value, &root_at, &header_slots, &text_host, &text_shown, text.clone(), other_texts.clone(), locals);
+            text_pane::probe("post-draw_text_panes"); // PROBE_TMP
             let (outline, outline_intents, locals) = draw_outline_panes(ui, &*value, &hosted(HostKind::Outline), &root_at, &|pane| navigator_params(&pane.into()), value.outline.clone(), locals);
             let locals = draw_spreadsheet_panes(ui, &(&*value).into(), &of_kind(&Panel::Spreadsheet), locals);
             let graph_panes = draw_other_graph_panes(ui, &shortcut_frame, &(&*value).into(), &other_panes, &roots);
@@ -1348,8 +1351,8 @@ pub fn update_frame(
                 effects: Effects::default(),
                 timeline_intents,
                 frame_request: initial_frame_request,
-                prompt: None,
-                prompt_intent: None,
+                prompt: prompt_next,
+                prompt_intent: prompt_intent_,
                 panel,
                 grab,
                 settings: unchanged.clone(),
@@ -1365,15 +1368,11 @@ pub fn update_frame(
                 locals,
                 other_texts: other_texts2,
                 handle_changes,
-                bar_action: bar_action.clone(),
+                bar_action,
                 view_pick,
                 drops,
             };
-            let prompt_intent_ = match (prompt_intent_, &result.bar_action) {
-                (None, Some(a)) => Some(PromptIntent::RunAction(a.clone())),
-                (intent, _) => intent,
-            };
-            built = Some(FrameResult { prompt: prompt_next, prompt_intent: prompt_intent_, ..result });
+            built = Some(result);
         };
         let ui_handle = value.ui.clone();
         rays_shell::host::frame(&mut ui_handle.borrow_mut(), frame_, &mut build_and_prompt);
@@ -1622,6 +1621,89 @@ mod tests {
             assert!(!pane_route(&(&value).into()).is_empty(), "B6: layout switch dropped g1's route");
             assert_eq!(pane_view(&(&value).into()).pan_x, 77.0, "B6: layout switch dropped g1's pan_x");
             assert_eq!(pane_view(&(&value).into()).pan_y, -33.0, "B6: layout switch dropped g1's pan_y");
+            editor_host::close(&value);
+        });
+    }
+
+    #[test]
+    fn b11_pick_split_and_outline_apply_same_frame_and_keep_bar_action() {
+        big_stack(|| {
+            // 1. /x pick-split applies on the click frame itself (no queued lag).
+            let mut value = model_of(
+                r#"(workspace w
+                    (graph g :context sop (sop/box))
+                    (graph editor :context editor (ui/workspace (ui/graph "g" :focus true))))"#,
+            );
+            let mut tick = 0;
+            step_model(&mut value, &mut tick, (400.0, 300.0), vec![]);
+            step_model(&mut value, &mut tick, (400.0, 300.0), vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('x'))]);
+            step_model(&mut value, &mut tick, (400.0, 300.0), vec![Event::KeyPressed(Key::KeyChar('4'))]);
+            assert!(matches!(value.prompt, Some(Prompt::Splitting { .. })), "B11 setup: expected Prompt::Splitting");
+            // Hover then click to commit the split: must land on THIS frame!
+            step_model(&mut value, &mut tick, (400.0, 300.0), vec![Event::PointerMoved((400.0, 300.0))]);
+            step_model(
+                &mut value,
+                &mut tick,
+                (400.0, 300.0),
+                vec![Event::PointerPressed(MouseButton::LeftButton, (400.0, 300.0)), Event::PointerReleased(MouseButton::LeftButton, (400.0, 300.0))],
+            );
+            let printed = workspace_doc::print(&value.doc.workspace.ws).unwrap().0;
+            assert!(printed.contains("(ui/inspector)"), "B11: /x pick-split did not apply on the click frame: {printed}");
+            assert!(value.queued.is_empty(), "B11: /x pick-split left a queued action: {:?}", value.queued);
+            editor_host::close(&value);
+
+            // 2. Graph toolbar Outline button applies on the click frame itself.
+            let mut value = model_of(
+                r#"(workspace o
+                    (graph g :context value (let* [a 1.0] a))
+                    (graph editor :context editor (ui/workspace (ui/graph "g" :focus true))))"#,
+            );
+            let mut tick = 0;
+            step_model(&mut value, &mut tick, (200.0, 300.0), vec![]);
+            step_model(&mut value, &mut tick, (200.0, 300.0), vec![]);
+            let f0 = idle_frame();
+            let leaf = layout::find(&geometry(&(&value).into(), &value.workspace, &f0), &Panel::Graph).expect("graph leaf");
+            let from = {
+                let mut ui = value.ui.borrow_mut();
+                chrome::tools_start(&mut ui, true, false, false, &panel_title(&(&value).into(), &leaf))
+            };
+            let (ox, oy) = {
+                let mut ui = value.ui.borrow_mut();
+                let (x, y, w, h) = crate::bars::tool_rect(true, &mut ui, leaf.header, from, crate::bars::Tool::Outline).expect("Outline tool rect");
+                (f64::from(x + w / 2.0), f64::from(y + h / 2.0))
+            };
+            step_model(&mut value, &mut tick, (ox, oy), vec![Event::PointerMoved((ox, oy))]);
+            step_model(
+                &mut value,
+                &mut tick,
+                (ox, oy),
+                vec![Event::PointerPressed(MouseButton::LeftButton, (ox, oy)), Event::PointerReleased(MouseButton::LeftButton, (ox, oy))],
+            );
+            let printed = workspace_doc::print(&value.doc.workspace.ws).unwrap().0;
+            assert!(printed.contains("(ui/outline)"), "B11: Outline toolbar click did not apply on the click frame: {printed}");
+            assert!(value.queued.is_empty(), "B11: Outline toolbar click left a queued action: {:?}", value.queued);
+            editor_host::close(&value);
+
+            // 3. A bar_action is not dropped when a prompt_intent arrives on the same frame.
+            let mut value = model_of(
+                r#"(workspace w
+                    (graph a :context sop (sop/box))
+                    (graph b :context sop (sop/box))
+                    (graph editor :context editor
+                      (let* [l0 (ui/graph "a") l1 (ui/split_at "horizontal" 0.5 (ui/graph "a") (ui/inspector))]
+                        (ui/workspace (ui/switch l0 l1 :active 0)))))"#,
+            );
+            let mut tick = 0;
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            let f = idle_frame();
+            let input = crate::editor_reduce::idle_input(&(&value).into(), &[], &f);
+            let mut res = crate::editor_reduce::idle_result(&(&value).into(), selection::empty());
+            res.prompt_intent = Some(PromptIntent::Go("b".to_string()));
+            res.bar_action = Some(Action::LayoutSwitch(1));
+            reduce(None, None, input, &mut value, res);
+            let printed = workspace_doc::print(&value.doc.workspace.ws).unwrap().0;
+            assert_eq!(pane_shown(&(&value).into()).map(String::as_str), Some("b"), "B11: prompt_intent Go(\"b\") did not apply");
+            assert!(printed.contains(":active 1"), "B11: bar_action LayoutSwitch(1) was dropped when prompt_intent arrived on the same frame: {printed}");
             editor_host::close(&value);
         });
     }

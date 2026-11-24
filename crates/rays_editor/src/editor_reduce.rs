@@ -908,6 +908,120 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
             Some(intent @ PromptIntent::Go(_)) => Some(intent),
             _ => None,
         };
+        result.bar_action = result.bar_action.take().filter(|a| crate::editor_carry::carry_allowed(a));
+    }
+    // B11: apply PromptIntent::RunAction and bar_action on this same frame, and never drop
+    // bar_action when a prompt_intent arrives alongside it.
+    let mut immediate: Vec<Action> = Vec::new();
+    if matches!(&result.prompt_intent, Some(PromptIntent::RunAction(_))) {
+        if let Some(PromptIntent::RunAction(a)) = result.prompt_intent.take() {
+            immediate.push(a);
+        }
+    }
+    if let Some(a) = result.bar_action.take() {
+        immediate.push(a);
+    }
+    let mut queued_more: Vec<Action> = Vec::new();
+    let mut text = text;
+    let mut timeline = timeline;
+    let mut timeline_changes = timeline_changes;
+    let mut copied = copied;
+    if !immediate.is_empty() {
+        let leaves = crate::editor_shell::shell_leaves(value, &result.workspace);
+        let intents = crate::editor_frame::panel_intents(&value.into(), &leaves, &result.workspace, frame_, &result.focus, result.focus_path.as_deref(), &immediate);
+        if !intents.is_empty() {
+            let vw = ModelView { workspace: &result.workspace, focus: &result.focus, selection: &result.selection, ..ModelView::from(value) };
+            let (next_ws, layout_changes) = crate::editor_panels::layout_intents(&vw, &result.workspace, &intents);
+            result.workspace = next_ws;
+            result.changes.extend(layout_changes);
+        }
+        result.changes.extend(crate::editor_panels::layout_actions(&value.into(), &result.workspace, None, &immediate));
+        for a in immediate {
+            match a {
+                Action::PanelSplitAt(..)
+                | Action::PanelSplit(_)
+                | Action::PanelClose
+                | Action::FloatToggle
+                | Action::PanelRetype(_)
+                | Action::ToggleGraph
+                | Action::ToggleInspector
+                | Action::ToggleTimeline
+                | Action::LayoutSwitch(_)
+                | Action::LayoutNew
+                | Action::LayoutRemove
+                | Action::WindowNew(_)
+                | Action::Peek => {
+                    if matches!(a, Action::PanelRetype(Panel::Graph | Panel::List | Panel::Lisp)) {
+                        actions.push(a);
+                    }
+                }
+                Action::TextCommand(cmd) => {
+                    if text_shown.is_some() {
+                        text = text_pane::command(&text, cmd);
+                    }
+                }
+                Action::ScopeCommand(cmd) => {
+                    if graph_shown && scope_name(&value.into()).is_some() {
+                        let start = result.scope_changes.len();
+                        scope_commands::run_command(&mut result.scope_view, cmd, &mut result.scope_changes);
+                        let vw = ModelView { workspace: &result.workspace, focus: &result.focus, selection: &result.selection, ..ModelView::from(value) };
+                        let more = crate::editor_frame::pane_changes(&value.into(), &vw, Vec::new(), &result.scope_changes[start..], &None, &[]);
+                        result.changes.extend(more);
+                    }
+                }
+                Action::CopyLisp => {
+                    copied = Some(crate::editor_panels::copy_workspace(value));
+                }
+                Action::PlayPause | Action::Reset | Action::Stop | Action::RestoreLayout | Action::OpenCamera | Action::WorldPlay => {
+                    let (ws, sel, tr, tl, tlc) = crate::editor_actions::apply_action(
+                        value,
+                        (result.workspace.clone(), result.selection.clone(), result.tree.clone(), timeline, timeline_changes),
+                        &a,
+                    );
+                    result.workspace = ws;
+                    result.selection = sel;
+                    result.tree = tr;
+                    timeline = tl;
+                    timeline_changes = tlc;
+                    actions.push(a);
+                }
+                Action::FrameCamera => {
+                    if result.frame_request.is_none() {
+                        result.frame_request = match pane_level(&value.into()) {
+                            Level::Inside(id) => value.viewed.get(&id).map(|(_, d)| *d).or_else(|| crate::editor_inspect::displayed(&value.into())),
+                            Level::Scene => crate::editor_inspect::displayed(&value.into()),
+                        };
+                    }
+                    actions.push(a);
+                }
+                Action::Back(_)
+                | Action::Undo
+                | Action::Redo
+                | Action::Enter
+                | Action::Up
+                | Action::GoWorld
+                | Action::ToggleMap
+                | Action::PickUp
+                | Action::LookThrough
+                | Action::LookThroughCamera
+                | Action::RenderMode(_)
+                | Action::Tool(_)
+                | Action::Fly
+                | Action::SaveSource
+                | Action::ReloadSource
+                | Action::OpenSource
+                | Action::HideUi
+                | Action::WorldEmit
+                | Action::WorldReseed
+                | Action::WorldTime(_)
+                | Action::WorldPreset(_) => {
+                    actions.push(a);
+                }
+                other => {
+                    queued_more.push(other);
+                }
+            }
+        }
     }
     let guide_error = if guide == value.guide {
         None
@@ -1261,7 +1375,6 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     let projections = projections_of(&outlined, &actions, &result, &*value2);
     let selection_changed = scope_selection_changed || outlined.is_some();
-    let mut text = text;
     if selection_changed {
         text.target = None;
     }
@@ -1369,11 +1482,10 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         (None, None) => false,
         _ => true,
     };
-    let queued = match &result.prompt_intent {
-        Some(PromptIntent::RunAction(a)) => vec![a.clone()],
-        _ if all_ui_visible && actions.contains(&Action::AddNode) && !graph_shown && has_panel(&(&*value2).into(), &Panel::Graph) => vec![Action::AddNode],
-        _ => Vec::new(),
-    };
+    let mut queued = queued_more;
+    if all_ui_visible && actions.contains(&Action::AddNode) && !graph_shown && has_panel(&(&*value2).into(), &Panel::Graph) && !queued.contains(&Action::AddNode) {
+        queued.push(Action::AddNode);
+    }
     let notice_at = value2.notice_at;
     let core = value2;
     core.timeline = timeline;
