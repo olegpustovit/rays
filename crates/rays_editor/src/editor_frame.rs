@@ -1519,6 +1519,113 @@ mod tests {
         frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
     }
 
+    fn step_model(value: &mut EditorModel, tick: &mut i64, pointer: (f64, f64), events: Vec<Event>) {
+        *tick += 1;
+        let t = *tick;
+        let mut input = input::at_time(t as f64 / 60.0);
+        input.dt = 1.0 / 60.0;
+        input.frame = t;
+        input.tick = t;
+        input.size = (900, 640);
+        input.pointer = pointer;
+        input.events = events;
+        let f = frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) };
+        let no_cam = |_: &mut Ui| -> PanelResult { Rc::new(()) };
+        let no_handles = |_: &mut Ui, _: Option<&Picked>, _: rays_math::mat4::T, _: layout::Bounds| (Vec::new(), false, None);
+        let no_view_state: Rc<dyn Fn(Option<&PanelResult>) -> Syntax> = Rc::new(|_| {
+            let mut b = flow_syntax::arena::SyntaxBuilder::new();
+            let fields = b.range(&[]);
+            let id = b.push(0, SNode::Map(fields), Default::default(), None);
+            b.freeze().handle(id)
+        });
+        let no_image = |_: i64| None;
+        let _ = update_frame(value, false, true, false, &no_cam, &no_handles, None, None, no_view_state, &f, None, None, &no_image, Vec::new());
+    }
+
+    #[test]
+    fn b5_split_preserves_graph_pane_and_locals() {
+        big_stack(|| {
+            let mut value = model_of(
+                r#"(workspace w
+                    (graph a :context sop (sop/box))
+                    (graph b :context sop (let* [box1 (sop/box)] box1))
+                    (graph editor :context editor
+                      (let* [net (ui/graph "a" :focus true) code (ui/lisp)]
+                        (ui/workspace (ui/split_at "horizontal" 0.6 net code)))))"#,
+            );
+            let mut tick = 0;
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            // Navigate to graph b (building a route), settle its initial layout, then pan and select.
+            go(&mut value, "b");
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            {
+                let p = pane_mut(&mut value);
+                p.view.pan_x = 123.0;
+                p.view.pan_y = -45.0;
+                scope::select(vec![vec!["b".into(), "box1".into()]], &mut p.view);
+            }
+            // Give the Lisp panel its own non-default tab state in `text` / `locals`.
+            value.text.tab = text_pane::Tab::Document;
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            // Split the focused graph panel with /ov.
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('o')), Event::KeyPressed(Key::KeyChar('v'))]);
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            let printed = workspace_doc::print(&value.doc.workspace.ws).unwrap().0;
+            assert!(printed.contains("net_a"), "B5 setup: /ov did not split net: {printed}");
+            assert_eq!(pane_shown(&(&value).into()).map(String::as_str), Some("b"), "B5: split reset pane.shown");
+            assert!(!pane_route(&(&value).into()).is_empty(), "B5: split cleared pane.route");
+            assert_eq!(pane_view(&(&value).into()).pan_x, 123.0, "B5: split reset pan_x");
+            assert_eq!(pane_view(&(&value).into()).pan_y, -45.0, "B5: split reset pan_y");
+            assert_eq!(scope::selected(pane_view(&(&value).into())), vec![vec![Symbol::from("b"), Symbol::from("box1")]], "B5: split cleared selection");
+            // Also split the Lisp panel: its local state (Tab::Document) must stay attached.
+            value.focus = Panel::Lisp;
+            value.focus_path = Some(vec![1]);
+            step_model(&mut value, &mut tick, (700.0, 200.0), vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('o')), Event::KeyPressed(Key::KeyChar('v'))]);
+            step_model(&mut value, &mut tick, (700.0, 200.0), vec![]);
+            assert_eq!(value.text.tab, text_pane::Tab::Document, "B5: splitting Lisp panel orphaned its local tab");
+            editor_host::close(&value);
+        });
+    }
+
+    #[test]
+    fn b6_layout_switch_preserves_inactive_graph_panes() {
+        big_stack(|| {
+            let mut value = model_of(
+                r#"(workspace w
+                    (graph a :context sop (sop/box))
+                    (graph b :context sop (sop/box))
+                    (graph editor :context editor
+                      (let* [g0 (ui/graph "a") g1 (ui/graph "a")
+                             l0 g0 l1 (ui/split_at "horizontal" 0.5 g1 (ui/inspector))]
+                        (ui/workspace (ui/switch l0 l1 :active 0)))))"#,
+            );
+            let mut tick = 0;
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            // Switch to layout 1 (/[1).
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('[')), Event::KeyPressed(Key::KeyChar('1'))]);
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            // Navigate on layout 1's graph panel g1, settle layout, then pan.
+            go(&mut value, "b");
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            {
+                let p = pane_mut(&mut value);
+                p.view.pan_x = 77.0;
+                p.view.pan_y = -33.0;
+            }
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            // Switch back to layout 0 (/[0), settle, then switch back to layout 1 (/[1).
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('[')), Event::KeyPressed(Key::KeyChar('0'))]);
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('[')), Event::KeyPressed(Key::KeyChar('1'))]);
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            assert_eq!(pane_shown(&(&value).into()).map(String::as_str), Some("b"), "B6: layout switch dropped g1's shown graph");
+            assert!(!pane_route(&(&value).into()).is_empty(), "B6: layout switch dropped g1's route");
+            assert_eq!(pane_view(&(&value).into()).pan_x, 77.0, "B6: layout switch dropped g1's pan_x");
+            assert_eq!(pane_view(&(&value).into()).pan_y, -33.0, "B6: layout switch dropped g1's pan_y");
+            editor_host::close(&value);
+        });
+    }
+
     #[test]
     fn b9_toggle_graph_sets_all_to_one_state() {
         big_stack(|| {

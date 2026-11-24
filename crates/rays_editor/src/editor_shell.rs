@@ -396,10 +396,163 @@ pub fn follow_graph(value: &mut EditorModel, focus: &Panel, focus_path: Option<&
             panel_map::set_leaf(&mut value.panes, Some(path));
         }
         (Some((key, path)), Some(_)) => {
-            // the pane left keeps its canvas, selection, graph and route in the map
+            // the pane left keeps its canvas, selection, graph and route in the map (bounded by MRU)
             with_pane_in_use(value, (&key, &path));
-            let keys: Vec<flow_check::workspace::Path> = all.iter().map(|(k, _)| k.clone()).collect();
-            panel_map::retain(&mut value.panes, &|key| keys.contains(key));
+        }
+    }
+}
+
+fn same_panel_kind(a: &Panel, b: &Panel) -> bool {
+    match (a, b) {
+        (Panel::View(_), Panel::View(_)) | (Panel::Canvas(_), Panel::Canvas(_)) => true,
+        _ => a == b,
+    }
+}
+
+/// Panel key renames caused by a same-layout edit (split, unsplit/undo, default-shell
+/// materialization, float): `(old_key, new_key, old_path, new_path)`. Returns empty on a layout
+/// switch or when the shell is unchanged.
+pub fn panel_renames(
+    before: &Document,
+    before_tree: &panels::Panels,
+    after: &Document,
+    after_tree: &panels::Panels,
+) -> Vec<(panel_map::Key, panel_map::Key, layout::Path, layout::Path)> {
+    if match (&before.shell, &after.shell) {
+        (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    } {
+        return Vec::new();
+    }
+    // Switching between editor graphs or switch layouts is not a key rename (B6 keeps each layout's panes).
+    let before_graph = workspace_doc::editor_graph_ref(&before.workspace.ws).map(|g| g.name.as_str());
+    let after_graph = workspace_doc::editor_graph_ref(&after.workspace.ws).map(|g| g.name.as_str());
+    if let (Some(a), Some(b)) = (before_graph, after_graph) {
+        if a != b {
+            return Vec::new();
+        }
+    }
+    if let (Some(a), Some(b)) = (
+        before.shell.as_ref().and_then(|s| s.switch.as_ref()),
+        after.shell.as_ref().and_then(|s| s.switch.as_ref()),
+    ) {
+        if a.active != b.active {
+            return Vec::new();
+        }
+    }
+    let old_leaves: Vec<(layout::Path, Panel, panel_map::Key)> = panels::leaves(before_tree)
+        .into_iter()
+        .map(|(p, panel)| {
+            let k = panel_key(before, &p);
+            (p, panel, k)
+        })
+        .collect();
+    let new_leaves: Vec<(layout::Path, Panel, panel_map::Key)> = panels::leaves(after_tree)
+        .into_iter()
+        .map(|(p, panel)| {
+            let k = panel_key(after, &p);
+            (p, panel, k)
+        })
+        .collect();
+    let disappeared: Vec<usize> = (0..old_leaves.len())
+        .filter(|&i| !new_leaves.iter().any(|(_, _, nk)| *nk == old_leaves[i].2))
+        .collect();
+    let appeared: Vec<usize> = (0..new_leaves.len())
+        .filter(|&j| !old_leaves.iter().any(|(_, _, ok)| *ok == new_leaves[j].2))
+        .collect();
+    if disappeared.is_empty() || appeared.is_empty() {
+        return Vec::new();
+    }
+    let mut used_old = vec![false; old_leaves.len()];
+    let mut used_new = vec![false; new_leaves.len()];
+    let mut out = Vec::new();
+    let mut match_pass = |pred: &dyn Fn(&[usize], &[usize]) -> bool| {
+        for &oi in &disappeared {
+            if used_old[oi] {
+                continue;
+            }
+            let (ref op, ref opanel, ref okey) = old_leaves[oi];
+            if let Some(&ni) = appeared.iter().find(|&&j| !used_new[j] && same_panel_kind(opanel, &new_leaves[j].1) && pred(op, &new_leaves[j].0)) {
+                used_old[oi] = true;
+                used_new[ni] = true;
+                let (ref np, _, ref nkey) = new_leaves[ni];
+                out.push((okey.clone(), nkey.clone(), op.clone(), np.clone()));
+            }
+        }
+    };
+    // 1. Same path (default-shell materialization or in-place binding rename).
+    match_pass(&|op, np| op == np);
+    // 2. Split: original leaf at `op` moved to `op + [0]` (`leaf` -> `leaf_a`).
+    match_pass(&|op, np| np.len() == op.len() + 1 && np[..op.len()] == *op && np[op.len()] == 0);
+    // 3. Unsplit / undo of split / sibling closed: `op` was a direct child of `np`.
+    match_pass(&|op, np| op.len() == np.len() + 1 && op[..np.len()] == *np);
+    // 4. Float / unfloat / dock where a unique disappeared leaf of a kind matches one appeared leaf.
+    for &oi in &disappeared {
+        if used_old[oi] {
+            continue;
+        }
+        let (ref op, ref opanel, ref okey) = old_leaves[oi];
+        let old_of_kind = disappeared.iter().filter(|&&i| !used_old[i] && same_panel_kind(&old_leaves[i].1, opanel)).count();
+        let mut new_of_kind = appeared.iter().copied().filter(|&j| !used_new[j] && same_panel_kind(&new_leaves[j].1, opanel));
+        if old_of_kind == 1 {
+            if let (Some(ni), None) = (new_of_kind.next(), new_of_kind.next()) {
+                used_old[oi] = true;
+                used_new[ni] = true;
+                let (ref np, _, ref nkey) = new_leaves[ni];
+                out.push((okey.clone(), nkey.clone(), op.clone(), np.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// Carry graph panes, panel locals, active host keys, focus path and start-keyword memory across
+/// panel key renames produced by a same-layout edit (B5).
+pub fn remap_panels(value: &mut EditorModel, result: &mut FrameResult, before: &Document, before_tree: &panels::Panels) {
+    let after_tree = shell_tree(value, &value.workspace).into_owned();
+    let renames = panel_renames(before, before_tree, &value.doc, &after_tree);
+    if renames.is_empty() {
+        return;
+    }
+    let rename_opt = |slot: &mut Option<panel_map::Key>, old: &panel_map::Key, new: &panel_map::Key| {
+        if slot.as_ref() == Some(old) {
+            *slot = Some(new.clone());
+        }
+    };
+    let rename_locals = |locals: &mut Vec<(panel_map::Key, Local)>, old: &panel_map::Key, new: &panel_map::Key| {
+        if let Some(pos) = locals.iter().position(|(k, _)| k == old) {
+            let (_, local) = locals.remove(pos);
+            locals.retain(|(k, _)| k != new);
+            locals.insert(pos.min(locals.len()), (new.clone(), local));
+        }
+    };
+    for (old_key, new_key, old_path, new_path) in renames {
+        panel_map::rename(&mut value.panes, &old_key, &new_key, Some(new_path.clone()));
+        for (k, _) in &mut result.graph_panes {
+            if *k == old_key {
+                *k = new_key.clone();
+            }
+        }
+        rename_locals(&mut value.locals, &old_key, &new_key);
+        rename_locals(&mut result.locals, &old_key, &new_key);
+        rename_opt(&mut value.list_at, &old_key, &new_key);
+        rename_opt(&mut value.text_at, &old_key, &new_key);
+        rename_opt(&mut value.outline_at, &old_key, &new_key);
+        if result.focus_path.as_ref() == Some(&old_path) {
+            result.focus_path = Some(new_path);
+        }
+        let started = std::rc::Rc::make_mut(&mut value.started);
+        rename_opt(&mut started.on, &old_key, &new_key);
+        for (k, _) in &mut started.views {
+            if *k == old_key {
+                *k = new_key.clone();
+            }
+        }
+        for (k, _) in &mut started.tabs {
+            if *k == old_key {
+                *k = new_key.clone();
+            }
         }
     }
 }

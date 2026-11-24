@@ -1166,10 +1166,22 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         scope::select(added.clone(), &mut picked_view)
     };
     let value2 = owned;
+    let before_tree = if !loaded_flag && !match (&value2.doc.shell, &doc.shell) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    } {
+        Some(crate::editor_shell::shell_tree(&*value2, &value2.workspace).into_owned())
+    } else {
+        None
+    };
     value2.timeline_frames = timeline_frames;
     value2.set_doc(doc.clone());
     value2.lisp_vocab = vocab;
     value2.workspace = workspace;
+    if let Some(before_tree) = before_tree {
+        crate::editor_shell::remap_panels(value2, &mut result, &previous_doc, &before_tree);
+    }
     pane_mut(value2).at = level;
     // the selection keeps the nodes that still exist in the open network
     let mut selection = if level != previous_level || loaded_flag {
