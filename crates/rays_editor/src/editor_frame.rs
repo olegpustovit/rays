@@ -41,7 +41,7 @@ use crate::editor_actions::{apply_action, routed};
 use crate::editor_carry::{carry_allowed, carry_place, carry_step};
 use crate::editor_commands::{self, Action, action_of, Command};
 use crate::editor_inspect::{displayed, kind, new_graph, objects as level_objects};
-use crate::editor_list::{rows, space};
+use crate::editor_list::{rows, space, sync_list_selection};
 use crate::editor_menu::open_menu;
 use crate::editor_model::*;
 use crate::editor_panels::{copy_bindings, copy_workspace, defn_change, focused_leaf, graph_leaf, layout_actions, layout_intents_cow, navigator_params, paste_bindings, write_panel_title};
@@ -1313,6 +1313,7 @@ pub fn update_frame(
                     _ => {}
                 }
             }
+            sync_list_selection(&(&*value).into(), &list_intents2, &mut scope_view2);
             let inspector_visible = has_panel(&vw, &Panel::Inspector);
             let selected_ids = selection::selected_nodes(&selection).to_vec();
             let selected_id = if selected_ids.len() == 1 { selection::selected(&selection) } else { None };

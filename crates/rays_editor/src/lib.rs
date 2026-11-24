@@ -81,6 +81,8 @@ mod test_editor_model;
 // tests: E
 #[cfg(test)]
 mod test_editor_reduce;
+#[cfg(test)]
+mod test_geometry_list_selection;
 
 // api: F (the public surface of rays_editor.rs, as `Rays_editor.Editor` etc.)
 pub use rays_editor::{window, workspace_catalog, workspace_window, editor, measure, workspace};

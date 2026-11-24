@@ -39,8 +39,8 @@ use crate::editor_actions::{in_world, intent_label, world_keys};
 use crate::editor_carry::carry_payload;
 use crate::editor_commands::Action;
 use crate::editor_history::{self as history, Merge};
-use crate::editor_inspect::{kind, lists, level_key, node_path, objects as level_objects, view_wants, View};
-use crate::editor_list::{apply_tree, enterable, geometry_objects, open_level, tree_edit, TreeState};
+use crate::editor_inspect::{kind, lists, level_key, objects as level_objects, view_wants, View};
+use crate::editor_list::{apply_tree, enterable, geometry_objects, open_level, sync_list_selection, tree_edit, TreeState};
 use crate::editor_model::*;
 use crate::editor_panels::{apply_change, dock_panels};
 use crate::editor_panes::{follow_target, fresh_local, go, graph_name, lit_tags, remember, scope_name, viewport_target};
@@ -1253,7 +1253,6 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let previous_level = pane_level(&value.into());
     let had_route = !pane_route(&value.into()).is_empty();
     let previous_viewed: Vec<_> = value.viewed.iter().map(|(id, (network, root))| (*id, flow_sop::network::identity(network), *root)).collect();
-    let scope_selection_changed = scope::selected(&result.scope_view) != scope::selected(pane_view(&value.into()));
     let vocab = vocabulary_for(value, &doc);
     let workspace = unrestore(&value.doc, &doc, result.workspace.clone());
     // i also follows a reference of the node selected in the pane (a material, an object's graph)
@@ -1266,23 +1265,13 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         None if actions.contains(&Action::Enter) => follow_target(&value.into(), None).or_else(|| viewport_target(&value.into())),
         None => None,
     };
-    let picked_row = result.tree_intents.iter().find_map(|i| match i {
-        tree::Intent::Select(ids) if ids.len() == 1 => Some(ids[0]),
-        _ => None,
-    });
     let mut picked_view = result.scope_view.clone();
     if added.is_empty() {
-        // A row of a geometry object's list selects its source node in the old pane.
-        match picked_row {
-            Some(id) if matches!(pane_level(&value.into()), Level::Inside(oid) if kind(value, oid).as_deref() == Some("geometry")) => match node_path(&value.into(), id) {
-                Some(path) => scope::select(vec![path], &mut picked_view),
-                None => {},
-            },
-            _ => {},
-        }
+        sync_list_selection(&value.into(), &result.tree_intents, &mut picked_view);
     } else {
-        scope::select(added.clone(), &mut picked_view)
-    };
+        scope::select(added.clone(), &mut picked_view);
+    }
+    let scope_selection_changed = scope::selected(&picked_view) != scope::selected(pane_view(&value.into()));
     let value2 = owned;
     let before_tree = if !loaded_flag && !match (&value2.doc.shell, &doc.shell) {
         (Some(a), Some(b)) => Arc::ptr_eq(a, b),

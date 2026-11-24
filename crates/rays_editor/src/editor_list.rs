@@ -30,6 +30,19 @@ pub fn enterable(value: &EditorModel, id: i64) -> bool {
     }
 }
 
+/// A lowered geometry selection replaces the graph's selection, including a clear.
+pub(crate) fn sync_list_selection(value: &ModelView<'_>, intents: &[Intent], view: &mut rays_graph::scope_state::Pane) {
+    let Some(ids) = intents.iter().rev().find_map(|intent| match intent {
+        Intent::Select(ids) => Some(ids),
+        _ => None,
+    }) else { return };
+    if !matches!(pane_level(value), Level::Inside(id) if kind(value, id).as_deref() == Some("geometry")) {
+        return;
+    }
+    let paths: Option<Vec<_>> = ids.iter().map(|id| crate::editor_inspect::node_path(value, *id)).collect();
+    rays_graph::scope_state::select(paths.unwrap_or_default(), view);
+}
+
 /// Switch the open level: nothing is selected there, and the list starts again.
 pub fn open_level(value: &mut EditorModel, level: Level) {
     if level == pane_level(&(&*value).into()) {
