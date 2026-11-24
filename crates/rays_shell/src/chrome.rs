@@ -320,6 +320,26 @@ pub fn update(
     let title: &dyn Fn(&Leaf) -> String = title.unwrap_or(&default_title);
     let groups: &dyn Fn(&Leaf) -> Vec<f32> = groups.unwrap_or(&no_groups);
     let geometry = geometry(Some(state), Some(hidden), tree, frame);
+    update_with_geometry(Some(state), Some(hidden), Some(title), Some(groups), key_of, focus, &geometry, ui, frame)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn update_with_geometry(
+    state: Option<&dyn Fn(&[usize]) -> panels::State>,
+    hidden: Option<&[Panel]>,
+    title: Option<&dyn Fn(&Leaf) -> String>,
+    groups: Option<&dyn Fn(&Leaf) -> Vec<f32>>,
+    key_of: Option<&dyn Fn(&str) -> String>,
+    focus: Option<&Path>,
+    geometry: &Geometry,
+    ui: &mut Ui,
+    frame: &frame::Frame,
+) -> Vec<Intent> {
+    let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
+    let default_hidden = [Panel::Timeline];
+    let hidden: &[Panel] = hidden.unwrap_or(&default_hidden);
+    let title: &dyn Fn(&Leaf) -> String = title.unwrap_or(&default_title);
+    let groups: &dyn Fn(&Leaf) -> Vec<f32> = groups.unwrap_or(&no_groups);
     let theme = ui.tokens();
     // the window being carried: its edge is the accent and four brackets stand round it
     let moving: Rc<RefCell<Option<Path>>> = Rc::new(RefCell::new(None));
@@ -421,7 +441,7 @@ pub fn update(
         kit::with_label(format_args!("workspace-window-ground{}", key(&l.path)), &mut |label| {
             view = Some(kit::cached(ui, label, revision, &mut |ui| ground(ui, l)));
         });
-        ui.to_front(order as i64, &view.expect("window ground view"));
+        ui.to_front((order * 2) as i64, &view.expect("window ground view"));
     }
     let mut intents: Vec<Intent> = Vec::new();
     // where the drag tip goes: over the right of the window being moved
@@ -454,7 +474,7 @@ pub fn update(
         let view = view.expect("header view");
         ui.set_at(&view, (x as f32, y as f32));
         if l.floating {
-            ui.to_front(order as i64, &view);
+            ui.to_front((order * 2) as i64, &view);
         }
         intents.extend(panel_menu(Some(state), key_of, ui, l, &view, open_at));
     }
@@ -802,9 +822,51 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
 /// The draggable gutters, wider than they are drawn. Build them after the panes so they sit on
 /// top of the neighbours' hit rectangles.
 pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Option<&[Panel]>, tree: &Panels, ui: &mut Ui, frame: &frame::Frame) -> Vec<Intent> {
+    let geo = geometry(state, hidden, tree, frame);
+    splitter_controls(state, &geo, ui, true)
+}
+
+/// Draw from the geometry used by the panes. The editor reads pointer drags before laying out.
+pub fn splitters_with_geometry(state: Option<&dyn Fn(&[usize]) -> panels::State>, geo: &Geometry, ui: &mut Ui) -> Vec<Intent> {
+    splitter_controls(state, geo, ui, false)
+}
+
+fn dragged_size(s: &Splitter, signal: &Signal) -> Option<PSize> {
+    let (dx, dy) = signal.drag;
+    if !(signal.held || signal.released) || (if s.axis == Axis::H { dx } else { dy }) == 0.0 {
+        return None;
+    }
+    let (px, py) = if signal.released { signal.release_point } else { signal.pointer };
+    let along = if s.axis == Axis::H { px } else { py };
+    let room = (s.span - SPLITTER_WIDTH).max(1);
+    Some(panels::clamp_size(match s.size {
+        PSize::Ratio(_) => PSize::Ratio((along as f64 - s.start as f64) / room as f64),
+        PSize::First(_) => PSize::First(along.round() as i64 - s.start),
+        PSize::Second(_) => PSize::Second(s.start + room - along.round() as i64),
+    }))
+}
+
+/// PXUI has already routed input through the previous hit tree when the frame builder starts.
+pub fn splitter_drag(ui: &Ui, geo: &Geometry) -> Option<(Option<(Path, PSize)>, bool)> {
+    let seed = Ui::key_of(ROOT_KEY, "workspace-grips");
+    for s in &geo.splitters {
+        let Some(node) = &s.node else { continue };
+        let mut grip = None;
+        kit::with_label(format_args!("workspace-grip{}", key(node)), &mut |label| {
+            grip = ui.box_of_key(Ui::key_of(seed, label));
+        });
+        let Some(grip) = grip else { continue };
+        let signal = ui.signal(&grip);
+        if signal.held || signal.released {
+            return Some((dragged_size(s, &signal).map(|size| (node.clone(), size)), signal.released));
+        }
+    }
+    None
+}
+
+fn splitter_controls(state: Option<&dyn Fn(&[usize]) -> panels::State>, geo: &Geometry, ui: &mut Ui, track_drag: bool) -> Vec<Intent> {
     let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
-    let mut intents: Vec<Intent> = Vec::new();
-    let geo = geometry(Some(state), hidden, tree, frame);
+    let mut intents = Vec::new();
     let theme = ui.tokens();
     // The grips are one cached view keyed by the gutters; a drag or a right click rebuilds it. The size
     // menu is built after it, at the root: the view's box keeps which gutter it is for and where.
@@ -828,7 +890,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
             };
             let (x, y, width, height) = s.bounds;
             let grip_axis = if s.axis == Axis::H { pxui::ui::Axis::Row } else { pxui::ui::Axis::Column };
-            let (_, signal) = ui.grip(format_args!("workspace-grip-{n}"), grip_axis, Some(Rect::new(x as f32, y as f32, width as f32, height as f32)));
+            let (_, signal) = ui.grip(format_args!("workspace-grip{}", key(node)), grip_axis, Some(Rect::new(x as f32, y as f32, width as f32, height as f32)));
             if signal.held {
                 // the ratio it makes, in a tip beside the gutter: "58 / 42"
                 let (first, second) = sides(s);
@@ -836,20 +898,13 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
                 let (px, py) = signal.pointer;
                 tip = Some((if s.axis == Axis::H { ((x + 8) as f32, py - 10.0) } else { (px + 8.0, (y + 8) as f32) }, a));
             }
-            let (dx, dy) = signal.drag;
-            if (signal.held || signal.released) && (if s.axis == Axis::H { dx } else { dy }) != 0.0 {
-                let (px, py) = signal.pointer;
-                let along = if s.axis == Axis::H { px } else { py };
-                // a fixed split is dragged in whole points of its fixed side, any other by ratio
-                let size = match s.size {
-                    PSize::Ratio(_) => PSize::Ratio((along as f64 - s.start as f64) / (1.max(s.span)) as f64),
-                    PSize::First(_) => PSize::First(along.round() as i64 - s.start),
-                    PSize::Second(_) => PSize::Second(s.start + s.span - SPLITTER_WIDTH - along.round() as i64),
-                };
-                intents.push(Intent::Resize { node: node.clone(), size: panels::clamp_size(size) });
-            }
-            if signal.released {
-                intents.push(Intent::Settled);
+            if track_drag {
+                if let Some(size) = dragged_size(s, &signal) {
+                    intents.push(Intent::Resize { node: node.clone(), size });
+                }
+                if signal.released {
+                    intents.push(Intent::Settled);
+                }
             }
             // a right-click sizes the split another way, keeping what it shows; the menu opens where
             // the gutter was clicked
@@ -858,6 +913,8 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
             }
         }
     });
+    // The hit band sits above docked panes, below floating windows.
+    ui.to_front(-1, &view);
     // the tip stands at the root, over everything, while a gutter is held
     if let Some(((tx, ty), a)) = tip {
         let tw = kit::cap_width(ui, &format!("{} / {}", a, 100 - a));
@@ -904,7 +961,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
         ui.set_state(&view, 0);
     }
     for (order, leaf) in geo.leaves.iter().enumerate() {
-        let order = order as i64;
+        let order = (order * 2 + 1) as i64;
         if state(&leaf.path).window.is_none() || state(&leaf.path).collapsed {
             continue;
         }

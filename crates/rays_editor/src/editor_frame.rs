@@ -347,12 +347,10 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
     Ok(next)
 }
 
-/// The gutters, last over every pane's hit area, and the layout the frame asks for through them.
+/// Apply the grip, drop and timeline intents after drawing the panes.
 #[allow(clippy::too_many_arguments)]
-pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: Shell, frame_: &frame::Frame, keymap: &[Command], shortcut_frame: &frame::Frame, g: &layout::Geometry, intents: &[chrome::Intent], strip_layout: Vec<chrome::Intent>, timeline_leaves: &[(Leaf, UiBox)], platform: input::Platform, ui: &mut Ui) -> (Shell, Vec<Change>) {
-    // The gutters last, on top of every pane's hit area: a drag applies from the next frame.
+pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: Shell, keymap: &[Command], g: &layout::Geometry, intents: &[chrome::Intent], mut grips: Vec<chrome::Intent>, strip_layout: Vec<chrome::Intent>, timeline_leaves: &[(Leaf, UiBox)], platform: input::Platform, ui: &mut Ui) -> (Shell, Vec<Change>) {
     let state = |path: &[usize]| panel_state(value, path);
-    let grips = chrome::splitters(Some(&state), Some(&workspace.hidden), &shell_tree(value, &workspace), ui, shortcut_frame);
     let dragging = intents.iter().find_map(|i| match i {
         chrome::Intent::Dragging(path, released) => Some((path.clone(), *released)),
         _ => None,
@@ -374,21 +372,13 @@ pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: S
             timeline_menus.extend(chrome::panel_menu(Some(&state), Some(&key_of), ui, leaf, boxed, at));
         });
     }
-    let mut all: Vec<chrome::Intent> = grips.clone();
-    all.extend(drops);
-    all.extend(timeline_menus);
-    all.extend(strip_layout);
-    let (mut workspace, drag_changes) = layout_intents(vw, &workspace, &all);
-    if workspace.window_live.is_some() && !intents.iter().chain(grips.iter()).any(|i| matches!(i, chrome::Intent::WindowDrag(..))) {
+    let window_dragged = intents.iter().chain(&grips).any(|i| matches!(i, chrome::Intent::WindowDrag(..)));
+    grips.extend(drops);
+    grips.extend(timeline_menus);
+    grips.extend(strip_layout);
+    let (mut workspace, drag_changes) = layout_intents(vw, &workspace, &grips);
+    if !window_dragged {
         workspace.window_live = None;
-    }
-    // a gutter drag that ended without its release (the window lost the focus, the pointer was
-    // cancelled) leaves no size behind for the next click on a gutter to commit
-    if workspace.live.is_some()
-        && !grips.iter().any(|i| matches!(i, chrome::Intent::Resize { .. } | chrome::Intent::Settled))
-        && (!frame::mouse_down(MouseButton::LeftButton, frame_) || frame::has_event(&|e| matches!(e, Event::FocusLost | Event::PointerCancelled(MouseButton::LeftButton)), frame_))
-    {
-        workspace.live = None;
     }
     (workspace, drag_changes)
 }
@@ -396,7 +386,7 @@ pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: S
 type Target = (Panel, Option<layout::Path>);
 
 /// The pane the last press landed in takes the focus; the panes' PXUI keys name them.
-pub fn follow_press<'a>(value: &ModelView<'a>, workspace: &Shell, frame_: &frame::Frame, roots: &[(Leaf, UiBox)], timeline_root: &Option<(Panel, UiBox)>, focus: Panel, focus_path: Option<layout::Path>, ui: &mut Ui) -> (Panel, Option<layout::Path>, Vec<(i64, Target)>) {
+pub fn follow_press(g: &layout::Geometry, roots: &[(Leaf, UiBox)], timeline_root: &Option<(Panel, UiBox)>, focus: Panel, focus_path: Option<layout::Path>, ui: &mut Ui) -> (Panel, Option<layout::Path>, Vec<(i64, Target)>) {
     let mut pane_roots: Vec<(Target, UiBox)> = roots.iter().map(|(l, b)| ((l.panel.clone(), Some(l.path.clone())), b.clone())).collect();
     if let Some((panel, b)) = timeline_root {
         pane_roots.push(((panel.clone(), None), b.clone()));
@@ -414,7 +404,7 @@ pub fn follow_press<'a>(value: &ModelView<'a>, workspace: &Shell, frame_: &frame
     let (mut focus, mut focus_path) = found;
     // a focus whose leaf an edit split, retyped or moved follows it, so the next panel key acts
     if focus_path.is_some() {
-        if let Some(leaf) = focused_leaf(&geometry(value, workspace, frame_), &focus, focus_path.as_deref()) {
+        if let Some(leaf) = focused_leaf(g, &focus, focus_path.as_deref()) {
             focus = leaf.panel.clone();
             focus_path = Some(leaf.path.clone());
         }
@@ -1033,7 +1023,6 @@ pub fn update_frame(
     // a panel's pane, laid out: the one in use, or one of the others
     let pane_of = |host: &Host| shown_as(&(&*value).into(), (&host.0, &host.1, &host.2));
     let in_use = |pane: &ModelView<'_>| pane.key == panel_map::key_ref(&value.panes);
-    text_pane::probe("pre-text_state"); // PROBE_TMP
     let ((text_host, text, text_shown, other_texts), text_error) =
         match text_state(&(&*value).into(), &actions, &pane_of, &hosted(HostKind::Text)) {
             Ok(state) => (state, None),
@@ -1123,6 +1112,10 @@ pub fn update_frame(
 
     let mut built: Option<FrameResult> = None;
     {
+        // PXUI may rebuild after layout without replaying pointer events. Keep the draft and
+        // release from the first build so the final build publishes the same geometry.
+        let mut splitter_workspace = None;
+        let mut splitter_released = false;
         let mut build_and_prompt = |ui: &mut Ui| {
             let mut vw = vw;
             if let Some(prefix) = &leader_panel {
@@ -1133,6 +1126,27 @@ pub fn update_frame(
             }
             if !all_ui_visible {
                 return;
+            }
+            if ui.captured() || frame::has_event(&|e| matches!(e, Event::PointerReleased(..)), frame_) {
+                if let Some((draft, released)) = last_geometry(&vw).and_then(|g| chrome::splitter_drag(ui, &g)) {
+                    if draft.is_some() {
+                        splitter_workspace.get_or_insert_with(|| workspace.clone()).live = draft;
+                    }
+                    splitter_released |= released;
+                }
+            }
+            if !splitter_released && workspace.live.is_some()
+                && (!frame::mouse_down(MouseButton::LeftButton, frame_) || frame::has_event(&|e| matches!(e, Event::FocusLost | Event::PointerCancelled(MouseButton::LeftButton)), frame_))
+            {
+                splitter_workspace.get_or_insert_with(|| workspace.clone()).live = None;
+            }
+            let workspace = splitter_workspace.as_ref().unwrap_or(&workspace);
+            vw.workspace = &workspace;
+            let g = geometry(&vw, &workspace, frame_);
+            let state_fn = |path: &[usize]| panel_state(&vw, path);
+            let mut grips = chrome::splitters_with_geometry(Some(&state_fn), &g, ui);
+            if splitter_released {
+                grips.push(chrome::Intent::Settled);
             }
             let (prompt_next, prompt_intent_, prompt_error) = match prompt_panel(&(&*value).into(), &focus, &keymap, frame_, &workspace, &text, text_shown.as_ref(), ui, initial_prompt.clone()) {
                 Ok((prompt, intent)) => (prompt, intent, None),
@@ -1149,12 +1163,11 @@ pub fn update_frame(
             // Text, then a text view's Selection / Graph / Document.  `Chrome.header_slots` places
             // them and cuts the title, so a narrow header drops the text tabs, then the views, and
             // never draws one over another
-            let geo0 = geometry(&(&*value).into(), &workspace, frame_);
             let mut group_table: HashMap<layout::Path, Vec<f32>> = HashMap::new();
             let mut tools_table: HashMap<layout::Path, f32> = HashMap::new();
             let platform_ui = rays_shell::host::platform(ui);
             let _ = platform_ui;
-            for leaf in &geo0.leaves {
+            for leaf in &g.leaves {
                 let text_ = match (&text_host, &text_shown) {
                     (Some((_, path, _, _)), Some(shown)) if *path == leaf.path => Some((text.clone(), shown.clone())),
                     _ => other_texts.iter().find_map(|(_, path, state, shown)| if *path == leaf.path { Some((state.clone(), shown.clone())) } else { None }),
@@ -1178,16 +1191,14 @@ pub fn update_frame(
                     _ => String::new(),
                 }
             };
-            let state_fn = |path: &[usize]| panel_state(&(&*value).into(), path);
             let title_fn = |leaf: &Leaf| panel_title(&vw, leaf);
-            let mut intents = chrome::update(Some(&state_fn), Some(&workspace.hidden), Some(&title_fn), Some(&header_groups), Some(&key_of), header_focus.as_ref(), &shell_tree(&*value, &workspace), ui, &shortcut_frame);
+            let mut intents = chrome::update_with_geometry(Some(&state_fn), Some(&workspace.hidden), Some(&title_fn), Some(&header_groups), Some(&key_of), header_focus.as_ref(), &g, ui, &shortcut_frame);
             let leaves = shell_leaves(&*value, &workspace);
-            intents.extend(panel_intents(&(&*value).into(), &leaves, &workspace, frame_, &focus, focus_path.as_deref(), &actions));
-            let layout_leaf = focused_leaf(&geo0, &focus, focus_path.as_deref());
+            intents.extend(panel_intents(&vw, &leaves, &workspace, frame_, &focus, focus_path.as_deref(), &actions));
+            let layout_leaf = focused_leaf(&g, &focus, focus_path.as_deref());
             let (workspace, mut layout_changes) = layout_intents(&vw, &workspace, &intents);
             layout_changes.extend(layout_actions(&(&*value).into(), &workspace, layout_leaf.as_ref(), &actions));
             vw.workspace = &workspace;
-            let g = geometry(&(&*value).into(), &workspace, frame_);
             // the graph panel's toolbar; a click is one command or edit
             let graph_host = graph_leaf(&vw, &g);
             let (tool_action, view_action, view_pick) = draw_graph_header(ui, &vw, &g, &graph_host, &header_slots, &tools_from);
@@ -1195,7 +1206,7 @@ pub fn update_frame(
             for (order, leaf) in g.leaves.iter().enumerate() {
                 let boxed = chrome::pane_root(ui, frame_, leaf.body, &format!("workspace-pane-{}{}", editor_commands::pane_name(&leaf.panel), chrome::key(&leaf.path)));
                 if leaf.floating {
-                    ui.to_front(order as i64, &boxed);
+                    ui.to_front((order * 2) as i64, &boxed);
                 }
                 roots.push((leaf.clone(), boxed));
             }
@@ -1230,9 +1241,7 @@ pub fn update_frame(
             let (graph_body, menu2, menu_pick) = draw_graph_pane(ui, frame_, &(&*value).into(), &shortcut_frame, &mut scope_view2, scope_active, guide, carry_lit.clone(), carry_hot.clone(), &graph_root, &graph_host, &workspace, menu.clone(), &open_menu, &mut scope_changes);
             // Each pane builder returns only its frame intents and updated pane-local state.
             let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &(&*value).into(), &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), &rows_, &columns, &host_rows, &selected, tree_value.clone(), list_intents.clone(), value.locals.clone());
-            text_pane::probe("pre-draw_text_panes"); // PROBE_TMP
             let (text2, text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &*value, &root_at, &header_slots, &text_host, &text_shown, text.clone(), other_texts.clone(), locals);
-            text_pane::probe("post-draw_text_panes"); // PROBE_TMP
             let (outline, outline_intents, locals) = draw_outline_panes(ui, &*value, &hosted(HostKind::Outline), &root_at, &|pane| navigator_params(&pane.into()), value.outline.clone(), locals);
             let locals = draw_spreadsheet_panes(ui, &(&*value).into(), &of_kind(&Panel::Spreadsheet), locals);
             let graph_panes = draw_other_graph_panes(ui, &shortcut_frame, &(&*value).into(), &other_panes, &roots);
@@ -1328,8 +1337,8 @@ pub fn update_frame(
                 status_box(&vw, ui, frame_, render_status.as_deref(), text_error.as_deref().or(prompt_error.as_deref()).or(error_status.as_deref()), context);
             }
             draw_notice(&(&*value).into(), frame_, &roots, &header_focus, graph_body, &scope_view2, scope_active, ui);
-            let (focus2, focus_path2, pane_keys) = follow_press(&(&*value).into(), &workspace, frame_, &roots, &timeline_root, focus.clone(), focus_path.clone(), ui);
-            let (workspace, drag_changes) = settle_layout(&(&*value).into(), &vw, workspace.clone(), frame_, &keymap, &shortcut_frame, &g, &intents, strip_layout, &timeline_leaves, platform, ui);
+            let (focus2, focus_path2, pane_keys) = follow_press(&g, &roots, &timeline_root, focus.clone(), focus_path.clone(), ui);
+            let (workspace, drag_changes) = settle_layout(&(&*value).into(), &vw, workspace.clone(), &keymap, &g, &intents, grips, strip_layout, &timeline_leaves, platform, ui);
             changes.extend(drag_changes);
             let mut drops = inspector_drops;
             drops.extend(viewport_drops);
@@ -1519,6 +1528,10 @@ mod tests {
     }
 
     fn step_model(value: &mut EditorModel, tick: &mut i64, pointer: (f64, f64), events: Vec<Event>) {
+        step_model_buttons(value, tick, &[], pointer, events);
+    }
+
+    fn step_model_buttons(value: &mut EditorModel, tick: &mut i64, buttons: &[MouseButton], pointer: (f64, f64), events: Vec<Event>) {
         *tick += 1;
         let t = *tick;
         let mut input = input::at_time(t as f64 / 60.0);
@@ -1527,6 +1540,7 @@ mod tests {
         input.tick = t;
         input.size = (900, 640);
         input.pointer = pointer;
+        input.buttons = buttons.to_vec();
         input.events = events;
         let f = frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) };
         let no_cam = |_: &mut Ui| -> PanelResult { Rc::new(()) };
@@ -1704,6 +1718,47 @@ mod tests {
             let printed = workspace_doc::print(&value.doc.workspace.ws).unwrap().0;
             assert_eq!(pane_shown(&(&value).into()).map(String::as_str), Some("b"), "B11: prompt_intent Go(\"b\") did not apply");
             assert!(printed.contains(":active 1"), "B11: bar_action LayoutSwitch(1) was dropped when prompt_intent arrived on the same frame: {printed}");
+            editor_host::close(&value);
+        });
+    }
+
+    #[test]
+    fn b12_splitter_drag_updates_panes_on_same_frame() {
+        big_stack(|| {
+            let mut value = model_of(
+                r#"(workspace w
+                    (graph g :context sop (sop/box))
+                    (graph editor :context editor
+                      (ui/workspace (ui/split_at "horizontal" 0.5 (ui/graph "g") (ui/inspector)))))"#,
+            );
+            let mut tick = 0;
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            let f0 = idle_frame();
+            let splitter = geometry(&(&value).into(), &value.workspace, &f0).splitters[0].clone();
+            let sx = splitter.bounds.0 as f64;
+            let sy = (splitter.bounds.1 + splitter.bounds.3 / 2) as f64;
+            let before_w = pane_view(&(&value).into()).width;
+            step_model(&mut value, &mut tick, (sx, sy), vec![Event::PointerMoved((sx, sy))]);
+            step_model_buttons(&mut value, &mut tick, &[MouseButton::LeftButton], (sx, sy), vec![Event::PointerPressed(MouseButton::LeftButton, (sx, sy))]);
+            // Drag 150 points right: the graph pane's drawn width must update on THIS frame, not lag by 1 frame.
+            let target_x = sx + 150.0;
+            step_model_buttons(&mut value, &mut tick, &[MouseButton::LeftButton], (target_x, sy), vec![Event::PointerMoved((target_x, sy))]);
+            let dragged_w = pane_view(&(&value).into()).width;
+            assert!(
+                (dragged_w - (before_w + 150)).abs() <= 4,
+                "B12: graph pane width lagged behind splitter drag on the drag frame (before={before_w}, dragged={dragged_w}, expected ~{})",
+                before_w + 150
+            );
+            {
+                let ui = value.ui.borrow();
+                let seed = Ui::key_of(pxui::ui::ROOT_KEY, "workspace-grips");
+                let grip = ui.box_of_key(Ui::key_of(seed, "workspace-grip")).expect("splitter grip");
+                assert!((ui.rect(&grip).x as f64 - target_x).abs() <= 1.0);
+            }
+            step_model(&mut value, &mut tick, (target_x, sy), vec![Event::PointerReleased(MouseButton::LeftButton, (target_x, sy))]);
+            assert!(value.workspace.live.is_none(), "the release should commit the draft");
+            assert_eq!(pane_view(&(&value).into()).width, dragged_w);
             editor_host::close(&value);
         });
     }

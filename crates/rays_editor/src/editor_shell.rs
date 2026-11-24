@@ -55,17 +55,12 @@ pub fn completion_names(value: &EditorModel) -> lisp_text::Names {
     }
 }
 
-/// The tree drawn now: the editor graph's (the host's when the document has none, or after
-/// "Restore layout"), with the split being dragged at its live ratio.
+/// The authored tree, or the host tree when the document has none or is restored.
 pub fn shell_tree<'a>(value: &'a EditorModel, shell: &'a Shell) -> Cow<'a, panels::Panels> {
-    let base = match &value.doc.shell {
+    Cow::Borrowed(match &value.doc.shell {
         Some(s) if !shell.restored => &s.tree,
         _ => &shell.tree,
-    };
-    match &shell.live {
-        Some((node, size)) => Cow::Owned(panels::set_size(node, *size, base.clone())),
-        None => Cow::Borrowed(base),
-    }
+    })
 }
 
 pub fn visible(shell: &Shell, panel: &Panel) -> bool {
@@ -179,27 +174,38 @@ struct GeoKey {
 
 thread_local! { static GEOMETRY: std::cell::RefCell<Option<(GeoKey, std::rc::Rc<layout::Geometry>)>> = const { std::cell::RefCell::new(None) }; }
 
+impl GeoKey {
+    fn matches(&self, value: &ModelView<'_>, shell: &Shell, graph: &str) -> bool {
+        self.graph == graph
+            && match (&self.shell_doc, &value.doc.shell) { (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b), (None, None) => true, _ => false }
+            && self.states == value.doc.workspace.ws.layout.panels
+            && self.workspace.restored == shell.restored
+            && self.workspace.tree == shell.tree
+            && self.workspace.hidden == shell.hidden
+            && self.workspace.window_live == shell.window_live
+    }
+}
+
+/// The grip signal belongs to the previous layout. Its split extent can be read even if this
+/// frame will change the live size or the window dimensions.
+pub fn last_geometry(value: &ModelView<'_>) -> Option<std::rc::Rc<layout::Geometry>> {
+    let graph = workspace_doc::editor_graph_ref(&value.doc.workspace.ws).map_or("@default", |g| g.name.as_str());
+    GEOMETRY.with(|cache| cache.borrow().as_ref().filter(|(k, _)| k.matches(value, value.workspace, graph)).map(|(_, g)| g.clone()))
+}
+
 pub fn geometry<'a>(value: &ModelView<'a>, shell: &Shell, frame: &frame::Frame) -> std::rc::Rc<layout::Geometry> {
     let ws = &value.doc.workspace.ws;
     let graph = workspace_doc::editor_graph_ref(ws).map_or("@default", |g| g.name.as_str());
     let hit = GEOMETRY.with(|cache| cache.borrow().as_ref().and_then(|(k, g)| {
-        let same = k.size == frame.input.size
-            && k.graph == graph
-            && match (&k.shell_doc, &value.doc.shell) { (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b), (None, None) => true, _ => false }
-            && k.states == ws.layout.panels
-            && k.workspace.restored == shell.restored
-            && k.workspace.tree == shell.tree
-            && k.workspace.hidden == shell.hidden
-            && k.workspace.live == shell.live
-            && k.workspace.window_live == shell.window_live;
-        same.then(|| g.clone())
+        (k.size == frame.input.size && k.workspace.live == shell.live && k.matches(value, shell, graph)).then(|| g.clone())
     }));
     if let Some(g) = hit {
         return g;
     }
-    let state = |path: &[usize]| panel_state(value, path);
-    let hidden = shell_hidden(value, shell);
-    let g = std::rc::Rc::new(layout::geometry(Some(&state), Some(&hidden), &shell_tree(value, shell), frame));
+    let view = ModelView { workspace: shell, ..*value };
+    let state = |path: &[usize]| panel_state(&view, path);
+    let hidden = shell_hidden(&view, shell);
+    let g = std::rc::Rc::new(layout::geometry_with_resize(Some(&state), Some(&hidden), &shell_tree(value, shell), frame, shell.live.as_ref()));
     let key = GeoKey { size: frame.input.size, shell_doc: value.doc.shell.clone(), states: ws.layout.panels.clone(), graph: graph.to_owned(), workspace: shell.clone() };
     GEOMETRY.with(|cache| *cache.borrow_mut() = Some((key, g.clone())));
     g

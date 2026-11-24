@@ -187,21 +187,22 @@ fn is_float(tree: &Panels) -> bool {
 /// A run of splits by ratio along one axis is one row of columns whose weights are the products
 /// of the ratios, so `[0.45 | 0.55 * 0.6364 | ...]` divides the width once. A split with a fixed
 /// side is one column of the run and is placed on its own.
-fn columns<'a>(axis: Axis, weight: f64, path: Path, tree: &'a Panels, out: &mut Vec<(f64, Path, &'a Panels)>) {
-    match tree {
-        Panels::Split { axis: a, size: Size::Ratio(ratio), a: ta, b: tb } if *a == axis && !(is_float(ta) || is_float(tb)) => {
-            columns(axis, weight * ratio, child(&path, 0), ta, out);
-            columns(axis, weight * (1.0 - ratio), child(&path, 1), tb, out);
+fn columns<'a>(axis: Axis, weight: f64, path: Path, tree: &'a Panels, resize: Option<(&[usize], Size)>, out: &mut Vec<(f64, Path, &'a Panels)>) {
+    if let (Panels::Split { axis: a, a: ta, b: tb, .. }, Size::Ratio(ratio)) = (tree, split_size(tree, resize)) {
+        if *a == axis && !(is_float(ta) || is_float(tb)) {
+            let child_resize = |i| resize.and_then(|(path, size)| path.strip_prefix(&[i]).map(|rest| (rest, size)));
+            columns(axis, weight * ratio, child(&path, 0), ta, child_resize(0), out);
+            columns(axis, weight * (1.0 - ratio), child(&path, 1), tb, child_resize(1), out);
+            return;
         }
-        _ => out.push((weight, path, tree)),
     }
+    out.push((weight, path, tree));
 }
 
-fn split_size(path: &[usize], tree: &Panels) -> Size {
-    match (path, tree) {
-        ([], Panels::Split { size, .. }) => *size,
-        ([0, rest @ ..], Panels::Split { a, .. }) => split_size(rest, a),
-        ([1, rest @ ..], Panels::Split { b, .. }) => split_size(rest, b),
+fn split_size(tree: &Panels, resize: Option<(&[usize], Size)>) -> Size {
+    match (tree, resize) {
+        (Panels::Split { .. }, Some(([], size))) => size,
+        (Panels::Split { size, .. }, _) => *size,
         _ => Size::Ratio(0.5),
     }
 }
@@ -298,6 +299,7 @@ struct Acc<'a> {
     leaves: Vec<Leaf>,
     splitters: Vec<Splitter>,
     floats: Vec<(Bounds, Path, &'a Panels)>,
+    resize: Option<&'a (Path, Size)>,
 }
 
 fn leaf(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, floating: bool, path: &[usize], panel: &Panel, outer: Bounds) {
@@ -349,6 +351,8 @@ fn rect_at(horizontal: bool, x: i64, y: i64, w: i64, h: i64, from: i64, extent: 
 
 fn place<'a>(acc: &mut Acc<'a>, state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], floating: bool, rect: Bounds, path: &mut Path, tree: &'a Panels) {
     let (x, y, w, h) = rect;
+    let resize = acc.resize.and_then(|(target, size)| target.strip_prefix(path.as_slice()).map(|rest| (rest, *size)));
+    let size = split_size(tree, resize);
     match tree {
         Panels::Leaf(p) => {
             if presence(state, hidden, path, tree) != Presence::Gone {
@@ -362,9 +366,9 @@ fn place<'a>(acc: &mut Acc<'a>, state: &dyn Fn(&[usize]) -> State, hidden: &[Pan
             at(path, &[0], |path| place(acc, state, hidden, floating, rect, path, a));
             at(path, &[1], |path| place(acc, state, hidden, floating, rect, path, b));
         }
-        Panels::Split { axis, size: size @ (Size::First(_) | Size::Second(_)), a, b } => {
+        Panels::Split { axis, a, b, .. } if !matches!(size, Size::Ratio(_)) => {
             let points = match size {
-                Size::First(p) | Size::Second(p) => *p,
+                Size::First(p) | Size::Second(p) => p,
                 Size::Ratio(_) => 0,
             };
             // one side keeps its points, the other takes the rest: the other keeps its minimum
@@ -397,7 +401,7 @@ fn place<'a>(acc: &mut Acc<'a>, state: &dyn Fn(&[usize]) -> State, hidden: &[Pan
                 acc.splitters.push(Splitter {
                     node: Some(path.to_vec()),
                     axis,
-                    size: *size,
+                    size,
                     bounds: rect_at(horizontal, x, y, w, h, origin + size_a, SPLITTER_WIDTH),
                     start: origin,
                     span: total,
@@ -409,7 +413,7 @@ fn place<'a>(acc: &mut Acc<'a>, state: &dyn Fn(&[usize]) -> State, hidden: &[Pan
         Panels::Split { axis, .. } => {
             let axis = *axis;
             let mut cols: Vec<(f64, Path, &Panels)> = Vec::new();
-            columns(axis, 1.0, Vec::new(), tree, &mut cols);
+            columns(axis, 1.0, Vec::new(), tree, resize, &mut cols);
             let info: Vec<(Presence, f64, i64, i64)> = cols
                 .iter()
                 .map(|(weight, col_path, sub)| {
@@ -461,7 +465,7 @@ fn place<'a>(acc: &mut Acc<'a>, state: &dyn Fn(&[usize]) -> State, hidden: &[Pan
                 acc.splitters.push(Splitter {
                     node: Some(full),
                     axis,
-                    size: split_size(&node, tree),
+                    size: panels::at_ref(&node, tree).map_or(Size::Ratio(0.5), |split| split_size(split, resize.filter(|(target, _)| *target == node).map(|(_, size)| (&[][..], size)))),
                     bounds,
                     start,
                     span,
@@ -534,6 +538,11 @@ fn no_state(_: &[usize]) -> State {
 /// 25-point status strip spans the frame below both. Every point of the frame is covered exactly
 /// once, floats aside.
 pub fn geometry(state: Option<&dyn Fn(&[usize]) -> State>, hidden: Option<&[Panel]>, tree: &Panels, frame: &frame::Frame) -> Geometry {
+    geometry_with_resize(state, hidden, tree, frame, None)
+}
+
+/// Lay out a draft split size without copying or changing the authored tree.
+pub fn geometry_with_resize(state: Option<&dyn Fn(&[usize]) -> State>, hidden: Option<&[Panel]>, tree: &Panels, frame: &frame::Frame, resize: Option<&(Path, Size)>) -> Geometry {
     let state: &dyn Fn(&[usize]) -> State = state.unwrap_or(&no_state);
     let default_hidden = [Panel::Timeline];
     let hidden: &[Panel] = hidden.unwrap_or(&default_hidden);
@@ -547,7 +556,7 @@ pub fn geometry(state: Option<&dyn Fn(&[usize]) -> State>, hidden: Option<&[Pane
     // the status strip spans the window below the tree and the timeline strip
     let status = STATUS_HEIGHT.min(0.max(fh - header - timeline - 1));
     let bottom = fh - status - timeline;
-    let mut acc = Acc { leaves: Vec::new(), splitters: Vec::new(), floats: Vec::new() };
+    let mut acc = Acc { leaves: Vec::new(), splitters: Vec::new(), floats: Vec::new(), resize };
     place(&mut acc, state, hidden, false, (0, 0, fw, 1.max(bottom)), &mut Vec::new(), tree);
     while !acc.floats.is_empty() {
         let queue = std::mem::take(&mut acc.floats);
