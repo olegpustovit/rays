@@ -386,8 +386,8 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                 &label,
                 &detail,
             );
-            if head.renamed != label && !preview {
-                changes.push(Change::Rename { node: node_id, label: head.renamed.clone() });
+            if !preview && let Some(label) = object_rename(&label, &head.renamed) {
+                changes.push(Change::Rename { node: node_id, label });
             }
             let mut body: Vec<Change> = Vec::new();
             ui.inspector_body(&mut |ui| {
@@ -475,3 +475,12 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
     });
     changes
 }
+
+fn object_rename(current: &str, entered: &str) -> Option<String> {
+    let entered = entered.trim();
+    (!entered.is_empty() && entered != current).then(|| entered.to_owned())
+}
+
+#[cfg(test)]
+#[path = "test_inspector_rename.rs"]
+mod test_inspector_rename;
