@@ -392,7 +392,12 @@ fn input(
     }
 }
 
-fn driven(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, source: &str, live: Option<&str>, shown: bool) -> Vec<FlowChange> {
+fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Vec<FlowChange> {
+    let (path, live, shown) = (row.path.as_str(), row.live.as_deref(), row.shown);
+    let literal = |text: &str| match row.fields.as_slice() {
+        [FieldView { kind: KindView::Integer(_), .. }] => text.parse::<i64>().ok().map(Value::Int),
+        _ => text.parse::<f64>().ok().filter(|v| v.is_finite()).map(Value::Float),
+    };
     let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
     // the cross that removes a drive shows on the hovered row, in place of the live value
     let hovered = ui.hovered_within(&boxed);
@@ -407,8 +412,18 @@ fn driven(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, source: &str, live: Op
                 line: Some(crate::kit::port_ink(&cx.theme, crate::kit::Port::Float)),
                 ..ValueFieldOpts::default()
             };
-            let (text, _) = ui.value_field((control_x, control_y), control_w, 20.0, &opts, &expression, &format!("flow-expression-{path}"), source);
-            if text == source { Vec::new() } else { vec![FlowChange::Expression(path.to_string(), text)] }
+            let valid = |text: &str| expression(text) || literal(text).is_some();
+            let (text, _) = ui.value_field((control_x, control_y), control_w, 20.0, &opts, &valid, &format!("flow-expression-{path}"), source);
+            if text == source {
+                Vec::new()
+            } else if let ([field], Some(value)) = (row.fields.as_slice(), literal(&text))
+                && matches!(field.kind, KindView::Integer(_) | KindView::Floating(_))
+            {
+                vec![FlowChange::Edited(field.name.clone(), value)]
+            } else {
+                let text = if expression(&text) { text } else { format!("={text}") };
+                vec![FlowChange::Expression(path.to_owned(), text)]
+            }
         } else {
             let link = ui.box_(
                 &format!("flow-source-{path}"),
@@ -563,7 +578,7 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
     // a row is named by its argument, as the sheet and the card name it
     let title: String = if row.fields.len() == 1 && row.path.starts_with('@') { row.fields[0].label.clone() } else { row.path.clone() };
     if let Some(source) = &row.drive {
-        return driven(ui, cx, &row.path, &title, source, row.live.as_deref(), row.shown);
+        return driven(ui, cx, row, &title, source);
     }
     if row.fields.len() == 1 {
         let field = &row.fields[0];

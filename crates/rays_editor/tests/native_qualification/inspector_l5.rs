@@ -43,6 +43,17 @@ fn b21_hex_color_is_one_edit() {
     assert_eq!(edits, vec![FlowChange::EditedVector("color".into(), [1., 0., 0.])]);
 }
 
+fn b22_driven_number_can_be_replaced() {
+    let row = FlowRow {
+        path: "radius".into(), shown: true, locked: false, drive: Some("=(* 2 t)".into()), live: None,
+        fields: vec![field("radius", param::floating(0., 10., None, None).unwrap(), Value::Float(2.))],
+    };
+    assert_eq!(type_in_row(&row, "3"), vec![FlowChange::Edited("radius".into(), Value::Float(3.))]);
+}
+
 pub fn cases() -> Vec<(&'static str, fn())> {
-    vec![("inspector_b21_hex_color_is_one_edit", b21_hex_color_is_one_edit)]
+    vec![
+        ("inspector_b21_hex_color_is_one_edit", b21_hex_color_is_one_edit),
+        ("inspector_b22_driven_number_can_be_replaced", b22_driven_number_can_be_replaced),
+    ]
 }
