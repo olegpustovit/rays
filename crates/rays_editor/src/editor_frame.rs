@@ -548,7 +548,6 @@ pub fn pane_changes<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, command_chang
     changes
 }
 
-type Inspected = (Option<PanelResult>, Vec<Change>, Vec<(String, Value)>, bool, Vec<scope::Change>, Vec<(carry_mod::Place, bool)>);
 
 /// Every inspector leaf: the one in use over the frame's state, the others over their own pane.
 #[allow(clippy::too_many_arguments)]
@@ -586,31 +585,36 @@ pub fn draw_inspectors<'a>(
             _ => None,
         }
     };
-    let mut inspectors: Vec<(Leaf, Inspected)> = Vec::new();
-    for (leaf, root) in roots {
+    let mut panel = None;
+    let mut inspector_changes = Vec::new();
+    let mut settings_changes = Vec::new();
+    let mut workspace_moves = Vec::new();
+    let mut inspector_drops = Vec::new();
+    let mut live_cook = value.live_cook;
+    for (index, (leaf, root)) in roots.iter().enumerate() {
         let host: Host = (panel_key(&value.doc, &leaf.path), leaf.path.clone(), leaf.panel.clone(), HostKind::List);
         let pane = pane_of(&host);
-        if in_use(&pane) {
-            let r = inspect_panel(image, camera_panel, inspector_visible, unchanged, &resized, g, ui, (*value, scope_view, selection, scope_active), root, leaf.body);
-            inspectors.push((leaf.clone(), r));
+        let mine = in_use(&pane);
+        let input = if mine {
+            (*value, scope_view, selection, scope_active)
         } else {
             let shown = graph_shown && stored_projection(&pane) == GraphView && graph_name(&pane).is_some();
-            let view = pane_view(&pane).clone();
-            let picked_selection = pane_selection(&pane).clone();
-            let (panel, _, _, _, moves, drops) = inspect_panel(image, camera_panel, inspector_visible, unchanged, &resized, g, ui, (pane, &view, &picked_selection, shown), root, leaf.body);
-            inspectors.push((leaf.clone(), (panel, Vec::new(), Vec::new(), value.live_cook, moves, drops)));
+            (pane, pane_view(&pane), pane_selection(&pane), shown)
+        };
+        let (result, changes, settings, live, moves, drops) = inspect_panel(
+            image, camera_panel, inspector_visible, unchanged, &resized, g, ui, input, root, leaf.body,
+        );
+        if index == 0 || (*focus == Panel::Inspector && Some(&leaf.path) == focus_path.as_ref()) {
+            panel = result;
         }
+        if mine {
+            inspector_changes.extend(changes);
+            settings_changes.extend(settings);
+            if live != value.live_cook { live_cook = live; }
+        }
+        workspace_moves.extend(moves);
+        inspector_drops.extend(drops);
     }
-    let focused = inspectors.iter().find(|(l, _)| *focus == Panel::Inspector && Some(&l.path) == focus_path.as_ref());
-    let panel = match (focused, inspectors.first()) {
-        (Some((_, r)), _) | (None, Some((_, r))) => r.0.clone(),
-        (None, None) => None,
-    };
-    let inspector_changes = inspectors.iter().flat_map(|(_, r)| r.1.clone()).collect();
-    let settings_changes = inspectors.iter().flat_map(|(_, r)| r.2.clone()).collect();
-    let workspace_moves = inspectors.iter().flat_map(|(_, r)| r.4.clone()).collect();
-    let inspector_drops = inspectors.iter().flat_map(|(_, r)| r.5.clone()).collect();
-    let live_cook = inspectors.iter().find_map(|(_, r)| if r.3 != value.live_cook { Some(r.3) } else { None }).unwrap_or(value.live_cook);
     (panel, inspector_changes, settings_changes, workspace_moves, inspector_drops, live_cook)
 }
 
