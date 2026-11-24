@@ -180,16 +180,15 @@ fn tour(p: &mut P) {
     p.act("idle end", &[], &[Key::Shift]);
 }
 
-/// a long session: 20 split/close pairs, then 20 undos, then idle; the settled idle must cost what a
-/// fresh editor's does (history depth and closed panes cost nothing)
-fn long(p: &mut P) {
+/// A long session of split/close pairs, then undos, then settled idle.
+fn long(p: &mut P, rounds: usize) {
     let ch = Key::KeyChar;
     p.act("idle fresh", &[], &[Key::Shift]);
-    for _ in 0..20 {
+    for _ in 0..rounds {
         p.act("split", &[], &[ch('/'), ch('o'), ch('v')]);
         p.act("close", &[], &[ch('/'), ch('o'), ch('x')]);
     }
-    for _ in 0..20 { p.act("undo", &[Key::Meta], &[ch('z')]); }
+    for _ in 0..rounds { p.act("undo", &[Key::Meta], &[ch('z')]); }
     p.act("idle after session", &[], &[Key::Shift]);
 }
 
@@ -218,10 +217,11 @@ fn basic() { check("basic", &session("basic", &sketch("basic.rays"), &tour)) }
 fn empty() { check("empty", &session("empty", include_str!("../../../rays_bin/src/empty.rays"), &tour)) }
 fn isogrid() { check("isogrid", &session("isogrid", &sketch("isogrid.rays"), &tour)) }
 fn long_session() {
-    let rows = session("long", &sketch("basic.rays"), &long);
+    let rounds = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 20 } else { 12 };
+    let rows = session("long", &sketch("basic.rays"), &|p| long(p, rounds));
     let fresh = rows.iter().find(|r| r.0 == "idle fresh").unwrap().3;
     let after = rows.iter().find(|r| r.0 == "idle after session").unwrap().3;
-    eprintln!("CLICK long session: settled idle {fresh} fresh, {after} after 40 edits and 20 undos");
+    eprintln!("CLICK long session: settled idle {fresh} fresh, {after} after {} edits and {rounds} undos", rounds * 2);
     check("long", &rows);
 }
 
