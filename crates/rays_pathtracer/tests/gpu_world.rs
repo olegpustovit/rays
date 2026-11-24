@@ -5,7 +5,7 @@ use rays::world as w;
 use rays_math::vec3;
 use rays_pathtracer::rays_pathtracer as p;
 
-const SPP: i64 = 8;
+const SPP: i64 = 16;
 
 fn v3(x: f64, y: f64, z: f64) -> vec3::T {
     vec3::create(x, y, z)
