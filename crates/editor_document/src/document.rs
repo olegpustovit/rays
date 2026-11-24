@@ -245,10 +245,17 @@ pub fn snapshot(value: &T) -> Snapshot {
 }
 
 pub fn snapshot_bytes(saved: &Snapshot) -> usize {
-    // the checked workspace and the ids hold about as much again
-    let mut all = saved.saved_ws.source.clone();
-    all.extend(saved.saved_ws.extra.iter().cloned());
-    2 * s::memory_bytes(&all)
+    let ws = &saved.saved_ws;
+    // syntax is shared by Arc and counted once; the checked workspace and the ids hold about as much again
+    let mut memory = s::Memory::default();
+    for form in ws.source.iter().chain(&ws.extra).chain(ws.imports.iter().flat_map(|(_, forms)| forms)) {
+        memory.add(form);
+    }
+    let texts: usize = ws.import_sources.iter().map(|(path, text)| path.len() + text.len()).sum();
+    // ponytail: the other copies a snapshot keeps (graph nodes, id maps, homes, layout) at a flat estimate per entry
+    let nodes = saved.saved_scene.len() + saved.saved_layers.values().map(|l| l.len()).sum::<usize>();
+    let entries = nodes + saved.saved_ids.len() + saved.saved_sites.len() + saved.saved_homes.objects.len() + saved.saved_homes.layers.len() + ws.layout.panels.len() + ws.layout.at.len();
+    2 * memory.bytes() + texts + 256 * entries
 }
 
 /// What the list shows: the scene's objects, or inside an object its SOP network or the World's layers.

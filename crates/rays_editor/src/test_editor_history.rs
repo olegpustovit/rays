@@ -209,3 +209,13 @@ fn no_op_edit_is_detected_by_value() {
     moved.active_camera = Some(3);
     assert!(!same_document(&b, &moved));
 }
+
+/// B3: a snapshot's size counts the imported texts it keeps, not only the workspace source.
+#[test]
+fn snapshot_bytes_counts_imports() {
+    let d = base();
+    let mut saved = document::snapshot(&d);
+    let plain = document::snapshot_bytes(&saved);
+    saved.saved_ws.import_sources.push(("lib.rays".into(), "x".repeat(1 << 20)));
+    assert!(document::snapshot_bytes(&saved) >= plain + (1 << 20));
+}
