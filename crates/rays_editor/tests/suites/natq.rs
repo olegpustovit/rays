@@ -15,6 +15,8 @@ mod marks_scene;
 mod smoke;
 #[path = "../native_qualification/alloc_budget.rs"]
 mod alloc_budget;
+#[path = "../native_qualification/click_budget.rs"]
+mod click_budget;
 
 pub fn scrub_child() -> bool {
     chains::scrub_child()
@@ -30,5 +32,6 @@ pub fn cases() -> Vec<(&'static str, fn())> {
     cases.extend(marks_scene::cases());
     cases.extend(smoke::cases());
     cases.extend(alloc_budget::cases());
+    cases.extend(click_budget::cases());
     cases
 }
