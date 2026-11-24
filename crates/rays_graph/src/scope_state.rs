@@ -231,7 +231,7 @@ pub struct Wiring {
 pub enum Drag {
     /// the cards' views move, those inside a zone it carries with them (the cards it carries are the
     /// pane's `moving`)
-    Moving { dx: f64, dy: f64, moved: bool },
+    Moving { dx: f64, dy: f64, moved: bool, narrow: bool },
     Wiring(Wiring),
     /// from the canvas press point to the pointer, screen space
     /// (what it adds to is the pane's `marquee_base`)
@@ -362,6 +362,8 @@ pub struct Pane {
     /// the node the viewport shows instead of the graph's result
     pub display: Option<Path>,
     pub framed: bool,
+    /// B19: the pan and zoom each graph the pane left was at, by key
+    pub cameras: Rc<RefCell<HashMap<String, (f64, f64, f64)>>>,
     pub layout: Rc<p::Layout>,
     pub geo: Geo,
     /// the font size point names were measured at
@@ -543,6 +545,7 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         cook: 0,
         display: None,
         framed: true,
+        cameras: Rc::new(RefCell::new(HashMap::new())),
         layout: Rc::new(p::Layout { placed: Vec::new(), w: 0.0, h: 0.0 }),
         geo: w::empty_geo(),
         geo_fs: 13,
@@ -1002,8 +1005,15 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: &mut Pane) {
     }
     if key != t.key {
         suspend(t);
+        if t.framed && !t.key.is_empty() {
+            // ponytail: a handful of graphs a session; bound it if graph names are generated
+            t.cameras.borrow_mut().insert(std::mem::take(&mut t.key), (t.pan_x, t.pan_y, t.zoom));
+        }
         t.key = key.to_owned();
         t.framed = false;
+        if let Some((x, y, z)) = t.cameras.borrow().get(key).copied() {
+            (t.pan_x, t.pan_y, t.zoom, t.framed) = (x, y, z, true);
+        }
         t.selected.clear();
         t.selected_wire = None;
     }

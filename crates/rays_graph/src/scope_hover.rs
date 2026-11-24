@@ -401,6 +401,12 @@ pub fn same_slots(t: &Pane, items: &Rc<Vec<Item3>>) {
     }
 }
 
+/// B16: the row under the pointer for a command: none while the geometry moved since the frame that found it
+/// (`hovered_at` is a slot of the old items).
+pub fn hovered_row_now(t: &Pane) -> Option<(Path, flow_graph::edit_tree::ArgKey)> {
+    if t.hovers.borrow().geo != geo_key(t) { None } else { crate::scope_state::hovered_row(t) }
+}
+
 fn geo_key(t: &Pane) -> (usize, usize) {
     (Rc::as_ptr(&t.geo.items) as *const u8 as usize, Rc::as_ptr(&t.geo.wires) as *const u8 as usize)
 }
@@ -451,7 +457,7 @@ pub fn moving_fast(t: &Pane) -> bool {
 /// them there.
 pub fn drag_offset(t: &Pane) -> Option<(f64, f64)> {
     match (&t.drag, &t.dropped) {
-        (Some(Drag::Moving { dx, dy, moved: true } | Drag::Carrying { dx, dy, .. }), _) => Some((*dx, *dy)),
+        (Some(Drag::Moving { dx, dy, moved: true, .. } | Drag::Carrying { dx, dy, .. }), _) => Some((*dx, *dy)),
         (_, Some((_, dx, dy, _))) => Some((*dx, *dy)),
         _ => None,
     }

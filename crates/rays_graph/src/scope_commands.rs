@@ -250,7 +250,8 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
     };
     match command {
         Command::Delete => {
-            if let Some((path, key)) = &st::hovered_row(t) {
+            // B14: Backspace deletes the selection; a hovered wire comes off only with nothing selected
+            if let Some((path, key)) = crate::scope_hover::hovered_row_now(t).filter(|_| nodes.is_empty()).as_ref() {
                 let hit = st::node_of(t, path).map(|n| n.rows.iter().any(|r| r.key == *key && (wired(r) || r.kind == p::RowKind::Rest))).unwrap_or(false);
                 if hit {
                     // a wire comes off; an item of a variadic input (a list's, a merge's) goes with what it holds
@@ -275,7 +276,7 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
             if parent != n.path {
                 return edit(Op::Unfold { node: parent, key: ArgKey::Arm(arm), sub: Vec::new() });
             }
-            if let Some((pp, key)) = &st::hovered_row(t) {
+            if let Some((pp, key)) = &crate::scope_hover::hovered_row_now(t) {
                 if *pp == n.path {
                     return edit(Op::Unfold { node: n.path.clone(), key: key.clone(), sub: Vec::new() });
                 }
@@ -394,7 +395,7 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
             }
         }),
         Command::ItemUp | Command::ItemDown => {
-            if let Some((path, ArgKey::Pos(i))) = &st::hovered_row(t) {
+            if let Some((path, ArgKey::Pos(i))) = &crate::scope_hover::hovered_row_now(t) {
                 if matches!(st::node_of(t, path), Some(n) if p::reorderable(&n)) {
                     return edit(Op::MoveItem { node: path.clone(), pos: if command == Command::ItemUp { *i } else { *i + 1 } });
                 }

@@ -1104,9 +1104,9 @@ pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &
                         }
                     }
                     Some(zn) if tp.collapsed => {
-                        let i = ((ly - p::HEAD_HEIGHT) / p::ROW_HEIGHT) as i64;
+                        let i = ((ly - p::BODY_TOP) / p::ROW_HEIGHT) as i64;
                         match if i >= 0 { zn.rail.get(i as usize) } else { None } {
-                            Some(r) if r.key.is_some() && ly >= p::HEAD_HEIGHT => Some((n.path.clone(), r.key.clone().unwrap())),
+                            Some(r) if r.key.is_some() && ly >= p::BODY_TOP => Some((n.path.clone(), r.key.clone().unwrap())),
                             _ => None,
                         }
                     }
@@ -1215,6 +1215,7 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
             let path = &items[*slot].0.path;
             if sig.pressed && left && t.context.is_none() {
                 let additive = ui.press_keys(canvas).contains(&Key::Shift.code());
+                let mut narrow = false;
                 if additive {
                     if !t.selected.remove(path) {
                         t.selected.insert(path);
@@ -1222,13 +1223,16 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
                 } else if !(t.selected.contains(path) && t.selected.iter().all(|q| t.geo.slot.contains_key(q))) {
                     t.selected.clear();
                     t.selected.insert(path);
+                } else {
+                    // B15: a click without a drag narrows a multi-selection to this card on release
+                    narrow = t.selected.len() > 1;
                 }
                 emit.push(Change::Selected);
                 // the move carries the selection but the cards inside others it holds
                 let (moving, sel) = (&mut t.moving, &t.selected);
                 moving.assign(sel);
                 moving.retain(&mut |q| !sel.iter().any(|a| a.len() < q.len() && q.starts_with(a)));
-                (t.selected_wire, t.drag) = (None, Some(Drag::Moving { dx: 0.0, dy: 0.0, moved: false }));
+                (t.selected_wire, t.drag) = (None, Some(Drag::Moving { dx: 0.0, dy: 0.0, moved: false, narrow }));
             }
             if sig.double_clicked && left && t.context.is_none() && t.editing.is_none() {
                 let (pl, _, ay) = &t.geo.items[*slot];
@@ -1252,7 +1256,7 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
             }
             let carried = t.selected.contains(path);
             let mut begin = false;
-            if let Some(Drag::Moving { dx, dy, moved }) = &mut t.drag {
+            if let Some(Drag::Moving { dx, dy, moved, .. }) = &mut t.drag {
                 if sig.held && left && carried {
                     let (ddx, ddy) = sig.drag;
                     *dx += f64::from(ddx) / z;
@@ -1265,7 +1269,12 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
                 crate::scope_hover::begin_move(t);
             }
             if sig.released && left {
-                if let Some(Drag::Moving { dx, dy, moved }) = t.drag.take() {
+                if let Some(Drag::Moving { dx, dy, moved, narrow }) = t.drag.take() {
+                    if !moved && narrow {
+                        t.selected.clear();
+                        t.selected.insert(path);
+                        emit.push(Change::Selected);
+                    }
                     if moved {
                         let mv: Vec<(Path, f64, f64)> = t.moving.iter().filter_map(|path| rel_at(t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + dx), p::snap(ry + dy)))).collect();
                         emit.push(Change::Moved(mv));
@@ -1609,10 +1618,17 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut 
     }
 }
 
+const MEASURED_MAX: usize = 4096;
+
 /// Measure with the UI's fonts, remembering the width for the pane's outside-a-frame queries.
 fn measure_ui(ui: &mut Ui, t: &Pane, size: i64, text: &str) -> f64 {
     let v = f64::from(ui.text_width(Some(size), text));
-    t.measured.borrow_mut().insert(text_key(size, text), v);
+    let mut m = t.measured.borrow_mut();
+    // B20: bounded; a full cache starts over (it refills from the visible text in one frame)
+    if m.len() >= MEASURED_MAX {
+        m.clear();
+    }
+    m.insert(text_key(size, text), v);
     v
 }
 

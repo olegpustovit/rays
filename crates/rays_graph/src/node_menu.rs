@@ -212,7 +212,7 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
     let width = MENU_WIDTH;
     let x = bx.max(menu.x.min(bx + bw - width));
     let y = by.max(menu.y.min(by + bh - height));
-    let result: Rc<RefCell<Option<(String, Pick)>>> = Rc::new(RefCell::new(None));
+    let result: Rc<RefCell<Option<(String, String, Pick)>>> = Rc::new(RefCell::new(None));
     let out = result.clone();
     let m = menu.clone();
     let open = ui.popup(
@@ -270,13 +270,15 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
                     paint.text_c(((cx + 6.5) as f32, ty as f32), muted, "\u{d7}");
                 });
             }
+            // B18: the pick indexes the rows of the query the picker listed, not the one the clear button just reset
+            let listed = query.clone();
             let query = if ui.signal(&clear).clicked { String::new() } else { query };
             let right = format!("{} of {}", rows(&m, &query).len(), m.items.len());
             ui.footer(
                 Some(&right),
                 &[("\u{2191}\u{2193}".to_owned(), "move".to_owned()), ("\u{21b5}".to_owned(), "place".to_owned())],
             );
-            *out.borrow_mut() = Some((query, pick));
+            *out.borrow_mut() = Some((query, listed, pick));
         },
     );
     let _ = Axis::Column;
@@ -285,12 +287,12 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
     } else {
         match result.borrow_mut().take() {
             None => (None, None),
-            Some((query, pick)) => {
+            Some((query, listed, pick)) => {
                 let menu = Menu { query, ..menu };
                 match pick {
                     Pick::Cancel => (None, None),
                     Pick::Pick(index) => {
-                        let key = rows(&menu, &menu.query)[index as usize].key.clone();
+                        let key = rows(&menu, &listed)[index as usize].key.clone();
                         (None, Some(key))
                     }
                     _ => (Some(menu), None),
