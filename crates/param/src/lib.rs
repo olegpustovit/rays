@@ -928,7 +928,7 @@ pub mod number {
         };
         match kind {
             Kind::Int => {
-                let n = int_scrub_delta(dx);
+                let n = int_scrub_delta(if fine { dx / 10.0 } else { dx });
                 if n == 0.0 {
                     origin.to_owned()
                 } else {
