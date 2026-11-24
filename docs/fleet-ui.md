@@ -69,6 +69,9 @@ Delete it when W3 closes; leftovers go to `OPEN_ISSUES.md`.
 - L2: `document_edit.rs:24` copies the factory list per gesture.
 ### L2
 ### L3
+### L6 (from L3, P4, measured)
+- P4 cause: `text_pane.rs:2485` (`view_checked`) calls `lisp_text::language(Some(vocab.clone()), ..)`: a deep clone of the whole `Vocab` (`Vec<Entry>` of `FieldView` vectors, ~12,000 allocations) plus its drop, on every built frame of every drawn text pane. After a layout edit (split) a text pane is drawn each frame, which is the whole 650 -> 12,400 idle step (sampled: `draw_text_panes` 434 of 674 update samples, 253 clone + 154 drop). Fix: `lisp_text::language` takes `Rc<Vocab>` (it wraps it in an Rc anyway, :746), `view_checked`/`view` take `&Rc<Vocab>`, and `LazyVocab` (`editor_model.rs:414`, cell of `Rc<Vocab>`, `force()` returns `&Rc<Vocab>`) hands out the shared Rc; `editor_panes.rs:658` (L8) passes it through. Better still: keep the Language per (vocab, names, imports, parinfer, theme) instead of rebuilding its ten closures per frame, and let an unchanged text pane be a cached PXUI view. Expect basic/empty settled rows from ~12.4k back to ~700.
+- Scheduled wake (B34, from L3): `LoopModel` will expose `next_wake: Option<f64>` (absolute `frame.input.t`); the loop sleeps until min(wake, repaint_at, cook, 100 ms). To have a frame at LIVE_DELAY (`text_pane.rs:2247`), call `ui.request_repaint_at(t)` (PXUI's repaint_at) from the text pane; no polling.
 ### L4
 - L2: `editor_scope::sync_scope` costs ~6 allocations on an idle frame of the empty sketch (the largest left in the reduce step).
 ### L5
