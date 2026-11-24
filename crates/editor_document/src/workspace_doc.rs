@@ -346,8 +346,13 @@ fn pruned(checked: &Workspace, catalog: &Catalog, layout: &lbp::T) -> lbp::T {
 }
 
 /// An edit remaps the keys it moves. Validate only the remaining layout keys against the authored
-/// paths, without projecting unrelated graphs.
-fn prune_keys(checked: &Workspace, layout: &lbp::T) -> lbp::T {
+/// paths, without projecting unrelated graphs; a graph the check kept as it was (`before`'s terms) keeps
+/// its keys.
+fn prune_keys(before: &Workspace, checked: &Workspace, layout: &lbp::T) -> lbp::T {
+    let kept = |root: &str| {
+        let same = |a: &Arc<Vec<w::Graph>>, b: &Arc<Vec<w::Graph>>| a.iter().find(|g| g.name == root).zip(b.iter().find(|g| g.name == root)).is_some_and(|(x, y)| x.body.identity() == y.body.identity());
+        same(&before.graphs, &checked.graphs) || same(&before.defs, &checked.defs)
+    };
     let graph = |root: &str| -> Option<&w::Graph> {
         checked
             .graphs
@@ -363,6 +368,9 @@ fn prune_keys(checked: &Workspace, layout: &lbp::T) -> lbp::T {
         }
     };
     let keep = |path: &flow_check::workspace::Path| -> bool {
+        if path.first().is_some_and(|root| kept(root.as_str())) {
+            return true;
+        }
         let mut prefix: flow_check::workspace::Path = Vec::new();
         for segment in path {
             if segment.starts_with('@') {
@@ -577,12 +585,12 @@ fn commit(t: &T, remap: &dyn Fn(&flow_check::workspace::Path) -> Option<flow_che
         layout.editor = None; // the other editor graphs are gone
     }
     if prune {
-        layout = prune_keys(&checked, &layout);
+        layout = prune_keys(&t.checked, &checked, &layout);
     }
     T { source, checked: Arc::new(checked), layout, literal: None, ..t.clone() }
 }
 
-fn checker_for(ops: Vec<FlowOp>, library: bool) -> Box<flow_edit::Checker> {
+fn checker_for(ops: Arc<Vec<FlowOp>>, library: bool) -> Box<flow_edit::Checker> {
     Box::new(move |catalog: &Catalog, forms: &[S]| fsc::check_workspace(&ops, library, None, catalog, forms))
 }
 
@@ -615,7 +623,7 @@ fn edit_unchecked(catalog: &Catalog, t: &T, op: &Op) -> R<T> {
         }
         _ => {}
     }
-    let checker = checker_for((*t.checked.ops).clone(), t.fragment);
+    let checker = checker_for(t.checked.ops.clone(), t.fragment);
     let result = flow_edit::apply_checked_with(&t.checked.ops, t.fragment, Some(&*checker), catalog, &t.source, op)?;
     let prune = !matches!(op, Op::SetArg { .. } | Op::SetInputDefault { .. } | Op::SetNote { .. } | Op::ToggleBypass { .. });
     Ok(commit(t, &|p| flow_edit::remap(op, p), false, prune, keep_ops(t, result)))
@@ -697,7 +705,7 @@ pub fn edit(catalog: &Catalog, t: &T, op: &Op) -> R<T> {
 /// One layout gesture, atomically, as `edit`: layout keys follow `layout_edit::remap`.
 pub fn edit_layout(catalog: &Catalog, t: &T, op: &layout_edit::Op) -> R<T> {
     guarded(t, &layout_edit::paths(op), &mut || {
-        let checker = checker_for((*t.checked.ops).clone(), t.fragment);
+        let checker = checker_for(t.checked.ops.clone(), t.fragment);
         let result = layout_edit::apply_checked(&t.checked.ops, t.fragment, Some(&*checker), catalog, &t.source, op)?;
         Ok(commit(t, &|p| layout_edit::remap(op, p), layout_edit::merges(op), layout_edit::changes_nodes(op), keep_ops(t, result)))
     })

@@ -447,19 +447,44 @@ fn seed(forms: &[Syntax], seen: &mut HashSet<String>, queue: &mut VecDeque<Strin
     }
 }
 
-/// The entries a workspace reaches through the names it mentions, in library order.
+/// The entries a workspace reaches through the names it mentions, in library order. Runs on every
+/// check: the name index is built once and the walk allocates only for what it reaches.
 fn reachable_entries(forms: &[Syntax], allowed: &dyn Fn(&Entry) -> bool) -> Vec<usize> {
     let Ok(library) = library() else { return Vec::new() };
-    let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
-    for (i, entry) in library.entries.iter().enumerate() {
-        if allowed(entry) {
-            by_name.entry(entry.name.clone()).or_default().push(i);
+    static BY_NAME: OnceLock<HashMap<&'static str, Vec<usize>>> = OnceLock::new();
+    let by_name = BY_NAME.get_or_init(|| {
+        let mut by_name: HashMap<&'static str, Vec<usize>> = HashMap::new();
+        for (i, entry) in library.entries.iter().enumerate() {
+            by_name.entry(entry.name.as_str()).or_default().push(i);
+        }
+        by_name
+    });
+    let mut keep = vec![false; library.entries.len()];
+    let mut queue: Vec<usize> = Vec::new();
+    let reach = |name: &str, keep: &mut [bool], queue: &mut Vec<usize>| {
+        for &i in by_name.get(name).map_or(&[][..], Vec::as_slice) {
+            if !keep[i] && allowed(&library.entries[i]) {
+                keep[i] = true;
+                queue.push(i);
+            }
+        }
+    };
+    fn walk(form: &Syntax, f: &mut dyn FnMut(&str)) {
+        if let Node::Sym(name) = &form.node {
+            f(form.name(*name));
+        }
+        for &child in form.children() {
+            walk(&form.child(child), f);
         }
     }
-    let (mut seen, mut queue) = (HashSet::new(), VecDeque::new());
-    seed(forms, &mut seen, &mut queue);
-    let mut keep = vec![false; library.entries.len()];
-    close_over(&by_name, &mut keep, &mut seen, &mut queue, &mut |i| library.entries[i].references.clone());
+    for form in forms {
+        walk(form, &mut |name| reach(name, &mut keep, &mut queue));
+    }
+    while let Some(i) = queue.pop() {
+        for name in &library.entries[i].references {
+            reach(name, &mut keep, &mut queue);
+        }
+    }
     (0..keep.len()).filter(|i| keep[*i]).collect()
 }
 

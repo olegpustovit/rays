@@ -79,7 +79,7 @@ fn layout_gestures_match_a_whole_rebuild_on_every_editor_sketch() {
     // a sketch per shape of editor graph: views and a canvas, a switch, a viewport over another scene
     // instance, a layout written after other graphs
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sketches");
-    let mut checked = 0;
+    let (mut checked, mut reused) = (0, 0);
     for name in ["isogrid.rays", "basic.rays", "particles.rays", "ws_variations.rays", "pxui.rays"] {
         let path = dir.join(name);
         let Some(doc) = load(&path) else { continue };
@@ -87,10 +87,14 @@ fn layout_gestures_match_a_whole_rebuild_on_every_editor_sketch() {
             let label = format!("{} {}", path.file_name().unwrap().to_string_lossy(), le::label(&op));
             let fast = document_edit::layout_op(None, &doc, &op);
             w::forget_retained();
+            lowering::WHOLE.with(|w| w.set(true));
             let whole = document_edit::layout_op(None, &doc, &op);
+            lowering::WHOLE.with(|w| w.set(false));
             match (fast, whole) {
                 (Ok(fast), Ok(whole)) => {
                     same_doc(&label, &fast, &whole);
+                    // the plan was kept: only the editor graph was evaluated again
+                    reused += usize::from(fast.workspace.lowered.plan.id == doc.workspace.lowered.plan.id);
                     // undo: the document before the gesture, lowered again on top of the one after it
                     let back = lowering::restore(None, &fast, &document::snapshot(&doc)).expect("restore");
                     same_doc(&format!("{label} undone"), &back, &doc);
@@ -102,4 +106,5 @@ fn layout_gestures_match_a_whole_rebuild_on_every_editor_sketch() {
         }
     }
     assert!(checked >= 11, "only {checked} gestures compared");
+    assert!(reused >= 6, "only {reused} gestures kept the plan");
 }

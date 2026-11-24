@@ -837,6 +837,38 @@ fn same_gpu(a: &gpu::Config, b: &gpu::Config) -> bool {
         }
 }
 
+thread_local! {
+    /// Tests lower whole to compare.
+    pub(crate) static WHOLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The graphs a check over the same definitions gave anew (an editor layout, the graphs after it); `None`
+/// when anything else changed, or host inputs reach one of them.
+fn changed_graphs(old: &workspace_doc::T, new: &workspace_doc::T) -> Option<Vec<String>> {
+    let (a, b) = (&old.checked, &new.checked);
+    // a check of the same forms gives the same terms: two checks of one source compare by their forms
+    let same = |x: &flow_check::workspace::Graph, y: &flow_check::workspace::Graph| x.name == y.name && (x.body.identity() == y.body.identity() || x.form == y.form);
+    let same_all = |x: &[flow_check::workspace::Graph], y: &[flow_check::workspace::Graph]| x.len() == y.len() && x.iter().zip(y).all(|(x, y)| same(x, y));
+    let same_definitions = Arc::ptr_eq(&old.inputs, &new.inputs)
+        && (Arc::ptr_eq(&a.defs, &b.defs) || same_all(&a.defs, &b.defs))
+        && (Arc::ptr_eq(&a.nodes, &b.nodes) || (a.nodes.len() == b.nodes.len() && a.nodes.iter().zip(b.nodes.iter()).all(|(x, y)| same(&x.body, &y.body))))
+        && (Arc::ptr_eq(&a.macros, &b.macros) || a.macros == b.macros);
+    if !same_definitions || a.graphs.len() != b.graphs.len() {
+        return None;
+    }
+    let mut changed = Vec::new();
+    for (x, y) in a.graphs.iter().zip(b.graphs.iter()) {
+        if x.name != y.name {
+            return None;
+        }
+        if !same(x, y) {
+            changed.push(y.name.clone());
+        }
+    }
+    let inputs_reach = new.inputs.iter().any(|(graph, _)| changed.contains(graph));
+    (!changed.is_empty() && !inputs_reach).then_some(changed)
+}
+
 fn same_calls(a: &[Call], b: &[Call]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.kind == y.kind && x.args == y.args)
 }
@@ -892,9 +924,24 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         }
         result
     });
-    let lowered = match previous_literal {
-        Some(result) => result?,
-        None => {
+    // a layout edit changes the editor graph alone (and the graphs written after it get fresh syntax):
+    // those are evaluated again over the previous plan when nothing else can see them
+    // (the lowering, whether only editor graphs changed)
+    let previous_graphs: Option<(lower_mod::T, bool)> = match (&previous_literal, previous) {
+        (None, Some(doc)) if same_gpu(&gpu, &doc.workspace.lowered.gpu) && doc.workspace.lowered.defer == defer && !WHOLE.with(|w| w.get()) => {
+            changed_graphs(&doc.workspace.ws, workspace).and_then(|names| {
+                let editors = names.iter().all(|n| workspace.checked.graphs.iter().any(|g| g.name == *n && g.context == context::editor()));
+                let names: Vec<&str> = names.iter().map(String::as_str).collect();
+                lower_mod::with_graphs(&doc.workspace.lowered, &doc.workspace.ws.checked, &workspace.checked, &names, options.record.unwrap_or(true)).map(|l| (l, editors))
+            }).filter(|(lowered, _)| !gpu.backend.is_some() || plan_window(workspace, &lowered.plan).is_ok_and(|w| w.fast == gpu.fast))
+        }
+        _ => None,
+    };
+    let layout_only = previous_graphs.as_ref().is_some_and(|(_, editors)| *editors);
+    let lowered = match (previous_literal, previous_graphs) {
+        (Some(result), _) => result?,
+        (None, Some((lowered, _))) => lowered,
+        (None, None) => {
             let lower = |gpu: &gpu::Config| -> R<lower_mod::T> {
                 let o = lower_mod::Options {
                     record: options.record.unwrap_or(true),
@@ -924,6 +971,22 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
     };
     let workspace = &workspace;
     check_context_time(workspace, &lowered.plan)?;
+    // only the layout changed, and no viewport (then or now) shows a scene instance of its own: the
+    // scene, its objects, World and settings are the previous document's
+    if let (Some(doc), true) = (previous, layout_only) {
+        let editor = shell_eval::editor(workspace, &lowered.plan)?;
+        let default_scene = workspace_doc::context_value(false, workspace, &lowered.plan, context::scene())?;
+        let own_scene = editor.as_ref().is_some_and(|e| e.viewports.iter().any(|(_, scene)| default_scene.as_ref() != Some(scene)));
+        let had_own = doc.shell.as_ref().is_some_and(|s| !s.views.is_empty()) || !doc.view_worlds.is_empty() || !doc.view_roots.is_empty();
+        if !own_scene && !had_own {
+            let ws = if has_settings(workspace) { workspace.clone() } else { workspace_doc::T { settings: doc.settings.clone(), ..workspace.clone() } };
+            return Ok(document::T {
+                shell: editor.map(|e| shell_of(e, Vec::new(), previous)),
+                workspace: document::Workspace { ws, lowered: Arc::new(lowered), fast: doc.workspace.fast.clone() },
+                ..doc.clone()
+            });
+        }
+    }
     check_scene(workspace, &lowered.plan)?;
     let (items, root) = items(workspace, &lowered)?;
     // a viewport over another instance of the scene draws objects of its own
@@ -1126,18 +1189,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
             scene_textures.insert(*id, texture.clone());
         }
     }
-    let shell = editor.map(|e| document::Shell {
-        tree: e.tree,
-        origins: e.origins,
-        named: e.named,
-        repeated: e.repeated,
-        follows: e.follows,
-        start: e.start,
-        views,
-        canvases: e.canvases,
-        preview_sources: e.preview_sources,
-        switch: e.switch,
-    });
+    let shell = editor.map(|e| shell_of(e, views, previous));
     let (fast_ws, fast_plan) = (workspace.clone(), lowered.plan.clone());
     let fast = document::LazyBool::new(Arc::new(move || match plan_window(&fast_ws, &fast_plan) {
         Ok(w) => w.fast,
@@ -1150,12 +1202,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         active_camera,
         root: root.params,
         settings,
-        // the previous shell stays when nothing in it changed (a scrub, an undo of a value): the
-        // geometry the shell caches is keyed on this Arc
-        shell: shell.map(|new| match previous.and_then(|doc| doc.shell.as_ref()) {
-            Some(old) if same_shell(old, &new) => old.clone(),
-            _ => Arc::new(new),
-        }),
+        shell,
         view_worlds,
         view_roots,
         homes,
@@ -1167,6 +1214,27 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
             fast,
         },
     })
+}
+
+/// The previous shell stays when nothing in it changed (a scrub, an undo of a value): the geometry the
+/// shell caches is keyed on this Arc.
+fn shell_of(e: shell_eval::Editor, views: Vec<(String, Vec<i64>)>, previous: Option<&document::T>) -> Arc<document::Shell> {
+    let new = document::Shell {
+        tree: e.tree,
+        origins: e.origins,
+        named: e.named,
+        repeated: e.repeated,
+        follows: e.follows,
+        start: e.start,
+        views,
+        canvases: e.canvases,
+        preview_sources: e.preview_sources,
+        switch: e.switch,
+    };
+    match previous.and_then(|doc| doc.shell.as_ref()) {
+        Some(old) if same_shell(old, &new) => old.clone(),
+        _ => Arc::new(new),
+    }
 }
 
 pub(crate) fn same_shell(a: &document::Shell, b: &document::Shell) -> bool {

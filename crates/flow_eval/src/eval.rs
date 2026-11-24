@@ -454,6 +454,8 @@ struct Arena {
     packed_bases: Shared<IdMap<(u64, flow_check::term_arena::PathId), Arc<Path>>>,
     // Deferred checks are kept oldest first while an inline argument is live. Checks depending only on frame facts run when the card cooks and report the failing branch diagnostic.
     guards: Option<Vec<(Value, bool, Diagnostic)>>,
+    /// `graphs_against`: a graph instance the plan does not hold is refused, not evaluated.
+    frozen: bool,
 }
 static EMPTY_WORKSPACE: LazyLock<Shared<Workspace>> = LazyLock::new(|| Shared::new(Workspace {
     name: String::new(), graphs: Vec::new().into(), defs: Vec::new().into(), nodes: Vec::new().into(), macros: Vec::new().into(), source: Vec::new().into(),
@@ -480,7 +482,7 @@ impl Arena {
             states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, decisions: 0, policies: Shared::default(), record: false,
             time: None, resolve: None, state: Some(State::default()), elems: BTreeMap::new(), step_count: 0,
             budget: 0, fn_calls: Shared::default(), memo: Shared::default(), interrupt: None, owns_index: false, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), fn_plans: Shared::default(), pure: Shared::default(), terms: Shared::default(), guards: None,
-            packed_bases: Shared::default(),
+            packed_bases: Shared::default(), frozen: false,
         }
     }
     /// What stands in for an arena while it is lent (never read: `owns_index` false marks it).
@@ -2348,6 +2350,7 @@ fn graph_value(a: &mut Arena, c: &ExecCtx, name: &str, over: &[(Symbol, Value)],
     keys.sort_by(|left, right| left.0.cmp(&right.0));
     let key = (symbol::intern(name), keys);
     if let Some(index) = a.cache.get(&key) { return Ok(a.cells[*index].result.clone()); }
+    if a.frozen { return Err(errorf("E_PLAN", format!("{name} is not an instance of the plan."))); }
     if a.time.is_some() { return eval_graph_body(a, c, &graph, over, record, -1).map(|(value, _)| value); }
     let instance = a.cells.len() as i64;
     a.cells.push(GraphCell { instance, graph: name.to_owned(), default: over.is_empty(), inputs: Vec::new(), result: Value::NoGeo });
@@ -2979,6 +2982,32 @@ pub fn static_with(workspace: &Workspace, record: bool, inputs: Option<&[(String
         results.push((symbol::intern(&graph.name), value));
     }
     Ok(result_from(&slot, &arena, results))
+}
+/// The default instances of `names` evaluated again over `plan`, the evaluation of a workspace that
+/// differed from `workspace` only in those graphs (graphs no other graph references): a `ref` to any
+/// other default instance answers with its result in the plan. `None` when one of them fails or would
+/// add to the plan (a node, an instance, state, a closure or residual of its own): evaluate it whole.
+pub fn graphs_against(workspace: &Workspace, plan: &Plan, names: &[&str], record: bool) -> Option<(Vec<(usize, Value, Vec<(Symbol, Value)>)>, Records)> {
+    let _nesting = EvalNesting::enter().ok()?;
+    let slot = Arena::new(workspace, record, MAX_STEPS);
+    let mut a = checkout(&slot);
+    a.frozen = true;
+    let root = root_ctx(&mut a);
+    for (index, instance) in plan.instances.iter().enumerate() {
+        a.cells.push(GraphCell { instance: index as i64, graph: instance.graph.clone(), default: instance.default, inputs: instance.inputs.clone(), result: instance.result.clone() });
+        if instance.default && !names.contains(&instance.graph.as_str()) { a.cache.insert((symbol::intern(&instance.graph), Vec::new()), index); }
+    }
+    let mut out = Vec::with_capacity(names.len());
+    for (index, instance) in plan.instances.iter().enumerate() {
+        if !instance.default || !names.contains(&instance.graph.as_str()) { continue; }
+        let graph = workspace.graphs.iter().find(|graph| graph.name == instance.graph)?;
+        let (value, inputs) = eval_graph_body(&mut a, &root, graph, &[], record, index as i64).ok()?;
+        a.cache.insert((symbol::intern(&instance.graph), Vec::new()), index);
+        out.push((index, value, inputs));
+    }
+    let own = !a.nodes.is_empty() || a.cells.len() != plan.instances.len() || !a.states.is_empty() || !a.functions.is_empty() || !a.residuals.is_empty();
+    if out.len() != names.len() || own { return None; }
+    Some((out, a.records.iter().map(|(path, values)| (path.clone(), values.clone())).collect()))
 }
 pub fn static_with_requests(budget: Option<usize>, record: bool, inputs: Option<&[(String, Vec<(Symbol, Value)>)]>, workspace: &Workspace) -> Result<Eval, Diagnostic> {
     static_with(workspace, record, inputs, budget)

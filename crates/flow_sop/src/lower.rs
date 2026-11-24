@@ -5083,6 +5083,51 @@ pub fn of_checked(factories: Option<Vec<Factory>>, o: Options, checked: &Workspa
     lower_checked(factories.unwrap_or_else(sop::nodes::factories), o, checked)
 }
 
+/// `lowered` (of `old`) with the default instances of `names` evaluated again from `checked`, when
+/// nothing else in it can change: no other graph references them, none of them made a plan node or
+/// an instance with inputs, and evaluated again over the plan none adds to it
+/// (`flow_eval::graphs_against`). An editor layout edit; `None` for anything else, which lowers
+/// whole. ponytail: the kernel-source digest keeps the source it was made from (only kernels read
+/// it), and the plan's nodes are copied twice; share them if a large plan shows in layout edits.
+pub fn with_graphs(lowered: &T, old: &Workspace, checked: &Workspace, names: &[&str], record: bool) -> Option<T> {
+    let instance = |name: &str| lowered.plan.instances.iter().position(|i| i.default && i.graph == name);
+    let made_nodes = names.iter().map(|name| instance(name)).collect::<Option<Vec<_>>>()?;
+    if lowered.plan.nodes.iter().any(|n| n.inst >= 0 && made_nodes.contains(&(n.inst as usize))) {
+        return None;
+    }
+    let refs = |g: &WGraph, to: &dyn Fn(&str, bool) -> bool| {
+        let arena = g.body.arena();
+        arena.rows().iter().any(|row| matches!(row.node, W::Node::GraphRef(id) if to(arena.name(arena.graph_ref(id).graph), !arena.fields(arena.graph_ref(id).inputs).is_empty())))
+    };
+    let referenced = checked.graphs.iter().filter(|g| !names.contains(&g.name.as_str())).any(|g| refs(g, &|to, _| names.contains(&to)));
+    // an instance with inputs one of them made would outlive it
+    let made_instances = old.graphs.iter().filter(|g| names.contains(&g.name.as_str())).any(|g| refs(g, &|_, inputs| inputs));
+    if referenced || made_instances {
+        return None;
+    }
+    let _phase = flow_syntax::phase_timer::measure("lower.graphs_again");
+    // as `make_lowerer` evaluates: helper bodies with their context reads captured
+    let workspace = Workspace { defs: checked.defs.iter().map(ck::capture_context).collect::<Vec<_>>().into(), ..checked.clone() };
+    let (values, records) = E::graphs_against(&workspace, &lowered.plan, names, record)?;
+    let rooted = |path: &[Symbol]| path.first().is_some_and(|root| names.contains(&root.as_str()));
+    let mut evaluated = (*lowered.evaluated).clone();
+    let mut kept: BTreeMap<_, _> = evaluated.records.drain(..).filter(|(path, _)| !rooted(path)).collect();
+    kept.extend(records);
+    evaluated.records = kept.into_iter().collect();
+    let mut next = lowered.clone();
+    for (index, value, inputs) in values {
+        for plan in [&mut evaluated.plan, &mut next.plan] {
+            plan.instances[index] = Instance { result: value.clone(), inputs: inputs.clone(), ..plan.instances[index].clone() };
+        }
+        let name = Symbol::from(lowered.plan.instances[index].graph.as_str());
+        if let Some((_, result)) = evaluated.results.iter_mut().find(|(n, _)| *n == name) {
+            *result = value;
+        }
+    }
+    next.evaluated = Arc::new(evaluated);
+    Some(next)
+}
+
 /// `factories` is the SOP catalog (default `sop::nodes::factories`). Errors: the checker's first
 /// error, the evaluator's, or `E_LOWER`.
 pub fn workspace(factories: Option<Vec<Factory>>, extra: Vec<catalog::Descriptor>, o: Options, source: &[Syntax]) -> R<T> {

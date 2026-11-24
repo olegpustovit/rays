@@ -3874,19 +3874,25 @@ fn recheck(ops: &[op::Op], library: bool, call_sites: bool, prelude: Option<&Pre
     let old_names = |path: &CheckPath| base.path_names(*path).to_vec();
     let live = levels().flat_map(|b| b.live.iter()).map(old_names).filter(|p| !rooted(p)).chain(checker.live.iter().map(names)).collect();
     let invariant = levels().flat_map(|b| b.invariant.iter()).map(old_names).filter(|p| !rooted(p)).chain(checker.invariant.iter().map(names)).collect();
-    let mut packed: BTreeMap<Path, PackedForm> = old_ws.packed.iter().filter(|(p, _)| !rooted(p)).cloned().collect();
-    let mut approx_reasons: BTreeMap<Path, Vec<Diagnostic>> = old_ws.approx_reasons.iter().filter(|(p, _)| !rooted(p)).cloned().collect();
-    for (path, f) in &checker.packed {
-        let f = match f {
-            CheckPackedForm::Candidate(paths) => PackedForm::Candidate(Arc::new(paths.iter().map(names).collect())),
-            CheckPackedForm::Refused(diagnostics) => PackedForm::Refused(diagnostics.clone()),
-        };
-        approx_reasons.insert(names(path), match &f {
-            PackedForm::Refused(reasons) => reasons.clone(),
-            PackedForm::Candidate(_) => vec![err("E_PACKED_PENDING", "Actual producer captures have not been qualified.".into(), None)],
-        });
-        packed.insert(names(path), f);
-    }
+    // the packed metadata stays shared unless the graphs checked again have some
+    let (packed, approx_reasons) = if checker.packed.is_empty() && !old_ws.packed.iter().any(|(p, _)| rooted(p)) {
+        (old_ws.packed.clone(), old_ws.approx_reasons.clone())
+    } else {
+        let mut packed: BTreeMap<Path, PackedForm> = old_ws.packed.iter().filter(|(p, _)| !rooted(p)).cloned().collect();
+        let mut approx_reasons: BTreeMap<Path, Vec<Diagnostic>> = old_ws.approx_reasons.iter().filter(|(p, _)| !rooted(p)).cloned().collect();
+        for (path, f) in &checker.packed {
+            let f = match f {
+                CheckPackedForm::Candidate(paths) => PackedForm::Candidate(Arc::new(paths.iter().map(names).collect())),
+                CheckPackedForm::Refused(diagnostics) => PackedForm::Refused(diagnostics.clone()),
+            };
+            approx_reasons.insert(names(path), match &f {
+                PackedForm::Refused(reasons) => reasons.clone(),
+                PackedForm::Candidate(_) => vec![err("E_PACKED_PENDING", "Actual producer captures have not been qualified.".into(), None)],
+            });
+            packed.insert(names(path), f);
+        }
+        (packed.into_iter().collect::<Vec<_>>().into(), approx_reasons.into_iter().collect::<Vec<_>>().into())
+    };
     let mut packed_roots: Vec<(Syntax, Path)> = levels().flat_map(|b| b.roots.iter()).map(|(f, p)| (f.clone(), old_names(p))).filter(|(_, p)| !rooted(p)).chain(checker.roots.iter().map(|(f, p)| (f.clone(), names(p)))).collect();
     packed_roots.sort_by(|(a, p), (b, q)| p.cmp(q).then(a.id.cmp(&b.id)));
     let graphs = old_ws.graphs.iter().map(|g| if is_dirty(&g.name) { checker.graph_terms.remove(&g.name) } else { Some(g.clone()) }).collect::<Option<Vec<_>>>()?;
@@ -3900,9 +3906,9 @@ fn recheck(ops: &[op::Op], library: bool, call_sites: bool, prelude: Option<&Pre
         live,
         invariant,
         approx: Paths::new(),
-        packed: packed.into_iter().collect::<Vec<_>>().into(),
+        packed,
         packed_roots,
-        approx_reasons: approx_reasons.into_iter().collect::<Vec<_>>().into(),
+        approx_reasons,
         kind_fns: old_ws.kind_fns.clone(),
         ops: old_ws.ops.clone(),
     }), diagnostics))
