@@ -742,9 +742,9 @@ pub fn color_chips(text: &str) -> Vec<(i64, i64, pxui::geom::color::T)> {
     out
 }
 
-pub fn language(vocab: Option<Vocab>, names: Option<Names>, imports: Option<Vec<(String, String)>>, parinfer: bool, theme: Theme) -> Language {
-    let vocab = Rc::new(vocab.unwrap_or_else(empty_vocab));
-    let names = Rc::new(names.unwrap_or_default());
+pub fn language(vocab: Option<Rc<Vocab>>, names: Option<Rc<Names>>, imports: Option<Vec<(String, String)>>, parinfer: bool, theme: Theme) -> Language {
+    let vocab = vocab.unwrap_or_else(|| Rc::new(empty_vocab()));
+    let names = names.unwrap_or_default();
     let imports = Rc::new(imports.unwrap_or_default());
     let (complete_vocab, describe_vocab) = (vocab.clone(), vocab);
     Language {

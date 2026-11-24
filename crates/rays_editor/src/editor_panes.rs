@@ -654,7 +654,7 @@ pub fn draw_text_panes(
     other_texts: Vec<(Key, layout::Path, text_pane::State, text_pane::Shown)>,
     locals: Vec<(Key, Local)>,
 ) -> (text_pane::State, Vec<text_pane::Intent>, Vec<(Key, Local)>, Vec<(Key, text_pane::Shown, Vec<text_pane::Intent>)>) {
-    let names = completion_names(value);
+    let names = Rc::new(completion_names(value));
     let vocab = value.lisp_vocab.force();
     let view_text = |ui: &mut Ui, path: &layout::Path, state: &text_pane::State, shown: &text_pane::Shown| -> Vec<text_pane::Intent> {
         match root_at(path) {

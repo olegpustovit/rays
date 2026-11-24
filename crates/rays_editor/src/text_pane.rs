@@ -2045,7 +2045,7 @@ struct AreaCtx {
     bar: f32,
     find_row: f32,
     language: Language,
-    names: Names,
+    names: Rc<Names>,
     time: f64,
 }
 
@@ -2438,7 +2438,7 @@ fn editor_area(
 }
 
 /// The text pane: draws inside `Ui::frame` and returns the intents `Editor_frame` applies after it.
-fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, vocab: &Vocab, names: &Names, time: f64, state: &State, shown: &Shown) -> Result<Vec<Intent>, Diagnostic> {
+fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, vocab: &Rc<Vocab>, names: &Rc<Names>, time: f64, state: &State, shown: &Shown) -> Result<Vec<Intent>, Diagnostic> {
     let (x, y, width, height) = bounds;
     let row = ui.row_height() as f32;
     let (x, y, width, height) = (x as f32, y as f32, width as f32, height as f32);
@@ -2588,7 +2588,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
 }
 
 /// A printing refusal is visible in the pane and reaches the editor without replacing its draft.
-pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, vocab: &Vocab, names: &Names, time: f64, state: &State, shown: &Shown) -> Vec<Intent> {
+pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, vocab: &Rc<Vocab>, names: &Rc<Names>, time: f64, state: &State, shown: &Shown) -> Vec<Intent> {
     match view_checked(ui, bounds, tabs_right, vocab, names, time, state, shown) {
         Ok(intents) => intents,
         Err(error) => {

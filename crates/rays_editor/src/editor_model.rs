@@ -412,7 +412,7 @@ pub fn flow_catalog(value: &EditorModel) -> Option<Arc<Catalog>> {
 /// Build the text pane vocabulary on first use.
 #[derive(Clone)]
 pub struct LazyVocab {
-    cell: Rc<OnceCell<lisp_text::Vocab>>,
+    cell: Rc<OnceCell<Rc<lisp_text::Vocab>>>,
     init: Rc<dyn Fn() -> lisp_text::Vocab>,
 }
 
@@ -420,8 +420,8 @@ impl LazyVocab {
     pub fn new(init: Rc<dyn Fn() -> lisp_text::Vocab>) -> LazyVocab {
         LazyVocab { cell: Rc::new(OnceCell::new()), init }
     }
-    pub fn force(&self) -> &lisp_text::Vocab {
-        self.cell.get_or_init(|| (self.init)())
+    pub fn force(&self) -> &Rc<lisp_text::Vocab> {
+        self.cell.get_or_init(|| Rc::new((self.init)()))
     }
 }
 
