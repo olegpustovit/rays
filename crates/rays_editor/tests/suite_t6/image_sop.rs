@@ -47,12 +47,6 @@ pub fn image_sop() {
     args.input_types = Some(vec!["missing_type".to_owned()]);
     let bad = edit_graph::factory(args, 1, Arc::new(|inputs| Ok(inputs[0].clone())));
     assert!(flow_sop::catalog::of_factories(1, &[], None, &[bad]).is_err());
-    let manifest = flow_sop::manifest::generate(&kinds::descriptors(), None, &factories).unwrap().0;
-    let (parsed, _) = flow_check::catalog::catalog_of_manifest(&manifest).unwrap();
-    let kind_of = |c: &flow_check::catalog::Catalog| c.kinds.iter().find(|k| k.qualified == "sop/attr_from_image").unwrap().clone();
-    assert!(kind_of(&parsed).slots == kind_of(&catalog).slots);
-    assert!(kind_of(&parsed).slots[1].ty == Some(flow_syntax::ty::image()));
-    assert!(!parsed.kinds.iter().find(|k| k.qualified == "sop/copy_to_points").unwrap().slots.iter().any(|s| s.ty.is_some()));
     let document = load(&catalog, SOURCE);
     let scope = P::of_graph(&catalog, &document.checked, "g").unwrap();
     let node = P::find(&scope, &["g".into(), "result".into()]).unwrap();

@@ -308,6 +308,12 @@ fn manifest_checks(exhaustive: bool) {
     let (manifest_text, digest) = manifest::generate(&[], None, &native).unwrap_or_else(|d| panic!("{}", diag(&d)));
     let (from_manifest, read_digest) = flow_check::catalog::catalog_of_manifest(&manifest_text).unwrap_or_else(|d| panic!("{}", diag(&d)));
     check(read_digest == digest && from_manifest.kinds == flow_catalog.kinds, "Flow manifest checker descriptor differs from the live catalog");
+    // Keep the mixed image/geometry and legacy slot checks on the manifest generated here.
+    let editor_catalog = editor_document::kinds::shared(None).unwrap();
+    let kind_of = |c: &flow_check::catalog::Catalog| c.kinds.iter().find(|k| k.qualified == "sop/attr_from_image").unwrap().clone();
+    assert!(kind_of(&from_manifest).slots == kind_of(&editor_catalog).slots);
+    assert!(kind_of(&from_manifest).slots[1].ty == Some(flow_syntax::ty::image()));
+    assert!(!from_manifest.kinds.iter().find(|k| k.qualified == "sop/copy_to_points").unwrap().slots.iter().any(|s| s.ty.is_some()));
     let transform = from_manifest.kinds.iter().find(|k| k.qualified == "sop/transform").unwrap();
     check(
         transform.facts.as_ref().is_some_and(|f| {
