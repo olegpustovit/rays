@@ -152,6 +152,7 @@ struct Ctx {
     chips: Vec<(String, Color)>,
     kept: bool,
     reveal_source: bool,
+    cache_rows: bool,
 }
 
 impl Ctx {
@@ -696,29 +697,35 @@ fn color_row_1(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str) -> Vec<FlowCha
 }
 
 fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &FlowRow) -> Vec<FlowChange> {
-    // a row is named by its argument, as the sheet and the card name it
-    let title: String = if row.fields.len() == 1 && row.path.starts_with('@') { row.fields[0].label.clone() } else { row.path.clone() };
-    if let Some(source) = &row.drive {
-        let revision = kit::debug_revision(&(row, cx.width, cx.pins, cx.pin_click, cx.reveal_source));
-        let mut out = Vec::new();
-        kit::with_label(format_args!("flow-driven-view-{}", row.path), &mut |label| {
-            ui.view(label, revision, Size::Px(cx.width), Size::Px(ui.row_height() as f32), &mut |ui| {
-                out = driven(ui, cx, row, &title, source);
-            });
+    if !cx.cache_rows {
+        return row_content(ui, cx, on_choice, row);
+    }
+    let revision = kit::debug_revision(&(row, cx.width, cx.pins, cx.pin_click, cx.kept, cx.reveal_source, &cx.chips));
+    let mut out = Vec::new();
+    kit::with_label(format_args!("flow-row-view-{}", row.path), &mut |label| {
+        ui.view(label, revision, Size::Px(cx.width), Size::Px(ui.row_height() as f32), &mut |ui| {
+            out = row_content(ui, cx, on_choice, row);
         });
-        return out;
+    });
+    out
+}
+
+fn row_content(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &FlowRow) -> Vec<FlowChange> {
+    let title = if let [field] = row.fields.as_slice() && row.path.starts_with('@') { &field.label } else { &row.path };
+    if let Some(source) = &row.drive {
+        return driven(ui, cx, row, title, source);
     }
     let mixed = row.live.as_deref() == Some("mixed");
     if row.fields.len() == 1 {
         let field = &row.fields[0];
         return if !mixed && is_color_1(field) {
-            color_row_1(ui, cx, row, &title)
+            color_row_1(ui, cx, row, title)
         } else {
-            scalar(ui, cx, on_choice, row, &title, mixed)
+            scalar(ui, cx, on_choice, row, title, mixed)
         };
     }
     if !mixed && is_color_3(row) {
-        return color_row_3(ui, cx, row, &title, row.shown);
+        return color_row_3(ui, cx, row, title, row.shown);
     }
     // a vector: three fields in the control column, 8 between, each with its axis letter
     let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, row.shown), &format!("flow-row-{}", row.path), &title);
@@ -759,12 +766,13 @@ fn build(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), expanded: &[St
     // the section's revision: its rows as they read (values, live readouts, drives, pins) and how
     // they are laid out
     let mine = |row: &&FlowRow| top_folder(row) == Some(folder) || (kind_label == Some(folder) && top_folder(row).is_none());
+    let carry_frame = (!cx.cache_rows).then(|| ui.frame_index());
     let shown = kit::revision(&|h| {
         use std::hash::Hash;
         for row in rows.iter().filter(mine) {
             kit::debug_revision(row).hash(h);
         }
-        (cx.width.to_bits(), cx.pins, cx.pin_click, cx.reveal_source, kit::debug_revision(&cx.chips)).hash(h);
+        (cx.width.to_bits(), cx.pins, cx.pin_click, cx.reveal_source, carry_frame, kit::debug_revision(&cx.chips)).hash(h);
     });
     ui.inspector_section_view(&format!("flow-section-{folder}"), shown, open, None, folder, &mut |ui| {
         // The kind's ungrouped rows precede rows explicitly in its folder, as in the old tree.
@@ -797,6 +805,8 @@ pub fn flow_fields(ui: &mut Ui, o: &FlowOpts, on_choice: Option<&dyn Fn(&str, &U
         chips: o.chips.clone(),
         kept: o.kept_drag,
         reveal_source: o.reveal_source,
+        // A carried material re-reads its drop target even on a kept row.
+        cache_rows: on_choice.is_none(),
     };
     let on_choice: &dyn Fn(&str, &UiBox) = on_choice.unwrap_or(&no_choice);
     if rows.is_empty() {

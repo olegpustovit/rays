@@ -75,7 +75,7 @@ fn click_budget_inspector_hover() {
         counts.push(mem_sys::alloc_count() - before);
     }
     eprintln!("CLICK inspector hover enter/hold/next/hold: {:?}", &counts[2..]);
-    assert!(counts[2] <= 39 && counts[3] == 0 && counts[4] <= 42 && counts[5] == 0, "{counts:?}");
+    assert!(counts[2] <= 26 && counts[3] == 0 && counts[4] <= 30 && counts[5] == 0, "{counts:?}");
     rays_shell::host::destroy(&mut ui);
 }
 
