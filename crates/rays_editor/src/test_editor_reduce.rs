@@ -162,6 +162,49 @@ fn reducer_idle_undo_and_gestures() {
     });
 }
 
+/// B1: a refused gesture's error clears when undo steps the document.
+#[test]
+fn undo_clears_the_edit_error() {
+    big_stack(|| {
+        let value = model();
+        let frame0 = frame_at(0.0, vec![], vec![]);
+        prime(&value, &frame0);
+        let mut owned = value.clone();
+        let mut result = idle_result(&(&owned).into(), selection::empty());
+        result.changes = vec![Change::SyntaxEdit(Op::AddNode { scope: vec!["g".into()], name: "second".to_string(), expr: syntax::parse("(sop/box)").unwrap().remove(0) })];
+        reduce(None, None, idle_input(&(&owned).into(), &[], &frame0), &mut owned, result);
+        let mut result = idle_result(&(&owned).into(), selection::empty());
+        result.changes = vec![Change::SyntaxEdit(Op::RemoveGraph { name: "missing".to_string() })];
+        let mut refused = owned.clone();
+        reduce(None, None, idle_input(&(&owned).into(), &[], &frame0), &mut refused, result);
+        assert!(refused.edit_error.is_some());
+        let back = reduce_idle(None, None, &refused, &[Action::Undo], &frame0).expect("undo");
+        assert!(back.edit_error.is_none(), "undo left {:?}", back.edit_error);
+        editor_host_close(&value);
+    });
+}
+
+/// B4: docking keeps its own undo label.
+#[test]
+fn docking_is_labelled_dock_panel() {
+    big_stack(|| {
+        let catalog = editor_document::kinds::catalog(flow_sop::manifest::VERSION, &sop::nodes::factories()).expect("catalog");
+        let text = "(workspace w (graph g :context sop (sop/box))\n (graph editor :context editor (let* [a (ui/graph) b (ui/lisp) c (ui/list) s (ui/split \"horizontal\" a b) u (ui/split \"horizontal\" s c)] (ui/workspace u))))";
+        let ws = workspace_doc::of_text(&TextOptions::default(), &catalog, text).expect("workspace");
+        let opts = CreateOpts { preferences: Some(std::env::temp_dir().join("rays-editor-test-no-preferences.rays").to_string_lossy().to_string()), presets: Some(std::env::temp_dir().join("rays-editor-test-presets").to_string_lossy().to_string()), ui_text_size: 11, await_: Some(true), ..CreateOpts::default() };
+        let value = editor_setup::create(opts, &ws, Rc::new(cook::prepare)).expect("model");
+        let frame0 = frame_at(0.0, vec![], vec![]);
+        prime(&value, &frame0);
+        let mut result = idle_result(&(&value).into(), selection::empty());
+        result.changes = vec![Change::DockPanels(vec![1], vec![0, 0], rays_shell::chrome::Side::Right)];
+        let mut owned = value.clone();
+        reduce(None, None, idle_input(&(&value).into(), &[], &frame0), &mut owned, result);
+        assert!(owned.edit_error.is_none(), "{:?}", owned.edit_error);
+        assert_eq!(history::label(&owned.history), "Dock panel");
+        editor_host_close(&value);
+    });
+}
+
 #[test]
 fn reducer_gesture_keys_layout_and_prompts() {
     big_stack(|| {

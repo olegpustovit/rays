@@ -329,7 +329,6 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                 Change::DockPanels(source, target, side) => match dock_panels(factories, &next, source, target, *side) {
                     Ok(doc) => {
                         next = Arc::new(doc);
-                        result.label = "Arrange panel".to_string();
                         result.edit_error = None;
                     }
                     Err(message) => g.refused = Some(message),
@@ -1116,6 +1115,11 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         commit(&arc, Some(&label), Some(merge), value.history.clone())
     };
     let (history2, doc, undone, notice) = undo_step(value, carrying, &actions, notice, history_after);
+    // an error is cleared by the next change that lands: an undo, a redo, a preset load or a text apply
+    // (a gesture of this frame that was refused keeps its own message)
+    if (undone || loaded_flag || !Arc::ptr_eq(&doc, &present)) && result.edit_error == value.edit_error {
+        result.edit_error = None;
+    }
     let effects = if undone || loaded_flag || carry_changed { param::union_effects(result.effects, document_edit::cook_effects()) } else { result.effects };
     // The open level must still exist after undo or a preset load.
     let level = document::resolve_level(&doc, if loaded_flag { Level::Scene } else { pane_level(&value.into()) });
