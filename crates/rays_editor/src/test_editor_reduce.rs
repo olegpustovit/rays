@@ -506,8 +506,10 @@ fn frame_views_borrow_the_owned_model() {
         let view_state = Rc::new(|_: Option<&PanelResult>| syntax::make(syntax::Draft::Map(Vec::new())));
         let identity = value.preferences.as_ptr();
         // Warm the UI's font/layout caches before measuring a steady frame.
-        editor_frame::update(&mut value, true, false, &camera, &handles, None, None, view_state.clone(), &frame, None, None, Vec::new(), None);
-        assert_eq!(value.preferences.as_ptr(), identity, "frame copied its owned model");
+        for _ in 0..4 {
+            editor_frame::update(&mut value, true, false, &camera, &handles, None, None, view_state.clone(), &frame, None, None, Vec::new(), None);
+            assert_eq!(value.preferences.as_ptr(), identity, "frame copied its owned model");
+        }
         mem_sys::local_reset();
         editor_frame::update(&mut value, true, false, &camera, &handles, None, None, view_state, &frame, None, None, Vec::new(), None);
         let peak = mem_sys::local_peak_bytes();

@@ -45,7 +45,7 @@ fn one(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Cost {
     mem_sys::local_reset();
     let before = mem_sys::local_alloc_count();
     rays_shell::host::build(ui, fr, &mut |ui: &mut Ui| {
-        let root = ui.box_("graph-root", BoxOpts::default().w(Size::Px(W as f32)).h(Size::Px(H as f32)).at((0.0, 0.0)));
+        let root = ui.node("graph-root", pxui::Node::DEFAULT.w(Size::Px(W as f32)).h(Size::Px(H as f32)).at(0.0, 0.0));
         // the intents in a list kept from frame to frame, as the editor keeps its own
         CHANGES.with(|c| {
             let mut c = c.borrow_mut();

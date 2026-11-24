@@ -195,7 +195,7 @@ pub fn create(opts: CreateOpts, workspace: &workspace_doc::T, prepare: cook::Pre
     let doc = Arc::new(doc);
     let ui = {
         let mut ui = rays_shell::host::create(platform, None, ui_font.as_deref());
-        ui.set_font_size(ui_text_size);
+        ui.set_font_size(ui_text_size as f32);
         ui
     };
     let keep: Arc<dyn Fn(&Document) -> document::Snapshot> = Arc::new(document::snapshot);

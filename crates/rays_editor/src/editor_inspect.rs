@@ -22,7 +22,7 @@ use flow_syntax::lisp;
 use flow_syntax::syntax::{self as s, Node as SNode, Syntax};
 use flow_syntax::ty::{self, Ty};
 use param::{FieldView, FloatRange, Impact, IntRange, KindView, Value};
-use pxui::ui::{HeadAction, Rect, Ui, UiBox};
+use pxui::ui::{HeadAction, Rect, Ui};
 use rays_graph::scope_state::Change as ScopeChange;
 use rays_shell::inspector as insp;
 use sop::edit_graph;
@@ -725,7 +725,7 @@ pub fn iteration_picks(ui: &mut Ui, footer: &probe::Footer, chain: &[Path], prob
     let zone = chain.last();
     match zone {
         Some(z) if !iterations.is_empty() => {
-            ui.inspector_message(
+            pxui::ext::inspector_message(ui,
                 "ws-runs",
                 &format!(
                     "Inside {}: runs {} times. {}",
@@ -738,7 +738,7 @@ pub fn iteration_picks(ui: &mut Ui, footer: &probe::Footer, chain: &[Path], prob
             let mut picks = Vec::new();
             for k in 0..iterations.len().min(64) {
                 let label = format!("{}{}  {}", if k as i64 == current { "\u{25ba} " } else { "  " }, k + 1, iterations[k]);
-                if ui.inspector_button(&format!("ws-iter-{k}"), &label) {
+                if pxui::ext::inspector_button(ui, &format!("ws-iter-{k}"), &label) {
                     picks.push(ScopeChange::ProbeSet { zone: z.clone(), index: k as i64 });
                 }
             }
@@ -757,16 +757,16 @@ pub fn note_section(ui: &mut Ui, width: f32, n: &p::Node) -> Vec<Change> {
     let current = n.note.clone().unwrap_or_default();
     let mut out: Vec<Change> = Vec::new();
     let shown = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&(&current, width.to_bits(), &n.path), h));
-    ui.inspector_section_view("ws-note-section", shown, false, None, "Note", &mut |ui| {
+    rays_shell::inspector::section(ui, "ws-note-section", shown, false, None, "Note", &mut |ui| {
         if current.contains('\n') {
-            ui.inspector_message("ws-note-lines", "A note of several lines is edited in the text pane.");
+            pxui::ext::inspector_message(ui, "ws-note-lines", "A note of several lines is edited in the text pane.");
             return;
         }
-        let (row, cx, cy, cw) = ui.inspector_row(Some(width), None, "ws-note", "note");
+        let (row, cx, cy, cw) = pxui::ext::inspector_row(ui, Some(width), None, "ws-note", "note");
         let mut text = current.clone();
         ui.within(&row, &mut |ui| {
-            let o = pxui::ui::ValueFieldOpts { left: true, ..Default::default() };
-            text = ui.value_field((cx, cy), cw, 20.0, &o, &|_| true, "ws-note-field", &current).0;
+            let o = pxui::ValueField::DEFAULT.left(true);
+            text = pxui::ext::value_field(ui, "ws-note-field", &current, pxui::Rect::new(cx, cy, cw, 20.0), &o, &pxui::ValueCallbacks::DEFAULT).changed.unwrap_or(&current).to_owned();
         });
         if text != current {
             out.push(Change::SyntaxEdit(fe::Op::SetNote { node: n.path.clone(), text }));
@@ -779,11 +779,11 @@ pub fn note_section(ui: &mut Ui, width: f32, n: &p::Node) -> Vec<Change> {
 pub fn output_section(ui: &mut Ui, width: f32, geo: Option<&probe::Geometry>) {
     if let Some(g) = geo {
         let shown = rays_shell::kit::debug_revision(&(g, width));
-        ui.inspector_section_view("ws-output", shown, true, None, "Output", &mut |ui| {
-            ui.inspector_readout(Some(width), "ws-output-points", "points", &group_digits(g.points));
-            ui.inspector_readout(Some(width), "ws-output-prims", "prims", &group_digits(g.prims));
+        rays_shell::inspector::section(ui, "ws-output", shown, true, None, "Output", &mut |ui| {
+            pxui::ext::inspector_readout(ui, Some(width), "ws-output-points", "points", &group_digits(g.points));
+            pxui::ext::inspector_readout(ui, Some(width), "ws-output-prims", "prims", &group_digits(g.prims));
             if let Some((x, y, z)) = g.extent {
-                ui.inspector_readout(
+                pxui::ext::inspector_readout(ui,
                     Some(width),
                     "ws-output-bounds",
                     "bounds",
@@ -791,10 +791,10 @@ pub fn output_section(ui: &mut Ui, width: f32, geo: Option<&probe::Geometry>) {
                 );
             }
             if !g.groups.is_empty() {
-                ui.inspector_readout(Some(width), "ws-output-groups", "groups", &g.groups.join(", "));
+                pxui::ext::inspector_readout(ui, Some(width), "ws-output-groups", "groups", &g.groups.join(", "));
             }
             for (i, (owner, name, kind, length)) in g.attributes.iter().enumerate() {
-                ui.inspector_readout(
+                pxui::ext::inspector_readout(ui,
                     Some(width),
                     &format!("ws-output-attr-{i}"),
                     &format!("{owner} {name}"),
@@ -890,7 +890,7 @@ pub type Resized<'a> = &'a dyn Fn(&[Symbol], rays_shell::layout::Way) -> Option<
 #[allow(clippy::too_many_arguments)]
 pub fn field_edits<'a>(
     ui: &mut Ui,
-    on_choice: Option<&dyn Fn(&str, &UiBox)>,
+    on_choice: Option<&dyn Fn(&str, &pxui::Handle)>,
     width: f32,
     expanded: &[String],
     parameters: &[port::Parameter],
@@ -1203,20 +1203,20 @@ pub fn readout_rows(ui: &mut Ui, n: &p::Node, value: &Model, footer: &probe::Foo
     // the head's detail line says it for a node; a zone keeps its readout rows
     if zone_text {
         for (label, text) in readouts {
-            ui.inspector_readout(Some(width), &format!("ws-{label}"), label, text);
+            pxui::ext::inspector_readout(ui, Some(width), &format!("ws-{label}"), label, text);
         }
     }
     if !zone_text && footer.execution.as_ref().map_or(false, |e| e.tier != "Cooked") {
         for (label, text) in readouts.iter().filter(|(l, _)| ["tier", "execution group", "group time"].contains(&l.as_str())) {
-            ui.inspector_readout(Some(width), &format!("ws-{label}"), label, text);
+            pxui::ext::inspector_readout(ui, Some(width), &format!("ws-{label}"), label, text);
         }
     }
     let checked = &value.doc.workspace.ws.checked;
     if checked.approx.contains(&n.path) {
-        ui.inspector_readout(Some(width), "ws-precision", "precision", "approximable");
+        pxui::ext::inspector_readout(ui, Some(width), "ws-precision", "precision", "approximable");
     } else if let Some((_, reasons)) = checked.approx_reasons.iter().find(|(p_, _)| *p_ == n.path) {
         for (i, reason) in reasons.iter().enumerate() {
-            ui.inspector_readout(Some(width), &format!("ws-precision-{i}"), "precision", &reason.message);
+            pxui::ext::inspector_readout(ui, Some(width), &format!("ws-precision-{i}"), "precision", &reason.message);
         }
     }
 }
@@ -1225,7 +1225,7 @@ pub fn readout_rows(ui: &mut Ui, n: &p::Node, value: &Model, footer: &probe::Foo
 pub fn zone_says(ui: &mut Ui, width: f32, zone_text: &Option<(&'static str, fn(&str) -> String)>, n: &p::Node) {
     if let (Some(z), Some((_, sentence))) = (&n.zone, zone_text) {
         let var = z.rail.iter().find(|r| r.role == p::Role::Var).map(|r| r.name.clone()).unwrap_or_else(|| "item".to_owned());
-        ui.inspector_message("ws-zone-says", &sentence(&var));
+        pxui::ext::inspector_message(ui, "ws-zone-says", &sentence(&var));
         for r in &z.rail {
             let label = match r.role {
                 p::Role::Var => format!("{} in", r.name),
@@ -1233,7 +1233,7 @@ pub fn zone_says(ui: &mut Ui, width: f32, zone_text: &Option<(&'static str, fn(&
                 p::Role::Param => format!("{} (input)", r.name),
                 p::Role::Capture => r.name.clone(),
             };
-            ui.inspector_readout(Some(width), &format!("ws-rail-{}", r.name), &label, &match &r.expr {
+            pxui::ext::inspector_readout(ui, Some(width), &format!("ws-rail-{}", r.name), &label, &match &r.expr {
                 Some(e) => lisp::flat(e),
                 None => "same for all".to_owned(),
             });
@@ -1244,11 +1244,11 @@ pub fn zone_says(ui: &mut Ui, width: f32, zone_text: &Option<(&'static str, fn(&
 /// A graph input: its type, and its default as one Lisp form.
 pub fn input_inspector(ui: &mut Ui, graph: &str, width: f32, scope: &p::Scope, path: &[Symbol]) -> (Vec<Change>, Vec<ScopeChange>) {
     let Some(input) = scope.inputs.iter().find(|i| i.path == path) else { return (vec![], vec![]) };
-    ui.inspector_header("ws-input", Some("input"), None, None, None, &[], None, false, &input.name, &ty::to_string(&input.ty));
+    pxui::ext::inspector_header(ui, "ws-input", Some("input"), None, None, None, &[], None, false, &input.name, &ty::to_string(&input.ty));
     let shown = input.default.as_ref().map(lisp::flat).unwrap_or_default();
     let mut text = shown.clone();
-    ui.inspector_body(&mut |ui| {
-        let (row, cx, cy, cw) = ui.inspector_row(Some(width), None, "ws-input-default", "default");
+    pxui::ext::inspector_body(ui, &mut |ui| {
+        let (row, cx, cy, cw) = pxui::ext::inspector_row(ui, Some(width), None, "ws-input-default", "default");
         ui.within(&row, &mut |ui| match &input.default {
             Some(form) if matches!(form.node, SNode::Num(_)) => {
                 // a number: the pane's own field, so it drags here as it does on the card
@@ -1261,8 +1261,8 @@ pub fn input_inspector(ui: &mut Ui, graph: &str, width: f32, scope: &p::Scope, p
                 text = rays_graph::scope_frame::num_field(ui, (cx as f64, cy as f64), cw as f64, 20.0, None, kind, None, false, "ws-input-default-field", &shown, None).unwrap_or_else(|| shown.clone());
             }
             _ => {
-                let o = pxui::ui::ValueFieldOpts { left: float_of(&shown).is_none(), ..Default::default() };
-                text = ui.value_field((cx, cy), cw, 20.0, &o, &|t| !t.trim().is_empty(), "ws-input-default-field", &shown).0;
+                let o = pxui::ValueField::DEFAULT.left(float_of(&shown).is_none());
+                text = pxui::ext::value_field(ui, "ws-input-default-field", &shown, pxui::Rect::new(cx, cy, cw, 20.0), &o, &pxui::ValueCallbacks::DEFAULT.valid(&|t| !t.trim().is_empty())).changed.unwrap_or(&shown).to_owned();
             }
         });
     });
@@ -1281,12 +1281,12 @@ pub fn input_inspector(ui: &mut Ui, graph: &str, width: f32, scope: &p::Scope, p
 pub fn expression_inspector(ui: &mut Ui, width: f32, value: &Model, holder: &p::Node, r: &p::Row) -> (Vec<Change>, Vec<ScopeChange>) {
     let e = r.expr.clone().expect("expression row");
     let op = s::head(&e).unwrap_or_default().to_owned();
-    ui.inspector_header("ws-header", Some(&op), None, None, None, &[], None, false, &format!("{} \u{b7} {}", p::title(holder), r.label), &lisp::flat(&e));
+    pxui::ext::inspector_header(ui, "ws-header", Some(&op), None, None, None, &[], None, false, &format!("{} \u{b7} {}", p::title(holder), r.label), &lisp::flat(&e));
     let entries = sub_entries(true, r);
     let mut requests: Vec<Change> = Vec::new();
     let source: &[S] = &value.doc.workspace.ws.source;
-    ui.inspector_body(&mut |ui| {
-        if ui.inspector_button(&format!("ws-unfold-{}", r.label), &format!("Unfold {}", r.label)) {
+    pxui::ext::inspector_body(ui, &mut |ui| {
+        if pxui::ext::inspector_button(ui, &format!("ws-unfold-{}", r.label), &format!("Unfold {}", r.label)) {
             requests.push(Change::SyntaxEdit(fe::Op::Unfold { node: holder.path.clone(), key: r.key.clone(), sub: vec![] }));
         }
         if !entries.is_empty() {
@@ -1315,7 +1315,7 @@ pub struct InspectorOpts<'a> {
     pub image: &'a dyn Fn(i64) -> Option<rays::image::Image>,
     pub laid: Option<ScopeKey>,
     pub window: bool,
-    pub on_choice: Option<&'a dyn Fn(&str, &UiBox)>,
+    pub on_choice: Option<&'a dyn Fn(&str, &pxui::Handle)>,
     pub resized: Resized<'a>,
     pub follows: &'a dyn Fn(&[Symbol]) -> Option<String>,
 }
@@ -1387,14 +1387,14 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     };
     if let Some(image) = preview {
         let (w, h) = rays::image::dimensions(&image);
-        ui.inspector_readout(Some(width), "image-size", "image", &format!("{w} \u{d7} {h}"));
+        pxui::ext::inspector_readout(ui, Some(width), "image-size", "image", &format!("{w} \u{d7} {h}"));
         let height = 160.0f32.min(width * h as f32 / w as f32);
-        let bx = ui.box_("image-thumbnail", pxui::ui::BoxOpts::default().w(pxui::ui::Size::Px(width)).h(pxui::ui::Size::Px(height)));
+        let bx = ui.node("image-thumbnail", pxui::Node::DEFAULT.w(pxui::ui::Size::Px(width)).h(pxui::ui::Size::Px(height)));
         // no image until a frame has run and the GPU device is known: ask for the next frame, which shows it
         match rays_shell::host::image(&image) {
-            Some(image) => ui.draw(&bx, move |paint, Rect { x, y, w: bw, h: bh }| {
+            Some(image) => ui.canvas(&bx, move |paint, Rect { x, y, w: bw, h: bh }| {
                 let scale = (bw / w as f32).min(bh / h as f32);
-                paint.image(x, y, w as f32 * scale, h as f32 * scale, &image);
+                let _ = paint.image(pxui::Rect::new(x, y, w as f32 * scale, h as f32 * scale), &image, &pxui::ImageStyle::DEFAULT);
             }),
             None if !rays_shell::host::ready() => ui.request_frame(),
             None => {}
@@ -1483,7 +1483,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     let index = if narrow || window { None } else { node_id.map(|id| format!("NO. {id:04}")) };
     let rename: Option<Rc<dyn Fn(&str) -> bool>> = if n.synthetic { None } else { Some(Rc::new(flow_syntax::symbol::valid_name)) };
     let reset_enabled = parameters.iter().any(|pm| authored(pm).is_some());
-    let head = ui.inspector_header(
+    let head = pxui::ext::inspector_header(ui,
         "ws-header",
         Some(&n.head),
         if displayed_path.as_ref() == Some(&n.path) { Some("view") } else { None },
@@ -1516,7 +1516,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     let rename_edit: Vec<Change> = if n.synthetic || head.renamed == p::title(&n) {
         vec![]
     } else {
-        vec![Change::SyntaxEdit(fe::Op::Rename { node: n.path.clone(), to_: head.renamed.clone() })]
+        vec![Change::SyntaxEdit(fe::Op::Rename { node: n.path.clone(), to_: head.renamed.to_owned() })]
     };
     let flags: Inspected = match pressed {
         Some(Pressed::Bypass) => (vec![Change::SyntaxEdit(fe::Op::ToggleBypass { node: n.path.clone() })], vec![]),
@@ -1531,10 +1531,10 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     let mut on_card = 0i64;
     let mut requests: Vec<Change> = Vec::new();
     let mut picks: Vec<ScopeChange> = Vec::new();
-    ui.inspector_body(&mut |ui| {
+    pxui::ext::inspector_body(ui, &mut |ui| {
         zone_says(ui, width, &zone_text, &n);
         readout_rows(ui, &n, value, &footer, &readouts, width, zone_text.is_some());
-        let hoist: Vec<Change> = if footer.invariant && ui.inspector_button("ws-hoist", "Move out of the loop") {
+        let hoist: Vec<Change> = if footer.invariant && pxui::ext::inspector_button(ui, "ws-hoist", "Move out of the loop") {
             vec![Change::SyntaxEdit(fe::Op::Hoist { node: n.path.clone() })]
         } else {
             vec![]
@@ -1542,8 +1542,8 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
         // a macro call: what it is, and the request the pane's lens button makes
         let mut macro_edit: Vec<Change> = vec![];
         if let Some(name) = &n.macro_ {
-            ui.inspector_message("ws-macro", &format!("Macro {name}: its rows are the holes."));
-            if ui.inspector_button("ws-inline", "Replace call with expansion") {
+            pxui::ext::inspector_message(ui, "ws-macro", &format!("Macro {name}: its rows are the holes."));
+            if pxui::ext::inspector_button(ui, "ws-inline", "Replace call with expansion") {
                 macro_edit.push(Change::SyntaxEdit(fe::Op::InlineMacro { node: n.path.clone() }));
             }
         }
@@ -1552,14 +1552,14 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
         if !n.synthetic && p::reorderable(&n) {
             for r in &n.rows {
                 if let ArgKey::Pos(k) = r.key {
-                    if k >= 1 && k < 24 && ui.inspector_button(&format!("ws-move-{k}"), &format!("Move item {} up", k + 1)) {
+                    if k >= 1 && k < 24 && pxui::ext::inspector_button(ui, &format!("ws-move-{k}"), &format!("Move item {} up", k + 1)) {
                         movers.push(Change::SyntaxEdit(fe::Op::MoveItem { node: n.path.clone(), pos: k }));
                     }
                 }
             }
         }
         if n.head == "settings/config" {
-            ui.inspector_message("ws-startup-settings", "Title, size, frame rate and seed apply on restart.");
+            pxui::ext::inspector_message(ui, "ws-startup-settings", "Title, size, frame rate and seed apply on restart.");
         }
         let ref_rows = reference_rows(value, &n);
         let (layout_names, layout_row, size_names, size_row) = layout_and_size_rows(value, &n);
@@ -1572,7 +1572,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
         // the operator rows' Unfold: the nested call becomes its own binding and card
         let mut unfold_nested: Vec<Change> = vec![];
         for (r, _) in &op_rows {
-            if r.expr.as_ref().map_or(false, operator_call) && ui.inspector_button(&format!("ws-unfold-{}", r.label), &format!("Unfold {}", r.label)) {
+            if r.expr.as_ref().map_or(false, operator_call) && pxui::ext::inspector_button(ui, &format!("ws-unfold-{}", r.label), &format!("Unfold {}", r.label)) {
                 unfold_nested.push(Change::SyntaxEdit(fe::Op::Unfold { node: n.path.clone(), key: r.key.clone(), sub: vec![] }));
             }
         }
@@ -1616,7 +1616,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     });
     // the sheet's bar: what a field takes, and how many rows are on the card
     if !(window || narrow) {
-        ui.inspector_bar(&[("s".to_owned(), "pin row to card".to_owned()), ("\u{2325} click".to_owned(), "type a value".to_owned())], on_card);
+        pxui::ext::inspector_bar(ui, &[("s", "pin row to card"), ("\u{2325} click", "type a value")], on_card);
     }
     let (flag_changes, flag_picks) = flags;
     let mut all = flag_changes;

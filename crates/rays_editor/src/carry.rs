@@ -17,7 +17,11 @@ use flow_syntax::context;
 use flow_syntax::syntax::{self as s, Node, Syntax};
 use sop::edit_graph::Factory;
 
-pub use pxui::ui::Payload;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Payload {
+    pub kind: String,
+    pub value: String,
+}
 
 use crate::text_pane;
 

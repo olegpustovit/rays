@@ -25,8 +25,8 @@ use flow_syntax::lisp;
 use flow_syntax::syntax::{Node as SNode, Syntax};
 use input::{Event, Key, MouseButton};
 use param::{Effects, FieldView, Value};
-use pxui::geom::p32;
-use pxui::ui::{BoxOpts, MenuOpts, MenuResult, Size, Ui, UiBox, CLICKABLE};
+use crate::p32;
+use pxui::ui::{Size, Ui};
 use rays_graph::node_menu;
 use rays_graph::scope_state as scope;
 use rays_shell::chrome;
@@ -252,11 +252,14 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
                 None => {
                     let keys: Vec<String> = (0..kinds.len()).map(|i| (i + 1).to_string()).collect();
                     let items: Vec<(String, bool)> = kinds.iter().map(|p| (panels::name(p).to_string(), true)).collect();
-                    let opts = MenuOpts { width: Some(200.0), keys, ..Default::default() };
-                    match ui.context_menu(p32(at), &opts, if split { "split-kind" } else { "window-kind" }, &items) {
-                        MenuResult::Open => (Some(open_prompt), None),
-                        MenuResult::Dismiss => (None, None),
-                        MenuResult::Pick(i) => pick(i as usize),
+                    let rows: Vec<_> = items.iter().zip(&keys).map(|((label, enabled), shortcut)|
+                        pxui::MenuItem::new(label).disabled(!enabled).shortcut(shortcut)).collect();
+                    let got = ui.menu(if split { "split-kind" } else { "window-kind" },
+                        pxui::Point::new(at.0 as f32, at.1 as f32), &rows, &pxui::Menu::DEFAULT.w_px(200.0));
+                    match (got.chosen, got.dismissed) {
+                        (None, false) => (Some(open_prompt), None),
+                        (None, true) => (None, None),
+                        (Some(i), _) => pick(i),
                     }
                 }
             }
@@ -268,7 +271,7 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
             let (mx, my) = frame_.input.pointer;
             let leaf = geometry(value, workspace, frame_).leaves.iter().find(|l| {
                 let (x, y, w, h) = l.frame;
-                !l.floating && pxui::ui::contains(pxui::ui::Rect::new(x as f32, y as f32, w as f32, h as f32), p32((mx, my)))
+                !l.floating && pxui::ui::Rect::new(x as f32, y as f32, w as f32, h as f32).contains(p32((mx, my)))
             }).cloned();
             let ratio = match &leaf {
                 Some(l) => {
@@ -278,40 +281,43 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
                 }
                 None => 0.5,
             };
-            let b = ui.box_("split-pending", BoxOpts::default().flags(CLICKABLE).w(Size::Px((frame_.input.size.0 as f64) as f32)).h(Size::Px((frame_.input.size.1 as f64) as f32)).at((0.0, 0.0)));
+            let b = ui.node("split-pending", pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).w(Size::Px((frame_.input.size.0 as f64) as f32)).h(Size::Px((frame_.input.size.1 as f64) as f32)).at(0.0, 0.0));
             ui.to_front(900, &b);
             let theme = ui.tokens();
             let painted = leaf.clone();
             let name = panels::name(&panel).to_uppercase();
-            ui.draw_over(&b, move |paint, _| {
+            ui.canvas_over(&b, move |paint, _| {
                 let Some(l) = &painted else { return };
                 let (x, y, w, h) = l.frame;
                 let (x, y, w, h) = (x as f64, y as f64, w as f64, h as f64);
                 let cut = if axis == Axis::H { x + w * ratio } else { y + h * ratio };
                 let (nx, ny, nw, nh) = if axis == Axis::H { (cut, y, x + w - cut, h) } else { (x, cut, w, y + h - cut) };
                 // the panel being split is tinted, the room of the new one more
-                let tint = |alpha: i64| pxui::geom::color::with_alpha(theme.accent, alpha);
-                paint.fill(x as f32, y as f32, w as f32, h as f32, tint(22));
-                paint.fill(nx as f32, ny as f32, nw as f32, nh as f32, tint(56));
+                let tint = |alpha: i64| theme.accent.with_alpha(alpha as u8);
+                paint.fill(pxui::Rect::new(x as f32, y as f32, w as f32, h as f32), pxui::Fill::new(tint(22)));
+                paint.fill(pxui::Rect::new(nx as f32, ny as f32, nw as f32, nh as f32), pxui::Fill::new(tint(56)));
                 // the new panel's room: accent brackets 6 inside its corners; the panel kept stays as it is
-                paint.brackets((nx + 6.0) as f32, (ny + 6.0) as f32, (nw - 12.0) as f32, (nh - 12.0) as f32, 0.0, 12.0, 1.0, theme.accent);
+                paint.brackets(pxui::Rect::new((nx + 6.0) as f32, (ny + 6.0) as f32, (nw - 12.0) as f32, (nh - 12.0) as f32), 0.0, 12.0, pxui::Stroke::new(theme.accent).width(1.0));
                 // the cut: a hairline through the panel with a short accent cap at each end
                 let (a, b2, (ux, uy)) = if axis == Axis::H { ((cut, y), (cut, y + h), (0.0, 1.0)) } else { ((x, cut), (x + w, cut), (1.0, 0.0)) };
-                paint.line_w(p32(a), p32(b2), 1.0, theme.accent);
+                paint.line(p32(a), p32(b2), pxui::Stroke::new(theme.accent).width(1.0));
                 for (px, py, sgn) in [(a.0, a.1, 1.0), (b2.0, b2.1, -1.0)] {
                     let (px, py) = (px + sgn * ux, py + sgn * uy);
-                    paint.line_w(((px - 5.0 * uy) as f32, (py - 5.0 * ux) as f32), ((px + 5.0 * uy) as f32, (py + 5.0 * ux) as f32), 3.0, theme.accent);
+                    paint.line(((px - 5.0 * uy) as f32, (py - 5.0 * ux) as f32), ((px + 5.0 * uy) as f32, (py + 5.0 * ux) as f32), pxui::Stroke::new(theme.accent).width(3.0));
                 }
                 // what is being made, in the new panel's room, and the keys that steer it
                 let (cx, cy) = (nx + nw / 2.0, ny + nh / 2.0);
                 if nw > 90.0 && nh > 40.0 {
-                    let cw = f64::from(paint.cap_width(&name));
-                    paint.cap(((cx - cw / 2.0) as f32, (cy - 14.0) as f32), Some(theme.accent), &name);
+                    let cw = f64::from({ let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(&name, style, None) }.unwrap_or(0.0));
+                    { let text = &name; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.accent); let _ = paint.text_spans(pxui::Point::new((cx - cw / 2.0) as f32, (cy - 14.0) as f32), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
                     let hint = "TAB  TURN   ESC  CANCEL";
-                    let hw = f64::from(paint.cap_width(hint));
-                    paint.cap(((cx - hw / 2.0) as f32, (cy + 4.0) as f32), Some(pxui::theme::ink_3(&theme)), hint);
+                    let hw = f64::from({ let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(hint, style, None) }.unwrap_or(0.0));
+                    { let text = hint; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521)); let _ = paint.text_spans(pxui::Point::new((cx - hw / 2.0) as f32, (cy + 4.0) as f32), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
                 }
-                paint.ratio(((mx + 12.0) as f32, (my + 12.0) as f32), (ratio * 100.0) as i64, 100 - (ratio * 100.0) as i64);
+                let first = (ratio * 100.0) as i64;
+                let label = format!("{first} / {}", 100 - first);
+                let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).tracking(0.08);
+                paint.text_chars(pxui::Point::new((mx + 12.0) as f32, (my + 12.0) as f32), style, &label);
             });
             let signal = ui.signal(&b);
             let cancel = pressed(Key::Escape) || frame_.input.events.iter().any(|e| matches!(e, Event::PointerPressed(MouseButton::RightButton, _)));
@@ -349,7 +355,7 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
 
 /// The gutters, last over every pane's hit area, and the layout the frame asks for through them.
 #[allow(clippy::too_many_arguments)]
-pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: Shell, frame_: &frame::Frame, keymap: &[Command], shortcut_frame: &frame::Frame, g: &layout::Geometry, intents: &[chrome::Intent], strip_layout: Vec<chrome::Intent>, timeline_leaves: &[(Leaf, UiBox)], platform: input::Platform, ui: &mut Ui) -> (Shell, Vec<Change>) {
+pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: Shell, frame_: &frame::Frame, keymap: &[Command], shortcut_frame: &frame::Frame, g: &layout::Geometry, intents: &[chrome::Intent], strip_layout: Vec<chrome::Intent>, timeline_leaves: &[(Leaf, pxui::Handle)], platform: input::Platform, ui: &mut Ui) -> (Shell, Vec<Change>) {
     // The gutters last, on top of every pane's hit area: a drag applies from the next frame.
     let state = |path: &[usize]| panel_state(value, path);
     let grips = chrome::splitters(Some(&state), Some(&workspace.hidden), &shell_tree(value, &workspace), ui, shortcut_frame);
@@ -370,7 +376,7 @@ pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: S
             continue;
         }
         ui.within(boxed, &mut |ui| {
-            let at = ui.context_at(boxed);
+            let at = ui.context_at(boxed).map(|p| (p.x, p.y));
             timeline_menus.extend(chrome::panel_menu(Some(&state), Some(&key_of), ui, leaf, boxed, at));
         });
     }
@@ -396,8 +402,8 @@ pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: S
 type Target = (Panel, Option<layout::Path>);
 
 /// The pane the last press landed in takes the focus; the panes' PXUI keys name them.
-pub fn follow_press<'a>(value: &ModelView<'a>, workspace: &Shell, frame_: &frame::Frame, roots: &[(Leaf, UiBox)], timeline_root: &Option<(Panel, UiBox)>, focus: Panel, focus_path: Option<layout::Path>, ui: &mut Ui) -> (Panel, Option<layout::Path>, Vec<(i64, Target)>) {
-    let mut pane_roots: Vec<(Target, UiBox)> = roots.iter().map(|(l, b)| ((l.panel.clone(), Some(l.path.clone())), b.clone())).collect();
+pub fn follow_press<'a>(value: &ModelView<'a>, workspace: &Shell, frame_: &frame::Frame, roots: &[(Leaf, pxui::Handle)], timeline_root: &Option<(Panel, pxui::Handle)>, focus: Panel, focus_path: Option<layout::Path>, ui: &mut Ui) -> (Panel, Option<layout::Path>, Vec<(i64, Target)>) {
+    let mut pane_roots: Vec<(Target, pxui::Handle)> = roots.iter().map(|(l, b)| ((l.panel.clone(), Some(l.path.clone())), b.clone())).collect();
     if let Some((panel, b)) = timeline_root {
         pane_roots.push(((panel.clone(), None), b.clone()));
     }
@@ -419,12 +425,12 @@ pub fn follow_press<'a>(value: &ModelView<'a>, workspace: &Shell, frame_: &frame
             focus_path = Some(leaf.path.clone());
         }
     }
-    let pane_keys = pane_roots.iter().map(|(target, b)| (pxui::ui_core::key(b), target.clone())).collect();
+    let pane_keys = pane_roots.iter().map(|(target, b)| (b.box_key, target.clone())).collect();
     (focus, focus_path, pane_keys)
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn draw_notice<'a>(value: &ModelView<'a>, frame_: &frame::Frame, roots: &[(Leaf, UiBox)], header_focus: &Option<layout::Path>, graph_body: layout::Bounds, scope_view: &scope::Pane, scope_active: bool, ui: &mut Ui) {
+pub fn draw_notice<'a>(value: &ModelView<'a>, frame_: &frame::Frame, roots: &[(Leaf, pxui::Handle)], header_focus: &Option<layout::Path>, graph_body: layout::Bounds, scope_view: &scope::Pane, scope_active: bool, ui: &mut Ui) {
     // echo, the sheet's [08]: messages only (saved, undo and redo results, refusals), never a key
     // press; the last one fades after 3 seconds.  It stands at the bottom-left of the focused pane,
     // above the strip.
@@ -458,7 +464,7 @@ pub fn draw_notice<'a>(value: &ModelView<'a>, frame_: &frame::Frame, roots: &[(L
 
 /// The viewport handles: their edits, a pick, and the changes they write.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_handles<'a>(value: &ModelView<'a>, workspace: &Shell, selection: selection::Selection, selected: &Option<Picked>, lowered_level: bool, scope_active: bool, active: &Option<Leaf>, view_root: &UiBox, view_handles: &ViewHandles, ui: &mut Ui) -> (selection::Selection, bool, Vec<Change>, Option<(i64, Vec<(String, Value)>)>) {
+pub fn draw_handles<'a>(value: &ModelView<'a>, frame_: &frame::Frame, workspace: &Shell, selection: selection::Selection, selected: &Option<Picked>, lowered_level: bool, scope_active: bool, active: &Option<Leaf>, view_root: &pxui::Handle, view_handles: &ViewHandles, ui: &mut Ui) -> (selection::Selection, bool, Vec<Change>, Option<(i64, Vec<(String, Value)>)>) {
     // a lowered node is edited through its text: the handles of the node selected in the graph pane
     // write its arguments, the list's rows of a geometry object have none
     let scope_target = if scope_active { scope_node(value) } else { None };
@@ -472,7 +478,7 @@ pub fn draw_handles<'a>(value: &ModelView<'a>, workspace: &Shell, selection: sel
         Some(leaf) if visible(workspace, &leaf.panel) => {
             let mut out = (Vec::new(), false, None);
             // ponytail: space reads the pane scope and scene, so reuse the current model until selection affects that operation.
-            ui.within(view_root, &mut |ui| {
+            chrome::within_pane(ui, view_root, frame_, leaf.body, &mut |ui| {
                 out = view_handles(ui, handle_target.as_ref(), space(value), leaf.body);
             });
             out
@@ -564,6 +570,7 @@ type Inspected = (Option<PanelResult>, Vec<Change>, Vec<(String, Value)>, bool, 
 /// Every inspector leaf: the one in use over the frame's state, the others over their own pane.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_inspectors<'a>(
+    frame_: &frame::Frame,
     value: &ModelView<'a>,
     workspace: &Shell,
     image: &dyn Fn(i64) -> Option<rays::image::Image>,
@@ -579,7 +586,7 @@ pub fn draw_inspectors<'a>(
     focus_path: &Option<layout::Path>,
     pane_of: &dyn Fn(&Host) -> ModelView<'a>,
     in_use: &dyn Fn(&ModelView<'a>) -> bool,
-    roots: &[(Leaf, UiBox)],
+    roots: &[(Leaf, pxui::Handle)],
     ui: &mut Ui,
 ) -> (Option<PanelResult>, Vec<Change>, Vec<(String, Value)>, Vec<scope::Change>, Vec<(carry_mod::Place, bool)>, bool) {
     // the split a card of the editor graph is, sized another way from what it shows now
@@ -602,13 +609,13 @@ pub fn draw_inspectors<'a>(
         let host: Host = (panel_key(&value.doc, &leaf.path), leaf.path.clone(), leaf.panel.clone(), HostKind::List);
         let pane = pane_of(&host);
         if in_use(&pane) {
-            let r = inspect_panel(image, camera_panel, inspector_visible, unchanged, &resized, g, ui, (*value, scope_view, selection, scope_active), root, leaf.body);
+            let r = inspect_panel(frame_, image, camera_panel, inspector_visible, unchanged, &resized, g, ui, (*value, scope_view, selection, scope_active), root, leaf.body);
             inspectors.push((leaf.clone(), r));
         } else {
             let shown = graph_shown && stored_projection(&pane) == GraphView && graph_name(&pane).is_some();
             let view = pane_view(&pane).clone();
             let picked_selection = pane_selection(&pane).clone();
-            let (panel, _, _, _, moves, drops) = inspect_panel(image, camera_panel, inspector_visible, unchanged, &resized, g, ui, (pane, &view, &picked_selection, shown), root, leaf.body);
+            let (panel, _, _, _, moves, drops) = inspect_panel(frame_, image, camera_panel, inspector_visible, unchanged, &resized, g, ui, (pane, &view, &picked_selection, shown), root, leaf.body);
             inspectors.push((leaf.clone(), (panel, Vec::new(), Vec::new(), value.live_cook, moves, drops)));
         }
     }
@@ -689,7 +696,7 @@ pub fn node_menu_step<'a>(value: &ModelView<'a>, workspace: &Shell, frame_: &fra
             None => (0, 0, 0, 0),
         };
         let (mx, my) = frame_.input.pointer;
-        let at = if pxui::ui::contains(pxui::ui::Rect::new(gx as f32, gy as f32, gw as f32, gh as f32), p32((mx, my))) { (mx as i64, my as i64) } else { (gx + gw / 3, gy + gh / 3) };
+        let at = if pxui::Rect::new(gx as f32, gy as f32, gw as f32, gh as f32).contains(p32((mx, my))) { (mx as i64, my as i64) } else { (gx + gw / 3, gy + gh / 3) };
         match open_menu(None, value, at) {
             Some(menu) => (Some(menu), Vec::new()),
             None => (value.menu.clone(), vec![Change::Declined("Open a graph to add a node to it".to_string())]),
@@ -755,9 +762,9 @@ pub fn set_text_size(value: &EditorModel, actions: &[Action]) {
         if let Action::UiScale(delta) = a {
             let sizes = [8i64, 9, 10, 11, 12, 13, 14, 16, 18];
             let default = sizes.iter().position(|s| *s == value.text_size).unwrap_or(5);
-            let here = sizes.iter().position(|s| *s == value.ui.borrow().font_size()).unwrap_or(default);
+            let here = sizes.iter().position(|s| *s == value.ui.borrow().font_size().round() as i64).unwrap_or(default);
             let index = if *delta == 0 { default } else { (here as i64 + delta).clamp(0, sizes.len() as i64 - 1) as usize };
-            value.ui.borrow_mut().set_font_size(sizes[index]);
+            value.ui.borrow_mut().set_font_size(sizes[index] as f32);
         }
     }
 }
@@ -773,13 +780,14 @@ pub fn gated(value: &mut EditorModel, frame_: &frame::Frame, text_focus: bool, h
         }
     }
     window_focus = if window_focus >= 0 { (window_focus + 1).min(2) } else { -1 };
-    let roots: Vec<i64> = value.pane_keys.iter().map(|(k, _)| *k).collect();
-    let pane_is_picture = match value.ui.borrow().root_at(p32(frame_.input.pointer), &roots) {
+    let roots: Vec<_> = value.pane_keys.iter().map(|(k, _)| pxui::Key::Resolved(*k)).collect();
+    let pane_is_picture = match value.ui.borrow().root_at(pxui::Point::new(frame_.input.pointer.0 as f32, frame_.input.pointer.1 as f32), &roots) {
         None => true,
-        Some(key) => match value.pane_keys.iter().find(|(k, _)| *k == key) {
+        Some(pxui::Key::Resolved(key)) => match value.pane_keys.iter().find(|(k, _)| *k == key) {
             Some((_, (panel, _))) => is_picture(panel),
             None => false,
         },
+        _ => false,
     };
     let gate = input::gate::Gate {
         prompt: value.prompt.is_some(),
@@ -925,7 +933,8 @@ pub fn update_frame(
     value.workspace.hidden = shell_hidden(&(&*value).into(), &value.workspace);
     follow_start(value);
     let (focus, focus_path) = if all_ui_visible {
-        let roots: Vec<i64> = value.pane_keys.iter().map(|(k, _)| *k).collect();
+        let roots: Vec<_> = value.pane_keys.iter().map(|(k, _)| pxui::Key::Resolved(*k)).collect();
+        let roots: Vec<_> = roots.iter().filter_map(|root| match root { pxui::Key::Resolved(key) => Some(*key), _ => None }).collect();
         let pressed = rays_shell::host::last_press_within(&value.ui.borrow(), frame_, &roots);
         match pressed {
             Some(key) => value.pane_keys.iter().find(|(k, _)| *k == key).map(|(_, t)| t.clone()).unwrap_or((value.focus.clone(), value.focus_path.clone())),
@@ -1116,6 +1125,8 @@ pub fn update_frame(
 
     let mut built: Option<FrameResult> = None;
     {
+        let mut pending_prompt = initial_prompt.clone();
+        let mut picked_prompt = None;
         let mut build_and_prompt = |ui: &mut Ui| {
             let mut vw = vw;
             if let Some(prefix) = &leader_panel {
@@ -1127,10 +1138,18 @@ pub fn update_frame(
             if !all_ui_visible {
                 return;
             }
-            let (prompt_next, prompt_intent_, prompt_error) = match prompt_panel(&(&*value).into(), &focus, &keymap, frame_, &workspace, &text, text_shown.as_ref(), ui, initial_prompt.clone()) {
-                Ok((prompt, intent)) => (prompt, intent, None),
-                Err(error) => (initial_prompt.clone(), None, Some(rays_diagnostic::to_string(&error))),
+            // PXUI can settle layout with another build in the same frame. Keep the first
+            // build's accepted query or intent once its keyboard events have been consumed.
+            let prompt_error = match prompt_panel(&(&*value).into(), &focus, &keymap, frame_, &workspace, &text, text_shown.as_ref(), ui, pending_prompt.clone()) {
+                Ok((prompt, intent)) => {
+                    pending_prompt = prompt;
+                    if intent.is_some() { picked_prompt = intent; }
+                    None
+                }
+                Err(error) => Some(rays_diagnostic::to_string(&error)),
             };
+            let prompt_next = pending_prompt.clone();
+            let prompt_intent_ = picked_prompt.clone();
             // ---- build ----
             // Chrome first: panel backgrounds, splitters and headers.  Its intents fold into the
             // shell now (a fold, a drag) or become one editor-graph edit after the frame.
@@ -1154,7 +1173,7 @@ pub fn update_frame(
                 };
                 let mut widths = Vec::new();
                 if leaf.panel == Panel::Graph {
-                    widths.push(ui.text_width(None, "GraphListText") + 24.0);
+                    widths.push(ui.text_service().width("GraphListText", pxui::Label::BODY, None).unwrap_or(0.0) + 24.0);
                 }
                 if let Some((state, shown)) = text_ {
                     widths.push(text_pane::tabs_width(ui, leaf.body.2, &state, &shown));
@@ -1184,7 +1203,7 @@ pub fn update_frame(
             // the graph panel's toolbar; a click is one command or edit
             let graph_host = graph_leaf(&vw, &g);
             let (tool_action, view_action, view_pick) = draw_graph_header(ui, &vw, &g, &graph_host, &header_slots, &tools_from);
-            let mut roots: Vec<(Leaf, UiBox)> = Vec::new();
+            let mut roots: Vec<(Leaf, pxui::Handle)> = Vec::new();
             for (order, leaf) in g.leaves.iter().enumerate() {
                 let boxed = chrome::pane_root(ui, frame_, leaf.body, &format!("workspace-pane-{}{}", editor_commands::pane_name(&leaf.panel), chrome::key(&leaf.path)));
                 if leaf.floating {
@@ -1198,19 +1217,19 @@ pub fn update_frame(
                 roots
                     .iter()
                     .filter_map(|(leaf, boxed)| match &leaf.panel {
-                        Panel::View(key) => ui.drop_target(boxed).map(|d| (carry_mod::Place::Viewport(key.clone()), matches!(d, pxui::ui::Drop::Dropped(_)))),
+                        Panel::View(key) => ui.drop_target(boxed).map(|d| (carry_mod::Place::Viewport(key.clone()), matches!(d, pxui::DropRef::Dropped(_)))),
                         _ => None,
                     })
                     .collect()
             };
-            let timeline_root: Option<(Panel, UiBox)> = if layout::find(&g, &Panel::Timeline).is_none() {
+            let timeline_root: Option<(Panel, pxui::Handle)> = if layout::find(&g, &Panel::Timeline).is_none() {
                 Some((Panel::Timeline, chrome::pane_root(ui, frame_, g.timeline_at, "workspace-pane-Timeline")))
             } else {
                 None
             };
             // every leaf draws in its own root: its PXUI keys are seeded by it
-            let root_at = |path: &layout::Path| -> Option<(Leaf, UiBox)> { roots.iter().find(|(l, _)| l.path == *path && l.body.3 > 0).cloned() };
-            let of_kind = |panel: &Panel| -> Vec<(Leaf, UiBox)> { roots.iter().filter(|(l, _)| l.panel == *panel && visible(&workspace, panel) && l.body.3 > 0).cloned().collect() };
+            let root_at = |path: &layout::Path| -> Option<(Leaf, pxui::Handle)> { roots.iter().find(|(l, _)| l.path == *path && l.body.3 > 0).cloned() };
+            let of_kind = |panel: &Panel| -> Vec<(Leaf, pxui::Handle)> { roots.iter().filter(|(l, _)| l.panel == *panel && visible(&workspace, panel) && l.body.3 > 0).cloned().collect() };
             let none_root = |ui: &mut Ui| chrome::pane_root(ui, frame_, (0, 0, 0, 0), "workspace-pane-none");
             let graph_root = match graph_host.as_ref().and_then(|l| root_at(&l.path)) {
                 Some((_, b)) => b,
@@ -1224,8 +1243,8 @@ pub fn update_frame(
             // Each pane builder returns only its frame intents and updated pane-local state.
             let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &(&*value).into(), &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), &rows_, &columns, &host_rows, &selected, tree_value.clone(), list_intents.clone(), value.locals.clone());
             let (text2, text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &*value, &root_at, &header_slots, &text_host, &text_shown, text.clone(), other_texts.clone(), locals);
-            let (outline, outline_intents, locals) = draw_outline_panes(ui, &*value, &hosted(HostKind::Outline), &root_at, &|pane| navigator_params(&pane.into()), value.outline.clone(), locals);
-            let locals = draw_spreadsheet_panes(ui, &(&*value).into(), &of_kind(&Panel::Spreadsheet), locals);
+            let (outline, outline_intents, locals) = draw_outline_panes(ui, frame_, &*value, &hosted(HostKind::Outline), &root_at, &|pane| navigator_params(&pane.into()), value.outline.clone(), locals);
+            let locals = draw_spreadsheet_panes(ui, frame_, &(&*value).into(), &of_kind(&Panel::Spreadsheet), locals);
             let graph_panes = draw_other_graph_panes(ui, &shortcut_frame, &(&*value).into(), &other_panes, &roots);
             let _ = text2;
             let mut changes = pane_changes(&(&*value).into(), &vw, command_changes.clone(), &scope_changes, &menu_pick, &outline_intents);
@@ -1267,6 +1286,7 @@ pub fn update_frame(
                 Level::Scene => false,
             };
             let (panel, inspector_changes, settings_changes, workspace_moves, inspector_drops, live_cook) = draw_inspectors(
+                frame_,
                 &(&*value).into(),
                 &workspace,
                 image,
@@ -1290,13 +1310,13 @@ pub fn update_frame(
             scope_changes.extend(workspace_moves);
             // every timeline leaf, else the strip under the tree
             let timeline_leaves = of_kind(&Panel::Timeline);
-            let timeline_slots: Vec<(layout::Bounds, UiBox, bool)> = if timeline_leaves.is_empty() {
+            let timeline_slots: Vec<(layout::Bounds, pxui::Handle, bool)> = if timeline_leaves.is_empty() {
                 timeline_root.iter().map(|(_, b)| (g.timeline_at, b.clone(), true)).collect()
             } else {
                 timeline_leaves.iter().map(|(l, b)| (l.body, b.clone(), false)).collect()
             };
-            let (timeline_intents, strip_layout) = draw_timeline_pane(ui, &value.timeline, value.timeline_frames, &timeline_slots, &timeline_root, g.timeline_at);
-            let (selection, grab, handle_ops, handle_changes) = draw_handles(&(&*value).into(), &workspace, selection, &selected_obj, lowered_level, scope_active, &active, &view_root, view_handles, ui);
+            let (timeline_intents, strip_layout) = draw_timeline_pane(ui, frame_, &value.timeline, value.timeline_frames, &timeline_slots, &timeline_root, g.timeline_at);
+            let (selection, grab, handle_ops, handle_changes) = draw_handles(&(&*value).into(), frame_, &workspace, selection, &selected_obj, lowered_level, scope_active, &active, &view_root, view_handles, ui);
             changes.extend(handle_ops);
             let context = match &leader {
                 router::State::Pending(_) => guide_context::GuideContext::Leader,

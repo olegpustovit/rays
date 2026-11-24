@@ -104,7 +104,7 @@ fn bare() { check("bare", "(workspace empty (graph g :context value 0))", BARE) 
 // paint, and changing the closure type at the same box/position remains safe.
 fn paint_storage() {
     use std::{cell::Cell, rc::Rc};
-    use pxui::ui::{BoxOpts, Paint, Rect, Size};
+    use pxui::ui::{Paint, Rect, Size};
     let mut ui = rays_shell::host::create(input::Platform::Apple, None, None);
     let token = Rc::new(Cell::new(0));
     let mut label_at = None::<*const u8>;
@@ -112,7 +112,7 @@ fn paint_storage() {
     for round in 0..6 {
         let f = rays::frame::Frame { input: input::Frame { size: (100, 100), ..input::at_time(round as f64) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
         rays_shell::host::build(&mut ui, &f, &mut |ui| {
-            let b = ui.box_("reuse", BoxOpts::default().w(Size::Px(20.)).h(Size::Px(20.)));
+            let b = ui.node("reuse", pxui::Node::DEFAULT.w(Size::Px(20.)).h(Size::Px(20.)));
             let before = mem_sys::alloc_count();
             let previous = label_at;
             let label = ui.cached_label(&b, 0, if round < 4 { "Repeated label" } else { "Changed label" });
@@ -128,11 +128,11 @@ fn paint_storage() {
             label_at = Some(at);
             if round == 3 {
                 let token = token.clone();
-                ui.draw(&b, move |_: &mut Paint, _: Rect| token.set(token.get() + 1));
+                ui.canvas(&b, move |_: &mut Paint, _: Rect| token.set(token.get() + 1));
             } else {
-                ui.draw(&b, painter(token.clone()));
+                ui.canvas(&b, painter(token.clone()));
             }
-            ui.draw_over(&b, painter(token.clone()));
+            ui.canvas_over(&b, painter(token.clone()));
             if [1, 2, 5].contains(&round) {
                 assert_eq!(mem_sys::alloc_count(), before, "warm callback storage allocated");
             }
@@ -147,7 +147,7 @@ fn paint_storage() {
     let big = "x".repeat(256 * 1024);
     let base = mem_sys::allocated_bytes();
     let f = rays::frame::Frame { input: input::Frame { size: (100, 100), ..input::at_time(8.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
-    rays_shell::host::build(&mut ui, &f, &mut |ui| { let b = ui.box_("retiring", BoxOpts::default().w(Size::Px(20.)).h(Size::Px(20.))); assert_eq!(ui.cached_label(&b, 0, &big).len(), big.len()); });
+    rays_shell::host::build(&mut ui, &f, &mut |ui| { let b = ui.node("retiring", pxui::Node::DEFAULT.w(Size::Px(20.)).h(Size::Px(20.))); assert_eq!(ui.cached_label(&b, 0, &big).len(), big.len()); });
     let held = mem_sys::allocated_bytes();
     assert!(held >= base + 200 * 1024, "the cached label is held while its box lives: {base} -> {held}");
     let f = rays::frame::Frame { input: input::Frame { size: (100, 100), ..input::at_time(9.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };

@@ -63,9 +63,9 @@ pub fn window_shell_pane_root() {
         let b = base();
         rays_shell::host::build(ui, &fr((400, 300), (0.0, 0.0), events), &mut |ui| {
             let root = chrome::pane_root(ui, &b, (100, 20, 100, 80), "pane");
-            let mut child: Option<UiBox> = None;
-            ui.within(&root, &mut |ui| {
-                child = Some(ui.box_("child", BoxOpts::default().flags(CLICKABLE).w(Size::Px(20.0)).h(Size::Px(20.0)).at((110.0, 30.0))));
+            let mut child: Option<pxui::Handle> = None;
+            chrome::within_pane(ui, &root, &b, (100, 20, 100, 80), &mut |ui| {
+                child = Some(ui.node("child", pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).w(Size::Px(20.0)).h(Size::Px(20.0)).at(110.0, 30.0)));
             });
             out = Some((ui.signal(&root), ui.signal(&child.unwrap())));
         });

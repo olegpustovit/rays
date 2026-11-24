@@ -9,26 +9,26 @@ CARGOFLAGS = $(if $(filter release,$(PROFILE)),--release)
 OS := $(shell uname -s)
 ifeq ($(OS),Darwin)
 LIBSO = libpxui.dylib
-LIBSONAME = libpxui.1.dylib
+LIBSONAME = libpxui.2.dylib
 else ifneq (,$(findstring NT-,$(OS)))
 # MSYS2 (uname -s is MINGW64_NT-...): pxui.dll and its import library land in target/<profile>; no soname link, the dll sits beside rays.exe.
 WINDOWS = 1
 else
 LIBSO = libpxui.so
-LIBSONAME = libpxui.so.1
+LIBSONAME = libpxui.so.2
 endif
 
 .PHONY: build lib install
 
 lib:
 	@test -e pxui/Cargo.toml || git submodule update --init
-	cargo build $(CARGOFLAGS) --manifest-path pxui/Cargo.toml -p pxui_dylib --target-dir target
+	cargo build --locked $(CARGOFLAGS) --manifest-path pxui/Cargo.toml -p pxui_dylib --target-dir target
 ifndef WINDOWS
 	ln -sfn $(LIBSO) target/$(if $(filter release,$(PROFILE)),release,debug)/$(LIBSONAME)
 endif
 
 build: lib
-	cargo build $(CARGOFLAGS) -p rays_bin
+	cargo build --locked $(CARGOFLAGS) -p rays_bin
 
 # macOS: a signed Rays.app in $(APPDIR) plus a `rays` command in $(PREFIX)/bin. Linux: rays and libpxui under $(PREFIX) (the binary's
 # rpath is $$ORIGIN/../lib; SDL3 stays a system library). Windows (MSYS2): rays.exe, pxui.dll and the DLLs they load from the MSYS2
@@ -48,6 +48,6 @@ else
 # lld puts every -L directory holding a shared library (target/release, the SDL3 prefix) into RUNPATH: overwrite it in place with the
 # installed layout's, NUL padded to the same length.
 	perl -0pi -e 's{\$$ORIGIN:\$$ORIGIN/\.\.:\$$ORIGIN/\.\./lib:[^\0]*}{q($$ORIGIN/../lib) . "\0" x (length($$&) - 14)}e' $(PREFIX)/bin/rays
-	install -m 755 target/release/libpxui.so $(PREFIX)/lib/libpxui.so.1.0
-	ln -sfn libpxui.so.1.0 $(PREFIX)/lib/libpxui.so.1
+	install -m 755 target/release/libpxui.so $(PREFIX)/lib/libpxui.so.2.0
+	ln -sfn libpxui.so.2.0 $(PREFIX)/lib/libpxui.so.2
 endif

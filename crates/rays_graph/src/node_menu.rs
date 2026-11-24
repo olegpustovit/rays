@@ -4,9 +4,9 @@
 use flow_check::op::{self, Op};
 use flow_syntax::context::{self, Context};
 use flow_syntax::ty::{self, ColorKind, Ty};
-use pxui::theme::{self, Tokens as Theme};
-use pxui::ui::{fuzzy_match, Axis, BoxOpts, Pick, PickerOpts, Size, Ui, BLOCKING, CLICKABLE};
-use pxui::geom::{color::T as Color, Rect};
+use pxui::theme::{Tokens as Theme};
+use pxui::ui::{fuzzy_match, Axis, Pick, Size, Ui};
+use pxui::{Rgba as Color, Rect};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -197,14 +197,10 @@ pub fn port_color(theme: &Theme, ty: &Ty) -> Color {
     }
 }
 
-fn picker_rows(menu: &Menu, query: &str) -> Vec<(String, String)> {
-    rows(menu, query).iter().map(|e| (entry_label(e), entry_detail(e))).collect()
-}
-
 /// The node menu: returns the menu while it stays open and the key of the entry picked this frame.
 pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<Menu>, Option<String>) {
     let (bx, by, bw, bh) = bounds;
-    let row = ui.row_height();
+    let row = ui.row_height().round() as i64;
     let shown = rows(&menu, "").len() as i64;
     // the edge, the title (4 above its row), the search row, the rows and the foot (a hairline under 4,
     // then a bar)
@@ -215,70 +211,61 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
     let result: Rc<RefCell<Option<(String, Pick)>>> = Rc::new(RefCell::new(None));
     let out = result.clone();
     let m = menu.clone();
-    let open = ui.popup(
-        Some(theme::border(&ui.tokens())),
-        None,
-        true,
-        false,
-        (x as f32, y as f32),
-        width as f32,
-        height as f32,
-        "pxui-graph-menu",
+    let overlay = pxui::Overlay::DEFAULT.at(pxui::Point::new(x as f32, y as f32))
+        .w_px(width as f32).h_px(height as f32).stroke(ui.tokens().foreground.with_alpha(77));
+    let open = ui.popup("pxui-graph-menu", &overlay,
         &mut |ui: &mut Ui| {
             let theme = ui.tokens();
             // the title row: the label at 12 and, right-aligned 8 from the edge in ink-2 at the label
             // size, the node the new one goes after
-            let title = ui.box_("pxui-graph-menu-title", BoxOpts::default().w(Size::Grow).h(Size::Px(((4 + row) as f64) as f32)));
+            let title = ui.node("pxui-graph-menu-title", pxui::Node::DEFAULT.w(Size::Grow).h(Size::Px(((4 + row) as f64) as f32)));
             let after = m.after.clone();
-            ui.draw(&title, move |paint, Rect { x, y, w, h }| { let (x, y, w, h) = (x as f64, y as f64, w as f64, h as f64);
-                let size = paint.label_size();
-                let top = f64::from(paint.text_top(Some(size), (y + 4.0) as f32, (h - 4.0) as f32));
-                paint.cap(((x + 12.0) as f32, top as f32), None, "Add node");
+            ui.canvas(&title, move |paint, Rect { x, y, w, h }| { let (x, y, w, h) = (x as f64, y as f64, w as f64, h as f64);
+                let size = paint.tokens().label_size;
+                let top = f64::from(((y + 4.0) as f32) + ((((h - 4.0) as f32) - (size) as f32) / 2.0).floor());
+                { paint.text_chars(pxui::Point::new((x + 12.0) as f32, top as f32), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), "Add node"); };
                 if let Some(name) = &after {
                     let text = format!("after {}", name);
-                    let tw = f64::from(paint.text_width(Some(size), &text));
-                    paint.text_s(((x + w - 8.0 - tw) as f32, top as f32), size, theme::ink_2(&theme), &text);
+                    let tw = f64::from(paint.text_service().width(&text, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0));
+                    { let text = &text; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)); let _ = paint.text_spans(pxui::Point::new((x + w - 8.0 - tw) as f32, top as f32), pxui::Label::BODY.size((size) as f32), 0.0, text, &[span]); };
                 }
             });
             // the rows, kept so that a row's square and unavailability are known
             let latest: Rc<RefCell<Vec<Entry>>> = Rc::new(RefCell::new(Vec::new()));
             let (l1, l2, l3) = (latest.clone(), latest.clone(), latest);
-            let mut o = PickerOpts::default();
-            o.limit = MENU_LIMIT;
-            o.mark = Some(Rc::new(move |index: i64| {
-                let l = l1.borrow();
-                if (index as usize) < l.len() { Some(port_color(&theme, &l[index as usize].output)) } else { None }
-            }));
-            o.off = Some(Rc::new(move |index: i64| {
-                let l = l2.borrow();
-                (index as usize) < l.len() && l[index as usize].off.is_some()
-            }));
-            let mq = m.clone();
-            let (query, pick) = ui.picker(&o, "type to search", &m.query, &move |query: &str| {
-                *l3.borrow_mut() = rows(&mq, query);
-                picker_rows(&mq, query)
+            let mark = |index: usize| l1.borrow().get(index).map(|entry| port_color(&theme, &entry.output));
+            let disabled = |index: usize| l2.borrow().get(index).is_some_and(|entry| entry.off.is_some());
+            let style = pxui::Picker::DEFAULT.limit(MENU_LIMIT as usize).mark(&mark).off(&disabled);
+            let response = ui.picker("pxui-graph-menu-search", "type to search", &m.query, &style, &mut |query, target| {
+                let entries = rows(&m, query);
+                for entry in &entries {
+                    target.push(pxui::PickRow::new(&entry_label(entry)).detail(&entry_detail(entry)));
+                }
+                *l3.borrow_mut() = entries;
             });
+            let query = response.query.to_owned();
+            let pick = response.pick;
             // a cross at the right of the search row clears it
-            let clear = ui.box_(
+            let clear = ui.node(
                 "pxui-graph-menu-clear",
-                BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(20.0)).h(Size::Px(20.0)).at((((x + width - 25) as f64) as f32, ((y + 1 + row + 4 + 4) as f64) as f32)),
+                pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::BLOCKING).w(Size::Px(20.0)).h(Size::Px(20.0)).at(((x + width - 25) as f64) as f32, ((y + 1 + row + 4 + 4) as f64) as f32),
             );
             if !query.is_empty() {
-                let muted = theme::muted(&ui.tokens());
-                ui.draw(&clear, move |paint, Rect { x: cx, y: cy, w: _, h: _ }| { let (cx, cy) = (cx as f64, cy as f64);
-                    let ty = f64::from(paint.text_top(None, cy as f32, 20.0));
-                    paint.text_c(((cx + 6.5) as f32, ty as f32), muted, "\u{d7}");
+                let muted = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
+                ui.canvas(&clear, move |paint, Rect { x: cx, y: cy, w: _, h: _ }| { let (cx, cy) = (cx as f64, cy as f64);
+                    let ty = f64::from((cy as f32) + (((20.0) - (paint.tokens().font_size) as f32) / 2.0).floor());
+                    { let text = "\u{d7}"; let span = pxui::TextSpan::new(0, text.len() as u32).color(muted); let _ = paint.text_spans(pxui::Point::new((cx + 6.5) as f32, ty as f32), pxui::Label::BODY, 0.0, text, &[span]); };
                 });
             }
             let query = if ui.signal(&clear).clicked { String::new() } else { query };
             let right = format!("{} of {}", rows(&m, &query).len(), m.items.len());
-            ui.footer(
-                Some(&right),
-                &[("\u{2191}\u{2193}".to_owned(), "move".to_owned()), ("\u{21b5}".to_owned(), "place".to_owned())],
+            pxui::ext::footer(
+                ui, Some(&right),
+                &[("\u{2191}\u{2193}", "move"), ("\u{21b5}", "place")],
             );
             *out.borrow_mut() = Some((query, pick));
         },
-    );
+    ).open;
     let _ = Axis::Column;
     let (next, picked) = if !open {
         (None, None)

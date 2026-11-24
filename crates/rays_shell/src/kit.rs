@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use pxui::theme;
 use pxui::ui::*;
-use pxui::geom::color::{self, T as Color};
+use pxui::Rgba as Color;
 
 /// The chrome's three graph inks, the same as `rays_graph::scope_paint::ports` (which the chrome
 /// may not reach): an int port's green for a checked file, a float port's blue for an expression,
@@ -14,7 +14,7 @@ pub fn port_ink(theme: &theme::Tokens, port: Port) -> Color {
         Port::Float => ("#285f77", "#72b3cf"),
         Port::Hint => ("#f5cf4f", "#f5cf4f"),
     };
-    color::hex_exn(if theme::dark(theme) { night } else { light }).expect("port ink")
+    Color::parse(if (theme).dark { night } else { light }).expect("port ink")
 }
 
 #[derive(Clone, Copy)]
@@ -25,30 +25,31 @@ pub enum Port {
 }
 
 pub fn text_y(ui: &Ui, y: f32, h: f32) -> f32 {
-    ui.text_top(None, y, h)
+    y + ((h - ui.font_size()) / 2.0).floor()
 }
 
 pub fn cap_size(ui: &Ui) -> i64 {
-    8.max(ui.font_size() - 2)
+    (ui.font_size() - 2.0).max(8.0).round() as i64
 }
 
 pub fn cap_y(ui: &Ui, y: f32, h: f32) -> f32 {
-    ui.text_top(Some(cap_size(ui)), y, h)
+    y + ((h - cap_size(ui) as f32) / 2.0).floor()
 }
 
 /// the width of a label (`Paint::cap`): upper case, 0.08 em of tracking after each letter
 pub fn cap_width(ui: &mut Ui, text: &str) -> f32 {
-    ui.cap_width(text)
+    let style = pxui::Label::BODY.size(cap_size(ui) as f32).caps(true).tracking(0.08);
+    ui.text_service().width(text, style, None).unwrap_or(0.0)
 }
 
 /// the width of a text button, the kit's `.btn`: a transparent 1-point edge, 6, the label, 6 and
 /// the key, 6, the edge
 pub fn button_width(ui: &mut Ui, hint: Option<&str>, icon: bool, label: &str) -> f32 {
     let size = cap_size(ui);
-    14.0 + ui.text_width(None, label)
+    14.0 + ui.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0)
         + if icon { 13.0 } else { 0.0 }
         + match hint {
-            Some(hint) => 6.0 + ui.text_width(Some(size), hint),
+            Some(hint) => 6.0 + ui.text_service().width(hint, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0),
             None => 0.0,
         }
 }
@@ -81,11 +82,11 @@ impl Default for ButtonOpts {
 /// checked (`active`), and for the `primary` (the one outlined button of a panel) a line-3 edge in
 /// every state. Its text is in its child nodes, not its look.
 pub fn button_states(theme: &theme::Tokens, primary: bool) -> theme::States {
-    let idle = if primary { theme::Look { border: theme::border(theme), border_w: 1.0, ..theme::Look::NONE } } else { theme::Look::NONE };
+    let idle = if primary { theme::Look { border: (theme).foreground.with_alpha(77), border_w: 1.0, ..theme::Look::NONE } } else { theme::Look::NONE };
     theme::States {
         idle,
-        hover: theme::Look { fill: theme::hover_fill(theme), ..idle },
-        pressed: theme::Look { fill: theme::pressed_fill(theme), ..idle },
+        hover: theme::Look { fill: (theme).input.blend((theme).accent, 0.11), ..idle },
+        pressed: theme::Look { fill: (theme).control.blend((theme).accent, 0.18), ..idle },
         focus: idle,
         disabled: idle,
         checked: theme::Look { fill: theme.control, ..idle },
@@ -94,7 +95,7 @@ pub fn button_states(theme: &theme::Tokens, primary: bool) -> theme::States {
 
 /// A text node at `x` in its parent, `h` tall (the parent's height), in `look`'s ink at its font.
 fn text_node(ui: &mut Ui, key: i64, x: f32, w: f32, h: f32, look: theme::Look, text: &str) {
-    let node = ui.node_keyed(key, Node { w: Size::Px(w.max(1.0)), h: Size::Px(h), at: Some((x, 0.0)).into(), look, ..Node::DEFAULT });
+    let node = ui.node(pxui::Key::Resolved(key), Node { w: Size::Px(w.max(1.0)), h: Size::Px(h), at: Some((x, 0.0)).into(), look, ..Node::DEFAULT });
     ui.text(&node, text);
 }
 
@@ -104,17 +105,17 @@ fn text_node(ui: &mut Ui, key: i64, x: f32, w: f32, h: f32, look: theme::Look, t
 pub fn button(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, o: &ButtonOpts, label: &str) -> bool {
     let (bx, by) = at;
     let theme = ui.tokens();
-    let boxed = ui.box_(key, BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(w)).h(Size::Px(o.h)).at((bx, by)));
+    let boxed = ui.node(pxui::hash_of(key), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::BLOCKING).w(Size::Px(w)).h(Size::Px(o.h)).at(bx, by));
     let signal = ui.signal(&boxed);
     let state = State { hovered: o.enabled && signal.hovered, pressed: o.enabled && signal.held, checked: o.active, ..State::default() };
-    ui.node_mut(&boxed, |node| node.look = *button_states(&theme, o.primary).pick(state));
-    let color = if o.enabled { theme.foreground } else { theme::ink_3(&theme) };
-    let lw = ui.text_width(None, label);
+    ui.node_mut(&boxed, &mut |node| node.look = *button_states(&theme, o.primary).pick(state));
+    let color = if o.enabled { theme.foreground } else { theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521) };
+    let lw = ui.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0);
     let tx = match o.icon {
         None if o.centered => ((w - lw) / 2.0).floor(),
         None => 7.0,
         Some(shape) => {
-            ui.draw(&boxed, move |paint, Rect { x, y, w: _, h }| {
+            ui.canvas(&boxed, move |paint, Rect { x, y, w: _, h }| {
                 let cy = y + (h / 2.0);
                 match shape {
                     Icon::Play => {
@@ -122,24 +123,24 @@ pub fn button(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, o: &ButtonOpts, la
                         for row in 0..=15 {
                             let top = cy - 4.0 + (0.5 * row as f32);
                             let reach = 1.0 - ((top + 0.25 - cy).abs() / 4.0);
-                            paint.fill(x + 7.0, top, 7.0 * reach, 0.5, color);
+                            paint.fill(pxui::Rect::new(x + 7.0, top, 7.0 * reach, 0.5), pxui::Fill::new(color));
                         }
                     }
-                    Icon::Stop => paint.fill(x + 7.0, cy - 4.0, 8.0, 8.0, color),
+                    Icon::Stop => paint.fill(pxui::Rect::new(x + 7.0, cy - 4.0, 8.0, 8.0), pxui::Fill::new(color)),
                 }
             });
             20.0
         }
     };
-    let saved = ui.enter(&boxed);
-    text_node(ui, pxui::ui_core::int_key(boxed.box_key, 0), tx, lw, o.h, theme::Look { text: color, ..theme::Look::NONE }, label);
-    if let Some(hint) = &o.hint {
-        let size = cap_size(ui);
-        let hw = ui.text_width(Some(size), hint);
-        let font = theme::Font { size: -2, ..theme::Font::BODY };
-        text_node(ui, pxui::ui_core::int_key(boxed.box_key, 1), tx + lw + 6.0, hw, o.h, theme::Look { text: theme::ink_3(&theme), font, ..theme::Look::NONE }, hint);
-    }
-    ui.leave(saved);
+    ui.within(&boxed, &mut |ui| {
+        text_node(ui, pxui::ui::int_key(boxed.box_key, 0), tx, lw, o.h, theme::Look { text: color, ..theme::Look::NONE }, label);
+        if let Some(hint) = &o.hint {
+            let size = cap_size(ui);
+            let hw = ui.text_service().width(hint, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0);
+            let font = theme::Font { size: -2, ..theme::Font::BODY };
+            text_node(ui, pxui::ui::int_key(boxed.box_key, 1), tx + lw + 6.0, hw, o.h, theme::Look { text: theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521), font, ..theme::Look::NONE }, hint);
+        }
+    });
     signal.clicked && o.enabled
 }
 
@@ -147,16 +148,17 @@ pub fn button(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, o: &ButtonOpts, la
 /// hex text typed (or `hex` unchanged). `key` names the pair; `at` is the control column.
 pub fn colour(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, swatch: Color, hex: &str) -> String {
     let (x, y) = at;
-    let boxed = ui.box_fmt(format_args!("swatch-{key}"), BoxOpts::default().at((x, y)).w(Size::Px(20.0)).h(Size::Px(20.0)));
-    let edge = theme::edge(&ui.tokens());
-    ui.draw(&boxed, move |paint, Rect { x: sx, y: sy, w: sw, h: sh }| {
+    let boxed = ui.node(pxui::hash_of(&format!("swatch-{key}")), pxui::Node::DEFAULT.at(x, y).w(Size::Px(20.0)).h(Size::Px(20.0)));
+    let edge = ui.tokens().foreground.with_alpha(38);
+    ui.canvas(&boxed, move |paint, Rect { x: sx, y: sy, w: sw, h: sh }| {
         // a 20-point square with its border inside
-        paint.fill(sx, sy, sw, sh, swatch);
-        paint.stroke(sx + 0.5, sy + 0.5, sw - 1.0, sh - 1.0, edge);
+        paint.fill(pxui::Rect::new(sx, sy, sw, sh), pxui::Fill::new(swatch));
+        paint.stroke(pxui::Rect::new(sx + 0.5, sy + 0.5, sw - 1.0, sh - 1.0), pxui::Stroke::new(edge));
     });
-    let opts = ValueFieldOpts { left: true, ..ValueFieldOpts::default() };
-    let valid = |t: &str| color::hex(t).is_ok();
-    ui.value_field((x + 28.0, y), w - 28.0, 20.0, &opts, &valid, &format!("hex-{key}"), hex).0
+    let style = pxui::ValueField::DEFAULT.left(true);
+    let valid = |t: &str| Color::parse(t).is_ok();
+    pxui::ext::value_field(ui, pxui::hash_of(&("hex", key)), hex, Rect::new(x + 28.0, y, w - 28.0, 20.0),
+        &style, &pxui::ValueCallbacks::DEFAULT.valid(&valid)).changed.unwrap_or(hex).to_owned()
 }
 
 /// The kit's switch: 28 x 14, a line-3 edge, an 8-point knob that is ink-3 on the track at the left
@@ -166,10 +168,10 @@ pub fn switch(ui: &mut Ui, key: &str, at: (f32, f32), on: bool) -> bool {
     let (sx, sy) = at;
     let checked = State { checked: on, ..State::default() };
     let (track, knob) = (*ui.theme().switch.pick(checked), *ui.theme().knob.pick(checked));
-    let boxed = ui.node(key, Node { flags: CLICKABLE | BLOCKING, w: Size::Px(28.0), h: Size::Px(14.0), at: Some((sx, sy)).into(), look: track, ..Node::DEFAULT });
-    let saved = ui.enter(&boxed);
-    ui.node_keyed(pxui::ui_core::int_key(boxed.box_key, 0), Node { w: Size::Px(8.0), h: Size::Px(8.0), at: Some((if on { 17.0 } else { 3.0 }, 3.0)).into(), look: knob, ..Node::DEFAULT });
-    ui.leave(saved);
+    let boxed = ui.node(pxui::hash_of(key), Node { flags: pxui::Flags::CLICKABLE | pxui::Flags::BLOCKING, w: Size::Px(28.0), h: Size::Px(14.0), at: Some((sx, sy)).into(), look: track, ..Node::DEFAULT });
+    ui.within(&boxed, &mut |ui| {
+        ui.node(pxui::Key::Resolved(pxui::ui::int_key(boxed.box_key, 0)), Node { w: Size::Px(8.0), h: Size::Px(8.0), at: Some((if on { 17.0 } else { 3.0 }, 3.0)).into(), look: knob, ..Node::DEFAULT });
+    });
     ui.signal(&boxed).clicked
 }
 
@@ -178,14 +180,13 @@ pub fn switch(ui: &mut Ui, key: &str, at: (f32, f32), on: bool) -> bool {
 pub fn segments(ui: &mut Ui, key: &str, right: f32, y: f32, labels: &[&str], active: i64) -> (Option<i64>, f32) {
     let h = 20.0;
     let theme = ui.tokens();
-    let total = 12.0 * (labels.len() as i64 - 1).max(0) as f32 + labels.iter().map(|label| ui.text_width(None, label)).sum::<f32>();
+    let total = 12.0 * (labels.len() as i64 - 1).max(0) as f32 + labels.iter().map(|label| ui.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0)).sum::<f32>();
     let mut x = right - total;
     let mut clicked = None;
     for (index, label) in labels.iter().enumerate() {
-        let w = ui.text_width(None, label);
-        let boxed = ui.box_fmt(
-            format_args!("{key}-{index}"),
-            BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(w + 8.0)).h(Size::Px(h)).at((x - 4.0, y)),
+        let w = ui.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0);
+        let boxed = ui.node(pxui::hash_of(&format!("{key}-{index}")),
+            pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::BLOCKING).w(Size::Px(w + 8.0)).h(Size::Px(h)).at(x - 4.0, y),
         );
         let signal = ui.signal(&boxed);
         if signal.clicked {
@@ -194,13 +195,13 @@ pub fn segments(ui: &mut Ui, key: &str, right: f32, y: f32, labels: &[&str], act
         // the one in use is ink with a 1-point underline 4 in from each side; another is ink-3, ink
         // while hovered
         let on = index as i64 == active;
-        let ink = if on || signal.hovered { theme.foreground } else { theme::ink_3(&theme) };
-        let saved = ui.enter(&boxed);
-        text_node(ui, pxui::ui_core::int_key(boxed.box_key, 0), 4.0, w, h, theme::Look { text: ink, ..theme::Look::NONE }, label);
-        if on {
-            ui.node_keyed(pxui::ui_core::int_key(boxed.box_key, 1), Node { w: Size::Px(w), h: Size::Px(1.0), at: Some((4.0, h - 1.0)).into(), look: theme::Look { fill: theme.foreground, ..theme::Look::NONE }, ..Node::DEFAULT });
-        }
-        ui.leave(saved);
+        let ink = if on || signal.hovered { theme.foreground } else { theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521) };
+        ui.within(&boxed, &mut |ui| {
+            text_node(ui, pxui::ui::int_key(boxed.box_key, 0), 4.0, w, h, theme::Look { text: ink, ..theme::Look::NONE }, label);
+            if on {
+                ui.node(pxui::Key::Resolved(pxui::ui::int_key(boxed.box_key, 1)), Node { w: Size::Px(w), h: Size::Px(1.0), at: Some((4.0, h - 1.0)).into(), look: theme::Look { fill: theme.foreground, ..theme::Look::NONE }, ..Node::DEFAULT });
+            }
+        });
         x += w + 12.0;
     }
     (clicked, right - total)
@@ -234,8 +235,8 @@ pub fn debug_revision(value: &dyn std::fmt::Debug) -> u64 {
 /// only when `revision` changes or the view is dirtied (input on its boxes, hover entering or leaving
 /// them, the theme, the window's size).
 pub fn cached(ui: &mut Ui, label: &str, revision: u64, f: &mut dyn FnMut(&mut Ui)) -> Handle {
-    let (w, h) = ui.view_size();
-    let view = ui.view(label, revision, Size::Px(w), Size::Px(h), f);
+    let pxui::ViewSize { width: w, height: h } = ui.view_size();
+    let (_, view) = sized_view(ui, label, revision, Size::Px(w), Size::Px(h), f);
     ui.set_at(&view, (0.0, 0.0));
     view
 }
@@ -275,13 +276,13 @@ pub fn with_label(label: std::fmt::Arguments, f: &mut dyn FnMut(&str)) {
 
 /// `cap_y` for a painter, which has the paint and not the handle.
 pub fn cap_y_paint(paint: &Paint, y: f32, h: f32) -> f32 {
-    paint.text_top(Some(8.max(paint.font_size - 2)), y, h)
+    (y) + (((h) - (paint.tokens().font_size - 2.0).max(8.0)) / 2.0).floor()
 }
 
 /// A vector: cells in the control column, 8 between, each with its axis letter in ink-3 drawn on
 /// `boxed` (the row); `cell index x w` makes the cell's own field (x, w relative to `boxed`).
 /// `reserve` keeps room at the right for a row's toggle.
-pub fn vector(ui: &mut Ui, boxed: &UiBox, at: (f32, f32), w: f32, reserve: f32, axes: &[&str], cell: &mut dyn FnMut(&mut Ui, usize, f32, f32)) {
+pub fn vector(ui: &mut Ui, boxed: &pxui::Handle, at: (f32, f32), w: f32, reserve: f32, axes: &[&str], cell: &mut dyn FnMut(&mut Ui, usize, f32, f32)) {
     let (cx, cy) = at;
     let n = axes.len() as f32;
     let cell_w = (w - reserve - (8.0 * (n - 1.0))) / n;
@@ -293,10 +294,23 @@ pub fn vector(ui: &mut Ui, boxed: &UiBox, at: (f32, f32), w: f32, reserve: f32, 
         let fx = start.round();
         let fw = (start + cell_w).round() - start.round();
         let axis = axis.to_string();
-        ui.draw(boxed, move |paint, Rect { x, y, w: _, h: _ }| {
+        ui.canvas(boxed, move |paint, Rect { x, y, w: _, h: _ }| {
             let ty = cap_y_paint(paint, y + cy - 0.5, 20.0);
-            paint.text_s((x + fx + 2.0, ty), cap, theme::ink_3(&theme), &axis);
+            { let text = &axis; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521)); let _ = paint.text_spans(pxui::Point::new(x + fx + 2.0, ty), pxui::Label::BODY.size((cap) as f32), 0.0, text, &[span]); };
         });
         cell(ui, index, fx, fw);
     }
+}
+
+pub(crate) fn sized_view(ui: &mut pxui::Ui, label: &str, revision: u64, width: pxui::Size, height: pxui::Size, build: &mut dyn FnMut(&mut pxui::Ui)) -> (pxui::Handle, pxui::Handle) {
+    let key = pxui::hash_of(label);
+    let host = ui.node(key, pxui::Node::DEFAULT.w(width).h(height).at(0.0, 0.0));
+    let mut view = None;
+    let view_key = match label {
+        "inspector-view" => pxui::Key::Label("inspector-view"),
+        "navigator-view" => pxui::Key::Label("navigator-view"),
+        _ => pxui::Key::from(key),
+    };
+    ui.within(&host, &mut |ui| view = Some(ui.view_of(view_key, &revision, &mut *build)));
+    (host, view.expect("sized retained view"))
 }

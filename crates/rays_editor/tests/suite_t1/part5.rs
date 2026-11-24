@@ -340,7 +340,7 @@ pub fn run_studio() {
         let sink = probes.clone();
         // the sketch's own rows end every inspector: a tall filler whose place says where that inspector has scrolled to
         let (next, _) = editor::update_with(e.clone(), &f, &move |ui| {
-            let filler = ui.box_("filler", pxui::ui::BoxOpts::default().h(pxui::ui::Size::Px(1500.)));
+            let filler = ui.node("filler", pxui::Node::DEFAULT.h(pxui::ui::Size::Px(1500.)));
             let y = f64::from(ui.rect(&filler).y);
             sink.borrow_mut().push(y);
             Rc::new(y)

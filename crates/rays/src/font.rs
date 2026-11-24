@@ -56,7 +56,7 @@ const SYSTEM_FONTS: [&str; 11] = [
 thread_local! {
     // Text is shaped on whichever thread lowers the scene; cosmic-text is deterministic, so every
     // thread's instance agrees.
-    static TEXT: RefCell<Option<Result<(pxui::Text, Vec<u16>), String>>> = const { RefCell::new(None) };
+    static TEXT: RefCell<Option<Result<(pxui::Ui, Vec<u16>), String>>> = const { RefCell::new(None) };
 }
 
 // The faces of `scene_command::marks::FONTS` after the default, in its order.
@@ -70,14 +70,16 @@ const FACES: [&[u8]; 11] = [
 
 /// The shaper and the load index of each face of `FONTS`: a default run keeps the first font of
 /// the engine, as it always did; a named face is loaded after the system font and Pragmasevka.
-fn text_engine() -> Option<(pxui::Text, Vec<u16>)> {
+fn text_engine() -> Option<(pxui::Ui, Vec<u16>)> {
     let system = SYSTEM_FONTS.iter().find_map(|p| std::fs::read(p).ok());
     let mut fonts: Vec<&[u8]> = system.iter().map(|v| v.as_slice()).collect();
-    fonts.push(pxui::text::pragmasevka());
-    let mut text = pxui::Text::new(&fonts)?;
-    let mut faces = vec![fonts.len() as u16 - 1];
-    for face in FACES { faces.push(text.add_font(face)? as u16); }
-    Some((text, faces))
+    fonts.push(pxui::pragmasevka());
+    let first_named = fonts.len() as u16 - 1;
+    fonts.extend(FACES);
+    let faces = (first_named..fonts.len() as u16).collect();
+    let fonts: Vec<_> = fonts.into_iter().map(pxui::FontData).collect();
+    let ui = pxui::Ui::new(&pxui::UiDesc::DEFAULT.fonts(&fonts)).ok()?;
+    Some((ui, faces))
 }
 
 fn paint_text(density: i64, wrap: Option<i64>, align: Alignment, size: i64, text: &str, mode: RenderMode, run: i64) -> Result<image::Image, String> {
@@ -85,27 +87,25 @@ fn paint_text(density: i64, wrap: Option<i64>, align: Alignment, size: i64, text
         return image::create(1, 1, None);
     }
     let RenderMode::Blended(c) = mode;
-    let style = pxui::TextStyle {
-        size_points: size as f32,
-        wrap: if wrap.is_some() { pxui::TextStyle::WRAP_WORD } else { pxui::TextStyle::WRAP_NONE },
-        align: match align {
-            Alignment::Left => pxui::TextStyle::ALIGN_LEFT,
-            Alignment::Center => pxui::TextStyle::ALIGN_CENTER,
-            Alignment::Right => pxui::TextStyle::ALIGN_RIGHT,
-        },
-        ..pxui::TextStyle::default()
-    };
+    let style = pxui::Label::BODY.size(size as f32).align(match align {
+        Alignment::Left => pxui::TextAlign::Start,
+        Alignment::Center => pxui::TextAlign::Center,
+        Alignment::Right => pxui::TextAlign::End,
+    });
+    let style = if wrap.is_some() { style.wrap() } else { style };
     let (face, _, tracking) = scene_command::marks::text_style_parts(run);
     TEXT.with(|t| {
         let mut t = t.borrow_mut();
         let (t, faces) = t.get_or_insert_with(|| text_engine().ok_or_else(|| "PXUI text initialization failed".to_owned()))
             .as_mut().map_err(|error| error.clone())?;
         // a default run keeps the first font of the engine and its fallbacks
-        let style = if run == 0 { style } else {
-            pxui::TextStyle { font: *faces.get(face).ok_or_else(|| format!("Text face {face} is not loaded"))?, tracking: tracking as f32, ..style }
+        let style = if run == 0 { style.font(0).tracking(0.0) } else {
+            style.font(*faces.get(face).ok_or_else(|| format!("Text face {face} is not loaded"))?)
+                .tracking(tracking as f32 / size as f32)
         };
-        let (w, h, px) = t.rasterize_rgba(0, text, &style, wrap.map_or(0.0, |w| w as f32), density as f32,
-            [c.r as u8, c.g as u8, c.b as u8, c.a as u8]).map_err(|e| format!("PXUI text rasterization failed: {e:?}"))?;
+        let mut px = Vec::new();
+        let (w, h) = t.text_service().rasterize_rgba(text, style, wrap.map(|w| w as f32), density as f32,
+            [c.r as u8, c.g as u8, c.b as u8, c.a as u8], &mut px).map_err(|e| format!("PXUI text rasterization failed: {e:?}"))?;
         let (w, h) = (i64::from(w), i64::from(h));
         image::upload_rgba(None, w, h, &px)
     })

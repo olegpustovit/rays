@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use editor_core::panels::{self, Axis, Panel, Path, Size};
-use pxui::ui::{BoxOpts, Size as UiSize, Ui};
+use pxui::ui::{Size as UiSize, Ui};
 use rays_shell::kit::{self, ButtonOpts};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +43,7 @@ fn tool_rects(outline: bool, ui: &mut Ui, header: Header, from: f32) -> [Option<
     let (hx, hy, hw, hh) = (header.0 as f32, header.1 as f32, header.2 as f32, header.3 as f32);
     // the views are 12 apart and end 36 points from the edge (8, the 20-point button, 8)
     let mut views_w = 24.0;
-    for v in VIEWS.iter() { views_w += ui.text_width(None, v); }
+    for v in VIEWS.iter() { views_w += ui.text_service().width(v, pxui::Label::BODY, None).unwrap_or(0.0); }
     let limit = hx + hw - 36.0 - views_w - 8.0;
     let mut x = hx + from;
     let mut place = |ui: &mut Ui, skip_macro: bool| {
@@ -85,12 +85,12 @@ pub fn tool_rect(outline: bool, ui: &mut Ui, header: Header, from: f32, tool: To
 /// The 1 x 12 rule that parts a header's title from the tools that start at `from`.
 pub fn rule(ui: &mut Ui, key: &str, header: Header, from: f32) {
     let (hx, hy, _, hh) = header;
-    let b = ui.box_(
-        key,
-        BoxOpts::default().w(UiSize::Px(1.0)).h(UiSize::Px(12.0)).at((hx as f32 + from - 13.0, hy as f32 + ((hh - 12) as f32 / 2.0))),
+    let b = ui.node(
+        pxui::hash_of(key),
+        pxui::Node::DEFAULT.w(UiSize::Px(1.0)).h(UiSize::Px(12.0)).at(hx as f32 + from - 13.0, hy as f32 + ((hh - 12) as f32 / 2.0)),
     );
-    let border = pxui::theme::border(&ui.tokens());
-    ui.draw(&b, move |paint, pxui::geom::Rect { x, y, w, h }| paint.fill(x, y, w, h, border));
+    let border = ui.tokens().foreground.with_alpha(77);
+    ui.canvas(&b, move |paint, pxui::geom::Rect { x, y, w, h }| paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(border)));
 }
 
 /// The toolbar in a panel header, `from` points after the header's left edge; the tool clicked this

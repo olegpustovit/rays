@@ -185,7 +185,7 @@ fn first_char(letter: &str) -> char {
 pub fn carry_step<'a>(value: &mut EditorModel, text_focus: bool, frame_: &'a frame::Frame) -> (Cow<'a, frame::Frame>, bool) {
     let c = match &value.carry {
         None => {
-            let carrying = value.ui.borrow().carrying();
+            let carrying = value.ui.borrow().carrying().map(|payload| carry_mod::Payload { kind: payload.kind.to_owned(), value: payload.value.to_owned() });
             return match carrying {
                 Some(payload) => {
                     value.carry = Some(Carry {

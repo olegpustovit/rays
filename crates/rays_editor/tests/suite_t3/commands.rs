@@ -226,7 +226,7 @@ pub fn new_graphs() {
 pub fn text_keys_are_handled() {
     use std::cell::RefCell;
     use std::rc::Rc;
-    let language = rays_editor::lisp_text::language(None, None, None, false, pxui::theme::default());
+    let language = rays_editor::lisp_text::language(None, None, None, false, pxui::theme::Tokens::default());
     let keys = l::text_keys();
     assert!(!keys.is_empty(), "no text keys");
     for (label, trigger) in keys {
@@ -238,18 +238,18 @@ pub fn text_keys_are_handled() {
         let mut step = |keys: &[Key], events: Vec<Event>| {
             let mut f = frame_at((0., 0.), events, 0);
             f.input.keys = keys.to_vec();
-            let (text, sel, caret, language) = (text.clone(), sel.clone(), caret.clone(), language.clone());
+            let (text, sel, caret) = (text.clone(), sel.clone(), caret.clone());
             rays_shell::host::build(&mut ui, &f, &mut |ui: &mut pxui::ui::Ui| {
-                let (sel2, caret2) = (sel.clone(), caret.clone());
-                let o = pxui::ui_text::TextAreaOpts {
-                    language: Some(language.clone()),
-                    on_select: Some(Rc::new(move |r| *sel2.borrow_mut() = r)),
-                    on_caret: Some(Rc::new(move |c| *caret2.borrow_mut() = c)),
-                    ..Default::default()
-                };
+                let on_select = |(a, b): (usize, usize)| *sel.borrow_mut() = (a as i64, b as i64);
+                let on_caret = |byte: usize| *caret.borrow_mut() = byte as i64;
+                let callbacks = pxui::AreaCallbacks::DEFAULT.language(language.as_pxui())
+                    .on_select(&on_select).on_caret(&on_caret);
                 let current = text.borrow().clone();
-                let (t, _) = ui.text_area_submit((0., 0.), 300., 96., &o, "area", &current);
-                *text.borrow_mut() = t;
+                let response = ui.text_area("area", &current, pxui::Node::DEFAULT.w_px(300.0).h_px(96.0),
+                    &pxui::TextArea::DEFAULT, &callbacks);
+                if let Some(changed) = response.changed {
+                    *text.borrow_mut() = changed.to_owned();
+                }
             });
         };
         step(&[], vec![]);

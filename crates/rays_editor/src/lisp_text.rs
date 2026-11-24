@@ -17,8 +17,8 @@ use std::sync::{Arc, OnceLock};
 use flow_check::lisp_scan::{self as scan, Kind, Token};
 use flow_check::{op, workspace};
 use flow_sop::catalog::Descriptor;
-use pxui::theme::{self, Tokens as Theme};
-use pxui::ui::{CodeContext, Completion, Language};
+use pxui::theme::{Tokens as Theme};
+use pxui::ui::{CodeContext, Completion};
 use sop::edit_graph::InputRequirement;
 
 pub use flow_syntax::text_lexer::{number, separator};
@@ -71,11 +71,11 @@ fn word(text: &str, t: &Token) -> String {
     scan::word(text, t)
 }
 
-pub fn colorize_now(theme: &Theme, text: &str) -> Vec<(i64, i64, pxui::geom::color::T)> {
+pub fn colorize_now(theme: &Theme, text: &str) -> Vec<(i64, i64, pxui::Rgba)> {
     // kit rev 3: forms in the float blue, a kind's namespace in the vector purple, keywords in the
     // bool red, numbers green, strings in the record green; brackets and comments recede to ink-3
     let ports = rays_graph::scope_paint::ports(theme);
-    let quiet = theme::ink_3(theme);
+    let quiet = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
     let lexed = lex(text);
     let tokens = &lexed.0;
     let mut out = Vec::new();
@@ -95,7 +95,7 @@ pub fn colorize_now(theme: &Theme, text: &str) -> Vec<(i64, i64, pxui::geom::col
             },
             Kind::Sym => vec![],
             Kind::Open(_) | Kind::Close(_) => span(quiet),
-            Kind::Unmatched => span(theme::invalid()),
+            Kind::Unmatched => span(pxui::Rgba::hex(0xc2255c)),
         };
         out.extend(spans);
     }
@@ -596,7 +596,7 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
     rank(&prefix, candidates)
         .into_iter()
         .map(|c| Completion {
-            replace: (replace.0 as i64, replace.1 as i64),
+            replace,
             insert: c.insert,
             label: c.name,
             detail: c.detail,
@@ -727,7 +727,7 @@ pub fn context_at(text: &str, caret: usize) -> CodeContext {
 }
 
 /// The "#rrggbb" literals of the text with their colour.
-pub fn color_chips(text: &str) -> Vec<(i64, i64, pxui::geom::color::T)> {
+pub fn color_chips(text: &str) -> Vec<(i64, i64, pxui::Rgba)> {
     let lexed = lex(text);
     let bytes = text.as_bytes();
     let mut out = Vec::new();
@@ -735,28 +735,61 @@ pub fn color_chips(text: &str) -> Vec<(i64, i64, pxui::geom::color::T)> {
         if t.kind != Kind::Str || t.stop - t.start < 9 || bytes[t.stop - 1] != b'"' {
             continue;
         }
-        if let Ok(color) = pxui::geom::color::hex(sub(text, t.start + 1, t.stop - 1)) {
+        if let Ok(color) = pxui::Rgba::parse(sub(text, t.start + 1, t.stop - 1)) {
             out.push((t.start as i64, t.stop as i64, color));
         }
     }
     out
 }
 
+/// Owns the language callbacks for a text pane. PXUI borrows them for each build.
+pub struct Language {
+    pub colorize: Rc<pxui::ColorizeFn<'static>>,
+    pub brackets: Rc<pxui::BracketsFn<'static>>,
+    pub indent: Rc<pxui::IndentFn<'static>>,
+    pub complete: Rc<pxui::CompleteFn<'static>>,
+    pub describe: Rc<pxui::DescribeFn<'static>>,
+    pub number_at: Rc<pxui::NumberAtFn<'static>>,
+    pub context_at: Rc<pxui::ContextAtFn<'static>>,
+    pub rewrite: Option<Rc<pxui::RewriteFn<'static>>>,
+    pub comment: &'static str,
+}
+
+impl Language {
+    pub fn as_pxui(&self) -> pxui::Language<'_> {
+        let language = pxui::Language::DEFAULT
+            .colorize(self.colorize.as_ref()).brackets(self.brackets.as_ref()).indent(self.indent.as_ref())
+            .pairs(&[('(', ')'), ('[', ']'), ('{', '}'), ('"', '"')])
+            .complete(self.complete.as_ref()).describe(self.describe.as_ref()).number_at(self.number_at.as_ref())
+            .context_at(self.context_at.as_ref()).comment(self.comment);
+        self.rewrite.as_deref().map_or(language, |rewrite| language.rewrite(rewrite))
+    }
+}
+
 pub fn language(vocab: Option<Vocab>, names: Option<Names>, imports: Option<Vec<(String, String)>>, parinfer: bool, theme: Theme) -> Language {
     let vocab = Rc::new(vocab.unwrap_or_else(empty_vocab));
-    let names = Rc::new(names.unwrap_or_default());
-    let imports = Rc::new(imports.unwrap_or_default());
-    let (complete_vocab, describe_vocab) = (vocab.clone(), vocab);
+    let names = names.unwrap_or_default();
+    let imports = imports.unwrap_or_default();
+    let complete_vocab = vocab.clone();
     Language {
-        colorize: Rc::new(move |text| colorize_now(&theme, text)),
-        brackets: Rc::new(brackets),
-        indent: Rc::new(|text, caret| scan::indent(text, caret.max(0) as usize)),
-        pairs: vec![('(', ')'), ('[', ']'), ('{', '}'), ('"', '"')],
-        complete: Rc::new(move |text, caret| complete(&names, &imports, &complete_vocab, text, caret.max(0) as usize)),
-        describe: Rc::new(move |text, byte| describe(&describe_vocab, text, byte.max(0) as usize)),
-        number_at: Rc::new(|text, byte| number_at(text, byte.max(0) as usize)),
-        context_at: Rc::new(|text, caret| context_at(text, caret.max(0) as usize)),
-        comment: ";".to_string(),
-        rewrite: if parinfer { Some(Rc::new(|text, caret| flow_syntax::parinfer::rewrite(text, caret))) } else { None },
+        colorize: Rc::new(move |text| colorize_now(&theme, text).into_iter().map(|(a, b, color)| (a as usize, b as usize, color)).collect()),
+        brackets: Rc::new(|text| brackets(text).into_iter().map(|(a, b)| (a as usize, b as usize)).collect()),
+        indent: Rc::new(scan::indent),
+        complete: Rc::new(move |text, caret| complete(&names, &imports, &complete_vocab, text, caret)),
+        describe: Rc::new(move |text, byte, out| {
+            let (a, b, text) = describe(&vocab, text, byte)?;
+            out.push_str(&text);
+            Some((a as usize, b as usize))
+        }),
+        number_at: Rc::new(|text, byte| number_at(text, byte).map(|(a, b)| (a as usize, b as usize))),
+        context_at: Rc::new(context_at),
+        comment: ";",
+        rewrite: parinfer.then(|| {
+            let rewrite: Rc<pxui::RewriteFn<'static>> = Rc::new(|text, caret| {
+                let (text, caret) = flow_syntax::parinfer::rewrite(text, caret as i64);
+                (text, caret as usize)
+            });
+            rewrite
+        }),
     }
 }

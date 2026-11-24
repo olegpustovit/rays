@@ -11,9 +11,11 @@ use flow_graph::projection::{Item, Level, Placed, ZoneKind};
 use flow_syntax::lisp;
 use flow_syntax::syntax::{Node as SNode, Syntax};
 use flow_syntax::ty::{self, Ty};
-use pxui::theme::{self, Tokens as Theme};
-use pxui::ui_core::{ellipsis, Paint, Ui};
-use pxui::geom::{color::{self, T as Color}, p32};
+use pxui::theme::{Tokens as Theme};
+use pxui::{Paint, Ui};
+use crate::p32;
+use pxui::ui::ellipsis;
+use pxui::Rgba as Color;
 
 type S = Syntax;
 
@@ -58,33 +60,33 @@ fn frame_list(t: &Pane, scope: &[Symbol]) -> Vec<Fr> {
 
 pub fn fitted<'a>(paint: &mut Paint, size: i64, width: f64, text: &'a str) -> Cow<'a, str> {
     // as before, the mark alone when not even it fits
-    if f64::from(paint.text_width(Some(size), text)) <= width {
+    if f64::from(paint.text_service().width(text, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0)) <= width {
         return Cow::Borrowed(text);
     }
-    let t = ellipsis(&mut |s: &str| paint.text_width(Some(size), s), width as f32, text);
+    let t = ellipsis(&mut |s: &str| paint.text_service().width(s, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0), width as f32, text);
     if t.is_empty() { Cow::Borrowed("\u{2026}") } else { t }
 }
 
 fn dashed_line(paint: &mut Paint, width: f64, color: Color, a: (f64, f64), b: (f64, f64)) {
-    paint.dashed_w(p32(a), p32(b), width as f32, color);
+    paint.dashed(p32(a), p32(b), pxui::Stroke::new(color).width(width as f32));
 }
 
 /// A 1-point frame inside the box, on whole points: a stroke is centred on its rectangle.
 pub fn frame_in(paint: &mut Paint, x: f64, y: f64, w: f64, h: f64, fill: Option<Color>, color: Color) {
     if let Some(f) = fill {
-        paint.fill(x as f32, y as f32, w as f32, h as f32, f);
+        paint.fill(pxui::Rect::new(x as f32, y as f32, w as f32, h as f32), pxui::Fill::new(f));
     }
-    paint.stroke((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32, color);
+    paint.stroke(pxui::Rect::new((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32), pxui::Stroke::new(color));
 }
 
 /// The same, dashed (a drop target, a dashed zone).
 pub fn dashed_frame_in(paint: &mut Paint, x: f64, y: f64, w: f64, h: f64, color: Color) {
-    paint.dashed_rect((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32, color);
+    paint.dashed_rect(pxui::Rect::new((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32), pxui::Stroke::new(color));
 }
 
 /// Crisp 1-point lines on the pixel grid.
 pub fn hline(paint: &mut Paint, x: f64, y: f64, w: f64, color: Color) {
-    paint.fill(x as f32, y as f32, w as f32, 1.0, color);
+    paint.fill(pxui::Rect::new(x as f32, y as f32, w as f32, 1.0), pxui::Fill::new(color));
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -105,8 +107,8 @@ pub fn draw_chevron(paint: &mut Paint, z: f64, at: (f64, f64), direction: Dir4, 
         Dir4::Left => ((2.0, -4.0), (2.0, 4.0), (-2.0, 0.0)),
     };
     let pt = |d: (f64, f64)| (cx + d.0 * z, cy + d.1 * z);
-    paint.line(p32(pt(a)), p32(pt(tip)), color);
-    paint.line(p32(pt(tip)), p32(pt(b)), color);
+    paint.line(p32(pt(a)), p32(pt(tip)), pxui::Stroke::new(color));
+    paint.line(p32(pt(tip)), p32(pt(b)), pxui::Stroke::new(color));
 }
 
 pub fn zone_style(theme: &Theme, kind: ZoneKind) -> Zone {
@@ -124,11 +126,11 @@ pub fn zone_style(theme: &Theme, kind: ZoneKind) -> Zone {
 pub fn paint_zone(paint: &mut Paint, taken: bool, theme: &Theme, kind: ZoneKind, rect: (f64, f64, f64, f64)) {
     let (x, y, w, h) = rect;
     let s = if kind == ZoneKind::Branch { zone_branch(theme, taken) } else { zone_style(theme, kind) };
-    paint.fill(x as f32, y as f32, w as f32, h as f32, s.fill);
+    paint.fill(pxui::Rect::new(x as f32, y as f32, w as f32, h as f32), pxui::Fill::new(s.fill));
     if s.dashed {
         dashed_frame_in(paint, x, y, w, h, s.edge);
     } else {
-        paint.stroke((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32, s.edge);
+        paint.stroke(pxui::Rect::new((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32), pxui::Stroke::new(s.edge));
     }
 }
 
@@ -168,7 +170,7 @@ pub fn paint_socket(paint: &mut Paint, theme: &Theme, ty: Option<&Ty>, connected
         for k in -n..n {
             let hw = half - (k as f64 + 0.5).abs();
             if hw > 0.0 {
-                paint.fill((cx - hw) as f32, (cy + k as f64) as f32, (2.0 * hw) as f32, 1.0, colour);
+                paint.fill(pxui::Rect::new((cx - hw) as f32, (cy + k as f64) as f32, (2.0 * hw) as f32, 1.0), pxui::Fill::new(colour));
             }
         }
     };
@@ -182,9 +184,9 @@ pub fn paint_socket(paint: &mut Paint, theme: &Theme, ty: Option<&Ty>, connected
         }
         Some(Ty::Record(_)) => frame_in(paint, cx - 5.0 * z, cy - 3.0 * z, 10.0 * z, 6.0 * z, Some(fill), color),
         _ => {
-            paint.circle((cx as f32, cy as f32), r as f32, Some(color), None);
+            paint.circle((cx as f32, cy as f32), r as f32, Some(pxui::Fill::new(color)), None);
             if !connected {
-                paint.circle((cx as f32, cy as f32), (r - 1.0) as f32, Some(theme.input), None);
+                paint.circle((cx as f32, cy as f32), (r - 1.0) as f32, Some(pxui::Fill::new(theme.input)), None);
             }
         }
     }
@@ -192,17 +194,17 @@ pub fn paint_socket(paint: &mut Paint, theme: &Theme, ty: Option<&Ty>, connected
 
 /// Kit text centred in a row: its top is `text_top`, scaled by the zoom through `h`.
 pub fn text_in(paint: &mut Paint, size: i64, color: Color, x: f64, y: f64, h: f64, text: &str) {
-    let top = f64::from(paint.text_top(Some(size), y as f32, h as f32));
-    paint.text_s((x as f32, top as f32), size, color, text);
+    let top = f64::from((y as f32) + (((h as f32) - (size) as f32) / 2.0).floor());
+    { let text = text; let span = pxui::TextSpan::new(0, text.len() as u32).color(color); let _ = paint.text_spans(pxui::Point::new(x as f32, top as f32), pxui::Label::BODY.size((size) as f32), 0.0, text, &[span]); };
 }
 
 /// A label: upper case, tracked by a point; returns its width.
 pub fn cap_in(paint: &mut Paint, size: i64, color: Color, x: f64, y: f64, h: f64, label: &str) -> f64 {
-    let label = label.to_ascii_uppercase();
-    let tracking = 0.08 * size as f64;
-    let top = f64::from(paint.text_top(Some(size), y as f32, h as f32));
-    paint.text_with((x as f32, top as f32), Some(size), tracking as f32, Some(color), &label);
-    f64::from(paint.text_width(Some(size), &label)) + (label.len() as f64 * tracking)
+    let top = f64::from((y as f32) + (((h as f32) - (size) as f32) / 2.0).floor());
+    let style = pxui::Label::BODY.size(size as f32).caps(true).tracking(0.08);
+    let span = pxui::TextSpan::new(0, label.len() as u32).color(color);
+    paint.text_spans(pxui::Point::new(x as f32, top as f32), style, 0.0, label, &[span])
+        .map_or(0.0, |metrics| f64::from(metrics.width))
 }
 
 pub fn kind_label(k: ZoneKind) -> &'static str {
@@ -219,11 +221,11 @@ pub fn kind_label(k: ZoneKind) -> &'static str {
 }
 
 fn hexc(s: &str) -> Color {
-    color::hex_exn(s).expect("scope_paint: bad colour")
+    Color::parse(s).expect("scope_paint: bad colour")
 }
 
 pub fn note_colors(theme: &Theme) -> (Color, Color) {
-    if theme::dark(theme) { (hexc("#4a4220"), hexc("#f3e6a8")) } else { (hexc("#f3e6a8"), hexc("#4a3f10")) }
+    if (theme).dark { (hexc("#4a4220"), hexc("#f3e6a8")) } else { (hexc("#f3e6a8"), hexc("#4a3f10")) }
 }
 
 /// The marks a node or zone carries: live time, loop-invariant, macro, loop order.
@@ -250,14 +252,14 @@ pub fn marks(execution: Option<&Execution>, n: &p::Node) -> Vec<String> {
 }
 
 pub fn marks_width(paint: &mut Paint, size: i64, gap: f64, marks: &[String]) -> f64 {
-    marks.iter().fold(0.0, |a, m| a + f64::from(paint.text_width(Some(size), m)) + gap)
+    marks.iter().fold(0.0, |a, m| a + f64::from(paint.text_service().width(m, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0)) + gap)
 }
 
 /// Marks right-aligned at `right`, accent, label size.
 pub fn paint_marks(paint: &mut Paint, theme: &Theme, size: i64, gap: f64, right: f64, y: f64, h: f64, marks: &[String]) {
     let mut x = right;
     for m in marks {
-        let wd = f64::from(paint.text_width(Some(size), m));
+        let wd = f64::from(paint.text_service().width(m, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0));
         text_in(paint, size, theme.accent, x - wd, y, h, m);
         x = x - wd - gap;
     }
@@ -328,13 +330,13 @@ pub fn live_numbers(z: f64, r: &p::Row) -> bool {
 /// line of a ranged number is 2 points above the hairline.
 pub fn paint_field(paint: &mut Paint, z: f64, ls: i64, theme: &Theme, x: f64, y: f64, wd: f64, left: bool, fraction: Option<f64>, chevron: bool, color: Color, text: &str) {
     let h = FIELD_H * z;
-    paint.fill(x as f32, (y + h - 1.0) as f32, wd as f32, 1.0, theme::edge(theme));
+    paint.fill(pxui::Rect::new(x as f32, (y + h - 1.0) as f32, wd as f32, 1.0), pxui::Fill::new((theme).foreground.with_alpha(38)));
     if let Some(f) = fraction {
-        paint.fill(x as f32, (y + h - 3.0) as f32, (wd * f) as f32, 2.0, theme::ink_2(theme));
+        paint.fill(pxui::Rect::new(x as f32, (y + h - 3.0) as f32, (wd * f) as f32, 2.0), pxui::Fill::new(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)));
     }
     let room = wd - (4.0 * z) - if chevron { 10.0 * z } else { 0.0 };
     let text = fitted(paint, ls, room, text);
-    let tw = f64::from(paint.text_width(Some(ls), &text));
+    let tw = f64::from(paint.text_service().width(&text, pxui::Label::BODY.size((ls) as f32), None).unwrap_or(0.0));
     let tx = if left || chevron { x + 2.0 * z } else { x + wd - (2.0 * z) - tw };
     text_in(paint, ls, color, tx, y, h, &text);
     if chevron {
@@ -343,8 +345,8 @@ pub fn paint_field(paint: &mut Paint, z: f64, ls: i64, theme: &Theme, x: f64, y:
 }
 
 pub fn paint_switch(paint: &mut Paint, theme: &Theme, z: f64, x: f64, y: f64, on: bool) {
-    frame_in(paint, x, y, SWITCH_W * z, SWITCH_H * z, Some(if on { theme.input } else { theme.track }), theme::border(theme));
-    paint.fill((x + (if on { 17.0 } else { 3.0 } * z)) as f32, (y + (3.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32, if on { theme.accent } else { theme::ink_3(theme) });
+    frame_in(paint, x, y, SWITCH_W * z, SWITCH_H * z, Some(if on { theme.input } else { theme.track }), (theme).foreground.with_alpha(77));
+    paint.fill(pxui::Rect::new((x + (if on { 17.0 } else { 3.0 } * z)) as f32, (y + (3.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32), pxui::Fill::new(if on { theme.accent } else { theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521) }));
 }
 
 /// The cells of a vector: each element is a field, its number right-aligned, anything else the
@@ -414,7 +416,7 @@ pub fn paint_value(paint: &mut Paint, t: &Pane, z: f64, fs: i64, size: Option<i6
     let right = x + wd - (HEAD_PAD * z);
     let fx = right - (FIELD_W * z);
     let fy = y + (4.0 * z);
-    let dim = theme::ink_3(&theme);
+    let dim = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
     match &r.chip {
         p::Chip::NoValue => match r.default.as_deref() {
             Some(d @ ("true" | "false")) => paint_switch(paint, &theme, z, right - (SWITCH_W * z), y + (5.0 * z), d == "true"),
@@ -465,24 +467,24 @@ pub fn paint_value(paint: &mut Paint, t: &Pane, z: f64, fs: i64, size: Option<i6
             let s = wired_name(r, s);
             let gap = 6.0 * z;
             let arrow = "\u{2190}";
-            let aw = f64::from(paint.text_width(Some(fs), arrow));
-            let (left, fw, room, livev, live_w) = wired_geo(&mut |size, s| f64::from(paint.text_width(Some(size), s)), t, z, fs, x, wd, fold, &s);
+            let aw = f64::from(paint.text_service().width(arrow, pxui::Label::BODY.size((fs) as f32), None).unwrap_or(0.0));
+            let (left, fw, room, livev, live_w) = wired_geo(&mut |size, s| f64::from(paint.text_service().width(s, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0)), t, z, fs, x, wd, fold, &s);
             let s = fitted(paint, fs, room, &s);
             if fold {
                 text_in(paint, fs, theme.accent, left - fw, y, rh, FOLD_GLYPH);
             }
-            text_in(paint, fs, if fold { theme::ink_3(&theme) } else { theme.accent }, left, y, rh, arrow);
-            text_in(paint, fs, theme::ink_2(&theme), left + aw + gap, y, rh, &s);
+            text_in(paint, fs, if fold { theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521) } else { theme.accent }, left, y, rh, arrow);
+            text_in(paint, fs, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32), left + aw + gap, y, rh, &s);
             if let Some(v) = livev {
                 text_in(paint, fs, theme.foreground, right - live_w + gap, y, rh, &v);
             }
         }
         p::Chip::Inline { glyph, text } => {
             let glyph = shown_glyph(glyph);
-            let gw = f64::from(paint.text_width(Some(ls), &glyph)) + (6.0 * z);
+            let gw = f64::from(paint.text_service().width(&glyph, pxui::Label::BODY.size((ls) as f32), None).unwrap_or(0.0)) + (6.0 * z);
             text_in(paint, ls, theme.accent, fx, y, rh, &glyph);
             let fit = fitted(paint, ls, (FIELD_W * z) - gw, text);
-            text_in(paint, ls, theme::ink_2(&theme), fx + gw, y, rh, &fit);
+            text_in(paint, ls, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32), fx + gw, y, rh, &fit);
         }
     }
 }
@@ -505,10 +507,10 @@ pub fn value_room(paint: &mut Paint, t: &Pane, z: f64, fs: i64, wd: f64, fold: b
         p::Chip::Name(s) => {
             let s = wired_name(r, s);
             let live = live_value(t, &s);
-            let aw = f64::from(paint.text_width(Some(fs), "\u{2190}"));
-            let sw = f64::from(paint.text_width(Some(fs), &s)).min(wd * 0.4);
+            let aw = f64::from(paint.text_service().width("\u{2190}", pxui::Label::BODY.size((fs) as f32), None).unwrap_or(0.0));
+            let sw = f64::from(paint.text_service().width(&s, pxui::Label::BODY.size((fs) as f32), None).unwrap_or(0.0)).min(wd * 0.4);
             let lw = match &live {
-                Some(v) => f64::from(paint.text_width(Some(fs), v)) + (6.0 * z),
+                Some(v) => f64::from(paint.text_service().width(v, pxui::Label::BODY.size((fs) as f32), None).unwrap_or(0.0)) + (6.0 * z),
                 None => 0.0,
             };
             wd - ((LABEL_X + HEAD_PAD) * z) - aw - sw - lw - (12.0 * z) - if fold { 14.0 * z } else { 0.0 }
@@ -532,7 +534,7 @@ pub fn paint_rows(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64, 
                 let fold = t.folds.contains_key(&(n.path.clone(), *i));
                 let target = carry && selected_row == Some(*i);
                 if selected_row == Some(*i) {
-                    paint.fill((x + 1.0) as f32, ry as f32, (wd - 2.0) as f32, rh as f32, if target { theme::hover_fill(&theme) } else { theme::faint_border(&theme) });
+                    paint.fill(pxui::Rect::new((x + 1.0) as f32, ry as f32, (wd - 2.0) as f32, rh as f32), pxui::Fill::new(if target { (theme).input.blend((theme).accent, 0.11) } else { (theme).foreground.with_alpha(20) }));
                 }
                 // a carried value over a row: the row takes the hover fill, an ink label and an accent underline
                 if target {
@@ -543,9 +545,9 @@ pub fn paint_rows(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64, 
                     theme.foreground
                 } else {
                     match r.kind {
-                        p::RowKind::Add => theme::ink_2(&theme),
+                        p::RowKind::Add => theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32),
                         p::RowKind::Binder | p::RowKind::Hole => theme.accent,
-                        _ => theme::ink_2(&theme),
+                        _ => theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32),
                     }
                 };
                 let size = if add { ls } else { fs };
@@ -571,8 +573,8 @@ pub fn paint_outputs(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f6
         let ry = y + ((nlines + j) as f64 * rh);
         text_in(paint, fs, colors(t).record, x + (LABEL_X * z), ry, rh, &format!("\u{2192} {}", name));
         let label = ty::to_string(ty);
-        let lw = f64::from(paint.text_width(Some(ls), &label));
-        text_in(paint, ls, theme::ink_2(&theme), x + wd - (HEAD_PAD * z) - lw, ry, rh, &label);
+        let lw = f64::from(paint.text_service().width(&label, pxui::Label::BODY.size((ls) as f32), None).unwrap_or(0.0));
+        text_in(paint, ls, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32), x + wd - (HEAD_PAD * z) - lw, ry, rh, &label);
         paint_socket(paint, &theme, Some(ty), true, z, (x + wd, ry + (12.0 * z)));
     }
 }
@@ -590,7 +592,7 @@ pub fn paint_rail(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64, 
             p::Role::Var => theme.accent,
             p::Role::Acc => palette.vec3,
             p::Role::Param => palette.fn_,
-            p::Role::Capture => theme::muted(&theme),
+            p::Role::Capture => theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32),
         };
         // in an open zone the names stand right of the begin bar, whose ports are level with them
         let nx = x + ((if expanded { 32.0 } else { 13.0 }) * z);
@@ -602,7 +604,7 @@ pub fn paint_rail(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64, 
             p::Role::Param => "param",
             p::Role::Capture => "from",
         };
-        text_in(paint, ls, theme::ink_3(&theme), nx + (58.0 * z), ry, rh, role);
+        text_in(paint, ls, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521), nx + (58.0 * z), ry, rh, role);
         if let Some(ex) = &r.expr {
             let sym = matches!(ex.node, SNode::Sym(_));
             let shown = match &ex.node {
@@ -613,12 +615,12 @@ pub fn paint_rail(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64, 
             let room = 0.0f64.max(x + wd - ((if expanded { 24.0 } else { 8.0 }) * z) - exx);
             if sym {
                 text_in(paint, ls, theme.accent, exx, ry, rh, "\u{2190}");
-                let aw = f64::from(paint.text_width(Some(ls), "\u{2190} "));
+                let aw = f64::from(paint.text_service().width("\u{2190} ", pxui::Label::BODY.size((ls) as f32), None).unwrap_or(0.0));
                 let f = fitted(paint, ls, 0.0f64.max(room - aw), &shown);
-                text_in(paint, ls, theme::ink_2(&theme), exx + aw, ry, rh, &f);
+                text_in(paint, ls, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32), exx + aw, ry, rh, &f);
             } else {
                 let f = fitted(paint, ls, room, &shown);
-                text_in(paint, ls, theme::ink_2(&theme), exx, ry, rh, &f);
+                text_in(paint, ls, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32), exx, ry, rh, &f);
             }
         }
         if r.key.is_some() || r.role == p::Role::Capture {
@@ -661,10 +663,10 @@ pub fn paint_zone_label(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y:
     let name = fitted(paint, fs, room, &name);
     text_in(paint, fs, theme.foreground, nx, y, hh, &name);
     if let Some(ex) = in_ {
-        let ix = nx + f64::from(paint.text_width(Some(fs), &name)) + gap;
+        let ix = nx + f64::from(paint.text_service().width(&name, pxui::Label::BODY.size((fs) as f32), None).unwrap_or(0.0)) + gap;
         let input = format!("in {}", ex);
         let f = fitted(paint, fs, 0.0f64.max(x + wd - (9.0 * z) - ix), &input);
-        text_in(paint, fs, theme::ink_2(&theme), ix, y, hh, &f);
+        text_in(paint, fs, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32), ix, y, hh, &f);
     }
 }
 
@@ -682,12 +684,12 @@ pub fn selector_geo(measure: &mut dyn FnMut(i64, &str) -> f64, z: f64, fs: i64, 
 pub fn paint_selector(paint: &mut Paint, t: &Pane, z: f64, fs: i64, count: i64, probe: i64, at: (f64, f64, f64)) {
     let theme = t.theme;
     let (x, y, wd) = at;
-    let (sx0, sy0, sw, sh, read) = selector_geo(&mut |size, s| f64::from(paint.text_width(Some(size), s)), z, fs, wd, count, probe);
+    let (sx0, sy0, sw, sh, read) = selector_geo(&mut |size, s| f64::from(paint.text_service().width(s, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0)), z, fs, wd, count, probe);
     let sx0 = x + sx0;
     let sy0 = y + sy0;
-    paint.fill(sx0 as f32, sy0 as f32, sw as f32, sh as f32, theme.input);
+    paint.fill(pxui::Rect::new(sx0 as f32, sy0 as f32, sw as f32, sh as f32), pxui::Fill::new(theme.input));
     // the sheet's `.seg` children are ink-3
-    let ink = theme::ink_3(&theme);
+    let ink = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
     draw_chevron(paint, z, (sx0 + (3.0 * z), sy0 + (sh / 2.0)), Dir4::Left, ink);
     draw_chevron(paint, z, (sx0 + sw - (3.0 * z), sy0 + (sh / 2.0)), Dir4::Right, ink);
     text_in(paint, fs, ink, sx0 + (18.0 * z), sy0, sh, &read);
@@ -715,8 +717,8 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
     let ls = 4.max(fs - 2);
     let hh = p::HEAD_HEIGHT * z;
     let viewed = t.display.as_ref() == Some(&n.path);
-    let ink_3 = theme::ink_3(&theme);
-    let invalid = theme::invalid();
+    let ink_3 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
+    let invalid = pxui::Rgba::hex(0xc2255c);
     let failed = o.failed.is_some();
     let square = if failed {
         invalid
@@ -727,22 +729,22 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
     } else {
         ty_color(t, Some(&n.ty))
     };
-    paint.fill((x + (HEAD_PAD * z)) as f32, (y + (8.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32, square);
+    paint.fill(pxui::Rect::new((x + (HEAD_PAD * z)) as f32, (y + (8.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32), pxui::Fill::new(square));
     if let Some(r) = &o.head {
         paint_socket(paint, &theme, r.ty.as_ref(), wired(r), z, (x + (1.0 * z), y + (PORT_Y * z)));
     }
     let name_x = x + (23.0 * z);
     let mut right = x + wd - (HEAD_PAD * z);
     if let Some(open_) = o.lens_open {
-        draw_chevron(paint, z, (x + wd - (14.0 * z), y + (12.0 * z)), if open_ { Dir4::Down } else { Dir4::Right }, theme::muted(&theme));
+        draw_chevron(paint, z, (x + wd - (14.0 * z), y + (12.0 * z)), if open_ { Dir4::Down } else { Dir4::Right }, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32));
         right = x + wd - (24.0 * z);
     }
     // the displayed node: the 12-point view flag, a line-3 frame and the accent square inside
     if viewed {
         let fx = right - (12.0 * z);
         let fy = y + (6.0 * z);
-        frame_in(paint, fx, fy, 12.0 * z, 12.0 * z, Some(theme.input), theme::border(&theme));
-        paint.fill((fx + (3.0 * z)) as f32, (fy + (3.0 * z)) as f32, (6.0 * z) as f32, (6.0 * z) as f32, theme.accent);
+        frame_in(paint, fx, fy, 12.0 * z, 12.0 * z, Some(theme.input), (theme).foreground.with_alpha(77));
+        paint.fill(pxui::Rect::new((fx + (3.0 * z)) as f32, (fy + (3.0 * z)) as f32, (6.0 * z) as f32, (6.0 * z) as f32), pxui::Fill::new(theme.accent));
         right = fx - (6.0 * z);
     }
     let m = marks(o.execution.as_ref(), n);
@@ -755,18 +757,18 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
     } else if n.bypass {
         ink_3
     } else if n.synthetic || p::anonymous(n) {
-        theme::muted(&theme)
+        theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)
     } else {
         theme.foreground
     };
     let name = fitted(paint, fs, 0.0f64.max(right - name_x), &title);
     text_in(paint, fs, name_color, name_x, y, hh, &name);
-    let mut name_end = name_x + f64::from(paint.text_width(Some(fs), &name));
+    let mut name_end = name_x + f64::from(paint.text_service().width(&name, pxui::Label::BODY.size((fs) as f32), None).unwrap_or(0.0));
     // a chip: how many rows have something written, in the kind's place at the right
     if o.shown == Level::Chip && p::set_count(n) > 0 {
         let text = format!("+{}", p::set_count(n));
-        text_in(paint, ls, theme::ink_2(&theme), name_end + (9.0 * z), y, hh, &text);
-        name_end = name_end + (9.0 * z) + f64::from(paint.text_width(Some(ls), &text));
+        text_in(paint, ls, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32), name_end + (9.0 * z), y, hh, &text);
+        name_end = name_end + (9.0 * z) + f64::from(paint.text_service().width(&text, pxui::Label::BODY.size((ls) as f32), None).unwrap_or(0.0));
     }
     // where the name and the kind meet, the kind yields; a value card has its field there instead
     let kind_text: Option<String> = match &o.failed {
@@ -784,10 +786,10 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
     };
     if let Some(text) = kind_text {
         let room = right - (name_end + (6.0 * z));
-        if room >= 3.0 * f64::from(paint.text_width(Some(ls), "m")) {
+        if room >= 3.0 * f64::from(paint.text_service().width("m", pxui::Label::BODY.size((ls) as f32), None).unwrap_or(0.0)) {
             let kind = fitted(paint, ls, room, &text);
-            let kw = f64::from(paint.text_width(Some(ls), &kind));
-            text_in(paint, ls, theme::ink_2(&theme), right - kw, y, hh, &kind);
+            let kw = f64::from(paint.text_service().width(&kind, pxui::Label::BODY.size((ls) as f32), None).unwrap_or(0.0));
+            text_in(paint, ls, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32), right - kw, y, hh, &kind);
         }
     }
 }
@@ -804,10 +806,10 @@ pub enum Piece {
 
 /// `fitted` measured by the UI.
 fn fit<'a>(ui: &mut Ui, size: i64, width: f64, text: &'a str) -> Cow<'a, str> {
-    if f64::from(ui.text_width(Some(size), text)) <= width {
+    if f64::from(ui.text_service().width(text, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0)) <= width {
         return Cow::Borrowed(text);
     }
-    let t = ellipsis(&mut |s: &str| ui.text_width(Some(size), s), width as f32, text);
+    let t = ellipsis(&mut |s: &str| ui.text_service().width(s, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0), width as f32, text);
     if t.is_empty() { Cow::Borrowed("\u{2026}") } else { t }
 }
 
@@ -821,19 +823,19 @@ pub fn readout(ui: &mut Ui, t: &Pane, z: f64, fs: i64, ghost: bool, full: bool, 
     let ls = 4.max(fs - 2);
     if ghost {
         let fit = fit(ui, ls, 72.0 * z, &f.value);
-        emit(ui, Piece::Text { x: x + wd + (8.0 * z), y: y + ((PORT_Y - 8.0) * z), w: 72.0 * z, h: 16.0 * z, size: ls, color: theme::ink_3(&theme) }, &fit);
+        emit(ui, Piece::Text { x: x + wd + (8.0 * z), y: y + ((PORT_Y - 8.0) * z), w: 72.0 * z, h: 16.0 * z, size: ls, color: theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521) }, &fit);
     }
     if !full {
         return;
     }
     let fh = p::FOOT_HEIGHT * z;
     let fy = y + h - (pad * z) - fh;
-    let ink_2 = theme::ink_2(&theme);
+    let ink_2 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
     let ty0 = fy + 1.0;
     let th = fh - 1.0;
     let mut right = x + wd - (HEAD_PAD * z);
     let mut put_right = |ui: &mut Ui, color: Color, s: &str, right: &mut f64| {
-        let tw = f64::from(ui.text_width(Some(ls), s));
+        let tw = f64::from(ui.text_service().width(s, pxui::Label::BODY.size((ls) as f32), None).unwrap_or(0.0));
         emit(ui, Piece::Text { x: *right - tw, y: ty0, w: tw, h: th, size: ls, color }, s);
         *right = *right - tw - (6.0 * z);
     };
@@ -935,13 +937,13 @@ pub fn paint_lens(paint: &mut Paint, t: &Pane, z: f64, fs: i64, l: &p::Lens, ste
     let theme = t.theme;
     let (x, y, wd) = at;
     let ls = 4.max(fs - 2);
-    paint.fill((x + 1.0) as f32, y as f32, (wd - 2.0) as f32, 1.0, theme::faint_border(&theme));
+    paint.fill(pxui::Rect::new((x + 1.0) as f32, y as f32, (wd - 2.0) as f32, 1.0), pxui::Fill::new((theme).foreground.with_alpha(20)));
     let len = l.steps.len() as i64;
     for i in 0..=len {
         let ((bx, by), (bw, bh)) = lens_button_box(len, i);
         let on = i == step;
         if on {
-            paint.fill((x + ((bx + 2.0) * z)) as f32, (y + ((by + bh) * z) - 1.0) as f32, ((bw - 4.0) * z) as f32, 1.0, theme.foreground);
+            paint.fill(pxui::Rect::new((x + ((bx + 2.0) * z)) as f32, (y + ((by + bh) * z) - 1.0) as f32, ((bw - 4.0) * z) as f32, 1.0), pxui::Fill::new(theme.foreground));
         }
         let label = if i == 0 {
             "call".to_owned()
@@ -950,8 +952,8 @@ pub fn paint_lens(paint: &mut Paint, t: &Pane, z: f64, fs: i64, l: &p::Lens, ste
         } else {
             i.to_string()
         };
-        let tw = f64::from(paint.text_width(Some(ls), &label));
-        text_in(paint, ls, if on { theme.foreground } else { theme::ink_3(&theme) }, x + ((bx + (bw / 2.0)) * z) - (tw / 2.0), y + (by * z), bh * z, &label);
+        let tw = f64::from(paint.text_service().width(&label, pxui::Label::BODY.size((ls) as f32), None).unwrap_or(0.0));
+        text_in(paint, ls, if on { theme.foreground } else { theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521) }, x + ((bx + (bw / 2.0)) * z) - (tw / 2.0), y + (by * z), bh * z, &label);
     }
     let text: String = if step >= len {
         if l.template.is_empty() { "(no definition)".to_owned() } else { l.template.clone() }
@@ -963,11 +965,11 @@ pub fn paint_lens(paint: &mut Paint, t: &Pane, z: f64, fs: i64, l: &p::Lens, ste
         if k < 16 {
             let src = if k == 15 && lines.len() > 16 { format!("{} \u{2026}", line) } else { (*line).to_owned() };
             let fit = fitted(paint, fs, wd - (20.0 * z), &src);
-            paint.text_s(((x + (10.0 * z)) as f32, (y + ((p::ROW_HEIGHT + 4.0 + (k as f64 * 20.0)) * z)) as f32), fs, theme.foreground, &fit);
+            { let text = &fit; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new((x + (10.0 * z)) as f32, (y + ((p::ROW_HEIGHT + 4.0 + (k as f64 * 20.0)) * z)) as f32), pxui::Label::BODY.size((fs) as f32), 0.0, text, &[span]); };
         }
     }
     let ((rx, ry), (rw, rh)) = lens_replace_box(lh);
-    frame_in(paint, x + (rx * z), y + (ry * z), rw * z, rh * z, None, theme::border(&theme));
+    frame_in(paint, x + (rx * z), y + (ry * z), rw * z, rh * z, None, (theme).foreground.with_alpha(77));
     text_in(paint, ls, theme.foreground, x + ((rx + 8.0) * z), y + (ry * z), rh * z, "Replace call with expansion");
     let reading = if step >= len {
         "the macro's template".to_owned()
@@ -983,20 +985,20 @@ pub fn paint_lens(paint: &mut Paint, t: &Pane, z: f64, fs: i64, l: &p::Lens, ste
             }
         }
     };
-    let tw = f64::from(paint.text_width(Some(ls), &reading));
+    let tw = f64::from(paint.text_service().width(&reading, pxui::Label::BODY.size((ls) as f32), None).unwrap_or(0.0));
     let fit = fitted(paint, ls, wd - ((rx + rw + 24.0) * z), &reading);
-    text_in(paint, ls, theme::muted(&theme), x + wd - (HEAD_PAD * z) - tw, y + (ry * z), rh * z, &fit);
+    text_in(paint, ls, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32), x + wd - (HEAD_PAD * z) - tw, y + (ry * z), rh * z, &fit);
 }
 
 /// A card's hairline: line-2, line-3 when selected, composed over the card's own fill.
 pub fn card_edge(t: &Pane, fill: Color, selected: bool) -> Color {
-    color::blend(t.theme.foreground, fill, if selected { 0.70 } else { 0.85 })
+    t.theme.foreground.blend(fill, if selected { 0.70 } else { 0.85 })
 }
 
 /// The card: its fill and a 1-point border inside its box (a stroke is centred on its rectangle).
 pub fn paint_card(paint: &mut Paint, x: f64, y: f64, wd: f64, h: f64, fill: Color, edge: Color) {
-    paint.fill(x as f32, y as f32, wd as f32, h as f32, fill);
-    paint.stroke((x + 0.5) as f32, (y + 0.5) as f32, (wd - 1.0) as f32, (h - 1.0) as f32, edge);
+    paint.fill(pxui::Rect::new(x as f32, y as f32, wd as f32, h as f32), pxui::Fill::new(fill));
+    paint.stroke(pxui::Rect::new((x + 0.5) as f32, (y + 0.5) as f32, (wd - 1.0) as f32, (h - 1.0) as f32), pxui::Stroke::new(edge));
 }
 
 /// A point: the 14-point disc in the node's colour with its name beside it (a compound is a ring with a
@@ -1011,25 +1013,25 @@ pub fn paint_point(paint: &mut Paint, t: &Pane, z: f64, fs: i64, pl: &Placed, fa
         p::Item::Input(i) => (i.ty.clone(), false, false, i.name.clone(), false),
         p::Item::Return => (ty::geometry(), false, false, "return".to_owned(), false),
     };
-    let color = if failed.is_some() { theme::invalid() } else { ty_color(t, Some(&ty)) };
+    let color = if failed.is_some() { pxui::Rgba::hex(0xc2255c) } else { ty_color(t, Some(&ty)) };
     if macro_ {
-        paint.circle(p32(c), (7.0 * z) as f32, Some(theme.panel), Some(color));
-        paint.circle(p32(c), (2.0 * z) as f32, Some(color), None);
+        paint.circle(p32(c), (7.0 * z) as f32, Some(pxui::Fill::new(theme.panel)), Some(pxui::Stroke::new(color)));
+        paint.circle(p32(c), (2.0 * z) as f32, Some(pxui::Fill::new(color)), None);
     } else {
-        paint.circle(p32(c), (7.0 * z) as f32, Some(color), None);
+        paint.circle(p32(c), (7.0 * z) as f32, Some(pxui::Fill::new(color)), None);
     }
     let name_color = if failed.is_some() {
-        theme::invalid()
+        pxui::Rgba::hex(0xc2255c)
     } else if bypass {
-        theme::ink_3(&theme)
+        theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521)
     } else {
         theme.foreground
     };
     text_in(paint, fs, name_color, x + (22.0 * z), y + (7.0 * z) - (12.0 * z), 24.0 * z, &title);
     if viewed {
         let fy = y + (21.0 * z);
-        frame_in(paint, x, fy, 12.0 * z, 12.0 * z, Some(theme.input), theme::border(&theme));
-        paint.fill((x + (3.0 * z)) as f32, (fy + (3.0 * z)) as f32, (6.0 * z) as f32, (6.0 * z) as f32, theme.accent);
+        frame_in(paint, x, fy, 12.0 * z, 12.0 * z, Some(theme.input), (theme).foreground.with_alpha(77));
+        paint.fill(pxui::Rect::new((x + (3.0 * z)) as f32, (fy + (3.0 * z)) as f32, (6.0 * z) as f32, (6.0 * z) as f32), pxui::Fill::new(theme.accent));
     }
 }
 
@@ -1127,7 +1129,7 @@ pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl
     if shown != Level::Chip {
         if let Some(note) = &n.note {
             let (bg, ink) = note_colors(&theme);
-            paint.fill((x + 1.0) as f32, body_y as f32, (wd - 2.0) as f32, (p::ROW_HEIGHT * z) as f32, bg);
+            paint.fill(pxui::Rect::new((x + 1.0) as f32, body_y as f32, (wd - 2.0) as f32, (p::ROW_HEIGHT * z) as f32), pxui::Fill::new(bg));
             let first = match note.find('\n') {
                 Some(i) => &note[..i],
                 None => note.as_str(),
@@ -1158,7 +1160,7 @@ pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl
         // the footer's hairline; its texts and sparkline are nodes (`readout`)
         if shown == Level::Full && o.footer.is_some() {
             let fy = y + h - ((p::CARD_PAD + lh) * z) - (p::FOOT_HEIGHT * z);
-            paint.fill((x + 1.0) as f32, fy as f32, (wd - 2.0) as f32, 1.0, theme::faint_border(&theme));
+            paint.fill(pxui::Rect::new((x + 1.0) as f32, fy as f32, (wd - 2.0) as f32, 1.0), pxui::Fill::new((theme).foreground.with_alpha(20)));
         }
         if let Some((l, step)) = lens {
             paint_lens(paint, t, z, fs, l, step, (x, y + h - ((lh + p::CARD_PAD) * z), wd), lh);
@@ -1230,9 +1232,9 @@ pub fn paint_zone_frame(paint: &mut Paint, t: &Pane, z: f64, fs: i64, n: &p::Nod
         if bh > 0.0 {
             let edge = zone_style(&theme, zn.kind).edge;
             let ls = 4.max(fs - 2);
-            let ink = theme::ink_3(&theme);
-            paint.fill((x + (20.0 * z)) as f32, top as f32, 1.0, bh as f32, edge);
-            paint.fill((x + wd - (21.0 * z)) as f32, top as f32, 1.0, bh as f32, edge);
+            let ink = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
+            paint.fill(pxui::Rect::new((x + (20.0 * z)) as f32, top as f32, 1.0, bh as f32), pxui::Fill::new(edge));
+            paint.fill(pxui::Rect::new((x + wd - (21.0 * z)) as f32, top as f32, 1.0, bh as f32), pxui::Fill::new(edge));
             let air = y + ((p::rail_top(n) - 22.0) * z);
             if let Some(r) = &label {
                 if zone_uses(zn, &r.names) {
@@ -1240,7 +1242,7 @@ pub fn paint_zone_frame(paint: &mut Paint, t: &Pane, z: f64, fs: i64, n: &p::Nod
                 }
             }
             let yl = if zn.kind == ZoneKind::Fold || zn.kind == ZoneKind::Scan { format!("{} \u{21ba}", zn.yield_label) } else { zn.yield_label.clone() };
-            let ylw = f64::from(paint.text_width(Some(ls), &yl));
+            let ylw = f64::from(paint.text_service().width(&yl, pxui::Label::BODY.size((ls) as f32), None).unwrap_or(0.0));
             text_in(paint, ls, ink, x + wd - (32.0 * z) - ylw, air, 16.0 * z, &yl);
             let (ex, ey) = w::end_port(n, wd / z);
             paint_socket(paint, &theme, Some(&n.ty), true, z, (x + (ex * z), y + (ey * z)));
@@ -1258,7 +1260,7 @@ pub fn paint_input(paint: &mut Paint, t: &Pane, z: f64, fs: i64, i: &p::Input, r
     let theme = t.theme;
     let (x, y, wd, _) = rect;
     let hh = p::HEAD_HEIGHT * z;
-    paint.fill((x + (HEAD_PAD * z)) as f32, (y + (8.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32, ty_color(t, Some(&i.ty)));
+    paint.fill(pxui::Rect::new((x + (HEAD_PAD * z)) as f32, (y + (8.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32), pxui::Fill::new(ty_color(t, Some(&i.ty))));
     let fx = x + (value_x(p::NODE_WIDTH) * z);
     let nm = fitted(paint, fs, 0.0f64.max(fx - (6.0 * z) - (x + (23.0 * z))), &i.name);
     text_in(paint, fs, theme.foreground, x + (23.0 * z), y, hh, &nm);
@@ -1274,7 +1276,7 @@ pub fn paint_input(paint: &mut Paint, t: &Pane, z: f64, fs: i64, i: &p::Input, r
             let numeric = matches!(d.node, SNode::Num(_));
             paint_field(paint, z, fs, &theme, fx, y + (4.0 * z), FIELD_W * z, !numeric, None, false, theme.foreground, &text);
         }
-        None => paint_field(paint, z, fs, &theme, fx, y + (4.0 * z), FIELD_W * z, true, None, false, theme::ink_3(&theme), &ty::to_string(&i.ty)),
+        None => paint_field(paint, z, fs, &theme, fx, y + (4.0 * z), FIELD_W * z, true, None, false, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521), &ty::to_string(&i.ty)),
     }
     paint_socket(paint, &theme, Some(&i.ty), true, z, (x + wd - (1.0 * z), y + (PORT_Y * z)));
 }
@@ -1284,26 +1286,26 @@ pub fn paint_return(paint: &mut Paint, t: &Pane, z: f64, fs: i64, s: &p::Scope, 
     let (x, y, wd, _) = rect;
     let hh = p::HEAD_HEIGHT * z;
     let rh = p::ROW_HEIGHT * z;
-    paint.fill((x + (HEAD_PAD * z)) as f32, (y + (8.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32, theme.foreground);
+    paint.fill(pxui::Rect::new((x + (HEAD_PAD * z)) as f32, (y + (8.0 * z)) as f32, (8.0 * z) as f32, (8.0 * z) as f32), pxui::Fill::new(theme.foreground));
     text_in(paint, fs, theme.foreground, x + (23.0 * z), y, hh, "return");
     let ry = y + (p::BODY_TOP * z);
-    text_in(paint, fs, theme::ink_2(&theme), x + (LABEL_X * z), ry, rh, "result");
+    text_in(paint, fs, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32), x + (LABEL_X * z), ry, rh, "result");
     let right = x + wd - (HEAD_PAD * z);
     match &s.result {
         p::ScopeResult::Link(l) => {
             let arrow = "\u{2190}";
-            let aw = f64::from(paint.text_width(Some(fs), arrow));
+            let aw = f64::from(paint.text_service().width(arrow, pxui::Label::BODY.size((fs) as f32), None).unwrap_or(0.0));
             let gap = 6.0 * z;
             let l = fitted(paint, fs, wd * 0.5, l);
-            let lw = f64::from(paint.text_width(Some(fs), &l));
+            let lw = f64::from(paint.text_service().width(&l, pxui::Label::BODY.size((fs) as f32), None).unwrap_or(0.0));
             text_in(paint, fs, theme.accent, right - lw - gap - aw, ry, rh, arrow);
-            text_in(paint, fs, theme::ink_2(&theme), right - lw, ry, rh, &l);
+            text_in(paint, fs, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32), right - lw, ry, rh, &l);
         }
         p::ScopeResult::Node(_) => {}
         p::ScopeResult::Literal(ex) => {
             let flat = lisp::flat(ex);
             let text = fitted(paint, fs, wd * 0.5, &flat);
-            let tw = f64::from(paint.text_width(Some(fs), &text));
+            let tw = f64::from(paint.text_service().width(&text, pxui::Label::BODY.size((fs) as f32), None).unwrap_or(0.0));
             text_in(paint, fs, theme.foreground, right - tw, ry, rh, &text);
         }
     }
@@ -1314,7 +1316,7 @@ pub fn paint_return(paint: &mut Paint, t: &Pane, z: f64, fs: i64, s: &p::Scope, 
 pub fn paint_polyline(clip: (f64, f64, f64, f64), paint: &mut Paint, width: f64, color: Color, pts: &[(f64, f64)]) {
     for pair in pts.windows(2) {
         if let Some((a, b)) = clip_segment(pair[0], pair[1], clip) {
-            paint.line_w(p32(a), p32(b), width as f32, color);
+            paint.line(p32(a), p32(b), pxui::Stroke::new(color).width(width as f32));
         }
     }
 }
@@ -1349,8 +1351,8 @@ pub fn paint_ground(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f64))
     let spacing = 24.0 * z * thin;
     // the lattices are anchored at the pane's corner, so a content box past the pane draws them in place
     let (ox, oy) = (t.x as f64, t.y as f64);
-    paint.fill(vx as f32, vy as f32, vw as f32, vh as f32, theme.panel);
-    paint.grid(vx as f32, vy as f32, vw as f32, vh as f32, ((ox + (t.pan_x % spacing) - 1.0) as f32, (oy + (t.pan_y % spacing) - 1.0) as f32), spacing as f32, 2.0, color::with_alpha(theme.foreground, 66));
+    paint.fill(pxui::Rect::new(vx as f32, vy as f32, vw as f32, vh as f32), pxui::Fill::new(theme.panel));
+    paint.grid(pxui::Rect::new(vx as f32, vy as f32, vw as f32, vh as f32), ((ox + (t.pan_x % spacing) - 1.0) as f32, (oy + (t.pan_y % spacing) - 1.0) as f32), spacing as f32, 2.0, pxui::Fill::new(theme.foreground.with_alpha(66)));
     if z >= 0.5 {
         let px = 480.0 * z;
         let py = 192.0 * z;
@@ -1366,13 +1368,13 @@ pub fn paint_ground(paint: &mut Paint, t: &Pane, viewport: (f64, f64, f64, f64))
         while y0 - py >= vy {
             y0 -= py;
         }
-        let line = theme::border(&theme);
+        let line = (theme).foreground.with_alpha(77);
         let mut cx = x0;
         while cx < vx + vw {
             let mut cy = y0;
             while cy < vy + vh {
-                paint.fill((cx - 4.0) as f32, cy as f32, 9.0, 1.0, line);
-                paint.fill(cx as f32, (cy - 4.0) as f32, 1.0, 9.0, line);
+                paint.fill(pxui::Rect::new((cx - 4.0) as f32, cy as f32, 9.0, 1.0), pxui::Fill::new(line));
+                paint.fill(pxui::Rect::new(cx as f32, (cy - 4.0) as f32, 1.0, 9.0), pxui::Fill::new(line));
                 cy += py;
             }
             cx += px;
@@ -1400,14 +1402,14 @@ pub fn paint_frame(paint: &mut Paint, t: &Pane, origin: usize, index: usize) {
     if let Some((title, (fx, fy), (fw, fh))) = frame_list(t, scope_path).into_iter().nth(index) {
         let x = sx(t, ox + fx);
         let y = sy(t, oy + fy);
-        frame_in(paint, x, y, fw * z, fh * z, Some(color::with_alpha(theme.foreground, 8)), theme::edge(&theme));
+        frame_in(paint, x, y, fw * z, fh * z, Some(theme.foreground.with_alpha(8)), (theme).foreground.with_alpha(38));
         let fsz = 7.max((10.0 * z) as i64);
-        paint.text_s(((x + 6.0) as f32, (y + 4.0) as f32), fsz, theme::muted(&theme), &title);
+        { let text = &title; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)); let _ = paint.text_spans(pxui::Point::new((x + 6.0) as f32, (y + 4.0) as f32), pxui::Label::BODY.size((fsz) as f32), 0.0, text, &[span]); };
         // delete cross top right, resize grip bottom right
-        paint.text_s(((x + (fw * z) - 14.0) as f32, (y + 4.0) as f32), fsz, theme::muted(&theme), "x");
-        let ink = theme::ink_3(&theme);
-        paint.fill((x + (fw * z) - 4.0) as f32, (y + (fh * z) - 11.0) as f32, 1.0, 8.0, ink);
-        paint.fill((x + (fw * z) - 11.0) as f32, (y + (fh * z) - 4.0) as f32, 8.0, 1.0, ink);
+        { let text = "x"; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)); let _ = paint.text_spans(pxui::Point::new((x + (fw * z) - 14.0) as f32, (y + 4.0) as f32), pxui::Label::BODY.size((fsz) as f32), 0.0, text, &[span]); };
+        let ink = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
+        paint.fill(pxui::Rect::new((x + (fw * z) - 4.0) as f32, (y + (fh * z) - 11.0) as f32, 1.0, 8.0), pxui::Fill::new(ink));
+        paint.fill(pxui::Rect::new((x + (fw * z) - 11.0) as f32, (y + (fh * z) - 4.0) as f32, 8.0, 1.0), pxui::Fill::new(ink));
     }
 }
 
@@ -1434,14 +1436,14 @@ pub fn wire_style(t: &Pane, z: f64, chain: &Option<std::rc::Rc<st::Chains>>, wi:
     } else if layout == Some(true) {
         theme.accent
     } else if layout == Some(false) {
-        theme::muted(&theme)
+        theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)
     } else {
         ty_color(t, wi.ty.as_ref())
     };
     // a formula's reads rest thin and faint; selecting either end draws them in full
     let faint = wi.refers && !(is_selected || is_highlighted || lit == Some(true));
     if lit == Some(false) || faint {
-        color = color::with_alpha(color, if faint { 90 } else { 40 });
+        color = color.with_alpha(if faint { 90 } else { 40 });
     }
     if faint {
         width = 1.0f64.max(z);
@@ -1468,12 +1470,12 @@ pub fn paint_wire(paint: &mut Paint, t: &Pane, z: f64, at: &dyn Fn((f64, f64)) -
             let (ax, ay) = at(pts[0]);
             let (bx, by) = at(pts[pts.len() - 1]);
             let stub = 14.0 * z;
-            paint.line_w((ax as f32, ay as f32), ((ax + stub) as f32, ay as f32), width as f32, color);
-            paint.line_w(((bx - stub) as f32, by as f32), (bx as f32, by as f32), width as f32, color);
+            paint.line((ax as f32, ay as f32), ((ax + stub) as f32, ay as f32), pxui::Stroke::new(color).width(width as f32));
+            paint.line(((bx - stub) as f32, by as f32), (bx as f32, by as f32), pxui::Stroke::new(color).width(width as f32));
             let name = tag;
-            let tw = f64::from(paint.text_width(Some(tag_size), name));
-            let ink = if lit == Some(false) { color::with_alpha(theme::ink_2(&theme), 60) } else { theme::ink_2(&theme) };
-            paint.text_s(((bx - stub - 4.0 - tw) as f32, (by - (tag_size as f64 / 2.0) - 1.0) as f32), tag_size, ink, name);
+            let tw = f64::from(paint.text_service().width(name, pxui::Label::BODY.size((tag_size) as f32), None).unwrap_or(0.0));
+            let ink = if lit == Some(false) { theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32).with_alpha(60) } else { theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32) };
+            { let text = name; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink); let _ = paint.text_spans(pxui::Point::new((bx - stub - 4.0 - tw) as f32, (by - (tag_size as f64 / 2.0) - 1.0) as f32), pxui::Label::BODY.size((tag_size) as f32), 0.0, text, &[span]); };
         }
         Stroke::Dashed => {
             for pair in pts.windows(2) {
@@ -1483,7 +1485,7 @@ pub fn paint_wire(paint: &mut Paint, t: &Pane, z: f64, at: &dyn Fn((f64, f64)) -
         Stroke::Line => {
             for pair in pts.windows(2) {
                 if let Some((a, b)) = clip_segment(at(pair[0]), at(pair[1]), clip) {
-                    paint.line_w(p32(a), p32(b), width as f32, color);
+                    paint.line(p32(a), p32(b), pxui::Stroke::new(color).width(width as f32));
                 }
             }
         }
@@ -1529,7 +1531,7 @@ pub(crate) fn zone_taken(t: &Pane, node: &p::Node, zn: &p::Zone) -> bool {
 // ---- the graph's theme tokens: port colours per Lisp type and zone colours
 
 fn theme_hex(value: &str) -> Color {
-    color::hex_exn(value).expect("Theme: bad colour constant")
+    Color::parse(value).expect("Theme: bad colour constant")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1561,7 +1563,7 @@ pub fn port_hint() -> Color {
 }
 
 pub fn ports(theme: &Theme) -> Ports {
-    let night = theme::dark(theme);
+    let night = (theme).dark;
     let pick = |i: usize| {
         let (light, dark) = PORT_COLORS[i];
         theme_hex(if night { dark } else { light })
@@ -1576,7 +1578,7 @@ pub fn ports(theme: &Theme) -> Ports {
         compound: vec3,
         output: theme.foreground,
         hint: port_hint(),
-        text: theme::muted(theme),
+        text: theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32),
         fn_: pick(4),
         record: pick(5),
     }
@@ -1592,8 +1594,8 @@ pub struct Zone {
 }
 
 fn zone(theme: &Theme, light: (i64, i64, i64, i64, i64), night: (i64, i64, i64, i64, i64), dashed: bool) -> Zone {
-    let (r, g, b, fill, edge) = if theme::dark(theme) { night } else { light };
-    Zone { fill: color::rgba(r, g, b, fill), edge: color::rgba(r, g, b, edge), dashed }
+    let (r, g, b, fill, edge) = if (theme).dark { night } else { light };
+    Zone { fill: Color::rgba(r as u8, g as u8, b as u8, fill as u8), edge: Color::rgba(r as u8, g as u8, b as u8, edge as u8), dashed }
 }
 
 pub fn zone_for(theme: &Theme) -> Zone {

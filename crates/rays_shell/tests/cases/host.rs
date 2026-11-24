@@ -48,8 +48,8 @@ fn render(density: i64, height: i64, build: &mut dyn FnMut(&mut Ui)) -> (canvas:
 /// branches, with the socket colours of text, functions and records.
 fn zones(ui: &mut Ui) {
     let t = ui.tokens();
-    let b = ui.box_("zones", BoxOpts::default().w(Size::Px(320.0)).h(Size::Px(390.0)).at((0.0, 0.0)));
-    ui.draw(&b, move |paint, _| {
+    let b = ui.node("zones", pxui::Node::DEFAULT.w(Size::Px(320.0)).h(Size::Px(390.0)).at(0.0, 0.0));
+    ui.canvas(&b, move |paint, _| {
         let list = [
             rays_graph::scope_paint::zone_for(&t),
             rays_graph::scope_paint::zone_fold(&t),
@@ -66,7 +66,7 @@ fn zones(ui: &mut Ui) {
             if zone.dashed {
                 paint.dashed_rect(x, y, 142.0, 80.0, zone.edge);
             } else {
-                paint.stroke(x + 0.5, y + 0.5, 141.0, 79.0, zone.edge);
+                paint.stroke(pxui::Rect::new(x + 0.5, y + 0.5, 141.0, 79.0), pxui::Stroke::new(zone.edge));
             }
         }
         let ports = rays_graph::scope_paint::ports(&t);
@@ -105,12 +105,12 @@ fn window_host_layers_around_native_content() {
     let mut ui = golden_ui();
     let mut front_key = 0;
     rays_shell::host::build(&mut ui, &frame_at(0, 240, 1, vec![]), &mut |ui| {
-        let front = ui.box_("front", BoxOpts::default().flags(CLICKABLE).at((0.0, 0.0)).w(Size::Px(100.0)).h(Size::Px(60.0)));
+        let front = ui.node("front", pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).at(0.0, 0.0).w(Size::Px(100.0)).h(Size::Px(60.0)));
         front_key = key(&front);
         ui.to_front(0, &front);
-        let back = ui.box_("back", BoxOpts::default().flags(CLICKABLE).at((0.0, 0.0)).w(Size::Px(100.0)).h(Size::Px(60.0)));
+        let back = ui.node("back", pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).at(0.0, 0.0).w(Size::Px(100.0)).h(Size::Px(60.0)));
         for b in [&front, &back] {
-            ui.draw(b, |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, pxui::geom::color::white()));
+            ui.canvas(b, |paint, Rect { x, y, w, h }| paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(pxui::geom::color::white())));
         }
     });
     let under = move |k: i64| -> Vec<scene::Node> {
@@ -188,8 +188,8 @@ fn window_host_destroy_ends_renderer_under_cached_paint() {
     }
     let ui = Rc::new(RefCell::new(golden_ui()));
     rays_shell::host::build(&mut ui.borrow_mut(), &frame_at(0, 40, 1, vec![]), &mut |ui| {
-        let b = ui.box_("b", BoxOpts::default().w(Size::Px(20.0)).h(Size::Px(20.0)).at((0.0, 0.0)));
-        ui.draw(&b, |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, pxui::geom::color::white()));
+        let b = ui.node("b", pxui::Node::DEFAULT.w(Size::Px(20.0)).h(Size::Px(20.0)).at(0.0, 0.0));
+        ui.canvas(&b, |paint, Rect { x, y, w, h }| paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(pxui::geom::color::white())));
     });
     let canvas_ = canvas::create(WIDTH, 40).expect("canvas");
     let kept = rays_shell::host::scene(&ui, None); // what the native-stage cache keeps

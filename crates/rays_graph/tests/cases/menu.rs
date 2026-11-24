@@ -76,13 +76,16 @@ fn run_menu() {
     let fitting = node_menu::create(Some("grid1"), 400, 250, vec![entry(0, &["Utility"], "box", "Box"), entry(1, &["Utility"], "null", "Null")]);
     check(node_menu::keys(&fitting, "") == vec!["null".to_owned(), "box".to_owned()], "the menu did not list what fits after the node first");
     // one colour per type, for the menu's squares and the pane's ports: a list is its elements'
-    let th = theme::default();
+    let th = theme::Tokens::default();
     check(
         node_menu::port_color(&th, &ty::Ty::List(Box::new(ty::Ty::Float))) == rays_graph::scope_paint::ports(&th).float && node_menu::port_color(&th, &ty::scene()) == rays_graph::scope_paint::ports(&th).output,
         "a list or a scene is not coloured as the graph pane colours it",
     );
     // the chrome repeats three port inks it may not import
-    for th in [th, pxui::theme::Tokens { panel: pxui::geom::color::rgb(20, 20, 20), ..th }] {
+    let mut dark = th;
+    dark.panel = pxui::Rgba::rgb(20, 20, 20);
+    dark.dark = true;
+    for th in [th, dark] {
         let (ports, ink) = (rays_graph::scope_paint::ports(&th), |p| rays_shell::kit::port_ink(&th, p));
         check(ink(rays_shell::kit::Port::Int) == ports.int && ink(rays_shell::kit::Port::Float) == ports.float && ink(rays_shell::kit::Port::Hint) == ports.hint, "the chrome's port inks drifted from the graph's");
     }

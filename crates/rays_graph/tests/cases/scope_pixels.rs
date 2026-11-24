@@ -31,7 +31,7 @@ fn frame_at(count: i64, density: i64, pointer: (f64, f64), events: Vec<Event>) -
 pub fn pane_frame(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Vec<Change> {
     let mut changes = Vec::new();
     rays_shell::host::build(ui, fr, &mut |ui: &mut Ui| {
-        let root = ui.box_("graph-root", BoxOpts::default().w(Size::Px(W as f32)).h(Size::Px(H as f32)).at((0.0, 0.0)));
+        let root = ui.node("graph-root", pxui::Node::DEFAULT.w(Size::Px(W as f32)).h(Size::Px(H as f32)).at(0.0, 0.0));
         ui.within(&root, &mut |ui| scope::update_cached("graph-view", &[], t, ui, fr, &mut changes));
     });
     changes
@@ -230,7 +230,7 @@ fn measured(ui: &mut Ui, t: &mut Pane, fr: &rframe::Frame) -> Step {
     let before = mem_sys::local_alloc_count();
     let mut changes = Vec::new();
     rays_shell::host::build(ui, fr, &mut |ui: &mut Ui| {
-        let root = ui.box_("graph-root", BoxOpts::default().w(Size::Px(W as f32)).h(Size::Px(H as f32)).at((0.0, 0.0)));
+        let root = ui.node("graph-root", pxui::Node::DEFAULT.w(Size::Px(W as f32)).h(Size::Px(H as f32)).at(0.0, 0.0));
         ui.within(&root, &mut |ui| scope::update_cached("graph-view", &[], t, ui, fr, &mut changes));
     });
     let allocs = mem_sys::local_alloc_count() - before;
@@ -402,9 +402,9 @@ fn window_graph_hover() {
         // to a screen reader the cards are groups named by their titles, their ports buttons
         ui.set_a11y(true);
         to(&mut ui, &mut t, away);
-                let named = |name: &str, role: pxui::a11y::Role| ui.a11y_nodes().iter().any(|n| n.is_role(role) && ui.a11y_name_of(n) == name);
-        check(named("c", pxui::a11y::Role::Group) && named("d", pxui::a11y::Role::Group), "the cards are not named groups");
-        check(named("targets", pxui::a11y::Role::Button), "c's targets port is not a named button");
+                let named = |name: &str, role: pxui::Role| ui.a11y_nodes().iter().any(|n| n.is_role(role) && ui.a11y_name_of(n) == name);
+        check(named("c", pxui::Role::Group) && named("d", pxui::Role::Group), "the cards are not named groups");
+        check(named("targets", pxui::Role::Button), "c's targets port is not a named button");
         rays_shell::host::destroy(&mut ui);
     }
 }

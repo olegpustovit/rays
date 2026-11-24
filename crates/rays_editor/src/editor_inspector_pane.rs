@@ -14,7 +14,7 @@ use flow_graph::projection as p;
 use flow_sop::port;
 use flow_syntax::syntax::Node as SNode;
 use param::{FieldView, Value};
-use pxui::ui::{Drop, Ui, UiBox};
+use pxui::ui::{Ui};
 use rays_graph::scope_state as scope;
 use rays_shell::inspector as insp;
 use rays_shell::layout;
@@ -65,6 +65,7 @@ pub fn follow(edit: Option<Follow>) {
 /// The inspector panel inside `inspector_root` at `bounds`.
 #[allow(clippy::too_many_arguments)]
 pub fn inspect_panel<'a>(
+    frame: &input::frame::Frame,
     image: &dyn Fn(i64) -> Option<rays::image::Image>,
     camera_panel: &dyn Fn(&mut Ui) -> PanelResult,
     inspector_visible: bool,
@@ -73,7 +74,7 @@ pub fn inspect_panel<'a>(
     g: &layout::Geometry,
     ui: &mut Ui,
     input: (ModelView<'a>, &scope::Pane, &selection::Selection, bool),
-    inspector_root: &UiBox,
+    inspector_root: &pxui::Handle,
     bounds: layout::Bounds,
 ) -> InspectorResult {
     let (value, scope_view, selection_, scope_active) = input;
@@ -172,7 +173,7 @@ pub fn inspect_panel<'a>(
                     }
                     paths => {
                         inspector_panel(window, ui, bounds, &mut |ui| {
-                            ui.inspector_header("multi-header", None, None, None, None, &[], None, false, &format!("{} nodes", paths.len()), "Selected");
+                            pxui::ext::inspector_header(ui, "multi-header", None, None, None, None, &[], None, false, &format!("{} nodes", paths.len()), "Selected");
                         });
                         (None, vec![], vec![], value.live_cook, vec![], vec![])
                     }
@@ -211,20 +212,20 @@ pub fn inspect_panel<'a>(
                         }
                         _ => (level_name(value), format!("{} node{} \u{b7} display {}", node_count, if node_count == 1 { "" } else { "s" }, display)),
                     };
-                    ui.inspector_header("network-header", None, None, None, None, &[], None, false, &title, &detail);
-                    ui.inspector_body(&mut |ui| {
+                    pxui::ext::inspector_header(ui, "network-header", None, None, None, None, &[], None, false, &title, &detail);
+                    pxui::ext::inspector_body(ui, &mut |ui| {
                         // the row sits under a section named for the graph, as every row of the sheet does
                         let mut section_live = None;
                         let shown = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&value.live_cook, h));
-                        ui.inspector_section_view("live-cook-section", shown, true, None, &title, &mut |ui| {
-                            section_live = Some(ui.inspector_toggle("live-cook", "Live update", value.live_cook));
+                        rays_shell::inspector::section(ui, "live-cook-section", shown, true, None, &title, &mut |ui| {
+                            section_live = Some(pxui::ext::inspector_toggle(ui, "live-cook", "Live update", value.live_cook));
                         });
                         live = section_live.unwrap_or(value.live_cook);
                         let mut fields: Vec<FieldView> = settings::fields(unchanged).into_iter().filter(|f| f.name != "renderer").collect();
                         if !fields.is_empty() {
                             let shown = rays_shell::kit::debug_revision(&(&fields, bounds.2));
-                            ui.scope("sketch-settings", &mut |ui| {
-                                ui.inspector_section_view("sketch-settings-section", shown, true, None, "Settings", &mut |ui| {
+                            ui.id("sketch-settings", |ui| {
+                                rays_shell::inspector::section(ui, "sketch-settings-section", shown, true, None, "Settings", &mut |ui| {
                                     changes = insp::fields(ui, &[], Some(bounds.2 as f32), true, std::mem::take(&mut fields));
                                     if let Some(name) = insp::pressed() {
                                         follow(Some(Rc::new(move |v: &Value, _: &mut Vec<Change>, settings: &mut Vec<(String, Value)>| settings.push((name.clone(), v.clone())))));
@@ -238,7 +239,7 @@ pub fn inspect_panel<'a>(
                 (panel, vec![], changes, live, vec![], vec![])
             } else if selected_ids.len() >= 2 {
                 inspector_panel(window, ui, bounds, &mut |ui| {
-                    ui.inspector_header("multi-header", None, None, None, None, &[], None, false, &format!("{} nodes", selected_ids.len()), "Selected");
+                    pxui::ext::inspector_header(ui, "multi-header", None, None, None, None, &[], None, false, &format!("{} nodes", selected_ids.len()), "Selected");
                 });
                 (None, vec![], vec![], value.live_cook, vec![], vec![])
             } else if lowered_level {
@@ -253,7 +254,7 @@ pub fn inspect_panel<'a>(
                         let opts = InspectorOpts { image, laid: None, window, on_choice: None, resized, follows: &follows };
                         inspected = workspace_inspector(value, ui, width, &path, &opts);
                     }
-                    None => ui.inspector_message("flow-derived", "Made from the graph's text. Select the node in the graph pane to edit its arguments."),
+                    None => pxui::ext::inspector_message(ui, "flow-derived", "Made from the graph's text. Select the node in the graph pane to edit its arguments."),
                 });
                 (None, inspected.0, vec![], value.live_cook, inspected.1, vec![])
             } else if let Some((laid, path)) = &target {
@@ -275,7 +276,7 @@ pub fn inspect_panel<'a>(
     };
     let mut built = false;
     on_sheet(ui, window, &mut |ui| {
-        ui.within(inspector_root, &mut |ui| {
+        rays_shell::chrome::within_pane(ui, inspector_root, frame, bounds, &mut |ui| {
             if cacheable {
                 rays_shell::kit::cached(ui, "inspector-view", revision, &mut |ui| {
                     built = true;
@@ -326,15 +327,15 @@ fn workspace_inspector_with_drops<'a>(value: &ModelView<'a>, ui: &mut Ui, width:
     let place_path = path.to_vec();
     let drops_in = drops.clone();
     // the callback needs the Ui to read the drop target: collect the boxes, ask after
-    let boxes: Rc<RefCell<Vec<(String, UiBox)>>> = Rc::new(RefCell::new(Vec::new()));
+    let boxes: Rc<RefCell<Vec<(String, pxui::Handle)>>> = Rc::new(RefCell::new(Vec::new()));
     let boxes_in = boxes.clone();
-    let on_choice = move |name: &str, boxed: &UiBox| boxes_in.borrow_mut().push((name.to_owned(), boxed.clone()));
+    let on_choice = move |name: &str, boxed: &pxui::Handle| boxes_in.borrow_mut().push((name.to_owned(), boxed.clone()));
     let inner = InspectorOpts { image: opts.image, laid: opts.laid.clone(), window: opts.window, on_choice: Some(&on_choice), resized: opts.resized, follows: opts.follows };
     let out = workspace_inspector(value, ui, width, path, &inner);
     for (name, boxed) in boxes.borrow().iter() {
         if name == "@ref:material" {
             if let Some(d) = ui.drop_target(boxed) {
-                drops_in.borrow_mut().push((carry::Place::Node(place_path.clone()), matches!(d, Drop::Dropped(_))));
+                drops_in.borrow_mut().push((carry::Place::Node(place_path.clone()), matches!(d, pxui::DropRef::Dropped(_))));
             }
         }
     }
@@ -352,7 +353,7 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
         && value.doc.shell.as_ref().map_or(false, |shell| shell.views.iter().any(|(_, ids)| ids.contains(&node_id)));
     let mut changes: Vec<Change> = Vec::new();
     inspector_panel(window, ui, bounds, &mut |ui| {
-        ui.scope(&format!("node.{node_id}"), &mut |ui| {
+        ui.id(pxui::hash_of(&("node", node_id)), |ui| {
             let inspector_width = bounds.2.max(1) as f32;
             let input = kind_graph::find(document, node_id).and_then(|n| n.input);
             let input_count = if kind_ == "camera" || kind_ == "root" || kind_ == "world" { 0 } else { 1 };
@@ -374,7 +375,7 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                 facts.join(" \u{b7} ")
             };
             let rename: Option<Rc<dyn Fn(&str) -> bool>> = if preview { None } else { Some(Rc::new(|text: &str| !text.trim().is_empty())) };
-            let head = ui.inspector_header(
+            let head = pxui::ext::inspector_header(ui,
                 "flow-inspector-header",
                 Some(&format!("{}/{}", if pane_level(value) == Level::Scene { "scene" } else { "world" }, kind_)),
                 if displayed(value) == Some(node_id) { Some("view") } else { None },
@@ -387,12 +388,12 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                 &detail,
             );
             if head.renamed != label && !preview {
-                changes.push(Change::Rename { node: node_id, label: head.renamed.clone() });
+                changes.push(Change::Rename { node: node_id, label: head.renamed.to_owned() });
             }
             let mut body: Vec<Change> = Vec::new();
-            ui.inspector_body(&mut |ui| {
+            pxui::ext::inspector_body(ui, &mut |ui| {
                 if input_count > 0 {
-                    ui.inspector_section("flow-input-heading", true, None, "Inputs", &mut |ui| {
+                    pxui::ext::inspector_section(ui, "flow-input-heading", true, None, "Inputs", &mut |ui| {
                         let source = match input {
                             None => "empty".to_owned(),
                             Some(id) => match kind_graph::find(document, id) {
@@ -400,15 +401,15 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                                 None => format!("#{id}"),
                             },
                         };
-                        ui.inspector_readout(Some(inspector_width), "flow-input-0", "in0", &format!("\u{2190} {source}"));
+                        pxui::ext::inspector_readout(ui, Some(inspector_width), "flow-input-0", "in0", &format!("\u{2190} {source}"));
                     });
                 }
                 if preview {
-                    ui.inspector_message("flow-preview", "Preview instance. Edit its viewport scene reference or source graph.");
+                    pxui::ext::inspector_message(ui, "flow-preview", "Preview instance. Edit its viewport scene reference or source graph.");
                 }
                 let rows = match object_rows(preview, &fields) {
                     Err(diagnostic) => {
-                        ui.inspector_message("flow-diagnostic", &rays_diagnostic::to_string(&diagnostic));
+                        pxui::ext::inspector_message(ui, "flow-diagnostic", &rays_diagnostic::to_string(&diagnostic));
                         Vec::new()
                     }
                     Ok(rows) => rows,

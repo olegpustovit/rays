@@ -1,5 +1,5 @@
 pub use pxui_sdl::translate::{button, in_points, key, positive, scroll_phase, translate};
-use sdl3::Event as SdlEvent;
+use sdl3::{DropChange, Event as SdlEvent};
 
 use crate::runtime_input;
 use input::Event;
@@ -10,6 +10,34 @@ pub fn push(value: &mut runtime_input::RuntimeInput, event: SdlEvent) -> Result<
         SdlEvent::MouseMotion { x, y, dx, dy } => {
             runtime_input::add_motion(value, dx, dy);
             runtime_input::push(value, Event::PointerMoved((x, y)))
+        }
+        SdlEvent::Drop { change: DropChange::Begin, .. } => {
+            value.drop_paths = Ok(Vec::new());
+            value.drop_bytes = 0;
+            Ok(())
+        }
+        SdlEvent::Drop { change: DropChange::File(path), .. } => {
+            value.drop_bytes = value.drop_bytes.saturating_add(path.len());
+            if let Ok(paths) = &mut value.drop_paths {
+                if paths.len() >= 1_000_000 || value.drop_bytes > 64 * 1024 * 1024
+                    || path.is_empty() || path.contains('\0')
+                {
+                    value.drop_paths = Err("The file drop was invalid or too large.".into());
+                } else {
+                    paths.push(path);
+                }
+            }
+            Ok(())
+        }
+        SdlEvent::Drop { change: DropChange::Complete, x, y } => {
+            value.drop_bytes = 0;
+            let paths = std::mem::replace(&mut value.drop_paths, Ok(Vec::new()));
+            let event = if matches!(&paths, Ok(paths) if paths.is_empty()) {
+                Event::FileDragEnded
+            } else {
+                Event::FilesDropped { position: (x, y), paths }
+            };
+            runtime_input::push(value, event)
         }
         event => match translate(event) {
             None => Ok(()),
@@ -30,7 +58,7 @@ pub fn push_all(value: &mut runtime_input::RuntimeInput, events: Vec<SdlEvent>) 
 pub fn pump(value: &mut runtime_input::RuntimeInput) -> Result<(), String> {
     match sdl3::event::poll_coalesced() {
         Err(error) => Err(error.to_string()),
-        Ok(events) => push_all(value, events),
+        Ok(events) => push_all(value, events.into_iter().map(|(_, event)| event).collect()),
     }
 }
 

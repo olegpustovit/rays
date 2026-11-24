@@ -91,3 +91,11 @@ pub use rays_editor::reduce;
 #[cfg(test)]
 mod test_loop_pure;
 
+
+fn p32((x, y): (f64, f64)) -> (f32, f32) {
+    (x as f32, y as f32)
+}
+
+fn p64((x, y): (f32, f32)) -> (f64, f64) {
+    (f64::from(x), f64::from(y))
+}

@@ -530,7 +530,7 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         y: 0,
         width: width.unwrap_or(640),
         height: height.unwrap_or(360),
-        theme: theme::default(),
+        theme: theme::Tokens::default(),
         guide: false,
         key: String::new(),
         scope: None,

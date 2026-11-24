@@ -4,8 +4,7 @@ use crate::kit;
 use param::{Effects, FieldView, KindView, Schema, Value};
 use pxui::theme;
 use pxui::ui::*;
-use pxui::geom::color::{self, T as Color};
-use std::rc::Rc;
+use pxui::Rgba as Color;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlowRow {
@@ -81,7 +80,7 @@ pub fn pressed() -> Option<String> {
 
 /// The held `kept_drag` number is dragged this frame (`Ui::field_drag`): its rows' views stay kept.
 pub fn dragging(ui: &Ui) -> bool {
-    HELD.with(|h| h.borrow().as_ref().is_some_and(|h| ui.box_of_key(h.field).is_some_and(|b| ui.field_drag(&b).is_some())))
+    HELD.with(|h| h.borrow().as_ref().is_some_and(|h| ui.box_of_key(pxui::Key::Resolved(h.field)).is_some_and(|b| pxui::ext::field_drag(ui, &b).is_some())))
 }
 
 /// After a frame of the held number's drag: its drag read as its build reads it, the field patched
@@ -93,11 +92,14 @@ pub fn dragged(ui: &mut Ui) -> Option<(bool, Option<(String, Value)>)> {
     HELD.with(|h| {
         let mut h = h.borrow_mut();
         let h = h.as_mut()?;
-        let field = ui.box_of_key(h.field)?;
-        let (_, dx) = ui.field_drag(&field)?;
+        let field = ui.box_of_key(pxui::Key::Resolved(h.field))?;
+        let (_, dx) = pxui::ext::field_drag(ui, &field)?;
         let fine = ui.press_keys(&field).contains(&input::Key::Shift.code());
         let text = param::number::scrub(h.kind, h.range, &h.origin, dx as f64, fine);
-        let opts = ValueFieldOpts { fraction: h.range.and_then(|r| param::number::fraction(r, &text).map(|f| f as f32)), trail: h.trail.clone(), ..ValueFieldOpts::default() };
+        let style = pxui::ValueField::DEFAULT;
+        let style = h.range.and_then(|r| param::number::fraction(r, &text))
+            .map_or(style, |fill| style.fraction(fill as f32));
+        let opts = h.trail.as_ref().map_or(style, |(unit, ink)| style.trail(unit, *ink));
         let patched = ui.patch_field(&field, &opts, &text);
         if text == h.last {
             return Some((patched, None));
@@ -154,8 +156,8 @@ fn pin_of(cx: &Ctx, shown: bool) -> Option<bool> {
 }
 
 /// a click on the dot, or the s key over the row, asks to flip the row's pin
-fn pin_change(ui: &mut Ui, cx: &Ctx, boxed: &UiBox, path: &str, shown: bool, clicked: bool, edits: Vec<FlowChange>) -> Vec<FlowChange> {
-    let key = cx.pin_click && ui.hovered_within(boxed) && !ui.text_input_focused() && ui.key_pressed(input::Key::KeyChar('s'));
+fn pin_change(ui: &mut Ui, cx: &Ctx, boxed: &pxui::Handle, path: &str, shown: bool, clicked: bool, edits: Vec<FlowChange>) -> Vec<FlowChange> {
+    let key = cx.pin_click && ui.hovered(boxed, true) && !ui.text_input_focused() && ui.key_pressed(pxui::KeyCode::Char('s'), pxui::Mods::NONE);
     let mut out = Vec::new();
     if clicked || key {
         out.push(FlowChange::Pinned(path.to_string(), !shown));
@@ -168,9 +170,9 @@ fn action(ui: &mut Ui, cx: &Ctx, key: &str, label: &str, x: f32, y: f32, enabled
     let pin = label == "pin";
     let x = if pin { 6.0 } else { x };
     let w = if pin { 18.0 } else { 20.0 };
-    let boxed = ui.box_(
-        key,
-        BoxOpts::default().flags(if enabled { CLICKABLE | TAB_STOP } else { NO_FLAGS }).at((x, y)).w(Size::Px(w)).h(Size::Px(20.0)),
+    let boxed = ui.node(
+        pxui::hash_of(key),
+        pxui::Node::DEFAULT.flags(if enabled { pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP } else { pxui::Flags::NONE }).at(x, y).w(Size::Px(w)).h(Size::Px(20.0)),
     );
     let signal = ui.signal(&boxed);
     let clicked = enabled && signal.clicked;
@@ -178,16 +180,16 @@ fn action(ui: &mut Ui, cx: &Ctx, key: &str, label: &str, x: f32, y: f32, enabled
         let (hovered, foreground, ink_3) = (signal.hovered, cx.theme.foreground, cx.ink_3);
         let label = label.to_string();
         let cap = kit::cap_size(ui);
-        ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
+        ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
             let color = if enabled && hovered { foreground } else { ink_3 };
             if label == "\u{d7}" {
                 let cx = x + (w / 2.0);
                 let cy = y + (h / 2.0);
-                paint.line((cx - 3.5, cy - 3.5), (cx + 3.5, cy + 3.5), color);
-                paint.line((cx - 3.5, cy + 3.5), (cx + 3.5, cy - 3.5), color);
+                paint.line((cx - 3.5, cy - 3.5), (cx + 3.5, cy + 3.5), pxui::Stroke::new(color));
+                paint.line((cx - 3.5, cy + 3.5), (cx + 3.5, cy - 3.5), pxui::Stroke::new(color));
             } else {
                 let ty = kit::cap_y_paint(paint, y, h);
-                paint.text_s((x + 1.0, ty), cap, color, &label);
+                { let text = &label; let span = pxui::TextSpan::new(0, text.len() as u32).color(color); let _ = paint.text_spans(pxui::Point::new(x + 1.0, ty), pxui::Label::BODY.size((cap) as f32), 0.0, text, &[span]); };
             }
         });
     }
@@ -205,7 +207,7 @@ fn numeric(
     convert: &dyn Fn(&str) -> Option<Value>,
     field: &FieldView,
     path: &str,
-    (row, key): (&UiBox, &str),
+    (row, key): (&pxui::Handle, &str),
     ranged: bool,
     edit: bool,
     (x, y, w): (f32, f32, f32),
@@ -216,30 +218,28 @@ fn numeric(
     let kept = cx.kept && !expression(text);
     // a held number scrubs by the range it had at the press: a literal's range follows its value
     // (`num_range`), and a drag measured from the press must not speed up as the value grows
-    let held = pxui::ui_core::key_of(row.box_key, key);
+    let held = pxui::ui::key_of(row.box_key, key);
     let scrub_range = if kept { HELD.with(|h| h.borrow().as_ref().filter(|h| h.field == held).map_or(range, |h| h.range)) } else { range };
-    let opts = ValueFieldOpts {
-        kept_drag: kept,
-        display,
-        edit,
-        left: expression(text),
-        trail: field.unit.clone().map(|unit| (unit, cx.ink_3)),
-        fraction: range.and_then(|r| param::number::fraction(r, text).map(|f| f as f32)),
-        scrub: Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, scrub_range, origin, dx as f64, fine))),
-        ..ValueFieldOpts::default()
-    };
-    let valid = move |t: &str| param::number::valid(kind, t) || expression(t);
-    let changed = ui.value_field((x, y), w, 20.0, &opts, &valid, key, text).0;
+    let style = pxui::ValueField::DEFAULT.kept_drag(kept).edit(edit).left(expression(text));
+    let style = display.as_deref().map_or(style, |display| style.display(display));
+    let style = field.unit.as_deref().map_or(style, |unit| style.trail(unit, cx.ink_3));
+    let style = range.and_then(|r| param::number::fraction(r, text))
+        .map_or(style, |fill| style.fraction(fill as f32));
+    let scrub = |origin: &str, dx: f32, fine| param::number::scrub(kind, scrub_range, origin, f64::from(dx), fine);
+    let valid = |t: &str| param::number::valid(kind, t) || expression(t);
+    let callbacks = pxui::ValueCallbacks::DEFAULT.valid(&valid).scrub(&scrub);
+    let changed = pxui::ext::value_field(ui, pxui::Key::Resolved(held), text, Rect::new(x, y, w, 20.0), &style, &callbacks)
+        .changed.unwrap_or(text).to_owned();
     if kept {
         // a press holds the number: its owner follows its drag while its view stays kept; the
         // release (or any build of it not held) lets it go
-        let (pressed, holding) = ui.box_of_key(held).map(|b| ui.signal(&b)).map_or((false, false), |s| (s.pressed, s.held));
+        let (pressed, holding) = ui.box_of_key(pxui::Key::Resolved(held)).map(|b| ui.signal(&b)).map_or((false, false), |s| (s.pressed, s.held));
         HELD.with(|h| {
             let mut h = h.borrow_mut();
             match h.as_mut() {
                 _ if pressed => {
                     let (origin, last) = (text.to_owned(), changed.clone());
-                    *h = Some(Held { field: held, name: field.name.clone(), kind, range, trail: opts.trail.clone(), origin, last, fresh: true });
+                    *h = Some(Held { field: held, name: field.name.clone(), kind, range, trail: field.unit.clone().map(|unit| (unit, cx.ink_3)), origin, last, fresh: true });
                 }
                 Some(mine) if mine.field == held && holding => mine.last = changed.clone(),
                 Some(mine) if mine.field == held => *h = None,
@@ -263,10 +263,10 @@ fn numeric(
 fn input(
     ui: &mut Ui,
     cx: &Ctx,
-    on_choice: &dyn Fn(&str, &UiBox),
+    on_choice: &dyn Fn(&str, &pxui::Handle),
     ranged: bool,
     field: &FieldView,
-    (row, path): (&UiBox, &str),
+    (row, path): (&pxui::Handle, &str),
     edit: bool,
     (x, y, w): (f32, f32, f32),
 ) -> Vec<FlowChange> {
@@ -314,12 +314,14 @@ fn input(
                 Value::Text(d) if d.is_empty() && field.name.ends_with("_group") => Some("all".to_string()),
                 _ => None,
             };
-            let opts = ValueFieldOpts { placeholder, left: true, ..ValueFieldOpts::default() };
-            let (text, _) = ui.value_field((x, y), w, 20.0, &opts, &|_| true, &key, &value);
+            let style = pxui::ValueField::DEFAULT.left(true);
+            let style = placeholder.as_deref().map_or(style, |text| style.placeholder(text));
+            let text = pxui::ext::value_field(ui, pxui::hash_of(&key), &value, Rect::new(x, y, w, 20.0),
+                &style, &pxui::ValueCallbacks::DEFAULT).changed.unwrap_or(&value).to_owned();
             if text == value { Vec::new() } else { vec![FlowChange::Edited(field.name.clone(), Value::Text(text.into_bytes().into()))] }
         }
         (KindView::Choice(choices), current @ (Value::Choice(_) | Value::Int(_))) => {
-            let boxed = ui.box_(&key, BoxOpts::default().flags(CLICKABLE | TAB_STOP | CLIP).at((x, y)).w(Size::Px(w)).h(Size::Px(20.0)));
+            let boxed = ui.node(pxui::hash_of(&key), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP | pxui::Flags::CLIP).at(x, y).w(Size::Px(w)).h(Size::Px(20.0)));
             let index: usize = match current {
                 Value::Int(index) => *index as usize,
                 Value::Choice(label) => choices.iter().position(|c| c == label).unwrap_or(0),
@@ -331,37 +333,37 @@ fn input(
             ui.set_state(&boxed, if open { 1 } else { 0 });
             let chip = cx.chip(&choices[index]);
             let shown = choices[index].clone();
-            ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
-                paint.fill(x, y + h - 1.0, w, 1.0, if open { theme.accent } else { theme::edge(&theme) });
+            ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
+                paint.fill(pxui::Rect::new(x, y + h - 1.0, w, 1.0), pxui::Fill::new(if open { theme.accent } else { (theme).foreground.with_alpha(38) }));
                 let pad = match chip {
                     Some(color) => {
-                        paint.rect(x + 2.0, y + 6.0, 8.0, 8.0, Some(color), Some(theme::edge(&theme)));
+                        let rect = Rect::new(x + 2.0, y + 6.0, 8.0, 8.0);
+                        paint.fill(rect, pxui::Fill::new(color));
+                        paint.stroke(rect, pxui::Stroke::new(theme.foreground.with_alpha(38)));
                         14.0
                     }
                     None => 0.0,
                 };
-                let ty = paint.text_top(None, y - 0.5, h);
-                paint.text_c((x + 2.0 + pad, ty), theme.foreground, &shown);
-                paint.chevron((x + w - 5.0, y + (h / 2.0)), if open { Dir::Up } else { Dir::Down }, theme.foreground);
+                let ty = (y - 0.5) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
+                { let text = &shown; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(x + 2.0 + pad, ty), pxui::Label::BODY, 0.0, text, &[span]); };
+                paint.chevron((x + w - 5.0, y + (h / 2.0)), if open { Dir::Up } else { Dir::Down }, pxui::Stroke::new(theme.foreground));
             });
             if !open || just_opened {
                 return Vec::new();
             }
             let Rect { x: bx, y: by, w: bw, h: bh } = ui.rect(&boxed);
-            let opts = MenuOpts {
-                width: Some(bw),
-                selected: Some(index as i64),
-                swatches: choices.iter().map(|choice| cx.chip(choice)).collect(),
-                ..MenuOpts::default()
-            };
-            let items: Vec<(String, bool)> = choices.iter().map(|choice| (choice.clone(), true)).collect();
-            match ui.context_menu((bx, by + bh + 1.0), &opts, &format!("{key}-options"), &items) {
-                MenuResult::Open => Vec::new(),
-                MenuResult::Dismiss => {
+            let rows: Vec<_> = choices.iter().enumerate().map(|(i, choice)| {
+                let item = MenuItem::new(choice).selected(i == index);
+                cx.chip(choice).map_or(item, |ink| item.swatch(ink))
+            }).collect();
+            let choice = ui.menu(pxui::hash_of(&(key, "options")), pxui::Point::new(bx, by + bh + 1.0), &rows, &Menu::DEFAULT.w_px(bw));
+            match (choice.chosen, choice.dismissed) {
+                (None, false) => Vec::new(),
+                (None, true) => {
                     ui.set_state(&boxed, 0);
                     Vec::new()
                 }
-                MenuResult::Pick(selected) => {
+                (Some(selected), _) => {
                     ui.set_state(&boxed, 0);
                     if selected as usize == index {
                         Vec::new()
@@ -369,7 +371,7 @@ fn input(
                         vec![FlowChange::Edited(
                             field.name.clone(),
                             match current {
-                                Value::Int(_) => Value::Int(selected),
+                                Value::Int(_) => Value::Int(selected as i64),
                                 _ => Value::Choice(choices[selected as usize].clone()),
                             },
                         )]
@@ -378,7 +380,7 @@ fn input(
             }
         }
         (KindView::Toggle, Value::Bool(value)) => {
-            let edited = ui.inspector_toggle_value(&key, (x, y), *value);
+            let edited = crate::kit::switch(ui, &key, (x, y), *value);
             if edited == *value { Vec::new() } else { vec![FlowChange::Edited(field.name.clone(), Value::Bool(edited))] }
         }
         _ => Vec::new(),
@@ -386,28 +388,25 @@ fn input(
 }
 
 fn driven(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, source: &str, live: Option<&str>, shown: bool) -> Vec<FlowChange> {
-    let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
+    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
     // the cross that removes a drive shows on the hovered row, in place of the live value
-    let hovered = ui.hovered_within(&boxed);
+    let hovered = ui.hovered(&boxed, true);
     let mut out: Vec<FlowChange> = Vec::new();
     ui.within(&boxed, &mut |ui| {
         let live: Option<String> = if hovered { None } else { live.map(|l| l.to_string()) };
         let edits: Vec<FlowChange> = if expression(source) {
-            let opts = ValueFieldOpts {
-                display: Some(source[1..].to_string()),
-                lead: Some(("\u{192}".to_string(), cx.ink_2)),
-                trail: live.map(|value| (value, cx.ink_2)),
-                line: Some(crate::kit::port_ink(&cx.theme, crate::kit::Port::Float)),
-                ..ValueFieldOpts::default()
-            };
-            let (text, _) = ui.value_field((control_x, control_y), control_w, 20.0, &opts, &expression, &format!("flow-expression-{path}"), source);
+            let style = pxui::ValueField::DEFAULT.display(&source[1..]).lead("Ã†â€™", cx.ink_2)
+                .line(crate::kit::port_ink(&cx.theme, crate::kit::Port::Float));
+            let style = live.as_deref().map_or(style, |text| style.trail(text, cx.ink_2));
+            let text = pxui::ext::value_field(ui, pxui::hash_of(&("flow-expression", path)), source,
+                Rect::new(control_x, control_y, control_w, 20.0), &style, &pxui::ValueCallbacks::DEFAULT.valid(&expression))
+                .changed.unwrap_or(source).to_owned();
             if text == source { Vec::new() } else { vec![FlowChange::Expression(path.to_string(), text)] }
         } else {
-            let link = ui.box_(
-                &format!("flow-source-{path}"),
-                BoxOpts::default()
-                    .flags(CLICKABLE | TAB_STOP_MARKED)
-                    .at((control_x, control_y))
+            let link = ui.node(pxui::hash_of(&format!("flow-source-{path}")),
+                pxui::Node::DEFAULT
+                    .flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP_MARKED)
+                    .at(control_x, control_y)
                     .w(Size::Px(1.0f32.max(control_w - 24.0)))
                     .h(Size::Px(20.0)),
             );
@@ -415,22 +414,22 @@ fn driven(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, source: &str, live: Op
             let theme = cx.theme;
             let ink_2 = cx.ink_2;
             let source = source.to_string();
-            ui.draw(&boxed, move |paint, Rect { x, y, w: _, h: _ }| {
-                let ty = paint.text_top(None, y + control_y - 0.5, 20.0);
+            ui.canvas(&boxed, move |paint, Rect { x, y, w: _, h: _ }| {
+                let ty = (y + control_y - 0.5) + (((20.0) - (paint.tokens().font_size) as f32) / 2.0).floor();
                 let left = x + control_x + 2.0;
                 let right = x + control_x + control_w - 2.0;
-                paint.text_c((left, ty), theme.accent, "\u{2190}");
-                let source_x = left + paint.text_width(None, "\u{2190}") + 6.0;
+                { let text = "\u{2190}"; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.accent); let _ = paint.text_spans(pxui::Point::new(left, ty), pxui::Label::BODY, 0.0, text, &[span]); };
+                let source_x = left + paint.text_service().width("\u{2190}", pxui::Label::BODY, None).unwrap_or(0.0) + 6.0;
                 let live_w = match &live {
-                    Some(v) => paint.text_width(None, v) + 6.0,
+                    Some(v) => paint.text_service().width(v, pxui::Label::BODY, None).unwrap_or(0.0) + 6.0,
                     None => 0.0,
                 };
-                let size = paint.font_size;
-                let shown = ellipsis(&mut |s| paint.text_width(Some(size), s), right - source_x - live_w, &source);
-                paint.text_c((source_x, ty), ink_2, &shown);
+                let size = paint.tokens().font_size;
+                let shown = ellipsis(&mut |s| paint.text_service().width(s, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0), right - source_x - live_w, &source);
+                { let text = &shown; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink_2); let _ = paint.text_spans(pxui::Point::new(source_x, ty), pxui::Label::BODY, 0.0, text, &[span]); };
                 if let Some(value) = &live {
-                    let vw = paint.text_width(None, value);
-                    paint.text_c((right - vw, ty), theme.foreground, value);
+                    let vw = paint.text_service().width(value, pxui::Label::BODY, None).unwrap_or(0.0);
+                    { let text = value; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(right - vw, ty), pxui::Label::BODY, 0.0, text, &[span]); };
                 }
             });
             if followed { vec![FlowChange::Follow(path.to_string())] } else { Vec::new() }
@@ -447,15 +446,15 @@ fn driven(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, source: &str, live: Op
     out
 }
 
-fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), path: &str, title: &str, field: &FieldView, shown: bool) -> Vec<FlowChange> {
-    let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
+fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &pxui::Handle), path: &str, title: &str, field: &FieldView, shown: bool) -> Vec<FlowChange> {
+    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
     let mut out: Vec<FlowChange> = Vec::new();
     ui.within(&boxed, &mut |ui| {
         // the label's own extent: its column
-        let label_x = ui.inspector_label_x();
-        let label = ui.box_(
+        let label_x = pxui::ext::inspector_label_x(ui);
+        let label = ui.node(
             "label-edit",
-            BoxOpts::default().flags(CLICKABLE).at((label_x, 2.0)).w(Size::Px(1.0f32.max(control_x - label_x - 8.0))).h(Size::Px(20.0)),
+            pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).at(label_x, 2.0).w(Size::Px(1.0f32.max(control_x - label_x - 8.0))).h(Size::Px(20.0)),
         );
         let edit = ui.signal(&label).double_clicked;
         let edits = input(ui, cx, on_choice, true, field, (&boxed, path), edit, (control_x, control_y, control_w));
@@ -477,7 +476,7 @@ fn is_color_1(field: &FieldView) -> bool {
     match (&field.kind, &field.current) {
         (KindView::Text, Value::Text(bytes)) => {
             let text = text_of(bytes);
-            (text.starts_with('#') || has_substr("color", &field.name)) && color::hex(&text).is_ok()
+            (text.starts_with('#') || has_substr("color", &field.name)) && Color::parse(&text).is_ok()
         }
         _ => false,
     }
@@ -498,18 +497,18 @@ fn color_row_3(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, shown: bool) -
     };
     let fields = &row.fields;
     let (r, g, b) = if fields.len() == 3 { (to_f(&fields[0].current), to_f(&fields[1].current), to_f(&fields[2].current)) } else { (0.0, 0.0, 0.0) };
-    let swatch_color = color::of_unit_floats(None, r, g, b);
-    let hex_str = color::to_hex_string(swatch_color);
-    let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
+    let swatch_color = Color::rgb((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8);
+    let hex_str = swatch_color.to_hex_string();
+    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
     let mut out: Vec<FlowChange> = Vec::new();
     ui.within(&boxed, &mut |ui| {
         let text = swatch_and_hex(ui, &path, (control_x, control_y, control_w), swatch_color, &hex_str);
         let hex_edits: Vec<FlowChange> = if text == hex_str {
             Vec::new()
         } else {
-            match color::hex(&text) {
+            match Color::parse(&text) {
                 Ok(c) => {
-                    let (nr, ng, nb, _) = color::to_floats(c);
+                    let (nr, ng, nb, _) = (f64::from(c.r) / 255.0, f64::from(c.g) / 255.0, f64::from(c.b) / 255.0, f64::from(c.a) / 255.0);
                     if fields.len() == 3 {
                         vec![
                             FlowChange::Edited(fields[0].name.clone(), Value::Float(nr)),
@@ -536,18 +535,18 @@ fn color_row_1(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, field: &FieldView
         Value::Text(t) => text_of(t),
         _ => "#ffffff".to_string(),
     };
-    let c = color::hex(&text_val).unwrap_or(color::white());
-    let (r, g, b, _) = color::to_floats(c);
-    let swatch_color = color::of_unit_floats(None, r, g, b);
-    let hex_str = color::to_hex_string(swatch_color);
-    let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
+    let c = Color::parse(&text_val).unwrap_or(Color::WHITE);
+    let (r, g, b, _) = (f64::from(c.r) / 255.0, f64::from(c.g) / 255.0, f64::from(c.b) / 255.0, f64::from(c.a) / 255.0);
+    let swatch_color = Color::rgb((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8);
+    let hex_str = swatch_color.to_hex_string();
+    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
     let mut out: Vec<FlowChange> = Vec::new();
     ui.within(&boxed, &mut |ui| {
         let text = swatch_and_hex(ui, path, (control_x, control_y, control_w), swatch_color, &hex_str);
         let hex_edits: Vec<FlowChange> = if text == hex_str {
             Vec::new()
         } else {
-            match color::hex(&text) {
+            match Color::parse(&text) {
                 Ok(_) => vec![FlowChange::Edited(field.name.clone(), Value::Text(text.into_bytes().into()))],
                 Err(_) => Vec::new(),
             }
@@ -560,7 +559,7 @@ fn color_row_1(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, field: &FieldView
     out
 }
 
-fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &FlowRow) -> Vec<FlowChange> {
+fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &pxui::Handle), row: &FlowRow) -> Vec<FlowChange> {
     // a row is named by its argument, as the sheet and the card name it
     let title: String = if row.fields.len() == 1 && row.path.starts_with('@') { row.fields[0].label.clone() } else { row.path.clone() };
     if let Some(source) = &row.drive {
@@ -578,7 +577,7 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
         return color_row_3(ui, cx, row, &title, row.shown);
     }
     // a vector: three fields in the control column, 8 between, each with its axis letter
-    let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, row.shown), &format!("flow-row-{}", row.path), &title);
+    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, row.shown), &format!("flow-row-{}", row.path), &title);
     let mut out: Vec<FlowChange> = Vec::new();
     ui.within(&boxed, &mut |ui| {
         let mut edits: Vec<FlowChange> = Vec::new();
@@ -596,10 +595,19 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
     out
 }
 
-fn no_choice(_: &str, _: &UiBox) {}
+fn no_choice(_: &str, _: &pxui::Handle) {}
+
+/// Builds the section header each frame while retaining its content by revision.
+pub fn section(ui: &mut Ui, key: &str, revision: u64, expanded: bool, set_expanded: Option<bool>, label: &str, build: &mut dyn FnMut(&mut Ui)) -> bool {
+    pxui::ext::inspector_section(ui, key, expanded, set_expanded, label, &mut |ui| {
+        let name = if key.starts_with("flow-section-") { "flow-section-content" } else { "content" };
+        let content = ui.node("section-body", pxui::Node::DEFAULT.w(pxui::Size::Grow).h(pxui::Size::Fit));
+        ui.within(&content, &mut |ui| { ui.view_of(name, &revision, &mut *build); });
+    })
+}
 
 #[allow(clippy::too_many_arguments)]
-fn build(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), expanded: &[String], kind_label: Option<&str>, rows: &[FlowRow], folder: &str, out: &mut Vec<FlowChange>) {
+fn build(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &pxui::Handle), expanded: &[String], kind_label: Option<&str>, rows: &[FlowRow], folder: &str, out: &mut Vec<FlowChange>) {
     let open = expanded.iter().any(|key| key == folder) || kind_label == Some(folder);
     // the section's revision: its rows as they read (values, live readouts, drives, pins) and how
     // they are laid out
@@ -611,7 +619,7 @@ fn build(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), expanded: &[St
         }
         (cx.width.to_bits(), cx.pins, cx.pin_click, kit::debug_revision(&cx.chips)).hash(h);
     });
-    ui.inspector_section_view(&format!("flow-section-{folder}"), shown, open, None, folder, &mut |ui| {
+    section(ui, &format!("flow-section-{folder}"), shown, open, None, folder, &mut |ui| {
         // The kind's ungrouped rows precede rows explicitly in its folder, as in the old tree.
         if kind_label == Some(folder) {
             for row in rows.iter().filter(|row| top_folder(row).is_none()) {
@@ -628,23 +636,23 @@ fn build(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), expanded: &[St
 /// the kit's inspector sheet. `on_choice` is called with the field's name and the box of each
 /// choice control, built or not open: a host makes it a drop target. Sections are one level deep
 /// (a parameter's top folder; a vector is one row, never a section of its own).
-pub fn flow_fields(ui: &mut Ui, o: &FlowOpts, on_choice: Option<&dyn Fn(&str, &UiBox)>, rows: &[FlowRow]) -> Vec<FlowChange> {
+pub fn flow_fields(ui: &mut Ui, o: &FlowOpts, on_choice: Option<&dyn Fn(&str, &pxui::Handle)>, rows: &[FlowRow]) -> Vec<FlowChange> {
     // the rows fill the panel they are built in
-    let width = o.width.unwrap_or_else(|| ui.inspector_width());
+    let width = o.width.unwrap_or_else(|| pxui::ext::inspector_width(ui));
     let theme = ui.tokens();
     let cx = Ctx {
         width,
         theme,
-        ink_2: theme::ink_2(&theme),
-        ink_3: theme::ink_3(&theme),
+        ink_2: theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32),
+        ink_3: theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521),
         pins: o.pins,
         pin_click: o.pin_click,
         chips: o.chips.clone(),
         kept: o.kept_drag,
     };
-    let on_choice: &dyn Fn(&str, &UiBox) = on_choice.unwrap_or(&no_choice);
+    let on_choice: &dyn Fn(&str, &pxui::Handle) = on_choice.unwrap_or(&no_choice);
     if rows.is_empty() {
-        ui.inspector_message("no-parameters", "No parameters");
+        pxui::ext::inspector_message(ui, "no-parameters", "No parameters");
         return Vec::new();
     }
     let mut out = Vec::new();

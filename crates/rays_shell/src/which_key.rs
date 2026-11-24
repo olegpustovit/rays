@@ -7,9 +7,8 @@ use editor_core::command;
 use editor_core::keymap::{self, Trigger};
 use editor_core::panels::Panel;
 use input::{Key, Platform};
-use pxui::theme;
 use pxui::ui::*;
-use pxui::geom::color::T as Color;
+use pxui::Rgba as Color;
 
 pub type Rows = Vec<(String, String)>;
 pub type Sections = Vec<(String, Rows)>;
@@ -120,30 +119,30 @@ fn by_category(
 /// (`gap` points above it) over rows of 24: the key in ink-3 at the label size, 8 points on, what
 /// it does, and a chevron when the key continues into more keys. `cols` columns share `w`.
 fn columns(paint: &mut Paint, (x, y, w): (f32, f32, f32), cols: i64, gap: f32, label_ink: Color, sections: &[(String, Rows)]) {
-    let theme = paint.theme;
-    let row = paint.row_height as f32;
-    let cap = 8.max(paint.font_size - 2);
+    let theme = paint.tokens();
+    let row = 24.0 as f32;
+    let cap = (paint.tokens().font_size - 2.0).max(8.0);
     let col_w = w / (1.max(cols)) as f32;
     for (column, (title, rows)) in sections.iter().enumerate() {
         let cx = x + (column as f32 * col_w);
         let cy = kit::cap_y_paint(paint, y + gap, row);
-        paint.cap((cx + 12.0, cy), Some(theme::ink_3(&theme)), title);
+        { let text = title; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521)); let _ = paint.text_spans(pxui::Point::new(cx + 12.0, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
         for (k, (key, label)) in rows.iter().enumerate() {
             let rx = cx;
             let ry = y + gap + row + (k as f32 * row);
             let group = label.starts_with('+');
             let label = if group { &label[1..] } else { &label[..] };
-            let key_width = paint.text_width(Some(cap), key);
+            let key_width = paint.text_service().width(key, pxui::Label::BODY.size((cap) as f32), None).unwrap_or(0.0);
             let ky = kit::cap_y_paint(paint, ry, row);
-            paint.text_s((rx + 12.0, ky), cap, theme::ink_3(&theme), key);
+            { let text = key; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521)); let _ = paint.text_spans(pxui::Point::new(rx + 12.0, ky), pxui::Label::BODY.size((cap) as f32), 0.0, text, &[span]); };
             let lx = rx + 12.0 + key_width + 8.0;
             let limit = rx + col_w - lx - if group { 20.0 } else { 12.0 };
-            let shown = ellipsis(&mut |s| paint.text_width(None, s), limit, label);
-            let ty = paint.text_top(None, ry, row);
-            paint.text_c((lx, ty), label_ink, &shown);
+            let shown = ellipsis(&mut |s| paint.text_service().width(s, pxui::Label::BODY, None).unwrap_or(0.0), limit, label);
+            let ty = (ry) + (((row) - (paint.tokens().font_size) as f32) / 2.0).floor();
+            { let text = &shown; let span = pxui::TextSpan::new(0, text.len() as u32).color(label_ink); let _ = paint.text_spans(pxui::Point::new(lx, ty), pxui::Label::BODY, 0.0, text, &[span]); };
             // a key that continues into more keys
             if group {
-                paint.chevron((rx + col_w - 17.0, ry + (row / 2.0)), Dir::Right, theme::ink_3(&theme));
+                paint.chevron((rx + col_w - 17.0, ry + (row / 2.0)), Dir::Right, pxui::Stroke::new(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521)));
             }
         }
     }
@@ -187,7 +186,7 @@ pub fn panel(
         .filter(|(_, rows)| !rows.is_empty())
         .collect(),
     };
-    let (view_w, view_h) = ui.view_size();
+    let pxui::ViewSize { width: view_w, height: view_h } = ui.view_size();
     let row = ui.row_height() as f32;
     let cols = 6.max(sections.len() as i64);
     // the edge, 8, the head row, a section label under 4, its rows, 8; never under the sheet's 183
@@ -196,20 +195,20 @@ pub fn panel(
     let leader = if prefix.is_empty() { "/".to_string() } else { format!("/ {prefix}") };
     // build before the body it shields; the host closes it on any key
     let cap = kit::cap_size(ui);
-    ui.popup(None, None, false, false, (0.0, y), view_w, height, "leader", &mut |ui| {
-        let boxed = ui.box_("leader-sheet", BoxOpts::default().w(Size::Grow).h(Size::Px(height)));
+    ui.panel("leader", &pxui::Overlay::DEFAULT.at(pxui::Point::new(0.0, y)).w_px(view_w).h_px(height), |ui: &mut Ui| {
+        let boxed = ui.node("leader-sheet", pxui::Node::DEFAULT.w(Size::Grow).h(Size::Px(height)));
         let sections = sections.clone();
         let leader = leader.clone();
-        ui.draw(&boxed, move |paint, Rect { x, y, w, h: _ }| {
-            paint.fill(x, y, w, 1.0, theme::border(&theme));
+        ui.canvas(&boxed, move |paint, Rect { x, y, w, h: _ }| {
+            paint.fill(pxui::Rect::new(x, y, w, 1.0), pxui::Fill::new((theme).foreground.with_alpha(77)));
             let y = y + 9.0;
             let ly = kit::cap_y_paint(paint, y, row);
-            paint.text_s((x + 12.0, ly), cap, theme::ink_3(&theme), &leader);
-            let lw = paint.text_width(Some(cap), &leader);
-            paint.cap((x + 20.0 + lw, ly), None, "Leader");
+            { let text = &leader; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521)); let _ = paint.text_spans(pxui::Point::new(x + 12.0, ly), pxui::Label::BODY.size((cap) as f32), 0.0, text, &[span]); };
+            let lw = paint.text_service().width(&leader, pxui::Label::BODY.size((cap) as f32), None).unwrap_or(0.0);
+            { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_chars(pxui::Point::new(x + 20.0 + lw, ly), style, "Leader"); };
             let hint = "a key continues \u{b7} esc closes";
-            let hw = paint.text_width(Some(cap), hint);
-            paint.text_s((x + w - 12.0 - hw, ly), cap, theme::ink_2(&theme), hint);
+            let hw = paint.text_service().width(hint, pxui::Label::BODY.size((cap) as f32), None).unwrap_or(0.0);
+            { let text = hint; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)); let _ = paint.text_spans(pxui::Point::new(x + w - 12.0 - hw, ly), pxui::Label::BODY.size((cap) as f32), 0.0, text, &[span]); };
             columns(paint, (x + 16.0, y + row, w - 32.0), cols, 4.0, theme.foreground, &sections);
         });
     });
@@ -289,36 +288,37 @@ pub fn sheet(
     let mut result: Option<bool> = None;
     let cap = kit::cap_size(ui);
     let context = context.to_string();
-    let open = ui.modal(Some(572.0), "guide-keys", &mut |ui| {
+    let open = ui.modal("guide-keys", &pxui::Overlay::DEFAULT.w_px(572.0), |ui: &mut Ui| {
         let theme = ui.tokens();
         let mut closed = false;
         // the title row: 4 above, then 24: the label, what has the focus (ink-2 at 70 percent, as
         // written) 8 before the close button, which ends 8 from the edge
-        let title = ui.box_("keys-title", BoxOpts::default().w(Size::Grow).h(Size::Px(28.0)));
+        let title = ui.node("keys-title", pxui::Node::DEFAULT.w(Size::Grow).h(Size::Px(28.0)));
         let ctx = context.clone();
-        ui.draw(&title, move |paint, Rect { x, y, w, h: _ }| {
+        ui.canvas(&title, move |paint, Rect { x, y, w, h: _ }| {
             let ty = kit::cap_y_paint(paint, y + 4.0, 24.0);
-            paint.cap((x + 12.0, ty), Some(theme::ink_2(&theme)), "Keys");
+            { let text = "Keys"; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)); let _ = paint.text_spans(pxui::Point::new(x + 12.0, ty), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
             if !ctx.is_empty() {
-                let cw = paint.text_width(Some(cap), &ctx);
-                paint.text_s((x + w - 36.0 - cw, ty), cap, pxui::geom::color::with_alpha(theme::ink_2(&theme), 179), &ctx);
+                let cw = paint.text_service().width(&ctx, pxui::Label::BODY.size((cap) as f32), None).unwrap_or(0.0);
+                { let text = &ctx; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32).with_alpha(179)); let _ = paint.text_spans(pxui::Point::new(x + w - 36.0 - cw, ty), pxui::Label::BODY.size((cap) as f32), 0.0, text, &[span]); };
             }
         });
         ui.within(&title, &mut |ui| {
-            let holder = ui.box_("keys-close-holder", BoxOpts::default().w(Size::Px(40.0)).h(Size::Px(24.0)).at((530.0, 4.0)));
+            let holder = ui.node("keys-close-holder", pxui::Node::DEFAULT.w(Size::Px(40.0)).h(Size::Px(24.0)).at(530.0, 4.0));
             ui.within(&holder, &mut |ui| {
-                if ui.button_styled("\u{d7}###guide-close", true, true, true, Some(theme::ink_2(&theme))) {
+                if ui.button("guide-close", "?", &pxui::Button::DEFAULT).clicked {
                     closed = true;
                 }
             });
         });
         // the filter: what is typed narrows the rows to the commands and keys that match; the
         // query lives with its box, Escape closes the sheet
-        let memory = ui.box_("keys-filter-memory", BoxOpts::default().w(Size::Grow).h(Size::Px(0.0)));
-        let typed = ui.text_state(&memory).unwrap_or_default();
-        let popts = PickerOpts { at_rest: true, ..PickerOpts::default() };
-        let (query, pick) = ui.picker(&popts, "filter commands", &typed, &|_| Vec::new());
-        ui.set_text_state(&memory, Some(query.clone()));
+        let memory = ui.node("keys-filter-memory", pxui::Node::DEFAULT.w(Size::Grow).h(Size::Px(0.0)));
+        let typed = ui.text_state(&memory).unwrap_or_default().to_owned();
+        let response = ui.picker("guide-filter", "filter commands", &typed, &pxui::Picker::DEFAULT.at_rest(true), &mut |_, _| {});
+        let query = response.query.to_owned();
+        let pick = response.pick;
+        ui.set_text_state(&memory, Some(&query));
         let shown: Sections = if query.is_empty() {
             sections.clone()
         } else {
@@ -345,8 +345,8 @@ pub fn sheet(
         }
         let tallest = stacks.iter().fold(0, |most, stack| most.max(height(stack)));
         let row = ui.row_height() as f32;
-        let boxed = ui.box_("keys-sheet", BoxOpts::default().w(Size::Grow).h(Size::Px((tallest as f32 * row) + 8.0)));
-        ui.draw(&boxed, move |paint, Rect { x, y, w, h: _ }| {
+        let boxed = ui.node("keys-sheet", pxui::Node::DEFAULT.w(Size::Grow).h(Size::Px((tallest as f32 * row) + 8.0)));
+        ui.canvas(&boxed, move |paint, Rect { x, y, w, h: _ }| {
             for (column, stack) in stacks.iter().enumerate() {
                 let mut top = y;
                 for section in stack {
@@ -355,7 +355,7 @@ pub fn sheet(
                         (x + (column as f32 * w / 3.0), top, w / 3.0),
                         1,
                         0.0,
-                        theme::ink_2(&theme),
+                        theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32),
                         std::slice::from_ref(section),
                     );
                     top += rows_of(section) as f32 * row;
@@ -364,5 +364,5 @@ pub fn sheet(
         });
         result = Some(pick != Pick::Cancel && !closed);
     });
-    open && result.unwrap_or(false)
+    open.open && result.unwrap_or(false)
 }
