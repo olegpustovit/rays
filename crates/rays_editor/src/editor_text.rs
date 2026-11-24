@@ -292,6 +292,7 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
             text.request = request.clone();
             value.text = text
         }
+        Intent::Command(command) => value.text = text_pane::command(&text, *command),
         Intent::Resolved => {
             text.pending = Vec::new();
             value.text = text

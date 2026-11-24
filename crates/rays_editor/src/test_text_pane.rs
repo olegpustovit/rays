@@ -256,6 +256,29 @@ fn caret_maps_into_the_text_it_is_in() {
 }
 
 #[test]
+fn definition_is_found_in_a_draft() {
+    // B43: a graph defined only in the draft is resolved through the draft's parse
+    let source = s::parse("(workspace w (graph g :context sop (sop/box)))").unwrap();
+    let shown = t::make_shown(&source, "g", None, Tab::Document).unwrap();
+    let draft = shown.text.replace("(graph g", "(graph h :context sop (sop/box))\n  (graph g");
+    let draft = draft.replace("(sop/box)))", "(sop/merge (ref h))))");
+    let byte = draft.rfind("h)").unwrap() as i64;
+    assert_eq!(t::definition_in(&draft, Tab::Document, &shown, byte), Some(vec!["h".into()]));
+    assert_eq!(t::definition_in(&shown.text, Tab::Document, &shown, 3), t::definition_at(&shown, 3));
+}
+
+#[test]
+fn characters_everywhere_and_pasted_text_is_normalised() {
+    // B45: the status column counts characters as Go to line does; CRLF and tabs are normalised
+    let text = "(a \u{e9}\u{e9})\n\u{e9}x y";
+    let byte = text.find('y').unwrap() as i64;
+    assert_eq!(t::char_position(text, byte), (2, 4));
+    assert_eq!(t::line_target(text, "2:4"), Some(byte), "Go to line and the status row agree");
+    assert_eq!(t::char_position(text, byte - 1), (2, 3));
+    assert_eq!(t::normalized("a\r\n\tb\rc"), "a\n  b\nc");
+}
+
+#[test]
 fn find_folds_unicode_case() {
     // B45: the fold is Unicode, the offsets are the text's own bytes
     let text = "\u{c4}rger \u{e4}rger \u{c4}RGER";

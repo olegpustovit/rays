@@ -687,6 +687,16 @@ pub fn definition_at(shown: &Shown, byte: i64) -> Option<Path> {
     reference_target(&shown.source, &from, &name)
 }
 
+/// `definition_at` in the text on screen: a draft is resolved through its own parse (B43).
+pub(crate) fn definition_in(text: &str, tab: Tab, shown: &Shown, byte: i64) -> Option<Path> {
+    if text == shown.text {
+        return definition_at(shown, byte);
+    }
+    let m = shown_of_text(text, tab, shown)?;
+    let from = binding_at(&m, byte).unwrap_or_else(|| vec![m.graph.clone().into()]);
+    reference_target(&m.source, &from, &symbol_at(text, byte)?)
+}
+
 fn span_range(span: &Span) -> (i64, i64) {
     (i64::from(span.start), i64::from(span.finish))
 }
@@ -1783,6 +1793,9 @@ pub fn summary(state: &State) -> String {
     if let Some(f) = &state.find {
         out.push_str(&format!(", find {} at {}{}", rdk_core::attribute::quote_bytes(f.query.as_bytes()), f.at, if f.replacing { " replacing" } else { "" }));
     }
+    if state.menu.is_some() {
+        out.push_str(", menu open");
+    }
     out
 }
 
@@ -1840,6 +1853,8 @@ pub enum Intent {
     ReferencesOf(String),
     /// the pending commands were resolved
     Resolved,
+    /// a command from the right-click menu: it waits for the next `view`, as a key's does
+    Command(Command),
 }
 
 /// Seconds a draft rests before `view` parses it.
@@ -2102,8 +2117,13 @@ fn find_bar(
 /// what the byte of a text maps to in the tabs' graph: the shown text's own spans when it is the
 /// shown text, else the parse of this text, made once per text
 pub(crate) fn caret_path(text: &str, tab: Tab, shown: &Shown, byte: i64) -> Option<Path> {
+    binding_at(&shown_of_text(text, tab, shown)?, byte)
+}
+
+/// `shown` when `text` is its text, else what the parse of `text` shows, made once per text.
+fn shown_of_text(text: &str, tab: Tab, shown: &Shown) -> Option<Shown> {
     if text == shown.text {
-        return binding_at(shown, byte);
+        return Some(shown.clone());
     }
     thread_local!(static PARSED: RefCell<Option<(Box<str>, Tab, Shown, Option<Shown>)>> = const { RefCell::new(None) });
     PARSED.with(|p| {
@@ -2112,7 +2132,7 @@ pub(crate) fn caret_path(text: &str, tab: Tab, shown: &Shown, byte: i64) -> Opti
         if !hit {
             *p = Some((text.into(), tab, shown.clone(), parsed_shown(text, tab, shown)));
         }
-        p.as_ref().and_then(|(_, _, _, m)| m.as_ref()).and_then(|m| binding_at(m, byte))
+        p.as_ref().and_then(|(_, _, _, m)| m.clone())
     })
 }
 
@@ -2259,17 +2279,14 @@ fn editor_area(
         o.on_caret_move = Some(Rc::new(move |byte| moved.set(Some(byte))));
     }
     let (text2, submitted) = ui.text_area_submit((c.x, ey), c.width, area_h, &o, key, text);
+    // a paste or a tab typed in arrives as text: kept as the pane keeps text (B45)
+    let text2 = if phase.get().is_none() && text2 != text && text2.contains(['\r', '\t']) { normalized(&text2) } else { text2 };
     // Command-click and F12 follow a (ref name) or a definition
     let follow = |byte: i64| {
         let target = match lisp_text::ref_at(text, byte.max(0) as usize) {
             Some(name) if c.names.graphs.contains(&name) => Some(vec![name.into()]),
-            _ => {
-                if text == shown.text {
-                    definition_at(shown, byte)
-                } else {
-                    None
-                }
-            }
+            // B43: a definition in the draft is found through the draft's own parse
+            _ => definition_in(text, state.tab, shown, byte),
         };
         if let Some(path) = target {
             if path_mark(&shown.source, &shown.spans, &path).is_none() {
@@ -2434,8 +2451,8 @@ fn editor_area(
     let hint = "\u{2318}\u{21b5}";
     // the caret's line and column, 1-based, in the status row's label
     let position = caret.get().map(|byte| {
-        let p = diagnostic::position_of_offset(&text2, byte.min(text2.len() as i64));
-        format!("{}:{}", p.line, p.col)
+        let (line, col) = char_position(&text2, byte);
+        format!("{line}:{col}")
     });
     let apply_w = kit::button_width(ui, Some(hint), false, "Check and apply");
     let by = ty + 1.0 + ((c.bar - 20.0) / 2.0);
@@ -2521,7 +2538,17 @@ fn editor_area(
         });
     }
     if let Some(at) = state.menu {
+        let selected = selection.get().filter(|&(a, b)| a < b && b <= text2.len() as i64);
         let items: Vec<(String, bool)> = vec![
+            ("Cut".to_owned(), selected.is_some()),
+            ("Copy".to_owned(), selected.is_some()),
+            ("Paste".to_owned(), true),
+            ("Select All".to_owned(), !text2.is_empty()),
+            (String::new(), false),
+            ("Find".to_owned(), true),
+            ("Go to Definition".to_owned(), caret.get().is_some()),
+            ("Find References".to_owned(), caret.get().is_some()),
+            (String::new(), false),
             ("Check and apply".to_owned(), can_apply),
             ("Discard".to_owned(), can_apply),
             (String::new(), false),
@@ -2534,24 +2561,59 @@ fn editor_area(
         match ui.context_menu(at, &MenuOpts::default(), &format!("{}-menu", key), &items) {
             MenuResult::Open => {}
             MenuResult::Dismiss => push(emit, Intent::Menu(None)),
-            MenuResult::Pick(0) => {
+            MenuResult::Pick(i) => {
                 push(emit, Intent::Menu(None));
-                push(emit, apply(text2.clone()));
-            }
-            MenuResult::Pick(1) => {
-                push(emit, Intent::Menu(None));
-                push(emit, discard.clone());
-            }
-            MenuResult::Pick(3) => {
-                push(emit, Intent::Menu(None));
-                push(emit, Intent::ToggleWrap);
-            }
-            MenuResult::Pick(_) => {
-                push(emit, Intent::Menu(None));
-                push(emit, Intent::ToggleParinfer);
+                match i {
+                    0 | 1 => {
+                        if let Some((a, b)) = selected {
+                            match rays::clipboard::set_text(&sub(&text2, a, b - a)) {
+                                Ok(()) if i == 0 => push(emit, Intent::RequestSet(Some(Request { select: (a, a), splice: vec![(a, b, String::new())] }))),
+                                _ => {}
+                            }
+                        }
+                    }
+                    2 => {
+                        if let Ok(pasted) = rays::clipboard::get_text() {
+                            let (a, b) = selection.get().filter(|&(a, b)| a <= b && b <= text2.len() as i64).unwrap_or_else(|| {
+                                let at = caret.get().unwrap_or(text2.len() as i64).clamp(0, text2.len() as i64);
+                                (at, at)
+                            });
+                            let pasted = normalized(&pasted);
+                            let end = a + pasted.len() as i64;
+                            push(emit, Intent::RequestSet(Some(Request { select: (end, end), splice: vec![(a, b, pasted)] })));
+                        }
+                    }
+                    3 => push(emit, Intent::RequestSet(Some(Request { select: (0, text2.len() as i64), splice: Vec::new() }))),
+                    5 => push(emit, Intent::Command(Command::Find)),
+                    6 => push(emit, Intent::Command(Command::Definition)),
+                    7 => push(emit, Intent::Command(Command::References)),
+                    9 => push(emit, apply(text2.clone())),
+                    10 => push(emit, discard.clone()),
+                    12 => push(emit, Intent::ToggleWrap),
+                    _ => push(emit, Intent::ToggleParinfer),
+                }
             }
         }
     }
+}
+
+/// Text as the pane keeps it: line ends are `\n`, a tab is two spaces (B45). One place for the menu's
+/// paste and for the keyboard's, which reaches the pane as an edit of the text.
+// ponytail: a tab becomes two spaces whatever its column; tab stops if mixed indentation matters
+pub(crate) fn normalized(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n").replace('\t', "  ")
+}
+
+/// 1-based line and character column of a byte (the status row and Go to line count the same way)
+pub fn char_position(text: &str, byte: i64) -> (i64, i64) {
+    let mut end = (byte.max(0) as usize).min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let before = &text[..end];
+    let line = before.bytes().filter(|b| *b == b'\n').count() as i64 + 1;
+    let start = before.rfind('\n').map_or(0, |i| i + 1);
+    (line, before[start..].chars().count() as i64 + 1)
 }
 
 /// The text pane: draws inside `Ui::frame` and returns the intents `Editor_frame` applies after it.
