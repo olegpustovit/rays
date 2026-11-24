@@ -744,11 +744,14 @@ pub fn projections_of(outlined: &Option<(String, Option<Path>)>, actions: &[Acti
 /// Command-Z / Shift-Command-Z: the history step, its notice and the document it leaves.
 pub fn undo_step(value: &EditorModel, carrying: bool, actions: &[Action], notice: Option<(NoticeKind, String)>, h: history::EditorHistory) -> (history::EditorHistory, Arc<Document>, bool, Option<(NoticeKind, String)>) {
     // an entry holds no lowering: stepping there lowers its text again, unless it is the last present
-    let current = history::present_arc(&h);
-    let factories = value.factories.clone();
-    let restore = move |saved: &document::Snapshot| lowering::restore(Some(&factories), &current, saved);
     let redo = actions.contains(&Action::Redo);
     let undo = actions.contains(&Action::Undo);
+    if !redo && !undo {
+        let doc = if carrying { value.doc.clone() } else { history::present_arc(&h) };
+        return (h, doc, false, notice);
+    }
+    let current = history::present_arc(&h);
+    let restore = |saved: &document::Snapshot| lowering::restore(Some(&value.factories), &current, saved);
     let stepped = if redo {
         history::redo(&restore, &h)
     } else if undo {
@@ -928,7 +931,11 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         })
         .cloned()
         .collect();
-    let (document, edit_error, editor_effects) = host_changes.iter().fold((level_objects(&value.into()).into_owned(), value.edit_error.clone(), Effects::default()), |state, c| apply_change(state, c));
+    let (document, edit_error, editor_effects) = host_changes.iter().fold(
+        // the frame already copied the level's objects into the result: an idle frame takes that copy
+        (if host_changes.is_empty() { std::mem::take(&mut result.document) } else { level_objects(&value.into()).into_owned() }, value.edit_error.clone(), Effects::default()),
+        |state, c| apply_change(state, c),
+    );
     // what a list or the inspector's name row asks of an object the text has is written to the text
     // (below); the derived network is edited only for the others
     let mut tree_edits: Vec<Edit> = result.tree_intents.iter().filter_map(|i| tree_edit(&value.into(), &rows, i)).collect();
@@ -940,7 +947,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         }
     }
     let applied = result.tree_intents.iter().fold(
-        TreeState { document, selection: result.selection.clone(), tree: result.tree.clone(), opened: result.opened, label: None, rows: rows.clone() },
+        TreeState { document, selection: result.selection.clone(), tree: result.tree.clone(), opened: result.opened, label: None, rows: if result.tree_intents.is_empty() { Vec::new() } else { rows.clone() } },
         |state, intent| apply_tree(&value.into(), state, intent),
     );
     let TreeState { document, selection, tree: tree_value, opened, label: tree_label, .. } = applied;
@@ -1063,7 +1070,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     // / e opens the World, writing one (a [scene/world] member and its world graph) on first use.
     let mut world_added = false;
-    if objects::ids("world", &next.scene).is_empty() && actions.contains(&Action::GoWorld) {
+    if actions.contains(&Action::GoWorld) && objects::ids("world", &next.scene).is_empty() {
         if let Ok(ops) = sync::add_world(&next) {
             if let Ok(doc) = document_edit::syntax_batch(Some(&value.factories), &next, &ops) {
                 next = Arc::new(doc);
@@ -1257,7 +1264,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
             })
             .collect()
     } else {
-        result.locals.clone()
+        std::mem::take(&mut result.locals)
     };
     value2.text = text;
     value2.rows = Rc::new(row_sets);
@@ -1295,7 +1302,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         cook::set_volatile(&previous_cook, Arc::new(move |id| volatile(id) || roots.contains(&id)));
     }
     let probes_wanted: Vec<(i64, i64)> = match pane_laid(&(&*value2).into()) {
-        Some(k) if scope_name(&(&*value2).into()).is_some() => {
+        Some(k) if !k.targets.is_empty() && scope_name(&(&*value2).into()).is_some() => {
             // only the footers drawn and the selection are counted, not every node of the graph
             let view = pane_view(&(&*value2).into());
             let mut shown = rays_graph::scope_frame::inspect::footer_paths(view);
@@ -1368,9 +1375,11 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     core.guide = guide;
     core.hud = hud;
     core.focus = result.focus.clone();
-    core.focus_path = result.focus_path.clone();
-    core.pane_keys = Rc::new(result.pane_keys.clone());
-    panel_map::with_others(&mut core.panes, result.graph_panes.clone());
+    core.focus_path = std::mem::take(&mut result.focus_path);
+    if core.pane_keys.as_slice() != result.pane_keys.as_slice() {
+        core.pane_keys = Rc::new(std::mem::take(&mut result.pane_keys));
+    }
+    panel_map::with_others(&mut core.panes, std::mem::take(&mut result.graph_panes));
     core.leader = leader;
     core.held_keys = held_keys;
     core.prompt = prompt;

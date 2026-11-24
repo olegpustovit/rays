@@ -844,7 +844,14 @@ pub fn update(
         probing,
         summaries,
         sources,
-        ..value.clone()
+        worker: value.worker.clone(),
+        seed: value.seed,
+        grain: value.grain,
+        domains: value.domains,
+        await_: value.await_,
+        preparer: value.preparer.clone(),
+        failure: value.failure.clone(),
+        state: value.state.clone(),
     };
     UpdateResult { cook, edit_error, prepared_changed, framed }
 }

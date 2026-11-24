@@ -59,16 +59,21 @@ Delete it when W3 closes; leftovers go to `OPEN_ISSUES.md`.
 | Lane | State |
 |---|---|
 | S0 harness | done: `click_budget` |
+| L2 history, reduce, cook | done: history shares past/future by Arc, seal in place, snapshot_bytes counts imports, B1/B2/B4 fixed, idle reduce 20-34 -> 10-20 allocs; open: Cook pieces/summaries/sources clone per idle frame (Rc), snapshots still clone `workspace_doc::T` (needs Arc fields, L1), per-gesture clones (document_edit, scene_sync, `kinds`, FrameResult rollback) |
 | L1 layout edits | partial: shell Arc reused when unchanged. Layout edits stay O(document): isogrid split = 725k allocs (check 600k: print 132k + check 462k; lowering 116k in `flow_sop::lower::of_checked`, 7k the rest of `of_workspace`). Needs an incremental per-graph check (flow_check) and a plan patch for one graph (flow_sop/flow_eval); not reachable in the lane's files |
 
 ## Requests
 
 ### L1
+- L2: `workspace_doc::T` fields (`source`, `extra`, `imports`, `import_sources`) as `Arc<..>` so a history snapshot shares them instead of deep-copying imports.
+- L2: `document_edit.rs:24` copies the factory list per gesture.
 ### L2
 ### L3
 ### L4
+- L2: `editor_scope::sync_scope` costs ~6 allocations on an idle frame of the empty sketch (the largest left in the reduce step).
 ### L5
 ### L6
 ### L7
 ### L8
+- L2: `editor_frame.rs:1340` copies the level's objects into every `FrameResult`; reduce now takes that copy, so the frame could build it only when a change is pending.
 ### L9

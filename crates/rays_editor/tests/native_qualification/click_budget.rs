@@ -13,8 +13,8 @@ const H: i64 = 900;
 /// (workspace, action, ceiling on the key frame, ceiling on the third frame after it: the settled cost)
 /// Set 2026-11-24 at measured + 5% (dec599ffa); lower a row when a change makes it cheaper.
 const CEILINGS: &[(&str, &str, u64, u64)] = &[
-    ("basic", "idle", 796, 722),
-    ("basic", "hover", 733, 735),
+    ("basic", "idle", 785, 710),
+    ("basic", "hover", 722, 723),
     ("basic", "split right", 61092, 13432),
     ("basic", "retype graph", 39505, 12999),
     ("basic", "retype inspector", 39515, 12949),
@@ -36,9 +36,9 @@ const CEILINGS: &[(&str, &str, u64, u64)] = &[
     ("basic", "layout 1", 40584, 13182),
     ("basic", "palette", 13878, 13457),
     ("basic", "escape", 13320, 13182),
-    ("basic", "idle end", 13237, 13182),
-    ("empty", "idle", 422, 348),
-    ("empty", "hover", 361, 362),
+    ("basic", "idle end", 13175, 13120),
+    ("empty", "idle", 406, 332),
+    ("empty", "hover", 345, 345),
     ("empty", "split right", 22638, 13017),
     ("empty", "retype graph", 34585, 13076),
     ("empty", "retype inspector", 48903, 13005),
@@ -60,9 +60,9 @@ const CEILINGS: &[(&str, &str, u64, u64)] = &[
     ("empty", "layout 1", 36837, 13367),
     ("empty", "palette", 14068, 13641),
     ("empty", "escape", 13505, 13367),
-    ("empty", "idle end", 13422, 13367),
-    ("isogrid", "idle", 846, 752),
-    ("isogrid", "hover", 766, 767),
+    ("empty", "idle end", 13349, 13295),
+    ("isogrid", "idle", 822, 728),
+    ("isogrid", "hover", 742, 742),
     ("isogrid", "split right", 797792, 755),
     ("isogrid", "retype graph", 917, 755),
     ("isogrid", "retype inspector", 796634, 755),
@@ -84,12 +84,12 @@ const CEILINGS: &[(&str, &str, u64, u64)] = &[
     ("isogrid", "layout 1", 820782, 1148),
     ("isogrid", "palette", 2187, 1508),
     ("isogrid", "escape", 1380, 1149),
-    ("isogrid", "idle end", 1209, 1149),
-    ("long", "idle fresh", 796, 722),
+    ("isogrid", "idle end", 1161, 1101),
+    ("long", "idle fresh", 785, 710),
     ("long", "split", 61093, 13432),
     ("long", "close", 42402, 13243),
     ("long", "undo", 20885, 13439),
-    ("long", "idle after session", 848, 788),
+    ("long", "idle after session", 560, 500),
 ];
 
 struct P {

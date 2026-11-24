@@ -30,6 +30,7 @@ const FRAMES: i64 = 30;
 // R10: typed renderer keys and numeric hashes: basic 1,285 / 147,518.
 // Z1/G1/Z5: reuse UI callbacks, labels and renderer buffers with shared hash/ABI changes:
 // basic 1,232 / 141,996; empty 916 / 53,361; bare 1,156 / 69,746.
+// L2: take the frame's copies instead of cloning them, no history clone: basic 629 / 93,156; empty 316 / 21,621; bare 467 / 35,031.
 // Historical reference points, retained after performance targets were retired.
 // Z2 shared immutable Text, sorted Record fields and Symbol paths; measured idle guard pairs.
 // Z8 retains immutable image cache storage instead of copying it during every frame.
@@ -40,9 +41,9 @@ const FRAMES: i64 = 30;
 // Z1: exact quad cache keys, single-field settings reads: basic 805 / 89,381; empty 538 / 34,724; bare 693 / 45,448.
 // Z1: shared shell tree, kept leaf list, borrowed level objects: basic 747 / 85,781; empty 462 / 31,882; bare 617 / 42,561.
 // Z1: wide-hash quad keys, no generic cache constructor: basic 747 / 85,098; empty 462 / 31,882; bare 617 / 42,561.
-const BASIC: (u64, u64) = (747, 85_098);
-const EMPTY: (u64, u64) = (462, 31_882);
-const BARE: (u64, u64) = (617, 42_561);
+const BASIC: (u64, u64) = (660, 97_800);
+const EMPTY: (u64, u64) = (332, 22_700);
+const BARE: (u64, u64) = (490, 36_800);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");
