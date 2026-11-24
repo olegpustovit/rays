@@ -382,6 +382,9 @@ pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &Shell, leaf: Option
                 Some(leaf) => edit(&|graph| le::Op::LayoutFloat { graph, at: leaf.path.iter().map(|i| *i as i64).collect() }),
                 None => Vec::new(),
             },
+            Action::ToggleInspector if !panels::each_leaf(&shell_tree(value, workspace), &mut |_, p| *p == Panel::Inspector) => {
+                vec![Change::Notice("No inspector in this layout.".to_string())]
+            }
             _ => Vec::new(),
         });
     }
@@ -417,8 +420,12 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &Shell, intents: &[c
                                 le::Op::SetPanelKind { node, panel: panel.clone() }
                             }),
                         }],
+                        le::Op::SetLayoutSize { .. } => vec![Change::Declined(format!(
+                            "This split is made by a loop in {}: edit the loop in the editor graph to resize it.",
+                            document::describe(&value.doc.workspace.ws.source, home)
+                        ))],
                         _ => vec![Change::Declined(format!(
-                            "These panels are copies made by a loop in {}: retype them (/ o), or edit the loop in the editor graph.",
+                            "These panels are copies made by a loop in {}: retype them (/ l), or edit the loop in the editor graph.",
                             document::describe(&value.doc.workspace.ws.source, home)
                         ))],
                     }
@@ -451,6 +458,9 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &Shell, intents: &[c
         }
     };
     let save_state = |path: &layout::Path, state: panels::State| -> Vec<Change> {
+        if workspace.restored {
+            return vec![Change::Declined("The default layout is showing. / z returns to the editor graph.".to_string())];
+        }
         let mut prefix = Vec::new();
         if editor.is_none() {
             let scene = scene_name(value);
@@ -632,4 +642,108 @@ pub fn inspector_subject<'a>(value: &ModelView<'a>) -> Option<flow_check::worksp
     }
     let paths = inspector_paths(scope::selected(pane_view(value)));
     if paths.len() == 1 { Some(paths[0].clone()) } else { None }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cook;
+    use crate::editor_host;
+    use crate::editor_setup::{self, CreateOpts};
+    use editor_document::workspace_doc::TextOptions;
+
+    fn big_stack(body: fn()) {
+        std::thread::Builder::new().stack_size(256 << 20).spawn(body).unwrap().join().unwrap();
+    }
+
+    fn model_of(text: &str) -> EditorModel {
+        let catalog = editor_document::kinds::catalog(flow_sop::manifest::VERSION, &sop::nodes::factories()).expect("catalog");
+        let ws = workspace_doc::of_text(&TextOptions::default(), &catalog, text).expect("workspace");
+        let opts = CreateOpts {
+            preferences: Some(std::env::temp_dir().join("rays-editor-test-no-preferences.rays").to_string_lossy().to_string()),
+            presets: Some(std::env::temp_dir().join("rays-editor-test-presets").to_string_lossy().to_string()),
+            ui_text_size: 11,
+            await_: Some(true),
+            ..CreateOpts::default()
+        };
+        editor_setup::create(opts, &ws, Rc::new(cook::prepare)).expect("model")
+    }
+
+    #[test]
+    fn b7_toggle_while_restored_is_refused() {
+        big_stack(|| {
+            let mut value = model_of(
+                r#"(workspace w
+                    (graph g :context sop (sop/box))
+                    (graph editor :context editor (ui/workspace (ui/graph "g"))))"#,
+            );
+            value.workspace.restored = true;
+            let (_, changes) = layout_intents(&(&value).into(), &value.workspace, &[chrome::Intent::Toggle(vec![1, 0])]);
+            assert!(
+                !changes.iter().any(|c| matches!(c, Change::PanelState(..))),
+                "B7: toggling while restored wrote PanelState"
+            );
+            assert!(
+                changes.iter().any(|c| matches!(c, Change::Declined(m) if m.contains("default layout"))),
+                "B7: toggling while restored did not decline with default-layout notice"
+            );
+            editor_host::close(&value);
+        });
+    }
+
+    #[test]
+    fn b10_resize_loop_split_gives_resize_message() {
+        big_stack(|| {
+            let value = model_of(
+                r#"(workspace w
+                    (graph g :context sop (sop/box))
+                    (graph editor :context editor
+                      (ui/workspace (ui/tile (for [i (range 2)] (ui/split_at "horizontal" 0.5 (ui/graph "g") (ui/inspector)))))))"#,
+            );
+            let shell = value.doc.shell.as_ref().expect("shell");
+            let loop_split = shell
+                .origins
+                .iter()
+                .find_map(|(path, o)| {
+                    if matches!(o, Origin::Loop(..)) && matches!(panels::at_ref(path, &shell.tree), Some(panels::Panels::Split { .. })) {
+                        Some(path.clone())
+                    } else {
+                        None
+                    }
+                })
+                .expect("loop-made split path");
+            let (_, changes) = layout_intents(
+                &(&value).into(),
+                &value.workspace,
+                &[chrome::Intent::Resize { node: loop_split, size: panels::Size::Ratio(0.4) }, chrome::Intent::Settled],
+            );
+            let declined = changes.iter().find_map(|c| match c {
+                Change::Declined(m) => Some(m.as_str()),
+                _ => None,
+            });
+            let msg = declined.expect("B10: resizing loop-made split should be declined");
+            assert!(
+                !msg.contains("retype") && msg.contains("loop") && msg.contains("resize"),
+                "B10: wrong refusal message for loop-made split resize: {msg}"
+            );
+            editor_host::close(&value);
+        });
+    }
+
+    #[test]
+    fn b13_toggle_inspector_without_inspector_shows_notice() {
+        big_stack(|| {
+            let value = model_of(
+                r#"(workspace w
+                    (graph g :context sop (sop/box))
+                    (graph editor :context editor (ui/workspace (ui/graph "g"))))"#,
+            );
+            let changes = layout_actions(&(&value).into(), &value.workspace, None, &[Action::ToggleInspector]);
+            assert!(
+                changes.iter().any(|c| matches!(c, Change::Notice(m) | Change::Declined(m) if m.to_lowercase().contains("inspector"))),
+                "B13: /i with no inspector should emit a notice"
+            );
+            editor_host::close(&value);
+        });
+    }
 }
