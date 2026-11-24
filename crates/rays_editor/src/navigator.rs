@@ -1201,28 +1201,10 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
     // the wide sheet's field leaves room for the add button; the narrow one has no button
     let field_w = if w >= 300.0 { w - 40.0 } else { w - 16.0 };
     let mut state = state.clone();
-    let mut renamed: Vec<Intent> = Vec::new();
-    // F2 puts the graph's name in this field instead of the search
-    match state.rename.clone() {
-        Some((graph, seen)) => {
-            let o = ValueFieldOpts { left: true, edit: !seen, ..ValueFieldOpts::default() };
-            let (text, open) = ui.value_field((x + 8.0, y + 6.0), field_w, 20.0, &o, &|t| flow_syntax::symbol::valid_name(t), "navigator-rename", &graph);
-            if text != graph {
-                state.rename = None;
-                renamed.push(Intent::Rename { graph, to: text });
-            } else if open {
-                state.rename = Some((graph, true));
-            } else if seen {
-                state.rename = None;
-            }
-        }
-        None => {
-            let o = ValueFieldOpts { left: true, ..ValueFieldOpts::default() };
-            let (query, typing) = ui.value_field((x + 8.0, y + 6.0), field_w, 20.0, &o, &|_| true, "navigator-search", &state.query);
-            state.query = query;
-            state.typing = typing;
-        }
-    }
+    let o = ValueFieldOpts { left: true, ..ValueFieldOpts::default() };
+    let (query, typing) = ui.value_field((x + 8.0, y + 6.0), field_w, 20.0, &o, &|_| true, "navigator-search", &state.query);
+    state.query = query;
+    state.typing = typing;
     let typing = state.typing;
     if state.query.is_empty() && !typing && state.rename.is_none() {
         let boxed = ui.box_("navigator-placeholder", BoxOpts::default().flags(CLIP).w(Size::Px(field_w - 4.0)).h(Size::Px(20.0)).at((x + 10.0, y + 6.0)));
@@ -1254,7 +1236,7 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
     ui.within(&boxed, &mut |ui: &mut Ui| content = Some(ui.box_("navigator-content", BoxOpts::default().w(Size::Px(w)).h(Size::Px(total + rh)))));
     let content = content.expect("navigator content");
     let row_at = |(_, py): (f32, f32)| row_of(&tops, top, scroll, py);
-    let mut intents: Vec<Intent> = renamed;
+    let mut intents: Vec<Intent> = Vec::new();
     // the two sheets of the kit: a column under 300 points (the workspace) drops the details and keeps 56 points for an
     // input's label, a wide one (the outline sheet) shows them and keeps 112
     let wide = w >= 300.0;
@@ -1325,13 +1307,14 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
         }
     }
     let hovered = if signal.hovered { row_at(signal.pointer) } else { None };
-    // F2 renames and Delete removes the graph under the pointer (a refused removal says who reads it)
+    // Return on macOS or F2 renames the graph at the pointer. Delete removes it.
     if let Some(Row::GraphRow { graph, .. } | Row::RootRow { graph, .. }) = hovered.map(|k| &rows[k])
         && !graph.starts_with("def:")
         && !typing
+        && !was_typing
         && state.rename.is_none()
     {
-        if ui.key_pressed(Key::F2) {
+        if ui.key_pressed(Key::F2) || (rays_shell::host::platform(ui) == input::Platform::Apple && ui.key_pressed(Key::Enter)) {
             begin_rename = Some((graph.clone(), false));
         } else if ui.key_pressed(Key::Delete) {
             intents.push(Intent::Remove(graph.clone()));
@@ -1402,9 +1385,22 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
         }
     }
     state.context = context;
-    if begin_rename.is_some() {
-        state.rename = begin_rename;
-    }
+    state.rename = begin_rename.or(state.rename).and_then(|(graph, seen)| {
+        let index = rows.iter().position(|row| {
+            matches!(row, Row::GraphRow { graph: name, .. } | Row::RootRow { graph: name, .. } if *name == graph)
+        })?;
+        let ry = top + tops[index] - scroll;
+        if ry < top || ry + rh > top + body { return None; }
+        let opts = ValueFieldOpts { left: true, edit: !seen, ..ValueFieldOpts::default() };
+        let valid = |text: &str| flow_syntax::symbol::valid_name(text.trim());
+        let (text, editing) = ui.value_field((x + 24.0, ry + 2.0), (w - 36.0).max(1.0), 20.0, &opts, &valid, "navigator-rename", &graph);
+        if text.trim() != graph {
+            intents.push(Intent::Rename { graph, to: text.trim().to_owned() });
+            None
+        } else {
+            editing.then_some((graph, true))
+        }
+    });
     if fold {
         state.scene_closed = !state.scene_closed;
     }

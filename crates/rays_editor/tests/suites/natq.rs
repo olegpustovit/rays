@@ -19,6 +19,8 @@ mod alloc_budget;
 mod click_budget;
 #[path = "../native_qualification/inspector_l5.rs"]
 mod inspector_l5;
+#[path = "../native_qualification/list_l5.rs"]
+mod list_l5;
 
 pub fn scrub_child() -> bool {
     chains::scrub_child()
@@ -36,5 +38,6 @@ pub fn cases() -> Vec<(&'static str, fn())> {
     cases.extend(alloc_budget::cases());
     cases.extend(click_budget::cases());
     cases.extend(inspector_l5::cases());
+    cases.extend(list_l5::cases());
     cases
 }

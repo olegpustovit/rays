@@ -5,7 +5,6 @@
 //! applies the intents.
 use crate::host;
 use crate::kit;
-use crate::prompt;
 use editor_core::command;
 use editor_core::keymap::Trigger;
 use input::{Key, MouseButton};
@@ -91,7 +90,7 @@ pub struct Tree {
     anchor: Option<i64>,
     folded: BTreeSet<i64>,
     filter: Option<String>,
-    renaming: Option<(i64, String)>,
+    renaming: Option<(i64, bool)>,
     drag: Option<Drag>,
     reveal: bool,
     context: Option<(f32, f32, i64, Vec<i64>)>,
@@ -110,7 +109,7 @@ pub fn focused(t: &Tree) -> Option<i64> {
     t.focus
 }
 
-/// The filter or rename prompt holds the keyboard.
+/// The filter or inline rename holds the keyboard.
 pub fn editing(t: &Tree) -> bool {
     t.renaming.is_some() || t.filter.is_some()
 }
@@ -125,7 +124,7 @@ pub fn summary(t: &Tree) -> String {
     )
 }
 
-/// Arrows, Home/End, Tab/Shift-Tab, Alt-arrows, F2, `/`, `h`, Enter; the host scopes them to its
+/// Arrows, Home/End, Tab/Shift-Tab, Alt-arrows, F2, `s`, `h`, Return; the host scopes them to its
 /// list pane.
 pub fn bindings() -> Vec<(command::Command, Command)> {
     let key = |id: &str, label: &str, key: Key, action: Command, modifiers: Vec<Key>| -> (command::Command, Command) {
@@ -151,7 +150,11 @@ pub fn bindings() -> Vec<(command::Command, Command)> {
         key("delete", "delete", Key::Backspace, Command::DeleteRows, vec![]),
         key("filter", "filter", Key::KeyChar('s'), Command::Filter, vec![]),
         key("hide", "hide / show", Key::KeyChar('h'), Command::Hide, vec![]),
-        key("activate", "open selected in graph", Key::Enter, Command::ActivateRow, vec![]),
+        if cfg!(target_os = "macos") {
+            key("rename", "rename", Key::Enter, Command::RenameRow, vec![])
+        } else {
+            key("activate", "open selected in graph", Key::Enter, Command::ActivateRow, vec![])
+        },
     ]
 }
 
@@ -292,7 +295,8 @@ pub fn run_command(t: &mut Tree, rows: &[Row], selected: &[i64], command: Comman
             Vec::new()
         }
         (Command::RenameRow, Some(k)) if !at(k as usize).ghost => {
-            t.renaming = Some((at(k as usize).id, at(k as usize).label.clone()));
+            t.renaming = Some((at(k as usize).id, false));
+            t.reveal = true;
             Vec::new()
         }
         (Command::Hide, Some(k)) => {
@@ -344,7 +348,7 @@ fn drop_of(offset: f32) -> DropAt {
     }
 }
 
-/// The row list, its toggle columns, and the filter and rename prompts, built inside `Ui::frame`.
+/// The row list, its toggle columns, filter and inline rename, built inside `Ui::frame`.
 /// One box takes every pointer gesture; rows are found from the pointer, so only the visible
 /// slice is painted. `title` leads the header, e.g. the level's breadcrumb.
 pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i64, i64, i64), title: &str, columns: &[String], rows: &[Row], selected: &[i64], intents: &mut Vec<Intent>) {
@@ -485,7 +489,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
             }
             MenuResult::Pick(1) => {
                 t.context = None;
-                t.renaming = Some((id, found.map(|row| row.label.clone()).unwrap_or_default()));
+                t.renaming = Some((id, false));
             }
             MenuResult::Pick(2) => {
                 t.context = None;
@@ -504,6 +508,9 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
     }
     // Held gestures: a 4-point dead zone starts a row drag; paint applies the toggle value to each
     // row the pointer passes.
+    if matches!(t.drag, Some(Drag::Rows { .. })) && ui.key_pressed(Key::Escape) {
+        t.drag = None;
+    }
     match t.drag.clone() {
         Some(Drag::Rows { ids, moved }) if signal.held || signal.released => {
             let (px, py) = signal.pointer;
@@ -707,21 +714,24 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
             (q, _) => t.filter = Some(q),
         }
     }
-    if let Some((id, name)) = t.renaming.clone() {
-        match prompt::name(ui, "tree-rename", "Rename", "A new name for the row", "Name", &name) {
-            None | Some((_, Pick::Cancel)) => {
-                ui.dismiss_popup();
-                t.renaming = None;
-            }
-            Some((name, Pick::Submit)) => {
-                ui.dismiss_popup();
-                t.renaming = None;
-                let trimmed = name.trim().to_string();
-                if !trimmed.is_empty() {
-                    intents.push(Intent::Rename(id, trimmed));
+    if let Some((id, seen)) = t.renaming {
+        t.renaming = None;
+        if let Some(k) = position(rows, &shown, id) {
+            let row = at(k);
+            let sticky = sticky_of(rows, &shown, height, scroll);
+            let ry = sticky.iter().position(|&index| index == k).map_or(top + k as f32 * height - scroll, |slot| top + slot as f32 * height);
+            if ry >= top && ry + height <= y + h {
+                let letter = if row.link { "↳" } else { &row.badge.0 };
+                let tx = x + 34.0 + row.depth as f32 * INDENT_STEP + kit::cap_width(ui, letter);
+                let opts = ValueFieldOpts { left: true, edit: !seen, ..ValueFieldOpts::default() };
+                let valid = |text: &str| !text.trim().is_empty();
+                let (name, editing) = ui.value_field((tx, ry + (height - 20.0) / 2.0), (columns_x - 8.0 - tx).max(1.0), 20.0, &opts, &valid, "tree-rename-field", &row.label);
+                if name.trim() != row.label {
+                    intents.push(Intent::Rename(id, name.trim().to_owned()));
+                } else if editing {
+                    t.renaming = Some((id, true));
                 }
             }
-            Some((name, _)) => t.renaming = Some((id, name)),
         }
     }
     t.reveal = false;
