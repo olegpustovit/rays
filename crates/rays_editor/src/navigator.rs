@@ -1002,13 +1002,17 @@ fn show(integer: bool, v: f64) -> String {
     if integer { format!("{}", v.round() as i64) } else { cfmt::g(v, 3) }
 }
 
+fn slider_text(integer: bool, value: f64) -> String {
+    if integer { show(true, value) } else { param::float_text(value) }
+}
+
 /// A slider's scrub from the value at the press, like a card's field: 1 per 6 points for an integer, a
 /// hundredth of the magnitude per point for a float, Shift is finer.
 fn scrub(integer: bool, origin: &str, dx: f32, shift: bool) -> String {
     match origin.parse::<f64>().ok() {
         None => origin.to_owned(),
         Some(o) if integer => show(integer, o + (dx as f64 / if shift { 24.0 } else { 6.0 }).round()),
-        Some(o) => show(integer, o + (dx as f64 * 0.01 * o.abs().max(1.0) * if shift { 0.1 } else { 1.0 })),
+        Some(o) => slider_text(false, o + (dx as f64 * 0.01 * o.abs().max(1.0) * if shift { 0.1 } else { 1.0 })),
     }
 }
 
@@ -1041,8 +1045,12 @@ fn input_sliders(
             if ry >= top && ry + rh <= top + body {
                 let integer = *integer;
                 let scrub: Rc<dyn Fn(&str, f32, bool) -> String> = Rc::new(move |origin, dx, shift| scrub(integer, origin, dx, shift));
-                let text = show(integer, *value);
-                let o = ValueFieldOpts { scrub: Some(scrub), edit: typed_row == Some(k), kept_drag: true, ..ValueFieldOpts::default() };
+                let text = slider_text(integer, *value);
+                let o = ValueFieldOpts {
+                    display: (!integer).then(|| show(false, *value)),
+                    scrub: Some(scrub), edit: typed_row == Some(k), kept_drag: true,
+                    ..ValueFieldOpts::default()
+                };
                 let valid = move |t: &str| match (t).parse::<f64>().ok() {
                     Some(v) => v.is_finite() && (!integer || v.fract() == 0.0),
                     None => false,
@@ -1143,7 +1151,7 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
                     let Row::InputRow { graph, name, integer, value } = row else { continue };
                     let field = pxui::ui_core::key_of(v.box_key, &slider_label(graph, name));
                     if ui.box_of_key(field).is_some_and(|b| ui.signal(&b).pressed) {
-                        let origin = show(*integer, *value);
+                        let origin = slider_text(*integer, *value);
                         *h = Some(Held { pane, field, graph: graph.clone(), input: name.clone(), integer: *integer, last: origin.clone(), origin, patched: false });
                     }
                 }
@@ -1172,9 +1180,11 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
             h.patched = true;
             return None;
         }
-        h.patched = ui.patch_field(&field, &ValueFieldOpts::default(), &text);
+        let value = text.parse::<f64>().ok().filter(|v| v.is_finite())?;
+        let opts = ValueFieldOpts { display: (!h.integer).then(|| show(false, value)), ..ValueFieldOpts::default() };
+        h.patched = ui.patch_field(&field, &opts, &text);
         h.last = text;
-        h.last.parse::<f64>().ok().filter(|v| v.is_finite()).map(|value| Intent::SetDefault { graph: h.graph.clone(), input: h.input.clone(), value, integer: h.integer })
+        Some(Intent::SetDefault { graph: h.graph.clone(), input: h.input.clone(), value, integer: h.integer })
     });
     intents.extend(followed.filter(|_| !verified));
     (state, intents)
@@ -1400,3 +1410,7 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
     }
     (state, intents, boxed.box_key)
 }
+
+#[cfg(test)]
+#[path = "test_navigator_l5.rs"]
+mod test_navigator_l5;
