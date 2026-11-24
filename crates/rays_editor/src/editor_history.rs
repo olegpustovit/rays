@@ -18,11 +18,11 @@ pub enum Merge {
 /// A live Arc present owns the document; history entries retain only keep() snapshots.
 pub struct EditorHistory {
     /// Oldest first; the newest entry is at the back.
-    past: VecDeque<(Arc<E>, String, i64)>,
+    past: Arc<VecDeque<(Arc<E>, Arc<str>, i64)>>,
     present: Arc<A>,
-    label: String,
+    label: Arc<str>,
     /// The next redo is last.
-    future: Vec<(Arc<E>, String, i64)>,
+    future: Arc<Vec<(Arc<E>, Arc<str>, i64)>>,
     /// The last present to become an entry, kept live beside the entries.
     recent: Option<(Arc<E>, Arc<A>)>,
     capacity: i64,
@@ -71,10 +71,10 @@ pub fn create(
         return Err("Editor_core.History.create: byte_capacity must be non-negative".into());
     }
     Ok(EditorHistory {
-        past: VecDeque::new(),
+        past: Arc::new(VecDeque::new()),
         present,
-        label: String::new(),
-        future: Vec::new(),
+        label: Arc::from(""),
+        future: Arc::new(Vec::new()),
         recent: None,
         capacity,
         byte_capacity,
@@ -96,7 +96,7 @@ pub fn label(h: &EditorHistory) -> &str {
 
 /// The label of the next redo, if any.
 pub fn redo_label(h: &EditorHistory) -> Option<&str> {
-    h.future.last().map(|(_, label, _)| label.as_str())
+    h.future.last().map(|(_, label, _)| &**label)
 }
 
 pub fn can_undo(h: &EditorHistory) -> bool {
@@ -128,7 +128,7 @@ pub fn retained(h: &EditorHistory) -> (Vec<&E>, Option<&A>) {
    (entries, h.recent.as_ref().map(|(_, live)| live.as_ref()))
 }
 
-fn entry_of(h: &EditorHistory) -> (Arc<E>, String, i64) {
+fn entry_of(h: &EditorHistory) -> (Arc<E>, Arc<str>, i64) {
     let entry = Arc::new((h.keep)(&h.present));
     let n =(h.size)(&entry).max(0);
    (entry, h.label.clone(), n)
@@ -150,7 +150,7 @@ fn trim_to(limit: i64, mut h: EditorHistory) -> EditorHistory {
             None => break,
         };
         if dropped < excess ||(bytes > h.byte_capacity && depth > 1) {
-            h.past.pop_front();
+            Arc::make_mut(&mut h.past).pop_front();
             dropped += 1;
             bytes -= n;
             depth -= 1;
@@ -174,10 +174,12 @@ fn commit(value: Arc<A>, label: &str, mut h: EditorHistory) -> EditorHistory {
     }
     let(entry, old_label, n) = entry_of(&h);
     let abandoned: i64 = h.future.iter().map(|(_, _, n)| *n).sum();
-    h.past.push_back((entry.clone(), old_label, n));
+    Arc::make_mut(&mut h.past).push_back((entry.clone(), old_label, n));
     let old_present = std::mem::replace(&mut h.present, value);
-    h.label = label.to_string();
-    h.future.clear();
+    h.label = Arc::from(label);
+    if !h.future.is_empty() {
+        h.future = Arc::new(Vec::new());
+    }
     h.recent = Some((entry, old_present));
     h.depth += 1;
     h.byte_depth = h.byte_depth + n - abandoned;
@@ -214,18 +216,18 @@ pub fn record(merge: Merge, label: &str, value: Arc<A>, h: EditorHistory) -> Edi
     h
 }
 
-pub fn seal(gesture_only: bool, mut h: EditorHistory) -> EditorHistory {
+/// Whether [`seal`] with this flag would change anything.
+pub fn sealable(gesture_only: bool, h: &EditorHistory) -> bool {
     match &h.merge {
-        None => h,
-        Some(Merge::Gesture(_)) => {
-            h.merge = None;
-            h
-        }
-        Some(_) if !gesture_only => {
-            h.merge = None;
-            h
-        }
-        Some(_) => h,
+        None => false,
+        Some(Merge::Gesture(_)) => true,
+        Some(_) => !gesture_only,
+    }
+}
+
+pub fn seal(gesture_only: bool, h: &mut EditorHistory) {
+    if sealable(gesture_only, h) {
+        h.merge = None;
     }
 }
 
@@ -251,10 +253,10 @@ pub fn undo(
         Err(error) => return Some(Err(error)),
     };
     let mut next = h.clone();
-    let(_, label, n) = next.past.pop_back().expect("checked non-empty above");
+    let(_, label, n) = Arc::make_mut(&mut next.past).pop_back().expect("checked non-empty above");
     let(entry, current_label, m) = entry_of(&next);
     let old_present = std::mem::replace(&mut next.present, live);
-    next.future.push((entry.clone(), current_label, m));
+    Arc::make_mut(&mut next.future).push((entry.clone(), current_label, m));
     next.label = label;
     next.recent = Some((entry, old_present));
     next.depth -= 1;
@@ -274,10 +276,10 @@ pub fn redo(
         Err(error) => return Some(Err(error)),
     };
     let mut next = h.clone();
-    let(_, label, n) = next.future.pop().expect("checked non-empty above");
+    let(_, label, n) = Arc::make_mut(&mut next.future).pop().expect("checked non-empty above");
     let(entry, current_label, m) = entry_of(&next);
     let old_present = std::mem::replace(&mut next.present, live);
-    next.past.push_back((entry.clone(), current_label, m));
+    Arc::make_mut(&mut next.past).push_back((entry.clone(), current_label, m));
     next.label = label;
     next.recent = Some((entry, old_present));
     next.depth += 1;
@@ -293,8 +295,8 @@ pub fn shed(keep: i64, h: EditorHistory) -> EditorHistory {
 
 /// No entries left, and none charged: the editor is closing.
 pub fn release(mut h: EditorHistory) -> EditorHistory {
-    h.past.clear();
-    h.future.clear();
+    h.past = Arc::new(VecDeque::new());
+    h.future = Arc::new(Vec::new());
     h.recent = None;
     h.depth = 0;
     h.byte_depth = 0;
@@ -306,7 +308,7 @@ pub fn release(mut h: EditorHistory) -> EditorHistory {
 pub fn restart(value: Arc<A>, h: EditorHistory) -> EditorHistory {
     let mut h = release(h);
     h.present = value;
-    h.label = String::new();
+    h.label = Arc::from("");
     h
 }
 

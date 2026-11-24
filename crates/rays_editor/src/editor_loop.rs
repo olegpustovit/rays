@@ -251,7 +251,7 @@ pub fn preview_images(value: &LoopModel, frame_: &frame::Frame) -> Vec<String> {
 /// pane's press and release for the camera's pointer grab.
 pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key], &[(i64, (Panel, Option<rays_shell::layout::Path>))]), loaded: bool, actions: &[Action], sent: &'a frame::Frame, area: Bounds) -> (Cow<'a, frame::Frame>, Vec<Key>, (bool, bool)) {
     let (previous_level, previous_map, held_keys, pane_keys) = before;
-    let seal = |core: &mut m::EditorModel| { core.history = history::seal(false, core.history.clone()); };
+    let seal = |core: &mut m::EditorModel| { if history::sealable(false, &core.history) { history::seal(false, &mut core.history); } };
     let world_drag = if loaded
         || m::pane_level(&(&value.core).into()) != previous_level
         || value.core.map_view != previous_map
@@ -565,7 +565,9 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let (camera, extra) = V::on_view(Rc::make_mut(&mut value.core), &previous_camera, &focus_key_of(&focused.viewing), camera, extra, stepped, !raw_frame.input.buttons.is_empty());
     let ends_pointer = |e: &Event| matches!(e, Event::PointerReleased(MouseButton::LeftButton, _) | Event::PointerCancelled(MouseButton::LeftButton) | Event::FocusLost);
     if !frame::mouse_down(MouseButton::LeftButton, &raw_frame) || frame::has_event(&ends_pointer, &raw_frame) || frame::has_event(&ends_pointer, &update_.input) {
-        Rc::make_mut(&mut value.core).history = history::seal(true, value.core.history.clone());
+        if history::sealable(true, &value.core.history) {
+            history::seal(true, &mut Rc::make_mut(&mut value.core).history);
+        }
     }
     let live = value.world_drag.is_some() || timeline::mode(&editor_list::timeline(&value.core)) == timeline::Mode::Playing;
     let baked_from = bake_world(None, value.baked_from.as_ref(), &value.core, live);

@@ -84,7 +84,8 @@ fn history_merge_seal_undo_redo_capacity_labels() {
     let h = f.record(Merge::Gesture("move/7".into()), "Edit", 7, h);
     let h = f.record(Merge::Gesture("move/7".into()), "Edit", 8, h);
     assert!(present(&h) == 8 && depth(&h) == 3);
-    let h = hist::seal(false, h);
+    let mut h = h;
+    hist::seal(false, &mut h);
     let h = f.record(Merge::Gesture("move/7".into()), "Edit", 9, h);
     assert!(present(&f.undo(&h).unwrap()) == 8);
     let burst = |at: f64, value: i64, h: hist::EditorHistory| f.record(Merge::Burst { key: "view".into(), at, window: 0.25 }, "Edit", value, h);
