@@ -1169,7 +1169,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
     })
 }
 
-fn same_shell(a: &document::Shell, b: &document::Shell) -> bool {
+pub(crate) fn same_shell(a: &document::Shell, b: &document::Shell) -> bool {
     a.tree == b.tree
         && a.origins == b.origins
         && a.named == b.named

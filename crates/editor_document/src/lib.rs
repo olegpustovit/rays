@@ -31,3 +31,5 @@ mod test_workspace_edit;
 mod test_projection;
 #[cfg(test)]
 mod test_layout_patch;
+#[cfg(test)]
+mod test_layout_incremental;

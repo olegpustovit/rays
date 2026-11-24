@@ -685,7 +685,10 @@ pub fn remap(op: &Op, p: &Path) -> Option<Path> {
     }
 }
 
-/// The rewritten source (printed and parsed again) and its check.
+/// The rewritten source and its check. Only the workspace children the gesture rewrote are new: they
+/// get fresh ids above the source's, and every other child keeps its rows, so a check over the last
+/// one does only the editor graph again. ponytail: a rewritten child keeps the spans of the parse it
+/// came from (new nodes have none); the text pane maps its own printed spans, so nothing reads them.
 pub fn apply_checked(
     ops: &[FlowOp],
     library: bool,
@@ -694,13 +697,32 @@ pub fn apply_checked(
     src: &[Syntax],
     op: &Op,
 ) -> R<(Vec<Syntax>, w::Workspace)> {
-    apply_rewrite(ops, library, checker, catalog, &mut || {
-        let mut builder = SyntaxBuilder::new();
-        let roots = src.iter().map(|form| builder.import(form)).collect::<Vec<_>>();
-        let roots = rewrite(&roots, op, &mut builder)?;
-        let arena = builder.freeze();
-        Ok(roots.into_iter().map(|id| arena.handle(id)).collect())
-    })
+    let mut builder = SyntaxBuilder::new();
+    let roots = src.iter().map(|form| builder.import(form)).collect::<Vec<_>>();
+    let rewritten = rewrite(&roots, op, &mut builder)?;
+    let mut next = src.iter().flat_map(|form| form.arena().rows().iter().map(|row| row.id)).max().unwrap_or(0) + 1;
+    let mut spliced = Vec::with_capacity(rewritten.len());
+    for (root, old) in rewritten.into_iter().zip(src) {
+        let kept: Vec<S> = old.children().iter().filter_map(|id| builder.imported(&old.child(*id))).collect();
+        let mut children = builder.children(root).to_vec();
+        for child in children.iter_mut() {
+            if !kept.contains(child) {
+                let (fresh, after) = builder.renumber(next, *child);
+                (*child, next) = (fresh, after);
+            }
+        }
+        spliced.push(builder.with_node(old, Draft::List(children)));
+    }
+    let arena = builder.freeze();
+    let forms: Vec<Syntax> = spliced.into_iter().map(|id| arena.handle(id)).collect();
+    let (checked, diagnostics) = match checker {
+        Some(check) => check(catalog, &forms),
+        None => w::check(ops, library, false, None, catalog, &forms),
+    };
+    match checked {
+        Some(checked) => Ok((forms, checked)),
+        None => Err(diagnostics.into_iter().find(|d| d.severity == rays_diagnostic::Severity::ErrorSeverity).unwrap_or_else(|| fail("The edit does not check."))),
+    }
 }
 
 /// The edit adds or removes nodes, so layout keys are pruned after it (a resize does not).

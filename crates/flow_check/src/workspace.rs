@@ -621,6 +621,13 @@ struct Checker {
     /// innermost memoised call began.
     depth_seen: Option<usize>,
     probes: Vec<String>,
+    /// Ids below this belong to the base chain.
+    prefix: usize,
+    /// Graphs checked again on top of a retained base: the base's state for them is hidden.
+    masked: BTreeSet<String>,
+    /// (graph, graph it references), and the graphs that took a catalog kind as a value.
+    refs: BTreeSet<(String, String)>,
+    kind_fn_graphs: BTreeSet<String>,
 }
 
 impl Checker {
@@ -665,6 +672,10 @@ impl Checker {
             events: 0,
             depth_seen: None,
             probes: Vec::new(),
+            prefix: 0,
+            masked: BTreeSet::new(),
+            refs: BTreeSet::new(),
+            kind_fn_graphs: BTreeSet::new(),
         }
     }
     fn fork(base: Rc<Checker>) -> Self {
@@ -673,36 +684,55 @@ impl Checker {
         checker.steps = base.steps; checker.count = base.count; checker.children = base.children;
         checker.zone_id = base.zone_id; checker.events = base.events;
         checker.inherited = base.inherited.clone();
+        checker.prefix = base.prefix + base.paths.len();
         checker.base = Some(base);
         checker
     }
     fn path_names(&self, path: CheckPath) -> &Arc<[Symbol]> {
-        let prefix = self.base.as_ref().map_or(0, |base| base.paths.len());
-        if path < prefix { &self.base.as_ref().unwrap().paths[path] } else { &self.paths[path - prefix] }
+        if path < self.prefix { self.base.as_ref().unwrap().path_names(path) } else { &self.paths[path - self.prefix] }
+    }
+    fn find_path(&self, names: &[Symbol]) -> Option<CheckPath> {
+        self.path_index.get(names).copied().or_else(|| self.base.as_ref()?.find_path(names))
     }
     fn path(&mut self, names: Path) -> CheckPath {
-        if let Some(id) = self.path_index.get(names.as_slice()) { return *id; }
-        if let Some(id) = self.base.as_ref().and_then(|base| base.path_index.get(names.as_slice())) { return *id; }
-        let id = self.base.as_ref().map_or(0, |base| base.paths.len()) + self.paths.len();
+        if let Some(id) = self.find_path(&names) { return id; }
+        let id = self.prefix + self.paths.len();
         let names: Arc<[Symbol]> = names.into();
         self.paths.push(names.clone()); self.path_index.insert(names, id); id
+    }
+    /// The base's state at `path` is hidden: the path is in a graph checked again.
+    fn hidden(&self, path: CheckPath) -> bool {
+        !self.masked.is_empty() && self.path_names(path).first().is_some_and(|root| self.masked.contains(root.as_str()))
+    }
+    /// What the base chain knows at a path this checker does not hide.
+    fn base_at<T>(&self, path: CheckPath, get: &dyn Fn(&Checker) -> Option<T>) -> Option<T> {
+        if self.hidden(path) { return None; }
+        let mut base = self.base.as_deref();
+        while let Some(b) = base {
+            if let Some(found) = get(b) { return Some(found); }
+            base = b.base.as_deref();
+        }
+        None
+    }
+    fn bases(&self) -> impl Iterator<Item = &Checker> {
+        std::iter::successors(self.base.as_deref(), |b| b.base.as_deref())
     }
     fn child_path(&mut self, parent: CheckPath, name: Symbol) -> CheckPath {
         let mut names = self.path_names(parent).to_vec(); names.push(name); self.path(names)
     }
     fn packed_update(&mut self, path: CheckPath, next: CheckPackedForm) {
-        let old = self.packed.get(&path).or_else(|| self.base.as_ref()?.packed.get(&path)).cloned();
+        let old = self.packed.get(&path).cloned().or_else(|| self.base_at(path, &|b| b.packed.get(&path).cloned()));
         let merged=match old { Some(old)=>Self::merge_packed(old,next), None=>next };
         self.packed.insert(path, merged);
     }
-    fn defs_get(&self, name: &str) -> Option<&Sig> { self.defs.get(name).or_else(|| self.base.as_ref()?.defs.get(name)) }
-    fn graphs_get(&self, name: &str) -> Option<&Sig> { self.graphs.get(name).or_else(|| self.base.as_ref()?.graphs.get(name)) }
-    fn node_defs_get(&self, name: &str) -> Option<&defnode::Defnode> { self.node_defs.get(name).or_else(|| self.base.as_ref()?.node_defs.get(name)) }
-    fn ginfo_get(&self, name: &str) -> Option<&Info> { self.ginfo.get(name).or_else(|| self.base.as_ref()?.ginfo.get(name)) }
-    fn def_terms_get(&self, name: &str) -> Option<&Graph> { self.def_terms.get(name).or_else(|| self.base.as_ref()?.def_terms.get(name)) }
-    fn macros_contains(&self, name: &str) -> bool { self.macros.contains_key(name) || self.base.as_ref().is_some_and(|base| base.macros.contains_key(name)) }
-    fn declared_names_contains(&self, name: &str) -> bool { self.declared_names.contains(name) || self.base.as_ref().is_some_and(|base| base.declared_names.contains(name)) }
-    fn checked_defs_contains(&self, name: &str) -> bool { self.checked_defs.contains(name) || self.base.as_ref().is_some_and(|base| base.checked_defs.contains(name)) }
+    fn defs_get(&self, name: &str) -> Option<&Sig> { self.defs.get(name).or_else(|| self.base.as_ref()?.defs_get(name)) }
+    fn graphs_get(&self, name: &str) -> Option<&Sig> { self.graphs.get(name).or_else(|| self.base.as_ref()?.graphs_get(name)) }
+    fn node_defs_get(&self, name: &str) -> Option<&defnode::Defnode> { self.node_defs.get(name).or_else(|| self.base.as_ref()?.node_defs_get(name)) }
+    fn ginfo_get(&self, name: &str) -> Option<&Info> { self.ginfo.get(name).or_else(|| if self.masked.contains(name) { None } else { self.base.as_ref()?.ginfo_get(name) }) }
+    fn def_terms_get(&self, name: &str) -> Option<&Graph> { self.def_terms.get(name).or_else(|| self.base.as_ref()?.def_terms_get(name)) }
+    fn macros_contains(&self, name: &str) -> bool { self.macros.contains_key(name) || self.base.as_ref().is_some_and(|base| base.macros_contains(name)) }
+    fn declared_names_contains(&self, name: &str) -> bool { self.declared_names.contains(name) || self.base.as_ref().is_some_and(|base| base.declared_names_contains(name)) }
+    fn checked_defs_contains(&self, name: &str) -> bool { self.checked_defs.contains(name) || self.base.as_ref().is_some_and(|base| base.checked_defs_contains(name)) }
  fn make_term(&mut self, form: &Syntax, ty: Ty, node: Draft) -> TermId {
      let form = self.terms.import_form(form);
      self.terms.push(None, &ty, form, node)
@@ -716,7 +746,7 @@ impl Checker {
  fn inline_path(&mut self,cx:&Cx,seg:&str)->CheckPath {
      self.events+=1;
      let key=self.child_path(cx.path,symbol::intern(seg));
-     let n=self.inline.get(&key).or_else(||self.base.as_ref()?.inline.get(&key)).copied().unwrap_or(0);
+     let n=self.inline.get(&key).copied().or_else(||self.base_at(key,&|b|b.inline.get(&key).copied())).unwrap_or(0);
      self.inline.insert(key,n+1);
      if n==0 {key} else {self.child_path(cx.path,format!("{seg}~{n}").into())}
  }
@@ -750,7 +780,8 @@ impl Checker {
  }
 
  fn add_root(&mut self, form: &Syntax, path: CheckPath, refusal: Option<Diagnostic>) {
-     if !self.base.iter().flat_map(|base|base.roots.iter()).chain(self.roots.iter()).any(|(old, owner)| old.id == form.id && owner == &path) {
+     let known = |roots: &[(Syntax, CheckPath)]| roots.iter().any(|(old, owner)| old.id == form.id && owner == &path);
+     if !known(&self.roots) && self.base_at(path, &|b| known(&b.roots).then_some(())).is_none() {
          self.roots.push((form.clone(), path));
      }
      let next = match refusal {
@@ -946,14 +977,14 @@ impl Checker {
          return self.infer(cx, form);
      }
      let memo = (form.id, key.to_owned());
-     let path = if let Some(path) = self.input_paths.get(&cx.path).and_then(|paths| paths.get(&memo)).or_else(|| self.base.as_ref()?.input_paths.get(&cx.path)?.get(&memo)) {
-         *path
+     let path = if let Some(path) = self.input_paths.get(&cx.path).and_then(|paths| paths.get(&memo)).copied().or_else(|| self.base_at(cx.path, &|b| b.input_paths.get(&cx.path)?.get(&memo).copied())) {
+         path
      } else {
          let mut stem = self.path_names(cx.path).to_vec();
          let leaf = stem.pop().unwrap_or_else(|| "@result".into());
          stem.push(format!("{leaf}#{key}").into());
          let stem_id = self.path(stem.clone());
-         let previous = self.base.as_ref().and_then(|base| base.inline.get(&stem_id)).copied().unwrap_or(0);
+         let previous = self.base_at(stem_id, &|b| b.inline.get(&stem_id).copied()).unwrap_or(0);
          let count = self.inline.entry(stem_id).or_insert(previous);
          let path = if *count == 0 {
              stem
@@ -1745,6 +1776,7 @@ impl Checker {
              }
              if let Ok(kind) = catalog::resolve_kind(&self.catalog, &cx.ctx, name) {
                  self.kind_fns.insert(name.to_owned(), (kind.qualified.clone(), kind.context, kind.slots.clone()));
+                 self.kind_fn_graphs.insert(self.graph_stack.last().cloned().unwrap_or_default());
                  let mut value = Info::leaf(Ty::Fn(None));
                  value.callable = Some(Rc::new(Callable::Kind(kind)));
                  return (self.make_term(form, Ty::Fn(None), Draft::FnRef(name.to_owned())), value);
@@ -1904,7 +1936,9 @@ impl Checker {
          return (self.make_term(form, rv.ty.clone(), Draft::CallFn { fn_name: name.to_owned(), args: args.iter().map(|a| a.term).collect(), body }), rv);
      }
      if self.macros_contains(name) {
-         let definitions = self.base.iter().flat_map(|base| base.macro_forms.iter()).chain(self.macro_forms.iter()).cloned().collect::<Vec<_>>();
+         let mut bases = self.bases().collect::<Vec<_>>();
+         bases.reverse();
+         let definitions = bases.into_iter().flat_map(|base| base.macro_forms.iter()).chain(self.macro_forms.iter()).cloned().collect::<Vec<_>>();
          return match macros::expand(&definitions, form) {
              Ok(expanded) => {
                  let (term, value) = self.infer(cx, &expanded);
@@ -2452,8 +2486,8 @@ impl Checker {
          }
          "ui/graph" => if let Some(argument) = positional.first() {
              if let Some(name) = text(argument) {
-                 let valid = graphs.contains_key(name) || base.is_some_and(|base|base.graphs.contains_key(name))
-                     || name.strip_prefix("def:").is_some_and(|name| defs.contains_key(name) || base.is_some_and(|base|base.defs.contains_key(name)));
+                 let valid = graphs.contains_key(name) || base.is_some_and(|base|base.graphs_get(name).is_some())
+                     || name.strip_prefix("def:").is_some_and(|name| defs.contains_key(name) || base.is_some_and(|base|base.defs_get(name).is_some()));
                  if !valid {
                      error(&argument.form, "E_UNKNOWN_GRAPH", &format!("Unknown graph: {name}."));
                  }
@@ -2954,6 +2988,7 @@ fn ref_form(&mut self, cx: &Cx, x: &Syntax, forms: &[packed::SyntaxId]) -> (Term
     let g = first.name(g);
     let Some(sg) = self.graphs_get(g).cloned() else { return self.fail_term(&first, "E_UNKNOWN_GRAPH", &format!("Unknown graph reference: {g}.")) };
      if cx.in_def { return self.fail_term(x, "E_REF_IN_DEF", "Reusable functions cannot capture project graphs; add an explicit parameter."); }
+     self.refs.insert((self.graph_stack.last().cloned().unwrap_or_default(), g.to_owned()));
      let gv = self.graph_info(x, g);
     let mut overrides: Vec<(Symbol, TermId)> = Vec::new();
      let mut vs = vec![gv.clone()];
@@ -3742,6 +3777,140 @@ pub fn prelude(
     Prelude { checker: Rc::new(checker) }
 }
 
+/// The last clean check on this thread, kept so that a workspace differing from it only in graphs
+/// nothing else references (an editor layout, the graphs written after it) checks just those.
+/// ponytail: one entry per thread, retained beside the document; drop it if checker memory shows.
+struct Retained {
+    checker: Rc<Checker>,
+    form: Syntax,
+    workspace: Workspace,
+    catalog_len: usize,
+}
+thread_local! { static RETAINED: std::cell::RefCell<Option<Rc<Retained>>> = const { std::cell::RefCell::new(None) }; }
+
+fn graph_name(form: &Syntax) -> Option<&str> {
+    match form.children() {
+        [head, name, ..] => match (form.arena().row(*head).node, form.arena().row(*name).node) {
+            (SNode::Sym(head), SNode::Sym(name)) if form.name(head) == "graph" => Some(form.name(name)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `check` of a workspace whose forms equal the retained check's but for some graphs no unchanged
+/// graph references: those are checked again over the retained checker. `None`: check it whole.
+fn recheck(ops: &[op::Op], library: bool, call_sites: bool, prelude: Option<&Prelude>, catalog: &catalog::Catalog, forms: &[Syntax]) -> Option<(Option<Workspace>, Vec<Diagnostic>)> {
+    let retained = RETAINED.with(|r| r.borrow().clone())?;
+    let base = &retained.checker;
+    let [form] = forms else { return None };
+    let same_prelude = match (prelude, base.base.as_ref()) {
+        (Some(p), Some(b)) => Rc::ptr_eq(&p.checker, b),
+        (None, None) => true,
+        _ => false,
+    };
+    if !same_prelude || base.library != library || base.call_sites != call_sites || !op::same_declarations(&base.ops, ops)
+        || base.catalog.version != catalog.version || retained.catalog_len != catalog.kinds.len() || base.catalog.kinds[..retained.catalog_len] != catalog.kinds[..] {
+        return None;
+    }
+    let (old, new) = (retained.form.children(), form.children());
+    if old.len() != new.len() || old.len() < 2 || form.meta() != retained.form.meta() || retained.form.child(old[0]) != form.child(new[0]) || retained.form.child(old[1]) != form.child(new[1]) {
+        return None;
+    }
+    let mut dirty: Vec<(String, Syntax)> = Vec::new();
+    for (o, n) in old[2..].iter().zip(&new[2..]) {
+        let (o, n) = (retained.form.child(*o), form.child(*n));
+        if o == n { continue; }
+        match (graph_name(&o), graph_name(&n)) {
+            (Some(a), Some(b)) if a == b && base.graphs.contains_key(a) => dirty.push((a.to_owned(), n)),
+            _ => return None,
+        }
+    }
+    let is_dirty = |name: &str| dirty.iter().any(|(d, _)| d == name);
+    if base.refs.iter().any(|(from, to)| is_dirty(to) && !is_dirty(from)) || dirty.iter().any(|(d, _)| base.kind_fn_graphs.contains(d)) {
+        return None;
+    }
+    let _phase = flow_syntax::phase_timer::measure("check.graphs_again");
+    let mut checker = Checker::fork(base.clone());
+    checker.masked = dirty.iter().map(|(d, _)| d.clone()).collect();
+    let declarations: Vec<(String, String, Syntax)> = new[2..].iter().filter_map(|id| {
+        let f = form.child(*id);
+        match f.children() {
+            [head, name, ..] => match (f.arena().row(*head).node, f.arena().row(*name).node) {
+                (SNode::Sym(head), SNode::Sym(name)) => Some((f.name(head).to_owned(), f.name(name).to_owned(), f.clone())),
+                _ => None,
+            },
+            _ => None,
+        }
+    }).collect();
+    for (name, f) in &dirty {
+        if let Some(signature) = checker.parse_signature(f, "graph", name, &declarations) {
+            checker.graphs.insert(name.clone(), signature);
+        }
+    }
+    if checker.diags.is_empty() {
+        for (name, f) in &dirty {
+            checker.graph_info(f, name);
+        }
+    }
+    let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    for problem in std::mem::take(&mut checker.diags) {
+        if !diagnostics.iter().any(|old| old.code == problem.code && old.span == problem.span && old.message == problem.message) {
+            diagnostics.push(problem);
+        }
+    }
+    if diagnostics.iter().any(|problem| problem.severity == Severity::ErrorSeverity) {
+        return Some((None, diagnostics));
+    }
+    // what the graphs checked again mark is theirs alone
+    let rooted = |path: &[Symbol]| path.first().is_some_and(|root| is_dirty(root.as_str()));
+    let names = |path: &CheckPath| checker.path_names(*path).to_vec();
+    if !checker.kind_fns.is_empty() || checker.live.iter().chain(&checker.invariant).chain(checker.packed.keys()).chain(checker.roots.iter().map(|(_, p)| p)).any(|p| !rooted(checker.path_names(*p))) {
+        return None;
+    }
+    let old_ws = &retained.workspace;
+    // the retained check's own marks, as `check` collects them
+    let levels = || base.base.iter().map(|b| &**b).chain(std::iter::once(&**base));
+    let old_names = |path: &CheckPath| base.path_names(*path).to_vec();
+    let live = levels().flat_map(|b| b.live.iter()).map(old_names).filter(|p| !rooted(p)).chain(checker.live.iter().map(names)).collect();
+    let invariant = levels().flat_map(|b| b.invariant.iter()).map(old_names).filter(|p| !rooted(p)).chain(checker.invariant.iter().map(names)).collect();
+    let mut packed: BTreeMap<Path, PackedForm> = old_ws.packed.iter().filter(|(p, _)| !rooted(p)).cloned().collect();
+    let mut approx_reasons: BTreeMap<Path, Vec<Diagnostic>> = old_ws.approx_reasons.iter().filter(|(p, _)| !rooted(p)).cloned().collect();
+    for (path, f) in &checker.packed {
+        let f = match f {
+            CheckPackedForm::Candidate(paths) => PackedForm::Candidate(Arc::new(paths.iter().map(names).collect())),
+            CheckPackedForm::Refused(diagnostics) => PackedForm::Refused(diagnostics.clone()),
+        };
+        approx_reasons.insert(names(path), match &f {
+            PackedForm::Refused(reasons) => reasons.clone(),
+            PackedForm::Candidate(_) => vec![err("E_PACKED_PENDING", "Actual producer captures have not been qualified.".into(), None)],
+        });
+        packed.insert(names(path), f);
+    }
+    let mut packed_roots: Vec<(Syntax, Path)> = levels().flat_map(|b| b.roots.iter()).map(|(f, p)| (f.clone(), old_names(p))).filter(|(_, p)| !rooted(p)).chain(checker.roots.iter().map(|(f, p)| (f.clone(), names(p)))).collect();
+    packed_roots.sort_by(|(a, p), (b, q)| p.cmp(q).then(a.id.cmp(&b.id)));
+    let graphs = old_ws.graphs.iter().map(|g| if is_dirty(&g.name) { checker.graph_terms.remove(&g.name) } else { Some(g.clone()) }).collect::<Option<Vec<_>>>()?;
+    Some((Some(Workspace {
+        name: old_ws.name.clone(),
+        graphs: graphs.into(),
+        defs: old_ws.defs.clone(),
+        nodes: old_ws.nodes.clone(),
+        macros: old_ws.macros.clone(),
+        source: forms.to_vec().into(),
+        live,
+        invariant,
+        approx: Paths::new(),
+        packed: packed.into_iter().collect::<Vec<_>>().into(),
+        packed_roots,
+        approx_reasons: approx_reasons.into_iter().collect::<Vec<_>>().into(),
+        kind_fns: old_ws.kind_fns.clone(),
+        ops: old_ws.ops.clone(),
+    }), diagnostics))
+}
+
+/// Forget the retained check (tests compare a recheck against a whole one).
+pub fn forget_retained() { RETAINED.with(|r| *r.borrow_mut() = None); }
+
 pub fn check(
     ops: &[op::Op],
     library: bool,
@@ -3753,6 +3922,9 @@ pub fn check(
     let _phase = flow_syntax::phase_timer::measure("check");
     if let Some(problem) = op::validate(ops) {
         return (None, vec![problem]);
+    }
+    if let Some(done) = recheck(ops, library, call_sites, prelude, catalog, forms) {
+        return done;
     }
     let mut checker = if let Some(prelude) = prelude {
         let mut checker = Checker::fork(prelude.checker.clone());
@@ -3827,8 +3999,8 @@ pub fn check(
     packed_roots.sort_by(|(a, p),(b, q)| p.cmp(q).then(a.id.cmp(&b.id)));
     let workspace = Workspace {
         name: name.to_owned(),
-        graphs: graph_names.iter().filter_map(|name| checker.graph_terms.remove(name).or_else(||checker.base.as_ref()?.graph_terms.get(name).cloned())).collect::<Vec<_>>().into(),
-        defs: def_names.iter().filter_map(|name| checker.def_terms.remove(name).or_else(||checker.base.as_ref()?.def_terms.get(name).cloned())).collect::<Vec<_>>().into(),
+        graphs: graph_names.iter().filter_map(|name| checker.graph_terms.get(name).cloned().or_else(||checker.base.as_ref()?.graph_terms.get(name).cloned())).collect::<Vec<_>>().into(),
+        defs: def_names.iter().filter_map(|name| checker.def_terms.get(name).cloned().or_else(||checker.base.as_ref()?.def_terms.get(name).cloned())).collect::<Vec<_>>().into(),
         nodes,
         macros,
         source: forms.to_vec().into(),
@@ -3839,8 +4011,19 @@ pub fn check(
         packed_roots,
         approx_reasons: approx_reasons.into(),
         kind_fns,
-        ops: checker.ops.into(),
+        ops: checker.ops.clone(),
     };
+    if diagnostics.is_empty() {
+        // the sets `recheck` collects again from the checker are left out
+        let kept = Workspace {
+            name: workspace.name.clone(), graphs: workspace.graphs.clone(), defs: workspace.defs.clone(), nodes: workspace.nodes.clone(),
+            macros: workspace.macros.clone(), source: workspace.source.clone(), live: Paths::new(), invariant: Paths::new(), approx: Paths::new(),
+            packed: workspace.packed.clone(), packed_roots: Vec::new(), approx_reasons: workspace.approx_reasons.clone(),
+            kind_fns: workspace.kind_fns.clone(), ops: workspace.ops.clone(),
+        };
+        let retained = Retained { checker: Rc::new(checker), form: workspace_form.clone(), workspace: kept, catalog_len: catalog.kinds.len() };
+        RETAINED.with(|r| *r.borrow_mut() = Some(Rc::new(retained)));
+    }
     (Some(workspace), diagnostics)
 }
 #[cfg(test)]
