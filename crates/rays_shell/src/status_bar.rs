@@ -199,7 +199,8 @@ fn focus_end(ui: &mut Ui, after: f32, kind: Option<&str>, selection: Option<&str
 fn strip(ui: &mut Ui, label: &str, bounds: (i64, i64, i64, i64), revision: u64, paint: &mut dyn FnMut(&mut Ui, &UiBox)) {
     let (x, y, w, h) = bounds;
     let view = ui.view(label, revision, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| {
-        let boxed = ui.box_(label, BoxOpts::default().flags(CLIP).w(Size::Grow).h(Size::Grow));
+        let flags = if matches!(label, "workspace-status" | "workspace-guide-leader") { CLICKABLE | CLIP } else { CLIP };
+        let boxed = ui.box_(label, BoxOpts::default().flags(flags).w(Size::Grow).h(Size::Grow));
         paint(ui, &boxed);
     });
     ui.set_at(&view, (x as f32, y as f32));
@@ -217,6 +218,7 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts) {
         let after = lead_plan(&mut |s| ui.text_width(None, s), x as f32, &o.file, limit, &o.text).4;
         let rev = revision(&|h| (bounds, after.to_bits(), hash_sans_text(o, h)).hash(h));
         strip(ui, "workspace-status", bounds, rev, &mut |ui, boxed| {
+            copy_menu(ui, boxed, &o.text);
             let o = o.clone();
             let fps = o.fps.map(|fps| format!("{fps} fps"));
             ui.draw(boxed, move |paint, b| {
@@ -252,6 +254,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             let after = lead_plan(&mut |s| ui.text_width(None, s), x as f32, &o.file, limit, &o.text).4;
             let rev = revision(&|h| (bounds, after.to_bits(), &pending, hash_sans_text(o, h)).hash(h));
             strip(ui, "workspace-guide-leader", bounds, rev, &mut |ui, boxed| {
+            copy_menu(ui, boxed, &o.text);
             let o = o.clone();
             let pending = pending.clone();
             let fps = o.fps.map(|fps| format!("{fps} fps"));
@@ -275,6 +278,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                     .h(Size::Px(height as f32))
                     .at((x as f32, y as f32)),
             );
+            copy_menu(ui, &bar, &o.text);
             let keys = &o.extra;
             let title = guide_context::name(context);
             // the kind and what is selected; a context that is no node's (the leader, a search) names itself
@@ -432,5 +436,11 @@ pub fn tips(ui: &mut Ui, bounds: (i64, i64, i64, i64), avoid: &[(f32, f32, f32, 
                 }
             });
         }
+    }
+}
+
+fn copy_menu(ui: &mut Ui, owner: &UiBox, text: &str) {
+    if kit::context_menu(ui, owner, &[("Copy value", !text.is_empty())]).is_some() {
+        let _ = rays::clipboard::set_text(text);
     }
 }

@@ -146,6 +146,10 @@ pub fn button(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, o: &ButtonOpts, la
 /// A colour: a 20-point swatch, then its hex field to the right edge of the control column; the
 /// hex text typed (or `hex` unchanged). `key` names the pair; `at` is the control column.
 pub fn colour(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, swatch: Color, hex: &str) -> String {
+    colour_edit(ui, key, at, w, swatch, hex, false)
+}
+
+pub fn colour_edit(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, swatch: Color, hex: &str, edit: bool) -> String {
     let (x, y) = at;
     let boxed = ui.box_fmt(format_args!("swatch-{key}"), BoxOpts::default().at((x, y)).w(Size::Px(20.0)).h(Size::Px(20.0)));
     let edge = theme::edge(&ui.tokens());
@@ -154,7 +158,7 @@ pub fn colour(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, swatch: Color, hex
         paint.fill(sx, sy, sw, sh, swatch);
         paint.stroke(sx + 0.5, sy + 0.5, sw - 1.0, sh - 1.0, edge);
     });
-    let opts = ValueFieldOpts { left: true, ..ValueFieldOpts::default() };
+    let opts = ValueFieldOpts { left: true, edit, ..ValueFieldOpts::default() };
     let valid = |t: &str| color::hex(t).is_ok();
     ui.value_field((x + 28.0, y), w - 28.0, 20.0, &opts, &valid, &format!("hex-{key}"), hex).0
 }
@@ -298,5 +302,34 @@ pub fn vector(ui: &mut Ui, boxed: &UiBox, at: (f32, f32), w: f32, reserve: f32, 
             paint.text_s((x + fx + 2.0, ty), cap, theme::ink_3(&theme), &axis);
         });
         cell(ui, index, fx, fw);
+    }
+}
+
+/// A right-click menu retained on its owner box. Returns the chosen item and the opening point.
+pub fn context_menu(ui: &mut Ui, owner: &UiBox, items: &[(&str, bool)]) -> Option<(usize, (f32, f32))> {
+    if let Some((x, y)) = ui.context_at(owner) {
+        let point = ((x.to_bits() as u64) << 32) | y.to_bits() as u64;
+        ui.set_state(owner, if point == 0 { 1 } else { point as i64 });
+    }
+    let point = ui.state(owner, 0) as u64;
+    if point == 0 {
+        return None;
+    }
+    let at = if point == 1 { (0.0, 0.0) } else { (f32::from_bits((point >> 32) as u32), f32::from_bits(point as u32)) };
+    let items: Vec<_> = items.iter().map(|(label, enabled)| ((*label).to_owned(), *enabled)).collect();
+    let mut result = MenuResult::Open;
+    with_label(format_args!("value-context-{}", owner.box_key), &mut |key| {
+        result = ui.context_menu(at, &MenuOpts::default(), key, &items);
+    });
+    match result {
+        MenuResult::Open => None,
+        MenuResult::Dismiss => {
+            ui.set_state(owner, 0);
+            None
+        }
+        MenuResult::Pick(index) => {
+            ui.set_state(owner, 0);
+            Some((index as usize, at))
+        }
     }
 }

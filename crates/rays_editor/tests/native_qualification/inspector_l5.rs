@@ -133,11 +133,78 @@ fn b29_shared_scrub_undoes_both_nodes_at_once() {
     editor::close(&e);
 }
 
+fn b27_inspector_row_context_menu() {
+    let row = FlowRow {
+        path: "count".into(), shown: true, locked: false, drive: None, live: None,
+        fields: vec![field("count", param::integer(0, 10, None, None).unwrap(), Value::Int(2))],
+    };
+    let mut row = row;
+    row.fields[0].current = Value::Int(9);
+    let mut changes = Vec::new();
+    choose_menu((320, 240), (80., 12.), "Reset to default", &mut |ui| {
+        changes = inspector::flow_fields(ui, &FlowOpts::default(), None, std::slice::from_ref(&row));
+    });
+    assert_eq!(changes, vec![FlowChange::Edited("count".into(), Value::Int(2))]);
+}
+
+fn choose_menu(size: (i64, i64), point: (f64, f64), item: &str, build: &mut dyn FnMut(&mut pxui::ui::Ui)) {
+    let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
+    ui.set_a11y(true);
+    let mut step = |ui: &mut pxui::ui::Ui, tick, point, events| {
+        let f = rays::frame::Frame {
+            input: input::Frame { size, frame: tick, tick, pointer: point, events, ..input::at_time(tick as f64 / 60.) },
+            pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.),
+        };
+        rays_shell::host::build(ui, &f, build);
+    };
+    step(&mut ui, 1, point, vec![]);
+    let right = MouseButton::RightButton;
+    step(&mut ui, 2, point, vec![Event::PointerPressed(right, point), Event::PointerReleased(right, point)]);
+    step(&mut ui, 3, point, vec![]);
+    let row = ui.a11y_nodes().iter().find(|n| ui.a11y_name_of(n) == item).unwrap_or_else(|| panic!("no menu item {item} at {point:?}"));
+    let at = ((row.rect.x + row.rect.w / 2.) as f64, (row.rect.y + row.rect.h / 2.) as f64);
+    let left = MouseButton::LeftButton;
+    step(&mut ui, 4, at, vec![Event::PointerPressed(left, at), Event::PointerReleased(left, at)]);
+    rays_shell::host::destroy(&mut ui);
+}
+
+fn b27_readouts_have_context_menus() {
+    let was = rays::clipboard::get_text().ok();
+    let size = (480, 240);
+    let opts = rays_shell::status_bar::Opts { text: "cook complete".into(), ..Default::default() };
+    choose_menu(size, (100., 212.), "Copy value", &mut |ui| {
+        rays_shell::status_bar::draw(ui, (0, 200, size.0, 24), &opts);
+    });
+    assert_eq!(rays::clipboard::get_text().unwrap(), opts.text);
+
+    choose_menu(size, (330., 12.), "Copy value", &mut |ui| {
+        rays_shell::timeline_bar::draw(ui, (0, 0, size.0, 24), false, false, 42, 0.7, 240);
+    });
+    assert_eq!(rays::clipboard::get_text().unwrap(), "42");
+
+    let geometry = rdk_ops::line_geometry::points(&[(3., 4., 5.)]).unwrap();
+    choose_menu(size, (100., 60.), "Copy value", &mut |ui| {
+        rays_editor::spreadsheet::view(ui, (0, 0, size.0, size.1), 0, Some(&geometry));
+    });
+    assert_eq!(rays::clipboard::get_text().unwrap(), "3.0");
+
+    let mut reveal = false;
+    choose_menu(size, (140., 22.), "Reveal in Lisp", &mut |ui| {
+        reveal = inspector::header_context(ui, "Example", false, true, &mut |ui| {
+            ui.inspector_header("sample-header", None, None, None, None, &[], None, false, "Example", "")
+        }).1;
+    });
+    assert!(reveal);
+    if let Some(text) = was { let _ = rays::clipboard::set_text(&text); }
+}
+
 pub fn cases() -> Vec<(&'static str, fn())> {
     vec![
         ("inspector_b21_hex_color_is_one_edit", b21_hex_color_is_one_edit),
         ("inspector_b22_driven_number_can_be_replaced", b22_driven_number_can_be_replaced),
         ("click_budget_inspector_hover", click_budget_inspector_hover),
         ("inspector_b29_shared_scrub_undoes_both_nodes_at_once", b29_shared_scrub_undoes_both_nodes_at_once),
+        ("inspector_b27_row_context_menu", b27_inspector_row_context_menu),
+        ("inspector_b27_readouts_have_context_menus", b27_readouts_have_context_menus),
     ]
 }

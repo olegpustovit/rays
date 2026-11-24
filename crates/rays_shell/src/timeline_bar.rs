@@ -27,6 +27,27 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
     intents
 }
 
+fn number_field(ui: &mut Ui, key: &str, at: (f32, f32), width: f32, current: &str, default: i64, valid: &dyn Fn(&str) -> bool) -> String {
+    let owner = ui.box_fmt(format_args!("{key}-owner"), BoxOpts::default().at(at).w(Size::Px(width)).h(Size::Px(20.0)));
+    let action = kit::context_menu(ui, &owner, &[
+        ("Copy value", true), ("Paste value", true), ("Reset to default", true), ("Type value", true),
+    ]).map(|(choice, _)| choice);
+    let mut text = String::new();
+    ui.within(&owner, &mut |ui| {
+        let opts = ValueFieldOpts { edit: action == Some(3), ..Default::default() };
+        text = ui.value_field((0.0, 0.0), width, 20.0, &opts, valid, key, current).0;
+    });
+    match action {
+        Some(0) => { let _ = rays::clipboard::set_text(current); }
+        Some(1) => {
+            if let Ok(value) = rays::clipboard::get_text() && valid(value.trim()) { text = value; }
+        }
+        Some(2) => text = default.to_string(),
+        _ => {}
+    }
+    text
+}
+
 fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, frame: i64, time: f64, max_frame: i64) -> Vec<Intent> {
     let (x, y, width, height) = bounds;
     let theme = ui.tokens();
@@ -70,9 +91,7 @@ fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, f
         let field_x = cx;
         let current = frame.to_string();
         let valid_frame = |text: &str| text.trim().parse::<i64>().is_ok();
-        let typed = ui
-            .value_field((field_x, cy), field_w, 20.0, &ValueFieldOpts::default(), &valid_frame, "timeline-frame-field", &current)
-            .0;
+        let typed = number_field(ui, "timeline-frame-field", (field_x, cy), field_w, &current, 0, &valid_frame);
         cx = cx + field_w + 8.0;
         let time_label = if tall { label(ui, &mut cx, "Time") } else { cx };
         let readout = format!("{} s", cfmt::f(time, 2));
@@ -85,7 +104,7 @@ fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, f
         let ended = if !tall {
             last.clone()
         } else {
-            ui.value_field((end_x, cy), 64.0, 20.0, &ValueFieldOpts::default(), &valid_end, "timeline-end-field", &last).0
+            number_field(ui, "timeline-end-field", (end_x, cy), 64.0, &last, 240, &valid_end)
         };
         let ruler_x = if tall { 0.0 } else { cx };
         let ruler_y = if tall { top + bar_h + 1.0 } else { top };
@@ -99,6 +118,9 @@ fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, f
             "timeline-scrub",
             BoxOpts::default().flags(CLICKABLE | BLOCKING).at((ruler_x, ruler_y)).w(Size::Px(ruler_w)).h(Size::Px(ruler_h)),
         );
+        if kit::context_menu(ui, &ruler, &[("Copy value", true)]).is_some() {
+            let _ = rays::clipboard::set_text(&current);
+        }
         let signal = ui.signal(&ruler);
         let scrub: Option<f32> = if signal.button == Some(MouseButton::LeftButton.code() as u8) && (signal.held || signal.released) && ruler_w > 1.0 {
             let px = (if signal.released { signal.release_point } else { signal.pointer }).0;

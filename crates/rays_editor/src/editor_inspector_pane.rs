@@ -213,7 +213,9 @@ pub fn inspect_panel<'a>(
                         }
                         _ => (level_name(value), format!("{} node{} \u{b7} display {}", node_count, if node_count == 1 { "" } else { "s" }, display)),
                     };
-                    ui.inspector_header("network-header", None, None, None, None, &[], None, false, &title, &detail);
+                    insp::header_context(ui, &title, false, false, &mut |ui| {
+                        ui.inspector_header("network-header", None, None, None, None, &[], None, false, &title, &detail)
+                    });
                     ui.inspector_body(&mut |ui| {
                         // the row sits under a section named for the graph, as every row of the sheet does
                         let mut section_live = None;
@@ -379,18 +381,18 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                 facts.join(" \u{b7} ")
             };
             let rename: Option<Rc<dyn Fn(&str) -> bool>> = if preview { None } else { Some(Rc::new(|text: &str| !text.trim().is_empty())) };
-            let head = ui.inspector_header(
+            let (head, _) = insp::header_context(ui, &label, false, false, &mut |ui| ui.inspector_header(
                 "flow-inspector-header",
                 Some(&format!("{}/{}", if pane_level(value) == Level::Scene { "scene" } else { "world" }, kind_)),
                 if displayed(value) == Some(node_id) { Some("view") } else { None },
                 Some(&format!("NO. {node_id:04}")),
-                rename,
+                rename.clone(),
                 &[],
                 None,
                 false,
                 &label,
                 &detail,
-            );
+            ));
             if !preview && let Some(label) = object_rename(&label, &head.renamed) {
                 changes.push(Change::Rename { node: node_id, label });
             }
@@ -471,7 +473,7 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                                 }
                             }
                         }
-                        insp::FlowChange::Pinned(..) | insp::FlowChange::Reset(..) => {}
+                        insp::FlowChange::Pinned(..) | insp::FlowChange::Reset(..) | insp::FlowChange::Reveal(..) => {}
                     }
                 }
             });

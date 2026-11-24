@@ -14,7 +14,7 @@ pub struct FlowRow {
     pub shown: bool,
     pub locked: bool,
     pub drive: Option<String>,
-    /// The drive readout or mixed state for a row shared by several nodes.
+    /// Drive readout, or “mixed” for an editable row shared by several nodes.
     pub live: Option<String>,
 }
 
@@ -26,6 +26,7 @@ pub enum FlowChange {
     Reset(String),
     Expression(String, String),
     Follow(String),
+    Reveal(String),
 }
 
 /// The optional arguments of `flow_fields`. `pins` draws each row's pin dot (`shown`: filled when
@@ -44,11 +45,12 @@ pub struct FlowOpts {
     /// the numbers are `kept_drag` fields: their owner follows a drag between builds (`pressed`,
     /// `dragging`, `dragged`), the rows' views kept
     pub kept_drag: bool,
+    pub reveal_source: bool,
 }
 
 impl Default for FlowOpts {
     fn default() -> FlowOpts {
-        FlowOpts { expanded: Vec::new(), width: None, pins: false, pin_click: false, chips: Vec::new(), kind_label: None, kept_drag: false }
+        FlowOpts { expanded: Vec::new(), width: None, pins: false, pin_click: false, chips: Vec::new(), kind_label: None, kept_drag: false, reveal_source: false }
     }
 }
 
@@ -149,6 +151,7 @@ struct Ctx {
     pin_click: bool,
     chips: Vec<(String, Color)>,
     kept: bool,
+    reveal_source: bool,
 }
 
 impl Ctx {
@@ -346,7 +349,7 @@ fn input(
                 _ => 0,
             };
             on_choice(&field.name, &boxed);
-            let just_opened = ui.signal(&boxed).clicked;
+            let just_opened = ui.signal(&boxed).clicked || edit;
             let open = just_opened || ui.state(&boxed, 0) == 1;
             ui.set_state(&boxed, if open { 1 } else { 0 });
             let chip = (!mixed).then(|| cx.chip(&choices[index])).flatten();
@@ -397,7 +400,7 @@ fn input(
                 }
             }
         }
-        (KindView::Toggle, Value::Bool(value)) if mixed => {
+        (KindView::Toggle, Value::Bool(value)) if mixed || edit || ui.box_of_key(pxui::ui_core::key_of(row.box_key, &key)).is_some_and(|b| ui.focused(&b)) => {
             let options = ValueFieldOpts { display: mixed.then(|| "mixed".to_owned()), edit, ..ValueFieldOpts::default() };
             let current = if mixed { "" } else if *value { "true" } else { "false" };
             let (text, _) = ui.value_field((x, y), w, 20.0, &options, &|s| s.parse::<bool>().is_ok(), &key, current);
@@ -413,38 +416,137 @@ fn input(
     }
 }
 
-fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Vec<FlowChange> {
-    let (path, live, shown) = (row.path.as_str(), row.live.as_deref(), row.shown);
-    let literal = |text: &str| match row.fields.as_slice() {
+fn number_from_drive(row: &FlowRow, text: &str) -> Option<Value> {
+    match row.fields.as_slice() {
         [FieldView { kind: KindView::Integer(_), .. }] => text.parse::<i64>().ok().map(Value::Int),
         _ => text.parse::<f64>().ok().filter(|v| v.is_finite()).map(Value::Float),
+    }
+}
+
+fn drive_edit(row: &FlowRow, text: String) -> Option<FlowChange> {
+    if expression(&text) {
+        Some(FlowChange::Expression(row.path.clone(), text))
+    } else {
+        let value = number_from_drive(row, &text)?;
+        match row.fields.as_slice() {
+            [field] if matches!(field.kind, KindView::Integer(_) | KindView::Floating(_)) => {
+                Some(FlowChange::Edited(field.name.clone(), value))
+            }
+            _ => Some(FlowChange::Expression(row.path.clone(), format!("={text}"))),
+        }
+    }
+}
+
+fn field_text(field: &FieldView) -> String {
+    match &field.current {
+        Value::Bool(v) => v.to_string(),
+        Value::Int(v) => match &field.kind {
+            KindView::Choice(options) => options.get(*v as usize).cloned().unwrap_or_default(),
+            _ => v.to_string(),
+        },
+        Value::Float(v) => param::float_text_with_decimal(*v, true),
+        Value::Text(v) => text_of(v),
+        Value::Choice(v) => v.clone(),
+    }
+}
+
+fn pasted_value(field: &FieldView, text: String) -> Option<Value> {
+    let literal = text.trim();
+    match &field.kind {
+        KindView::Integer(_) => literal.parse().ok().map(Value::Int),
+        KindView::Floating(_) => literal.parse::<f64>().ok().filter(|v| v.is_finite()).map(Value::Float),
+        KindView::Toggle => literal.parse().ok().map(Value::Bool),
+        KindView::Text => Some(Value::Text(text.into_bytes().into())),
+        KindView::Choice(options) => {
+            let index = options.iter().position(|s| s == literal)?;
+            Some(match field.current {
+                Value::Int(_) => Value::Int(index as i64),
+                _ => Value::Choice(options[index].clone()),
+            })
+        }
+    }
+}
+
+fn vector_text(fields: &[FieldView]) -> String {
+    let items: Vec<_> = fields.iter().map(field_text).collect();
+    format!("[{}]", items.join(" "))
+}
+
+fn pasted_vector(row: &FlowRow, text: &str) -> Option<[f64; 3]> {
+    if is_color_3(row) && let Ok(c) = color::hex(text) {
+        let (r, g, b, _) = color::to_floats(c);
+        return Some([r, g, b]);
+    }
+    let text = text.strip_prefix('[')?.strip_suffix(']')?;
+    let values: Vec<f64> = text.split_whitespace().map(str::parse).collect::<Result<_, _>>().ok()?;
+    values.iter().all(|v| v.is_finite()).then_some(())?;
+    values.try_into().ok()
+}
+
+fn row_menu(ui: &mut Ui, cx: &Ctx, boxed: &UiBox, row: &FlowRow, typable: bool) -> (bool, Vec<FlowChange>) {
+    let mixed = row.live.as_deref() == Some("mixed");
+    let Some((choice, _)) = kit::context_menu(ui, boxed, &[
+        ("Copy value", !mixed),
+        ("Paste value", true),
+        ("Reset to default", true),
+        ("Type value", typable),
+        ("Reveal in Lisp", cx.reveal_source),
+    ]) else { return (false, Vec::new()); };
+    let edit = match choice {
+        0 => {
+            let text = if let Some(source) = &row.drive { source.clone() }
+                else if let [field] = row.fields.as_slice() { field_text(field) }
+                else { vector_text(&row.fields) };
+            let _ = rays::clipboard::set_text(&text);
+            None
+        }
+        1 => rays::clipboard::get_text().ok().and_then(|text| {
+            if row.drive.is_some() {
+                drive_edit(row, text.trim().to_owned())
+            } else if let [field] = row.fields.as_slice() {
+                pasted_value(field, text).map(|value| FlowChange::Edited(field.name.clone(), value))
+            } else {
+                pasted_vector(row, text.trim()).map(|values| FlowChange::EditedVector(row.path.clone(), values))
+            }
+        }),
+        2 if row.drive.is_some() => Some(FlowChange::Reset(row.path.clone())),
+        2 => match row.fields.as_slice() {
+            [f] => Some(FlowChange::Edited(f.name.clone(), f.default.clone())),
+            [a, b, c] => match (&a.default, &b.default, &c.default) {
+                (Value::Float(a), Value::Float(b), Value::Float(c)) => Some(FlowChange::EditedVector(row.path.clone(), [*a, *b, *c])),
+                _ => None,
+            },
+            _ => None,
+        },
+        3 => return (true, Vec::new()),
+        4 => Some(FlowChange::Reveal(row.path.clone())),
+        _ => None,
     };
+    (false, edit.into_iter().collect())
+}
+
+fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Vec<FlowChange> {
+    let (path, live, shown) = (row.path.as_str(), row.live.as_deref(), row.shown);
     let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
     // the cross that removes a drive shows on the hovered row, in place of the live value
     let hovered = ui.hovered_within(&boxed);
-    let mut out: Vec<FlowChange> = Vec::new();
+    let (type_value, mut out) = row_menu(ui, cx, &boxed, row, true);
     ui.within(&boxed, &mut |ui| {
         let live: Option<String> = if hovered { None } else { live.map(|l| l.to_string()) };
-        let edits: Vec<FlowChange> = if expression(source) {
+        let key = format!("flow-expression-{path}");
+        let editing = ui.box_of_key(pxui::ui_core::key_of(boxed.box_key, &key)).is_some_and(|b| ui.focused(&b));
+        let edits: Vec<FlowChange> = if expression(source) || type_value || editing {
             let opts = ValueFieldOpts {
-                display: Some(source[1..].to_string()),
+                edit: type_value,
+                display: Some(source.strip_prefix('=').unwrap_or(source).to_owned()),
                 lead: Some(("\u{192}".to_string(), cx.ink_2)),
                 trail: live.map(|value| (value, cx.ink_2)),
                 line: Some(crate::kit::port_ink(&cx.theme, crate::kit::Port::Float)),
                 ..ValueFieldOpts::default()
             };
-            let valid = |text: &str| expression(text) || literal(text).is_some();
-            let (text, _) = ui.value_field((control_x, control_y), control_w, 20.0, &opts, &valid, &format!("flow-expression-{path}"), source);
-            if text == source {
-                Vec::new()
-            } else if let ([field], Some(value)) = (row.fields.as_slice(), literal(&text))
-                && matches!(field.kind, KindView::Integer(_) | KindView::Floating(_))
-            {
-                vec![FlowChange::Edited(field.name.clone(), value)]
-            } else {
-                let text = if expression(&text) { text } else { format!("={text}") };
-                vec![FlowChange::Expression(path.to_owned(), text)]
-            }
+            let valid = |text: &str| expression(text) || number_from_drive(row, text).is_some();
+            let (text, _) = ui.value_field((control_x, control_y), control_w, 20.0, &opts, &valid, &key, source);
+            if text == source { Vec::new() } else { drive_edit(row, text).into_iter().collect() }
         } else {
             let link = ui.box_(
                 &format!("flow-source-{path}"),
@@ -485,14 +587,15 @@ fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Ve
             all.push(FlowChange::Reset(path.to_string()));
         }
         all.extend(edits);
-        out = pin_change(ui, cx, &boxed, path, shown, pin, all);
+        out.extend(pin_change(ui, cx, &boxed, path, shown, pin, all));
     });
     out
 }
 
-fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), path: &str, title: &str, field: &FieldView, shown: bool, mixed: bool) -> Vec<FlowChange> {
+fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &FlowRow, title: &str, mixed: bool) -> Vec<FlowChange> {
+    let (path, field, shown) = (row.path.as_str(), &row.fields[0], row.shown);
     let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
-    let mut out: Vec<FlowChange> = Vec::new();
+    let (type_value, mut out) = row_menu(ui, cx, &boxed, row, true);
     ui.within(&boxed, &mut |ui| {
         // the label's own extent: its column
         let label_x = ui.inspector_label_x();
@@ -500,10 +603,10 @@ fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), path: &str, t
             "label-edit",
             BoxOpts::default().flags(CLICKABLE).at((label_x, 2.0)).w(Size::Px(1.0f32.max(control_x - label_x - 8.0))).h(Size::Px(20.0)),
         );
-        let edit = ui.signal(&label).double_clicked;
+        let edit = type_value || ui.signal(&label).double_clicked;
         let edits = input(ui, cx, on_choice, true, field, (&boxed, path), edit, mixed, (control_x, control_y, control_w));
         let pinned = cx.pin_click && action(ui, cx, &format!("pin-{path}"), "pin", 0.0, control_y, true);
-        out = pin_change(ui, cx, &boxed, path, shown, pinned, edits);
+        out.extend(pin_change(ui, cx, &boxed, path, shown, pinned, edits));
     });
     out
 }
@@ -526,10 +629,6 @@ fn is_color_1(field: &FieldView) -> bool {
     }
 }
 
-fn swatch_and_hex(ui: &mut Ui, path: &str, control: (f32, f32, f32), swatch: Color, hex: &str) -> String {
-    kit::colour(ui, path, (control.0, control.1), control.2, swatch, hex)
-}
-
 fn color_row_3(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, shown: bool) -> Vec<FlowChange> {
     let path = row.path.clone();
     let to_f = |v: &Value| -> f64 {
@@ -544,9 +643,9 @@ fn color_row_3(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, shown: bool) -
     let swatch_color = color::of_unit_floats(None, r, g, b);
     let hex_str = color::to_hex_string(swatch_color);
     let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
-    let mut out: Vec<FlowChange> = Vec::new();
+    let (type_value, mut out) = row_menu(ui, cx, &boxed, row, true);
     ui.within(&boxed, &mut |ui| {
-        let text = swatch_and_hex(ui, &path, (control_x, control_y, control_w), swatch_color, &hex_str);
+        let text = kit::colour_edit(ui, &path, (control_x, control_y), control_w, swatch_color, &hex_str, type_value);
         let hex_edits: Vec<FlowChange> = if text == hex_str {
             Vec::new()
         } else {
@@ -561,12 +660,13 @@ fn color_row_3(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, shown: bool) -
         let pin = cx.pin_click && action(ui, cx, &format!("pin-{path}"), "pin", 0.0, control_y, !row.locked);
         let mut all = hex_edits;
         all.extend(pin_change(ui, cx, &boxed, &path, shown, pin, Vec::new()));
-        out = all;
+        out.extend(all);
     });
     out
 }
 
-fn color_row_1(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, field: &FieldView, shown: bool) -> Vec<FlowChange> {
+fn color_row_1(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str) -> Vec<FlowChange> {
+    let (path, field, shown) = (row.path.as_str(), &row.fields[0], row.shown);
     let text_val = match &field.current {
         Value::Text(t) => text_of(t),
         _ => "#ffffff".to_string(),
@@ -576,9 +676,9 @@ fn color_row_1(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, field: &FieldView
     let swatch_color = color::of_unit_floats(None, r, g, b);
     let hex_str = color::to_hex_string(swatch_color);
     let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
-    let mut out: Vec<FlowChange> = Vec::new();
+    let (type_value, mut out) = row_menu(ui, cx, &boxed, row, true);
     ui.within(&boxed, &mut |ui| {
-        let text = swatch_and_hex(ui, path, (control_x, control_y, control_w), swatch_color, &hex_str);
+        let text = kit::colour_edit(ui, path, (control_x, control_y), control_w, swatch_color, &hex_str, type_value);
         let hex_edits: Vec<FlowChange> = if text == hex_str {
             Vec::new()
         } else {
@@ -590,7 +690,7 @@ fn color_row_1(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, field: &FieldView
         let pin = cx.pin_click && action(ui, cx, &format!("pin-{path}"), "pin", 0.0, control_y, true);
         let mut all = hex_edits;
         all.extend(pin_change(ui, cx, &boxed, path, shown, pin, Vec::new()));
-        out = all;
+        out.extend(all);
     });
     out
 }
@@ -599,7 +699,7 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
     // a row is named by its argument, as the sheet and the card name it
     let title: String = if row.fields.len() == 1 && row.path.starts_with('@') { row.fields[0].label.clone() } else { row.path.clone() };
     if let Some(source) = &row.drive {
-        let revision = kit::debug_revision(&(row, cx.width, cx.pins, cx.pin_click));
+        let revision = kit::debug_revision(&(row, cx.width, cx.pins, cx.pin_click, cx.reveal_source));
         let mut out = Vec::new();
         kit::with_label(format_args!("flow-driven-view-{}", row.path), &mut |label| {
             ui.view(label, revision, Size::Px(cx.width), Size::Px(ui.row_height() as f32), &mut |ui| {
@@ -612,9 +712,9 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
     if row.fields.len() == 1 {
         let field = &row.fields[0];
         return if !mixed && is_color_1(field) {
-            color_row_1(ui, cx, &row.path, &title, field, row.shown)
+            color_row_1(ui, cx, row, &title)
         } else {
-            scalar(ui, cx, on_choice, &row.path, &title, field, row.shown, mixed)
+            scalar(ui, cx, on_choice, row, &title, mixed)
         };
     }
     if !mixed && is_color_3(row) {
@@ -622,19 +722,31 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
     }
     // a vector: three fields in the control column, 8 between, each with its axis letter
     let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, row.shown), &format!("flow-row-{}", row.path), &title);
-    let mut out: Vec<FlowChange> = Vec::new();
+    let (type_value, mut out) = row_menu(ui, cx, &boxed, row, row.fields.len() == 3);
     ui.within(&boxed, &mut |ui| {
         let mut edits: Vec<FlowChange> = Vec::new();
-        kit::vector(ui, &boxed, (control_x, control_y), control_w, 0.0, &["x", "y", "z"], &mut |ui, index, x, w| {
-            if let Some(field) = row.fields.get(index) {
-                let axis = ["x", "y", "z"][index];
-                edits.extend(input(ui, cx, on_choice, false, field, (&boxed, &format!("{}.{}", row.path, axis)), false, mixed, (x, control_y, w)));
+        let key = "flow-vector-entry";
+        let editing = ui.box_of_key(pxui::ui_core::key_of(boxed.box_key, key)).is_some_and(|b| ui.focused(&b));
+        if type_value || editing {
+            let current = if mixed { String::new() } else { vector_text(&row.fields) };
+            let options = ValueFieldOpts { edit: type_value, left: true, ..Default::default() };
+            let valid = |text: &str| pasted_vector(row, text.trim()).is_some();
+            let (text, _) = ui.value_field((control_x, control_y), control_w, 20.0, &options, &valid, key, &current);
+            if text != current && let Some(v) = pasted_vector(row, text.trim()) {
+                edits.push(FlowChange::EditedVector(row.path.clone(), v));
             }
-        });
+        } else {
+            kit::vector(ui, &boxed, (control_x, control_y), control_w, 0.0, &["x", "y", "z"], &mut |ui, index, x, w| {
+                if let Some(field) = row.fields.get(index) {
+                    let axis = ["x", "y", "z"][index];
+                    edits.extend(input(ui, cx, on_choice, false, field, (&boxed, &format!("{}.{}", row.path, axis)), false, mixed, (x, control_y, w)));
+                }
+            });
+        }
         let pin = cx.pin_click && action(ui, cx, &format!("pin-{}", row.path), "pin", 0.0, control_y, !row.locked);
         let mut all = edits;
         all.extend(pin_change(ui, cx, &boxed, &row.path, row.shown, pin, Vec::new()));
-        out = all;
+        out.extend(all);
     });
     out
 }
@@ -652,7 +764,7 @@ fn build(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), expanded: &[St
         for row in rows.iter().filter(mine) {
             kit::debug_revision(row).hash(h);
         }
-        (cx.width.to_bits(), cx.pins, cx.pin_click, kit::debug_revision(&cx.chips)).hash(h);
+        (cx.width.to_bits(), cx.pins, cx.pin_click, cx.reveal_source, kit::debug_revision(&cx.chips)).hash(h);
     });
     ui.inspector_section_view(&format!("flow-section-{folder}"), shown, open, None, folder, &mut |ui| {
         // The kind's ungrouped rows precede rows explicitly in its folder, as in the old tree.
@@ -684,6 +796,7 @@ pub fn flow_fields(ui: &mut Ui, o: &FlowOpts, on_choice: Option<&dyn Fn(&str, &U
         pin_click: o.pin_click,
         chips: o.chips.clone(),
         kept: o.kept_drag,
+        reveal_source: o.reveal_source,
     };
     let on_choice: &dyn Fn(&str, &UiBox) = on_choice.unwrap_or(&no_choice);
     if rows.is_empty() {
@@ -732,4 +845,22 @@ pub fn record(ui: &mut Ui, schema: &Schema, values: &[Value]) -> Result<(Vec<Val
     let views = schema.view(values)?;
     let changes = fields(ui, &[], None, false, views);
     if changes.is_empty() { Ok((values.to_vec(), param::NO_EFFECTS)) } else { schema.apply_all(values, &changes) }
+}
+
+/// The header's right-click actions use the same reset request as the button.
+pub fn header_context(ui: &mut Ui, title: &str, reset: bool, reveal: bool, build: &mut dyn FnMut(&mut Ui) -> Head) -> (Head, bool) {
+    let owner = ui.box_("inspector-header-context", BoxOpts::default().flags(CLICKABLE).w(Size::Grow).h(Size::Fit));
+    let mut head = None;
+    ui.within(&owner, &mut |ui| head = Some(build(ui)));
+    let mut head = head.expect("inspector header");
+    let mut reveal_source = false;
+    if let Some((choice, _)) = kit::context_menu(ui, &owner, &[("Copy value", true), ("Reset to default", reset), ("Reveal in Lisp", reveal)]) {
+        match choice {
+            0 => { let _ = rays::clipboard::set_text(title); }
+            1 => head.reset_pressed = true,
+            2 => reveal_source = true,
+            _ => {}
+        }
+    }
+    (head, reveal_source)
 }

@@ -671,6 +671,7 @@ pub fn follow_row(source: &[S], n: &p::Node, r: &p::Row) -> Option<Change> {
 
 pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(p::Row, Vec<i64>)>, ev: &insp::FlowChange) -> Option<Change> {
     match ev {
+        insp::FlowChange::Reveal(_) => Some(Change::FollowSource(n.path.clone())),
         insp::FlowChange::Follow(path) => arg_row(path).and_then(|(r, sub)| {
             let mut expr = r.expr.clone();
             for i in &sub {
@@ -915,7 +916,7 @@ pub fn field_edits<'a>(
         },
         None => Vec::new(),
     };
-    let opts = insp::FlowOpts { expanded: expanded.to_vec(), width: Some(width), pins: true, pin_click: true, chips, kind_label: Some(kind_label(&n.head)), kept_drag: true };
+    let opts = insp::FlowOpts { expanded: expanded.to_vec(), width: Some(width), pins: true, pin_click: true, chips, kind_label: Some(kind_label(&n.head)), kept_drag: true, reveal_source: true };
     let events = insp::flow_fields(ui, &opts, on_choice, rows);
     // a number pressed: what its drag edits, followed while the inspector stays kept
     if let Some(name) = insp::pressed() {
@@ -935,7 +936,7 @@ pub fn field_edits<'a>(
     for ev in events {
         let name_of = |ev: &insp::FlowChange| -> String {
             match ev {
-                insp::FlowChange::Edited(n, _) | insp::FlowChange::EditedVector(n, _) | insp::FlowChange::Expression(n, _) | insp::FlowChange::Follow(n) | insp::FlowChange::Reset(n) | insp::FlowChange::Pinned(n, _) => n.clone(),
+                insp::FlowChange::Edited(n, _) | insp::FlowChange::EditedVector(n, _) | insp::FlowChange::Expression(n, _) | insp::FlowChange::Follow(n) | insp::FlowChange::Reveal(n) | insp::FlowChange::Reset(n) | insp::FlowChange::Pinned(n, _) => n.clone(),
             }
         };
         let name = name_of(&ev);
@@ -969,6 +970,7 @@ pub fn field_edits<'a>(
             continue;
         }
         match &ev {
+            insp::FlowChange::Reveal(_) => out.push(Change::FollowSource(n.path.clone())),
             insp::FlowChange::Follow(path) => {
                 let row = row_of(path).or_else(|| {
                     [".x", ".y", ".z", ".w"].iter().find_map(|suffix| if path.ends_with(suffix) { row_of(&path[..path.len() - 2]) } else { None })
@@ -1248,13 +1250,16 @@ pub fn zone_says(ui: &mut Ui, width: f32, zone_text: &Option<(&'static str, fn(&
 /// A graph input: its type, and its default as one Lisp form.
 pub fn input_inspector(ui: &mut Ui, graph: &str, width: f32, scope: &p::Scope, path: &[Symbol]) -> (Vec<Change>, Vec<ScopeChange>) {
     let Some(input) = scope.inputs.iter().find(|i| i.path == path) else { return (vec![], vec![]) };
-    ui.inspector_header("ws-input", Some("input"), None, None, None, &[], None, false, &input.name, &ty::to_string(&input.ty));
+    let (_, reveal) = insp::header_context(ui, &input.name, false, true, &mut |ui| {
+        ui.inspector_header("ws-input", Some("input"), None, None, None, &[], None, false, &input.name, &ty::to_string(&input.ty))
+    });
     let shown = input.default.as_ref().map(lisp::flat).unwrap_or_default();
     let mut text = shown.clone();
     ui.inspector_body(&mut |ui| {
         let (row, cx, cy, cw) = ui.inspector_row(Some(width), None, "ws-input-default", "default");
+        let menu = rays_shell::kit::context_menu(ui, &row, &[("Copy value", !shown.is_empty()), ("Paste value", true), ("Type value", true)]).map(|(item, _)| item);
         ui.within(&row, &mut |ui| match &input.default {
-            Some(form) if matches!(form.node, SNode::Num(_)) => {
+            Some(form) if menu != Some(2) && matches!(form.node, SNode::Num(_)) => {
                 // a number: the pane's own field, so it drags here as it does on the card
                 // the input's type decides the step: a float written [1] scrubs by fractions
                 let kind = match input.ty {
@@ -1265,13 +1270,18 @@ pub fn input_inspector(ui: &mut Ui, graph: &str, width: f32, scope: &p::Scope, p
                 text = rays_graph::scope_frame::num_field(ui, (cx as f64, cy as f64), cw as f64, 20.0, None, kind, None, false, "ws-input-default-field", &shown, None).unwrap_or_else(|| shown.clone());
             }
             _ => {
-                let o = pxui::ui::ValueFieldOpts { left: float_of(&shown).is_none(), ..Default::default() };
+                let o = pxui::ui::ValueFieldOpts { left: float_of(&shown).is_none(), edit: menu == Some(2), ..Default::default() };
                 text = ui.value_field((cx, cy), cw, 20.0, &o, &|t| !t.trim().is_empty(), "ws-input-default-field", &shown).0;
             }
         });
+        match menu {
+            Some(0) => { let _ = rays::clipboard::set_text(&shown); }
+            Some(1) => { if let Ok(clip) = rays::clipboard::get_text() { text = clip; } }
+            _ => {}
+        }
     });
     if text == shown {
-        return (vec![], vec![]);
+        return (if reveal { vec![Change::FollowSource(path.to_vec())] } else { vec![] }, vec![]);
     }
     match s::parse(&text) {
         Ok(mut v) if v.len() == 1 => (vec![Change::SyntaxEdit(fe::Op::SetInputDefault { form: graph.to_owned(), input: input.name.clone(), value: v.remove(0) })], vec![]),
@@ -1285,16 +1295,19 @@ pub fn input_inspector(ui: &mut Ui, graph: &str, width: f32, scope: &p::Scope, p
 pub fn expression_inspector(ui: &mut Ui, width: f32, value: &Model, holder: &p::Node, r: &p::Row) -> (Vec<Change>, Vec<ScopeChange>) {
     let e = r.expr.clone().expect("expression row");
     let op = s::head(&e).unwrap_or_default().to_owned();
-    ui.inspector_header("ws-header", Some(&op), None, None, None, &[], None, false, &format!("{} \u{b7} {}", p::title(holder), r.label), &lisp::flat(&e));
+    let title = format!("{} \u{b7} {}", p::title(holder), r.label);
+    let (_, reveal) = insp::header_context(ui, &title, false, true, &mut |ui| {
+        ui.inspector_header("ws-header", Some(&op), None, None, None, &[], None, false, &title, &lisp::flat(&e))
+    });
     let entries = sub_entries(true, r);
-    let mut requests: Vec<Change> = Vec::new();
+    let mut requests: Vec<Change> = if reveal { vec![Change::FollowSource(holder.path.clone())] } else { vec![] };
     let source: &[S] = &value.doc.workspace.ws.source;
     ui.inspector_body(&mut |ui| {
         if ui.inspector_button(&format!("ws-unfold-{}", r.label), &format!("Unfold {}", r.label)) {
             requests.push(Change::SyntaxEdit(fe::Op::Unfold { node: holder.path.clone(), key: r.key.clone(), sub: vec![] }));
         }
         if !entries.is_empty() {
-            let opts = insp::FlowOpts { width: Some(width), kind_label: Some(kind_label(&op)), kept_drag: true, ..Default::default() };
+            let opts = insp::FlowOpts { width: Some(width), kind_label: Some(kind_label(&op)), kept_drag: true, reveal_source: true, ..Default::default() };
             let rows: Vec<insp::FlowRow> = entries.iter().map(|(_, _, _, ir)| ir.clone()).collect();
             let events = insp::flow_fields(ui, &opts, None, &rows);
             let find = |name: &str| arg_row_in(&entries, name);
@@ -1437,7 +1450,10 @@ impl SharedTarget {
 /// Each frame's changes land together. The first target and field give the existing gesture
 /// key for every frame of a shared scrub, so history merges the whole drag.
 pub fn shared_inspector(ui: &mut Ui, width: f32, count: usize, targets: Vec<SharedTarget>) -> Vec<Change> {
-    ui.inspector_header("multi-header", None, None, None, None, &[], None, false, &format!("{count} nodes"), "Selected");
+    let title = format!("{count} nodes");
+    insp::header_context(ui, &title, false, false, &mut |ui| {
+        ui.inspector_header("multi-header", None, None, None, None, &[], None, false, &title, "Selected")
+    });
     let mut changes = Vec::new();
     ui.inspector_body(&mut |ui| {
         let mut rows = Vec::new();
@@ -1611,18 +1627,19 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     let index = if narrow || window { None } else { node_id.map(|id| format!("NO. {id:04}")) };
     let rename: Option<Rc<dyn Fn(&str) -> bool>> = if n.synthetic { None } else { Some(Rc::new(flow_syntax::symbol::valid_name)) };
     let reset_enabled = parameters.iter().any(|pm| authored(pm).is_some());
-    let head = ui.inspector_header(
+    let title = p::title(n);
+    let (head, reveal) = insp::header_context(ui, &title, reset_enabled, true, &mut |ui| ui.inspector_header(
         "ws-header",
         Some(&n.head),
         if displayed_path.as_ref() == Some(&n.path) { Some("view") } else { None },
         index.as_deref(),
-        rename,
+        rename.clone(),
         &actions,
         Some("Reset all"),
         reset_enabled,
-        &p::title(&n),
+        &title,
         &detail,
-    );
+    ));
     let pressed = head.chosen.map(|i| buttons[i as usize].1.clone());
     // Reset all: every written argument of the node removed, one undoable entry
     let reset_all: Vec<Change> = if !head.reset_pressed {
@@ -1748,6 +1765,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     }
     let (flag_changes, flag_picks) = flags;
     let mut all = flag_changes;
+    if reveal { all.push(Change::FollowSource(n.path.clone())); }
     all.extend(rename_edit);
     all.extend(reset_all);
     all.extend(requests);

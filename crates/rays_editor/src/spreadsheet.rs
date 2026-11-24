@@ -1,7 +1,5 @@
 //! The spreadsheet panel's table over a cooked geometry's point, vertex, primitive or detail
 //! attributes.
-use std::rc::Rc;
-
 use pxui::ui::{BoxOpts, Rect, Size, Ui};
 use rdk_rays::geometry_view as gv;
 
@@ -45,18 +43,32 @@ fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), owner: i64, geometry: Option
             ui.draw(&b, |paint, Rect { x, y, w: _, h: _ }| paint.text((x + 8.0, y + 5.0), "Select a cooked geometry node."));
         }
         Some(geometry) => {
-            let columns = Rc::new(columns(owner, geometry));
+            let columns = columns(owner, geometry);
             let headers: Vec<String> = columns.iter().map(|(name, _)| name.clone()).collect();
-            let cells = columns.clone();
-            ui.table(
-                (x as f32, y as f32 + 24.0),
-                w as f32,
-                (h - 24).max(0) as f32,
-                &headers,
-                count(owner, geometry),
-                move |row, column| (cells[column as usize].1)(row),
-                "sheet-values",
-            );
+            let height = (h - 24).max(0) as f32;
+            let table = ui.box_("sheet-table-context", BoxOpts::default()
+                .at((x as f32, y as f32 + 24.0)).w(Size::Px(w as f32)).h(Size::Px(height)));
+            let n = count(owner, geometry);
+            ui.within(&table, &mut |ui| {
+                ui.table((0.0, 0.0), w as f32, height, &headers, n, |row, column| (columns[column as usize].1)(row), "sheet-values");
+            });
+            use pxui::ui_core::key_of;
+            let body = key_of(key_of(table.box_key, "sheet-values"), "sheet-values-body");
+            if let Some(body) = ui.box_of_key(body)
+                && let Some((_, (px, py))) = rays_shell::kit::context_menu(ui, &body, &[("Copy value", true)])
+            {
+                let bounds = ui.rect(&body);
+                let row = ((py - bounds.y + ui.scroll_offset(&body)) / ui.row_height() as f32).floor() as i64;
+                if (0..n).contains(&row) && px >= bounds.x {
+                    let mut stop = bounds.x;
+                    // ponytail: Ui::table's column widths; use an ABI cell hit once PXUI exposes one.
+                    let column = headers.iter().position(|head| {
+                        stop += 72.0f32.max(ui.text_width(None, head) + 24.0);
+                        px < stop
+                    });
+                    if let Some(column) = column { let _ = rays::clipboard::set_text(&(columns[column].1)(row)); }
+                }
+            }
         }
     }
     changed
