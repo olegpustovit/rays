@@ -620,6 +620,8 @@ fn gpu_execution_texture_sampling() {
     let mut mirror = nearest.clone(); mirror.address_u = AddressMode::MirrorRepeat;
     let mut mip = nearest.clone(); mip.mip_filter = MipFilter::NearestMip; mip.lod_min = 1.; mip.lod_max = 1.;
     let linear_tolerance = u8::from(ogpu_core::impl_::backend().unwrap() == "vulkan");
+    // Rotate the in-flight slots in the default loop; keep the long stability check in slow mode.
+    let repeats = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 600 } else { 64 };
     for (i,(u,v,sampler,expected,tolerance)) in [
         (0.1,0.1,nearest.clone(),[255u8,0,0,255],0u8),
         (0.5,0.5,linear,[128,128,128,255],linear_tolerance),
@@ -633,7 +635,7 @@ fn gpu_execution_texture_sampling() {
         base.draw.state.viewport = (0,0,4,4); base.draw.state.scissor = (0,0,4,4);
         let draw = Rc::new(base);
         let mut uploaded = None;
-        for _ in 0..600 {
+        for _ in 0..repeats {
             renderer::draw(None,&e,&[draw.clone()]).unwrap();
             for pixel in renderer::capture(&e).unwrap().chunks_exact(4) {
                 for c in 0..4 { assert!(pixel[c].abs_diff(expected[c]) <= tolerance,"sampler {i} channel {c}: {} != {}",pixel[c],expected[c]); }
@@ -681,7 +683,7 @@ fn gpu_execution_texture_sampling() {
     let mut vertices=Vec::new();
     for (x,y) in [(-1f32,-1f32),(3.,-1.),(-1.,3.)] { vertices.extend(common::floats(&[x,y])); vertices.extend(0xff0080ffu32.to_le_bytes()); }
     plain.draw.mesh.vertices=new_bytes(vertices); let plain=Rc::new(plain);
-    for _ in 0..600 {
+    for _ in 0..repeats {
         renderer::draw(None,&e,&[plain.clone(),textured.clone()]).unwrap();
         assert_eq!(renderer::capture(&e).unwrap(),[255,0,0,255].repeat(16),"mixed plain/textured argument bindings");
     }
@@ -692,7 +694,7 @@ fn gpu_execution_texture_sampling() {
     }
     let mut sampler=nearest.clone(); sampler.min_filter=SamplerFilter::Linear; sampler.mag_filter=SamplerFilter::Linear;
     let compacted=quad(SampledTexture { key:"native-sampler-eviction".into(),levels:levels.clone(),sampler,gpu:None },0.5);
-    for _ in 0..600 {
+    for _ in 0..repeats {
         renderer::draw(None,&e,&[compacted.clone()]).unwrap();
         for pixel in renderer::capture(&e).unwrap().chunks_exact(4) {
             assert!(pixel[..3].iter().all(|v| v.abs_diff(128)<=linear_tolerance),"sampler eviction changed linear sampling");
