@@ -76,7 +76,8 @@ pub fn position_of_offset(source: &str, offset: impl Into<i64>) -> Position {
         if byte == b'\n' {
             line += 1;
             col = 1;
-        } else {
+        } else if byte & 0xC0 != 0x80 {
+            // characters, not bytes: a UTF-8 continuation byte is not a column
             col += 1;
         }
     }
@@ -290,6 +291,8 @@ mod tests {
         let source = "é\nx";
         assert_eq!(position_of_offset(source, -1), Position { line: 1, col: 1 });
         assert_eq!(position_of_offset(source, 1), Position { line: 1, col: 2 });
+        assert_eq!(position_of_offset(source, 2), Position { line: 1, col: 2 });
+        assert_eq!(position_of_offset("é(x", 3), Position { line: 1, col: 3 });
         assert_eq!(position_of_offset(source, 99), Position { line: 2, col: 2 });
 
         let diagnostic = warning(
