@@ -56,6 +56,8 @@ pub fn cases() -> Vec<(&'static str, fn())> {
         ("rays_editor_workspace_walk", test_rays_editor::workspace_walk),
         ("source_editor", test_source::editor_flow),
         ("source_autosave", test_source::autosave),
+        ("source_reload_asks", test_source::reload_asks),
+        ("source_reload_keeps_drafts", test_source::reload_keeps_drafts),
         ("ports_noise_save", test_ports::noise::save),
         ("ports_recursive_rectangles_save", test_ports::recursive_rectangles::save),
         ("ports_drawing_save", test_ports::drawing::save),

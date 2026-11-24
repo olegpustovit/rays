@@ -413,6 +413,10 @@ pub fn reload_failed(value: &mut EditorModel, name: &str, text: &str, diagnostic
         },
     };
     value.notice = Some((NoticeKind::Refusal, format!("{name} not reloaded{first}")));
+    // a draft is the user's work: the refused file's text never replaces it (B41)
+    if crate::editor_text::has_draft(None, value) {
+        return;
+    }
     value.text = text_pane::State {
         tab: text_pane::Tab::Document,
         draft: Some(text.to_string()),

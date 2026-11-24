@@ -101,6 +101,9 @@ pub fn open_dialog(value: &mut LoopModel, update_: &mut Update, events: &[Event]
     }
 }
 
+/// How long the reload command waits for its second press.
+const RELOAD_ASK: f64 = 10.;
+
 pub fn reload_source(value: &mut LoopModel, update_: &mut Update, now: f64) {
     let previous = match &value.source {
         Some(previous) if !editor_host::carrying(&value.core) => previous.clone(),
@@ -115,6 +118,18 @@ pub fn reload_source(value: &mut LoopModel, update_: &mut Update, now: f64) {
         });
     }
     let forced = update_.actions.contains(&Action::ReloadSource);
+    // B41: the reload command replaces unsaved edits and drafts, so it asks first. The question is a
+    // notice and the same command again within RELOAD_ASK seconds is the answer.
+    // ponytail: no modal prompt kind exists to put a button on; the shell lane's Prompt takes this when it has one
+    thread_local!(static ASKED: std::cell::Cell<Option<f64>> = const { std::cell::Cell::new(None) });
+    if forced && editor_text::unsaved(value.refused.as_deref(), &value.core) {
+        if !ASKED.get().is_some_and(|at| now >= at && now - at < RELOAD_ASK) {
+            ASKED.set(Some(now));
+            Rc::make_mut(&mut value.core).notice = Some((NoticeKind::Refusal, format!("{name} would replace your unsaved edits \u{b7} run \"Reload sketch from its file\" again to discard them, or Command-S to keep them as a preset")));
+            return;
+        }
+        ASKED.set(None);
+    }
     let text = match (&read, &value.held) {
         (Some(_), _) => read.clone(),
         (None, None) if forced => store::read_text(source_file::file(&file)).ok(),
