@@ -258,14 +258,14 @@ struct GraphInfo {
     inputs: Vec<(String, Ty, Option<S>)>,
 }
 
-struct Cx {
-    catalog: Catalog,
+struct Cx<'a> {
+    catalog: std::borrow::Cow<'a, Catalog>,
     ctx: Context,
-    ops: Vec<FlowOp>,
+    ops: Arc<Vec<FlowOp>>,
     graphs: Vec<GraphInfo>,
     defs: Vec<GraphInfo>,
     macros: Vec<(String, S)>,
-    macros_list: Vec<S>,
+    macros_list: Arc<Vec<S>>,
     live: w::Paths,
     invariant: w::Paths,
     terms: Vec<(Path, Info)>,
@@ -1362,12 +1362,17 @@ fn graph_info(g: &w::Graph) -> GraphInfo {
 /// written in an input is a card unless `folded` its leaf, and its whole call tree with it.
 pub fn of_graph_with(folded: &dyn Fn(&[Symbol]) -> bool, catalog: &Catalog, workspace: &w::Workspace, name: &str) -> Result<Scope, String> {
     let _timer = flow_syntax::phase_timer::measure("project");
-    let mut kinds: Vec<catalog::Kind> = workspace.nodes.iter().map(|n| n.kind.clone()).collect();
-    kinds.extend(catalog.kinds.iter().cloned());
-    let catalog = Catalog { version: catalog.version, kinds };
+    // the catalog is borrowed; only a workspace that defines its own nodes needs a merged copy
+    let catalog: std::borrow::Cow<Catalog> = if workspace.nodes.is_empty() {
+        std::borrow::Cow::Borrowed(catalog)
+    } else {
+        let mut kinds: Vec<catalog::Kind> = workspace.nodes.iter().map(|n| n.kind.clone()).collect();
+        kinds.extend(catalog.kinds.iter().cloned());
+        std::borrow::Cow::Owned(Catalog { version: catalog.version, kinds })
+    };
     let g = find_graph(workspace, name).ok_or_else(|| format!("Projection.of_graph: no graph {}", name))?;
     let root: Path = vec![if workspace.defs.iter().any(|d| std::ptr::eq(d, g)) { format!("def:{}", g.name).into() } else { g.name.clone().into() }];
-    let macros_list = (*workspace.macros).clone();
+    let macros_list = workspace.macros.clone();
     let macros: Vec<(String, S)> = macros_list
         .iter()
         .filter_map(|m| m.children().get(1).and_then(|id| match m.arena().row(*id).node {
@@ -1378,7 +1383,7 @@ pub fn of_graph_with(folded: &dyn Fn(&[Symbol]) -> bool, catalog: &Catalog, work
     let mut c = Cx {
         catalog,
         ctx: g.context,
-        ops: (*workspace.ops).clone(),
+        ops: workspace.ops.clone(),
         graphs: workspace.graphs.iter().map(graph_info).collect(),
         defs: workspace.defs.iter().map(graph_info).collect(),
         macros,

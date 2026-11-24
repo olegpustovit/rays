@@ -92,7 +92,7 @@ const CEILINGS: &[(&str, &str, u64, u64)] = &[
     ("long", "idle after session", 289, 228),
 ];
 
-struct P {
+pub(crate) struct P {
     e: Option<editor::Editor>,
     tick: i64,
     canvas: rays::canvas::Canvas,
@@ -100,7 +100,7 @@ struct P {
 }
 
 impl P {
-    fn step(&mut self, keys: &[Key], events: Vec<Event>, pointer: (f64, f64)) -> (f64, u64) {
+    pub(crate) fn step(&mut self, keys: &[Key], events: Vec<Event>, pointer: (f64, f64)) -> (f64, u64) {
         self.tick += 1;
         let t = self.tick;
         let f = rays::frame::Frame {
@@ -115,7 +115,7 @@ impl P {
         self.e = Some(editor::after_present(e, &f));
         (s.elapsed().as_secs_f64() * 1e3, mem_sys::alloc_count() - n0)
     }
-    fn record(&mut self, name: &str, frames: Vec<(f64, u64)>) {
+    pub(crate) fn record(&mut self, name: &str, frames: Vec<(f64, u64)>) {
         let cells: Vec<String> = frames.iter().map(|(ms, n)| format!("{ms:7.2}ms {n:7}a")).collect();
         eprintln!("CLICK {name:26} | {}", cells.join(" | "));
         self.rows.push((name.to_string(), frames[0].0, frames[0].1, frames[3].1));
@@ -133,7 +133,7 @@ impl P {
     }
 }
 
-fn session(label: &str, source: &str, actions: &dyn Fn(&mut P)) -> Vec<(String, f64, u64, u64)> {
+pub(crate) fn session(label: &str, source: &str, actions: &dyn Fn(&mut P)) -> Vec<(String, f64, u64, u64)> {
     assert!(crate::common::gpu(), "native GPU required");
     let doc = workspace::load(None, Vec::new(), None, source).unwrap_or_else(|d| panic!("{d:?}"));
     let canvas = rays::canvas::create(W, H).unwrap();
@@ -193,7 +193,7 @@ fn long(p: &mut P) {
     p.act("idle after session", &[], &[Key::Shift]);
 }
 
-fn sketch(name: &str) -> String { std::fs::read_to_string(format!("{}/../../sketches/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap() }
+pub(crate) fn sketch(name: &str) -> String { std::fs::read_to_string(format!("{}/../../sketches/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap() }
 
 fn check(label: &str, rows: &[(String, f64, u64, u64)]) {
     let mut over = Vec::new();

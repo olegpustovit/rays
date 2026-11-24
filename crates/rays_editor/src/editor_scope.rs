@@ -173,6 +173,37 @@ impl scope::Saved for DocSaved {
     }
 }
 
+/// What the pane reads of the saved layout: everything but the panels' window bounds and disclosure.
+fn layout_same(a: &layout_by_path::T, b: &layout_by_path::T) -> bool {
+    a.editor == b.editor && a.at == b.at && a.pinned == b.pinned && a.level == b.level && a.rows == b.rows && a.collapsed == b.collapsed && a.frames == b.frames
+}
+
+type Projected = (String, Arc<flow_check::workspace::Workspace>, usize, layout_by_path::PathMap<bool>, Rc<p::Scope>);
+
+thread_local! {
+    static PROJECTED: RefCell<Vec<Projected>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The graph's projection, from the last few: Enter, Up, Back and a retype to a graph level returned to a
+/// graph whose checked workspace, folds and catalog are the ones it was projected from.
+fn projected(catalog: &flow_check::catalog::Catalog, ws: &workspace_doc::T, name: &str) -> Rc<p::Scope> {
+    let key = |e: &Projected| e.0 == name && Arc::ptr_eq(&e.1, &ws.checked) && e.2 == catalog.kinds.len() && e.3 == ws.layout.collapsed;
+    if let Some(hit) = PROJECTED.with(|c| c.borrow().iter().find(|e| key(e)).map(|e| e.4.clone())) {
+        return hit;
+    }
+    let scope = Rc::new(
+        p::of_graph_with(&|path: &[Symbol]| ws.layout.collapsed.get(path) != Some(&false), catalog, &ws.checked, name).expect("the pane's graph is checked"),
+    );
+    PROJECTED.with(|c| {
+        let mut c = c.borrow_mut();
+        // ponytail: eight graphs by their checked workspace; a document edit replaces the checked Arc, so a stale one ages out
+        c.retain(|e| Arc::ptr_eq(&e.1, &ws.checked));
+        c.truncate(7);
+        c.insert(0, (name.to_owned(), ws.checked.clone(), catalog.kinds.len(), ws.layout.collapsed.clone(), scope.clone()));
+    });
+    scope
+}
+
 /// Lay the workspace pane out again when the document, the probes or the graph changed; the
 /// footers are rebuilt when the recording evaluation, the cook's geometry counts or (a live
 /// document) the time changed. The evaluation is retained by lowering, never repeated by a pane
@@ -204,7 +235,7 @@ pub fn sync_scope(value: &mut EditorModel) {
     });
     let edits: Vec<(Path, ArgKey, S)> =
         arguments.as_deref().unwrap_or(&[]).iter().map(|c| (c.path.clone(), ArgKey::Kw(c.field.clone()), c.expr.clone())).collect();
-    let same = |k: &ScopeKey| k.graph == name && k.ws.layout == ws.layout && arguments.is_some();
+    let same = |k: &ScopeKey| k.graph == name && layout_same(&k.ws.layout, &ws.layout) && arguments.is_some();
     let moved = match &previous {
         Some(k) => !(same(k) && k.probe_map == value.probes),
         None => true,
@@ -261,7 +292,6 @@ pub fn sync_scope(value: &mut EditorModel) {
         Some(k) => k.gap,
         None => 0.2,
     };
-    let folded_ws = ws.clone();
     let scope_proj: Rc<p::Scope> = match &previous {
         Some(k) if arguments.is_some() => {
             if edits.is_empty() {
@@ -270,10 +300,7 @@ pub fn sync_scope(value: &mut EditorModel) {
                 Rc::new(p::with_arguments(&edits, &k.scope))
             }
         }
-        _ => Rc::new(
-            p::of_graph_with(&|path: &[Symbol]| folded_ws.layout.collapsed.get(path) != Some(&false), &catalog, &ws.checked, &name)
-                .expect("the pane's graph is checked"),
-        ),
+        _ => projected(&catalog, ws, &name),
     };
     if !moved {
         scope::with_arguments(&edits, &mut pane_mut(value).view);
