@@ -888,8 +888,18 @@ pub mod number {
             .map(|value| ((value - low) / (high - low)).clamp(0.0, 1.0))
     }
 
+    /// Display text only. The editor retains the full representation for editing and scrubbing.
     pub fn show(value: f64) -> String {
-        super::float_text_with_decimal(value, true)
+        let exact = super::float_text_with_decimal(value, true);
+        let mantissa = exact.split('e').next().unwrap_or(&exact);
+        let digits = mantissa.trim_start_matches(['-', '0', '.']).bytes().filter(u8::is_ascii_digit).count();
+        if digits > 15
+            && let Ok(rounded) = format!("{value:.14e}").parse::<f64>()
+            && rounded.is_finite()
+        {
+            return super::float_text_with_decimal(rounded, true);
+        }
+        exact
     }
 
     // the digits a text writes after its point
