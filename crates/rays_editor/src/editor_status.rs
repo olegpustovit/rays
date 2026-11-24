@@ -204,7 +204,9 @@ pub fn status_box<'a>(value: &ModelView<'a>, ui: &mut Ui, frame: &frame::Frame, 
             (&phase.phase, phase.seconds.to_bits()).hash(h);
         }
         rays_shell::kit::debug_revision(&(value.leader, &value.workspace.window_live)).hash(h);
-        (session_scope.selected.as_slice(), scope::zoom(session_scope).to_bits()).hash(h);
+        // the zoom shows only with the graph the one pane (`build_box`'s `alone`)
+        let alone = g.leaves.len() == 1 && !g.leaves[0].floating;
+        (session_scope.selected.as_slice(), alone.then(|| scope::zoom(session_scope).to_bits())).hash(h);
         value.selected_box.as_ref().map(|(_, _, name)| name).hash(h);
         for leaf in &g.leaves {
             (editor_core::panels::name(&leaf.panel), leaf.floating).hash(h);
