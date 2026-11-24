@@ -60,6 +60,7 @@ Delete it when W3 closes; leftovers go to `OPEN_ISSUES.md`.
 |---|---|
 | S0 harness | done: `click_budget` |
 | L2 history, reduce, cook | done: history shares past/future by Arc, seal in place, snapshot_bytes counts imports, B1/B2/B4 fixed, idle reduce 20-34 -> 10-20 allocs; open: Cook pieces/summaries/sources clone per idle frame (Rc), snapshots still clone `workspace_doc::T` (needs Arc fields, L1), per-gesture clones (document_edit, scene_sync, `kinds`, FrameResult rollback) |
+| L3 frame loop | P4 cause found (text_pane `view_checked` deep-clones the Vocab per built frame; request under L6, fix = `Rc<Vocab>`; expect basic/empty settled ~12.4k -> ~700). B30/B34 (input frames never quiet, wake at `repaint_at`), B31 (skipped present redrawn), B33 (hidden window), B36 (wait before on_stop) fixed, test `quiet_rule`. Open: B32 (request L7), B35 (note), P10 small items measured at ~1 alloc each (idle frame is 217 of 268 in `editor_frame::update`); isogrid `escape` row is 1413/1036 over 1380/1149 from another lane's change |
 | L1 layout edits | partial: shell Arc reused when unchanged. Layout edits stay O(document): isogrid split = 725k allocs (check 600k: print 132k + check 462k; lowering 116k in `flow_sop::lower::of_checked`, 7k the rest of `of_workspace`). Needs an incremental per-graph check (flow_check) and a plan patch for one graph (flow_sop/flow_eval); not reachable in the lane's files |
 
 ## Requests
@@ -78,8 +79,11 @@ Delete it when W3 closes; leftovers go to `OPEN_ISSUES.md`.
 - L2: `editor_scope::sync_scope` costs ~6 allocations on an idle frame of the empty sketch (the largest left in the reduce step).
 ### L5
 ### L6
+- L7, B39: PXUI reports an exhausted text undo or redo through `ui.passed_undo()`. Forward it to document history only when no pane has an unapplied draft and no modal owns the text input. Rays already does this in `editor_frame::undo_passed`; preserve the draft check when changing routing.
+- L7, P5: the Lisp rewrite implementation lives in `crates/flow_syntax/src/parinfer.rs` and its caller in `lisp_text::language`. Incremental Lisp rewriting needs checkpointed parser state and one caret/anchor mapping from the chosen rewrite, wired by the host. PXUI's current language callback receives the whole string and one caret.
 ### L7
 - L3, B32 (live resize redraw): the sdl3 event-watch callback (`pxui/crates/open/sdl3/src/lib.rs` near :550) is never installed, so while the user drags a window edge SDL runs its own modal loop and `poll` is not called: the picture stretches until release. Install an `SDL_AddEventWatch` that, on a `WindowChange::Resized`/`PixelSizeChanged` event, pushes it and calls a registered redraw hook; `rays::sketch` then registers a hook that runs one `one_frame` (it can call `input_state::poll` and `scene::render` from the main thread, which is where SDL calls watches on macOS and Windows). L3 wires the hook as soon as the export exists.
+- L7 to L3: `sdl3::event::set_live_resize_callback` and the SDL event watch already exist at the pinned PXUI commit. L3 can wire the hook now. L7 is checking the wait path because the pinned watch only dispatches while polling.
 ### L8
 - L2: `editor_frame.rs:1340` copies the level's objects into every `FrameResult`; reduce now takes that copy, so the frame could build it only when a change is pending.
 ### L9
