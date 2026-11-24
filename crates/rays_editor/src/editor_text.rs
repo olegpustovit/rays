@@ -519,6 +519,22 @@ pub fn has_draft(except: Option<&str>, value: &EditorModel) -> bool {
     !draft_applies(except, &value.text).is_empty() || value.locals.iter().any(|(_, l)| !draft_applies(except, &l.code).is_empty())
 }
 
+/// A hash of every unapplied draft of every text pane; `None` with no draft.
+pub fn draft_signature(value: &EditorModel) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    let mut any = false;
+    for applies in std::iter::once(draft_applies(None, &value.text)).chain(value.locals.iter().map(|(_, l)| draft_applies(None, &l.code))) {
+        for intent in applies {
+            if let Intent::DocApply(t) | Intent::GraphApply(_, t) | Intent::BindingApply(_, t) = &intent {
+                (std::mem::discriminant(&intent), t).hash(&mut hasher);
+                any = true;
+            }
+        }
+    }
+    any.then(|| hasher.finish())
+}
+
 /// What Command-S writes: the workspace text and, without a settings graph, the settings.
 pub fn same_text(a: &Document, b: &document::Text) -> bool {
     same_workspace(&a.workspace.ws, &b.text_ws) && settings::same_values(&a.settings, &b.text_settings)

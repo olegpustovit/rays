@@ -191,26 +191,39 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     let key = V::section_key(&value.camera, &value.extra);
     value.state_checked = now;
     let saved_same = value.saved_doc.upgrade().is_some_and(|d| Arc::ptr_eq(&d, &value.core.doc));
+    // B42: unapplied drafts are work too; they are saved as the applies Command-S would make. A change of
+    // any draft saves again.
+    // ponytail: the last saved drafts are remembered per thread, one editor per thread; a field of LoopModel when two share one
+    thread_local!(static SAVED_DRAFTS: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) });
+    let drafts = editor_text::draft_signature(&value.core);
     // a preview document is never saved
-    if (saved_same && key == value.saved_view_key) || editor_host::carrying(&value.core) {
+    if (saved_same && key == value.saved_view_key && drafts == SAVED_DRAFTS.get()) || editor_host::carrying(&value.core) {
         return;
     }
     let view = if key == value.saved_view_key { value.saved_view.clone() } else { V::section(&value.camera, &value.extra) };
     // the recovery file of an earlier session holds its unsaved work: orbiting in a document that is
     // still the one opened never writes over it
-    if !value.state_owned && editor_text::same_text(&value.core.doc, &value.opened) && Path::new(&editor_setup::state_file(&value.core)).exists() {
+    if !value.state_owned && drafts.is_none() && editor_text::same_text(&value.core.doc, &value.opened) && Path::new(&editor_setup::state_file(&value.core)).exists() {
         value.saved_doc = Arc::downgrade(&value.core.doc);
         value.saved_view = view;
         value.saved_view_key = key;
         return;
     }
-    match preset::save(&editor_setup::state_directory(&value.core), &value.core.state_name, &value.core.doc, &view) {
+    let doc = if drafts.is_some() {
+        let mut applied = (*value.core).clone();
+        editor_text::apply_drafts(None, &mut applied);
+        applied.doc
+    } else {
+        value.core.doc.clone()
+    };
+    match preset::save(&editor_setup::state_directory(&value.core), &value.core.state_name, &doc, &view) {
         Ok(_) => {
             value.saved_doc = Arc::downgrade(&value.core.doc);
             value.saved_view = view;
             value.saved_view_key = key;
             value.state_error = None;
             value.state_owned = true;
+            SAVED_DRAFTS.set(drafts);
         }
         Err(message) => {
             value.state_error = Some(format!("Autosave failed: {message}"));

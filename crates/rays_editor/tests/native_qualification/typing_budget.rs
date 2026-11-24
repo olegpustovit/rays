@@ -38,12 +38,16 @@ impl P {
 
 /// isogrid.rays with a Lisp pane split to the right and its text focused (a click inside it)
 fn open_lisp() -> (P, flow_native::workspace_gpu::WorkspaceGpu, (f64, f64)) {
+    open_lisp_in(None)
+}
+
+fn open_lisp_in(presets: Option<String>) -> (P, flow_native::workspace_gpu::WorkspaceGpu, (f64, f64)) {
     assert!(crate::common::gpu(), "native GPU required");
     let source = std::fs::read_to_string(format!("{}/../../sketches/isogrid.rays", env!("CARGO_MANIFEST_DIR"))).unwrap();
     let doc = workspace::load(None, Vec::new(), None, &source).unwrap_or_else(|d| panic!("{d:?}"));
     let canvas = rays::canvas::create(W, H).unwrap();
     let gpu = flow_native::workspace_gpu::create(None);
-    let e = editor::create(editor::Create { gpu_owner: Some(gpu.clone()), await_: Some(true), platform: Some(input::Platform::Apple), ..Default::default() }, &doc, None, editor::prepare_fn(), editor::draw_fn()).unwrap();
+    let e = editor::create(editor::Create { presets, gpu_owner: Some(gpu.clone()), await_: Some(true), platform: Some(input::Platform::Apple), ..Default::default() }, &doc, None, editor::prepare_fn(), editor::draw_fn()).unwrap();
     e.core.ui.borrow_mut().verify_views(false);
     let mut p = P { e: Some(e), tick: 0, canvas };
     let ch = Key::KeyChar;
@@ -83,6 +87,32 @@ fn menu() {
     close(p, gpu);
 }
 
+/// B42: the recovery file carries the text panes' unapplied drafts, as the applies Command-S would make
+fn autosave_drafts() {
+    let dir = std::env::temp_dir().join(format!("rays-autosave-drafts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (mut p, gpu, click) = open_lisp_in(Some(dir.to_string_lossy().into_owned()));
+    let editor_ = p.e.as_mut().unwrap();
+    let ws = editor::workspace(editor_);
+    let text = editor_document::workspace_doc::to_text(&ws).unwrap();
+    let at = text.find(":fov ").expect("the sketch's camera has a :fov") + ":fov ".len();
+    let stop = at + text[at..].find([' ', ')']).unwrap();
+    let draft = format!("{}0.5{}", &text[..at], &text[stop..]);
+    assert_ne!(draft, text, "the camera is not at 0.5 already");
+    {
+        let core = std::rc::Rc::make_mut(&mut editor_.core);
+        core.text.tab = rays_editor::text_pane::Tab::Document;
+        core.text.draft = Some(draft);
+        core.text.doc_base = Some(std::sync::Arc::new(ws));
+    }
+    for _ in 0..45 { p.step(&[], vec![], click); }
+    let state = std::fs::read_dir(dir.join("state")).expect("autosave wrote no recovery file").next().expect("a recovery file").unwrap().path();
+    let saved = std::fs::read_to_string(&state).unwrap();
+    assert!(saved.contains(":fov 0.5"), "the autosave left out the unapplied draft");
+    close(p, gpu);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn typing() {
     let (mut p, gpu, click) = open_lisp();
     let step = |p: &mut P, keys: &[Key], events: Vec<Event>, pointer: (f64, f64)| p.step(keys, events, pointer);
@@ -106,5 +136,5 @@ fn typing() {
 }
 
 pub fn cases() -> Vec<(&'static str, fn())> {
-    vec![("typing_budget", typing), ("text_menu", menu)]
+    vec![("typing_budget", typing), ("text_menu", menu), ("autosave_drafts", autosave_drafts)]
 }
