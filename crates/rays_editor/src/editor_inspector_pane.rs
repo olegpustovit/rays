@@ -78,25 +78,8 @@ pub fn inspect_panel<'a>(
 ) -> InspectorResult {
     let (value, scope_view, selection_, scope_active) = input;
     let value = &value;
-    let ws = &value.doc.workspace.ws;
-    let document = objects(value);
-    let selected_ids: Vec<i64> = selection::selected_nodes(selection_).to_vec();
+    let selected_ids = selection::selected_nodes(selection_);
     let level = pane_level(value);
-    let in_geometry_level = |level: Level| match level {
-        Level::Inside(g_) => kind(value, g_).as_deref() == Some("geometry"),
-        Level::Scene => false,
-    };
-    let target = match selected_ids.as_slice() {
-        [id] if !in_geometry_level(level) => scene_target(value, *id),
-        _ => None,
-    };
-    let lowered_level = in_geometry_level(level);
-    // a row of a geometry object's list selects its node in the pane: the inspector follows it
-    let scope_selected: Vec<flow_check::workspace::Path> = if pane_laid(value).map_or(false, |k| Some(&k.graph) == graph_name(value).as_ref()) || (lowered_level && pane_laid(value).is_some()) {
-        inspector_paths(scope::selected(scope_view))
-    } else {
-        Vec::new()
-    };
     let window = g.leaves.iter().any(|l| l.floating && l.panel == layout::Panel::Inspector && l.body == bounds);
     // a window keeps its 1-point border on the left, right and bottom: its panel lies inside
     let bounds = if window {
@@ -119,7 +102,7 @@ pub fn inspect_panel<'a>(
     let previewed = ui.state(inspector_root, -1);
     let preview_key = (previewed >= 0).then(|| image(previewed)).flatten().map(|im| (rays::image::identity(&im), rays::image::generation(&im)));
     // the cook's results show only for a selected node (its counts, its compiled arguments)
-    let cook_rev = if selected_ids.is_empty() && scope_selected.is_empty() { 0 } else { value.cook.results };
+    let cook_rev = if selected_ids.is_empty() && scope_view.selected.is_empty() { 0 } else { value.cook.results };
     let live = rays_shell::kit::revision(&|h| {
         use std::hash::Hash;
         let level_key = match level {
@@ -127,7 +110,7 @@ pub fn inspect_panel<'a>(
             Level::Inside(id) => (1, id),
         };
         (value.revs, cook_rev, preview_key, inspector_visible, window, bounds, scope_active, value.live_cook).hash(h);
-        (level_key, &pane(value).shown, selected_ids.as_slice(), selection_.primary, scope_view.selected.as_slice(), value.carry.is_some()).hash(h);
+        (level_key, &pane(value).shown, selected_ids, selection_.primary, scope_view.selected.as_slice(), value.carry.is_some()).hash(h);
     });
     let cacheable = value.revs.panel.is_some() && value.carry.is_none();
     // while a number of the rows is dragged and followed by patches (below) the inspector stays as it
@@ -152,22 +135,39 @@ pub fn inspect_panel<'a>(
     let image: &dyn Fn(i64) -> Option<rays::image::Image> = &image_seen;
     let mut result: Option<InspectorResult> = None;
     let mut build = |ui: &mut Ui| {
+            let ws = &value.doc.workspace.ws;
+            let document = objects(value);
+            let lowered_level = matches!(level, Level::Inside(id) if kind(value, id).as_deref() == Some("geometry"));
+            // A row of a geometry object's list selects its node in the pane.
+            let scope_selected = if pane_laid(value).is_some_and(|k| lowered_level || Some(&k.graph) == graph_name(value).as_ref()) {
+                inspector_paths(scope::selected(scope_view))
+            } else {
+                Vec::new()
+            };
             let out: InspectorResult = if !inspector_visible {
                 (None, vec![], vec![], value.live_cook, vec![], vec![])
             } else if !scope_selected.is_empty() {
                 match scope_selected.as_slice() {
                     [path] => {
-                        // the inspector reports each choice control it builds: the material one is
-                        // a place a carried payload can be put, gathered here and returned with
-                        // the rows' requests
-                        let drops: Rc<RefCell<Vec<(carry::Place, bool)>>> = Rc::new(RefCell::new(Vec::new()));
                         let mut inspected = (vec![], vec![]);
+                        let mut drops = Vec::new();
                         inspector_panel(window, ui, bounds, &mut |ui| {
                             let follows = |pth: &[Symbol]| follow_target(value, Some(pth));
-                            let opts = InspectorOpts { image, laid: None, window, on_choice: None, resized, follows: &follows };
-                            inspected = workspace_inspector_with_drops(value, ui, width, path, &opts, &drops);
+                            let material = std::cell::Cell::new(None);
+                            let choice = |name: &str, boxed: &UiBox| {
+                                if name == "@ref:material" {
+                                    material.set(Some(*boxed));
+                                }
+                            };
+                            let opts = InspectorOpts {
+                                image, laid: None, window, resized, follows: &follows,
+                                on_choice: value.carry.as_ref().map(|_| &choice as &dyn Fn(&str, &UiBox)),
+                            };
+                            inspected = workspace_inspector(value, ui, width, path, &opts);
+                            if let Some(boxed) = material.get() && let Some(drop) = ui.drop_target(&boxed) {
+                                drops.push((carry::Place::Node(path.clone()), matches!(drop, Drop::Dropped(_))));
+                            }
                         });
-                        let drops = drops.borrow().clone();
                         (None, inspected.0, vec![], value.live_cook, inspected.1, drops)
                     }
                     paths => {
@@ -256,20 +256,20 @@ pub fn inspect_panel<'a>(
                     None => ui.inspector_message("flow-derived", "Made from the graph's text. Select the node in the graph pane to edit its arguments."),
                 });
                 (None, inspected.0, vec![], value.live_cook, inspected.1, vec![])
-            } else if let Some((laid, path)) = &target {
-                // a scene object or World layer the text binds: the one inspector, over the
-                // projection of its graph (the pane's own, or one made for the sheet)
-                let mut inspected: Inspected = (vec![], vec![]);
-                inspector_panel(window, ui, bounds, &mut |ui| {
-                    let follows = |pth: &[Symbol]| follow_target(value, Some(pth));
-                    let opts = InspectorOpts { image, laid: Some(laid.clone()), window, on_choice: None, resized, follows: &follows };
-                    inspected = workspace_inspector(value, ui, width, &path, &opts);
-                });
-                (None, inspected.0, vec![], value.live_cook, inspected.1, vec![])
             } else {
                 let node_id = selected_ids[0];
-                let changes = object_inspector(value, ui, &*document, node_id, bounds, window, ws);
-                (None, changes, vec![], value.live_cook, vec![], vec![])
+                if let Some((laid, path)) = inspector_scene_target(value, node_id) {
+                    let mut inspected: Inspected = (vec![], vec![]);
+                    inspector_panel(window, ui, bounds, &mut |ui| {
+                        let follows = |pth: &[Symbol]| follow_target(value, Some(pth));
+                        let opts = InspectorOpts { image, laid: Some(&laid), window, on_choice: None, resized, follows: &follows };
+                        inspected = workspace_inspector(value, ui, width, &path, &opts);
+                    });
+                    (None, inspected.0, vec![], value.live_cook, inspected.1, vec![])
+                } else {
+                    let changes = object_inspector(value, ui, &document, node_id, bounds, window, ws);
+                    (None, changes, vec![], value.live_cook, vec![], vec![])
+                }
             };
             result = Some(out);
     };
@@ -320,25 +320,17 @@ pub fn inspect_panel<'a>(
     result.unwrap_or_else(|| (None, followed, settings, value.live_cook, vec![], vec![]))
 }
 
-/// `workspace_inspector` for a node of the graph pane, gathering the places the choice controls
-/// offer a carried payload (the material one): the inspector reports each choice control it builds.
-fn workspace_inspector_with_drops<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, path: &[Symbol], opts: &InspectorOpts, drops: &Rc<RefCell<Vec<(carry::Place, bool)>>>) -> Inspected {
-    let place_path = path.to_vec();
-    let drops_in = drops.clone();
-    // the callback needs the Ui to read the drop target: collect the boxes, ask after
-    let boxes: Rc<RefCell<Vec<(String, UiBox)>>> = Rc::new(RefCell::new(Vec::new()));
-    let boxes_in = boxes.clone();
-    let on_choice = move |name: &str, boxed: &UiBox| boxes_in.borrow_mut().push((name.to_owned(), boxed.clone()));
-    let inner = InspectorOpts { image: opts.image, laid: opts.laid.clone(), window: opts.window, on_choice: Some(&on_choice), resized: opts.resized, follows: opts.follows };
-    let out = workspace_inspector(value, ui, width, path, &inner);
-    for (name, boxed) in boxes.borrow().iter() {
-        if name == "@ref:material" {
-            if let Some(d) = ui.drop_target(boxed) {
-                drops_in.borrow_mut().push((carry::Place::Node(place_path.clone()), matches!(d, Drop::Dropped(_))));
-            }
-        }
+fn inspector_scene_target<'a>(value: &ModelView<'a>, node: i64) -> Option<(std::borrow::Cow<'a, ScopeKey>, std::borrow::Cow<'a, [Symbol]>)> {
+    use std::borrow::Cow;
+    let homes = match pane_level(value) {
+        Level::Scene => &value.doc.homes.objects,
+        Level::Inside(_) => &value.doc.homes.layers,
+    };
+    let (_, doc_mod::Home::BoundAt(path)) = homes.iter().find(|(id, _)| *id == node)? else { return None };
+    if let Some(laid) = pane_laid(value) && path.len() >= 2 && path[0].as_str() == laid.graph {
+        return inspector_node(&laid.scope, path).map(|_| (Cow::Borrowed(laid), Cow::Borrowed(path.as_slice())));
     }
-    out
+    scene_target(value, node).map(|(laid, path)| (Cow::Owned(laid), Cow::Owned(path)))
 }
 
 /// The sheet of a scene object or World layer the text does not bind by name: its fields, with

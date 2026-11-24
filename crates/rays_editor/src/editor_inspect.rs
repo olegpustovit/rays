@@ -1317,7 +1317,7 @@ pub type Inspected = (Vec<Change>, Vec<ScopeChange>);
 /// The optional arguments of `workspace_inspector`.
 pub struct InspectorOpts<'a> {
     pub image: &'a dyn Fn(i64) -> Option<rays::image::Image>,
-    pub laid: Option<ScopeKey>,
+    pub laid: Option<&'a ScopeKey>,
     pub window: bool,
     pub on_choice: Option<&'a dyn Fn(&str, &UiBox)>,
     pub resized: Resized<'a>,
@@ -1345,45 +1345,49 @@ fn zone_words(kind: p::ZoneKind) -> (&'static str, fn(&str) -> String) {
     }
 }
 
+pub fn inspector_node<'a>(scope: &'a p::Scope, path: &[Symbol]) -> Option<&'a p::Node> {
+    scope.nodes.iter().find_map(|n| {
+        if n.path == path { Some(n) } else { n.zone.as_ref().and_then(|z| inspector_node(&z.scope, path)) }
+    })
+}
+
+fn pane_chains<'a>(value: &ModelView<'a>, scope: &Rc<p::Scope>) -> Option<&'a HashMap<Path, Vec<Path>>> {
+    let pane = crate::editor_model::pane_view(value);
+    pane.scope.as_ref().filter(|shown| Rc::ptr_eq(shown, scope)).map(|_| pane.chains.as_ref())
+}
+
 /// The inspector of the node selected in the workspace pane: its value at the probe, whether it
 /// recooks every frame, the list of its iterations (a click moves the zone's probe), and the
 /// catalog parameters of the lowered node at that iteration. An edit is a `SetArg` on the
 /// authored argument; an argument that is not a literal shows its expression and is locked.
 /// Returns the graph requests and the probe moves.
 pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, path: &[Symbol], o: &InspectorOpts) -> Inspected {
-    let laid = match &o.laid {
-        Some(k) => Some(k.clone()),
-        None => crate::editor_model::pane_laid(value).cloned(),
-    };
-    let Some(laid) = laid else { return (vec![], vec![]) };
-    let Some(records) = laid.records.clone() else { return (vec![], vec![]) };
-    let scope = laid.scope.clone();
-    let graph = laid.graph.clone();
-    // `holder @ [":" ^ label]`: a row of a node that is an operator call (the pane's expression chip)
-    let row_subject: Option<(p::Node, p::Row)> = match path.split_last() {
-        Some((last, rev_holder)) if last.starts_with(':') && !rev_holder.is_empty() && !scope.inputs.iter().any(|i| i.path == path) => {
-            let label = &last[1..];
-            p::find(&scope, rev_holder).and_then(|h| {
-                let r = h.rows.iter().find(|r| r.label == label && r.expr.as_ref().map_or(false, operator_call)).cloned();
-                r.map(|r| (h, r))
-            })
+    let Some(laid) = o.laid.or_else(|| crate::editor_model::pane_laid(value)) else { return (vec![], vec![]) };
+    let Some(records) = &laid.records else { return (vec![], vec![]) };
+    let scope = &laid.scope;
+    let graph = &laid.graph;
+    let Some(n) = inspector_node(scope, path) else {
+        // A chip selects the operator argument at holder + [":" + label].
+        if let Some((last, holder)) = path.split_last()
+            && let Some(label) = last.strip_prefix(':')
+            && !scope.inputs.iter().any(|i| i.path == path)
+            && let Some(h) = inspector_node(scope, holder)
+            && let Some(r) = h.rows.iter().find(|r| r.label == label && r.expr.as_ref().is_some_and(operator_call))
+        {
+            return expression_inspector(ui, width, value, h, r);
         }
-        _ => None,
+        return input_inspector(ui, graph, width, scope, path);
     };
-    let found = p::find(&scope, path);
-    let n = match found {
-        None => {
-            return match row_subject {
-                Some((h, r)) => expression_inspector(ui, width, value, &h, &r),
-                None => input_inspector(ui, &graph, width, &scope, path),
-            };
-        }
-        Some(n) => n,
+    let owned_chains;
+    let chains = if let Some(chains) = pane_chains(value, scope) {
+        chains
+    } else {
+        owned_chains = probe::chains(scope);
+        &owned_chains
     };
-    let chains = probe::chains(&scope);
-    let chain: Vec<Path> = chains.get(&n.path).cloned().unwrap_or_default();
-    let probes = probes_of(value, &chains, &n.path);
-    let footer = records.borrow_mut().footer(&n, &probes);
+    let chain = chains.get(&n.path).map_or(&[][..], Vec::as_slice);
+    let probes = probes_of(value, chains, &n.path);
+    let footer = records.borrow_mut().footer(n, &probes);
     let preview = match records.borrow_mut().at(&n.path, &probes) {
         Some(Summary::Value(flow_syntax::value::Value::Deferred(Ty::Named(name), id))) if name == "image" => (o.image)(id),
         Some(Summary::Image(im)) => (o.image)(im.node),
@@ -1408,7 +1412,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     let zone_text: Option<(&'static str, fn(&str) -> String)> = n.zone.as_ref().map(|z| zone_words(z.kind));
     // a bypassed node passes its input through: the plan node is the upstream one, so it has no
     // number, cook or arguments of its own to show here
-    let node_id = if n.bypass { None } else { compiled_at(value, &chains, &records, &n.path) };
+    let node_id = if n.bypass { None } else { compiled_at(value, chains, records, &n.path) };
     let node = node_id.and_then(|id| compiled_node(value, id));
     let authored_row = |key: &str| -> Option<S> {
         n.rows.iter().find(|r| r.key == ArgKey::Kw(key.to_owned())).and_then(|r| r.expr.clone())
@@ -1418,7 +1422,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     // the checked kind's parameters, valued by what is written
     let fields: Vec<FieldView> = match &node {
         Some(nd) => node::parameter_fields(nd),
-        None => kind_fields(value, &graph, &n.head, &authored_row).unwrap_or_default(),
+        None => kind_fields(value, graph, &n.head, &authored_row).unwrap_or_default(),
     };
     let parameters: Vec<port::Parameter> = port::parameters(false, &fields).unwrap_or_default();
     // the docked column under ~340 points (workspace.html) has no number and no bar; the window
@@ -1431,7 +1435,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     let on_card_row = |pth: &str| -> bool { row_of(pth).map_or(false, |r| p::row_shown(pin_of(&r), &r)) };
     let geo: Option<probe::Geometry> = node_id.and_then(|id| node_owner(value, id).and_then(|oid| cook::geometry(&value.cook, oid, id).cloned()));
     let displayed_path = viewed_path(value, &scope);
-    let readouts = records.borrow_mut().readouts(&n, &probes);
+    let readouts = records.borrow_mut().readouts(n, &probes);
     // the head: the kind, VIEW while displayed, the node's number; the name edited in place; what
     // the probe and the cook know; the flags the card has as buttons
     let follow = (o.follows)(&n.path);
@@ -1537,7 +1541,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     let mut picks: Vec<ScopeChange> = Vec::new();
     ui.inspector_body(&mut |ui| {
         zone_says(ui, width, &zone_text, &n);
-        readout_rows(ui, &n, value, &footer, &readouts, width, zone_text.is_some());
+        readout_rows(ui, n, value, &footer, &readouts, width, zone_text.is_some());
         let hoist: Vec<Change> = if footer.invariant && ui.inspector_button("ws-hoist", "Move out of the loop") {
             vec![Change::SyntaxEdit(fe::Op::Hoist { node: n.path.clone() })]
         } else {
@@ -1567,7 +1571,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
         }
         let ref_rows = reference_rows(value, &n);
         let (layout_names, layout_row, size_names, size_row) = layout_and_size_rows(value, &n);
-        let op_rows = operator_rows(&n, &pin_of, size_row.is_some(), layout_row.is_some(), !ref_rows.is_empty(), !parameters.is_empty());
+        let op_rows = operator_rows(n, &pin_of, size_row.is_some(), layout_row.is_some(), !ref_rows.is_empty(), !parameters.is_empty());
         let mut entries: Vec<Entry> = Vec::new();
         for (r, ir) in &op_rows {
             entries.push((ir.path.clone(), r.clone(), vec![], ir.clone()));
@@ -1611,10 +1615,10 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
         let mut expanded: Vec<String> = fields.iter().filter_map(|f| f.folder.first().cloned()).collect();
         expanded.sort();
         expanded.dedup();
-        let edits = field_edits(ui, o.on_choice, width, &expanded, &parameters, &ref_rows, &row_of, &arg_row, value, &size_names, &n, o.resized, &graph, &layout_names, &rows);
+        let edits = field_edits(ui, o.on_choice, width, &expanded, &parameters, &ref_rows, &row_of, &arg_row, value, &size_names, n, o.resized, graph, &layout_names, &rows);
         output_section(ui, width, geo.as_ref());
         let note = note_section(ui, width, &n);
-        picks = iteration_picks(ui, &footer, &chain, &probes, &n, &records);
+        picks = iteration_picks(ui, &footer, chain, &probes, n, &records);
         on_card = rows.iter().filter(|r| r.shown && !r.path.starts_with('@')).count() as i64;
         requests = [hoist, macro_edit, note, movers, unfold_nested, edits].concat();
     });
@@ -1637,7 +1641,13 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
 pub fn node_path<'a>(value: &ModelView<'a>, node_id: i64) -> Option<Path> {
     let laid = crate::editor_model::pane_laid(value)?;
     let records = laid.records.as_ref()?;
-    let chains = probe::chains(&laid.scope);
+    let owned_chains;
+    let chains = if let Some(chains) = pane_chains(value, &laid.scope) {
+        chains
+    } else {
+        owned_chains = probe::chains(&laid.scope);
+        &owned_chains
+    };
     fn search(value: &Model, chains: &HashMap<Path, Vec<Path>>, records: &Rc<RefCell<Probe>>, node_id: i64, sc: &p::Scope) -> Option<Path> {
         sc.nodes.iter().find_map(|n| {
             if compiled_at(value, chains, records, &n.path) == Some(node_id) {
@@ -1647,7 +1657,7 @@ pub fn node_path<'a>(value: &ModelView<'a>, node_id: i64) -> Option<Path> {
             }
         })
     }
-    search(value, &chains, records, node_id, &laid.scope)
+    search(value, chains, records, node_id, &laid.scope)
 }
 
 /// The same lowering, physically: its recording evaluation is the identity.

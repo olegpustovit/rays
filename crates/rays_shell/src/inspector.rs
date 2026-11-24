@@ -162,7 +162,7 @@ fn pin_of(cx: &Ctx, shown: bool) -> Option<bool> {
 
 /// a click on the dot, or the s key over the row, asks to flip the row's pin
 fn pin_change(ui: &mut Ui, cx: &Ctx, boxed: &UiBox, path: &str, shown: bool, clicked: bool, edits: Vec<FlowChange>) -> Vec<FlowChange> {
-    let key = cx.pin_click && ui.hovered_within(boxed) && !ui.text_input_focused() && ui.key_pressed(input::Key::KeyChar('s'));
+    let key = cx.pin_click && !ui.text_input_focused() && ui.key_pressed(input::Key::KeyChar('s')) && ui.hovered_within(boxed);
     let mut out = Vec::new();
     if clicked || key {
         out.push(FlowChange::Pinned(path.to_string(), !shown));
@@ -578,7 +578,14 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
     // a row is named by its argument, as the sheet and the card name it
     let title: String = if row.fields.len() == 1 && row.path.starts_with('@') { row.fields[0].label.clone() } else { row.path.clone() };
     if let Some(source) = &row.drive {
-        return driven(ui, cx, row, &title, source);
+        let revision = kit::debug_revision(&(row, cx.width, cx.pins, cx.pin_click));
+        let mut out = Vec::new();
+        kit::with_label(format_args!("flow-driven-view-{}", row.path), &mut |label| {
+            ui.view(label, revision, Size::Px(cx.width), Size::Px(ui.row_height() as f32), &mut |ui| {
+                out = driven(ui, cx, row, &title, source);
+            });
+        });
+        return out;
     }
     if row.fields.len() == 1 {
         let field = &row.fields[0];

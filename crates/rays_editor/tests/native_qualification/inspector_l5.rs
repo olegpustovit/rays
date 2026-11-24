@@ -51,9 +51,38 @@ fn b22_driven_number_can_be_replaced() {
     assert_eq!(type_in_row(&row, "3"), vec![FlowChange::Edited("radius".into(), Value::Float(3.))]);
 }
 
+fn click_budget_inspector_hover() {
+    let rows: Vec<FlowRow> = (0..12).map(|i| FlowRow {
+        path: format!("argument-{i}"), shown: true, locked: false, drive: Some("=(* 2 t)".into()), live: Some("2.0".into()),
+        fields: vec![field("radius", param::floating(0., 10., None, None).unwrap(), Value::Float(2.))],
+    }).collect();
+    let opts = FlowOpts { kind_label: Some("Geometry".into()), pin_click: true, ..Default::default() };
+    let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
+    ui.verify_views(false);
+    let mut counts = Vec::new();
+    for tick in 1..=6 {
+        let point = (235., match tick { 1 | 2 => 5., 3 | 4 => 38., _ => 62. });
+        let frame = rays::frame::Frame {
+            input: input::Frame { size: (320, 360), frame: tick, tick, pointer: point, events: vec![Event::PointerMoved(point)], ..input::at_time(tick as f64 / 60.) },
+            pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.),
+        };
+        let before = mem_sys::alloc_count();
+        rays_shell::host::build(&mut ui, &frame, &mut |ui| {
+            rays_shell::kit::cached(ui, "inspector-hover-parent", 1, &mut |ui| {
+                inspector::flow_fields(ui, &opts, None, &rows);
+            });
+        });
+        counts.push(mem_sys::alloc_count() - before);
+    }
+    eprintln!("CLICK inspector hover enter/hold/next/hold: {:?}", &counts[2..]);
+    assert!(counts[2] <= 39 && counts[3] == 0 && counts[4] <= 42 && counts[5] == 0, "{counts:?}");
+    rays_shell::host::destroy(&mut ui);
+}
+
 pub fn cases() -> Vec<(&'static str, fn())> {
     vec![
         ("inspector_b21_hex_color_is_one_edit", b21_hex_color_is_one_edit),
         ("inspector_b22_driven_number_can_be_replaced", b22_driven_number_can_be_replaced),
+        ("click_budget_inspector_hover", click_budget_inspector_hover),
     ]
 }
