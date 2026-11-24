@@ -1150,7 +1150,12 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         active_camera,
         root: root.params,
         settings,
-        shell: shell.map(Arc::new),
+        // the previous shell stays when nothing in it changed (a scrub, an undo of a value): the
+        // geometry the shell caches is keyed on this Arc
+        shell: shell.map(|new| match previous.and_then(|doc| doc.shell.as_ref()) {
+            Some(old) if same_shell(old, &new) => old.clone(),
+            _ => Arc::new(new),
+        }),
         view_worlds,
         view_roots,
         homes,
@@ -1162,6 +1167,30 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
             fast,
         },
     })
+}
+
+fn same_shell(a: &document::Shell, b: &document::Shell) -> bool {
+    a.tree == b.tree
+        && a.origins == b.origins
+        && a.named == b.named
+        && a.repeated == b.repeated
+        && a.follows == b.follows
+        && a.start == b.start
+        && a.views == b.views
+        && a.canvases == b.canvases
+        && a.switch == b.switch
+        && a.preview_sources.len() == b.preview_sources.len()
+        && a.preview_sources.iter().zip(&b.preview_sources).all(|((ka, x), (kb, y))| {
+            ka == kb
+                && x.editor_graph == y.editor_graph
+                && x.panel == y.panel
+                && x.instance == y.instance
+                && match (&x.scene_ref, &y.scene_ref) {
+                    (Some(p), Some(q)) => flow_syntax::syntax::equal(p, q),
+                    (None, None) => true,
+                    _ => false,
+                }
+        })
 }
 
 /// An undo entry live again: the entry's text lowered under the ids it had, on top of the document

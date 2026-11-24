@@ -29,3 +29,5 @@ mod test_workspace_cook;
 mod test_workspace_edit;
 #[cfg(test)]
 mod test_projection;
+#[cfg(test)]
+mod test_layout_patch;

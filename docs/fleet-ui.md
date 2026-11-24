@@ -59,6 +59,7 @@ Delete it when W3 closes; leftovers go to `OPEN_ISSUES.md`.
 | Lane | State |
 |---|---|
 | S0 harness | done: `click_budget` |
+| L1 layout edits | partial: shell Arc reused when unchanged. Layout edits stay O(document): isogrid split = 725k allocs (check 600k: print 132k + check 462k; lowering 116k in `flow_sop::lower::of_checked`, 7k the rest of `of_workspace`). Needs an incremental per-graph check (flow_check) and a plan patch for one graph (flow_sop/flow_eval); not reachable in the lane's files |
 
 ## Requests
 
