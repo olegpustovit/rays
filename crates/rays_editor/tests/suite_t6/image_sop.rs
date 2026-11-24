@@ -79,7 +79,7 @@ pub fn image_sop() {
     let fallback = S::parse(node.rows[1].default.as_ref().unwrap()).unwrap().remove(0);
     let disconnected = wd::edit(&catalog, &document, &Op::Disconnect { node: result.clone(), key: ArgKey::Pos(1), fallback: Some(fallback) }).unwrap();
     assert!(P::find(&P::of_graph(&catalog, &disconnected.checked, "g").unwrap(), &["g".into(), "result#1".into()]).is_some());
-    let lowered = flow_sop::lower::workspace(Some(factories.clone()), kinds::descriptors(), flow_sop::lower::Options::default(), &document.source).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let lowered = flow_sop::lower::of_checked(Some(factories), flow_sop::lower::Options::default(), &document.checked).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let graph = lowered.graphs.iter().find(|g| g.name == "g" && g.default).unwrap();
     let node = edit_graph::compile_node(&graph.network.geometry, graph.root.unwrap()).unwrap();
     let mut s = session::create(16, 65536).unwrap();

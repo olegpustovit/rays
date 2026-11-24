@@ -70,11 +70,13 @@ pub fn replace(text: &str, from: &str, by: &str) -> String {
 pub fn shell_of(doc: &document::T) -> document::Shell {
     doc.shell.as_deref().cloned().unwrap_or_else(|| fail("no editor graph"))
 }
-/// The variations workspace with its editor graph replaced.
+/// The variations graphs with a smaller garden and the caller's editor layout.
 pub fn with_editor(body: &str) -> String {
     let text = case("variations");
     let start = text.find("(graph editor :context").expect("editor graph");
-    format!("{}(graph editor :context editor\n{body}))\n", &text[..start])
+    let scene = text[..start].replace("(count : int 40)", "(count : int 4)")
+        .replace(":columns 48", ":columns 12").replace(":segments 8 :rings 4", ":segments 4 :rings 3");
+    format!("{scene}(graph editor :context editor\n{body}))\n")
 }
 pub fn expect_error(name: &str, text: &str, needle: &str) {
     match workspace_doc::of_text(&TextOptions::default(), &catalog(), text) {
@@ -130,8 +132,11 @@ fn no_preferences() -> Option<String> {
     Some(file.to_string_lossy().to_string())
 }
 pub fn editor_with(text: &str, options: editor::Create) -> editor::Editor {
+    editor_with_doc(&of_text(text), options)
+}
+pub fn editor_with_doc(doc: &workspace_doc::T, options: editor::Create) -> editor::Editor {
     let options = editor::Create { await_: Some(true), ui_text_size: Some(11), platform: Some(input::Platform::Apple), domains: options.domains.or(Some(1)), preferences: options.preferences.or_else(no_preferences), ..options };
-    match editor::create(options, &of_text(text), None, editor::prepare_fn(), editor::draw_fn()) {
+    match editor::create(options, doc, None, editor::prepare_fn(), editor::draw_fn()) {
         Ok(e) => e,
         Err(m) => fail(&m),
     }
@@ -161,7 +166,7 @@ impl Run {
     pub fn step_full(&mut self, buttons: &[MouseButton], keys: &[Key], mouse: (f64, f64), events: Vec<Event>) {
         self.count += 1;
         let f = frame_full(buttons, keys, (0., 0.), mouse, events, self.count);
-        self.e = editor::update(self.e.clone(), &f);
+        rays_editor::editor_loop::update(&mut self.e, &f);
     }
     pub fn step(&mut self, mouse: (f64, f64), events: Vec<Event>) {
         self.step_full(&[], &[], mouse, events)

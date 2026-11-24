@@ -23,10 +23,13 @@ pub fn run_values() {
     if !gpu() {
         return;
     }
+    let default = of_text("(workspace w (graph g :context sop (sop/box)))");
     let started = |text: Option<&str>| {
         let opening = text.is_none();
-        let text = text.unwrap_or("(workspace w (graph g :context sop (sop/box)))");
-        let mut r = Run::new(editor(text));
+        let mut r = Run::new(match text {
+            Some(text) => editor(text),
+            None => editor_with_doc(&default, editor::Create::default()),
+        });
         r.step((450., 300.), vec![]);
         r.step((450., 300.), vec![]);
         let (gx, gy, _, _) = r.panes().graph;

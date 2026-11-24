@@ -500,6 +500,9 @@ fn rgba_diff_max(actual: &[u8], expected: &[u8]) -> i32 {
 
 /// Native geometry captures: P/Cd, two instances, exact CPU domains, resident GPU images, parent freshness.
 fn native_geometry_captures() {
+    // Compare the handle ledger of these captures from a fresh headless lease; an earlier
+    // case's retired textures can otherwise leave the ledger while this case renders.
+    common::release_keepalive();
     if !common::gpu() {
         return;
     }

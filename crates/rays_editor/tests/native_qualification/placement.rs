@@ -249,7 +249,9 @@ fn retained_generations() {
         let mut expected = isogrid::draw(&canvas,&previous.2);
         assert!(expected.iter().any(|c| i64::from(c.r)+i64::from(c.g)+i64::from(c.b)>0));
         let mut warm = None; let mut heap=0;
-        for i in 1..=200 {
+        // Default covers 32 generations after the warm snapshot. Slow mode keeps the full leak soak.
+        let generations = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 200 } else { 48 };
+        for i in 1..=generations {
             let next = cook(&mut session,&node,i as f64);
             isogrid::draw(&other,&next.2);
             isogrid::same(&isogrid::draw(&canvas,&previous.2),&expected,"placement");
@@ -264,7 +266,7 @@ fn retained_generations() {
         assert_eq!(last.pipeline_compilations,first.pipeline_compilations);
         assert_eq!(last.runners_created,first.runners_created);
         assert!(last.buffer_creations<=first.buffer_creations+4);
-        assert!(last.status_reads>=first.status_reads+184);
+        assert!(last.status_reads>=first.status_reads+generations-16);
         assert!(last.held_buffers<=first.held_buffers+4);
         assert!(heap_delta<=262144*std::mem::size_of::<usize>() as i64,"retained bytes {heap_delta}");
         assert_eq!(last.payload_readback_bytes,0);

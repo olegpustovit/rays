@@ -77,7 +77,9 @@ pub(super) fn run(index: usize) {
             let world=if triangles {let mut w=rays::world::bake(Some(1),None,64,32,&rays::world::default()).unwrap();w.sun=Some(rays::world::Sun {direction:vec3::normalize(vec3::create(0.3,1.,0.2)),radiance:rays::world::rgb(4.,4.,4.),angular_radius:0.01});Some(w)}else{None};
             let mut device_tracer=None;let mut host_tracer=None;
             let mut gpu_times=Vec::new();let mut cpu_times=Vec::new();let mut display_times=Vec::new();let mut host_times=Vec::new();let mut trace_times=Vec::new();let mut host_trace_times=Vec::new();
-            for frame in 0..8 {
+            // One cold frame and three refits exercise every check. Slow qualification keeps all eight.
+            let frames = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 8 } else { 4 };
+            for frame in 0..frames {
                 let before=wg::image_stats(&gpu).0;let calls=dispatch.load(Ordering::SeqCst);let start=std::time::Instant::now();let d=device.cook(frame);if frame>0 {gpu_times.push(start.elapsed());}let after=wg::image_stats(&gpu).0;
                 if bare {assert!(g::find_attribute(a::Owner::Point,"N",&d).is_none());}
                 if frame==0 && !recompute && !bare {assert_eq!(after.input_uploaded_bytes-before.input_uploaded_bytes,n*n*12);assert_eq!(dispatch.load(Ordering::SeqCst)-calls,1);}

@@ -49,12 +49,9 @@ fn packed_node<'a>(p: &'a l::T, overridden: bool, kind: &str) -> &'a e::Node {
         matches && p.plan.instances[n.inst as usize].graph == "mesh" && p.plan.instances[n.inst as usize].default != overridden
     }).unwrap_or_else(|| panic!("missing packed node {kind}, override={overridden}"))
 }
-fn inspect_packed(p: &l::T, domains: i64, state: &e::State, live: &input::Frame, overridden: bool) {
-    let source = packed_node(p, overridden, "sop/copy_to_points").id;
-    let context_ = ok(l::source_context(p, source));
-    let (cone, root) = ok(l::source_cone(&context_, source));
+fn inspect_packed(cone: &network::Network, root: i64, domains: i64, state: &e::State, live: &input::Frame) {
     let lane = value_lane::create(Some(e::fork_state(state)));
-    let resolved = ok(value_lane::resolve(None, Some(live), &lane, live.t, &cone));
+    let resolved = ok(value_lane::resolve(None, Some(live), &lane, live.t, cone));
     let root = edit_graph::compile_node(&resolved.geometry, root).unwrap();
     let mut session = session::create(0, 0).unwrap();
     let ctx = context::create(context::Options { domains: Some(domains), ..Default::default() }).unwrap();
@@ -63,18 +60,20 @@ fn inspect_packed(p: &l::T, domains: i64, state: &e::State, live: &input::Frame,
     assert_eq!(output.instances.as_ref().unwrap().len(), 2);
     session::close(&mut session);
 }
-fn packed_expected(offset: f64, bias: f64) -> Vec<u8> {
+fn packed_expected(offset: f64, bias: f64, height: i64) -> Vec<u8> {
     let sum_x = 0.03125 + 3. * (offset + bias - 0.03125);
-    let rgba: Vec<_> = (0..65 * 17 * 4).map(|i| match i % 4 {
+    let rgba: Vec<_> = (0..65 * height * 4).map(|i| match i % 4 {
         0 => ((i / 4 % 65) as f64 + 0.5) / 65. + sum_x / 4.,
-        1 => ((i / 4 / 65) as f64 + 0.5) / 17. + offset + bias - 0.0625,
+        1 => ((i / 4 / 65) as f64 + 0.5) / height as f64 + offset + bias - 0.0625,
         2 => 6. * 0.0625,
         _ => 1.,
     }).collect();
-    bytes(&ok(si::of_vec4(&context::create(Default::default()).unwrap(), 65, 17, &rgba)))
+    bytes(&ok(si::of_vec4(&context::create(Default::default()).unwrap(), 65, height, &rgba)))
 }
 fn packed_capture(stateful: bool) {
     assert!(common::gpu(), "native Vulkan device required");
+    // The 65-pixel row still crosses the packing boundary and the image spans multiple rows.
+    let height = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 17 } else { 5 };
     let bias = if stateful { "(state [n 0.015625] (+ n 0.015625))" } else { "(* t 0.015625)" };
     let p = lower(&format!(r##"(workspace packed_capture
     (graph drawing :context draw [(image : image (image/noise :width 1 :height 1))] (draw/image image))
@@ -90,14 +89,20 @@ fn packed_capture(stateful: bool) {
              b (array/nth (sop/attr geo :P) 3)
              c (reduce + [0 0 0] (sop/attr geo :Cd))
              img (image/map (fn [uv] [(+ uv.x (/ p.x 4)) (+ uv.y (+ a.x (* b.x 2))) c.y 1])
-               :width 65 :height 17)
+               :width 65 :height {height})
              frozen (exact img)
-             parent (image/render (ref drawing :image img) :width 65 :height 17)] geo))
+             parent (image/render (ref drawing :image img) :width 65 :height {height})] geo))
     (graph other :context sop (ref mesh :offset 0.25))
     (graph backdrop :context draw (draw/background "#102030"))
-    (graph fixed :context image (image/render (ref backdrop) :width 65 :height 17)))"##));
+    (graph fixed :context image (image/render (ref backdrop) :width 65 :height {height})))"##));
     let owners = [Owner::new(1, false), Owner::new(8, false), Owner::new(1, true), Owner::new(8, true)];
     for o in &owners { wi::bind(&o.images, &p); }
+    let captures = [false, true].map(|overridden| {
+        let id = |kind| packed_node(&p, overridden, kind).id;
+        let source = id("sop/copy_to_points");
+        let context = ok(l::source_context(&p, source));
+        (overridden, ok(l::source_cone(&context, source)), value(id("image/map")), value(id("image/render")), value(id("exact")))
+    });
     let before = handles();
     let state = e::create_state();
     let backdrops: Vec<_> = owners[2..].iter().map(|o| {
@@ -108,37 +113,36 @@ fn packed_capture(stateful: bool) {
     let mut check = |state: &e::State, frame: i64, bias: f64| {
         let live = at(frame);
         let stamp = e::state_stamp(state);
-        for overridden in [false, true] {
-            let expected = packed_expected(if overridden { 0.25 } else { 0.125 }, bias);
-            for domains in [1, 8] { inspect_packed(&p, domains, state, &live, overridden); }
-            let v = |kind| value(packed_node(&p, overridden, kind).id);
-            let one = ok(owners[0].payload(&p, state, &live, &v("image/map")));
-            let eight = ok(owners[1].payload(&p, state, &live, &v("image/map")));
+        for (overridden, (cone, root), map, render, exact) in &captures {
+            let expected = packed_expected(if *overridden { 0.25 } else { 0.125 }, bias, height);
+            for domains in [1, 8] { inspect_packed(cone, *root, domains, state, &live); }
+            let one = ok(owners[0].payload(&p, state, &live, map));
+            let eight = ok(owners[1].payload(&p, state, &live, map));
             assert_eq!(bytes(&one), expected); assert_eq!(bytes(&eight), expected);
             if retained.is_empty() { retained.push((one.clone(), bytes(&one))); }
             for o in &owners[2..] {
-                let child = ok(o.image(&p, state, &live, &v("image/map")));
+                let child = ok(o.image(&p, state, &live, map));
                 let native = image::resource(&child);
                 assert_eq!(Native::cpu_storage_bytes(&native), 0);
                 let actual = image::pixels(&child).unwrap(); near(&actual, &expected);
-                let parent = ok(o.image(&p, state, &live, &v("image/render")));
+                let parent = ok(o.image(&p, state, &live, render));
                 near(&image::pixels(&parent).unwrap(), &expected);
                 let stats = wi::capture_stats(&o.images);
                 let reads = wg::image_stats(&o.gpu).0.status_reads;
                 let parent_native = image::resource(&parent);
                 let child_reads = Native::readbacks(&native);
                 let parent_reads = Native::readbacks(&parent_native);
-                assert!(image::same(&ok(o.image(&p, state, &live, &v("image/map"))), &child));
-                assert!(image::same(&ok(o.image(&p, state, &live, &v("image/render"))), &parent));
+                assert!(image::same(&ok(o.image(&p, state, &live, map)), &child));
+                assert!(image::same(&ok(o.image(&p, state, &live, render)), &parent));
                 assert_eq!(wi::capture_stats(&o.images), stats);
                 assert_eq!(Native::readbacks(&native), child_reads);
                 assert_eq!(Native::readbacks(&parent_native), parent_reads);
                 let host = wg::image_stats(&o.gpu).0;
                 assert_eq!(host.status_reads, reads); assert_eq!(host.readback_bytes, 0);
-                assert_eq!(bytes(&ok(o.payload(&p, state, &live, &v("image/map")))), expected);
+                assert_eq!(bytes(&ok(o.payload(&p, state, &live, map))), expected);
                 assert_eq!(Native::cpu_storage_bytes(&native), 0);
                 if frame == 0 {
-                    let frozen = ok(o.payload(&p, state, &live, &v("exact")));
+                    let frozen = ok(o.payload(&p, state, &live, exact));
                     assert_eq!(bytes(&frozen), actual);
                     retained.push((frozen.clone(), bytes(&frozen)));
                 }

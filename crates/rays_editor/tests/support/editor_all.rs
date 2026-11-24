@@ -1,8 +1,20 @@
 // Merged editor suite (B3): groups t1–t6 and native qualification, included by `gpu_editor` and `editor`.
-// `pure_cases.txt` names the cases that never acquire a GPU device (probed); they run in `editor`,
-// which the runner parallelizes. Every other case runs in the serialized `gpu_editor`.
+// `pure_cases.txt` names the device-free cases the runner parallelizes in `editor`.
+// Native cases use `gpu_editor`, where the full SOP inventories also share their checked factories.
 #[path = "../../../rays/tests/common/mod.rs"]
-mod common;
+mod native;
+
+mod common {
+    pub use super::native::{release_keepalive, window};
+    use std::cell::Cell;
+
+    thread_local! { pub static DEVICE_FREE: Cell<bool> = const { Cell::new(false) }; }
+
+    pub fn gpu() -> bool {
+        // The device-free cases use the same editor helpers with no native backend installed.
+        DEVICE_FREE.get() || super::native::gpu()
+    }
+}
 
 #[path = "../support/mod.rs"]
 mod support;
@@ -39,9 +51,12 @@ fn run_split(pure: bool) {
     cases.extend(suite_t5::cases());
     cases.extend(suite_t6::cases());
     cases.extend(natq::cases());
-    // ponytail: a case that starts needing a device must move out of pure_cases.txt (it would still pass,
-    // but contend with parallel cases); upgrade to a per-case marker if the list churns.
+    // ponytail: keep the device-free names in one list; use per-case markers if it churns.
     let pure_names: std::collections::HashSet<&str> = include_str!("../pure_cases.txt").lines().collect();
     cases.retain(|(name, _)| pure_names.contains(name) == pure);
+    common::DEVICE_FREE.set(pure);
     common::window::run(&cases);
+    if pure {
+        assert!(!ogpu_core::impl_::is_selected(), "a device-free editor case selected a GPU backend");
+    }
 }

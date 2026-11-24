@@ -340,9 +340,10 @@ fn traced(gpu:&wg::WorkspaceGpu,config:&gpu::Config) {
     let camera=rays::camera::perspective(None,None,None,rays_math::vec3::create(20.,18.,22.),rays_math::vec3::create(4.,4.,4.)).unwrap();
     let picture=|mesh:rays::mesh::Mesh| {
         let scene=pt::Scene { objects:vec![(mesh,pt::material(None,None,None,None,pt::Linear_color::rgb(1.,1.,1.)))],spheres:Vec::new(),strands:Vec::new(),environment:pt::Environment {sky:pt::Linear_color::rgb(0.5,0.5,0.5),ground:pt::Linear_color::rgb(0.5,0.5,0.5),panels:Vec::new()},lights:Vec::new() };
-        let mut tracer=pt::create(&Default::default(),64,64,&scene).unwrap();
+        let mut tracer=pt::create(&pt::CreateOptions { spp: Some(8), ..Default::default() },64,64,&scene).unwrap();
         pt::reset(&mut tracer);
-        for _ in 0..16 { pt::render(&mut tracer,&camera).unwrap(); pt::flush(&mut tracer).unwrap(); }
+        for _ in 0..2 { pt::render(&mut tracer,&camera).unwrap(); pt::flush(&mut tracer).unwrap(); }
+        assert_eq!(pt::samples(&tracer),16);
         let bytes=rays::image::pixels(&pt::image(&tracer)).unwrap(); pt::destroy(&mut tracer); bytes
     };
     let mut host=None;
@@ -361,6 +362,8 @@ fn traced(gpu:&wg::WorkspaceGpu,config:&gpu::Config) {
 }
 fn live_mesh() {
     assert!(crate::common::gpu(),"native GPU required");
+    // Keep repeated resident frames and the large-display threshold; slow mode extends the runs.
+    let slow = std::env::var("RAYS_SLOW").as_deref() == Ok("1");
     let gpu=wg::create(None); wg::qualification(&gpu);
     wg::with_backend(&gpu,true,&mut |config|{
         resident(&gpu,config,8,&[0.,1./6.],true,false);
@@ -373,7 +376,8 @@ fn live_mesh() {
         flow_ir::fallback::reset();
         let sea=std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),"/../../sketches/gpu_sea.rays")).unwrap().replace("(side : int 1000)","(side : int 256)");
         let before=wg::image_stats(&gpu).0; let mut uploads=0;
-        cook(&sea,Some(config.clone()),&(0..=6).map(|i|i as f64/60.).collect::<Vec<_>>(),Some("sea"),true,|frame,g|{
+        let sea_frames = if slow { 7 } else { 5 };
+        cook(&sea,Some(config.clone()),&(0..sea_frames).map(|i|i as f64/60.).collect::<Vec<_>>(),Some("sea"),true,|frame,g|{
             if frame>=3 { assert!(p::resident(g::positions(g))); assert!(a::holder(&attribute(g,"N")).is_some()); let now=wg::image_stats(&gpu).0.input_uploads; if frame>3 { assert_eq!(now,uploads); } uploads=now; }
         });
         assert_eq!(wg::image_stats(&gpu).0.payload_readback_bytes,before.payload_readback_bytes);
@@ -386,11 +390,13 @@ fn live_mesh() {
         let root=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sketches");
         let swarm=std::fs::read_to_string(root.join("swarm.rays")).unwrap().replace("(import \"swarm_lib.rays\")","").replacen("(workspace swarm",&format!("(workspace swarm\n{}",std::fs::read_to_string(root.join("swarm_lib.rays")).unwrap()),1).replace("(tubes : int 4000)","(tubes : int 300)").replace("(points : int 257)","(points : int 32)");
         flow_ir::fallback::reset();
-        cook(&swarm,Some(config.clone()),&(0..=5).map(|i|i as f64/60.).collect::<Vec<_>>(),Some("swirling"),true,|frame,g|{
+        let swarm_frames = if slow { 6 } else { 5 };
+        cook(&swarm,Some(config.clone()),&(0..swarm_frames).map(|i|i as f64/60.).collect::<Vec<_>>(),Some("swirling"),true,|frame,g|{
             if frame>=3 { assert!(p::resident(g::positions(g))); assert!(wg::display(&gpu,g).is_some(),"{:?}",wg::display_refusal(&gpu)); }
         });
         assert!(flow_ir::fallback::seen().is_empty(),"{:?}",flow_ir::fallback::seen());
-        resident(&gpu,config,128,&[0.,0.01,0.02,0.03,0.04],false,true);
+        let display_times = [0.,0.01,0.02,0.03,0.04];
+        resident(&gpu,config,128,&display_times[..if slow { 5 } else { 3 }],false,true);
     });
     wg::close(&gpu);
 }

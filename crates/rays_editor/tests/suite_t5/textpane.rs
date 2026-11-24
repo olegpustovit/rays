@@ -91,15 +91,14 @@ pub fn editor_text() {
     env.click(discard);
     type_text(&mut env, &format!("{applied} \"open"));
     check(!has(&env.dump(), ", error"), "a draft was parsed before it rested");
-    for _ in 0..30 {
-        env.step(vec![]);
-    }
+    // The first frame records the draft; the next is after its debounce deadline.
+    env.step(vec![]);
+    env.d.step_full(&[], &[], env.mouse, vec![], 29);
     check(has(&env.dump(), ", error"), &format!("a rested draft was not parsed\n{}", env.dump()));
     env.step(vec![Event::TextInput("\"".into())]);
     check(!has(&env.dump(), ", error"), &format!("the parse of an older text outlived an edit\n{}", env.dump()));
-    for _ in 0..30 {
-        env.step(vec![]);
-    }
+    env.step(vec![]);
+    env.d.step_full(&[], &[], env.mouse, vec![], 29);
     check(!has(&env.dump(), ", error"), &format!("a balanced draft was reported\n{}", env.dump()));
     env.click(discard);
     type_text(&mut env, &replace(&applied, "(seeds : int 8)", "(seeds : int 7)"));

@@ -87,15 +87,7 @@ pub fn with_editor(text: &str, f: impl FnOnce(editor::Editor)) {
     editor::close(&guard);
 }
 
-/// A line of the crash dump's editor.txt after `key: `.
-pub fn dump_line(e: &editor::Editor, key: &str) -> String {
-    let dir = scratch_dir("rays-t3-dump");
-    editor::crash_dump(e, &dir).unwrap_or_else(|m| panic!("crash_dump: {m}"));
-    let text = std::fs::read_to_string(format!("{dir}/editor.txt")).expect("editor.txt");
-    let _ = std::fs::remove_dir_all(&dir);
-    let prefix = format!("{key}: ");
-    text.lines().find_map(|l| l.strip_prefix(prefix.as_str()).map(str::to_string)).unwrap_or_else(|| panic!("no {key} in the dump"))
-}
+pub use crate::support::shell::dump_line;
 
 pub fn scratch_dir(prefix: &str) -> String {
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -157,11 +149,7 @@ impl Driver {
 
 /// The whole crash dump's editor.txt.
 pub fn dump_text(e: &editor::Editor) -> String {
-    let dir = scratch_dir("rays-t5-dump");
-    editor::crash_dump(e, &dir).unwrap_or_else(|m| panic!("crash_dump: {m}"));
-    let text = std::fs::read_to_string(format!("{dir}/editor.txt")).expect("editor.txt");
-    let _ = std::fs::remove_dir_all(&dir);
-    text
+    editor::private::state_text(e)
 }
 
 /// The text of a specification/workspace/cases fixture (`Test_text.case`).

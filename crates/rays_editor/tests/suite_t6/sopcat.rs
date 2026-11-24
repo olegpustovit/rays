@@ -41,39 +41,41 @@ thread_local! {
     static REGISTERED: RefCell<Option<Vec<Factory>>> = const { RefCell::new(None) };
 }
 
-/// The native factories plus the ones the library's Lisp definitions lower to.
+fn lower_factories(sources: &[syntax::Syntax]) -> Vec<Factory> {
+    let mut native = sop::nodes::factories();
+    let cat = catalog::of_factories(manifest::VERSION, &[], None, &native).unwrap_or_else(|d| panic!("{}", diag(&d)));
+    let forms = syntax::parse("(workspace registered_nodes)").unwrap();
+    let workspace = match catalog::check_workspace(operators::all(), true, Some(sources), &cat, &forms) {
+        (Some(w), d) if d.is_empty() => w,
+        (_, ds) => panic!("{}", ds.iter().map(diag).collect::<Vec<_>>().join("\n")),
+    };
+    let lowered = lower::of_checked(Some(native.clone()), lower::Options::default(), &workspace).unwrap_or_else(|d| panic!("{}", diag(&d)));
+    native.extend(lowered.factories.iter().cloned());
+    native
+}
+
+/// Only the inventory tests need every Lisp definition. Behavior tests lower the named
+/// nodes and their transitive dependencies through the same checker and factory builder.
+fn factories_for(keys: &[&str]) -> Vec<Factory> {
+    let roots = keys.iter().map(|key| format!("sop/{key}")).collect::<Vec<_>>().join(" ");
+    let roots = syntax::parse(&roots).unwrap();
+    let sources = catalog::sources().unwrap_or_else(|d| panic!("{}", diag(&d)));
+    lower_factories(&catalog::private::reachable_sources(sources, &roots))
+}
+
 fn registered_factories() -> Vec<Factory> {
-    REGISTERED.with(|cell| {
-        cell.borrow_mut()
-            .get_or_insert_with(|| {
-                let started = std::time::Instant::now();
-                let native = sop::nodes::factories();
-                let cat = catalog::of_factories(manifest::VERSION, &[], None, &native).unwrap_or_else(|d| panic!("{}", diag(&d)));
-                let forms = syntax::parse("(workspace registered_nodes)").unwrap();
-                // An explicit library keeps every definition; the default prunes to what the forms reach.
-                let sources = catalog::sources().unwrap_or_else(|d| panic!("{}", diag(&d)));
-                let workspace = match catalog::check_workspace(operators::all(), true, Some(sources), &cat, &forms) {
-                    (Some(w), d) if d.is_empty() => w,
-                    (_, ds) => panic!("{}", ds.iter().map(diag).collect::<Vec<_>>().join("\n")),
-                };
-                eprintln!("registered: check {:?}", started.elapsed());
-                let lowered = lower::of_checked(Some(native.clone()), lower::Options::default(), &workspace).unwrap_or_else(|d| panic!("{}", diag(&d)));
-                eprintln!("registered: lowered {:?}", started.elapsed());
-                let mut all = native;
-                all.extend(lowered.factories.iter().cloned());
-                all
-            })
-            .clone()
-    })
+    REGISTERED.with(|cell| cell.borrow_mut().get_or_insert_with(|| {
+        lower_factories(catalog::sources().unwrap_or_else(|d| panic!("{}", diag(&d))))
+    }).clone())
 }
 
-fn factory_named(key: &str) -> Factory {
-    registered_factories().into_iter().find(|f| edit::factory_key(f) == key).unwrap_or_else(|| panic!("no factory {key}"))
+fn factory_named<'a>(factories: &'a [Factory], key: &str) -> &'a Factory {
+    factories.iter().find(|f| edit::factory_key(f) == key).unwrap_or_else(|| panic!("no factory {key}"))
 }
 
-fn catalog_node(key: &str, inputs: &[Option<node::T>], changes: &[(String, Value)]) -> node::T {
-    let factory = factory_named(key);
-    let n = edit::instantiate_optional(&factory, inputs).unwrap_or_else(|m| panic!("{m}"));
+fn catalog_node(factories: &[Factory], key: &str, inputs: &[Option<node::T>], changes: &[(String, Value)]) -> node::T {
+    let factory = factory_named(factories, key);
+    let n = edit::instantiate_optional(factory, inputs).unwrap_or_else(|m| panic!("{m}"));
     node::apply_parameters(&n, changes).unwrap_or_else(|m| panic!("{m}")).0
 }
 
@@ -221,17 +223,18 @@ fn gallery_grid_warning() {
 }
 
 fn motion() {
+    let factories = factories_for(&["rest_position", "point_velocity"]);
     let mut s = session::create(32, 16_000_000).unwrap();
     let previous = lisp_sop::snapshot(&rdk_ops::line_geometry::points(&[(0., 0., 0.), (1., 1., 1.)]).unwrap());
     let current = lisp_sop::snapshot(&rdk_ops::line_geometry::points(&[(1., 2., 3.), (3., 5., 7.)]).unwrap());
-    let rested = catalog_node("rest_position", &[Some(current.clone()), None], &[]);
-    let graph = catalog_node("point_velocity", &[Some(rested), Some(previous.clone()), None], &[pv("dt", Value::Float(0.5)), pv("add_x", Value::Float(1.)), pv("add_z", Value::Float(-1.))]);
+    let rested = catalog_node(&factories, "rest_position", &[Some(current.clone()), None], &[]);
+    let graph = catalog_node(&factories, "point_velocity", &[Some(rested), Some(previous.clone()), None], &[pv("dt", Value::Float(0.5)), pv("add_x", Value::Float(1.)), pv("add_z", Value::Float(-1.))]);
     let output = cook(&mut s, &graph);
     let rest = float3("rest", &output);
     let velocity = float3("v", &output);
     check(rest.0 == [1., 3.] && rest.1 == [2., 5.] && rest.2 == [3., 7.], "Rest Position SOP output");
     check(velocity.0 == [3., 5.] && velocity.1 == [4., 8.] && velocity.2 == [5., 11.], "Point Velocity SOP output");
-    let invalid = catalog_node("point_velocity", &[Some(current), Some(previous), None], &[pv("group", text("missing"))]);
+    let invalid = catalog_node(&factories, "point_velocity", &[Some(current), Some(previous), None], &[pv("group", text("missing"))]);
     match session::cook(&mut s, None, &sctx::create(CtxOptions::default()).unwrap(), &invalid) {
         Err(error) => check(error.code == "missing_group", &format!("unexpected diagnostic {}", error.code)),
         Ok(_) => panic!("Point Velocity SOP accepted a missing group"),
@@ -240,8 +243,9 @@ fn motion() {
 }
 
 fn set_color() {
+    let factories = factories_for(&["box", "set_color"]);
     let mut s = session::create(8, 1_000_000).unwrap();
-    let b = catalog_node("box", &[], &[]);
+    let b = catalog_node(&factories, "box", &[], &[]);
     let colors = |s: &mut session::T, n: &node::T| -> float4::view::View {
         match geo::find_attribute(Owner::Point, "Cd", &cook(s, n)) {
             Some(a) => match attr::storage(&a) {
@@ -251,10 +255,10 @@ fn set_color() {
             None => panic!("set_color wrote no Cd"),
         }
     };
-    let plain = colors(&mut s, &catalog_node("set_color", &[Some(b.clone())], &[]));
+    let plain = colors(&mut s, &catalog_node(&factories, "set_color", &[Some(b.clone())], &[]));
     check(plain.x.iter().all(|v| *v == 1.) && plain.w.iter().all(|v| *v == 1.), "set_color defaults are not opaque white");
     let grouped = lisp_sop::node(&[("box".to_owned(), b)], r#"(sop/group_range (sop/ext_box) :name "g" :end_ 0)"#);
-    let tinted = colors(&mut s, &catalog_node("set_color", &[Some(grouped)], &[pv("group", text("g")), pv("color_r", Value::Float(0.25)), pv("alpha", Value::Float(0.5))]));
+    let tinted = colors(&mut s, &catalog_node(&factories, "set_color", &[Some(grouped)], &[pv("group", text("g")), pv("color_r", Value::Float(0.25)), pv("alpha", Value::Float(0.5))]));
     check(tinted.x[0] == 0.25 && tinted.w[0] == 0.5 && tinted.x[1] == 1. && tinted.w[1] == 1., "set_color group did not restrict the write");
     session::close(&mut s);
 }
@@ -525,9 +529,13 @@ fn run_body() {
     session::close(&mut key_session);
 
     use InputRequirement::{Optional, Required};
+    let factories = factories_for(&[
+        "match_size", "boolean_detect", "intersection_analysis", "fuse", "poly_loft",
+        "rest_position", "delete_attributes", "point_replicate", "attribute_fade", "point_velocity", "points",
+    ]);
     let optional_second = |key: &str, message: &str| {
-        let f = factory_named(key);
-        check(edit::factory_inputs(&f) == vec![Required, Optional] && edit::instantiate_optional(&f, &[None, None]).is_ok(), message);
+        let f = factory_named(&factories, key);
+        check(edit::factory_inputs(f) == vec![Required, Optional] && edit::instantiate_optional(f, &[None, None]).is_ok(), message);
     };
     optional_second("match_size", "PPX descriptor lost Match Size's optional target input signature");
     for key in ["boolean_detect", "intersection_analysis", "fuse", "poly_loft", "rest_position"] {
@@ -535,21 +543,21 @@ fn run_body() {
     }
     optional_second("delete_attributes", "Delete Attributes lost its optional reference input signature");
     optional_second("point_replicate", "Point Replicate lost its optional custom-shape input signature");
-    let fade_factory = factory_named("attribute_fade");
-    check(edit::factory_inputs(&fade_factory) == vec![Required, Optional, Optional] && edit::instantiate_optional(&fade_factory, &[None, None, None]).is_ok(), "Attribute Fade lost its two optional source input signatures");
+    let fade_factory = factory_named(&factories, "attribute_fade");
+    check(edit::factory_inputs(fade_factory) == vec![Required, Optional, Optional] && edit::instantiate_optional(fade_factory, &[None, None, None]).is_ok(), "Attribute Fade lost its two optional source input signatures");
     let fade_source = labelled("fade-source", &[], "(sop/box)");
     let fade_hold = labelled("fade-hold", &[], "(sop/box)");
-    let fade = edit::instantiate_optional(&fade_factory, &[Some(fade_source.clone()), None, Some(fade_hold.clone())]).unwrap();
+    let fade = edit::instantiate_optional(fade_factory, &[Some(fade_source.clone()), None, Some(fade_hold.clone())]).unwrap();
     let (fade, _) = node::apply_parameters(&fade, &[pv("fade_in", Value::Float(3.))]).unwrap();
     check(node::inputs(&fade).iter().map(node::id).collect::<Vec<_>>() == [node::id(&fade_source), node::id(&fade_hold)], "Attribute Fade parameter edit reassigned its sparse hold-source port");
-    let velocity_factory = factory_named("point_velocity");
-    check(edit::factory_inputs(&velocity_factory) == vec![Required, Optional, Optional] && edit::instantiate_optional(&velocity_factory, &[None, None, None]).is_ok(), "Point Velocity lost its previous/next optional input signatures");
-    let velocity = edit::instantiate_optional(&velocity_factory, &[Some(fade_source.clone()), None, Some(fade_hold.clone())]).unwrap();
+    let velocity_factory = factory_named(&factories, "point_velocity");
+    check(edit::factory_inputs(velocity_factory) == vec![Required, Optional, Optional] && edit::instantiate_optional(velocity_factory, &[None, None, None]).is_ok(), "Point Velocity lost its previous/next optional input signatures");
+    let velocity = edit::instantiate_optional(velocity_factory, &[Some(fade_source.clone()), None, Some(fade_hold.clone())]).unwrap();
     let (velocity, _) = node::apply_parameters(&velocity, &[pv("dt", Value::Float(0.1))]).unwrap();
     check(node::inputs(&velocity).iter().map(node::id).collect::<Vec<_>>() == [node::id(&fade_source), node::id(&fade_hold)], "Point Velocity parameter edit reassigned its sparse next-sample port");
-    let points_factory = factory_named("points");
-    let points = edit::instantiate(&points_factory, &[]).unwrap();
-    check(node::operation(&points) == "points" && edit::factory_arity(&points_factory) == 0, "point-generation editor factory has the wrong node or arity");
+    let points_factory = factory_named(&factories, "points");
+    let points = edit::instantiate(points_factory, &[]).unwrap();
+    check(node::operation(&points) == "points" && edit::factory_arity(points_factory) == 0, "point-generation editor factory has the wrong node or arity");
     let mut point_session = session::create(2, 1_000_000).unwrap();
     let point_mesh = rdk_rays::rays_mesh::to_mesh(&cook(&mut point_session, &points)).unwrap_or_else(|e| panic!("{}", rdk_core::error::to_string(&e)));
     check(matches!(rays::mesh::mode(&point_mesh), rays::mesh::Mode::Points) && rays::mesh::vertex_count(&point_mesh) == 50, "point-only SOP output did not retain point rendering mode");
@@ -613,7 +621,7 @@ fn morph_sketch() {
     // an unwired Blend Shapes passes its input through
     let mut s = session::create(8, 1_000_000).unwrap();
     let grid = lisp(r#"(sop/grid :width_mode "Auto" :height_mode "Auto" :rows 2 :columns 2)"#);
-    let idle = catalog_node("blend_shapes", &[Some(grid.clone()), None, None, None, None], &[]);
+    let idle = catalog_node(&lowered.factories, "blend_shapes", &[Some(grid.clone()), None, None, None, None], &[]);
     check(node::operation(&idle) == "blend_shapes" && positions(&cook(&mut s, &idle)) == positions(&cook(&mut s, &grid)), "unwired Blend Shapes is not a passthrough");
     session::close(&mut s);
 }
@@ -621,6 +629,7 @@ fn morph_sketch() {
 /// The inputs of the Blend Shapes, Attribute Composite and Skin nodes that the ws_morph sketch leaves
 /// alone: masks, point IDs, alpha and the rest guide, the same at one and four domains.
 fn node_inputs() {
+    let factories = factories_for(&["blend_shapes", "attribute_composite", "skin"]);
     let add = |owner: Owner, name: &str, storage: Storage, g: geo::T| {
         let a = attr::create_owned(name, owner, storage).unwrap();
         geo::with_attribute(a, &g).unwrap()
@@ -639,7 +648,7 @@ fn node_inputs() {
     let source = add(point, "mask", Storage::Float(std::sync::Arc::new(vec![0., 0.5, 1.])), line(&[0., 1., 2.]));
     let target = add(point, "mask", Storage::Float(std::sync::Arc::new(vec![1., 0.5, 0.])), line(&[10., 11., 12.]));
     let default_inputs = vec![Some(lisp_sop::snapshot(&source)), Some(lisp_sop::snapshot(&target)), None, None, None];
-    let blend = |inputs: &[Option<node::T>], changes: &[(String, Value)]| catalog_node("blend_shapes", inputs, changes);
+    let blend = |inputs: &[Option<node::T>], changes: &[(String, Value)]| catalog_node(&factories, "blend_shapes", inputs, changes);
     let scaled = |source_name: &str| {
         both("masked Blend Shapes", &blend(&default_inputs, &[pv("weight1", Value::Float(0.5)), pv("masking", choice("Scale from attribute")), pv("mask_source", choice(source_name))]))
     };
@@ -662,7 +671,7 @@ fn node_inputs() {
     let composite = both(
         "alpha Attribute Composite",
         &catalog_node(
-            "attribute_composite",
+            &factories, "attribute_composite",
             &[Some(lisp_sop::snapshot(&layer(&[0., 1., 2.], &[2., 4., 6.], &[1., 1., 0.]))), Some(lisp_sop::snapshot(&layer(&[10., 11., 12.], &[10., 20., 30.], &[1., 0., 1.]))), None, None, None],
             &[pv("point_attributes", text("P value")), pv("allow_position", Value::Bool(true)), pv("alpha_attribute", text("alpha"))],
         ),
@@ -686,7 +695,7 @@ fn node_inputs() {
         let p = float3::view::of_owned_exn(pts.iter().map(|p| p.0).collect(), pts.iter().map(|p| p.1).collect(), pts.iter().map(|p| p.2).collect()).unwrap();
         geo::create(p, t, None, None, None).unwrap()
     };
-    let skin = |inputs: &[Option<node::T>]| both("Skin", &catalog_node("skin", inputs, &[]));
+    let skin = |inputs: &[Option<node::T>]| both("Skin", &catalog_node(&factories, "skin", inputs, &[]));
     let corners = |g: &geo::T| topo(g).1;
     let straight = skin(&[Some(lisp_sop::snapshot(&rings(0))), None]);
     let turned = skin(&[Some(lisp_sop::snapshot(&rings(1))), None]);
