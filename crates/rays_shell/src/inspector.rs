@@ -14,6 +14,7 @@ pub struct FlowRow {
     pub shown: bool,
     pub locked: bool,
     pub drive: Option<String>,
+    /// The drive readout or mixed state for a row shared by several nodes.
     pub live: Option<String>,
 }
 
@@ -215,28 +216,35 @@ fn numeric(
     (row, key): (&UiBox, &str),
     ranged: bool,
     edit: bool,
+    mixed: bool,
     (x, y, w): (f32, f32, f32),
 ) -> Vec<FlowChange> {
     // the kit's number field: a drag changes the value from the one it had, by the step of its
     // kind and soft range (a vector's cell has none), so a click without a drag writes nothing
     let range = if ranged { range } else { None };
-    let kept = cx.kept && !expression(text);
+    let kept = cx.kept && !mixed && !expression(text);
     // a held number scrubs by the range it had at the press: a literal's range follows its value
     // (`num_range`), and a drag measured from the press must not speed up as the value grows
     let held = pxui::ui_core::key_of(row.box_key, key);
     let scrub_range = if kept { HELD.with(|h| h.borrow().as_ref().filter(|h| h.field == held).map_or(range, |h| h.range)) } else { range };
+    let field_text = if mixed { "" } else { text };
+    let mixed_origin = mixed.then(|| text.to_owned());
     let opts = ValueFieldOpts {
         kept_drag: kept,
-        display,
+        display: if mixed { Some("mixed".to_owned()) } else { display },
         edit,
         left: expression(text),
         trail: field.unit.clone().map(|unit| (unit, cx.ink_3)),
-        fraction: range.and_then(|r| param::number::fraction(r, text).map(|f| f as f32)),
-        scrub: Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, scrub_range, origin, dx as f64, fine))),
+        fraction: range.and_then(|r| param::number::fraction(r, field_text).map(|f| f as f32)),
+        scrub: Some(Rc::new(move |origin, dx, fine| {
+            let base = mixed_origin.as_deref().unwrap_or(origin);
+            let next = param::number::scrub(kind, scrub_range, base, dx as f64, fine);
+            if origin.is_empty() && next == base { String::new() } else { next }
+        })),
         ..ValueFieldOpts::default()
     };
     let valid = move |t: &str| param::number::valid(kind, t) || expression(t);
-    let changed = ui.value_field((x, y), w, 20.0, &opts, &valid, key, text).0;
+    let changed = ui.value_field((x, y), w, 20.0, &opts, &valid, key, field_text).0;
     if kept {
         // a press holds the number: its owner follows its drag while its view stays kept; the
         // release (or any build of it not held) lets it go
@@ -254,7 +262,7 @@ fn numeric(
             }
         });
     }
-    if changed == text {
+    if changed == field_text {
         Vec::new()
     } else if expression(&changed) {
         vec![FlowChange::Expression(path.to_string(), changed)]
@@ -275,6 +283,7 @@ fn input(
     field: &FieldView,
     (row, path): (&UiBox, &str),
     edit: bool,
+    mixed: bool,
     (x, y, w): (f32, f32, f32),
 ) -> Vec<FlowChange> {
     let key = format!("flow-value-{path}");
@@ -293,6 +302,7 @@ fn input(
             (row, &key),
             ranged,
             edit,
+            mixed,
             (x, y, w),
         ),
         (KindView::Floating(range), Value::Float(value)) => {
@@ -310,20 +320,23 @@ fn input(
                 (row, &key),
                 ranged,
                 edit,
+                mixed,
                 (x, y, w),
             )
         }
         (KindView::Text, Value::Text(bytes)) => {
-            let value = text_of(bytes);
+            let value = if mixed { String::new() } else { text_of(bytes) };
             // an empty group means every element of its owner
             let placeholder = match &field.default {
                 Value::Text(d) if d.is_empty() && field.name == "group" => Some("all points".to_string()),
                 Value::Text(d) if d.is_empty() && field.name.ends_with("_group") => Some("all".to_string()),
                 _ => None,
             };
-            let opts = ValueFieldOpts { placeholder, left: true, ..ValueFieldOpts::default() };
+            let opts = ValueFieldOpts { placeholder, display: mixed.then(|| "mixed".to_owned()), edit, left: true, ..ValueFieldOpts::default() };
+            let focused = mixed && ui.box_of_key(pxui::ui_core::key_of(row.box_key, &key)).is_some_and(|b| ui.focused(&b));
             let (text, _) = ui.value_field((x, y), w, 20.0, &opts, &|_| true, &key, &value);
-            if text == value { Vec::new() } else { vec![FlowChange::Edited(field.name.clone(), Value::Text(text.into_bytes().into()))] }
+            let explicit_empty = focused && ui.key_pressed(input::Key::Enter);
+            if text == value && !explicit_empty { Vec::new() } else { vec![FlowChange::Edited(field.name.clone(), Value::Text(text.into_bytes().into()))] }
         }
         (KindView::Choice(choices), current @ (Value::Choice(_) | Value::Int(_))) => {
             let boxed = ui.box_(&key, BoxOpts::default().flags(CLICKABLE | TAB_STOP | CLIP).at((x, y)).w(Size::Px(w)).h(Size::Px(20.0)));
@@ -336,8 +349,8 @@ fn input(
             let just_opened = ui.signal(&boxed).clicked;
             let open = just_opened || ui.state(&boxed, 0) == 1;
             ui.set_state(&boxed, if open { 1 } else { 0 });
-            let chip = cx.chip(&choices[index]);
-            let shown = choices[index].clone();
+            let chip = (!mixed).then(|| cx.chip(&choices[index])).flatten();
+            let shown = if mixed { "mixed".to_owned() } else { choices[index].clone() };
             ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
                 paint.fill(x, y + h - 1.0, w, 1.0, if open { theme.accent } else { theme::edge(&theme) });
                 let pad = match chip {
@@ -357,7 +370,7 @@ fn input(
             let Rect { x: bx, y: by, w: bw, h: bh } = ui.rect(&boxed);
             let opts = MenuOpts {
                 width: Some(bw),
-                selected: Some(index as i64),
+                selected: (!mixed).then_some(index as i64),
                 swatches: choices.iter().map(|choice| cx.chip(choice)).collect(),
                 ..MenuOpts::default()
             };
@@ -370,7 +383,7 @@ fn input(
                 }
                 MenuResult::Pick(selected) => {
                     ui.set_state(&boxed, 0);
-                    if selected as usize == index {
+                    if !mixed && selected as usize == index {
                         Vec::new()
                     } else {
                         vec![FlowChange::Edited(
@@ -382,6 +395,14 @@ fn input(
                         )]
                     }
                 }
+            }
+        }
+        (KindView::Toggle, Value::Bool(value)) if mixed => {
+            let options = ValueFieldOpts { display: mixed.then(|| "mixed".to_owned()), edit, ..ValueFieldOpts::default() };
+            let current = if mixed { "" } else if *value { "true" } else { "false" };
+            let (text, _) = ui.value_field((x, y), w, 20.0, &options, &|s| s.parse::<bool>().is_ok(), &key, current);
+            if text == current { Vec::new() } else {
+                text.parse::<bool>().ok().map_or_else(Vec::new, |v| vec![FlowChange::Edited(field.name.clone(), Value::Bool(v))])
             }
         }
         (KindView::Toggle, Value::Bool(value)) => {
@@ -469,7 +490,7 @@ fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Ve
     out
 }
 
-fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), path: &str, title: &str, field: &FieldView, shown: bool) -> Vec<FlowChange> {
+fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), path: &str, title: &str, field: &FieldView, shown: bool, mixed: bool) -> Vec<FlowChange> {
     let (boxed, control_x, control_y, control_w) = ui.inspector_row(Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
     let mut out: Vec<FlowChange> = Vec::new();
     ui.within(&boxed, &mut |ui| {
@@ -480,7 +501,7 @@ fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), path: &str, t
             BoxOpts::default().flags(CLICKABLE).at((label_x, 2.0)).w(Size::Px(1.0f32.max(control_x - label_x - 8.0))).h(Size::Px(20.0)),
         );
         let edit = ui.signal(&label).double_clicked;
-        let edits = input(ui, cx, on_choice, true, field, (&boxed, path), edit, (control_x, control_y, control_w));
+        let edits = input(ui, cx, on_choice, true, field, (&boxed, path), edit, mixed, (control_x, control_y, control_w));
         let pinned = cx.pin_click && action(ui, cx, &format!("pin-{path}"), "pin", 0.0, control_y, true);
         out = pin_change(ui, cx, &boxed, path, shown, pinned, edits);
     });
@@ -587,15 +608,16 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
         });
         return out;
     }
+    let mixed = row.live.as_deref() == Some("mixed");
     if row.fields.len() == 1 {
         let field = &row.fields[0];
-        return if is_color_1(field) {
+        return if !mixed && is_color_1(field) {
             color_row_1(ui, cx, &row.path, &title, field, row.shown)
         } else {
-            scalar(ui, cx, on_choice, &row.path, &title, field, row.shown)
+            scalar(ui, cx, on_choice, &row.path, &title, field, row.shown, mixed)
         };
     }
-    if is_color_3(row) {
+    if !mixed && is_color_3(row) {
         return color_row_3(ui, cx, row, &title, row.shown);
     }
     // a vector: three fields in the control column, 8 between, each with its axis letter
@@ -606,7 +628,7 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
         kit::vector(ui, &boxed, (control_x, control_y), control_w, 0.0, &["x", "y", "z"], &mut |ui, index, x, w| {
             if let Some(field) = row.fields.get(index) {
                 let axis = ["x", "y", "z"][index];
-                edits.extend(input(ui, cx, on_choice, false, field, (&boxed, &format!("{}.{}", row.path, axis)), false, (x, control_y, w)));
+                edits.extend(input(ui, cx, on_choice, false, field, (&boxed, &format!("{}.{}", row.path, axis)), false, mixed, (x, control_y, w)));
             }
         });
         let pin = cx.pin_click && action(ui, cx, &format!("pin-{}", row.path), "pin", 0.0, control_y, !row.locked);

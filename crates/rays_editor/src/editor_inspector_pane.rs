@@ -171,10 +171,12 @@ pub fn inspect_panel<'a>(
                         (None, inspected.0, vec![], value.live_cook, inspected.1, drops)
                     }
                     paths => {
+                        let mut changes = Vec::new();
                         inspector_panel(window, ui, bounds, &mut |ui| {
-                            ui.inspector_header("multi-header", None, None, None, None, &[], None, false, &format!("{} nodes", paths.len()), "Selected");
+                            let targets = pane_laid(value).into_iter().flat_map(|laid| paths.iter().filter_map(|path| SharedTarget::graph(value, laid, path))).collect();
+                            changes = shared_inspector(ui, width, paths.len(), targets);
                         });
-                        (None, vec![], vec![], value.live_cook, vec![], vec![])
+                        (None, changes, vec![], value.live_cook, vec![], vec![])
                     }
                 }
             } else if selected_ids.is_empty() {
@@ -237,10 +239,21 @@ pub fn inspect_panel<'a>(
                 });
                 (panel, vec![], changes, live, vec![], vec![])
             } else if selected_ids.len() >= 2 {
+                let mut changes = Vec::new();
                 inspector_panel(window, ui, bounds, &mut |ui| {
-                    ui.inspector_header("multi-header", None, None, None, None, &[], None, false, &format!("{} nodes", selected_ids.len()), "Selected");
+                    let targets = selected_ids.iter().filter_map(|id| {
+                        if lowered_level {
+                            let path = node_path(value, *id)?;
+                            SharedTarget::graph(value, pane_laid(value)?, &path)
+                        } else if let Some((laid, path)) = inspector_scene_target(value, *id) {
+                            SharedTarget::graph(value, &laid, &path)
+                        } else {
+                            document.iter().find(|n| n.id == *id).map(SharedTarget::object)
+                        }
+                    }).collect();
+                    changes = shared_inspector(ui, width, selected_ids.len(), targets);
                 });
-                (None, vec![], vec![], value.live_cook, vec![], vec![])
+                (None, changes, vec![], value.live_cook, vec![], vec![])
             } else if lowered_level {
                 let node_id = selected_ids[0];
                 // the nodes of a geometry object are the lowering of its graph: the graph pane's

@@ -1345,6 +1345,134 @@ fn zone_words(kind: p::ZoneKind) -> (&'static str, fn(&str) -> String) {
     }
 }
 
+fn authored_arg(n: &p::Node, key: &str) -> Option<S> {
+    n.rows.iter().find(|r| matches!(&r.key, ArgKey::Kw(name) if name == key)).and_then(|r| r.expr.clone())
+}
+
+fn inspected_fields(value: &ModelView<'_>, graph: &str, n: &p::Node, compiled: Option<&node::T>) -> Vec<FieldView> {
+    match compiled {
+        Some(n) => node::parameter_fields(n),
+        None => kind_fields(value, graph, &n.head, &|key| authored_arg(n, key)).unwrap_or_default(),
+    }
+}
+
+pub struct SharedTarget {
+    node: Result<Path, i64>,
+    rows: Vec<(Option<ArgKey>, insp::FlowRow)>,
+}
+
+impl SharedTarget {
+    pub fn graph(value: &ModelView<'_>, laid: &ScopeKey, path: &[Symbol]) -> Option<Self> {
+        let n = inspector_node(&laid.scope, path)?;
+        let owned_chains;
+        let chains = if let Some(chains) = pane_chains(value, &laid.scope) {
+            chains
+        } else {
+            owned_chains = probe::chains(&laid.scope);
+            &owned_chains
+        };
+        let compiled = laid.records.as_ref()
+            .filter(|_| !n.bypass)
+            .and_then(|records| compiled_at(value, chains, records, path))
+            .and_then(|id| compiled_node(value, id));
+        let fields = inspected_fields(value, &laid.graph, n, compiled.as_ref());
+        let parameters = port::parameters(false, &fields).unwrap_or_default();
+        let rows = if parameters.is_empty() {
+            operator_rows(n, &|_| None, false, false, false, false).into_iter()
+                .filter(|(_, row)| row.drive.is_none())
+                .map(|(r, row)| (Some(r.key), row)).collect()
+        } else {
+            parameters.into_iter().map(|pm| {
+                let driven = authored_arg(n, &pm.path).is_some_and(|expr| !is_literal(&expr));
+                let row = sheet_row(&pm.path, pm.fields, false, None, driven.then(|| "mixed".to_owned()));
+                (Some(ArgKey::Kw(pm.path)), row)
+            }).collect()
+        };
+        Some(Self { node: Ok(path.to_vec()), rows })
+    }
+
+    pub fn object(n: &kind_graph::Node) -> Self {
+        let rows = crate::editor_shell::object_rows(false, &kind_graph::fields(n))
+            .unwrap_or_default().into_iter().map(|row| (None, row)).collect();
+        Self { node: Err(n.id), rows }
+    }
+
+    fn matching(&self, row: &insp::FlowRow) -> Option<&insp::FlowRow> {
+        self.rows.iter().map(|(_, r)| r).find(|r| {
+            r.path == row.path && r.fields.len() == row.fields.len() && r.fields.iter().zip(&row.fields).all(|(a, b)| {
+                a.name == b.name && a.kind == b.kind
+                    && core::mem::discriminant(&a.current) == core::mem::discriminant(&b.current)
+            })
+        })
+    }
+
+    fn edit(&self, event: &insp::FlowChange, out: &mut Vec<Change>) {
+        for (key, row) in &self.rows {
+            let (values, edited) = match event {
+                insp::FlowChange::Edited(name, v) => {
+                    let Some(index) = row.fields.iter().position(|f| f.name == *name) else { continue };
+                    let values: Vec<_> = row.fields.iter().enumerate().map(|(i, f)| if i == index { v.clone() } else { f.current.clone() }).collect();
+                    (values, Some(index))
+                }
+                insp::FlowChange::EditedVector(path, values) if row.path == *path => (values.map(Value::Float).to_vec(), None),
+                _ => continue,
+            };
+            match (&self.node, key) {
+                (Ok(path), Some(key)) => {
+                    let value = if let [single] = values.as_slice() { syntax_of_value(single) } else { vector_syntax(values.iter()) };
+                    out.push(Change::SyntaxEdit(fe::Op::SetArg { node: path.clone(), key: key.clone(), sub: vec![], value }));
+                }
+                (Err(id), _) => {
+                    out.extend(row.fields.iter().zip(values).enumerate().filter(|(i, _)| edited.is_none_or(|j| *i == j)).map(|(_, (f, value))| {
+                        Change::SetParameter { node: *id, path: f.name.clone(), value }
+                    }));
+                }
+                _ => {}
+            }
+            break;
+        }
+    }
+}
+
+/// Each frame's changes land together. The first target and field give the existing gesture
+/// key for every frame of a shared scrub, so history merges the whole drag.
+pub fn shared_inspector(ui: &mut Ui, width: f32, count: usize, targets: Vec<SharedTarget>) -> Vec<Change> {
+    ui.inspector_header("multi-header", None, None, None, None, &[], None, false, &format!("{count} nodes"), "Selected");
+    let mut changes = Vec::new();
+    ui.inspector_body(&mut |ui| {
+        let mut rows = Vec::new();
+        if let Some(first) = targets.first().filter(|_| targets.len() == count) {
+            for (_, candidate) in &first.rows {
+                let mut mixed = candidate.live.is_some();
+                if targets[1..].iter().all(|target| target.matching(candidate).is_some_and(|r| {
+                    mixed |= r.live.is_some() || r.fields.iter().zip(&candidate.fields).any(|(a, b)| a.current != b.current);
+                    true
+                })) {
+                    let mut row = candidate.clone();
+                    row.live = mixed.then(|| "mixed".to_owned());
+                    rows.push(row);
+                }
+            }
+        }
+        if rows.is_empty() {
+            ui.inspector_message("shared-empty", "No shared parameters");
+            return;
+        }
+        let mut expanded: Vec<String> = rows.iter().flat_map(|r| r.fields.iter().filter_map(|f| f.folder.first().cloned())).collect();
+        expanded.sort();
+        expanded.dedup();
+        let opts = insp::FlowOpts {
+            expanded, width: Some(width), kind_label: Some("Shared parameters".to_owned()),
+            ..Default::default()
+        };
+        let edits = insp::flow_fields(ui, &opts, None, &rows);
+        for edit in &edits {
+            for target in targets.iter() { target.edit(edit, &mut changes); }
+        }
+    });
+    changes
+}
+
 pub fn inspector_node<'a>(scope: &'a p::Scope, path: &[Symbol]) -> Option<&'a p::Node> {
     scope.nodes.iter().find_map(|n| {
         if n.path == path { Some(n) } else { n.zone.as_ref().and_then(|z| inspector_node(&z.scope, path)) }
@@ -1414,16 +1542,8 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     // number, cook or arguments of its own to show here
     let node_id = if n.bypass { None } else { compiled_at(value, chains, records, &n.path) };
     let node = node_id.and_then(|id| compiled_node(value, id));
-    let authored_row = |key: &str| -> Option<S> {
-        n.rows.iter().find(|r| r.key == ArgKey::Kw(key.to_owned())).and_then(|r| r.expr.clone())
-    };
-    let authored = |parameter: &port::Parameter| authored_row(&parameter.path);
-    // the arguments: a compiled node's own fields, else (a scene or material node, which has none)
-    // the checked kind's parameters, valued by what is written
-    let fields: Vec<FieldView> = match &node {
-        Some(nd) => node::parameter_fields(nd),
-        None => kind_fields(value, graph, &n.head, &authored_row).unwrap_or_default(),
-    };
+    let authored = |parameter: &port::Parameter| authored_arg(n, &parameter.path);
+    let fields = inspected_fields(value, graph, n, node.as_ref());
     let parameters: Vec<port::Parameter> = port::parameters(false, &fields).unwrap_or_default();
     // the docked column under ~340 points (workspace.html) has no number and no bar; the window
     // follows windows.html (no bar); the 380 column (inspector.html) has both
