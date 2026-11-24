@@ -20,6 +20,7 @@ pub struct FlowRow {
 #[derive(Clone, Debug, PartialEq)]
 pub enum FlowChange {
     Edited(String, Value),
+    EditedVector(String, [f64; 3]),
     Pinned(String, bool),
     Reset(String),
     Expression(String, String),
@@ -516,15 +517,7 @@ fn color_row_3(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, shown: bool) -
             match color::hex(&text) {
                 Ok(c) => {
                     let (nr, ng, nb, _) = color::to_floats(c);
-                    if fields.len() == 3 {
-                        vec![
-                            FlowChange::Edited(fields[0].name.clone(), Value::Float(nr)),
-                            FlowChange::Edited(fields[1].name.clone(), Value::Float(ng)),
-                            FlowChange::Edited(fields[2].name.clone(), Value::Float(nb)),
-                        ]
-                    } else {
-                        Vec::new()
-                    }
+                    vec![FlowChange::EditedVector(path.clone(), [nr, ng, nb])]
                 }
                 Err(_) => Vec::new(),
             }

@@ -427,6 +427,13 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                 for ev in events {
                     match ev {
                         insp::FlowChange::Edited(path, v) => body.push(Change::SetParameter { node: node_id, path, value: v }),
+                        insp::FlowChange::EditedVector(path, channels) => {
+                            if let Some(row) = rows.iter().find(|r| r.path == path) {
+                                body.extend(row.fields.iter().zip(channels).map(|(field, v)| Change::SetParameter {
+                                    node: node_id, path: field.name.clone(), value: Value::Float(v),
+                                }));
+                            }
+                        }
                         insp::FlowChange::Expression(path, text) => {
                             // a row is a field of the node; its argument is the parameter holding it
                             // (a vector's field is one component of it)

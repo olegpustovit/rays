@@ -682,6 +682,10 @@ pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(
         insp::FlowChange::Edited(name, edited) => {
             arg_row(name).map(|(r, sub)| Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: r.key, sub: arg_sub(name, sub), value: syntax_of_value(edited) }))
         }
+        insp::FlowChange::EditedVector(path, channels) => arg_row(path).map(|(r, sub)| {
+            let value = vector_syntax(channels.map(Value::Float).iter());
+            Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: r.key, sub, value })
+        }),
         insp::FlowChange::Expression(path, text) => arg_row(path).map(|(r, sub)| match expression_text(text) {
             Ok(value) => Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub, value }),
             Err(message) => Change::Declined(message),
@@ -840,27 +844,23 @@ fn parameter_of<'p>(parameters: &'p [port::Parameter], name: &str) -> Option<(&'
 
 /// A parameter's field edited: the argument written whole (a vector with its other cells as they are).
 fn parameter_edit(node: &[Symbol], parameter: &port::Parameter, index: usize, edited: &Value) -> Change {
-    let syntax = syntax_of_value(edited);
-    let syntax = if parameter.fields.len() != 3 {
-        syntax
+    let value = if parameter.fields.len() == 3 {
+        vector_syntax(parameter.fields.iter().enumerate().map(|(i, f)| {
+            if i == index { edited } else { &f.current }
+        }))
     } else {
-        let mut builder = s::SyntaxBuilder::new();
-        let items = parameter.fields.iter().enumerate().map(|(i, f)| {
-            if i == index {
-                builder.import(&syntax)
-            } else {
-                let text = match &f.current {
-                    Value::Float(x) => lisp::float(*x),
-                    Value::Int(x) => lisp::float(*x as f64),
-                    _ => "0.0".to_owned(),
-                };
-                builder.push_draft(0, s::Draft::Num(text), Default::default(), None)
-            }
-        }).collect();
-        let id = builder.push_draft(0, s::Draft::Vec(items), Default::default(), None);
-        builder.freeze().handle(id)
+        syntax_of_value(edited)
     };
-    Change::SyntaxEdit(fe::Op::SetArg { node: node.to_vec(), key: ArgKey::Kw(parameter.path.clone()), sub: vec![], value: syntax })
+    let node = node.to_vec();
+    let key = ArgKey::Kw(parameter.path.clone());
+    Change::SyntaxEdit(fe::Op::SetArg { node, key, sub: vec![], value })
+}
+
+fn vector_syntax<'a>(values: impl Iterator<Item = &'a Value>) -> S {
+    let mut builder = s::SyntaxBuilder::new();
+    let items = values.map(|v| builder.import(&syntax_of_value(v))).collect();
+    let id = builder.push_draft(0, s::Draft::Vec(items), Default::default(), None);
+    builder.freeze().handle(id)
 }
 
 fn ref_form(name: &str) -> S {
@@ -935,7 +935,7 @@ pub fn field_edits<'a>(
     for ev in events {
         let name_of = |ev: &insp::FlowChange| -> String {
             match ev {
-                insp::FlowChange::Edited(n, _) | insp::FlowChange::Expression(n, _) | insp::FlowChange::Follow(n) | insp::FlowChange::Reset(n) | insp::FlowChange::Pinned(n, _) => n.clone(),
+                insp::FlowChange::Edited(n, _) | insp::FlowChange::EditedVector(n, _) | insp::FlowChange::Expression(n, _) | insp::FlowChange::Follow(n) | insp::FlowChange::Reset(n) | insp::FlowChange::Pinned(n, _) => n.clone(),
             }
         };
         let name = name_of(&ev);
@@ -997,6 +997,10 @@ pub fn field_edits<'a>(
                         out.push(parameter_edit(&n.path, parameter, index, edited));
                     }
                 }
+            }
+            insp::FlowChange::EditedVector(path, channels) => {
+                let value = vector_syntax(channels.map(Value::Float).iter());
+                out.push(Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: ArgKey::Kw(path.clone()), sub: vec![], value }));
             }
             insp::FlowChange::Pinned(path, want) => {
                 if let Some(r) = row_of(path) {
