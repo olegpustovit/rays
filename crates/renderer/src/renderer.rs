@@ -197,6 +197,8 @@ const SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY: i64 = renderer_lowering::SNAPSHOT_CACH
 struct StatsCounters {
     logical_draws: i64,
     logical_passes: i64,
+    /// frames whose drawable was not acquired (timeout, occlusion): nothing reached the screen
+    skipped_presents: i64,
 }
 
 fn count_draws(counters: &mut StatsCounters, count: i64) {
@@ -294,6 +296,7 @@ pub struct Stats {
     pub retained_plan_hits: i64,
     pub retained_plan_misses: i64,
     pub sun_shadow_passes: i64,
+    pub skipped_presents: i64,
 }
 
 pub const ZERO_STATS: Stats = Stats {
@@ -305,6 +308,7 @@ pub const ZERO_STATS: Stats = Stats {
     retained_plan_hits: 0,
     retained_plan_misses: 0,
     sun_shadow_passes: 0,
+    skipped_presents: 0,
 };
 
 pub struct RendererData {
@@ -503,7 +507,7 @@ fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_:
         renderer: RefCell::new(renderer),
         gpu_owner: gpu_owner_,
         renderer_facts: Cell::new(facts),
-        counters: RefCell::new(StatsCounters { logical_draws: 0, logical_passes: 0 }),
+        counters: RefCell::new(StatsCounters { logical_draws: 0, logical_passes: 0, skipped_presents: 0 }),
         scaled: RefCell::new(new_scaled_cache()),
         shared_device_lease,
         owns_device_lease,
@@ -656,7 +660,19 @@ pub fn stats(value: &Renderer) -> Result<Stats, Error> {
         retained_plan_hits: retained.hits,
         retained_plan_misses: retained.misses,
         sun_shadow_passes: scene_execution::sun_shadow_passes(&renderer),
+        skipped_presents: counters.skipped_presents,
     })
+}
+
+/// Frames whose drawable was not acquired (timeout, occlusion): they reached no screen.
+pub fn skipped_presents(value: &Renderer) -> i64 {
+    value.0.counters.borrow().skipped_presents
+}
+
+/// Waits for the last submitted frame to complete (before what it reads is released).
+pub fn wait_frame(value: &Renderer) -> Result<(), Error> {
+    ensure("Renderer.wait_frame", value)?;
+    scene_execution::settle(&mut value.0.renderer.borrow_mut())
 }
 
 pub fn presentation_facts_of(value: &Renderer) -> Result<PresentationFacts, Error> {
@@ -1030,14 +1046,30 @@ pub fn replay_step(clear: Option<(f64, f64, f64, f64)>, identity: &str, version:
     let replayed = scene_execution::replay_prepared_sampled_resources(clear, identity, version, &mut value.0.renderer.borrow_mut())?;
     match replayed {
         None => Ok(None),
-        Some((_presented, draw_count)) => {
+        Some((presented, draw_count)) => {
             count_draws(&mut value.0.counters.borrow_mut(), draw_count);
+            value.0.counters.borrow_mut().skipped_presents += i64::from(!presented);
             Ok(Some(()))
         }
     }
 }
 
 fn step_core(
+    after_prepare: &mut dyn FnMut(),
+    clear: Option<(f64, f64, f64, f64)>,
+    identity: Option<&str>,
+    version: Option<i64>,
+    value: &Renderer,
+    draws: &[Draw],
+) -> Result<bool, Error> {
+    let presented = step_inner(after_prepare, clear, identity, version, value, draws);
+    if let Ok(false) = presented {
+        value.0.counters.borrow_mut().skipped_presents += 1;
+    }
+    presented
+}
+
+fn step_inner(
     after_prepare: &mut dyn FnMut(),
     clear: Option<(f64, f64, f64, f64)>,
     identity: Option<&str>,

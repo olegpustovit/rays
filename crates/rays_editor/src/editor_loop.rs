@@ -1051,6 +1051,8 @@ pub fn run(
         update: Box::new(move |model, frame_| {
             let value = model.downcast_mut::<LoopModel>().expect("editor model");
             update(value, frame_);
+            // a caret blink or a delayed parse ends the quiet wait when it is due, not at the next 100 ms tick
+            sketch::wake_at(value.core.ui.borrow().repaint_at());
             // A cursor the platform refuses is said in the strip; the editor runs on.
             if let Err(message) = set_ui_cursor(&value.core.ui.borrow(), V::ui_visible(&value.control)) {
                 value.render_status = Some(format!("Cursor: {message}"));

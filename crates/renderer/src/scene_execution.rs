@@ -2437,7 +2437,8 @@ fn discard(frame: &Acquired) {
 /// One presented frame stays in flight: the CPU builds the next frame while the GPU draws this one.
 /// Waiting here, before any preparation, keeps every resource the previous frame used alive until it
 /// completes, so retiring and destroying after the next submission stays safe.
-fn settle(value: &mut SceneExecution) -> Result<(), Error> {
+/// Waits for the last submitted frame; what it drew from (images, tracers) may be released after.
+pub fn settle(value: &mut SceneExecution) -> Result<(), Error> {
     let serial = value.in_flight_serial.take();
     match value.in_flight.take() {
         None => Ok(()),

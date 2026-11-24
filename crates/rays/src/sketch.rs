@@ -474,7 +474,8 @@ impl Drop for Finish {
             report_crash(&self.model);
         }
         if !self.done {
-            // Run on_stop before destroying the renderer.
+            // Run on_stop before destroying the renderer, once the last frame is done with what on_stop frees.
+            let _ = rr::wait_frame(&self.coordinator);
             if let (Some(on_stop), Ok(m)) = (&self.model.program.on_stop, self.model.model.try_borrow())
                 && let Some(m) = m.as_ref() {
                     on_stop(m.as_ref());
@@ -728,7 +729,8 @@ fn run_state_internal(
         });
         result
     };
-    // on_stop sees the final model, then the renderer goes
+    // on_stop sees the final model, then the renderer goes; the last submitted frame completes first
+    let _ = rr::wait_frame(&coordinator);
     if let (Some(on_stop), Ok(m)) = (&program_.on_stop, crash.model.try_borrow())
         && let Some(m) = m.as_ref() {
             on_stop(m.as_ref());
@@ -737,6 +739,43 @@ fn run_state_internal(
     drop(finish);
     looped?;
     crash.model.borrow_mut().take().ok_or_else(|| startup_error(op, ErrorKind::InvalidState, "model is gone"))
+}
+
+thread_local! { static WAKE: Cell<Option<f64>> = const { Cell::new(None) }; }
+
+/// The frame clock time (`frame.input.t`) the next frame is due at, as of the frame that ran last:
+/// the quiet wait ends then. Set it from `update` each frame; it clears after the loop reads it.
+pub fn wake_at(t: Option<f64>) {
+    WAKE.set(t);
+}
+
+/// What a frame that drew nothing leaves of the quiet count: input (a click, a key) means the next
+/// frame shows its result, so it is never quiet.
+fn quiet_after(quiet: i64, had_input: bool) -> i64 {
+    if had_input { 0 } else { quiet + 1 }
+}
+
+/// How long a quiet window waits for input: a frame, and after half a second of the same picture
+/// 100 ms, cut short by a scheduled wake in `wake_in` seconds.
+fn quiet_timeout_ms(quiet: i64, wake_in: Option<f64>) -> i32 {
+    let base = if quiet > 30 { 100 } else { 16 };
+    wake_in.map_or(base, |s| base.min((s * 1000.).ceil().max(0.) as i32))
+}
+
+#[cfg(test)]
+mod quiet_rule {
+    use super::*;
+
+    #[test]
+    fn input_ends_quiet_and_wake_shortens_the_wait() {
+        assert_eq!(quiet_after(40, true), 0, "a click frame is never quiet");
+        assert_eq!(quiet_after(40, false), 41);
+        assert_eq!(quiet_timeout_ms(40, None), 100);
+        assert_eq!(quiet_timeout_ms(1, None), 16);
+        assert_eq!(quiet_timeout_ms(40, Some(0.0301)), 31, "sleeps until the wake, rounded up");
+        assert_eq!(quiet_timeout_ms(40, Some(-1.)), 0, "an overdue wake does not wait");
+        assert_eq!(quiet_timeout_ms(1, Some(5.)), 16);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -775,10 +814,13 @@ fn run_loop(
             });
         });
         step?;
+        // the frame clock time the program asked to be woken at (a caret blink, a delayed parse)
+        let wake_in = WAKE.take().map(|t| t - time::now(&state.time.borrow()));
         // an unchanged frame skipped vsync: wait a frame for input, and after half a second of the
-        // same picture up to 100 ms, so a still window costs a few ticks a second
+        // same picture up to 100 ms (never past a scheduled wake), so a still window costs a few
+        // ticks a second
         if quiet > 0 {
-            let timeout_ms: i32 = if quiet > 30 { 100 } else { 16 };
+            let timeout_ms = quiet_timeout_ms(quiet, wake_in);
             let busy = program_.idle.as_ref().is_some_and(|idle| crash.model.borrow().as_ref().is_some_and(|m| idle(m.as_ref())));
             if busy {
                 // work for the main thread is in flight (a cook's device requests): serve it as it
@@ -824,6 +866,7 @@ fn one_frame(
     };
     input_state::set_unit(&mut state.input.borrow_mut(), unit);
     let polled = input_state::poll(&mut state.input.borrow_mut()).map_err(|m| startup_error(op, ErrorKind::InvalidState, &m))?;
+    let had_input = !polled.events.is_empty();
     let events = polled.events.clone();
     // SDL announces a size or density change; the window is not polled.
     if polled.window_changed {
@@ -840,6 +883,13 @@ fn one_frame(
     };
     if events.iter().any(|e| matches!(e, Event::Closed)) {
         state.stopped.set(true);
+    }
+    // A minimized or covered interactive window neither updates nor draws; any input wakes it.
+    // A finite run (max_frames, RAYS_MAX_FRAMES, export) is a test or a capture: it always runs.
+    if limit.is_none() && !visible {
+        *shown = None;
+        input_state::wait(&state.input.borrow(), 33);
+        return Ok(());
     }
     *count += 1;
     let dt = match config_.clock {
@@ -884,21 +934,18 @@ fn one_frame(
         (program_.view)(m.as_ref(), &facts)
     };
     *last_scene.borrow_mut() = Some(scene_.clone());
-    // An interactive window that is minimized or covered is not drawn and the loop idles. A finite
-    // run (max_frames, RAYS_MAX_FRAMES, export) is a test or a capture: it always renders. A window
-    // whose picture did not change keeps the last one on screen, as a native view does: no draw, no
-    // present, and the loop waits for input instead of vsync.
+    // A window whose picture did not change keeps the last one on screen, as a native view does: no
+    // draw, no present, and the loop waits for input instead of vsync (unless the frame had input).
+    // A picture whose present was skipped (no drawable) was not shown: it is drawn again.
     if limit.is_some() {
         scene::render(&scene_);
-    } else if !visible {
-        *shown = None;
-        std::thread::sleep(std::time::Duration::from_millis(33));
     } else if polled.window_changed || shown.as_ref().is_none_or(|last| !scene::same(last, &scene_)) {
+        let skipped = rr::skipped_presents(coordinator);
         scene::render(&scene_);
-        *shown = Some(scene_);
+        *shown = if rr::skipped_presents(coordinator) == skipped { Some(scene_) } else { None };
         *quiet = 0;
     } else {
-        *quiet += 1;
+        *quiet = quiet_after(*quiet, had_input);
     }
     if let Some(e) = render_failure.borrow_mut().take() {
         return Err(e);
