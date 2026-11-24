@@ -588,6 +588,15 @@ pub fn update(
                     summaries = found;
                     sources = data;
                 }
+                // a late completion cooked from graphs that have since changed shows nothing of them:
+                // the previous piece stays until the resubmitted cook lands
+                let pieces: Vec<Piece> = pieces
+                    .into_iter()
+                    .filter_map(|p| match graphs.iter().find(|(id, _)| *id == p.id) {
+                        Some((_, g)) if node::ptr_eq(&p.graph, g) => Some(p),
+                        _ => value.pieces.iter().find(|old| old.id == p.id).cloned(),
+                    })
+                    .collect();
                 (pieces, None, Some(took), true, None, None, false)
             }
             Ok(Cooked::Probed(pieces, found, data)) => {
@@ -1048,5 +1057,37 @@ pub fn draw(n: &node::T, p: &Prepared) -> Result<rays::scene3::Scene3, surface::
     match &device {
         Some(device) => surface::scene3(explosion.as_ref(), Some(&|g: &Geometry| device(g)), &p.surface),
         None => surface::scene3(explosion.as_ref(), None, &p.surface),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flow_sop::lower;
+
+    fn lowered(text: &str) -> lower::T {
+        let forms = flow_syntax::syntax::parse(text).unwrap();
+        lower::workspace(Some(sop::nodes::factories()), editor_document::kinds::descriptors(), lower::Options::default(), &forms).unwrap()
+    }
+
+    fn step(c: &Cook, l: &lower::T) -> UpdateResult {
+        let objects: Vec<_> = lower::objects(l).into_iter().map(|(id, n, d)| (id as i64, n, d)).collect();
+        let mut input = input::at_time(0.0);
+        input.size = (64, 64);
+        let f = frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) };
+        update(None, None, false, &[], &pick::Set::default(), None, c, &settings::none(), &objects.iter().map(|(i, n, d)| (*i, n, *d)).collect::<Vec<_>>(), None, Effects::default(), &[], &timeline::create(), &f, None)
+    }
+
+    /// B2: a cook that lands after its graphs changed does not show them.
+    #[test]
+    fn late_completion_of_old_graphs_is_dropped() {
+        let a = lowered("(workspace w (graph g :context sop (sop/box)))");
+        let b = lowered("(workspace w (graph g :context sop (sop/box :size 2.0)))");
+        let c = create(Rc::new(prepare), 42, 97, Some(1), Some(false), None, 512, 256 * 1024 * 1024).expect("cook");
+        let first = step(&c, &a);
+        assert!(first.cook.pieces.is_empty());
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let second = step(&first.cook, &b);
+        assert!(second.cook.pieces.is_empty(), "pieces of the old graph were accepted");
     }
 }
