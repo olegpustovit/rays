@@ -865,9 +865,9 @@ fn one_frame(
         u
     };
     input_state::set_unit(&mut state.input.borrow_mut(), unit);
-    let polled = input_state::poll(&mut state.input.borrow_mut()).map_err(|m| startup_error(op, ErrorKind::InvalidState, &m))?;
-    let had_input = !polled.events.is_empty();
-    let events = polled.events.clone();
+    let mut polled = input_state::poll(&mut state.input.borrow_mut()).map_err(|m| startup_error(op, ErrorKind::InvalidState, &m))?;
+    let events = std::mem::take(&mut polled.events);
+    let had_input = !events.is_empty();
     // SDL announces a size or density change; the window is not polled.
     if polled.window_changed {
         native::runtime_of_mut(coordinator, &mut |r| runtime::window_changed(r));

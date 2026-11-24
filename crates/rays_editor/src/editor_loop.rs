@@ -769,7 +769,7 @@ pub fn settle(before_rest: &Option<Rest>, value: &mut LoopModel, frame_: &frame:
     value.rest = Some(Rest { picture, still, shown: frame_.clone() });
 }
 
-pub fn rests(value: &LoopModel, frame_: &frame::Frame) -> Option<Rest> {
+pub fn rests(value: &LoopModel, frame_: &frame::Frame) -> bool {
     match &value.rest {
         Some(rest_)
             if rest_.still >= REST_FRAMES
@@ -778,9 +778,9 @@ pub fn rests(value: &LoopModel, frame_: &frame::Frame) -> Option<Rest> {
                 && frame_.input.t >= rest_.shown.input.t
                 && frame_.input.t - rest_.shown.input.t < REST_SECONDS =>
         {
-            Some(rest_.clone())
+            true
         }
-        _ => None,
+        _ => false,
     }
 }
 
@@ -799,8 +799,9 @@ pub fn source_at_rest(value: &mut LoopModel, now: f64) -> bool {
 }
 
 pub fn update(value: &mut LoopModel, frame_: &frame::Frame) {
-    if rests(value, frame_).is_none() || !source_at_rest(value, frame_.input.t) {
-        let before = value.rest.clone();
+    if !rests(value, frame_) || !source_at_rest(value, frame_.input.t) {
+        // settle replaces it; the frame never reads it, so it is moved, not copied
+        let before = value.rest.take();
         update_with(value, frame_, &|_ui| Rc::new(()), Some(0));
         settle(&before, value, frame_);
     } else {
