@@ -68,6 +68,8 @@ Delete it when W3 closes; leftovers go to `OPEN_ISSUES.md`.
 - L2: `workspace_doc::T` fields (`source`, `extra`, `imports`, `import_sources`) as `Arc<..>` so a history snapshot shares them instead of deep-copying imports.
 - L2: `document_edit.rs:24` copies the factory list per gesture.
 ### L2
+### L3 notes
+- B35 (fractional HiDPI) left: `sketch.rs` renders at an integer `density` (`round(max(pixel_density, drawable/logical))`) down through `native_scene_lowering::render`; a 1.5x display renders at 2x and is scaled by the swapchain. Keeping the true density needs `f64` density in `layer::stage_native_render_checked` and the retained plan keys; Windows box verifies it later.
 ### L3
 ### L6 (from L3, P4, measured)
 - P4 cause: `text_pane.rs:2485` (`view_checked`) calls `lisp_text::language(Some(vocab.clone()), ..)`: a deep clone of the whole `Vocab` (`Vec<Entry>` of `FieldView` vectors, ~12,000 allocations) plus its drop, on every built frame of every drawn text pane. After a layout edit (split) a text pane is drawn each frame, which is the whole 650 -> 12,400 idle step (sampled: `draw_text_panes` 434 of 674 update samples, 253 clone + 154 drop). Fix: `lisp_text::language` takes `Rc<Vocab>` (it wraps it in an Rc anyway, :746), `view_checked`/`view` take `&Rc<Vocab>`, and `LazyVocab` (`editor_model.rs:414`, cell of `Rc<Vocab>`, `force()` returns `&Rc<Vocab>`) hands out the shared Rc; `editor_panes.rs:658` (L8) passes it through. Better still: keep the Language per (vocab, names, imports, parinfer, theme) instead of rebuilding its ten closures per frame, and let an unchanged text pane be a cached PXUI view. Expect basic/empty settled rows from ~12.4k back to ~700.
@@ -77,6 +79,7 @@ Delete it when W3 closes; leftovers go to `OPEN_ISSUES.md`.
 ### L5
 ### L6
 ### L7
+- L3, B32 (live resize redraw): the sdl3 event-watch callback (`pxui/crates/open/sdl3/src/lib.rs` near :550) is never installed, so while the user drags a window edge SDL runs its own modal loop and `poll` is not called: the picture stretches until release. Install an `SDL_AddEventWatch` that, on a `WindowChange::Resized`/`PixelSizeChanged` event, pushes it and calls a registered redraw hook; `rays::sketch` then registers a hook that runs one `one_frame` (it can call `input_state::poll` and `scene::render` from the main thread, which is where SDL calls watches on macOS and Windows). L3 wires the hook as soon as the export exists.
 ### L8
 - L2: `editor_frame.rs:1340` copies the level's objects into every `FrameResult`; reduce now takes that copy, so the frame could build it only when a change is pending.
 ### L9
