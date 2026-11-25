@@ -35,12 +35,14 @@ const B_HOVER_INSPECTOR: (u64, u64) = (87, 9);
 const C_PAN: (u64, u64) = (99, 13);
 const C_ZOOM: (u64, u64) = (95, 13);
 const D_TYPING: (u64, u64) = (385, 13);
-// E click/toggle (Z13): settled = idle = 0 after isogrid render 0 + settle wait for zoom-rest timer.
-const E_CLICK_KEY: (u64, u64) = (221, 13);
+// E click/toggle (Z13): settled = idle = 0. Zoom-rest wake removed (crisp on zoom frame).
+const E_CLICK_KEY: (u64, u64) = (210, 13); // meas 200
 const E_CLICK_SETTLED: (u64, u64) = (0, 13);
 // E_toggle_key: layout-only recovery print splices prior body (no SyntaxBuilder::import of source).
-const E_TOGGLE_KEY: (u64, u64) = (335, 13);
+const E_TOGGLE_KEY: (u64, u64) = (272, 13); // meas 259
 const E_TOGGLE_SETTLED: (u64, u64) = (0, 13);
+/// Frame ~0.1s after a zoom that used to schedule `repaint_after` — must stay at rest (0 rust).
+const E_ZOOM_REST_FIRE: (u64, u64) = (0, 26); // meas 0/24
 const F_FROZEN: (u64, u64) = (0, 8);
 const F_STATIC: (u64, u64) = (0, 9);
 
@@ -432,9 +434,8 @@ fn e_click_toggle() {
             if phase == 0 {
                 acc.off();
             }
-            // REST_FRAMES=2. Settled also waits out graph zoom-rest `repaint_after(0.1)` (~6 frames)
-            // so wants_frame is clear (else ~2/20 SLOW rounds wake into a full update).
-            p.idle(if phase == 1 { 8 } else { 3 }, IDLE_AT);
+            // REST_FRAMES=2: three idles climb still; measured frame must rest (no zoom-rest wake).
+            p.idle(3, IDLE_AT);
             if phase == 1 {
                 acc.on();
             }
@@ -444,6 +445,23 @@ fn e_click_toggle() {
             }
         }
         check(name, acc.n / rounds, native_total(rounds), ceil);
+    }
+    // Former `repaint_after(0.1)` wake: zoom, wait ~0.1s, measure — must be idle 0 (no deferred full update).
+    {
+        let at = (1080., 200.);
+        p.step(&[], vec![Event::PointerMoved(at)], at);
+        p.idle(4, at);
+        let mut acc = Acc::new();
+        for _ in 0..rounds {
+            p.step(&[], vec![Event::Scrolled((0., 1.))], at);
+            p.idle(6, at); // ~0.1s at 60fps
+            acc.on();
+            p.idle(1, at);
+            acc.off();
+            p.step(&[], vec![Event::Scrolled((0., -1.))], at);
+            p.idle(6, at);
+        }
+        check("E_zoom_rest_fire", acc.n / rounds, native_total(rounds), E_ZOOM_REST_FIRE);
     }
     p.close();
     eprintln!("E_click_toggle wall {:.2}s", started.elapsed().as_secs_f64());

@@ -417,8 +417,9 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     } else {
         value.core.doc.clone()
     };
-    let prior = recovery_prior(&value.recovery_print, &doc).map(|s| s.to_owned());
-    if let Err(message) = preset::compose_into(&doc, &view, prior.as_deref(), &mut value.recovery_buf) {
+    // Borrow the cached body — `to_owned` cloned the whole workspace text on every layout toggle.
+    let prior = recovery_prior(&value.recovery_print, &doc);
+    if let Err(message) = preset::compose_into(&doc, &view, prior, &mut value.recovery_buf) {
         value.state_error = Some(format!("Autosave failed: {message}"));
         value.saved_doc = std::sync::Weak::new();
         value.saved_drafts = None;

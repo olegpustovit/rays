@@ -53,7 +53,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 | Z3 | done: Scratch tessellate (fef497e23); Wide keys + always-on shape cache + Affine unit segments (ae918f88f); guides cache + Affine lines + stack screen_box (cc870c828). zero_alloc A_isosel 712→48, B 727→196/194, C 467/462→174/170 (Z0 ceilings at meas+5%). click_budget isogrid idle 402/324→252/175, hover 334/334→185/185. Overlay tessellate/format! → 0 warm; pan reuses unit meshes. Left: guides hit clones outer Nodes Vec; camera-key miss still builds Node wrappers (tessellate 0). |
 | Z9 | in progress (`../rays-z9`). B_hover **139/137→85/82** (ceil 90/87): cook skip at_rest; keymap skip pointer-only; follow_focus no keys Vec; view_bodies Rc cache; of_kind refs. Residue: Extra clones×2, compose_scene each PointerMoved, compose_view Node collects (Z1/Z3), ~8 native (Z5). |
 | Z8 | in progress (`../rays-z8`). Autosave splice+buffer; REST slide proved. A_empty/bare/isogrid/isosel **0** rust. Isogrid was thrashing one `frame_pass` between Scene3+depth and Scene2 — dual `frame_passes` + reused attach scratch. E_toggle 333 (ceil 365). B/C/D/E/A_basic/F → Z9–Z13. |
-| Z13 | E settled **0/0** (was click 10 / toggle 24–34). Toggle settle waits out graph `repaint_after(0.1)` (idle 8 on settled only). Key: click **210** (ceil 221), toggle **319** (ceil 335). Residue: inspector/wires rebuild on selection; layout+recovery splice+after_present on `/g`. |
+| Z13 | E settled **0/0**. Zoom-rest: crisp on zoom frame (no `repaint_after`); `E_zoom_rest_fire` 0 rust. DocMem skip when workspace Arcs same. PathSet/Selection reserve. Rest tick skips stale-doc autosave compose (~240 flake). Reverted Z9 cook-skip (E_toggle ~1775). Keys: click **200** (ceil 210), toggle **259** (ceil 272). Residue: inspector/wires; layout UI + recovery splice→0 on key (Z8/Z10). |
 | Z5 | submit retained pool + warm-submit 0-alloc regression (`2ecaaf05`); phase_timer Arc+TLS recycle. SLOW empty/bare **2/8** (ceil 3/9); isogrid **13/12**. Renderer warm = 0 on empty. Left: ~2 editor scatter (follow_press / compose) → Z1; MetalHandle general pool optional. |
 | Z6a | done: PXUI rekey-on-text-change + mono caret (85482d18); glyph atlas. Direct atlas quads enabled once Z6b Image-run batching landed (no per-frame blit). |
 | Z12 | F **0/0** rust (was 101/102); A_idle_basic **218→208** (ceil 219). Live-stamp canvas reuse + may_rest (dt=0 / size-only). Draw locals+marks pool; Cook Rc reuse. A residue → Z5/Z6b (`ordered_items`, signature collect, prepare_upload for changing circle+frame text). |
@@ -80,4 +80,8 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 - Z12→Z5: `ordered_items::add` / `stage_native` ~6 allocs/frame on animated basic.
 - Owns plan_entry/plan_batches/batch_resources_of/rebind, ICB pool, and Image-run (same-texture Image/Glyphs → one Scene2Textured draw). Coordinate with Z5 on shared helpers via Requests.
 - Image-run + Atlas landed: A_idle_basic 240/8; window_resources text/atlas ownership + density checks green.
+### Z8
+- Z13: layout-only recovery compose on `/g` is still ~250 when forced onto the key frame; rest ticks skip stale-doc autosave until the next non-rest frame. Want 0-alloc splice on the toggle key so throttle can lift without a rest wake.
+### Z9
+- Z13: cook-skip (`Arc::ptr_eq` doc + at_rest) made E_toggle_key ~1775; reverted on z13. Re-introduce only with a proof that layout toggles stay warm.
 ### Z7

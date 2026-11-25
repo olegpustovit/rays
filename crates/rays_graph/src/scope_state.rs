@@ -729,7 +729,11 @@ pub fn editing(t: &Pane) -> bool {
 }
 
 pub fn select(paths: Vec<Path>, t: &mut Pane) {
-    t.selected = PathSet::of(&paths);
+    // Keep PathSet slot capacity across reselects (same-pane click ↔ empty ↔ click).
+    t.selected.clear();
+    for p in &paths {
+        t.selected.insert(p);
+    }
     t.selected_wire = None;
 }
 

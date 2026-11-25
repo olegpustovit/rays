@@ -13,6 +13,15 @@ fn selection_is_sorted_unique_with_the_first_primary() {
     let many = sel::select_nodes(&[7, 2, 7, 5]);
     assert_eq!((sel::selected(&many), sel::selected_nodes(&many).to_vec()), (Some(7), vec![2, 5, 7]));
     assert_eq!(sel::select_nodes(&[]), sel::clear());
+    let mut reused = sel::empty();
+    sel::set(&mut reused, 4);
+    assert_eq!(reused, one);
+    sel::set(&mut reused, 4); // warm reselect: capacity kept
+    assert_eq!(reused, one);
+    sel::set_nodes(&mut reused, &[7, 2, 7, 5]);
+    assert_eq!(reused, many);
+    sel::set_nodes(&mut reused, &[]);
+    assert_eq!(reused, sel::clear());
 }
 
 fn path(parts: &[&str]) -> flow_check::workspace::Path {

@@ -494,7 +494,7 @@ pub fn apply_tree<'a>(value: &ModelView<'_>, state: TreeState<'a>, intent: &Inte
     let mut s = state;
     match intent {
         Intent::Select(ids) => {
-            s.selection = if ids.is_empty() { selection::clear() } else { selection::select_nodes(ids) };
+            selection::set_nodes(&mut s.selection, ids);
         }
         // the display node of a workspace graph is its result
         Intent::Flag { .. } if geometry => {}

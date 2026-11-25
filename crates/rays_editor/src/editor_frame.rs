@@ -1400,8 +1400,8 @@ pub fn update_frame(
             let mut selection = selection.clone();
             for i in &list_intents2 {
                 match i {
-                    tree::Intent::Select(ids) if ids.is_empty() => selection = selection::clear(),
-                    tree::Intent::Select(ids) => selection = selection::select_nodes(ids),
+                    tree::Intent::Select(ids) if ids.is_empty() => selection::set_nodes(&mut selection, &[]),
+                    tree::Intent::Select(ids) => selection::set_nodes(&mut selection, ids),
                     _ => {}
                 }
             }

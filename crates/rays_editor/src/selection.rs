@@ -24,6 +24,16 @@ pub fn select(id: i64) -> Selection {
     Selection { ids: vec![id], primary: Some(id) }
 }
 
+/// Same as `select`, writing into `t` so a warm single-id reselect allocates nothing.
+pub fn set(t: &mut Selection, id: i64) {
+    if t.primary == Some(id) && t.ids.len() == 1 && t.ids[0] == id {
+        return;
+    }
+    t.ids.clear();
+    t.ids.push(id);
+    t.primary = Some(id);
+}
+
 /// The first id is primary; the ids are kept sorted and unique.
 pub fn select_nodes(ids: &[i64]) -> Selection {
     match ids.first() {
@@ -33,6 +43,23 @@ pub fn select_nodes(ids: &[i64]) -> Selection {
             sorted.sort();
             sorted.dedup();
             Selection { ids: sorted, primary: Some(*first) }
+        }
+    }
+}
+
+/// `select_nodes` into reserved storage.
+pub fn set_nodes(t: &mut Selection, ids: &[i64]) {
+    match ids.first() {
+        None => {
+            t.ids.clear();
+            t.primary = None;
+        }
+        Some(first) => {
+            t.ids.clear();
+            t.ids.extend_from_slice(ids);
+            t.ids.sort();
+            t.ids.dedup();
+            t.primary = Some(*first);
         }
     }
 }
