@@ -32,6 +32,10 @@ struct Cache {
     code: Vec<bool>,
     /// Reused by `finish` so a no-op rewrite (output == input) allocates nothing after warm.
     out: Vec<u8>,
+    /// Scratch for `finish` trails / closer bytes (cleared each call; capacity retained).
+    trails: Vec<(usize, Vec<u8>)>,
+    trail: Vec<u8>,
+    tail: Vec<u8>,
 }
 
 thread_local!(static CACHE: RefCell<Cache> = RefCell::new(Cache::default()));
@@ -165,31 +169,54 @@ impl Cache {
         let n = bytes.len();
         let count = lines.len();
         // Closers popped by later lines (or left on the stack at the end) land on the line they point back to.
-        let mut trails: Vec<(usize, &[u8])> = Vec::new();
+        let mut trail_n = 0usize;
         for (index, l) in lines.iter().enumerate() {
-            if !l.pops.is_empty() { trails.push((index - l.pop_back, &l.pops)); }
+            if l.pops.is_empty() {
+                continue;
+            }
+            if trail_n == self.trails.len() {
+                self.trails.push((0, Vec::new()));
+            }
+            let slot = &mut self.trails[trail_n];
+            slot.0 = index - l.pop_back;
+            slot.1.clear();
+            slot.1.extend_from_slice(&l.pops);
+            trail_n += 1;
         }
-        let tail: Vec<u8> = self.end_stack.iter().rev().map(|(c, _)| *c).collect();
-        if let (Some(b), false) = (self.end_back, tail.is_empty()) { trails.push((count - b, &tail)); }
+        self.tail.clear();
+        self.tail.extend(self.end_stack.iter().rev().map(|(c, _)| *c));
+        if let (Some(b), false) = (self.end_back, self.tail.is_empty()) {
+            if trail_n == self.trails.len() {
+                self.trails.push((0, Vec::new()));
+            }
+            let slot = &mut self.trails[trail_n];
+            slot.0 = count - b;
+            slot.1.clear();
+            slot.1.extend_from_slice(&self.tail);
+            trail_n += 1;
+        }
+        self.trails.truncate(trail_n);
         if self.out.capacity() < n + 8 {
             self.out.reserve(n + 8 - self.out.capacity());
         }
         self.out.clear();
         let mut shift: i64 = 0;
         let mut cursor = 0;
-        let mut trail: Vec<u8> = Vec::new();
         for (index, l) in lines.iter().enumerate() {
-            trail.clear();
-            while cursor < trails.len() && trails[cursor].0 == index { trail.extend_from_slice(trails[cursor].1); cursor += 1; }
-            let (mut at, mut pending) = (l.start, !trail.is_empty());
+            self.trail.clear();
+            while cursor < self.trails.len() && self.trails[cursor].0 == index {
+                self.trail.extend_from_slice(&self.trails[cursor].1);
+                cursor += 1;
+            }
+            let (mut at, mut pending) = (l.start, !self.trail.is_empty());
             let tp = l.start + l.code_end;
             for r in l.removed.iter().map(|r| *r).chain(std::iter::once(l.stop)) {
                 if pending && tp <= r {
                     self.out.extend_from_slice(&bytes[at..tp]);
-                    self.out.extend_from_slice(&trail);
+                    self.out.extend_from_slice(&self.trail);
                     at = tp;
                     pending = false;
-                    if (tp as i64) < caret { shift += trail.len() as i64; }
+                    if (tp as i64) < caret { shift += self.trail.len() as i64; }
                 }
                 if r < l.stop {
                     self.out.extend_from_slice(&bytes[at..r]);

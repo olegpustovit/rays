@@ -195,8 +195,8 @@ pub fn specials() -> &'static [(&'static str, String)] {
     })
 }
 
-pub fn constants() -> Vec<(&'static str, &'static str)> {
-    vec![
+pub fn constants() -> &'static [(&'static str, &'static str)] {
+    &[
         ("t", "time in seconds \u{b7} a binding reading t recooks every frame"),
         ("pi", "3.14159..."),
         ("true", "boolean true"),
@@ -205,22 +205,27 @@ pub fn constants() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-pub fn contexts() -> Vec<String> {
-    flow_syntax::context::all().into_iter().map(|c| flow_syntax::context::name(c).to_string()).collect()
+const CONTEXT_NAMES: &[&str] = &["scene", "sop", "material", "world", "editor", "settings", "value", "draw", "image", "host"];
+
+pub fn contexts() -> &'static [&'static str] {
+    CONTEXT_NAMES
 }
 
-pub fn special_keywords() -> Vec<(String, String)> {
-    vec![
-        (":context".to_string(), format!("the graph's context: {}", contexts().join(", "))),
-        (":skip".to_string(), ":skip [i ...] \u{b7} iteration tuples a for or scene/merge leaves out".to_string()),
-        (":else".to_string(), "the branch when no test holds".to_string()),
-        (":keys".to_string(), "{:keys [a b]} \u{b7} destructure a record's fields".to_string()),
-        (":bypass".to_string(), "^:bypass (call ...) \u{b7} the call passes its first input through".to_string()),
-    ]
+pub fn special_keywords() -> &'static [(String, String)] {
+    static KWS: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    KWS.get_or_init(|| {
+        vec![
+            (":context".to_string(), format!("the graph's context: {}", CONTEXT_NAMES.join(", "))),
+            (":skip".to_string(), ":skip [i ...] \u{b7} iteration tuples a for or scene/merge leaves out".to_string()),
+            (":else".to_string(), "the branch when no test holds".to_string()),
+            (":keys".to_string(), "{:keys [a b]} \u{b7} destructure a record's fields".to_string()),
+            (":bypass".to_string(), "^:bypass (call ...) \u{b7} the call passes its first input through".to_string()),
+        ]
+    })
 }
 
-fn special_keyword(name: &str) -> Option<String> {
-    special_keywords().into_iter().find(|(k, _)| k == name).map(|(_, d)| d)
+fn special_keyword(name: &str) -> Option<&'static str> {
+    special_keywords().iter().find(|(k, _)| k == name).map(|(_, d)| d.as_str())
 }
 
 fn ws_context(name: &str) -> flow_syntax::context::Context {
@@ -228,28 +233,56 @@ fn ws_context(name: &str) -> flow_syntax::context::Context {
 }
 
 pub fn ops_of(vocab: &Vocab, context: &str) -> Vec<(String, workspace::OpSignature)> {
-    op::of_context(&vocab.ops, &ws_context(context))
-        .into_iter()
+    ops_borrowed(vocab, context)
         .map(|o| {
-            let s = workspace::OpSignature { pos: o.signature.pos.clone(), opt: o.signature.opt.clone(), rest: o.signature.rest.clone(), kw: o.signature.kw.clone() };
+            let s = workspace::OpSignature {
+                pos: o.signature.pos.clone(),
+                opt: o.signature.opt.clone(),
+                rest: o.signature.rest.clone(),
+                kw: o.signature.kw.clone(),
+            };
             (o.name.clone(), s)
         })
         .collect()
+}
+
+/// Builtins + extras for `context` and `value`, borrowed (no Op clone).
+fn ops_borrowed<'a>(vocab: &'a Vocab, context: &str) -> impl Iterator<Item = &'a op::Op> {
+    let ctx = ws_context(context);
+    let value = flow_syntax::context::value();
+    op::all()
+        .iter()
+        .chain(vocab.ops.iter())
+        .filter(move |o| o.ctx == ctx || o.ctx == value)
 }
 
 fn ty_name(ty: &flow_syntax::ty::Ty) -> String {
     flow_syntax::ty::to_string(ty)
 }
 
-pub fn op_doc(name: &str, s: &workspace::OpSignature) -> String {
+fn op_doc_fields(
+    name: &str,
+    pos: &[(flow_syntax::symbol::Symbol, flow_syntax::ty::Ty)],
+    opt: &[(flow_syntax::symbol::Symbol, flow_syntax::ty::Ty)],
+    rest: &Option<(flow_syntax::symbol::Symbol, flow_syntax::ty::Ty)>,
+    kw: &[(flow_syntax::symbol::Symbol, flow_syntax::ty::Ty)],
+) -> String {
     let mut parts: Vec<String> = vec![name.to_string()];
-    parts.extend(s.pos.iter().map(|(n, t)| format!("{n}:{}", ty_name(t))));
-    parts.extend(s.opt.iter().map(|(n, t)| format!("[{n}:{}]", ty_name(t))));
-    if let Some((n, t)) = &s.rest {
+    parts.extend(pos.iter().map(|(n, t)| format!("{n}:{}", ty_name(t))));
+    parts.extend(opt.iter().map(|(n, t)| format!("[{n}:{}]", ty_name(t))));
+    if let Some((n, t)) = rest {
         parts.push(format!("{n}:{}...", ty_name(t)));
     }
-    parts.extend(s.kw.iter().map(|(n, t)| format!(":{n} {}", ty_name(t))));
+    parts.extend(kw.iter().map(|(n, t)| format!(":{n} {}", ty_name(t))));
     format!("({}) \u{b7} built-in operator", parts.join(" "))
+}
+
+fn op_doc_sig(name: &str, s: &op::Signature) -> String {
+    op_doc_fields(name, &s.pos, &s.opt, &s.rest, &s.kw)
+}
+
+pub fn op_doc(name: &str, s: &workspace::OpSignature) -> String {
+    op_doc_fields(name, &s.pos, &s.opt, &s.rest, &s.kw)
 }
 
 pub fn kind_doc(k: &Entry) -> String {
@@ -394,6 +427,53 @@ const VALUE_KEYWORDS: [&str; 3] = [":material", ":camera", ":active"];
 
 fn mk(group: i64, uses: i64, insert: Option<String>, name: &str, detail: &str, doc: &str) -> Candidate {
     Candidate { name: name.to_string(), insert: insert.unwrap_or_else(|| name.to_string()), detail: detail.to_string(), doc: doc.to_string(), group, uses }
+}
+
+/// Scored name before `mk`: build detail/doc strings only for the top 48.
+enum SoftKind<'a> {
+    Defn,
+    Import { file: &'a str },
+    Kind { k: &'a Entry },
+    Form { doc: &'a str },
+    Op { op: &'a op::Op },
+}
+
+struct Soft<'a> {
+    q: i64,
+    group: i64,
+    uses: i64,
+    name: &'a str,
+    kind: SoftKind<'a>,
+}
+
+fn soft_push<'a>(out: &mut Vec<Soft<'a>>, prefix: &str, group: i64, uses: i64, name: &'a str, kind: SoftKind<'a>) {
+    let q = quality(prefix, name);
+    if q != 0 {
+        out.push(Soft { q, group, uses, name, kind });
+    }
+}
+
+fn soft_finish(mut soft: Vec<Soft<'_>>) -> Vec<Candidate> {
+    soft.sort_by(|a, b| {
+        b.q.cmp(&a.q)
+            .then(a.group.cmp(&b.group))
+            .then(b.uses.cmp(&a.uses))
+            .then_with(|| a.name.as_bytes().cmp(b.name.as_bytes()))
+    });
+    soft.truncate(48);
+    soft.into_iter()
+        .map(|s| match s.kind {
+            SoftKind::Defn => mk(s.group, s.uses, None, s.name, "defn", &format!("{0} \u{b7} a function of this workspace", s.name)),
+            SoftKind::Import { file } => {
+                mk(s.group, s.uses, None, s.name, &format!("import \u{b7} {file}"), &format!("{0} \u{b7} imported from {file}", s.name))
+            }
+            SoftKind::Kind { k } => {
+                mk(s.group, s.uses, None, s.name, &k.category.join(" / "), &format!("{} \u{b7} {}", k.qualified, kind_doc(k)))
+            }
+            SoftKind::Form { doc } => mk(s.group, s.uses, None, s.name, "form", doc),
+            SoftKind::Op { op } => mk(s.group, s.uses, None, s.name, "operator", &op_doc_sig(&op.name, &op.signature)),
+        })
+        .collect()
 }
 
 fn kind_of<'a>(vocab: &'a Vocab, context: &str, name: &str) -> Option<&'a Entry> {
@@ -568,30 +648,35 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
     } else if cur_kind == Some(Kind::Num) {
         Vec::new()
     } else if head_position {
-        // the head of a call: this context's kinds, the defns, the special forms, the operators
+        // Score every head name first; mk (and op/kind docs) only for the top 48.
         let (_, defns, _) = scan::bound(text, tokens, caret);
-        let mut out: Vec<Candidate> = Vec::new();
+        let mut soft: Vec<Soft<'_>> = Vec::new();
         for d in defns {
-            if quality(prefix, d) == 0 { continue; }
-            out.push(mk(0, usage(text, tokens, d), None, d, "defn", &format!("{d} \u{b7} a function of this workspace")));
+            soft_push(&mut soft, prefix, 0, usage(text, tokens, d), d, SoftKind::Defn);
         }
         for (name, file) in imports {
-            if names.graphs.contains(name) || quality(prefix, name) == 0 { continue; }
-            out.push(mk(0, 0, None, name, &format!("import \u{b7} {file}"), &format!("{name} \u{b7} imported from {file}")));
+            if names.graphs.contains(name) {
+                continue;
+            }
+            soft_push(&mut soft, prefix, 0, 0, name, SoftKind::Import { file });
         }
         for k in &vocab.kinds {
-            if k.context != context || quality(prefix, &k.qualified) == 0 { continue; }
-            out.push(mk(0, usage(text, tokens, &k.qualified), None, &k.qualified, &k.category.join(" / "), &format!("{} \u{b7} {}", k.qualified, kind_doc(k))));
+            if k.context != context {
+                continue;
+            }
+            soft_push(&mut soft, prefix, 0, usage(text, tokens, &k.qualified), &k.qualified, SoftKind::Kind { k });
         }
         for (s, doc) in specials() {
-            if quality(prefix, s) == 0 { continue; }
-            out.push(mk(1, usage(text, tokens, s), None, s, "form", doc));
+            soft_push(&mut soft, prefix, 1, usage(text, tokens, s), s, SoftKind::Form { doc });
         }
-        for (o, s) in ops_of(vocab, &context) {
-            if quality(prefix, &o) == 0 { continue; }
-            out.push(mk(2, usage(text, tokens, &o), None, &o, "operator", &op_doc(&o, &s)));
+        for o in ops_borrowed(vocab, &context) {
+            soft_push(&mut soft, prefix, 2, usage(text, tokens, &o.name), &o.name, SoftKind::Op { op: o });
         }
-        out
+        let ranked = soft_finish(soft);
+        return ranked
+            .into_iter()
+            .map(|c| Completion { replace, insert: c.insert, label: c.name, detail: c.detail, doc: c.doc })
+            .collect();
     } else if cur_kind == Some(Kind::Sym) {
         if after_kw == Some(":context") {
             contexts().iter().filter(|c| quality(prefix, c) != 0).map(|c| mk(0, 0, None, c, "context", &format!("{c} graph"))).collect()
@@ -691,7 +776,7 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
                         if k.slots.iter().any(|(n, _)| *n == bare) {
                             Some(format!("{bare} \u{b7} input of {}", k.qualified))
                         } else {
-                            special_keyword(&w)
+                            special_keyword(&w).map(|s| s.to_string())
                         }
                     }
                 },
@@ -699,7 +784,7 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
                     let ty = s.kw.iter().find(|(n, _)| *n == bare).map(|(_, t)| ty_name(t)).unwrap_or_default();
                     Some(format!("{w} \u{b7} {ty}"))
                 }
-                _ => special_keyword(&w),
+                _ => special_keyword(&w).map(|s| s.to_string()),
             }
         }
         Kind::Sym => match constants().iter().find(|(n, _)| *n == w) {
@@ -721,7 +806,7 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
             }
         },
         Kind::Num => Some(format!("{w} \u{b7} drag sideways to change it, Shift for coarse steps")),
-        Kind::Meta => special_keyword(&bare),
+          Kind::Meta => special_keyword(&bare).map(|s| s.to_string()),
         Kind::Str => match enclosing_head.and_then(kind) {
             Some(k) => {
                 let v: String = w.replace('"', " ");

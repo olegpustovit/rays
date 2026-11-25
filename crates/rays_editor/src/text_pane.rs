@@ -1953,14 +1953,15 @@ fn colour_popup(ui: &mut Ui, at: (f32, f32), text: &str, range: (i64, i64)) -> O
 }
 
 /// the tabs' names: the workspace sheet's narrow Lisp panel (under 400 points) says "Doc"; a
-/// document with a draft wears a star
-fn tab_labels(width: i64, dirty: bool) -> Vec<(Tab, String)> {
-    let doc = if width < 400 { "Doc" } else { "Document" };
-    vec![
-        (Tab::Selection, "Selection".to_owned()),
-        (Tab::Graph, "Graph".to_owned()),
-        (Tab::Document, if dirty { format!("{} *", doc) } else { doc.to_owned() }),
-    ]
+/// document with a draft wears a star. Static labels so a warm frame allocates none for the tabs.
+fn tab_labels(width: i64, dirty: bool) -> [(Tab, &'static str); 3] {
+    let doc = match (width < 400, dirty) {
+        (true, true) => "Doc *",
+        (true, false) => "Doc",
+        (false, true) => "Document *",
+        (false, false) => "Document",
+    };
+    [(Tab::Selection, "Selection"), (Tab::Graph, "Graph"), (Tab::Document, doc)]
 }
 
 /// The room the Selection / Graph / Document tabs of `view` take in the header of a panel `width` wide.
@@ -2617,7 +2618,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
     let active = tabs.iter().position(|(tab, _)| *tab == state.tab).unwrap_or(0) as i64;
     // `tabs_right` is where the header has room for them (`Chrome::header_slots`); none in a header too narrow
     if let Some(right) = tabs_right {
-        let labels: Vec<&str> = tabs.iter().map(|(_, l)| l.as_str()).collect();
+        let labels = [tabs[0].1, tabs[1].1, tabs[2].1];
         let (hit, _) = kit::segments(ui, "text-tab", right, y - layout::HEADER_HEIGHT as f32 + 2.0, &labels, active);
         if let Some(index) = hit {
             push(&emit, Intent::Tab(tabs[index as usize].0));
@@ -2631,23 +2632,19 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
     let body_h = row.max(height);
     let language = shared_language(vocab, names, state, theme);
     let ctx = AreaCtx { x, width, row, theme, footer, narrow, bar, find_row, language, names: names.clone(), time };
-    let message_of = |errors: &[Diagnostic], dirty: bool, clean: String| -> String {
-        match real_errors(errors).first() {
-            Some(d) => first_line(&diagnostic::to_string(d)),
-            None => {
-                if dirty {
-                    "Unapplied draft. Every other pane shows the last applied document.".to_owned()
-                } else {
-                    clean
-                }
-            }
-        }
+    // Owned only when a diagnostic must be formatted; warm dirty typing uses a static.
+    const DIRTY_MSG: &str = "Unapplied draft. Every other pane shows the last applied document.";
+    const DOC_CLEAN: &str = "Source matches the applied document.";
+    const SEL_CLEAN: &str = "The selection with what it reads; Check and apply writes the bindings shown.";
+    let message_buf = |errors: &[Diagnostic]| -> Option<String> {
+        real_errors(errors).first().map(|d| first_line(&diagnostic::to_string(d)))
     };
-    let text = current_text(state, shown)?;
+    let text = current_text_ref(state, shown)?;
     match state.tab {
         Tab::Document => {
             let errors = errors_of(state, &state.doc_errors, &text);
-            let message = message_of(&errors, dirty, "Source matches the applied document.".to_owned());
+            let owned = message_buf(&errors);
+            let message = owned.as_deref().unwrap_or(if dirty { DIRTY_MSG } else { DOC_CLEAN });
             editor_area(
                 ui,
                 &emit,
@@ -2656,24 +2653,26 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 shown,
                 "text-document",
                 (body_y, body_h),
-                &text,
+                text,
                 &errors,
                 if dirty { Vec::new() } else { shown.mark.into_iter().collect() },
                 if dirty { None } else { shown.mark.map(|m| m.0) },
                 &|t| Intent::DocApply(t),
                 Intent::DocDiscard,
                 dirty,
-                &message,
+                message,
                 &|t| Intent::DocDraft(t),
                 &|t, done| Intent::DocScrub(t, done),
             );
         }
         Tab::Graph => {
             let slot = graph_slot(state, &shown.graph);
-            let errors = errors_of(state, &slot.map(|s| s.gerrors.clone()).unwrap_or_else(no_errors), &text);
+            let errors = errors_of(state, &slot.map(|s| s.gerrors.clone()).unwrap_or_else(no_errors), text);
             let dirty = text != shown.text;
             let spans: Vec<(i64, i64)> = if dirty { Vec::new() } else { shown.mark.into_iter().collect() };
-            let message = message_of(&errors, dirty, format!("Edit {} as text; Check and apply checks the whole workspace.", shown.graph));
+            let clean = format!("Edit {} as text; Check and apply checks the whole workspace.", shown.graph);
+            let owned = message_buf(&errors);
+            let message = owned.as_deref().unwrap_or(if dirty { DIRTY_MSG } else { &clean });
             let graph = shown.graph.clone();
             let (g1, g2, g3) = (graph.clone(), graph.clone(), graph.clone());
             editor_area(
@@ -2684,14 +2683,14 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 shown,
                 "text-graph",
                 (body_y, body_h),
-                &text,
+                text,
                 &errors,
                 spans,
                 if dirty { None } else { shown.mark.map(|m| m.0) },
                 &move |t| Intent::GraphApply(g1.clone(), t),
                 Intent::GraphDiscard(graph),
                 dirty,
-                &message,
+                message,
                 &move |t| Intent::GraphDraft(g2.clone(), t),
                 &move |t, done| Intent::GraphScrub(g3.clone(), t, done),
             );
@@ -2700,8 +2699,9 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
             // the closure of the selection, editable: its bindings are the graph's root bindings
             let dirty = text != shown.text;
             let spans: Vec<(i64, i64)> = if dirty { Vec::new() } else { shown.mark.into_iter().collect() };
-            let errors = errors_of(state, &state.binding_errors, &text);
-            let message = message_of(&errors, dirty, "The selection with what it reads; Check and apply writes the bindings shown.".to_owned());
+            let errors = errors_of(state, &state.binding_errors, text);
+            let owned = message_buf(&errors);
+            let message = owned.as_deref().unwrap_or(if dirty { DIRTY_MSG } else { SEL_CLEAN });
             let (k1, k2, k3) = (shown.key.clone(), shown.key.clone(), shown.key.clone());
             editor_area(
                 ui,
@@ -2711,14 +2711,14 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 shown,
                 "text-selection",
                 (body_y, body_h),
-                &text,
+                text,
                 &errors,
                 spans,
                 shown.mark.map(|m| m.0),
                 &move |t| Intent::BindingApply(k1.clone(), t),
                 Intent::BindingDiscard,
                 dirty,
-                &message,
+                message,
                 &move |t| Intent::BindingDraft(k2.clone(), t),
                 &move |t, done| Intent::BindingScrub(k3.clone(), t, done),
             );
