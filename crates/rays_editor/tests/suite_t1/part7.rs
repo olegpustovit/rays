@@ -389,6 +389,7 @@ pub fn run_nested_inspector() {
     (graph editor :context editor (ui/workspace (ui/split "horizontal" (ui/graph "g") (ui/inspector)))))"#;
     let mut r = Run::new(editor(text));
     let m = (450., 300.);
+    r.e.core.ui.borrow_mut().set_a11y(true);
     r.step(m, vec![]);
     r.step(m, vec![]);
     let click = |r: &mut Run, p: (f64, f64)| {
@@ -412,7 +413,12 @@ pub fn run_nested_inspector() {
     check(after != before && has(&after, "(+ 2.0 (* ") && has(&after, "a 1.0") && has(&after, " a))") && !has(&after, "(* 3.0 a)"), &format!("the nested * input was not editable from the inspector: {after}"));
     let b_line = after.lines().find(|l| has(l, "b (+")).expect("b line").to_string();
     check(has(&b_line, "(+ 2.0 (* ") && !has(&b_line, "(* 3.0 a)") && has(&b_line, " a))") && r.undo_label() == Some("Edit value".into()), &format!("only the nested 3.0 may change: {b_line}"));
-    click(&mut r, at(154, 0));
+    let unfold = {
+        let ui = r.e.core.ui.borrow();
+        let button = pxui::testing::find(&ui, pxui::Role::Button, "Unfold b").expect("Unfold b");
+        ((button.x + button.w / 2.0) as f64, (button.y + button.h / 2.0) as f64)
+    };
+    click(&mut r, unfold);
     r.step(m, vec![]);
     let unfolded = r.source();
     check(has(&unfolded, "product (* ") && has(&unfolded, "b (+ 2.0 product)"), &format!("Unfold did not make the nested call its own binding: {unfolded}"));

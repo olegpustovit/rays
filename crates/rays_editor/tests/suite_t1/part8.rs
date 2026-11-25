@@ -23,6 +23,7 @@ pub fn run_expression_chip() {
     (graph editor :context editor (ui/workspace (ui/split "horizontal" (ui/graph "g") (ui/inspector)))))"#;
     let mut r = Run::new(editor(text));
     let m = (450., 300.);
+    r.e.core.ui.borrow_mut().set_a11y(true);
     r.step(m, vec![]);
     r.step(m, vec![]);
     let click = |r: &mut Run, p: (f64, f64)| {
@@ -38,17 +39,25 @@ pub fn run_expression_chip() {
     r.step(m, vec![]);
     check(r.dump("scope selected") == "g/b, g/b/:b", &format!("the chip did not select its row: {}", r.dump("scope selected")));
     let before = r.source();
-    let (ix, iy, _, _) = r.panes().inspector;
-    let at = |dy: i64, x: i64| ((ix + 200 + x) as f64, (iy + dy) as f64);
-    r.stepb(&[LB], at(190, 0), vec![Event::PointerPressed(LB, at(190, 0))]);
-    for x in [20, 40, 60, 80] {
-        r.stepb(&[LB], at(190, x), vec![]);
+    let row_center = |r: &Run, label: &str| {
+        let ui = r.e.core.ui.borrow();
+        let (ix, _, _, _) = r.panes().inspector;
+        let row = ui.a11y_nodes().iter().find(|node| node.rect.x >= ix as f32 && ui.a11y_name_of(node) == label)
+            .expect("expression inspector row").rect;
+        ((row.x + row.w / 2.0) as f64, (row.y + row.h / 2.0) as f64)
+    };
+    let (x, y) = row_center(&r, "b.0");
+    r.stepb(&[LB], (x, y), vec![Event::PointerPressed(LB, (x, y))]);
+    for dx in [20.0, 40.0, 60.0, 80.0] {
+        let point = (x + dx, y);
+        r.stepb(&[LB], point, vec![Event::PointerMoved(point)]);
     }
-    r.step(at(190, 90), vec![Event::PointerReleased(LB, at(190, 90))]);
+    r.step((x + 90.0, y), vec![Event::PointerReleased(LB, (x + 90.0, y))]);
     r.step(m, vec![]);
     let after = r.source();
     check(after != before && has(&after, "(+ 2.0 (* ") && !has(&after, "(* 3.0 a)"), &format!("the 3.0 of the * was not editable from the row's inspector: {after}"));
-    click(&mut r, at(214, 0));
+    let reference = row_center(&r, "b.1");
+    click(&mut r, reference);
     r.step(m, vec![]);
     check(r.dump("scope selected") == "g/a", &format!("a nested inspector reference followed its parent expression: {}", r.dump("scope selected")));
     r.close();
