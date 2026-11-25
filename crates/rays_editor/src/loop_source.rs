@@ -417,18 +417,15 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     } else {
         value.core.doc.clone()
     };
-    let prior = recovery_prior(&value.recovery_print, &doc);
-    let text = match preset::compose(&doc, &view, prior) {
-        Ok(text) => text,
-        Err(message) => {
-            value.state_error = Some(format!("Autosave failed: {message}"));
-            value.saved_doc = std::sync::Weak::new();
-            value.saved_drafts = None;
-            value.recovery_print = None;
-            return;
-        }
-    };
-    let text: Arc<str> = text.into();
+    let prior = recovery_prior(&value.recovery_print, &doc).map(|s| s.to_owned());
+    if let Err(message) = preset::compose_into(&doc, &view, prior.as_deref(), &mut value.recovery_buf) {
+        value.state_error = Some(format!("Autosave failed: {message}"));
+        value.saved_doc = std::sync::Weak::new();
+        value.saved_drafts = None;
+        value.recovery_print = None;
+        return;
+    }
+    let text: Arc<str> = value.recovery_buf.as_str().into();
     // Skip when printed content is unchanged (revision of bytes, not a re-print of a different doc).
     if value.recovery_print.as_ref().is_some_and(|c| c.written.as_ref() == text.as_ref()) {
         value.saved_doc = Arc::downgrade(&value.core.doc);

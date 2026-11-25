@@ -39,7 +39,7 @@ const E_CLICK_KEY: (u64, u64) = (256, 13);
 const E_CLICK_SETTLED: (u64, u64) = (11, 13);
 // E_toggle_key: layout-only recovery print splices prior body (no SyntaxBuilder::import of source).
 const E_TOGGLE_KEY: (u64, u64) = (365, 15);
-const E_TOGGLE_SETTLED: (u64, u64) = (36, 15);
+const E_TOGGLE_SETTLED: (u64, u64) = (11, 15);
 const F_FROZEN: (u64, u64) = (118, 8);
 const F_STATIC: (u64, u64) = (123, 9);
 

@@ -318,7 +318,13 @@ pub fn run_idle_rest() {
     };
     after_rest(&mut t, &|t| t.tick((451., 300.), 1, vec![]), "a moved pointer");
     after_rest(&mut t, &|t| t.tick((451., 300.), 1, vec![Event::FocusLost]), "an event");
-    after_rest(&mut t, &|t| t.tick((451., 300.), 61, vec![]), "a second");
+    // Sliding REST_SECONDS no longer forces a rebuild on the 1 s boundary; time still advances and
+    // rest ticks still run source/autosave/timeline without a full UI rebuild.
+    after_rest(&mut t, &|t| t.tick((451., 300.), 61, vec![]), "a second (slide)");
+    // Resting implies the cook is idle: may_rest requires cook::at_rest, and the rest path never
+    // submits work — so a cook cannot "finish while resting"; completion is always polled on a
+    // full update before rest begins.
+    check(rays_editor::cook::at_rest(&t.e.core.cook), "resting with a busy cook");
     editor::close(&t.e);
     // a graph that reads the clock never rests while it plays, even while its picture holds still
     let mut t = T::new(
@@ -340,4 +346,60 @@ pub fn run_idle_rest() {
     let p = t.tick0();
     check(rays::scene::same(&t.tick0(), &p), "a stopped clock did not rest");
     editor::close(&t.e);
+
+    // External .rays edit while the rest clock is sliding: source_at_rest polls on rest ticks and
+    // forces a full update when the file changes (no dependence on the old 1 s rebuild).
+    {
+        let dir = std::env::temp_dir().join(format!("rays-rest-slide-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("sketch.rays");
+        let text0 = r##"(workspace idle (graph picture :context draw (draw/background "#14161c")))"##;
+        let text1 = r##"(workspace idle (graph picture :context draw (draw/background "#ff0000")))"##;
+        std::fs::write(&file, text0).unwrap();
+        let path = file.to_string_lossy().into_owned();
+        let digest = editor_document::lowering::sha256(text0);
+        let source = rays_editor::source_file::at(&path, &digest);
+        let doc = of_text(text0);
+        let mut e = editor::create(
+            editor::Create {
+                await_: Some(true),
+                ui_text_size: Some(11),
+                platform: Some(input::Platform::Apple),
+                domains: Some(1),
+                ..Default::default()
+            },
+            &doc,
+            Some(source),
+            editor::prepare_fn(),
+            editor::draw_fn(),
+        )
+        .expect("editor opens");
+        let mut count = 0i64;
+        let mut tick = |e: &mut editor::Editor, step: i64| {
+            count += step;
+            let f = frame(&[], (450., 300.), vec![], count);
+            *e = editor::update(e.clone(), &f);
+            let scene = editor::scene(e, &f).into_owned();
+            *e = editor::after_present(e.clone(), &f);
+            scene
+        };
+        for _ in 0..40 {
+            tick(&mut e, 1);
+        }
+        let rested = tick(&mut e, 1);
+        check(rays::scene::same(&tick(&mut e, 1), &rested), "file editor did not rest before external edit");
+        std::fs::write(&file, text1).unwrap();
+        // poll INTERVAL is 0.5 s; advance past it on rest/slide ticks until the change reloads
+        let mut reloaded = false;
+        for _ in 0..80 {
+            let scene = tick(&mut e, 1);
+            if !rays::scene::same(&scene, &rested) {
+                reloaded = true;
+                break;
+            }
+        }
+        check(reloaded, "external .rays edit while resting was not picked up");
+        editor::close(&e);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

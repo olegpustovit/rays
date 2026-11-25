@@ -139,6 +139,8 @@ pub struct LoopModel {
     pub saver: Rc<crate::loop_source::Saver>,
     /// Cached recovery print base: reused on layout-only edits (see `loop_source::autosave`).
     pub recovery_print: Option<crate::loop_source::RecoveryPrint>,
+    /// Reused compose buffer for recovery text (cleared each save).
+    pub recovery_buf: String,
     /// Idle-stable view_state Rc for update_with (keyed by section_key).
     pub view_state: Option<( ([u64; 7], bool, crate::editor_renderer::Mode), Rc<dyn Fn(Option<&crate::editor_model::PanelResult>) -> flow_syntax::syntax::Syntax>) >,
     pub canvases: Vec<(String, CanvasPicture)>,
@@ -304,6 +306,7 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
                 seen_drafts: None,
                 saver: Rc::default(),
                 recovery_print: None,
+                recovery_buf: String::new(),
                 view_state: None,
             })
         }

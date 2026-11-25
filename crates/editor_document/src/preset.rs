@@ -81,19 +81,34 @@ pub fn save(directory: &str, name: &str, doc: &document::T, view: &S) -> Result<
 /// Compose recovery file text. When `prior_body` is a previous workspace `to_text` for the same
 /// authored source, only `(layout ...)` is rebuilt — no SyntaxBuilder::import of the source.
 pub fn compose(doc: &document::T, view: &S, prior_body: Option<&str>) -> Result<String, String> {
+    let mut out = String::new();
+    compose_into(doc, view, prior_body, &mut out)?;
+    Ok(out)
+}
+
+/// Like `compose`, writing into a caller-owned buffer (cleared first) so the saver can reuse it.
+pub fn compose_into(doc: &document::T, view: &S, prior_body: Option<&str>, out: &mut String) -> Result<(), String> {
     if !finite(view) {
         return Err("viewport contains nonfinite values".to_owned());
     }
-    let body = match prior_body {
-        Some(prior) => refresh_layout(prior, doc)?,
-        None => text(doc)?,
+    out.clear();
+    match prior_body {
+        Some(prior) => {
+            let body = refresh_layout(prior, doc)?;
+            out.push_str(&body);
+        }
+        None => out.push_str(&text(doc)?),
     };
     let mut builder = flow_syntax::arena::SyntaxBuilder::new();
     let head = builder.push_draft(0, flow_syntax::arena::Draft::Sym("view".to_owned()), rays_diagnostic::Span { start: 0, finish: 0 }, None);
     let view = builder.import(view);
     let root = builder.push_draft(0, flow_syntax::arena::Draft::List(vec![head, view]), rays_diagnostic::Span { start: 0, finish: 0 }, None);
     let view_text = lisp::print(&[builder.freeze().handle(root)]).map_err(|error| rays_diagnostic::to_string(&error))?.0;
-    Ok(format!("{body}\n{view_text}"))
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&view_text);
+    Ok(())
 }
 
 pub fn save_text(directory: &str, name: &str, text: &str) -> Result<String, String> {
