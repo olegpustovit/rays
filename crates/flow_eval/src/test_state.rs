@@ -60,11 +60,12 @@ fn compiled_state_keeps_device_arrays_until_an_interpreter_reads_them() {
     })).unwrap();
     let live = at(0., 0, 0);
     residual::bind_live(root, &live, Some(&state)).unwrap();
-    let read = || residual::state_read(root, view.instance, path.clone(), view.iter.to_vec(), false, &|| data.clone()).unwrap();
+    let site = StateSite::new(view.instance, path.clone(), view.iter.to_vec(), false);
+    let read = || residual::state_read(root, &site, &|| data.clone()).unwrap();
     assert!(device::held_by_device(&read()));
-    let stored = residual::state_write(root, view.instance, path.clone(), view.iter.to_vec(), false, data).unwrap();
+    let stored = residual::state_write(root, &site, data).unwrap();
     assert!(device::held_by_device(&stored));
-    assert!(device::held_by_device(&residual::state_peek(root, view.instance, path.clone(), view.iter.to_vec(), false).unwrap()));
+    assert!(device::held_by_device(&residual::state_peek(root, &site).unwrap()));
     assert_eq!(reads.load(O::SeqCst), 0);
     assert_eq!(host::force_reference(&Value::Residual(root), &live, Some(&state), None, None).unwrap(), Value::Floats(1, Arc::new(vec![2., 3., 4.])));
     assert!(reads.load(O::SeqCst) > 0);
@@ -213,4 +214,30 @@ fn exact_images_cannot_be_state() {
             }
         }
     }
+}
+
+/// Z7: StateSite clones are Arc bumps; a warm same-frame begin_frame saves no maps.
+#[test]
+fn state_site_and_warm_frame_allocate_nothing() {
+    let site = StateSite::new(0, vec!["g".into(), "n".into()], vec![], false);
+    mem_sys::local_reset();
+    let begin = mem_sys::local_alloc_count();
+    for _ in 0..256 {
+        std::hint::black_box(site.clone());
+    }
+    assert_eq!(mem_sys::local_alloc_count() - begin, 0, "StateSite clone is Arc refcounts");
+
+    let workspace = checked("(state [n 0] (+ n 1))");
+    let state = create_state();
+    let evaluation = static_eval(&workspace).unwrap();
+    let residual = get(&evaluation, "g");
+    force(&residual, &at(0., 0, 0), Some(&state)).unwrap();
+    mem_sys::local_reset();
+    let before = mem_sys::local_alloc_count();
+    force(&residual, &at(0., 0, 0), Some(&state)).unwrap();
+    let warm = mem_sys::local_alloc_count() - before;
+    assert!(warm < 64, "warm same-frame force stayed small ({warm})");
+    let stamp = state_stamp(&state);
+    transaction(&state, &mut || Ok(())).unwrap();
+    assert_eq!(state_stamp(&state), stamp);
 }

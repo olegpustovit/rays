@@ -332,27 +332,36 @@ pub fn roots<'a>(values: impl IntoIterator<Item = &'a Value>) -> Roots {
     roots
 }
 
+/// State-site identity: path and iteration are Arc-shared so a warm frame only bumps refcounts.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct StateKey { instance: i64, path: Path, iter: Vec<i64> }
+struct StateKey { instance: i64, path: Arc<Path>, iter: Arc<[i64]> }
 // Compare instance, then path, then iteration.
 impl Ord for StateKey { fn cmp(&self, other: &Self) -> std::cmp::Ordering { self.instance.cmp(&other.instance).then_with(|| self.path.cmp(&other.path)).then_with(|| self.iter.cmp(&other.iter)) } }
 impl PartialOrd for StateKey { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) } }
+fn empty_iter() -> Arc<[i64]> {
+    static EMPTY: LazyLock<Arc<[i64]>> = LazyLock::new(|| Arc::from(Vec::<i64>::new()));
+    EMPTY.clone()
+}
+fn empty_path_arc() -> Arc<Path> {
+    static EMPTY: LazyLock<Arc<Path>> = LazyLock::new(|| Arc::new(Vec::new()));
+    EMPTY.clone()
+}
 // ponytail: a write copies a shared map; use persistent maps if changed-state copying dominates.
 #[derive(Clone, Debug)]
-struct StatePlane { source: String, frame: Option<i64>, before: Shared<BTreeMap<StateKey, Value>>, next: Shared<BTreeMap<StateKey, Value>>, epoch: i64 }
+struct StatePlane { source: Arc<str>, frame: Option<i64>, before: Shared<BTreeMap<StateKey, Value>>, next: Shared<BTreeMap<StateKey, Value>>, epoch: i64 }
 fn empty_state_map() -> Shared<BTreeMap<StateKey, Value>> {
     static EMPTY: LazyLock<Arc<BTreeMap<StateKey, Value>>> = LazyLock::new(|| Arc::new(BTreeMap::new()));
     Shared(EMPTY.clone())
 }
 impl Default for StatePlane {
-    fn default() -> Self { Self { source: String::new(), frame: None, before: empty_state_map(), next: empty_state_map(), epoch: 0 } }
+    fn default() -> Self { Self { source: Arc::from(""), frame: None, before: empty_state_map(), next: empty_state_map(), epoch: 0 } }
 }
 #[derive(Clone, Debug, Default)]
 pub struct State { inner: Arc<Mutex<StateData>> }
 #[derive(Clone, Debug)]
-struct StateData { source: String, frame: Option<i64>, before: Shared<BTreeMap<StateKey, Value>>, next: Shared<BTreeMap<StateKey, Value>>, host: Option<StatePlane>, epoch: i64 }
+struct StateData { source: Arc<str>, frame: Option<i64>, before: Shared<BTreeMap<StateKey, Value>>, next: Shared<BTreeMap<StateKey, Value>>, host: Option<StatePlane>, epoch: i64 }
 impl Default for StateData {
-    fn default() -> Self { Self { source: String::new(), frame: None, before: empty_state_map(), next: empty_state_map(), host: None, epoch: 0 } }
+    fn default() -> Self { Self { source: Arc::from(""), frame: None, before: empty_state_map(), next: empty_state_map(), host: None, epoch: 0 } }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StateStamp(i64, Option<i64>);
@@ -2368,39 +2377,59 @@ fn state_plane(a: &Arena, c: &ExecCtx) -> Result<(State, i64), Diagnostic> {
     Ok((state, frame))
 }
 fn state_key(c: &ExecCtx, zone: &[Symbol]) -> StateKey {
-    let mut path = (*c.prefix).clone();
-    path.extend(zone.to_vec());
-    StateKey { instance: c.inst, path, iter: c.iter.to_vec() }
+    let path = if zone.is_empty() {
+        c.prefix.clone()
+    } else {
+        let mut path = (*c.prefix).clone();
+        path.extend_from_slice(zone);
+        Arc::new(path)
+    };
+    let iter = if c.iter.len() == 0 { empty_iter() } else { Arc::from(c.iter.to_vec()) };
+    StateKey { instance: c.inst, path, iter }
 }
+/// Advance the plane to `frame` without allocating when the key set is stable (in-place replace)
+/// or when `next` can become `before` wholesale. Source identity is an `Arc<str>` so a matching
+/// warm frame never rebuilds the string.
 fn begin_frame(state: &mut StateData, source: &str, frame: i64) {
-    if state.source != source || state.frame.is_some_and(|old| frame < old) {
-        state.source = source.into();
+    if state.source.as_ref() != source || state.frame.is_some_and(|old| frame < old) {
+        state.source = Arc::from(source);
         state.frame = None;
         state.before = empty_state_map();
         state.next = empty_state_map();
         state.epoch = STATE_EPOCH.fetch_add(1, Ordering::Relaxed);
     }
     if state.frame != Some(frame) {
-        let newer = std::mem::replace(&mut state.next, empty_state_map());
-        if state.before.is_empty() { state.before = newer; }
-        else if !newer.is_empty() { state.before.extend(Arc::unwrap_or_clone(newer.0)); }
+        merge_state_maps(&mut state.before, std::mem::replace(&mut state.next, empty_state_map()));
         state.frame = Some(frame);
     }
 }
 fn begin_host_frame(state: &mut StatePlane, source: &str, frame: i64) {
-    if state.source != source || state.frame.is_some_and(|old| frame < old) {
-        state.source = source.into();
+    if state.source.as_ref() != source || state.frame.is_some_and(|old| frame < old) {
+        state.source = Arc::from(source);
         state.frame = None;
         state.before = empty_state_map();
         state.next = empty_state_map();
         state.epoch = STATE_EPOCH.fetch_add(1, Ordering::Relaxed);
     }
     if state.frame != Some(frame) {
-        let newer = std::mem::replace(&mut state.next, empty_state_map());
-        if state.before.is_empty() { state.before = newer; }
-        else if !newer.is_empty() { state.before.extend(Arc::unwrap_or_clone(newer.0)); }
+        merge_state_maps(&mut state.before, std::mem::replace(&mut state.next, empty_state_map()));
         state.frame = Some(frame);
     }
+}
+/// Fold `newer` into `before`. Prefers moves and in-place inserts over cloning the BTree.
+fn merge_state_maps(before: &mut Shared<BTreeMap<StateKey, Value>>, newer: Shared<BTreeMap<StateKey, Value>>) {
+    if newer.is_empty() { return; }
+    if before.is_empty() {
+        *before = newer;
+        return;
+    }
+    if Arc::strong_count(&before.0) == 1 && Arc::strong_count(&newer.0) == 1 {
+        let newer = Arc::try_unwrap(newer.0).unwrap_or_else(|_| unreachable!());
+        let before = Arc::get_mut(&mut before.0).expect("strong_count == 1");
+        for (key, value) in newer { before.insert(key, value); }
+        return;
+    }
+    before.extend(Arc::unwrap_or_clone(newer.0));
 }
 fn state_data(value: Value) -> Result<Value, Diagnostic> {
     let _nesting = EvalNesting::enter()?;
@@ -3014,13 +3043,32 @@ pub fn static_with_requests(budget: Option<usize>, record: bool, inputs: Option<
 }
 
 pub fn create_state()->State{State::default()}
-pub fn reset_state(state:&State,host_state:bool){let mut s=state.inner.lock().unwrap();s.source.clear();s.frame=None;s.before=empty_state_map();s.next=empty_state_map();s.epoch=STATE_EPOCH.fetch_add(1,Ordering::Relaxed);if host_state{s.host=None}}
+pub fn reset_state(state:&State,host_state:bool){let mut s=state.inner.lock().unwrap();s.source=Arc::from("");s.frame=None;s.before=empty_state_map();s.next=empty_state_map();s.epoch=STATE_EPOCH.fetch_add(1,Ordering::Relaxed);if host_state{s.host=None}}
 fn save_state(state:&State)->StateData{state.inner.lock().unwrap().clone()}
 pub fn fork_state(state:&State)->State{State{inner:Arc::new(Mutex::new(save_state(state)))}}
 pub fn state_stamp(state:&State)->StateStamp{let s=state.inner.lock().unwrap();StateStamp(s.epoch,s.host.as_ref().map(|x|x.epoch))}
 fn restore_state(state:&State,saved:StateData){let replaced=std::mem::replace(&mut *state.inner.lock().unwrap(),saved);drop(replaced)}
 pub fn state_values(state:&State)->Vec<Value>{let state=state.inner.lock().unwrap();let mut values=state.before.values().chain(state.next.values()).cloned().collect::<Vec<_>>();if let Some(host)=&state.host{values.extend(host.before.values().chain(host.next.values()).cloned());}values}
 pub fn transaction(state:&State,f:&mut dyn FnMut()->Result<(),Diagnostic>)->Result<(),Diagnostic>{let saved=save_state(state);let result=f();if result.is_err(){restore_state(state,saved)}result}
+
+/// Prebuilt state-site key for the compiled residual path: clone is Arc refcounts only.
+#[derive(Clone, Debug)]
+pub struct StateSite {
+    pub instance: i64,
+    pub path: Arc<Path>,
+    pub iter: Arc<[i64]>,
+    pub host: bool,
+}
+impl StateSite {
+    pub fn new(instance: i64, path: Path, iter: Vec<i64>, host: bool) -> Self {
+        Self {
+            instance,
+            path: if path.is_empty() { empty_path_arc() } else { Arc::new(path) },
+            iter: if iter.is_empty() { empty_iter() } else { Arc::from(iter) },
+            host,
+        }
+    }
+}
 
 pub fn force(value:&Value,live:&Frame,state:Option<&State>)->Result<Value,Diagnostic>{force_with(value,live,state,None,None)}
 type ResolveFn = Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>;
@@ -3704,48 +3752,56 @@ pub mod residual {
         restore_live(&mut arena, saved_live);
         result
     }
-    fn state_location(a: &mut Arena, residual: &ResidualData, instance: i64, path: Path, iter: Vec<i64>, host: bool) -> ExecCtx {
-        let mut context = residual.ctx.clone();
-        context.inst = instance; context.prefix = Arc::new(path); context.iter = Iter::from_slice(&iter); context.host = host;
-        sync_site(a, &mut context);
-        context
+    fn state_plane_at(a: &Arena, host: bool) -> Result<(State, i64), Diagnostic> {
+        let state = a.state.clone().ok_or_else(|| error("E_STATE", "State is not available."))?;
+        let frame = a.time.as_ref().map_or(0, |frame| if host { frame.tick } else { frame.frame });
+        if host { state.inner.lock().unwrap().host.get_or_insert_with(StatePlane::default); }
+        Ok((state, frame))
     }
-    pub fn state_read(id: ResidualId, instance: i64, path: Path, iter: Vec<i64>, host: bool, init: &dyn Fn() -> Value) -> Result<Value, Diagnostic> {
+    fn site_key(site: &StateSite) -> StateKey {
+        StateKey { instance: site.instance, path: site.path.clone(), iter: site.iter.clone() }
+    }
+    /// Compiled state read: `site` is built once per plan slot (Arc path/iter); no per-frame route rebuild.
+    pub fn state_read(id: ResidualId, site: &StateSite, init: &dyn Fn() -> Value) -> Result<Value, Diagnostic> {
         let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
         let mut cell = held(&arena); let arena = cell.as_mut().expect("filled");
-        let residual = get_res(&arena, id)?;
-        let context = state_location(arena, &residual, instance, path, iter, host);
-        let (state, frame) = state_plane(&arena, &context)?;
+        let key = site_key(site);
+        let (state, frame) = state_plane_at(arena, site.host)?;
         let source = workspace_source_key(arena);
-        let key = state_key(&context, &[]);
         let previous = {
             let mut state = state.inner.lock().unwrap();
-            if host {
+            if site.host {
                 let plane = state.host.get_or_insert_with(StatePlane::default);
-                begin_host_frame(plane, &source, frame);
+                begin_host_frame(plane, source, frame);
                 plane.before.get(&key).cloned()
             } else {
-                begin_frame(&mut state, &source, frame);
+                begin_frame(&mut state, source, frame);
                 state.before.get(&key).cloned()
             }
         };
         drop(cell);
         state_data(previous.unwrap_or_else(init))
     }
-    pub fn state_peek(id: ResidualId, instance: i64, path: Path, iter: Vec<i64>, host: bool) -> Option<Value> {
+    pub fn state_peek(id: ResidualId, site: &StateSite) -> Option<Value> {
         let arena = arena_for_residual(&id)?;
-        let mut cell = held(&arena); let arena = cell.as_mut().expect("filled");
-        let residual = get_res(&arena, id).ok()?;
-        let context = state_location(arena, &residual, instance, path, iter, host);
+        let cell = held(&arena); let arena = cell.as_ref().expect("filled");
+        let key = site_key(site);
         let state = arena.state.as_ref()?.inner.lock().ok()?;
-        let value = if host { state.host.as_ref()?.next.get(&state_key(&context, &[])).cloned() } else { state.next.get(&state_key(&context, &[])).cloned() }?;
+        let value = if site.host { state.host.as_ref()?.next.get(&key).cloned() } else { state.next.get(&key).cloned() }?;
         Some(value)
     }
-    pub fn state_write(id: ResidualId, instance: i64, path: Path, iter: Vec<i64>, host: bool, value: Value) -> Result<Value, Diagnostic> {
+    pub fn state_write(id: ResidualId, site: &StateSite, value: Value) -> Result<Value, Diagnostic> {
         let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
         let mut arena = checkout(&arena);
         let residual = get_res(&arena, id)?;
-        let context = state_location(&mut arena, &residual, instance, path, iter, host);
+        let mut context = residual.ctx.clone();
+        context.inst = site.instance;
+        context.host = site.host;
+        context.prefix = site.path.clone();
+        context.site = site.path.clone();
+        context.base = empty_path_arc();
+        context.route = Route(None);
+        context.iter = if site.iter.is_empty() { Iter::default() } else { Iter::from_slice(&site.iter) };
         super::state_write(&mut arena, &context, &Vec::new(), value)
     }
     // the workspace's operator table, shared (a lowering asks for it per operator: copying the catalog each time was most of a call)
@@ -4092,14 +4148,14 @@ fn text_clones_and_parameter_reads_share_binary_payloads() {
         {
             let mut data = state.inner.lock().unwrap();
             for i in 0..128 {
-                let key = StateKey { instance: i, path: vec![], iter: vec![] };
+                let key = StateKey { instance: i, path: empty_path_arc(), iter: empty_iter() };
                 data.before.insert(key.clone(), Value::Int(i));
                 data.next.insert(key, Value::Int(i + 1));
             }
             data.host = Some(StatePlane::default());
             let host = data.host.as_mut().unwrap();
             for i in 0..128 {
-                let key = StateKey { instance: i, path: vec![], iter: vec![] };
+                let key = StateKey { instance: i, path: empty_path_arc(), iter: empty_iter() };
                 host.before.insert(key.clone(), Value::Int(i + 2));
                 host.next.insert(key, Value::Int(i + 3));
             }
@@ -4118,7 +4174,7 @@ fn text_clones_and_parameter_reads_share_binary_payloads() {
         assert_eq!(stamp_allocations, 0, "a comparison stamp is an integer pair");
         assert_eq!(transaction_allocations, 0, "a read-only transaction only saves shared map handles");
 
-        let key = StateKey { instance: 0, path: vec![], iter: vec![] };
+        let key = StateKey { instance: 0, path: empty_path_arc(), iter: empty_iter() };
         let before = state_stamp(&state);
         let failed = transaction(&state, &mut || {
             let mut data = state.inner.lock().unwrap();
@@ -4134,11 +4190,11 @@ fn text_clones_and_parameter_reads_share_binary_payloads() {
         assert_eq!(state_stamp(&state), before);
         {
             let data = state.inner.lock().unwrap();
-            assert_eq!((data.source.as_str(), data.frame), ("", None));
+            assert_eq!((data.source.as_ref(), data.frame), ("", None));
             assert_eq!(data.before.len(), 128);
             assert_eq!(data.next.get(&key), Some(&Value::Int(1)));
             let host = data.host.as_ref().unwrap();
-            assert_eq!((host.source.as_str(), host.frame), ("", None));
+            assert_eq!((host.source.as_ref(), host.frame), ("", None));
             assert_eq!(host.before.len(), 128);
             assert_eq!(host.next.get(&key), Some(&Value::Int(3)));
         }

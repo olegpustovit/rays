@@ -7,7 +7,7 @@ use crate::core_ir::{self as c, Expr, FrameField, Plane, Primitive, Program, Sta
 use crate::core_marks;
 use crate::packed;
 use flow_check::op::{self, Op};
-use flow_check::workspace::{DiagnosticPolicy, Path, Paths};
+use flow_check::workspace::{DiagnosticPolicy, Paths};
 use flow_eval as e;
 use flow_syntax::context;
 use flow_syntax::ty::Ty;
@@ -1551,7 +1551,8 @@ fn unfold_shape(program: &Program, loop_: &Statement, body: &[Statement], index:
 // ---------------------------------------------------------------------------------------------
 // prepare.
 
-type SlotKey = Arc<dyn Fn(&State) -> Result<(i64, Path, Vec<i64>, bool), Diagnostic> + Send + Sync>;
+/// Prebuilt once per plan slot: path/iter are Arc-shared so a warm frame only bumps refcounts.
+type SlotKey = Arc<dyn Fn(&State) -> Result<e::StateSite, Diagnostic> + Send + Sync>;
 
 struct Ctx {
     program: Arc<Program>,
@@ -2387,7 +2388,7 @@ impl Ctx {
                 let key = self.slot_keys[ix(*slot)].clone();
                 let (result, initial) = (ix(*result), ix(*initial));
                 Arc::new(move |st| {
-                    let (instance, path, iter, host) = key(st)?;
+                    let site = key(st)?;
                     if !st.builders.is_empty() { st.builders[result] = None; }
                     let root = state_root(st)?;
                     let failed: std::cell::RefCell<Option<Diagnostic>> = std::cell::RefCell::new(None);
@@ -2411,7 +2412,7 @@ impl Ctx {
                             _ => s.values[initial].clone(),
                         }
                     };
-                    let value = e::residual::state_read(root, instance, path, iter, host, &seed);
+                    let value = e::residual::state_read(root, &site, &seed);
                     drop(cell);
                     if let Some(d) = failed.into_inner() { return Err(d); }
                     let value = value?;
@@ -2423,9 +2424,9 @@ impl Ctx {
                 let key = self.slot_keys[ix(*slot)].clone();
                 let (found, value) = (ix(*found), ix(*value));
                 Arc::new(move |st| {
-                    let (instance, path, iter, host) = key(st)?;
+                    let site = key(st)?;
                     let root = state_root(st)?;
-                    let pending = e::residual::state_peek(root, instance, path, iter, host);
+                    let pending = e::residual::state_peek(root, &site);
                     st.values[found] = Value::Bool(pending.is_some());
                     let pending = pending.unwrap_or(Value::NoGeo);
                     st.values[value] = if st.resident_on { pending } else { e::device::thaw(&pending) };
@@ -2443,10 +2444,10 @@ impl Ctx {
                             st.values[value] = kept;
                         }
                     }
-                    let (instance, path, iter, host) = key(st)?;
+                    let site = key(st)?;
                     seal(st, value as i64);
                     let root = state_root(st)?;
-                    st.values[value] = e::residual::state_write(root, instance, path, iter, host, st.values[value].clone())?;
+                    st.values[value] = e::residual::state_write(root, &site, st.values[value].clone())?;
                     Ok(())
                 })
             }
@@ -2548,12 +2549,14 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
         .map(|slot| -> SlotKey {
             let mut path = slot.prefix.clone();
             path.extend(slot.zone.iter().cloned());
+            let path = Arc::new(path);
             let host = slot.plane == Plane::Host;
             let instance = slot.source.instance;
             let iter = slot.source.iter.clone();
             if iter.iter().all(|i| matches!(i, c::Iteration::StaticIndex(_))) {
-                let fixed: Vec<i64> = iter.iter().map(|i| if let c::Iteration::StaticIndex(i) = i { *i } else { 0 }).collect();
-                Arc::new(move |_| Ok((instance, path.clone(), fixed.clone(), host)))
+                let fixed: Arc<[i64]> = iter.iter().map(|i| if let c::Iteration::StaticIndex(i) = i { *i } else { 0 }).collect::<Vec<_>>().into();
+                let site = e::StateSite { instance, path, iter: fixed, host };
+                Arc::new(move |_| Ok(site.clone()))
             } else {
                 Arc::new(move |st| {
                     let mut out = Vec::with_capacity(iter.len());
@@ -2563,7 +2566,7 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
                             c::Iteration::LocalIndex(l) => v::int_of(&st.values[ix(*l)])?,
                         });
                     }
-                    Ok((instance, path.clone(), out, host))
+                    Ok(e::StateSite { instance, path: path.clone(), iter: Arc::from(out), host })
                 })
             }
         })
