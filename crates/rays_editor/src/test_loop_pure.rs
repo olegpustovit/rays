@@ -34,6 +34,9 @@ fn control_toggles_and_camera_defaults() {
     let hidden = V::toggle_ui(&control);
     let opened = V::open_camera(&hidden);
     assert!(V::ui_visible(&opened) && opened.open_camera == Some(true));
+    let expanded = V::Control { camera_expanded: true, ..control };
+    assert_eq!(V::open_camera(&expanded).open_camera, Some(false));
+    assert_eq!(V::open_camera(&V::toggle_ui(&expanded)).open_camera, Some(true));
     let camera = V::default_camera();
     assert_eq!(rays::easy_camera::distance(&camera), 7.);
 }

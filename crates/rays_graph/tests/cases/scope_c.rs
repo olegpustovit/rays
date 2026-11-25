@@ -149,6 +149,12 @@ fn scope_gestures_3() {
     check(scope::selected(&eview) == want, "the pane did not keep the row selected beside its card");
 }
 
+fn held_left(ui: &mut pxui::ui::Ui, view: scope::Pane, point: (i64, i64), keys: Vec<Key>, events: Vec<Event>) -> (scope::Pane, Vec<Change>) {
+    let mut frame = g::frame(point, keys, events);
+    frame.input.buttons.push(MouseButton::LeftButton);
+    in_frame(ui, &frame, view)
+}
+
 /// Drag presses at a, moves to b and releases; return move/release changes in order.
 fn drag(ui: &mut pxui::ui::Ui, view: scope::Pane, shift: bool, a: (i64, i64), b: (i64, i64)) -> (scope::Pane, Vec<Change>) {
     let mut evs = Vec::new();
@@ -157,9 +163,14 @@ fn drag(ui: &mut pxui::ui::Ui, view: scope::Pane, shift: bool, a: (i64, i64), b:
     }
     evs.push(mouse_move(a));
     evs.push(mouse_press(MouseButton::LeftButton, a));
-    let (view, _) = scope_step(ui, view, &g::frame(a, Vec::new(), evs));
-    let (view, moved) = scope_step(ui, view, &g::frame(b, Vec::new(), vec![mouse_move(b)]));
-    let (view, released) = scope_step(ui, view, &g::frame(b, Vec::new(), vec![mouse_release(MouseButton::LeftButton, b)]));
+    let keys = if shift { vec![Key::Shift] } else { Vec::new() };
+    let (view, _) = held_left(ui, view, a, keys.clone(), evs);
+    let (view, moved) = held_left(ui, view, b, keys, vec![mouse_move(b)]);
+    let mut events = vec![mouse_release(MouseButton::LeftButton, b)];
+    if shift {
+        events.push(Event::KeyReleased(Key::Shift));
+    }
+    let (view, released) = in_frame(ui, &g::frame(b, Vec::new(), events), view);
     let mut all = moved;
     all.extend(released);
     (view, all)
@@ -193,8 +204,8 @@ fn scope_gestures_4() {
     let sy0 = tile_y - (hp.y * z);
     let corner = ((sx0 + ((fx0 + fw) * z) - 6.0) as i64, (sy0 + ((fy0 + fh) * z) - 6.0) as i64);
     let drag_to = (corner.0 + 30, corner.1 + 20);
-    let (sized, _) = scope_step(&mut ui, framed.clone(), &g::frame(corner, Vec::new(), vec![mouse_move(corner), mouse_press(MouseButton::LeftButton, corner)]));
-    let (sized, _) = scope_step(&mut ui, sized, &g::frame(drag_to, Vec::new(), vec![mouse_move(drag_to)]));
+    let (sized, _) = held_left(&mut ui, framed.clone(), corner, Vec::new(), vec![mouse_move(corner), mouse_press(MouseButton::LeftButton, corner)]);
+    let (sized, _) = held_left(&mut ui, sized, drag_to, Vec::new(), vec![mouse_move(drag_to)]);
     let (_, changes) = scope_step(&mut ui, sized, &g::frame(drag_to, Vec::new(), vec![mouse_release(MouseButton::LeftButton, drag_to)]));
     let grown = changes.iter().find_map(|c| match c {
         Change::FramesSet { frames, .. } if frames.len() == 1 => Some((frames[0].2 .0, frames[0].2 .1)),
@@ -218,9 +229,10 @@ fn scope_gestures_4() {
     );
     // a drag on the title carries the frame with the nodes inside it, as one Moved and one Frames_set
     let towards = (title_at.0 + 40, title_at.1 + 30);
-    let (carried, _) = scope_step(&mut ui, framed.clone(), &g::frame(title_at, Vec::new(), vec![mouse_move(title_at), mouse_press(MouseButton::LeftButton, title_at)]));
-    let (carried, _) = scope_step(&mut ui, carried, &g::frame(towards, Vec::new(), vec![mouse_move(towards)]));
-    let (carried, _) = scope_step(&mut ui, carried, &g::frame(towards, Vec::new(), Vec::new()));
+    let framed = g::settled(&mut ui, framed);
+    let (carried, _) = held_left(&mut ui, framed.clone(), title_at, Vec::new(), vec![mouse_move(title_at), mouse_press(MouseButton::LeftButton, title_at)]);
+    let (carried, _) = held_left(&mut ui, carried, towards, Vec::new(), vec![mouse_move(towards)]);
+    let (carried, _) = held_left(&mut ui, carried, towards, Vec::new(), Vec::new());
     let moved_box = scope::inspect::box_of(&carried, &heart);
     let still_box = scope::inspect::box_of(&framed, &heart);
     check(matches!((moved_box, still_box), (Some(m), Some(s0)) if m.0 > s0.0 + 10.0), "the nodes did not travel with the frame while it was dragged");

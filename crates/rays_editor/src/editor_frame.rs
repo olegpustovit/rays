@@ -1177,7 +1177,7 @@ pub fn update_frame(
         let mut splitter_workspace = None;
         let mut splitter_released = false;
         let mut pending_prompt = initial_prompt.clone();
-        let mut picked_prompt = None;
+        let mut pending_menu = menu.clone();
         let mut build_and_prompt = |ui: &mut Ui| {
             let workspace = Cow::Borrowed(workspace_override.as_ref().unwrap_or(&value.workspace));
             let selection = selection_override.as_ref().unwrap_or_else(|| &panel_map::active(&value.panes).picked);
@@ -1220,16 +1220,14 @@ pub fn update_frame(
             }
             // PXUI can settle layout with another build in the same frame. Keep the first
             // build's accepted query or intent once its keyboard events have been consumed.
-            let prompt_error = match prompt_panel(&(&*value).into(), &focus, &keymap, frame_, &workspace, &text, text_shown.as_ref(), ui, pending_prompt.clone()) {
+            let (prompt_intent_, prompt_error) = match prompt_panel(&(&*value).into(), &focus, &keymap, frame_, &workspace, &text, text_shown.as_ref(), ui, pending_prompt.clone()) {
                 Ok((prompt, intent)) => {
                     pending_prompt = prompt;
-                    if intent.is_some() { picked_prompt = intent; }
-                    None
+                    (intent, None)
                 }
-                Err(error) => Some(rays_diagnostic::to_string(&error)),
+                Err(error) => (None, Some(rays_diagnostic::to_string(&error))),
             };
             let prompt_next = pending_prompt.clone();
-            let prompt_intent_ = picked_prompt.clone();
             // ---- build ----
             // Chrome first: panel backgrounds, splitters and headers.  Its intents fold into the
             // shell now (a fold, a drag) or become one editor-graph edit after the frame.
@@ -1253,7 +1251,7 @@ pub fn update_frame(
                 let mut widths = [0.0; 2];
                 let graph = usize::from(leaf.panel == Panel::Graph);
                 if graph > 0 {
-                    widths[0] = ui.text_service().width("GraphListText", pxui::Label::BODY, None).unwrap_or(0.0) + 24.0;
+                    widths[0] = rays_shell::kit::text_width(ui, "GraphListText") + 24.0;
                 }
                 let n = if let Some((state, shown)) = text_ {
                     widths[graph] = text_pane::tabs_width(ui, leaf.body.2, state, shown);
@@ -1328,7 +1326,8 @@ pub fn update_frame(
             let view_root = draw_viewport_pane(ui, &(&*value).into(), probe_caption(&vw), &roots, active.as_ref(), &none_root);
             let mut scope_view2 = scope_view.take().unwrap_or_else(|| frame_pane(value).0);
             let mut scope_changes = scope_command_changes.clone();
-            let (graph_body, menu2, menu_pick) = draw_graph_pane(ui, frame_, &(&*value).into(), &shortcut_frame, &mut scope_view2, scope_active, guide, carry_lit.clone(), carry_hot.clone(), &graph_root, &graph_host, &workspace, menu.clone(), &open_menu, &mut scope_changes);
+            let (graph_body, menu2, menu_pick) = draw_graph_pane(ui, frame_, &(&*value).into(), &shortcut_frame, &mut scope_view2, scope_active, guide, carry_lit.clone(), carry_hot.clone(), &graph_root, &graph_host, &workspace, pending_menu.take(), &open_menu, &mut scope_changes);
+            pending_menu = menu2.clone();
             // Each pane builder returns only its frame intents and updated pane-local state.
             let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &(&*value).into(), &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), rows.as_ref(), &host_rows, &|| selected(selection), tree_value.clone(), list_intents.clone(), value.locals.clone());
             let (text2, text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &*value, &root_at, &tab_at, &text_host, &text_shown, text.clone(), other_texts.clone(), locals);
@@ -1477,7 +1476,11 @@ pub fn update_frame(
             // build have finished, so the panes can be lent to the drawer in place.
             draw_other_graph_panes(ui, &shortcut_frame, value, &other_panes, &roots);
             PANE_ROOTS.set(roots);
-            built = Some(result);
+            // Layout settling rebuilds the picture with quiet signals. Reduce the intents from
+            // the first build, which received the frame's input.
+            if built.is_none() {
+                built = Some(result);
+            }
         };
         rays_shell::host::frame(&mut ui_handle.borrow_mut(), frame_, &mut build_and_prompt);
     }

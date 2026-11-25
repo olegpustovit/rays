@@ -26,37 +26,38 @@ pub fn run_root_section() {
            all (scene/merge body)]
       (scene/root all :renderer "Raster" :width 800 :height 600 :max_spp 64))))"#,
     ));
+    r.e.core.ui.borrow_mut().set_a11y(true);
     for _ in 0..6 {
         r.step((450., 300.), vec![]);
     }
     let before = r.source();
     check(r.undo_label().is_none() && has(&r.source(), ":width 800"), "the root is in the text, nothing to undo");
-    let (ix, iy, iw, ih) = editor::panes(&r.e, &idle_frame(r.count)).inspector;
+    let (ix, _, iw, ih) = editor::panes(&r.e, &idle_frame(r.count)).inspector;
     check(iw > 0 && ih > 0, "the inspector panel is showing");
-    // the Renderer row of the Scene root section: a press opens its menu under the field; the second row is Wireframe.
-    let row = iy + 90 + 24 + 4 + 24 + 40 + 96 + 40 + 24 + 40;
+    let named = |r: &Run, name: &str| {
+        let ui = r.e.core.ui.borrow();
+        ui.a11y_nodes().iter().find(|n| ui.a11y_name_of(n) == name && n.rect.x >= ix as f32)
+            .map(|n| ((ix + iw * 3 / 4) as f64, (n.rect.y + n.rect.h / 2.0) as f64))
+    };
     let press = |r: &mut Run, at: (f64, f64)| {
         r.step(at, vec![Event::PointerMoved(at)]);
         r.step(at, vec![Event::PointerPressed(LB, at), Event::PointerReleased(LB, at)]);
         r.step(at, vec![]);
     };
-    let x = (ix + iw * 3 / 4) as f64;
-    press(&mut r, (x, (row + 12) as f64));
-    press(&mut r, (x, (row + 23 + 6 + 24 + 12) as f64));
+    let renderer = named(&r, "renderer").expect("the renderer row");
+    press(&mut r, renderer);
+    let wireframe = {
+        let ui = r.e.core.ui.borrow();
+        let row = pxui::testing::find(&ui, pxui::Role::MenuItem, "Wireframe").expect("the Wireframe renderer");
+        ((row.x + row.w / 2.0) as f64, (row.y + row.h / 2.0) as f64)
+    };
+    press(&mut r, wireframe);
     check(r.undo_label() == Some("Render settings".into()), "no control of the inspector wrote the root");
     check(r.source() != before && has(&r.source(), "(scene/root all"), "the root stayed in the text, edited");
     r.step_full(&[], &[Key::Meta], (450., 300.), vec![ch('z')]);
     check(r.source() == before, "one undo returns the root");
     // a drag of its width: the root follows every frame while the inspector stays kept (the field
     // patched; its verifying builds see the patch), and the whole drag is one undo step
-    r.e.core.ui.borrow_mut().set_a11y(true);
-    for _ in 0..4 {
-        r.step((450., 300.), vec![]);
-    }
-    let named = |r: &Run, name: &str| {
-        let ui = r.e.core.ui.borrow();
-                ui.a11y_nodes().iter().find(|n| ui.a11y_name_of(n) == name && n.rect.x >= ix as f32).map(|n| ((ix + iw * 3 / 4) as f64, (n.rect.y + n.rect.h / 2.0) as f64))
-    };
     // (its Size section opened)
     let size = named(&r, "Size").unwrap_or_else(|| fail("the Size section"));
     press(&mut r, size);

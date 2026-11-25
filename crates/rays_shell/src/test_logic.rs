@@ -166,3 +166,53 @@ fn search_prompt_receives_text_after_opening() {
     crate::host::build(&mut ui, &frame, &mut |ui| { result = build(ui); });
     assert_eq!(result.as_ref().map(|(query, _)| query.as_str()), Some("g"));
 }
+
+#[test]
+fn host_input_snapshot_preserves_held_state_and_frame_facts() {
+    use crate::host;
+    use input::{Event, MouseButton};
+    let mut ui = host::create(Platform::Apple, None, None);
+    let root = std::cell::Cell::new(0);
+    let mut build = |ui: &mut pxui::Ui| {
+        root.set(ui.node("viewport", pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE)
+            .w_px(100.0).h_px(80.0)).box_key);
+    };
+    let mut frame = input::frame::Frame {
+        input: input::Frame {
+            size: (100, 80),
+            pointer: (19.0, 23.0),
+            keys: vec![Key::Shift],
+            dt: 0.0125,
+            frame: 17,
+            tick: 19,
+            ..input::at_time(0.25)
+        },
+        pixel_scale: (1.5, 2.0),
+        fps: 80.0,
+        mouse_delta: (0.0, 0.0),
+    };
+    host::build(&mut ui, &frame, &mut build);
+    let owner = root.get();
+    assert_eq!(host::input(&mut ui, Some(owner)), frame);
+
+    frame.input.t += frame.input.dt;
+    frame.input.frame += 1;
+    frame.input.tick += 1;
+    frame.input.buttons.push(MouseButton::LeftButton);
+    frame.mouse_delta = (3.25, -2.75);
+    frame.input.events = vec![
+        Event::PointerPressed(MouseButton::LeftButton, (17.0, 22.0)),
+        Event::PointerMoved(frame.input.pointer),
+    ];
+    host::build(&mut ui, &frame, &mut build);
+    assert_eq!(host::input(&mut ui, Some(owner)), frame);
+
+    frame.input.t += frame.input.dt;
+    frame.input.frame += 1;
+    frame.input.tick += 1;
+    frame.input.events.clear();
+    frame.mouse_delta = (0.0, 0.0);
+    host::build(&mut ui, &frame, &mut build);
+    assert_eq!(host::input(&mut ui, Some(owner)), frame);
+    host::destroy(&mut ui);
+}

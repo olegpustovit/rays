@@ -24,6 +24,12 @@ pub enum Port {
     Hint,
 }
 
+/// The width of ordinary chrome text at the user's current UI size.
+pub fn text_width(ui: &mut Ui, text: &str) -> f32 {
+    let style = pxui::Label::BODY.size(ui.font_size());
+    ui.text_service().width(text, style, None).unwrap_or(0.0)
+}
+
 pub fn text_y(ui: &Ui, y: f32, h: f32) -> f32 {
     y + ((h - ui.font_size()) / 2.0).floor()
 }
@@ -46,7 +52,7 @@ pub fn cap_width(ui: &mut Ui, text: &str) -> f32 {
 /// the key, 6, the edge
 pub fn button_width(ui: &mut Ui, hint: Option<&str>, icon: bool, label: &str) -> f32 {
     let size = cap_size(ui);
-    14.0 + ui.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0)
+    14.0 + text_width(ui, label)
         + if icon { 13.0 } else { 0.0 }
         + match hint {
             Some(hint) => 6.0 + ui.text_service().width(hint, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0),
@@ -110,7 +116,7 @@ pub fn button(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, o: &ButtonOpts, la
     let state = State { hovered: o.enabled && signal.hovered, pressed: o.enabled && signal.held, checked: o.active, ..State::default() };
     ui.node_mut(&boxed, &mut |node| node.look = *button_states(&theme, o.primary).pick(state));
     let color = if o.enabled { theme.foreground } else { theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521) };
-    let lw = ui.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0);
+    let lw = text_width(ui, label);
     let tx = match o.icon {
         None if o.centered => ((w - lw) / 2.0).floor(),
         None => 7.0,
@@ -183,11 +189,11 @@ pub fn switch(ui: &mut Ui, key: &str, at: (f32, f32), on: bool) -> bool {
 pub fn segments(ui: &mut Ui, key: &str, right: f32, y: f32, labels: &[&str], active: i64) -> (Option<i64>, f32) {
     let h = 20.0;
     let theme = ui.tokens();
-    let total = 12.0 * (labels.len() as i64 - 1).max(0) as f32 + labels.iter().map(|label| ui.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0)).sum::<f32>();
+    let total = 12.0 * (labels.len() as i64 - 1).max(0) as f32 + labels.iter().map(|label| text_width(ui, label)).sum::<f32>();
     let mut x = right - total;
     let mut clicked = None;
     for (index, label) in labels.iter().enumerate() {
-        let w = ui.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0);
+        let w = text_width(ui, label);
         let boxed = ui.node(pxui::hash_of(&format!("{key}-{index}")),
             pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::BLOCKING).w(Size::Px(w + 8.0)).h(Size::Px(h)).at(x - 4.0, y),
         );

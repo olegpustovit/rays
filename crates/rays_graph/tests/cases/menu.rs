@@ -10,12 +10,14 @@ use rays::frame as rframe;
 const BOUNDS: (i64, i64, i64, i64) = (20, 30, 800, 520);
 
 fn one_frame(ui: &mut Ui, menu: Menu, fr: &rframe::Frame) -> (Option<Menu>, Option<String>) {
-    let mut cell = Some(menu);
-    let mut out: Option<(Option<Menu>, Option<String>)> = None;
+    let mut open = Some(menu);
+    let mut picked = None;
     rays_shell::host::build(ui, fr, &mut |ui: &mut Ui| {
-        out = Some(node_menu::update(cell.take().expect("menu"), ui, BOUNDS));
+        if let Some(menu) = open.take() {
+            (open, picked) = node_menu::update(menu, ui, BOUNDS);
+        }
     });
-    out.expect("frame")
+    (open, picked)
 }
 
 /// The menu is built inside a UI frame; hit rectangles come from the previous frame, so each step first

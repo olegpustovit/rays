@@ -1577,7 +1577,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut 
             if !ui.verifying() {
                 let mut hv = t.hovers.borrow_mut();
                 let k = hv.frame_titles.len();
-                hv.keys.push(tb.box_key);
+                hv.keys.push(pxui::Key::Resolved(tb.box_key));
                 hv.frame_titles.push((tb.box_key, k));
             }
             frame_boxes.push(FrameBox { scope: scope.clone(), i, title: title.clone(), rect: (x, y, wd, h), xb, rb });

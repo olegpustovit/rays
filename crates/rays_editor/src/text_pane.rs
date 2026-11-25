@@ -1963,11 +1963,11 @@ fn tab_labels(width: i64, dirty: bool) -> Vec<(Tab, String)> {
 pub fn tabs_width(ui: &mut Ui, width: i64, state: &State, shown: &Shown) -> f32 {
     let dirty = match dirty(state, shown) {
         Ok(dirty) => dirty,
-        Err(error) => return ui.text_service().width(&diagnostic::to_string(&error), pxui::Label::BODY, None).unwrap_or(0.0),
+        Err(error) => return kit::text_width(ui, &diagnostic::to_string(&error)),
     };
     let mut w = -12.0;
     for (_, label) in tab_labels(width, dirty) {
-        w = w + 12.0 + ui.text_service().width(&label, pxui::Label::BODY, None).unwrap_or(0.0);
+        w = w + 12.0 + kit::text_width(ui, &label);
     }
     w
 }

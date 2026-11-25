@@ -125,12 +125,23 @@ pub fn flow_rows() {
     let count = pxui_view_without_folder(views.iter().find(|v| v.name == "count").expect("count").clone());
     let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
     let row = |drive: Option<&str>, locked: bool| FlowRow { path: "count".into(), fields: vec![count.clone()], shown: true, locked, drive: drive.map(String::from), live: Some("3".into()) };
+    let mut pointer = (0.0, 0.0);
     let mut step = |opts: &FlowOpts, rows: &[FlowRow], events: Vec<Event>| -> Vec<FlowChange> {
         let mut out = Vec::new();
-        rays_shell::host::build(&mut ui, &frame(2., vec![]), &mut |ui: &mut Ui| {
+        let mut settle = frame(2.0, vec![]);
+        settle.input.pointer = pointer;
+        rays_shell::host::build(&mut ui, &settle, &mut |ui: &mut Ui| {
             inspector::flow_fields(ui, opts, None, rows);
         });
-        rays_shell::host::build(&mut ui, &frame(2., events), &mut |ui: &mut Ui| {
+        if let Some(point) = events.iter().rev().find_map(|event| match event {
+            Event::PointerMoved(point) | Event::PointerPressed(_, point) | Event::PointerReleased(_, point) => Some(*point),
+            _ => None,
+        }) {
+            pointer = point;
+        }
+        let mut input = frame(2.0, events);
+        input.input.pointer = pointer;
+        rays_shell::host::build(&mut ui, &input, &mut |ui: &mut Ui| {
             out = inspector::flow_fields(ui, opts, None, rows);
         });
         out

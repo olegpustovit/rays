@@ -86,6 +86,8 @@ struct Encoded {
     events: Vec<pxui::Event>,
     text: Vec<String>,
     touches: Vec<pxui::Touch>,
+    keys: Vec<u32>,
+    buttons: Vec<u32>,
 }
 
 thread_local! {
@@ -148,12 +150,27 @@ fn build_with(ui: &mut Ui, frame: &Frame, pasted: Option<Event>, f: &mut dyn FnM
             enc.events.push(wire_event(event, text));
         }
     }
+    enc.keys.clear();
+    enc.keys.extend(frame.input.keys.iter().map(|key| key.code()));
+    enc.buttons.clear();
+    enc.buttons.extend(frame.input.buttons.iter().map(|button| button.code()));
     let (width, height) = frame.input.size;
     let input = pxui::FrameIn::new(width as f32, height as f32)
         .time(frame.input.t)
         .scale(frame.pixel_scale.0 as f32)
         .events(&enc.events);
-    let built = ui.frame(&input, f).map(|_| ());
+    let snapshot = pxui::InputSnapshot {
+        keys: &enc.keys,
+        buttons: &enc.buttons,
+        pointer: [frame.input.pointer.0, frame.input.pointer.1],
+        mouse_delta: [frame.mouse_delta.0, frame.mouse_delta.1],
+        pixel_scale: [frame.pixel_scale.0, frame.pixel_scale.1],
+        dt: frame.input.dt,
+        frame: frame.input.frame,
+        tick: frame.input.tick,
+        fps: frame.fps,
+    };
+    let built = ui.frame_with_snapshot(&input, &snapshot, f).map(|_| ());
     ENCODED.set(enc);
     built.map_err(|code| format!("PXUI frame failed ({code:?}): {}", ui.last_error())).expect("PXUI frame");
 }

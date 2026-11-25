@@ -53,6 +53,7 @@ pub mod cc {
         pub ui_visible: bool,
         pub filename: String,
         pub open_camera: Option<bool>,
+        pub camera_expanded: bool,
         /// the Camera section's number fields (FOV, distance, near and far clip) as it last built
         /// them, and the revision it was last declared with: a drag of one follows by patches
         pub fields: [i64; 4],
@@ -128,7 +129,7 @@ pub mod cc {
 
     pub fn make(prefix: &str) -> Visibility {
         assert!(!prefix.is_empty(), "Pxui camera control: prefix is empty");
-        Visibility { prefix: prefix.to_string(), ui_visible: true, filename: "_out/rays-render.png".to_string(), open_camera: None, fields: [0; 4], shown: 0, held: false }
+        Visibility { prefix: prefix.to_string(), ui_visible: true, filename: "_out/rays-render.png".to_string(), open_camera: None, camera_expanded: false, fields: [0; 4], shown: 0, held: false }
     }
 
     pub fn create() -> Control {
@@ -141,7 +142,8 @@ pub mod cc {
 
     /// Show the UI and toggle the Camera section, or open it if the UI was hidden.
     pub fn open_camera(control: &Control) -> Control {
-        Control { ui_visible: true, open_camera: Some(!control.ui_visible), ..control.clone() }
+        let expanded = !control.ui_visible || !control.camera_expanded;
+        Control { ui_visible: true, open_camera: Some(expanded), ..control.clone() }
     }
 
     /// A number row (`kept_drag`: its owner follows a drag between builds, `dragged`); the value and
@@ -199,14 +201,10 @@ pub mod cc {
         (Control { filename: filename.clone(), ..control.clone() }, if save { vec![filename] } else { Vec::new() })
     }
 
-    /// `open_camera` opens the section explicitly while hidden, otherwise it toggles.
+    /// Apply the expansion chosen when the command was handled. Layout settling can rebuild this
+    /// section several times in the same host frame.
     pub fn camera_section(control: &Control, ui: &mut Ui, revision: u64, build: &mut dyn FnMut(&mut Ui)) -> bool {
-        let set_expanded = match control.open_camera {
-            None => None,
-            Some(true) => Some(true),
-            Some(false) => Some(!ui.expanded("Camera").unwrap_or(false)),
-        };
-        rays_shell::inspector::section(ui, "Camera", revision, false, set_expanded, "Camera", build)
+        rays_shell::inspector::section(ui, "Camera", revision, false, control.open_camera, "Camera", build)
     }
 
     pub fn widgets(control: &Control, ui: &mut Ui, camera: &easy_camera::EasyCamera) -> (Control, easy_camera::EasyCamera, Vec<RenderRequest>) {
@@ -223,7 +221,7 @@ pub mod cc {
             let dragging = control.fields.iter().any(|&k| ui.box_of_key(pxui::Key::Resolved(k)).is_some_and(|b| pxui::ext::field_drag(ui, &b).is_some()));
             let revision = if control.held && dragging { control.shown } else { live };
             let mut fields = control.fields;
-            camera_section(control, ui, revision, &mut |ui| {
+            let camera_expanded = camera_section(control, ui, revision, &mut |ui| {
                 let mut values = numbers(camera);
                 for (i, (label, low, high)) in NUMBERS.iter().enumerate() {
                     (values[i], fields[i]) = number(ui, label, label, *low, *high, values[i], true);
@@ -234,7 +232,7 @@ pub mod cc {
             });
             out_camera = result.unwrap_or_else(|| camera.clone());
             let (c, s) = render_section(&Control { open_camera: None, ..control.clone() }, ui);
-            control_out = Control { fields, shown: revision, ..c };
+            control_out = Control { camera_expanded, fields, shown: revision, ..c };
             saves = s;
         });
         (control_out, out_camera, saves.into_iter().map(|filename| RenderRequest { filename }).collect())

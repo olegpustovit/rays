@@ -833,7 +833,7 @@ pub fn draw_graph_header<'a>(
                 let (hx, hy, hw, hh) = leaf.header;
                 let from = hx as f32 + from;
                 let modes = ["Solid", "Wire", "Traced"];
-                let seg_w = modes.iter().fold(24.0, |w, label| w + ui.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0));
+                let seg_w = modes.iter().fold(24.0, |w, label| w + kit::text_width(ui, label));
                 let look_w = kit::button_width(ui, Some("C"), false, "Look through");
                 let ty = hy as f32 + ((hh - 20) as f32 / 2.0);
                 let frame_w = kit::button_width(ui, Some("F"), false, "Frame");
