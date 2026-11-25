@@ -744,14 +744,14 @@ pub fn reads_clock(value: &LoopModel) -> bool {
 
 pub fn may_rest(value: &LoopModel, frame_: &frame::Frame) -> bool {
     let core = &value.core;
-    // A deferred UI repaint (caret blink) is fine: `rests` still refuses to skip while
-    // `wants_frame` is due. Clearing rest on every blink request kept settled frames hot.
+    // Deferred UI repaint (caret blink) and a static command HUD are fine: `rests` still
+    // refuses to skip while `wants_frame` is due, and `layer::same` resets still when the HUD
+    // text or chrome actually changes. Requiring hud.is_none() kept post-click idles hot.
     frame_.input.events.is_empty()
         && value.world_drag.is_none()
         && value.pending_render.is_none()
         && core.carry.is_none()
         && core.queued.is_empty()
-        && core.hud.is_none()
         && (core.notice.is_none() || frame_.input.t - core.notice_at >= 3.)
         && core.traces.iter().all(|(_, t)| t.samples >= t.cap)
         && cook::at_rest(&core.cook)
