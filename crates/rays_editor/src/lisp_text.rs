@@ -88,7 +88,7 @@ fn sub(text: &str, from: usize, to: usize) -> &str {
     if from > to { "" } else { &text[from..to] }
 }
 
-fn word(text: &str, t: &Token) -> String {
+fn word<'a>(text: &'a str, t: &Token) -> &'a str {
     scan::word(text, t)
 }
 
@@ -179,9 +179,16 @@ pub fn empty_vocab() -> Vocab {
 }
 
 /// Language forms use the same signatures and descriptions as CLI lookup.
-pub fn specials() -> Vec<(String, String)> {
-    flow_check::registry::FORMS.iter().chain(flow_check::registry::DIRECTIVES)
-        .map(|(name, args, doc, _)| ((*name).to_owned(), format!("({name} {args}) · {doc}"))).collect()
+/// Built once: every describe/complete call borrows the same table.
+pub fn specials() -> &'static [(&'static str, String)] {
+    static SPECIALS: OnceLock<Vec<(&'static str, String)>> = OnceLock::new();
+    SPECIALS.get_or_init(|| {
+        flow_check::registry::FORMS
+            .iter()
+            .chain(flow_check::registry::DIRECTIVES)
+            .map(|(name, args, doc, _)| (*name, format!("({name} {args}) · {doc}")))
+            .collect()
+    })
 }
 
 pub fn constants() -> Vec<(&'static str, &'static str)> {
@@ -320,16 +327,19 @@ fn usage(text: &str, tokens: &[Token], name: &str) -> i64 {
     tokens.iter().filter(|t| t.kind == Kind::Head && word(text, t) == name).count() as i64
 }
 
+fn ascii_prefix(name: &str, prefix: &str) -> bool {
+    let (n, p) = (name.as_bytes(), prefix.as_bytes());
+    p.len() <= n.len() && n[..p.len()].iter().zip(p).all(|(a, b)| a.eq_ignore_ascii_case(b))
+}
+
 /// How well `name` matches the typed `prefix`: 3 a prefix, 2 a prefix of a word after _ or /, 1 a
-/// subsequence, 0 none.
+/// subsequence, 0 none. Allocates nothing.
 pub fn quality(prefix: &str, name: &str) -> i64 {
-    let p = prefix.to_ascii_lowercase();
-    let n = name.to_ascii_lowercase();
-    if p.is_empty() || n.starts_with(&p) {
+    if prefix.is_empty() || ascii_prefix(name, prefix) {
         3
-    } else if n.split('_').any(|w| w.starts_with(&p)) || n.split('/').any(|w| w.starts_with(&p)) {
+    } else if name.split('_').any(|w| ascii_prefix(w, prefix)) || name.split('/').any(|w| ascii_prefix(w, prefix)) {
         2
-    } else if pxui::ui::fuzzy_match(&p, &n) {
+    } else if pxui::ui::fuzzy_match(prefix, name) {
         1
     } else {
         0
@@ -410,7 +420,7 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
         _ => false,
     };
     let after_value_keyword = match last {
-        Some(t) if t.kind == Kind::Kw => t.stop < caret && VALUE_KEYWORDS.contains(&word(text, t).as_str()),
+        Some(t) if t.kind == Kind::Kw => t.stop < caret && VALUE_KEYWORDS.contains(&word(text, t)),
         _ => false,
     };
     if current.is_none() && !head_position && !after_value_keyword {
@@ -419,10 +429,14 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
     // the whole text, so the brackets around the caret are matched
     let whole = lex(text);
     let tokens = &whole.0;
-    let prefix = match current {
-        Some(t) if t.kind == Kind::Str => sub(text, t.start + 1, caret).to_string(), // past the quote
+    let prefix_buf;
+    let prefix: &str = match current {
+        Some(t) if t.kind == Kind::Str => {
+            prefix_buf = sub(text, t.start + 1, caret).to_string();
+            &prefix_buf
+        }
         Some(t) => word(text, t),
-        None => String::new(),
+        None => "",
     };
     let replace: (usize, usize) = match current {
         Some(t) if t.kind == Kind::Str && caret < text.len() && bytes[caret] == b'"' => (t.start, caret + 1),
@@ -433,7 +447,7 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
     // The first stack entry is the innermost open bracket.
     let innermost = open_stack.first();
     let enclosing: Option<usize> = innermost.and_then(|(_, at)| scan::index_at(tokens, *at));
-    let enclosing_head: Option<String> = match enclosing {
+    let enclosing_head: Option<&str> = match enclosing {
         Some(i) if i + 1 < tokens.len() && tokens[i + 1].kind == Kind::Head => Some(word(text, &tokens[i + 1])),
         _ => None,
     };
@@ -441,16 +455,16 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
         Some(i) => scan::items(tokens, i).into_iter().filter(|j| tokens[*j].stop <= replace.0).collect(),
         None => Vec::new(),
     };
-    let present: Vec<String> = prior.iter().filter(|j| tokens[**j].kind == Kind::Kw).map(|j| word(text, &tokens[*j])).collect();
-    let after_kw: Option<String> = match prior.last() {
+    let present: Vec<&str> = prior.iter().filter(|j| tokens[**j].kind == Kind::Kw).map(|j| word(text, &tokens[*j])).collect();
+    let after_kw: Option<&str> = match prior.last() {
         Some(j) if tokens[*j].kind == Kind::Kw => Some(word(text, &tokens[*j])),
         _ => None,
     };
-    let kind: Option<&Entry> = enclosing_head.as_deref().and_then(|h| kind_of(vocab, &context, h));
-    let strip = |kw: &str| kw[1..].to_string();
+    let kind: Option<&Entry> = enclosing_head.and_then(|h| kind_of(vocab, &context, h));
+    let strip = |kw: &str| kw[1..].to_owned();
     // the choices of the keyword before the caret
     let mut choices: Vec<Candidate> = Vec::new();
-    if let (Some(kw), Some(k)) = (&after_kw, kind) {
+    if let (Some(kw), Some(k)) = (after_kw, kind) {
         let kw = strip(kw);
         if let Some(f) = k.fields.iter().find(|f| f.name == kw) {
             if let param::KindView::Choice(options) = &f.kind {
@@ -460,8 +474,8 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
     }
     // an operator's text argument: after its keyword, or at its place among the positional ones
     if choices.is_empty() {
-        if let Some(h) = &enclosing_head {
-            let argument: Option<flow_syntax::symbol::Symbol> = match &after_kw {
+        if let Some(h) = enclosing_head {
+            let argument: Option<flow_syntax::symbol::Symbol> = match after_kw {
                 Some(kw) => flow_syntax::symbol::find(&strip(kw)),
                 None if present.is_empty() && !prior.is_empty() => {
                     workspace::op_signature(&vocab.ops, &ws_context(&context), h).and_then(|s| s.pos.get(prior.len() - 1).map(|(n, _)| *n))
@@ -479,19 +493,19 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
     // a new name in a binder's vector is the writer's to choose
     let naming = match (innermost, enclosing) {
         (Some(('[', _)), Some(i)) => match scan::head_before(text, tokens, i) {
-            Some(h) if scan::BINDERS.contains(&h.as_str()) => h == "fn" || prior.len() % 2 == 0,
+            Some(h) if scan::BINDERS.contains(&h) => h == "fn" || prior.len() % 2 == 0,
             _ => false,
         },
         _ => false,
     };
     // the value of :material, :camera or :active, from the document
-    let valued: Vec<Candidate> = match (&after_kw, current) {
+    let valued: Vec<Candidate> = match (after_kw, current) {
         (_, Some(t)) if matches!(t.kind, Kind::Kw | Kind::Head | Kind::Meta | Kind::Str) => Vec::new(),
-        (Some(kw), _) if kw == ":material" => {
+        (Some(":material"), _) => {
             names.materials.iter().map(|m| mk(0, 0, Some(format!("(ref {m})")), m, "material", &format!("(ref {m})"))).collect()
         }
-        (Some(kw), _) if kw == ":camera" => names.cameras.iter().map(|c| mk(0, 0, None, c, "camera", "a camera of the scene")).collect(),
-        (Some(kw), _) if kw == ":active" => names
+        (Some(":camera"), _) => names.cameras.iter().map(|c| mk(0, 0, None, c, "camera", "a camera of the scene")).collect(),
+        (Some(":active"), _) => names
             .layouts
             .iter()
             .enumerate()
@@ -511,10 +525,11 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
         let mut out: Vec<Candidate> = Vec::new();
         if let Some(k) = kind {
             for (name, ty, doc, primary) in keywords_of(k) {
-                if present.contains(&format!(":{name}")) {
+                let key = format!(":{name}");
+                if present.iter().any(|p| *p == key) {
                     continue;
                 }
-                out.push(mk(if primary { 0 } else { 1 }, 0, None, &format!(":{name}"), &ty, &doc));
+                out.push(mk(if primary { 0 } else { 1 }, 0, None, &key, &ty, &doc));
             }
             for (s, required) in &k.slots {
                 out.push(mk(
@@ -527,14 +542,14 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
                 ));
             }
         }
-        if let Some(h) = &enclosing_head {
+        if let Some(h) = enclosing_head {
             if let Some(s) = workspace::op_signature(&vocab.ops, &ws_context(&context), h) {
                 for (k, t) in &s.kw {
                     out.push(mk(0, 0, None, &format!(":{k}"), &ty_name(t), &op_doc(h, &s)));
                 }
             }
         }
-        let of_form: &[&str] = match enclosing_head.as_deref() {
+        let of_form: &[&str] = match enclosing_head {
             Some("graph" | "defn" | "defmacro") => &[":context"],
             Some("for" | "scene/merge") => &[":skip"],
             Some("cond" | "case") => &[":else"],
@@ -552,7 +567,7 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
         // the head of a call: this context's kinds, the defns, the special forms, the operators
         let (_, defns, _) = scan::bound(text, tokens, caret);
         let mut out: Vec<Candidate> = Vec::new();
-        for d in &defns {
+        for d in defns {
             out.push(mk(0, usage(text, tokens, d), None, d, "defn", &format!("{d} \u{b7} a function of this workspace")));
         }
         for (name, file) in imports {
@@ -566,22 +581,22 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
             }
         }
         for (s, doc) in specials() {
-            out.push(mk(1, usage(text, tokens, &s), None, &s, "form", &doc));
+            out.push(mk(1, usage(text, tokens, s), None, s, "form", doc));
         }
         for (o, s) in ops_of(vocab, &context) {
             out.push(mk(2, usage(text, tokens, &o), None, &o, "operator", &op_doc(&o, &s)));
         }
         out
     } else if cur_kind == Some(Kind::Sym) {
-        // an argument: a context after :context, a graph after ref, a choice after its keyword,
-        // else the bindings in scope, the constants and the defns
-        if after_kw.as_deref() == Some(":context") {
+        if after_kw == Some(":context") {
             contexts().iter().map(|c| mk(0, 0, None, c, "context", &format!("{c} graph"))).collect()
-        } else if enclosing_head.as_deref() == Some("ref") && prior.len() <= 1 {
+        } else if enclosing_head == Some("ref") && prior.len() <= 1 {
             let (_, _, graphs) = scan::bound(text, tokens, caret);
-            let mut all = graphs.clone();
-            all.extend(names.graphs.iter().filter(|g| !graphs.contains(g)).cloned());
-            all.iter()
+            let mut all: Vec<&str> = graphs;
+            for g in &names.graphs {
+                if !all.contains(&g.as_str()) { all.push(g.as_str()); }
+            }
+            all.into_iter()
                 .map(|g| {
                     let detail = match imports.iter().find(|(n, _)| n == g) {
                         Some((_, file)) => format!("graph \u{b7} {file}"),
@@ -594,27 +609,36 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
             choices.clone()
         } else {
             let (bindings, defns, _) = scan::bound(text, tokens, caret);
-            let mut seen: Vec<String> = Vec::new();
+            let mut seen: Vec<&str> = Vec::new();
             let mut out: Vec<Candidate> = Vec::new();
-            for (name, doc) in bindings.iter().rev() {
-                if seen.contains(name) {
-                    continue;
-                }
-                seen.push(name.clone());
-                out.push(mk(0, 0, None, name, "binding", doc));
+            for (name, _) in bindings.iter().rev() {
+                if seen.contains(name) { continue; }
+                seen.push(*name);
+                out.push(mk(0, 0, None, name, "binding", ""));
             }
             for (c, doc) in constants() {
                 out.push(mk(1, 0, None, c, "constant", doc));
             }
-            for d in &defns {
+            for d in defns {
                 out.push(mk(2, 0, None, d, "defn", &format!("{d} \u{b7} a function value")));
             }
-            out
+            let mut ranked = rank(prefix, out);
+            for c in &mut ranked {
+                if c.detail == "binding" {
+                    if let Some((_, doc)) = bindings.iter().rev().find(|(n, _)| *n == c.name) {
+                        c.doc = doc.render(text, tokens);
+                    }
+                }
+            }
+            return ranked
+                .into_iter()
+                .map(|c| Completion { replace, insert: c.insert, label: c.name, detail: c.detail, doc: c.doc })
+                .collect();
         }
     } else {
         Vec::new()
     };
-    rank(&prefix, candidates)
+    rank(prefix, candidates)
         .into_iter()
         .map(|c| Completion {
             replace,
@@ -639,9 +663,8 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
     let kind = |name: &str| kind_of(vocab, &context, name);
     let signature = |name: &str| workspace::op_signature(&vocab.ops, &ws_context(&context), name);
     let bare = if w.len() > 1 { w[1..].to_string() } else { String::new() };
-    let sp = specials();
     let doc: Option<String> = match t.kind {
-        Kind::Head => match (sp.iter().find(|(n, _)| *n == w), kind(&w), signature(&w)) {
+        Kind::Head => match (specials().iter().find(|(n, _)| *n == w), kind(&w), signature(&w)) {
             (Some((_, doc)), _, _) => Some(doc.clone()),
             (None, Some(k), _) => Some(format!("{} \u{b7} {}", k.qualified, kind_doc(k))),
             (None, None, Some(s)) => Some(op_doc(&w, &s)),
@@ -651,8 +674,8 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
             }
         },
         Kind::Kw => {
-            let k = enclosing_head.as_deref().and_then(kind);
-            let s = enclosing_head.as_deref().and_then(signature);
+            let k = enclosing_head.and_then(kind);
+            let s = enclosing_head.and_then(signature);
             match (k, s) {
                 (Some(k), _) => match keywords_of(k).into_iter().find(|(name, ..)| *name == bare) {
                     Some((_, _, doc, _)) => Some(doc),
@@ -676,7 +699,7 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
             None => {
                 let (bindings, defns, graphs) = scan::bound(text, tokens, t.start);
                 match bindings.iter().rev().find(|(n, _)| *n == w) {
-                    Some((_, doc)) => Some(format!("{w} \u{b7} {doc}")),
+                    Some((_, doc)) => Some(format!("{w} \u{b7} {}", doc.render(text, tokens))),
                     None => {
                         if defns.contains(&w) {
                             Some(format!("{w} \u{b7} a function of this workspace"))
@@ -691,7 +714,7 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
         },
         Kind::Num => Some(format!("{w} \u{b7} drag sideways to change it, Shift for coarse steps")),
         Kind::Meta => special_keyword(&bare),
-        Kind::Str => match enclosing_head.as_deref().and_then(kind) {
+        Kind::Str => match enclosing_head.and_then(kind) {
             Some(k) => {
                 let v: String = w.replace('"', " ");
                 let v = v.trim().to_string();
@@ -725,7 +748,7 @@ pub fn ref_at(text: &str, byte: usize) -> Option<String> {
             && tokens[i - 1].start <= byte
             && byte <= tokens[i + 1].stop + 1
         {
-            found = Some(word(text, &tokens[i + 1]));
+            found = Some(word(text, &tokens[i + 1]).to_owned());
         }
     }
     found
