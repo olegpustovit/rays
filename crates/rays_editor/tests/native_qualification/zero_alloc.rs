@@ -34,8 +34,8 @@ const B_HOVER_GRAPH: (u64, u64) = (81, 9);
 const B_HOVER_INSPECTOR: (u64, u64) = (78, 9);
 const C_PAN: (u64, u64) = (99, 13);
 const C_ZOOM: (u64, u64) = (95, 13);
-// Z11: soft complete + static tabs + draft borrow + parinfer scratch; measured 234/12 + 5% (post Z9/Z13).
-const D_TYPING: (u64, u64) = (246, 13);
+// Z11: soft complete + static tabs + draft borrow + parinfer scratch + footer keys; measured 222/12 + 5%.
+const D_TYPING: (u64, u64) = (234, 13);
 // E click/toggle (Z13): settled = idle = 0 after isogrid render 0 + settle wait for zoom-rest timer.
 const E_CLICK_KEY: (u64, u64) = (221, 13);
 const E_CLICK_SETTLED: (u64, u64) = (0, 13);

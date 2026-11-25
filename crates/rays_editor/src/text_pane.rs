@@ -1988,7 +1988,7 @@ fn find_button(ui: &mut Ui, key: &str, right: &mut f32, active: bool, name: &str
 }
 
 fn rule(ui: &mut Ui, theme: &Theme, key: &str, x: f32, width: f32, name: &str, at: f32) {
-    let boxed = ui.node(pxui::hash_of(&format!("{}{}", key, name)), pxui::Node::DEFAULT.w(Size::Px(width)).h(Size::Px(1.0)).at(x, at));
+    let boxed = ui.node(pxui::hash_of(&(key, name)), pxui::Node::DEFAULT.w(Size::Px(width)).h(Size::Px(1.0)).at(x, at));
     let edge = (theme).foreground.with_alpha(38);
     ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(edge)));
 }
@@ -2195,7 +2195,8 @@ fn editor_area(
 ) {
     let (ey, eh) = at;
     let theme = c.theme;
-    let chips = lisp_text::color_chips(text);
+    // Skip color-chip scan when the text has no quoted colour literals (warm typing).
+    let chips = if text.as_bytes().contains(&b'"') { lisp_text::color_chips(text) } else { Vec::new() };
     // the find bar sits between the text and the footer: one row, two with the replace row
     let find_h = match &state.find {
         Some(f) => if f.replacing { 2.0 * c.find_row } else { c.find_row },
@@ -2442,25 +2443,32 @@ fn editor_area(
         let (line, col) = char_position(&text2, byte);
         format!("{line}:{col}")
     });
+    // Stable widget keys without format! (warm draft frames).
+    let (apply_key, discard_key, parinfer_key) = match key {
+        "text-document" => ("text-document-apply", "text-document-discard", "text-document-parinfer"),
+        "text-graph" => ("text-graph-apply", "text-graph-discard", "text-graph-parinfer"),
+        "text-selection" => ("text-selection-apply", "text-selection-discard", "text-selection-parinfer"),
+        _ => ("text-apply", "text-discard", "text-parinfer"),
+    };
     let apply_w = kit::button_width(ui, Some(hint), false, "Check and apply");
     let by = ty + 1.0 + ((c.bar - 20.0) / 2.0);
     let apply_opts = ButtonOpts { primary: true, enabled: can_apply, hint: Some(hint.into()), ..ButtonOpts::default() };
-    if kit::button(ui, &format!("{}-apply", key), (c.x + 12.0, by), apply_w, &apply_opts, "Check and apply") || (submitted && can_apply) {
+    if kit::button(ui, apply_key, (c.x + 12.0, by), apply_w, &apply_opts, "Check and apply") || (submitted && can_apply) {
         push(emit, apply(text2.to_string()));
     }
     let discard_hint = if c.narrow { None } else { Some("esc") };
     let discard_opts = ButtonOpts { enabled: can_apply, hint: discard_hint.map(Into::into), ..ButtonOpts::default() };
     let discard_w = kit::button_width(ui, discard_hint, false, "Discard");
-    if kit::button(ui, &format!("{}-discard", key), (c.x + 12.0 + apply_w + 8.0, by), discard_w, &discard_opts, "Discard") {
+    if kit::button(ui, discard_key, (c.x + 12.0 + apply_w + 8.0, by), discard_w, &discard_opts, "Discard") {
         push(emit, discard.clone());
     }
     // parinfer and its switch, at the bar's end
     let switch_x = c.x + c.width - 12.0 - 28.0;
     if !c.narrow {
-        if kit::switch(ui, &format!("{}-parinfer", key), (switch_x, ty + 1.0 + ((c.bar - 14.0) / 2.0)), state.parinfer) {
+        if kit::switch(ui, parinfer_key, (switch_x, ty + 1.0 + ((c.bar - 14.0) / 2.0)), state.parinfer) {
             push(emit, Intent::ToggleParinfer);
         }
-        let boxed = ui.node(pxui::hash_of(&format!("{}-parinfer-label", key)), pxui::Node::DEFAULT.w(Size::Px(80.0)).h(Size::Px(c.bar)).at(switch_x - 8.0 - 80.0, ty + 1.0));
+        let boxed = ui.node(pxui::hash_of(&(key, "parinfer-label")), pxui::Node::DEFAULT.w(Size::Px(80.0)).h(Size::Px(c.bar)).at(switch_x - 8.0 - 80.0, ty + 1.0));
         let ink2 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
         ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
             let label = "parinfer";
@@ -2470,19 +2478,23 @@ fn editor_area(
         rule(ui, &theme, key, c.x, c.width, "-rule2", ty + 1.0 + c.bar);
     }
     let wrong = !errors.is_empty();
-    let msg = ui.node(pxui::hash_of(&format!("{}-message", key)),
+    let msg = ui.node(pxui::hash_of(&(key, "message")),
         pxui::Node::DEFAULT.flags(pxui::Flags::CLIP).w(Size::Px(c.width)).h(Size::Px(if c.narrow { 0.0 } else { c.row })).at(c.x, ty + c.bar + 2.0),
     );
     if !c.narrow {
-        let (errors, text_c, message) = (errors.to_vec(), if errors.is_empty() { String::new() } else { text.to_owned() }, message.to_owned());
+        // Own diagnostics / source only when needed; static status messages stay borrowed until paint needs a String.
+        let errors = if errors.is_empty() { Vec::new() } else { errors.to_vec() };
+        let text_c = if errors.is_empty() { String::new() } else { text.to_owned() };
+        let message = message.to_owned();
         let accent = theme.accent;
         let ink2 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
         let (state_label, cap_w) = {
-            let mut parts: Vec<String> = position.into_iter().collect();
-            if can_apply {
-                parts.push("modified".to_owned());
-            }
-            let label = parts.join(" \u{b7} ");
+            let label = match (position.as_deref(), can_apply) {
+                (Some(p), true) => format!("{p} \u{b7} modified"),
+                (Some(p), false) => p.to_owned(),
+                (None, true) => "modified".to_owned(),
+                (None, false) => String::new(),
+            };
             let w = if label.is_empty() { 0.0 } else { kit::cap_width(ui, &label) };
             (label, w)
         };
@@ -2724,8 +2736,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
             );
         }
     }
-    let out = emit.borrow().clone();
-    Ok(out)
+    Ok(std::mem::take(&mut *emit.borrow_mut()))
 }
 
 /// Everything `view_checked` reads, hashed (no allocation): equal revisions draw the same pane. `None` when
