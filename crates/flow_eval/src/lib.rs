@@ -1,5 +1,6 @@
 mod eval;
 pub use eval::*;
+pub mod frame_arena;
 #[cfg(test)]
 mod test_op;
 #[cfg(test)]

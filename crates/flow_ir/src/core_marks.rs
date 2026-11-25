@@ -82,9 +82,9 @@ fn push(sink: &mut Sink, entry: Entry) -> Result<(), Diagnostic> {
 }
 
 /// The entries in painter order, checked by `Marks::validate` (`E_DRAW_RANGE` otherwise).
-pub fn finish(sink: &Sink) -> Result<Vec<Entry>, Diagnostic> {
+pub fn finish(sink: &mut Sink) -> Result<Vec<Entry>, Diagnostic> {
     match m::validate(&sink.entries) {
-        Ok(()) => Ok(sink.entries.clone()),
+        Ok(()) => Ok(std::mem::take(&mut sink.entries)),
         Err(message) => Err(v::fail("E_DRAW_RANGE", &message)),
     }
 }
@@ -491,7 +491,7 @@ mod tests {
         let buffers = Buffers::create();
         let mut s = sink(None, size, &buffers);
         compile(&draw)(&values, &mut s)?;
-        finish(&s)
+        finish(&mut s)
     }
     fn args(names: &[&str]) -> Vec<(Symbol, i64)> { names.iter().enumerate().map(|(i, n)| ((*n).into(), i as i64)).collect() }
 
@@ -531,7 +531,7 @@ mod tests {
         let mut s = sink(None, (200, 100), &buffers);
         let draw = Draw::Batch { mark: Mark::Circle, args: args(&["positions", "radius"]) };
         compile(&draw)(&[positions.clone(), radii], &mut s).unwrap();
-        let entries = finish(&s).unwrap();
+        let entries = finish(&mut s).unwrap();
         assert!(matches!(&entries[0], Entry::MarkSet { count: 3, kind: Kind::Circle { position: PairAttr::Buffer(Buffer { id: 1, count: 3, width: 3 }), radius: ScalarAttr::Buffer(Buffer { id: 2, .. }), .. } }));
         assert_eq!(buffers.find(1).unwrap().len(), 9);
         // picture error: radii of a different length
@@ -558,7 +558,7 @@ mod tests {
         compile(&Draw::Push(Transform::Translate, 0))(&values, &mut s).unwrap();
         compile(&Draw::TextRun { at: 4, text: 1, ink: 2, size: 3, style: None })(&values, &mut s).unwrap();
         compile(&Draw::Pop)(&values, &mut s).unwrap();
-        let entries = finish(&s).unwrap();
+        let entries = finish(&mut s).unwrap();
         assert_eq!(entries[0], Entry::PushTransform { xx: 1.0, xy: 0.0, yx: 0.0, yy: 1.0, tx: 1.0, ty: -2.0 });
         assert_eq!(entries[1], Entry::Text { x: 12, y: 12, size: 20, color: 0xaabbccffu32 as i32, text: b"hi".to_vec(), style: 0 });
         assert_eq!(entries[2], Entry::PopTransform);

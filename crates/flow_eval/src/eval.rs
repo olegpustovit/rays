@@ -2401,6 +2401,11 @@ fn begin_frame(state: &mut StateData, source: &str, frame: i64) {
     if state.frame != Some(frame) {
         merge_state_maps(&mut state.before, std::mem::replace(&mut state.next, empty_state_map()));
         state.frame = Some(frame);
+        crate::frame_arena::reset();
+        crate::frame_arena::begin();
+    } else {
+        // Same frame re-entry: keep sticky text; ensure the arena is live.
+        crate::frame_arena::begin();
     }
 }
 fn begin_host_frame(state: &mut StatePlane, source: &str, frame: i64) {
@@ -2433,6 +2438,7 @@ fn merge_state_maps(before: &mut Shared<BTreeMap<StateKey, Value>>, newer: Share
 }
 fn state_data(value: Value) -> Result<Value, Diagnostic> {
     let _nesting = EvalNesting::enter()?;
+    let value = crate::frame_arena::persist(value);
     match value {
         Value::Deferred(..) | Value::NoGeo => eval_error("E_STATE_TYPE", "State stores data, not deferred nodes or layouts."),
         Value::Struct(g) if flow_syntax::ty::shape(&g.ty) => eval_error("E_STATE_TYPE", "State stores data, not deferred nodes or layouts."),

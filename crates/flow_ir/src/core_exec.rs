@@ -515,7 +515,10 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
             Arc::new(move |st| v::coerce_to(&ty, &st.values[ix(first)]))
         }
         Primitive::Truthy => Arc::new(move |st| Ok(Value::Bool(v::truthy(&st.values[ix(first)])?))),
-        Primitive::Show => Arc::new(move |st| Ok(Value::Text(v::show_with(&|x| x.clone(), &st.values[ix(first)]).into()))),
+        Primitive::Show => Arc::new(move |st| {
+            let shown = v::show_with(&|x| x.clone(), &st.values[ix(first)]);
+            Ok(e::frame_arena::text(&shown))
+        }),
         Primitive::TextConcat => {
             let args = args_v.clone();
             Arc::new(move |st| {
@@ -526,7 +529,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
                         _ => return Err(v::fail("E_TYPE", "Expected text.")),
                     }
                 }
-                Ok(Value::Text(out.into()))
+                Ok(e::frame_arena::text(&out))
             })
         }
         Primitive::Fail(code, message) => {
@@ -2851,7 +2854,7 @@ pub fn draw(prepared: &Prepared, live: &Frame, size: (i64, i64), buffers: &Buffe
         arena_finish(&mut a);
         *prepared.arena_pool.lock().unwrap() = Some(a);
     }
-    core_marks::finish(st.marks.as_ref().expect("marks"))
+    core_marks::finish(st.marks.as_mut().expect("marks"))
 }
 
 
