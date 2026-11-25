@@ -9,7 +9,7 @@ const CEILINGS: &[(&str, u64, u64)] = &[
     ("zoom rest", 616, 487),
     ("pan across overscan", 502, 1121),
     ("node select", 500, 488),
-    ("box select", 499, 7557),
+    ("box select", 499, 840),
     ("after box select", 842, 556),
     ("escape", 643, 556),
     ("hover moves", 684, 563),

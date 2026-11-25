@@ -11,7 +11,6 @@ use std::rc::Rc;
 use editor_document::document::{self as doc_mod};
 use editor_document::kind_graph;
 use editor_document::layout_edit as le;
-use flow_check::catalog as fcat;
 use flow_graph::flow_edit::{self as fe, ArgKey};
 use flow_graph::probe::{self, Probe, Summary};
 use flow_graph::projection as p;
@@ -414,9 +413,23 @@ pub fn kind_fields(value: &Model, graph: &str, head: &str, authored: &dyn Fn(&st
     }
     let catalog = flow_catalog(value)?;
     let context = ctx?;
-    let kind: fcat::Kind = match declaration {
-        Some(n) if n.kind.context == context => n.kind.clone(),
-        _ => fcat::resolve_kind(&catalog, &context, head).ok()?,
+    let kind = match declaration {
+        Some(n) if n.kind.context == context => &n.kind,
+        _ => {
+            // The inspector also sees ordinary Lisp operators. Check for a kind without
+            // constructing checker diagnostics and suggestions for those operators.
+            let mut matches = catalog.kinds.iter().filter(|kind| {
+                kind.qualified == head || (!head.contains('/')
+                    && kind.qualified.split_once('/').is_some_and(|(_, name)| name == head))
+            });
+            let kind = matches.next()?;
+            if matches.any(|other| other.qualified != kind.qualified)
+                || (kind.context != context && kind.context != context::value())
+            {
+                return None;
+            }
+            kind
+        }
     };
     let mut out = Vec::new();
     for pm in &kind.parameters {
@@ -1469,26 +1482,26 @@ impl SharedTarget {
 
 /// Each frame's changes land together. The first target and field give the existing gesture
 /// key for every frame of a shared scrub, so history merges the whole drag.
-pub fn shared_inspector(ui: &mut Ui, width: f32, count: usize, targets: Vec<SharedTarget>) -> Vec<Change> {
+pub fn shared_inspector(ui: &mut Ui, width: f32, count: usize, target_at: &dyn Fn(usize) -> Option<SharedTarget>) -> Vec<Change> {
     let title = format!("{count} nodes");
     insp::header_context(ui, &title, false, false, &mut |ui| {
         ui.inspector_header("multi-header", None, None, None, None, &[], None, false, &title, "Selected")
     });
     let mut changes = Vec::new();
     ui.inspector_body(&mut |ui| {
-        let mut rows = Vec::new();
-        if let Some(first) = targets.first().filter(|_| targets.len() == count) {
-            for (_, candidate) in &first.rows {
-                let mut mixed = candidate.live.is_some();
-                if targets[1..].iter().all(|target| target.matching(candidate).is_some_and(|r| {
-                    mixed |= r.live.is_some() || r.fields.iter().zip(&candidate.fields).any(|(a, b)| a.current != b.current);
-                    true
-                })) {
-                    let mut row = candidate.clone();
-                    row.live = mixed.then(|| "mixed".to_owned());
-                    rows.push(row);
-                }
+        let mut rows: Vec<_> = target_at(0).into_iter().flat_map(|target| target.rows.into_iter().map(|(_, row)| row)).collect();
+        for i in 1..count {
+            if rows.is_empty() {
+                break;
             }
+            let Some(target) = target_at(i) else { rows.clear(); break };
+            rows.retain_mut(|row| {
+                let Some(other) = target.matching(row) else { return false };
+                if row.live.is_none() && (other.live.is_some() || other.fields.iter().zip(&row.fields).any(|(a, b)| a.current != b.current)) {
+                    row.live = Some("mixed".to_owned());
+                }
+                true
+            });
         }
         if rows.is_empty() {
             ui.inspector_message("shared-empty", "No shared parameters");
@@ -1503,7 +1516,11 @@ pub fn shared_inspector(ui: &mut Ui, width: f32, count: usize, targets: Vec<Shar
         };
         let edits = insp::flow_fields(ui, &opts, None, &rows);
         for edit in &edits {
-            for target in targets.iter() { target.edit(edit, &mut changes); }
+            for i in 0..count {
+                if let Some(target) = target_at(i) {
+                    target.edit(edit, &mut changes);
+                }
+            }
         }
     });
     changes

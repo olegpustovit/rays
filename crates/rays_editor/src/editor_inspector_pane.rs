@@ -173,8 +173,7 @@ pub fn inspect_panel<'a>(
                     paths => {
                         let mut changes = Vec::new();
                         inspector_panel(window, ui, bounds, &mut |ui| {
-                            let targets = pane_laid(value).into_iter().flat_map(|laid| paths.iter().filter_map(|path| SharedTarget::graph(value, laid, path))).collect();
-                            changes = shared_inspector(ui, width, paths.len(), targets);
+                            changes = shared_inspector(ui, width, paths.len(), &|i| SharedTarget::graph(value, pane_laid(value)?, &paths[i]));
                         });
                         (None, changes, vec![], value.live_cook, vec![], vec![])
                     }
@@ -243,17 +242,17 @@ pub fn inspect_panel<'a>(
             } else if selected_ids.len() >= 2 {
                 let mut changes = Vec::new();
                 inspector_panel(window, ui, bounds, &mut |ui| {
-                    let targets = selected_ids.iter().filter_map(|id| {
+                    changes = shared_inspector(ui, width, selected_ids.len(), &|i| {
+                        let id = selected_ids[i];
                         if lowered_level {
-                            let path = node_path(value, *id)?;
+                            let path = node_path(value, id)?;
                             SharedTarget::graph(value, pane_laid(value)?, &path)
-                        } else if let Some((laid, path)) = inspector_scene_target(value, *id) {
+                        } else if let Some((laid, path)) = inspector_scene_target(value, id) {
                             SharedTarget::graph(value, &laid, &path)
                         } else {
-                            document.iter().find(|n| n.id == *id).map(SharedTarget::object)
+                            document.iter().find(|n| n.id == id).map(SharedTarget::object)
                         }
-                    }).collect();
-                    changes = shared_inspector(ui, width, selected_ids.len(), targets);
+                    });
                 });
                 (None, changes, vec![], value.live_cook, vec![], vec![])
             } else if lowered_level {
