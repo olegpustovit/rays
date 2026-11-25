@@ -44,7 +44,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 
 | Lane | State |
 |---|---|
-| Z2 | done: edit_overlay (mark_input); LitCache Rc; pane.chains; selected `&[Path]`; graph_name_at `&str` |
+| Z2 | done: edit_overlay (mark_input→graph-edit); LitCache Rc; pane.chains; selected `&[Path]`; graph_name_at `&str`. zero_alloc A_ISOSEL 712→51 (matches idle); regression via update_cached |
 | Z0 | landed: mem_sys `trace` (PXUI 71931474), zero_alloc A–F (ceilings = measured+5%), RAYS_ZERO_ALLOC; cfg fix ae7f8ed36 |
 | Z1 | Landed borrow sites: `find`/`ids`/`read` (cb1a86b52); Leaf/Panel walk, look/focus `&str`, composition_key Rc, Scene3 Rc nodes/lights, Extra render by-value, chord lists without Vec (545d5ffcf). click_budget isogrid idle 536/458→402/324, hover 469/469→334/334 (meas 382/308, 318/318). Remaining: Extra navigate clones, `panel_key` owned Path on rare paths, Finding 2 remainder is Z2 content rebuild + Z3 overlays (~300 settled still theirs). |
 | Z4 | specials OnceLock; BoundDoc lazy; complete/rank borrow; colorize SPANS; Word unit; incremental lex (sketch equality); State take in one_intent. typing_budget 1712/782→1163/330 (meas 1107/314, mean 0.36ms). Left: shown() State clone via &ModelView (needs Z1 take), Live.seen String on Intent::Live, lex token Vec clone on return, PXUI cosmic-text (Z6), remaining ~500–1100 whole-step allocs outside lisp_text. |

@@ -451,27 +451,38 @@ fn scope_ghost_values() {
 
 /// Idle frames with a selection (and an open name field) keep the content view: the focused
 /// edit_field lives in `graph-edit`, so PXUI's mark_input does not dirty the content sized_view.
+/// Uses `update_cached` (salt 0), the editor path; `update` salts by frame_index and never keeps.
 fn scope_idle_keeps_content_with_selection() {
     let mut ui = new_ui();
+    ui.verify_views(false);
     let w = load_workspace("bloom");
-    let (view, _) = scope_view(ScopeOpts::default(), &w, "flower");
-    let (view, _) = scope_step(&mut ui, view, &frame0());
+    let (mut view, _) = scope_view(ScopeOpts::default(), &w, "flower");
+    let fr = frame0();
+    let go = |ui: &mut Ui, t: &mut Pane| {
+        let mut changes = Vec::new();
+        rays_shell::host::build(ui, &fr, &mut |ui: &mut Ui| {
+            let root = ui.node("graph-root", pxui::Node::DEFAULT.w(Size::Px(1000.0)).h(Size::Px(700.0)).at(0.0, 0.0));
+            ui.within(&root, &mut |ui| scope::update_cached("graph-view", &[], t, ui, &fr, &mut changes));
+        });
+    };
+    go(&mut ui, &mut view);
+    go(&mut ui, &mut view);
     let heart = path(&["flower", "heart"]);
-    let mut view = { let mut v = view; scope::select(vec![heart.clone()], &mut v); v };
+    scope::select(vec![heart.clone()], &mut view);
     let mut changes = Vec::new();
     scope::run_command(&mut view, Command::EditName, &mut changes);
     check(scope::editing(&view), "EditName did not open the name field");
-    let (view, _) = scope_step(&mut ui, view, &frame0());
+    go(&mut ui, &mut view);
+    go(&mut ui, &mut view);
     let builds0 = scope::inspect::content_builds(&view);
-    let mut cur = view;
     for _ in 0..5 {
-        let (v, _) = scope_step(&mut ui, cur, &frame0());
-        cur = v;
+        go(&mut ui, &mut view);
     }
-    let built = scope::inspect::content_builds(&cur) - builds0;
-    check(built == 0, &format!("idle frames with a selection rebuilt content {built} times"));
-    check(scope::selected(&cur) == vec![heart], "selection was lost");
+    let built = scope::inspect::content_builds(&view) - builds0;
+    check(built == 0, &format!("idle frames with a selection rebuilt content {built} times; editing={}", scope::editing(&view)));
+    check(scope::selected(&view) == vec![heart], "selection was lost");
 }
+
 
 pub const CASES: &[(&str, fn())] = &[
     ("scope_zoom_geometry", scope_zoom_geometry),

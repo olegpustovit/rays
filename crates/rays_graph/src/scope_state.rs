@@ -461,7 +461,7 @@ pub fn content_drag(d: &Option<Drag>) -> Option<&Drag> {
 /// Whether two panes build the same content but for the pan and zoom (a cached pane's view moves its
 /// content for them): the same graph, layout, geometry, records and settings (shared parts by
 /// identity; the last build's copy keeps them alive, so an address is never reused under it), and the
-/// same edit, marks and content drag. The selection, the selected wire, a move of plain cards, a
+/// same marks and content drag (open text fields live outside the content view). The selection, the selected wire, a move of plain cards, a
 /// wire or rubber band being dragged, the context menu and the hover are drawn over the content
 /// (`scope_hover`); the pan's pointer grab is no part of what it shows. Text measurements, the
 /// chain memo and the stats are caches or outputs, not inputs.
@@ -478,7 +478,7 @@ pub fn same_but_arguments(a: &Pane, b: &Pane) -> bool {
     geo && (a.x, a.y, a.width, a.height, a.guide, a.framed, a.geo_fs, a.geo_cold, a.tags) == (b.x, b.y, b.width, b.height, b.guide, b.framed, b.geo_fs, b.geo_cold, b.tags)
         && a.theme == b.theme && a.key == b.key && Rc::ptr_eq(&a.saved, &b.saved) && a.records.is_some() == b.records.is_some() && a.cook == b.cook
         && Rc::ptr_eq(&a.chains, &b.chains) && Rc::ptr_eq(&a.folds, &b.folds) && Rc::ptr_eq(&a.counts, &b.counts)
-        && a.lens == b.lens && a.display == b.display && content_drag(&a.drag) == content_drag(&b.drag) && a.editing == b.editing && a.switches == b.switches
+        && a.lens == b.lens && a.display == b.display && content_drag(&a.drag) == content_drag(&b.drag) && a.switches == b.switches
         && a.carry_lit == b.carry_lit && a.carry_hot == b.carry_hot && a.failed == b.failed && a.hinting == b.hinting && a.back == b.back
 }
 
