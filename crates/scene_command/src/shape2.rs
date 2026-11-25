@@ -49,9 +49,12 @@ fn path_of_points(closed: bool, points: &[(f64, f64)]) -> path::Path {
     if let Some((&first, rest)) = points.split_first() {
         commands.push(Command::MoveTo(point(first)));
         commands.extend(rest.iter().copied().map(|p| Command::LineTo(point(p))));
-        if closed { commands.push(Command::Close); }
+        if closed {
+            commands.push(Command::Close);
+        }
     }
-    path::of_commands(&commands)
+    // Move into Path (avoid of_commands → to_vec second copy).
+    path::from_vec(commands)
 }
 
 pub fn line(from: (f64, f64), to: (f64, f64), width: f64, color: i32) -> Result<Geometry, String> {
@@ -86,12 +89,21 @@ pub fn rounded_rect(width: f64, height: f64, radius: f64, fill: Option<i32>, str
     ];
     styled(&path::of_commands(&commands), fill, stroke)
 }
-fn ellipse_points((cx, cy): (f64, f64), rx: f64, ry: f64) -> Vec<(f64, f64)> {
-    (0..32).map(|index| {
-        let angle = 2.0 * std::f64::consts::PI * index as f64 / 32.0;
-        (cx + rx * rays_math::libm::cos(angle), cy + ry * rays_math::libm::sin(angle))
-    }).collect()
-}
 pub fn ellipse(center: (f64, f64), rx: f64, ry: f64, fill: Option<i32>, stroke: Option<i32>) -> Result<Vec<Geometry>, String> {
-    polygon(&ellipse_points(center, rx, ry), fill, stroke)
+    thread_local! {
+        static PTS: std::cell::RefCell<Vec<(f64, f64)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    PTS.with(|slot| {
+        let mut pts = slot.borrow_mut();
+        pts.clear();
+        if pts.capacity() < 32 {
+            pts.reserve(32);
+        }
+        let (cx, cy) = center;
+        for index in 0..32 {
+            let angle = 2.0 * std::f64::consts::PI * index as f64 / 32.0;
+            pts.push((cx + rx * rays_math::libm::cos(angle), cy + ry * rays_math::libm::sin(angle)));
+        }
+        polygon(&pts, fill, stroke)
+    })
 }

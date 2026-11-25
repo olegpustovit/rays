@@ -64,6 +64,10 @@ pub fn of_commands(commands: &[Command]) -> Path {
     Path(commands.to_vec())
 }
 
+pub fn from_vec(commands: Vec<Command>) -> Path {
+    Path(commands)
+}
+
 impl Path {
     /// Path commands remain in authored order.
     pub fn commands(&self) -> &[Command] {
