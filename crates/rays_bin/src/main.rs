@@ -38,6 +38,12 @@ fn mem_command(path: &str, frames: i64) {
         }
         std::process::exit(1)
     });
+    if !mem::COUNTING {
+        eprintln!("rays mem: process allocation counting is off. Live and allocated byte totals omit the process allocator.\n\
+                   Run both commands from the Rays checkout to enable counting in a debug build.\n\
+                     make lib PROFILE=debug CARGOFLAGS='--features pxui_dylib/counting'\n\
+                     cargo build -p rays_bin --features counting");
+    }
     let outcome = measure::run(Default::default(), &|_, e| e, frames.min(30), frames, &workspace).unwrap_or_else(|m| die(&format!("rays: {m}")));
     let fb = |n: i64| mem::Report::format_bytes(n);
     print!("{}", outcome.fin.report.to_string());

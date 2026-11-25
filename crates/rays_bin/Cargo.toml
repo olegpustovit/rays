@@ -15,6 +15,9 @@ name = "rays"
 path = "src/main.rs"
 test = false
 
+[features]
+counting = ["mem/counting"]
+
 [dependencies]
 editor_document = { path = "../editor_document" }
 rays_editor = { path = "../rays_editor" }

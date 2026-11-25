@@ -4,8 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+counting = ["mem_sys/counting"]
+
 [dependencies]
 mem_sys = { path = "../../pxui/crates/open/mem_sys" }
+
+[dev-dependencies]
+mem_sys = { path = "../../pxui/crates/open/mem_sys", features = ["counting"] }
 
 [lints]
 workspace = true
