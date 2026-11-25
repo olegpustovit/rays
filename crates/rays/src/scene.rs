@@ -135,6 +135,9 @@ struct ShapeCacheContext {
 
 thread_local! {
     static CURRENT_SHAPES: RefCell<Option<Rc<ShapeCacheContext>>> = const { RefCell::new(None) };
+    // Overlays are built in compose_scene before canvas installs CURRENT_SHAPES; keep a bounded
+    // fallback so line/circle/path still hit across warm frames.
+    static FALLBACK_SHAPES: RefCell<Option<Rc<ShapeCacheContext>>> = const { RefCell::new(None) };
     static CURRENT_LOWER: RefCell<Option<Rc<LowerCacheContext>>> = const { RefCell::new(None) };
     static CURRENT_CONTEXT: RefCell<Option<layer::CacheContext>> = const { RefCell::new(None) };
     static RENDERER: RefCell<Option<Rc<dyn Fn(&Scene)>>> = const { RefCell::new(None) };
@@ -151,28 +154,72 @@ fn create_shape_cache_context() -> ShapeCacheContext {
     }
 }
 
+fn shapes_context() -> Rc<ShapeCacheContext> {
+    if let Some(c) = CURRENT_SHAPES.with(|c| c.borrow().clone()) {
+        return c;
+    }
+    FALLBACK_SHAPES.with(|slot| {
+        if slot.borrow().is_none() {
+            *slot.borrow_mut() = Some(Rc::new(create_shape_cache_context()));
+        }
+        slot.borrow().clone().expect("fallback shapes")
+    })
+}
+
 /// Estimate retained heap bytes of a cached scene node.
 fn node_bytes(n: &Node) -> i64 {
     match n {
         Node::Geometry(g) => (g.vertices.len() * 8 + g.indices.len() * 8 + 64) as i64,
-        Node::Group(nodes) | Node::Translate(_, _, nodes) => 64 + nodes.iter().map(node_bytes).sum::<i64>(),
+        Node::Group(nodes) | Node::Translate(_, _, nodes) | Node::Affine(_, nodes) => 64 + nodes.iter().map(node_bytes).sum::<i64>(),
         _ => 64,
     }
 }
 
+fn wide_key(tag: u64, words: &[u64]) -> TableKey {
+    use std::hash::{Hash, Hasher};
+    let hash = |seed: u64| {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        seed.hash(&mut h);
+        tag.hash(&mut h);
+        words.hash(&mut h);
+        h.finish()
+    };
+    TableKey::Wide(hash(0x9e37_79b9_7f4a_7c15), hash(0xc2b2_ae3d_27d4_eb4f))
+}
+
+thread_local! {
+    static KEY_WORDS: RefCell<Vec<u64>> = RefCell::new(Vec::new());
+}
+
+fn with_key_words<R>(f: impl FnOnce(&mut Vec<u64>) -> R) -> R {
+    KEY_WORDS.with(|w| {
+        let mut words = w.borrow_mut();
+        words.clear();
+        f(&mut words)
+    })
+}
+
 fn path_geometry_key(points: &[(i64, i64)], closed: bool, width: f64, fill: Option<color::T>, stroke: Option<color::T>) -> TableKey {
-    TableKey::Str(format!("pg|{points:?}|{closed}|{}|{:?}|{:?}", width.to_bits(), fill.map(rgba), stroke.map(rgba)))
+    with_key_words(|words| {
+        words.push(closed as u64);
+        words.push(width.to_bits());
+        words.push(fill.map(rgba).unwrap_or(i32::MIN) as u32 as u64);
+        words.push(stroke.map(rgba).unwrap_or(i32::MIN) as u32 as u64);
+        for &(x, y) in points {
+            words.push(x as u64);
+            words.push(y as u64);
+        }
+        wide_key(1, words)
+    })
 }
 
 fn path_geometry_cached(key: TableKey, make: &dyn Fn() -> Result<Node, String>) -> Result<Node, String> {
-    let context = CURRENT_SHAPES.with(|c| c.borrow().clone());
-    let Some(context) = context else {
-        return make();
-    };
+    let context = shapes_context();
     if let Some(item) = side_lru::find(&mut context.path_geometry.borrow_mut(), &key)
-        && let Ok(n) = item.downcast::<Node>() {
-            return Ok((*n).clone());
-        }
+        && let Ok(n) = item.downcast::<Node>()
+    {
+        return Ok((*n).clone());
+    }
     let value = make()?;
     side_lru::add(&mut context.path_geometry.borrow_mut(), node_bytes(&value), key, Rc::new(value.clone()));
     Ok(value)
@@ -192,6 +239,53 @@ pub fn line(from_: (i64, i64), to_: (i64, i64), color_: Option<color::T>, width:
         let g = shape2::line(as_float(from_), as_float(to_), width, rgba(color_))?;
         Ok(Node::Geometry(Rc::new(g)))
     })
+}
+
+/// Screen-space segment via Affine of a cached unit stroke: pan/orbit reuses the mesh.
+pub fn stroke_segment(from_: (f64, f64), to_: (f64, f64), color_: color::T, width: f64) -> Result<Node, String> {
+    let width = width.max(1.0);
+    let (dx, dy) = (to_.0 - from_.0, to_.1 - from_.1);
+    let len = dx.hypot(dy);
+    if len < 1e-6 {
+        return rect((from_.0 as i64, from_.1 as i64), 0, 0, None, None);
+    }
+    let key = wide_key(3, &[1, width.to_bits(), rgba(color_) as u32 as u64]);
+    let unit = path_geometry_cached(key, &|| {
+        let g = shape2::line((0.0, 0.0), (1.0, 0.0), width, rgba(color_))?;
+        Ok(Node::Geometry(Rc::new(g)))
+    })?;
+    let (ux, uy) = (dx / len, dy / len);
+    Ok(Node::Affine(
+        Transform { xx: dx, xy: dy, yx: -uy, yy: ux, tx: from_.0, ty: from_.1 },
+        Rc::new(vec![unit]),
+    ))
+}
+
+/// Filled thick line via Affine of a cached unit quad (u∈[0,1], v∈[-½,½]).
+pub fn thick_segment(from_: (f64, f64), to_: (f64, f64), color_: color::T, width: f64) -> Result<Node, String> {
+    let (dx, dy) = (to_.0 - from_.0, to_.1 - from_.1);
+    let len = dx.hypot(dy);
+    if len < 1e-6 {
+        return rect((from_.0 as i64, from_.1 as i64), 0, 0, None, None);
+    }
+    let key = wide_key(4, &[rgba(color_) as u32 as u64]);
+    let unit = path_geometry_cached(key, &|| {
+        let p = |x, y| path_mod::Point { x, y };
+        let path = path_mod::of_commands(&[
+            path_mod::Command::MoveTo(p(0.0, 0.5)),
+            path_mod::Command::LineTo(p(1.0, 0.5)),
+            path_mod::Command::LineTo(p(1.0, -0.5)),
+            path_mod::Command::LineTo(p(0.0, -0.5)),
+            path_mod::Command::Close,
+        ]);
+        let g = shape2::fill_path(rgba(color_), &path)?;
+        Ok(Node::Geometry(Rc::new(g)))
+    })?;
+    let (ux, uy) = (dx / len, dy / len);
+    Ok(Node::Affine(
+        Transform { xx: dx, xy: dy, yx: -uy * width, yy: ux * width, tx: from_.0, ty: from_.1 },
+        Rc::new(vec![unit]),
+    ))
 }
 
 pub(crate) fn polygon(points: &[(i64, i64)], fill: Option<color::T>, stroke: Option<color::T>) -> Result<Node, String> {
@@ -218,24 +312,19 @@ pub fn rect(at: (i64, i64), w: i64, h: i64, fill: Option<color::T>, stroke: Opti
 pub(crate) fn rounded_rect(at: (i64, i64), w: i64, h: i64, radius: i64, fill: Option<color::T>, stroke: Option<color::T>) -> Result<Node, String> {
     let (x, y) = at;
     let radius = std::cmp::max(0, std::cmp::min(radius, std::cmp::min(w.abs(), h.abs()) / 2));
-    let key = TableKey::Str(format!("rr|{w}|{h}|{radius}|{:?}|{:?}", fill.map(rgba), stroke.map(rgba)));
+    let key = wide_key(5, &[w as u64, h as u64, radius as u64, fill.map(rgba).unwrap_or(i32::MIN) as u32 as u64, stroke.map(rgba).unwrap_or(i32::MIN) as u32 as u64]);
     let make = || -> Result<Rc<Vec<Node>>, String> {
         Ok(Rc::new(geometry_nodes(shape2::rounded_rect(w as f64, h as f64, radius as f64, fill.map(rgba), stroke.map(rgba)))?))
     };
-    let context = CURRENT_SHAPES.with(|c| c.borrow().clone());
-    let geometry = match context {
-        None => make()?,
-        Some(context) => {
-            let found = side_lru::find(&mut context.rounded.borrow_mut(), &key).and_then(|i| i.downcast::<Vec<Node>>().ok());
-            match found {
-                Some(found) => found,
-                None => {
-                    let value = make()?;
-                    let bytes = value.iter().map(node_bytes).sum();
-                    side_lru::add(&mut context.rounded.borrow_mut(), bytes, key, value.clone());
-                    value
-                }
-            }
+    let context = shapes_context();
+    let found = side_lru::find(&mut context.rounded.borrow_mut(), &key).and_then(|i| i.downcast::<Vec<Node>>().ok());
+    let geometry = match found {
+        Some(found) => found,
+        None => {
+            let value = make()?;
+            let bytes = value.iter().map(node_bytes).sum();
+            side_lru::add(&mut context.rounded.borrow_mut(), bytes, key, value.clone());
+            value
         }
     };
     Ok(Node::Translate(x, y, geometry))
@@ -243,25 +332,19 @@ pub(crate) fn rounded_rect(at: (i64, i64), w: i64, h: i64, radius: i64, fill: Op
 
 fn ellipse(at: (i64, i64), rx: i64, ry: i64, fill: Option<color::T>, stroke: Option<color::T>) -> Result<Node, String> {
     let (cx, cy) = at;
-    let key = TableKey::Str(format!("el|{cx}|{cy}|{rx}|{ry}|{:?}|{:?}", fill.map(rgba), stroke.map(rgba)));
-    let make = || -> Result<Node, String> {
-        Ok(Node::Group(Rc::new(geometry_nodes(shape2::ellipse((cx as f64, cy as f64), rx as f64, ry as f64, fill.map(rgba), stroke.map(rgba)))?)))
-    };
-    let context = CURRENT_SHAPES.with(|c| c.borrow().clone());
-    match context {
-        None => make(),
-        Some(context) => {
-            let found = side_lru::find(&mut context.ellipse.borrow_mut(), &key).and_then(|i| i.downcast::<Node>().ok());
-            match found {
-                Some(found) => Ok((*found).clone()),
-                None => {
-                    let value = make()?;
-                    side_lru::add(&mut context.ellipse.borrow_mut(), node_bytes(&value), key, Rc::new(value.clone()));
-                    Ok(value)
-                }
-            }
+    // Geometry at the origin; Translate places it so pan only changes the wrapper.
+    let key = wide_key(6, &[rx as u64, ry as u64, fill.map(rgba).unwrap_or(i32::MIN) as u32 as u64, stroke.map(rgba).unwrap_or(i32::MIN) as u32 as u64]);
+    let context = shapes_context();
+    let found = side_lru::find(&mut context.ellipse.borrow_mut(), &key).and_then(|i| i.downcast::<Node>().ok());
+    let origin = match found {
+        Some(found) => (*found).clone(),
+        None => {
+            let value = Node::Group(Rc::new(geometry_nodes(shape2::ellipse((0.0, 0.0), rx as f64, ry as f64, fill.map(rgba), stroke.map(rgba)))?));
+            side_lru::add(&mut context.ellipse.borrow_mut(), node_bytes(&value), key, Rc::new(value.clone()));
+            value
         }
-    }
+    };
+    Ok(Node::Translate(cx, cy, Rc::new(vec![origin])))
 }
 
 pub fn circle(at: (i64, i64), radius: i64, fill: Option<color::T>, stroke: Option<color::T>) -> Result<Node, String> {
@@ -270,12 +353,30 @@ pub fn circle(at: (i64, i64), radius: i64, fill: Option<color::T>, stroke: Optio
 
 pub fn path(fill: Option<color::T>, value: &path_mod::t) -> Result<Node, String> {
     let closed = value.commands().iter().any(|c| matches!(c, path_mod::Command::Close));
-    let geometries = if closed {
-        shape2::path(Some(rgba(fill.unwrap_or_else(default_color))), None, value)
+    let (fill_c, stroke_c) = if closed {
+        (Some(rgba(fill.unwrap_or_else(default_color))), None)
     } else {
-        shape2::path(None, Some(rgba(default_color())), value)
+        (None, Some(rgba(default_color())))
     };
-    Ok(Node::Group(Rc::new(geometry_nodes(geometries)?)))
+    let key = with_key_words(|words| {
+        words.push(fill_c.unwrap_or(i32::MIN) as u32 as u64);
+        words.push(stroke_c.unwrap_or(i32::MIN) as u32 as u64);
+        for c in value.commands() {
+            match *c {
+                path_mod::Command::MoveTo(p) => words.extend_from_slice(&[1, p.x.to_bits(), p.y.to_bits()]),
+                path_mod::Command::LineTo(p) => words.extend_from_slice(&[2, p.x.to_bits(), p.y.to_bits()]),
+                path_mod::Command::QuadraticTo(c0, p) => {
+                    words.extend_from_slice(&[3, c0.x.to_bits(), c0.y.to_bits(), p.x.to_bits(), p.y.to_bits()]);
+                }
+                path_mod::Command::CubicTo(c1, c2, p) => {
+                    words.extend_from_slice(&[4, c1.x.to_bits(), c1.y.to_bits(), c2.x.to_bits(), c2.y.to_bits(), p.x.to_bits(), p.y.to_bits()]);
+                }
+                path_mod::Command::Close => words.push(5),
+            }
+        }
+        wide_key(2, words)
+    });
+    path_geometry_cached(key, &|| Ok(Node::Group(Rc::new(geometry_nodes(shape2::path(fill_c, stroke_c, value))?))))
 }
 
 pub fn text(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: &str) -> Node { styled_text(at, color_, size, value, 0) }

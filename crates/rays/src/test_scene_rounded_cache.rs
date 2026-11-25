@@ -83,11 +83,19 @@ fn rounded_and_path_caches_are_deterministic_and_bounded() {
         require(primitive_baseline == serialize(&[primitive()]), "bounded primitive cache eviction changed geometry");
         let ellipse_first = primitive();
         let ellipse_second = primitive();
-        let same_group = match (&ellipse_first, &ellipse_second) {
-            (Node::Group(a), Node::Group(b)) => Rc::ptr_eq(a, b) || (a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| matches!((x, y), (Node::Geometry(p), Node::Geometry(q)) if Rc::ptr_eq(p, q)))),
+        let same_geom = match (&ellipse_first, &ellipse_second) {
+            (Node::Translate(x1, y1, a), Node::Translate(x2, y2, b)) => {
+                x1 == x2 && y1 == y2 && (Rc::ptr_eq(a, b) || (a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| {
+                    match (x, y) {
+                        (Node::Group(p), Node::Group(q)) => Rc::ptr_eq(p, q) || (p.len() == q.len() && p.iter().zip(q.iter()).all(|(u, v)| matches!((u, v), (Node::Geometry(pu), Node::Geometry(pv)) if Rc::ptr_eq(pu, pv)))),
+                        (Node::Geometry(p), Node::Geometry(q)) => Rc::ptr_eq(p, q),
+                        _ => false,
+                    }
+                })))
+            }
             _ => false,
         };
-        require(same_group, "stable ellipse did not reuse its immutable scene node");
+        require(same_geom, "stable ellipse did not reuse its immutable scene node");
         for index in 0..300 {
             let _ = scene::circle((index, index & 15), index + 2, Some(color::rgb(0, 0, 255)), None).expect("circle");
         }
@@ -124,5 +132,20 @@ fn rounded_and_path_caches_are_deterministic_and_bounded() {
         let evicted_after = first_geometry(&evicting());
         require(!Rc::ptr_eq(&evicted_before, &evicted_after), "native path cache did not deterministically evict its oldest geometry");
         require(native_baseline == serialize(&native_paths()), "native path cache eviction changed exact serialized IR");
+        // Screen-space Affine segments share one unit mesh across endpoints (pan/orbit).
+        let ink = color::rgba(61, 103, 149, 219);
+        let thick_a = scene::thick_segment((10.0, 20.0), (80.0, 60.0), ink, 1.5).expect("thick");
+        let thick_b = scene::thick_segment((11.0, 21.0), (90.0, 10.0), ink, 1.5).expect("thick");
+        let stroke_a = scene::stroke_segment((3.0, 4.0), (50.0, 40.0), ink, 2.0).expect("stroke");
+        let stroke_b = scene::stroke_segment((5.0, 8.0), (70.0, 12.0), ink, 2.0).expect("stroke");
+        let unit_of = |n: &Node| -> Rc<render_ir::Geometry> {
+            match n {
+                Node::Affine(_, children) => first_geometry(&children[0]),
+                _ => panic!("expected Affine"),
+            }
+        };
+        require(Rc::ptr_eq(&unit_of(&thick_a), &unit_of(&thick_b)), "thick_segment rebuilt unit mesh on endpoint change");
+        require(Rc::ptr_eq(&unit_of(&stroke_a), &unit_of(&stroke_b)), "stroke_segment rebuilt unit mesh on endpoint change");
+        require(serialize(&[thick_a]) != serialize(&[thick_b]), "thick Affine omitted endpoint transform");
     });
 }
