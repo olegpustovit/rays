@@ -35,3 +35,21 @@ fn timeline_advances_pauses_stops_resets_and_seeks() {
     let key = frame_with(0.25, vec![input::Event::KeyPressed(input::Key::KeyChar('p'))], vec![]);
     assert_eq!(t::mode(&t::update(&t::create(), &key).0), Mode::Playing, "timeline reacted to a key press");
 }
+
+/// `editor_loop::may_rest` treats Playing + dt==0 as clock_idle: the timeline must not advance then,
+/// or resting would freeze a moving picture. Positive dt while Playing must advance (basic's
+/// "frame N" text); may_rest must stay awake on that path.
+#[test]
+fn playing_dt_advances_frame_index_dt_zero_does_not() {
+    let playing = t::create();
+    assert_eq!(t::mode(&playing), Mode::Playing);
+    let (moved, changes) = t::update(&playing, &frame_with(1.0 / 60.0, vec![], vec![]));
+    assert_eq!(t::frame(&moved), 1, "Playing + dt>0 must advance frame/index");
+    assert!(t::time(&moved) > 0.0);
+    assert!(t::changed_context(&changes), "advance is a cook-context change");
+
+    let (frozen, idle) = t::update(&moved, &frame_with(0.0, vec![], vec![]));
+    assert_eq!(t::frame(&frozen), 1, "Playing + dt==0 must not advance frame/index");
+    assert_eq!(t::time(&frozen), t::time(&moved), "clock must not move at dt==0");
+    assert!(!t::changed_context(&idle), "dt==0 while Playing is semantically at rest");
+}

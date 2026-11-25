@@ -24,7 +24,7 @@ fn action_rounds() -> u64 {
 /// (rust allocs/unit, native mallocs/unit). Rust = counting allocator; native from trace when available.
 /// Seeded at measured (2026-11-25, after Z1/Z2/Z4) + 5%, rounded up. Lanes lower these toward 0 / ≤12.
 // Ceilings = measured + 5% after Z6b Image-run + Atlas direct quads (2026-11-25, RAYS_SLOW).
-const A_BASIC: (u64, u64) = (219, 9);
+const A_BASIC: (u64, u64) = (210, 9);
 const A_EMPTY: (u64, u64) = (0, 9);
 const A_BARE: (u64, u64) = (0, 9);
 const A_ISOGRID: (u64, u64) = (0, 13);
@@ -467,6 +467,48 @@ fn f_basic_static() {
     eprintln!("F_basic_static wall {:.2}s", started.elapsed().as_secs_f64());
 }
 
+/// may_rest: Playing + dt>0 on basic (reads frame/index) must keep redrawing; dt==0 must not
+/// advance the timeline frame (rest is then semantically identical).
+fn may_rest_basic_clock() {
+    let mut p = P::new(&sk("basic.rays"));
+    p.idle(4, IDLE_AT);
+    let before = {
+        let e = p.e.as_ref().unwrap();
+        rays_editor::editor_list::timeline(&e.core).frame
+    };
+    p.step(&[], vec![], IDLE_AT);
+    let e = p.e.as_ref().unwrap();
+    let after = rays_editor::editor_list::timeline(&e.core).frame;
+    assert!(after > before, "Playing + dt>0 must advance timeline frame (basic frame N); {before} → {after}");
+    let f = rays::frame::Frame {
+        input: input::Frame {
+            dt: 1. / 60.,
+            frame: p.tick,
+            tick: p.tick,
+            size: (W, H),
+            pointer: IDLE_AT,
+            ..input::at_time(p.tick as f64 / 60.)
+        },
+        pixel_scale: (1., 1.),
+        fps: 60.,
+        mouse_delta: (0., 0.),
+    };
+    assert!(
+        !rays_editor::editor_loop::may_rest(e, &f),
+        "may_rest must stay awake while Playing with dt>0 and a time-reading canvas"
+    );
+    p.freeze = true;
+    let frozen_at = after;
+    p.step(&[], vec![], IDLE_AT);
+    let e = p.e.as_ref().unwrap();
+    assert_eq!(
+        rays_editor::editor_list::timeline(&e.core).frame,
+        frozen_at,
+        "dt==0 must not advance frame/index (may_rest clock_idle arm)"
+    );
+    p.close();
+}
+
 pub fn cases() -> Vec<(&'static str, fn())> {
     vec![
         ("zero_alloc_a_basic", a_basic),
@@ -479,5 +521,6 @@ pub fn cases() -> Vec<(&'static str, fn())> {
         ("zero_alloc_d_typing", d_typing),
         ("zero_alloc_e_click_toggle", e_click_toggle),
         ("zero_alloc_f_basic_static", f_basic_static),
+        ("zero_alloc_may_rest_basic_clock", may_rest_basic_clock),
     ]
 }

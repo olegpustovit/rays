@@ -65,6 +65,14 @@ pub struct Sink {
     size: (i64, i64),
     image: Option<ImageResolver>,
     entries: Vec<Entry>,
+    /// Recycled `Entry::Text` byte buffers (capacity kept across draws).
+    text_bufs: Vec<Vec<u8>>,
+}
+
+impl Sink {
+    fn take_text_buf(&mut self) -> Vec<u8> {
+        self.text_bufs.pop().unwrap_or_default()
+    }
 }
 
 /// `size` is the canvas (for `draw/background`); `image` resolves an image node to a host resource
@@ -75,8 +83,13 @@ pub fn sink(image: Option<ImageResolver>, size: (i64, i64), buffers: &Buffers) -
 
 /// Like [`sink`], but reuses a prior entries Vec's capacity (cleared).
 pub fn sink_from(image: Option<ImageResolver>, size: (i64, i64), buffers: &Buffers, mut entries: Vec<Entry>) -> Sink {
-    entries.clear();
-    Sink { buffers: buffers.clone(), size, image, entries }
+    let mut text_bufs = Vec::new();
+    for entry in entries.drain(..) {
+        if let Entry::Text { text, .. } = entry {
+            text_bufs.push(text);
+        }
+    }
+    Sink { buffers: buffers.clone(), size, image, entries, text_bufs }
 }
 
 fn push(sink: &mut Sink, entry: Entry) -> Result<(), Diagnostic> {
@@ -428,11 +441,10 @@ pub fn compile(draw: &Draw) -> Compiled {
         }),
         Draw::Path { path: p, args } => Box::new(move |vals, sink| self::path(sink, p, &args, vals)),
         Draw::TextRun { at, text, ink: i, size, style } => Box::new(move |vals, sink| {
-            let text = match &vals[text as usize] {
-                Value::Text(s) => s.to_vec(),
-                _ => return Err(v::fail("E_TYPE", "Drawing text is text.")),
+            let Value::Text(s) = &vals[text as usize] else {
+                return Err(v::fail("E_TYPE", "Drawing text is text."));
             };
-            if !text.is_empty() {
+            if !s.is_empty() {
                 let (x, y) = point(&vals[at as usize])?;
                 let size = v::int_of(&vals[size as usize])?;
                 let color = ink(&vals[i as usize])?;
@@ -444,6 +456,10 @@ pub fn compile(draw: &Draw) -> Compiled {
                         _ => return Err(v::fail("E_TYPE", "The font and align of a text run are text.")),
                     },
                 };
+                // Reuse a prior Entry::Text buffer's capacity when the sink was recycled.
+                let mut text = sink.take_text_buf();
+                text.clear();
+                text.extend_from_slice(s);
                 push(sink, Entry::Text { x, y, size, color, text, style })?;
             }
             Ok(())

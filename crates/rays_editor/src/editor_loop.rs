@@ -902,6 +902,9 @@ pub fn may_rest(value: &LoopModel, frame_: &frame::Frame) -> bool {
     // text or chrome actually changes. Requiring hud.is_none() kept post-click idles hot.
     // A playing timeline that reads the clock still rests when dt is 0 (frozen harness) or when
     // every canvas only reads size (static source with width/height): the picture cannot move.
+    // Justified by `test_timeline::playing_dt_advances_frame_index_dt_zero_does_not`: timeline
+    // advances only when Playing && dt>0, so dt==0 is semantically identical to a paused clock.
+    // If frame/index ever advanced at dt==0, this arm would be wrong — narrow it then.
     let clock_idle = frame_.input.dt == 0.0
         || timeline::mode(&editor_list::timeline(core)) != timeline::Mode::Playing
         || !reads_clock(value)

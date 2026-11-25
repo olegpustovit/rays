@@ -819,6 +819,10 @@ pub struct SceneExecution {
     /// Host-side packing buffer reused across uniform uploads (Shared destinations write from here;
     /// DeviceLocal destinations copy through `buffer_staging`).
     uniform_staging: Vec<u8>,
+    /// Packed mesh+uniform bytes for `prepare_upload` reuse (circle radius / animated marks).
+    mesh_upload_scratch: Vec<u8>,
+    /// Reused automatic-signature rows for `finish_prepared_frame` (no per-frame `collect` alloc).
+    signature_scratch: Vec<AutomaticSignature>,
     /// Shared staging buffer reused when a destination is device-local (no unified-memory assumption).
     buffer_staging: Option<(Buffer, i64)>,
     prepared_cache: side_lru::Table,
@@ -1238,6 +1242,8 @@ pub fn create(
                 uniform_low: 0,
                 previous_uniforms: Vec::new(),
                 uniform_staging: Vec::new(),
+                mesh_upload_scratch: Vec::new(),
+                signature_scratch: Vec::new(),
                 buffer_staging: None,
                 // the meshes' bytes: rays.native_stage holds them
                 prepared_cache: side_lru::create(lru::cache("renderer.prepared"), false, CACHE_BYTE_CAPACITY, Box::new(|_, _| {}), 64),
@@ -1464,8 +1470,6 @@ fn prepare_upload(
     }
     let payload_hash = if vertex_stable { None } else { Some(content_hash(mesh, uniform_bytes)) };
     let uniform_offset = uniforms.map(|_| vertex_index_bytes as i64);
-    let mut uniform_copy = runtime_resources::byte_buffer(operation, uniform_bytes.len())?;
-    uniform_copy.extend_from_slice(uniform_bytes);
     let reserved = |item: &CachedRef| scratch_mem_mesh(&value.prepared_scratch, item);
     let reusable: Option<CachedRef> = match &existing {
         Some(item) if item.borrow().bytes >= total && !reserved(item) => Some(item.clone()),
@@ -1482,15 +1486,19 @@ fn prepare_upload(
     };
     match reusable {
         Some(item) => {
-            let mut packed = runtime_resources::byte_buffer(operation, total as usize)?;
-            packed.extend_from_slice(vertices);
-            packed.extend_from_slice(&indices);
-            packed.extend_from_slice(uniform_bytes);
-            write_gpu_bytes(value, &item.borrow().buffer, 0, &packed)?;
-            let (old_key, size) = {
+            // Patch into reserved GPU capacity: reuse host scratch + the cached uniform_copy buf.
+            value.mesh_upload_scratch.clear();
+            value.mesh_upload_scratch.reserve(total as usize);
+            value.mesh_upload_scratch.extend_from_slice(vertices);
+            value.mesh_upload_scratch.extend_from_slice(indices);
+            value.mesh_upload_scratch.extend_from_slice(uniform_bytes);
+            let (old_key, size, buffer) = {
                 let b = item.borrow();
-                (b.key.clone(), b.bytes)
+                (b.key.clone(), b.bytes, b.buffer.clone())
             };
+            let packed = std::mem::take(&mut value.mesh_upload_scratch);
+            write_gpu_bytes(value, &buffer, 0, &packed)?;
+            value.mesh_upload_scratch = packed;
             let stolen = old_key != key;
             if stolen {
                 side_lru::take(&mut value.cache, &skey(&old_key));
@@ -1502,7 +1510,8 @@ fn prepare_upload(
                 b.trusted_source = source_for_trust(mesh, size);
                 b.index_offset = vertices.len() as i64;
                 b.uniform_offset = uniform_offset;
-                b.uniform_copy = uniform_copy;
+                b.uniform_copy.clear();
+                b.uniform_copy.extend_from_slice(uniform_bytes);
                 b.vertex_count = vertex_count;
                 b.index_count = index_count;
                 b.primitive = mesh.primitive;
@@ -1542,6 +1551,8 @@ fn prepare_upload(
             if !uniform_bytes.is_empty() {
                 write(value, offset + indices.len() as i64, uniform_bytes)?;
             }
+            let mut uniform_copy = Vec::new();
+            uniform_copy.extend_from_slice(uniform_bytes);
             let item: CachedRef = Rc::new(RefCell::new(Cached {
                 key: key.to_owned(),
                 payload_hash,
@@ -1842,10 +1853,21 @@ fn texel_format(texel: i64) -> TextureFormat {
     }
 }
 
+/// Borrowed sampler check (avoids `validate_sampler`'s label `String` clone on the warm path).
+fn sampler_ok(d: &SamplerDescriptor) -> bool {
+    d.lod_min.is_finite()
+        && d.lod_max.is_finite()
+        && (d.lod_min as f32).is_finite()
+        && (d.lod_max as f32).is_finite()
+        && d.lod_min >= 0.
+        && d.lod_max >= d.lod_min
+        && (1..=16).contains(&d.max_anisotropy)
+}
+
 fn valid_texture(source: &SampledTexture) -> bool {
     !source.key.is_empty()
         && !source.levels.is_empty()
-        && ogpu_core::validation::validate_sampler(&source.sampler).is_ok()
+        && sampler_ok(&source.sampler)
         && match &source.gpu {
             Some(texture) => {
                 let descriptor = backend::texture_descriptor(texture);
@@ -3814,6 +3836,26 @@ fn plan_batches(value: &mut SceneExecution) -> Result<Vec<Rc<BatchPlan>>, Error>
     Ok(planned)
 }
 
+fn fill_signature_scratch(value: &mut SceneExecution) {
+    let n = value.prepared_scratch.length;
+    value.signature_scratch.clear();
+    value.signature_scratch.extend(value.prepared_scratch.slots[..n].iter().map(automatic_signature));
+}
+
+fn signatures_rc(scratch: &mut Vec<AutomaticSignature>) -> Rc<[AutomaticSignature]> {
+    Rc::from(scratch.as_slice())
+}
+
+fn store_signatures(dest: &mut Rc<[AutomaticSignature]>, scratch: &[AutomaticSignature]) {
+    if Rc::strong_count(dest) == 1 && dest.len() == scratch.len() {
+        if let Some(slots) = Rc::get_mut(dest) {
+            slots.clone_from_slice(scratch);
+            return;
+        }
+    }
+    *dest = Rc::from(scratch);
+}
+
 fn finish_prepared_frame(
     value: &mut SceneExecution,
     frame: Acquired,
@@ -3824,13 +3866,12 @@ fn finish_prepared_frame(
     after_prepare: &mut dyn FnMut(),
 ) -> Result<bool, Error> {
     after_prepare();
-    let signatures: Rc<[AutomaticSignature]> =
-        value.prepared_scratch.slots[..value.prepared_scratch.length].iter().map(automatic_signature).collect();
+    fill_signature_scratch(value);
     let hit = match &value.automatic_submission {
         Some(plan)
             if plan.clear == clear
                 && plan.gpu_vertices.iter().all(gpu_vertices_valid)
-                && plan.payloads == signatures =>
+                && plan.payloads.as_ref() == value.signature_scratch.as_slice() =>
         {
             Some(plan.clone())
         }
@@ -3854,15 +3895,17 @@ fn finish_prepared_frame(
     }
     // Shape-compatible (resource identities may move; pipelines/counts/buffer ids stay): patch the
     // retained batches in place and keep ICBs whose draw parameters still match.
-    if let Some(plan_rc) = value.automatic_submission.as_ref().filter(|plan| {
-        plan.clear == clear && plan.gpu_vertices.iter().all(gpu_vertices_valid) && same_plan_shape(&plan.payloads, &signatures)
-    }) {
-        let mut plan_rc = plan_rc.clone();
-        value.automatic_submission = None;
+    let shape_hit = value.automatic_submission.as_ref().is_some_and(|plan| {
+        plan.clear == clear
+            && plan.gpu_vertices.iter().all(gpu_vertices_valid)
+            && same_plan_shape(&plan.payloads, &value.signature_scratch)
+    });
+    if shape_hit {
+        let mut plan_rc = value.automatic_submission.take().expect("shape_hit");
         let plan = Rc::make_mut(&mut plan_rc);
         if patch_retained_plan(value, plan).is_ok() {
             plan.clear = clear;
-            plan.payloads = signatures;
+            store_signatures(&mut plan.payloads, &value.signature_scratch);
             plan.gpu_vertices.clear();
             for slot in value.prepared_scratch.slots[..value.prepared_scratch.length].iter().rev() {
                 if let Some(gpu) = slot.gpu_vertices.clone() {
@@ -3890,7 +3933,9 @@ fn finish_prepared_frame(
         value.automatic_submission = Some(plan_rc);
     }
     value.icb_stats.misses += 1;
-    let admit = value.automatic_candidate.as_ref().is_some_and(|c| c.clear == clear && c.payloads == signatures);
+    let admit = value.automatic_candidate.as_ref().is_some_and(|c| {
+        c.clear == clear && c.payloads.as_ref() == value.signature_scratch.as_slice()
+    });
     // a plan nothing keeps (a frame unlike the last, without a prepared key) is encoded only
     let retained = prepared_key.is_some() || admit;
     let plan_batches_ = match plan_batches(value) {
@@ -3908,6 +3953,7 @@ fn finish_prepared_frame(
     clear_prepared_scratch(&mut value.prepared_scratch);
     encode_frame(value, &frame, clear, &plan_batches_)?;
     value.previous_uniforms = uniform_slices;
+    let signatures = signatures_rc(&mut value.signature_scratch);
     let plan = retained.then(|| {
         Rc::new(ReplayPlan { clear, payloads: signatures.clone(), batches: plan_batches_, gpu_vertices })
     });

@@ -995,10 +995,80 @@ pub mod layer {
         Blend(Blend),
     }
 
+    thread_local! {
+        static WRAP_ONES: std::cell::RefCell<Vec<Rc<[Node]>>> = const { std::cell::RefCell::new(Vec::new()) };
+        static ORDERED_SCRATCH: std::cell::RefCell<(Vec<Wrapper>, Vec<LayerItem>, Vec<Node>, Vec<Grouped>)> =
+            const { std::cell::RefCell::new((Vec::new(), Vec::new(), Vec::new(), Vec::new())) };
+    }
+
+    fn wrap_one(n: Node) -> Rc<[Node]> {
+        WRAP_ONES.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            while let Some(mut rc) = pool.pop() {
+                if let Some(slice) = Rc::get_mut(&mut rc) {
+                    if let Some(slot) = slice.get_mut(0) {
+                        *slot = n;
+                        return rc;
+                    }
+                }
+            }
+            Rc::from([n])
+        })
+    }
+
+    fn recycle_wrap_one(rc: Rc<[Node]>) {
+        if rc.len() == 1 && Rc::strong_count(&rc) == 1 {
+            WRAP_ONES.with(|pool| pool.borrow_mut().push(rc));
+        }
+    }
+
+    /// Peel wrapper shells into `WRAP_ONES` once staging no longer shares them.
+    fn recycle_wrapped_node(mut node: Node) {
+        loop {
+            let child = match &mut node {
+                Node::Translate(_, _, c)
+                | Node::Rotate(_, c)
+                | Node::Scale(_, _, c)
+                | Node::Affine(_, c)
+                | Node::Clip(_, _, _, _, c)
+                | Node::Blend(_, c) => c,
+                _ => return,
+            };
+            if Rc::strong_count(child) != 1 {
+                return;
+            }
+            let Some(slot) = Rc::get_mut(child).and_then(|s| s.get_mut(0)) else {
+                return;
+            };
+            let inner = std::mem::replace(slot, Node::LayerBreak);
+            let shell = match std::mem::replace(&mut node, Node::LayerBreak) {
+                Node::Translate(_, _, c)
+                | Node::Rotate(_, c)
+                | Node::Scale(_, _, c)
+                | Node::Affine(_, c)
+                | Node::Clip(_, _, _, _, c)
+                | Node::Blend(_, c) => c,
+                _ => return,
+            };
+            recycle_wrap_one(shell);
+            node = inner;
+        }
+    }
+
+    fn recycle_grouped(grouped: &mut Vec<Grouped>) {
+        for g in grouped.drain(..) {
+            if let Grouped::Two(nodes) = g {
+                for n in nodes {
+                    recycle_wrapped_node(n);
+                }
+            }
+        }
+    }
+
     fn wrap_node(wrappers: &[Wrapper], n: Node) -> Node {
         let mut n = n;
         for w in wrappers.iter().rev() {
-            let one: Rc<[Node]> = Rc::from([n]);
+            let one = wrap_one(n);
             n = match w {
                 Wrapper::Translate(x, y) => Node::Translate(*x, *y, one),
                 Wrapper::Rotate(a) => Node::Rotate(*a, one),
@@ -1011,7 +1081,7 @@ pub mod layer {
         n
     }
 
-    fn ordered_items(scene: &[Node]) -> Vec<LayerItem> {
+    fn ordered_items(scene: &[Node]) {
         fn add(wrappers: &mut Vec<Wrapper>, acc: &mut Vec<LayerItem>, list: &[Node]) {
             for n in list {
                 let direct = wrappers.is_empty();
@@ -1055,9 +1125,34 @@ pub mod layer {
                 }
             }
         }
-        let mut acc = Vec::new();
-        add(&mut Vec::new(), &mut acc, scene);
-        acc
+        // Fills TLS LayerItem/Grouped scratch (capacities retained across stage_native calls).
+        ORDERED_SCRATCH.with(|cell| {
+            let (ref mut wrappers, ref mut acc, ref mut nodes, ref mut out) = *cell.borrow_mut();
+            wrappers.clear();
+            acc.clear();
+            add(wrappers, acc, scene);
+            out.clear();
+            nodes.clear();
+            for item in acc.drain(..) {
+                match item {
+                    LayerItem::TwoNode(n) => nodes.push(n),
+                    other => {
+                        if !nodes.is_empty() {
+                            out.push(Grouped::Two(std::mem::take(nodes)));
+                        }
+                        match other {
+                            LayerItem::SegmentNode(n) => out.push(Grouped::Segment(n)),
+                            LayerItem::ThreeNode(v) => out.push(Grouped::Three(v)),
+                            LayerItem::UiItem(u) => out.push(Grouped::Ui(u)),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            if !nodes.is_empty() {
+                out.push(Grouped::Two(std::mem::take(nodes)));
+            }
+        })
     }
 
     enum Grouped {
@@ -1065,31 +1160,6 @@ pub mod layer {
         Segment(DisplayListNode),
         Three(Rc<View3dNode>),
         Ui(UiNode),
-    }
-
-    fn grouped_items(items: Vec<LayerItem>) -> Vec<Grouped> {
-        let mut out = Vec::new();
-        let mut nodes: Vec<Node> = Vec::new();
-        for item in items {
-            match item {
-                LayerItem::TwoNode(n) => nodes.push(n),
-                other => {
-                    if !nodes.is_empty() {
-                        out.push(Grouped::Two(std::mem::take(&mut nodes)));
-                    }
-                    match other {
-                        LayerItem::SegmentNode(n) => out.push(Grouped::Segment(n)),
-                        LayerItem::ThreeNode(v) => out.push(Grouped::Three(v)),
-                        LayerItem::UiItem(u) => out.push(Grouped::Ui(u)),
-                        _ => {}
-                    }
-                }
-            }
-        }
-        if !nodes.is_empty() {
-            out.push(Grouped::Two(nodes));
-        }
-        out
     }
 
     fn same_native_scene(left: &[Node], right: &[Node]) -> bool {
@@ -1342,7 +1412,8 @@ pub mod layer {
         if width <= 0 || height <= 0 {
             return Err(NativeError::Message("invalid scene extent".to_string()));
         }
-        let grouped_list = grouped_items(ordered_items(scene));
+        ordered_items(scene);
+        let mut grouped_list = ORDERED_SCRATCH.with(|cell| std::mem::take(&mut cell.borrow_mut().3));
         let single_two = matches!(grouped_list.as_slice(), [Grouped::Two(_)]);
         let materialized = if single_two || aggregate {
             stage_materialized(density, scene)
@@ -1354,6 +1425,8 @@ pub mod layer {
         let mesh_images: Rc<RefCell<Vec<RImage::Image>>> = Rc::new(RefCell::new(Vec::new()));
         let callbacks = texture_resources(mesh_images.clone());
         let layers: Vec<NativeLayer> = if single_two {
+            recycle_grouped(&mut grouped_list);
+            ORDERED_SCRATCH.with(|cell| cell.borrow_mut().3 = grouped_list);
             vec![NativeLayer::Scene2Layer(scene2.clone(), resources.clone())]
         } else {
             let mut layers = Vec::new();
@@ -1382,6 +1455,8 @@ pub mod layer {
                     }
                 }
             }
+            recycle_grouped(&mut grouped_list);
+            ORDERED_SCRATCH.with(|cell| cell.borrow_mut().3 = grouped_list);
             layers
         };
         let mut clear = (0., 0., 0., 0.);

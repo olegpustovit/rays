@@ -23,6 +23,9 @@ struct Arena {
     /// Recent text Arcs (sticky across gens when bytes match).
     sticky: [Option<(u32, Arc<[u8]>)>; STICKY],
     sticky_next: usize,
+    /// Last changing text Arc: rewritten in place when uniquely held and length matches
+    /// (animated "frame N" → "frame N+1" of the same digit width allocates nothing).
+    ephemeral: Option<Arc<[u8]>>,
     #[cfg(debug_assertions)]
     poisoned: bool,
 }
@@ -33,6 +36,7 @@ thread_local! {
         generation: 1,
         sticky: [None, None, None, None, None, None, None, None],
         sticky_next: 0,
+        ephemeral: None,
         #[cfg(debug_assertions)]
         poisoned: false,
     }) };
@@ -91,13 +95,34 @@ fn touch_sticky(a: &mut Arena, arc: &Arc<[u8]>) {
     }
 }
 
+fn strip_sticky_ptr(a: &mut Arena, ptr: *const [u8]) {
+    for slot in &mut a.sticky {
+        if slot.as_ref().is_some_and(|(_, s)| std::ptr::addr_eq(Arc::as_ptr(s), ptr)) {
+            *slot = None;
+        }
+    }
+}
+
 fn intern_scratch(a: &mut Arena) -> Value {
-    let bytes = a.scratch.as_slice();
-    if let Some(arc) = sticky_get(a, bytes) {
+    if let Some(arc) = sticky_get(a, a.scratch.as_slice()) {
         touch_sticky(a, &arc);
         return Value::Text(arc);
     }
-    let arc: Arc<[u8]> = Arc::from(bytes);
+    // Changing sketch text (frame counter): rewrite the unique ephemeral Arc when length holds.
+    // Drop sticky clones of that Arc first so strong_count can fall to 1.
+    let len = a.scratch.len();
+    if a.ephemeral.as_ref().is_some_and(|arc| arc.len() == len) {
+        let ptr = Arc::as_ptr(a.ephemeral.as_ref().expect("len match"));
+        strip_sticky_ptr(a, ptr);
+        if a.ephemeral.as_ref().is_some_and(|arc| Arc::strong_count(arc) == 1) {
+            let mut arc = a.ephemeral.take().expect("len match");
+            Arc::get_mut(&mut arc).expect("strong_count == 1").copy_from_slice(&a.scratch);
+            a.ephemeral = Some(arc.clone());
+            return Value::Text(arc);
+        }
+    }
+    let arc: Arc<[u8]> = Arc::from(a.scratch.as_slice());
+    a.ephemeral = Some(arc.clone());
     sticky_put(a, arc.clone());
     Value::Text(arc)
 }
@@ -208,6 +233,36 @@ mod tests {
         })
         .unwrap();
         assert_eq!(mem_sys::local_alloc_count() - start, 0, "frozen show+build is alloc-free");
+    }
+
+    #[test]
+    fn ephemeral_same_length_frame_text_allocates_nothing() {
+        begin();
+        let a = build_text::<()>(|out| {
+            out.extend_from_slice(b"1280 x 900  frame 10");
+            Ok(())
+        })
+        .unwrap();
+        let len = match &a {
+            Value::Text(t) => t.len(),
+            _ => panic!(),
+        };
+        reset();
+        begin();
+        // Drop the only external ref so ephemeral is unique for rewrite.
+        drop(a);
+        mem_sys::local_reset();
+        let start = mem_sys::local_alloc_count();
+        let b = build_text::<()>(|out| {
+            out.extend_from_slice(b"1280 x 900  frame 11");
+            Ok(())
+        })
+        .unwrap();
+        let allocs = mem_sys::local_alloc_count() - start;
+        let Value::Text(second) = &b else { panic!() };
+        assert_eq!(allocs, 0, "same-length frame text rewrites ephemeral Arc");
+        assert_eq!(second.as_ref(), b"1280 x 900  frame 11");
+        assert_eq!(len, second.len());
     }
 
     #[test]
