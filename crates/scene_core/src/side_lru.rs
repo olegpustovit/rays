@@ -70,7 +70,8 @@ fn create_inner<K>(owner: lru::Owner, capacity: i64, release: Release<K>, hash: 
     let evictable: Evictable = Arc::new(move |_, value| !guard.lock().expect("pinned ids").contains(&id_of(value)));
     options.release = Some(Arc::new(move |_, value| sink.lock().expect("evicted ids").push(id_of(value))));
     options.evictable = Some(evictable);
-    Table { cache: Cache::with_options(owner, capacity, Arc::new(same_id), options), items: HashMap::new(), next: 1, evicted, pinned, release, hash, equal, promote }
+    let n = usize::try_from(capacity.max(0).min(1024)).unwrap_or(0);
+    Table { cache: Cache::with_options(owner, capacity, Arc::new(same_id), options), items: HashMap::with_capacity(n), next: 1, evicted, pinned, release, hash, equal, promote }
 }
 
 fn settle<K>(table: &mut Table<K>) {

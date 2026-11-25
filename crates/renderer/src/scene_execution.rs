@@ -809,6 +809,8 @@ pub struct SceneExecution {
     in_flight_serial: Option<u64>,
     /// this frame's process-wide number, for UI painters (`UiPass::frame`)
     encoded_frame: u64,
+    /// Reused across frames via `rebegin_commands` after GPU settle (no new CommandsInner Rc).
+    frame_commands: Option<backend::Commands>,
     dead: bool,
     /// A borrowed device (shared with a window) is never destroyed here.
     owns_device: bool,
@@ -1190,6 +1192,7 @@ pub fn create(
                 in_flight: None,
                 in_flight_serial: None,
                 encoded_frame: 0,
+                frame_commands: None,
                 dead: false,
             })
         }
@@ -2687,12 +2690,30 @@ fn submit_frame(value: &mut SceneExecution, frame: &Acquired, commands: &backend
 
 /// Encodes `batches` into one command buffer and completes it.
 fn encode_frame(value: &mut SceneExecution, frame: &Acquired, clear: (f64, f64, f64, f64), batches: &[Rc<BatchPlan>]) -> Result<(), Error> {
-    let commands = match backend::begin_commands(&value.queue) {
-        Ok(commands) => commands,
-        Err(e) => {
-            discard(frame);
-            return Err(e);
-        }
+    let commands = match value.frame_commands.as_ref() {
+        Some(commands) => match backend::rebegin_commands(commands) {
+            Ok(()) => commands.clone(),
+            Err(_) => match backend::begin_commands(&value.queue) {
+                Ok(commands) => {
+                    value.frame_commands = Some(commands.clone());
+                    commands
+                }
+                Err(e) => {
+                    discard(frame);
+                    return Err(e);
+                }
+            },
+        },
+        None => match backend::begin_commands(&value.queue) {
+            Ok(commands) => {
+                value.frame_commands = Some(commands.clone());
+                commands
+            }
+            Err(e) => {
+                discard(frame);
+                return Err(e);
+            }
+        },
     };
     static ENCODED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     value.encoded_frame = ENCODED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -3783,6 +3804,7 @@ pub fn destroy(value: &mut SceneExecution) -> Result<(), Error> {
     }
     let _ = settle(value);
     value.dead = true;
+    value.frame_commands = None;
     let mut first: Option<Error> = None;
     let record = |result: Result<(), Error>, first: &mut Option<Error>| {
         if let Err(e) = result

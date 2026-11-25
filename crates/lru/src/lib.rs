@@ -527,6 +527,7 @@ impl Cache {
 
     pub fn with_options(owner: Owner, capacity: i64, lookup_equal: Arc<KeyLookupEqual>, options: CacheOptions) -> Self {
         let charged = Arc::new(AtomicI64::new(0));
+        let slots = initial_capacity(capacity);
         let state = Arc::new(SharedTable {
             state: Mutex::new(TableState::Cache(CacheState {
                 capacity: capacity.max(0),
@@ -536,9 +537,10 @@ impl Cache {
                 lookup_equal,
                 evictable: options.evictable.unwrap_or_else(|| Arc::new(|_, _| true)),
                 release: options.release.unwrap_or_else(|| Arc::new(|_, _| {})),
-                buckets: HashMap::with_capacity(initial_capacity(capacity)),
-                entries: Vec::new(),
-                free: Vec::new(),
+                buckets: HashMap::with_capacity(slots),
+                // Reserve entry slots so warm inserts reuse free indices without growing the Vec.
+                entries: Vec::with_capacity(slots),
+                free: Vec::with_capacity(slots),
                 oldest: None,
                 length: 0,
                 charged: Arc::clone(&charged),
