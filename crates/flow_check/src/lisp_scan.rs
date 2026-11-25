@@ -205,8 +205,8 @@ pub fn indent(text: &str, caret: usize) -> String {
     " ".repeat(width)
 }
 
-pub fn word(text: &str, token: &Token) -> String {
-    text.get(token.start..token.stop).unwrap_or_default().to_owned()
+pub fn word<'a>(text: &'a str, token: &Token) -> &'a str {
+    text.get(token.start..token.stop).unwrap_or_default()
 }
 
 pub fn index_at(tokens: &[Token], at: usize) -> Option<usize> {
@@ -247,7 +247,7 @@ pub fn item_stop(tokens: &[Token], j: usize) -> usize {
         .map_or_else(|| tokens.last().map_or(token.stop, |last| last.stop), |close| close.stop)
 }
 
-pub fn head_before(text: &str, tokens: &[Token], i: usize) -> Option<String> {
+pub fn head_before<'a>(text: &'a str, tokens: &[Token], i: usize) -> Option<&'a str> {
     let mut depth = 0;
     for j in (0..i.min(tokens.len())).rev() {
         match tokens[j].kind {
@@ -273,11 +273,29 @@ fn snippet(text: &str, tokens: &[Token], j: usize) -> String {
     String::from_utf8_lossy(value).replace('\n', " ")
 }
 
-pub fn bound(
-    text: &str,
+/// A binding's doc, built only when a completion/describe row shows it.
+#[derive(Clone, Copy, Debug)]
+pub enum BoundDoc<'a> {
+    Param { head: &'a str },
+    Binding { head: &'a str, value_at: usize },
+    Input { form_at: usize },
+}
+
+impl BoundDoc<'_> {
+    pub fn render(self, text: &str, tokens: &[Token]) -> String {
+        match self {
+            BoundDoc::Param { head } => format!("parameter of {head}"),
+            BoundDoc::Binding { head, value_at } => format!("{head} binding · {}", snippet(text, tokens, value_at)),
+            BoundDoc::Input { form_at } => format!("input · {}", snippet(text, tokens, form_at)),
+        }
+    }
+}
+
+pub fn bound<'a>(
+    text: &'a str,
     tokens: &[Token],
     limit: usize,
-) -> (Vec<(String, String)>, Vec<String>, Vec<String>) {
+) -> (Vec<(&'a str, BoundDoc<'a>)>, Vec<&'a str>, Vec<&'a str>) {
     let mut names = Vec::new();
     let mut defns = Vec::new();
     let mut graphs = Vec::new();
@@ -295,7 +313,7 @@ pub fn bound(
                 }
             }
             Kind::Open(_) | Kind::Unmatched if text.as_bytes().get(tokens[i].start) == Some(&b'[') => {
-                match head_before(text, tokens, i).as_deref() {
+                match head_before(text, tokens, i) {
                     Some(head) if BINDERS.contains(&head) => {
                         let items = items(tokens, i);
                         let all = head == "fn";
@@ -304,12 +322,12 @@ pub fn bound(
                                 && tokens[j].start < limit
                                 && (all || position % 2 == 0)
                             {
-                                let description = if all || position + 1 >= items.len() {
-                                    format!("parameter of {head}")
+                                let doc = if all || position + 1 >= items.len() {
+                                    BoundDoc::Param { head }
                                 } else {
-                                    format!("{head} binding · {}", snippet(text, tokens, items[position + 1]))
+                                    BoundDoc::Binding { head, value_at: items[position + 1] }
                                 };
-                                names.push((word(text, &tokens[j]), description));
+                                names.push((word(text, &tokens[j]), doc));
                             }
                         }
                     }
@@ -318,10 +336,7 @@ pub fn bound(
                             if matches!(tokens[j].kind, Kind::Open(_) | Kind::Unmatched)
                                 && tokens.get(j + 1).is_some_and(|next| next.kind == Kind::Head)
                             {
-                                names.push((
-                                    word(text, &tokens[j + 1]),
-                                    format!("input · {}", snippet(text, tokens, j)),
-                                ));
+                                names.push((word(text, &tokens[j + 1]), BoundDoc::Input { form_at: j }));
                             }
                         }
                     }
@@ -334,7 +349,7 @@ pub fn bound(
     (names, defns, graphs)
 }
 
-pub fn kw_value(text: &str, tokens: &[Token], i: usize, kw: &str) -> Option<String> {
+pub fn kw_value<'a>(text: &'a str, tokens: &[Token], i: usize, kw: &str) -> Option<&'a str> {
     let items = items(tokens, i);
     for pair in items.windows(2) {
         let (key, value) = (pair[0], pair[1]);
@@ -351,13 +366,13 @@ pub fn context_of(text: &str, tokens: &[Token], open_stack: &[(char, usize)]) ->
         if i + 1 < tokens.len() && tokens[i + 1].kind == Kind::Head {
             let head = word(text, &tokens[i + 1]);
             if head == "graph" || head == "defn" {
-                if let Some(context) = kw_value(text, tokens, i, ":context") { return context; }
+                if let Some(context) = kw_value(text, tokens, i, ":context") { return context.to_owned(); }
                 let depth = match tokens[i].kind { Kind::Open(depth) => depth, _ => 0 };
                 for token in tokens.iter().skip(i + 2).take_while(|token| token.kind != Kind::Close(depth)) {
                     if token.kind != Kind::Head { continue; }
                     let name = word(text, token);
-                    let context = crate::op::find_ref(&[], &name, &flow_syntax::context::value()).map(|operator| operator.ctx)
-                        .or_else(|| flow_syntax::context::of_qualified(&name));
+                    let context = crate::op::find_ref(&[], name, &flow_syntax::context::value()).map(|operator| operator.ctx)
+                        .or_else(|| flow_syntax::context::of_qualified(name));
                     if let Some(context) = context.filter(|context| *context != flow_syntax::context::value()) {
                         return flow_syntax::context::name(context).to_owned();
                     }
@@ -398,8 +413,8 @@ mod tests {
         assert_eq!(top.iter().map(|&i| tokens[i].start).collect::<Vec<_>>(), vec![1, 7, 9, 23]);
         assert_eq!(item_stop(&tokens, top[2]), 22);
         let inner = index_at(&tokens, 13).unwrap();
-        assert_eq!(head_before(text, &tokens, inner + 1).as_deref(), Some("inner"));
-        assert_eq!(head_before(text, &tokens, top[3]).as_deref(), Some("outer"));
+        assert_eq!(head_before(text, &tokens, inner + 1), Some("inner"));
+        assert_eq!(head_before(text, &tokens, top[3]), Some("outer"));
     }
 
     #[test]
@@ -407,18 +422,18 @@ mod tests {
         let text = "(workspace w (graph g :context scene [(depth : int 5)] (let* [ring (sop/box) n 2] (fn [x y] x))))";
         let (tokens, _, stack) = lex(text);
         let (names, _defns, graphs) = bound(text, &tokens, text.len());
-        assert!(names.iter().any(|(name, _)| name == "depth"));
-        assert!(names.iter().any(|(name, _)| name == "ring"));
-        assert!(names.iter().any(|(name, _)| name == "n"));
-        assert!(names.iter().any(|(name, _)| name == "x"));
+        assert!(names.iter().any(|(name, _)| *name == "depth"));
+        assert!(names.iter().any(|(name, _)| *name == "ring"));
+        assert!(names.iter().any(|(name, _)| *name == "n"));
+        assert!(names.iter().any(|(name, _)| *name == "x"));
         let definitions = "(defn sample :context value [] 1) (defmacro other [x] x)";
         let (definition_tokens, _, _) = lex(definitions);
         let (_, defn_names, _) = bound(definitions, &definition_tokens, definitions.len());
-        assert_eq!(defn_names, vec!["sample".to_owned(), "other".to_owned()]);
+        assert_eq!(defn_names, vec!["sample", "other"]);
         assert_eq!(graphs, vec!["g"]);
 
         let graph = index_at(&tokens, 13).unwrap();
-        assert_eq!(kw_value(text, &tokens, graph, ":context").as_deref(), Some("scene"));
+        assert_eq!(kw_value(text, &tokens, graph, ":context"), Some("scene"));
         assert_eq!(context_of(text, &tokens, &stack), "sop");
         let graph_text = "(graph g :context scene [x";
         let (graph_tokens, _, graph_stack) = lex(graph_text);
