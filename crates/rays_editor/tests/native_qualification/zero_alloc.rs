@@ -24,7 +24,7 @@ fn action_rounds() -> u64 {
 /// (rust allocs/unit, native mallocs/unit). Rust = counting allocator; native from trace when available.
 /// Seeded at measured (2026-11-25, after Z1/Z2/Z4) + 5%, rounded up. Lanes lower these toward 0 / ≤12.
 // Ceilings = measured + 5% after Z6b Image-run + Atlas direct quads (2026-11-25, RAYS_SLOW).
-const A_BASIC: (u64, u64) = (210, 9);
+const A_BASIC: (u64, u64) = (96, 9);
 const A_EMPTY: (u64, u64) = (0, 9);
 const A_BARE: (u64, u64) = (0, 9);
 const A_ISOGRID: (u64, u64) = (0, 13);
