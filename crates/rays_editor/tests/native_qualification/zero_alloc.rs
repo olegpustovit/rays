@@ -25,10 +25,10 @@ fn action_rounds() -> u64 {
 /// Seeded at measured (2026-11-25, after Z1/Z2/Z4) + 5%, rounded up. Lanes lower these toward 0 / ≤12.
 // Ceilings = measured + 5% after Z8 rest-picture borrow + device Arc reuse (2026-11-25).
 const A_BASIC: (u64, u64) = (383, 59);
-const A_EMPTY: (u64, u64) = (18, 10);
-const A_BARE: (u64, u64) = (18, 10);
-const A_ISOGRID: (u64, u64) = (29, 15);
-const A_ISOSEL: (u64, u64) = (29, 15);
+const A_EMPTY: (u64, u64) = (16, 9);
+const A_BARE: (u64, u64) = (16, 9);
+const A_ISOGRID: (u64, u64) = (23, 13);
+const A_ISOSEL: (u64, u64) = (23, 13);
 const B_HOVER_GRAPH: (u64, u64) = (182, 15);
 const B_HOVER_INSPECTOR: (u64, u64) = (182, 15);
 const C_PAN: (u64, u64) = (158, 15);
