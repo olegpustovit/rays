@@ -477,8 +477,8 @@ pub fn pick_in_views(value: &mut LoopModel, focused: &Focus, camera: &V::Camera,
     // a payload carried over a viewport: the surface under the pointer is the place
     if let Some(key) = editor_host::carry_viewport(&core) {
         if !core.map_view {
-            if let Some((_, bounds)) = editor_shell::view_bodies(&(&*core).into(), raw_frame).into_iter().find(|(k, _)| *k == key) {
-                let film = V::film(extra, &look_key_of(&focused.viewing, &key), bounds);
+            if let Some((_, bounds)) = editor_shell::view_bodies(&(&*core).into(), raw_frame).iter().find(|(k, _)| *k == key) {
+                let film = V::film(extra, &look_key_of(&focused.viewing, &key), *bounds);
                 let (_, _, w, h) = film;
                 if w > 0 && h > 0 {
                     let view_ = camera_for(&focused.viewing, camera, &focused.cameras, extra, pending, &key);
@@ -746,7 +746,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let context_error = if composed_.errors.is_empty() { context_error } else { Some(composed_.errors.join("; ")) };
     let rendered = composed_.rendered.clone();
     let views = composed_.views.clone();
-    let bodies: Vec<(String, Bounds)> = if V::ui_visible(&control) { editor_shell::view_bodies(&(&value.core).into(), &raw_frame) } else { vec![("@hidden".to_string(), (0, 0, raw_frame.input.size.0, raw_frame.input.size.1))] };
+    let bodies: std::rc::Rc<Vec<(String, Bounds)>> = if V::ui_visible(&control) { editor_shell::view_bodies(&(&value.core).into(), &raw_frame) } else { std::rc::Rc::new(vec![("@hidden".to_string(), (0, 0, raw_frame.input.size.0, raw_frame.input.size.1))]) };
     let pending = value.pending_render.is_some();
     let focused_rendered = focused_image_of(&focused.viewing, &views, &rendered);
     let render_views: Vec<(String, Bounds, rays::camera::Camera, rays::scene3::Scene3)> = bodies
@@ -758,7 +758,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
         .collect();
     let focus = focus_key_of(&focused.viewing);
     let extra = V::render(extra, raw_frame.pixel_scale, Some(focus), render_views);
-    with_view_overlays(value, frame.input.t, &extra, &focused.viewing, &camera, &focused.cameras, pending, &bodies);
+    with_view_overlays(value, frame.input.t, &extra, &focused.viewing, &camera, &focused.cameras, pending, bodies.as_slice());
     let map = match (&baked, &value.map) {
         (Some(b), Some((source, image_))) if Rc::ptr_eq(b, source) || !value.core.map_view => Some((source.clone(), image_.clone())),
         (Some(b), previous) if value.core.map_view => {

@@ -219,9 +219,13 @@ pub fn compose_view(
     // Compose newest floating windows first.
     let mut painted: Vec<Nodes> = Vec::new();
     let mut windows: Vec<(Option<i64>, Nodes)> = Vec::new();
-    for (key, bounds) in editor_shell::view_bodies_in(&core.into(), &geometry) {
-        let image = if bounds == viewport && core.map_view { paint_world(viewport) } else { worlds(paint_view, camera_of, rendered, views, view_visible, &[(key.clone(), bounds)]) };
-        match floating.iter().find(|(k, _, _)| *k == key) {
+    for (key, bounds) in editor_shell::view_bodies_in(&core.into(), &geometry).iter() {
+        let image = if *bounds == viewport && core.map_view {
+            paint_world(viewport)
+        } else {
+            worlds(paint_view, camera_of, rendered, views, view_visible, &[(key.clone(), *bounds)])
+        };
+        match floating.iter().find(|(k, _, _)| k == key) {
             None => painted.insert(0, image),
             Some((_, path, (x, y, w, h))) => {
                 let root = root_of(&Panel::View(key.clone()), path);

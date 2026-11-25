@@ -505,16 +505,9 @@ pub fn follow_focus(value: &LoopModel, core: &m::EditorModel, frame_: &frame::Fr
 
 /// `follow_focus` over a geometry already laid out.
 pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &rays_shell::layout::Geometry) -> Focus {
-    let keys: Vec<String> = g
-        .leaves
-        .iter()
-        .filter_map(|leaf| match &leaf.panel {
-            Panel::View(key) => Some(key.clone()),
-            _ => None,
-        })
-        .collect();
+    let has_view = |key: &str| g.leaves.iter().any(|leaf| matches!(&leaf.panel, Panel::View(k) if k == key));
     let mut cameras = value.cameras.clone();
-    cameras.retain(|(key, _)| keys.contains(key));
+    cameras.retain(|(key, _)| has_view(key));
     let unchanged = Focus { viewing: value.viewing.clone(), camera: value.camera.clone(), cameras };
     match editor_shell::active_view(&core.into(), g) {
         Some(leaf) => match &leaf.panel {
@@ -532,7 +525,7 @@ pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &rays_shell:
                     Focus { viewing: Some(key.clone()), cameras: others, ..unchanged }
                 }
                 Some(previous) => {
-                    let mut kept: Vec<(String, V::Camera)> = if keys.contains(previous) {
+                    let mut kept: Vec<(String, V::Camera)> = if has_view(previous) {
                         let mut k = vec![(previous.clone(), value.camera.clone())];
                         k.extend(unchanged.cameras.iter().filter(|(p, _)| p != previous).cloned());
                         k

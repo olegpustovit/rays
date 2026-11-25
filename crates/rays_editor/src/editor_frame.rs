@@ -370,7 +370,7 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
 
 /// Apply the grip, drop and timeline intents after drawing the panes.
 #[allow(clippy::too_many_arguments)]
-pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: &'a Shell, keymap: &[Command], g: &layout::Geometry, intents: &[chrome::Intent], mut grips: Vec<chrome::Intent>, strip_layout: Vec<chrome::Intent>, timeline_leaves: &[(Leaf, pxui::Handle)], platform: input::Platform, ui: &mut Ui) -> (Cow<'a, Shell>, Vec<Change>) {
+pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: &'a Shell, keymap: &[Command], g: &layout::Geometry, intents: &[chrome::Intent], mut grips: Vec<chrome::Intent>, strip_layout: Vec<chrome::Intent>, timeline_leaves: &[&(Leaf, pxui::Handle)], platform: input::Platform, ui: &mut Ui) -> (Cow<'a, Shell>, Vec<Change>) {
     let state = |path: &[usize]| panel_state(value, path);
     let dragging = intents.iter().find_map(|i| match i {
         chrome::Intent::Dragging(path, released) => Some((path.clone(), *released)),
@@ -384,7 +384,7 @@ pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: &
         }
     };
     let mut timeline_menus: Vec<chrome::Intent> = Vec::new();
-    for (leaf, boxed) in timeline_leaves {
+    for &(leaf, boxed) in timeline_leaves {
         if leaf.panel != Panel::Timeline || leaf.body == (0, 0, 0, 0) {
             continue;
         }
@@ -614,7 +614,7 @@ pub fn draw_inspectors<'a>(
     focus_path: &Option<layout::Path>,
     pane_of: &dyn Fn(&Host) -> ModelView<'a>,
     in_use: &dyn Fn(&ModelView<'a>) -> bool,
-    roots: &[(Leaf, pxui::Handle)],
+    roots: &[&(Leaf, pxui::Handle)],
     ui: &mut Ui,
 ) -> (Option<PanelResult>, Vec<Change>, Vec<(String, Value)>, Vec<scope::Change>, Vec<(carry_mod::Place, bool)>, bool) {
     // the split a card of the editor graph is, sized another way from what it shows now
@@ -638,7 +638,7 @@ pub fn draw_inspectors<'a>(
     let mut workspace_moves = Vec::new();
     let mut inspector_drops = Vec::new();
     let mut live_cook = value.live_cook;
-    for (index, (leaf, root)) in roots.iter().enumerate() {
+    for (index, (leaf, root)) in roots.iter().copied().enumerate() {
         let host: Host = (panel_key(&value.doc, &leaf.path), leaf.path.clone(), leaf.panel.clone(), HostKind::List);
         let pane = pane_of(&host);
         let mine = in_use(&pane);
@@ -1015,7 +1015,17 @@ pub fn update_frame(
     value.focus = held_focus;
     let held_keys = frame_.input.keys.clone();
     let platform = ui_platform(&*value);
-    let keymap_refs: Vec<&Command> = if frame_.input.events.is_empty() { Vec::new() } else { keymap.iter().collect() };
+    // Pointer-only frames never match a chord; skip building the keymap ref vec (hover path).
+    let need_keymap = frame_.input.events.iter().any(|e| {
+        matches!(
+            e,
+            Event::KeyPressed(_)
+                | Event::KeyReleased(_)
+                | Event::TextInput(_)
+                | Event::TextEditing { .. }
+        )
+    });
+    let keymap_refs: Vec<&Command> = if need_keymap { keymap.iter().collect() } else { Vec::new() };
     let (leader, commands, routed) = router::step(
         &value.held_keys,
         platform,
@@ -1347,7 +1357,7 @@ pub fn update_frame(
             };
             // every leaf draws in its own root: its PXUI keys are seeded by it
             let root_at = |path: &layout::Path| roots.iter().find(|(l, _)| l.path == *path && l.body.3 > 0);
-            let of_kind = |panel: &Panel| -> Vec<(Leaf, pxui::Handle)> { roots.iter().filter(|(l, _)| l.panel == *panel && visible(&workspace, panel) && l.body.3 > 0).cloned().collect() };
+            let of_kind = |panel: &Panel| -> Vec<&(Leaf, pxui::Handle)> { roots.iter().filter(|(l, _)| l.panel == *panel && visible(&workspace, panel) && l.body.3 > 0).collect() };
             let none_root = |ui: &mut Ui| chrome::pane_root(ui, frame_, (0, 0, 0, 0), "workspace-pane-none");
             let graph_root = match graph_host.as_ref().and_then(|l| root_at(&l.path)) {
                 Some((_, b)) => *b,
@@ -1430,9 +1440,9 @@ pub fn update_frame(
             // every timeline leaf, else the strip under the tree
             let timeline_leaves = of_kind(&Panel::Timeline);
             let timeline_slots: Vec<(layout::Bounds, pxui::Handle, bool)> = if timeline_leaves.is_empty() {
-                timeline_root.iter().map(|(_, b)| (g.timeline_at, b.clone(), true)).collect()
+                timeline_root.iter().map(|(_, b)| (g.timeline_at, *b, true)).collect()
             } else {
-                timeline_leaves.iter().map(|(l, b)| (l.body, b.clone(), false)).collect()
+                timeline_leaves.iter().map(|&&(ref l, b)| (l.body, b, false)).collect()
             };
             let (timeline_intents, strip_layout) = draw_timeline_pane(ui, frame_, &value.timeline, value.timeline_frames, &timeline_slots, &timeline_root, g.timeline_at);
             let (selection, grab, handle_ops, handle_changes) = draw_handles(&(&*value).into(), frame_, &workspace, selection, &selected_obj, lowered_level, scope_active, active, &view_root, view_handles, ui);

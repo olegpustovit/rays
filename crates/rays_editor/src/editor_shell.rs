@@ -240,19 +240,56 @@ pub fn panes_in<'a>(value: &ModelView<'a>, g: &layout::Geometry) -> layout::Pane
 }
 
 /// The viewports on screen and the bodies they are drawn in.
-pub fn view_bodies<'a>(value: &ModelView<'a>, frame: &frame::Frame) -> Vec<(String, layout::Bounds)> {
+pub fn view_bodies<'a>(value: &ModelView<'a>, frame: &frame::Frame) -> std::rc::Rc<Vec<(String, layout::Bounds)>> {
     view_bodies_in(value, &geometry(value, &value.workspace, frame))
 }
 
 /// `view_bodies` of a geometry already laid out.
-pub fn view_bodies_in<'a>(value: &ModelView<'a>, g: &layout::Geometry) -> Vec<(String, layout::Bounds)> {
-    g.leaves
+pub fn view_bodies_in<'a>(value: &ModelView<'a>, g: &layout::Geometry) -> std::rc::Rc<Vec<(String, layout::Bounds)>> {
+    thread_local! {
+        static CACHE: std::cell::RefCell<Option<(usize, u64, std::rc::Rc<Vec<(String, layout::Bounds)>>)>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    let leaf_ptr = g.leaves.as_ptr() as usize;
+    let mut h = 0u64;
+    for leaf in &g.leaves {
+        if let Panel::View(key) = &leaf.panel {
+            h = h.wrapping_mul(131).wrapping_add(key.len() as u64);
+            for b in key.as_bytes() {
+                h = h.wrapping_mul(31).wrapping_add(*b as u64);
+            }
+            let collapsed = panel_state(value, &leaf.path).collapsed;
+            h = h.wrapping_mul(2).wrapping_add(u64::from(collapsed));
+            let (x, y, w, hh) = leaf.body;
+            h = h
+                .wrapping_mul(17)
+                .wrapping_add(x as u64)
+                .wrapping_mul(17)
+                .wrapping_add(y as u64)
+                .wrapping_mul(17)
+                .wrapping_add(w as u64)
+                .wrapping_mul(17)
+                .wrapping_add(hh as u64);
+        }
+    }
+    if let Some(hit) = CACHE.with(|c| {
+        c.borrow()
+            .as_ref()
+            .and_then(|(p, hh, v)| if *p == leaf_ptr && *hh == h { Some(v.clone()) } else { None })
+    }) {
+        return hit;
+    }
+    let bodies: Vec<(String, layout::Bounds)> = g
+        .leaves
         .iter()
         .filter_map(|leaf| match &leaf.panel {
             Panel::View(key) if !panel_state(value, &leaf.path).collapsed => Some((key.clone(), leaf.body)),
             _ => None,
         })
-        .collect()
+        .collect();
+    let rc = std::rc::Rc::new(bodies);
+    CACHE.with(|c| *c.borrow_mut() = Some((leaf_ptr, h, rc.clone())));
+    rc
 }
 
 pub fn view_visible<'a>(value: &ModelView<'a>) -> bool {

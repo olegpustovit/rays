@@ -730,9 +730,9 @@ pub fn draw_outline_panes<'r>(
 }
 
 /// The spreadsheet panels: each remembers which object's sheet it shows.
-pub fn draw_spreadsheet_panes<'a>(ui: &mut Ui, frame_: &frame::Frame, value: &ModelView<'a>, panes: &[(Leaf, pxui::Handle)], locals: Vec<(Key, Local)>) -> Vec<(Key, Local)> {
+pub fn draw_spreadsheet_panes<'a>(ui: &mut Ui, frame_: &frame::Frame, value: &ModelView<'a>, panes: &[&(Leaf, pxui::Handle)], locals: Vec<(Key, Local)>) -> Vec<(Key, Local)> {
     let mut locals = locals;
-    for (leaf, root) in panes {
+    for &(leaf, root) in panes {
         let key = panel_key(&value.doc, &leaf.path);
         let pane = shown_as(value, (&key, &leaf.path, &leaf.panel));
         let mut local = local_of(&locals, &key);

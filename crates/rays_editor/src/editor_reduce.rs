@@ -1423,46 +1423,64 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         let volatile = flow_sop::lower::is_volatile(&doc.workspace.lowered);
         cook::set_volatile(&previous_cook, Arc::new(move |id| volatile(id) || roots.contains(&id)));
     }
-    let probes_wanted: Vec<(i64, i64)> = match pane_laid(&(&*value2).into()) {
-        Some(k) if !k.targets.is_empty() && scope_name(&(&*value2).into()).is_some() => {
-            // only the footers drawn and the selection are counted, not every node of the graph
-            let view = pane_view(&(&*value2).into());
-            let mut shown = rays_graph::scope_frame::inspect::footer_paths(view);
-            shown.extend(scope::selected(view).iter().cloned());
-            k.targets.iter().filter_map(|(path, target)| if shown.contains(path) { Some(*target) } else { None }).collect()
-        }
-        _ => Vec::new(),
+    // Hover/idle at rest: keep previous cook. live_cook is a setting (usually on);
+    // Playing timelines still emit Advanced every frame — cook is already settled.
+    let skip_cook = std::sync::Arc::ptr_eq(&doc, &previous_doc)
+        && cook::at_rest(&previous_cook)
+        && !effects.cook
+        && frame_request.is_none();
+    let (cooked_opt, lit_cache) = if skip_cook {
+        (None, value2.lit.clone())
+    } else {
+        let probes_wanted: Vec<(i64, i64)> = match pane_laid(&(&*value2).into()) {
+            Some(k) if !k.targets.is_empty() && scope_name(&(&*value2).into()).is_some() => {
+                let view = pane_view(&(&*value2).into());
+                let mut shown = rays_graph::scope_frame::inspect::footer_paths(view);
+                shown.extend(scope::selected(view).iter().cloned());
+                k.targets.iter().filter_map(|(path, target)| if shown.contains(path) { Some(*target) } else { None }).collect()
+            }
+            _ => Vec::new(),
+        };
+        let (lit, lit_cache) = lit_tags(&(&*value2).into());
+        let default_pump = || std::thread::sleep(std::time::Duration::from_micros(500));
+        let pump_ref: &dyn Fn() = match pump {
+            Some(p) => p,
+            None => &default_pump,
+        };
+        let gpu_config = gpu.cloned().unwrap_or_else(|| value2.gpu.clone());
+        let cooked = cook::update(
+            Some(&gpu_config),
+            Some(value2.live_frame.clone()),
+            result.live_cook,
+            &probes_wanted,
+            &lit,
+            Some(pump_ref),
+            &previous_cook,
+            &doc.settings,
+            &geometry_objects(&*value2),
+            result.edit_error.clone(),
+            effects,
+            &timeline_changes,
+            &timeline,
+            &frame_,
+            frame_request,
+        );
+        (Some(cooked), lit_cache)
     };
-    let (lit, lit_cache) = lit_tags(&(&*value2).into());
-    let default_pump = || std::thread::sleep(std::time::Duration::from_micros(500));
-    let pump_ref: &dyn Fn() = match pump {
-        Some(p) => p,
-        None => &default_pump,
-    };
-    let gpu_config = gpu.cloned().unwrap_or_else(|| value2.gpu.clone());
-    let cooked = cook::update(
-        Some(&gpu_config),
-        Some(value2.live_frame.clone()),
-        result.live_cook,
-        &probes_wanted,
-        &lit,
-        Some(pump_ref),
-        &previous_cook,
-        &doc.settings,
-        &geometry_objects(&*value2),
-        result.edit_error.clone(),
-        effects,
-        &timeline_changes,
-        &timeline,
-        &frame_,
-        frame_request,
-    );
-    let (framing, framed) = framing_step(&*value2, &doc, &cooked, frame_request, &actions, &frame_, &result);
     let document_changed = !Arc::ptr_eq(&doc, &previous_doc);
     let (carry_value, pick_error) = pick_up(&*value2, &actions, &frame_, carry_report);
+    let (framing, framed, prepared_changed, edit_error, cook_framed, cooked_run) = match cooked_opt {
+        None => (value2.framing, None, false, value2.edit_error.clone(), false, None),
+        Some(cooked) => {
+            let cook_framed = cooked.framed.is_some();
+            let (framing, framed) = framing_step(&*value2, &doc, &cooked, frame_request, &actions, &frame_, &result);
+            let prepared_changed = cooked.prepared_changed && !same_pieces(cook::pieces(&cooked.cook), cook::pieces(&previous_cook));
+            let edit_error = cooked.edit_error.clone();
+            (framing, framed, prepared_changed, edit_error, cook_framed, Some(cooked))
+        }
+    };
     // a cook that gave back every piece it had (the text changed, the objects did not) leaves
     // nothing to recompose, and no accumulating render to restart
-    let prepared_changed = cooked.prepared_changed && !same_pieces(cook::pieces(&cooked.cook), cook::pieces(&previous_cook));
     let new_notice = if guide_error.is_some() {
         guide_error
     } else if let Some(m) = pick_error {
@@ -1486,33 +1504,41 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let notice_at = value2.notice_at;
     let core = value2;
     core.timeline = timeline;
-    // Warm idle: only quiet/schedule meta moved — mutate the existing Rc instead of boxing a new Cook.
-    let reuse_cook = !cooked.prepared_changed
-        && cooked.cook.results == previous_cook.results
-        && cooked.cook.error == previous_cook.error
-        && cooked.cook.seconds == previous_cook.seconds
-        && std::rc::Rc::ptr_eq(&cooked.cook.pieces, &previous_cook.pieces)
-        && std::rc::Rc::ptr_eq(&cooked.cook.summaries, &previous_cook.summaries)
-        && std::sync::Arc::ptr_eq(&cooked.cook.sources, &previous_cook.sources);
-    drop(previous_cook);
-    if reuse_cook {
-        if let Some(c) = std::rc::Rc::get_mut(&mut core.cook) {
-            c.quiet = cooked.cook.quiet;
-            c.schedule = cooked.cook.schedule;
-            c.force = cooked.cook.force;
-            c.probe_job = cooked.cook.probe_job;
-            c.probes_owed = cooked.cook.probes_owed;
-            c.probing = cooked.cook.probing;
-            c.framing = cooked.cook.framing;
-            c.settings = cooked.cook.settings;
-        } else {
-            core.cook = std::rc::Rc::new(cooked.cook);
+    match cooked_run {
+        None => {
+            // skip_cook: keep the existing Rc (value2.cook == previous_cook).
+            drop(previous_cook);
         }
-    } else {
-        core.cook = std::rc::Rc::new(cooked.cook);
+        Some(cooked) => {
+            // Warm idle: only quiet/schedule meta moved — mutate the existing Rc instead of boxing a new Cook.
+            let reuse_cook = !cooked.prepared_changed
+                && cooked.cook.results == previous_cook.results
+                && cooked.cook.error == previous_cook.error
+                && cooked.cook.seconds == previous_cook.seconds
+                && std::rc::Rc::ptr_eq(&cooked.cook.pieces, &previous_cook.pieces)
+                && std::rc::Rc::ptr_eq(&cooked.cook.summaries, &previous_cook.summaries)
+                && std::sync::Arc::ptr_eq(&cooked.cook.sources, &previous_cook.sources);
+            drop(previous_cook);
+            if reuse_cook {
+                if let Some(c) = std::rc::Rc::get_mut(&mut core.cook) {
+                    c.quiet = cooked.cook.quiet;
+                    c.schedule = cooked.cook.schedule;
+                    c.force = cooked.cook.force;
+                    c.probe_job = cooked.cook.probe_job;
+                    c.probes_owed = cooked.cook.probes_owed;
+                    c.probing = cooked.cook.probing;
+                    c.framing = cooked.cook.framing;
+                    c.settings = cooked.cook.settings;
+                } else {
+                    core.cook = std::rc::Rc::new(cooked.cook);
+                }
+            } else {
+                core.cook = std::rc::Rc::new(cooked.cook);
+            }
+        }
     }
     core.lit = lit_cache;
-    core.edit_error = cooked.edit_error.clone();
+    core.edit_error = edit_error;
     core.status_fps = status_fps;
     core.status_fps_at = status_fps_at;
     core.last_dt = frame_.input.dt;
@@ -1530,7 +1556,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     core.prompt = prompt;
     core.queued = queued;
     core.carry = carry_value;
-    core.framing = if cooked.framed.is_some() { None } else { framing };
+    core.framing = if cook_framed { None } else { framing };
     core.notice = new_notice;
     core.notice_at = if notice_changed { frame_.input.t } else { notice_at };
     let scene_changed = carry_changed || !kg::same(&doc.scene, &previous_doc.scene) || prepared_changed;
