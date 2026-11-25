@@ -37,7 +37,7 @@ const C_ZOOM: (u64, u64) = (139, 13);
 const D_TYPING: (u64, u64) = (385, 13);
 const E_CLICK_KEY: (u64, u64) = (256, 13);
 const E_CLICK_SETTLED: (u64, u64) = (11, 13);
-// E_toggle_key still ~872 (editor/eval, not Z5) — leave ceil so the overshoot stays visible.
+// E_toggle_key: autosave no longer flushes on cook.await_ (was workspace_doc::print on /g).
 const E_TOGGLE_KEY: (u64, u64) = (382, 15);
 const E_TOGGLE_SETTLED: (u64, u64) = (162, 15);
 const F_FROZEN: (u64, u64) = (118, 8);

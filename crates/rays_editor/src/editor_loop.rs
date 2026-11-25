@@ -675,7 +675,14 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     };
     // a held button defers the write to its release: the synced write is tens of ms (F_FULLFSYNC)
     // and stuttered every orbit and slider drag at 2 Hz
-    if frame.input.buttons.is_empty() { autosave(value, false, frame.input.t); }
+    // Panel toggles (/g, /i, /t) rewrite layout only; defer recovery print to the next idle so the
+    // key frame does not pay workspace_doc::print under cook.await_ (~500 rust allocs on /g).
+    let panel_toggle = update_.actions.iter().any(|a| {
+        matches!(a, Action::ToggleGraph | Action::ToggleInspector | Action::ToggleTimeline)
+    });
+    if frame.input.buttons.is_empty() && !panel_toggle {
+        autosave(value, false, frame.input.t);
+    }
     inspected
 }
 
