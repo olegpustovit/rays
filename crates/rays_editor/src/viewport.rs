@@ -48,9 +48,9 @@ pub mod cc {
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct Visibility {
-        pub prefix: String,
+        pub prefix: Rc<str>,
         pub ui_visible: bool,
-        pub filename: String,
+        pub filename: Rc<str>,
         pub open_camera: Option<bool>,
         pub camera_expanded: bool,
         /// the Camera section's number fields (FOV, distance, near and far clip) as it last built
@@ -128,7 +128,7 @@ pub mod cc {
 
     pub fn make(prefix: &str) -> Visibility {
         assert!(!prefix.is_empty(), "Pxui camera control: prefix is empty");
-        Visibility { prefix: prefix.to_string(), ui_visible: true, filename: "_out/rays-render.png".to_string(), open_camera: None, camera_expanded: false, fields: [0; 4], shown: 0, held: false }
+        Visibility { prefix: Rc::from(prefix), ui_visible: true, filename: Rc::from("_out/rays-render.png"), open_camera: None, camera_expanded: false, fields: [0; 4], shown: 0, held: false }
     }
 
     pub fn create() -> Control {
@@ -194,10 +194,10 @@ pub mod cc {
         let revision = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&control.filename, h));
         rays_shell::inspector::section(ui, "Render", revision, false, None, "Render", &mut |ui| {
             let filename = text(ui, "Output", "Output", &control.filename);
-            out = (filename, pxui::ext::inspector_button(ui, "Save", "Render / save PNG"));
+            out = (Rc::<str>::from(filename), pxui::ext::inspector_button(ui, "Save", "Render / save PNG"));
         });
         let (filename, save) = out;
-        (Control { filename: filename.clone(), ..control.clone() }, if save { vec![filename] } else { Vec::new() })
+        (Control { filename: Rc::clone(&filename), ..control.clone() }, if save { vec![filename.to_string()] } else { Vec::new() })
     }
 
     /// Apply the expansion chosen when the command was handled. Layout settling can rebuild this
@@ -279,17 +279,17 @@ pub struct Show {
 #[derive(Clone)]
 pub struct Extra {
     /// the viewports that look through their render camera, by key
-    pub looking: Vec<String>,
+    pub looking: Rc<Vec<String>>,
     /// the focused viewport: the one the toggle and the navigation mean
-    pub key: String,
+    pub key: Rc<str>,
     /// the `:look_through true` viewports last followed
-    pub started: Vec<String>,
+    pub started: Rc<Vec<String>>,
     pub fly: Option<f64>,
     pub relative_grab: bool,
     /// the ACTIVE camera's view: a viewport with no root of its own
     pub document_camera: rcam::Camera,
     /// the viewports with a root of their own
-    pub view_roots: Vec<(String, ViewRoot)>,
+    pub view_roots: Rc<Vec<(String, ViewRoot)>>,
     pub free_view: rcam::Camera,
     /// the orbit camera `free_view` shows
     pub viewing: easy_camera::EasyCamera,
@@ -495,13 +495,13 @@ pub fn looks(extra_: &Extra, key: &str) -> bool {
     extra_.looking.iter().any(|k| k == key)
 }
 pub fn look_through(extra_: &Extra) -> bool {
-    looks(extra_, &extra_.key)
+    looks(extra_, extra_.key.as_ref())
 }
 
 pub fn set_look(extra_: &Extra, on: bool) -> Extra {
-    let mut looking: Vec<String> = if on { vec![extra_.key.clone()] } else { Vec::new() };
-    looking.extend(extra_.looking.iter().filter(|k| **k != extra_.key).cloned());
-    Extra { looking, ..extra_.clone() }
+    let mut looking: Vec<String> = if on { vec![extra_.key.to_string()] } else { Vec::new() };
+    looking.extend(extra_.looking.iter().filter(|k| k.as_str() != extra_.key.as_ref()).cloned());
+    Extra { looking: Rc::new(looking), ..extra_.clone() }
 }
 
 pub fn init(mut core: Model, camera_: &easy_camera::EasyCamera) -> (Model, Extra) {
@@ -523,13 +523,13 @@ pub fn init(mut core: Model, camera_: &easy_camera::EasyCamera) -> (Model, Extra
     let mode = root_renderer(&core).or_else(|| renderer_setting(&core)).unwrap_or(renderer::Mode::Raster);
     let custom = root_renderer(&core).is_none() && renderer_setting(&core).is_some();
     let extra_ = Extra {
-        looking: looking.clone(),
-        key,
-        started: looking,
+        looking: Rc::new(looking.clone()),
+        key: Rc::from(key.as_str()),
+        started: Rc::new(looking),
         fly: None,
         relative_grab: false,
         document_camera: render_camera.clone(),
-        view_roots: core.doc.view_roots.clone(),
+        view_roots: Rc::new(core.doc.view_roots.clone()),
         free_view: free_view_of(&render_camera, None, camera_),
         viewing: camera_.clone(),
         free_camera: render_camera,
@@ -882,21 +882,21 @@ pub fn on_view(core: &mut Model, previous: &Camera, key: &str, camera_: Camera, 
     };
     extra_ = Extra {
         document_camera: deferred.or_else(|| decoded.as_ref().map(|(c, _)| c.clone())).unwrap_or_else(|| easy_camera::camera(&camera_).expect("camera")),
-        view_roots: core.doc.view_roots.clone(),
+        view_roots: Rc::new(core.doc.view_roots.clone()),
         ..extra_
     };
     // the focused viewport's free view carries the lens of its own camera
     let free_camera = look(&extra_, key).through;
     // a viewport whose `:look_through` changed in the text follows it; the others stay as they are
     let said = core.doc.shell.as_ref().map(|s| s.start.looking.clone()).unwrap_or_default();
-    if said != extra_.started {
+    if said.as_slice() != extra_.started.as_slice() {
         let mut looking: Vec<String> = extra_.looking.iter().filter(|k| said.contains(k) || extra_.started.contains(k) == said.contains(k)).cloned().collect();
         looking.extend(said.iter().filter(|k| !extra_.started.contains(k) && !extra_.looking.contains(k)).cloned());
-        extra_ = Extra { started: said, looking, ..extra_ };
+        extra_ = Extra { started: Rc::new(said), looking: Rc::new(looking), ..extra_ };
     }
     let free_view = free_view_of(&free_camera, Some(&extra_.free_view), &camera_);
     let extra_ = Extra {
-        key: key.to_string(),
+        key: Rc::from(key),
         free_camera,
         free_view,
         viewing: camera_.clone(),
@@ -958,6 +958,23 @@ pub fn film(extra_: &Extra, key: &str, (x, y, width, height): Bounds) -> Bounds 
 /// film is the root's resolution in a step that fits the viewport's gate in drawable pixels; a free
 /// view's film is the pane itself. `views` carry each viewport's rectangle (`film`).
 pub fn render(mut extra_: Extra, pixel_scale: (f64, f64), focus: Option<&str>, views: Vec<(String, Bounds, rcam::Camera, d3::Scene3)>) -> Extra {
+    let mode = extra_.renderer_request.unwrap_or(extra_.renderer.mode);
+    // Settled raster: no tracer slots, skip building renderer::View (warm pan/zoom/hover).
+    if !extra_.renderer.custom
+        && mode == renderer::Mode::Raster
+        && views.iter().all(|(key, ..)| of_root(look(&extra_, key).settings.renderer) == renderer::Mode::Raster)
+    {
+        if !(extra_.renderer.raster_only
+            && extra_.renderer.slots.is_empty()
+            && extra_.renderer.error.is_none()
+            && extra_.renderer.mode == mode
+            && extra_.renderer.turn.is_none())
+        {
+            renderer::close(&extra_.renderer);
+            extra_.renderer = renderer::State { mode, custom: false, ..renderer::empty() };
+        }
+        return extra_;
+    }
     let (scale_x, scale_y) = pixel_scale;
     let views: Vec<renderer::View> = views
         .into_iter()

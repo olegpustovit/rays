@@ -499,6 +499,26 @@ pub struct Focus {
     pub cameras: Vec<(String, V::Camera)>,
 }
 
+/// Apply viewport focus follow in place. Warm path (same view, no orphan cameras) allocates nothing.
+pub fn apply_follow_focus(value: &mut LoopModel, frame_: &frame::Frame) {
+    let g = editor_shell::geometry(&(&value.core).into(), &value.core.workspace, frame_);
+    let active_key = editor_shell::active_view(&(&value.core).into(), &g).and_then(|leaf| match &leaf.panel {
+        Panel::View(key) => Some(key.as_str()),
+        _ => None,
+    });
+    let focus_moves = matches!(active_key, Some(k) if value.viewing.as_deref() != Some(k));
+    if !focus_moves {
+        value.cameras.retain(|(cam_key, _)| {
+            g.leaves.iter().any(|leaf| matches!(&leaf.panel, Panel::View(k) if k == cam_key))
+        });
+        return;
+    }
+    let Focus { viewing, camera, cameras } = follow_focus_in(value, &value.core, &g);
+    value.viewing = viewing;
+    value.camera = camera;
+    value.cameras = cameras;
+}
+
 /// Focus moves to another viewport: the orbit of the one left is kept, the new one starts from the
 /// orbit it last had, else from a copy of the one in use. `core` is the model whose panels say
 /// which viewport has the focus.
@@ -509,6 +529,17 @@ pub fn follow_focus(value: &LoopModel, core: &m::EditorModel, frame_: &frame::Fr
 /// `follow_focus` over a geometry already laid out.
 pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &rays_shell::layout::Geometry) -> Focus {
     let has_view = |key: &str| g.leaves.iter().any(|leaf| matches!(&leaf.panel, Panel::View(k) if k == key));
+    let active_key = editor_shell::active_view(&core.into(), g).and_then(|leaf| match &leaf.panel {
+        Panel::View(key) => Some(key.as_str()),
+        _ => None,
+    });
+    let focus_moves = matches!(active_key, Some(k) if value.viewing.as_deref() != Some(k));
+    if !focus_moves {
+        let orphan = value.cameras.iter().any(|(cam_key, _)| !has_view(cam_key));
+        if !orphan {
+            return Focus { viewing: value.viewing.clone(), camera: value.camera.clone(), cameras: value.cameras.clone() };
+        }
+    }
     let mut cameras = value.cameras.clone();
     cameras.retain(|(key, _)| has_view(key));
     let unchanged = Focus { viewing: value.viewing.clone(), camera: value.camera.clone(), cameras };
@@ -599,13 +630,13 @@ pub fn display_keys(drawn: &Drawn) -> Vec<String> {
     keys
 }
 
-/// Fingerprint for whether `compose` must run again: shared scene identity, pane level, and views.
-pub type CompositionKey = (Rc<kg::T>, Level, Vec<(String, Vec<i64>)>);
+/// Fingerprint for whether `compose` must run again: shared scene identity, pane level, and shell.
+pub type CompositionKey = (Rc<kg::T>, Level, Option<std::sync::Arc<editor_document::document::Shell>>);
 
 /// Recompose when a cook, the scene, or the World changed. Each object's drawing is reused while
 /// its graph and prepared value are physically the same, so moving an object only re-places it.
 pub fn composition_key(core: &m::EditorModel, scene: &Rc<kg::T>) -> CompositionKey {
-    (Rc::clone(scene), m::pane_level(&core.into()), core.doc.shell.as_ref().map(|s| s.views.clone()).unwrap_or_default())
+    (Rc::clone(scene), m::pane_level(&core.into()), core.doc.shell.clone())
 }
 
 /// What `compose` hands back, and whether the drawings (`drawn`) are new ones.
@@ -661,9 +692,17 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
     }
     // a texture has no identity here: a drawing with one, or one that had one, is drawn again
     let texture_changed = value.drawn.iter().any(|(id, e)| !(e.texture.is_none() && !textures.contains_key(id)));
-    let (scene_rc, level_, views_) = composition_key(core, scene);
+    let (scene_rc, level_, shell_) = composition_key(core, scene);
     let same = match &value.composed {
-        Some((s, l, v)) => Rc::ptr_eq(s, &scene_rc) && *l == level_ && *v == views_,
+        Some((s, l, sh)) => {
+            Rc::ptr_eq(s, &scene_rc)
+                && *l == level_
+                && match (sh, &shell_) {
+                    (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                    (None, None) => true,
+                    _ => false,
+                }
+        }
         None => false,
     };
     if !(texture_changed

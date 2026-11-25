@@ -386,15 +386,21 @@ pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key],
 /// what the panes draw over the views: header tools, the gate where a film is not the whole pane,
 /// the selected object box in the focused view, and the render clock
 #[allow(clippy::too_many_arguments)]
-pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::Extra, viewing: &Option<String>, camera: &V::Camera, cameras: &[(String, V::Camera)], pending: bool, bodies: &[(String, Bounds)]) {
-    let core = Rc::make_mut(&mut value.core);
-    core.view_tools = V::header_tools(extra);
+pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::Extra, viewing: &Option<String>, camera: &V::Camera, cameras: &[(String, V::Camera)], pending: bool, geometry: &rays_shell::layout::Geometry) {
     // Graph pan/zoom leaves viewport bodies and cameras still: skip rebuilding gates/traces/box.
     let fp = {
         use std::hash::{Hash, Hasher};
         let mut h = std::hash::DefaultHasher::new();
-        bodies.len().hash(&mut h);
-        for (k, b) in bodies { k.hash(&mut h); b.hash(&mut h); }
+        let mut n = 0usize;
+        for leaf in &geometry.leaves {
+            if let Panel::View(key) = &leaf.panel {
+                if editor_shell::panel_state(&(&value.core).into(), &leaf.path).collapsed { continue; }
+                n += 1;
+                key.hash(&mut h);
+                leaf.body.hash(&mut h);
+            }
+        }
+        n.hash(&mut h);
         viewing.hash(&mut h);
         pending.hash(&mut h);
         for c in std::iter::once(camera).chain(cameras.iter().map(|(_, c)| c)) {
@@ -410,13 +416,23 @@ pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::Extra, vie
         return;
     }
     value.view_overlay_fp = Some(fp);
+    let core = Rc::make_mut(&mut value.core);
+    core.view_tools = V::header_tools(extra);
+    let bodies: Vec<(&str, Bounds)> = geometry
+        .leaves
+        .iter()
+        .filter_map(|leaf| match &leaf.panel {
+            Panel::View(key) if !editor_shell::panel_state(&(&*core).into(), &leaf.path).collapsed => Some((key.as_str(), leaf.body)),
+            _ => None,
+        })
+        .collect();
     // what the panes draw over a view: the gate where it is not the whole pane, and the selected
     // object's box in the focused view
     core.gates = bodies
         .iter()
         .filter_map(|(key, bounds)| {
             let film = V::film(extra, look_key_of(viewing, key), *bounds);
-            if film == *bounds || key == "@hidden" { None } else { Some((key.clone(), film)) }
+            if film == *bounds || *key == "@hidden" { None } else { Some(((*key).to_owned(), film)) }
         })
         .collect();
     core.selected_box = editor_list::selected_bounds(&(&*core).into()).and_then(|(world, box_, name)| {
@@ -435,7 +451,7 @@ pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::Extra, vie
                     Some((_, t)) if samples >= t.samples && t.film == film => (if t.samples >= cap { t.seconds } else { now - t.since }, t.since),
                     _ => (0., now),
                 };
-                (key.clone(), m::Trace { film, samples, cap, bounces, seconds, since })
+                ((*key).to_owned(), m::Trace { film, samples, cap, bounces, seconds, since })
             })
         })
         .collect();
@@ -534,17 +550,18 @@ fn error_status_of(value: &LoopModel, image_errors: &[String]) -> Option<String>
     }
 }
 
+
 /// `revision`: what `inspector` shows, mixed into the camera panel's revision (the editor's loop builds
 /// nothing of its own: `Some(0)`); a sketch's widgets with none are built every frame.
 
 pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>, revision: Option<u64>) -> Option<Rc<dyn Any>> {
     let drawn_before = value.drawn.clone();
-    let followed = follow_focus(&value, &value.core, frame_);
-    (value.viewing, value.camera, value.cameras) = (followed.viewing, followed.camera, followed.cameras);
+    apply_follow_focus(value, frame_);
     let ui = value.core.ui.clone();
     let raw_frame = frame_;
     let (extra, frame) = V::begin_frame(&value.extra, frame_);
     let visible = V::ui_visible(&value.control);
+    // Extra/Control/Camera clones are free on the warm path (Rc string fields).
     let panel_control = value.control.clone();
     let panel_camera = value.camera.clone();
     let panel_extra = extra.clone();
@@ -579,10 +596,10 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     };
     let handles_view = view_camera(&value);
     let handles_extra = extra.clone();
-    let handles_key = focus_key(&value).to_owned();
+    let handles_key = Rc::clone(&extra.key);
     let view_handles = move |ui: &mut Ui, selected: Option<&m::Picked>, space: rays_math::mat4::T, bounds: Bounds| {
         // a handle is where the picture shows its point: in the view's film, not its pane
-        V::handles(ui, selected, handles_scene.as_ref(), &space, &handles_view, &handles_extra, V::film(&handles_extra, &handles_key, bounds))
+        V::handles(ui, selected, handles_scene.as_ref(), &space, &handles_view, &handles_extra, V::film(&handles_extra, handles_key.as_ref(), bounds))
     };
     let before_level = m::pane_level(&(&value.core).into());
     let before_map = value.core.map_view;
@@ -642,12 +659,23 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     open_import(value, &mut update_);
     reload_source(value, &mut update_, frame.input.t);
     let geometry = editor_shell::geometry(&(&value.core).into(), &value.core.workspace, &frame);
-    let focused = follow_focus_in(&value, &value.core, &geometry);
+    // Focus can only move on a press into another view; pan/zoom/hover avoid Focus String clones
+    // by moving viewing/cameras out and restoring them at the end of update_with.
+    let focus_moved = frame.input.events.iter().any(|e| matches!(e, Event::PointerPressed(..)));
+    let focused = if focus_moved {
+        follow_focus_in(&value, &value.core, &geometry)
+    } else {
+        Focus {
+            viewing: std::mem::take(&mut value.viewing),
+            camera: value.camera.clone(),
+            cameras: std::mem::take(&mut value.cameras),
+        }
+    };
     let panes = editor_shell::panes_in(&(&value.core).into(), &geometry);
     let panel_out: Option<Rc<V::PanelOut>> = update_.panel.take().and_then(|p| Rc::downcast::<V::PanelOut>(p).ok());
     let (control, camera, requests, extra, inspected) = match panel_out {
         Some(p) => {
-            let camera = if focused.viewing != value.viewing { focused.camera.clone() } else { p.camera.clone() };
+            let camera = if focus_moved { focused.camera.clone() } else { p.camera.clone() };
             (p.control.clone(), camera, p.requests.clone(), p.extra.clone(), Some(p.inspected.clone()))
         }
         None => (value.control.clone(), focused.camera.clone(), Vec::new(), extra, None),
@@ -655,7 +683,8 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     // a number of the camera panel dragged on its kept section: the camera follows by its patches
     let (control, camera) = match V::dragged(&control, &mut ui.borrow_mut(), &camera) {
         Some(dragged) => (V::Control { held: true, ..control }, dragged),
-        None => (V::Control { held: false, ..control }, camera),
+        None if control.held => (V::Control { held: false, ..control }, camera),
+        None => (control, camera),
     };
     let (camera, extra) = match &update_.loaded_view {
         Some(json) => V::restore(&camera, &extra, json),
@@ -749,19 +778,33 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let context_error = if composed_.errors.is_empty() { context_error } else { Some(composed_.errors.join("; ")) };
     let rendered = composed_.rendered.clone();
     let views = composed_.views.clone();
-    let bodies: std::rc::Rc<Vec<(String, Bounds)>> = if V::ui_visible(&control) { editor_shell::view_bodies(&(&value.core).into(), &raw_frame) } else { std::rc::Rc::new(vec![("@hidden".to_string(), (0, 0, raw_frame.input.size.0, raw_frame.input.size.1))]) };
     let pending = value.pending_render.is_some();
-    let focused_rendered = focused_image_of(&focused.viewing, &views, &rendered);
-    let render_views: Vec<(String, Bounds, rays::camera::Camera, rays::scene3::Scene3)> = bodies
-        .iter()
-        .filter_map(|(key, bounds)| {
-            let scene3 = if key == "@hidden" { focused_rendered.clone() } else { views.iter().find(|(k, _)| k == key).map(|(_, s)| s.clone()).or_else(|| rendered.clone()) };
-            scene3.map(|scene3| (key.clone(), V::film(&extra, look_key_of(&focused.viewing, key), *bounds), camera_for(&focused.viewing, &camera, &focused.cameras, &extra, pending, key), scene3))
-        })
-        .collect();
     let focus = focus_key_of(&focused.viewing);
+    let raster_warm = !extra.renderer.custom
+        && extra.renderer_request.unwrap_or(extra.renderer.mode) == crate::editor_renderer::Mode::Raster;
+    let render_views = if raster_warm {
+        Vec::new()
+    } else {
+        let bodies = if V::ui_visible(&control) {
+            editor_shell::view_bodies_in(&(&value.core).into(), &geometry)
+        } else {
+            std::rc::Rc::new(vec![("@hidden".to_string(), (0, 0, raw_frame.input.size.0, raw_frame.input.size.1))])
+        };
+        let focused_rendered = focused_image_of(&focused.viewing, &views, &rendered);
+        bodies
+            .iter()
+            .filter_map(|(key, bounds)| {
+                let scene3 = if key == "@hidden" { focused_rendered.clone() } else { views.iter().find(|(k, _)| k == key).map(|(_, s)| s.clone()).or_else(|| rendered.clone()) };
+                scene3.map(|scene3| {
+                    let film = V::film(&extra, look_key_of(&focused.viewing, key), *bounds);
+                    let cam = camera_for(&focused.viewing, &camera, &focused.cameras, &extra, pending, key);
+                    (key.clone(), film, cam, scene3)
+                })
+            })
+            .collect()
+    };
     let extra = V::render(extra, raw_frame.pixel_scale, Some(focus), render_views);
-    with_view_overlays(value, frame.input.t, &extra, &focused.viewing, &camera, &focused.cameras, pending, bodies.as_slice());
+    with_view_overlays(value, frame.input.t, &extra, &focused.viewing, &camera, &focused.cameras, pending, &geometry);
     let map = match (&baked, &value.map) {
         (Some(b), Some((source, image_))) if Rc::ptr_eq(b, source) || !value.core.map_view => Some((source.clone(), image_.clone())),
         (Some(b), previous) if value.core.map_view => {
@@ -776,14 +819,14 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let pending_render = requests.last().cloned();
     let render_status = if pending_render.is_some() && rendered.is_none() { Some("Render unavailable until the first cook completes".to_string()) } else { render_status };
     value.camera = camera;
-    value.cameras = focused.cameras.clone();
-    value.viewing = focused.viewing.clone();
+    value.cameras = focused.cameras;
+    value.viewing = focused.viewing;
     value.control = control;
     value.rendered = rendered;
     value.views = views;
     value.drawn = composed_.drawn.clone();
     value.composed = Some(composition_key(&value.core, &scene));
-    value.resolved = Some((value.core.doc.clone(), live_input.clone(), scene, scene_error));
+    value.resolved = Some((value.core.doc.clone(), live_input, scene, scene_error));
     value.context_error = context_error;
     value.canvases = canvases;
     value.baked = baked;
@@ -796,9 +839,10 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     value.source = source;
     refresh_hidden(value, &raw_frame);
     {
+        let live_input = &value.resolved.as_ref().expect("resolved").1;
         let workspace = &value.core.doc.workspace.ws;
         let lowered = &value.core.doc.workspace.lowered;
-        let result = workspace_host::update(&mut value.host.borrow_mut(), &value.core.cook.state, &live_input, &workspace, &lowered.plan);
+        let result = workspace_host::update(&mut value.host.borrow_mut(), &value.core.cook.state, live_input, &workspace, &lowered.plan);
         if let Err(diagnostic) = result {
             value.context_error = Some(rays_diagnostic::to_string(&diagnostic));
         }

@@ -1112,7 +1112,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
                 let objects = level_objects(&value.into());
                 format!("Edit {}", if derived { kg::find(&document, *id) } else { kg::find(&objects, *id) }.map(|n| n.label.clone()).unwrap_or_else(|| id.to_string()))
             },
-            None => "Edit".to_string(),
+            // Reuse FrameResult's label (often empty) — avoid a fresh "Edit".to_string() every frame.
+            None => std::mem::take(&mut result.label),
         },
     };
     let result_document_unchanged = !derived || kg::same(&document, &level_objects(&value.into()));
@@ -1312,8 +1313,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
             selection = selection::select(id);
         }
     }
-    value2.menu = result.menu.clone();
-    value2.tree = result.tree.clone();
+    value2.menu = std::mem::take(&mut result.menu);
+    if value2.tree != result.tree { value2.tree = result.tree.clone(); }
     if value2.probes != probes {
         value2.revs.views += 1;
         value2.probes = probes;
@@ -1342,8 +1343,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         Action::Back(k) => n.max(*k),
         _ => n,
     });
-    let route = pane_route(&(&*value2).into()).to_vec();
     if pops > 0 && target.is_none() && followed.is_none() {
+        let route = pane_route(&(&*value2).into()).to_vec();
         if let Some(((back_level, pane_graph), rest)) = route.get((pops - 1).max(0) as usize..).and_then(|r| r.split_first()) {
             let back_level = document::resolve_level(&doc, *back_level);
             let rest = rest.to_vec();
@@ -1560,7 +1561,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     core.notice = new_notice;
     core.notice_at = if notice_changed { frame_.input.t } else { notice_at };
     let scene_changed = carry_changed || !kg::same(&doc.scene, &previous_doc.scene) || prepared_changed;
-    let mut out_actions = actions.clone();
+    let mut out_actions = actions;
     if entered_camera.is_some() && entered_camera == doc.active_camera {
         out_actions.push(Action::LookThroughCamera);
     }
@@ -1571,7 +1572,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         framed,
         loaded_view,
         actions: out_actions,
-        panel: result.panel.clone(),
+        panel: result.panel.take(),
         input: input_frame,
     }
 }
@@ -1642,7 +1643,7 @@ pub fn idle_result<'a>(value: &ModelView<'a>, selection: selection::Selection) -
         settings: value.doc.settings.clone(),
         opened: None,
         live_cook: value.live_cook,
-        label: "Edit".to_string(),
+        label: String::new(),
         changes: Vec::new(),
         tree_intents: Vec::new(),
         text_intents: Vec::new(),
