@@ -221,6 +221,9 @@ pub fn save_source(core: &mut m::EditorModel, source: Option<source_file::Source
 pub struct Saver {
     shared: Arc<(std::sync::Mutex<SaveSlot>, std::sync::Condvar)>,
     thread: std::cell::RefCell<Option<std::thread::JoinHandle<()>>>,
+    /// the documents handed over, until the writer is idle: the last reference to a document (and
+    /// whatever it owns) is dropped on this thread, never on the writer's
+    held: std::cell::RefCell<Vec<Arc<editor_document::document::T>>>,
 }
 
 #[derive(Default)]
@@ -237,8 +240,10 @@ impl Saver {
         self.shared.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn submit(&self, save: Box<dyn FnOnce() -> Result<(), String> + Send>) {
-        self.lock().next = Some(save);
+    fn submit(&self, doc: Option<Arc<editor_document::document::T>>, save: Box<dyn FnOnce() -> Result<(), String> + Send>) {
+        self.held.borrow_mut().extend(doc);
+        let replaced = self.lock().next.replace(save);
+        drop(replaced);
         self.shared.1.notify_all();
         let mut thread = self.thread.borrow_mut();
         if thread.is_none() {
@@ -253,11 +258,21 @@ impl Saver {
         while slot.next.is_some() || slot.busy {
             slot = self.shared.1.wait(slot).unwrap_or_else(std::sync::PoisonError::into_inner);
         }
-        slot.done.take()
+        let done = slot.done.take();
+        drop(slot);
+        self.held.borrow_mut().clear();
+        done
     }
 
     fn take_done(&self) -> Option<Result<(), String>> {
-        self.lock().done.take()
+        let mut slot = self.lock();
+        let idle = slot.next.is_none() && !slot.busy;
+        let done = slot.done.take();
+        drop(slot);
+        if idle && !self.held.borrow().is_empty() {
+            self.held.borrow_mut().clear();
+        }
+        done
     }
 }
 
@@ -268,6 +283,7 @@ impl Drop for Saver {
         if let Some(thread) = self.thread.get_mut().take() {
             let _ = thread.join();
         }
+        self.held.get_mut().clear();
     }
 }
 
@@ -347,7 +363,7 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
         value.core.doc.clone()
     };
     let (directory, name, written) = (editor_setup::state_directory(&value.core), value.core.state_name.clone(), view.clone());
-    value.saver.submit(Box::new(move || preset::save(&directory, &name, &doc, &written).map(|_| ())));
+    value.saver.submit(Some(doc.clone()), Box::new(move || preset::save(&directory, &name, &doc, &written).map(|_| ())));
     value.saved_doc = Arc::downgrade(&value.core.doc);
     value.saved_view = view;
     value.saved_view_key = key;
@@ -372,17 +388,17 @@ mod saver {
         let held = gate.lock().unwrap();
         for k in 0..4 {
             let (written, gate) = (written.clone(), gate.clone());
-            saver.submit(Box::new(move || { let _g = gate.lock().unwrap(); written.lock().unwrap().push(k); Ok(()) }));
+            saver.submit(None, Box::new(move || { let _g = gate.lock().unwrap(); written.lock().unwrap().push(k); Ok(()) }));
         }
         drop(held);
         assert_eq!(saver.flush(), Some(Ok(())));
         let seen = written.lock().unwrap().clone();
         assert_eq!(seen.last(), Some(&3), "the newest save is written: {seen:?}");
         assert!(seen.len() <= 2, "a save not started is replaced: {seen:?}");
-        saver.submit(Box::new(|| Err("disk full".to_owned())));
+        saver.submit(None, Box::new(|| Err("disk full".to_owned())));
         assert_eq!(saver.flush(), Some(Err("disk full".to_owned())));
         let w = written.clone();
-        saver.submit(Box::new(move || { std::thread::sleep(std::time::Duration::from_millis(20)); w.lock().unwrap().push(9); Ok(()) }));
+        saver.submit(None, Box::new(move || { std::thread::sleep(std::time::Duration::from_millis(20)); w.lock().unwrap().push(9); Ok(()) }));
         drop(saver);
         assert_eq!(written.lock().unwrap().last(), Some(&9), "dropping the saver finished the pending save");
     }
