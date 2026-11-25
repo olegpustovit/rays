@@ -730,9 +730,10 @@ pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(
 pub fn spreadsheet_source<'a>(value: &ModelView<'a>) -> Option<&'a rdk_rays::geometry_view::T> {
     let laid = crate::editor_model::pane_laid(value)?;
     let records = laid.records.as_ref()?;
-    let path = rays_graph::scope_state::selected(&crate::editor_model::pane_view(value)).into_iter().next()?;
-    let chains = probe::chains(&laid.scope);
-    let node_id = compiled_at(value, &chains, records, &path)?;
+    let selected = rays_graph::scope_state::selected(&crate::editor_model::pane_view(value));
+    let path = selected.first()?;
+    let chains = crate::editor_model::pane_view(value).chains.as_ref();
+    let node_id = compiled_at(value, chains, records, path)?;
     let object_id = node_owner(value, node_id)?;
     cook::source(&value.model.cook, object_id, node_id)
 }

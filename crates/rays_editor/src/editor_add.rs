@@ -256,7 +256,7 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<Change> {
         // several selected objects move into a new merge; with none selected, an empty merge
         let name = fe::fresh_name(&ws.source, &graph, "group");
         return if selected.len() >= 2 {
-            vec![Change::SyntaxEdit(fe::Op::GroupMerge { nodes: selected, name })]
+            vec![Change::SyntaxEdit(fe::Op::GroupMerge { nodes: selected.to_vec(), name })]
         } else {
             let mut builder = s::SyntaxBuilder::new();
             let head = builder.push_draft(0, s::Draft::Sym("scene/merge".into()), Default::default(), None);
@@ -280,7 +280,7 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<Change> {
     let laid = crate::editor_model::pane_laid(value);
     // a nested node (a call written in another's input) has no name to read: it gets one first
     // (`Rename` binds it), in the same undo step as the node added after it
-    let hoisted: Option<(flow_check::workspace::Path, String)> = match (selected.as_slice(), laid) {
+    let hoisted: Option<(flow_check::workspace::Path, String)> = match (selected, laid) {
         ([path], Some(k)) if path.len() >= 2 && last_of(path).contains('#') => p::find(&k.scope, path).map(|n| {
             let base = match n.head.rfind('/') {
                 Some(i) => n.head[i + 1..].to_owned(),
@@ -299,7 +299,7 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<Change> {
     let (scope_path, input): (flow_check::workspace::Path, Option<String>) = if (context == context::scene() || context == context::world()) && !is_value {
         // an object joins the scene's merge and a layer goes on top of the stack: the edit itself does that
         (vec![graph.clone().into()], None)
-    } else if let [path] = selected.as_slice() {
+    } else if let [path] = selected {
         if path.len() >= 2 {
             (path[..path.len() - 1].to_vec(), if arity > 0 { binding(path) } else { None })
         } else {
@@ -318,7 +318,7 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<Change> {
         (vec![graph.clone().into()], if arity > 0 { result } else { None })
     };
     let (expr, base): (S, String) = if is_value {
-        let wire: Option<(String, Ty)> = match (selected.as_slice(), laid) {
+        let wire: Option<(String, Ty)> = match (selected, laid) {
             ([path], Some(k)) if path.len() >= 2 => binding(path).and_then(|name| p::find(&k.scope, path).map(|n| (name, n.ty.clone()))),
             _ => None,
         };
@@ -389,7 +389,7 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<Change> {
         None => vec![],
     };
     // a wire pulled off an existing wire: the new node goes between its source and its sink
-    let insert: Vec<fe::Op> = match (selected.as_slice(), &input, rays_graph::scope_pane::selected_wire(pane_view(value)), laid) {
+    let insert: Vec<fe::Op> = match (selected, &input, rays_graph::scope_pane::selected_wire(pane_view(value)), laid) {
         ([path], Some(from), Some((target, wkey)), Some(k)) if reads(from, &expr) => {
             let ok = match p::find(&k.scope, &target) {
                 Some(n) => n.rows.iter().any(|r| r.key == wkey && r.chip == p::Chip::Name(last_of(path).to_owned())),

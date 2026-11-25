@@ -112,7 +112,7 @@ pub fn write_panel_title(value: &ModelView<'_>, leaf: &Leaf, title: &mut String)
             let (pane, path) = graph_pane();
             let graph = graph_of(&pane, path.as_deref());
             if !graph.is_empty() {
-                let paths = if pane.laid.is_none() { Vec::new() } else { inspector_paths(scope::selected(&pane.view)) };
+                let paths = if pane.laid.is_none() { Vec::new() } else { inspector_paths(scope::selected(&pane.view).to_vec()) };
                 if let [path] = paths.as_slice() {
                     let label = match pane.laid.as_deref().and_then(|k| fproj::find(&k.scope, path)) {
                         Some(n) => fproj::title(&n),
@@ -346,7 +346,7 @@ fn make_navigator_params(value: &ModelView<'_>, active: Option<String>) -> navig
         scope: here.map(|k| k.scope.clone()),
         records: here.and_then(|k| k.records.clone()),
         probes: Rc::new(move |p: &[Symbol]| probes.get(p).copied().unwrap_or(0)),
-        selected: scope::selected(pane_view(value)),
+        selected: scope::selected(pane_view(value)).to_vec(),
         chips: evaluated.as_ref().map(|ev| navigator::chips(ev)).unwrap_or_default(),
         notes: evaluated.as_ref().map(|ev| navigator::notes(ev)).unwrap_or_default(),
         objects: outline_objects(value),
@@ -730,7 +730,7 @@ pub fn paste_bindings<'a>(value: &ModelView<'a>) -> Vec<Change> {
     };
     let ws = &value.doc.workspace.ws;
     let selected = scope::selected(pane_view(value));
-    let scope_path: flow_check::workspace::Path = match selected.as_slice() {
+    let scope_path: flow_check::workspace::Path = match selected {
         [path] if path.len() >= 2 => path[..path.len() - 1].to_vec(),
         _ => vec![graph.clone().into()],
     };
@@ -747,7 +747,7 @@ pub fn inspector_subject<'a>(value: &ModelView<'a>) -> Option<flow_check::worksp
     if pane_laid(value).is_none() {
         return None;
     }
-    let paths = inspector_paths(scope::selected(pane_view(value)));
+    let paths = inspector_paths(scope::selected(pane_view(value)).to_vec());
     if paths.len() == 1 { Some(paths[0].clone()) } else { None }
 }
 

@@ -189,7 +189,7 @@ pub fn frame_list(t: &Pane, scope: &[Symbol]) -> Vec<Fr> {
 
 /// A frame around the selected nodes of one scope, in that scope's coordinates.
 fn new_frame(t: &Pane) -> Option<(Path, Fr)> {
-    let paths: Vec<Path> = st::selected(t).into_iter().filter(|q| t.geo.slot.contains_key(q)).collect();
+    let paths: Vec<Path> = st::selected(t).iter().filter(|q| t.geo.slot.contains_key(*q)).cloned().collect();
     let first = paths.first()?;
     let scope = scope_of_path(first);
     let boxes: Vec<(f64, f64, f64, f64)> = paths.iter().filter_map(|q| if scope_of_path(q) == scope { st::box_at(t, q) } else { None }).collect();
@@ -454,7 +454,7 @@ fn levelled(t: &Pane, path: &[Symbol]) -> Option<Level> {
 fn level_command(t: &mut Pane, command: Command, emit: &mut Vec<Change>) {
     let chosen: Vec<(Path, Level)> = match command {
         Command::OpenAll | Command::PointAll => t.geo.items.iter().filter_map(|(pl, _, _)| level_of(pl).map(|l| (pl.path.clone(), l))).collect(),
-        _ => st::selected(t).into_iter().filter_map(|q| levelled(t, &q).map(|l| (q, l))).collect(),
+        _ => st::selected(t).iter().filter_map(|q| levelled(t, q).map(|l| (q.clone(), l))).collect(),
     };
     if chosen.is_empty() {
         emit.push(Change::Notice("Select a card to change its level".to_owned()));
@@ -695,8 +695,7 @@ pub fn run_command(t: &mut Pane, command: Command, emit: &mut Vec<Change>) {
         Command::ShowHints => start_hints(t, emit),
         Command::FrameSelection => frame_selection(t),
         Command::EditName => {
-            let sel = st::selected(t);
-            if let [path] = sel.as_slice() {
+            if let [path] = st::selected(t) {
                 if matches!(st::node_of(t, path), Some(n) if !n.synthetic) {
                     t.editing = Some(Editing::Name(path.clone()));
                     return;

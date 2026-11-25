@@ -405,7 +405,7 @@ pub fn follow_target<'a>(value: &ModelView<'a>, path: Option<&[Symbol]>) -> Opti
     let graphs: &[flow_check::workspace::Graph] = &ws.checked.graphs;
     let selected: Vec<Key> = match path {
         Some(p_) => vec![p_.to_vec()],
-        None => scope::selected(pane_view(value)),
+        None => scope::selected(pane_view(value)).to_vec(),
     };
     match selected.as_slice() {
         [path] if graph_name(value).is_some() => {
@@ -489,7 +489,7 @@ pub fn scope_node<'a>(value: &ModelView<'a>) -> Option<(Key, sop::node::T)> {
     let laid = pane_laid(value)?;
     let records = laid.records.as_ref()?;
     let selected = scope::selected(pane_view(value));
-    let [path] = selected.as_slice() else { return None };
+    let [path] = selected else { return None };
     scope_name(value)?;
     let n = p::find(&laid.scope, path)?;
     let node_id = compiled_at(value, pane_view(value).chains.as_ref(), records, &n.path)?;
@@ -500,7 +500,7 @@ pub fn scope_node<'a>(value: &ModelView<'a>) -> Option<(Key, sop::node::T)> {
 pub fn lit_tags<'a>(value: &ModelView<'a>) -> (pick::Set, Option<LitCache>) {
     let lowered = &value.doc.workspace.lowered;
     let selected = scope::selected(pane_view(value));
-    match (pane_laid(value), selected.as_slice()) {
+    match (pane_laid(value), selected) {
         (Some(laid), [site]) if scope_name(value).is_some() => {
             if let Some(c) = &value.lit {
                 if c.site == *site && c.at == value.probes && std::sync::Arc::ptr_eq(&c.evaluated, &lowered.evaluated) && Rc::ptr_eq(&c.scope, &laid.scope) {

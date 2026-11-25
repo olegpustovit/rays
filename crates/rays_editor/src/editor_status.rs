@@ -262,7 +262,7 @@ fn build_box(value: &ModelView<'_>, ui: &mut Ui, g: &rays_shell::layout::Geometr
     let selection = match (&focus, &value.selected_box) {
         (Panel::View(_), Some((_, _, name))) => Some(name.clone()),
         _ => {
-            let paths = inspector_paths(scope::selected(pane_view(value)));
+            let paths = inspector_paths(scope::selected(pane_view(value)).to_vec());
             match paths.len() {
                 1 => paths[0].last().map(ToString::to_string),
                 0 => None,
@@ -283,7 +283,7 @@ fn build_box(value: &ModelView<'_>, ui: &mut Ui, g: &rays_shell::layout::Geometr
         String::new()
     } else {
         let nodes = scope::stats(pane_view(value)).nodes;
-        let selected = inspector_paths(scope::selected(pane_view(value))).len();
+        let selected = inspector_paths(scope::selected(pane_view(value)).to_vec()).len();
         format!("{nodes} node{}{}", if nodes == 1 { "" } else { "s" }, if selected == 0 { String::new() } else { format!(" \u{b7} {selected} selected") })
     };
     let notes: Vec<String> = if floating > 0 {

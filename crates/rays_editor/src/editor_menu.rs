@@ -92,7 +92,7 @@ pub fn open_menu<'a>(scope_view: Option<&scope::Pane>, value: &ModelView<'a>, (x
         }
     }
     let selected = scope::selected(scope_view);
-    let after = match selected.as_slice() {
+    let after = match selected {
         [path] if path.len() >= 2 => binding_name(path),
         _ => None,
     };

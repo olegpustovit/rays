@@ -135,7 +135,7 @@ pub fn carry_payload<'a>(value: &ModelView<'a>) -> Result<carry_mod::Payload, St
         Some(found) => Some(found),
         None => {
             let selected = scope::selected(pane_view(value));
-            match selected.as_slice() {
+            match selected {
                 [path] => value.doc.homes.objects.iter().find_map(|(id, home)| if *home == Home::BoundAt(path.clone()) { Some(*id) } else { None }).and_then(camera_named),
                 _ => None,
             }

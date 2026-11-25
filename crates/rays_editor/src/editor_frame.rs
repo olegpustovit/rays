@@ -725,7 +725,7 @@ pub fn text_state<'a>(value: &ModelView<'a>, actions: &[Action], pane_of: &dyn F
             graph => graph,
         };
         let Some(graph) = graph else { return Ok(None) };
-        let selected = match scope::selected(pane_view(&pane)).as_slice() {
+        let selected = match scope::selected(pane_view(&pane)) {
             [path] => Some(path.clone()),
             _ => None,
         };

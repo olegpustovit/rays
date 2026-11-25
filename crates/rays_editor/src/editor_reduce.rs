@@ -1423,7 +1423,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
             // only the footers drawn and the selection are counted, not every node of the graph
             let view = pane_view(&(&*value2).into());
             let mut shown = rays_graph::scope_frame::inspect::footer_paths(view);
-            shown.extend(scope::selected(view));
+            shown.extend(scope::selected(view).iter().cloned());
             k.targets.iter().filter_map(|(path, target)| if shown.contains(path) { Some(*target) } else { None }).collect()
         }
         _ => Vec::new(),

@@ -228,10 +228,10 @@ pub fn preview_images(value: &LoopModel, frame_: &frame::Frame) -> Vec<String> {
     };
     if let Some(laid) = m::pane_laid(&(&value.core).into()) {
         if let Some(records) = &laid.records {
-            let chains = probe::chains(&laid.scope);
+            let chains = m::pane_view(&(&value.core).into()).chains.clone();
             for path in rays_graph::scope_state::selected(m::pane_view(&(&value.core).into())) {
-                let probes: Vec<i64> = chains.get(&path).cloned().unwrap_or_default().iter().map(|zone| value.core.probes.get(zone).copied().unwrap_or(0)).collect();
-                let summary = records.borrow_mut().at(&path, &probes);
+                let probes: Vec<i64> = chains.get(path).cloned().unwrap_or_default().iter().map(|zone| value.core.probes.get(zone).copied().unwrap_or(0)).collect();
+                let summary = records.borrow_mut().at(path, &probes);
                 match summary {
                     Some(probe::Summary::Value(v @ EValue::Deferred(Ty::Named(_), _))) if matches!(&v, EValue::Deferred(Ty::Named(n), _) if n == "image") => preview(v),
                     Some(probe::Summary::Image(image)) => preview(EValue::Deferred(ty::image(), image.node)),
@@ -929,7 +929,7 @@ pub fn state_text(value: &LoopModel) -> String {
         None => "none".to_string(),
     };
     let scope_selected = {
-        let paths = rays_graph::scope_state::selected(m::pane_view(&core.into()));
+        let paths = rays_graph::scope_state::selected(m::pane_view(&core.into())).to_vec();
         if paths.is_empty() { "-".to_string() } else { paths.iter().map(|p| flow_syntax::symbol::join_path(&p, "/")).collect::<Vec<_>>().join(", ") }
     };
     let or_dash = |o: &Option<String>| o.clone().unwrap_or_else(|| "-".to_string());

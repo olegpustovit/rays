@@ -720,8 +720,8 @@ pub fn with_carry(lit: Vec<(Path, String)>, hot: Option<(Path, bool)>, t: &mut P
     if t.carry_lit != lit || t.carry_hot != hot { t.carry_lit = lit; t.carry_hot = hot; }
 }
 
-pub fn selected(t: &Pane) -> Vec<Path> {
-    t.selected.iter().cloned().collect()
+pub fn selected(t: &Pane) -> &[Path] {
+    t.selected.as_slice()
 }
 
 pub fn editing(t: &Pane) -> bool {
