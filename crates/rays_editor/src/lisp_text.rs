@@ -92,20 +92,21 @@ fn word<'a>(text: &'a str, t: &Token) -> &'a str {
     scan::word(text, t)
 }
 
-pub fn colorize_now(theme: &Theme, text: &str) -> Vec<(i64, i64, pxui::Rgba)> {
+pub fn colorize_now(theme: &Theme, text: &str) -> Vec<(usize, usize, pxui::Rgba)> {
     // kit rev 3: forms in the float blue, a kind's namespace in the vector purple, keywords in the
     // bool red, numbers green, strings in the record green; brackets and comments recede to ink-3
     let ports = rays_graph::scope_paint::ports(theme);
     let quiet = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
     let lexed = lex(text);
     let tokens = &lexed.0;
-    // ponytail: one reused span buffer; capacity reserved after the first warm colorize
-    thread_local!(static SPANS: std::cell::RefCell<Vec<(i64, i64, pxui::Rgba)>> = const { std::cell::RefCell::new(Vec::new()) });
+    // ponytail: fill a TLS buffer then hand it off; replace with an empty shell of the same
+    // capacity so the next warm colorize does not grow. PXUI wants usize spans directly.
+    thread_local!(static SPANS: std::cell::RefCell<Vec<(usize, usize, pxui::Rgba)>> = const { std::cell::RefCell::new(Vec::new()) });
     SPANS.with(|cell| {
         let mut out = cell.borrow_mut();
         out.clear();
         for (i, t) in tokens.iter().enumerate() {
-            let push = |out: &mut Vec<_>, color| out.push((t.start as i64, t.stop as i64, color));
+            let push = |out: &mut Vec<_>, color| out.push((t.start, t.stop, color));
             let declares = i + 1 < tokens.len() && tokens[i + 1].kind == Kind::Sym && sub(text, tokens[i + 1].start, tokens[i + 1].stop) == ":";
             match t.kind {
                 Kind::Comment | Kind::Meta => push(&mut out, quiet),
@@ -114,7 +115,7 @@ pub fn colorize_now(theme: &Theme, text: &str) -> Vec<(i64, i64, pxui::Rgba)> {
                 Kind::Kw => push(&mut out, ports.bool),
                 Kind::Head if declares => {}
                 Kind::Head => match text.as_bytes()[t.start..].iter().position(|b| *b == b'/').map(|p| p + t.start) {
-                    Some(slash) if slash + 1 < t.stop => out.push((t.start as i64, slash as i64 + 1, ports.vec3)),
+                    Some(slash) if slash + 1 < t.stop => out.push((t.start, slash + 1, ports.vec3)),
                     _ => push(&mut out, ports.float),
                 },
                 Kind::Sym => {}
@@ -910,7 +911,7 @@ pub fn language(vocab: Option<Rc<Vocab>>, names: Option<Rc<Names>>, imports: Opt
     let imports = Rc::new(imports.unwrap_or_default());
     let complete_vocab = vocab.clone();
     Language {
-        colorize: Rc::new(move |text| colorize_now(&theme, text).into_iter().map(|(a, b, color)| (a as usize, b as usize, color)).collect()),
+        colorize: Rc::new(move |text| colorize_now(&theme, text)),
         brackets: Rc::new(|text| brackets(text).into_iter().map(|(a, b)| (a as usize, b as usize)).collect()),
         indent: Rc::new(scan::indent),
         complete: Rc::new(move |text, caret| complete(&names, &imports, &complete_vocab, text, caret)),
