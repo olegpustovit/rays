@@ -2463,36 +2463,244 @@ fn icb_draw_compatible(left: &PlanDraw, right: &PlanDraw) -> bool {
         })
 }
 
-/// Rebuild draw bindings into the retained batches when only resource identities changed; keep an
-/// ICB whose buffer/draw parameters still match.
+/// Patch texture/argument/resident bindings into retained batches without `plan_batches`. Re-encode
+/// an existing ICB when buffer offsets move; never destroy/create on a capacity hit.
 fn patch_retained_plan(value: &mut SceneExecution, plan: &mut ReplayPlan) -> Result<(), Error> {
-    let fresh = plan_batches(value)?;
-    if fresh.len() != plan.batches.len() {
-        return Err(failure_error("Scene_execution.patch_plan", ErrorKind::InvalidState, "batch shape changed"));
-    }
-    let rebuilt = fresh;
-    for (new, old) in rebuilt.iter().zip(plan.batches.iter()) {
-        let keep = old.family == new.family
-            && old.samples == new.samples
-            && old.draws.len() == new.draws.len()
-            && old.draws.iter().zip(new.draws.iter()).all(|(a, b)| icb_draw_compatible(a, b))
-            && plain_draws(&new.draws);
-        if keep {
-            let capacity = old.icb_capacity.get();
-            if let Some(icb) = old.icb.borrow_mut().take() {
-                new.icb_capacity.set(capacity);
-                *new.icb.borrow_mut() = Some(icb);
+    let length = value.prepared_scratch.length;
+    let mut slot = 0usize;
+    for batch_rc in &mut plan.batches {
+        let batch = Rc::get_mut(batch_rc).ok_or_else(|| {
+            failure_error("Scene_execution.patch_plan", ErrorKind::InvalidState, "batch plan is shared")
+        })?;
+        if batch.ui.is_some() {
+            if slot >= length || value.prepared_scratch.slots[slot].ui.is_none() {
+                return Err(failure_error("Scene_execution.patch_plan", ErrorKind::InvalidState, "batch shape changed"));
             }
-        } else {
-            let _ = old.icb_capacity.replace(0);
-            if let Some(icb) = old.icb.borrow_mut().take() {
-                evict_icb(value, icb);
+            slot += 1;
+            continue;
+        }
+        if slot + batch.draws.len() > length {
+            return Err(failure_error("Scene_execution.patch_plan", ErrorKind::InvalidState, "batch shape changed"));
+        }
+        let mut icb_dirty = false;
+        let mut resources_dirty = false;
+        for draw in &mut batch.draws {
+            let family = value.prepared_scratch.slots[slot].family;
+            if value.prepared_scratch.slots[slot].ui.is_some()
+                || value.prepared_scratch.slots[slot].samples != batch.samples
+                || attachment_class(family) != attachment_class(batch.family)
+            {
+                return Err(failure_error("Scene_execution.patch_plan", ErrorKind::InvalidState, "batch shape changed"));
             }
-            build_icb(value, new)?;
+            match patch_draw_bindings(value, slot, draw)? {
+                PatchDraw::Unchanged => {}
+                PatchDraw::Resources => resources_dirty = true,
+                PatchDraw::Icb => {
+                    icb_dirty = true;
+                    resources_dirty = true;
+                }
+            }
+            slot += 1;
+        }
+        if resources_dirty {
+            refill_batch_resources(value, batch);
+            sync_driver_draws(batch);
+        }
+        if icb_dirty {
+            refresh_icb(value, batch)?;
         }
     }
-    plan.batches = rebuilt;
+    if slot != length {
+        return Err(failure_error("Scene_execution.patch_plan", ErrorKind::InvalidState, "batch shape changed"));
+    }
     Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PatchDraw {
+    Unchanged,
+    Resources,
+    Icb,
+}
+
+/// Update one retained draw for resource-identity changes under `same_plan_shape`. Scene2/textured
+/// (the animated-canvas path) patches without `plan_entry`; other families absorb a fresh entry into
+/// the existing Vec capacities.
+fn patch_draw_bindings(value: &mut SceneExecution, index: usize, dest: &mut PlanDraw) -> Result<PatchDraw, Error> {
+    let family = value.prepared_scratch.slots[index].family;
+    match family {
+        Scene2 | Scene2Textured => patch_scene2_bindings(value, index, dest),
+        _ => {
+            let fresh = plan_entry(value, index)?;
+            Ok(absorb_plan_draw(dest, fresh))
+        }
+    }
+}
+
+fn patch_scene2_bindings(value: &mut SceneExecution, index: usize, dest: &mut PlanDraw) -> Result<PatchDraw, Error> {
+    let (family, blend, samples, texture) = {
+        let slot = &value.prepared_scratch.slots[index];
+        (slot.family, slot.blend, slot.samples, slot.texture.clone())
+    };
+    let Some((source, cached)) = texture else {
+        return Ok(PatchDraw::Unchanged);
+    };
+    let texture = cached.borrow().texture.clone();
+    if family == Scene2Textured {
+        let variant = find_pipeline(value, family, blend, samples).expect("pipeline variant");
+        let (page, offset) = argument_slice(value, variant, &texture, &source.sampler)?;
+        let mut icb = false;
+        for (stage, slot_i, buf, off) in &mut dest.draw.buffers {
+            if *stage == ShaderStage::Fragment && *slot_i == 7 {
+                if *off != offset || backend::buffer_id(buf) != backend::buffer_id(&page) {
+                    *buf = page;
+                    *off = offset;
+                    icb = true;
+                }
+                break;
+            }
+        }
+        let mut resources = icb;
+        match dest.resident.first_mut() {
+            Some(existing) if backend::texture_id(existing) == backend::texture_id(&texture) => {}
+            Some(existing) => {
+                *existing = texture;
+                resources = true;
+            }
+            None => {
+                dest.resident.push(texture);
+                resources = true;
+            }
+        }
+        return Ok(if icb {
+            PatchDraw::Icb
+        } else if resources {
+            PatchDraw::Resources
+        } else {
+            PatchDraw::Unchanged
+        });
+    }
+    // Scene2 direct texture/sampler binds (non-argument).
+    let (_, sampler) = sampler_for(value, &source.sampler)?;
+    let mut changed = false;
+    if let Some((_, _, tx)) = dest.textures.iter_mut().find(|(stage, slot_i, _)| *stage == ShaderStage::Fragment && *slot_i == 1) {
+        if backend::texture_id(tx) != backend::texture_id(&texture) {
+            *tx = texture;
+            changed = true;
+        }
+    } else {
+        dest.textures.push((ShaderStage::Fragment, 1, texture));
+        changed = true;
+    }
+    if let Some((_, _, s)) = dest.samplers.iter_mut().find(|(stage, slot_i, _)| *stage == ShaderStage::Fragment && *slot_i == 2) {
+        *s = sampler;
+    } else {
+        dest.samplers.push((ShaderStage::Fragment, 2, sampler));
+        changed = true;
+    }
+    Ok(if changed { PatchDraw::Resources } else { PatchDraw::Unchanged })
+}
+
+fn absorb_plan_draw(dest: &mut PlanDraw, mut fresh: PlanDraw) -> PatchDraw {
+    let icb = !icb_draw_compatible(dest, &fresh);
+    dest.draw.pipeline = fresh.draw.pipeline;
+    dest.draw.primitive = fresh.draw.primitive;
+    dest.draw.vertex_start = fresh.draw.vertex_start;
+    dest.draw.vertex_count = fresh.draw.vertex_count;
+    dest.draw.instances = fresh.draw.instances;
+    dest.draw.index = fresh.draw.index.take();
+    dest.draw.buffers.clear();
+    dest.draw.buffers.append(&mut fresh.draw.buffers);
+    dest.textures.clear();
+    dest.textures.append(&mut fresh.textures);
+    dest.samplers.clear();
+    dest.samplers.append(&mut fresh.samplers);
+    dest.resident.clear();
+    dest.resident.append(&mut fresh.resident);
+    dest.indirect = fresh.indirect.take();
+    if icb {
+        PatchDraw::Icb
+    } else {
+        PatchDraw::Resources
+    }
+}
+
+/// ponytail: O(n²) id scan over a handful of pass resources; upgrade to a reused HashSet scratch if
+/// coalesced draws grow past a few dozen.
+fn refill_batch_resources(value: &SceneExecution, batch: &mut BatchPlan) {
+    batch.resources.clear();
+    let push_buffer = |resources: &mut Vec<ResourceUse>, b: &Buffer| {
+        let id = backend::buffer_id(b);
+        if resources.iter().all(|r| !matches!(r, ResourceUse::Buffer(x) if backend::buffer_id(x) == id)) {
+            resources.push(ResourceUse::Buffer(b.clone()));
+        }
+    };
+    let push_texture = |resources: &mut Vec<ResourceUse>, tx: &Texture| {
+        let id = backend::texture_id(tx);
+        if resources.iter().all(|r| !matches!(r, ResourceUse::Texture(x) if backend::texture_id(x) == id)) {
+            resources.push(ResourceUse::Texture(tx.clone()));
+        }
+    };
+    for draw in &batch.draws {
+        for (_, _, b, _) in &draw.draw.buffers {
+            push_buffer(&mut batch.resources, b);
+        }
+        if let Some((_, b, _, _)) = &draw.draw.index {
+            push_buffer(&mut batch.resources, b);
+        }
+        if let Some((b, _)) = &draw.indirect {
+            push_buffer(&mut batch.resources, b);
+        }
+        for (_, _, tx) in &draw.textures {
+            push_texture(&mut batch.resources, tx);
+        }
+        for tx in &draw.resident {
+            push_texture(&mut batch.resources, tx);
+        }
+    }
+    if let Some(pool) = &value.arguments {
+        push_buffer(&mut batch.resources, &pool.buffer);
+    }
+}
+
+fn sync_driver_draws(batch: &mut BatchPlan) {
+    if batch.driver_draws.len() != batch.draws.len() {
+        batch.driver_draws.clear();
+        batch.driver_draws.extend(batch.draws.iter().map(|d| d.draw.clone()));
+        return;
+    }
+    for (driver, draw) in batch.driver_draws.iter_mut().zip(&batch.draws) {
+        driver.pipeline = draw.draw.pipeline.clone();
+        driver.primitive = draw.draw.primitive;
+        driver.vertex_start = draw.draw.vertex_start;
+        driver.vertex_count = draw.draw.vertex_count;
+        driver.instances = draw.draw.instances;
+        driver.index = draw.draw.index.clone();
+        if driver.buffers.len() == draw.draw.buffers.len() {
+            for (dst, src) in driver.buffers.iter_mut().zip(&draw.draw.buffers) {
+                *dst = (src.0, src.1, src.2.clone(), src.3);
+            }
+        } else {
+            driver.buffers.clone_from(&draw.draw.buffers);
+        }
+    }
+}
+
+fn refresh_icb(value: &mut SceneExecution, batch: &BatchPlan) -> Result<(), Error> {
+    if batch.draws.is_empty() || !plain_draws(&batch.draws) || !batch.draws.iter().all(|d| backend::pipeline_indirect(&d.draw.pipeline)) {
+        let capacity = batch.icb_capacity.replace(0);
+        let _ = capacity;
+        if let Some(icb) = batch.icb.borrow_mut().take() {
+            evict_icb(value, icb);
+        }
+        return Ok(());
+    }
+    if let Some(icb) = batch.icb.borrow().clone() {
+        encode_icb(&icb, &batch.draws)?;
+        value.icb_stats.builds += 1;
+        return Ok(());
+    }
+    build_icb(value, batch)
 }
 
 const PREPARED_SCRATCH_CAPACITY: usize = 65_536;
@@ -3583,12 +3791,13 @@ fn finish_prepared_frame(
         let plan = Rc::make_mut(&mut plan_rc);
         if patch_retained_plan(value, plan).is_ok() {
             plan.clear = clear;
-            plan.payloads = signatures.clone();
-            plan.gpu_vertices = value.prepared_scratch.slots[..value.prepared_scratch.length]
-                .iter()
-                .rev()
-                .filter_map(|slot| slot.gpu_vertices.clone())
-                .collect();
+            plan.payloads = signatures;
+            plan.gpu_vertices.clear();
+            for slot in value.prepared_scratch.slots[..value.prepared_scratch.length].iter().rev() {
+                if let Some(gpu) = slot.gpu_vertices.clone() {
+                    plan.gpu_vertices.push(gpu);
+                }
+            }
             value.icb_stats.hits += 1;
             clear_prepared_scratch(&mut value.prepared_scratch);
             encode_frame(value, &frame, clear, &plan.batches)?;
@@ -3711,8 +3920,18 @@ pub fn submit(
             after_prepare();
             return replay_plan(value, &plan);
         }
-    let old = value.prepared_submission.take().map(|s| s.plan);
-    drop_plan(value, old);
+    // Same prepared identity with a new version: keep the prior plan for same-shape patching
+    // instead of destroying its ICBs before finish_prepared_frame can reuse them.
+    let old = value.prepared_submission.take();
+    match (old, &prepared) {
+        (Some(cached), Some((identity, _))) if cached.identity == *identity => {
+            let prior_auto = value.automatic_submission.take();
+            drop_plan(value, prior_auto);
+            value.automatic_submission = Some(cached.plan);
+        }
+        (Some(cached), _) => drop_plan(value, Some(cached.plan)),
+        (None, _) => {}
+    }
     let prepared_key = prepared.clone();
     let draws = match resolve_prepared(value, &prepared, draws) {
         Ok(draws) => draws,
