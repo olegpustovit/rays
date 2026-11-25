@@ -69,7 +69,10 @@ fn tour(p: &mut P) {
     let frames = (0..4).map(|i| { let q = (1000. + 35. * i as f64, 150. + 30. * i as f64); p.step(&[], vec![Event::PointerMoved(q)], q) }).collect();
     p.record("hover moves", frames);
     // into the defn `voxels` calls and up again (the pane's graph changes both times)
-    let graph = |p: &P| rays_editor::editor_panes::graph_name(&(&*p.e.as_ref().expect("editor").core).into());
+    let graph = |p: &P| -> Option<String> {
+        let model = (&*p.e.as_ref().expect("editor").core).into();
+        rays_editor::editor_panes::graph_name(&model).map(str::to_owned)
+    };
     let shown = graph(p);
     {
         let core = std::rc::Rc::make_mut(&mut p.e.as_mut().expect("editor").core);
