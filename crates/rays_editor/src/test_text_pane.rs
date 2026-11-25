@@ -566,7 +566,7 @@ fn lisp_text_numbers_and_parinfer() {
     assert_eq!(l::number_at("(sop/box :size_x 1.25 :x 3)", 19), Some((17, 21)), "the number at a byte");
     assert_eq!(l::number_at("(sop/box :size_x 1.25 :x 3)", 16), None, "a space is no number");
     // parinfer: closers follow indentation, the printed workspaces are already in that shape
-    let pf = |text: &str| flow_syntax::parinfer::rewrite(text, 0).0;
+    let pf = |text: &str| flow_syntax::parinfer::rewrite(text, 0).0.into_owned();
     for name in ["bloom", "sunflower", "rosette"] {
         let printed = flow_syntax::lisp::print(&source(name)).unwrap().0;
         assert_eq!(pf(&printed), printed, "{name}: parinfer changed the printed workspace");
@@ -582,10 +582,14 @@ fn lisp_text_numbers_and_parinfer() {
     assert_eq!(l::brackets("(a \"x\n)\" b)"), vec![(0, 10)], "a bracket on a string's second line is not one");
     assert_eq!(pf("(let* [a 1\n       b 2]\n  a)"), "(let* [a 1\n       b 2]\n  a)", "a vector over two lines");
     assert_eq!(pf("(a\n  )"), "(a)\n", "a line of closers alone becomes blank");
-    assert_eq!(flow_syntax::parinfer::rewrite("(a \n  )", 6), ("(a) \n  ".to_string(), 7), "Enter before a closer keeps the caret's indentation");
-    assert_eq!(flow_syntax::parinfer::rewrite("(a", 2), ("(a)".to_string(), 2), "the caret stays before an inferred closer");
-    assert_eq!(flow_syntax::parinfer::rewrite("(a\nb)", 4), ("(a)\nb".to_string(), 5), "the caret follows a moved closer");
-    assert_eq!(flow_syntax::parinfer::rewrite("(a  )", 3), ("(a )".to_string(), 3), "a blank typed before a closer survives on the caret's line");
+    let eq = |text: &str, caret: i64, want: &str, want_caret: i64, msg: &str| {
+        let (got, at) = flow_syntax::parinfer::rewrite(text, caret);
+        assert_eq!((got.as_ref(), at), (want, want_caret), "{msg}");
+    };
+    eq("(a \n  )", 6, "(a) \n  ", 7, "Enter before a closer keeps the caret's indentation");
+    eq("(a", 2, "(a)", 2, "the caret stays before an inferred closer");
+    eq("(a\nb)", 4, "(a)\nb", 5, "the caret follows a moved closer");
+    eq("(a  )", 3, "(a )", 3, "a blank typed before a closer survives on the caret's line");
     assert!(
         l::language(None, None, None, true, theme).rewrite.is_some() && l::language(None, None, None, false, theme).rewrite.is_none(),
         "the language rewrites only with parinfer on"

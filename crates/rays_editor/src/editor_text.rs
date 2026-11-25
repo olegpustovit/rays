@@ -306,7 +306,17 @@ fn one_intent(value: &mut EditorModel, intent: Intent) {
             value.text = text
         }
         Intent::DocDraft(draft) => {
-            text.draft = Some(draft.clone());
+            // Reuse the draft String's buffer across keystrokes instead of replacing it.
+            match &mut text.draft {
+                Some(had) => {
+                    if had.capacity() < draft.len() {
+                        had.reserve(draft.len() - had.capacity() + 64);
+                    }
+                    had.clear();
+                    had.push_str(draft);
+                }
+                None => text.draft = Some(draft.clone()),
+            }
             text.doc_base = base(text.doc_base.clone());
             text.scrubbing = false;
             value.text = text
@@ -523,10 +533,16 @@ pub fn draft_applies(except: Option<&str>, text: &text_pane::State) -> Vec<Inten
     out
 }
 
+fn pane_has_draft(except: Option<&str>, text: &text_pane::State) -> bool {
+    matches!(&text.draft, Some(d) if Some(d.as_str()) != except)
+        || !text.graphs.is_empty()
+        || text.binding_draft.is_some()
+}
+
 /// Some text pane holds text that is not in the document (`except`: the text of a refused reload,
 /// which is the file's and not the user's).
 pub fn has_draft(except: Option<&str>, value: &EditorModel) -> bool {
-    !draft_applies(except, &value.text).is_empty() || value.locals.iter().any(|(_, l)| !draft_applies(except, &l.code).is_empty())
+    pane_has_draft(except, &value.text) || value.locals.iter().any(|(_, l)| pane_has_draft(except, &l.code))
 }
 
 /// A hash of every unapplied draft of every text pane; `None` with no draft.

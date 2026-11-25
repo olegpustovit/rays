@@ -572,28 +572,29 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
         let (_, defns, _) = scan::bound(text, tokens, caret);
         let mut out: Vec<Candidate> = Vec::new();
         for d in defns {
+            if quality(prefix, d) == 0 { continue; }
             out.push(mk(0, usage(text, tokens, d), None, d, "defn", &format!("{d} \u{b7} a function of this workspace")));
         }
         for (name, file) in imports {
-            if !names.graphs.contains(name) {
-                out.push(mk(0, 0, None, name, &format!("import \u{b7} {file}"), &format!("{name} \u{b7} imported from {file}")));
-            }
+            if names.graphs.contains(name) || quality(prefix, name) == 0 { continue; }
+            out.push(mk(0, 0, None, name, &format!("import \u{b7} {file}"), &format!("{name} \u{b7} imported from {file}")));
         }
         for k in &vocab.kinds {
-            if k.context == context {
-                out.push(mk(0, usage(text, tokens, &k.qualified), None, &k.qualified, &k.category.join(" / "), &format!("{} \u{b7} {}", k.qualified, kind_doc(k))));
-            }
+            if k.context != context || quality(prefix, &k.qualified) == 0 { continue; }
+            out.push(mk(0, usage(text, tokens, &k.qualified), None, &k.qualified, &k.category.join(" / "), &format!("{} \u{b7} {}", k.qualified, kind_doc(k))));
         }
         for (s, doc) in specials() {
+            if quality(prefix, s) == 0 { continue; }
             out.push(mk(1, usage(text, tokens, s), None, s, "form", doc));
         }
         for (o, s) in ops_of(vocab, &context) {
+            if quality(prefix, &o) == 0 { continue; }
             out.push(mk(2, usage(text, tokens, &o), None, &o, "operator", &op_doc(&o, &s)));
         }
         out
     } else if cur_kind == Some(Kind::Sym) {
         if after_kw == Some(":context") {
-            contexts().iter().map(|c| mk(0, 0, None, c, "context", &format!("{c} graph"))).collect()
+            contexts().iter().filter(|c| quality(prefix, c) != 0).map(|c| mk(0, 0, None, c, "context", &format!("{c} graph"))).collect()
         } else if enclosing_head == Some("ref") && prior.len() <= 1 {
             let (_, _, graphs) = scan::bound(text, tokens, caret);
             let mut all: Vec<&str> = graphs;
@@ -601,6 +602,7 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
                 if !all.contains(&g.as_str()) { all.push(g.as_str()); }
             }
             all.into_iter()
+                .filter(|g| quality(prefix, g) != 0)
                 .map(|g| {
                     let detail = match imports.iter().find(|(n, _)| n == g) {
                         Some((_, file)) => format!("graph \u{b7} {file}"),
@@ -616,14 +618,16 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
             let mut seen: Vec<&str> = Vec::new();
             let mut out: Vec<Candidate> = Vec::new();
             for (name, _) in bindings.iter().rev() {
-                if seen.contains(name) { continue; }
+                if seen.contains(name) || quality(prefix, name) == 0 { continue; }
                 seen.push(*name);
                 out.push(mk(0, 0, None, name, "binding", ""));
             }
             for (c, doc) in constants() {
+                if quality(prefix, c) == 0 { continue; }
                 out.push(mk(1, 0, None, c, "constant", doc));
             }
             for d in defns {
+                if quality(prefix, d) == 0 { continue; }
                 out.push(mk(2, 0, None, d, "defn", &format!("{d} \u{b7} a function value")));
             }
             let mut ranked = rank(prefix, out);
@@ -835,8 +839,10 @@ pub fn language(vocab: Option<Rc<Vocab>>, names: Option<Rc<Names>>, imports: Opt
         comment: ";",
         rewrite: parinfer.then(|| {
             let rewrite: Rc<pxui::RewriteFn<'static>> = Rc::new(|text, caret| {
-                let (text, caret) = flow_syntax::parinfer::rewrite(text, caret as i64);
-                (text, caret as usize)
+                match flow_syntax::parinfer::rewrite(text, caret as i64) {
+                    (std::borrow::Cow::Borrowed(_), caret) => (None, caret as usize),
+                    (std::borrow::Cow::Owned(text), caret) => (Some(text), caret as usize),
+                }
             });
             rewrite
         }),

@@ -2,6 +2,8 @@
 //! insert or delete re-scans only from its line until the parser state meets the old one again (one line for a typed
 //! character); anything else (paste, newline, another pane's text) re-scans from the first changed line, or all of it.
 //! Records are validated against the stored text on every call, so a stale cache can only cost time, never change output.
+//! When the rewrite adds or removes nothing, `rewrite` returns `Cow::Borrowed` (no allocation).
+use std::borrow::Cow;
 use std::cell::RefCell;
 
 type Stack = Vec<(u8, usize)>;
@@ -28,11 +30,13 @@ struct Cache {
     end_stack: Stack,
     end_back: Option<usize>,
     code: Vec<bool>,
+    /// Reused by `finish` so a no-op rewrite (output == input) allocates nothing after warm.
+    out: Vec<u8>,
 }
 
 thread_local!(static CACHE: RefCell<Cache> = RefCell::new(Cache::default()));
 
-pub fn rewrite(text: &str, caret: i64) -> (String, i64) {
+pub fn rewrite<'a>(text: &'a str, caret: i64) -> (Cow<'a, str>, i64) {
     CACHE.with(|cache| match cache.try_borrow_mut() {
         Ok(mut cache) => cache.rewrite(text, caret),
         Err(_) => Cache::default().rewrite(text, caret),
@@ -40,12 +44,12 @@ pub fn rewrite(text: &str, caret: i64) -> (String, i64) {
 }
 
 /// Scan every line from nothing (the reference the incremental path must equal).
-pub fn rewrite_full(text: &str, caret: i64) -> (String, i64) { Cache::default().rewrite(text, caret) }
+pub fn rewrite_full<'a>(text: &'a str, caret: i64) -> (Cow<'a, str>, i64) { Cache::default().rewrite(text, caret) }
 
 fn line_at(lines: &[Line], offset: usize) -> usize { lines.partition_point(|l| l.start <= offset).saturating_sub(1) }
 
 impl Cache {
-    fn rewrite(&mut self, text: &str, caret: i64) -> (String, i64) {
+    fn rewrite<'a>(&mut self, text: &'a str, caret: i64) -> (Cow<'a, str>, i64) {
         let (old, new) = (self.text.as_bytes(), text.as_bytes());
         let n = new.len();
         let limit = old.len().min(n);
@@ -155,8 +159,8 @@ impl Cache {
         Line { start, stop, stack: in_stack, back, in_string: opened_in_string, code_end: code_end - start, removed, pops, pop_back }
     }
 
-    /// Store the records and write the output.
-    fn finish(&mut self, lines: Vec<Line>, text: &str, caret: i64) -> (String, i64) {
+    /// Store the records and write the output. Borrowed when the rewrite leaves the bytes unchanged.
+    fn finish<'a>(&mut self, lines: Vec<Line>, text: &'a str, caret: i64) -> (Cow<'a, str>, i64) {
         let bytes = text.as_bytes();
         let n = bytes.len();
         let count = lines.len();
@@ -167,7 +171,10 @@ impl Cache {
         }
         let tail: Vec<u8> = self.end_stack.iter().rev().map(|(c, _)| *c).collect();
         if let (Some(b), false) = (self.end_back, tail.is_empty()) { trails.push((count - b, &tail)); }
-        let mut out = Vec::with_capacity(n + 8);
+        if self.out.capacity() < n + 8 {
+            self.out.reserve(n + 8 - self.out.capacity());
+        }
+        self.out.clear();
         let mut shift: i64 = 0;
         let mut cursor = 0;
         let mut trail: Vec<u8> = Vec::new();
@@ -178,47 +185,65 @@ impl Cache {
             let tp = l.start + l.code_end;
             for r in l.removed.iter().map(|r| *r).chain(std::iter::once(l.stop)) {
                 if pending && tp <= r {
-                    out.extend_from_slice(&bytes[at..tp]);
-                    out.extend_from_slice(&trail);
+                    self.out.extend_from_slice(&bytes[at..tp]);
+                    self.out.extend_from_slice(&trail);
                     at = tp;
                     pending = false;
                     if (tp as i64) < caret { shift += trail.len() as i64; }
                 }
                 if r < l.stop {
-                    out.extend_from_slice(&bytes[at..r]);
+                    self.out.extend_from_slice(&bytes[at..r]);
                     at = r + 1;
                     if (r as i64) < caret { shift -= 1; }
                 }
             }
-            out.extend_from_slice(&bytes[at..l.stop]);
-            if l.stop < n { out.push(b'\n'); }
+            self.out.extend_from_slice(&bytes[at..l.stop]);
+            if l.stop < n { self.out.push(b'\n'); }
+        }
+        if self.text.capacity() < text.len() {
+            self.text.reserve(text.len() - self.text.capacity() + 64);
         }
         self.text.clear();
         self.text.push_str(text);
         self.caret = caret;
         self.lines = lines;
-        (String::from_utf8(out).expect("inserting ASCII closers preserves UTF-8"), caret.saturating_add(shift))
+        // Balanced typing rebuilds the same bytes (trailing closers stripped then reattached): borrow.
+        if self.out.as_slice() == bytes {
+            return (Cow::Borrowed(text), caret);
+        }
+        let out = std::mem::take(&mut self.out);
+        (Cow::Owned(String::from_utf8(out).expect("inserting ASCII closers preserves UTF-8")), caret.saturating_add(shift))
     }
 }
 #[cfg(test)]
 mod tests {
     use super::{rewrite, rewrite_full};
+    use std::borrow::Cow;
     #[test]
     fn full_width_caret_preserves_negative_sentinels_and_saturates() {
         for caret in [i64::MIN, -1, 1i64 << 62] {
-            assert_eq!(rewrite("(a", caret), ("(a)".into(), caret.saturating_add(i64::from(caret > 2))));
+            let (text, at) = rewrite("(a", caret);
+            assert_eq!((text.as_ref(), at), ("(a)", caret.saturating_add(i64::from(caret > 2))));
         }
-        assert_eq!(rewrite("(a", i64::MAX), ("(a)".into(), i64::MAX));
+        let (text, at) = rewrite("(a", i64::MAX);
+        assert_eq!((text.as_ref(), at), ("(a)", i64::MAX));
     }
     #[test]
     fn infers_closers_and_preserves_utf8() {
-        assert_eq!(rewrite("(a\n  (b\nc", 0), ("(a\n  (b))\nc".into(), 0));
-        assert_eq!(rewrite("(λ", 0), ("(λ)".into(), 0));
-        assert_eq!(rewrite("(a", -3), ("(a)".into(), -3));
+        assert_eq!(rewrite("(a\n  (b\nc", 0).0.as_ref(), "(a\n  (b))\nc");
+        assert_eq!(rewrite("(λ", 0).0.as_ref(), "(λ)");
+        assert_eq!(rewrite("(a", -3).0.as_ref(), "(a)");
+        assert_eq!(rewrite("(a", -3).1, -3);
     }
     #[test]
     fn closers_come_off_the_stack_innermost_first() {
-        assert_eq!(rewrite_full("(a [b {c", 0).0, "(a [b {c}])");
+        assert_eq!(rewrite_full("(a [b {c", 0).0.as_ref(), "(a [b {c}])");
+    }
+    #[test]
+    fn balanced_typing_borrows() {
+        let (text, caret) = rewrite("(a)", 2);
+        assert!(matches!(text, Cow::Borrowed(_)), "no-op rewrite must not allocate");
+        assert_eq!((text.as_ref(), caret), ("(a)", 2));
     }
     #[test]
     fn incremental_equals_full_over_every_sketch() {
