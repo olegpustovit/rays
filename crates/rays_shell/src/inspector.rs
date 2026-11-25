@@ -703,7 +703,7 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
     let revision = kit::debug_revision(&(row, cx.width, cx.pins, cx.pin_click, cx.kept, cx.reveal_source, &cx.chips));
     let mut out = Vec::new();
     kit::with_label(format_args!("flow-row-view-{}", row.path), &mut |label| {
-        ui.view(label, revision, Size::Px(cx.width), Size::Px(ui.row_height() as f32), &mut |ui| {
+        ui.view(label, revision, Size::Px(cx.width), Size::Fit, &mut |ui| {
             out = row_content(ui, cx, on_choice, row);
         });
     });
