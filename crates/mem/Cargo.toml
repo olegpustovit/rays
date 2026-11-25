@@ -6,6 +6,7 @@ license.workspace = true
 
 [features]
 counting = ["mem_sys/counting"]
+trace = ["mem_sys/trace"]
 
 [dependencies]
 mem_sys = { path = "../../pxui/crates/open/mem_sys" }

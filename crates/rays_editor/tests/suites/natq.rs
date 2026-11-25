@@ -25,6 +25,8 @@ mod typing_budget;
 mod inspector_l5;
 #[path = "../native_qualification/list_l5.rs"]
 mod list_l5;
+#[path = "../native_qualification/zero_alloc.rs"]
+mod zero_alloc;
 
 pub fn scrub_child() -> bool {
     chains::scrub_child()
@@ -46,6 +48,7 @@ pub fn cases() -> Vec<(&'static str, fn())> {
     cases.extend(typing_budget::cases());
     cases.extend(inspector_l5::cases());
     cases.extend(list_l5::cases());
+    cases.extend(zero_alloc::cases());
     cases
 }
 

@@ -62,6 +62,14 @@ registers its `pxui_counter` export with `mem::set_peer`. `mem_sys::alloc_count`
 `local_alloc_count`, `local_reset` and `local_peak_bytes` then cover the whole process (the peak is the sum of the two peaks, an
 upper bound); every budget and the memory ledger use them.
 
+`RAYS_ZERO_ALLOC=1` (dev only): after 60 warm frames, any frame with no input and no model replacement that still
+allocates logs its top malloc stack sites once per distinct report (`mem_sys` `trace` feature). Build counting +
+stacks with `make lib PROFILE=debug CARGOFLAGS='--features pxui_dylib/counting'` and
+`cargo build -p rays_bin --features counting,trace`, then run e.g.
+`RAYS_ZERO_ALLOC=1 target/debug/rays sketches/isogrid.rays`. The `zero_alloc_*` suite in `rays_editor` pins the
+per-scenario ceilings (docs/fleet-zero.md).
+
+
 ## The pxui submodule and validation
 
 PXUI, `ogpu_*`, the window hosts, `sdl3` and `cargo t` itself live in the `pxui/` submodule

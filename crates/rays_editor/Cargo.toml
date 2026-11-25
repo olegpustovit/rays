@@ -44,7 +44,7 @@ rdk_ops = { path = "../rdk_ops" }
 ogpu_core = { path = "../../pxui/crates/open/ogpu_core" }
 renderer = { path = "../renderer" }
 runtime_resources = { path = "../runtime_resources" }
-mem_sys = { path = "../../pxui/crates/open/mem_sys", features = ["counting"] }
+mem_sys = { path = "../../pxui/crates/open/mem_sys", features = ["counting", "trace"] }
 scene_command = { path = "../scene_command" }
 
 # Window smoke + merged editor suite (B3), split: `gpu_editor` (device cases, serialized) and `editor` (pure, parallel); harness = false, rays/tests/common/window.rs.

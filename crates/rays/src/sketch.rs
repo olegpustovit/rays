@@ -18,8 +18,9 @@ use renderer::renderer::{self as rr, native};
 use rays_math::color;
 use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::rc::Rc;
+use std::sync::Mutex;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Clock {
@@ -395,14 +396,18 @@ struct CrashState {
     program: Rc<Program>,
 }
 
-fn update_model(stored: &RefCell<Option<Model>>, update: &dyn Fn(&mut dyn Any, &frame::Frame) -> Option<Model>, facts: &frame::Frame, op: &str) -> Result<(), Error> {
+fn update_model(stored: &RefCell<Option<Model>>, update: &dyn Fn(&mut dyn Any, &frame::Frame) -> Option<Model>, facts: &frame::Frame, op: &str) -> Result<bool, Error> {
     let next = {
         let mut guard = stored.borrow_mut();
         let model = guard.as_mut().ok_or_else(|| startup_error(op, ErrorKind::InvalidState, "model is gone"))?;
         update(model.as_mut(), facts)
     };
-    if let Some(next) = next { *stored.borrow_mut() = Some(next); }
-    Ok(())
+    if let Some(next) = next {
+        *stored.borrow_mut() = Some(next);
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 fn report_crash(state: &CrashState) {
@@ -756,6 +761,30 @@ fn quiet_after(quiet: i64, had_input: bool) -> i64 {
     if had_input { 0 } else { quiet + 1 }
 }
 
+static ZERO_ALLOC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+static ZERO_ALLOC_LOGGED: std::sync::LazyLock<Mutex<HashSet<u64>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// Log each warm idle allocation site once (`RAYS_ZERO_ALLOC=1`, counting + optional `trace`).
+fn log_zero_alloc_sites() {
+    let text = mem::trace_top(15);
+    if text.is_empty() {
+        if !mem::TRACE {
+            eprintln!("RAYS_ZERO_ALLOC: idle frame allocated (rebuild with --features counting,trace for stacks)");
+        }
+        return;
+    }
+    let mut logged = ZERO_ALLOC_LOGGED.lock().unwrap_or_else(|e| e.into_inner());
+    let mut key = 1469598103934665603u64;
+    for b in text.bytes() {
+        key ^= u64::from(b);
+        key = key.wrapping_mul(1099511628211);
+    }
+    if logged.insert(key) {
+        eprintln!("RAYS_ZERO_ALLOC idle frame sites:\n{text}");
+    }
+}
+
 /// How long a quiet window waits for input: a frame, and after half a second of the same picture
 /// 100 ms, cut short by a scheduled wake in `wake_in` seconds.
 fn quiet_timeout_ms(quiet: i64, wake_in: Option<f64>) -> i32 {
@@ -1011,8 +1040,17 @@ fn one_frame(
         recent.push_back(facts.clone());
     }
     // Keep the model stored while callbacks run, so unwinding can still dump it.
-    update_model(&crash.model, &*program_.update, &facts, op)?;
+    let zero_alloc = ZERO_ALLOC.get_or_init(|| std::env::var_os("RAYS_ZERO_ALLOC").is_some());
+    let watch = *zero_alloc && frames.count > 60 && !had_input && mem::COUNTING;
+    let n0 = watch.then(mem::alloc_count);
+    if watch {
+        mem::trace_start();
+    }
+    let model_changed = update_model(&crash.model, &*program_.update, &facts, op)?;
     if frames.hidden {
+        if watch {
+            mem::trace_stop();
+        }
         return Ok(());
     }
     let scene_ = {
@@ -1020,13 +1058,14 @@ fn one_frame(
         let m = guard.as_ref().ok_or_else(|| startup_error(op, ErrorKind::InvalidState, "model is gone"))?;
         (program_.view)(m.as_ref(), &facts)
     };
+    let scene_changed = frames.shown.as_ref().is_none_or(|last| !scene::same(last, &scene_));
     *last_scene.borrow_mut() = Some(scene_.clone());
     // A window whose picture did not change keeps the last one on screen, as a native view does: no
     // draw, no present, and the loop waits for input instead of vsync (unless the frame had input).
     // A picture whose present was skipped (no drawable) was not shown: it is drawn again.
     if limit.is_some() {
         scene::render(&scene_);
-    } else if polled.window_changed || frames.shown.as_ref().is_none_or(|last| !scene::same(last, &scene_)) {
+    } else if polled.window_changed || scene_changed {
         let skipped = rr::skipped_presents(coordinator);
         scene::render(&scene_);
         frames.shown = if rr::skipped_presents(coordinator) == skipped { Some(scene_) } else { None };
@@ -1035,10 +1074,22 @@ fn one_frame(
         frames.quiet = quiet_after(frames.quiet, had_input);
     }
     if let Some(e) = render_failure.borrow_mut().take() {
+        if watch {
+            mem::trace_stop();
+        }
         return Err(e);
     }
-    if let Some(after) = &program_.after_present {
-        update_model(&crash.model, &**after, &facts, op)?;
+    let after_changed = if let Some(after) = &program_.after_present {
+        update_model(&crash.model, &**after, &facts, op)?
+    } else {
+        false
+    };
+    if watch {
+        mem::trace_stop();
+        let allocated = n0.is_some_and(|n0| mem::alloc_count() > n0);
+        if allocated && !model_changed && !after_changed {
+            log_zero_alloc_sites();
+        }
     }
     if let Some(e) = PENDING_FAILURE.with(|p| p.borrow_mut().take()) {
         return Err(e);

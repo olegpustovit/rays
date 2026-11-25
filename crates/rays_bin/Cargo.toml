@@ -17,6 +17,7 @@ test = false
 
 [features]
 counting = ["mem/counting"]
+trace = ["mem/trace"]
 
 [dependencies]
 editor_document = { path = "../editor_document" }

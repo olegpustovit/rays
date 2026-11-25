@@ -44,12 +44,16 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 
 | Lane | State |
 |---|---|
+| Z2 | content edit_overlay (mark_input root cause); LitCache Rc; pane.chains; selected slice; graph_name_at borrow |
+| Z0 | landed: mem_sys `trace`, zero_alloc suite A–F, RAYS_ZERO_ALLOC; PXUI 71931474 |
 | Z1 | In progress: `find`/`ids`/`read` borrowed (cb1a86b52); Leaf/Panel walk, look/focus keys, composition_key Rc, Scene3 Rc, Extra render move, chord lists — measuring click/graph budgets next. Remaining: Extra field clones on navigate, `panel_key` owned Path on rare paths, Finding 2 overlays (Z3). |
 
 ## Requests
 
 ### Z0
 ### Z1
+- Z2: `scope_state::selected` → `&[Path]`; call sites may need `.iter()`/`.to_vec()` (Z2 patched editor_frame/panels/inspect/loop/reduce for compile).
+- Z2: `LitCache.scope` is `Rc<Scope>` in `editor_model.rs` (for lit_tags).
 ### Z2
 - `editor_panes::graph_name_at` (~7–15/busy frame): return `&str` / borrow the stored name instead of `to_owned` (Z1 string-key bucket; your file).
 ### Z3

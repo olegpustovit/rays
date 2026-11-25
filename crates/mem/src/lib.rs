@@ -1127,10 +1127,44 @@ pub fn pressure_start() -> bool {
 
 /// Whether this build tracks allocations in the process allocator.
 pub use mem_sys::COUNTING;
+/// Whether the opt-in malloc stack capture (`trace` feature) is compiled in.
+pub use mem_sys::TRACE;
 
 /// Counts a library's own allocator (a dynamic libpxui) with this process's: its counter export, as `mem_sys::set_peer` takes it.
 pub fn set_peer(counter: fn(u32) -> u64) {
     mem_sys::set_peer(counter)
+}
+
+pub fn alloc_count() -> u64 {
+    mem_sys::alloc_count()
+}
+
+/// Process-wide malloc stack capture. Present only with the `trace` feature on Apple.
+#[cfg(all(feature = "trace", any(target_os = "macos", target_os = "ios")))]
+pub mod trace {
+    pub use mem_sys::trace::*;
+}
+
+/// Start malloc stack capture when the `trace` feature is on; otherwise a no-op.
+pub fn trace_start() {
+    #[cfg(all(feature = "trace", any(target_os = "macos", target_os = "ios")))]
+    trace::start();
+}
+
+pub fn trace_stop() {
+    #[cfg(all(feature = "trace", any(target_os = "macos", target_os = "ios")))]
+    trace::stop();
+}
+
+/// Top allocation sites since the last start, formatted; empty when `trace` is off.
+pub fn trace_top(n: usize) -> String {
+    #[cfg(all(feature = "trace", any(target_os = "macos", target_os = "ios")))]
+    {
+        let report = trace::report(n);
+        return trace::format_sites(&report.sites, n);
+    }
+    let _ = n;
+    String::new()
 }
 
 pub fn allocated_bytes() -> i64 {
