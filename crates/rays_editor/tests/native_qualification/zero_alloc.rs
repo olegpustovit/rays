@@ -27,7 +27,7 @@ fn action_rounds() -> u64 {
 const A_BASIC: (u64, u64) = (241, 9);
 const A_EMPTY: (u64, u64) = (0, 9);
 const A_BARE: (u64, u64) = (0, 9);
-const A_ISOGRID: (u64, u64) = (14, 13);
+const A_ISOGRID: (u64, u64) = (0, 13);
 // Selected idle: Z8 may_rest path; lowered after Z5 idle cuts (meas 10/12).
 const A_ISOSEL: (u64, u64) = (11, 13);
 const B_HOVER_GRAPH: (u64, u64) = (161, 13);

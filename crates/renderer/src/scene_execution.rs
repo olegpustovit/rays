@@ -851,12 +851,16 @@ pub struct SceneExecution {
     encoded_frame: u64,
     /// Reused across frames via `rebegin_commands` after GPU settle (no new CommandsInner Rc).
     frame_commands: Option<backend::Commands>,
-    /// Owned pass restarted across warm frames when attachments match (no RenderInner/Box).
-    frame_pass: Option<backend::PreparedRenderTarget>,
+    /// Owned passes restarted across warm frames when attachments match (no RenderInner/Box).
+    /// Two slots: isogrid alternates Scene3+depth and Scene2; a single slot thrashed every pass.
+    frame_passes: [Option<backend::PreparedRenderTarget>; 2],
     /// Load-reopen after UiPass::split (blur); restarted across frames.
     ui_reopen_pass: RefCell<Option<backend::PreparedRenderTarget>>,
     /// Reused `RenderTarget.colors` shell for compatible checks (avoids `vec![attachment]` per pass).
     scratch_colors: Vec<ColorAttachment>,
+    /// Reused attachment-pool key list and texture out-buffer for `render_target`.
+    scratch_attach_keys: Vec<(scene_attachment_pool::Kind, i64, bool)>,
+    scratch_attach_textures: Vec<Texture>,
     dead: bool,
     /// A borrowed device (shared with a window) is never destroyed here.
     owns_device: bool,
@@ -1266,8 +1270,10 @@ pub fn create(
                 in_flight_serial: None,
                 encoded_frame: 0,
                 frame_commands: None,
-                frame_pass: None,
+                frame_passes: [None, None],
                 scratch_colors: Vec::with_capacity(1),
+                scratch_attach_keys: Vec::with_capacity(2),
+                scratch_attach_textures: Vec::with_capacity(2),
                 ui_reopen_pass: RefCell::new(None),
                 dead: false,
             })
@@ -2813,15 +2819,15 @@ fn render_target(
     // an attachment no other pass reads needs no memory: it clears here and only its resolve stays
     let color_passes = load == Load::Clear && !later_color;
     let depth_passes = state.depth_load == Load::Clear && !later_depth;
-    let mut keys: Vec<(scene_attachment_pool::Kind, i64, bool)> = Vec::new();
+    value.scratch_attach_keys.clear();
     if samples != 1 {
-        keys.push((scene_attachment_pool::Kind::Color, samples, color_passes));
+        value.scratch_attach_keys.push((scene_attachment_pool::Kind::Color, samples, color_passes));
     }
     if has_depth(family) {
-        keys.push((scene_attachment_pool::Kind::Depth, samples, depth_passes));
+        value.scratch_attach_keys.push((scene_attachment_pool::Kind::Depth, samples, depth_passes));
     }
-    let pooled = scene_attachment_pool::acquire_many(&mut value.attachments, &keys)?;
-    let mut attachments = pooled.into_iter();
+    scene_attachment_pool::acquire_many_into(&mut value.attachments, &value.scratch_attach_keys, &mut value.scratch_attach_textures)?;
+    let mut attachments = value.scratch_attach_textures.drain(..);
     let color = if samples == 1 { value.target.clone() } else { attachments.next().expect("color attachment") };
     let resolve = if samples == 1 { None } else { Some(value.target.clone()) };
     let depth = if has_depth(family) {
@@ -3004,20 +3010,27 @@ fn begin_pass(
         later.iter().any(same_samples),
         later.iter().any(|next| same_samples(next) && has_depth(next.family) && next.state.depth_load == Load::Load),
     )?;
-    // Reuse one owned pass across warm frames when attachments match (RenderInner/Box stay).
+    // Reuse an owned pass across warm frames when attachments match (RenderInner/Box stay).
+    // Two slots: isogrid alternates Scene3+depth and Scene2; a single slot thrashed every pass.
     // Recover the colors shell when the pass is already compatible so the next frame doesn't realloc.
-    if value.frame_pass.as_ref().is_some_and(|p| p.compatible(&target)) {
+    let slot = value
+        .frame_passes
+        .iter()
+        .position(|p| p.as_ref().is_some_and(|p| p.compatible(&target)))
+        .or_else(|| value.frame_passes.iter().position(|p| p.is_none()))
+        .unwrap_or(0);
+    if value.frame_passes[slot].as_ref().is_some_and(|p| p.compatible(&target)) {
         value.scratch_colors = std::mem::take(&mut target.colors);
         if value.scratch_colors.capacity() < 1 {
             value.scratch_colors.reserve(1);
         }
     } else {
-        value.frame_pass = Some(backend::prepare_render_target(&value.device, target)?);
+        value.frame_passes[slot] = Some(backend::prepare_render_target(&value.device, target)?);
         if value.scratch_colors.capacity() < 1 {
             value.scratch_colors.reserve(1);
         }
     }
-    backend::render_prepared(commands, value.frame_pass.as_mut().expect("frame_pass"))
+    backend::render_prepared(commands, value.frame_passes[slot].as_mut().expect("frame_pass"))
 }
 
 /// Records `batch` into `encoder`; the pass to go on in when the batch's UI split it.
@@ -4372,7 +4385,7 @@ pub fn destroy(value: &mut SceneExecution) -> Result<(), Error> {
     let _ = settle(value);
     value.dead = true;
     value.frame_commands = None;
-    value.frame_pass = None;
+    value.frame_passes = [None, None];
     value.ui_reopen_pass = RefCell::new(None);
     let mut first: Option<Error> = None;
     let record = |result: Result<(), Error>, first: &mut Option<Error>| {

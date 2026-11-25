@@ -82,8 +82,9 @@ fn destroy_entries(entries: &[Entry]) {
     }
 }
 
-/// Each of (kind, samples, passing).
-pub fn acquire_many(value: &mut AttachmentPool, keys: &[(Kind, i64, bool)]) -> Result<Vec<Texture>, Error> {
+/// Each of (kind, samples, passing). Writes into `out` (cleared first); warm callers keep capacity.
+pub fn acquire_many_into(value: &mut AttachmentPool, keys: &[(Kind, i64, bool)], out: &mut Vec<Texture>) -> Result<(), Error> {
+    out.clear();
     if value.dead {
         return Err(failure("pool is destroyed"));
     }
@@ -91,21 +92,20 @@ pub fn acquire_many(value: &mut AttachmentPool, keys: &[(Kind, i64, bool)]) -> R
         return Err(failure("unsupported sample count"));
     }
     let mut made: Vec<Entry> = Vec::new();
-    let mut textures = Vec::new();
     for (kind_, samples, passing) in keys {
         // a backend without memoryless attachments keeps one ordinary attachment for both
         let passing = *passing && value.memoryless;
         let matches = |entry: &Entry| entry.kind == *kind_ && entry.samples == *samples && entry.passing == passing;
         let found = made.iter().find(|entry| matches(entry)).or_else(|| value.entries.iter().find(|entry| matches(entry)));
         match found {
-            Some(entry) => textures.push(entry.texture.clone()),
+            Some(entry) => out.push(entry.texture.clone()),
             None => match allocate(value, *kind_, *samples, passing) {
                 Err(failure) => {
                     destroy_entries(&made);
                     return Err(failure);
                 }
                 Ok(texture) => {
-                    textures.push(texture.clone());
+                    out.push(texture.clone());
                     made.push(Entry { kind: *kind_, samples: *samples, passing, texture });
                 }
             },
@@ -117,7 +117,14 @@ pub fn acquire_many(value: &mut AttachmentPool, keys: &[(Kind, i64, bool)]) -> R
         made.append(&mut value.entries);
         value.entries = made;
     }
-    Ok(textures)
+    Ok(())
+}
+
+/// Each of (kind, samples, passing).
+pub fn acquire_many(value: &mut AttachmentPool, keys: &[(Kind, i64, bool)]) -> Result<Vec<Texture>, Error> {
+    let mut out = Vec::with_capacity(keys.len());
+    acquire_many_into(value, keys, &mut out)?;
+    Ok(out)
 }
 
 /// `acquire pool kind ~samples` allocates the exact attachment on its first use and returns the
