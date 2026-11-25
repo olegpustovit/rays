@@ -120,9 +120,10 @@ pub fn run_editor() {
         r.step((450., 300.), vec![]);
     };
     // drag the outline | rest gutter: one rewrite of the editor graph, one history entry.
-    // At 900 points the outline's 120-point minimum lifts its 13% to 169.
+    // At 900 points the outline's 120-point minimum lifts its 13% to 169. A ratio is of the
+    // 899 points beside the 1-point gutter, as layout distributes it: 300 / 899.
     drag(&mut r, (169.5, 300.), (300., 300.));
-    check(has(&r.source(), "(ui/split_at \"horizontal\" 0.3333 outline right)"), &format!("the drag rewrote the outline split: {}", r.source()));
+    check(has(&r.source(), "(ui/split_at \"horizontal\" 0.3337 outline right)"), &format!("the drag rewrote the outline split: {}", r.source()));
     check(r.undo_label() == Some("Resize panel".into()), "one history entry named Resize panel");
     // the header menu of the graph panel: split side by side
     r.click_button(MouseButton::RightButton, (400., 10.));
