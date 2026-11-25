@@ -72,7 +72,7 @@ pub fn run() {
         editor::draw(n, p)
     });
     let ed = editor::create(
-        editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), factories: Some(factories.clone()), ..Default::default() },
+        editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), factories: Some(factories.clone()), await_: Some(true), ..Default::default() },
         &workspace,
         None,
         editor::prepare_fn(),

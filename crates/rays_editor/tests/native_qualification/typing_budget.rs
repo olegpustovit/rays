@@ -9,7 +9,7 @@ use std::time::Instant;
 const W: i64 = 1280;
 const H: i64 = 900;
 /// allocations on the worst of 20 keystrokes, and on the settled frame after them
-const CEILING: (u64, u64) = (2720, 829);
+const CEILING: (u64, u64) = (1712, 782);
 
 struct P {
     e: Option<editor::Editor>,

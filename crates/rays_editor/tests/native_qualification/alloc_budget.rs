@@ -1,6 +1,6 @@
 //! Per-frame allocation measurements for the editor (Wave M): the `isogrid_orbit` harness on `basic.rays`,
 //! on the workspace `rays` opens with no file (the plan's "empty editor") and on one without an
-//! editor graph. Historical references are informational; model ownership and render checks remain strict.
+//! editor graph. Guard idle allocation counts and bytes, model ownership, and successful renders.
 use rays_editor::{editor, workspace};
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -41,9 +41,9 @@ const FRAMES: i64 = 30;
 // Z1: exact quad cache keys, single-field settings reads: basic 805 / 89,381; empty 538 / 34,724; bare 693 / 45,448.
 // Z1: shared shell tree, kept leaf list, borrowed level objects: basic 747 / 85,781; empty 462 / 31,882; bare 617 / 42,561.
 // Z1: wide-hash quad keys, no generic cache constructor: basic 747 / 85,098; empty 462 / 31,882; bare 617 / 42,561.
-const BASIC: (u64, u64) = (549, 85_179);
-const EMPTY: (u64, u64) = (177, 11_128);
-const BARE: (u64, u64) = (266, 21_350);
+const BASIC: (u64, u64) = (530, 79_989);
+const EMPTY: (u64, u64) = (172, 10_826);
+const BARE: (u64, u64) = (260, 20_829);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");
@@ -96,6 +96,7 @@ fn check(name: &str, source: &str, (max_allocs, max_bytes): (u64, u64)) {
     let (n, b, rays, report) = per_frame(source, (max_allocs, max_bytes));
     let pxui = n.saturating_sub(rays);
     eprintln!("{name}: {n} allocs/frame (reference {max_allocs}), {b} bytes/frame (reference {max_bytes}); {rays} Rays, {pxui} PXUI\nwalker profile over {FRAMES} frames:\n{report}");
+    assert!(n <= max_allocs && b <= max_bytes, "{name}: {n} allocations and {b} bytes per frame exceed {max_allocs} allocations or {max_bytes} bytes");
 }
 
 fn basic() { check("basic", &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../sketches/basic.rays")).unwrap(), BASIC) }

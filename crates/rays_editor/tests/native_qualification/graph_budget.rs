@@ -6,15 +6,15 @@ use input::{Event, Key, MouseButton};
 /// (action, ceiling on the key frame, ceiling on the third frame after it)
 /// Measured in a fresh process plus 5%, rounded up and capped at the previous ceiling.
 const CEILINGS: &[(&str, u64, u64)] = &[
-    ("zoom rest", 472, 464),
-    ("pan across overscan", 479, 977),
-    ("node select", 477, 465),
-    ("box select", 476, 698),
-    ("after box select", 533, 533),
-    ("escape", 620, 533),
-    ("hover moves", 540, 540),
-    ("enter", 1958, 466),
-    ("up", 602, 465),
+    ("zoom rest", 462, 457),
+    ("pan across overscan", 472, 977),
+    ("node select", 467, 458),
+    ("box select", 469, 677),
+    ("after box select", 527, 527),
+    ("escape", 612, 527),
+    ("hover moves", 531, 531),
+    ("enter", 1855, 458),
+    ("up", 593, 458),
 ];
 
 fn rest(p: &mut P, name: &str, first: (f64, u64)) {
@@ -127,7 +127,7 @@ fn multi_graph() {
         let first = p.step(&[], vec![Event::Scrolled((0., 1.))], at);
         let mut frames = vec![first];
         for _ in 0..3 { frames.push(p.step(&[], vec![], at)); }
-        assert!(frames[0].1 <= 246 && frames[3].1 <= 238, "inactive graph exceeded its zoom allocation budget: {frames:?}");
+        assert!(frames[0].1 <= 238 && frames[3].1 <= 233, "inactive graph exceeded its zoom allocation budget: {frames:?}");
         p.record("inactive graph zoom", frames);
         let (after, zoomed) = inactive(p);
         assert_eq!(storage, after, "drawing the inactive graph copied its pane state");
