@@ -71,7 +71,7 @@ fn lex_cached(text: &str) -> Arc<Lexed> {
             return tokens;
         }
     }
-    let tokens: Arc<Lexed> = Arc::new(scan::lex(text));
+    let tokens: Arc<Lexed> = scan::lex(text);
     let bytes = text.len() + tokens.0.len() * std::mem::size_of::<Token>() + tokens.1.len() * 16 + tokens.2.len() * 16;
     lexed_cache().add(lru::Key::from_value(Arc::new(key)), tokens.clone(), bytes as i64);
     tokens

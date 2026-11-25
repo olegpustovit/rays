@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use flow_syntax::text_lexer::{self, Kind as LexKind, Word};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,7 +32,17 @@ fn closer_of(open: char) -> char {
     }
 }
 
-pub fn lex(text: &str) -> (Vec<Token>, Vec<(usize, usize)>, Vec<(char, usize)>) {
+type Lexed = (Vec<Token>, Vec<(usize, usize)>, Vec<(char, usize)>);
+thread_local!(static LEXED: std::cell::RefCell<(String, Option<Arc<Lexed>>)> =
+    const { std::cell::RefCell::new((String::new(), None)) });
+
+pub fn lex(text: &str) -> Arc<Lexed> {
+    if let Some(hit) = LEXED.with(|c| {
+        let c = c.borrow();
+        (c.0.as_str() == text).then(|| c.1.clone()).flatten()
+    }) {
+        return hit;
+    }
     let raw = text_lexer::lex(text);
     let mut tokens = Vec::new();
     let mut pairs = Vec::new();
@@ -116,7 +127,14 @@ pub fn lex(text: &str) -> (Vec<Token>, Vec<(usize, usize)>, Vec<(char, usize)>) 
         tokens[index].kind = Kind::Unmatched;
     }
     let open_stack = stack.iter().rev().map(|&(open, at, _)| (open, at)).collect();
-    (tokens, pairs, open_stack)
+    let out = Arc::new((tokens, pairs, open_stack));
+    LEXED.with(|c| {
+        let mut c = c.borrow_mut();
+        c.0.clear();
+        c.0.push_str(text);
+        c.1 = Some(out.clone());
+    });
+    out
 }
 
 const BODY_FORM_CANDIDATES: &[&str] = &[
@@ -143,9 +161,9 @@ fn tokens_before(text: &str, caret: usize) -> Vec<Token> {
     while !text.is_char_boundary(prefix_end) {
         prefix_end -= 1;
     }
-    let (mut tokens, _, _) = lex(&text[..prefix_end]);
+    let (mut tokens, _, _) = Arc::unwrap_or_clone(lex(&text[..prefix_end]));
     if prefix_end != end {
-        let source_tokens = lex(text).0;
+        let source_tokens = &lex(text).0;
         if let Some(partial) = source_tokens.iter().find(|token| token.start < end && token.stop > end) {
             if let Some(existing) = tokens.iter_mut().find(|token| token.start == partial.start) {
                 existing.stop = end;
@@ -391,7 +409,7 @@ mod tests {
     #[test]
     fn brackets_nesting_and_byte_offsets() {
         let text = "(a [b] c) ] {x";
-        let (tokens, pairs, stack) = lex(text);
+        let (tokens, pairs, stack) = Arc::unwrap_or_clone(lex(text));
         assert_eq!(pairs, vec![(3, 5), (0, 8)]);
         assert_eq!(stack, vec![('{', 12)]);
         assert!(matches!(tokens[0].kind, Kind::Open(0)));
@@ -408,7 +426,7 @@ mod tests {
     #[test]
     fn nested_items_and_heads() {
         let text = "(outer a [b (inner c)] d)";
-        let (tokens, _, _) = lex(text);
+        let (tokens, _, _) = Arc::unwrap_or_clone(lex(text));
         let top = items(&tokens, 0);
         assert_eq!(top.iter().map(|&i| tokens[i].start).collect::<Vec<_>>(), vec![1, 7, 9, 23]);
         assert_eq!(item_stop(&tokens, top[2]), 22);
@@ -420,14 +438,14 @@ mod tests {
     #[test]
     fn editor_readers_keep_bindings_keywords_and_context() {
         let text = "(workspace w (graph g :context scene [(depth : int 5)] (let* [ring (sop/box) n 2] (fn [x y] x))))";
-        let (tokens, _, stack) = lex(text);
+        let (tokens, _, stack) = Arc::unwrap_or_clone(lex(text));
         let (names, _defns, graphs) = bound(text, &tokens, text.len());
         assert!(names.iter().any(|(name, _)| *name == "depth"));
         assert!(names.iter().any(|(name, _)| *name == "ring"));
         assert!(names.iter().any(|(name, _)| *name == "n"));
         assert!(names.iter().any(|(name, _)| *name == "x"));
         let definitions = "(defn sample :context value [] 1) (defmacro other [x] x)";
-        let (definition_tokens, _, _) = lex(definitions);
+        let (definition_tokens, _, _) = Arc::unwrap_or_clone(lex(definitions));
         let (_, defn_names, _) = bound(definitions, &definition_tokens, definitions.len());
         assert_eq!(defn_names, vec!["sample", "other"]);
         assert_eq!(graphs, vec!["g"]);
@@ -436,7 +454,7 @@ mod tests {
         assert_eq!(kw_value(text, &tokens, graph, ":context"), Some("scene"));
         assert_eq!(context_of(text, &tokens, &stack), "sop");
         let graph_text = "(graph g :context scene [x";
-        let (graph_tokens, _, graph_stack) = lex(graph_text);
+        let (graph_tokens, _, graph_stack) = Arc::unwrap_or_clone(lex(graph_text));
         assert_eq!(context_of(graph_text, &graph_tokens, &graph_stack), "scene");
     }
 
@@ -455,7 +473,7 @@ mod inferred_context_tests {
     #[test]
     fn completion_infers_context_through_let_without_an_annotation() {
         let source = "(workspace example (graph picture (let [width (frame/width)] (draw/circle [0 0] 3";
-        let (tokens, _, stack) = super::lex(source);
+        let (tokens, _, stack) = Arc::unwrap_or_clone(super::lex(source));
         assert_eq!(super::context_of(source, &tokens, &stack), "draw");
     }
 }

@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Word {
@@ -168,7 +169,7 @@ fn string_token(source: &str, start: usize) -> (Token, usize) {
 struct LineCk { start: usize, from: usize }
 
 #[derive(Default)]
-struct LexCache { text: String, tokens: Vec<Token>, lines: Vec<LineCk> }
+struct LexCache { text: String, tokens: Arc<Vec<Token>>, lines: Vec<LineCk> }
 
 thread_local!(static LEX_CACHE: RefCell<LexCache> = RefCell::new(LexCache::default()));
 
@@ -199,13 +200,14 @@ fn build_lines(text: &str, tokens: &[Token]) -> Vec<LineCk> {
 }
 
 /// Incremental lex: reuse tokens before the first changed line (parinfer-style line checkpoints).
-pub fn lex(source: &str) -> Vec<Token> {
+/// Returns a shared Arc; identical `source` is an Arc clone only.
+pub fn lex(source: &str) -> Arc<Vec<Token>> {
     LEX_CACHE.with(|cell| {
         let mut cache = cell.borrow_mut();
         if cache.text.as_str() == source { return cache.tokens.clone(); }
         let prefix = cache.text.as_bytes().iter().zip(source.as_bytes()).take_while(|(a, b)| a == b).count();
         let first_line = if cache.lines.is_empty() { 0 } else { cache.lines.partition_point(|l| l.start <= prefix).saturating_sub(1) };
-        if first_line > 0 && first_line < cache.lines.len() {
+        let tokens = if first_line > 0 && first_line < cache.lines.len() {
             let cut = cache.lines[first_line].start;
             let tok_from = cache.lines[first_line].from;
             let open_string = cache.tokens[..tok_from].iter().any(|t| matches!(t.kind, Kind::String(_)) && (t.stop as usize) > cut);
@@ -217,16 +219,18 @@ pub fn lex(source: &str) -> Vec<Token> {
                     if let Some(issue) = &mut t.issue { issue.start += cut as i64; issue.finish += cut as i64; }
                 }
                 tokens.extend(rest);
-                cache.lines = build_lines(source, &tokens);
-                cache.text = source.to_owned();
-                cache.tokens.clone_from(&tokens);
-                return tokens;
+                tokens
+            } else {
+                lex_full(source)
             }
-        }
-        let tokens = lex_full(source);
+        } else {
+            lex_full(source)
+        };
         cache.lines = build_lines(source, &tokens);
-        cache.text = source.to_owned();
-        cache.tokens.clone_from(&tokens);
+        cache.text.clear();
+        cache.text.push_str(source);
+        let tokens = Arc::new(tokens);
+        cache.tokens = tokens.clone();
         tokens
     })
 }
@@ -370,7 +374,7 @@ mod tests {
                         _ => { let end = (at + 1..=s.len()).find(|&i| s.is_char_boundary(i)).unwrap_or(s.len()); s.replace_range(at..end, "y"); }
                     }
                 }
-                assert_eq!(lex(&s), lex_full(&s), "incremental != full after edit");
+                assert_eq!(lex(&s).as_slice(), lex_full(&s).as_slice(), "incremental != full after edit");
             }
         }
     }
