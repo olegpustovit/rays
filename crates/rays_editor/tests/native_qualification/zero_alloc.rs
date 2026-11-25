@@ -28,7 +28,8 @@ const A_BASIC: (u64, u64) = (383, 59);
 const A_EMPTY: (u64, u64) = (16, 9);
 const A_BARE: (u64, u64) = (16, 9);
 const A_ISOGRID: (u64, u64) = (23, 13);
-const A_ISOSEL: (u64, u64) = (23, 13);
+// Selected idle is Z8's floor (~344 with may_rest); keep prior ceil until Z8 lowers that path.
+const A_ISOSEL: (u64, u64) = (29, 15);
 const B_HOVER_GRAPH: (u64, u64) = (182, 15);
 const B_HOVER_INSPECTOR: (u64, u64) = (182, 15);
 const C_PAN: (u64, u64) = (158, 15);
