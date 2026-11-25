@@ -890,7 +890,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     // i on a collapsed function or loop opens it in place, as a double click does
     let mut actions = actions;
-    if let [zone] = scope::selected(pane_view(&value.into())).as_slice() {
+    if let [zone] = pane_view(&value.into()).selected.as_slice() {
         if actions.contains(&Action::Enter) && scope::collapsed_zone(pane_view(&value.into()), zone) {
             result.scope_changes.push(scope::Change::ZoneCollapsed { zone: zone.clone(), collapsed: false });
             actions.retain(|a| *a != Action::Enter);
@@ -1256,13 +1256,12 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         None if actions.contains(&Action::Enter) => follow_target(&value.into(), None).or_else(|| viewport_target(&value.into())),
         None => None,
     };
-    let mut picked_view = result.scope_view.clone();
     if added.is_empty() {
-        sync_list_selection(&value.into(), &result.tree_intents, &mut picked_view);
+        sync_list_selection(&value.into(), &result.tree_intents, &mut result.scope_view);
     } else {
-        scope::select(added.clone(), &mut picked_view);
+        scope::select(added.clone(), &mut result.scope_view);
     }
-    let scope_selection_changed = scope::selected(&picked_view) != scope::selected(pane_view(&value.into()));
+    let scope_selection_changed = result.scope_view.selected != pane_view(&value.into()).selected;
     let value2 = owned;
     let before_tree = if !loaded_flag && !match (&value2.doc.shell, &doc.shell) {
         (Some(a), Some(b)) => Arc::ptr_eq(a, b),
@@ -1317,7 +1316,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     {
         let pane = pane_mut(value2);
         pane.picked = selection.clone();
-        pane.view = picked_view;
+        std::mem::swap(&mut pane.view, &mut result.scope_view);
     }
     if let Some(level) = target {
         if level != pane_level(&(&*value2).into()) {

@@ -160,7 +160,7 @@ pub fn probe_caption<'a>(value: &ModelView<'a>) -> Option<String> {
         return None;
     }
     let probe_of = |p: &[Symbol]| value.probes.get(p).copied().unwrap_or(0);
-    let zones: Vec<fproj::Node> = fproj::zones(&laid.scope).into_iter().filter(|n| n.zone.as_ref().is_some_and(|z| z.kind != ZoneKind::Let)).collect();
+    let zones: Vec<&fproj::Node> = fproj::zones(&laid.scope).into_iter().filter(|n| n.zone.as_ref().is_some_and(|z| z.kind != ZoneKind::Let)).collect();
     let own = zones.iter().find(|n| n.path == *path);
     let zone = match own {
         Some(n) => Some(n.path.clone()),

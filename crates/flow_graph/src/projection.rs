@@ -1413,11 +1413,11 @@ pub fn of_graph(catalog: &Catalog, workspace: &w::Workspace, name: &str) -> Resu
 }
 
 /// Every zone below the scope, outer first.
-pub fn zones(sc: &Scope) -> Vec<Node> {
+pub fn zones(sc: &Scope) -> Vec<&Node> {
     let mut out = Vec::new();
     for n in &sc.nodes {
         if let Some(z) = &n.zone {
-            out.push(n.clone());
+            out.push(n);
             out.extend(zones(&z.scope));
         }
     }
@@ -1426,12 +1426,17 @@ pub fn zones(sc: &Scope) -> Vec<Node> {
 
 /// The node at a path, searching zones.
 pub fn find(sc: &Scope, path: &[Symbol]) -> Option<Node> {
+    find_ref(sc, path).cloned()
+}
+
+/// `find`, borrowed.
+pub fn find_ref<'s>(sc: &'s Scope, path: &[Symbol]) -> Option<&'s Node> {
     for n in &sc.nodes {
         if n.path == path {
-            return Some(n.clone());
+            return Some(n);
         }
         if let Some(z) = &n.zone {
-            if let Some(f) = find(&z.scope, path) {
+            if let Some(f) = find_ref(&z.scope, path) {
                 return Some(f);
             }
         }

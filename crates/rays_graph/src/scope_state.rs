@@ -315,6 +315,8 @@ pub struct Chains {
     pub slot: Rc<HashMap<Path, usize>>,
     pub rev: u64,
     todo: Vec<usize>,
+    /// the wires' (matched end, joined end) slots, sorted (kept buffer)
+    ends: Vec<(usize, usize)>,
 }
 
 impl Chains {
@@ -589,8 +591,6 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
 
 /// The nodes upstream and downstream of the selection (it included), along the wires; `None` with
 /// nothing selected. A wire is lit when both its ends are in the same side.
-/// ponytail: one pass over the wires per step of the walk, per selection or geometry change; index them
-/// by their ends if a 10k-wire graph drags.
 pub fn chains_of(t: &Pane) -> Option<Rc<Chains>> {
     if t.selected.is_empty() {
         return None;
@@ -610,7 +610,15 @@ pub fn chains_of(t: &Pane) -> Option<Rc<Chains>> {
     (ch.rev, ch.slot) = (rev, t.geo.slot.clone());
     let n = t.geo.items.len();
     let slot = |q: &Option<Path>| q.as_ref().and_then(|q| t.geo.slot.get(q).copied());
-    let reach = |upstream: bool, seen: &mut Vec<bool>, todo: &mut Vec<usize>| {
+    // the wires sorted by the end the walk matches: each step reads the ones at its node, O(w log w) a walk
+    let reach = |upstream: bool, seen: &mut Vec<bool>, todo: &mut Vec<usize>, ends: &mut Vec<(usize, usize)>| {
+        ends.clear();
+        // the first of the pair is matched against the node, the second joins the side
+        ends.extend(t.geo.wires.iter().filter_map(|wi| {
+            let (first, second) = if upstream { (slot(&wi.into), slot(&wi.from)) } else { (slot(&wi.from), slot(&wi.into)) };
+            Some((first?, second?))
+        }));
+        ends.sort_unstable();
         seen.clear();
         seen.resize(n, false);
         todo.clear();
@@ -619,20 +627,16 @@ pub fn chains_of(t: &Pane) -> Option<Rc<Chains>> {
             seen[k] = true;
         }
         while let Some(k) = todo.pop() {
-            for wi in t.geo.wires.iter() {
-                // the first of the pair is matched against the node, the second joins the side
-                let (first, second) = if upstream { (slot(&wi.into), slot(&wi.from)) } else { (slot(&wi.from), slot(&wi.into)) };
-                if let (Some(a), Some(b)) = (first, second) {
-                    if a == k && !seen[b] {
-                        seen[b] = true;
-                        todo.push(b);
-                    }
+            for &(_, b) in ends[ends.partition_point(|e| e.0 < k)..].iter().take_while(|e| e.0 == k) {
+                if !seen[b] {
+                    seen[b] = true;
+                    todo.push(b);
                 }
             }
         }
     };
-    reach(true, &mut ch.up, &mut ch.todo);
-    reach(false, &mut ch.down, &mut ch.todo);
+    reach(true, &mut ch.up, &mut ch.todo, &mut ch.ends);
+    reach(false, &mut ch.down, &mut ch.todo, &mut ch.ends);
     c.sel.assign(&t.selected);
     c.wires = Some(t.geo.wires.clone());
     c.chains = Some(r.clone());
@@ -1038,19 +1042,22 @@ pub fn with_display(display: Option<Path>, t: &mut Pane) {
 }
 
 pub fn with_arguments(changes: &[(Path, ArgKey, S)], t: &mut Pane) {
-    let scope = match t.scope.clone() {
-        None => return,
-        Some(s) => s,
-    };
-    let changes: Vec<(Path, ArgKey, S)> = changes.iter().filter(|(pth, _, _)| t.geo.slot.contains_key(pth)).cloned().collect();
-    if changes.is_empty() {
+    if let Some(scope) = &t.scope {
+        let scope = Rc::new(p::with_arguments(changes, scope));
+        with_patched(changes, scope, t);
+    }
+}
+
+/// `with_arguments` with the scope those changes already patched (`p::with_arguments`): the host's
+/// projection, so a scrub frame copies the scope once.
+pub fn with_patched(changes: &[(Path, ArgKey, S)], scope: Rc<p::Scope>, t: &mut Pane) {
+    if t.scope.is_none() || !changes.iter().any(|(pth, _, _)| t.geo.slot.contains_key(pth)) {
         return;
     }
-    let scope = Rc::new(p::with_arguments(&changes, &scope));
-    let mut nodes: HashMap<Path, p::Node> = HashMap::new();
-    fn index(sc: &p::Scope, nodes: &mut HashMap<Path, p::Node>) {
+    let mut nodes: HashMap<&[Symbol], &p::Node> = HashMap::new();
+    fn index<'s>(sc: &'s p::Scope, nodes: &mut HashMap<&'s [Symbol], &'s p::Node>) {
         for node in &sc.nodes {
-            nodes.insert(node.path.clone(), node.clone());
+            nodes.insert(&node.path, node);
             if let Some(z) = &node.zone {
                 index(&z.scope, nodes);
             }
@@ -1058,14 +1065,14 @@ pub fn with_arguments(changes: &[(Path, ArgKey, S)], t: &mut Pane) {
     }
     index(&scope, &mut nodes);
     let mut places: HashMap<Path, Placed> = HashMap::new();
-    fn patch_layout(layout: &p::Layout, nodes: &HashMap<Path, p::Node>, places: &mut HashMap<Path, Placed>) -> p::Layout {
+    fn patch_layout(layout: &p::Layout, nodes: &HashMap<&[Symbol], &p::Node>, places: &mut HashMap<Path, Placed>) -> p::Layout {
         let placed: Vec<Placed> = layout
             .placed
             .iter()
             .map(|pl| {
                 let item = match &pl.item {
-                    Item::Item(node) => match nodes.get(&node.path) {
-                        Some(next) if next != node => Item::Item(next.clone()),
+                    Item::Item(node) => match nodes.get(node.path.as_slice()) {
+                        Some(next) if *next != node => Item::Item((*next).clone()),
                         _ => pl.item.clone(),
                     },
                     other => other.clone(),
@@ -1103,6 +1110,7 @@ pub fn with_arguments(changes: &[(Path, ArgKey, S)], t: &mut Pane) {
     let items = Rc::new(items);
     crate::scope_hover::same_slots(t, &items);
     let geo = Geo { items, ..t.geo.clone() };
+    drop(nodes);
     (t.scope, t.layout, t.geo) = (Some(scope), Rc::new(layout), geo);
 }
 
@@ -1127,8 +1135,8 @@ pub fn with_records(records: Rc<RefCell<Probe>>, t: &mut Pane) {
 
 // ------------------------------------------------------------- lookups
 
-pub fn node_of(t: &Pane, path: &[Symbol]) -> Option<p::Node> {
-    t.scope.as_ref().and_then(|s| p::find(s, path))
+pub fn node_of<'t>(t: &'t Pane, path: &[Symbol]) -> Option<&'t p::Node> {
+    t.scope.as_ref().and_then(|s| p::find_ref(s, path))
 }
 
 pub fn collapsed_zone(t: &Pane, path: &[Symbol]) -> bool {
@@ -1150,6 +1158,6 @@ pub fn rel_at(t: &Pane, path: &[Symbol]) -> Option<(f64, f64)> {
     t.item_at(path).map(|(pl, _, _)| (pl.x, pl.y))
 }
 
-pub fn selected_nodes(t: &Pane) -> Vec<p::Node> {
-    selected(t).iter().filter_map(|pth| node_of(t, pth)).collect()
+pub fn selected_nodes(t: &Pane) -> Vec<&p::Node> {
+    t.selected.iter().filter_map(|pth| node_of(t, pth)).collect()
 }

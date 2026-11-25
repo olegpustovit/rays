@@ -217,7 +217,6 @@ pub fn sync_scope(value: &mut EditorModel) {
         }
     }
     let Some(name) = graph_name(&(&*value).into()) else { return };
-    let Some(catalog) = flow_catalog(&*value) else { return };
     let document = value.doc.clone();
     let workspace = &document.workspace;
     let (ws, lowered) = (&workspace.ws, &workspace.lowered);
@@ -250,7 +249,7 @@ pub fn sync_scope(value: &mut EditorModel) {
         None
     };
     let now = (value.clock)();
-    let summaries = value.cook.summaries.clone();
+    let summaries = &value.cook.summaries;
     let execution_count = probe_run::report_count(&lowered.profile);
     // a moving clock or pointer re-forces the probes at most five times a second: a forced frame
     // sets the quiet time to four times its own length, so forcing never takes more than a fifth
@@ -261,7 +260,7 @@ pub fn sync_scope(value: &mut EditorModel) {
     let quiet = |k: &ScopeKey| -> f64 { 2.0f64.min(0.2f64.max(4.0 * (now - k.stamp))) };
     let fresh = match &previous {
         Some(k) => !(k.evaluated.as_ref().map_or(false, |e| Arc::ptr_eq(e, &evaluated))
-            && k.summaries == summaries
+            && k.summaries == *summaries
             && execution_count == k.executions.len()
             && (match (&k.time, &time) {
                 (Some(a), Some(b)) => !sop_context::input_changed(**lowered.reads, a, b),
@@ -300,22 +299,10 @@ pub fn sync_scope(value: &mut EditorModel) {
                 Rc::new(p::with_arguments(&edits, &k.scope))
             }
         }
-        _ => projected(&catalog, ws, &name),
-    };
-    if !moved {
-        scope::with_arguments(&edits, &mut pane_mut(value).view);
-    } else {
-        let display = viewed_path(&(&*value).into(), &scope_proj);
-        let layouts: Vec<String> = match &value.doc.shell {
-            Some(sh) if sh.switch.is_some() && workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name) == Some(name.clone()) => {
-                layouts(&*value).into_iter().map(|(n, _)| n).collect()
-            }
-            _ => Vec::new(),
-        };
-        let saved = Rc::new(DocSaved { layout: ws.layout.clone(), probes: value.probes.clone(), imports: ws.imports.clone() });
-        let opts = scope::ScopeOpts { saved, display, layouts };
-        let _phase = phase_timer::measure("layout");
-        scope::with_scope(opts, &name, scope_proj.clone(), &mut pane_mut(value).view);
+        _ => {
+            let Some(catalog) = flow_catalog(&*value) else { return };
+            projected(&catalog, ws, &name)
+        }
     };
     // Probe snapshots need the published facts, not the previous cook's compiled graphs and their arrays.
     let owner = node_owner_of(&(&*value).into());
@@ -329,11 +316,6 @@ pub fn sync_scope(value: &mut EditorModel) {
             summaries.iter().find(|(k, _)| *k == (object_id, node_id)).map(|(_, g)| g.clone())
         })
     };
-    // a pick in another graph's geometry asked for its node to be selected here
-    if !value.select_later.is_empty() && value.select_later.iter().all(|pth| pth.first().is_some_and(|part| part.as_str() == name)) {
-        let paths = std::mem::take(&mut value.select_later);
-        scope::select(paths, &mut pane_mut(value).view);
-    }
     let element: Rc<dyn Fn(&[Symbol], i64) -> Option<Vec<(Symbol, Value)>>> = {
         let lowered = lowered.clone();
         Rc::new(move |zone: &[Symbol], k: i64| lower::zone_element(&lowered, &zone.to_vec(), k).map(|(n, (x, y, z))| vec![(n, Value::Vec3(x, y, z))]))
@@ -400,8 +382,39 @@ pub fn sync_scope(value: &mut EditorModel) {
         };
         Some(Rc::new(RefCell::new(probe::make(&evaluated, options))))
     };
-    if let Some(records) = &records {
-        if fresh || moved { scope::with_records(records.clone(), &mut pane_mut(value).view); }
+    // a pane's first records come before its first layout: the cards reserve their footer rows in it,
+    // laid out once
+    let set_records = |value: &mut EditorModel| {
+        if let Some(records) = &records {
+            if fresh || moved { scope::with_records(records.clone(), &mut pane_mut(value).view); }
+        }
+    };
+    let first = pane_view(&(&*value).into()).records.is_none();
+    if first {
+        set_records(value);
+    }
+    if !moved {
+        scope::with_patched(&edits, scope_proj.clone(), &mut pane_mut(value).view);
+    } else {
+        let display = viewed_path(&(&*value).into(), &scope_proj);
+        let layouts: Vec<String> = match &value.doc.shell {
+            Some(sh) if sh.switch.is_some() && workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name) == Some(name.clone()) => {
+                layouts(&*value).into_iter().map(|(n, _)| n).collect()
+            }
+            _ => Vec::new(),
+        };
+        let saved = Rc::new(DocSaved { layout: ws.layout.clone(), probes: value.probes.clone(), imports: ws.imports.clone() });
+        let opts = scope::ScopeOpts { saved, display, layouts };
+        let _phase = phase_timer::measure("layout");
+        scope::with_scope(opts, &name, scope_proj.clone(), &mut pane_mut(value).view);
+    };
+    // a pick in another graph's geometry asked for its node to be selected here
+    if !value.select_later.is_empty() && value.select_later.iter().all(|pth| pth.first().is_some_and(|part| part.as_str() == name)) {
+        let paths = std::mem::take(&mut value.select_later);
+        scope::select(paths, &mut pane_mut(value).view);
+    }
+    if !first {
+        set_records(value);
     }
     let targets: Vec<(Path, (i64, i64))> = match (&records, &previous) {
         (Some(_), Some(k))

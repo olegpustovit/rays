@@ -8,7 +8,6 @@ use std::rc::Rc;
 
 use editor_core::panels::{self as panels, Panel};
 use editor_document::document::{self as doc_mod, Level};
-use editor_document::kind_graph;
 use flow_graph::flow_edit::{self as fe, ArgKey};
 use flow_graph::probe;
 use flow_graph::projection as p;
@@ -300,19 +299,19 @@ pub fn graph_name_at(doc: &doc_mod::T, level: Level, shown: Option<&str>, path: 
     let ws = &doc.workspace.ws;
     let exists = |name: &str| -> bool {
         ws.checked.graphs.iter().any(|g| g.name == name)
-            || (name.len() > 4 && &name[..4] == "def:" && ws.checked.defs.iter().any(|g| format!("def:{}", g.name) == name))
+            || name.strip_prefix("def:").is_some_and(|def| ws.checked.defs.iter().any(|g| g.name == def))
     };
     // the graph the pane's own leaf pins
     let named = || doc.shell.as_ref().and_then(|s| path.and_then(|path| s.named.iter().find(|(p, _)| p.as_slice() == path).map(|(_, n)| n.as_str())));
     let chosen = shown.or_else(named);
-    let kind = |id| doc_mod::scene_graph(doc).into_iter().find(|node| node.id == id).map(|node| node.kind);
+    let kind = |id| doc.scene.iter().find(|node| node.id == id).map(|node| node.kind.as_str());
     match (chosen, level) {
         (Some(name), _) if exists(name) => Some(name.to_owned()),
-        (_, Level::Inside(id)) if kind(id).as_deref() == Some("geometry") => match doc_mod::object_graph(doc, id) {
+        (_, Level::Inside(id)) if kind(id) == Some("geometry") => match doc_mod::object_graph(doc, id) {
             Some(name) => Some(name),
-            None => kind_graph::find(&doc_mod::scene_graph(doc), id).and_then(|node| if exists(&node.label) { Some(node.label.clone()) } else { None }),
+            None => doc.scene.iter().find(|node| node.id == id).and_then(|node| if exists(&node.label) { Some(node.label.clone()) } else { None }),
         },
-        (_, Level::Inside(id)) if kind(id).as_deref() == Some("world") => {
+        (_, Level::Inside(id)) if kind(id) == Some("world") => {
             ws.checked.graphs.iter().find_map(|g| if g.context == context::world() { Some(g.name.clone()) } else { None })
         }
         (_, Level::Scene) => ws.checked.graphs.iter().find_map(|g| if g.context == context::scene() { Some(g.name.clone()) } else { None }),
@@ -524,9 +523,9 @@ pub fn failed_nodes<'a>(value: &ModelView<'a>) -> Vec<(Key, String)> {
     let failed = cook::failed_node(&value.cook);
     match (failed, pane_laid(value)) {
         (Some((code, node_id)), Some(laid)) if scope_name(value).is_some() && laid.records.is_some() => {
-            fn nodes(s: &p::Scope, out: &mut Vec<p::Node>) {
+            fn nodes<'s>(s: &'s p::Scope, out: &mut Vec<&'s p::Node>) {
                 for n in &s.nodes {
-                    out.push(n.clone());
+                    out.push(n);
                     if let Some(z) = &n.zone {
                         nodes(&z.scope, out);
                     }

@@ -235,8 +235,8 @@ fn edit(op: Op) -> Vec<Change> {
     vec![Change::SyntaxEdit(op)]
 }
 
-fn row_of(t: &Pane, path: &[Symbol], key: &ArgKey) -> Option<(p::Node, p::Row)> {
-    st::node_of(t, path).and_then(|n| n.rows.iter().find(|r| r.key == *key).cloned().map(|r| (n, r)))
+fn row_of<'t>(t: &'t Pane, path: &[Symbol], key: &ArgKey) -> Option<(&'t p::Node, &'t p::Row)> {
+    st::node_of(t, path).and_then(|n| n.rows.iter().find(|r| r.key == *key).map(|r| (n, r)))
 }
 
 pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
@@ -347,10 +347,10 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
             .collect(),
         Command::ProbeStep(delta) => {
             // with nothing selected, one stepper pins the iteration of every zone of the graph
-            let nodes: Vec<p::Node> = if !nodes.is_empty() {
+            let nodes: Vec<&p::Node> = if !nodes.is_empty() {
                 nodes.clone()
             } else {
-                t.geo.items.iter().filter_map(|(pl, _, _)| match &pl.item { p::Item::Item(n) => Some(n.clone()), _ => None }).collect()
+                t.geo.items.iter().filter_map(|(pl, _, _)| match &pl.item { p::Item::Item(n) => Some(n), _ => None }).collect()
             };
             nodes
                 .iter()

@@ -4,17 +4,17 @@ use super::click_budget::{session, sketch, P};
 use input::{Event, Key, MouseButton};
 
 /// (action, ceiling on the key frame, ceiling on the third frame after it)
-/// Set 2026-11-25 at measured + 5% (L4).
+/// Set 2026-11-25 at measured + 5% (L4); enter and up measured since they enter a defn and come back.
 const CEILINGS: &[(&str, u64, u64)] = &[
-    ("zoom rest", 636, 507),
-    ("pan across overscan", 522, 1141),
-    ("node select", 520, 508),
-    ("box select", 519, 7587),
-    ("after box select", 896, 611),
-    ("escape", 698, 611),
-    ("hover moves", 739, 618),
-    ("enter", 704, 611),
-    ("up", 708, 611),
+    ("zoom rest", 616, 487),
+    ("pan across overscan", 502, 1121),
+    ("node select", 500, 488),
+    ("box select", 499, 7557),
+    ("after box select", 842, 556),
+    ("escape", 643, 556),
+    ("hover moves", 684, 563),
+    ("enter", 2060, 492),
+    ("up", 1812, 488),
 ];
 
 fn rest(p: &mut P, name: &str, first: (f64, u64)) {
@@ -59,10 +59,22 @@ fn tour(p: &mut P) {
     rest(p, "escape", f);
     let frames = (0..4).map(|i| { let q = (1000. + 35. * i as f64, 150. + 30. * i as f64); p.step(&[], vec![Event::PointerMoved(q)], q) }).collect();
     p.record("hover moves", frames);
+    // into the defn `voxels` calls and up again (the pane's graph changes both times)
+    let graph = |p: &P| rays_editor::editor_panes::graph_name(&(&*p.e.as_ref().expect("editor").core).into());
+    let shown = graph(p);
+    {
+        let core = std::rc::Rc::make_mut(&mut p.e.as_mut().expect("editor").core);
+        rays_graph::scope_pane::select(vec![vec!["volume".into(), "voxels".into()]], &mut rays_editor::editor_model::pane_mut(core).view);
+    }
+    for _ in 0..3 {
+        p.step(&[], vec![], at);
+    }
     let f = p.step(&[], vec![Event::KeyPressed(ch('i'))], at);
     rest(p, "enter", f);
-    let f = p.step(&[Key::Meta], vec![Event::KeyPressed(Key::ArrowUp)], at);
+    assert!(graph(p).as_deref() == Some("def:build-volume"), "i did not enter the defn voxels calls ({:?})", graph(p));
+    let f = p.step(&[], vec![Event::KeyPressed(ch('u'))], at);
     rest(p, "up", f);
+    assert!(graph(p) == shown, "u did not come back to {shown:?} ({:?})", graph(p));
 }
 
 fn isogrid() {

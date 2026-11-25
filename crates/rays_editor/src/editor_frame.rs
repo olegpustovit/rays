@@ -1060,17 +1060,22 @@ pub fn update_frame(
             Err(error) => ((None, value.text.clone(), None, Vec::new()), Some(rays_diagnostic::to_string(&error))),
         };
     let scope_active = graph_shown && scope_name(&(&*value).into()).is_some();
-    let mut scope_view = pane_view(&(&*value).into()).clone();
-    let mut scope_command_changes: Vec<scope::Change> = Vec::new();
-    for a in &actions {
-        match a {
-            Action::ScopeCommand(command) if scope_active => {
-                rays_graph::scope_commands::run_command(&mut scope_view, command.clone(), &mut scope_command_changes);
+    // the frame's copy of the pane, its commands run: made once, and again only for a build PXUI repeats
+    // (the first build took the copy; the result hands it to reduce)
+    let frame_pane = || -> (scope::Pane, Vec<scope::Change>) {
+        let mut view = pane_view(&(&*value).into()).clone();
+        let mut changes = Vec::new();
+        for a in &actions {
+            match a {
+                Action::ScopeCommand(command) if scope_active => rays_graph::scope_commands::run_command(&mut view, command.clone(), &mut changes),
+                Action::OpenCamera => scope::clear_selection(&mut view),
+                _ => {}
             }
-            Action::OpenCamera => scope::clear_selection(&mut scope_view),
-            _ => {}
         }
-    }
+        (view, changes)
+    };
+    let (view, scope_command_changes) = frame_pane();
+    let mut scope_view = Some(view);
     let (menu, command_changes) = node_menu_step(&(&*value).into(), &workspace, frame_, &actions, graph_shown);
     let shown_node = match pane_level(&(&*value).into()) {
         Level::Inside(id) => match value.viewed.get(&id) {
@@ -1279,7 +1284,7 @@ pub fn update_frame(
             };
             let active = active_view(&vw, &g);
             let view_root = draw_viewport_pane(ui, &(&*value).into(), probe_caption(&vw), &roots, active.as_ref(), &none_root);
-            let mut scope_view2 = scope_view.clone();
+            let mut scope_view2 = scope_view.take().unwrap_or_else(|| frame_pane().0);
             let mut scope_changes = scope_command_changes.clone();
             let (graph_body, menu2, menu_pick) = draw_graph_pane(ui, frame_, &(&*value).into(), &shortcut_frame, &mut scope_view2, scope_active, guide, carry_lit.clone(), carry_hot.clone(), &graph_root, &graph_host, &workspace, menu.clone(), &open_menu, &mut scope_changes);
             // Each pane builder returns only its frame intents and updated pane-local state.
@@ -1447,7 +1452,7 @@ pub fn update_frame(
             selection: selection.into_owned(),
             menu: menu.clone(),
             menu_pick: None,
-            scope_view: scope_view.clone(),
+            scope_view: scope_view.take().unwrap_or_else(|| frame_pane().0),
             scope_changes: scope_command_changes.clone(),
             tree: tree_value.into_owned(),
             list_rows: rows.clone(),

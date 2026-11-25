@@ -1456,7 +1456,9 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
             }
             t.marquee = hits;
             if sig.released {
+                // (the hits clear: every copy of the pane after the band would copy them)
                 t.drag = None;
+                t.marquee.clear();
             }
         }
     }
