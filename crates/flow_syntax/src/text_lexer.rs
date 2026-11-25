@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Word {
     Symbol,
@@ -162,7 +164,74 @@ fn string_token(source: &str, start: usize) -> (Token, usize) {
     (token(Kind::String(decoded), start, j, first_issue), j)
 }
 
+
+struct LineCk { start: usize, from: usize }
+
+#[derive(Default)]
+struct LexCache { text: String, tokens: Vec<Token>, lines: Vec<LineCk> }
+
+thread_local!(static LEX_CACHE: RefCell<LexCache> = RefCell::new(LexCache::default()));
+
+#[cfg(test)]
+fn reset_lex_cache() { LEX_CACHE.with(|c| *c.borrow_mut() = LexCache::default()); }
+
+fn build_lines(text: &str, tokens: &[Token]) -> Vec<LineCk> {
+    let bytes = text.as_bytes();
+    let mut starts = vec![0usize];
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'\n' && i + 1 < bytes.len() { starts.push(i + 1); }
+    }
+    let mut lines = Vec::with_capacity(starts.len());
+    let mut ti = 0;
+    let n = tokens.len();
+    for (li, &start) in starts.iter().enumerate() {
+        let stop = starts.get(li + 1).copied().unwrap_or(text.len());
+        let from = ti;
+        while ti < n {
+            let tok = &tokens[ti];
+            if matches!(tok.kind, Kind::End) && tok.issue.is_none() { break; }
+            if (tok.start as usize) >= stop { break; }
+            ti += 1;
+        }
+        lines.push(LineCk { start, from });
+    }
+    lines
+}
+
+/// Incremental lex: reuse tokens before the first changed line (parinfer-style line checkpoints).
 pub fn lex(source: &str) -> Vec<Token> {
+    LEX_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        if cache.text.as_str() == source { return cache.tokens.clone(); }
+        let prefix = cache.text.as_bytes().iter().zip(source.as_bytes()).take_while(|(a, b)| a == b).count();
+        let first_line = if cache.lines.is_empty() { 0 } else { cache.lines.partition_point(|l| l.start <= prefix).saturating_sub(1) };
+        if first_line > 0 && first_line < cache.lines.len() {
+            let cut = cache.lines[first_line].start;
+            let tok_from = cache.lines[first_line].from;
+            let open_string = cache.tokens[..tok_from].iter().any(|t| matches!(t.kind, Kind::String(_)) && (t.stop as usize) > cut);
+            if !open_string {
+                let mut tokens: Vec<_> = cache.tokens[..tok_from].iter().filter(|t| !(matches!(t.kind, Kind::End) && t.issue.is_none())).cloned().collect();
+                let mut rest = lex_full(&source[cut..]);
+                for t in &mut rest {
+                    t.start += cut as i64; t.stop += cut as i64;
+                    if let Some(issue) = &mut t.issue { issue.start += cut as i64; issue.finish += cut as i64; }
+                }
+                tokens.extend(rest);
+                cache.lines = build_lines(source, &tokens);
+                cache.text = source.to_owned();
+                cache.tokens.clone_from(&tokens);
+                return tokens;
+            }
+        }
+        let tokens = lex_full(source);
+        cache.lines = build_lines(source, &tokens);
+        cache.text = source.to_owned();
+        cache.tokens.clone_from(&tokens);
+        tokens
+    })
+}
+
+pub fn lex_full(source: &str) -> Vec<Token> {
     let bytes = source.as_bytes();
     let n = bytes.len();
     let mut tokens = Vec::new();
@@ -253,7 +322,7 @@ pub fn lex(source: &str) -> Vec<Token> {
 
 #[cfg(test)]
 mod tests {
-    use super::{lex, number, Kind, Word};
+    use super::{lex, lex_full, number, reset_lex_cache, Kind, Word};
 
     #[test]
     fn numbers_and_tolerant_lexing() {
@@ -268,5 +337,41 @@ mod tests {
         assert!(tokens.iter().any(|token| {
             matches!(token.kind, Kind::Word(Word::Symbol)) && token.start == 11
         }));
+    }
+
+    #[test]
+    fn incremental_matches_full_over_sketch_edits() {
+        let root = format!("{}/../../sketches", env!("CARGO_MANIFEST_DIR"));
+        let mut sketches = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(&root) {
+            for e in rd.flatten() {
+                let path = e.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("rays") {
+                    if let Ok(text) = std::fs::read_to_string(&path) { sketches.push(text); }
+                }
+            }
+        }
+        assert!(!sketches.is_empty(), "expected sketches/*.rays under {root}");
+        let mut seed = 0x9e37_79b9_u64;
+        let mut next = || { seed = seed.wrapping_mul(0x5851_f42d_4c95_7f2d).wrapping_add(1); seed };
+        for text in &sketches {
+            reset_lex_cache();
+            let _ = lex(text);
+            for _ in 0..24 {
+                let mut s = text.clone();
+                let op = next() % 3;
+                if s.is_empty() { s.push('x'); }
+                else {
+                    let at = (next() as usize) % s.len();
+                    let at = (0..=at).rev().find(|&i| s.is_char_boundary(i)).unwrap_or(0);
+                    match op {
+                        0 => s.insert_str(at, "x"),
+                        1 => { let end = (at + 1..=s.len()).find(|&i| s.is_char_boundary(i)).unwrap_or(s.len()); s.replace_range(at..end, ""); }
+                        _ => { let end = (at + 1..=s.len()).find(|&i| s.is_char_boundary(i)).unwrap_or(s.len()); s.replace_range(at..end, "y"); }
+                    }
+                }
+                assert_eq!(lex(&s), lex_full(&s), "incremental != full after edit");
+            }
+        }
     }
 }
