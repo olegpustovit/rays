@@ -252,6 +252,8 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
             let clear = ui.node("pxui-graph-menu-clear", pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::BLOCKING)
                 .w_px(20.0).h_px(20.0).at((width - 25) as f32, (1 + row + 4 + 4) as f32));
             if !query.is_empty() {
+                ui.set_role(&clear, pxui::Role::Button, pxui::A11yStates::NONE);
+                ui.a11y_name(&clear, "Clear search");
                 let muted = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
                 ui.canvas(&clear, move |paint, Rect { x: cx, y: cy, w: _, h: _ }| { let (cx, cy) = (cx as f64, cy as f64);
                     let ty = f64::from((cy as f32) + (((20.0) - (paint.tokens().font_size) as f32) / 2.0).floor());

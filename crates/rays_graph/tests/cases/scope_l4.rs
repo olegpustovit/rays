@@ -6,7 +6,7 @@ use flow_graph::flow_edit::Op;
 use input::MouseButton;
 use rays_graph::scope_pane as scope;
 use rays_graph::scope_state::{Change, Command, ScopeOpts};
-use rays_graph::node_menu::{self, Entry, Menu};
+use rays_graph::node_menu::{self, Entry};
 use flow_graph::edit_tree::ArgKey;
 
 const TEXT: &str = "(workspace m (graph g :context sop (let* [a (sop/box) b (sop/box) m (sop/merge a b)] m)))";
@@ -109,25 +109,19 @@ fn b17_a_wire_dropped_on_a_collapsed_rail_row_takes_that_row() {
 /// B18: Enter and a click on the clear cross in one frame place the row the typed query listed.
 fn b18_a_pick_with_the_query_cleared_places_the_listed_row() {
     let mut ui = new_ui();
+    ui.set_a11y(true);
     let entry = |key: &str, label: &str| Entry { key: key.to_owned(), label: label.to_owned(), category: vec!["Utility".to_owned()], arity: 0, context: "sop".to_owned(), output: flow_syntax::ty::geometry(), off: None };
-    let bounds = (20, 30, 800, 520);
-    let step = |ui: &mut pxui::ui::Ui, menu: Menu, events: Vec<input::Event>| {
-        let mut cell = Some(menu);
-        let mut out = None;
-        rays_shell::host::build(ui, &frame_ev((400, 250), events), &mut |ui: &mut pxui::ui::Ui| out = Some(node_menu::update(cell.take().expect("menu"), ui, bounds)));
-        out.expect("frame")
-    };
     let menu = node_menu::create(None, 400, 250, vec![entry("aa", "Alpha"), entry("bb", "Beta")]);
-    let (menu, _) = step(&mut ui, menu, Vec::new());
-    let (menu, _) = step(&mut ui, menu.expect("open"), vec![input::Event::TextInput("b".into())]);
-    let (menu, _) = step(&mut ui, menu.expect("open"), Vec::new());
-    // the cross: 25 from the menu's right edge, under the 1-point edge, the title row and 8 of padding
-    let row = ui.row_height();
-    let at = ((400 + 320 - 25 + 10) as f64, 250.0 + 1.0 + f64::from(row) + 8.0 + 10.0);
+    let step = crate::menu::one_frame;
+    let (menu, _) = step(&mut ui, menu, &frame_ev((400, 250), Vec::new()));
+    let (menu, _) = step(&mut ui, menu.expect("open"), &frame_ev((400, 250), vec![input::Event::TextInput("b".into())]));
+    let (menu, _) = step(&mut ui, menu.expect("open"), &frame_ev((400, 250), Vec::new()));
+    let clear = pxui::testing::find(&ui, pxui::Role::Button, "Clear search").expect("clear search button");
+    let at = ((clear.x + clear.w / 2.0) as i64, (clear.y + clear.h / 2.0) as i64);
     let (_, picked) = step(
         &mut ui,
         menu.expect("open"),
-        vec![input::Event::KeyPressed(input::Key::Enter), input::Event::PointerMoved(at), input::Event::PointerPressed(MouseButton::LeftButton, at), input::Event::PointerReleased(MouseButton::LeftButton, at)],
+        &frame_ev(at, vec![input::Event::KeyPressed(input::Key::Enter), mouse_move(at), mouse_press(MouseButton::LeftButton, at), mouse_release(MouseButton::LeftButton, at)]),
     );
     check(picked == Some("bb".to_owned()), &format!("the pick placed {picked:?}, not the row \"b\" listed"));
 }

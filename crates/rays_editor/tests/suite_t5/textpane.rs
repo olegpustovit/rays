@@ -277,6 +277,8 @@ fn head(e: &editor::Editor, path: &[&str], (dx, dy): (f64, f64)) -> (f64, f64) {
 
 fn w9_frames(env0: editor::Editor, first: i64, last: i64, script: &Script) -> editor::Editor {
     let mut env = env0;
+    let mut pointer = (640.0, 360.0);
+    let mut buttons = Vec::new();
     for n in first..=last {
         let events = match script.iter().find(|(k, _)| *k == n) {
             Some((_, f)) => f(&env),
@@ -289,8 +291,25 @@ fn w9_frames(env0: editor::Editor, first: i64, last: i64, script: &Script) -> ed
                 _ => vec![],
             },
         };
-        let mut f = frame_at((640., 360.), events, n);
+        for event in &events {
+            match event {
+                Event::PointerMoved(point) => pointer = *point,
+                Event::PointerPressed(button, point) => {
+                    pointer = *point;
+                    if !buttons.contains(button) {
+                        buttons.push(*button);
+                    }
+                }
+                Event::PointerReleased(button, point) => {
+                    pointer = *point;
+                    buttons.retain(|held| held != button);
+                }
+                _ => {}
+            }
+        }
+        let mut f = frame_at(pointer, events, n);
         f.input.size = (1400, 800);
+        f.input.buttons.clone_from(&buttons);
         env = editor::update(env, &f);
     }
     env
@@ -299,24 +318,36 @@ fn w9_frames(env0: editor::Editor, first: i64, last: i64, script: &Script) -> ed
 pub fn editor_w9() {
     let presets = scratch_dir("rays-text-presets");
     let ui_font = ui_font();
-    let start = || create(editor::Create { domains: Some(1), presets: Some(presets.clone()), ui_font: ui_font.clone(), ..options() }, &load(&small_rosette()));
+    let start = || {
+        let e = create(editor::Create { domains: Some(1), presets: Some(presets.clone()), ui_font: ui_font.clone(), ..options() }, &load(&small_rosette()));
+        e.core.ui.borrow_mut().set_a11y(true);
+        e
+    };
+    let row = |e: &editor::Editor, name| crate::support::shell::inspector_row(&e.core.ui.borrow(), 1100.0, name);
+    let control = move |e: &editor::Editor, name| {
+        let node = row(e, name);
+        (f64::from(node.x + node.w * 0.7), f64::from(node.y + node.h / 2.0))
+    };
     let prefix = w9_frames(start(), 1, 21, &vec![]);
-    let scenario = |prefix: &editor::Editor, script: Script| -> (String, Option<String>) {
-        let env = w9_frames(prefix.clone(), 22, 40, &script);
-        (printed(&editor::workspace(&env).source), editor::undo_label(&env))
+    let scenario = |script: Script| -> (String, Option<String>) {
+        let prefix = w9_frames(start(), 1, 21, &vec![]);
+        let env = w9_frames(prefix, 22, 40, &script);
+        let result = (printed(&editor::workspace(&env).source), editor::undo_label(&env));
+        editor::close(&env);
+        result
     };
     let untouched = printed(&editor::workspace(&prefix).source);
     check(has(&untouched, "^:bypass (sop/subdivide inner"), "soft starts bypassed");
+    editor::close(&prefix);
 
     let petals = ["rosette", ":petals"];
     let lab = |l: &Option<String>| l.clone().unwrap_or_else(|| "-".into());
     let soft_click = |e: &editor::Editor| click_events(head(e, &["rosette", "soft"], (60., 12.)));
-    let (text, label) = scenario(&prefix, vec![(22, Box::new(soft_click)), (24, Box::new(|_| vec![ch('b')]))]);
+    let (text, label) = scenario(vec![(22, Box::new(soft_click)), (24, Box::new(|_| vec![ch('b')]))]);
     check(!has(&text, "^:bypass") && label.as_deref() == Some("Bypass"), &format!("the b key: {}, bypass {}", lab(&label), has(&text, "^:bypass")));
-    let (text, label) = scenario(&prefix, vec![(22, Box::new(soft_click)), (26, Box::new(|_| click_events((1216., 162.))))]);
+    let (text, label) = scenario(vec![(22, Box::new(soft_click)), (26, Box::new(|_| click_events((1216., 162.))))]);
     check(!has(&text, "^:bypass") && label.as_deref() == Some("Bypass"), &format!("the inspector's Bypass toggle: {}", lab(&label)));
     let (text, label) = scenario(
-        &prefix,
         vec![
             (22, Box::new(soft_click)),
             (26, Box::new(|_| click_events((1220., 92.)))),
@@ -327,14 +358,17 @@ pub fn editor_w9() {
     );
     check(has(&text, "gentle ^:bypass (sop/subdivide") && !has(&text, "soft ^:bypass") && label.as_deref() == Some("Rename"), &format!("the inspector's name field: {}", lab(&label)));
     let (text, label) = scenario(
-        &prefix,
         vec![
-            (22, Box::new(move |e| click_events(head(e, &petals, (60., 12.))))),
+            // The zoom leaves the input clipped by the graph pane. Pan it into view first.
+            (22, Box::new(|_| vec![Event::PointerPressed(MouseButton::RightButton, (840., 220.))])),
+            (23, Box::new(|_| vec![Event::PointerMoved((1000., 220.))])),
+            (24, Box::new(|_| vec![Event::PointerReleased(MouseButton::RightButton, (1000., 220.))])),
+            (25, Box::new(move |e| click_events(head(e, &petals, (60., 12.))))),
             (
                 26,
-                Box::new(|_| {
+                Box::new(move |e| {
                     let mut v = vec![key(Key::Alt)];
-                    v.extend(click_events((1290., 165.)));
+                    v.extend(click_events(control(e, "default")));
                     v.push(Event::KeyReleased(Key::Alt));
                     v
                 }),
@@ -345,33 +379,33 @@ pub fn editor_w9() {
         ],
     );
     check(has(&text, "(petals : int 3)") && label.as_deref() == Some("Input default"), &format!("the inspector's input default: {}", lab(&label)));
-    let (text, label) = scenario(&prefix, vec![(22, Box::new(soft_click)), (26, Box::new(|_| vec![ch('m')])), (30, Box::new(|_| click_events((500., 461.))))]);
+    let modal_click = |e: &editor::Editor, role, name| {
+        let ui = e.core.ui.borrow();
+        let node = pxui::testing::find(&ui, role, name).unwrap_or_else(|| {
+            panic!("missing {name}: {:?}", ui.a11y_nodes().iter().map(|n| (n.role, ui.a11y_name_of(n))).collect::<Vec<_>>())
+        });
+        click_events((f64::from(node.x + node.w / 2.0), f64::from(node.y + node.h / 2.0)))
+    };
+    let (text, label) = scenario(vec![(22, Box::new(soft_click)), (26, Box::new(|_| vec![ch('m')])), (30, Box::new(move |e| modal_click(e, pxui::Role::Button, "Create macro")))]);
     check(has(&text, "(defmacro soft_tpl [p1 inner]") && label.as_deref() == Some("Make macro"), &format!("the make-macro dialog: {}", lab(&label)));
-    let fresh = w9_frames(start(), 1, 21, &vec![]);
     let (text, label) = scenario(
-        &fresh,
-        vec![(22, Box::new(soft_click)), (26, Box::new(|_| vec![ch('m')])), (30, Box::new(|_| click_events((700., 437.)))), (34, Box::new(|_| vec![key(Key::Enter)]))],
+        vec![(22, Box::new(soft_click)), (26, Box::new(|_| vec![ch('m')])), (30, Box::new(move |e| modal_click(e, pxui::Role::TextField, "Macro name"))), (34, Box::new(|_| vec![key(Key::Enter)]))],
     );
     check(has(&text, "(defmacro soft_tpl [p1 inner]") && label.as_deref() == Some("Make macro"), &format!("Enter in the make-macro dialog: {}", lab(&label)));
-    editor::close(&fresh);
-    let wheel = || -> Box<dyn Fn(&editor::Editor) -> Vec<Event>> { Box::new(|_| vec![Event::PointerMoved((1260., 405.)), Event::Scrolled((0., -2.))]) };
+    let scroll_to_bottom = |_: &editor::Editor| vec![Event::PointerMoved((1260., 405.)), Event::Scrolled((0., -40.))];
     let (text, label) = scenario(
-        &prefix,
         vec![
             (22, Box::new(soft_click)),
-            (24, wheel()),
-            (25, wheel()),
-            (26, Box::new(|_| click_events((1250., 763.)))),
-            (28, wheel()),
-            (29, wheel()),
-            (30, Box::new(|_| click_events((1290., 763.)))),
+            (24, Box::new(scroll_to_bottom)),
+            (26, Box::new(move |e| click_events(control(e, "Note")))),
+            (28, Box::new(scroll_to_bottom)),
+            (30, Box::new(move |e| click_events(control(e, "note")))),
             (32, Box::new(|_| vec![ch('a')])),
             (34, Box::new(|_| vec![Event::TextInput("a fresh note".into())])),
             (36, Box::new(|_| vec![key(Key::Enter)])),
         ],
     );
     check(has(&text, "; a fresh note") && label.as_deref() == Some("Note"), &format!("the note edit: {}", lab(&label)));
-    editor::close(&prefix);
     let _ = std::fs::remove_dir_all(&presets);
 }
 

@@ -9,7 +9,7 @@ use rays::frame as rframe;
 
 const BOUNDS: (i64, i64, i64, i64) = (20, 30, 800, 520);
 
-fn one_frame(ui: &mut Ui, menu: Menu, fr: &rframe::Frame) -> (Option<Menu>, Option<String>) {
+pub(crate) fn one_frame(ui: &mut Ui, menu: Menu, fr: &rframe::Frame) -> (Option<Menu>, Option<String>) {
     let mut open = Some(menu);
     let mut picked = None;
     rays_shell::host::build(ui, fr, &mut |ui: &mut Ui| {
