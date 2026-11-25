@@ -957,7 +957,9 @@ pub mod layer {
             (Node::Clear(l), Node::Clear(r)) => l == r,
             (Node::Geometry(l), Node::Geometry(r)) => Rc::ptr_eq(l, r) || l == r,
             (Node::DisplayList(l), Node::DisplayList(r)) => Arc::ptr_eq(&l.segment, &r.segment) && same_resources(&l.resources, &r.resources),
-            (Node::Ui(l), Node::Ui(r)) => same_ui_node(l, r),
+            // Native staging retains a painter and its layer. The painter reads the
+            // current UI frame each time the renderer records the pass.
+            (Node::Ui(l), Node::Ui(r)) => l.ui.identity() == r.ui.identity(),
             (Node::Shapes(l), Node::Shapes(r)) => same_ui(l, r),
             (Node::Image(l), Node::Image(r)) => image::same(&l.image, &r.image) && l.x == r.x && l.y == r.y && l.scale == r.scale && l.angle == r.angle,
             (Node::Text(l), Node::Text(r)) => same_text(l, r),
@@ -994,7 +996,10 @@ pub mod layer {
             Node::Clear(c) => mix(0, rgba(*c) as i64),
             Node::Geometry(g) => mix(mix(mix(1, g.vertices.len() as i64), g.indices.len() as i64), g.color as i64),
             Node::DisplayList(_) => 3,
-            Node::Ui(u) => mix(mix(4, u.ui.layer as i64), u.stamp),
+            Node::Ui(u) => {
+                let (paint, layer) = u.ui.identity();
+                mix(mix(4, layer as i64), paint as i64)
+            }
             Node::Shapes(_) => 16,
             Node::Image(i) => mix(mix(mix(mix(5, i.x), i.y), i.scale.to_bits() as i64), i.angle.to_bits() as i64),
             Node::Text(tn) => {

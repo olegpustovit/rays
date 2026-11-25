@@ -202,6 +202,82 @@ fn window_host_destroy_ends_renderer_under_cached_paint() {
     let _ = canvas::destroy(&canvas_);
 }
 
+fn window_host_replayed_ui_defers_image_drop() {
+    use rays::sketch;
+    use rays_shell::host::{self, HostImage};
+
+    if !common::gpu() {
+        return;
+    }
+    common::release_keepalive();
+    thread_local! {
+        static SERIALS: RefCell<Vec<(u64, u64)>> = const { RefCell::new(Vec::new()) };
+    }
+    scene::on_frame_begin(|frame| SERIALS.with(|serials| {
+        serials.borrow_mut().push((frame.serial, frame.completed));
+        Ok(())
+    }));
+    struct State {
+        ui: Rc<RefCell<Ui>>,
+        image: Option<HostImage>,
+        dropped_at: Option<u64>,
+    }
+    let live = || ogpu_core::impl_::live_handles().expect("live handles");
+    let before = live();
+    let options = sketch::RunOptions {
+        config: Some(sketch::Config { width: 96, height: 64, fps: None, ..sketch::default_config() }),
+        max_frames: Some(5),
+        ..Default::default()
+    };
+    let program = sketch::Program {
+        init: Box::new(|_| Box::new(State { ui: Rc::new(RefCell::new(golden_ui())), image: None, dropped_at: None })),
+        update: Box::new(|state, frame| {
+            let state = state.downcast_mut::<State>().unwrap();
+            if frame.input.frame == 2 {
+                let source = image::create(4, 4, Some(color::red())).expect("image");
+                state.image = Some(host::image(&source).expect("host image after first frame"));
+                image::destroy(&source).expect("destroy source image");
+            }
+            host::build(&mut state.ui.borrow_mut(), frame, &mut |ui| {
+                let box_ = ui.box_("image area", BoxOpts::default().w(Size::Px(20.)).h(Size::Px(20.)));
+                let image = state.image.as_ref().map(|image| **image);
+                let offset = frame.input.frame as f32;
+                ui.draw(&box_, move |paint, _| {
+                    paint.fill(offset, 0., 20., 20., pxui::geom::color::white());
+                    if let Some(image) = image {
+                        paint.image(offset, 0., 20., 20., &image);
+                    }
+                });
+            });
+            None
+        }),
+        view: Box::new(|state, _| host::scene(&state.downcast_ref::<State>().unwrap().ui, None)),
+        after_present: Some(Box::new(move |state, frame| {
+            let state = state.downcast_mut::<State>().unwrap();
+            if frame.input.frame == 3 {
+                let (serial, completed) = SERIALS.with(|serials| *serials.borrow().last().unwrap());
+                assert!(completed < serial, "the presented image's frame must be in flight");
+                let before_drop = live();
+                drop(state.image.take().expect("the frame sampled the image"));
+                assert_eq!(live(), before_drop, "dropping the host image freed an in-flight texture");
+                state.dropped_at = Some(serial);
+            }
+            None
+        })),
+        crash_dump: None,
+        idle: None,
+        on_stop: Some(Box::new(|state| host::destroy(&mut state.downcast_ref::<State>().unwrap().ui.borrow_mut()))),
+    };
+    let state = sketch::run_state(options, program).unwrap_or_else(|error| panic!("{}", sketch::error_to_string(&error)));
+    let dropped_at = state.downcast_ref::<State>().unwrap().dropped_at.expect("image drop was exercised");
+    let frames = SERIALS.with(|serials| std::mem::take(&mut *serials.borrow_mut()));
+    assert_eq!(frames.len(), 5, "each replay prepared the UI");
+    assert!(frames.windows(2).all(|pair| pair[0].0 < pair[1].0), "each replay has its own frame serial");
+    assert!(frames.iter().any(|&(serial, completed)| serial > dropped_at && completed >= dropped_at),
+        "the renderer did not report completion of the image's last frame");
+    assert_eq!(live(), before, "a retired HostImage leaked a native texture");
+}
+
 pub const CASES: &[(&str, fn())] = &[
     ("window_host_zones_parity", window_host_zones_parity),
     ("window_host_layers_around_native_content", window_host_layers_around_native_content),
@@ -209,4 +285,5 @@ pub const CASES: &[(&str, fn())] = &[
     ("window_host_scrub_rule", window_host_scrub_rule),
     ("window_host_memory_ledger", window_host_memory_ledger),
     ("window_host_destroy_ends_renderer_under_cached_paint", window_host_destroy_ends_renderer_under_cached_paint),
+    ("window_host_replayed_ui_defers_image_drop", window_host_replayed_ui_defers_image_drop),
 ];

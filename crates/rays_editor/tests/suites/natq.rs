@@ -42,8 +42,52 @@ pub fn cases() -> Vec<(&'static str, fn())> {
     cases.extend(alloc_budget::cases());
     cases.extend(click_budget::cases());
     cases.extend(graph_budget::cases());
+    cases.push(("native_ui_replays_updated_pixels", native_ui_replays_updated_pixels));
     cases.extend(typing_budget::cases());
     cases.extend(inspector_l5::cases());
     cases.extend(list_l5::cases());
     cases
+}
+
+fn native_ui_replays_updated_pixels() {
+    use ogpu_core::backend::{self, ColorAttachment, RenderTarget};
+    use ogpu_core::render_pass::{Load, Store};
+    use rays::{canvas, scene};
+    use std::{cell::Cell, rc::Rc};
+
+    assert!(crate::common::gpu(), "native GPU required");
+    let color = Rc::new(Cell::new((1., 0., 0., 1.)));
+    let last_frame = Rc::new(Cell::new(0));
+    let paint: scene::UiPaint = Rc::new({
+        let color = color.clone();
+        let last_frame = last_frame.clone();
+        move |pass, _| {
+            assert!(pass.frame > last_frame.replace(pass.frame), "replay reused the frame serial");
+            pass.split(&mut |commands, target| {
+                let encoder = backend::render_encoder(commands, &RenderTarget {
+                    colors: vec![ColorAttachment {
+                        texture: target.clone(), resolve: None,
+                        load: Load::Clear, store: Store::Store, clear: color.get(),
+                    }],
+                    depth: None,
+                })?;
+                backend::end_render(&encoder)
+            })?;
+            Ok(())
+        }
+    });
+    let context = scene::layer::create_cache_context();
+    let frame = |stamp| [scene::layer::ui(paint.clone(), 0, stamp)];
+    scene::layer::with_cache_context(&context, &mut || {
+        let first = scene::layer::stage_native_render(8, 8, &frame(1)).unwrap();
+        let second = scene::layer::stage_native_render(8, 8, &frame(2)).unwrap();
+        assert!(Rc::ptr_eq(&first, &second), "UI paint changes must reuse native staging");
+    });
+    let canvas = canvas::create(8, 8).unwrap();
+    canvas::render(None, &canvas, &frame(1)).unwrap();
+    assert_eq!(canvas::pixels(&canvas).unwrap(), [rays_math::color::red(); 64], "the first UI frame paints red");
+    color.set((0., 1., 0., 1.));
+    canvas::render(None, &canvas, &frame(2)).unwrap();
+    assert_eq!(canvas::pixels(&canvas).unwrap(), [rays_math::color::rgb(0, 255, 0); 64], "the replay paints the new green UI frame");
+    canvas::destroy(&canvas).unwrap();
 }

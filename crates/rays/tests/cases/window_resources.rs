@@ -251,18 +251,24 @@ fn window_resources_display_list_images() {
                 if std::rc::Rc::ptr_eq(stable, reused) && !std::rc::Rc::ptr_eq(first_dynamic, changed_dynamic) => {}
             _ => fail(&format!("changed layer invalidated unrelated retained Scene2 IR")),
         }
-        let mut last_identity: Option<(String, i64)> = None;
         let paint: scene::UiPaint = std::rc::Rc::new(|_, _| Ok(()));
+        let frame = |stamp, width| {
+            vec![
+                scene::rect((1, 1), width, 4, Some(color::red()), None).expect("rect"),
+                layer::ui(paint.clone(), 0, stamp),
+            ]
+        };
+        let original = layer::stage_native_render(32, 32, &frame(0, 4)).expect("stage");
+        let (identity, version) = original.retained.as_ref().expect("retained");
         for i in 0..24 {
-            let frame = vec![layer::ui(paint.clone(), 0, i)];
-            let first = layer::stage_native_render(32, 32, &frame).expect("stage");
-            require(std::rc::Rc::ptr_eq(&first, &layer::stage_native_render(32, 32, &frame).expect("stage")), "unchanged UI frame missed stage reuse");
-            let now = first.retained.clone().expect("retained");
-            if let Some((identity, version)) = &last_identity {
-                require(now.0 == *identity && now.1 > *version, "changed UI frame did not replace its versioned submission");
-            }
-            last_identity = Some(now);
+            let next = layer::stage_native_render(32, 32, &frame(i, 4)).expect("stage");
+            require(std::rc::Rc::ptr_eq(&original, &next), "UI stamp invalidated native staging");
+            require(next.retained.as_ref() == original.retained.as_ref(), "UI stamp replaced the submission version");
         }
+        let changed = layer::stage_native_render(32, 32, &frame(24, 5)).expect("stage");
+        let (next_identity, next_version) = changed.retained.as_ref().expect("retained");
+        require(!std::rc::Rc::ptr_eq(&original, &changed) && next_identity == identity && next_version > version,
+            "changed native geometry did not replace its versioned submission");
         let mut image_builder = display_list::Builder::create();
         image_builder
             .image(

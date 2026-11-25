@@ -448,7 +448,8 @@ pub struct UiLayer {
 }
 
 impl UiLayer {
-    fn identity(&self) -> (usize, usize) {
+    /// The painter and layer retained by a native render plan. The painter reads live UI state.
+    pub fn identity(&self) -> (usize, usize) {
         (Rc::as_ptr(&self.paint) as *const u8 as usize, self.layer)
     }
 }
