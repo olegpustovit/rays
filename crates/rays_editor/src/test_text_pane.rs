@@ -232,9 +232,9 @@ fn moving_the_selection_does_not_print_again() {
     let source = s::parse("(workspace w (graph g :context sop (let* [a (sop/box) b (sop/box)] b)))").unwrap();
     let state = t::State { tab: Tab::Document, ..t::initial() };
     let path = |leaf: &str| -> Vec<flow_syntax::symbol::Symbol> { vec!["g".into(), leaf.into()] };
-    let (state, first) = t::shown(None, &state, &source, "g", Some(&path("a"))).unwrap();
+    let (state, first) = t::shown(None, state, &source, "g", Some(&path("a"))).unwrap();
     let guard = SampleGuard::start_with_clock(Box::new(|| 0.0));
-    let (_, second) = t::shown(None, &state, &source, "g", Some(&path("b"))).unwrap();
+    let (_, second) = t::shown(None, state, &source, "g", Some(&path("b"))).unwrap();
     let sample = guard.finish();
     assert_eq!(flow_syntax::phase_timer::calls(&sample, "print"), 0, "the selection moved and the document printed again");
     assert_eq!(first.text, second.text);
@@ -415,11 +415,11 @@ fn shown_cache_and_commands() {
     let src = source("bloom");
     let state = t::initial();
     let selected = p(&["flower", "ring", "leaf"]);
-    let (state, a) = t::shown(None, &state, &src, "flower", Some(&selected)).unwrap();
+    let (state, a) = t::shown(None, state, &src, "flower", Some(&selected)).unwrap();
     assert!(state.cache.is_some());
-    let (_, b) = t::shown(None, &state, &src, "flower", Some(&selected)).unwrap();
+    let (state, b) = t::shown(None, state, &src, "flower", Some(&selected)).unwrap();
     assert!(std::sync::Arc::ptr_eq(&a.source, &b.source), "the same source and selection are not shown again");
-    let (_, c) = t::shown(None, &state, &src, "flower", None).unwrap();
+    let (state, c) = t::shown(None, state, &src, "flower", None).unwrap();
     assert!(c.mark.is_none() && a.mark.is_some());
     let state = t::command(&state, t::Command::FindNext);
     assert_eq!(state.pending, vec![t::Command::FindNext]);

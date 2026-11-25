@@ -23,8 +23,8 @@ fn action_rounds() -> u64 {
 
 /// (rust allocs/unit, native mallocs/unit). Rust = counting allocator; native from trace when available.
 /// Seeded at measured (2026-11-25, after Z1/Z2/Z4) + 5%, rounded up. Lanes lower these toward 0 / ≤12.
-// Ceilings = measured + 5% after Z8 rest-picture borrow + device Arc reuse (2026-11-25).
-const A_BASIC: (u64, u64) = (383, 59);
+// Ceilings = measured + 5% after Z6b Image-run + Atlas direct quads (2026-11-25, RAYS_SLOW).
+const A_BASIC: (u64, u64) = (252, 9);
 const A_EMPTY: (u64, u64) = (15, 9);
 const A_BARE: (u64, u64) = (15, 9);
 const A_ISOGRID: (u64, u64) = (23, 13);
@@ -39,8 +39,8 @@ const E_CLICK_KEY: (u64, u64) = (277, 16);
 const E_CLICK_SETTLED: (u64, u64) = (30, 15);
 const E_TOGGLE_KEY: (u64, u64) = (382, 15);
 const E_TOGGLE_SETTLED: (u64, u64) = (162, 15);
-const F_FROZEN: (u64, u64) = (145, 10);
-const F_STATIC: (u64, u64) = (150, 10);
+const F_FROZEN: (u64, u64) = (129, 8);
+const F_STATIC: (u64, u64) = (135, 9);
 
 struct P {
     e: Option<editor::Editor>,

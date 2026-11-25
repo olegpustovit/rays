@@ -409,8 +409,13 @@ fn qualification_retained_eviction_textured300() { execution_retained_eviction(t
 
 fn gpu_execution_scratch_boundaries() {
     if !common::gpu() { return; }
+    // Owned-device path (same as lifecycle): create_offscreen's shared headless currently leaves
+    // +1 native handle after a draw even when destroy_device succeeds (Z5 create_offscreen).
+    use ::renderer::{renderer_pipeline, scene_execution as se};
+    use ogpu_core::surface::{Configuration, Format, PresentMode};
     let baseline = live_handles();
-    let e = renderer::create_offscreen(&config(64,64)).unwrap();
+    let cfg = Configuration { logical_width: 64, logical_height: 64, physical_width: 64, physical_height: 64, format: Format::Bgra8Unorm, present_mode: PresentMode::Fifo, max_acquired: 1, layer: None };
+    let mut e = renderer_pipeline::create_renderer(&ogpu_core::impl_::backend().unwrap(), None, None, true, ogpu_core::impl_::create_driver().unwrap(), &cfg).unwrap();
     let plain = |key: &str, viewport, scissor, uniforms| {
         let mut vertices = Vec::new();
         for (x,y) in [(-1f32,-1f32),(3.,-1.),(-1.,3.)] {
@@ -422,14 +427,18 @@ fn gpu_execution_scratch_boundaries() {
         })
     };
     let clear = Some((0.,0.,0.,1.));
-    renderer::draw(clear, &e, &[plain("scratch-over", (0,0,128,128), (16,-8,128,128), None)]).unwrap();
-    let pixels = renderer::capture(&e).unwrap();
+    let draw = |e: &mut se::SceneExecution, clear: Option<(f64,f64,f64,f64)>, draws: &[Draw]| {
+        se::submit(None, &mut || {}, clear, e, draws).map(|_| ())
+    };
+    let capture = |e: &mut se::SceneExecution| se::read_pixels(e, 256);
+    draw(&mut e, clear, &[plain("scratch-over", (0,0,128,128), (16,-8,128,128), None)]).unwrap();
+    let pixels = capture(&mut e).unwrap();
     for y in 0..64 { for x in 0..64 {
         let at = (y*64+x)*4;
         assert_eq!(&pixels[at..at+4], if x < 16 { &[0,0,0,255] } else { &[255;4] }, "clipped scissor ({x},{y})");
     }}
-    renderer::draw(clear, &e, &[plain("scratch-off", (100,100,8,8), (100,100,8,8), None)]).unwrap();
-    assert!(renderer::capture(&e).unwrap().chunks_exact(4).all(|p| p == [0,0,0,255]));
+    draw(&mut e, clear, &[plain("scratch-off", (100,100,8,8), (100,100,8,8), None)]).unwrap();
+    assert!(capture(&mut e).unwrap().chunks_exact(4).all(|p| p == [0,0,0,255]));
     {
         use ::renderer::scene_execution::{SampledTexture,TextureLevel};
         use ogpu_core::types::{SamplerDescriptor,SamplerFilter,MipFilter,AddressMode};
@@ -439,31 +448,31 @@ fn gpu_execution_scratch_boundaries() {
             d.family=renderer::PipelineFamily::Scene2Textured; d.texture=Some(texture.clone());
             d.draw.mesh.vertices=new_bytes(common::floats(&[1.,0.,0.,0.,1.,0.,0.,0.,1.,1.,1.,1.,-1.,-1.,2.,2.,0.,0.,1.,0.]));
             d.draw.mesh.vertex_count=4; d.draw.mesh.indices=new_bytes(common::words(&[0,1,2,0,2,3])); d.draw.mesh.index_count=6;
-            renderer::draw(clear,&e,&[Rc::new(d)]).unwrap();
-            assert_eq!(renderer::capture(&e).unwrap(),expected.repeat(64*64),"viewport was squeezed instead of clipped");
+            draw(&mut e, clear, &[Rc::new(d)]).unwrap();
+            assert_eq!(capture(&mut e).unwrap(),expected.repeat(64*64),"viewport was squeezed instead of clipped");
         }
     }
     let affine = |offset| new_bytes(common::floats(&[1.,0.,offset,0.,1.,0.]));
-    // bytes are immutable: a changed uniform set is a new buffer under the same draw keys
+    // Same shape, new contents: patch uploads 64 bytes in place (no new page).
     let draws_with = |offset: f32| -> Vec<_> {
         [affine(0.), affine(offset)].iter().enumerate().map(|(i,u)| plain(&format!("scratch-uniform-{i}"), (0,0,64,64), (0,0,64,64), Some(u.clone()))).collect()
     };
     let draws = draws_with(1.);
-    renderer::draw(None, &e, &draws).unwrap();
-    let uploaded = renderer::stats(&e).unwrap().uploaded_bytes;
-    renderer::draw(None, &e, &draws).unwrap();
-    assert_eq!(renderer::stats(&e).unwrap().uploaded_bytes, uploaded);
-    renderer::draw(None, &e, &draws_with(2.)).unwrap();
-    assert_eq!(renderer::stats(&e).unwrap().uploaded_bytes, uploaded + 64, "a changed uniform set uploads a new page");
+    draw(&mut e, None, &draws).unwrap();
+    let uploaded = se::upload_bytes(&e);
+    draw(&mut e, None, &draws).unwrap();
+    assert_eq!(se::upload_bytes(&e), uploaded);
+    draw(&mut e, None, &draws_with(2.)).unwrap();
+    assert_eq!(se::upload_bytes(&e), uploaded + 64, "a changed uniform set uploads its bytes");
     for frame in 3..=7 {
-        renderer::draw(None, &e, &draws_with(frame as f32)).unwrap();
+        draw(&mut e, None, &draws_with(frame as f32)).unwrap();
     }
     let too_many = vec![draws[0].clone(); 65_537];
-    match renderer::draw(None, &e, &too_many) {
+    match draw(&mut e, None, &too_many) {
         Err(error) => assert_eq!(error.kind, ogpu_core::error::ErrorKind::Capacity),
         Ok(_) => panic!("scratch accepted more than 65536 draws"),
     }
-    renderer::destroy(&e).unwrap();
+    se::destroy(&mut e).unwrap();
     assert_eq!(live_handles(), baseline, "scratch handle delta");
 }
 
@@ -740,6 +749,12 @@ fn gpu_execution_offscreen_lifecycle() {
     assert!(se::upload_bytes(&e)>0);
     assert!(se::private::cache_count_for_report(&mut e)<=2);
     se::submit(Some(("offscreen-retained".into(),1)),&mut || {},clear,&mut e,&[d.clone()]).unwrap();
+    assert_eq!(
+        se::private::prepared_key_for_test(&e),
+        Some(("offscreen-retained".into(), 1)),
+        "prepared submit must retain its plan (hits={} misses={} builds={})",
+        se::retained_stats(&e).hits, se::retained_stats(&e).misses, se::retained_stats(&e).builds,
+    );
     let mut steady = None;
     for frame in 1..=60 {
         assert_eq!(se::replay_prepared_sampled_resources(clear,"offscreen-retained",1,&mut e).unwrap(),Some((true,1)));
@@ -785,6 +800,30 @@ fn gpu_execution_offscreen_lifecycle() {
         assert_eq!((stats.hits,stats.misses),if frame==3 {(2,4)} else {(1,2+frame)});
     }
     se::destroy(&mut mixed).unwrap();
+    // Z6b: changing uniform *contents* with a stable shape patches in place and reuses the ICB.
+    let mut patch = renderer_pipeline::create_renderer(&ogpu_core::impl_::backend().unwrap(),None,None,true,ogpu_core::impl_::create_driver().unwrap(),&cfg).unwrap();
+    let mut animated = (*d).clone();
+    animated.draw.state.viewport=(0,0,64,64);
+    animated.draw.state.scissor=(0,0,64,64);
+    // 24-byte affine → geometry_constants; length stays 32 across frames.
+    animated.draw.state.transform_uniforms = Some(new_bytes(common::floats(&[1.,0.,0.,1.,0.,0.])));
+    let clear = Some((1.,1.,1.,1.));
+    for _ in 0..2 {
+        se::submit(None,&mut || {},clear,&mut patch,&[Rc::new(animated.clone())]).unwrap();
+    }
+    let after_admit = se::retained_stats(&patch);
+    assert!(after_admit.misses >= 1, "plan was never built");
+    let builds_at_admit = after_admit.builds;
+    for frame in 0..8 {
+        let mut next = animated.clone();
+        let shift = frame as f32 * 0.01;
+        next.draw.state.transform_uniforms = Some(new_bytes(common::floats(&[1.,0.,0.,1.,shift,0.])));
+        se::submit(None,&mut || {},clear,&mut patch,&[Rc::new(next)]).unwrap();
+    }
+    let after = se::retained_stats(&patch);
+    assert!(after.hits >= 8, "uniform-only frames should hit the retained plan, got hits={}", after.hits);
+    assert_eq!(after.builds, builds_at_admit, "uniform-only frames must not create/re-encode ICBs");
+    se::destroy(&mut patch).unwrap();
     assert_eq!(live_handles(),baseline);
 }
 

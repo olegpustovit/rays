@@ -164,7 +164,8 @@ fn window_resources_automatic_text_cache() {
             layer::release(&s);
         }
         let (entries, references) = font::raster::automatic_counts();
-        require(entries == 1 && references == 0, "stable automatic cache ownership");
+        // Atlas path: glyph pages are the cache (no string-keyed LRU insert per frame).
+        require(entries == 0 && references == 0, "stable automatic cache ownership");
         let retina = vec![scene::text((0, 0), Some(color::rgb(12, 34, 56)), Some(16), "density")];
         let staged = |density: i64| -> (std::rc::Rc<render_ir::RenderIr>, Vec<(f64, f64, f64, f64)>) {
             let st = layer::stage_native_render_checked(Some(density), 64, 32, &retina).map_err(|_| "stage").expect("stage");
@@ -190,8 +191,10 @@ fn window_resources_automatic_text_cache() {
         }
         let _ = (one, two);
         layer::release(&retina);
+        // Tracking ≠ 0 forces paint_fallback Image (atlas skips the string-keyed LRU).
+        let tracked = scene_command::marks::text_style("pragmasevka", "left", 0.1).expect("style");
         for index in 0..300 {
-            let s = vec![scene::text((0, 0), None, Some(16), &format!("entry-{index:03}"))];
+            let s = vec![scene::styled_text((0, 0), None, Some(16), &format!("entry-{index:03}"), tracked)];
             automatic_stage(&s);
             layer::release(&s);
         }
@@ -199,7 +202,9 @@ fn window_resources_automatic_text_cache() {
         require(entries == 256 && references == 0, "automatic LRU capacity");
         // If all 256 cached entries are pinned, the next value is transient rather than
         // invalidating an image still borrowed by an active scene.
-        let scenes: Vec<Vec<scene::Node>> = (0..257).map(|i| vec![scene::text((0, 0), None, Some(16), &format!("pinned-{i:03}"))]).collect();
+        let scenes: Vec<Vec<scene::Node>> = (0..257)
+            .map(|i| vec![scene::styled_text((0, 0), None, Some(16), &format!("pinned-{i:03}"), tracked)])
+            .collect();
         let images: Vec<RImage::Image> = scenes.iter().map(|s| automatic_stage(s).1).collect();
         let (entries, references) = font::raster::automatic_counts();
         require(entries == 256 && references == 257, "pinned cache overflow policy");
