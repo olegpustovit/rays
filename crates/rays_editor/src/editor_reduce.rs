@@ -1428,8 +1428,10 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     // Hover/idle at rest: keep previous cook. live_cook is a setting (usually on);
     // Playing timelines still emit Advanced every frame — cook is already settled.
+    // Skip only once graphs are stored — else an empty Cook freezes and /g cold-rebuilds.
     let skip_cook = std::sync::Arc::ptr_eq(&doc, &previous_doc)
         && cook::at_rest(&previous_cook)
+        && !previous_cook.graphs.is_empty()
         && !effects.cook
         && frame_request.is_none();
     let (cooked_opt, lit_cache) = if skip_cook {
@@ -1514,7 +1516,15 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         }
         Some(cooked) => {
             // Warm idle: only quiet/schedule meta moved — mutate the existing Rc instead of boxing a new Cook.
+            // Graphs must already match: a warm idle can build graphs while pieces stay
+            // unpublished (!prepared_changed). Reusing meta alone would drop them, and
+            // skip_cook would then freeze an empty Cook — next layout edit cold-recompiles.
+            let graphs_same = cooked.cook.graphs.len() == previous_cook.graphs.len()
+                && cooked.cook.graphs.iter().zip(previous_cook.graphs.iter()).all(|(a, b)| {
+                    a.0 == b.0 && sop::node::ptr_eq(&a.1, &b.1)
+                });
             let reuse_cook = !cooked.prepared_changed
+                && graphs_same
                 && cooked.cook.results == previous_cook.results
                 && cooked.cook.error == previous_cook.error
                 && cooked.cook.seconds == previous_cook.seconds
