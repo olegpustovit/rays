@@ -88,21 +88,20 @@ fn lead(paint: &mut Paint, (x, y, h): (f32, f32, f32), file: &str, state: State,
     after
 }
 
-/// The status line in ink-2, cut to `limit`, in a small view of its own over the strip's: a readout
-/// that changes every frame (the frame cook) rebuilds only this. Returns where the lead ends, which
-/// the strip's revision takes in place of the text.
+/// The status line in ink-2, cut to `limit`, in a box of its own over the strip's: a readout that
+/// changes every frame (the frame cook) leaves the strip's view kept. Not a view: the editor caches
+/// the whole status (`editor_status::status_box`), and a nested view would rebuild with it.
+/// Returns where the lead ends, which the strip's revision takes in place of the text.
 fn line(ui: &mut Ui, label: &str, bounds: (i64, i64, i64, i64), file: &str, state: State, limit: f32, text: &str) -> f32 {
     let (x, y, w, h) = bounds;
     let (_, _, text_x, shown, after) = lead_plan(&mut |s| ui.text_width(None, s), x as f32, file, limit, text);
-    let rev = revision(&|hs| (bounds, state, text_x.to_bits(), &*shown).hash(hs));
     let at = (text_x.floor() as i64).clamp(x, x + w);
-    strip(ui, label, (at, y, x + w - at, h), rev, &mut |ui, boxed| {
-        let shown = shown.to_string();
-        ui.draw(boxed, move |paint, b| {
-            let theme = paint.theme;
-            let ty = paint.text_top(None, b.y + 1.0, b.h - 1.0);
-            paint.text_c((text_x, ty), if state == State::Error { theme::invalid() } else { theme::ink_2(&theme) }, &shown);
-        });
+    let boxed = ui.box_(label, BoxOpts::default().flags(CLIP).at((at as f32, y as f32)).w(Size::Px((x + w - at) as f32)).h(Size::Px(h as f32)));
+    let shown = shown.to_string();
+    ui.draw(&boxed, move |paint, b| {
+        let theme = paint.theme;
+        let ty = paint.text_top(None, b.y + 1.0, b.h - 1.0);
+        paint.text_c((text_x, ty), if state == State::Error { theme::invalid() } else { theme::ink_2(&theme) }, &shown);
     });
     after
 }
