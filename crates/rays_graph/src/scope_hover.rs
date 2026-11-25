@@ -285,7 +285,7 @@ pub struct Hovers {
     /// the cards of the build before, while one builds
     spare: Vec<Card>,
     /// the tiles' and ports' keys (what `Ui::root_at` answers among)
-    pub keys: Vec<i64>,
+    pub keys: Vec<pxui::Key>,
     /// the wires and the open zones in view, in the build's order, and the frames (their scope's
     /// place in the geometry's origins and their index there)
     pub reach: Vec<usize>,
@@ -387,8 +387,8 @@ impl Hovers {
         }
         self.offset.retain(|v| self.cards.iter().any(|c| c.view.box_key == v.box_key));
         for c in &self.cards {
-            self.keys.push(c.tile.box_key);
-            self.keys.extend(c.ports.iter().map(|q| q.b.box_key));
+            self.keys.push(pxui::Key::Resolved(c.tile.box_key));
+            self.keys.extend(c.ports.iter().map(|q| pxui::Key::Resolved(q.b.box_key)));
         }
     }
 }
@@ -531,11 +531,10 @@ fn slot_now(t: &Pane, hv: &Hovers, c: &Card) -> Option<usize> {
 /// wire (over the bare canvas, or inside an open zone's body over its card), else the ground.
 pub fn classify(t: &Pane, ui: &mut Ui, pt: (f64, f64)) -> On {
     let hovers = t.hovers.clone();
-    let hv = hovers.borrow();
+    let mut hv = hovers.borrow_mut();
     let chain = chains_of(t);
     let fresh = hv.geo == geo_key(t);
-    let keys: Vec<_> = hv.keys.iter().copied().map(pxui::Key::Resolved).collect();
-    match ui.root_at(pxui::Point::new(pt.0 as f32, pt.1 as f32), &keys) {
+    match ui.root_at(pxui::Point::new(pt.0 as f32, pt.1 as f32), &hv.keys) {
         Some(pxui::Key::Resolved(k)) if hv.frame_titles.iter().any(|(key, _)| *key == k) => match hv.frame_titles.iter().find(|(key, _)| *key == k) {
             Some(&(_, f)) if fresh => On::Frame(f),
             _ => On::Ground,
@@ -566,8 +565,8 @@ pub fn classify(t: &Pane, ui: &mut Ui, pt: (f64, f64)) -> On {
             On::Card(slot)
         }
         _ => {
-            let mut near = Vec::new();
-            match wire_on_canvas(t, &chain, &hv.reach, &mut near, pt, viewport(t)) {
+            let Hovers { reach, near, .. } = &mut *hv;
+            match wire_on_canvas(t, &chain, reach, near, pt, viewport(t)) {
                 Some(i) if fresh => On::Wire(i),
                 _ => On::Ground,
             }
