@@ -321,7 +321,7 @@ fn part_contexts() {
     assert!(lowering::window(&settings_of("(settings/config :fps f)")).is_ok(), "a settings graph with an input");
     assert_eq!(lowering::window(&settings_of("(settings/config :fps (* f 100))")).unwrap().fps, 240, "a computed fps above the hard bound is clamped when lowered");
     let none_world = lowering::of_workspace(&lowering::Options { factories: Some(factories()), ..Default::default() }, &of_text(&catalog, None, "(workspace w (graph x :context world (world/sky)))"));
-    assert!(matches!(none_world, Ok(ref d) if objects::ids("world", &crate::document::scene_graph(d)).is_empty()), "a world graph no scene/world references is no World");
+    assert!(matches!(none_world, Ok(ref d) if objects::ids("world", &crate::document::scene_graph(d)).next().is_none()), "a world graph no scene/world references is no World");
     let plain_doc = build(None, &of_text(&catalog, None, STILL));
     assert_eq!(labels(&crate::document::scene_graph(&plain_doc).into_iter().filter(|i| i.kind == "geometry").collect::<Vec<_>>()), ["g"], "no scene graph: one object per sop graph");
     let variations = build(None, &of_text(&catalog, None, &case("variations")));

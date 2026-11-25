@@ -96,7 +96,8 @@ pub fn window_schema() -> Arc<Schema> {
 }
 
 pub fn window_of_values(values: &[Value]) -> Window {
-    let r = g::Rec::of(&window_schema(), values.to_vec());
+    let schema = window_schema();
+    let r = g::Rec::of(&schema, values);
     let title = match &values[0] {
         Value::Text(t) => String::from_utf8_lossy(t).into_owned(),
         _ => String::new(),

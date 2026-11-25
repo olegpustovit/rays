@@ -40,7 +40,7 @@ pub fn run() {
     assert!(carries_gpu(&reloaded), "a real workspace text reload discarded its GPU config");
     assert!(document::validate(&doc).is_ok(), "a lowered workspace is a valid document");
     let scene = document::scene_graph(&doc);
-    assert!(!scene.is_empty() && document::object_network(&doc, objects::ids("geometry", &scene)[0]).is_some(), "the lowering has no geometry object with a network");
+    assert!(!scene.is_empty() && document::object_network(&doc, objects::ids("geometry", &scene).next().unwrap()).is_some(), "the lowering has no geometry object with a network");
     // an object must own its network, and a network its object
     let mut no_networks = doc.clone();
     std::sync::Arc::make_mut(&mut no_networks.networks).clear();

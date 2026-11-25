@@ -376,7 +376,7 @@ fn delete_loops(st: &mut State, before: &document::T, gone: &[(i64, Home)]) -> R
 // ---- the scene ----
 
 fn label(graph: &[g::Node], id: i64) -> Option<String> {
-    g::find(graph, id).map(|n| n.label)
+    g::find(graph, id).map(|n| n.label.clone())
 }
 
 fn object_edits(before: &[g::Node], after: &[g::Node], id: i64, nb: &g::Node, na: &g::Node) -> Edits {
@@ -559,7 +559,7 @@ fn object_changes(st: &mut State, before: &document::T, a: &[g::Node]) -> R<()> 
 // ---- the World ----
 
 fn world_id(doc: &document::T) -> Option<i64> {
-    objects::ids("world", &document::scene_graph(doc)).first().copied()
+    objects::ids("world", &document::scene_graph(doc)).next()
 }
 
 /// Layer ids from the top down.
@@ -925,7 +925,7 @@ pub fn writes(doc: &document::T, level: Level, edit: &Edit) -> bool {
 
 fn node_at(doc: &document::T, level: Level, id: i64) -> R<g::Node> {
     match document::kinds(doc, level).and_then(|gr| g::find(gr, id)) {
-        Some(node) => Ok(node),
+        Some(node) => Ok(node.clone()),
         None => stop("That object is gone."),
     }
 }
@@ -1258,7 +1258,7 @@ pub fn add_geometry(doc: &document::T, existing: Option<&str>) -> Vec<Op> {
 /// The ops of adding a World (a world graph and a `scene/world` member); refused when the scene
 /// has one.
 pub fn add_world(doc: &document::T) -> R<Vec<Op>> {
-    if !objects::ids("world", &document::scene_graph(doc)).is_empty() {
+    if objects::ids("world", &document::scene_graph(doc)).next().is_some() {
         return Err("The scene already has a World.".to_owned());
     }
     let workspace = &doc.workspace.ws;

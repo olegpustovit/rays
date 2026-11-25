@@ -168,7 +168,7 @@ pub fn draw_viewport_pane<'a>(
                 let camera = value
                     .doc
                     .active_camera
-                    .and_then(|id| kind_graph::find(&scene(value), id).map(|node| node.label));
+                    .and_then(|id| kind_graph::find(&scene(value), id).map(|node| node.label.clone()));
                 let mut parts = vec![["Solid", "Wire", "Traced"][(*mode).clamp(0, 2) as usize].to_string()];
                 parts.extend(camera);
                 let text = parts.join(" \u{b7} ");
@@ -238,7 +238,7 @@ fn marks(ui: &mut Ui, value: &ModelView<'_>, leaf: &Leaf, key: &str, theme: them
         };
         let root = value.doc.view_roots.iter().find(|(k, _)| k == key).map(|(_, r)| r.params.clone()).unwrap_or_else(|| value.doc.root.clone());
         let scene_graph = scene(value);
-        let camera = value.doc.active_camera.and_then(|id| kind_graph::find(&scene_graph, id));
+        let camera = value.doc.active_camera.and_then(|id| kind_graph::find(&scene_graph, id).cloned());
         let (tris, objects, points) = counts;
         // the traced readout: its samples are the caption's "n/cap spp"
         let traced = value.traces.iter().find(|(k, _)| k == key).map(|(_, t)| t.clone());

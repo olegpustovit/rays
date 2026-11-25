@@ -57,8 +57,9 @@ pub mod geometry {
     /// half its triangles; "None" for open or single-sided geometry seen from both sides.
     pub const CULL_LABELS: [&str; 3] = ["Back", "None", "Front"];
 
-    pub fn from_values(values: Vec<Value>) -> Parameters {
-        let r = Rec::of(&parameters_schema(), values);
+    pub fn from_values(values: &[Value]) -> Parameters {
+        let schema = parameters_schema();
+        let r = Rec::of(&schema, values);
         Parameters {
             translate_x: r.f("translate_x"),
             translate_y: r.f("translate_y"),
@@ -75,7 +76,7 @@ pub mod geometry {
     }
 
     pub fn parameters_default() -> Parameters {
-        from_values(parameters_schema().default().to_vec())
+        from_values(parameters_schema().default())
     }
 
     pub fn kind() -> g::Kind {
@@ -133,8 +134,9 @@ pub mod camera {
         .clone()
     }
 
-    pub fn from_values(values: Vec<Value>) -> Parameters {
-        let r = Rec::of(&parameters_schema(), values);
+    pub fn from_values(values: &[Value]) -> Parameters {
+        let schema = parameters_schema();
+        let r = Rec::of(&schema, values);
         Parameters {
             fov: r.f("fov"),
             near: r.f("near"),
@@ -155,7 +157,7 @@ pub mod camera {
     }
 
     pub fn parameters_default() -> Parameters {
-        from_values(parameters_schema().default().to_vec())
+        from_values(parameters_schema().default())
     }
 
     pub fn kind() -> g::Kind {
@@ -166,7 +168,7 @@ pub mod camera {
         if node.kind != "camera" {
             return None;
         }
-        let p = from_values(super::read(&parameters_schema(), node)?);
+        let p = from_values(&super::read(&parameters_schema(), node)?);
         let at = vec3::create(p.eye_x, p.eye_y, p.eye_z);
         let target = vec3::create(p.target_x, p.target_y, p.target_z);
         let up = vec3::create(p.up_x, p.up_y, p.up_z);
@@ -252,8 +254,9 @@ pub mod root {
         .clone()
     }
 
-    pub fn from_values(values: Vec<Value>) -> Parameters {
-        let r = Rec::of(&parameters_schema(), values);
+    pub fn from_values(values: &[Value]) -> Parameters {
+        let schema = parameters_schema();
+        let r = Rec::of(&schema, values);
         Parameters {
             renderer: renderer_of_label(r.c("renderer")),
             width: r.i("width"),
@@ -276,7 +279,7 @@ pub mod root {
     }
 
     pub fn parameters_default() -> Parameters {
-        from_values(parameters_schema().default().to_vec())
+        from_values(parameters_schema().default())
     }
 
     pub fn kind() -> g::Kind {
@@ -374,8 +377,9 @@ pub mod light {
         .clone()
     }
 
-    pub fn from_values(values: Vec<Value>) -> Parameters {
-        let r = Rec::of(&parameters_schema(), values);
+    pub fn from_values(values: &[Value]) -> Parameters {
+        let schema = parameters_schema();
+        let r = Rec::of(&schema, values);
         Parameters {
             shape: shape_of_label(r.c("shape")),
             translate_x: r.f("translate_x"),
@@ -397,7 +401,7 @@ pub mod light {
     }
 
     pub fn parameters_default() -> Parameters {
-        from_values(parameters_schema().default().to_vec())
+        from_values(parameters_schema().default())
     }
 
     pub fn kind() -> g::Kind {
@@ -406,18 +410,18 @@ pub mod light {
 }
 
 /// Read node values through the schema; return None when a value is refused.
-pub fn read(schema: &Schema, node: &g::Node) -> Option<Vec<Value>> {
-    // values made over this very schema are already its record
+/// Hot path borrows the node's stored record; the schema-mismatch path owns a conversion.
+pub fn read<'a>(schema: &Schema, node: &'a g::Node) -> Option<std::borrow::Cow<'a, [Value]>> {
     if let Some(values) = crate::settings::record_of(&node.values, schema) {
-        return Some(values.to_vec());
+        return Some(std::borrow::Cow::Borrowed(values));
     }
     let changes: Vec<(String, Value)> = g::fields(node).into_iter().map(|f| (f.name, f.current)).collect();
-    schema.apply_all(schema.default(), &changes).ok().map(|(values, _)| values)
+    schema.apply_all(schema.default(), &changes).ok().map(|(values, _)| std::borrow::Cow::Owned(values))
 }
 
 pub fn geometry(node: &g::Node) -> Option<geometry::Parameters> {
     if node.kind == "geometry" {
-        read(&geometry::parameters_schema(), node).map(geometry::from_values)
+        read(&geometry::parameters_schema(), node).map(|v| geometry::from_values(&v))
     } else {
         None
     }
@@ -425,7 +429,7 @@ pub fn geometry(node: &g::Node) -> Option<geometry::Parameters> {
 
 pub fn light(node: &g::Node) -> Option<light::Parameters> {
     if node.kind == "light" {
-        read(&light::parameters_schema(), node).map(light::from_values)
+        read(&light::parameters_schema(), node).map(|v| light::from_values(&v))
     } else {
         None
     }
@@ -537,15 +541,14 @@ fn to_light(scene: &[g::Node], id: i64) -> Option<rlight::Light> {
     result.ok()
 }
 
-pub fn ids(kind: &str, scene: &[g::Node]) -> Vec<i64> {
+pub fn ids<'a>(kind: &'a str, scene: &'a [g::Node]) -> impl Iterator<Item = i64> + 'a {
     g::ids(kind, scene)
 }
 
 pub fn lights(render: bool, scene: &[g::Node]) -> Vec<rlight::Light> {
     ids("light", scene)
-        .into_iter()
         .filter_map(|id| match g::find(scene, id) {
-            Some(node) if visible(&node) && (!render || flag("render", &node)) => to_light(scene, id),
+            Some(node) if visible(node) && (!render || flag("render", node)) => to_light(scene, id),
             _ => None,
         })
         .collect()
@@ -667,4 +670,17 @@ pub fn outdent(scene: &[g::Node], ids: &[i64]) -> g::T {
         }
     }
     scene
+}
+
+#[cfg(test)]
+mod zero_alloc_read {
+    use super::*;
+    #[test]
+    fn read_borrows_record() {
+        let kind = geometry::kind();
+        let node = g::instance(Some(1), "box", &kind);
+        let values = read(&geometry::parameters_schema(), &node).expect("record");
+        assert!(matches!(values, std::borrow::Cow::Borrowed(_)));
+        let _ = geometry::from_values(&values);
+    }
 }

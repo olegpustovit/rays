@@ -164,7 +164,7 @@ pub fn world(view: Option<&View>, value: &EditorModel, time: Option<f64>) -> Opt
         Some(Some(w)) => layers::to_world(time, &w.node, &w.layers),
         None => {
             let scene_graph = scene(value);
-            let id = objects::ids("world", &scene_graph).into_iter().find(|id| view_wants(value, &View::Primary, *id))?;
+            let id = objects::ids("world", &scene_graph).find(|id| view_wants(value, &View::Primary, *id))?;
             let node = kg::find(&scene_graph, id)?;
             let layer_nodes = document::layers(&value.doc, id)?;
             layers::to_world(time, &node, layer_nodes)
@@ -200,7 +200,7 @@ fn placed_pieces_of(render: bool, view: Option<&View>, value: &EditorModel, piec
 }
 
 pub fn world_id(value: &EditorModel) -> Option<i64> {
-    objects::ids("world", &scene(value)).first().copied()
+    objects::ids("world", &scene(value)).next()
 }
 
 /// A parameter edit made in the view (a map drag, a World rotation): one undo entry per pointer

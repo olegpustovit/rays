@@ -520,7 +520,7 @@ struct Root {
 
 fn root_params(values: &[(String, PV)]) -> R<root::Parameters> {
     let (record, _) = root::parameters_schema().apply_all(&root::to_values(&root::default()), values).map_err(|m| diag("E_RANGE", &m))?;
-    Ok(root::from_values(record))
+    Ok(root::from_values(&record))
 }
 
 /// The item a camera value is: the call whose arguments it carries.
@@ -1061,7 +1061,7 @@ pub(crate) fn lower_workspace(options: &Options, factories: Option<&[Factory]>, 
     let mut objects_: Vec<(i64, Item)> = Vec::new();
     for item in &items {
         let home = if item.group.is_none() { item.home.clone() } else { Home::Looped };
-        match find_claim(&graph, &used, &item.kind_of.key, &home, &item.label, &old_homes.objects).and_then(|id| kg::find(&graph, id)) {
+        match find_claim(&graph, &used, &item.kind_of.key, &home, &item.label, &old_homes.objects).and_then(|id| kg::find(&graph, id).cloned()) {
             Some(node) => {
                 let claimed = with_values(&item.kind_of, &kg::Node { label: item.label.clone(), ..node.clone() }, &item.values)?;
                 // Updating the label allocates a distinct claimed node.
@@ -1161,7 +1161,7 @@ pub(crate) fn lower_workspace(options: &Options, factories: Option<&[Factory]>, 
         Some(doc) if settings::same_values(&doc.settings, &settings) || same_settings(&doc.settings, &settings) => doc.settings.clone(),
         _ => settings,
     };
-    let cameras: Vec<i64> = objects::ids("camera", &graph).into_iter().filter(|id| !views.iter().any(|(_, ids)| ids.contains(id))).collect();
+    let cameras: Vec<i64> = objects::ids("camera", &graph).filter(|id| !views.iter().any(|(_, ids)| ids.contains(id))).collect();
     let active_camera = match objects_.iter().find(|(id, item)| item.active && item.group.is_none() && cameras.contains(id)) {
         Some((id, _)) => Some(*id),
         None if has_scene => cameras.first().copied(),

@@ -67,12 +67,12 @@ pub fn field(node: &Node, name: &str) -> Option<Value> {
     settings::value(&node.values, name)
 }
 
-pub fn find(graph: &[Node], id: i64) -> Option<Node> {
-    graph.iter().find(|node| node.id == id).cloned()
+pub fn find(graph: &[Node], id: i64) -> Option<&Node> {
+    graph.iter().find(|node| node.id == id)
 }
 
-pub fn ids(kind: &str, graph: &[Node]) -> Vec<i64> {
-    graph.iter().filter(|node| node.kind == kind).map(|node| node.id).collect()
+pub fn ids<'a>(kind: &'a str, graph: &'a [Node]) -> impl Iterator<Item = i64> + 'a {
+    graph.iter().filter(move |node| node.kind == kind).map(|node| node.id)
 }
 
 pub fn add(graph: &[Node], node: Node) -> T {
@@ -109,7 +109,7 @@ pub fn apply(node: &Node, changes: &[(String, Value)]) -> Result<(Node, Effects)
 pub fn set_fields(graph: &[Node], id: i64, changes: &[(String, Value)]) -> Result<(T, Effects), String> {
     match find(graph, id) {
         None => Err(format!("no object #{id}")),
-        Some(node) => apply(&node, changes).map(|(node, effects)| (replace(graph, &node), effects)),
+        Some(node) => apply(node, changes).map(|(node, effects)| (replace(graph, &node), effects)),
     }
 }
 
@@ -120,12 +120,13 @@ pub fn stack(graph: &[Node]) -> Vec<Node> {
         return Vec::new();
     };
     let mut acc: Vec<Node> = vec![top.clone()];
-    let mut node = top.clone();
+    let mut cur = top.id;
     loop {
-        match node.input.and_then(|i| find(graph, i)) {
+        let input = find(graph, cur).and_then(|n| n.input);
+        match input.and_then(|i| find(graph, i)) {
             Some(below) if !acc.iter().any(|a| a.id == below.id) => {
+                cur = below.id;
                 acc.push(below.clone());
-                node = below;
             }
             _ => break,
         }
@@ -182,15 +183,14 @@ pub fn schema_of(specs: Vec<decl::Spec>) -> Arc<Schema> {
 }
 
 /// Read a typed parameter record by field name.
-#[derive(Clone)]
-pub struct Rec {
-    schema: Arc<Schema>,
-    pub values: Vec<Value>,
+pub struct Rec<'a> {
+    schema: &'a Schema,
+    values: &'a [Value],
 }
 
-impl Rec {
-    pub fn of(schema: &Arc<Schema>, values: Vec<Value>) -> Rec {
-        Rec { schema: schema.clone(), values }
+impl<'a> Rec<'a> {
+    pub fn of(schema: &'a Schema, values: &'a [Value]) -> Rec<'a> {
+        Rec { schema, values }
     }
     fn at(&self, name: &str) -> &Value {
         let i = self.schema.fields().iter().position(|f| f.name() == name).unwrap_or_else(|| panic!("no field {name}"));
@@ -219,5 +219,24 @@ impl Rec {
             Value::Choice(x) => x,
             other => panic!("field {name} is {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod zero_alloc_borrow {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn find_returns_borrow_ids_iterate() {
+        let kind = kind_make("geometry", "G", "", &[], &Arc::new(param::schema("g".into(), vec![]).unwrap()));
+        let n = instance(Some(7), "box", &kind);
+        let g = vec![n];
+        let found = find(&g, 7).expect("node");
+        assert_eq!(found.label, "box");
+        // same allocation: find does not clone
+        assert!(std::ptr::eq(found, &g[0]));
+        assert_eq!(ids("geometry", &g).collect::<Vec<_>>(), vec![7]);
+        assert!(ids("light", &g).next().is_none());
     }
 }

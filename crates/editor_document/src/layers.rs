@@ -244,16 +244,18 @@ pub fn kinds() -> Vec<g::Kind> {
 // ---- nodes <-> World ----
 
 
-fn rec(schema: &Arc<Schema>, node: &g::Node) -> Option<Rec> {
-    read(schema, node).map(|values| Rec::of(schema, values))
+fn rec<'a>(schema: &'a Schema, values: &'a [Value]) -> Rec<'a> {
+    Rec::of(schema, values)
 }
 
 fn layer(node: &g::Node) -> Option<world::Entry> {
     let entry = |layer: world::Layer, visible: bool| Some(world::Entry { name: node.label.clone(), layer, visible });
-    let rgb3 = |p: &Rec, a: &str, b: &str, c: &str| world::rgb(p.f(a), p.f(b), p.f(c));
+    let rgb3 = |p: &Rec<'_>, a: &str, b: &str, c: &str| world::rgb(p.f(a), p.f(b), p.f(c));
     match node.kind.as_str() {
         "gradient" => {
-            let p = rec(&gradient::parameters_schema(), node)?;
+            let schema = gradient::parameters_schema();
+            let values = read(&schema, node)?;
+            let p = rec(&schema, &values);
             entry(
                 world::Layer::Gradient {
                     zenith: rgb3(&p, "zenith_r", "zenith_g", "zenith_b"),
@@ -265,11 +267,15 @@ fn layer(node: &g::Node) -> Option<world::Entry> {
             )
         }
         "sky" => {
-            let p = rec(&sky::parameters_schema(), node)?;
+            let schema = sky::parameters_schema();
+            let values = read(&schema, node)?;
+            let p = rec(&schema, &values);
             entry(world::Layer::Sky { turbidity: p.f("turbidity"), intensity: p.f("intensity") }, p.b("visible"))
         }
         "sun" => {
-            let p = rec(&sun::parameters_schema(), node)?;
+            let schema = sun::parameters_schema();
+            let values = read(&schema, node)?;
+            let p = rec(&schema, &values);
             entry(
                 world::Layer::Sun {
                     angular_radius: p.f("angular_radius"),
@@ -280,7 +286,9 @@ fn layer(node: &g::Node) -> Option<world::Entry> {
             )
         }
         "shape" => {
-            let p = rec(&shape::parameters_schema(), node)?;
+            let schema = shape::parameters_schema();
+            let values = read(&schema, node)?;
+            let p = rec(&schema, &values);
             entry(
                 world::Layer::Shape {
                     shape: shape::of_label(p.c("shape")),
@@ -297,7 +305,9 @@ fn layer(node: &g::Node) -> Option<world::Entry> {
             )
         }
         "scatter" => {
-            let p = rec(&scatter::parameters_schema(), node)?;
+            let schema = scatter::parameters_schema();
+            let values = read(&schema, node)?;
+            let p = rec(&schema, &values);
             entry(
                 world::Layer::Scatter {
                     seed: p.i("seed"),
@@ -315,7 +325,9 @@ fn layer(node: &g::Node) -> Option<world::Entry> {
             )
         }
         "room" => {
-            let p = rec(&room::parameters_schema(), node)?;
+            let schema = room::parameters_schema();
+            let values = read(&schema, node)?;
+            let p = rec(&schema, &values);
             entry(
                 world::Layer::Room {
                     width: p.f("width"),
@@ -340,7 +352,9 @@ fn layer(node: &g::Node) -> Option<world::Entry> {
 /// the node's day cycle.
 pub fn to_world(time: Option<f64>, node: &g::Node, layers: &[g::Node]) -> Option<world::World> {
     let time = time.unwrap_or(0.);
-    let p = rec(&settings::parameters_schema(), node)?;
+    let schema = settings::parameters_schema();
+    let values = read(&schema, node)?;
+    let p = rec(&schema, &values);
     let hours = (p.f("time_of_day") + time * p.f("day_cycle")) % 24.;
     let mut stack = g::stack(layers);
     stack.reverse();

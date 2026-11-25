@@ -394,7 +394,7 @@ pub fn carry_line(value: &LoopModel) -> Option<String> {
 pub fn level(value: &LoopModel) -> Option<String> {
     match m::pane_level(&(&value.core).into()) {
         Level::Scene => None,
-        Level::Inside(id) => Some(kg::find(&editor_inspect::scene(&value.core), id).map(|n| n.label).unwrap_or_default()),
+        Level::Inside(id) => Some(kg::find(&editor_inspect::scene(&value.core), id).map(|n| n.label.clone()).unwrap_or_default()),
     }
 }
 

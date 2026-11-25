@@ -54,7 +54,7 @@ pub fn workspace_doc(
     let has_scene = lowering::graph_of(workspace, context::scene()).is_some();
     let scene = if has_scene { declared } else { seed_scene(declared) };
     if !has_scene {
-        doc.active_camera = objects::ids("camera", &scene).first().copied();
+        doc.active_camera = objects::ids("camera", &scene).next();
     }
     doc.scene = scene;
     Ok(doc)

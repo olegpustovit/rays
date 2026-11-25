@@ -50,7 +50,7 @@ pub fn level_name_at(value: &EditorModel, level: editor_document::document::Leve
     match level {
         editor_document::document::Level::Scene => "scene".to_string(),
         editor_document::document::Level::Inside(id) => {
-            format!("scene \u{203a} {}", editor_document::kind_graph::find(&scene(value), id).map(|n| n.label).unwrap_or_else(|| "?".to_string()))
+            format!("scene \u{203a} {}", editor_document::kind_graph::find(&scene(value), id).map(|n| n.label.clone()).unwrap_or_else(|| "?".to_string()))
         }
     }
 }

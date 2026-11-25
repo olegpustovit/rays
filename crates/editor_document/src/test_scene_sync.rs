@@ -87,7 +87,7 @@ fn fields(node: &kg::Node) -> Fields {
 }
 
 fn label_of(g: &[kg::Node], id: i64) -> Option<String> {
-    kg::find(g, id).map(|n| n.label)
+    kg::find(g, id).map(|n| n.label.clone())
 }
 
 /// A document as labels say it: ids are allowed to differ.
@@ -159,7 +159,7 @@ fn float(name: &str, x: f64) -> (String, Value) {
 }
 
 fn world_network(doc: &Doc) -> (i64, kg::T) {
-    let wid = objects::ids("world", &scene(doc))[0];
+    let wid = objects::ids("world", &scene(doc)).next().unwrap();
     (wid, doc.layers[&wid].clone())
 }
 
@@ -448,9 +448,9 @@ fn delete_camera_world_and_settings() {
     // deleting the World takes the member out of the scene; its graph stays
     let worldless = document::prune(&with_scene(&doc, kg::remove(&[wid], &scene(&doc))));
     let edited = wrote("World delete", Level::Scene, &doc, &Edit::Delete(vec![wid]), &worldless);
-    check(!contains(&source(&edited), "(scene/world") && objects::ids("world", &scene(&edited)).is_empty(), "a deleted World stayed in the scene");
+    check(!contains(&source(&edited), "(scene/world") && objects::ids("world", &scene(&edited)).next().is_none(), "a deleted World stayed in the scene");
     same_after_reload(&edited, "world delete");
-    check(objects::ids("world", &scene(&open_text(&source(&edited)))).is_empty(), "a deleted World came back on reload");
+    check(objects::ids("world", &scene(&open_text(&source(&edited)))).next().is_none(), "a deleted World came back on reload");
     // settings graph
     let new_settings = settings::apply(&doc.settings, &[("width".to_owned(), Value::Int(800))]).unwrap().0;
     let edited = wrote("settings", Level::Scene, &doc, &Edit::Settings(new_settings.clone()), &Doc { settings: new_settings.clone(), ..doc.clone() });
@@ -928,7 +928,7 @@ fn root_settings_and_camera() {
         "the root's settings were not read",
     );
     check(doc.active_camera == Some(node_id(&doc, "side")), "the root's :camera is not the active camera");
-    let wid = objects::ids("world", &scene(&doc))[0];
+    let wid = objects::ids("world", &scene(&doc)).next().unwrap();
     check(
         doc.homes.objects.iter().any(|(i, _)| *i == wid) && doc.homes.world_graph.as_deref() == Some("sky") && doc.layers.contains_key(&wid) && doc.homes.layers.len() == 2,
         "scene/world did not read its world graph's layers",
@@ -1024,7 +1024,7 @@ fn world_member_edits() {
     // a deleted top layer hands the graph's result to the layer below; the stack reorders
     let edited = ok(write(Level::Inside(wid), &doc, &Edit::Delete(vec![sun])));
     check(
-        !contains(&source(&edited), "world/sun") && contains(&source(&edited), "world/sky") && !objects::ids("world", &scene(&edited)).is_empty(),
+        !contains(&source(&edited), "world/sun") && contains(&source(&edited), "world/sky") && !objects::ids("world", &scene(&edited)).next().is_none(),
         &format!("a deleted top layer: {}", source(&edited)),
     );
     same_after_reload(&edited, "World member layer delete");
@@ -1050,7 +1050,7 @@ fn world_member_edits() {
     let worldless = document::prune(&with_scene(&doc, kg::remove(&[wid], &scene(&doc))));
     let edited = wrote("World member delete", Level::Scene, &doc, &Edit::Delete(vec![wid]), &worldless);
     check(
-        objects::ids("world", &scene(&edited)).is_empty()
+        objects::ids("world", &scene(&edited)).next().is_none()
             && !contains(&source(&edited), "scene/world")
             && !contains(&source(&edited), "graph sky")
             && contains(&source(&edited), "scene/root"),
@@ -1112,7 +1112,7 @@ fn graph_names(doc: &Doc) -> Vec<String> {
 }
 
 fn geometries(doc: &Doc) -> usize {
-    objects::ids("geometry", &scene(doc)).len()
+    objects::ids("geometry", &scene(doc)).count()
 }
 
 fn path(parts: &[&str]) -> flow_check::workspace::Path {
@@ -1150,7 +1150,7 @@ fn compose_add_geometry_and_world() {
     );
     let worlded = apply_ops(&bare, &sync::add_world(&bare).unwrap()).unwrap();
     check(
-        !objects::ids("world", &scene(&worlded)).is_empty()
+        objects::ids("world", &scene(&worlded)).next().is_some()
             && contains(&flat(&source(&worlded)), "(scene/world (ref sky))")
             && contains(&flat(&source(&worlded)), "(graph sky :context world")
             && contains(&flat(&source(&worlded)), "(world/sun (world/sky))"),
@@ -1164,10 +1164,10 @@ fn compose_add_geometry_and_world() {
         Err(message) => check(contains(&message, "E_SCENE_WORLD") || contains(&message, "World"), &format!("one-World add: {message}")),
         Ok(_) => panic!("a second World was added to one root"),
     }
-    let delete_world = |doc: &Doc| ok(write(Level::Scene, doc, &Edit::Delete(objects::ids("world", &scene(doc)))));
+    let delete_world = |doc: &Doc| ok(write(Level::Scene, doc, &Edit::Delete(objects::ids("world", &scene(doc)).collect())));
     let deleted = delete_world(&worlded);
     check(
-        objects::ids("world", &scene(&deleted)).is_empty() && !graph_names(&deleted).contains(&"sky".to_owned()) && !contains(&source(&deleted), "world/none"),
+        objects::ids("world", &scene(&deleted)).next().is_none() && !graph_names(&deleted).contains(&"sky".to_owned()) && !contains(&source(&deleted), "world/none"),
         "deleting a World did not remove its orphan graph",
     );
     same_after_reload(&deleted, "delete orphan World");
@@ -1179,7 +1179,7 @@ fn compose_add_geometry_and_world() {
     };
     let retained = delete_world(&shared);
     check(
-        objects::ids("world", &scene(&retained)).is_empty()
+        objects::ids("world", &scene(&retained)).next().is_none()
             && graph_names(&retained).contains(&"saved".to_owned())
             && sky_text(&retained) == sky_text(&shared)
             && !contains(&source(&retained), "world/none"),
@@ -1364,7 +1364,7 @@ fn instances_each_viewport_has_its_root_and_world() {
     }
     check(lowering::instance_root(&flow_syntax::value::struct_value("scene/merge", flow_syntax::ty::scene(), vec![].into())).is_none(), "a part has no root of its own");
     // each viewport draws its own World: the document's scene (a part) has none, the two roots do
-    check(objects::ids("world", &scene(&doc)).is_empty(), "the part holds no World");
+    check(objects::ids("world", &scene(&doc)).next().is_none(), "the part holds no World");
     match doc.view_worlds.as_slice() {
         [(_, Some(day)), (_, Some(night))] => {
             check(day.node.label == "Noon" && night.node.label == "Dusk", "each viewport's World node is its own");

@@ -113,7 +113,7 @@ pub fn selected_bounds<'a>(value: &ModelView<'a>) -> Option<(mat4::T, cook::Boun
     let bounds = cook::piece_bounds(piece)?;
     let scene_graph = scene(value);
     let node = kg::find(&scene_graph, piece.id)?;
-    Some((objects::world(&scene_graph, piece.id), bounds, node.label))
+    Some((objects::world(&scene_graph, piece.id), bounds, node.label.clone()))
 }
 
 pub fn no_graph() -> node::T {

@@ -85,7 +85,7 @@ fn document_boundary_validation_dump_preset_gpu() {
     assert!(carries_gpu(&reloaded), "a real workspace text reload discarded its GPU config");
     assert!(document::validate(&doc).is_ok(), "a lowered workspace is a valid document");
     let scene = document::scene_graph(&doc);
-    let geometry = crate::objects::ids("geometry", &scene);
+    let geometry: Vec<_> = crate::objects::ids("geometry", &scene).collect();
     assert!(!scene.is_empty() && document::object_network(&doc, geometry[0]).is_some(), "the lowering has no geometry object with a network");
     // an object must own its network, and a network its object
     assert!(document::validate(&document::T { networks: Default::default(), ..doc.clone() }).is_err(), "an object without its network was accepted");

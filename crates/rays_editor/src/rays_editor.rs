@@ -494,7 +494,7 @@ pub mod workspace {
 
     pub fn document_camera(document: &Document, base: &easy_camera::EasyCamera) -> easy_camera::EasyCamera {
         let scene = &document.scene;
-        let first = editor_document::objects::ids("camera", scene).first().copied();
+        let first = editor_document::objects::ids("camera", scene).next();
         match first.and_then(|id| editor_document::kind_graph::find(scene, id)).and_then(|n| editor_document::objects::camera::of_node(&n)) {
             Some((view, _)) => easy_camera::of_view(rays::camera::position(&view), rays::camera::target(&view), base),
             None => base.clone(),

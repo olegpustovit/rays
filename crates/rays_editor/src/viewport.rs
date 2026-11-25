@@ -353,7 +353,7 @@ pub fn release(extra_: &Extra) -> Extra {
 // ---- camera objects: scene nodes with operation "camera" (Objects.Camera).
 
 pub fn camera_ids(scene: &kg::T) -> Vec<i64> {
-    objects::ids("camera", scene)
+    objects::ids("camera", scene).collect()
 }
 
 pub fn follows(node: &kg::Node) -> bool {
@@ -391,8 +391,8 @@ pub fn same_view(a: &rcam::Camera, b: &rcam::Camera) -> bool {
         }
 }
 
-pub fn active_node(core: &Model) -> Option<kg::Node> {
-    core.doc.active_camera.and_then(|id| kg::find(&editor_inspect::scene(core), id))
+pub fn active_node(core: &Model) -> Option<&kg::Node> {
+    core.doc.active_camera.and_then(|id| kg::find(editor_inspect::scene(core), id))
 }
 
 /// A default camera, following the viewport.
@@ -538,7 +538,7 @@ pub fn init(mut core: Model, camera_: &easy_camera::EasyCamera) -> (Model, Extra
         root_rows: Rc::new(RefCell::new((None, Vec::new()))),
         root_request: None,
         root_drag: Rc::new(RefCell::new(None)),
-        following: active_node(&core).map(|n| follows(&n)),
+        following: active_node(&core).map(follows),
         follow_request: None,
         written: None,
         follow_pending: false,
@@ -621,13 +621,13 @@ pub fn panel(ui: &mut Ui, control_: &Control, camera_: &Camera, extra_: &Extra, 
             let (drag, pressed) = (extra_.root_drag.clone(), extra_.root.clone());
             crate::editor_inspector_pane::follow(Some(Rc::new(move |v: &param::Value, _: &mut Vec<crate::editor_model::Change>, _: &mut Vec<(String, param::Value)>| {
                 if let Ok((values, _)) = root::parameters_schema().apply_all(&root::to_values(&pressed), &[(name.clone(), v.clone())]) {
-                    *drag.borrow_mut() = Some(root::from_values(values));
+                    *drag.borrow_mut() = Some(root::from_values(&values));
                 }
             })));
         }
         if !changes.is_empty() {
             if let Ok((values, _)) = root::parameters_schema().apply_all(&root::to_values(&extra_.root), &changes) {
-                root_ = root::from_values(values);
+                root_ = root::from_values(&values);
             }
         }
     });
@@ -747,7 +747,7 @@ pub fn navigate(area: Bounds, grab: (bool, bool), _control: &Control, camera_: &
     let (pressed, released) = grab;
     let active = active_node(core);
     // A fixed render camera owns the view while look-through is enabled.
-    if look_through(extra_) && active.is_some() && !active.as_ref().is_some_and(follows) {
+    if look_through(extra_) && active.is_some() && !active.is_some_and(follows) {
         return (camera_.clone(), release(extra_));
     }
     match extra_.fly {
@@ -819,16 +819,20 @@ pub fn on_view(core: &mut Model, previous: &Camera, key: &str, camera_: Camera, 
         root: root::Parameters { renderer: to_root(mode), ..core.doc.root.clone() },
         ..extra_
     };
-    if let (Some(value), Some(node)) = (extra_.follow_request, active_node(core)) {
-        editor_host::edit_node(core, document::Level::Scene, node.id, &[("follow_viewport".to_string(), Value::Bool(value))], "Follow viewport");
+    if let Some(value) = extra_.follow_request {
+        if let Some(id) = core.doc.active_camera {
+            editor_host::edit_node(core, document::Level::Scene, id, &[("follow_viewport".to_string(), Value::Bool(value))], "Follow viewport");
+        }
     }
     let mut written = extra_.written.clone();
     let mut pending = extra_.follow_pending && !stepped;
     let mut deferred = None;
-    let active = active_node(&*core);
-    let decoded = active.as_ref().and_then(ocamera::of_node);
-    let camera_ = match (&active, &decoded) {
-        (Some(node), Some((node_view, true))) => {
+    // Decode once while the scene is still; drop the node borrow before any scene_edit.
+    let active_id = core.doc.active_camera;
+    let decoded = active_id.and_then(|id| kg::find(editor_inspect::scene(&*core), id)).and_then(ocamera::of_node);
+    let mut replaced = false;
+    let camera_ = match (active_id, &decoded) {
+        (Some(id), Some((node_view, true))) => {
             let moved = !stepped && !same_view(&easy_camera::camera(previous).expect("camera"), &easy_camera::camera(&camera_).expect("camera"));
             if moved || pending || !same_view(node_view, &easy_camera::camera(&camera_).expect("camera")) {
                 if (moved || pending) && held {
@@ -839,10 +843,11 @@ pub fn on_view(core: &mut Model, previous: &Camera, key: &str, camera_: Camera, 
                     camera_
                 } else if moved || pending {
                     pending = false;
-                    match kg::set_fields(&editor_inspect::scene(&*core), node.id, &view_parameters(&camera_)) {
+                    match kg::set_fields(editor_inspect::scene(&*core), id, &view_parameters(&camera_)) {
                         Ok((scene, _)) => {
                             written = Some(easy_camera::camera(&camera_).expect("camera"));
                             editor_host::scene_edit(core, editor_host::SceneMode::Amend, None, scene);
+                            replaced = true;
                             camera_
                         }
                         Err(_) => camera_,
@@ -865,12 +870,11 @@ pub fn on_view(core: &mut Model, previous: &Camera, key: &str, camera_: Camera, 
         }
         _ => camera_,
     };
-    // Reuse this frame's decode. A following viewport can write a new immutable node above; only
-    // that replacement needs another schema/camera conversion.
-    let current = active_node(&*core);
-    let decoded = match (&current, &active) {
-        (Some(c), Some(a)) if std::ptr::eq(c, a) => decoded,
-        _ => current.as_ref().and_then(ocamera::of_node),
+    // Reuse this frame's decode unless a write replaced the node above.
+    let decoded = if replaced {
+        active_node(&*core).and_then(ocamera::of_node)
+    } else {
+        decoded
     };
     extra_ = Extra {
         document_camera: deferred.or_else(|| decoded.as_ref().map(|(c, _)| c.clone())).unwrap_or_else(|| easy_camera::camera(&camera_).expect("camera")),
@@ -892,7 +896,7 @@ pub fn on_view(core: &mut Model, previous: &Camera, key: &str, camera_: Camera, 
         free_camera,
         free_view,
         viewing: camera_.clone(),
-        following: current.as_ref().map(|_| decoded.as_ref().map(|(_, f)| *f).unwrap_or(false)),
+        following: active_id.map(|_| decoded.as_ref().map(|(_, f)| *f).unwrap_or(false)),
         follow_request: None,
         written,
         follow_pending: pending,
@@ -1011,7 +1015,7 @@ pub fn compose(scene_: &kg::T, world_: Option<&world::Baked>, pieces: Vec<(mat4:
             if *ghost { d3::with_depth(d3::depth_state(Some(false)), vec![d3::with_blend(d3::Blend::Screen, vec![placed])]) } else { placed }
         })
         .collect();
-    let lights = if !lights.is_empty() || !objects::ids("light", scene_).is_empty() { lights } else { walk::lights(&base) };
+    let lights = if !lights.is_empty() || objects::ids("light", scene_).next().is_some() { lights } else { walk::lights(&base) };
     let created = d3::create(Some(lights), Some(walk::ambient(&base)), Some(walk::separate_specular(&base)), Some(walk::samples(&base)), nodes).unwrap_or_else(|_| d3::empty());
     match world_ {
         Some(baked) => d3::with_world(baked.clone(), &created),

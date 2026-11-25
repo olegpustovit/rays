@@ -110,7 +110,7 @@ pub fn level_target(followed: Option<String>, has_route: bool, value2: &EditorMo
                 Level::Inside(_) => Some(Level::Scene),
                 Level::Scene => None,
             },
-            (Some(Action::GoWorld), _) => objects::ids("world", &doc.scene).into_iter().find(|id| enterable(value2, *id)).map(Level::Inside),
+            (Some(Action::GoWorld), _) => objects::ids("world", &doc.scene).find(|id| enterable(value2, *id)).map(Level::Inside),
             (Some(Action::Enter), _) | (_, Some(_)) => {
                 let candidate = match result.opened {
                     Some(id) => Some(id),
@@ -1103,7 +1103,10 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         (Some(label), _) | (None, Some(label)) => label,
         (None, None) if settings_changed => "Settings".to_string(),
         (None, None) => match &result.handle_changes {
-            Some((id, _)) => format!("Edit {}", if derived { kg::find(&document, *id) } else { kg::find(&level_objects(&value.into()), *id) }.map(|n| n.label).unwrap_or_else(|| id.to_string())),
+            Some((id, _)) => {
+                let objects = level_objects(&value.into());
+                format!("Edit {}", if derived { kg::find(&document, *id) } else { kg::find(&objects, *id) }.map(|n| n.label.clone()).unwrap_or_else(|| id.to_string()))
+            },
             None => "Edit".to_string(),
         },
     };
@@ -1183,7 +1186,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     // / e opens the World, writing one (a [scene/world] member and its world graph) on first use.
     let mut world_added = false;
-    if actions.contains(&Action::GoWorld) && objects::ids("world", &next.scene).is_empty() {
+    if actions.contains(&Action::GoWorld) && objects::ids("world", &next.scene).next().is_none() {
         if let Ok(ops) = sync::add_world(&next) {
             if let Ok(doc) = document_edit::syntax_batch(Some(&value.factories), &next, &ops) {
                 next = Arc::new(doc);
