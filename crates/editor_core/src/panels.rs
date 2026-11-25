@@ -140,7 +140,14 @@ fn each_leaf_at(path: &mut Path, tree: &Panels, f: &mut dyn FnMut(&[usize], &Pan
 
 /// Every leaf in [`leaves`] order, without allocating, until `f` returns true; whether it did.
 pub fn each_leaf(tree: &Panels, f: &mut dyn FnMut(&[usize], &Panel) -> bool) -> bool {
-    each_leaf_at(&mut Vec::new(), tree, f)
+    thread_local! {
+        static PATH: std::cell::RefCell<Path> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    PATH.with(|cell| {
+        let mut path = cell.borrow_mut();
+        path.clear();
+        each_leaf_at(&mut path, tree, f)
+    })
 }
 
 /// Every leaf in tree order, floats last: a float's own leaves before the floats inside it.

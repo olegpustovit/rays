@@ -219,7 +219,7 @@ pub fn has_panel<'a>(value: &ModelView<'a>, panel: &Panel) -> bool {
 }
 
 /// The viewport that keyboard focus and the camera follow: the focused one, else the first.
-pub fn active_view<'a>(value: &ModelView<'a>, g: &layout::Geometry) -> Option<layout::Leaf> {
+pub fn active_view<'a>(value: &ModelView<'a>, g: &'a layout::Geometry) -> Option<&'a layout::Leaf> {
     match &value.focus {
         Panel::View(_) if layout::find(g, &value.focus).is_some() => layout::find(g, &value.focus),
         _ => layout::first_view(g),

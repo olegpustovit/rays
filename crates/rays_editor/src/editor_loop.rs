@@ -316,15 +316,15 @@ pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::Extra, vie
     core.gates = bodies
         .iter()
         .filter_map(|(key, bounds)| {
-            let film = V::film(extra, &look_key_of(viewing, key), *bounds);
+            let film = V::film(extra, look_key_of(viewing, key), *bounds);
             if film == *bounds || key == "@hidden" { None } else { Some((key.clone(), film)) }
         })
         .collect();
     core.selected_box = editor_list::selected_bounds(&(&*core).into()).and_then(|(world, box_, name)| {
         let key = focus_key_of(viewing);
         bodies.iter().find(|(k, _)| *k == key).and_then(|(_, bounds)| {
-            let view_ = camera_for(viewing, camera, cameras, extra, pending, &key);
-            V::screen_box(&view_, V::film(extra, &look_key_of(viewing, &key), *bounds), &world, &box_).map(|rect| (key.clone(), rect, name))
+            let view_ = camera_for(viewing, camera, cameras, extra, pending, key);
+            V::screen_box(&view_, V::film(extra, look_key_of(viewing, key), *bounds), &world, &box_).map(|rect| (key.to_owned(), rect, name))
         })
     });
     // the render clock: a restart of the samples starts it, reaching the cap stops it
@@ -443,7 +443,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let handles_scene = editor_inspect::scene(&value.core).clone();
     let handles_view = view_camera(&value);
     let handles_extra = extra.clone();
-    let handles_key = focus_key(&value);
+    let handles_key = focus_key(&value).to_owned();
     let view_handles = move |ui: &mut Ui, selected: Option<&m::Picked>, space: rays_math::mat4::T, bounds: Bounds| {
         // a handle is where the picture shows its point: in the view's film, not its pane
         V::handles(ui, selected, &handles_scene, &space, &handles_view, &handles_extra, V::film(&handles_extra, &handles_key, bounds))
@@ -585,18 +585,18 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let time = timeline::time(&timeline_);
     let live_input = input::Frame { t: time, frame: timeline::frame(&timeline_), ..value.core.live_frame.clone() };
     let reuse = match &value.resolved {
-        Some((doc, at, scene, error)) if same_context(doc, &value.core.doc) && !sop::context::input_changed(lowering::scene_reads(doc), at, &live_input) => Some((scene.clone(), error.clone())),
+        Some((doc, at, scene, error)) if same_context(doc, &value.core.doc) && !sop::context::input_changed(lowering::scene_reads(doc), at, &live_input) => Some((Rc::clone(scene), error.clone())),
         _ => None,
     };
     let (scene, scene_error) = match reuse {
         Some(r) => r,
         None => {
             let previous = match &value.resolved {
-                Some((doc, _, scene, _)) if same_context(doc, &value.core.doc) => Some(scene.clone()),
+                Some((doc, _, scene, _)) if same_context(doc, &value.core.doc) => Some(scene.as_ref()),
                 _ => None,
             };
-            let (scene, errors) = lowering::resolve_scene(previous.as_ref(), Some(&value.core.cook.state), Some(&live_input), &value.core.doc, time);
-            (scene, if errors.is_empty() { None } else { Some(errors.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")) })
+            let (scene, errors) = lowering::resolve_scene(previous, Some(&value.core.cook.state), Some(&live_input), &value.core.doc, time);
+            (Rc::new(scene), if errors.is_empty() { None } else { Some(errors.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")) })
         }
     };
     let context_error = if image_errors.is_empty() { scene_error.clone() } else { Some(image_errors.join("; ")) };
@@ -613,11 +613,11 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
         .iter()
         .filter_map(|(key, bounds)| {
             let scene3 = if key == "@hidden" { focused_rendered.clone() } else { views.iter().find(|(k, _)| k == key).map(|(_, s)| s.clone()).or_else(|| rendered.clone()) };
-            scene3.map(|scene3| (key.clone(), V::film(&extra, &look_key_of(&focused.viewing, key), *bounds), camera_for(&focused.viewing, &camera, &focused.cameras, &extra, pending, key), scene3))
+            scene3.map(|scene3| (key.clone(), V::film(&extra, look_key_of(&focused.viewing, key), *bounds), camera_for(&focused.viewing, &camera, &focused.cameras, &extra, pending, key), scene3))
         })
         .collect();
     let focus = focus_key_of(&focused.viewing);
-    let extra = V::render(&extra, raw_frame.pixel_scale, Some(&focus), render_views);
+    let extra = V::render(extra, raw_frame.pixel_scale, Some(focus), render_views);
     with_view_overlays(value, frame.input.t, &extra, &focused.viewing, &camera, &focused.cameras, pending, &bodies);
     let map = match (&baked, &value.map) {
         (Some(b), Some((source, image_))) if Rc::ptr_eq(b, source) || !value.core.map_view => Some((source.clone(), image_.clone())),

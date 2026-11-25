@@ -235,9 +235,14 @@ pub mod router {
 
     /// The matching chord with the most modifiers; on a tie the earlier command wins.
     fn chord(platform: Platform, commands: &[&Command], focus: &Panel, keys: &[Key], key: Key) -> Option<Command> {
+        chord_filtered(platform, commands, focus, keys, key, false)
+    }
+
+    fn chord_filtered(platform: Platform, commands: &[&Command], focus: &Panel, keys: &[Key], key: Key, globals_only: bool) -> Option<Command> {
         let mut best: Option<(usize, &Command)> = None;
-        for command in commands.iter().copied().filter(|command| visible(command, focus)) {
+        for command in commands.iter().copied().filter(|command| (!globals_only || command.scope.is_none()) && visible(command, focus)) {
             let Some(Trigger::Chord(bound, modifiers)) = &command.trigger else { continue };
+            // ponytail: small fixed set of chord modifiers; stack array if the binding table grows
             let modifiers: Vec<Key> = modifiers.iter().map(|m| resolve(platform, *m)).collect();
             let matches = same_key(*bound, key)
                 && modifiers.iter().all(|m| keys.contains(m))
@@ -294,8 +299,6 @@ pub mod router {
         previous_keys: &[Key],
         frame: &'a frame::Frame,
     ) -> (Vec<Command>, Cow<'a, frame::Frame>) {
-        let global: Vec<&Command> =
-            keymap.iter().copied().filter(|command| command.scope.is_none()).collect();
         let owned = |key: Key| match key {
             Key::KeyChar(c) => ['a', 'c', 'v', 'x', 'z', 'y'].contains(&c.to_ascii_lowercase()),
             Key::F12 => false,
@@ -310,7 +313,7 @@ pub mod router {
                 Event::KeyPressed(key)
                     if !owned(*key) && (input::command_held(platform, &modifiers) || *key == Key::F12) =>
                 {
-                    match chord(platform, &global, focus, &modifiers, *key) {
+                    match chord_filtered(platform, keymap, focus, &modifiers, *key, true) {
                         Some(command) => { actions.push(command); consumed.push(index); },
                         None => {},
                     }
@@ -408,11 +411,11 @@ pub mod router {
                         *character
                     };
                     let typed = format!("{}{}", prefix, character.to_ascii_lowercase());
-                    let commands: Vec<&Command> = keymap.iter().copied().filter(|command| visible(command, focus)).collect();
-                    if let Some(command) = commands.iter().find(|command| matches!(&command.trigger, Some(Trigger::Leader(sequence)) if sequence == &typed)) {
-                        actions.push((*command).clone());
+                    let mut cmds = keymap.iter().copied().filter(|command| visible(command, focus));
+                    if let Some(command) = cmds.by_ref().find(|command| matches!(&command.trigger, Some(Trigger::Leader(sequence)) if sequence == &typed)) {
+                        actions.push(command.clone());
                         state = State::Idle;
-                    } else if commands.iter().any(|command| {
+                    } else if keymap.iter().copied().filter(|command| visible(command, focus)).any(|command| {
                         matches!(&command.trigger, Some(Trigger::Leader(sequence)) if sequence.starts_with(&typed))
                     }) {
                         state = State::Pending(typed);

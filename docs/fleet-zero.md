@@ -44,12 +44,14 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 
 | Lane | State |
 |---|---|
+| Z1 | In progress: `find`/`ids`/`read` borrowed (cb1a86b52); Leaf/Panel walk, look/focus keys, composition_key Rc, Scene3 Rc, Extra render move, chord lists — measuring click/graph budgets next. Remaining: Extra field clones on navigate, `panel_key` owned Path on rare paths, Finding 2 overlays (Z3). |
 
 ## Requests
 
 ### Z0
 ### Z1
 ### Z2
+- `editor_panes::graph_name_at` (~7–15/busy frame): return `&str` / borrow the stored name instead of `to_owned` (Z1 string-key bucket; your file).
 ### Z3
 ### Z4
 ### Z5

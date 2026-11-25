@@ -91,8 +91,8 @@ pub struct LoopModel {
     pub views: Vec<(String, V::Rendered)>,
     /// per object
     pub drawn: Rc<Drawn>,
-    pub composed: Option<(kg::T, Level, Vec<(String, Vec<i64>)>)>,
-    pub resolved: Option<(std::sync::Arc<Document>, Input, kg::T, Option<String>)>,
+    pub composed: Option<CompositionKey>,
+    pub resolved: Option<(std::sync::Arc<Document>, Input, Rc<kg::T>, Option<String>)>,
     pub context_error: Option<String>,
     /// E_MEMORY while the process stays over its limit
     pub memory_error: Option<String>,
@@ -408,7 +408,7 @@ pub fn same_context(a: &Document, b: &Document) -> bool {
 
 pub fn resolved_scene(value: &LoopModel) -> kg::T {
     match &value.resolved {
-        Some((doc, _, scene, _)) if same_context(doc, &value.core.doc) => scene.clone(),
+        Some((doc, _, scene, _)) if same_context(doc, &value.core.doc) => (**scene).clone(),
         _ => editor_inspect::scene(&value.core).clone(),
     }
 }
@@ -436,20 +436,20 @@ pub fn set_settings(mut value: LoopModel, settings: &editor_document::settings::
 }
 
 /// the viewport the focus is in; the default layout's one before any focus
-pub fn focus_key_of(viewing: &Option<String>) -> String {
-    viewing.clone().unwrap_or_else(|| "main".to_string())
+pub fn focus_key_of(viewing: &Option<String>) -> &str {
+    viewing.as_deref().unwrap_or("main")
 }
 
-pub fn focus_key(value: &LoopModel) -> String {
+pub fn focus_key(value: &LoopModel) -> &str {
     focus_key_of(&value.viewing)
 }
 
 /// the viewport whose root a view is read from: the hidden scene shows the focused viewport
-pub fn look_key_of(viewing: &Option<String>, key: &str) -> String {
-    if key == "@hidden" { focus_key_of(viewing) } else { key.to_string() }
+pub fn look_key_of<'a>(viewing: &'a Option<String>, key: &'a str) -> &'a str {
+    if key == "@hidden" { focus_key_of(viewing) } else { key }
 }
 
-pub fn look_key(value: &LoopModel, key: &str) -> String {
+pub fn look_key<'a>(value: &'a LoopModel, key: &'a str) -> &'a str {
     look_key_of(&value.viewing, key)
 }
 
@@ -457,12 +457,12 @@ pub fn look_key(value: &LoopModel, key: &str) -> String {
 /// camera of its own root
 pub fn camera_for(viewing: &Option<String>, camera: &V::Camera, cameras: &[(String, V::Camera)], extra: &V::Extra, pending: bool, key: &str) -> rays::camera::Camera {
     let key = look_key_of(viewing, key);
-    let orbit = if viewing.as_deref() == Some(key.as_str()) {
+    let orbit = if viewing.as_deref() == Some(key) {
         camera.clone()
     } else {
         cameras.iter().find(|(k, _)| *k == key).map(|(_, c)| c.clone()).unwrap_or_else(|| camera.clone())
     };
-    V::view_camera(&orbit, extra, &key, pending)
+    V::view_camera(&orbit, extra, key, pending)
 }
 
 pub fn camera_of(value: &LoopModel, key: &str) -> rays::camera::Camera {
@@ -470,7 +470,7 @@ pub fn camera_of(value: &LoopModel, key: &str) -> rays::camera::Camera {
 }
 
 pub fn view_camera(value: &LoopModel) -> rays::camera::Camera {
-    camera_of(value, &focus_key(value))
+    camera_of(value, focus_key(value))
 }
 
 /// Which viewport the orbit belongs to, and the orbits of the others.
@@ -500,20 +500,20 @@ pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &rays_shell:
     let mut cameras = value.cameras.clone();
     cameras.retain(|(key, _)| keys.contains(key));
     let unchanged = Focus { viewing: value.viewing.clone(), camera: value.camera.clone(), cameras };
-    match editor_shell::active_view(&core.into(), &g) {
-        Some(leaf) => match leaf.panel {
-            Panel::View(key) if Some(&key) != value.viewing.as_ref() => match &value.viewing {
+    match editor_shell::active_view(&core.into(), g) {
+        Some(leaf) => match &leaf.panel {
+            Panel::View(key) if Some(key) != value.viewing.as_ref() => match &value.viewing {
                 None => {
                     // the first focus: every other viewport starts as a copy of the orbit in use
                     let others: Vec<(String, V::Camera)> = g
                         .leaves
                         .iter()
                         .filter_map(|leaf| match &leaf.panel {
-                            Panel::View(k) if *k != key => Some((k.clone(), value.camera.clone())),
+                            Panel::View(k) if k != key => Some((k.clone(), value.camera.clone())),
                             _ => None,
                         })
                         .collect();
-                    Focus { viewing: Some(key), cameras: others, ..unchanged }
+                    Focus { viewing: Some(key.clone()), cameras: others, ..unchanged }
                 }
                 Some(previous) => {
                     let mut kept: Vec<(String, V::Camera)> = if keys.contains(previous) {
@@ -523,9 +523,9 @@ pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &rays_shell:
                     } else {
                         unchanged.cameras.clone()
                     };
-                    let camera = kept.iter().find(|(k, _)| *k == key).map(|(_, c)| c.clone()).unwrap_or_else(|| value.camera.clone());
-                    kept.retain(|(k, _)| *k != key);
-                    Focus { viewing: Some(key), camera, cameras: kept }
+                    let camera = kept.iter().find(|(k, _)| k == key).map(|(_, c)| c.clone()).unwrap_or_else(|| value.camera.clone());
+                    kept.retain(|(k, _)| k != key);
+                    Focus { viewing: Some(key.clone()), camera, cameras: kept }
                 }
             },
             _ => unchanged,
@@ -535,7 +535,7 @@ pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &rays_shell:
 }
 
 pub fn paint_view(value: &LoopModel, key: &str, viewport: rays_shell::layout::Bounds, view_: &rays::camera::Camera, rendered: &d3::Scene3) -> Vec<rays::scene::Node> {
-    V::paint(&value.extra, key, V::film(&value.extra, &look_key(value, key), viewport), view_, rendered)
+    V::paint(&value.extra, key, V::film(&value.extra, look_key(value, key), viewport), view_, rendered)
 }
 
 pub fn viewport_camera(value: &LoopModel, key: &str) -> rays::camera::Camera {
@@ -556,7 +556,7 @@ pub fn focused_image(value: &LoopModel) -> Option<d3::Scene3> {
 pub fn film(value: &LoopModel, frame_: &frame::Frame) -> (i64, i64, i64, i64) {
     let pane = editor_shell::panes(&(&value.core).into(), frame_).view;
     let (x, y, _, _) = pane;
-    let (fx, fy, w, h) = V::film(&value.extra, &focus_key(value), pane);
+    let (fx, fy, w, h) = V::film(&value.extra, focus_key(value), pane);
     (fx - x, fy - y, w, h)
 }
 
@@ -587,10 +587,13 @@ pub fn display_keys(drawn: &Drawn) -> Vec<String> {
     keys
 }
 
+/// Fingerprint for whether `compose` must run again: shared scene identity, pane level, and views.
+pub type CompositionKey = (Rc<kg::T>, Level, Vec<(String, Vec<i64>)>);
+
 /// Recompose when a cook, the scene, or the World changed. Each object's drawing is reused while
 /// its graph and prepared value are physically the same, so moving an object only re-places it.
-pub fn composition_key(core: &m::EditorModel, scene: &kg::T) -> (kg::T, Level, Vec<(String, Vec<i64>)>) {
-    (scene.clone(), m::pane_level(&core.into()), core.doc.shell.as_ref().map(|s| s.views.clone()).unwrap_or_default())
+pub fn composition_key(core: &m::EditorModel, scene: &Rc<kg::T>) -> CompositionKey {
+    (Rc::clone(scene), m::pane_level(&core.into()), core.doc.shell.as_ref().map(|s| s.views.clone()).unwrap_or_default())
 }
 
 /// What `compose` hands back, and whether the drawings (`drawn`) are new ones.
@@ -614,7 +617,7 @@ fn same_baked_views(a: &[(String, BakedPair)], b: &[(String, BakedPair)]) -> boo
     a.len() == b.len() && a.iter().zip(b).all(|((k, (_, x)), (k2, (_, y)))| k == k2 && Rc::ptr_eq(x, y))
 }
 
-pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &Option<Rc<world::Baked>>, baked_views: &[(String, BakedPair)], scene: &kg::T) -> ComposedOut {
+pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &Option<Rc<world::Baked>>, baked_views: &[(String, BakedPair)], scene: &Rc<kg::T>) -> ComposedOut {
     let draw_errors = |drawn: &Drawn, errors: &[String]| -> Vec<String> {
         let mut out: Vec<String> = errors.to_vec();
         for e in drawn.values() {
@@ -646,9 +649,9 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
     }
     // a texture has no identity here: a drawing with one, or one that had one, is drawn again
     let texture_changed = value.drawn.iter().any(|(id, e)| !(e.texture.is_none() && !textures.contains_key(id)));
-    let (scene_, level_, views_) = composition_key(core, scene);
+    let (scene_rc, level_, views_) = composition_key(core, scene);
     let same = match &value.composed {
-        Some((s, l, v)) => kg::same(s, &scene_) && *l == level_ && *v == views_,
+        Some((s, l, v)) => Rc::ptr_eq(s, &scene_rc) && *l == level_ && *v == views_,
         None => false,
     };
     if !(texture_changed
@@ -697,14 +700,14 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
     };
     let compose_pieces = |world_: &Option<Rc<world::Baked>>, view: &View, pieces: Vec<(mat4::T, cook::Piece)>| -> d3::Scene3 {
         V::compose(
-            &editor_host::scene_for_view(Some(scene.clone()), Some(view), core),
+            &editor_host::scene_for_view(Some((**scene).clone()), Some(view), core),
             world_.as_deref(),
             pieces
                 .into_iter()
                 .map(|(matrix, piece)| {
                     let rendered = &drawn.get(&piece.id).expect("drawn piece").rendered;
-                    let culled = match kg::find(&scene, piece.id) {
-                        Some(node) => walk::with_cull(objects::cull(&node), rendered),
+                    let culled = match kg::find(scene, piece.id) {
+                        Some(node) => walk::with_cull(objects::cull(node), rendered),
                         None => rendered.clone(),
                     };
                     (matrix, ghost(piece.id), culled)

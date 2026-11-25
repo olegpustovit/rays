@@ -582,12 +582,12 @@ pub fn geometry_with_resize(state: Option<&dyn Fn(&[usize]) -> State>, hidden: O
     }
 }
 
-pub fn find(geometry: &Geometry, panel: &Panel) -> Option<Leaf> {
-    geometry.leaves.iter().find(|l| l.panel == *panel && l.body.3 > 0).cloned()
+pub fn find<'a>(geometry: &'a Geometry, panel: &Panel) -> Option<&'a Leaf> {
+    geometry.leaves.iter().find(|l| l.panel == *panel && l.body.3 > 0)
 }
 
-pub fn first_view(geometry: &Geometry) -> Option<Leaf> {
-    geometry.leaves.iter().find(|l| l.body.3 > 0 && matches!(l.panel, Panel::View(_))).cloned()
+pub fn first_view(geometry: &Geometry) -> Option<&Leaf> {
+    geometry.leaves.iter().find(|l| l.body.3 > 0 && matches!(l.panel, Panel::View(_)))
 }
 
 const ZERO: Bounds = (0, 0, 0, 0);

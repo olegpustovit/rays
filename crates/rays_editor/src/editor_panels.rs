@@ -383,7 +383,7 @@ pub fn focused_leaf(g: &layout::Geometry, focus: &Panel, path: Option<&[usize]>)
     let first = |f: &dyn Fn(&Leaf) -> bool| g.leaves.iter().find(|l| f(l)).cloned();
     path.and_then(|p| first(&|l| kind(l) && under(p, &l.path)))
         .or_else(|| first(&|l| Some(l.path.as_slice()) == path))
-        .or_else(|| layout::find(g, focus))
+        .or_else(|| layout::find(g, focus).cloned())
         .or_else(|| first(&kind))
         // its panel was closed and no other is of its kind: the leaf that shares the most of its
         // path, the neighbour that took its place

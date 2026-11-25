@@ -953,14 +953,14 @@ pub fn film(extra_: &Extra, key: &str, (x, y, width, height): Bounds) -> Bounds 
 /// Each viewport renders as its own root says. Looking through the render camera, the tracer's
 /// film is the root's resolution in a step that fits the viewport's gate in drawable pixels; a free
 /// view's film is the pane itself. `views` carry each viewport's rectangle (`film`).
-pub fn render(extra_: &Extra, pixel_scale: (f64, f64), focus: Option<&str>, views: Vec<(String, Bounds, rcam::Camera, d3::Scene3)>) -> Extra {
+pub fn render(mut extra_: Extra, pixel_scale: (f64, f64), focus: Option<&str>, views: Vec<(String, Bounds, rcam::Camera, d3::Scene3)>) -> Extra {
     let (scale_x, scale_y) = pixel_scale;
     let views: Vec<renderer::View> = views
         .into_iter()
         .map(|(key, (_, _, width, height), camera_, scene_)| {
-            let settings = look(extra_, &key).settings;
+            let settings = look(&extra_, &key).settings;
             let gate = ((width as f64 * scale_x).round() as i64, (height as f64 * scale_y).round() as i64);
-            let (film_, step) = renderer::film(looks(extra_, &key), (settings.width, settings.height), gate);
+            let (film_, step) = renderer::film(looks(&extra_, &key), (settings.width, settings.height), gate);
             renderer::View {
                 key,
                 film: film_,
@@ -972,7 +972,8 @@ pub fn render(extra_: &Extra, pixel_scale: (f64, f64), focus: Option<&str>, view
             }
         })
         .collect();
-    Extra { renderer: renderer::update(&extra_.renderer, extra_.renderer.mode, extra_.renderer.custom, focus, &views), ..extra_.clone() }
+    extra_.renderer = renderer::update(&extra_.renderer, extra_.renderer.mode, extra_.renderer.custom, focus, &views);
+    extra_
 }
 
 /// A traced viewport's header: whether it looks through, and the renderer (0 solid, 1 wire, 2 traced).

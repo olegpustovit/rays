@@ -469,7 +469,7 @@ pub fn draw_notice<'a>(value: &ModelView<'a>, frame_: &frame::Frame, roots: &[(L
 
 /// The viewport handles: their edits, a pick, and the changes they write.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_handles<'a>(value: &ModelView<'a>, frame_: &frame::Frame, workspace: &Shell, selection: selection::Selection, selected: &Option<Picked>, lowered_level: bool, scope_active: bool, active: &Option<Leaf>, view_root: &pxui::Handle, view_handles: &ViewHandles, ui: &mut Ui) -> (selection::Selection, bool, Vec<Change>, Option<(i64, Vec<(String, Value)>)>) {
+pub fn draw_handles<'a>(value: &ModelView<'a>, frame_: &frame::Frame, workspace: &Shell, selection: selection::Selection, selected: &Option<Picked>, lowered_level: bool, scope_active: bool, active: Option<&Leaf>, view_root: &pxui::Handle, view_handles: &ViewHandles, ui: &mut Ui) -> (selection::Selection, bool, Vec<Change>, Option<(i64, Vec<(String, Value)>)>) {
     // a lowered node is edited through its text: the handles of the node selected in the graph pane
     // write its arguments, the list's rows of a geometry object have none
     let scope_target = if scope_active { scope_node(value) } else { None };
@@ -1323,7 +1323,7 @@ pub fn update_frame(
                 None => none_root(ui),
             };
             let active = active_view(&vw, &g);
-            let view_root = draw_viewport_pane(ui, &(&*value).into(), probe_caption(&vw), &roots, active.as_ref(), &none_root);
+            let view_root = draw_viewport_pane(ui, &(&*value).into(), probe_caption(&vw), &roots, active, &none_root);
             let mut scope_view2 = scope_view.take().unwrap_or_else(|| frame_pane(value).0);
             let mut scope_changes = scope_command_changes.clone();
             let (graph_body, menu2, menu_pick) = draw_graph_pane(ui, frame_, &(&*value).into(), &shortcut_frame, &mut scope_view2, scope_active, guide, carry_lit.clone(), carry_hot.clone(), &graph_root, &graph_host, &workspace, pending_menu.take(), &open_menu, &mut scope_changes);
@@ -1404,7 +1404,7 @@ pub fn update_frame(
                 timeline_leaves.iter().map(|(l, b)| (l.body, b.clone(), false)).collect()
             };
             let (timeline_intents, strip_layout) = draw_timeline_pane(ui, frame_, &value.timeline, value.timeline_frames, &timeline_slots, &timeline_root, g.timeline_at);
-            let (selection, grab, handle_ops, handle_changes) = draw_handles(&(&*value).into(), frame_, &workspace, selection, &selected_obj, lowered_level, scope_active, &active, &view_root, view_handles, ui);
+            let (selection, grab, handle_ops, handle_changes) = draw_handles(&(&*value).into(), frame_, &workspace, selection, &selected_obj, lowered_level, scope_active, active, &view_root, view_handles, ui);
             changes.extend(handle_ops);
             let context = match &leader {
                 router::State::Pending(_) => guide_context::GuideContext::Leader,

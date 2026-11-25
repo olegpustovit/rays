@@ -72,8 +72,8 @@ pub enum Node {
 
 #[derive(Clone)]
 pub struct Scene3 {
-    nodes: Vec<Node>,
-    lights: Vec<light::Light>,
+    nodes: Rc<Vec<Node>>,
+    lights: Rc<Vec<light::Light>>,
     ambient: color::T,
     separate_specular: bool,
     samples: i64,
@@ -86,8 +86,8 @@ pub fn depth_state(write: Option<bool>) -> DepthState {
 
 pub fn empty() -> Scene3 {
     Scene3 {
-        nodes: Vec::new(),
-        lights: Vec::new(),
+        nodes: Rc::new(Vec::new()),
+        lights: Rc::new(Vec::new()),
         ambient: color::black(),
         separate_specular: false,
         samples: 1,
@@ -110,8 +110,8 @@ pub fn create(
         return Err("Scene3.create: samples must be 1, 4, 9, or 16".to_string());
     }
     Ok(Scene3 {
-        nodes,
-        lights: lights.unwrap_or_default(),
+        nodes: Rc::new(nodes),
+        lights: Rc::new(lights.unwrap_or_default()),
         ambient: ambient.unwrap_or_else(|| color::rgb(32, 32, 32)),
         separate_specular: separate_specular.unwrap_or(false),
         samples,
@@ -166,7 +166,7 @@ pub fn instances_array(
 /// The scene's drawings without its lights and render settings, e.g. to place a whole scene under
 /// a `transform` inside another.
 pub fn nodes(scene: &Scene3) -> Vec<Node> {
-    scene.nodes.clone()
+    (*scene.nodes).clone()
 }
 
 #[cfg(test)]
@@ -217,7 +217,7 @@ pub mod walk {
                 Node::BlendState(state, children) => Node::BlendState(*state, many(children)),
             }
         }
-        Scene3 { nodes: scene.nodes.iter().map(|n| visit(texture, n)).collect(), ..scene.clone() }
+        Scene3 { nodes: Rc::new(scene.nodes.iter().map(|n| visit(texture, n)).collect()), ..scene.clone() }
     }
 
     /// `scene` with every mesh drawn under `cull` (a geometry object's face culling)
@@ -233,7 +233,7 @@ pub mod walk {
                 Node::BlendState(state, children) => Node::BlendState(*state, many(children)),
             }
         }
-        Scene3 { nodes: scene.nodes.iter().map(|n| visit(cull_, n)).collect(), ..scene.clone() }
+        Scene3 { nodes: Rc::new(scene.nodes.iter().map(|n| visit(cull_, n)).collect()), ..scene.clone() }
     }
 
     #[derive(Clone)]
@@ -349,7 +349,7 @@ pub mod walk {
     }
 
     pub fn lights(scene: &Scene3) -> Vec<light::Light> {
-        scene.lights.clone()
+        (*scene.lights).clone()
     }
 
     pub fn ambient(scene: &Scene3) -> color::T {
@@ -433,4 +433,16 @@ pub fn same(a: &Scene3, b: &Scene3) -> bool {
         && a.separate_specular == b.separate_specular
         && a.samples == b.samples
         && same_world(&a.world, &b.world)
+}
+
+#[cfg(test)]
+mod zero_alloc_scene3 {
+    use super::*;
+    #[test]
+    fn clone_shares_nodes() {
+        let a = create(None, None, None, None, vec![]).unwrap();
+        let b = a.clone();
+        assert!(std::rc::Rc::ptr_eq(&a.nodes, &b.nodes));
+        assert!(std::rc::Rc::ptr_eq(&a.lights, &b.lights));
+    }
 }
