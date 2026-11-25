@@ -15,7 +15,7 @@ use editor_document::settings;
 use flow_syntax::context;
 use flow_syntax::syntax::{Node as SNode, Syntax};
 use input::Event;
-use param::{FieldView, KindView, Value};
+use param::{KindView, Value};
 use pxui::ui::{BoxOpts, Size, Ui, ValueFieldOpts, CLICKABLE};
 use rays_shell::layout::Bounds;
 use rays::camera as rcam;
@@ -488,10 +488,10 @@ pub fn root_renderer(core: &Model) -> Option<renderer::Mode> {
 }
 
 pub fn renderer_setting(core: &Model) -> Option<renderer::Mode> {
-    settings::fields(&editor_list::settings(core)).into_iter().find_map(|f: FieldView| match (f.name.as_str(), &f.current) {
-        ("renderer", Value::Choice(label)) => renderer::of_label(label),
+    match settings::value(&core.doc.settings, "renderer") {
+        Some(Value::Choice(label)) => renderer::of_label(&label),
         _ => None,
-    })
+    }
 }
 
 pub fn looks(extra_: &Extra, key: &str) -> bool {

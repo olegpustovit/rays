@@ -41,7 +41,7 @@ const FRAMES: i64 = 30;
 // Z1: exact quad cache keys, single-field settings reads: basic 805 / 89,381; empty 538 / 34,724; bare 693 / 45,448.
 // Z1: shared shell tree, kept leaf list, borrowed level objects: basic 747 / 85,781; empty 462 / 31,882; bare 617 / 42,561.
 // Z1: wide-hash quad keys, no generic cache constructor: basic 747 / 85,098; empty 462 / 31,882; bare 617 / 42,561.
-const BASIC: (u64, u64) = (588, 90_065);
+const BASIC: (u64, u64) = (549, 85_179);
 const EMPTY: (u64, u64) = (177, 11_128);
 const BARE: (u64, u64) = (266, 21_350);
 
