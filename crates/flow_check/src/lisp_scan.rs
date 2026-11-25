@@ -35,6 +35,9 @@ fn closer_of(open: char) -> char {
 type Lexed = (Vec<Token>, Vec<(usize, usize)>, Vec<(char, usize)>);
 thread_local!(static LEXED: std::cell::RefCell<(String, Option<Arc<Lexed>>)> =
     const { std::cell::RefCell::new((String::new(), None)) });
+// Working buffers survive Arc hand-off (capacity shells) so a warm miss does not grow new Vecs.
+thread_local!(static WORK: std::cell::RefCell<(Vec<Token>, Vec<(usize, usize)>, Vec<(char, usize)>)> =
+    const { std::cell::RefCell::new((Vec::new(), Vec::new(), Vec::new())) });
 
 pub fn lex(text: &str) -> Arc<Lexed> {
     if let Some(hit) = LEXED.with(|c| {
@@ -44,90 +47,104 @@ pub fn lex(text: &str) -> Arc<Lexed> {
         return hit;
     }
     let raw = text_lexer::lex(text);
-    let mut tokens = Vec::new();
-    let mut pairs = Vec::new();
-    let mut stack: Vec<(char, usize, usize)> = Vec::new();
-    let mut head_next = false;
-    let mut index = 0;
-    while index < raw.len() {
-        let token = &raw[index];
-        let start = token.start as usize;
-        let stop = token.stop as usize;
-        match &token.kind {
-            LexKind::Open(open) => {
-                let at = tokens.len();
-                tokens.push(Token { kind: Kind::Open(stack.len()), start, stop });
-                stack.push((*open, start, at));
-                head_next = *open == '(';
-            }
-            LexKind::Close(close) => {
-                let kind = if stack.last().is_some_and(|(open, _, _)| closer_of(*open) == *close) {
-                    match stack.pop() {
-                        Some((_, at, _)) => {
-                            pairs.push((at, start));
-                            Kind::Close(stack.len())
+    let out = WORK.with(|w| {
+        let mut w = w.borrow_mut();
+        w.0.clear();
+        w.1.clear();
+        w.2.clear();
+        let (tokens, pairs, open_stack) = &mut *w;
+        let mut stack: Vec<(char, usize, usize)> = Vec::new();
+        let mut head_next = false;
+        let mut index = 0;
+        while index < raw.len() {
+            let token = &raw[index];
+            let start = token.start as usize;
+            let stop = token.stop as usize;
+            match &token.kind {
+                LexKind::Open(open) => {
+                    let at = tokens.len();
+                    tokens.push(Token { kind: Kind::Open(stack.len()), start, stop });
+                    stack.push((*open, start, at));
+                    head_next = *open == '(';
+                }
+                LexKind::Close(close) => {
+                    let kind = if stack.last().is_some_and(|(open, _, _)| closer_of(*open) == *close) {
+                        match stack.pop() {
+                            Some((_, at, _)) => {
+                                pairs.push((at, start));
+                                Kind::Close(stack.len())
+                            }
+                            None => Kind::Unmatched,
                         }
-                        None => Kind::Unmatched,
-                    }
-                } else {
-                    Kind::Unmatched
-                };
-                tokens.push(Token { kind, start, stop });
-                head_next = false;
-            }
-            LexKind::Comment(_) => tokens.push(Token { kind: Kind::Comment, start, stop }),
-            LexKind::String(_) => {
-                tokens.push(Token { kind: Kind::Str, start, stop });
-                head_next = false;
-            }
-            LexKind::Meta(_) => {
-                tokens.push(Token { kind: if head_next { Kind::Head } else { Kind::Meta }, start, stop });
-                head_next = false;
-            }
-            LexKind::Word(word) => {
-                let kind = if head_next {
-                    Kind::Head
-                } else {
-                    match word {
-                        Word::Symbol => Kind::Sym,
-                        Word::Keyword => Kind::Kw,
-                        Word::Number => Kind::Num,
-                    }
-                };
-                tokens.push(Token { kind, start, stop });
-                head_next = false;
-            }
-            LexKind::Prefix(_) => {
-                let merged_stop = if let Some(next) = raw.get(index + 1) {
-                    let mergeable = matches!(
-                        &next.kind,
-                        LexKind::Word(_) | LexKind::Meta(_) | LexKind::Prefix(_)
-                    );
-                    if mergeable && next.start == token.stop {
-                        index += 1;
-                        next.stop as usize
+                    } else {
+                        Kind::Unmatched
+                    };
+                    tokens.push(Token { kind, start, stop });
+                    head_next = false;
+                }
+                LexKind::Comment(_) => tokens.push(Token { kind: Kind::Comment, start, stop }),
+                LexKind::String(_) => {
+                    tokens.push(Token { kind: Kind::Str, start, stop });
+                    head_next = false;
+                }
+                LexKind::Meta(_) => {
+                    tokens.push(Token { kind: if head_next { Kind::Head } else { Kind::Meta }, start, stop });
+                    head_next = false;
+                }
+                LexKind::Word(word) => {
+                    let kind = if head_next {
+                        Kind::Head
+                    } else {
+                        match word {
+                            Word::Symbol => Kind::Sym,
+                            Word::Keyword => Kind::Kw,
+                            Word::Number => Kind::Num,
+                        }
+                    };
+                    tokens.push(Token { kind, start, stop });
+                    head_next = false;
+                }
+                LexKind::Prefix(_) => {
+                    let merged_stop = if let Some(next) = raw.get(index + 1) {
+                        let mergeable = matches!(
+                            &next.kind,
+                            LexKind::Word(_) | LexKind::Meta(_) | LexKind::Prefix(_)
+                        );
+                        if mergeable && next.start == token.stop {
+                            index += 1;
+                            next.stop as usize
+                        } else {
+                            stop
+                        }
                     } else {
                         stop
-                    }
-                } else {
-                    stop
-                };
-                tokens.push(Token {
-                    kind: if head_next { Kind::Head } else { Kind::Sym },
-                    start,
-                    stop: merged_stop,
-                });
-                head_next = false;
+                    };
+                    tokens.push(Token {
+                        kind: if head_next { Kind::Head } else { Kind::Sym },
+                        start,
+                        stop: merged_stop,
+                    });
+                    head_next = false;
+                }
+                LexKind::End => {}
             }
-            LexKind::End => {}
+            index += 1;
         }
-        index += 1;
-    }
-    for &(_, _, index) in &stack {
-        tokens[index].kind = Kind::Unmatched;
-    }
-    let open_stack = stack.iter().rev().map(|&(open, at, _)| (open, at)).collect();
-    let out = Arc::new((tokens, pairs, open_stack));
+        for &(_, _, index) in &stack {
+            tokens[index].kind = Kind::Unmatched;
+        }
+        open_stack.extend(stack.iter().rev().map(|&(open, at, _)| (open, at)));
+        let tokens = std::mem::take(tokens);
+        let pairs = std::mem::take(pairs);
+        let open_stack = std::mem::take(open_stack);
+        // Keep capacity shells for the next miss; readers own the filled Vecs via Arc.
+        let (cap_t, cap_p, cap_o) = (tokens.capacity(), pairs.capacity(), open_stack.capacity());
+        let out = Arc::new((tokens, pairs, open_stack));
+        w.0 = Vec::with_capacity(cap_t);
+        w.1 = Vec::with_capacity(cap_p);
+        w.2 = Vec::with_capacity(cap_o);
+        out
+    });
     LEXED.with(|c| {
         let mut c = c.borrow_mut();
         c.0.clear();

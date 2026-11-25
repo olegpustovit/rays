@@ -2226,12 +2226,29 @@ fn editor_area(
     };
     let current = state.find.as_ref().and_then(|f| find_current(f, &matches));
     // every match is a band, the current one also a bar under it; the view goes to the current one
-    let mut spans = spans;
-    spans.extend(matches.iter().take(2000).copied());
-    let mut shown_chips = chips.clone();
-    if let Some((a, b)) = current {
-        shown_chips.push((a, b, theme.accent));
-    }
+    // ponytail: TLS scratch for i64→usize span/chip converts so warm dirty typing does not grow.
+    thread_local!(static AREA_SCRATCH: std::cell::RefCell<(Vec<(usize, usize)>, Vec<(usize, usize, pxui::Rgba)>, Vec<usize>)> =
+        const { std::cell::RefCell::new((Vec::new(), Vec::new(), Vec::new())) });
+    let (spans_ui, chips_ui, error_lines) = AREA_SCRATCH.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        let (sp, ch, er) = &mut *cell;
+        sp.clear();
+        ch.clear();
+        er.clear();
+        sp.extend(spans.iter().map(|&(a, b)| (a as usize, b as usize)));
+        sp.extend(matches.iter().take(2000).map(|&(a, b)| (a as usize, b as usize)));
+        ch.extend_from_slice(&chips);
+        if let Some((a, b)) = current {
+            ch.push((a as usize, b as usize, theme.accent));
+        }
+        er.extend(errors.iter().filter_map(|d| line_of(text, d)).map(|line| line as usize));
+        let (cap_s, cap_c, cap_e) = (sp.capacity(), ch.capacity(), er.capacity());
+        (
+            std::mem::replace(sp, Vec::with_capacity(cap_s)),
+            std::mem::replace(ch, Vec::with_capacity(cap_c)),
+            std::mem::replace(er, Vec::with_capacity(cap_e)),
+        )
+    });
     let reveal = match current {
         Some((a, _)) => Some(a),
         None => reveal,
@@ -2244,20 +2261,22 @@ fn editor_area(
     // Use the text returned by this build for clicks and caret movement.
     let clicked = Cell::new(None);
     let moved = Cell::new(None);
-    let error_lines: Vec<_> = errors.iter().filter_map(|d| line_of(text, d)).map(|line| line as usize).collect();
-    let message_text: Vec<_> = errors.iter().filter_map(|d| line_of(text, d).map(|line| {
-        (line, d.span.as_ref().map(span_range), format!("{}  {}", d.code, first_line(&d.message)))
-    })).collect();
+    // Notes only when diagnostics exist (warm typing has none).
+    let message_text: Vec<(i64, Option<(i64, i64)>, String)> = if errors.is_empty() {
+        Vec::new()
+    } else {
+        errors.iter().filter_map(|d| line_of(text, d).map(|line| {
+            (line, d.span.as_ref().map(span_range), format!("{}  {}", d.code, first_line(&d.message)))
+        })).collect()
+    };
     let notes: Vec<_> = message_text.iter().map(|(line, range, text)| {
         let note = pxui::AreaNote::new(*line as usize, text);
         range.map_or(note, |(a, b)| note.range(a as usize, b as usize))
     }).collect();
-    let spans: Vec<_> = spans.into_iter().map(|(a, b)| (a as usize, b as usize)).collect();
-    let chips_ui: Vec<_> = shown_chips.into_iter().map(|(a, b, color)| (a as usize, b as usize, color)).collect();
     let splices: Vec<_> = state.request.iter().flat_map(|request| &request.splice)
         .map(|(a, b, value)| pxui::Splice::new(*a as usize, *b as usize, value)).collect();
     let area = pxui::TextArea::DEFAULT.wrap(state.wrap).errors(&error_lines).notes(&notes)
-        .spans(&spans).chips(&chips_ui).splices(&splices);
+        .spans(&spans_ui).chips(&chips_ui).splices(&splices);
     let area = reveal.map_or(area, |at| area.reveal(pxui::Reveal::new(at as usize, state.nonce as u64)));
     let area = state.request.as_ref().map_or(area, |request| area.select(request.select.0 as usize, request.select.1 as usize));
     let on_context = |at| push(emit, Intent::Menu(Some(at)));
@@ -2310,8 +2329,8 @@ fn editor_area(
         if command {
             follow(&text2, byte);
         } else {
-            match chips.iter().find(|(a, b, _)| *a <= byte && byte < *b) {
-                Some((a, b, _)) => push(emit, Intent::Picker(Some((*a, *b, false)))),
+            match chips.iter().find(|(a, b, _)| *a as i64 <= byte && byte < *b as i64) {
+                Some((a, b, _)) => push(emit, Intent::Picker(Some((*a as i64, *b as i64, false)))),
                 // the caret in a binding selects its node
                 None => {
                     if let Some(path) = caret_path(&text2, state.tab, shown, byte) {
@@ -2349,7 +2368,7 @@ fn editor_area(
     }
     // the colour control: each edit applies live as one merged history entry, sealed on close
     let text2 = match state.picker {
-        Some((a, b, changed)) if b <= text2.len() as i64 && chips.iter().any(|(a2, b2, _)| a == *a2 && b == *b2) => {
+        Some((a, b, changed)) if b <= text2.len() as i64 && chips.iter().any(|(a2, b2, _)| a == *a2 as i64 && b == *b2 as i64) => {
             match colour_popup(ui, ((c.x).max(c.x + c.width - 310.0), ey + c.row), &text2, (a, b)) {
                 Some(edited) if edited != *text2 => {
                     push(emit, Intent::Picker(Some((a, b, true))));
@@ -2500,23 +2519,35 @@ fn editor_area(
         pxui::Node::DEFAULT.flags(pxui::Flags::CLIP).w(Size::Px(c.width)).h(Size::Px(if c.narrow { 0.0 } else { c.row })).at(c.x, ty + c.bar + 2.0),
     );
     if !c.narrow {
-        // Own diagnostics / source only when needed; static status messages stay borrowed until paint needs a String.
+        // Own diagnostics / source only when needed. Static status strings stay &'static (no per-key to_owned).
         let errors = if errors.is_empty() { Vec::new() } else { errors.to_vec() };
         let text_c = if errors.is_empty() { String::new() } else { text.to_owned() };
-        let message = message.to_owned();
+        const STATICS: &[&str] = &[
+            "Unapplied draft. Every other pane shows the last applied document.",
+            "Source matches the applied document.",
+            "The selection with what it reads; Check and apply writes the bindings shown.",
+        ];
+        let message_static = STATICS.iter().copied().find(|s| std::ptr::eq(*s as *const str, message as *const str));
+        let message_owned = if message_static.is_some() || message.is_empty() { String::new() } else { message.to_owned() };
         let accent = theme.accent;
         let ink2 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
-        let (state_label, cap_w) = {
-            let label = match (position.as_deref(), can_apply) {
-                (Some(p), true) => format!("{p} \u{b7} modified"),
-                (Some(p), false) => p.to_owned(),
-                (None, true) => "modified".to_owned(),
-                (None, false) => String::new(),
-            };
+        // ponytail: caret/modified label reuses one String capacity across frames.
+        thread_local!(static STATE_LABEL: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) });
+        let (state_label, cap_w) = STATE_LABEL.with(|cell| {
+            let mut label = cell.borrow_mut();
+            label.clear();
+            match (position.as_deref(), can_apply) {
+                (Some(p), true) => { label.push_str(p); label.push_str(" \u{b7} modified"); }
+                (Some(p), false) => label.push_str(p),
+                (None, true) => label.push_str("modified"),
+                (None, false) => {}
+            }
             let w = if label.is_empty() { 0.0 } else { kit::cap_width(ui, &label) };
-            (label, w)
-        };
+            let cap = label.capacity();
+            (std::mem::replace(&mut *label, String::with_capacity(cap)), w)
+        });
         ui.canvas(&msg, move |paint, Rect { x, y, w, h }| {
+            let message = message_static.unwrap_or(message_owned.as_str());
             // the state: a dot in the error colour or the accent for a draft, then what it says; the
             // first error is "n errors" in the error colour and its line and message in ink-2
             let tx = if wrong || can_apply {
@@ -2700,9 +2731,14 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
             let errors = errors_of(state, &slot.map(|s| s.gerrors.clone()).unwrap_or_else(no_errors), text);
             let dirty = text != shown.text;
             let spans: Vec<(i64, i64)> = if dirty { Vec::new() } else { shown.mark.into_iter().collect() };
-            let clean = format!("Edit {} as text; Check and apply checks the whole workspace.", shown.graph);
             let owned = message_buf(&errors);
-            let message = owned.as_deref().unwrap_or(if dirty { DIRTY_MSG } else { &clean });
+            let clean;
+            let message = owned.as_deref().unwrap_or(if dirty {
+                DIRTY_MSG
+            } else {
+                clean = format!("Edit {} as text; Check and apply checks the whole workspace.", shown.graph);
+                clean.as_str()
+            });
             let graph = shown.graph.clone();
             let (g1, g2, g3) = (graph.clone(), graph.clone(), graph.clone());
             editor_area(

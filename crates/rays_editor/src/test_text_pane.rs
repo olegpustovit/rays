@@ -465,16 +465,24 @@ fn lisp_text() {
     let theme = pxui::theme::Tokens::default();
     let lang = l::language(None, None, None, false, theme);
     assert_eq!(lang.comment, ";", "the Lisp comments with a semicolon");
-    let a = (lang.colorize)("(a b)");
+    let mut a = Vec::new();
+    (lang.colorize)("(a b)", &mut a);
+    let mut b = Vec::new();
+    (lang.colorize)("(a b c d)", &mut b);
+    let mut a2 = Vec::new();
+    (lang.colorize)("(a b)", &mut a2);
     assert!(
-        (lang.colorize)("(a b c d)") != a && (lang.colorize)("(a b)") == a && l::brackets("(a b c d)") == vec![(0, 8)] && l::brackets("(a b)") == vec![(0, 4)],
+        b != a && a2 == a && l::brackets("(a b c d)") == vec![(0, 8)] && l::brackets("(a b)") == vec![(0, 4)],
         "a cached lexing answered for another text"
     );
-    let colors = (lang.colorize)("(sop/box :size 1.5 \"s\" ; c");
+    let mut colors = Vec::new();
+    (lang.colorize)("(sop/box :size 1.5 \"s\" ; c", &mut colors);
     assert_eq!(colors.len(), 6, "head, keyword, number, string, comment and the paren: {} runs", colors.len());
     let malformed = "(f \"bad\\q\" :next)";
     let later = malformed.find(':').unwrap();
-    assert!((lang.colorize)(malformed).iter().any(|(start, stop, _)| *start <= later && later < *stop), "the tolerant text lexer colors after a malformed escape");
+    let mut malformed_colors = Vec::new();
+    (lang.colorize)(malformed, &mut malformed_colors);
+    assert!(malformed_colors.iter().any(|(start, stop, _)| *start <= later && later < *stop), "the tolerant text lexer colors after a malformed escape");
 }
 
 fn indent_len(text: &str) -> usize {

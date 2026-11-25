@@ -92,44 +92,44 @@ fn word<'a>(text: &'a str, t: &Token) -> &'a str {
     scan::word(text, t)
 }
 
-pub fn colorize_now(theme: &Theme, text: &str) -> Vec<(usize, usize, pxui::Rgba)> {
+pub fn colorize_now(theme: &Theme, text: &str, out: &mut Vec<(usize, usize, pxui::Rgba)>) {
     // kit rev 3: forms in the float blue, a kind's namespace in the vector purple, keywords in the
     // bool red, numbers green, strings in the record green; brackets and comments recede to ink-3
     let ports = rays_graph::scope_paint::ports(theme);
     let quiet = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
     let lexed = lex(text);
     let tokens = &lexed.0;
-    // ponytail: fill a TLS buffer then hand it off; replace with an empty shell of the same
-    // capacity so the next warm colorize does not grow. PXUI wants usize spans directly.
-    thread_local!(static SPANS: std::cell::RefCell<Vec<(usize, usize, pxui::Rgba)>> = const { std::cell::RefCell::new(Vec::new()) });
-    SPANS.with(|cell| {
+    out.clear();
+    for (i, t) in tokens.iter().enumerate() {
+        let push = |out: &mut Vec<_>, color| out.push((t.start, t.stop, color));
+        let declares = i + 1 < tokens.len() && tokens[i + 1].kind == Kind::Sym && sub(text, tokens[i + 1].start, tokens[i + 1].stop) == ":";
+        match t.kind {
+            Kind::Comment | Kind::Meta => push(out, quiet),
+            Kind::Str => push(out, ports.record),
+            Kind::Num => push(out, ports.int),
+            Kind::Kw => push(out, ports.bool),
+            Kind::Head if declares => {}
+            Kind::Head => match text.as_bytes()[t.start..].iter().position(|b| *b == b'/').map(|p| p + t.start) {
+                Some(slash) if slash + 1 < t.stop => out.push((t.start, slash + 1, ports.vec3)),
+                _ => push(out, ports.float),
+            },
+            Kind::Sym => {}
+            Kind::Open(_) | Kind::Close(_) => push(out, quiet),
+            Kind::Unmatched => push(out, pxui::Rgba::hex(0xc2255c)),
+        }
+    }
+}
+
+pub fn brackets(text: &str) -> Vec<(usize, usize)> {
+    // ponytail: PXUI wants usize; hand off a capacity shell like colorize_now.
+    thread_local!(static PAIRS: std::cell::RefCell<Vec<(usize, usize)>> = const { std::cell::RefCell::new(Vec::new()) });
+    PAIRS.with(|cell| {
         let mut out = cell.borrow_mut();
         out.clear();
-        for (i, t) in tokens.iter().enumerate() {
-            let push = |out: &mut Vec<_>, color| out.push((t.start, t.stop, color));
-            let declares = i + 1 < tokens.len() && tokens[i + 1].kind == Kind::Sym && sub(text, tokens[i + 1].start, tokens[i + 1].stop) == ":";
-            match t.kind {
-                Kind::Comment | Kind::Meta => push(&mut out, quiet),
-                Kind::Str => push(&mut out, ports.record),
-                Kind::Num => push(&mut out, ports.int),
-                Kind::Kw => push(&mut out, ports.bool),
-                Kind::Head if declares => {}
-                Kind::Head => match text.as_bytes()[t.start..].iter().position(|b| *b == b'/').map(|p| p + t.start) {
-                    Some(slash) if slash + 1 < t.stop => out.push((t.start, slash + 1, ports.vec3)),
-                    _ => push(&mut out, ports.float),
-                },
-                Kind::Sym => {}
-                Kind::Open(_) | Kind::Close(_) => push(&mut out, quiet),
-                Kind::Unmatched => push(&mut out, pxui::Rgba::hex(0xc2255c)),
-            }
-        }
+        out.extend_from_slice(&lex(text).1);
         let cap = out.capacity();
         std::mem::replace(&mut *out, Vec::with_capacity(cap))
     })
-}
-
-pub fn brackets(text: &str) -> Vec<(i64, i64)> {
-    lex(text).1.iter().map(|(a, b)| (*a as i64, *b as i64)).collect()
 }
 
 /// One kind of the catalog as the text editor sees it: the qualified name a head writes, its context
@@ -865,19 +865,24 @@ pub fn context_at(text: &str, caret: usize) -> CodeContext {
 }
 
 /// The "#rrggbb" literals of the text with their colour.
-pub fn color_chips(text: &str) -> Vec<(i64, i64, pxui::Rgba)> {
-    let lexed = lex(text);
-    let bytes = text.as_bytes();
-    let mut out = Vec::new();
-    for t in lexed.0.iter() {
-        if t.kind != Kind::Str || t.stop - t.start < 9 || bytes[t.stop - 1] != b'"' {
-            continue;
+pub fn color_chips(text: &str) -> Vec<(usize, usize, pxui::Rgba)> {
+    thread_local!(static CHIPS: std::cell::RefCell<Vec<(usize, usize, pxui::Rgba)>> = const { std::cell::RefCell::new(Vec::new()) });
+    CHIPS.with(|cell| {
+        let mut out = cell.borrow_mut();
+        out.clear();
+        let lexed = lex(text);
+        let bytes = text.as_bytes();
+        for t in lexed.0.iter() {
+            if t.kind != Kind::Str || t.stop - t.start < 9 || bytes[t.stop - 1] != b'"' {
+                continue;
+            }
+            if let Ok(color) = pxui::Rgba::parse(sub(text, t.start + 1, t.stop - 1)) {
+                out.push((t.start, t.stop, color));
+            }
         }
-        if let Ok(color) = pxui::Rgba::parse(sub(text, t.start + 1, t.stop - 1)) {
-            out.push((t.start as i64, t.stop as i64, color));
-        }
-    }
-    out
+        let cap = out.capacity();
+        std::mem::replace(&mut *out, Vec::with_capacity(cap))
+    })
 }
 
 /// Owns the language callbacks for a text pane. PXUI borrows them for each build.
@@ -911,8 +916,8 @@ pub fn language(vocab: Option<Rc<Vocab>>, names: Option<Rc<Names>>, imports: Opt
     let imports = Rc::new(imports.unwrap_or_default());
     let complete_vocab = vocab.clone();
     Language {
-        colorize: Rc::new(move |text| colorize_now(&theme, text)),
-        brackets: Rc::new(|text| brackets(text).into_iter().map(|(a, b)| (a as usize, b as usize)).collect()),
+        colorize: Rc::new(move |text, out| colorize_now(&theme, text, out)),
+        brackets: Rc::new(brackets),
         indent: Rc::new(scan::indent),
         complete: Rc::new(move |text, caret| complete(&names, &imports, &complete_vocab, text, caret)),
         describe: Rc::new(move |text, byte, out| {

@@ -169,20 +169,22 @@ fn string_token(source: &str, start: usize) -> (Token, usize) {
 struct LineCk { start: usize, from: usize }
 
 #[derive(Default)]
-struct LexCache { text: String, tokens: Arc<Vec<Token>>, lines: Vec<LineCk> }
+struct LexCache { text: String, tokens: Arc<Vec<Token>>, lines: Vec<LineCk>, starts: Vec<usize> }
 
 thread_local!(static LEX_CACHE: RefCell<LexCache> = RefCell::new(LexCache::default()));
 
 #[cfg(test)]
 fn reset_lex_cache() { LEX_CACHE.with(|c| *c.borrow_mut() = LexCache::default()); }
 
-fn build_lines(text: &str, tokens: &[Token]) -> Vec<LineCk> {
+fn build_lines_into(lines: &mut Vec<LineCk>, starts: &mut Vec<usize>, text: &str, tokens: &[Token]) {
+    lines.clear();
+    starts.clear();
+    starts.push(0);
     let bytes = text.as_bytes();
-    let mut starts = vec![0usize];
     for (i, &b) in bytes.iter().enumerate() {
         if b == b'\n' && i + 1 < bytes.len() { starts.push(i + 1); }
     }
-    let mut lines = Vec::with_capacity(starts.len());
+    lines.reserve(starts.len());
     let mut ti = 0;
     let n = tokens.len();
     for (li, &start) in starts.iter().enumerate() {
@@ -196,7 +198,6 @@ fn build_lines(text: &str, tokens: &[Token]) -> Vec<LineCk> {
         }
         lines.push(LineCk { start, from });
     }
-    lines
 }
 
 /// Incremental lex: reuse tokens before the first changed line (parinfer-style line checkpoints).
@@ -207,12 +208,23 @@ pub fn lex(source: &str) -> Arc<Vec<Token>> {
         if cache.text.as_str() == source { return cache.tokens.clone(); }
         let prefix = cache.text.as_bytes().iter().zip(source.as_bytes()).take_while(|(a, b)| a == b).count();
         let first_line = if cache.lines.is_empty() { 0 } else { cache.lines.partition_point(|l| l.start <= prefix).saturating_sub(1) };
+        // Unique Arc: truncate the prefix in place (no Token/String clones). Shared Arc: fall back to clone.
+        let mut tokens = match Arc::try_unwrap(std::mem::take(&mut cache.tokens)) {
+            Ok(v) => v,
+            Err(shared) => {
+                cache.tokens = shared.clone();
+                (*shared).clone()
+            }
+        };
         let tokens = if first_line > 0 && first_line < cache.lines.len() {
             let cut = cache.lines[first_line].start;
             let tok_from = cache.lines[first_line].from;
-            let open_string = cache.tokens[..tok_from].iter().any(|t| matches!(t.kind, Kind::String(_)) && (t.stop as usize) > cut);
+            let open_string = tokens[..tok_from].iter().any(|t| matches!(t.kind, Kind::String(_)) && (t.stop as usize) > cut);
             if !open_string {
-                let mut tokens: Vec<_> = cache.tokens[..tok_from].iter().filter(|t| !(matches!(t.kind, Kind::End) && t.issue.is_none())).cloned().collect();
+                tokens.truncate(tok_from);
+                while tokens.last().is_some_and(|t| matches!(t.kind, Kind::End) && t.issue.is_none()) {
+                    tokens.pop();
+                }
                 let mut rest = lex_full(&source[cut..]);
                 for t in &mut rest {
                     t.start += cut as i64; t.stop += cut as i64;
@@ -226,7 +238,10 @@ pub fn lex(source: &str) -> Arc<Vec<Token>> {
         } else {
             lex_full(source)
         };
-        cache.lines = build_lines(source, &tokens);
+        {
+            let LexCache { lines, starts, .. } = &mut *cache;
+            build_lines_into(lines, starts, source, &tokens);
+        }
         cache.text.clear();
         cache.text.push_str(source);
         let tokens = Arc::new(tokens);
