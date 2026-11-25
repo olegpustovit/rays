@@ -52,7 +52,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 | Z4 | lisp_text/lex BoundDoc+OnceLock+SPANS+Word+incremental+Arc caches; State take (one_intent+shown+frame); Live moves. typing_budget→1103/260 (meas 1050/247, mean 0.60ms). zero_alloc D_typing 401 rust + 37 native/unit (was ~1031 app + ~49 pxui). Left: ~400 rust/key (scene/kind_graph/PXUI cosmic Z6); not yet 0.
 | Z3 | done: Scratch tessellate (fef497e23); Wide keys + always-on shape cache + Affine unit segments (ae918f88f); guides cache + Affine lines + stack screen_box (cc870c828). zero_alloc A_isosel 712→48, B 727→196/194, C 467/462→174/170 (Z0 ceilings at meas+5%). click_budget isogrid idle 402/324→252/175, hover 334/334→185/185. Overlay tessellate/format! → 0 warm; pan reuses unit meshes. Left: guides hit clones outer Nodes Vec; camera-key miss still builds Node wrappers (tessellate 0). |
 | Z8 | in progress. Batch 1: Rest.picture Rc + scene_of Cow; device Arc — empty/bare 32→17, isogrid 51→27, B 196→174, C 174/170→154/150, E 298/180→264/152, toggle 403/183→364/155, D 401→382. Batch 2: may_rest vs blink; navigate Extra by value. Batch 3: REST_FRAMES 2→1 — E_click_settled 151→28 (=idle). Toggle settled still ~154. Idle Rays ≈0 (remainder Z5 ogpu; needs Z5 pxui pointer 3ed306c3 for native ceils). B/C/D still full update_with (~173/150/381). Next: input-path clones, toggle settle, D whole-step. |
-| Z5 | landed PXUI 3ed306c3: device-name OnceLock; CB renew pool after GPU complete; MTLRenderPassDescriptor recycle+clear; residency capacity. empty/bare native 25→9, isogrid 37→14; Rust empty ~34→17 (with Z8). Rays Wide snapshot/skey. Left: CommandContext/encoder Arc per begin; wrap_node Rc<[Node]>; slab LRU (crates/lru); MetalHandle pool; animated ICB/text native. |
+| Z5 | landed PXUI 3ed306c3 (pointer → 85482d18 tip): device-name OnceLock; CB renew after GPU complete; MTLRenderPassDescriptor recycle+clear; residency capacity. empty/bare native 25→9, isogrid 37→14; Rust empty ~34→17 (with Z8). Rays Wide snapshot/skey. Left: CommandContext/encoder Arc per begin; wrap_node; slab LRU; MetalHandle pool; animated ICB/text. |
 | Z7 | done: Plan Arc in canvas_pictures (ca2624fc7); StateSite Arc keys + alloc-free begin_frame (f89e23f2b); frame_arena sticky text + finish takes marks (60f9e810c); multi-sticky+scratch show/concat (26f54193c). F_frozen ~241→140 rust on pinned pxui (ceil 145); with Z5 pxui 3ed306c3 →128/9. A_basic rust 405 (ceil 413). flow_eval 121, flow_ir 357, flow_native 33 green; seq/par unchanged. Left: eval→0 needs Z6 canvas text/ICB; F/A native ceils need Z5 Rays pxui pointer. |
 
 ## Requests
@@ -66,8 +66,8 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 ### Z4
 - `text_pane::shown` still clones State on cache hit because `editor_frame::text_state` takes `&ModelView`; take/replace needs a `&mut` path in Z1's frame.
 ### Z5
-- bump Rays `pxui` pointer to 3ed306c3 (on PXUI origin/dev); F/A native ceils (10/59) assume it. `ctx_spare` dead_code currently breaks `cargo t` against that commit — finish or allow before the bump.
 - wrap_node: `Rc<[Node]>` (needs Node-children type change in `rays/src/scene.rs`).
 - crates/lru: fixed-capacity open-addressing buckets (nobody owns; HashMap nodes on insert).
+- CommandContext/MetalCommands/encoder Arc still per begin (~17 idle Rust floor); MetalHandle pool; animated ICB.
 ### Z6
 ### Z7
