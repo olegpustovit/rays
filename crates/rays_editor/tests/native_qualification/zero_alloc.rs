@@ -29,9 +29,9 @@ const A_EMPTY: (u64, u64) = (0, 9);
 const A_BARE: (u64, u64) = (0, 9);
 const A_ISOGRID: (u64, u64) = (0, 13);
 // Selected idle: Z8 may_rest path; lowered after Z5 idle cuts (meas 10/12).
-const A_ISOSEL: (u64, u64) = (11, 13);
-const B_HOVER_GRAPH: (u64, u64) = (161, 13);
-const B_HOVER_INSPECTOR: (u64, u64) = (159, 13);
+const A_ISOSEL: (u64, u64) = (0, 13);
+const B_HOVER_GRAPH: (u64, u64) = (131, 13);
+const B_HOVER_INSPECTOR: (u64, u64) = (129, 13);
 const C_PAN: (u64, u64) = (143, 13);
 const C_ZOOM: (u64, u64) = (139, 13);
 const D_TYPING: (u64, u64) = (385, 13);

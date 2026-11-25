@@ -266,11 +266,11 @@ pub fn paint_marks(paint: &mut Paint, theme: &Theme, size: i64, gap: f64, right:
 }
 
 /// DepartureMono has no the glyphs of the study: the pane draws them in their place.
-pub fn shown_glyph(g: &str) -> String {
+pub fn shown_glyph(g: &str) -> &str {
     match g {
-        "\u{27f2}" => "\u{21b5}".to_owned(),
-        "\u{25c6}" => "\u{25ca}".to_owned(),
-        other => other.to_owned(),
+        "\u{27f2}" => "\u{21b5}",
+        "\u{25c6}" => "\u{25ca}",
+        other => other,
     }
 }
 
