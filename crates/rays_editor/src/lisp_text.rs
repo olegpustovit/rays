@@ -925,9 +925,8 @@ pub fn language(vocab: Option<Rc<Vocab>>, names: Option<Rc<Names>>, imports: Opt
         rewrite: parinfer.then(|| {
             let rewrite: Rc<pxui::RewriteFn<'static>> = Rc::new(|text, caret| {
                 match flow_syntax::parinfer::rewrite(text, caret as i64) {
-                    // RewriteFn is (String, caret): unchanged borrows still need an owned copy for the ABI.
-                    (std::borrow::Cow::Borrowed(_), caret) => (text.to_owned(), caret as usize),
-                    (std::borrow::Cow::Owned(text), caret) => (text, caret as usize),
+                    (std::borrow::Cow::Borrowed(_), caret) => (None, caret as usize),
+                    (std::borrow::Cow::Owned(text), caret) => (Some(text), caret as usize),
                 }
             });
             rewrite
