@@ -140,7 +140,7 @@ pub fn inspect_panel<'a>(
             let document = objects(value);
             let lowered_level = matches!(level, Level::Inside(id) if kind(value, id).as_deref() == Some("geometry"));
             // A row of a geometry object's list selects its node in the pane.
-            let scope_selected = if pane_laid(value).is_some_and(|k| lowered_level || Some(&k.graph) == graph_name(value).as_ref()) {
+            let scope_selected = if pane_laid(value).is_some_and(|k| lowered_level || graph_name(value) == Some(k.graph.as_str())) {
                 inspector_paths(scope::selected(scope_view).to_vec())
             } else {
                 Vec::new()
@@ -200,7 +200,7 @@ pub fn inspect_panel<'a>(
                         None => "none".to_owned(),
                     };
                     let (title, detail) = match pane_laid(value) {
-                        Some(k) if scope_active && Some(&k.graph) == graph_name(value).as_ref() => {
+                        Some(k) if scope_active && graph_name(value) == Some(k.graph.as_str()) => {
                             fn count(s: &p::Scope) -> usize {
                                 s.nodes.iter().fold(0, |n, x| n + 1 + x.zone.as_ref().map_or(0, |z| count(&z.scope)))
                             }

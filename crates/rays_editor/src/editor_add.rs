@@ -59,7 +59,7 @@ pub fn add_target<'a>(value: &ModelView<'a>) -> Option<(String, Context)> {
     match graph_name(value) {
         Some(name) => {
             let ctx = ws.checked.graphs.iter().find(|g| g.name == name).map(|g| g.context).unwrap_or_else(context::sop);
-            Some((name, ctx))
+            Some((name.to_owned(), ctx))
         }
         None => match pane_level(value) {
             Level::Scene => Some(("scene".to_owned(), context::scene())),

@@ -83,17 +83,17 @@ pub fn carry_try(value: &EditorModel, c: &Carry, place: &Place) -> CarryPreview 
 pub fn carry_targets<'a>(value: &ModelView<'a>, c: Carry) -> Carry {
     let graph = graph_name(value);
     if let Some((for_graph, _)) = &c.targets {
-        if *for_graph == graph {
+        if for_graph.as_deref() == graph {
             return c;
         }
     }
     let found = match flow_catalog(value) {
         None => Vec::new(),
-        Some(catalog) => carry_mod::targets(Some(&value.factories), &catalog, None, &c.original, &c.payload, graph.as_deref()),
+        Some(catalog) => carry_mod::targets(Some(&value.factories), &catalog, None, &c.original, &c.payload, graph),
     };
     let letters: Vec<char> = CARRY_LETTERS.chars().collect();
     let targets = found.into_iter().enumerate().map(|(i, (place, label))| (letters[i].to_string(), place, label)).collect();
-    Carry { targets: Some((graph, targets)), ..c }
+    Carry { targets: Some((graph.map(str::to_owned), targets)), ..c }
 }
 
 fn referenced_payload(ws: &w::Workspace, name: &str) -> Option<Result<carry_mod::Payload, String>> {

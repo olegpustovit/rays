@@ -155,7 +155,7 @@ pub fn probe_caption<'a>(value: &ModelView<'a>) -> Option<String> {
     }
     let path = &selected[0];
     let records = laid.records.as_ref()?;
-    if graph_name(value).as_ref() != Some(&laid.graph) {
+    if graph_name(value) != Some(laid.graph.as_str()) {
         return None;
     }
     let probe_of = |p: &[Symbol]| value.probes.get(p).copied().unwrap_or(0);

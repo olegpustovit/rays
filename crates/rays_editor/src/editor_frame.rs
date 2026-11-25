@@ -721,10 +721,11 @@ pub fn text_state<'a>(value: &ModelView<'a>, actions: &[Action], pane_of: &dyn F
     let text_of = |state: &text_pane::State, host: &Host| -> Result<Option<(text_pane::State, text_pane::Shown)>, rays_diagnostic::Diagnostic> {
         let pane = pane_of(host);
         let graph = match graph_name(&pane) {
-            None if host.2 == Panel::Lisp => ws.checked.graphs.first().map(|g| g.name.clone()),
+            None if host.2 == Panel::Lisp => ws.checked.graphs.first().map(|g| g.name.as_str()),
             graph => graph,
         };
         let Some(graph) = graph else { return Ok(None) };
+        let graph = graph.to_owned();
         let selected = match scope::selected(pane_view(&pane)) {
             [path] => Some(path.clone()),
             _ => None,

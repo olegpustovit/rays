@@ -941,7 +941,7 @@ pub fn state_text(value: &LoopModel) -> String {
             m::Projection::GraphView => "graph",
             m::Projection::TextView => "text",
         },
-        or_dash(&editor_panes::graph_name(&core.into())),
+        or_dash(&editor_panes::graph_name(&core.into()).map(str::to_owned)),
         editor_panes::graph_panels(&core.into()),
         editor_panes::windows(&core.into()),
         editor_panes::panels_line(&core.into()),

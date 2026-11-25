@@ -229,7 +229,7 @@ pub fn sync_scope(value: &mut EditorModel) {
             }
         }
     }
-    let Some(name) = graph_name(&(&*value).into()) else { return };
+    let Some(name) = graph_name(&(&*value).into()).map(str::to_owned) else { return };
     let document = value.doc.clone();
     let workspace = &document.workspace;
     let (ws, lowered) = (&workspace.ws, &workspace.lowered);

@@ -283,7 +283,7 @@ pub fn graph_of_object(value: &EditorModel, id: i64) -> Option<String> {
     doc_mod::object_graph(&value.doc, id)
 }
 
-pub fn graph_name<'a>(value: &ModelView<'a>) -> Option<String> {
+pub fn graph_name<'a>(value: &ModelView<'a>) -> Option<&'a str> {
     let owned;
     let path = match value.doc.shell.as_ref().map(|_| graph_path_known(value)) {
         Some(None) => { owned = graph_path(value); owned.as_deref() }
@@ -293,26 +293,35 @@ pub fn graph_name<'a>(value: &ModelView<'a>) -> Option<String> {
     graph_name_at(&value.doc, pane_level(value), pane_shown(value).map(String::as_str), path)
 }
 
-pub fn graph_name_at(doc: &doc_mod::T, level: Level, shown: Option<&str>, path: Option<&[usize]>) -> Option<String> {
+pub fn graph_name_at<'a>(doc: &'a doc_mod::T, level: Level, shown: Option<&'a str>, path: Option<&[usize]>) -> Option<&'a str> {
     let ws = &doc.workspace.ws;
     let exists = |name: &str| -> bool {
         ws.checked.graphs.iter().any(|g| g.name == name)
             || name.strip_prefix("def:").is_some_and(|def| ws.checked.defs.iter().any(|g| g.name == def))
     };
-    // the graph the pane's own leaf pins
     let named = || doc.shell.as_ref().and_then(|s| path.and_then(|path| s.named.iter().find(|(p, _)| p.as_slice() == path).map(|(_, n)| n.as_str())));
     let chosen = shown.or_else(named);
     let kind = |id| doc.scene.iter().find(|node| node.id == id).map(|node| node.kind.as_str());
     match (chosen, level) {
-        (Some(name), _) if exists(name) => Some(name.to_owned()),
-        (_, Level::Inside(id)) if kind(id) == Some("geometry") => match doc_mod::object_graph(doc, id) {
-            Some(name) => Some(name),
-            None => doc.scene.iter().find(|node| node.id == id).and_then(|node| if exists(&node.label) { Some(node.label.clone()) } else { None }),
-        },
-        (_, Level::Inside(id)) if kind(id) == Some("world") => {
-            ws.checked.graphs.iter().find_map(|g| if g.context == context::world() { Some(g.name.clone()) } else { None })
+        (Some(name), _) if exists(name) => Some(name),
+        (_, Level::Inside(id)) if kind(id) == Some("geometry") => {
+            let from_net = doc.networks.get(&id).and_then(|n| {
+                doc.workspace.lowered.graphs.iter().find(|g| {
+                    flow_sop_catalog::network::ptr_eq(&g.network, &n.graph)
+                        || match (g.root, sop::edit_graph::root(&n.graph.geometry)) {
+                            (Some(a), Some(b)) => a == b,
+                            _ => false,
+                        }
+                }).map(|g| g.name.as_str())
+            });
+            from_net.or_else(|| {
+                doc.scene.iter().find(|node| node.id == id).and_then(|node| if exists(&node.label) { Some(node.label.as_str()) } else { None })
+            })
         }
-        (_, Level::Scene) => ws.checked.graphs.iter().find_map(|g| if g.context == context::scene() { Some(g.name.clone()) } else { None }),
+        (_, Level::Inside(id)) if kind(id) == Some("world") => {
+            ws.checked.graphs.iter().find_map(|g| if g.context == context::world() { Some(g.name.as_str()) } else { None })
+        }
+        (_, Level::Scene) => ws.checked.graphs.iter().find_map(|g| if g.context == context::scene() { Some(g.name.as_str()) } else { None }),
         _ => None,
     }
 }
@@ -324,7 +333,7 @@ pub fn graph_panels<'a>(value: &ModelView<'a>) -> String {
         .map(|(key, path)| {
             let pane = pane_at(value, (key, path));
             let path = if value.key == Some(key) { graph_path(value) } else { Some(path.clone()) };
-            graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or_else(|| "-".to_owned())
+            graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or("-").to_owned()
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -378,7 +387,7 @@ pub fn remember(value: &mut EditorModel) {
 }
 
 pub fn go(value: &mut EditorModel, graph: &str) {
-    if graph_name(&(&*value).into()).as_deref() != Some(graph) {
+    if graph_name(&(&*value).into()) != Some(graph) {
         remember(value);
         panel_map::active_mut(&mut value.panes).shown = Some(graph.to_owned());
     }
@@ -473,14 +482,14 @@ pub fn route_in(value: &EditorModel, pane: &GraphPane, path: Option<&[usize]>) -
     let mut names: Vec<String> = pane.route
         .iter()
         .rev()
-        .filter_map(|(at, shown)| graph_name_at(&value.doc, *at, shown.as_deref(), path))
+        .filter_map(|(at, shown)| graph_name_at(&value.doc, *at, shown.as_deref(), path).map(str::to_owned))
         .collect();
-    names.extend(graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path));
+    names.extend(graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path).map(str::to_owned));
     let skip = names.len().saturating_sub(3);
     names.into_iter().skip(skip).collect::<Vec<_>>().join(" > ")
 }
 
-pub fn scope_name<'a>(value: &ModelView<'a>) -> Option<String> {
+pub fn scope_name<'a>(value: &ModelView<'a>) -> Option<&'a str> {
     if projection_of(value) == GraphView { graph_name(value) } else { None }
 }
 

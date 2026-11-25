@@ -435,6 +435,7 @@ dependencies = [
  "flow_native",
  "flow_shader",
  "flow_sop",
+ "flow_sop_catalog",
  "flow_syntax",
  "input",
  "lru",

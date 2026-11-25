@@ -44,7 +44,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 
 | Lane | State |
 |---|---|
-| Z2 | content edit_overlay (mark_input root cause); LitCache Rc; pane.chains; selected slice; graph_name_at borrow |
+| Z2 | done: edit_overlay (mark_input); LitCache Rc; pane.chains; selected `&[Path]`; graph_name_at `&str` |
 | Z0 | landed: mem_sys `trace`, zero_alloc suite A–F, RAYS_ZERO_ALLOC; PXUI 71931474 |
 | Z1 | Landed borrow sites: `find`/`ids`/`read` (cb1a86b52); Leaf/Panel walk, look/focus `&str`, composition_key Rc, Scene3 Rc nodes/lights, Extra render by-value, chord lists without Vec (545d5ffcf). click_budget isogrid idle 536/458→402/324, hover 469/469→334/334 (meas 382/308, 318/318). Remaining: Extra navigate clones, `panel_key` owned Path on rare paths, Finding 2 remainder is Z2 content rebuild + Z3 overlays (~300 settled still theirs). |
 
@@ -56,7 +56,6 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 - Z2: `scope_state::selected` → `&[Path]`; call sites may need `.iter()`/`.to_vec()` (Z2 patched editor_frame/panels/inspect/loop/reduce for compile).
 - Z2: `LitCache.scope` is `Rc<Scope>` in `editor_model.rs` (for lit_tags).
 ### Z2
-- `editor_panes::graph_name_at` (~7–15/busy frame): return `&str` / borrow the stored name instead of `to_owned` (Z1 string-key bucket; your file).
 ### Z3
 - Finding 2 remainder: viewport overlay re-tessellation on every input event with no scene change.
 ### Z4

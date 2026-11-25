@@ -53,7 +53,7 @@ pub fn write_panel_title(value: &ModelView<'_>, leaf: &Leaf, title: &mut String)
             shown_pane(value, (&Vec::new(), &leaf.path, &leaf.panel))
         }
     };
-    let graph_of = |pane: &GraphPane, path: Option<&[usize]>| graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path).unwrap_or_default();
+    let graph_of = |pane: &GraphPane, path: Option<&[usize]>| graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path).unwrap_or("").to_owned();
     let add = |title: &mut String, subtitle: &str| {
         if !subtitle.is_empty() {
             title.push('\t');
@@ -288,7 +288,7 @@ pub fn outline_objects<'a>(value: &ModelView<'a>) -> Vec<navigator::Obj> {
 }
 
 pub fn navigator_params<'a>(value: &ModelView<'a>) -> navigator::Params {
-    make_navigator_params(value, graph_name(value))
+    make_navigator_params(value, graph_name(value).map(str::to_owned))
 }
 
 pub(crate) fn retained_navigator_params(value: &ModelView<'_>) -> Rc<navigator::Params> {
@@ -302,7 +302,7 @@ pub(crate) fn retained_navigator_params(value: &ModelView<'_>) -> Rc<navigator::
     // ponytail: the outline panes share the active graph. Keep one entry on this thread until
     // switching between editors is frequent enough to need one entry per editor.
     thread_local! { static LAST: std::cell::RefCell<Option<Memo>> = const { std::cell::RefCell::new(None) }; }
-    let active = graph_name(value);
+    let active = graph_name(value).map(str::to_owned);
     let laid = value.pane.laid.as_ref().map(Rc::downgrade);
     let objects = if pane_level(value) == document::Level::Scene {
         selection::selected_nodes(pane_selection(value))
