@@ -52,7 +52,8 @@ pub type DrawFn = Rc<dyn Fn(&node::T, &cook::Prepared) -> Result<d3::Scene3, Con
 /// frames in a row drew the same one.
 #[derive(Clone)]
 pub struct Rest {
-    pub picture: Vec<rays::scene::Node>,
+    /// Shared with `scene_of` while the rest picture is reused: warm idle frames borrow it.
+    pub picture: Rc<Vec<rays::scene::Node>>,
     pub still: i64,
     pub shown: frame::Frame,
 }
@@ -98,6 +99,8 @@ pub struct LoopModel {
     pub memory_error: Option<String>,
     /// the machine's budget and the pressure source are set
     pub memory_known: bool,
+    /// Cached device-bytes reader for `memory_boundary` (same bytes → no Arc alloc).
+    pub device_bytes_reader: Option<(i64, std::sync::Arc<dyn Fn() -> i64 + Send + Sync>)>,
     pub baked: Option<Rc<world::Baked>>,
     pub baked_from: Option<BakedPair>,
     /// the World of each viewport over another scene instance
@@ -266,6 +269,7 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
                 context_error: None,
                 memory_error: None,
                 memory_known: false,
+                device_bytes_reader: None,
                 canvases: Vec::new(),
                 host: Rc::new(std::cell::RefCell::new(host)),
                 baked: None,

@@ -101,7 +101,7 @@ pub mod editor {
         value
     }
 
-    pub fn scene(value: &Editor, frame_: &frame::Frame) -> Vec<rays::scene::Node> {
+    pub fn scene<'a>(value: &'a Editor, frame_: &frame::Frame) -> std::borrow::Cow<'a, [rays::scene::Node]> {
         editor_loop::scene_of(value, frame_)
     }
 

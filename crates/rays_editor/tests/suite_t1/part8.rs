@@ -284,7 +284,7 @@ pub fn run_idle_rest() {
             self.count += step;
             let f = frame(&[], mouse, events, self.count);
             self.e = editor::update(self.e.clone(), &f);
-            let scene = editor::scene(&self.e, &f);
+            let scene = editor::scene(&self.e, &f).into_owned();
             self.e = editor::after_present(self.e.clone(), &f);
             scene
         }

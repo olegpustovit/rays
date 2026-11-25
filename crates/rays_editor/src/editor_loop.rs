@@ -762,7 +762,7 @@ pub fn settle(before_rest: &Option<Rest>, value: &mut LoopModel, frame_: &frame:
         value.rest = None;
         return;
     }
-    let picture = compose_scene(&value, frame_);
+    let picture = Rc::new(compose_scene(&value, frame_));
     let still = match before_rest {
         Some(rest) if same_input(&rest.shown, frame_) && scene::layer::same(&rest.picture, &picture) => rest.still + 1,
         _ => 0,
@@ -853,13 +853,21 @@ pub fn memory_boundary(value: &mut LoopModel) {
     }
     // Immutable ownership roots only change on edits/reloads, never on an unchanged scene's frame.
     document_memory(&value.core.doc);
-    let options = |device: i64| mem::RetreatOptions { device: Some(Arc::new(move || device)), usage: None, later: Vec::new() };
-    let mut verdict = mem::retreat_with(options(device_bytes));
+    let device = match &value.device_bytes_reader {
+        Some((n, arc)) if *n == device_bytes => arc.clone(),
+        _ => {
+            let arc: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(move || device_bytes);
+            value.device_bytes_reader = Some((device_bytes, arc.clone()));
+            arc
+        }
+    };
+    let options = || mem::RetreatOptions { device: Some(device.clone()), usage: None, later: Vec::new() };
+    let mut verdict = mem::retreat_with(options());
     let mut core_changed = false;
     if matches!(verdict, mem::Verdict::Over(_)) && history::depth(&value.core.history) > 16 {
         Rc::make_mut(&mut value.core).history = history::shed(16, value.core.history.clone());
         core_changed = true;
-        verdict = mem::retreat_with(options(device_bytes));
+        verdict = mem::retreat_with(options());
     }
     match verdict {
         mem::Verdict::Over(overdraft) => {
@@ -897,10 +905,10 @@ pub fn after_present(value: &mut LoopModel, frame_: &frame::Frame) {
     }
 }
 
-pub fn scene_of(value: &LoopModel, frame_: &frame::Frame) -> Nodes {
+pub fn scene_of<'a>(value: &'a LoopModel, frame_: &frame::Frame) -> Cow<'a, [scene_node]> {
     match &value.rest {
-        Some(rest) if same_input(&rest.shown, frame_) => rest.picture.clone(),
-        _ => compose_scene(value, frame_),
+        Some(rest) if same_input(&rest.shown, frame_) => Cow::Borrowed(rest.picture.as_slice()),
+        _ => Cow::Owned(compose_scene(value, frame_)),
     }
 }
 
@@ -1061,7 +1069,7 @@ pub fn run(
             }
             None
         }),
-        view: Box::new(move |model, frame_| scene_of(model.downcast_ref::<LoopModel>().expect("editor model"), frame_)),
+        view: Box::new(move |model, frame_| scene_of(model.downcast_ref::<LoopModel>().expect("editor model"), frame_).into_owned()),
         after_present: Some(Box::new(move |model, frame_| {
             after_present(model.downcast_mut::<LoopModel>().expect("editor model"), frame_);
             None
