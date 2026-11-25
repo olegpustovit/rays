@@ -48,6 +48,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 | Z0 | landed: mem_sys `trace` (PXUI 71931474), zero_alloc A–F (ceilings = measured+5%), RAYS_ZERO_ALLOC; cfg fix ae7f8ed36 |
 | Z1 | Landed borrow sites: `find`/`ids`/`read` (cb1a86b52); Leaf/Panel walk, look/focus `&str`, composition_key Rc, Scene3 Rc nodes/lights, Extra render by-value, chord lists without Vec (545d5ffcf). click_budget isogrid idle 536/458→402/324, hover 469/469→334/334 (meas 382/308, 318/318). Remaining: Extra navigate clones, `panel_key` owned Path on rare paths, Finding 2 remainder is Z2 content rebuild + Z3 overlays (~300 settled still theirs). |
 | Z4 | specials OnceLock; BoundDoc lazy; complete/rank borrow; colorize SPANS; Word unit; incremental lex (sketch equality); State take in one_intent. typing_budget 1712/782→1163/330 (meas 1107/314, mean 0.36ms). Left: shown() State clone via &ModelView (needs Z1 take), Live.seen String on Intent::Live, lex token Vec clone on return, PXUI cosmic-text (Z6), remaining ~500–1100 whole-step allocs outside lisp_text. |
+| Z3 | done: Scratch tessellate (fef497e23); Wide keys + always-on shape cache + Affine unit segments (ae918f88f); guides cache + Affine lines + stack screen_box (cc870c828). zero_alloc A_isosel 712→48, B 727→196/194, C 467/462→174/170 (Z0 ceilings at meas+5%). click_budget isogrid idle 402/324→252/175, hover 334/334→185/185. Overlay tessellate/format! → 0 warm; pan reuses unit meshes. Left: guides hit clones outer Nodes Vec; camera-key miss still builds Node wrappers (tessellate 0). |
 
 ## Requests
 
@@ -57,7 +58,6 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 - Z2: `LitCache.scope` is `Rc<Scope>` in `editor_model.rs` (for lit_tags).
 ### Z2
 ### Z3
-- Finding 2 remainder: viewport overlay re-tessellation on every input event with no scene change.
 ### Z4
 - `text_pane::shown` still clones State on cache hit because `editor_frame::text_state` takes `&ModelView`; take/replace needs a `&mut` path in Z1's frame.
 ### Z5
