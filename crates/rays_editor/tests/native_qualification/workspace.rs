@@ -467,7 +467,11 @@ fn gpu_marks() {
             scene = Some(ok(drawing::render_prepared(&prepared, &live, (160, 96), &drawing::RenderOptions { gpu: Some(wg::marks(&gpu)), ..Default::default() })));
         });
         let scene = scene.unwrap(); assert_eq!(mark_tokens(&scene), 3);
-        assert_eq!(capture(&scene), expected, "GPU marks differ at t={time}");
+        // The GPU marks place a corner relative to the mark's centre (b3727688a): an antialiased edge may land
+        // one step of one channel away, the bound renderer's marks parity test keeps since 26a873f96.
+        let got = capture(&scene);
+        let steps: Vec<u64> = got.iter().zip(&expected).filter(|(a, b)| a != b).map(|(a, b)| [a.r.abs_diff(b.r), a.g.abs_diff(b.g), a.b.abs_diff(b.b), a.a.abs_diff(b.a)].into_iter().max().unwrap()).collect();
+        assert!(got.len() == expected.len() && steps.iter().all(|s| *s <= 1) && steps.len() * 10 <= got.len(), "GPU marks differ at t={time}: {} pixels, largest step {:?}", steps.len(), steps.iter().max());
         assert!(expected.iter().filter(|c| **c != expected[159]).count() > 500);
     }
     canvas::destroy(&c).unwrap();
