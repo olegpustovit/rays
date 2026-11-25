@@ -177,15 +177,15 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
         Intent::LiteralScrub { source, op, position, fallback } => (fallback.as_ref(), Some((source.clone(), op.clone(), position.clone()))),
         other => (other, None),
     };
-    let mut text = match intent {
-        Intent::DocScrub(..) | Intent::GraphScrub(..) | Intent::BindingScrub(..) => value.text.clone(),
-        _ => {
-            let mut t0 = value.text.clone();
-            t0.scrubbing = false;
-            t0.cache = if value.text.scrubbing { None } else { value.text.cache.clone() };
-            t0
+    // take the pane state: every arm writes it back, so a clone per keystroke is waste
+    let was_scrubbing = value.text.scrubbing;
+    let mut text = std::mem::replace(&mut value.text, text_pane::initial());
+    if !matches!(intent, Intent::DocScrub(..) | Intent::GraphScrub(..) | Intent::BindingScrub(..)) {
+        text.scrubbing = false;
+        if was_scrubbing {
+            text.cache = None;
         }
-    };
+    }
     let doc = value.doc.clone();
     let workspace: &WorkspaceDoc = &doc.workspace.ws;
     let base = |old: Option<Arc<WorkspaceDoc>>| -> Option<Arc<WorkspaceDoc>> { Some(old.unwrap_or_else(|| Arc::new(workspace.clone()))) };
