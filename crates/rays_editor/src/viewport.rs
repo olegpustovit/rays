@@ -742,18 +742,21 @@ pub fn on_doc(previous: &document::T, core: &mut Model, camera_: &Camera) {
     }
 }
 
-pub fn navigate(area: Bounds, grab: (bool, bool), _control: &Control, camera_: &Camera, extra_: &Extra, core: &Model, input: &frame::Frame) -> (Camera, Extra) {
+pub fn navigate(area: Bounds, grab: (bool, bool), _control: &Control, camera_: &Camera, mut extra_: Extra, core: &Model, input: &frame::Frame) -> (Camera, Extra) {
     let (pressed, released) = grab;
     let active = active_node(core);
     // A fixed render camera owns the view while look-through is enabled.
-    if look_through(extra_) && active.is_some() && !active.is_some_and(follows) {
-        return (camera_.clone(), release(extra_));
+    if look_through(&extra_) && active.is_some() && !active.is_some_and(follows) {
+        return (camera_.clone(), release(&extra_));
     }
     match extra_.fly {
         Some(speed) => {
             match easy_camera::fly(speed, camera_, input) {
-                Ok((camera_, speed)) => (camera_, Extra { fly: Some(speed), ..extra_.clone() }),
-                Err(_) => (camera_.clone(), extra_.clone()),
+                Ok((camera_, speed)) => {
+                    extra_.fly = Some(speed);
+                    (camera_, extra_)
+                }
+                Err(_) => (camera_.clone(), extra_),
             }
         }
         None => {
@@ -767,9 +770,10 @@ pub fn navigate(area: Bounds, grab: (bool, bool), _control: &Control, camera_: &
             };
             if grabbing != extra_.relative_grab {
                 set_relative(grabbing);
+                extra_.relative_grab = grabbing;
             }
             let camera_ = cc::navigate(Some(area), camera_, input);
-            (camera_, Extra { relative_grab: grabbing, ..extra_.clone() })
+            (camera_, extra_)
         }
     }
 }

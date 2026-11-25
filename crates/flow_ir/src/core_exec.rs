@@ -515,21 +515,19 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
             Arc::new(move |st| v::coerce_to(&ty, &st.values[ix(first)]))
         }
         Primitive::Truthy => Arc::new(move |st| Ok(Value::Bool(v::truthy(&st.values[ix(first)])?))),
-        Primitive::Show => Arc::new(move |st| {
-            let shown = v::show_with(&|x| x.clone(), &st.values[ix(first)]);
-            Ok(e::frame_arena::text(&shown))
-        }),
+        Primitive::Show => Arc::new(move |st| Ok(e::frame_arena::show(&st.values[ix(first)]))),
         Primitive::TextConcat => {
             let args = args_v.clone();
             Arc::new(move |st| {
-                let mut out: Vec<u8> = Vec::new();
-                for (_, i) in &args {
-                    match &st.values[ix(*i)] {
-                        Value::Text(s) => out.extend_from_slice(s),
-                        _ => return Err(v::fail("E_TYPE", "Expected text.")),
+                e::frame_arena::build_text(|out| {
+                    for (_, i) in &args {
+                        match &st.values[ix(*i)] {
+                            Value::Text(s) => out.extend_from_slice(s),
+                            _ => return Err(v::fail("E_TYPE", "Expected text.")),
+                        }
                     }
-                }
-                Ok(e::frame_arena::text(&out))
+                    Ok(())
+                })
             })
         }
         Primitive::Fail(code, message) => {

@@ -693,8 +693,25 @@ fn scene_image_sampler() -> SamplerDescriptor {
     }
 }
 
+fn key_hash(parts: &[&str], ints: &[i64]) -> (u64, u64) {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut a = DefaultHasher::new();
+    for p in parts {
+        p.hash(&mut a);
+    }
+    let hi = a.finish();
+    let mut b = DefaultHasher::new();
+    hi.hash(&mut b);
+    for i in ints {
+        i.hash(&mut b);
+    }
+    (hi, b.finish())
+}
+
 fn snapshot_key(key: &str, density: i64) -> TableKey {
-    TableKey::Str(format!("{}|{}", key, density))
+    let (hi, lo) = key_hash(&[key], &[density]);
+    TableKey::Wide(hi, lo)
 }
 
 fn snapshot_entry(value: &Renderer, key: &str, density: i64) -> Option<Rc<RefCell<SnapshotCacheEntry>>> {
@@ -703,7 +720,12 @@ fn snapshot_entry(value: &Renderer, key: &str, density: i64) -> Option<Rc<RefCel
 }
 
 fn texture_key(key: &str, density: i64, generation: i64) -> String {
-    format!("{}:{}:{}", key, density, generation)
+    let mut s = String::with_capacity(key.len() + 24);
+    s.push_str(key);
+    s.push(':');
+    use std::fmt::Write;
+    let _ = write!(s, "{density}:{generation}");
+    s
 }
 
 fn gpu_texture(key: String, width: i64, height: i64, gpu_: Texture) -> Rc<SampledTexture> {

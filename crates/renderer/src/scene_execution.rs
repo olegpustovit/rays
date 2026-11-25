@@ -729,7 +729,15 @@ fn prepared_run_of(item: &Item) -> Rc<PreparedRun> {
 }
 
 fn skey(key: &str) -> TableKey {
-    TableKey::Str(key.to_owned())
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut a = DefaultHasher::new();
+    key.hash(&mut a);
+    let hi = a.finish();
+    let mut b = DefaultHasher::new();
+    hi.hash(&mut b);
+    key.len().hash(&mut b);
+    TableKey::Wide(hi, b.finish())
 }
 
 /// Evicted GPU resources are destroyed once the frame that evicted them has been submitted.
