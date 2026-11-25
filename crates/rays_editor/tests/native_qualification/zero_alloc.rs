@@ -24,23 +24,24 @@ fn action_rounds() -> u64 {
 /// (rust allocs/unit, native mallocs/unit). Rust = counting allocator; native from trace when available.
 /// Seeded at measured (2026-11-25, after Z1/Z2/Z4) + 5%, rounded up. Lanes lower these toward 0 / ≤12.
 // Ceilings = measured + 5% after Z6b Image-run + Atlas direct quads (2026-11-25, RAYS_SLOW).
-const A_BASIC: (u64, u64) = (252, 9);
-const A_EMPTY: (u64, u64) = (7, 9);
-const A_BARE: (u64, u64) = (7, 9);
-const A_ISOGRID: (u64, u64) = (16, 13);
-// Selected idle is Z8's floor (~344 with may_rest); keep prior ceil until Z8 lowers that path.
-const A_ISOSEL: (u64, u64) = (29, 15);
-const B_HOVER_GRAPH: (u64, u64) = (182, 15);
-const B_HOVER_INSPECTOR: (u64, u64) = (182, 15);
-const C_PAN: (u64, u64) = (158, 15);
-const C_ZOOM: (u64, u64) = (154, 15);
-const D_TYPING: (u64, u64) = (401, 15);
-const E_CLICK_KEY: (u64, u64) = (277, 16);
-const E_CLICK_SETTLED: (u64, u64) = (30, 15);
+const A_BASIC: (u64, u64) = (241, 9);
+const A_EMPTY: (u64, u64) = (4, 9);
+const A_BARE: (u64, u64) = (4, 9);
+const A_ISOGRID: (u64, u64) = (14, 13);
+// Selected idle: Z8 may_rest path; lowered after Z5 idle cuts (meas 10/12).
+const A_ISOSEL: (u64, u64) = (11, 13);
+const B_HOVER_GRAPH: (u64, u64) = (161, 13);
+const B_HOVER_INSPECTOR: (u64, u64) = (159, 13);
+const C_PAN: (u64, u64) = (143, 13);
+const C_ZOOM: (u64, u64) = (139, 13);
+const D_TYPING: (u64, u64) = (385, 13);
+const E_CLICK_KEY: (u64, u64) = (256, 13);
+const E_CLICK_SETTLED: (u64, u64) = (11, 13);
+// E_toggle_key still ~872 (editor/eval, not Z5) — leave ceil so the overshoot stays visible.
 const E_TOGGLE_KEY: (u64, u64) = (382, 15);
 const E_TOGGLE_SETTLED: (u64, u64) = (162, 15);
-const F_FROZEN: (u64, u64) = (129, 8);
-const F_STATIC: (u64, u64) = (135, 9);
+const F_FROZEN: (u64, u64) = (118, 8);
+const F_STATIC: (u64, u64) = (123, 9);
 
 struct P {
     e: Option<editor::Editor>,
@@ -166,8 +167,7 @@ fn check(name: &str, rust: u64, native: u64, (max_rust, max_native): (u64, u64))
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         if mem_sys::TRACE {
             let report = mem_sys::trace::report(15);
-            eprint!("top sites:
-{}", mem_sys::trace::format_sites(&report.sites, 15));
+            eprint!("top sites:\n{}", mem_sys::trace::format_sites(&report.sites, 15));
         }
         assert!(
             rust <= max_rust,

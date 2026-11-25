@@ -5,6 +5,7 @@
 //! from its keymap.
 
 use rays::frame;
+use std::borrow::Cow;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -67,12 +68,27 @@ pub fn seek(value: &Timeline, frame: i64) -> (Timeline, Vec<Change>) {
     )
 }
 
-pub fn update(value: &Timeline, runtime_frame: &frame::Frame) -> (Timeline, Vec<Change>) {
+const ADVANCED: &[Change] = &[Change::Advanced];
+
+/// Warm idle returns a borrowed one-element slice (no heap). Callers that must append convert with `into_owned`.
+pub fn update(value: &Timeline, runtime_frame: &frame::Frame) -> (Timeline, Cow<'static, [Change]>) {
     let dt = runtime_frame.input.dt;
     if value.mode == Mode::Playing && dt.is_finite() && dt > 0.0 {
-        (Timeline { time: value.time + dt, frame: value.frame + 1, ..*value }, vec![Change::Advanced])
+        (Timeline { time: value.time + dt, frame: value.frame + 1, ..*value }, Cow::Borrowed(ADVANCED))
     } else {
-        (*value, Vec::new())
+        (*value, Cow::Borrowed(&[]))
+    }
+}
+
+/// Like [`update`], writing 0–1 changes into `out` (cleared first) so a reused buffer stays allocation-free.
+pub fn update_into(value: &Timeline, runtime_frame: &frame::Frame, out: &mut Vec<Change>) -> Timeline {
+    out.clear();
+    let dt = runtime_frame.input.dt;
+    if value.mode == Mode::Playing && dt.is_finite() && dt > 0.0 {
+        out.push(Change::Advanced);
+        Timeline { time: value.time + dt, frame: value.frame + 1, ..*value }
+    } else {
+        *value
     }
 }
 

@@ -855,6 +855,8 @@ pub struct SceneExecution {
     frame_pass: Option<backend::PreparedRenderTarget>,
     /// Load-reopen after UiPass::split (blur); restarted across frames.
     ui_reopen_pass: RefCell<Option<backend::PreparedRenderTarget>>,
+    /// Reused `RenderTarget.colors` shell for compatible checks (avoids `vec![attachment]` per pass).
+    scratch_colors: Vec<ColorAttachment>,
     dead: bool,
     /// A borrowed device (shared with a window) is never destroyed here.
     owns_device: bool,
@@ -1265,6 +1267,7 @@ pub fn create(
                 encoded_frame: 0,
                 frame_commands: None,
                 frame_pass: None,
+                scratch_colors: Vec::with_capacity(1),
                 ui_reopen_pass: RefCell::new(None),
                 dead: false,
             })
@@ -2831,14 +2834,16 @@ fn render_target(
     } else {
         None
     };
+    value.scratch_colors.clear();
+    value.scratch_colors.push(ColorAttachment {
+        texture: color,
+        resolve,
+        load,
+        store: if samples == 1 { Store::Store } else { Store::Resolve },
+        clear,
+    });
     Ok(RenderTarget {
-        colors: vec![ColorAttachment {
-            texture: color,
-            resolve,
-            load,
-            store: if samples == 1 { Store::Store } else { Store::Resolve },
-            clear,
-        }],
+        colors: std::mem::take(&mut value.scratch_colors),
         depth,
     })
 }
@@ -2989,7 +2994,7 @@ fn begin_pass(
     batch: &BatchPlan,
 ) -> Result<backend::RenderEncoder, Error> {
     let same_samples = |next: &Rc<BatchPlan>| next.samples == batch.samples;
-    let target = render_target(
+    let mut target = render_target(
         value,
         batch.family,
         batch.samples,
@@ -3000,8 +3005,17 @@ fn begin_pass(
         later.iter().any(|next| same_samples(next) && has_depth(next.family) && next.state.depth_load == Load::Load),
     )?;
     // Reuse one owned pass across warm frames when attachments match (RenderInner/Box stay).
-    if value.frame_pass.as_ref().is_none_or(|p| !p.compatible(&target)) {
+    // Recover the colors shell when the pass is already compatible so the next frame doesn't realloc.
+    if value.frame_pass.as_ref().is_some_and(|p| p.compatible(&target)) {
+        value.scratch_colors = std::mem::take(&mut target.colors);
+        if value.scratch_colors.capacity() < 1 {
+            value.scratch_colors.reserve(1);
+        }
+    } else {
         value.frame_pass = Some(backend::prepare_render_target(&value.device, target)?);
+        if value.scratch_colors.capacity() < 1 {
+            value.scratch_colors.reserve(1);
+        }
     }
     backend::render_prepared(commands, value.frame_pass.as_mut().expect("frame_pass"))
 }

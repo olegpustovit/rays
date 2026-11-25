@@ -806,9 +806,14 @@ pub fn view_input(value: &EditorModel, result: &FrameResult) -> frame::Frame {
     rays_shell::host::input(&mut value.ui.borrow_mut(), owner)
 }
 
-pub fn timeline_step(value: &EditorModel, timeline: timeline::Timeline, timeline_changes: Vec<timeline::Change>, result: &FrameResult) -> (timeline::Timeline, Vec<timeline::Change>, i64) {
+pub fn timeline_step(value: &EditorModel, timeline: timeline::Timeline, timeline_changes: std::borrow::Cow<'static, [timeline::Change]>, result: &FrameResult) -> (timeline::Timeline, std::borrow::Cow<'static, [timeline::Change]>, i64) {
     let mut timeline = timeline;
-    let mut changes = timeline_changes;
+    // Idle: keep the borrowed Advanced slice. Only own a Vec when intents append.
+    let mut changes = if result.timeline_intents.is_empty() {
+        timeline_changes
+    } else {
+        std::borrow::Cow::Owned(timeline_changes.into_owned())
+    };
     for intent in &result.timeline_intents {
         let (next, emitted) = match intent {
             TimelineIntent::PauseToggle => timeline::toggle_pause(&timeline),
@@ -818,7 +823,7 @@ pub fn timeline_step(value: &EditorModel, timeline: timeline::Timeline, timeline
             TimelineIntent::SetEnd(_) => (timeline.clone(), Vec::new()),
         };
         timeline = next;
-        changes.extend(emitted);
+        changes.to_mut().extend(emitted);
     }
     // the End field of a tall timeline: the scrub range (view state, like the playhead)
     let mut frames = value.timeline_frames;
@@ -848,7 +853,7 @@ pub struct FrameInput<'a> {
     pub status_fps: Option<i64>,
     pub status_fps_at: f64,
     pub timeline: timeline::Timeline,
-    pub timeline_changes: Vec<timeline::Change>,
+    pub timeline_changes: std::borrow::Cow<'static, [timeline::Change]>,
     pub graph_shown: bool,
     pub text: text_pane::State,
     pub text_shown: Option<text_pane::Shown>,
@@ -981,14 +986,14 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
                 Action::PlayPause | Action::Reset | Action::Stop | Action::RestoreLayout | Action::OpenCamera | Action::WorldPlay => {
                     let (ws, sel, tr, tl, tlc) = crate::editor_actions::apply_action(
                         value,
-                        (result.workspace.clone(), result.selection.clone(), result.tree.clone(), timeline, timeline_changes),
+                        (result.workspace.clone(), result.selection.clone(), result.tree.clone(), timeline, timeline_changes.into_owned()),
                         &a,
                     );
                     result.workspace = ws;
                     result.selection = sel;
                     result.tree = tr;
                     timeline = tl;
-                    timeline_changes = tlc;
+                    timeline_changes = std::borrow::Cow::Owned(tlc);
                     actions.push(a);
                 }
                 Action::FrameCamera => {
@@ -1626,7 +1631,7 @@ pub fn idle_input<'a, 'f>(value: &ModelView<'a>, actions: &[Action], frame_: &'f
         status_fps: value.status_fps,
         status_fps_at: value.status_fps_at,
         timeline: value.timeline.clone(),
-        timeline_changes: Vec::new(),
+        timeline_changes: std::borrow::Cow::Borrowed(&[]),
         graph_shown: false,
         text: value.text.clone(),
         text_shown: None,

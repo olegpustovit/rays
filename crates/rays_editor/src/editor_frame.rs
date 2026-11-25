@@ -1033,9 +1033,9 @@ pub fn update_frame(
     let (applied, timeline_now, timeline_changes) = if actions.is_empty() {
         (None, timeline_now, timeline_changes)
     } else {
-        let start = (value.workspace.clone(), pane_selection(&(&*value).into()).clone(), value.tree.clone(), timeline_now, timeline_changes);
+        let start = (value.workspace.clone(), pane_selection(&(&*value).into()).clone(), value.tree.clone(), timeline_now, timeline_changes.into_owned());
         let (workspace, selection, tree, timeline, changes) = actions.iter().fold(start, |state, action| apply_action(value, state, action));
-        (Some((workspace, selection, tree)), timeline, changes)
+        (Some((workspace, selection, tree)), timeline, std::borrow::Cow::Owned(changes))
     };
     value.timeline = timeline_now;
     sync_scope(value);
