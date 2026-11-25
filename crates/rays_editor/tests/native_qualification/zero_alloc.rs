@@ -165,7 +165,8 @@ fn check(name: &str, rust: u64, native: u64, (max_rust, max_native): (u64, u64))
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         if mem_sys::TRACE {
             let report = mem_sys::trace::report(15);
-            eprint!("top sites:\n{}", mem_sys::trace::format_sites(&report.sites, 15));
+            eprint!("top sites:
+{}", mem_sys::trace::format_sites(&report.sites, 15));
         }
         assert!(
             rust <= max_rust,
@@ -395,7 +396,8 @@ fn e_click_toggle() {
             if phase == 0 {
                 acc.off();
             }
-            p.idle(2, q);
+            // REST_FRAMES=2: still climbs 0,1,2 across three idles so the measured frame can rest.
+            p.idle(3, q);
             if phase == 1 {
                 acc.on();
             }
@@ -427,7 +429,8 @@ fn e_click_toggle() {
             if phase == 0 {
                 acc.off();
             }
-            p.idle(2, IDLE_AT);
+            // REST_FRAMES=2: three idles so still>=2 before the measured rest frame.
+            p.idle(3, IDLE_AT);
             if phase == 1 {
                 acc.on();
             }
