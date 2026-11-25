@@ -52,7 +52,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 | Z4 | lisp_text/lex BoundDoc+OnceLock+SPANS+Word+incremental+Arc caches; State take (one_intent+shown+frame); Live moves. typing_budget→1103/260 (meas 1050/247, mean 0.60ms). zero_alloc D_typing 401 rust + 37 native/unit (was ~1031 app + ~49 pxui). Left: ~400 rust/key (scene/kind_graph/PXUI cosmic Z6); not yet 0.
 | Z3 | done: Scratch tessellate (fef497e23); Wide keys + always-on shape cache + Affine unit segments (ae918f88f); guides cache + Affine lines + stack screen_box (cc870c828). zero_alloc A_isosel 712→48, B 727→196/194, C 467/462→174/170 (Z0 ceilings at meas+5%). click_budget isogrid idle 402/324→252/175, hover 334/334→185/185. Overlay tessellate/format! → 0 warm; pan reuses unit meshes. Left: guides hit clones outer Nodes Vec; camera-key miss still builds Node wrappers (tessellate 0). |
 | Z8 | in progress (`../rays-z8`). REST_FRAMES=2 restored. “Picture churn” was may_rest clearing rest on event frames (not layer::same A/B). Batch 4: may_rest ignores static command HUD (same rationale as blink); settled harness idle(3). E_click_settled now equals A_idle_isogrid_selected (~353) — both the selected-state floor (scene/render/present ~352 with update at rest). Next: drive selected idle/settled Rays sites to 0; B/C/D. quiet_rule green. |
-| Z5 | rebegin_commands + SceneExecution frame_commands; encoder renew spare; wrap_node Rc<[Node]>; LRU/side_lru reserve. SLOW empty **14/8** (ceil 15/9), isogrid **21/12**. UV Atlas blit kept (Z6b Image batch). Left: RenderInner/Box ~14→0; Z6a UV after Z6b. |
+| Z5 | rebegin_commands + generation-tagged prepared passes (PXUI `b73716cb`); SceneExecution frame_commands/frame_pass; encoder renew; wrap_node Rc<[Node]>; LRU reserve. SLOW empty **15/8** (ceil 15/9). Cross-gen prepared restart invalidated (Splice). Left: alloc-free cross-gen rebind (keep Box); RenderInner→0; Z6b UV. |
 | Z6a | done: PXUI rekey-on-text-change + mono caret (85482d18); canvas text glyph atlas blit (no reshape). A_idle_basic 538→364 rust / 121→56 native; D 385/14; F 139/9 + 143/9. Ceilings A 414→383. ponytail: instanced atlas quads (Z5) to drop the blit upload. |
 
 ## Requests
@@ -68,7 +68,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 ### Z5
 - Z6a: instanced atlas UV glyphs (or Glyphs with source rects) so canvas text can emit one batch instead of a CPU blit+upload per changing string.
 - crates/lru: fixed-capacity open-addressing buckets (nobody owns; HashMap nodes on insert).
-- MetalCommands Box + ogpu_core CommandsInner/RenderInner still per begin (~15 idle Rust floor).
+- MetalCommands Box + RenderInner still per begin after generation-safe invalidate (~15 idle Rust floor); alloc-free cross-gen needs kept driver shell + honest rebind.
 - Z6a: instanced atlas UV glyphs so canvas text skips per-frame blit upload.
 ### Z6
 ### Z6b

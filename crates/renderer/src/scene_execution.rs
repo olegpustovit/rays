@@ -317,6 +317,8 @@ pub struct UiPass<'a> {
     state: (Rect, Rect, Cull),
     /// the pass after the last split
     reopened: RefCell<Option<backend::RenderEncoder>>,
+    /// SceneExecution-owned Load-reopen prepared (shared across frames/splits).
+    reopen_prepared: &'a RefCell<Option<backend::PreparedRenderTarget>>,
 }
 
 static UI_SPLITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -347,10 +349,15 @@ impl UiPass<'_> {
         backend::end_render(&open)?;
         UI_SPLITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         record(self.commands, self.target)?;
-        let encoder = backend::render_encoder(self.commands, &RenderTarget {
+        let target = RenderTarget {
             colors: vec![ColorAttachment { texture: self.target.clone(), resolve: None, load: Load::Load, store: Store::Store, clear: (0.0, 0.0, 0.0, 0.0) }],
             depth: None,
-        })?;
+        };
+        let mut slot = self.reopen_prepared.borrow_mut();
+        if slot.as_ref().is_none_or(|p| !p.compatible(&target)) {
+            *slot = Some(backend::prepare_render_target(self.device, target)?);
+        }
+        let encoder = backend::render_prepared(self.commands, slot.as_mut().expect("ui reopen"))?;
         backend::set_viewport(&encoder, self.state.0)?;
         backend::set_scissor(&encoder, self.state.1)?;
         backend::set_cull(&encoder, self.state.2)?;
@@ -811,6 +818,10 @@ pub struct SceneExecution {
     encoded_frame: u64,
     /// Reused across frames via `rebegin_commands` after GPU settle (no new CommandsInner Rc).
     frame_commands: Option<backend::Commands>,
+    /// Owned pass restarted across warm frames when attachments match (no RenderInner/Box).
+    frame_pass: Option<backend::PreparedRenderTarget>,
+    /// Load-reopen after UiPass::split (blur); restarted across frames.
+    ui_reopen_pass: RefCell<Option<backend::PreparedRenderTarget>>,
     dead: bool,
     /// A borrowed device (shared with a window) is never destroyed here.
     owns_device: bool,
@@ -1193,6 +1204,8 @@ pub fn create(
                 in_flight_serial: None,
                 encoded_frame: 0,
                 frame_commands: None,
+                frame_pass: None,
+                ui_reopen_pass: RefCell::new(None),
                 dead: false,
             })
         }
@@ -2527,7 +2540,11 @@ fn begin_pass(
         later.iter().any(same_samples),
         later.iter().any(|next| same_samples(next) && has_depth(next.family) && next.state.depth_load == Load::Load),
     )?;
-    backend::render_encoder(commands, &target)
+    // Reuse one owned pass across warm frames when attachments match (RenderInner/Box stay).
+    if value.frame_pass.as_ref().is_none_or(|p| !p.compatible(&target)) {
+        value.frame_pass = Some(backend::prepare_render_target(&value.device, target)?);
+    }
+    backend::render_prepared(commands, value.frame_pass.as_mut().expect("frame_pass"))
 }
 
 /// Records `batch` into `encoder`; the pass to go on in when the batch's UI split it.
@@ -2568,6 +2585,7 @@ fn encode_batch(value: &mut SceneExecution, encoder: &backend::RenderEncoder, co
             target: &value.target,
             state,
             reopened: RefCell::new(None),
+            reopen_prepared: &value.ui_reopen_pass,
         };
         (ui.paint)(&pass, ui.layer)?;
         reopened = pass.reopened.into_inner();
@@ -3805,6 +3823,8 @@ pub fn destroy(value: &mut SceneExecution) -> Result<(), Error> {
     let _ = settle(value);
     value.dead = true;
     value.frame_commands = None;
+    value.frame_pass = None;
+    value.ui_reopen_pass = RefCell::new(None);
     let mut first: Option<Error> = None;
     let record = |result: Result<(), Error>, first: &mut Option<Error>| {
         if let Err(e) = result
