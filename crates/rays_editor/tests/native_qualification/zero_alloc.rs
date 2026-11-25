@@ -35,11 +35,12 @@ const B_HOVER_INSPECTOR: (u64, u64) = (129, 13);
 const C_PAN: (u64, u64) = (99, 13);
 const C_ZOOM: (u64, u64) = (95, 13);
 const D_TYPING: (u64, u64) = (385, 13);
-const E_CLICK_KEY: (u64, u64) = (256, 13);
-const E_CLICK_SETTLED: (u64, u64) = (11, 13);
+// E click/toggle (Z13): settled = idle = 0 after isogrid render 0 + settle wait for zoom-rest timer.
+const E_CLICK_KEY: (u64, u64) = (221, 13);
+const E_CLICK_SETTLED: (u64, u64) = (0, 13);
 // E_toggle_key: layout-only recovery print splices prior body (no SyntaxBuilder::import of source).
-const E_TOGGLE_KEY: (u64, u64) = (365, 15);
-const E_TOGGLE_SETTLED: (u64, u64) = (11, 15);
+const E_TOGGLE_KEY: (u64, u64) = (335, 13);
+const E_TOGGLE_SETTLED: (u64, u64) = (0, 13);
 const F_FROZEN: (u64, u64) = (0, 8);
 const F_STATIC: (u64, u64) = (0, 9);
 
@@ -431,8 +432,9 @@ fn e_click_toggle() {
             if phase == 0 {
                 acc.off();
             }
-            // REST_FRAMES=2: three idles so still>=2 before the measured rest frame.
-            p.idle(3, IDLE_AT);
+            // REST_FRAMES=2. Settled also waits out graph zoom-rest `repaint_after(0.1)` (~6 frames)
+            // so wants_frame is clear (else ~2/20 SLOW rounds wake into a full update).
+            p.idle(if phase == 1 { 8 } else { 3 }, IDLE_AT);
             if phase == 1 {
                 acc.on();
             }
