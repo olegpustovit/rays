@@ -723,7 +723,11 @@ pub fn compose_scene(value: &LoopModel, frame_: &frame::Frame) -> Nodes {
 /// for `rest_frames` full frames, which covers what no clause names: a visible clock moving is a
 /// picture changing.
 pub const REST_SECONDS: f64 = 1.;
-pub const REST_FRAMES: i64 = 2;
+/// One confirmed unchanged picture is enough: after a selection click the composed scene can
+/// alternate for a couple of frames, and requiring two matches kept settled frames on the full
+/// update path forever. A one-frame glitch may rest for up to `REST_SECONDS` (upgrade: classify
+/// volatile UI chrome out of the rest key).
+pub const REST_FRAMES: i64 = 1;
 
 pub fn same_input(a: &frame::Frame, b: &frame::Frame) -> bool {
     a.input.size == b.input.size && a.pixel_scale == b.pixel_scale && a.input.pointer == b.input.pointer && a.input.buttons == b.input.buttons && a.input.keys == b.input.keys
