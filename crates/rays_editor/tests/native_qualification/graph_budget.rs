@@ -13,8 +13,8 @@ const CEILINGS: &[(&str, u64, u64)] = &[
     ("after box select", 842, 556),
     ("escape", 643, 556),
     ("hover moves", 684, 563),
-    ("enter", 2060, 492),
-    ("up", 1812, 488),
+    ("enter", 1982, 492),
+    ("up", 627, 488),
 ];
 
 fn rest(p: &mut P, name: &str, first: (f64, u64)) {

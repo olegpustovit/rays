@@ -140,36 +140,45 @@ pub fn view_node(value: &mut EditorModel, path: &[Symbol]) {
 
 /// What the document keeps of each node, for the pane to ask (`scope::Saved`).
 struct DocSaved {
-    layout: layout_by_path::T,
+    document: Arc<editor_document::document::T>,
     probes: layout_by_path::PathMap<i64>,
-    imports: Arc<Vec<(String, Vec<Syntax>)>>,
+}
+
+impl DocSaved {
+    fn layout(&self) -> &layout_by_path::T {
+        &self.document.workspace.ws.layout
+    }
 }
 
 impl scope::Saved for DocSaved {
+    fn layout_identity(&self) -> Option<*const ()> {
+        Some(std::ptr::from_ref(self.layout()).cast())
+    }
+
     fn at(&self, path: &[Symbol]) -> Option<(f64, f64)> {
-        self.layout.at.get(path).copied()
+        self.layout().at.get(path).copied()
     }
     fn level(&self, path: &[Symbol]) -> Option<(p::Level, bool)> {
-        match (self.layout.level.get(path), self.layout.pinned.get(path)) {
+        match (self.layout().level.get(path), self.layout().pinned.get(path)) {
             (None, None) => None,
             (level, pinned) => Some((level.copied().unwrap_or(p::Level::Card), pinned.copied().unwrap_or(false))),
         }
     }
     fn pin(&self, path: &[Symbol], label: &str) -> Option<bool> {
-        self.layout.rows.get(path).and_then(|m| m.get(label)).copied()
+        self.layout().rows.get(path).and_then(|m| m.get(label)).copied()
     }
     // a function or loop starts open, its body in view: c folds it
     fn collapsed(&self, path: &[Symbol]) -> bool {
-        self.layout.collapsed.get(path) == Some(&true)
+        self.layout().collapsed.get(path) == Some(&true)
     }
     fn probe(&self, path: &[Symbol]) -> i64 {
         self.probes.get(path).copied().unwrap_or(0)
     }
     fn frames(&self, path: &[Symbol]) -> Vec<scope::Frame3> {
-        self.layout.frames.get(path).map(|fs| fs.iter().map(|f| (f.title.clone(), f.at, f.size)).collect()).unwrap_or_default()
+        self.layout().frames.get(path).map(|fs| fs.iter().map(|f| (f.title.clone(), f.at, f.size)).collect()).unwrap_or_default()
     }
     fn imported(&self, path: &[Symbol]) -> Option<String> {
-        workspace_doc::imported_file(&self.imports, path)
+        workspace_doc::imported_file(&self.document.workspace.ws.imports, path)
     }
 }
 
@@ -398,12 +407,12 @@ pub fn sync_scope(value: &mut EditorModel) {
     } else {
         let display = viewed_path(&(&*value).into(), &scope_proj);
         let layouts: Vec<String> = match &value.doc.shell {
-            Some(sh) if sh.switch.is_some() && workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name) == Some(name.clone()) => {
+            Some(sh) if sh.switch.is_some() && workspace_doc::editor_graph_ref(ws).is_some_and(|g| g.name == name) => {
                 layouts(&*value).into_iter().map(|(n, _)| n).collect()
             }
             _ => Vec::new(),
         };
-        let saved = Rc::new(DocSaved { layout: ws.layout.clone(), probes: value.probes.clone(), imports: ws.imports.clone() });
+        let saved = Rc::new(DocSaved { document: document.clone(), probes: value.probes.clone() });
         let opts = scope::ScopeOpts { saved, display, layouts };
         let _phase = phase_timer::measure("layout");
         scope::with_scope(opts, &name, scope_proj.clone(), &mut pane_mut(value).view);

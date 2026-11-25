@@ -9,6 +9,7 @@ use flow_graph::projection as p;
 use flow_graph::projection::{Item, Level, Placed, ScopeResult, ZoneKind};
 use flow_syntax::syntax::{self as s, Syntax};
 use flow_syntax::ty::Ty;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -80,11 +81,11 @@ pub fn index_query_into(ix: &Index, r: (f64, f64, f64, f64), found: &mut Vec<usi
     found.dedup();
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Src {
-    pub pos: (f64, f64),
-    pub ty: Option<Ty>,
-    pub owner: Option<Path>,
+#[derive(Clone, Copy)]
+struct Src<'s> {
+    pos: (f64, f64),
+    ty: Option<&'s Ty>,
+    owner: &'s [Symbol],
 }
 
 pub type Target = (Path, ArgKey, Option<S>);
@@ -377,7 +378,7 @@ pub fn point_box_w(name_w: &dyn Fn(&str) -> f64, name: &str) -> f64 {
     p::POINT_SIZE + 8.0 + name_w(name)
 }
 
-fn on_path(o: &Option<Path>, pth: &Path) -> bool {
+fn on_path(o: Option<&[Symbol]>, pth: &[Symbol]) -> bool {
     matches!(o, Some(x) if x == pth)
 }
 
@@ -388,7 +389,7 @@ struct Items {
 }
 
 impl Items {
-    fn at(&self, path: &Path) -> Option<&Item3> {
+    fn at(&self, path: &[Symbol]) -> Option<&Item3> {
         self.slot.get(path).map(|i| &self.items[*i])
     }
 }
@@ -468,7 +469,7 @@ impl Scratch {
 
 /// The cards a wire from `a` to `b` bends clear of: `cards` lists those that may meet a rectangle,
 /// `item` is one card and where it sits. Appended to `out`.
-fn route_into<'g>(cards: &mut dyn FnMut((f64, f64, f64, f64), &mut Vec<usize>), item: &dyn Fn(usize) -> (&'g Placed, f64, f64), a: (f64, f64), b: (f64, f64), from: &Option<Path>, into: &Option<Path>, s: &mut Scratch, out: &mut Vec<(f64, f64)>) {
+fn route_into<'g>(cards: &mut dyn FnMut((f64, f64, f64, f64), &mut Vec<usize>), item: &dyn Fn(usize) -> (&'g Placed, f64, f64), a: (f64, f64), b: (f64, f64), from: Option<&[Symbol]>, into: Option<&[Symbol]>, s: &mut Scratch, out: &mut Vec<(f64, f64)>) {
     let (ax, ay) = a;
     let (bx, by) = b;
     let inside = |pt: (f64, f64), pl: &Placed, cx: f64, cy: f64| pt.0 >= cx && pt.0 <= cx + pl.w && pt.1 >= cy && pt.1 <= cy + pl.h;
@@ -546,30 +547,30 @@ fn spine_at(o: (&Placed, f64, f64), i: (&Placed, f64, f64), a: (f64, f64), b: (f
     }
 }
 
-fn spine(items: &Items, src: &Src, into: &Path, b: (f64, f64)) -> Option<[(f64, f64); 6]> {
-    let o = items.at(src.owner.as_ref()?)?;
+fn spine(items: &Items, src: &Src<'_>, into: &Path, b: (f64, f64)) -> Option<[(f64, f64); 6]> {
+    let o = items.at(src.owner)?;
     let i = items.at(into)?;
     spine_at((&o.0, o.1, o.2), (&i.0, i.1, i.2), src.pos, b)
 }
 
-fn add_wire(items: &Items, out: &mut Out, target: Option<Target>, refers: bool, src: Option<&Src>, b: (f64, f64), into: &Path) {
+fn add_wire(items: &Items, out: &mut Out, target: Option<Target>, refers: bool, src: Option<Src<'_>>, b: (f64, f64), into: &Path) {
     let s = match src {
         Some(s) => s,
         None => return,
     };
     let mut pts = Vec::new();
     let drop = out.bars.contains(&fkey(s.pos));
-    if let Some(corners) = spine(items, s, into, b) {
+    if let Some(corners) = spine(items, &s, into, b) {
         rounded_into(&corners, &mut pts);
         let (a, b) = (pts[0], *pts.last().unwrap());
-        out.wires.push(Wire { a, b, ty: s.ty.clone(), target, pts, refers, from: s.owner.clone(), into: Some(into.clone()), drop });
+        out.wires.push(Wire { a, b, ty: s.ty.cloned(), target, pts, refers, from: Some(s.owner.to_vec()), into: Some(into.clone()), drop });
         return;
     } else if drop || (b.0 - s.pos.0).abs() > TAG_SPAN {
         curve_into(drop, s.pos, b, &mut pts);
     } else {
-        route_into(&mut |r, found| index_query_into(&items.tiles, r, found), &|i| { let (pl, x, y) = &items.items[i]; (&**pl, *x, *y) }, s.pos, b, &s.owner, &Some(into.clone()), &mut out.scratch, &mut pts);
+        route_into(&mut |r, found| index_query_into(&items.tiles, r, found), &|i| { let (pl, x, y) = &items.items[i]; (&**pl, *x, *y) }, s.pos, b, Some(s.owner), Some(into), &mut out.scratch, &mut pts);
     }
-    out.wires.push(Wire { a: s.pos, b, ty: s.ty.clone(), target, pts, refers, from: s.owner.clone(), into: Some(into.clone()), drop });
+    out.wires.push(Wire { a: s.pos, b, ty: s.ty.cloned(), target, pts, refers, from: Some(s.owner.to_vec()), into: Some(into.clone()), drop });
 }
 
 /// Wire `i` of `geo` with the cards at `moving` (slots, ascending; none inside another) moved by `d`:
@@ -606,18 +607,18 @@ pub fn reroute(geo: &Geo, i: usize, moving: &[usize], d: (f64, f64), s: &mut Scr
         found.extend_from_slice(moving);
         found.sort_unstable();
     };
-    route_into(&mut cards, &at, a, b, &wi.from, &wi.into, s, out);
+    route_into(&mut cards, &at, a, b, wi.from.as_deref(), wi.into.as_deref(), s, out);
 }
 
-type Table = HashMap<String, Src>;
+type Table<'s> = HashMap<Cow<'s, str>, Src<'s>>;
 
-fn resolve(chain: &[Table], name: &str) -> Option<Src> {
+fn resolve<'s>(chain: &[Table<'s>], name: &str) -> Option<Src<'s>> {
     for tbl in chain.iter().rev() {
         if let Some(s) = tbl.get(name) {
-            return Some(s.clone());
+            return Some(*s);
         }
         if let Some(s) = tbl.get(root_name(name)) {
-            return Some(s.clone());
+            return Some(*s);
         }
     }
     None
@@ -631,7 +632,7 @@ fn names_of(e: &Option<S>) -> Vec<String> {
 }
 
 /// A plain `for` has no out-what it yields wires from the yielded card.
-fn inner_out(items: &Items, n: &p::Node) -> Option<((f64, f64), Path)> {
+fn inner_out<'s>(items: &Items, n: &'s p::Node) -> Option<((f64, f64), &'s [Symbol])> {
     let z = n.zone.as_ref()?;
     if z.kind != ZoneKind::For {
         return None;
@@ -641,21 +642,21 @@ fn inner_out(items: &Items, n: &p::Node) -> Option<((f64, f64), Path)> {
             return None;
         }
     }
-    let target: Option<Path> = match &z.scope.result {
-        ScopeResult::Link(l) => z.scope.nodes.iter().find(|m| m.binds.iter().any(|b| b == root_name(l))).map(|m| m.path.clone()),
-        ScopeResult::Node(pth) => Some(pth.clone()),
+    let target: Option<&[Symbol]> = match &z.scope.result {
+        ScopeResult::Link(l) => z.scope.nodes.iter().find(|m| m.binds.iter().any(|b| b == root_name(l))).map(|m| m.path.as_slice()),
+        ScopeResult::Node(pth) => Some(pth),
         ScopeResult::Literal(_) => None,
     };
     let path = target?;
-    let (pl, ax, ay) = items.at(&path)?;
+    let (pl, ax, ay) = items.at(path)?;
     Some((out_anchor(pl, *ax, *ay), path))
 }
 
-fn declared(items: &Items, sc: &p::Scope) -> Table {
-    let mut tbl: Table = HashMap::new();
+fn declared<'s>(items: &Items, sc: &'s p::Scope) -> Table<'s> {
+    let mut tbl = Table::new();
     for i in &sc.inputs {
         if let Some((pl, ax, ay)) = items.at(&i.path) {
-            tbl.insert(i.name.clone(), Src { pos: out_anchor(pl, *ax, *ay), ty: Some(i.ty.clone()), owner: Some(i.path.clone()) });
+            tbl.insert(i.name.as_str().into(), Src { pos: out_anchor(pl, *ax, *ay), ty: Some(&i.ty), owner: &i.path });
         }
     }
     for n in &sc.nodes {
@@ -665,7 +666,7 @@ fn declared(items: &Items, sc: &p::Scope) -> Table {
             let lines = pl.lines.len();
             let (main, main_owner) = match inner_out(items, n) {
                 Some((pos, owner)) => (pos, owner),
-                None => (out_anchor(pl, ax, ay), n.path.clone()),
+                None => (out_anchor(pl, ax, ay), n.path.as_slice()),
             };
             // a point or a chip has the one out end; its named outputs are listed on a card
             let out = |j: usize| -> (f64, f64) {
@@ -677,13 +678,13 @@ fn declared(items: &Items, sc: &p::Scope) -> Table {
             };
             if n.binds.len() == 1 && n.binds[0] == n.name {
                 let b = &n.binds[0];
-                tbl.insert(b.clone(), Src { pos: main, ty: Some(n.ty.clone()), owner: Some(main_owner) });
+                tbl.insert(b.as_str().into(), Src { pos: main, ty: Some(&n.ty), owner: main_owner });
                 for (j, (f, ty)) in n.outputs.iter().enumerate() {
-                    tbl.insert(format!("{}.{}", b, f), Src { pos: out(j), ty: Some(ty.clone()), owner: Some(n.path.clone()) });
+                    tbl.insert(format!("{b}.{f}").into(), Src { pos: out(j), ty: Some(ty), owner: &n.path });
                 }
             } else {
                 for (j, (f, ty)) in n.outputs.iter().enumerate() {
-                    tbl.insert(f.clone(), Src { pos: out(j), ty: Some(ty.clone()), owner: Some(n.path.clone()) });
+                    tbl.insert(f.as_str().into(), Src { pos: out(j), ty: Some(ty), owner: &n.path });
                 }
             }
         }
@@ -691,7 +692,7 @@ fn declared(items: &Items, sc: &p::Scope) -> Table {
     tbl
 }
 
-fn scope_wires(items: &Items, out: &mut Out, chain: &mut Vec<Table>, sc: &p::Scope) {
+fn scope_wires<'s>(items: &Items, out: &mut Out, chain: &mut Vec<Table<'s>>, sc: &'s p::Scope) {
     chain.push(declared(items, sc));
     for n in &sc.nodes {
         let (pl, ax, ay) = match items.at(&n.path) {
@@ -719,21 +720,16 @@ fn scope_wires(items: &Items, out: &mut Out, chain: &mut Vec<Table>, sc: &p::Sco
                     if names.is_empty() {
                         continue;
                     }
-                    let target0: Option<Target> = Some((n.path.clone(), r.key.clone(), fallback(r)));
+                    let fallback = fallback(r);
                     for name in &names {
+                        let Some(src) = resolve(chain, name).filter(|src| src.owner != n.path) else { continue };
                         // a call in a vector's cell: the wire ends at that cell of the vector
                         let target = match r.cells.iter().find(|(_, leaf)| leaf == name) {
                             Some((ci, _)) => Some(p::cell_wire(n, r, *ci)),
-                            None => target0.clone(),
+                            None => Some((n.path.clone(), r.key.clone(), fallback.clone())),
                         };
-                        let src = resolve(chain, name);
-                        if let Some(Src { owner: Some(o), .. }) = &src {
-                            if *o == n.path {
-                                continue;
-                            }
-                        }
                         let refers = matches!(r.chip, p::Chip::Inline { .. });
-                        add_wire(items, out, target, refers, src.as_ref(), target_pos, &n.path);
+                        add_wire(items, out, target, refers, Some(src), target_pos, &n.path);
                     }
                 }
             }
@@ -758,26 +754,26 @@ fn scope_wires(items: &Items, out: &mut Out, chain: &mut Vec<Table>, sc: &p::Sco
                         let target: Option<Target> = r.key.as_ref().map(|key| (n.path.clone(), key.clone(), None));
                         for name in names {
                             let src = resolve(chain, &name);
-                            add_wire(items, out, target.clone(), false, src.as_ref(), rail_pos(ri), &n.path);
+                            add_wire(items, out, target.clone(), false, src, rail_pos(ri), &n.path);
                         }
                     }
                 }
                 if !collapsed {
                     // the loop's variables: a port in the zone's left strip (the label's), or at the right
                     // of the rail row
-                    let mut rail: Table = HashMap::new();
+                    let mut rail = Table::new();
                     for (ri, r) in z.rail.iter().enumerate() {
                         if r.role != p::Role::Capture {
                             let (bx, by) = begin_port(n, z, ri);
                             let pos = (ax + bx, ay + by);
-                            let src = Src { pos, ty: r.ty.clone(), owner: Some(n.path.clone()) };
+                            let src = Src { pos, ty: r.ty.as_ref(), owner: &n.path };
                             // a loop's variables leave down the bar; a function's parameters are ordinary
                             // left-to-right wires
                             if z.kind != ZoneKind::Fn {
                                 out.bars.insert(fkey(pos));
                             }
                             for name in &r.names {
-                                rail.insert(name.clone(), src.clone());
+                                rail.insert(name.as_str().into(), src);
                             }
                         }
                     }
@@ -795,7 +791,7 @@ fn scope_wires(items: &Items, out: &mut Out, chain: &mut Vec<Table>, sc: &p::Sco
                     // there, so no wire runs back across the body
                     if z.kind != ZoneKind::For {
                         let (ex, ey) = end_port(n, w);
-                        add_wire(items, out, None, false, source.as_ref(), (ax + ex, ay + ey), &n.path);
+                        add_wire(items, out, None, false, source, (ax + ex, ay + ey), &n.path);
                     }
                 }
             }
@@ -833,7 +829,7 @@ pub fn compute(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, s
                 ScopeResult::Literal(_) => None,
             };
             let target = (*ax, ay + p::BODY_TOP + WIRE_ROW_Y);
-            add_wire(&items, &mut out, None, false, source.as_ref(), target, &rpath);
+            add_wire(&items, &mut out, None, false, source, target, &rpath);
         }
     }
     let wires = out.wires;

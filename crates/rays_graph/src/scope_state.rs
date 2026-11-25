@@ -277,6 +277,11 @@ pub struct Hinting {
 /// frames), the iteration each zone shows, and the imported files that define graphs. The pane only
 /// asks; a host that keeps none of it uses `Nothing`.
 pub trait Saved {
+    /// Stable identity of the immutable layout held by this owner. A host may opt out.
+    fn layout_identity(&self) -> Option<*const ()> {
+        None
+    }
+
     fn at(&self, _path: &[Symbol]) -> Option<(f64, f64)> {
         None
     }
@@ -367,6 +372,7 @@ pub struct Pane {
     /// B19: the pan and zoom each graph the pane left was at, by key
     pub cameras: Rc<RefCell<HashMap<String, (f64, f64, f64)>>>,
     pub layout: Rc<p::Layout>,
+    switches_cache: Rc<RefCell<Vec<GraphLayout>>>,
     pub geo: Geo,
     /// the font size point names were measured at
     pub geo_fs: i64,
@@ -426,6 +432,21 @@ pub struct Pane {
     pub built: Rc<RefCell<Option<(Rc<Pane>, u64)>>>,
     /// what the last content build left for the hover between builds (`scope_hover`)
     pub hovers: Rc<RefCell<crate::scope_hover::Hovers>>,
+}
+
+/// The canonical layout of a graph at entry. Gesture state belongs to the live pane.
+#[derive(Clone)]
+struct GraphLayout {
+    scope: Rc<p::Scope>,
+    saved: Rc<dyn Saved>,
+    foot: bool,
+    zoom: f64,
+    layout: Rc<p::Layout>,
+    geo: Geo,
+    geo_fs: i64,
+    geo_cold: bool,
+    chains: Rc<HashMap<Path, Vec<Path>>>,
+    folds: Rc<HashMap<(Path, usize), Path>>,
 }
 
 /// A drag the content builds: a frame's corner; a move of cards (zones with what they hold) and a
@@ -549,6 +570,7 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         framed: true,
         cameras: Rc::new(RefCell::new(HashMap::new())),
         layout: Rc::new(p::Layout { placed: Vec::new(), w: 0.0, h: 0.0 }),
+        switches_cache: Rc::default(),
         geo: w::empty_geo(),
         geo_fs: 13,
         geo_cold: false,
@@ -929,6 +951,8 @@ impl Default for ScopeOpts {
 
 pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: &mut Pane) {
     let ScopeOpts { saved, display, layouts } = o;
+    let switched = key != t.key;
+    let cache_key = (switched && layouts.is_empty() && t.lens.is_empty()).then(|| saved.layout_identity()).flatten();
     let scope: Rc<p::Scope> = if layouts.is_empty() {
         scope
     } else {
@@ -953,20 +977,39 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: &mut Pane) {
     if !same {
         (t.hinting, t.context, t.highlighted) = (None, None, Vec::new());
     }
-    let layout = lay(t, &saved, key == t.key, &scope);
-    let earlier: Vec<Placed> = if key == t.key { t.layout.placed.clone() } else { Vec::new() };
+    let foot = t.records.is_some();
+    let cached = cache_key.and_then(|identity| {
+        t.switches_cache.borrow().iter().find(|entry| {
+            Rc::ptr_eq(&entry.scope, &scope) && entry.saved.layout_identity() == Some(identity) && entry.foot == foot
+        }).cloned()
+    });
+    let layout = cached.as_ref().map_or_else(|| Rc::new(lay(t, &saved, !switched, &scope)), |entry| entry.layout.clone());
+    let earlier = (!switched).then(|| t.layout.clone());
     let (n, z, r) = count_scope(&scope);
     let stats = Stats { nodes: n, zones: z, rows: r, ..t.stats };
-    let chains = Rc::new(probe::chains(&scope));
-    let folds = Rc::new(fold_sources(&scope));
+    let chains = cached.as_ref().map_or_else(|| Rc::new(probe::chains(&scope)), |entry| entry.chains.clone());
+    let folds = cached.as_ref().map_or_else(|| Rc::new(fold_sources(&scope)), |entry| entry.folds.clone());
     let switches = switch_nodes(&scope);
-    let layout = Rc::new(layout);
     (t.scope, t.saved, t.display, t.layout, t.switches, t.chains, t.folds, t.stats) = (Some(scope.clone()), saved, display, layout.clone(), switches, chains, folds, stats);
-    regeo(t, &scope, &layout, &no_shift);
+    if let Some(entry) = cached.as_ref().filter(|entry| {
+        entry.zoom == t.zoom || entry.geo.items.iter().all(|(placed, _, _)| placed.shown != Level::Point)
+    }) {
+        (t.geo, t.geo_fs, t.geo_cold) = (entry.geo.clone(), entry.geo_fs, entry.geo_cold);
+    } else {
+        regeo(t, &scope, &layout, &no_shift);
+    }
+    if cache_key.is_some() && cached.is_none() {
+        let mut cache = t.switches_cache.borrow_mut();
+        // ponytail: keep two entry layouts per pane, enough for entering a definition and going up.
+        cache.retain(|entry| entry.saved.layout_identity() == cache_key);
+        cache.truncate(1);
+        cache.insert(0, GraphLayout { scope, saved: t.saved.clone(), foot, zoom: t.zoom, layout: layout.clone(),
+            geo: t.geo.clone(), geo_fs: t.geo_fs, geo_cold: t.geo_cold, chains: t.chains.clone(), folds: t.folds.clone() });
+    }
     // a card an edit added (an unfolded call lands a column left of its owner) that falls outside the view
     // brings the pane to it, nothing else moves
-    if !(earlier.is_empty() || layout.placed.len() <= earlier.len() || t.width == 0) {
-        let known: std::collections::HashSet<&Path> = earlier.iter().map(|b| &b.path).collect();
+    if let Some(earlier) = earlier.filter(|old| !old.placed.is_empty() && layout.placed.len() > old.placed.len() && t.width != 0) {
+        let known: std::collections::HashSet<&Path> = earlier.placed.iter().map(|b| &b.path).collect();
         if let Some(b) = layout.placed.iter().find(|b| !known.contains(&b.path)) {
             // the pan that puts [lo, hi] (graph units) inside [0, size] with a 24-point margin
             let zoom = t.zoom;
@@ -1007,7 +1050,7 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: &mut Pane) {
             t.editing = None;
         }
     }
-    if key != t.key {
+    if switched {
         suspend(t);
         if t.framed && !t.key.is_empty() {
             // ponytail: a handful of graphs a session; bound it if graph names are generated
