@@ -52,9 +52,9 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 | Z4 | lisp_text/lex BoundDoc+OnceLock+SPANS+Word+incremental+Arc caches; State take (one_intent+shown+frame); Live moves. typing_budget→1103/260 (meas 1050/247, mean 0.60ms). zero_alloc D_typing 401 rust + 37 native/unit (was ~1031 app + ~49 pxui). Left: ~400 rust/key (scene/kind_graph/PXUI cosmic Z6); not yet 0.
 | Z3 | done: Scratch tessellate (fef497e23); Wide keys + always-on shape cache + Affine unit segments (ae918f88f); guides cache + Affine lines + stack screen_box (cc870c828). zero_alloc A_isosel 712→48, B 727→196/194, C 467/462→174/170 (Z0 ceilings at meas+5%). click_budget isogrid idle 402/324→252/175, hover 334/334→185/185. Overlay tessellate/format! → 0 warm; pan reuses unit meshes. Left: guides hit clones outer Nodes Vec; camera-key miss still builds Node wrappers (tessellate 0). |
 | Z8 | in progress (`../rays-z8`). REST_FRAMES=2; may_rest ignores static HUD. Bisect A_ISOSEL 51→344: first bad `0cfef552b` (Z5 Wide skey); `find_str` still matched Str only → miss every frame. Fixed `find(&skey(...))` — A_ISOSEL 344→17 (ceil 29). Next: B/C/D selected/input floors. |
-| Z5 | rebegin_commands + SceneExecution frame_commands; encoder renew spare; wrap_node Rc<[Node]>; LRU/side_lru reserve. SLOW empty **14/8** (ceil 15/9), isogrid **21/12**. UV Atlas blit kept (Z6b Image batch). Left: RenderInner/Box ~14→0; Z6a UV after Z6b. |
-| Z6a | done: PXUI rekey-on-text-change + mono caret (85482d18); canvas text glyph atlas blit (no reshape). A_idle_basic 538→364 rust / 121→56 native; D 385/14; F 139/9 + 143/9. Ceilings A 414→383. ponytail: instanced atlas quads (Z5) to drop the blit upload. |
-| Z6b | done (`../rays-z6b`): finding 5 — same-shape frames patch uniforms in place (Shared staging); patch draw bindings into retained BatchPlan (no `plan_batches`); re-encode ICB in place; keep prepared plan across version bumps for shape reuse; mesh page headroom; Wide mesh `find`+`skey`. Free-list ICB pool deferred (ogpu child leak). zero_alloc A_idle_basic 364→278 rust / 56→36 native; F frozen 139→126 / 9, static 143→132 / 9. Ceilings A 366→292/38, F 135→133 / 141→139. million_marks paired `(t301−t61)/240` debug counting-off: z6b median 18.637 ms/frame vs current origin/dev 44.986 (m2-after merged was 15.703). Remaining A sites by owner: Z5 ~24 ogpu encode; Z6a text blit/upload ~7+native; Z7 eval/state ~70; Z8 editor idle floor; Z6b residual: signature collect + argument-slice map on new textures + ICB re-encode when offsets move. |
+| Z5 | rebegin_commands + SceneExecution frame_commands; encoder renew spare; wrap_node Rc<[Node]>; LRU/side_lru reserve. SLOW empty **14/8** (ceil 15/9), isogrid **21/12**. Left: RenderInner/Box ~14→0. |
+| Z6a | done: PXUI rekey-on-text-change + mono caret (85482d18); glyph atlas. Direct atlas quads enabled once Z6b Image-run batching landed (no per-frame blit). |
+| Z6b | done (`../rays-z6b`): finding 5 plan/ICB patch + prepared reuse; **Image-run batching** — consecutive same-texture `Command::Image`/Glyphs → one Scene2Textured draw (`affine[20k..]`, capacity-stable `image-run:{tex}:{cap}`). Canvas text `TextDraw::Atlas` (no per-frame blit). A_idle_basic **240/8** (ceil 252/9); F 122/7 + 128/8 (ceil 129/8, 135/9). Free-list ICB pool deferred. Remaining: Z5 ogpu encode; Z7 eval; Z8 editor; Z6b signature collect / argument-slice / ICB re-encode. |
 
 ## Requests
 
@@ -67,13 +67,12 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 ### Z4
 - `text_pane::shown` still clones State on cache hit because `editor_frame::text_state` takes `&ModelView`; take/replace needs a `&mut` path in Z1's frame.
 ### Z5
-- Z6a: instanced atlas UV glyphs (or Glyphs with source rects) so canvas text can emit one batch instead of a CPU blit+upload per changing string.
 - crates/lru: fixed-capacity open-addressing buckets (nobody owns; HashMap nodes on insert).
 - MetalCommands Box + ogpu_core CommandsInner/RenderInner still per begin (~15 idle Rust floor).
-- Z6a: instanced atlas UV glyphs so canvas text skips per-frame blit upload.
 - Z6b: `create_offscreen` shared-headless leaves +1 native handle after a draw (`destroy_device` ok); scratch now uses owned `create_renderer`. Capacity-keyed ICB free-list needs correct child accounting on delayed destroy.
 - Z6b: `find_str` misses Wide `skey` mesh entries (re-upload every frame); mesh path uses `find`+`skey`. Prefer completing Wide lookup for texture/prepared or keep Str keys where find_str remains.
 ### Z6
 ### Z6b
-- Owns plan_entry/plan_batches/batch_resources_of/rebind and ICB pool. Coordinate with Z5 on shared helpers via Requests.
+- Owns plan_entry/plan_batches/batch_resources_of/rebind, ICB pool, and Image-run (same-texture Image/Glyphs → one Scene2Textured draw). Coordinate with Z5 on shared helpers via Requests.
+- Image-run + Atlas landed: A_idle_basic 240/8; window_resources text/atlas ownership + density checks green.
 ### Z7

@@ -223,34 +223,21 @@ fn paint_atlas(engine: &mut TextEngine, density: i64, align: Alignment, size: i6
         x += f64::from(adv);
     }
     let _ = align;
-    // Blit atlas glyphs into one logical-sized image so the scene still emits a single
-    // Command::Image (multi-quad Image commands blew past A_idle_basic's rust ceiling).
-    // Glyph pages stay warm: changing "frame N" only blits, no cosmic-text reshape.
-    // ponytail: CPU blit + one upload; instanced atlas quads when Z5 batches UV glyphs.
+    // Direct atlas quads: Z6b batches consecutive same-texture Images into one Scene2Textured
+    // draw (marks.rays affine[20k..]), so multi-glyph text stays under the A_idle_basic ceiling
+    // without a per-frame CPU blit/upload. Wrap/tracking still uses paint_fallback.
     let lw = x.max(1.0).ceil() as i64;
     let lh = (height as f64 / dens).ceil().max(1.0) as i64;
-    let pw = (lw as f64 * dens).ceil().max(1.0) as i64;
-    let ph = (lh as f64 * dens).ceil().max(1.0) as i64;
-    let need = (pw * ph * 4) as usize;
-    if engine.scratch.len() < need { engine.scratch.resize(need, 0); }
-    engine.scratch[..need].fill(0);
-    if !engine.pages.is_empty() {
-        let page = &engine.pages[page_i];
-        for q in &engine.rects {
-            let (sx, sy, sw, sh) = (q.source.0 as i64, q.source.1 as i64, q.source.2 as i64, q.source.3 as i64);
-            let (dx, dy) = ((q.dest.0 * dens).round() as i64, (q.dest.1 * dens).round() as i64);
-            for row in 0..sh {
-                if dy + row < 0 || dy + row >= ph { continue; }
-                let src = ((sy + row) * page.width + sx) as usize * 4;
-                let dst = ((dy + row) * pw + dx) as usize * 4;
-                let n = (sw * 4) as usize;
-                if src + n <= page.pixels.len() && dst + n <= need {
-                    engine.scratch[dst..dst + n].copy_from_slice(&page.pixels[src..src + n]);
-                }
-            }
-        }
+    if engine.pages.is_empty() {
+        return Ok(TextDraw::Image(image::create(1, 1, None)?));
     }
-    Ok(TextDraw::Image(image::upload_rgba(None, pw, ph, &engine.scratch[..need])?))
+    let page = &engine.pages[page_i];
+    Ok(TextDraw::Atlas {
+        image: page.image.clone(),
+        width: lw,
+        height: lh,
+        quads: std::rc::Rc::from(engine.rects.as_slice()),
+    })
 }
 
 fn paint_text(density: i64, wrap: Option<i64>, align: Alignment, size: i64, text: &str, mode: RenderMode, run: i64) -> Result<TextDraw, String> {

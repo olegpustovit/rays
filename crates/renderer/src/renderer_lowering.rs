@@ -298,6 +298,74 @@ fn wide(words: &[u64]) -> (u64, u64) {
     (hash(0x9e37_79b9_7f4a_7c15), hash(0xc2b2_ae3d_27d4_eb4f))
 }
 
+/// One quad's constants (marks.rays `quad-vertex`): 20 floats / 80 bytes — affine, white ink, rect, UV.
+fn write_quad_constants(vertices: &mut [u8], base_float: usize, transform: &Transform, destination: &Rect, uv: (f64, f64, f64, f64)) {
+    let (u0, v0, u1, v1) = uv;
+    let at = base_float * 4;
+    write_affine(&mut vertices[at..], transform);
+    for (index, value) in [1.0, 1.0, 1.0, 1.0, destination.x, destination.y, destination.width, destination.height, u0, v0, u1, v1]
+        .into_iter()
+        .enumerate()
+    {
+        put(&mut vertices[at..], 8 + index, value as f32);
+    }
+}
+
+fn image_run_capacity(quads: usize) -> usize {
+    quads.next_power_of_two().clamp(1, 256)
+}
+
+/// Consecutive same-texture Images (atlas glyph quads): one Scene2Textured draw whose constants are
+/// `affine[20k..]` per the native marks.rays quad-vertex. Capacity is the next power of two so a
+/// changing string patches instance bytes without a new mesh key / plan rebuild.
+fn quads_run(
+    state_: &mut Lowering,
+    texture: &Rc<SampledTexture>,
+    quads: &[(Rect, (f64, f64, f64, f64))],
+    transform: &Transform,
+    clip: (i64, i64, i64, i64),
+    framebuffer: (i64, i64, i64, i64),
+) -> Result<Draw, Error> {
+    let n = quads.len();
+    if n == 0 {
+        return Ok(quad(state_, texture, &Rect { x: 0., y: 0., width: 0., height: 0. }, (0., 0., 1., 1.), transform, clip, framebuffer));
+    }
+    if n == 1 {
+        return Ok(quad(state_, texture, &quads[0].0, quads[0].1, transform, clip, framebuffer));
+    }
+    let capacity = image_run_capacity(n);
+    // Texture key + capacity: destination/UV bytes patch in place under the same mesh identity.
+    let key = format!("image-run:{}:{capacity}", texture.key);
+    let mut vertices = vec![0u8; capacity * 80];
+    let empty = Rect { x: 0., y: 0., width: 0., height: 0. };
+    for (i, slot) in vertices.chunks_exact_mut(80).enumerate() {
+        let (dest, uv) = if i < n { (quads[i].0, quads[i].1) } else { (empty, (0., 0., 0., 0.)) };
+        write_quad_constants(slot, 0, transform, &dest, uv);
+    }
+    let indices = ui_index_bytes(state_, capacity as i64)?;
+    Ok(Rc::new(SampledDraw {
+        ui: None,
+        family: PipelineFamily::Scene2Textured,
+        blend: Blend::Alpha,
+        texture: Some(texture.clone()),
+        auxiliary: None,
+        vertex_attributes: None,
+        samples: 1,
+        draw: scene_execution::GeometryDraw {
+            mesh: Mesh {
+                key: MeshKey::Host(key),
+                vertices: new_bytes(vertices),
+                shared_vertices: None,
+                vertex_count: 4 * capacity as i64,
+                indices,
+                index_count: 6 * capacity as i64,
+                primitive: Primitive::TriangleList,
+            },
+            state: default_state(framebuffer, clip),
+        },
+    }))
+}
+
 /// Cached quads retain texture owners, so pointer identity cannot be reused while the draw is cached.
 fn quad(
     state_: &mut Lowering,
@@ -333,16 +401,8 @@ fn quad(
             (cached.vertices.clone(), cached.indices.clone(), cached.mesh_key.clone())
         }
         None => {
-            // the quad's constants (marks.rays, quad-vertex): the affine, a white ink, the
-            // rectangle and its texture's
             let mut vertices = vec![0u8; 80];
-            write_affine(&mut vertices, transform);
-            for (index, value) in [1.0, 1.0, 1.0, 1.0, destination.x, destination.y, destination.width, destination.height, u0, v0, u1, v1]
-                .into_iter()
-                .enumerate()
-            {
-                put(&mut vertices, 8 + index, value as f32);
-            }
+            write_quad_constants(&mut vertices, 0, transform, destination, uv);
             let mut indices = vec![0u8; 24];
             for (i, n) in [0, 1, 2, 0, 2, 3].into_iter().enumerate() {
                 put_word(&mut indices, i, n);
@@ -556,22 +616,41 @@ pub fn lower_scene2(
                 }
             }
             Command::Image(command) => {
+                // Same-texture Image runs → one instanced quad batch (marks.rays affine[20k..]).
+                let resource_id = command.resource_id;
+                let mut stop = cursor;
+                while stop < commands.len() {
+                    match &commands[stop] {
+                        Command::Image(next) if next.resource_id == resource_id => stop += 1,
+                        _ => break,
+                    }
+                }
+                cursor = stop;
                 if clip_live(&clips) {
-                    match resolve(command.resource_id) {
+                    match resolve(resource_id) {
                         None => failure = Some("resource id is unbound".to_owned()),
                         Some(source) => match snapshot(density, source) {
                             Err(e) => failure = Some(error::to_string(&e)),
                             Ok((width, height, texture)) => {
-                                let s = command.source;
                                 if width <= 0 || height <= 0 {
                                     failure = Some("resource extent is invalid".to_owned());
                                 } else {
                                     let (w, h) = (width as f64, height as f64);
-                                    let uv = (s.x / w, s.y / h, (s.x + s.width) / w, (s.y + s.height) / h);
                                     let transform = render_transform(transforms.last().expect("transform"));
                                     let clip = *clips.last().expect("clip");
-                                    let d = quad(state_, &texture, &command.destination, uv, &transform, clip, framebuffer);
-                                    emit(state_, &mut number, blend, d);
+                                    let mut quads = Vec::with_capacity(stop - first);
+                                    for cmd in &commands[first..stop] {
+                                        let Command::Image(img) = cmd else { unreachable!() };
+                                        let s = img.source;
+                                        quads.push((
+                                            img.destination,
+                                            (s.x / w, s.y / h, (s.x + s.width) / w, (s.y + s.height) / h),
+                                        ));
+                                    }
+                                    match quads_run(state_, &texture, &quads, &transform, clip, framebuffer) {
+                                        Ok(d) => emit(state_, &mut number, blend, d),
+                                        Err(e) => failure = Some(error::to_string(&e)),
+                                    }
                                 }
                             }
                         },
@@ -585,12 +664,21 @@ pub fn lower_scene2(
                         Some(source) => match snapshot(density, source) {
                             Err(e) => failure = Some(error::to_string(&e)),
                             Ok((width, height, texture)) => {
-                                for glyph in &glyphs.glyphs {
-                                    let destination = Rect { x: glyph.x, y: glyph.y, width: width as f64, height: height as f64 };
-                                    let transform = render_transform(transforms.last().expect("transform"));
-                                    let clip = *clips.last().expect("clip");
-                                    let d = quad(state_, &texture, &destination, (0.0, 0.0, 1.0, 1.0), &transform, clip, framebuffer);
-                                    emit(state_, &mut number, blend, d);
+                                let transform = render_transform(transforms.last().expect("transform"));
+                                let clip = *clips.last().expect("clip");
+                                let quads: Vec<(Rect, (f64, f64, f64, f64))> = glyphs
+                                    .glyphs
+                                    .iter()
+                                    .map(|glyph| {
+                                        (
+                                            Rect { x: glyph.x, y: glyph.y, width: width as f64, height: height as f64 },
+                                            (0.0, 0.0, 1.0, 1.0),
+                                        )
+                                    })
+                                    .collect();
+                                match quads_run(state_, &texture, &quads, &transform, clip, framebuffer) {
+                                    Ok(d) => emit(state_, &mut number, blend, d),
+                                    Err(e) => failure = Some(error::to_string(&e)),
                                 }
                             }
                         },
@@ -615,6 +703,37 @@ pub fn lower_scene2(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_run_batches_same_texture_quads() {
+        let mut state = create();
+        let transform = Transform { xx: 1., xy: 0., yx: 0., yy: 1., tx: 0., ty: 0. };
+        let viewport = (0, 0, 64, 64);
+        let pixels = new_bytes(vec![255; 64 * 64 * 4]);
+        let texture = Rc::new(SampledTexture {
+            key: "atlas".into(),
+            levels: Rc::new(vec![TextureLevel { width: 64, height: 64, bytes: pixels }]),
+            sampler: ui_sampler(),
+            gpu: None,
+        });
+        let quads: Vec<(Rect, (f64, f64, f64, f64))> = (0..5)
+            .map(|i| {
+                let x = i as f64 * 8.;
+                (
+                    Rect { x, y: 0., width: 8., height: 8. },
+                    (x / 64., 0., (x + 8.) / 64., 8. / 64.),
+                )
+            })
+            .collect();
+        let draw = quads_run(&mut state, &texture, &quads, &transform, viewport, viewport).unwrap();
+        assert_eq!(draw.family, PipelineFamily::Scene2Textured);
+        assert_eq!(draw.draw.mesh.vertex_count, 4 * 8); // capacity 8 for 5 quads
+        assert_eq!(draw.draw.mesh.index_count, 6 * 8);
+        assert!(matches!(&draw.draw.mesh.key, MeshKey::Host(k) if k == "image-run:atlas:8"));
+        // Same capacity: a longer run still under 8 keeps the mesh identity for in-place patch.
+        let again = quads_run(&mut state, &texture, &quads[..3], &transform, viewport, viewport).unwrap();
+        assert!(matches!(&again.draw.mesh.key, MeshKey::Host(k) if k == "image-run:atlas:4"));
+    }
 
     #[test]
     fn animated_quad_snapshots_obey_the_byte_budget() {
