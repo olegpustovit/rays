@@ -225,12 +225,17 @@ pub fn lex(source: &str) -> Arc<Vec<Token>> {
                 while tokens.last().is_some_and(|t| matches!(t.kind, Kind::End) && t.issue.is_none()) {
                     tokens.pop();
                 }
-                let mut rest = lex_full(&source[cut..]);
-                for t in &mut rest {
-                    t.start += cut as i64; t.stop += cut as i64;
-                    if let Some(issue) = &mut t.issue { issue.start += cut as i64; issue.finish += cut as i64; }
-                }
-                tokens.extend(rest);
+                thread_local!(static REST: std::cell::RefCell<Vec<Token>> = const { std::cell::RefCell::new(Vec::new()) });
+                REST.with(|cell| {
+                    let mut rest = cell.borrow_mut();
+                    rest.clear();
+                    lex_full_into(&mut rest, &source[cut..]);
+                    for t in rest.iter_mut() {
+                        t.start += cut as i64; t.stop += cut as i64;
+                        if let Some(issue) = &mut t.issue { issue.start += cut as i64; issue.finish += cut as i64; }
+                    }
+                    tokens.extend(rest.drain(..));
+                });
                 tokens
             } else {
                 lex_full(source)
@@ -251,9 +256,14 @@ pub fn lex(source: &str) -> Arc<Vec<Token>> {
 }
 
 pub fn lex_full(source: &str) -> Vec<Token> {
+    let mut tokens = Vec::new();
+    lex_full_into(&mut tokens, source);
+    tokens
+}
+
+fn lex_full_into(tokens: &mut Vec<Token>, source: &str) {
     let bytes = source.as_bytes();
     let n = bytes.len();
-    let mut tokens = Vec::new();
     let mut i = 0;
     while i < n {
         match bytes[i] {
@@ -336,7 +346,6 @@ pub fn lex_full(source: &str) -> Vec<Token> {
         tokens.extend(controls);
         tokens.sort_by_key(|item| item.start);
     }
-    tokens
 }
 
 #[cfg(test)]

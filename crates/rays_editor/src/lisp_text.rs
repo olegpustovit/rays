@@ -44,11 +44,11 @@ fn lexed_cache() -> &'static lru::IdentityList {
 /// the front so the long text outlives the caret prefixes the completions lex. The result is shared,
 /// never mutated by readers.
 pub fn lex(text: &str) -> Arc<Lexed> {
-    // ponytail: four texts held beside the budgeted cache so a hit copies nothing; the cache still owns the bytes it is charged
-    thread_local!(static RECENT: std::cell::RefCell<Vec<(Box<str>, Arc<Lexed>)>> = const { std::cell::RefCell::new(Vec::new()) });
+    // ponytail: four String shells beside the budgeted cache; warm miss reuses shells (no Box<str>).
+    thread_local!(static RECENT: std::cell::RefCell<Vec<(String, Arc<Lexed>)>> = const { std::cell::RefCell::new(Vec::new()) });
     let hit = RECENT.with(|r| {
         let mut r = r.borrow_mut();
-        let i = r.iter().position(|(t, _)| **t == *text)?;
+        let i = r.iter().position(|(t, _)| t.as_str() == text)?;
         r[..=i].rotate_right(1);
         Some(r[0].1.clone())
     });
@@ -58,8 +58,15 @@ pub fn lex(text: &str) -> Arc<Lexed> {
     let tokens = lex_cached(text);
     RECENT.with(|r| {
         let mut r = r.borrow_mut();
-        r.truncate(3);
-        r.insert(0, (text.into(), tokens.clone()));
+        if r.len() >= 4 {
+            let mut slot = r.pop().expect("len >= 4");
+            slot.0.clear();
+            slot.0.push_str(text);
+            slot.1 = tokens.clone();
+            r.insert(0, slot);
+        } else {
+            r.insert(0, (text.to_owned(), tokens.clone()));
+        }
     });
     tokens
 }

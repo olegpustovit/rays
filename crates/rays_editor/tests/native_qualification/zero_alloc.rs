@@ -35,8 +35,8 @@ const B_HOVER_GRAPH: (u64, u64) = (62, 9);
 const B_HOVER_INSPECTOR: (u64, u64) = (59, 9);
 const C_PAN: (u64, u64) = (41, 9);
 const C_ZOOM: (u64, u64) = (45, 9);
-// Z11: mono text-area paint + lex/colorize reuse; meas 172 → ceil 181.
-const D_TYPING: (u64, u64) = (181, 13);
+// Z11: mono text-area paint + lex/colorize reuse; meas 170 → ceil 179.
+const D_TYPING: (u64, u64) = (179, 13);
 // E click/toggle (Z13): settled = idle = 0 after isogrid render 0 + settle wait for zoom-rest timer.
 const E_CLICK_KEY: (u64, u64) = (167, 9);
 const E_CLICK_SETTLED: (u64, u64) = (0, 13);
