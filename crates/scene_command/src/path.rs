@@ -1,4 +1,6 @@
 use rays_math::float::{max as float_max, compare as compare_float};
+use std::cell::RefCell;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point {
     pub x: f64,
@@ -142,7 +144,53 @@ fn cubic(
     cubic(output, depth + 1, center, right, c2b, b, tolerance_squared)
 }
 
-fn flatten(tolerance: f64, path: &Path) -> Result<Vec<Vec<Point>>, Error> {
+/// Persistent working sets for flatten/tessellate/stroke. `clear()` keeps capacity.
+#[derive(Default)]
+pub struct Scratch {
+    contour_pool: Vec<Vec<Point>>,
+    contours: Vec<Vec<Point>>,
+    points: Vec<Point>,
+    ys: Vec<f64>,
+    edges: Vec<Crossing>,
+    vertices: Vec<Point>,
+    pub indices: Vec<i64>,
+    pub flat: Vec<f64>,
+}
+
+impl Scratch {
+    fn recycle_contours(&mut self) {
+        for mut c in self.contours.drain(..) {
+            c.clear();
+            self.contour_pool.push(c);
+        }
+    }
+
+    fn take_contour_buf(&mut self) -> Vec<Point> {
+        let mut buf = self.contour_pool.pop().unwrap_or_default();
+        buf.clear();
+        buf
+    }
+
+    fn finish_contour(&mut self) {
+        if self.points.is_empty() {
+            return;
+        }
+        let mut done = self.take_contour_buf();
+        std::mem::swap(&mut done, &mut self.points);
+        self.contours.push(done);
+    }
+}
+
+thread_local! {
+    static SCRATCH: RefCell<Scratch> = RefCell::new(Scratch::default());
+}
+
+/// Borrow the process scratch (clear + reuse). Nested tessellation is unsupported.
+pub fn with_scratch<R>(f: impl FnOnce(&mut Scratch) -> R) -> R {
+    SCRATCH.with(|s| f(&mut s.borrow_mut()))
+}
+
+fn flatten_into(scratch: &mut Scratch, tolerance: f64, path: &Path) -> Result<(), Error> {
     if !tolerance.is_finite() || tolerance <= 0.0 {
         return Err(Error::InvalidTolerance(tolerance));
     }
@@ -150,8 +198,8 @@ fn flatten(tolerance: f64, path: &Path) -> Result<Vec<Vec<Point>>, Error> {
         return Err(Error::EmptyPath);
     }
     let tolerance_squared = tolerance * tolerance;
-    let mut contours = Vec::new();
-    let mut points = Vec::new();
+    scratch.recycle_contours();
+    scratch.points.clear();
     let mut current: Option<Point> = None;
     let mut start: Option<Point> = None;
     for &command in &path.0 {
@@ -159,23 +207,23 @@ fn flatten(tolerance: f64, path: &Path) -> Result<Vec<Vec<Point>>, Error> {
             Command::MoveTo(p) => {
                 if !finite(p) { return Err(Error::NonFinitePoint(p)); }
                 if current.is_some() {
-                    if !points.is_empty() { contours.push(std::mem::take(&mut points)); }
+                    scratch.finish_contour();
                 }
-                add_point(&mut points, p)?;
+                add_point(&mut scratch.points, p)?;
                 current = Some(p);
                 start = Some(p);
             }
             Command::LineTo(p) => {
                 if !finite(p) { return Err(Error::NonFinitePoint(p)); }
                 if current.is_none() { return Err(Error::MissingCurrentPoint); }
-                add_point(&mut points, p)?;
+                add_point(&mut scratch.points, p)?;
                 current = Some(p);
             }
             Command::QuadraticTo(control, p) => {
                 if !finite(control) { return Err(Error::NonFinitePoint(control)); }
                 if !finite(p) { return Err(Error::NonFinitePoint(p)); }
                 let Some(a) = current else { return Err(Error::MissingCurrentPoint) };
-                quadratic(&mut points, 0, a, control, p, tolerance_squared)?;
+                quadratic(&mut scratch.points, 0, a, control, p, tolerance_squared)?;
                 current = Some(p);
             }
             Command::CubicTo(c1, c2, p) => {
@@ -183,25 +231,25 @@ fn flatten(tolerance: f64, path: &Path) -> Result<Vec<Vec<Point>>, Error> {
                 if !finite(c2) { return Err(Error::NonFinitePoint(c2)); }
                 if !finite(p) { return Err(Error::NonFinitePoint(p)); }
                 let Some(a) = current else { return Err(Error::MissingCurrentPoint) };
-                cubic(&mut points, 0, a, c1, c2, p, tolerance_squared)?;
+                cubic(&mut scratch.points, 0, a, c1, c2, p, tolerance_squared)?;
                 current = Some(p);
             }
             Command::Close => {
                 match (current, start) {
-                    (Some(last), Some(first)) if last != first => add_point(&mut points, first)?,
+                    (Some(last), Some(first)) if last != first => add_point(&mut scratch.points, first)?,
                     (Some(_), Some(_)) => (),
                     _ => return Err(Error::MissingCurrentPoint),
                 }
-                if !points.is_empty() { contours.push(std::mem::take(&mut points)); }
+                scratch.finish_contour();
                 current = None;
                 start = None;
             }
         }
     }
-    if current.is_some() && !points.is_empty() {
-        contours.push(points);
+    if current.is_some() {
+        scratch.finish_contour();
     }
-    Ok(contours)
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -212,7 +260,20 @@ struct Crossing {
     source: u32,
 }
 
-pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Mesh, Error> {
+fn add_quad(vertices: &mut Vec<Point>, indices: &mut Vec<i64>, left: Crossing, right: Crossing, y0: f64, y1: f64) -> Result<(), Error> {
+    if vertices.len().checked_add(4).filter(|n| *n <= MAX_POINTS).is_none() {
+        return Err(Error::ComplexityLimit);
+    }
+    let base = vertices.len() as i64;
+    vertices.extend_from_slice(&[
+        Point { x: left.x0, y: y0 }, Point { x: right.x0, y: y0 },
+        Point { x: right.x1, y: y1 }, Point { x: left.x1, y: y1 },
+    ]);
+    indices.extend_from_slice(&[base + 3, base + 2, base, base + 2, base + 1, base]);
+    Ok(())
+}
+
+fn tessellate_into(scratch: &mut Scratch, tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<(), Error> {
     let mut open_contour = false;
     let mut active = false;
     for command in &path.0 {
@@ -226,32 +287,24 @@ pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Me
         }
     }
     if active || open_contour { return Err(Error::OpenContour); }
-    let contours = flatten(tolerance, path)?;
-    let mut ys: Vec<f64> = contours.iter().flatten().map(|p| p.y).collect();
-    ys.sort_by(|a, b| compare_float(*a, *b));
-    ys.dedup_by(|a, b| *a == *b);
-    let mut vertices = Vec::new();
-    let mut triangles = Vec::new();
-    // Each quad emits its existing reversed index block, preserving triangle orientation.
-    let add_quad = |vertices: &mut Vec<Point>, triangles: &mut Vec<usize>, left: Crossing, right: Crossing, y0: f64, y1: f64| -> Result<(), Error> {
-        if vertices.len().checked_add(4).filter(|n| *n <= MAX_POINTS).is_none() {
-            return Err(Error::ComplexityLimit);
+    flatten_into(scratch, tolerance, path)?;
+    scratch.ys.clear();
+    for contour in &scratch.contours {
+        for p in contour {
+            scratch.ys.push(p.y);
         }
-        let base = vertices.len();
-        vertices.extend_from_slice(&[
-            Point { x: left.x0, y: y0 }, Point { x: right.x0, y: y0 },
-            Point { x: right.x1, y: y1 }, Point { x: left.x1, y: y1 },
-        ]);
-        triangles.extend_from_slice(&[base + 3, base + 2, base, base + 2, base + 1, base]);
-        Ok(())
-    };
-    for band in 0..ys.len().saturating_sub(1) {
-        let y0 = ys[band];
-        let y1 = ys[band + 1];
+    }
+    scratch.ys.sort_by(|a, b| compare_float(*a, *b));
+    scratch.ys.dedup_by(|a, b| *a == *b);
+    scratch.vertices.clear();
+    scratch.indices.clear();
+    for band in 0..scratch.ys.len().saturating_sub(1) {
+        let y0 = scratch.ys[band];
+        let y1 = scratch.ys[band + 1];
         if y1 <= y0 { continue; }
         let middle = (y0 + y1) * 0.5;
-        let mut edges = Vec::new();
-        for contour in &contours {
+        scratch.edges.clear();
+        for contour in &scratch.contours {
             for pair in contour.windows(2) {
                 let a = pair[0];
                 let b = pair[1];
@@ -259,16 +312,16 @@ pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Me
                 let high = a.y.max(b.y);
                 if a.y != b.y && middle >= low && middle < high {
                     let at = |y| a.x + ((y - a.y) * (b.x - a.x) / (b.y - a.y));
-                    let source = u32::try_from(edges.len()).map_err(|_| Error::ComplexityLimit)?;
-                    edges.push(Crossing { x0: at(y0), x1: at(y1), winding: if b.y > a.y { 1 } else { -1 }, source });
+                    let source = u32::try_from(scratch.edges.len()).map_err(|_| Error::ComplexityLimit)?;
+                    scratch.edges.push(Crossing { x0: at(y0), x1: at(y1), winding: if b.y > a.y { 1 } else { -1 }, source });
                 }
             }
         }
-        edges.sort_by(|a, b| compare_float((a.x0 + a.x1) * 0.5, (b.x0 + b.x1) * 0.5).then(a.source.cmp(&b.source)));
+        scratch.edges.sort_by(|a, b| compare_float((a.x0 + a.x1) * 0.5, (b.x0 + b.x1) * 0.5).then(a.source.cmp(&b.source)));
         let mut inside = false;
         let mut winding = 0;
         let mut left = None;
-        for edge in edges {
+        for &edge in &scratch.edges {
             let was_inside = inside;
             match fill_rule {
                 FillRule::EvenOdd => inside = !inside,
@@ -277,26 +330,46 @@ pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Me
             if !was_inside && inside { left = Some(edge); }
             else if was_inside && !inside {
                 let Some(left_edge) = left else { return Err(Error::InvalidTopology); };
-                add_quad(&mut vertices, &mut triangles, left_edge, edge, y0, y1)?;
+                add_quad(&mut scratch.vertices, &mut scratch.indices, left_edge, edge, y0, y1)?;
             }
         }
     }
-    Ok(Mesh { vertices, indices: triangles.into_iter().map(|i| i as i64).collect() })
+    Ok(())
 }
 
-pub fn stroke(
+pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Mesh, Error> {
+    with_scratch(|scratch| {
+        tessellate_into(scratch, tolerance, fill_rule, path)?;
+        Ok(Mesh { vertices: scratch.vertices.clone(), indices: scratch.indices.clone() })
+    })
+}
+
+/// Fill into scratch flat/index buffers (no Mesh alloc). Caller reads `scratch.flat` / `scratch.indices`.
+pub fn tessellate_scratch(scratch: &mut Scratch, tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<(), Error> {
+    tessellate_into(scratch, tolerance, fill_rule, path)?;
+    scratch.flat.clear();
+    scratch.flat.reserve(scratch.vertices.len() * 2);
+    for p in &scratch.vertices {
+        scratch.flat.push(p.x);
+        scratch.flat.push(p.y);
+    }
+    Ok(())
+}
+
+fn stroke_into(
+    scratch: &mut Scratch,
     tolerance: f64,
     width: f64,
     cap: Cap,
     join: Join,
     miter_limit: f64,
     path: &Path,
-) -> Result<Mesh, Error> {
+) -> Result<(), Error> {
     if !width.is_finite() || width <= 0.0 { return Err(Error::InvalidWidth(width)); }
     if !miter_limit.is_finite() || miter_limit < 1.0 { return Err(Error::InvalidMiterLimit(miter_limit)); }
-    let contours = flatten(tolerance, path)?;
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
+    flatten_into(scratch, tolerance, path)?;
+    scratch.vertices.clear();
+    scratch.indices.clear();
     let half = width * 0.5;
     let unit = |a: Point, b: Point| {
         let dx = b.x - a.x;
@@ -305,14 +378,14 @@ pub fn stroke(
         if length == 0.0 { None } else { Some((dx / length, dy / length)) }
     };
     let offset = |p: Point, nx: f64, ny: f64, scale: f64| Point { x: p.x + nx * scale, y: p.y + ny * scale };
-    let add_triangle = |vertices: &mut Vec<Point>, indices: &mut Vec<usize>, a: Point, b: Point, c: Point| -> Result<(), Error> {
+    let add_triangle = |vertices: &mut Vec<Point>, indices: &mut Vec<i64>, a: Point, b: Point, c: Point| -> Result<(), Error> {
         if vertices.len().checked_add(3).filter(|n| *n <= MAX_POINTS).is_none() { return Err(Error::ComplexityLimit); }
-        let base = vertices.len();
+        let base = vertices.len() as i64;
         vertices.extend_from_slice(&[a, b, c]);
         indices.extend_from_slice(&[base + 2, base + 1, base]);
         Ok(())
     };
-    let fan = |vertices: &mut Vec<Point>, indices: &mut Vec<usize>, center: Point, radius: f64, start_angle: f64, delta: f64| -> Result<(), Error> {
+    let fan = |vertices: &mut Vec<Point>, indices: &mut Vec<i64>, center: Point, radius: f64, start_angle: f64, delta: f64| -> Result<(), Error> {
         let denominator = if tolerance >= radius { std::f64::consts::PI } else { 2.0 * rays_math::libm::acos((1.0 - (tolerance / radius)).max(-1.0)) };
         let steps = ((delta.abs() / denominator).ceil() as usize).clamp(1, 64);
         let mut previous = offset(center, rays_math::libm::cos(start_angle), rays_math::libm::sin(start_angle), radius);
@@ -324,10 +397,12 @@ pub fn stroke(
         }
         Ok(())
     };
-    for contour in contours {
-        let count = contour.len();
-        let closed = count > 2 && contour[0] == contour[count - 1];
-        for pair in contour.windows(2) {
+    // Contours are in scratch.contours; stroke reads them without borrowing scratch mutably for helpers.
+    let contour_count = scratch.contours.len();
+    for ci in 0..contour_count {
+        let count = scratch.contours[ci].len();
+        let closed = count > 2 && scratch.contours[ci][0] == scratch.contours[ci][count - 1];
+        for pair in scratch.contours[ci].windows(2) {
             if let Some((dx, dy)) = unit(pair[0], pair[1]) {
                 let (nx, ny) = (-dy, dx);
                 let (a, b) = (pair[0], pair[1]);
@@ -335,13 +410,13 @@ pub fn stroke(
                 let a1 = offset(a, nx, ny, -half);
                 let b0 = offset(b, nx, ny, half);
                 let b1 = offset(b, nx, ny, -half);
-                if vertices.len().checked_add(4).filter(|n| *n <= MAX_POINTS).is_none() { return Err(Error::ComplexityLimit); }
-                let base = vertices.len();
-                vertices.extend_from_slice(&[a0, a1, b1, b0]);
-                indices.extend_from_slice(&[base + 2, base + 1, base, base + 3, base + 2, base]);
+                if scratch.vertices.len().checked_add(4).filter(|n| *n <= MAX_POINTS).is_none() { return Err(Error::ComplexityLimit); }
+                let base = scratch.vertices.len() as i64;
+                scratch.vertices.extend_from_slice(&[a0, a1, b1, b0]);
+                scratch.indices.extend_from_slice(&[base + 2, base + 1, base, base + 3, base + 2, base]);
             }
         }
-        let add_join = |vertices: &mut Vec<Point>, indices: &mut Vec<usize>, a: Point, b: Point, c: Point| -> Result<(), Error> {
+        let add_join = |vertices: &mut Vec<Point>, indices: &mut Vec<i64>, a: Point, b: Point, c: Point| -> Result<(), Error> {
             let (Some((dx0, dy0)), Some((dx1, dy1))) = (unit(a, b), unit(b, c)) else { return Ok(()) };
             let cross = dx0 * dy1 - dy0 * dx1;
             if !(cross.abs() > 1e-15) { return Ok(()); }
@@ -373,7 +448,7 @@ pub fn stroke(
                 }
             }
         };
-        let add_cap = |vertices: &mut Vec<Point>, indices: &mut Vec<usize>, point: Point, direction: (f64, f64), at_start: bool| -> Result<(), Error> {
+        let add_cap = |vertices: &mut Vec<Point>, indices: &mut Vec<i64>, point: Point, direction: (f64, f64), at_start: bool| -> Result<(), Error> {
             let (dx, dy) = direction;
             let (nx, ny) = (-dy, dx);
             match cap {
@@ -395,18 +470,86 @@ pub fn stroke(
             }
         };
         if closed {
-            for i in 1..count.saturating_sub(1) { add_join(&mut vertices, &mut indices, contour[i - 1], contour[i], contour[i + 1])?; }
-            add_join(&mut vertices, &mut indices, contour[count - 2], contour[0], contour[1])?;
+            for i in 1..count.saturating_sub(1) {
+                let (a, b, c) = (scratch.contours[ci][i - 1], scratch.contours[ci][i], scratch.contours[ci][i + 1]);
+                add_join(&mut scratch.vertices, &mut scratch.indices, a, b, c)?;
+            }
+            let (a, b, c) = (scratch.contours[ci][count - 2], scratch.contours[ci][0], scratch.contours[ci][1]);
+            add_join(&mut scratch.vertices, &mut scratch.indices, a, b, c)?;
         } else if count >= 2 {
-            for i in 1..count.saturating_sub(1) { add_join(&mut vertices, &mut indices, contour[i - 1], contour[i], contour[i + 1])?; }
-            if let Some(direction) = unit(contour[0], contour[1]) { add_cap(&mut vertices, &mut indices, contour[0], direction, true)?; }
-            if let Some(direction) = unit(contour[count - 2], contour[count - 1]) { add_cap(&mut vertices, &mut indices, contour[count - 1], direction, false)?; }
+            for i in 1..count.saturating_sub(1) {
+                let (a, b, c) = (scratch.contours[ci][i - 1], scratch.contours[ci][i], scratch.contours[ci][i + 1]);
+                add_join(&mut scratch.vertices, &mut scratch.indices, a, b, c)?;
+            }
+            if let Some(direction) = unit(scratch.contours[ci][0], scratch.contours[ci][1]) {
+                add_cap(&mut scratch.vertices, &mut scratch.indices, scratch.contours[ci][0], direction, true)?;
+            }
+            if let Some(direction) = unit(scratch.contours[ci][count - 2], scratch.contours[ci][count - 1]) {
+                add_cap(&mut scratch.vertices, &mut scratch.indices, scratch.contours[ci][count - 1], direction, false)?;
+            }
         }
     }
-    Ok(Mesh { vertices, indices: indices.into_iter().map(|i| i as i64).collect() })
+    Ok(())
+}
+
+pub fn stroke(
+    tolerance: f64,
+    width: f64,
+    cap: Cap,
+    join: Join,
+    miter_limit: f64,
+    path: &Path,
+) -> Result<Mesh, Error> {
+    with_scratch(|scratch| {
+        stroke_into(scratch, tolerance, width, cap, join, miter_limit, path)?;
+        Ok(Mesh { vertices: scratch.vertices.clone(), indices: scratch.indices.clone() })
+    })
+}
+
+/// Stroke into scratch flat/index buffers.
+pub fn stroke_scratch(
+    scratch: &mut Scratch,
+    tolerance: f64,
+    width: f64,
+    cap: Cap,
+    join: Join,
+    miter_limit: f64,
+    path: &Path,
+) -> Result<(), Error> {
+    stroke_into(scratch, tolerance, width, cap, join, miter_limit, path)?;
+    scratch.flat.clear();
+    scratch.flat.reserve(scratch.vertices.len() * 2);
+    for p in &scratch.vertices {
+        scratch.flat.push(p.x);
+        scratch.flat.push(p.y);
+    }
+    Ok(())
 }
 
 #[test]
 fn crossing_tie_key_uses_existing_padding() {
     assert_eq!(std::mem::size_of::<Crossing>(), 24);
+}
+
+#[test]
+fn scratch_reuses_capacity_across_tessellations() {
+    let path = of_commands(&[
+        Command::MoveTo(Point { x: 0.0, y: 0.0 }),
+        Command::LineTo(Point { x: 4.0, y: 0.0 }),
+        Command::LineTo(Point { x: 4.0, y: 3.0 }),
+        Command::LineTo(Point { x: 0.0, y: 3.0 }),
+        Command::Close,
+    ]);
+    with_scratch(|s| {
+        tessellate_scratch(s, 0.25, FillRule::NonZero, &path).unwrap();
+        let v_cap = s.vertices.capacity();
+        let i_cap = s.indices.capacity();
+        let e_cap = s.edges.capacity();
+        let y_cap = s.ys.capacity();
+        tessellate_scratch(s, 0.25, FillRule::NonZero, &path).unwrap();
+        assert!(s.vertices.capacity() >= v_cap, "vertices reallocated");
+        assert!(s.indices.capacity() >= i_cap, "indices reallocated");
+        assert!(s.edges.capacity() >= e_cap, "edges reallocated");
+        assert!(s.ys.capacity() >= y_cap, "ys reallocated");
+    });
 }

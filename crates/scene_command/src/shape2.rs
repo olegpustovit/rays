@@ -4,31 +4,46 @@ use path::{Command, Point};
 use render_ir::Geometry;
 
 fn point((x, y): (f64, f64)) -> Point { Point { x, y } }
-fn geometry_of_mesh(color: i32, mesh: path::Mesh) -> Geometry {
-    let vertices = mesh.vertices.into_iter().flat_map(|p| [p.x, p.y]).collect();
-    Geometry { vertices, indices: mesh.indices, color }
+
+fn geometry_from_scratch(color: i32, scratch: &path::Scratch) -> Geometry {
+    Geometry { vertices: scratch.flat.clone(), indices: scratch.indices.clone(), color }
 }
-fn path_error(operation: &str, result: Result<path::Mesh, path::Error>) -> Result<path::Mesh, String> {
-    match result {
-        Ok(mesh) => Ok(mesh),
-        Err(path::Error::EmptyPath) => Ok(path::Mesh { vertices: Vec::new(), indices: Vec::new() }),
+
+fn run_mesh(operation: &str, scratch: &mut path::Scratch, run: impl FnOnce(&mut path::Scratch) -> Result<(), path::Error>) -> Result<(), String> {
+    match run(scratch) {
+        Ok(()) => Ok(()),
+        Err(path::Error::EmptyPath) => {
+            scratch.flat.clear();
+            scratch.indices.clear();
+            Ok(())
+        }
         Err(_) => Err(operation.to_owned()),
     }
 }
+
 pub fn fill_path(color: i32, path: &path::Path) -> Result<Geometry, String> {
-    let mesh = path_error("Shape2 fill", path::tessellate(0.25, path::FillRule::NonZero, path))?;
-    Ok(geometry_of_mesh(color, mesh))
+    path::with_scratch(|scratch| {
+        run_mesh("Shape2 fill", scratch, |s| path::tessellate_scratch(s, 0.25, path::FillRule::NonZero, path))?;
+        Ok(geometry_from_scratch(color, scratch))
+    })
 }
+
 pub fn stroke_path(color: i32, path: &path::Path, width: f64) -> Result<Geometry, String> {
-    let mesh = path_error("Shape2 stroke", path::stroke(0.25, width, path::Cap::Butt, path::Join::Miter, 4.0, path))?;
-    Ok(geometry_of_mesh(color, mesh))
+    path::with_scratch(|scratch| {
+        run_mesh("Shape2 stroke", scratch, |s| {
+            path::stroke_scratch(s, 0.25, width, path::Cap::Butt, path::Join::Miter, 4.0, path)
+        })?;
+        Ok(geometry_from_scratch(color, scratch))
+    })
 }
+
 fn styled(path: &path::Path, fill: Option<i32>, stroke: Option<i32>) -> Result<Vec<Geometry>, String> {
     let mut output = Vec::new();
     if let Some(color) = fill { output.push(fill_path(color, path)?); }
     if let Some(color) = stroke { output.push(stroke_path(color, path, 1.0)?); }
     Ok(output)
 }
+
 fn path_of_points(closed: bool, points: &[(f64, f64)]) -> path::Path {
     let mut commands = Vec::with_capacity(points.len() + if closed { 1 } else { 0 });
     if let Some((&first, rest)) = points.split_first() {
