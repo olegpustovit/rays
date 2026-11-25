@@ -31,7 +31,8 @@ type Core = (c::Prepared, Option<ResidualId>, Buffers);
 pub struct Prepared {
     id: i64,
     states: I::Program,
-    plan: e::Plan,
+    /// Shared with image resolvers so a warm frame never deep-clones the plan.
+    plan: Arc<e::Plan>,
     root: Value,
     approx: Paths,
     fast: bool,
@@ -43,6 +44,13 @@ pub struct Prepared {
     /// the last scene's mark sets bind GPU outputs a later draw replaces
     kept: RefCell<Option<((i64, i64), scene::Scene)>>,
     borrows: Cell<bool>,
+}
+
+impl Prepared {
+    /// The evaluation plan this drawing was prepared against (shared; clone is a refcount bump).
+    pub fn plan(&self) -> &Arc<e::Plan> {
+        &self.plan
+    }
 }
 
 /// The optional arguments of [`prepare`].
@@ -87,7 +95,7 @@ pub fn prepare(o: &PrepareOptions, plan: &e::Plan, root: &Value) -> Result<Prepa
     Ok(Prepared {
         id: DRAWINGS.fetch_add(1, Ordering::SeqCst),
         states,
-        plan: plan.clone(),
+        plan: Arc::new(plan.clone()),
         root: root.clone(),
         approx: approx.clone(),
         fast: gpu.fast,

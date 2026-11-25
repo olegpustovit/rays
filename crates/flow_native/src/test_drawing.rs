@@ -56,6 +56,21 @@ fn a_static_drawing_is_kept_per_size() {
     assert!(!drawing::borrows_gpu(&prepared));
 }
 
+/// Z7: canvas_pictures must share Prepared's Arc<Plan> (refcount only), never deep-clone per frame.
+#[test]
+fn prepared_plan_arc_clone_allocates_nothing() {
+    let (lowered, value) = draw(r##"(draw/circle [10 20 0] 4)"##);
+    let prepared = ok(drawing::prepare(&drawing::PrepareOptions::default(), &lowered.evaluated.plan, &value));
+    let plan = prepared.plan().clone();
+    mem_sys::local_reset();
+    let begin = mem_sys::local_alloc_count();
+    for _ in 0..64 {
+        std::hint::black_box(plan.clone());
+    }
+    assert_eq!(mem_sys::local_alloc_count() - begin, 0, "Arc<Plan> clone is a refcount bump");
+    assert!(std::sync::Arc::ptr_eq(prepared.plan(), &plan));
+}
+
 fn rect_set(count: i64) -> Entry {
     Entry::MarkSet {
         count,

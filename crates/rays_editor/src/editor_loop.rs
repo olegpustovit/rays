@@ -181,7 +181,8 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
                     let image_images = images.clone();
                     let state = core.cook.state.clone();
                     let live = input.clone();
-                    let plan = lowered.plan.clone();
+                    // Prepared already holds Arc<Plan>; a warm frame only bumps the refcount.
+                    let plan = p.plan().clone();
                     let gpu_for_image = gpu.clone();
                     let resolver: drawing::ImageResolver = Rc::new(move |v: &EValue| workspace_images::image(Some(&gpu_for_image), true, &image_images, &state, &live, &plan, v));
                     let options = drawing::RenderOptions {
