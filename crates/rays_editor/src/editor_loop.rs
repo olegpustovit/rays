@@ -553,7 +553,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let area = if visible { panes.view } else { (0, 0, frame.input.size.0, frame.input.size.1) };
     let (input, modifiers, grab) = world_drag_frame(value, (before_level, before_map, &before_keys, &before_panes), update_.loaded_view.is_some(), &update_.actions, &update_.input, area);
     pick_in_views(value, &focused, &camera, &extra, area, &modifiers, &input, &raw_frame);
-    let (camera, extra) = if value.core.map_view { (camera, V::release(&extra)) } else { V::navigate(area, grab, &control, &camera, &extra, &value.core, &input) };
+    let (camera, extra) = if value.core.map_view { (camera, V::release(&extra)) } else { V::navigate(area, grab, &control, &camera, extra, &value.core, &input) };
     let (camera, render_status) = match &update_.framed {
         Some(Some((min, max))) => {
             let (_, _, w, h) = panes.view;
@@ -744,6 +744,8 @@ pub fn reads_clock(value: &LoopModel) -> bool {
 
 pub fn may_rest(value: &LoopModel, frame_: &frame::Frame) -> bool {
     let core = &value.core;
+    // A deferred UI repaint (caret blink) is fine: `rests` still refuses to skip while
+    // `wants_frame` is due. Clearing rest on every blink request kept settled frames hot.
     frame_.input.events.is_empty()
         && value.world_drag.is_none()
         && value.pending_render.is_none()
@@ -752,7 +754,6 @@ pub fn may_rest(value: &LoopModel, frame_: &frame::Frame) -> bool {
         && core.hud.is_none()
         && (core.notice.is_none() || frame_.input.t - core.notice_at >= 3.)
         && core.traces.iter().all(|(_, t)| t.samples >= t.cap)
-        && core.ui.borrow().repaint_at().is_none()
         && cook::at_rest(&core.cook)
         && (timeline::mode(&editor_list::timeline(core)) != timeline::Mode::Playing || !reads_clock(value))
 }

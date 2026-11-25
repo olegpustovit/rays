@@ -24,22 +24,22 @@ fn action_rounds() -> u64 {
 /// (rust allocs/unit, native mallocs/unit). Rust = counting allocator; native from trace when available.
 /// Seeded at measured (2026-11-25, after Z1/Z2/Z4) + 5%, rounded up. Lanes lower these toward 0 / ≤12.
 // Ceilings = measured + 5% after Z8 rest-picture borrow + device Arc reuse (2026-11-25).
-const A_BASIC: (u64, u64) = (414, 59);
+const A_BASIC: (u64, u64) = (413, 59);
 const A_EMPTY: (u64, u64) = (18, 10);
 const A_BARE: (u64, u64) = (18, 10);
 const A_ISOGRID: (u64, u64) = (29, 15);
 const A_ISOSEL: (u64, u64) = (29, 15);
-const B_HOVER_GRAPH: (u64, u64) = (183, 15);
-const B_HOVER_INSPECTOR: (u64, u64) = (183, 15);
-const C_PAN: (u64, u64) = (162, 15);
-const C_ZOOM: (u64, u64) = (158, 15);
-const D_TYPING: (u64, u64) = (402, 15);
-const E_CLICK_KEY: (u64, u64) = (278, 16);
-const E_CLICK_SETTLED: (u64, u64) = (160, 15);
-const E_TOGGLE_KEY: (u64, u64) = (383, 15);
-const E_TOGGLE_SETTLED: (u64, u64) = (163, 15);
-const F_FROZEN: (u64, u64) = (146, 10);
-const F_STATIC: (u64, u64) = (151, 10);
+const B_HOVER_GRAPH: (u64, u64) = (182, 15);
+const B_HOVER_INSPECTOR: (u64, u64) = (182, 15);
+const C_PAN: (u64, u64) = (161, 15);
+const C_ZOOM: (u64, u64) = (157, 15);
+const D_TYPING: (u64, u64) = (401, 15);
+const E_CLICK_KEY: (u64, u64) = (277, 16);
+const E_CLICK_SETTLED: (u64, u64) = (159, 15);
+const E_TOGGLE_KEY: (u64, u64) = (382, 15);
+const E_TOGGLE_SETTLED: (u64, u64) = (162, 15);
+const F_FROZEN: (u64, u64) = (145, 10);
+const F_STATIC: (u64, u64) = (150, 10);
 
 struct P {
     e: Option<editor::Editor>,
