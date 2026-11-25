@@ -141,9 +141,9 @@ fn non_default(node: &g::Node, builder: &mut SyntaxBuilder) -> Vec<(String, Synt
 
 // ---- applying ops to the text ----
 
-struct State {
+struct State<'a> {
     catalog: Arc<Catalog>,
-    workspace: workspace_doc::T,
+    workspace: std::borrow::Cow<'a, workspace_doc::T>,
     /// Homes already made bindings.
     unfolded: Vec<(Home, Path)>,
     /// The host's objects are already written.
@@ -154,15 +154,15 @@ struct State {
     source_changed: bool,
 }
 
-fn state(factories: Option<&[Factory]>, doc: &document::T) -> R<State> {
+fn state<'a>(factories: Option<&[Factory]>, doc: &'a document::T) -> R<State<'a>> {
     let catalog = kinds::shared(factories).map_err(|d| diag(&d))?;
-    Ok(State { catalog, workspace: doc.workspace.ws.clone(), unfolded: Vec::new(), adopted: false, changed: false, source_changed: false })
+    Ok(State { catalog, workspace: std::borrow::Cow::Borrowed(&doc.workspace.ws), unfolded: Vec::new(), adopted: false, changed: false, source_changed: false })
 }
 
 fn apply(st: &mut State, op: Op) -> R<()> {
     match workspace_doc::edit(&st.catalog, &st.workspace, &op) {
         Ok(workspace) => {
-            st.workspace = workspace;
+            st.workspace = std::borrow::Cow::Owned(workspace);
             st.changed = true;
             st.source_changed = true;
             Ok(())
@@ -845,7 +845,7 @@ fn settings_write(st: &mut State, before: &document::T, now: &settings::T) -> R<
             set(st, home, &changed, None)
         }
         None if differs => {
-            st.workspace.settings = now.clone();
+            st.workspace.to_mut().settings = now.clone();
             st.changed = true;
             Ok(())
         }
@@ -924,7 +924,7 @@ pub fn writes(doc: &document::T, level: Level, edit: &Edit) -> bool {
 }
 
 fn node_at(doc: &document::T, level: Level, id: i64) -> R<g::Node> {
-    match document::kinds(doc, level).and_then(|gr| g::find(&gr, id)) {
+    match document::kinds(doc, level).and_then(|gr| g::find(gr, id)) {
         Some(node) => Ok(node),
         None => stop("That object is gone."),
     }
@@ -1087,8 +1087,7 @@ fn write_edit(st: &mut State, doc: &document::T, level: Level, edit: &Edit) -> R
 }
 
 fn lower(factories: Option<&[Factory]>, previous: &document::T, workspace: &workspace_doc::T) -> R<document::T> {
-    let options = Options { factories: factories.map(|f| f.to_vec()), previous: Some(previous.clone()), ..Options::default() };
-    lowering::of_workspace(&options, workspace).map_err(|d| diag(&d))
+    lowering::lower_workspace(&Options::default(), factories, Some(previous), workspace).map_err(|d| diag(&d))
 }
 
 /// The edit written to the text and lowered again, the derived document never edited in between,
@@ -1110,7 +1109,7 @@ pub fn write(factories: Option<&[Factory]>, doc: &document::T, level: Level, edi
             // the lowering finds an object of the text by its home, else by kind and label: the
             // deleted ones are not there to be taken for the copies of a loop that stay
             match document::kinds(doc, level) {
-                Some(graph) => document::prune(&document::with_kinds(doc, level, g::remove(ids, &graph))),
+                Some(graph) => document::prune(&document::with_kinds(doc, level, g::remove(ids, graph))),
                 None => doc.clone(),
             }
         }
@@ -1120,7 +1119,7 @@ pub fn write(factories: Option<&[Factory]>, doc: &document::T, level: Level, edi
         Ok(Some((doc, note)))
     } else if !st.source_changed {
         let mut doc = doc;
-        doc.workspace.ws = st.workspace;
+        doc.workspace.ws = st.workspace.into_owned();
         Ok(Some((doc, note)))
     } else {
         Ok(Some((lower(factories, &doc, &st.workspace)?, note)))
@@ -1133,7 +1132,7 @@ pub fn write(factories: Option<&[Factory]>, doc: &document::T, level: Level, edi
 /// `reconcile` adopts it).
 pub fn set_fields(factories: Option<&[Factory]>, doc: &document::T, level: Level, node: i64, values: &[(String, Value)]) -> R<Option<(document::T, Effects, Home)>> {
     let home = field_home(doc, level, node);
-    let was = document::kinds(doc, level).and_then(|gr| g::find(&gr, node));
+    let was = document::kinds(doc, level).and_then(|gr| g::find(gr, node));
     match (home, was) {
         (Some(home), Some(was)) => {
             let (_, effects) = g::apply(&was, values)?;

@@ -374,7 +374,7 @@ fn part_literals() {
         for phase in ["print", "parse", "check", "project"] {
             assert_eq!(calls(&phases, phase), 0, "literal repeated {phase}");
         }
-        assert_eq!(doc::to_text(&next).unwrap(), doc::to_text(&doc::T { source: source.clone(), checked: Arc::new(checked.clone()), ..next.clone() }).unwrap(), "literal save differs from slow edit");
+        assert_eq!(doc::to_text(&next).unwrap(), doc::to_text(&doc::T { source: Arc::new(source.clone()), checked: Arc::new(checked.clone()), ..next.clone() }).unwrap(), "literal save differs from slow edit");
         let changes = doc::literal_changes(&old, &next).expect("literal changes");
         let (patched, phases) = sampled(|| {
             let mut current = Some(lowered.clone());
@@ -437,7 +437,7 @@ fn part_literals() {
         let (next, phases) = sampled(|| doc::edit(&catalog, &old, &operation).unwrap());
         assert!(calls(&phases, "check") == 0 && calls(&phases, "parse") == 0, "literal with notes or in a loop repeated the workspace check");
         let (source, checked) = full_edit(&catalog, &old, &operation).unwrap();
-        assert_eq!(doc::to_text(&next).unwrap(), doc::to_text(&doc::T { source, checked: Arc::new(checked.clone()), ..next.clone() }).unwrap(), "loop/comment literal text differs");
+        assert_eq!(doc::to_text(&next).unwrap(), doc::to_text(&doc::T { source: source.into(), checked: Arc::new(checked.clone()), ..next.clone() }).unwrap(), "loop/comment literal text differs");
         let low = flow_sop::lower::of_checked(Some(factories()), Default::default(), &old.checked).unwrap();
         let change = doc::literal_changes(&old, &next).unwrap().remove(0);
         let (patched, phases) = sampled(|| literal_edit::lower(&low, &change));

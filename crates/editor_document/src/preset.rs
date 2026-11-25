@@ -123,7 +123,7 @@ pub fn load_with_ops(gpu: Option<flow_ir::flow_ir::gpu::Config>, ops: Vec<FlowOp
     let mut workspace = workspace_doc::of_text(&options, &catalog, &text)
         .map_err(|ds| ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("\n"))?;
     // the view is the preset's own form, not the document's
-    workspace.extra = Vec::new();
+    workspace.extra = std::sync::Arc::default();
     let forms = s::parse(&text).map_err(|d| rays_diagnostic::to_string(&d))?;
     let view = match forms.iter().find(|form| s::head(form) == Some("view")) {
         Some(form) if form.children().len() == 2 => form.child(form.children()[1]),

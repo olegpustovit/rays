@@ -21,10 +21,6 @@ pub fn cook_effects() -> Effects {
     param::add_impact(param::Impact::Cook, param::NO_EFFECTS)
 }
 
-fn factories_of(factories: Option<&[Factory]>) -> Vec<Factory> {
-    factories.map(|f| f.to_vec()).unwrap_or_else(sop::nodes::factories)
-}
-
 /// One gesture on a workspace document: rewrite and re-check the source, then lower it into the
 /// document's objects. Atomic: an error changes nothing.
 fn edit_result(apply: &dyn Fn(&Catalog, &workspace_doc::T) -> R<workspace_doc::T>, factories: Option<&[Factory]>, doc: &document::T) -> R<document::T> {
@@ -32,7 +28,7 @@ fn edit_result(apply: &dyn Fn(&Catalog, &workspace_doc::T) -> R<workspace_doc::T
     let run = |d: &document::T| -> R<document::T> {
         let catalog = kinds::shared(factories)?;
         let workspace = apply(&catalog, &d.workspace.ws)?;
-        lowering::of_workspace(&lowering::Options { factories: Some(factories_of(factories)), previous: Some(d.clone()), ..Default::default() }, &workspace)
+        lowering::lower_workspace(&lowering::Options::default(), factories, Some(d), &workspace)
     };
     // a gesture on the scene the host composes (the text has no such graph yet, so the edit finds
     // nothing to change): the host's own objects are written out first, and the gesture is tried
@@ -95,7 +91,7 @@ pub fn text_edit(imports: Option<&[(String, String)]>, factories: Option<&[Facto
         layout: Some(workspace.layout.clone()),
     };
     let edited = workspace_doc::of_text(&options, &catalog, text)?;
-    lowering::of_workspace(&lowering::Options { factories: Some(factories_of(factories)), previous: Some(doc.clone()), ..Default::default() }, &edited).map_err(|d| vec![d])
+    lowering::lower_workspace(&lowering::Options::default(), factories, Some(doc), &edited).map_err(|d| vec![d])
 }
 
 /// A change to the workspace's layout keys (a moved item, a collapsed zone): the source and the
@@ -111,7 +107,7 @@ pub fn select_layout(factories: Option<&[Factory]>, doc: &document::T, name: &st
     workspace.layout.editor = Some(name.to_owned());
     match workspace_doc::editor_graph(&workspace) {
         None => Err(format!("Unknown editor layout {name}.")),
-        Some(_) => lowering::of_workspace(&lowering::Options { factories: Some(factories_of(factories)), previous: Some(doc.clone()), ..Default::default() }, &workspace)
+        Some(_) => lowering::lower_workspace(&lowering::Options::default(), factories, Some(doc), &workspace)
             .map_err(|d| rays_diagnostic::to_string(&d)),
     }
 }

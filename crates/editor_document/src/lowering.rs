@@ -885,11 +885,13 @@ fn objects_only(all: Vec<Call>) -> Vec<Call> {
 /// Whatever a declared object's text does not say is the schema's default, so the text is the
 /// whole truth of it.
 pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<document::T> {
+    lower_workspace(options, options.factories.as_deref(), options.previous.as_ref(), workspace)
+}
+
+pub(crate) fn lower_workspace(options: &Options, factories: Option<&[Factory]>, previous: Option<&document::T>, workspace: &workspace_doc::T) -> R<document::T> {
     let _phase = flow_syntax::phase_timer::measure("document.lower");
     flow_ir::fallback::reset();
-    let previous = options.previous.as_ref();
     let defer = options.defer.unwrap_or(true);
-    let factories: Vec<Factory> = options.factories.clone().unwrap_or_else(sop::nodes::factories);
     let mut gpu = options.gpu.clone().unwrap_or_else(|| match previous {
         Some(doc) => doc.workspace.lowered.gpu.clone(),
         None => gpu::default(),
@@ -952,7 +954,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
                     inputs: Some((*workspace.inputs).clone()),
                     ..Default::default()
                 };
-                lower_mod::of_checked(Some(factories.clone()), o, &workspace.checked)
+                lower_mod::of_checked(factories.map(<[Factory]>::to_vec), o, &workspace.checked)
             };
             let lowered = lower(&gpu)?;
             match (gpu.backend.is_some(), plan_window(workspace, &lowered.plan)) {

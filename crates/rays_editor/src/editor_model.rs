@@ -106,7 +106,7 @@ pub struct ScopeKey {
     pub probe_map: PathMap<i64>,
     pub graph: String,
     pub evaluated: Option<Arc<flow_eval::Eval>>,
-    pub summaries: Vec<cook::Summary>,
+    pub summaries: Rc<Vec<cook::Summary>>,
     pub time: Option<Input>,
     pub executions: probe_run::Reports,
     pub records: Option<Rc<RefCell<Probe>>>,
@@ -407,7 +407,7 @@ pub struct Carry {
     pub via: Via,
     pub original: Arc<Document>,
     /// the pieces cooked for `original`: a surface is picked on them, not on the preview
-    pub settled: Vec<cook::Piece>,
+    pub settled: Rc<Vec<cook::Piece>>,
     pub report: Option<CarryReport>,
     /// the key route's letters, computed for the pane graph named
     pub targets: Option<(Option<String>, Vec<(String, carry_mod::Place, String)>)>,

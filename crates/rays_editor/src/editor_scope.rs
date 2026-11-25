@@ -142,7 +142,7 @@ pub fn view_node(value: &mut EditorModel, path: &[Symbol]) {
 struct DocSaved {
     layout: layout_by_path::T,
     probes: layout_by_path::PathMap<i64>,
-    imports: Vec<(String, Vec<Syntax>)>,
+    imports: Arc<Vec<(String, Vec<Syntax>)>>,
 }
 
 impl scope::Saved for DocSaved {
@@ -491,7 +491,7 @@ pub fn scene_target<'a>(value: &ModelView<'a>, id: i64) -> Option<(ScopeKey, Pat
                         probe_map: value.probes.clone(),
                         graph,
                         evaluated: Some(evaluated.clone()),
-                        summaries: vec![],
+                        summaries: Rc::default(),
                         time: None,
                         executions: probe_run::no_reports(),
                         records: Some(Rc::new(RefCell::new(probe::make(&evaluated, options)))),

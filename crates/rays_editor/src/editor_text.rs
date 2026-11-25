@@ -234,7 +234,7 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
     };
     let scrub = |apply: &dyn Fn(&str) -> Candidate, draft: &str| -> Candidate {
         match &literal {
-            Some((source, op, position)) if **source == workspace.source => document_edit::syntax_edit_result(Some(&value.factories), &value.doc, op)
+            Some((source, op, position)) if *source == workspace.source => document_edit::syntax_edit_result(Some(&value.factories), &value.doc, op)
                 .map_err(|d| vec![Diagnostic { position: Some(position.clone()), span: None, ..d }]),
             _ => apply(draft),
         }

@@ -276,7 +276,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
     // Workspace gestures: one rewrite of the source per gesture, lowered into the document, one
     // history entry named by the op. A frame's gestures land together: the first one refused leaves
     // none of them applied, and a later one cannot hide its message.
-    let gestures = (!loaded && (!tree_edits.is_empty() || result.handle_changes.is_some() || !result.changes.is_empty())).then(|| (next.clone(), result.clone()));
+    let gestures = (!loaded && (!tree_edits.is_empty() || result.handle_changes.is_some() || !result.changes.is_empty())).then(|| (next.clone(), result.label.clone(), result.effects));
     let mut g = GestureLog::default();
     let factories: &[Factory] = &value.factories;
     let level = pane_level(value);
@@ -318,11 +318,12 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
         }
     }
     if !loaded {
-        for c in result.changes.clone() {
+        let changes = std::mem::take(&mut result.changes);
+        for c in &changes {
             if g.refused.is_some() {
                 continue;
             }
-            match &c {
+            match c {
                 Change::SetParameter { node, path, value: field } if in_text(*node) => {
                     set_fields(&mut next, &mut result, &mut g, *node, &[(path.clone(), field.clone())]);
                 }
@@ -508,14 +509,17 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                 _ => {}
             }
         }
+        result.changes = changes;
     }
-    if let Some(edit_error) = g.refused.clone() {
-        let (doc, mut res) = gestures.expect("a refused gesture has a rollback snapshot");
-        res.edit_error = Some(edit_error);
+    if let Some(edit_error) = g.refused.take() {
+        let (doc, label, effects) = gestures.expect("a refused gesture has a rollback snapshot");
+        result.label = label;
+        result.effects = effects;
+        result.edit_error = Some(edit_error);
         g.added = Vec::new();
         g.created = None;
         g.renamed = None;
-        return (doc, res, g.added, g.created, g.renamed, g.note);
+        return (doc, result, g.added, g.created, g.renamed, g.note);
     }
     (next, result, g.added, g.created, g.renamed, g.note)
 }

@@ -21,6 +21,7 @@ use crate::editor_inspect::kind;
 use crate::editor_model::*;
 use crate::editor_panes::{graph_family, listing, scope_name, texting};
 use crate::editor_shell::layouts;
+use std::borrow::Cow;
 use crate::selection;
 use crate::timeline;
 
@@ -106,12 +107,14 @@ pub fn world_keys<'a>(value: &ModelView<'a>, doc: &Arc<Document>, selection: &se
     // a World the text does not have is edited as a derived object, for reconcile to adopt
     let with_fields = |doc: &mut Arc<Document>, level: Level, edits: &[(i64, Vec<(String, Value)>)]| {
         if let Some(graph) = document::kinds(doc, level) {
-            let graph = edits.iter().fold(graph, |graph, (id, values)| match kg::set_fields(&graph, *id, values) {
-                Ok((graph, _)) => graph,
-                Err(_) => graph,
+            let updated = edits.iter().fold(Cow::Borrowed(graph.as_slice()), |graph, (id, values)| {
+                match kg::set_fields(&graph, *id, values) {
+                    Ok((graph, _)) => Cow::Owned(graph),
+                    Err(_) => graph,
+                }
             });
-            let current = match level { Level::Scene => Some(&doc.scene), Level::Inside(id) => document::layers(doc, id) };
-            if current.is_none_or(|current| !kg::same(current, &graph)) {
+            if !kg::same(graph, &updated) {
+                let graph = updated.into_owned();
                 let doc = Arc::make_mut(doc);
                 match level { Level::Scene => doc.scene = graph, Level::Inside(id) => { doc.layers.insert(id, graph); } }
             }

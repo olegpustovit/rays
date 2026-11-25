@@ -1057,7 +1057,7 @@ fn patched_shown(previous: &WorkspaceDoc, workspace: &WorkspaceDoc, shown: &Show
     let mark = shown.mark.map(|(a, b)| (boundary(a).unwrap_or(a), boundary(b).unwrap_or(b)));
     let printed = Printed::ready(applied, applied_spans)?;
     Ok(Some(Shown::new(ShownData {
-        source: Arc::new(workspace.source.clone()),
+        source: workspace.source.clone(),
         text,
         applied: printed.clone(),
         applied_spans: printed,

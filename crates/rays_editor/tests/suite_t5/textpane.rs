@@ -483,7 +483,7 @@ pub fn editor_literal_scrub() {
         let set = |v: &str| fe::Op::SetArg { node: g_a.clone(), key: pts.clone(), sub: vec![], value: num(v) };
         let (source, checked) = fe::apply_checked(&catalog, &before.source, &set("38")).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
         let mut alt = valid.clone();
-        alt.source = source;
+        alt.source = source.into();
         alt.checked = std::sync::Arc::new(checked);
         check(wd::to_text(&valid).unwrap() == wd::to_text(&alt).unwrap(), "fast text token scrub differs from the full syntax edit");
         drag(&mut env, 520.);
@@ -494,7 +494,7 @@ pub fn editor_literal_scrub() {
         check(matches!(points.node, Node::Num(n) if points.name(n) == "4"), &format!("text token scrub in tab {tab_index} did not apply its latest number: {} (at {nx:.1},{ny:.1}; text {:?})", flow_syntax::lisp::flat(&points), shown.text));
         let (source, checked) = fe::apply_checked(&catalog, &before.source, &set("4")).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
         let mut alt = ws.clone();
-        alt.source = source;
+        alt.source = source.into();
         alt.checked = std::sync::Arc::new(checked);
         check(wd::to_text(&ws).unwrap() == wd::to_text(&alt).unwrap(), "text token scrub differs from the full syntax edit");
         env.at((nx + 20., ny), vec![Event::PointerReleased(LB, (nx + 20., ny))]);

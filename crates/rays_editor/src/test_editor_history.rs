@@ -215,7 +215,12 @@ fn no_op_edit_is_detected_by_value() {
 fn snapshot_bytes_counts_imports() {
     let d = base();
     let mut saved = document::snapshot(&d);
+    let ws = &d.workspace.ws;
+    assert!(Arc::ptr_eq(&ws.source, &saved.saved_ws.source));
+    assert!(Arc::ptr_eq(&ws.extra, &saved.saved_ws.extra));
+    assert!(Arc::ptr_eq(&ws.imports, &saved.saved_ws.imports));
+    assert!(Arc::ptr_eq(&ws.import_sources, &saved.saved_ws.import_sources));
     let plain = document::snapshot_bytes(&saved);
-    saved.saved_ws.import_sources.push(("lib.rays".into(), "x".repeat(1 << 20)));
+    Arc::make_mut(&mut saved.saved_ws.import_sources).push(("lib.rays".into(), "x".repeat(1 << 20)));
     assert!(document::snapshot_bytes(&saved) >= plain + (1 << 20));
 }

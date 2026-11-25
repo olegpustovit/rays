@@ -141,7 +141,7 @@ pub struct Cook {
     pub await_: bool,
     pub schedule: schedule::Schedule,
     pub preparer: Preparer,
-    pub pieces: Vec<Piece>,
+    pub pieces: Rc<Vec<Piece>>,
     /// the latest desired submission settings
     pub settings: Option<settings::T>,
     pub error: Option<String>,
@@ -169,9 +169,9 @@ pub struct Cook {
     pub probes_owed: bool,
     /// updates since the last edit: footers are counted once an edit settles
     pub quiet: i64,
-    pub summaries: Vec<Summary>,
+    pub summaries: Rc<Vec<Summary>>,
     /// same bounded optional cook targets as summaries
-    pub sources: Vec<Source>,
+    pub sources: Arc<Vec<Source>>,
     /// bumped each time a cook publishes: a completed or awaited job, a recompiled or re-resolved
     /// graph, a changed error. What a cached view of the results keys on.
     pub results: u64,
@@ -279,7 +279,7 @@ pub fn create(
         await_,
         schedule: schedule::initial(),
         preparer: Preparer { cache: Rc::new(RefCell::new(PreparedCache { entries: VecDeque::new(), bytes: 0 })), prepare, clock },
-        pieces: Vec::new(),
+        pieces: Rc::default(),
         settings: None,
         error: None,
         failure: Rc::new(RefCell::new(None)),
@@ -296,8 +296,8 @@ pub fn create(
         probing: Vec::new(),
         probes_owed: false,
         quiet: 0,
-        summaries: Vec::new(),
-        sources: Vec::new(),
+        summaries: Rc::default(),
+        sources: Arc::default(),
         results: 0,
     })
 }
@@ -572,7 +572,7 @@ pub fn update(
     let mut summaries = value.summaries.clone();
     let mut sources = value.sources.clone();
     let (mut pieces, mut error, mut seconds, mut prepared_changed, mut framed, mut framing, force_next): (
-        Vec<Piece>,
+        Rc<Vec<Piece>>,
         Option<String>,
         Option<f64>,
         bool,
@@ -585,8 +585,8 @@ pub fn update(
             Ok(Cooked::Displayed(pieces, found, data)) => {
                 // a display cook that counted nothing keeps the counts it has
                 if !found.is_empty() {
-                    summaries = found;
-                    sources = data;
+                    summaries = Rc::new(found);
+                    sources = Arc::new(data);
                 }
                 // a late completion cooked from graphs that have since changed shows nothing of them:
                 // the previous piece stays until the resubmitted cook lands
@@ -597,12 +597,12 @@ pub fn update(
                         _ => value.pieces.iter().find(|old| old.id == p.id).cloned(),
                     })
                     .collect();
-                (pieces, None, Some(took), true, None, None, false)
+                (Rc::new(pieces), None, Some(took), true, None, None, false)
             }
             Ok(Cooked::Probed(pieces, found, data)) => {
-                summaries = found;
-                sources = data;
-                (pieces, value.error.clone(), value.seconds, true, None, None, false)
+                summaries = Rc::new(found);
+                sources = Arc::new(data);
+                (Rc::new(pieces), value.error.clone(), value.seconds, true, None, None, false)
             }
             Ok(Cooked::Framed(b)) => (value.pieces.clone(), value.error.clone(), value.seconds, false, Some(b), None, resume),
             Err(message) => {
@@ -622,7 +622,7 @@ pub fn update(
     // completes. Invalid nonempty SOPs keep their last successful graph and preview through the
     // compilation fallback.
     if (changed || completed) && pieces.iter().any(|p| !compiled.contains_key(&p.id)) {
-        pieces.retain(|p| compiled.contains_key(&p.id));
+        Rc::make_mut(&mut pieces).retain(|p| compiled.contains_key(&p.id));
         prepared_changed = true;
     }
     let force_flag = changed
@@ -730,9 +730,9 @@ pub fn update(
         match awaited.result {
             Ok(prepared) => match complete(gpu, &value.preparer, &value.pieces, prepared) {
                 Ok(Cooked::Displayed(awaited_pieces, found, data)) => {
-                    summaries = found;
-                    sources = data;
-                    pieces = awaited_pieces.into_iter().filter(|p| compiled.contains_key(&p.id)).collect();
+                    summaries = Rc::new(found);
+                    sources = Arc::new(data);
+                    pieces = Rc::new(awaited_pieces.into_iter().filter(|p| compiled.contains_key(&p.id)).collect());
                     error = None;
                     seconds = Some(awaited.seconds);
                     prepared_changed = true;
@@ -755,30 +755,27 @@ pub fn update(
     // a piece prepared under another highlight is prepared again from its kept output: no recook, no
     // lowering, and nothing when no tag is involved
     let mut retinted = false;
-    let mut retinted_pieces: Vec<Piece> = Vec::new();
-    for piece in pieces {
-        if pick::same_set(&piece.lit, lit) {
-            retinted_pieces.push(piece);
-            continue;
-        }
-        match sop::payload::geometry(&piece.output.payload) {
-            Err(_) => retinted_pieces.push(piece),
-            Ok(geometry) if pick::tags(&geometry).is_none() => retinted_pieces.push(Piece::with_lit(piece, lit)),
-            Ok(_) => {
-                let made = pick::tint(&piece.output, lit)
-                    .map_err(|d| rays_diagnostic::error_to_string(&d))
-                    .and_then(|tinted| prepare_cached(None, &value.preparer, piece.id, &piece.context, &piece.settings, &tinted));
-                match made {
-                    Ok(prepared) => {
+    if pieces.iter().any(|piece| !pick::same_set(&piece.lit, lit)) {
+        for piece in Rc::make_mut(&mut pieces) {
+            if pick::same_set(&piece.lit, lit) {
+                continue;
+            }
+            match sop::payload::geometry(&piece.output.payload) {
+                Err(_) => {}
+                Ok(geometry) if pick::tags(&geometry).is_none() => piece.lit = lit.clone(),
+                Ok(_) => {
+                    let made = pick::tint(&piece.output, lit)
+                        .map_err(|d| rays_diagnostic::error_to_string(&d))
+                        .and_then(|tinted| prepare_cached(None, &value.preparer, piece.id, &piece.context, &piece.settings, &tinted));
+                    if let Ok(prepared) = made {
                         retinted = true;
-                        retinted_pieces.push(Piece { prepared, lit: lit.clone(), ..piece });
+                        piece.prepared = prepared;
+                        piece.lit = lit.clone();
                     }
-                    Err(_) => retinted_pieces.push(piece),
                 }
             }
         }
     }
-    let pieces = retinted_pieces;
     let prepared_changed = prepared_changed || retinted;
     let (framed, framing) = match frame_request {
         None => (framed.take(), framing),
@@ -854,13 +851,6 @@ pub fn update(
         state: value.state.clone(),
     };
     UpdateResult { cook, edit_error, prepared_changed, framed }
-}
-
-impl Piece {
-    fn with_lit(mut piece: Piece, lit: &pick::Set) -> Piece {
-        piece.lit = lit.clone();
-        piece
-    }
 }
 
 /// Everything the worker's prepare step reads, owned so it can move to the worker thread. It makes

@@ -42,20 +42,20 @@ pub type Inputs = Vec<(String, Vec<(Symbol, E)>)>;
 #[derive(Clone)]
 pub struct T {
     /// The one `(workspace ...)` form.
-    pub source: Vec<S>,
+    pub source: Arc<Vec<S>>,
     pub checked: Arc<Workspace>,
     pub layout: lbp::T,
     pub settings: settings::T,
     /// The other root forms as they were written, for `to_text`.
-    pub extra: Vec<S>,
+    pub extra: Arc<Vec<S>>,
     /// Host-supplied graph inputs; retained across edits and reloads, validated by lowering,
     /// never written into the source.
     pub inputs: Arc<Inputs>,
     pub literal: Option<Literal>,
     /// Read-only children spliced from each relative imported file.
-    pub imports: Vec<(String, Vec<S>)>,
+    pub imports: Arc<Vec<(String, Vec<S>)>>,
     /// Original imported texts, retained for reload digests and rechecking.
-    pub import_sources: Vec<(String, String)>,
+    pub import_sources: Arc<Vec<(String, String)>>,
     /// A library of bare graph, definition or macro forms, printed without a workspace wrapper.
     pub fragment: bool,
 }
@@ -69,12 +69,12 @@ pub fn memory_allocations(value: &T) -> (Vec<(usize, usize)>, Vec<(usize, usize)
     memory.workspace(&value.checked);
     if let Some(literal) = &value.literal { memory.workspace(&literal.base); }
     memory.syntax.allocation(value.imports.as_ptr(), value.imports.capacity() * std::mem::size_of::<(String, Vec<S>)>());
-    for (path, forms) in &value.imports {
+    for (path, forms) in value.imports.iter() {
         memory.syntax.allocation(path.as_ptr(), path.capacity());
         memory.syntax.forms(forms);
     }
     memory.syntax.allocation(value.import_sources.as_ptr(), value.import_sources.capacity() * std::mem::size_of::<(String, String)>());
-    for (path, text) in &value.import_sources {
+    for (path, text) in value.import_sources.iter() {
         memory.syntax.allocation(path.as_ptr(), path.capacity());
         memory.syntax.allocation(text.as_ptr(), text.capacity());
     }
@@ -186,7 +186,7 @@ pub fn imported_file(imports: &[(String, Vec<S>)], path: &[Symbol]) -> Option<St
 
 fn authored_source(t: &T) -> Vec<S> {
     let names: Vec<String> = t.imports.iter().flat_map(|(_, forms)| forms.iter().filter_map(second_name)).collect();
-    if names.is_empty() { return t.source.clone(); }
+    if names.is_empty() { return (*t.source).clone(); }
     let mut builder = SyntaxBuilder::new();
     for form in t.source.iter() { builder.import(form); }
     let roots = t.source.iter().map(|form| match form.node {
@@ -477,15 +477,15 @@ pub fn check_text(options: &TextOptions, catalog: &Catalog, text: &str) -> Resul
     let layout = pruned(&checked, catalog, &layout);
     Ok((
         T {
-            source: vec![ws],
+            source: Arc::new(vec![ws]),
             layout,
             settings: st,
             inputs: Arc::new(options.inputs.clone()),
             literal: None,
-            imports: loaded.clone(),
             fragment,
-            import_sources: options.imports.iter().filter(|(path, _)| loaded.iter().any(|(p, _)| p == path)).cloned().collect(),
-            extra: if fragment { Vec::new() } else { forms.iter().filter(|f| head(f) != Some("workspace")).cloned().collect() },
+            import_sources: Arc::new(options.imports.iter().filter(|(path, _)| loaded.iter().any(|(p, _)| p == path)).cloned().collect()),
+            extra: Arc::new(if fragment { Vec::new() } else { forms.iter().filter(|f| head(f) != Some("workspace")).cloned().collect() }),
+            imports: Arc::new(loaded),
             checked: Arc::new(checked),
         },
         warnings,
@@ -497,7 +497,7 @@ pub fn of_text(options: &TextOptions, catalog: &Catalog, text: &str) -> Result<T
 }
 
 pub fn import_texts(t: &T) -> Vec<(String, String)> {
-    t.import_sources.clone()
+    (*t.import_sources).clone()
 }
 
 fn max_id(form: &S) -> i64 {
@@ -526,7 +526,7 @@ pub fn print(t: &T) -> R<(String, lisp::Spans)> {
     let mut names: Vec<&str> = written.clone();
     names.extend(["layout", "settings"].iter().filter(|n| !written.contains(n)));
     let mut carried: Vec<String> = Vec::new();
-    let mut remaining: Vec<S> = t.extra.clone();
+    let mut remaining = (*t.extra).clone();
     let mut builder = SyntaxBuilder::new();
     let mut forms: Vec<SyntaxId> = Vec::new();
     for name in names {
@@ -587,7 +587,7 @@ fn commit(t: &T, remap: &dyn Fn(&flow_check::workspace::Path) -> Option<flow_che
     if prune {
         layout = prune_keys(&t.checked, &checked, &layout);
     }
-    T { source, checked: Arc::new(checked), layout, literal: None, ..t.clone() }
+    T { source: Arc::new(source), checked: Arc::new(checked), layout, literal: None, ..t.clone() }
 }
 
 fn checker_for(ops: Arc<Vec<FlowOp>>, library: bool) -> Box<flow_edit::Checker> {
@@ -618,7 +618,7 @@ fn edit_unchecked(catalog: &Catalog, t: &T, op: &Op) -> R<T> {
                 None => change,
             };
             edits.insert(key(&change), change);
-            let source = (*checked.source).clone();
+            let source = checked.source.clone();
             return Ok(T { checked: Arc::new(checked), source, literal: Some(Literal { base, edits }), ..t.clone() });
         }
         _ => {}

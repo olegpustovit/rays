@@ -226,7 +226,7 @@ pub fn edit_node(value: &mut EditorModel, level: Level, node_id: i64, values: &[
         Err(message) => failed(value, message),
         Ok(None) => match document::kinds(&value.doc, level) {
             None => {},
-            Some(graph) => match kg::set_fields(&graph, node_id, values) {
+            Some(graph) => match kg::set_fields(graph, node_id, values) {
                 Err(_) => {},
                 Ok((graph, _)) => {
                     let edited = document::with_kinds(&value.doc, level, graph);

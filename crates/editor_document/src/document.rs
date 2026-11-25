@@ -248,7 +248,7 @@ pub fn snapshot_bytes(saved: &Snapshot) -> usize {
     let ws = &saved.saved_ws;
     // syntax is shared by Arc and counted once; the checked workspace and the ids hold about as much again
     let mut memory = s::Memory::default();
-    for form in ws.source.iter().chain(&ws.extra).chain(ws.imports.iter().flat_map(|(_, forms)| forms)) {
+    for form in ws.source.iter().chain(ws.extra.iter()).chain(ws.imports.iter().flat_map(|(_, forms)| forms)) {
         memory.add(form);
     }
     let texts: usize = ws.import_sources.iter().map(|(path, text)| path.len() + text.len()).sum();
@@ -282,10 +282,10 @@ pub fn with_layers(value: &T, id: i64, layers: kg::T) -> T {
 }
 
 /// The objects or layers of a level; none inside a geometry object.
-pub fn kinds(value: &T, level: Level) -> Option<kg::T> {
+pub fn kinds(value: &T, level: Level) -> Option<&kg::T> {
     match level {
-        Level::Scene => Some(value.scene.clone()),
-        Level::Inside(id) => layers(value, id).cloned(),
+        Level::Scene => Some(&value.scene),
+        Level::Inside(id) => layers(value, id),
     }
 }
 
