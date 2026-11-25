@@ -30,6 +30,7 @@ gpu_case!(text_text_find, textpane::editor_text_find);
 gpu_case!(scene_sync_add_by_key, scene_sync_t::add_by_key);
 gpu_case!(materials_carry, carry_t::carry_tests);
 gpu_case!(materials_viewport_carry, carry_t::viewport_carry_tests);
+gpu_case!(materials_carry_over_lisp, carry_t::carry_over_lisp_is_steady);
 
 pub fn cases() -> Vec<(&'static str, fn())> {
     vec![
@@ -44,5 +45,6 @@ pub fn cases() -> Vec<(&'static str, fn())> {
         ("scene_sync_add_by_key", scene_sync_add_by_key),
         ("materials_carry", materials_carry),
         ("materials_viewport_carry", materials_viewport_carry),
+        ("materials_carry_over_lisp", materials_carry_over_lisp),
     ]
 }

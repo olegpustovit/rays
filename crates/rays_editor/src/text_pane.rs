@@ -2792,8 +2792,9 @@ fn revision(bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, vocab: &Rc<Vo
 
 /// A printing refusal is visible in the pane and reaches the editor without replacing its draft.
 pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, vocab: &Rc<Vocab>, names: &Rc<Names>, time: f64, state: &State, shown: &Shown) -> Vec<Intent> {
-    // an unchanged pane is a kept view: its intents are none (nothing reached it)
-    let revision = revision(bounds, tabs_right, vocab, names, time, state, shown).unwrap_or_else(|| time.to_bits());
+    // an unchanged pane is a kept view: its intents are none (nothing reached it). A carry over the pane
+    // reports where it is every frame, so the pane builds while one is held.
+    let revision = if ui.carrying().is_some() { None } else { revision(bounds, tabs_right, vocab, names, time, state, shown) }.unwrap_or_else(|| time.to_bits());
     let mut built = None;
     kit::cached(ui, "text-pane", revision, &mut |ui| built = Some(view_checked(ui, bounds, tabs_right, vocab, names, time, state, shown)));
     match built.unwrap_or(Ok(Vec::new())) {

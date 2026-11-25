@@ -92,6 +92,7 @@ marks_scene_rects_size_array
 marks_scene_retention
 marks_scene_static_allocation
 materials_carry
+materials_carry_over_lisp
 materials_face_materials
 materials_follow
 materials_refs

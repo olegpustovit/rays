@@ -103,6 +103,43 @@ fn split(ratio: f64, a: Box<Tree>, b: Box<Tree>) -> Box<Tree> {
     Box::new(Tree::Split { axis: Axis::H, size: Size::Ratio(ratio), a, b })
 }
 
+/// the outline row of a graph, in screen points, as the Navigator draws it now
+fn row_at(e: &Ed, catalog: &flow_check::catalog::Catalog, layout: &Tree, graph: &str) -> (f64, f64) {
+    let doc = e.ws().checked.clone();
+    let chips = match flow_eval::r#static(&doc, false, None) {
+        Ok(ev) => N::chips(&ev),
+        Err(d) => fail(&rays_diagnostic::to_string(&d)),
+    };
+    let active = e.pane();
+    let scope = flow_graph::projection::of_graph(catalog, &doc, &active).ok().map(Rc::new);
+    let objects = (0..kg_len(e.e()))
+        .map(|_| N::Obj { depth: 0, letter: String::new(), name: String::new(), detail: String::new(), visible: None, render: None, lead: false, inert: false, chosen: false, home: None })
+        .collect();
+    let params = N::Params {
+        workspace: doc.clone(),
+        active: Some(active),
+        scope,
+        records: None,
+        probes: Rc::new(|_| 0),
+        selected: Vec::new(),
+        chips,
+        objects,
+        root_detail: String::new(),
+        layouts: None,
+        notes: Vec::new(),
+    };
+    let geometry = L::geometry(None, Some(&[Panel::Timeline]), layout, &frame_at((0., 0.), vec![], 0));
+    let bounds = L::find(&geometry, &Panel::Outline).expect("outline").body;
+    for (row, (x, y, w, h)) in N::row_rects(&N::initial(), &params, bounds) {
+        let text = N::describe(&row);
+        let text = text.strip_prefix("> ").unwrap_or(&text).to_string();
+        if text.starts_with(&format!("{graph} · ")) {
+            return (f64::from(x + w / 2.), f64::from(y + h / 2.));
+        }
+    }
+    fail(&format!("the outline has no row {graph}"))
+}
+
 pub fn carry_tests() {
     let layout = split(0.22, leaf(Panel::Outline), split(0.45, leaf(Panel::View("main".into())), split(0.62, leaf(Panel::Graph), leaf(Panel::Inspector))));
     let mut e = Ed::new(make(CARRY_SOURCE, f64::INFINITY));
@@ -111,42 +148,7 @@ pub fn carry_tests() {
     let ys = rays_editor::editor_commands::keymap().iter().filter(|c| matches!(&c.trigger, Some(Trigger::Chord(Key::KeyChar('y'), m)) if m.is_empty())).count();
     chk(ys == 1, "y picks up and no other command takes it");
     let catalog = catalog();
-    // the outline row of a graph, in screen points, as the Navigator draws it now
-    let row_of = |e: &Ed, graph: &str| -> (f64, f64) {
-        let doc = e.ws().checked.clone();
-        let chips = match flow_eval::r#static(&doc, false, None) {
-            Ok(ev) => N::chips(&ev),
-            Err(d) => fail(&rays_diagnostic::to_string(&d)),
-        };
-        let active = e.pane();
-        let scope = flow_graph::projection::of_graph(&catalog, &doc, &active).ok().map(Rc::new);
-        let objects = (0..kg_len(e.e()))
-            .map(|_| N::Obj { depth: 0, letter: String::new(), name: String::new(), detail: String::new(), visible: None, render: None, lead: false, inert: false, chosen: false, home: None })
-            .collect();
-        let params = N::Params {
-            workspace: doc.clone(),
-            active: Some(active),
-            scope,
-            records: None,
-            probes: Rc::new(|_| 0),
-            selected: Vec::new(),
-            chips,
-            objects,
-            root_detail: String::new(),
-            layouts: None,
-            notes: Vec::new(),
-        };
-        let geometry = L::geometry(None, Some(&[Panel::Timeline]), &layout, &frame_at((0., 0.), vec![], 0));
-        let bounds = L::find(&geometry, &Panel::Outline).expect("outline").body;
-        for (row, (x, y, w, h)) in N::row_rects(&N::initial(), &params, bounds) {
-            let text = N::describe(&row);
-            let text = text.strip_prefix("> ").unwrap_or(&text).to_string();
-            if text.starts_with(&format!("{graph} · ")) {
-                return (f64::from(x + w / 2.), f64::from(y + h / 2.));
-            }
-        }
-        fail(&format!("the outline has no row {graph}"))
-    };
+    let row_of = |e: &Ed, graph: &str| row_at(e, &catalog, &layout, graph);
     let tile = |e: &Ed, path: &[&str]| -> (f64, f64) {
         let path: flow_check::workspace::Path = path.iter().map(|s| (*s).into()).collect();
         let (x, y, w, h) = editor::node_box(e.e(), &path).expect("box");
@@ -421,6 +423,54 @@ const VIEWPORT_SOURCE: &str = r#"(workspace views
     (let* [left (ui/viewport (ref day))
            right (ui/viewport (ref night))]
       (ui/workspace (ui/split_at "horizontal" 0.6 (ui/split_at "horizontal" 0.5 left right) (ui/graph))))))"#;
+
+/// A row carried over a Lisp pane keeps its preview on still frames: the text pane's kept view
+/// returned no CarryOver, so the preview dropped and came back every other frame.
+pub fn carry_over_lisp_is_steady() {
+    let source = r#"(workspace drop
+  (graph a :context sop (sop/box))
+  (graph b :context sop (sop/merge (sop/box)))
+  (graph scene :context scene (scene/merge (scene/geometry (ref b))))
+  (graph editor :context editor (ui/workspace (ui/split_at "horizontal" 0.3 (ui/outline) (ui/lisp)))))"#;
+    let layout = split(0.3, leaf(Panel::Outline), leaf(Panel::Lisp));
+    let mut e = Ed::new(editor::create(editor::Create { carry_budget: Some(f64::INFINITY), ..options() }, &load(source), None, prepare_empty(), editor::draw_fn()).unwrap_or_else(|m| fail(&m)));
+    // as the app runs: a kept view is not rebuilt to verify it
+    e.e().core.ui.borrow_mut().verify_views(false);
+    e.step(vec![]);
+    e.jump("b");
+    // the Lisp pane's Graph tab, and the gap after `(sop/merge` in it: a put there previews
+    let geometry = L::geometry(None, Some(&[Panel::Timeline]), &layout, &frame_at((0., 0.), vec![], 0));
+    let (x, top, w, _) = L::find(&geometry, &Panel::Lisp).expect("lisp").body;
+    let tab = tab_at(w < 400, x + w - 36, top, 1);
+    e.step_m(tab, vec![Event::PointerMoved(tab)]);
+    e.step_m(tab, vec![Event::PointerPressed(LB, tab), Event::PointerReleased(LB, tab)]);
+    e.step(vec![]);
+    chk(e.e().core.text.tab == rays_editor::text_pane::Tab::Graph, "the Lisp pane shows the graph");
+    let text = rays_editor::text_pane::make_shown(&e.ws().source, "b", None, rays_editor::text_pane::Tab::Graph).unwrap().text.clone();
+    let l = text.split('\n').position(|line| line.contains("(sop/merge")).expect("(sop/merge");
+    let row_y = top as f64 + 8. + l as f64 * 17.;
+    let catalog = catalog();
+    let from = row_at(&e, &catalog, &layout, "a");
+    e.step_m(from, vec![Event::PointerMoved(from)]);
+    e.step_b(from, vec![Event::PointerPressed(LB, from)]);
+    let (fx, fy) = from;
+    e.step_b((fx + 12., fy + 6.), vec![Event::PointerMoved((fx + 12., fy + 6.))]);
+    e.step_b((fx + 12., fy + 6.), vec![]);
+    chk(editor::carrying(e.e()).is_some(), "the row is carried");
+    // along the line to the first place the put previews (the gap after `(sop/merge`)
+    let over = (0..120).map(|i| (x as f64 + 30. + i as f64 * 3., row_y)).find(|&p| {
+        e.step_b(p, vec![Event::PointerMoved(p)]);
+        e.step_b(p, vec![]);
+        has(&e.line(), "Preview")
+    }).unwrap_or_else(|| fail(&format!("no place on the line previews the put: {}", e.line())));
+    let first = e.line();
+    for k in 0..6 {
+        e.step_b(over, vec![]);
+        chk(e.line() == first && has(&e.text(), "(ref a)"), &format!("still frame {k}: {} after {first}", e.line()));
+    }
+    e.step_b(over, vec![key(Key::Escape)]);
+    e.step_m(over, vec![Event::PointerReleased(LB, over)]);
+}
 
 pub fn viewport_carry_tests() {
     let ws0 = load(VIEWPORT_SOURCE);
