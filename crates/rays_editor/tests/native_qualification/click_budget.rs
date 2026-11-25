@@ -16,15 +16,15 @@ const H: i64 = 900;
 const CEILINGS: &[(&str, &str, u64, u64)] = &[
     ("basic", "idle", 674, 598),
     ("basic", "hover", 611, 612),
-    ("basic", "split right", 13384, 619),
+    ("basic", "split right", 10800, 619),
     ("basic", "retype graph", 2870, 160),
     ("basic", "retype inspector", 2831, 151),
-    ("basic", "retype lisp", 2810, 3738),
+    ("basic", "retype lisp", 2810, 795),
     ("basic", "retype list", 2831, 158),
     ("basic", "retype spreadsheet", 2828, 151),
     ("basic", "retype outline", 2820, 157),
     ("basic", "close panel", 2562, 123),
-    ("basic", "split below", 3034, 3784),
+    ("basic", "split below", 3034, 796),
     ("basic", "toggle inspector", 294, 168),
     ("basic", "toggle graph", 386, 150),
     ("basic", "toggle graph back", 354, 164),
@@ -43,12 +43,12 @@ const CEILINGS: &[(&str, &str, u64, u64)] = &[
     ("empty", "split right", 2790, 198),
     ("empty", "retype graph", 2272, 192),
     ("empty", "retype inspector", 2362, 181),
-    ("empty", "retype lisp", 2240, 1925),
+    ("empty", "retype lisp", 2240, 634),
     ("empty", "retype list", 2260, 196),
     ("empty", "retype spreadsheet", 2259, 184),
     ("empty", "retype outline", 2246, 189),
     ("empty", "close panel", 2097, 179),
-    ("empty", "split below", 2509, 1974),
+    ("empty", "split below", 2509, 638),
     ("empty", "toggle inspector", 419, 196),
     ("empty", "toggle graph", 399, 180),
     ("empty", "toggle graph back", 392, 196),
@@ -93,11 +93,17 @@ const CEILINGS: &[(&str, &str, u64, u64)] = &[
     ("long", "idle after session", 207, 145),
 ];
 
+/// (workspace, action, ceiling on the busiest of its four frames): the first Lisp pane on IsoGrid
+/// prints the document (136,747 allocations before the printer wrote flat text into one buffer).
+const PEAKS: &[(&str, &str, u64)] = &[("isogrid", "retype lisp", 12_800)];
+
 pub(crate) struct P {
     pub(crate) e: Option<editor::Editor>,
     tick: i64,
     canvas: rays::canvas::Canvas,
     rows: Vec<(String, f64, u64, u64)>,
+    /// the most allocations of any of an action's four frames
+    peaks: Vec<(String, u64)>,
 }
 
 impl P {
@@ -120,6 +126,7 @@ impl P {
         let cells: Vec<String> = frames.iter().map(|(ms, n)| format!("{ms:7.2}ms {n:7}a")).collect();
         eprintln!("CLICK {name:26} | {}", cells.join(" | "));
         self.rows.push((name.to_string(), frames[0].0, frames[0].1, frames[3].1));
+        self.peaks.push((name.to_string(), frames.iter().map(|f| f.1).max().unwrap_or(0)));
     }
     /// every press but the last on its own frame; the last is the measured click
     fn act(&mut self, name: &str, keys: &[Key], presses: &[Key]) {
@@ -147,10 +154,15 @@ pub(crate) fn session(label: &str, source: &str, actions: &dyn Fn(&mut P)) -> Ve
     sop::async_cook::set_clock(&core.cook.worker, core.clock.clone());
     // measured as the app runs: no verifying rebuilds
     e.core.ui.borrow_mut().verify_views(false);
-    let mut p = P { e: Some(e), tick: 0, canvas, rows: Vec::new() };
+    let mut p = P { e: Some(e), tick: 0, canvas, rows: Vec::new(), peaks: Vec::new() };
     for _ in 0..30 { p.step(&[], vec![], (600., 400.)); }
     eprintln!("CLICK ===== {label}: key frame, +1, +2, +3 (update+render ms, allocations)");
     actions(&mut p);
+    for (name, peak) in &p.peaks {
+        if let Some((_, _, max)) = PEAKS.iter().find(|c| c.0 == label && c.1 == name) {
+            assert!(peak <= max, "{label} {name}: a frame allocated {peak}, over {max}");
+        }
+    }
     editor::close(p.e.as_ref().unwrap());
     flow_native::workspace_gpu::close(&gpu);
     rays::canvas::destroy(&p.canvas).unwrap();

@@ -31,6 +31,16 @@ fn spaces(count: usize) -> String {
     " ".repeat(count)
 }
 
+fn push_spaces(text: &mut String, count: usize) {
+    text.extend(std::iter::repeat_n(' ', count));
+}
+
+/// the printer's span markers around a form's text: `\u{1}id\u{2}` before, `\u{3}` after
+fn open_mark(form: &Syntax, text: &mut String) {
+    use std::fmt::Write;
+    let _ = write!(text, "\u{1}{}\u{2}", form.id);
+}
+
 pub fn float(value: f64) -> String {
     param::float_text_with_decimal(value, true)
 }
@@ -96,14 +106,12 @@ fn prefix(kind: QuoteKind) -> &'static str {
     }
 }
 
-fn meta_pre(form: &Syntax) -> String {
-    let mut text = String::new();
+fn push_meta(form: &Syntax, text: &mut String) {
     for meta in form.meta() {
         text.push_str("^:");
         text.push_str(meta);
         text.push(' ');
     }
-    text
 }
 
 fn kids(form: &Syntax) -> &[SyntaxId] {
@@ -119,32 +127,51 @@ fn head(form: &Syntax) -> &str {
 }
 
 fn core_flat(form: &Syntax) -> String {
-    match &form.node {
-        Node::Sym(symbol) => form.name(*symbol).to_owned(),
-        Node::Kw(keyword) => format!(":{}", form.name(*keyword)),
-        Node::Num(raw) => number(form.name(*raw)),
-        Node::Str(text) => quote_string(form.bytes(*text)),
-        Node::List(_) => join_form(form, "(", ")"),
-        Node::Vec(_) => join_form(form, "[", "]"),
-        Node::Map(_) => join_form(form, "{", "}"),
-        Node::Quote(kind, child) => format!("{}{}", prefix(*kind), flat_(&form.child(*child))),
-    }
-}
-
-fn join_form(form: &Syntax, open: &str, close: &str) -> String {
-    let mut text = String::from(open);
-    for (index, child) in kids(form).iter().enumerate() {
-        if index > 0 { text.push(' '); }
-        text.push_str(&flat_(&form.child(*child)));
-    }
-    text.push_str(close);
+    let mut text = String::new();
+    core_flat_into(form, &mut text);
     text
 }
 
+/// One line, written into `text`: a subtree's flat text is one buffer, not a String per node.
+fn core_flat_into(form: &Syntax, text: &mut String) {
+    let join = |open: char, close: char, text: &mut String| {
+        text.push(open);
+        for (index, child) in kids(form).iter().enumerate() {
+            if index > 0 { text.push(' '); }
+            flat_into(&form.child(*child), text);
+        }
+        text.push(close);
+    };
+    match &form.node {
+        Node::Sym(symbol) => text.push_str(form.name(*symbol)),
+        Node::Kw(keyword) => { text.push(':'); text.push_str(form.name(*keyword)); }
+        Node::Num(raw) => {
+            let raw = form.name(*raw);
+            if raw.contains('.') && !(matches!(raw, "NaN" | "Infinity" | "-Infinity") || raw.contains('e') || raw.contains('E')) {
+                text.push_str(&number(raw));
+            } else {
+                text.push_str(raw);
+            }
+        }
+        Node::Str(bytes) => text.push_str(&quote_string(form.bytes(*bytes))),
+        Node::List(_) => join('(', ')', text),
+        Node::Vec(_) => join('[', ']', text),
+        Node::Map(_) => join('{', '}', text),
+        Node::Quote(kind, child) => { text.push_str(prefix(*kind)); flat_into(&form.child(*child), text); }
+    }
+}
+
+fn flat_into(form: &Syntax, text: &mut String) {
+    open_mark(form, text);
+    push_meta(form, text);
+    core_flat_into(form, text);
+    text.push('\u{3}');
+}
+
 fn flat_(form: &Syntax) -> String {
-    let mut text = meta_pre(form);
-    text.push_str(&core_flat(form));
-    wrap(form, &text)
+    let mut text = String::new();
+    flat_into(form, &mut text);
+    text
 }
 
 fn newline_comments(lines: &[String], column: usize) -> String {
@@ -152,19 +179,13 @@ fn newline_comments(lines: &[String], column: usize) -> String {
     for line in lines {
         if line.is_empty() { text.push(';'); } else { text.push_str("; "); text.push_str(line); }
         text.push('\n');
-        text.push_str(&spaces(column));
+        push_spaces(&mut text, column);
     }
     text
 }
 
 fn note_at(form: &Syntax, column: usize) -> String {
     newline_comments(&form.notes(), column)
-}
-
-fn with_notes(form: &Syntax, column: usize, text: String) -> String {
-    let mut result = note_at(form, column);
-    result.push_str(&text);
-    result
 }
 
 fn own(form: &Syntax) -> bool {
@@ -232,16 +253,30 @@ fn wide(form: &Syntax) -> bool {
 }
 
 fn pp(form: &Syntax, indent: usize) -> String {
-    let pre = meta_pre(form);
-    let mut text = pre.clone();
-    text.push_str(&core(form, indent + pre.len()));
-    wrap(form, &text)
+    let mut text = String::new();
+    open_mark(form, &mut text);
+    let at = text.len();
+    push_meta(form, &mut text);
+    let pre = text.len() - at;
+    if matches!(&form.node, Node::Sym(_) | Node::Kw(_) | Node::Num(_) | Node::Str(_)) {
+        core_flat_into(form, &mut text);
+    } else {
+        text.push_str(&core(form, indent + pre));
+    }
+    text.push('\u{3}');
+    text
 }
 
 fn core(form: &Syntax, indent: usize) -> String {
-    let flat = core_flat(form);
+    if matches!(&form.node, Node::Sym(_) | Node::Kw(_) | Node::Num(_) | Node::Str(_)) {
+        return core_flat(form);
+    }
+    // the one-line text is printed only when a form may fit on a line: a wide form (more nodes than
+    // WIDTH) never does, and flattening every enclosing form made the print quadratic in depth
+    let flat_text = std::cell::OnceCell::new();
+    let flat_ref = || flat_text.get_or_init(|| core_flat(form));
     let narrow = !wide(form);
-    let fits = |column: usize, limit: usize| narrow && visible_width(&flat) + column <= limit;
+    let fits = |column: usize, limit: usize| narrow && visible_width(flat_ref()) + column <= limit;
     let forms = kids(form);
     let len = forms.len();
     let is_vector = matches!(&form.node, Node::Vec(_));
@@ -249,14 +284,18 @@ fn core(form: &Syntax, indent: usize) -> String {
     let deeply_nested = deep(form);
     let line = |index: usize, column: usize| {
         let child = &form.child(forms[index]);
-        format!("\n{}{}", spaces(column), with_notes(child, column, pp(child, column)))
+        let mut text = String::from("\n");
+        push_spaces(&mut text, column);
+        text.push_str(&note_at(child, column));
+        text.push_str(&pp(child, column));
+        text
     };
     match &form.node {
-        Node::Sym(_) | Node::Kw(_) | Node::Num(_) | Node::Str(_) => flat,
+        Node::Sym(_) | Node::Kw(_) | Node::Num(_) | Node::Str(_) => unreachable!(),
         Node::Quote(kind, child) => format!("{}{}", prefix(*kind), pp(&form.child(*child), indent + prefix(*kind).len())),
         Node::Vec(_) | Node::Map(_) => {
             if !deeply_nested && (is_vector || fits(indent, WIDTH)) {
-                flat
+                flat_text.into_inner().unwrap_or_else(|| core_flat(form))
             } else {
                 let column = indent + 1;
                 let mut pieces = Vec::new();
@@ -270,7 +309,7 @@ fn core(form: &Syntax, indent: usize) -> String {
                         pair.push_str(&key_text);
                         if !value.notes().is_empty() {
                             pair.push('\n');
-                            pair.push_str(&spaces(column + 2));
+                            push_spaces(&mut pair, column + 2);
                             pair.push_str(&note_at(value, column + 2));
                             pair.push_str(&pp(value, column + 2));
                         } else {
@@ -288,7 +327,7 @@ fn core(form: &Syntax, indent: usize) -> String {
                 let mut text = String::from(open);
                 if forms.first().is_some_and(|child| !form.arena().notes(*child).is_empty()) {
                     text.push('\n');
-                    text.push_str(&spaces(column));
+                    push_spaces(&mut text, column);
                 }
                 text.push_str(&pieces.join(&format!("\n{}", spaces(column))));
                 text.push_str(&end_notes(form, column));
@@ -296,7 +335,7 @@ fn core(form: &Syntax, indent: usize) -> String {
                 text
             }
         }
-        Node::List(_) if len == 0 => flat,
+        Node::List(_) if len == 0 => flat_text.into_inner().unwrap_or_else(|| core_flat(form)),
         Node::List(_) => {
             let call_head = head(form);
             let bind_forms = ["let", "let*", "for", "sum"];
@@ -313,7 +352,7 @@ fn core(form: &Syntax, indent: usize) -> String {
                 text.push_str(&pp(&start, column));
                 for (i, step) in steps.iter().enumerate() {
                     text.push('\n');
-                    text.push_str(&spaces(column));
+                    push_spaces(&mut text, column);
                     if i == last { text.push_str(&core(step, column)); }
                     else { text.push_str(&note_at(step, column)); text.push_str(&pp(step, column)); }
                 }
@@ -324,7 +363,7 @@ fn core(form: &Syntax, indent: usize) -> String {
                 for id in &forms[2..] {
                     let child = &form.child(*id);
                     text.push_str("\n\n");
-                    text.push_str(&spaces(indent + 2));
+                    push_spaces(&mut text, indent + 2);
                     text.push_str(&note_at(child, indent + 2));
                     text.push_str(&pp(child, indent + 2));
                 }
@@ -336,7 +375,7 @@ fn core(form: &Syntax, indent: usize) -> String {
                 && !special
                 && !(matches!(call_head, "let" | "let*") && len > 1 && is_vec_at(1) && vec_len(1) > 2)
             {
-                flat
+                flat_text.into_inner().unwrap_or_else(|| core_flat(form))
             } else if bind_forms.contains(&call_head) && is_vec_at(1) && len == 3 && slots_plain(2) {
                 let column = indent + call_head.len() + 2;
                 let mut text = format!("({call_head} {}", binding_vector(&form.child(forms[1]), column));
@@ -363,7 +402,7 @@ fn core(form: &Syntax, indent: usize) -> String {
                 let column = indent + 4;
                 let mut text = String::from("(if");
                 if !form.arena().notes(forms[1]).is_empty() {
-                    text.push('\n'); text.push_str(&spaces(column)); text.push_str(&note_at(&form.child(forms[1]), column));
+                    text.push('\n'); push_spaces(&mut text, column); text.push_str(&note_at(&form.child(forms[1]), column));
                 } else { text.push(' '); }
                 text.push_str(&pp(&form.child(forms[1]), column));
                 text.push_str(&line(2, column));
@@ -399,7 +438,7 @@ fn core(form: &Syntax, indent: usize) -> String {
                     let selector = &form.child(forms[1]);
                     let mut prefix_text = String::from("(case");
                     if !selector.notes().is_empty() {
-                        prefix_text.push('\n'); prefix_text.push_str(&spaces(column)); prefix_text.push_str(&note_at(selector, column));
+                        prefix_text.push('\n'); push_spaces(&mut prefix_text, column); prefix_text.push_str(&note_at(selector, column));
                         prefix_text.push_str(&pp(selector, column));
                     } else { prefix_text.push(' '); prefix_text.push_str(&pp(selector, indent + 6)); }
                     prefix_text
@@ -413,13 +452,13 @@ fn core(form: &Syntax, indent: usize) -> String {
                     if i + 1 < len {
                         let value = &form.child(forms[i + 1]);
                         if !value.notes().is_empty() || test_text.contains('\n') {
-                            row.push('\n'); row.push_str(&spaces(column + 2)); row.push_str(&note_at(value, column + 2)); row.push_str(&pp(value, column + 2));
+                            row.push('\n'); push_spaces(&mut row, column + 2); row.push_str(&note_at(value, column + 2)); row.push_str(&pp(value, column + 2));
                         } else {
                             row.push(' '); row.push_str(&pp(value, column + visible_width(&test_text) + 1));
                         }
                         i += 2;
                     } else { i += 1; }
-                    text.push('\n'); text.push_str(&spaces(column)); text.push_str(&row);
+                    text.push('\n'); push_spaces(&mut text, column); text.push_str(&row);
                 }
                 text.push_str(&end_notes(form, column));
                 text.push(')');
@@ -438,19 +477,19 @@ fn core(form: &Syntax, indent: usize) -> String {
                 }
                 let head_text = flat_(&form.child(forms[0]));
                 if units.is_empty() && form.tail().is_empty() {
-                    flat
+                    flat_text.into_inner().unwrap_or_else(|| core_flat(form))
                 } else if own(form) {
                     let column = indent + 2;
                     let mut text = String::from("(");
                     if !form.arena().notes(forms[0]).is_empty() { text.push_str(&note_at(&form.child(forms[0]), indent + 1)); }
                     text.push_str(&head_text);
                     for unit in &units {
-                        text.push('\n'); text.push_str(&spaces(column));
+                        text.push('\n'); push_spaces(&mut text, column);
                         if unit.len() == 2 {
                             let key = &form.child(unit[0]); let value = &form.child(unit[1]);
                             text.push_str(&note_at(key, column)); text.push_str(&flat_(key));
                             if !value.notes().is_empty() {
-                                text.push('\n'); text.push_str(&spaces(column + 2)); text.push_str(&note_at(value, column + 2)); text.push_str(&pp(value, column + 2));
+                                text.push('\n'); push_spaces(&mut text, column + 2); text.push_str(&note_at(value, column + 2)); text.push_str(&pp(value, column + 2));
                             } else {
                                 text.push(' '); text.push_str(&pp(value, column + visible_width(&flat_(key)) + 1));
                             }
@@ -469,11 +508,11 @@ fn core(form: &Syntax, indent: usize) -> String {
                     };
                     let first = render_unit(&units[0]);
                     let mut text = format!("({head_text}");
-                    if column == indent + 4 && units.len() > 1 && visible_width(&first) > 30 { text.push('\n'); text.push_str(&spaces(column)); }
+                    if column == indent + 4 && units.len() > 1 && visible_width(&first) > 30 { text.push('\n'); push_spaces(&mut text, column); }
                     else { text.push(' '); }
                     text.push_str(&first);
                     for unit in &units[1..] {
-                        text.push('\n'); text.push_str(&spaces(column)); text.push_str(&render_unit(unit));
+                        text.push('\n'); push_spaces(&mut text, column); text.push_str(&render_unit(unit));
                     }
                     text.push(')');
                     text
@@ -495,7 +534,7 @@ fn binding_vector(form: &Syntax, column: usize) -> String {
         if i + 1 < values.len() {
             let value = &form.child(values[i + 1]);
             if !value.notes().is_empty() {
-                row.push('\n'); row.push_str(&spaces(column + 3)); row.push_str(&note_at(value, column + 3)); row.push_str(&pp(value, column + 3));
+                row.push('\n'); push_spaces(&mut row, column + 3); row.push_str(&note_at(value, column + 3)); row.push_str(&pp(value, column + 3));
             } else {
                 row.push(' '); row.push_str(&pp(value, column + 2 + visible_width(&name_text)));
             }
@@ -505,11 +544,11 @@ fn binding_vector(form: &Syntax, column: usize) -> String {
     }
     let mut text = String::from("[");
     if values.first().is_some_and(|value| !form.arena().notes(*value).is_empty()) {
-        text.push('\n'); text.push_str(&spaces(column + 1));
+        text.push('\n'); push_spaces(&mut text, column + 1);
     }
     text.push_str(&rows.join(&format!("\n{}", spaces(column + 1))));
     if !form.tail().is_empty() {
-        text.push('\n'); text.push_str(&spaces(column + 1)); text.push_str(&newline_comments(&form.tail(), column + 1));
+        text.push('\n'); push_spaces(&mut text, column + 1); text.push_str(&newline_comments(&form.tail(), column + 1));
     }
     text.push(']');
     wrap(form, &text)
