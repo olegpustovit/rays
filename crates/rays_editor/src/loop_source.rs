@@ -315,14 +315,60 @@ fn read_outcome(value: &mut LoopModel, outcome: Option<Result<(), String>>) {
             value.state_error = Some(format!("Autosave failed: {message}"));
             value.saved_doc = std::sync::Weak::new();
             value.saved_drafts = None;
+            value.recovery_print = None;
         }
         None => {}
     }
 }
 
-/// One recovery file per sketch. Polling at 2 Hz keeps checking out of idle frames; the print and the
-/// write run on the `Saver`'s thread (a fixed-step run waits for it, as for its cook); a live drag is
-/// saved after its release (the caller skips held frames); close flushes.
+/// Cached workspace body for recovery prints. When source/extra/settings Arc identity still holds,
+/// only `(layout ...)` is rebuilt — no `SyntaxBuilder::import` of the authored source.
+#[derive(Clone)]
+pub struct RecoveryPrint {
+    pub body: Arc<str>,
+    pub source: Arc<Vec<flow_syntax::syntax::Syntax>>,
+    pub extra: Arc<Vec<flow_syntax::syntax::Syntax>>,
+    pub ws_settings: editor_document::settings::T,
+    pub doc_settings: editor_document::settings::T,
+    /// Full last-written recovery text (body + view); skip when compose would reprint the same bytes.
+    pub written: Arc<str>,
+}
+
+fn recovery_prior<'a>(cache: &'a Option<RecoveryPrint>, doc: &editor_document::document::T) -> Option<&'a str> {
+    let c = cache.as_ref()?;
+    let ws = &doc.workspace.ws;
+    if Arc::ptr_eq(&c.source, &ws.source)
+        && Arc::ptr_eq(&c.extra, &ws.extra)
+        && editor_document::settings::same_values(&c.ws_settings, &ws.settings)
+        && editor_document::settings::same_values(&c.doc_settings, &doc.settings)
+    {
+        Some(c.body.as_ref())
+    } else {
+        None
+    }
+}
+
+/// Warm the body cache off the hot path so the first layout-only edit can splice.
+fn ensure_recovery_body(value: &mut LoopModel) {
+    let doc = value.core.doc.clone();
+    if recovery_prior(&value.recovery_print, &doc).is_some() {
+        return;
+    }
+    let Ok(body) = preset::text(&doc) else { return };
+    let ws = &doc.workspace.ws;
+    value.recovery_print = Some(RecoveryPrint {
+        body: body.into(),
+        source: ws.source.clone(),
+        extra: ws.extra.clone(),
+        ws_settings: ws.settings.clone(),
+        doc_settings: doc.settings.clone(),
+        written: Arc::from(""),
+    });
+}
+
+/// One recovery file per sketch. Polling at 2 Hz keeps checking out of idle frames; compose runs on
+/// the UI thread (layout-only splices the prior body), the write runs on the `Saver` thread; a live
+/// drag is saved after its release (the caller skips held frames); close and cook.await_ flush.
 pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     let outcome = value.saver.take_done();
     read_outcome(value, outcome);
@@ -344,12 +390,21 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     }
     // a preview document is never saved
     if (saved_same && key == value.saved_view_key && drafts == value.saved_drafts) || editor_host::carrying(&value.core) {
+        // Warm the print base while the document is idle so a later layout-only edit splices.
+        if !editor_host::carrying(&value.core) {
+            ensure_recovery_body(value);
+        }
+        if force || value.core.cook.await_ {
+            let outcome = value.saver.flush();
+            read_outcome(value, outcome);
+        }
         return;
     }
     let view = if key == value.saved_view_key { value.saved_view.clone() } else { V::section(&value.camera, &value.extra) };
     // the recovery file of an earlier session holds its unsaved work: orbiting in a document that is
     // still the one opened never writes over it
     if !value.state_owned && drafts.is_none() && editor_text::same_text(&value.core.doc, &value.opened) && Path::new(&editor_setup::state_file(&value.core)).exists() {
+        ensure_recovery_body(value);
         value.saved_doc = Arc::downgrade(&value.core.doc);
         value.saved_view = view;
         value.saved_view_key = key;
@@ -362,8 +417,46 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     } else {
         value.core.doc.clone()
     };
-    let (directory, name, written) = (editor_setup::state_directory(&value.core), value.core.state_name.clone(), view.clone());
-    value.saver.submit(Some(doc.clone()), Box::new(move || preset::save(&directory, &name, &doc, &written).map(|_| ())));
+    let prior = recovery_prior(&value.recovery_print, &doc);
+    let text = match preset::compose(&doc, &view, prior) {
+        Ok(text) => text,
+        Err(message) => {
+            value.state_error = Some(format!("Autosave failed: {message}"));
+            value.saved_doc = std::sync::Weak::new();
+            value.saved_drafts = None;
+            value.recovery_print = None;
+            return;
+        }
+    };
+    let text: Arc<str> = text.into();
+    // Skip when printed content is unchanged (revision of bytes, not a re-print of a different doc).
+    if value.recovery_print.as_ref().is_some_and(|c| c.written.as_ref() == text.as_ref()) {
+        value.saved_doc = Arc::downgrade(&value.core.doc);
+        value.saved_view = view;
+        value.saved_view_key = key;
+        value.saved_drafts = drafts;
+        if force || value.core.cook.await_ {
+            let outcome = value.saver.flush();
+            read_outcome(value, outcome);
+        }
+        return;
+    }
+    // Body without the trailing `(view ...)` line: next layout-only toggle splices from this.
+    let body: Arc<str> = match text.rsplit_once("\n(view") {
+        Some((body, _)) => body.to_owned().into(),
+        None => text.clone(),
+    };
+    let ws = &doc.workspace.ws;
+    value.recovery_print = Some(RecoveryPrint {
+        body,
+        source: ws.source.clone(),
+        extra: ws.extra.clone(),
+        ws_settings: ws.settings.clone(),
+        doc_settings: doc.settings.clone(),
+        written: text.clone(),
+    });
+    let (directory, name) = (editor_setup::state_directory(&value.core), value.core.state_name.clone());
+    value.saver.submit(Some(doc), Box::new(move || preset::save_text(&directory, &name, &text).map(|_| ())));
     value.saved_doc = Arc::downgrade(&value.core.doc);
     value.saved_view = view;
     value.saved_view_key = key;
