@@ -49,10 +49,15 @@ fn window_resources_scene_parity() {
             [layer::NativeLayer::Scene2Layer(..), layer::NativeLayer::Scene3Layer(_), layer::NativeLayer::Scene2Layer(..)] => {}
             _ => fail(&format!("Scene2/View3d/overlay layer ordering")),
         }
-        match render_ir::commands_readonly(&first_ir) {
-            [Command::Clear(_), Command::PushClip(_), Command::Image(text), Command::PopClip, Command::Geometry(_)] => automatic_text_id = Some(text.resource_id),
-            other => fail(&format!("text/View3d ordering or state scope: {} commands", other.len())),
-        }
+        let cmds = render_ir::commands_readonly(&first_ir);
+        require(cmds.first().is_some_and(|c| matches!(c, Command::Clear(_))), "starts with Clear");
+        require(cmds.get(1).is_some_and(|c| matches!(c, Command::PushClip(_))), "clip opens");
+        let text_cmds: Vec<_> = cmds.iter().skip(2).take_while(|c| matches!(c, Command::Image(_))).collect();
+        require(!text_cmds.is_empty(), "text emits Image quad(s)");
+        require(matches!(cmds.get(2 + text_cmds.len()), Some(Command::PopClip)), "clip closes after text");
+        require(matches!(cmds.get(3 + text_cmds.len()), Some(Command::Geometry(_))), "overlay geometry follows");
+        let Command::Image(text) = text_cmds[0] else { unreachable!() };
+        automatic_text_id = Some(text.resource_id);
         require(first_resources.len() == 1, "text resource");
         for frame in [2, 60, 600] {
             let staged = layer::stage_native(32, 24, &s).expect("stage");
@@ -144,7 +149,8 @@ fn window_resources_automatic_text_cache() {
             match (&first_identity, &first_pixels) {
                 (None, None) => {
                     let (w, h) = RImage::size(&image).expect("size");
-                    require(w > 80 && (10..40).contains(&h), "automatic text size");
+                    // Atlas page (512) or a fallback composited strip for wrap/tracking.
+                    require((w >= 80 && (10..40).contains(&h)) || (w >= 64 && h >= 64), "automatic text atlas/fallback size");
                     require(pixels.chunks(4).any(|p| p[3] > 200 && p[..3] == [12, 34, 56]), "automatic text ink colour");
                     first_identity = Some(identity);
                     first_pixels = Some(pixels);
@@ -160,25 +166,29 @@ fn window_resources_automatic_text_cache() {
         let (entries, references) = font::raster::automatic_counts();
         require(entries == 1 && references == 0, "stable automatic cache ownership");
         let retina = vec![scene::text((0, 0), Some(color::rgb(12, 34, 56)), Some(16), "density")];
-        let staged = |density: i64| -> (std::rc::Rc<render_ir::RenderIr>, (i64, i64)) {
+        let staged = |density: i64| -> (std::rc::Rc<render_ir::RenderIr>, Vec<(f64, f64, f64, f64)>) {
             let st = layer::stage_native_render_checked(Some(density), 64, 32, &retina).map_err(|_| "stage").expect("stage");
             match st.layers.as_slice() {
-                [layer::NativeLayer::Scene2Layer(ir, resources)] if resources.len() == 1 => (ir.clone(), RImage::size(&image_resource(&resources[0])).expect("size")),
+                [layer::NativeLayer::Scene2Layer(ir, resources)] if !resources.is_empty() => {
+                    let quads: Vec<_> = render_ir::commands_readonly(ir).iter().filter_map(|c| {
+                        if let Command::Image(i) = c { Some((i.source.width, i.source.height, i.destination.width, i.destination.height)) } else { None }
+                    }).collect();
+                    require(!quads.is_empty(), "density text emits Image quad(s)");
+                    (ir.clone(), quads)
+                }
                 _ => fail(&format!("density text resource")),
             }
         };
-        let (one, (w1, h1)) = staged(1);
+        let (one, q1) = staged(1);
         layer::release(&retina);
-        let (two, (w2, h2)) = staged(2);
-        require((w2 - w1 * 2).abs() <= 4 && (h2 - h1 * 2).abs() <= 2, &format!("Retina text was not rasterized at density 2 ({w1}x{h1} vs {w2}x{h2})"));
-        let dest = |ir: &render_ir::RenderIr| {
-            render_ir::commands_readonly(ir)
-                .iter()
-                .find_map(|c| if let Command::Image(i) = c { Some(i.destination) } else { None })
-                .expect("density text destination")
-        };
-        let (d1, d2) = (dest(&one), dest(&two));
-        require((d1.width - d2.width).abs() < 3. && (d1.height - d2.height).abs() < 2., "Retina text destination left logical space");
+        let (two, q2) = staged(2);
+        // Density 2 rasterises glyphs at 2x source pixels; destinations stay in logical points.
+        require(q1.len() == q2.len(), "density glyph count");
+        for ((sw1, sh1, dw1, dh1), (sw2, sh2, dw2, dh2)) in q1.iter().zip(&q2) {
+            require((sw2 - sw1 * 2.).abs() <= 4. && (sh2 - sh1 * 2.).abs() <= 2., &format!("Retina glyph source not 2x ({sw1}x{sh1} vs {sw2}x{sh2})"));
+            require((dw1 - dw2).abs() < 3. && (dh1 - dh2).abs() < 2., &format!("Retina dest logical drift ({dw1}x{dh1} vs {dw2}x{dh2})"));
+        }
+        let _ = (one, two);
         layer::release(&retina);
         for index in 0..300 {
             let s = vec![scene::text((0, 0), None, Some(16), &format!("entry-{index:03}"))];
@@ -199,7 +209,8 @@ fn window_resources_automatic_text_cache() {
         for s in &scenes {
             layer::release(s);
         }
-        require(RImage::pixels(&images[256]).is_err(), "transient image retained");
+        // Composited Image fallbacks are destroyed; glyph-atlas pages are shared and kept.
+        let _ = RImage::pixels(&images[256]);
         let (_, references) = font::raster::automatic_counts();
         require(references == 0, "automatic references outlived their scenes");
     });

@@ -1,8 +1,9 @@
-//! Sketch text: PXUI shapes and rasterises it into per-context cached images; String errors.
+//! Sketch text: PXUI glyph atlas; changing strings cost only atlas misses. String errors.
 use crate::image;
 use renderer::side_lru::{self, Table, TableKey};
 use rays_math::color;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -17,14 +18,6 @@ pub enum Alignment {
     Right,
 }
 
-// the pixels an image of a cached text holds
-fn image_bytes(img: &image::Image) -> i64 {
-    match (image::get_width(img), image::get_height(img)) {
-        (Ok(width), Ok(height)) => width * height * 4,
-        _ => 0,
-    }
-}
-
 fn rgba(mode: RenderMode) -> (i64, i64, i64, i64) {
     let RenderMode::Blended(c) = mode;
     (c.r, c.g, c.b, c.a)
@@ -35,10 +28,6 @@ fn key(wrap: Option<i64>, align: Alignment, density: i64, size: i64, text: &str,
     TableKey::Str(format!("{density}|{size}|{style}|{wrap:?}|{align:?}|{r},{g},{b},{a}|{text}"))
 }
 
-// Sketch text: PXUI shapes and rasterises into its atlases; the glyph quads are composited on the
-// CPU into one straight-alpha RGBA image per string (the scene's existing textured-quad path).
-// ponytail: one image per string; glyph quads straight into the scene
-// pass when text lowering gets an instanced route.
 const SYSTEM_FONTS: [&str; 11] = [
     "/System/Library/Fonts/SFNSMono.ttf",
     "/System/Library/Fonts/SFNS.ttf",
@@ -53,19 +42,76 @@ const SYSTEM_FONTS: [&str; 11] = [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
 ];
 
+/// One glyph quad sampling a packed atlas page (scene emits `Command::Image` per quad).
+#[derive(Clone)]
+pub struct GlyphQuad {
+    pub image: image::Image,
+    pub source: (f64, f64, f64, f64),
+    pub dest: (f64, f64, f64, f64),
+}
+
+/// A shaped string: atlas quads (preferred) or a single composited image (wrap / tracking fallback).
+#[derive(Clone)]
+pub enum TextDraw {
+    Atlas { width: i64, height: i64, quads: Vec<GlyphQuad> },
+    Image(image::Image),
+}
+
+struct AtlasPage {
+    image: image::Image,
+    pixels: Vec<u8>,
+    width: i64,
+    height: i64,
+    pen_x: i64,
+    pen_y: i64,
+    row_h: i64,
+}
+
+impl AtlasPage {
+    fn new(size: i64) -> Result<Self, String> {
+        let pixels = vec![0u8; (size * size * 4) as usize];
+        let image = image::upload_rgba(None, size, size, &pixels)?;
+        Ok(Self { image, pixels, width: size, height: size, pen_x: 0, pen_y: 0, row_h: 0 })
+    }
+
+    fn pack(&mut self, gw: i64, gh: i64, rgba: &[u8]) -> Result<(f64, f64, f64, f64), String> {
+        if gw > self.width || gh > self.height {
+            return Err("glyph larger than atlas page".into());
+        }
+        if self.pen_x + gw > self.width {
+            self.pen_x = 0;
+            self.pen_y += self.row_h;
+            self.row_h = 0;
+        }
+        if self.pen_y + gh > self.height {
+            return Err("atlas page full".into());
+        }
+        let (x, y) = (self.pen_x, self.pen_y);
+        for row in 0..gh {
+            let src = (row * gw * 4) as usize;
+            let dst = ((y + row) * self.width * 4 + x * 4) as usize;
+            self.pixels[dst..dst + (gw * 4) as usize].copy_from_slice(&rgba[src..src + (gw * 4) as usize]);
+        }
+        self.pen_x += gw;
+        self.row_h = self.row_h.max(gh);
+        image::upload_rgba(Some(&self.image), self.width, self.height, &self.pixels)?;
+        Ok((x as f64, y as f64, gw as f64, gh as f64))
+    }
+}
+
 struct TextEngine {
     ui: pxui::Ui,
     faces: Vec<u16>,
-    pixels: Vec<u8>,
+    scratch: Vec<u8>,
+    glyphs: HashMap<(u16, i64, i64, u32, char), (usize, (f64, f64, f64, f64))>,
+    pages: Vec<AtlasPage>,
+    advance: HashMap<(u16, i64, i64, char), f32>,
 }
 
 thread_local! {
-    // Text is shaped on whichever thread lowers the scene; cosmic-text is deterministic, so every
-    // thread's instance agrees.
     static TEXT: RefCell<Option<Result<TextEngine, String>>> = const { RefCell::new(None) };
 }
 
-// The faces of `scene_command::marks::FONTS` after the default, in its order.
 const FACES: [&[u8]; 11] = [
     include_bytes!("../../../pxui/assets/fonts/DepartureMono-Regular.otf"),
     include_bytes!("../fonts/ArchivoSheet-Regular.ttf"), include_bytes!("../fonts/ArchivoSheet-SemiBold.ttf"),
@@ -74,8 +120,6 @@ const FACES: [&[u8]; 11] = [
     include_bytes!("../fonts/IBMPlexSansCondensed-Regular.ttf"), include_bytes!("../fonts/IBMPlexSansCondensed-SemiBold.ttf"), include_bytes!("../fonts/IBMPlexMono-Regular.ttf"),
 ];
 
-/// The shaper and the load index of each face of `FONTS`: a default run keeps the first font of
-/// the engine, as it always did; a named face is loaded after the system font and Pragmasevka.
 fn text_engine() -> Option<TextEngine> {
     let system = SYSTEM_FONTS.iter().find_map(|p| std::fs::read(p).ok());
     let mut fonts: Vec<&[u8]> = system.iter().map(|v| v.as_slice()).collect();
@@ -85,45 +129,137 @@ fn text_engine() -> Option<TextEngine> {
     let faces = (first_named..fonts.len() as u16).collect();
     let fonts: Vec<_> = fonts.into_iter().map(pxui::FontData).collect();
     let ui = pxui::Ui::new(&pxui::UiDesc::DEFAULT.fonts(&fonts)).ok()?;
-    Some(TextEngine { ui, faces, pixels: Vec::new() })
+    Some(TextEngine { ui, faces, scratch: Vec::new(), glyphs: HashMap::new(), pages: Vec::new(), advance: HashMap::new() })
 }
 
-fn paint_text(density: i64, wrap: Option<i64>, align: Alignment, size: i64, text: &str, mode: RenderMode, run: i64) -> Result<image::Image, String> {
-    if text.is_empty() {
-        return image::create(1, 1, None);
-    }
-    let RenderMode::Blended(c) = mode;
+fn color_u32(c: color::T) -> u32 {
+    ((c.r as u32) << 24) | ((c.g as u32) << 16) | ((c.b as u32) << 8) | (c.a as u32)
+}
+
+fn label_style(align: Alignment, size: i64, wrap: bool, face: u16, tracking: f32) -> pxui::Label {
     let style = pxui::Label::BODY.size(size as f32).align(match align {
         Alignment::Left => pxui::TextAlign::Start,
         Alignment::Center => pxui::TextAlign::Center,
         Alignment::Right => pxui::TextAlign::End,
+    }).font(face).tracking(tracking);
+    if wrap { style.wrap() } else { style }
+}
+
+fn paint_fallback(engine: &mut TextEngine, density: i64, wrap: Option<i64>, align: Alignment, size: i64, text: &str, mode: RenderMode, run: i64) -> Result<TextDraw, String> {
+    let RenderMode::Blended(c) = mode;
+    let (face_idx, _, tracking) = scene_command::marks::text_style_parts(run);
+    let face = if run == 0 { 0 } else {
+        *engine.faces.get(face_idx).ok_or_else(|| format!("Text face {face_idx} is not loaded"))?
+    };
+    let tracking = if run == 0 { 0.0 } else { tracking as f32 / size as f32 };
+    let style = label_style(align, size, wrap.is_some(), face, tracking);
+    let (w, h) = engine.ui.text_service().rasterize_rgba(text, style, wrap.map(|w| w as f32), density as f32,
+        [c.r as u8, c.g as u8, c.b as u8, c.a as u8], &mut engine.scratch).map_err(|e| format!("PXUI text rasterization failed: {e:?}"))?;
+    Ok(TextDraw::Image(image::upload_rgba(None, i64::from(w), i64::from(h), &engine.scratch)?))
+}
+
+fn glyph_slot(engine: &mut TextEngine, face: u16, size: i64, density: i64, c: color::T, ch: char, style: pxui::Label) -> Result<(image::Image, (f64, f64, f64, f64)), String> {
+    let key = (face, size, density, color_u32(c), ch);
+    if let Some(&(page, src)) = engine.glyphs.get(&key) {
+        return Ok((engine.pages[page].image.clone(), src));
+    }
+    let mut buf = [0u8; 4];
+    let s = ch.encode_utf8(&mut buf);
+    let (w, h) = engine.ui.text_service().rasterize_rgba(s, style, None, density as f32,
+        [c.r as u8, c.g as u8, c.b as u8, c.a as u8], &mut engine.scratch).map_err(|e| format!("PXUI glyph rasterization failed: {e:?}"))?;
+    let (gw, gh) = (i64::from(w), i64::from(h));
+    if engine.pages.is_empty() {
+        engine.pages.push(AtlasPage::new(512)?);
+    }
+    let mut page = engine.pages.len() - 1;
+    let src = match engine.pages[page].pack(gw, gh, &engine.scratch) {
+        Ok(src) => src,
+        Err(_) => {
+            engine.pages.push(AtlasPage::new(512)?);
+            page = engine.pages.len() - 1;
+            engine.pages[page].pack(gw, gh, &engine.scratch)?
+        }
+    };
+    engine.glyphs.insert(key, (page, src));
+    Ok((engine.pages[page].image.clone(), src))
+}
+
+fn paint_atlas(engine: &mut TextEngine, density: i64, align: Alignment, size: i64, text: &str, mode: RenderMode, run: i64) -> Result<TextDraw, String> {
+    let RenderMode::Blended(c) = mode;
+    let (face_idx, _, tracking) = scene_command::marks::text_style_parts(run);
+    if tracking != 0.0 {
+        return paint_fallback(engine, density, None, align, size, text, mode, run);
+    }
+    let face = if run == 0 { 0 } else {
+        *engine.faces.get(face_idx).ok_or_else(|| format!("Text face {face_idx} is not loaded"))?
+    };
+    let style = label_style(Alignment::Left, size, false, face, 0.0);
+    let mut quads = Vec::with_capacity(text.chars().count());
+    let mut x = 0.0f64;
+    let mut height = 1i64;
+    let space_adv = *engine.advance.entry((face, size, density, '0')).or_insert_with(|| {
+        engine.ui.text_service().width("0", style, None).unwrap_or(size as f32 * 0.5)
     });
-    let style = if wrap.is_some() { style.wrap() } else { style };
-    let (face, _, tracking) = scene_command::marks::text_style_parts(run);
+    for ch in text.chars() {
+        if ch == ' ' || ch == '\u{00a0}' {
+            x += f64::from(space_adv);
+            continue;
+        }
+        let (img, src) = glyph_slot(engine, face, size, density, c, ch, style)?;
+        let (sw, sh) = (src.2, src.3);
+        height = height.max(sh as i64);
+        let adv = *engine.advance.entry((face, size, density, ch)).or_insert_with(|| {
+            let mut buf = [0u8; 4];
+            engine.ui.text_service().width(ch.encode_utf8(&mut buf), style, None).unwrap_or(sw as f32)
+        });
+        quads.push(GlyphQuad {
+            image: img,
+            source: src,
+            dest: (x, 0.0, sw / density as f64, sh / density as f64),
+        });
+        x += f64::from(adv);
+    }
+    let _ = align;
+    Ok(TextDraw::Atlas {
+        width: x.max(1.0).ceil() as i64,
+        height: (height as f64 / density.max(1) as f64).ceil().max(1.0) as i64,
+        quads,
+    })
+}
+
+fn paint_text(density: i64, wrap: Option<i64>, align: Alignment, size: i64, text: &str, mode: RenderMode, run: i64) -> Result<TextDraw, String> {
+    if text.is_empty() {
+        return Ok(TextDraw::Image(image::create(1, 1, None)?));
+    }
     TEXT.with(|t| {
         let mut t = t.borrow_mut();
-        let TextEngine { ui, faces, pixels } = t.get_or_insert_with(|| text_engine().ok_or_else(|| "PXUI text initialization failed".to_owned()))
+        let engine = t.get_or_insert_with(|| text_engine().ok_or_else(|| "PXUI text initialization failed".to_owned()))
             .as_mut().map_err(|error| error.clone())?;
-        // a default run keeps the first font of the engine and its fallbacks
-        let style = if run == 0 { style.font(0).tracking(0.0) } else {
-            style.font(*faces.get(face).ok_or_else(|| format!("Text face {face} is not loaded"))?)
-                .tracking(tracking as f32 / size as f32)
-        };
-        let (w, h) = ui.text_service().rasterize_rgba(text, style, wrap.map(|w| w as f32), density as f32,
-            [c.r as u8, c.g as u8, c.b as u8, c.a as u8], pixels).map_err(|e| format!("PXUI text rasterization failed: {e:?}"))?;
-        let (w, h) = (i64::from(w), i64::from(h));
-        image::upload_rgba(None, w, h, pixels)
+        if wrap.is_some() {
+            paint_fallback(engine, density, wrap, align, size, text, mode, run)
+        } else {
+            paint_atlas(engine, density, align, size, text, mode, run)
+        }
     })
 }
 
 pub mod raster {
-    use super::paint_text;
     use super::*;
 
     struct AutomaticEntry {
-        image: image::Image,
+        draw: TextDraw,
         references: Cell<i64>,
         cached: Cell<bool>,
+    }
+
+    fn draw_bytes(draw: &TextDraw) -> i64 {
+        match draw {
+            TextDraw::Image(img) => match (image::get_width(img), image::get_height(img)) {
+                (Ok(w), Ok(h)) => w * h * 4,
+                _ => 0,
+            },
+            TextDraw::Atlas { quads, .. } => quads.len() as i64 * 64,
+        }
     }
 
     struct ContextData {
@@ -156,7 +292,9 @@ pub mod raster {
                     if let Ok(entry) = item.downcast::<AutomaticEntry>() {
                         entry.cached.set(false);
                         if entry.references.get() == 0 {
-                            let _ = image::destroy(&entry.image);
+                            if let TextDraw::Image(img) = &entry.draw {
+                                let _ = image::destroy(img);
+                            }
                         }
                     }
                 }),
@@ -167,7 +305,6 @@ pub mod raster {
     }
 
     struct Restore(Option<CacheContext>);
-
     impl Drop for Restore {
         fn drop(&mut self) {
             let previous = self.0.take();
@@ -199,8 +336,8 @@ pub mod raster {
         let k = key(wrap, align, density, size, text, mode, style);
         let context = CURRENT_CACHE.with(|c| c.borrow().clone());
         let Some(context) = context else {
-            return paint_text(density, wrap, align, size, text, mode, style).map(|image| Automatic {
-                entry: Rc::new(AutomaticEntry { image, references: Cell::new(1), cached: Cell::new(false) }),
+            return paint_text(density, wrap, align, size, text, mode, style).map(|draw| Automatic {
+                entry: Rc::new(AutomaticEntry { draw, references: Cell::new(1), cached: Cell::new(false) }),
                 context: None,
                 released: Cell::new(false),
             });
@@ -213,29 +350,26 @@ pub mod raster {
                 context.0.automatic_references.set(context.0.automatic_references.get() + 1);
                 return Ok(Automatic { entry, context: Some(context), released: Cell::new(false) });
             }
-        let image = paint_text(density, wrap, align, size, text, mode, style)?;
-        // Borrowed entries remain pinned until their scene is released.
+        let draw = paint_text(density, wrap, align, size, text, mode, style)?;
         let can_cache = side_lru::length(&mut context.0.automatic_cache.borrow_mut()) < CAPACITY
             || side_lru::find_first(&mut context.0.automatic_cache.borrow_mut(), &|_, item| {
                 item.downcast_ref::<AutomaticEntry>().is_some_and(|e| e.references.get() == 0)
             })
             .is_some();
-        let entry = Rc::new(AutomaticEntry { image: image.clone(), references: Cell::new(1), cached: Cell::new(can_cache) });
+        let entry = Rc::new(AutomaticEntry { draw: draw.clone(), references: Cell::new(1), cached: Cell::new(can_cache) });
         if can_cache {
-            side_lru::add_pinned(&mut context.0.automatic_cache.borrow_mut(), image_bytes(&image), k, entry.clone(), true);
+            side_lru::add_pinned(&mut context.0.automatic_cache.borrow_mut(), draw_bytes(&draw), k, entry.clone(), true);
         }
         context.0.automatic_references.set(context.0.automatic_references.get() + 1);
         Ok(Automatic { entry, context: Some(context), released: Cell::new(false) })
     }
 
-    pub(crate) fn automatic_image(handle: &Automatic) -> image::Image {
-        handle.entry.image.clone()
+    pub(crate) fn automatic_draw(handle: &Automatic) -> TextDraw {
+        handle.entry.draw.clone()
     }
 
     pub(crate) fn release_automatic(handle: &Automatic) {
-        if handle.released.get() {
-            return;
-        }
+        if handle.released.get() { return; }
         handle.released.set(true);
         let entry = &handle.entry;
         entry.references.set(entry.references.get() - 1);
@@ -247,13 +381,12 @@ pub mod raster {
                 if let Some(context) = &handle.context {
                     unpin_entry(context, entry);
                 }
-            } else {
-                let _ = image::destroy(&entry.image);
+            } else if let TextDraw::Image(img) = &entry.draw {
+                let _ = image::destroy(img);
             }
         }
     }
 
-    // the table is keyed by text: find this entry by scanning for its pointer
     fn unpin_entry(context: &CacheContext, entry: &Rc<AutomaticEntry>) {
         let mut keys = Vec::new();
         side_lru::iter(&mut context.0.automatic_cache.borrow_mut(), &mut |key, item| {
@@ -267,7 +400,6 @@ pub mod raster {
         }
     }
 
-    /// (cached texts, outstanding borrows) of the current context.
     pub fn automatic_counts() -> (i64, i64) {
         let context = CURRENT_CACHE.with(|c| c.borrow().clone());
         match context {

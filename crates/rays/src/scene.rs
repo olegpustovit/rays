@@ -743,15 +743,17 @@ pub mod layer {
         f()
     }
 
-    fn text_image(density: i64, n: &TextNode) -> Result<image::Image, String> {
-        if let Some(img) = n.rendered.borrow().as_ref() {
-            return Ok(img.clone());
+    fn text_draw(density: i64, n: &TextNode) -> Result<font::TextDraw, String> {
+        if let Some(a) = n.automatic.borrow().as_ref() {
+            return Ok(font::raster::automatic_draw(a));
         }
         let automatic = font::raster::borrow_automatic(n.wrap, Some(n.align), Some(density), n.size, &n.value, font::RenderMode::Blended(n.color), n.style)?;
-        let img = font::raster::automatic_image(&automatic);
+        let draw = font::raster::automatic_draw(&automatic);
+        if let font::TextDraw::Image(img) = &draw {
+            *n.rendered.borrow_mut() = Some(img.clone());
+        }
         *n.automatic.borrow_mut() = Some(automatic);
-        *n.rendered.borrow_mut() = Some(img.clone());
-        Ok(img)
+        Ok(draw)
     }
 
     struct CommandBuilder {
@@ -794,13 +796,37 @@ pub mod layer {
                     Node::Image(i) => image_command(builder, &i.image, i.x, i.y, i.scale, i.angle),
                     Node::Text(tn) => {
                         let scale = 1. / std::cmp::max(1, density) as f64;
-                        let img = text_image(density, tn)?;
-                        // a centred or right-aligned run hangs from its middle or its right end
-                        let x = match scene_command::marks::text_style_parts(tn.style).1 {
-                            0 => tn.x,
-                            align => { let width = (image::get_width(&img)? as f64 * scale).round() as i64; if align == 1 { tn.x - width / 2 } else { tn.x - width } }
-                        };
-                        image_command(builder, &img, x, tn.y, scale, 0.);
+                        match text_draw(density, tn)? {
+                            font::TextDraw::Image(img) => {
+                                let x = match scene_command::marks::text_style_parts(tn.style).1 {
+                                    0 => tn.x,
+                                    align => { let width = (image::get_width(&img)? as f64 * scale).round() as i64; if align == 1 { tn.x - width / 2 } else { tn.x - width } }
+                                };
+                                image_command(builder, &img, x, tn.y, scale, 0.);
+                            }
+                            font::TextDraw::Atlas { width, quads, .. } => {
+                                // Quads are already in logical points (glyph atlas source is device pixels).
+                                let _ = scale;
+                                let x0 = match scene_command::marks::text_style_parts(tn.style).1 {
+                                    0 => tn.x as f64,
+                                    1 => tn.x as f64 - width as f64 / 2.,
+                                    _ => tn.x as f64 - width as f64,
+                                };
+                                let y0 = tn.y as f64;
+                                for q in &quads {
+                                    builder.values.push(Command::Image(render_ir::Image {
+                                        resource_id: image::identity(&q.image),
+                                        source: render_ir::Rect { x: q.source.0, y: q.source.1, width: q.source.2, height: q.source.3 },
+                                        destination: render_ir::Rect {
+                                            x: x0 + q.dest.0,
+                                            y: y0 + q.dest.1,
+                                            width: q.dest.2,
+                                            height: q.dest.3,
+                                        },
+                                    }));
+                                }
+                            }
+                        }
                     }
                     Node::Group(g) => nodes(builder, density, g)?,
                     Node::Translate(x, y, g) => {
@@ -875,8 +901,19 @@ pub mod layer {
                 match n {
                     Node::Image(i) => acc.push((image::identity(&i.image), retained_resource::Image(image::resource(&i.image)))),
                     Node::Text(tn) => {
-                        let img = text_image(density, tn)?;
-                        acc.push((image::identity(&img), retained_resource::Image(image::resource(&img))));
+                        match text_draw(density, tn)? {
+                            font::TextDraw::Image(img) => {
+                                acc.push((image::identity(&img), retained_resource::Image(image::resource(&img))));
+                            }
+                            font::TextDraw::Atlas { quads, .. } => {
+                                for q in &quads {
+                                    let id = image::identity(&q.image);
+                                    if !acc.iter().any(|(i, _)| *i == id) {
+                                        acc.push((id, retained_resource::Image(image::resource(&q.image))));
+                                    }
+                                }
+                            }
+                        }
                     }
                     Node::DisplayList(d) => acc.extend(d.resources.iter().cloned()),
                     Node::Group(g)
