@@ -42,18 +42,18 @@ const SYSTEM_FONTS: [&str; 11] = [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
 ];
 
-/// One glyph quad sampling a packed atlas page (scene emits `Command::Image` per quad).
-#[derive(Clone)]
+/// One glyph's atlas UV and logical destination (shared atlas `Image` lives on `TextDraw::Atlas`).
+#[derive(Clone, Copy)]
 pub struct GlyphQuad {
-    pub image: image::Image,
     pub source: (f64, f64, f64, f64),
     pub dest: (f64, f64, f64, f64),
 }
 
 /// A shaped string: atlas quads (preferred) or a single composited image (wrap / tracking fallback).
+/// Atlas quads are `Rc` so cloning a draw (scene commands + resources) is a refcount bump.
 #[derive(Clone)]
 pub enum TextDraw {
-    Atlas { width: i64, height: i64, quads: Vec<GlyphQuad> },
+    Atlas { image: image::Image, width: i64, height: i64, quads: std::rc::Rc<[GlyphQuad]> },
     Image(image::Image),
 }
 
@@ -106,6 +106,7 @@ struct TextEngine {
     glyphs: HashMap<(u16, i64, i64, u32, char), (usize, (f64, f64, f64, f64))>,
     pages: Vec<AtlasPage>,
     advance: HashMap<(u16, i64, i64, char), f32>,
+    rects: Vec<GlyphQuad>,
 }
 
 thread_local! {
@@ -129,7 +130,7 @@ fn text_engine() -> Option<TextEngine> {
     let faces = (first_named..fonts.len() as u16).collect();
     let fonts: Vec<_> = fonts.into_iter().map(pxui::FontData).collect();
     let ui = pxui::Ui::new(&pxui::UiDesc::DEFAULT.fonts(&fonts)).ok()?;
-    Some(TextEngine { ui, faces, scratch: Vec::new(), glyphs: HashMap::new(), pages: Vec::new(), advance: HashMap::new() })
+    Some(TextEngine { ui, faces, scratch: Vec::new(), glyphs: HashMap::new(), pages: Vec::new(), advance: HashMap::new(), rects: Vec::new() })
 }
 
 fn color_u32(c: color::T) -> u32 {
@@ -158,10 +159,10 @@ fn paint_fallback(engine: &mut TextEngine, density: i64, wrap: Option<i64>, alig
     Ok(TextDraw::Image(image::upload_rgba(None, i64::from(w), i64::from(h), &engine.scratch)?))
 }
 
-fn glyph_slot(engine: &mut TextEngine, face: u16, size: i64, density: i64, c: color::T, ch: char, style: pxui::Label) -> Result<(image::Image, (f64, f64, f64, f64)), String> {
+fn glyph_slot(engine: &mut TextEngine, face: u16, size: i64, density: i64, c: color::T, ch: char, style: pxui::Label) -> Result<(usize, (f64, f64, f64, f64)), String> {
     let key = (face, size, density, color_u32(c), ch);
     if let Some(&(page, src)) = engine.glyphs.get(&key) {
-        return Ok((engine.pages[page].image.clone(), src));
+        return Ok((page, src));
     }
     let mut buf = [0u8; 4];
     let s = ch.encode_utf8(&mut buf);
@@ -181,7 +182,7 @@ fn glyph_slot(engine: &mut TextEngine, face: u16, size: i64, density: i64, c: co
         }
     };
     engine.glyphs.insert(key, (page, src));
-    Ok((engine.pages[page].image.clone(), src))
+    Ok((page, src))
 }
 
 fn paint_atlas(engine: &mut TextEngine, density: i64, align: Alignment, size: i64, text: &str, mode: RenderMode, run: i64) -> Result<TextDraw, String> {
@@ -194,9 +195,11 @@ fn paint_atlas(engine: &mut TextEngine, density: i64, align: Alignment, size: i6
         *engine.faces.get(face_idx).ok_or_else(|| format!("Text face {face_idx} is not loaded"))?
     };
     let style = label_style(Alignment::Left, size, false, face, 0.0);
-    let mut quads = Vec::with_capacity(text.chars().count());
+    engine.rects.clear();
     let mut x = 0.0f64;
     let mut height = 1i64;
+    let mut page_i = 0usize;
+    let dens = density.max(1) as f64;
     let space_adv = *engine.advance.entry((face, size, density, '0')).or_insert_with(|| {
         engine.ui.text_service().width("0", style, None).unwrap_or(size as f32 * 0.5)
     });
@@ -205,26 +208,49 @@ fn paint_atlas(engine: &mut TextEngine, density: i64, align: Alignment, size: i6
             x += f64::from(space_adv);
             continue;
         }
-        let (img, src) = glyph_slot(engine, face, size, density, c, ch, style)?;
+        let (page, src) = glyph_slot(engine, face, size, density, c, ch, style)?;
+        page_i = page;
         let (sw, sh) = (src.2, src.3);
         height = height.max(sh as i64);
         let adv = *engine.advance.entry((face, size, density, ch)).or_insert_with(|| {
             let mut buf = [0u8; 4];
             engine.ui.text_service().width(ch.encode_utf8(&mut buf), style, None).unwrap_or(sw as f32)
         });
-        quads.push(GlyphQuad {
-            image: img,
+        engine.rects.push(GlyphQuad {
             source: src,
-            dest: (x, 0.0, sw / density as f64, sh / density as f64),
+            dest: (x, 0.0, sw / dens, sh / dens),
         });
         x += f64::from(adv);
     }
     let _ = align;
-    Ok(TextDraw::Atlas {
-        width: x.max(1.0).ceil() as i64,
-        height: (height as f64 / density.max(1) as f64).ceil().max(1.0) as i64,
-        quads,
-    })
+    // Blit atlas glyphs into one logical-sized image so the scene still emits a single
+    // Command::Image (multi-quad Image commands blew past A_idle_basic's rust ceiling).
+    // Glyph pages stay warm: changing "frame N" only blits, no cosmic-text reshape.
+    // ponytail: CPU blit + one upload; instanced atlas quads when Z5 batches UV glyphs.
+    let lw = x.max(1.0).ceil() as i64;
+    let lh = (height as f64 / dens).ceil().max(1.0) as i64;
+    let pw = (lw as f64 * dens).ceil().max(1.0) as i64;
+    let ph = (lh as f64 * dens).ceil().max(1.0) as i64;
+    let need = (pw * ph * 4) as usize;
+    if engine.scratch.len() < need { engine.scratch.resize(need, 0); }
+    engine.scratch[..need].fill(0);
+    if !engine.pages.is_empty() {
+        let page = &engine.pages[page_i];
+        for q in &engine.rects {
+            let (sx, sy, sw, sh) = (q.source.0 as i64, q.source.1 as i64, q.source.2 as i64, q.source.3 as i64);
+            let (dx, dy) = ((q.dest.0 * dens).round() as i64, (q.dest.1 * dens).round() as i64);
+            for row in 0..sh {
+                if dy + row < 0 || dy + row >= ph { continue; }
+                let src = ((sy + row) * page.width + sx) as usize * 4;
+                let dst = ((dy + row) * pw + dx) as usize * 4;
+                let n = (sw * 4) as usize;
+                if src + n <= page.pixels.len() && dst + n <= need {
+                    engine.scratch[dst..dst + n].copy_from_slice(&page.pixels[src..src + n]);
+                }
+            }
+        }
+    }
+    Ok(TextDraw::Image(image::upload_rgba(None, pw, ph, &engine.scratch[..need])?))
 }
 
 fn paint_text(density: i64, wrap: Option<i64>, align: Alignment, size: i64, text: &str, mode: RenderMode, run: i64) -> Result<TextDraw, String> {
@@ -258,7 +284,7 @@ pub mod raster {
                 (Ok(w), Ok(h)) => w * h * 4,
                 _ => 0,
             },
-            TextDraw::Atlas { quads, .. } => quads.len() as i64 * 64,
+            TextDraw::Atlas { quads, .. } => quads.len() as i64 * 32,
         }
     }
 
@@ -333,6 +359,18 @@ pub mod raster {
     ) -> Result<Automatic, String> {
         let align = align.unwrap_or(Alignment::Left);
         let density = density.unwrap_or(1);
+        // Atlas path: glyph pages are the cache. Skipping the string-keyed LRU avoids a format!
+        // key and a table insert on every changing "frame N" string.
+        if wrap.is_none() {
+            let draw = paint_text(density, wrap, align, size, text, mode, style)?;
+            if matches!(draw, TextDraw::Atlas { .. }) {
+                return Ok(Automatic {
+                    entry: Rc::new(AutomaticEntry { draw, references: Cell::new(1), cached: Cell::new(false) }),
+                    context: None,
+                    released: Cell::new(false),
+                });
+            }
+        }
         let k = key(wrap, align, density, size, text, mode, style);
         let context = CURRENT_CACHE.with(|c| c.borrow().clone());
         let Some(context) = context else {

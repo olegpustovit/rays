@@ -804,7 +804,7 @@ pub mod layer {
                                 };
                                 image_command(builder, &img, x, tn.y, scale, 0.);
                             }
-                            font::TextDraw::Atlas { width, quads, .. } => {
+                            font::TextDraw::Atlas { image: atlas, width, quads, .. } => {
                                 // Quads are already in logical points (glyph atlas source is device pixels).
                                 let _ = scale;
                                 let x0 = match scene_command::marks::text_style_parts(tn.style).1 {
@@ -813,9 +813,10 @@ pub mod layer {
                                     _ => tn.x as f64 - width as f64,
                                 };
                                 let y0 = tn.y as f64;
-                                for q in &quads {
+                                let id = image::identity(&atlas);
+                                for q in quads.iter() {
                                     builder.values.push(Command::Image(render_ir::Image {
-                                        resource_id: image::identity(&q.image),
+                                        resource_id: id,
                                         source: render_ir::Rect { x: q.source.0, y: q.source.1, width: q.source.2, height: q.source.3 },
                                         destination: render_ir::Rect {
                                             x: x0 + q.dest.0,
@@ -905,12 +906,10 @@ pub mod layer {
                             font::TextDraw::Image(img) => {
                                 acc.push((image::identity(&img), retained_resource::Image(image::resource(&img))));
                             }
-                            font::TextDraw::Atlas { quads, .. } => {
-                                for q in &quads {
-                                    let id = image::identity(&q.image);
-                                    if !acc.iter().any(|(i, _)| *i == id) {
-                                        acc.push((id, retained_resource::Image(image::resource(&q.image))));
-                                    }
+                            font::TextDraw::Atlas { image: atlas, .. } => {
+                                let id = image::identity(&atlas);
+                                if !acc.iter().any(|(i, _)| *i == id) {
+                                    acc.push((id, retained_resource::Image(image::resource(&atlas))));
                                 }
                             }
                         }
