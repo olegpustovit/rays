@@ -2284,7 +2284,8 @@ fn editor_area(
         (if area.len() == text.len() && std::ptr::eq(area.as_ptr(), text.as_ptr()) { std::borrow::Cow::Borrowed(text) } else { std::borrow::Cow::Owned(area.to_owned()) }, submitted)
     };
     // a paste or a tab typed in arrives as text: kept as the pane keeps text (B45)
-    let text2 = if phase.get().is_none() && text2 != text && text2.contains(['\r', '\t']) { std::borrow::Cow::Owned(normalized(&text2)) } else { text2 };
+    // (PXUI carries the area's caret through this change as it does through any external edit)
+    let text2 = if phase.get().is_none() && text2 != text && text2.bytes().any(|b| b == b'\r' || b == b'\t') { std::borrow::Cow::Owned(normalized(&text2)) } else { text2 };
     // Command-click and F12 follow a (ref name) or a definition
     let follow = |byte: i64| {
         let target = match lisp_text::ref_at(text, byte.max(0) as usize) {
@@ -2301,7 +2302,8 @@ fn editor_area(
     };
     // the caret moved by typing or keys: the binding it is in, in the text it is in now
     // a number dragged live moves no caret: its text is the document's next, which is not parsed again here
-    if let Some(byte) = moved.get().filter(|_| phase.get().is_none())
+    // typing (the text changed) does not parse the whole text for it: the binding is followed once the text rests
+    if let Some(byte) = moved.get().filter(|_| phase.get().is_none() && *text2 == *text)
         && let Some(path) = caret_path(&text2, state.tab, shown, byte)
         && path != shown.key
     {
@@ -2385,6 +2387,9 @@ fn editor_area(
                             Ok(_) => Vec::new(),
                         };
                         push(emit, Intent::Live(Live { found: Some(found), ..l.clone() }));
+                        if let Some(path) = caret.get().and_then(|b| caret_path(text, state.tab, shown, b)).filter(|p| *p != shown.key) {
+                            push(emit, Intent::SelectBinding(path));
+                        }
                     } else {
                         ui.repaint_after(LIVE_DELAY - (c.time - l.since));
                     }
@@ -2748,9 +2753,50 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
     Ok(out)
 }
 
+/// Everything `view_checked` reads, hashed (no allocation): equal revisions draw the same pane. `None` when
+/// the pane must be built (commands to resolve, a text that fails to print). Input on the pane, the keyboard
+/// focus, hover, the theme and the window's size rebuild a kept view without this.
+fn revision(bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, vocab: &Rc<Vocab>, names: &Rc<Names>, time: f64, state: &State, shown: &Shown) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    if !state.pending.is_empty() { return None; }
+    let text = current_text_ref(state, shown).ok()?;
+    let applied = shown.applied.text().ok()?;
+    let mut h = std::hash::DefaultHasher::new();
+    let checked = |h: &mut std::hash::DefaultHasher, c: &Checked| {
+        c.at.hash(h);
+        for d in &c.found { (&d.code, &d.message, d.span.as_ref().map(|s| (s.start, s.finish))).hash(h); }
+    };
+    bounds.hash(&mut h);
+    tabs_right.map(f32::to_bits).hash(&mut h);
+    (Rc::as_ptr(vocab) as usize, Rc::as_ptr(names) as usize).hash(&mut h);
+    (state.tab as u8, state.wrap, state.parinfer, state.scrubbing, state.nonce, state.menu.map(|(a, b)| (a.to_bits(), b.to_bits())), state.picker, &state.target).hash(&mut h);
+    text.hash(&mut h);
+    (applied.len(), &shown.text, shown.mark, &shown.key, &shown.graph).hash(&mut h);
+    (Arc::as_ptr(&shown.source) as usize, Arc::as_ptr(&shown.spans) as usize).hash(&mut h);
+    state.draft.is_some().hash(&mut h);
+    if state.draft.is_some() { (applied == text).hash(&mut h); }
+    if let Some((k, _)) = &state.binding_draft { k.hash(&mut h); }
+    checked(&mut h, &state.doc_errors);
+    checked(&mut h, &state.binding_errors);
+    for (g, slot) in &state.graphs { g.hash(&mut h); slot.gtext.hash(&mut h); checked(&mut h, &slot.gerrors); }
+    match &state.live {
+        Some(l) => (true, l.since.to_bits(), l.seen.len(), l.found.as_ref().map(|f| f.iter().map(|d| (&d.code, &d.message)).collect::<Vec<_>>()), l.found.is_none() && time - l.since >= LIVE_DELAY).hash(&mut h),
+        None => false.hash(&mut h),
+    }
+    if let Some(f) = &state.find { (&f.query, &f.replace, f.case, f.replacing, f.at, f.grab).hash(&mut h); }
+    state.find.is_some().hash(&mut h);
+    if let Some(r) = &state.request { (r.select, &r.splice).hash(&mut h); }
+    state.request.is_some().hash(&mut h);
+    Some(h.finish())
+}
+
 /// A printing refusal is visible in the pane and reaches the editor without replacing its draft.
 pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, vocab: &Rc<Vocab>, names: &Rc<Names>, time: f64, state: &State, shown: &Shown) -> Vec<Intent> {
-    match view_checked(ui, bounds, tabs_right, vocab, names, time, state, shown) {
+    // an unchanged pane is a kept view: its intents are none (nothing reached it)
+    let revision = revision(bounds, tabs_right, vocab, names, time, state, shown).unwrap_or_else(|| time.to_bits());
+    let mut built = None;
+    kit::cached(ui, "text-pane", revision, &mut |ui| built = Some(view_checked(ui, bounds, tabs_right, vocab, names, time, state, shown)));
+    match built.unwrap_or(Ok(Vec::new())) {
         Ok(intents) => intents,
         Err(error) => {
             let (x, y, width, height) = bounds;

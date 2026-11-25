@@ -9,7 +9,7 @@ use std::time::Instant;
 const W: i64 = 1280;
 const H: i64 = 900;
 /// allocations on the worst of 20 keystrokes, and on the settled frame after them
-const CEILING: (u64, u64) = (2974, 873);
+const CEILING: (u64, u64) = (2742, 852);
 
 struct P {
     e: Option<editor::Editor>,
@@ -18,7 +18,7 @@ struct P {
 }
 
 impl P {
-    /// (ms, allocations, the UI's wake, the frame's time)
+    /// (ms of `editor::update` alone, allocations of the whole step, the UI's wake, the frame's time); the GPU render is not Rays' cost here
     fn step(&mut self, keys: &[Key], events: Vec<Event>, pointer: (f64, f64)) -> (f64, u64, Option<f64>, f64) {
         self.tick += 1;
         let t = self.tick;
@@ -28,11 +28,12 @@ impl P {
         let n0 = mem_sys::alloc_count();
         let s = Instant::now();
         let m = editor::update(self.e.take().unwrap(), &f);
+        let ms = s.elapsed().as_secs_f64() * 1e3;
         assert!(m.context_error.is_none(), "{:?}", m.context_error);
         rays::canvas::render(None, &self.canvas, &editor::scene(&m, &f)).unwrap();
         let wake = editor::private::ui(&m).borrow().repaint_at();
         self.e = Some(editor::after_present(m, &f));
-        (s.elapsed().as_secs_f64() * 1e3, mem_sys::alloc_count() - n0, wake, t as f64 / 60.)
+        (ms, mem_sys::alloc_count() - n0, wake, t as f64 / 60.)
     }
 }
 
@@ -132,10 +133,26 @@ fn typing() {
     let (ms, settled, _, _) = step(&mut p, &[], vec![], click);
     eprintln!("TYPING worst keystroke {:.2}ms {}a; mean {:.2}ms; settled after {:.2}ms {}a", worst.0, worst.1, total_ms / 20.0, ms, settled);
     eprintln!("TYPING ceiling now: ({}, {})", worst.1, settled);
+    assert!(total_ms / 20.0 <= 1.0, "L6: a keystroke costs Rays code at most 1 ms (mean {:.2} ms)", total_ms / 20.0);
     assert!(worst.1 <= CEILING.0 && settled <= CEILING.1, "typing over its ceiling: {}/{} over {}/{}", worst.1, settled, CEILING.0, CEILING.1);
     close(p, gpu);
 }
 
+/// B45: a pasted CRLF and tab is normalised after the area returns; PXUI carries the caret through that external change (guard: the note that it sat bytes off no longer holds)
+fn tab_keeps_the_caret() {
+    let (mut p, gpu, click) = open_lisp();
+    for (i, t) in ["x", "a\r\n\r\n\tb", "y", "z"].into_iter().enumerate() {
+        p.step(&[], vec![if i == 1 { Event::Paste(t.to_string()) } else { Event::TextInput(t.to_string()) }], click);
+        p.step(&[], vec![], click);
+        p.step(&[], vec![], click);
+    }
+    let t = &p.e.as_ref().unwrap().core.text;
+    let draft = t.draft.clone().or(t.binding_draft.as_ref().map(|(_, d)| d.clone())).expect("typing made a draft");
+    assert!(!draft.contains(['\t', '\r']), "the paste was normalised");
+    assert!(draft.contains("xa\n\n  byz"), "the caret followed the normalised text: {:?}", &draft[draft.find('x').unwrap_or(0)..][..12.min(draft.len())]);
+    close(p, gpu);
+}
+
 pub fn cases() -> Vec<(&'static str, fn())> {
-    vec![("typing_budget", typing), ("text_menu", menu), ("autosave_drafts", autosave_drafts)]
+    vec![("typing_budget", typing), ("tab_keeps_the_caret", tab_keeps_the_caret), ("text_menu", menu), ("autosave_drafts", autosave_drafts)]
 }
