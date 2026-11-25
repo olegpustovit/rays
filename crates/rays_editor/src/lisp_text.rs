@@ -99,28 +99,32 @@ pub fn colorize_now(theme: &Theme, text: &str) -> Vec<(i64, i64, pxui::Rgba)> {
     let quiet = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
     let lexed = lex(text);
     let tokens = &lexed.0;
-    let mut out = Vec::new();
-    for (i, t) in tokens.iter().enumerate() {
-        let span = |color| vec![(t.start as i64, t.stop as i64, color)];
-        // the name of a typed input, `(floors : int 5)`, is a binding, not a form: ink
-        let declares = i + 1 < tokens.len() && tokens[i + 1].kind == Kind::Sym && sub(text, tokens[i + 1].start, tokens[i + 1].stop) == ":";
-        let spans = match t.kind {
-            Kind::Comment | Kind::Meta => span(quiet),
-            Kind::Str => span(ports.record),
-            Kind::Num => span(ports.int),
-            Kind::Kw => span(ports.bool),
-            Kind::Head if declares => vec![],
-            Kind::Head => match text.as_bytes()[t.start..].iter().position(|b| *b == b'/').map(|p| p + t.start) {
-                Some(slash) if slash + 1 < t.stop => vec![(t.start as i64, slash as i64 + 1, ports.vec3)],
-                _ => span(ports.float),
-            },
-            Kind::Sym => vec![],
-            Kind::Open(_) | Kind::Close(_) => span(quiet),
-            Kind::Unmatched => span(pxui::Rgba::hex(0xc2255c)),
-        };
-        out.extend(spans);
-    }
-    out
+    // ponytail: one reused span buffer; capacity reserved after the first warm colorize
+    thread_local!(static SPANS: std::cell::RefCell<Vec<(i64, i64, pxui::Rgba)>> = const { std::cell::RefCell::new(Vec::new()) });
+    SPANS.with(|cell| {
+        let mut out = cell.borrow_mut();
+        out.clear();
+        for (i, t) in tokens.iter().enumerate() {
+            let push = |out: &mut Vec<_>, color| out.push((t.start as i64, t.stop as i64, color));
+            let declares = i + 1 < tokens.len() && tokens[i + 1].kind == Kind::Sym && sub(text, tokens[i + 1].start, tokens[i + 1].stop) == ":";
+            match t.kind {
+                Kind::Comment | Kind::Meta => push(&mut out, quiet),
+                Kind::Str => push(&mut out, ports.record),
+                Kind::Num => push(&mut out, ports.int),
+                Kind::Kw => push(&mut out, ports.bool),
+                Kind::Head if declares => {}
+                Kind::Head => match text.as_bytes()[t.start..].iter().position(|b| *b == b'/').map(|p| p + t.start) {
+                    Some(slash) if slash + 1 < t.stop => out.push((t.start as i64, slash as i64 + 1, ports.vec3)),
+                    _ => push(&mut out, ports.float),
+                },
+                Kind::Sym => {}
+                Kind::Open(_) | Kind::Close(_) => push(&mut out, quiet),
+                Kind::Unmatched => push(&mut out, pxui::Rgba::hex(0xc2255c)),
+            }
+        }
+        let cap = out.capacity();
+        std::mem::replace(&mut *out, Vec::with_capacity(cap))
+    })
 }
 
 pub fn brackets(text: &str) -> Vec<(i64, i64)> {
