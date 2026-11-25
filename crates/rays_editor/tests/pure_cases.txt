@@ -164,6 +164,7 @@ run_lisp_inspector
 run_loop_expression
 run_loop_view
 run_lowering
+run_mixed_inspector_click
 run_movers
 run_nested_inspector
 run_op_inspector

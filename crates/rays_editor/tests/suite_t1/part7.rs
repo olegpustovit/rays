@@ -380,6 +380,56 @@ pub fn run_op_inspector() {
     r.close();
 }
 
+pub fn run_mixed_inspector_click() {
+    let mut r = Run::new(editor(r#"(workspace shared
+    (graph g :context sop
+      (let* [a (sop/uv_sphere :radius 1.0 :segments 8 :rings 4)
+             b (sop/uv_sphere :radius 2.0 :segments 8 :rings 4)]
+        (sop/merge a b)))
+    (graph editor :context editor
+      (ui/workspace (ui/split "horizontal" (ui/graph "g") (ui/inspector) :second_size 280))))"#));
+    {
+        let mut ui = r.e.core.ui.borrow_mut();
+        ui.set_a11y(true);
+        ui.verify_views(true);
+    }
+    let mouse = (450., 300.);
+    r.step(mouse, vec![]);
+    r.step(mouse, vec![]);
+    let point = |r: &Run, node: &str| {
+        let (x, y, w, _) = editor::node_box(&r.e, &["g".into(), node.into()]).expect("sphere card");
+        ((x + w / 2) as f64, (y + 12) as f64)
+    };
+    let a = point(&r, "a");
+    r.click(a);
+    let b = point(&r, "b");
+    r.step(b, vec![Event::PointerMoved(b)]);
+    r.step_full(&[LB], &[Key::Shift], b, vec![Event::PointerPressed(LB, b)]);
+    r.step_full(&[], &[Key::Shift], b, vec![Event::PointerReleased(LB, b)]);
+
+    let (ix, _, _, _) = r.panes().inspector;
+    let (field, at) = {
+        let ui = r.e.core.ui.borrow();
+        inspector_row(&ui, ix as f32, "Shared parameters");
+        let row = ui.a11y_nodes().iter().find(|node| node.rect.x >= ix as f32 && ui.a11y_name_of(node) == "radius")
+            .expect("the shared radius row");
+        let row = ui.box_of_a11y(row.id).expect("the row handle");
+        let field = ui.box_of_key(pxui::Key::Resolved(pxui::ui::key_of(row.box_key, "flow-value-radius.x")))
+            .expect("the shared radius value field");
+        let rect = ui.rect(&field);
+        (field, (f64::from(rect.x + rect.w / 2.0), f64::from(rect.y + rect.h / 2.0)))
+    };
+    let before = r.source();
+    let history = r.undo_label();
+    r.click(at);
+    assert!(r.e.core.ui.borrow().signal(&field).clicked);
+    r.e.core.ui.borrow_mut().request_frame();
+    r.step(at, vec![]);
+    assert_eq!(r.source(), before);
+    assert_eq!(r.undo_label(), history);
+    r.close();
+}
+
 pub fn run_nested_inspector() {
     if !gpu() {
         return;

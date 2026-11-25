@@ -73,6 +73,7 @@ cases! {
     run_undo_under_pane => part7::run_undo_under_pane;
     run_spreadsheet => part7::run_spreadsheet;
     run_op_inspector => part7::run_op_inspector;
+    run_mixed_inspector_click => part7::run_mixed_inspector_click;
     run_nested_inspector => part7::run_nested_inspector;
     run_expression_chip => part8::run_expression_chip;
     run_context_menus => part8::run_context_menus;
