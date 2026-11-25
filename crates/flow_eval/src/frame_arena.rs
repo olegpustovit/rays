@@ -1,47 +1,49 @@
 //! Per-frame arena for sketch-ephemeral values (strings, small boxed payloads).
 //!
 //! Reset at `begin_frame`. Values that escape into state (or any cross-frame store)
-//! must go through [`persist`], which copies them onto the heap. In debug builds, a
-//! generation counter poisons stale handles so a dangling use fails loudly.
+//! must go through [`persist`]. In debug builds, a poison latch on reset makes a
+//! dangling use fail loudly.
 //!
-//! Design: a bump `Vec<u8>` holds frame-local bytes; a sticky text slot reuses one
-//! `Arc<[u8]>` while its content is unchanged (frozen clock). Capacity is kept across
-//! resets so a warm frame allocates nothing from the Rust allocator for those paths.
+//! Design: a reusable `scratch` `Vec<u8>` builds frame-local text; a small sticky
+//! table of `Arc<[u8]>` reuses prior strings when the sketch reprints them (frozen
+//! clock). Capacity is kept across resets so a warm frozen frame allocates nothing
+//! from the Rust allocator for those paths.
 
 use flow_syntax::value::Value;
 use std::cell::RefCell;
+use std::io::Write as _;
 use std::sync::Arc;
 
-#[derive(Default)]
+const STICKY: usize = 8;
+
 struct Arena {
-    bump: Vec<u8>,
-    /// Generation incremented on every reset; stale handles disagree and panic in debug.
+    scratch: Vec<u8>,
+    /// Incremented on every reset; sticky entries retarget to the new value on reuse.
     generation: u32,
-    /// Last text Arc produced this generation (or sticky across gens when bytes match).
-    text: Option<(u32, Arc<[u8]>)>,
-    /// Recycled entry/list scratch lengths (capacity kept on the bump via clear).
+    /// Recent text Arcs (sticky across gens when bytes match).
+    sticky: [Option<(u32, Arc<[u8]>)>; STICKY],
+    sticky_next: usize,
     #[cfg(debug_assertions)]
     poisoned: bool,
 }
 
 thread_local! {
     static ARENA: RefCell<Arena> = const { RefCell::new(Arena {
-        bump: Vec::new(),
+        scratch: Vec::new(),
         generation: 1,
-        text: None,
+        sticky: [None, None, None, None, None, None, None, None],
+        sticky_next: 0,
         #[cfg(debug_assertions)]
         poisoned: false,
     }) };
 }
 
-/// Reset the frame arena. Call from `begin_frame` once the plane advances (or matches).
+/// Reset the frame arena. Call from `begin_frame` once the plane advances.
 pub fn reset() {
     ARENA.with(|a| {
         let mut a = a.borrow_mut();
         a.generation = a.generation.wrapping_add(1).max(1);
-        a.bump.clear();
-        // Keep sticky text Arc when present: frozen frames rewrite the same bytes and
-        // reuse it without touching the allocator. Drop only on generation wrap.
+        a.scratch.clear();
         #[cfg(debug_assertions)]
         {
             a.poisoned = true;
@@ -66,51 +68,100 @@ fn check_live(a: &Arena) {
     assert!(!a.poisoned, "frame_arena: use after reset (dangling frame value)");
 }
 
-/// Intern `bytes` as `Value::Text` for this frame. Reuses the sticky Arc when content matches.
+fn sticky_get(a: &Arena, bytes: &[u8]) -> Option<Arc<[u8]>> {
+    a.sticky.iter().flatten().find_map(|(_, arc)| {
+        if arc.as_ref() == bytes {
+            Some(arc.clone())
+        } else {
+            None
+        }
+    })
+}
+
+fn sticky_put(a: &mut Arena, arc: Arc<[u8]>) {
+    let i = a.sticky_next % STICKY;
+    a.sticky[i] = Some((a.generation, arc));
+    a.sticky_next = i + 1;
+}
+
+fn touch_sticky(a: &mut Arena, arc: &Arc<[u8]>) {
+    let g = a.generation;
+    if let Some(slot) = a.sticky.iter_mut().flatten().find(|(_, s)| Arc::ptr_eq(s, arc)) {
+        slot.0 = g;
+    }
+}
+
+fn intern_scratch(a: &mut Arena) -> Value {
+    let bytes = a.scratch.as_slice();
+    if let Some(arc) = sticky_get(a, bytes) {
+        touch_sticky(a, &arc);
+        return Value::Text(arc);
+    }
+    let arc: Arc<[u8]> = Arc::from(bytes);
+    sticky_put(a, arc.clone());
+    Value::Text(arc)
+}
+
+/// Intern `bytes` as `Value::Text` for this frame. Reuses a sticky Arc when content matches.
 pub fn text(bytes: &[u8]) -> Value {
     ARENA.with(|a| {
         let mut a = a.borrow_mut();
         #[cfg(debug_assertions)]
         check_live(&a);
-        if let Some((generation, arc)) = &a.text {
-            if *generation == a.generation && arc.as_ref() == bytes {
-                return Value::Text(arc.clone());
-            }
-            // Sticky reuse across reset when the sketch reprints the same string (frozen clock).
-            if arc.as_ref() == bytes {
-                let arc = arc.clone();
-                a.text = Some((a.generation, arc.clone()));
-                return Value::Text(arc);
-            }
+        if let Some(arc) = sticky_get(&a, bytes) {
+            touch_sticky(&mut a, &arc);
+            return Value::Text(arc);
         }
         let arc: Arc<[u8]> = Arc::from(bytes);
-        a.text = Some((a.generation, arc.clone()));
+        sticky_put(&mut a, arc.clone());
         Value::Text(arc)
     })
 }
 
-/// Copy a frame value onto the heap so it may outlive the next [`reset`].
-/// Today `Value::Text` is already an `Arc`; this is the store boundary the arena documents.
-pub fn persist(value: Value) -> Value {
-    match value {
-        Value::Text(bytes) => Value::Text(Arc::from(bytes.as_ref())),
-        Value::List(values) => Value::List(Arc::new(values.iter().cloned().map(persist).collect())),
-        other => other,
-    }
-}
-
-/// Append bytes into the bump (kept capacity) and return a copy as `Arc<[u8]>`.
-/// Prefer [`text`] for Values; this is for mark tables that want owned bytes once.
-pub fn bytes(data: &[u8]) -> Arc<[u8]> {
+/// Format a value into the reused scratch buffer and intern it as frame text.
+pub fn show(value: &Value) -> Value {
     ARENA.with(|a| {
         let mut a = a.borrow_mut();
         #[cfg(debug_assertions)]
         check_live(&a);
-        let start = a.bump.len();
-        a.bump.extend_from_slice(data);
-        let slice = &a.bump[start..];
-        Arc::from(slice)
+        a.scratch.clear();
+        show_into(&mut a.scratch, value);
+        intern_scratch(&mut a)
     })
+}
+
+/// Build text in the reused scratch (no per-call `Vec`), then intern it.
+pub fn build_text<E>(f: impl FnOnce(&mut Vec<u8>) -> Result<(), E>) -> Result<Value, E> {
+    ARENA.with(|a| {
+        let mut a = a.borrow_mut();
+        #[cfg(debug_assertions)]
+        check_live(&a);
+        a.scratch.clear();
+        f(&mut a.scratch)?;
+        Ok(intern_scratch(&mut a))
+    })
+}
+
+fn show_into(out: &mut Vec<u8>, value: &Value) {
+    match value {
+        Value::Int(n) => {
+            let _ = write!(out, "{n}");
+        }
+        Value::Float(n) => out.extend_from_slice(param::float_text(*n).as_bytes()),
+        Value::Bool(true) => out.extend_from_slice(b"true"),
+        Value::Bool(false) => out.extend_from_slice(b"false"),
+        Value::Text(text) => out.extend_from_slice(text),
+        other => out.extend_from_slice(&flow_syntax::value::show_with(&|x| x.clone(), other)),
+    }
+}
+
+/// Copy a frame value onto the heap so it may outlive the next [`reset`].
+/// `Value::Text` is already an `Arc`; sharing it across frames is safe.
+pub fn persist(value: Value) -> Value {
+    match value {
+        Value::List(values) => Value::List(Arc::new(values.iter().cloned().map(persist).collect())),
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -131,6 +182,32 @@ mod tests {
         let Value::Text(second) = &b else { panic!() };
         assert!(Arc::ptr_eq(first, second), "sticky text shares the Arc");
         assert_eq!(allocs, 0, "matching text after reset allocates nothing");
+    }
+
+    #[test]
+    fn sticky_show_and_build_allocate_nothing_when_stable() {
+        begin();
+        let _ = show(&Value::Int(1280));
+        let _ = show(&Value::Int(900));
+        let _ = show(&Value::Int(0));
+        let _ = build_text::<()>(|out| {
+            out.extend_from_slice(b"1280 x 900  frame 0");
+            Ok(())
+        })
+        .unwrap();
+        reset();
+        begin();
+        mem_sys::local_reset();
+        let start = mem_sys::local_alloc_count();
+        let _ = show(&Value::Int(1280));
+        let _ = show(&Value::Int(900));
+        let _ = show(&Value::Int(0));
+        let _ = build_text::<()>(|out| {
+            out.extend_from_slice(b"1280 x 900  frame 0");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(mem_sys::local_alloc_count() - start, 0, "frozen show+build is alloc-free");
     }
 
     #[test]
