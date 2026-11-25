@@ -27,8 +27,8 @@ fn action_rounds() -> u64 {
 const A_BASIC: (u64, u64) = (383, 59);
 const A_EMPTY: (u64, u64) = (18, 10);
 const A_BARE: (u64, u64) = (18, 10);
-const A_ISOGRID: (u64, u64) = (26, 15);
-const A_ISOSEL: (u64, u64) = (26, 15);
+const A_ISOGRID: (u64, u64) = (29, 15);
+const A_ISOSEL: (u64, u64) = (29, 15);
 const B_HOVER_GRAPH: (u64, u64) = (182, 15);
 const B_HOVER_INSPECTOR: (u64, u64) = (182, 15);
 const C_PAN: (u64, u64) = (158, 15);
