@@ -13,6 +13,8 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 
 ## Rules
 
+- **Since 2026-11-25 16:30: every lane works in its own worktree** (`git worktree add ../rays-<lane> origin/dev -b <lane>` + `git submodule update --init`; PXUI work on a branch off PXUI origin/dev inside it), rebases on origin/dev and pushes from there. **Never stash, reset, checkout or restore another lane's files**; the shared checkout is the coordinator's.
+
 - AGENTS.md applies (and pxui/AGENTS.md for PXUI). One shared tree; edit only your lane's files (below). Need
   a change elsewhere: add a line under the owner's heading in "Requests". Keep the tree compiling: edits in
   compile-atomic batches; if it breaks in someone else's file, wait and retry.
