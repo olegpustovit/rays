@@ -22,7 +22,6 @@ use rays::camera as rcam;
 use rays::easy_camera;
 use rays::frame;
 use rays::light;
-use rays::path as rpath;
 use rays::scene::{self, Node as scene_node};
 use rays::scene3::{self as d3, walk};
 use rays::sketch;
@@ -1053,44 +1052,39 @@ pub fn project(bounds: Bounds, camera_: &rcam::Camera, point: vec3::T) -> Option
 }
 
 pub fn screen_box(view_: &rcam::Camera, bounds: Bounds, world_: &mat4::T, box_: &cook::Bounds) -> Option<Bounds> {
-    let mut corners: Vec<Option<(f64, f64)>> = Vec::new();
-    cook::iter_corners(world_, box_, &mut |point| corners.push(project(bounds, view_, point)));
-    if corners.iter().any(|c| c.is_none()) {
+    let mut n = 0usize;
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut ok = true;
+    cook::iter_corners(world_, box_, &mut |point| {
+        n += 1;
+        match project(bounds, view_, point) {
+            Some((x, y)) => {
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+            None => ok = false,
+        }
+    });
+    if !ok || n == 0 {
         return None;
     }
-    let xs: Vec<f64> = corners.iter().filter_map(|c| c.map(|c| c.0)).collect();
-    let ys: Vec<f64> = corners.iter().filter_map(|c| c.map(|c| c.1)).collect();
-    let min = |v: &[f64]| v.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = |v: &[f64]| v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let (x0, y0) = (min(&xs) as i64, min(&ys) as i64);
-    Some((x0, y0, max(&xs) as i64 - x0, max(&ys) as i64 - y0))
+    let (x0, y0) = (min_x as i64, min_y as i64);
+    Some((x0, y0, max_x as i64 - x0, max_y as i64 - y0))
 }
 
 pub fn line(width: i64, color_: color::T, (x0, y0): (f64, f64), (x1, y1): (f64, f64)) -> Nodes {
-    one(scene::line((x0 as i64, y0 as i64), (x1 as i64, y1 as i64), Some(color_), Some(width)))
+    // Affine of a cached unit stroke: camera pan/orbit reuses the tessellated mesh.
+    one(scene::stroke_segment((x0, y0), (x1, y1), color_, width as f64))
 }
 
-/// A line of a width in whole or half points: Scene lines have whole widths only, so the stroke is
-/// a filled quad of the line's length.
+/// A line of a width in whole or half points: Affine of a cached unit filled quad.
 pub fn thick_line(width: f64, color_: color::T, (x0, y0): (f64, f64), (x1, y1): (f64, f64)) -> Nodes {
-    let (dx, dy) = (x1 - x0, y1 - y0);
-    let length = dx.hypot(dy);
-    if length < 1e-6 {
-        one(scene::rect((x0 as i64, y0 as i64), 0, 0, None, None))
-    } else {
-        let (nx, ny) = (-dy / length * width / 2., dx / length * width / 2.);
-        let p = |x: f64, y: f64| rpath::Point { x, y };
-        one(scene::path(
-            Some(color_),
-            &rpath::of_commands(&[
-                rpath::Command::MoveTo(p(x0 + nx, y0 + ny)),
-                rpath::Command::LineTo(p(x1 + nx, y1 + ny)),
-                rpath::Command::LineTo(p(x1 - nx, y1 - ny)),
-                rpath::Command::LineTo(p(x0 - nx, y0 - ny)),
-                rpath::Command::Close,
-            ]),
-        ))
-    }
+    one(scene::thick_segment((x0, y0), (x1, y1), color_, width))
 }
 
 pub fn segment(bounds: Bounds, view_: &rcam::Camera, color_: color::T, a: vec3::T, b: vec3::T) -> Nodes {
@@ -1364,9 +1358,82 @@ pub fn light_guide(bounds: Bounds, view_: &rcam::Camera, color_: color::T, light
     }
 }
 
-/// `bounds` is the rectangle the view is drawn in (`film`): what is projected lies on the picture.
-/// The axis gizmo belongs to the `pane`'s corner.
-pub fn guides(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_: &rcam::Camera, extra_: &Extra, pane: Bounds, bounds: Bounds) -> Nodes {
+fn hash_vec3(h: &mut impl std::hash::Hasher, v: vec3::T) {
+    use std::hash::Hash;
+    v.x.to_bits().hash(h);
+    v.y.to_bits().hash(h);
+    v.z.to_bits().hash(h);
+}
+
+fn guides_key(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_: &rcam::Camera, extra_: &Extra, pane: Bounds, bounds: Bounds) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    pane.hash(&mut h);
+    bounds.hash(&mut h);
+    hash_vec3(&mut h, rcam::position(view_));
+    hash_vec3(&mut h, rcam::target(view_));
+    hash_vec3(&mut h, rcam::up(view_));
+    match rcam::projection(view_) {
+        rcam::Projection::Perspective { fov_y, near, far } => {
+            1u8.hash(&mut h);
+            fov_y.to_bits().hash(&mut h);
+            near.to_bits().hash(&mut h);
+            far.to_bits().hash(&mut h);
+        }
+        rcam::Projection::Orthographic { height, near, far } => {
+            2u8.hash(&mut h);
+            height.to_bits().hash(&mut h);
+            near.to_bits().hash(&mut h);
+            far.to_bits().hash(&mut h);
+        }
+    }
+    for row in 0..4 {
+        for col in 0..4 {
+            mat4::get(space, row, col).unwrap_or(0.).to_bits().hash(&mut h);
+        }
+    }
+    extra_.show.cameras.hash(&mut h);
+    extra_.show.axes.hash(&mut h);
+    extra_.show.handles.hash(&mut h);
+    std::mem::discriminant(&extra_.tool).hash(&mut h);
+    hash_vec3(&mut h, rcam::position(&extra_.document_camera));
+    hash_vec3(&mut h, rcam::target(&extra_.document_camera));
+    if let Some(node) = selected {
+        node.id.hash(&mut h);
+        for f in &node.fields {
+            f.name.hash(&mut h);
+            match &f.current {
+                Value::Float(v) => { 1u8.hash(&mut h); v.to_bits().hash(&mut h); }
+                Value::Int(v) => { 2u8.hash(&mut h); v.hash(&mut h); }
+                Value::Bool(v) => { 3u8.hash(&mut h); v.hash(&mut h); }
+                Value::Text(v) => { 4u8.hash(&mut h); v.hash(&mut h); }
+                _ => 5u8.hash(&mut h),
+            }
+        }
+    } else {
+        0u8.hash(&mut h);
+    }
+    // Camera/light object ids: geometry revision proxy without cloning payloads.
+    for id in camera_ids(scene_) {
+        id.hash(&mut h);
+    }
+    for id in objects::ids("light", scene_) {
+        id.hash(&mut h);
+    }
+    h.finish()
+}
+
+struct GuidesCache {
+    key: u64,
+    nodes: Rc<Nodes>,
+}
+
+thread_local! {
+    // ponytail: one-slot guides cache; raise to a small LRU if multi-viewport idle frames miss.
+    static GUIDES_CACHE: RefCell<Option<GuidesCache>> = const { RefCell::new(None) };
+}
+
+fn guides_build(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_: &rcam::Camera, extra_: &Extra, pane: Bounds, bounds: Bounds) -> Nodes {
     let mut cameras = Nodes::new();
     if extra_.show.cameras {
         for node_id in camera_ids(scene_) {
@@ -1413,6 +1480,23 @@ pub fn guides(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_:
     }
     out.extend(handles_);
     out
+}
+
+/// `bounds` is the rectangle the view is drawn in (`film`): what is projected lies on the picture.
+/// The axis gizmo belongs to the `pane`'s corner.
+pub fn guides(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_: &rcam::Camera, extra_: &Extra, pane: Bounds, bounds: Bounds) -> Nodes {
+    let key = guides_key(scene_, selected, space, view_, extra_, pane, bounds);
+    GUIDES_CACHE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if let Some(cache) = slot.as_ref()
+            && cache.key == key
+        {
+            return (*cache.nodes).clone();
+        }
+        let nodes = guides_build(scene_, selected, space, view_, extra_, pane, bounds);
+        *slot = Some(GuidesCache { key, nodes: Rc::new(nodes.clone()) });
+        nodes
+    })
 }
 
 pub fn save(request: &Request) -> Result<(), String> {
