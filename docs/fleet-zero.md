@@ -47,6 +47,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 | Z2 | done: edit_overlay (mark_input); LitCache Rc; pane.chains; selected `&[Path]`; graph_name_at `&str` |
 | Z0 | landed: mem_sys `trace`, zero_alloc suite A–F, RAYS_ZERO_ALLOC; PXUI 71931474 |
 | Z1 | Landed borrow sites: `find`/`ids`/`read` (cb1a86b52); Leaf/Panel walk, look/focus `&str`, composition_key Rc, Scene3 Rc nodes/lights, Extra render by-value, chord lists without Vec (545d5ffcf). click_budget isogrid idle 536/458→402/324, hover 469/469→334/334 (meas 382/308, 318/318). Remaining: Extra navigate clones, `panel_key` owned Path on rare paths, Finding 2 remainder is Z2 content rebuild + Z3 overlays (~300 settled still theirs). |
+| Z4 | specials OnceLock; BoundDoc lazy; complete/rank borrow; colorize SPANS; Word unit; incremental lex (sketch equality); State take in one_intent. typing_budget 1712/782→1163/330 (meas 1107/314, mean 0.36ms). Left: shown() State clone via &ModelView (needs Z1 take), Live.seen String on Intent::Live, lex token Vec clone on return, PXUI cosmic-text (Z6), remaining ~500–1100 whole-step allocs outside lisp_text. |
 
 ## Requests
 
@@ -59,6 +60,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 ### Z3
 - Finding 2 remainder: viewport overlay re-tessellation on every input event with no scene change.
 ### Z4
+- `text_pane::shown` still clones State on cache hit because `editor_frame::text_state` takes `&ModelView`; take/replace needs a `&mut` path in Z1's frame.
 ### Z5
 ### Z6
 ### Z7
