@@ -1664,6 +1664,30 @@ mod tests {
     }
 
     #[test]
+    fn a_split_reusing_a_closed_panes_name_starts_fresh() {
+        big_stack(|| {
+            let mut value = model_of(
+                r#"(workspace w
+                    (graph a :context sop (sop/box))
+                    (graph editor :context editor
+                      (let* [net (ui/graph "a" :focus true) code (ui/lisp)]
+                        (ui/workspace (ui/split_at "horizontal" 0.6 net code)))))"#,
+            );
+            let mut tick = 0;
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            // what a closed `net_b` left: split/close pairs reuse the names they free
+            let stale: panel_map::Key = vec!["editor".into(), "net_b".into()];
+            value.locals = crate::editor_panes::put_local(&stale, &|l| Local { code: text_pane::State { tab: text_pane::Tab::Document, ..l.code }, ..l }, &value.locals);
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('o')), Event::KeyPressed(Key::KeyChar('v'))]);
+            step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
+            let printed = workspace_doc::print(&value.doc.workspace.ws).unwrap().0;
+            assert!(printed.contains("net_b"), "setup: /ov did not split net: {printed}");
+            assert!(!value.locals.iter().any(|(k, l)| *k == stale && l.code.tab == text_pane::Tab::Document), "the new pane took a closed pane's state");
+            editor_host::close(&value);
+        });
+    }
+
+    #[test]
     fn b6_layout_switch_preserves_inactive_graph_panes() {
         big_stack(|| {
             let mut value = model_of(

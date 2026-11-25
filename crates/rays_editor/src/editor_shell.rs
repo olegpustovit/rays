@@ -545,6 +545,15 @@ pub fn panel_renames(
 pub fn remap_panels(value: &mut EditorModel, result: &mut FrameResult, before: &Document, before_tree: &panels::Panels) {
     let after_tree = shell_tree(value, &value.workspace).into_owned();
     let renames = panel_renames(before, before_tree, &value.doc, &after_tree);
+    // a pane key that appears (a split reusing the name a closed half freed) starts with fresh state
+    let old_keys: Vec<panel_map::Key> = panels::leaves(before_tree).into_iter().map(|(p, _)| panel_key(before, &p)).collect();
+    for (p, _) in panels::leaves(&after_tree) {
+        let key = panel_key(&value.doc, &p);
+        if !old_keys.contains(&key) && !renames.iter().any(|(_, new, _, _)| *new == key) {
+            value.locals.retain(|(k, _)| *k != key);
+            result.locals.retain(|(k, _)| *k != key);
+        }
+    }
     if renames.is_empty() {
         return;
     }
