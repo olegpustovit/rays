@@ -168,12 +168,26 @@ pub struct Slot {
     pub gerrors: Checked,
 }
 
-/// The parse of a draft: `found` is `None` until `seen` has rested for the debounce.
+/// The parse of a draft: `found` is `None` until the seen fingerprint has rested for the debounce.
+/// Fingerprint (len+hash) avoids cloning the whole draft on every keystroke.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Live {
-    pub seen: String,
+    pub seen_len: usize,
+    pub seen_hash: u64,
     pub since: f64,
     pub found: Option<Vec<Diagnostic>>,
+}
+
+fn text_fp(text: &str) -> (usize, u64) {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    text.hash(&mut h);
+    (text.len(), h.finish())
+}
+
+fn live_matches(live: &Live, text: &str) -> bool {
+    let (len, hash) = text_fp(text);
+    live.seen_len == len && live.seen_hash == hash
 }
 
 /// The cache key of `State::cache`.
@@ -1714,9 +1728,11 @@ pub fn visible(c: &Checked, text: &str) -> Vec<Diagnostic> {
 /// what the area marks for `text`: the apply errors that still hold and the rested draft's parse
 fn errors_of(state: &State, c: &Checked, text: &str) -> Vec<Diagnostic> {
     let mut held = real_errors(&visible(c, text));
-    if let Some(Live { seen, found: Some(found), .. }) = &state.live
-        && seen == text
+    if let Some(l) = &state.live
+        && l.found.is_some()
+        && live_matches(l, text)
     {
+        let found = l.found.as_ref().unwrap();
         let extra: Vec<Diagnostic> = real_errors(found).into_iter().filter(|d| !held.contains(d)).collect();
         held.extend(extra);
     }
@@ -1725,10 +1741,11 @@ fn errors_of(state: &State, c: &Checked, text: &str) -> Vec<Diagnostic> {
 
 /// the parse errors of a draft some tab holds, once it has rested
 fn live_errors(state: &State) -> Vec<Diagnostic> {
-    if let Some(Live { seen, found: Some(found), .. }) = &state.live
-        && (state.draft.as_deref() == Some(seen.as_str())
-            || matches!(&state.binding_draft, Some((_, t)) if t == seen)
-            || state.graphs.iter().any(|(_, s)| s.gtext == *seen))
+    if let Some(l) = &state.live
+        && let Some(found) = &l.found
+        && (state.draft.as_deref().is_some_and(|t| live_matches(l, t))
+            || matches!(&state.binding_draft, Some((_, t)) if live_matches(l, t))
+            || state.graphs.iter().any(|(_, s)| live_matches(l, &s.gtext)))
     {
         return real_errors(found);
     }
@@ -2359,7 +2376,7 @@ fn editor_area(
     // frame it is due in is asked for (B46), nothing polls
     if can_apply {
         match &state.live {
-            Some(l) if l.seen == text => {
+            Some(l) if live_matches(l, text) => {
                 if l.found.is_none() {
                     if c.time - l.since >= LIVE_DELAY {
                         let found = match s::parse(text) {
@@ -2376,7 +2393,8 @@ fn editor_area(
                 }
             }
             _ => {
-                push(emit, Intent::Live(Live { seen: text.to_owned(), since: c.time, found: None }));
+                let (seen_len, seen_hash) = text_fp(text);
+                push(emit, Intent::Live(Live { seen_len, seen_hash, since: c.time, found: None }));
                 ui.repaint_after(LIVE_DELAY);
             }
         }
@@ -2766,7 +2784,7 @@ fn revision(bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, vocab: &Rc<Vo
     checked(&mut h, &state.binding_errors);
     for (g, slot) in &state.graphs { g.hash(&mut h); slot.gtext.hash(&mut h); checked(&mut h, &slot.gerrors); }
     match &state.live {
-        Some(l) => (true, l.since.to_bits(), l.seen.len(), l.found.as_ref().map(|f| f.iter().map(|d| (&d.code, &d.message)).collect::<Vec<_>>()), l.found.is_none() && time - l.since >= LIVE_DELAY).hash(&mut h),
+        Some(l) => (true, l.since.to_bits(), l.seen_len, l.seen_hash, l.found.as_ref().map(|f| f.iter().map(|d| (&d.code, &d.message)).collect::<Vec<_>>()), l.found.is_none() && time - l.since >= LIVE_DELAY).hash(&mut h),
         None => false.hash(&mut h),
     }
     if let Some(f) = &state.find { (&f.query, &f.replace, f.case, f.replacing, f.at, f.grab).hash(&mut h); }
