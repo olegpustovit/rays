@@ -50,6 +50,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 | Z4 | lisp_text/lex BoundDoc+OnceLock+SPANS+Word+incremental+Arc caches; State take (one_intent+shown+frame); Live moves. typing_budget→1103/260 (meas 1050/247, mean 0.60ms). zero_alloc D_typing 401 rust + 37 native/unit (was ~1031 app + ~49 pxui). Left: ~400 rust/key (scene/kind_graph/PXUI cosmic Z6); not yet 0.
 | Z3 | done: Scratch tessellate (fef497e23); Wide keys + always-on shape cache + Affine unit segments (ae918f88f); guides cache + Affine lines + stack screen_box (cc870c828). zero_alloc A_isosel 712→48, B 727→196/194, C 467/462→174/170 (Z0 ceilings at meas+5%). click_budget isogrid idle 402/324→252/175, hover 334/334→185/185. Overlay tessellate/format! → 0 warm; pan reuses unit meshes. Left: guides hit clones outer Nodes Vec; camera-key miss still builds Node wrappers (tessellate 0). |
 | Z8 | in progress (owns finished Z1/Z2/Z3 + D whole-step). Batch 1: Rest.picture Rc + scene_of Cow borrow; cache memory_boundary device Arc. empty/bare 32→17, isogrid/isosel 51→27, B 196→174, C 174/170→154/150, E 298/180→264/152, toggle 403/183→364/155, D 401→382 (ceilings meas+5%). Idle Rays sites scene_of/memory_boundary → 0; remaining idle Rust is Z5 ogpu. Settled ≫ idle still. Next: Extra clone, settled→idle, D whole-step. |
+| Z6a | done: PXUI rekey-on-text-change + mono caret (85482d18); canvas text glyph atlas blit (no reshape). A_idle_basic 538→364 rust / 121→56 native; D 385/14; F 139/9 + 143/9. Ceilings A 414→383. ponytail: instanced atlas quads (Z5) to drop the blit upload. |
 
 ## Requests
 
@@ -62,5 +63,6 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 ### Z4
 - `text_pane::shown` still clones State on cache hit because `editor_frame::text_state` takes `&ModelView`; take/replace needs a `&mut` path in Z1's frame.
 ### Z5
+- Z6a: instanced atlas UV glyphs (or Glyphs with source rects) so canvas text can emit one batch instead of a CPU blit+upload per changing string.
 ### Z6
 ### Z7
