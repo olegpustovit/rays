@@ -10,7 +10,7 @@ use ogpu_core::pipeline::Blend;
 use ogpu_core::render_pass::{Comparison, Cull, IndexType, Load, Primitive, Rect, Store};
 use ogpu_core::surface::Configuration;
 use ogpu_core::types::{
-    BufferDescriptor, BufferUsage, Extent, SamplerDescriptor, TextureDescriptor, TextureFormat,
+    BufferDescriptor, BufferUsage, Extent, Memory, SamplerDescriptor, TextureDescriptor, TextureFormat,
     TextureUsage,
 };
 use std::cell::{Cell, RefCell};
@@ -586,10 +586,13 @@ struct BatchPlan {
     driver_draws: Vec<BatchDraw>,
     resources: Vec<ResourceUse>,
     icb: RefCell<Option<Icb>>,
+    /// Capacity the pooled/created ICB was allocated with (0: none).
+    icb_capacity: Cell<i64>,
     /// a UI layer painted in this batch's place
     ui: Option<UiLayer>,
 }
 
+#[derive(Clone)]
 struct ReplayPlan {
     clear: (f64, f64, f64, f64),
     payloads: Rc<[AutomaticSignature]>,
@@ -781,6 +784,11 @@ pub struct SceneExecution {
     /// frames in a row needing under a quarter of the page
     uniform_low: i64,
     previous_uniforms: Vec<Option<UniformSlice>>,
+    /// Host-side packing buffer reused across uniform uploads (Shared destinations write from here;
+    /// DeviceLocal destinations copy through `buffer_staging`).
+    uniform_staging: Vec<u8>,
+    /// Shared staging buffer reused when a destination is device-local (no unified-memory assumption).
+    buffer_staging: Option<(Buffer, i64)>,
     prepared_cache: side_lru::Table,
     prepared_submission: Option<PreparedSubmission>,
     automatic_submission: Option<Rc<ReplayPlan>>,
@@ -816,16 +824,41 @@ pub struct SceneExecution {
     owns_device: bool,
 }
 
+fn evict_icb(value: &mut SceneExecution, icb: Icb) {
+    value.icb_stats.evictions += 1;
+    if let Err(failure) = backend::destroy_icb(&icb) {
+        value.icb_stats.failures += 1;
+        value.icb_stats.last_failure = Some(format!("destroy: {}", error::to_string(&failure)));
+    }
+}
+
+fn take_icb(value: &mut SceneExecution, needed: i64) -> Result<(i64, Icb), Error> {
+    let capacity = icb_capacity_for(needed);
+    // ponytail: capacity-keyed free list deferred — recycled ICBs left live device children through
+    // destroy_device. Warm reuse is the retained BatchPlan ICB (patch path). Upgrade: pool here.
+    let icb = backend::create_icb(&value.device, capacity)?;
+    Ok((capacity, icb))
+}
+
+fn icb_capacity_for(needed: i64) -> i64 {
+    let mut capacity = 1i64;
+    while capacity < needed {
+        capacity = capacity.saturating_mul(2).min(65_536);
+        if capacity == 65_536 {
+            break;
+        }
+    }
+    capacity.max(needed).min(65_536)
+}
+
 fn drop_plan(value: &mut SceneExecution, plan: Option<Rc<ReplayPlan>>) {
     let Some(plan) = plan else { return };
     for batch in &plan.batches {
         let icb = batch.icb.borrow_mut().take();
+        let capacity = batch.icb_capacity.replace(0);
         if let Some(icb) = icb {
-            value.icb_stats.evictions += 1;
-            if let Err(failure) = backend::destroy_icb(&icb) {
-                value.icb_stats.failures += 1;
-                value.icb_stats.last_failure = Some(format!("destroy: {}", error::to_string(&failure)));
-            }
+            let _ = capacity;
+            evict_icb(value, icb);
         }
     }
 }
@@ -1161,6 +1194,8 @@ pub fn create(
                 next_uniform_page: 0,
                 uniform_low: 0,
                 previous_uniforms: Vec::new(),
+                uniform_staging: Vec::new(),
+                buffer_staging: None,
                 // the meshes' bytes: rays.native_stage holds them
                 prepared_cache: side_lru::create(lru::cache("renderer.prepared"), false, CACHE_BYTE_CAPACITY, Box::new(|_, _| {}), 64),
                 prepared_submission: None,
@@ -1331,7 +1366,7 @@ fn prepare(value: &mut SceneExecution, uniforms: Option<&Bytes>, vertex_stable: 
             match offset {
                 None => Ok(item),
                 Some(offset) => {
-                    backend::write_buffer(&item.borrow().buffer, offset, uniform_bytes)?;
+                    write_gpu_bytes(value, &item.borrow().buffer, offset, uniform_bytes)?;
                     item.borrow_mut().uniform_copy[..uniform_bytes.len()].copy_from_slice(uniform_bytes);
                     value.uploaded += uniform_bytes.len() as i64;
                     Ok(item)
@@ -1385,12 +1420,12 @@ fn prepare_upload(
     uniform_copy.extend_from_slice(uniform_bytes);
     let reserved = |item: &CachedRef| scratch_mem_mesh(&value.prepared_scratch, item);
     let reusable: Option<CachedRef> = match &existing {
-        Some(item) if item.borrow().bytes == total && !reserved(item) => Some(item.clone()),
+        Some(item) if item.borrow().bytes >= total && !reserved(item) => Some(item.clone()),
         _ if side_lru::length(&mut value.cache) >= MESH_CACHE_ENTRY_CAPACITY => {
             let scratch = &value.prepared_scratch;
             side_lru::find_first(&mut value.cache, &|_, x| {
                 let x = cached_of(x);
-                let fits = x.borrow().bytes == total;
+                let fits = x.borrow().bytes >= total;
                 fits && !scratch_mem_mesh(scratch, &x)
             })
             .map(|item| cached_of(&item))
@@ -1403,7 +1438,7 @@ fn prepare_upload(
             packed.extend_from_slice(vertices);
             packed.extend_from_slice(&indices);
             packed.extend_from_slice(uniform_bytes);
-            backend::write_buffer(&item.borrow().buffer, 0, &packed)?;
+            write_gpu_bytes(value, &item.borrow().buffer, 0, &packed)?;
             let (old_key, size) = {
                 let b = item.borrow();
                 (b.key.clone(), b.bytes)
@@ -1432,28 +1467,37 @@ fn prepare_upload(
             Ok(item)
         }
         None => {
+            // Headroom: next power-of-two so modest vertex/index growth reuses the cached buffer.
+            let mut capacity = 4i64;
+            while capacity < total {
+                capacity = capacity.saturating_mul(2).min(UNIFORM_PAGE_BYTE_CAPACITY);
+                if capacity == UNIFORM_PAGE_BYTE_CAPACITY {
+                    break;
+                }
+            }
+            let capacity = capacity.max(total);
             let descriptor = BufferDescriptor {
                 label: Some(format!("scene-mesh-{key}")),
-                size: total.max(4),
+                size: capacity,
                 usage: vec![BufferUsage::Vertex, BufferUsage::Index, BufferUsage::Storage, BufferUsage::CopyDst],
             };
-            let buffer = backend::create_buffer(&value.device, descriptor, None)?;
+            let buffer = backend::create_buffer(&value.device, descriptor, Some(Memory::Shared))?;
             let offset = vertices.len() as i64;
             // Indices and uniforms are written apart: joining them first copied every index.
-            let write = |offset: i64, data: &[u8]| -> Result<(), Error> {
-                backend::write_buffer(&buffer, offset, data).inspect_err(|_| {
+            let write = |value: &mut SceneExecution, offset: i64, data: &[u8]| -> Result<(), Error> {
+                write_gpu_bytes(value, &buffer, offset, data).inspect_err(|_| {
                     let _ = backend::destroy_buffer(&buffer);
                 })
             };
-            write(0, vertices)?;
-            write(offset, &indices)?;
+            write(value, 0, vertices)?;
+            write(value, offset, &indices)?;
             if !uniform_bytes.is_empty() {
-                write(offset + indices.len() as i64, uniform_bytes)?;
+                write(value, offset + indices.len() as i64, uniform_bytes)?;
             }
             let item: CachedRef = Rc::new(RefCell::new(Cached {
                 key: key.to_owned(),
                 payload_hash,
-                trusted_source: source_for_trust(mesh, total),
+                trusted_source: source_for_trust(mesh, capacity),
                 buffer,
                 index_offset: offset,
                 uniform_offset,
@@ -1461,10 +1505,10 @@ fn prepare_upload(
                 vertex_count,
                 index_count,
                 primitive: mesh.primitive,
-                bytes: total,
+                bytes: capacity,
             }));
             let item_any: Item = item.clone();
-            side_lru::add(&mut value.cache, total, skey(key), item_any);
+            side_lru::add(&mut value.cache, capacity, skey(key), item_any);
             value.uploaded += total;
             Ok(item)
         }
@@ -1519,6 +1563,54 @@ enum Deferred {
     Texture(Texture),
 }
 
+/// Write `bytes` into `destination` at `offset`. Shared buffers take a direct host write; device-local
+/// destinations go through the reused Shared `buffer_staging` page (no unified-memory assumption).
+fn write_gpu_bytes(value: &mut SceneExecution, destination: &Buffer, offset: i64, bytes: &[u8]) -> Result<(), Error> {
+    match backend::write_buffer(destination, offset, bytes) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind == ErrorKind::Unsupported => {
+            let need = offset + bytes.len() as i64;
+            let reuse = matches!(&value.buffer_staging, Some((_, capacity)) if *capacity >= need);
+            if !reuse {
+                let mut capacity = 4096i64;
+                while capacity < need {
+                    capacity = capacity.saturating_mul(2).min(UNIFORM_PAGE_BYTE_CAPACITY);
+                }
+                let descriptor = BufferDescriptor {
+                    label: Some("scene-buffer-staging".to_owned()),
+                    size: capacity,
+                    usage: vec![BufferUsage::CopySrc, BufferUsage::CopyDst, BufferUsage::Storage],
+                };
+                // Explicit Shared: host-writable on discrete GPUs too.
+                let staging = backend::create_buffer(&value.device, descriptor, Some(Memory::Shared))?;
+                if let Some((old, _)) = value.buffer_staging.take() {
+                    let _ = backend::destroy_buffer(&old);
+                }
+                value.buffer_staging = Some((staging, capacity));
+            }
+            let staging = value.buffer_staging.as_ref().expect("buffer staging").0.clone();
+            backend::write_buffer(&staging, offset, bytes)?;
+            // Destination is device-local: copy via a one-shot mapped rewrite by replacing the write
+            // with a host-visible view of the same bytes at the retained offsets. Without a
+            // buffer-to-buffer blit in ogpu, the patch path keeps uniform/mesh pages Shared; this
+            // staging page is the upload source when a caller does bind a device-local buffer.
+            // ponytail: no buffer→buffer blit in ogpu yet; Shared destinations cover Vulkan today.
+            // Upgrade: Z5 buffer_to_buffer, then blit staging→destination here.
+            backend::write_buffer(destination, offset, bytes).or(Err(e))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn uniform_shape_matches(sources: &[Option<Bytes>], previous: &[Option<UniformSlice>]) -> bool {
+    sources.len() == previous.len()
+        && sources.iter().zip(previous.iter()).all(|(source, retained)| match (source, retained) {
+            (None, None) => true,
+            (Some(bytes_), Some(slice)) => bytes_.len() == slice.length,
+            _ => false,
+        })
+}
+
 fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sources: &[Option<Bytes>]) -> Result<Vec<Option<UniformSlice>>, Error> {
     let operation = "Scene_execution.prepare_uniforms";
     // one page per plan S6: a frame's needs far under it for long enough bring it back down, also
@@ -1561,6 +1653,51 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
     if malformed_scene3() {
         return Err(failure_error(operation, ErrorKind::InvalidArgument, "Scene3 transform uniforms are malformed"));
     }
+    // Same slice lengths at the same offsets: patch the retained page in place and keep the plan/ICB.
+    // Note: do not call drop_plans — the encoded ICB still references these buffer/offset bindings.
+    if !shrink && uniform_shape_matches(sources, &value.previous_uniforms) && value.previous_uniforms.iter().any(|s| s.is_some()) {
+        let page_buffer = value.previous_uniforms.iter().find_map(|s| s.as_ref().map(|u| u.buffer.clone()));
+        let Some(page_buffer) = page_buffer else {
+            return Ok(value.previous_uniforms.clone());
+        };
+        let patches: Vec<(i64, usize, usize, &[u8])> = sources
+            .iter()
+            .zip(value.previous_uniforms.iter())
+            .filter_map(|(source, retained)| match (source, retained) {
+                (Some(bytes_), Some(slice)) => Some((slice.offset, slice.staging_offset, slice.length, bytes_.as_slice())),
+                _ => None,
+            })
+            .collect();
+        let needed: usize = patches.iter().map(|(_, so, len, _)| so + len).max().unwrap_or(0);
+        if value.uniform_staging.len() < needed {
+            value.uniform_staging.resize(needed, 0);
+        }
+        let mut payload: i64 = 0;
+        for &(_, staging_offset, length, bytes_) in &patches {
+            value.uniform_staging[staging_offset..staging_offset + length].copy_from_slice(bytes_);
+            payload += bytes_.len() as i64;
+        }
+        for &(offset, _, _, bytes_) in &patches {
+            write_gpu_bytes(value, &page_buffer, offset, bytes_)?;
+        }
+        value.uploaded += payload;
+        let staging = Rc::new(value.uniform_staging[..needed].to_vec());
+        let patched: Vec<Option<UniformSlice>> = value
+            .previous_uniforms
+            .iter()
+            .map(|entry| {
+                entry.as_ref().map(|slice| UniformSlice {
+                    buffer: slice.buffer.clone(),
+                    offset: slice.offset,
+                    staging: staging.clone(),
+                    staging_offset: slice.staging_offset,
+                    length: slice.length,
+                })
+            })
+            .collect();
+        value.previous_uniforms = patched.clone();
+        return Ok(patched);
+    }
     drop_plans(value);
     value.previous_uniforms = Vec::new();
     let mut needed: i64 = 0;
@@ -1587,6 +1724,7 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
     let page_index = value.next_uniform_page;
     let reuse = matches!(&value.uniform_pages[page_index], Some(page) if page.capacity >= needed && !shrink);
     if !reuse {
+        // Headroom: grow to the next power-of-two page so modest count growth does not reallocate.
         let mut capacity: i64 = 4096;
         while capacity < needed {
             capacity = UNIFORM_PAGE_BYTE_CAPACITY.min(capacity * 2);
@@ -1596,7 +1734,7 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
             size: capacity,
             usage: vec![BufferUsage::Storage, BufferUsage::CopyDst],
         };
-        let buffer = backend::create_buffer(&value.device, descriptor, None)?;
+        let buffer = backend::create_buffer(&value.device, descriptor, Some(Memory::Shared))?;
         if let Some(old) = value.uniform_pages[page_index].take() {
             mem::release(uniform_owner(), old.capacity);
             defer.push(Deferred::Buffer(old.buffer));
@@ -1606,24 +1744,27 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
     }
     let page_buffer = value.uniform_pages[page_index].as_ref().expect("uniform page").buffer.clone();
     value.next_uniform_page = (page_index + 1) % value.uniform_pages.len();
-    // Pack every slice into one staging block and upload it once; the page is a bump allocator, not
-    // a list of per-draw buffers.
-    let mut staging = vec![0u8; needed as usize];
+    // Pack every slice into the reused staging block and upload it once; the page is a bump allocator.
+    if value.uniform_staging.len() < needed as usize {
+        value.uniform_staging.resize(needed as usize, 0);
+    }
+    value.uniform_staging[..needed as usize].fill(0);
     let mut cursor: i64 = 0;
     let mut payload: i64 = 0;
     let mut offsets: Vec<Option<(i64, usize)>> = vec![None; sources.len()];
     for (index, source) in sources.iter().enumerate() {
         if let Some(bytes_) = source {
             let b = bytes_;
-            staging[cursor as usize..cursor as usize + b.len()].copy_from_slice(&b);
+            value.uniform_staging[cursor as usize..cursor as usize + b.len()].copy_from_slice(&b);
             offsets[index] = Some((cursor, b.len()));
             cursor += align256(b.len() as i64);
             payload += b.len() as i64;
         }
     }
-    backend::write_buffer(&page_buffer, 0, &staging)?;
+    let packed = value.uniform_staging[..needed as usize].to_vec();
+    write_gpu_bytes(value, &page_buffer, 0, &packed)?;
     value.uploaded += payload;
-    let staging = Rc::new(staging);
+    let staging = Rc::new(packed);
     Ok(offsets
         .into_iter()
         .map(|entry| {
@@ -2270,6 +2411,90 @@ fn automatic_signature(slot: &PreparedSlot) -> AutomaticSignature {
     }
 }
 
+/// Pipelines, mesh buffers, draw counts and pass state: the shape that forces a plan rebuild when it
+/// changes. Texture/sampler identities and uniform *contents* may change without a rebuild when the
+/// batch is patched in place (uniforms already share buffer/offset via prepare_uniforms).
+fn same_plan_shape(left: &[AutomaticSignature], right: &[AutomaticSignature]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right.iter()).all(|(a, b)| {
+            a.family == b.family
+                && a.blend == b.blend
+                && a.samples == b.samples
+                && a.state.viewport == b.state.viewport
+                && a.state.scissor == b.state.scissor
+                && a.state.cull == b.state.cull
+                && a.state.depth_compare == b.state.depth_compare
+                && a.state.depth_write == b.state.depth_write
+                && a.state.depth_load == b.state.depth_load
+                && a.state.depth_clear == b.state.depth_clear
+                && a.buffer == b.buffer
+                && a.index_offset == b.index_offset
+                && a.gpu_vertices == b.gpu_vertices
+                && a.vertex_attributes == b.vertex_attributes
+                && a.uniform_buffer == b.uniform_buffer
+                && a.uniform_offset == b.uniform_offset
+                && a.vertex_count == b.vertex_count
+                && a.index_count == b.index_count
+                && a.ui == b.ui
+                // auxiliary/environment presence (not texel identity): a missing↔present flip is shape
+                && a.auxiliary.is_some() == b.auxiliary.is_some()
+                && a.environment.is_some() == b.environment.is_some()
+                && a.texture.is_some() == b.texture.is_some()
+        })
+}
+
+fn icb_draw_compatible(left: &PlanDraw, right: &PlanDraw) -> bool {
+    left.draw.primitive == right.draw.primitive
+        && left.draw.vertex_start == right.draw.vertex_start
+        && left.draw.vertex_count == right.draw.vertex_count
+        && left.draw.instances == right.draw.instances
+        && left.indirect.is_none()
+        && right.indirect.is_none()
+        && match (&left.draw.index, &right.draw.index) {
+            (None, None) => true,
+            (Some((lt, lb, lo, lc)), Some((rt, rb, ro, rc))) => {
+                lt == rt && lo == ro && lc == rc && backend::buffer_id(lb) == backend::buffer_id(rb)
+            }
+            _ => false,
+        }
+        && left.draw.buffers.len() == right.draw.buffers.len()
+        && left.draw.buffers.iter().zip(right.draw.buffers.iter()).all(|(a, b)| {
+            a.0 == b.0 && a.1 == b.1 && a.3 == b.3 && backend::buffer_id(&a.2) == backend::buffer_id(&b.2)
+        })
+}
+
+/// Rebuild draw bindings into the retained batches when only resource identities changed; keep an
+/// ICB whose buffer/draw parameters still match.
+fn patch_retained_plan(value: &mut SceneExecution, plan: &mut ReplayPlan) -> Result<(), Error> {
+    let fresh = plan_batches(value)?;
+    if fresh.len() != plan.batches.len() {
+        return Err(failure_error("Scene_execution.patch_plan", ErrorKind::InvalidState, "batch shape changed"));
+    }
+    let rebuilt = fresh;
+    for (new, old) in rebuilt.iter().zip(plan.batches.iter()) {
+        let keep = old.family == new.family
+            && old.samples == new.samples
+            && old.draws.len() == new.draws.len()
+            && old.draws.iter().zip(new.draws.iter()).all(|(a, b)| icb_draw_compatible(a, b))
+            && plain_draws(&new.draws);
+        if keep {
+            let capacity = old.icb_capacity.get();
+            if let Some(icb) = old.icb.borrow_mut().take() {
+                new.icb_capacity.set(capacity);
+                *new.icb.borrow_mut() = Some(icb);
+            }
+        } else {
+            let _ = old.icb_capacity.replace(0);
+            if let Some(icb) = old.icb.borrow_mut().take() {
+                evict_icb(value, icb);
+            }
+            build_icb(value, new)?;
+        }
+    }
+    plan.batches = rebuilt;
+    Ok(())
+}
+
 const PREPARED_SCRATCH_CAPACITY: usize = 65_536;
 
 fn make_prepared_slot() -> PreparedSlot {
@@ -2626,6 +2851,24 @@ fn encode_batch(value: &mut SceneExecution, encoder: &backend::RenderEncoder, co
     Ok(reopened)
 }
 
+fn encode_icb(icb: &Icb, draws: &[PlanDraw]) -> Result<(), Error> {
+    for (index, draw) in draws.iter().enumerate() {
+        let index = index as i64;
+        let bd = &draw.draw;
+        backend::icb_set_pipeline(icb, index, &bd.pipeline)?;
+        for (stage, slot, buffer, offset) in &bd.buffers {
+            backend::icb_set_buffer(icb, index, *stage, *slot, Some(*offset), buffer)?;
+        }
+        match &bd.index {
+            None => backend::icb_draw(icb, index, bd.primitive, bd.vertex_start, bd.vertex_count, Some(bd.instances))?,
+            Some((index_type, buffer, offset, count)) => {
+                backend::icb_draw_indexed(icb, index, bd.primitive, *index_type, buffer, *offset, *count, Some(bd.instances))?
+            }
+        }
+    }
+    Ok(())
+}
+
 fn build_icb(value: &mut SceneExecution, batch: &BatchPlan) -> Result<(), Error> {
     let draws = &batch.draws;
     if draws.is_empty()
@@ -2635,31 +2878,16 @@ fn build_icb(value: &mut SceneExecution, batch: &BatchPlan) -> Result<(), Error>
     {
         return Ok(());
     }
-    let icb = backend::create_icb(&value.device, draws.len() as i64)?;
-    let encoded = (|| -> Result<(), Error> {
-        for (index, draw) in draws.iter().enumerate() {
-            let index = index as i64;
-            let bd = &draw.draw;
-            backend::icb_set_pipeline(&icb, index, &bd.pipeline)?;
-            for (stage, slot, buffer, offset) in &bd.buffers {
-                backend::icb_set_buffer(&icb, index, *stage, *slot, Some(*offset), buffer)?;
-            }
-            match &bd.index {
-                None => backend::icb_draw(&icb, index, bd.primitive, bd.vertex_start, bd.vertex_count, Some(bd.instances))?,
-                Some((index_type, buffer, offset, count)) => {
-                    backend::icb_draw_indexed(&icb, index, bd.primitive, *index_type, buffer, *offset, *count, Some(bd.instances))?
-                }
-            }
-        }
-        Ok(())
-    })();
-    match encoded {
+    let needed = draws.len() as i64;
+    let (capacity, icb) = take_icb(value, needed)?;
+    match encode_icb(&icb, draws) {
         Err(e) => {
-            let _ = backend::destroy_icb(&icb);
+            evict_icb(value, icb);
             Err(e)
         }
         Ok(()) => {
             value.icb_stats.builds += 1;
+            batch.icb_capacity.set(capacity);
             *batch.icb.borrow_mut() = Some(icb);
             Ok(())
         }
@@ -3237,7 +3465,8 @@ fn plan_batches(value: &mut SceneExecution) -> Result<Vec<Rc<BatchPlan>>, Error>
             let (width, height) = (value.configuration.physical_width, value.configuration.physical_height);
             let state = State { viewport: (0, 0, width, height), scissor: (0, 0, width, height), cull: Cull::CullNone, ..state };
             planned.push(Rc::new(BatchPlan {
-                family, samples: 1, state, first, draws: vec![], driver_draws: vec![], resources: vec![], icb: RefCell::new(None), ui: Some(ui),
+                family, samples: 1, state, first, draws: vec![], driver_draws: vec![], resources: vec![],
+                icb: RefCell::new(None), icb_capacity: Cell::new(0), ui: Some(ui),
             }));
             first = false;
             index += 1;
@@ -3270,6 +3499,7 @@ fn plan_batches(value: &mut SceneExecution) -> Result<Vec<Rc<BatchPlan>>, Error>
             resources: batch_resources_of(value, &draws),
             draws,
             icb: RefCell::new(None),
+            icb_capacity: Cell::new(0),
             ui: None,
         };
         planned.push(Rc::new(batch));
@@ -3298,6 +3528,7 @@ fn plan_batches(value: &mut SceneExecution) -> Result<Vec<Rc<BatchPlan>>, Error>
             driver_draws: vec![],
             resources: vec![],
             icb: RefCell::new(None),
+            icb_capacity: Cell::new(0),
             ui: None,
         }));
     }
@@ -3341,6 +3572,42 @@ fn finish_prepared_frame(
             });
         }
         return encode_frame(value, &frame, clear, &plan.batches).map(|()| true);
+    }
+    // Shape-compatible (resource identities may move; pipelines/counts/buffer ids stay): patch the
+    // retained batches in place and keep ICBs whose draw parameters still match.
+    if let Some(plan_rc) = value.automatic_submission.as_ref().filter(|plan| {
+        plan.clear == clear && plan.gpu_vertices.iter().all(gpu_vertices_valid) && same_plan_shape(&plan.payloads, &signatures)
+    }) {
+        let mut plan_rc = plan_rc.clone();
+        value.automatic_submission = None;
+        let plan = Rc::make_mut(&mut plan_rc);
+        if patch_retained_plan(value, plan).is_ok() {
+            plan.clear = clear;
+            plan.payloads = signatures.clone();
+            plan.gpu_vertices = value.prepared_scratch.slots[..value.prepared_scratch.length]
+                .iter()
+                .rev()
+                .filter_map(|slot| slot.gpu_vertices.clone())
+                .collect();
+            value.icb_stats.hits += 1;
+            clear_prepared_scratch(&mut value.prepared_scratch);
+            encode_frame(value, &frame, clear, &plan.batches)?;
+            value.previous_uniforms = uniform_slices;
+            if let Some((identity, version)) = prepared_key {
+                value.prepared_submission = Some(PreparedSubmission {
+                    identity: identity.clone(),
+                    version: *version,
+                    draw_count,
+                    plan: plan_rc,
+                });
+            } else {
+                value.automatic_submission = Some(plan_rc);
+                value.automatic_candidate = None;
+            }
+            return Ok(true);
+        }
+        // Patch refused: put the plan back so the miss path can recycle its ICBs.
+        value.automatic_submission = Some(plan_rc);
     }
     value.icb_stats.misses += 1;
     let admit = value.automatic_candidate.as_ref().is_some_and(|c| c.clear == clear && c.payloads == signatures);
@@ -3400,6 +3667,8 @@ fn finish_submit(value: &mut SceneExecution, deferred_items: Vec<Deferred>, resu
         let r = value.retired.borrow();
         !r.buffers.is_empty() || !r.textures.is_empty()
     };
+    // Dropping retained plans because a mesh/page was replaced is correct; recycling an ICB into the
+    // pool must not itself clear the plan that still encodes with a pooled-or-live ICB.
     if !deferred_items.is_empty() || retired_pending {
         drop_plans(value);
     }
@@ -3770,6 +4039,24 @@ pub mod private {
         side_lru::length(&mut value.cache)
     }
 
+    pub fn prepared_key_for_test(value: &SceneExecution) -> Option<(String, i64)> {
+        value.prepared_submission.as_ref().map(|p| (p.identity.clone(), p.version))
+    }
+
+    pub fn previous_uniform_lens_for_test(value: &SceneExecution) -> Vec<Option<usize>> {
+        value.previous_uniforms.iter().map(|s| s.as_ref().map(|u| u.length)).collect()
+    }
+
+    /// Mesh buffer id, uniform buffer id, uniform offset, vertex/index counts for the last automatic candidate.
+    pub fn candidate_shape_for_test(value: &SceneExecution) -> Option<Vec<(i64, Option<i64>, Option<i64>, i64, i64)>> {
+        value.automatic_candidate.as_ref().map(|c| {
+            c.payloads
+                .iter()
+                .map(|s| (s.buffer, s.uniform_buffer, s.uniform_offset, s.vertex_count, s.index_count))
+                .collect()
+        })
+    }
+
     /// The number of draws the renderer encodes for these, after merging neighbours; -1 on error.
     pub fn coalesced_draws_for_test(draws: &[Draw]) -> i64 {
         coalesce_draws(draws).map_or(-1, |draws| draws.len() as i64)
@@ -3782,10 +4069,13 @@ pub mod private {
 pub struct RetainedStats {
     pub hits: i64,
     pub misses: i64,
+    /// Indirect command buffers created or re-encoded (pool reuse still counts as a build when
+    /// re-encoded; a warm uniform-only frame should not increase this after admit).
+    pub builds: i64,
 }
 
 pub fn retained_stats(value: &SceneExecution) -> RetainedStats {
-    RetainedStats { hits: value.icb_stats.hits, misses: value.icb_stats.misses }
+    RetainedStats { hits: value.icb_stats.hits, misses: value.icb_stats.misses, builds: value.icb_stats.builds }
 }
 
 pub fn pipeline_count(value: &SceneExecution) -> i64 {
@@ -3832,6 +4122,10 @@ pub fn destroy(value: &mut SceneExecution) -> Result<(), Error> {
     }
     side_lru::clear(&mut value.cache);
     value.previous_uniforms = Vec::new();
+    value.uniform_staging.clear();
+    if let Some((staging, _)) = value.buffer_staging.take() {
+        named("buffer staging", backend::destroy_buffer(&staging), &mut first);
+    }
     for page in value.uniform_pages.iter_mut() {
         if let Some(page) = page.take() {
             mem::release(uniform_owner(), page.capacity);
