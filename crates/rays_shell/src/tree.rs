@@ -124,13 +124,13 @@ pub fn summary(t: &Tree) -> String {
     )
 }
 
-/// Arrows, Home/End, Tab/Shift-Tab, Alt-arrows, F2, `s`, `h`, Return; the host scopes them to its
+/// Arrows, Home/End, Tab/Shift-Tab, Alt-arrows, F2, `s`, `h`, Return, Command-Down; the host scopes them to its
 /// list pane.
 pub fn bindings() -> Vec<(command::Command, Command)> {
     let key = |id: &str, label: &str, key: Key, action: Command, modifiers: Vec<Key>| -> (command::Command, Command) {
         (command::make(Some(Trigger::Chord(key, modifiers)), None, Vec::new(), &format!("list.{id}"), label, 0), action)
     };
-    vec![
+    let mut keys = vec![
         key("up", "previous row", Key::ArrowUp, Command::Up, vec![]),
         key("down", "next row", Key::ArrowDown, Command::Down, vec![]),
         key("up", "previous row", Key::KeyChar('k'), Command::Up, vec![]),
@@ -150,12 +150,15 @@ pub fn bindings() -> Vec<(command::Command, Command)> {
         key("delete", "delete", Key::Backspace, Command::DeleteRows, vec![]),
         key("filter", "filter", Key::KeyChar('s'), Command::Filter, vec![]),
         key("hide", "hide / show", Key::KeyChar('h'), Command::Hide, vec![]),
-        if cfg!(target_os = "macos") {
-            key("rename", "rename", Key::Enter, Command::RenameRow, vec![])
-        } else {
-            key("activate", "open selected in graph", Key::Enter, Command::ActivateRow, vec![])
-        },
-    ]
+    ];
+    // Finder's keys on macOS: Return renames, Command-Down opens
+    if cfg!(target_os = "macos") {
+        keys.push(key("rename", "rename", Key::Enter, Command::RenameRow, vec![]));
+        keys.push(key("activate", "open selected in graph", Key::ArrowDown, Command::ActivateRow, vec![Key::Meta]));
+    } else {
+        keys.push(key("activate", "open selected in graph", Key::Enter, Command::ActivateRow, vec![]));
+    }
+    keys
 }
 
 fn has_children(rows: &[Row], index: usize) -> bool {

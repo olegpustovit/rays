@@ -256,8 +256,13 @@ fn sec_a(r: &mut Run, cx: &Ctx, _cooks: &Rc<Cell<i64>>) {
     let row = (gx + 40, gy + 24 + 12);
     r.step_with(row, &[], &[], vec![]);
     r.step_with(row, &[], &[], press(at(row)));
-    r.key(Key::Enter);
-    assert_eq!(r.projection(), "projection: graph", "list Enter did not open the selected node in graph");
+    // the list's open key: Command-Down on macOS (Return renames there, as in Finder), Enter elsewhere
+    if cfg!(target_os = "macos") {
+        r.step_with(row, &[Key::Meta], &[], vec![Event::KeyPressed(Key::ArrowDown)]);
+    } else {
+        r.key(Key::Enter);
+    }
+    assert_eq!(r.projection(), "projection: graph", "the list's open key did not open the selected node in graph");
     r.chars(&['u']);
     assert!(editor::level(&r.e).is_none(), "u did not go back to the scene");
     r.step(vec![]);
