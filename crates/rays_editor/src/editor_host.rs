@@ -132,15 +132,17 @@ pub fn set_root(value: &mut EditorModel, root: &objects::root::Parameters) {
 /// as a `Syntax_edit` intent, committed as one history entry named by the op (`Gesture` merge for a
 /// scrub).
 pub fn host_edit(value: &mut EditorModel, label: &str, gesture: Option<String>, edited: &dyn Fn(Option<&[sop::edit_graph::Factory]>, &Document) -> Result<Document, Diagnostic>) -> Result<(), String> {
-    let clock = value.clock.clone();
-    let guard = SampleGuard::start_with_clock(Box::new(move || clock()));
+    let guard = SampleGuard::start_arc(value.clock.clone());
     let result = edited(Some(&value.factories), &value.doc)
         .map(|doc| {
             install(value, doc, label, gesture.map(Merge::Gesture).unwrap_or(Merge::Step));
         })
         .map_err(|d| rays_diagnostic::to_string(&d));
-    let phases = guard.finish();
-    if result.is_ok() { value.edit_phases = phases; }
+    if result.is_ok() {
+        value.edit_phases = guard.finish();
+    } else {
+        guard.discard();
+    }
     result
 }
 

@@ -1583,8 +1583,7 @@ pub fn update(
     host_events: Vec<Event>,
     pump: Option<&dyn Fn()>,
 ) -> Update {
-    let clock = value.clock.clone();
-    let guard = flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || clock()));
+    let guard = flow_syntax::phase_timer::SampleGuard::start_arc(value.clock.clone());
     let before = value.doc.clone();
     let (frame_after, carry_changed) = carry_step(value, text_focus, frame_);
     let no_image = |_: i64| None;
@@ -1593,9 +1592,11 @@ pub fn update(
         None => &no_image,
     };
     let out = update_frame(value, carry_changed, all_ui_visible, text_focus, camera_panel, view_handles, render_status, error_status, view_state, &frame_after, gpu, pump, image, host_events);
-    let phases = guard.finish();
     if !std::sync::Arc::ptr_eq(&value.doc, &before) {
-        value.edit_phases = phases;
+        value.edit_phases = guard.finish();
+    } else {
+        // Idle: park the Sample shell; do not build a PhaseTimer Vec.
+        guard.discard();
     }
     out
 }

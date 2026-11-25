@@ -52,7 +52,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 | Z4 | lisp_text/lex BoundDoc+OnceLock+SPANS+Word+incremental+Arc caches; State take (one_intent+shown+frame); Live moves. typing_budget→1103/260 (meas 1050/247, mean 0.60ms). zero_alloc D_typing 401 rust + 37 native/unit (was ~1031 app + ~49 pxui). Left: ~400 rust/key (scene/kind_graph/PXUI cosmic Z6); not yet 0.
 | Z3 | done: Scratch tessellate (fef497e23); Wide keys + always-on shape cache + Affine unit segments (ae918f88f); guides cache + Affine lines + stack screen_box (cc870c828). zero_alloc A_isosel 712→48, B 727→196/194, C 467/462→174/170 (Z0 ceilings at meas+5%). click_budget isogrid idle 402/324→252/175, hover 334/334→185/185. Overlay tessellate/format! → 0 warm; pan reuses unit meshes. Left: guides hit clones outer Nodes Vec; camera-key miss still builds Node wrappers (tessellate 0). |
 | Z8 | in progress (`../rays-z8`). REST_FRAMES=2; may_rest ignores static HUD. Bisect A_ISOSEL 51→344: first bad `0cfef552b` (Z5 Wide skey); `find_str` still matched Str only → miss every frame. Fixed `find(&skey(...))` — A_ISOSEL 344→17 (ceil 29). Next: B/C/D selected/input floors. |
-| Z5 | timeline Cow + scratch_colors + submit retained-shell pool. SLOW empty/bare **3/8** (ceil 4/9); isogrid **13/12** (native ≤12); isosel **10/12**. Renderer warm sites gone on empty (remaining 3 = editor noise). UV/Atlas → Z6b (done). Left: MetalHandle general pool (renew covers CB/encoder); empty→0 needs Z1 editor leftovers. |
+| Z5 | submit retained pool + warm-submit 0-alloc regression (`2ecaaf05`); phase_timer Arc+TLS recycle. SLOW empty/bare **2/8** (ceil 3/9); isogrid **13/12**. Renderer warm = 0 on empty. Left: ~2 editor scatter (follow_press / compose) → Z1; MetalHandle general pool optional. |
 | Z6a | done: PXUI rekey-on-text-change + mono caret (85482d18); glyph atlas. Direct atlas quads enabled once Z6b Image-run batching landed (no per-frame blit). |
 | Z6b | done (`../rays-z6b`): finding 5 plan/ICB patch + prepared reuse; **Image-run batching** — consecutive same-texture `Command::Image`/Glyphs → one Scene2Textured draw (`affine[20k..]`, capacity-stable `image-run:{tex}:{cap}`). Canvas text `TextDraw::Atlas` (no per-frame blit). A_idle_basic **240/8** (ceil 252/9); F 122/7 + 128/8 (ceil 129/8, 135/9). Free-list ICB pool deferred. Remaining: Z5 ogpu encode; Z7 eval; Z8 editor; Z6b signature collect / argument-slice / ICB re-encode. |
 
@@ -67,11 +67,10 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 ### Z4
 - `text_pane::shown` still clones State on cache hit because `editor_frame::text_state` takes `&ModelView`; take/replace needs a `&mut` path in Z1's frame.
 ### Z5
-- Idle empty **3** Rust are editor (follow_press / update_with / phase_timer / compose) — not ogpu. Z1 to cut for empty→0.
-- MetalHandle general pool still open (CB/encoder renew already avoids `new` on warm).
+- Idle empty **2** Rust are editor scatter (follow_press `path.cloned`, compose/host) — not ogpu. MetalHandle general pool still open.
 - crates/lru: side_lru reserves HashMap; shared `lru` still node-allocates on cold insert (warm reserve holds).
 ### Z1
-- Z5: idle empty's last **3** Rust/frame are editor-side (see TRACE); timeline Cow already landed from Z5.
+- Z5: idle empty's last **2** Rust/frame (follow_press pane_keys Path clones; occasional compose). phase_timer recycle landed.
 ### Z6
 ### Z6b
 - Owns plan_entry/plan_batches/batch_resources_of/rebind, ICB pool, and Image-run (same-texture Image/Glyphs → one Scene2Textured draw). Coordinate with Z5 on shared helpers via Requests.

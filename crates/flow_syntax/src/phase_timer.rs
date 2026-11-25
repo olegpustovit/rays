@@ -1,4 +1,4 @@
-use std::{cell::RefCell, marker::PhantomData, rc::Rc};
+use std::{cell::RefCell, marker::PhantomData, rc::Rc, sync::Arc};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry { pub phase: String, pub calls: i64, pub seconds: f64 }
@@ -6,12 +6,71 @@ pub struct Entry { pub phase: String, pub calls: i64, pub seconds: f64 }
 pub struct PhaseTimer { pub total: f64, pub entries: Vec<Entry> }
 pub type T = PhaseTimer;
 pub fn empty() -> PhaseTimer { PhaseTimer { total: 0.0, entries: Vec::new() } }
-struct Scope { phase: String, started: f64, children: f64 }
-struct Sample { clock: Box<dyn FnMut() -> f64>, started: f64, last: f64, entries: Vec<Entry>, stack: Vec<Scope>, enabled: bool }
-thread_local! { static CURRENT: RefCell<Option<Sample>> = const { RefCell::new(None) }; }
+
+struct Scope { phase: &'static str, started: f64, children: f64 }
+enum Clock {
+    Boxed(Box<dyn FnMut() -> f64>),
+    Shared(Arc<dyn Fn() -> f64 + Send + Sync>),
+}
+struct Sample {
+    clock: Clock,
+    started: f64,
+    last: f64,
+    entries: Vec<Entry>,
+    stack: Vec<Scope>,
+    enabled: bool,
+}
+
+thread_local! {
+    static CURRENT: RefCell<Option<Sample>> = const { RefCell::new(None) };
+    // Warm editor frames recycle one Sample (reserved entries/stack) so measure stays allocation-free.
+    static SPARE: RefCell<Option<Sample>> = const { RefCell::new(None) };
+}
+
+fn tick(clock: &mut Clock) -> f64 {
+    match clock {
+        Clock::Boxed(f) => f(),
+        Clock::Shared(f) => f(),
+    }
+}
 fn now(sample: &mut Sample) -> f64 {
-    sample.last = sample.last.max((sample.clock)());
+    sample.last = sample.last.max(tick(&mut sample.clock));
     sample.last
+}
+
+fn take_spare(clock: Clock) -> Sample {
+    let mut sample = SPARE.with(|s| s.borrow_mut().take()).unwrap_or_else(|| Sample {
+        clock: Clock::Shared(Arc::new(|| 0.0)),
+        started: 0.0,
+        last: 0.0,
+        entries: Vec::with_capacity(8),
+        stack: Vec::with_capacity(4),
+        enabled: true,
+    });
+    sample.clock = clock;
+    let started = tick(&mut sample.clock);
+    sample.started = started;
+    sample.last = started;
+    sample.stack.clear();
+    for entry in &mut sample.entries {
+        entry.calls = 0;
+        entry.seconds = 0.0;
+    }
+    sample.enabled = true;
+    sample
+}
+
+fn park(mut sample: Sample) {
+    sample.stack.clear();
+    for entry in &mut sample.entries {
+        entry.calls = 0;
+        entry.seconds = 0.0;
+    }
+    SPARE.with(|s| {
+        if s.borrow().is_none() {
+            *s.borrow_mut() = Some(sample);
+        }
+    });
 }
 
 pub struct SampleGuard { finished: bool, owns_sample: bool, _not_send: PhantomData<Rc<()>> }
@@ -19,58 +78,115 @@ impl SampleGuard {
     pub fn start_with_clock(clock: Box<dyn FnMut() -> f64 + 'static>) -> Self {
         let owns_sample = CURRENT.with(|current| {
             let mut current = current.borrow_mut();
-            if current.is_some() { false } else {
-                let mut clock = clock;
-                let started = clock();
-                *current = Some(Sample { clock, started, last: started, entries: Vec::new(), stack: Vec::new(), enabled: true });
+            if current.is_some() {
+                false
+            } else {
+                *current = Some(take_spare(Clock::Boxed(clock)));
                 true
             }
         });
         Self { finished: false, owns_sample, _not_send: PhantomData }
     }
+
+    /// Editor hot path: Arc clock, recycled Sample shell (no per-frame `Box` / Vec).
+    pub fn start_arc(clock: Arc<dyn Fn() -> f64 + Send + Sync>) -> Self {
+        let owns_sample = CURRENT.with(|current| {
+            let mut current = current.borrow_mut();
+            if current.is_some() {
+                false
+            } else {
+                *current = Some(take_spare(Clock::Shared(clock)));
+                true
+            }
+        });
+        Self { finished: false, owns_sample, _not_send: PhantomData }
+    }
+
     pub fn finish(mut self) -> PhaseTimer {
         self.finished = true;
         CURRENT.with(|current| {
             let mut current = current.borrow_mut();
             if self.owns_sample {
-                current.take().map_or_else(empty, |mut sample| PhaseTimer { total: now(&mut sample) - sample.started, entries: sorted_entries(sample.entries) })
+                current.take().map_or_else(empty, |mut sample| {
+                    let total = now(&mut sample) - sample.started;
+                    // Keep zero-call rows out of the published timer; capacity stays in `entries`.
+                    sample.entries.retain(|e| e.calls > 0);
+                    sample.entries.sort_by(|a, b| a.phase.cmp(&b.phase));
+                    let entries = std::mem::replace(&mut sample.entries, Vec::with_capacity(8));
+                    park(sample);
+                    PhaseTimer { total, entries }
+                })
             } else {
-                current.as_mut().map_or_else(empty, |sample| PhaseTimer { total: now(sample) - sample.started, entries: sorted_entries(sample.entries.clone()) })
+                current.as_mut().map_or_else(empty, |sample| {
+                    let total = now(sample) - sample.started;
+                    let mut entries: Vec<Entry> = sample.entries.iter().filter(|e| e.calls > 0).cloned().collect();
+                    entries.sort_by(|a, b| a.phase.cmp(&b.phase));
+                    PhaseTimer { total, entries }
+                })
             }
         })
     }
+
+    /// Return the Sample to the spare without building a PhaseTimer (idle frames).
+    pub fn discard(mut self) {
+        self.finished = true;
+        if !self.owns_sample {
+            return;
+        }
+        CURRENT.with(|current| {
+            if let Some(sample) = current.borrow_mut().take() {
+                park(sample);
+            }
+        });
+    }
 }
 impl Drop for SampleGuard {
-    fn drop(&mut self) { if self.owns_sample && !self.finished { CURRENT.with(|current| { current.replace(None); }); } }
+    fn drop(&mut self) {
+        if self.owns_sample && !self.finished {
+            CURRENT.with(|current| {
+                if let Some(sample) = current.borrow_mut().take() {
+                    park(sample);
+                }
+            });
+        }
+    }
 }
 
 pub struct MeasureGuard { active: bool, _not_send: PhantomData<Rc<()>> }
-pub fn measure(phase: &str) -> MeasureGuard {
+pub fn measure(phase: &'static str) -> MeasureGuard {
     let active = CURRENT.with(|current| {
         let mut current = current.borrow_mut();
         if let Some(sample) = current.as_mut().filter(|sample| sample.enabled) {
             let started = now(sample);
-            sample.stack.push(Scope { phase: phase.to_owned(), started, children: 0.0 });
+            sample.stack.push(Scope { phase, started, children: 0.0 });
             true
-        } else { false }
+        } else {
+            false
+        }
     });
     MeasureGuard { active, _not_send: PhantomData }
 }
 impl Drop for MeasureGuard {
     fn drop(&mut self) {
-        if !self.active { return; }
+        if !self.active {
+            return;
+        }
         CURRENT.with(|current| {
             let mut current = current.borrow_mut();
-            let Some(sample) = current.as_mut() else { return; };
+            let Some(sample) = current.as_mut() else { return };
             let elapsed = now(sample) - sample.stack.last().map_or(sample.last, |scope| scope.started);
-            let Some(scope) = sample.stack.pop() else { return; };
+            let Some(scope) = sample.stack.pop() else { return };
             let elapsed = elapsed.max(0.0);
-            if let Some(parent) = sample.stack.last_mut() { parent.children += elapsed; }
+            if let Some(parent) = sample.stack.last_mut() {
+                parent.children += elapsed;
+            }
             let seconds = (elapsed - scope.children).max(0.0);
             if let Some(entry) = sample.entries.iter_mut().find(|entry| entry.phase == scope.phase) {
                 entry.calls += 1;
                 entry.seconds += seconds;
-            } else { sample.entries.push(Entry { phase: scope.phase, calls: 1, seconds }); }
+            } else {
+                sample.entries.push(Entry { phase: scope.phase.to_owned(), calls: 1, seconds });
+            }
         });
     }
 }
@@ -83,15 +199,27 @@ pub fn without() -> WithoutGuard {
 impl Drop for WithoutGuard {
     fn drop(&mut self) {
         if let Some(previous) = self.previous.take() {
-            CURRENT.with(|current| { current.replace(Some(previous)); });
+            CURRENT.with(|current| {
+                current.replace(Some(previous));
+            });
         }
     }
 }
 
-fn sorted_entries(mut entries: Vec<Entry>) -> Vec<Entry> { entries.sort_by(|a, b| a.phase.cmp(&b.phase)); entries }
-pub fn calls(timer: &PhaseTimer, phase: &str) -> i64 { timer.entries.iter().find(|entry| entry.phase == phase).map_or(0, |entry| entry.calls) }
-pub fn seconds(timer: &PhaseTimer, phase: &str) -> f64 { timer.entries.iter().find(|entry| entry.phase == phase).map_or(0.0, |entry| entry.seconds) }
-pub fn summary(timer: &PhaseTimer) -> String { timer.entries.iter().map(|entry| format!("{} {:.1} ms", entry.phase, entry.seconds * 1000.0)).collect::<Vec<_>>().join(" · ") }
+pub fn calls(timer: &PhaseTimer, phase: &str) -> i64 {
+    timer.entries.iter().find(|entry| entry.phase == phase).map_or(0, |entry| entry.calls)
+}
+pub fn seconds(timer: &PhaseTimer, phase: &str) -> f64 {
+    timer.entries.iter().find(|entry| entry.phase == phase).map_or(0.0, |entry| entry.seconds)
+}
+pub fn summary(timer: &PhaseTimer) -> String {
+    timer
+        .entries
+        .iter()
+        .map(|entry| format!("{} {:.1} ms", entry.phase, entry.seconds * 1000.0))
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
 
 #[cfg(test)]
 mod tests {
@@ -227,4 +355,5 @@ mod tests {
         }).join().unwrap();
         assert!(parent.finish().entries.is_empty());
     }
+
 }
