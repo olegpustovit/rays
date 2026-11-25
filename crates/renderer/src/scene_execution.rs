@@ -852,7 +852,8 @@ pub struct SceneExecution {
     /// Reused across frames via `rebegin_commands` after GPU settle (no new CommandsInner Rc).
     frame_commands: Option<backend::Commands>,
     /// Owned passes restarted across warm frames when attachments match (no RenderInner/Box).
-    /// Two slots: isogrid alternates Scene3+depth and Scene2; a single slot thrashed every pass.
+    /// ponytail: 2 slots cover idle isogrid (Scene3+depth then Scene2); grow if a third warm
+    /// signature shows up in zero_alloc (unwrap_or(0) replaces slot 0).
     frame_passes: [Option<backend::PreparedRenderTarget>; 2],
     /// Load-reopen after UiPass::split (blur); restarted across frames.
     ui_reopen_pass: RefCell<Option<backend::PreparedRenderTarget>>,

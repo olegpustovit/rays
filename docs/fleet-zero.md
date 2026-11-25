@@ -71,7 +71,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 - Idle empty **2** Rust are editor scatter (follow_press `path.cloned`, compose/host) — not ogpu. MetalHandle general pool still open.
 - crates/lru: side_lru reserves HashMap; shared `lru` still node-allocates on cold insert (warm reserve holds).
 ### Z1
-- Z5→Z8: idle empty/bare **0** rust (REST_SECONDS slide). Isogrid ~10 remains.
+- Z5→Z8: idle empty/bare/isogrid/isosel **0** rust (REST slide + dual frame_passes).
 ### Z6
 ### Z6b
 - Owns plan_entry/plan_batches/batch_resources_of/rebind, ICB pool, and Image-run (same-texture Image/Glyphs → one Scene2Textured draw). Coordinate with Z5 on shared helpers via Requests.
