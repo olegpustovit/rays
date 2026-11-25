@@ -1313,7 +1313,8 @@ fn prepare(value: &mut SceneExecution, uniforms: Option<&Bytes>, vertex_stable: 
             side_lru::remove(&mut value.cache, &skey(&key));
         }
     }
-    let found = side_lru::find_str(&mut value.cache, key).map(|item| cached_of(&item));
+    // skey is Wide; find_str only matches Str and missed every hit after the Wide switch.
+    let found = side_lru::find(&mut value.cache, &skey(key)).map(|item| cached_of(&item));
     match found {
         None => prepare_upload(value, uniforms, uniform_bytes, valid_uniforms, vertex_stable, mesh, key, None),
         Some(item) if item.borrow().primitive != mesh.primitive => {
@@ -1749,7 +1750,7 @@ fn prepare_texture(value: &mut SceneExecution, defer: &mut Vec<Deferred>, source
             levels: source.levels.clone(),
         })));
     }
-    let found = side_lru::find_str(&mut value.texture_cache, &source.key).map(|item| cached_texture_of(&item));
+    let found = side_lru::find(&mut value.texture_cache, &skey(&source.key)).map(|item| cached_texture_of(&item));
     let key = source.key.as_str();
     match found {
         Some(item)
@@ -2195,7 +2196,7 @@ fn resolve_prepared(value: &mut SceneExecution, prepared: &Option<(String, i64)>
             Err(failure_error("Scene_execution.prepare_run", ErrorKind::InvalidArgument, "prepared identity is empty"))
         }
         Some((identity, version)) => {
-            if let Some(item) = side_lru::find_str(&mut value.prepared_cache, identity) {
+            if let Some(item) = side_lru::find(&mut value.prepared_cache, &skey(identity)) {
                 let item = prepared_run_of(&item);
                 if item.version == *version {
                     return Ok(item.draws.clone());
