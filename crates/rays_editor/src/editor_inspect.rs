@@ -158,22 +158,22 @@ pub fn displayed<'a>(value: &ModelView<'a>) -> Option<i64> {
     }
 }
 
-pub fn viewed_path<'a>(value: &ModelView<'a>, scope: &p::Scope) -> Option<Path> {
-    let valid = |pv: &Preview| -> Option<Path> {
+pub fn viewed_path<'a>(value: &ModelView<'a>, scope: &'a p::Scope, link: &'a mut Option<[Symbol; 2]>) -> Option<&'a [Symbol]> {
+    let valid = |pv: &'a Preview| -> Option<&'a [Symbol]> {
         match (pv.path.first(), scope.path.first()) {
-            (Some(graph), Some(root)) if graph == root => Some(pv.path.clone()),
+            (Some(graph), Some(root)) if graph == root => Some(&pv.path),
             _ => None,
         }
     };
     let level = crate::editor_model::pane_level(value);
     let mut found = match level {
-        Level::Inside(id) if doc_mod::object_graph(&value.doc, id).as_deref() == scope.path.first().map(|x| x.as_str()) => {
-            value.previews.get(&id).and_then(&valid)
+        Level::Inside(id) if !value.model.previews.is_empty() && doc_mod::object_graph(&value.doc, id).as_deref() == scope.path.first().map(|x| x.as_str()) => {
+            value.model.previews.get(&id).and_then(&valid)
         }
-        _ => value.previews.values().find_map(&valid),
+        _ => value.model.previews.values().find_map(&valid),
     };
     if found.is_none() {
-        if let Some(canvas) = &value.canvas_preview {
+        if let Some(canvas) = &value.model.canvas_preview {
             found = valid(canvas);
         }
     }
@@ -181,8 +181,8 @@ pub fn viewed_path<'a>(value: &ModelView<'a>, scope: &p::Scope) -> Option<Path> 
         return found;
     }
     match &scope.result {
-        p::ScopeResult::Link(target) => Some(vec![scope.path[0], target.clone().into()]),
-        p::ScopeResult::Node(path) => Some(path.clone()),
+        p::ScopeResult::Link(target) => Some(link.insert([scope.path[0], target.as_str().into()])),
+        p::ScopeResult::Node(path) => Some(path),
         p::ScopeResult::Literal(_) => None,
     }
 }
@@ -1607,7 +1607,8 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     let row_of = |pth: &str| -> Option<p::Row> { n.rows.iter().find(|r| r.key == ArgKey::Kw(pth.to_owned())).cloned() };
     let on_card_row = |pth: &str| -> bool { row_of(pth).map_or(false, |r| p::row_shown(pin_of(&r), &r)) };
     let geo: Option<probe::Geometry> = node_id.and_then(|id| node_owner(value, id).and_then(|oid| cook::geometry(&value.cook, oid, id).cloned()));
-    let displayed_path = viewed_path(value, &scope);
+    let mut display_link = None;
+    let displayed_path = viewed_path(value, &scope, &mut display_link);
     let readouts = records.borrow_mut().readouts(n, &probes);
     // the head: the kind, VIEW while displayed, the node's number; the name edited in place; what
     // the probe and the cook know; the flags the card has as buttons
@@ -1628,7 +1629,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     };
     let mut buttons: Vec<(HeadAction, Pressed)> = Vec::new();
     if [ty::geometry(), ty::drawing(), ty::image()].contains(&n.ty) {
-        buttons.push((HeadAction { caption: "View".into(), keycap: "V".into(), active: displayed_path.as_ref() == Some(&n.path), usable: true }, Pressed::View));
+        buttons.push((HeadAction { caption: "View".into(), keycap: "V".into(), active: displayed_path == Some(n.path.as_slice()), usable: true }, Pressed::View));
     }
     if p::bypassable(&n) {
         buttons.push((HeadAction { caption: "Bypass".into(), keycap: "B".into(), active: n.bypass, usable: true }, Pressed::Bypass));
@@ -1668,7 +1669,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
     let (head, reveal) = insp::header_context(ui, &title, reset_enabled, true, &mut |ui| ui.inspector_header(
         "ws-header",
         Some(&n.head),
-        if displayed_path.as_ref() == Some(&n.path) { Some("view") } else { None },
+        if displayed_path == Some(n.path.as_slice()) { Some("view") } else { None },
         index.as_deref(),
         rename.clone(),
         &actions,

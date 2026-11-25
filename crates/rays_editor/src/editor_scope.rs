@@ -219,10 +219,14 @@ fn projected(catalog: &flow_check::catalog::Catalog, ws: &workspace_doc::T, name
 /// or a frame.
 pub fn sync_scope(value: &mut EditorModel) {
     sync_views(value);
-    if let Some(display) = pane_laid(&(&*value).into()).map(|key| viewed_path(&(&*value).into(), &key.scope)) {
-        let view = &mut crate::panel_map::active_mut(&mut value.panes).view;
-        if view.display != display {
-            view.display = display;
+    {
+        let model = (&*value).into();
+        let mut link = None;
+        if let Some(laid) = pane_laid(&model) {
+            let display = viewed_path(&model, &laid.scope, &mut link);
+            if pane_view(&model).display.as_deref() != display {
+                pane_mut(value).view.display = display.map(<[Symbol]>::to_vec);
+            }
         }
     }
     let Some(name) = graph_name(&(&*value).into()) else { return };
@@ -279,6 +283,7 @@ pub fn sync_scope(value: &mut EditorModel) {
         None => true,
     };
     if !moved && !fresh {
+        drop(previous);
         // the first call after a forced frame learns what that frame cost
         if let Some(k) = crate::panel_map::active_mut(&mut value.panes).laid.as_mut() {
             let gap = if k.fresh_last { quiet(k) } else { k.gap };
@@ -405,7 +410,8 @@ pub fn sync_scope(value: &mut EditorModel) {
     if !moved {
         scope::with_patched(&edits, scope_proj.clone(), &mut pane_mut(value).view);
     } else {
-        let display = viewed_path(&(&*value).into(), &scope_proj);
+        let mut link = None;
+        let display = viewed_path(&(&*value).into(), &scope_proj, &mut link).map(<[Symbol]>::to_vec);
         let layouts: Vec<String> = match &value.doc.shell {
             Some(sh) if sh.switch.is_some() && workspace_doc::editor_graph_ref(ws).is_some_and(|g| g.name == name) => {
                 layouts(&*value).into_iter().map(|(n, _)| n).collect()
@@ -513,7 +519,8 @@ pub fn scene_target<'a>(value: &ModelView<'a>, id: i64) -> Option<(ScopeKey, Pat
                     }
                 }
             };
-            p::find(&laid.scope, &path).map(|_| (laid, path))
+            p::find_ref(&laid.scope, &path)?;
+            Some((laid, path))
         }
         _ => None,
     }

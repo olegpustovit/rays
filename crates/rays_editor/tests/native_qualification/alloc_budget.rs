@@ -42,10 +42,10 @@ const FRAMES: i64 = 30;
 // Z1: shared shell tree, kept leaf list, borrowed level objects: basic 747 / 85,781; empty 462 / 31,882; bare 617 / 42,561.
 // Z1: wide-hash quad keys, no generic cache constructor: basic 747 / 85,098; empty 462 / 31,882; bare 617 / 42,561.
 const BASIC: (u64, u64) = (588, 90_065);
-const EMPTY: (u64, u64) = (180, 11_154);
+const EMPTY: (u64, u64) = (177, 11_128);
 const BARE: (u64, u64) = (266, 21_350);
 
-fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
+fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");
     let doc = workspace::load(None, Vec::new(), None, source).unwrap_or_else(|d| panic!("{d:?}"));
     let (w, h) = (1280, 900);
@@ -74,8 +74,10 @@ fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     };
     for _ in 0..FRAMES { editor = step(editor); }
     let (n0, b0) = (mem_sys::alloc_count(), mem_sys::alloc_bytes_total());
+    let local0 = mem_sys::own(mem_sys::COUNT_ALLOCS);
     for _ in 0..FRAMES { editor = step(editor); }
     let (n, b) = ((mem_sys::alloc_count() - n0) / FRAMES as u64, (mem_sys::alloc_bytes_total() - b0) / FRAMES as u64);
+    let rays = (mem_sys::own(mem_sys::COUNT_ALLOCS) - local0) / FRAMES as u64;
     let report = if n > max.0 || b > max.1 {
         // mem_sys::TRACE went with M20; the walker profile names the Lisp-evaluation sites
         flow_eval::PROFILE_ON.store(true, Relaxed);
@@ -87,12 +89,13 @@ fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     editor::close(&editor);
     flow_native::workspace_gpu::close(&gpu);
     rays::canvas::destroy(&canvas).unwrap();
-    (n, b, report)
+    (n, b, rays, report)
 }
 
 fn check(name: &str, source: &str, (max_allocs, max_bytes): (u64, u64)) {
-    let (n, b, report) = per_frame(source, (max_allocs, max_bytes));
-    eprintln!("{name}: {n} allocs/frame (reference {max_allocs}), {b} bytes/frame (reference {max_bytes})\nwalker profile over {FRAMES} frames:\n{report}");
+    let (n, b, rays, report) = per_frame(source, (max_allocs, max_bytes));
+    let pxui = n.saturating_sub(rays);
+    eprintln!("{name}: {n} allocs/frame (reference {max_allocs}), {b} bytes/frame (reference {max_bytes}); {rays} Rays, {pxui} PXUI\nwalker profile over {FRAMES} frames:\n{report}");
 }
 
 fn basic() { check("basic", &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../sketches/basic.rays")).unwrap(), BASIC) }
