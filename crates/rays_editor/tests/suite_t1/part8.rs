@@ -77,9 +77,14 @@ pub fn run_context_menus() {
     exercise("(let* [outline (ui/outline) main (ui/graph \"g\")] (ui/workspace (ui/split \"horizontal\" outline main :first_size 216)))", &|r| {
         let origin = (20., 220.);
         click(r, MouseButton::RightButton, origin);
+        r.e.core.ui.borrow_mut().set_a11y(true);
         hover(r, (40., 239.));
         r.step((40., 239.), vec![]);
-        let choice = (189., 335.);
+        let choice = {
+            let ui = r.e.core.ui.borrow();
+            let row = pxui::testing::find(&ui, pxui::Role::MenuItem, "value").expect("value context menu item");
+            ((row.x + 8.0) as f64, (row.y + row.h / 2.0) as f64)
+        };
         hover(r, choice);
         r.step(choice, vec![]);
         click(r, LB, choice);
