@@ -261,6 +261,7 @@ fn render_core(core: &Core, state: &e::State, p: &Prepared, live: &Frame, size: 
             Ok(table_devices[token as usize].clone())
         };
         let scene = marks_scene::scene(buffers, Some(&image_of), gpu_wrapped.as_deref(), Some(&p.cache), Some(&device_of), &marks)?;
+        c::recycle_marks(program, marks);
         if p.whole && table_devices.is_empty() {
             *p.kept.borrow_mut() = Some((size, scene.clone()));
         }

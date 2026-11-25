@@ -97,9 +97,38 @@ pub fn pane_input(input: &input::Frame, (x, y, w, h): (i64, i64, i64, i64)) -> i
     input::Frame { size: (w, h), pointer: local(input.pointer), events, ..input.clone() }
 }
 
+fn reads_care_about_time(reads: &[String]) -> bool {
+    reads.iter().any(|r| {
+        let r = r.as_str();
+        r.contains("index") || r.contains("/dt") || r == "dt" || r == "time" || r.contains("pointer") || r.contains("key") || r.contains("step")
+    })
+}
+
+/// Plan-level: any arg that reads index/dt/pointer (size-only frame reads do not count).
+fn plan_cares_time(plan: &flow_eval::Plan) -> bool {
+    plan.nodes.iter().any(|n| n.args.iter().any(|(_, v)| reads_care_about_time(&flow_eval::frame_reads(v))))
+}
+
+fn live_stamp_of(input: &input::Frame, cares_time: bool, state: &flow_eval::State) -> (i64, i64, u64, i64) {
+    let epoch = flow_eval::state_epoch(state);
+    if cares_time {
+        (input.frame, input.tick, input.dt.to_bits(), epoch)
+    } else {
+        (0, 0, 0, epoch)
+    }
+}
+
 /// each canvas panel's picture: reused while its plan, size and preview stand, else rendered
-pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: &input::Frame, raw_frame: &frame::Frame, core: &m::EditorModel, control: &V::Control) -> (Vec<(String, CanvasPicture)>, Option<String>) {
-    let mut pictures: Vec<(String, CanvasPicture)> = Vec::new();
+pub fn canvas_pictures(
+    context_error: Option<String>,
+    value: &LoopModel,
+    mut previous_canvases: Vec<(String, CanvasPicture)>,
+    input: &input::Frame,
+    raw_frame: &frame::Frame,
+    core: &m::EditorModel,
+    control: &V::Control,
+) -> (Vec<(String, CanvasPicture)>, Option<String>) {
+    let mut pictures: Vec<(String, CanvasPicture)> = Vec::with_capacity(previous_canvases.len().max(1));
     let mut error = context_error;
     let geometry = editor_shell::geometry(&core.into(), &core.workspace, raw_frame);
     let images = host_images(value);
@@ -123,7 +152,7 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
             _ => drawing_value,
         };
         workspace_images::bind(&images, lowered);
-        let previous = value.canvases.iter().find(|(k, _)| *k == key).map(|(_, p)| p.clone());
+        let previous = previous_canvases.iter().position(|(k, _)| *k == key).map(|i| previous_canvases.swap_remove(i).1);
         let pid = workspace_images::plan_id(&lowered.plan);
         let same_plan = previous.as_ref().is_some_and(|p| p.plan == pid);
         let dynamic = match &previous {
@@ -131,9 +160,30 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
             Some(picture) if same_plan && picture.preview == preview => picture.dynamic,
             _ => !lowered.states.is_empty() || lowered.plan.nodes.iter().any(|n| n.args.iter().any(|(_, v)| flow_eval::is_live(v) || flow_eval::frame_dependent(v))),
         };
-        let blank = |previous: &Option<CanvasPicture>| -> CanvasPicture {
-            previous.clone().unwrap_or(CanvasPicture { size: (w, h), dynamic, plan: pid, scene: Vec::new(), prepared: None, preview: preview.clone() })
+        let cares_time = match &previous {
+            Some(picture) if same_plan => picture.cares_time,
+            _ => plan_cares_time(&lowered.plan),
         };
+        let stamp = live_stamp_of(&input, cares_time, &core.cook.state);
+        let blank = |previous: &Option<CanvasPicture>| -> CanvasPicture {
+            previous.clone().unwrap_or(CanvasPicture {
+                size: (w, h),
+                dynamic,
+                plan: pid,
+                scene: Vec::new(),
+                prepared: None,
+                preview: preview.clone(),
+                live_stamp: None,
+                cares_time,
+            })
+        };
+        // Frozen / static live inputs: keep the prior scene (no re-eval, no marks rebuild).
+        if previous.as_ref().is_some_and(|p| {
+            same_plan && p.size == (w, h) && p.preview == preview && p.live_stamp == Some(stamp) && p.prepared.is_some()
+        }) {
+            pictures.push((key, previous.expect("previous")));
+            continue;
+        }
         // a canvas previewing an image node
         if let Some((pty, id)) = preview.clone().filter(|(pty, _)| *pty == ty::image()) {
             let result = workspace_images::image(None, true, &images, &core.cook.state, &input, &lowered.plan, &EValue::Deferred(pty, id));
@@ -143,10 +193,22 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
                     let scale = (w as f64 / iw as f64).min(h as f64 / ih as f64);
                     let mut scene_: Nodes = scene::rect((0, 0), w, h, Some(rays_math::color::black()), None).ok().into_iter().collect();
                     scene_.extend(scene::image(&img, (0, 0), Some(scale), None).ok());
-                    pictures.insert(0, (key, CanvasPicture { size: (w, h), dynamic, plan: pid, scene: scene_, prepared: None, preview: preview.clone() }));
+                    pictures.push((
+                        key,
+                        CanvasPicture {
+                            size: (w, h),
+                            dynamic,
+                            plan: pid,
+                            scene: scene_,
+                            prepared: None,
+                            preview: preview.clone(),
+                            live_stamp: Some(stamp),
+                            cares_time,
+                        },
+                    ));
                 }
                 Err(d) => {
-                    pictures.insert(0, (key, blank(&previous)));
+                    pictures.push((key, blank(&previous)));
                     error = Some(rays_diagnostic::to_string(&d));
                 }
             }
@@ -157,7 +219,7 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
             None => continue,
         };
         if same_plan && !dynamic && previous.as_ref().is_some_and(|p| p.size == (w, h) && p.preview == preview) {
-            pictures.insert(0, (key, previous.expect("previous")));
+            pictures.push((key, previous.expect("previous")));
             continue;
         }
         let fast = lowering::fast(&core.doc);
@@ -196,7 +258,19 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
             }
         }
         match rendered.expect("rendered") {
-            Ok((prepared, scene_)) => pictures.insert(0, (key, CanvasPicture { size: (w, h), dynamic, plan: pid, scene: scene_, prepared: Some(prepared), preview: preview.clone() })),
+            Ok((prepared, scene_)) => pictures.push((
+                key,
+                CanvasPicture {
+                    size: (w, h),
+                    dynamic,
+                    plan: pid,
+                    scene: scene_,
+                    prepared: Some(prepared),
+                    preview: preview.clone(),
+                    live_stamp: Some(stamp),
+                    cares_time,
+                },
+            )),
             Err(d) => {
                 // the last picture stays up, unless its mark sets bind GPU outputs this failed
                 // render may already have replaced
@@ -206,7 +280,7 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
                     }
                     p
                 });
-                pictures.insert(0, (key, blank(&previous)));
+                pictures.push((key, blank(&previous)));
                 error = Some(rays_diagnostic::to_string(&d));
             }
         }
@@ -643,7 +717,8 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
         }
     };
     let context_error = if image_errors.is_empty() { scene_error.clone() } else { Some(image_errors.join("; ")) };
-    let (canvases, context_error) = canvas_pictures(context_error, &value, &live_input, &raw_frame, &value.core, &control);
+    let prior_canvases = std::mem::take(&mut value.canvases);
+    let (canvases, context_error) = canvas_pictures(context_error, &value, prior_canvases, &live_input, &raw_frame, &value.core, &control);
     let composed_ = compose(&value, &value.core, update_.prepared_changed || update_.scene_changed || update_.effects.view || update_.effects.export, &baked, &baked_views, &scene);
     workspace_gpu::frame(&gpu_t, if composed_.drawn_changed { Some(display_keys(&composed_.drawn)) } else { None }.as_deref());
     let context_error = if composed_.errors.is_empty() { context_error } else { Some(composed_.errors.join("; ")) };
@@ -789,6 +864,12 @@ pub fn may_rest(value: &LoopModel, frame_: &frame::Frame) -> bool {
     // Deferred UI repaint (caret blink) and a static command HUD are fine: `rests` still
     // refuses to skip while `wants_frame` is due, and `layer::same` resets still when the HUD
     // text or chrome actually changes. Requiring hud.is_none() kept post-click idles hot.
+    // A playing timeline that reads the clock still rests when dt is 0 (frozen harness) or when
+    // every canvas only reads size (static source with width/height): the picture cannot move.
+    let clock_idle = frame_.input.dt == 0.0
+        || timeline::mode(&editor_list::timeline(core)) != timeline::Mode::Playing
+        || !reads_clock(value)
+        || (!value.canvases.is_empty() && value.canvases.iter().all(|(_, p)| !p.cares_time));
     frame_.input.events.is_empty()
         && value.world_drag.is_none()
         && value.pending_render.is_none()
@@ -797,7 +878,7 @@ pub fn may_rest(value: &LoopModel, frame_: &frame::Frame) -> bool {
         && (core.notice.is_none() || frame_.input.t - core.notice_at >= 3.)
         && core.traces.iter().all(|(_, t)| t.samples >= t.cap)
         && cook::at_rest(&core.cook)
-        && (timeline::mode(&editor_list::timeline(core)) != timeline::Mode::Playing || !reads_clock(value))
+        && clock_idle
 }
 
 pub fn settle(before_rest: &Option<Rest>, value: &mut LoopModel, frame_: &frame::Frame) {

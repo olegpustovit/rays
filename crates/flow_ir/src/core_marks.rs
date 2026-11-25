@@ -70,7 +70,13 @@ pub struct Sink {
 /// `size` is the canvas (for `draw/background`); `image` resolves an image node to a host resource
 /// id (positive) or fails.
 pub fn sink(image: Option<ImageResolver>, size: (i64, i64), buffers: &Buffers) -> Sink {
-    Sink { buffers: buffers.clone(), size, image, entries: Vec::new() }
+    sink_from(image, size, buffers, Vec::new())
+}
+
+/// Like [`sink`], but reuses a prior entries Vec's capacity (cleared).
+pub fn sink_from(image: Option<ImageResolver>, size: (i64, i64), buffers: &Buffers, mut entries: Vec<Entry>) -> Sink {
+    entries.clear();
+    Sink { buffers: buffers.clone(), size, image, entries }
 }
 
 fn push(sink: &mut Sink, entry: Entry) -> Result<(), Diagnostic> {
