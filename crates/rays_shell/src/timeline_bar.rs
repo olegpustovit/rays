@@ -28,7 +28,8 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
 }
 
 fn number_field(ui: &mut Ui, key: &str, at: (f32, f32), width: f32, current: &str, default: i64, valid: &dyn Fn(&str) -> bool) -> String {
-    let owner = ui.box_fmt(format_args!("{key}-owner"), BoxOpts::default().at(at).w(Size::Px(width)).h(Size::Px(20.0)));
+    // clickable: a right-click on the field reaches its menu, not the bar under it
+    let owner = ui.box_fmt(format_args!("{key}-owner"), BoxOpts::default().flags(CLICKABLE).at(at).w(Size::Px(width)).h(Size::Px(20.0)));
     let action = kit::context_menu(ui, &owner, &[
         ("Copy value", true), ("Paste value", true), ("Reset to default", true), ("Type value", true),
     ]).map(|(choice, _)| choice);
@@ -118,9 +119,8 @@ fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, f
             "timeline-scrub",
             BoxOpts::default().flags(CLICKABLE | BLOCKING).at((ruler_x, ruler_y)).w(Size::Px(ruler_w)).h(Size::Px(ruler_h)),
         );
-        if kit::context_menu(ui, &ruler, &[("Copy value", true)]).is_some() {
-            let _ = rays::clipboard::set_text(&current);
-        }
+        // the ruler has no menu of its own: a right-click on it opens its panel's (or the strip's), and
+        // the frame field beside it copies the frame
         let signal = ui.signal(&ruler);
         let scrub: Option<f32> = if signal.button == Some(MouseButton::LeftButton.code() as u8) && (signal.held || signal.released) && ruler_w > 1.0 {
             let px = (if signal.released { signal.release_point } else { signal.pointer }).0;

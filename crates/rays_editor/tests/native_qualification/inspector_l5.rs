@@ -147,6 +147,28 @@ fn b27_inspector_row_context_menu() {
     assert_eq!(changes, vec![FlowChange::Edited("count".into(), Value::Int(2))]);
 }
 
+/// The frame field's menu owner takes right-clicks only: a click still edits the field, Return seeks.
+fn timeline_frame_field_types_a_frame() {
+    let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
+    let mut intents = Vec::new();
+    let at = (160., 12.);
+    for (tick, events) in [
+        vec![],
+        vec![Event::PointerPressed(MouseButton::LeftButton, at), Event::PointerReleased(MouseButton::LeftButton, at)],
+        vec![Event::KeyPressed(Key::Meta), Event::KeyPressed(Key::KeyChar('a'))],
+        vec![Event::TextInput("7".into()), Event::KeyPressed(Key::Enter)],
+    ].into_iter().enumerate() {
+        let keys = if tick == 2 { vec![Key::Meta] } else { vec![] };
+        let f = rays::frame::Frame {
+            input: input::Frame { size: (480, 240), frame: tick as i64 + 1, tick: tick as i64 + 1, pointer: at, keys, events, ..input::at_time(tick as f64 / 60.) },
+            pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.),
+        };
+        rays_shell::host::build(&mut ui, &f, &mut |ui| intents.extend(rays_shell::timeline_bar::draw(ui, (0, 0, 480, 24), false, false, 42, 0.7, 240)));
+    }
+    rays_shell::host::destroy(&mut ui);
+    assert_eq!(intents, vec![rays_shell::timeline_bar::Intent::SeekPlayback(7)]);
+}
+
 fn choose_menu(size: (i64, i64), point: (f64, f64), item: &str, build: &mut dyn FnMut(&mut pxui::ui::Ui)) {
     let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
     ui.set_a11y(true);
@@ -177,7 +199,8 @@ fn b27_readouts_have_context_menus() {
     });
     assert_eq!(rays::clipboard::get_text().unwrap(), opts.text);
 
-    choose_menu(size, (330., 12.), "Copy value", &mut |ui| {
+    // the frame field: the ruler's right-click belongs to its panel's menu (run_context_menus)
+    choose_menu(size, (180., 12.), "Copy value", &mut |ui| {
         rays_shell::timeline_bar::draw(ui, (0, 0, size.0, 24), false, false, 42, 0.7, 240);
     });
     assert_eq!(rays::clipboard::get_text().unwrap(), "42");
@@ -206,5 +229,6 @@ pub fn cases() -> Vec<(&'static str, fn())> {
         ("inspector_b29_shared_scrub_undoes_both_nodes_at_once", b29_shared_scrub_undoes_both_nodes_at_once),
         ("inspector_b27_row_context_menu", b27_inspector_row_context_menu),
         ("inspector_b27_readouts_have_context_menus", b27_readouts_have_context_menus),
+        ("inspector_b27_timeline_frame_field_types_a_frame", timeline_frame_field_types_a_frame),
     ]
 }
