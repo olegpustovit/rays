@@ -740,6 +740,12 @@ fn gpu_execution_offscreen_lifecycle() {
     assert!(se::upload_bytes(&e)>0);
     assert!(se::private::cache_count_for_report(&mut e)<=2);
     se::submit(Some(("offscreen-retained".into(),1)),&mut || {},clear,&mut e,&[d.clone()]).unwrap();
+    assert_eq!(
+        se::private::prepared_key_for_test(&e),
+        Some(("offscreen-retained".into(), 1)),
+        "prepared submit must retain its plan (hits={} misses={} builds={})",
+        se::retained_stats(&e).hits, se::retained_stats(&e).misses, se::retained_stats(&e).builds,
+    );
     let mut steady = None;
     for frame in 1..=60 {
         assert_eq!(se::replay_prepared_sampled_resources(clear,"offscreen-retained",1,&mut e).unwrap(),Some((true,1)));
@@ -785,6 +791,30 @@ fn gpu_execution_offscreen_lifecycle() {
         assert_eq!((stats.hits,stats.misses),if frame==3 {(2,4)} else {(1,2+frame)});
     }
     se::destroy(&mut mixed).unwrap();
+    // Z6b: changing uniform *contents* with a stable shape patches in place and reuses the ICB.
+    let mut patch = renderer_pipeline::create_renderer(&ogpu_core::impl_::backend().unwrap(),None,None,true,ogpu_core::impl_::create_driver().unwrap(),&cfg).unwrap();
+    let mut animated = (*d).clone();
+    animated.draw.state.viewport=(0,0,64,64);
+    animated.draw.state.scissor=(0,0,64,64);
+    // 24-byte affine → geometry_constants; length stays 32 across frames.
+    animated.draw.state.transform_uniforms = Some(new_bytes(common::floats(&[1.,0.,0.,1.,0.,0.])));
+    let clear = Some((1.,1.,1.,1.));
+    for _ in 0..2 {
+        se::submit(None,&mut || {},clear,&mut patch,&[Rc::new(animated.clone())]).unwrap();
+    }
+    let after_admit = se::retained_stats(&patch);
+    assert!(after_admit.misses >= 1, "plan was never built");
+    let builds_at_admit = after_admit.builds;
+    for frame in 0..8 {
+        let mut next = animated.clone();
+        let shift = frame as f32 * 0.01;
+        next.draw.state.transform_uniforms = Some(new_bytes(common::floats(&[1.,0.,0.,1.,shift,0.])));
+        se::submit(None,&mut || {},clear,&mut patch,&[Rc::new(next)]).unwrap();
+    }
+    let after = se::retained_stats(&patch);
+    assert!(after.hits >= 8, "uniform-only frames should hit the retained plan, got hits={}", after.hits);
+    assert_eq!(after.builds, builds_at_admit, "uniform-only frames must not create/re-encode ICBs");
+    se::destroy(&mut patch).unwrap();
     assert_eq!(live_handles(),baseline);
 }
 
