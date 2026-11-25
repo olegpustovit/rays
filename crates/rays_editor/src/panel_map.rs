@@ -44,6 +44,10 @@ pub fn find<'a>(t: &'a PanelMap, key: &Key) -> Option<&'a Pane> {
     t.panes.iter().find(|(k, _)| k == key).map(|(_, pane)| pane)
 }
 
+pub fn find_mut<'a>(t: &'a mut PanelMap, key: &Key) -> Option<&'a mut Pane> {
+    t.panes.iter_mut().find(|(k, _)| k == key).map(|(_, pane)| pane)
+}
+
 pub fn entry<'a>(t: &'a PanelMap, key: &Key) -> Option<(&'a Key, &'a Pane)> {
     t.panes.iter().find(|(k, _)| k == key).map(|(key, pane)| (key, pane))
 }

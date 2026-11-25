@@ -1053,7 +1053,6 @@ pub fn update_frame(
     // graph pane in use (the first graph of the workspace when none is open).
     // a panel's pane, laid out: the one in use, or one of the others
     let pane_of = |host: &Host| shown_as(&(&*value).into(), (&host.0, &host.1, &host.2));
-    let in_use = |pane: &ModelView<'_>| pane.key == panel_map::key_ref(&value.panes);
     let ((text_host, text, text_shown, other_texts), text_error) =
         match text_state(&(&*value).into(), &actions, &pane_of, &hosted(HostKind::Text)) {
             Ok(state) => (state, None),
@@ -1062,8 +1061,8 @@ pub fn update_frame(
     let scope_active = graph_shown && scope_name(&(&*value).into()).is_some();
     // the frame's copy of the pane, its commands run: made once, and again only for a build PXUI repeats
     // (the first build took the copy; the result hands it to reduce)
-    let frame_pane = || -> (scope::Pane, Vec<scope::Change>) {
-        let mut view = pane_view(&(&*value).into()).clone();
+    let frame_pane = |value: &EditorModel| -> (scope::Pane, Vec<scope::Change>) {
+        let mut view = pane_view(&value.into()).clone();
         let mut changes = Vec::new();
         for a in &actions {
             match a {
@@ -1074,7 +1073,7 @@ pub fn update_frame(
         }
         (view, changes)
     };
-    let (view, scope_command_changes) = frame_pane();
+    let (view, scope_command_changes) = frame_pane(value);
     let mut scope_view = Some(view);
     let (menu, command_changes) = node_menu_step(&(&*value).into(), &workspace, frame_, &actions, graph_shown);
     let shown_node = match pane_level(&(&*value).into()) {
@@ -1085,9 +1084,9 @@ pub fn update_frame(
         Level::Scene => displayed(&(&*value).into()),
     };
     let (row_sets, rows, host_rows) = list_rows(&(&*value).into(), listing_, list_drawn, &pane_of, &list_hosts);
-    let selected = || -> Vec<i64> {
-        let mut ids = selection::selected_nodes(&selection).to_vec();
-        let primary = selection::selected(&selection);
+    let selected = |selection: &selection::Selection| -> Vec<i64> {
+        let mut ids = selection::selected_nodes(selection).to_vec();
+        let primary = selection::selected(selection);
         ids.sort_by(|a, b| {
             if Some(*a) == primary {
                 std::cmp::Ordering::Less
@@ -1105,7 +1104,7 @@ pub fn update_frame(
         match a {
             Action::ListCommand(tree::Command::ActivateRow) => {}
             Action::ListCommand(command) if graph_shown => {
-                tree::run_command(tree_value.to_mut(), rows.as_ref().map_or(&[][..], |pair| pair.0.as_slice()), &selected(), command.clone(), &mut list_intents);
+                tree::run_command(tree_value.to_mut(), rows.as_ref().map_or(&[][..], |pair| pair.0.as_slice()), &selected(&selection), command.clone(), &mut list_intents);
             }
             _ => {}
         }
@@ -1146,6 +1145,10 @@ pub fn update_frame(
         router::State::Idle => None,
     };
 
+    let workspace_override = match workspace { Cow::Owned(v) => Some(v), Cow::Borrowed(_) => None };
+    let selection_override = match selection { Cow::Owned(v) => Some(v), Cow::Borrowed(_) => None };
+    let tree_override = match tree_value { Cow::Owned(v) => Some(v), Cow::Borrowed(_) => None };
+    let ui_handle = value.ui.clone();
     let mut built: Option<FrameResult> = None;
     {
         // PXUI may rebuild after layout without replaying pointer events. Keep the draft and
@@ -1153,7 +1156,15 @@ pub fn update_frame(
         let mut splitter_workspace = None;
         let mut splitter_released = false;
         let mut build_and_prompt = |ui: &mut Ui| {
-            let mut vw = vw;
+            let workspace = Cow::Borrowed(workspace_override.as_ref().unwrap_or(&value.workspace));
+            let selection = selection_override.as_ref().unwrap_or_else(|| &panel_map::active(&value.panes).picked);
+            let tree_value = tree_override.as_ref().unwrap_or(&value.tree);
+            let pane_of = |host: &Host| shown_as(&(&*value).into(), (&host.0, &host.1, &host.2));
+            let in_use = |pane: &ModelView<'_>| pane.key == panel_map::key_ref(&value.panes);
+            let mut vw = ModelView::from(&*value);
+            vw.workspace = &workspace;
+            vw.focus = &focus;
+            vw.selection = selection;
             if let Some(prefix) = &leader_panel {
                 let category = |c: &Command| editor_commands::group(c).to_string();
                 let describe = |p: &str| editor_commands::describe_prefix(p);
@@ -1284,15 +1295,14 @@ pub fn update_frame(
             };
             let active = active_view(&vw, &g);
             let view_root = draw_viewport_pane(ui, &(&*value).into(), probe_caption(&vw), &roots, active.as_ref(), &none_root);
-            let mut scope_view2 = scope_view.take().unwrap_or_else(|| frame_pane().0);
+            let mut scope_view2 = scope_view.take().unwrap_or_else(|| frame_pane(value).0);
             let mut scope_changes = scope_command_changes.clone();
             let (graph_body, menu2, menu_pick) = draw_graph_pane(ui, frame_, &(&*value).into(), &shortcut_frame, &mut scope_view2, scope_active, guide, carry_lit.clone(), carry_hot.clone(), &graph_root, &graph_host, &workspace, menu.clone(), &open_menu, &mut scope_changes);
             // Each pane builder returns only its frame intents and updated pane-local state.
-            let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &(&*value).into(), &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), rows.as_ref(), &host_rows, &selected, tree_value.as_ref().clone(), list_intents.clone(), value.locals.clone());
+            let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &(&*value).into(), &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), rows.as_ref(), &host_rows, &|| selected(selection), tree_value.clone(), list_intents.clone(), value.locals.clone());
             let (text2, text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &*value, &root_at, &tab_at, &text_host, &text_shown, text.clone(), other_texts.clone(), locals);
             let (outline, outline_intents, locals) = draw_outline_panes(ui, &*value, &hosted(HostKind::Outline), &root_at, value.outline.clone(), locals);
             let locals = draw_spreadsheet_panes(ui, &(&*value).into(), &of_kind(&Panel::Spreadsheet), locals);
-            let graph_panes = draw_other_graph_panes(ui, &shortcut_frame, &(&*value).into(), &other_panes, &roots);
             let _ = text2;
             let mut changes = pane_changes(&(&*value).into(), &vw, command_changes.clone(), &scope_changes, &menu_pick, &outline_intents);
             // a layout row and the add button are commands: they run like a toolbar click
@@ -1316,7 +1326,7 @@ pub fn update_frame(
             let bar_action = [tool_action, view_action, outline_action, crumb_action].into_iter().fold(None, |latest, a| if a.is_none() { latest } else { a });
             // Selection is view state; inspection intents retain the selected stable id. Topology and
             // parameter application wait until Ui.frame finishes.
-            let mut selection = selection.as_ref().clone();
+            let mut selection = selection.clone();
             for i in &list_intents2 {
                 match i {
                     tree::Intent::Select(ids) if ids.is_empty() => selection = selection::clear(),
@@ -1388,7 +1398,6 @@ pub fn update_frame(
             draw_notice(&(&*value).into(), frame_, &roots, header_focus, graph_body, &scope_view2, scope_active, ui);
             let (focus2, focus_path2, pane_keys) = follow_press(&g, &roots, &timeline_root, focus.clone(), focus_path.clone(), ui);
             let (workspace, drag_changes) = settle_layout(&(&*value).into(), &vw, &workspace, &keymap, &g, &intents, grips, strip_layout, &timeline_leaves, platform, ui);
-            PANE_ROOTS.set(roots);
             HEADER_POSITIONS.set(header_positions);
             changes.extend(drag_changes);
             let mut drops = inspector_drops;
@@ -1424,7 +1433,7 @@ pub fn update_frame(
                 text_intents,
                 open_graph,
                 settings_changes,
-                graph_panes,
+                graph_panes: Vec::new(),
                 locals,
                 other_texts: other_texts2,
                 handle_changes,
@@ -1432,29 +1441,32 @@ pub fn update_frame(
                 view_pick,
                 drops,
             };
+            // The remaining graph views only change pane-local state. All model readers in this
+            // build have finished, so the panes can be lent to the drawer in place.
+            draw_other_graph_panes(ui, &shortcut_frame, value, &other_panes, &roots);
+            PANE_ROOTS.set(roots);
             built = Some(result);
         };
-        let ui_handle = value.ui.clone();
         rays_shell::host::frame(&mut ui_handle.borrow_mut(), frame_, &mut build_and_prompt);
     }
     let result = match built {
         Some(result) => result,
         None => FrameResult {
-            workspace: workspace.into_owned(),
+            workspace: workspace_override.unwrap_or_else(|| value.workspace.clone()),
             focus: focus.clone(),
             focus_path: focus_path.clone(),
             pane_keys: Vec::new(),
-            graph_panes: panel_map::others(&value.panes),
+            graph_panes: Vec::new(),
             locals: value.locals.clone(),
             other_texts: Vec::new(),
             outline: value.outline.clone(),
             outline_intents: Vec::new(),
-            selection: selection.into_owned(),
+            selection: selection_override.unwrap_or_else(|| pane_selection(&(&*value).into()).clone()),
             menu: menu.clone(),
             menu_pick: None,
-            scope_view: scope_view.take().unwrap_or_else(|| frame_pane().0),
+            scope_view: scope_view.take().unwrap_or_else(|| frame_pane(value).0),
             scope_changes: scope_command_changes.clone(),
-            tree: tree_value.into_owned(),
+            tree: tree_override.unwrap_or_else(|| value.tree.clone()),
             list_rows: rows.clone(),
             edit_error: text_error.clone().or_else(|| value.edit_error.clone()),
             effects: Effects::default(),

@@ -744,36 +744,31 @@ pub fn pressed_keys(value: &EditorModel, frame_: &frame::Frame) -> Vec<input::Ke
 }
 
 /// The graph panes that are not the one in use: those showing a graph update their canvas.
-pub fn draw_other_graph_panes<'a>(
+pub fn draw_other_graph_panes(
     ui: &mut Ui,
     shortcut_frame: &frame::Frame,
-    value: &ModelView<'a>,
+    value: &mut EditorModel,
     other_panes: &[(Key, layout::Path)],
     roots: &[(Leaf, UiBox)],
-) -> Vec<(Key, GraphPane)> {
-    let mut out = Vec::new();
+) {
+    let pressed = if other_panes.is_empty() { Vec::new() } else { pressed_keys(value, shortcut_frame) };
     for (key, path) in other_panes {
-        let pane = as_pane(value, (key, path));
-        let mut active = pane.pane.clone();
-        match roots.iter().find(|(leaf, _)| leaf.path == *path) {
-            Some((leaf, hosted)) if leaf.body.3 > 0 => {
-                let (x, y, width, height) = leaf.body;
-                if stored_projection(&pane) == GraphView && graph_name(&pane).is_some() {
-                    ui.within(hosted, &mut |ui| {
-                        let theme = ui.tokens();
-                        let theme = if leaf.floating { sheet_theme(&theme) } else { theme };
-                        scope::with_guide(false, &mut active.view);
-                        scope::with_theme(theme, &mut active.view);
-                        scope::with_bounds(x, y, width.max(1), height.max(1), &mut active.view);
-                        rays_graph::scope_pane::update_cached("graph-view", &pressed_keys(value, shortcut_frame), &mut active.view, ui, shortcut_frame, &mut Vec::new());
-                    });
-                }
-                out.push((key.clone(), active));
-            }
-            _ => out.push((key.clone(), active)),
+        let Some((leaf, hosted)) = roots.iter().find(|(leaf, _)| leaf.path == *path && leaf.body.3 > 0) else { continue };
+        let pane = as_pane(&(&*value).into(), (key, path));
+        if stored_projection(&pane) != GraphView || graph_name(&pane).is_none() {
+            continue;
         }
+        let view = &mut panel_map::find_mut(&mut value.panes, key).expect("graph panes are synchronized before frame construction").view;
+        let (x, y, width, height) = leaf.body;
+        ui.within(hosted, &mut |ui| {
+            let theme = ui.tokens();
+            let theme = if leaf.floating { sheet_theme(&theme) } else { theme };
+            scope::with_guide(false, view);
+            scope::with_theme(theme, view);
+            scope::with_bounds(x, y, width.max(1), height.max(1), view);
+            rays_graph::scope_pane::update_cached("graph-view", &pressed, view, ui, shortcut_frame, &mut Vec::new());
+        });
     }
-    out
 }
 
 const VIEW_TABS: [&str; 3] = ["Graph", "List", "Text"];

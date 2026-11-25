@@ -95,6 +95,37 @@ fn isogrid() {
     assert!(over.is_empty(), "{}", over.join("; "));
 }
 
+fn multi_graph() {
+    use rays_editor::{editor_shell::graph_leaves, panel_map};
+    let source = r#"(workspace two-graphs
+      (graph a :context sop (let* [box (sop/box)] box))
+      (graph b :context sop (let* [ball (sop/uv_sphere)] ball))
+      (graph editor :context editor
+        (let* [left (ui/graph "a" :focus true) right (ui/graph "b")]
+          (ui/workspace (ui/split "horizontal" left right)))))"#;
+    session("two graphs", source, &|p| {
+        let inactive = |p: &P| {
+            let core = &*p.e.as_ref().unwrap().core;
+            let leaves = graph_leaves(&core.into());
+            let (key, _) = leaves.iter().find(|(key, _)| Some(key) != panel_map::key_ref(&core.panes)).unwrap();
+            let view = &panel_map::find(&core.panes, key).unwrap().view;
+            assert_eq!(view.key, "b");
+            (view.key.as_ptr(), view.zoom)
+        };
+        let (storage, zoom) = inactive(p);
+        let at = (1040., 200.);
+        p.step(&[], vec![Event::PointerMoved(at)], at);
+        let first = p.step(&[], vec![Event::Scrolled((0., 1.))], at);
+        let mut frames = vec![first];
+        for _ in 0..3 { frames.push(p.step(&[], vec![], at)); }
+        assert!(frames[0].1 <= 246 && frames[3].1 <= 238, "inactive graph exceeded its zoom allocation budget: {frames:?}");
+        p.record("inactive graph zoom", frames);
+        let (after, zoomed) = inactive(p);
+        assert_eq!(storage, after, "drawing the inactive graph copied its pane state");
+        assert!(zoomed > zoom, "the inactive graph lost its wheel gesture");
+    });
+}
+
 pub fn cases() -> Vec<(&'static str, fn())> {
-    vec![("graph_budget_isogrid", isogrid)]
+    vec![("graph_budget_isogrid", isogrid), ("graph_budget_multi", multi_graph)]
 }
