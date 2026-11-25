@@ -209,25 +209,30 @@ fn settle_ledger(was: Bytes, now: Bytes) {
 /// The last frame as scene nodes: each layer after what `under` puts beneath its floating root
 /// (by box key), then the focused text's input-method area. The renderer draws each layer, borrowed
 /// from the UI, in its place in the frame's pass.
-pub fn scene(ui: &Rc<RefCell<Ui>>, under: Option<&dyn Fn(i64) -> Vec<scene::Node>>) -> Vec<scene::Node> {
+/// Append this UI's layers (and optional under-layer nodes) into `out`. Reuses `out`'s capacity.
+pub fn scene_into(ui: &Rc<RefCell<Ui>>, under: Option<&dyn Fn(i64) -> Vec<scene::Node>>, out: &mut Vec<scene::Node>) {
     let paint = painter(ui);
     let ui = ui.borrow();
-    let mut nodes = Vec::new();
     for (index, layer) in ui.layers().enumerate() {
         if let Some(under) = under {
-            nodes.extend(under(layer.key));
+            out.extend(under(layer.key));
         }
         if !layer.instances.is_empty() {
-            nodes.push(scene::layer::ui(paint.clone(), index, ui.draw_revision() as i64));
+            out.push(scene::layer::ui(paint.clone(), index, ui.draw_revision() as i64));
         }
     }
     if let Some(ime) = ui.ime() {
         let pxui::Rect { x, y, w, h } = ime.rect;
-        nodes.push(scene::text_input_region(
+        out.push(scene::text_input_region(
             (x.round() as i64, y.round() as i64),
             w.round() as i64, h.round() as i64, Some(true), Some(ime.caret.round() as i64),
         ).expect("PXUI input area"));
     }
+}
+
+pub fn scene(ui: &Rc<RefCell<Ui>>, under: Option<&dyn Fn(i64) -> Vec<scene::Node>>) -> Vec<scene::Node> {
+    let mut nodes = Vec::new();
+    scene_into(ui, under, &mut nodes);
     nodes
 }
 

@@ -297,10 +297,17 @@ pub fn preview_images(value: &LoopModel, frame_: &frame::Frame) -> Vec<String> {
     let images = host_images(value);
     workspace_images::bind(&images, lowered);
     let gpu = workspace_gpu::config(&host_gpu(value), lowering::fast(&value.core.doc));
-    let live = input::Frame { t: timeline::time(&editor_list::timeline(&value.core)), ..live_frame::of_frame(frame_) };
+    // Lazy: isogrid pan/zoom often previews nothing — skip of_frame until a selected image needs it.
+    let mut live: Option<input::Frame> = None;
     let mut errors: Vec<String> = Vec::new();
     let mut preview = |image: EValue| {
-        if let Err(diagnostic) = workspace_images::image(Some(&gpu), true, &images, &value.core.cook.state, &live, &lowered.plan, &image) {
+        let live = live.get_or_insert_with(|| {
+            let mut f = input::at_time(0.0);
+            live_frame::refresh(&mut f, frame_);
+            f.t = timeline::time(&editor_list::timeline(&value.core));
+            f
+        });
+        if let Err(diagnostic) = workspace_images::image(Some(&gpu), true, &images, &value.core.cook.state, live, &lowered.plan, &image) {
             errors.push(rays_diagnostic::to_string(&diagnostic));
         }
     };

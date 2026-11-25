@@ -78,7 +78,15 @@ pub fn scene_edit(value: &mut EditorModel, mode: SceneMode, active_camera: Optio
 }
 
 pub fn machinery<'a>(value: &ModelView<'a>, under: Option<&dyn Fn(i64) -> Vec<ui_scene::Node>>, all_ui_visible: bool) -> Vec<ui_scene::Node> {
-    if all_ui_visible || *value.leader != editor_core::router::State::Idle { rays_shell::host::scene(&value.ui, under) } else { Vec::new() }
+    let mut out = Vec::new();
+    machinery_into(value, under, all_ui_visible, &mut out);
+    out
+}
+
+pub fn machinery_into<'a>(value: &ModelView<'a>, under: Option<&dyn Fn(i64) -> Vec<ui_scene::Node>>, all_ui_visible: bool, out: &mut Vec<ui_scene::Node>) {
+    if all_ui_visible || *value.leader != editor_core::router::State::Idle {
+        rays_shell::host::scene_into(&value.ui, under, out);
+    }
 }
 
 pub fn close(value: &EditorModel) {

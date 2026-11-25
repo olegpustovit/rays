@@ -110,11 +110,11 @@ pub fn world_nodes(paint_view: &PaintView, key: &str, camera: &rcam::Camera, ren
 }
 
 /// Each viewport shows its own scene instance's image, else the primary one.
-pub fn worlds(paint_view: &PaintView, camera: &dyn Fn(&str) -> rcam::Camera, rendered: Option<&d3::Scene3>, views: &[(String, d3::Scene3)], view_visible: bool, bodies: &[(String, Bounds)]) -> Nodes {
+pub fn worlds(paint_view: &PaintView, camera: &dyn Fn(&str) -> rcam::Camera, rendered: Option<&d3::Scene3>, views: &[(String, d3::Scene3)], view_visible: bool, bodies: &[(&str, Bounds)]) -> Nodes {
     bodies
         .iter()
         .flat_map(|(key, bounds)| {
-            let image = views.iter().find(|(k, _)| k == key).map(|(_, i)| i).or(rendered);
+            let image = views.iter().find(|(k, _)| k.as_str() == *key).map(|(_, i)| i).or(rendered);
             world_nodes(paint_view, key, &camera(key), image, view_visible, *bounds)
         })
         .collect()
@@ -188,7 +188,7 @@ pub fn compose_view(
             if let Some((_, picture)) = canvases.iter().find(|(k, _)| k == key) {
                 out.extend(picture.scene.iter().cloned());
             }
-            out.extend(editor_host::machinery(&core.into(), None, false));
+            editor_host::machinery_into(&core.into(), None, false, &mut out);
             return out;
         }
     }
@@ -198,7 +198,7 @@ pub fn compose_view(
     if !ui_visible {
         let mut out = vec![scene::clear(background)];
         out.extend(world_nodes(paint_view, "@hidden", camera, focused, view_visible, (0, 0, frame_.input.size.0, frame_.input.size.1)));
-        out.extend(editor_host::machinery(&core.into(), None, false));
+        editor_host::machinery_into(&core.into(), None, false, &mut out);
         return out;
     }
     let geometry = editor_shell::geometry(&core.into(), &core.workspace, frame_);
@@ -223,7 +223,7 @@ pub fn compose_view(
         let image = if *bounds == viewport && core.map_view {
             paint_world(viewport)
         } else {
-            worlds(paint_view, camera_of, rendered, views, view_visible, &[(key.clone(), *bounds)])
+            worlds(paint_view, camera_of, rendered, views, view_visible, &[(key.as_str(), *bounds)])
         };
         match floating.iter().find(|(k, _, _)| k == key) {
             None => painted.insert(0, image),
@@ -262,6 +262,6 @@ pub fn compose_view(
     if let Some(g) = guides {
         out.push(g);
     }
-    out.extend(editor_host::machinery(&core.into(), Some(&under), true));
+    editor_host::machinery_into(&core.into(), Some(&under), true, &mut out);
     out
 }
