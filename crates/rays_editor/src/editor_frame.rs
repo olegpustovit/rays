@@ -1171,7 +1171,7 @@ pub fn update_frame(
                 };
                 let mut widths = Vec::new();
                 if leaf.panel == Panel::Graph {
-                    widths.push(ui.text_service().width("GraphListText", pxui::Label::BODY, None).unwrap_or(0.0) + 24.0);
+                    widths.push(rays_shell::kit::text_width(ui, "GraphListText") + 24.0);
                 }
                 if let Some((state, shown)) = text_ {
                     widths.push(text_pane::tabs_width(ui, leaf.body.2, &state, &shown));
