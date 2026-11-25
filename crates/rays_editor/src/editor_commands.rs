@@ -25,6 +25,7 @@ pub enum Action {
     SaveSource,
     /// the palette: take the source file's text over unsaved edits
     ReloadSource,
+    ReloadSourceConfirmed,
     /// Command-O: choose a .rays in the system dialog and open it in this window
     OpenSource,
     ToggleTimeline,

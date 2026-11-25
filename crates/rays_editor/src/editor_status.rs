@@ -28,6 +28,7 @@ pub fn prompt_name(value: &EditorModel) -> &'static str {
     match &value.prompt {
         None => "-",
         Some(Prompt::Keys) => "keys",
+        Some(Prompt::Confirming { .. }) => "confirm",
         Some(Prompt::Saving(_)) => "save preset",
         Some(Prompt::Palette(_)) => "commands",
         Some(Prompt::Jumping(_)) => "jump",

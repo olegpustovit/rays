@@ -34,6 +34,45 @@ fn spacer(ui: &mut Ui, key: &str, height: f32) {
     ui.box_(key, BoxOpts::default().w(Size::Grow).h(Size::Px(height)));
 }
 
+/// Confirmation with a safe default. Left and Right move between the choices; Tab switches.
+pub fn confirm(ui: &mut Ui, key: &str, title: &str, message: &str, accept: &str, cancel: &str, mut accepting: bool) -> (bool, Pick) {
+    let width = ui.view_size().0.min(440.0);
+    let mut pick = Pick::None;
+    let open = ui.modal(Some(width), key, &mut |ui| {
+        if ui.key_pressed(Key::ArrowLeft) {
+            accepting = false;
+        } else if ui.key_pressed(Key::ArrowRight) {
+            accepting = true;
+        } else if ui.key_pressed(Key::Tab) {
+            accepting = !accepting;
+        }
+        ui.label(title);
+        ui.inspector_message("confirmation-message", message);
+        spacer(ui, "confirmation-gap", 8.0);
+        let row = ui.box_("confirmation-buttons", BoxOpts::default().w(Size::Grow).h(Size::Px(28.0)));
+        ui.within(&row, &mut |ui| {
+            let cancel_w = ui.text_width(None, cancel).ceil() + 24.0;
+            let accept_w = ui.text_width(None, accept).ceil() + 24.0;
+            let accept_x = width - 6.0 - accept_w;
+            let safe_box = ui.box_("confirmation-safe", BoxOpts::default().w(Size::Px(cancel_w)).at((accept_x - cancel_w, 0.0)));
+            let accept_box = ui.box_("confirmation-action", BoxOpts::default().w(Size::Px(accept_w)).at((accept_x, 0.0)));
+            let (mut canceled, mut accepted) = (false, false);
+            ui.within(&safe_box, &mut |ui| canceled = ui.button_styled(cancel, accepting, false, false, None));
+            ui.within(&accept_box, &mut |ui| accepted = ui.button_styled(accept, !accepting, false, false, None));
+            let enter = ui.key_pressed(Key::Enter);
+            pick = if canceled || (enter && !accepting) {
+                Pick::Cancel
+            } else if accepted || enter {
+                Pick::Submit
+            } else {
+                Pick::None
+            };
+        });
+        ui.footer(None, &[("↵".into(), if accepting { accept } else { cancel }.into()), ("esc".into(), cancel.into())]);
+    });
+    (accepting, if open { pick } else { Pick::Cancel })
+}
+
 /// A name prompt, the sheet's `06`: the title, what is asked in ink-2, the field and the buttons.
 pub fn name(ui: &mut Ui, key: &str, title: &str, description: &str, label: &str, query: &str) -> Option<(String, Pick)> {
     let mut out: Option<(String, Pick)> = None;

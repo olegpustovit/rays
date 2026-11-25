@@ -1013,6 +1013,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
                 | Action::Fly
                 | Action::SaveSource
                 | Action::ReloadSource
+                | Action::ReloadSourceConfirmed
                 | Action::OpenSource
                 | Action::HideUi
                 | Action::WorldEmit

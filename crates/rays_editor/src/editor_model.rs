@@ -157,6 +157,14 @@ pub struct Started {
 #[derive(Clone)]
 pub enum Prompt {
     Keys,
+    Confirming {
+        title: &'static str,
+        message: String,
+        accept: &'static str,
+        cancel: &'static str,
+        action: editor_commands::Action,
+        accepting: bool,
+    },
     Saving(String),
     /// command search query
     Palette(String),

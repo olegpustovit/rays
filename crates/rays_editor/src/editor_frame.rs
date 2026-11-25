@@ -122,6 +122,14 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
             let category = |c: &Command| editor_commands::sheet_group(c).to_string();
             if which_key::sheet(ui, &context, Some(&category), &text_keys, &commands) { (Some(Prompt::Keys), None) } else { (None, None) }
         }
+        Some(Prompt::Confirming { title, message, accept, cancel, action, accepting }) => {
+            let (accepting, answer) = shell_prompt::confirm(ui, "confirm-action", title, &message, accept, cancel, accepting);
+            match answer {
+                pxui::ui::Pick::Cancel => (None, None),
+                pxui::ui::Pick::Submit => (None, Some(PromptIntent::RunAction(action))),
+                _ => (Some(Prompt::Confirming { title, message, accept, cancel, action, accepting }), None),
+            }
+        }
         Some(Prompt::Saving(name)) => match shell_prompt::name(ui, "preset-save", "Save preset", "Name for the current state of the document", "Preset name", &name) {
             None | Some((_, pxui::ui::Pick::Cancel)) => (None, None),
             Some((name, pxui::ui::Pick::Submit)) => (None, Some(PromptIntent::SavePresetFile(name))),

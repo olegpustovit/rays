@@ -414,7 +414,29 @@ pub fn autosave() {
     r.d.close();
     let _ = fs::remove_dir_all(&dir);
 }
-/// B41: "Reload sketch from its file" over unsaved edits asks first, and a refused file never replaces a draft
+fn open_reload_question(r: &mut Run) {
+    r.step(vec![meta_k('/'), meta_k('/')]);
+    r.step(vec![Event::TextInput("Reload sketch from".into())]);
+    r.step(vec![Event::KeyPressed(Key::Enter)]);
+    r.step(vec![]);
+    assert!(r.e().core.prompt.is_some(), "the reload command did not open a confirmation");
+}
+
+fn click_prompt(r: &mut Run, label: &str) {
+    r.step(vec![]);
+    let point = {
+        let ui = r.e().core.ui.borrow();
+        let button = ui.a11y_nodes().iter().find(|node| node.role == pxui::a11y::Role::Button as u32 && ui.a11y_name_of(node) == label)
+            .unwrap_or_else(|| panic!("no {label:?} button in the reload prompt"));
+        ((button.rect.x + button.rect.w / 2.) as f64, (button.rect.y + button.rect.h / 2.) as f64)
+    };
+    let left = input::MouseButton::LeftButton;
+    r.d.bk(&[left], &[], point, vec![Event::PointerPressed(left, point)]);
+    r.d.step_at(point, vec![Event::PointerReleased(left, point)]);
+    r.step(vec![]);
+}
+
+/// B41: the reload asks before discarding applied edits. Return and Escape keep them.
 pub fn reload_asks() {
     if !gpu() {
         return;
@@ -424,43 +446,55 @@ pub fn reload_asks() {
     let (text0, text1) = (sketch("0.5"), sketch("0.7"));
     write(&file, &text0);
     let mut r = Run::new(editor(Some(&format!("{dir}/presets")), vec![], source_file::at(&file, &sha(&text0)), &text0), (450., 300.));
-    r.step(vec![]);
+    r.e().core.ui.borrow_mut().set_a11y(true);
     r.step(vec![]);
     r.edit(set_arg(&["g", "@result"], "segments", S::Draft::Num("12".into())));
     let label = editor::undo_label(r.e());
-    let reload = |r: &mut Run| {
-        r.step(vec![meta_k('/'), meta_k('/')]);
-        r.step(vec![Event::TextInput("Reload sketch from".into())]);
-        r.step(vec![Event::KeyPressed(Key::Enter)]);
-        r.run_for(1.);
-    };
     write(&file, &text1);
-    r.d.count += 0;
-    reload(&mut r);
-    assert!(has(&source_text(r.e()), ":segments 12") && editor::undo_label(r.e()) == label, "the reload replaced unsaved edits without asking: {}", source_text(r.e()));
-    assert!(has(&cook_line(r.e()), "unsaved edits"), "the question was not asked: {}", cook_line(r.e()));
-    reload(&mut r);
-    assert!(has(&source_text(r.e()), "0.7") && !has(&source_text(r.e()), ":segments 12"), "the second reload did not take the file: {}", source_text(r.e()));
+    let kept = |r: &Run| has(&source_text(r.e()), ":segments 12") && editor::undo_label(r.e()) == label;
+    for key in [Key::Enter, Key::Escape] {
+        open_reload_question(&mut r);
+        assert!(kept(&r));
+        r.step(vec![Event::KeyPressed(key)]);
+        assert!(r.e().core.prompt.is_none() && kept(&r), "{key:?} discarded the unsaved edits");
+    }
+    open_reload_question(&mut r);
+    click_prompt(&mut r, "Reload");
+    assert!(r.e().core.prompt.is_none());
+    assert!(has(&source_text(r.e()), "0.7") && !has(&source_text(r.e()), ":segments 12"));
     r.d.close();
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// B41: a refused file's text is shown as a draft only when there is no draft of the user's to lose
+/// B41: even a confirmed reload of refused text preserves the user's drafts.
 pub fn reload_keeps_drafts() {
     if !gpu() {
         return;
     }
+    let dir = temp_dir("src-reload-keeps-drafts");
+    let file = format!("{dir}/sketch.rays");
     let text0 = sketch("0.5");
-    let r = Run::new(editor(None, vec![], source_file::at("sketch.rays", &sha(&text0)), &text0), (450., 300.));
-    let mut core = (*r.e().core).clone();
-    core.text.draft = Some("my draft".to_owned());
-    let broken = rays_diagnostic::error("E_X".into(), "no".into(), None, None, None, Vec::new(), Vec::new());
-    rays_editor::editor_host::reload_failed(&mut core, "sketch.rays", TYPO, &[broken.clone()]);
-    assert_eq!(core.text.draft.as_deref(), Some("my draft"), "a refused reload wrote the file over the user's draft");
-    core.text.draft = None;
-    rays_editor::editor_host::reload_failed(&mut core, "sketch.rays", TYPO, &[broken]);
-    assert_eq!(core.text.draft.as_deref(), Some(TYPO), "with no draft the refused text is shown for fixing");
+    write(&file, &text0);
+    let mut r = Run::new(editor(Some(&format!("{dir}/presets")), vec![], source_file::at(&file, &sha(&text0)), &text0), (450., 300.));
+    r.e().core.ui.borrow_mut().set_a11y(true);
+    r.step(vec![]);
+    std::rc::Rc::make_mut(&mut r.d.ed.as_mut().unwrap().core).text.draft = Some("my draft".to_owned());
+    write(&file, TYPO);
+    open_reload_question(&mut r);
+    assert!(matches!(&r.e().core.prompt,
+        Some(rays_editor::editor_model::Prompt::Confirming { message, .. }) if message == "Unapplied edits in 1 pane will be lost."
+    ));
+    click_prompt(&mut r, "Keep editing");
+    assert!(r.e().core.prompt.is_none(), "Keep editing left {}", rays_editor::editor_status::prompt_name(&r.e().core));
+    assert_eq!(r.e().core.text.draft.as_deref(), Some("my draft"));
+    open_reload_question(&mut r);
+    r.step(vec![Event::KeyPressed(Key::ArrowRight)]);
+    r.step(vec![Event::KeyPressed(Key::Enter)]);
+    assert!(r.e().core.prompt.is_none());
+    assert_eq!(r.e().core.text.draft.as_deref(), Some("my draft"), "refused reload replaced the user's draft");
+    assert!(has(&cook_line(r.e()), "sketch.rays not reloaded"), "{}", cook_line(r.e()));
     r.d.close();
+    let _ = fs::remove_dir_all(&dir);
 }
 
 fn meta_k(c: char) -> Event {
