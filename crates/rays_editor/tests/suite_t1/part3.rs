@@ -239,7 +239,8 @@ pub fn run_cameras() {
     }
     let geometry = |r: &Run| layout::geometry(None, Some(&[Panel::Timeline]), &shell_of(&r.e.core.doc).tree, &idle_frame(0));
     let center = |r: &Run, key: &str| {
-        let leaf = layout::find(&geometry(r), &Panel::View(key.into())).expect("leaf");
+        let g = geometry(r);
+        let leaf = layout::find(&g, &Panel::View(key.into())).expect("leaf");
         let (x, y, w, h) = leaf.body;
         ((x + w / 2) as f64, (y + h / 2) as f64)
     };
@@ -286,7 +287,8 @@ pub fn run_cameras() {
     check(same(position(&r, "v1.1.1"), first), "returning to a viewport lost its orbit");
     // a click on the geometry of a viewport over another scene instance selects the node that made it
     let graph_pane = {
-        let (x, y, _, _) = layout::find(&geometry(&r), &Panel::Graph).expect("graph leaf").body;
+        let g = geometry(&r);
+        let (x, y, _, _) = layout::find(&g, &Panel::Graph).expect("graph leaf").body;
         ((x + 20) as f64, (y + 200) as f64)
     };
     r.step(graph_pane, vec![Event::PointerMoved(graph_pane)]);

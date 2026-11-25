@@ -102,7 +102,7 @@ pub fn run_context_menus() {
     });
     exercise("(let* [main (ui/graph \"g\") time (ui/timeline)] (ui/workspace (ui/split \"vertical\" main time :second_size 24)))", &|r| {
         let geometry = layout::geometry(None, Some(&[]), &shell_of(&build_ok(&editor::workspace(&r.e))).tree, &idle_frame(0));
-        let (x, y, _, _) = layout::find(&geometry, &Panel::Timeline).expect("timeline").body;
+        let (x, y, _, _) = layout::find(&geometry, &Panel::Timeline).cloned().expect("timeline").body;
         let origin = ((x + 500) as f64, (y + 12) as f64);
         click(r, MouseButton::RightButton, origin);
         r.step(origin, vec![]);
@@ -246,8 +246,8 @@ pub fn run_outline_button() {
         Ok(d) => d,
         Err(d) => fail(&rays_diagnostic::to_string(&d)),
     };
-    let leaf = layout::find(&layout::geometry(None, None, &d.shell.expect("shell").tree, &idle_frame(0)), &Panel::Graph).expect("graph leaf");
-    let header = leaf.header;
+    let geom = layout::geometry(None, None, &d.shell.expect("shell").tree, &idle_frame(0));
+    let header = layout::find(&geom, &Panel::Graph).expect("graph leaf").header;
     let mut ui = rays_shell::host::create(input::Platform::Apple, Some(11), None);
     let from = rays_shell::chrome::tools_start(&mut ui, true, false, false, &format!("Graph\t{} / value", r.dump("pane graph")));
     let (x, y) = match rays_editor::bars::tool_rect(true, &mut ui, header, from, rays_editor::bars::Tool::Outline) {

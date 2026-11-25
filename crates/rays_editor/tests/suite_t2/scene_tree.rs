@@ -56,7 +56,7 @@ fn labelled(e: &Ed) -> Labelled {
             (
                 info.label.clone(),
                 info.kind.clone(),
-                info.input.and_then(|id| kg::find(&graph, id)).map(|n| n.label),
+                info.input.and_then(|id| kg::find(&graph, id)).map(|n| n.label.clone()),
                 kg::fields(info).into_iter().map(|f| (f.name, f.current)).collect(),
             )
         })

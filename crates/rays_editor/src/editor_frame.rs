@@ -1798,10 +1798,11 @@ mod tests {
             step_model(&mut value, &mut tick, (200.0, 300.0), vec![]);
             step_model(&mut value, &mut tick, (200.0, 300.0), vec![]);
             let f0 = idle_frame();
-            let leaf = layout::find(&geometry(&(&value).into(), &value.workspace, &f0), &Panel::Graph).expect("graph leaf");
+            let geom = geometry(&(&value).into(), &value.workspace, &f0);
+            let leaf = layout::find(&geom, &Panel::Graph).expect("graph leaf");
             let from = {
                 let mut ui = value.ui.borrow_mut();
-                chrome::tools_start(&mut ui, true, false, false, &panel_title(&(&value).into(), &leaf))
+                chrome::tools_start(&mut ui, true, false, false, &panel_title(&(&value).into(), leaf))
             };
             let (ox, oy) = {
                 let mut ui = value.ui.borrow_mut();

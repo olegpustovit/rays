@@ -88,8 +88,14 @@ fn body(r: &mut Bloom) {
     let shell = doc.shell.clone().expect("shell");
     let geometry = |_r: &Bloom| layout::geometry(None, Some(&[Panel::Timeline]), &shell.tree, &bframe(&[], &[], (0., 0.), vec![], 0));
     let _ = r;
-    let outline = |r: &Bloom| layout::find(&geometry(r), &Panel::Outline).expect("outline").body;
-    let graph_leaf = |r: &Bloom| layout::find(&geometry(r), &Panel::Graph).expect("graph leaf");
+    let outline = |r: &Bloom| {
+        let g = geometry(r);
+        layout::find(&g, &Panel::Outline).expect("outline").body
+    };
+    let graph_leaf = |r: &Bloom| {
+        let g = geometry(r);
+        layout::find(&g, &Panel::Graph).expect("graph leaf").clone()
+    };
     let scope_of = |name: &str| Some(Rc::new(flow_graph::projection::of_graph(&catalog, &ws.checked, name).unwrap()));
     let params = |r: &Bloom, active: &str, scope: Option<Rc<flow_graph::projection::Scope>>| n::Params {
         workspace: ws.checked.clone(),

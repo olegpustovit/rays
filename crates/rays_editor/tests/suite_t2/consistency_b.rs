@@ -358,7 +358,7 @@ fn lisp_apply() {
         let (x, y, w, h) = {
             let doc = build(&ws);
             let g = layout::geometry(None, Some(&[Panel::Timeline]), &shell(&doc).tree, &frame(1));
-            layout::find(&g, &Panel::Lisp).expect("lisp leaf").body
+            layout::find(&g, &Panel::Lisp).cloned().expect("lisp leaf").body
         };
         let count = std::cell::Cell::new(1);
         let run = |e: &mut Ed, mouse: (f64, f64), keys: &[Key], events: Vec<Event>| {
@@ -482,7 +482,7 @@ fn named_inspector() {
             assert!(editor::level(e).is_none(), "fixture left the scene level");
             let doc = lower_with(factories, &editor::workspace(e));
             let g = layout::geometry(None, Some(&[Panel::Timeline]), &shell(&doc).tree, &frame(1));
-            let (from, to) = inspector_drag_from(layout::find(&g, &Panel::Inspector).expect("inspector").body);
+            let (from, to) = inspector_drag_from(layout::find(&g, &Panel::Inspector).cloned().expect("inspector").body);
             upd(e, |e| editor::update(e, &frame_full(&[MouseButton::LeftButton], &[], (0., 0.), from, vec![Event::PointerPressed(MouseButton::LeftButton, from)], 4)));
             upd(e, |e| editor::update(e, &frame_full(&[MouseButton::LeftButton], &[], (0., 0.), to, vec![Event::PointerMoved(to)], 5)));
             upd(e, |e| editor::update(e, &frame_at(to, vec![Event::PointerReleased(MouseButton::LeftButton, to)], 6)));
@@ -510,12 +510,12 @@ fn stale_inspector_draft() {
             update(e, &[], &[], p, click_events(p));
             let doc = lower_with(factories, &editor::workspace(e));
             let panes = layout::geometry(None, Some(&[Panel::Timeline]), &shell(&doc).tree, &frame(1));
-            let (lx, ly, _, lh) = layout::find(&panes, &Panel::Lisp).expect("lisp").body;
+            let (lx, ly, _, lh) = layout::find(&panes, &Panel::Lisp).cloned().expect("lisp").body;
             let area = ((lx + 150) as f64, (ly + 70) as f64);
             update(e, &[], &[], area, click_events(area));
             update(e, &[Key::Meta], &[], area, vec![Event::KeyPressed(Key::KeyChar('a'))]);
             update(e, &[], &[], area, vec![Event::TextInput("(let* [a (sop/test_source :value 2)] a)".into())]);
-            let (from, to) = inspector_drag_from(layout::find(&panes, &Panel::Inspector).expect("inspector").body);
+            let (from, to) = inspector_drag_from(layout::find(&panes, &Panel::Inspector).cloned().expect("inspector").body);
             let before = editor::workspace(e);
             update(e, &[], &[MouseButton::LeftButton], from, vec![Event::PointerPressed(MouseButton::LeftButton, from)]);
             update(e, &[], &[MouseButton::LeftButton], to, vec![Event::PointerMoved(to)]);
