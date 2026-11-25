@@ -80,7 +80,7 @@ fn same_ui_node(a: &UiNode, b: &UiNode) -> bool {
 
 #[derive(Clone)]
 pub enum Node {
-    Group(Rc<Vec<Node>>),
+    Group(Rc<[Node]>),
     Clear(color::T),
     Geometry(Rc<Geometry>),
     Text(Rc<TextNode>),
@@ -91,19 +91,19 @@ pub enum Node {
     View3d(Rc<View3dNode>),
     Region(i64, i64, i64, i64, bool, i64),
     LayerBreak,
-    Translate(i64, i64, Rc<Vec<Node>>),
-    Rotate(f64, Rc<Vec<Node>>),
-    Scale(f64, f64, Rc<Vec<Node>>),
-    Affine(Transform, Rc<Vec<Node>>),
-    Clip(i64, i64, i64, i64, Rc<Vec<Node>>),
-    Blend(Blend, Rc<Vec<Node>>),
+    Translate(i64, i64, Rc<[Node]>),
+    Rotate(f64, Rc<[Node]>),
+    Scale(f64, f64, Rc<[Node]>),
+    Affine(Transform, Rc<[Node]>),
+    Clip(i64, i64, i64, i64, Rc<[Node]>),
+    Blend(Blend, Rc<[Node]>),
 }
 
 pub type Scene = Vec<Node>;
 
 
 pub fn group(x: Scene) -> Node {
-    Node::Group(Rc::new(x))
+    Node::Group(Rc::from(x))
 }
 
 pub fn clear(c: color::T) -> Node {
@@ -257,7 +257,7 @@ pub fn stroke_segment(from_: (f64, f64), to_: (f64, f64), color_: color::T, widt
     let (ux, uy) = (dx / len, dy / len);
     Ok(Node::Affine(
         Transform { xx: dx, xy: dy, yx: -uy, yy: ux, tx: from_.0, ty: from_.1 },
-        Rc::new(vec![unit]),
+        Rc::from([unit]),
     ))
 }
 
@@ -284,7 +284,7 @@ pub fn thick_segment(from_: (f64, f64), to_: (f64, f64), color_: color::T, width
     let (ux, uy) = (dx / len, dy / len);
     Ok(Node::Affine(
         Transform { xx: dx, xy: dy, yx: -uy * width, yy: ux * width, tx: from_.0, ty: from_.1 },
-        Rc::new(vec![unit]),
+        Rc::from([unit]),
     ))
 }
 
@@ -293,7 +293,7 @@ pub(crate) fn polygon(points: &[(i64, i64)], fill: Option<color::T>, stroke: Opt
     let key = path_geometry_key(points, true, 1., fill, stroke);
     path_geometry_cached(key, &|| {
         let floats: Vec<(f64, f64)> = points.iter().map(|&(x, y)| (x as f64, y as f64)).collect();
-        Ok(Node::Group(Rc::new(geometry_nodes(shape2::polygon(&floats, fill.map(rgba), stroke.map(rgba)))?)))
+        Ok(Node::Group(Rc::from(geometry_nodes(shape2::polygon(&floats, fill.map(rgba), stroke.map(rgba)))?)))
     })
 }
 
@@ -313,17 +313,17 @@ pub(crate) fn rounded_rect(at: (i64, i64), w: i64, h: i64, radius: i64, fill: Op
     let (x, y) = at;
     let radius = std::cmp::max(0, std::cmp::min(radius, std::cmp::min(w.abs(), h.abs()) / 2));
     let key = wide_key(5, &[w as u64, h as u64, radius as u64, fill.map(rgba).unwrap_or(i32::MIN) as u32 as u64, stroke.map(rgba).unwrap_or(i32::MIN) as u32 as u64]);
-    let make = || -> Result<Rc<Vec<Node>>, String> {
-        Ok(Rc::new(geometry_nodes(shape2::rounded_rect(w as f64, h as f64, radius as f64, fill.map(rgba), stroke.map(rgba)))?))
+    let make = || -> Result<Rc<[Node]>, String> {
+        Ok(Rc::from(geometry_nodes(shape2::rounded_rect(w as f64, h as f64, radius as f64, fill.map(rgba), stroke.map(rgba)))?))
     };
     let context = shapes_context();
-    let found = side_lru::find(&mut context.rounded.borrow_mut(), &key).and_then(|i| i.downcast::<Vec<Node>>().ok());
+    let found = side_lru::find(&mut context.rounded.borrow_mut(), &key).and_then(|i| i.downcast::<Rc<[Node]>>().ok());
     let geometry = match found {
-        Some(found) => found,
+        Some(found) => (*found).clone(),
         None => {
             let value = make()?;
             let bytes = value.iter().map(node_bytes).sum();
-            side_lru::add(&mut context.rounded.borrow_mut(), bytes, key, value.clone());
+            side_lru::add(&mut context.rounded.borrow_mut(), bytes, key, Rc::new(value.clone()));
             value
         }
     };
@@ -339,12 +339,12 @@ fn ellipse(at: (i64, i64), rx: i64, ry: i64, fill: Option<color::T>, stroke: Opt
     let origin = match found {
         Some(found) => (*found).clone(),
         None => {
-            let value = Node::Group(Rc::new(geometry_nodes(shape2::ellipse((0.0, 0.0), rx as f64, ry as f64, fill.map(rgba), stroke.map(rgba)))?));
+            let value = Node::Group(Rc::from(geometry_nodes(shape2::ellipse((0.0, 0.0), rx as f64, ry as f64, fill.map(rgba), stroke.map(rgba)))?));
             side_lru::add(&mut context.ellipse.borrow_mut(), node_bytes(&value), key, Rc::new(value.clone()));
             value
         }
     };
-    Ok(Node::Translate(cx, cy, Rc::new(vec![origin])))
+    Ok(Node::Translate(cx, cy, Rc::from([origin])))
 }
 
 pub fn circle(at: (i64, i64), radius: i64, fill: Option<color::T>, stroke: Option<color::T>) -> Result<Node, String> {
@@ -376,7 +376,7 @@ pub fn path(fill: Option<color::T>, value: &path_mod::t) -> Result<Node, String>
         }
         wide_key(2, words)
     });
-    path_geometry_cached(key, &|| Ok(Node::Group(Rc::new(geometry_nodes(shape2::path(fill_c, stroke_c, value))?))))
+    path_geometry_cached(key, &|| Ok(Node::Group(Rc::from(geometry_nodes(shape2::path(fill_c, stroke_c, value))?))))
 }
 
 pub fn text(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: &str) -> Node { styled_text(at, color_, size, value, 0) }
@@ -452,19 +452,19 @@ pub fn text_input_region(at: (i64, i64), w: i64, h: i64, focused: Option<bool>, 
 }
 
 pub fn translate(x: i64, y: i64, nodes: Scene) -> Node {
-    Node::Translate(x, y, Rc::new(nodes))
+    Node::Translate(x, y, Rc::from(nodes))
 }
 
 pub fn rotate(a: f64, nodes: Scene) -> Node {
-    Node::Rotate(a, Rc::new(nodes))
+    Node::Rotate(a, Rc::from(nodes))
 }
 
 pub fn scale(x: f64, y: f64, nodes: Scene) -> Node {
-    Node::Scale(x, y, Rc::new(nodes))
+    Node::Scale(x, y, Rc::from(nodes))
 }
 
 pub fn clip(at: (i64, i64), w: i64, h: i64, nodes: Scene) -> Node {
-    Node::Clip(at.0, at.1, w, h, Rc::new(nodes))
+    Node::Clip(at.0, at.1, w, h, Rc::from(nodes))
 }
 
 // The same picture: what a node draws, not its render caches; resources and images by identity.
@@ -490,7 +490,7 @@ fn same_ui(a: &ui_batch::Table, b: &ui_batch::Table) -> bool {
     a.count() == b.count() && a.instances() == b.instances() && a.batches() == b.batches() && a.marks() == b.marks()
 }
 
-fn same_children(a: &Rc<Vec<Node>>, b: &Rc<Vec<Node>>) -> bool {
+fn same_children(a: &Rc<[Node]>, b: &Rc<[Node]>) -> bool {
     Rc::ptr_eq(a, b) || same(a, b)
 }
 
@@ -545,7 +545,7 @@ pub fn geometry(g: Geometry) -> Node {
 
 /// An exact affine view transform: the six coefficients are the command's own.
 pub fn transform(tr: Transform, nodes: Scene) -> Node {
-    Node::Affine(tr, Rc::new(nodes))
+    Node::Affine(tr, Rc::from(nodes))
 }
 
 pub(crate) fn render(scene: &Scene) {
@@ -998,7 +998,7 @@ pub mod layer {
     fn wrap_node(wrappers: &[Wrapper], n: Node) -> Node {
         let mut n = n;
         for w in wrappers.iter().rev() {
-            let one = Rc::new(vec![n]);
+            let one: Rc<[Node]> = Rc::from([n]);
             n = match w {
                 Wrapper::Translate(x, y) => Node::Translate(*x, *y, one),
                 Wrapper::Rotate(a) => Node::Rotate(*a, one),
@@ -1096,7 +1096,7 @@ pub mod layer {
         left.len() == right.len() && left.iter().zip(right.iter()).all(|(l, r)| same_native_node(l, r))
     }
 
-    fn same_native_children(left: &Rc<Vec<Node>>, right: &Rc<Vec<Node>>) -> bool {
+    fn same_native_children(left: &Rc<[Node]>, right: &Rc<[Node]>) -> bool {
         Rc::ptr_eq(left, right) || same_native_scene(left, right)
     }
 
