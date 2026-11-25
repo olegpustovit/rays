@@ -386,6 +386,27 @@ pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key],
 pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::Extra, viewing: &Option<String>, camera: &V::Camera, cameras: &[(String, V::Camera)], pending: bool, bodies: &[(String, Bounds)]) {
     let core = Rc::make_mut(&mut value.core);
     core.view_tools = V::header_tools(extra);
+    // Graph pan/zoom leaves viewport bodies and cameras still: skip rebuilding gates/traces/box.
+    let fp = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::hash::DefaultHasher::new();
+        bodies.len().hash(&mut h);
+        for (k, b) in bodies { k.hash(&mut h); b.hash(&mut h); }
+        viewing.hash(&mut h);
+        pending.hash(&mut h);
+        for c in std::iter::once(camera).chain(cameras.iter().map(|(_, c)| c)) {
+            let (bits, follow, mode) = V::section_key(c, extra);
+            bits.hash(&mut h);
+            follow.hash(&mut h);
+            std::mem::discriminant(&mode).hash(&mut h);
+        }
+        for (k, _) in cameras { k.hash(&mut h); }
+        h.finish()
+    };
+    if value.view_overlay_fp == Some(fp) {
+        return;
+    }
+    value.view_overlay_fp = Some(fp);
     // what the panes draw over a view: the gate where it is not the whole pane, and the selected
     // object's box in the focused view
     core.gates = bodies
@@ -512,6 +533,7 @@ fn error_status_of(value: &LoopModel, image_errors: &[String]) -> Option<String>
 
 /// `revision`: what `inspector` shows, mixed into the camera panel's revision (the editor's loop builds
 /// nothing of its own: `Some(0)`); a sketch's widgets with none are built every frame.
+
 pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>, revision: Option<u64>) -> Option<Rc<dyn Any>> {
     let drawn_before = value.drawn.clone();
     let followed = follow_focus(&value, &value.core, frame_);

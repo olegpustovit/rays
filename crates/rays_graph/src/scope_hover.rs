@@ -297,6 +297,8 @@ pub struct Hovers {
     /// the cards in view, and the key the lists were made for
     pub visible: Vec<usize>,
     listed: Option<u64>,
+    /// pan/zoom the overlay paint reads (updated every frame; not part of the view key)
+    pub place: (u64, u64, u64),
     pub frame_views: Vec<pxui::Handle>,
     /// the content builds so far (not counting verifying runs)
     pub builds: u64,
@@ -894,9 +896,10 @@ pub fn overlay_key(t: &Pane, now: &Now, under: u64) -> u64 {
     let mut h = std::hash::DefaultHasher::new();
     let shown = !hv.lit.is_empty() || now.tip.is_some() || now.live.is_some() || now.flag;
     (&hv.lit, now.tip, now.live, now.flag).hash(&mut h);
+    // pan/zoom are applied live via `Hovers::place` + set_view; keep the overlay cached across them
     if shown {
         let chain = chains_of(t).map(|c| (Rc::as_ptr(&c) as usize, c.rev));
-        (t.pan_x.to_bits(), t.pan_y.to_bits(), t.zoom.to_bits(), under, t.x, t.y, t.width, t.height, chain, selected_wire_index(t)).hash(&mut h);
+        (under, t.x, t.y, t.width, t.height, chain, selected_wire_index(t)).hash(&mut h);
     }
     h.finish()
 }
@@ -939,11 +942,12 @@ pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
         hv.drawn.extend_from_slice(&t.highlighted);
     }
     let hovers = t.hovers.clone();
-    let (place, now) = (Place::of(t), *now);
+    let now = *now;
     ui.canvas(&b, move |paint, _| {
         let t = &*kept;
         let hv = hovers.borrow();
         let theme = t.theme;
+        let place = Place { x: t.x as f64, y: t.y as f64, pan_x: f64::from_bits(hv.place.0), pan_y: f64::from_bits(hv.place.1), zoom: f64::from_bits(hv.place.2) };
         let z = place.zoom;
         let at = |q: (f64, f64)| place.at(q);
         let pane = (place.x, place.y, t.width as f64, t.height as f64);

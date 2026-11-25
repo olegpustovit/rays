@@ -1961,6 +1961,7 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
         // path, and over the cards a view of the hover that builds only when what it shows changes
         crate::scope_hover::place_cards(t, ui, anchor.map_or(t.zoom, |a| a.2));
         crate::scope_hover::show(t, ui, &now);
+        t.hovers.borrow_mut().place = (t.pan_x.to_bits(), t.pan_y.to_bits(), t.zoom.to_bits());
         let font_size = ui.font_size().round() as i64;
         let over = crate::sized_view(ui, "graph-hover", crate::scope_hover::overlay_key(t, &now, key) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::overlay(t, ui, &now, font_size));
         ui.set_at(&over, (0.0, 0.0));
