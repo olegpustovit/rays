@@ -424,7 +424,7 @@ pub fn update(
         let mut view = None;
         kit::with_label(format_args!("workspace-window-ground{}", key(&l.path)), &mut |label| {
             let pxui::ViewSize { width, height } = ui.view_size();
-            view = Some(kit::sized_view(ui, label, revision, Size::Px(width), Size::Px(height), &mut |ui| ground(ui, l)).0);
+            view = Some(kit::sized_view(ui, label, revision, (0.0, 0.0), Size::Px(width), Size::Px(height), &mut |ui| ground(ui, l)).0);
         });
         ui.to_front(order as i64, &view.expect("window ground view"));
     }
@@ -454,10 +454,9 @@ pub fn update(
         // keyed by the leaf, so a drag or a menu follows it when the layout reorders the leaves
         let mut view = None;
         kit::with_label(format_args!("workspace-header-view-{}{}", panels::lower_name(&l.panel), key(&l.path)), &mut |label| {
-            view = Some(crate::kit::sized_view(ui, label, revision, Size::Px(w as f32), Size::Px(h as f32), &mut built));
+            view = Some(crate::kit::sized_view(ui, label, revision, (x as f32, y as f32), Size::Px(w as f32), Size::Px(h as f32), &mut built));
         });
         let (root, view) = view.expect("header view");
-        ui.set_at(&view, (x as f32, y as f32));
         if l.floating {
             ui.to_front(order as i64, &root);
         }

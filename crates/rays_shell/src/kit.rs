@@ -236,9 +236,7 @@ pub fn debug_revision(value: &dyn std::fmt::Debug) -> u64 {
 /// them, the theme, the window's size).
 pub fn cached(ui: &mut Ui, label: &str, revision: u64, f: &mut dyn FnMut(&mut Ui)) -> Handle {
     let pxui::ViewSize { width: w, height: h } = ui.view_size();
-    let (_, view) = sized_view(ui, label, revision, Size::Px(w), Size::Px(h), f);
-    ui.set_at(&view, (0.0, 0.0));
-    view
+    sized_view(ui, label, revision, (0.0, 0.0), Size::Px(w), Size::Px(h), f).1
 }
 
 /// `f` with `label` formatted on the stack (a heap string only past 96 bytes): a label made per frame
@@ -302,9 +300,9 @@ pub fn vector(ui: &mut Ui, boxed: &pxui::Handle, at: (f32, f32), w: f32, reserve
     }
 }
 
-pub(crate) fn sized_view(ui: &mut pxui::Ui, label: &str, revision: u64, width: pxui::Size, height: pxui::Size, build: &mut dyn FnMut(&mut pxui::Ui)) -> (pxui::Handle, pxui::Handle) {
+pub(crate) fn sized_view(ui: &mut pxui::Ui, label: &str, revision: u64, at: (f32, f32), width: pxui::Size, height: pxui::Size, build: &mut dyn FnMut(&mut pxui::Ui)) -> (pxui::Handle, pxui::Handle) {
     let key = pxui::hash_of(label);
-    let host = ui.node(key, pxui::Node::DEFAULT.w(width).h(height).at(0.0, 0.0));
+    let host = ui.node(key, pxui::Node::DEFAULT.w(width).h(height).at(at.0, at.1));
     let mut view = None;
     let view_key = match label {
         "inspector-view" => pxui::Key::Label("inspector-view"),

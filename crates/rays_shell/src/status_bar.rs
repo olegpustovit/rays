@@ -196,11 +196,10 @@ fn focus_end(ui: &mut Ui, after: f32, kind: Option<&str>, selection: Option<&str
 /// The strip's hit boxes stay at the root over it, so hovering or dragging them rebuilds nothing.
 fn strip(ui: &mut Ui, label: &str, bounds: (i64, i64, i64, i64), revision: u64, paint: &mut dyn FnMut(&mut Ui, &pxui::Handle)) {
     let (x, y, w, h) = bounds;
-    let (_, view) = crate::kit::sized_view(ui, label, revision, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| {
+    crate::kit::sized_view(ui, label, revision, (x as f32, y as f32), Size::Px(w as f32), Size::Px(h as f32), &mut |ui| {
         let boxed = ui.node(pxui::hash_of(label), pxui::Node::DEFAULT.flags(pxui::Flags::CLIP).w(Size::Grow).h(Size::Grow));
         paint(ui, &boxed);
     });
-    ui.set_at(&view, (x as f32, y as f32));
 }
 
 use crate::kit::revision;
