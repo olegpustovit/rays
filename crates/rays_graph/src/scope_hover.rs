@@ -989,16 +989,27 @@ pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
             let (pl, ax, ay) = &t.geo.items[slot];
             if let Item::Item(n) = &pl.item {
                 if let p::Chip::Inline { glyph, text } = &n.rows[i].chip {
-                    let full = format!("{} {}", sp::shown_glyph(glyph), text);
+                    // Reuse one buffer: format! per tip frame showed up in B_hover site dumps.
+                    thread_local! {
+                        static TIP: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+                    }
                     let k = pl.lines.iter().position(|l| matches!(l, p::Line::Row(j, _) if *j == i)).unwrap_or(0);
                     let (x, y) = at((ax + sp::value_x(p::NODE_WIDTH), rows_top(n, *ay) + (k as f64 * p::ROW_HEIGHT)));
                     let size = 4.max(fs - 2);
-                    let wd = f64::from(paint.text_service().width(&full, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0)) + (12.0 * z);
-                    if wd > sp::FIELD_W * z {
-                        sp::frame_in(paint, x, y + (2.0 * z), wd, 20.0 * z, Some(theme.input), (theme).foreground.with_alpha(38));
-                        let ty = f64::from(((y + (2.0 * z)) as f32) + ((((20.0 * z) as f32) - (size) as f32) / 2.0).floor());
-                        { let text = &full; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new((x + (6.0 * z)) as f32, ty as f32), pxui::Label::BODY.size((size) as f32), 0.0, text, &[span]); };
-                    }
+                    TIP.with(|buf| {
+                        let mut buf = buf.borrow_mut();
+                        buf.clear();
+                        buf.push_str(sp::shown_glyph(glyph));
+                        buf.push(' ');
+                        buf.push_str(text);
+                        let wd = f64::from(paint.text_service().width(buf.as_str(), pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0)) + (12.0 * z);
+                        if wd > sp::FIELD_W * z {
+                            sp::frame_in(paint, x, y + (2.0 * z), wd, 20.0 * z, Some(theme.input), (theme).foreground.with_alpha(38));
+                            let ty = f64::from(((y + (2.0 * z)) as f32) + ((((20.0 * z) as f32) - (size) as f32) / 2.0).floor());
+                            let span = pxui::TextSpan::new(0, buf.len() as u32).color(theme.foreground);
+                            let _ = paint.text_spans(pxui::Point::new((x + (6.0 * z)) as f32, ty as f32), pxui::Label::BODY.size((size) as f32), 0.0, buf.as_str(), &[span]);
+                        }
+                    });
                 }
             }
         }

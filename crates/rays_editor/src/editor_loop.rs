@@ -457,13 +457,33 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     });
     Rc::make_mut(&mut value.core).revs.panel = panel_rev;
     let camera_panel = move |ui: &mut Ui| -> PanelResult { Rc::new(V::panel(ui, &panel_control, &panel_camera, &panel_extra, inspector)) };
-    let handles_scene = editor_inspect::scene(&value.core).clone();
+    // Retain the scene graph for the handles closure without cloning nodes every frame (hover was
+    // paying ~12 kind_graph String allocs here). Keyed by document Arc identity.
+    let handles_scene = {
+        thread_local! {
+            // ponytail: one-slot; a second concurrent editor would thrash — upgrade to weak map then.
+            static SCENE: std::cell::RefCell<Option<(usize, std::rc::Rc<editor_document::kind_graph::T>)>> =
+                const { std::cell::RefCell::new(None) };
+        }
+        let ptr = std::sync::Arc::as_ptr(&value.core.doc) as usize;
+        SCENE.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if let Some((p, rc)) = slot.as_ref()
+                && *p == ptr
+            {
+                return std::rc::Rc::clone(rc);
+            }
+            let rc = std::rc::Rc::new(editor_inspect::scene(&value.core).to_vec());
+            *slot = Some((ptr, std::rc::Rc::clone(&rc)));
+            rc
+        })
+    };
     let handles_view = view_camera(&value);
     let handles_extra = extra.clone();
     let handles_key = focus_key(&value).to_owned();
     let view_handles = move |ui: &mut Ui, selected: Option<&m::Picked>, space: rays_math::mat4::T, bounds: Bounds| {
         // a handle is where the picture shows its point: in the view's film, not its pane
-        V::handles(ui, selected, &handles_scene, &space, &handles_view, &handles_extra, V::film(&handles_extra, &handles_key, bounds))
+        V::handles(ui, selected, handles_scene.as_ref(), &space, &handles_view, &handles_extra, V::film(&handles_extra, &handles_key, bounds))
     };
     let before_level = m::pane_level(&(&value.core).into());
     let before_map = value.core.map_view;

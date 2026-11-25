@@ -737,7 +737,8 @@ pub fn apply_action(camera_: &Camera, extra_: &Extra, a: &Action) -> (Extra, Opt
 }
 
 pub fn on_doc(previous: &document::T, core: &mut Model, camera_: &Camera) {
-    if !kg::same(&editor_inspect::scene(core), &document::scene_graph(previous)) || core.doc.active_camera != previous.active_camera {
+    // Borrow the document's scene: scene_graph() cloned every node (strings) on each hover frame.
+    if !kg::same(editor_inspect::scene(core), &previous.scene) || core.doc.active_camera != previous.active_camera {
         sync_cameras(editor_host::SceneMode::Amend, core, camera_);
     }
 }
@@ -1262,7 +1263,7 @@ pub fn handles(ui: &mut Ui, selected: Option<&Picked>, scene_: &kg::T, space: &m
         if extra_.show.handles {
             for a in arrows(node, view_, bounds, space, extra_.tool) {
                 let (tx, ty) = a.tip;
-                let box_ = ui.node(pxui::hash_of(&format!("handle-{}", a.name)), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).w(Size::Px(14.)).h(Size::Px(14.)).at((tx - 7.) as f32, (ty - 7.) as f32));
+                let box_ = ui.node(pxui::hash_of(&("handle", a.name)), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).w(Size::Px(14.)).h(Size::Px(14.)).at((tx - 7.) as f32, (ty - 7.) as f32));
                 let signal = ui.signal(&box_);
                 let (mx, my) = crate::p64(signal.drag);
                 let (ux, uy) = a.unit;
@@ -1429,7 +1430,7 @@ fn guides_key(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_:
 
 struct GuidesCache {
     key: u64,
-    nodes: Rc<Nodes>,
+    nodes: Rc<[scene_node]>,
 }
 
 thread_local! {
@@ -1488,6 +1489,9 @@ fn guides_build(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view
 
 /// `bounds` is the rectangle the view is drawn in (`film`): what is projected lies on the picture.
 /// The axis gizmo belongs to the `pane`'s corner.
+///
+/// Cache hits return one `Node::Group` over the retained slice (Rc bump + one-slot vec): cloning the
+/// outer `Vec<Node>` on every hover/`scene_of` frame was Z3's leftover warm alloc.
 pub fn guides(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_: &rcam::Camera, extra_: &Extra, pane: Bounds, bounds: Bounds) -> Nodes {
     let key = guides_key(scene_, selected, space, view_, extra_, pane, bounds);
     GUIDES_CACHE.with(|slot| {
@@ -1495,11 +1499,12 @@ pub fn guides(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_:
         if let Some(cache) = slot.as_ref()
             && cache.key == key
         {
-            return (*cache.nodes).clone();
+            return vec![scene_node::Group(Rc::clone(&cache.nodes))];
         }
-        let nodes = guides_build(scene_, selected, space, view_, extra_, pane, bounds);
-        *slot = Some(GuidesCache { key, nodes: Rc::new(nodes.clone()) });
-        nodes
+        let built = guides_build(scene_, selected, space, view_, extra_, pane, bounds);
+        let nodes: Rc<[scene_node]> = Rc::from(built);
+        *slot = Some(GuidesCache { key, nodes: Rc::clone(&nodes) });
+        vec![scene_node::Group(nodes)]
     })
 }
 
