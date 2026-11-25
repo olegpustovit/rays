@@ -68,6 +68,52 @@ Delete it when W3 closes; leftovers go to `OPEN_ISSUES.md`.
 | L4 graph pane | B14 (Backspace deletes the selection before unwiring a hovered row), B15 (click in a multi-selection narrows on release), B16 (stale hovered row after a regeo), B17 (collapsed rail drop at BODY_TOP), B18 (menu pick indexes the listed rows), B19 (camera kept per graph), B20 (width cache bounded) fixed, tests in `rays_graph/tests/cases/scope_l4.rs` (B17, B18 have none: no collapsed-zone fixture; the clear cross took no headless click). Perf: projection borrows catalog/ops/macros and is cached per (graph, checked, folds, catalog); panel-state changes no longer relay the graph; `graph_name` reads the scene by borrow; `failed_nodes` borrows. New `graph_budget_isogrid` (zoom 605/482, pan 497/1086, select 495/483, box 494/7225, hover 703/588, enter 670/581). Open: first frame lays out twice, card views keyed on rev, scope::Pane clones per frame (editor_frame, editor_reduce:1144), sync_scope allocs, node menu clones, p::zones on out-port press, scrub deep copies, chains O(nodes x wires), graph_name still returns a String |
 | L5 inspector, list, outline, status | B21–B28 fixed. B29 adds mixed shared fields and one undo for a multi-node scrub. P7 borrows scope state and the graph pane's chain table. Inspector hover enter/cross rows 178/172 → 24/28 allocs, settled 0. P8 retains outline rows and caches status, timeline and spreadsheet views. Paired idle allocs/frame (basic/empty/bare) 597/194/311 → 584/184/296. Settled outline (basic/empty) 565/528 → 456/430. Open: share list rows through frame/reduce and avoid rebuilding outline Params and off-graph scene projections. B29 geometry-list selection needs the synchronization below. |
 
+| L9 test speed | Both final Mac runs reached all 541 default editor cases within the 60-second execution deadline, up from 294 at timeout. The warm run took 53.964 s and its slowest case took 1.864 s. The grouped editor, Flow integration and graph window targets passed the same sets in forward and reverse order. Assertion failures remain listed below. |
+
+### L9 test timings
+
+| Case | Before (s) | After (s) | Change |
+|---|---:|---:|---|
+| `flow_gpu::sampling` | 3.007 | 0.041 | Default checks 1,024 samples across the pixel-row boundary. Slow mode keeps 4,096. |
+| `sopcat_node_inputs` | 2.627 | 0.522 | Lower only the requested factories and their dependencies. |
+| `sopcat_graph_edits` | 2.624 | 0.548 | Lower only the requested factories and their dependencies. |
+| `sopcat_morph_sketch` | 2.610 | 0.457 | Reuse the sketch's lowered Blend Shapes factory. |
+| `sopcat_motion` | 2.216 | 0.077 | Lower only the two motion factories and their dependencies. |
+| `sopcat_set_color` | 2.329 | 0.132 | Lower only the box and color factories and their dependencies. |
+| `sopcat_membership` | 2.134 | 1.863 | Build the full catalog once in the grouped inventory cases. |
+| `sopcat_manifest` | 2.399 | 0.255 | Reuse that catalog. |
+| `image_sop` | 2.253 | 0.029 | Lower its checked source and reuse the catalog inventory case for manifest slot assertions. |
+| `text_editor_text` | 1.999 | 0.412 | Read the state dump in memory and advance the debounce clock directly. |
+| `workspace_packed_capture_state` | 2.159 | 0.582 | Reuse capture cones. Keep the 65-wide row and use five default rows. |
+| `native_live_mesh` | 2.339 | 1.440 | Batch the same trace samples and shorten repeated resident-frame checks. |
+| `native_chain_frames_triangles` | 1.884 | 0.946 | Default checks the cold frame and three refits. Slow mode keeps eight frames. |
+| `native_placement_retained_generations` | 1.667 | 0.308 | Default checks 32 generations after warmup. Slow mode keeps the 200-generation run. |
+| `alloc_budget_basic` | 4.193 | 0.087 | Historical baseline. Grouped run reuses native setup and includes the fleet's editor changes. |
+| `click_budget_long` | 2.044 | 1.088 | Focused timing with 12 default rounds, 20 in slow mode, and the same ceilings including settled idle. |
+| `editor_document` layout gesture oracle | 2.602 | 1.845 / 0.858 | Independent smaller-sketch and IsoGrid cases keep all 11 gesture comparisons. |
+| `editor_document` wave cook | 2.066 | 1.651 | Use 48 samples per strand by default and the authored 90 in slow mode. |
+| `rays_pathtracer::furnace_mis` | 2.592 | 1.370 | Batch 16 samples per render with the original total. |
+| `renderer::gpu_execution_texture_sampling` | 2.280 | 0.194 | Use 64 draws per path by default and 600 in slow mode. |
+
+The workspace sweep covered 40 default packages and 10 slow-mode suites, one crate at a time.
+Default runner wall including compilation fell from 17.255 to 16.335 s for `editor_document`,
+11.902 to 2.273 s for `flow_gpu`, 34.112 to 9.836 s for `rays_pathtracer`, and
+15.572 to 12.170 s for `renderer`. The final editor run before the warm repeat took 62.971 s,
+including a 6.13-second build. The warm repeat took 53.964 s, with both runs below the execution cap.
+Balancing the four pure groups against recorded timings reduced the busiest group's summed
+case time from 15.337 to 12.296 s. The slow editor run reached 541 cases in 145.478 s.
+Its longest cases were the full Shattered Studio fixture (30.504 s) and catalog perturbation (21.417 s).
+
+The first capped run could not time the later native cases. Those baselines come from the first
+run that reached each case. Grouped case times start inside the child; standalone timings
+include process startup. The per-case ledger, cases over one second and slowest 30 for each
+mode are in `target/l9-test-times/`.
+
+The runner's focused failure-recovery and deadline tests passed, and the PXUI dependency and
+remote gates passed. The full runner test set passed at the graph-window stage. The final
+balancing stage still saw intermittent failures in the two existing qualification setup and
+contention timing fixtures.
+
 ## Requests
 
 ### L1
@@ -103,3 +149,26 @@ Delete it when W3 closes; leftovers go to `OPEN_ISSUES.md`.
 - L5 (P8): borrow the shared list row/column pair in `draw_list_panes` after the model/reducer switch to `Rc`. The `rows.to_vec()` and retained last rows still copy today.
 - L2: `editor_frame.rs:1340` copies the level's objects into every `FrameResult`; reduce now takes that copy, so the frame could build it only when a change is pending.
 ### L9
+
+### Failures (for review)
+
+| Case | Binary | Assertion and first recorded failing HEAD |
+|---|---|---|
+| `rays_editor::run_ui_frames` | `editor` | At `bf70fcea5`, “zooming rebuilt 10 views and wrote 0 instance bytes a frame.” The latest default run passes. Slow mode at `7335e7874` still reports “orrery: playing rebuilt 25 views in 12 frames.” |
+| `rays_editor::run_editor` | `gpu_editor` | “the drag rewrote the outline split” at `bf70fcea5`. The resulting split writes `0.3337`, and the case expects `0.3333`. |
+| `rays_editor::run_loop_copies` | `gpu_editor` | “a rename of one copy did not rename the template” at `bf70fcea5`. The scene still reports `spot,spot,spot`. |
+| `rays_editor::run_expression_chip` | `gpu_editor` | “a nested inspector reference followed its parent expression: g/b, g/b/:b” at `3df52a69f`. A later run reports “the 3.0 of the * was not editable from the row's inspector.” |
+| `rays_editor::run_context_menus` | `gpu_editor` | “the timeline context menu did not open at the pointer” at `3df52a69f`. |
+| `rays_editor::scene_tree_a_list` | `gpu_editor` | “list Enter did not open the selected node in graph” at `3df52a69f`. |
+| `rays_editor::workspace_gpu_marks` | `gpu_editor` | “GPU marks differ at t=0” at `3df52a69f`, reproduced in an isolated process. |
+| `rays_editor::editor_frame::tests::b5_split_preserves_graph_pane_and_locals` and `rays_editor::editor_frame::tests::b12_splitter_drag_updates_panes_on_same_frame` | `rays_editor` library | “the frame's pane” at `74d4d97f5`. The full-run `click_budget_empty` also reaches that assertion. |
+| `rays_editor::click_budget_isogrid` and `rays_editor::click_budget_long` | `gpu_editor` | Full run at `139c256e0` exceeds settled allocation ceilings, including IsoGrid split right (877 vs 510) and long-session final idle (342 vs 228). The focused run of those two cases passes. |
+| `rays_editor::source_reload_keeps_drafts` | `gpu_editor` | “assertion failed: r.e().core.prompt.is_none()” at `823933f5b`. |
+| `rays_editor::graph_budget_isogrid` | `gpu_editor` | “enter: 1964/470 over 704/611; up: 1728/466 over 708/611” at `823933f5b`. |
+| `rays_editor::tab_keeps_the_caret` | `gpu_editor` | “typing made a draft” at `823933f5b`. |
+| `gate::tests::dependency_gate_resolves_workspace_dependencies_and_rejects_prohibited_edges` | `gate` | “dev-only tests do not change production boundaries” at `451f6dabb`. The fixture gets a private PXUI dependency diagnostic for `flow_ir`. |
+| `rays_bin::cli_help_errors_json_and_documentation` | `cli` | Generated JSON differs from `fixtures/cli/doc.json` at `c41f672f1`. |
+
+HEAD labels record the first available failing sample from the shared checkout. The three
+original editor failures last passed at `3f2307451` in the timing ledger. Concurrent edits
+were present in some failing samples.
