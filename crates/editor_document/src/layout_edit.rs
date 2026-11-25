@@ -207,6 +207,30 @@ loop {
 let res = strip(&sc.res, &mut removed, builder)?.ok_or_else(|| fail("Keep at least one docked panel."))?;
 Ok((ps, res, removed)) }
 
+/// A split the close reduced to the name of its other half takes that half's value, and the half's
+/// binding goes: split/close pairs leave no chain of aliases behind (the editor graph and every
+/// frame that reads it grew with each pair). A name read anywhere else stays.
+fn fold_aliases(before: &[(S, S)], mut ps: Vec<(S, S)>, res: &S, builder: &mut SyntaxBuilder) -> Vec<(S, S)> {
+    let mut i = 0;
+    while i < ps.len() {
+        let (p, e) = ps[i];
+        let was_split = binding_of(before, &pat_key(&p, builder), builder).is_some_and(|old| head_sym(&old, builder).is_some_and(is_container));
+        let target = match node_of(&e, builder) { Node::Sym(name) if was_split => Some(builder.name(name).to_owned()), _ => None };
+        let found = target.and_then(|q| ps.iter().position(|(p2, _)| pat_key(p2, builder) == q).map(|j| (j, q)));
+        if let Some((j, q)) = found {
+            let reads = count_refs(&q, res, builder) + ps.iter().map(|(_, e2)| count_refs(&q, e2, builder)).sum::<usize>();
+            if j < i && reads == 1 {
+                ps[i].1 = ps[j].1;
+                ps.remove(j);
+                i -= 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    ps
+}
+
 fn drop_kid(e: &S, i: i64, builder: &mut SyntaxBuilder) -> R<Option<S>> { match head_sym(e, builder) {
     Some("ui/split" | "ui/split_at") => Ok(layout_kids(e, builder).nth((1 - i) as usize)),
     Some("ui/tile") => {
@@ -460,6 +484,7 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
             let sc = scope_of(sx, builder).ok_or_else(|| fail("This editor graph is a single expression. Edit it in Lisp."))?;
             get_node(sx, &leaf, builder)?;
             let (ps, res, _) = strip_panel(false, &sc, &leaf, builder)?;
+            let ps = fold_aliases(&sc.ps, ps, &res, builder);
             reorder(&rebuild(&sc, &ps, res, builder), builder)
         }, builder)
     }

@@ -87,10 +87,10 @@ const CEILINGS: &[(&str, &str, u64, u64)] = &[
     ("isogrid", "escape", 965, 564),
     ("isogrid", "idle end", 626, 564),
     ("long", "idle fresh", 674, 598),
-    ("long", "split", 13386, 619),
-    ("long", "close", 3549, 139),
-    ("long", "undo", 5612, 186),
-    ("long", "idle after session", 207, 145),
+    ("long", "split", 10802, 619),
+    ("long", "close", 2536, 121),
+    ("long", "undo", 2120, 166),
+    ("long", "idle after session", 187, 125),
 ];
 
 /// (workspace, action, ceiling on the busiest of its four frames): the first Lisp pane on IsoGrid

@@ -70,6 +70,11 @@ pub fn run_ops() {
     let sp = ok("Split panel", L::SplitPanel { node: p(&["editor", "network"]), axis: Axis::V, ratio: 0.5, panel: panel("lisp") });
     check(panels::to_string(&tree(&sp)) == "(h outline (h (v (v graph lisp) lisp) (tile view)))", &format!("split: {}", panels::to_string(&tree(&sp))));
     check(has(&source(&sp), "(ui/split_at \"vertical\" 0.5 network_a network_b)"), "the new split");
+    // closing the new half gives the text back: no alias chain grows with split/close pairs
+    match editor::edit_layout(sp.clone(), &L::ClosePanel { node: p(&["editor", "network_b"]) }) {
+        Ok(q) => check(source(&q) == source(&e), &format!("split then close left {}", source(&q))),
+        Err(m) => fail(&m),
+    }
     let c = ok("Close panel", L::ClosePanel { node: p(&["editor", "network"]) });
     check(panels::to_string(&tree(&c)) == "(h outline (h lisp (tile view)))", &format!("close: {}", panels::to_string(&tree(&c))));
     let t = ok("Retype panel", L::SetPanelKind { node: p(&["editor", "network"]), panel: panel("list") });
