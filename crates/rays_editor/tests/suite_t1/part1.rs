@@ -131,7 +131,7 @@ pub fn run_editor() {
     r.click((420., 28.));
     r.step((450., 300.), vec![]);
     check(r.undo_label() == Some("Split panel".into()), &format!("the menu split the graph panel: {:?}", r.undo_label()));
-    check(has(&r.source(), "network_a") && has(&r.source(), "network_b"), "the split bound two new panels");
+    check(has(&r.source(), "(ui/split_at \"horizontal\" 0.5 network network_b)"), "the split kept the graph and bound a new panel");
     // a panel made by a loop cannot be split: the status says where it comes from
     let geometry = layout::geometry(None, Some(&[Panel::Timeline]), &shell_of(&build_ok(&editor::workspace(&r.e))).tree, &frame(&[], (0., 0.), vec![], 0));
     let leaf = layout::find(&geometry, &Panel::View("v1.1.2".into())).expect("leaf");
@@ -176,7 +176,7 @@ pub fn run_panel_keys() {
     let m = (300., 150.);
     r.step(m, vec![slash(), ch('o'), ch('v')]);
     r.step(m, vec![]);
-    check(r.undo_label() == Some("Split panel".into()) && has(&r.source(), "network_a"), "/ o v split the focused panel");
+    check(r.undo_label() == Some("Split panel".into()) && has(&r.source(), "(ui/split_at \"horizontal\" 0.5 network network_b)"), "/ o v split the focused panel");
     r.step(m, vec![slash(), ch('o'), ch('x')]);
     r.step(m, vec![]);
     check(r.undo_label() == Some("Close panel".into()), "/ o x closed it again");

@@ -1682,7 +1682,7 @@ mod tests {
             step_model(&mut value, &mut tick, (200.0, 200.0), vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('o')), Event::KeyPressed(Key::KeyChar('v'))]);
             step_model(&mut value, &mut tick, (200.0, 200.0), vec![]);
             let printed = workspace_doc::print(&value.doc.workspace.ws).unwrap().0;
-            assert!(printed.contains("net_a"), "B5 setup: /ov did not split net: {printed}");
+            assert!(printed.contains("(ui/split_at \"horizontal\" 0.5 net net_b)"), "B5 setup: /ov did not split net: {printed}");
             assert_eq!(pane_shown(&(&value).into()).map(String::as_str), Some("b"), "B5: split reset pane.shown");
             assert!(!pane_route(&(&value).into()).is_empty(), "B5: split cleared pane.route");
             assert_eq!(pane_view(&(&value).into()).pan_x, 123.0, "B5: split reset pan_x");

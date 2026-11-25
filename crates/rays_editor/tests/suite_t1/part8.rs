@@ -109,7 +109,7 @@ pub fn run_context_menus() {
         let choice = (origin.0 + 20., origin.1.min(640. - 335.) + 19.);
         click(r, LB, choice);
         r.step(choice, vec![]);
-        check(r.undo_label() == Some("Split panel".into()) && has(&r.source(), "time_a (ui/timeline)") && has(&r.source(), "time_b (ui/lisp)"), &format!("the timeline context menu did not open at the pointer: {}", r.source()));
+        check(r.undo_label() == Some("Split panel".into()) && has(&r.source(), "time (ui/timeline)") && has(&r.source(), "time_b (ui/lisp)"), &format!("the timeline context menu did not open at the pointer: {}", r.source()));
         check(rays_editor::timeline::mode(&editor::timeline(&r.e)) == rays_editor::timeline::Mode::Playing, "a timeline right-click sought the playhead");
     });
     exercise("(ui/workspace (ui/graph \"g\"))", &|r| {

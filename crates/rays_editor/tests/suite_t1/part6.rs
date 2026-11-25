@@ -252,6 +252,6 @@ pub fn run_panel_chain() {
     keys(&mut r, &[' ', 'l', 'u']);
     check(r.undo_label() == Some("Retype panel".into()) && has(&r.source(), "(ui/outline)"), &format!("a retype after splitting a viewport did nothing: {}", r.source()));
     keys(&mut r, &[' ', 'o', 'v']);
-    check(r.undo_label() == Some("Split panel".into()) && has(&r.dump("panels"), "outline preview_a_a*"), &format!("a split after a retype did nothing: {}", r.dump("panels")));
+    check(r.undo_label() == Some("Split panel".into()) && has(&r.dump("panels"), "outline preview*"), &format!("a split after a retype did nothing: {}", r.dump("panels")));
     r.close();
 }

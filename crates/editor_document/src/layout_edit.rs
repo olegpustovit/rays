@@ -207,19 +207,32 @@ loop {
 let res = strip(&sc.res, &mut removed, builder)?.ok_or_else(|| fail("Keep at least one docked panel."))?;
 Ok((ps, res, removed)) }
 
-/// A split the close reduced to the name of its other half takes that half's value, and the half's
-/// binding goes: split/close pairs leave no chain of aliases behind (the editor graph and every
-/// frame that reads it grew with each pair). A name read anywhere else stays.
-fn fold_aliases(before: &[(S, S)], mut ps: Vec<(S, S)>, res: &S, builder: &mut SyntaxBuilder) -> Vec<(S, S)> {
+fn replace_placement(old: &str, new: &str, e: &S, builder: &mut SyntaxBuilder) -> S {
+    if count_refs(old, e, builder) == 0 { *e } else { rename_place(old, new, e, builder) }
+}
+
+/// Fold the aliases left by a collapse. The original half of a split keeps its binding.
+fn fold_aliases(before: &[(S, S)], ps: &mut Vec<(S, S)>, res: &mut S, builder: &mut SyntaxBuilder) {
     let mut i = 0;
     while i < ps.len() {
         let (p, e) = ps[i];
-        let was_split = binding_of(before, &pat_key(&p, builder), builder).is_some_and(|old| head_sym(&old, builder).is_some_and(is_container));
-        let target = match node_of(&e, builder) { Node::Sym(name) if was_split => Some(builder.name(name).to_owned()), _ => None };
-        let found = target.and_then(|q| ps.iter().position(|(p2, _)| pat_key(p2, builder) == q).map(|j| (j, q)));
-        if let Some((j, q)) = found {
-            let reads = count_refs(&q, res, builder) + ps.iter().map(|(_, e2)| count_refs(&q, e2, builder)).sum::<usize>();
-            if j < i && reads == 1 {
+        let Some(target) = sym_of(&e, builder) else { i += 1; continue };
+        let group = pat_key(&p, builder);
+        let Some(old) = binding_of(before, &group, builder).filter(|old| head_sym(old, builder).is_some_and(is_container)) else { i += 1; continue };
+        if matches!(head_sym(&old, builder), Some("ui/split" | "ui/split_at"))
+            && layout_kids(&old, builder).next().and_then(|kid| sym_of(&kid, builder)) == Some(target)
+        {
+            let target = target.to_owned();
+            ps.remove(i);
+            for (_, value) in &mut ps[i..] {
+                *value = replace_placement(&group, &target, value, builder);
+            }
+            *res = replace_placement(&group, &target, res, builder);
+            continue;
+        }
+        if let Some(j) = ps[..i].iter().position(|(p, _)| pat_key(p, builder) == target) {
+            let reads = count_refs(target, res, builder) + ps.iter().map(|(_, value)| count_refs(target, value, builder)).sum::<usize>();
+            if reads == 1 {
                 ps[i].1 = ps[j].1;
                 ps.remove(j);
                 i -= 1;
@@ -228,7 +241,32 @@ fn fold_aliases(before: &[(S, S)], mut ps: Vec<(S, S)>, res: &S, builder: &mut S
         }
         i += 1;
     }
-    ps
+}
+
+/// A follower whose graph is gone falls back to the focused graph.
+fn detach_follows(e: &S, removed: &[String], builder: &mut SyntaxBuilder) -> R<S> {
+    match head_sym(e, builder) {
+        Some("ui/inspector" | "ui/spreadsheet" | "ui/list" | "ui/lisp") => {
+            let args = args_of(e, builder);
+            if kw_get(args, "of", builder).and_then(|id| sym_of(&id, builder)).is_some_and(|name| removed.iter().any(|n| n == name)) {
+                return arg_set(e, &ArgKey::Kw("of".into()), None, builder);
+            }
+        }
+        Some(head) if is_container(head) || matches!(head, "ui/workspace" | "ui/switch") => {
+            return try_map_children(&mut |child, builder| detach_follows(child, removed, builder), e, builder);
+        }
+        _ => {}
+    }
+    Ok(*e)
+}
+
+fn detach_followers(sc: &mut Scope, removed: &[String], builder: &mut SyntaxBuilder) -> R<()> {
+    for e in sc.ps.iter_mut().map(|(_, e)| e).chain(std::iter::once(&mut sc.res)) {
+        if removed.iter().any(|name| count_refs(name, e, builder) > 0) {
+            *e = detach_follows(e, removed, builder)?;
+        }
+    }
+    Ok(())
 }
 
 fn drop_kid(e: &S, i: i64, builder: &mut SyntaxBuilder) -> R<Option<S>> { match head_sym(e, builder) {
@@ -463,29 +501,32 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
         edit_scope(src, &sp, &mut |sx, builder| {
             let sc = scope_of(sx, builder).ok_or_else(|| fail("This editor graph is a single expression. Edit it in Lisp."))?;
             let j = first_pair_index(&sc, &leaf, builder)?;
-            let a = fresh(&mut used, &format!("{leaf}_a"));
+            let group = fresh(&mut used, "split");
             let b = fresh(&mut used, &format!("{leaf}_b"));
-            let (p, orig) = sc.ps[j].clone();
             let split = call("ui/split_at", vec![
                 str_node(if *axis == Axis::H { "horizontal" } else { "vertical" }, builder),
-                num_node(&ratio_text(*ratio), builder), sym(&a, builder), sym(&b, builder),
+                num_node(&ratio_text(*ratio), builder), sym(&leaf, builder), sym(&b, builder),
             ], builder);
-            let mut ps: Vec<(S, S)> = sc.ps[..j].to_vec();
-            ps.push((sym(&a, builder), orig));
+            let mut ps = Vec::with_capacity(sc.ps.len() + 2);
+            ps.extend_from_slice(&sc.ps[..=j]);
             ps.push((sym(&b, builder), panel));
-            ps.push((p, split));
-            ps.extend(sc.ps[j + 1..].iter().cloned());
-            reorder(&rebuild(&sc, &ps, sc.res.clone(), builder), builder)
+            ps.push((sym(&group, builder), split));
+            ps.extend(sc.ps[j + 1..].iter().map(|(p, e)| (*p, replace_placement(&leaf, &group, e, builder))));
+            let res = replace_placement(&leaf, &group, &sc.res, builder);
+            reorder(&rebuild(&sc, &ps, res, builder), builder)
         }, builder)
     }
     Op::ClosePanel { node } => {
         let (sp, leaf) = split_node(node)?;
         edit_scope(src, &sp, &mut |sx, builder| {
-            let sc = scope_of(sx, builder).ok_or_else(|| fail("This editor graph is a single expression. Edit it in Lisp."))?;
+            let mut sc = scope_of(sx, builder).ok_or_else(|| fail("This editor graph is a single expression. Edit it in Lisp."))?;
             get_node(sx, &leaf, builder)?;
-            let (ps, res, _) = strip_panel(false, &sc, &leaf, builder)?;
-            let ps = fold_aliases(&sc.ps, ps, &res, builder);
-            reorder(&rebuild(&sc, &ps, res, builder), builder)
+            let (mut ps, mut res, removed) = strip_panel(false, &sc, &leaf, builder)?;
+            fold_aliases(&sc.ps, &mut ps, &mut res, builder);
+            sc.ps = ps;
+            sc.res = res;
+            detach_followers(&mut sc, &removed, builder)?;
+            reorder(&rebuilt(&sc, builder), builder)
         }, builder)
     }
     Op::DockPanel { node, target, side } => {
@@ -520,7 +561,16 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
     Op::SetPanelKind { node, panel } => {
         let (sp, leaf) = split_node(node)?;
         let panel = builder.import(panel);
-        edit_scope(src, &sp, &mut |sx, builder| set_node(sx, &leaf, panel, builder), builder)
+        edit_scope(src, &sp, &mut |sx, builder| {
+            let detaches = head_sym(&panel, builder) != Some("ui/graph") && head_sym(&get_node(sx, &leaf, builder)?, builder) == Some("ui/graph");
+            let updated = set_node(sx, &leaf, panel, builder)?;
+            if !detaches {
+                return Ok(updated);
+            }
+            let Some(mut sc) = scope_of(&updated, builder) else { return Ok(updated) };
+            detach_followers(&mut sc, std::slice::from_ref(&leaf), builder)?;
+            Ok(rebuilt(&sc, builder))
+        }, builder)
     }
     Op::SetLayout { graph, index } => edit_scope(src, &[graph.clone().into()], &mut |sx, builder| {
         let sc = editor_scope(sx, builder)?;

@@ -516,7 +516,7 @@ pub fn panel_renames(
     };
     // 1. Same path (default-shell materialization or in-place binding rename).
     match_pass(&|op, np| op == np);
-    // 2. Split: original leaf at `op` moved to `op + [0]` (`leaf` -> `leaf_a`).
+    // 2. Split: an inline leaf at `op` moved to `op + [0]` and got a binding.
     match_pass(&|op, np| np.len() == op.len() + 1 && np[..op.len()] == *op && np[op.len()] == 0);
     // 3. Unsplit / undo of split / sibling closed: `op` was a direct child of `np`.
     match_pass(&|op, np| op.len() == np.len() + 1 && op[..np.len()] == *np);
@@ -545,14 +545,25 @@ pub fn panel_renames(
 pub fn remap_panels(value: &mut EditorModel, result: &mut FrameResult, before: &Document, before_tree: &panels::Panels) {
     let after_tree = shell_tree(value, &value.workspace).into_owned();
     let renames = panel_renames(before, before_tree, &value.doc, &after_tree);
+    let focus = result.focus_path.as_ref().and_then(|path| match panels::at_ref(path, before_tree) {
+        Some(panels::Panels::Leaf(panel)) => Some((panel, panel_key_ref(before, path))),
+        _ => None,
+    });
     // a pane key that appears (a split reusing the name a closed half freed) starts with fresh state
     let old_keys: Vec<panel_map::Key> = panels::leaves(before_tree).into_iter().map(|(p, _)| panel_key(before, &p)).collect();
-    for (p, _) in panels::leaves(&after_tree) {
+    let mut focused = None;
+    for (p, panel) in panels::leaves(&after_tree) {
         let key = panel_key(&value.doc, &p);
+        if focus.as_ref().is_some_and(|(old, old_key)| same_panel_kind(old, &panel) && key_is(&key, old_key)) {
+            focused = Some(p);
+        }
         if !old_keys.contains(&key) && !renames.iter().any(|(_, new, _, _)| *new == key) {
             value.locals.retain(|(k, _)| *k != key);
             result.locals.retain(|(k, _)| *k != key);
         }
+    }
+    if let Some(path) = focused {
+        result.focus_path = Some(path);
     }
     if renames.is_empty() {
         return;

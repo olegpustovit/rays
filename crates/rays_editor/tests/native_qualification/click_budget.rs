@@ -4,7 +4,7 @@
 //! checked against the plan's targets only with `RAYS_CLICK_TIMES=1` (they move 2x on a loaded Mac).
 //! Allocation sites: `MallocStackLogging=1` on the test binary, then `malloc_history <pid> -callTree`.
 use input::{Event, Key, MouseButton};
-use rays_editor::{editor, workspace};
+use rays_editor::{editor, editor_model::NoticeKind, workspace};
 use std::time::Instant;
 
 const W: i64 = 1280;
@@ -64,15 +64,9 @@ const CEILINGS: &[(&str, &str, u64, u64)] = &[
     ("empty", "idle end", 344, 299),
     ("isogrid", "idle", 536, 458),
     ("isogrid", "hover", 469, 469),
-    ("isogrid", "split right", 7061, 462),
     ("isogrid", "retype graph", 509, 462),
-    ("isogrid", "retype inspector", 6438, 462),
     ("isogrid", "retype lisp", 510, 475),
     ("isogrid", "retype list", 520, 475),
-    ("isogrid", "retype spreadsheet", 6464, 475),
-    ("isogrid", "retype outline", 6464, 475),
-    ("isogrid", "close panel", 3465, 475),
-    ("isogrid", "split below", 7071, 475),
     ("isogrid", "toggle inspector", 660, 462),
     ("isogrid", "toggle graph", 1919, 465),
     ("isogrid", "toggle graph back", 931, 462),
@@ -86,6 +80,15 @@ const CEILINGS: &[(&str, &str, u64, u64)] = &[
     ("isogrid", "palette", 1571, 565),
     ("isogrid", "escape", 814, 557),
     ("isogrid", "idle end", 608, 557),
+    ("isogrid focused network", "retype lisp", 507, 471),
+    ("isogrid focused network", "retype graph", 517, 459),
+    ("isogrid focused network", "split right", 8035, 478),
+    ("isogrid focused network", "split below", 8049, 480),
+    ("isogrid focused network", "retype inspector", 9342, 449),
+    ("isogrid focused network", "retype spreadsheet", 9357, 451),
+    ("isogrid focused network", "retype outline", 9356, 455),
+    ("isogrid focused network", "close panel", 9135, 445),
+    ("isogrid focused network", "undo", 2887, 471),
     ("long", "idle fresh", 637, 577),
     ("long", "split", 10802, 599),
     ("long", "close", 2532, 117),
@@ -127,8 +130,12 @@ impl P {
         assert!(e.context_error.is_none(), "{:?}", e.context_error);
         let sc = editor::scene(&e, &f);
         rays::canvas::render(None, &self.canvas, &sc).unwrap();
-        self.e = Some(editor::after_present(e, &f));
-        (s.elapsed().as_secs_f64() * 1e3, mem_sys::alloc_count() - n0)
+        let e = editor::after_present(e, &f);
+        let measured = (s.elapsed().as_secs_f64() * 1e3, mem_sys::alloc_count() - n0);
+        assert!(e.core.edit_error.is_none(), "frame {t}: {:?}", e.core.edit_error);
+        assert!(!matches!(e.core.notice, Some((NoticeKind::Refusal, _))), "frame {t}: {:?}", e.core.notice);
+        self.e = Some(e);
+        measured
     }
     pub(crate) fn record(&mut self, name: &str, frames: Vec<(f64, u64)>) {
         let cells: Vec<String> = frames.iter().map(|(ms, n)| format!("{ms:7.2}ms {n:7}a")).collect();
@@ -138,9 +145,12 @@ impl P {
     }
     /// every press but the last on its own frame; the last is the measured click
     fn act(&mut self, name: &str, keys: &[Key], presses: &[Key]) {
-        for k in &presses[..presses.len() - 1] { self.step(keys, vec![Event::KeyPressed(*k)], (600., 400.)); }
-        let mut frames = vec![self.step(keys, vec![Event::KeyPressed(*presses.last().unwrap())], (600., 400.))];
-        for _ in 0..3 { frames.push(self.step(&[], vec![], (600., 400.))); }
+        self.act_at(name, keys, presses, (600., 400.));
+    }
+    fn act_at(&mut self, name: &str, keys: &[Key], presses: &[Key], at: (f64, f64)) {
+        for k in &presses[..presses.len() - 1] { self.step(keys, vec![Event::KeyPressed(*k)], at); }
+        let mut frames = vec![self.step(keys, vec![Event::KeyPressed(*presses.last().unwrap())], at)];
+        for _ in 0..3 { frames.push(self.step(&[], vec![], at)); }
         self.record(name, frames);
     }
     fn hover(&mut self, name: &str) {
@@ -150,6 +160,7 @@ impl P {
 }
 
 pub(crate) fn session(label: &str, source: &str, actions: &dyn Fn(&mut P)) -> Vec<(String, f64, u64, u64)> {
+    assert!(mem_sys::COUNTING, "allocation budgets require counting");
     assert!(crate::common::gpu(), "native GPU required");
     let doc = workspace::load(None, Vec::new(), None, source).unwrap_or_else(|d| panic!("{d:?}"));
     let canvas = rays::canvas::create(W, H).unwrap();
@@ -177,20 +188,22 @@ pub(crate) fn session(label: &str, source: &str, actions: &dyn Fn(&mut P)) -> Ve
     p.rows
 }
 
-fn tour(p: &mut P) {
+fn tour(p: &mut P, edit_layout: bool) {
     let ch = Key::KeyChar;
     let l = |c: char| [ch('/'), ch('l'), ch(c)];
     p.act("idle", &[], &[Key::Shift]);
     p.hover("hover");
-    p.act("split right", &[], &[ch('/'), ch('o'), ch('v')]);
+    if edit_layout { p.act("split right", &[], &[ch('/'), ch('o'), ch('v')]); }
     p.act("retype graph", &[], &l('g'));
-    p.act("retype inspector", &[], &l('i'));
+    if edit_layout { p.act("retype inspector", &[], &l('i')); }
     p.act("retype lisp", &[], &l('t'));
     p.act("retype list", &[], &l('l'));
-    p.act("retype spreadsheet", &[], &l('s'));
-    p.act("retype outline", &[], &l('u'));
-    p.act("close panel", &[], &[ch('/'), ch('o'), ch('x')]);
-    p.act("split below", &[], &[ch('/'), ch('o'), ch('h')]);
+    if edit_layout {
+        p.act("retype spreadsheet", &[], &l('s'));
+        p.act("retype outline", &[], &l('u'));
+        p.act("close panel", &[], &[ch('/'), ch('o'), ch('x')]);
+        p.act("split below", &[], &[ch('/'), ch('o'), ch('h')]);
+    }
     p.act("toggle inspector", &[], &[ch('/'), ch('i')]);
     p.act("toggle graph", &[], &[ch('/'), ch('g')]);
     p.act("toggle graph back", &[], &[ch('/'), ch('g')]);
@@ -239,9 +252,59 @@ fn check(label: &str, rows: &[(String, f64, u64, u64)]) {
     assert!(over.is_empty(), "{label}: {}", over.join("; "));
 }
 
-fn basic() { check("basic", &session("basic", &sketch("basic.rays"), &tour)) }
-fn empty() { check("empty", &session("empty", include_str!("../../../rays_bin/src/empty.rays"), &tour)) }
-fn isogrid() { check("isogrid", &session("isogrid", &sketch("isogrid.rays"), &tour)) }
+fn basic() { check("basic", &session("basic", &sketch("basic.rays"), &|p| tour(p, true))) }
+fn empty() { check("empty", &session("empty", include_str!("../../../rays_bin/src/empty.rays"), &|p| tour(p, true))) }
+// IsoGrid's document edits have their own tour. The old rows timed refused edits.
+fn isogrid() { check("isogrid", &session("isogrid", &sketch("isogrid.rays"), &|p| tour(p, false))) }
+fn isogrid_focused_network() {
+    use editor_document::{document::Origin, workspace_doc};
+    use rays_editor::{editor_model::Projection, editor_panes::stored_projection};
+    let label = "isogrid focused network";
+    let rows = session(label, &sketch("isogrid.rays"), &|p| {
+        let source = |p: &P| workspace_doc::print(&editor::workspace(p.e.as_ref().unwrap())).unwrap().0;
+        let authored = source(p);
+        let at = (1080., 200.);
+        let ch = Key::KeyChar;
+        let assert_network_focus = |p: &P, name: &str| {
+            let core = &p.e.as_ref().unwrap().core;
+            let shell = core.doc.shell.as_ref().unwrap();
+            assert!(shell.origins.iter().any(|(path, origin)| {
+                Some(path) == core.focus_path.as_ref() && matches!(origin, Origin::Bound(n) if n == "network")
+            }), "{name}: focus must be on network");
+        };
+        for (name, key, projection) in [
+            ("retype lisp", 't', Projection::TextView),
+            ("retype graph", 'g', Projection::GraphView),
+        ] {
+            assert_network_focus(p, name);
+            p.act_at(name, &[], &[ch('/'), ch('l'), ch(key)], at);
+            let core = &p.e.as_ref().unwrap().core;
+            assert_eq!(stored_projection(&(&**core).into()), projection, "{name}");
+        }
+        assert_eq!(source(p), authored, "switching projection changed the document");
+        for (name, a, b, undo, follows) in [
+            ("split right", 'o', 'v', "Split panel", 1),
+            ("split below", 'o', 'h', "Split panel", 1),
+            ("retype inspector", 'l', 'i', "Retype panel", 0),
+            ("retype spreadsheet", 'l', 's', "Retype panel", 0),
+            ("retype outline", 'l', 'u', "Retype panel", 0),
+            ("close panel", 'o', 'x', "Close panel", 0),
+        ] {
+            p.step(&[], vec![Event::PointerMoved(at)], at);
+            assert_network_focus(p, name);
+            p.act_at(name, &[], &[ch('/'), ch(a), ch(b)], at);
+            let e = p.e.as_ref().unwrap();
+            assert_eq!(editor::undo_label(e).as_deref(), Some(undo), "{name}");
+            assert_eq!(e.core.doc.shell.as_ref().unwrap().follows.len(), follows, "{name}");
+            if follows != 0 {
+                assert_network_focus(p, name);
+            }
+            p.act_at("undo", &[Key::Meta], &[ch('z')], at);
+            assert_eq!(source(p), authored, "{name}: undo must restore the source");
+        }
+    });
+    check(label, &rows);
+}
 fn long_session() {
     let rounds = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 20 } else { 12 };
     let rows = session("long", &sketch("basic.rays"), &|p| long(p, rounds));
@@ -252,5 +315,5 @@ fn long_session() {
 }
 
 pub fn cases() -> Vec<(&'static str, fn())> {
-    vec![("click_budget_basic", basic), ("click_budget_empty", empty), ("click_budget_isogrid", isogrid), ("click_budget_long", long_session)]
+    vec![("click_budget_basic", basic), ("click_budget_empty", empty), ("click_budget_isogrid", isogrid), ("click_budget_isogrid_focused_network", isogrid_focused_network), ("click_budget_long", long_session)]
 }
