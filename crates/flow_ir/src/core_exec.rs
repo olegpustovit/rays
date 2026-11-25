@@ -339,6 +339,8 @@ pub struct Prepared {
     arena_kills: bool,
     /// a drawing with no resident loop: its integer arrays may stay on the device (`Resident::exact`)
     ints: bool,
+    /// Mark-entry Vec capacity reused across `draw` (warm animated frames).
+    marks_pool: Mutex<Option<Vec<scene_command::marks::Entry>>>,
 }
 
 /// A float-only scalar program (arithmetic, sin, cos over the frame clock and literals) runs on an
@@ -2648,7 +2650,14 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
         arena_pool: Mutex::new(None),
         arena_kills: clobber,
         ints,
+        marks_pool: Mutex::new(None),
     }
+}
+
+/// Return a finished marks table's capacity to the prepared program for the next `draw`.
+pub fn recycle_marks(prepared: &Prepared, mut marks: scene_command::marks::Table) {
+    marks.clear();
+    *prepared.marks_pool.lock().unwrap() = Some(marks);
 }
 
 impl Prepared {
@@ -2831,13 +2840,20 @@ pub fn draw(prepared: &Prepared, live: &Frame, size: (i64, i64), buffers: &Buffe
     }
     let program = &prepared.program;
     let image = o.image.clone();
-    let sink = core_marks::sink(image, size, buffers);
+    let n = program.locals.len();
+    // Draw always pools locals: animated canvases re-enter every frame with a small register file.
+    let values = match prepared.pool.lock().unwrap().take() {
+        Some(values) if values.len() == n => values,
+        _ => vec![Value::NoGeo; n],
+    };
+    let entries = prepared.marks_pool.lock().unwrap().take().unwrap_or_default();
+    let sink = core_marks::sink_from(image, size, buffers, entries);
     let arena = arena_for(prepared, o.device.is_some() || o.resident.is_some());
     // a drawing with no resident loop draws in an exact scope when the host offers one
     let exact = o.resident.as_ref().filter(|_| prepared.ints).and_then(|r| r.exact());
     let resident = exact.clone().or_else(|| o.resident.clone());
     let options = Options { root: o.root, force: o.force.clone(), resolve: o.resolve.clone(), resident: resident.clone(), ..Options::default() };
-    let mut st = new_state(prepared, vec![Value::NoGeo; program.locals.len()], arena, live, &options);
+    let mut st = new_state(prepared, values, arena, live, &options);
     st.exact = exact.is_some();
     st.host_source = None;
     st.marks = Some(sink);
@@ -2848,6 +2864,7 @@ pub fn draw(prepared: &Prepared, live: &Frame, size: (i64, i64), buffers: &Buffe
     if let Some(r) = &resident { r.close(); }
     if let Some(r) = &o.resident { r.close(); }
     ran?;
+    *prepared.pool.lock().unwrap() = Some(std::mem::take(&mut st.values));
     if let Some(mut a) = st.arena.take() {
         arena_finish(&mut a);
         *prepared.arena_pool.lock().unwrap() = Some(a);

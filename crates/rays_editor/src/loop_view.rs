@@ -59,6 +59,11 @@ pub struct CanvasPicture {
     pub prepared: Option<Rc<drawing::Prepared>>,
     /// the node shown instead of the pane's own picture
     pub preview: Option<(Ty, i64)>,
+    /// Live inputs the picture was drawn from: `(frame, tick, dt.to_bits(), state_epoch)`.
+    /// When these match, a warm frame reuses the scene without re-eval (frozen clock / static).
+    pub live_stamp: Option<(i64, i64, u64, i64)>,
+    /// True when the drawing reads time-varying frame inputs (index/dt/pointer), not only size.
+    pub cares_time: bool,
 }
 
 /// A World bake for this frame: the preview size while a gesture or the day cycle is live, the

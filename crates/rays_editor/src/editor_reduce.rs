@@ -1486,7 +1486,31 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let notice_at = value2.notice_at;
     let core = value2;
     core.timeline = timeline;
-    core.cook = std::rc::Rc::new(cooked.cook);
+    // Warm idle: only quiet/schedule meta moved — mutate the existing Rc instead of boxing a new Cook.
+    let reuse_cook = !cooked.prepared_changed
+        && cooked.cook.results == previous_cook.results
+        && cooked.cook.error == previous_cook.error
+        && cooked.cook.seconds == previous_cook.seconds
+        && std::rc::Rc::ptr_eq(&cooked.cook.pieces, &previous_cook.pieces)
+        && std::rc::Rc::ptr_eq(&cooked.cook.summaries, &previous_cook.summaries)
+        && std::sync::Arc::ptr_eq(&cooked.cook.sources, &previous_cook.sources);
+    drop(previous_cook);
+    if reuse_cook {
+        if let Some(c) = std::rc::Rc::get_mut(&mut core.cook) {
+            c.quiet = cooked.cook.quiet;
+            c.schedule = cooked.cook.schedule;
+            c.force = cooked.cook.force;
+            c.probe_job = cooked.cook.probe_job;
+            c.probes_owed = cooked.cook.probes_owed;
+            c.probing = cooked.cook.probing;
+            c.framing = cooked.cook.framing;
+            c.settings = cooked.cook.settings;
+        } else {
+            core.cook = std::rc::Rc::new(cooked.cook);
+        }
+    } else {
+        core.cook = std::rc::Rc::new(cooked.cook);
+    }
     core.lit = lit_cache;
     core.edit_error = cooked.edit_error.clone();
     core.status_fps = status_fps;

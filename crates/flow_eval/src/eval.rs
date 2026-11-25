@@ -3053,6 +3053,8 @@ pub fn reset_state(state:&State,host_state:bool){let mut s=state.inner.lock().un
 fn save_state(state:&State)->StateData{state.inner.lock().unwrap().clone()}
 pub fn fork_state(state:&State)->State{State{inner:Arc::new(Mutex::new(save_state(state)))}}
 pub fn state_stamp(state:&State)->StateStamp{let s=state.inner.lock().unwrap();StateStamp(s.epoch,s.host.as_ref().map(|x|x.epoch))}
+/// Process-local epoch of the state's plane (bumps on source reset); for warm canvas stamps.
+pub fn state_epoch(state: &State) -> i64 { state.inner.lock().unwrap().epoch }
 fn restore_state(state:&State,saved:StateData){let replaced=std::mem::replace(&mut *state.inner.lock().unwrap(),saved);drop(replaced)}
 pub fn state_values(state:&State)->Vec<Value>{let state=state.inner.lock().unwrap();let mut values=state.before.values().chain(state.next.values()).cloned().collect::<Vec<_>>();if let Some(host)=&state.host{values.extend(host.before.values().chain(host.next.values()).cloned());}values}
 pub fn transaction(state:&State,f:&mut dyn FnMut()->Result<(),Diagnostic>)->Result<(),Diagnostic>{let saved=save_state(state);let result=f();if result.is_err(){restore_state(state,saved)}result}

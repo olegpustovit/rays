@@ -71,6 +71,23 @@ fn prepared_plan_arc_clone_allocates_nothing() {
     assert!(std::sync::Arc::ptr_eq(prepared.plan(), &plan));
 }
 
+/// Z12: warm draw reuses locals + marks capacity (first frame may allocate; second must not grow).
+#[test]
+fn warm_draw_reuses_locals_and_marks_capacity() {
+    let (lowered, value) = draw(r##"(draw/circle [10 20 0] 4)"##);
+    let prepared = ok(drawing::prepare(&drawing::PrepareOptions::default(), &lowered.evaluated.plan, &value));
+    let live = input::at_time(0.);
+    let a = ok(drawing::render_prepared(&prepared, &live, (200, 100), &drawing::RenderOptions::default()));
+    mem_sys::local_reset();
+    let begin = mem_sys::local_alloc_count();
+    let b = ok(drawing::render_prepared(&prepared, &live, (200, 100), &drawing::RenderOptions::default()));
+    let warm = mem_sys::local_alloc_count() - begin;
+    assert!(scene::same(&a, &b));
+    // Scene Node Vec still builds; locals/marks pools must not re-grow. Bound loosely so a
+    // future zero is fine; a regression that rebuilds the register file trips this.
+    assert!(warm < 40, "warm redraw allocated {warm}, expected pooled locals/marks");
+}
+
 fn rect_set(count: i64) -> Entry {
     Entry::MarkSet {
         count,
