@@ -66,8 +66,9 @@ pub fn geometry_objects(value: &EditorModel) -> Vec<(i64, &net::Network, i64)> {
     let ws = &value.doc.workspace.ws;
     let image_graph = |node: &kg::Node| ws.checked.graphs.iter().any(|g| g.name == node.label && context::result(g.context) == ty::image());
     let scene_graph = scene(value);
-    let mut found = Vec::new();
-    for id in objects::ids("geometry", &scene_graph) {
+    let ids: Vec<i64> = objects::ids("geometry", &scene_graph).collect();
+    let mut found = Vec::with_capacity(ids.len());
+    for id in ids {
         if let (Some(node), Some(network)) = (kg::find(&scene_graph, id), value.doc.networks.get(&id)) {
             if objects::visible(&node) && !image_graph(&node) {
                 match value.viewed.get(&id) {

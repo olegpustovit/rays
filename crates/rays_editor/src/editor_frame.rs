@@ -839,7 +839,7 @@ pub fn gated(value: &mut EditorModel, frame_: &frame::Frame, text_focus: bool, h
         previous: std::mem::replace(&mut value.live_frame, input::at_time(frame_.input.t)),
         blocked: std::mem::take(&mut value.sketch_blocked),
     };
-    let (mut live_frame, sketch_blocked) = input::gate::gate(&gate, &flow_native::live_frame::of_frame(frame_));
+    let (mut live_frame, sketch_blocked) = input::gate::gate(&gate, flow_native::live_frame::of_frame(frame_));
     if !host_events.is_empty() {
         let mut events = host_events;
         events.append(&mut live_frame.events);

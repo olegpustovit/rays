@@ -128,9 +128,12 @@ pub fn canvas_pictures(
     core: &m::EditorModel,
     control: &V::Control,
 ) -> (Vec<(String, CanvasPicture)>, Option<String>) {
-    let mut pictures: Vec<(String, CanvasPicture)> = Vec::with_capacity(previous_canvases.len().max(1));
     let mut error = context_error;
     let geometry = editor_shell::geometry(&core.into(), &core.workspace, raw_frame);
+    if !geometry.leaves.iter().any(|leaf| matches!(&leaf.panel, Panel::Canvas(_))) {
+        return (Vec::new(), error);
+    }
+    let mut pictures: Vec<(String, CanvasPicture)> = Vec::with_capacity(previous_canvases.len());
     let images = host_images(value);
     let gpu_t = host_gpu(value);
     for leaf in &geometry.leaves {
