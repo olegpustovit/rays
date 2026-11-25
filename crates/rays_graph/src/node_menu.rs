@@ -35,7 +35,8 @@ struct Item {
 
 #[derive(Clone)]
 pub struct Menu {
-    items: Vec<Item>,
+    /// shared: the frame and the popup hold copies of the menu
+    items: Rc<Vec<Item>>,
     x: i64,
     y: i64,
     query: String,
@@ -93,7 +94,7 @@ pub fn create(after: Option<&str>, x: i64, y: i64, entries: Vec<Entry>) -> Menu 
             entry,
         });
     }
-    Menu { items, x, y, query: String::new(), after: after.map(|s| s.to_owned()) }
+    Menu { items: Rc::new(items), x, y, query: String::new(), after: after.map(|s| s.to_owned()) }
 }
 
 fn search_rank(query: &str, item: &Item) -> i64 {
@@ -111,7 +112,7 @@ fn search_rank(query: &str, item: &Item) -> i64 {
 }
 
 /// The rows: every match of the query, or, before anything is typed, every kind that can be placed here.
-fn rows(menu: &Menu, query: &str) -> Vec<Entry> {
+fn rows<'m>(menu: &'m Menu, query: &str) -> Vec<&'m Entry> {
     if !query.is_empty() {
         let q = query.to_ascii_lowercase();
         // the kinds that cannot be placed here follow the ones that can
@@ -127,18 +128,18 @@ fn rows(menu: &Menu, query: &str) -> Vec<Entry> {
                 .then_with(|| search_rank(&q, l).cmp(&search_rank(&q, r)))
                 .then_with(|| l.entry.label.as_bytes().cmp(r.entry.label.as_bytes()))
         });
-        found.into_iter().map(|i| i.entry.clone()).collect()
+        found.into_iter().map(|i| &i.entry).collect()
     } else {
         let fits = |e: &Entry| if menu.after.is_some() && e.arity == 0 { 1 } else { 0 };
         // the host lists the graph's own kinds first: a graph's kinds keep that order, by name within
-        let mut contexts: Vec<String> = Vec::new();
-        for i in &menu.items {
-            if !contexts.contains(&i.entry.context) {
-                contexts.push(i.entry.context.clone());
+        let mut contexts: Vec<&str> = Vec::new();
+        for i in menu.items.iter() {
+            if !contexts.contains(&i.entry.context.as_str()) {
+                contexts.push(&i.entry.context);
             }
         }
         let context = |e: &Entry| contexts.iter().position(|c| *c == e.context).unwrap_or(contexts.len());
-        let mut v: Vec<Entry> = menu.items.iter().filter(|i| i.entry.off.is_none()).map(|i| i.entry.clone()).collect();
+        let mut v: Vec<&Entry> = menu.items.iter().filter(|i| i.entry.off.is_none()).map(|i| &i.entry).collect();
         v.sort_by(|a, b| fits(a).cmp(&fits(b)).then_with(|| context(a).cmp(&context(b))).then_with(|| a.label.as_bytes().cmp(b.label.as_bytes())));
         v
     }
@@ -241,27 +242,27 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
                 }
             });
             // the rows, kept so that a row's square and unavailability are known
-            let latest: Rc<RefCell<Vec<Entry>>> = Rc::new(RefCell::new(Vec::new()));
+            let latest: Rc<RefCell<Vec<(Color, bool)>>> = Rc::new(RefCell::new(Vec::new()));
             let (l1, l2, l3) = (latest.clone(), latest.clone(), latest);
             let mut o = PickerOpts::default();
             o.limit = MENU_LIMIT;
             o.mark = Some(Rc::new(move |index: i64| {
                 let l = l1.borrow();
-                if (index as usize) < l.len() { Some(port_color(&theme, &l[index as usize].output)) } else { None }
+                l.get(index as usize).map(|r| r.0)
             }));
             o.off = Some(Rc::new(move |index: i64| {
                 let l = l2.borrow();
-                (index as usize) < l.len() && l[index as usize].off.is_some()
+                l.get(index as usize).is_some_and(|r| r.1)
             }));
             let mq = m.clone();
             let (query, pick) = ui.picker(&o, "type to search", &m.query, &move |query: &str| {
-                *l3.borrow_mut() = rows(&mq, query);
+                *l3.borrow_mut() = rows(&mq, query).iter().map(|e| (port_color(&theme, &e.output), e.off.is_some())).collect();
                 picker_rows(&mq, query)
             });
-            // a cross at the right of the search row clears it
+            // a cross at the right of the search row clears it (placed in the popup's own points)
             let clear = ui.box_(
                 "pxui-graph-menu-clear",
-                BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(20.0)).h(Size::Px(20.0)).at((((x + width - 25) as f64) as f32, ((y + 1 + row + 4 + 4) as f64) as f32)),
+                BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(20.0)).h(Size::Px(20.0)).at(((width - 25) as f32, (1 + row + 4 + 4) as f32)),
             );
             if !query.is_empty() {
                 let muted = theme::muted(&ui.tokens());
@@ -308,5 +309,5 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
 
 /// The entry keys the query lists, in order.
 pub fn keys(menu: &Menu, query: &str) -> Vec<String> {
-    rows(menu, query).into_iter().map(|e| e.key).collect()
+    rows(menu, query).into_iter().map(|e| e.key.clone()).collect()
 }
