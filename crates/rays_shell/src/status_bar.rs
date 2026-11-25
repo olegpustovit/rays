@@ -3,7 +3,6 @@ use crate::kit;
 use std::borrow::Cow;
 use std::hash::Hash;
 use editor_core::guide_context;
-use pxui::theme;
 use pxui::ui::*;
 
 /// What the dot after the file says: checked and cooked, cooking, refused.
@@ -73,18 +72,18 @@ fn lead_plan<'a>(width: &mut dyn FnMut(&str) -> f32, x: f32, file: &str, limit: 
 /// What every strip starts with: the file and a dot for the state (checked, cooking, refused); the
 /// status line after them is `line`'s. Where the next thing goes.
 fn lead(paint: &mut Paint, (x, y, h): (f32, f32, f32), file: &str, state: State, limit: f32, text: &str) -> f32 {
-    let theme = paint.theme;
-    let ty = paint.text_top(None, y, h);
-    let (file_x, dot_x, _, _, after) = lead_plan(&mut |s| paint.text_width(None, s), x, file, limit, text);
+    let theme = paint.tokens();
+    let ty = (y) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
+    let (file_x, dot_x, _, _, after) = lead_plan(&mut |s| paint.text_service().width(s, pxui::Label::BODY, None).unwrap_or(0.0), x, file, limit, text);
     if !file.is_empty() {
-        paint.text_c((file_x, ty), theme.foreground, file);
+        { let text = file; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(file_x, ty), pxui::Label::BODY, 0.0, text, &[span]); };
     }
     let fill = match state {
         State::Ok => crate::kit::port_ink(&theme, crate::kit::Port::Int),
         State::Busy => theme.accent,
-        State::Error => theme::invalid(),
+        State::Error => pxui::Rgba::hex(0xc2255c),
     };
-    paint.circle((dot_x + 3.0, y + (h / 2.0)), 3.0, Some(fill), None);
+    paint.circle((dot_x + 3.0, y + (h / 2.0)), 3.0, Some(pxui::Fill::new(fill)), None);
     after
 }
 
@@ -94,14 +93,14 @@ fn lead(paint: &mut Paint, (x, y, h): (f32, f32, f32), file: &str, state: State,
 /// Returns where the lead ends, which the strip's revision takes in place of the text.
 fn line(ui: &mut Ui, label: &str, bounds: (i64, i64, i64, i64), file: &str, state: State, limit: f32, text: &str) -> f32 {
     let (x, y, w, h) = bounds;
-    let (_, _, text_x, shown, after) = lead_plan(&mut |s| ui.text_width(None, s), x as f32, file, limit, text);
+    let (_, _, text_x, shown, after) = lead_plan(&mut |s| ui.text_service().width(s, pxui::Label::BODY, None).unwrap_or(0.0), x as f32, file, limit, text);
     let at = (text_x.floor() as i64).clamp(x, x + w);
-    let boxed = ui.box_(label, BoxOpts::default().flags(CLIP).at((at as f32, y as f32)).w(Size::Px((x + w - at) as f32)).h(Size::Px(h as f32)));
+    let boxed = ui.node(pxui::hash_of(label), Node::DEFAULT.flags(Flags::CLIP).at(at as f32, y as f32).w_px((x + w - at) as f32).h_px(h as f32));
     let shown = shown.to_string();
-    ui.draw(&boxed, move |paint, b| {
-        let theme = paint.theme;
-        let ty = paint.text_top(None, b.y + 1.0, b.h - 1.0);
-        paint.text_c((text_x, ty), if state == State::Error { theme::invalid() } else { theme::ink_2(&theme) }, &shown);
+    ui.canvas(&boxed, move |paint, b| {
+        let theme = paint.tokens();
+        let ty = (b.y + 1.0) + (((b.h - 1.0) - (paint.tokens().font_size) as f32) / 2.0).floor();
+        { let text = &shown; let span = pxui::TextSpan::new(0, text.len() as u32).color(if state == State::Error { pxui::Rgba::hex(0xc2255c) } else { theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32) }); let _ = paint.text_spans(pxui::Point::new(text_x, ty), pxui::Label::BODY, 0.0, text, &[span]); };
     });
     after
 }
@@ -125,35 +124,37 @@ fn trail_start(ui: &mut Ui, x: f32, w: f32, notes: &[String], readout: &str, lay
     for note in notes.iter().rev() {
         right = right - kit::cap_width(ui, note) - 8.0;
     }
-    if readout.is_empty() { right } else { right - ui.text_width(None, readout) - 8.0 }
+    if readout.is_empty() { right } else { right - ui.text_service().width(readout, pxui::Label::BODY, None).unwrap_or(0.0) - 8.0 }
 }
 
 /// the strip's end: the layout in use, then the frame rate in ink, 8 apart; where they start
 fn trail(paint: &mut Paint, (x, y, w, h): (f32, f32, f32, f32), notes: &[String], readout: &str, layout: &str, fps: Option<&str>) -> f32 {
-    let theme = paint.theme;
+    let theme = paint.tokens();
     let cy = kit::cap_y_paint(paint, y, h);
     let mut right = x + w - 12.0;
     if let Some(fps) = fps {
-        right -= paint.cap_width(fps);
-        paint.cap((right, cy), Some(theme.foreground), fps);
+        let style = pxui::Label::BODY.size((theme.font_size - 2.0).max(8.0)).caps(true).tracking(0.08);
+        right -= paint.text_service().width(fps, style, None).unwrap_or(0.0);
+        let span = pxui::TextSpan::new(0, fps.len() as u32).color(theme.foreground);
+        let _ = paint.text_spans(pxui::Point::new(right, cy), style, 0.0, fps, &[span]);
         right -= 8.0;
     }
     if !layout.is_empty() {
-        right -= paint.cap_width(layout);
-        paint.cap((right, cy), None, layout);
+        right -= paint.text_service().width(layout, pxui::Label::BODY.size((theme.font_size - 2.0).max(8.0)).caps(true).tracking(0.08), None).unwrap_or(0.0);
+        { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_chars(pxui::Point::new(right, cy), style, layout); };
         right -= 8.0;
     }
     // notes ("3 floating", "3 graphs") stand left of the layout
     for note in notes.iter().rev() {
-        right -= paint.cap_width(note);
-        paint.cap((right, cy), None, note);
+        right -= paint.text_service().width(note, pxui::Label::BODY.size((theme.font_size - 2.0).max(8.0)).caps(true).tracking(0.08), None).unwrap_or(0.0);
+        { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_chars(pxui::Point::new(right, cy), style, note); };
         right -= 8.0;
     }
     // a graph alone in the strip: its counts in ink-2 before the zoom
     if !readout.is_empty() {
-        right -= paint.text_width(None, readout);
-        let ty = paint.text_top(None, y, h);
-        paint.text_c((right, ty), theme::ink_2(&theme), readout);
+        right -= paint.text_service().width(readout, pxui::Label::BODY, None).unwrap_or(0.0);
+        let ty = (y) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
+        { let text = readout; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)); let _ = paint.text_spans(pxui::Point::new(right, ty), pxui::Label::BODY, 0.0, text, &[span]); };
         right -= 8.0;
     }
     right
@@ -161,24 +162,24 @@ fn trail(paint: &mut Paint, (x, y, w, h): (f32, f32, f32, f32), notes: &[String]
 
 /// the hairline above the bar; the bar is the 24 points under it
 fn ground(paint: &mut Paint, Rect { x, y, w, h }: Rect) -> Rect {
-    let theme = paint.theme;
-    paint.fill(x, y, w, h, theme.panel);
-    paint.fill(x, y, w, 1.0, theme::edge(&theme));
+    let theme = paint.tokens();
+    paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(theme.panel));
+    paint.fill(pxui::Rect::new(x, y, w, 1.0), pxui::Fill::new((theme).foreground.with_alpha(38)));
     Rect::new(x, y + 1.0, w, h - 1.0)
 }
 
 /// the rule, then the focused pane's kind (ink) and what is selected (ink-2), both labels; where
 /// the next thing goes
 fn focus_labels(paint: &mut Paint, (y, h): (f32, f32), rule: bool, accent: bool, after: f32, kind: Option<&str>, selection: Option<&str>) -> f32 {
-    let theme = paint.theme;
+    let theme = paint.tokens();
     let mut tx = after + 17.0;
     if rule {
-        paint.fill(after + 4.0, y + ((h - 12.0) / 2.0), 1.0, 12.0, theme::border(&theme));
+        paint.fill(pxui::Rect::new(after + 4.0, y + ((h - 12.0) / 2.0), 1.0, 12.0), pxui::Fill::new((theme).foreground.with_alpha(77)));
     }
-    for (text, color) in [kind.map(|k| (k, if accent { theme.accent } else { theme.foreground })), selection.map(|s| (s, theme::ink_2(&theme)))].into_iter().flatten() {
+    for (text, color) in [kind.map(|k| (k, if accent { theme.accent } else { theme.foreground })), selection.map(|s| (s, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)))].into_iter().flatten() {
         let cy = kit::cap_y_paint(paint, y, h);
-        paint.cap((tx, cy), Some(color), text);
-        tx = tx + paint.cap_width(text) + 8.0;
+        { let text = text; let span = pxui::TextSpan::new(0, text.len() as u32).color(color); let _ = paint.text_spans(pxui::Point::new(tx, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
+        tx = tx + { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(text, style, None) }.unwrap_or(0.0) + 8.0;
     }
     tx
 }
@@ -193,16 +194,15 @@ fn focus_end(ui: &mut Ui, after: f32, kind: Option<&str>, selection: Option<&str
 }
 
 /// The strip's paint, in a cached view of its own at `bounds`: `paint` builds the one painted box
-/// (`CLIP`, filling the view) only when `revision` (the hash of what it shows, with the bounds) changes.
+/// (`pxui::Flags::CLIP`, filling the view) only when `revision` (the hash of what it shows, with the bounds) changes.
 /// The strip's hit boxes stay at the root over it, so hovering or dragging them rebuilds nothing.
-fn strip(ui: &mut Ui, label: &str, bounds: (i64, i64, i64, i64), revision: u64, paint: &mut dyn FnMut(&mut Ui, &UiBox)) {
+fn strip(ui: &mut Ui, label: &str, bounds: (i64, i64, i64, i64), revision: u64, paint: &mut dyn FnMut(&mut Ui, &pxui::Handle)) {
     let (x, y, w, h) = bounds;
-    let view = ui.view(label, revision, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| {
-        let flags = if matches!(label, "workspace-status" | "workspace-guide-leader") { CLICKABLE | CLIP } else { CLIP };
-        let boxed = ui.box_(label, BoxOpts::default().flags(flags).w(Size::Grow).h(Size::Grow));
+    kit::sized_view(ui, label, revision, (x as f32, y as f32), Size::Px(w as f32), Size::Px(h as f32), &mut |ui| {
+        let flags = if matches!(label, "workspace-status" | "workspace-guide-leader") { Flags::CLICKABLE | Flags::CLIP } else { Flags::CLIP };
+        let boxed = ui.node(pxui::hash_of(label), Node::DEFAULT.flags(flags).w(Size::Grow).h(Size::Grow));
         paint(ui, &boxed);
     });
-    ui.set_at(&view, (x as f32, y as f32));
 }
 
 use crate::kit::revision;
@@ -214,13 +214,13 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts) {
     if height > 0 {
         let right = trail_start(ui, x as f32, width as f32, &o.notes, &o.readout, &o.layout, o.fps);
         let limit = if o.kind.is_none() && o.selection.is_none() { right } else { right - 160.0 };
-        let after = lead_plan(&mut |s| ui.text_width(None, s), x as f32, &o.file, limit, &o.text).4;
+        let after = lead_plan(&mut |s| ui.text_service().width(s, pxui::Label::BODY, None).unwrap_or(0.0), x as f32, &o.file, limit, &o.text).4;
         let rev = revision(&|h| (bounds, after.to_bits(), hash_sans_text(o, h)).hash(h));
         strip(ui, "workspace-status", bounds, rev, &mut |ui, boxed| {
             copy_menu(ui, boxed, &o.text);
             let o = o.clone();
             let fps = o.fps.map(|fps| format!("{fps} fps"));
-            ui.draw(boxed, move |paint, b| {
+            ui.canvas(boxed, move |paint, b| {
                 let Rect { x, y, w, h } = ground(paint, b);
                 trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, fps.as_deref());
                 lead(paint, (x, y, h), &o.file, o.state, limit, &o.text);
@@ -250,32 +250,32 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             // an open leader: the file and its state, a rule, the pending prefix in the accent and
             // `waiting for a key`, the frame rate at the end
             let limit = x as f32 + 320.0f32.min(width as f32 / 4.0);
-            let after = lead_plan(&mut |s| ui.text_width(None, s), x as f32, &o.file, limit, &o.text).4;
+            let after = lead_plan(&mut |s| ui.text_service().width(s, pxui::Label::BODY, None).unwrap_or(0.0), x as f32, &o.file, limit, &o.text).4;
             let rev = revision(&|h| (bounds, after.to_bits(), &pending, hash_sans_text(o, h)).hash(h));
             strip(ui, "workspace-guide-leader", bounds, rev, &mut |ui, boxed| {
             copy_menu(ui, boxed, &o.text);
             let o = o.clone();
             let pending = pending.clone();
             let fps = o.fps.map(|fps| format!("{fps} fps"));
-            ui.draw(boxed, move |paint, b| {
+            ui.canvas(boxed, move |paint, b| {
                 let Rect { x, y, w, h } = ground(paint, b);
                 trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, fps.as_deref());
                 lead(paint, (x, y, h), &o.file, o.state, limit, &o.text);
                 let tx = focus_labels(paint, (y, h), true, true, after, Some(&pending), None);
-                let ty = paint.text_top(None, y, h);
-                paint.text_c((tx, ty), theme::ink_2(&theme), "waiting for a key");
+                let ty = (y) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
+                { let text = "waiting for a key"; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)); let _ = paint.text_spans(pxui::Point::new(tx, ty), pxui::Label::BODY, 0.0, text, &[span]); };
             });
             });
             line(ui, "workspace-guide-line", bounds, &o.file, o.state, limit, &o.text);
         }
         None => {
-            let bar = ui.box_(
+            let bar = ui.node(
                 "workspace-guide",
-                BoxOpts::default()
-                    .flags(CLICKABLE | CLIP)
+                pxui::Node::DEFAULT
+                    .flags(pxui::Flags::CLICKABLE | pxui::Flags::CLIP)
                     .w(Size::Px(width as f32))
                     .h(Size::Px(height as f32))
-                    .at((x as f32, y as f32)),
+                    .at(x as f32, y as f32),
             );
             copy_menu(ui, &bar, &o.text);
             let keys = &o.extra;
@@ -301,12 +301,12 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             let small = kit::cap_size(ui);
             let mut keys_w = 0.0;
             for (k, l) in keys {
-                keys_w = keys_w + ui.text_width(Some(small), k) + ui.text_width(None, l) + 16.0;
+                keys_w = keys_w + ui.text_service().width(k, pxui::Label::BODY.size((small) as f32), None).unwrap_or(0.0) + ui.text_service().width(l, pxui::Label::BODY, None).unwrap_or(0.0) + 16.0;
             }
             let max_w = (limit - labels_w - 8.0 - fx).max(0.0);
             let natural_limit = (fx + 320.0f32.min(fw / 4.0)).max(limit - labels_w - keys_w - 8.0);
             let natural_end = if has_lead {
-                let (_, _, _, _, after) = lead_plan(&mut |s| ui.text_width(None, s), fx, &o.file, natural_limit, &o.text);
+                let (_, _, _, _, after) = lead_plan(&mut |s| ui.text_service().width(s, pxui::Label::BODY, None).unwrap_or(0.0), fx, &o.file, natural_limit, &o.text);
                 after
             } else {
                 fx - 5.0
@@ -318,9 +318,9 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                 Some(w) => fx + w,
                 None => natural_end,
             }) + 1.0;
-            let split = ui.box_(
+            let split = ui.node(
                 "workspace-guide-split",
-                BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(7.0)).h(Size::Px(height as f32)).at((split_x, y as f32)),
+                pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::BLOCKING).w(Size::Px(7.0)).h(Size::Px(height as f32)).at(split_x, y as f32),
             );
             let (lead_limit, after_lead) = if !has_lead {
                 (natural_limit, natural_end)
@@ -332,10 +332,10 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                     ui.request_cursor(Cursor::HorizontalResize);
                 }
                 if sg.pressed && w.is_none() {
-                    ui.set_text_state(&bar, Some((natural_end - fx).to_string()));
+                    ui.set_text_state(&bar, Some(&(natural_end - fx).to_string()));
                 }
                 if sg.held {
-                    ui.set_text_state(&bar, Some(max_w.min(24.0f32.max(sg.pointer.0 - 4.0 - fx)).to_string()));
+                    ui.set_text_state(&bar, Some(&max_w.min(24.0f32.max(sg.pointer.0 - 4.0 - fx)).to_string()));
                 }
                 match stored(ui) {
                     Some(w) => (fx + w, fx + w),
@@ -348,8 +348,8 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             let mut pairs: Vec<(f32, String, String, f32)> = Vec::new();
             let mut tx = labels_end;
             for (key, label) in keys {
-                let kw = ui.text_width(Some(small), key);
-                let lw = ui.text_width(None, label);
+                let kw = ui.text_service().width(key, pxui::Label::BODY.size((small) as f32), None).unwrap_or(0.0);
+                let lw = ui.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0);
                 if tx + kw + 8.0 + lw > limit - 8.0 {
                     tx = f32::INFINITY;
                 } else {
@@ -361,7 +361,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             let fps = o.fps.map(|fps| format!("{fps} fps"));
             let accent = o.accent;
             let (kind, selection) = (kind.map(str::to_owned), selection.map(str::to_owned));
-            ui.draw(boxed, move |paint, b| {
+            ui.canvas(boxed, move |paint, b| {
                 let Rect { x, y, w, h } = ground(paint, b);
                 trail(paint, (x, y, w, h), &o2.notes, &o2.readout, &o2.layout, fps.as_deref());
                 // the file and its state, to the rule, then the labels
@@ -374,9 +374,9 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                 // each key in ink-3 at the label size before what it does in ink-2, 8 apart
                 for (tx, key, label, kw) in &pairs {
                     let cy = kit::cap_y_paint(paint, y, h);
-                    paint.text_s((*tx, cy), small, theme::ink_3(&theme), key);
-                    let ty = paint.text_top(None, y, h);
-                    paint.text_c((tx + kw + 8.0, ty), theme::ink_2(&theme), label);
+                    { let text = key; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521)); let _ = paint.text_spans(pxui::Point::new(*tx, cy), pxui::Label::BODY.size((small) as f32), 0.0, text, &[span]); };
+                    let ty = (y) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
+                    { let text = label; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)); let _ = paint.text_spans(pxui::Point::new(tx + kw + 8.0, ty), pxui::Label::BODY, 0.0, text, &[span]); };
                 }
             });
             });
@@ -385,7 +385,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             }
             if ui.signal(&bar).hovered {
                 let names: Vec<String> = keys.iter().map(|(k, _)| k.to_string()).collect();
-                ui.tooltip("guide-strip", &format!("{} \u{b7} {} \u{b7} / ?: all keys", title, names.join("  ")));
+                ui.tooltip(&bar, &format!("{} \u{b7} {} \u{b7} / ?: all keys", title, names.join("  ")));
             }
         }
     }
@@ -404,7 +404,7 @@ pub fn tips(ui: &mut Ui, bounds: (i64, i64, i64, i64), avoid: &[(f32, f32, f32, 
                 TipKind::Info => 32.0,
                 TipKind::Refusal => 14.0,
             };
-            let w = ((0.max(width - 24)) as f32).min(ui.text_width(None, text) + extra);
+            let w = ((0.max(width - 24)) as f32).min(ui.text_service().width(text, pxui::Label::BODY, None).unwrap_or(0.0) + extra);
             let top = (y + 0.max(height - 12)) as f32 - ((count - index) as f32 * 28.0) + 4.0;
             // a tip that would sit on a rectangle of `avoid` (a graph card) moves up above it
             let left = (x + 12) as f32;
@@ -416,29 +416,28 @@ pub fn tips(ui: &mut Ui, bounds: (i64, i64, i64, i64), avoid: &[(f32, f32, f32, 
                     top = ay - 28.0;
                 }
             }
-            let boxed = ui.box_(
-                &format!("echo-tip-{index}"),
-                BoxOpts::default().flags(CLIP).w(Size::Px(w)).h(Size::Px(24.0)).at(((x + 12) as f32, top)),
+            let boxed = ui.node(pxui::hash_of(&format!("echo-tip-{index}")),
+                pxui::Node::DEFAULT.flags(pxui::Flags::CLIP).w(Size::Px(w)).h(Size::Px(24.0)).at((x + 12) as f32, top),
             );
             let kind = *kind;
             let text = text.clone();
-            ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
-                paint.fill(x, y, w, h, theme.input);
-                paint.frame(x, y, w, h, theme::edge(&theme));
-                let ty = paint.text_top(None, y, h);
+            ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
+                paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(theme.input));
+                paint.frame(pxui::Rect::new(x, y, w, h), pxui::Stroke::new((theme).foreground.with_alpha(38)));
+                let ty = (y) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
                 match kind {
                     TipKind::Info => {
-                        paint.circle((x + 10.0, y + (h / 2.0)), 3.0, Some(crate::kit::port_ink(&theme, crate::kit::Port::Hint)), None);
-                        paint.text_c((x + 19.0, ty), theme.foreground, &text);
+                        paint.circle((x + 10.0, y + (h / 2.0)), 3.0, Some(pxui::Fill::new(crate::kit::port_ink(&theme, crate::kit::Port::Hint))), None);
+                        { let text = &text; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(x + 19.0, ty), pxui::Label::BODY, 0.0, text, &[span]); };
                     }
-                    TipKind::Refusal => paint.text_c((x + 7.0, ty), theme::invalid(), &text),
+                    TipKind::Refusal => { let text = &text; let span = pxui::TextSpan::new(0, text.len() as u32).color(pxui::Rgba::hex(0xc2255c)); let _ = paint.text_spans(pxui::Point::new(x + 7.0, ty), pxui::Label::BODY, 0.0, text, &[span]); },
                 }
             });
         }
     }
 }
 
-fn copy_menu(ui: &mut Ui, owner: &UiBox, text: &str) {
+fn copy_menu(ui: &mut Ui, owner: &Handle, text: &str) {
     if kit::context_menu(ui, owner, &[("Copy value", !text.is_empty())]).is_some() {
         let _ = rays::clipboard::set_text(text);
     }

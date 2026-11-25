@@ -1,6 +1,5 @@
 use crate::kit;
 use input::MouseButton;
-use pxui::theme;
 use pxui::ui::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,38 +26,39 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
     intents
 }
 
-fn number_field(ui: &mut Ui, key: &str, at: (f32, f32), width: f32, current: &str, default: i64, valid: &dyn Fn(&str) -> bool) -> String {
+fn number_field(ui: &mut Ui, key: &str, at: (f32, f32), width: f32, current: &str, default: i64, valid: &dyn Fn(&str) -> bool) -> Option<i64> {
     // clickable: a right-click on the field reaches its menu, not the bar under it
-    let owner = ui.box_fmt(format_args!("{key}-owner"), BoxOpts::default().flags(CLICKABLE).at(at).w(Size::Px(width)).h(Size::Px(20.0)));
+    let owner = ui.node(pxui::hash_of(&("timeline-field-owner", key)), Node::DEFAULT.flags(Flags::CLICKABLE).at(at.0, at.1).w_px(width).h_px(20.0));
     let action = kit::context_menu(ui, &owner, &[
         ("Copy value", true), ("Paste value", true), ("Reset to default", true), ("Type value", true),
     ]).map(|(choice, _)| choice);
-    let mut text = String::new();
+    let mut number = None;
     ui.within(&owner, &mut |ui| {
-        let opts = ValueFieldOpts { edit: action == Some(3), ..Default::default() };
-        text = ui.value_field((0.0, 0.0), width, 20.0, &opts, valid, key, current).0;
+        let opts = pxui::ValueField::DEFAULT.edit(action == Some(3));
+        number = pxui::ext::value_field(ui, pxui::hash_of(key), current, Rect::new(0.0, 0.0, width, 20.0), &opts, &pxui::ValueCallbacks::DEFAULT.valid(valid))
+            .changed.and_then(|text| text.trim().parse().ok());
     });
     match action {
         Some(0) => { let _ = rays::clipboard::set_text(current); }
         Some(1) => {
-            if let Ok(value) = rays::clipboard::get_text() && valid(value.trim()) { text = value; }
+            if let Ok(value) = rays::clipboard::get_text() && valid(value.trim()) { number = value.trim().parse().ok(); }
         }
-        Some(2) => text = default.to_string(),
+        Some(2) => number = Some(default),
         _ => {}
     }
-    text
+    number
 }
 
 fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, frame: i64, time: f64, max_frame: i64) -> Vec<Intent> {
     let (x, y, width, height) = bounds;
     let theme = ui.tokens();
     let (fx, fy, fw, fh) = (x as f32, y as f32, width as f32, height as f32);
-    let bar = ui.box_("workspace-timeline", BoxOpts::default().flags(CLIP | CLICKABLE).w(Size::Px(fw)).h(Size::Px(fh)).at((fx, fy)));
+    let bar = ui.node("workspace-timeline", pxui::Node::DEFAULT.flags(pxui::Flags::CLIP | pxui::Flags::CLICKABLE).w(Size::Px(fw)).h(Size::Px(fh)).at(fx, fy));
     let top = if edge { 1.0 } else { 0.0 };
-    ui.draw(&bar, move |paint, Rect { x, y, w, h }| {
-        paint.fill(x, y, w, h, theme.panel);
+    ui.canvas(&bar, move |paint, Rect { x, y, w, h }| {
+        paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(theme.panel));
         if edge {
-            paint.fill(x, y, w, 1.0, theme::edge(&theme));
+            paint.fill(pxui::Rect::new(x, y, w, 1.0), pxui::Fill::new((theme).foreground.with_alpha(38)));
         }
     });
     let tall = fh - top >= 56.0;
@@ -90,23 +90,26 @@ fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, f
         let frame_label = label(ui, &mut cx, if tall { "Frame" } else { "F" });
         let field_w = if tall { 64.0 } else { 48.0 };
         let field_x = cx;
-        let current = frame.to_string();
         let valid_frame = |text: &str| text.trim().parse::<i64>().is_ok();
-        let typed = number_field(ui, "timeline-frame-field", (field_x, cy), field_w, &current, 0, &valid_frame);
+        let mut typed = None;
+        kit::with_label(format_args!("{frame}"), &mut |current| {
+            typed = number_field(ui, "timeline-frame-field", (field_x, cy), field_w, current, 0, &valid_frame);
+        });
         cx = cx + field_w + 8.0;
         let time_label = if tall { label(ui, &mut cx, "Time") } else { cx };
-        let readout = format!("{} s", cfmt::f(time, 2));
         let readout_x = cx;
-        cx = cx + ui.text_width(None, &readout) + 8.0;
+        kit::with_label(format_args!("{time:.2} s"), &mut |text| {
+            cx += ui.text_service().width(text, pxui::Label::BODY, None).unwrap_or(0.0) + 8.0;
+        });
         // the last frame, typed, at the end of a tall panel's bar
-        let last = max_frame.to_string();
         let end_x = fw - 12.0 - 64.0;
-        let valid_end = |text: &str| text.trim().parse::<i64>().is_ok_and(|n| n >= 1);
-        let ended = if !tall {
-            last.clone()
-        } else {
-            number_field(ui, "timeline-end-field", (end_x, cy), 64.0, &last, 240, &valid_end)
-        };
+        let mut ended = None;
+        if tall {
+            let valid_end = |text: &str| text.trim().parse::<i64>().is_ok_and(|n| n >= 1);
+            kit::with_label(format_args!("{max_frame}"), &mut |last| {
+                ended = number_field(ui, "timeline-end-field", (end_x, cy), 64.0, last, 240, &valid_end);
+            });
+        }
         let ruler_x = if tall { 0.0 } else { cx };
         let ruler_y = if tall { top + bar_h + 1.0 } else { top };
         let ruler_w = (fw - ruler_x).max(0.0);
@@ -115,9 +118,9 @@ fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, f
         let inner_x = if tall { 0.0 } else { 1.0 };
         let span = 1.0f32.max(ruler_w - inner_x);
         let range = (frame as f32).max(max_frame as f32);
-        let ruler = ui.box_(
+        let ruler = ui.node(
             "timeline-scrub",
-            BoxOpts::default().flags(CLICKABLE | BLOCKING).at((ruler_x, ruler_y)).w(Size::Px(ruler_w)).h(Size::Px(ruler_h)),
+            pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::BLOCKING).at(ruler_x, ruler_y).w(Size::Px(ruler_w)).h(Size::Px(ruler_h)),
         );
         // the ruler has no menu of its own: a right-click on it opens its panel's (or the strip's), and
         // the frame field beside it copies the frame
@@ -129,20 +132,25 @@ fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, f
         } else {
             None
         };
-        ui.draw(&bar, move |paint, Rect { x, y, w, h: _ }| {
+        ui.canvas(&bar, move |paint, Rect { x, y, w, h: _ }| {
             let y = y + top;
             let h = bar_h;
             let cy = kit::cap_y_paint(paint, y, h);
-            paint.cap((x + frame_label, cy), None, if tall { "Frame" } else { "F" });
+            { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_chars(pxui::Point::new(x + frame_label, cy), style, if tall { "Frame" } else { "F" }); };
             if tall {
-                paint.cap((x + time_label, cy), None, "Time");
-                let ew = paint.cap_width("End");
-                paint.cap((x + end_x - 8.0 - ew, cy), None, "End");
-                paint.fill(x + rule_x, y + ((h - 12.0) / 2.0), 1.0, 12.0, theme::border(&theme));
-                paint.fill(x, y + bar_h, w, 1.0, theme::edge(&theme));
+                { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_chars(pxui::Point::new(x + time_label, cy), style, "Time"); };
+                let end_style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08);
+                let ew = paint.text_service().width("End", end_style, None).unwrap_or(0.0);
+                { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_chars(pxui::Point::new(x + end_x - 8.0 - ew, cy), style, "End"); };
+                paint.fill(pxui::Rect::new(x + rule_x, y + ((h - 12.0) / 2.0), 1.0, 12.0), pxui::Fill::new((theme).foreground.with_alpha(77)));
+                paint.fill(pxui::Rect::new(x, y + bar_h, w, 1.0), pxui::Fill::new((theme).foreground.with_alpha(38)));
             }
-            let ty = paint.text_top(None, y, h);
-            paint.text_c((x + readout_x, ty), if tall { theme.foreground } else { theme::ink_2(&theme) }, &readout);
+            let ty = (y) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
+            let ink = if tall { theme.foreground } else { theme.ink_2() };
+            kit::with_label(format_args!("{time:.2} s"), &mut |text| {
+                let span = pxui::TextSpan::new(0, text.len() as u32).color(ink);
+                let _ = paint.text_spans(pxui::Point::new(x + readout_x, ty), pxui::Label::BODY, 0.0, text, &[span]);
+            });
         });
         let cap = kit::cap_size(ui);
         let tick_labels: [String; 10] = if tall {
@@ -150,16 +158,15 @@ fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, f
         } else {
             std::array::from_fn(|_| String::new())
         };
-        let head_label = current.clone();
-        ui.draw(&ruler, move |paint, Rect { x, y, w, h }| {
-            paint.fill(x, y, w, h, theme.input);
+        ui.canvas(&ruler, move |paint, Rect { x, y, w, h }| {
+            paint.fill(Rect::new(x, y, w, h), pxui::Fill::new(theme.input));
             if !tall {
-                paint.fill(x, y, 1.0, h, theme::edge(&theme));
+                paint.fill(pxui::Rect::new(x, y, 1.0, h), pxui::Fill::new((theme).foreground.with_alpha(38)));
             }
             let left = x + inner_x;
             let at = |fraction: f32| left + (fraction * span).floor();
             let head = at(frame as f32 / 1.0f32.max(range));
-            paint.fill(left, y, head - left, h, theme::tint(&theme));
+            paint.fill(pxui::Rect::new(left, y, head - left, h), pxui::Fill::new((theme).accent.with_alpha(41)));
             // a strip has fifty minor ticks and a major one in five; a taller ruler a tick a
             // hundredth and a major one in ten, numbered
             let minors: i64 = if tall { 100 } else { 50 };
@@ -169,32 +176,35 @@ fn build(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, f
             for tick in 0..minors {
                 let tx = at(tick as f32 / minors as f32);
                 if tick % every == 0 {
-                    paint.fill(tx, y + h - major_h, 1.0, major_h, theme::border(&theme));
+                    paint.fill(pxui::Rect::new(tx, y + h - major_h, 1.0, major_h), pxui::Fill::new((theme).foreground.with_alpha(77)));
                     if tall {
                         let cy = kit::cap_y_paint(paint, y + 16.0, 24.0);
-                        paint.text_s((tx + 4.0, cy), cap, theme::ink_3(&theme), &tick_labels[(tick / every) as usize]);
+                        let text = &tick_labels[(tick / every) as usize];
+                        let style = pxui::Label::BODY.size(cap as f32);
+                        let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.ink_3());
+                        let _ = paint.text_spans(pxui::Point::new(tx + 4.0, cy), style, 0.0, text, &[span]);
                     }
                 } else {
-                    paint.fill(tx, y + h - minor_h, 1.0, minor_h, theme::edge(&theme));
+                    paint.fill(pxui::Rect::new(tx, y + h - minor_h, 1.0, minor_h), pxui::Fill::new((theme).foreground.with_alpha(38)));
                 }
             }
             // the 2-point accent playhead, and the frame as an accent label right of it
             let head = if tall { head - 1.0 } else { head };
-            paint.fill(head, y, 2.0, h, theme.accent);
+            paint.fill(pxui::Rect::new(head, y, 2.0, h), pxui::Fill::new(theme.accent));
             let tag_h = if tall { 24.0 } else { 14.0 };
             let cy = kit::cap_y_paint(paint, y, tag_h);
-            paint.cap((head + 2.0, cy), Some(theme.accent), &head_label);
+            let style = pxui::Label::BODY.size((theme.font_size - 2.0).max(8.0)).caps(true).tracking(0.08)
+                .color(pxui::theme::ColorToken::ACCENT);
+            kit::with_label(format_args!("{frame}"), &mut |text| {
+                paint.text_chars(pxui::Point::new(head + 2.0, cy), style, text);
+            });
         });
         // a typed frame clamps to the timeline: 0 to the last frame
-        if typed != current {
-            if let Ok(n) = typed.trim().parse::<i64>() {
-                out.push(Intent::SeekPlayback(0.max(max_frame.min(n))));
-            }
+        if let Some(n) = typed.filter(|&n| n != frame) {
+            out.push(Intent::SeekPlayback(0.max(max_frame.min(n))));
         }
-        if ended != last {
-            if let Ok(n) = ended.trim().parse::<i64>() {
-                out.push(Intent::SetEnd(n));
-            }
+        if let Some(n) = ended.filter(|&n| n != max_frame) {
+            out.push(Intent::SetEnd(n));
         }
         if pause {
             out.push(Intent::PauseToggle);

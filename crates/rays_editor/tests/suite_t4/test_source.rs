@@ -426,7 +426,7 @@ fn click_prompt(r: &mut Run, label: &str) {
     r.step(vec![]);
     let point = {
         let ui = r.e().core.ui.borrow();
-        let button = ui.a11y_nodes().iter().find(|node| node.role == pxui::a11y::Role::Button as u32 && ui.a11y_name_of(node) == label)
+        let button = ui.a11y_nodes().iter().find(|node| node.is_role(pxui::ui::Role::Button) && ui.a11y_name_of(node) == label)
             .unwrap_or_else(|| panic!("no {label:?} button in the reload prompt"));
         ((button.rect.x + button.rect.w / 2.) as f64, (button.rect.y + button.rect.h / 2.) as f64)
     };

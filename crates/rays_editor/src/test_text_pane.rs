@@ -462,7 +462,7 @@ fn lisp_text() {
     assert_eq!(pairs, vec![(0, 8), (3, 5)], "matched pairs");
     assert!(l::brackets("(a ]").is_empty(), "a mismatched closer pairs with nothing");
     // the lexing is kept per text version: a changed text, and the same text again, read right
-    let theme = pxui::theme::default();
+    let theme = pxui::theme::Tokens::default();
     let lang = l::language(None, None, None, false, theme);
     assert_eq!(lang.comment, ";", "the Lisp comments with a semicolon");
     let a = (lang.colorize)("(a b)");
@@ -473,7 +473,7 @@ fn lisp_text() {
     let colors = (lang.colorize)("(sop/box :size 1.5 \"s\" ; c");
     assert_eq!(colors.len(), 6, "head, keyword, number, string, comment and the paren: {} runs", colors.len());
     let malformed = "(f \"bad\\q\" :next)";
-    let later = malformed.find(':').unwrap() as i64;
+    let later = malformed.find(':').unwrap();
     assert!((lang.colorize)(malformed).iter().any(|(start, stop, _)| *start <= later && later < *stop), "the tolerant text lexer colors after a malformed escape");
 }
 
@@ -561,7 +561,7 @@ fn lisp_text_completions() {
 #[test]
 fn lisp_text_numbers_and_parinfer() {
     use crate::lisp_text as l;
-    let theme = pxui::theme::default();
+    let theme = pxui::theme::Tokens::default();
     // numbers
     assert_eq!(l::number_at("(sop/box :size_x 1.25 :x 3)", 19), Some((17, 21)), "the number at a byte");
     assert_eq!(l::number_at("(sop/box :size_x 1.25 :x 3)", 16), None, "a space is no number");

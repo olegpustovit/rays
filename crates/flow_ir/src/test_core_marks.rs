@@ -24,7 +24,7 @@ fn checked(body: &str) -> W::Workspace {
     }
 }
 
-const PICTURES: [&str; 22] = [
+const PICTURES: [&str; 23] = [
     r##"(draw/background "#14161c")"##,
     r##"(draw/merge (draw/rect [1 2 0] [30 40 0]) (draw/rect [1 2 0] [3 4 0] :stroke "#fff") (draw/rect [0 0 0] [5 5 0] :fill "#f00" :stroke "#00f"))"##,
     "(draw/circle [10.5 20 0] 4)",
@@ -43,13 +43,16 @@ const PICTURES: [&str; 22] = [
     "(let* [p (map (fn [i] [i 0 0]) (array/range 0))] (draw/merge (draw/circles p) (draw/points p)))",
     r##"(draw/text [12.7 12 0] "hi" :color "#abc" :size 20)"##,
     r##"(draw/text [12 12 0] "")"##,
+    r##"(draw/text [12 12 0] "hi" :font "archivo-semibold" :align "right" :tracking 0.08)"##,
     r##"(draw/rounded_rect [4 5 0] [60 40 0] :radius 8 :fill "#123")"##,
     "(draw/rounded_rect [4 5 0] [60 40 0])",
     r##"(draw/polygon (map (fn [i] [i (* i i) 0]) (array/range 4)) :stroke "#fff")"##,
     r##"(draw/polyline (map (fn [i] [i (* i i) 0]) (array/range 4)) :color "#f0f")"##,
 ];
 
-const ERRORS: [(&str, &str); 6] = [
+const ERRORS: [(&str, &str); 8] = [
+    (r##"(draw/text [0 0 0] "hi" :font "comic")"##, "E_TEXT_STYLE"),
+    (r##"(draw/text [0 0 0] "hi" :align "middle")"##, "E_TEXT_STYLE"),
     ("(let* [p (map (fn [i] [i 0 0]) (array/range 3)) r (map (fn [i] 1.0) (array/range 2))] (draw/circles p :radius r))", "E_DRAW_LENGTH"),
     ("(let* [p (map (fn [i] [i 0 0]) (array/range 3)) c (map (fn [i] [0.5 0 0]) (array/range 2))] (draw/rects p [1 1 0] :fill c))", "E_DRAW_LENGTH"),
     ("(let* [p (map (fn [i] [i 0 0]) (array/range 3)) q (map (fn [i] [i 0 0]) (array/range 2))] (draw/lines p q))", "E_DRAW_LENGTH"),
@@ -132,7 +135,11 @@ fn dump() -> String {
                     indices.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")
                 )),
                 Entry::Image { .. } => out.push_str("  image\n"),
-                Entry::Text { x, y, size, color, text } => out.push_str(&format!("  text {x},{y} size={size} {} {:?}\n", ink(*color), String::from_utf8_lossy(text))),
+                Entry::Text { x, y, size, color, text, style } => {
+                    let (font, align, tracking) = scene_command::marks::text_style_parts(*style);
+                    let styled = if *style == 0 { String::new() } else { format!(" {} {} tracking={tracking}", scene_command::marks::FONTS[font], scene_command::marks::ALIGNS[align]) };
+                    out.push_str(&format!("  text {x},{y} size={size} {} {:?}{styled}\n", ink(*color), String::from_utf8_lossy(text)))
+                }
                 Entry::PushTransform { xx, xy, yx, yy, tx, ty } => {
                     out.push_str(&format!("  push {} {} {} {} {} {}\n", flow_syntax::lisp::float(*xx), flow_syntax::lisp::float(*xy), flow_syntax::lisp::float(*yx), flow_syntax::lisp::float(*yy), flow_syntax::lisp::float(*tx), flow_syntax::lisp::float(*ty)))
                 }

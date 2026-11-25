@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
     command = [str(INDEX), '--root', str(fixture / 'tree'), '--output', str(output), '--cache', str(work / 'cache')]
     cold = subprocess.check_output(command, text=True)
     assert '32 files, 224 symbols, 302 nodes, 0 cache hits' in cold, cold
-    for name in ('atlas.tsv', 'profile.tsv'):
+    for name in ('atlas.tsv', 'profile.tsv', 'crates.tsv', 'lines.tsv', 'chars.tsv'):
         assert (work / name).read_bytes() == (fixture / name).read_bytes(), f'{name}: fixture golden changed'
     # An unanswered request (null) is retried, never stored as a file without symbols.
     assert all(json.loads(saved.read_text()) for saved in (work / 'cache').iterdir()), 'an empty answer was cached'
@@ -47,6 +47,37 @@ with tempfile.TemporaryDirectory(prefix='rays-atlas-') as temporary:
                 if n(scope, 'kind') == 4:
                     assert n(scope, 'first') <= n(child, 'first') <= n(child, 'last') <= n(scope, 'last'), 'symbol outside its scope'
     assert len((work / 'profile.tsv').read_text().splitlines()) == 1 + 32 * 32
+    # Below every leaf symbol its lines tile the symbol: a row a line, the parts of a tile contiguous and covering it.
+    below = [{k.split(':')[0]: v for k, v in r.items()} for r in csv.DictReader((work / 'lines.tsv').open(), delimiter='\t', quoting=csv.QUOTE_NONE)]
+    for row in rows:
+        if n(row, 'kind') == 5:
+            first, count = n(row, 'sub'), n(row, 'subs')
+            tree = below[first:first + count]
+            assert sum(int(t['kind']) == 1 for t in tree) == min(64, n(row, 'last') - n(row, 'first') + 1), 'a row a line'
+            assert [float(tree[0][k]) for k in 'xywh'] == [0.0, 0.0, 1.0, 1.0], 'a tree covers its symbol'
+            for t in tree:
+                parts = below[int(t['child']):int(t['child']) + int(t['count'])]
+                if parts:
+                    assert first <= int(t['child']) < first + count, 'a tree keeps to its rows'
+                    assert abs(sum(float(c['w']) * float(c['h']) for c in parts) - float(t['w']) * float(t['h'])) < 1e-12, 'parts cover their tile'
+    assert len((work / 'chars.tsv').read_text().splitlines()) == 1 + 41 * 64
+    # Every leaf has its own cell in its crate's reading order, and a crate's files stack without gaps.
+    crates = [{k.split(':')[0]: v for k, v in r.items()} for r in csv.DictReader((work / 'crates.tsv').open(), delimiter='\t', quoting=csv.QUOTE_NONE)]
+    assert sorted(int(c['rank']) for c in crates) == list(range(len(crates))) and sum(int(c['files']) for c in crates) == 32
+    for k, crate in enumerate(crates):
+        cells = [n(r, 'cell') for r in rows if n(r, 'kind') == 5 and n(r, 'crate') == k]
+        assert len(cells) == len(set(cells)) and max(cells) == int(crate['cells']) - 1, 'ledger cells'
+        # a file or a scope spans the cells of its leaves, and a symbol's level counts the scopes around it
+        for i, r in enumerate(rows):
+            if n(r, 'crate') == k and n(r, 'kind') in (1, 4) and n(r, 'cells'):
+                held, pending = [], [i]
+                while pending:
+                    j = pending.pop()
+                    held += [n(rows[j], 'cell')] if n(rows[j], 'kind') == 5 else []
+                    pending += range(n(rows[j], 'child'), n(rows[j], 'child') + n(rows[j], 'count'))
+                assert (min(held), max(held) - min(held) + 1) == (n(r, 'cell'), n(r, 'cells')), 'a group spans its leaves'
+        tops = sorted((n(r, 'top'), n(r, 'last')) for r in rows if n(r, 'kind') in (1, 2) and n(r, 'crate') == k)
+        assert all(a + lines == b for (a, lines), (b, _) in zip(tops, tops[1:])) and tops[-1][0] + tops[-1][1] == int(crate['lines']), 'strata tops'
     # A file's digest, not its timestamp or size, keys the symbol cache.
     tiny = work / 'tree'
     tiny.mkdir()

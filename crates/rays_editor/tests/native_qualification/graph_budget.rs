@@ -32,12 +32,19 @@ fn tour(p: &mut P) {
     p.step(&[], vec![Event::PointerMoved(at)], at);
     let f = p.step(&[], vec![Event::Scrolled((0., 1.))], at);
     rest(p, "zoom rest", f);
+    let pan = |p: &P| {
+        let model = (&*p.e.as_ref().expect("editor").core).into();
+        let view = rays_editor::editor_model::pane_view(&model);
+        (view.pan_x, view.pan_y)
+    };
+    let before_pan = pan(p);
     let mut frames = Vec::new();
     frames.push(p.step(&[], vec![Event::PointerPressed(MouseButton::RightButton, at)], at));
     for i in 1..4 {
         let q = (at.0 + 100. * i as f64 - 150., at.1 + 20. * i as f64);
         frames.push(p.step(&[], vec![Event::PointerMoved(q)], q));
     }
+    assert_ne!(pan(p), before_pan, "the held right button must pan the graph");
     assert!(frames[1..3].iter().all(|&(_, allocs)| allocs <= 471), "pan inside overscan rebuilt the native submission: {frames:?}");
     p.record("pan across overscan", frames);
     p.step(&[], vec![Event::PointerReleased(MouseButton::RightButton, (at.0 + 150., at.1 + 60.))], at);

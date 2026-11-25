@@ -63,9 +63,9 @@ pub fn window_shell_pane_root() {
         let b = base();
         rays_shell::host::build(ui, &fr((400, 300), (0.0, 0.0), events), &mut |ui| {
             let root = chrome::pane_root(ui, &b, (100, 20, 100, 80), "pane");
-            let mut child: Option<UiBox> = None;
-            ui.within(&root, &mut |ui| {
-                child = Some(ui.box_("child", BoxOpts::default().flags(CLICKABLE).w(Size::Px(20.0)).h(Size::Px(20.0)).at((110.0, 30.0))));
+            let mut child: Option<pxui::Handle> = None;
+            chrome::within_pane(ui, &root, &b, (100, 20, 100, 80), &mut |ui| {
+                child = Some(ui.node("child", pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).w(Size::Px(20.0)).h(Size::Px(20.0)).at(110.0, 30.0)));
             });
             out = Some((ui.signal(&root), ui.signal(&child.unwrap())));
         });
@@ -86,15 +86,16 @@ pub fn window_shell_splitter_hit_area() {
     assert_eq!((panes.view.2, panes.graph.2, panes.inspector.2), (449, 349, 200), "shell layout defaults are not 45/35/20");
     let divider_x = panes.view.2;
     let mut ui = new_ui();
-    let chrome_frame = |ui: &mut Ui, events: Vec<Event>| {
-        let f = fr((1000, 300), (0.0, 0.0), events);
+    let chrome_frame = |ui: &mut Ui, at, events: Vec<Event>| {
+        let f = fr((1000, 300), at, events);
         rays_shell::host::build(ui, &f, &mut |ui| {
             chrome::update(None, None, None, None, None, None, &layout, ui, &wide);
             chrome::splitters(None, None, &layout, ui, &wide);
         });
     };
-    chrome_frame(&mut ui, vec![]);
-    chrome_frame(&mut ui, vec![moved(((divider_x - 2) as f64, 100.0))]);
+    let at = ((divider_x - 2) as f64, 100.0);
+    chrome_frame(&mut ui, (0.0, 0.0), vec![]);
+    chrome_frame(&mut ui, at, vec![moved(at)]);
     assert!({ let p = ui.output().platform; p.has_cursor != 0 && p.cursor == 1 }, "thin splitter lost its wider resize hit area");
     rays_shell::host::destroy(&mut ui);
 }

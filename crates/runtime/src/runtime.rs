@@ -297,6 +297,12 @@ pub fn destroy(value: &mut Runtime) -> Result<(), Error> {
     }
 }
 
+/// The SDL window id used when dispatching a synchronous live-resize callback.
+#[cfg(not(target_os = "linux"))]
+pub fn window_id(value: &Runtime) -> Option<u32> {
+    value.window.as_ref().map(|window| window.borrow().id())
+}
+
 pub fn is_window(value: &Runtime) -> bool {
     value.window.is_some()
 }
@@ -315,7 +321,9 @@ pub fn surface_configuration(value: &mut Runtime) -> Result<surface::Configurati
         physical_height: f.drawable_height,
         format: surface::Format::Bgra8Unorm,
         present_mode: if vsync { surface::PresentMode::Fifo } else { surface::PresentMode::Immediate },
-        max_acquired: 2,
+        // CAMetalLayer's usual three drawables: with two, a fullscreen window that scans out directly
+        // holds one a frame longer and a vsynced loop waits every other refresh, 30 frames a second.
+        max_acquired: 3,
         layer,
     })
 }

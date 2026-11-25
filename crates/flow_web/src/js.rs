@@ -860,7 +860,10 @@ fn draw(ctx: &mut Context, d: &Draw) -> String {
                 object_of(args)
             )
         }
-        Draw::TextRun { at, text, ink, size } => format!(
+        // ponytail: the web runtime has one face and left runs; a styled run fails there until it
+        // carries the faces. A default run exports as it always did.
+        Draw::TextRun { style: Some(_), .. } => "rt.fail(\"E_WEB_TEXT_STYLE\", \"Text fonts, alignment and tracking are native only.\");".to_owned(),
+        Draw::TextRun { at, text, ink, size, style: None } => format!(
             "if (typeof {t} !== \"string\") rt.fail(\"E_TYPE\", \"Drawing text is text.\"); else if ({t} !== \"\") {{ const [x, y] = point(rt, {}); emit(rt, {{type: \"text\", x, y, size: Number(rt.coerce(\"int\", {})), color: ink(rt, {}), text: {t}}}); }}",
             local(*at),
             local(*size),
@@ -1301,8 +1304,8 @@ fn resident_statement(ctx: &mut Context, program: &C::Program, options: &FrameOp
             statement(ctx, program, 3, s)?;
             ctx.resident = false;
             // its arrays stay on the device when what follows only ranges over and draws them
-            let tail = core_exec::resident_tail(program, s, &|r| ctx.is_gpu(r));
-            if let Some((_, ranges)) = &tail {
+            let tail = core_exec::resident_tail(program, s, &|r| ctx.is_gpu(r), false).filter(|(_, _, exact)| exact.is_empty());
+            if let Some((_, ranges, _)) = &tail {
                 let mut merged = ranges.clone();
                 merged.extend(ctx.tail_ranges.iter().cloned());
                 ctx.tail_ranges = merged;

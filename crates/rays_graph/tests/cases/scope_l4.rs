@@ -123,7 +123,7 @@ fn b18_a_pick_with_the_query_cleared_places_the_listed_row() {
     let (menu, _) = step(&mut ui, menu.expect("open"), Vec::new());
     // the cross: 25 from the menu's right edge, under the 1-point edge, the title row and 8 of padding
     let row = ui.row_height();
-    let at = ((400 + 320 - 25 + 10) as f64, (250 + 1 + row + 8 + 10) as f64);
+    let at = ((400 + 320 - 25 + 10) as f64, 250.0 + 1.0 + f64::from(row) + 8.0 + 10.0);
     let (_, picked) = step(
         &mut ui,
         menu.expect("open"),

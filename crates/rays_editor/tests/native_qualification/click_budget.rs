@@ -3,7 +3,7 @@
 //! A lane that makes an action cheaper lowers its row. Wall times are printed, and
 //! checked against the plan's targets only with `RAYS_CLICK_TIMES=1` (they move 2x on a loaded Mac).
 //! Allocation sites: `MallocStackLogging=1` on the test binary, then `malloc_history <pid> -callTree`.
-use input::{Event, Key};
+use input::{Event, Key, MouseButton};
 use rays_editor::{editor, workspace};
 use std::time::Instant;
 
@@ -100,6 +100,7 @@ const PEAKS: &[(&str, &str, u64)] = &[("isogrid", "retype lisp", 12_800)];
 pub(crate) struct P {
     pub(crate) e: Option<editor::Editor>,
     tick: i64,
+    buttons: Vec<MouseButton>,
     canvas: rays::canvas::Canvas,
     rows: Vec<(String, f64, u64, u64)>,
     /// the most allocations of any of an action's four frames
@@ -110,8 +111,15 @@ impl P {
     pub(crate) fn step(&mut self, keys: &[Key], events: Vec<Event>, pointer: (f64, f64)) -> (f64, u64) {
         self.tick += 1;
         let t = self.tick;
+        for event in &events {
+            match event {
+                Event::PointerPressed(button, _) if !self.buttons.contains(button) => self.buttons.push(*button),
+                Event::PointerReleased(button, _) => self.buttons.retain(|held| held != button),
+                _ => {}
+            }
+        }
         let f = rays::frame::Frame {
-            input: input::Frame { dt: 1. / 60., frame: t, tick: t, size: (W, H), pointer, keys: keys.to_vec(), events, ..input::at_time(t as f64 / 60.) },
+            input: input::Frame { dt: 1. / 60., frame: t, tick: t, size: (W, H), pointer, keys: keys.to_vec(), buttons: self.buttons.clone(), events, ..input::at_time(t as f64 / 60.) },
             pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
         let n0 = mem_sys::alloc_count();
         let s = Instant::now();
@@ -154,7 +162,7 @@ pub(crate) fn session(label: &str, source: &str, actions: &dyn Fn(&mut P)) -> Ve
     sop::async_cook::set_clock(&core.cook.worker, core.clock.clone());
     // measured as the app runs: no verifying rebuilds
     e.core.ui.borrow_mut().verify_views(false);
-    let mut p = P { e: Some(e), tick: 0, canvas, rows: Vec::new(), peaks: Vec::new() };
+    let mut p = P { e: Some(e), tick: 0, buttons: Vec::new(), canvas, rows: Vec::new(), peaks: Vec::new() };
     for _ in 0..30 { p.step(&[], vec![], (600., 400.)); }
     eprintln!("CLICK ===== {label}: key frame, +1, +2, +3 (update+render ms, allocations)");
     actions(&mut p);

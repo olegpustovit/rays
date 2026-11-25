@@ -5,7 +5,6 @@ use param::{FieldView, FloatRange, Impact, KindView, Value};
 use pxui::ui::*;
 use rays_shell::inspector::{self, FlowChange, FlowOpts, FlowRow};
 use rays_shell::tree::{self as T, Command, DropAt, Intent, Row};
-use pxui::geom::color;
 
 fn left_press(p: (f64, f64)) -> Event {
     Event::PointerPressed(MouseButton::LeftButton, p)
@@ -22,12 +21,16 @@ pub fn window_shell_inspector_record() {
     let field = param::field("on".to_string(), param::toggle(), Value::Bool(false)).and_then(|f| f.label("On".to_string())).expect("field");
     let schema = param::schema("look".to_string(), vec![field]).expect("schema");
     let mut ui = new_ui();
-    let click = vec![left_press((115.0, 15.0)), left_release((115.0, 15.0))];
+    let at = (115.0, 15.0);
+    let click = vec![left_press(at), left_release(at)];
     let record = |ui: &mut Ui, events: Vec<Event>, value: bool| -> Result<(Vec<Value>, param::Effects), String> {
         let mut out = Err("not built".to_string());
-        rays_shell::host::build(ui, &fr((400, 300), (0.0, 0.0), events), &mut |ui| {
-            ui.panel(PanelOpts::default().at(0.0, 0.0).width(260.0), "record", &mut |ui| {
-                out = inspector::record(ui, &schema, &[Value::Bool(value)]);
+        rays_shell::host::build(ui, &fr((400, 300), at, events), &mut |ui| {
+            ui.panel("record", &Overlay::DEFAULT.at(Point::new(0.0, 0.0)).w_px(260.0), |ui| {
+                let next = inspector::record(ui, &schema, &[Value::Bool(value)]);
+                if !out.as_ref().is_ok_and(|(_, effects)| param::has_effects(*effects)) {
+                    out = next;
+                }
             });
         });
         out
@@ -60,7 +63,7 @@ pub fn window_shell_inspector_folder_order() {
         let seen = RefCell::new(Vec::new());
         let opts = FlowOpts { kind_label: kind.map(str::to_owned), expanded: vec!["Root".into(), "Size".into(), "Other".into()], ..Default::default() };
         rays_shell::host::build(&mut ui, &fr((400, 600), (0., 0.), vec![]), &mut |ui| {
-            ui.panel(PanelOpts::default().at(0., 0.).width(260.), "folders", &mut |ui| {
+            ui.panel("folders", &Overlay::DEFAULT.at(Point::new(0.0, 0.0)).w_px(260.0), |ui| {
                 let changes = inspector::flow_fields(ui, &opts, Some(&|name, _| seen.borrow_mut().push(name.to_owned())), &rows);
                 assert!(changes.is_empty());
             });
@@ -86,11 +89,15 @@ fn cell(name: &str, index: i64) -> FieldView {
     }
 }
 
-fn build_rows(ui: &mut Ui, mouse: (f64, f64), events: Vec<Event>, label: &str, rows: &[FlowRow]) -> Vec<FlowChange> {
+fn build_rows(ui: &mut Ui, mouse: (f64, f64), held: bool, events: Vec<Event>, label: &str, rows: &[FlowRow]) -> Vec<FlowChange> {
     let mut out = Vec::new();
-    rays_shell::host::build(ui, &fr((400, 300), mouse, events), &mut |ui| {
-        ui.panel(PanelOpts::default().at(0.0, 0.0).width(260.0), label, &mut |ui| {
-            out = inspector::flow_fields(ui, &FlowOpts::default(), None, rows);
+    let mut frame = fr((400, 300), mouse, events);
+    if held {
+        frame.input.buttons.push(MouseButton::LeftButton);
+    }
+    rays_shell::host::build(ui, &frame, &mut |ui| {
+        ui.panel(pxui::hash_of(label), &Overlay::DEFAULT.at(Point::new(0.0, 0.0)).w_px(260.0), |ui| {
+            out.extend(inspector::flow_fields(ui, &FlowOpts::default(), None, rows));
         });
     });
     out
@@ -99,11 +106,11 @@ fn build_rows(ui: &mut Ui, mouse: (f64, f64), events: Vec<Event>, label: &str, r
 /// A click without a drag, or a drag of `by` points from `at`.
 fn gesture(ui: &mut Ui, label: &str, rows: &[FlowRow], at: (f64, f64), by: Option<f64>) -> Vec<FlowChange> {
     match by {
-        None => build_rows(ui, at, vec![left_release(at)], label, rows),
+        None => build_rows(ui, at, false, vec![left_release(at)], label, rows),
         Some(by) => {
             let to = (at.0 + by, at.1);
-            let mut found = build_rows(ui, to, vec![Event::PointerMoved(to)], label, rows);
-            found.extend(build_rows(ui, to, vec![left_release(to)], label, rows));
+            let mut found = build_rows(ui, to, true, vec![Event::PointerMoved(to)], label, rows);
+            found.extend(build_rows(ui, to, false, vec![left_release(to)], label, rows));
             found
         }
     }
@@ -123,14 +130,14 @@ pub fn window_shell_vector_cells() {
     // one press at each place per UI: a second one there would be a double-click, which types
     let pass = |by: Option<f64>| -> Vec<bool> {
         let mut ui = new_ui();
-        build_rows(&mut ui, (0.0, 0.0), vec![], "vector", &vector);
+        build_rows(&mut ui, (0.0, 0.0), false, vec![], "vector", &vector);
         let mut found = Vec::new();
         for x in [90, 110, 130, 150, 170, 190, 210, 230] {
             let at = (x as f64, 12.0);
-            build_rows(&mut ui, at, vec![Event::PointerMoved(at)], "vector", &vector);
-            let mut changes = build_rows(&mut ui, at, vec![left_press(at)], "vector", &vector);
+            build_rows(&mut ui, at, false, vec![Event::PointerMoved(at)], "vector", &vector);
+            let mut changes = build_rows(&mut ui, at, true, vec![left_press(at)], "vector", &vector);
             changes.extend(gesture(&mut ui, "vector", &vector, at, by));
-            build_rows(&mut ui, (0.0, 0.0), vec![], "vector", &vector);
+            build_rows(&mut ui, (0.0, 0.0), false, vec![], "vector", &vector);
             found.push(!changes.is_empty());
         }
         rays_shell::host::destroy(&mut ui);
@@ -152,10 +159,10 @@ fn ranged_float(drags: bool) {
     let edits = |value: f64, by: Option<f64>| -> Vec<FlowChange> {
         let rows = scalar(value);
         let mut ui = new_ui();
-        build_rows(&mut ui, (0.0, 0.0), vec![], "scalar", &rows);
+        build_rows(&mut ui, (0.0, 0.0), false, vec![], "scalar", &rows);
         let at = (180.0, 12.0);
-        build_rows(&mut ui, at, vec![Event::PointerMoved(at)], "scalar", &rows);
-        let mut found = build_rows(&mut ui, at, vec![left_press(at)], "scalar", &rows);
+        build_rows(&mut ui, at, false, vec![Event::PointerMoved(at)], "scalar", &rows);
+        let mut found = build_rows(&mut ui, at, true, vec![left_press(at)], "scalar", &rows);
         found.extend(gesture(&mut ui, "scalar", &rows, at, by));
         rays_shell::host::destroy(&mut ui);
         found
@@ -186,7 +193,7 @@ fn ranged_float(drags: bool) {
 // ----------------------------------------------------------------------- tree
 
 fn row(id: i64, depth: i64, label: &str) -> Row {
-    Row { id, depth, label: label.to_string(), detail: String::new(), badge: ("S".to_string(), color::gray(90)), link: false, ghost: false, flags: vec![true] }
+    Row { id, depth, label: label.to_string(), detail: String::new(), badge: ("S".to_string(), pxui::Rgba::rgb(90, 90, 90)), link: false, ghost: false, flags: vec![true] }
 }
 
 fn center(k: i64) -> (f64, f64) {

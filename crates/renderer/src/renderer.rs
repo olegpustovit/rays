@@ -1110,8 +1110,7 @@ fn step_inner(
                 let mut prepared = value.0.last_step_prepared.borrow_mut();
                 prepared.clear();
                 prepared.extend(draws.iter().map(|x| {
-                        let d = &x.draw;
-                        let s = &d.state;
+                        let s = &x.draw.state;
                         let viewport = match s.viewport {
                             (_, _, w, h) if w < 0 || h < 0 => (0, 0, f.logical_width, f.logical_height),
                             v => v,
@@ -1120,23 +1119,13 @@ fn step_inner(
                             (_, _, w, h) if w < 0 || h < 0 => (0, 0, f.logical_width, f.logical_height),
                             v => v,
                         };
-                        let draw_ = if viewport == s.viewport && scissor == s.scissor {
-                            d.clone()
-                        } else {
-                            let mut copy = d.clone();
-                            copy.state.viewport = viewport;
-                            copy.state.scissor = scissor;
-                            copy
-                        };
-                        Rc::new(SampledDraw { ui: x.ui.clone(),
-                            family: x.family,
-                            blend: x.blend,
-                            texture: x.texture.clone(),
-                            auxiliary: x.auxiliary.clone(),
-                            vertex_attributes: x.vertex_attributes.clone(),
-                            samples: x.samples,
-                            draw: draw_,
-                        })
+                        if viewport == s.viewport && scissor == s.scissor {
+                            return x.clone();
+                        }
+                        let mut draw = (**x).clone();
+                        draw.draw.state.viewport = viewport;
+                        draw.draw.state.scissor = scissor;
+                        Rc::new(draw)
                     }));
                 let mut input = value.0.last_step_draws.borrow_mut();
                 input.clear();

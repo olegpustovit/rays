@@ -26,7 +26,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$fw"
 cp packaging/Rays.icns "$app/Contents/Resources/Rays.icns"
 cp target/release/rays "$app/Contents/MacOS/rays"
-cp -L target/release/libpxui.1.dylib "$fw/libpxui.1.dylib"
+cp -L target/release/libpxui.2.dylib "$fw/libpxui.2.dylib"
 
 # Copy a file's non-system dylibs into Frameworks (recursively) and point it at them through @rpath. The binary's rpath is the
 # bundle's Frameworks; an @rpath dependency of a copied library is its sibling in the source directory ($2); the dev-tree rpaths (target/<profile>) are removed everywhere.
@@ -49,7 +49,7 @@ fix() {
     done
 }
 fix "$app/Contents/MacOS/rays"
-fix "$fw/libpxui.1.dylib"
+fix "$fw/libpxui.2.dylib"
 install_name_tool -add_rpath @executable_path/../Frameworks "$app/Contents/MacOS/rays"
 
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)

@@ -206,16 +206,17 @@ fn b27_readouts_have_context_menus() {
     assert_eq!(rays::clipboard::get_text().unwrap(), "42");
 
     let geometry = rdk_ops::line_geometry::points(&[(3., 4., 5.)]).unwrap();
-    choose_menu(size, (100., 60.), "Copy value", &mut |ui| {
-        rays_editor::spreadsheet::view(ui, (0, 0, size.0, size.1), 0, Some(&geometry));
+    let mut table = std::rc::Rc::new(pxui::TableState::new());
+    choose_menu(size, (150., 60.), "Copy value", &mut |ui| {
+        rays_editor::spreadsheet::view(ui, (0, 0, size.0, size.1), 0, Some(&geometry), &mut table);
     });
     assert_eq!(rays::clipboard::get_text().unwrap(), "3.0");
 
     let mut reveal = false;
     choose_menu(size, (140., 22.), "Reveal in Lisp", &mut |ui| {
         reveal = inspector::header_context(ui, "Example", false, true, &mut |ui| {
-            ui.inspector_header("sample-header", None, None, None, None, &[], None, false, "Example", "")
-        }).1;
+            let _ = pxui::ext::inspector_header(ui, "sample-header", None, None, None, None, &[], None, false, "Example", "");
+        }).1 == Some(2);
     });
     assert!(reveal);
     if let Some(text) = was { let _ = rays::clipboard::set_text(&text); }

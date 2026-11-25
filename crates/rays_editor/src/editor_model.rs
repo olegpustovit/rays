@@ -144,6 +144,7 @@ pub struct Local {
     pub code: text_pane::State,
     pub nav: navigator::State,
     pub sheet_owner: i64,
+    pub sheet_table: Option<Rc<pxui::TableState>>,
 }
 
 /// The start keywords the editor last followed, by panel key.

@@ -287,7 +287,7 @@ fn transform_bits(t_: &Transform) -> [f64; 6] {
 }
 
 /// A quad's bits as two independent 64-bit hashes: a table key without text.
-fn wide(words: &[u64]) -> TableKey {
+fn wide(words: &[u64]) -> (u64, u64) {
     use std::hash::{Hash, Hasher};
     let hash = |seed: u64| {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -295,7 +295,7 @@ fn wide(words: &[u64]) -> TableKey {
         words.hash(&mut hasher);
         hasher.finish()
     };
-    TableKey::Wide(hash(0x9e37_79b9_7f4a_7c15), hash(0xc2b2_ae3d_27d4_eb4f))
+    (hash(0x9e37_79b9_7f4a_7c15), hash(0xc2b2_ae3d_27d4_eb4f))
 }
 
 /// Cached quads retain texture owners, so pointer identity cannot be reused while the draw is cached.
@@ -316,12 +316,14 @@ fn quad(
     for (slot, word) in words.iter_mut().zip(geometry) {
         *slot = word;
     }
-    let payload_key = wide(&words);
+    let (payload_hi, payload_lo) = wide(&words);
+    let payload_key = TableKey::Wide(payload_hi, payload_lo);
     words[18] = Rc::as_ptr(texture) as usize as u64;
     for (slot, v) in words[19..].iter_mut().zip([framebuffer.0, framebuffer.1, framebuffer.2, framebuffer.3]) {
         *slot = v as u64;
     }
-    let quad_key = wide(&words);
+    let (quad_hi, quad_lo) = wide(&words);
+    let quad_key = TableKey::Wide(quad_hi, quad_lo);
     if let Some(item) = side_lru::find(&mut state_.quad_cache, &quad_key) {
         return item.downcast::<SampledDraw>().unwrap_or_else(|_| unreachable!("quad table item"));
     }
@@ -345,29 +347,7 @@ fn quad(
             for (i, n) in [0, 1, 2, 0, 2, 3].into_iter().enumerate() {
                 put_word(&mut indices, i, n);
             }
-            let (cx, cy, cw, ch) = clip;
-            let g = |v: f64| cfmt::g(v, 8);
-            let key = format!(
-                "quad:{},{},{},{}:{},{},{},{},{},{}:{},{},{},{}:{},{},{},{}",
-                g(destination.x),
-                g(destination.y),
-                g(destination.width),
-                g(destination.height),
-                g(transform.xx),
-                g(transform.xy),
-                g(transform.yx),
-                g(transform.yy),
-                g(transform.tx),
-                g(transform.ty),
-                cx,
-                cy,
-                cw,
-                ch,
-                g(u0),
-                g(v0),
-                g(u1),
-                g(v1)
-            );
+            let key = format!("quad:{payload_hi:016x}{payload_lo:016x}");
             let payload = Rc::new(CachedQuadPayload {
                 mesh_key: key.clone(),
                 vertices: new_bytes(vertices),

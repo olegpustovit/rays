@@ -180,6 +180,12 @@ pub enum MeshKey {
     GpuVertices { name: Rc<String>, indices: Option<Rc<String>> },
 }
 
+impl MeshKey {
+    fn is_empty(&self) -> bool {
+        matches!(self, Self::Host(key) if key.is_empty())
+    }
+}
+
 pub fn mesh_key_string(key: &MeshKey) -> String {
     match key {
         MeshKey::Host(k) => k.clone(),
@@ -365,6 +371,7 @@ thread_local! {
 pub struct FrameStart {
     pub device: Device,
     pub commands: backend::Commands,
+    pub size_px: [u32; 2],
     pub serial: u64,
     pub completed: u64,
     pub painters: Vec<UiPaint>,
@@ -414,7 +421,8 @@ fn run_frame_hooks(value: &SceneExecution, commands: &backend::Commands, batches
         return Ok(());
     }
     let completed = completed_before(value.encoded_frame)?;
-    let start = FrameStart { device: value.device.clone(), commands: commands.clone(), serial: value.encoded_frame, completed, painters };
+    let size_px = [value.configuration.physical_width as u32, value.configuration.physical_height as u32];
+    let start = FrameStart { device: value.device.clone(), commands: commands.clone(), size_px, serial: value.encoded_frame, completed, painters };
     hooks.iter().try_for_each(|hook| hook(&start))
 }
 
@@ -584,7 +592,7 @@ struct BatchPlan {
 
 struct ReplayPlan {
     clear: (f64, f64, f64, f64),
-    payloads: Vec<AutomaticSignature>,
+    payloads: Rc<[AutomaticSignature]>,
     batches: Vec<Rc<BatchPlan>>,
     gpu_vertices: Vec<GpuVertices>,
 }
@@ -598,7 +606,7 @@ struct PreparedSubmission {
 
 struct AutomaticCandidate {
     clear: (f64, f64, f64, f64),
-    payloads: Vec<AutomaticSignature>,
+    payloads: Rc<[AutomaticSignature]>,
 }
 
 struct PreparedSlot {
@@ -946,7 +954,7 @@ pub fn prepare_scene3(clear: (f64, f64, f64, f64), clear_depth: f64, entries: &[
         entry.samples > 0
             && [1, 4, 9, 16].contains(&entry.samples)
             && valid_family(entry)
-            && !mesh_key_string(&mesh.key).is_empty()
+            && !mesh.key.is_empty()
             && mesh.vertex_count >= 0
             && mesh.index_count >= 0
             && (mesh.shared_vertices.is_none() || blen(&mesh.vertices)==0)
@@ -1263,9 +1271,16 @@ fn scratch_mem_mesh(scratch: &PreparedScratch, item: &CachedRef) -> bool {
 /// keep the exact source bytes they were uploaded from and compare them physically. Content hashing
 /// happens once per upload and only decides a same-key miss for fresh but equal bytes.
 fn prepare(value: &mut SceneExecution, uniforms: Option<&Bytes>, vertex_stable: bool, mesh: &Mesh) -> Result<CachedRef, Error> {
-    let uniform_bytes: Vec<u8> = uniforms.map(|b| b.to_vec()).unwrap_or_default();
-    let valid_uniforms = uniforms.is_none_or(|bytes_| valid_uniform_bytes(&bytes_));
-    let key = mesh_key_string(&mesh.key);
+    let uniform_bytes = uniforms.map_or(&[][..], |bytes| &bytes[..]);
+    let valid_uniforms = uniforms.is_none_or(|bytes_| valid_uniform_bytes(bytes_));
+    let gpu_key;
+    let key = match &mesh.key {
+        MeshKey::Host(key) => key,
+        MeshKey::GpuVertices { .. } => {
+            gpu_key = mesh_key_string(&mesh.key);
+            &gpu_key
+        }
+    };
     // a borrowed stream that was unregistered can never be named again: its cached copies go,
     // rather than waiting for the table's byte or entry limit
     let unregistered = value.gpu_vertices.borrow().unregistered;
@@ -1287,11 +1302,11 @@ fn prepare(value: &mut SceneExecution, uniforms: Option<&Bytes>, vertex_stable: 
             side_lru::remove(&mut value.cache, &skey(&key));
         }
     }
-    let found = side_lru::find(&mut value.cache, &skey(&key)).map(|item| cached_of(&item));
+    let found = side_lru::find_str(&mut value.cache, key).map(|item| cached_of(&item));
     match found {
-        None => prepare_upload(value, uniforms, &uniform_bytes, valid_uniforms, vertex_stable, mesh, &key, None),
+        None => prepare_upload(value, uniforms, uniform_bytes, valid_uniforms, vertex_stable, mesh, key, None),
         Some(item) if item.borrow().primitive != mesh.primitive => {
-            prepare_upload(value, uniforms, &uniform_bytes, valid_uniforms, vertex_stable, mesh, &key, Some(item))
+            prepare_upload(value, uniforms, uniform_bytes, valid_uniforms, vertex_stable, mesh, key, Some(item))
         }
         Some(item) if vertex_stable => {
             let (equal, offset) = {
@@ -1304,8 +1319,8 @@ fn prepare(value: &mut SceneExecution, uniforms: Option<&Bytes>, vertex_stable: 
             match offset {
                 None => Ok(item),
                 Some(offset) => {
-                    backend::write_buffer(&item.borrow().buffer, offset, &uniform_bytes)?;
-                    item.borrow_mut().uniform_copy[..uniform_bytes.len()].copy_from_slice(&uniform_bytes);
+                    backend::write_buffer(&item.borrow().buffer, offset, uniform_bytes)?;
+                    item.borrow_mut().uniform_copy[..uniform_bytes.len()].copy_from_slice(uniform_bytes);
                     value.uploaded += uniform_bytes.len() as i64;
                     Ok(item)
                 }
@@ -1314,12 +1329,12 @@ fn prepare(value: &mut SceneExecution, uniforms: Option<&Bytes>, vertex_stable: 
         Some(item) if same_bytes(mesh, &item.borrow().trusted_source) && uniform_bytes == item.borrow().uniform_copy => Ok(item),
         Some(item) => {
             let hash = item.borrow().payload_hash;
-            if hash.is_some_and(|hash| hash == content_hash(mesh, &uniform_bytes)) {
+            if hash.is_some_and(|hash| hash == content_hash(mesh, uniform_bytes)) {
                 let size = item.borrow().bytes;
                 item.borrow_mut().trusted_source = source_for_trust(mesh, size);
                 Ok(item)
             } else {
-                prepare_upload(value, uniforms, &uniform_bytes, valid_uniforms, vertex_stable, mesh, &key, Some(item))
+                prepare_upload(value, uniforms, uniform_bytes, valid_uniforms, vertex_stable, mesh, key, Some(item))
             }
         }
     }
@@ -1344,7 +1359,7 @@ fn prepare_upload(
         .ok_or_else(|| failure_error(operation, ErrorKind::Capacity, "mesh storage exceeds native address space"))?;
     let total = vertex_index_bytes.checked_add(uniform_bytes.len()).and_then(|n| i64::try_from(n).ok())
         .ok_or_else(|| failure_error(operation, ErrorKind::Capacity, "mesh storage exceeds native address space"))?;
-    if mesh_key_string(&mesh.key).is_empty()
+    if mesh.key.is_empty()
         || vertex_count <= 0
         || index_count <= 0
         || (total == 0 && matches!(mesh.key, MeshKey::Host(_)))
@@ -1406,7 +1421,7 @@ fn prepare_upload(
         }
         None => {
             let descriptor = BufferDescriptor {
-                label: Some(format!("scene-mesh-{}", mesh_key_string(&mesh.key))),
+                label: Some(format!("scene-mesh-{key}")),
                 size: total.max(4),
                 usage: vec![BufferUsage::Vertex, BufferUsage::Index, BufferUsage::Storage, BufferUsage::CopyDst],
             };
@@ -1720,10 +1735,10 @@ fn prepare_texture(value: &mut SceneExecution, defer: &mut Vec<Deferred>, source
             texture: texture.clone(),
             bytes: 0,
             used: value.frame,
-            levels: Rc::new(Vec::new()),
+            levels: source.levels.clone(),
         })));
     }
-    let found = side_lru::find(&mut value.texture_cache, &skey(&source.key)).map(|item| cached_texture_of(&item));
+    let found = side_lru::find_str(&mut value.texture_cache, &source.key).map(|item| cached_texture_of(&item));
     let key = source.key.as_str();
     match found {
         Some(item)
@@ -1787,11 +1802,15 @@ fn upload_texture(
         return Err(failure_error("Scene_execution.prepare_texture", ErrorKind::InvalidArgument, "texture or sampler is malformed"));
     }
     let texel = texel_bytes(source);
-    let shape = format!(
-        "{}{}",
-        if texel == 4 { String::new() } else { format!("{}B:", texel) },
-        source.levels.iter().map(|level| format!("{}x{}", level.width, level.height)).collect::<Vec<_>>().join("/")
-    );
+    use std::fmt::Write as _;
+    let mut shape = String::new();
+    if texel != 4 {
+        write!(shape, "{texel}B:").expect("write to String");
+    }
+    for (i, level) in source.levels.iter().enumerate() {
+        if i > 0 { shape.push('/'); }
+        write!(shape, "{}x{}", level.width, level.height).expect("write to String");
+    }
     // Canvas and managed-image identities are unique and lower to one authoritative generation per
     // staged frame, so their same-shape storage can be updated safely between completed
     // submissions. A replacement image of the same shape may steal an unused cached texture; two
@@ -1810,29 +1829,28 @@ fn upload_texture(
             .map(|item| cached_texture_of(&item))
         }
     };
-    let descriptor = TextureDescriptor {
-        label: Some(format!("scene-texture-{}", source.key)),
-        width: source.levels[0].width,
-        height: source.levels[0].height,
-        depth: 1,
-        mip_levels: source.levels.len() as i64,
-        sample_count: 1,
-        format: texel_format(texel),
-        usage: vec![TextureUsage::TextureBinding, TextureUsage::TextureCopyDst],
-    };
-    let rows: Vec<i64> = source.levels.iter().map(|level| align256(level.width * texel)).collect();
-    let mut offsets = vec![0i64; source.levels.len()];
-    for index in 1..offsets.len() {
-        offsets[index] = offsets[index - 1] + rows[index - 1] * source.levels[index - 1].height;
-    }
-    let last = offsets.len() - 1;
-    let total = offsets[last] + rows[last] * source.levels[last].height;
+    let layout = || source.levels.iter().scan(0, |offset, level| {
+        let pitch = align256(level.width * texel);
+        let start = *offset;
+        *offset += pitch * level.height;
+        Some((level, start, pitch))
+    });
+    let total = layout().last().map_or(0, |(level, offset, pitch)| offset + pitch * level.height);
     // Each retained CPU/GPU bank fits this charge; their combined storage may be twice it.
     let charge = total.max(crate::renderer_lowering::sampled_texture_bytes(source));
     let cacheable = charge <= TEXTURE_CACHE_BYTE_CAPACITY;
     let (texture, created) = match &reusable {
         Some(item) if cacheable => (item.borrow().texture.clone(), false),
-        _ => (backend::create_texture(&value.device, descriptor)?, true),
+        _ => (backend::create_texture(&value.device, TextureDescriptor {
+            label: Some(format!("scene-texture-{}", source.key)),
+            width: source.levels[0].width,
+            height: source.levels[0].height,
+            depth: 1,
+            mip_levels: source.levels.len() as i64,
+            sample_count: 1,
+            format: texel_format(texel),
+            usage: vec![TextureUsage::TextureBinding, TextureUsage::TextureCopyDst],
+        })?, true),
     };
     let destroy_created = |texture: &Texture| {
         if created {
@@ -1848,11 +1866,11 @@ fn upload_texture(
         let scratch = value.texture_upload_scratch.as_mut().expect("texture staging");
         staging = scratch.buffer.clone();
         let packed = &mut scratch.bytes;
-        for (level_index, level) in source.levels.iter().enumerate() {
+        for (level, offset, pitch) in layout() {
             let pixels = &level.bytes;
             let row_bytes = (level.width * texel) as usize;
             for row in 0..level.height as usize {
-                let to = offsets[level_index] as usize + row * rows[level_index] as usize;
+                let to = offset as usize + row * pitch as usize;
                 packed[to..to + row_bytes].copy_from_slice(&pixels[row * row_bytes..(row + 1) * row_bytes]);
             }
         }
@@ -1869,13 +1887,13 @@ fn upload_texture(
         let commands = backend::begin_commands(&value.queue)?;
         let encoded = (|| -> Result<backend::Receipt, Error> {
             let blit = backend::blit_encoder(&commands)?;
-            for (index, level) in source.levels.iter().enumerate() {
+            for (index, (level, offset, pitch)) in layout().enumerate() {
                 backend::buffer_to_texture(
                     &blit,
                     &staging,
-                    Some(offsets[index]),
-                    rows[index],
-                    rows[index] * level.height,
+                    Some(offset),
+                    pitch,
+                    pitch * level.height,
                     &texture,
                     Some(index as i64),
                     None,
@@ -2166,7 +2184,7 @@ fn resolve_prepared(value: &mut SceneExecution, prepared: &Option<(String, i64)>
             Err(failure_error("Scene_execution.prepare_run", ErrorKind::InvalidArgument, "prepared identity is empty"))
         }
         Some((identity, version)) => {
-            if let Some(item) = side_lru::find(&mut value.prepared_cache, &skey(identity)) {
+            if let Some(item) = side_lru::find_str(&mut value.prepared_cache, identity) {
                 let item = prepared_run_of(&item);
                 if item.version == *version {
                     return Ok(item.draws.clone());
@@ -3266,7 +3284,7 @@ fn finish_prepared_frame(
     after_prepare: &mut dyn FnMut(),
 ) -> Result<bool, Error> {
     after_prepare();
-    let mut signatures: Vec<AutomaticSignature> =
+    let signatures: Rc<[AutomaticSignature]> =
         value.prepared_scratch.slots[..value.prepared_scratch.length].iter().map(automatic_signature).collect();
     let hit = match &value.automatic_submission {
         Some(plan)
@@ -3305,14 +3323,6 @@ fn finish_prepared_frame(
             return Err(e);
         }
     };
-    // an admitted plan takes the signatures; otherwise the next frame compares against them
-    let payloads = if !retained {
-        Vec::new()
-    } else if admit {
-        std::mem::take(&mut signatures)
-    } else {
-        signatures.clone()
-    };
     let gpu_vertices: Vec<GpuVertices> = if retained {
         value.prepared_scratch.slots[..value.prepared_scratch.length].iter().rev().filter_map(|slot| slot.gpu_vertices.clone()).collect()
     } else {
@@ -3322,7 +3332,7 @@ fn finish_prepared_frame(
     encode_frame(value, &frame, clear, &plan_batches_)?;
     value.previous_uniforms = uniform_slices;
     let plan = retained.then(|| {
-        Rc::new(ReplayPlan { clear, payloads, batches: plan_batches_, gpu_vertices })
+        Rc::new(ReplayPlan { clear, payloads: signatures.clone(), batches: plan_batches_, gpu_vertices })
     });
     if let Some(plan) = &plan {
         for batch in &plan.batches {
@@ -3416,7 +3426,7 @@ pub fn submit(
     // failing the whole frame.
     let draws: Vec<Draw> = draws.into_iter().filter(|entry| entry.ui.is_some() || (entry.draw.mesh.vertex_count > 0 && entry.draw.mesh.index_count > 0)).collect();
     let valid_mesh = |mesh: &Mesh| {
-        !mesh_key_string(&mesh.key).is_empty()
+        !mesh.key.is_empty()
             && mesh.vertex_count > 0
             && mesh.index_count > 0
             && valid_index_length(mesh)
@@ -3553,10 +3563,9 @@ fn prepare_all(
         let mode = &modes[position];
         let (family, draw) = (entry.family, &entry.draw);
         let gpu_vertices = resolve_gpu_vertices(value, entry)?;
-        let cpu_mesh = match &gpu_vertices {
-            None => draw.mesh.clone(),
-            Some(source) if source.indices.is_some() => draw.mesh.clone(),
-            Some(_) => Mesh {
+        let borrowed_indices;
+        let cpu_mesh = if gpu_vertices.as_ref().is_some_and(|source| source.indices.is_none()) {
+            borrowed_indices = Mesh {
                 key: MeshKey::Host(format!(
                     "gpu:indices:{}{}",
                     draw.mesh.vertex_count,
@@ -3566,10 +3575,13 @@ fn prepare_all(
                     }
                 )),
                 ..draw.mesh.clone()
-            },
+            };
+            &borrowed_indices
+        } else {
+            &draw.mesh
         };
         let uniforms = if mode.scene2 || mode.affine || mode.scene3_transform { None } else { draw.state.transform_uniforms.as_ref() };
-        let mesh_ = prepare(value, uniforms, mode.scene3_transform, &cpu_mesh)?;
+        let mesh_ = prepare(value, uniforms, mode.scene3_transform, cpu_mesh)?;
         let attributes = match &entry.vertex_attributes {
             None => None,
             Some((_, b)) if blen(b) == 0 => None,

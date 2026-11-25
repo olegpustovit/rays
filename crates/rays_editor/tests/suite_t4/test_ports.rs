@@ -31,7 +31,7 @@ fn frame_of(synthetic: bool, name: &str, count: i64) -> rays::frame::Frame {
             ("recursive_rectangles", 1) => vec![Event::PointerPressed(LeftButton, (100., 140.))],
             ("audio", 1) => vec![Event::KeyPressed(Key::KeyChar('3'))],
             ("audio", 3) => vec![Event::PointerPressed(LeftButton, (400., 180.))],
-            ("file_dialog", 1) => vec![Event::FileDropped("sample.png".into()), Event::FileDialog { id: 1, result: Ok(vec!["a.png".into(), "b.png".into()]) }],
+            ("file_dialog", 1) => vec![Event::FilesDropped { position: (0.0, 0.0), paths: Ok(vec!["sample.png".into()]) }, Event::FileDialog { id: 1, result: Ok(vec!["a.png".into(), "b.png".into()]) }],
             ("file_dialog", 2) => vec![Event::FileDragMoved((90., 140.)), Event::Pinched(1.25)],
             ("file_dialog", 3) => vec![Event::FileDragEnded, Event::FileDialog { id: 2, result: Ok(vec![]) }],
             _ => vec![],

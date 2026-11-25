@@ -19,7 +19,7 @@ use flow_native::workspace_images;
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::Value as EValue;
 use input::{Event, Key, MouseButton};
-use pxui::geom::p64;
+use crate::p64;
 use pxui::ui::Ui;
 use rays_shell::layout::Bounds;
 use rays::frame;
@@ -261,7 +261,7 @@ pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key],
     let modifiers = sent.input.events.iter().fold(modifiers, |keys, e| input::keys_after(&keys, e));
     let ui = value.core.ui.clone();
     let ui = ui.borrow();
-    let view = pane_keys.iter().find_map(|(key, (panel, _))| if matches!(panel, Panel::View(_)) { ui.box_of_key(*key) } else { None });
+    let view = pane_keys.iter().find_map(|(key, (panel, _))| if matches!(panel, Panel::View(_)) { ui.box_of_key(pxui::Key::Resolved(*key)) } else { None });
     let signal = view.as_ref().map(|b| ui.signal(b));
     let core = Rc::make_mut(&mut value.core);
     let (world_drag, engaged) = match (&signal, &view) {

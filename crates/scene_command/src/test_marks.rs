@@ -110,7 +110,7 @@ fn valid_tables_of_every_entry_kind_pass() {
         Entry::Geometry { vertices: vec![], indices: vec![], color: 0 },
         Entry::Geometry { vertices: vec![0.0, 0.0, 1.0, 0.0, 1.0, 1.0], indices: vec![0, 1, 2], color: 1 },
         Entry::Image { resource: 1, x: 0, y: 0, scale: 1.0, angle: 0.0 },
-        Entry::Text { x: 0, y: 0, size: 0, color: 0, text: vec![] },
+        Entry::Text { x: 0, y: 0, size: 0, color: 0, text: vec![], style: 0 },
         Entry::PushTransform { xx: 1.0, xy: 0.0, yx: 0.0, yy: 1.0, tx: 0.0, ty: 0.0 },
         Entry::PushClip { x: 0.0, y: 0.0, width: 1.0, height: 1.0 },
         Entry::PopClip,
@@ -159,7 +159,7 @@ fn refusals_name_each_invalid_entry() {
     bad(&[Entry::PushClip { x: 0.0, y: 0.0, width: 1.0, height: 1.0 }]);
     // Families are independent: a clip pop cannot close a transform push.
     bad(&[Entry::PushTransform { xx: 1.0, xy: 0.0, yx: 0.0, yy: 1.0, tx: 0.0, ty: 0.0 }, Entry::PopClip]);
-    let too_many = vec![Entry::Text { x: 0, y: 0, size: 1, color: 0, text: vec![] }; (marks::max_entries() + 1) as usize];
+    let too_many = vec![Entry::Text { x: 0, y: 0, size: 1, color: 0, text: vec![], style: 0 }; (marks::max_entries() + 1) as usize];
     bad(&too_many);
 }
 
@@ -173,7 +173,7 @@ fn serialize_is_exact_and_deterministic() {
     }
     let tiny = vec![
         Entry::MarkSet { count: 1, kind: Kind::Point { position: pair(1.0, 2.0), fill: 0x11223344 } },
-        Entry::Text { x: 1, y: 2, size: 3, color: 5, text: b"hi".to_vec() },
+        Entry::Text { x: 1, y: 2, size: 3, color: 5, text: b"hi".to_vec(), style: 0 },
     ];
     let mut expected = Vec::new();
     expected.extend_from_slice(&0x524d4b31_u32.to_le_bytes());

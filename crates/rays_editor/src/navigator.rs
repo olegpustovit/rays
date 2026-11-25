@@ -14,10 +14,10 @@ use flow_syntax::syntax::{self as s, Node, Syntax};
 use flow_syntax::ty::{self, ColorKind, Ty};
 use flow_syntax::value::Value;
 use input::Key;
-use pxui::theme::{self, Tokens as Theme};
+use pxui::theme::{Tokens as Theme};
 use pxui::ui::*;
 use rays_shell::kit::{self, ButtonOpts};
-use pxui::geom::color::{self, T as Color};
+use pxui::Rgba as Color;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -197,9 +197,9 @@ pub fn chips(ev: &flow_eval::Eval) -> Vec<(String, Color)> {
             Value::Struct(p) if p.name == "material/standard" => {
                 let fields = &p.fields;
                 let colour = match fields.get_str("color") {
-                    Some(Value::Vec3(r, g, b)) => Some(color::rgb(byte(*r), byte(*g), byte(*b))),
-                    Some(Value::Text(hex)) => color::hex(&String::from_utf8_lossy(hex)).ok(),
-                    None => Some(color::white()),
+                    Some(Value::Vec3(r, g, b)) => Some(Color::rgb(byte(*r) as u8, byte(*g) as u8, byte(*b) as u8)),
+                    Some(Value::Text(hex)) => Color::parse(&String::from_utf8_lossy(hex)).ok(),
+                    None => Some(Color::WHITE),
                     Some(_) => None,
                 };
                 colour.map(|c| (name.as_str().to_owned(), c))
@@ -638,7 +638,7 @@ pub fn describe(row: &Row) -> String {
                     _ => String::new(),
                 },
                 match chip {
-                    Some(c) => color::to_hex_string(color::with_alpha(*c, 255)),
+                    Some(c) => c.with_alpha(255).to_hex_string(),
                     None => String::new(),
                 },
             ];
@@ -732,27 +732,27 @@ struct PaintCtx {
 }
 
 fn ell<'a>(paint: &mut Paint, limit: f32, label: &'a str) -> Cow<'a, str> {
-    ellipsis(&mut |s| paint.text_width(None, s), limit, label)
+    ellipsis(&mut |s| paint.text_service().width(s, pxui::Label::BODY, None).unwrap_or(0.0), limit, label)
 }
 
 /// hover is the faintest line, the current row the control fill, the selected one adds the accent brackets
 fn shade(paint: &mut Paint, c: &PaintCtx, k: usize, ry: f32, rhh: f32, selected: bool, current: bool) {
     let (x, w, theme) = (c.x, c.w, &c.theme);
     if selected {
-        paint.fill(x + 4.0, ry, w - 8.0, rhh, theme.control);
-        paint.brackets(x + 4.0, ry, w - 8.0, rhh, 3.0, 8.0, 2.0, theme.accent);
+        paint.fill(pxui::Rect::new(x + 4.0, ry, w - 8.0, rhh), pxui::Fill::new(theme.control));
+        paint.brackets(pxui::Rect::new(x + 4.0, ry, w - 8.0, rhh), 3.0, 8.0, pxui::Stroke::new(theme.accent).width(2.0));
     } else if current {
-        paint.fill(x, ry, w, rhh, theme.control);
+        paint.fill(pxui::Rect::new(x, ry, w, rhh), pxui::Fill::new(theme.control));
     } else if c.hovered == Some(k) {
-        paint.fill(x, ry, w, rhh, theme::faint_border(theme));
+        paint.fill(pxui::Rect::new(x, ry, w, rhh), pxui::Fill::new((theme).foreground.with_alpha(20)));
     }
 }
 
 /// the detail at the row's end takes at most half the row; the label keeps the rest
 fn right_text(paint: &mut Paint, c: &PaintCtx, ty: f32, label: &str) -> f32 {
     let label = ell(paint, (c.w - 24.0) / 2.0, label);
-    let tw = paint.text_width(None, &label);
-    paint.text_c((c.x + c.w - tw - 12.0, ty), c.muted, &label);
+    let tw = paint.text_service().width(&label, pxui::Label::BODY, None).unwrap_or(0.0);
+    { let text = &label; let span = pxui::TextSpan::new(0, text.len() as u32).color(c.muted); let _ = paint.text_spans(pxui::Point::new(c.x + c.w - tw - 12.0, ty), pxui::Label::BODY, 0.0, text, &[span]); };
     c.x + c.w - tw - 20.0
 }
 
@@ -760,43 +760,43 @@ fn right_text(paint: &mut Paint, c: &PaintCtx, ty: f32, label: &str) -> f32 {
 fn labelled(paint: &mut Paint, c: &PaintCtx, ty: f32, color: Color, from: f32, label: &str, detail: &str) {
     let edge = right_text(paint, c, ty, detail);
     let cut = ell(paint, edge - from, label);
-    paint.text_c((from, ty), color, &cut);
+    { let text = &cut; let span = pxui::TextSpan::new(0, text.len() as u32).color(color); let _ = paint.text_spans(pxui::Point::new(from, ty), pxui::Label::BODY, 0.0, text, &[span]); };
 }
 
 fn square(paint: &mut Paint, c: &PaintCtx, ry: f32, sx: f32, color: Color) {
-    paint.fill(sx, ry + (c.rh / 2.0) - 4.0, 8.0, 8.0, color);
+    paint.fill(pxui::Rect::new(sx, ry + (c.rh / 2.0) - 4.0, 8.0, 8.0), pxui::Fill::new(color));
 }
 
 fn paint_row(paint: &mut Paint, c: &PaintCtx, k: usize, row: &Row) {
     let (x, w, rh, theme, muted, wide) = (c.x, c.w, c.rh, &c.theme, c.muted, c.wide);
     let ry = c.top + c.tops[k] - c.scroll;
     let rhh = c.tops[k + 1] - c.tops[k];
-    let ink_3 = theme::ink_3(theme);
-    let ty = paint.text_top(None, ry, rh);
+    let ink_3 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
+    let ty = (ry) + (((rh) - (paint.tokens().font_size) as f32) / 2.0).floor();
     // a zone's kind: an accent label, no fill
     let tag = |paint: &mut Paint, tx: f32, glyph: &str| -> f32 {
-        paint.cap((tx, kit::cap_y_paint(paint, ry, rh)), Some(theme.accent), glyph);
-        tx + paint.cap_width(glyph) + 8.0
+        { let text = glyph; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.accent); let _ = paint.text_spans(pxui::Point::new(tx, kit::cap_y_paint(paint, ry, rh)), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
+        tx + { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(glyph, style, None) }.unwrap_or(0.0) + 8.0
     };
     // the right columns: a 20-point count, or the two 12-point flags 8 apart
     let flag_x = |column: i64| x + w - 12.0 - 12.0 - ((1 - column) as f32 * 20.0);
     match row {
         Row::Head(s, right) => {
             let cy = kit::cap_y_paint(paint, ry + rhh - rh, rh);
-            paint.cap((x + 12.0, cy), Some(ink_3), s);
+            { let text = s; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink_3); let _ = paint.text_spans(pxui::Point::new(x + 12.0, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
             // the right column is a label in ink-3 too: two 12-point columns over the flags, a word, or the leader
             // keys as the kit's key text
             if right == "v  r" {
                 for (column, name) in ["v", "r"].iter().enumerate() {
-                    let cw = paint.cap_width(name);
-                    paint.cap((flag_x(column as i64) + 6.0 - (cw / 2.0), cy), Some(ink_3), name);
+                    let cw = { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(name, style, None) }.unwrap_or(0.0);
+                    { let text = name; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink_3); let _ = paint.text_spans(pxui::Point::new(flag_x(column as i64) + 6.0 - (cw / 2.0), cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
                 }
             } else if right == "/ [" {
-                let kw = paint.text_width(Some(c.small), right);
-                paint.text_s((x + w - 12.0 - kw, cy), c.small, ink_3, right);
+                let kw = paint.text_service().width(right, pxui::Label::BODY.size((c.small) as f32), None).unwrap_or(0.0);
+                { let text = right; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink_3); let _ = paint.text_spans(pxui::Point::new(x + w - 12.0 - kw, cy), pxui::Label::BODY.size((c.small) as f32), 0.0, text, &[span]); };
             } else if !right.is_empty() && (wide || right != "used") {
-                let cw = paint.cap_width(right);
-                paint.cap((x + w - 12.0 - cw, cy), Some(ink_3), right);
+                let cw = { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(right, style, None) }.unwrap_or(0.0);
+                { let text = right; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink_3); let _ = paint.text_spans(pxui::Point::new(x + w - 12.0 - cw, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
             }
         }
         Row::ObjectRow(o) => {
@@ -811,79 +811,79 @@ fn paint_row(paint: &mut Paint, c: &PaintCtx, k: usize, row: &Row) {
             };
             // the selected object stands in the root's indent with a chevron of its own
             if o.chosen && wide {
-                paint.chevron((x + 15.0, ry + (rh / 2.0)), Dir::Down, theme.foreground);
+                paint.chevron((x + 15.0, ry + (rh / 2.0)), Dir::Down, pxui::Stroke::new(theme.foreground));
             }
             let right = x + w - if o.chosen { 7.0 } else { 12.0 };
             let flag_x = |column: i64| right - 12.0 - ((1 - column) as f32 * 20.0);
-            paint.cap((ox, kit::cap_y_paint(paint, ry, rh)), Some(if o.chosen { theme.foreground } else { muted }), &o.letter);
+            { let text = &o.letter; let span = pxui::TextSpan::new(0, text.len() as u32).color(if o.chosen { theme.foreground } else { muted }); let _ = paint.text_spans(pxui::Point::new(ox, kit::cap_y_paint(paint, ry, rh)), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
             let cy = ry + (rh / 2.0);
             // a flag is a 12-point box with its 1-point line and a 6-point mark inset 2 inside it: the render camera's is the accent
             if let Some(on) = o.visible {
                 let fx = flag_x(0);
                 // a stroke is centred on its edge: inset half a point to keep the box 12 points
-                paint.fill(fx, cy - 6.0, 12.0, 12.0, theme.input);
-                paint.stroke(fx + 0.5, cy - 5.5, 11.0, 11.0, theme::border(theme));
+                paint.fill(pxui::Rect::new(fx, cy - 6.0, 12.0, 12.0), pxui::Fill::new(theme.input));
+                paint.stroke(pxui::Rect::new(fx + 0.5, cy - 5.5, 11.0, 11.0), pxui::Stroke::new((theme).foreground.with_alpha(77)));
                 if on {
-                    paint.fill(fx + 3.0, cy - 3.0, 6.0, 6.0, muted);
+                    paint.fill(pxui::Rect::new(fx + 3.0, cy - 3.0, 6.0, 6.0), pxui::Fill::new(muted));
                 }
             }
             if let Some(on) = o.render {
                 let fx = flag_x(1) + 6.0;
-                paint.circle((fx, cy), 5.5, Some(theme.input), Some(theme::border(theme)));
+                paint.circle((fx, cy), 5.5, Some(pxui::Fill::new(theme.input)), Some(pxui::Stroke::new((theme).foreground.with_alpha(77))));
                 if on {
-                    paint.circle((fx, cy), 3.0, Some(if o.lead { theme.accent } else { muted }), None);
+                    paint.circle((fx, cy), 3.0, Some(pxui::Fill::new(if o.lead { theme.accent } else { muted })), None);
                 }
             }
             let edge = flag_x(0) - 8.0;
-            let dw = paint.text_width(None, &o.detail);
-            let name_x = ox + paint.cap_width(&o.letter) + 8.0;
+            let dw = paint.text_service().width(&o.detail, pxui::Label::BODY, None).unwrap_or(0.0);
+            let name_x = ox + { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(&o.letter, style, None) }.unwrap_or(0.0) + 8.0;
             let name = ell(paint, edge - name_x, &o.name);
-            paint.text_c((name_x, ty), theme.foreground, &name);
-            if wide && name_x + paint.text_width(None, &name) + 8.0 < edge - dw {
-                paint.text_c((edge - dw, ty), muted, &o.detail);
+            { let text = &name; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(name_x, ty), pxui::Label::BODY, 0.0, text, &[span]); };
+            if wide && name_x + paint.text_service().width(&name, pxui::Label::BODY, None).unwrap_or(0.0) + 8.0 < edge - dw {
+                { let text = &o.detail; let span = pxui::TextSpan::new(0, text.len() as u32).color(muted); let _ = paint.text_spans(pxui::Point::new(edge - dw, ty), pxui::Label::BODY, 0.0, text, &[span]); };
             }
         }
         Row::RootRow { detail, folded, active, .. } => {
             shade(paint, c, k, ry, rhh, false, *active);
             // the chevron opens or folds the objects; wide only, where the sheet draws it
             if wide {
-                paint.chevron((x + 15.0, ry + (rh / 2.0)), if *folded { Dir::Right } else { Dir::Down }, theme.foreground);
+                paint.chevron((x + 15.0, ry + (rh / 2.0)), if *folded { Dir::Right } else { Dir::Down }, pxui::Stroke::new(theme.foreground));
             }
             let ox = x + if wide { 26.0 } else { 12.0 };
-            paint.cap((ox, kit::cap_y_paint(paint, ry, rh)), Some(muted), "R");
-            let name_x = ox + paint.cap_width("R") + 8.0;
-            paint.text_c((name_x, ty), theme.foreground, "root");
+            { let text = "R"; let span = pxui::TextSpan::new(0, text.len() as u32).color(muted); let _ = paint.text_spans(pxui::Point::new(ox, kit::cap_y_paint(paint, ry, rh)), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
+            let name_x = ox + { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width("R", style, None) }.unwrap_or(0.0) + 8.0;
+            { let text = "root"; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(name_x, ty), pxui::Label::BODY, 0.0, text, &[span]); };
             if wide {
                 let edge = flag_x(0) - 8.0;
-                let dw = paint.text_width(None, detail);
-                paint.text_c((edge - dw, ty), muted, detail);
+                let dw = paint.text_service().width(detail, pxui::Label::BODY, None).unwrap_or(0.0);
+                { let text = detail; let span = pxui::TextSpan::new(0, text.len() as u32).color(muted); let _ = paint.text_spans(pxui::Point::new(edge - dw, ty), pxui::Label::BODY, 0.0, text, &[span]); };
             }
         }
         Row::LayoutRow { index, label, active } => {
             shade(paint, c, k, ry, rhh, false, false);
             // its key as the kit's key text, then the name 8 points on
             let key = index.to_string();
-            paint.text_s((x + 12.0, kit::cap_y_paint(paint, ry, rh)), c.small, theme::ink_3(theme), &key);
-            let name_x = x + 12.0 + paint.text_width(Some(c.small), &key) + 8.0;
+            { let text = &key; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521)); let _ = paint.text_spans(pxui::Point::new(x + 12.0, kit::cap_y_paint(paint, ry, rh)), pxui::Label::BODY.size((c.small) as f32), 0.0, text, &[span]); };
+            let name_x = x + 12.0 + paint.text_service().width(&key, pxui::Label::BODY.size((c.small) as f32), None).unwrap_or(0.0) + 8.0;
             let cut = ell(paint, x + w - 38.0 - name_x, label);
-            paint.text_c((name_x, ty), theme.foreground, &cut);
+            { let text = &cut; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(name_x, ty), pxui::Label::BODY, 0.0, text, &[span]); };
             if *active {
-                paint.fill(x + w - 18.0, ry + (rh / 2.0) - 3.0, 6.0, 6.0, theme.accent);
+                paint.fill(pxui::Rect::new(x + w - 18.0, ry + (rh / 2.0) - 3.0, 6.0, 6.0), pxui::Fill::new(theme.accent));
             }
         }
         Row::InputRow { name, .. } => {
             let cut = ell(paint, c.label_w, name);
-            paint.text_c((x + 12.0, ty), muted, &cut);
+            { let text = &cut; let span = pxui::TextSpan::new(0, text.len() as u32).color(muted); let _ = paint.text_spans(pxui::Point::new(x + 12.0, ty), pxui::Label::BODY, 0.0, text, &[span]); };
         }
         Row::GraphRow { label, context, detail, active, chip, dim, used, graph } => {
             shade(paint, c, k, ry, rhh, false, *active);
             if wide && *active && c.has_scope {
-                paint.chevron((x + 5.0, ry + (rh / 2.0)), if c.opened.contains(graph) { Dir::Down } else { Dir::Right }, ink_3);
+                paint.chevron((x + 5.0, ry + (rh / 2.0)), if c.opened.contains(graph) { Dir::Down } else { Dir::Right }, pxui::Stroke::new(ink_3));
             }
             match chip {
                 Some(col) => {
-                    paint.fill(x + 12.0, ry + (rh / 2.0) - 6.0, 12.0, 12.0, *col);
-                    paint.stroke(x + 12.5, ry + (rh / 2.0) - 5.5, 11.0, 11.0, theme::edge(theme));
+                    paint.fill(pxui::Rect::new(x + 12.0, ry + (rh / 2.0) - 6.0, 12.0, 12.0), pxui::Fill::new(*col));
+                    paint.stroke(pxui::Rect::new(x + 12.5, ry + (rh / 2.0) - 5.5, 11.0, 11.0), pxui::Stroke::new((theme).foreground.with_alpha(38)));
                 }
                 None if graph.starts_with("def:") => {
                     // a function: the diamond of its port, a 7-point square turned 45 degrees (10 across), in half-point rows
@@ -891,7 +891,7 @@ fn paint_row(paint: &mut Paint, c: &PaintCtx, k: usize, row: &Row) {
                     for kk in 0..20 {
                         let off = ((kk as f32 + 0.5) * 0.5) - 5.0;
                         let half = 5.0 - off.abs();
-                        paint.fill(cx - half, cy + off - 0.25, 2.0 * half, 0.5, rays_graph::scope_paint::ports(theme).fn_);
+                        paint.fill(pxui::Rect::new(cx - half, cy + off - 0.25, 2.0 * half, 0.5), pxui::Fill::new(rays_graph::scope_paint::ports(theme).fn_));
                     }
                 }
                 None => square(paint, c, ry, x + 12.0, context_color(theme, *context)),
@@ -908,14 +908,14 @@ fn paint_row(paint: &mut Paint, c: &PaintCtx, k: usize, row: &Row) {
                 Some(n) => {
                     let count = n.to_string();
                     // a count is ink on the wide sheet, ink-2 on the narrow one
-                    let cw = paint.text_width(None, &count);
-                    paint.text_c((x + w - 12.0 - cw, ty), if wide { color } else if *dim { ink_3 } else { muted }, &count);
+                    let cw = paint.text_service().width(&count, pxui::Label::BODY, None).unwrap_or(0.0);
+                    { let text = &count; let span = pxui::TextSpan::new(0, text.len() as u32).color(if wide { color } else if *dim { ink_3 } else { muted }); let _ = paint.text_spans(pxui::Point::new(x + w - 12.0 - cw, ty), pxui::Label::BODY, 0.0, text, &[span]); };
                     let edge = x + w - 40.0;
-                    let dw = paint.text_width(None, detail);
+                    let dw = paint.text_service().width(detail, pxui::Label::BODY, None).unwrap_or(0.0);
                     let name = ell(paint, edge - from, label);
-                    paint.text_c((from, ty), color, &name);
-                    if wide && from + paint.text_width(None, &name) + 8.0 < edge - dw {
-                        paint.text_c((edge - dw, ty), if *dim { ink_3 } else { muted }, detail);
+                    { let text = &name; let span = pxui::TextSpan::new(0, text.len() as u32).color(color); let _ = paint.text_spans(pxui::Point::new(from, ty), pxui::Label::BODY, 0.0, text, &[span]); };
+                    if wide && from + paint.text_service().width(&name, pxui::Label::BODY, None).unwrap_or(0.0) + 8.0 < edge - dw {
+                        { let text = detail; let span = pxui::TextSpan::new(0, text.len() as u32).color(if *dim { ink_3 } else { muted }); let _ = paint.text_spans(pxui::Point::new(edge - dw, ty), pxui::Label::BODY, 0.0, text, &[span]); };
                     }
                 }
                 None => labelled(paint, c, ty, color, from, label, if wide { detail } else { "" }),
@@ -937,26 +937,26 @@ fn paint_row(paint: &mut Paint, c: &PaintCtx, k: usize, row: &Row) {
         }
         Row::MacroRow(name, uses) => {
             shade(paint, c, k, ry, rhh, false, false);
-            paint.text_c((x + 12.0, ty), muted, "\u{3bb}");
+            { let text = "\u{3bb}"; let span = pxui::TextSpan::new(0, text.len() as u32).color(muted); let _ = paint.text_spans(pxui::Point::new(x + 12.0, ty), pxui::Label::BODY, 0.0, text, &[span]); };
             labelled(paint, c, ty, theme.foreground, x + 28.0, name, &plural(*uses, "use"));
         }
         Row::LinkRow { label, graph, .. } => {
             shade(paint, c, k, ry, rhh, false, false);
-            paint.text_c((x + 12.0, ty), muted, label);
-            paint.text_c((x + 20.0 + c.label_w, ty), theme.foreground, graph);
+            { let text = label; let span = pxui::TextSpan::new(0, text.len() as u32).color(muted); let _ = paint.text_spans(pxui::Point::new(x + 12.0, ty), pxui::Label::BODY, 0.0, text, &[span]); };
+            { let text = graph; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(x + 20.0 + c.label_w, ty), pxui::Label::BODY, 0.0, text, &[span]); };
         }
-        Row::Empty(s) => paint.text_c((x + 12.0, ty), ink_3, s),
+        Row::Empty(s) => { let text = s; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink_3); let _ = paint.text_spans(pxui::Point::new(x + 12.0, ty), pxui::Label::BODY, 0.0, text, &[span]); },
     }
 }
 
 /// the list's rows, painted in the content child so the list's clip holds them
-fn paint_rows(ui: &mut Ui, content: &UiBox, c: PaintCtx) {
+fn paint_rows(ui: &mut Ui, content: &pxui::Handle, c: PaintCtx) {
     let c = Rc::new(c);
     let _ = ui;
     let c2 = c.clone();
-    ui.draw(content, move |paint, _| {
+    ui.canvas(content, move |paint, _| {
         let c = &c2;
-        paint.fill(c.x, c.top, c.w, c.body, c.theme.panel);
+        paint.fill(pxui::Rect::new(c.x, c.top, c.w, c.body), pxui::Fill::new(c.theme.panel));
         for (k, row) in c.rows.iter().enumerate() {
             let ry = c.top + c.tops[k] - c.scroll;
             let rhh = c.tops[k + 1] - c.tops[k];
@@ -973,35 +973,35 @@ fn paint_footer(ui: &mut Ui, theme: Theme, muted: Color, rh: f32, bounds: (f32, 
         return;
     }
     let (x, y, w, h) = bounds;
-    let boxed = ui.box_("navigator-footer", BoxOpts::default().w(Size::Px(w)).h(Size::Px(footer)).at((x, y + h - footer)));
+    let boxed = ui.node("navigator-footer", pxui::Node::DEFAULT.w(Size::Px(w)).h(Size::Px(footer)).at(x, y + h - footer));
     let small = kit::cap_size(ui);
-    ui.draw(&boxed, move |paint, Rect { x: fx, y: fy, w: fw, h: _ }| {
-        paint.fill(fx, fy, fw, footer, theme.panel);
-        paint.fill(fx, fy, fw, 1.0, theme::edge(&theme));
+    ui.canvas(&boxed, move |paint, Rect { x: fx, y: fy, w: fw, h: _ }| {
+        paint.fill(pxui::Rect::new(fx, fy, fw, footer), pxui::Fill::new(theme.panel));
+        paint.fill(pxui::Rect::new(fx, fy, fw, 1.0), pxui::Fill::new((theme).foreground.with_alpha(38)));
         let mut tx = fx + 12.0;
         // each key in ink-3 at the label size, what it does in ink-2, 8 apart
         for (key, what) in [("s", "filter"), ("i", "enter"), ("/ j", "jump")] {
-            paint.text_s((tx, kit::cap_y_paint(paint, fy + 1.0, rh)), small, theme::ink_3(&theme), key);
-            tx += paint.text_width(Some(small), key) + 8.0;
-            paint.text_c((tx, paint.text_top(None, fy + 1.0, rh)), muted, what);
-            tx += paint.text_width(None, what) + 8.0;
+            { let text = key; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521)); let _ = paint.text_spans(pxui::Point::new(tx, kit::cap_y_paint(paint, fy + 1.0, rh)), pxui::Label::BODY.size((small) as f32), 0.0, text, &[span]); };
+            tx += paint.text_service().width(key, pxui::Label::BODY.size((small) as f32), None).unwrap_or(0.0) + 8.0;
+            { let text = what; let span = pxui::TextSpan::new(0, text.len() as u32).color(muted); let _ = paint.text_spans(pxui::Point::new(tx, (fy + 1.0) + (((rh) - (paint.tokens().font_size) as f32) / 2.0).floor()), pxui::Label::BODY, 0.0, text, &[span]); };
+            tx += paint.text_service().width(what, pxui::Label::BODY, None).unwrap_or(0.0) + 8.0;
         }
         let count = plural(graphs as i64, "graph");
-        let cw = paint.cap_width(&count);
-        paint.cap((fx + fw - 12.0 - cw, kit::cap_y_paint(paint, fy + 1.0, rh)), None, &count);
+        let cw = { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(&count, style, None) }.unwrap_or(0.0);
+        { paint.text_chars(pxui::Point::new(fx + fw - 12.0 - cw, kit::cap_y_paint(paint, fy + 1.0, rh)), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), &count); };
     });
 }
 
-fn paint_thumb(ui: &mut Ui, theme: Theme, total: f32, rh: f32, boxed: &UiBox) {
+fn paint_thumb(ui: &mut Ui, theme: Theme, total: f32, rh: f32, boxed: &pxui::Handle) {
     // the scroll thumb: 4 points wide, 2 from the edge, line-3, over a track 6 points in from both ends
-    let scroll = ui.scroll_position(boxed);
-    ui.draw_over(boxed, move |paint, Rect { x: bx, y: by, w: bw, h: bh }| {
+    let scroll = ui.scroll(boxed).settled;
+    ui.canvas_over(boxed, move |paint, Rect { x: bx, y: by, w: bw, h: bh }| {
         let content = total + rh;
         if content > bh {
             let track = (bh - 12.0).max(1.0);
             let thumb = track.min((track * bh / content).max(20.0));
             let y = by + 6.0 + (track - thumb) * (scroll / (content - bh).max(1.0)).max(0.0).min(1.0);
-            paint.fill(bx + bw - 6.0, y, 4.0, thumb, theme::border(&theme));
+            paint.fill(pxui::Rect::new(bx + bw - 6.0, y, 4.0, thumb), pxui::Fill::new((theme).foreground.with_alpha(77)));
         }
     });
 }
@@ -1044,6 +1044,7 @@ fn input_sliders(
     w: f32,
     label_w: f32,
     typed_row: Option<usize>,
+    pane: i64,
 ) {
     // the sliders of the inputs, over their rows: a drag scrubs and Option-click types, as every numeric field of
     // the kit; a double click on the row's name types too, as an inspector row's label does (the field itself keeps
@@ -1053,18 +1054,20 @@ fn input_sliders(
             let ry = top + tops[k] - scroll;
             if ry >= top && ry + rh <= top + body {
                 let integer = *integer;
-                let scrub: Rc<dyn Fn(&str, f32, bool) -> String> = Rc::new(move |origin, dx, shift| scrub(integer, origin, dx, shift));
+                let scrub = |origin: &str, dx, shift| scrub(integer, origin, dx, shift);
                 let text = slider_text(integer, *value);
-                let o = ValueFieldOpts {
-                    display: (!integer).then(|| show(false, *value)),
-                    scrub: Some(scrub), edit: typed_row == Some(k), kept_drag: true,
-                    ..ValueFieldOpts::default()
-                };
+                let display = (!integer).then(|| show(false, *value));
+                let style = pxui::ValueField::DEFAULT.kept_drag(true).edit(typed_row == Some(k));
+                let style = display.as_deref().map_or(style, |display| style.display(display));
                 let valid = move |t: &str| match (t).parse::<f64>().ok() {
                     Some(v) => v.is_finite() && (!integer || v.fract() == 0.0),
                     None => false,
                 };
-                let (changed, _) = ui.value_field((x + 20.0 + label_w, ry + 2.0), w - 32.0 - label_w, 20.0, &o, &valid, &slider_label(graph, name), &text);
+                let label = slider_label(graph, name);
+                let key = pxui::Key::Resolved(pxui::ui::key_of(pane, &label));
+                let changed = pxui::ext::value_field(ui, key, &text,
+                    Rect::new(x + 20.0 + label_w, ry + 2.0, w - 32.0 - label_w, 20.0), &style,
+                    &pxui::ValueCallbacks::DEFAULT.valid(&valid).scrub(&scrub)).changed.unwrap_or(&text);
                 if changed != text
                     && let Some(v) = (&changed).parse::<f64>().ok()
                 {
@@ -1136,7 +1139,7 @@ fn row_of(tops: &[f32], top: f32, scroll: f32, py: f32) -> Option<usize> {
 }
 
 /// The held slider's scrub as its field reads it this frame (`dx` from the press).
-fn held_text(h: &Held, ui: &Ui, field: &UiBox, dx: f32) -> String {
+fn held_text(h: &Held, ui: &Ui, field: &pxui::Handle, dx: f32) -> String {
     scrub(h.integer, &h.origin, dx, ui.press_keys(field).contains(&Key::Shift.code()))
 }
 
@@ -1149,7 +1152,7 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
     use std::hash::Hash;
     let wide = bounds.2 >= 300;
     let rh = ui.row_height() as f32;
-    let dragged = HELD.with(|h| h.borrow().as_ref().filter(|h| h.pane == pane).and_then(|h| ui.box_of_key(h.field).filter(|b| ui.field_drag(b).is_some()).map(|_| h.patched)));
+    let dragged = HELD.with(|h| h.borrow().as_ref().filter(|h| h.pane == pane).and_then(|h| ui.box_of_key(pxui::Key::Resolved(h.field)).filter(|b| pxui::ext::field_drag(ui, b).is_some()).map(|_| h.patched)));
     let (rev, list, rows, tops) = SHOWN.with(|s| {
         let mut s = s.borrow_mut();
         let last = s.iter().position(|e| e.pane == pane).map(|index| s.remove(index));
@@ -1167,19 +1170,19 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
                 Shown { pane, state: state.clone(), params: pa.clone(), zones, wide, row_height: rh, rows, tops, rev, list }
             }
         };
-        let result = (e.rev, ui.box_of_key(e.list), e.rows.clone(), e.tops.clone());
+        let result = (e.rev, ui.box_of_key(pxui::Key::Resolved(e.list)), e.rows.clone(), e.tops.clone());
         if s.len() == 12 { s.remove(0); }
         s.push(e);
         result
     });
-    let scroll = list.map_or(0.0, |b| ui.scroll_position(&b));
+    let scroll = list.map_or(0.0, |b| ui.scroll(&b).settled);
     let hovered = list.map(|b| ui.signal(&b)).filter(|sg| sg.hovered).and_then(|sg| row_of(&tops, bounds.1 as f32 + SEARCH_HEIGHT, scroll, sg.pointer.1));
-    let keys = [Key::F2, Key::Delete, Key::Enter].map(|k| ui.key_pressed(k));
+    let keys = [pxui::KeyCode::F2, pxui::KeyCode::Delete, pxui::KeyCode::Enter].map(|k| ui.key_pressed(k, pxui::Mods::NONE));
     let revision = kit::revision(&|h| (rev, bounds, pa.scope.is_some(), pa.workspace.graphs.len(), scroll.to_bits(), hovered, keys).hash(h));
     let (mut out, mut verified) = (None, false);
-    let v = kit::cached(ui, "navigator-view", revision, &mut |ui| {
+    kit::cached(ui, "navigator-view", revision, &mut |ui| {
         verified = ui.verifying();
-        out = Some(build(state, ui, bounds, pa, rows.clone(), tops.clone()));
+        out = Some(build(state, ui, bounds, pa, rows.clone(), tops.clone(), pane));
     });
     let (state, mut intents) = match out {
         Some((next, intents, list)) if !verified => {
@@ -1189,13 +1192,13 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
                 let mut h = h.borrow_mut();
                 for row in rows.iter() {
                     let Row::InputRow { graph, name, integer, value } = row else { continue };
-                    let field = pxui::ui_core::key_of(v.box_key, &slider_label(graph, name));
-                    if ui.box_of_key(field).is_some_and(|b| ui.signal(&b).pressed) {
+                    let field = pxui::ui::key_of(pane, &slider_label(graph, name));
+                    if ui.box_of_key(pxui::Key::Resolved(field)).is_some_and(|b| ui.signal(&b).pressed) {
                         let origin = slider_text(*integer, *value);
                         *h = Some(Held { pane, field, graph: graph.clone(), input: name.clone(), integer: *integer, last: origin.clone(), origin, patched: false });
                     }
                 }
-                let signal = h.as_ref().and_then(|held| ui.box_of_key(held.field).map(|b| (b, ui.signal(&b))));
+                let signal = h.as_ref().and_then(|held| ui.box_of_key(pxui::Key::Resolved(held.field)).map(|b| (b, ui.signal(&b))));
                 match (h.as_mut(), signal) {
                     (Some(held), Some((b, sg))) if held.pane == pane && sg.held => (held.last, held.patched) = (held_text(held, ui, &b, sg.pointer.0 - sg.press_point.0), false),
                     (Some(held), _) if held.pane == pane => *h = None,
@@ -1213,15 +1216,16 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
     let followed = HELD.with(|h| {
         let mut h = h.borrow_mut();
         let h = h.as_mut().filter(|h| h.pane == pane)?;
-        let field = ui.box_of_key(h.field)?;
-        let (_, dx) = ui.field_drag(&field)?;
+        let field = ui.box_of_key(pxui::Key::Resolved(h.field))?;
+        let (_, dx) = pxui::ext::field_drag(ui, &field)?;
         let text = held_text(h, ui, &field, dx);
         if text == h.last {
             h.patched = true;
             return None;
         }
         let value = text.parse::<f64>().ok().filter(|v| v.is_finite())?;
-        let opts = ValueFieldOpts { display: (!h.integer).then(|| show(false, value)), ..ValueFieldOpts::default() };
+        let display = (!h.integer).then(|| show(false, value));
+        let opts = display.as_deref().map_or(pxui::ValueField::DEFAULT, |display| pxui::ValueField::DEFAULT.display(display));
         h.patched = ui.patch_field(&field, &opts, &text);
         h.last = text;
         Some(Intent::SetDefault { graph: h.graph.clone(), input: h.input.clone(), value, integer: h.integer })
@@ -1230,30 +1234,30 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
     (state, intents)
 }
 
-fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, rows: Rc<Vec<Row>>, tops: Rc<Vec<f32>>) -> (State, Vec<Intent>, i64) {
+fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, rows: Rc<Vec<Row>>, tops: Rc<Vec<f32>>, pane: i64) -> (State, Vec<Intent>, i64) {
     let theme = ui.tokens();
     let rh = ui.row_height() as f32;
     let (x, y, w, h) = bounds;
     let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);
-    let muted = theme::muted(&theme);
+    let muted = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
     // the search field above the list
     let (was_typing, query_in) = (state.typing, state.query.clone());
     // the wide sheet's field leaves room for the add button; the narrow one has no button
     let field_w = if w >= 300.0 { w - 40.0 } else { w - 16.0 };
     let mut state = state.clone();
-    let o = ValueFieldOpts { left: true, ..ValueFieldOpts::default() };
-    let (query, typing) = ui.value_field((x + 8.0, y + 6.0), field_w, 20.0, &o, &|_| true, "navigator-search", &state.query);
-    state.query = query;
-    state.typing = typing;
+    let response = pxui::ext::value_field(ui, "navigator-search", &state.query, Rect::new(x + 8.0, y + 6.0, field_w, 20.0),
+        &pxui::ValueField::DEFAULT.left(true), &pxui::ValueCallbacks::DEFAULT);
+    state.typing = response.editing;
+    if let Some(query) = response.changed { state.query = query.to_owned(); }
     let typing = state.typing;
     if state.query.is_empty() && !typing && state.rename.is_none() {
-        let boxed = ui.box_("navigator-placeholder", BoxOpts::default().flags(CLIP).w(Size::Px(field_w - 4.0)).h(Size::Px(20.0)).at((x + 10.0, y + 6.0)));
+        let boxed = ui.node("navigator-placeholder", pxui::Node::DEFAULT.flags(pxui::Flags::CLIP).w(Size::Px(field_w - 4.0)).h(Size::Px(20.0)).at(x + 10.0, y + 6.0));
         let wide_field = w >= 300.0;
-        ui.draw(&boxed, move |paint, Rect { x: px, y: py, w: pw, h }| {
-            let ty = paint.text_top(None, py, h);
-            paint.text_c((px, ty), muted, "/");
+        ui.canvas(&boxed, move |paint, Rect { x: px, y: py, w: pw, h }| {
+            let ty = (py) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
+            { let text = "/"; let span = pxui::TextSpan::new(0, text.len() as u32).color(muted); let _ = paint.text_spans(pxui::Point::new(px, ty), pxui::Label::BODY, 0.0, text, &[span]); };
             let cut = ell(paint, pw - 12.5, if wide_field { "go to node, graph, function" } else { "go to" });
-            paint.text_c((px + 12.5, ty), theme::ink_3(&theme), &cut);
+            { let text = &cut; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521)); let _ = paint.text_spans(pxui::Point::new(px + 12.5, ty), pxui::Label::BODY, 0.0, text, &[span]); };
         });
     }
     // (the search field's text moves the rows the frame it changes)
@@ -1269,16 +1273,16 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
     // the wide sheet closes with a hairline and a 24-point bar of its keys and the graph count
     let footer = if w >= 300.0 { rh + 1.0 } else { 0.0 };
     let body = rh.max(h - SEARCH_HEIGHT - footer);
-    let boxed = ui.box_(
+    let boxed = ui.node(
         "navigator-list",
-        BoxOpts::default().flags(CLICKABLE | SCROLL | CLIP | BLOCKING).w(Size::Px(w)).h(Size::Px(body)).at((x, top)).scroll_step(rh),
+        pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::SCROLL | pxui::Flags::CLIP | pxui::Flags::BLOCKING).w(Size::Px(w)).h(Size::Px(body)).at(x, top).scroll_step(rh),
     );
     let signal = ui.signal(&boxed);
     // the painted position, elastic edge movement included: a click lands on the row it sees
-    let scroll = ui.scroll_position(&boxed);
+    let scroll = ui.scroll(&boxed).settled;
     // the rows paint in the child so the list's clip holds them: a box's own painter is not clipped
-    let mut content: Option<UiBox> = None;
-    ui.within(&boxed, &mut |ui: &mut Ui| content = Some(ui.box_("navigator-content", BoxOpts::default().w(Size::Px(w)).h(Size::Px(total + rh)))));
+    let mut content: Option<pxui::Handle> = None;
+    ui.within(&boxed, &mut |ui: &mut Ui| content = Some(ui.node("navigator-content", pxui::Node::DEFAULT.w(Size::Px(w)).h(Size::Px(total + rh)))));
     let content = content.expect("navigator content");
     let row_at = |(_, py): (f32, f32)| row_of(&tops, top, scroll, py);
     let mut intents: Vec<Intent> = Vec::new();
@@ -1301,7 +1305,7 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
             _ => {}
         }
     }
-    let put = matches!(ui.drop_target(&boxed), Some(Drop::Dropped(_)));
+    let put = matches!(ui.drop_target(&boxed), Some(pxui::DropRef::Dropped(_)));
     if signal.clicked && !put {
         match row_at(signal.release_point).map(|k| &rows[k]) {
             Some(Row::GraphRow { graph, active, .. }) => {
@@ -1341,7 +1345,7 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
             _ => {}
         }
     }
-    if (typing || was_typing) && ui.key_pressed(Key::Enter) {
+    if (typing || was_typing) && ui.key_pressed(pxui::KeyCode::Enter, pxui::Mods::NONE) {
         let first = rows.iter().find_map(|row| match row {
             Row::GraphRow { graph, .. } => Some(Intent::Open { graph: graph.clone(), node: None }),
             Row::NodeRow { graph, path, .. } => Some(Intent::Open { graph: graph.clone(), node: Some(path.clone()) }),
@@ -1359,9 +1363,9 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
         && !was_typing
         && state.rename.is_none()
     {
-        if ui.key_pressed(Key::F2) || (rays_shell::host::platform(ui) == input::Platform::Apple && ui.key_pressed(Key::Enter)) {
+        if ui.key_pressed(pxui::KeyCode::F2, pxui::Mods::NONE) || (rays_shell::host::platform(ui) == input::Platform::Apple && ui.key_pressed(pxui::KeyCode::Enter, pxui::Mods::NONE)) {
             begin_rename = Some((graph.clone(), false));
-        } else if ui.key_pressed(Key::Delete) {
+        } else if ui.key_pressed(pxui::KeyCode::Delete, pxui::Mods::NONE) {
             intents.push(Intent::Remove(graph.clone()));
         }
     }
@@ -1381,14 +1385,15 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
             Some(g) => !g.starts_with("def:"),
             None => false,
         };
-        let items = vec![("New graph".to_owned(), true), ("Rename".to_owned(), editable), ("Delete".to_owned(), editable)];
         let contexts = new_graph_contexts();
-        let submenu = Submenu { row: 0, rows: contexts.iter().map(|c| (c.clone(), true)).collect(), keys: Vec::new(), current: None };
-        let o = MenuOpts { danger: vec![2], submenus: vec![submenu], ..MenuOpts::default() };
-        match ui.context_menu((cx, cy), &o, "navigator-context", &items) {
-            MenuResult::Open => {}
-            MenuResult::Dismiss => context = None,
-            MenuResult::Pick(n) => {
+        let submenu: Vec<_> = contexts.iter().map(|label| pxui::MenuItem::new(label)).collect();
+        let items = [pxui::MenuItem::new("New graph").submenu(&submenu),
+            pxui::MenuItem::new("Rename").disabled(!editable), pxui::MenuItem::new("Delete").disabled(!editable).danger()];
+        let choice = ui.menu("navigator-context", pxui::Point::new(cx, cy), &items, &pxui::Menu::DEFAULT);
+        match (choice.chosen, choice.dismissed) {
+            (None, false) => {}
+            (None, true) => context = None,
+            (Some(n), _) => {
                 context = None;
                 match (n, graph) {
                     (1, Some(g)) => begin_rename = Some((g, false)),
@@ -1421,7 +1426,7 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
     paint_footer(ui, theme, muted, rh, (x, y, w, h), footer, pa.workspace.graphs.len());
     paint_thumb(ui, theme, total, rh, &boxed);
     let typed_row = if signal.double_clicked { row_at(signal.press_point) } else { None };
-    input_sliders(ui, &mut intents, &rows, &tops, top, scroll, rh, body, x, w, label_w, typed_row);
+    input_sliders(ui, &mut intents, &rows, &tops, top, scroll, rh, body, x, w, label_w, typed_row, pane);
     if let Some(graph) = toggle {
         if state.opened.contains(&graph) {
             state.opened.retain(|g| *g != graph);
@@ -1436,14 +1441,15 @@ fn build(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Params, 
         })?;
         let ry = top + tops[index] - scroll;
         if ry < top || ry + rh > top + body { return None; }
-        let opts = ValueFieldOpts { left: true, edit: !seen, ..ValueFieldOpts::default() };
+        let style = pxui::ValueField::DEFAULT.left(true).edit(!seen);
         let valid = |text: &str| flow_syntax::symbol::valid_name(text.trim());
-        let (text, editing) = ui.value_field((x + 24.0, ry + 2.0), (w - 36.0).max(1.0), 20.0, &opts, &valid, "navigator-rename", &graph);
-        if text.trim() != graph {
-            intents.push(Intent::Rename { graph, to: text.trim().to_owned() });
+        let response = pxui::ext::value_field(ui, "navigator-rename", &graph, Rect::new(x + 24.0, ry + 2.0, (w - 36.0).max(1.0), 20.0),
+            &style, &pxui::ValueCallbacks::DEFAULT.valid(&valid));
+        if let Some(to) = response.changed.map(str::trim).filter(|to| *to != graph) {
+            intents.push(Intent::Rename { graph, to: to.to_owned() });
             None
         } else {
-            editing.then_some((graph, true))
+            response.editing.then_some((graph, true))
         }
     });
     if fold {

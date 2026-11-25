@@ -35,6 +35,8 @@ pub struct RuntimeInput {
     relative: bool,
     // Window coordinates per logical point (Runtime.window_unit_of).
     unit: f64,
+    pub(crate) drop_paths: Result<Vec<String>, String>,
+    pub(crate) drop_bytes: usize,
 }
 
 pub fn create(max_events: i64, logical_width: i64, logical_height: i64) -> Result<RuntimeInput, String> {
@@ -51,6 +53,8 @@ pub fn create(max_events: i64, logical_width: i64, logical_height: i64) -> Resul
             visible: true,
             relative: false,
             unit: 1.,
+            drop_paths: Ok(Vec::new()),
+            drop_bytes: 0,
         })
     }
 }
@@ -70,10 +74,10 @@ fn apply(value: &mut RuntimeInput, event: &Event) {
             value.pointer.py = y;
         }
         Event::VisibilityChanged(visible) => value.visible = visible,
-        Event::TextInput(_)
+        Event::Touch(_) | Event::EnvironmentChanged | Event::TextInput(_)
         | Event::Paste(_)
         | Event::TextEditing { .. }
-        | Event::FileDropped(_)
+        | Event::FilesDropped { .. }
         | Event::FileDragMoved(_)
         | Event::FileDragEnded
         | Event::PixelSizeChanged(_)
@@ -94,7 +98,8 @@ fn apply(value: &mut RuntimeInput, event: &Event) {
 
 pub fn push(value: &mut RuntimeInput, event: Event) -> Result<(), String> {
     let error = match &event {
-        Event::FileDropped(path) if path.is_empty() || path.contains('\0') => {
+        Event::FilesDropped { paths: Ok(paths), .. }
+            if paths.iter().any(|path| path.is_empty() || path.contains('\0')) => {
             Some("file-drop path is malformed")
         }
         Event::Resized((width, height)) | Event::PixelSizeChanged((width, height))

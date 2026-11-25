@@ -18,7 +18,21 @@ import time
 
 EXTENSIONS = {'.rs'}
 EXCLUDED = {'.git', 'target', '_out', '_build', '_opam', 'node_modules', 'vendor', 'fixtures', 'history'}
-COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'), ('kind', 'int'), ('group', 'int'), ('depth', 'int'), ('child', 'int'), ('count', 'int'), ('owner', 'int'), ('file', 'int'), ('lsp', 'int'), ('first', 'int'), ('last', 'int'), ('mass', 'int'), ('seed', 'int'), ('bytes', 'int'), ('label', 'text'), ('tag', 'text'), ('path', 'text'), ('l0', 'text'), ('l1', 'text'), ('l2', 'text'), ('chars', 'int')]
+COLUMNS = [('parent', 'int'), ('x', 'float'), ('y', 'float'), ('size', 'float'), ('kind', 'int'), ('group', 'int'), ('depth', 'int'), ('child', 'int'), ('count', 'int'), ('owner', 'int'), ('file', 'int'), ('lsp', 'int'), ('first', 'int'), ('last', 'int'), ('mass', 'int'), ('seed', 'int'), ('bytes', 'int'), ('crate', 'int'), ('cell', 'int'), ('cells', 'int'), ('level', 'int'), ('top', 'int'), ('sub', 'int'), ('subs', 'int'), ('label', 'text'), ('tag', 'text'), ('path', 'text'), ('l0', 'text'), ('l1', 'text'), ('l2', 'text'), ('chars', 'int')]
+# `crate` is a row of crates.tsv, whose `ax`, `ay` is the corner of the crate's longest file. `cell` is a leaf's place in its crate's reading order, one cell
+# skipped between files; a file or a scope has the `cell` of its first leaf and the `cells` to its last, and `level` counts the scopes
+# around a symbol. `top` is the lines of the longer files of a file's crate.
+CRATES = [('x0', 'float'), ('y0', 'float'), ('x1', 'float'), ('y1', 'float'), ('ax', 'float'), ('ay', 'float'), ('files', 'int'), ('lines', 'int'), ('cells', 'int'), ('chars', 'int'), ('name', 'text'), ('title', 'text'), ('rank', 'int')]
+# The tree goes on below a leaf symbol, outside this table: `sub` is the first of its `subs` rows of
+# lines.tsv, its lines as a tiling of the unit square of the symbol's square. A row there is a tile
+# [x y w h], `kind` 0 a branch or 1 a line, its parts as contiguous rows from `child` (absolute; `below`
+# counts from the tree's first row) and a line's `chars` up to 40. Four parts and more share their
+# tile's quadrants as symbols do; three are a half and two quarters, two are halves, so the parts of
+# a tile always cover it. chars.tsv is every such tiling of 0 to 40 equal characters, 64 rows each:
+# kind 0 a branch, 2 a character, -1 no row.
+LINES = [('x', 'float'), ('y', 'float'), ('w', 'float'), ('h', 'float'), ('kind', 'int'), ('child', 'int'), ('count', 'int'), ('chars', 'int'), ('below', 'int')]
+CHARS = [('x', 'float'), ('y', 'float'), ('w', 'float'), ('h', 'float'), ('kind', 'int')]
+LINE_CAP, CHAR_CAP, CHAR_ROWS = 64, 40, 64
 # A number comes last: a row never ends in the tab of an empty text cell.
 # Node kinds: the file quadtree, then each indexed file's nested symbol field.
 BRANCH, FILE, HOLLOW, PACK, SCOPE, LEAF, EMPTY = range(7)
@@ -148,6 +162,72 @@ def group(path):
     return 0
 
 
+def crate_name(root, path, known):
+    """The directory of the nearest Cargo.toml under the root, else the one above src, tests, examples or benches."""
+    parts = path.split('/')[:-1]
+    for n in range(len(parts), 0, -1):
+        directory = '/'.join(parts[:n])
+        if directory not in known:
+            known[directory] = (root / directory / 'Cargo.toml').is_file()
+        if known[directory]:
+            return parts[n - 1]
+    for n, part in enumerate(parts):
+        if part in ('src', 'tests', 'examples', 'benches') and n > 0:
+            return parts[n - 1]
+    return parts[0] if parts else 'source'
+
+
+def crates(files, root_node):
+    """Number the crates in path order and place every leaf and file within its crate."""
+    names = list(dict.fromkeys(f['crate'] for f in files))
+    rows = [{'name': name, 'title': name.upper().replace('_', ' '), 'chars': len(name), 'x0': 1.0, 'y0': 1.0, 'x1': 0.0, 'y1': 0.0, 'files': 0, 'lines': 0, 'cells': 0} for name in names]
+    nodes = {}
+
+    def visit(node, file, level):
+        if node['kind'] in (FILE, HOLLOW):
+            file = node['file']
+            nodes[file] = {'node': node, 'leaves': [], 'groups': [node]}
+        if file is not None:
+            node['crate'] = names.index(files[file]['crate'])
+            if node['kind'] in (SCOPE, LEAF):
+                node['level'] = level
+            if node['kind'] == LEAF:
+                nodes[file]['leaves'].append(node)
+            if node['kind'] == SCOPE:
+                nodes[file]['groups'].append(node)
+        for child in node['children']:
+            visit(child, file, level + (node['kind'] == SCOPE))
+
+    def leaves_under(node):
+        return [node] if node['kind'] == LEAF else [leaf for child in node['children'] for leaf in leaves_under(child)]
+
+    visit(root_node, None, 0)
+    for k, row in enumerate(rows):
+        members = [n for n, f in enumerate(files) if f['crate'] == row['name']]
+        for n in members:
+            node = nodes[n]['node']
+            if row['files']:
+                row['cells'] += 1
+            for leaf in sorted(nodes[n]['leaves'], key=lambda leaf: (leaf['first'], leaf['label'])):
+                leaf['cell'] = row['cells']
+                row['cells'] += 1
+            for group in nodes[n]['groups']:
+                held = [leaf['cell'] for leaf in leaves_under(group)]
+                if held:
+                    group['cell'], group['cells'] = min(held), max(held) - min(held) + 1
+            row['files'] += 1
+            row['x0'], row['y0'] = min(row['x0'], node['x']), min(row['y0'], node['y'])
+            row['x1'], row['y1'] = max(row['x1'], node['x'] + node['size']), max(row['y1'], node['y'] + node['size'])
+        for n in sorted(members, key=lambda n: (-len(files[n]['lines']), files[n]['path'])):
+            if not row['lines']:
+                row['ax'], row['ay'] = nodes[n]['node']['x'], nodes[n]['node']['y']
+            nodes[n]['node']['top'] = row['lines']
+            row['lines'] += max(1, len(files[n]['lines']))
+    for rank, k in enumerate(sorted(range(len(rows)), key=lambda k: (-rows[k]['lines'], rows[k]['name']))):
+        rows[k]['rank'] = rank
+    return rows
+
+
 def span(symbol, path, count):
     r = symbol.get('range', symbol.get('location', {}).get('range'))
     if r is None:
@@ -230,7 +310,7 @@ def scope(f, x, y, size, symbols):
             inner = s.get('children', [])
             children = [scope(f, x + size * 0.08, y + size * 0.08, size * 0.84, inner)] if inner else []
             return {**base, 'kind': SCOPE if inner else LEAF, 'children': children, 'lsp': s['kind'], 'first': first, 'last': last,
-                    'mass': last - first + 1, 'seed': seed(s['name']), 'label': s['name'], **preview(f['lines'], first, last)}
+                    'mass': last - first + 1, 'seed': seed(s['name']), 'label': s['name'], 'tag': s['name'] if len(s['name']) <= 14 else s['name'][:12] + '..', **preview(f['lines'], first, last)}
         children = [pack(x + qx * size / 2, y + qy * size / 2, size / 2, a, b)
                     for a, b, qx, qy in quadrants(weights, (0.10, 0.18, 0.29, 0.43), lo, hi, seed(items[lo]['name']) % 4)]
         return {**base, 'kind': PACK, 'children': children}
@@ -261,6 +341,80 @@ def table_rows(root):
     return rows
 
 
+def tiled(weights, turn_seed, leaf):
+    """Items as a tiling of the unit square: breadth-first rows, the parts of a tile contiguous and covering it."""
+    prefix = [0.0]
+    for w in weights:
+        prefix.append(prefix[-1] + w)
+
+    def tile(x, y, w, h, lo, hi):
+        node = {'x': x, 'y': y, 'w': w, 'h': h}
+        n, turn = hi - lo, (turn_seed ^ (lo * 31 + hi)) % 4
+        if n == 1:
+            return {**node, **leaf(lo), 'children': []}
+        if n >= 4:
+            parts = [tile(x + qx * w / 2, y + qy * h / 2, w / 2, h / 2, a, b) for a, b, qx, qy in quadrants(prefix, (0.10, 0.18, 0.29, 0.43), lo, hi, turn)]
+        else:
+            # two halves across the longer side (a square by its turn); of three, the heaviest keeps a half
+            across = w > h or (w == h and turn % 2 == 0)
+            first = (x, y, w / 2, h) if across else (x, y, w, h / 2)
+            second = (x + w / 2, y, w / 2, h) if across else (x, y + h / 2, w, h / 2)
+            if turn >= 2:
+                first, second = second, first
+            if n == 2:
+                parts = [tile(*first, lo, lo + 1), tile(*second, lo + 1, hi)]
+            else:
+                heavy = max(range(lo, hi), key=lambda k: weights[k])
+                if heavy == lo:
+                    parts = [tile(*first, lo, lo + 1), tile(*second, lo + 1, hi)]
+                elif heavy == hi - 1:
+                    parts = [tile(*first, lo, hi - 1), tile(*second, hi - 1, hi)]
+                else:
+                    # the middle one cannot keep a half and its neighbours stay contiguous: the first does
+                    parts = [tile(*first, lo, lo + 1), tile(*second, lo + 1, hi)]
+        return {**node, 'kind': 0, 'children': parts}
+
+    if not weights:
+        return []
+    rows, pending = [], [tile(0.0, 0.0, 1.0, 1.0, 0, len(weights))]
+    while pending:
+        following = []
+        for node in pending:
+            rows.append(node)
+            following.extend(node['children'])
+        pending = following
+    cursor = 1
+    for row in rows:
+        row['child'], row['count'] = cursor, len(row.pop('children'))
+        cursor += row['count']
+    return rows
+
+
+def line_trees(files, rows):
+    """The lines of every leaf symbol as a tree of its own, up to LINE_CAP lines; the leaf rows learn where theirs is."""
+    out = []
+    for row in rows:
+        if row['kind'] != LEAF:
+            continue
+        lines = files[row['file']]['lines'][row['first'] - 1:row['last']][:LINE_CAP] or ['']
+        tree = tiled([math.sqrt(1 + len(line)) for line in lines], row['seed'], lambda n: {'kind': 1, 'chars': min(CHAR_CAP, len(lines[n]))})
+        row['sub'], row['subs'] = len(out), len(tree)
+        for node in tree:
+            node['below'] = node['child']
+            node['child'] += len(out)
+        out.extend(tree)
+    return out
+
+
+def char_trees():
+    out = []
+    for n in range(CHAR_CAP + 1):
+        tree = tiled([1.0] * n, n, lambda k: {'kind': 2})
+        assert len(tree) <= CHAR_ROWS
+        out.extend(tree + [{'x': 0.0, 'y': 0.0, 'w': 0.0, 'h': 0.0, 'kind': -1}] * (CHAR_ROWS - len(tree)))
+    return out
+
+
 def escape(value):
     return str(value).replace('\\', '\\\\').replace('\t', '\\t').replace('\n', '\\n').replace('\r', '\\r')
 
@@ -289,6 +443,7 @@ def main():
     version = subprocess.check_output([args.lsp, '--version'], text=True).strip()
     lsp = None
     files = []
+    known = {}
     hits = 0
     try:
         found = sorted(sources(root), key=lambda p: p.relative_to(root).as_posix())
@@ -311,19 +466,30 @@ def main():
                     temporary = saved.with_suffix('.tmp')
                     temporary.write_text(json.dumps(symbols, ensure_ascii=False), encoding='utf-8')
                     temporary.replace(saved)
-            profile = [0] * 32
+            # `width` hashes a line to its number modulo 32 (the longest wins); `mean` cuts the file
+            # into 32 slices, first line to last, and keeps each slice's mean line length.
+            profile, total, held = [0] * 32, [0] * 32, [0] * 32
             for n, line in enumerate(lines):
                 profile[n % 32] = max(profile[n % 32], min(120, len(line)))
+                total[n * 32 // len(lines)] += len(line)
+                held[n * 32 // len(lines)] += 1
+            # a file under 32 lines leaves slices empty: each takes the line it would fall on
+            mean = [round(t / c) if c else len(lines[b * len(lines) // 32]) if lines else 0 for b, (t, c) in enumerate(zip(total, held))]
             name = file.name
             row = {'group': group(path), 'file': len(files), 'first': 1, 'last': max(1, len(lines)), 'bytes': len(raw), 'label': name,
                    'tag': name if len(name) <= 26 else name[:23] + '...', 'chars': min(26, len(name)), 'path': path, **preview(lines, 1, len(lines))}
-            files.append({'path': path, 'lines': lines, 'symbols': symbols, 'profile': profile, 'row': row})
+            files.append({'path': path, 'lines': lines, 'symbols': symbols, 'profile': profile, 'mean': mean, 'crate': crate_name(root, path, known), 'row': row})
         if not files:
             raise ValueError('no source files found')
-        rows = table_rows(file_tree(files))
+        tree = file_tree(files)
+        write_table(output.with_name('crates.tsv'), CRATES, crates(files, tree))
+        rows = table_rows(tree)
+        write_table(output.with_name('lines.tsv'), LINES, line_trees(files, rows))
+        write_table(output.with_name('chars.tsv'), CHARS, char_trees())
         write_table(output, COLUMNS, rows)
-        # Function marks read their file's 32-bin line-length profile: row = file * 32 + bin.
-        write_table(output.with_name('profile.tsv'), [('width', 'int')], [{'width': w} for f in files for w in f['profile']])
+        # Two 32-bin line-length profiles a file: row = file * 32 + bin.
+        write_table(output.with_name('profile.tsv'), [('width', 'int'), ('mean', 'int')],
+                    [{'width': w, 'mean': m} for f in files for w, m in zip(f['profile'], f['mean'])])
         symbols = sum(row['kind'] in (SCOPE, LEAF) for row in rows)
         print(f'{len(files)} files, {symbols} symbols, {len(rows)} nodes, {hits} cache hits -> {output}')
     finally:

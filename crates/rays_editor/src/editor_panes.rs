@@ -15,14 +15,13 @@ use flow_sop::lower;
 use flow_syntax::context;
 use flow_syntax::syntax::{Node as SNode, Syntax};
 use pxui::ui::Ui;
-use pxui::ui::UiBox;
 use rays_graph::node_menu;
 
 
 use rays_graph::scope_state as scope;
 use rays_shell::kit::{self, ButtonOpts};
 use rays_shell::layout::{self, Leaf};
-use rays_shell::timeline_bar;
+use rays_shell::{chrome, timeline_bar};
 use rays_shell::tree;
 use rays::frame;
 
@@ -80,7 +79,7 @@ pub fn texting<'a>(value: &ModelView<'a>) -> bool {
 // ---- panel instances: every leaf draws, with its own list, text pane or outline ----
 
 pub fn fresh_local() -> Local {
-    Local { rows: tree::create(), code: text_pane::initial(), nav: navigator::initial(), sheet_owner: 0 }
+    Local { rows: tree::create(), code: text_pane::initial(), nav: navigator::initial(), sheet_owner: 0, sheet_table: None }
 }
 
 pub fn local_of(locals: &[(Key, Local)], key: &Key) -> Local {
@@ -544,12 +543,12 @@ pub fn failed_nodes<'a>(value: &ModelView<'a>) -> Vec<(Key, String)> {
 /// The lists of every list host: the in-use one draws the live rows, the others their cached ones.
 /// Returns the tree, the intents and the locals.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_list_panes<'a>(
+pub fn draw_list_panes<'a, 'r>(
     ui: &mut Ui,
     shortcut_frame: &frame::Frame,
     value: &ModelView<'a>,
     hosted: &[Host],
-    root_at: &dyn Fn(&layout::Path) -> Option<(Leaf, UiBox)>,
+    root_at: &dyn Fn(&layout::Path) -> Option<&'r (Leaf, pxui::Handle)>,
     pane_of: &dyn Fn(&Host) -> ModelView<'a>,
     in_use: &dyn Fn(&ModelView<'a>) -> bool,
     title_of: &dyn Fn(&ModelView<'a>) -> String,
@@ -576,7 +575,7 @@ pub fn draw_list_panes<'a>(
         // selection, the title and columns, and the list's own state as its last build left it
         let draw = |ui: &mut Ui, mut state: tree::Tree| -> (tree::Tree, Vec<tree::Intent>) {
             let mut emitted = Vec::new();
-            let root_key = pxui::ui_core::key(&root);
+            let root_key = root.box_key;
             let state_rev = LISTS.with(|l| {
                 let mut l = l.borrow_mut();
                 match l.iter_mut().find(|(k, _, _, _)| *k == root_key) {
@@ -593,14 +592,14 @@ pub fn draw_list_panes<'a>(
                 }
             });
             // the hovered row follows the pointer inside the list's one box
-            let pointer = ui.hovered_within(&root).then(|| shortcut_frame.input.pointer.1.to_bits());
+            let pointer = ui.hovered(root, true).then(|| shortcut_frame.input.pointer.1.to_bits());
             let revision = kit::revision(&|h| {
                 use std::hash::Hash;
                 (state_rev, &selected_now, &title, &columns_now, leaf.body, pointer).hash(h)
             });
             let mut built = false;
             on_sheet(ui, leaf.floating, &mut |ui| {
-                ui.within(&root, &mut |ui| {
+                chrome::within_pane(ui, root, shortcut_frame, leaf.body, &mut |ui| {
                     kit::cached(ui, "list-view", revision, &mut |ui| {
                         built = true;
                         tree::update(&mut state, ui, shortcut_frame, leaf.body, &title, columns_now, rows_now, &selected_now, &mut emitted);
@@ -642,11 +641,11 @@ thread_local! {
 
 /// The text panes: the one in use and the others, each with what it showed.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_text_panes(
+pub fn draw_text_panes<'r>(
     ui: &mut Ui,
     frame_: &frame::Frame,
     value: &EditorModel,
-    root_at: &dyn Fn(&layout::Path) -> Option<(Leaf, UiBox)>,
+    root_at: &dyn Fn(&layout::Path) -> Option<&'r (Leaf, pxui::Handle)>,
     tab_at: &dyn Fn(&Leaf) -> [Option<f32>; 2],
     text_host: &Option<Host>,
     text_shown: &Option<text_pane::Shown>,
@@ -659,9 +658,9 @@ pub fn draw_text_panes(
     let view_text = |ui: &mut Ui, path: &layout::Path, state: &text_pane::State, shown: &text_pane::Shown| -> Vec<text_pane::Intent> {
         match root_at(path) {
             Some((leaf, root)) => {
-                let tabs_right = tab_at(&leaf)[1];
+                let tabs_right = tab_at(leaf)[1];
                 let mut out = Vec::new();
-                ui.within(&root, &mut |ui| {
+                chrome::within_pane(ui, root, frame_, leaf.body, &mut |ui| {
                     out = text_pane::view(ui, leaf.body, tabs_right, vocab, &names, frame_.input.t, state, shown);
                 });
                 out
@@ -685,11 +684,12 @@ pub fn draw_text_panes(
 }
 
 /// The outline panels.
-pub fn draw_outline_panes(
+pub fn draw_outline_panes<'r>(
     ui: &mut Ui,
+    frame_: &frame::Frame,
     value: &EditorModel,
     hosted: &[Host],
-    root_at: &dyn Fn(&layout::Path) -> Option<(Leaf, UiBox)>,
+    root_at: &dyn Fn(&layout::Path) -> Option<&'r (Leaf, pxui::Handle)>,
     outline: navigator::State,
     locals: Vec<(Key, Local)>,
 ) -> (navigator::State, Vec<navigator::Intent>, Vec<(Key, Local)>) {
@@ -701,8 +701,8 @@ pub fn draw_outline_panes(
         let draw = |ui: &mut Ui, state: &navigator::State| -> (navigator::State, Vec<navigator::Intent>) {
             let mut result = None;
             on_sheet(ui, leaf.floating, &mut |ui| {
-                ui.within(&root, &mut |ui| {
-                    result = Some(navigator::view(state, ui, leaf.body, params, pxui::ui_core::key(&root)));
+                chrome::within_pane(ui, root, frame_, leaf.body, &mut |ui| {
+                    result = Some(navigator::view(state, ui, leaf.body, params, root.box_key));
                 });
             });
             result.expect("outline drawn")
@@ -721,19 +721,19 @@ pub fn draw_outline_panes(
 }
 
 /// The spreadsheet panels: each remembers which object's sheet it shows.
-pub fn draw_spreadsheet_panes<'a>(ui: &mut Ui, value: &ModelView<'a>, panes: &[(Leaf, UiBox)], locals: Vec<(Key, Local)>) -> Vec<(Key, Local)> {
+pub fn draw_spreadsheet_panes<'a>(ui: &mut Ui, frame_: &frame::Frame, value: &ModelView<'a>, panes: &[(Leaf, pxui::Handle)], locals: Vec<(Key, Local)>) -> Vec<(Key, Local)> {
     let mut locals = locals;
     for (leaf, root) in panes {
         let key = panel_key(&value.doc, &leaf.path);
         let pane = shown_as(value, (&key, &leaf.path, &leaf.panel));
-        let owner = local_of(&locals, &key).sheet_owner;
-        let mut changed = None;
-        ui.within(root, &mut |ui| {
-            changed = spreadsheet::view(ui, leaf.body, owner, spreadsheet_source(&pane));
+        let mut local = local_of(&locals, &key);
+        chrome::within_pane(ui, root, frame_, leaf.body, &mut |ui| {
+            let table = local.sheet_table.get_or_insert_with(|| Rc::new(pxui::TableState::new()));
+            if let Some(owner) = spreadsheet::view(ui, leaf.body, local.sheet_owner, spreadsheet_source(&pane), table) {
+                local.sheet_owner = owner;
+            }
         });
-        if let Some(sheet_owner) = changed {
-            locals = put_local(&key, &|local_| Local { sheet_owner, ..local_ }, &locals);
-        }
+        locals = put_local(&key, &|_| local.clone(), &locals);
     }
     locals
 }
@@ -749,7 +749,7 @@ pub fn draw_other_graph_panes(
     shortcut_frame: &frame::Frame,
     value: &mut EditorModel,
     other_panes: &[(Key, layout::Path)],
-    roots: &[(Leaf, UiBox)],
+    roots: &[(Leaf, pxui::Handle)],
 ) {
     let pressed = if other_panes.is_empty() { Vec::new() } else { pressed_keys(value, shortcut_frame) };
     for (key, path) in other_panes {
@@ -760,7 +760,7 @@ pub fn draw_other_graph_panes(
         }
         let view = &mut panel_map::find_mut(&mut value.panes, key).expect("graph panes are synchronized before frame construction").view;
         let (x, y, width, height) = leaf.body;
-        ui.within(hosted, &mut |ui| {
+        chrome::within_pane(ui, hosted, shortcut_frame, leaf.body, &mut |ui| {
             let theme = ui.tokens();
             let theme = if leaf.floating { sheet_theme(&theme) } else { theme };
             scope::with_guide(false, view);
@@ -833,7 +833,7 @@ pub fn draw_graph_header<'a>(
                 let (hx, hy, hw, hh) = leaf.header;
                 let from = hx as f32 + from;
                 let modes = ["Solid", "Wire", "Traced"];
-                let seg_w = modes.iter().fold(24.0, |w, label| w + ui.text_width(None, label));
+                let seg_w = modes.iter().fold(24.0, |w, label| w + ui.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0));
                 let look_w = kit::button_width(ui, Some("C"), false, "Look through");
                 let ty = hy as f32 + ((hh - 20) as f32 / 2.0);
                 let frame_w = kit::button_width(ui, Some("F"), false, "Frame");
@@ -874,7 +874,7 @@ pub fn draw_graph_pane<'a>(
     guide: bool,
     carry_lit: Vec<(Key, String)>,
     carry_hot: Option<(Key, bool)>,
-    graph_root: &UiBox,
+    graph_root: &pxui::Handle,
     graph_host: &Option<Leaf>,
     workspace: &Shell,
     menu: Option<node_menu::Menu>,
@@ -892,7 +892,7 @@ pub fn draw_graph_pane<'a>(
     } else {
         let failed = failed_nodes(value);
         let pressed = pressed_keys(value, shortcut_frame);
-        ui.within(graph_root, &mut |ui| {
+        chrome::within_pane(ui, graph_root, shortcut_frame, graph_body, &mut |ui| {
             let theme = ui.tokens();
             let theme = match graph_host {
                 Some(leaf) if leaf.floating => sheet_theme(&theme),
@@ -920,7 +920,7 @@ pub fn draw_graph_pane<'a>(
     if let Some(m) = menu.take() {
         let status_y = geometry(value, workspace, frame_).status_at.1;
         let mut result = None;
-        ui.within(graph_root, &mut |ui| {
+        chrome::within_pane(ui, graph_root, shortcut_frame, graph_body, &mut |ui| {
             result = Some(node_menu::update(m.clone(), ui, (0, 0, frame_.input.size.0, status_y)));
         });
         let (next, picked) = result.expect("menu updated");
@@ -933,10 +933,11 @@ pub fn draw_graph_pane<'a>(
 /// The timeline panes' bars and the strip's context menu: the playback intents and the layout ones.
 pub fn draw_timeline_pane(
     ui: &mut Ui,
+    frame_: &frame::Frame,
     timeline_: &timeline::Timeline,
     max_frame: i64,
-    slots: &[(layout::Bounds, UiBox, bool)],
-    timeline_root: &Option<(Panel, UiBox)>,
+    slots: &[(layout::Bounds, pxui::Handle, bool)],
+    timeline_root: &Option<(Panel, pxui::Handle)>,
     strip_bounds: layout::Bounds,
 ) -> (Vec<TimelineIntent>, Vec<rays_shell::chrome::Intent>) {
     let mut intents = Vec::new();
@@ -945,7 +946,7 @@ pub fn draw_timeline_pane(
             continue;
         }
         let playing = timeline::mode(timeline_) == timeline::Mode::Playing;
-        ui.within(boxed, &mut |ui| {
+        chrome::within_pane(ui, boxed, frame_, *bounds, &mut |ui| {
             intents.extend(timeline_bar::draw(ui, *bounds, *edge, playing, timeline::frame(timeline_), timeline::time(timeline_), max_frame));
         });
     }
@@ -954,8 +955,8 @@ pub fn draw_timeline_pane(
     if let Some((_, boxed)) = timeline_root {
         if strip_bounds.3 > 0 {
             ui.within(boxed, &mut |ui| {
-                if let Some((x, y)) = ui.context_at(boxed) {
-                    ui.set_text_state(boxed, Some(format!("{} {}", cfmt::g(x as f64, 6), cfmt::g(y as f64, 6))));
+                if let Some(pxui::Point { x, y }) = ui.context_at(boxed) {
+                    ui.set_text_state(boxed, Some(&format!("{} {}", cfmt::g(x as f64, 6), cfmt::g(y as f64, 6))));
                 }
                 let state = ui.text_state(boxed).map(|s| s.split(' ').map(|x| x.to_owned()).collect::<Vec<_>>());
                 if let Some(parts) = state {
@@ -963,13 +964,14 @@ pub fn draw_timeline_pane(
                         if let (Ok(x), Ok(y)) = (x.parse::<f64>(), y.parse::<f64>()) {
                             let playing = timeline::mode(timeline_) == timeline::Mode::Playing;
                             let items = vec![(if playing { "Pause" } else { "Play" }.to_owned(), true), ("Stop".to_owned(), true), ("Hide timeline".to_owned(), true)];
-                            let result = ui.context_menu((x as f32, y as f32), &Default::default(), "timeline-context", &items);
-                            if !matches!(result, pxui::ui::MenuResult::Open) {
+                            let rows: Vec<_> = items.iter().map(|(label, enabled)| pxui::MenuItem::new(label).disabled(!enabled)).collect();
+                            let result = ui.menu("timeline-context", pxui::Point::new(x as f32, y as f32), &rows, &pxui::Menu::DEFAULT);
+                            if result.dismissed || result.chosen.is_some() {
                                 ui.set_text_state(boxed, None);
-                                match result {
-                                    pxui::ui::MenuResult::Pick(0) => strip_playback.push(TimelineIntent::PauseToggle),
-                                    pxui::ui::MenuResult::Pick(1) => strip_playback.push(TimelineIntent::StopPlayback),
-                                    pxui::ui::MenuResult::Pick(2) => strip_layout.push(rays_shell::chrome::Intent::Toggle(vec![usize::MAX])),
+                                match result.chosen {
+                                    Some(0) => strip_playback.push(TimelineIntent::PauseToggle),
+                                    Some(1) => strip_playback.push(TimelineIntent::StopPlayback),
+                                    Some(2) => strip_layout.push(rays_shell::chrome::Intent::Toggle(vec![usize::MAX])),
                                     _ => {}
                                 }
                             }

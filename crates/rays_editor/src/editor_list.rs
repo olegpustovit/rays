@@ -10,7 +10,7 @@ use flow_syntax::{context, ty};
 use flow_sop::network as net;
 use param::Value;
 use rays_shell::tree::{self, DropAt, Intent, Row};
-use pxui::geom::color::{self, T as Color};
+use pxui::Rgba as Color;
 use rays_math::mat4;
 use sop::custom;
 use sop::edit_graph;
@@ -174,7 +174,7 @@ pub fn space<'a>(value: &ModelView<'a>) -> mat4::T {
 // ---- the graph as a list ----
 
 fn hex(text: &str) -> Color {
-    color::hex_exn(text).unwrap_or_else(|_| color::hex_exn("#000000").expect("black"))
+    Color::parse(text).unwrap_or_else(|_| Color::parse("#000000").expect("black"))
 }
 
 /// A row's kind letter and colour (the prototype's palette).

@@ -457,6 +457,8 @@ fn frame_value(f:&Frame)->Value{
 fn event_value(event:&Event,fields:&[(&str,Ty)])->Value{
     let point=|p:(f64,f64)|Value::Vec3(p.0,p.1,0.);
     let (kind,values):(&str,Vec<(&str,Value)>)=match event{
+        Event::Touch(t)=>("touch",vec![("position",point(t.point)),("time",Value::Float(t.time)),("phase",text(match t.phase { input::TouchPhase::Began=>"began",input::TouchPhase::Moved=>"moved",input::TouchPhase::Ended=>"ended",input::TouchPhase::Cancelled=>"cancelled" }))]),
+        Event::EnvironmentChanged=>("environment-changed",vec![]),
         Event::KeyPressed(k)=>("key-pressed",vec![("key",text(&input::key_name(*k)))]),
         Event::KeyReleased(k)=>("key-released",vec![("key",text(&input::key_name(*k)))]),
         Event::PointerMoved(p)=>("pointer-moved",vec![("position",point(*p))]),
@@ -467,7 +469,10 @@ fn event_value(event:&Event,fields:&[(&str,Ty)])->Value{
         Event::TextInput(s)=>("text-input",vec![("text",text(s))]),
         Event::Paste(s)=>("paste",vec![("text",text(s))]),
         Event::TextEditing{text: s,start,length}=>("text-editing",vec![("text",text(s)),("start",Value::Int(*start)),("length",Value::Int(*length))]),
-        Event::FileDropped(s)=>("file-dropped",vec![("text",text(s))]),
+        Event::FilesDropped{position,paths}=>("file-dropped",std::iter::once(("position",point(*position))).chain(match paths {
+            Ok(paths)=>vec![("text",text(paths.first().map_or("",String::as_str))),("paths",Value::List(Arc::new(paths.iter().map(|s|text(s)).collect())))],
+            Err(error)=>vec![("error",text(error))],
+        }).collect()),
         Event::FileDragMoved(p)=>("file-drag-moved",vec![("position",point(*p))]),
         Event::FileDragEnded=>("file-drag-ended",vec![]),
         Event::Pinched(x)=>("pinched",vec![("scale",Value::Float(*x))]),
@@ -666,7 +671,7 @@ fn draw_ops()->Vec<Op>{
         ("draw/circles",vec![("positions",arr(Ty::Vec3))],vec![],None,vec![("radius",Ty::Any),("fill",Ty::Any),("stroke",Ty::Any)]),
         ("draw/rects",vec![("positions",arr(Ty::Vec3)),("sizes",Ty::Any)],vec![],None,vec![("fill",Ty::Any),("stroke",Ty::Any)]),
         ("draw/lines",vec![("from",arr(Ty::Vec3)),("to",arr(Ty::Vec3))],vec![],None,vec![("color",Ty::Any),("width",Ty::Float)]),
-        ("draw/text",vec![("at",Ty::Vec3),("text",Ty::Text)],vec![],None,vec![("color",Ty::Color),("size",Ty::Float)]),
+        ("draw/text",vec![("at",Ty::Vec3),("text",Ty::Text)],vec![],None,vec![("color",Ty::Color),("size",Ty::Float),("font",Ty::Text),("align",Ty::Text),("tracking",Ty::Float)]),
         ("draw/translate",vec![("offset",Ty::Vec3),("drawing",drawing.clone())],vec![],None,vec![]),
         ("draw/rotate",vec![("angle",Ty::Float),("drawing",drawing.clone())],vec![],None,vec![]),
         ("draw/scale",vec![("factor",Ty::Any),("drawing",drawing.clone())],vec![],None,vec![]),

@@ -244,6 +244,8 @@ fn button_name(b: &MouseButton) -> &'static str {
 
 fn event_text(e: &Event) -> String {
     match e {
+        Event::Touch(t) => format!("touch {:?} {:?}", t.phase, t.point),
+        Event::EnvironmentChanged => "environment-changed".to_string(),
         Event::KeyPressed(k) => format!("press {}", key_name(k)),
         Event::KeyReleased(k) => format!("release {}", key_name(k)),
         Event::PointerMoved((x, y)) => format!("move {x:.0},{y:.0}"),
@@ -256,7 +258,10 @@ fn event_text(e: &Event) -> String {
         Event::TextEditing { text, .. } => format!("ime {text:?}"),
         Event::FileDialog { id, result: Ok(paths) } => format!("dialog {id} {}", paths.len()),
         Event::FileDialog { id, result: Err(message) } => format!("dialog {id} failed {message:?}"),
-        Event::FileDropped(f) => format!("drop {f}"),
+        Event::FilesDropped { paths, .. } => match paths {
+            Ok(paths) => format!("drop {}", paths.join(", ")),
+            Err(error) => format!("drop error {error}"),
+        },
         Event::Resized((w, h)) => format!("resize {w}x{h}"),
         Event::FileDragMoved((x, y)) => format!("drag {x:.0},{y:.0}"),
         Event::FileDragEnded => "drag-end".to_string(),
@@ -866,8 +871,10 @@ fn run_loop(
     #[cfg(not(target_os = "linux"))]
     let _watch = {
         let (step, failure) = (step.clone(), resize_failure.clone());
-        runtime::runtime_input_sdl3::set_live_resize_callback(Some(Box::new(move || {
-            if failure.borrow().is_none() {
+        let mut window_id = None;
+        native::runtime_of(coordinator, &mut |runtime| window_id = runtime::window_id(runtime));
+        runtime::runtime_input_sdl3::set_live_resize_callback(Some(Box::new(move |resized| {
+            if window_id == Some(resized) && failure.borrow().is_none() {
                 // Keep panic unwinding on the Rust side of the SDL event-watch callback.
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     step(input_state::Polled { events: Vec::new(), window_changed: true, visible: false }, true)

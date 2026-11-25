@@ -1,5 +1,5 @@
 pub use pxui_sdl::translate::{button, in_points, key, positive, scroll_phase, translate};
-use sdl3::Event as SdlEvent;
+use sdl3::{DropChange, Event as SdlEvent};
 
 #[cfg(not(target_os = "linux"))]
 pub use sdl3::event::set_live_resize_callback;
@@ -14,6 +14,34 @@ pub fn push(value: &mut runtime_input::RuntimeInput, event: SdlEvent) -> Result<
             runtime_input::add_motion(value, dx, dy);
             runtime_input::push(value, Event::PointerMoved((x, y)))
         }
+        SdlEvent::Drop { change: DropChange::Begin, .. } => {
+            value.drop_paths = Ok(Vec::new());
+            value.drop_bytes = 0;
+            Ok(())
+        }
+        SdlEvent::Drop { change: DropChange::File(path), .. } => {
+            value.drop_bytes = value.drop_bytes.saturating_add(path.len());
+            if let Ok(paths) = &mut value.drop_paths {
+                if paths.len() >= 1_000_000 || value.drop_bytes > 64 * 1024 * 1024
+                    || path.is_empty() || path.contains('\0')
+                {
+                    value.drop_paths = Err("The file drop was invalid or too large.".into());
+                } else {
+                    paths.push(path);
+                }
+            }
+            Ok(())
+        }
+        SdlEvent::Drop { change: DropChange::Complete, x, y } => {
+            value.drop_bytes = 0;
+            let paths = std::mem::replace(&mut value.drop_paths, Ok(Vec::new()));
+            let event = if matches!(&paths, Ok(paths) if paths.is_empty()) {
+                Event::FileDragEnded
+            } else {
+                Event::FilesDropped { position: (x, y), paths }
+            };
+            runtime_input::push(value, event)
+        }
         event => match translate(event) {
             None => Ok(()),
             Some(event) => runtime_input::push(value, event),
@@ -22,7 +50,7 @@ pub fn push(value: &mut runtime_input::RuntimeInput, event: SdlEvent) -> Result<
 }
 
 // One bad event never drops the rest of the batch; the first error is returned.
-pub fn push_all(value: &mut runtime_input::RuntimeInput, events: Vec<SdlEvent>) -> Result<(), String> {
+pub fn push_all(value: &mut runtime_input::RuntimeInput, events: impl IntoIterator<Item = SdlEvent>) -> Result<(), String> {
     events.into_iter().fold(Ok(()), |first, event| match (push(value, event), first) {
         (Err(error), Ok(())) => Err(error),
         (_, first) => first,
@@ -31,11 +59,11 @@ pub fn push_all(value: &mut runtime_input::RuntimeInput, events: Vec<SdlEvent>) 
 
 #[cfg(not(target_os = "linux"))]
 pub fn pump(value: &mut runtime_input::RuntimeInput) -> Result<(), String> {
-    poll().and_then(|events| push_all(value, events))
+    poll().and_then(|events| push_all(value, events.into_iter().map(|(_, event)| event)))
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn poll() -> Result<Vec<SdlEvent>, String> {
+pub fn poll() -> Result<Vec<sdl3::event::Routed>, String> {
     sdl3::event::poll_coalesced().map_err(|error| error.to_string())
 }
 

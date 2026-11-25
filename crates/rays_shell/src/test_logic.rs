@@ -5,10 +5,9 @@ use editor_core::command;
 use editor_core::keymap::Trigger;
 use editor_core::panels::Panel;
 use input::{Key, Platform};
-use pxui::geom::color;
 
 fn row(id: i64, depth: i64, label: &str) -> Row {
-    Row { id, depth, label: label.to_string(), detail: String::new(), badge: ("S".to_string(), color::gray(90)), link: false, ghost: false, flags: vec![true] }
+    Row { id, depth, label: label.to_string(), detail: String::new(), badge: ("S".to_string(), pxui::Rgba::gray(90)), link: false, ghost: false, flags: vec![true] }
 }
 
 #[test]
@@ -116,4 +115,54 @@ fn leader_pages_by_category_and_chords() {
     // the pure page builders are private; the key sheet is the public face of the same table
     let sections = which_key::sheet_sections(Platform::Other, Some(&category), &[], &keymap);
     assert_eq!(sections.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), vec!["Panel", "File"]);
+}
+
+#[test]
+fn pane_root_keeps_window_coordinates_and_hit_bounds() {
+    use crate::{chrome, host};
+    use input::frame::Frame;
+    use pxui::{Flags, Key, Node, Point};
+    let mut ui = host::create(input::Platform::Other, None, None);
+    let mut frame = Frame { input: input::at_time(0.0), pixel_scale: (1.0, 1.0), fps: 0.0, mouse_delta: (0.0, 0.0) };
+    frame.input.size = (400, 300);
+    let bounds = (100, 20, 100, 80);
+    let mut pane = None;
+    let mut child = None;
+    host::build(&mut ui, &frame, &mut |ui| {
+        let root = chrome::pane_root(ui, &frame, bounds, "pane");
+        chrome::within_pane(ui, &root, &frame, bounds, &mut |ui| {
+            child = Some(ui.node("child", Node::DEFAULT.flags(Flags::CLICKABLE).at(110.0, 30.0).w_px(20.0).h_px(20.0)));
+        });
+        pane = Some(root);
+    });
+    assert_eq!(ui.rect(&child.unwrap()).f64(), (110.0, 30.0, 20.0, 20.0));
+    let pane = Key::Resolved(pane.unwrap().box_key);
+    assert_eq!(ui.root_at(Point::new(115.0, 35.0), &[pane]), Some(pane));
+    assert_eq!(ui.root_at(Point::new(5.0, 5.0), &[pane]), None);
+    host::destroy(&mut ui);
+}
+
+#[test]
+fn search_prompt_receives_text_after_opening() {
+    let mut ui = crate::host::create(input::Platform::Apple, Some(11), None);
+    let mut frame = input::frame::Frame { input: input::at_time(0.0), pixel_scale: (1.0, 1.0), fps: 0.0, mouse_delta: (0.0, 0.0) };
+    frame.input.size = (400, 300);
+    let mut result = None;
+    crate::host::build(&mut ui, &frame, &mut |_| {});
+    frame.input.t = 1.0;
+    frame.input.events = vec![input::Event::KeyPressed(Key::KeyChar('/')), input::Event::KeyPressed(Key::KeyChar('j'))];
+    let build = |ui: &mut pxui::Ui| {
+        let result = crate::prompt::search(ui, "jump", "Jump", "Search", "", 1, &mut |_, rows| {
+            rows.push(pxui::PickRow::new("graph"));
+            1
+        });
+        ui.text_area("source", "some source", pxui::Node::DEFAULT.w_px(150.0).h_px(96.0), &pxui::TextArea::DEFAULT, &pxui::AreaCallbacks::DEFAULT);
+        result
+    };
+    crate::host::build(&mut ui, &frame, &mut |ui| { result = build(ui); });
+    assert_eq!(result.as_ref().map(|(query, _)| query.as_str()), Some(""));
+    frame.input.t = 2.0;
+    frame.input.events = vec![input::Event::TextInput("g".to_owned())];
+    crate::host::build(&mut ui, &frame, &mut |ui| { result = build(ui); });
+    assert_eq!(result.as_ref().map(|(query, _)| query.as_str()), Some("g"));
 }

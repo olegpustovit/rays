@@ -18,7 +18,6 @@ lru = { path = "../lru" }
 scene_core = { path = "../scene_core" }
 rays_math = { path = "../rays_math" }
 mem = { path = "../mem" }
-cfmt = { path = "../../pxui/crates/open/cfmt" }
 
 [dev-dependencies]
 ogpu_mock = { path = "../../pxui/crates/open/ogpu_mock" }

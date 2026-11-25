@@ -161,7 +161,7 @@ pub(crate) fn poll(state: &std::cell::RefCell<InputState>) -> Result<Polled, Str
     state.delta = (0., 0.);
     ri::begin_frame(&mut state.source);
     #[cfg(not(target_os = "linux"))]
-    let pumped = events.and_then(|events| sdl::push_all(&mut state.source, events));
+    let pumped = events.and_then(|events| sdl::push_all(&mut state.source, events.into_iter().map(|(_, event)| event)));
     #[cfg(target_os = "linux")]
     let pumped = sdl::pump(&mut state.source);
     let native = ri::drain(&mut state.source);

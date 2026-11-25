@@ -1693,6 +1693,7 @@ struct EP {
     gather_uint32: Vec<bool>,
     uint32_words: Vec<i64>,
     output_uint32: Vec<bool>,
+    signed_words: bool,
     inputs: Vec<i64>,
     outputs: Vec<i64>,
     gathers: Vec<i64>,
@@ -1859,11 +1860,15 @@ impl EP {
         let offset = self.e.offset(at, width, component);
         self.e.load_uint(self.gathers[k], offset)
     }
+    /// OpConvertUToF of a uint32 word, or OpConvertSToF when the words are signed Ints
+    fn word_to_float(&self) -> i64 {
+        if self.signed_words { 111 } else { 112 }
+    }
     fn element(&mut self, prepared: i64, at: i64, width: i64, component: i64) -> i64 {
         let word = self.element_word(prepared, at, width, component);
         let k = self.gather_k(prepared);
         let float = self.e.float;
-        self.e.result(float, if self.gather_uint32[k] { 112 } else { 124 }, &[word])
+        self.e.result(float, if self.gather_uint32[k] { self.word_to_float() } else { 124 }, &[word])
     }
     fn noise_table(&mut self, seed: i64, index: i64) -> i64 {
         let base = self.layout.table_seeds.iter().position(|s| *s == seed).expect("a noise table") as i64 * 512;
@@ -2145,7 +2150,7 @@ impl EP {
                 let offset = self.e.offset(self.index, *width, *component);
                 let l = self.e.load_uint(self.inputs[*input as usize], offset);
                 let float = self.e.float;
-                self.e.result(float, 112, &[l])
+                self.e.result(float, self.word_to_float(), &[l])
             }
             Instruction::Input(input, width, component) => {
                 let offset = self.e.offset(self.index, *width, *component);
@@ -2154,7 +2159,7 @@ impl EP {
             Instruction::Uniform(input, component) if self.is_uint32(self.layout.uniforms[*input as usize] + component) => {
                 let w = self.e.uniform(self.layout.uniforms[*input as usize] + component);
                 let float = self.e.float;
-                self.e.result(float, 112, &[w])
+                self.e.result(float, self.word_to_float(), &[w])
             }
             Instruction::Uniform(input, component) => self.e.uniform_float(self.layout.uniforms[*input as usize] + component),
             Instruction::Frame(_) | Instruction::Guarded(..) => panic!("frames and guards are resolved before printing"),
@@ -2561,7 +2566,7 @@ impl EP {
                     let value = self.int_of(register);
                     let boolean = self.e.boolean;
                     // a 32-bit Int is out of uint32 range only when negative; a narrow register never is
-                    let c = if self.e.int32 && self.narrow(register) {
+                    let c = if self.signed_words || (self.e.int32 && self.narrow(register)) {
                         self.e.bool_false()
                     } else if self.e.int32 {
                         let zero = self.e.l(0);
@@ -2617,6 +2622,7 @@ pub struct ProgramOptions {
     gather_uint32: Vec<bool>,
     uint32_words: Vec<i64>,
     output_uint32: Vec<bool>,
+    signed_words: bool,
 }
 
 /// The register program of a kernel or a raster stage; returns the invalid flag.
@@ -2641,6 +2647,7 @@ fn emit_program(
         gather_uint32: options.gather_uint32.clone(),
         uint32_words: options.uint32_words.clone(),
         output_uint32: options.output_uint32.clone(),
+        signed_words: options.signed_words,
         inputs: inputs.to_vec(),
         outputs: outputs.to_vec(),
         gathers: gathers.to_vec(),
@@ -2725,6 +2732,8 @@ pub struct Options {
     pub curves: bool,
     pub spheres: bool,
     pub uint32_scalars: bool,
+    /// uint32 words hold a signed 32-bit Int: an output below zero is exact, not a range error
+    pub signed_words: bool,
     pub uint32_outputs: Vec<i64>,
     pub uint32_inputs: Vec<i64>,
     pub uint32_tables: Vec<i64>,
@@ -2740,6 +2749,7 @@ impl Default for Options {
             curves: false,
             spheres: true,
             uint32_scalars: false,
+            signed_words: false,
             uint32_outputs: vec![],
             uint32_inputs: vec![],
             uint32_tables: vec![],
@@ -2797,7 +2807,7 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
         for (k, (_, (index, width))) in layout.gathers.iter().enumerate() {
             if index == t && *width == 1 { gather_uint32[k] = true; found = true; }
         }
-        if !fast || !found {
+        if !fast || (!found && !options.signed_words) {
             return Err(fail_d("Uint32 table requires a scalar gathered buffer in fast precision."));
         }
     }
@@ -3011,6 +3021,7 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
         gather_uint32: gather_uint32.clone(),
         uint32_words: uint32_words.clone(),
         output_uint32: output_uint32.clone(),
+        signed_words: options.signed_words,
     };
     let invalid = match (options.unfold, &carried) {
         (Some(steps), Some((vars, pass))) => {
@@ -3225,7 +3236,7 @@ pub fn stage(s: &StageSpec, program: &packed::T) -> Result<Vec<u8>, Diagnostic> 
     e.status_bits = e.result(e.uint_function_pointer, 59, &[7, z]);
     let index = e.u(0);
     let mut raster = Some(st);
-    let options = ProgramOptions { carried: None, input_uint32: vec![], gather_uint32: vec![], uint32_words: vec![], output_uint32: vec![] };
+    let options = ProgramOptions { carried: None, input_uint32: vec![], gather_uint32: vec![], uint32_words: vec![], output_uint32: vec![], signed_words: false };
     emit_program(&mut e, &layout, &mut raster, &options, &[], &[], &[], index);
     if let Some(d) = e.failure.take() {
         return Err(d);

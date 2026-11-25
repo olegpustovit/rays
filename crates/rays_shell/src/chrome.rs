@@ -7,7 +7,6 @@ use crate::layout::*;
 use crate::layout::Size as PSize;
 use crate::layout::{Axis, Panels};
 use editor_core::panels;
-use input::Key;
 use pxui::theme;
 use pxui::ui::*;
 use pxui::ui::Size;
@@ -45,28 +44,31 @@ pub enum Intent {
     Crumb(Path, i64),
 }
 
-fn floating(ui: &mut Ui, flags: Flags, (x, y, width, height): Bounds, label: std::fmt::Arguments) -> UiBox {
-    ui.box_fmt(
-        label,
-        BoxOpts::default().flags(flags).w(Size::Px(width as f32)).h(Size::Px(height as f32)).at((x as f32, y as f32)),
-    )
+fn floating(ui: &mut Ui, flags: Flags, (x, y, width, height): Bounds, label: std::fmt::Arguments) -> pxui::Handle {
+    let mut key = 0;
+    kit::with_label(label, &mut |label| key = pxui::hash_of(label));
+    ui.node(key, Node::DEFAULT.flags(flags).at(x as f32, y as f32).w_px(width as f32).h_px(height as f32))
 }
 
-/// A pane's PXUI hit ancestor; children keep screen-space coordinates.
-pub fn pane_root(ui: &mut Ui, frame: &frame::Frame, bounds: Bounds, label: &str) -> UiBox {
-    pane_root_fmt(ui, frame, bounds, format_args!("{label}"))
+/// A pane's PXUI hit ancestor, sized to the pane's interactive bounds.
+pub fn pane_root(ui: &mut Ui, _frame: &frame::Frame, (x, y, width, height): Bounds, label: &str) -> Handle {
+    ui.node(pxui::hash_of(label), Node::DEFAULT.flags(Flags::CLICKABLE)
+        .at(x as f32, y as f32).w_px(width as f32).h_px(height as f32))
 }
 
-pub fn pane_root_fmt(ui: &mut Ui, frame: &frame::Frame, bounds: Bounds, label: std::fmt::Arguments<'_>) -> UiBox {
-    let (x, y, width, height) = bounds;
-    let rect = Rect::new(x as f32, y as f32, width as f32, height as f32);
-    let mut opts = BoxOpts::default()
-        .flags(CLICKABLE)
-        .w(Size::Px(frame.input.size.0 as f32))
-        .h(Size::Px(frame.input.size.1 as f32))
-        .at((0.0, 0.0));
-    opts.hit_rect = Some(rect);
-    ui.box_fmt(label, opts)
+pub fn pane_root_fmt(ui: &mut Ui, frame: &frame::Frame, bounds: Bounds, label: std::fmt::Arguments<'_>) -> Handle {
+    let mut root = None;
+    kit::with_label(label, &mut |label| root = Some(pane_root(ui, frame, bounds, label)));
+    root.expect("pane root")
+}
+
+/// Builds the pane's window-coordinate children under its pane-sized hit ancestor.
+pub fn within_pane(ui: &mut Ui, root: &pxui::Handle, frame: &frame::Frame, (x, y, _, _): Bounds, build: &mut dyn FnMut(&mut Ui)) {
+    ui.within(root, &mut |ui| {
+        let screen = ui.node("window-coordinates", Node::DEFAULT.at(-(x as f32), -(y as f32))
+            .w_px(frame.input.size.0 as f32).h_px(frame.input.size.1 as f32));
+        ui.within(&screen, &mut *build);
+    });
 }
 
 /// a panel's path as text, to key its boxes
@@ -98,8 +100,8 @@ fn numbered((i, part): (usize, &str)) -> (i64, &str) {
     (i as i64, part)
 }
 
-/// A path too long for its room loses its head, not its subject: "… / sop". The parts shown are
-/// `from` on, behind a "…" when `dots`; each keeps its index in the title, the dots are -1.
+/// A path too long for its room loses its head, not its subject: "â€¦ / sop". The parts shown are
+/// `from` on, behind a "â€¦" when `dots`; each keeps its index in the title, the dots are -1.
 struct Fit {
     dots: bool,
     from: usize,
@@ -156,7 +158,7 @@ fn retypes() -> Vec<(&'static str, Panel)> {
     editor_core::panels::PANELS.iter().map(|entry| (entry.menu_title, entry.panel.clone())).collect()
 }
 
-fn drag_origin(ui: &mut Ui, boxed: &UiBox, bounds: Bounds, signal: &Signal) -> Bounds {
+fn drag_origin(ui: &mut Ui, boxed: &Handle, bounds: Bounds, signal: &Signal) -> Bounds {
     if !(signal.pressed || signal.held || signal.released) {
         return bounds;
     }
@@ -165,7 +167,7 @@ fn drag_origin(ui: &mut Ui, boxed: &UiBox, bounds: Bounds, signal: &Signal) -> B
     // Each PXUI box has one numeric slot. The grip owns the four coordinates for the gesture.
     ui.within(boxed, &mut |ui| {
         for (label, value) in ["origin-x", "origin-y", "origin-w", "origin-h"].into_iter().zip(&mut origin) {
-            let state = ui.box_(label, BoxOpts::default().w(Size::Px(0.0)).h(Size::Px(0.0)).at((0.0, 0.0)));
+            let state = ui.node(label, Node::DEFAULT.w_px(0.0).h_px(0.0).at(0.0, 0.0));
             if signal.pressed {
                 ui.set_state(&state, *value);
             } else {
@@ -195,14 +197,14 @@ pub fn panel_menu(
     key_of: Option<&dyn Fn(&str) -> String>,
     ui: &mut Ui,
     l: &Leaf,
-    boxed: &UiBox,
+    boxed: &pxui::Handle,
     at: Option<(f32, f32)>,
 ) -> Vec<Intent> {
     let _ = state;
     let key_of: &dyn Fn(&str) -> String = key_of.unwrap_or(&no_key);
     if let Some((x, y)) = at {
         ui.set_state(boxed, 1);
-        ui.set_text_state(boxed, Some(format!("{} {}", cfmt::g(x as f64, 6), cfmt::g(y as f64, 6))));
+        ui.set_text_state(boxed, Some(&format!("{} {}", cfmt::g(x as f64, 6), cfmt::g(y as f64, 6))));
     }
     if ui.state(boxed, 0) != 1 {
         return Vec::new();
@@ -239,14 +241,16 @@ pub fn panel_menu(
             (a, b) => a == b,
         })
         .unwrap_or(0) as i64;
-    let opts = MenuOpts { width: Some(232.0), keys, selected: Some(current), lead_from: 5, ..MenuOpts::default() };
-    match ui.context_menu(at, &opts, &format!("workspace-menu-{}", key(&l.path)), &rows) {
-        MenuResult::Open => Vec::new(),
-        MenuResult::Dismiss => {
+    let items: Vec<_> = rows.iter().zip(&keys).enumerate().map(|(index, ((label, enabled), shortcut))|
+        MenuItem::new(label).disabled(!enabled).selected(index as i64 == current).shortcut(shortcut)).collect();
+    let choice = ui.menu(pxui::hash_of(&("workspace-menu", &l.path)), pxui::Point::new(at.0, at.1), &items, &Menu::DEFAULT.w_px(232.0));
+    match (choice.chosen, choice.dismissed) {
+        (None, false) => Vec::new(),
+        (None, true) => {
             ui.set_state(boxed, 0);
             Vec::new()
         }
-        MenuResult::Pick(i) => {
+        (Some(i), _) => {
             ui.set_state(boxed, 0);
             vec![match i {
                 0 => Intent::SplitPanel(l.path.clone(), Axis::H),
@@ -300,7 +304,7 @@ fn no_groups(_: &Leaf) -> Vec<f32> {
 thread_local! { static HEADER_TITLE: Cell<String> = const { Cell::new(String::new()) }; }
 
 fn cut<'a>(paint: &mut Paint, size: Option<i64>, room: f32, part: &'a str) -> Cow<'a, str> {
-    ellipsis(&mut |s| paint.text_width(size, s), room.max(0.0), part)
+    ellipsis(&mut |s| paint.text_service().width(s, size.map_or(pxui::Label::BODY, |size| pxui::Label::BODY.size(size as f32)), None).unwrap_or(0.0), room.max(0.0), part)
 }
 
 /// A `title` is "Kind<TAB>a / b": the kind is the header's label, the rest its breadcrumb (the
@@ -354,29 +358,29 @@ pub fn update_with_geometry(
             // a view paints its own picture; a window over one still has its line-3 edge and the
             // sheet fill of its title row's margin
             Panel::View(_) | Panel::Canvas(_) | Panel::Timeline if l.floating => {
-                let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-window-edge{}", key(&l.path)));
+                let boxed = floating(ui, Flags::NONE, l.frame, format_args!("workspace-window-edge{}", key(&l.path)));
                 let is_view = matches!(l.panel, Panel::View(_));
                 let body = l.body;
                 let hy = l.header.1;
                 let fy = l.frame.1;
-                ui.draw_over(&boxed, move |paint, Rect { x, y, w, h }| {
-                    let line = theme::border(&theme);
-                    paint.fill(x, y, w, (hy - fy) as f32, theme.input);
+                ui.canvas_over(&boxed, move |paint, Rect { x, y, w, h }| {
+                    let line = theme.border();
+                    paint.fill(Rect::new(x, y, w, (hy - fy) as f32), pxui::Fill::new(theme.input));
                     // a viewport window: the sheet's white round the picture and a line-2 frame on it
                     if is_view && body.2 > 0 {
                         let (bx, by, bw, bh) = body;
                         let (bx, by, bw, bh) = (bx as f32, by as f32, bw as f32, bh as f32);
                         let hy = hy as f32;
-                        paint.fill(x, hy, w, by - hy, theme.input);
-                        paint.fill(x, by, bx - x, y + h - by, theme.input);
-                        paint.fill(bx + bw, by, x + w - bx - bw, y + h - by, theme.input);
-                        paint.fill(bx, by + bh, bw, y + h - by - bh, theme.input);
-                        paint.frame(bx, by, bw, bh, theme::edge(&theme));
+                        paint.fill(pxui::Rect::new(x, hy, w, by - hy), pxui::Fill::new(theme.input));
+                        paint.fill(pxui::Rect::new(x, by, bx - x, y + h - by), pxui::Fill::new(theme.input));
+                        paint.fill(pxui::Rect::new(bx + bw, by, x + w - bx - bw, y + h - by), pxui::Fill::new(theme.input));
+                        paint.fill(pxui::Rect::new(bx, by + bh, bw, y + h - by - bh), pxui::Fill::new(theme.input));
+                        paint.frame(pxui::Rect::new(bx, by, bw, bh), pxui::Stroke::new((theme).foreground.with_alpha(38)));
                     }
-                    paint.fill(x, y, w, 1.0, line);
-                    paint.fill(x, y, 1.0, h, line);
-                    paint.fill(x + w - 1.0, y, 1.0, h, line);
-                    paint.fill(x, y + h - 1.0, w, 1.0, line);
+                    paint.fill(pxui::Rect::new(x, y, w, 1.0), pxui::Fill::new(line));
+                    paint.fill(pxui::Rect::new(x, y, 1.0, h), pxui::Fill::new(line));
+                    paint.fill(pxui::Rect::new(x + w - 1.0, y, 1.0, h), pxui::Fill::new(line));
+                    paint.fill(pxui::Rect::new(x, y + h - 1.0, w, 1.0), pxui::Fill::new(line));
                 });
             }
             // docked, its picture is only its body: the margin over its header is the ground every
@@ -385,27 +389,27 @@ pub fn update_with_geometry(
                 let fy = l.frame.1;
                 let hy = l.header.1;
                 if hy > fy {
-                    let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-margin{}", key(&l.path)));
-                    ui.draw(&boxed, move |paint, Rect { x, y, w, h: _ }| {
-                        paint.fill(x, y, w, (hy - fy) as f32, theme.panel);
+                    let boxed = floating(ui, pxui::Flags::NONE, l.frame, format_args!("workspace-margin{}", key(&l.path)));
+                    ui.canvas(&boxed, move |paint, Rect { x, y, w, h: _ }| {
+                        paint.fill(pxui::Rect::new(x, y, w, (hy - fy) as f32), pxui::Fill::new(theme.panel));
                     });
                 }
             }
             p => {
                 let boxed = floating(
                     ui,
-                    NO_FLAGS,
+                    pxui::Flags::NONE,
                     l.frame,
                     format_args!("workspace-{}{}", panels::lower_name(p), key(&l.path)),
                 );
                 let is_floating = l.floating;
-                ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
+                ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
                     // a window is a sheet with one line-3 edge; a docked panel is the ground
                     if is_floating {
-                        paint.fill(x, y, w, h, theme.input);
-                        paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::border(&theme));
+                        paint.fill(Rect::new(x, y, w, h), pxui::Fill::new(theme.input));
+                        paint.stroke(Rect::new(x + 0.5, y + 0.5, w - 1.0, h - 1.0), pxui::Stroke::new(theme.border()));
                     } else {
-                        paint.fill(x, y, w, h, theme.panel);
+                        paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(theme.panel));
                     }
                 });
             }
@@ -427,8 +431,8 @@ pub fn update_with_geometry(
             ground(ui, l);
         }
         for (n, s) in geometry.splitters.iter().enumerate() {
-            let boxed = floating(ui, NO_FLAGS, s.bounds, format_args!("workspace-gutter-{n}"));
-            ui.draw(&boxed, move |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, theme::edge(&theme)));
+            let boxed = floating(ui, pxui::Flags::NONE, s.bounds, format_args!("workspace-gutter-{n}"));
+            ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new((theme).foreground.with_alpha(38))));
         }
     });
     // A window's ground is a root-level view of its own, raised with the window (`to_front`), keyed
@@ -440,7 +444,8 @@ pub fn update_with_geometry(
         });
         let mut view = None;
         kit::with_label(format_args!("workspace-window-ground{}", key(&l.path)), &mut |label| {
-            view = Some(kit::cached(ui, label, revision, &mut |ui| ground(ui, l)));
+            let pxui::ViewSize { width, height } = ui.view_size();
+            view = Some(kit::sized_view(ui, label, revision, (0.0, 0.0), Size::Px(width), Size::Px(height), &mut |ui| ground(ui, l)).0);
         });
         ui.to_front((order * 2) as i64, &view.expect("window ground view"));
     }
@@ -471,12 +476,11 @@ pub fn update_with_geometry(
         // keyed by the leaf, so a drag or a menu follows it when the layout reorders the leaves
         let mut view = None;
         kit::with_label(format_args!("workspace-header-view-{}{}", panels::lower_name(&l.panel), key(&l.path)), &mut |label| {
-            view = Some(ui.view(label, revision, Size::Px(w as f32), Size::Px(h as f32), &mut built));
+            view = Some(crate::kit::sized_view(ui, label, revision, (x as f32, y as f32), Size::Px(w as f32), Size::Px(h as f32), &mut built));
         });
-        let view = view.expect("header view");
-        ui.set_at(&view, (x as f32, y as f32));
+        let (root, view) = view.expect("header view");
         if l.floating {
-            ui.to_front((order * 2) as i64, &view);
+            ui.to_front((order * 2) as i64, &root);
         }
         intents.extend(panel_menu(Some(state), key_of, ui, l, &view, open_at));
     }
@@ -485,35 +489,35 @@ pub fn update_with_geometry(
     if let Some((wx, wy, ww)) = tip {
         let words = "release to dock \u{b7} esc keeps it floating";
         let size = kit::cap_size(ui);
-        let tw = ui.text_width(Some(size), words);
+        let tw = ui.text_service().width(words, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0);
         let w = tw + 14.0;
         let tx = ((frame.input.size.0 - 4) as f32 - w).min(wx as f32 + (0.625 * ww as f32));
         let ty = 4.0f32.max(wy as f32 - 30.0);
-        let boxed = ui.box_("workspace-drag-tip", BoxOpts::default().w(Size::Px(w)).h(Size::Px(20.0)).at((tx, ty)));
+        let boxed = ui.node("workspace-drag-tip", pxui::Node::DEFAULT.w(Size::Px(w)).h(Size::Px(20.0)).at(tx, ty));
         ui.to_front(i64::MAX, &boxed);
-        ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
-            paint.fill(x, y, w, h, theme.input);
-            paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::edge(&theme));
+        ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
+            paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(theme.input));
+            paint.stroke(pxui::Rect::new(x + 0.5, y + 0.5, w - 1.0, h - 1.0), pxui::Stroke::new((theme).foreground.with_alpha(38)));
             let cy = kit::cap_y_paint(paint, y, h);
-            paint.text_s((x + 7.0, cy), size, theme.foreground, words);
+            { let text = words; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(x + 7.0, cy), pxui::Label::BODY.size((size) as f32), 0.0, text, &[span]); };
         });
     }
     if let Some(path) = moving {
         for (order, l) in geometry.leaves.iter().enumerate() {
             if l.path == path {
                 if l.floating {
-                    let edge = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-moving-edge"));
+                    let edge = floating(ui, Flags::NONE, l.frame, format_args!("workspace-moving-edge"));
                     ui.to_front((order * 2) as i64, &edge);
-                    ui.draw(&edge, move |paint, Rect { x, y, w, h }| {
-                        paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme.accent);
+                    ui.canvas(&edge, move |paint, Rect { x, y, w, h }| {
+                        paint.stroke(Rect::new(x + 0.5, y + 0.5, w - 1.0, h - 1.0), pxui::Stroke::new(theme.accent));
                     });
                 }
                 let (fx, fy, fw, fh) = l.frame;
-                let boxed = floating(ui, NO_FLAGS, (fx - 8, fy - 8, fw + 16, fh + 16), format_args!("workspace-moving"));
+                let boxed = floating(ui, pxui::Flags::NONE, (fx - 8, fy - 8, fw + 16, fh + 16), format_args!("workspace-moving"));
                 ui.to_front(i64::MAX - 1, &boxed);
                 // the padding box of the window, brackets 4 points outside it
-                ui.draw(&boxed, move |paint, _| {
-                    paint.brackets(fx as f32 + 1.0, fy as f32 + 1.0, fw as f32 - 2.0, fh as f32 - 2.0, 4.0, 8.0, 2.0, theme.accent);
+                ui.canvas(&boxed, move |paint, _| {
+                    paint.brackets(Rect::new(fx as f32 + 1.0, fy as f32 + 1.0, fw as f32 - 2.0, fh as f32 - 2.0), 4.0, 8.0, pxui::Stroke::new(theme.accent).width(2.0));
                 });
             }
         }
@@ -544,29 +548,26 @@ fn header(
     let theme = *theme;
     let (x, y, w, h) = l.header;
     let (name, path) = (panels::lower_name(&l.panel), key(&l.path));
-    let boxed = floating(ui, CLICKABLE | CLIP, (0, 0, w, h), format_args!("workspace-header-{name}{path}"));
+    let boxed = floating(ui, pxui::Flags::CLICKABLE | pxui::Flags::CLIP, (0, 0, w, h), format_args!("workspace-header-{name}{path}"));
     let size = h.min(20);
     // docked: the collapse chevron, a 20-point button 8 points from the edge. A window: dock,
     // then close.
     let windowed = st.window.is_some() && !st.collapsed;
-    let button = floating(ui, TAB_STOP_MARKED | CLICKABLE, (0.max(w - 8 - size), (h - size) / 2, size, size), format_args!("workspace-collapse-{name}{path}"));
+    let button = floating(ui, pxui::Flags::TAB_STOP_MARKED | pxui::Flags::CLICKABLE, (0.max(w - 8 - size), (h - size) / 2, size, size), format_args!("workspace-collapse-{name}{path}"));
     if ui.signal(&button).clicked {
         intents.push(if windowed { Intent::ClosePanel(l.path.clone()) } else { Intent::Toggle(l.path.clone()) });
     }
     let tools = 8 + size + if windowed { size + 8 } else { 0 };
     if windowed {
-        let dock = floating(ui, TAB_STOP_MARKED | CLICKABLE, (0.max(w - tools), (h - size) / 2, size, size), format_args!("workspace-dock-{name}{path}"));
+        let dock = floating(ui, pxui::Flags::TAB_STOP_MARKED | pxui::Flags::CLICKABLE, (0.max(w - tools), (h - size) / 2, size, size), format_args!("workspace-dock-{name}{path}"));
         let signal = ui.signal(&dock);
         if signal.clicked {
             intents.push(Intent::Window(l.path.clone(), None));
         }
         // the dock mark: a chevron-down in ink-2, as the sheet's window rows
-        ui.node_mut(&dock, |node| (node.look, node.mark) = (*header_button(&theme, theme::ink_2(&theme)).pick(State { hovered: signal.hovered, ..State::default() }), Mark::Chevron(Dir::Down)));
-        if ui.focused(&dock) {
-            ui.draw_over(&dock, move |paint, Rect { x, y, w, h }| paint.fill(x, y + h - 1.0, w, 1.0, theme.accent));
-        }
+        ui.node_mut(&dock, &mut |node| (node.look, node.mark) = (*header_button(&theme, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)).pick(State { hovered: signal.hovered, ..State::default() }), Mark::Chevron(Dir::Down)));
     }
-    let grip = floating(ui, CLICKABLE | BLOCKING, (0, 0, 0.max(w - tools), h), format_args!("workspace-drag-{name}{path}"));
+    let grip = floating(ui, pxui::Flags::CLICKABLE | pxui::Flags::BLOCKING, (0, 0, 0.max(w - tools), h), format_args!("workspace-drag-{name}{path}"));
     let drag = ui.signal(&grip);
     // a window is dragged from where it is drawn (the layout keeps it inside the frame, whatever
     // its saved place says), with the size it has when it is not collapsed
@@ -583,7 +584,7 @@ fn header(
     };
     let (ox, oy, ow, oh) = drag_origin(ui, &grip, original, &drag);
     // Escape puts the panel back where the drag began (a docked one stays docked)
-    let cancelled = (ui.state(&grip, 0) == 1 && !drag.pressed) || (drag.held && ui.key_pressed(Key::Escape));
+    let cancelled = (ui.state(&grip, 0) == 1 && !drag.pressed) || (drag.held && ui.key_pressed(pxui::KeyCode::Escape, pxui::Mods::NONE));
     ui.set_state(&grip, if cancelled && !drag.released { 1 } else { 0 });
     if drag.held || drag.released {
         let (px, py) = if drag.released { drag.release_point } else { drag.pointer };
@@ -622,51 +623,48 @@ fn header(
     let (main, sub) = split_title(text);
     if !sub.is_empty() && !l.floating && !st.collapsed && w as f32 >= 60.0 {
         let mut tx = x as f32 + 12.0 + (if focused { 12.0 } else { 0.0 }) + kit::cap_width(ui, main) + 8.0;
-        let fit = fit_crumbs(&mut |p| ui.text_width(None, p), limit_slots - tx, sub);
+        let fit = fit_crumbs(&mut |p| ui.text_service().width(p, pxui::Label::BODY, None).unwrap_or(0.0), limit_slots - tx, sub);
         let count = fit.len(sub);
         for (n, (index, part)) in fit.parts(sub).enumerate() {
-            let pw = ui.text_width(None, part);
+            let pw = ui.text_service().width(part, pxui::Label::BODY, None).unwrap_or(0.0);
             if index >= 0 && n + 1 < count && tx + pw <= limit_slots {
-                let b = floating(ui, CLICKABLE, (tx as i64 - x, 0, pw.ceil() as i64, h), format_args!("workspace-crumb-{name}{path}-{index}"));
+                let b = floating(ui, pxui::Flags::CLICKABLE, (tx as i64 - x, 0, pw.ceil() as i64, h), format_args!("workspace-crumb-{name}{path}-{index}"));
                 if ui.signal(&b).clicked {
                     intents.push(Intent::Crumb(l.path.clone(), index));
                 }
             }
-            tx = tx + pw + 8.0 + (ui.text_width(None, "/") + 8.0);
+            tx = tx + pw + 8.0 + (ui.text_service().width("/", pxui::Label::BODY, None).unwrap_or(0.0) + 8.0);
         }
     }
     // the collapse chevron (a window's close cross) on the button's look: the hover fill under it
     let collapse_state = State { hovered: ui.signal(&button).hovered, ..State::default() };
-    let ink = if l.floating { theme::ink_2(&theme) } else { theme.foreground };
+    let ink = if l.floating { theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32) } else { theme.foreground };
     if windowed {
         // the window's close mark is the label-size multiplication sign, centred in its button
         let cap = kit::cap_size(ui);
-        let tw = ui.text_width(Some(cap), "\u{d7}");
-        ui.node_mut(&button, |node| {
-            node.look = theme::Look { font: theme::Font { size: -2, ..theme::Font::BODY }, ..*header_button(&theme, theme::ink_2(&theme)).pick(collapse_state) };
+        let tw = ui.text_service().width("\u{d7}", pxui::Label::BODY.size((cap) as f32), None).unwrap_or(0.0);
+        ui.node_mut(&button, &mut |node| {
+            node.look = theme::Look { font: theme::Font { size: -2, ..theme::Font::BODY }, ..*header_button(&theme, theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)).pick(collapse_state) };
             node.inset = Edges { l: (size as f32 - tw) / 2.0, ..Edges::ZERO };
         });
         ui.text(&button, "\u{d7}");
     } else {
         let collapsed_now = collapsed;
-        ui.node_mut(&button, |node| (node.look, node.mark) = (*header_button(&theme, ink).pick(collapse_state), Mark::Chevron(if collapsed_now { Dir::Down } else { Dir::Left })));
+        ui.node_mut(&button, &mut |node| (node.look, node.mark) = (*header_button(&theme, ink).pick(collapse_state), Mark::Chevron(if collapsed_now { Dir::Down } else { Dir::Left })));
     }
     // the keyboard's mark is the sheet's: an accent line over the last row of the button
-    if ui.focused(&button) {
-        ui.draw_over(&button, move |paint, Rect { x, y, w, h }| paint.fill(x, y + h - 1.0, w, 1.0, theme.accent));
-    }
-    let mut text_box: Option<UiBox> = None;
+    let mut text_box: Option<pxui::Handle> = None;
     ui.within(&boxed, &mut |ui| {
-        text_box = Some(ui.box_("header-text", BoxOpts::default().w(Size::Grow).h(Size::Grow)));
+        text_box = Some(ui.node("header-text", pxui::Node::DEFAULT.w(Size::Grow).h(Size::Grow)));
     });
     let text_box = text_box.expect("header-text");
     let floating_ = l.floating;
     let text = text.to_owned();
     let cap = kit::cap_size(ui);
-    ui.draw(&text_box, move |paint, Rect { x, y, w, h }| {
-        paint.fill(x, y, w, h, if floating_ { theme.input } else { theme.panel });
-        let ink_2 = theme::ink_2(&theme);
-        let ink_3 = theme::ink_3(&theme);
+    ui.canvas(&text_box, move |paint, Rect { x, y, w, h }| {
+        paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(if floating_ { theme.input } else { theme.panel }));
+        let ink_2 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
+        let ink_3 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
         // "Title<TAB>a / b": the kind as a label, then the breadcrumb, its last part in ink
         let (main, sub) = split_title(&text);
         if w >= 60.0 {
@@ -677,27 +675,27 @@ fn header(
             let mut limit = limit_slots;
             if focused {
                 if tx + 6.0 <= limit {
-                    paint.fill(tx, y + (h / 2.0) - 3.0, 6.0, 6.0, theme.accent);
+                    paint.fill(pxui::Rect::new(tx, y + (h / 2.0) - 3.0, 6.0, 6.0), pxui::Fill::new(theme.accent));
                 }
                 tx += 12.0;
             }
-            let labelled = tx + paint.cap_width(main) <= limit;
+            let labelled = tx + { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(main, style, None) }.unwrap_or(0.0) <= limit;
             if !labelled {
                 limit = tx;
             }
             if labelled {
                 let cy = kit::cap_y_paint(paint, y, h);
-                paint.cap((tx, cy), Some(if focused { theme.foreground } else { ink_2 }), main);
+                { let text = main; let span = pxui::TextSpan::new(0, text.len() as u32).color(if focused { theme.foreground } else { ink_2 }); let _ = paint.text_spans(pxui::Point::new(tx, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
             }
-            tx += paint.cap_width(main) + 8.0;
-            let ty = paint.text_top(None, y, h);
+            tx += { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(main, style, None) }.unwrap_or(0.0) + 8.0;
+            let ty = (y) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
             // put: cut to the room left, paint, and advance
-            let put = |paint: &mut Paint, tx: &mut f32, color: pxui::geom::color::T, part: &str| {
+            let put = |paint: &mut Paint, tx: &mut f32, color: pxui::Rgba, part: &str| {
                 let part = cut(paint, None, limit - *tx, part);
                 if !part.is_empty() {
-                    paint.text_c((*tx, ty), color, &part);
+                    { let text = &part; let span = pxui::TextSpan::new(0, text.len() as u32).color(color); let _ = paint.text_spans(pxui::Point::new(*tx, ty), pxui::Label::BODY, 0.0, text, &[span]); };
                 }
-                *tx = *tx + paint.text_width(None, &part) + 8.0;
+                *tx = *tx + paint.text_service().width(&part, pxui::Label::BODY, None).unwrap_or(0.0) + 8.0;
             };
             // a window's title row: the path is one string in ink-2 at the label size
             if !sub.is_empty() && floating_ && !collapsed {
@@ -705,9 +703,9 @@ fn header(
                 let size = cap;
                 let cy = kit::cap_y_paint(paint, y, h);
                 let shown = cut(paint, Some(size), limit - tx, sub);
-                paint.text_s((tx, cy), size, pxui::geom::color::with_alpha(ink_2, 179), &shown);
+                { let text = &shown; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink_2.with_alpha(179)); let _ = paint.text_spans(pxui::Point::new(tx, cy), pxui::Label::BODY.size((size) as f32), 0.0, text, &[span]); };
             } else if !sub.is_empty() && !collapsed {
-                let fit = fit_crumbs(&mut |p| paint.text_width(None, p), limit - tx, sub);
+                let fit = fit_crumbs(&mut |p| paint.text_service().width(p, pxui::Label::BODY, None).unwrap_or(0.0), limit - tx, sub);
                 let count = fit.len(sub);
                 for (i, (_, part)) in fit.parts(sub).enumerate() {
                     if i + 1 == count {
@@ -727,9 +725,9 @@ fn header(
 
 /// A header's 20-point button (collapse, dock, close) as `States`: the hover fill under its mark,
 /// drawn in `ink`.
-fn header_button(theme: &theme::Tokens, ink: pxui::geom::color::T) -> theme::States {
+fn header_button(theme: &theme::Tokens, ink: pxui::Rgba) -> theme::States {
     let idle = theme::Look { text: ink, ..theme::Look::NONE };
-    theme::States { hover: theme::Look { fill: theme::hover_fill(theme), ..idle }, ..theme::States::all(idle) }
+    theme::States { hover: theme::Look { fill: (theme).input.blend((theme).accent, 0.11), ..idle }, ..theme::States::of(idle) }
 }
 
 /// where a header's tools begin: after its title, the 8-point gap, the 1 x 12 rule between two
@@ -740,17 +738,17 @@ pub fn tools_start(ui: &mut Ui, focused: bool, floating: bool, collapsed: bool, 
     if sub.is_empty() {
     } else if floating {
         let size = kit::cap_size(ui);
-        x = x + 8.0 + ui.text_width(Some(size), &sub);
+        x = x + 8.0 + ui.text_service().width(&sub, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0);
     } else {
         for (i, part) in crumbs(sub).enumerate() {
             if i > 0 {
-                x = x + 8.0 + ui.text_width(None, "/");
+                x = x + 8.0 + ui.text_service().width("/", pxui::Label::BODY, None).unwrap_or(0.0);
             }
-            x = x + 8.0 + ui.text_width(None, part);
+            x = x + 8.0 + ui.text_service().width(part, pxui::Label::BODY, None).unwrap_or(0.0);
         }
     }
     if collapsed {
-        x = x + 8.0 + ui.text_width(None, "collapsed");
+        x = x + 8.0 + ui.text_service().width("collapsed", pxui::Label::BODY, None).unwrap_or(0.0);
     }
     x + 25.0
 }
@@ -769,10 +767,10 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
         let ex = 36.min(w / 3);
         let ey = 36.min(h / 3);
         // the pane's own box sits under its four edges, so the pane under the pointer is known
-        let pane = floating(ui, CLICKABLE, (x, y, w, h), format_args!("workspace-drop-pane-{}", key(&leaf.path)));
+        let pane = floating(ui, pxui::Flags::CLICKABLE, (x, y, w, h), format_args!("workspace-drop-pane-{}", key(&leaf.path)));
         ui.to_front(i64::MAX, &pane);
         let pane_hovered = ui.signal(&pane).hovered;
-        let mut edges: Vec<(Side, &str, UiBox, bool)> = Vec::new();
+        let mut edges: Vec<(Side, &str, pxui::Handle, bool)> = Vec::new();
         for (side, rect) in [
             (Side::Left, (x, y + ey, ex, 0.max(h - (2 * ey)))),
             (Side::Right, (x + w - ex, y + ey, ex, 0.max(h - (2 * ey)))),
@@ -785,7 +783,7 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
                 Side::Top => "top",
                 Side::Bottom => "bottom",
             };
-            let boxed = floating(ui, CLICKABLE | BLOCKING, rect, format_args!("workspace-drop-{}{}", key(&leaf.path), suffix));
+            let boxed = floating(ui, pxui::Flags::CLICKABLE | pxui::Flags::BLOCKING, rect, format_args!("workspace-drop-{}{}", key(&leaf.path), suffix));
             ui.to_front(i64::MAX, &boxed);
             let hovered = ui.signal(&boxed).hovered;
             edges.push((side, suffix, boxed, hovered));
@@ -798,13 +796,13 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
         for (side, suffix, boxed, hovered) in edges {
             if under {
                 let label = format!("split {suffix}");
-                ui.draw(&boxed, move |paint, _| {
-                    let color = if hovered { theme.accent } else { theme::border(&theme) };
+                ui.canvas(&boxed, move |paint, _| {
+                    let color = if hovered { theme.accent } else { (theme).foreground.with_alpha(77) };
                     match side {
-                        Side::Top => paint.fill(fx + (fw / 2.0) - 24.0, fy + 6.0, 48.0, 4.0, color),
-                        Side::Bottom => paint.fill(fx + (fw / 2.0) - 24.0, fy + fh - 10.0, 48.0, 4.0, color),
-                        Side::Left => paint.fill(fx + 6.0, fy + (fh / 2.0) - 24.0, 4.0, 48.0, color),
-                        Side::Right => paint.fill(fx + fw - 10.0, fy + (fh / 2.0) - 24.0, 4.0, 48.0, color),
+                        Side::Top => paint.fill(pxui::Rect::new(fx + (fw / 2.0) - 24.0, fy + 6.0, 48.0, 4.0), pxui::Fill::new(color)),
+                        Side::Bottom => paint.fill(pxui::Rect::new(fx + (fw / 2.0) - 24.0, fy + fh - 10.0, 48.0, 4.0), pxui::Fill::new(color)),
+                        Side::Left => paint.fill(pxui::Rect::new(fx + 6.0, fy + (fh / 2.0) - 24.0, 4.0, 48.0), pxui::Fill::new(color)),
+                        Side::Right => paint.fill(pxui::Rect::new(fx + fw - 10.0, fy + (fh / 2.0) - 24.0, 4.0, 48.0), pxui::Fill::new(color)),
                     }
                     if hovered {
                         let (hx, hy, hw, hh) = match side {
@@ -813,10 +811,10 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
                             Side::Left => (fx, fy, fw / 2.0, fh),
                             Side::Right => (fx + (fw / 2.0), fy, fw / 2.0, fh),
                         };
-                        paint.fill(hx, hy, hw, hh, theme::tint(&theme));
-                        paint.dashed_rect(hx + 0.5, hy + 0.5, hw - 1.0, hh - 1.0, theme.accent);
-                        let cw = paint.cap_width(&label);
-                        paint.cap((hx + ((hw - cw) / 2.0), hy + (hh / 2.0) - 6.0), Some(theme.accent), &label);
+                        paint.fill(pxui::Rect::new(hx, hy, hw, hh), pxui::Fill::new((theme).accent.with_alpha(41)));
+                        paint.dashed_rect(Rect::new(hx + 0.5, hy + 0.5, hw - 1.0, hh - 1.0), pxui::Stroke::new(theme.accent));
+                        let cw = { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(&label, style, None) }.unwrap_or(0.0);
+                        { let text = &label; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.accent); let _ = paint.text_spans(pxui::Point::new(hx + ((hw - cw) / 2.0), hy + (hh / 2.0) - 6.0), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
                     }
                 });
             }
@@ -857,12 +855,12 @@ fn dragged_size(s: &Splitter, signal: &Signal) -> Option<PSize> {
 
 /// PXUI has already routed input through the previous hit tree when the frame builder starts.
 pub fn splitter_drag(ui: &Ui, geo: &Geometry) -> Option<(Option<(Path, PSize)>, bool)> {
-    let seed = Ui::key_of(ROOT_KEY, "workspace-grips");
+    let seed = pxui::ui::key_of(ROOT_KEY, "workspace-grips");
     for s in &geo.splitters {
         let Some(node) = &s.node else { continue };
         let mut grip = None;
         kit::with_label(format_args!("workspace-grip{}", key(node)), &mut |label| {
-            grip = ui.box_of_key(Ui::key_of(seed, label));
+            grip = ui.box_of_key(Key::Resolved(pxui::ui::key_of(seed, label)));
         });
         let Some(grip) = grip else { continue };
         let signal = ui.signal(&grip);
@@ -892,61 +890,70 @@ fn splitter_controls(state: Option<&dyn Fn(&[usize]) -> panels::State>, geo: &Ge
     });
     let mut menu_at: Option<(usize, (f32, f32))> = None;
     let mut tip: Option<((f32, f32), i64)> = None;
-    let view = kit::cached(ui, "workspace-grips", revision, &mut |ui| {
-        for (n, s) in geo.splitters.iter().enumerate() {
-            let Some(node) = &s.node else {
-                continue;
-            };
-            let (x, y, width, height) = s.bounds;
-            let grip_axis = if s.axis == Axis::H { pxui::ui::Axis::Row } else { pxui::ui::Axis::Column };
-            let (_, signal) = ui.grip(format_args!("workspace-grip{}", key(node)), grip_axis, Some(Rect::new(x as f32, y as f32, width as f32, height as f32)));
-            if signal.held {
-                // the ratio it makes, in a tip beside the gutter: "58 / 42"
-                let (first, second) = sides(s);
-                let a = (100.0 * first as f32 / (1.max(first + second)) as f32).round() as i64;
-                let (px, py) = signal.pointer;
-                tip = Some((if s.axis == Axis::H { ((x + 8) as f32, py - 10.0) } else { (px + 8.0, (y + 8) as f32) }, a));
-            }
-            if track_drag {
-                if let Some(size) = dragged_size(s, &signal) {
-                    intents.push(Intent::Resize { node: node.clone(), size });
+    let pxui::ViewSize { width, height } = ui.view_size();
+    let (root, view) = kit::sized_view(ui, "workspace-grips", revision, (0.0, 0.0), Size::Px(width), Size::Px(height), &mut |ui| {
+        let seed = pxui::ui::key_of(ROOT_KEY, "workspace-grips");
+        ui.id(Key::Resolved(seed), |ui| {
+            for (n, s) in geo.splitters.iter().enumerate() {
+                let Some(node) = &s.node else {
+                    continue;
+                };
+                let (x, y, width, height) = s.bounds;
+                let grip_axis = if s.axis == Axis::H { pxui::ui::Axis::Row } else { pxui::ui::Axis::Column };
+                let (_, signal) = pxui::ext::grip(ui, format_args!("workspace-grip{}", key(node)), grip_axis, Some(Rect::new(x as f32, y as f32, width as f32, height as f32)));
+                if signal.held {
+                    // the ratio it makes, in a tip beside the gutter: "58 / 42"
+                    let (first, second) = sides(s);
+                    let a = (100.0 * first as f32 / (1.max(first + second)) as f32).round() as i64;
+                    let (px, py) = signal.pointer;
+                    tip = Some((if s.axis == Axis::H { ((x + 8) as f32, py - 10.0) } else { (px + 8.0, (y + 8) as f32) }, a));
                 }
-                if signal.released {
-                    intents.push(Intent::Settled);
+                if track_drag {
+                    if let Some(size) = dragged_size(s, &signal) {
+                        intents.push(Intent::Resize { node: node.clone(), size });
+                    }
+                    if signal.released {
+                        intents.push(Intent::Settled);
+                    }
+                }
+                // a right-click sizes the split another way, keeping what it shows; the menu opens where
+                // the gutter was clicked
+                if context_clicked(&signal) {
+                    menu_at = Some((n, signal.release_point));
                 }
             }
-            // a right-click sizes the split another way, keeping what it shows; the menu opens where
-            // the gutter was clicked
-            if context_clicked(&signal) {
-                menu_at = Some((n, signal.release_point));
-            }
-        }
+        });
     });
     // The hit band sits above docked panes, below floating windows.
-    ui.to_front(-1, &view);
+    ui.to_front(-1, &root);
     // the tip stands at the root, over everything, while a gutter is held
     if let Some(((tx, ty), a)) = tip {
         let tw = kit::cap_width(ui, &format!("{} / {}", a, 100 - a));
-        let tip = ui.box_("workspace-gutter-tip", BoxOpts::default().w(Size::Px(tw)).h(Size::Px(20.0)).at((tx, ty)));
+        let tip = ui.node("workspace-gutter-tip", pxui::Node::DEFAULT.w(Size::Px(tw)).h(Size::Px(20.0)).at(tx, ty));
         ui.to_front(i64::MAX, &tip);
-        ui.draw(&tip, move |paint, Rect { x, y, w: _, h }| {
+        ui.canvas(&tip, move |paint, Rect { x, y, w: _, h }| {
             let cy = kit::cap_y_paint(paint, y, h);
-            paint.ratio((x, cy), a, 100 - a);
+            let ratio = format!("{} / {}", a, 100 - a);
+            let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).tracking(0.08);
+            paint.text_chars(pxui::Point::new(x, cy), style, &ratio);
         });
     }
     if let Some((n, at)) = menu_at {
         ui.set_state(&view, n as i64 + 1);
-        ui.set_text_state(&view, Some(format!("{} {}", cfmt::g(at.0 as f64, 6), cfmt::g(at.1 as f64, 6))));
+        ui.set_text_state(&view, Some(&format!("{} {}", cfmt::g(at.0 as f64, 6), cfmt::g(at.1 as f64, 6))));
     }
     let open = ui.state(&view, 0);
     if let Some(s) = geo.splitters.get((open - 1).max(0) as usize).filter(|s| open > 0 && s.node.is_some()) {
         let n = open - 1;
         let default_at = (s.bounds.0 as f32, s.bounds.1 as f32);
-        let at = ui.text_state(&view).as_deref().and_then(point).unwrap_or(default_at);
-        match ui.context_menu(at, &MenuOpts::default(), &format!("workspace-size-menu-{n}"), &size_rows(s)) {
-            MenuResult::Open => {}
-            MenuResult::Dismiss => ui.set_state(&view, 0),
-            MenuResult::Pick(i) => {
+        let at = ui.text_state(&view).and_then(point).unwrap_or(default_at);
+        let rows = size_rows(s);
+        let items: Vec<_> = rows.iter().map(|(label, enabled)| MenuItem::new(label).disabled(!enabled)).collect();
+        let choice = ui.menu(pxui::hash_of(&("workspace-size-menu", n)), Point::new(at.0, at.1), &items, &Menu::DEFAULT);
+        match (choice.chosen, choice.dismissed) {
+            (None, false) => {}
+            (None, true) => ui.set_state(&view, 0),
+            (Some(i), _) => {
                 ui.set_state(&view, 0);
                 let node = s.node.clone().expect("a sized gutter");
                 intents.push(Intent::Resize { node, size: resized(s, SIZE_WAYS[i as usize]) });
@@ -963,7 +970,7 @@ fn splitter_controls(state: Option<&dyn Fn(&[usize]) -> panels::State>, geo: &Ge
         }
         let bounds = leaf.frame;
         let (x, y, w, h) = bounds;
-        let boxed = floating(ui, CLICKABLE | BLOCKING, (x + w - 12, y + h - 12, 12, 12), format_args!("workspace-window-size-{}", key(&leaf.path)));
+        let boxed = floating(ui, pxui::Flags::CLICKABLE | pxui::Flags::BLOCKING, (x + w - 12, y + h - 12, 12, 12), format_args!("workspace-window-size-{}", key(&leaf.path)));
         ui.to_front(order, &boxed);
         let signal = ui.signal(&boxed);
         let (x, y, w, h) = drag_origin(ui, &boxed, bounds, &signal);
@@ -978,11 +985,11 @@ fn splitter_controls(state: Option<&dyn Fn(&[usize]) -> panels::State>, geo: &Ge
                 ));
             }
         }
-        let ink = theme::ink_3(&theme);
-        ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
+        let ink = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
+        ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
             // an 8-point corner of two 1-point lines, 4 points in from the window's edges
-            paint.fill(x + w - 5.0, y + h - 12.0, 1.0, 8.0, ink);
-            paint.fill(x + w - 12.0, y + h - 5.0, 8.0, 1.0, ink);
+            paint.fill(pxui::Rect::new(x + w - 5.0, y + h - 12.0, 1.0, 8.0), pxui::Fill::new(ink));
+            paint.fill(pxui::Rect::new(x + w - 12.0, y + h - 5.0, 8.0, 1.0), pxui::Fill::new(ink));
         });
     }
     intents

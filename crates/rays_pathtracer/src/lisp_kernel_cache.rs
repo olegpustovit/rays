@@ -243,6 +243,7 @@ fn decode(data: &[u8]) -> Option<FrontResult> {
         uniform_layout,
         uniform_bytes,
         uint32_uniforms,
+        signed_words: false,
         table_seeds,
         output_widths,
         output_uint32,

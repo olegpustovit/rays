@@ -4,7 +4,7 @@ use rays_shell::tree::{self, Command, Intent, Row};
 fn row(id: i64, label: &str) -> Row {
     Row {
         id, label: label.into(), depth: 0, detail: String::new(), ghost: false, link: false,
-        badge: ("G".into(), pxui::geom::color::white()), flags: Vec::new(),
+        badge: ("G".into(), pxui::Rgba::WHITE), flags: Vec::new(),
     }
 }
 

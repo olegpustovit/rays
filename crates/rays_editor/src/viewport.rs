@@ -16,7 +16,7 @@ use flow_syntax::context;
 use flow_syntax::syntax::{Node as SNode, Syntax};
 use input::Event;
 use param::{KindView, Value};
-use pxui::ui::{BoxOpts, Size, Ui, ValueFieldOpts, CLICKABLE};
+use pxui::ui::{Rect, Size, Ui};
 use rays_shell::layout::Bounds;
 use rays::camera as rcam;
 use rays::easy_camera;
@@ -103,11 +103,11 @@ pub mod cc {
     pub fn dragged(control: &Control, ui: &mut Ui, camera: &easy_camera::EasyCamera) -> Option<easy_camera::EasyCamera> {
         let now = numbers(camera);
         for (i, &key) in control.fields.iter().enumerate() {
-            let Some((field, (fraction, _))) = ui.box_of_key(key).and_then(|b| ui.field_drag(&b).map(|d| (b, d))) else { continue };
+            let Some((field, (fraction, _))) = ui.box_of_key(pxui::Key::Resolved(key)).and_then(|b| pxui::ext::field_drag(ui, &b).map(|d| (b, d))) else { continue };
             let (_, low, high) = NUMBERS[i];
             // the slide's text (as `number`'s slide spells it); the line shows the value the frame
             // began with, as the build does
-            let opts = ValueFieldOpts { fraction: Some(((now[i] - low) / (high - low)) as f32), ..Default::default() };
+            let opts = pxui::ValueField::DEFAULT.fraction(((now[i] - low) / (high - low)) as f32);
             let read = DRAGGED.with(|text| {
                 let mut text = text.borrow_mut();
                 cfmt::g_into(&mut text, low + fraction as f64 * (high - low), 6);
@@ -147,24 +147,22 @@ pub mod cc {
     /// A number row (`kept_drag`: its owner follows a drag between builds, `dragged`); the value and
     /// the field's key.
     pub fn number(ui: &mut Ui, key: &str, label: &str, low: f64, high: f64, value: f64, kept_drag: bool) -> (f64, i64) {
-        let (row, x, y, w) = ui.inspector_row(None, None, key, label);
+        let (row, x, y, w) = pxui::ext::inspector_row(ui, None, None, key, label);
         let mut result = value;
         let field = format!("{key}-value");
-        let field_key = pxui::ui_core::key_of(row.box_key, &field);
+        let field_key = pxui::ui::key_of(row.box_key, &field);
         ui.within(&row, &mut |ui| {
-            let label_x = ui.inspector_label_x();
+            let label_x = pxui::ext::inspector_label_x(ui);
             let width = if y > 20. { w } else { (x - label_x - 8.).max(1.) };
-            let label_hit = ui.box_("label-edit", BoxOpts::default().flags(CLICKABLE).at((label_x, 2.)).w(Size::Px(width)).h(Size::Px(20.)));
+            let label_hit = ui.node("label-edit", pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).at(label_x, 2.).w(Size::Px(width)).h(Size::Px(20.)));
             let edit = ui.signal(&label_hit).double_clicked;
             let shown = cfmt::g(value, 6);
-            let opts = ValueFieldOpts {
-                fraction: Some(((value - low) / (high - low)) as f32),
-                slide: Some(Rc::new(move |fraction: f32| cfmt::g(low + fraction as f64 * (high - low), 6))),
-                edit,
-                kept_drag,
-                ..Default::default()
-            };
-            let (text, _) = ui.value_field((x, y), w, 20., &opts, &|text: &str| text.parse::<f64>().is_ok_and(f64::is_finite), &field, &shown);
+            let opts = pxui::ValueField::DEFAULT.fraction(((value - low) / (high - low)) as f32).edit(edit).kept_drag(kept_drag);
+            let slide = |fraction: f32| cfmt::g(low + f64::from(fraction) * (high - low), 6);
+            let valid = |text: &str| text.parse::<f64>().is_ok_and(f64::is_finite);
+            let callbacks = pxui::ValueCallbacks::DEFAULT.slide(&slide).valid(&valid);
+            let text = pxui::ext::value_field(ui, pxui::Key::Resolved(field_key), &shown,
+                Rect::new(x, y, w, 20.0), &opts, &callbacks).changed.unwrap_or(&shown);
             // the text shows 6 digits: an unedited field leaves the value as it is
             result = if text == shown {
                 value
@@ -179,11 +177,13 @@ pub mod cc {
     }
 
     pub fn text(ui: &mut Ui, key: &str, label: &str, value: &str) -> String {
-        let (row, x, y, w) = ui.inspector_row(None, None, key, label);
+        let (row, x, y, w) = pxui::ext::inspector_row(ui, None, None, key, label);
         let mut result = value.to_string();
         ui.within(&row, &mut |ui| {
-            let opts = ValueFieldOpts { left: true, ..Default::default() };
-            result = ui.value_field((x, y), w, 20., &opts, &|_: &str| true, &format!("{key}-value"), value).0;
+            let opts = pxui::ValueField::DEFAULT.left(true);
+            result = pxui::ext::value_field(ui, pxui::hash_of(&(key, "value")), value,
+                Rect::new(x, y, w, 20.0), &opts, &pxui::ValueCallbacks::DEFAULT)
+                .changed.unwrap_or(value).to_owned();
         });
         result
     }
@@ -191,9 +191,9 @@ pub mod cc {
     pub fn render_section(control: &Control, ui: &mut Ui) -> (Control, Vec<String>) {
         let mut out = (control.filename.clone(), false);
         let revision = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&control.filename, h));
-        ui.inspector_section_view("Render", revision, false, None, "Render", &mut |ui| {
+        rays_shell::inspector::section(ui, "Render", revision, false, None, "Render", &mut |ui| {
             let filename = text(ui, "Output", "Output", &control.filename);
-            out = (filename, ui.inspector_button("Save", "Render / save PNG"));
+            out = (filename, pxui::ext::inspector_button(ui, "Save", "Render / save PNG"));
         });
         let (filename, save) = out;
         (Control { filename: filename.clone(), ..control.clone() }, if save { vec![filename] } else { Vec::new() })
@@ -206,21 +206,21 @@ pub mod cc {
             Some(true) => Some(true),
             Some(false) => Some(!ui.expanded("Camera").unwrap_or(false)),
         };
-        ui.inspector_section_view("Camera", revision, false, set_expanded, "Camera", build)
+        rays_shell::inspector::section(ui, "Camera", revision, false, set_expanded, "Camera", build)
     }
 
     pub fn widgets(control: &Control, ui: &mut Ui, camera: &easy_camera::EasyCamera) -> (Control, easy_camera::EasyCamera, Vec<RenderRequest>) {
         let mut out_camera = camera.clone();
         let mut control_out = control.clone();
         let mut saves: Vec<String> = Vec::new();
-        ui.scope(&control.prefix, &mut |ui| {
+        ui.id(pxui::hash_of(&control.prefix), |ui| {
             let mut result: Option<easy_camera::EasyCamera> = None;
             // the section shows the lens, the distance, the clip planes and the inertia
             let shown = [easy_camera::fov_y(camera).to_bits(), easy_camera::distance(camera).to_bits(), easy_camera::near(camera).to_bits(), easy_camera::far(camera).to_bits(), easy_camera::inertia(camera) as u64];
             let live = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&shown, h));
             // while a number's drag is followed between frames (`dragged`) the section stays as it
             // was declared; its release builds it as the camera is now
-            let dragging = control.fields.iter().any(|&k| ui.box_of_key(k).is_some_and(|b| ui.field_drag(&b).is_some()));
+            let dragging = control.fields.iter().any(|&k| ui.box_of_key(pxui::Key::Resolved(k)).is_some_and(|b| pxui::ext::field_drag(ui, &b).is_some()));
             let revision = if control.held && dragging { control.shown } else { live };
             let mut fields = control.fields;
             camera_section(control, ui, revision, &mut |ui| {
@@ -228,8 +228,8 @@ pub mod cc {
                 for (i, (label, low, high)) in NUMBERS.iter().enumerate() {
                     (values[i], fields[i]) = number(ui, label, label, *low, *high, values[i], true);
                 }
-                let inertia = ui.inspector_toggle("Inertia", "Inertia", easy_camera::inertia(camera));
-                let reset = ui.inspector_button("Reset camera", "Reset camera");
+                let inertia = pxui::ext::inspector_toggle(ui, "Inertia", "Inertia", easy_camera::inertia(camera));
+                let reset = pxui::ext::inspector_button(ui, "Reset camera", "Reset camera");
                 result = Some(edited(camera, values, inertia, reset));
             });
             out_camera = result.unwrap_or_else(|| camera.clone());
@@ -578,21 +578,21 @@ pub fn panel(ui: &mut Ui, control_: &Control, camera_: &Camera, extra_: &Extra, 
     // a kept section asks for nothing: no follow request
     let mut next = Extra { follow_request: None, ..extra_.clone() };
     let revision = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&(look_through(extra_), extra_.following, extra_.show.cameras, extra_.show.axes, extra_.show.handles), h));
-    ui.inspector_section_view("Viewport", revision, true, None, "Viewport", &mut |ui| {
+    rays_shell::inspector::section(ui, "Viewport", revision, true, None, "Viewport", &mut |ui| {
         // the label column is 0.3 of the panel less 16: the rows say it short, their keys stay
-        let through = ui.inspector_toggle("Look through render camera", "Look through", look_through(extra_));
+        let through = pxui::ext::inspector_toggle(ui, "Look through render camera", "Look through", look_through(extra_));
         // The ACTIVE camera's own parameter, here so a look-through can be set up by orbiting: on,
         // the viewport drives the camera.
         let follow_request = match extra_.following {
             Some(following) => {
-                let wanted = ui.inspector_toggle("Camera follows viewport", "Follows view", following);
+                let wanted = pxui::ext::inspector_toggle(ui, "Camera follows viewport", "Follows view", following);
                 if wanted != following { Some(wanted) } else { None }
             }
             None => None,
         };
-        let cameras = ui.inspector_toggle("Cameras and lights", "Cameras", extra_.show.cameras);
-        let axes = ui.inspector_toggle("Axis gizmo", "Axis gizmo", extra_.show.axes);
-        let handles = ui.inspector_toggle("Selected node handles", "Handles", extra_.show.handles);
+        let cameras = pxui::ext::inspector_toggle(ui, "Cameras and lights", "Cameras", extra_.show.cameras);
+        let axes = pxui::ext::inspector_toggle(ui, "Axis gizmo", "Axis gizmo", extra_.show.axes);
+        let handles = pxui::ext::inspector_toggle(ui, "Selected node handles", "Handles", extra_.show.handles);
         next = Extra { follow_request, show: Show { cameras, axes, handles }, ..set_look(extra_, through) };
     });
     let (control_out, camera_out, requests) = cc::widgets(control_, ui, camera_);
@@ -609,7 +609,7 @@ pub fn panel(ui: &mut Ui, control_: &Control, camera_: &Camera, extra_: &Extra, 
         }
     }
     let revision = rays_shell::kit::debug_revision(&extra_.root_rows.borrow().0);
-    ui.inspector_section_view("renderer-section", revision, true, None, "Scene root", &mut |ui| {
+    rays_shell::inspector::section(ui, "renderer-section", revision, true, None, "Scene root", &mut |ui| {
         let cached = extra_.root_rows.borrow();
         if cached.0.as_ref() != Some(&extra_.root) {
             return;
@@ -1261,9 +1261,9 @@ pub fn handles(ui: &mut Ui, selected: Option<&Picked>, scene_: &kg::T, space: &m
         if extra_.show.handles {
             for a in arrows(node, view_, bounds, space, extra_.tool) {
                 let (tx, ty) = a.tip;
-                let box_ = ui.box_fmt(format_args!("handle-{}", a.name), BoxOpts::default().flags(CLICKABLE).w(Size::Px(14.)).h(Size::Px(14.)).at(((tx - 7.) as f32, (ty - 7.) as f32)));
+                let box_ = ui.node(pxui::hash_of(&format!("handle-{}", a.name)), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).w(Size::Px(14.)).h(Size::Px(14.)).at((tx - 7.) as f32, (ty - 7.) as f32));
                 let signal = ui.signal(&box_);
-                let (mx, my) = pxui::geom::p64(signal.drag);
+                let (mx, my) = crate::p64(signal.drag);
                 let (ux, uy) = a.unit;
                 let delta = match a.tool {
                     Tool::Turn => (mx * ux + my * uy) / ux.hypot(uy),
@@ -1285,7 +1285,7 @@ pub fn handles(ui: &mut Ui, selected: Option<&Picked>, scene_: &kg::T, space: &m
             if let Some(camera_) = camera_ {
                 if !same_view(&camera_, view_) {
                     if let Some((x, y)) = project(bounds, view_, rcam::position(&camera_)) {
-                        let box_ = ui.box_fmt(format_args!("pick-camera-{node_id}"), BoxOpts::default().flags(CLICKABLE).w(Size::Px(PICK_SIZE as f32)).h(Size::Px(PICK_SIZE as f32)).at(((x - PICK_SIZE / 2.) as f32, (y - PICK_SIZE / 2.) as f32)));
+                        let box_ = ui.node(pxui::hash_of(&("pick-camera", node_id)), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).w(Size::Px(PICK_SIZE as f32)).h(Size::Px(PICK_SIZE as f32)).at((x - PICK_SIZE / 2.) as f32, (y - PICK_SIZE / 2.) as f32));
                         let signal = ui.signal(&box_);
                         grab = grab || signal.held;
                         if signal.clicked {

@@ -154,11 +154,11 @@ fn validate_mesh_images(images: &[runtime_resources::image::Image]) -> Result<()
     Ok(())
 }
 
-struct Release(Vec<scene::Node>);
+struct Release<'a>(&'a [scene::Node]);
 
-impl Drop for Release {
+impl Drop for Release<'_> {
     fn drop(&mut self) {
-        layer::release(&self.0);
+        layer::release(self.0);
     }
 }
 
@@ -183,7 +183,7 @@ fn lower_all(
     staged: &layer::StagedNative,
     submission: &rr::Submission,
 ) -> Result<Vec<rr::Batch>, Error> {
-    let mut batches = Vec::new();
+    let mut batches = Vec::with_capacity(staged.layers.len());
     for layer in &staged.layers {
         let batch = match layer {
             layer::NativeLayer::Scene2Layer(ir, resources) => {
@@ -218,7 +218,7 @@ fn lower_all(
 pub(crate) fn render(execution: &rr::Renderer, density: i64, width: i64, height: i64, scene: &[scene::Node]) -> Result<(), Error> {
     let mut cancel = Cancel(None);
     let prepared: Result<Outcome, Error> = {
-        let _release = Release(scene.to_vec());
+        let _release = Release(scene);
         match layer::stage_native_render_checked(Some(density), width, height, scene) {
             Err(layer::NativeError::Message(message)) => Err(Error::Stage(message)),
             Err(layer::NativeError::Resource(e)) => Err(Error::Resource(e)),

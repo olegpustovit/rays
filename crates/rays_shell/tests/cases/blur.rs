@@ -35,21 +35,26 @@ fn render(canvas_: &canvas::Canvas, blur: f32) -> (Vec<u8>, u64, u64) {
 fn render_at(canvas_: &canvas::Canvas, blur: f32, left: f32, radius: f32) -> (Vec<u8>, u64, u64) {
     let path = format!("{}/../../pxui/assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
     let ui = Rc::new(RefCell::new(rays_shell::host::create(Platform::Apple, None, Some(&path))));
+    if blur > 0.0 {
+        rays_shell::host::enable_backdrop_blur(&ui);
+    }
     let view = Cell::new(None);
     let mut build = |ui: &mut Ui| {
-        ui.node("under", Node { w: Size::Px(4.0), h: Size::Px(1.0), look: Look { fill: pxui::geom::color::rgba(0, 0, 0, 1), ..Look::NONE }, ..Node::DEFAULT });
-        let glass = ui.view("glass", 1, Size::Px(160.0), Size::Px(80.0), &mut |ui| {
-            ui.node("pane", Node { w: Size::Px(160.0), h: Size::Px(80.0), look: Look { fill: pxui::geom::color::rgba(0, 0, 0, 1), ..Look::NONE }, ..Node::DEFAULT });
+        ui.node("under", Node { w: Size::Px(4.0), h: Size::Px(1.0), look: Look { fill: pxui::Rgba::rgba(0, 0, 0, 1), ..Look::NONE }, ..Node::DEFAULT });
+        let area = ui.node("glass-area", Node::DEFAULT.w(Size::Px(160.0)).h(Size::Px(80.0)).at(0.0, 0.0));
+        ui.within(&area, &mut |ui| {
+            let glass = ui.view_of("glass", &1, |ui| {
+                ui.node("pane", Node { w: Size::Px(160.0), h: Size::Px(80.0), look: Look { fill: pxui::Rgba::rgba(0, 0, 0, 1), ..Look::NONE }, ..Node::DEFAULT });
+            });
+            ui.node_mut(&glass, &mut |node| node.look.radius = [radius; 4]);
+            view.set(Some(glass));
         });
-        ui.node_mut(&glass, |node| node.look.radius = [radius; 4]);
-        view.set(Some(glass));
     };
     for count in 0..2 {
         rays_shell::host::build(&mut ui.borrow_mut(), &frame_at(count), &mut build);
         if count == 0 {
             let mut ui = ui.borrow_mut();
-            ui.view_offset(&view.get().unwrap(), left, 40.0);
-            ui.view_backdrop_blur(&view.get().unwrap(), blur);
+            ui.set_view(&view.get().unwrap(), &ViewTransform::DEFAULT.offset(left, 40.0).blur(blur));
         }
     }
     let mut nodes = vec![scene::clear(color::rgb(255, 255, 255)), scene::rect((0, 0), 160, H, Some(color::black()), None).unwrap()];

@@ -30,9 +30,9 @@ fn rgba(mode: RenderMode) -> (i64, i64, i64, i64) {
     (c.r, c.g, c.b, c.a)
 }
 
-fn key(wrap: Option<i64>, align: Alignment, density: i64, size: i64, text: &str, mode: RenderMode) -> TableKey {
+fn key(wrap: Option<i64>, align: Alignment, density: i64, size: i64, text: &str, mode: RenderMode, style: i64) -> TableKey {
     let (r, g, b, a) = rgba(mode);
-    TableKey::Str(format!("{density}|{size}|{wrap:?}|{align:?}|{r},{g},{b},{a}|{text}"))
+    TableKey::Str(format!("{density}|{size}|{style}|{wrap:?}|{align:?}|{r},{g},{b},{a}|{text}"))
 }
 
 // Sketch text: PXUI shapes and rasterises into its atlases; the glyph quads are composited on the
@@ -53,42 +53,66 @@ const SYSTEM_FONTS: [&str; 11] = [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
 ];
 
+struct TextEngine {
+    ui: pxui::Ui,
+    faces: Vec<u16>,
+    pixels: Vec<u8>,
+}
+
 thread_local! {
     // Text is shaped on whichever thread lowers the scene; cosmic-text is deterministic, so every
     // thread's instance agrees.
-    static TEXT: RefCell<Option<Result<pxui::Text, String>>> = const { RefCell::new(None) };
+    static TEXT: RefCell<Option<Result<TextEngine, String>>> = const { RefCell::new(None) };
 }
 
-fn text_engine() -> Option<pxui::Text> {
+// The faces of `scene_command::marks::FONTS` after the default, in its order.
+const FACES: [&[u8]; 11] = [
+    include_bytes!("../../../pxui/assets/fonts/DepartureMono-Regular.otf"),
+    include_bytes!("../fonts/ArchivoSheet-Regular.ttf"), include_bytes!("../fonts/ArchivoSheet-SemiBold.ttf"),
+    include_bytes!("../fonts/ArchivoSheet-CondensedBold.ttf"), include_bytes!("../fonts/ArchivoSheet-ExpandedExtraBold.ttf"),
+    include_bytes!("../fonts/NewsreaderPage-Regular.ttf"), include_bytes!("../fonts/NewsreaderPage-SemiBold.ttf"), include_bytes!("../fonts/NewsreaderPage-Display.ttf"),
+    include_bytes!("../fonts/IBMPlexSansCondensed-Regular.ttf"), include_bytes!("../fonts/IBMPlexSansCondensed-SemiBold.ttf"), include_bytes!("../fonts/IBMPlexMono-Regular.ttf"),
+];
+
+/// The shaper and the load index of each face of `FONTS`: a default run keeps the first font of
+/// the engine, as it always did; a named face is loaded after the system font and Pragmasevka.
+fn text_engine() -> Option<TextEngine> {
     let system = SYSTEM_FONTS.iter().find_map(|p| std::fs::read(p).ok());
     let mut fonts: Vec<&[u8]> = system.iter().map(|v| v.as_slice()).collect();
-    fonts.push(pxui::text::pragmasevka());
-    pxui::Text::new(&fonts)
+    fonts.push(pxui::pragmasevka());
+    let first_named = fonts.len() as u16 - 1;
+    fonts.extend(FACES);
+    let faces = (first_named..fonts.len() as u16).collect();
+    let fonts: Vec<_> = fonts.into_iter().map(pxui::FontData).collect();
+    let ui = pxui::Ui::new(&pxui::UiDesc::DEFAULT.fonts(&fonts)).ok()?;
+    Some(TextEngine { ui, faces, pixels: Vec::new() })
 }
 
-fn paint_text(density: i64, wrap: Option<i64>, align: Alignment, size: i64, text: &str, mode: RenderMode) -> Result<image::Image, String> {
+fn paint_text(density: i64, wrap: Option<i64>, align: Alignment, size: i64, text: &str, mode: RenderMode, run: i64) -> Result<image::Image, String> {
     if text.is_empty() {
         return image::create(1, 1, None);
     }
     let RenderMode::Blended(c) = mode;
-    let style = pxui::TextStyle {
-        size_points: size as f32,
-        wrap: if wrap.is_some() { pxui::TextStyle::WRAP_WORD } else { pxui::TextStyle::WRAP_NONE },
-        align: match align {
-            Alignment::Left => pxui::TextStyle::ALIGN_LEFT,
-            Alignment::Center => pxui::TextStyle::ALIGN_CENTER,
-            Alignment::Right => pxui::TextStyle::ALIGN_RIGHT,
-        },
-        ..pxui::TextStyle::default()
-    };
+    let style = pxui::Label::BODY.size(size as f32).align(match align {
+        Alignment::Left => pxui::TextAlign::Start,
+        Alignment::Center => pxui::TextAlign::Center,
+        Alignment::Right => pxui::TextAlign::End,
+    });
+    let style = if wrap.is_some() { style.wrap() } else { style };
+    let (face, _, tracking) = scene_command::marks::text_style_parts(run);
     TEXT.with(|t| {
         let mut t = t.borrow_mut();
-        let t = t.get_or_insert_with(|| text_engine().ok_or_else(|| "PXUI text initialization failed".to_owned()))
+        let TextEngine { ui, faces, pixels } = t.get_or_insert_with(|| text_engine().ok_or_else(|| "PXUI text initialization failed".to_owned()))
             .as_mut().map_err(|error| error.clone())?;
-        let (w, h, px) = t.rasterize_rgba(0, text, &style, wrap.map_or(0.0, |w| w as f32), density as f32,
-            [c.r as u8, c.g as u8, c.b as u8, c.a as u8]).map_err(|e| format!("PXUI text rasterization failed: {e:?}"))?;
+        // a default run keeps the first font of the engine and its fallbacks
+        let style = if run == 0 { style.font(0).tracking(0.0) } else {
+            style.font(*faces.get(face).ok_or_else(|| format!("Text face {face} is not loaded"))?)
+                .tracking(tracking as f32 / size as f32)
+        };
+        let (w, h) = ui.text_service().rasterize_rgba(text, style, wrap.map(|w| w as f32), density as f32,
+            [c.r as u8, c.g as u8, c.b as u8, c.a as u8], pixels).map_err(|e| format!("PXUI text rasterization failed: {e:?}"))?;
         let (w, h) = (i64::from(w), i64::from(h));
-        image::upload_rgba(None, w, h, &px)
+        image::upload_rgba(None, w, h, pixels)
     })
 }
 
@@ -168,13 +192,14 @@ pub mod raster {
         size: i64,
         text: &str,
         mode: RenderMode,
+        style: i64,
     ) -> Result<Automatic, String> {
         let align = align.unwrap_or(Alignment::Left);
         let density = density.unwrap_or(1);
-        let k = key(wrap, align, density, size, text, mode);
+        let k = key(wrap, align, density, size, text, mode, style);
         let context = CURRENT_CACHE.with(|c| c.borrow().clone());
         let Some(context) = context else {
-            return paint_text(density, wrap, align, size, text, mode).map(|image| Automatic {
+            return paint_text(density, wrap, align, size, text, mode, style).map(|image| Automatic {
                 entry: Rc::new(AutomaticEntry { image, references: Cell::new(1), cached: Cell::new(false) }),
                 context: None,
                 released: Cell::new(false),
@@ -188,7 +213,7 @@ pub mod raster {
                 context.0.automatic_references.set(context.0.automatic_references.get() + 1);
                 return Ok(Automatic { entry, context: Some(context), released: Cell::new(false) });
             }
-        let image = paint_text(density, wrap, align, size, text, mode)?;
+        let image = paint_text(density, wrap, align, size, text, mode, style)?;
         // Borrowed entries remain pinned until their scene is released.
         let can_cache = side_lru::length(&mut context.0.automatic_cache.borrow_mut()) < CAPACITY
             || side_lru::find_first(&mut context.0.automatic_cache.borrow_mut(), &|_, item| {

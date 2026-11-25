@@ -7,11 +7,11 @@ use flow_syntax::lisp::{self, Spans};
 use flow_syntax::syntax::{self as s, Draft, Node, Syntax, SyntaxBuilder, SyntaxId};
 use rays_diagnostic::{self as diagnostic, Diagnostic, Severity, Span};
 use crate::lisp_text::{self, Names, Vocab};
-use pxui::theme::{self, Tokens as Theme};
+use pxui::theme::{Tokens as Theme};
 use pxui::ui::*;
 use rays_shell::kit::{self, ButtonOpts};
 use rays_shell::layout;
-use pxui::geom::color;
+use pxui::Rgba as Color;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
@@ -1593,7 +1593,7 @@ pub fn line_target(text: &str, input: &str) -> Option<i64> {
     };
     let (line, column) = (line?, column?);
     let from = line_offset(text, line);
-    let stop = pxui::ui_text::line_end(text, from);
+    let stop = pxui::ui::line_end(text, from);
     Some(text[from..stop].char_indices().nth((column - 1) as usize).map_or(stop, |(at, _)| from + at) as i64)
 }
 
@@ -1652,7 +1652,7 @@ fn real_errors(l: &[Diagnostic]) -> Vec<Diagnostic> {
 
 /// the byte where 1-based `line` of `text` ends
 fn line_stop(text: &str, line: i64) -> i64 {
-    pxui::ui_text::line_end(text, line_offset(text, line)) as i64
+    pxui::ui::line_end(text, line_offset(text, line)) as i64
 }
 
 fn symbol_spans(text: &str) -> Vec<(String, Span)> {
@@ -1684,8 +1684,8 @@ pub fn references(text: &str, name: &str) -> Vec<(i64, String)> {
         .into_iter()
         .filter(|(n, _)| n == name)
         .map(|(_, span)| {
-            let a = pxui::ui_text::line_start(text, span.start as usize);
-            let b = pxui::ui_text::line_end(text, a);
+            let a = pxui::ui::line_start(text, span.start as usize);
+            let b = pxui::ui::line_end(text, a);
             (i64::from(span.start), text[a..b].trim().to_owned())
         })
         .collect()
@@ -1885,15 +1885,17 @@ fn colour_popup(ui: &mut Ui, at: (f32, f32), text: &str, range: (i64, i64)) -> O
     let (a, b) = range;
     let theme = ui.tokens();
     let literal = sub(text, a + 1, b - a - 2);
-    let colour = color::hex(&literal).unwrap_or(color::white());
-    let (r, g, bl, _) = color::to_floats(colour);
+    let colour = Color::parse(&literal).unwrap_or(Color::WHITE);
+    let (r, g, bl, _) = (f64::from(colour.r) / 255.0, f64::from(colour.g) / 255.0, f64::from(colour.b) / 255.0, f64::from(colour.a) / 255.0);
     let alpha = if literal.len() == 9 { sub(&literal, 7, 2) } else { String::new() };
-    let hex = move |r: f64, g: f64, b: f64| format!("{}{}", color::to_hex_string(color::of_unit_floats(None, r, g, b)), alpha);
+    let hex = move |r: f64, g: f64, b: f64| format!("{}{}", Color::rgb((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8).to_hex_string(), alpha);
     let shown = hex(r, g, bl);
     let edit: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let out = edit.clone();
-    let open = ui.popup(Some(theme::edge(&theme)), None, true, false, at, 300.0, 24.0, "text-colour", &mut |ui: &mut Ui| {
-        let (boxed, cx, cy, cw) = ui.inspector_row(Some(300.0), None, "text-colour-row", "colour");
+    let overlay = pxui::Overlay::DEFAULT.at(pxui::Point::new(at.0, at.1)).w_px(300.0).h_px(24.0)
+        .stroke(theme.foreground.with_alpha(38));
+    let open = ui.popup("text-colour", &overlay, |ui: &mut Ui| {
+        let (boxed, cx, cy, cw) = pxui::ext::inspector_row(ui, Some(300.0), None, "text-colour-row", "colour");
         let (shown, hex) = (shown.clone(), hex.clone());
         let edit = edit.clone();
         ui.within(&boxed, &mut |ui: &mut Ui| {
@@ -1903,8 +1905,8 @@ fn colour_popup(ui: &mut Ui, at: (f32, f32), text: &str, range: (i64, i64)) -> O
             let from_hex = if typed == shown {
                 None
             } else {
-                color::hex(&typed).ok().map(|c| {
-                    let (r, g, b, _) = color::to_floats(c);
+                Color::parse(&typed).ok().map(|c| {
+                    let (r, g, b, _) = (f64::from(c.r) / 255.0, f64::from(c.g) / 255.0, f64::from(c.b) / 255.0, f64::from(c.a) / 255.0);
                     hex(r, g, b)
                 })
             };
@@ -1913,22 +1915,19 @@ fn colour_popup(ui: &mut Ui, at: (f32, f32), text: &str, range: (i64, i64)) -> O
             let mut from_slider: Option<String> = None;
             for (index, (axis, cur)) in [("r", r), ("g", g), ("b", bl)].into_iter().enumerate() {
                 let ax_x = sliders_x + (index as f32 * (field_w + 8.0));
-                let (cap_y, size, ink) = (kit::cap_y(ui, cy, 20.0), kit::cap_size(ui), theme::ink_3(&theme));
+                let (cap_y, size, ink) = (kit::cap_y(ui, cy, 20.0), kit::cap_size(ui), theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521));
                 let boxed2 = boxed.clone();
-                ui.draw(&boxed2, move |paint, Rect { x, y, w: _, h: _ }| {
+                ui.canvas(&boxed2, move |paint, Rect { x, y, w: _, h: _ }| {
                     let _ = cap_y;
-                    paint.text_s((x + ax_x + 2.0, kit::cap_y_paint(paint, y + cy, 20.0)), size, ink, axis);
+                    { let text = axis; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink); let _ = paint.text_spans(pxui::Point::new(x + ax_x + 2.0, kit::cap_y_paint(paint, y + cy, 20.0)), pxui::Label::BODY.size((size) as f32), 0.0, text, &[span]); };
                 });
                 let display = format!("{:.2}", cur);
-                let o = ValueFieldOpts {
-                    display: Some(display.clone()),
-                    fraction: Some(cur as f32),
-                    slide: Some(Rc::new(|f| format!("{:.2}", f))),
-                    edit: false,
-                    left: false,
-                    ..ValueFieldOpts::default()
-                };
-                let (changed, _) = ui.value_field((ax_x, cy), field_w, 20.0, &o, &|t| (t).parse::<f64>().ok().is_some(), &format!("text-colour-{}", axis), &display);
+                let style = pxui::ValueField::DEFAULT.display(&display).fraction(cur as f32);
+                let slide = |f| format!("{f:.2}");
+                let valid = |text: &str| text.parse::<f64>().is_ok();
+                let changed = pxui::ext::value_field(ui, pxui::hash_of(&("text-colour", axis)), &display,
+                    Rect::new(ax_x, cy, field_w, 20.0), &style, &pxui::ValueCallbacks::DEFAULT.slide(&slide).valid(&valid))
+                    .changed.unwrap_or(&display);
                 if changed != display && from_slider.is_none() {
                     if let Some(v) = (&changed).parse::<f64>().ok() {
                         let v = v.min(1.0).max(0.0);
@@ -1942,7 +1941,7 @@ fn colour_popup(ui: &mut Ui, at: (f32, f32), text: &str, range: (i64, i64)) -> O
             };
         });
     });
-    if !open {
+    if !open.open {
         return None;
     }
     let edited = out.borrow().clone();
@@ -1964,11 +1963,11 @@ fn tab_labels(width: i64, dirty: bool) -> Vec<(Tab, String)> {
 pub fn tabs_width(ui: &mut Ui, width: i64, state: &State, shown: &Shown) -> f32 {
     let dirty = match dirty(state, shown) {
         Ok(dirty) => dirty,
-        Err(error) => return ui.text_width(None, &diagnostic::to_string(&error)),
+        Err(error) => return ui.text_service().width(&diagnostic::to_string(&error), pxui::Label::BODY, None).unwrap_or(0.0),
     };
     let mut w = -12.0;
     for (_, label) in tab_labels(width, dirty) {
-        w = w + 12.0 + ui.text_width(None, &label);
+        w = w + 12.0 + ui.text_service().width(&label, pxui::Label::BODY, None).unwrap_or(0.0);
     }
     w
 }
@@ -1984,9 +1983,9 @@ fn find_button(ui: &mut Ui, key: &str, right: &mut f32, active: bool, name: &str
 }
 
 fn rule(ui: &mut Ui, theme: &Theme, key: &str, x: f32, width: f32, name: &str, at: f32) {
-    let boxed = ui.box_fmt(format_args!("{}{}", key, name), BoxOpts::default().w(Size::Px(width)).h(Size::Px(1.0)).at((x, at)));
-    let edge = theme::edge(theme);
-    ui.draw(&boxed, move |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, edge));
+    let boxed = ui.node(pxui::hash_of(&format!("{}{}", key, name)), pxui::Node::DEFAULT.w(Size::Px(width)).h(Size::Px(1.0)).at(x, at));
+    let edge = (theme).foreground.with_alpha(38);
+    ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(edge)));
 }
 
 /// the find bar between the text and the footer: one row, two with the replace row
@@ -2041,21 +2040,17 @@ fn find_bar(
         reveal = true;
     }
     let count_w = 76.0;
-    let boxed = ui.box_fmt(format_args!("{}-find-count", key), BoxOpts::default().w(Size::Px(count_w)).h(Size::Px(find_row)).at((right - count_w, ry)));
-    let (bad, ink2) = (total == 0 && !f.query.is_empty(), theme::ink_2(theme));
-    ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
-        let tw = paint.text_width(None, &count);
-        paint.text_c((x + w - tw, paint.text_top(None, y, h)), if bad { theme::invalid() } else { ink2 }, &count);
+    let boxed = ui.node(pxui::hash_of(&format!("{}-find-count", key)), pxui::Node::DEFAULT.w(Size::Px(count_w)).h(Size::Px(find_row)).at(right - count_w, ry));
+    let (bad, ink2) = (total == 0 && !f.query.is_empty(), theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32));
+    ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
+        let tw = paint.text_service().width(&count, pxui::Label::BODY, None).unwrap_or(0.0);
+        { let text = &count; let span = pxui::TextSpan::new(0, text.len() as u32).color(if bad { pxui::Rgba::hex(0xc2255c) } else { ink2 }); let _ = paint.text_spans(pxui::Point::new(x + w - tw, (y) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor()), pxui::Label::BODY, 0.0, text, &[span]); };
     });
-    let (query, step) = ui.line_field(
-        (x + 12.0, ry + 4.0),
-        (right - count_w - 8.0 - x - 12.0).max(60.0),
-        20.0,
-        f.grab,
-        "Find",
-        &format!("{}-find", key),
-        &f.query,
-    );
+    let find = pxui::ext::line_field(ui, pxui::hash_of(&(key, "find")), &f.query,
+        Rect::new(x + 12.0, ry + 4.0, (right - count_w - 8.0 - x - 12.0).max(60.0), 20.0),
+        &pxui::LineField::DEFAULT.grab(f.grab).placeholder("Find"));
+    let query = find.changed.unwrap_or(&f.query).to_owned();
+    let step = find.step;
     if query != f.query {
         f2.query = query;
         reveal = true;
@@ -2088,15 +2083,11 @@ fn find_bar(
         if find_button(ui, key, &mut right2, false, "-replace-one", "Replace", ry2) {
             replace_with(&mut f2, &mut reveal, false);
         }
-        let (by, step) = ui.line_field(
-            (x + 12.0, ry2 + 4.0),
-            (right2 - 8.0 - x - 12.0).max(60.0),
-            20.0,
-            false,
-            "Replace with",
-            &format!("{}-with", key),
-            &f.replace,
-        );
+        let replace = pxui::ext::line_field(ui, pxui::hash_of(&(key, "replace")), &f.replace,
+            Rect::new(x + 12.0, ry2 + 4.0, (right2 - 8.0 - x - 12.0).max(60.0), 20.0),
+            &pxui::LineField::DEFAULT.placeholder("Replace with"));
+        let by = replace.changed.unwrap_or(&f.replace).to_owned();
+        let step = replace.step;
         if by != f.replace {
             f2.replace = by;
         }
@@ -2170,7 +2161,7 @@ struct AreaCtx {
     narrow: bool,
     bar: f32,
     find_row: f32,
-    language: Language,
+    language: lisp_text::Language,
     names: Rc<Names>,
     time: f64,
 }
@@ -2223,75 +2214,58 @@ fn editor_area(
         None => reveal,
     };
     // a dragged number applies live (`scrub`, merged into one history entry); typing is a draft
-    let phase: Rc<Cell<Option<ScrubPhase>>> = Rc::new(Cell::new(None));
-    let caret: Rc<Cell<Option<i64>>> = Rc::new(Cell::new(None));
-    let token: Rc<RefCell<Option<((i64, i64), String)>>> = Rc::new(RefCell::new(None));
-    let selection: Rc<Cell<Option<(i64, i64)>>> = Rc::new(Cell::new(None));
-    // clicks and caret moves are answered once the area has returned, with the text it returned
-    let clicked: Rc<Cell<Option<(i64, bool)>>> = Rc::new(Cell::new(None));
-    let moved: Rc<Cell<Option<i64>>> = Rc::new(Cell::new(None));
-    let mut o = TextAreaOpts::default();
-    o.wrap = state.wrap;
-    o.errors = errors.iter().filter_map(|d| line_of(text, d)).collect();
-    o.messages = errors
-        .iter()
-        .filter_map(|d| line_of(text, d).map(|line| (line, d.span.as_ref().map(span_range), format!("{}  {}", d.code, first_line(&d.message)))))
-        .collect();
-    o.spans = spans;
-    o.reveal = reveal;
-    o.reveal_nonce = state.nonce;
-    o.select = state.request.as_ref().map(|r| r.select);
-    o.splice = state.request.as_ref().map(|r| r.splice.clone()).unwrap_or_default();
-    o.language = Some(c.language.clone());
-    o.chips = shown_chips;
-    {
-        let emit = emit.clone();
-        o.on_context = Some(Rc::new(move |at| push(&emit, Intent::Menu(Some(at)))));
-    }
-    {
-        let phase = phase.clone();
-        o.on_scrub = Some(Rc::new(move |p| phase.set(Some(p))));
-    }
-    {
-        let token = token.clone();
-        o.on_scrub_edit = Some(Rc::new(move |range, replacement| *token.borrow_mut() = Some((range, replacement.to_owned()))));
-    }
-    {
-        let selection = selection.clone();
-        o.on_select = Some(Rc::new(move |range| selection.set(Some(range))));
-    }
-    {
-        let emit = emit.clone();
-        o.on_drop = Some(Rc::new(move |byte, drop| push(&emit, Intent::CarryOver(byte, matches!(drop, Drop::Dropped(_))))));
-    }
-    {
-        // Command-click follows a (ref name); a click on a colour literal opens the colour control; both
-        // are answered after the area, which has the text of this frame
-        let clicked = clicked.clone();
-        o.on_click = Some(Rc::new(move |byte, command| clicked.set(Some((byte, command)))));
-    }
-    {
-        let caret = caret.clone();
-        o.on_caret = Some(Rc::new(move |byte| caret.set(Some(byte))));
-    }
-    {
-        let moved = moved.clone();
-        o.on_caret_move = Some(Rc::new(move |byte| moved.set(Some(byte))));
-    }
-    // an unchanged result is the input itself: nothing is copied for a frame that edited nothing
-    let (text2, submitted): (std::borrow::Cow<str>, bool) = {
-        let (area, submitted) = ui.text_area_submit_borrowed((c.x, ey), c.width, area_h, &o, key, text);
-        (if area.len() == text.len() && std::ptr::eq(area.as_ptr(), text.as_ptr()) { std::borrow::Cow::Borrowed(text) } else { std::borrow::Cow::Owned(area.to_owned()) }, submitted)
+    let phase = Cell::new(None);
+    let caret = Cell::new(None);
+    let token = RefCell::new(None);
+    let selection = Cell::new(None);
+    // Use the text returned by this build for clicks and caret movement.
+    let clicked = Cell::new(None);
+    let moved = Cell::new(None);
+    let error_lines: Vec<_> = errors.iter().filter_map(|d| line_of(text, d)).map(|line| line as usize).collect();
+    let message_text: Vec<_> = errors.iter().filter_map(|d| line_of(text, d).map(|line| {
+        (line, d.span.as_ref().map(span_range), format!("{}  {}", d.code, first_line(&d.message)))
+    })).collect();
+    let notes: Vec<_> = message_text.iter().map(|(line, range, text)| {
+        let note = pxui::AreaNote::new(*line as usize, text);
+        range.map_or(note, |(a, b)| note.range(a as usize, b as usize))
+    }).collect();
+    let spans: Vec<_> = spans.into_iter().map(|(a, b)| (a as usize, b as usize)).collect();
+    let chips_ui: Vec<_> = shown_chips.into_iter().map(|(a, b, color)| (a as usize, b as usize, color)).collect();
+    let splices: Vec<_> = state.request.iter().flat_map(|request| &request.splice)
+        .map(|(a, b, value)| pxui::Splice::new(*a as usize, *b as usize, value)).collect();
+    let area = pxui::TextArea::DEFAULT.wrap(state.wrap).errors(&error_lines).notes(&notes)
+        .spans(&spans).chips(&chips_ui).splices(&splices);
+    let area = reveal.map_or(area, |at| area.reveal(pxui::Reveal::new(at as usize, state.nonce as u64)));
+    let area = state.request.as_ref().map_or(area, |request| area.select(request.select.0 as usize, request.select.1 as usize));
+    let on_context = |at| push(emit, Intent::Menu(Some(at)));
+    let on_scrub = |p| phase.set(Some(p));
+    let on_scrub_edit = |(a, b): (usize, usize), replacement: &str| {
+        *token.borrow_mut() = Some(((a as i64, b as i64), replacement.to_owned()));
     };
-    // a paste or a tab typed in arrives as text: kept as the pane keeps text (B45)
-    // (PXUI carries the area's caret through this change as it does through any external edit)
-    let text2 = if phase.get().is_none() && text2 != text && text2.bytes().any(|b| b == b'\r' || b == b'\t') { std::borrow::Cow::Owned(normalized(&text2)) } else { text2 };
+    let on_select = |(a, b): (usize, usize)| selection.set(Some((a as i64, b as i64)));
+    let on_drop = |byte: usize, drop: pxui::DropRef<'_>| push(emit, Intent::CarryOver(byte as i64, matches!(drop, pxui::DropRef::Dropped(_))));
+    let on_click = |byte: usize, command| clicked.set(Some((byte as i64, command)));
+    let on_caret = |byte: usize| caret.set(Some(byte as i64));
+    let on_caret_move = |byte: usize| moved.set(Some(byte as i64));
+    let callbacks = pxui::AreaCallbacks::DEFAULT.language(c.language.as_pxui()).on_context(&on_context)
+        .on_scrub(&on_scrub).on_scrub_edit(&on_scrub_edit).on_select(&on_select).on_drop(&on_drop)
+        .on_click(&on_click).on_caret(&on_caret).on_caret_move(&on_caret_move);
+    let node = pxui::Node::DEFAULT.at(c.x, ey).w_px(c.width).h_px(area_h);
+    let response = ui.text_area(pxui::hash_of(key), text, node, &area, &callbacks);
+    let submitted = response.submitted;
+    let text2 = response.changed.map_or(std::borrow::Cow::Borrowed(text), |changed| {
+        if phase.get().is_none() && changed.bytes().any(|b| b == b'\r' || b == b'\t') {
+            std::borrow::Cow::Owned(normalized(changed))
+        } else {
+            std::borrow::Cow::Owned(changed.to_owned())
+        }
+    });
     // Command-click and F12 follow a (ref name) or a definition
-    let follow = |byte: i64| {
-        let target = match lisp_text::ref_at(text, byte.max(0) as usize) {
+    let follow = |text2: &str, byte: i64| {
+        let target = match lisp_text::ref_at(text2, byte.max(0) as usize) {
             Some(name) if c.names.graphs.contains(&name) => Some(vec![name.into()]),
             // B43: a definition in the draft is found through the draft's own parse
-            _ => definition_in(text, state.tab, shown, byte),
+            _ => definition_in(text2, state.tab, shown, byte),
         };
         if let Some(path) = target {
             if path_mark(&shown.source, &shown.spans, &path).is_none() {
@@ -2311,7 +2285,7 @@ fn editor_area(
     }
     if let Some((byte, command)) = clicked.get() {
         if command {
-            follow(byte);
+            follow(&text2, byte);
         } else {
             match chips.iter().find(|(a, b, _)| *a <= byte && byte < *b) {
                 Some((a, b, _)) => push(emit, Intent::Picker(Some((*a, *b, false)))),
@@ -2441,7 +2415,7 @@ fn editor_area(
             }
             Command::Definition => {
                 if let Some(b) = caret.get() {
-                    follow(b)
+                    follow(&text2, b)
                 }
             }
             Command::References => {
@@ -2481,24 +2455,23 @@ fn editor_area(
         if kit::switch(ui, &format!("{}-parinfer", key), (switch_x, ty + 1.0 + ((c.bar - 14.0) / 2.0)), state.parinfer) {
             push(emit, Intent::ToggleParinfer);
         }
-        let boxed = ui.box_fmt(format_args!("{}-parinfer-label", key), BoxOpts::default().w(Size::Px(80.0)).h(Size::Px(c.bar)).at((switch_x - 8.0 - 80.0, ty + 1.0)));
-        let ink2 = theme::ink_2(&theme);
-        ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
+        let boxed = ui.node(pxui::hash_of(&format!("{}-parinfer-label", key)), pxui::Node::DEFAULT.w(Size::Px(80.0)).h(Size::Px(c.bar)).at(switch_x - 8.0 - 80.0, ty + 1.0));
+        let ink2 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
+        ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
             let label = "parinfer";
-            let tw = paint.text_width(None, label);
-            paint.text_c((x + w - tw, paint.text_top(None, y, h)), ink2, label);
+            let tw = paint.text_service().width(label, pxui::Label::BODY, None).unwrap_or(0.0);
+            { let text = label; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink2); let _ = paint.text_spans(pxui::Point::new(x + w - tw, (y) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor()), pxui::Label::BODY, 0.0, text, &[span]); };
         });
         rule(ui, &theme, key, c.x, c.width, "-rule2", ty + 1.0 + c.bar);
     }
     let wrong = !errors.is_empty();
-    let msg = ui.box_(
-        &format!("{}-message", key),
-        BoxOpts::default().flags(CLIP).w(Size::Px(c.width)).h(Size::Px(if c.narrow { 0.0 } else { c.row })).at((c.x, ty + c.bar + 2.0)),
+    let msg = ui.node(pxui::hash_of(&format!("{}-message", key)),
+        pxui::Node::DEFAULT.flags(pxui::Flags::CLIP).w(Size::Px(c.width)).h(Size::Px(if c.narrow { 0.0 } else { c.row })).at(c.x, ty + c.bar + 2.0),
     );
     if !c.narrow {
         let (errors, text_c, message) = (errors.to_vec(), if errors.is_empty() { String::new() } else { text.to_owned() }, message.to_owned());
         let accent = theme.accent;
-        let ink2 = theme::ink_2(&theme);
+        let ink2 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
         let (state_label, cap_w) = {
             let mut parts: Vec<String> = position.into_iter().collect();
             if can_apply {
@@ -2508,23 +2481,23 @@ fn editor_area(
             let w = if label.is_empty() { 0.0 } else { kit::cap_width(ui, &label) };
             (label, w)
         };
-        ui.draw(&msg, move |paint, Rect { x, y, w, h }| {
+        ui.canvas(&msg, move |paint, Rect { x, y, w, h }| {
             // the state: a dot in the error colour or the accent for a draft, then what it says; the
             // first error is "n errors" in the error colour and its line and message in ink-2
             let tx = if wrong || can_apply {
-                paint.circle((x + 15.0, y + (h / 2.0)), 3.0, Some(if wrong { theme::invalid() } else { accent }), None);
+                paint.circle((x + 15.0, y + (h / 2.0)), 3.0, Some(pxui::Fill::new(if wrong { pxui::Rgba::hex(0xc2255c) } else { accent })), None);
                 x + 26.0
             } else {
                 x + 12.0
             };
             // the label at the row's end: where the caret is, and whether the text is a draft
             let tail = if !state_label.is_empty() { cap_w + 20.0 } else { 12.0 };
-            let ty = paint.text_top(None, y, h);
+            let ty = (y) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
             match errors.first() {
                 Some(first) => {
                     let count = format!("{} error{}", errors.len(), if errors.len() == 1 { "" } else { "s" });
-                    paint.text_c((tx, ty), theme::invalid(), &count);
-                    let dx = tx + paint.text_width(None, &count) + 8.0;
+                    { let text = &count; let span = pxui::TextSpan::new(0, text.len() as u32).color(pxui::Rgba::hex(0xc2255c)); let _ = paint.text_spans(pxui::Point::new(tx, ty), pxui::Label::BODY, 0.0, text, &[span]); };
+                    let dx = tx + paint.text_service().width(&count, pxui::Label::BODY, None).unwrap_or(0.0) + 8.0;
                     let detail = format!(
                         "{}{}",
                         match line_of(&text_c, first) {
@@ -2533,44 +2506,42 @@ fn editor_area(
                         },
                         first_line(&diagnostic::to_string(first))
                     );
-                    let cut = ellipsis(&mut |s| paint.text_width(None, s), x + w - tail - dx, &detail);
-                    paint.text_c((dx, ty), ink2, &cut);
+                    let cut = ellipsis(&mut |s| paint.text_service().width(s, pxui::Label::BODY, None).unwrap_or(0.0), x + w - tail - dx, &detail);
+                    { let text = &cut; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink2); let _ = paint.text_spans(pxui::Point::new(dx, ty), pxui::Label::BODY, 0.0, text, &[span]); };
                 }
                 None => {
-                    let cut = ellipsis(&mut |s| paint.text_width(None, s), x + w - tail - tx, &message);
-                    paint.text_c((tx, ty), ink2, &cut);
+                    let cut = ellipsis(&mut |s| paint.text_service().width(s, pxui::Label::BODY, None).unwrap_or(0.0), x + w - tail - tx, &message);
+                    { let text = &cut; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink2); let _ = paint.text_spans(pxui::Point::new(tx, ty), pxui::Label::BODY, 0.0, text, &[span]); };
                 }
             }
             if !state_label.is_empty() {
-                paint.cap((x + w - 12.0 - cap_w, kit::cap_y_paint(paint, y, h)), None, &state_label);
+                { paint.text_chars(pxui::Point::new(x + w - 12.0 - cap_w, kit::cap_y_paint(paint, y, h)), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), &state_label); };
             }
         });
     }
     if let Some(at) = state.menu {
         let selected = selection.get().filter(|&(a, b)| a < b && b <= text2.len() as i64);
-        let items: Vec<(String, bool)> = vec![
-            ("Cut".to_owned(), selected.is_some()),
-            ("Copy".to_owned(), selected.is_some()),
-            ("Paste".to_owned(), true),
-            ("Select All".to_owned(), !text2.is_empty()),
-            (String::new(), false),
-            ("Find".to_owned(), true),
-            ("Go to Definition".to_owned(), caret.get().is_some()),
-            ("Find References".to_owned(), caret.get().is_some()),
-            (String::new(), false),
-            ("Check and apply".to_owned(), can_apply),
-            ("Discard".to_owned(), can_apply),
-            (String::new(), false),
-            ((if state.wrap { "Unwrap long lines" } else { "Wrap long lines" }).to_owned(), true),
-            (
-                (if state.parinfer { "Parinfer off (keep brackets as typed)" } else { "Parinfer on (brackets follow indentation)" }).to_owned(),
-                true,
-            ),
+        let items = [
+            MenuItem::new("Cut").disabled(selected.is_none()),
+            MenuItem::new("Copy").disabled(selected.is_none()),
+            MenuItem::new("Paste"),
+            MenuItem::new("Select All").disabled(text2.is_empty()),
+            MenuItem::new(""),
+            MenuItem::new("Find"),
+            MenuItem::new("Go to Definition").disabled(caret.get().is_none()),
+            MenuItem::new("Find References").disabled(caret.get().is_none()),
+            MenuItem::new(""),
+            MenuItem::new("Check and apply").disabled(!can_apply),
+            MenuItem::new("Discard").disabled(!can_apply),
+            MenuItem::new(""),
+            MenuItem::new(if state.wrap { "Unwrap long lines" } else { "Wrap long lines" }),
+            MenuItem::new(if state.parinfer { "Parinfer off (keep brackets as typed)" } else { "Parinfer on (brackets follow indentation)" }),
         ];
-        match ui.context_menu(at, &MenuOpts::default(), &format!("{}-menu", key), &items) {
-            MenuResult::Open => {}
-            MenuResult::Dismiss => push(emit, Intent::Menu(None)),
-            MenuResult::Pick(i) => {
+        let choice = ui.menu(pxui::hash_of(&(key, "menu")), pxui::Point::new(at.0, at.1), &items, &Menu::DEFAULT);
+        match (choice.chosen, choice.dismissed) {
+            (None, false) => {}
+            (None, true) => push(emit, Intent::Menu(None)),
+            (Some(i), _) => {
                 push(emit, Intent::Menu(None));
                 match i {
                     0 | 1 => {
@@ -2801,12 +2772,12 @@ pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f32>, 
         Ok(intents) => intents,
         Err(error) => {
             let (x, y, width, height) = bounds;
-            let boxed = ui.box_("text-print-error", BoxOpts::default().flags(CLIP)
-                .w(Size::Px(width as f32)).h(Size::Px(height as f32)).at((x as f32, y as f32)));
+            let boxed = ui.node("text-print-error", pxui::Node::DEFAULT.flags(pxui::Flags::CLIP)
+                .w(Size::Px(width as f32)).h(Size::Px(height as f32)).at(x as f32, y as f32));
             let message = diagnostic::to_string(&error);
-            ui.draw(&boxed, move |paint, Rect { x, y, w: _, h: _ }| {
-                let top = paint.text_top(None, y, 24.0);
-                paint.text_c((x + 12.0, top), theme::invalid(), &message);
+            ui.canvas(&boxed, move |paint, Rect { x, y, w: _, h: _ }| {
+                let top = (y) + (((24.0) - (paint.tokens().font_size) as f32) / 2.0).floor();
+                { let text = &message; let span = pxui::TextSpan::new(0, text.len() as u32).color(pxui::Rgba::hex(0xc2255c)); let _ = paint.text_spans(pxui::Point::new(x + 12.0, top), pxui::Label::BODY, 0.0, text, &[span]); };
             });
             vec![Intent::PrintError(error)]
         }
@@ -2838,8 +2809,8 @@ mod printing_errors {
 
 /// The language of a pane, kept while its inputs are the same values: the vocabulary, the names, the
 /// imports of the shown document, parinfer and the theme.
-fn shared_language(vocab: &Rc<Vocab>, names: &Rc<Names>, state: &State, theme: Theme) -> Language {
-    type Entry = (Rc<Vocab>, Rc<Names>, Option<Arc<(CacheKey, Shown)>>, bool, Theme, Language);
+fn shared_language(vocab: &Rc<Vocab>, names: &Rc<Names>, state: &State, theme: Theme) -> lisp_text::Language {
+    type Entry = (Rc<Vocab>, Rc<Names>, Option<Arc<(CacheKey, Shown)>>, bool, Theme, lisp_text::Language);
     thread_local!(static CACHE: RefCell<Vec<Entry>> = const { RefCell::new(Vec::new()) });
     CACHE.with(|c| {
         let mut c = c.borrow_mut();

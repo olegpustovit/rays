@@ -7,7 +7,7 @@ use editor_document::document::{Level, Origin, T as Document};
 use editor_document::workspace_doc;
 use flow_syntax::context;
 use pxui::theme::Tokens as Theme;
-use pxui::ui::{PanelOpts, Ui};
+use pxui::ui::{Ui};
 use rays_graph::scope_state as scope;
 use rays_shell::inspector::FlowRow;
 use rays_shell::layout;
@@ -615,14 +615,14 @@ pub fn on_sheet(ui: &mut Ui, floating: bool, build: &mut dyn FnMut(&mut Ui)) {
         return;
     }
     // the sheet theme is derived once per token change, not per call
-    thread_local! { static SHEET: std::cell::RefCell<Option<(Theme, std::rc::Rc<pxui::Theme>)>> = const { std::cell::RefCell::new(None) }; }
+    thread_local! { static SHEET: std::cell::RefCell<Option<(Theme, std::rc::Rc<pxui::ThemeHandle>)>> = const { std::cell::RefCell::new(None) }; }
     let tokens = ui.tokens();
     let sheet = SHEET.with(|cell| {
         let mut cell = cell.borrow_mut();
         match cell.as_ref() {
             Some((from, sheet)) if *from == tokens => sheet.clone(),
             _ => {
-                let sheet = std::rc::Rc::new(pxui::Theme::from_tokens(sheet_theme(&tokens)));
+                let sheet = std::rc::Rc::new(pxui::ThemeHandle::from_tokens(sheet_theme(&tokens)));
                 *cell = Some((tokens, sheet.clone()));
                 sheet
             }
@@ -633,11 +633,10 @@ pub fn on_sheet(ui: &mut Ui, floating: bool, build: &mut dyn FnMut(&mut Ui)) {
 
 pub fn inspector_panel(window: bool, ui: &mut Ui, bounds: layout::Bounds, build: &mut dyn FnMut(&mut Ui)) {
     let (x, y, width, height) = bounds;
-    ui.panel(
-        PanelOpts { window, x: x as f32, y: y as f32, width: width as f32, height: Some(height as f32), padding: 0, ..PanelOpts::default() },
-        "workspace-inspector-panel",
-        build,
-    );
+    let overlay = pxui::Overlay::DEFAULT.at(pxui::Point::new(x as f32, y as f32))
+        .w_px(width as f32).h_px(height as f32).padding(0.0);
+    let overlay = if window { overlay.window() } else { overlay };
+    ui.panel("workspace-inspector-panel", &overlay, build);
 }
 
 /// The inspector rows of a scene object or a World layer: its fields, a vec3 in one row.

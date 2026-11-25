@@ -8,10 +8,9 @@ use crate::kit;
 use editor_core::command;
 use editor_core::keymap::Trigger;
 use input::{Key, MouseButton};
-use pxui::theme;
 use pxui::ui::*;
 use rays::frame;
-use pxui::geom::color::T as Color;
+use pxui::Rgba as Color;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -363,11 +362,11 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
     let at = |k: usize| &rows[shown[k]];
     let top = y + height;
     let body = height.max(h - height);
-    let mut opts = BoxOpts::default().flags(CLICKABLE | SCROLL | CLIP | BLOCKING).w(Size::Px(w)).h(Size::Px(h)).at((x, y));
+    let mut opts = pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::SCROLL | pxui::Flags::CLIP | pxui::Flags::BLOCKING).w(Size::Px(w)).h(Size::Px(h)).at(x, y);
     opts = opts.scroll_step(height);
-    let boxed = ui.box_("tree", opts);
+    let boxed = ui.node("tree", opts);
     let signal = ui.signal(&boxed);
-    let mut scroll = ui.scroll_offset(&boxed);
+    let mut scroll = ui.scroll(&boxed).settled;
     if t.reveal {
         if let Some(k) = t.focus.and_then(|f| position(rows, &shown, f)) {
             let row_top = k as f32 * height;
@@ -383,7 +382,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
         ui.set_scroll_offset(&boxed, scroll);
     }
     ui.within(&boxed, &mut |ui| {
-        ui.box_("tree-content", BoxOpts::default().w(Size::Px(w)).h(Size::Px((count + 1) as f32 * height)));
+        ui.node("tree-content", pxui::Node::DEFAULT.w(Size::Px(w)).h(Size::Px((count + 1) as f32 * height)));
     });
     let row_at = |py: f32| -> Option<usize> {
         // a sticky row is the row under the pointer, not the one scrolled beneath it
@@ -483,22 +482,24 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
             ((if shown_flag == Some(false) { "Show" } else { "Hide" }).to_string(), shown_flag.is_some()),
             ("Delete".to_string(), true),
         ];
-        match ui.context_menu((cx, cy), &MenuOpts::default(), "tree-context", &items) {
-            MenuResult::Open => {}
-            MenuResult::Dismiss => t.context = None,
-            MenuResult::Pick(0) => {
+        let rows: Vec<_> = items.iter().map(|(label, enabled)| MenuItem::new(label).disabled(!enabled)).collect();
+        let choice = ui.menu("tree-context", pxui::Point::new(cx, cy), &rows, &Menu::DEFAULT);
+        match (choice.chosen, choice.dismissed) {
+            (None, false) => {}
+            (None, true) => t.context = None,
+            (Some(0), _) => {
                 t.context = None;
                 intents.push(Intent::Activate(id));
             }
-            MenuResult::Pick(1) => {
+            (Some(1), _) => {
                 t.context = None;
                 t.renaming = Some((id, false));
             }
-            MenuResult::Pick(2) => {
+            (Some(2), _) => {
                 t.context = None;
                 intents.push(Intent::Flag { ids, column: 0, value: shown_flag == Some(false) });
             }
-            MenuResult::Pick(_) => {
+            (Some(_), _) => {
                 t.context = None;
                 intents.push(Intent::Delete(ids));
             }
@@ -511,7 +512,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
     }
     // Held gestures: a 4-point dead zone starts a row drag; paint applies the toggle value to each
     // row the pointer passes.
-    if matches!(t.drag, Some(Drag::Rows { .. })) && ui.key_pressed(Key::Escape) {
+    if matches!(t.drag, Some(Drag::Rows { .. })) && ui.key_pressed(pxui::KeyCode::Escape, pxui::Mods::NONE) {
         t.drag = None;
     }
     match t.drag.clone() {
@@ -577,7 +578,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
         let hover_pointer = signal.pointer.1;
         let build_scroll = scroll;
         let sticky_rows = rows_rc.clone();
-        ui.draw(&boxed, move |paint, _| {
+        ui.canvas(&boxed, move |paint, _| {
             let rows: &[Row] = &rows_rc;
             let at = |k: usize| &rows[shown[k]];
             let is_selected = |id: i64| selected.contains(&id);
@@ -585,9 +586,9 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
             let first = 0.max((scroll / height).floor() as i64);
             let last = (count as i64 - 1).min(((scroll + body) / height).ceil() as i64);
             let sticky = sticky_of(&sticky_rows, &shown, height, scroll);
-            paint.fill(x, y, w, h, theme.panel);
-            let ink_2 = theme::ink_2(&theme);
-            let ink_3 = theme::ink_3(&theme);
+            paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(theme.panel));
+            let ink_2 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
+            let ink_3 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
             // the row under the pointer, sticky rows first (as `row_at` finds it)
             let hover: Option<usize> = if signal.hovered && !dragging {
                 let py = hover_pointer;
@@ -610,41 +611,41 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
                 let selected = is_selected(row.id);
                 // current (the keyboard cursor) and selected are the control fill; selected adds the
                 // accent brackets, drawn once the rows are down
-                paint.fill(x, row_y, w, height, theme.panel);
+                paint.fill(pxui::Rect::new(x, row_y, w, height), pxui::Fill::new(theme.panel));
                 if selected {
-                    paint.fill(x + 6.0, row_y, w - 12.0, height, theme.control);
+                    paint.fill(pxui::Rect::new(x + 6.0, row_y, w - 12.0, height), pxui::Fill::new(theme.control));
                 } else if focus == Some(row.id) {
-                    paint.fill(x, row_y, w, height, theme.control);
+                    paint.fill(pxui::Rect::new(x, row_y, w, height), pxui::Fill::new(theme.control));
                 } else if hover == Some(k) {
-                    paint.fill(x, row_y, w, height, theme::faint_border(&theme));
+                    paint.fill(pxui::Rect::new(x, row_y, w, height), pxui::Fill::new((theme).foreground.with_alpha(20)));
                 }
                 let indent = |level: i64| x + 12.0 + (level as f32 * INDENT_STEP);
-                let text_y = paint.text_top(None, row_y, height);
+                let text_y = (row_y) + (((height) - (paint.tokens().font_size) as f32) / 2.0).floor();
                 if has_children(rows, index) {
                     paint.chevron(
                         (indent(row.depth) + 3.0, row_y + (height / 2.0)),
                         if folded.contains(&row.id) && flag_filter_none { Dir::Right } else { Dir::Down },
-                        ink_2,
+                        pxui::Stroke::new(ink_2),
                     );
                 }
                 // the kind: a letter in the label style, in ink once selected
                 let badge_x = indent(row.depth) + 14.0;
                 let letter: &str = if row.link { "\u{21b3}" } else { &row.badge.0 };
                 let cy = kit::cap_y_paint(paint, row_y, height);
-                paint.cap((badge_x, cy), Some(if selected || focus == Some(row.id) { theme.foreground } else { ink_2 }), letter);
-                let label_x = badge_x + paint.cap_width(letter) + 8.0;
+                { let text = letter; let span = pxui::TextSpan::new(0, text.len() as u32).color(if selected || focus == Some(row.id) { theme.foreground } else { ink_2 }); let _ = paint.text_spans(pxui::Point::new(badge_x, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
+                let label_x = badge_x + { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(letter, style, None) }.unwrap_or(0.0) + 8.0;
                 let hidden = match row.flags.first() {
                     Some(shown) => !shown,
                     None => false,
                 };
                 let color = if row.ghost || row.link || hidden { ink_3 } else { theme.foreground };
-                paint.text_c((label_x, text_y), color, &row.label);
+                { let text = &row.label; let span = pxui::TextSpan::new(0, text.len() as u32).color(color); let _ = paint.text_spans(pxui::Point::new(label_x, text_y), pxui::Label::BODY, 0.0, text, &[span]); };
                 if !row.detail.is_empty() {
                     // the detail sits before the flags, where the label leaves room
-                    let dw = paint.text_width(None, &row.detail);
+                    let dw = paint.text_service().width(&row.detail, pxui::Label::BODY, None).unwrap_or(0.0);
                     let dx = columns_x - 8.0 - dw;
-                    if dx > label_x + paint.text_width(None, &row.label) + 8.0 {
-                        paint.text_c((dx, text_y), ink_2, &row.detail);
+                    if dx > label_x + paint.text_service().width(&row.label, pxui::Label::BODY, None).unwrap_or(0.0) + 8.0 {
+                        { let text = &row.detail; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink_2); let _ = paint.text_spans(pxui::Point::new(dx, text_y), pxui::Label::BODY, 0.0, text, &[span]); };
                     }
                 }
                 // Flags: a square for the first column (visible), a round one for the others.
@@ -661,7 +662,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
             // every row, since they reach into the rows above and below, whose ground would cover them
             let mark = |paint: &mut Paint, k: usize, row_y: f32| {
                 if is_selected(at(k).id) {
-                    paint.brackets(x + 6.0, row_y, w - 12.0, height, 4.0, 8.0, 2.0, theme.accent);
+                    paint.brackets(Rect::new(x + 6.0, row_y, w - 12.0, height), 4.0, 8.0, pxui::Stroke::new(theme.accent).width(2.0));
                 }
             };
             for k in first..=last {
@@ -674,26 +675,26 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
                 mark(paint, *k, top + (slot as f32 * height));
             }
             if !sticky.is_empty() {
-                paint.fill(x, top + (sticky.len() as f32 * height), w, 1.0, theme::edge(&theme));
+                paint.fill(pxui::Rect::new(x, top + (sticky.len() as f32 * height), w, 1.0), pxui::Fill::new((theme).foreground.with_alpha(38)));
             }
             if let Some((k, drop)) = drop_hint {
                 let row_y = top + (k as f32 * height) - scroll;
                 match drop {
-                    DropAt::Inside => paint.frame_w(x, row_y, w, height, 2.0, theme.accent),
+                    DropAt::Inside => paint.frame(Rect::new(x, row_y, w, height), pxui::Stroke::new(theme.accent).width(2.0)),
                     DropAt::Before | DropAt::After => {
                         let line_y = if drop == DropAt::Before { row_y } else { row_y + height };
-                        paint.line_w((x, line_y), (x + w, line_y), 2.0, theme.accent);
+                        paint.line((x, line_y), (x + w, line_y), pxui::Stroke::new(theme.accent).width(2.0));
                     }
                 }
             }
             // Header: the level as a section label and the flag columns, or the filter under a prompt.
-            paint.fill(x, y, w, height, theme.panel);
+            paint.fill(pxui::Rect::new(x, y, w, height), pxui::Fill::new(theme.panel));
             if filter.is_none() {
                 let cy = kit::cap_y_paint(paint, y, height);
-                paint.cap((x + 12.0, cy), Some(ink_3), &title);
+                { let text = &title; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink_3); let _ = paint.text_spans(pxui::Point::new(x + 12.0, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
                 for (column, name) in columns.iter().enumerate() {
-                    let nw = paint.cap_width(name);
-                    paint.cap((columns_x + (column as f32 * FLAG_WIDTH) + 6.0 - (nw / 2.0), cy), Some(ink_2), name);
+                    let nw = { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(name, style, None) }.unwrap_or(0.0);
+                    { let text = name; let span = pxui::TextSpan::new(0, text.len() as u32).color(ink_2); let _ = paint.text_spans(pxui::Point::new(columns_x + (column as f32 * FLAG_WIDTH) + 6.0 - (nw / 2.0), cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
                 }
             }
         });
@@ -701,9 +702,10 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
     // The filter field sits in the header; Escape clears it.
     if let Some(query) = t.filter.clone() {
         let mut result: (String, Pick) = (query.clone(), Pick::None);
-        let popts = PanelOpts::default().at(x, y).width(w).max_height(height + 16.0);
-        ui.panel(popts, "tree-filter", &mut |ui| {
-            result = ui.picker(&PickerOpts::default(), "Filter rows", &query, &|_| Vec::new());
+        let overlay = pxui::Overlay::DEFAULT.at(pxui::Point::new(x, y)).w_px(w).max_h_px(height + 16.0);
+        ui.panel("tree-filter", &overlay, |ui: &mut Ui| {
+            let response = ui.picker("tree-filter-field", "Filter rows", &query, &pxui::Picker::DEFAULT, &mut |_, _| {});
+            result = (response.query.to_owned(), response.pick);
         });
         match result {
             (_, Pick::Cancel) => {
@@ -726,12 +728,14 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
             if ry >= top && ry + height <= y + h {
                 let letter = if row.link { "↳" } else { &row.badge.0 };
                 let tx = x + 34.0 + row.depth as f32 * INDENT_STEP + kit::cap_width(ui, letter);
-                let opts = ValueFieldOpts { left: true, edit: !seen, ..ValueFieldOpts::default() };
+                let opts = pxui::ValueField::DEFAULT.left(true).edit(!seen);
                 let valid = |text: &str| !text.trim().is_empty();
-                let (name, editing) = ui.value_field((tx, ry + (height - 20.0) / 2.0), (columns_x - 8.0 - tx).max(1.0), 20.0, &opts, &valid, "tree-rename-field", &row.label);
+                let rect = Rect::new(tx, ry + (height - 20.0) / 2.0, (columns_x - 8.0 - tx).max(1.0), 20.0);
+                let response = pxui::ext::value_field(ui, "tree-rename-field", &row.label, rect, &opts, &pxui::ValueCallbacks::DEFAULT.valid(&valid));
+                let name = response.changed.unwrap_or(&row.label);
                 if name.trim() != row.label {
                     intents.push(Intent::Rename(id, name.trim().to_owned()));
-                } else if editing {
+                } else if response.editing {
                     t.renaming = Some((id, true));
                 }
             }

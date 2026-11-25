@@ -35,7 +35,7 @@ cover past machines and settings, not current defaults.
 
 Rays loads `libpxui` (the PXUI stable C ABI) at run time; nothing links it statically. Cargo does not order a
 cdylib before a dependent's link, so build it first: `make lib` (release; `make lib PROFILE=debug` for debug)
-puts `libpxui.dylib` and the `libpxui.1.dylib` link (Linux: `libpxui.so`, `libpxui.so.1`; Windows: `pxui.dll` and its
+puts `libpxui.dylib` and the `libpxui.2.dylib` link (Linux: `libpxui.so`, `libpxui.so.2`; Windows: `pxui.dll` and its
 import library `libpxui.dll.a`) in `target/<profile>/`, and `make build` does that and builds `rays`. `cargo t` builds
 it for you. The binaries and tests find it there without `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH`: rpaths to
 `target/<profile>` (macOS: `pxui/tools/cc-stack.sh`; Linux: `$ORIGIN` in `.cargo/config.toml`), and on Windows the dll
@@ -51,7 +51,7 @@ with a `rays` link in `PREFIX/bin` (default `~/.local`). `CODESIGN_IDENTITY` pic
 "Developer ID Application", else "Apple Development", else ad hoc (printed). The app is not notarized, so `spctl` rejects it.
 Runtime assets (fonts, themes, shaders, nodes) are embedded in the binary: Resources holds only the icon.
 
-`make install PREFIX=...` elsewhere: Linux puts `bin/rays` and `lib/libpxui.so.1` under `PREFIX` (rpath `$ORIGIN/../lib`,
+`make install PREFIX=...` elsewhere: Linux puts `bin/rays` and `lib/libpxui.so.2` under `PREFIX` (rpath `$ORIGIN/../lib`,
 nothing into the build tree; SDL3 stays a system library found through pkg-config at build time and `ld.so` at run time,
 check with `ldd`). Windows (MSYS2) puts `rays.exe`, `pxui.dll` and every MSYS2 DLL they load (SDL3, SDL3_image, SDL3_mixer,
 libstdc++, libgcc, libwinpthread, libiconv) in `PREFIX/bin`, a directory that runs from anywhere. Both were run on the
@@ -65,7 +65,9 @@ upper bound); every budget and the memory ledger use them.
 ## The pxui submodule and validation
 
 PXUI, `ogpu_*`, the window hosts, `sdl3` and `cargo t` itself live in the `pxui/` submodule
-(`git@github.com:olegpustovit/pxui.git`). After a clone: `git submodule update --init`. `cargo t -p pxui_core`
+(`git@github.com:olegpustovit/pxui.git`). After a clone: `git submodule update --init`.
+
+`cargo t -p pxui_core`
 and the other PXUI crates run from the Rays root (the alias builds `pxui/tools/t` into this `target/`).
 To change PXUI: edit in `pxui/`, `pxui/tools/validate.sh` there, commit and push in `pxui/`, then commit
 the pointer here; `cargo run -p gate -- pxui` refuses a pointer that is not on the remote.
@@ -104,7 +106,7 @@ Both executables ran the same 20 byte-identical sketches (none imports another
 file), then `mem sketches/basic.rays --frames 30`. One warmup preceded three
 alternating samples per implementation, with compilation outside the timers and
 other build/test jobs paused. Each sample starts a fresh process. The native `mem`
-route uses a 960×640 offscreen GPU canvas, fixed 60 Hz and one editor domain in both
+route uses a 960Ã—640 offscreen GPU canvas, fixed 60 Hz and one editor domain in both
 versions; checks retain their normal defaults. All 16 commands exited successfully.
 
 | Workload | OCaml median | Rust debug median | Rust result |
@@ -139,7 +141,7 @@ SDL tests set their own dummy driver hints: do not globally set SDL_VIDEODRIVER=
 whole suite (the environment overrides SDL_SetHint). Native window tests run on the process's
 initial thread. The Cocoa native-layer case passes on this host; the former video-device failure
 came from running Cocoa on a test worker. PXUI display parity uses a separate native-driver
-process and this host's measured 1× density.
+process and this host's measured 1Ã— density.
 
 ## Current profile measurements (2026-11-10)
 

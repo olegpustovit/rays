@@ -91,6 +91,17 @@ pub fn find<K>(table: &mut Table<K>, key: &K) -> Option<Item> {
     table.items.get(&id_of(&value)).map(|(_, item)| item.clone())
 }
 
+pub fn find_str(table: &mut Table, key: &str) -> Option<Item> {
+    settle(table);
+    let mut hash = DefaultHasher::new();
+    std::mem::discriminant(&TableKey::Str(String::new())).hash(&mut hash);
+    key.hash(&mut hash);
+    let value = table.cache.find_with(hash.finish(), &|stored| {
+        matches!(table.items.get(&key_id(stored)), Some((TableKey::Str(text), _)) if text == key)
+    }, table.promote)?;
+    table.items.get(&id_of(&value)).map(|(_, item)| item.clone())
+}
+
 pub fn peek<K>(table: &mut Table<K>, key: &K) -> Option<Item> {
     settle(table);
     let value = table.cache.peek_with((table.hash)(key), &|stored| matches(table, stored, key), table.promote)?;

@@ -3,10 +3,10 @@
 use editor_document::kind_graph;
 use param::Value;
 use pxui::theme;
-use pxui::ui::{BoxOpts, Paint, Size, Ui, UiBox, CLIP};
+use pxui::ui::{Paint, Size, Ui};
 use rays_shell::kit;
 use rays_shell::layout::Leaf;
-use pxui::geom::color::T as Color;
+use pxui::Rgba as Color;
 
 use crate::editor_inspect::{group_digits, scene};
 use crate::editor_list::{piece, pieces};
@@ -17,20 +17,22 @@ pub type Rect = (i64, i64, i64, i64);
 /// What is painted over a view stays in its pane: the box the marks are drawn in fills a clipping
 /// one (`Ui.clip` binds a box's children, not its own paint), so a bracket, a label or a frame that
 /// runs past the pane's edge is cut there and never lies on its neighbour.
-fn view_layer(ui: &mut Ui, bounds: Rect, key: &str) -> UiBox {
+fn view_layer(ui: &mut Ui, bounds: Rect, key: &str) -> pxui::Handle {
     let (bx, by, bw, bh) = bounds;
-    let pane = ui.box_(key, BoxOpts::default().flags(CLIP).w(Size::Px(bw as f32)).h(Size::Px(bh as f32)).at((bx as f32, by as f32)));
-    let mut inner: Option<UiBox> = None;
-    ui.within(&pane, &mut |ui| inner = Some(ui.box_("marks", BoxOpts::default().w(Size::Grow).h(Size::Grow))));
+    let pane = ui.node(pxui::hash_of(key), pxui::Node::DEFAULT.flags(pxui::Flags::CLIP).w(Size::Px(bw as f32)).h(Size::Px(bh as f32)).at(bx as f32, by as f32));
+    let mut inner: Option<pxui::Handle> = None;
+    ui.within(&pane, &mut |ui| inner = Some(ui.node("marks", pxui::Node::DEFAULT.w(Size::Grow).h(Size::Grow))));
     inner.expect("marks box")
 }
 
 /// A label in the row at `y`; `pl` and `pr` points of ground beside it; its width.
 fn label(paint: &mut Paint, theme: &theme::Tokens, rh: f32, x: f32, y: f32, pl: f32, pr: f32, color: Option<Color>, text: &str) -> f32 {
-    let w = paint.cap_width(text);
-    paint.fill(x - pl, y, w + pl + pr, rh, theme.panel);
+    let w = { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(text, style, None) }.unwrap_or(0.0);
+    paint.fill(pxui::Rect::new(x - pl, y, w + pl + pr, rh), pxui::Fill::new(theme.panel));
     let cy = kit::cap_y_paint(paint, y, rh);
-    paint.cap((x, cy), color, text);
+    let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08);
+    let span = pxui::TextSpan::new(0, text.len() as u32).color(color.unwrap_or(paint.tokens().foreground));
+    let _ = paint.text_spans(pxui::Point::new(x, cy), style, 0.0, text, &[span]);
     w
 }
 
@@ -50,25 +52,25 @@ fn traced_readout(paint: &mut Paint, theme: &theme::Tokens, rh: f32, narrow: boo
     let fx = x + if narrow { 8.0 } else { 12.0 };
     let oy = y + if narrow { 8.0 } else { 12.0 };
     let ox = fx + 8.0;
-    let title = paint.font_size * theme::TITLE_SIZE / theme::FONT_SIZE;
+    let title = paint.tokens().font_size * theme::TITLE_SIZE as f32 / theme::FONT_SIZE as f32;
     let bar_w = if narrow { 112.0 } else { 224.0f32.min(w - 24.0) };
-    paint.fill(fx, oy, bar_w + 16.0, 3.0 * rh + 24.0, theme.panel);
+    paint.fill(pxui::Rect::new(fx, oy, bar_w + 16.0, 3.0 * rh + 24.0), pxui::Fill::new(theme.panel));
     let tw = label(paint, theme, rh, ox, oy, 0.0, 0.0, Some(theme.foreground), "Path traced");
     if !narrow {
         let cy = kit::cap_y_paint(paint, oy, rh);
-        paint.cap((ox + tw + 6.0, cy), Some(theme::ink_2(theme)), "Metal RT");
+        { let text = "Metal RT"; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)); let _ = paint.text_spans(pxui::Point::new(ox + tw + 6.0, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
     }
     let row2 = oy + rh + 4.0;
     let count = t.samples.min(t.cap).to_string();
-    let ty = paint.text_top(Some(title), row2, rh) - 1.0;
-    paint.text_s((ox, ty), title, theme.foreground, &count);
-    let after = paint.text_width(Some(title), &format!("{count} "));
+    let ty = (row2) + (((rh) - (title) as f32) / 2.0).floor() - 1.0;
+    { let text = &count; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(ox, ty), pxui::Label::BODY.size((title) as f32), 0.0, text, &[span]); };
+    let after = paint.text_service().width(&format!("{count} "), pxui::Label::BODY.size((title) as f32), None).unwrap_or(0.0);
     let tail = if narrow { format!("/ {}", t.cap) } else { format!("/ {} spp", t.cap) };
-    paint.text_s((ox + after, ty), title, theme::ink_2(theme), &tail);
+    { let text = &tail; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)); let _ = paint.text_spans(pxui::Point::new(ox + after, ty), pxui::Label::BODY.size((title) as f32), 0.0, text, &[span]); };
     // the bar: a line-3 box 4 high, filled inside it with the share of the samples
     let by = row2 + rh + 4.0;
-    paint.stroke(ox + 0.5, by + 0.5, bar_w - 1.0, 3.0, theme::border(theme));
-    paint.fill(ox + 1.0, by + 1.0, (bar_w - 2.0) * 1.0f32.min(t.samples as f32 / t.cap.max(1) as f32), 2.0, theme.foreground);
+    paint.stroke(pxui::Rect::new(ox + 0.5, by + 0.5, bar_w - 1.0, 3.0), pxui::Stroke::new((theme).foreground.with_alpha(77)));
+    paint.fill(pxui::Rect::new(ox + 1.0, by + 1.0, (bar_w - 2.0) * 1.0f32.min(t.samples as f32 / t.cap.max(1) as f32), 2.0), pxui::Fill::new(theme.foreground));
     // under it: the seconds the accumulation took and, on a wide body, the bounces and the film in
     // pixels
     let (fw, fh) = t.film;
@@ -85,7 +87,7 @@ fn traced_readout(paint: &mut Paint, theme: &theme::Tokens, rh: f32, narrow: boo
         )
     };
     let cy = kit::cap_y_paint(paint, by + 8.0, rh);
-    paint.cap((ox, cy), None, &text);
+    { paint.text_chars(pxui::Point::new(ox, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), &text); };
 }
 
 fn camera_readout(paint: &mut Paint, theme: &theme::Tokens, rh: f32, (x, y, w, _h): (f32, f32, f32, f32), node: &kind_graph::Node) {
@@ -108,18 +110,18 @@ fn camera_readout(paint: &mut Paint, theme: &theme::Tokens, rh: f32, (x, y, w, _
             rows.push(("Focus".to_string(), cfmt::f(d, 2)));
         }
     }
-    let value_w = rows.iter().fold(0.0f32, |m, (_, v)| m.max(paint.text_width(None, v)));
-    let label_w = rows.iter().fold(0.0f32, |m, (l, _)| m.max(paint.cap_width(l)));
+    let value_w = rows.iter().fold(0.0f32, |m, (_, v)| m.max(paint.text_service().width(v, pxui::Label::BODY, None).unwrap_or(0.0)));
+    let label_w = rows.iter().fold(0.0f32, |m, (l, _)| m.max({ let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(l, style, None) }.unwrap_or(0.0)));
     let right = x + w - 12.0;
-    paint.fill(right - value_w - 10.0 - label_w - 8.0, y + 12.0, value_w + 10.0 + label_w + 8.0, rh * rows.len() as f32 + 4.0, theme.panel);
+    paint.fill(pxui::Rect::new(right - value_w - 10.0 - label_w - 8.0, y + 12.0, value_w + 10.0 + label_w + 8.0, rh * rows.len() as f32 + 4.0), pxui::Fill::new(theme.panel));
     for (i, (name, text)) in rows.iter().enumerate() {
         let ry = y + 12.0 + rh * i as f32;
         let cy = kit::cap_y_paint(paint, ry, rh);
-        let nw = paint.cap_width(name);
-        paint.cap((right - value_w - 10.0 - nw, cy), None, name);
-        let tw = paint.text_width(None, text);
-        let ty = paint.text_top(None, ry, rh);
-        paint.text_c((right - tw, ty), theme.foreground, text);
+        let nw = { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(name, style, None) }.unwrap_or(0.0);
+        { paint.text_chars(pxui::Point::new(right - value_w - 10.0 - nw, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), name); };
+        let tw = paint.text_service().width(text, pxui::Label::BODY, None).unwrap_or(0.0);
+        let ty = (ry) + (((rh) - (paint.tokens().font_size) as f32) / 2.0).floor();
+        { let text = text; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(right - tw, ty), pxui::Label::BODY, 0.0, text, &[span]); };
     }
 }
 
@@ -128,10 +130,10 @@ pub fn draw_viewport_pane<'a>(
     ui: &mut Ui,
     value: &ModelView<'a>,
     caption: Option<String>,
-    roots: &[(Leaf, UiBox)],
+    roots: &[(Leaf, pxui::Handle)],
     active: Option<&Leaf>,
-    none_root: &dyn Fn(&mut Ui) -> UiBox,
-) -> UiBox {
+    none_root: &dyn Fn(&mut Ui) -> pxui::Handle,
+) -> pxui::Handle {
     // the iteration the selected node shows, over the viewport's lower left corner
     if let (Some(text), Some(leaf)) = (&caption, active) {
         // a label on the ground, like every readout over the view; a cached view keyed by its text
@@ -143,11 +145,11 @@ pub fn draw_viewport_pane<'a>(
             let layer = view_layer(ui, leaf.body, "viewport-caption");
             let theme = ui.tokens();
             let text = text.clone();
-            ui.draw(&layer, move |paint, pxui::geom::Rect { x, y, h, .. }| {
+            ui.canvas(&layer, move |paint, pxui::geom::Rect { x, y, h, .. }| {
                 let (px, py) = (x + 12.0, y + h - 24.0);
-                let w = paint.cap_width(&text) + 8.0;
-                paint.fill(px - 4.0, py, w, 16.0, theme.panel);
-                paint.cap((px, py + 2.0), None, &text);
+                let w = { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(&text, style, None) }.unwrap_or(0.0) + 8.0;
+                paint.fill(pxui::Rect::new(px - 4.0, py, w, 16.0), pxui::Fill::new(theme.panel));
+                { paint.text_chars(pxui::Point::new(px, py + 2.0), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), &text); };
             });
         });
     }
@@ -171,15 +173,14 @@ pub fn draw_viewport_pane<'a>(
                 parts.extend(camera);
                 let text = parts.join(" \u{b7} ");
                 let w = kit::cap_width(ui, &text) + 8.0;
-                let boxed = ui.box_(
-                    &format!("viewport-window-label-{key}"),
-                    BoxOpts::default().w(Size::Px(w)).h(Size::Px(16.0)).at((bx as f32 + 8.0, by as f32 + 4.0)),
+                let boxed = ui.node(pxui::hash_of(&format!("viewport-window-label-{key}")),
+                    pxui::Node::DEFAULT.w(Size::Px(w)).h(Size::Px(16.0)).at(bx as f32 + 8.0, by as f32 + 4.0),
                 );
                 ui.to_front(i64::MAX, &boxed);
                 let size = kit::cap_size(ui);
-                ui.draw(&boxed, move |paint, pxui::geom::Rect { x, y, h, .. }| {
-                    let cy = paint.text_top(Some(size), y, h);
-                    paint.cap((x + 4.0, cy), None, &text);
+                ui.canvas(&boxed, move |paint, pxui::geom::Rect { x, y, h, .. }| {
+                    let cy = (y) + (((h) - (size) as f32) / 2.0).floor();
+                    { paint.text_chars(pxui::Point::new(x + 4.0, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), &text); };
                 });
             }
         }
@@ -245,16 +246,16 @@ fn marks(ui: &mut Ui, value: &ModelView<'_>, leaf: &Leaf, key: &str, theme: them
         // camera readout, no object count; a wide one follows viewport.html
         let narrow = bw < 1000;
         let fps = value.status_fps;
-        ui.draw(&overlay, move |paint, pxui::geom::Rect { x, y, w, h }| {
+        ui.canvas(&overlay, move |paint, pxui::geom::Rect { x, y, w, h }| {
             if let Some((gx, gy, gw, gh)) = gate {
                 let (gx, gy, gw, gh) = (gx as f32, gy as f32, gw as f32, gh as f32);
-                paint.stroke(gx + 0.5, gy + 0.5, gw - 1.0, gh - 1.0, theme::edge(&theme));
+                paint.stroke(pxui::Rect::new(gx + 0.5, gy + 0.5, gw - 1.0, gh - 1.0), pxui::Stroke::new((theme).foreground.with_alpha(38)));
                 // the corner marks lie on the frame's own edge: 16 points, 1 wide, in ink
-                paint.brackets(gx, gy, gw, gh, 0.0, 16.0, 1.0, theme.foreground);
+                paint.brackets(pxui::Rect::new(gx, gy, gw, gh), 0.0, 16.0, pxui::Stroke::new(theme.foreground).width(1.0));
                 // the label stands over the frame's left end with no ground of its own; the traced
                 // readout, drawn after it, covers its head where the sheet's does
                 let at = kit::cap_y_paint(paint, if gy - y >= 20.0 { gy - 20.0 } else { gy + 4.0 }, rh);
-                paint.cap((gx, at), None, &format!("Render frame \u{b7} {} \u{d7} {}", root.width, root.height));
+                { paint.text_chars(pxui::Point::new(gx, at), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), &format!("Render frame \u{b7} {} \u{d7} {}", root.width, root.height)); };
             }
             // a traced viewport's readout: the path tracer and its backend as labels, the samples as a
             // 20-point count over a 4-point bar, the film as a label; 4 apart, on the ground
@@ -264,15 +265,15 @@ fn marks(ui: &mut Ui, value: &ModelView<'_>, leaf: &Leaf, key: &str, theme: them
             if let Some(((sx, sy, sw, sh), name)) = &boxed {
                 let (sx, sy, sw, sh) = (*sx as f32, *sy as f32, *sw as f32, *sh as f32);
                 if sw > 8.0 && sh > 8.0 {
-                    paint.brackets(sx, sy, sw, sh, 4.0, 8.0, 2.0, theme.accent);
+                    paint.brackets(pxui::Rect::new(sx, sy, sw, sh), 4.0, 8.0, pxui::Stroke::new(theme.accent).width(2.0));
                     // the name in the accent, in the row that ends where the brackets begin, then how
                     // many points the object cooked to, on the ground
                     let ny = sy - 4.0 - rh;
                     let cy = kit::cap_y_paint(paint, ny, rh);
-                    paint.cap((sx - 4.0, cy), Some(theme.accent), name);
+                    { let text = name; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.accent); let _ = paint.text_spans(pxui::Point::new(sx - 4.0, cy), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), 0.0, text, &[span]); };
                     if let Some(n) = points {
-                        let lx = sx - 4.0 + paint.cap_width(name) + 8.0;
-                        label(paint, &theme, rh, lx, ny, 4.0, 4.0, Some(theme::ink_2(&theme)), &format!("{} pts", group_digits(n)));
+                        let lx = sx - 4.0 + { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(name, style, None) }.unwrap_or(0.0) + 8.0;
+                        label(paint, &theme, rh, lx, ny, 4.0, 4.0, Some(theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32)), &format!("{} pts", group_digits(n)));
                     }
                 }
             }
@@ -294,17 +295,19 @@ fn marks(ui: &mut Ui, value: &ModelView<'_>, leaf: &Leaf, key: &str, theme: them
             }
             let mut total = 12.0 * (items.len() as f32 - 1.0);
             for (text, _) in &items {
-                total += paint.cap_width(text);
+                total += { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(text, style, None) }.unwrap_or(0.0);
             }
             // the wide sheet's readout stands on a patch of the ground; the narrow one on the view
             if !narrow {
-                paint.fill(x + w - edge - total - 8.0, row_y, total + 8.0, rh, theme.panel);
+                paint.fill(pxui::Rect::new(x + w - edge - total - 8.0, row_y, total + 8.0, rh), pxui::Fill::new(theme.panel));
             }
             let mut at = x + w - edge - total;
             for (text, color) in &items {
                 let cy = kit::cap_y_paint(paint, row_y, rh);
-                paint.cap((at, cy), *color, text);
-                at += paint.cap_width(text) + 12.0;
+                let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08);
+    let span = pxui::TextSpan::new(0, text.len() as u32).color(color.unwrap_or(paint.tokens().foreground));
+    let _ = paint.text_spans(pxui::Point::new(at, cy), style, 0.0, text, &[span]);
+                at += { let style = pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08); paint.text_service().width(text, style, None) }.unwrap_or(0.0) + 12.0;
             }
         });
     }

@@ -77,9 +77,9 @@ pub fn inspector_rows() {
         let mut out = (values.clone(), param::NO_EFFECTS);
         let v = values.clone();
         rays_shell::host::build(&mut ui, &frame(time, events), &mut |ui: &mut Ui| {
-            ui.panel(pxui::ui_kit::PanelOpts { x: 0., y: 0., width: 260., ..Default::default() }, "inspector", &mut |ui: &mut Ui| {
-                ui.scope("selected", &mut |ui: &mut Ui| {
-                    ui.label("Selected shape");
+            ui.panel("inspector", &pxui::Overlay::DEFAULT.w_px(260.0), |ui: &mut Ui| {
+                ui.id("selected", |ui: &mut Ui| {
+                    ui.label("Selected shape", pxui::Label::BODY);
                     let views = schema.view(&v).expect("view");
                     let changes = inspector::fields(ui, &["Geometry".to_string()], None, false, views.clone());
                     out = if changes.is_empty() { (v.clone(), param::NO_EFFECTS) } else { schema.apply_all(&v, &changes).unwrap_or_else(|m| fail(&m)) };

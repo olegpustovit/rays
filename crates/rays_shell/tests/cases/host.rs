@@ -48,8 +48,8 @@ fn render(density: i64, height: i64, build: &mut dyn FnMut(&mut Ui)) -> (canvas:
 /// branches, with the socket colours of text, functions and records.
 fn zones(ui: &mut Ui) {
     let t = ui.tokens();
-    let b = ui.box_("zones", BoxOpts::default().w(Size::Px(320.0)).h(Size::Px(390.0)).at((0.0, 0.0)));
-    ui.draw(&b, move |paint, _| {
+    let b = ui.node("zones", pxui::Node::DEFAULT.w(Size::Px(320.0)).h(Size::Px(390.0)).at(0.0, 0.0));
+    ui.canvas(&b, move |paint, _| {
         let list = [
             rays_graph::scope_paint::zone_for(&t),
             rays_graph::scope_paint::zone_fold(&t),
@@ -62,16 +62,16 @@ fn zones(ui: &mut Ui) {
         for (i, zone) in list.iter().enumerate() {
             let x = 12.0 + (i % 2) as f32 * 154.0;
             let y = 12.0 + (i / 2) as f32 * 92.0;
-            paint.rect(x, y, 142.0, 80.0, Some(zone.fill), None);
+            paint.fill(Rect::new(x, y, 142.0, 80.0), Fill::new(zone.fill));
             if zone.dashed {
-                paint.dashed_rect(x, y, 142.0, 80.0, zone.edge);
+                paint.dashed_rect(Rect::new(x, y, 142.0, 80.0), Stroke::new(zone.edge));
             } else {
-                paint.stroke(x + 0.5, y + 0.5, 141.0, 79.0, zone.edge);
+                paint.stroke(pxui::Rect::new(x + 0.5, y + 0.5, 141.0, 79.0), pxui::Stroke::new(zone.edge));
             }
         }
         let ports = rays_graph::scope_paint::ports(&t);
         for (i, c) in [ports.text, ports.fn_, ports.record].iter().enumerate() {
-            paint.rect(170.0 + i as f32 * 20.0, 200.0, 10.0, 10.0, Some(*c), None);
+            paint.fill(Rect::new(170.0 + i as f32 * 20.0, 200.0, 10.0, 10.0), Fill::new(*c));
         }
     });
 }
@@ -105,12 +105,12 @@ fn window_host_layers_around_native_content() {
     let mut ui = golden_ui();
     let mut front_key = 0;
     rays_shell::host::build(&mut ui, &frame_at(0, 240, 1, vec![]), &mut |ui| {
-        let front = ui.box_("front", BoxOpts::default().flags(CLICKABLE).at((0.0, 0.0)).w(Size::Px(100.0)).h(Size::Px(60.0)));
-        front_key = key(&front);
+        let front = ui.node("front", pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).at(0.0, 0.0).w(Size::Px(100.0)).h(Size::Px(60.0)));
+        front_key = front.box_key;
         ui.to_front(0, &front);
-        let back = ui.box_("back", BoxOpts::default().flags(CLICKABLE).at((0.0, 0.0)).w(Size::Px(100.0)).h(Size::Px(60.0)));
+        let back = ui.node("back", pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).at(0.0, 0.0).w(Size::Px(100.0)).h(Size::Px(60.0)));
         for b in [&front, &back] {
-            ui.draw(b, |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, pxui::geom::color::white()));
+            ui.canvas(b, |paint, Rect { x, y, w, h }| paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(pxui::Rgba::WHITE)));
         }
     });
     let under = move |k: i64| -> Vec<scene::Node> {
@@ -136,7 +136,7 @@ fn window_host_clipboard() {
         f.input.keys = keys;
         rays_shell::host::frame(ui, &f, &mut |ui| {
             let v = value.borrow().clone();
-            *value.borrow_mut() = ui.text_field("Caption", &v).map(str::to_owned).unwrap_or(v);
+            *value.borrow_mut() = ui.text_field("caption", &v, &pxui::TextField::DEFAULT.name("Caption")).changed.unwrap_or(&v).to_owned();
         });
     };
     step(&mut ui, 0, vec![], vec![]);
@@ -171,9 +171,9 @@ fn window_host_memory_ledger() {
     let owner = mem::document("pxui.text_undo");
     let at_start = mem::bytes(&owner);
     let mut ui = golden_ui();
-    let mut edit = ui.load_text_edit(1, "small");
+    let mut edit = ui.load_text_edit("undo-ledger", "small");
     edit.text = "x".repeat(10_000);
-    ui.remember(&edit, false);
+    ui.remember("undo-ledger", &edit, false);
     rays_shell::host::charge(&mut ui);
     assert_eq!(mem::bytes(&owner) - at_start, ui.text_undo_bytes() as i64, "text undo's charge is not what it holds");
     rays_shell::host::destroy(&mut ui);
@@ -188,8 +188,8 @@ fn window_host_destroy_ends_renderer_under_cached_paint() {
     }
     let ui = Rc::new(RefCell::new(golden_ui()));
     rays_shell::host::build(&mut ui.borrow_mut(), &frame_at(0, 40, 1, vec![]), &mut |ui| {
-        let b = ui.box_("b", BoxOpts::default().w(Size::Px(20.0)).h(Size::Px(20.0)).at((0.0, 0.0)));
-        ui.draw(&b, |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, pxui::geom::color::white()));
+        let b = ui.node("b", pxui::Node::DEFAULT.w(Size::Px(20.0)).h(Size::Px(20.0)).at(0.0, 0.0));
+        ui.canvas(&b, |paint, Rect { x, y, w, h }| paint.fill(pxui::Rect::new(x, y, w, h), pxui::Fill::new(pxui::Rgba::WHITE)));
     });
     let canvas_ = canvas::create(WIDTH, 40).expect("canvas");
     let kept = rays_shell::host::scene(&ui, None); // what the native-stage cache keeps
@@ -239,13 +239,14 @@ fn window_host_replayed_ui_defers_image_drop() {
                 image::destroy(&source).expect("destroy source image");
             }
             host::build(&mut state.ui.borrow_mut(), frame, &mut |ui| {
-                let box_ = ui.box_("image area", BoxOpts::default().w(Size::Px(20.)).h(Size::Px(20.)));
+                let box_ = ui.node("image area", Node::DEFAULT.w_px(20.).h_px(20.));
                 let image = state.image.as_ref().map(|image| **image);
                 let offset = frame.input.frame as f32;
-                ui.draw(&box_, move |paint, _| {
-                    paint.fill(offset, 0., 20., 20., pxui::geom::color::white());
+                ui.canvas(&box_, move |paint, _| {
+                    let rect = Rect::new(offset, 0., 20., 20.);
+                    paint.fill(rect, Fill::new(pxui::Rgba::WHITE));
                     if let Some(image) = image {
-                        paint.image(offset, 0., 20., 20., &image);
+                        paint.image(rect, &image, &pxui::ImageStyle::DEFAULT).expect("paint image");
                     }
                 });
             });

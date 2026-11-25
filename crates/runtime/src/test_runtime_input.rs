@@ -8,7 +8,7 @@ use crate::runtime_input as source;
 use crate::runtime_input_sdl3;
 
 fn key(key: SdlKey, down: bool) -> SdlEvent {
-    SdlEvent::Key { key, modifiers: Vec::new(), down, repeat: false }
+    SdlEvent::Key { key, modifiers: 0, down, repeat: false }
 }
 
 fn window(change: WindowChange) -> SdlEvent {
@@ -218,7 +218,7 @@ fn runtime_input_translates_sdl_events_into_facts() {
     // a finished file dialog is one event: the paths, an empty cancel, or the failure
     let dialog_expectations: [(DialogOutcome, Result<Vec<String>, String>); 3] = [
         (
-            DialogOutcome::Chosen(vec!["/tmp/a.png".to_string(), "/tmp/b.png".to_string()]),
+            DialogOutcome::Chosen(vec!["/tmp/a.png".to_string().into(), "/tmp/b.png".to_string().into()]),
             Ok(vec!["/tmp/a.png".to_string(), "/tmp/b.png".to_string()]),
         ),
         (DialogOutcome::Cancelled, Ok(Vec::new())),
@@ -234,11 +234,13 @@ fn runtime_input_translates_sdl_events_into_facts() {
 
     // files: a drag over the window has a position, the drop a path
     let drop = "/definitely/missing/dir/drop.bin";
+    let completed = |paths| Event::FilesDropped { position: (5.5, 6.5), paths: Ok(paths) };
     for event in [
         SdlEvent::Drop { change: DropChange::Begin, x: 0., y: 0. },
         SdlEvent::Drop { change: DropChange::Position, x: 5.5, y: 6.5 },
         SdlEvent::Drop { change: DropChange::File(drop.to_string()), x: 5.5, y: 6.5 },
-        SdlEvent::Drop { change: DropChange::Complete, x: 0., y: 0. },
+        SdlEvent::Drop { change: DropChange::File("another.bin".into()), x: 5.5, y: 6.5 },
+        SdlEvent::Drop { change: DropChange::Complete, x: 5.5, y: 6.5 },
     ] {
         runtime_input_sdl3::push(&mut native, event).unwrap();
     }
@@ -246,19 +248,18 @@ fn runtime_input_translates_sdl_events_into_facts() {
         source::drain(&mut native),
         vec![
             Event::FileDragMoved((5.5, 6.5)),
-            Event::FileDropped(drop.to_string()),
-            Event::FileDragEnded,
+            completed(vec![drop.to_string(), "another.bin".into()]),
         ],
         "native file drop must carry its drag position and the full path without reading it"
     );
     assert!(
-        source::push(&mut native, Event::FileDropped(String::new())).is_err(),
+        source::push(&mut native, completed(vec![String::new()])).is_err(),
         "empty file-drop path passed input validation"
     );
-    source::push(&mut native, Event::FileDropped(drop.to_string())).unwrap();
+    source::push(&mut native, completed(vec![drop.to_string()])).unwrap();
     assert_eq!(
         source::drain(&mut native),
-        vec![Event::FileDropped(drop.to_string())],
+        vec![completed(vec![drop.to_string()])],
         "rejected file drop corrupted the next event"
     );
     assert!(
@@ -272,12 +273,12 @@ fn runtime_input_translates_sdl_events_into_facts() {
         runtime_input_sdl3::push_all(
             &mut batch,
             vec![
-                SdlEvent::Drop { change: DropChange::File(String::new()), x: 0., y: 0. },
+                SdlEvent::Pinch { phase: sdl3::PinchPhase::Updated, scale: 0.0 },
                 SdlEvent::TextInput("after".to_string()),
-                SdlEvent::Drop { change: DropChange::File(String::new()), x: 1., y: 1. },
+                SdlEvent::Pinch { phase: sdl3::PinchPhase::Updated, scale: -1.0 },
             ],
         ),
-        Err("file-drop path is malformed".to_string()),
+        Err("pinch scale must be finite and positive".to_string()),
         "the pump swallowed a rejected event"
     );
     assert_eq!(

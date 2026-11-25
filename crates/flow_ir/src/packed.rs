@@ -3861,6 +3861,11 @@ pub mod host {
         all.push((Arc::downgrade(values), Arc::downgrade(input)));
     }
 
+    /// the numeric carrier a backend registered for an integer array (`register_integer_input`), while both live
+    pub fn integer_input(values: &Arc<Vec<i64>>) -> Option<Arc<Vec<f64>>> {
+        INTEGER_INPUTS.lock().unwrap().iter().find_map(|(v, p)| v.upgrade().filter(|v| Arc::ptr_eq(v, values)).and_then(|_| p.upgrade()))
+    }
+
     fn int_floats(values: &Arc<Vec<i64>>) -> Result<Arc<Vec<f64>>, Diagnostic> {
         if let Some(input) = INTEGER_INPUTS.lock().unwrap().iter().find_map(|(v, p)| {
             v.upgrade().filter(|v| Arc::ptr_eq(v, values)).and_then(|_| p.upgrade())

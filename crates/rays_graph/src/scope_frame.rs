@@ -16,10 +16,9 @@ use flow_syntax::syntax::{self as s, Node as SNode};
 use flow_syntax::ty::Ty;
 use input::{Event, Key, MouseButton};
 use param::number::Kind;
-use pxui::theme;
 use pxui::ui::*;
 use rays::frame as rframe;
-use pxui::geom::{color, p32, p64};
+use crate::{p32, p64};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -59,18 +58,21 @@ pub fn num_field(ui: &mut Ui, at: (f64, f64), w: f64, h: f64, size: Option<i64>,
         Some(f) => f.is_finite() || nonfinite,
         None => false,
     };
-    let field = follow.map(|(seed, _)| pxui::ui_core::key_of(seed, label));
+    let field = follow.map(|(seed, _)| pxui::ui::key_of(seed, label));
     // a held number scrubs by the range it had at the press (a literal's range follows its value)
     let scrub_range = HELD.with(|h| h.borrow().as_ref().filter(|h| Some(h.field) == field).map_or(range, |h| h.range));
-    let mut o = ValueFieldOpts::default();
-    o.size = size;
-    o.kept_drag = follow.is_some();
-    o.fraction = range.and_then(|r| param::number::fraction(r, text)).map(|f| f as f32);
-    o.scrub = Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, scrub_range, origin, dx as f64, fine)));
-    let text2 = ui.value_field(p32(at), w as f32, h as f32, &o, &valid, label, text).0;
+    let style = pxui::ValueField::DEFAULT.kept_drag(follow.is_some());
+    let style = size.map_or(style, |size| style.size(size as usize));
+    let style = range.and_then(|r| param::number::fraction(r, text))
+        .map_or(style, |fill| style.fraction(fill as f32));
+    let scrub = |origin: &str, dx: f32, fine| param::number::scrub(kind, scrub_range, origin, f64::from(dx), fine);
+    let callbacks = pxui::ValueCallbacks::DEFAULT.valid(&valid).scrub(&scrub);
+    let key = field.map_or_else(|| pxui::Key::from(pxui::hash_of(label)), pxui::Key::Resolved);
+    let response = pxui::ext::value_field(ui, key, text, Rect::new(at.0 as f32, at.1 as f32, w as f32, h as f32), &style, &callbacks);
+    let text2 = response.changed.unwrap_or(text).to_owned();
     // (a verifying run of a kept card leaves the held number to the pane's patch)
     if let (Some(field), Some((seed, edit)), false) = (field, follow, ui.verifying()) {
-        let (pressed, holding) = ui.box_of_key(field).map(|b| ui.signal(&b)).map_or((false, false), |s| (s.pressed, s.held));
+        let (pressed, holding) = ui.box_of_key(pxui::Key::Resolved(field)).map(|b| ui.signal(&b)).map_or((false, false), |s| (s.pressed, s.held));
         HELD.with(|h| {
             let mut h = h.borrow_mut();
             match h.as_mut() {
@@ -108,7 +110,7 @@ thread_local! {
 /// The held number is a card's of this pane and dragged this frame (`Ui::field_drag`).
 fn held_drag(t: &Pane, ui: &Ui) -> bool {
     HELD.with(|h| {
-        h.borrow().as_ref().is_some_and(|h| t.hovers.borrow().cards.iter().any(|c| c.tile.box_key == h.tile) && ui.box_of_key(h.field).is_some_and(|b| ui.field_drag(&b).is_some()))
+        h.borrow().as_ref().is_some_and(|h| t.hovers.borrow().cards.iter().any(|c| c.tile.box_key == h.tile) && ui.box_of_key(pxui::Key::Resolved(h.field)).is_some_and(|b| pxui::ext::field_drag(ui, &b).is_some()))
     })
 }
 
@@ -119,16 +121,19 @@ fn follow_drag(ui: &mut Ui) -> Option<Change> {
     HELD.with(|h| {
         let mut h = h.borrow_mut();
         let h = h.as_mut()?;
-        let field = ui.box_of_key(h.field)?;
-        let (_, dx) = ui.field_drag(&field)?;
+        let field = ui.box_of_key(pxui::Key::Resolved(h.field))?;
+        let (_, dx) = pxui::ext::field_drag(ui, &field)?;
         let fine = ui.press_keys(&field).contains(&Key::Shift.code());
         let text = param::number::scrub(h.kind, h.range, &h.origin, dx as f64, fine);
         if text == h.last {
             h.patched = true;
             return None;
         }
-        let o = ValueFieldOpts { size: h.size, fraction: h.range.and_then(|r| param::number::fraction(r, &text).map(|f| f as f32)), ..ValueFieldOpts::default() };
-        h.patched = ui.patch_field(&field, &o, &text);
+        let style = pxui::ValueField::DEFAULT;
+        let style = h.size.map_or(style, |size| style.size(size as usize));
+        let style = h.range.and_then(|r| param::number::fraction(r, &text))
+            .map_or(style, |fill| style.fraction(fill as f32));
+        h.patched = ui.patch_field(&field, &style, &text);
         let valid = s::number_value(&text).is_some_and(|f| f.is_finite() || h.nonfinite);
         h.last = text.clone();
         let mut edit = h.edit.clone();
@@ -333,180 +338,180 @@ pub enum Del {
 /// changes its fields asked for.
 pub struct Built {
     pub slot: usize,
-    pub taps: Vec<(UiBox, Tap)>,
+    pub taps: Vec<(pxui::Handle, Tap)>,
     pub fields: Vec<Change>,
 }
 
 /// A box over the content: no hover of it changes what the content builds (`scope_hover`).
-fn box_in(ui: &mut Ui, flags: Flags, w: f64, h: f64, at: (f64, f64), name: &str) -> UiBox {
-    ui.box_(name, BoxOpts::default().flags(flags | HOVER_FREE).w(Size::Px(w as f32)).h(Size::Px(h as f32)).at(p32(at)))
+fn box_in(ui: &mut Ui, flags: Flags, w: f64, h: f64, at: (f64, f64), name: &str) -> pxui::Handle {
+    ui.node(pxui::hash_of(name), pxui::Node::DEFAULT.flags(flags | pxui::Flags::HOVER_FREE).w(Size::Px(w as f32)).h(Size::Px(h as f32)).at(at.0 as f32, at.1 as f32))
 }
 
 /// A port: in the hit list for the hover and for what a press is on, but the canvas takes its input.
-const PORT: Flags = BLOCKING;
+const PORT: Flags = pxui::Flags::BLOCKING;
 
 /// A tile's ports and taps: out-ports, inputs (with what a click on them takes off), zone controls.
-pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &UiBox, ports: &mut Vec<crate::scope_hover::Port>) -> Vec<(UiBox, Tap)> {
+pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &pxui::Handle, ports: &mut Vec<crate::scope_hover::Port>) -> Vec<(pxui::Handle, Tap)> {
     use crate::scope_hover::{Port, PortKind};
     let shown = pl.shown;
-    let saved = ui.enter(tile);
     let mut outs: Vec<Port> = Vec::new();
     let mut inputs: Vec<Port> = Vec::new();
-    let mut taps: Vec<(UiBox, Tap)> = Vec::new();
-    let mut out = |b: UiBox, src: String, ty: Option<Ty>| outs.push(Port { b, kind: PortKind::Out(src, ty) });
-    match &pl.item {
-        Item::Input(i) => {
-            let pos = if shown == Level::Point { (pl.w, p::POINT_SIZE / 2.0) } else { (pl.w - 1.0, sp::PORT_Y) };
-            let b = bxz(ui, z, PORT, "out", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-            out(b, i.name.clone(), Some(i.ty.clone()));
-        }
-        Item::Return => {
-            let b = bxz(ui, z, PORT, "in", (0.0 - 7.0, p::BODY_TOP + 12.0 - 7.0), (14.0, 14.0));
-            inputs.push(Port { b, kind: PortKind::In(None) });
-        }
-        Item::Item(n) => {
-            let node_src = if n.binds.len() == 1 && n.binds[0] == n.name { Some(n.name.clone()) } else { None };
-            let plain_for = match &n.zone {
-                Some(zn) if zn.kind == p::ZoneKind::For => !pl.collapsed,
-                _ => false,
-            };
-            if let Some(src) = &node_src {
-                if !plain_for {
-                    let pos = if shown == Level::Point { (pl.w, p::POINT_SIZE / 2.0) } else { (pl.w - 1.0, sp::PORT_Y) };
-                    let b = bxz(ui, z, PORT, "out", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-                    out(b, src.clone(), Some(n.ty.clone()));
-                }
+    let mut taps: Vec<(pxui::Handle, Tap)> = Vec::new();
+    ui.within(tile, &mut |ui| {
+        let mut out = |b: pxui::Handle, src: String, ty: Option<Ty>| outs.push(Port { b, kind: PortKind::Out(src, ty) });
+        match &pl.item {
+            Item::Input(i) => {
+                let pos = if shown == Level::Point { (pl.w, p::POINT_SIZE / 2.0) } else { (pl.w - 1.0, sp::PORT_Y) };
+                let b = bxz(ui, z, PORT, "out", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                out(b, i.name.clone(), Some(i.ty.clone()));
             }
-            // the header's in-port: the first geometry slot
-            if let Some(hi) = n.rows.iter().position(|r| r.head) {
-                if n.zone.is_none() {
-                    let pos = if shown == Level::Point { (0.0, p::POINT_SIZE / 2.0) } else { (1.0, sp::PORT_Y) };
-                    let sink = bxz(ui, z, PORT, "d:head", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-                    ui.a11y_name(&sink, &n.rows[hi].label);
-                    inputs.push(Port { b: sink, kind: PortKind::In(wired(&n.rows[hi]).then_some(Del::Unwire(hi))) });
-                }
+            Item::Return => {
+                let b = bxz(ui, z, PORT, "in", (0.0 - 7.0, p::BODY_TOP + 12.0 - 7.0), (14.0, 14.0));
+                inputs.push(Port { b, kind: PortKind::In(None) });
             }
-            match &n.zone {
-                Some(zn) if !pl.collapsed => {
-                    // the label row's variable: the collection's in-port at the edge, the variable's
-                    // out-port in the left strip once something reads it
-                    if let Some(li) = label_index(zn) {
-                        let r = &zn.rail[li];
-                        if r.key.is_some() && zn.kind != p::ZoneKind::For {
-                            let sink = bxz(ui, z, PORT, "rd:label", (1.0 - 7.0, sp::PORT_Y - 7.0), (14.0, 14.0));
-                            let del = match (&r.key, &r.expr) {
-                                (Some(key), Some(ex)) if !e::free_names(ex).is_empty() => Some(Del::Disconnect(key.clone())),
-                                _ => None,
-                            };
-                            inputs.push(Port { b: sink, kind: PortKind::In(del) });
-                        }
-                        if sp::zone_uses(zn, &r.names) {
-                            let pos = begin_port(n, zn, li);
-                            let b = bxz(ui, z, PORT, "rail:label", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-                            out(b, r.names.first().cloned().unwrap_or_default(), r.ty.clone());
-                        }
-                    }
-                    for (i, ri) in extra_indices(zn).iter().enumerate() {
-                        let r = &zn.rail[*ri];
-                        let cy = p::HEAD_HEIGHT + (i as f64 * p::ROW_HEIGHT) + 12.0;
-                        if r.role != p::Role::Capture {
-                            let pos = begin_port(n, zn, *ri);
-                            let b = bxzf(ui, z, PORT, format_args!("rail:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-                            out(b, r.names.first().cloned().unwrap_or_default(), r.ty.clone());
-                        }
-                        // wired rail rows can be disconnected from their socket
-                        if r.key.is_some() {
-                            let b = bxzf(ui, z, PORT, format_args!("rd:{}", i), (0.0 - 7.0, cy - 7.0), (14.0, 14.0));
-                            let del = match (&r.key, &r.expr) {
-                                (Some(key), Some(ex)) if !e::free_names(ex).is_empty() => Some(Del::Disconnect(key.clone())),
-                                _ => None,
-                            };
-                            inputs.push(Port { b, kind: PortKind::In(del) });
-                        }
-                    }
-                    if zn.kind != p::ZoneKind::Let && zn.kind != p::ZoneKind::State && zn.kind != p::ZoneKind::Branch {
-                        // the selector of the label row: a button each side of the reading
-                        let (selx, sely, selw, selh, _) = sp::selector_geo(&mut |size, text| measure_ui(ui, t, size, text), z, fs, pl.w * z, count_of(t, &n.path), t.saved.probe(&n.path));
-                        let (selx, sely, selw, selh) = (selx / z, sely / z, selw / z, selh / z);
-                        let b = bxz(ui, z, CLICKABLE, "prev", (selx - 4.0, sely), (16.0, selh));
-                        taps.push((b, Tap::Step(-1)));
-                        let b = bxz(ui, z, CLICKABLE, "next", (selx + selw - 12.0, sely), (16.0, selh));
-                        taps.push((b, Tap::Step(1)));
-                        let b = bxz(ui, z, CLICKABLE, "track", (selx + 12.0, sely), (selw - 24.0, selh));
-                        taps.push((b, Tap::Track));
-                    }
-                    if zn.kind != p::ZoneKind::Let {
-                        let b = bxz(ui, z, CLICKABLE, "toggle", (0.0, 0.0), (64.0, p::HEAD_HEIGHT));
-                        taps.push((b, Tap::Toggle));
+            Item::Item(n) => {
+                let node_src = if n.binds.len() == 1 && n.binds[0] == n.name { Some(n.name.clone()) } else { None };
+                let plain_for = match &n.zone {
+                    Some(zn) if zn.kind == p::ZoneKind::For => !pl.collapsed,
+                    _ => false,
+                };
+                if let Some(src) = &node_src {
+                    if !plain_for {
+                        let pos = if shown == Level::Point { (pl.w, p::POINT_SIZE / 2.0) } else { (pl.w - 1.0, sp::PORT_Y) };
+                        let b = bxz(ui, z, PORT, "out", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                        out(b, src.clone(), Some(n.ty.clone()));
                     }
                 }
-                Some(zn) => {
-                    for (i, r) in zn.rail.iter().enumerate() {
-                        if r.key.is_some() || r.role == p::Role::Capture {
-                            let pos = (0.0, p::BODY_TOP + ((i as f64 + 0.5) * p::ROW_HEIGHT));
-                            let b = bxzf(ui, z, PORT, format_args!("rd:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-                            inputs.push(Port { b, kind: PortKind::In(None) });
-                        }
-                    }
-                    if zn.kind != p::ZoneKind::Let {
-                        let b = bxz(ui, z, CLICKABLE, "toggle", (sp::HEAD_PAD, 0.0), (64.0, p::HEAD_HEIGHT));
-                        taps.push((b, Tap::Toggle));
+                // the header's in-port: the first geometry slot
+                if let Some(hi) = n.rows.iter().position(|r| r.head) {
+                    if n.zone.is_none() {
+                        let pos = if shown == Level::Point { (0.0, p::POINT_SIZE / 2.0) } else { (1.0, sp::PORT_Y) };
+                        let sink = bxz(ui, z, PORT, "d:head", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                        ui.a11y_name(&sink, &n.rows[hi].label);
+                        inputs.push(Port { b: sink, kind: PortKind::In(wired(&n.rows[hi]).then_some(Del::Unwire(hi))) });
                     }
                 }
-                None => {
-                    if let Some(l) = &n.lens {
-                        if shown != Level::Point && shown != Level::Chip {
-                            let b = bxz(ui, z, CLICKABLE, "lens", (pl.w - 22.0, 2.0), (20.0, 20.0));
-                            taps.push((b, Tap::Lens));
-                            if let Some(step) = lens_of(t, &n.path) {
-                                let lh = p::lens_height(l, step);
-                                let top = sp::lens_top(pl.h, lh);
-                                let len = l.steps.len() as i64;
-                                for i in 0..=len {
-                                    let ((bxx, byy), size) = sp::lens_button_box(len, i);
-                                    let b = bxzf(ui, z, CLICKABLE, format_args!("ls{}", i), (bxx, top + byy), size);
-                                    taps.push((b, Tap::LensStep(i)));
-                                }
-                                let ((rx, ry), size) = sp::lens_replace_box(lh);
-                                let b = bxz(ui, z, CLICKABLE, "lr", (rx, top + ry), size);
-                                taps.push((b, Tap::Replace));
+                match &n.zone {
+                    Some(zn) if !pl.collapsed => {
+                        // the label row's variable: the collection's in-port at the edge, the variable's
+                        // out-port in the left strip once something reads it
+                        if let Some(li) = label_index(zn) {
+                            let r = &zn.rail[li];
+                            if r.key.is_some() && zn.kind != p::ZoneKind::For {
+                                let sink = bxz(ui, z, PORT, "rd:label", (1.0 - 7.0, sp::PORT_Y - 7.0), (14.0, 14.0));
+                                let del = match (&r.key, &r.expr) {
+                                    (Some(key), Some(ex)) if !e::free_names(ex).is_empty() => Some(Del::Disconnect(key.clone())),
+                                    _ => None,
+                                };
+                                inputs.push(Port { b: sink, kind: PortKind::In(del) });
+                            }
+                            if sp::zone_uses(zn, &r.names) {
+                                let pos = begin_port(n, zn, li);
+                                let b = bxz(ui, z, PORT, "rail:label", (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                                out(b, r.names.first().cloned().unwrap_or_default(), r.ty.clone());
                             }
                         }
-                    }
-                    if shown == Level::Card || shown == Level::Full {
-                        let top = rows_top(n, 0.0);
-                        let nlines = pl.lines.len();
-                        for (j, (f, ty)) in n.outputs.iter().enumerate() {
-                            let src = if n.binds.len() == 1 && n.binds[0] == n.name { format!("{}.{}", n.name, f) } else { f.clone() };
-                            let pos = (pl.w, top + (((nlines + j) as f64 + 0.5) * p::ROW_HEIGHT));
-                            let b = bxzf(ui, z, PORT, format_args!("o:{}", j), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
-                            out(b, src, Some(ty.clone()));
+                        for (i, ri) in extra_indices(zn).iter().enumerate() {
+                            let r = &zn.rail[*ri];
+                            let cy = p::HEAD_HEIGHT + (i as f64 * p::ROW_HEIGHT) + 12.0;
+                            if r.role != p::Role::Capture {
+                                let pos = begin_port(n, zn, *ri);
+                                let b = bxzf(ui, z, PORT, format_args!("rail:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                                out(b, r.names.first().cloned().unwrap_or_default(), r.ty.clone());
+                            }
+                            // wired rail rows can be disconnected from their socket
+                            if r.key.is_some() {
+                                let b = bxzf(ui, z, PORT, format_args!("rd:{}", i), (0.0 - 7.0, cy - 7.0), (14.0, 14.0));
+                                let del = match (&r.key, &r.expr) {
+                                    (Some(key), Some(ex)) if !e::free_names(ex).is_empty() => Some(Del::Disconnect(key.clone())),
+                                    _ => None,
+                                };
+                                inputs.push(Port { b, kind: PortKind::In(del) });
+                            }
                         }
-                        for (k, line) in pl.lines.iter().enumerate() {
-                            if let p::Line::Row(i, r) = line {
-                                let ry = top + (k as f64 * p::ROW_HEIGHT);
-                                if r.socket {
-                                    let sink = bxzf(ui, z, PORT, format_args!("d:{}", i), (0.0 - 7.0, ry + 12.0 - 7.0), (14.0, 14.0));
-                                    ui.a11y_name(&sink, &r.label);
-                                    inputs.push(Port { b: sink, kind: PortKind::In(wired(r).then_some(Del::Unwire(*i))) });
+                        if zn.kind != p::ZoneKind::Let && zn.kind != p::ZoneKind::State && zn.kind != p::ZoneKind::Branch {
+                            // the selector of the label row: a button each side of the reading
+                            let (selx, sely, selw, selh, _) = sp::selector_geo(&mut |size, text| measure_ui(ui, t, size, text), z, fs, pl.w * z, count_of(t, &n.path), t.saved.probe(&n.path));
+                            let (selx, sely, selw, selh) = (selx / z, sely / z, selw / z, selh / z);
+                            let b = bxz(ui, z, pxui::Flags::CLICKABLE, "prev", (selx - 4.0, sely), (16.0, selh));
+                            taps.push((b, Tap::Step(-1)));
+                            let b = bxz(ui, z, pxui::Flags::CLICKABLE, "next", (selx + selw - 12.0, sely), (16.0, selh));
+                            taps.push((b, Tap::Step(1)));
+                            let b = bxz(ui, z, pxui::Flags::CLICKABLE, "track", (selx + 12.0, sely), (selw - 24.0, selh));
+                            taps.push((b, Tap::Track));
+                        }
+                        if zn.kind != p::ZoneKind::Let {
+                            let b = bxz(ui, z, pxui::Flags::CLICKABLE, "toggle", (0.0, 0.0), (64.0, p::HEAD_HEIGHT));
+                            taps.push((b, Tap::Toggle));
+                        }
+                    }
+                    Some(zn) => {
+                        for (i, r) in zn.rail.iter().enumerate() {
+                            if r.key.is_some() || r.role == p::Role::Capture {
+                                let pos = (0.0, p::BODY_TOP + ((i as f64 + 0.5) * p::ROW_HEIGHT));
+                                let b = bxzf(ui, z, PORT, format_args!("rd:{}", i), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                                inputs.push(Port { b, kind: PortKind::In(None) });
+                            }
+                        }
+                        if zn.kind != p::ZoneKind::Let {
+                            let b = bxz(ui, z, pxui::Flags::CLICKABLE, "toggle", (sp::HEAD_PAD, 0.0), (64.0, p::HEAD_HEIGHT));
+                            taps.push((b, Tap::Toggle));
+                        }
+                    }
+                    None => {
+                        if let Some(l) = &n.lens {
+                            if shown != Level::Point && shown != Level::Chip {
+                                let b = bxz(ui, z, pxui::Flags::CLICKABLE, "lens", (pl.w - 22.0, 2.0), (20.0, 20.0));
+                                taps.push((b, Tap::Lens));
+                                if let Some(step) = lens_of(t, &n.path) {
+                                    let lh = p::lens_height(l, step);
+                                    let top = sp::lens_top(pl.h, lh);
+                                    let len = l.steps.len() as i64;
+                                    for i in 0..=len {
+                                        let ((bxx, byy), size) = sp::lens_button_box(len, i);
+                                        let b = bxzf(ui, z, pxui::Flags::CLICKABLE, format_args!("ls{}", i), (bxx, top + byy), size);
+                                        taps.push((b, Tap::LensStep(i)));
+                                    }
+                                    let ((rx, ry), size) = sp::lens_replace_box(lh);
+                                    let b = bxz(ui, z, pxui::Flags::CLICKABLE, "lr", (rx, top + ry), size);
+                                    taps.push((b, Tap::Replace));
                                 }
                             }
                         }
+                        if shown == Level::Card || shown == Level::Full {
+                            let top = rows_top(n, 0.0);
+                            let nlines = pl.lines.len();
+                            for (j, (f, ty)) in n.outputs.iter().enumerate() {
+                                let src = if n.binds.len() == 1 && n.binds[0] == n.name { format!("{}.{}", n.name, f) } else { f.clone() };
+                                let pos = (pl.w, top + (((nlines + j) as f64 + 0.5) * p::ROW_HEIGHT));
+                                let b = bxzf(ui, z, PORT, format_args!("o:{}", j), (pos.0 - 7.0, pos.1 - 7.0), (14.0, 14.0));
+                                out(b, src, Some(ty.clone()));
+                            }
+                            for (k, line) in pl.lines.iter().enumerate() {
+                                if let p::Line::Row(i, r) = line {
+                                    let ry = top + (k as f64 * p::ROW_HEIGHT);
+                                    if r.socket {
+                                        let sink = bxzf(ui, z, PORT, format_args!("d:{}", i), (0.0 - 7.0, ry + 12.0 - 7.0), (14.0, 14.0));
+                                        ui.a11y_name(&sink, &r.label);
+                                        inputs.push(Port { b: sink, kind: PortKind::In(wired(r).then_some(Del::Unwire(*i))) });
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-    }
-    ui.leave(saved);
+    });
     // to a screen reader a port is a button named by what it carries
     for q in &outs {
-        ui.set_role(&q.b, pxui::a11y::Role::Button, 0);
+        ui.set_role(&q.b, pxui::Role::Button, pxui::A11yStates::NONE);
         if let PortKind::Out(name, _) = &q.kind {
             ui.a11y_name(&q.b, name);
         }
     }
     for q in &inputs {
-        ui.set_role(&q.b, pxui::a11y::Role::Button, 0);
+        ui.set_role(&q.b, pxui::Role::Button, pxui::A11yStates::NONE);
     }
     ports.extend(outs);
     ports.extend(inputs);
@@ -550,9 +555,9 @@ pub fn row_fields_of(ui: &mut Ui, tile: i64, z: f64, pl: &Placed, n: &p::Node, r
                     return out;
                 }
                 SNode::Sym(b) if matches!(ex.name(*b), "true" | "false") => {
-                    let toggle = ui.box_(
-                        &format!("b{}", name),
-                        BoxOpts::default().flags(CLICKABLE | TAB_STOP | HOVER_FREE).w(Size::Px((sp::SWITCH_W * z) as f32)).h(Size::Px((sp::SWITCH_H * z) as f32)).at((((pl.w - sp::HEAD_PAD - sp::SWITCH_W) * z) as f32, ((ry + 5.0) * z) as f32)),
+                    let toggle = ui.node(
+                        pxui::hash_of(&("b", name)),
+                        pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP | pxui::Flags::HOVER_FREE).w(Size::Px((sp::SWITCH_W * z) as f32)).h(Size::Px((sp::SWITCH_H * z) as f32)).at(((pl.w - sp::HEAD_PAD - sp::SWITCH_W) * z) as f32, ((ry + 5.0) * z) as f32),
                     );
                     if ui.signal(&toggle).clicked {
                         let mut builder = flow_syntax::arena::SyntaxBuilder::new();
@@ -589,20 +594,21 @@ impl Ctx {
 
 /// A text field over a tile or frame: `Some change` the frame it commits.
 pub fn edit_field(c: &mut Ctx, ui: &mut Ui, at: (f64, f64), w: f64, h: f64, key: &str, current: &str, valid: &dyn Fn(&str) -> bool, commit: &dyn Fn(String) -> Change) -> Vec<Change> {
-    let mut o = ValueFieldOpts::default();
-    o.size = Some(c.fs);
-    o.edit = true;
-    o.left = (current).parse::<f64>().ok().is_none();
-    let (v, open) = ui.value_field(p32(at), w as f32, h as f32, &o, valid, key, current);
+    let style = pxui::ValueField::DEFAULT.size(c.fs as usize).edit(true).left(current.parse::<f64>().is_err());
+    let callbacks = pxui::ValueCallbacks::DEFAULT.valid(valid);
+    let response = pxui::ext::value_field(ui, pxui::hash_of(key), current,
+        Rect::new(at.0 as f32, at.1 as f32, w as f32, h as f32), &style, &callbacks);
+    let v = response.changed.unwrap_or(current);
+    let open = response.editing;
     if !open {
         c.finished = true;
     }
-    if !open && v != current && valid(&v) { vec![commit(v)] } else { Vec::new() }
+    if !open && v != current && valid(&v) { vec![commit(v.to_owned())] } else { Vec::new() }
 }
 
 /// The live widgets of a card's rows and header (value fields, switches, add and fold buttons, read
 /// names, reorder and layout buttons, an open name field): the changes they asked for this frame.
-fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &UiBox) -> Vec<Change> {
+fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &pxui::Handle) -> Vec<Change> {
     let tile = *tile;
     let shown = pl.shown;
     // fields, inside the tile
@@ -610,32 +616,32 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
     match &pl.item {
         Item::Item(n) if n.zone.is_none() && z >= 0.5 && p::value_card(n) => {
             // a literal binding: its value is the field of its header, at body size
-            let saved = ui.enter(&tile);
-            for r in &n.rows {
-                fields.extend(row_fields_of(ui, tile.box_key, z, pl, n, r, "v", 0.0, fs));
-            }
-            ui.leave(saved);
+            ui.within(&tile, &mut |ui| {
+                for r in &n.rows {
+                    fields.extend(row_fields_of(ui, tile.box_key, z, pl, n, r, "v", 0.0, fs));
+                }
+            });
         }
         Item::Item(n) if n.zone.is_none() && z >= 0.5 && (shown == Level::Card || shown == Level::Full) => {
-            let saved = ui.enter(&tile);
-            let top = rows_top(n, 0.0);
-            for (k, line) in pl.lines.iter().enumerate() {
-                if let p::Line::Row(i, r) = line {
-                    fields.extend(row_fields_of(ui, tile.box_key, z, pl, n, r, &i.to_string(), top + (k as f64 * p::ROW_HEIGHT), 4.max(fs - 2)));
+            ui.within(&tile, &mut |ui| {
+                let top = rows_top(n, 0.0);
+                for (k, line) in pl.lines.iter().enumerate() {
+                    if let p::Line::Row(i, r) = line {
+                        fields.extend(row_fields_of(ui, tile.box_key, z, pl, n, r, &i.to_string(), top + (k as f64 * p::ROW_HEIGHT), 4.max(fs - 2)));
+                    }
                 }
-            }
-            ui.leave(saved);
+            });
         }
         Item::Input(i) if z >= 0.5 && t.editing != Some(Editing::Default(pl.path.clone())) => {
             if let Some(d) = &i.default {
                 if let SNode::Num(text) = &d.node {
                     // a value node: its number is a field in the header, at body size
-                    let saved = ui.enter(&tile);
-                    let edit = |t: String| Change::SyntaxEdit(e::Op::SetInputDefault { form: i.path[0].to_string(), input: i.name.clone(), value: number_syntax(t) });
-                    if let Some(text2) = num_field(ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, Some(fs), None, None, false, "default", d.name(*text), Some((tile.box_key, &edit))) {
-                        fields.push(edit(text2));
-                    }
-                    ui.leave(saved);
+                    ui.within(&tile, &mut |ui| {
+                        let edit = |t: String| Change::SyntaxEdit(e::Op::SetInputDefault { form: i.path[0].to_string(), input: i.name.clone(), value: number_syntax(t) });
+                        if let Some(text2) = num_field(ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, Some(fs), None, None, false, "default", d.name(*text), Some((tile.box_key, &edit))) {
+                            fields.push(edit(text2));
+                        }
+                    });
                 }
             }
         }
@@ -644,135 +650,135 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
     let mut add_clicks: Vec<Change> = Vec::new();
     if let Item::Item(n) = &pl.item {
         if n.zone.is_none() && z >= 0.5 && (shown == Level::Card || shown == Level::Full) {
-            let saved = ui.enter(&tile);
-            let top = rows_top(n, 0.0);
-            for (k, line) in pl.lines.iter().enumerate() {
-                let (i, r) = match line {
-                    p::Line::Row(i, r) => (*i, r),
-                    _ => continue,
-                };
-                let row_y = (top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z;
-                if r.kind == p::RowKind::Add || matches!(r.chip, p::Chip::Inline { .. }) {
-                    let b = ui.box_(
-                        &format!("a{}", i),
-                        BoxOpts::default()
-                            .flags(CLICKABLE | TAB_STOP | HOVER_FREE)
-                            .w(Size::Px((if r.kind == p::RowKind::Add { (pl.w - sp::LABEL_X - sp::HEAD_PAD) * z } else { 24.0 * z }) as f32))
-                            .h(Size::Px((16.0 * z) as f32))
-                            .at((((if r.kind == p::RowKind::Add { sp::LABEL_X } else { sp::value_x(pl.w) }) * z) as f32, row_y as f32)),
-                    );
-                    // a click on the expression's text (not its glyph, which unfolds) makes the row the inspector's
-                    // subject: the holder stays selected, the row is `holder @ [":" ^ label]`
-                    let mut subject: Vec<Change> = Vec::new();
-                    if let p::Chip::Inline { .. } = r.chip {
-                        let cb = ui.box_fmt(format_args!("ex{}", i), BoxOpts::default().flags(CLICKABLE | HOVER_FREE).w(Size::Px(((sp::FIELD_W - 24.0) * z) as f32)).h(Size::Px((16.0 * z) as f32)).at((((sp::value_x(pl.w) + 24.0) * z) as f32, row_y as f32)));
-                        let sg = ui.signal(&cb);
-                        // a double click expands the call in place, as the glyph does
-                        if sg.double_clicked {
-                            subject = unfold_row(n, r);
-                        } else if sg.clicked {
-                            let mut row = n.path.clone();
-                            row.push(format!(":{}", r.label).into());
-                            c.select = Some(vec![n.path.clone(), row]);
-                            subject = vec![Change::Selected];
-                        }
-                    }
-                    fields.extend(Vec::new());
-                    add_clicks.extend(subject);
-                    if ui.signal(&b).clicked {
-                        match (r.kind, &r.chip) {
-                            (p::RowKind::Add, _) => match &r.key {
-                                ArgKey::Field(_) => {
-                                    // the first `fN` the record does not have
-                                    let mut k2 = 1;
-                                    let name = loop {
-                                        let name = format!("f{}", k2);
-                                        if n.rows.iter().any(|r2| r2.key == ArgKey::Field(name.clone())) {
-                                            k2 += 1;
-                                        } else {
-                                            break name;
-                                        }
-                                    };
-                                    add_clicks.push(Change::SyntaxEdit(e::Op::AddField { node: n.path.clone(), name, value: number_syntax("0".to_owned()) }));
-                                }
-                                ArgKey::Kw(kw) if kw.is_empty() => {
-                                    c.opened = Some(Editing::Output(n.path.clone()));
-                                    // a new output is named first
-                                }
-                                _ if n.head == "list" || n.head == "str" => {
-                                    add_clicks.push(Change::SyntaxEdit(e::Op::AddItem { node: n.path.clone() }));
-                                }
-                                key => {
-                                    // a type with no literal (geometry, a list, a function, a scene) is wired
-                                    match &r.ty {
-                                        Some(Ty::Named(nm)) if nm == "geometry" => add_clicks.push(Change::Notice("Wire a node onto this row".to_owned())),
-                                        Some(ty) => match e::default_for(ty, &r.label, None) {
-                                            Some(value) => add_clicks.push(Change::SyntaxEdit(e::Op::SetArg { node: n.path.clone(), key: key.clone(), sub: Vec::new(), value })),
-                                            None => add_clicks.push(Change::Notice("Wire a node onto this row".to_owned())),
-                                        },
-                                        None => add_clicks.push(Change::SyntaxEdit(e::Op::SetArg { node: n.path.clone(), key: key.clone(), sub: Vec::new(), value: number_syntax("0".to_owned()) })),
-                                    }
-                                }
-                            },
-                            (_, p::Chip::Inline { .. }) => add_clicks.extend(unfold_row(n, r)),
-                            _ => {}
-                        }
-                    }
-                } else if let (p::Chip::Name(nm), true) = (&r.chip, t.folds.contains_key(&(n.path.clone(), i))) {
-                    // the fold button of a wired row, where `paint_value` draws its glyph
-                    let (left, fw, _, _, _) = sp::wired_geo(&mut |size, text| measure_ui(ui, t, size, text), t, z, fs, 0.0, pl.w * z, true, &sp::wired_name(r, nm));
-                    let b = ui.box_fmt(format_args!("fold{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP | HOVER_FREE).w(Size::Px(fw as f32)).h(Size::Px((16.0 * z) as f32)).at(((left - fw - (2.0 * z)) as f32, row_y as f32)));
-                    if ui.signal(&b).clicked {
-                        add_clicks.push(Change::SyntaxEdit(e::Op::FoldInto { node: t.folds[&(n.path.clone(), i)].clone() }));
-                    }
-                } else if let p::Chip::Name(nm) = &r.chip {
-                    if !e::nested(nm) {
-                        // a row that reads a binding: a click on its name selects that binding
-                        let root = nm.split('.').next().unwrap_or("").to_owned();
-                        let mut target: Option<Path> = None;
-                        let mut kk = n.path.len() as i64 - 1;
-                        while kk >= 0 {
-                            let mut cand: Path = n.path[..kk as usize].to_vec();
-                            cand.push(root.clone().into());
-                            if node_of(t, &cand).is_some() || input_of(t, &cand).is_some() {
-                                target = Some(cand);
-                                break;
+            ui.within(&tile, &mut |ui| {
+                let top = rows_top(n, 0.0);
+                for (k, line) in pl.lines.iter().enumerate() {
+                    let (i, r) = match line {
+                        p::Line::Row(i, r) => (*i, r),
+                        _ => continue,
+                    };
+                    let row_y = (top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z;
+                    if r.kind == p::RowKind::Add || matches!(r.chip, p::Chip::Inline { .. }) {
+                        let b = ui.node(
+                            pxui::hash_of(&("a", i)),
+                            pxui::Node::DEFAULT
+                                .flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP | pxui::Flags::HOVER_FREE)
+                                .w(Size::Px((if r.kind == p::RowKind::Add { (pl.w - sp::LABEL_X - sp::HEAD_PAD) * z } else { 24.0 * z }) as f32))
+                                .h(Size::Px((16.0 * z) as f32))
+                                .at(((if r.kind == p::RowKind::Add { sp::LABEL_X } else { sp::value_x(pl.w) }) * z) as f32, row_y as f32),
+                        );
+                        // a click on the expression's text (not its glyph, which unfolds) makes the row the inspector's
+                        // subject: the holder stays selected, the row is `holder @ [":" ^ label]`
+                        let mut subject: Vec<Change> = Vec::new();
+                        if let p::Chip::Inline { .. } = r.chip {
+                            let cb = ui.node(pxui::hash_of(&("ex", i)), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::HOVER_FREE).w(Size::Px(((sp::FIELD_W - 24.0) * z) as f32)).h(Size::Px((16.0 * z) as f32)).at(((sp::value_x(pl.w) + 24.0) * z) as f32, row_y as f32));
+                            let sg = ui.signal(&cb);
+                            // a double click expands the call in place, as the glyph does
+                            if sg.double_clicked {
+                                subject = unfold_row(n, r);
+                            } else if sg.clicked {
+                                let mut row = n.path.clone();
+                                row.push(format!(":{}", r.label).into());
+                                c.select = Some(vec![n.path.clone(), row]);
+                                subject = vec![Change::Selected];
                             }
-                            kk -= 1;
                         }
-                        if let Some(cand) = target {
-                            let mut m = |size: i64, text: &str| measure_ui(ui, t, size, text);
-                            let (left, _, room, _, _) = sp::wired_geo(&mut m, t, z, fs, 0.0, pl.w * z, false, nm);
-                            let width = m(fs, "\u{2190}") + (6.0 * z) + m(fs, nm).min(room);
-                            let b = ui.box_fmt(format_args!("ref{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP | HOVER_FREE).w(Size::Px(width as f32)).h(Size::Px((16.0 * z) as f32)).at((left as f32, row_y as f32)));
-                            if ui.signal(&b).clicked {
-                                c.select = Some(vec![cand]);
-                                add_clicks.push(Change::Selected);
+                        fields.extend(Vec::new());
+                        add_clicks.extend(subject);
+                        if ui.signal(&b).clicked {
+                            match (r.kind, &r.chip) {
+                                (p::RowKind::Add, _) => match &r.key {
+                                    ArgKey::Field(_) => {
+                                        // the first `fN` the record does not have
+                                        let mut k2 = 1;
+                                        let name = loop {
+                                            let name = format!("f{}", k2);
+                                            if n.rows.iter().any(|r2| r2.key == ArgKey::Field(name.clone())) {
+                                                k2 += 1;
+                                            } else {
+                                                break name;
+                                            }
+                                        };
+                                        add_clicks.push(Change::SyntaxEdit(e::Op::AddField { node: n.path.clone(), name, value: number_syntax("0".to_owned()) }));
+                                    }
+                                    ArgKey::Kw(kw) if kw.is_empty() => {
+                                        c.opened = Some(Editing::Output(n.path.clone()));
+                                        // a new output is named first
+                                    }
+                                    _ if n.head == "list" || n.head == "str" => {
+                                        add_clicks.push(Change::SyntaxEdit(e::Op::AddItem { node: n.path.clone() }));
+                                    }
+                                    key => {
+                                        // a type with no literal (geometry, a list, a function, a scene) is wired
+                                        match &r.ty {
+                                            Some(Ty::Named(nm)) if nm == "geometry" => add_clicks.push(Change::Notice("Wire a node onto this row".to_owned())),
+                                            Some(ty) => match e::default_for(ty, &r.label, None) {
+                                                Some(value) => add_clicks.push(Change::SyntaxEdit(e::Op::SetArg { node: n.path.clone(), key: key.clone(), sub: Vec::new(), value })),
+                                                None => add_clicks.push(Change::Notice("Wire a node onto this row".to_owned())),
+                                            },
+                                            None => add_clicks.push(Change::SyntaxEdit(e::Op::SetArg { node: n.path.clone(), key: key.clone(), sub: Vec::new(), value: number_syntax("0".to_owned()) })),
+                                        }
+                                    }
+                                },
+                                (_, p::Chip::Inline { .. }) => add_clicks.extend(unfold_row(n, r)),
+                                _ => {}
+                            }
+                        }
+                    } else if let (p::Chip::Name(nm), true) = (&r.chip, t.folds.contains_key(&(n.path.clone(), i))) {
+                        // the fold button of a wired row, where `paint_value` draws its glyph
+                        let (left, fw, _, _, _) = sp::wired_geo(&mut |size, text| measure_ui(ui, t, size, text), t, z, fs, 0.0, pl.w * z, true, &sp::wired_name(r, nm));
+                        let b = ui.node(pxui::hash_of(&("fold", i)), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP | pxui::Flags::HOVER_FREE).w(Size::Px(fw as f32)).h(Size::Px((16.0 * z) as f32)).at((left - fw - (2.0 * z)) as f32, row_y as f32));
+                        if ui.signal(&b).clicked {
+                            add_clicks.push(Change::SyntaxEdit(e::Op::FoldInto { node: t.folds[&(n.path.clone(), i)].clone() }));
+                        }
+                    } else if let p::Chip::Name(nm) = &r.chip {
+                        if !e::nested(nm) {
+                            // a row that reads a binding: a click on its name selects that binding
+                            let root = nm.split('.').next().unwrap_or("").to_owned();
+                            let mut target: Option<Path> = None;
+                            let mut kk = n.path.len() as i64 - 1;
+                            while kk >= 0 {
+                                let mut cand: Path = n.path[..kk as usize].to_vec();
+                                cand.push(root.clone().into());
+                                if node_of(t, &cand).is_some() || input_of(t, &cand).is_some() {
+                                    target = Some(cand);
+                                    break;
+                                }
+                                kk -= 1;
+                            }
+                            if let Some(cand) = target {
+                                let mut m = |size: i64, text: &str| measure_ui(ui, t, size, text);
+                                let (left, _, room, _, _) = sp::wired_geo(&mut m, t, z, fs, 0.0, pl.w * z, false, nm);
+                                let width = m(fs, "\u{2190}") + (6.0 * z) + m(fs, nm).min(room);
+                                let b = ui.node(pxui::hash_of(&("ref", i)), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP | pxui::Flags::HOVER_FREE).w(Size::Px(width as f32)).h(Size::Px((16.0 * z) as f32)).at(left as f32, row_y as f32));
+                                if ui.signal(&b).clicked {
+                                    c.select = Some(vec![cand]);
+                                    add_clicks.push(Change::Selected);
+                                }
                             }
                         }
                     }
                 }
-            }
-            ui.leave(saved);
+            });
         }
     }
     let mut editors: Vec<Change> = Vec::new();
     match (&t.editing, &pl.item) {
         (Some(Editing::Name(path)), Item::Item(n)) if *path == n.path => {
-            let saved = ui.enter(&tile);
-            let np = n.path.clone();
-            editors = edit_field(c, ui, (21.0 * z, 3.0 * z), (pl.w - 21.0 - sp::HEAD_PAD) * z, 18.0 * z, "name", &p::title(n), &valid_name, &move |v| Change::SyntaxEdit(e::Op::Rename { node: np.clone(), to_: v }));
-            ui.leave(saved);
+            ui.within(&tile, &mut |ui| {
+                let np = n.path.clone();
+                editors = edit_field(c, ui, (21.0 * z, 3.0 * z), (pl.w - 21.0 - sp::HEAD_PAD) * z, 18.0 * z, "name", &p::title(n), &valid_name, &move |v| Change::SyntaxEdit(e::Op::Rename { node: np.clone(), to_: v }));
+            });
         }
         (Some(Editing::Output(path)), Item::Item(n)) if *path == n.path => {
             match pl.lines.iter().position(|l| matches!(l, p::Line::Row(_, r) if r.kind == p::RowKind::Add && r.key == ArgKey::Kw(String::new()))) {
                 Some(k) => {
-                    let saved = ui.enter(&tile);
-                    let np = n.path.clone();
-                    editors = edit_field(c, ui, (sp::LABEL_X * z, (rows_top(n, 0.0) + (k as f64 * p::ROW_HEIGHT) + 4.0) * z), (pl.w - sp::LABEL_X - sp::HEAD_PAD) * z, sp::FIELD_H * z, "output", "", &valid_name, &move |v| {
-                        Change::SyntaxEdit(e::Op::AddField { node: np.clone(), name: v, value: number_syntax("0".to_owned()) })
+                    ui.within(&tile, &mut |ui| {
+                        let np = n.path.clone();
+                        editors = edit_field(c, ui, (sp::LABEL_X * z, (rows_top(n, 0.0) + (k as f64 * p::ROW_HEIGHT) + 4.0) * z), (pl.w - sp::LABEL_X - sp::HEAD_PAD) * z, sp::FIELD_H * z, "output", "", &valid_name, &move |v| {
+                            Change::SyntaxEdit(e::Op::AddField { node: np.clone(), name: v, value: number_syntax("0".to_owned()) })
+                        });
                     });
-                    ui.leave(saved);
                 }
                 None => {
                     c.finished = true;
@@ -780,37 +786,37 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
             }
         }
         (Some(Editing::Default(path)), Item::Input(i)) if *path == i.path => {
-            let saved = ui.enter(&tile);
-            let text = match &i.default {
-                Some(d) => flow_syntax::lisp::flat(d),
-                None => String::new(),
-            };
-            let (form, input) = (i.path[0].to_string(), i.name.clone());
-            editors = edit_field(c, ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, "default", &text, &|v: &str| single_form(v).is_some(), &move |v| {
-                Change::SyntaxEdit(e::Op::SetInputDefault { form: form.clone(), input: input.clone(), value: single_form(&v).expect("validated") })
+            ui.within(&tile, &mut |ui| {
+                let text = match &i.default {
+                    Some(d) => flow_syntax::lisp::flat(d),
+                    None => String::new(),
+                };
+                let (form, input) = (i.path[0].to_string(), i.name.clone());
+                editors = edit_field(c, ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, "default", &text, &|v: &str| single_form(v).is_some(), &move |v| {
+                    Change::SyntaxEdit(e::Op::SetInputDefault { form: form.clone(), input: input.clone(), value: single_form(&v).expect("validated") })
+                });
             });
-            ui.leave(saved);
         }
         _ => {}
     }
     let mut movers: Vec<Change> = Vec::new();
     if let Item::Item(n) = &pl.item {
         if p::reorderable(n) && z >= 0.5 && (shown == Level::Card || shown == Level::Full) {
-            let saved = ui.enter(&tile);
-            let top = rows_top(n, 0.0);
-            for (k, line) in pl.lines.iter().enumerate() {
-                if let p::Line::Row(i, r) = line {
-                    if let (p::RowKind::Rest, ArgKey::Pos(j)) = (r.kind, &r.key) {
-                        if *j >= 1 {
-                            let b = ui.box_fmt(format_args!("mv{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP | HOVER_FREE).w(Size::Px((16.0 * z) as f32)).h(Size::Px((16.0 * z) as f32)).at((((pl.w - 22.0) * z) as f32, ((top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z) as f32)));
-                            if ui.signal(&b).clicked {
-                                movers.push(Change::SyntaxEdit(e::Op::MoveItem { node: n.path.clone(), pos: *j }));
+            ui.within(&tile, &mut |ui| {
+                let top = rows_top(n, 0.0);
+                for (k, line) in pl.lines.iter().enumerate() {
+                    if let p::Line::Row(i, r) = line {
+                        if let (p::RowKind::Rest, ArgKey::Pos(j)) = (r.kind, &r.key) {
+                            if *j >= 1 {
+                                let b = ui.node(pxui::hash_of(&("mv", i)), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP | pxui::Flags::HOVER_FREE).w(Size::Px((16.0 * z) as f32)).h(Size::Px((16.0 * z) as f32)).at(((pl.w - 22.0) * z) as f32, ((top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z) as f32));
+                                if ui.signal(&b).clicked {
+                                    movers.push(Change::SyntaxEdit(e::Op::MoveItem { node: n.path.clone(), pos: *j }));
+                                }
                             }
                         }
                     }
                 }
-            }
-            ui.leave(saved);
+            });
         }
     }
     // a switch's rows: a click on a layout's name makes it the active one
@@ -818,21 +824,21 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
     if let Item::Item(n) = &pl.item {
         if let Some((_, active)) = t.switches.iter().find(|(sp_, _)| *sp_ == pl.path) {
             if z >= 0.5 && (shown == Level::Card || shown == Level::Full) {
-                let saved = ui.enter(&tile);
-                let top = rows_top(n, 0.0);
-                for (k, line) in pl.lines.iter().enumerate() {
-                    if let p::Line::Row(i, r) = line {
-                        if let ArgKey::Pos(j) = &r.key {
-                            if r.kind != p::RowKind::Add && *j != *active {
-                                let b = ui.box_fmt(format_args!("sw{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP | HOVER_FREE).w(Size::Px(((pl.w - 24.0) * z) as f32)).h(Size::Px((16.0 * z) as f32)).at(((12.0 * z) as f32, ((top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z) as f32)));
-                                if ui.signal(&b).clicked {
-                                    switchers.push(Change::LayoutActive { graph: t.key.clone(), index: *j });
+                ui.within(&tile, &mut |ui| {
+                    let top = rows_top(n, 0.0);
+                    for (k, line) in pl.lines.iter().enumerate() {
+                        if let p::Line::Row(i, r) = line {
+                            if let ArgKey::Pos(j) = &r.key {
+                                if r.kind != p::RowKind::Add && *j != *active {
+                                    let b = ui.node(pxui::hash_of(&("sw", i)), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP | pxui::Flags::HOVER_FREE).w(Size::Px(((pl.w - 24.0) * z) as f32)).h(Size::Px((16.0 * z) as f32)).at((12.0 * z) as f32, ((top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z) as f32));
+                                    if ui.signal(&b).clicked {
+                                        switchers.push(Change::LayoutActive { graph: t.key.clone(), index: *j });
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                ui.leave(saved);
+                });
             }
         }
     }
@@ -857,7 +863,7 @@ fn build_card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, 
     let mut hh = std::hash::DefaultHasher::new();
     (rev, slot).hash(&mut hh);
     let mut rec = None;
-    let view = ui.view(&key, hh.finish(), Size::Px(w as f32), Size::Px(h as f32), &mut |ui| {
+    let view = crate::sized_view(ui, &key, hh.finish(), Size::Px(w as f32), Size::Px(h as f32), &mut |ui| {
         rec = Some(card(c, t, ui, z, fs, slot, snap, footers, &key, built));
     });
     ui.set_at(&view, p32(at));
@@ -874,7 +880,7 @@ fn build_card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, 
     }
 }
 
-type CardRec = (UiBox, Option<crate::scope_hover::Ground>, [UiBox; 4], Option<UiBox>, Vec<crate::scope_hover::Port>, crate::scope_hover::Readout);
+type CardRec = (pxui::Handle, Option<crate::scope_hover::Ground>, [pxui::Handle; 4], Option<pxui::Handle>, Vec<crate::scope_hover::Port>, crate::scope_hover::Readout);
 
 fn card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, snap: &Rc<Pane>, footers: &HashMap<Path, Footer>, key: &str, built: &mut Vec<Built>) -> CardRec {
     use crate::scope_hover as sh;
@@ -882,7 +888,7 @@ fn card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, snap: 
     let (ax, ay) = (*ax, *ay);
     let (w, h) = (pl.w * z, pl.h * z);
     let shown = pl.shown;
-    let tile = box_in(ui, BLOCKING, w, h, (0.0, 0.0), key);
+    let tile = box_in(ui, pxui::Flags::BLOCKING, w, h, (0.0, 0.0), key);
     let failed = |path: &Path| t.failed.iter().any(|(q, _)| q == path);
     // the card's ground: its fill and edge as a node (a collapsed zone's stack painted under it); a
     // point and an open zone have none
@@ -893,48 +899,51 @@ fn card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, snap: 
         Item::Input(_) | Item::Return => (Some(sh::ground(t, false, false, false)), false, false),
     };
     let node = |ui: &mut Ui, name: &str, at: (f64, f64), size: (f64, f64), look: Look, flags: Flags| {
-        ui.node(name, Node { w: Size::Px(size.0 as f32), h: Size::Px(size.1 as f32), at: Some((at.0 as f32, at.1 as f32)).into(), look, flags, ..Node::DEFAULT })
+        ui.node(pxui::hash_of(name), Node { w: Size::Px(size.0 as f32), h: Size::Px(size.1 as f32), at: Some((at.0 as f32, at.1 as f32)).into(), look, flags, ..Node::DEFAULT })
     };
-    let saved = ui.enter(&tile);
-    if stack {
-        let st = ui.box_("stack", BoxOpts::default().w(Size::Px(w as f32)).h(Size::Px(h as f32)).at((0.0, 0.0)));
-        let snap = snap.clone();
-        ui.draw(&st, move |paint, rect| sp::paint_stack(paint, &snap, z, rect.f64()));
-    }
-    let ground = looks.map(|looks| {
-        let g = node(ui, "g", (0.0, 0.0), (w, h), looks[0], NO_FLAGS);
-        // the first row line's band, behind the card's text; idle it is the ground's colour
-        let row = match &pl.item {
-            Item::Item(n) if band => pl.lines.iter().position(|l| matches!(l, p::Line::Row(..))).map(|k| {
-                let ry = (rows_top(n, 0.0) + (k as f64 * p::ROW_HEIGHT)) * z;
-                let hl = node(ui, "hl", (1.0, ry), (w - 2.0, p::ROW_HEIGHT * z), Look { fill: looks[0].fill, ..Look::NONE }, NO_FLAGS);
-                (hl, k, (p::ROW_HEIGHT * z) as f32)
-            }),
-            _ => None,
-        };
-        sh::Ground { node: g, looks, row }
-    });
-    let painted = ui.box_("card", BoxOpts::default().w(Size::Px(w as f32)).h(Size::Px(h as f32)).at((0.0, 0.0)));
-    paint_card(t, ui, &painted, z, fs, slot, snap, footers);
-    // what it shows of its records, over its painting
-    let readout = crate::scope_hover::readout_nodes(t, ui, z, fs, slot, match &pl.item {
-        Item::Item(n) => footers.get(&n.path),
-        _ => None,
-    });
-    // over the painting: the selection's brackets, a scene object's dimming, the recession
-    let (bx, by, bw, bh, off, len, wid) = sp::brackets_of(pl, z, w, h);
-    let corners = [(bx - off, by - off), (bx + bw + off - len, by - off), (bx - off, by + bh + off - len), (bx + bw + off - len, by + bh + off - len)];
-    let brackets: [UiBox; 4] = std::array::from_fn(|k| node(ui, "b", corners[k], (len, len), sh::corner(sh::CORNERS[k], wid as f32, Look::NONE.fill), KEEP_ROOM));
-    let mut recede = None;
-    if let Item::Item(n) = &pl.item {
-        if n.zone.is_none() || pl.collapsed {
-            if dimmed(t, n) {
-                node(ui, "dim", (0.0, 0.0), (w, h), Look { fill: color::with_alpha(t.theme.panel, 150), ..Look::NONE }, NO_FLAGS);
-            }
-            recede = Some(node(ui, "recede", (0.0, 0.0), (w, h), sh::recede_look(t, false), KEEP_ROOM));
+    let mut children = None;
+    ui.within(&tile, &mut |ui| {
+        if stack {
+            let st = ui.node("stack", pxui::Node::DEFAULT.w(Size::Px(w as f32)).h(Size::Px(h as f32)).at(0.0, 0.0));
+            let snap = snap.clone();
+            ui.canvas(&st, move |paint, rect| sp::paint_stack(paint, &snap, z, rect.f64()));
         }
-    }
-    ui.leave(saved);
+        let ground = looks.map(|looks| {
+            let g = node(ui, "g", (0.0, 0.0), (w, h), looks[0], pxui::Flags::NONE);
+            // the first row line's band, behind the card's text; idle it is the ground's colour
+            let row = match &pl.item {
+                Item::Item(n) if band => pl.lines.iter().position(|l| matches!(l, p::Line::Row(..))).map(|k| {
+                    let ry = (rows_top(n, 0.0) + (k as f64 * p::ROW_HEIGHT)) * z;
+                    let hl = node(ui, "hl", (1.0, ry), (w - 2.0, p::ROW_HEIGHT * z), Look { fill: looks[0].fill, ..Look::NONE }, pxui::Flags::NONE);
+                    (hl, k, (p::ROW_HEIGHT * z) as f32)
+                }),
+                _ => None,
+            };
+            sh::Ground { node: g, looks, row }
+        });
+        let painted = ui.node("card", pxui::Node::DEFAULT.w(Size::Px(w as f32)).h(Size::Px(h as f32)).at(0.0, 0.0));
+        paint_card(t, ui, &painted, z, fs, slot, snap, footers);
+        // what it shows of its records, over its painting
+        let readout = crate::scope_hover::readout_nodes(t, ui, z, fs, slot, match &pl.item {
+            Item::Item(n) => footers.get(&n.path),
+            _ => None,
+        });
+        // over the painting: the selection's brackets, a scene object's dimming, the recession
+        let (bx, by, bw, bh, off, len, wid) = sp::brackets_of(pl, z, w, h);
+        let corners = [(bx - off, by - off), (bx + bw + off - len, by - off), (bx - off, by + bh + off - len), (bx + bw + off - len, by + bh + off - len)];
+        let brackets: [pxui::Handle; 4] = std::array::from_fn(|k| node(ui, "b", corners[k], (len, len), sh::corner(sh::CORNERS[k], wid as f32, Look::NONE.fill), pxui::Flags::KEEP_ROOM));
+        let mut recede = None;
+        if let Item::Item(n) = &pl.item {
+            if n.zone.is_none() || pl.collapsed {
+                if dimmed(t, n) {
+                    node(ui, "dim", (0.0, 0.0), (w, h), Look { fill: t.theme.panel.with_alpha(150), ..Look::NONE }, pxui::Flags::NONE);
+                }
+                recede = Some(node(ui, "recede", (0.0, 0.0), (w, h), sh::recede_look(t, false), pxui::Flags::KEEP_ROOM));
+            }
+        }
+        children = Some((ground, brackets, recede, readout));
+    });
+    let (ground, brackets, recede, readout) = children.expect("card children");
     // an expanded zone's tile covers its body; the wires that end inside it are hit over it
     let mut ports = Vec::new();
     let taps = tile_ports(t, ui, z, fs, pl, &tile, &mut ports);
@@ -944,7 +953,7 @@ fn card(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usize, snap: 
         Item::Input(i) => i.name.clone(),
         Item::Return => "return".to_owned(),
     };
-    ui.set_role(&tile, pxui::a11y::Role::Group, 0);
+    ui.set_role(&tile, pxui::Role::Group, pxui::A11yStates::NONE);
     ui.a11y_name(&tile, &title);
     let fields = card_fields(c, t, ui, z, fs, pl, &tile);
     let _ = (ax, ay);
@@ -966,7 +975,7 @@ fn dimmed(t: &Pane, n: &p::Node) -> bool {
 }
 
 /// The card's painting over its ground: what the item shows at its level.
-fn paint_card(t: &Pane, ui: &mut Ui, on: &UiBox, z: f64, fs: i64, slot: usize, snap: &Rc<Pane>, footers: &HashMap<Path, Footer>) {
+fn paint_card(t: &Pane, ui: &mut Ui, on: &pxui::Handle, z: f64, fs: i64, slot: usize, snap: &Rc<Pane>, footers: &HashMap<Path, Footer>) {
     let (pl, ax, ay) = &t.geo.items[slot];
     // the hovered row is the row highlight's (`scope_hover`), but for a carried value over it: the
     // carry builds every frame and marks its target row here
@@ -994,7 +1003,7 @@ fn paint_card(t: &Pane, ui: &mut Ui, on: &UiBox, z: f64, fs: i64, slot: usize, s
         count = count_of(t, &n.path);
     }
     let snap = snap.clone();
-    ui.draw(on, move |paint, rect| {
+    ui.canvas(on, move |paint, rect| {
         let rect = rect.f64();
         let (pl, _, _) = &snap.geo.items[slot];
         match &pl.item {
@@ -1018,33 +1027,26 @@ fn paint_card(t: &Pane, ui: &mut Ui, on: &UiBox, z: f64, fs: i64, slot: usize, s
 
 /// A payload in flight: the innermost node under the pointer (a zone's tile covers its body), else the
 /// canvas, is where it would be put; the host decides whether it takes it.
-pub fn drop_change(t: &Pane, ui: &mut Ui, canvas: &UiBox) -> Option<Change> {
-    let on_canvas = ui.drop_target(canvas)?;
-    let mut found: Option<(usize, Drop)> = None;
-    let hovers = t.hovers.clone();
-    let hv = hovers.borrow();
-    for c in &hv.cards {
-        let pl = &t.geo.items[c.slot].0;
-        if let Some(d) = ui.drop_target(&c.tile) {
-            let skip = match &found {
-                Some((q, _)) => {
-                    let qp = &t.geo.items[*q].0;
-                    qp.w * qp.h <= pl.w * pl.h
-                }
-                None => false,
-            };
-            if !skip {
-                found = Some((c.slot, d));
-            }
+pub fn drop_change(t: &Pane, ui: &mut Ui, canvas: &pxui::Handle) -> Option<Change> {
+    let hovers = t.hovers.borrow();
+    let mut found = None;
+    for card in &hovers.cards {
+        let placed = &t.geo.items[card.slot].0;
+        let area = placed.w * placed.h;
+        if found.is_some_and(|(_, best)| best <= area) { continue; }
+        if ui.drop_target(&card.tile).is_some() {
+            found = Some((card.slot, area));
         }
     }
-    let (path, drop) = match found {
-        Some((slot, d)) => (t.geo.items[slot].0.path.clone(), d),
-        None => (vec![t.key.clone().into()], on_canvas),
+    let (path, drop) = if let Some((slot, _)) = found {
+        let card = hovers.cards.iter().find(|card| card.slot == slot)?;
+        (t.geo.items[slot].0.path.clone(), ui.drop_target(&card.tile)?)
+    } else {
+        (vec![t.key.clone().into()], ui.drop_target(canvas)?)
     };
     Some(match drop {
-        Drop::Hover(pay) => Change::DropOver { path, kind: pay.kind, value: pay.value },
-        Drop::Dropped(pay) => Change::Dropped { path, kind: pay.kind, value: pay.value },
+        pxui::DropRef::Hover(pay) => Change::DropOver { path, kind: pay.kind.to_owned(), value: pay.value.to_owned() },
+        pxui::DropRef::Dropped(pay) => Change::Dropped { path, kind: pay.kind.to_owned(), value: pay.value.to_owned() },
     })
 }
 
@@ -1052,16 +1054,16 @@ pub fn drop_change(t: &Pane, ui: &mut Ui, canvas: &UiBox) -> Option<Change> {
 pub fn context_menu(t: &mut Pane, ui: &mut Ui, emit: &mut Vec<Change>) {
     if let Some((at, path)) = t.context.clone() {
         let items = context_items(t, &path);
-        match ui.context_menu(p32(at), &MenuOpts::default(), "pxui-scope-context", &items) {
-            MenuResult::Open => {}
-            MenuResult::Dismiss => { t.context = None; },
-            MenuResult::Pick(i) => {
-                match t.saved.imported(&path) {
-                    Some(file) => emit.push(Change::OpenImport(file)),
-                    None => emit.extend(action_changes(t, context_command(i))),
-                }
-                t.context = None;
+        let rows: Vec<_> = items.iter().map(|(name, enabled)| pxui::MenuItem::new(name).disabled(!enabled)).collect();
+        let choice = ui.menu("pxui-scope-context", pxui::Point::new(at.0 as f32, at.1 as f32), &rows, &pxui::Menu::DEFAULT);
+        if let Some(i) = choice.chosen {
+            match t.saved.imported(&path) {
+                Some(file) => emit.push(Change::OpenImport(file)),
+                None => emit.extend(action_changes(t, context_command(i as i64))),
             }
+        }
+        if choice.dismissed || choice.chosen.is_some() {
+            t.context = None;
         }
     }
 }
@@ -1075,7 +1077,7 @@ pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &
         let hovers = t.hovers.clone();
         let hv = hovers.borrow();
         for c in &hv.cards {
-            if !ui.hovered_within(&c.tile) {
+            if !ui.hovered(&c.tile, true) {
                 continue;
             }
             any_hover = true;
@@ -1183,7 +1185,7 @@ fn dropped(t: &mut Pane, ui: &Ui, dx: f64, dy: f64) {
 /// (pulled, it is a new wire from its source), on the ground starts a rubber band; the moves, wires and
 /// bands that follow and their release; a double click and a right click. The canvas holds every
 /// press on the content (`scope_hover::classify` says what it is on).
-fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, sig: &Signal, emit: &mut Vec<Change>) {
+fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &pxui::Handle, sig: &Signal, emit: &mut Vec<Change>) {
     use crate::scope_hover::On;
     let z = t.zoom;
     let mouse = frame.input.pointer;
@@ -1321,7 +1323,7 @@ fn gestures(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, si
         }
         On::In(slot, del, rect) => {
             let (x, y, w, h) = *rect;
-            let inside = contains(Rect::new(x as f32, y as f32, w as f32, h as f32), sig.release_point);
+            let inside = Rect::new(x as f32, y as f32, w as f32, h as f32).contains(sig.release_point);
             if sig.clicked && inside {
                 let ops: Vec<e::Op> = match (del, &t.geo.items[*slot].0.item) {
                     (Some(Del::Unwire(i)), Item::Item(n)) => unwire(t, n, &n.rows[*i]),
@@ -1554,8 +1556,8 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut 
         i: usize,
         title: String,
         rect: (f64, f64, f64, f64),
-        xb: UiBox,
-        rb: UiBox,
+        xb: pxui::Handle,
+        rb: pxui::Handle,
     }
     let mut frame_boxes: Vec<FrameBox> = Vec::new();
     for (scope, (ox, oy)) in t.geo.origins.iter() {
@@ -1569,9 +1571,9 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut 
             };
             // the title strip takes no input of its own: the canvas carries the frame from it
             // (`gestures`), so a carry builds nothing
-            let tb = mk(ui, BLOCKING | HOVER_FREE, "t", (x, y), ((wd - 20.0).max(8.0), 18.0 * z));
-            let xb = mk(ui, CLICKABLE, "x", (x + wd - 18.0, y + 2.0), (16.0, 16.0));
-            let rb = mk(ui, CLICKABLE, "r", (x + wd - 12.0, y + h - 12.0), (12.0, 12.0));
+            let tb = mk(ui, pxui::Flags::BLOCKING | pxui::Flags::HOVER_FREE, "t", (x, y), ((wd - 20.0).max(8.0), 18.0 * z));
+            let xb = mk(ui, pxui::Flags::CLICKABLE, "x", (x + wd - 18.0, y + 2.0), (16.0, 16.0));
+            let rb = mk(ui, pxui::Flags::CLICKABLE, "r", (x + wd - 12.0, y + h - 12.0), (12.0, 12.0));
             if !ui.verifying() {
                 let mut hv = t.hovers.borrow_mut();
                 let k = hv.frame_titles.len();
@@ -1624,7 +1626,7 @@ const MEASURED_MAX: usize = 4096;
 
 /// Measure with the UI's fonts, remembering the width for the pane's outside-a-frame queries.
 fn measure_ui(ui: &mut Ui, t: &Pane, size: i64, text: &str) -> f64 {
-    let v = f64::from(ui.text_width(Some(size), text));
+    let v = f64::from(ui.text_service().width(text, pxui::Label::BODY.size(size as f32), None).unwrap_or(0.0));
     let mut m = t.measured.borrow_mut();
     // B20: bounded; a full cache starts over (it refills from the visible text in one frame)
     if m.len() >= MEASURED_MAX {
@@ -1637,7 +1639,7 @@ fn measure_ui(ui: &mut Ui, t: &Pane, size: i64, text: &str) -> f64 {
 type Marks = Vec<((f64, f64, f64, f64), Option<String>, Option<bool>)>;
 
 /// Over the cards, in the content: a carried value's places and the one under it, the letter hints.
-fn paint_over(t: &Pane, ui: &mut Ui, z: f64, host: &UiBox, visible: &[usize]) {
+fn paint_over(t: &Pane, ui: &mut Ui, z: f64, host: &pxui::Handle, visible: &[usize]) {
     let mut marks: Marks = Vec::new();
     if !(t.carry_lit.is_empty() && t.carry_hot.is_none()) {
         for &slot in visible {
@@ -1658,24 +1660,24 @@ fn paint_over(t: &Pane, ui: &mut Ui, z: f64, host: &UiBox, visible: &[usize]) {
     if marks.is_empty() && canvas_hot.is_none() && t.hinting.is_none() {
         return;
     }
-    let font_size = ui.font_size();
+    let font_size = ui.font_size().round() as i64;
     let snap = Rc::new(t.clone());
     // over the cards, in the content box (it moves with them); what is the pane's is the pane's rectangle
     let pane = (t.x as f64, t.y as f64, t.width as f64, t.height as f64);
-    ui.draw_over(host, move |paint, _| {
+    ui.canvas_over(host, move |paint, _| {
         let (cx, cy, cw, ch) = pane;
-        let refused = theme::invalid();
-        let hint_chip = |paint: &mut pxui::ui::Paint, bg: color::T, at: (f64, f64), letter: &str| {
+        let refused = pxui::Rgba::hex(0xc2255c);
+        let hint_chip = |paint: &mut pxui::ui::Paint, bg: pxui::Rgba, at: (f64, f64), letter: &str| {
             let letter = letter.to_uppercase();
             let size = 8.max(font_size - 2);
-            let lw = 14.0f64.max(f64::from(paint.text_width(Some(size), &letter)) + 6.0);
-            paint.fill((at.0 - 7.0) as f32, (at.1 - 7.0) as f32, lw as f32, 14.0, bg);
-            let tw = f64::from(paint.text_width(Some(size), &letter));
-            let ty = f64::from(paint.text_top(Some(size), (at.1 - 7.0) as f32, 14.0));
-            paint.text_s(((at.0 - 7.0 + ((lw - tw) / 2.0)) as f32, ty as f32), size, snap.theme.foreground, &letter);
+            let lw = 14.0f64.max(f64::from(paint.text_service().width(&letter, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0)) + 6.0);
+            paint.fill(pxui::Rect::new((at.0 - 7.0) as f32, (at.1 - 7.0) as f32, lw as f32, 14.0), pxui::Fill::new(bg));
+            let tw = f64::from(paint.text_service().width(&letter, pxui::Label::BODY.size((size) as f32), None).unwrap_or(0.0));
+            let ty = f64::from(((at.1 - 7.0) as f32) + (((14.0) - (size) as f32) / 2.0).floor());
+            { let text = &letter; let span = pxui::TextSpan::new(0, text.len() as u32).color(snap.theme.foreground); let _ = paint.text_spans(pxui::Point::new((at.0 - 7.0 + ((lw - tw) / 2.0)) as f32, ty as f32), pxui::Label::BODY.size((size) as f32), 0.0, text, &[span]); };
         };
         if let Some(ok) = canvas_hot {
-            paint.dashed_rect((cx + 1.5) as f32, (cy + 1.5) as f32, (cw - 3.0) as f32, (ch - 3.0) as f32, if ok { snap.theme.accent } else { refused });
+            paint.dashed_rect(Rect::new((cx + 1.5) as f32, (cy + 1.5) as f32, (cw - 3.0) as f32, (ch - 3.0) as f32), pxui::Stroke::new(if ok { snap.theme.accent } else { refused }));
         }
         for ((x, y, w, h), letter, hot) in &marks {
             let color = match hot {
@@ -1684,9 +1686,9 @@ fn paint_over(t: &Pane, ui: &mut Ui, z: f64, host: &UiBox, visible: &[usize]) {
             };
             // a drop target: a dashed accent edge on the card
             if hot.is_some() {
-                paint.dashed_rect((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32, color);
+                paint.dashed_rect(Rect::new((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32), pxui::Stroke::new(color));
             } else {
-                paint.stroke((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32, color);
+                paint.stroke(pxui::Rect::new((x + 0.5) as f32, (y + 0.5) as f32, (w - 1.0) as f32, (h - 1.0) as f32), pxui::Stroke::new(color));
             }
             // a letter of the key route: the hint colour under ink, at the card's top left (-7, -7)
             if let Some(letter) = letter {
@@ -1749,12 +1751,12 @@ fn view_step(t: &mut Pane, sig: &Signal, frame: &rframe::Frame) {
 }
 
 /// The canvas: the bare ground's hit box (presses, pans, the wheel), clipping what it holds. It takes
-/// the presses on the cards, ports and wires too (they are `BLOCKING`, not clickable), so a press, a
+/// the presses on the cards, ports and wires too (they are `pxui::Flags::BLOCKING`, not clickable), so a press, a
 /// drag or a selection on the content builds none of it.
-fn canvas_box(t: &Pane, ui: &mut Ui) -> UiBox {
-    ui.box_(
+fn canvas_box(t: &Pane, ui: &mut Ui) -> pxui::Handle {
+    ui.node(
         "pxui-scope",
-        BoxOpts::default().flags(CLICKABLE | SCROLL | CLIP | BLOCKING | CAPTURE_UNCLAIMED).w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at((t.x as f32, t.y as f32)),
+        pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::SCROLL | pxui::Flags::CLIP | pxui::Flags::BLOCKING | pxui::Flags::CAPTURE_UNCLAIMED).w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at(t.x as f32, t.y as f32),
     )
 }
 
@@ -1801,12 +1803,12 @@ pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fr
 }
 
 /// The graph canvas for one frame, every view of it built; its canvas box.
-pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) -> UiBox {
+pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) -> pxui::Handle {
     pane("graph-view", ui.frame_index(), pressed, t, ui, frame, changes)
 }
 
 /// The pane's views; with a `salt` changing every frame none is kept.
-fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) -> UiBox {
+fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) -> pxui::Handle {
     use std::hash::{Hash, Hasher};
     // the first view shows the whole graph, at zoom 1 when it fits (Home frames everything)
     if !t.framed {
@@ -1871,145 +1873,145 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
     let selected = crate::scope_hover::selected_wire_index(t);
     // the wires a move draws in its own view
     crate::scope_hover::carry_wires(t);
-    let saved = ui.enter(&canvas);
-    // the grid, the zones, the frames and the wires, under the cards: they build again with the
-    // content and when the selection's chains or the selected wire change
-    let mut hh = std::hash::DefaultHasher::new();
-    (key, chain.as_ref().map(|c| (Rc::as_ptr(c) as usize, c.rev)), selected, &t.highlighted, &t.hovers.borrow().skip).hash(&mut hh);
-    let wires = ui.view("graph-wires", hh.finish(), cw, ch, &mut |ui| crate::scope_hover::wires_view(t, ui, key, cw, ch, &chain, selected));
-    ui.set_at(&wires, (-ov.0 as f32, -ov.1 as f32));
-    // the wires a move of cards carries, where it puts them
-    let under = ui.view("graph-drag-wires", crate::scope_hover::drag_wires_key(t) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::drag_wires(t, ui));
-    ui.set_at(&under, (0.0, 0.0));
-    let (mut built, mut verified) = (None, false);
-    let view = ui.view(label, key, cw, ch, &mut |ui| {
-        verified = ui.verifying();
-        // a verifying run of the kept view builds as the kept build did
-        let now = (t.pan_x, t.pan_y, t.zoom);
-        if ui.verifying() {
-            if let Some(a) = anchor_of(t) {
-                (t.pan_x, t.pan_y, t.zoom) = a;
+    ui.within(&canvas, &mut |ui| {
+        // the grid, the zones, the frames and the wires, under the cards: they build again with the
+        // content and when the selection's chains or the selected wire change
+        let mut hh = std::hash::DefaultHasher::new();
+        (key, chain.as_ref().map(|c| (Rc::as_ptr(c) as usize, c.rev)), selected, &t.highlighted, &t.hovers.borrow().skip).hash(&mut hh);
+        let wires = crate::sized_view(ui, "graph-wires", hh.finish(), cw, ch, &mut |ui| crate::scope_hover::wires_view(t, ui, key, cw, ch, &chain, selected));
+        ui.set_at(&wires, (-ov.0 as f32, -ov.1 as f32));
+        // the wires a move of cards carries, where it puts them
+        let under = crate::sized_view(ui, "graph-drag-wires", crate::scope_hover::drag_wires_key(t) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::drag_wires(t, ui));
+        ui.set_at(&under, (0.0, 0.0));
+        let (mut built, mut verified) = (None, false);
+        let view = crate::sized_view(ui, label, key, cw, ch, &mut |ui| {
+            verified = ui.verifying();
+            // a verifying run of the kept view builds as the kept build did
+            let now = (t.pan_x, t.pan_y, t.zoom);
+            if ui.verifying() {
+                if let Some(a) = anchor_of(t) {
+                    (t.pan_x, t.pan_y, t.zoom) = a;
+                }
+            }
+            let before = t.clone();
+            let at = content(t, ui, &canvas, ov, key, changes);
+            // a build that changed the pane (a field's click selected) painted part of it from the state
+            // before: it is kept as of before, so the next frame builds again from the state now
+            let settled = builds_same(&before, t);
+            if !settled {
+                ui.request_frame();
+            }
+            if ui.verifying() {
+                (t.pan_x, t.pan_y, t.zoom) = now;
+            }
+            built = Some((at, if settled { None } else { Some(before) }));
+        });
+        ui.set_at(&view, (-ov.0 as f32, -ov.1 as f32));
+        let fresh = built.is_some() && !verified;
+        if let Some((at, before)) = built {
+            let mut kept = before.unwrap_or_else(|| t.clone());
+            (kept.pan_x, kept.pan_y, kept.zoom) = at;
+            keep_built(&kept, rev);
+        }
+        if held && fresh {
+            HELD.with(|h| h.borrow_mut().iter_mut().for_each(|h| h.patched = false));
+        } else if held {
+            // a verifying run of the kept content wrote the drag's change itself; it shows the patch
+            let edit = follow_drag(ui);
+            if !verified {
+                changes.extend(edit);
             }
         }
-        let before = t.clone();
-        let at = content(t, ui, &canvas, ov, key, changes);
-        // a build that changed the pane (a field's click selected) painted part of it from the state
-        // before: it is kept as of before, so the next frame builds again from the state now
-        let settled = builds_same(&before, t);
-        if !settled {
-            ui.request_frame();
+        // a dragged wire or rubber band, over the cards
+        let (mouse, press) = (frame.input.pointer, p64(sig.press_point));
+        let marks = crate::sized_view(ui, "graph-drag-marks", crate::scope_hover::drag_marks_key(t, mouse, press) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::drag_marks(t, ui, mouse, press));
+        ui.set_at(&marks, (0.0, 0.0));
+        // the anchored views where the pan and zoom now put them
+        // (about the window's corner: a built point p shows at k (p + o), the pane's pan point where the
+        // build had it scaled by k about it; with k one, p + o exactly)
+        let anchor = anchor_of(t);
+        if let Some((bx, by, bz)) = anchor {
+            let k = t.zoom / bz;
+            let shift = |o: f64, pan: f64, built: f64| if k == 1.0 { pan - built } else { (o + pan) / k - (o + built) };
+            for v in [&wires, &view] {
+                ui.set_view(v, &pxui::ViewTransform::DEFAULT.offset(shift(t.x as f64, t.pan_x, bx) as f32, shift(t.y as f64, t.pan_y, by) as f32));
+                ui.set_view(v, &pxui::ViewTransform::DEFAULT.about(k as f32, [1.0, 0.0, 0.0, 1.0], (0.0, 0.0)));
+            }
         }
-        if ui.verifying() {
-            (t.pan_x, t.pan_y, t.zoom) = now;
-        }
-        built = Some((at, if settled { None } else { Some(before) }));
+        // a move of cards: their views offset; the hover's and the selection's looks through the patch
+        // path, and over the cards a view of the hover that builds only when what it shows changes
+        crate::scope_hover::place_cards(t, ui, anchor.map_or(t.zoom, |a| a.2));
+        crate::scope_hover::show(t, ui, &now);
+        let font_size = ui.font_size().round() as i64;
+        let over = crate::sized_view(ui, "graph-hover", crate::scope_hover::overlay_key(t, &now, key) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::overlay(t, ui, &now, font_size));
+        ui.set_at(&over, (0.0, 0.0));
     });
-    ui.set_at(&view, (-ov.0 as f32, -ov.1 as f32));
-    let fresh = built.is_some() && !verified;
-    if let Some((at, before)) = built {
-        let mut kept = before.unwrap_or_else(|| t.clone());
-        (kept.pan_x, kept.pan_y, kept.zoom) = at;
-        keep_built(&kept, rev);
-    }
-    if held && fresh {
-        HELD.with(|h| h.borrow_mut().iter_mut().for_each(|h| h.patched = false));
-    } else if held {
-        // a verifying run of the kept content wrote the drag's change itself; it shows the patch
-        let edit = follow_drag(ui);
-        if !verified {
-            changes.extend(edit);
-        }
-    }
-    // a dragged wire or rubber band, over the cards
-    let (mouse, press) = (frame.input.pointer, p64(sig.press_point));
-    let marks = ui.view("graph-drag-marks", crate::scope_hover::drag_marks_key(t, mouse, press) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::drag_marks(t, ui, mouse, press));
-    ui.set_at(&marks, (0.0, 0.0));
-    // the anchored views where the pan and zoom now put them
-    // (about the window's corner: a built point p shows at k (p + o), the pane's pan point where the
-    // build had it scaled by k about it; with k one, p + o exactly)
-    let anchor = anchor_of(t);
-    if let Some((bx, by, bz)) = anchor {
-        let k = t.zoom / bz;
-        let shift = |o: f64, pan: f64, built: f64| if k == 1.0 { pan - built } else { (o + pan) / k - (o + built) };
-        for v in [&wires, &view] {
-            ui.view_offset(v, shift(t.x as f64, t.pan_x, bx) as f32, shift(t.y as f64, t.pan_y, by) as f32);
-            ui.view_transform_about(v, k as f32, [1.0, 0.0, 0.0, 1.0], (0.0, 0.0));
-        }
-    }
-    // a move of cards: their views offset; the hover's and the selection's looks through the patch
-    // path, and over the cards a view of the hover that builds only when what it shows changes
-    crate::scope_hover::place_cards(t, ui, anchor.map_or(t.zoom, |a| a.2));
-    crate::scope_hover::show(t, ui, &now);
-    let font_size = ui.font_size();
-    let over = ui.view("graph-hover", crate::scope_hover::overlay_key(t, &now, key) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::overlay(t, ui, &now, font_size));
-    ui.set_at(&over, (0.0, 0.0));
-    ui.leave(saved);
     canvas
 }
 
 /// The cards on the canvas, in a content box `ov` past each side of the pane, and the gestures of the
 /// widgets on them. The pan and zoom it was built at.
-fn content(t: &mut Pane, ui: &mut Ui, canvas: &UiBox, ov: (f64, f64), rev: u64, changes: &mut Vec<Change>) -> (f64, f64, f64) {
+fn content(t: &mut Pane, ui: &mut Ui, canvas: &pxui::Handle, ov: (f64, f64), rev: u64, changes: &mut Vec<Change>) -> (f64, f64, f64) {
     let at = (t.pan_x, t.pan_y, t.zoom);
     // at the pane's corner, so its children land where they would on the canvas (to the bit)
-    let host = ui.box_("pxui-scope-content", BoxOpts::default().w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at((ov.0 as f32, ov.1 as f32)));
-    let saved = ui.enter(&host);
-    refont(t, ui);
-    let z = t.zoom;
-    // text follows the zoom down to 5 points (a 6-point row at zoom 0.25 holds it)
-    let fs = font_of(z);
-    // the cards in view (`scope_hover::list`)
-    let visible = t.hovers.borrow().visible.clone();
-    // footers: only for what is in view, and not when too small to read
-    let mut footers: HashMap<Path, Footer> = HashMap::new();
-    if let Some(records) = &t.records {
-        if z >= 0.4 {
-            for &i in &visible {
-                let (pl, _, _) = &t.geo.items[i];
-                if let Item::Item(n) = &pl.item {
-                    if if n.zone.is_some() { pl.collapsed } else { true } {
-                        footers.insert(n.path.clone(), footer_of(t, records, n));
+    let host = ui.node("pxui-scope-content", pxui::Node::DEFAULT.w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at(ov.0 as f32, ov.1 as f32));
+    ui.within(&host, &mut |ui| {
+        refont(t, ui);
+        let z = t.zoom;
+        // text follows the zoom down to 5 points (a 6-point row at zoom 0.25 holds it)
+        let fs = font_of(z);
+        // the cards in view (`scope_hover::list`)
+        let visible = t.hovers.borrow().visible.clone();
+        // footers: only for what is in view, and not when too small to read
+        let mut footers: HashMap<Path, Footer> = HashMap::new();
+        if let Some(records) = &t.records {
+            if z >= 0.4 {
+                for &i in &visible {
+                    let (pl, _, _) = &t.geo.items[i];
+                    if let Item::Item(n) = &pl.item {
+                        if if n.zone.is_some() { pl.collapsed } else { true } {
+                            footers.insert(n.path.clone(), footer_of(t, records, n));
+                        }
                     }
                 }
             }
         }
-    }
-    // the cards, each a view of its own; what the hover and the gestures read between builds (a
-    // verifying run leaves the kept build's)
-    let snap = Rc::new(t.clone());
-    let mut ctx = Ctx { finished: false, opened: None, fs, ov, select: None };
-    let mut built: Vec<Built> = Vec::new();
-    if !ui.verifying() {
-        t.hovers.borrow_mut().begin(t);
-    }
-    for &i in &visible {
-        build_card(&mut ctx, t, ui, z, fs, i, &snap, &footers, rev, &mut built);
-    }
-    if !ui.verifying() {
-        t.hovers.borrow_mut().end(t, ui);
-    }
-    if ctx.finished {
-        t.editing = None;
-    }
-    if let Some(c) = drop_change(t, ui, canvas) {
-        changes.push(c);
-    }
-    frames_step(t, ui, &mut ctx, z, changes);
-    if ctx.finished { t.editing = None; }
-    if let Some(editing) = ctx.opened.take() { t.editing = Some(editing); }
-    let (lens_next, lens_changed) = card_gestures(t, ui, &built, changes);
-    if let Some(paths) = ctx.select.take() {
-        select(paths, t);
-    }
-    paint_over(t, ui, z, &host, &visible);
-    let drawn_zones = visible.iter().filter(|&&i| matches!(&t.geo.items[i].0.item, Item::Item(n) if n.zone.is_some()) && !t.geo.items[i].0.collapsed).count() as i64;
-    t.stats = Stats { drawn_items: visible.len() as i64, drawn_zones, ..t.stats };
-    // an opened or stepped expansion panel changes its card's size: lay out again for the next frame
-    if lens_changed {
-        t.lens = lens_next;
-        relayout(None, t);
-    }
-    ui.leave(saved);
+        // the cards, each a view of its own; what the hover and the gestures read between builds (a
+        // verifying run leaves the kept build's)
+        let snap = Rc::new(t.clone());
+        let mut ctx = Ctx { finished: false, opened: None, fs, ov, select: None };
+        let mut built: Vec<Built> = Vec::new();
+        if !ui.verifying() {
+            t.hovers.borrow_mut().begin(t);
+        }
+        for &i in &visible {
+            build_card(&mut ctx, t, ui, z, fs, i, &snap, &footers, rev, &mut built);
+        }
+        if !ui.verifying() {
+            t.hovers.borrow_mut().end(t, ui);
+        }
+        if ctx.finished {
+            t.editing = None;
+        }
+        if let Some(c) = drop_change(t, ui, canvas) {
+            changes.push(c);
+        }
+        frames_step(t, ui, &mut ctx, z, changes);
+        if ctx.finished { t.editing = None; }
+        if let Some(editing) = ctx.opened.take() { t.editing = Some(editing); }
+        let (lens_next, lens_changed) = card_gestures(t, ui, &built, changes);
+        if let Some(paths) = ctx.select.take() {
+            select(paths, t);
+        }
+        paint_over(t, ui, z, &host, &visible);
+        let drawn_zones = visible.iter().filter(|&&i| matches!(&t.geo.items[i].0.item, Item::Item(n) if n.zone.is_some()) && !t.geo.items[i].0.collapsed).count() as i64;
+        t.stats = Stats { drawn_items: visible.len() as i64, drawn_zones, ..t.stats };
+        // an opened or stepped expansion panel changes its card's size: lay out again for the next frame
+        if lens_changed {
+            t.lens = lens_next;
+            relayout(None, t);
+        }
+    });
     at
 }
 
@@ -2079,11 +2081,11 @@ pub mod inspect {
 }
 
 /// A tile-relative port or tap box: `pos` and `size` in card points, scaled by the zoom.
-fn bxz(ui: &mut Ui, z: f64, flags: Flags, name: &str, pos: (f64, f64), size: (f64, f64)) -> UiBox {
+fn bxz(ui: &mut Ui, z: f64, flags: Flags, name: &str, pos: (f64, f64), size: (f64, f64)) -> pxui::Handle {
     bxzf(ui, z, flags, format_args!("{name}"), pos, size)
 }
 
 /// `bxz` with a formatted name (nothing allocated for it).
-fn bxzf(ui: &mut Ui, z: f64, flags: Flags, name: std::fmt::Arguments, pos: (f64, f64), size: (f64, f64)) -> UiBox {
-    ui.box_fmt(name, BoxOpts::default().flags(flags | HOVER_FREE).w(Size::Px((size.0 * z) as f32)).h(Size::Px((size.1 * z) as f32)).at(((pos.0 * z) as f32, (pos.1 * z) as f32)))
+fn bxzf(ui: &mut Ui, z: f64, flags: Flags, name: std::fmt::Arguments, pos: (f64, f64), size: (f64, f64)) -> pxui::Handle {
+    ui.node(pxui::hash_of(&name.to_string()), pxui::Node::DEFAULT.flags(flags | pxui::Flags::HOVER_FREE).w(Size::Px((size.0 * z) as f32)).h(Size::Px((size.1 * z) as f32)).at((pos.0 * z) as f32, (pos.1 * z) as f32))
 }
