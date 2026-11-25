@@ -54,6 +54,7 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 | Z8 | in progress (`../rays-z8`). REST_FRAMES=2; may_rest ignores static HUD. Bisect A_ISOSEL 51→344: first bad `0cfef552b` (Z5 Wide skey); `find_str` still matched Str only → miss every frame. Fixed `find(&skey(...))` — A_ISOSEL 344→17 (ceil 29). Next: B/C/D selected/input floors. |
 | Z5 | rebegin_commands + SceneExecution frame_commands; encoder renew spare; wrap_node Rc<[Node]>; LRU/side_lru reserve. SLOW empty **14/8** (ceil 15/9), isogrid **21/12**. UV Atlas blit kept (Z6b Image batch). Left: RenderInner/Box ~14→0; Z6a UV after Z6b. |
 | Z6a | done: PXUI rekey-on-text-change + mono caret (85482d18); canvas text glyph atlas blit (no reshape). A_idle_basic 538→364 rust / 121→56 native; D 385/14; F 139/9 + 143/9. Ceilings A 414→383. ponytail: instanced atlas quads (Z5) to drop the blit upload. |
+| Z6b | done (`../rays-z6b`): finding 5 — same-shape frames patch uniforms in place (Shared staging; no unified-mem), reuse retained BatchPlan ICB; mesh page power-of-two headroom; Wide mesh cache `find`+`skey`. Free-list ICB pool deferred (ogpu child leak on delayed destroy). zero_alloc A_idle_basic 364→348 rust / 56 native; F frozen 139→128 / 9, static 143→134 / 9. Ceilings A 383→366, F 145→135 / 150→141. million_marks `rays mem --frames 301` ≈17.7 ms/frame (debug; not slower). |
 
 ## Requests
 
@@ -70,6 +71,8 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 - crates/lru: fixed-capacity open-addressing buckets (nobody owns; HashMap nodes on insert).
 - MetalCommands Box + ogpu_core CommandsInner/RenderInner still per begin (~15 idle Rust floor).
 - Z6a: instanced atlas UV glyphs so canvas text skips per-frame blit upload.
+- Z6b: `create_offscreen` shared-headless leaves +1 native handle after a draw (`destroy_device` ok); scratch now uses owned `create_renderer`. Capacity-keyed ICB free-list needs correct child accounting on delayed destroy.
+- Z6b: `find_str` misses Wide `skey` mesh entries (re-upload every frame); mesh path uses `find`+`skey`. Prefer completing Wide lookup for texture/prepared or keep Str keys where find_str remains.
 ### Z6
 ### Z6b
 - Owns plan_entry/plan_batches/batch_resources_of/rebind and ICB pool. Coordinate with Z5 on shared helpers via Requests.
