@@ -552,8 +552,6 @@ fn run_state_internal(
         destroy_run(&coordinator, &target);
         return Err(startup_error(op, ErrorKind::InvalidState, &format!("input: {message}")));
     }
-    let mut logical_width = config_.width;
-    let mut logical_height = config_.height;
     install_panic_hook();
 
     let capture = {
@@ -722,8 +720,6 @@ fn run_state_internal(
                     &world_caches,
                     &last_scene,
                     &render_failure,
-                    &mut logical_width,
-                    &mut logical_height,
                 );
             });
         });
@@ -778,6 +774,30 @@ mod quiet_rule {
     }
 }
 
+struct LoopFrames {
+    count: i64,
+    quiet: i64,
+    hidden: bool,
+    shown: Option<scene::Scene>,
+    logical_size: (i64, i64),
+}
+
+impl LoopFrames {
+    fn done(&self, state: &RunContext, limit: Option<i64>) -> bool {
+        state.stopped.get() || limit.is_some_and(|n| self.count >= n)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+struct ResizeWatch;
+
+#[cfg(not(target_os = "linux"))]
+impl Drop for ResizeWatch {
+    fn drop(&mut self) {
+        let _ = runtime::runtime_input_sdl3::set_live_resize_callback(None);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_loop(
     config_: &Config,
@@ -791,51 +811,93 @@ fn run_loop(
     world_caches: &world::private::CacheContext,
     last_scene: &Rc<RefCell<Option<scene::Scene>>>,
     render_failure: &Rc<RefCell<Option<Error>>>,
-    logical_width: &mut i64,
-    logical_height: &mut i64,
 ) -> Result<(), Error> {
-    let op = "Sketch.input";
-    let mut count = 0_i64;
-    let mut shown: Option<scene::Scene> = None;
-    let mut quiet = 0_i64;
-    let mut failure: Option<Error> = None;
-    let stopped_or_done = |count: i64| state.stopped.get() || limit.is_some_and(|l| count >= l);
-    while !stopped_or_done(count) {
-        if let Some(e) = failure.take() {
-            return Err(e);
-        }
-        let mut step: Result<(), Error> = Ok(());
-        layer::with_cache_context(caches, &mut || {
-            world::private::with_cache_context(world_caches, &mut || {
-                step = one_frame(
-                    config_, limit, profile, state, crash, program_, coordinator, last_scene, render_failure, logical_width, logical_height, &mut count, &mut shown, &mut quiet,
-                    op,
-                );
+    const OP: &str = "Sketch.input";
+    let frames = Rc::new(RefCell::new(LoopFrames {
+        count: 0,
+        quiet: 0,
+        hidden: false,
+        shown: None,
+        logical_size: (config_.width, config_.height),
+    }));
+    let step = Rc::new({
+        let (config, state, crash, program, coordinator) = (config_.clone(), state.clone(), crash.clone(), program_.clone(), coordinator.clone());
+        let (caches, world_caches, last_scene, render_failure, frames) =
+            (caches.clone(), world_caches.clone(), last_scene.clone(), render_failure.clone(), frames.clone());
+        move |input: input_state::Polled, resizing| {
+            let Ok(mut frames) = frames.try_borrow_mut() else { return Ok(()) };
+            if frames.done(&state, limit) {
+                return Ok(());
+            }
+            let mut step = Ok(());
+            let mut input = Some(input);
+            layer::with_cache_context(&caches, &mut || {
+                world::private::with_cache_context(&world_caches, &mut || {
+                    step = one_frame(&config, limit, profile, &state, &crash, &program, &coordinator, &last_scene, &render_failure, &mut frames, input.take().expect("one input per frame"), resizing, OP);
+                });
             });
-        });
-        step?;
-        // the frame clock time the program asked to be woken at (a caret blink, a delayed parse)
-        let wake_in = WAKE.take().map(|t| t - time::now(&state.time.borrow()));
-        // an unchanged frame skipped vsync: wait a frame for input, and after half a second of the
-        // same picture up to 100 ms (never past a scheduled wake), so a still window costs a few
-        // ticks a second
-        if quiet > 0 {
+            step
+        }
+    });
+    #[cfg(not(target_os = "linux"))]
+    let resize_failure = Rc::new(RefCell::new(None));
+    #[cfg(not(target_os = "linux"))]
+    let _watch = {
+        let (step, failure) = (step.clone(), resize_failure.clone());
+        runtime::runtime_input_sdl3::set_live_resize_callback(Some(Box::new(move || {
+            if failure.borrow().is_none() {
+                // Keep panic unwinding on the Rust side of the SDL event-watch callback.
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    step(input_state::Polled { events: Vec::new(), window_changed: true, visible: false }, true)
+                }));
+                if !matches!(outcome, Ok(Ok(()))) {
+                    *failure.borrow_mut() = Some(outcome);
+                }
+            }
+            Ok(())
+        }))).map_err(|error| startup_error(OP, ErrorKind::InvalidState, &error.to_string()))?;
+        ResizeWatch
+    };
+    let check_resize = || -> Result<(), Error> {
+        #[cfg(not(target_os = "linux"))]
+        if let Some(outcome) = resize_failure.borrow_mut().take() {
+            return match outcome {
+                Ok(result) => result,
+                Err(panic) => std::panic::resume_unwind(panic),
+            };
+        }
+        Ok(())
+    };
+
+    while !frames.borrow().done(state, limit) {
+        let mut unit = 1.;
+        native::runtime_of_mut(coordinator, &mut |r| unit = runtime::window_unit_of(r));
+        input_state::set_unit(&mut state.input.borrow_mut(), unit);
+        let polled = input_state::poll(&state.input);
+        check_resize()?;
+        step(polled.map_err(|m| startup_error(OP, ErrorKind::InvalidState, &m))?, false)?;
+        let (quiet, hidden) = {
+            let frames = frames.borrow();
+            (frames.quiet, frames.hidden)
+        };
+        let wake_at = WAKE.take();
+        if hidden {
+            input_state::wait(33);
+        } else if quiet > 0 {
+            // An unchanged frame skipped vsync. Wait for input, or a scheduled caret/cook wake.
+            let wake_in = wake_at.map(|t| t - time::now(&state.time.borrow()));
             let timeout_ms = quiet_timeout_ms(quiet, wake_in);
-            let busy = program_.idle.as_ref().is_some_and(|idle| crash.model.borrow().as_ref().is_some_and(|m| idle(m.as_ref())));
-            if busy {
-                // work for the main thread is in flight (a cook's device requests): serve it as it
-                // arrives instead of at the next frame
+            let busy = || program_.idle.as_ref().is_some_and(|idle| crash.model.borrow().as_ref().is_some_and(|m| idle(m.as_ref())));
+            if busy() {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
-                while program_.idle.as_ref().is_some_and(|idle| crash.model.borrow().as_ref().is_some_and(|m| idle(m.as_ref())))
-                    && std::time::Instant::now() < deadline
-                    && !input_state::wait(&state.input.borrow(), 1)
-                {}
+                while busy() && std::time::Instant::now() < deadline && !input_state::wait(1) {}
             } else {
-                input_state::wait(&state.input.borrow(), timeout_ms);
+                input_state::wait(timeout_ms);
             }
         } else {
             time::limit_frame_rate(&state.time.borrow());
         }
+        check_resize()?;
     }
     Ok(())
 }
@@ -845,38 +907,31 @@ fn one_frame(
     config_: &Config,
     limit: Option<i64>,
     profile: bool,
-    state: &Rc<RunContext>,
-    crash: &Rc<CrashState>,
-    program_: &Rc<Program>,
+    state: &RunContext,
+    crash: &CrashState,
+    program_: &Program,
     coordinator: &rr::Renderer,
-    last_scene: &Rc<RefCell<Option<scene::Scene>>>,
-    render_failure: &Rc<RefCell<Option<Error>>>,
-    logical_width: &mut i64,
-    logical_height: &mut i64,
-    count: &mut i64,
-    shown: &mut Option<scene::Scene>,
-    quiet: &mut i64,
+    last_scene: &RefCell<Option<scene::Scene>>,
+    render_failure: &RefCell<Option<Error>>,
+    frames: &mut LoopFrames,
+    polled: input_state::Polled,
+    resizing: bool,
     op: &str,
 ) -> Result<(), Error> {
     time::update(&mut state.time.borrow_mut());
-    let unit = {
-        let mut u = 1.;
-        native::runtime_of_mut(coordinator, &mut |r| u = runtime::window_unit_of(r));
-        u
-    };
-    input_state::set_unit(&mut state.input.borrow_mut(), unit);
-    let mut polled = input_state::poll(&mut state.input.borrow_mut()).map_err(|m| startup_error(op, ErrorKind::InvalidState, &m))?;
-    let events = std::mem::take(&mut polled.events);
+    let events = polled.events;
     let had_input = !events.is_empty();
-    // SDL announces a size or density change; the window is not polled.
     if polled.window_changed {
-        native::runtime_of_mut(coordinator, &mut |r| runtime::window_changed(r));
+        run_runtime(coordinator, &|runtime| {
+            runtime::window_changed(runtime);
+            runtime::sync_facts(runtime)
+        })?;
     }
-    // A covered window has no end event: while it is hidden, ask once a frame whether it is back.
+    // A covered window has no end event: ask once a frame whether it is back.
     let visible = polled.visible || {
         let mut seen = false;
         native::runtime_of_mut(coordinator, &mut |r| seen = matches!(runtime::visible(r), Ok(true)));
-        if seen {
+        if seen && !resizing {
             input_state::set_visible(&mut state.input.borrow_mut(), true);
         }
         seen
@@ -884,14 +939,13 @@ fn one_frame(
     if events.iter().any(|e| matches!(e, Event::Closed)) {
         state.stopped.set(true);
     }
-    // A minimized or covered interactive window neither updates nor draws; any input wakes it.
-    // A finite run (max_frames, RAYS_MAX_FRAMES, export) is a test or a capture: it always runs.
-    if limit.is_none() && !visible {
-        *shown = None;
-        input_state::wait(&state.input.borrow(), 33);
+    // A finite run (tests and export) always draws, including from a hidden window.
+    frames.hidden = limit.is_none() && !visible;
+    if frames.hidden {
+        frames.shown = None;
         return Ok(());
     }
-    *count += 1;
+    frames.count += 1;
     let dt = match config_.clock {
         Clock::Realtime => time::delta(&state.time.borrow()),
         Clock::Fixed(value) => value,
@@ -899,26 +953,29 @@ fn one_frame(
     let base = make_frame(
         config_,
         &state.input.borrow(),
-        *count,
+        frames.count,
         match config_.clock {
             Clock::Realtime => time::now(&state.time.borrow()),
-            Clock::Fixed(_) => *count as f64 * dt,
+            Clock::Fixed(_) => frames.count as f64 * dt,
         },
         dt,
         events,
     );
     let presentation = with_runtime_facts(coordinator)?;
-    if presentation.logical_width != *logical_width || presentation.logical_height != *logical_height {
-        input_state::configure(&state.input.borrow(), presentation.logical_width, presentation.logical_height)
+    let size = (presentation.logical_width, presentation.logical_height);
+    if size != frames.logical_size {
+        input_state::configure(&state.input.borrow(), size.0, size.1)
             .map_err(|m| startup_error(op, ErrorKind::InvalidState, &m))?;
+        frames.logical_size = size;
     }
-    *logical_width = presentation.logical_width;
-    *logical_height = presentation.logical_height;
     let scale_x = presentation.drawable_width as f64 / presentation.logical_width as f64;
     let scale_y = presentation.drawable_height as f64 / presentation.logical_height as f64;
-    let mut input = base.input.clone();
-    input.size = (presentation.logical_width, presentation.logical_height);
-    let facts = frame::Frame { input, pixel_scale: (scale_x, scale_y), ..base };
+    let mut facts = base;
+    facts.input.size = size;
+    facts.pixel_scale = (scale_x, scale_y);
+    if resizing {
+        facts.mouse_delta = (0., 0.);
+    }
     {
         let mut recent = crash.recent.borrow_mut();
         if recent.len() == 120 {
@@ -939,13 +996,13 @@ fn one_frame(
     // A picture whose present was skipped (no drawable) was not shown: it is drawn again.
     if limit.is_some() {
         scene::render(&scene_);
-    } else if polled.window_changed || shown.as_ref().is_none_or(|last| !scene::same(last, &scene_)) {
+    } else if polled.window_changed || frames.shown.as_ref().is_none_or(|last| !scene::same(last, &scene_)) {
         let skipped = rr::skipped_presents(coordinator);
         scene::render(&scene_);
-        *shown = if rr::skipped_presents(coordinator) == skipped { Some(scene_) } else { None };
-        *quiet = 0;
+        frames.shown = if rr::skipped_presents(coordinator) == skipped { Some(scene_) } else { None };
+        frames.quiet = 0;
     } else {
-        *quiet = quiet_after(*quiet, had_input);
+        frames.quiet = quiet_after(frames.quiet, had_input);
     }
     if let Some(e) = render_failure.borrow_mut().take() {
         return Err(e);
@@ -956,11 +1013,11 @@ fn one_frame(
     if let Some(e) = PENDING_FAILURE.with(|p| p.borrow_mut().take()) {
         return Err(e);
     }
-    if profile && *count % 30 == 0
+    if profile && frames.count % 30 == 0
         && let Ok(s) = rr::stats(coordinator) {
             eprintln!(
                 "profile frame {}: gpu {:.2} ms, draws {}, passes {}, uploaded {} B, sun passes {}, plan hits {} misses {}",
-                count,
+                frames.count,
                 s.gpu_duration_seconds * 1000.,
                 s.logical_draws,
                 s.logical_passes,

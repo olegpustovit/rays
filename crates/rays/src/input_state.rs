@@ -148,13 +148,21 @@ pub struct Polled {
     pub visible: bool,
 }
 
-pub(crate) fn wait(_state: &InputState, timeout_ms: i32) -> bool {
+pub(crate) fn wait(timeout_ms: i32) -> bool {
     sdl::wait(timeout_ms).unwrap_or(false)
 }
 
-pub(crate) fn poll(state: &mut InputState) -> Result<Polled, String> {
+pub(crate) fn poll(state: &std::cell::RefCell<InputState>) -> Result<Polled, String> {
+    // The resize watch can update the sketch while SDL pumps. Apply the queued input only
+    // once the pump returns, with no borrow of the sketch input across the callback.
+    #[cfg(not(target_os = "linux"))]
+    let events = sdl::poll();
+    let state = &mut *state.borrow_mut();
     state.delta = (0., 0.);
     ri::begin_frame(&mut state.source);
+    #[cfg(not(target_os = "linux"))]
+    let pumped = events.and_then(|events| sdl::push_all(&mut state.source, events));
+    #[cfg(target_os = "linux")]
     let pumped = sdl::pump(&mut state.source);
     let native = ri::drain(&mut state.source);
     let window_changed = native.iter().any(|e| matches!(e, Event::Resized(_) | Event::PixelSizeChanged(_)));

@@ -1,6 +1,9 @@
 pub use pxui_sdl::translate::{button, in_points, key, positive, scroll_phase, translate};
 use sdl3::Event as SdlEvent;
 
+#[cfg(not(target_os = "linux"))]
+pub use sdl3::event::set_live_resize_callback;
+
 use crate::runtime_input;
 use input::Event;
 
@@ -28,10 +31,12 @@ pub fn push_all(value: &mut runtime_input::RuntimeInput, events: Vec<SdlEvent>) 
 
 #[cfg(not(target_os = "linux"))]
 pub fn pump(value: &mut runtime_input::RuntimeInput) -> Result<(), String> {
-    match sdl3::event::poll_coalesced() {
-        Err(error) => Err(error.to_string()),
-        Ok(events) => push_all(value, events),
-    }
+    poll().and_then(|events| push_all(value, events))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn poll() -> Result<Vec<SdlEvent>, String> {
+    sdl3::event::poll_coalesced().map_err(|error| error.to_string())
 }
 
 #[cfg(not(target_os = "linux"))]
