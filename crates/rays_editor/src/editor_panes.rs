@@ -9,7 +9,6 @@ use std::rc::Rc;
 use editor_core::panels::{self as panels, Panel};
 use editor_document::document::{self as doc_mod, Level};
 use flow_graph::flow_edit::{self as fe, ArgKey};
-use flow_graph::probe;
 use flow_graph::projection as p;
 use flow_sop::lower;
 use flow_syntax::context;
@@ -493,7 +492,7 @@ pub fn scope_node<'a>(value: &ModelView<'a>) -> Option<(Key, sop::node::T)> {
     let [path] = selected.as_slice() else { return None };
     scope_name(value)?;
     let n = p::find(&laid.scope, path)?;
-    let node_id = compiled_at(value, &probe::chains(&laid.scope), records, &n.path)?;
+    let node_id = compiled_at(value, pane_view(value).chains.as_ref(), records, &n.path)?;
     compiled_node(value, node_id).map(|node| (n.path.clone(), node))
 }
 
@@ -504,13 +503,14 @@ pub fn lit_tags<'a>(value: &ModelView<'a>) -> (pick::Set, Option<LitCache>) {
     match (pane_laid(value), selected.as_slice()) {
         (Some(laid), [site]) if scope_name(value).is_some() => {
             if let Some(c) = &value.lit {
-                if c.site == *site && c.at == value.probes && std::sync::Arc::ptr_eq(&c.evaluated, &lowered.evaluated) && c.scope == *laid.scope {
+                if c.site == *site && c.at == value.probes && std::sync::Arc::ptr_eq(&c.evaluated, &lowered.evaluated) && Rc::ptr_eq(&c.scope, &laid.scope) {
                     return (c.tags.clone(), value.lit.clone());
                 }
             }
-            let iter = probes_of(value, &probe::chains(&laid.scope), site);
+            let chains = pane_view(value).chains.as_ref();
+            let iter = probes_of(value, chains, site);
             let tags: pick::Set = lower::tags(lowered, site, &iter).into_iter().collect();
-            (tags.clone(), Some(LitCache { site: site.clone(), at: value.probes.clone(), evaluated: lowered.evaluated.clone(), scope: (*laid.scope).clone(), tags }))
+            (tags.clone(), Some(LitCache { site: site.clone(), at: value.probes.clone(), evaluated: lowered.evaluated.clone(), scope: laid.scope.clone(), tags }))
         }
         _ => (pick::Set::new(), None),
     }
@@ -532,9 +532,9 @@ pub fn failed_nodes<'a>(value: &ModelView<'a>) -> Vec<(Key, String)> {
             }
             let mut all = Vec::new();
             nodes(&laid.scope, &mut all);
-            let chains = probe::chains(&laid.scope);
+            let chains = pane_view(value).chains.as_ref();
             let records = laid.records.as_ref().unwrap();
-            all.iter().filter(|n| compiled_at(value, &chains, records, &n.path) == Some(node_id)).map(|n| (n.path.clone(), code.clone())).collect()
+            all.iter().filter(|n| compiled_at(value, chains, records, &n.path) == Some(node_id)).map(|n| (n.path.clone(), code.clone())).collect()
         }
         _ => Vec::new(),
     }

@@ -5,7 +5,6 @@ use editor_core::guide_context;
 use editor_core::keymap;
 use editor_core::panels::Panel;
 use editor_core::router;
-use flow_graph::probe;
 use flow_graph::projection::{self as fproj, ZoneKind};
 use flow_syntax::phase_timer;
 use pxui::ui::Ui;
@@ -164,7 +163,7 @@ pub fn probe_caption<'a>(value: &ModelView<'a>) -> Option<String> {
     let own = zones.iter().find(|n| n.path == *path);
     let zone = match own {
         Some(n) => Some(n.path.clone()),
-        None => match probe::chains(&laid.scope).get(path) {
+        None => match pane_view(value).chains.get(path) {
             Some(chain) if !chain.is_empty() => chain.last().cloned(),
             _ => None,
         },

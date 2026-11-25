@@ -374,7 +374,7 @@ pub struct LitCache {
     pub site: w::Path,
     pub at: PathMap<i64>,
     pub evaluated: Arc<flow_eval::Eval>,
-    pub scope: fprojection::Scope,
+    pub scope: Rc<fprojection::Scope>,
     pub tags: pick::Set,
 }
 
