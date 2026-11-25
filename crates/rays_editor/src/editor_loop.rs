@@ -815,6 +815,20 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     // a held button defers the write to its release: the synced write is tens of ms (F_FULLFSYNC)
     // and stuttered every orbit and slider drag at 2 Hz
     if frame.input.buttons.is_empty() { autosave(value, false, frame.input.t); }
+    // Pointer-only hover: compose once and let scene_of borrow (pointer is not in the picture).
+    let pointer_only = raw_frame.input.events.iter().all(|e| matches!(e, Event::PointerMoved(_)));
+    if pointer_only
+        && !update_.scene_changed
+        && !update_.prepared_changed
+        && !update_.effects.view
+        && !update_.effects.export
+    {
+        if value.last_picture.is_none() {
+            value.last_picture = Some(Rc::new(compose_scene(value, raw_frame)));
+        }
+    } else {
+        value.last_picture = None;
+    }
     inspected
 }
 
@@ -1055,6 +1069,7 @@ pub fn memory_boundary(value: &mut LoopModel) {
     }
     if core_changed {
         value.rest = None;
+        value.last_picture = None;
     }
 }
 
@@ -1076,6 +1091,9 @@ pub fn after_present(value: &mut LoopModel, frame_: &frame::Frame) {
 }
 
 pub fn scene_of<'a>(value: &'a LoopModel, frame_: &frame::Frame) -> Cow<'a, [scene_node]> {
+    if let Some(pic) = &value.last_picture {
+        return Cow::Borrowed(pic.as_slice());
+    }
     match &value.rest {
         Some(rest) if same_input(&rest.shown, frame_) => Cow::Borrowed(rest.picture.as_slice()),
         _ => Cow::Owned(compose_scene(value, frame_)),

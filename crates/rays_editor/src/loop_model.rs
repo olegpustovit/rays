@@ -151,6 +151,8 @@ pub struct LoopModel {
     pub panel_seen: Option<(V::PanelKey, u64)>,
     /// fingerprint of with_view_overlays inputs (skip rebuild on graph pan/zoom)
     pub view_overlay_fp: Option<u64>,
+    /// Pointer-only hover: reuse the last composed scene (pointer is not part of the picture).
+    pub last_picture: Option<Rc<Vec<rays::scene::Node>>>,
 }
 
 /// Scene objects a sketch starts with: its lights as light objects.
@@ -263,7 +265,8 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
             let saved_doc = std::sync::Arc::downgrade(&core.doc);
             Ok(LoopModel {
                 panel_seen: None,
-        view_overlay_fp: None,
+                view_overlay_fp: None,
+                last_picture: None,
                 core: Rc::new(core),
                 rest: None,
                 camera,
