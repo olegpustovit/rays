@@ -161,7 +161,10 @@ fn render_core(core: &Core, state: &e::State, p: &Prepared, live: &Frame, size: 
         None => (None, None),
     };
     let mut result: Option<scene::Scene> = None;
-    e::transaction(state, &mut || {
+    // Warm playing canvases must not COW-snapshot state around the draw: `transaction` Arc-shares
+    // before/next maps and every `merge_state_maps` then `clone_subtree`s (~2/frame on basic).
+    // Rollback is for edit/probe paths that call `transaction` explicitly.
+    let mut draw = || -> Result<(), Diagnostic> {
         I::force(&p.states, &I::ForceOptions { state: Some(state.clone()), ..Default::default() }, live)?;
         if let Some((kept, scene)) = &*p.kept.borrow() {
             if p.whole && *kept == size {
@@ -268,7 +271,8 @@ fn render_core(core: &Core, state: &e::State, p: &Prepared, live: &Frame, size: 
         p.borrows.set(!table_devices.is_empty());
         result = Some(scene);
         Ok(())
-    })?;
+    };
+    draw()?;
     result.ok_or_else(|| v::fail("E_DRAW_KIND", "The drawing produced no scene."))
 }
 

@@ -1704,24 +1704,21 @@ pub mod executor {
                     let key = (r.1, r.0);
                     if let Some(found) = self.forced.lock().unwrap().get(&key) { return Ok(found.clone()); }
                     e::residual::bind_live(*r, &self.live, Some(&state))?;
-                    let restore = e::residual::checkpoint(*r)?;
+                    // No eager checkpoint: it Arc-shares before/next for the walk and warm merges clone.
                     let result = match self.execute(*r, &self.live) {
                         Some(Ok(value)) => Ok(value),
                         Some(Err(d)) => {
                             if strict_or_resident {
                                 Err(d)
                             } else {
-                                restore();
                                 self.fell_back.store(true, Ordering::Relaxed);
                                 reference(self, &Value::Residual(*r), &state)
                             }
                         }
                         None => {
                             if strict_or_resident && !e::state_dependent(&Value::Residual(*r)) {
-                                restore();
                                 Err(v::fail("E_CORE_FORM", "This value needs a compiled executor."))
                             } else {
-                                restore();
                                 self.fell_back.store(true, Ordering::Relaxed);
                                 reference(self, &Value::Residual(*r), &state)
                             }
@@ -1864,19 +1861,11 @@ pub mod executor {
                     }
                 }
             };
-            let mut produced: Option<Result<Value, Diagnostic>> = None;
+            // No COW `transaction` around force: save_state Arc-shares before/next maps and every
+            // begin_frame merge then clone_subtrees (~2/frame on animated basic). Warm canvas
+            // advances state intentionally; edit/probe paths that need rollback call transaction.
             let go = |run: &Arc<Run>| -> Result<Value, Diagnostic> { if o.reference { fallback(run) } else { body(run) } };
-            let transacted = e::transaction(&state, &mut || {
-                let r = go(&run);
-                let ok = r.as_ref().map(|_| ()).map_err(|d| d.clone());
-                produced = Some(r);
-                ok
-            });
-            result = match (transacted, produced) {
-                (_, Some(r)) => r,
-                (Err(d), None) => Err(d),
-                (Ok(()), None) => Ok(Value::NoGeo),
-            };
+            result = go(&run);
             fell_back = fell_back || run.fell_back.load(Ordering::Relaxed);
         }
         if let Some(profile) = &program.profile {

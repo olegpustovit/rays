@@ -198,6 +198,8 @@ pub struct Data {
     frames: Cell<i64>,
     /// dropped displays, released at a later `frame`
     releasing: RefCell<Vec<(i64, Rc<dyn Fn()>)>>,
+    /// Warm canvas reuses one resident fold scope (new_scope was ~2 allocs/frame).
+    drawing_resident: RefCell<Option<drawing::Resident>>,
 }
 
 #[derive(Clone)]
@@ -245,6 +247,7 @@ pub fn create(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>) -> WorkspaceGpu
         topology: RefCell::new(None),
         frames: Cell::new(0),
         releasing: RefCell::new(Vec::new()),
+        drawing_resident: RefCell::new(None),
     });
     SERVICES.with(|s| s.borrow_mut().insert(id, data.clone()));
     WorkspaceGpu(data)
@@ -859,10 +862,15 @@ pub fn resident(gpu: &G::Config, t_: &WorkspaceGpu) -> Option<drawing::Resident>
     if !gpu.fast {
         return None;
     }
+    if let Some(cached) = t_.0.drawing_resident.borrow().clone() {
+        return Some(cached);
+    }
     let (_, host) = owner(&t_.0).ok()?;
     let show_host = host.clone();
     let show: drawing::Show = Rc::new(move |packed: &Packed, live: &Frame| h::show(&show_host, packed, live));
-    Some((h::resident(false, gpu.fast, &host), show))
+    let made = (h::resident(false, gpu.fast, &host), show);
+    *t_.0.drawing_resident.borrow_mut() = Some(made.clone());
+    Some(made)
 }
 
 pub fn image(t_: &WorkspaceGpu, key: &crate::workspace_images::ImageKey, width: i64, height: i64, publish: &mut dyn FnMut(&image_sink::Output) -> Result<(), Diagnostic>, value: &G::Value) -> Result<(), Diagnostic> {
@@ -1288,6 +1296,7 @@ pub fn close(t_: &WorkspaceGpu) {
     }
     d.mark_sets.borrow_mut().clear();
     d.images.borrow_mut().clear();
+    *d.drawing_resident.borrow_mut() = None;
     let owner_ = d.owner.borrow_mut().take();
     if let Some((gpu, host)) = owner_ {
         h::close(&host);

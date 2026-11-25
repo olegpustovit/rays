@@ -2557,7 +2557,8 @@ impl core_exec::Resident for HostResident {
         scope_of(&self.0).map_or(Ok(None), |s| s.nth(v, i))
     }
     fn exact(&self) -> Option<Arc<dyn core_exec::Resident>> {
-        scope_of(&self.0).and_then(|s| live(&s.t).then(|| resident_exact(&s.t).executor))
+        // Reuse this scope: `resident_exact` used to `new_scope` every draw (~1 alloc/frame on basic).
+        scope_of(&self.0).filter(|s| live(&s.t)).map(|_| Arc::new(HostResident(self.0.clone())) as Arc<dyn core_exec::Resident>)
     }
 }
 

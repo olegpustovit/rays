@@ -148,13 +148,9 @@ pub fn requests(host: &mut WorkspaceHost, reference: bool, state: &e::State, liv
     let mut result: Vec<Request> = Vec::new();
     {
         let prepared_ref: &Prepared = prepared;
-        e::transaction(state, &mut || {
-            let forced = force(&prepared_ref.effects, state, reference, live)?;
-            let mut collected = Vec::new();
-            collect(plan, prepared_ref, state, reference, live, &forced, &mut collected)?;
-            result = collected;
-            Ok(())
-        })?;
+        // No COW transaction (warm merge must keep unique state maps).
+        let forced = force(&prepared_ref.effects, state, reference, live)?;
+        collect(plan, prepared_ref, state, reference, live, &forced, &mut result)?;
     }
     let rising: Vec<Request> = result.iter().filter(|r| r.when_ && !prepared.edges[r.id as usize]).map(|r| Request { id: r.id, when_: r.when_, kind: r.kind.clone(), args: r.args.clone() }).collect();
     for r in &result {

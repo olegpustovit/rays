@@ -2778,8 +2778,10 @@ fn general_values(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Valu
 /// State needs its residual even in strict mode; strict failures restore it without entering the
 /// tree walker. Ordinary failures retain the evaluator's fallback.
 pub fn execute(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Value, Diagnostic> {
+    // Eager checkpoint Arc-shares state maps for the whole execute; warm begin_frame merges then
+    // clone every frame. Strict/probe paths that need rollback still checkpoint below on error.
     let restore: Box<dyn Fn()> = match o.root {
-        Some(r) if !prepared.stateless => e::residual::checkpoint(r)?,
+        Some(r) if !prepared.stateless && o.strict => e::residual::checkpoint(r)?,
         _ => Box::new(|| {}),
     };
     let close = || {
@@ -2842,8 +2844,16 @@ pub fn draw(prepared: &Prepared, live: &Frame, size: (i64, i64), buffers: &Buffe
     let image = o.image.clone();
     let n = program.locals.len();
     // Draw always pools locals: animated canvases re-enter every frame with a small register file.
+    // Drop pooled Text Arcs before eval so frame_arena ephemeral rewrite can keep strong_count == 1.
     let values = match prepared.pool.lock().unwrap().take() {
-        Some(values) if values.len() == n => values,
+        Some(mut values) if values.len() == n => {
+            for v in &mut values {
+                if matches!(v, Value::Text(_)) {
+                    *v = Value::NoGeo;
+                }
+            }
+            values
+        }
         _ => vec![Value::NoGeo; n],
     };
     let entries = prepared.marks_pool.lock().unwrap().take().unwrap_or_default();

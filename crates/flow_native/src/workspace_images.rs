@@ -972,14 +972,9 @@ fn with_request(t_: &Rc<Data>, ctx: &Ctx, context: Option<&l::ImageContext>, dis
 
 fn run_request(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, display: bool, plan: &e::Plan, value: &Value) -> Result<EntryRef, Diagnostic> {
     let d = &**t_;
-    let mut run = || -> Result<EntryRef, Diagnostic> {
-        let mut outcome: Option<EntryRef> = None;
-        e::transaction(&ctx.state, &mut || {
-            outcome = Some(resolve_value(t_, request, ctx, display, plan, value)?);
-            Ok(())
-        })?;
-        Ok(outcome.expect("resolved"))
-    };
+    // No COW transaction: save_state Arc-shares before/next and warm begin_frame merges clone.
+    // Image resolve advances canvas state intentionally; failures leave the frame's writes.
+    let mut run = || -> Result<EntryRef, Diagnostic> { resolve_value(t_, request, ctx, display, plan, value) };
     let result = match value {
         Value::Deferred(_, id) => with_active(request, ctx.pid, *id, &mut run),
         _ => run(),
