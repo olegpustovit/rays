@@ -144,13 +144,13 @@ impl Acc {
     }
     fn on(&mut self) {
         self.mark = mem_sys::alloc_count();
-        #[cfg(all(feature = "trace", any(target_os = "macos", target_os = "ios")))]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         if mem_sys::TRACE {
             mem_sys::trace::resume();
         }
     }
     fn off(&mut self) {
-        #[cfg(all(feature = "trace", any(target_os = "macos", target_os = "ios")))]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         if mem_sys::TRACE {
             mem_sys::trace::stop();
         }
@@ -161,7 +161,7 @@ impl Acc {
 fn check(name: &str, rust: u64, native: u64, (max_rust, max_native): (u64, u64)) {
     eprintln!("{name}: {rust} rust/unit (ceil {max_rust}), {native} native/unit (ceil {max_native})");
     if rust > max_rust || (mem_sys::TRACE && native > max_native) {
-        #[cfg(all(feature = "trace", any(target_os = "macos", target_os = "ios")))]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         if mem_sys::TRACE {
             let report = mem_sys::trace::report(15);
             eprint!("top sites:\n{}", mem_sys::trace::format_sites(&report.sites, 15));
@@ -187,7 +187,7 @@ fn scenario(p: &mut P, f: &mut dyn FnMut(&mut P, u64)) -> (u64, u64) {
         f(p, i as u64);
     }
     let n0 = mem_sys::alloc_count();
-    #[cfg(all(feature = "trace", any(target_os = "macos", target_os = "ios")))]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     if mem_sys::TRACE {
         mem_sys::trace::clear();
         mem_sys::trace::start();
@@ -201,7 +201,7 @@ fn scenario(p: &mut P, f: &mut dyn FnMut(&mut P, u64)) -> (u64, u64) {
 }
 
 fn native_total(units: u64) -> u64 {
-    #[cfg(all(feature = "trace", any(target_os = "macos", target_os = "ios")))]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     if mem_sys::TRACE {
         mem_sys::trace::stop();
         return if units == 0 { 0 } else { mem_sys::trace::totals().native / units };
@@ -370,7 +370,7 @@ fn e_click_toggle() {
     for (phase, ceil) in [(0, E_CLICK_KEY), (1, E_CLICK_SETTLED)] {
         let name = if phase == 0 { "E_click_key" } else { "E_click_settled" };
         let mut acc = Acc::new();
-        #[cfg(all(feature = "trace", any(target_os = "macos", target_os = "ios")))]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         if mem_sys::TRACE {
             mem_sys::trace::start();
             mem_sys::trace::stop();
@@ -411,7 +411,7 @@ fn e_click_toggle() {
     for (phase, ceil) in [(0, E_TOGGLE_KEY), (1, E_TOGGLE_SETTLED)] {
         let name = if phase == 0 { "E_toggle_key" } else { "E_toggle_settled" };
         let mut acc = Acc::new();
-        #[cfg(all(feature = "trace", any(target_os = "macos", target_os = "ios")))]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         if mem_sys::TRACE {
             mem_sys::trace::start();
             mem_sys::trace::stop();

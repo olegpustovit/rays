@@ -52,7 +52,6 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 ## Requests
 
 ### Z0
-- `zero_alloc.rs` uses `#[cfg(feature = "trace")]` but that feature is on `mem_sys`, not the test crate → `-D unexpected-cfgs` breaks `gpu_editor`. Drop the feature predicate (keep the macos/ios cfg) or `allow(unexpected_cfgs)`.
 ### Z1
 - Z2: `scope_state::selected` → `&[Path]`; call sites may need `.iter()`/`.to_vec()` (Z2 patched editor_frame/panels/inspect/loop/reduce for compile).
 - Z2: `LitCache.scope` is `Rc<Scope>` in `editor_model.rs` (for lit_tags).
