@@ -762,43 +762,9 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
             });
         }
     }
-    let mut editors: Vec<Change> = Vec::new();
-    match (&t.editing, &pl.item) {
-        (Some(Editing::Name(path)), Item::Item(n)) if *path == n.path => {
-            ui.within(&tile, &mut |ui| {
-                let np = n.path.clone();
-                editors = edit_field(c, ui, (21.0 * z, 3.0 * z), (pl.w - 21.0 - sp::HEAD_PAD) * z, 18.0 * z, "name", &p::title(n), &valid_name, &move |v| Change::SyntaxEdit(e::Op::Rename { node: np.clone(), to_: v }));
-            });
-        }
-        (Some(Editing::Output(path)), Item::Item(n)) if *path == n.path => {
-            match pl.lines.iter().position(|l| matches!(l, p::Line::Row(_, r) if r.kind == p::RowKind::Add && r.key == ArgKey::Kw(String::new()))) {
-                Some(k) => {
-                    ui.within(&tile, &mut |ui| {
-                        let np = n.path.clone();
-                        editors = edit_field(c, ui, (sp::LABEL_X * z, (rows_top(n, 0.0) + (k as f64 * p::ROW_HEIGHT) + 4.0) * z), (pl.w - sp::LABEL_X - sp::HEAD_PAD) * z, sp::FIELD_H * z, "output", "", &valid_name, &move |v| {
-                            Change::SyntaxEdit(e::Op::AddField { node: np.clone(), name: v, value: number_syntax("0".to_owned()) })
-                        });
-                    });
-                }
-                None => {
-                    c.finished = true;
-                }
-            }
-        }
-        (Some(Editing::Default(path)), Item::Input(i)) if *path == i.path => {
-            ui.within(&tile, &mut |ui| {
-                let text = match &i.default {
-                    Some(d) => flow_syntax::lisp::flat(d),
-                    None => String::new(),
-                };
-                let (form, input) = (i.path[0].to_string(), i.name.clone());
-                editors = edit_field(c, ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, "default", &text, &|v: &str| single_form(v).is_some(), &move |v| {
-                    Change::SyntaxEdit(e::Op::SetInputDefault { form: form.clone(), input: input.clone(), value: single_form(&v).expect("validated") })
-                });
-            });
-        }
-        _ => {}
-    }
+    // focused editors live in `edit_overlay` (sibling of the content view): PXUI's mark_input
+    // dirties the focused view and its ancestors every frame for the caret, which would rebuild
+    // every card if the field lived here
     let mut movers: Vec<Change> = Vec::new();
     if let Item::Item(n) = &pl.item {
         if p::reorderable(n) && z >= 0.5 && (shown == Level::Card || shown == Level::Full) {
@@ -844,7 +810,6 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
     }
     let mut all = fields;
     all.extend(add_clicks);
-    all.extend(editors);
     all.extend(movers);
     all.extend(switchers);
     all
@@ -1588,20 +1553,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, emit: &mut 
         let xs = ui.signal(&xb);
         let rs = ui.signal(&rb);
         let all = t.saved.frames(&scope);
-        if let Some(Editing::Title(sp_, k)) = &t.editing {
-            if *sp_ == scope && *k == i as i64 {
-                let all2 = all.clone();
-                let scope2 = scope.clone();
-                let at = ctx.local(t, (x + 4.0, y + 2.0));
-                let ch = edit_field(ctx, ui, at, (wd - 24.0).max(40.0), 16.0 * z, &format!("frt{}", i), &title, &|s: &str| !s.is_empty() && !s.contains('"'), &move |v| {
-                    Change::FramesSet {
-                        scope: scope2.clone(),
-                        frames: all2.iter().enumerate().map(|(j, f)| if j == i { (v.clone(), f.1, f.2) } else { f.clone() }).collect(),
-                    }
-                });
-                emit.extend(ch);
-            }
-        }
+        let _ = (title, wd, x, y); // title edited in edit_overlay
         if xs.clicked {
             emit.push(Change::FramesSet { scope: scope.clone(), frames: all.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, f)| f.clone()).collect() });
         } else if rs.pressed && left_button(&rs) {
@@ -1748,6 +1700,73 @@ fn view_step(t: &mut Pane, sig: &Signal, frame: &rframe::Frame) {
         let pan_y = my - t.y as f64 - ((my - t.y as f64 - t.pan_y) * k);
         (t.zoom, t.pan_x, t.pan_y, t.zoom_t) = (zoom, pan_x, pan_y, frame.input.t);
     }
+}
+
+
+/// Focused name/default/title/output fields, outside the content sized_view.
+/// PXUI's `mark_input` dirties the focused view and ancestors every frame for the caret; keeping
+/// the field here leaves the content view's cache key valid and the cards kept.
+fn edit_overlay(t: &mut Pane, ui: &mut Ui, changes: &mut Vec<Change>) {
+    let Some(editing) = t.editing.clone() else { return };
+    let z = t.zoom;
+    let fs = font_of(z);
+    let mut ctx = Ctx { finished: false, opened: None, fs, ov: (0.0, 0.0), select: None };
+    let local = |t: &Pane, pt: (f64, f64)| (pt.0 - t.x as f64, pt.1 - t.y as f64);
+    match editing {
+        Editing::Name(path) => {
+            if let (Some(n), Some((pl, ax, ay))) = (node_of(t, &path), t.item_at(&path)) {
+                let at = local(t, (sx(t, *ax) + 21.0 * z, sy(t, *ay) + 3.0 * z));
+                let np = n.path.clone();
+                changes.extend(edit_field(&mut ctx, ui, at, (pl.w - 21.0 - sp::HEAD_PAD) * z, 18.0 * z, "name", &p::title(n), &valid_name, &move |v| Change::SyntaxEdit(e::Op::Rename { node: np.clone(), to_: v })));
+            }
+        }
+        Editing::Output(path) => {
+            if let (Some(n), Some((pl, ax, ay))) = (node_of(t, &path), t.item_at(&path)) {
+                match pl.lines.iter().position(|l| matches!(l, p::Line::Row(_, r) if r.kind == p::RowKind::Add && r.key == ArgKey::Kw(String::new()))) {
+                    Some(k) => {
+                        let at = local(t, (sx(t, *ax) + sp::LABEL_X * z, sy(t, *ay) + (rows_top(n, 0.0) + (k as f64 * p::ROW_HEIGHT) + 4.0) * z));
+                        let np = n.path.clone();
+                        changes.extend(edit_field(&mut ctx, ui, at, (pl.w - sp::LABEL_X - sp::HEAD_PAD) * z, sp::FIELD_H * z, "output", "", &valid_name, &move |v| {
+                            Change::SyntaxEdit(e::Op::AddField { node: np.clone(), name: v, value: number_syntax("0".to_owned()) })
+                        }));
+                    }
+                    None => ctx.finished = true,
+                }
+            }
+        }
+        Editing::Default(path) => {
+            if let (Some(i), Some((pl, ax, ay))) = (input_of(t, &path), t.item_at(&path)) {
+                let text = match &i.default {
+                    Some(d) => flow_syntax::lisp::flat(d),
+                    None => String::new(),
+                };
+                let (form, input) = (i.path[0].to_string(), i.name.clone());
+                let at = local(t, (sx(t, *ax) + sp::value_x(pl.w) * z, sy(t, *ay) + 4.0 * z));
+                changes.extend(edit_field(&mut ctx, ui, at, sp::FIELD_W * z, sp::FIELD_H * z, "default", &text, &|v: &str| single_form(v).is_some(), &move |v| {
+                    Change::SyntaxEdit(e::Op::SetInputDefault { form: form.clone(), input: input.clone(), value: single_form(&v).expect("validated") })
+                }));
+            }
+        }
+        Editing::Title(scope, index) => {
+            if let Some((ox, oy)) = t.geo.origins.iter().find(|(q, _)| *q == scope).map(|(_, o)| *o) {
+                if let Some((title, (fx, fy), (fw, _))) = t.saved.frames(&scope).get(index as usize) {
+                    let at = local(t, (sx(t, ox + fx) + 4.0, sy(t, oy + fy) + 2.0));
+                    let all = t.saved.frames(&scope);
+                    let scope2 = scope.clone();
+                    let i = index as usize;
+                    let title = title.clone();
+                    changes.extend(edit_field(&mut ctx, ui, at, (fw * z - 24.0).max(40.0), 16.0 * z, &format!("frt{i}"), &title, &|s: &str| !s.is_empty() && !s.contains('"'), &move |v| {
+                        Change::FramesSet {
+                            scope: scope2.clone(),
+                            frames: all.iter().enumerate().map(|(j, f)| if j == i { (v.clone(), f.1, f.2) } else { f.clone() }).collect(),
+                        }
+                    }));
+                }
+            }
+        }
+    }
+    if ctx.finished { t.editing = None; }
+    if let Some(editing) = ctx.opened.take() { t.editing = Some(editing); }
 }
 
 /// The canvas: the bare ground's hit box (presses, pans, the wheel), clipping what it holds. It takes
@@ -1945,6 +1964,13 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
         let font_size = ui.font_size().round() as i64;
         let over = crate::sized_view(ui, "graph-hover", crate::scope_hover::overlay_key(t, &now, key) ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| crate::scope_hover::overlay(t, ui, &now, font_size));
         ui.set_at(&over, (0.0, 0.0));
+        // focused field outside the content view (see edit_overlay): keyed by what it edits
+        if t.editing.is_some() {
+            let mut hh = std::hash::DefaultHasher::new();
+            t.editing.hash(&mut hh);
+            let edit = crate::sized_view(ui, "graph-edit", hh.finish() ^ salt, Size::Px(w as f32), Size::Px(h as f32), &mut |ui| edit_overlay(t, ui, changes));
+            ui.set_at(&edit, (0.0, 0.0));
+        }
     });
     canvas
 }

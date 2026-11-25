@@ -243,7 +243,7 @@ pub enum Drag {
 }
 
 /// The text field open over the pane: a node's name, a graph input's default, a frame's title.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Editing {
     Name(Path),
     Default(Path),

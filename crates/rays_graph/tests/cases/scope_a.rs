@@ -448,6 +448,31 @@ fn scope_ghost_values() {
     check(scope::inspect::ghost(&scope_step(&mut ui, bare, &frame0()).0, &path(&["g", "k"])).is_none(), "a ghost value without records");
 }
 
+
+/// Idle frames with a selection (and an open name field) keep the content view: the focused
+/// edit_field lives in `graph-edit`, so PXUI's mark_input does not dirty the content sized_view.
+fn scope_idle_keeps_content_with_selection() {
+    let mut ui = new_ui();
+    let w = load_workspace("bloom");
+    let (view, _) = scope_view(ScopeOpts::default(), &w, "flower");
+    let (view, _) = scope_step(&mut ui, view, &frame0());
+    let heart = path(&["flower", "heart"]);
+    let mut view = { let mut v = view; scope::select(vec![heart.clone()], &mut v); v };
+    let mut changes = Vec::new();
+    scope::run_command(&mut view, Command::EditName, &mut changes);
+    check(scope::editing(&view), "EditName did not open the name field");
+    let (view, _) = scope_step(&mut ui, view, &frame0());
+    let builds0 = scope::inspect::content_builds(&view);
+    let mut cur = view;
+    for _ in 0..5 {
+        let (v, _) = scope_step(&mut ui, cur, &frame0());
+        cur = v;
+    }
+    let built = scope::inspect::content_builds(&cur) - builds0;
+    check(built == 0, &format!("idle frames with a selection rebuilt content {built} times"));
+    check(scope::selected(&cur) == vec![heart], "selection was lost");
+}
+
 pub const CASES: &[(&str, fn())] = &[
     ("scope_zoom_geometry", scope_zoom_geometry),
     ("scope_levels_a", scope_levels_a),
@@ -455,6 +480,7 @@ pub const CASES: &[(&str, fn())] = &[
     ("scope_levels_c", scope_levels_c),
     ("scope_connection_hover", scope_connection_hover),
     ("scope_idle_frame", scope_idle_frame),
+    ("scope_idle_keeps_content_with_selection", scope_idle_keeps_content_with_selection),
     ("scope_suspend", scope_suspend),
     ("scope_pinch", scope_pinch),
     ("scope_carry", scope_carry),
