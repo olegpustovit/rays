@@ -25,9 +25,9 @@ fn action_rounds() -> u64 {
 /// Seeded at measured (2026-11-25, after Z1/Z2/Z4) + 5%, rounded up. Lanes lower these toward 0 / ≤12.
 // Ceilings = measured + 5% after Z6b Image-run + Atlas direct quads (2026-11-25, RAYS_SLOW).
 const A_BASIC: (u64, u64) = (252, 9);
-const A_EMPTY: (u64, u64) = (11, 9);
-const A_BARE: (u64, u64) = (11, 9);
-const A_ISOGRID: (u64, u64) = (20, 13);
+const A_EMPTY: (u64, u64) = (7, 9);
+const A_BARE: (u64, u64) = (7, 9);
+const A_ISOGRID: (u64, u64) = (16, 13);
 // Selected idle is Z8's floor (~344 with may_rest); keep prior ceil until Z8 lowers that path.
 const A_ISOSEL: (u64, u64) = (29, 15);
 const B_HOVER_GRAPH: (u64, u64) = (182, 15);

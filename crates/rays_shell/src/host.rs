@@ -314,29 +314,32 @@ fn begin(frame: &scene::FrameStart) -> Result<(), Error> {
     }));
     let native = backend::native_commands(&frame.commands)?;
     let commands = Commands { vk_command_buffer: native.vk_command_buffer, mtl_command_buffer: native.mtl_command_buffer, ..Commands::default() };
-    for paint in &frame.painters {
-        let found = ENTRIES.with(|entries| entries.borrow().iter().find(|e| Rc::ptr_eq(&e.paint, paint)).map(|e| (e.ui.clone(), e.renderer.clone(), e.blur_extent.get())));
-        let Some((ui, cell, blur_extent)) = found else { continue };
-        let Some(ui_rc) = ui.upgrade() else { continue };
-        let mut renderer = cell.borrow_mut();
-        let creating = renderer.is_none();
-        if creating {
-            let ui = ui_rc.try_borrow().map_err(|_| error::make("Pxui.paint", ErrorKind::InvalidState, "the UI is being changed while its frame renders"))?;
-            *renderer = Some(make_renderer(&ui, &frame.device)?);
+    scene::with_frame_painters(|painters| -> Result<(), Error> {
+        for paint in painters {
+            let found = ENTRIES.with(|entries| entries.borrow().iter().find(|e| Rc::ptr_eq(&e.paint, paint)).map(|e| (e.ui.clone(), e.renderer.clone(), e.blur_extent.get())));
+            let Some((ui, cell, blur_extent)) = found else { continue };
+            let Some(ui_rc) = ui.upgrade() else { continue };
+            let mut renderer = cell.borrow_mut();
+            let creating = renderer.is_none();
+            if creating {
+                let ui = ui_rc.try_borrow().map_err(|_| error::make("Pxui.paint", ErrorKind::InvalidState, "the UI is being changed while its frame renders"))?;
+                *renderer = Some(make_renderer(&ui, &frame.device)?);
+            }
+            let renderer = renderer.as_mut().expect("renderer");
+            if blur_extent.is_some_and(|extent| creating || extent != frame.size_px) {
+                let [width, height] = frame.size_px;
+                renderer.resize(width, height).map_err(|code| failure(&ui, "prepare backdrop blur", code))?;
+                ENTRIES.with(|entries| {
+                    if let Some(entry) = entries.borrow().iter().find(|entry| Rc::ptr_eq(&entry.paint, paint)) {
+                        entry.blur_extent.set(Some(frame.size_px));
+                    }
+                });
+            }
+            let prepared = renderer.prepare(&commands, frame.serial, frame.completed);
+            prepared.map_err(|code| failure(&ui, "renderer prepare", code))?;
         }
-        let renderer = renderer.as_mut().expect("renderer");
-        if blur_extent.is_some_and(|extent| creating || extent != frame.size_px) {
-            let [width, height] = frame.size_px;
-            renderer.resize(width, height).map_err(|code| failure(&ui, "prepare backdrop blur", code))?;
-            ENTRIES.with(|entries| {
-                if let Some(entry) = entries.borrow().iter().find(|entry| Rc::ptr_eq(&entry.paint, paint)) {
-                    entry.blur_extent.set(Some(frame.size_px));
-                }
-            });
-        }
-        let prepared = renderer.prepare(&commands, frame.serial, frame.completed);
-        prepared.map_err(|code| failure(&ui, "renderer prepare", code))?;
-    }
+        Ok(())
+    })?;
     Ok(())
 }
 

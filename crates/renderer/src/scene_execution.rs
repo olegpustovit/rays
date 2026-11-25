@@ -381,7 +381,16 @@ pub struct FrameStart {
     pub size_px: [u32; 2],
     pub serial: u64,
     pub completed: u64,
-    pub painters: Vec<UiPaint>,
+}
+
+thread_local! {
+    /// Painters for the in-flight `on_frame_begin` hook; valid only during the hook call.
+    static FRAME_PAINTERS: RefCell<Vec<UiPaint>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Borrow the UI painters for the current `on_frame_begin` hook (empty outside a hook).
+pub fn with_frame_painters<R>(f: impl FnOnce(&[UiPaint]) -> R) -> R {
+    FRAME_PAINTERS.with(|slot| f(&slot.borrow()))
 }
 
 /// Runs before a frame that has UI layers records its first pass, so the UI can record what must sit outside a pass (glyph uploads).
@@ -414,23 +423,39 @@ fn completed_before(serial: u64) -> Result<u64, Error> {
 }
 
 fn run_frame_hooks(value: &SceneExecution, commands: &backend::Commands, batches: &[Rc<BatchPlan>]) -> Result<(), Error> {
-    let hooks = FRAME_HOOKS.with(|h| h.borrow().clone());
-    if hooks.is_empty() {
-        return Ok(());
-    }
-    let mut painters: Vec<UiPaint> = Vec::new();
-    for ui in batches.iter().filter_map(|b| b.ui.as_ref()) {
-        if !painters.iter().any(|p| Rc::ptr_eq(p, &ui.paint)) {
-            painters.push(ui.paint.clone());
+    // Borrow hooks in place; painters live in FRAME_PAINTERS for the hook (no per-frame Vec alloc).
+    FRAME_HOOKS.with(|h| {
+        let hooks = h.borrow();
+        if hooks.is_empty() {
+            return Ok(());
         }
-    }
-    if painters.is_empty() {
-        return Ok(());
-    }
-    let completed = completed_before(value.encoded_frame)?;
-    let size_px = [value.configuration.physical_width as u32, value.configuration.physical_height as u32];
-    let start = FrameStart { device: value.device.clone(), commands: commands.clone(), size_px, serial: value.encoded_frame, completed, painters };
-    hooks.iter().try_for_each(|hook| hook(&start))
+        FRAME_PAINTERS.with(|slot| {
+            let mut painters = slot.borrow_mut();
+            painters.clear();
+            if painters.capacity() < 4 {
+                painters.reserve(4);
+            }
+            for ui in batches.iter().filter_map(|b| b.ui.as_ref()) {
+                if !painters.iter().any(|p| Rc::ptr_eq(p, &ui.paint)) {
+                    painters.push(ui.paint.clone());
+                }
+            }
+            if painters.is_empty() {
+                return Ok(());
+            }
+            drop(painters);
+            let completed = completed_before(value.encoded_frame)?;
+            let size_px = [value.configuration.physical_width as u32, value.configuration.physical_height as u32];
+            let start = FrameStart {
+                device: value.device.clone(),
+                commands: commands.clone(),
+                size_px,
+                serial: value.encoded_frame,
+                completed,
+            };
+            hooks.iter().try_for_each(|hook| hook(&start))
+        })
+    })
 }
 
 /// Paints layer `layer` of its owner's last UI frame (PXUI's painter, from the shell).
