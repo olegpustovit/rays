@@ -4,17 +4,17 @@ use super::click_budget::{session, sketch, P};
 use input::{Event, Key, MouseButton};
 
 /// (action, ceiling on the key frame, ceiling on the third frame after it)
-/// Set 2026-11-25 at measured + 5% (L4); enter and up measured since they enter a defn and come back.
+/// Measured in a fresh process plus 5%, rounded up and capped at the previous ceiling.
 const CEILINGS: &[(&str, u64, u64)] = &[
-    ("zoom rest", 616, 487),
-    ("pan across overscan", 502, 1121),
-    ("node select", 500, 488),
-    ("box select", 499, 840),
-    ("after box select", 842, 556),
-    ("escape", 643, 556),
-    ("hover moves", 684, 563),
-    ("enter", 1982, 492),
-    ("up", 627, 488),
+    ("zoom rest", 472, 464),
+    ("pan across overscan", 479, 977),
+    ("node select", 477, 465),
+    ("box select", 476, 698),
+    ("after box select", 533, 533),
+    ("escape", 620, 533),
+    ("hover moves", 540, 540),
+    ("enter", 1958, 466),
+    ("up", 602, 465),
 ];
 
 fn rest(p: &mut P, name: &str, first: (f64, u64)) {
@@ -38,6 +38,7 @@ fn tour(p: &mut P) {
         let q = (at.0 + 100. * i as f64 - 150., at.1 + 20. * i as f64);
         frames.push(p.step(&[], vec![Event::PointerMoved(q)], q));
     }
+    assert!(frames[1..3].iter().all(|&(_, allocs)| allocs <= 471), "pan inside overscan rebuilt the native submission: {frames:?}");
     p.record("pan across overscan", frames);
     p.step(&[], vec![Event::PointerReleased(MouseButton::RightButton, (at.0 + 150., at.1 + 60.))], at);
     for _ in 0..3 {
@@ -51,6 +52,7 @@ fn tour(p: &mut P) {
         let q = (900. + 100. * i as f64, 60. + 80. * i as f64);
         frames.push(p.step(&[], vec![Event::PointerMoved(q)], q));
     }
+    assert!(frames[1..3].iter().all(|&(_, allocs)| allocs <= 471), "rubber-band drag rebuilt the native submission: {frames:?}");
     p.record("box select", frames);
     p.step(&[], vec![Event::PointerReleased(MouseButton::LeftButton, (1200., 300.))], (1200., 300.));
     let f = p.step(&[], vec![], (1200., 300.));
