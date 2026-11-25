@@ -27,9 +27,9 @@ fn form(source: &str, tokens: &[Token], at: &mut usize, next: &mut Id, notes: Ve
         return Err(fail(source, token.start, token.stop, "E_DEPTH", &format!("S-expression nesting exceeds {DEPTH_LIMIT} forms")));
     }
     let node = match &token.kind {
-        Kind::Word(Word::Symbol(text)) => Node::Sym(builder.intern(text)),
-        Kind::Word(Word::Keyword(text)) => Node::Kw(builder.intern(text)),
-        Kind::Word(Word::Number(text)) => Node::Num(builder.intern(text)),
+        Kind::Word(Word::Symbol) => Node::Sym(builder.intern(&source[token.start as usize..token.stop as usize])),
+        Kind::Word(Word::Keyword) => Node::Kw(builder.intern(&source[token.start as usize + 1..token.stop as usize])),
+        Kind::Word(Word::Number) => Node::Num(builder.intern(&source[token.start as usize..token.stop as usize])),
         Kind::String(bytes) => Node::Str(builder.bytes(bytes)),
         Kind::Open(delimiter) => {
             let id = fresh(next);

@@ -78,9 +78,9 @@ pub fn lex(text: &str) -> (Vec<Token>, Vec<(usize, usize)>, Vec<(char, usize)>) 
                     Kind::Head
                 } else {
                     match word {
-                        Word::Symbol(_) => Kind::Sym,
-                        Word::Keyword(_) => Kind::Kw,
-                        Word::Number(_) => Kind::Num,
+                        Word::Symbol => Kind::Sym,
+                        Word::Keyword => Kind::Kw,
+                        Word::Number => Kind::Num,
                     }
                 };
                 tokens.push(Token { kind, start, stop });

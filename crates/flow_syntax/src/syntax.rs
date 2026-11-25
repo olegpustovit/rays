@@ -226,7 +226,7 @@ mod tests {
         let tokens = text_lexer::lex(source);
         let issue = tokens.iter().find_map(|token| token.issue.as_ref()).unwrap();
         assert_eq!((issue.code.as_str(), issue.start, issue.finish), ("E_UNEXPECTED", 7, 9));
-        assert!(tokens.iter().any(|token| matches!(&token.kind, text_lexer::Kind::Word(text_lexer::Word::Symbol(value)) if value == "b") && token.start == 11));
+        assert!(tokens.iter().any(|token| matches!(&token.kind, text_lexer::Kind::Word(text_lexer::Word::Symbol)) && token.start == 11));
         let problem = parse(source).unwrap_err();
         assert_eq!(problem.code, issue.code); assert_eq!(problem.span.as_ref().map(|span| i64::from(span.start)), Some(issue.start));
         assert!(text_lexer::lex("x").iter().any(|token| matches!(token.kind, text_lexer::Kind::End)));

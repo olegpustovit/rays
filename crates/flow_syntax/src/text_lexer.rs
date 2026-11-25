@@ -1,8 +1,8 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Word {
-    Symbol(String),
-    Keyword(String),
-    Number(String),
+    Symbol,
+    Keyword,
+    Number,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -220,11 +220,11 @@ pub fn lex(source: &str) -> Vec<Token> {
                 let finish = word_end(bytes, i);
                 let text = &source[start..finish];
                 let word = if text.len() > 1 && text.starts_with(':') {
-                    Word::Keyword(text[1..].to_owned())
+                    Word::Keyword
                 } else if number(text) {
-                    Word::Number(text.to_owned())
+                    Word::Number
                 } else {
-                    Word::Symbol(text.to_owned())
+                    Word::Symbol
                 };
                 tokens.push(token(Kind::Word(word), start, finish, None));
                 i = finish;
@@ -265,6 +265,8 @@ mod tests {
         }
         let tokens = lex("(a \"bad\\q\" b)");
         assert_eq!(tokens.iter().find_map(|token| token.issue.as_ref()).unwrap().start, 7);
-        assert!(tokens.iter().any(|token| matches!(&token.kind, Kind::Word(Word::Symbol(word)) if word == "b") && token.start == 11));
+        assert!(tokens.iter().any(|token| {
+            matches!(token.kind, Kind::Word(Word::Symbol)) && token.start == 11
+        }));
     }
 }
