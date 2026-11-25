@@ -212,9 +212,104 @@ pub fn save_source(core: &mut m::EditorModel, source: Option<source_file::Source
     }
 }
 
-/// One recovery file per sketch. Polling at 2 Hz keeps printing and filesystem work out of idle
-/// frames; a live drag is saved after its release (the caller skips held frames); close flushes.
+/// The recovery file's writer: one long-lived thread per editor (started on the first save) prints and
+/// writes, so the UI thread hands over only Arcs. A newer document replaces one not yet started; dropping
+/// the last handle (and `flush`) waits until the newest has been written.
+/// ponytail: its own thread, not the parallel pool, which only runs fork-join work; move it if the pool
+/// gains detached jobs.
+#[derive(Default)]
+pub struct Saver {
+    shared: Arc<(std::sync::Mutex<SaveSlot>, std::sync::Condvar)>,
+    thread: std::cell::RefCell<Option<std::thread::JoinHandle<()>>>,
+}
+
+#[derive(Default)]
+struct SaveSlot {
+    next: Option<Box<dyn FnOnce() -> Result<(), String> + Send>>,
+    busy: bool,
+    closed: bool,
+    /// the last finished write's outcome, until the UI thread reads it
+    done: Option<Result<(), String>>,
+}
+
+impl Saver {
+    fn lock(&self) -> std::sync::MutexGuard<'_, SaveSlot> {
+        self.shared.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn submit(&self, save: Box<dyn FnOnce() -> Result<(), String> + Send>) {
+        self.lock().next = Some(save);
+        self.shared.1.notify_all();
+        let mut thread = self.thread.borrow_mut();
+        if thread.is_none() {
+            let shared = self.shared.clone();
+            *thread = Some(std::thread::Builder::new().name("rays-autosave".into()).spawn(move || write_saves(&shared)).expect("autosave thread"));
+        }
+    }
+
+    /// Waits for every submitted save; the outcome of the last one, if not read yet.
+    pub fn flush(&self) -> Option<Result<(), String>> {
+        let mut slot = self.lock();
+        while slot.next.is_some() || slot.busy {
+            slot = self.shared.1.wait(slot).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        slot.done.take()
+    }
+
+    fn take_done(&self) -> Option<Result<(), String>> {
+        self.lock().done.take()
+    }
+}
+
+impl Drop for Saver {
+    fn drop(&mut self) {
+        self.lock().closed = true;
+        self.shared.1.notify_all();
+        if let Some(thread) = self.thread.get_mut().take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn write_saves(shared: &(std::sync::Mutex<SaveSlot>, std::sync::Condvar)) {
+    let (mutex, wake) = shared;
+    let mut slot = mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    loop {
+        if let Some(save) = slot.next.take() {
+            slot.busy = true;
+            drop(slot);
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(save)).unwrap_or_else(|_| Err("the writer panicked".to_owned()));
+            slot = mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            slot.busy = false;
+            slot.done = Some(outcome);
+            wake.notify_all();
+        } else if slot.closed {
+            return;
+        } else {
+            slot = wake.wait(slot).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+}
+
+/// A finished write: a failure is shown and the document saved again at the next poll.
+fn read_outcome(value: &mut LoopModel, outcome: Option<Result<(), String>>) {
+    match outcome {
+        Some(Ok(())) => value.state_error = None,
+        Some(Err(message)) => {
+            value.state_error = Some(format!("Autosave failed: {message}"));
+            value.saved_doc = std::sync::Weak::new();
+            value.saved_drafts = None;
+        }
+        None => {}
+    }
+}
+
+/// One recovery file per sketch. Polling at 2 Hz keeps checking out of idle frames; the print and the
+/// write run on the `Saver`'s thread (a fixed-step run waits for it, as for its cook); a live drag is
+/// saved after its release (the caller skips held frames); close flushes.
 pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
+    let outcome = value.saver.take_done();
+    read_outcome(value, outcome);
     if !force && now >= value.state_checked && now - value.state_checked < 0.5 {
         return;
     }
@@ -223,19 +318,16 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     let saved_same = value.saved_doc.upgrade().is_some_and(|d| Arc::ptr_eq(&d, &value.core.doc));
     // B42: unapplied drafts are work too; they are saved as the applies Command-S would make. A change of
     // any draft saves again.
-    // ponytail: the last saved drafts are remembered per thread, one editor per thread; a field of LoopModel when two share one
-    thread_local!(static SAVED_DRAFTS: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) });
     let drafts = editor_text::draft_signature(&value.core);
-    // a draft still being typed is not written: it must stand through one more poll (the write prints and
-    // checks the document, tens of ms on a big sketch)
-    thread_local!(static SEEN_DRAFTS: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) });
-    let settled = drafts == SEEN_DRAFTS.get();
-    SEEN_DRAFTS.set(drafts);
-    if !force && drafts.is_some() && drafts != SAVED_DRAFTS.get() && !settled {
+    // a draft still being typed is not written: it must stand through one more poll (applying it
+    // checks the document)
+    let settled = drafts == value.seen_drafts;
+    value.seen_drafts = drafts;
+    if !force && drafts.is_some() && drafts != value.saved_drafts && !settled {
         return;
     }
     // a preview document is never saved
-    if (saved_same && key == value.saved_view_key && drafts == SAVED_DRAFTS.get()) || editor_host::carrying(&value.core) {
+    if (saved_same && key == value.saved_view_key && drafts == value.saved_drafts) || editor_host::carrying(&value.core) {
         return;
     }
     let view = if key == value.saved_view_key { value.saved_view.clone() } else { V::section(&value.camera, &value.extra) };
@@ -254,17 +346,44 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     } else {
         value.core.doc.clone()
     };
-    match preset::save(&editor_setup::state_directory(&value.core), &value.core.state_name, &doc, &view) {
-        Ok(_) => {
-            value.saved_doc = Arc::downgrade(&value.core.doc);
-            value.saved_view = view;
-            value.saved_view_key = key;
-            value.state_error = None;
-            value.state_owned = true;
-            SAVED_DRAFTS.set(drafts);
+    let (directory, name, written) = (editor_setup::state_directory(&value.core), value.core.state_name.clone(), view.clone());
+    value.saver.submit(Box::new(move || preset::save(&directory, &name, &doc, &written).map(|_| ())));
+    value.saved_doc = Arc::downgrade(&value.core.doc);
+    value.saved_view = view;
+    value.saved_view_key = key;
+    value.state_owned = true;
+    value.saved_drafts = drafts;
+    if force || value.core.cook.await_ {
+        let outcome = value.saver.flush();
+        read_outcome(value, outcome);
+    }
+}
+
+#[cfg(test)]
+mod saver {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    fn newest_save_wins_and_drop_waits_for_it() {
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let saver = Saver::default();
+        let gate = Arc::new(Mutex::new(()));
+        let held = gate.lock().unwrap();
+        for k in 0..4 {
+            let (written, gate) = (written.clone(), gate.clone());
+            saver.submit(Box::new(move || { let _g = gate.lock().unwrap(); written.lock().unwrap().push(k); Ok(()) }));
         }
-        Err(message) => {
-            value.state_error = Some(format!("Autosave failed: {message}"));
-        }
+        drop(held);
+        assert_eq!(saver.flush(), Some(Ok(())));
+        let seen = written.lock().unwrap().clone();
+        assert_eq!(seen.last(), Some(&3), "the newest save is written: {seen:?}");
+        assert!(seen.len() <= 2, "a save not started is replaced: {seen:?}");
+        saver.submit(Box::new(|| Err("disk full".to_owned())));
+        assert_eq!(saver.flush(), Some(Err("disk full".to_owned())));
+        let w = written.clone();
+        saver.submit(Box::new(move || { std::thread::sleep(std::time::Duration::from_millis(20)); w.lock().unwrap().push(9); Ok(()) }));
+        drop(saver);
+        assert_eq!(written.lock().unwrap().last(), Some(&9), "dropping the saver finished the pending save");
     }
 }
