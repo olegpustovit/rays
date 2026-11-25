@@ -309,18 +309,19 @@ fn sec_b(r: &mut Run, _cx: &Ctx, cooks: &Rc<Cell<i64>>) {
 
 /// Dragging an object transform slider in the inspector does not re-cook.
 fn sec_c(r: &mut Run, _cx: &Ctx, cooks: &Rc<Cell<i64>>) {
+    r.e.core.ui.borrow_mut().set_a11y(true);
     r.key(Key::Home);
     let cooked = cooks.get();
     r.select("geo1", 8);
     r.step(vec![]);
-    let (ix, iy, _, _) = editor::panes(&r.e, &tframe((450, 320), vec![], &[], &[], 0)).inspector;
-    // the Translate row's middle: 346 before 55482c94 added the 24-point Cull row above it
-    let slider = |x: i64| (ix + 100 + x, iy + 370);
+    let (ix, _, _, _) = editor::panes(&r.e, &tframe((450, 320), vec![], &[], &[], 0)).inspector;
+    let row = crate::support::shell::inspector_row(&r.e.core.ui.borrow(), ix as f32, "translate");
+    let slider = |x: i64| (row.x.round() as i64 + 100 + x, (row.y + row.h / 2.0).round() as i64);
     let translate_x = |e: &Ed| editor::selected_node(e).and_then(|n| n.fields.into_iter().find(|f| f.name == "translate_x").map(|f| f.current));
     let before = translate_x(&r.e);
     r.step_with(slider(0), &[], &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, at(slider(0)))]);
     for x in [4, 8, 12, 16] {
-        r.step_with(slider(x), &[], &[MouseButton::LeftButton], vec![]);
+        r.step_with(slider(x), &[], &[MouseButton::LeftButton], vec![Event::PointerMoved(at(slider(x)))]);
     }
     r.step_with(slider(20), &[], &[], vec![Event::PointerReleased(MouseButton::LeftButton, at(slider(20)))]);
     assert!(before.is_some() && translate_x(&r.e) != before, "dragging the Translate X slider did not edit geo1");

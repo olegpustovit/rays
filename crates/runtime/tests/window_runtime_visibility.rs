@@ -15,6 +15,15 @@ fn window_runtime_visibility() {
     set_text_input(&mut runtime, None).unwrap();
     assert!(!visible(&mut runtime).unwrap(), "native window was not initially hidden");
     show(&mut runtime).unwrap();
+    #[cfg(target_os = "macos")]
+    {
+        // AppKit reports exposure after the window server has ordered the window.
+        let start = std::time::Instant::now();
+        while !visible(&mut runtime).unwrap() && start.elapsed() < std::time::Duration::from_millis(500) {
+            runtime_input_sdl3::wait(10).unwrap();
+            runtime_input_sdl3::poll().unwrap();
+        }
+    }
     assert!(visible(&mut runtime).unwrap(), "show did not set visible flag");
     let configuration = surface_configuration(&mut runtime).unwrap();
     assert!(configuration.layer.is_some() && configuration.logical_width > 0);

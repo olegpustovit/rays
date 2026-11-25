@@ -66,7 +66,7 @@ draw/circle|draw|Drawing|scalar|pos=at:vec3,radius:float|opt=|rest=-|kw=fill:col
 draw/circles|draw|Drawing|scalar|pos=positions:array:vec3|opt=|rest=-|kw=radius:any,fill:any,stroke:any|choices=|any=false|live=false|ar=false|pk=false
 draw/rects|draw|Drawing|scalar|pos=positions:array:vec3,sizes:any|opt=|rest=-|kw=fill:any,stroke:any|choices=|any=false|live=false|ar=false|pk=false
 draw/lines|draw|Drawing|scalar|pos=from:array:vec3,to:array:vec3|opt=|rest=-|kw=color:any,width:float|choices=|any=false|live=false|ar=false|pk=false
-draw/text|draw|Drawing|scalar|pos=at:vec3,text:text|opt=|rest=-|kw=color:color,size:float|choices=|any=false|live=false|ar=false|pk=false
+draw/text|draw|Drawing|scalar|pos=at:vec3,text:text|opt=|rest=-|kw=color:color,size:float,font:text,align:text,tracking:float|choices=|any=false|live=false|ar=false|pk=false
 draw/translate|draw|Drawing|scalar|pos=offset:vec3,drawing:drawing|opt=|rest=-|kw=|choices=|any=false|live=false|ar=false|pk=false
 draw/rotate|draw|Drawing|scalar|pos=angle:float,drawing:drawing|opt=|rest=-|kw=|choices=|any=false|live=false|ar=false|pk=false
 draw/scale|draw|Drawing|scalar|pos=factor:any,drawing:drawing|opt=|rest=-|kw=|choices=|any=false|live=false|ar=false|pk=false

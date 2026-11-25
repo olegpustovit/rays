@@ -28,6 +28,7 @@ fn f(v: f64) -> Option<Value> {
 
 /// The list's rows, walked with the arrows: the row under the focus is the selection.
 fn select_row(r: &mut Run, k: usize) {
+    r.e.core.ui.borrow_mut().set_a11y(true);
     let m = (450., 300.);
     r.step(m, vec![]);
     r.step(m, vec![]);
@@ -41,17 +42,21 @@ fn select_row(r: &mut Run, k: usize) {
     r.step(m, vec![]);
 }
 
-/// A drag across the inspector's slider at `row` points under the panel's top.
-fn drag_slider(r: &mut Run, row: i64) {
-    let (ix, iy, _, _) = r.panes().inspector;
-    // the first field of a vector row starts at the control column: 12 + 6 + 8 + 56 + 8 = 90 in a
-    // 180-wide panel; a point 10 inside it
-    let at = |x: i64| ((ix + 100 + x) as f64, (iy + row) as f64);
-    r.stepb(&[LB], at(0), vec![Event::PointerPressed(LB, at(0))]);
-    for x in [4, 8, 12, 16] {
-        r.stepb(&[LB], at(x), vec![]);
+fn translate_slider(r: &Run) -> (f64, f64) {
+    let (ix, _, _, _) = r.panes().inspector;
+    let row = inspector_row(&r.e.core.ui.borrow(), ix as f32, "translate");
+    // The first field of this vector is 90 points into the 180-point inspector.
+    ((row.x + 100.0) as f64, (row.y + row.h / 2.0) as f64)
+}
+
+fn drag_slider(r: &mut Run) {
+    let (x, y) = translate_slider(r);
+    let at = |offset| (x + offset, y);
+    r.stepb(&[LB], at(0.0), vec![Event::PointerPressed(LB, at(0.0))]);
+    for offset in [4.0, 8.0, 12.0, 16.0] {
+        r.stepb(&[LB], at(offset), vec![Event::PointerMoved(at(offset))]);
     }
-    r.step(at(20), vec![Event::PointerReleased(LB, at(20))]);
+    r.step(at(20.0), vec![Event::PointerReleased(LB, at(20.0))]);
     r.step((450., 300.), vec![]);
 }
 
@@ -79,10 +84,7 @@ pub fn run_loop_copies() {
     select_row(&mut r, 1);
     let x = |r: &Run| objects(&r.e).iter().map(|i| field_of(i, "translate_x")).collect::<Vec<_>>();
     check(objects(&r.e).len() == 3 && x(&r).iter().all(|v| *v == f(0.)), "the loop did not make three objects at the origin");
-    // the head is 118 tall at the test's 11 points, then Inputs (4 + 24, 24), Geometry (16 + 24, three switch
-    // rows since 55482c94 added Cull) and Transform (16 + 24): the translate row is 118 + 52 + 112 + 40 = 322
-    // down, its middle 12 more
-    drag_slider(&mut r, 334);
+    drag_slider(&mut r);
     let moved = x(&r);
     check(moved.iter().all(|v| *v == moved[0] && *v != f(0.)), "dragging a literal field of one copy did not move all three");
     check(count_of(&r.source(), ":translate [") == 1, &format!("the template was not edited once: {}", r.source()));
@@ -116,9 +118,7 @@ pub fn run_loop_copies() {
     let mut r = Run::new(editor(text));
     select_row(&mut r, 2);
     let before = r.source();
-    // the head 118, Inputs (4 + 24, 24), Light (16 + 24, five rows) and Transform (16 + 24), then 12 into
-    // the translate row: 118 + 52 + 160 + 40 + 12 = 382
-    drag_slider(&mut r, 382);
+    drag_slider(&mut r);
     check(r.source() == before && r.undo_label().is_none(), "a computed field of a copy was written");
     check(has(&r.dump("edit error"), "computed by the loop"), &format!("no reason for the refused edit: {}", r.dump("edit error")));
     // deleting one copy skips its iteration: the others stay where they are
@@ -158,9 +158,7 @@ pub fn run_loop_expression() {
         (scene/merge (scene/geometry (ref g)) row))))"#;
     let mut r = Run::new(editor(text));
     select_row(&mut r, 2);
-    let (ix, iy, _, _) = r.panes().inspector;
-    // Option-click on the translate X field of the lamp
-    let label = ((ix + 100) as f64, (iy + 118 + 28 + 24 + 40 + 120 + 40 + 12) as f64);
+    let label = translate_slider(&r);
     r.step(label, vec![Event::PointerMoved(label)]);
     r.step_full(&[LB], &[Key::Alt], label, vec![Event::PointerPressed(LB, label)]);
     r.step_full(&[], &[Key::Alt], label, vec![Event::PointerReleased(LB, label)]);

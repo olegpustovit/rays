@@ -17,6 +17,12 @@ pub fn check(condition: bool, message: &str) {
         fail(message)
     }
 }
+
+pub fn inspector_row(ui: &pxui::Ui, left: f32, name: &str) -> pxui::Rect {
+    let rows = || ui.a11y_nodes().iter().filter(|node| node.rect.x >= left);
+    rows().find(|node| ui.a11y_name_of(node) == name).map(|node| node.rect)
+        .unwrap_or_else(|| panic!("missing inspector row {name}: {:?}", rows().map(|node| ui.a11y_name_of(node)).collect::<Vec<_>>()))
+}
 pub fn has(text: &str, sub: &str) -> bool {
     text.contains(sub)
 }

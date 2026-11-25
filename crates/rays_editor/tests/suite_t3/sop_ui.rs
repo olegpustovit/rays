@@ -73,40 +73,56 @@ pub fn inspector_rows() {
     let mut values = schema.default().to_vec();
     check(schema.fields().len() == 5, "sop_params defaults or ignored-field policy is incorrect");
     let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
-    let mut step = |values: &Vec<Value>, time: f64, events: Vec<Event>| -> (Vec<Value>, param::Effects) {
+    ui.set_a11y(true);
+    let step = |ui: &mut Ui, values: &Vec<Value>, time: f64, events: Vec<Event>| -> (Vec<Value>, param::Effects) {
         let mut out = (values.clone(), param::NO_EFFECTS);
         let v = values.clone();
-        rays_shell::host::build(&mut ui, &frame(time, events), &mut |ui: &mut Ui| {
+        let pointer = events.iter().rev().find_map(|event| match event {
+            Event::PointerMoved(point) | Event::PointerPressed(_, point) | Event::PointerReleased(_, point) => Some(*point),
+            _ => None,
+        });
+        let mut input = frame(time, events);
+        input.input.pointer = pointer.unwrap_or_default();
+        rays_shell::host::build(ui, &input, &mut |ui: &mut Ui| {
             ui.panel("inspector", &pxui::Overlay::DEFAULT.w_px(260.0), |ui: &mut Ui| {
                 ui.id("selected", |ui: &mut Ui| {
                     ui.label("Selected shape", pxui::Label::BODY);
                     let views = schema.view(&v).expect("view");
                     let changes = inspector::fields(ui, &["Geometry".to_string()], None, false, views.clone());
-                    out = if changes.is_empty() { (v.clone(), param::NO_EFFECTS) } else { schema.apply_all(&v, &changes).unwrap_or_else(|m| fail(&m)) };
+                    if !changes.is_empty() {
+                        out = schema.apply_all(&v, &changes).unwrap_or_else(|m| fail(&m));
+                    }
                 });
             });
         });
         out
     };
-    let (unchanged, effects) = step(&values, 0., vec![]);
+    let (unchanged, effects) = step(&mut ui, &values, 0., vec![]);
     check(unchanged == values && !effects.cook, "an idle inspector frame changed the graph");
-    // The shared inspector rows are 24 points, below the label and the folder's section header
-    let row = |index: i64| 24 + 40 + ((index - 2) * 24) + 12;
-    let (v, effects) = step(&values, 0.5, click(110, row(3)));
+    let row = |ui: &Ui, name| crate::support::shell::inspector_row(ui, 0.0, name);
+    let middle = |row: pxui::Rect| (row.y + row.h / 2.0).round() as i64;
+    let enabled = row(&ui, "enabled");
+    let (v, effects) = step(&mut ui, &values, 0.5, click(enabled.x.round() as i64 + 110, middle(enabled)));
     values = v;
     let get = |values: &Vec<Value>, name: &str| -> Value { values[schema.fields().iter().position(|f| f.name() == name).unwrap()].clone() };
     check(effects.cook && get(&values, "enabled") == Value::Bool(false), "inspector toggle did not apply through the node schema");
-    let (v, _) = step(&values, 1., click(170, row(4)));
+    let mode = row(&ui, "mode");
+    let (v, _) = step(&mut ui, &values, 1., click(mode.x.round() as i64 + 170, middle(mode)));
     values = v;
-    let (v, _) = step(&values, 1.05, vec![]);
+    let (v, _) = step(&mut ui, &values, 1.05, vec![]);
     values = v;
-    let (v, _) = step(&values, 1.1, click(170, row(4) + 54));
+    let sphere = pxui::testing::find(&ui, pxui::Role::MenuItem, "Sphere").expect("Sphere menu item");
+    let (v, _) = step(&mut ui, &values, 1.1, click((sphere.x + sphere.w / 2.0) as i64, middle(sphere)));
     values = v;
     check(get(&values, "mode") == Value::Choice("Sphere".into()), "inspector choice did not apply");
+    let count = row(&ui, "count");
+    let start = (f64::from(count.x) + 140.0, middle(count) as f64);
+    let end = (start.0 + 260.0, start.1);
     let (v, _) = step(
+        &mut ui,
         &values,
         1.5,
-        vec![Event::PointerPressed(MouseButton::LeftButton, (140., row(2) as f64)), Event::PointerMoved((400., row(2) as f64)), Event::PointerReleased(MouseButton::LeftButton, (400., row(2) as f64))],
+        vec![Event::PointerPressed(MouseButton::LeftButton, start), Event::PointerMoved(end), Event::PointerReleased(MouseButton::LeftButton, end)],
     );
     values = v;
     check(get(&values, "count") == Value::Int(5), "inspector integer drag did not clamp to the soft range");
