@@ -58,30 +58,74 @@ pub fn open_level(value: &mut EditorModel, level: Level) {
     { let pane = pane_mut(value); pane.at = level; pane.shown = None; pane.picked = selection::empty(); };
 }
 
-/// The geometry objects to cook: visible ones, each with its network.
-pub fn geometry_objects(value: &EditorModel) -> Vec<(i64, &net::Network, i64)> {
+/// Fill `out` with visible geometry objects (each with its network). Reuses `out`'s capacity.
+pub fn geometry_objects_into<'a>(value: &'a EditorModel, out: &mut Vec<(i64, &'a net::Network, i64)>) {
     // a workspace without a scene graph shows each graph the lowering made a network of; an image
     // graph is one (the canvas previews its nodes) but its payload is not geometry, so the geometry
     // cook never takes it (Flow_native.Workspace_images cooks images)
+    out.clear();
     let ws = &value.doc.workspace.ws;
     let image_graph = |node: &kg::Node| ws.checked.graphs.iter().any(|g| g.name == node.label && context::result(g.context) == ty::image());
     let scene_graph = scene(value);
-    let ids: Vec<i64> = objects::ids("geometry", &scene_graph).collect();
-    let mut found = Vec::with_capacity(ids.len());
-    for id in ids {
+    for id in objects::ids("geometry", &scene_graph) {
         if let (Some(node), Some(network)) = (kg::find(&scene_graph, id), value.doc.networks.get(&id)) {
             if objects::visible(&node) && !image_graph(&node) {
                 match value.viewed.get(&id) {
-                    Some((graph, displayed)) => found.push((id, graph, *displayed)),
+                    Some((graph, displayed)) => out.push((id, graph, *displayed)),
                     None => {
                         if let Some(displayed) = network.displayed {
-                            found.push((id, &network.graph, displayed));
+                            out.push((id, &network.graph, displayed));
                         }
                     }
                 }
             }
         }
     }
+}
+
+/// The geometry objects to cook: visible ones, each with its network.
+pub fn geometry_objects(value: &EditorModel) -> Vec<(i64, &net::Network, i64)> {
+    let mut found = Vec::new();
+    geometry_objects_into(value, &mut found);
+    found
+}
+
+fn each_geometry<'a>(value: &'a EditorModel, mut f: impl FnMut(i64, &'a net::Network, i64) -> bool) {
+    let ws = &value.doc.workspace.ws;
+    let image_graph = |node: &kg::Node| ws.checked.graphs.iter().any(|g| g.name == node.label && context::result(g.context) == ty::image());
+    let scene_graph = scene(value);
+    for id in objects::ids("geometry", &scene_graph) {
+        if let (Some(node), Some(network)) = (kg::find(&scene_graph, id), value.doc.networks.get(&id)) {
+            if objects::visible(&node) && !image_graph(&node) {
+                let hit = match value.viewed.get(&id) {
+                    Some((graph, displayed)) => Some((id, graph, *displayed)),
+                    None => network.displayed.map(|displayed| (id, &network.graph, displayed)),
+                };
+                if let Some((id, graph, displayed)) = hit {
+                    if !f(id, graph, displayed) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn has_geometry_objects(value: &EditorModel) -> bool {
+    let mut any = false;
+    each_geometry(value, |_, _, _| {
+        any = true;
+        false
+    });
+    any
+}
+
+pub fn first_geometry_object<'a>(value: &'a EditorModel) -> Option<(i64, &'a net::Network, i64)> {
+    let mut found = None;
+    each_geometry(value, |id, graph, displayed| {
+        found = Some((id, graph, displayed));
+        false
+    });
     found
 }
 
@@ -90,7 +134,7 @@ pub fn geometry_objects(value: &EditorModel) -> Vec<(i64, &net::Network, i64)> {
 pub fn focus_object<'a>(value: &ModelView<'a>) -> Option<i64> {
     match pane_level(value) {
         Level::Inside(id) if kind(value, id).as_deref() == Some("geometry") => Some(id),
-        Level::Inside(_) | Level::Scene => geometry_objects(value).first().map(|(id, _, _)| *id),
+        Level::Inside(_) | Level::Scene => first_geometry_object(value.model).map(|(id, _, _)| id),
     }
 }
 

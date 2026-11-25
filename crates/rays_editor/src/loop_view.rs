@@ -159,7 +159,7 @@ pub fn compose_view(
     camera: &rcam::Camera,
     camera_of: &dyn Fn(&str) -> rcam::Camera,
     paint_view: &PaintView,
-    guides: &dyn Fn(Bounds) -> Nodes,
+    guides: &dyn Fn(Bounds) -> Option<scene_node>,
     cache: Option<&HiddenSceneCache>,
     core: &Model,
     frame_: &frame::Frame,
@@ -203,7 +203,7 @@ pub fn compose_view(
     }
     let geometry = editor_shell::geometry(&core.into(), &core.workspace, frame_);
     let viewport = editor_shell::panes_in(&core.into(), &geometry).view;
-    let guides = if view_visible { guides(viewport) } else { Vec::new() };
+    let guides = if view_visible { guides(viewport) } else { None };
     // every viewport shows its own scene instance's image; the map replaces the focused one
     let floating: Vec<(String, Vec<usize>, Bounds)> = geometry
         .leaves
@@ -259,7 +259,9 @@ pub fn compose_view(
     order.reverse();
     let mut out = vec![scene::clear(background)];
     out.extend(order.into_iter().flatten());
-    out.extend(guides);
+    if let Some(g) = guides {
+        out.push(g);
+    }
     out.extend(editor_host::machinery(&core.into(), Some(&under), true));
     out
 }

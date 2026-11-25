@@ -1435,8 +1435,8 @@ fn guides_key(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_:
     } else {
         0u8.hash(&mut h);
     }
-    // Camera/light object ids: geometry revision proxy without cloning payloads.
-    for id in camera_ids(scene_) {
+    // Camera/light object ids: geometry revision proxy without collecting Vecs.
+    for id in objects::ids("camera", scene_) {
         id.hash(&mut h);
     }
     for id in objects::ids("light", scene_) {
@@ -1458,7 +1458,7 @@ thread_local! {
 fn guides_build(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_: &rcam::Camera, extra_: &Extra, pane: Bounds, bounds: Bounds) -> Nodes {
     let mut cameras = Nodes::new();
     if extra_.show.cameras {
-        for node_id in camera_ids(scene_) {
+        for node_id in objects::ids("camera", scene_) {
             let camera_ = kg::find(scene_, node_id).and_then(|n| node_camera(&n));
             if let Some(camera_) = camera_ {
                 if !same_view(&camera_, view_) {
@@ -1509,19 +1509,17 @@ fn guides_build(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view
 ///
 /// Cache hits return one `Node::Group` over the retained slice (Rc bump + one-slot vec): cloning the
 /// outer `Vec<Node>` on every hover/`scene_of` frame was Z3's leftover warm alloc.
-pub fn guides(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_: &rcam::Camera, extra_: &Extra, pane: Bounds, bounds: Bounds) -> Nodes {
+pub fn guides(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_: &rcam::Camera, extra_: &Extra, pane: Bounds, bounds: Bounds) -> scene_node {
     let key = guides_key(scene_, selected, space, view_, extra_, pane, bounds);
     GUIDES_CACHE.with(|slot| {
         let mut slot = slot.borrow_mut();
-        if let Some(cache) = slot.as_ref()
-            && cache.key == key
-        {
-            return vec![scene_node::Group(Rc::clone(&cache.nodes))];
+        if let Some(cache) = slot.as_ref().filter(|c| c.key == key) {
+            return scene_node::Group(Rc::clone(&cache.nodes));
         }
         let built = guides_build(scene_, selected, space, view_, extra_, pane, bounds);
         let nodes: Rc<[scene_node]> = Rc::from(built);
         *slot = Some(GuidesCache { key, nodes: Rc::clone(&nodes) });
-        vec![scene_node::Group(nodes)]
+        scene_node::Group(nodes)
     })
 }
 

@@ -881,11 +881,11 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
 
 pub fn compose_scene(value: &LoopModel, frame_: &frame::Frame) -> Nodes {
     let pv = |key: &str, vp: Bounds, view_: &rays::camera::Camera, r: &rays::scene3::Scene3| paint_view(value, key, vp, view_, r);
-    let guides = |bounds: Bounds| -> Nodes {
+    let guides = |bounds: Bounds| -> Option<rays::scene::Node> {
         if value.core.map_view {
-            Vec::new()
+            None
         } else {
-            V::guides(
+            Some(V::guides(
                 &editor_inspect::scene(&value.core),
                 editor_list::selected_node(&(&value.core).into()).as_ref(),
                 &editor_list::space(&(&value.core).into()),
@@ -893,7 +893,7 @@ pub fn compose_scene(value: &LoopModel, frame_: &frame::Frame) -> Nodes {
                 &value.extra,
                 bounds,
                 V::film(&value.extra, &focus_key(value), bounds),
-            )
+            ))
         }
     };
     compose_view(

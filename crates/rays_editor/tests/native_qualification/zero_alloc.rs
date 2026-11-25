@@ -31,11 +31,11 @@ const A_ISOGRID: (u64, u64) = (0, 13);
 // Selected idle: Z8 may_rest path; lowered after Z5 idle cuts (meas 10/12).
 const A_ISOSEL: (u64, u64) = (0, 13);
 // Z10 remasure (meas+5%): B 65/62, C 53/48, D 203, E_click 159.
-const B_HOVER_GRAPH: (u64, u64) = (69, 9);
-const B_HOVER_INSPECTOR: (u64, u64) = (66, 9);
-const C_PAN: (u64, u64) = (51, 9);
-const C_ZOOM: (u64, u64) = (56, 9);
-const D_TYPING: (u64, u64) = (214, 13);
+const B_HOVER_GRAPH: (u64, u64) = (62, 9);
+const B_HOVER_INSPECTOR: (u64, u64) = (59, 9);
+const C_PAN: (u64, u64) = (44, 9);
+const C_ZOOM: (u64, u64) = (48, 9);
+const D_TYPING: (u64, u64) = (207, 13);
 // E click/toggle (Z13): settled = idle = 0 after isogrid render 0 + settle wait for zoom-rest timer.
 const E_CLICK_KEY: (u64, u64) = (167, 9);
 const E_CLICK_SETTLED: (u64, u64) = (0, 13);

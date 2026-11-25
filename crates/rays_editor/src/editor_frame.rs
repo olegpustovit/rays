@@ -827,6 +827,11 @@ pub fn gated(value: &mut EditorModel, frame_: &frame::Frame, text_focus: bool, h
         },
         _ => false,
     };
+    let previous_pointer = value.live_frame.pointer;
+    let previous_held = !value.live_frame.buttons.is_empty();
+    // Steal vec capacities into `live`; leave a capacity-free stub (empty Vec is not a heap alloc).
+    let mut live = std::mem::replace(&mut value.live_frame, input::at_time(frame_.input.t));
+    flow_native::live_frame::refresh(&mut live, frame_);
     let gate = input::gate::Gate {
         prompt: value.prompt.is_some(),
         menu: value.menu.is_some(),
@@ -836,10 +841,11 @@ pub fn gated(value: &mut EditorModel, frame_: &frame::Frame, text_focus: bool, h
         pointer_on_picture: pane_is_picture,
         window_key: window_focus >= 2,
         pressed: frame_.input.events.iter().any(|e| matches!(e, Event::PointerPressed(..))),
-        previous: std::mem::replace(&mut value.live_frame, input::at_time(frame_.input.t)),
+        previous_pointer,
+        previous_held,
         blocked: std::mem::take(&mut value.sketch_blocked),
     };
-    let (mut live_frame, sketch_blocked) = input::gate::gate(&gate, flow_native::live_frame::of_frame(frame_));
+    let (mut live_frame, sketch_blocked) = input::gate::gate(&gate, live);
     if !host_events.is_empty() {
         let mut events = host_events;
         events.append(&mut live_frame.events);

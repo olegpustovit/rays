@@ -742,7 +742,7 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
             }
         }
     }
-    let waiting = placed.is_empty() && !editor_list::geometry_objects(core).is_empty() && editor_list::pieces(core).is_empty();
+    let waiting = placed.is_empty() && editor_list::has_geometry_objects(core) && editor_list::pieces(core).is_empty();
     let ghost = |id: i64| -> bool {
         match m::pane_level(&core.into()) {
             Level::Inside(open_id) => editor_inspect::kind(core, open_id).as_deref() == Some("geometry") && id != open_id,

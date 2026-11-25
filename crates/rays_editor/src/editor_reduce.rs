@@ -725,9 +725,8 @@ pub fn framing_step(value2: &EditorModel, doc: &Document, cooked: &cook::UpdateR
 
 /// The graph panel's own projection: list and text views are panels of their own now (`/ l`
 /// retypes), so opening a graph is the only thing that changes it.
-pub fn projections_of(outlined: &Option<(String, Option<Path>)>, actions: &[Action], result: &FrameResult, value2: &EditorModel) -> LevelMap {
+pub fn projections_of(outlined: &Option<(String, Option<Path>)>, actions: &[Action], result: &FrameResult, value2: &EditorModel, views: LevelMap) -> LevelMap {
     let level = pane_level(&value2.into());
-    let views = pane_views(&value2.into()).clone();
     if result.open_graph.is_some() || outlined.is_some() {
         return level_map_add(views, level, GraphView);
     }
@@ -1369,7 +1368,10 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     if let Some(PromptIntent::FindNode(path)) = &result.prompt_intent {
         select_source(value2, path);
     }
-    let projections = projections_of(&outlined, &actions, &result, &*value2);
+    let projections = {
+        let views = std::mem::take(&mut pane_mut(value2).views);
+        projections_of(&outlined, &actions, &result, &*value2, views)
+    };
     let selection_changed = scope_selection_changed || outlined.is_some();
     if selection_changed {
         text.target = None;
