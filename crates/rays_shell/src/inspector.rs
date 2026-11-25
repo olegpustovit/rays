@@ -380,7 +380,7 @@ fn input(
             }
         }
         (KindView::Toggle, Value::Bool(value)) => {
-            let edited = crate::kit::switch(ui, &key, (x, y), *value);
+            let edited = *value ^ crate::kit::switch(ui, &key, (x, y), *value);
             if edited == *value { Vec::new() } else { vec![FlowChange::Edited(field.name.clone(), Value::Bool(edited))] }
         }
         _ => Vec::new(),
