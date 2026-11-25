@@ -403,6 +403,22 @@ thread_local! {
     static FRAME_IMAGES: RefCell<Option<workspace_images::WorkspaceImages>> = const { RefCell::new(None) };
 }
 
+fn image_metadata() -> flow_sop::lower::ImageMetadata {
+    use std::sync::OnceLock;
+    static META: OnceLock<flow_sop::lower::ImageMetadata> = OnceLock::new();
+    META.get_or_init(|| {
+        Arc::new(|plan, id| {
+            FRAME_IMAGES.with(|f| {
+                f.borrow()
+                    .as_ref()
+                    .and_then(|images| workspace_images::peek(images, plan, id))
+                    .map(|i| image::dimensions(&i))
+            })
+        })
+    })
+    .clone()
+}
+
 fn error_status_of(value: &LoopModel, image_errors: &[String]) -> Option<String> {
     if !image_errors.is_empty() {
         Some(image_errors.join("; "))
@@ -461,18 +477,24 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let gpu_t = host_gpu(&value);
     let text_focus = ui.borrow().text_input_focused();
     let error_status = error_status_of(&value, &image_errors);
-    let view_state: Rc<dyn Fn(Option<&PanelResult>) -> flow_syntax::syntax::Syntax> = {
-        let (camera, extra) = (value.camera.clone(), value.extra.clone());
-        Rc::new(move |panel| match panel.and_then(|p| (**p).downcast_ref::<V::PanelOut>()) {
-            Some(p) => V::section(&p.camera, &p.extra),
-            None => V::section(&camera, &extra),
-        })
+    let view_key = V::section_key(&value.camera, &value.extra);
+    let view_state = match &value.view_state {
+        Some((k, f)) if *k == view_key => f.clone(),
+        _ => {
+            let (camera, extra) = (value.camera.clone(), value.extra.clone());
+            let f: Rc<dyn Fn(Option<&PanelResult>) -> flow_syntax::syntax::Syntax> = Rc::new(move |panel| match panel.and_then(|p| (**p).downcast_ref::<V::PanelOut>()) {
+                Some(p) => V::section(&p.camera, &p.extra),
+                None => V::section(&camera, &extra),
+            });
+            value.view_state = Some((view_key, f.clone()));
+            f
+        }
     };
     let host_events = workspace_host::take_events(&mut value.host.borrow_mut());
     let mut updated: Option<Update> = None;
     let mut host_events = Some(host_events);
     workspace_gpu::with_backend(&gpu_t, lowering::fast(&value.core.doc), &mut |gpu| {
-        let metadata: flow_sop::lower::ImageMetadata = Arc::new(|plan, id| FRAME_IMAGES.with(|f| f.borrow().as_ref().and_then(|images| workspace_images::peek(images, plan, id)).map(|i| image::dimensions(&i))));
+        let metadata = image_metadata();
         flow_sop::lower::with_images(Some(gpu.clone()), Some(metadata), workspace_images::payload(&images), &mut || {
             let pump = || {
                 workspace_gpu::pump(&gpu_t, false);
@@ -808,6 +830,30 @@ pub fn source_at_rest(value: &mut LoopModel, now: f64) -> bool {
 }
 
 pub fn update(value: &mut LoopModel, frame_: &frame::Frame) {
+    // REST_SECONDS expiry alone must not rebuild: sliding the rest window keeps idle at 0 allocs
+    // while still allowing wants_frame / input / picture changes to wake (status fps stays from the
+    // last full frame until something else asks for one).
+    let slide_rest = value.rest.as_ref().is_some_and(|rest| {
+        rest.still >= REST_FRAMES
+            && !rays_shell::host::wants_frame(&value.core.ui.borrow(), &frame_.input.events, frame_.input.t)
+            && same_input(&rest.shown, frame_)
+    }) && source_at_rest(value, frame_.input.t);
+    if slide_rest {
+        if let Some(rest) = &mut value.rest {
+            if frame_.input.t >= rest.shown.input.t && frame_.input.t - rest.shown.input.t >= REST_SECONDS {
+                rest.shown.input.t = frame_.input.t;
+                rest.shown.input.frame = frame_.input.frame;
+                rest.shown.input.tick = frame_.input.tick;
+            }
+        }
+        let before_error = value.state_error.clone();
+        autosave(value, false, frame_.input.t);
+        let timeline = editor_list::timeline(&value.core);
+        let (moved, _) = timeline::update(&timeline, frame_);
+        if moved != timeline { Rc::make_mut(&mut value.core).timeline = moved; }
+        if value.state_error != before_error { value.rest = None; }
+        return;
+    }
     if !rests(value, frame_) || !source_at_rest(value, frame_.input.t) {
         // settle replaces it; the frame never reads it, so it is moved, not copied
         let before = value.rest.take();

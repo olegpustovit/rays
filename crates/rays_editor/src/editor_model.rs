@@ -323,7 +323,7 @@ pub struct FrameResult {
     pub focus: Panel,
     /// the focused leaf itself, for its panel keys
     pub focus_path: Option<layout::Path>,
-    pub pane_keys: Vec<(i64, (Panel, Option<layout::Path>))>,
+    pub pane_keys: std::rc::Rc<Vec<(i64, (Panel, Option<layout::Path>))>>,
     pub scope_view: scope::Pane,
     pub scope_changes: Vec<scope::Change>,
     pub selection: selection::Selection,

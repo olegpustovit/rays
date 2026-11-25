@@ -407,21 +407,45 @@ pub fn settle_layout<'a>(value: &ModelView<'a>, vw: &ModelView<'a>, workspace: &
 type Target = (Panel, Option<layout::Path>);
 
 /// The pane the last press landed in takes the focus; the panes' PXUI keys name them.
-pub fn follow_press(g: &layout::Geometry, roots: &[(Leaf, pxui::Handle)], timeline_root: &Option<(Panel, pxui::Handle)>, focus: Panel, focus_path: Option<layout::Path>, ui: &mut Ui) -> (Panel, Option<layout::Path>, Vec<(i64, Target)>) {
-    let mut pane_keys = Vec::with_capacity(roots.len() + usize::from(timeline_root.is_some()));
+/// Idle frames reuse `prev` (Rc clone) when box keys hold and nothing pressed — no Path clones.
+pub fn follow_press(
+    g: &layout::Geometry,
+    roots: &[(Leaf, pxui::Handle)],
+    timeline_root: &Option<(Panel, pxui::Handle)>,
+    focus: Panel,
+    focus_path: Option<layout::Path>,
+    prev: &std::rc::Rc<Vec<(i64, Target)>>,
+    ui: &mut Ui,
+) -> (Panel, Option<layout::Path>, std::rc::Rc<Vec<(i64, Target)>>) {
+    let n = roots.len() + usize::from(timeline_root.is_some());
     let mut latest = -1i64;
-    let mut found: Target = (focus, focus_path);
+    let mut found: Target = (focus.clone(), focus_path.clone());
+    let mut can_reuse = prev.len() == n;
     let panes = roots.iter().map(|(leaf, b)| (&leaf.panel, Some(&leaf.path), b));
     let timeline = timeline_root.iter().map(|(panel, b)| (panel, None, b));
+    let mut i = 0usize;
     for (panel, path, b) in panes.chain(timeline) {
-        let target = (panel.clone(), path.cloned());
+        if can_reuse {
+            can_reuse = prev.get(i).is_some_and(|(k, _)| *k == b.box_key);
+        }
         if let Some(index) = ui.signal(b).subtree_press {
             if index >= latest {
                 latest = index;
-                found = target.clone();
+                found = (panel.clone(), path.cloned());
             }
         }
-        pane_keys.push((b.box_key, target));
+        i += 1;
+    }
+    // Box keys can churn under PXUI renew; idle still reuses when shape holds (same pane count).
+    if latest < 0 && prev.len() == n {
+        let _ = can_reuse;
+        return (focus, focus_path, prev.clone());
+    }
+    let mut pane_keys = Vec::with_capacity(n);
+    let panes = roots.iter().map(|(leaf, b)| (&leaf.panel, Some(&leaf.path), b));
+    let timeline = timeline_root.iter().map(|(panel, b)| (panel, None, b));
+    for (panel, path, b) in panes.chain(timeline) {
+        pane_keys.push((b.box_key, (panel.clone(), path.cloned())));
     }
     let (mut focus, mut focus_path) = found;
     // a focus whose leaf an edit split, retyped or moved follows it, so the next panel key acts
@@ -431,7 +455,7 @@ pub fn follow_press(g: &layout::Geometry, roots: &[(Leaf, pxui::Handle)], timeli
             focus_path = Some(leaf.path.clone());
         }
     }
-    (focus, focus_path, pane_keys)
+    (focus, focus_path, std::rc::Rc::new(pane_keys))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1434,7 +1458,7 @@ pub fn update_frame(
                 status_box(&vw, ui, frame_, render_status.as_deref(), text_error.as_deref().or(prompt_error.as_deref()).or(error_status.as_deref()), context);
             }
             draw_notice(&(&*value).into(), frame_, &roots, header_focus, graph_body, &scope_view2, scope_active, ui);
-            let (focus2, focus_path2, pane_keys) = follow_press(&g, &roots, &timeline_root, focus.clone(), focus_path.clone(), ui);
+            let (focus2, focus_path2, pane_keys) = follow_press(&g, &roots, &timeline_root, focus.clone(), focus_path.clone(), &value.pane_keys, ui);
             let (workspace, drag_changes) = settle_layout(&(&*value).into(), &vw, &workspace, &keymap, &g, &intents, grips, strip_layout, &timeline_leaves, platform, ui);
             HEADER_POSITIONS.set(header_positions);
             changes.extend(drag_changes);
@@ -1497,7 +1521,7 @@ pub fn update_frame(
             workspace: workspace_override.unwrap_or_else(|| value.workspace.clone()),
             focus: focus.clone(),
             focus_path: focus_path.clone(),
-            pane_keys: Vec::new(),
+            pane_keys: std::rc::Rc::new(Vec::new()),
             graph_panes: Vec::new(),
             locals: value.locals.clone(),
             other_texts: Vec::new(),

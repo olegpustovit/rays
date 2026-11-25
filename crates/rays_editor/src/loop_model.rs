@@ -137,6 +137,8 @@ pub struct LoopModel {
     pub saved_drafts: Option<u64>,
     pub seen_drafts: Option<u64>,
     pub saver: Rc<crate::loop_source::Saver>,
+    /// Idle-stable view_state Rc for update_with (keyed by section_key).
+    pub view_state: Option<( ([u64; 7], bool, crate::editor_renderer::Mode), Rc<dyn Fn(Option<&crate::editor_model::PanelResult>) -> flow_syntax::syntax::Syntax>) >,
     pub canvases: Vec<(String, CanvasPicture)>,
     pub host: Rc<std::cell::RefCell<workspace_host::WorkspaceHost>>,
     /// when this frame's update ended, and the meshes it draws for the first time
@@ -299,6 +301,7 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
                 saved_drafts: None,
                 seen_drafts: None,
                 saver: Rc::default(),
+                view_state: None,
             })
         }
     }

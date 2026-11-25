@@ -1497,8 +1497,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     core.hud = hud;
     core.focus = result.focus.clone();
     core.focus_path = std::mem::take(&mut result.focus_path);
-    if core.pane_keys.as_slice() != result.pane_keys.as_slice() {
-        core.pane_keys = Rc::new(std::mem::take(&mut result.pane_keys));
+    if !std::rc::Rc::ptr_eq(&core.pane_keys, &result.pane_keys) {
+        core.pane_keys = std::mem::take(&mut result.pane_keys);
     }
     panel_map::with_others(&mut core.panes, std::mem::take(&mut result.graph_panes));
     core.leader = leader;
@@ -1571,7 +1571,7 @@ pub fn idle_result<'a>(value: &ModelView<'a>, selection: selection::Selection) -
         workspace: value.workspace.clone(),
         focus: value.focus.clone(),
         focus_path: value.focus_path.clone(),
-        pane_keys: (*value.pane_keys).clone(),
+        pane_keys: value.pane_keys.clone(),
         scope_view: pane_view(value).clone(),
         scope_changes: Vec::new(),
         selection,
