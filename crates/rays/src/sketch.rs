@@ -758,6 +758,18 @@ fn quiet_timeout_ms(quiet: i64, wake_in: Option<f64>) -> i32 {
     wake_in.map_or(base, |s| base.min((s * 1000.).ceil().max(0.) as i32))
 }
 
+/// How long the loop waits after a frame (serving the idle pump while the program is busy), or None
+/// to pace at the frame rate: a hidden window waits 33 ms for input, a quiet one as above.
+fn wait_ms(hidden: bool, quiet: i64, wake_in: Option<f64>) -> Option<i32> {
+    if hidden { Some(33) } else if quiet > 0 { Some(quiet_timeout_ms(quiet, wake_in)) } else { None }
+}
+
+/// A hidden window still updates on a frame with input (a release, FocusLost, a key up must end
+/// gestures), but never draws.
+fn updates(hidden: bool, had_input: bool) -> bool {
+    !hidden || had_input
+}
+
 #[cfg(test)]
 mod quiet_rule {
     use super::*;
@@ -771,6 +783,16 @@ mod quiet_rule {
         assert_eq!(quiet_timeout_ms(40, Some(0.0301)), 31, "sleeps until the wake, rounded up");
         assert_eq!(quiet_timeout_ms(40, Some(-1.)), 0, "an overdue wake does not wait");
         assert_eq!(quiet_timeout_ms(1, Some(5.)), 16);
+    }
+
+    #[test]
+    fn hidden_window_takes_input_and_keeps_the_pump() {
+        assert!(updates(true, true), "a hidden window's input reaches update");
+        assert!(!updates(true, false));
+        assert!(updates(false, false));
+        assert_eq!(wait_ms(true, 0, None), Some(33), "a hidden window waits through the idle pump");
+        assert_eq!(wait_ms(false, 40, None), Some(100));
+        assert_eq!(wait_ms(false, 0, None), None);
     }
 }
 
@@ -880,13 +902,9 @@ fn run_loop(
             let frames = frames.borrow();
             (frames.quiet, frames.hidden)
         };
-        let wake_at = WAKE.take();
-        if hidden {
-            input_state::wait(33);
-        } else if quiet > 0 {
-            // An unchanged frame skipped vsync. Wait for input, or a scheduled caret/cook wake.
-            let wake_in = wake_at.map(|t| t - time::now(&state.time.borrow()));
-            let timeout_ms = quiet_timeout_ms(quiet, wake_in);
+        let wake_in = WAKE.take().map(|t| t - time::now(&state.time.borrow()));
+        // A hidden or unchanged frame skipped vsync. Wait for input, or a scheduled caret/cook wake.
+        if let Some(timeout_ms) = wait_ms(hidden, quiet, wake_in) {
             let busy = || program_.idle.as_ref().is_some_and(|idle| crash.model.borrow().as_ref().is_some_and(|m| idle(m.as_ref())));
             if busy() {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
@@ -943,6 +961,8 @@ fn one_frame(
     frames.hidden = limit.is_none() && !visible;
     if frames.hidden {
         frames.shown = None;
+    }
+    if !updates(frames.hidden, had_input) {
         return Ok(());
     }
     frames.count += 1;
@@ -985,6 +1005,9 @@ fn one_frame(
     }
     // Keep the model stored while callbacks run, so unwinding can still dump it.
     update_model(&crash.model, &*program_.update, &facts, op)?;
+    if frames.hidden {
+        return Ok(());
+    }
     let scene_ = {
         let guard = crash.model.borrow();
         let m = guard.as_ref().ok_or_else(|| startup_error(op, ErrorKind::InvalidState, "model is gone"))?;
