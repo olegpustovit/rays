@@ -346,12 +346,12 @@ pub fn trunk_rows(network: &net::Network, viewed: Option<i64>, flags: &dyn Fn(i6
 pub type LazyRows<'a> = Box<dyn FnOnce() -> (Vec<Row>, Vec<String>) + 'a>;
 
 /// The open level's list: what it is made from, and its rows and flag columns when asked.
-pub fn rows<'a>(value: &ModelView<'a>) -> (RowSource, LazyRows<'a>) {
+pub fn rows<'a>(value: &ModelView<'a>) -> (RowSource<'a>, LazyRows<'a>) {
     match (pane_level(value), network(value)) {
         (Level::Scene, _) => {
             let scene_graph = &value.doc.scene;
             let active = value.doc.active_camera;
-            (RowSource::Objects(scene_graph.clone()), Box::new(move || (scene_rows(active, scene_graph), vec!["v".to_string(), "r".to_string()])))
+            (RowSource::Objects(std::borrow::Cow::Borrowed(scene_graph)), Box::new(move || (scene_rows(active, scene_graph), vec!["v".to_string(), "r".to_string()])))
         }
         (Level::Inside(_), Some(network)) => {
             let graph = &network.graph;
@@ -371,7 +371,7 @@ pub fn rows<'a>(value: &ModelView<'a>) -> (RowSource, LazyRows<'a>) {
         }
         (Level::Inside(_), None) => {
             let layers = level_objects(value);
-            (RowSource::Objects(layers.to_vec()), Box::new(move || (layer_rows(&layers), vec!["v".to_string()])))
+            (RowSource::Objects(layers.clone()), Box::new(move || (layer_rows(&layers), vec!["v".to_string()])))
         }
     }
 }
@@ -472,19 +472,19 @@ pub fn reparented(document: &[kg::Node], rows: &[Row], intent: &Intent) -> Optio
 /// The state `apply_tree` folds: the open level's graph, the selection, the list's view state, an
 /// entry request, the history label and the rows the intents refer to.
 #[derive(Clone)]
-pub struct TreeState {
+pub struct TreeState<'a> {
     pub document: kg::T,
     pub selection: selection::Selection,
     pub tree: tree::Tree,
     pub opened: Option<i64>,
     pub label: Option<String>,
-    pub rows: Vec<Row>,
+    pub rows: &'a [Row],
 }
 
 /// Tree intents become selection, an entry request, and edits of the derived network for the
 /// objects only the host made (reconcile adopts them): what the text has is edited as text
 /// (`tree_edit`).
-pub fn apply_tree<'a>(value: &ModelView<'a>, state: TreeState, intent: &Intent) -> TreeState {
+pub fn apply_tree<'a>(value: &ModelView<'_>, state: TreeState<'a>, intent: &Intent) -> TreeState<'a> {
     let level = pane_level(value);
     let in_text = |id: i64| scene_sync::in_text(&value.doc, level, id);
     let hosted = |ids: &[i64]| -> Vec<i64> { ids.iter().copied().filter(|id| !in_text(*id)).collect() };
@@ -507,7 +507,7 @@ pub fn apply_tree<'a>(value: &ModelView<'a>, state: TreeState, intent: &Intent) 
             s.label = Some(if *on { "Show" } else { "Hide" }.to_string());
         }
         Intent::Move { .. } | Intent::Reorder { .. } if world => {
-            if let Some(order) = restacked(&s.rows, intent) {
+            if let Some(order) = restacked(s.rows, intent) {
                 if !order.iter().all(|id| in_text(*id)) {
                     s.document = restack(&s.document, &order);
                 }
@@ -515,7 +515,7 @@ pub fn apply_tree<'a>(value: &ModelView<'a>, state: TreeState, intent: &Intent) 
             }
         }
         Intent::Move { .. } | Intent::Indent(_) if level == Level::Scene => {
-            if let Some((ids, parent)) = reparented(&s.document, &s.rows, intent) {
+            if let Some((ids, parent)) = reparented(&s.document, s.rows, intent) {
                 s.document = objects::reparent(&s.document, &hosted(&ids), parent);
                 s.label = Some("Reparent".to_string());
             }

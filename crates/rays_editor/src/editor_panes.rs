@@ -554,9 +554,8 @@ pub fn draw_list_panes<'a>(
     pane_of: &dyn Fn(&Host) -> ModelView<'a>,
     in_use: &dyn Fn(&ModelView<'a>) -> bool,
     title_of: &dyn Fn(&ModelView<'a>) -> String,
-    rows: &[tree::Row],
-    columns: &[String],
-    host_rows: &[(Key, (Vec<tree::Row>, Vec<String>))],
+    rows: Option<&Rc<ListRows>>,
+    host_rows: &[(Key, Rc<ListRows>)],
     selected: &dyn Fn() -> Vec<i64>,
     tree_state: tree::Tree,
     intents: Vec<tree::Intent>,
@@ -568,14 +567,13 @@ pub fn draw_list_panes<'a>(
         let Some((leaf, root)) = root_at(path) else { continue };
         let pane = pane_of(host);
         let mine = in_use(&pane);
-        let (rows_now, columns_now): (Vec<tree::Row>, Vec<String>) = if mine {
-            (rows.to_vec(), columns.to_vec())
-        } else {
-            host_rows.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()).expect("host rows")
-        };
+        let pair = (if mine { rows } else { None })
+            .or_else(|| host_rows.iter().find(|(k, _)| k == key).map(|(_, v)| v))
+            .expect("host rows");
+        let (rows_now, columns_now) = &**pair;
         let selected_now: Vec<i64> = if mine { selected() } else { selection::selected_nodes(pane_selection(&pane)).to_vec() };
         let title = title_of(&pane);
-        // a cached view keyed by the rows (compared with the last build's, copied on a change), the
+        // a cached view keyed by the shared row pair, the
         // selection, the title and columns, and the list's own state as its last build left it
         let draw = |ui: &mut Ui, mut state: tree::Tree| -> (tree::Tree, Vec<tree::Intent>) {
             let mut emitted = Vec::new();
@@ -583,14 +581,14 @@ pub fn draw_list_panes<'a>(
             let state_rev = LISTS.with(|l| {
                 let mut l = l.borrow_mut();
                 match l.iter_mut().find(|(k, _, _, _)| *k == root_key) {
-                    Some((_, seen, rows, rev)) if *seen == state && *rows == rows_now => *rev,
+                    Some((_, seen, rows, rev)) if *seen == state && rows.ptr_eq(&Rc::downgrade(pair)) => *rev,
                     Some((_, seen, rows, rev)) => {
-                        (*seen, *rows) = (state.clone(), rows_now.clone());
+                        (*seen, *rows) = (state.clone(), Rc::downgrade(pair));
                         *rev += 1;
                         *rev
                     }
                     None => {
-                        l.push((root_key, state.clone(), rows_now.clone(), 0));
+                        l.push((root_key, state.clone(), Rc::downgrade(pair), 0));
                         0
                     }
                 }
@@ -606,7 +604,7 @@ pub fn draw_list_panes<'a>(
                 ui.within(&root, &mut |ui| {
                     kit::cached(ui, "list-view", revision, &mut |ui| {
                         built = true;
-                        tree::update(&mut state, ui, shortcut_frame, leaf.body, &title, &columns_now, &rows_now, &selected_now, &mut emitted);
+                        tree::update(&mut state, ui, shortcut_frame, leaf.body, &title, columns_now, rows_now, &selected_now, &mut emitted);
                     });
                 });
             });
@@ -640,7 +638,7 @@ thread_local! {
     /// each list's state as its last build left it and its rows, by its pane root's key, and their
     /// revision: compared, never trusted, so two editors sharing a key only rebuild more
     // ponytail: one entry per list pane ever shown, never pruned; prune with the pane when lists churn
-    static LISTS: std::cell::RefCell<Vec<(i64, tree::Tree, Vec<tree::Row>, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static LISTS: std::cell::RefCell<Vec<(i64, tree::Tree, std::rc::Weak<ListRows>, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// The text panes: the one in use and the others, each with what it showed.
@@ -693,19 +691,19 @@ pub fn draw_outline_panes(
     value: &EditorModel,
     hosted: &[Host],
     root_at: &dyn Fn(&layout::Path) -> Option<(Leaf, UiBox)>,
-    params_of: &dyn Fn(&EditorModel) -> navigator::Params,
     outline: navigator::State,
     locals: Vec<(Key, Local)>,
 ) -> (navigator::State, Vec<navigator::Intent>, Vec<(Key, Local)>) {
     let (mut outline, mut intents, mut locals) = (outline, Vec::new(), locals);
+    let mut params = None;
     for (key, path, _, _) in hosted {
         let Some((leaf, root)) = root_at(path) else { continue };
-        let params = params_of(value);
+        let params = params.get_or_insert_with(|| crate::editor_panels::retained_navigator_params(&value.into()));
         let draw = |ui: &mut Ui, state: &navigator::State| -> (navigator::State, Vec<navigator::Intent>) {
             let mut result = None;
             on_sheet(ui, leaf.floating, &mut |ui| {
                 ui.within(&root, &mut |ui| {
-                    result = Some(navigator::view(state, ui, leaf.body, &params, pxui::ui_core::key(&root)));
+                    result = Some(navigator::view(state, ui, leaf.body, params, pxui::ui_core::key(&root)));
                 });
             });
             result.expect("outline drawn")

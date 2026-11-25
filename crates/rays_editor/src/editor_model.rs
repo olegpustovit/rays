@@ -232,12 +232,24 @@ pub struct Shell {
 /// What a level's list rows are made from: a geometry object's network, or the scene's objects or
 /// the World's layers; a cached row set is kept while its source is the same.
 #[derive(Clone)]
-pub enum RowSource {
+pub enum RowSource<'a> {
     Network(net::Network),
-    Objects(kg::T),
+    Objects(std::borrow::Cow<'a, [kg::Node]>),
 }
 
-pub fn same_source(a: &RowSource, b: &RowSource) -> bool {
+impl RowSource<'_> {
+    pub fn into_owned(self) -> RowSource<'static> {
+        match self {
+            Self::Network(network) => RowSource::Network(network),
+            Self::Objects(objects) => RowSource::Objects(std::borrow::Cow::Owned(objects.into_owned())),
+        }
+    }
+}
+
+pub type ListRows = (Vec<tree::Row>, Vec<String>);
+pub type RowSet = (RowSource<'static>, (Option<i64>, Option<i64>), Rc<ListRows>);
+
+pub fn same_source(a: &RowSource<'_>, b: &RowSource<'_>) -> bool {
     match (a, b) {
         (RowSource::Network(a), RowSource::Network(b)) => net::ptr_eq(a, b),
         (RowSource::Objects(a), RowSource::Objects(b)) => kg::same(a, b),
@@ -320,9 +332,7 @@ pub struct FrameResult {
     pub tree: tree::Tree,
     pub outline: navigator::State,
     pub outline_intents: Vec<navigator::Intent>,
-    /// the open level's objects or layers after this frame's derived edits; none inside a geometry
-    /// object
-    pub document: kg::T,
+    pub list_rows: Option<Rc<ListRows>>,
     pub edit_error: Option<String>,
     pub effects: Effects,
     pub timeline_intents: Vec<TimelineIntent>,
@@ -467,7 +477,7 @@ pub struct EditorModel {
     /// cook while a drag holds the pointer
     pub live_cook: bool,
     /// the rows of the lists drawn last frame, cached by network, display node and active camera
-    pub rows: Rc<Vec<(RowSource, (Option<i64>, Option<i64>), (Vec<tree::Row>, Vec<String>))>>,
+    pub rows: Rc<Vec<Rc<RowSet>>>,
     /// the SOP catalog
     pub factories: Vec<Factory>,
     /// the node menu, while it is open

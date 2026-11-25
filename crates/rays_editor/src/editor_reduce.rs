@@ -848,8 +848,7 @@ pub struct FrameInput<'a> {
     pub graph_shown: bool,
     pub text: text_pane::State,
     pub text_shown: Option<text_pane::Shown>,
-    pub row_sets: Vec<(RowSource, (Option<i64>, Option<i64>), (Vec<tree::Row>, Vec<String>))>,
-    pub rows: Vec<tree::Row>,
+    pub row_sets: Vec<Rc<RowSet>>,
 }
 
 fn same_workspace_all(a: &document::Workspace, b: &document::Workspace) -> bool {
@@ -884,7 +883,6 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         text,
         text_shown,
         row_sets,
-        rows,
     } = input;
     let mut result = result;
     if let Some(PromptIntent::EditSource(op)) = &result.prompt_intent {
@@ -1041,23 +1039,20 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     // gestures); only an object the host made is edited as a derived node, for reconcile to adopt
     let level0 = pane_level(&value.into());
     let in_text = |node: i64| sync::in_text(&value.doc, level0, node);
-    let host_changes: Vec<Change> = result
-        .changes
-        .iter()
-        .filter(|c| match c {
-            Change::SetParameter { node, .. } | Change::Rename { node, .. } => !in_text(*node),
-            _ => true,
-        })
-        .cloned()
-        .collect();
-    let (document, edit_error, editor_effects) = host_changes.iter().fold(
-        // the frame already copied the level's objects into the result: an idle frame takes that copy
-        (if host_changes.is_empty() { std::mem::take(&mut result.document) } else { level_objects(&value.into()).into_owned() }, value.edit_error.clone(), Effects::default()),
-        |state, c| apply_change(state, c),
+    let is_host_change = |c: &&Change| matches!(c,
+        Change::SetParameter { node, .. } | Change::Rename { node, .. } if !in_text(*node)
     );
+    let handle = result.handle_changes.as_ref().filter(|(id, _)| !in_text(*id));
+    let mut host_changes = result.changes.iter().filter(is_host_change).peekable();
+    let derived = host_changes.peek().is_some() || !result.tree_intents.is_empty() || handle.is_some();
+    let (document, edit_error, editor_effects) = host_changes.fold(
+        (if derived { level_objects(&value.into()).into_owned() } else { Vec::new() }, value.edit_error.clone(), Effects::default()),
+        apply_change,
+    );
+    let rows = result.list_rows.as_ref().map_or(&[][..], |pair| pair.0.as_slice());
     // what a list or the inspector's name row asks of an object the text has is written to the text
     // (below); the derived network is edited only for the others
-    let mut tree_edits: Vec<Edit> = result.tree_intents.iter().filter_map(|i| tree_edit(&value.into(), &rows, i)).collect();
+    let mut tree_edits: Vec<Edit> = result.tree_intents.iter().filter_map(|i| tree_edit(&value.into(), rows, i)).collect();
     for c in &result.changes {
         if let Change::Rename { node, label } = c {
             if in_text(*node) {
@@ -1066,19 +1061,15 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         }
     }
     let applied = result.tree_intents.iter().fold(
-        TreeState { document, selection: result.selection.clone(), tree: result.tree.clone(), opened: result.opened, label: None, rows: if result.tree_intents.is_empty() { Vec::new() } else { rows.clone() } },
+        TreeState { document, selection: result.selection.clone(), tree: result.tree.clone(), opened: result.opened, label: None, rows },
         |state, intent| apply_tree(&value.into(), state, intent),
     );
     let TreeState { document, selection, tree: tree_value, opened, label: tree_label, .. } = applied;
     let mut edit_error = edit_error;
     let mut document = document;
     let mut parameter_effects = Effects::default();
-    let handle = match &result.handle_changes {
-        Some((id, _)) if in_text(*id) => None,
-        other => other.clone(),
-    };
     if let Some((node_id, values)) = handle {
-        match kg::set_fields(&document, node_id, &values) {
+        match kg::set_fields(&document, *node_id, values) {
             Ok((doc, changed)) => {
                 document = doc;
                 parameter_effects = param::union_effects(parameter_effects, changed);
@@ -1108,12 +1099,11 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         (Some(label), _) | (None, Some(label)) => label,
         (None, None) if settings_changed => "Settings".to_string(),
         (None, None) => match &result.handle_changes {
-            Some((id, _)) => format!("Edit {}", kg::find(&document, *id).map(|n| n.label).unwrap_or_else(|| id.to_string())),
+            Some((id, _)) => format!("Edit {}", if derived { kg::find(&document, *id) } else { kg::find(&level_objects(&value.into()), *id) }.map(|n| n.label).unwrap_or_else(|| id.to_string())),
             None => "Edit".to_string(),
         },
     };
-    let result_document_unchanged = kg::same(&document, &level_objects(&value.into()));
-    result.document = document;
+    let result_document_unchanged = !derived || kg::same(&document, &level_objects(&value.into()));
     result.selection = selection;
     result.tree = tree_value;
     result.opened = opened;
@@ -1134,7 +1124,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
             if result_document_unchanged || network_present(&value.into()) {
                 present.clone()
             } else {
-                let doc = document::with_kinds(&present, pane_level(&value.into()), result.document.clone());
+                let doc = document::with_kinds(&present, pane_level(&value.into()), document);
                 Arc::new(if pane_level(&value.into()) == Level::Scene { document::prune(&doc) } else { doc })
             }
         }, None)
@@ -1386,7 +1376,9 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         std::mem::take(&mut result.locals)
     };
     value2.text = text;
-    value2.rows = Rc::new(row_sets);
+    if value2.rows.len() != row_sets.len() || !value2.rows.iter().zip(&row_sets).all(|(a, b)| Rc::ptr_eq(a, b)) {
+        value2.rows = Rc::new(row_sets);
+    }
     value2.live_cook = result.live_cook;
     pane_mut(value2).views = projections;
     value2.locals = locals;
@@ -1577,7 +1569,7 @@ pub fn idle_result<'a>(value: &ModelView<'a>, selection: selection::Selection) -
         tree: value.tree.clone(),
         outline: value.outline.clone(),
         outline_intents: Vec::new(),
-        document: level_objects(value).into_owned(),
+        list_rows: None,
         edit_error: value.edit_error.clone(),
         effects: Effects::default(),
         timeline_intents: Vec::new(),
@@ -1633,7 +1625,6 @@ pub fn idle_input<'a, 'f>(value: &ModelView<'a>, actions: &[Action], frame_: &'f
         text: value.text.clone(),
         text_shown: None,
         row_sets: Vec::new(),
-        rows: Vec::new(),
     }
 }
 

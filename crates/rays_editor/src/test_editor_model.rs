@@ -88,7 +88,7 @@ fn creation_shell_list_status() {
         tree: tree::create(),
         opened: None,
         label: None,
-        rows: shown.clone(),
+        rows: &shown,
     };
     let state = editor_list::apply_tree(&(&value).into(), state, &Intent::Select(vec![shown[0].id]));
     assert_eq!(selection::selected(&state.selection), Some(shown[0].id));

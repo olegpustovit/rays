@@ -44,7 +44,7 @@ use crate::editor_inspect::{displayed, kind, new_graph, objects as level_objects
 use crate::editor_list::{rows, space, sync_list_selection};
 use crate::editor_menu::open_menu;
 use crate::editor_model::*;
-use crate::editor_panels::{copy_bindings, copy_workspace, defn_change, focused_leaf, graph_leaf, layout_actions, layout_intents_cow, navigator_params, paste_bindings, write_panel_title};
+use crate::editor_panels::{copy_bindings, copy_workspace, defn_change, focused_leaf, graph_leaf, layout_actions, layout_intents_cow, paste_bindings, write_panel_title};
 use crate::editor_panes::*;
 use crate::editor_reduce::{reduce, FrameInput};
 use crate::editor_scope::sync_scope;
@@ -651,27 +651,25 @@ pub fn carry_marks(value: &EditorModel) -> Marks {
     (lit, hot)
 }
 
-type RowSet = (RowSource, (Option<i64>, Option<i64>), (Vec<tree::Row>, Vec<String>));
-
 /// The rows of a level's list and of every list that draws, by panel key.
-pub fn list_rows<'a>(value: &ModelView<'a>, listing_: bool, list_drawn: bool, pane_of: &dyn Fn(&Host) -> ModelView<'a>, list_hosts: &[Host]) -> (Vec<RowSet>, Vec<tree::Row>, Vec<String>, Vec<(Key_, (Vec<tree::Row>, Vec<String>))>) {
+pub fn list_rows<'a>(value: &ModelView<'a>, listing_: bool, list_drawn: bool, pane_of: &dyn Fn(&Host) -> ModelView<'a>, list_hosts: &[Host]) -> (Vec<Rc<RowSet>>, Option<Rc<ListRows>>, Vec<(Key_, Rc<ListRows>)>) {
     // the rows of a level's list, made once per network and kept while a list shows them
-    let rows_of = |sets: &mut Vec<RowSet>, pane: ModelView<'a>| -> (Vec<tree::Row>, Vec<String>) {
+    let rows_of = |sets: &mut Vec<Rc<RowSet>>, pane: ModelView<'a>| -> Rc<ListRows> {
         let (source, made) = rows(&pane);
         let key = (displayed(&pane), pane.doc.active_camera);
-        if let Some((_, _, r)) = sets.iter().find(|(s, k, _)| same_source(s, &source) && *k == key) {
-            return r.clone();
+        if let Some(entry) = sets.iter().find(|entry| same_source(&entry.0, &source) && entry.1 == key) {
+            return entry.2.clone();
         }
-        let entry = match value.rows.iter().find(|(s, k, _)| same_source(s, &source) && *k == key) {
+        let entry = match value.rows.iter().find(|entry| same_source(&entry.0, &source) && entry.1 == key) {
             Some(entry) => entry.clone(),
-            None => (source, key, made()),
+            None => Rc::new((source.into_owned(), key, Rc::new(made()))),
         };
         let r = entry.2.clone();
         sets.insert(0, entry);
         r
     };
-    let mut sets: Vec<RowSet> = Vec::new();
-    let (rows_, columns) = if listing_ || list_drawn { rows_of(&mut sets, *value) } else { (Vec::new(), Vec::new()) };
+    let mut sets: Vec<Rc<RowSet>> = Vec::new();
+    let rows = (listing_ || list_drawn).then(|| rows_of(&mut sets, *value));
     // the rows of every list that draws, by panel key: made here, before the frame builds
     let mut host_rows = Vec::new();
     for host in list_hosts {
@@ -679,7 +677,7 @@ pub fn list_rows<'a>(value: &ModelView<'a>, listing_: bool, list_drawn: bool, pa
         let r = rows_of(&mut sets, pane);
         host_rows.insert(0, (host.0.clone(), r));
     }
-    (sets, rows_, columns, host_rows)
+    (sets, rows, host_rows)
 }
 
 /// `/ a`: the node menu of the graph the pane shows.
@@ -1081,7 +1079,7 @@ pub fn update_frame(
         },
         Level::Scene => displayed(&(&*value).into()),
     };
-    let (row_sets, rows_, columns, host_rows) = list_rows(&(&*value).into(), listing_, list_drawn, &pane_of, &list_hosts);
+    let (row_sets, rows, host_rows) = list_rows(&(&*value).into(), listing_, list_drawn, &pane_of, &list_hosts);
     let selected = || -> Vec<i64> {
         let mut ids = selection::selected_nodes(&selection).to_vec();
         let primary = selection::selected(&selection);
@@ -1102,7 +1100,7 @@ pub fn update_frame(
         match a {
             Action::ListCommand(tree::Command::ActivateRow) => {}
             Action::ListCommand(command) if graph_shown => {
-                tree::run_command(tree_value.to_mut(), &rows_, &selected(), command.clone(), &mut list_intents);
+                tree::run_command(tree_value.to_mut(), rows.as_ref().map_or(&[][..], |pair| pair.0.as_slice()), &selected(), command.clone(), &mut list_intents);
             }
             _ => {}
         }
@@ -1285,9 +1283,9 @@ pub fn update_frame(
             let mut scope_changes = scope_command_changes.clone();
             let (graph_body, menu2, menu_pick) = draw_graph_pane(ui, frame_, &(&*value).into(), &shortcut_frame, &mut scope_view2, scope_active, guide, carry_lit.clone(), carry_hot.clone(), &graph_root, &graph_host, &workspace, menu.clone(), &open_menu, &mut scope_changes);
             // Each pane builder returns only its frame intents and updated pane-local state.
-            let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &(&*value).into(), &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), &rows_, &columns, &host_rows, &selected, tree_value.as_ref().clone(), list_intents.clone(), value.locals.clone());
+            let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &(&*value).into(), &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), rows.as_ref(), &host_rows, &selected, tree_value.as_ref().clone(), list_intents.clone(), value.locals.clone());
             let (text2, text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &*value, &root_at, &tab_at, &text_host, &text_shown, text.clone(), other_texts.clone(), locals);
-            let (outline, outline_intents, locals) = draw_outline_panes(ui, &*value, &hosted(HostKind::Outline), &root_at, &|pane| navigator_params(&pane.into()), value.outline.clone(), locals);
+            let (outline, outline_intents, locals) = draw_outline_panes(ui, &*value, &hosted(HostKind::Outline), &root_at, value.outline.clone(), locals);
             let locals = draw_spreadsheet_panes(ui, &(&*value).into(), &of_kind(&Panel::Spreadsheet), locals);
             let graph_panes = draw_other_graph_panes(ui, &shortcut_frame, &(&*value).into(), &other_panes, &roots);
             let _ = text2;
@@ -1403,7 +1401,7 @@ pub fn update_frame(
                 scope_view: scope_view2,
                 scope_changes,
                 tree: tree2,
-                document: level_objects(&(&*value).into()).into_owned(),
+                list_rows: rows.clone(),
                 edit_error: text_error.clone().or(prompt_error.clone()).or_else(|| value.edit_error.clone()),
                 effects: Effects::default(),
                 timeline_intents,
@@ -1452,7 +1450,7 @@ pub fn update_frame(
             scope_view: scope_view.clone(),
             scope_changes: scope_command_changes.clone(),
             tree: tree_value.into_owned(),
-            document: level_objects(&(&*value).into()).into_owned(),
+            list_rows: rows.clone(),
             edit_error: text_error.clone().or_else(|| value.edit_error.clone()),
             effects: Effects::default(),
             timeline_intents: Vec::new(),
@@ -1501,7 +1499,6 @@ pub fn update_frame(
             text,
             text_shown,
             row_sets,
-            rows: rows_,
         },
         value,
         result,

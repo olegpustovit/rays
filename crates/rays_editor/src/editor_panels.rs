@@ -288,8 +288,52 @@ pub fn outline_objects<'a>(value: &ModelView<'a>) -> Vec<navigator::Obj> {
 }
 
 pub fn navigator_params<'a>(value: &ModelView<'a>) -> navigator::Params {
-    let ws = &value.doc.workspace.ws;
+    make_navigator_params(value, graph_name(value))
+}
+
+pub(crate) fn retained_navigator_params(value: &ModelView<'_>) -> Rc<navigator::Params> {
+    struct Memo {
+        doc: std::sync::Weak<Document>,
+        laid: Option<std::rc::Weak<ScopeKey>>,
+        probes: PathMap<i64>,
+        objects: Vec<i64>,
+        params: Rc<navigator::Params>,
+    }
+    // ponytail: the outline panes share the active graph. Keep one entry on this thread until
+    // switching between editors is frequent enough to need one entry per editor.
+    thread_local! { static LAST: std::cell::RefCell<Option<Memo>> = const { std::cell::RefCell::new(None) }; }
     let active = graph_name(value);
+    let laid = value.pane.laid.as_ref().map(Rc::downgrade);
+    let objects = if pane_level(value) == document::Level::Scene {
+        selection::selected_nodes(pane_selection(value))
+    } else {
+        &[]
+    };
+    LAST.with(|last| {
+        let mut last = last.borrow_mut();
+        let doc = std::sync::Arc::downgrade(value.doc);
+        if let Some(memo) = &*last
+            && memo.doc.ptr_eq(&doc)
+            && match (&memo.laid, &laid) {
+                (Some(a), Some(b)) => a.ptr_eq(b),
+                (None, None) => true,
+                _ => false,
+            }
+            && memo.probes == value.probes
+            && memo.objects == objects
+            && memo.params.active == active
+            && memo.params.selected == pane_view(value).selected.as_slice()
+        {
+            return memo.params.clone();
+        }
+        let params = Rc::new(make_navigator_params(value, active));
+        *last = Some(Memo { doc, laid, probes: value.probes.clone(), objects: objects.to_vec(), params: params.clone() });
+        params
+    })
+}
+
+fn make_navigator_params(value: &ModelView<'_>, active: Option<String>) -> navigator::Params {
+    let ws = &value.doc.workspace.ws;
     let here = match (pane_laid(value), &active) {
         (Some(k), Some(name)) if k.graph == *name => Some(k),
         _ => None,
