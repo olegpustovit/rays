@@ -1523,7 +1523,12 @@ mod tests {
             fs::write(&path, fs::read_to_string(&path).unwrap().replace("[dependencies]", "[dev-dependencies]")).unwrap();
         }
         let dev_only = deps(&root).unwrap();
-        assert!(dev_only.is_empty(), "dev-only tests do not change production boundaries: {dev_only:#?}");
+        // Layer boundaries ignore dev-only edges; a direct private PXUI path is wrong in any section (AGENTS.md).
+        assert_eq!(
+            dev_only,
+            ["crates/flow_ir/Cargo.toml:4: `flow_ir` depends directly on private PXUI crate `pxui_core`; use the public `pxui` wrapper"],
+            "dev-only tests do not change production boundaries"
+        );
         fs::remove_dir_all(&root).unwrap();
         assert_eq!(allowed.unwrap(), Vec::<String>::new());
         let sdl_edge = sdl_edge.unwrap();
