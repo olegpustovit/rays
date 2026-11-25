@@ -716,9 +716,9 @@ pub fn node_menu_step<'a>(value: &ModelView<'a>, workspace: &Shell, frame_: &fra
 type TextState = (Option<Host>, text_pane::State, Option<text_pane::Shown>, Vec<(Key_, layout::Path, text_pane::State, text_pane::Shown)>);
 
 /// What each text pane shows: its state and what it is showing.
-pub fn text_state<'a>(value: &ModelView<'a>, actions: &[Action], pane_of: &dyn Fn(&Host) -> ModelView<'a>, text_hosts: &[Host]) -> Result<TextState, rays_diagnostic::Diagnostic> {
+pub fn text_state<'a>(value: &ModelView<'a>, actions: &[Action], pane_of: &dyn Fn(&Host) -> ModelView<'a>, text_hosts: &[Host], pane_text: text_pane::State) -> Result<TextState, rays_diagnostic::Diagnostic> {
     let ws = &value.doc.workspace.ws;
-    let text_of = |state: &text_pane::State, host: &Host| -> Result<Option<(text_pane::State, text_pane::Shown)>, rays_diagnostic::Diagnostic> {
+    let text_of = |state: text_pane::State, host: &Host| -> Result<Option<(text_pane::State, text_pane::Shown)>, rays_diagnostic::Diagnostic> {
         let pane = pane_of(host);
         let graph = match graph_name(&pane) {
             None if host.2 == Panel::Lisp => ws.checked.graphs.first().map(|g| g.name.as_str()),
@@ -739,10 +739,12 @@ pub fn text_state<'a>(value: &ModelView<'a>, actions: &[Action], pane_of: &dyn F
         Ok(Some(text_pane::shown(Some(shown_ws), state, &shown_ws.source, &graph, selected.as_ref())?))
     };
     let text_host = text_hosts.iter().find(|(key, _, _, _)| Some(key) == value.text_at.as_ref()).cloned();
-    let current = match text_host.as_ref() { Some(host) => text_of(&value.text, host)?, None => None };
-    let (mut text, text_shown) = match current {
-        Some((text, shown)) => (text, Some(shown)),
-        None => (value.text.clone(), None),
+    let (mut text, text_shown) = match text_host.as_ref() {
+        Some(host) => match text_of(pane_text, host)? {
+            Some((text, shown)) => (text, Some(shown)),
+            None => (text_pane::initial(), None),
+        },
+        None => (pane_text, None),
     };
     // the keys of the text (find, go to) wait in the pane's state for its view; nothing without one
     if text_shown.is_some() {
@@ -757,7 +759,7 @@ pub fn text_state<'a>(value: &ModelView<'a>, actions: &[Action], pane_of: &dyn F
         if Some(&host.0) == value.text_at.as_ref() {
             continue;
         }
-        if let Some((state, shown)) = text_of(&local_of(&value.locals, &host.0).code, host)? {
+        if let Some((state, shown)) = text_of(local_of(&value.locals, &host.0).code.clone(), host)? {
             other_texts.push((host.0.clone(), host.1.clone(), state, shown));
         }
     }
@@ -1058,6 +1060,8 @@ pub fn update_frame(
             panel_map::set_leaf(&mut value.panes, active_leaf);
         }
     }
+    // take pane text before Cow borrows into value (selection/workspace)
+    let taken_text = std::mem::replace(&mut value.text, text_pane::initial());
     let (workspace, selection, tree_value) = match applied {
         Some((workspace, selection, tree)) => (Cow::Owned(workspace), Cow::Owned(selection), Cow::Owned(tree)),
         None => (Cow::Borrowed(&value.workspace), Cow::Borrowed(pane_selection(&(&*value).into())), Cow::Borrowed(&value.tree)),
@@ -1075,11 +1079,13 @@ pub fn update_frame(
     // graph pane in use (the first graph of the workspace when none is open).
     // a panel's pane, laid out: the one in use, or one of the others
     let pane_of = |host: &Host| shown_as(&(&*value).into(), (&host.0, &host.1, &host.2));
-    let ((text_host, text, text_shown, other_texts), text_error) =
-        match text_state(&(&*value).into(), &actions, &pane_of, &hosted(HostKind::Text)) {
+    let ((text_host, text, text_shown, other_texts), text_error) = {
+        let mv = (&*value).into();
+        match text_state(&mv, &actions, &pane_of, &hosted(HostKind::Text), taken_text) {
             Ok(state) => (state, None),
-            Err(error) => ((None, value.text.clone(), None, Vec::new()), Some(rays_diagnostic::to_string(&error))),
-        };
+            Err(error) => ((None, text_pane::initial(), None, Vec::new()), Some(rays_diagnostic::to_string(&error))),
+        }
+    };
     let scope_active = graph_shown && scope_name(&(&*value).into()).is_some();
     // the frame's copy of the pane, its commands run: made once, and again only for a build PXUI repeats
     // (the first build took the copy; the result hands it to reduce)

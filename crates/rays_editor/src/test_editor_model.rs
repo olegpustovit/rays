@@ -118,10 +118,10 @@ fn text_applies_body() {
     let mut value = model();
     // an applied draft is one "Edit text" entry; the file's text is what Command-S last wrote
     assert!(!editor_text::unsaved(None, &value));
-    editor_text::apply_text(&mut value, &[TextIntent::DocDraft(TEXT2.to_string())]);
+    editor_text::apply_text_ref(&mut value, &[TextIntent::DocDraft(TEXT2.to_string())]);
     assert!(editor_text::has_draft(None, &value));
     assert!(editor_text::unsaved(None, &value));
-    editor_text::apply_text(&mut value, &[TextIntent::DocApply(TEXT2.to_string())]);
+    editor_text::apply_text_ref(&mut value, &[TextIntent::DocApply(TEXT2.to_string())]);
     assert!(!editor_text::has_draft(None, &value), "{:?}", value.text.doc_errors.found.iter().map(|d| d.message.clone()).collect::<Vec<_>>());
     assert_eq!(history::depth(&value.history), 1);
     assert_eq!(history::label(&value.history), "Edit text");
@@ -133,14 +133,14 @@ fn text_applies_body() {
 
     // a draft that does not check keeps its errors and changes nothing else
     let before = history::depth(&value.history);
-    editor_text::apply_text(&mut value, &[TextIntent::DocApply("(workspace".to_string())]);
+    editor_text::apply_text_ref(&mut value, &[TextIntent::DocApply("(workspace".to_string())]);
     assert_eq!(history::depth(&value.history), before);
     assert!(!value.text.doc_errors.found.is_empty());
     assert_eq!(value.text.draft.as_deref(), Some("(workspace"));
     assert!(editor_text::has_draft(None, &value));
     // `apply_drafts` refuses to go on while it stands
     assert!(!editor_text::apply_drafts(None, &mut value.clone()));
-    editor_text::apply_text(&mut value, &[TextIntent::DocDiscard]);
+    editor_text::apply_text_ref(&mut value, &[TextIntent::DocDiscard]);
     assert!(!editor_text::has_draft(None, &value));
     assert!(editor_text::apply_drafts(None, &mut value.clone()));
 
@@ -157,7 +157,7 @@ fn text_applies_body() {
     assert_eq!(failed.text.tab, text_pane::Tab::Document);
     assert_eq!(failed.text.draft.as_deref(), Some("(workspace"));
     // A vertical right angle on the camera's 24 mm gate is a 12 mm lens in the outline.
-    editor_text::apply_text(&mut value, &[TextIntent::DocApply(
+    editor_text::apply_text_ref(&mut value, &[TextIntent::DocApply(
         "(workspace w (graph scene :context scene (scene/camera :name \"wide\" :fov 1.5707963267948966)))".to_owned(),
     )]);
     assert!(value.text.doc_errors.found.is_empty());

@@ -1069,7 +1069,7 @@ fn patched_shown(previous: &WorkspaceDoc, workspace: &WorkspaceDoc, shown: &Show
 }
 
 /// Cache shown text by source, workspace, graph, selection and tab. ponytail: source equality may walk O(source); retain an identity owner end-to-end if profiling justifies it.
-pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], graph: &str, selected: Option<&Path>) -> Result<(State, Shown), Diagnostic> {
+pub fn shown(workspace: Option<&WorkspaceDoc>, mut state: State, source: &[S], graph: &str, selected: Option<&Path>) -> Result<(State, Shown), Diagnostic> {
     let graph = match (&state.tab, &state.binding_draft) {
         (Tab::Selection, Some((path, _))) if !path.is_empty() => path[0].as_str(),
         _ => graph,
@@ -1084,17 +1084,17 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
         (Some(a), Some(b)) => same_workspace(a, b),
         _ => false,
     };
-    if let Some(cache) = &state.cache {
+    let cache_hit = state.cache.as_ref().and_then(|cache| {
         let (key, shown) = &**cache;
-        if *key.source == *source && same(&key.workspace, workspace) && key.graph == graph && key.selected == selected && key.tab == state.tab {
-            return Ok((state.clone(), shown.clone()));
-        }
+        (*key.source == *source && same(&key.workspace, workspace) && key.graph == graph && key.selected == selected && key.tab == state.tab)
+            .then(|| shown.clone())
+    });
+    if let Some(shown) = cache_hit {
+        return Ok((state, shown));
     }
     // Only the selection moved: the Graph and Document texts are the same, the mark and the key follow it
     // (the Selection tab prints the selected closure, so it prints again).
-    if let Some(cache) = &state.cache
-        && state.tab != Tab::Selection
-    {
+    let moved_hit = (state.tab != Tab::Selection).then(|| state.cache.as_ref()).flatten().and_then(|cache| {
         let (key, shown) = &**cache;
         if *key.source == *source && same(&key.workspace, workspace) && key.graph == graph && key.tab == state.tab {
             let mut moved = shown.clone();
@@ -1103,10 +1103,15 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
                 None => vec![graph.into()],
             };
             moved.mark = selected.as_ref().and_then(|p| path_mark(source, &moved.spans, p));
-            let mut next = state.clone();
-            next.cache = Some(Arc::new((CacheKey { selected, ..key.clone() }, moved.clone())));
-            return Ok((next, moved));
+            let key = CacheKey { selected: selected.clone(), ..key.clone() };
+            Some((key, moved))
+        } else {
+            None
         }
+    });
+    if let Some((key, moved)) = moved_hit {
+        state.cache = Some(Arc::new((key, moved.clone())));
+        return Ok((state, moved));
     }
     let patched = match (&state.cache, workspace) {
         (Some(cache), Some(workspace)) => {
@@ -1137,9 +1142,8 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
         selected,
         tab: state.tab,
     };
-    let mut next = state.clone();
-    next.cache = Some(Arc::new((key, shown.clone())));
-    Ok((next, shown))
+    state.cache = Some(Arc::new((key, shown.clone())));
+    Ok((state, shown))
 }
 
 // The printer's token ID names the source form. Prefer the innermost card, then address its

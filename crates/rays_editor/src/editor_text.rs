@@ -172,14 +172,22 @@ fn of_graph(graph: &str, ws: &WorkspaceDoc) -> Result<String, Diagnostic> {
     text_pane::make_shown(&ws.source, graph, None, Tab::Graph).map(|shown| shown.text.clone())
 }
 
-fn one_intent(value: &mut EditorModel, intent: &Intent) {
-    let (intent, literal): (&Intent, Option<(Arc<Vec<flow_syntax::syntax::Syntax>>, Op, Position)>) = match intent {
-        Intent::LiteralScrub { source, op, position, fallback } => (fallback.as_ref(), Some((source.clone(), op.clone(), position.clone()))),
+fn one_intent(value: &mut EditorModel, intent: Intent) {
+    let (intent, literal): (Intent, Option<(Arc<Vec<flow_syntax::syntax::Syntax>>, Op, Position)>) = match intent {
+        Intent::LiteralScrub { source, op, position, fallback } => (*fallback, Some((source, op, position))),
         other => (other, None),
     };
     // take the pane state: every arm writes it back, so a clone per keystroke is waste
     let was_scrubbing = value.text.scrubbing;
     let mut text = std::mem::replace(&mut value.text, text_pane::initial());
+    if let Intent::Live(live) = intent {
+        text.scrubbing = false;
+        if was_scrubbing { text.cache = None; }
+        text.live = Some(live);
+        value.text = text;
+        return;
+    }
+    let intent = &intent;
     if !matches!(intent, Intent::DocScrub(..) | Intent::GraphScrub(..) | Intent::BindingScrub(..)) {
         text.scrubbing = false;
         if was_scrubbing {
@@ -346,10 +354,7 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
             value.text = put(text, graph, Some(slot))
         }
         Intent::GraphDiscard(graph) => value.text = put(text, graph, None),
-        Intent::Live(live) => {
-            text.live = Some(live.clone());
-            value.text = text
-        }
+        Intent::Live(_) => unreachable!("Live handled above"),
         Intent::GraphApply(graph, draft) => {
             let gbase = slot_of(&text, graph).and_then(|s| s.gbase);
             match checked(false, &|ws| of_graph(graph, ws), draft, gbase.as_deref(), &|d| graph_document(&*value, graph, d)) {
@@ -477,10 +482,14 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
     }
 }
 
-pub fn apply_text(value: &mut EditorModel, intents: &[Intent]) {
+pub fn apply_text(value: &mut EditorModel, intents: impl IntoIterator<Item = Intent>) {
     for intent in intents {
         one_intent(value, intent);
     }
+}
+
+pub fn apply_text_ref(value: &mut EditorModel, intents: &[Intent]) {
+    apply_text(value, intents.iter().cloned());
 }
 
 /// The intents of a text pane that is not the one in use fold into its own state.
@@ -490,8 +499,9 @@ pub fn apply_text_at(value: &mut EditorModel, key: &flow_check::workspace::Path,
     }
     let code = local_of(&value.locals, key).code;
     let mut mine = std::mem::replace(&mut value.text, code);
-    apply_text(value, intents);
-    if intents.iter().any(|i| matches!(i, Intent::SelectBinding(_) | Intent::JumpDefinition(_))) {
+    let jump = intents.iter().any(|i| matches!(i, Intent::SelectBinding(_) | Intent::JumpDefinition(_)));
+    apply_text(value, intents.iter().cloned());
+    if jump {
         mine.target = None;
     }
     let code = std::mem::replace(&mut value.text, mine);
@@ -555,7 +565,7 @@ pub fn filed(mut value: EditorModel) -> EditorModel {
 /// that does not check stays with its errors, and `Err` says the save must wait.
 pub fn apply_drafts(except: Option<&str>, value: &mut EditorModel) -> bool {
     let applies = draft_applies(except, &value.text);
-    apply_text(value, &applies);
+    apply_text(value, applies);
     let locals = value.locals.clone();
     for (key, l) in locals {
         apply_text_at(value, &key, &draft_applies(except, &l.code));

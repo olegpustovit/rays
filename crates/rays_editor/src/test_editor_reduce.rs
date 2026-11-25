@@ -404,7 +404,7 @@ fn text_installs_scrubs_and_navigation_mutate_the_model() {
                 1 => Intent::GraphApply("g".into(), draft),
                 _ => Intent::BindingApply(path.clone(), draft),
             };
-            editor_text::apply_text(&mut value, &[apply]);
+            editor_text::apply_text_ref(&mut value, &[apply]);
             assert_eq!(value.preferences.as_ptr(), identity, "apply copied the model");
             assert_eq!(history::depth(&value.history), kind * 2 + 1);
             assert!(!editor_text::has_draft(None, &value));
@@ -416,11 +416,11 @@ fn text_installs_scrubs_and_navigation_mutate_the_model() {
                     _ => Intent::BindingScrub(path.clone(), draft, done),
                 }
             };
-            editor_text::apply_text(&mut value, &[scrub(kind * 3 + 2, false), scrub(kind * 3 + 3, false)]);
+            editor_text::apply_text_ref(&mut value, &[scrub(kind * 3 + 2, false), scrub(kind * 3 + 3, false)]);
             assert_eq!(value.preferences.as_ptr(), identity, "scrub copied the model");
             assert_eq!(history::depth(&value.history), kind * 2 + 2, "scrub frames must merge");
             let doc = value.doc.clone();
-            editor_text::apply_text(&mut value, &[scrub(kind * 3 + 3, true)]);
+            editor_text::apply_text_ref(&mut value, &[scrub(kind * 3 + 3, true)]);
             assert_eq!(value.preferences.as_ptr(), identity, "scrub release copied the model");
             assert!(Arc::ptr_eq(&value.doc, &doc), "scrub release reinstalled the same edit");
             assert_eq!(history::depth(&value.history), kind * 2 + 2);
@@ -446,11 +446,11 @@ fn text_installs_scrubs_and_navigation_mutate_the_model() {
             assert_eq!(value.text.target, Some(path.clone()));
             assert_eq!(editor_panes::local_of(&value.locals, &key).code.target, Some(path.clone()));
         }
-        editor_text::apply_text(&mut value, &[Intent::SelectBinding(path.clone())]);
+        editor_text::apply_text_ref(&mut value, &[Intent::SelectBinding(path.clone())]);
         assert_eq!(value.preferences.as_ptr(), identity);
         assert!(value.text.target.is_none());
         assert!(editor_panes::local_of(&value.locals, &key).code.target.is_none());
-        editor_text::apply_text(&mut value, &[Intent::JumpDefinition(path.clone())]);
+        editor_text::apply_text_ref(&mut value, &[Intent::JumpDefinition(path.clone())]);
         assert_eq!(value.preferences.as_ptr(), identity);
         assert_eq!(value.text.target, Some(path));
         assert_eq!(value.text.nonce, 1);
@@ -499,10 +499,10 @@ fn carry_view_reads_the_original_document() {
         use crate::{editor_panes, editor_text, text_pane::Intent};
         let mut value = model();
         let source = "(workspace w (graph cobalt :context material (material/standard :color \"#2670f5\")) (graph shards :context sop (let* [m (sop/material (sop/box) :material (ref cobalt))] m)))";
-        editor_text::apply_text(&mut value, &[Intent::DocApply(source.into())]);
+        editor_text::apply_text_ref(&mut value, &[Intent::DocApply(source.into())]);
         assert!(value.text.doc_errors.found.is_empty(), "{:?}", value.text.doc_errors.found);
         let original = value.doc.clone();
-        editor_text::apply_text(&mut value, &[Intent::DocApply(TEXT.into())]);
+        editor_text::apply_text_ref(&mut value, &[Intent::DocApply(TEXT.into())]);
         assert!(value.text.doc_errors.found.is_empty());
         crate::panel_map::active_mut(&mut value.panes).shown = Some("shards".into());
         let path = vec!["shards".into(), "m".into()];
