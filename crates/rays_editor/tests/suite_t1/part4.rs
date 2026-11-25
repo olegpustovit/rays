@@ -95,7 +95,8 @@ pub fn run_loop_copies() {
     // one undo gives them all back
     undo(&mut r);
     r.close();
-    // a rename from the list is the template's :name: every copy takes it
+    // a rename from the list is the template's :name: every copy takes it. The inline field opens
+    // with the name selected, as Finder does, so the typed name replaces it.
     let mut r = Run::new(editor(text));
     select_row(&mut r, 2);
     let m = (450., 300.);
@@ -104,7 +105,7 @@ pub fn run_loop_copies() {
     r.step(m, vec![key(Key::Enter)]);
     r.step(m, vec![]);
     let labels: Vec<String> = objects(&r.e).iter().map(|i| i.label.clone()).collect();
-    check(labels.iter().all(|l| l == "gspot") && count_of(&r.source(), ":name \"gspot\"") == 1 && r.undo_label() == Some("Rename".into()), &format!("a rename of one copy did not rename the template: {}{}", r.source(), labels.join(",")));
+    check(labels.iter().all(|l| l == "spot") && count_of(&r.source(), ":name \"spot\"") == 1 && r.undo_label() == Some("Rename".into()), &format!("a rename of one copy did not rename the template: {}{}", r.source(), labels.join(",")));
     r.close();
     // a copy computed from its index has no value of its own
     let text = r#"(workspace lamps
