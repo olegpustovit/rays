@@ -109,6 +109,31 @@ fn animated_drawing_keeps_published_scenes() {
     assert_eq!((text1.value.as_str(), text2.value.as_str()), ("frame 10", "frame 11"));
 }
 
+#[test]
+fn animated_drawing_reuses_warm_storage() {
+    let (lowered, value) = draw(r##"(let* [phase (state [previous 0.0] (+ previous (frame/dt)))]
+      (draw/merge (draw/background "#14161c")
+        (draw/circle [30 20 0] (+ 4 (int (* phase 10))))
+        (draw/text [1 2 0] (str (frame/width) " frame " (frame/index)))))"##);
+    let prepared = ok(drawing::prepare(&drawing::PrepareOptions {
+        profile: Some(lowered.profile.clone()),
+        states: lowered.states.clone(),
+        ..Default::default()
+    }, &lowered.evaluated.plan, &value));
+    let options = drawing::RenderOptions { state: Some(flow_eval::create_state()), ..Default::default() };
+    let mut scene = Vec::new();
+    let mut step = |frame| {
+        let live = input::Frame { frame, tick: frame, dt: 1. / 60., size: (60, 40), ..input::at_time(frame as f64 / 60.) };
+        let next = ok(drawing::render_prepared(&prepared, &live, live.size, &options));
+        drawing::recycle_scene(&prepared, std::mem::replace(&mut scene, next));
+    };
+    for frame in 10..40 { step(frame); }
+    let start = mem_sys::local_alloc_count();
+    for frame in 40..60 { step(frame); }
+    assert_eq!(mem_sys::local_alloc_count() - start, 0);
+    assert!(matches!(&scene[2], scene::Node::Text(text) if text.value == "60 frame 59"));
+}
+
 fn rect_set(count: i64) -> Entry {
     Entry::MarkSet {
         count,
