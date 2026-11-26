@@ -102,20 +102,24 @@ fn furnace_mis() {
             assert_eq!(*v, 255);
         }
     }
+    // The camera sees the +Z side of the sphere. Put the sun and bright spot on that side so
+    // low-sample BSDF-only rays can miss the concentrated illumination.
+    let front = std::f64::consts::PI;
     let peaked = world(
         w::Background::Environment,
-        (0., 0.7),
+        (front, 0.45),
         vec![
             gradient(w::rgb(0.02, 0.02, 0.02)),
-            w::Layer::Shape { shape: w::Shape::Circle, azimuth: 0.5, elevation: 0.5, width: 0.4, height: 0.4, softness: 0.05, color: white(), intensity: 8., emit: w::Emit::Dome },
-            w::Layer::Sun { angular_radius: 0.12, intensity: 50., tint: white() },
+            w::Layer::Shape { shape: w::Shape::Circle, azimuth: front + 0.5, elevation: 0.5, width: 0.4, height: 0.4, softness: 0.05, color: white(), intensity: 8., emit: w::Emit::Dome },
+            w::Layer::Sun { angular_radius: 0.18, intensity: 10., tint: white() },
         ],
     );
-    let reference = capture(&mut tracer, &cam, &peaked, 1024);
-    let bsdf_reference = capture(&mut bsdf, &cam, &peaked, 1024);
+    let reference = capture(&mut tracer, &cam, &peaked, 4096);
+    let bsdf_reference = capture(&mut bsdf, &cam, &peaked, 4096);
     let difference = (mean_red(&reference) - mean_red(&bsdf_reference)).abs();
     assert!(mean_red(&reference) > 0. && difference < 1.5, "converged mean difference {difference}");
-    assert!(rmse(&reference, &bsdf_reference) < 4.);
+    let converged_error = rmse(&reference, &bsdf_reference);
+    assert!(converged_error < 4., "converged RMSE {converged_error}");
     let mis_short = capture(&mut tracer, &cam, &peaked, 16);
     let bsdf_short = capture(&mut bsdf, &cam, &peaked, 16);
     let (mis_error, bsdf_error) = (rmse(&mis_short, &reference), rmse(&bsdf_short, &reference));
