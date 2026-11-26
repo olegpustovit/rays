@@ -223,4 +223,7 @@ fn snapshot_bytes_counts_imports() {
     let plain = document::snapshot_bytes(&saved);
     Arc::make_mut(&mut saved.saved_ws.import_sources).push(("lib.rays".into(), "x".repeat(1 << 20)));
     assert!(document::snapshot_bytes(&saved) >= plain + (1 << 20));
+    // The accounting scratch must forget arenas and bytes from the preceding snapshot.
+    let fresh = document::snapshot(&base());
+    assert_eq!(document::snapshot_bytes(&fresh), plain);
 }

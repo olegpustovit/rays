@@ -381,7 +381,7 @@ pub struct Pane {
     pub pan_x: f64,
     pub pan_y: f64,
     pub zoom: f64,
-    /// the frame time of the last zoom step: the zoom rests 0.1 s after it
+    /// The frame time of the last zoom step. Subsequent frames can snap the cached views.
     pub zoom_t: f64,
     /// the frame time of the last frame whose canvas input or keys the cached view's build takes
     pub busy_t: f64,
@@ -729,7 +729,11 @@ pub fn editing(t: &Pane) -> bool {
 }
 
 pub fn select(paths: Vec<Path>, t: &mut Pane) {
-    t.selected = PathSet::of(&paths);
+    // Keep PathSet slot capacity across reselects (same-pane click ↔ empty ↔ click).
+    t.selected.clear();
+    for p in &paths {
+        t.selected.insert(p);
+    }
     t.selected_wire = None;
 }
 

@@ -1313,13 +1313,13 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let (followed, target) = level_target(followed, had_route, &*value2, level, &doc, &selection, &actions, &result);
     if let Some(id) = result.open_graph {
         if lists(&(&*value2).into(), id) {
-            selection = selection::select(id);
+            selection::set(&mut selection, id);
         }
     }
     // / e selects the scene's World, then enters it
     if let Some(Level::Inside(id)) = target {
         if actions.contains(&Action::GoWorld) && level == Level::Scene {
-            selection = selection::select(id);
+            selection::set(&mut selection, id);
         }
     }
     value2.menu = std::mem::take(&mut result.menu);
@@ -1382,23 +1382,13 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         let views = std::mem::take(&mut pane_mut(value2).views);
         projections_of(&outlined, &actions, &result, &*value2, views)
     };
-    let selection_changed = scope_selection_changed || outlined.is_some();
-    if selection_changed {
+    let mut locals = std::mem::take(&mut result.locals);
+    if scope_selection_changed || outlined.is_some() {
         text.target = None;
+        for (_, local) in &mut locals {
+            local.code.target = None;
+        }
     }
-    let locals: Vec<(crate::panel_map::Key, Local)> = if selection_changed {
-        result
-            .locals
-            .iter()
-            .map(|(key, l)| {
-                let mut l = l.clone();
-                l.code.target = None;
-                (key.clone(), l)
-            })
-            .collect()
-    } else {
-        std::mem::take(&mut result.locals)
-    };
     value2.text = text;
     if value2.rows.len() != row_sets.len() || !value2.rows.iter().zip(&row_sets).all(|(a, b)| Rc::ptr_eq(a, b)) {
         value2.rows = Rc::new(row_sets);

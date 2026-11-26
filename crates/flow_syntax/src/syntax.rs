@@ -39,6 +39,12 @@ pub fn memory_bytes(forms: &[Syntax]) -> usize {
 #[derive(Default)]
 pub struct Memory { seen: std::collections::HashSet<usize>, bytes: usize, allocations: Vec<(usize, usize)> }
 impl Memory {
+    /// Clears the current accounting pass while retaining its scratch buffers.
+    pub fn clear(&mut self) {
+        self.seen.clear();
+        self.allocations.clear();
+        self.bytes = 0;
+    }
     pub fn bytes(&self) -> usize { self.bytes }
     pub fn into_allocations(self) -> Vec<(usize, usize)> { self.allocations }
     pub fn allocation<T>(&mut self, pointer: *const T, bytes: usize) -> bool {

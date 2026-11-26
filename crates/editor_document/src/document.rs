@@ -21,6 +21,7 @@ use param::Value as PV;
 use scene_core::camera as rcamera;
 use rays_diagnostic::Diagnostic;
 use sop::edit_graph;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
@@ -244,18 +245,31 @@ pub fn snapshot(value: &T) -> Snapshot {
     }
 }
 
+thread_local! {
+    static SNAPSHOT_MEMORY: RefCell<s::Memory> = RefCell::new(s::Memory::default());
+}
+
 pub fn snapshot_bytes(saved: &Snapshot) -> usize {
     let ws = &saved.saved_ws;
-    // syntax is shared by Arc and counted once; the checked workspace and the ids hold about as much again
-    let mut memory = s::Memory::default();
-    for form in ws.source.iter().chain(ws.extra.iter()).chain(ws.imports.iter().flat_map(|(_, forms)| forms)) {
-        memory.add(form);
-    }
+    // Syntax is shared by Arc and counted once. Reuse the accounting buffers across undo entries.
+    let syntax_bytes = SNAPSHOT_MEMORY.with_borrow_mut(|memory| {
+        for form in ws.source.iter().chain(ws.extra.iter()).chain(ws.imports.iter().flat_map(|(_, forms)| forms)) {
+            memory.add(form);
+        }
+        let bytes = memory.bytes();
+        // Keep scratch for ordinary edits and release it after unusually large snapshots.
+        if bytes <= 1024 * 1024 {
+            memory.clear();
+        } else {
+            *memory = s::Memory::default();
+        }
+        bytes
+    });
     let texts: usize = ws.import_sources.iter().map(|(path, text)| path.len() + text.len()).sum();
     // ponytail: the other copies a snapshot keeps (graph nodes, id maps, homes, layout) at a flat estimate per entry
     let nodes = saved.saved_scene.len() + saved.saved_layers.values().map(|l| l.len()).sum::<usize>();
     let entries = nodes + saved.saved_ids.len() + saved.saved_sites.len() + saved.saved_homes.objects.len() + saved.saved_homes.layers.len() + ws.layout.panels.len() + ws.layout.at.len();
-    2 * memory.bytes() + texts + 256 * entries
+    2 * syntax_bytes + texts + 256 * entries
 }
 
 /// What the list shows: the scene's objects, or inside an object its SOP network or the World's layers.

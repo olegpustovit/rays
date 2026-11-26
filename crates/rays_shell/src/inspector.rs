@@ -289,136 +289,137 @@ fn input(
     mixed: bool,
     (x, y, w): (f32, f32, f32),
 ) -> Vec<FlowChange> {
-    let key = format!("flow-value-{path}");
-    let field_key = Key::Resolved(key_of(row.box_key, &key));
-    let theme = cx.theme;
-    match (&field.kind, &field.current) {
-        (KindView::Integer(range), Value::Int(value)) => numeric(
-            ui,
-            cx,
-            param::number::Kind::Int,
-            Some((range.soft_min as f64, range.soft_max as f64)),
-            None,
-            &value.to_string(),
-            &|text| text.parse::<i64>().ok().map(Value::Int),
-            field,
-            path,
-            (row, &key),
-            ranged,
-            edit,
-            mixed,
-            (x, y, w),
-        ),
-        (KindView::Floating(range), Value::Float(value)) => {
-            // the text is the value in full, so a scrub starts from what is stored; it is shown short
-            numeric(
+    kit::with_label(format_args!("flow-value-{path}"), &mut |key| {
+        let field_key = Key::Resolved(key_of(row.box_key, key));
+        let theme = cx.theme;
+        match (&field.kind, &field.current) {
+            (KindView::Integer(range), Value::Int(value)) => numeric(
                 ui,
                 cx,
-                param::number::Kind::Float,
-                Some((range.soft_min, range.soft_max)),
-                Some(param::number::show(*value)),
-                &param::float_text_with_decimal(*value, true),
-                &|text| (text).parse::<f64>().ok().map(Value::Float),
+                param::number::Kind::Int,
+                Some((range.soft_min as f64, range.soft_max as f64)),
+                None,
+                &value.to_string(),
+                &|text| text.parse::<i64>().ok().map(Value::Int),
                 field,
                 path,
-                (row, &key),
+                (row, key),
                 ranged,
                 edit,
                 mixed,
                 (x, y, w),
-            )
-        }
-        (KindView::Text, Value::Text(bytes)) => {
-            let value = if mixed { String::new() } else { text_of(bytes) };
-            // an empty group means every element of its owner
-            let placeholder = match &field.default {
-                Value::Text(d) if d.is_empty() && field.name == "group" => Some("all points".to_string()),
-                Value::Text(d) if d.is_empty() && field.name.ends_with("_group") => Some("all".to_string()),
-                _ => None,
-            };
-            let style = pxui::ValueField::DEFAULT.left(true).edit(edit);
-            let style = placeholder.as_deref().map_or(style, |text| style.placeholder(text));
-            let style = if mixed { style.display("mixed") } else { style };
-            let explicit_empty = mixed && ui.key_pressed(pxui::KeyCode::Enter, pxui::Mods::NONE)
-                && ui.box_of_key(field_key).is_some_and(|b| ui.text_state(&b).is_some());
-            let changed = pxui::ext::value_field(ui, field_key, &value, Rect::new(x, y, w, 20.0), &style, &pxui::ValueCallbacks::DEFAULT).changed;
-            changed.or(explicit_empty.then_some("")).map_or_else(Vec::new, |text| {
-                vec![FlowChange::Edited(field.name.clone(), Value::Text(text.as_bytes().to_vec().into()))]
-            })
-        }
-        (KindView::Choice(choices), current @ (Value::Choice(_) | Value::Int(_))) => {
-            let boxed = ui.node(pxui::hash_of(&key), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP | pxui::Flags::CLIP).at(x, y).w(Size::Px(w)).h(Size::Px(20.0)));
-            let index: usize = match current {
-                Value::Int(index) => *index as usize,
-                Value::Choice(label) => choices.iter().position(|c| c == label).unwrap_or(0),
-                _ => 0,
-            };
-            on_choice(&field.name, &boxed);
-            let just_opened = ui.signal(&boxed).clicked || edit;
-            let open = just_opened || ui.state(&boxed, 0) == 1;
-            ui.set_state(&boxed, if open { 1 } else { 0 });
-            let chip = (!mixed).then(|| cx.chip(&choices[index])).flatten();
-            let shown = if mixed { "mixed".to_owned() } else { choices[index].clone() };
-            ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
-                paint.fill(Rect::new(x, y + h - 1.0, w, 1.0), pxui::Fill::new(if open { theme.accent } else { theme.edge() }));
-                let pad = match chip {
-                    Some(color) => {
-                        let rect = Rect::new(x + 2.0, y + 6.0, 8.0, 8.0);
-                        paint.fill(rect, pxui::Fill::new(color));
-                        paint.stroke(rect, pxui::Stroke::new(theme.foreground.with_alpha(38)));
-                        14.0
-                    }
-                    None => 0.0,
+            ),
+            (KindView::Floating(range), Value::Float(value)) => {
+                // the text is the value in full, so a scrub starts from what is stored; it is shown short
+                numeric(
+                    ui,
+                    cx,
+                    param::number::Kind::Float,
+                    Some((range.soft_min, range.soft_max)),
+                    Some(param::number::show(*value)),
+                    &param::float_text_with_decimal(*value, true),
+                    &|text| (text).parse::<f64>().ok().map(Value::Float),
+                    field,
+                    path,
+                    (row, key),
+                    ranged,
+                    edit,
+                    mixed,
+                    (x, y, w),
+                )
+            }
+            (KindView::Text, Value::Text(bytes)) => {
+                let value = if mixed { String::new() } else { text_of(bytes) };
+                // an empty group means every element of its owner
+                let placeholder = match &field.default {
+                    Value::Text(d) if d.is_empty() && field.name == "group" => Some("all points".to_string()),
+                    Value::Text(d) if d.is_empty() && field.name.ends_with("_group") => Some("all".to_string()),
+                    _ => None,
                 };
-                let ty = (y - 0.5) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
-                { let text = &shown; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(x + 2.0 + pad, ty), pxui::Label::BODY, 0.0, text, &[span]); };
-                paint.chevron((x + w - 5.0, y + (h / 2.0)), if open { Dir::Up } else { Dir::Down }, pxui::Stroke::new(theme.foreground));
-            });
-            if !open || just_opened {
-                return Vec::new();
+                let style = pxui::ValueField::DEFAULT.left(true).edit(edit);
+                let style = placeholder.as_deref().map_or(style, |text| style.placeholder(text));
+                let style = if mixed { style.display("mixed") } else { style };
+                let explicit_empty = mixed && ui.key_pressed(pxui::KeyCode::Enter, pxui::Mods::NONE)
+                    && ui.box_of_key(field_key).is_some_and(|b| ui.text_state(&b).is_some());
+                let changed = pxui::ext::value_field(ui, field_key, &value, Rect::new(x, y, w, 20.0), &style, &pxui::ValueCallbacks::DEFAULT).changed;
+                changed.or(explicit_empty.then_some("")).map_or_else(Vec::new, |text| {
+                    vec![FlowChange::Edited(field.name.clone(), Value::Text(text.as_bytes().to_vec().into()))]
+                })
             }
-            let Rect { x: bx, y: by, w: bw, h: bh } = ui.rect(&boxed);
-            let rows: Vec<_> = choices.iter().enumerate().map(|(i, choice)| {
-                let item = MenuItem::new(choice).selected(!mixed && i == index);
-                cx.chip(choice).map_or(item, |ink| item.swatch(ink))
-            }).collect();
-            let choice = ui.menu(pxui::hash_of(&(key, "options")), Point::new(bx, by + bh + 1.0), &rows, &Menu::DEFAULT.w_px(bw));
-            match (choice.chosen, choice.dismissed) {
-                (None, false) => Vec::new(),
-                (None, true) => {
-                    ui.set_state(&boxed, 0);
-                    Vec::new()
+            (KindView::Choice(choices), current @ (Value::Choice(_) | Value::Int(_))) => {
+                let boxed = ui.node(pxui::hash_of(key), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP | pxui::Flags::CLIP).at(x, y).w(Size::Px(w)).h(Size::Px(20.0)));
+                let index: usize = match current {
+                    Value::Int(index) => *index as usize,
+                    Value::Choice(label) => choices.iter().position(|c| c == label).unwrap_or(0),
+                    _ => 0,
+                };
+                on_choice(&field.name, &boxed);
+                let just_opened = ui.signal(&boxed).clicked || edit;
+                let open = just_opened || ui.state(&boxed, 0) == 1;
+                ui.set_state(&boxed, if open { 1 } else { 0 });
+                let chip = (!mixed).then(|| cx.chip(&choices[index])).flatten();
+                let shown = if mixed { "mixed".to_owned() } else { choices[index].clone() };
+                ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
+                    paint.fill(Rect::new(x, y + h - 1.0, w, 1.0), pxui::Fill::new(if open { theme.accent } else { theme.edge() }));
+                    let pad = match chip {
+                        Some(color) => {
+                            let rect = Rect::new(x + 2.0, y + 6.0, 8.0, 8.0);
+                            paint.fill(rect, pxui::Fill::new(color));
+                            paint.stroke(rect, pxui::Stroke::new(theme.foreground.with_alpha(38)));
+                            14.0
+                        }
+                        None => 0.0,
+                    };
+                    let ty = (y - 0.5) + (((h) - (paint.tokens().font_size) as f32) / 2.0).floor();
+                    { let text = &shown; let span = pxui::TextSpan::new(0, text.len() as u32).color(theme.foreground); let _ = paint.text_spans(pxui::Point::new(x + 2.0 + pad, ty), pxui::Label::BODY, 0.0, text, &[span]); };
+                    paint.chevron((x + w - 5.0, y + (h / 2.0)), if open { Dir::Up } else { Dir::Down }, pxui::Stroke::new(theme.foreground));
+                });
+                if !open || just_opened {
+                    return Vec::new();
                 }
-                (Some(selected), _) => {
-                    ui.set_state(&boxed, 0);
-                    if !mixed && selected as usize == index {
+                let Rect { x: bx, y: by, w: bw, h: bh } = ui.rect(&boxed);
+                let rows: Vec<_> = choices.iter().enumerate().map(|(i, choice)| {
+                    let item = MenuItem::new(choice).selected(!mixed && i == index);
+                    cx.chip(choice).map_or(item, |ink| item.swatch(ink))
+                }).collect();
+                let choice = ui.menu(pxui::hash_of(&(key, "options")), Point::new(bx, by + bh + 1.0), &rows, &Menu::DEFAULT.w_px(bw));
+                match (choice.chosen, choice.dismissed) {
+                    (None, false) => Vec::new(),
+                    (None, true) => {
+                        ui.set_state(&boxed, 0);
                         Vec::new()
-                    } else {
-                        vec![FlowChange::Edited(
-                            field.name.clone(),
-                            match current {
-                                Value::Int(_) => Value::Int(selected as i64),
-                                _ => Value::Choice(choices[selected as usize].clone()),
-                            },
-                        )]
+                    }
+                    (Some(selected), _) => {
+                        ui.set_state(&boxed, 0);
+                        if !mixed && selected as usize == index {
+                            Vec::new()
+                        } else {
+                            vec![FlowChange::Edited(
+                                field.name.clone(),
+                                match current {
+                                    Value::Int(_) => Value::Int(selected as i64),
+                                    _ => Value::Choice(choices[selected as usize].clone()),
+                                },
+                            )]
+                        }
                     }
                 }
             }
+            (KindView::Toggle, Value::Bool(value)) if mixed || edit || ui.box_of_key(field_key).is_some_and(|b| ui.text_state(&b).is_some()) => {
+                let style = pxui::ValueField::DEFAULT.edit(edit);
+                let style = if mixed { style.display("mixed") } else { style };
+                let current = if mixed { "" } else if *value { "true" } else { "false" };
+                let valid = |s: &str| s.parse::<bool>().is_ok();
+                let changed = pxui::ext::value_field(ui, field_key, current, Rect::new(x, y, w, 20.0), &style, &pxui::ValueCallbacks::DEFAULT.valid(&valid)).changed;
+                changed.and_then(|text| text.parse::<bool>().ok()).map_or_else(Vec::new, |v| vec![FlowChange::Edited(field.name.clone(), Value::Bool(v))])
+            }
+            (KindView::Toggle, Value::Bool(value)) => {
+                let edited = *value ^ crate::kit::switch(ui, key, (x, y), *value);
+                if edited == *value { Vec::new() } else { vec![FlowChange::Edited(field.name.clone(), Value::Bool(edited))] }
+            }
+            _ => Vec::new(),
         }
-        (KindView::Toggle, Value::Bool(value)) if mixed || edit || ui.box_of_key(field_key).is_some_and(|b| ui.text_state(&b).is_some()) => {
-            let style = pxui::ValueField::DEFAULT.edit(edit);
-            let style = if mixed { style.display("mixed") } else { style };
-            let current = if mixed { "" } else if *value { "true" } else { "false" };
-            let valid = |s: &str| s.parse::<bool>().is_ok();
-            let changed = pxui::ext::value_field(ui, field_key, current, Rect::new(x, y, w, 20.0), &style, &pxui::ValueCallbacks::DEFAULT.valid(&valid)).changed;
-            changed.and_then(|text| text.parse::<bool>().ok()).map_or_else(Vec::new, |v| vec![FlowChange::Edited(field.name.clone(), Value::Bool(v))])
-        }
-        (KindView::Toggle, Value::Bool(value)) => {
-            let edited = *value ^ crate::kit::switch(ui, &key, (x, y), *value);
-            if edited == *value { Vec::new() } else { vec![FlowChange::Edited(field.name.clone(), Value::Bool(edited))] }
-        }
-        _ => Vec::new(),
-    }
+    })
 }
 
 fn number_from_drive(row: &FlowRow, text: &str) -> Option<Value> {
@@ -532,7 +533,9 @@ fn row_menu(ui: &mut Ui, cx: &Ctx, boxed: &Handle, row: &FlowRow, typable: bool)
 
 fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Vec<FlowChange> {
     let (path, live, shown) = (row.path.as_str(), row.live.as_deref(), row.shown);
-    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
+    let (boxed, control_x, control_y, control_w) = kit::with_label(format_args!("flow-row-{path}"), &mut |key| {
+        pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), key, title)
+    });
     // the cross that removes a drive shows on the hovered row, in place of the live value
     let hovered = ui.hovered(&boxed, true);
     let (type_value, mut out) = row_menu(ui, cx, &boxed, row, true);
@@ -597,7 +600,9 @@ fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Ve
 
 fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &Handle), row: &FlowRow, title: &str, mixed: bool) -> Vec<FlowChange> {
     let (path, field, shown) = (row.path.as_str(), &row.fields[0], row.shown);
-    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
+    let (boxed, control_x, control_y, control_w) = kit::with_label(format_args!("flow-row-{path}"), &mut |key| {
+        pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), key, title)
+    });
     let (type_value, mut out) = row_menu(ui, cx, &boxed, row, true);
     ui.within(&boxed, &mut |ui| {
         // the label's own extent: its column
@@ -645,7 +650,9 @@ fn color_row_3(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, shown: bool) -
     let (r, g, b) = if fields.len() == 3 { (to_f(&fields[0].current), to_f(&fields[1].current), to_f(&fields[2].current)) } else { (0.0, 0.0, 0.0) };
     let swatch_color = Color::rgb((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8);
     let hex_str = swatch_color.to_hex_string();
-    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
+    let (boxed, control_x, control_y, control_w) = kit::with_label(format_args!("flow-row-{path}"), &mut |key| {
+        pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), key, title)
+    });
     let (type_value, mut out) = row_menu(ui, cx, &boxed, row, true);
     ui.within(&boxed, &mut |ui| {
         let text = kit::colour_edit(ui, &path, (control_x, control_y), control_w, swatch_color, &hex_str, type_value);
@@ -676,7 +683,9 @@ fn color_row_1(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str) -> Vec<FlowCha
     };
     let swatch_color = Color::parse(&text_val).unwrap_or(Color::WHITE).with_alpha(255);
     let hex_str = swatch_color.to_hex_string();
-    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
+    let (boxed, control_x, control_y, control_w) = kit::with_label(format_args!("flow-row-{path}"), &mut |key| {
+        pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), key, title)
+    });
     let (type_value, mut out) = row_menu(ui, cx, &boxed, row, true);
     ui.within(&boxed, &mut |ui| {
         let text = kit::colour_edit(ui, path, (control_x, control_y), control_w, swatch_color, &hex_str, type_value);
@@ -730,7 +739,9 @@ fn row_content(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &Handle), row: &F
         return color_row_3(ui, cx, row, title, row.shown);
     }
     // a vector: three fields in the control column, 8 between, each with its axis letter
-    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, row.shown), &format!("flow-row-{}", row.path), &title);
+    let (boxed, control_x, control_y, control_w) = kit::with_label(format_args!("flow-row-{}", row.path), &mut |key| {
+        pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, row.shown), key, title)
+    });
     let (type_value, mut out) = row_menu(ui, cx, &boxed, row, row.fields.len() == 3);
     ui.within(&boxed, &mut |ui| {
         let mut edits: Vec<FlowChange> = Vec::new();
@@ -748,7 +759,9 @@ fn row_content(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &Handle), row: &F
             kit::vector(ui, &boxed, (control_x, control_y), control_w, 0.0, &["x", "y", "z"], &mut |ui, index, x, w| {
                 if let Some(field) = row.fields.get(index) {
                     let axis = ["x", "y", "z"][index];
-                    edits.extend(input(ui, cx, on_choice, false, field, (&boxed, &format!("{}.{}", row.path, axis)), false, mixed, (x, control_y, w)));
+                    kit::with_label(format_args!("{}.{axis}", row.path), &mut |path| {
+                        edits.extend(input(ui, cx, on_choice, false, field, (&boxed, path), false, mixed, (x, control_y, w)));
+                    });
                 }
             });
         }

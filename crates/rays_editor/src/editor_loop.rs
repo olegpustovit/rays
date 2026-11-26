@@ -60,6 +60,25 @@ fn document_memory(value: &Arc<editor_document::document::T>) {
     MEMORY_DOCUMENT.with(|last| {
         let mut last = last.borrow_mut();
         if last.upgrade().is_some_and(|old| Arc::ptr_eq(&old, value)) { return; }
+        // Layout-only Doc shells (`/g`) share accounted workspace Arcs: retarget without rebuilding
+        // root Vecs/closures (toggle after_present was ~42).
+        if last.upgrade().is_some_and(|old| {
+            let a = &old.workspace.ws;
+            let b = &value.workspace.ws;
+            Arc::ptr_eq(&a.source, &b.source)
+                && Arc::ptr_eq(&a.checked, &b.checked)
+                && Arc::ptr_eq(&a.extra, &b.extra)
+                && Arc::ptr_eq(&a.imports, &b.imports)
+                && Arc::ptr_eq(&a.import_sources, &b.import_sources)
+                && match (&a.literal, &b.literal) {
+                    (None, None) => true,
+                    (Some(x), Some(y)) => Arc::ptr_eq(&x.base, &y.base),
+                    _ => false,
+                }
+        }) {
+            *last = Arc::downgrade(value);
+            return;
+        }
         let (syntax, terms) = workspace_doc::memory_allocations(&value.workspace.ws);
         // Each callback owns the immutable root whose allocations its cached identities describe.
         let syntax_document = value.clone();

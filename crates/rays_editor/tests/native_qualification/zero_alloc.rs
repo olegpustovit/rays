@@ -38,12 +38,13 @@ const C_PAN: (u64, u64) = (0, 12);
 const C_ZOOM: (u64, u64) = (0, 12);
 // Z10: measured 75 Rust allocations per typed character after shared input-frame cuts.
 const D_TYPING: (u64, u64) = (79, 13);
-// E click/toggle (Z13): settled = idle = 0 after isogrid render 0 + settle wait for zoom-rest timer.
+// E settled rows cover click, toggle and the former zoom repaint deadline.
 const E_CLICK_KEY: (u64, u64) = (75, 13);
 const E_CLICK_SETTLED: (u64, u64) = (0, 13);
-// Z10: measured 224 Rust allocations on the full toggle key frame.
-const E_TOGGLE_KEY: (u64, u64) = (236, 13);
+const E_TOGGLE_KEY: (u64, u64) = (220, 13);
 const E_TOGGLE_SETTLED: (u64, u64) = (0, 13);
+/// Frame ~0.1s after a zoom that used to schedule `repaint_after` — must stay at rest (0 rust).
+const E_ZOOM_REST_FIRE: (u64, u64) = (0, 13);
 const F_FROZEN: (u64, u64) = (0, 8);
 const F_STATIC: (u64, u64) = (0, 9);
 
@@ -134,6 +135,10 @@ impl P {
 
     fn selected(&self) -> usize {
         rays_graph::scope_state::selected(self.graph()).len()
+    }
+
+    fn collapsed_panes(&self) -> usize {
+        self.e.as_ref().unwrap().core.doc.workspace.ws.layout.panels.values().filter(|p| p.collapsed).count()
     }
 }
 
@@ -458,6 +463,7 @@ fn e_click_toggle() {
         for _ in 0..rounds {
             p.idle(10, IDLE_AT);
             p.step(&[], [Event::KeyPressed(ch('/'))], IDLE_AT);
+            let before = p.collapsed_panes();
             if phase == 0 {
                 acc.on();
             }
@@ -465,9 +471,9 @@ fn e_click_toggle() {
             if phase == 0 {
                 acc.off();
             }
-            // REST_FRAMES=2. Settled also waits out graph zoom-rest `repaint_after(0.1)` (~6 frames)
-            // so wants_frame is clear (else ~2/20 SLOW rounds wake into a full update).
-            p.idle(if phase == 1 { 8 } else { 3 }, IDLE_AT);
+            assert_ne!(before, p.collapsed_panes(), "/g did not toggle the graph pane");
+            // REST_FRAMES=2: three idles climb still; measured frame must rest.
+            p.idle(3, IDLE_AT);
             if phase == 1 {
                 acc.on();
             }
@@ -477,6 +483,31 @@ fn e_click_toggle() {
             }
         }
         check(name, acc.n / rounds, native_total(rounds), ceil);
+    }
+    // Measure across the former repaint_after(0.1) deadline, including rounding to the next tick.
+    {
+        let at = (1080., 200.);
+        p.step(&[], vec![Event::PointerMoved(at)], at);
+        p.idle(4, at);
+        let mut acc = Acc::new();
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        if mem_sys::TRACE {
+            mem_sys::trace::clear();
+        }
+        for _ in 0..rounds {
+            let zoom = p.graph().zoom;
+            p.step(&[], [Event::Scrolled((0., 1.))], at);
+            assert!(p.graph().zoom > zoom, "wheel input did not zoom the graph pane");
+            p.idle(5, at);
+            acc.on();
+            p.idle(3, at);
+            acc.off();
+            p.step(&[], [Event::Scrolled((0., -1.))], at);
+            p.idle(6, at);
+        }
+        let frames = rounds * 3;
+        check("E_zoom_rest_fire", acc.n / frames, native_total(frames), E_ZOOM_REST_FIRE);
+        assert_eq!(acc.n, 0, "zoom scheduled a rebuild after the editor had settled");
     }
     p.close();
     eprintln!("E_click_toggle wall {:.2}s", started.elapsed().as_secs_f64());

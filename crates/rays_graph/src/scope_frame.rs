@@ -1814,9 +1814,8 @@ fn settle(t: &mut Pane, ui: &Ui) {
 /// the boxes the last build left. Kept, the pane is unchanged and no changes are emitted. The anchored
 /// views hold the pane and an overscan past each side (`overscan`) at the pan and zoom they were built
 /// at; a pan offsets them and a zoom scales them about the pan (`view_offset`, `view_transform`: hit
-/// testing follows), so a drag or a wheel on the canvas builds nothing. They build again at the new pan
-/// and zoom once the pane would show past their overscan, and once the zoom has rested 0.1 s (text
-/// shaped and strokes snapped at the zoom's own size).
+/// testing follows), so a drag or wheel step on the canvas builds nothing within the overscan.
+/// The first frame after the wheel stops builds at the new zoom so text and strokes are crisp.
 pub fn update_cached(label: &str, pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) {
     pane(label, 0, pressed, t, ui, frame, changes);
 }
@@ -1840,22 +1839,25 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
     settle(t, ui);
     let ov = overscan(t);
     let (w, h) = (t.width as f64, t.height as f64);
-    // rebuilt at the pan and zoom now: the zoom rested, or the pane shows past the content's edge
-    let moved = match anchor_of(t) {
+    // Keep the anchored views while zoom input arrives. Rebuild as soon as it stops, before
+    // the editor settles; a delayed repaint used to wake an already resting editor.
+    let zooming = frame.input.t == t.zoom_t && !frame.input.events.is_empty();
+    let anchor = anchor_of(t);
+    let moved = match anchor {
         None => true,
         Some((bx, by, bz)) => {
             let k = t.zoom / bz;
             // the pane's corners in the content's points (pane-relative) as it was built
             let back = |q: f64, pan: f64, built: f64| built + ((q - pan) / k);
-            (t.zoom != bz && frame.input.t - t.zoom_t >= 0.1)
+            (t.zoom != bz && !zooming)
                 || back(0.0, t.pan_x, bx) < -ov.0
                 || back(w, t.pan_x, bx) > w + ov.0
                 || back(0.0, t.pan_y, by) < -ov.1
                 || back(h, t.pan_y, by) > h + ov.1
         }
     };
-    if t.zoom != anchor_of(t).map_or(t.zoom, |a| a.2) && !moved {
-        ui.repaint_after(0.1);
+    if !moved && anchor.is_some_and(|(_, _, zoom)| t.zoom != zoom) {
+        ui.request_frame();
     }
     if moved {
         // at the zoom it builds at, before the revision reads the geometry
@@ -1915,11 +1917,8 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
             let before = t.clone();
             let at = content(t, ui, &canvas, ov, key, changes);
             // a build that changed the pane (a field's click selected) painted part of it from the state
-            // before: it is kept as of before, so the next frame builds again from the state now
+            // before: it is kept as of before, so the next frame builds again from the state now.
             let settled = builds_same(&before, t);
-            if !settled {
-                ui.request_frame();
-            }
             if ui.verifying() {
                 (t.pan_x, t.pan_y, t.zoom) = now;
             }
@@ -1928,6 +1927,10 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
         ui.set_at(&view, (-ov.0 as f32, -ov.1 as f32));
         let fresh = built.is_some() && !verified;
         if let Some((at, before)) = built {
+            if before.is_some() && !verified {
+                // A request inside the cached content would also force that view to rebuild.
+                ui.request_frame();
+            }
             let mut kept = before.unwrap_or_else(|| t.clone());
             (kept.pan_x, kept.pan_y, kept.zoom) = at;
             keep_built(&kept, rev);

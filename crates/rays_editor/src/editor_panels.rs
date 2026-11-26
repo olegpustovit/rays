@@ -485,12 +485,12 @@ pub fn layout_intents_cow<'a>(value: &ModelView<'_>, workspace: &'a Shell, inten
         return (Cow::Borrowed(workspace), Vec::new());
     }
     let base = shell_tree(value, workspace);
-    let editor = workspace_doc::editor_graph_ref(&value.doc.workspace.ws).map(|g| g.name.clone());
+    let editor = workspace_doc::editor_graph_ref(&value.doc.workspace.ws).map(|g| g.name.as_str());
     let shell_doc = if workspace.restored { None } else { value.doc.shell.as_ref() };
     let edit = |path: &layout::Path, make: Maker| -> Vec<Change> {
-        match (&editor, shell_doc) {
+        match (editor, shell_doc) {
             (Some(graph), Some(s)) => match s.origins.iter().find(|(p, _)| p == path).map(|(_, o)| o) {
-                Some(Origin::Bound(name)) => vec![Change::LayoutEdit(make(&vec![graph.clone().into(), name.clone().into()]))],
+                Some(Origin::Bound(name)) => vec![Change::LayoutEdit(make(&vec![graph.into(), name.clone().into()]))],
                 Some(Origin::Inline(home, key)) => {
                     let make = make.clone();
                     vec![Change::LayoutInline { home: home.clone(), key: key.clone(), make: Rc::new(move |p: &flow_check::workspace::Path| make(p)) }]
@@ -544,22 +544,21 @@ pub fn layout_intents_cow<'a>(value: &ModelView<'_>, workspace: &'a Shell, inten
             _ => panel_kinds::beside(""),
         }
     };
-    let save_state = |path: &layout::Path, state: panels::State| -> Vec<Change> {
+    let save_state = |changes: &mut Vec<Change>, path: &layout::Path, state: panels::State| {
         if workspace.restored {
-            return vec![Change::Declined("The default layout is showing. / z returns to the editor graph.".to_string())];
+            changes.push(Change::Declined("The default layout is showing. / z returns to the editor graph.".to_string()));
+            return;
         }
-        let mut prefix = Vec::new();
         if editor.is_none() {
             let scene = scene_name(value);
             let (text, _) = bars::tree_text("editor", &scene, &base);
             if let Ok(forms) = s::parse(&text) {
                 if forms.len() == 1 {
-                    prefix.push(set_editor_graph(forms[0].clone()));
+                    changes.push(set_editor_graph(forms[0].clone()));
                 }
             }
         }
-        prefix.push(Change::PanelState(path.clone(), state));
-        prefix
+        changes.push(Change::PanelState(path.clone(), state));
     };
     let mut updated: Option<Shell> = None;
     let mut changes: Vec<Change> = Vec::new();
@@ -567,13 +566,13 @@ pub fn layout_intents_cow<'a>(value: &ModelView<'_>, workspace: &'a Shell, inten
         match intent {
             chrome::Intent::Toggle(path) => {
                 let state = panel_state(value, path);
-                changes.extend(save_state(path, panels::State { collapsed: !state.collapsed, ..state }));
+                save_state(&mut changes, path, panels::State { collapsed: !state.collapsed, ..state });
             }
-            chrome::Intent::Window(path, window) => changes.extend(save_state(path, panels::State { window: *window, ..panel_state(value, path) })),
+            chrome::Intent::Window(path, window) => save_state(&mut changes, path, panels::State { window: *window, ..panel_state(value, path) }),
             chrome::Intent::WindowDrag(path, window, released) => {
                 if *released {
                     updated.get_or_insert_with(|| workspace.clone()).window_live = None;
-                    changes.extend(save_state(path, panels::State { window: Some(*window), ..panel_state(value, path) }));
+                    save_state(&mut changes, path, panels::State { window: Some(*window), ..panel_state(value, path) });
                 } else {
                     updated.get_or_insert_with(|| workspace.clone()).window_live = Some((path.clone(), *window));
                 }
@@ -601,12 +600,12 @@ pub fn layout_intents_cow<'a>(value: &ModelView<'_>, workspace: &'a Shell, inten
             chrome::Intent::FloatPanel(path) => {
                 let st = panel_state(value, path);
                 if st.window.is_some() {
-                    changes.extend(save_state(path, panels::State { window: None, ..st }));
+                    save_state(&mut changes, path, panels::State { window: None, ..st });
                 } else {
                     let at: Vec<i64> = path.iter().map(|i| *i as i64).collect();
-                    changes.extend(match &editor {
+                    changes.extend(match editor {
                         _ if workspace.restored => vec![Change::Declined("The default layout is showing. / z returns to the editor graph.".to_string())],
-                        Some(graph) => vec![Change::LayoutEdit(le::Op::LayoutFloat { graph: graph.clone(), at })],
+                        Some(graph) => vec![Change::LayoutEdit(le::Op::LayoutFloat { graph: graph.to_owned(), at })],
                         None => {
                             let scene = scene_name(value);
                             let (text, _) = bars::tree_text("editor", &scene, &base);

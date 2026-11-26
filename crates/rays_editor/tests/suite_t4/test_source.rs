@@ -456,6 +456,30 @@ pub fn autosave() {
     assert_eq!(read_layout(), changed);
     layout_run.replace(e);
     layout_run.d.close();
+
+    // A cold recovery cache defers the new layout to the normal autosave poll.
+    let cold_file = format!("{dir}/cold.rays");
+    let cold_text = "(workspace w
+      (graph g :context sop [] (sop/uv_sphere :radius 0.5 :segments 8 :rings 4))
+      (graph editor :context editor (ui/workspace (ui/graph \"g\" :focus true))))";
+    write(&cold_file, cold_text);
+    let mut cold_run = Run::new(editor(Some(&isolated), vec![], source_file::at(&cold_file, &sha(cold_text)), cold_text), (200., 300.));
+    let cold_state = rays_editor::editor_setup::state_file(&cold_run.e().core);
+    cold_run.advance(35);
+    cold_run.step(vec![meta_k('/')]);
+    cold_run.d.ed.as_mut().unwrap().recovery_print = None;
+    cold_run.step(vec![meta_k('g')]);
+    for _ in 0..4 {
+        cold_run.step(vec![]);
+    }
+    assert!(
+        cold_run.e().rest.as_ref().is_some_and(|rest| rest.still >= rays_editor::editor_loop::REST_FRAMES),
+        "editor did not reach the rest path before the autosave deadline"
+    );
+    assert!(!std::path::Path::new(&cold_state).exists(), "cold recovery was written before the rest tick");
+    cold_run.advance(27); // 0.5 s since the toggle, plus one frame for clock rounding.
+    assert!(has(&read(&cold_state), ":collapsed true"), "/g followed by rest did not write the new layout");
+    cold_run.d.close();
     let _ = fs::remove_dir_all(&dir);
 }
 fn open_reload_question(r: &mut Run) {

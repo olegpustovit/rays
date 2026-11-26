@@ -250,7 +250,7 @@ pub fn cached(ui: &mut Ui, label: &str, revision: u64, f: &mut dyn FnMut(&mut Ui
 
 /// `f` with `label` formatted on the stack (a heap string only past 96 bytes): a label made per frame
 /// without an allocation.
-pub fn with_label(label: std::fmt::Arguments, f: &mut dyn FnMut(&str)) {
+pub fn with_label<T>(label: std::fmt::Arguments, f: &mut dyn FnMut(&str) -> T) -> T {
     struct Buf {
         bytes: [u8; 96],
         len: usize,
