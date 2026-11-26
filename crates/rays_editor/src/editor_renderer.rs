@@ -562,24 +562,27 @@ pub fn info(state: &State, key: &str) -> Option<Info> {
     }
 }
 
-pub fn paint(state: &State, key: &str, bounds: (i64, i64, i64, i64), camera: &camera::Camera, scene_: &d3::Scene3) -> Vec<scene::Node> {
-    let raster = || vec![scene::view3d(Some(bounds), camera, scene_.clone())];
+pub fn paint(state: &State, key: &str, bounds: (i64, i64, i64, i64), camera: &camera::Camera, scene_: &d3::Scene3, previous: &[scene::Node]) -> Option<scene::Node> {
+    let view = |scene_: &d3::Scene3| {
+        previous.iter().find_map(|node| match node {
+            scene::Node::View3d(view) if view.viewport == Some(bounds) && view.camera == *camera && d3::same(&view.scene, scene_) => Some(node.clone()),
+            _ => None,
+        }).unwrap_or_else(|| scene::view3d(Some(bounds), camera, scene_.clone()))
+    };
+    let raster = || Some(view(scene_));
     if state.custom || state.raster_only {
         return raster();
     }
     match slot_of(state, key) {
         Some(Slot { setting: Setting { mode: Mode::Raster, .. }, .. }) => raster(),
-        Some(Slot { wire: Some(wire), .. }) => vec![scene::view3d(Some(bounds), camera, wire.clone())],
+        Some(Slot { wire: Some(wire), .. }) => Some(view(wire)),
         Some(Slot { tracer: Some(tracer), .. }) => {
             let (x, y, w, _) = bounds;
             let tracer = tracer.borrow();
             // the film is scaled to its pane's gate, so a resize inside a step never re-renders
             let (sw, _) = p::size(&tracer);
-            match scene::image(&p::image(&tracer), (x, y), Some(w as f64 / sw.max(1) as f64), None) {
-                Ok(node) => vec![node],
-                Err(_) => Vec::new(),
-            }
+            scene::image(&p::image(&tracer), (x, y), Some(w as f64 / sw.max(1) as f64), None).ok()
         }
-        _ => Vec::new(),
+        _ => None,
     }
 }

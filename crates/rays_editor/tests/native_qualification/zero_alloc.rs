@@ -49,7 +49,7 @@ const F_STATIC: (u64, u64) = (0, 9);
 struct P {
     e: Option<editor::Editor>,
     tick: i64,
-    buttons: Vec<MouseButton>,
+    frame: rays::frame::Frame,
     canvas: rays::canvas::Canvas,
     gpu: flow_native::workspace_gpu::WorkspaceGpu,
     freeze: bool,
@@ -79,48 +79,44 @@ impl P {
         core.clock = std::sync::Arc::new(|| 0.);
         sop::async_cook::set_clock(&core.cook.worker, core.clock.clone());
         e.core.ui.borrow_mut().verify_views(false);
-        P { e: Some(e), tick: 0, buttons: Vec::new(), canvas, gpu, freeze: false }
+        let frame = rays::frame::Frame {
+            input: input::Frame { size: (W, H), ..input::at_time(0.) },
+            pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.),
+        };
+        P { e: Some(e), tick: 0, frame, canvas, gpu, freeze: false }
     }
 
-    fn step(&mut self, keys: &[Key], events: Vec<Event>, pointer: (f64, f64)) {
+    fn step(&mut self, keys: &[Key], events: impl IntoIterator<Item = Event>, pointer: (f64, f64)) {
         if !self.freeze {
             self.tick += 1;
         }
-        let t = self.tick;
-        for event in &events {
+        let input = &mut self.frame.input;
+        input.events.clear();
+        input.events.extend(events);
+        for event in &input.events {
             match event {
-                Event::PointerPressed(button, _) if !self.buttons.contains(button) => self.buttons.push(*button),
-                Event::PointerReleased(button, _) => self.buttons.retain(|held| held != button),
+                Event::PointerPressed(button, _) if !input.buttons.contains(button) => input.buttons.push(*button),
+                Event::PointerReleased(button, _) => input.buttons.retain(|held| held != button),
                 _ => {}
             }
         }
-        let dt = if self.freeze { 0. } else { 1. / 60. };
-        let f = rays::frame::Frame {
-            input: input::Frame {
-                dt,
-                frame: t,
-                tick: t,
-                size: (W, H),
-                pointer,
-                keys: keys.to_vec(),
-                buttons: self.buttons.clone(),
-                events,
-                ..input::at_time(t as f64 / 60.)
-            },
-            pixel_scale: (1., 1.),
-            fps: 60.,
-            mouse_delta: (0., 0.),
-        };
-        let e = editor::update(self.e.take().unwrap(), &f);
+        input.t = self.tick as f64 / 60.;
+        input.dt = if self.freeze { 0. } else { 1. / 60. };
+        input.frame = self.tick;
+        input.tick = self.tick;
+        input.pointer = pointer;
+        input.keys.clear();
+        input.keys.extend_from_slice(keys);
+        let e = editor::update(self.e.take().unwrap(), &self.frame);
         assert!(e.context_error.is_none(), "{:?}", e.context_error);
-        let sc = editor::scene(&e, &f);
+        let sc = editor::scene(&e, &self.frame);
         rays::canvas::render(None, &self.canvas, &sc).unwrap();
-        self.e = Some(editor::after_present(e, &f));
+        self.e = Some(editor::after_present(e, &self.frame));
     }
 
     fn idle(&mut self, n: usize, at: (f64, f64)) {
         for _ in 0..n {
-            self.step(&[], vec![], at);
+            self.step(&[], [], at);
         }
     }
 
@@ -130,9 +126,13 @@ impl P {
         rays::canvas::destroy(&self.canvas).unwrap();
     }
 
-    fn selected(&self) -> usize {
+    fn graph(&self) -> &rays_graph::scope_state::Pane {
         let core = &*self.e.as_ref().unwrap().core;
-        rays_graph::scope_state::selected(rays_editor::editor_model::pane_view(&core.into())).len()
+        rays_editor::editor_model::pane_view(&core.into())
+    }
+
+    fn selected(&self) -> usize {
+        rays_graph::scope_state::selected(self.graph()).len()
     }
 }
 
@@ -219,7 +219,7 @@ fn native_total(units: u64) -> u64 {
 fn idle_case(name: &str, source: &str, ceil: (u64, u64)) {
     let started = Instant::now();
     let mut p = P::new(source);
-    let (rust, native) = scenario(&mut p, &mut |p, _| p.step(&[], vec![], IDLE_AT));
+    let (rust, native) = scenario(&mut p, &mut |p, _| p.step(&[], [], IDLE_AT));
     p.close();
     check(name, rust, native, ceil);
     eprintln!("{name} wall {:.2}s", started.elapsed().as_secs_f64());
@@ -245,10 +245,10 @@ fn find_node(p: &mut P) -> ((f64, f64), (f64, f64)) {
     'scan: for y in (40..440).step_by(step) {
         for x in (890..1270).step_by(step) {
             let q = (x as f64, y as f64);
-            p.step(&[], vec![Event::PointerMoved(q)], q);
+            p.step(&[], [Event::PointerMoved(q)], q);
             p.step(
                 &[],
-                vec![
+                [
                     Event::PointerPressed(MouseButton::LeftButton, q),
                     Event::PointerReleased(MouseButton::LeftButton, q),
                 ],
@@ -268,7 +268,7 @@ fn find_node(p: &mut P) -> ((f64, f64), (f64, f64)) {
         }
     }
     let (node, empty) = (node.expect("no node found"), empty.expect("no empty point"));
-    p.step(&[], vec![Event::PointerMoved(node)], node);
+    p.step(&[], [Event::PointerMoved(node)], node);
     p.step(
         &[],
         vec![
@@ -288,7 +288,7 @@ fn a_isosel() {
     p.idle(20, IDLE_AT);
     let (node, _) = find_node(&mut p);
     p.idle(10, node);
-    let (rust, native) = scenario(&mut p, &mut |p, _| p.step(&[], vec![], node));
+    let (rust, native) = scenario(&mut p, &mut |p, _| p.step(&[], [], node));
     p.close();
     check("A_idle_isogrid_selected", rust, native, A_ISOSEL);
     eprintln!("A_idle_isogrid_selected wall {:.2}s", started.elapsed().as_secs_f64());
@@ -301,7 +301,7 @@ fn b_hover() {
     find_node(&mut p);
     let mv = |p: &mut P, i: u64, x0: f64, y0: f64| {
         let q = (x0 + (i % 60) as f64 * 6., y0 + ((i / 3) % 40) as f64 * 8.);
-        p.step(&[], vec![Event::PointerMoved(q)], q);
+        p.step(&[], [Event::PointerMoved(q)], q);
     };
     let (rust, native) = scenario(&mut p, &mut |p, i| mv(p, i, 900., 60.));
     check("B_hover_graph", rust, native, B_HOVER_GRAPH);
@@ -315,14 +315,20 @@ fn c_pan_zoom() {
     let started = Instant::now();
     let mut p = P::new(&sk("isogrid.rays"));
     let at = (1080., 200.);
-    p.step(&[], vec![Event::PointerMoved(at)], at);
+    p.step(&[], [Event::PointerMoved(at)], at);
     p.idle(20, at);
+    assert!(p.e.as_ref().unwrap().rendered.is_some(), "C must display the cooked isogrid view");
+    let zoom = p.graph().zoom;
+    p.step(&[], [Event::Scrolled((0., 1.))], at);
+    assert!(p.graph().zoom > zoom, "wheel must zoom the graph");
+    p.step(&[], [Event::Scrolled((0., -1.))], at);
     let (rust, native) = scenario(&mut p, &mut |p, i| {
-        p.step(&[], vec![Event::Scrolled((0., if (i / 10) % 2 == 0 { 1. } else { -1. }))], at)
+        p.step(&[], [Event::Scrolled((0., if (i / 10) % 2 == 0 { 1. } else { -1. }))], at)
     });
     check("C_zoom", rust, native, C_ZOOM);
     p.idle(10, at);
-    p.step(&[], vec![Event::PointerPressed(MouseButton::RightButton, at)], at);
+    p.step(&[], [Event::PointerPressed(MouseButton::RightButton, at)], at);
+    let pan = (p.graph().pan_x, p.graph().pan_y);
     let q = |i: u64| {
         let k = (i % 40) as f64;
         let d = if k < 20. { k } else { 40. - k };
@@ -330,10 +336,11 @@ fn c_pan_zoom() {
     };
     let (rust, native) = scenario(&mut p, &mut |p, i| {
         let q = q(i);
-        p.step(&[], vec![Event::PointerMoved(q)], q)
+        p.step(&[], [Event::PointerMoved(q)], q)
     });
+    assert_ne!((p.graph().pan_x, p.graph().pan_y), pan, "right-button drag must pan the graph");
     check("C_pan", rust, native, C_PAN);
-    p.step(&[], vec![Event::PointerReleased(MouseButton::RightButton, at)], at);
+    p.step(&[], [Event::PointerReleased(MouseButton::RightButton, at)], at);
     p.close();
     eprintln!("C_pan_zoom wall {:.2}s", started.elapsed().as_secs_f64());
 }
@@ -345,10 +352,10 @@ fn d_typing() {
     let click = (W as f64 * 0.75, H as f64 * 0.4);
     p.idle(20, click);
     for k in [ch('/'), ch('o'), ch('v'), ch('/'), ch('l'), ch('t')] {
-        p.step(&[], vec![Event::KeyPressed(k)], click);
+        p.step(&[], [Event::KeyPressed(k)], click);
     }
     p.idle(4, click);
-    p.step(&[], vec![Event::PointerMoved(click)], click);
+    p.step(&[], [Event::PointerMoved(click)], click);
     p.step(
         &[],
         vec![
@@ -359,8 +366,11 @@ fn d_typing() {
     );
     p.idle(20, click);
     let (rust, native) = scenario(&mut p, &mut |p, i| {
-        p.step(&[], vec![Event::TextInput(["x", "y"][i as usize % 2].to_string())], click)
+        p.step(&[], [Event::TextInput(["x", "y"][i as usize % 2].to_string())], click)
     });
+    let core = &p.e.as_ref().unwrap().core;
+    assert!(core.ui.borrow().text_input_focused(), "typing requires a focused editor area");
+    assert!(rays_editor::text_pane::summary(&core.text).contains("draft yes"), "typing must change the draft");
     p.close();
     check("D_typing", rust, native, D_TYPING);
     eprintln!("D_typing wall {:.2}s", started.elapsed().as_secs_f64());
@@ -384,14 +394,14 @@ fn e_click_toggle() {
         for i in 0..rounds {
             let q = if i % 2 == 0 { empty } else { node };
             let before = p.selected();
-            p.step(&[], vec![Event::PointerMoved(q)], q);
+            p.step(&[], [Event::PointerMoved(q)], q);
             p.idle(10, q);
             if phase == 0 {
                 acc.on();
             }
             p.step(
                 &[],
-                vec![
+                [
                     Event::PointerPressed(MouseButton::LeftButton, q),
                     Event::PointerReleased(MouseButton::LeftButton, q),
                 ],
@@ -425,11 +435,11 @@ fn e_click_toggle() {
         }
         for _ in 0..rounds {
             p.idle(10, IDLE_AT);
-            p.step(&[], vec![Event::KeyPressed(ch('/'))], IDLE_AT);
+            p.step(&[], [Event::KeyPressed(ch('/'))], IDLE_AT);
             if phase == 0 {
                 acc.on();
             }
-            p.step(&[], vec![Event::KeyPressed(ch('g'))], IDLE_AT);
+            p.step(&[], [Event::KeyPressed(ch('g'))], IDLE_AT);
             if phase == 0 {
                 acc.off();
             }
@@ -459,11 +469,11 @@ fn f_basic_static() {
     let mut p = P::new(&sk("basic.rays"));
     p.idle(warm_n(), IDLE_AT);
     p.freeze = true;
-    let (rust, native) = scenario(&mut p, &mut |p, _| p.step(&[], vec![], IDLE_AT));
+    let (rust, native) = scenario(&mut p, &mut |p, _| p.step(&[], [], IDLE_AT));
     check("F_basic_frozen_clock", rust, native, F_FROZEN);
     p.close();
     let mut p = P::new(&static_basic());
-    let (rust, native) = scenario(&mut p, &mut |p, _| p.step(&[], vec![], IDLE_AT));
+    let (rust, native) = scenario(&mut p, &mut |p, _| p.step(&[], [], IDLE_AT));
     check("F_basic_static_source", rust, native, F_STATIC);
     p.close();
     eprintln!("F_basic_static wall {:.2}s", started.elapsed().as_secs_f64());
@@ -505,7 +515,7 @@ fn may_rest_basic_clock() {
         let e = p.e.as_ref().unwrap();
         rays_editor::editor_list::timeline(&e.core).frame
     };
-    p.step(&[], vec![], IDLE_AT);
+    p.step(&[], [], IDLE_AT);
     let e = p.e.as_ref().unwrap();
     let after = rays_editor::editor_list::timeline(&e.core).frame;
     assert!(after > before, "Playing + dt>0 must advance timeline frame (basic frame N); {before} → {after}");
@@ -528,7 +538,7 @@ fn may_rest_basic_clock() {
     );
     p.freeze = true;
     let frozen_at = after;
-    p.step(&[], vec![], IDLE_AT);
+    p.step(&[], [], IDLE_AT);
     let e = p.e.as_ref().unwrap();
     assert_eq!(
         rays_editor::editor_list::timeline(&e.core).frame,

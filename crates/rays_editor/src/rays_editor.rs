@@ -336,6 +336,7 @@ pub mod editor {
         let mut value = value;
         value.camera = camera;
         value.rest = None;
+        value.picture_size = None;
         value
     }
 

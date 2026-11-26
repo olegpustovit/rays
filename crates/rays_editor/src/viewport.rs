@@ -4,6 +4,7 @@ use std::any::Any;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use editor_core::panels::{self, Panel};
 use editor_core::router;
@@ -289,7 +290,7 @@ pub struct Extra {
     /// the ACTIVE camera's view: a viewport with no root of its own
     pub document_camera: rcam::Camera,
     /// the viewports with a root of their own
-    pub view_roots: Rc<Vec<(String, ViewRoot)>>,
+    pub view_roots: Arc<Vec<(String, ViewRoot)>>,
     pub free_view: rcam::Camera,
     /// the orbit camera `free_view` shows
     pub viewing: easy_camera::EasyCamera,
@@ -351,8 +352,12 @@ pub fn release(extra_: &Extra) -> Extra {
 
 // ---- camera objects: scene nodes with operation "camera" (Objects.Camera).
 
-pub fn camera_ids(scene: &kg::T) -> Vec<i64> {
-    objects::ids("camera", scene).collect()
+pub fn camera_ids(scene: &kg::T) -> impl Iterator<Item = i64> + '_ {
+    objects::ids("camera", scene)
+}
+
+pub fn has_camera(scene: &kg::T) -> bool {
+    objects::ids("camera", scene).next().is_some()
 }
 
 pub fn follows(node: &kg::Node) -> bool {
@@ -404,7 +409,7 @@ pub fn add_default_camera(scene: &kg::T, easy: &easy_camera::EasyCamera) -> Opti
 }
 
 pub fn seed_scene(easy: &easy_camera::EasyCamera, scene: kg::T) -> kg::T {
-    if !camera_ids(&scene).is_empty() { scene } else { add_default_camera(&scene, easy).unwrap_or(scene) }
+    if has_camera(&scene) { scene } else { add_default_camera(&scene, easy).unwrap_or(scene) }
 }
 
 /// One ACTIVE camera whenever any exists; a nonempty scene of a workspace with no scene graph
@@ -413,13 +418,13 @@ pub fn seed_scene(easy: &easy_camera::EasyCamera, scene: kg::T) -> kg::T {
 pub fn sync_cameras(mode: editor_host::SceneMode, core: &mut Model, easy: &easy_camera::EasyCamera) {
     let scene = editor_inspect::scene(core);
     // A scene graph is authoritative: the host only supplies a camera for host-owned scenes.
-    if camera_ids(&scene).is_empty() && !scene.is_empty() && lowering::graph_of(&core.doc.workspace.ws, context::scene()).is_none() {
+    if !has_camera(&scene) && !scene.is_empty() && lowering::graph_of(&core.doc.workspace.ws, context::scene()).is_none() {
         if let Some(scene) = add_default_camera(&scene, easy) {
             editor_host::scene_edit(core, mode, None, scene);
         }
     }
     let view = editor_inspect::View::Primary;
-    let ids: Vec<i64> = camera_ids(&editor_inspect::scene(core)).into_iter().filter(|id| editor_inspect::view_wants(core, &view, *id)).collect();
+    let ids: Vec<i64> = camera_ids(&editor_inspect::scene(core)).filter(|id| editor_inspect::view_wants(core, &view, *id)).collect();
     let active = match core.doc.active_camera {
         Some(id) if ids.contains(&id) => Some(id),
         _ => ids.first().copied(),
@@ -529,7 +534,7 @@ pub fn init(mut core: Model, camera_: &easy_camera::EasyCamera) -> (Model, Extra
         fly: None,
         relative_grab: false,
         document_camera: render_camera.clone(),
-        view_roots: Rc::new(core.doc.view_roots.clone()),
+        view_roots: core.doc.view_roots.clone(),
         free_view: free_view_of(&render_camera, None, camera_),
         viewing: camera_.clone(),
         free_camera: render_camera,
@@ -882,21 +887,21 @@ pub fn on_view(core: &mut Model, previous: &Camera, key: &str, camera_: Camera, 
     };
     extra_ = Extra {
         document_camera: deferred.or_else(|| decoded.as_ref().map(|(c, _)| c.clone())).unwrap_or_else(|| easy_camera::camera(&camera_).expect("camera")),
-        view_roots: Rc::new(core.doc.view_roots.clone()),
+        view_roots: core.doc.view_roots.clone(),
         ..extra_
     };
     // the focused viewport's free view carries the lens of its own camera
     let free_camera = look(&extra_, key).through;
     // a viewport whose `:look_through` changed in the text follows it; the others stay as they are
-    let said = core.doc.shell.as_ref().map(|s| s.start.looking.clone()).unwrap_or_default();
-    if said.as_slice() != extra_.started.as_slice() {
+    let said = core.doc.shell.as_ref().map_or(&[][..], |s| s.start.looking.as_slice());
+    if said != extra_.started.as_slice() {
         let mut looking: Vec<String> = extra_.looking.iter().filter(|k| said.contains(k) || extra_.started.contains(k) == said.contains(k)).cloned().collect();
         looking.extend(said.iter().filter(|k| !extra_.started.contains(k) && !extra_.looking.contains(k)).cloned());
-        extra_ = Extra { started: Rc::new(said), looking: Rc::new(looking), ..extra_ };
+        extra_ = Extra { started: Rc::new(said.to_vec()), looking: Rc::new(looking), ..extra_ };
     }
     let free_view = free_view_of(&free_camera, Some(&extra_.free_view), &camera_);
     let extra_ = Extra {
-        key: Rc::from(key),
+        key: if extra_.key.as_ref() == key { extra_.key.clone() } else { Rc::from(key) },
         free_camera,
         free_view,
         viewing: camera_.clone(),
@@ -1019,8 +1024,8 @@ pub fn render_status(extra_: &Extra) -> Option<String> {
     extra_.renderer.error.clone()
 }
 
-pub fn paint(extra_: &Extra, key: &str, viewport: Bounds, camera_: &rcam::Camera, rendered_: &d3::Scene3) -> Nodes {
-    renderer::paint(&extra_.renderer, key, viewport, camera_, rendered_)
+pub fn paint(extra_: &Extra, key: &str, viewport: Bounds, camera_: &rcam::Camera, rendered_: &d3::Scene3, previous: &[scene_node]) -> Option<scene_node> {
+    renderer::paint(&extra_.renderer, key, viewport, camera_, rendered_, previous)
 }
 
 /// Objects under their world transforms. Light objects light the scene when there are any;

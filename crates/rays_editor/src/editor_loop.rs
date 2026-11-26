@@ -670,10 +670,11 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     open_import(value, &mut update_);
     reload_source(value, &mut update_, frame.input.t);
     let geometry = editor_shell::geometry(&(&value.core).into(), &value.core.workspace, &frame);
-    // Focus can only move on a press into another view; pan/zoom/hover avoid Focus String clones
-    // by moving viewing/cameras out and restoring them at the end of update_with.
-    let focus_moved = frame.input.events.iter().any(|e| matches!(e, Event::PointerPressed(..)));
-    let focused = if focus_moved {
+    let press = frame.input.events.iter().any(|e| matches!(e, Event::PointerPressed(..)));
+    let active_view = editor_shell::active_view(&(&value.core).into(), &geometry);
+    let focus_moved = active_view.is_some_and(|leaf| matches!(&leaf.panel, Panel::View(key) if value.viewing.as_ref() != Some(key)));
+    let has_orphan = value.cameras.iter().any(|(key, _)| !geometry.leaves.iter().any(|leaf| matches!(&leaf.panel, Panel::View(k) if k == key)));
+    let focused = if focus_moved || has_orphan {
         follow_focus_in(&value, &value.core, &geometry)
     } else {
         Focus {
@@ -686,7 +687,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let panel_out: Option<Rc<V::PanelOut>> = update_.panel.take().and_then(|p| Rc::downcast::<V::PanelOut>(p).ok());
     let (control, camera, requests, extra, inspected) = match panel_out {
         Some(p) => {
-            let camera = if focus_moved { focused.camera.clone() } else { p.camera.clone() };
+            let camera = if press || focus_moved { focused.camera.clone() } else { p.camera.clone() };
             (p.control.clone(), camera, p.requests.clone(), p.extra.clone(), Some(p.inspected.clone()))
         }
         None => (value.control.clone(), focused.camera.clone(), Vec::new(), extra, None),
@@ -751,6 +752,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
             history::seal(true, &mut Rc::make_mut(&mut value.core).history);
         }
     }
+    crate::editor_reduce::recycle_view_input(update_.input);
     let live = value.world_drag.is_some() || timeline::mode(&editor_list::timeline(&value.core)) == timeline::Mode::Playing;
     let baked_from = bake_world(None, value.baked_from.as_ref(), &value.core, live);
     let baked = baked_from.as_ref().map(|(_, b)| b.clone());
@@ -765,26 +767,50 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let baked_views = if new_views.len() == value.baked_views.len() && new_views.iter().zip(&value.baked_views).all(|((k, (_, b)), (k2, (_, b2)))| k == k2 && Rc::ptr_eq(b, b2)) { value.baked_views.clone() } else { new_views };
     let timeline_ = editor_list::timeline(&value.core);
     let time = timeline::time(&timeline_);
-    let live_input = input::Frame { t: time, frame: timeline::frame(&timeline_), ..value.core.live_frame.clone() };
-    let reuse = match &value.resolved {
-        Some((doc, at, scene, error)) if same_context(doc, &value.core.doc) && !sop::context::input_changed(lowering::scene_reads(doc), at, &live_input) => Some((Rc::clone(scene), error.clone())),
-        _ => None,
-    };
-    let (scene, scene_error) = match reuse {
-        Some(r) => r,
-        None => {
-            let previous = match &value.resolved {
-                Some((doc, _, scene, _)) if same_context(doc, &value.core.doc) => Some(scene.as_ref()),
-                _ => None,
-            };
-            let (scene, errors) = lowering::resolve_scene(previous, Some(&value.core.cook.state), Some(&live_input), &value.core.doc, time);
-            (Rc::new(scene), if errors.is_empty() { None } else { Some(errors.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")) })
+    thread_local! {
+        static LIVE_SCRATCH: std::cell::RefCell<input::Frame> = std::cell::RefCell::new(input::at_time(0.));
+    }
+    let (scene, canvases, context_error) = {
+        let mut live_input = LIVE_SCRATCH.with(|slot| slot.replace(input::at_time(0.)));
+        live_frame::copy_input(&mut live_input, &value.core.live_frame);
+        live_input.t = time;
+        live_input.frame = timeline::frame(&timeline_);
+        let reuse = match &value.resolved {
+            Some((doc, at, scene, error)) if same_context(doc, &value.core.doc) && !sop::context::input_changed(lowering::scene_reads(doc), at, &live_input) => Some((Rc::clone(scene), error.clone())),
+            _ => None,
+        };
+        let (scene, scene_error) = match reuse {
+            Some(r) => r,
+            None => {
+                let previous = match &value.resolved {
+                    Some((doc, _, scene, _)) if same_context(doc, &value.core.doc) => Some(scene.as_ref()),
+                    _ => None,
+                };
+                let (scene, errors) = lowering::resolve_scene(previous, Some(&value.core.cook.state), Some(&live_input), &value.core.doc, time);
+                (Rc::new(scene), if errors.is_empty() { None } else { Some(errors.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")) })
+            }
+        };
+        let context_error = if image_errors.is_empty() { scene_error.clone() } else { Some(image_errors.join("; ")) };
+        let prior_canvases = std::mem::take(&mut value.canvases);
+        let (canvases, context_error, _canvases_changed) = canvas_pictures(context_error, &value, prior_canvases, &live_input, &raw_frame, &value.core, &control);
+        // Exchange the snapshots so both buffers retain capacity for the next frame.
+        match &mut value.resolved {
+            Some((doc, at, sc, err)) => {
+                *doc = value.core.doc.clone();
+                std::mem::swap(at, &mut live_input);
+                *sc = Rc::clone(&scene);
+                *err = scene_error.clone();
+            }
+            None => {
+                let at = std::mem::replace(&mut live_input, input::at_time(0.));
+                value.resolved = Some((value.core.doc.clone(), at, Rc::clone(&scene), scene_error));
+            }
         }
+        LIVE_SCRATCH.with(|slot| slot.replace(live_input));
+        (scene, canvases, context_error)
     };
-    let context_error = if image_errors.is_empty() { scene_error.clone() } else { Some(image_errors.join("; ")) };
-    let prior_canvases = std::mem::take(&mut value.canvases);
-    let (canvases, context_error, canvases_changed) = canvas_pictures(context_error, &value, prior_canvases, &live_input, &raw_frame, &value.core, &control);
-    let composed_ = compose(&value, &value.core, update_.prepared_changed || update_.scene_changed || update_.effects.view || update_.effects.export, &baked, &baked_views, &scene);
+    let live_input = &value.resolved.as_ref().expect("resolved").1;
+    let composed_ = compose(&value, &value.core, live_input, update_.prepared_changed || update_.scene_changed || update_.effects.view || update_.effects.export, &baked, &baked_views, &scene);
     workspace_gpu::frame(&gpu_t, if composed_.drawn_changed { Some(display_keys(&composed_.drawn)) } else { None }.as_deref());
     let context_error = if composed_.errors.is_empty() { context_error } else { Some(composed_.errors.join("; ")) };
     let rendered = composed_.rendered.clone();
@@ -837,7 +863,6 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     value.views = views;
     value.drawn = composed_.drawn.clone();
     value.composed = Some(composition_key(&value.core, &scene));
-    value.resolved = Some((value.core.doc.clone(), live_input, scene, scene_error));
     value.context_error = context_error;
     value.canvases = canvases;
     value.baked = baked;
@@ -873,22 +898,12 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     // a held button defers the write to its release: the synced write is tens of ms (F_FULLFSYNC)
     // and stuttered every orbit and slider drag at 2 Hz
     if frame.input.buttons.is_empty() { autosave(value, false, frame.input.t); }
-    // Pointer-only hover can borrow the composition until its canvas or view changes.
-    let pointer_only = raw_frame.input.events.iter().all(|e| matches!(e, Event::PointerMoved(_)));
-    if pointer_only
-        && !update_.scene_changed
-        && !update_.prepared_changed
-        && !update_.effects.view
-        && !update_.effects.export
-    {
-        if canvases_changed || value.last_picture.is_none() {
-            let mut picture = value.last_picture.take().unwrap_or_default();
-            compose_scene_into(value, raw_frame, Rc::make_mut(&mut picture));
-            value.last_picture = Some(picture);
-        }
-    } else {
-        value.last_picture = None;
-    }
+    let mut picture = std::mem::take(&mut value.picture_scratch);
+    compose_scene_into(value, raw_frame, &mut picture);
+    std::mem::swap(&mut value.picture, &mut picture);
+    picture.clear();
+    value.picture_scratch = picture;
+    value.picture_size = Some(raw_frame.input.size);
     inspected
 }
 
@@ -915,8 +930,7 @@ fn compose_scene_into(value: &LoopModel, frame_: &frame::Frame, out: &mut Nodes)
             ))
         }
     };
-    compose_view(
-        out,
+    compose_view_into(
         value.map.as_ref().map(|(_, i)| i),
         &value.canvases,
         V::ui_visible(&value.control),
@@ -931,7 +945,8 @@ fn compose_scene_into(value: &LoopModel, frame_: &frame::Frame, out: &mut Nodes)
         value.hidden_scene_cache.as_ref(),
         &value.core,
         frame_,
-    )
+        out,
+    );
 }
 
 /// An idle frame is not built: with no input, no cook and a clock nothing reads, a frame is the last
@@ -1139,7 +1154,7 @@ pub fn memory_boundary(value: &mut LoopModel) {
     }
     if core_changed {
         value.rest = None;
-        value.last_picture = None;
+        value.picture_size = None;
     }
 }
 
@@ -1154,6 +1169,7 @@ pub fn after_present(value: &mut LoopModel, frame_: &frame::Frame) {
         Some(status) => {
             value.render_status = Some(status);
             value.pending_render = None;
+            value.picture_size = None;
             refresh_hidden(value, frame_)
         }
         None => {},
@@ -1161,8 +1177,8 @@ pub fn after_present(value: &mut LoopModel, frame_: &frame::Frame) {
 }
 
 pub fn scene_of<'a>(value: &'a LoopModel, frame_: &frame::Frame) -> Cow<'a, [scene_node]> {
-    if let Some(pic) = &value.last_picture {
-        return Cow::Borrowed(pic.as_slice());
+    if value.picture_size == Some(frame_.input.size) {
+        return Cow::Borrowed(&value.picture);
     }
     match &value.rest {
         Some(rest) if same_input(&rest.shown, frame_) => Cow::Borrowed(rest.picture.as_slice()),

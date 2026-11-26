@@ -151,8 +151,10 @@ pub struct LoopModel {
     pub panel_seen: Option<(V::PanelKey, u64)>,
     /// fingerprint of with_view_overlays inputs (skip rebuild on graph pan/zoom)
     pub view_overlay_fp: Option<u64>,
-    /// Pointer-only hover: reuse the last composed scene (pointer is not part of the picture).
-    pub last_picture: Option<Rc<Vec<rays::scene::Node>>>,
+    /// Composed frame at its logical size. Keep the scene Vec for the next frame's nodes.
+    pub(crate) picture_size: Option<(i64, i64)>,
+    pub(crate) picture: Vec<rays::scene::Node>,
+    pub(crate) picture_scratch: Vec<rays::scene::Node>,
 }
 
 /// Scene objects a sketch starts with: its lights as light objects.
@@ -266,7 +268,9 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
             Ok(LoopModel {
                 panel_seen: None,
                 view_overlay_fp: None,
-                last_picture: None,
+                picture_size: None,
+                picture: Vec::new(),
+                picture_scratch: Vec::new(),
                 core: Rc::new(core),
                 rest: None,
                 camera,
@@ -372,7 +376,7 @@ pub fn probe(value: &LoopModel, zone: &[Symbol]) -> Option<i64> {
 
 /// The model with a replaced core: what a test or tool does outside a frame. Drops `rest`.
 pub fn with_core(value: LoopModel, core: m::EditorModel) -> LoopModel {
-    LoopModel { core: Rc::new(core), rest: None, ..value }
+    LoopModel { core: Rc::new(core), rest: None, picture_size: None, ..value }
 }
 
 pub fn set_probe(value: LoopModel, zone: &[Symbol], index: i64) -> LoopModel {
@@ -389,12 +393,14 @@ pub fn node_box(value: &LoopModel, path: &[Symbol]) -> Option<(i64, i64, i64, i6
 pub fn edit(mut value: LoopModel, op: &fe::Op) -> Result<LoopModel, String> {
     editor_host::syntax_edit(Rc::make_mut(&mut value.core), op)?;
     value.rest = None;
+    value.picture_size = None;
     Ok(value)
 }
 
 pub fn edit_layout(mut value: LoopModel, op: &layout_edit::Op) -> Result<LoopModel, String> {
     editor_host::layout_edit_op(Rc::make_mut(&mut value.core), op)?;
     value.rest = None;
+    value.picture_size = None;
     Ok(value)
 }
 
@@ -577,8 +583,8 @@ pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &rays_shell:
     }
 }
 
-pub fn paint_view(value: &LoopModel, key: &str, viewport: rays_shell::layout::Bounds, view_: &rays::camera::Camera, rendered: &d3::Scene3) -> Vec<rays::scene::Node> {
-    V::paint(&value.extra, key, V::film(&value.extra, look_key(value, key), viewport), view_, rendered)
+pub fn paint_view(value: &LoopModel, key: &str, viewport: rays_shell::layout::Bounds, view_: &rays::camera::Camera, rendered: &d3::Scene3) -> Option<rays::scene::Node> {
+    V::paint(&value.extra, key, V::film(&value.extra, look_key(value, key), viewport), view_, rendered, &value.picture)
 }
 
 pub fn viewport_camera(value: &LoopModel, key: &str) -> rays::camera::Camera {
@@ -660,7 +666,7 @@ fn same_baked_views(a: &[(String, BakedPair)], b: &[(String, BakedPair)]) -> boo
     a.len() == b.len() && a.iter().zip(b).all(|((k, (_, x)), (k2, (_, y)))| k == k2 && Rc::ptr_eq(x, y))
 }
 
-pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &Option<Rc<world::Baked>>, baked_views: &[(String, BakedPair)], scene: &Rc<kg::T>) -> ComposedOut {
+pub fn compose(value: &LoopModel, core: &m::EditorModel, live: &Input, changed: bool, baked: &Option<Rc<world::Baked>>, baked_views: &[(String, BakedPair)], scene: &Rc<kg::T>) -> ComposedOut {
     let draw_errors = |drawn: &Drawn, errors: &[String]| -> Vec<String> {
         let mut out: Vec<String> = errors.to_vec();
         for e in drawn.values() {
@@ -671,8 +677,6 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
         out
     };
 
-    let timeline_ = editor_list::timeline(core);
-    let live = Input { t: timeline::time(&timeline_), frame: timeline::frame(&timeline_), ..core.live_frame.clone() };
     let lowered = &core.doc.workspace.lowered;
     let (images, host_gpu) = {
         let host = value.host.borrow();
@@ -683,7 +687,7 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
     let mut textures: BTreeMap<i64, texture::Texture> = BTreeMap::new();
     let mut errors: Vec<String> = Vec::new();
     for (id, source) in core.doc.scene_textures.iter() {
-        match workspace_images::texture(None, &images, &core.cook.state, &live, plan, source) {
+        match workspace_images::texture(None, &images, &core.cook.state, live, plan, source) {
             Ok(texture) => {
                 textures.insert(*id, texture);
             }

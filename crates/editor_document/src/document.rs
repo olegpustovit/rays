@@ -196,7 +196,7 @@ pub struct T {
     /// (none: that instance has none); a viewport not listed shows the document's.
     pub view_worlds: Vec<(String, Option<ViewWorld>)>,
     /// A viewport over a scene instance with a `scene/root` of its own.
-    pub view_roots: Vec<(String, ViewRoot)>,
+    pub view_roots: Arc<Vec<(String, ViewRoot)>>,
     /// Where each derived object is written in the text.
     pub homes: Homes,
     pub scene_drives: IntMap<(String, Vec<(port::Parameter, E)>)>,
@@ -491,7 +491,7 @@ pub fn dump(value: &T) -> String {
     for (key, world) in &value.view_worlds {
         line(format!("view {} world {}", key, world.as_ref().map_or("-".to_owned(), |w| format!("{:?}", &w.node.label))));
     }
-    for (key, r) in &value.view_roots {
+    for (key, r) in value.view_roots.iter() {
         let camera = match &r.camera {
             Some(c) => {
                 let p = rcamera::position(c);
