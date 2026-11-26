@@ -140,10 +140,9 @@ pub fn run(runtime: &renderer::Renderer, frames: &Frames, mut before_draw: impl 
         }
     }
     let churn = renderer::stats(runtime).unwrap();
-    // The churn frames admit one new automatic plan (two misses, one build) that replaces the earlier
-    // one, then replay it for churn - 2 frames while the same-shape texture is recycled with one upload
-    // (256 bytes) per generation.
-    assert!(counters(&churn) == (4, 18 + frames.churn - 2), "managed-image churn rebuilt its retained render plan: {}", describe(&churn));
+    // A texture change with the same draw shape patches the existing plan. Every generation
+    // should be a hit with exactly one upload (256 bytes).
+    assert!(counters(&churn) == (2, 18 + frames.churn), "managed-image churn rebuilt its retained render plan: {}", describe(&churn));
     assert_eq!(churn.uploaded_bytes - uploaded, 256 * frames.churn, "managed-image churn upload cardinality is not exact");
     assert_eq!(Some(peak_live), settled_release, "managed-image churn grew native live-handle state");
     let plain_mesh = Mesh { key: MeshKey::Host("scene2-retained-plain".into()), ..triangle.clone() };
@@ -154,7 +153,7 @@ pub fn run(runtime: &renderer::Renderer, frames: &Frames, mut before_draw: impl 
     }
     assert_eq!(first_pixel(runtime), SAMPLE, "mixed canonical Scene2 exact pixel mismatch");
     let mixed = renderer::stats(runtime).unwrap();
-    assert!(counters(&mixed) == (6, counters(&churn).1 + frames.mixed - 2), "mixed plain/textured Scene2 did not retain one stable plan: {}", describe(&mixed));
+    assert!(counters(&mixed) == (counters(&churn).0 + 2, counters(&churn).1 + frames.mixed - 2), "mixed plain/textured Scene2 did not retain one stable plan: {}", describe(&mixed));
     for frame in 0..160 {
         let identity = frame % 80;
         let m = Mesh { key: MeshKey::Host(format!("scene2-plan-churn-{identity:02}")), ..triangle.clone() };
