@@ -173,7 +173,7 @@ pub fn create(opts: CreateOpts, workspace: &workspace_doc::T, prepare: cook::Pre
     let single_draw = drawings.next().filter(|_| drawings.next().is_none()).filter(|_| !workspace.checked.graphs.iter().any(|g| g.context == context::editor()));
     let initial_panel = single_draw.map(|g| panels::Panel::Canvas(g.name.clone()));
     let initial_tree = initial_panel.clone().map(panels::Panels::Leaf).unwrap_or_else(layout_default);
-    let shell = Shell { tree: std::rc::Rc::new(initial_tree), hidden: vec![panels::Panel::Timeline], live: None, window_live: None, restored: false };
+    let shell = Shell { tree: std::rc::Rc::new(initial_tree), hidden: Rc::new(vec![panels::Panel::Timeline]), live: None, window_live: None, restored: false };
     let presets = match presets {
         Some(directory) => directory,
         None => editor_core::store::filename_concat(&user_folder(platform), &preset::sanitize(&name)),

@@ -246,14 +246,28 @@ pub fn start_of(doc: &doc_mod::T) -> Started {
 /// The editor follows a start keyword when its value in the text changed (flow.md 11.11): on
 /// opening, a reload, a preset, an edit, undo. What did not change is left as the user has it.
 pub fn follow_start(value: &mut EditorModel) {
-    let now = start_of(&value.doc);
     let was = value.started.clone();
-    if now == *was {
+    if let Some(shell) = &value.doc.shell {
+        let same = |now: &[(layout::Path, String)], before: &[(Key, String)]| {
+            now.len() == before.len() && now.iter().zip(before).all(|((path, value_now), (key, value_before))| {
+                value_now == value_before && same_panel_key(&value.doc, path, key)
+            })
+        };
+        let same_focus = match (&shell.start.focus, &was.on) {
+            (Some(path), Some(key)) => same_panel_key(&value.doc, path, key),
+            (None, None) => true,
+            _ => false,
+        };
+        if same_focus && same(&shell.start.graph_views, &was.views) && same(&shell.start.tabs, &was.tabs) {
+            return;
+        }
+    } else if was.on.is_none() && was.views.is_empty() && was.tabs.is_empty() {
         return;
     }
+    let now = start_of(&value.doc);
     let leaves = shell_leaves(&*value, &value.workspace);
     let path_of = |value: &EditorModel, key: &Key| -> Option<(layout::Path, Panel)> {
-        leaves.iter().find(|(path, _)| panel_key(&value.doc, path) == *key).cloned()
+        leaves.iter().find(|(path, _)| same_panel_key(&value.doc, path, key)).cloned()
     };
     let changed = |now: &[(Key, String)], was: &[(Key, String)]| -> Vec<(Key, String)> {
         now.iter().filter(|(key, v)| was.iter().find(|(k, _)| k == key).map(|(_, w)| w) != Some(v)).cloned().collect()

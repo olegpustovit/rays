@@ -225,7 +225,7 @@ pub fn sync_scope(value: &mut EditorModel) {
         if let Some(laid) = pane_laid(&model) {
             let display = viewed_path(&model, &laid.scope, &mut link);
             if pane_view(&model).display.as_deref() != display {
-                pane_mut(value).view.display = display.map(<[Symbol]>::to_vec);
+                pane_mut(value).view.display = display.map(Rc::from);
             }
         }
     }

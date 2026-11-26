@@ -798,7 +798,7 @@ fn card_fields(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed,
                                 if r.kind != p::RowKind::Add && *j != *active {
                                     let b = ui.node(pxui::hash_of(&("sw", i)), pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP | pxui::Flags::HOVER_FREE).w(Size::Px(((pl.w - 24.0) * z) as f32)).h(Size::Px((16.0 * z) as f32)).at((12.0 * z) as f32, ((top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z) as f32));
                                     if ui.signal(&b).clicked {
-                                        switchers.push(Change::LayoutActive { graph: t.key.clone(), index: *j });
+                                        switchers.push(Change::LayoutActive { graph: t.key.to_string(), index: *j });
                                     }
                                 }
                             }
@@ -1007,7 +1007,7 @@ pub fn drop_change(t: &Pane, ui: &mut Ui, canvas: &pxui::Handle) -> Option<Chang
         let card = hovers.cards.iter().find(|card| card.slot == slot)?;
         (t.geo.items[slot].0.path.clone(), ui.drop_target(&card.tile)?)
     } else {
-        (vec![t.key.clone().into()], ui.drop_target(canvas)?)
+        (vec![t.key], ui.drop_target(canvas)?)
     };
     Some(match drop {
         pxui::DropRef::Hover(pay) => Change::DropOver { path, kind: pay.kind.to_owned(), value: pay.value.to_owned() },

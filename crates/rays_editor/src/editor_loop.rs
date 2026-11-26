@@ -346,8 +346,13 @@ pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key],
         || value.core.map_view != previous_map
         || actions.iter().any(|a| matches!(a, Action::Undo | Action::Redo | Action::HideUi))
     { None } else { value.world_drag.clone() };
-    let modifiers = input::keys_before(held_keys, &sent.input.keys, &sent.input.events);
-    let modifiers = sent.input.events.iter().fold(modifiers, |keys, e| input::keys_after(&keys, e));
+    let mut modifiers = Vec::new();
+    if sent.input.events.iter().any(|event| matches!(event, Event::PointerReleased(MouseButton::LeftButton, _))) {
+        input::keys_before_into(held_keys, &sent.input.keys, &sent.input.events, &mut modifiers);
+        for event in &sent.input.events {
+            input::update_keys(&mut modifiers, event);
+        }
+    }
     let ui = value.core.ui.clone();
     let ui = ui.borrow();
     let view = pane_keys.iter().find_map(|(key, (panel, _))| if matches!(panel, Panel::View(_)) { ui.box_of_key(pxui::Key::Resolved(*key)) } else { None });

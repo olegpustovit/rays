@@ -30,18 +30,19 @@ const A_BARE: (u64, u64) = (0, 9);
 const A_ISOGRID: (u64, u64) = (0, 13);
 // Selected idle: Z8 may_rest path; lowered after Z5 idle cuts (meas 10/12).
 const A_ISOSEL: (u64, u64) = (0, 13);
-// Z10 remasure (meas+5%): B 65/62, C 53/48, D 203, E_click 159.
-const B_HOVER_GRAPH: (u64, u64) = (59, 13);
-const B_HOVER_INSPECTOR: (u64, u64) = (57, 13);
-const C_PAN: (u64, u64) = (41, 9);
-const C_ZOOM: (u64, u64) = (45, 9);
-// Z11: borrow pane state and reuse lexer storage; measured 126 + 5%.
-const D_TYPING: (u64, u64) = (133, 13);
+// Z10: measured 20/17 Rust allocations per hover frame.
+const B_HOVER_GRAPH: (u64, u64) = (21, 13);
+const B_HOVER_INSPECTOR: (u64, u64) = (18, 13);
+// The cooked isogrid viewport adds the depth pass; the prior 9 budget was for the undrawn view.
+const C_PAN: (u64, u64) = (0, 12);
+const C_ZOOM: (u64, u64) = (0, 12);
+// Z10: measured 75 Rust allocations per typed character after shared input-frame cuts.
+const D_TYPING: (u64, u64) = (79, 13);
 // E click/toggle (Z13): settled = idle = 0 after isogrid render 0 + settle wait for zoom-rest timer.
-const E_CLICK_KEY: (u64, u64) = (167, 13);
+const E_CLICK_KEY: (u64, u64) = (75, 13);
 const E_CLICK_SETTLED: (u64, u64) = (0, 13);
-// Z8: recovery splice and submit allocate 0 on the UI thread. Full key frame measured 269.
-const E_TOGGLE_KEY: (u64, u64) = (283, 13);
+// Z10: measured 224 Rust allocations on the full toggle key frame.
+const E_TOGGLE_KEY: (u64, u64) = (236, 13);
 const E_TOGGLE_SETTLED: (u64, u64) = (0, 13);
 const F_FROZEN: (u64, u64) = (0, 8);
 const F_STATIC: (u64, u64) = (0, 9);
@@ -201,7 +202,7 @@ fn scenario(p: &mut P, f: &mut dyn FnMut(&mut P, u64)) -> (u64, u64) {
     for i in 0..frames {
         f(p, warm as u64 + i);
     }
-    let rust = (mem_sys::alloc_count() - n0) / frames;
+    let rust = (mem_sys::alloc_count() - n0).div_ceil(frames);
     let native = native_total(frames);
     (rust, native)
 }
@@ -317,7 +318,7 @@ fn c_pan_zoom() {
     let at = (1080., 200.);
     p.step(&[], [Event::PointerMoved(at)], at);
     p.idle(20, at);
-    assert!(p.e.as_ref().unwrap().rendered.is_some(), "C must display the cooked isogrid view");
+    assert!(!p.e.as_ref().unwrap().drawn.is_empty(), "C must display the cooked isogrid view");
     let zoom = p.graph().zoom;
     p.step(&[], [Event::Scrolled((0., 1.))], at);
     assert!(p.graph().zoom > zoom, "wheel must zoom the graph");
@@ -343,6 +344,27 @@ fn c_pan_zoom() {
     p.step(&[], [Event::PointerReleased(MouseButton::RightButton, at)], at);
     p.close();
     eprintln!("C_pan_zoom wall {:.2}s", started.elapsed().as_secs_f64());
+}
+
+fn c_noop_input() {
+    let mut p = P::new(&sk("isogrid.rays"));
+    let pointer = (1080., 200.);
+    p.step(&[], [Event::PointerMoved(pointer)], pointer);
+    p.idle(20, pointer);
+    p.freeze = true;
+    let doc = p.e.as_ref().unwrap().core.doc.clone();
+    let view = (p.graph().zoom, p.graph().pan_x, p.graph().pan_y);
+    let (pointer_rust, pointer_native) = scenario(&mut p, &mut |p, _| {
+        p.step(&[], [Event::PointerMoved(pointer)], pointer);
+    });
+    let (key_rust, key_native) = scenario(&mut p, &mut |p, _| {
+        p.step(&[], [Event::KeyPressed(Key::F8), Event::KeyReleased(Key::F8)], pointer);
+    });
+    assert!(std::sync::Arc::ptr_eq(&doc, &p.e.as_ref().unwrap().core.doc));
+    assert_eq!(view, (p.graph().zoom, p.graph().pan_x, p.graph().pan_y));
+    p.close();
+    check("C_noop_pointer", pointer_rust, pointer_native, (0, 12));
+    check("C_noop_key", key_rust, key_native, (0, 12));
 }
 
 fn d_typing() {
@@ -558,6 +580,7 @@ pub fn cases() -> Vec<(&'static str, fn())> {
         ("zero_alloc_a_isosel", a_isosel),
         ("zero_alloc_b_hover", b_hover),
         ("zero_alloc_c_pan_zoom", c_pan_zoom),
+        ("zero_alloc_c_noop_input", c_noop_input),
         ("zero_alloc_d_typing", d_typing),
         ("zero_alloc_e_click_toggle", e_click_toggle),
         ("zero_alloc_f_basic_static", f_basic_static),

@@ -36,7 +36,7 @@ pub fn apply_action(value: &EditorModel, state: Applied, action: &Action) -> App
         (workspace, selection, tree, timeline, changes)
     };
     let expand = |panel: Panel, mut workspace: Shell| {
-        workspace.hidden = layout::expand(&panel, &workspace.hidden);
+        workspace.hidden = Rc::new(layout::expand(&panel, &workspace.hidden));
         workspace
     };
     match action {
@@ -45,7 +45,7 @@ pub fn apply_action(value: &EditorModel, state: Applied, action: &Action) -> App
             let workspace = if workspace.restored {
                 Shell { restored: false, live: None, window_live: None, ..workspace }
             } else {
-                Shell { tree: std::rc::Rc::new(layout::default()), hidden: vec![Panel::Timeline], live: None, window_live: None, restored: true }
+                Shell { tree: std::rc::Rc::new(layout::default()), hidden: Rc::new(vec![Panel::Timeline]), live: None, window_live: None, restored: true }
             };
             (workspace, selection, tree, timeline, changes)
         }

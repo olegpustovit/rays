@@ -79,7 +79,7 @@ fn actions_routing_and_labels() {
         let state = (value.workspace.clone(), selection::select(3), value.tree.clone(), value.timeline.clone(), Vec::new());
         let (workspace, selection, _, _, _) = apply_action(&value, state.clone(), &Action::RestoreLayout);
         assert!(workspace.restored);
-        assert_eq!(workspace.hidden, vec![Panel::Timeline]);
+        assert_eq!(workspace.hidden.as_slice(), &[Panel::Timeline]);
         let again = apply_action(&value, (workspace, selection, value.tree.clone(), value.timeline.clone(), Vec::new()), &Action::RestoreLayout);
         assert!(!again.0.restored);
         let (_, selection, _, _, _) = apply_action(&value, state.clone(), &Action::OpenCamera);
@@ -535,7 +535,7 @@ fn frame_views_borrow_the_owned_model() {
             assert_eq!(selection::selected(pane_selection(&view)), Some(7));
             assert!(selection::selected(pane_selection(&(&value).into())).is_none());
             let mut workspace = value.workspace.clone();
-            workspace.hidden.push(Panel::Graph);
+            std::rc::Rc::make_mut(&mut workspace.hidden).push(Panel::Graph);
             let focus = Panel::Lisp;
             let viewed = ModelView { workspace: &workspace, focus: &focus, ..view };
             assert!(editor_panes::texting(&viewed));

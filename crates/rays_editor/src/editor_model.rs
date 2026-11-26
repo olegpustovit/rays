@@ -223,7 +223,7 @@ pub struct Trace {
 #[derive(Clone)]
 pub struct Shell {
     pub tree: std::rc::Rc<panels::Panels>,
-    pub hidden: Vec<Panel>,
+    pub hidden: Rc<Vec<Panel>>,
     /// the split being dragged, its size
     pub live: Option<(layout::Path, panels::Size)>,
     pub window_live: Option<(layout::Path, layout::Bounds)>,

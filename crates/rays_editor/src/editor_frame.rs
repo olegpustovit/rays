@@ -979,8 +979,8 @@ pub fn update_frame(
     let carrying = value.carry.is_some();
     gated(value, frame_, text_focus, host_events);
     let hidden = shell_hidden(&(&*value).into(), &value.workspace);
-    if hidden != value.workspace.hidden {
-        value.workspace.hidden = hidden.to_vec();
+    if hidden != value.workspace.hidden.as_slice() {
+        value.workspace.hidden = std::rc::Rc::new(hidden.to_vec());
     }
     follow_start(value);
     let pressed_focus = if all_ui_visible && frame::has_event(&|e| matches!(e, Event::PointerPressed(..)), frame_) {
@@ -1008,23 +1008,12 @@ pub fn update_frame(
         || tree::editing(&value.tree);
     let text_focus = text_focus || modal;
     let keymap = live_keymap(all_ui_visible, routed(&ModelView { focus, ..ModelView::from(&*value) }));
-    let held_keys = frame_.input.keys.clone();
+    let held_keys = Some(frame_.input.keys.as_slice());
     let platform = ui_platform(&*value);
-    // Pointer-only frames never match a chord; skip building the keymap ref vec (hover path).
-    let need_keymap = frame_.input.events.iter().any(|e| {
-        matches!(
-            e,
-            Event::KeyPressed(_)
-                | Event::KeyReleased(_)
-                | Event::TextInput(_)
-                | Event::TextEditing { .. }
-        )
-    });
-    let keymap_refs: Vec<&Command> = if need_keymap { keymap.iter().collect() } else { Vec::new() };
-    let (leader, commands, routed) = router::step(
+    let (leader, commands, routed) = router::step_commands(
         &value.held_keys,
         platform,
-        &keymap_refs,
+        keymap.as_slice(),
         &editor_commands::scope(focus),
         text_focus,
         frame_,

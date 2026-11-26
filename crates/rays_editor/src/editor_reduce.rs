@@ -850,7 +850,7 @@ pub struct FrameInput<'a> {
     pub all_ui_visible: bool,
     pub view_state: Rc<dyn Fn(Option<&PanelResult>) -> Syntax>,
     pub carrying: bool,
-    pub held_keys: Vec<input::Key>,
+    pub held_keys: Option<&'a [input::Key]>,
     pub leader: router::State,
     pub frame: &'a frame::Frame,
     pub hud: Option<(String, f64)>,
@@ -1577,7 +1577,10 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     panel_map::with_others(&mut core.panes, std::mem::take(&mut result.graph_panes));
     core.leader = leader;
-    core.held_keys = held_keys;
+    if let Some(keys) = held_keys {
+        core.held_keys.clear();
+        core.held_keys.extend_from_slice(keys);
+    }
     core.prompt = prompt;
     core.queued = queued;
     core.carry = carry_value;
@@ -1694,7 +1697,7 @@ pub fn idle_input<'a, 'f>(value: &ModelView<'a>, actions: &[Action], frame_: &'f
             builder.freeze().handle(id)
         }),
         carrying: value.carry.is_some(),
-        held_keys: value.held_keys.clone(),
+        held_keys: None,
         leader: value.leader.clone(),
         frame: frame_,
         hud: value.hud.clone(),

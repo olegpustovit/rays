@@ -351,7 +351,7 @@ pub struct Pane {
     pub height: i64,
     pub theme: Theme,
     pub guide: bool,
-    pub key: String,
+    pub key: Symbol,
     pub scope: Option<Rc<p::Scope>>,
     /// what the host keeps per node: saved layout, probes, imported files
     pub saved: Rc<dyn Saved>,
@@ -367,10 +367,10 @@ pub struct Pane {
     /// bumped by a cook a patch cannot show: the content builds again
     pub cook: u64,
     /// the node the viewport shows instead of the graph's result
-    pub display: Option<Path>,
+    pub display: Option<Rc<[Symbol]>>,
     pub framed: bool,
     /// B19: the pan and zoom each graph the pane left was at, by key
-    pub cameras: Rc<RefCell<HashMap<String, (f64, f64, f64)>>>,
+    pub cameras: Rc<RefCell<HashMap<Symbol, (f64, f64, f64)>>>,
     pub layout: Rc<p::Layout>,
     switches_cache: Rc<RefCell<Vec<GraphLayout>>>,
     pub geo: Geo,
@@ -557,7 +557,7 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         height: height.unwrap_or(360),
         theme: theme::Tokens::default(),
         guide: false,
-        key: String::new(),
+        key: "".into(),
         scope: None,
         saved: Rc::new(Nothing),
         lens: Vec::new(),
@@ -951,7 +951,7 @@ impl Default for ScopeOpts {
 
 pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: &mut Pane) {
     let ScopeOpts { saved, display, layouts } = o;
-    let switched = key != t.key;
+    let switched = t.key.as_str() != key;
     let cache_key = (switched && layouts.is_empty() && t.lens.is_empty()).then(|| saved.layout_identity()).flatten();
     let scope: Rc<p::Scope> = if layouts.is_empty() {
         scope
@@ -990,7 +990,7 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: &mut Pane) {
     let chains = cached.as_ref().map_or_else(|| Rc::new(probe::chains(&scope)), |entry| entry.chains.clone());
     let folds = cached.as_ref().map_or_else(|| Rc::new(fold_sources(&scope)), |entry| entry.folds.clone());
     let switches = switch_nodes(&scope);
-    (t.scope, t.saved, t.display, t.layout, t.switches, t.chains, t.folds, t.stats) = (Some(scope.clone()), saved, display, layout.clone(), switches, chains, folds, stats);
+    (t.scope, t.saved, t.display, t.layout, t.switches, t.chains, t.folds, t.stats) = (Some(scope.clone()), saved, display.map(Rc::from), layout.clone(), switches, chains, folds, stats);
     if let Some(entry) = cached.as_ref().filter(|entry| {
         entry.zoom == t.zoom || entry.geo.items.iter().all(|(placed, _, _)| placed.shown != Level::Point)
     }) {
@@ -1054,11 +1054,11 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: &mut Pane) {
         suspend(t);
         if t.framed && !t.key.is_empty() {
             // ponytail: a handful of graphs a session; bound it if graph names are generated
-            t.cameras.borrow_mut().insert(std::mem::take(&mut t.key), (t.pan_x, t.pan_y, t.zoom));
+            t.cameras.borrow_mut().insert(t.key, (t.pan_x, t.pan_y, t.zoom));
         }
-        t.key = key.to_owned();
+        t.key = key.into();
         t.framed = false;
-        if let Some((x, y, z)) = t.cameras.borrow().get(key).copied() {
+        if let Some((x, y, z)) = t.cameras.borrow().get(&t.key).copied() {
             (t.pan_x, t.pan_y, t.zoom, t.framed) = (x, y, z, true);
         }
         t.selected.clear();
@@ -1081,7 +1081,7 @@ pub fn tidy(t: &mut Pane) {
 }
 
 pub fn with_display(display: Option<Path>, t: &mut Pane) {
-    t.display = display;
+    t.display = display.map(Rc::from);
 }
 
 pub fn with_arguments(changes: &[(Path, ArgKey, S)], t: &mut Pane) {

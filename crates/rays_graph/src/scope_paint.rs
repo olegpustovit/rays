@@ -716,7 +716,7 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
     let theme = t.theme;
     let ls = 4.max(fs - 2);
     let hh = p::HEAD_HEIGHT * z;
-    let viewed = t.display.as_ref() == Some(&n.path);
+    let viewed = t.display.as_deref() == Some(n.path.as_slice());
     let ink_3 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.521);
     let invalid = pxui::Rgba::hex(0xc2255c);
     let failed = o.failed.is_some();
@@ -1009,7 +1009,7 @@ pub fn paint_point(paint: &mut Paint, t: &Pane, z: f64, fs: i64, pl: &Placed, fa
     let (x, y, _, _) = rect;
     let c = (x + (7.0 * z), y + (7.0 * z));
     let (ty, macro_, bypass, title, viewed) = match &pl.item {
-        p::Item::Item(n) => (n.ty.clone(), n.macro_.is_some(), n.bypass, p::title(n), t.display.as_ref() == Some(&n.path)),
+        p::Item::Item(n) => (n.ty.clone(), n.macro_.is_some(), n.bypass, p::title(n), t.display.as_deref() == Some(n.path.as_slice())),
         p::Item::Input(i) => (i.ty.clone(), false, false, i.name.clone(), false),
         p::Item::Return => (ty::geometry(), false, false, "return".to_owned(), false),
     };
@@ -1117,7 +1117,7 @@ pub fn paint_node(paint: &mut Paint, t: &Pane, z: f64, fs: i64, o: &NodeOpts, pl
         }
     }
     // the displayed result at the end of its chain has no out-port: the view flag takes the place
-    if o.out_wired || t.display.as_ref() != Some(&n.path) {
+    if o.out_wired || t.display.as_deref() != Some(n.path.as_slice()) {
         paint_socket(paint, &theme, Some(&n.ty), o.out_wired, z, (x + wd - (1.0 * z), y + (PORT_Y * z)));
     }
     // a literal binding is the header alone: its value in the field at the right

@@ -210,7 +210,12 @@ pub mod router {
     use super::keymap::{resolve, shifted, Trigger};
     use crate::frame;
     use input::{Event, Key, Platform};
-    use std::borrow::Cow;
+    use std::borrow::{Borrow, Cow};
+    use std::cell::Cell;
+
+    thread_local! {
+        static MODIFIERS: Cell<Vec<Key>> = const { Cell::new(Vec::new()) };
+    }
 
     /// Tab cancels leader routing, runs its exact-modifier host binding or passes to UI traversal,
     /// then hands the remaining ordered events to the UI (including a same-frame /).
@@ -234,21 +239,21 @@ pub mod router {
     }
 
     /// The matching chord with the most modifiers; on a tie the earlier command wins.
-    fn chord(platform: Platform, commands: &[&Command], focus: &Panel, keys: &[Key], key: Key) -> Option<Command> {
+    fn chord(platform: Platform, commands: &[impl Borrow<Command>], focus: &Panel, keys: &[Key], key: Key) -> Option<Command> {
         chord_filtered(platform, commands, focus, keys, key, false)
     }
 
-    fn chord_filtered(platform: Platform, commands: &[&Command], focus: &Panel, keys: &[Key], key: Key, globals_only: bool) -> Option<Command> {
+    fn chord_filtered(platform: Platform, commands: &[impl Borrow<Command>], focus: &Panel, keys: &[Key], key: Key, globals_only: bool) -> Option<Command> {
         let mut best: Option<(usize, &Command)> = None;
-        for command in commands.iter().copied().filter(|command| (!globals_only || command.scope.is_none()) && visible(command, focus)) {
+        for command in commands.iter().map(Borrow::borrow).filter(|command| (!globals_only || command.scope.is_none()) && visible(command, focus)) {
             let Some(Trigger::Chord(bound, modifiers)) = &command.trigger else { continue };
-            // ponytail: small fixed set of chord modifiers; stack array if the binding table grows
-            let modifiers: Vec<Key> = modifiers.iter().map(|m| resolve(platform, *m)).collect();
-            let matches = same_key(*bound, key)
-                && modifiers.iter().all(|m| keys.contains(m))
+            if !same_key(*bound, key) { continue; }
+            let resolved = || modifiers.iter().map(|m| resolve(platform, *m));
+            let contains = |key| resolved().any(|m| m == key);
+            let matches = resolved().all(|m| keys.contains(&m))
                 && (*bound != Key::Tab
-                    || [Key::Shift, Key::Alt].iter().all(|m| keys.contains(m) == modifiers.contains(m)))
-                && [Key::Meta, Key::Ctrl].iter().all(|m| !keys.contains(m) || modifiers.contains(m));
+                    || [Key::Shift, Key::Alt].into_iter().all(|m| keys.contains(&m) == contains(m)))
+                && [Key::Meta, Key::Ctrl].into_iter().all(|m| !keys.contains(&m) || contains(m));
             if matches {
                 let count = modifiers.len();
                 match best {
@@ -294,9 +299,9 @@ pub mod router {
     /// are select all, copy, cut, paste, undo and redo). Only commands of every pane run.
     fn text_chords<'a>(
         platform: Platform,
-        keymap: &[&Command],
+        keymap: &[impl Borrow<Command>],
         focus: &Panel,
-        previous_keys: &[Key],
+        modifiers: &mut Vec<Key>,
         frame: &'a frame::Frame,
     ) -> (Vec<Command>, Cow<'a, frame::Frame>) {
         let owned = |key: Key| match key {
@@ -304,16 +309,15 @@ pub mod router {
             Key::F12 => false,
             _ => true,
         };
-        let mut modifiers = input::keys_before(previous_keys, &frame.input.keys, &frame.input.events);
         let mut actions = Vec::new();
         let mut consumed = Vec::new();
         for (index, event) in frame.input.events.iter().enumerate() {
-            modifiers = input::keys_after(&modifiers, event);
+            input::update_keys(modifiers, event);
             match event {
                 Event::KeyPressed(key)
-                    if !owned(*key) && (input::command_held(platform, &modifiers) || *key == Key::F12) =>
+                    if !owned(*key) && (input::command_held(platform, modifiers) || *key == Key::F12) =>
                 {
-                    match chord_filtered(platform, keymap, focus, &modifiers, *key, true) {
+                    match chord_filtered(platform, keymap, focus, modifiers, *key, true) {
                         Some(command) => { actions.push(command); consumed.push(index); },
                         None => {},
                     }
@@ -338,21 +342,36 @@ pub mod router {
         frame: &'a frame::Frame,
         state: State,
     ) -> (State, Vec<Command>, Cow<'a, frame::Frame>) {
+        step_commands(previous_keys, platform, keymap, focus, text_focus, frame, state)
+    }
+
+    /// Route a borrowed command table directly while retaining the modifier scratch.
+    pub fn step_commands<'a>(
+        previous_keys: &[Key],
+        platform: Platform,
+        keymap: &[impl Borrow<Command>],
+        focus: &Panel,
+        text_focus: bool,
+        frame: &'a frame::Frame,
+        state: State,
+    ) -> (State, Vec<Command>, Cow<'a, frame::Frame>) {
         if frame.input.events.is_empty() {
             return (if text_focus { State::Idle } else { state }, Vec::new(), Cow::Borrowed(frame));
         }
+        let mut modifiers = MODIFIERS.take();
+        input::keys_before_into(previous_keys, &frame.input.keys, &frame.input.events, &mut modifiers);
         if text_focus {
-            let (actions, frame) = text_chords(platform, keymap, focus, previous_keys, frame);
+            let (actions, frame) = text_chords(platform, keymap, focus, &mut modifiers, frame);
+            MODIFIERS.set(modifiers);
             return (State::Idle, actions, frame);
         }
-        let mut modifiers = input::keys_before(previous_keys, &frame.input.keys, &frame.input.events);
         let mut traversing = false;
         let mut state = state;
         let mut actions: Vec<Command> = Vec::new();
         let mut consumed = Vec::new();
         for (index, event) in frame.input.events.iter().enumerate() {
             let mut pass = false;
-            modifiers = input::keys_after(&modifiers, event);
+            input::update_keys(&mut modifiers, event);
             let command = input::command_held(platform, &modifiers);
             if traversing {
                 state = State::Idle;
@@ -411,11 +430,11 @@ pub mod router {
                         *character
                     };
                     let typed = format!("{}{}", prefix, character.to_ascii_lowercase());
-                    let mut cmds = keymap.iter().copied().filter(|command| visible(command, focus));
+                    let mut cmds = keymap.iter().map(Borrow::borrow).filter(|command| visible(command, focus));
                     if let Some(command) = cmds.by_ref().find(|command| matches!(&command.trigger, Some(Trigger::Leader(sequence)) if sequence == &typed)) {
                         actions.push(command.clone());
                         state = State::Idle;
-                    } else if keymap.iter().copied().filter(|command| visible(command, focus)).any(|command| {
+                    } else if keymap.iter().map(Borrow::borrow).filter(|command| visible(command, focus)).any(|command| {
                         matches!(&command.trigger, Some(Trigger::Leader(sequence)) if sequence.starts_with(&typed))
                     }) {
                         state = State::Pending(typed);
@@ -435,6 +454,7 @@ pub mod router {
             }
             if !pass { consumed.push(index); }
         }
+        MODIFIERS.set(modifiers);
         (state, actions, without_events(frame, consumed))
     }
 }
