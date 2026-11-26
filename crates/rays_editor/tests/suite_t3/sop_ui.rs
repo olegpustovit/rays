@@ -140,7 +140,7 @@ pub fn flow_rows() {
     let views = schema.view(schema.default()).expect("view");
     let count = pxui_view_without_folder(views.iter().find(|v| v.name == "count").expect("count").clone());
     let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
-    let row = |drive: Option<&str>, locked: bool| FlowRow { path: "count".into(), fields: vec![count.clone()], shown: true, locked, drive: drive.map(String::from), live: Some("3".into()) };
+    let row = |drive: Option<&str>, locked: bool| FlowRow { path: "count".into(), fields: vec![count.clone()], shown: true, locked, drive: drive.map(Into::into), live: Some("3".into()) };
     let mut pointer = (0.0, 0.0);
     let mut step = |opts: &FlowOpts, rows: &[FlowRow], events: Vec<Event>| -> Vec<FlowChange> {
         let mut out = Vec::new();

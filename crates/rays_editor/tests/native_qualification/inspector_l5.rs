@@ -60,8 +60,8 @@ fn click_budget_inspector_hover() {
     let mut ui = rays_shell::host::create(Platform::Apple, Some(11), None);
     ui.verify_views(false);
     let mut counts = Vec::new();
-    for tick in 1..=6 {
-        let point = (235., match tick { 1 | 2 => 5., 3 | 4 => 38., _ => 62. });
+    for tick in 1..=12 {
+        let point = (235., match (tick - 1) % 6 { 0 | 1 => 5., 2 | 3 => 38., _ => 62. });
         let frame = rays::frame::Frame {
             input: input::Frame { size: (320, 360), frame: tick, tick, pointer: point, events: vec![Event::PointerMoved(point)], ..input::at_time(tick as f64 / 60.) },
             pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.),
@@ -74,8 +74,9 @@ fn click_budget_inspector_hover() {
         });
         counts.push(mem_sys::alloc_count() - before);
     }
-    eprintln!("CLICK inspector hover enter/hold/next/hold: {:?}", &counts[2..]);
-    assert!(counts[2] <= 21 && counts[3] == 0 && counts[4] <= 20 && counts[5] == 0, "{counts:?}");
+    eprintln!("CLICK inspector hover enter/hold/next/hold: {:?}", &counts[2..6]);
+    assert!(counts[2] <= 10 && counts[3..6] == [0, 0, 0], "{counts:?}");
+    assert_eq!(&counts[6..], &[0; 6], "warm hover transitions: {counts:?}");
     rays_shell::host::destroy(&mut ui);
 }
 

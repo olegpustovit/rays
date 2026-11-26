@@ -5,6 +5,7 @@ use param::{Effects, FieldView, KindView, Schema, Value};
 use pxui::theme;
 use pxui::ui::*;
 use pxui::Rgba as Color;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlowRow {
@@ -12,9 +13,9 @@ pub struct FlowRow {
     pub fields: Vec<FieldView>,
     pub shown: bool,
     pub locked: bool,
-    pub drive: Option<String>,
+    pub drive: Option<Arc<str>>,
     /// Drive readout, or “mixed” for an editable row shared by several nodes.
-    pub live: Option<String>,
+    pub live: Option<Arc<str>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -175,34 +176,25 @@ fn pin_change(ui: &mut Ui, cx: &Ctx, boxed: &Handle, path: &str, shown: bool, cl
     out
 }
 
-fn action(ui: &mut Ui, cx: &Ctx, key: &str, label: &str, x: f32, y: f32, enabled: bool) -> bool {
-    let pin = label == "pin";
-    let x = if pin { 6.0 } else { x };
-    let w = if pin { 18.0 } else { 20.0 };
-    let boxed = ui.node(
-        pxui::hash_of(key),
-        pxui::Node::DEFAULT.flags(if enabled { pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP } else { pxui::Flags::NONE }).at(x, y).w(Size::Px(w)).h(Size::Px(20.0)),
-    );
+fn action(ui: &mut Ui, cx: &Ctx, pin: bool, x: f32, y: f32, enabled: bool) -> bool {
+    // Each action is scoped to its own row, whose key already includes the field path.
+    let (key, x, w) = if pin { ("pin", 6.0, 18.0) } else { ("reset", x, 20.0) };
+    let mut flags = if enabled { pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP } else { pxui::Flags::NONE };
+    if pin {
+        flags |= pxui::Flags::HOVER_FREE;
+    }
+    let boxed = ui.node(key, pxui::Node::DEFAULT.flags(flags).at(x, y).w(Size::Px(w)).h(Size::Px(20.0)));
     let signal = ui.signal(&boxed);
-    let clicked = enabled && signal.clicked;
     if !pin {
-        let (hovered, foreground, ink_3) = (signal.hovered, cx.theme.foreground, cx.ink_3);
-        let label = label.to_string();
-        let cap = kit::cap_size(ui);
+        let color = if enabled && signal.hovered { cx.theme.foreground } else { cx.ink_3 };
         ui.canvas(&boxed, move |paint, Rect { x, y, w, h }| {
-            let color = if enabled && hovered { foreground } else { ink_3 };
-            if label == "\u{d7}" {
-                let cx = x + (w / 2.0);
-                let cy = y + (h / 2.0);
-                paint.line((cx - 3.5, cy - 3.5), (cx + 3.5, cy + 3.5), pxui::Stroke::new(color));
-                paint.line((cx - 3.5, cy + 3.5), (cx + 3.5, cy - 3.5), pxui::Stroke::new(color));
-            } else {
-                let ty = kit::cap_y_paint(paint, y, h);
-                { let text = &label; let span = pxui::TextSpan::new(0, text.len() as u32).color(color); let _ = paint.text_spans(pxui::Point::new(x + 1.0, ty), pxui::Label::BODY.size((cap) as f32), 0.0, text, &[span]); };
-            }
+            let cx = x + (w / 2.0);
+            let cy = y + (h / 2.0);
+            paint.line((cx - 3.5, cy - 3.5), (cx + 3.5, cy + 3.5), pxui::Stroke::new(color));
+            paint.line((cx - 3.5, cy + 3.5), (cx + 3.5, cy - 3.5), pxui::Stroke::new(color));
         });
     }
-    clicked
+    enabled && signal.clicked
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -499,7 +491,7 @@ fn row_menu(ui: &mut Ui, cx: &Ctx, boxed: &Handle, row: &FlowRow, typable: bool)
     ]) else { return (false, Vec::new()); };
     let edit = match choice {
         0 => {
-            let text = if let Some(source) = &row.drive { source.clone() }
+            let text = if let Some(source) = &row.drive { source.to_string() }
                 else if let [field] = row.fields.as_slice() { field_text(field) }
                 else { vector_text(&row.fields) };
             let _ = rays::clipboard::set_text(&text);
@@ -530,16 +522,19 @@ fn row_menu(ui: &mut Ui, cx: &Ctx, boxed: &Handle, row: &FlowRow, typable: bool)
     (false, edit.into_iter().collect())
 }
 
-fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Vec<FlowChange> {
-    let (path, live, shown) = (row.path.as_str(), row.live.as_deref(), row.shown);
-    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
+fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &Arc<str>) -> Vec<FlowChange> {
+    let (path, live, shown) = (row.path.as_str(), row.live.as_ref(), row.shown);
+    let mut row_box = None;
+    kit::with_label(format_args!("flow-row-{path}"), &mut |key| {
+        row_box = Some(pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), key, title));
+    });
+    let (boxed, control_x, control_y, control_w) = row_box.expect("inspector row");
     // the cross that removes a drive shows on the hovered row, in place of the live value
     let hovered = ui.hovered(&boxed, true);
     let (type_value, mut out) = row_menu(ui, cx, &boxed, row, true);
     ui.within(&boxed, &mut |ui| {
         let live = if hovered { None } else { live };
-        let key = format!("flow-expression-{path}");
-        let key = Key::Resolved(key_of(boxed.box_key, &key));
+        let key = Key::Resolved(key_of(boxed.box_key, "flow-expression"));
         let editing = ui.box_of_key(key).is_some_and(|b| ui.text_state(&b).is_some());
         let edits: Vec<FlowChange> = if expression(source) || type_value || editing {
             let style = pxui::ValueField::DEFAULT.edit(type_value)
@@ -551,9 +546,9 @@ fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Ve
             pxui::ext::value_field(ui, key, source, Rect::new(control_x, control_y, control_w, 20.0), &style, &pxui::ValueCallbacks::DEFAULT.valid(&valid))
                 .changed.and_then(|text| drive_edit(row, text.to_owned())).into_iter().collect()
         } else {
-            let link = ui.node(pxui::hash_of(&format!("flow-source-{path}")),
+            let link = ui.node("flow-source",
                 pxui::Node::DEFAULT
-                    .flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP_MARKED)
+                    .flags(pxui::Flags::CLICKABLE | pxui::Flags::TAB_STOP_MARKED | pxui::Flags::HOVER_FREE)
                     .at(control_x, control_y)
                     .w(Size::Px(1.0f32.max(control_w - 24.0)))
                     .h(Size::Px(20.0)),
@@ -561,8 +556,8 @@ fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Ve
             let followed = ui.signal(&link).clicked;
             let theme = cx.theme;
             let ink_2 = cx.ink_2;
-            let source = source.to_string();
-            let live = live.map(str::to_owned);
+            let source = source.clone();
+            let live = live.cloned();
             ui.canvas(&boxed, move |paint, Rect { x, y, w: _, h: _ }| {
                 let ty = (y + control_y - 0.5) + (((20.0) - (paint.tokens().font_size) as f32) / 2.0).floor();
                 let left = x + control_x + 2.0;
@@ -583,8 +578,8 @@ fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Ve
             });
             if followed { vec![FlowChange::Follow(path.to_string())] } else { Vec::new() }
         };
-        let reset = hovered && action(ui, cx, &format!("reset-{path}"), "\u{d7}", cx.width - 32.0, control_y, true);
-        let pin = cx.pin_click && action(ui, cx, &format!("pin-{path}"), "pin", 0.0, control_y, true);
+        let reset = hovered && action(ui, cx, false, cx.width - 32.0, control_y, true);
+        let pin = cx.pin_click && action(ui, cx, true, 0.0, control_y, true);
         let mut all = Vec::new();
         if reset {
             all.push(FlowChange::Reset(path.to_string()));
@@ -604,11 +599,11 @@ fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &Handle), row: &FlowRo
         let label_x = pxui::ext::inspector_label_x(ui);
         let label = ui.node(
             "label-edit",
-            pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE).at(label_x, 2.0).w(Size::Px(1.0f32.max(control_x - label_x - 8.0))).h(Size::Px(20.0)),
+            pxui::Node::DEFAULT.flags(pxui::Flags::CLICKABLE | pxui::Flags::HOVER_FREE).at(label_x, 2.0).w(Size::Px(1.0f32.max(control_x - label_x - 8.0))).h(Size::Px(20.0)),
         );
         let edit = type_value || ui.signal(&label).double_clicked;
         let edits = input(ui, cx, on_choice, true, field, (&boxed, path), edit, mixed, (control_x, control_y, control_w));
-        let pinned = cx.pin_click && action(ui, cx, &format!("pin-{path}"), "pin", 0.0, control_y, true);
+        let pinned = cx.pin_click && action(ui, cx, true, 0.0, control_y, true);
         out.extend(pin_change(ui, cx, &boxed, path, shown, pinned, edits));
     });
     out
@@ -660,7 +655,7 @@ fn color_row_3(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, shown: bool) -
                 Err(_) => Vec::new(),
             }
         };
-        let pin = cx.pin_click && action(ui, cx, &format!("pin-{path}"), "pin", 0.0, control_y, !row.locked);
+        let pin = cx.pin_click && action(ui, cx, true, 0.0, control_y, !row.locked);
         let mut all = hex_edits;
         all.extend(pin_change(ui, cx, &boxed, &path, shown, pin, Vec::new()));
         out.extend(all);
@@ -688,7 +683,7 @@ fn color_row_1(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str) -> Vec<FlowCha
                 Err(_) => Vec::new(),
             }
         };
-        let pin = cx.pin_click && action(ui, cx, &format!("pin-{path}"), "pin", 0.0, control_y, true);
+        let pin = cx.pin_click && action(ui, cx, true, 0.0, control_y, true);
         let mut all = hex_edits;
         all.extend(pin_change(ui, cx, &boxed, path, shown, pin, Vec::new()));
         out.extend(all);
@@ -752,7 +747,7 @@ fn row_content(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &Handle), row: &F
                 }
             });
         }
-        let pin = cx.pin_click && action(ui, cx, &format!("pin-{}", row.path), "pin", 0.0, control_y, !row.locked);
+        let pin = cx.pin_click && action(ui, cx, true, 0.0, control_y, !row.locked);
         let mut all = edits;
         all.extend(pin_change(ui, cx, &boxed, &row.path, row.shown, pin, Vec::new()));
         out.extend(all);
@@ -785,16 +780,18 @@ fn build(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &pxui::Handle), expande
         }
         (cx.width.to_bits(), cx.pins, cx.pin_click, cx.reveal_source, carry_frame, kit::debug_revision(&cx.chips)).hash(h);
     });
-    section(ui, &format!("flow-section-{folder}"), shown, open, None, folder, &mut |ui| {
-        // The kind's ungrouped rows precede rows explicitly in its folder, as in the old tree.
-        if kind_label == Some(folder) {
-            for row in rows.iter().filter(|row| top_folder(row).is_none()) {
+    kit::with_label(format_args!("flow-section-{folder}"), &mut |key| {
+        section(ui, key, shown, open, None, folder, &mut |ui| {
+            // The kind's ungrouped rows precede rows explicitly in its folder, as in the old tree.
+            if kind_label == Some(folder) {
+                for row in rows.iter().filter(|row| top_folder(row).is_none()) {
+                    out.extend(row_widget(ui, cx, on_choice, row));
+                }
+            }
+            for row in rows.iter().filter(|row| top_folder(row) == Some(folder)) {
                 out.extend(row_widget(ui, cx, on_choice, row));
             }
-        }
-        for row in rows.iter().filter(|row| top_folder(row) == Some(folder)) {
-            out.extend(row_widget(ui, cx, on_choice, row));
-        }
+        });
     });
 }
 

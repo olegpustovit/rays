@@ -299,7 +299,13 @@ fn b_hover() {
     let started = Instant::now();
     let mut p = P::new(&sk("isogrid.rays"));
     p.idle(20, IDLE_AT);
-    find_node(&mut p);
+    let (node, _) = find_node(&mut p);
+    // The second click in the scan can open the graph input's default-value editor.
+    if p.graph().editing.is_some() {
+        p.step(&[], [Event::KeyPressed(Key::Escape)], node);
+        p.idle(2, node);
+    }
+    assert!(p.graph().editing.is_none() && p.selected() > 0, "hover needs a selection and no active edit");
     let mv = |p: &mut P, i: u64, x0: f64, y0: f64| {
         let q = (x0 + (i % 60) as f64 * 6., y0 + ((i / 3) % 40) as f64 * 8.);
         p.step(&[], [Event::PointerMoved(q)], q);

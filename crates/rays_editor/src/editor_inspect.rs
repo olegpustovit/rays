@@ -628,7 +628,7 @@ fn walk_sub(row: &p::Row, shown: bool, chain: &[Symbol], depth: i64, sub: &[i64]
                 base.clone(),
                 row.clone(),
                 sub2.clone(),
-                insp::FlowRow { path: base.clone(), fields, shown, locked: false, drive, live: None },
+                insp::FlowRow { path: base.clone(), fields, shown, locked: false, drive: drive.map(Into::into), live: None },
             ));
         }
     }
@@ -1050,7 +1050,7 @@ pub fn field_edits<'a>(
 }
 
 fn sheet_row(path: &str, fields: Vec<FieldView>, shown: bool, drive: Option<String>, live: Option<String>) -> insp::FlowRow {
-    insp::FlowRow { path: path.to_owned(), fields, shown, locked: false, drive, live }
+    insp::FlowRow { path: path.to_owned(), fields, shown, locked: false, drive: drive.map(Into::into), live: live.map(Into::into) }
 }
 
 /// A value operator's inputs as rows: a value operator (+, *, sin ...) or a nested call has no
@@ -1501,7 +1501,7 @@ pub fn shared_inspector(ui: &mut Ui, width: f32, count: usize, target_at: &dyn F
             rows.retain_mut(|row| {
                 let Some(other) = target.matching(row) else { return false };
                 if row.live.is_none() && (other.live.is_some() || other.fields.iter().zip(&row.fields).any(|(a, b)| a.current != b.current)) {
-                    row.live = Some("mixed".to_owned());
+                    row.live = Some("mixed".into());
                 }
                 true
             });
@@ -1791,7 +1791,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f32, p
                 [FieldView { current: Value::Bool(b), .. }] => Some(b.to_string()),
                 _ => None,
             };
-            rows.push(insp::FlowRow { path: pm.path.clone(), fields: pm.fields.clone(), shown: on_card_row(&pm.path), locked: false, drive, live });
+            rows.push(insp::FlowRow { path: pm.path.clone(), fields: pm.fields.clone(), shown: on_card_row(&pm.path), locked: false, drive: drive.map(Into::into), live: live.map(Into::into) });
         }
         let mut expanded: Vec<String> = fields.iter().filter_map(|f| f.folder.first().cloned()).collect();
         expanded.sort();
