@@ -144,17 +144,10 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
                 .map(|node| (node.label.as_str(), if value.doc.active_camera == Some(node.id) { "Active" } else { "" },
                     PromptIntent::RunAction(Action::SelectCamera(node.id))))
                 .collect();
-            choices.push(("Render camera…", "", PromptIntent::RunAction(Action::RenderCamera)));
+            choices.push(("Render camera", "", PromptIntent::RunAction(Action::RenderCamera)));
             choices.push(("Render all takes", "", PromptIntent::RunAction(Action::RenderAllCameras)));
+            choices.push(("Focus here", "", PromptIntent::RunAction(Action::FocusHere)));
             search_prompt(ui, "camera-picker", "Camera", "Search cameras", &query, &choices, &Prompt::Cameras)
-        }
-        Some(Prompt::RenderOutput { all, path }) => {
-            let (title, label) = if all { ("Render all takes", "Output folder") } else { ("Render camera", "Output PNG") };
-            match shell_prompt::name(ui, "render-output", title, label, label, &path) {
-                None | Some((_, pxui::ui::Pick::Cancel)) => (None, None),
-                Some((path, pxui::ui::Pick::Submit)) => (None, Some(PromptIntent::RunAction(Action::RenderOutput { all, path }))),
-                Some((path, _)) => (Some(Prompt::RenderOutput { all, path }), None),
-            }
         }
         Some(Prompt::Saving(name)) => match shell_prompt::name(ui, "preset-save", "Save preset", "Name for the current state of the document", "Preset name", &name) {
             None | Some((_, pxui::ui::Pick::Cancel)) => (None, None),
@@ -1198,8 +1191,6 @@ pub fn update_frame(
             Action::GuideKeys => initial_prompt = Some(Prompt::Keys),
             Action::CommandPalette => initial_prompt = Some(Prompt::Palette(String::new())),
             Action::PickCamera => initial_prompt = Some(Prompt::Cameras(String::new())),
-            Action::RenderCamera => initial_prompt = Some(Prompt::RenderOutput { all: false, path: "render.png".into() }),
-            Action::RenderAllCameras => initial_prompt = Some(Prompt::RenderOutput { all: true, path: "renders".into() }),
             Action::Jump => initial_prompt = Some(Prompt::Jumping(String::new())),
             Action::GotoSymbol if text_shown.is_some() => initial_prompt = Some(Prompt::Symbols(String::new())),
             Action::GotoLine if text_shown.is_some() => initial_prompt = Some(Prompt::Going(String::new())),
@@ -1401,7 +1392,7 @@ pub fn update_frame(
                 _ => None,
             });
             // the latest of the four is the command, as when each overwrote the one before
-            let bar_action = [tool_action, view_action, outline_action, crumb_action].into_iter().fold(None, |latest, a| if a.is_none() { latest } else { a });
+            let mut bar_action = [tool_action, view_action, outline_action, crumb_action].into_iter().fold(None, |latest, a| if a.is_none() { latest } else { a });
             // Selection is view state; inspection intents retain the selected stable id. Topology and
             // parameter application wait until Ui.frame finishes.
             let mut selection = selection.clone();
@@ -1468,7 +1459,9 @@ pub fn update_frame(
                 vw.guide = guide;
                 vw.leader = &leader;
                 vw.selection = &selection;
-                status_box(&vw, ui, frame_, render_status.as_deref(), text_error.as_deref().or(prompt_error.as_deref()).or(error_status.as_deref()), context);
+                if status_box(&vw, ui, frame_, render_status.as_deref(), text_error.as_deref().or(prompt_error.as_deref()).or(error_status.as_deref()), context) {
+                    bar_action = Some(Action::RevealRender);
+                }
             }
             draw_notice(&(&*value).into(), frame_, &roots, header_focus, graph_body, &scope_view2, scope_active, ui);
             let (focus_change, pane_keys) = follow_press(&g, &roots, &timeline_root, current, (focus, focus_path), &value.pane_keys, ui);

@@ -81,9 +81,13 @@ pub fn read_preferences(filename: &str) -> Result<store::settings::Settings, Str
 }
 
 pub fn save_guide(filename: &str, guide: bool) -> Result<(), String> {
+    save_preference(filename, "guide", Draft::Sym(guide.to_string()))
+}
+
+pub fn save_preference(filename: &str, key: &str, value: Draft) -> Result<(), String> {
     let mut values = if std::path::Path::new(filename).exists() { read_preferences(filename)? } else { Vec::new() };
-    values.retain(|(k, _)| k != "guide");
-    values.insert(0, ("guide".to_string(), syntax::make(Draft::Sym(guide.to_string()))));
+    values.retain(|(k, _)| k != key);
+    values.insert(0, (key.to_owned(), syntax::make(value)));
     store::settings::save("rays-editor", filename, &values)
 }
 

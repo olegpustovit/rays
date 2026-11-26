@@ -31,7 +31,6 @@ pub fn prompt_name(value: &EditorModel) -> &'static str {
         Some(Prompt::Saving(_)) => "save preset",
         Some(Prompt::Palette(_)) => "commands",
         Some(Prompt::Cameras(_)) => "cameras",
-        Some(Prompt::RenderOutput { .. }) => "render output",
         Some(Prompt::Jumping(_)) => "jump",
         Some(Prompt::Symbols(_)) => "go to symbol",
         Some(Prompt::Referencing(..)) => "references",
@@ -176,21 +175,29 @@ pub fn probe_caption<'a>(value: &ModelView<'a>) -> Option<String> {
 }
 
 /// The status strip under the view: kit text on the ground, under a hairline.
-pub fn status_box<'a>(value: &ModelView<'a>, ui: &mut Ui, frame: &frame::Frame, render_status: Option<&str>, error_status: Option<&str>, context: guide_context::GuideContext) {
+pub fn status_box<'a>(value: &ModelView<'a>, ui: &mut Ui, frame: &frame::Frame, render_status: Option<&str>, error_status: Option<&str>, context: guide_context::GuideContext) -> bool {
     let g = geometry(value, &value.workspace, frame);
     if g.status_at.3 <= 0 {
-        return;
+        return false;
     }
     let status = crate::cook::status(&value.cook);
     let fallback = flow_ir::fallback::summary();
     let memory = mem::status_line();
     let session_scope = pane_view(value);
+    let mut reveal = false;
     let paint = &mut |ui: &mut Ui| {
         build_box(value, ui, &g, render_status, error_status, context, status.clone(), fallback.clone(), memory.clone());
+        if render_status.is_some_and(|s| s.starts_with("Saved ")) {
+            let (x, y, w, h) = g.status_at;
+            let label = if cfg!(target_os = "macos") { "Reveal in Finder" } else { "Reveal in folder" };
+            let width = rays_shell::kit::button_width(ui, None, false, label);
+            reveal = rays_shell::kit::button(ui, "reveal-render", ((x + w) as f32 - width - 6., y as f32 + (h as f32 - 20.) / 2.),
+                width, &Default::default(), label);
+        }
     };
     if value.carry.is_some() {
         paint(ui);
-        return;
+        return reveal;
     }
     let revision = rays_shell::kit::revision(&|h| {
         use std::hash::Hash;
@@ -218,6 +225,7 @@ pub fn status_box<'a>(value: &ModelView<'a>, ui: &mut Ui, frame: &frame::Frame, 
         }
     });
     rays_shell::kit::cached(ui, "editor-status-view", revision, paint);
+    reveal
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -245,9 +253,10 @@ fn build_box(value: &ModelView<'_>, ui: &mut Ui, g: &rays_shell::layout::Geometr
         Some(sw) if sw.active < sw.layouts.len() as i64 => format!("layout {} \u{b7} {}", sw.active, editor_core::panels::summary(&sw.layouts[sw.active as usize])),
         _ => String::new(),
     };
-    let line = match error_status {
-        Some(error) => error.to_string(),
-        None => {
+    let line = match (render_status, error_status) {
+        (_, Some(error)) => error.to_string(),
+        (Some(saved), None) if saved.starts_with("Saved ") => saved.to_owned(),
+        (_, None) => {
             let base = status_text_with(value, true, status, fallback, memory);
             match render_status {
                 None => base,

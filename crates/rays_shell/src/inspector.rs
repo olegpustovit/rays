@@ -61,6 +61,7 @@ struct Held {
     kind: param::number::Kind,
     range: Option<(f64, f64)>,
     trail: Option<(String, Color)>,
+    degrees: bool,
     origin: String,
     last: String,
     /// pressed in the build `pressed` has not yet been asked about
@@ -113,7 +114,7 @@ pub fn dragged(ui: &mut Ui) -> Option<(bool, Option<(String, Value)>)> {
         }
         let value = match h.kind {
             param::number::Kind::Int => text.parse::<i64>().ok().map(Value::Int),
-            param::number::Kind::Float => text.parse::<f64>().ok().map(Value::Float),
+            param::number::Kind::Float => entered_angle(h.degrees, &text).map(Value::Float),
         };
         h.last = text;
         Some((patched, value.map(|v| (h.name.clone(), v))))
@@ -205,6 +206,23 @@ fn action(ui: &mut Ui, cx: &Ctx, key: &str, label: &str, x: f32, y: f32, enabled
     clicked
 }
 
+fn degrees(field: &FieldView) -> bool {
+    field.unit.as_deref() == Some("rad")
+}
+
+fn shown_angle(degrees: bool, value: f64) -> f64 {
+    if degrees { value.to_degrees() } else { value }
+}
+
+fn entered_angle(degrees: bool, text: &str) -> Option<f64> {
+    let value = text.parse::<f64>().ok().filter(|v| v.is_finite())?;
+    Some(if degrees { value.to_radians() } else { value })
+}
+
+fn shown_unit(field: &FieldView) -> Option<&str> {
+    if degrees(field) { Some("°") } else { field.unit.as_deref() }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn numeric(
     ui: &mut Ui,
@@ -234,7 +252,7 @@ fn numeric(
     let display = if mixed { Some("mixed") } else { display.as_deref() };
     let style = pxui::ValueField::DEFAULT.kept_drag(kept).edit(edit).left(expression(text));
     let style = display.map_or(style, |display| style.display(display));
-    let style = field.unit.as_deref().map_or(style, |unit| style.trail(unit, cx.ink_3));
+    let style = shown_unit(field).map_or(style, |unit| style.trail(unit, cx.ink_3));
     let style = range.and_then(|r| param::number::fraction(r, field_text))
         .map_or(style, |fill| style.fraction(fill as f32));
     let scrub = |origin: &str, dx: f32, fine| {
@@ -255,7 +273,7 @@ fn numeric(
             match h.as_mut() {
                 _ if pressed => {
                     let (origin, last) = (text.to_owned(), changed.as_deref().unwrap_or(field_text).to_owned());
-                    *h = Some(Held { field: held, name: field.name.clone(), kind, range, trail: field.unit.clone().map(|unit| (unit, cx.ink_3)), origin, last, fresh: true });
+                    *h = Some(Held { field: held, name: field.name.clone(), kind, range, trail: shown_unit(field).map(|unit| (unit.to_owned(), cx.ink_3)), degrees: degrees(field), origin, last, fresh: true });
                 }
                 Some(mine) if mine.field == held && holding => changed.as_deref().unwrap_or(field_text).clone_into(&mut mine.last),
                 Some(mine) if mine.field == held => *h = None,
@@ -311,14 +329,16 @@ fn input(
         ),
         (KindView::Floating(range), Value::Float(value)) => {
             // the text is the value in full, so a scrub starts from what is stored; it is shown short
+            let degrees = degrees(field);
+            let value = shown_angle(degrees, *value);
             numeric(
                 ui,
                 cx,
                 param::number::Kind::Float,
-                Some((range.soft_min, range.soft_max)),
-                Some(param::number::show(*value)),
-                &param::float_text_with_decimal(*value, true),
-                &|text| (text).parse::<f64>().ok().map(Value::Float),
+                Some((shown_angle(degrees, range.soft_min), shown_angle(degrees, range.soft_max))),
+                Some(param::number::show(value)),
+                &param::float_text_with_decimal(value, true),
+                &|text| entered_angle(degrees, text).map(Value::Float),
                 field,
                 path,
                 (row, &key),
@@ -424,7 +444,7 @@ fn input(
 fn number_from_drive(row: &FlowRow, text: &str) -> Option<Value> {
     match row.fields.as_slice() {
         [FieldView { kind: KindView::Integer(_), .. }] => text.parse::<i64>().ok().map(Value::Int),
-        _ => text.parse::<f64>().ok().filter(|v| v.is_finite()).map(Value::Float),
+        fields => entered_angle(fields.len() == 1 && degrees(&fields[0]), text).map(Value::Float),
     }
 }
 
@@ -449,7 +469,7 @@ fn field_text(field: &FieldView) -> String {
             KindView::Choice(options) => options.get(*v as usize).cloned().unwrap_or_default(),
             _ => v.to_string(),
         },
-        Value::Float(v) => param::float_text_with_decimal(*v, true),
+        Value::Float(v) => param::float_text_with_decimal(shown_angle(degrees(field), *v), true),
         Value::Text(v) => text_of(v),
         Value::Choice(v) => v.clone(),
     }
@@ -459,7 +479,7 @@ fn pasted_value(field: &FieldView, text: String) -> Option<Value> {
     let literal = text.trim();
     match &field.kind {
         KindView::Integer(_) => literal.parse().ok().map(Value::Int),
-        KindView::Floating(_) => literal.parse::<f64>().ok().filter(|v| v.is_finite()).map(Value::Float),
+        KindView::Floating(_) => entered_angle(degrees(field), literal).map(Value::Float),
         KindView::Toggle => literal.parse().ok().map(Value::Bool),
         KindView::Text => Some(Value::Text(text.into_bytes().into())),
         KindView::Choice(options) => {
@@ -483,9 +503,10 @@ fn pasted_vector(row: &FlowRow, text: &str) -> Option<[f64; 3]> {
         return Some([r, g, b]);
     }
     let text = text.strip_prefix('[')?.strip_suffix(']')?;
-    let values: Vec<f64> = text.split_whitespace().map(str::parse).collect::<Result<_, _>>().ok()?;
-    values.iter().all(|v| v.is_finite()).then_some(())?;
-    values.try_into().ok()
+    let mut values = text.split_whitespace();
+    let [x, y, z] = row.fields.as_slice() else { return None };
+    let vector = [entered_angle(degrees(x), values.next()?)?, entered_angle(degrees(y), values.next()?)?, entered_angle(degrees(z), values.next()?)?];
+    values.next().is_none().then_some(vector)
 }
 
 fn row_menu(ui: &mut Ui, cx: &Ctx, boxed: &Handle, row: &FlowRow, typable: bool) -> (bool, Vec<FlowChange>) {
@@ -532,6 +553,9 @@ fn row_menu(ui: &mut Ui, cx: &Ctx, boxed: &Handle, row: &FlowRow, typable: bool)
 
 fn driven(ui: &mut Ui, cx: &Ctx, row: &FlowRow, title: &str, source: &str) -> Vec<FlowChange> {
     let (path, live, shown) = (row.path.as_str(), row.live.as_deref(), row.shown);
+    let angle = row.fields.len() == 1 && degrees(&row.fields[0]);
+    let degrees_live = live.filter(|_| angle).and_then(|s| s.parse::<f64>().ok()).map(|v| format!("{}°", param::number::show(v.to_degrees())));
+    let live = degrees_live.as_deref().or(live);
     let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, shown), &format!("flow-row-{path}"), title);
     // the cross that removes a drive shows on the hovered row, in place of the live value
     let hovered = ui.hovered(&boxed, true);
@@ -714,6 +738,7 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &Handle), row: &Fl
 
 fn row_content(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &Handle), row: &FlowRow) -> Vec<FlowChange> {
     let title = if let [field] = row.fields.as_slice() && row.path.starts_with('@') { &field.label } else { &row.path };
+    let title = title.strip_suffix(" (radians)").unwrap_or(title);
     if let Some(source) = &row.drive {
         return driven(ui, cx, row, title, source);
     }
@@ -730,7 +755,7 @@ fn row_content(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &Handle), row: &F
         return color_row_3(ui, cx, row, title, row.shown);
     }
     // a vector: three fields in the control column, 8 between, each with its axis letter
-    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, row.shown), &format!("flow-row-{}", row.path), &title);
+    let (boxed, control_x, control_y, control_w) = pxui::ext::inspector_row(ui, Some(cx.width), pin_of(cx, row.shown), &format!("flow-row-{}", row.path), title);
     let (type_value, mut out) = row_menu(ui, cx, &boxed, row, row.fields.len() == 3);
     ui.within(&boxed, &mut |ui| {
         let mut edits: Vec<FlowChange> = Vec::new();
@@ -879,4 +904,19 @@ pub fn header_context<T>(ui: &mut Ui, title: &str, reset: bool, reveal: bool, bu
         let _ = rays::clipboard::set_text(title);
     }
     (head.expect("inspector header"), action)
+}
+
+#[cfg(test)]
+mod angle_tests {
+    use super::*;
+
+    #[test]
+    fn inspector_uses_degrees_and_keeps_lisp_radians() {
+        let radians = std::f64::consts::FRAC_PI_2;
+        assert_eq!(shown_angle(true, radians), 90.);
+        assert_eq!(entered_angle(true, "90"), Some(radians));
+        assert_eq!(shown_angle(false, 90.), 90.);
+        assert_eq!(entered_angle(false, "90"), Some(90.));
+        assert_eq!(entered_angle(true, "NaN"), None);
+    }
 }

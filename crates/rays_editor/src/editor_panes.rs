@@ -873,7 +873,8 @@ pub fn draw_graph_header<'a>(
         if leaf.header.3 > 0 {
             let from = tools_from(&leaf);
             let camera = value.doc.active_camera.and_then(|id| editor_document::kind_graph::find(&value.doc.scene, id));
-            let revision = kit::revision(&|h| (leaf.header, from.to_bits(), *looks, *mode, camera.map(|node| &node.label)).hash(h));
+            let can_render = crate::editor_render_output::has_camera(&value.doc);
+            let revision = kit::revision(&|h| (leaf.header, from.to_bits(), *looks, *mode, camera.map(|node| &node.label), can_render).hash(h));
             kit::cached(ui, "workspace-view-tools", revision, &mut |ui| {
                 let (hx, hy, hw, hh) = leaf.header;
                 let from = hx as f32 + from;
@@ -885,7 +886,8 @@ pub fn draw_graph_header<'a>(
                 let right = (hx + hw - 36) as f32;
                 let name = camera.map_or("Camera", |node| node.label.as_str());
                 let cam_w = if camera.is_some() { kit::button_width(ui, None, false, name) + 8.0 } else { 0.0 };
-                if from + seg_w + 8.0 + look_w + 8.0 + frame_w < right - cam_w {
+                let render_w = if can_render { kit::button_width(ui, None, false, "Render") + 8.0 } else { 0.0 };
+                if from + seg_w + 8.0 + look_w + 8.0 + frame_w < right - cam_w - render_w {
                     bars::rule(ui, "workspace-view-rule", leaf.header, from - hx as f32);
                     let render = match kit::segments(ui, "workspace-render", from + seg_w, ty, &modes, *mode).0 {
                         Some(i) if i != *mode => Some(Action::RenderMode(i)),
@@ -900,6 +902,12 @@ pub fn draw_graph_header<'a>(
                     } else {
                         render
                     };
+                }
+                if can_render && right - cam_w - render_w > from
+                    && kit::button(ui, "workspace-render-camera", (right - cam_w - render_w, ty), render_w - 8.0,
+                        &ButtonOpts::default(), "Render")
+                {
+                    view_action = Some(Action::RenderCamera);
                 }
                 if camera.is_some() && right - cam_w > from
                     && kit::button(ui, "workspace-choose-camera", (right - cam_w, ty), cam_w - 8.0,

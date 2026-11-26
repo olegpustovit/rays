@@ -294,6 +294,26 @@ fn nearest_by(placed: &[(mat4::T, cook::Piece)], origin: vec3::T, direction: vec
     best
 }
 
+pub(crate) fn selected_camera(value: &EditorModel) -> Option<i64> {
+    crate::selection::selected(pane_selection(&value.into()))
+        .and_then(|id| kg::find(scene(value), id))
+        .filter(|node| node.kind == "camera")
+        .or_else(|| crate::viewport::active_node(value))
+        .map(|node| node.id)
+}
+
+pub(crate) fn focus_here(view: Option<&str>, value: &mut EditorModel, id: i64, origin: vec3::T, direction: vec3::T) -> bool {
+    let Some(camera) = kg::find(scene(value), id).and_then(crate::viewport::node_camera) else { return false };
+    let placed = placed_pieces(false, Some(&view_of(view, value)), value);
+    let Some((t, _, _)) = nearest_by(&placed, origin, direction, &|p, o, d| {
+        cook::pick_material(p, o, d).map(|(t, _)| (t, Hit::Tag(0)))
+    }) else { return false };
+    let point = vec3::add(origin, vec3::scale(direction, t));
+    let Some(depth) = crate::viewport::focus_depth(&camera, point) else { return false };
+    edit_node(value, Level::Scene, id, &[("focus_distance".into(), Value::Float(depth))], "Focus camera");
+    true
+}
+
 /// A click in the view: the primitive under the ray, its `__flow_src` tag, the merge input that
 /// made it (`Lower.provenance`), then the selection is that node and every enclosing zone probes
 /// that iteration, so the highlight (`lit_tags`), the selectors and the inspector agree.  A click

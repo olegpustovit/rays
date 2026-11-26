@@ -117,6 +117,7 @@ pub struct LoopModel {
     pub world_drag: Option<WorldDrag>,
     /// a left press in the view that may become a click
     pub pick_press: Option<(f64, f64)>,
+    pub focus_here: Option<i64>,
     /// the .rays the document came from: polled, saved over
     pub source: Option<source_file::SourceFile>,
     /// the file's changed text, waiting while the document has unsaved work
@@ -273,10 +274,14 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
                 picture_size: None,
                 picture: Vec::new(),
                 picture_scratch: Vec::new(),
-                core: Rc::new(core),
                 rest: None,
                 camera,
-                control: V::create_control(),
+                control: V::Control {
+                    output: crate::editor_render_output::output_preference(&core.preferences).into(),
+                    has_camera: crate::editor_render_output::has_camera(&core.doc),
+                    ..V::create_control()
+                },
+                core: Rc::new(core),
                 draw,
                 rendered: None,
                 views: Vec::new(),
@@ -302,6 +307,7 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
                 hidden_scene_cache: None,
                 world_drag: None,
                 pick_press: None,
+                focus_here: None,
                 source,
                 held: None,
                 open_dialog: None,

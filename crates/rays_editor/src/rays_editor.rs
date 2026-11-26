@@ -609,6 +609,10 @@ pub mod workspace {
 
     /// Render the primary scene's camera (or a named camera) into a full-resolution path-traced film.
     pub fn render_scene_png(camera: Option<&str>, size: Option<(i64, i64)>, samples: Option<i64>, frame: i64, path: &str, doc: &workspace_doc::T) -> Result<(), Diagnostic> {
+        render_scene_png_at_width(camera, size, None, samples, frame, path, doc)
+    }
+
+    pub fn render_scene_png_at_width(camera: Option<&str>, size: Option<(i64, i64)>, width: Option<i64>, samples: Option<i64>, frame: i64, path: &str, doc: &workspace_doc::T) -> Result<(), Diagnostic> {
         use editor_document::{kind_graph as kg, objects};
         use rays::scene3::walk;
         use rays_pathtracer::rays_pathtracer as trace;
@@ -648,7 +652,13 @@ pub mod workspace {
             let core = Rc::make_mut(&mut editor.core);
             core.timeline = crate::timeline::seek(&core.timeline, frame).0;
             let root = &core.doc.root;
-            let (width, height) = size.unwrap_or((root.width, root.height));
+            let (width, height) = if let Some(width) = width {
+                let height = width.checked_mul(root.height).and_then(|n| n.checked_add(root.width / 2))
+                    .map(|n| (n / root.width).max(1)).ok_or_else(|| fail("Render width is out of range.".into()))?;
+                (width, height)
+            } else {
+                size.unwrap_or((root.width, root.height))
+            };
             let samples = samples.unwrap_or(root.max_spp);
             if frame < 0 || width <= 0 || height <= 0 || samples <= 0 {
                 return Err(fail("Frame must be nonnegative. Dimensions and sample count must be positive.".into()));

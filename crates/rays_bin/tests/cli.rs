@@ -244,3 +244,36 @@ fn table_load_is_relative_typed_and_refused_by_web() {
     }
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn gpu_cli_named_camera_uses_export_settings_and_locks_width_to_aspect() {
+    let dir = std::env::temp_dir().join(format!("rays-take-output-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("takes.rays");
+    std::fs::write(&source, r#"(workspace takes
+      (graph mesh :context sop (sop/box))
+      (graph scene :context scene [(take : text "portrait") (preview : bool true)]
+        (let* [portrait (scene/camera :name "portrait")
+               square (scene/camera :name "square")
+               selected (if (equal? take "square") square portrait)
+               box (scene/geometry (ref mesh))]
+          (scene/root (scene/merge box portrait square) :camera selected :renderer "Path traced"
+            :width (if preview 12 48)
+            :height (if preview 15 (if (equal? take "square") 48 60))
+            :max_spp (if preview 1 9) :bounces 1))))"#).unwrap();
+    let png = dir.join("output.png");
+    for (camera, width_override, expected) in [("portrait", None, (48, 60)), ("square", Some("32"), (32, 32))] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rays"));
+        command.current_dir(root()).env("RAYS_RENDER_PROGRESS", "1")
+            .arg("render").arg(&source).args(["--camera", camera, "-o"]).arg(&png);
+        if let Some(width) = width_override { command.args(["--width", width]); }
+        let out = command.output().unwrap();
+        let progress = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{progress}");
+        assert!(progress.contains("RAYS_PROGRESS 33"), "the export must use the take's nine samples: {progress}");
+        let png = std::fs::read(&png).unwrap();
+        let dimensions = (u32::from_be_bytes(png[16..20].try_into().unwrap()), u32::from_be_bytes(png[20..24].try_into().unwrap()));
+        assert_eq!(dimensions, expected);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

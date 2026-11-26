@@ -52,6 +52,10 @@ pub mod cc {
         pub prefix: Rc<str>,
         pub ui_visible: bool,
         pub filename: Rc<str>,
+        pub output: Rc<str>,
+        pub render_width: Rc<str>,
+        pub render_spp: Rc<str>,
+        pub has_camera: bool,
         pub open_camera: Option<bool>,
         pub camera_expanded: bool,
         /// the Camera section's number fields (FOV, distance, near and far clip) as it last built
@@ -66,7 +70,7 @@ pub mod cc {
     pub type Control = Visibility;
 
     /// The Camera section's numbers: label, key and soft range.
-    const NUMBERS: [(&str, f64, f64); 4] = [("FOV", 15., 120.), ("Distance", 0.1, 100.), ("Near clip", 0.01, 10.), ("Far clip", 10., 5000.)];
+    const NUMBERS: [(&str, f64, f64); 4] = [("FOV (°)", 15., 120.), ("Distance", 0.1, 100.), ("Near clip", 0.01, 10.), ("Far clip", 10., 5000.)];
 
     /// The section's numbers of `camera`, FOV in degrees.
     fn numbers(camera: &easy_camera::EasyCamera) -> [f64; 4] {
@@ -124,12 +128,13 @@ pub mod cc {
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct RenderRequest {
-        pub filename: String,
+        pub filename: Option<String>,
+        pub all: bool,
     }
 
     pub fn make(prefix: &str) -> Visibility {
         assert!(!prefix.is_empty(), "Pxui camera control: prefix is empty");
-        Visibility { prefix: Rc::from(prefix), ui_visible: true, filename: Rc::from("_out/rays-render.png"), open_camera: None, camera_expanded: false, fields: [0; 4], shown: 0, held: false }
+        Visibility { prefix: Rc::from(prefix), ui_visible: true, filename: Rc::from("_out/rays-render.png"), output: Rc::from(""), render_width: Rc::from(""), render_spp: Rc::from(""), has_camera: false, open_camera: None, camera_expanded: false, fields: [0; 4], shown: 0, held: false }
     }
 
     pub fn create() -> Control {
@@ -190,15 +195,31 @@ pub mod cc {
         result
     }
 
-    pub fn render_section(control: &Control, ui: &mut Ui) -> (Control, Vec<String>) {
-        let mut out = (control.filename.clone(), false);
-        let revision = rays_shell::kit::revision(&|h| std::hash::Hash::hash(&control.filename, h));
+    pub fn render_section(control: &Control, ui: &mut Ui) -> (Control, Vec<RenderRequest>) {
+        let mut next = control.clone();
+        let mut requests = Vec::new();
+        let revision = rays_shell::kit::revision(&|h| std::hash::Hash::hash(
+            &(control.has_camera, &control.filename, &control.output, &control.render_width, &control.render_spp), h));
         rays_shell::inspector::section(ui, "Render", revision, false, None, "Render", &mut |ui| {
-            let filename = text(ui, "Output", "Output", &control.filename);
-            out = (Rc::<str>::from(filename), pxui::ext::inspector_button(ui, "Save", "Render / save PNG"));
+            if control.has_camera {
+                next.output = text(ui, "Output folder", "Output", &control.output).into();
+                next.render_width = text(ui, "Export width", "Width (px)", &control.render_width).into();
+                next.render_spp = text(ui, "Export samples", "Render spp", &control.render_spp).into();
+                pxui::ext::inspector_message(ui, "Take defaults", "Blank width and spp use the take defaults.");
+                if pxui::ext::inspector_button(ui, "Render camera", "Render") {
+                    requests.push(RenderRequest { filename: None, all: false });
+                }
+                if pxui::ext::inspector_button(ui, "Render all", "Render all takes") {
+                    requests.push(RenderRequest { filename: None, all: true });
+                }
+            } else {
+                next.filename = text(ui, "Output file", "Output", &control.filename).into();
+                if pxui::ext::inspector_button(ui, "Save", "Save viewport PNG") {
+                    requests.push(RenderRequest { filename: Some(next.filename.to_string()), all: false });
+                }
+            }
         });
-        let (filename, save) = out;
-        (Control { filename: Rc::clone(&filename), ..control.clone() }, if save { vec![filename.to_string()] } else { Vec::new() })
+        (next, requests)
     }
 
     /// Apply the expansion chosen when the command was handled. Layout settling can rebuild this
@@ -210,7 +231,7 @@ pub mod cc {
     pub fn widgets(control: &Control, ui: &mut Ui, camera: &easy_camera::EasyCamera) -> (Control, easy_camera::EasyCamera, Vec<RenderRequest>) {
         let mut out_camera = camera.clone();
         let mut control_out = control.clone();
-        let mut saves: Vec<String> = Vec::new();
+        let mut saves = Vec::new();
         ui.id(pxui::hash_of(&control.prefix), |ui| {
             let mut result: Option<easy_camera::EasyCamera> = None;
             // the section shows the lens, the distance, the clip planes and the inertia
@@ -235,7 +256,7 @@ pub mod cc {
             control_out = Control { camera_expanded, fields, shown: revision, ..c };
             saves = s;
         });
-        (control_out, out_camera, saves.into_iter().map(|filename| RenderRequest { filename }).collect())
+        (control_out, out_camera, saves)
     }
 
     pub fn navigate(control_area: Option<Bounds>, camera: &easy_camera::EasyCamera, frame_: &frame::Frame) -> easy_camera::EasyCamera {
@@ -248,7 +269,7 @@ pub mod cc {
     }
 
     pub fn save(request: &RenderRequest) -> Result<(), String> {
-        rays::canvas::save_screen_png(&request.filename)
+        rays::canvas::save_screen_png(request.filename.as_deref().expect("viewport capture request"))
     }
 }
 
@@ -662,7 +683,10 @@ pub fn panel_revision(seen: &mut Option<(PanelKey, u64)>, control_: &Control, ca
     let (inertia, look) = (easy_camera::inertia(camera_), look_through(extra_));
     // what the panel shows of its control: not the section's bookkeeping (its fields, the revision
     // it was declared with, a drag followed between frames)
-    let shows = |a: &Control, b: &Control| (&a.prefix, a.ui_visible, &a.filename, a.open_camera) == (&b.prefix, b.ui_visible, &b.filename, b.open_camera);
+    let shows = |a: &Control, b: &Control| {
+        (&a.prefix, a.ui_visible, &a.filename, a.open_camera, a.has_camera, &a.output, &a.render_width, &a.render_spp)
+            == (&b.prefix, b.ui_visible, &b.filename, b.open_camera, b.has_camera, &b.output, &b.render_width, &b.render_spp)
+    };
     let same = seen.as_ref().is_some_and(|(k, _)| {
         k.inertia == inertia && k.look == look && k.following == extra_.following && k.show == extra_.show && shows(&k.control, control_) && k.root == extra_.root
     });
@@ -1126,6 +1150,38 @@ pub fn segment(bounds: Bounds, view_: &rcam::Camera, color_: color::T, a: vec3::
     }
 }
 
+pub(crate) fn focus_depth(camera: &rcam::Camera, point: vec3::T) -> Option<f64> {
+    let eye = rcam::position(camera);
+    let forward = vec3::normalize(vec3::sub(rcam::target(camera), eye));
+    let depth = vec3::dot(vec3::sub(point, eye), forward);
+    (depth.is_finite() && depth > 0.).then_some(depth)
+}
+
+fn focus_plane(bounds: Bounds, view: &rcam::Camera, camera: &rcam::Camera, aspect: f64) -> Nodes {
+    let eye = rcam::position(camera);
+    let forward = vec3::normalize(vec3::sub(rcam::target(camera), eye));
+    let right = vec3::normalize(vec3::cross(forward, rcam::up(camera)));
+    let up = vec3::cross(right, forward);
+    let depth = rcam::focus_distance(camera);
+    let rcam::Projection::Perspective { fov_y, .. } = rcam::projection(camera) else { return Vec::new() };
+    let half = depth * (fov_y / 2.).tan();
+    let center = vec3::add(eye, vec3::scale(forward, depth));
+    let corners = [(-1., -1.), (1., -1.), (1., 1.), (-1., 1.)].map(|(x, y)| {
+        let point = vec3::add(center, vec3::add(vec3::scale(right, x * half * aspect), vec3::scale(up, y * half)));
+        project(bounds, view, point).map(|(x, y)| rays::path::Point { x, y })
+    });
+    let [Some(a), Some(b), Some(c), Some(d)] = corners else { return Vec::new() };
+    use rays::path::Command::*;
+    let path = rays::path::of_commands(&[MoveTo(a), LineTo(b), LineTo(c), LineTo(d), Close]);
+    let ink = active_color();
+    let mut out: Nodes = scene::path(Some(color::with_alpha(ink, 56)), &path).into_iter().collect();
+    for (a, b) in [(a,b),(b,c),(c,d),(d,a)] {
+        out.extend(line(1, ink, (a.x,a.y), (b.x,b.y)));
+    }
+    out.push(scene::text((d.x as i64 + 5, d.y as i64 + 5), Some(ink), Some(12), &format!("focus {depth:.1} m")));
+    out
+}
+
 /// A pyramid half a unit deep with the view's aspect, and its aim.
 pub fn frustum(bounds: Bounds, view_: &rcam::Camera, color_: color::T, camera_: &rcam::Camera) -> Nodes {
     let (eye, target) = (rcam::position(camera_), rcam::target(camera_));
@@ -1424,6 +1480,7 @@ fn guides_key(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_:
             mat4::get(space, row, col).unwrap_or(0.).to_bits().hash(&mut h);
         }
     }
+    (extra_.root.width, extra_.root.height).hash(&mut h);
     extra_.show.cameras.hash(&mut h);
     extra_.show.axes.hash(&mut h);
     extra_.show.handles.hash(&mut h);
@@ -1482,6 +1539,11 @@ fn guides_build(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view
             }
         }
     }
+    if let Some(camera) = selected.and_then(|picked| kg::find(scene_, picked.id)).and_then(node_camera) {
+        if !same_view(&camera, view_) {
+            cameras.extend(focus_plane(bounds, view_, &camera, extra_.root.width as f64 / extra_.root.height.max(1) as f64));
+        }
+    }
     let mut lights = Nodes::new();
     if extra_.show.cameras {
         for l in objects::lights(false, scene_) {
@@ -1537,7 +1599,7 @@ pub fn save(request: &Request) -> Result<(), String> {
     cc::save(request)
 }
 pub fn filename(request: &Request) -> String {
-    request.filename.clone()
+    request.filename.clone().expect("viewport capture request")
 }
 
 pub fn close(extra_: &Extra) {

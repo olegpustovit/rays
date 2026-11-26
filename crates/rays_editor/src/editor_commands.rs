@@ -45,7 +45,8 @@ pub enum Action {
     SelectCamera(i64),
     RenderCamera,
     RenderAllCameras,
-    RenderOutput { all: bool, path: String },
+    RevealRender,
+    FocusHere,
     Fly,
     /// 0 none, 1 translate, 2 rotate, 3 scale
     Tool(i64),
@@ -175,7 +176,8 @@ fn build() -> Table {
     b.command("workspace.toggle-inspector", "toggle inspector", leader("i"), None, &[], ToggleInspector);
     b.command("workspace.hide-ui", "hide all UI", leader("h"), None, &[], HideUi);
     b.command("view.pick-camera", "Choose camera", None, None, &[], PickCamera);
-    b.command("view.render-camera", "Render camera…", None, None, &[], RenderCamera);
+    b.command("view.render-camera", "Render camera", None, None, &[], RenderCamera);
+    b.command("view.focus-here", "Focus here", None, None, &[], FocusHere);
     b.command("view.render-all-cameras", "Render all takes", None, None, &[], RenderAllCameras);
     b.command("workspace.camera-section", "camera section", leader("c"), None, &[], OpenCamera);
     b.command("timeline.play-pause", "play / pause", leader("p"), None, &[], PlayPause);

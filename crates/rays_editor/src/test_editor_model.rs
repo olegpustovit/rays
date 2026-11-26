@@ -278,3 +278,25 @@ fn revisions_bump_on_their_mutation() {
     shown.show.axes = !extra.show.axes;
     assert_eq!(v::panel_revision(&mut seen, &control, &wider, &shown), first + 2);
 }
+
+#[test]
+fn focus_distance_uses_camera_axis_and_is_undoable() {
+    use rays_math::vec3;
+    let source = "(workspace focus (graph scene :context scene (scene/camera :name \"take\" :eye [0 0 7] :target [0 0 0])))";
+    let doc = editor_document::lowering::of_workspace(&Default::default(), &workspace(source)).unwrap();
+    let id = doc.active_camera.unwrap();
+    let node = editor_document::kind_graph::find(&doc.scene, id).unwrap();
+    let camera = crate::viewport::node_camera(node).unwrap();
+    let depth = crate::viewport::focus_depth(&camera, vec3::create(3., 2., 3.)).unwrap();
+    assert_eq!(depth, 4.);
+    assert_eq!(crate::viewport::focus_depth(&camera, vec3::create(0., 0., 8.)), None);
+    let (edited, _, _) = editor_document::scene_sync::set_fields(None, &doc, Level::Scene, id,
+        &[("focus_distance".into(), param::Value::Float(depth))]).unwrap().unwrap();
+    let camera_of = |doc: &document::T| {
+        let node = editor_document::kind_graph::find(&doc.scene, id).unwrap();
+        crate::viewport::node_camera(node).unwrap()
+    };
+    assert_eq!(rays::camera::focus_distance(&camera_of(&edited)), 4.);
+    let restored = editor_document::lowering::restore(None, &edited, &document::snapshot(&doc)).unwrap();
+    assert_eq!(rays::camera::focus_distance(&camera_of(&restored)), 7.);
+}

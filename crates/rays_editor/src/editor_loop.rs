@@ -479,7 +479,8 @@ pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::Extra, vie
 /// The frame's clicks pick in the view, and a payload carried over a viewport finds its surface.
 /// Updates the core and the press still waiting for its release.
 #[allow(clippy::too_many_arguments)]
-pub fn pick_in_views(value: &mut LoopModel, focused: &Focus, camera: &V::Camera, extra: &V::Extra, area: Bounds, modifiers: &[Key], input: &frame::Frame, raw_frame: &frame::Frame) {
+pub fn pick_in_views(value: &mut LoopModel, focused: &Focus, camera: &V::Camera, extra: &V::Extra, area: Bounds, modifiers: &[Key], input: &frame::Frame, raw_frame: &frame::Frame) -> Option<String> {
+    let mut status = None;
     // A press and release within the drag threshold is a click: the view picks.
     let mut press = value.pick_press;
     let mut clicks: Vec<(f64, f64)> = Vec::new();
@@ -502,13 +503,19 @@ pub fn pick_in_views(value: &mut LoopModel, focused: &Focus, camera: &V::Camera,
     if !core.map_view {
         for at in clicks.iter().rev() {
             let film = V::film(extra, &focus_key_of(&focused.viewing), area);
-            let (_, _, w, h) = film;
-            if w <= 0 || h <= 0 {
+            let (x, y, w, h) = film;
+            let inside = (x as f64..(x + w) as f64).contains(&at.0) && (y as f64..(y + h) as f64).contains(&at.1);
+            if w <= 0 || h <= 0 || (value.focus_here.is_some() && !inside) {
                 continue;
             }
             let view_ = camera_for(&focused.viewing, camera, &focused.cameras, extra, pending, &focus_key_of(&focused.viewing));
             if let Some((origin, direction)) = V::pick_ray(film, &view_, *at) {
-                editor_host::pick(focused.viewing.as_deref(), modifiers.contains(&Key::Alt), core, origin, direction);
+                if let Some(id) = value.focus_here.take() {
+                    let focused = editor_host::focus_here(focused.viewing.as_deref(), core, id, origin, direction);
+                    status = Some(if focused { "Camera focus set".into() } else { "No focus surface under the pointer".into() });
+                } else {
+                    editor_host::pick(focused.viewing.as_deref(), modifiers.contains(&Key::Alt), core, origin, direction);
+                }
             }
         }
     }
@@ -527,7 +534,8 @@ pub fn pick_in_views(value: &mut LoopModel, focused: &Focus, camera: &V::Camera,
             }
         }
     }
-    value.pick_press = press
+    value.pick_press = press;
+    status
 }
 
 thread_local! {
@@ -718,11 +726,24 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
         match a {
             Action::HideUi => control = V::toggle_ui(&control),
             Action::OpenCamera => control = V::open_camera(&control),
-            Action::RenderOutput { all, path } => {
-                render_status = Some(match crate::editor_render_output::start(value, *all, path) {
+            Action::RenderCamera | Action::RenderAllCameras => {
+                render_status = Some(match crate::editor_render_output::start(value, matches!(a, Action::RenderAllCameras), &control) {
                     Ok(()) => "Preparing camera render…".into(),
                     Err(message) => message,
                 });
+            }
+            Action::FocusHere => {
+                value.focus_here = editor_host::selected_camera(&value.core);
+                render_status = Some(if value.focus_here.is_some() {
+                    "Click a surface to set camera focus · Esc cancels".into()
+                } else { "Choose a camera to focus".into() });
+            }
+            Action::RevealRender => {
+                if let Some(path) = render_status.as_deref().and_then(|s| s.strip_prefix("Saved ")) {
+                    if let Err(message) = crate::editor_render_output::reveal(path) {
+                        render_status = Some(message);
+                    }
+                }
             }
             other => {
                 let (e, notice) = V::apply_action(&camera, &extra, other);
@@ -733,7 +754,21 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
             }
         }
     }
+    if control.output != value.control.output && !control.output.trim().is_empty() {
+        if let Err(message) = crate::editor_setup::save_preference(&value.core.preferences, "render_output",
+            flow_syntax::arena::Draft::Str(control.output.trim().as_bytes().to_vec()))
+        {
+            render_status = Some(format!("Could not save render folder: {message}"));
+        }
+    }
+    if let Some(request) = requests.iter().find(|r| r.filename.is_none()) {
+        render_status = Some(match crate::editor_render_output::start(value, request.all, &control) {
+            Ok(()) => "Preparing camera render…".into(),
+            Err(message) => message,
+        });
+    }
     V::on_doc(&document, Rc::make_mut(&mut value.core), &camera);
+    control.has_camera = crate::editor_render_output::has_camera(&value.core.doc);
     // Command-S applies drafts before writing; rejected drafts keep the save waiting.
     let source = if !update_.actions.contains(&Action::SaveSource) {
         value.source.clone()
@@ -748,7 +783,15 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     }
     let area = if visible { panes.view } else { (0, 0, frame.input.size.0, frame.input.size.1) };
     let (input, modifiers, grab) = world_drag_frame(value, (before_level, before_map, &before_keys, &before_panes), update_.loaded_view.is_some(), &update_.actions, &update_.input, area);
-    pick_in_views(value, &focused, &camera, &extra, area, &modifiers, &input, &raw_frame);
+    if value.focus_here.is_some() && raw_frame.input.events.iter().any(|e| matches!(e, Event::KeyPressed(Key::Escape))) {
+        value.focus_here = None;
+        render_status = None;
+    }
+    if update_.actions.contains(&Action::FocusHere) {
+        value.pick_press = None;
+    } else if let Some(status) = pick_in_views(value, &focused, &camera, &extra, area, &modifiers, &input, &raw_frame) {
+        render_status = Some(status);
+    }
     let (camera, extra) = if value.core.map_view { (camera, V::release(&extra)) } else { V::navigate(area, grab, &control, &camera, extra, &value.core, &input) };
     let (camera, render_status) = match &update_.framed {
         Some(Some((min, max))) => {
@@ -867,7 +910,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
         }
         (_, previous) => previous.clone(),
     };
-    let pending_render = requests.last().cloned();
+    let pending_render = requests.iter().find(|r| r.filename.is_some()).cloned();
     let render_status = if pending_render.is_some() && rendered.is_none() { Some("Render unavailable until the first cook completes".to_string()) } else { render_status };
     value.camera = camera;
     value.cameras = focused.cameras;

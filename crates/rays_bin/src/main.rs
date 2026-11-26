@@ -86,7 +86,7 @@ const USAGE: &str = "Usage: rays [FILE.rays]
        rays fmt FILE
        rays doc [NAME|NAMESPACE/|SEARCH] [--json] [--all] [--markdown]
        rays render FILE -o PNG [--frame N] [--size WIDTHxHEIGHT] [--graph NAME]
-       rays render FILE --camera NAME [-o PNG] [--size WIDTHxHEIGHT] [--samples N]
+       rays render FILE --camera NAME [-o PNG] [--width PX | --size WIDTHxHEIGHT] [--samples N]
        rays mem FILE [--frames N]
        rays web FILE -o DIR
 
@@ -102,6 +102,7 @@ fn render_command(args: &[&str]) {
     let (mut output, mut graph, mut size, mut frame) = (None, None, None, 0);
     let (mut camera, mut samples) = (None, None);
     let mut source_stdin = false;
+    let mut width = None;
     let mut rest = options;
     while !rest.is_empty() {
         let [flag, value, tail @ ..] = rest else { usage(rest[0]); };
@@ -112,11 +113,13 @@ fn render_command(args: &[&str]) {
             "--camera" if camera.is_none() => camera = Some(*value),
             "--samples" if samples.is_none() => samples = Some(value.parse::<i64>().ok().filter(|n| *n > 0).unwrap_or_else(|| usage(value))),
             "--frame" => frame = value.parse::<i64>().ok().filter(|n| *n >= 0).unwrap_or_else(|| usage(value)),
+            "--width" if width.is_none() => width = Some(value.parse::<i64>().ok().filter(|n| *n > 0).unwrap_or_else(|| usage(value))),
             "--size" => size = Some(value.split_once('x').and_then(|(w,h)| Some((w.parse::<i64>().ok()?, h.parse::<i64>().ok()?))).filter(|(w,h)| *w > 0 && *h > 0).unwrap_or_else(|| usage(value))),
             _ => usage(flag),
         }
         rest = tail;
     }
+    if width.is_some() && (size.is_some() || graph.is_some()) { usage("render: --width uses the camera aspect"); }
     let fallback;
     let output = match (output, camera) {
         (Some(explicit), _) => explicit,
@@ -140,9 +143,9 @@ fn render_command(args: &[&str]) {
     });
     let draw = doc.checked.graphs.iter().any(|g| g.context == flow_syntax::context::draw());
     let scene = doc.checked.graphs.iter().any(|g| g.context == flow_syntax::context::scene());
-    let rendered = if graph.is_none() && (camera.is_some() || samples.is_some() || (scene && !draw)) {
+    let rendered = if graph.is_none() && (camera.is_some() || samples.is_some() || width.is_some() || (scene && !draw)) {
         if !scene { usage("render: no scene graph"); }
-        workspace::render_scene_png(camera, size, samples, frame, output, &doc)
+        workspace::render_scene_png_at_width(camera, size, width, samples, frame, output, &doc)
     } else {
         if camera.is_some() || samples.is_some() { usage("render: --graph selects a draw graph"); }
         eprintln!("render uses the CPU reference evaluator; use rays mem FILE --frames N to measure device frames.");

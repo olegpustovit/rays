@@ -236,7 +236,8 @@ fn marks(ui: &mut Ui, value: &ModelView<'_>, leaf: &Leaf, key: &str, theme: them
             Some((k, rect, name)) if k == key => Some((*rect, name.clone())),
             _ => None,
         };
-        let root = value.doc.view_roots.iter().find(|(k, _)| k == key).map(|(_, r)| r.params.clone()).unwrap_or_else(|| value.doc.root.clone());
+        let own = value.doc.view_roots.iter().find(|(k, _)| k == key).map(|(_, r)| r);
+        let root = own.map(|r| r.params.clone()).unwrap_or_else(|| value.doc.root.clone());
         let scene_graph = scene(value);
         let camera = value.doc.active_camera.and_then(|id| kind_graph::find(&scene_graph, id).cloned());
         let (tris, objects, points) = counts;
@@ -246,6 +247,11 @@ fn marks(ui: &mut Ui, value: &ModelView<'_>, leaf: &Leaf, key: &str, theme: them
         // camera readout, no object count; a wide one follows viewport.html
         let narrow = bw < 1000;
         let fps = value.status_fps;
+        let lens = gate.and_then(|_| {
+            let camera = own.and_then(|r| r.camera.clone())
+                .or_else(|| camera.as_ref().and_then(crate::viewport::node_camera))?;
+            Some(format!("Focus {:.1} m · Aperture {:.2} m", rays::camera::focus_distance(&camera), rays::camera::lens(&camera).aperture))
+        });
         ui.canvas(&overlay, move |paint, pxui::geom::Rect { x, y, w, h }| {
             if let Some((gx, gy, gw, gh)) = gate {
                 let (gx, gy, gw, gh) = (gx as f32, gy as f32, gw as f32, gh as f32);
@@ -281,6 +287,9 @@ fn marks(ui: &mut Ui, value: &ModelView<'_>, leaf: &Leaf, key: &str, theme: them
                 if let Some(node) = &camera {
                     camera_readout(paint, &theme, rh, (x, y, w, h), node);
                 }
+            }
+            if let Some(lens) = &lens {
+                label(paint, &theme, rh, x + 8., y + h - 32., 4., 4., None, lens);
             }
             // the scene's size and the frame rate: labels 12 apart, the rate in ink, in the row that
             // ends 12 (6 on a narrow body) above the pane's foot

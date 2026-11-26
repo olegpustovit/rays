@@ -1025,7 +1025,10 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
                 | Action::LookThrough
                 | Action::LookThroughCamera
                 | Action::SelectCamera(_)
-                | Action::RenderOutput { .. }
+                | Action::RenderCamera
+                | Action::RenderAllCameras
+                | Action::RevealRender
+                | Action::FocusHere
                 | Action::RenderMode(_)
                 | Action::Tool(_)
                 | Action::Fly
