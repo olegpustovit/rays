@@ -1485,7 +1485,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let document_changed = !Arc::ptr_eq(&doc, &previous_doc);
     let (carry_value, pick_error) = pick_up(&*value2, &actions, &frame_, carry_report);
     let (framing, framed, prepared_changed, edit_error, cook_framed, cooked_run) = match cooked_opt {
-        None => (value2.framing, None, false, value2.edit_error.clone(), false, None),
+        // A refusal still belongs to this frame when it reuses the previous cook.
+        None => (value2.framing, None, false, result.edit_error.take(), false, None),
         Some(cooked) => {
             let cook_framed = cooked.framed.is_some();
             let (framing, framed) = framing_step(&*value2, &doc, &cooked, frame_request, &actions, &frame_, &result);
