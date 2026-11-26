@@ -63,7 +63,9 @@ fn append_string(result: &mut String, text: &str) {
             '\n' => result.push_str("\\n"),
             '\t' => result.push_str("\\t"),
             '\r' => result.push_str("\\r"),
-            '\u{1}'..='\u{3}' => result.push_str(&format!("\\{:03}", character as u32)),
+            '\u{1}' => result.push_str("\\001"),
+            '\u{2}' => result.push_str("\\002"),
+            '\u{3}' => result.push_str("\\003"),
             other => result.push(other),
         }
     }
@@ -71,30 +73,36 @@ fn append_string(result: &mut String, text: &str) {
 
 pub fn quote_string(bytes: &[u8]) -> String {
     let mut result = String::with_capacity(bytes.len() + 2);
+    quote_string_into(bytes, &mut result);
+    result
+}
+
+/// Append a Lisp string literal to a reusable buffer.
+pub fn quote_string_into(bytes: &[u8], result: &mut String) {
     result.push('"');
     let mut i = 0;
     while i < bytes.len() {
         match std::str::from_utf8(&bytes[i..]) {
             Ok(text) => {
-                append_string(&mut result, text);
+                append_string(result, text);
                 break;
             }
             Err(error) if error.valid_up_to() > 0 => {
                 let valid = std::str::from_utf8(&bytes[i..i + error.valid_up_to()]).expect("valid UTF-8 prefix");
-                append_string(&mut result, valid);
+                append_string(result, valid);
                 i += error.valid_up_to();
             }
             Err(error) => {
                 let invalid = error.error_len().unwrap_or(bytes.len() - i);
                 for byte in &bytes[i..i + invalid] {
-                    result.push_str(&format!("\\{:03}", byte));
+                    use std::fmt::Write as _;
+                    let _ = write!(result, "\\{:03}", byte);
                 }
                 i += invalid;
             }
         }
     }
     result.push('"');
-    result
 }
 
 fn prefix(kind: QuoteKind) -> &'static str {

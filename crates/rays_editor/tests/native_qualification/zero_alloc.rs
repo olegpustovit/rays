@@ -40,9 +40,8 @@ const D_TYPING: (u64, u64) = (179, 13);
 // E click/toggle (Z13): settled = idle = 0 after isogrid render 0 + settle wait for zoom-rest timer.
 const E_CLICK_KEY: (u64, u64) = (167, 13);
 const E_CLICK_SETTLED: (u64, u64) = (0, 13);
-// E_toggle_key: layout-only recovery print splices prior body (no SyntaxBuilder::import of source).
-// Pre-existing ~1770 on origin/dev (Z13); ceiling left for Z13 — do not raise.
-const E_TOGGLE_KEY: (u64, u64) = (303, 13);
+// Z8: recovery splice and submit allocate 0 on the UI thread. Full key frame measured 269.
+const E_TOGGLE_KEY: (u64, u64) = (283, 13);
 const E_TOGGLE_SETTLED: (u64, u64) = (0, 13);
 const F_FROZEN: (u64, u64) = (0, 8);
 const F_STATIC: (u64, u64) = (0, 9);

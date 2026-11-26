@@ -212,26 +212,21 @@ pub fn save_source(core: &mut m::EditorModel, source: Option<source_file::Source
     }
 }
 
-/// The recovery file's writer: one long-lived thread per editor (started on the first save) prints and
-/// writes, so the UI thread hands over only Arcs. A newer document replaces one not yet started; dropping
-/// the last handle (and `flush`) waits until the newest has been written.
-/// ponytail: its own thread, not the parallel pool, which only runs fork-join work; move it if the pool
-/// gains detached jobs.
+/// A single writer for the recovery file. New submissions replace the pending save, and the
+/// writer takes the newest text after finishing any write already in progress.
 #[derive(Default)]
 pub struct Saver {
     shared: Arc<(std::sync::Mutex<SaveSlot>, std::sync::Condvar)>,
     thread: std::cell::RefCell<Option<std::thread::JoinHandle<()>>>,
-    /// the documents handed over, until the writer is idle: the last reference to a document (and
-    /// whatever it owns) is dropped on this thread, never on the writer's
-    held: std::cell::RefCell<Vec<Arc<editor_document::document::T>>>,
 }
 
 #[derive(Default)]
 struct SaveSlot {
-    next: Option<Box<dyn FnOnce() -> Result<(), String> + Send>>,
+    next: Option<Arc<(String, String)>>,
+    text: String,
+    capacity: usize,
     busy: bool,
     closed: bool,
-    /// the last finished write's outcome, until the UI thread reads it
     done: Option<Result<(), String>>,
 }
 
@@ -240,16 +235,28 @@ impl Saver {
         self.shared.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn submit(&self, doc: Option<Arc<editor_document::document::T>>, save: Box<dyn FnOnce() -> Result<(), String> + Send>) {
-        self.held.borrow_mut().extend(doc);
-        let replaced = self.lock().next.replace(save);
-        drop(replaced);
-        self.shared.1.notify_all();
+    fn warm(&self, capacity: usize) {
+        {
+            let mut slot = self.lock();
+            slot.capacity = slot.capacity.max(capacity);
+            let additional = capacity.saturating_sub(slot.text.len());
+            slot.text.reserve(additional);
+        }
         let mut thread = self.thread.borrow_mut();
         if thread.is_none() {
+            let text = String::with_capacity(capacity);
             let shared = self.shared.clone();
-            *thread = Some(std::thread::Builder::new().name("rays-autosave".into()).spawn(move || write_saves(&shared)).expect("autosave thread"));
+            *thread = Some(std::thread::Builder::new().name("rays-autosave".into())
+                .spawn(move || write_saves(&shared, text)).expect("autosave thread"));
         }
+    }
+
+    fn submit(&self, target: &Arc<(String, String)>, text: &str) {
+        let mut slot = self.lock();
+        slot.text.clear();
+        slot.text.push_str(text);
+        slot.next = Some(target.clone());
+        self.shared.1.notify_one();
     }
 
     /// Waits for every submitted save; the outcome of the last one, if not read yet.
@@ -258,21 +265,11 @@ impl Saver {
         while slot.next.is_some() || slot.busy {
             slot = self.shared.1.wait(slot).unwrap_or_else(std::sync::PoisonError::into_inner);
         }
-        let done = slot.done.take();
-        drop(slot);
-        self.held.borrow_mut().clear();
-        done
+        slot.done.take()
     }
 
     fn take_done(&self) -> Option<Result<(), String>> {
-        let mut slot = self.lock();
-        let idle = slot.next.is_none() && !slot.busy;
-        let done = slot.done.take();
-        drop(slot);
-        if idle && !self.held.borrow().is_empty() {
-            self.held.borrow_mut().clear();
-        }
-        done
+        self.lock().done.take()
     }
 }
 
@@ -283,18 +280,21 @@ impl Drop for Saver {
         if let Some(thread) = self.thread.get_mut().take() {
             let _ = thread.join();
         }
-        self.held.get_mut().clear();
     }
 }
 
-fn write_saves(shared: &(std::sync::Mutex<SaveSlot>, std::sync::Condvar)) {
+fn write_saves(shared: &(std::sync::Mutex<SaveSlot>, std::sync::Condvar), mut text: String) {
     let (mutex, wake) = shared;
     let mut slot = mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     loop {
-        if let Some(save) = slot.next.take() {
+        if let Some(target) = slot.next.take() {
+            text.clear();
+            text.reserve(slot.capacity);
+            std::mem::swap(&mut text, &mut slot.text);
             slot.busy = true;
             drop(slot);
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(save)).unwrap_or_else(|_| Err("the writer panicked".to_owned()));
+            let outcome = std::panic::catch_unwind(|| preset::save_text(&target.0, &target.1, &text).map(|_| ()))
+                .unwrap_or_else(|_| Err("the writer panicked".to_owned()));
             slot = mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             slot.busy = false;
             slot.done = Some(outcome);
@@ -325,45 +325,63 @@ fn read_outcome(value: &mut LoopModel, outcome: Option<Result<(), String>>) {
 /// only `(layout ...)` is rebuilt — no `SyntaxBuilder::import` of the authored source.
 #[derive(Clone)]
 pub struct RecoveryPrint {
-    pub body: Arc<str>,
-    pub source: Arc<Vec<flow_syntax::syntax::Syntax>>,
-    pub extra: Arc<Vec<flow_syntax::syntax::Syntax>>,
-    pub ws_settings: editor_document::settings::T,
-    pub doc_settings: editor_document::settings::T,
-    /// Full last-written recovery text (body + view); skip when compose would reprint the same bytes.
-    pub written: Arc<str>,
+    body: Arc<str>,
+    source: Arc<Vec<flow_syntax::syntax::Syntax>>,
+    extra: Arc<Vec<flow_syntax::syntax::Syntax>>,
+    imports: Arc<Vec<(String, Vec<flow_syntax::syntax::Syntax>)>>,
+    ws_settings: editor_document::settings::T,
+    doc_settings: editor_document::settings::T,
+    fragment: bool,
+    /// The viewport syntax identity and its printed form stay paired across saves.
+    view: (u64, u32),
+    view_line: Arc<str>,
+    target: Arc<(String, String)>,
+    written: String,
 }
 
-fn recovery_prior<'a>(cache: &'a Option<RecoveryPrint>, doc: &editor_document::document::T) -> Option<&'a str> {
-    let c = cache.as_ref()?;
-    let ws = &doc.workspace.ws;
-    if Arc::ptr_eq(&c.source, &ws.source)
-        && Arc::ptr_eq(&c.extra, &ws.extra)
-        && editor_document::settings::same_values(&c.ws_settings, &ws.settings)
-        && editor_document::settings::same_values(&c.doc_settings, &doc.settings)
-    {
-        Some(c.body.as_ref())
-    } else {
-        None
+impl RecoveryPrint {
+    fn matches(&self, doc: &editor_document::document::T) -> bool {
+        let ws = &doc.workspace.ws;
+        Arc::ptr_eq(&self.source, &ws.source)
+            && Arc::ptr_eq(&self.extra, &ws.extra)
+            && Arc::ptr_eq(&self.imports, &ws.imports)
+            && editor_document::settings::same_values(&self.ws_settings, &ws.settings)
+            && editor_document::settings::same_values(&self.doc_settings, &doc.settings)
+            && self.fragment == ws.fragment
     }
 }
 
-/// Warm the body cache off the hot path so the first layout-only edit can splice.
-fn ensure_recovery_body(value: &mut LoopModel) {
-    let doc = value.core.doc.clone();
-    if recovery_prior(&value.recovery_print, &doc).is_some() {
-        return;
+fn prepare_recovery(value: &mut LoopModel, doc: &editor_document::document::T, view: &flow_syntax::syntax::Syntax) -> Result<(), String> {
+    if let Some(cache) = value.recovery_print.as_mut().filter(|cache| cache.matches(doc)) {
+        if cache.view != view.identity() {
+            cache.view_line = preset::print_view(view)?.into();
+            cache.view = view.identity();
+        }
+        return Ok(());
     }
-    let Ok(body) = preset::text(&doc) else { return };
+    let body = preset::recovery_body(doc)?;
+    let view_line = preset::print_view(view)?;
     let ws = &doc.workspace.ws;
+    // ponytail: leave room for one small panel entry. Larger layout changes grow the buffers.
+    let mut layout = String::new();
+    editor_document::layout_by_path::write_into(&ws.layout, &mut layout);
+    let capacity = body.len() + layout.len() + view_line.len() + 128;
+    value.recovery_buf.reserve(capacity.saturating_sub(value.recovery_buf.len()));
+    value.saver.warm(capacity);
     value.recovery_print = Some(RecoveryPrint {
         body: body.into(),
         source: ws.source.clone(),
         extra: ws.extra.clone(),
+        imports: ws.imports.clone(),
         ws_settings: ws.settings.clone(),
         doc_settings: doc.settings.clone(),
-        written: Arc::from(""),
+        fragment: ws.fragment,
+        view: view.identity(),
+        view_line: view_line.into(),
+        target: Arc::new((editor_setup::state_directory(&value.core), value.core.state_name.clone())),
+        written: String::with_capacity(capacity),
     });
+    Ok(())
 }
 
 /// One recovery file per sketch. Polling at 2 Hz keeps checking out of idle frames; compose runs on
@@ -372,15 +390,20 @@ fn ensure_recovery_body(value: &mut LoopModel) {
 pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     let outcome = value.saver.take_done();
     read_outcome(value, outcome);
-    if !force && now >= value.state_checked && now - value.state_checked < 0.5 {
+    let saved_same = value.saved_doc.upgrade().is_some_and(|d| Arc::ptr_eq(&d, &value.core.doc));
+    let polled_recently = !force && now >= value.state_checked && now - value.state_checked < 0.5;
+    // Layout-only edits can use the warmed print buffers on the frame that commits them.
+    if polled_recently && (saved_same || !value.recovery_print.as_ref().is_some_and(|cache| cache.matches(&value.core.doc))) {
         return;
     }
     let key = V::section_key(&value.camera, &value.extra);
-    value.state_checked = now;
-    let saved_same = value.saved_doc.upgrade().is_some_and(|d| Arc::ptr_eq(&d, &value.core.doc));
     // B42: unapplied drafts are work too; they are saved as the applies Command-S would make. A change of
     // any draft saves again.
     let drafts = editor_text::draft_signature(&value.core);
+    if polled_recently && (drafts.is_some() || key != value.saved_view_key) {
+        return;
+    }
+    value.state_checked = now;
     // a draft still being typed is not written: it must stand through one more poll (applying it
     // checks the document)
     let settled = drafts == value.seen_drafts;
@@ -391,8 +414,12 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     // a preview document is never saved
     if (saved_same && key == value.saved_view_key && drafts == value.saved_drafts) || editor_host::carrying(&value.core) {
         // Warm the print base while the document is idle so a later layout-only edit splices.
-        if !editor_host::carrying(&value.core) {
-            ensure_recovery_body(value);
+        if !editor_host::carrying(&value.core)
+            && !value.recovery_print.as_ref().is_some_and(|cache| cache.matches(&value.core.doc) && cache.view == value.saved_view.identity())
+        {
+            let doc = value.core.doc.clone();
+            let view = value.saved_view.clone();
+            let _ = prepare_recovery(value, &doc, &view);
         }
         if force || value.core.cook.await_ {
             let outcome = value.saver.flush();
@@ -404,7 +431,6 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     // the recovery file of an earlier session holds its unsaved work: orbiting in a document that is
     // still the one opened never writes over it
     if !value.state_owned && drafts.is_none() && editor_text::same_text(&value.core.doc, &value.opened) && Path::new(&editor_setup::state_file(&value.core)).exists() {
-        ensure_recovery_body(value);
         value.saved_doc = Arc::downgrade(&value.core.doc);
         value.saved_view = view;
         value.saved_view_key = key;
@@ -417,43 +443,16 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     } else {
         value.core.doc.clone()
     };
-    let prior = recovery_prior(&value.recovery_print, &doc).map(|s| s.to_owned());
-    if let Err(message) = preset::compose_into(&doc, &view, prior.as_deref(), &mut value.recovery_buf) {
-        value.state_error = Some(format!("Autosave failed: {message}"));
-        value.saved_doc = std::sync::Weak::new();
-        value.saved_drafts = None;
-        value.recovery_print = None;
+    if let Err(message) = prepare_recovery(value, &doc, &view) {
+        read_outcome(value, Some(Err(message)));
         return;
     }
-    let text: Arc<str> = value.recovery_buf.as_str().into();
-    // Skip when printed content is unchanged (revision of bytes, not a re-print of a different doc).
-    if value.recovery_print.as_ref().is_some_and(|c| c.written.as_ref() == text.as_ref()) {
-        value.saved_doc = Arc::downgrade(&value.core.doc);
-        value.saved_view = view;
-        value.saved_view_key = key;
-        value.saved_drafts = drafts;
-        if force || value.core.cook.await_ {
-            let outcome = value.saver.flush();
-            read_outcome(value, outcome);
-        }
-        return;
+    let cache = value.recovery_print.as_mut().expect("prepared recovery");
+    preset::splice_recovery_into(&cache.body, &doc.workspace.ws.layout, &cache.view_line, &mut value.recovery_buf);
+    if cache.written != value.recovery_buf {
+        value.saver.submit(&cache.target, &value.recovery_buf);
+        std::mem::swap(&mut cache.written, &mut value.recovery_buf);
     }
-    // Body without the trailing `(view ...)` line: next layout-only toggle splices from this.
-    let body: Arc<str> = match text.rsplit_once("\n(view") {
-        Some((body, _)) => body.to_owned().into(),
-        None => text.clone(),
-    };
-    let ws = &doc.workspace.ws;
-    value.recovery_print = Some(RecoveryPrint {
-        body,
-        source: ws.source.clone(),
-        extra: ws.extra.clone(),
-        ws_settings: ws.settings.clone(),
-        doc_settings: doc.settings.clone(),
-        written: text.clone(),
-    });
-    let (directory, name) = (editor_setup::state_directory(&value.core), value.core.state_name.clone());
-    value.saver.submit(Some(doc), Box::new(move || preset::save_text(&directory, &name, &text).map(|_| ())));
     value.saved_doc = Arc::downgrade(&value.core.doc);
     value.saved_view = view;
     value.saved_view_key = key;
@@ -468,28 +467,23 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
 #[cfg(test)]
 mod saver {
     use super::*;
-    use std::sync::Mutex;
 
     #[test]
     fn newest_save_wins_and_drop_waits_for_it() {
-        let written = Arc::new(Mutex::new(Vec::new()));
+        let directory = std::env::temp_dir().join(format!("rays-saver-{}", std::process::id()));
+        let target = Arc::new((directory.to_string_lossy().into_owned(), "newest".to_owned()));
         let saver = Saver::default();
-        let gate = Arc::new(Mutex::new(()));
-        let held = gate.lock().unwrap();
-        for k in 0..4 {
-            let (written, gate) = (written.clone(), gate.clone());
-            saver.submit(None, Box::new(move || { let _g = gate.lock().unwrap(); written.lock().unwrap().push(k); Ok(()) }));
+        saver.warm(64);
+        for text in ["first", "second", "newest"] {
+            saver.submit(&target, text);
         }
-        drop(held);
         assert_eq!(saver.flush(), Some(Ok(())));
-        let seen = written.lock().unwrap().clone();
-        assert_eq!(seen.last(), Some(&3), "the newest save is written: {seen:?}");
-        assert!(seen.len() <= 2, "a save not started is replaced: {seen:?}");
-        saver.submit(None, Box::new(|| Err("disk full".to_owned())));
-        assert_eq!(saver.flush(), Some(Err("disk full".to_owned())));
-        let w = written.clone();
-        saver.submit(None, Box::new(move || { std::thread::sleep(std::time::Duration::from_millis(20)); w.lock().unwrap().push(9); Ok(()) }));
+        let file = preset::path(&target.0, &target.1);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "newest");
+        saver.submit(&target, "last");
         drop(saver);
-        assert_eq!(written.lock().unwrap().last(), Some(&9), "dropping the saver finished the pending save");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "last");
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

@@ -63,11 +63,15 @@ fn finite(f: &S) -> bool {
 
 /// The canonical workspace text of `doc` (its settings beside it).
 pub fn text(doc: &document::T) -> Result<String, String> {
+    workspace_text(doc, workspace_doc::to_text)
+}
+
+fn workspace_text(doc: &document::T, print: fn(&workspace_doc::T) -> Result<String, rays_diagnostic::Diagnostic>) -> Result<String, String> {
     let workspace = &doc.workspace.ws;
     let text = if lowering::has_settings(workspace) {
-        workspace_doc::to_text(workspace)
+        print(workspace)
     } else {
-        workspace_doc::to_text(&workspace_doc::T { settings: doc.settings.clone(), ..workspace.clone() })
+        print(&workspace_doc::T { settings: doc.settings.clone(), ..workspace.clone() })
     };
     text.map_err(|error| rays_diagnostic::to_string(&error))
 }
@@ -81,34 +85,49 @@ pub fn save(directory: &str, name: &str, doc: &document::T, view: &S) -> Result<
 /// Compose recovery file text. When `prior_body` is a previous workspace `to_text` for the same
 /// authored source, only `(layout ...)` is rebuilt — no SyntaxBuilder::import of the source.
 pub fn compose(doc: &document::T, view: &S, prior_body: Option<&str>) -> Result<String, String> {
+    let view = print_view(view)?;
     let mut out = String::new();
-    compose_into(doc, view, prior_body, &mut out)?;
+    match prior_body {
+        Some(prior) => {
+            splice_drop_forms_into(prior, &mut out)?;
+            append_layout(&doc.workspace.ws.layout, &mut out);
+        }
+        None => out = text(doc)?,
+    }
+    append_form(&view, &mut out);
     Ok(out)
 }
 
-/// Like `compose`, writing into a caller-owned buffer (cleared first) so the saver can reuse it.
-pub fn compose_into(doc: &document::T, view: &S, prior_body: Option<&str>, out: &mut String) -> Result<(), String> {
-    if !finite(view) {
-        return Err("viewport contains nonfinite values".to_owned());
-    }
+/// The authored recovery body with its layout and view forms removed.
+pub fn recovery_body(doc: &document::T) -> Result<String, String> {
+    workspace_text(doc, workspace_doc::recovery_body)
+}
+
+/// Write the recovery snapshot from a cached authored body and printed view.
+pub fn splice_recovery_into(body: &str, layout: &crate::layout_by_path::T, view: &str, out: &mut String) {
     out.clear();
-    match prior_body {
-        Some(prior) => {
-            let body = refresh_layout(prior, doc)?;
-            out.push_str(&body);
-        }
-        None => out.push_str(&text(doc)?),
-    };
-    let mut builder = flow_syntax::arena::SyntaxBuilder::new();
-    let head = builder.push_draft(0, flow_syntax::arena::Draft::Sym("view".to_owned()), rays_diagnostic::Span { start: 0, finish: 0 }, None);
-    let view = builder.import(view);
-    let root = builder.push_draft(0, flow_syntax::arena::Draft::List(vec![head, view]), rays_diagnostic::Span { start: 0, finish: 0 }, None);
-    let view_text = lisp::print(&[builder.freeze().handle(root)]).map_err(|error| rays_diagnostic::to_string(&error))?.0;
+    out.push_str(body);
+    append_layout(layout, out);
+    append_form(view, out);
+}
+
+fn append_form(form: &str, out: &mut String) {
     if !out.is_empty() && !out.ends_with('\n') {
         out.push('\n');
     }
-    out.push_str(&view_text);
-    Ok(())
+    out.push_str(form);
+}
+
+pub fn print_view(view: &S) -> Result<String, String> {
+    if !finite(view) {
+        return Err("viewport contains nonfinite values".to_owned());
+    }
+    let mut builder = flow_syntax::arena::SyntaxBuilder::new();
+    let span = rays_diagnostic::Span { start: 0, finish: 0 };
+    let head = builder.push_draft(0, flow_syntax::arena::Draft::Sym("view".to_owned()), span.clone(), None);
+    let view = builder.import(view);
+    let root = builder.push_draft(0, flow_syntax::arena::Draft::List(vec![head, view]), span, None);
+    lisp::print(&[builder.freeze().handle(root)]).map(|(text, _)| text).map_err(|error| rays_diagnostic::to_string(&error))
 }
 
 pub fn save_text(directory: &str, name: &str, text: &str) -> Result<String, String> {
@@ -121,117 +140,42 @@ pub fn save_text(directory: &str, name: &str, text: &str) -> Result<String, Stri
     Ok(target)
 }
 
-fn refresh_layout(prior: &str, doc: &document::T) -> Result<String, String> {
+fn append_layout(layout: &crate::layout_by_path::T, out: &mut String) {
     use crate::layout_by_path as lbp;
-    let layout = if lbp::is_empty(&doc.workspace.ws.layout) {
-        None
-    } else {
-        Some(lisp::print(&[lbp::to_syntax(&doc.workspace.ws.layout)]).map_err(|e| rays_diagnostic::to_string(&e))?.0)
-    };
-    Ok(splice_drop_forms(prior, &["layout", "view"], layout.as_deref()))
-}
-
-fn splice_drop_forms(prior: &str, drop_heads: &[&str], append_layout: Option<&str>) -> String {
-    let mut out = String::with_capacity(prior.len() + append_layout.map_or(0, str::len) + 8);
-    let b = prior.as_bytes();
-    let mut i = 0usize;
-    while i < b.len() {
-        let start = i;
-        while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | b'\r') {
-            i += 1;
-        }
-        if i >= b.len() {
-            out.push_str(&prior[start..]);
-            break;
-        }
-        if b[i] == b';' {
-            while i < b.len() && b[i] != b'\n' {
-                i += 1;
-            }
-            out.push_str(&prior[start..i]);
-            continue;
-        }
-        if b[i] != b'(' {
-            out.push(b[i] as char);
-            i += 1;
-            continue;
-        }
-        let form_start = start;
-        let list_start = i;
-        let mut depth = 0i32;
-        while i < b.len() {
-            match b[i] {
-                b'(' => depth += 1,
-                b')' => {
-                    depth -= 1;
-                    i += 1;
-                    if depth == 0 {
-                        break;
-                    }
-                    continue;
-                }
-                b'"' => {
-                    i += 1;
-                    while i < b.len() {
-                        if b[i] == b'\\' {
-                            i = i.saturating_add(2);
-                            continue;
-                        }
-                        if b[i] == b'"' {
-                            i += 1;
-                            break;
-                        }
-                        i += 1;
-                    }
-                    continue;
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        let head = form_head(&prior[list_start..i]);
-        if drop_heads.iter().any(|h| head == *h) {
-            continue;
-        }
-        out.push_str(&prior[form_start..i]);
-    }
-    if let Some(layout) = append_layout {
+    if !lbp::is_empty(layout) {
         if !out.is_empty() && !out.ends_with('\n') {
             out.push('\n');
         }
-        out.push_str(layout);
+        lbp::write_into(layout, out);
         out.push('\n');
     }
-    out
 }
 
-fn form_head(form: &str) -> &str {
-    let bytes = form.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() && bytes[i] != b'(' {
-        i += 1;
+fn splice_drop_forms_into(prior: &str, out: &mut String) -> Result<(), String> {
+    let forms = flow_syntax::arena_parse::parse(prior).map_err(|error| rays_diagnostic::to_string(&error))?;
+    let mut cursor = 0;
+    for form in forms {
+        if matches!(s::head(&form), Some("layout" | "view")) {
+            out.push_str(&prior[cursor..form.span.start as usize]);
+            cursor = form.span.finish as usize;
+        }
     }
-    if i >= bytes.len() {
-        return "";
-    }
-    i += 1;
-    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-        i += 1;
-    }
-    let s = i;
-    while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b')' {
-        i += 1;
-    }
-    std::str::from_utf8(&bytes[s..i]).unwrap_or("")
+    out.push_str(&prior[cursor..]);
+    Ok(())
 }
 
 #[cfg(test)]
 mod splice_tests {
     #[test]
     fn drops_layout_and_view_keeps_workspace() {
-        let prior = "(workspace library (graph g (sphere :radius 1)))\n(layout (panels))\n(view {:eye [0 0 1]})\n";
-        let out = super::splice_drop_forms(prior, &["layout", "view"], Some("(layout (panels :graph true))"));
-        assert!(out.contains("(workspace library"));
+        let prior = "(workspace library ; ) ☃\n  (graph g (sphere :radius 1)))\n(layout (panels))\n(view {:eye [0 0 1]})\n";
+        let mut out = String::new();
+        super::splice_drop_forms_into(prior, &mut out).unwrap();
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str("(layout (panels :graph true))\n");
+        assert!(out.contains("(workspace library ; ) ☃\n  (graph g (sphere :radius 1)))"));
         assert!(out.contains("(layout (panels :graph true))"));
         assert!(!out.contains("(view"));
         assert!(!out.contains("(layout (panels))\n"));

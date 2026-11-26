@@ -509,6 +509,14 @@ fn max_id(form: &S) -> i64 {
 /// form it replaces. Comments of a form that is no longer written move to the next one, or to the
 /// end of the text.
 pub fn print(t: &T) -> R<(String, lisp::Spans)> {
+    print_forms(t, true)
+}
+
+pub(crate) fn recovery_body(t: &T) -> R<String> {
+    print_forms(t, false).map(|(text, _)| text)
+}
+
+fn print_forms(t: &T, layout_and_view: bool) -> R<(String, lisp::Spans)> {
     let source = authored_source(t);
     let source: Vec<S> = if t.fragment {
         source.iter().flat_map(|form| form.children().iter().skip(2).map(|id| form.child(*id))).collect()
@@ -519,7 +527,7 @@ pub fn print(t: &T) -> R<(String, lisp::Spans)> {
         return lisp::print(&source);
     }
     let fresh: Vec<(&str, Option<S>)> = vec![
-        ("layout", if lbp::is_empty(&t.layout) { None } else { Some(lbp::to_syntax(&t.layout)) }),
+        ("layout", (layout_and_view && !lbp::is_empty(&t.layout)).then(|| lbp::to_syntax(&t.layout))),
         ("settings", settings_form(&t.settings)),
     ];
     let written: Vec<&str> = t.extra.iter().filter_map(|f| head(f)).collect();
@@ -534,7 +542,7 @@ pub fn print(t: &T) -> R<(String, lisp::Spans)> {
         let mut notes = carried.clone();
         notes.extend(old.as_ref().map(|f| f.notes().to_vec()).unwrap_or_default());
         let tail = old.as_ref().map(|f| f.tail().to_vec()).unwrap_or_default();
-        let preserve = name == "view" || name == "import";
+        let preserve = (layout_and_view && name == "view") || name == "import";
         let chosen = if preserve { old } else { fresh.iter().find(|(n, _)| *n == name).and_then(|(_, form)| form.clone()) };
         match chosen {
             Some(form) => {

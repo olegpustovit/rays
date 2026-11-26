@@ -159,6 +159,114 @@ pub fn to_syntax(t: &T) -> Syntax {
     builder.freeze().handle(root)
 }
 
+/// Append a parseable `(layout ...)` form. No SyntaxBuilder; grows `out` only when capacity is short.
+pub fn write_into(t: &T, out: &mut String) {
+    use std::fmt::Write as _;
+    fn quote(out: &mut String, text: &str) {
+        lisp::quote_string_into(text.as_bytes(), out);
+    }
+    fn num(out: &mut String, x: f64) {
+        if x.fract() == 0. && x.is_finite() && x.abs() < 1e15 {
+            let _ = write!(out, "{}", x as i64);
+        } else {
+            let _ = write!(out, "{x}");
+        }
+    }
+    fn path(out: &mut String, p: &Path) {
+        out.push('[');
+        for (i, s) in p.iter().enumerate() {
+            if i > 0 {
+                out.push(' ');
+            }
+            quote(out, s.as_str());
+        }
+        out.push(']');
+    }
+    fn pair(out: &mut String, p: (f64, f64)) {
+        out.push('[');
+        num(out, p.0);
+        out.push(' ');
+        num(out, p.1);
+        out.push(']');
+    }
+    out.push_str("(layout");
+    if let Some(name) = &t.editor {
+        out.push_str(" (editor ");
+        quote(out, name);
+        out.push(')');
+    }
+    for (p, state) in &t.panels {
+        out.push_str(" (panel ");
+        path(out, p);
+        out.push_str(" :collapsed ");
+        out.push_str(if state.collapsed { "true" } else { "false" });
+        if let Some((x, y, w, h)) = state.window {
+            out.push_str(" :window [");
+            let _ = write!(out, "{x} {y} {w} {h}");
+            out.push(']');
+        }
+        out.push(')');
+    }
+    // Separate node forms per field map: `of_syntax` merges by path (avoids a PathMap alloc).
+    for (p, v) in &t.at {
+        out.push_str(" (node ");
+        path(out, p);
+        out.push_str(" :at ");
+        pair(out, *v);
+        out.push(')');
+    }
+    for (p, v) in &t.level {
+        out.push_str(" (node ");
+        path(out, p);
+        out.push_str(" :level ");
+        quote(out, projection::level_name(*v));
+        out.push(')');
+    }
+    for (p, v) in &t.pinned {
+        out.push_str(" (node ");
+        path(out, p);
+        out.push_str(" :pinned ");
+        out.push_str(if *v { "true" } else { "false" });
+        out.push(')');
+    }
+    for (p, v) in &t.collapsed {
+        out.push_str(" (node ");
+        path(out, p);
+        out.push_str(" :collapsed ");
+        out.push_str(if *v { "true" } else { "false" });
+        out.push(')');
+    }
+    for (p, rows) in &t.rows {
+        out.push_str(" (node ");
+        path(out, p);
+        out.push_str(" :rows {");
+        for (i, (k, v)) in rows.iter().enumerate() {
+            if i > 0 {
+                out.push(' ');
+            }
+            out.push(':');
+            out.push_str(k);
+            out.push(' ');
+            out.push_str(if *v { "true" } else { "false" });
+        }
+        out.push_str("})");
+    }
+    for (p, fs) in &t.frames {
+        for f in fs {
+            out.push_str(" (frame ");
+            path(out, p);
+            out.push(' ');
+            quote(out, &f.title);
+            out.push_str(" :at ");
+            pair(out, f.at);
+            out.push_str(" :size ");
+            pair(out, f.size);
+            out.push(')');
+        }
+    }
+    out.push(')');
+}
+
 fn fail<V>(message: String) -> Result<V, String> {
     Err(format!("layout: {message}"))
 }
@@ -337,4 +445,30 @@ fn read_item(mut t: T, item: &Syntax) -> Result<T, String> {
 
 fn unknown(item: &Syntax) -> Result<T, String> {
     fail(format!("unknown entry {}", lisp::flat(item)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streamed_layout_round_trips() {
+        let path = vec!["network".into()];
+        let mut layout = T { editor: Some("editor".to_owned()), ..T::default() };
+        layout.panels.insert(path.clone(), State { collapsed: true, window: Some((5, 10, 180, 120)) });
+        layout.at.insert(path.clone(), (1.25, -2.5));
+        layout.pinned.insert(path.clone(), true);
+        layout.level.insert(path.clone(), Level::Point);
+        layout.collapsed.insert(path.clone(), false);
+        layout.rows.insert(path.clone(), BTreeMap::from([("a".to_owned(), true)]));
+        layout.frames.insert(path, vec![Frame {
+            title: "frame \"☃\"\n\u{1}".to_owned(),
+            at: (2., 3.),
+            size: (200., 150.),
+        }]);
+        let mut text = String::new();
+        write_into(&layout, &mut text);
+        let forms = flow_syntax::arena_parse::parse(&text).unwrap();
+        assert_eq!(of_syntax(&forms[0]).unwrap(), layout);
+    }
 }

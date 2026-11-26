@@ -412,6 +412,50 @@ pub fn autosave() {
     r.advance(35);
     assert!(has(&read(&state), ":radius 2") && dump_line(r.e(), "autosave") == "-", "autosave did not retry and clear its error while the editor remained open");
     r.d.close();
+    // A real /g edit reaches recovery as the editor settles.
+    let isolated = format!("{dir}/layout-presets");
+    let mut layout_run = Run::new(editor(Some(&isolated), vec![], source_file::at(&file, &sha(&text0)), &text0), (200., 300.));
+    let toggle = |run: &mut Run| {
+        run.step(vec![Event::KeyPressed(Key::KeyChar('/'))]);
+        run.step(vec![Event::KeyPressed(Key::KeyChar('g'))]);
+    };
+    layout_run.step(vec![]);
+    // The first toggle installs the default editor graph. Let that authored edit save first.
+    toggle(&mut layout_run);
+    layout_run.advance(35);
+    let before = layout_run.e().core.doc.workspace.ws.layout.clone();
+    toggle(&mut layout_run);
+    let recovery = rays_editor::editor_setup::state_file(&layout_run.e().core);
+    let read_layout = || {
+        let text = read(&recovery);
+        assert!(has(&text, "; the header") && has(&text, "(view"));
+        let forms = flow_syntax::arena_parse::parse(&text).unwrap();
+        let form = forms.iter().find(|form| flow_syntax::syntax::head(form) == Some("layout")).expect("saved layout");
+        editor_document::layout_by_path::of_syntax(form).unwrap()
+    };
+    let expected = layout_run.e().core.doc.workspace.ws.layout.clone();
+    assert_ne!(expected, before, "/g did not change the layout");
+    layout_run.advance(4);
+    assert_eq!(read_layout(), expected);
+
+    // Exercise the splice directly to measure it separately from the other work done on /g.
+    let mut e = layout_run.d.ed.take().unwrap();
+    let core = std::rc::Rc::make_mut(&mut e.core);
+    std::rc::Rc::make_mut(&mut core.cook).await_ = false;
+    let doc = Arc::make_mut(&mut core.doc);
+    let layout = &mut doc.workspace.ws.layout;
+    let panel = layout.panels.values_mut().next().unwrap();
+    panel.collapsed = !panel.collapsed;
+    let changed = layout.clone();
+    let now = e.state_checked + 1. / 60.;
+    let before = mem_sys::local_alloc_count();
+    rays_editor::loop_source::autosave(&mut e, false, now);
+    let allocated = mem_sys::local_alloc_count() - before;
+    assert_eq!(allocated, 0, "the warmed layout splice and submit allocated on the UI thread");
+    assert_eq!(e.saver.flush(), Some(Ok(())));
+    assert_eq!(read_layout(), changed);
+    layout_run.replace(e);
+    layout_run.d.close();
     let _ = fs::remove_dir_all(&dir);
 }
 fn open_reload_question(r: &mut Run) {
