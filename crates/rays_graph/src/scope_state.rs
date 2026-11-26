@@ -390,8 +390,6 @@ pub struct Pane {
     pub panning_grab: bool,
     /// the row under the pointer: its item's slot in `geo.items` and its index (`hovered_row`)
     pub hovered_at: Option<(usize, usize)>,
-    /// the wires lit for the pointer (indices into `geo.wires`)
-    pub highlighted: Vec<usize>,
     pub drag: Option<Drag>,
     /// what the left press of the gesture in progress is on (`scope_hover::classify`)
     pub press: Option<crate::scope_hover::On>,
@@ -583,7 +581,6 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         selected_wire: None,
         panning_grab: false,
         hovered_at: None,
-        highlighted: Vec::new(),
         drag: None,
         press: None,
         dropped: None,
@@ -700,7 +697,7 @@ pub fn suspend(t: &mut Pane) {
     t.drag = None;
     t.press = None;
     t.context = None;
-    t.highlighted.clear();
+    t.hovers.borrow_mut().lit.clear();
     t.panning_grab = false;
 }
 
@@ -975,7 +972,8 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: &mut Pane) {
     // letter hints, an open context menu and the hover name nodes and wires of the scope they were made over
     let same = matches!(&t.scope, Some(previous) if Rc::ptr_eq(previous, &scope));
     if !same {
-        (t.hinting, t.context, t.highlighted) = (None, None, Vec::new());
+        (t.hinting, t.context) = (None, None);
+        t.hovers.borrow_mut().lit.clear();
     }
     let foot = t.records.is_some();
     let cached = cache_key.and_then(|identity| {

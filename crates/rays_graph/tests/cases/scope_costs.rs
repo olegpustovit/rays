@@ -151,7 +151,7 @@ fn window_graph_costs() {
         go(ui, t, p, &[], vec![Event::PointerMoved(p)])
     });
     go(&mut ui, &mut t, port, &[], vec![Event::PointerMoved(port)]);
-    let lit = t.highlighted.len();
+    let lit = scope::inspect::highlighted_connections(&t).len();
     let port_hover = run(&mut table, "port hover", &mut ui, &mut t, n, &mut |ui, t, i| {
         let p = if i % 2 == 0 { port } else { c1 };
         go(ui, t, p, &[], vec![Event::PointerMoved(p)])

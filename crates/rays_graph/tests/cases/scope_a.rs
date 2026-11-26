@@ -336,7 +336,7 @@ fn scope_suspend() {
     check(!scope::inspect::grabbed(&idle) && !scope::editing(&idle), "suspend left the grab or the field");
     // suspending an idle pane makes no new value: the sharing (layout) and the open state are unchanged
     let again = { let mut r8_view = idle.clone(); scope::suspend(&mut r8_view); r8_view };
-    check(Rc::ptr_eq(&again.layout, &idle.layout) && again.drag.is_none() && again.context.is_none() && again.highlighted.is_empty(), "suspending an idle pane made a new value");
+    check(Rc::ptr_eq(&again.layout, &idle.layout) && again.drag.is_none() && again.context.is_none() && scope::inspect::highlighted_connections(&again).is_empty(), "suspending an idle pane made a new value");
     // drawn again as the button comes up: no grab, no field, no edit
     let (after, mut changes) = scope_step(&mut ui, idle, &frame_ev(empty, vec![mouse_release(MouseButton::RightButton, empty)]));
     let (after, later) = scope_step(&mut ui, after, &frame_ev(empty, vec![]));

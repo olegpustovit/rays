@@ -387,12 +387,12 @@ fn window_graph_hover() {
         // a port lights its wires: each in its own view (widened, under the cards), their ends ringed
         // in the view over the content
         let s = to(&mut ui, &mut t, port);
-        let lit = t.highlighted.len();
+        let lit = scope::inspect::highlighted_connections(&t).len();
         check(lit > 0, "the out-port lit no wire");
         check(verify || s.views == 2 + lit, &format!("hovering a port built {} views (the hover's, the wires view and the {lit} lit wires')", s.views));
         check(verify || s.allocs == 0, &format!("hovering a port allocated {}", s.allocs));
         let s = to(&mut ui, &mut t, canvas);
-        check(t.highlighted.is_empty(), "wires stayed lit off the port");
+        check(scope::inspect::highlighted_connections(&t).is_empty(), "wires stayed lit off the port");
         check(verify || s.views == 2 + lit, &format!("leaving a port built {} views", s.views));
         // selecting a card: one content build
         step(&mut ui, &mut t, hc, vec![Event::PointerMoved(hc), Event::PointerPressed(MouseButton::LeftButton, hc)]);

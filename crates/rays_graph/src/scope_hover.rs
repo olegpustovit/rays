@@ -311,9 +311,8 @@ pub struct Hovers {
     /// the selection and hover the cards show (`show`)
     sel: u64,
     hover: (i64, Option<usize>),
-    /// the wires lit for the hover, and lists to compare it with
-    lit: Vec<usize>,
-    next: Vec<usize>,
+    /// The wires lit for the hover (ascending).
+    pub(crate) lit: Vec<usize>,
     /// the lit wires the hover view drew
     drawn: Vec<usize>,
     /// the wires near the pointer
@@ -377,10 +376,27 @@ impl Hovers {
 
     /// The build is over: the cards it left are what presses and the hover find.
     pub fn end(&mut self, t: &Pane, ui: &mut Ui) {
+        let tip_capacity = self.cards.iter()
+            .filter_map(|card| match &t.geo.items[card.slot].0.item {
+                Item::Item(node) => Some(node.rows.iter()),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|row| match &row.chip {
+                p::Chip::Inline { glyph, text } => Some(sp::shown_glyph(glyph).len() + 1 + text.len()),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
+        TIP.with(|buf| {
+            let mut buf = buf.borrow_mut();
+            buf.clear();
+            buf.reserve(tip_capacity);
+        });
         self.tags.clear();
         self.tags.extend(t.geo.wires.iter().map(|wi| if wi.target.is_some() && (wi.b.0 - wi.a.0).abs() > TAG_SPAN { sp::tag_name(t, wi) } else { String::new() }));
         // room for every wire near the pointer and lit by it, so the hover never grows the lists
-        for v in [&mut self.near, &mut self.lit, &mut self.next] {
+        for v in [&mut self.near, &mut self.lit, &mut self.drawn] {
             v.reserve(t.geo.wires.len());
         }
         // a card no longer built shows its place again
@@ -593,7 +609,6 @@ pub fn find(t: &mut Pane, ui: &mut Ui, canvas: &pxui::Handle, mouse: (f64, f64))
         // the geometry moved since the build (it builds this frame), or cards are carried: nothing
         // is hovered until it settles
         t.hovered_at = None;
-        t.highlighted.clear();
         hv.lit.clear();
         return now;
     }
@@ -649,23 +664,14 @@ pub fn find(t: &mut Pane, ui: &mut Ui, canvas: &pxui::Handle, mouse: (f64, f64))
         })
     };
     let same_port = |pt: (f64, f64)| port.is_some_and(|(x, y)| (sx(t, pt.0) - x).abs() <= (1.5 * z) + 0.5 && (sy(t, pt.1) - y).abs() <= (1.5 * z) + 0.5);
-    let mut next = std::mem::take(&mut hv.next);
-    next.clear();
+    let Hovers { reach, lit, .. } = &mut *hv;
+    lit.clear();
     if t.context.is_none() {
-        for &i in &hv.reach {
+        lit.extend(reach.iter().copied().filter(|&i| {
             let wi = &t.geo.wires[i];
-            if hot == Some(i) || same_port(wi.a) || same_port(wi.b) {
-                next.push(i);
-            }
-        }
+            hot == Some(i) || same_port(wi.a) || same_port(wi.b)
+        }));
     }
-    if !t.highlighted.iter().eq(next.iter().rev()) {
-        t.highlighted.clear();
-        t.highlighted.reserve(t.geo.wires.len());
-        t.highlighted.extend(next.iter().rev());
-    }
-    std::mem::swap(&mut next, &mut hv.lit);
-    hv.next = next;
     // the red `t` of a live card's header: a tip after the pointer rests on it, saying what it is
     for c in &hv.cards {
         let (pl, ax, ay) = &t.geo.items[c.slot];
@@ -888,6 +894,10 @@ pub fn carry_wires(t: &Pane) {
     hv.skip.sort_unstable();
 }
 
+thread_local! {
+    static TIP: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
 /// Drawn over the cards for the hover, in the pane's points at the pan and zoom now: each lit wire
 /// widened and ringed at its ends, the full text of a hovered expression row, a live card's tip and
 /// the displayed node's. Its key changes only with what it shows.
@@ -931,7 +941,7 @@ pub fn selected_wire_index(t: &Pane) -> Option<usize> {
 
 pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
     let b = ui.node("pxui-scope-hover", pxui::Node::DEFAULT.w(Size::Px(t.width as f32)).h(Size::Px(t.height as f32)).at(0.0, 0.0));
-    if t.highlighted.is_empty() && now.tip.is_none() && now.live.is_none() && !now.flag {
+    if t.hovers.borrow().lit.is_empty() && now.tip.is_none() && now.live.is_none() && !now.flag {
         return;
     }
     let Some(kept) = kept(t) else { return };
@@ -939,7 +949,7 @@ pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
         let mut hv = t.hovers.borrow_mut();
         let hv = &mut *hv;
         hv.drawn.clear();
-        hv.drawn.extend_from_slice(&t.highlighted);
+        hv.drawn.extend(hv.lit.iter().rev().copied());
     }
     let hovers = t.hovers.clone();
     let now = *now;
@@ -993,10 +1003,6 @@ pub fn overlay(t: &Pane, ui: &mut Ui, now: &Now, font_size: i64) {
             let (pl, ax, ay) = &t.geo.items[slot];
             if let Item::Item(n) = &pl.item {
                 if let p::Chip::Inline { glyph, text } = &n.rows[i].chip {
-                    // Reuse one buffer: format! per tip frame showed up in B_hover site dumps.
-                    thread_local! {
-                        static TIP: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
-                    }
                     let k = pl.lines.iter().position(|l| matches!(l, p::Line::Row(j, _) if *j == i)).unwrap_or(0);
                     let (x, y) = at((ax + sp::value_x(p::NODE_WIDTH), rows_top(n, *ay) + (k as f64 * p::ROW_HEIGHT)));
                     let size = 4.max(fs - 2);
@@ -1216,7 +1222,7 @@ pub fn wires_view(t: &Pane, ui: &mut Ui, key: u64, w: Size, h: Size, chain: &Opt
         }
         for &i in &hv.reach {
             let wi = &t.geo.wires[i];
-            let (lit, is_selected, lit_now, carried) = (chain.as_ref().map(|c| wire_lit(c, wi)), selected == Some(i), t.highlighted.contains(&i), hv.skip.binary_search(&i).is_ok());
+            let (lit, is_selected, lit_now, carried) = (chain.as_ref().map(|c| wire_lit(c, wi)), selected == Some(i), hv.lit.binary_search(&i).is_ok(), hv.skip.binary_search(&i).is_ok());
             let mut hh = std::hash::DefaultHasher::new();
             (key, lit, is_selected, lit_now, carried).hash(&mut hh);
             full(ui, label(&mut buf, b'w', i), hh.finish(), false, &mut |ui, b| {

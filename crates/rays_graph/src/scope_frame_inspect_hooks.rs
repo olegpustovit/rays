@@ -13,7 +13,7 @@ pub fn macro_step(t: &Pane, path: &[Symbol]) -> Option<i64> {
 }
 
 pub fn highlighted_connections(t: &Pane) -> Vec<((f64, f64), (f64, f64))> {
-    t.highlighted.iter().map(|&i| &t.geo.wires[i]).map(|wi| ((sx(t, wi.a.0), sy(t, wi.a.1)), (sx(t, wi.b.0), sy(t, wi.b.1)))).collect()
+    t.hovers.borrow().lit.iter().rev().map(|&i| &t.geo.wires[i]).map(|wi| ((sx(t, wi.a.0), sy(t, wi.a.1)), (sx(t, wi.b.0), sy(t, wi.b.1)))).collect()
 }
 
 /// previous button, track, next button, in screen points

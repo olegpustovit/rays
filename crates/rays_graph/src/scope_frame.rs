@@ -1896,7 +1896,10 @@ fn pane(label: &str, salt: u64, pressed: &[Key], t: &mut Pane, ui: &mut Ui, fram
         // the grid, the zones, the frames and the wires, under the cards: they build again with the
         // content and when the selection's chains or the selected wire change
         let mut hh = std::hash::DefaultHasher::new();
-        (key, chain.as_ref().map(|c| (Rc::as_ptr(c) as usize, c.rev)), selected, &t.highlighted, &t.hovers.borrow().skip).hash(&mut hh);
+        {
+            let hover = t.hovers.borrow();
+            (key, chain.as_ref().map(|c| (Rc::as_ptr(c) as usize, c.rev)), selected, &hover.lit, &hover.skip).hash(&mut hh);
+        }
         let wires = crate::sized_view(ui, "graph-wires", hh.finish(), cw, ch, &mut |ui| crate::scope_hover::wires_view(t, ui, key, cw, ch, &chain, selected));
         ui.set_at(&wires, (-ov.0 as f32, -ov.1 as f32));
         // the wires a move of cards carries, where it puts them
