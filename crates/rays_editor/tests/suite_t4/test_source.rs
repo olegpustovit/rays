@@ -372,6 +372,17 @@ pub fn autosave() {
     let snapshot = read(&state);
     let stamp = fs::metadata(&state).unwrap().modified().unwrap();
     r = Run::new(create(), (200., 300.));
+    let mut e = r.d.ed.take().unwrap();
+    let fov = rays::easy_camera::fov_y(&e.camera);
+    e.camera = rays::easy_camera::with_fov_y(fov * 0.8, &e.camera).unwrap();
+    // A pristine sketch can establish a new view while preserving a previous session's recovery.
+    // Its next scheduled idle poll must use the print cache warmed on the first poll.
+    rays_editor::loop_source::autosave(&mut e, false, 0.);
+    mem_sys::local_reset();
+    rays_editor::loop_source::autosave(&mut e, false, 0.5);
+    let allocated = mem_sys::local_alloc_count();
+    r.replace(e);
+    assert_eq!(allocated, 0, "the idle poll rebuilt the recovery print cache");
     r.advance(70);
     assert!(read(&state) == snapshot && fs::metadata(&state).unwrap().modified().unwrap() == stamp, "an unchanged restarted sketch overwrote the last edited state");
     // E7: orbiting in the pristine document does not write over the earlier session's unsaved work

@@ -431,7 +431,9 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     // the recovery file of an earlier session holds its unsaved work: orbiting in a document that is
     // still the one opened never writes over it
     if !value.state_owned && drafts.is_none() && editor_text::same_text(&value.core.doc, &value.opened) && Path::new(&editor_setup::state_file(&value.core)).exists() {
-        value.saved_doc = Arc::downgrade(&value.core.doc);
+        let doc = value.core.doc.clone();
+        let _ = prepare_recovery(value, &doc, &view);
+        value.saved_doc = Arc::downgrade(&doc);
         value.saved_view = view;
         value.saved_view_key = key;
         return;
