@@ -219,7 +219,6 @@ struct Routing {
     view: bool,
     graph: bool,
     world: bool,
-    layouts: Vec<(String, bool)>,
 }
 
 /// Commands that only mean something on this level and projection; the last frame's list while
@@ -235,10 +234,24 @@ pub fn routed<'a>(value: &ModelView<'a>) -> Rc<Vec<editor_commands::Command>> {
         view: leaves.iter().any(|(_, p)| matches!(p, Panel::View(_))),
         graph: leaves.iter().any(|(_, p)| *p == Panel::Graph),
         world: in_world(value),
-        layouts: layouts(value),
     };
-    thread_local! { static LAST: RefCell<Option<(Routing, Rc<Vec<editor_commands::Command>>)>> = const { RefCell::new(None) }; }
-    if let Some(hit) = LAST.with(|l| l.borrow().as_ref().filter(|(k, _)| *k == r).map(|(_, v)| v.clone())) {
+    type Cached = (Routing, Arc<Document>, Rc<Vec<editor_commands::Command>>);
+    thread_local! { static LAST: RefCell<Option<Cached>> = const { RefCell::new(None) }; }
+    let layouts_match = |cached: &Document| {
+        let switch = |doc: &Document| doc.shell.as_ref().and_then(|s| s.switch.as_ref()).is_some();
+        match (switch(cached), switch(&value.doc)) {
+            (true, true) => cached.shell.as_ref().zip(value.doc.shell.as_ref()).is_some_and(|(a, b)| {
+                Arc::ptr_eq(a, b) || a.switch == b.switch
+            }),
+            (false, false) => {
+                let before = &cached.workspace.ws;
+                let now = &value.doc.workspace.ws;
+                Arc::ptr_eq(&before.checked.graphs, &now.checked.graphs) && before.layout.editor == now.layout.editor
+            }
+            _ => false,
+        }
+    };
+    if let Some(hit) = LAST.with(|l| l.borrow().as_ref().filter(|(k, doc, _)| *k == r && layouts_match(doc)).map(|(_, _, v)| v.clone())) {
         return hit;
     }
     let (f, a) = (Some(Trigger::Leader("f".to_string())), Some(Trigger::Leader("a".to_string())));
@@ -256,7 +269,7 @@ pub fn routed<'a>(value: &ModelView<'a>) -> Rc<Vec<editor_commands::Command>> {
     };
     let kept: Vec<editor_commands::Command> = editor_commands::keymap().iter().filter(keep).cloned().collect();
     let routed = Rc::new(layout_labels(value, kept));
-    LAST.with(|l| *l.borrow_mut() = Some((r, routed.clone())));
+    LAST.with(|l| *l.borrow_mut() = Some((r, value.doc.clone(), routed.clone())));
     routed
 }
 

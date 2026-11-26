@@ -53,7 +53,7 @@ pub fn write_panel_title(value: &ModelView<'_>, leaf: &Leaf, title: &mut String)
             shown_pane(value, (&Vec::new(), &leaf.path, &leaf.panel))
         }
     };
-    let graph_of = |pane: &GraphPane, path: Option<&[usize]>| graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path).unwrap_or("").to_owned();
+
     let add = |title: &mut String, subtitle: &str| {
         if !subtitle.is_empty() {
             title.push('\t');
@@ -75,20 +75,20 @@ pub fn write_panel_title(value: &ModelView<'_>, leaf: &Leaf, title: &mut String)
         }
         Panel::Graph => {
             let (pane, path) = graph_pane();
-            let graph = graph_of(&pane, path.as_deref());
+            let graph = graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path.as_deref().map(Vec::as_slice)).unwrap_or("");
             if !graph.is_empty() {
                 if pane.route.is_empty() {
-                    add(title, &graph);
+                    add(title, graph);
                 } else {
                     title.push('\t');
-                    let route = route_in(value, &pane, path.as_deref());
+                    let route = route_in(value, &pane, path.as_deref().map(Vec::as_slice));
                     for (i, part) in route.split('>').enumerate() {
                         if i > 0 { title.push_str(" / "); }
                         title.push_str(part.trim());
                     }
                 }
                 if let Some(graph) = value.doc.workspace.ws.checked.graphs.iter().find(|g| g.name == graph) {
-                    let _ = write!(title, " / {}", flow_check::workspace::context_name(&graph.context));
+                    let _ = write!(title, " / {}", context::name(graph.context));
                 }
             }
         }
@@ -98,9 +98,9 @@ pub fn write_panel_title(value: &ModelView<'_>, leaf: &Leaf, title: &mut String)
         }
         Panel::Lisp if leaf.frame.2 >= 400 => {
             let (pane, path) = graph_pane();
-            let graph = graph_of(&pane, path.as_deref());
+            let graph = graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path.as_deref().map(Vec::as_slice)).unwrap_or("");
             if value.file.is_empty() {
-                add(title, &graph);
+                add(title, graph);
             } else {
                 add(title, &value.file);
                 if !graph.is_empty() {
@@ -110,7 +110,7 @@ pub fn write_panel_title(value: &ModelView<'_>, leaf: &Leaf, title: &mut String)
         }
         Panel::Inspector => {
             let (pane, path) = graph_pane();
-            let graph = graph_of(&pane, path.as_deref());
+            let graph = graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path.as_deref().map(Vec::as_slice)).unwrap_or("");
             if !graph.is_empty() {
                 let paths = if pane.laid.is_none() { Vec::new() } else { inspector_paths(scope::selected(&pane.view).to_vec()) };
                 if let [path] = paths.as_slice() {
@@ -122,20 +122,20 @@ pub fn write_panel_title(value: &ModelView<'_>, leaf: &Leaf, title: &mut String)
                         }),
                     };
                     if leaf.frame.2 >= 340 {
-                        add(title, &graph);
+                        add(title, graph);
                         let _ = write!(title, " / {label}");
                     } else {
                         add(title, &label);
                     }
                 } else {
-                    add(title, &graph);
+                    add(title, graph);
                 }
             }
         }
         Panel::Outline if leaf.frame.2 >= 300 => add(title, &value.file),
         Panel::Spreadsheet => {
             let (pane, path) = graph_pane();
-            add(title, &graph_of(&pane, path.as_deref()));
+            add(title, graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path.as_deref().map(Vec::as_slice)).unwrap_or(""));
         }
         Panel::Timeline if value.steady >= 3 && value.last_dt > 0.0 => {
             let _ = write!(title, "\tfixed dt 1/{}", (1.0 / value.last_dt).round() as i64);
@@ -356,9 +356,12 @@ fn make_navigator_params(value: &ModelView<'_>, active: Option<String>) -> navig
 }
 
 /// The leaf the graph pane in use draws in, when it is open.
-pub fn graph_leaf<'a>(value: &ModelView<'a>, g: &layout::Geometry) -> Option<Leaf> {
+pub fn graph_leaf<'a>(value: &'a ModelView<'a>, g: &'a layout::Geometry) -> Option<&'a Leaf> {
+    if let Some(path) = crate::editor_shell::graph_path_known(value) {
+        return g.leaves.iter().find(|l| l.path.as_slice() == path && l.panel == Panel::Graph && l.body.3 > 0);
+    }
     let path = crate::editor_shell::graph_path(value)?;
-    g.leaves.iter().find(|l| l.path == path && l.panel == Panel::Graph && l.body.3 > 0).cloned()
+    g.leaves.iter().find(|l| l.path == path && l.panel == Panel::Graph && l.body.3 > 0)
 }
 
 fn under(prefix: &[usize], path: &[usize]) -> bool {
@@ -372,18 +375,18 @@ fn shared(a: &[usize], b: &[usize]) -> i64 {
 /// Chrome emits document edits; splitter drafts stay local until release. A refused structural
 /// edit returns a notice and preserves the document.
 /// The focused leaf: the one clicked when its kind is shown twice, else the first of its kind.
-pub fn focused_leaf(g: &layout::Geometry, focus: &Panel, path: Option<&[usize]>) -> Option<Leaf> {
+pub fn focused_leaf<'a>(g: &'a layout::Geometry, focus: &Panel, path: Option<&[usize]>) -> Option<&'a Leaf> {
     if let Some(leaf) = g.leaves.iter().find(|l| Some(l.path.as_slice()) == path && l.panel == *focus) {
-        return Some(leaf.clone());
+        return Some(leaf);
     }
     // the tree changed under the focus: a split moves the leaf a level down (and a viewport's key
     // follows its path), a retype leaves another kind at the path.  The leaf of that kind under
     // the old path, else the leaf now at the path, else the first of the kind.
     let kind = |l: &Leaf| editor_commands::scope(&l.panel) == editor_commands::scope(focus);
-    let first = |f: &dyn Fn(&Leaf) -> bool| g.leaves.iter().find(|l| f(l)).cloned();
+    let first = |f: &dyn Fn(&Leaf) -> bool| g.leaves.iter().find(|l| f(l));
     path.and_then(|p| first(&|l| kind(l) && under(p, &l.path)))
         .or_else(|| first(&|l| Some(l.path.as_slice()) == path))
-        .or_else(|| layout::find(g, focus).cloned())
+        .or_else(|| layout::find(g, focus))
         .or_else(|| first(&kind))
         // its panel was closed and no other is of its kind: the leaf that shares the most of its
         // path, the neighbour that took its place
@@ -396,7 +399,7 @@ pub fn focused_leaf(g: &layout::Geometry, focus: &Panel, path: Option<&[usize]>)
                         _ => Some(l),
                     };
                 }
-                best.cloned()
+                best
             })
         })
 }
@@ -414,10 +417,10 @@ fn set_editor_graph(form: s::Syntax) -> Change {
 /// / [ and / n: the layouts of the switch and the floating windows, each one edit of the editor
 /// graph (written from the layout shown first, when the document has none).
 pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &Shell, _leaf: Option<&Leaf>, actions: &[Action]) -> Vec<Change> {
-    let graph = workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name);
+    let graph = workspace_doc::editor_graph_ref(&value.doc.workspace.ws).map(|g| &g.name);
     let has_switch = value.doc.shell.as_ref().and_then(|s| s.switch.as_ref()).is_some();
     let edit = |make: &dyn Fn(String) -> le::Op| -> Vec<Change> {
-        match &graph {
+        match graph {
             _ if workspace.restored => vec![Change::Declined("The default layout is showing. / z returns to the editor graph.".to_string())],
             Some(graph) => vec![Change::LayoutEdit(make(graph.clone()))],
             None => {
@@ -449,7 +452,7 @@ pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &Shell, _leaf: Optio
             }
             Action::LayoutNew if !has_switch && !layouts(value).is_empty() => {
                 // an older file with several editor graphs: they become the layouts of one switch first
-                match &graph {
+                match graph {
                     Some(graph) => vec![Change::LayoutEdit(le::Op::MergeThenNew { graph: graph.clone() })],
                     None => Vec::new(),
                 }
@@ -482,7 +485,7 @@ pub fn layout_intents_cow<'a>(value: &ModelView<'_>, workspace: &'a Shell, inten
         return (Cow::Borrowed(workspace), Vec::new());
     }
     let base = shell_tree(value, workspace);
-    let editor = workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name);
+    let editor = workspace_doc::editor_graph_ref(&value.doc.workspace.ws).map(|g| g.name.clone());
     let shell_doc = if workspace.restored { None } else { value.doc.shell.as_ref() };
     let edit = |path: &layout::Path, make: Maker| -> Vec<Change> {
         match (&editor, shell_doc) {

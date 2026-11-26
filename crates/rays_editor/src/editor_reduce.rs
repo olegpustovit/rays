@@ -343,7 +343,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                     result.label = if state.collapsed { "Collapse panel" } else { "Arrange panel" }.to_string();
                     result.edit_error = None;
                 }
-                Change::SelectLayout(name) if editor_document::workspace_doc::editor_graph(&next.workspace.ws).map(|g| g.name).as_ref() == Some(name) => {}
+                Change::SelectLayout(name) if editor_document::workspace_doc::editor_graph_ref(&next.workspace.ws).map(|g| g.name.as_str()) == Some(name.as_str()) => {}
                 Change::SelectLayout(name) => match document_edit::select_layout(Some(factories), &next, name) {
                     Ok(doc) => {
                         next = Arc::new(doc);
@@ -795,14 +795,23 @@ pub fn undo_step(value: &EditorModel, carrying: bool, actions: &[Action], notice
     }
 }
 
+thread_local! {
+    static VIEW_INPUT: std::cell::Cell<Option<frame::Frame>> = const { std::cell::Cell::new(None) };
+}
+
+pub(crate) fn recycle_view_input(mut input: frame::Frame) {
+    input.input.events.clear();
+    VIEW_INPUT.set(Some(input));
+}
+
 /// The pointer and keys of the sketch go to the pane in focus, else the first viewer.
 pub fn view_input(value: &EditorModel, result: &FrameResult) -> frame::Frame {
     let is_view = |p: &Panel| matches!(p, Panel::View(_));
-    let owner = match result.pane_keys.iter().find(|(_, (panel, _))| *panel == result.focus && is_view(panel)) {
+    let owner = match result.pane_keys.iter().find(|(_, (panel, _))| panel == result.focus(value).0 && is_view(panel)) {
         Some((key, _)) => Some(*key),
         None => result.pane_keys.iter().find_map(|(key, (panel, _))| if is_view(panel) { Some(*key) } else { None }),
     };
-    rays_shell::host::input(&mut value.ui.borrow_mut(), owner)
+    rays_shell::host::read_input(&mut value.ui.borrow_mut(), owner, VIEW_INPUT.take())
 }
 
 pub fn timeline_step(value: &EditorModel, timeline: timeline::Timeline, timeline_changes: std::borrow::Cow<'static, [timeline::Change]>, result: &FrameResult) -> (timeline::Timeline, std::borrow::Cow<'static, [timeline::Change]>, i64) {
@@ -938,9 +947,10 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let mut copied = copied;
     if !immediate.is_empty() {
         let leaves = crate::editor_shell::shell_leaves(value, &result.workspace);
-        let intents = crate::editor_frame::panel_intents(&value.into(), &leaves, &result.workspace, frame_, &result.focus, result.focus_path.as_deref(), &immediate);
+        let (focus, path) = result.focus(value);
+        let intents = crate::editor_frame::panel_intents(&value.into(), &leaves, &result.workspace, frame_, focus, path.map(Vec::as_slice), &immediate);
         if !intents.is_empty() {
-            let vw = ModelView { workspace: &result.workspace, focus: &result.focus, selection: &result.selection, ..ModelView::from(value) };
+            let vw = ModelView { workspace: &result.workspace, focus: result.focus(value).0, selection: &result.selection, ..ModelView::from(value) };
             let (next_ws, layout_changes) = crate::editor_panels::layout_intents(&vw, &result.workspace, &intents);
             result.workspace = next_ws;
             result.changes.extend(layout_changes);
@@ -974,7 +984,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
                     if graph_shown && scope_name(&value.into()).is_some() {
                         let start = result.scope_changes.len();
                         scope_commands::run_command(&mut result.scope_view, cmd, &mut result.scope_changes);
-                        let vw = ModelView { workspace: &result.workspace, focus: &result.focus, selection: &result.selection, ..ModelView::from(value) };
+                        let vw = ModelView { workspace: &result.workspace, focus: result.focus(value).0, selection: &result.selection, ..ModelView::from(value) };
                         let more = crate::editor_frame::pane_changes(&value.into(), &vw, Vec::new(), &result.scope_changes[start..], &None, &[]);
                         result.changes.extend(more);
                     }
@@ -1558,8 +1568,10 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     core.steady = steady;
     core.guide = guide;
     core.hud = hud;
-    core.focus = result.focus.clone();
-    core.focus_path = std::mem::take(&mut result.focus_path);
+    if let Some((focus, path)) = result.focus_change.take() {
+        core.focus = focus;
+        core.focus_path = path;
+    }
     if !std::rc::Rc::ptr_eq(&core.pane_keys, &result.pane_keys) {
         core.pane_keys = std::mem::take(&mut result.pane_keys);
     }
@@ -1632,8 +1644,7 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &EditorM
 pub fn idle_result<'a>(value: &ModelView<'a>, selection: selection::Selection) -> FrameResult {
     FrameResult {
         workspace: value.workspace.clone(),
-        focus: value.focus.clone(),
-        focus_path: value.focus_path.clone(),
+        focus_change: None,
         pane_keys: value.pane_keys.clone(),
         scope_view: pane_view(value).clone(),
         scope_changes: Vec::new(),

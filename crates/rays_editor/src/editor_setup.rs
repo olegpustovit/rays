@@ -279,11 +279,11 @@ pub fn create(opts: CreateOpts, workspace: &workspace_doc::T, prepare: cook::Pre
     let on: Option<layout::Path> = value.doc.shell.as_ref().and_then(|s| s.start.focus.clone());
     let focus = if on.is_none() { value.focus.clone() } else { panels::Panel::Graph };
     let mut value = value;
-    follow_graph(&mut value, &focus, on.as_deref());
+    follow_graph(&mut value, Some((&focus, on.as_deref())));
     let views = graph_path(&(&value).into()).map(|p| start_views(&value.doc, level, &p)).unwrap_or_else(level_map_empty);
     pane_mut(&mut value).views = views.clone();
     let hosts = panel_hosts(&(&value).into());
-    follow_hosts(&mut value, on.as_ref(), &hosts);
+    follow_hosts(&mut value, Some(on.as_ref()), &hosts);
     follow_start(&mut value);
     Ok(value)
 }

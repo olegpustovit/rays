@@ -229,25 +229,24 @@ pub fn sync_scope(value: &mut EditorModel) {
             }
         }
     }
-    let Some(name) = graph_name(&(&*value).into()).map(str::to_owned) else { return };
+    let Some(name_ref) = graph_name(&(&*value).into()) else { return };
     let document = value.doc.clone();
     let workspace = &document.workspace;
     let (ws, lowered) = (&workspace.ws, &workspace.lowered);
     let previous: Option<Rc<ScopeKey>> = pane(&(&*value).into()).laid.clone();
+    // Resolve argument drift once; defer edit Vecs until past the warm early-return.
     let arguments: Option<Vec<editor_document::literal_edit::Change>> = previous.as_ref().and_then(|k| {
-        if k.graph != name || k.ws.layout.collapsed != ws.layout.collapsed {
+        if k.graph != name_ref || k.ws.layout.collapsed != ws.layout.collapsed {
             None
         } else {
             match workspace_doc::literal_changes(&k.ws, ws) {
                 Some(changes) => Some(changes),
-                None if p::same_graph(&k.ws.checked, &ws.checked, &name) => Some(vec![]),
+                None if p::same_graph(&k.ws.checked, &ws.checked, name_ref) => Some(vec![]),
                 None => None,
             }
         }
     });
-    let edits: Vec<(Path, ArgKey, S)> =
-        arguments.as_deref().unwrap_or(&[]).iter().map(|c| (c.path.clone(), ArgKey::Kw(c.field.clone()), c.expr.clone())).collect();
-    let same = |k: &ScopeKey| k.graph == name && layout_same(&k.ws.layout, &ws.layout) && arguments.is_some();
+    let same = |k: &ScopeKey| k.graph == name_ref && layout_same(&k.ws.layout, &ws.layout) && arguments.is_some();
     let moved = match &previous {
         Some(k) => !(same(k) && k.probe_map == value.probes),
         None => true,
@@ -295,6 +294,9 @@ pub fn sync_scope(value: &mut EditorModel) {
         }
         return;
     }
+    let edits: Vec<(Path, ArgKey, S)> =
+        arguments.as_deref().unwrap_or(&[]).iter().map(|c| (c.path.clone(), ArgKey::Kw(c.field.clone()), c.expr.clone())).collect();
+    let name = name_ref.to_owned();
     let executions = probe_run::reports(&lowered.profile);
     let stamp = match &previous {
         Some(k) if !fresh => k.stamp,

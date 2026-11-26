@@ -84,7 +84,7 @@ fn sample_ty() -> Ty {
 }
 
 pub fn effects(workspace: &workspace_doc::T, plan: &e::Plan) -> Option<Value> {
-    let graph = workspace_doc::editor_graph(workspace)?;
+    let graph = workspace_doc::editor_graph_ref(workspace)?;
     let instance = plan.instances.iter().find(|i| i.default && i.graph == graph.name)?;
     match &instance.result {
         Value::Struct(g) if g.name == "ui/workspace" => g.fields.get_str("effects").cloned(),

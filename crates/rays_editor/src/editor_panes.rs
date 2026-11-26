@@ -112,81 +112,102 @@ pub enum HostKind {
 /// A panel that holds a list, a text pane or an outline: its key, leaf path, panel and what it holds.
 pub type Host = (Key, layout::Path, Panel, HostKind);
 
-/// The open panels that hold a list, a text pane or an outline: a graph panel holds the one its
-/// view shows.
-pub fn panel_hosts<'a>(value: &ModelView<'a>) -> Vec<Host> {
-    let mut out = Vec::new();
-    for (path, panel) in shell_leaves(value, &value.workspace).iter() {
-        if !visible(&value.workspace, panel) || panel_state(value, path).collapsed {
-            continue;
+/// The open panels that hold a list, a text pane or an outline. A graph panel holds the one its
+/// current projection shows. Reuse the host list while its leaves, panel keys and kinds match.
+pub fn panel_hosts(value: &ModelView<'_>) -> Rc<Vec<Host>> {
+    thread_local! { static HOSTS: std::cell::RefCell<Rc<Vec<Host>>> = std::cell::RefCell::new(Rc::new(Vec::new())); }
+    let leaves = shell_leaves(value, value.workspace);
+    let graphs = graph_leaves(value);
+    let hosts = || leaves.iter().filter_map(|(path, panel)| {
+        if !visible(value.workspace, panel) || panel_state(value, path).collapsed {
+            return None;
         }
         let kind = match panel {
             Panel::List => HostKind::List,
             Panel::Lisp => HostKind::Text,
             Panel::Outline => HostKind::Outline,
             Panel::Graph => {
-                let graphs = graph_leaves(value);
                 let (key, _) = graphs.iter().find(|(_, p)| p == path).expect("graph leaf has a panel key");
-                let kind = match projection_in(value, &pane_at(value, (key, path))) {
+                match projection_in(value, &pane_at(value, (key, path))) {
                     ListView => HostKind::List,
                     TextView => HostKind::Text,
-                    GraphView => continue,
-                };
-                out.push((key.clone(), path.clone(), panel.clone(), kind));
-                continue;
+                    GraphView => return None,
+                }
             }
-            _ => continue,
+            _ => return None,
         };
-        out.push((panel_key(&value.doc, path), path.clone(), panel.clone(), kind));
-    }
-    out
+        Some((path, panel, kind))
+    });
+    HOSTS.with(|slot| {
+        let mut cached = slot.borrow_mut();
+        let mut current = hosts();
+        let same = cached.iter().all(|(key, path, panel, kind)| {
+            current.next().is_some_and(|(p, panel_now, kind_now)| {
+                (path, panel, *kind) == (p, panel_now, kind_now) && same_panel_key(&value.doc, p, key)
+            })
+        }) && current.next().is_none();
+        if !same {
+            *cached = Rc::new(hosts().map(|(path, panel, kind)| (panel_key(&value.doc, path), path.clone(), panel.clone(), kind)).collect());
+        }
+        cached.clone()
+    })
 }
 
 /// The graph state a leaf reads, with its resolved graph path, without copying the editor model.
-pub fn shown_pane<'a>(value: &ModelView<'a>, (key, path, panel): (&Key, &layout::Path, &Panel)) -> (Cow<'a, GraphPane>, Option<layout::Path>) {
-    let at = |key: &Key, path: &layout::Path| {
+pub fn shown_pane<'a>(value: &ModelView<'a>, (key, path, panel): (&Key, &'a layout::Path, &Panel)) -> (Cow<'a, GraphPane>, Option<Cow<'a, layout::Path>>) {
+    if *panel == Panel::Graph {
         let resolved = value.doc.shell.as_ref().and_then(|_| {
-            if value.key == Some(key) { graph_path(value) } else { Some(path.clone()) }
+            if value.key == Some(key) { graph_path_cow(value) } else { Some(Cow::Borrowed(path)) }
         });
-        (pane_at(value, (key, path)), resolved)
-    };
-    if *panel == Panel::Graph { at(key, path) } else {
-        match tied(value, path) {
-            Some((key, path)) => at(&key, &path),
-            None => (Cow::Borrowed(value.pane), value.doc.shell.as_ref().and_then(|_| graph_path(value))),
-        }
+        return (pane_at(value, (key, path)), resolved);
     }
+    if let Some(target) = tied_path(value, path) {
+        let graphs = graph_leaves(value);
+        if let Some((key, _)) = graphs.iter().find(|(_, path)| path == target) {
+            return shown_pane(value, (key, target, &Panel::Graph));
+        }
+        return shown_pane(value, (&panel_key(&value.doc, target), target, &Panel::Graph));
+    }
+    (Cow::Borrowed(value.pane), value.doc.shell.as_ref().and_then(|_| graph_path_cow(value)))
 }
 
 /// The synchronized graph pane a leaf follows, borrowed with its shared model.
 pub fn shown_as<'a>(value: &ModelView<'a>, (key, path, panel): (&Key, &layout::Path, &Panel)) -> ModelView<'a> {
-    if *panel == Panel::Graph { as_pane(value, (key, path)) } else {
-        match tied(value, path) {
-            Some((key, path)) => as_pane(value, (&key, &path)),
-            None => *value,
-        }
+    if *panel == Panel::Graph {
+        return as_pane(value, (key, path));
     }
+    if let Some(target) = tied_path(value, path) {
+        let graphs = graph_leaves(value);
+        if let Some((key, _)) = graphs.iter().find(|(_, path)| path == target) {
+            return as_pane(value, (key, target));
+        }
+        return as_pane(value, (&panel_key(&value.doc, target), target));
+    }
+    *value
 }
 
 /// `tree`, `text` and `outline` follow the focus like the graph pane does: each belongs to the
 /// focused panel of its kind, else to the one it was, else to the first one open; the panel left
 /// keeps its own in `locals`.
-pub fn follow_hosts(value: &mut EditorModel, focus_path: Option<&layout::Path>, hosts: &[Host]) {
-    let focused = focus_path.map(|p| panel_key(&value.doc, p));
+pub fn follow_hosts(value: &mut EditorModel, focus: Option<Option<&layout::Path>>, hosts: &[Host]) {
     for kind in [HostKind::List, HostKind::Text, HostKind::Outline] {
         let current = match kind {
-            HostKind::List => value.list_at.clone(),
-            HostKind::Text => value.text_at.clone(),
-            HostKind::Outline => value.outline_at.clone(),
+            HostKind::List => value.list_at.as_ref(),
+            HostKind::Text => value.text_at.as_ref(),
+            HostKind::Outline => value.outline_at.as_ref(),
         };
-        let keys: Vec<&Key> = hosts.iter().filter(|(_, _, _, k)| *k == kind).map(|(key, ..)| key).collect();
-        let target = match (&focused, &current) {
-            (Some(key), _) if keys.contains(&key) => Some(key.clone()),
-            (_, Some(key)) if keys.contains(&key) => current.clone(),
-            _ => keys.first().map(|k| (*k).clone()),
+        // Match by leaf path — no panel_key alloc on the warm pan/hover path.
+        let by_path = focus.unwrap_or(value.focus_path.as_ref()).and_then(|path| hosts.iter().find(|(_, p, _, k)| *k == kind && p == path).map(|(key, ..)| key));
+        let first = hosts.iter().find(|(_, _, _, k)| *k == kind).map(|(key, ..)| key);
+        let target = match (by_path, current) {
+            (Some(key), _) => Some(key),
+            (_, Some(key)) if hosts.iter().any(|(k, _, _, kd)| *kd == kind && k == key) => Some(key),
+            _ => first,
         };
         let Some(key) = target else { continue };
-        if current.as_ref() == Some(&key) { continue; }
+        if current == Some(key) { continue; }
+        let key = key.clone();
+        let current = current.cloned();
         if let Some(old) = &current {
             value.locals = put_local(old, &|l| match kind {
                     HostKind::List => Local { rows: value.tree.clone(), ..l },
@@ -790,7 +811,7 @@ pub fn draw_graph_header<'a>(
     ui: &mut Ui,
     value: &ModelView<'a>,
     g: &layout::Geometry,
-    graph_host: &Option<Leaf>,
+    graph_host: Option<&Leaf>,
     tab_at: &dyn Fn(&Leaf) -> [Option<f32>; 2],
     tools_from: &dyn Fn(&Leaf) -> f32,
 ) -> HeaderAsks {
@@ -798,7 +819,7 @@ pub fn draw_graph_header<'a>(
     // The graph header's tools and views, and the viewport's render tabs, are two cached views keyed by
     // what they show: input on a button rebuilds its view, which then reports the click.
     let (mut tool_action, mut view_pick) = (None, None);
-    if let Some(leaf) = graph_host.as_ref().filter(|_| has_panel(value, &Panel::Graph)) {
+    if let Some(leaf) = graph_host.filter(|_| has_panel(value, &Panel::Graph)) {
         let graph_view = projection_of(value) == GraphView;
         let tools_scope = scope_name(value).is_some();
         let has_selection = !pane_view(value).selected.is_empty();
@@ -884,7 +905,7 @@ pub fn draw_graph_pane<'a>(
     carry_lit: Vec<(Key, String)>,
     carry_hot: Option<(Key, bool)>,
     graph_root: &pxui::Handle,
-    graph_host: &Option<Leaf>,
+    graph_host: Option<&Leaf>,
     workspace: &Shell,
     menu: Option<node_menu::Menu>,
     open_menu: &dyn Fn(Option<&scope::Pane>, &ModelView<'a>, (i64, i64)) -> Option<node_menu::Menu>,
@@ -945,7 +966,7 @@ pub fn draw_timeline_pane(
     frame_: &frame::Frame,
     timeline_: &timeline::Timeline,
     max_frame: i64,
-    slots: &[(layout::Bounds, pxui::Handle, bool)],
+    slots: impl Iterator<Item = (layout::Bounds, pxui::Handle, bool)>,
     timeline_root: &Option<(Panel, pxui::Handle)>,
     strip_bounds: layout::Bounds,
 ) -> (Vec<TimelineIntent>, Vec<rays_shell::chrome::Intent>) {
@@ -955,8 +976,8 @@ pub fn draw_timeline_pane(
             continue;
         }
         let playing = timeline::mode(timeline_) == timeline::Mode::Playing;
-        chrome::within_pane(ui, boxed, frame_, *bounds, &mut |ui| {
-            intents.extend(timeline_bar::draw(ui, *bounds, *edge, playing, timeline::frame(timeline_), timeline::time(timeline_), max_frame));
+        chrome::within_pane(ui, &boxed, frame_, bounds, &mut |ui| {
+            intents.extend(timeline_bar::draw(ui, bounds, edge, playing, timeline::frame(timeline_), timeline::time(timeline_), max_frame));
         });
     }
     let mut strip_playback: Vec<TimelineIntent> = Vec::new();

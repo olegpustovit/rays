@@ -317,13 +317,14 @@ pub enum Change {
 /// Inspector callbacks return a sketch-owned result; the requesting loop downcasts it.
 pub type PanelResult = Rc<dyn Any>;
 
+/// A focused panel and the leaf that holds it.
+pub type FocusTarget = (Panel, Option<layout::Path>);
+
 #[derive(Clone)]
 pub struct FrameResult {
     pub workspace: Shell,
-    pub focus: Panel,
-    /// the focused leaf itself, for its panel keys
-    pub focus_path: Option<layout::Path>,
-    pub pane_keys: std::rc::Rc<Vec<(i64, (Panel, Option<layout::Path>))>>,
+    pub focus_change: Option<FocusTarget>,
+    pub pane_keys: Rc<Vec<(i64, FocusTarget)>>,
     pub scope_view: scope::Pane,
     pub scope_changes: Vec<scope::Change>,
     pub selection: selection::Selection,
@@ -365,6 +366,16 @@ pub struct FrameResult {
     pub view_pick: Option<Projection>,
     /// where a carried payload is hovered or released (`true`), from panes that are not the graph's
     pub drops: Vec<(carry_mod::Place, bool)>,
+}
+
+impl FrameResult {
+    pub fn focus<'a>(&'a self, model: &'a EditorModel) -> (&'a Panel, Option<&'a layout::Path>) {
+        self.focus_change.as_ref().map_or((&model.focus, model.focus_path.as_ref()), |(panel, path)| (panel, path.as_ref()))
+    }
+
+    pub fn set_focus_path(&mut self, model: &EditorModel, path: layout::Path) {
+        self.focus_change.get_or_insert_with(|| (model.focus.clone(), None)).1 = Some(path);
+    }
 }
 
 /// The tags `Pick::tint` highlights: those of the merge inputs made by the selected node at the

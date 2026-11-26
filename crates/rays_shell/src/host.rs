@@ -35,9 +35,19 @@ pub fn create(platform: input::Platform, font_size: Option<i64>, path: Option<&s
 
 /// The frame's input as the UI routed it to `owner` (a viewport's root key; `None`: the app's).
 pub fn input(ui: &mut Ui, owner: Option<i64>) -> Frame {
+    read_input(ui, owner, None)
+}
+
+/// Read the completed frame into the previous snapshot's buffers when available.
+pub fn read_input(ui: &mut Ui, owner: Option<i64>, previous: Option<Frame>) -> Frame {
     let routed = ui.routed_input(owner).expect("completed PXUI frame");
     let raw = routed.input();
-    let events = routed.events().enumerate().filter_map(|(index, event)| {
+    let (mut buttons, mut keys, mut events) = previous.map_or_else(
+        || (Vec::new(), Vec::new(), Vec::new()),
+        |frame| (frame.input.buttons, frame.input.keys, frame.input.events),
+    );
+    events.clear();
+    events.extend(routed.events().enumerate().filter_map(|(index, event)| {
         let touch = (event.kind == pxui::Event::TOUCH).then(|| routed.touch(index)).flatten().and_then(|touch| Some(input::Touch {
             device: touch.device, finger: touch.finger, point: (touch.x, touch.y),
             time: touch.time, pressure: touch.pressure, phase: input::TouchPhase::from_code(touch.phase)?,
@@ -46,13 +56,15 @@ pub fn input(ui: &mut Ui, owner: Option<i64>) -> Frame {
             kind: event.kind, code: event.code, x: event.x, y: event.y, value: event.value,
             text: Some(pxui::event_text(event)), touch: touch.as_ref(),
         })
-    }).collect();
+    }));
+    buttons.clear();
+    buttons.extend(routed.buttons().iter().filter_map(|b| input::MouseButton::from_code(*b)));
+    keys.clear();
+    keys.extend(routed.keys().iter().filter_map(|k| input::Key::from_code(*k)));
     Frame {
         input: input::Frame {
             t: raw.time, dt: raw.dt, frame: raw.frame, tick: raw.tick, size: (raw.logical_size[0], raw.logical_size[1]), pointer: (raw.pointer[0], raw.pointer[1]),
-            buttons: routed.buttons().iter().filter_map(|b| input::MouseButton::from_code(*b)).collect(),
-            keys: routed.keys().iter().filter_map(|k| input::Key::from_code(*k)).collect(),
-            events,
+            buttons, keys, events,
         },
         pixel_scale: (raw.pixel_scale[0], raw.pixel_scale[1]), fps: raw.fps, mouse_delta: (raw.mouse_delta[0], raw.mouse_delta[1]),
     }

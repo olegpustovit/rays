@@ -115,6 +115,11 @@ fn key_is(key: &[Symbol], (graph, tail): &(&str, KeyTail)) -> bool {
     }
 }
 
+/// Test a saved panel key against the current document and leaf without allocating.
+pub(crate) fn same_panel_key(doc: &Document, path: &[usize], key: &[Symbol]) -> bool {
+    key_is(key, &panel_key_ref(doc, path))
+}
+
 pub fn panel_state<'a>(value: &ModelView<'a>, path: &[usize]) -> panels::State {
     // ponytail: linear scan of the saved panel states (a handful); key the map by borrowed parts if it grows
     let saved = |key: &(&str, KeyTail)| value.doc.workspace.ws.layout.panels.iter().find(|(k, _)| key_is(k, key)).map(|(_, s)| *s);
@@ -347,12 +352,20 @@ pub fn graph_leaves(value: &ModelView<'_>) -> GraphLeaves {
 /// The leaf of the pane in use: where its panel was last seen when that is still its leaf (no
 /// walk: this is read many times a frame), else found again, else the first graph leaf.
 pub fn graph_path<'a>(value: &ModelView<'a>) -> Option<layout::Path> {
+    graph_path_cow(value).map(|p| p.into_owned())
+}
+
+/// Borrowed when the pane's remembered leaf still holds; else owned from the leaf walk.
+pub fn graph_path_cow<'a>(value: &ModelView<'a>) -> Option<std::borrow::Cow<'a, layout::Path>> {
     if let Some(path) = graph_path_known(value) {
-        return Some(path.clone());
+        return Some(std::borrow::Cow::Borrowed(path));
     }
     let leaves = graph_leaves(value);
-    value.key.and_then(|key| leaves.iter().find(|(k, _)| k == key).map(|(_, path)| path.clone()))
+    value
+        .key
+        .and_then(|key| leaves.iter().find(|(k, _)| k == key).map(|(_, path)| path.clone()))
         .or_else(|| leaves.first().map(|(_, path)| path.clone()))
+        .map(std::borrow::Cow::Owned)
 }
 
 /// `graph_path` when the pane's remembered leaf still holds it: borrowed, no walk.
@@ -436,7 +449,7 @@ pub fn tied(value: &ModelView<'_>, path: &[usize]) -> Option<(flow_check::worksp
     tied_path(value, path).map(|target| (panel_key(&value.doc, target), target.clone()))
 }
 
-fn tied_path<'a>(value: &ModelView<'a>, path: &[usize]) -> Option<&'a layout::Path> {
+pub(crate) fn tied_path<'a>(value: &ModelView<'a>, path: &[usize]) -> Option<&'a layout::Path> {
     if value.workspace.restored {
         return None;
     }
@@ -445,7 +458,7 @@ fn tied_path<'a>(value: &ModelView<'a>, path: &[usize]) -> Option<&'a layout::Pa
 
 /// The pane in use follows the focus: the focused graph leaf, else the one it was, else the first
 /// one open. The pane left keeps its canvas, selection, graph and route.
-pub fn follow_graph(value: &mut EditorModel, focus: &Panel, focus_path: Option<&[usize]>) {
+pub fn follow_graph(value: &mut EditorModel, focus: Option<(&Panel, Option<&[usize]>)>) {
     let all = graph_leaves(&(&*value).into());
     let current = panel_map::key_ref(&value.panes);
     let current_leaf = current.and_then(|key| all.iter().find(|(k, _)| k == key).map(|(_, path)| path));
@@ -453,6 +466,7 @@ pub fn follow_graph(value: &mut EditorModel, focus: &Panel, focus_path: Option<&
         panel_map::set_leaf(&mut value.panes, current_leaf.cloned());
     }
     let vw = ModelView::from(&*value);
+    let (focus, focus_path) = focus.unwrap_or((&value.focus, value.focus_path.as_deref()));
     let focused = focus_path.and_then(|path| {
         if *focus == Panel::Graph { Some(path) } else { tied_path(&vw, path).map(Vec::as_slice) }
     });
@@ -582,7 +596,8 @@ pub fn panel_renames(
 pub fn remap_panels(value: &mut EditorModel, result: &mut FrameResult, before: &Document, before_tree: &panels::Panels) {
     let after_tree = shell_tree(value, &value.workspace).into_owned();
     let renames = panel_renames(before, before_tree, &value.doc, &after_tree);
-    let focus = result.focus_path.as_ref().and_then(|path| match panels::at_ref(path, before_tree) {
+    let focus_path = result.focus_change.as_ref().map_or(value.focus_path.as_ref(), |(_, path)| path.as_ref());
+    let focus = focus_path.and_then(|path| match panels::at_ref(path, before_tree) {
         Some(panels::Panels::Leaf(panel)) => Some((panel, panel_key_ref(before, path))),
         _ => None,
     });
@@ -600,7 +615,7 @@ pub fn remap_panels(value: &mut EditorModel, result: &mut FrameResult, before: &
         }
     }
     if let Some(path) = focused {
-        result.focus_path = Some(path);
+        result.set_focus_path(value, path);
     }
     if renames.is_empty() {
         return;
@@ -629,8 +644,8 @@ pub fn remap_panels(value: &mut EditorModel, result: &mut FrameResult, before: &
         rename_opt(&mut value.list_at, &old_key, &new_key);
         rename_opt(&mut value.text_at, &old_key, &new_key);
         rename_opt(&mut value.outline_at, &old_key, &new_key);
-        if result.focus_path.as_ref() == Some(&old_path) {
-            result.focus_path = Some(new_path);
+        if result.focus(value).1 == Some(&old_path) {
+            result.set_focus_path(value, new_path);
         }
         let started = std::rc::Rc::make_mut(&mut value.started);
         rename_opt(&mut started.on, &old_key, &new_key);

@@ -72,7 +72,7 @@ fn creation_shell_list_status() {
     assert_eq!(graphs.len(), 1);
     assert_eq!(editor_shell::graph_path(&(&value).into()), Some(graphs[0].1.clone()));
     let mut followed = value.clone();
-    editor_shell::follow_graph(&mut followed, &Panel::Graph, Some(&graphs[0].1));
+    editor_shell::follow_graph(&mut followed, Some((&Panel::Graph, Some(&graphs[0].1))));
     assert_eq!(panel_map_key(&followed), Some(graphs[0].0.clone()));
 
     // the list: the scene level lists objects with the visible and render columns
@@ -102,6 +102,24 @@ fn creation_shell_list_status() {
     assert_eq!(editor_status::prompt_name(&value), "-");
     assert_eq!(editor_status::level_name(&(&value).into()), "scene");
     assert!(editor_status::probe_caption(&(&value).into()).is_none());
+    editor_host::close(&value);
+}
+
+#[test]
+fn graph_host_follows_projection_without_a_shell_edit() {
+    use crate::editor_panes::{HostKind, panel_hosts};
+
+    let mut value = model();
+    let kind = |value: &EditorModel| {
+        panel_hosts(&value.into()).iter().find(|(_, _, panel, _)| *panel == Panel::Graph).map(|(_, _, _, kind)| *kind)
+    };
+    assert_eq!(kind(&value), Some(HostKind::List));
+    let pane = pane_mut(&mut value);
+    pane.views = level_map_singleton(pane.at, TextView);
+    assert_eq!(kind(&value), Some(HostKind::Text));
+    let pane = pane_mut(&mut value);
+    pane.views = level_map_singleton(pane.at, GraphView);
+    assert_eq!(kind(&value), None);
     editor_host::close(&value);
 }
 
