@@ -360,8 +360,7 @@ mod tests {
     fn editor_span_lexer_matches_parser_kinds_and_offsets() {
         use std::mem::discriminant;
 
-        let source = "(^:meta ; comment\n \"a\\q\
- b\" ^ 7 :word 'π \u{1} \"unfinished)";
+        let source = "(^:meta ; comment\n \"a\\q\n b\" ^ 7 :word 'π \u{1} \"unfinished)";
         let mut spans = Vec::new();
         super::lex_spans_into(source, &mut spans);
         let parser = lex_full(source);

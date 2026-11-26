@@ -10,6 +10,7 @@ type Stack = Vec<(u8, usize)>;
 
 /// One scanned line. `back` is the distance from this line to the last code line before it (relative, so a record
 /// stays valid when lines are inserted above it); the closers this line popped go to the line `pop_back` above it.
+#[derive(Default)]
 struct Line {
     start: usize,
     stop: usize,
@@ -27,6 +28,9 @@ struct Cache {
     text: String,
     caret: i64,
     lines: Vec<Line>,
+    old_tail: Vec<Line>,
+    spare_lines: Vec<Line>,
+    scan_stack: Stack,
     end_stack: Stack,
     end_back: Option<usize>,
     code: Vec<bool>,
@@ -68,19 +72,28 @@ impl Cache {
         let (old_caret, old_n) = (self.caret, old.len());
         let safe = |c: i64, at: usize, len: usize| c <= at as i64 || c >= len as i64;
         let mut lines = std::mem::take(&mut self.lines);
-        let old_tail = lines.split_off(first.min(lines.len()));
-        let (mut stack, mut last, mut in_string, mut start) = match old_tail.first() {
-            Some(l) => (l.stack.clone(), l.back.map(|b| first - b), l.in_string, l.start),
-            None => (Vec::new(), None, false, 0),
+        let mut old_tail = std::mem::take(&mut self.old_tail);
+        old_tail.extend(lines.drain(first..));
+        let mut stack = std::mem::take(&mut self.scan_stack);
+        stack.clear();
+        let (mut last, mut in_string, mut start) = match old_tail.first() {
+            Some(line) => {
+                stack.extend_from_slice(&line.stack);
+                (line.back.map(|back| first - back), line.in_string, line.start)
+            }
+            None => (None, false, 0),
         };
-        let mut old_tail = old_tail;
         loop {
             let index = lines.len();
             let stop = new[start..].iter().position(|&b| b == b'\n').map_or(n, |i| start + i);
             let back = last.map(|l| index - l);
             let record = self.scan(new, caret, index, start, stop, &mut stack, &mut last, &mut in_string, back);
             lines.push(record);
-            if stop == n { break; }
+            if stop == n {
+                self.end_back = last.map(|l| lines.len() - l);
+                std::mem::swap(&mut self.end_stack, &mut stack);
+                break;
+            }
             start = stop + 1;
             // Meet the old records again: same bytes (inside the common suffix), same parser state, no caret nearby.
             if start + suffix >= n {
@@ -96,19 +109,25 @@ impl Cache {
                             lines.push(l);
                         }
                         // The old end state is still the end state.
-                        return self.finish(lines, text, caret);
+                        break;
                     }
                 }
             }
         }
-        self.end_back = last.map(|l| lines.len() - l);
-        self.end_stack = stack;
+        self.scan_stack = stack;
+        self.spare_lines.truncate(lines.len());
+        let room = lines.len() - self.spare_lines.len();
+        self.spare_lines.extend(old_tail.drain(..).take(room));
+        self.old_tail = old_tail;
         self.finish(lines, text, caret)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn scan(&mut self, bytes: &[u8], caret: i64, index: usize, start: usize, stop: usize, stack: &mut Stack, last: &mut Option<usize>, in_string: &mut bool, back: Option<usize>) -> Line {
-        let in_stack = stack.clone();
+        let Line { stack: mut in_stack, mut removed, mut pops, .. } = self.spare_lines.pop().unwrap_or_default();
+        in_stack.clone_from(stack);
+        removed.clear();
+        pops.clear();
         let opened_in_string = *in_string;
         let code = &mut self.code;
         code.clear();
@@ -139,7 +158,6 @@ impl Cache {
         let mut first = start;
         while first < ts && space(bytes[first]) { first += 1; }
         let is_code_line = first < ts && first < comment && !opened_in_string;
-        let mut pops = Vec::new();
         if is_code_line {
             let column = first - start;
             while stack.last().is_some_and(|(_, col)| *col >= column) {
@@ -147,7 +165,6 @@ impl Cache {
                 if last.is_some() { pops.push(closer); }
             }
         }
-        let mut removed = Vec::new();
         for offset in start..ts {
             if is_code(offset) {
                 match bytes[offset] {
@@ -196,10 +213,8 @@ impl Cache {
             trail_n += 1;
         }
         self.trails.truncate(trail_n);
-        if self.out.capacity() < n + 8 {
-            self.out.reserve(n + 8 - self.out.capacity());
-        }
         self.out.clear();
+        self.out.reserve(n + 8);
         let mut shift: i64 = 0;
         let mut cursor = 0;
         for (index, l) in lines.iter().enumerate() {
