@@ -18,9 +18,15 @@
                          ink (* 0.55 (phosphor l))]
                     [(* c.w (+ (* 0.94 ink) (* 0.52 (phosphor c.x))))
                      (* c.w (+ ink (* 0.52 (phosphor c.y))))
-                     (* c.w (+ (* 1.07 ink) (* 0.52 (phosphor c.z)))) 1.0])) rgba))]
-      (sop/material (sop/with_attr grid "Cd" cd :owner "point" :type vec4)
-        :material "Pixels" :color [0 0 0] :emission [gain gain gain] :roughness 0.4)))
+                     (* c.w (+ (* 1.07 ink) (* 0.52 (phosphor c.z)))) 1.0])) rgba))
+           pixels (sop/material (sop/with_attr grid "Cd" cd :owner "point" :type vec4)
+                    :material "Pixels" :color [0 0 0] :emission [gain gain gain] :roughness 0.4)
+           body (sop/box :size [(+ width 0.06) 0.036 (+ height 0.06)] :center [0 -0.021 0] :normals "Point")
+           backing (sop/material
+                     (sop/with_attr body "Cd" (array/vec4 (sop/count body :points) [1 1 1 1]) :owner "point" :type vec4)
+                     :material "Graphite glass" :color [0.043 0.055 0.066]
+                     :emission [0.006 0.009 0.014] :roughness 0.37)]
+      (sop/merge pixels backing)))
 
   (graph main :context sop
     [(path : text "pxui/tools/pxui_gallery/fixtures/gallery_kit_dusk_1x.png")
@@ -46,16 +52,16 @@
       :zenith [0.008 0.011 0.014] :horizon [0.002 0.003 0.005] :nadir [0.001 0.001 0.002]))
 
   (graph scene :context scene
-    (let* [left (scene/camera :name "left" :eye [-1.80 1.17 2.05] :target [-1.31 0.355 -0.48]
-                               :fov 0.52 :aperture 0.12 :up [0.38 1 0])
+    (let* [left (scene/camera :name "left" :eye [-1.73 1.17 2.05] :target [-1.26 0.356 -0.48]
+                               :fov 0.67 :aperture 0.13 :up [0.38 1 0])
            right (scene/camera :name "right" :eye [0.43 1.32 2.52] :target [-0.44 0.385 -0.32]
                                 :fov 0.50 :aperture 0.10 :up [-0.34 1 0])
-           overhead (scene/camera :name "overhead" :eye [1.20 4.50 2.70] :target [0.26 0.35 -0.82]
-                                   :fov 0.59 :aperture 0.26 :up [-0.30 1 0])
+           overhead (scene/camera :name "overhead" :eye [0.80 4.50 2.77] :target [-0.18 0.346 -0.82]
+                                   :fov 0.76 :aperture 0.29 :up [-0.30 1 0])
            macro (scene/camera :name "macro" :eye [-1.90 1.02 1.38] :target [-2.03 0.30 -1.00]
                                 :fov 0.38 :aperture 0.22 :up [0.23 1 0])
-           wide (scene/camera :name "wide" :eye [-4.10 3.50 7.10] :target [0 0.42 -1.20]
-                               :fov 0.67 :aperture 0.22 :up [0.14 1 0])
+           wide (scene/camera :name "wide" :eye [-2.70 4.30 8.40] :target [0.24 0.51 -1.36]
+                               :fov 0.81 :aperture 0.28 :up [0.10 1 0])
            primary (scene/geometry (ref main) :name "Inspector" :translate [0 0.42 0] :rotate [-0.085 0 0.018])
            back (scene/geometry (ref rear) :name "Control layer" :translate [-1.65 1.05 -2.55]
                                 :rotate [-0.14 -0.15 -0.025])
