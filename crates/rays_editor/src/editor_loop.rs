@@ -414,6 +414,9 @@ pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::Extra, vie
                 n += 1;
                 key.hash(&mut h);
                 leaf.body.hash(&mut h);
+                // The film keeps its image identity as samples complete. Updating the readout
+                // changes the scene so the window presents the new pixels.
+                V::trace(extra, look_key_of(viewing, key)).hash(&mut h);
             }
         }
         n.hash(&mut h);

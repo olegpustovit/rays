@@ -302,6 +302,92 @@ fn animated_sketches_follow_playback() {
     }
 }
 
+fn render_modes() {
+    use crate::support::shell::{self, Run};
+    use pxui::ui::{Key, key_of};
+    use rays_editor::{editor, editor_renderer::Mode};
+    use std::{cell::RefCell, time::Duration};
+
+    assert!(crate::common::gpu(), "native GPU required");
+    let mut run = Run::new(shell::editor(&text()));
+    let pointer = (0., 0.);
+    run.step(pointer, vec![input::Event::KeyPressed(input::Key::Space)]);
+    run.step(pointer, vec![]);
+    let (x, y, w, h) = run.panes().view;
+    assert!(w > 0 && h > 0, "IsoGrid viewport is absent");
+    let frame = shell::idle_frame(run.count);
+    let (width, height) = frame.input.size;
+    let output = canvas::create(width, height).unwrap();
+    let shown = RefCell::new((Vec::new(), Vec::new()));
+    let pixels = |run: &Run| {
+        let frame = shell::idle_frame(run.count);
+        let nodes = editor::scene(&run.e, &frame);
+        let mut shown = shown.borrow_mut();
+        // The live window keeps the previous pixels when the scene compares equal.
+        if !scene::same(&shown.0, &nodes) {
+            shown.1 = draw(&output, &nodes);
+            shown.0 = nodes.to_vec();
+        }
+        let picture = &shown.1;
+        (y + h / 4..y + 3 * h / 4)
+            .flat_map(|row| &picture[(row * width + x + w / 4) as usize..(row * width + x + 3 * w / 4) as usize])
+            .copied()
+            .collect::<Vec<_>>()
+    };
+    let switch = |run: &mut Run, index, mode| {
+        let at = {
+            let ui = run.e.core.ui.borrow();
+            let host_key = pxui::hash_of("workspace-view-tools");
+            let host = ui.box_of_key(host_key).expect("viewport tools host");
+            let mut buffer = [0; 17];
+            let toolbar = key_of(host.box_key, Key::from(host_key).label(&mut buffer));
+            let tab_key = Key::from(pxui::hash_of(&format!("workspace-render-{index}")));
+            let tab = ui.box_of_key(Key::Resolved(key_of(toolbar, tab_key.label(&mut buffer)))).expect("render mode tab");
+            let rect = ui.rect(&tab);
+            (f64::from(rect.x + rect.w / 2.), f64::from(rect.y + rect.h / 2.))
+        };
+        run.click(at);
+        assert_eq!(editor::renderer(&run.e), mode, "{:?}", run.e.core.edit_error);
+        assert_eq!(run.e.core.view_tools.map(|(_, active)| active), Some(index));
+        pixels(run)
+    };
+    assert_eq!(editor::renderer(&run.e), Mode::Raster);
+    let solid = pixels(&run);
+    let wire = switch(&mut run, 1, Mode::Wireframe);
+    assert!(wire != solid, "wire and solid viewport pixels match");
+    switch(&mut run, 2, Mode::PathTraced);
+    let key = run.e.viewing.clone().unwrap_or_else(|| "main".into());
+    let samples = |run: &Run| editor::slot_of(&run.e, &key)
+        .unwrap_or_else(|| panic!("traced viewport has no slot: {:?}", run.e.extra.renderer.error))
+        .samples;
+    let advance = |run: &mut Run, previous| {
+        for _ in 0..24 {
+            if samples(run) > previous {
+                break;
+            }
+            run.step(pointer, vec![]);
+            pixels(run);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        samples(run)
+    };
+    let first = advance(&mut run, 0);
+    assert!(first > 0, "tracing did not start");
+    let traced = pixels(&run);
+    assert!(traced != wire && traced != solid, "traced viewport did not replace the raster picture");
+    let next = advance(&mut run, first);
+    assert!(next > first, "tracing stopped accumulating");
+    // The viewport readout is painted on the next frame and must wake presentation.
+    run.step(pointer, vec![]);
+    assert!(pixels(&run) != traced, "accumulation did not update the presented viewport pixels");
+    assert!(run.e.core.traces.iter().any(|(k, trace)| k == &key && trace.samples >= next),
+        "the viewport readout did not follow completed samples");
+    assert!(switch(&mut run, 0, Mode::Raster) == solid, "solid viewport did not return to its original pixels");
+    assert!(editor::slot_of(&run.e, &key).is_none());
+    run.close();
+    canvas::destroy(&output).unwrap();
+}
+
 pub fn cases() -> Vec<(&'static str, fn())> {
-    vec![("native_isogrid_animated_sketches_follow_playback", animated_sketches_follow_playback), ("native_isogrid_timeline_changes_geometry", timeline_changes_geometry), ("native_isogrid_viewport_recipe_0",|| viewport(0)),("native_isogrid_viewport_recipe_1",|| viewport(1)),("native_isogrid_viewport_recipe_2",|| viewport(2)),("native_isogrid_viewport_recipe_3",|| viewport(3)),("native_isogrid_viewport_recipe_4",|| viewport(4)),("native_isogrid_viewport_recipe_5",|| viewport(5)),("native_isogrid_viewport_recipe_6",|| viewport(6)),("native_isogrid_viewport_recipe_7",|| viewport(7))]
+    vec![("native_isogrid_viewport_render_modes", render_modes), ("native_isogrid_animated_sketches_follow_playback", animated_sketches_follow_playback), ("native_isogrid_timeline_changes_geometry", timeline_changes_geometry), ("native_isogrid_viewport_recipe_0",|| viewport(0)),("native_isogrid_viewport_recipe_1",|| viewport(1)),("native_isogrid_viewport_recipe_2",|| viewport(2)),("native_isogrid_viewport_recipe_3",|| viewport(3)),("native_isogrid_viewport_recipe_4",|| viewport(4)),("native_isogrid_viewport_recipe_5",|| viewport(5)),("native_isogrid_viewport_recipe_6",|| viewport(6)),("native_isogrid_viewport_recipe_7",|| viewport(7))]
 }

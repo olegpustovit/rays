@@ -1016,8 +1016,9 @@ pub fn header_tools(extra_: &Extra) -> Option<(bool, i64)> {
 
 /// A traced viewport's film in pixels, samples, cap and bounces.
 pub fn trace(extra_: &Extra, key: &str) -> Option<((i64, i64), i64, i64, i64)> {
+    let info = renderer::info(&extra_.renderer, key)?;
     let settings = look(extra_, key).settings;
-    renderer::info(&extra_.renderer, key).map(|i| (i.size, i.samples, i.cap, settings.bounces))
+    Some((info.size, info.samples, info.cap, settings.bounces))
 }
 
 pub fn render_status(extra_: &Extra) -> Option<String> {
