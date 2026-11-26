@@ -9,10 +9,9 @@
 //! ponytail: the text is lexed once per frame per need (colours, pairs, indent, completions); the
 //! workspace texts are a few hundred lines.
 
-use std::any::Any;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicI64, Ordering}};
 
 use flow_check::lisp_scan::{self as scan, Kind, Token};
 use flow_check::{op, workspace};
@@ -23,64 +22,68 @@ use sop::edit_graph::InputRequirement;
 
 pub use flow_syntax::text_lexer::{number, separator};
 
-pub type Lexed = (Vec<Token>, Vec<(usize, usize)>, Vec<(char, usize)>);
+pub use scan::Lexed;
 
-static LEXED: OnceLock<lru::IdentityList> = OnceLock::new();
-
-fn lexed_cache() -> &'static lru::IdentityList {
-    LEXED.get_or_init(|| {
-        lru::IdentityList::new(
-            lru::cache("editor.lisp_text"),
-            4,
-            Arc::new(|key: &lru::Key, other: &(dyn Any + Send + Sync)| {
-                matches!((key.as_any().downcast_ref::<String>(), other.downcast_ref::<String>()), (Some(a), Some(b)) if a == b)
-            }),
-        )
-    })
+#[derive(Default)]
+struct LexEntry {
+    text: String,
+    tokens: Arc<Lexed>,
 }
 
-/// The lexing of the last four texts asked for, most recent first: a frame asks for the same text
-/// several times and the next frame asks again, so a text is lexed once per version. A hit moves to
-/// the front so the long text outlives the caret prefixes the completions lex. The result is shared,
-/// never mutated by readers.
+impl LexEntry {
+    fn bytes(&self) -> i64 {
+        let (tokens, pairs, open) = self.tokens.as_ref();
+        (self.text.capacity() + std::mem::size_of::<Lexed>()
+            + tokens.capacity() * std::mem::size_of::<Token>()
+            + pairs.capacity() * std::mem::size_of::<(usize, usize)>()
+            + open.capacity() * std::mem::size_of::<(char, usize)>()) as i64
+    }
+}
+
+static LEXED: Mutex<Vec<LexEntry>> = Mutex::new(Vec::new());
+static LEX_OWNER: OnceLock<mem::Owner> = OnceLock::new();
+static LEX_LAST_USE: AtomicI64 = AtomicI64::new(0);
+
+/// The four most recent texts share their lexing across callers. On a miss, reuse the
+/// oldest entry's buffers once its readers have let go.
 pub fn lex(text: &str) -> Arc<Lexed> {
-    // ponytail: four String shells beside the budgeted cache; warm miss reuses shells (no Box<str>).
-    thread_local!(static RECENT: std::cell::RefCell<Vec<(String, Arc<Lexed>)>> = const { std::cell::RefCell::new(Vec::new()) });
-    let hit = RECENT.with(|r| {
-        let mut r = r.borrow_mut();
-        let i = r.iter().position(|(t, _)| t.as_str() == text)?;
-        r[..=i].rotate_right(1);
-        Some(r[0].1.clone())
+    let owner = LEX_OWNER.get_or_init(|| {
+        let owner = mem::cache("editor.lisp_text");
+        let evict_owner = owner.clone();
+        let options = mem::EvictorOptions {
+            last_use: Some(Arc::new(|| LEX_LAST_USE.load(Ordering::Relaxed))),
+            ..Default::default()
+        };
+        mem::register_evictor(&owner, options, Arc::new(move || {
+            let mut entries = LEXED.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(entry) = entries.pop() else { return false };
+            mem::release(&evict_owner, entry.bytes());
+            true
+        }));
+        owner
     });
-    if let Some(found) = hit {
-        return found;
+    let mut entries = LEXED.lock().unwrap_or_else(|e| e.into_inner());
+    LEX_LAST_USE.store(mem::epoch(), Ordering::Relaxed);
+    if let Some(at) = entries.iter().position(|entry| entry.text == text) {
+        entries[..=at].rotate_right(1);
+        return entries[0].tokens.clone();
     }
-    let tokens = lex_cached(text);
-    RECENT.with(|r| {
-        let mut r = r.borrow_mut();
-        if r.len() >= 4 {
-            let mut slot = r.pop().expect("len >= 4");
-            slot.0.clear();
-            slot.0.push_str(text);
-            slot.1 = tokens.clone();
-            r.insert(0, slot);
-        } else {
-            r.insert(0, (text.to_owned(), tokens.clone()));
-        }
-    });
-    tokens
-}
-
-fn lex_cached(text: &str) -> Arc<Lexed> {
-    let key = text.to_string();
-    if let Some(found) = lexed_cache().find_by(&key) {
-        if let Ok(tokens) = found.downcast::<Lexed>() {
-            return tokens;
-        }
+    let mut entry = if entries.len() == 4 {
+        let entry = entries.pop().expect("full lex cache");
+        mem::release(owner, entry.bytes());
+        entry
+    } else {
+        LexEntry::default()
+    };
+    entry.text.clear();
+    entry.text.push_str(text);
+    if Arc::get_mut(&mut entry.tokens).is_none() {
+        entry.tokens = Arc::default();
     }
-    let tokens: Arc<Lexed> = scan::lex(text);
-    let bytes = text.len() + tokens.0.len() * std::mem::size_of::<Token>() + tokens.1.len() * 16 + tokens.2.len() * 16;
-    lexed_cache().add(lru::Key::from_value(Arc::new(key)), tokens.clone(), bytes as i64);
+    scan::lex_into(text, Arc::get_mut(&mut entry.tokens).expect("unique lex storage"));
+    let tokens = entry.tokens.clone();
+    mem::charge(owner, entry.bytes());
+    entries.insert(0, entry);
     tokens
 }
 
@@ -521,12 +524,8 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
     // the whole text, so the brackets around the caret are matched
     let whole = lex(text);
     let tokens = &whole.0;
-    let prefix_buf;
     let prefix: &str = match current {
-        Some(t) if t.kind == Kind::Str => {
-            prefix_buf = sub(text, t.start + 1, caret).to_string();
-            &prefix_buf
-        }
+        Some(t) if t.kind == Kind::Str => sub(text, t.start + 1, caret),
         Some(t) => word(text, t),
         None => "",
     };
@@ -543,21 +542,16 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
         Some(i) if i + 1 < tokens.len() && tokens[i + 1].kind == Kind::Head => Some(word(text, &tokens[i + 1])),
         _ => None,
     };
-    let prior: Vec<usize> = match enclosing {
-        Some(i) => scan::items(tokens, i).into_iter().filter(|j| tokens[*j].stop <= replace.0).collect(),
-        None => Vec::new(),
-    };
-    let present: Vec<&str> = prior.iter().filter(|j| tokens[**j].kind == Kind::Kw).map(|j| word(text, &tokens[*j])).collect();
-    let after_kw: Option<&str> = match prior.last() {
-        Some(j) if tokens[*j].kind == Kind::Kw => Some(word(text, &tokens[*j])),
-        _ => None,
-    };
-    let kind: Option<&Entry> = enclosing_head.and_then(|h| kind_of(vocab, &context, h));
-    let strip = |kw: &str| kw[1..].to_owned();
+    let prior = enclosing.into_iter().flat_map(|i| scan::items(tokens, i))
+        .filter(|j| tokens[*j].stop <= replace.0);
+    let (prior_count, last) = prior.clone().fold((0, None), |(count, _), item| (count + 1, Some(item)));
+    let present = prior.filter(|&i| tokens[i].kind == Kind::Kw).map(|i| word(text, &tokens[i]));
+    let after_kw = last.filter(|&i| tokens[i].kind == Kind::Kw).map(|i| word(text, &tokens[i]));
+    let kind: Option<&Entry> = enclosing_head.and_then(|h| kind_of(vocab, context, h));
     // the choices of the keyword before the caret
     let mut choices: Vec<Candidate> = Vec::new();
     if let (Some(kw), Some(k)) = (after_kw, kind) {
-        let kw = strip(kw);
+        let kw = &kw[1..];
         if let Some(f) = k.fields.iter().find(|f| f.name == kw) {
             if let param::KindView::Choice(options) = &f.kind {
                 choices = options.iter().map(|o| mk(0, 0, Some(format!("\"{o}\"")), o, "choice", &format!("{} = {o}", f.label))).collect();
@@ -568,9 +562,9 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
     if choices.is_empty() {
         if let Some(h) = enclosing_head {
             let argument: Option<flow_syntax::symbol::Symbol> = match after_kw {
-                Some(kw) => flow_syntax::symbol::find(&strip(kw)),
-                None if present.is_empty() && !prior.is_empty() => {
-                    workspace::op_signature(&vocab.ops, &ws_context(&context), h).and_then(|s| s.pos.get(prior.len() - 1).map(|(n, _)| *n))
+                Some(kw) => flow_syntax::symbol::find(&kw[1..]),
+                None if prior_count > 0 && present.clone().next().is_none() => {
+                    op::find_ref(&vocab.ops, h, &ws_context(context)).and_then(|o| o.signature.pos.get(prior_count - 1).map(|(n, _)| *n))
                 }
                 None => None,
             };
@@ -585,7 +579,7 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
     // a new name in a binder's vector is the writer's to choose
     let naming = match (innermost, enclosing) {
         (Some(('[', _)), Some(i)) => match scan::head_before(text, tokens, i) {
-            Some(h) if scan::BINDERS.contains(&h) => h == "fn" || prior.len() % 2 == 0,
+            Some(h) if scan::BINDERS.contains(&h) => h == "fn" || prior_count % 2 == 0,
             _ => false,
         },
         _ => false,
@@ -618,7 +612,7 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
         if let Some(k) = kind {
             for (name, ty, doc, primary) in keywords_of(k) {
                 let key = format!(":{name}");
-                if present.iter().any(|p| *p == key) {
+                if present.clone().any(|p| p == key) {
                     continue;
                 }
                 out.push(mk(if primary { 0 } else { 1 }, 0, None, &key, &ty, &doc));
@@ -635,7 +629,7 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
             }
         }
         if let Some(h) = enclosing_head {
-            if let Some(s) = workspace::op_signature(&vocab.ops, &ws_context(&context), h) {
+            if let Some(s) = workspace::op_signature(&vocab.ops, &ws_context(context), h) {
                 for (k, t) in &s.kw {
                     out.push(mk(0, 0, None, &format!(":{k}"), &ty_name(t), &op_doc(h, &s)));
                 }
@@ -657,7 +651,7 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
         Vec::new()
     } else if head_position {
         // Score every head name first; mk (and op/kind docs) only for the top 48.
-        let (_, defns, _) = scan::bound(text, tokens, caret);
+        let (_, defns, _) = scan::bound_where(text, tokens, caret, &|name| quality(prefix, name) != 0);
         let mut soft: Vec<Soft<'_>> = Vec::new();
         for d in defns {
             soft_push(&mut soft, prefix, 0, usage(text, tokens, d), d, SoftKind::Defn);
@@ -677,7 +671,7 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
         for (s, doc) in specials() {
             soft_push(&mut soft, prefix, 1, usage(text, tokens, s), s, SoftKind::Form { doc });
         }
-        for o in ops_borrowed(vocab, &context) {
+        for o in ops_borrowed(vocab, context) {
             soft_push(&mut soft, prefix, 2, usage(text, tokens, &o.name), &o.name, SoftKind::Op { op: o });
         }
         let ranked = soft_finish(soft);
@@ -688,8 +682,8 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
     } else if cur_kind == Some(Kind::Sym) {
         if after_kw == Some(":context") {
             contexts().iter().filter(|c| quality(prefix, c) != 0).map(|c| mk(0, 0, None, c, "context", &format!("{c} graph"))).collect()
-        } else if enclosing_head == Some("ref") && prior.len() <= 1 {
-            let (_, _, graphs) = scan::bound(text, tokens, caret);
+        } else if enclosing_head == Some("ref") && prior_count <= 1 {
+            let (_, _, graphs) = scan::bound_where(text, tokens, caret, &|name| quality(prefix, name) != 0);
             let mut all: Vec<&str> = graphs;
             for g in &names.graphs {
                 if !all.contains(&g.as_str()) { all.push(g.as_str()); }
@@ -707,11 +701,11 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
         } else if !choices.is_empty() {
             choices.clone()
         } else {
-            let (bindings, defns, _) = scan::bound(text, tokens, caret);
+            let (bindings, defns, _) = scan::bound_where(text, tokens, caret, &|name| quality(prefix, name) != 0);
             let mut seen: Vec<&str> = Vec::new();
             let mut out: Vec<Candidate> = Vec::new();
             for (name, _) in bindings.iter().rev() {
-                if seen.contains(name) || quality(prefix, name) == 0 { continue; }
+                if seen.contains(name) { continue; }
                 seen.push(*name);
                 out.push(mk(0, 0, None, name, "binding", ""));
             }
@@ -720,7 +714,6 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
                 out.push(mk(1, 0, None, c, "constant", doc));
             }
             for d in defns {
-                if quality(prefix, d) == 0 { continue; }
                 out.push(mk(2, 0, None, d, "defn", &format!("{d} \u{b7} a function value")));
             }
             let mut ranked = rank(prefix, out);
@@ -761,8 +754,8 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
     let enclosing_head = scan::head_before(text, tokens, i);
     let open_stack = lex(sub(text, 0, t.start)).2.clone();
     let context = scan::context_of(text, tokens, &open_stack);
-    let kind = |name: &str| kind_of(vocab, &context, name);
-    let signature = |name: &str| workspace::op_signature(&vocab.ops, &ws_context(&context), name);
+    let kind = |name: &str| kind_of(vocab, context, name);
+    let signature = |name: &str| workspace::op_signature(&vocab.ops, &ws_context(context), name);
     let bare = if w.len() > 1 { w[1..].to_string() } else { String::new() };
     let doc: Option<String> = match t.kind {
         Kind::Head => match (specials().iter().find(|(n, _)| *n == w), kind(&w), signature(&w)) {
@@ -872,24 +865,19 @@ pub fn context_at(text: &str, caret: usize) -> CodeContext {
 }
 
 /// The "#rrggbb" literals of the text with their colour.
-pub fn color_chips(text: &str) -> Vec<(usize, usize, pxui::Rgba)> {
-    thread_local!(static CHIPS: std::cell::RefCell<Vec<(usize, usize, pxui::Rgba)>> = const { std::cell::RefCell::new(Vec::new()) });
-    CHIPS.with(|cell| {
-        let mut out = cell.borrow_mut();
-        out.clear();
-        let lexed = lex(text);
-        let bytes = text.as_bytes();
-        for t in lexed.0.iter() {
-            if t.kind != Kind::Str || t.stop - t.start < 9 || bytes[t.stop - 1] != b'"' {
-                continue;
-            }
-            if let Ok(color) = pxui::Rgba::parse(sub(text, t.start + 1, t.stop - 1)) {
-                out.push((t.start, t.stop, color));
-            }
+pub fn color_chips(text: &str, out: &mut Vec<(usize, usize, pxui::Rgba)>) {
+    out.clear();
+    if !text.as_bytes().contains(&b'"') { return; }
+    let lexed = lex(text);
+    let bytes = text.as_bytes();
+    for t in &lexed.0 {
+        if t.kind != Kind::Str || t.stop - t.start < 9 || bytes[t.stop - 1] != b'"' {
+            continue;
         }
-        let cap = out.capacity();
-        std::mem::replace(&mut *out, Vec::with_capacity(cap))
-    })
+        if let Ok(color) = pxui::Rgba::parse(sub(text, t.start + 1, t.stop - 1)) {
+            out.push((t.start, t.stop, color));
+        }
+    }
 }
 
 /// Owns the language callbacks for a text pane. PXUI borrows them for each build.

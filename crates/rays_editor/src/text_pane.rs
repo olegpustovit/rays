@@ -1088,10 +1088,10 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, mut state: State, source: &[S], g
         (Tab::Selection, Some((path, _))) if !path.is_empty() => path[0].as_str(),
         _ => graph,
     };
-    let selected: Option<Path> = match (&state.tab, &state.binding_draft, &state.target) {
-        (Tab::Selection, Some((path, _)), _) => Some(path.clone()),
-        (Tab::Document, _, Some(path)) => Some(path.clone()),
-        _ => selected.cloned(),
+    let selected = match (&state.tab, &state.binding_draft, &state.target) {
+        (Tab::Selection, Some((path, _)), _) => Some(path),
+        (Tab::Document, _, Some(path)) => Some(path),
+        _ => selected,
     };
     let same = |a: &Option<Arc<WorkspaceDoc>>, b: Option<&WorkspaceDoc>| match (a, b) {
         (None, None) => true,
@@ -1100,7 +1100,7 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, mut state: State, source: &[S], g
     };
     let cache_hit = state.cache.as_ref().and_then(|cache| {
         let (key, shown) = &**cache;
-        (*key.source == *source && same(&key.workspace, workspace) && key.graph == graph && key.selected == selected && key.tab == state.tab)
+        (*key.source == *source && same(&key.workspace, workspace) && key.graph == graph && key.selected.as_ref() == selected && key.tab == state.tab)
             .then(|| shown.clone())
     });
     if let Some(shown) = cache_hit {
@@ -1112,12 +1112,12 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, mut state: State, source: &[S], g
         let (key, shown) = &**cache;
         if *key.source == *source && same(&key.workspace, workspace) && key.graph == graph && key.tab == state.tab {
             let mut moved = shown.clone();
-            moved.key = match &selected {
+            moved.key = match selected {
                 Some(path) => path.clone(),
                 None => vec![graph.into()],
             };
-            moved.mark = selected.as_ref().and_then(|p| path_mark(source, &moved.spans, p));
-            let key = CacheKey { selected: selected.clone(), ..key.clone() };
+            moved.mark = selected.and_then(|p| path_mark(source, &moved.spans, p));
+            let key = CacheKey { selected: selected.cloned(), ..key.clone() };
             Some((key, moved))
         } else {
             None
@@ -1131,7 +1131,7 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, mut state: State, source: &[S], g
         (Some(cache), Some(workspace)) => {
             let (key, shown) = &**cache;
             match &key.workspace {
-                Some(previous) if state.scrubbing && key.graph == graph && key.selected == selected && key.tab == state.tab => {
+                Some(previous) if state.scrubbing && key.graph == graph && key.selected.as_ref() == selected && key.tab == state.tab => {
                     patched_shown(previous, workspace, shown)?
                 }
                 _ => None,
@@ -1147,13 +1147,13 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, mut state: State, source: &[S], g
     };
     let shown = match patched {
         Some(shown) => shown,
-        None => make_shown_with(workspace, source, graph, selected.as_ref(), state.tab, printed)?,
+        None => make_shown_with(workspace, source, graph, selected, state.tab, printed)?,
     };
     let key = CacheKey {
         source: shown.source.clone(),
         workspace: workspace.map(|w| Arc::new(w.clone())),
         graph: graph.to_owned(),
-        selected,
+        selected: selected.cloned(),
         tab: state.tab,
     };
     state.cache = Some(Arc::new((key, shown.clone())));
@@ -1890,7 +1890,7 @@ fn dirty(state: &State, shown: &Shown) -> Result<bool, Diagnostic> {
 
 // ---- drawing ----
 
-type Emit = Rc<RefCell<Vec<Intent>>>;
+type Emit = RefCell<Vec<Intent>>;
 
 fn push(emit: &Emit, intent: Intent) {
     emit.borrow_mut().push(intent);
@@ -2204,7 +2204,7 @@ fn editor_area(
     spans: Vec<(i64, i64)>,
     reveal: Option<i64>,
     apply: &dyn Fn(String) -> Intent,
-    discard: Intent,
+    discard: &dyn Fn() -> Intent,
     can_apply: bool,
     message: &str,
     draft: &dyn Fn(String) -> Intent,
@@ -2212,8 +2212,9 @@ fn editor_area(
 ) {
     let (ey, eh) = at;
     let theme = c.theme;
-    // Skip color-chip scan when the text has no quoted colour literals (warm typing).
-    let chips = if text.as_bytes().contains(&b'"') { lisp_text::color_chips(text) } else { Vec::new() };
+    thread_local!(static CHIPS: RefCell<Vec<(usize, usize, pxui::Rgba)>> = const { RefCell::new(Vec::new()) });
+    let mut chips = CHIPS.take();
+    lisp_text::color_chips(text, &mut chips);
     // the find bar sits between the text and the footer: one row, two with the replace row
     let find_h = match &state.find {
         Some(f) => if f.replacing { 2.0 * c.find_row } else { c.find_row },
@@ -2226,29 +2227,19 @@ fn editor_area(
     };
     let current = state.find.as_ref().and_then(|f| find_current(f, &matches));
     // every match is a band, the current one also a bar under it; the view goes to the current one
-    // ponytail: TLS scratch for i64→usize span/chip converts so warm dirty typing does not grow.
-    thread_local!(static AREA_SCRATCH: std::cell::RefCell<(Vec<(usize, usize)>, Vec<(usize, usize, pxui::Rgba)>, Vec<usize>)> =
-        const { std::cell::RefCell::new((Vec::new(), Vec::new(), Vec::new())) });
-    let (spans_ui, chips_ui, error_lines) = AREA_SCRATCH.with(|cell| {
-        let mut cell = cell.borrow_mut();
-        let (sp, ch, er) = &mut *cell;
-        sp.clear();
-        ch.clear();
-        er.clear();
-        sp.extend(spans.iter().map(|&(a, b)| (a as usize, b as usize)));
-        sp.extend(matches.iter().take(2000).map(|&(a, b)| (a as usize, b as usize)));
-        ch.extend_from_slice(&chips);
-        if let Some((a, b)) = current {
-            ch.push((a as usize, b as usize, theme.accent));
-        }
-        er.extend(errors.iter().filter_map(|d| line_of(text, d)).map(|line| line as usize));
-        let (cap_s, cap_c, cap_e) = (sp.capacity(), ch.capacity(), er.capacity());
-        (
-            std::mem::replace(sp, Vec::with_capacity(cap_s)),
-            std::mem::replace(ch, Vec::with_capacity(cap_c)),
-            std::mem::replace(er, Vec::with_capacity(cap_e)),
-        )
-    });
+    thread_local!(static AREA_SCRATCH: RefCell<(Vec<(usize, usize)>, Vec<(usize, usize, pxui::Rgba)>, Vec<usize>)> =
+        const { RefCell::new((Vec::new(), Vec::new(), Vec::new())) });
+    let (mut spans_ui, mut chips_ui, mut error_lines) = AREA_SCRATCH.take();
+    spans_ui.clear();
+    spans_ui.extend(spans.iter().map(|&(a, b)| (a as usize, b as usize)));
+    spans_ui.extend(matches.iter().take(2000).map(|&(a, b)| (a as usize, b as usize)));
+    chips_ui.clear();
+    chips_ui.extend_from_slice(&chips);
+    if let Some((a, b)) = current {
+        chips_ui.push((a as usize, b as usize, theme.accent));
+    }
+    error_lines.clear();
+    error_lines.extend(errors.iter().filter_map(|d| line_of(text, d)).map(|line| line as usize));
     let reveal = match current {
         Some((a, _)) => Some(a),
         None => reveal,
@@ -2302,6 +2293,7 @@ fn editor_area(
             std::borrow::Cow::Owned(changed.to_owned())
         }
     });
+    AREA_SCRATCH.set((spans_ui, chips_ui, error_lines));
     // Command-click and F12 follow a (ref name) or a definition
     let follow = |text2: &str, byte: i64| {
         let target = match lisp_text::ref_at(text2, byte.max(0) as usize) {
@@ -2475,11 +2467,6 @@ fn editor_area(
     find_bar(ui, emit, state, &theme, c.find_row, key, c.width, c.x, current, &matches, ay);
     // Command-Enter in the area is the button: the one outlined button of the panel
     let hint = "\u{2318}\u{21b5}";
-    // the caret's line and column, 1-based, in the status row's label
-    let position = caret.get().map(|byte| {
-        let (line, col) = char_position(&text2, byte);
-        format!("{line}:{col}")
-    });
     // Stable widget keys without format! (warm draft frames).
     let (apply_key, discard_key, parinfer_key) = match key {
         "text-document" => ("text-document-apply", "text-document-discard", "text-document-parinfer"),
@@ -2497,7 +2484,7 @@ fn editor_area(
     let discard_opts = ButtonOpts { enabled: can_apply, hint: discard_hint.map(Into::into), ..ButtonOpts::default() };
     let discard_w = kit::button_width(ui, discard_hint, false, "Discard");
     if kit::button(ui, discard_key, (c.x + 12.0 + apply_w + 8.0, by), discard_w, &discard_opts, "Discard") {
-        push(emit, discard.clone());
+        push(emit, discard());
     }
     // parinfer and its switch, at the bar's end
     let switch_x = c.x + c.width - 12.0 - 28.0;
@@ -2531,22 +2518,30 @@ fn editor_area(
         let message_owned = if message_static.is_some() || message.is_empty() { String::new() } else { message.to_owned() };
         let accent = theme.accent;
         let ink2 = theme.foreground.blend(theme.ink_ground.get().unwrap_or(theme.panel), 0.32);
-        // ponytail: caret/modified label reuses one String capacity across frames.
-        thread_local!(static STATE_LABEL: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) });
-        let (state_label, cap_w) = STATE_LABEL.with(|cell| {
-            let mut label = cell.borrow_mut();
-            label.clear();
-            match (position.as_deref(), can_apply) {
-                (Some(p), true) => { label.push_str(p); label.push_str(" \u{b7} modified"); }
-                (Some(p), false) => label.push_str(p),
-                (None, true) => label.push_str("modified"),
-                (None, false) => {}
+        // Two 64-bit offsets, a colon and the optional suffix fit in this buffer.
+        let mut state_label = [0; 64];
+        let mut remaining = state_label.as_mut_slice();
+        if let Some(byte) = caret.get() {
+            use std::io::Write as _;
+            let (line, col) = char_position(&text2, byte);
+            write!(remaining, "{line}:{col}").expect("caret label fits");
+            if can_apply {
+                remaining.write_all(" · modified".as_bytes()).expect("caret label fits");
             }
-            let w = if label.is_empty() { 0.0 } else { kit::cap_width(ui, &label) };
-            let cap = label.capacity();
-            (std::mem::replace(&mut *label, String::with_capacity(cap)), w)
-        });
+        } else if can_apply {
+            use std::io::Write as _;
+            remaining.write_all(b"modified").expect("caret label fits");
+        }
+        let label_len = 64 - remaining.len();
+        let label = std::str::from_utf8(&state_label[..label_len]).expect("caret label is UTF-8");
+        let label_style = pxui::Label::BODY.size(kit::cap_size(ui) as f32).caps(true).tracking(0.08);
+        let mut glyph = [0; 4];
+        let cap_w: f32 = label.chars().map(|ch| {
+            let ch = if ch.is_ascii_digit() { '0' } else { ch };
+            ui.text_service().width(ch.encode_utf8(&mut glyph), label_style, None).unwrap_or(0.0)
+        }).sum();
         ui.canvas(&msg, move |paint, Rect { x, y, w, h }| {
+            let state_label = std::str::from_utf8(&state_label[..label_len]).expect("caret label is UTF-8");
             let message = message_static.unwrap_or(message_owned.as_str());
             // the state: a dot in the error colour or the accent for a draft, then what it says; the
             // first error is "n errors" in the error colour and its line and message in ink-2
@@ -2581,7 +2576,7 @@ fn editor_area(
                 }
             }
             if !state_label.is_empty() {
-                { paint.text_chars(pxui::Point::new(x + w - 12.0 - cap_w, kit::cap_y_paint(paint, y, h)), pxui::Label::BODY.size((paint.tokens().font_size - 2.0).max(8.0)).caps(true).tracking(0.08), &state_label); };
+                { paint.text_chars(pxui::Point::new(x + w - 12.0 - cap_w, kit::cap_y_paint(paint, y, h)), label_style, state_label); };
             }
         });
     }
@@ -2634,13 +2629,14 @@ fn editor_area(
                     6 => push(emit, Intent::Command(Command::Definition)),
                     7 => push(emit, Intent::Command(Command::References)),
                     9 => push(emit, apply(text2.to_string())),
-                    10 => push(emit, discard.clone()),
+                    10 => push(emit, discard()),
                     12 => push(emit, Intent::ToggleWrap),
                     _ => push(emit, Intent::ToggleParinfer),
                 }
             }
         }
     }
+    CHIPS.set(chips);
 }
 
 /// Text as the pane keeps it: line ends are `\n`, a tab is two spaces (B45). One place for the menu's
@@ -2668,7 +2664,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
     let row = ui.row_height() as f32;
     let (x, y, width, height) = (x as f32, y as f32, width as f32, height as f32);
     let theme = ui.tokens();
-    let emit: Emit = Rc::new(RefCell::new(Vec::new()));
+    let emit = Emit::default();
     // the printed document is made here, once a frame, never inside a token scrub
     let _ = shown.applied.text()?;
     let dirty = dirty(state, shown)?;
@@ -2719,7 +2715,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 if dirty { Vec::new() } else { shown.mark.into_iter().collect() },
                 if dirty { None } else { shown.mark.map(|m| m.0) },
                 &|t| Intent::DocApply(t),
-                Intent::DocDiscard,
+                &|| Intent::DocDiscard,
                 dirty,
                 message,
                 &|t| Intent::DocDraft(t),
@@ -2739,8 +2735,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 clean = format!("Edit {} as text; Check and apply checks the whole workspace.", shown.graph);
                 clean.as_str()
             });
-            let graph = shown.graph.clone();
-            let (g1, g2, g3) = (graph.clone(), graph.clone(), graph.clone());
+            let graph = &shown.graph;
             editor_area(
                 ui,
                 &emit,
@@ -2753,12 +2748,12 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 &errors,
                 spans,
                 if dirty { None } else { shown.mark.map(|m| m.0) },
-                &move |t| Intent::GraphApply(g1.clone(), t),
-                Intent::GraphDiscard(graph),
+                &|t| Intent::GraphApply(graph.clone(), t),
+                &|| Intent::GraphDiscard(graph.clone()),
                 dirty,
                 message,
-                &move |t| Intent::GraphDraft(g2.clone(), t),
-                &move |t, done| Intent::GraphScrub(g3.clone(), t, done),
+                &|t| Intent::GraphDraft(graph.clone(), t),
+                &|t, done| Intent::GraphScrub(graph.clone(), t, done),
             );
         }
         Tab::Selection => {
@@ -2768,7 +2763,6 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
             let errors = errors_of(state, &state.binding_errors, text);
             let owned = message_buf(&errors);
             let message = owned.as_deref().unwrap_or(if dirty { DIRTY_MSG } else { SEL_CLEAN });
-            let (k1, k2, k3) = (shown.key.clone(), shown.key.clone(), shown.key.clone());
             editor_area(
                 ui,
                 &emit,
@@ -2781,16 +2775,16 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 &errors,
                 spans,
                 shown.mark.map(|m| m.0),
-                &move |t| Intent::BindingApply(k1.clone(), t),
-                Intent::BindingDiscard,
+                &|t| Intent::BindingApply(shown.key.clone(), t),
+                &|| Intent::BindingDiscard,
                 dirty,
                 message,
-                &move |t| Intent::BindingDraft(k2.clone(), t),
-                &move |t, done| Intent::BindingScrub(k3.clone(), t, done),
+                &|t| Intent::BindingDraft(shown.key.clone(), t),
+                &|t, done| Intent::BindingScrub(shown.key.clone(), t, done),
             );
         }
     }
-    Ok(std::mem::take(&mut *emit.borrow_mut()))
+    Ok(emit.into_inner())
 }
 
 /// Everything `view_checked` reads, hashed (no allocation): equal revisions draw the same pane. `None` when

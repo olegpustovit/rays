@@ -32,28 +32,28 @@ fn closer_of(open: char) -> char {
     }
 }
 
-type Lexed = (Vec<Token>, Vec<(usize, usize)>, Vec<(char, usize)>);
-thread_local!(static LEXED: std::cell::RefCell<(String, Option<Arc<Lexed>>)> =
-    const { std::cell::RefCell::new((String::new(), None)) });
-// Working buffers survive Arc hand-off (capacity shells) so a warm miss does not grow new Vecs.
-thread_local!(static WORK: std::cell::RefCell<(Vec<Token>, Vec<(usize, usize)>, Vec<(char, usize)>)> =
-    const { std::cell::RefCell::new((Vec::new(), Vec::new(), Vec::new())) });
+pub type Lexed = (Vec<Token>, Vec<(usize, usize)>, Vec<(char, usize)>);
 
 pub fn lex(text: &str) -> Arc<Lexed> {
-    if let Some(hit) = LEXED.with(|c| {
-        let c = c.borrow();
-        (c.0.as_str() == text).then(|| c.1.clone()).flatten()
-    }) {
-        return hit;
+    let mut out = Lexed::default();
+    lex_into(text, &mut out);
+    Arc::new(out)
+}
+
+/// Classify the editor's tokens and match brackets into reusable storage.
+pub fn lex_into(text: &str, (tokens, pairs, open_stack): &mut Lexed) {
+    tokens.clear();
+    pairs.clear();
+    open_stack.clear();
+    thread_local! {
+        static RAW: std::cell::RefCell<Vec<text_lexer::Token>> = const { std::cell::RefCell::new(Vec::new()) };
+        static STACK: std::cell::RefCell<Vec<(char, usize, usize)>> = const { std::cell::RefCell::new(Vec::new()) };
     }
-    let raw = text_lexer::lex(text);
-    let out = WORK.with(|w| {
-        let mut w = w.borrow_mut();
-        w.0.clear();
-        w.1.clear();
-        w.2.clear();
-        let (tokens, pairs, open_stack) = &mut *w;
-        let mut stack: Vec<(char, usize, usize)> = Vec::new();
+    RAW.with(|raw| STACK.with(|stack| {
+        let mut raw = raw.borrow_mut();
+        text_lexer::lex_spans_into(text, &mut raw);
+        let mut stack = stack.borrow_mut();
+        stack.clear();
         let mut head_next = false;
         let mut index = 0;
         while index < raw.len() {
@@ -130,28 +130,11 @@ pub fn lex(text: &str) -> Arc<Lexed> {
             }
             index += 1;
         }
-        for &(_, _, index) in &stack {
+        for &(_, _, index) in stack.iter() {
             tokens[index].kind = Kind::Unmatched;
         }
         open_stack.extend(stack.iter().rev().map(|&(open, at, _)| (open, at)));
-        let tokens = std::mem::take(tokens);
-        let pairs = std::mem::take(pairs);
-        let open_stack = std::mem::take(open_stack);
-        // Keep capacity shells for the next miss; readers own the filled Vecs via Arc.
-        let (cap_t, cap_p, cap_o) = (tokens.capacity(), pairs.capacity(), open_stack.capacity());
-        let out = Arc::new((tokens, pairs, open_stack));
-        w.0 = Vec::with_capacity(cap_t);
-        w.1 = Vec::with_capacity(cap_p);
-        w.2 = Vec::with_capacity(cap_o);
-        out
-    });
-    LEXED.with(|c| {
-        let mut c = c.borrow_mut();
-        c.0.clear();
-        c.0.push_str(text);
-        c.1 = Some(out.clone());
-    });
-    out
+    }));
 }
 
 const BODY_FORM_CANDIDATES: &[&str] = &[
@@ -248,28 +231,17 @@ pub fn index_at(tokens: &[Token], at: usize) -> Option<usize> {
     tokens.iter().position(|token| token.start == at)
 }
 
-pub fn items(tokens: &[Token], i: usize) -> Vec<usize> {
-    let mut items = Vec::new();
-    let mut depth = 0;
-    for (j, token) in tokens.iter().enumerate().skip(i.saturating_add(1)) {
+pub fn items(tokens: &[Token], i: usize) -> impl Iterator<Item = usize> + Clone + '_ {
+    tokens.iter().enumerate().skip(i.saturating_add(1)).scan(0, |depth, (index, token)| {
+        let top = *depth == 0;
         match token.kind {
-            Kind::Open(_) => {
-                if depth == 0 {
-                    items.push(j);
-                }
-                depth += 1;
-            }
-            Kind::Close(_) => {
-                if depth == 0 {
-                    break;
-                }
-                depth -= 1;
-            }
-            _ if depth == 0 => items.push(j),
+            Kind::Open(_) => *depth += 1,
+            Kind::Close(_) if top => return None,
+            Kind::Close(_) => *depth -= 1,
             _ => {}
         }
-    }
-    items
+        Some(top.then_some(index))
+    }).flatten()
 }
 
 pub fn item_stop(tokens: &[Token], j: usize) -> usize {
@@ -331,6 +303,15 @@ pub fn bound<'a>(
     tokens: &[Token],
     limit: usize,
 ) -> (Vec<(&'a str, BoundDoc<'a>)>, Vec<&'a str>, Vec<&'a str>) {
+    bound_where(text, tokens, limit, &|_| true)
+}
+
+pub fn bound_where<'a>(
+    text: &'a str,
+    tokens: &[Token],
+    limit: usize,
+    accept: &dyn Fn(&str) -> bool,
+) -> (Vec<(&'a str, BoundDoc<'a>)>, Vec<&'a str>, Vec<&'a str>) {
     let mut names = Vec::new();
     let mut defns = Vec::new();
     let mut graphs = Vec::new();
@@ -341,28 +322,31 @@ pub fn bound<'a>(
         match tokens[i].kind {
             Kind::Head if i + 1 < tokens.len() && tokens[i + 1].kind == Kind::Sym => {
                 let head = word(text, &tokens[i]);
-                if head == "defn" || head == "defmacro" {
-                    defns.push(word(text, &tokens[i + 1]));
-                } else if head == "graph" {
-                    graphs.push(word(text, &tokens[i + 1]));
+                let name = word(text, &tokens[i + 1]);
+                match head {
+                    "defn" | "defmacro" if accept(name) => defns.push(name),
+                    "graph" if accept(name) => graphs.push(name),
+                    _ => {}
                 }
             }
             Kind::Open(_) | Kind::Unmatched if text.as_bytes().get(tokens[i].start) == Some(&b'[') => {
                 match head_before(text, tokens, i) {
                     Some(head) if BINDERS.contains(&head) => {
-                        let items = items(tokens, i);
+                        let mut items = items(tokens, i).enumerate().peekable();
                         let all = head == "fn";
-                        for (position, &j) in items.iter().enumerate() {
+                        while let Some((position, j)) = items.next() {
                             if tokens[j].kind == Kind::Sym
                                 && tokens[j].start < limit
                                 && (all || position % 2 == 0)
                             {
-                                let doc = if all || position + 1 >= items.len() {
-                                    BoundDoc::Param { head }
-                                } else {
-                                    BoundDoc::Binding { head, value_at: items[position + 1] }
-                                };
-                                names.push((word(text, &tokens[j]), doc));
+                                let name = word(text, &tokens[j]);
+                                if accept(name) {
+                                    let doc = match items.peek() {
+                                        Some(&(_, value_at)) if !all => BoundDoc::Binding { head, value_at },
+                                        _ => BoundDoc::Param { head },
+                                    };
+                                    names.push((name, doc));
+                                }
                             }
                         }
                     }
@@ -371,7 +355,10 @@ pub fn bound<'a>(
                             if matches!(tokens[j].kind, Kind::Open(_) | Kind::Unmatched)
                                 && tokens.get(j + 1).is_some_and(|next| next.kind == Kind::Head)
                             {
-                                names.push((word(text, &tokens[j + 1]), BoundDoc::Input { form_at: j }));
+                                let name = word(text, &tokens[j + 1]);
+                                if accept(name) {
+                                    names.push((name, BoundDoc::Input { form_at: j }));
+                                }
                             }
                         }
                     }
@@ -385,9 +372,9 @@ pub fn bound<'a>(
 }
 
 pub fn kw_value<'a>(text: &'a str, tokens: &[Token], i: usize, kw: &str) -> Option<&'a str> {
-    let items = items(tokens, i);
-    for pair in items.windows(2) {
-        let (key, value) = (pair[0], pair[1]);
+    let mut items = items(tokens, i).peekable();
+    while let Some(key) = items.next() {
+        let Some(&value) = items.peek() else { break };
         if tokens[key].kind == Kind::Kw && word(text, &tokens[key]) == kw {
             return (tokens[value].kind == Kind::Sym).then(|| word(text, &tokens[value]));
         }
@@ -395,13 +382,13 @@ pub fn kw_value<'a>(text: &'a str, tokens: &[Token], i: usize, kw: &str) -> Opti
     None
 }
 
-pub fn context_of(text: &str, tokens: &[Token], open_stack: &[(char, usize)]) -> String {
+pub fn context_of<'a>(text: &'a str, tokens: &[Token], open_stack: &[(char, usize)]) -> &'a str {
     for &(_, at) in open_stack.iter().rev() {
         let Some(i) = index_at(tokens, at) else { continue };
         if i + 1 < tokens.len() && tokens[i + 1].kind == Kind::Head {
             let head = word(text, &tokens[i + 1]);
             if head == "graph" || head == "defn" {
-                if let Some(context) = kw_value(text, tokens, i, ":context") { return context.to_owned(); }
+                if let Some(context) = kw_value(text, tokens, i, ":context") { return context; }
                 let depth = match tokens[i].kind { Kind::Open(depth) => depth, _ => 0 };
                 for token in tokens.iter().skip(i + 2).take_while(|token| token.kind != Kind::Close(depth)) {
                     if token.kind != Kind::Head { continue; }
@@ -409,18 +396,20 @@ pub fn context_of(text: &str, tokens: &[Token], open_stack: &[(char, usize)]) ->
                     let context = crate::op::find_ref(&[], name, &flow_syntax::context::value()).map(|operator| operator.ctx)
                         .or_else(|| flow_syntax::context::of_qualified(name));
                     if let Some(context) = context.filter(|context| *context != flow_syntax::context::value()) {
-                        return flow_syntax::context::name(context).to_owned();
+                        return flow_syntax::context::name(context);
                     }
                 }
-                return "value".to_owned();
+                return "value";
             }
         }
     }
-    "sop".to_owned()
+    "sop"
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{bound, context_of, head_before, indent, index_at, item_stop, items, kw_value, lex, word, Kind};
 
     #[test]
@@ -434,17 +423,17 @@ mod tests {
         assert_eq!(tokens[7].kind, Kind::Unmatched);
         assert_eq!(tokens[8].kind, Kind::Unmatched);
 
-        let (tokens, _, _) = lex("é (f π)");
+        let (tokens, _, _) = &*lex("é (f π)");
         let pi = tokens.iter().find(|token| word("é (f π)", token) == "π").unwrap();
         assert_eq!((pi.start, pi.stop), (6, 8));
-        assert_eq!(index_at(&tokens, 6), Some(3));
+        assert_eq!(index_at(tokens, 6), Some(3));
     }
 
     #[test]
     fn nested_items_and_heads() {
         let text = "(outer a [b (inner c)] d)";
         let (tokens, _, _) = Arc::unwrap_or_clone(lex(text));
-        let top = items(&tokens, 0);
+        let top: Vec<_> = items(&tokens, 0).collect();
         assert_eq!(top.iter().map(|&i| tokens[i].start).collect::<Vec<_>>(), vec![1, 7, 9, 23]);
         assert_eq!(item_stop(&tokens, top[2]), 22);
         let inner = index_at(&tokens, 13).unwrap();
@@ -487,6 +476,8 @@ mod tests {
 
 #[cfg(test)]
 mod inferred_context_tests {
+    use std::sync::Arc;
+
     #[test]
     fn completion_infers_context_through_let_without_an_annotation() {
         let source = "(workspace example (graph picture (let [width (frame/width)] (draw/circle [0 0] 3";

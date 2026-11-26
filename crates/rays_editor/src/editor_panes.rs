@@ -656,12 +656,12 @@ pub fn draw_text_panes<'r>(
     value: &EditorModel,
     root_at: &dyn Fn(&layout::Path) -> Option<&'r (Leaf, pxui::Handle)>,
     tab_at: &dyn Fn(&Leaf) -> [Option<f32>; 2],
-    text_host: &Option<Host>,
+    text_host: Option<&Host>,
     text_shown: &Option<text_pane::Shown>,
-    text: text_pane::State,
-    other_texts: Vec<(Key, layout::Path, text_pane::State, text_pane::Shown)>,
+    text: &text_pane::State,
+    other_texts: &[(Key, layout::Path, text_pane::State, text_pane::Shown)],
     locals: Vec<(Key, Local)>,
-) -> (text_pane::State, Vec<text_pane::Intent>, Vec<(Key, Local)>, Vec<(Key, text_pane::Shown, Vec<text_pane::Intent>)>) {
+) -> (Vec<text_pane::Intent>, Vec<(Key, Local)>, Vec<(Key, text_pane::Shown, Vec<text_pane::Intent>)>) {
     let names = crate::editor_text::shared_names(value);
     let vocab = value.lisp_vocab.force();
     let view_text = |ui: &mut Ui, path: &layout::Path, state: &text_pane::State, shown: &text_pane::Shown| -> Vec<text_pane::Intent> {
@@ -678,18 +678,18 @@ pub fn draw_text_panes<'r>(
         }
     };
     let text_intents = match (text_shown, text_host) {
-        (Some(shown), Some((_, path, _, _))) => view_text(ui, path, &text, shown),
+        (Some(shown), Some((_, path, _, _))) => view_text(ui, path, text, shown),
         _ => Vec::new(),
     };
     let mut locals = locals;
     let mut texts = Vec::new();
     for (key, path, state, shown) in other_texts {
-        locals = put_local(&key, &|l| Local { code: state.clone(), ..l }, &locals);
-        let intents = view_text(ui, &path, &state, &shown);
+        locals = put_local(key, &|l| Local { code: state.clone(), ..l }, &locals);
+        let intents = view_text(ui, path, state, shown);
         // Dispatch intents from the latest drawn pane first.
-        texts.insert(0, (key, shown, intents));
+        texts.insert(0, (key.clone(), shown.clone(), intents));
     }
-    (text, text_intents, locals, texts)
+    (text_intents, locals, texts)
 }
 
 /// The outline panels.

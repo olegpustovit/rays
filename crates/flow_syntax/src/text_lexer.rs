@@ -101,14 +101,14 @@ fn trim_comment(source: &str, mut start: usize, mut end: usize) -> String {
     source[start..end].to_owned()
 }
 
-fn string_token(source: &str, start: usize) -> (Token, usize) {
+fn string_token(source: &str, start: usize, keep_payload: bool) -> (Token, usize) {
     let bytes = source.as_bytes();
-    let mut decoded = Vec::with_capacity(32);
+    let mut decoded = if keep_payload { Vec::with_capacity(32) } else { Vec::new() };
     let mut first_issue = None;
     let mut j = start + 1;
     loop {
         if j >= bytes.len() {
-            if first_issue.is_none() {
+            if keep_payload && first_issue.is_none() {
                 first_issue = Some(issue(start, bytes.len(), "E_UNCLOSED", "This string is never closed"));
             }
             break;
@@ -119,7 +119,7 @@ fn string_token(source: &str, start: usize) -> (Token, usize) {
                 break;
             }
             b'\\' if j + 1 >= bytes.len() => {
-                if first_issue.is_none() {
+                if keep_payload && first_issue.is_none() {
                     first_issue = Some(issue(start, bytes.len(), "E_UNCLOSED", "This string is never closed"));
                 }
                 j = bytes.len();
@@ -128,26 +128,27 @@ fn string_token(source: &str, start: usize) -> (Token, usize) {
             b'\\' => {
                 let escaped = bytes[j + 1];
                 match escaped {
-                    b'"' | b'\\' => decoded.push(escaped),
-                    b'n' => decoded.push(b'\n'),
-                    b't' => decoded.push(b'\t'),
-                    b'r' => decoded.push(b'\r'),
+                    b'"' | b'\\' | b'n' | b't' | b'r' => {
+                        if keep_payload {
+                            decoded.push(match escaped { b'n' => b'\n', b't' => b'\t', b'r' => b'\r', _ => escaped });
+                        }
+                    },
                     b'0'..=b'9' if j + 3 < bytes.len() && bytes[j + 2].is_ascii_digit() && bytes[j + 3].is_ascii_digit() => {
                         let value = (escaped - b'0') as u16 * 100
                             + (bytes[j + 2] - b'0') as u16 * 10
                             + (bytes[j + 3] - b'0') as u16;
                         if value > 255 {
-                            if first_issue.is_none() {
+                            if keep_payload && first_issue.is_none() {
                                 first_issue = Some(issue(j, j + 4, "E_UNEXPECTED", "A decimal byte escape must be 000 to 255."));
                             }
-                        } else {
+                        } else if keep_payload {
                             decoded.push(value as u8);
                         }
                         j += 4;
                         continue;
                     }
                     _ => {
-                        if first_issue.is_none() {
+                        if keep_payload && first_issue.is_none() {
                             first_issue = Some(issue(j, j + 2, "E_UNEXPECTED", "Unknown string escape"));
                         }
                         j += 2;
@@ -157,7 +158,7 @@ fn string_token(source: &str, start: usize) -> (Token, usize) {
                 j += 2;
             }
             _ => {
-                decoded.push(bytes[j]);
+                if keep_payload { decoded.push(bytes[j]); }
                 j += 1;
             }
         }
@@ -208,60 +209,47 @@ pub fn lex(source: &str) -> Arc<Vec<Token>> {
         if cache.text.as_str() == source { return cache.tokens.clone(); }
         let prefix = cache.text.as_bytes().iter().zip(source.as_bytes()).take_while(|(a, b)| a == b).count();
         let first_line = if cache.lines.is_empty() { 0 } else { cache.lines.partition_point(|l| l.start <= prefix).saturating_sub(1) };
-        // Unique Arc: truncate the prefix in place (no Token/String clones). Shared Arc: fall back to clone.
-        let mut tokens = match Arc::try_unwrap(std::mem::take(&mut cache.tokens)) {
-            Ok(v) => v,
-            Err(shared) => {
-                cache.tokens = shared.clone();
-                (*shared).clone()
-            }
-        };
-        let tokens = if first_line > 0 && first_line < cache.lines.len() {
-            let cut = cache.lines[first_line].start;
-            let tok_from = cache.lines[first_line].from;
-            let open_string = tokens[..tok_from].iter().any(|t| matches!(t.kind, Kind::String(_)) && (t.stop as usize) > cut);
-            if !open_string {
-                tokens.truncate(tok_from);
-                while tokens.last().is_some_and(|t| matches!(t.kind, Kind::End) && t.issue.is_none()) {
-                    tokens.pop();
+        let LexCache { tokens, lines, starts, .. } = &mut *cache;
+        let tokens = Arc::make_mut(tokens);
+        let cut = lines.get(first_line).map_or(0, |line| line.start);
+        let tok_from = lines.get(first_line).map_or(0, |line| line.from);
+        let open_string = tokens[..tok_from].iter().any(|t| matches!(t.kind, Kind::String(_)) && (t.stop as usize) > cut);
+        if cut > 0 && !open_string {
+            tokens.truncate(tok_from);
+            lex_full_into(tokens, &source[cut..], true);
+            for t in &mut tokens[tok_from..] {
+                t.start += cut as i64;
+                t.stop += cut as i64;
+                if let Some(issue) = &mut t.issue {
+                    issue.start += cut as i64;
+                    issue.finish += cut as i64;
                 }
-                thread_local!(static REST: std::cell::RefCell<Vec<Token>> = const { std::cell::RefCell::new(Vec::new()) });
-                REST.with(|cell| {
-                    let mut rest = cell.borrow_mut();
-                    rest.clear();
-                    lex_full_into(&mut rest, &source[cut..]);
-                    for t in rest.iter_mut() {
-                        t.start += cut as i64; t.stop += cut as i64;
-                        if let Some(issue) = &mut t.issue { issue.start += cut as i64; issue.finish += cut as i64; }
-                    }
-                    tokens.extend(rest.drain(..));
-                });
-                tokens
-            } else {
-                lex_full(source)
             }
         } else {
-            lex_full(source)
-        };
-        {
-            let LexCache { lines, starts, .. } = &mut *cache;
-            build_lines_into(lines, starts, source, &tokens);
+            tokens.clear();
+            lex_full_into(tokens, source, true);
         }
+        build_lines_into(lines, starts, source, tokens);
         cache.text.clear();
         cache.text.push_str(source);
-        let tokens = Arc::new(tokens);
-        cache.tokens = tokens.clone();
-        tokens
+        cache.tokens.clone()
     })
 }
 
 pub fn lex_full(source: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
-    lex_full_into(&mut tokens, source);
+    lex_full_into(&mut tokens, source, true);
     tokens
 }
 
-fn lex_full_into(tokens: &mut Vec<Token>, source: &str) {
+/// Token kinds and offsets for the editor. It needs neither decoded payloads nor diagnostics.
+pub fn lex_spans_into(source: &str, tokens: &mut Vec<Token>) {
+    tokens.clear();
+    lex_full_into(tokens, source, false);
+}
+
+fn lex_full_into(tokens: &mut Vec<Token>, source: &str, keep_payload: bool) {
+    let first = tokens.len();
     let bytes = source.as_bytes();
     let n = bytes.len();
     let mut i = 0;
@@ -275,7 +263,7 @@ fn lex_full_into(tokens: &mut Vec<Token>, source: &str) {
                 let mut content = start;
                 while content < finish && bytes[content] == b';' { content += 1; }
                 if content < finish && bytes[content] == b' ' { content += 1; }
-                let text = trim_comment(source, content, finish);
+                let text = if keep_payload { trim_comment(source, content, finish) } else { String::new() };
                 tokens.push(token(Kind::Comment(text), start, finish, None));
             }
             b'(' | b'[' | b'{' => {
@@ -301,15 +289,15 @@ fn lex_full_into(tokens: &mut Vec<Token>, source: &str) {
             b'^' => {
                 let finish = word_end(bytes, i + 1);
                 let valid = finish > i + 2 && bytes[i + 1] == b':';
-                let problem = if valid { None } else {
+                let problem = if valid || !keep_payload { None } else {
                     Some(issue(i, finish.max(i + 1), "E_UNEXPECTED", "^ is followed by a keyword, as in ^:bypass"))
                 };
-                let name = if valid { source[i + 2..finish].to_owned() } else { String::new() };
+                let name = if valid && keep_payload { source[i + 2..finish].to_owned() } else { String::new() };
                 tokens.push(token(Kind::Meta(name), i, finish, problem));
                 i = finish;
             }
             b'"' => {
-                let (lexed, finish) = string_token(source, i);
+                let (lexed, finish) = string_token(source, i, keep_payload);
                 tokens.push(lexed);
                 i = finish;
             }
@@ -331,6 +319,7 @@ fn lex_full_into(tokens: &mut Vec<Token>, source: &str) {
     }
     tokens.push(token(Kind::End, n, n, None));
 
+    if !keep_payload { return; }
     let mut controls = Vec::new();
     for (at, &byte) in bytes.iter().enumerate() {
         if (1..=3).contains(&byte) {
@@ -344,7 +333,7 @@ fn lex_full_into(tokens: &mut Vec<Token>, source: &str) {
     }
     if !controls.is_empty() {
         tokens.extend(controls);
-        tokens.sort_by_key(|item| item.start);
+        tokens[first..].sort_by_key(|item| item.start);
     }
 }
 
@@ -365,6 +354,32 @@ mod tests {
         assert!(tokens.iter().any(|token| {
             matches!(token.kind, Kind::Word(Word::Symbol)) && token.start == 11
         }));
+    }
+
+    #[test]
+    fn editor_span_lexer_matches_parser_kinds_and_offsets() {
+        use std::mem::discriminant;
+
+        let source = "(^:meta ; comment\n \"a\\q\
+ b\" ^ 7 :word 'π \u{1} \"unfinished)";
+        let mut spans = Vec::new();
+        super::lex_spans_into(source, &mut spans);
+        let parser = lex_full(source);
+        let signature = |token: &super::Token| (discriminant(&token.kind), token.start, token.stop);
+        let parser_spans: Vec<_> = parser.iter().filter(|tok| !matches!(tok.kind, Kind::End) || tok.start == tok.stop)
+            .map(signature).collect();
+        assert_eq!(spans.iter().map(signature).collect::<Vec<_>>(), parser_spans);
+        assert!(spans.iter().all(|tok| tok.issue.is_none()));
+    }
+
+    #[test]
+    fn incremental_lex_preserves_a_held_snapshot() {
+        let source = "(a)\n(b)";
+        let edited = "(a)\n(c)";
+        let held = lex(source);
+        let next = lex(edited);
+        assert_eq!(held.as_slice(), lex_full(source));
+        assert_eq!(next.as_slice(), lex_full(edited));
     }
 
     #[test]

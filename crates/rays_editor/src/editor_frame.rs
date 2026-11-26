@@ -737,10 +737,10 @@ pub fn node_menu_step<'a>(value: &ModelView<'a>, workspace: &Shell, frame_: &fra
     }
 }
 
-type TextState = (Option<Host>, text_pane::State, Option<text_pane::Shown>, Vec<(Key_, layout::Path, text_pane::State, text_pane::Shown)>);
+type TextState<'h> = (Option<&'h Host>, text_pane::State, Option<text_pane::Shown>, Vec<(Key_, layout::Path, text_pane::State, text_pane::Shown)>);
 
 /// What each text pane shows: its state and what it is showing.
-pub fn text_state<'a>(value: &ModelView<'a>, actions: &[Action], pane_of: &dyn Fn(&Host) -> ModelView<'a>, text_hosts: &[Host], pane_text: text_pane::State) -> Result<TextState, rays_diagnostic::Diagnostic> {
+pub fn text_state<'a, 'h>(value: &ModelView<'a>, actions: &[Action], pane_of: &dyn Fn(&Host) -> ModelView<'a>, hosts: &'h [Host], pane_text: text_pane::State) -> Result<TextState<'h>, rays_diagnostic::Diagnostic> {
     let ws = &value.doc.workspace.ws;
     let text_of = |state: text_pane::State, host: &Host| -> Result<Option<(text_pane::State, text_pane::Shown)>, rays_diagnostic::Diagnostic> {
         let pane = pane_of(host);
@@ -749,9 +749,8 @@ pub fn text_state<'a>(value: &ModelView<'a>, actions: &[Action], pane_of: &dyn F
             graph => graph,
         };
         let Some(graph) = graph else { return Ok(None) };
-        let graph = graph.to_owned();
         let selected = match scope::selected(pane_view(&pane)) {
-            [path] => Some(path.clone()),
+            [path] => Some(path),
             _ => None,
         };
         // while a payload is carried the text is the document it was picked up from: the preview is
@@ -760,10 +759,11 @@ pub fn text_state<'a>(value: &ModelView<'a>, actions: &[Action], pane_of: &dyn F
             Some(c) => &c.original.workspace.ws,
             None => ws,
         };
-        Ok(Some(text_pane::shown(Some(shown_ws), state, &shown_ws.source, &graph, selected.as_ref())?))
+        Ok(Some(text_pane::shown(Some(shown_ws), state, &shown_ws.source, graph, selected)?))
     };
-    let text_host = text_hosts.iter().find(|(key, _, _, _)| Some(key) == value.text_at.as_ref()).cloned();
-    let (mut text, text_shown) = match text_host.as_ref() {
+    let text_hosts = hosts.iter().filter(|host| host.3 == HostKind::Text);
+    let text_host = text_hosts.clone().find(|(key, _, _, _)| Some(key) == value.text_at.as_ref());
+    let (mut text, text_shown) = match text_host {
         Some(host) => match text_of(pane_text, host)? {
             Some((text, shown)) => (text, Some(shown)),
             None => (text_pane::initial(), None),
@@ -1121,7 +1121,7 @@ pub fn update_frame(
     let pane_of = |host: &Host| shown_as(&(&*value).into(), (&host.0, &host.1, &host.2));
     let ((text_host, text, text_shown, other_texts), text_error) = {
         let mv = (&*value).into();
-        match text_state(&mv, &actions, &pane_of, &hosted(HostKind::Text), taken_text) {
+        match text_state(&mv, &actions, &pane_of, &hosts, taken_text) {
             Ok(state) => (state, None),
             Err(error) => ((None, text_pane::initial(), None, Vec::new()), Some(rays_diagnostic::to_string(&error))),
         }
@@ -1377,10 +1377,9 @@ pub fn update_frame(
             pending_menu = menu2.clone();
             // Each pane builder returns only its frame intents and updated pane-local state.
             let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &(&*value).into(), &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), rows.as_ref(), &host_rows, &|| selected(selection), tree_value.clone(), list_intents.clone(), value.locals.clone());
-            let (text2, text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &*value, &root_at, &tab_at, &text_host, &text_shown, text.clone(), other_texts.clone(), locals);
+            let (text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &*value, &root_at, &tab_at, text_host, &text_shown, &text, &other_texts, locals);
             let (outline, outline_intents, locals) = draw_outline_panes(ui, frame_, &*value, &hosted(HostKind::Outline), &root_at, value.outline.clone(), locals);
             let locals = draw_spreadsheet_panes(ui, frame_, &(&*value).into(), &of_kind(&Panel::Spreadsheet), locals);
-            let _ = text2;
             let mut changes = pane_changes(&(&*value).into(), &vw, command_changes.clone(), &scope_changes, &menu_pick, &outline_intents);
             // a layout row and the add button are commands: they run like a toolbar click
             let mut outline_action: Option<Action> = None;
