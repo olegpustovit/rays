@@ -65,14 +65,8 @@ pub struct Sink {
     size: (i64, i64),
     image: Option<ImageResolver>,
     entries: Vec<Entry>,
-    /// Recycled `Entry::Text` byte buffers (capacity kept across draws).
-    text_bufs: Vec<Vec<u8>>,
-}
-
-impl Sink {
-    fn take_text_buf(&mut self) -> Vec<u8> {
-        self.text_bufs.pop().unwrap_or_default()
-    }
+    /// Rebuild entries in painter order, reusing the previous entry's payload at each position.
+    written: usize,
 }
 
 /// `size` is the canvas (for `draw/background`); `image` resolves an image node to a host resource
@@ -81,27 +75,27 @@ pub fn sink(image: Option<ImageResolver>, size: (i64, i64), buffers: &Buffers) -
     sink_from(image, size, buffers, Vec::new())
 }
 
-/// Like [`sink`], but reuses a prior entries Vec's capacity (cleared).
-pub fn sink_from(image: Option<ImageResolver>, size: (i64, i64), buffers: &Buffers, mut entries: Vec<Entry>) -> Sink {
-    let mut text_bufs = Vec::new();
-    for entry in entries.drain(..) {
-        if let Entry::Text { text, .. } = entry {
-            text_bufs.push(text);
-        }
-    }
-    Sink { buffers: buffers.clone(), size, image, entries, text_bufs }
+/// Like [`sink`], but reuses the previous entries' storage.
+pub fn sink_from(image: Option<ImageResolver>, size: (i64, i64), buffers: &Buffers, entries: Vec<Entry>) -> Sink {
+    Sink { buffers: buffers.clone(), size, image, entries, written: 0 }
 }
 
 fn push(sink: &mut Sink, entry: Entry) -> Result<(), Diagnostic> {
-    if sink.entries.len() as i64 >= m::MAX_ENTRIES {
+    if sink.written as i64 >= m::MAX_ENTRIES {
         return Err(v::fail("E_DRAW_RANGE", "A drawing has too many entries."));
     }
-    sink.entries.push(entry);
+    if let Some(previous) = sink.entries.get_mut(sink.written) {
+        *previous = entry;
+    } else {
+        sink.entries.push(entry);
+    }
+    sink.written += 1;
     Ok(())
 }
 
 /// The entries in painter order, checked by `Marks::validate` (`E_DRAW_RANGE` otherwise).
 pub fn finish(sink: &mut Sink) -> Result<Vec<Entry>, Diagnostic> {
+    sink.entries.truncate(sink.written);
     match m::validate(&sink.entries) {
         Ok(()) => Ok(std::mem::take(&mut sink.entries)),
         Err(message) => Err(v::fail("E_DRAW_RANGE", &message)),
@@ -210,13 +204,13 @@ fn colour_attr(sink: &Sink, count: i64, value: &Value) -> Result<ColorAttr, Diag
     }
 }
 
-fn assoc<'a>(args: &'a [(Symbol, &'a Value)], key: &str) -> Option<&'a Value> {
-    args.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
+fn assoc<'a>(args: &[(Symbol, i64)], values: &'a [Value], key: &str) -> Option<&'a Value> {
+    args.iter().find(|(k, _)| k == key).map(|(_, i)| &values[*i as usize])
 }
 
-fn check_colors(count: i64, args: &[(Symbol, &Value)]) -> Result<(), Diagnostic> {
+fn check_colors(count: i64, args: &[(Symbol, i64)], values: &[Value]) -> Result<(), Diagnostic> {
     for key in ["fill", "stroke", "color"] {
-        if let Some(Value::Floats(3, xs)) = assoc(args, key) {
+        if let Some(Value::Floats(3, xs)) = assoc(args, values, key) {
             if xs.len() as i64 != 3 * count {
                 return Err(colors_length());
             }
@@ -255,21 +249,16 @@ fn points_attr(sink: &mut Sink, value: &Value) -> Result<(i64, PairAttr), Diagno
     }
 }
 
-fn resolve_args<'a>(args: &[(Symbol, i64)], values: &'a [Value]) -> Vec<(Symbol, &'a Value)> {
-    args.iter().map(|(k, i)| (k.clone(), &values[*i as usize])).collect()
-}
-
 fn length_error(message: &str) -> Diagnostic {
     v::fail("E_DRAW_LENGTH", message)
 }
 
 fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(Symbol, i64)], values: &[Value]) -> Result<(), Diagnostic> {
-    let args = resolve_args(raw, values);
     let arg = |key: &str| -> Result<&Value, Diagnostic> {
-        assoc(&args, key).ok_or_else(|| v::failf("E_DRAW_INPUT", &format!("draw needs {}.", key)))
+        assoc(raw, values, key).ok_or_else(|| v::failf("E_DRAW_INPUT", &format!("draw needs {}.", key)))
     };
     let style = |sink: &Sink, count: i64| -> Result<(ColorAttr, ColorAttr), Diagnostic> {
-        let get = |key: &str| match assoc(&args, key) {
+        let get = |key: &str| match assoc(raw, values, key) {
             Some(value) => colour_attr(sink, count, value),
             None => Ok(ColorAttr::Constant(0)),
         };
@@ -319,7 +308,7 @@ fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(Symbol, i64)], values:
                     }
                 }
             };
-            check_colors(n, &args)?;
+            check_colors(n, raw, values)?;
             let (fill, stroke) = style(sink, n)?;
             push(sink, Entry::MarkSet { count: n, kind: Kind::Circle { position, radius, fill, stroke, stroke_width: ScalarAttr::Constant(1.0) } })
         }
@@ -350,7 +339,7 @@ fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(Symbol, i64)], values:
                     }
                 }
             };
-            check_colors(n, &args)?;
+            check_colors(n, raw, values)?;
             let (fill, stroke) = style(sink, n)?;
             push(sink, Entry::MarkSet { count: n, kind: Kind::Rect { position, size, fill, stroke, stroke_width: ScalarAttr::Constant(1.0) } })
         }
@@ -365,7 +354,7 @@ fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(Symbol, i64)], values:
             } else {
                 PairAttr::Constant(pair(arg("to")?)?)
             };
-            check_colors(n, &args)?;
+            check_colors(n, raw, values)?;
             let stroke = colour_attr(sink, n, arg("color")?)?;
             let stroke_width = ScalarAttr::Constant(v::num(arg("width")?)?);
             push(sink, Entry::MarkSet { count: n, kind: Kind::Line { position, end, stroke, stroke_width } })
@@ -374,10 +363,9 @@ fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(Symbol, i64)], values:
 }
 
 fn path(sink: &mut Sink, kind: PathKind, raw: &[(Symbol, i64)], values: &[Value]) -> Result<(), Diagnostic> {
-    let args = resolve_args(raw, values);
-    let arg = |key: &str| assoc(&args, key).expect("Not_found");
+    let arg = |key: &str| assoc(raw, values, key).expect("Not_found");
     let opt = |key: &str| -> Result<Option<i32>, Diagnostic> {
-        match assoc(&args, key) {
+        match assoc(raw, values, key) {
             Some(value) => Ok(Some(color(value)?)),
             None => Ok(None),
         }
@@ -421,12 +409,30 @@ pub type Compiled = Box<dyn Fn(&[Value], &mut Sink) -> Result<(), Diagnostic> + 
 
 pub fn compile(draw: &Draw) -> Compiled {
     match draw.clone() {
-        Draw::Background(c) => Box::new(move |vals, sink| {
-            let (w, h) = sink.size;
-            let (w, h) = (w as f64, h as f64);
-            let fill = color(&vals[c as usize])?;
-            geometry(sink, shape2::polygon(&[(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)], Some(fill), None))
-        }),
+        Draw::Background(c) => {
+            let kept = std::sync::Mutex::new(None);
+            Box::new(move |vals, sink| {
+                let fill = color(&vals[c as usize])?;
+                let key = (sink.size, fill);
+                let mut kept = kept.lock().unwrap();
+                if kept.as_ref().is_none_or(|(old, _)| *old != key) {
+                    let (w, h) = (sink.size.0 as f64, sink.size.1 as f64);
+                    let meshes = shape2::polygon(&[(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)], Some(fill), None)
+                        .map_err(|message| v::fail("E_DRAW_RANGE", &message))?;
+                    *kept = Some((key, meshes));
+                }
+                for mesh in &kept.as_ref().unwrap().1 {
+                    let (mut vertices, mut indices) = match sink.entries.get_mut(sink.written) {
+                        Some(Entry::Geometry { vertices, indices, .. }) => (std::mem::take(vertices), std::mem::take(indices)),
+                        _ => (Vec::new(), Vec::new()),
+                    };
+                    vertices.clone_from(&mesh.vertices);
+                    indices.clone_from(&mesh.indices);
+                    push(sink, Entry::Geometry { vertices, indices, color: mesh.color })?;
+                }
+                Ok(())
+            })
+        },
         Draw::Point { at, ink: i } => Box::new(move |vals, sink| {
             let (x, y) = float_point(&vals[at as usize])?;
             let fill = ink(&vals[i as usize])?;
@@ -457,7 +463,10 @@ pub fn compile(draw: &Draw) -> Compiled {
                     },
                 };
                 // Reuse a prior Entry::Text buffer's capacity when the sink was recycled.
-                let mut text = sink.take_text_buf();
+                let mut text = match sink.entries.get_mut(sink.written) {
+                    Some(Entry::Text { text, .. }) => std::mem::take(text),
+                    _ => Vec::new(),
+                };
                 text.clear();
                 text.extend_from_slice(s);
                 push(sink, Entry::Text { x, y, size, color, text, style })?;

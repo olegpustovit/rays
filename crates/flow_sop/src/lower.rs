@@ -205,8 +205,15 @@ pub type ImageMetadata = Arc<dyn Fn(&Plan, i64) -> Option<(i64, i64)> + Send + S
 
 #[derive(Clone)]
 struct Images {
+    gpu: Option<gpu::Config>,
     resolve: ImageResolver,
-    metadata: ImageMetadata,
+    metadata: Option<ImageMetadata>,
+}
+
+impl Images {
+    fn resolve(&self, gpu: Option<&gpu::Config>, context: &ImageContext, plan: &Plan, state: &State, live: &Frame, value: &Value) -> Result<sop::image::T, Diagnostic> {
+        (self.resolve)(gpu.or(self.gpu.as_ref()), Some(context), plan, state, live, value)
+    }
 }
 
 thread_local! {
@@ -215,18 +222,19 @@ thread_local! {
 
 /// Scope an initial-domain resource resolver around value-lane resolution.
 pub fn with_images(gpu: Option<gpu::Config>, metadata: Option<ImageMetadata>, resolver: ImageResolver, run: &mut dyn FnMut()) {
-    let metadata: ImageMetadata = metadata.unwrap_or_else(|| Arc::new(|_, _| None));
-    let wrapped: ImageResolver = Arc::new(move |requested, context, plan, state, live, value| {
-        let used = requested.cloned().or_else(|| gpu.clone());
-        resolver(used.as_ref(), context, plan, state, live, value)
-    });
-    let previous = IMAGE_PROVIDER.with(|p| p.borrow_mut().replace(Images { resolve: wrapped, metadata }));
+    struct Restore(Option<Images>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            IMAGE_PROVIDER.with(|p| *p.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(IMAGE_PROVIDER.with(|p| p.borrow_mut().replace(Images { gpu, resolve: resolver, metadata })));
     run();
-    IMAGE_PROVIDER.with(|p| *p.borrow_mut() = previous);
 }
 
 pub fn image_metadata(plan: &Plan, node: i64) -> Option<(i64, i64)> {
-    IMAGE_PROVIDER.with(|p| p.borrow().as_ref().and_then(|images| (images.metadata)(plan, node)))
+    let metadata = IMAGE_PROVIDER.with(|p| p.borrow().as_ref().and_then(|images| images.metadata.clone()));
+    metadata.and_then(|find| find(plan, node))
 }
 
 fn image_provider() -> Option<Images> {
@@ -4687,7 +4695,7 @@ impl Lowerer {
                         return Err(fail("E_IMAGE", "Image resources need an initial-domain resolver."));
                     };
                     let context = ImageContext { compiled: this.compiled_context(), network: network.clone() };
-                    let image = (images.resolve)(Some(&this.o.gpu), Some(&context), &this.evaluated.plan, state, live, &Value::Deferred(ty::image(), n.id))?;
+                    let image = images.resolve(Some(&this.o.gpu), &context, &this.evaluated.plan, state, live, &Value::Deferred(ty::image(), n.id))?;
                     if node::parameters(node) == sop::image::data_id(&image).to_string().as_bytes() {
                         Ok(node.clone())
                     } else {

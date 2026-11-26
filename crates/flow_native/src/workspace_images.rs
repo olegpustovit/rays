@@ -212,6 +212,7 @@ pub struct Data {
     source_ids: RefCell<Vec<Vec<i64>>>,
     freshness: RefCell<Vec<(bool, deps::T)>>,
     qualification: RefCell<Option<(PlanId, Paths, Vec<Option<Path>>)>>,
+    payload: std::cell::OnceCell<l::ImageResolver>,
     arguments: RefCell<Vec<Option<I::Program>>>,
     drawings: RefCell<Vec<Option<Rc<drawing::Prepared>>>>,
     maps: RefCell<Vec<Option<(i64, i64, FnId, image_kernel::T)>>>,
@@ -261,6 +262,7 @@ pub fn create(seed: Option<i64>, grain: Option<i64>, domains: Option<i64>, gpu: 
         source_ids: RefCell::new(Vec::new()),
         freshness: RefCell::new(Vec::new()),
         qualification: RefCell::new(None),
+        payload: std::cell::OnceCell::new(),
         arguments: RefCell::new(Vec::new()),
         drawings: RefCell::new(Vec::new()),
         maps: RefCell::new(Vec::new()),
@@ -1453,13 +1455,13 @@ pub fn image(gpu: Option<&G::Config>, display: bool, t_: &WorkspaceImages, state
 /// The resolver `Lower` installs for a cook: the CPU payload of an image node, resolved here.
 pub fn payload(t_: &WorkspaceImages) -> l::ImageResolver {
     let owner_id = t_.0.id;
-    Arc::new(move |gpu, context, plan, state, live, value| {
+    t_.0.payload.get_or_init(|| Arc::new(move |gpu, context, plan, state, live, value| {
         let Some(d) = owner_of(owner_id) else { return Err(error("Image resources must resolve on the initial domain.")) };
         let ctx = Ctx { gpu: gpu.cloned(), state: state.clone(), live: live.clone(), pid: plan_id(plan) };
         let entry = resolve(&d, &ctx, context, false, plan, value)?;
         let cpu = entry.borrow().cpu.clone();
         Ok(cpu.expect("cpu").payload)
-    })
+    })).clone()
 }
 
 pub fn texture(gpu: Option<&G::Config>, t_: &WorkspaceImages, state: &e::State, live: &Frame, plan: &e::Plan, value: &Value) -> Result<texture::Texture, Diagnostic> {

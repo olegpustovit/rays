@@ -18,14 +18,8 @@ const STICKY: usize = 8;
 
 struct Arena {
     scratch: Vec<u8>,
-    /// Incremented on every reset; sticky entries retarget to the new value on reuse.
-    generation: u32,
-    /// Recent text Arcs (sticky across gens when bytes match).
-    sticky: [Option<(u32, Arc<[u8]>)>; STICKY],
-    sticky_next: usize,
-    /// Last changing text Arc: rewritten in place when uniquely held and length matches
-    /// (animated "frame N" → "frame N+1" of the same digit width allocates nothing).
-    ephemeral: Option<Arc<[u8]>>,
+    /// Most recently used first. Unshared allocations can also hold new same-length text.
+    sticky: [Option<Arc<[u8]>>; STICKY],
     #[cfg(debug_assertions)]
     poisoned: bool,
 }
@@ -33,10 +27,7 @@ struct Arena {
 thread_local! {
     static ARENA: RefCell<Arena> = const { RefCell::new(Arena {
         scratch: Vec::new(),
-        generation: 1,
-        sticky: [None, None, None, None, None, None, None, None],
-        sticky_next: 0,
-        ephemeral: None,
+        sticky: [const { None }; STICKY],
         #[cfg(debug_assertions)]
         poisoned: false,
     }) };
@@ -46,7 +37,6 @@ thread_local! {
 pub fn reset() {
     ARENA.with(|a| {
         let mut a = a.borrow_mut();
-        a.generation = a.generation.wrapping_add(1).max(1);
         a.scratch.clear();
         #[cfg(debug_assertions)]
         {
@@ -72,74 +62,33 @@ fn check_live(a: &Arena) {
     assert!(!a.poisoned, "frame_arena: use after reset (dangling frame value)");
 }
 
-fn sticky_get(a: &Arena, bytes: &[u8]) -> Option<Arc<[u8]>> {
-    a.sticky.iter().flatten().find_map(|(_, arc)| {
-        if arc.as_ref() == bytes {
-            Some(arc.clone())
-        } else {
-            None
-        }
-    })
-}
-
-fn sticky_put(a: &mut Arena, arc: Arc<[u8]>) {
-    let i = a.sticky_next % STICKY;
-    a.sticky[i] = Some((a.generation, arc));
-    a.sticky_next = i + 1;
-}
-
-fn touch_sticky(a: &mut Arena, arc: &Arc<[u8]>) {
-    let g = a.generation;
-    if let Some(slot) = a.sticky.iter_mut().flatten().find(|(_, s)| Arc::ptr_eq(s, arc)) {
-        slot.0 = g;
-    }
-}
-
-fn strip_sticky_ptr(a: &mut Arena, ptr: *const [u8]) {
-    for slot in &mut a.sticky {
-        if slot.as_ref().is_some_and(|(_, s)| std::ptr::addr_eq(Arc::as_ptr(s), ptr)) {
-            *slot = None;
-        }
-    }
+fn intern(sticky: &mut [Option<Arc<[u8]>>; STICKY], bytes: &[u8]) -> Value {
+    let slot = if let Some(i) = sticky.iter().position(|arc| arc.as_deref() == Some(bytes)) {
+        i
+    } else if let Some(i) = sticky.iter_mut().rposition(|arc| {
+        arc.as_mut().and_then(Arc::get_mut).filter(|text| text.len() == bytes.len()).is_some()
+    }) {
+        Arc::get_mut(sticky[i].as_mut().unwrap()).unwrap().copy_from_slice(bytes);
+        i
+    } else {
+        sticky[STICKY - 1] = Some(Arc::from(bytes));
+        STICKY - 1
+    };
+    sticky[..=slot].rotate_right(1);
+    Value::Text(sticky[0].as_ref().unwrap().clone())
 }
 
 fn intern_scratch(a: &mut Arena) -> Value {
-    if let Some(arc) = sticky_get(a, a.scratch.as_slice()) {
-        touch_sticky(a, &arc);
-        return Value::Text(arc);
-    }
-    // Changing sketch text (frame counter): rewrite the unique ephemeral Arc when length holds.
-    // Drop sticky clones of that Arc first so strong_count can fall to 1.
-    let len = a.scratch.len();
-    if a.ephemeral.as_ref().is_some_and(|arc| arc.len() == len) {
-        let ptr = Arc::as_ptr(a.ephemeral.as_ref().expect("len match"));
-        strip_sticky_ptr(a, ptr);
-        if a.ephemeral.as_ref().is_some_and(|arc| Arc::strong_count(arc) == 1) {
-            let mut arc = a.ephemeral.take().expect("len match");
-            Arc::get_mut(&mut arc).expect("strong_count == 1").copy_from_slice(&a.scratch);
-            a.ephemeral = Some(arc.clone());
-            return Value::Text(arc);
-        }
-    }
-    let arc: Arc<[u8]> = Arc::from(a.scratch.as_slice());
-    a.ephemeral = Some(arc.clone());
-    sticky_put(a, arc.clone());
-    Value::Text(arc)
+    intern(&mut a.sticky, &a.scratch)
 }
 
-/// Intern `bytes` as `Value::Text` for this frame. Reuses a sticky Arc when content matches.
+/// Intern `bytes` as `Value::Text` for this frame.
 pub fn text(bytes: &[u8]) -> Value {
     ARENA.with(|a| {
         let mut a = a.borrow_mut();
         #[cfg(debug_assertions)]
         check_live(&a);
-        if let Some(arc) = sticky_get(&a, bytes) {
-            touch_sticky(&mut a, &arc);
-            return Value::Text(arc);
-        }
-        let arc: Arc<[u8]> = Arc::from(bytes);
-        sticky_put(&mut a, arc.clone());
-        Value::Text(arc)
+        intern(&mut a.sticky, bytes)
     })
 }
 
@@ -263,6 +212,18 @@ mod tests {
         assert_eq!(allocs, 0, "same-length frame text rewrites ephemeral Arc");
         assert_eq!(second.as_ref(), b"1280 x 900  frame 11");
         assert_eq!(len, second.len());
+    }
+
+    #[test]
+    fn changing_text_reuses_storage_while_a_prior_frame_is_held() {
+        begin();
+        let first = text(b"frame 10");
+        drop(text(b"frame 11"));
+        mem_sys::local_reset();
+        let third = text(b"frame 12");
+        assert_eq!(mem_sys::local_alloc_count(), 0);
+        assert_eq!(first, Value::Text(Arc::from(&b"frame 10"[..])));
+        assert_eq!(third, Value::Text(Arc::from(&b"frame 12"[..])));
     }
 
     #[test]

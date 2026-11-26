@@ -507,8 +507,14 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol,
         let args = args_v.clone();
         Arc::new(move |st: &mut State| {
             let operation = resolved(&cell)?;
-            let given: Vec<(Symbol, Value)> = args.iter().map(|(n, i)| (n.clone(), st.values[ix(*i)].clone())).collect();
-            apply_op(operation, st, &given)
+            let get = |(name, i): &(Symbol, i64)| (*name, st.values[ix(*i)].clone());
+            match args.as_slice() {
+                [] => apply_op(operation, st, &[]),
+                [a] => apply_op(operation, st, &[get(a)]),
+                [a, b] => apply_op(operation, st, &[get(a), get(b)]),
+                [a, b, c] => apply_op(operation, st, &[get(a), get(b), get(c)]),
+                _ => apply_op(operation, st, &args.iter().map(get).collect::<Vec<_>>()),
+            }
         })
     };
     let body: Ex = match operation {
@@ -1717,12 +1723,11 @@ impl Ctx {
             Expr::Vec(ns) => {
                 let ns = ns.clone();
                 Arc::new(move |st| {
-                    let mut xs = Vec::with_capacity(ns.len());
-                    for n in &ns { xs.push(v::num(&st.values[ix(*n)])?); }
-                    match xs.as_slice() {
-                        [x, y] => Ok(Value::Vec2(*x, *y)),
-                        [x, y, z] => Ok(Value::Vec3(*x, *y, *z)),
-                        [x, y, z, w] => Ok(Value::Vec4(*x, *y, *z, *w)),
+                    let num = |n| v::num(&st.values[ix(n)]);
+                    match ns.as_slice() {
+                        [x, y] => Ok(Value::Vec2(num(*x)?, num(*y)?)),
+                        [x, y, z] => Ok(Value::Vec3(num(*x)?, num(*y)?, num(*z)?)),
+                        [x, y, z, w] => Ok(Value::Vec4(num(*x)?, num(*y)?, num(*z)?, num(*w)?)),
                         _ => Err(v::fail("E_CORE", "Invalid vector width.")),
                     }
                 })
@@ -2655,8 +2660,7 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
 }
 
 /// Return a finished marks table's capacity to the prepared program for the next `draw`.
-pub fn recycle_marks(prepared: &Prepared, mut marks: scene_command::marks::Table) {
-    marks.clear();
+pub fn recycle_marks(prepared: &Prepared, marks: scene_command::marks::Table) {
     *prepared.marks_pool.lock().unwrap() = Some(marks);
 }
 
@@ -2780,9 +2784,12 @@ fn general_values(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Valu
 pub fn execute(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Value, Diagnostic> {
     // Eager checkpoint Arc-shares state maps for the whole execute; warm begin_frame merges then
     // clone every frame. Strict/probe paths that need rollback still checkpoint below on error.
-    let restore: Box<dyn Fn()> = match o.root {
-        Some(r) if !prepared.stateless && o.strict => e::residual::checkpoint(r)?,
-        _ => Box::new(|| {}),
+    let checkpoint = match o.root {
+        Some(r) if !prepared.stateless && o.strict => Some(e::residual::checkpoint(r)?),
+        _ => None,
+    };
+    let restore = || {
+        if let Some(restore) = &checkpoint { restore(); }
     };
     let close = || {
         if let Some(r) = &o.resident { r.close(); }

@@ -383,12 +383,33 @@ pub fn text(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: 
 
 /// Text in a face, alignment and tracking of `scene_command::marks::text_style`; 0 is `text`.
 pub fn styled_text(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: &str, style: i64) -> Node {
+    styled_text_reuse(at, color_, size, value, style, None)
+}
+
+/// Reuse the string and node when their previous scene has released them.
+pub fn styled_text_reuse(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: &str, style: i64, mut spare: Option<Rc<TextNode>>) -> Node {
+    let color = color_.unwrap_or_else(default_color);
+    let size = size.unwrap_or(16);
+    if let Some(node) = spare.as_mut().and_then(Rc::get_mut) {
+        node.x = at.0;
+        node.y = at.1;
+        node.value.clear();
+        node.value.push_str(value);
+        node.color = color;
+        node.size = size;
+        node.wrap = None;
+        node.align = font::Alignment::Left;
+        node.style = style;
+        *node.automatic.get_mut() = None;
+        *node.rendered.get_mut() = None;
+        return Node::Text(spare.unwrap());
+    }
     Node::Text(Rc::new(TextNode {
         x: at.0,
         y: at.1,
         value: value.to_string(),
-        color: color_.unwrap_or_else(default_color),
-        size: size.unwrap_or(16),
+        color,
+        size,
         wrap: None,
         align: font::Alignment::Left,
         style,

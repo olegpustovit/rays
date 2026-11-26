@@ -34,7 +34,7 @@ pub struct Attribute {
 /// Registers one mark set drawn by the `Marks` family: the `slot` numbers the frame's GPU sets from
 /// 0, `kind` is the `Ui_batch` kind word (rect 0, circle 4, line 5) and the attributes are
 /// position, extent, fill, stroke and width.
-pub type Gpu = dyn Fn(i64, i64, i64, &[Attribute]) -> Result<m::GpuToken, Diagnostic>;
+pub type Gpu<'a> = dyn Fn(i64, i64, i64, &[Attribute]) -> Result<m::GpuToken, Diagnostic> + 'a;
 
 type Kept = List<(i64, i64), (Arc<Vec<f64>>, Rc<Vec<u8>>)>;
 
@@ -43,10 +43,18 @@ type Kept = List<(i64, i64), (Arc<Vec<f64>>, Rc<Vec<u8>>)>;
 pub struct Cache {
     nodes: RefCell<List<i64, (Entry, Vec<Arc<Vec<f64>>>, scene::Node)>>,
     converted: RefCell<Kept>,
+    builder: RefCell<Option<Builder>>,
+    scene: RefCell<scene::Scene>,
+    text: RefCell<Vec<Rc<scene::TextNode>>>,
 }
 
 pub fn cache_new() -> Cache {
-    Cache { nodes: RefCell::new(List::new(1024, Box::new(|_, _| {}))), converted: RefCell::new(List::new(4096, Box::new(|_, _| {}))) }
+    Cache { nodes: RefCell::new(List::new(1024, Box::new(|_, _| {}))), converted: RefCell::new(List::new(4096, Box::new(|_, _| {}))), builder: RefCell::new(None), scene: RefCell::new(Vec::new()), text: RefCell::new(Vec::new()) }
+}
+
+pub(crate) fn recycle_scene(cache: &Cache, mut scene: scene::Scene) {
+    scene.clear();
+    *cache.scene.borrow_mut() = scene;
 }
 
 /// The nodes held.
@@ -288,7 +296,7 @@ fn words(buffers: &Buffers, device: Device, c: Option<&Cache>, slot: i64, place:
 }
 
 /// Rect, circle and line sets with a device attribute: position, extent, fill, stroke, width.
-fn gpu_set(buffers: &Buffers, device: Device, gpu_: &Gpu, c: Option<&Cache>, slot: i64, count: i64, kind: &Kind) -> Result<scene::Node, Diagnostic> {
+fn gpu_set(buffers: &Buffers, device: Device, gpu_: &Gpu<'_>, c: Option<&Cache>, slot: i64, count: i64, kind: &Kind) -> Result<scene::Node, Diagnostic> {
     let (kind_word, attributes) = match kind {
         Kind::Rect { position: PairAttr::Buffer(b), size: PairAttr::Constant(size), fill: fill @ ColorAttr::Constant(_), stroke: stroke @ ColorAttr::Constant(_), .. } => (
             0,
@@ -401,45 +409,10 @@ fn range(r: Result<(), String>) -> Result<(), Diagnostic> {
     r.map_err(|message| fail("E_DRAW_RANGE", &message))
 }
 
-/// An attribute as the builder's packed floats: a constant is its one element with stride 0.
-fn packed2(buffers: &Buffers, a: &PairAttr) -> Result<(Arc<Vec<f64>>, i64), Diagnostic> {
-    match a {
-        PairAttr::Constant((x, y)) => Ok((Arc::new(vec![*x, *y]), 0)),
-        PairAttr::Buffer(b) => Ok((data(buffers, b)?, b.width)),
-        PairAttr::Device(_) => Err(no_device()),
-    }
-}
-
-fn packed1(buffers: &Buffers, a: &ScalarAttr) -> Result<(Arc<Vec<f64>>, i64), Diagnostic> {
-    match a {
-        ScalarAttr::Constant(x) => Ok((Arc::new(vec![*x]), 0)),
-        ScalarAttr::Buffer(b) => Ok((data(buffers, b)?, 1)),
-        ScalarAttr::Device(_) => Err(no_device()),
-    }
-}
-
-/// A set with constant colours is written by the builder from the arrays themselves, with no
-/// allocation per mark; a per-instance colour goes mark by mark through `drawing_color`.
-fn shapes(buffers: &Buffers, count: i64, kind: &Kind) -> Result<scene::Node, Diagnostic> {
-    let mut b = Builder::with_capacity(count);
+/// Build into spare storage when a previous published table is still held by a frame.
+fn shapes(b: &mut Builder, buffers: &Buffers, count: i64, kind: &Kind) -> Result<scene::Node, Diagnostic> {
+    b.reset();
     match kind {
-        Kind::Rect { position, size, fill: ColorAttr::Constant(fill), stroke: ColorAttr::Constant(stroke), .. } => {
-            let (p, ps) = packed2(buffers, position)?;
-            let (s, ss) = packed2(buffers, size)?;
-            range(b.rects(count, &p, ps, &s, ss, *fill, *stroke))?;
-        }
-        Kind::Circle { position, radius, fill: ColorAttr::Constant(fill), stroke: ColorAttr::Constant(stroke), stroke_width } => {
-            let (p, ps) = packed2(buffers, position)?;
-            let (r, rs) = packed1(buffers, radius)?;
-            let (w, ws) = packed1(buffers, stroke_width)?;
-            range(b.circles(count, &p, ps, &r, rs, *fill, *stroke, &w, ws))?;
-        }
-        Kind::Line { position, end, stroke: ColorAttr::Constant(color), stroke_width } => {
-            let (p, ps) = packed2(buffers, position)?;
-            let (e, es) = packed2(buffers, end)?;
-            let (w, ws) = packed1(buffers, stroke_width)?;
-            range(b.lines(count, &p, ps, &e, es, *color, &w, ws))?;
-        }
         Kind::Rect { position, size, fill, stroke, .. } => {
             let (position, size, fill, stroke) = (pairs(buffers, position)?, pairs(buffers, size)?, colours(buffers, fill)?, colours(buffers, stroke)?);
             for i in 0..count as usize {
@@ -511,9 +484,8 @@ fn arrays(buffers: &Buffers, kind: &Kind) -> Result<Vec<Arc<Vec<f64>>>, Diagnost
 
 /// The scene node of a mark set, kept while its description and the physical attribute arrays are
 /// the same as the previous frame's: a batch whose data did not change is not built again.
-fn cached(c: Option<&Cache>, buffers: &Buffers, ordinal: i64, entry: &Entry, kind: &Kind, build: &dyn Fn() -> Result<Option<scene::Node>, Diagnostic>) -> Result<Option<scene::Node>, Diagnostic> {
+fn cached(c: Option<&Cache>, ordinal: i64, entry: &Entry, data: Vec<Arc<Vec<f64>>>, build: &dyn Fn() -> Result<Option<scene::Node>, Diagnostic>) -> Result<Option<scene::Node>, Diagnostic> {
     let Some(c) = c else { return build() };
-    let data = arrays(buffers, kind)?;
     if let Some((previous, old, node)) = c.nodes.borrow_mut().find(&|k, _| *k == ordinal) {
         if previous == entry && old.len() == data.len() && old.iter().zip(data.iter()).all(|(a, b)| Arc::ptr_eq(a, b)) {
             return Ok(Some(node.clone()));
@@ -543,7 +515,7 @@ enum Close {
 pub fn scene(
     buffers: &Buffers,
     image: Option<&dyn Fn(i64) -> rays::image::Image>,
-    gpu_: Option<&Gpu>,
+    gpu_: Option<&Gpu<'_>>,
     cache_: Option<&Cache>,
     device: Option<Device>,
     marks: &[Entry],
@@ -555,14 +527,14 @@ pub fn scene(
     let device: Device = device.unwrap_or(&no_dev);
     // Open pushes, innermost first, each with the nodes drawn inside it.
     let mut stack: Vec<(Close, Vec<scene::Node>)> = Vec::new();
-    let mut top: Vec<scene::Node> = Vec::new();
+    let mut top = cache_.map(|cache| cache.scene.take()).unwrap_or_default();
     let (mut slot, mut sets) = (0i64, 0i64);
     for entry in marks {
         match entry {
             Entry::MarkSet { count, kind: kind @ Kind::Point { position, fill } } if !on_gpu(gpu_.is_some(), slot, *count, kind) => {
                 sets += 1;
                 // A point set with no points has no node; it is never kept.
-                if let Some(node) = cached(cache_, buffers, sets, entry, kind, &|| points(buffers, *count, position, *fill))? {
+                if let Some(node) = cached(cache_, sets, entry, arrays(buffers, kind)?, &|| points(buffers, *count, position, *fill))? {
                     top.push(node);
                 }
             }
@@ -573,19 +545,39 @@ pub fn scene(
             }
             Entry::MarkSet { count, kind } => {
                 sets += 1;
-                if let Some(node) = cached(cache_, buffers, sets, entry, kind, &|| shapes(buffers, *count, kind).map(Some))? {
+                if let Some(node) = cached(cache_, sets, entry, arrays(buffers, kind)?, &|| {
+                    let mut scratch = cache_.map(|cache| cache.builder.borrow_mut());
+                    let mut local = None;
+                    let builder = scratch.as_deref_mut().unwrap_or(&mut local).get_or_insert_with(|| Builder::with_capacity(*count));
+                    shapes(builder, buffers, *count, kind).map(Some)
+                })? {
                     top.push(node);
                 }
             }
             Entry::Geometry { vertices, indices, color } => {
-                top.push(scene::geometry(Geometry { vertices: vertices.clone(), indices: indices.clone(), color: *color }));
+                sets += 1;
+                let build = || Ok(Some(scene::geometry(Geometry { vertices: vertices.clone(), indices: indices.clone(), color: *color })));
+                let cache = cache_.filter(|_| vertices.len() <= 8 && indices.len() <= 6);
+                let node = cached(cache, sets, entry, Vec::new(), &build)?;
+                top.extend(node);
             }
             Entry::Image { resource, x, y, scale, angle } => match image {
                 Some(resolve) => top.push(scene::image(&resolve(*resource), (*x, *y), Some(*scale), Some(*angle)).map_err(|message| fail("E_DRAW_RANGE", &message))?),
                 None => return Err(fail("E_IMAGE", "Drawing images need an environment-owned image resolver.")),
             },
             Entry::Text { x, y, size, color: c, text, style } => {
-                top.push(scene::styled_text((*x, *y), Some(color(*c)), Some(*size), &String::from_utf8_lossy(text), *style));
+                let mut pool = cache_.map(|cache| cache.text.borrow_mut());
+                let spare = pool.as_mut().and_then(|pool| {
+                    let idle = pool.iter().position(|text| Rc::strong_count(text) == 1 && Rc::weak_count(text) == 0)?;
+                    Some(pool.swap_remove(idle))
+                });
+                let node = scene::styled_text_reuse((*x, *y), Some(color(*c)), Some(*size), &String::from_utf8_lossy(text), *style, spare);
+                // ponytail: keep up to 128 released text nodes per drawing. A drawing with more
+                // simultaneous text can use per-slot pools sized to its active mark count.
+                if let (Some(pool), scene::Node::Text(text)) = (&mut pool, &node) {
+                    if pool.len() < 128 { pool.push(text.clone()); }
+                }
+                top.push(node);
             }
             Entry::PushTransform { xx, xy, yx, yy, tx, ty } => {
                 stack.push((Close::Transform(Transform { xx: *xx, xy: *xy, yx: *yx, yy: *yy, tx: *tx, ty: *ty }), std::mem::take(&mut top)));

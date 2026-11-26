@@ -171,6 +171,7 @@ pub struct Data {
     clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     owner: RefCell<Option<(x::Gpu, h::T)>>,
     mark_sets: RefCell<List<i64, x::GpuMarks>>,
+    drawing_marks: std::cell::OnceCell<Rc<marks_scene::Gpu<'static>>>,
     images: RefCell<List<crate::workspace_images::ImageKey, image_sink::T>>,
     image_stats: Rc<RefCell<ImageStats>>,
     closed_host: RefCell<h::Stats>,
@@ -225,6 +226,7 @@ pub fn create(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>) -> WorkspaceGpu
         owner: RefCell::new(None),
         // plans, not caches: what the frame draws
         mark_sets: RefCell::new(List::new(64, Box::new(|_, sink: x::GpuMarks| x::close_gpu_marks(&sink)))),
+        drawing_marks: std::cell::OnceCell::new(),
         images: RefCell::new(List::new(64, Box::new(move |_, sink: image_sink::T| close_image(&stats, sink)))),
         image_stats,
         closed_host: RefCell::new(h::zero()),
@@ -910,9 +912,9 @@ pub fn image(t_: &WorkspaceGpu, key: &crate::workspace_images::ImageKey, width: 
 
 /// One `Marks`-family source per GPU mark set of a frame, numbered in drawing order (at most 64),
 /// each owning the uploads of its CPU attributes and borrowing its GPU ones.
-pub fn marks(t_: &WorkspaceGpu) -> Rc<marks_scene::Gpu> {
+pub fn marks(t_: &WorkspaceGpu) -> Rc<marks_scene::Gpu<'static>> {
     let id = t_.0.id;
-    Rc::new(move |slot: i64, kind: i64, count: i64, attributes: &[marks_scene::Attribute]| {
+    t_.0.drawing_marks.get_or_init(|| Rc::new(move |slot: i64, kind: i64, count: i64, attributes: &[marks_scene::Attribute]| {
         let d = service(id).ok_or_else(|| error("Workspace GPU resources require their open initial-domain owner."))?;
         let (gpu, host) = owner(&d)?;
         let found = d.mark_sets.borrow_mut().find(&|k, _| *k == slot).cloned();
@@ -960,7 +962,7 @@ pub fn marks(t_: &WorkspaceGpu) -> Rc<marks_scene::Gpu> {
             _ => None,
         };
         native(x::gpu_marks_token(indirect, &sink, kind, count, &sources))
-    })
+    })).clone()
 }
 
 fn drop_display(d: &Data, key: &str) {

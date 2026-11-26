@@ -88,6 +88,27 @@ fn warm_draw_reuses_locals_and_marks_capacity() {
     assert!(warm < 40, "warm redraw allocated {warm}, expected pooled locals/marks");
 }
 
+#[test]
+fn animated_drawing_keeps_published_scenes() {
+    let (lowered, value) = draw(r##"(draw/merge (draw/background "#14161c")
+      (draw/circle [10 20 0] (+ 4 (frame/index)))
+      (draw/text [1 2 0] (str "frame " (frame/index))))"##);
+    let prepared = ok(drawing::prepare(&drawing::PrepareOptions::default(), &lowered.evaluated.plan, &value));
+    let state = flow_eval::create_state();
+    let render = |frame| {
+        let live = input::Frame { frame, tick: frame, ..input::at_time(0.) };
+        let options = drawing::RenderOptions { state: Some(state.clone()), ..Default::default() };
+        ok(drawing::render_prepared(&prepared, &live, (60, 40), &options))
+    };
+    let first = render(10);
+    let second = render(11);
+    let [scene::Node::Geometry(bg1), scene::Node::Shapes(circle1), scene::Node::Text(text1)] = first.as_slice() else { panic!("first drawing") };
+    let [scene::Node::Geometry(bg2), scene::Node::Shapes(circle2), scene::Node::Text(text2)] = second.as_slice() else { panic!("second drawing") };
+    assert!(std::rc::Rc::ptr_eq(bg1, bg2));
+    assert_eq!((circle1.float(0, 2).unwrap(), circle2.float(0, 2).unwrap()), (24., 25.));
+    assert_eq!((text1.value.as_str(), text2.value.as_str()), ("frame 10", "frame 11"));
+}
+
 fn rect_set(count: i64) -> Entry {
     Entry::MarkSet {
         count,

@@ -2495,11 +2495,11 @@ pub fn resident_exact(t: &T) -> HostResidency {
 
 fn resident_words(uint32: bool, signed: bool, t: &T) -> HostResidency {
     let (_, guard) = new_scope(t, uint32, signed);
-    HostResidency { executor: Arc::new(HostResident(guard.clone())), guard, id: t.0.id, t: t.clone() }
+    HostResidency { executor: Arc::new_cyclic(|executor| HostResident(guard.clone(), executor.clone())), guard, id: t.0.id, t: t.clone() }
 }
 
 /// The resident fold's device: the scope, found by its guard, which the last holder dropping ends.
-struct HostResident(Arc<Guard>);
+struct HostResident(Arc<Guard>, std::sync::Weak<HostResident>);
 
 impl core_exec::Resident for HostResident {
     fn fill(&self, ty: &Ty, length: i64, v: &Value) -> Result<Option<Value>, Diagnostic> {
@@ -2557,8 +2557,8 @@ impl core_exec::Resident for HostResident {
         scope_of(&self.0).map_or(Ok(None), |s| s.nth(v, i))
     }
     fn exact(&self) -> Option<Arc<dyn core_exec::Resident>> {
-        // Reuse this scope: `resident_exact` used to `new_scope` every draw (~1 alloc/frame on basic).
-        scope_of(&self.0).filter(|s| live(&s.t)).map(|_| Arc::new(HostResident(self.0.clone())) as Arc<dyn core_exec::Resident>)
+        scope_of(&self.0).filter(|s| live(&s.t))?;
+        self.1.upgrade().map(|resident| resident as Arc<dyn core_exec::Resident>)
     }
 }
 

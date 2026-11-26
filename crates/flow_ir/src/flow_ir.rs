@@ -358,12 +358,25 @@ pub mod profile {
     }
 
     pub fn record(profile: &T, execution: &Execution) {
+        record_timing(profile, execution, execution.seconds);
+    }
+
+    pub(super) fn record_timing(profile: &T, execution: &Execution, seconds: f64) {
         // ponytail: 512 recent groups, a linear scan once per group; index if profiling many small
         // groups measurably costs a frame.
         let mut list = profile.executions.lock().unwrap();
-        list.retain(|old| !(old.sites == execution.sites && old.tier == execution.tier));
-        list.insert(0, execution.clone());
-        list.truncate(512);
+        if let Some(i) = list.iter().position(|old| old.sites == execution.sites && old.tier == execution.tier) {
+            if list[i].owner != execution.owner {
+                list[i].owner.clone_from(&execution.owner);
+            }
+            list[i].seconds = seconds;
+            list[..=i].rotate_right(1);
+        } else {
+            if list.len() == 512 { list.pop(); }
+            let mut execution = execution.clone();
+            execution.seconds = seconds;
+            list.insert(0, execution);
+        }
     }
 
     /// The `Executor` entry of a static map: `finish(head, tail, completed)` closes it.
@@ -1154,6 +1167,7 @@ pub mod executor {
         pub value: Value,
         candidates: Mutex<HashMap<((i64, i64), bool), Candidate>>,
         root_core: Mutex<Option<(bool, Arc<core_exec::Prepared>)>>,
+        run_pool: Mutex<Option<Arc<Run>>>,
         packed_region: Option<Packed>,
         packed_root: Option<(Packed, bool)>,
         trace: Option<core_lower::Trace>,
@@ -1472,6 +1486,7 @@ pub mod executor {
             value: v.clone(),
             candidates: Mutex::new(HashMap::new()),
             root_core: Mutex::new(None),
+            run_pool: Mutex::new(None),
             packed_region,
             packed_root,
             trace: o.trace.clone(),
@@ -1552,20 +1567,19 @@ pub mod executor {
         pub outputs: Arc<Mutex<Vec<Vec<Option<Vec<f64>>>>>>,
     }
 
-    fn count_walk(counter: &Option<Arc<AtomicUsize>>) -> Arc<dyn Fn()> {
-        let counter = counter.clone();
-        Arc::new(move || {
-            if let Some(c) = &counter { c.fetch_add(1, Ordering::Relaxed); }
-        })
+    fn count_walk(counter: &Option<Arc<AtomicUsize>>) -> Option<Arc<dyn Fn() + Send + Sync>> {
+        let counter = counter.clone()?;
+        Some(Arc::new(move || { counter.fetch_add(1, Ordering::Relaxed); }))
     }
 
     /// One force operation's caches and settings; `dispatch` recurses into it.
     struct Run {
-        p: Program,
+        p: std::sync::Weak<ProgramData>,
         o: ForceOptions,
         live: Frame,
         counters: Counters,
         measure: Option<packed::Measure>,
+        packed_ran: Option<Arc<std::sync::atomic::AtomicBool>>,
         forced: Mutex<HashMap<(i64, i64), Value>>,
         operation: Mutex<HashMap<((i64, i64), bool), Candidate>>,
         fell_back: std::sync::atomic::AtomicBool,
@@ -1573,32 +1587,33 @@ pub mod executor {
 
     fn reference(run: &Run, value: &Value, state: &e::State) -> Result<Value, Diagnostic> {
         let walk = count_walk(&run.counters.walker);
-        e::host::force_reference_observed(value, &run.live, Some(state), run.o.elems.as_deref(), run.o.resolve.clone(), &*walk)
+        e::host::force_reference_observed(value, &run.live, Some(state), run.o.elems.as_deref(), run.o.resolve.clone(), walk.as_deref().unwrap_or(&|| {}))
     }
 
     impl Run {
         fn candidate(&self, r: ResidualId) -> Candidate {
+            let program = self.p.upgrade().expect("the force owns its program");
             let key = ((r.1, r.0), self.o.strict);
             if let Some(found) = self.operation.lock().unwrap().get(&key) { return found.clone(); }
             let result = {
-                let mut candidates = self.p.candidates.lock().unwrap();
+                let mut candidates = program.candidates.lock().unwrap();
                 match candidates.get(&key) {
                     Some(found) => found.clone(),
                     None => {
                         if let Some(c) = &self.counters.lower { c.fetch_add(1, Ordering::Relaxed); }
                         let template = |r: ResidualId| -> Candidate {
                             let options = packed::CompileOptions {
-                                trace: self.p.trace.clone(),
+                                trace: program.trace.clone(),
                                 through_exact: false,
                                 fusion: true,
-                                count_source: Some(self.p.count_source.clone()),
+                                count_source: Some(program.count_source.clone()),
                             };
                             match e::residual::residual_view(r).ok().and_then(|view| packed::compile_template(&options, r, &view.term)) {
                                 Some(p) => Candidate::Packed(p),
                                 None => Candidate::Reference,
                             }
                         };
-                        let candidate = match core_lower::lower(None, self.p.trace.clone(), self.o.strict, None, None, r) {
+                        let candidate = match core_lower::lower(None, program.trace.clone(), self.o.strict, None, None, r) {
                             Ok(core) => {
                                 // Placement declines before execution, while state is untouched.
                                 let declined = !self.o.strict
@@ -1613,8 +1628,8 @@ pub mod executor {
                     }
                 }
             };
-            if let (Candidate::Core(prepared), Value::Residual(root)) = (&result, &self.p.value) {
-                if (root.1, root.0) == (r.1, r.0) && prepared.direct() { *self.p.root_core.lock().unwrap() = Some((self.o.strict, prepared.clone())); }
+            if let (Candidate::Core(prepared), Value::Residual(root)) = (&result, &program.value) {
+                if (root.1, root.0) == (r.1, r.0) && prepared.direct() { *program.root_core.lock().unwrap() = Some((self.o.strict, prepared.clone())); }
             }
             self.operation.lock().unwrap().insert(key, result.clone());
             result
@@ -1637,20 +1652,17 @@ pub mod executor {
                 elems: self.o.elems.clone(),
                 resolve: self.o.resolve.clone(),
                 measure: self.measure.clone(),
-                on_walk: Some({
-                    let counter = self.counters.walker.clone();
-                    Arc::new(move || {
-                        if let Some(c) = &counter { c.fetch_add(1, Ordering::Relaxed); }
-                    })
-                }),
+                on_walk: count_walk(&self.counters.walker),
                 ..Default::default()
             }
         }
 
         fn execute_core(self: &Arc<Self>, root: Option<ResidualId>, prepared: &core_exec::Prepared) -> Result<Value, Diagnostic> {
-            let run = self.clone();
-            let options = self.force_options();
-            let live = self.live.clone();
+            let force = prepared.has_regions().then(|| {
+                let options = self.force_options();
+                let live = self.live.clone();
+                Arc::new(move |p: &Packed| packed::force(p, &live, &options)) as core_exec::ForceFn
+            });
             core_exec::execute(
                 prepared,
                 &self.live,
@@ -1658,17 +1670,13 @@ pub mod executor {
                     root,
                     strict: self.o.strict,
                     rerun_on_error: false,
-                    on_walk: Some(count_walk(&self.counters.walker)),
-                    force: Some(Arc::new(move |p: &Packed| packed::force(p, &live, &options))),
+                    on_walk: count_walk(&self.counters.walker).map(|walk| walk as Arc<dyn Fn()>),
+                    force,
                     resolve: self.o.resolve.clone(),
                     resident: self.o.resident.clone(),
                     host_source: None,
                 },
             )
-            .map_err(|d| {
-                let _ = &run;
-                d
-            })
         }
 
         fn execute(self: &Arc<Self>, r: ResidualId, live: &Frame) -> Option<Result<Value, Diagnostic>> {
@@ -1747,6 +1755,16 @@ pub mod executor {
     }
 
     pub fn force_impl(program: &Program, o: &ForceOptions, into: Option<&Into>, counters: &Counters, live: &Frame) -> Result<Value, Diagnostic> {
+        force_mode(program, o, into, counters, live, false)
+    }
+
+    /// Execute the top-level state values in order when the caller only needs their effects.
+    pub fn advance_states(program: &Program, state: &e::State, live: &Frame) -> Result<(), Diagnostic> {
+        let options = ForceOptions { state: Some(state.clone()), ..Default::default() };
+        force_mode(program, &options, None, &Counters::default(), live, true).map(|_| ())
+    }
+
+    fn force_mode(program: &Program, o: &ForceOptions, into: Option<&Into>, counters: &Counters, live: &Frame, discard_list: bool) -> Result<Value, Diagnostic> {
         let fast = if into.is_some() || o.state.is_some() || o.elems.is_some() || o.resolve.is_some() || o.reference || program.profile.is_some() {
             None
         } else {
@@ -1767,14 +1785,14 @@ pub mod executor {
                     Ok(v) => Ok(v),
                     Err(_) if !o.strict && o.resident.is_none() => {
                         let walk = count_walk(&counters.walker);
-                        e::host::force_reference_observed(&program.value, live, None, None, None, &*walk)
+                        e::host::force_reference_observed(&program.value, live, None, None, None, walk.as_deref().unwrap_or(&|| {}))
                     }
                     Err(d) => Err(d),
                 };
             }
         }
         let started = program.profile.as_ref().map(|p| (p.clock)());
-        let packed_ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ran_packed = false;
         let mut fell_back = o.reference;
         let result: Result<Value, Diagnostic>;
         if !e::is_live(&program.value) {
@@ -1783,16 +1801,32 @@ pub mod executor {
             let state = o.state.clone().unwrap_or_else(e::create_state);
             let mut opts = o.clone();
             opts.state = Some(state.clone());
-            let run = Arc::new(Run {
-                p: program.clone(),
-                o: opts,
-                live: live.clone(),
-                counters: counters.clone(),
-                measure: measure(packed_ran.clone(), &program.profile),
-                forced: Mutex::new(HashMap::new()),
-                operation: Mutex::new(HashMap::new()),
-                fell_back: std::sync::atomic::AtomicBool::new(false),
-            });
+            let spare = program.run_pool.lock().unwrap().take();
+            let mut run = match spare {
+                Some(mut run) => {
+                    let run_data = Arc::get_mut(&mut run).expect("exclusive force cache");
+                    run_data.o = opts;
+                    run_data.live.clone_from(live);
+                    run_data.counters = counters.clone();
+                    if let Some(ran) = &run_data.packed_ran { ran.store(false, Ordering::Relaxed); }
+                    run_data.fell_back.store(false, Ordering::Relaxed);
+                    run
+                }
+                None => {
+                    let packed_ran = program.profile.as_ref().map(|_| Arc::new(std::sync::atomic::AtomicBool::new(false)));
+                    Arc::new(Run {
+                        p: Arc::downgrade(program),
+                        o: opts,
+                        live: live.clone(),
+                        counters: counters.clone(),
+                        measure: packed_ran.as_ref().and_then(|ran| measure(ran.clone(), &program.profile)),
+                        packed_ran,
+                        forced: Mutex::new(HashMap::new()),
+                        operation: Mutex::new(HashMap::new()),
+                        fell_back: std::sync::atomic::AtomicBool::new(false),
+                    })
+                }
+            };
             let fallback = |run: &Arc<Run>| -> Result<Value, Diagnostic> {
                 run.fell_back.store(true, Ordering::Relaxed);
                 reference(run, &program.value, &state)
@@ -1838,7 +1872,13 @@ pub mod executor {
                             _ => None,
                         };
                         match record_core {
-                            None => run.walk(&program.value),
+                            None => match &program.value {
+                                Value::List(values) if discard_list => {
+                                    for value in values.iter() { run.walk(value)?; }
+                                    Ok(Value::NoGeo)
+                                }
+                                _ => run.walk(&program.value),
+                            },
                             Some((root, prepared)) => {
                                 // a stateful record's root, bound to this frame and state, carries
                                 // what its reads see
@@ -1867,9 +1907,25 @@ pub mod executor {
             let go = |run: &Arc<Run>| -> Result<Value, Diagnostic> { if o.reference { fallback(run) } else { body(run) } };
             result = go(&run);
             fell_back = fell_back || run.fell_back.load(Ordering::Relaxed);
+            ran_packed = run.packed_ran.as_ref().is_some_and(|ran| ran.load(Ordering::Relaxed));
+            if let Some(data) = Arc::get_mut(&mut run) {
+                data.o = ForceOptions::default();
+                data.counters = Counters::default();
+                data.forced.get_mut().unwrap().clear();
+                data.operation.get_mut().unwrap().clear();
+                *program.run_pool.lock().unwrap() = Some(run);
+            }
         }
         if let Some(profile) = &program.profile {
-            if !packed_ran.load(Ordering::Relaxed) {
+            if !ran_packed {
+                if let Value::List(_) = &program.value {
+                    static CORE: std::sync::OnceLock<Execution> = std::sync::OnceLock::new();
+                    static INTERP: std::sync::OnceLock<Execution> = std::sync::OnceLock::new();
+                    let (slot, tier) = if fell_back { (&INTERP, Tier::Interp) } else { (&CORE, Tier::Core) };
+                    let execution = slot.get_or_init(|| Execution { owner: (vec!["@value".into()], Vec::new()), sites: Vec::new(), tier, seconds: 0.0 });
+                    profile::record_timing(profile, execution, ((profile.clock)() - started.unwrap_or(0.0)).max(0.0));
+                    return result;
+                }
                 let (id, sites): (Id, Vec<(i64, Path, Vec<i64>)>) = match &program.value {
                     Value::Residual(residual) => match e::residual::residual_view(*residual) {
                         Ok(view) => {
