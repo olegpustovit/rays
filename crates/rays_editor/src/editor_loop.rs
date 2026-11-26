@@ -854,7 +854,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
             })
             .collect()
     };
-    let extra = V::render(extra, raw_frame.pixel_scale, Some(focus), render_views);
+    let extra = V::render(extra, raw_frame.pixel_scale, raw_frame.input.t, Some(focus), render_views);
     with_view_overlays(value, frame.input.t, &extra, &focused.viewing, &camera, &focused.cameras, pending, &geometry);
     let map = match (&baked, &value.map) {
         (Some(b), Some((source, image_))) if Rc::ptr_eq(b, source) || !value.core.map_view => Some((source.clone(), image_.clone())),
@@ -1012,6 +1012,10 @@ pub fn may_rest(value: &LoopModel, frame_: &frame::Frame) -> bool {
         && core.queued.is_empty()
         && (core.notice.is_none() || frame_.input.t - core.notice_at >= 3.)
         && core.traces.iter().all(|(_, t)| t.samples >= t.cap)
+        && value.extra.renderer.slots.iter().all(|slot| slot.step == 1 && slot.tracer.as_ref().is_none_or(|t| {
+            let t = t.borrow();
+            t.building.is_none() && t.queued_mesh.is_none()
+        }))
         && cook::at_rest(&core.cook)
         && clock_idle
 }

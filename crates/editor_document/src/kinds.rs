@@ -118,7 +118,7 @@ fn window_fields() -> Vec<FieldView> {
 fn kind_slots(qualified: &str) -> Vec<(String, InputRequirement)> {
     let s = |n: &str, r: InputRequirement| (n.to_owned(), r);
     match qualified {
-        "scene/geometry" => vec![s("geometry", InputRequirement::Required), s("texture", InputRequirement::Optional)],
+        "scene/geometry" => vec![s("geometry", InputRequirement::Required), s("texture", InputRequirement::Optional), s("material", InputRequirement::Optional)],
         "scene/world" => vec![s("world", InputRequirement::Required)],
         "scene/root" => vec![s("scene", InputRequirement::Required), s("camera", InputRequirement::Optional), s("film", InputRequirement::Optional)],
         q if q.starts_with("world/") => vec![s("below", InputRequirement::Optional)],
@@ -148,7 +148,7 @@ pub fn descriptors() -> Vec<Descriptor> {
                 description: kind.description.clone(),
                 slots: kind_slots(&qualified),
                 slot_types: match qualified.as_str() {
-                    "scene/geometry" => vec!["geometry".into(), "image".into()],
+                    "scene/geometry" => vec!["geometry".into(), "image".into(), "material".into()],
                     "scene/root" => vec!["scene".into(), "scene".into(), "material".into()],
                     _ => Vec::new(),
                 },

@@ -204,12 +204,16 @@ pub mod walk {
     use super::*;
 
     pub fn with_texture(texture: &Texture, scene: &Scene3) -> Scene3 {
-        fn visit(texture: &Texture, n: &Node) -> Node {
-            let many = |children: &Rc<Vec<Node>>| Rc::new(children.iter().map(|c| visit(texture, c)).collect::<Vec<Node>>());
+        with_surface(None, Some(texture), scene)
+    }
+
+    pub fn with_surface(material: Option<&material::Material>, texture: Option<&Texture>, scene: &Scene3) -> Scene3 {
+        fn visit(material: Option<&material::Material>, texture: Option<&Texture>, n: &Node) -> Node {
+            let many = |children: &Rc<Vec<Node>>| Rc::new(children.iter().map(|c| visit(material, texture, c)).collect::<Vec<Node>>());
             match n {
-                Node::Mesh(m, mat, _, mode, cull_, shading_) => Node::Mesh(m.clone(), mat.clone(), Some(texture.clone()), *mode, *cull_, *shading_),
-                Node::Instances(m, mat, _, mode, cull_, shading_, transforms) => {
-                    Node::Instances(m.clone(), mat.clone(), Some(texture.clone()), *mode, *cull_, *shading_, transforms.clone())
+                Node::Mesh(m, mat, tex, mode, cull_, shading_) => Node::Mesh(m.clone(), material.unwrap_or(mat).clone(), texture.cloned().or_else(|| tex.clone()), *mode, *cull_, *shading_),
+                Node::Instances(m, mat, tex, mode, cull_, shading_, transforms) => {
+                    Node::Instances(m.clone(), material.unwrap_or(mat).clone(), texture.cloned().or_else(|| tex.clone()), *mode, *cull_, *shading_, transforms.clone())
                 }
                 Node::Group(children) => Node::Group(many(children)),
                 Node::Transform(matrix, children) => Node::Transform(matrix.clone(), many(children)),
@@ -217,7 +221,7 @@ pub mod walk {
                 Node::BlendState(state, children) => Node::BlendState(*state, many(children)),
             }
         }
-        Scene3 { nodes: Rc::new(scene.nodes.iter().map(|n| visit(texture, n)).collect()), ..scene.clone() }
+        Scene3 { nodes: Rc::new(scene.nodes.iter().map(|n| visit(material, texture, n)).collect()), ..scene.clone() }
     }
 
     /// `scene` with every mesh drawn under `cull` (a geometry object's face culling)
@@ -251,8 +255,8 @@ pub mod walk {
     pub(crate) fn cacheable(scene: &Scene3) -> bool {
         fn nodes(list: &[Node]) -> bool {
             list.iter().all(|n| match n {
-                Node::Mesh(_, _, texture, ..) => texture.is_none(),
-                Node::Instances(_, _, texture, ..) => texture.is_none(),
+                Node::Mesh(_, _, tex, ..) | Node::Instances(_, _, tex, ..) =>
+                    tex.as_ref().is_none_or(|tex| texture::private::image(&tex.value).is_none()),
                 Node::Group(nested) | Node::Transform(_, nested) | Node::DepthState(_, nested) | Node::BlendState(_, nested) => nodes(nested),
             })
         }

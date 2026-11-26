@@ -23,7 +23,7 @@ pub struct Material {
     pub roughness: f64,
     pub metallic: f64,
     pub emission: LinearColor,
-    pub vertex_emission: bool,
+    pub texture: Option<rays::texture::private::RgbaLevel>,
     /// Round-corners radius in scene units (0 = off). A render-time shading bevel: the normal rolls over
     /// onto adjacent faces within this distance of an edge, without changing geometry.
     pub round: f64,
@@ -35,7 +35,7 @@ pub fn material(roughness: Option<f64>, metallic: Option<f64>, emission: Option<
         roughness: roughness.unwrap_or(0.5),
         metallic: metallic.unwrap_or(0.),
         emission: emission.unwrap_or(linear::rgb(0., 0., 0.)),
-        vertex_emission: true,
+        texture: None,
         round: round.unwrap_or(0.),
     }
 }
@@ -331,12 +331,13 @@ pub fn mesh(spheres: Option<&[Sphere]>, strands: Option<&[Strand]>, objects: &[(
     materials.extend(spheres.iter().map(|s| s.sphere_material.clone()));
     materials.extend(strands.iter().map(|s| s.strand_material.clone()));
     let devices: Vec<Option<mesh_data::Device>> = objects.iter().map(|(m, _)| device_of(m)).collect();
-    if spheres.is_empty() && strands.is_empty() && devices.len() == 1 && devices[0].is_some() {
+    if spheres.is_empty() && strands.is_empty() && devices.len() == 1 && devices[0].is_some() && materials[0].texture.is_none() {
         let device = devices[0].clone().unwrap();
         Ok(mesh_data::MeshData {
             triangles: device.index_count / 3,
             device: Some(device),
             positions: vec![],
+            uv: vec![],
             normals: vec![],
             colors: vec![],
             ids: vec![],
@@ -373,7 +374,7 @@ pub fn material_bytes(materials: &[Material]) -> Vec<u8> {
     for m in materials {
         add_float4(&mut builder, color_tuple(&m.albedo), m.roughness);
         add_float4(&mut builder, color_tuple(&m.emission), m.metallic);
-        add_float4(&mut builder, (m.round, if m.vertex_emission { 0. } else { 1. }, 0.), 0.);
+        add_float4(&mut builder, (m.round, 0., 0.), 0.);
     }
     builder
 }
@@ -522,15 +523,12 @@ fn create_tracer(o: &CreateOptions, width: i64, height: i64, scene_: &Scene) -> 
         ogpu_core::caps::require(Some("Rays_pathtracer.create"), &b::capabilities(&device), &ogpu_core::caps::Feature::RayTracing).map_err(gpu_err)?;
         let m = mesh(Some(&scene_.spheres), Some(&scene_.strands), &scene_.objects)?;
         // a device mesh is installed by [replace_mesh] once the tracer exists, over a stand-in
-        let gpu_mesh_ = upload_mesh(
-            &device,
-            &queue,
-            &if m.device.is_none() {
-                m.clone()
-            } else {
-                mesh_data::MeshData { device: None, positions: vec![0; 36], normals: vec![0; 36], colors: vec![], ids: vec![0; 4], triangles: 1, ..m.clone() }
-            },
-        )?;
+        let gpu_mesh_ = if m.device.is_none() {
+            upload_mesh(&device, &queue, &m)?
+        } else {
+            let stand_in = mesh_data::MeshData { device: None, positions: vec![0; 36], normals: vec![0; 36], colors: vec![], ids: vec![0; 4], triangles: 1, ..m.clone() };
+            upload_mesh(&device, &queue, &stand_in)?
+        };
         let panels = shared(&device, "pathtracer-panels", &panel_bytes(&scene_.environment.panels))?;
         let lights = shared(&device, "pathtracer-lights", &light_bytes(&[], &scene_.lights))?;
         let world_buffer = shared(&device, "pathtracer-world", &[0u8; 16])?;
@@ -1110,21 +1108,41 @@ pub fn resize(t: &mut PathTracer, width: i64, height: i64) -> Result<(), String>
     } else {
         restart(t);
         flush(t)?;
-        let pixels = vec![0u8; (width * height * 4) as usize];
-        // The image stops sampling the old film before that film is destroyed.
-        runtime_resources::image::replace(&t.resource, width, height, &pixels).map_err(|e| resources_err(&e))?;
-        if let Some(f) = &t.film {
-            destroy_film(None, f);
-        }
-        t.film = None;
-        if let Some(shown) = t.shown.take() {
-            let _ = b::destroy_texture(&shown);
-        }
-        t.published = None;
-        t.width = width;
-        t.height = height;
-        Ok(())
+        resize_film(t, width, height)
     }
+}
+
+/// The editor can keep displaying a film while its last GPU band finishes.
+pub fn try_resize(t: &mut PathTracer, width: i64, height: i64) -> Result<bool, String> {
+    if width <= 0 || height <= 0 {
+        return Err("path tracer size must be positive".to_string());
+    }
+    if (width, height) == size(t) {
+        return Ok(true);
+    }
+    if !poll(t)? {
+        return Ok(false);
+    }
+    restart(t);
+    resize_film(t, width, height)?;
+    Ok(true)
+}
+
+fn resize_film(t: &mut PathTracer, width: i64, height: i64) -> Result<(), String> {
+    let pixels = vec![0u8; (width * height * 4) as usize];
+    // The image stops sampling the old film before that film is destroyed.
+    runtime_resources::image::replace(&t.resource, width, height, &pixels).map_err(|e| resources_err(&e))?;
+    if let Some(f) = &t.film {
+        destroy_film(None, f);
+    }
+    t.film = None;
+    if let Some(shown) = t.shown.take() {
+        let _ = b::destroy_texture(&shown);
+    }
+    t.published = None;
+    t.width = width;
+    t.height = height;
+    Ok(())
 }
 
 fn poll(t: &mut PathTracer) -> Result<bool, String> {
@@ -1202,6 +1220,7 @@ fn lisp_facts(t: &PathTracer) -> lisp_kernel::Facts {
         bsdf_only: t.bsdf_only,
         instanced: t.gpu.shape.instanced,
         colored: t.gpu.shape.colored,
+        textured: t.gpu.tables.textured,
         lone: t.gpu.shape.lone,
         classes: t.gpu.tables.classes,
         motion: t.gpu.shape.motion,
@@ -1339,6 +1358,8 @@ fn lisp_table(t: &PathTracer, tables: &crate::mesh_build::Tables, geo: &Buffer, 
         "inst" => (tables.inst.clone(), 4 * tables.instance_count),
         "nrm" => (t.gpu.normals.clone(), count(&t.gpu.normals, 12)),
         "cols" => (t.gpu.colors.clone(), count(&t.gpu.colors, 12)),
+        "uvs" => (tables.uv.clone(), count(&tables.uv, 8)),
+        "texels" => (tables.textures.clone(), count(&tables.textures, 4)),
         "accum" => (live_film(t).accum.clone(), n),
         "geo" => (geo.clone(), n),
         "pgeo" => (pgeo.clone(), n),
@@ -1729,6 +1750,7 @@ pub mod private {
             let a: Vec<f64> = (0..length).map(|i| f32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().unwrap()) as f64).collect();
             match ty {
                 flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Vec4 => Value::Floats(4, std::sync::Arc::new(a)),
+                flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Vec2 => Value::Floats(2, std::sync::Arc::new(a)),
                 flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Vec3 => Value::Floats(3, std::sync::Arc::new(a)),
                 flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Int => Value::IntArray(std::sync::Arc::new(a.iter().map(|v| *v as i64).collect())),
                 _ => Value::Floats(1, std::sync::Arc::new(a)),

@@ -4,7 +4,7 @@
   (error code "material could not produce valid geometry"
     :cause (str "material [" code "]: " reason)))
 (defn material_write :context sop
-  [(geo : geometry) (selection : (array int)) (name : text) (color : vec3) (roughness : float) (round : float) (emission : vec3) (vertex_emission : bool)]
+  [(geo : geometry) (selection : (array int)) (name : text) (color : vec3) (roughness : float) (round : float) (emission : vec3)]
   (let* [count (sop/count geo :primitives)
          path_exists (sop/has_attr geo "shop_materialpath" :owner "primitive")
          rough_exists (sop/has_attr geo "material_roughness" :owner "primitive")
@@ -30,10 +30,8 @@
                with_rough (sop/with_attr with_path "material_roughness" (array/float count roughness) :owner "primitive"
                             :type float :selection selection :default (sqrt (/ 2.0 34.0)))
                with_color (sop/with_attr with_rough "material_color" (array/vec4 count [color.x color.y color.z 1.0])
-                            :owner "primitive" :type vec4 :selection selection :default [1.0 1.0 1.0 1.0])
-               with_tint (sop/with_attr with_color "material_vertex_emission" (array/float count (if vertex_emission 1.0 0.0))
-                           :owner "primitive" :type float :selection selection :default 1.0)]
-          (sop/with_attr (sop/with_attr with_tint "material_emission" (array/vec4 count [emission.x emission.y emission.z 1.0])
+                            :owner "primitive" :type vec4 :selection selection :default [1.0 1.0 1.0 1.0])]
+          (sop/with_attr (sop/with_attr with_color "material_emission" (array/vec4 count [emission.x emission.y emission.z 1.0])
                            :owner "primitive" :type vec4 :selection selection :default [0.0 0.0 0.0 1.0])
             "material_round" (array/float count round) :owner "primitive" :type float :selection selection :default 0.0)))))
 (defnode sop/material :label "Material" :category ["Attribute" "Material"]
@@ -48,17 +46,16 @@
    (round : float 0.0 :label "Round corners" :min 0 :max 0.5 :hard_min 0)
    (emission_r : float 0.0 :label "Emission red" :min 0 :max 1 :hard_min 0 :hard_max 1 :vec3 ["emission" 0])
    (emission_g : float 0.0 :label "Emission green" :min 0 :max 1 :hard_min 0 :hard_max 1 :vec3 ["emission" 1])
-   (emission_b : float 0.0 :label "Emission blue" :min 0 :max 1 :hard_min 0 :hard_max 1 :vec3 ["emission" 2])
-   (vertex_emission : bool true :label "Vertex colour tints emission")]
+   (emission_b : float 0.0 :label "Emission blue" :min 0 :max 1 :hard_min 0 :hard_max 1 :vec3 ["emission" 2])]
   (let* [selected_group (text/trim group)
          count (sop/count in0 :primitives)
          color [color_r color_g color_b]
          emission [emission_r emission_g emission_b]]
     (if (text/blank? group)
-      (material_write in0 (exact (array/int count 1)) material color roughness round emission vertex_emission)
+      (material_write in0 (exact (array/int count 1)) material color roughness round emission)
       (let* [found (fold [seen false] [name (sop/group_names in0 "" :owner "primitive")]
                      (or seen (equal? name selected_group)))]
         (if (not found)
           (material_error "invalid_group" (str "unknown primitive group " selected_group))
           (material_write in0 (exact (sop/group in0 :name selected_group :owner "primitive"))
-            material color roughness round emission vertex_emission))))))
+            material color roughness round emission))))))

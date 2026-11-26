@@ -77,6 +77,8 @@ pub fn tables() -> Vec<(&'static str, Ty)> {
         ("inst", array_of(Ty::Vec3)),
         ("nrm", array_of(Ty::Vec3)),
         ("cols", array_of(Ty::Vec3)),
+        ("uvs", array_of(Ty::Vec2)),
+        ("texels", array_of(Ty::Float)),
         ("accum", array_of(Ty::Vec4)),
         ("geo", array_of(Ty::Vec4)),
         ("pgeo", array_of(Ty::Vec4)),
@@ -115,6 +117,7 @@ pub fn placeholder(ty: &Ty) -> Value {
         Ty::Int => Value::Int(1_000_000 * k + 7),
         Ty::Array(inner) if **inner == Ty::Vec4 => Value::Floats(4, Arc::new(vec![0.; 4])),
         Ty::Array(inner) if **inner == Ty::Vec3 => Value::Floats(3, Arc::new(vec![0.; 3])),
+        Ty::Array(inner) if **inner == Ty::Vec2 => Value::Floats(2, Arc::new(vec![0.; 2])),
         Ty::Array(inner) if **inner == Ty::Int => Value::IntArray(Arc::new(vec![0])),
         _ => Value::Floats(1, Arc::new(vec![0.])),
     }
@@ -122,7 +125,7 @@ pub fn placeholder(ty: &Ty) -> Value {
 
 fn same_placeholder(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Floats(1, x), Value::Floats(1, y)) | (Value::Floats(3, x), Value::Floats(3, y)) | (Value::Floats(4, x), Value::Floats(4, y)) => Arc::ptr_eq(x, y),
+        (Value::Floats(1, x), Value::Floats(1, y)) | (Value::Floats(2, x), Value::Floats(2, y)) | (Value::Floats(3, x), Value::Floats(3, y)) | (Value::Floats(4, x), Value::Floats(4, y)) => Arc::ptr_eq(x, y),
         (Value::IntArray(x), Value::IntArray(y)) => Arc::ptr_eq(x, y),
         _ => a == b,
     }
@@ -132,6 +135,7 @@ pub fn width(ty: &Ty) -> i64 {
     match ty {
         Ty::Array(inner) if **inner == Ty::Vec4 => 4,
         Ty::Array(inner) if **inner == Ty::Vec3 => 3,
+        Ty::Array(inner) if **inner == Ty::Vec2 => 2,
         _ => 1,
     }
 }
@@ -152,6 +156,7 @@ pub struct Facts {
     pub bsdf_only: bool,
     pub instanced: bool,
     pub colored: bool,
+    pub textured: bool,
     /// a device mesh: one material, whatever its triangles
     pub lone: bool,
     pub classes: (bool, bool, bool),
@@ -167,7 +172,7 @@ pub fn text(f: &Facts, preview_set: bool) -> String {
     let (metallic, emissive, round) = f.classes;
     let u = |preview: bool| {
         format!(
-            "{{:eye eye :lens {} :fwd fwd :rgt rgt :up up :tan-half tanhalf :aspect aspect :focus focus :width width :height height :spp {} :bounces {} :frame frame :sky sky :ground ground :panels {} :lights {} :world {} :background {} :map-w {} :map-h {} :bg bg :sun-dir sundir :sun-cos suncos :sun-rad sunrad :sun-pdf {} :round-samples {} :preview {} :bsdf-only {} :instanced {} :colored {} :lone {} :sphere-base spherebase :metallic {} :emissive {} :round {} :motion {} :inst-rows {} :strand-base strandbase}}",
+            "{{:eye eye :lens {} :fwd fwd :rgt rgt :up up :tan-half tanhalf :aspect aspect :focus focus :width width :height height :spp {} :bounces {} :frame frame :sky sky :ground ground :panels {} :lights {} :world {} :background {} :map-w {} :map-h {} :bg bg :sun-dir sundir :sun-cos suncos :sun-rad sunrad :sun-pdf {} :round-samples {} :preview {} :bsdf-only {} :instanced {} :colored {} :textured {} :lone {} :sphere-base spherebase :metallic {} :emissive {} :round {} :motion {} :inst-rows {} :strand-base strandbase}}",
             if preview { "0." } else { "lens" },
             if preview { 1 } else { f.spp },
             if preview { 1 } else { f.bounces },
@@ -183,6 +188,7 @@ pub fn text(f: &Facts, preview_set: bool) -> String {
             f.bsdf_only,
             f.instanced,
             f.colored,
+            f.textured,
             f.lone,
             metallic,
             emissive,
@@ -191,7 +197,7 @@ pub fn text(f: &Facts, preview_set: bool) -> String {
             if f.motion { 7 } else { 4 },
         )
     };
-    let args = "lights mats ids inst nrm cols pan wmap cdf";
+    let args = "lights mats ids inst nrm cols uvs texels pan wmap cdf";
     let clear = f.world && f.background == 2;
     // the records are built inside each kernel, whose captures are then the placeholders themselves
     let kernel = |params: &str, name: &str, body: String| {
@@ -366,6 +372,7 @@ fn check_sketch_here() -> Result<(), String> {
         bsdf_only: false,
         instanced: true,
         colored: true,
+        textured: true,
         lone: false,
         classes: (false, false, true),
         motion: false,

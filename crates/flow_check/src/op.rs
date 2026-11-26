@@ -925,7 +925,7 @@ fn panel_ops()->Vec<Op>{
     ops.push(structure_op("material/film",context::material(),vec![],vec![],None,vec![
         ("exposure",Ty::Float),("bloom",Ty::Float),("bloom_threshold",Ty::Float),
         ("bloom_sigma",Ty::Float),("grain",Ty::Float)],ty::material(),false,"Film grade"));
-    ops.push(structure_op("material/standard",context::material(),vec![],vec![],None,vec![("name",Ty::Text),("color",Ty::Color),("roughness",Ty::Float),("emission",Ty::Color),("vertex_emission",Ty::Bool)],ty::material(),false,"Material"));
+    ops.push(structure_op("material/standard",context::material(),vec![],vec![],None,vec![("name",Ty::Text),("color",Ty::Color),("roughness",Ty::Float),("emission",Ty::Color),("texture",named_ty("image"))],ty::material(),false,"Material"));
     ops.push(structure_op("world/none",context::world(),vec![],vec![],None,vec![],ty::world(),false,"World"));
     ops.push(structure_op("ui/workspace",context::editor(),vec![("root",panel.clone())],vec![],None,vec![("effects",Ty::Any)],ty::editor(),false,"Editor"));
     ops.push(structure_op("ui/viewport",context::editor(),vec![("scene",scene)],vec![],None,vec![("look_through",Ty::Bool),("focus",Ty::Bool)],panel.clone(),false,"Editor"));

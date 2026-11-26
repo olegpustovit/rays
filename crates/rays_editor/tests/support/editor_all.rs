@@ -54,6 +54,7 @@ fn run_split(pure: bool) {
     cases.extend(natq::cases());
     cases.push(("hero_named_camera", hero::named_camera));
     cases.push(("hero_material_edit", hero::material_edit));
+    cases.push(("hero_drawable_preview", hero::drawable_preview));
     // ponytail: keep the device-free names in one list; use per-case markers if it churns.
     let pure_names: std::collections::HashSet<&str> = include_str!("../pure_cases.txt").lines().collect();
     cases.retain(|(name, _)| pure_names.contains(name) == pure);

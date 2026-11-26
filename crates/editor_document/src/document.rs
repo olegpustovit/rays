@@ -200,8 +200,9 @@ pub struct T {
     /// Where each derived object is written in the text.
     pub homes: Homes,
     pub scene_drives: IntMap<(String, Vec<(port::Parameter, E)>)>,
-    /// Residual light fields, resolved for composition; never written into history.
+    /// Scene surface inputs resolved for composition.
     pub scene_textures: IntMap<E>,
+    pub scene_materials: IntMap<E>,
     /// The authored document and its lowering.
     pub workspace: Workspace,
 }

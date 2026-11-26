@@ -69,6 +69,7 @@ pub struct DrawnEntry {
     pub prepared: cook::PreparedRef,
     pub rendered: d3::Scene3,
     pub texture: Option<texture::Texture>,
+    pub material: Option<rays::material::Material>,
     pub error: Option<String>,
 }
 
@@ -430,7 +431,7 @@ pub fn scene_document(value: &LoopModel) -> kg::T {
 }
 
 pub fn same_context(a: &Document, b: &Document) -> bool {
-    std::ptr::eq(a, b) || (kg::same(&a.scene, &b.scene) && a.scene_drives == b.scene_drives && a.scene_textures == b.scene_textures)
+    std::ptr::eq(a, b) || (kg::same(&a.scene, &b.scene) && a.scene_drives == b.scene_drives && a.scene_textures == b.scene_textures && a.scene_materials == b.scene_materials)
 }
 
 pub fn resolved_scene(value: &LoopModel) -> kg::T {
@@ -696,8 +697,12 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, live: &Input, changed: 
             Err(diagnostic) => errors.insert(0, rays_diagnostic::to_string(&diagnostic)),
         }
     }
-    // a texture has no identity here: a drawing with one, or one that had one, is drawn again
-    let texture_changed = value.drawn.iter().any(|(id, e)| !(e.texture.is_none() && !textures.contains_key(id)));
+    let same_texture = |a: Option<&texture::Texture>, b: Option<&texture::Texture>| match (a, b) {
+        (Some(a), Some(b)) => texture::private::identity(a) == texture::private::identity(b) && texture::private::image(b).is_none(),
+        (None, None) => true,
+        _ => false,
+    };
+    let texture_changed = value.drawn.iter().any(|(id, e)| !same_texture(e.texture.as_ref(), textures.get(id)));
     let (scene_rc, level_, shell_) = composition_key(core, scene);
     let same = match &value.composed {
         Some((s, l, sh)) => {
@@ -724,8 +729,22 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, live: &Input, changed: 
     let mut drawn: Drawn = BTreeMap::new();
     for (_, piece) in &placed {
         let texture = textures.get(&piece.id).cloned();
+        let material = core.doc.scene_materials.get(&piece.id).and_then(|v| v.geo_fields()).and_then(|fields| {
+            use flow_syntax::value::Value;
+            use rays_math::color;
+            let colour = |key, fallback| match fields.get_str(key) {
+                Some(Value::Vec3(r, g, b)) => color::of_floats(*r, *g, *b, 1.),
+                Some(Value::Text(text)) => color::hex(&String::from_utf8_lossy(text)).unwrap_or(fallback),
+                _ => fallback,
+            };
+            let diffuse = colour("color", color::white());
+            let emission = colour("emission", color::black());
+            let rough = match fields.get_str("roughness") { Some(Value::Float(r)) => *r, Some(Value::Int(r)) => *r as f64, _ => 0.4 };
+            let shine = (2. / (rough * rough).max(0.0001) - 2.).max(0.);
+            rays::material::create(Some(diffuse), Some(diffuse), Some(color::black()), Some(emission), Some(shine), None).ok()
+        });
         match value.drawn.get(&piece.id) {
-            Some(prev) if node::ptr_eq(&prev.graph, &piece.graph) && Rc::ptr_eq(&prev.prepared, &piece.prepared) && prev.texture.is_none() && texture.is_none() => {
+            Some(prev) if node::ptr_eq(&prev.graph, &piece.graph) && Rc::ptr_eq(&prev.prepared, &piece.prepared) && same_texture(prev.texture.as_ref(), texture.as_ref()) && prev.material == material => {
                 drawn.insert(piece.id, prev.clone());
             }
             _ => {
@@ -740,11 +759,13 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, live: &Input, changed: 
                     Ok(s) => (s, None),
                     Err(ConversionError(message)) => (d3::empty(), Some(message)),
                 };
-                let scene3 = match &texture {
-                    Some(tex) => walk::with_texture(&d3::textured(None, tex.clone()), &scene3),
-                    None => scene3,
+                let scene3 = if material.is_some() || texture.is_some() {
+                    let tex = texture.as_ref().map(|tex| d3::textured(None, tex.clone()));
+                    walk::with_surface(material.as_ref(), tex.as_ref(), &scene3)
+                } else {
+                    scene3
                 };
-                drawn.insert(piece.id, DrawnEntry { graph: piece.graph.clone(), prepared: piece.prepared.clone(), rendered: scene3, texture, error });
+                drawn.insert(piece.id, DrawnEntry { graph: piece.graph.clone(), prepared: piece.prepared.clone(), rendered: scene3, texture, material, error });
             }
         }
     }

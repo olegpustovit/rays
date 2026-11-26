@@ -3,6 +3,7 @@ use crate::num::{fmax, fmin, int_of_float};
 use rays_math::color;
 use runtime_resources::image as Resource;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,13 +23,13 @@ pub enum Wrap {
 pub struct Level {
     pub width: i64,
     pub height: i64,
-    pub pixels: Vec<color::T>,
+    pub pixels: Arc<Vec<u8>>,
 }
 
 pub struct Cpu {
     pub width: i64,
     pub height: i64,
-    pub pixels: Vec<color::T>,
+    pub pixels: Arc<Vec<u8>>,
     pub mipmaps: Vec<Level>,
 }
 
@@ -67,28 +68,22 @@ fn owned(data: Cpu) -> Texture {
     Texture(Rc::new(TextureData { backing: Backing::Cpu(data), id: fresh_id() }))
 }
 
-/// Zero-copy construction for fresh immutable pixel arrays. The supplied array becomes backing
-/// storage.
 pub fn create_owned(width: i64, height: i64, pixels: Vec<color::T>) -> Result<Texture, String> {
-    if width <= 0 || height <= 0 {
-        return Err("Texture.create: dimensions must be positive".to_string());
+    let rgba = pixels.into_iter().flat_map(|c| [c.r as u8, c.g as u8, c.b as u8, c.a as u8]).collect();
+    create_rgba8(width, height, rgba)
+}
+
+pub fn create_rgba8(width: i64, height: i64, pixels: Vec<u8>) -> Result<Texture, String> {
+    if width <= 0 || height <= 0 || width.checked_mul(height).and_then(|n| n.checked_mul(4)) != Some(pixels.len() as i64) {
+        return Err("Texture.create: invalid dimensions or RGBA byte count".to_string());
     }
-    let expected = width * height;
-    if pixels.len() as i64 != expected {
-        return Err(format!(
-            "Texture.create: expected {expected} pixels for {width}x{height}, received {}",
-            pixels.len()
-        ));
-    }
-    Ok(owned(Cpu { width, height, pixels, mipmaps: Vec::new() }))
+    Ok(owned(Cpu { width, height, pixels: Arc::new(pixels), mipmaps: Vec::new() }))
 }
 
 pub fn init(width: i64, height: i64, make: &dyn Fn(i64, i64) -> color::T) -> Result<Texture, String> {
-    if width <= 0 || height <= 0 {
-        return Err("Texture.init: dimensions must be positive".to_string());
-    }
-    let pixels = (0..width * height).map(|index| make(index % width, index / width)).collect();
-    Ok(owned(Cpu { width, height, pixels, mipmaps: Vec::new() }))
+    let count = width.checked_mul(height).filter(|_| width > 0 && height > 0)
+        .ok_or_else(|| "Texture.init: invalid dimensions".to_string())?;
+    create_owned(width, height, (0..count).map(|index| make(index % width, index / width)).collect())
 }
 
 pub fn size(texture: &Texture) -> Result<(i64, i64), String> {
@@ -101,14 +96,15 @@ pub fn size(texture: &Texture) -> Result<(i64, i64), String> {
 }
 
 pub fn pixels(texture: &Texture) -> Result<Vec<color::T>, String> {
-    Ok(cpu_ref(texture).ok_or_else(|| borrowed_message("Texture.pixels"))?.pixels.clone())
+    let data = cpu_ref(texture).ok_or_else(|| borrowed_message("Texture.pixels"))?;
+    Ok(data.pixels.chunks_exact(4).map(|c| color::rgba(c[0] as i64, c[1] as i64, c[2] as i64, c[3] as i64)).collect())
 }
 
-fn next_level(source_width: i64, source_height: i64, source: &[color::T]) -> Level {
+fn next_level(source_width: i64, source_height: i64, source: &[u8]) -> Level {
     let width = std::cmp::max(1, (source_width + 1) / 2);
     let height = std::cmp::max(1, (source_height + 1) / 2);
     let pixels = (0..width * height)
-        .map(|index| {
+        .flat_map(|index| {
             let x = index % width;
             let y = index / width;
             let (mut red, mut green, mut blue, mut alpha, mut count) = (0, 0, 0, 0, 0);
@@ -117,20 +113,20 @@ fn next_level(source_width: i64, source_height: i64, source: &[color::T]) -> Lev
                     let source_x = x * 2 + offset_x;
                     let source_y = y * 2 + offset_y;
                     if source_x < source_width && source_y < source_height {
-                        let c = source[(source_y * source_width + source_x) as usize];
-                        red += c.r;
-                        green += c.g;
-                        blue += c.b;
-                        alpha += c.a;
+                        let i = 4 * (source_y * source_width + source_x) as usize;
+                        red += i64::from(source[i]);
+                        green += i64::from(source[i + 1]);
+                        blue += i64::from(source[i + 2]);
+                        alpha += i64::from(source[i + 3]);
                         count += 1;
                     }
                 }
             }
-            let rounded = |value: i64| (value + count / 2) / count;
-            color::rgba(rounded(red), rounded(green), rounded(blue), rounded(alpha))
+            let rounded = |value: i64| ((value + count / 2) / count) as u8;
+            [rounded(red), rounded(green), rounded(blue), rounded(alpha)]
         })
         .collect();
-    Level { width, height, pixels }
+    Level { width, height, pixels: Arc::new(pixels) }
 }
 
 pub fn generate_mipmaps(texture: &Texture) -> Result<Texture, String> {
@@ -163,14 +159,11 @@ pub fn subsection(x: i64, y: i64, width: i64, height: i64, texture: &Texture) ->
     if x < 0 || y < 0 || x + width > source.width || y + height > source.height {
         return Err("Texture.subsection: rectangle is outside the source texture".to_string());
     }
-    let pixels = (0..width * height)
-        .map(|index| {
-            let target_x = index % width;
-            let target_y = index / width;
-            source.pixels[((y + target_y) * source.width + x + target_x) as usize]
-        })
-        .collect();
-    Ok(owned(Cpu { width, height, pixels, mipmaps: Vec::new() }))
+    let pixels = (y..y + height).flat_map(|row| {
+        let first = (4 * (row * source.width + x)) as usize;
+        source.pixels[first..first + 4 * width as usize].iter().copied()
+    }).collect();
+    create_rgba8(width, height, pixels)
 }
 
 fn wrap_coordinate(mode: Wrap, value: f64) -> f64 {
@@ -186,10 +179,6 @@ fn wrap_coordinate(mode: Wrap, value: f64) -> f64 {
             if value <= 1. { value } else { 2. - value }
         }
     }
-}
-
-fn pack(c: color::T) -> i64 {
-    (c.r << 24) | (c.g << 16) | (c.b << 8) | c.a
 }
 
 fn unpack(value: i64) -> color::T {
@@ -209,8 +198,9 @@ fn blend_packed(left: i64, right: i64, amount: f64) -> i64 {
     (red << 24) | (green << 16) | (blue << 8) | alpha
 }
 
-fn packed_texel(pixels: &[color::T], width: i64, x: i64, y: i64) -> i64 {
-    pack(pixels[(y * width + x) as usize])
+fn packed_texel(pixels: &[u8], width: i64, x: i64, y: i64) -> i64 {
+    let at = (4 * (y * width + x)) as usize;
+    u32::from_be_bytes(pixels[at..at + 4].try_into().unwrap()) as i64
 }
 
 fn sample_pixels_packed(
@@ -219,7 +209,7 @@ fn sample_pixels_packed(
     wrap_v: Wrap,
     width: i64,
     height: i64,
-    pixels: &[color::T],
+    pixels: &[u8],
     u: f64,
     v: f64,
 ) -> i64 {
@@ -329,13 +319,17 @@ pub mod private {
         }
     }
 
-    /// Packed RGBA levels, base level first: (width, height, pixels) copies.
-    pub fn levels(texture: &Texture) -> Result<Vec<(i64, i64, Vec<color::T>)>, String> {
+    pub type RgbaLevel = (i64, i64, Arc<Vec<u8>>);
+
+    /// Packed RGBA levels, base level first. Clones share the immutable pixels.
+    pub fn levels(texture: &Texture) -> Result<Vec<RgbaLevel>, String> {
         let data = cpu_ref(texture).ok_or_else(|| borrowed_message("Texture.Private.levels"))?;
-        let mut out = vec![(data.width, data.height, data.pixels.clone())];
-        for l in &data.mipmaps {
-            out.push((l.width, l.height, l.pixels.clone()));
-        }
-        Ok(out)
+        let base = (data.width, data.height, data.pixels.clone());
+        Ok(std::iter::once(base).chain(data.mipmaps.iter().map(|l| (l.width, l.height, l.pixels.clone()))).collect())
+    }
+
+    pub fn trace_pixels(texture: &Texture) -> Result<RgbaLevel, String> {
+        let data = cpu_ref(texture).ok_or_else(|| borrowed_message("Path tracing"))?;
+        Ok((data.width, data.height, data.pixels.clone()))
     }
 }

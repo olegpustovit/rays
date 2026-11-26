@@ -1,7 +1,6 @@
-//! Path-traced editor viewports share the renderer settings. ponytail: converted meshes use a 64-entry MRU list with estimated byte charges outside global Lru retreat.
+//! Path-traced editor viewports share the renderer settings.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::rc::Rc;
 
 use rays::camera;
@@ -59,37 +58,21 @@ pub struct CachedMesh {
     pub traced: p::Mesh,
 }
 
-const MESH_ENTRIES: usize = 64;
-
-/// The converted source meshes, most recent first, keyed by the mesh (physical identity) and its
-/// material.
+/// Converted meshes keyed by source and material. A scene change prunes the entries that no
+/// current viewport uses, so old takes and material edits cannot pin CPU geometry or textures.
 #[derive(Clone)]
 pub struct MeshCache {
-    entries: VecDeque<(mesh::Mesh, material::Material, Rc<CachedMesh>)>,
+    entries: Vec<(mesh::Mesh, material::Material, Option<i64>, Rc<CachedMesh>)>,
 }
 
 impl MeshCache {
-    fn peek(&self, mesh_: &mesh::Mesh, material_: &material::Material) -> Option<Rc<CachedMesh>> {
-        self.entries.iter().find(|(m, mat, _)| mesh::same(m, mesh_) && mat == material_).map(|(_, _, c)| c.clone())
-    }
-
-    fn add(&mut self, mesh_: mesh::Mesh, material_: material::Material, cached: CachedMesh) {
-        if let Some(at) = self.entries.iter().position(|(m, mat, _)| mesh::same(m, &mesh_) && *mat == material_) {
-            self.entries.remove(at);
-        }
-        self.entries.push_front((mesh_, material_, Rc::new(cached)));
-        while self.entries.len() > MESH_ENTRIES {
-            self.entries.pop_back();
-        }
-    }
-
-    fn head(&self) -> Option<(&material::Material, &Rc<CachedMesh>)> {
-        self.entries.front().map(|(_, mat, c)| (mat, c))
+    fn peek(&self, source: &mesh::Mesh, material: &material::Material, texture: Option<i64>) -> Option<Rc<CachedMesh>> {
+        self.entries.iter().find(|(m, mat, tex, _)| mesh::same(m, source) && mat == material && *tex == texture).map(|(_, _, _, c)| c.clone())
     }
 }
 
 pub fn empty_meshes() -> MeshCache {
-    MeshCache { entries: VecDeque::new() }
+    MeshCache { entries: Vec::new() }
 }
 
 /// How one viewport renders: the root of its scene instance, else the document's. The sample cap is
@@ -104,7 +87,7 @@ pub struct Setting {
 }
 
 /// A viewport as one frame asks to draw it: `film` is the tracer's film in drawable pixels, `step`
-/// the divisor of the root's resolution it came from, `cap` the root's samples per pixel.
+/// the divisor of the viewport's drawable size, `cap` the root's samples per pixel.
 #[derive(Clone)]
 pub struct View {
     pub key: String,
@@ -114,6 +97,7 @@ pub struct View {
     pub scene: d3::Scene3,
     pub setting: Setting,
     pub cap: i64,
+    pub full_size_at: f64,
 }
 
 pub type Tracer = Rc<RefCell<p::PathTracer>>;
@@ -132,6 +116,7 @@ pub struct Slot {
     graded: Option<(i64, rays::image::Image)>,
     pub setting: Setting,
     pub cap: i64,
+    pub full_size_at: f64,
     /// why the last render of the slot failed, until one succeeds
     pub failure: Option<String>,
 }
@@ -165,22 +150,10 @@ pub fn close(state: &State) {
     }
 }
 
-/// The film of a traced viewport: the root's resolution divided by 1, 2, 4 or 8, the largest that
-/// does not exceed the gate (in drawable pixels, the root's aspect fitted in the pane), the eighth
-/// when even that is too big. A pane resize changes the film only by crossing a step. A viewport
-/// that is not looking `through` the render camera shows its own free view, not the render: its film
-/// is its rectangle, pixel for pixel, so the picture has the pane's aspect and lies where the raster
-/// one does.
-pub const FILM_STEPS: [i64; 4] = [1, 2, 4, 8];
-
-pub fn film(through: bool, resolution: (i64, i64), gate: (i64, i64)) -> ((i64, i64), i64) {
-    let (width, height) = resolution;
-    let (gate_width, gate_height) = gate;
-    if !through {
-        return ((gate_width.max(1), gate_height.max(1)), 1);
-    }
-    let step = FILM_STEPS.iter().copied().find(|step| width / step <= gate_width && height / step <= gate_height).unwrap_or(8);
-    (((width / step).max(1), (height / step).max(1)), step)
+/// Use half the drawable dimensions during motion, then accumulate at full size.
+pub fn film(gate: (i64, i64), moving: bool) -> ((i64, i64), i64) {
+    let step = if moving { 2 } else { 1 };
+    (((gate.0 / step).max(1), (gate.1 / step).max(1)), step)
 }
 
 fn linear(c: &color::T) -> p::LinearColor {
@@ -188,9 +161,7 @@ fn linear(c: &color::T) -> p::LinearColor {
 }
 
 pub fn traced_material(m: &material::Material) -> p::Material {
-    let mut traced = p::material(Some((2.0 / (m.shininess.max(0.0) + 2.0)).sqrt()), None, Some(linear(&m.emissive)), Some(m.round), linear(&m.diffuse));
-    traced.vertex_emission = m.vertex_emission;
-    traced
+    p::material(Some((2.0 / (m.shininess.max(0.0) + 2.0)).sqrt()), None, Some(linear(&m.emissive)), Some(m.round), linear(&m.diffuse))
 }
 
 pub fn wire_scene(scene: &d3::Scene3) -> d3::Scene3 {
@@ -239,9 +210,8 @@ pub fn device_drawing(scene: &d3::Scene3) -> Option<walk::Drawing> {
 
 type Traced = (MeshCache, p::Mesh, (mesh::Mesh, p::Material));
 
-/// The cache keeps at most 64 converted source meshes. Placement remains in the tracer's instance
-/// structure, so an orbit does not convert or upload geometry. The scene's mesh and material a new
-/// tracer starts from come with it.
+/// Placement remains in the tracer's instance structure, so an orbit does not convert geometry.
+/// The scene's first mesh and material are the bootstrap for a new tracer.
 pub fn traced_scene(meshes: &MeshCache, scene: &d3::Scene3) -> Result<Traced, String> {
     if let Some(drawing) = device_drawing(scene) {
         let first = (drawing.mesh.clone(), traced_material(&drawing.material));
@@ -250,24 +220,29 @@ pub fn traced_scene(meshes: &MeshCache, scene: &d3::Scene3) -> Result<Traced, St
     }
     let mut cache = meshes.clone();
     let mut result: Result<Vec<(mat4::T, p::Mesh)>, String> = Ok(Vec::new());
+    let mut first = None;
     walk::iter_batches(
         &mut |drawing, transforms| {
             let Ok(placed) = &mut result else { return };
             let step = (|| -> Result<(mat4::T, p::Mesh), String> {
-                if drawing.texture.is_some() {
-                    return Err("Path tracing textured meshes is not supported.".to_string());
-                }
-                let cached = match cache.peek(&drawing.mesh, &drawing.material) {
+                let texture_id = |tex: &d3::Texture| rays::texture::private::identity(&tex.value);
+                let key = drawing.texture.as_ref().map(texture_id);
+                let cached = match cache.peek(&drawing.mesh, &drawing.material, key) {
                     Some(cached) => cached,
                     None => {
                         let geometry = rdk_rays::rays_mesh::of_mesh(&drawing.mesh).map_err(|e| rdk_rays::geometry_view::error_string(&e))?;
                         let trace_mesh = rdk_rays::rays_mesh::to_trace_mesh(&geometry).map_err(|e| rdk_rays::geometry_view::error_string(&e))?;
-                        let traced = p::mesh(None, None, &[(trace_mesh.clone(), traced_material(&drawing.material))])?;
-                        let cached = CachedMesh { trace_source: trace_mesh, traced };
-                        cache.add(drawing.mesh.clone(), drawing.material.clone(), cached.clone());
-                        Rc::new(cached)
+                        let mut material = traced_material(&drawing.material);
+                        if let Some(texture) = &drawing.texture {
+                            material.texture = Some(rays::texture::private::trace_pixels(&texture.value)?);
+                        }
+                        let traced = p::mesh(None, None, &[(trace_mesh.clone(), material)])?;
+                        let cached = Rc::new(CachedMesh { trace_source: trace_mesh, traced });
+                        cache.entries.push((drawing.mesh.clone(), drawing.material.clone(), key, cached.clone()));
+                        cached
                     }
                 };
+                first.get_or_insert_with(|| (cached.trace_source.clone(), traced_material(&drawing.material)));
                 let placed_mesh = match transforms {
                     None => cached.traced.clone(),
                     Some(transforms) => p::mesh_instanced(&cached.traced, None, None, transforms)?,
@@ -283,9 +258,8 @@ pub fn traced_scene(meshes: &MeshCache, scene: &d3::Scene3) -> Result<Traced, St
     );
     let placed = result?;
     let mesh_ = p::scene_mesh(&placed)?;
-    let (source_material, cached) = cache.head().ok_or_else(|| "Path tracing needs a scene mesh.".to_string())?;
-    let first = (cached.trace_source.clone(), traced_material(source_material));
-    Ok((cache.clone(), mesh_, first))
+    let first = first.ok_or_else(|| "Path tracing needs a scene mesh.".to_string())?;
+    Ok((cache, mesh_, first))
 }
 
 /// Viewports asking for the same traced picture share one tracer: the same scene, camera, film and
@@ -389,7 +363,9 @@ pub fn update(state: &State, mode: Mode, custom: bool, focus: Option<&str>, view
         let wants = view.setting.mode == Mode::PathTraced
             && match previous.map(|i| &state.slots[i]) {
                 Some(Slot { tracer: Some(tracer), scene, camera, film, .. }) => {
-                    !d3::same(scene, &view.scene) || camera.as_ref() != Some(&view.camera) || *film != view.film || p::samples(&tracer.borrow()) < cap
+                    let tracer = tracer.borrow();
+                    !d3::same(scene, &view.scene) || camera.as_ref() != Some(&view.camera) || *film != view.film
+                        || p::samples(&tracer) < cap || tracer.building.is_some() || tracer.queued_mesh.is_some()
                 }
                 Some(Slot { tracer: None, .. }) | None => true,
             };
@@ -410,6 +386,20 @@ pub fn update(state: &State, mode: Mode, custom: bool, focus: Option<&str>, view
                 destroy(tracer);
             }
         }
+    }
+    if plans.iter().any(|plan| plan.previous.is_none_or(|i| !d3::same(&state.slots[i].scene, &plan.view.scene)))
+        || state.slots.len() != slots.len()
+    {
+        meshes.entries.retain(|(mesh_, material, texture, _)| {
+            let mut shown = false;
+            for slot in &slots {
+                walk::iter_batches(&mut |drawing, _| {
+                    shown |= mesh::same(&drawing.mesh, mesh_) && &drawing.material == material
+                        && drawing.texture.as_ref().map(|tex| rays::texture::private::identity(&tex.value)) == *texture;
+                }, &slot.scene);
+            }
+            shown
+        });
     }
     let failures: Vec<String> = slots.iter().filter_map(|slot| slot.failure.clone()).collect();
     State {
@@ -441,6 +431,7 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut MeshCache) -
         graded: None,
         setting,
         cap: plan.limit,
+        full_size_at: view.full_size_at,
         failure: None,
     };
     let scene = &view.scene;
@@ -458,7 +449,7 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut MeshCache) -
         // picture it had stays
         Mode::PathTraced if !plan.wants || !(plan.focused || is_chosen) => match previous {
             Some(slot) => {
-                let mut slot = Slot { keys: plan.names.clone(), cap: plan.limit, ..slot.clone() };
+                let mut slot = Slot { keys: plan.names.clone(), cap: plan.limit, full_size_at: view.full_size_at, ..slot.clone() };
                 if let (Some(tracer), false) = (&slot.tracer, plan.wants) {
                     if let Err(message) = p::release_film(&mut tracer.borrow_mut()) {
                         slot.failure = Some(format!("Renderer [{}]: {message}", view.key));
@@ -482,6 +473,11 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut MeshCache) -
                     let (cache, mesh_, first) = traced_scene(meshes, scene)?;
                     (cache, Some((mesh_, first)))
                 };
+                if let Some(tracer) = &prior.tracer
+                    && !p::try_resize(&mut tracer.borrow_mut(), width, height)?
+                {
+                    return Ok(Slot { keys: plan.names.clone(), cap: plan.limit, full_size_at: view.full_size_at, ..prior.clone() });
+                }
                 *meshes = cache;
                 let tracer: Tracer = match &prior.tracer {
                     Some(tracer) => tracer.clone(),
@@ -507,7 +503,6 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut MeshCache) -
                 if let Some((mesh_, _)) = &mesh_ {
                     p::queue_mesh(&mut tracer.borrow_mut(), mesh_)?;
                 }
-                p::resize(&mut tracer.borrow_mut(), width, height)?;
                 if prior.tracer.is_none() || walk::lights(&prior.scene) != walk::lights(scene) {
                     let lights: Vec<p::Light> = walk::lights(scene).iter().map(p::light_of).collect();
                     p::set_lights(&mut tracer.borrow_mut(), &lights)?;
@@ -520,7 +515,9 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut MeshCache) -
                     let generation = rays::image::generation(&raw);
                     match prior.graded.as_ref() {
                         Some((known, _)) if *known == generation => prior.graded.clone(),
-                        _ if p::samples(&t) > 0 => {
+                        // Read back the full film once at convergence. Preview and accumulation
+                        // stay on the GPU while the viewport or its camera is moving.
+                        _ if p::samples(&t) >= plan.limit => {
                             let into = prior.graded.as_ref().map(|(_, pixels)| pixels);
                             Some((generation, crate::film_grade::apply(&raw, setting.film, into)?))
                         }
@@ -558,8 +555,7 @@ pub fn slot_of<'a>(state: &'a State, key: &str) -> Option<&'a Slot> {
     state.slots.iter().find(|slot| slot.keys.iter().any(|k| k == key))
 }
 
-/// What a traced viewport's slot holds: the film in pixels, the step of the root's resolution it is
-/// at, the samples per pixel accumulated and the cap they run to, and how many viewports it serves.
+/// What a traced viewport's slot holds: the film in pixels, the divisor of its drawable size, the samples per pixel accumulated and the cap they run to, and how many viewports it serves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Info {
     pub size: (i64, i64),
@@ -597,12 +593,14 @@ pub fn paint(state: &State, key: &str, bounds: (i64, i64, i64, i64), camera: &ca
         Some(Slot { setting: Setting { mode: Mode::Raster, .. }, .. }) => raster(),
         Some(Slot { wire: Some(wire), .. }) => Some(view(wire)),
         Some(Slot { tracer: Some(tracer), graded, .. }) => {
-            let (x, y, w, _) = bounds;
+            let (x, y, w, h) = bounds;
             let tracer = tracer.borrow();
-            // the film is scaled to its pane's gate, so a resize inside a step never re-renders
-            let (sw, _) = p::size(&tracer);
             let image = graded.as_ref().map_or_else(|| p::image(&tracer), |(_, image)| image.clone());
-            scene::image(&image, (x, y), Some(w as f64 / sw.max(1) as f64), None).ok()
+            let (sw, sh) = rays::image::dimensions(&image);
+            scene::image(&image, (0, 0), None, None).ok().map(|node| {
+                let image = scene::scale(w as f64 / sw.max(1) as f64, h as f64 / sh.max(1) as f64, vec![node]);
+                scene::translate(x, y, vec![image])
+            })
         }
         _ => None,
     }

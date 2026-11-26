@@ -25,6 +25,9 @@ pub struct Shape {
 #[derive(Clone)]
 pub struct Tables {
     pub ids: Buffer,
+    pub uv: Buffer,
+    pub textures: Buffer,
+    pub textured: bool,
     pub inst: Buffer,
     pub trace_instances: Option<Buffer>,
     pub spheres: Buffer,
@@ -124,7 +127,7 @@ pub fn shared(device: &Device, label: &str, bytes: &[u8]) -> Result<Buffer, Stri
 }
 
 pub fn table_buffers(t: &Tables) -> Vec<Buffer> {
-    let mut v = vec![t.ids.clone(), t.inst.clone(), t.spheres.clone(), t.strands.clone()];
+    let mut v = vec![t.ids.clone(), t.inst.clone(), t.spheres.clone(), t.strands.clone(), t.uv.clone(), t.textures.clone()];
     v.extend(t.trace_instances.iter().cloned());
     v
 }
@@ -388,13 +391,55 @@ pub fn upload_tables(material_data: &[u8], device: &Device, mesh: &mesh_data::Me
             owned.push(buf.clone());
             Ok(buf)
         };
+        let textured = !mesh.uv.is_empty();
+        let mut texture_data = vec![0; if textured { 12 * mesh.materials.len() } else { 4 }];
+        let mut offsets = Vec::new();
+        if textured {
+            for (i, material) in mesh.materials.iter().enumerate() {
+                let Some((width, height, pixels)) = &material.texture else { continue };
+                if *width <= 0 || *height <= 0 || *width > 1 << 24 || *height > 1 << 24
+                    || width.checked_mul(*height).and_then(|n| n.checked_mul(4)) != Some(pixels.len() as i64)
+                {
+                    return Err("path tracer texture has invalid size or texel count".to_string());
+                }
+                let at = match offsets.iter().find(|(source, _)| std::sync::Arc::ptr_eq(source, pixels)) {
+                    Some((_, at)) => *at,
+                    None => {
+                        // Align texel bases so a float32 stores the integer exactly even above 2^24.
+                        let at = (texture_data.len() / 4).next_multiple_of(256);
+                        if at.checked_add(pixels.len() / 4).is_none_or(|n| n > i32::MAX as usize) {
+                            return Err("path tracer texture table exceeds 32-bit indices".to_string());
+                        }
+                        texture_data.resize(at * 4, 0);
+                        texture_data.try_reserve(pixels.len()).map_err(|error| error.to_string())?;
+                        for rgb in pixels.chunks_exact(4) {
+                            let value = u32::from_be_bytes([0, rgb[0], rgb[1], rgb[2]]);
+                            texture_data.extend_from_slice(&(value as f32).to_le_bytes());
+                        }
+                        offsets.push((pixels.clone(), at));
+                        at
+                    }
+                };
+                for (j, value) in [at as f32, *width as f32, *height as f32].into_iter().enumerate() {
+                    let a = 12 * i + 4 * j;
+                    texture_data[a..a + 4].copy_from_slice(&value.to_le_bytes());
+                }
+            }
+        }
         let ids_buffer = upload("pathtracer-lisp-ids", &ids)?;
         let inst_buffer = upload("pathtracer-lisp-instances", &if n == 0 { vec![0.; 12] } else { inst })?;
         let spheres_buffer = upload("pathtracer-lisp-spheres", &if spheres.is_empty() { vec![0.; 4] } else { spheres })?;
         let strands_buffer = upload("pathtracer-lisp-strands", &if strands.is_empty() { vec![0.; 8] } else { strands })?;
         let trace_instances = if n == 0 { None } else { Some(upload("pathtracer-lisp-trace", &trace)?) };
+        let uv = shared(device, "pathtracer-uv", if textured { &mesh.uv } else { &[0; 8] })?;
+        owned.push(uv.clone());
+        let textures = shared(device, "pathtracer-texels", &texture_data)?;
+        owned.push(textures.clone());
         Ok(Tables {
             ids: ids_buffer,
+            uv,
+            textures,
+            textured,
             inst: inst_buffer,
             trace_instances,
             spheres: spheres_buffer,
@@ -462,8 +507,13 @@ pub fn upload_mesh_async(reuse: Option<&GpuMesh>, material_data: &[u8], device: 
 }
 
 fn upload_inner(o: &mut OwnedResources, reuse: Option<&GpuMesh>, material_data: &[u8], device: &Device, queue: &Queue, mesh: &mesh_data::MeshData) -> Result<MeshBuild, String> {
-    let mesh = if mesh_shape(mesh).motion && !b::capabilities(device).ray_tracing_motion { mesh_data::shutter_midpoint(mesh)? } else { mesh.clone() };
-    let mesh = &mesh;
+    let midpoint;
+    let mesh = if mesh_shape(mesh).motion && !b::capabilities(device).ray_tracing_motion {
+        midpoint = mesh_data::shutter_midpoint(mesh)?;
+        &midpoint
+    } else {
+        mesh
+    };
     let shape = mesh_shape(mesh);
     let extras = &mesh.extras;
     let capabilities = b::capabilities(device);

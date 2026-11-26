@@ -96,6 +96,7 @@ pub struct Device {
 pub struct MeshData {
     pub device: Option<Device>,
     pub positions: Vec<u8>,
+    pub uv: Vec<u8>,
     pub normals: Vec<u8>,
     /// a float3 per corner like the normals; empty: no mesh has colours
     pub colors: Vec<u8>,
@@ -107,11 +108,13 @@ pub struct MeshData {
     pub scene: Option<Layout>,
 }
 
-type FlatParts = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64);
+type FlatParts = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64);
 
-fn flatten(extras: &Extras, objects: &[(rays::mesh::Mesh, i64)]) -> Result<FlatParts, String> {
+fn flatten(extras: &Extras, objects: &[(rays::mesh::Mesh, i64)], materials: &[Material]) -> Result<FlatParts, String> {
     let mut positions = Vec::with_capacity(4096);
     let mut normals = Vec::with_capacity(4096);
+    let mut uv = Vec::new();
+    let textured = materials.iter().any(|m| m.texture.is_some());
     let mut colors = Vec::with_capacity(4096);
     let mut ids = Vec::with_capacity(1024);
     let mut count = 0i64;
@@ -126,6 +129,9 @@ fn flatten(extras: &Extras, objects: &[(rays::mesh::Mesh, i64)]) -> Result<FlatP
         let view = rays::mesh::view::packed_view(source_mesh)?;
         if view.mode != rays::mesh::Mode::Triangles {
             return Err("path tracer meshes must be triangle-ready".to_string());
+        }
+        if materials[*material_index as usize].texture.is_some() && view.tex_coords.is_none() {
+            return Err("path tracer textured meshes need vertex UVs".to_string());
         }
         let normals_view = match &view.normals {
             Some(n) => n.clone(),
@@ -142,6 +148,11 @@ fn flatten(extras: &Extras, objects: &[(rays::mesh::Mesh, i64)]) -> Result<FlatP
                 let vertex = view.indices[triangle * 3 + corner] as usize;
                 add_vec3(&mut positions, component(&view.vertices, vertex));
                 add_vec3(&mut normals, component(&normals_view, vertex));
+                if textured {
+                    let coord = view.tex_coords.as_ref().map_or((0., 0.), |uv| (uv[vertex].x, uv[vertex].y));
+                    add_f32(&mut uv, coord.0);
+                    add_f32(&mut uv, coord.1);
+                }
                 if colored {
                     add_vec3(
                         &mut colors,
@@ -162,14 +173,14 @@ fn flatten(extras: &Extras, objects: &[(rays::mesh::Mesh, i64)]) -> Result<FlatP
     if count == 0 && extras.sphere_count == 0 && extras.segments == 0 {
         Err("path tracer scene has no triangles".to_string())
     } else {
-        Ok((positions, normals, colors, ids, count))
+        Ok((positions, normals, colors, ids, uv, count))
     }
 }
 
 pub fn flat_mesh(extras: Extras, materials: Vec<Material>, source_meshes: &[rays::mesh::Mesh]) -> Result<MeshData, String> {
     let objects: Vec<(rays::mesh::Mesh, i64)> = source_meshes.iter().cloned().enumerate().map(|(i, m)| (m, i as i64)).collect();
-    let (mesh_positions, mesh_normals, mesh_colors, mesh_ids, triangles) = flatten(&extras, &objects)?;
-    Ok(MeshData { device: None, positions: mesh_positions, normals: mesh_normals, colors: mesh_colors, ids: mesh_ids, triangles, materials, instances: None, extras, scene: None })
+    let (mesh_positions, mesh_normals, mesh_colors, mesh_ids, uv, triangles) = flatten(&extras, &objects, &materials)?;
+    Ok(MeshData { device: None, positions: mesh_positions, uv, normals: mesh_normals, colors: mesh_colors, ids: mesh_ids, triangles, materials, instances: None, extras, scene: None })
 }
 
 /// Column-major 3x4 transform plus its 3x3 normal matrix (cofactors / det): seven packed float3
@@ -338,11 +349,11 @@ pub fn shutter_midpoint(m: &MeshData) -> Result<MeshData, String> {
     }
 }
 
-type InputEntry = (mat4::T, MeshData, Vec<Part>, Vec<(mat4::T, i64, i64)>);
+type InputEntry<'a> = (mat4::T, &'a MeshData, Vec<Part>, Vec<(mat4::T, i64, i64)>);
 
 pub fn scene_mesh(objects: &[(mat4::T, MeshData)]) -> Result<MeshData, String> {
     // Each input as its parts and placements in its own index spaces.
-    let mut inputs: Vec<InputEntry> = Vec::new();
+    let mut inputs: Vec<InputEntry<'_>> = Vec::new();
     for (matrix, m) in objects {
         let whole = vec![Part::TrianglePart(0, m.positions.len() as i64 / 12)];
         if m.device.is_some() {
@@ -357,11 +368,11 @@ pub fn scene_mesh(objects: &[(mat4::T, MeshData)]) -> Result<MeshData, String> {
             return Err("path tracer scene_mesh objects cannot carry motion".to_string());
         }
         let entry = match (&m.scene, &m.instances) {
-            (Some(layout), _) => (matrix.clone(), m.clone(), layout.parts.clone(), layout.placements.clone()),
-            (None, None) => (matrix.clone(), m.clone(), whole, vec![(mat4::identity(), 0, -1)]),
+            (Some(layout), _) => (matrix.clone(), m, layout.parts.clone(), layout.placements.clone()),
+            (None, None) => (matrix.clone(), m, whole, vec![(mat4::identity(), 0, -1)]),
             (None, Some(instances)) => (
                 matrix.clone(),
-                m.clone(),
+                m,
                 whole,
                 instances.records.iter().enumerate().map(|(i, record)| (instances.matrices[i].clone(), 0, record.user_id)).collect(),
             ),
@@ -374,6 +385,8 @@ pub fn scene_mesh(objects: &[(mat4::T, MeshData)]) -> Result<MeshData, String> {
     let mut positions = Vec::with_capacity(4096);
     let mut normals = Vec::with_capacity(4096);
     let mut colors = Vec::with_capacity(4096);
+    let mut uv = Vec::new();
+    let textured = inputs.iter().any(|(_, m, _, _)| !m.uv.is_empty());
     let colored = inputs.iter().any(|(_, m, _, _)| !m.colors.is_empty());
     let mut ids = Vec::with_capacity(1024);
     let mut parts: Vec<Part> = Vec::new();
@@ -386,6 +399,13 @@ pub fn scene_mesh(objects: &[(mat4::T, MeshData)]) -> Result<MeshData, String> {
     for (matrix, m, input_parts, input_placements) in &inputs {
         positions.extend_from_slice(&m.positions);
         normals.extend_from_slice(&m.normals);
+        if textured {
+            if m.uv.is_empty() {
+                uv.resize(uv.len() + 8 * (m.positions.len() / 12), 0);
+            } else {
+                uv.extend_from_slice(&m.uv);
+            }
+        }
         if colored {
             if !m.colors.is_empty() {
                 colors.extend_from_slice(&m.colors);
@@ -416,6 +436,7 @@ pub fn scene_mesh(objects: &[(mat4::T, MeshData)]) -> Result<MeshData, String> {
     let base = MeshData {
         device: None,
         positions,
+        uv,
         normals,
         colors,
         ids,

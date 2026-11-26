@@ -2,12 +2,11 @@
 ; rays render sketches/hero_ui.rays --camera tele/permission -o permission.png
 ; Use the viewport camera name to change takes and / j to find the material graphs.
 ; The scene's studio input adds the floor and backing glass for lighting edits.
-; ponytail: keep the prepared crops and smaller preview meshes as PNGs beside the six source
-; captures. Recrop or resize them when replacing a capture; use image sampling if this asset set grows.
 (workspace hero_ui
   (graph screen :context material
-    [(strength : float 1.0) (tint : vec3 [1 1 1]) (vertex_emission : bool true)]
-    (material/standard :name "Screen" :vertex_emission vertex_emission :color [0 0 0] :emission [(* strength tint.x) (* strength tint.y) (* strength tint.z)] :roughness 0.4))
+    [(path : text "sketches/hero_ui/01-sessions-sidebar.png") (strength : float 1.0) (tint : vec3 [1 1 1])]
+    (material/standard :name "Screen" :texture (image/load path) :color [0 0 0]
+      :emission [(* strength tint.x) (* strength tint.y) (* strength tint.z)] :roughness 0.4))
 
   (graph graphite :context material
     (material/standard :name "Window edge" :color [0 0 0] :emission [0.023 0.029 0.036] :roughness 0.4))
@@ -32,29 +31,18 @@
   (graph glass_mesh :context sop
     (sop/material (sop/box :size [9.64 0.025 6.04] :center [0 -0.1 0]) :material (ref glass)))
 
-  (defn phosphor :context value [(v : float) (black : float) (gamma : float)]
-    (pow (max 0.0 (/ (- v black) (- 1.0 black))) gamma))
-
   (graph panel :context sop
-    [(path : text "sketches/hero_ui/prepared/01-sessions-sidebar-1920.png")
-     (columns : int 1920) (rows : int 1200) (width : float 9.6) (height : float 6.0) (close : bool false)]
-    (let* [texels (sop/image_texels (image/load path))
-           rgba (sop/attr texels "rgba" :owner "point" :type "vec4")
-           grid (sop/grid :counts "Point counts" :columns columns :rows rows :width width :height height)
-           black (if close 0.065 0.106)
-           gamma (if close 1.85 1.90)
-           cd (exact (map (fn [(c : vec4)]
-                  (let* [l (+ (+ (* c.x 0.2126) (* c.y 0.7152)) (* c.z 0.0722))
-                         ink (* (if close 0.15 0.13) (phosphor l black gamma))]
-                    [(+ (if close 0.004 0.0051) (* c.w (+ ink (* (if close 0.84 0.73) (phosphor c.x black gamma)))))
-                     (+ (if close 0.006 0.007) (* c.w (+ ink (* (if close 0.84 0.78) (phosphor c.y black gamma)))))
-                     (+ (if close 0.008 0.010) (* c.w (+ ink (* (if close 0.84 0.82) (phosphor c.z black gamma))))) 1.0])) rgba))
-           pixels (sop/material (sop/with_attr grid "Cd" cd :owner "point" :type vec4) :material (ref screen))
-           body (sop/box :size [(+ width 0.06) 0.036 (+ height 0.06)] :center [0 -0.0181 0] :normals "Point")
-           rim (sop/material (sop/with_attr body "Cd" (array/vec4 (sop/count body :points) [1 1 1 1])
-                                             :owner "point" :type vec4)
-                 :material (ref graphite))]
-      (if close pixels (sop/merge pixels rim))))
+    [(width : float 9.6) (height : float 6.0) (crop : vec4 [0 0 1 1])]
+    (let* [grid (sop/grid :columns 1 :rows 1 :width width :height height :uv_attribute "uv")
+           uv (sop/attr grid "uv" :type "vec2")]
+      (sop/with_attr grid "uv"
+        (exact (map (fn [(p : vec2)] [(+ crop.x (* p.x crop.z)) (+ crop.y (* p.y crop.w))]) uv))
+        :type vec2)))
+
+  (graph rim :context sop
+    [(width : float 9.6) (height : float 6.0)]
+    (sop/material (sop/box :size [(+ width 0.06) 0.036 (+ height 0.06)] :center [0 -0.0181 0] :normals "Point")
+      :material (ref graphite)))
 
   (graph world :context world
     [(close : bool false)]
@@ -124,39 +112,36 @@
              :else tele_permission)
            stock (cond
              (or (equal? take "tele/usage") (equal? take "tele/usage-square"))
-               {:path "05-usage-dashboard-1920.png" :preview "tele-usage-preview.png" :columns 1920 :rows 1200 :preview_rows 300 :width 9.6 :height (* 9.6 (/ 1200.0 1920.0)) :close false}
-             (or (equal? take "tele/permission") (equal? take "tele/permission-square"))
-               {:path "01-sessions-sidebar-1920.png" :preview "tele-permission-preview.png" :columns 1920 :rows 1200 :preview_rows 300 :width 9.6 :height (* 9.6 (/ 1200.0 1920.0)) :close false}
+               {:path "05-usage-dashboard.png" :crop [0 0 1 1] :width 9.6 :height 6.0 :close false}
              (equal? take "tele/diff")
-               {:path "02-chat-transcript-1920.png" :preview "tele-diff-preview.png" :columns 1920 :rows 1200 :preview_rows 300 :width 9.6 :height (* 9.6 (/ 1200.0 1920.0)) :close false}
+               {:path "02-chat-transcript.png" :crop [0 0 1 1] :width 9.6 :height 6.0 :close false}
              (equal? take "tele/topology")
-               {:path "06-machine-topology-1920.png" :preview "tele-topology-preview.png" :columns 1920 :rows 1200 :preview_rows 300 :width 9.6 :height (* 9.6 (/ 1200.0 1920.0)) :close false}
+               {:path "06-machine-topology.png" :crop [0 0 1 1] :width 9.6 :height 6.0 :close false}
              (equal? take "tele/sessions")
-               {:path "03-work-filters-1920.png" :preview "tele-sessions-preview.png" :columns 1920 :rows 1200 :preview_rows 300 :width 9.6 :height (* 9.6 (/ 1200.0 1920.0)) :close false}
-             ; Close crops in source pixels (left, top, width, height). Resize bicubically to the recorded mesh dimensions.
-             ; 05-usage-dashboard: 470, 3, 844, 850.
+               {:path "03-work-filters.png" :crop [0 0 1 1] :width 9.6 :height 6.0 :close false}
+             ; The crop coordinates use the 1920 × 1200 framing grid.
              (or (equal? take "close/usage") (equal? take "close/usage-square"))
-               {:path "macro-usage-2x.png" :preview "close-usage-preview.png" :columns 1668 :rows 1680 :preview_rows 483 :width 2.5320000 :height (* 2.5320000 (/ 1680.0 1668.0)) :close true}
-             ; 01-sessions-sidebar: 969, 4, 914, 1189.
+               {:path "05-usage-dashboard.png" :crop [(/ 470.0 1920.0) (/ 3.0 1200.0) (/ 844.0 1920.0) (/ 850.0 1200.0)]
+                :width 2.5320000 :height (* 2.5320000 (/ 1680.0 1668.0)) :close true}
              (or (equal? take "close/permission") (equal? take "close/permission-square"))
-               {:path "grazing-left-2x.png" :preview "close-permission-preview.png" :columns 1468 :rows 1908 :preview_rows 624 :width 2.7420000 :height (* 2.7420000 (/ 1908.0 1468.0)) :close true}
-             ; 02-chat-transcript: 1110, 227, 482, 734.
+               {:path "01-sessions-sidebar.png" :crop [(/ 969.0 1920.0) (/ 4.0 1200.0) (/ 914.0 1920.0) (/ 1189.0 1200.0)]
+                :width 2.7420000 :height (* 2.7420000 (/ 1908.0 1468.0)) :close true}
              (equal? take "close/diff")
-               {:path "grazing-right-2x.png" :preview "close-diff-preview.png" :columns 964 :rows 1468 :preview_rows 731 :width 1.4460000 :height (* 1.4460000 (/ 1468.0 964.0)) :close true}
-             ; 06-machine-topology: 974, 0, 858, 1014.
+               {:path "02-chat-transcript.png" :crop [(/ 1110.0 1920.0) (/ 227.0 1200.0) (/ 482.0 1920.0) (/ 734.0 1200.0)]
+                :width 1.4460000 :height (* 1.4460000 (/ 1468.0 964.0)) :close true}
              (equal? take "close/topology")
-               {:path "overhead-topology-2x.png" :preview "close-topology-preview.png" :columns 1540 :rows 1820 :preview_rows 567 :width 2.5740000 :height (* 2.5740000 (/ 1820.0 1540.0)) :close true}
-             ; 01-sessions-sidebar: 0, 0, 527, 729.
+               {:path "06-machine-topology.png" :crop [(/ 974.0 1920.0) 0 (/ 858.0 1920.0) (/ 1014.0 1200.0)]
+                :width 2.5740000 :height (* 2.5740000 (/ 1820.0 1540.0)) :close true}
              (equal? take "close/sessions")
-               {:path "wide-layered-2x.png" :preview "close-sessions-preview.png" :columns 1054 :rows 1458 :preview_rows 664 :width 1.5810000 :height (* 1.5810000 (/ 1458.0 1054.0)) :close true}
-             :else {:path "01-sessions-sidebar-1920.png" :preview "tele-permission-preview.png" :columns 1920 :rows 1200 :preview_rows 300 :width 9.6 :height (* 9.6 (/ 1200.0 1920.0)) :close false})
+               {:path "01-sessions-sidebar.png" :crop [0 0 (/ 527.0 1920.0) (/ 729.0 1200.0)]
+                :width 1.5810000 :height (* 1.5810000 (/ 1458.0 1054.0)) :close true}
+             :else {:path "01-sessions-sidebar.png" :crop [0 0 1 1] :width 9.6 :height 6.0 :close false})
            square (or (or (equal? take "tele/usage-square") (equal? take "tele/permission-square"))
                       (or (equal? take "close/usage-square") (equal? take "close/permission-square")))
-           screen (scene/geometry
-                    (ref panel :path (str "sketches/hero_ui/prepared/" (if preview stock.preview stock.path))
-                      :columns (if preview 480 stock.columns) :rows (if preview stock.preview_rows stock.rows)
-                      :width stock.width :height stock.height :close stock.close)
-                    :name "UI screen")
+           screen (scene/geometry (ref panel :width stock.width :height stock.height :crop stock.crop)
+                    :name "UI screen" :material (ref screen :path (str "sketches/hero_ui/" stock.path)))
+           edge (if stock.close (scene/merge)
+                  (scene/geometry (ref rim :width stock.width :height stock.height) :name "Window edge"))
            dome (scene/world (ref world :close stock.close))
            grade (if stock.close (ref close_grade) (ref tele_grade))
            floor (if studio
@@ -166,12 +151,12 @@
                     (scene/geometry (ref glass_mesh) :name "Smoked glass")
                     (scene/merge))]
       (scene/root
-        (scene/merge screen dome floor back
+        (scene/merge screen edge dome floor back
           tele_usage tele_usage_square tele_permission tele_permission_square tele_diff
           tele_topology tele_sessions close_usage close_usage_square close_permission
           close_permission_square close_diff close_topology close_sessions)
-        :camera camera :film grade :renderer "Path traced" :width (if preview 480 2400)
-        :height (if preview (if square 480 600) (if square 2400 3000))
+        :camera camera :film grade :renderer "Path traced" :width 2400
+        :height (if square 2400 3000)
         :max_spp (if preview 16 (if stock.close 320 512)) :bounces 1)))
 
   (graph editor :context editor

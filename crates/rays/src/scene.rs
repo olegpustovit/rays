@@ -1308,14 +1308,7 @@ pub mod layer {
         let create = || -> Result<Vec<se::TextureLevel>, String> {
             Ok(texture::private::levels(tex)?
                 .into_iter()
-                .map(|(w, h, pixels)| {
-                    let mut bytes = Vec::with_capacity(pixels.len() * 4);
-                    for c in &pixels {
-                        bytes.extend_from_slice(&[c.r as u8, c.g as u8, c.b as u8, c.a as u8]);
-                    }
-                    let _ = (w, h);
-                    se::TextureLevel { width: w, height: h, bytes: se::new_bytes(bytes) }
-                })
+                .map(|(width, height, bytes)| se::TextureLevel { width, height, bytes: se::new_bytes(bytes.as_ref().clone()) })
                 .collect())
         };
         let lower = CURRENT_LOWER.with(|c| c.borrow().clone());

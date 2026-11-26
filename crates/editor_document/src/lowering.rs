@@ -48,7 +48,7 @@ pub struct Options {
 
 // ---- lowering a struct ----
 
-const SLOT_NAMES: [&str; 11] = ["geometry", "texture", "layers", "below", "name", "parent", "active", "world", "scene", "camera", "film"];
+const SLOT_NAMES: [&str; 12] = ["geometry", "texture", "material", "layers", "below", "name", "parent", "active", "world", "scene", "camera", "film"];
 
 /// The field changes a struct's keywords make, checked against the schema's bounds.
 fn changes(qualified: &str, args: &Record) -> R<Vec<(String, PV)>> {
@@ -425,6 +425,7 @@ struct Item {
     label: String,
     values: Vec<(String, PV)>,
     texture: Option<E>,
+    material: Option<E>,
     geometry: Option<lower_mod::Graph>,
     home: Home,
     parent: Option<String>,
@@ -502,8 +503,13 @@ fn item_of(lowered: &lower_mod::T, call: &Call) -> R<Item> {
         _ => None,
     };
     let active = args.iter().find(|(n, _)| n == "active").map(|(_, v)| v) == Some(&E::Bool(true));
-    let texture = args.iter().find(|(n, _)| n == "texture").map(|(_, v)| v.clone());
-    Ok(Item { kind_of, label, values, geometry, home: home.clone(), parent, active, group: None, drives, via: via.clone(), texture })
+    let material = match args.get_str("material") {
+        Some(value @ E::Struct(fields)) if fields.name == "material/standard" => Some(value.clone()),
+        Some(_) => return Err(diag("E_LOWER", "A scene geometry uses a standard material.")),
+        None => None,
+    };
+    let texture = args.get_str("texture").or_else(|| material.as_ref().and_then(E::geo_fields).and_then(|fields| fields.get_str("texture"))).cloned();
+    Ok(Item { kind_of, label, values, geometry, home: home.clone(), parent, active, group: None, drives, via: via.clone(), texture, material })
 }
 
 fn is_scene_kind(kind: &str) -> bool {
@@ -606,6 +612,7 @@ fn items(workspace: &workspace_doc::T, lowered: &lower_mod::T) -> R<(Vec<Item>, 
                     values: Vec::new(),
                     geometry: Some(g.clone()),
                     texture: None,
+                    material: None,
                     home: Home::Looped,
                     parent: None,
                     active: false,
@@ -1216,9 +1223,13 @@ pub(crate) fn lower_workspace(options: &Options, factories: Option<&[Factory]>, 
         }
     }
     let mut scene_textures: document::IntMap<E> = document::IntMap::new();
+    let mut scene_materials: document::IntMap<E> = document::IntMap::new();
     for (id, item) in &objects_ {
         if let Some(texture) = &item.texture {
             scene_textures.insert(*id, texture.clone());
+        }
+        if let Some(material) = &item.material {
+            scene_materials.insert(*id, material.clone());
         }
     }
     let shell = editor.map(|e| shell_of(e, views, previous));
@@ -1240,6 +1251,7 @@ pub(crate) fn lower_workspace(options: &Options, factories: Option<&[Factory]>, 
         homes,
         scene_drives,
         scene_textures,
+        scene_materials,
         workspace: document::Workspace {
             ws: workspace,
             lowered: Arc::new(lowered),

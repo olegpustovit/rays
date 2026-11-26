@@ -385,25 +385,27 @@ fn strands() {
     println!("pathtracer: strands ok");
 }
 
-fn vertex_emission() {
+fn image_emission() {
     use rays::mesh::{Vec3Buffer, view::create_packed_owned};
-    use rays_math::color;
+    use rays_math::{color, vec2};
 
     if !common::gpu() {
         return;
     }
-    let red = color::rgb(255, 0, 0);
-    let green = color::rgb(0, 255, 0);
+    let texture = get(rays::texture::create_owned(2, 2, vec![
+        color::red(), color::rgb(0, 255, 0), color::rgb(0, 0, 255), color::white(),
+    ]));
     let screen = get(create_packed_owned(
         None, Some(vec![0, 1, 2, 0, 2, 3]),
         Some(Vec3Buffer::of_planes(vec![0.; 4], vec![0.; 4], vec![1.; 4])),
-        Some(vec![red, green, green, red]), None,
+        None, Some(vec![vec2::create(0., 1.), vec2::create(1., 1.), vec2::create(1., 0.), vec2::create(0., 0.)]),
         Vec3Buffer::of_planes(vec![-1., 1., 1., -1.], vec![-1., -1., 1., 1.], vec![0.; 4]),
     ));
     let black = rgb(0., 0., 0.);
-    let material = p::material(None, None, Some(rgb(1., 1., 1.)), None, black.clone());
+    let mut material = p::material(None, None, Some(rgb(1., 1., 1.)), None, black.clone());
+    material.texture = Some(get(rays::texture::private::trace_pixels(&texture)));
     let scene = p::Scene {
-        objects: vec![(screen, material)],
+        objects: vec![(screen.clone(), material)],
         spheres: vec![], strands: vec![], lights: vec![],
         environment: p::Environment { sky: black.clone(), ground: black, panels: vec![] },
     };
@@ -412,9 +414,27 @@ fn vertex_emission() {
     tracer.bands = 1;
     frame(&mut tracer, &camera);
     let one = pixels(&tracer);
-    let pixel = |x: usize| &one[(12 * 32 + x) * 4..(12 * 32 + x) * 4 + 4];
-    let (left, right) = (pixel(2), pixel(29));
-    assert!(left[0] > left[1] && right[1] > right[0] && left[2] == 0 && right[2] == 0);
+    let check = |rgba: &[u8]| {
+        let pixel = |x: usize, y: usize| &rgba[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4];
+        for (x, y, dominant) in [(3, 3, 0), (28, 3, 1), (3, 20, 2)] {
+            let c = pixel(x, y);
+            assert!(c[dominant] > 180 && c.iter().take(3).enumerate().all(|(i, &v)| i == dominant || v < 10), "{x},{y}: {c:?}");
+        }
+        let white = pixel(28, 20);
+        assert!(white.iter().take(3).all(|&v| v > 180), "{white:?}");
+        let middle = pixel(16, 12);
+        assert!(middle.iter().take(3).all(|&v| (50..200).contains(&v)), "{middle:?}");
+    };
+    check(&one);
+    use rays::{canvas, material, scene, scene3};
+    let drawn = scene3::mesh(Some(material::unlit(color::white())), Some(scene3::textured(None, texture)), None, Some(scene3::Cull::CullNone), None, screen);
+    let solid = get(scene3::create(None, None, None, None, vec![drawn]));
+    let canvas = get(canvas::create(32, 24));
+    get(canvas::render(None, &canvas, &[scene::view3d(None, &camera, solid)]));
+    let image = get(canvas::to_image(&canvas));
+    check(&get(rays::image::pixels(&image)));
+    get(rays::image::destroy(&image));
+    get(canvas::destroy(&canvas));
     p::reset(&mut tracer);
     tracer.bands = 3;
     frame(&mut tracer, &camera);
@@ -424,7 +444,7 @@ fn vertex_emission() {
 
 pub const CASES: &[(&str, fn())] = &[
         ("lit", lit),
-        ("vertex_emission", vertex_emission),
+        ("image_emission", image_emission),
         ("lens", lens),
         ("instanced", instanced),
         ("residency", residency),

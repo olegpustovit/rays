@@ -367,7 +367,6 @@ fn material_args(kind: &str, args: Vec<(Symbol, Value)>) -> Vec<(Symbol, Value)>
                 out.push(("color".into(), field("color", Value::Vec3(1., 1., 1.))));
                 out.push(("roughness".into(), field("roughness", Value::Float(0.4))));
                 out.push(("emission".into(), field("emission", Value::Vec3(0., 0., 0.))));
-                out.push(("vertex_emission".into(), field("vertex_emission", Value::Bool(true))));
             }
             _ => out.push(arg),
         }

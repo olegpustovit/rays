@@ -85,6 +85,7 @@ enum TextureSlot {
     /// built from the CPU payload on first use
     Lazy(sop::image::T, OnceCell<Result<texture::Texture, String>>),
     Ready(texture::Texture),
+    Loaded(image::Image, OnceCell<Result<texture::Texture, String>>),
 }
 
 /// Exact in-process image identity; file paths remain OS data, while authored sites retain Symbols.
@@ -800,12 +801,14 @@ fn texture_slot(payload: &sop::image::T) -> Rc<TextureSlot> {
 fn force_texture(slot: &TextureSlot) -> Result<texture::Texture, String> {
     match slot {
         TextureSlot::Ready(tex) => Ok(tex.clone()),
+        TextureSlot::Loaded(image, cell) => cell.get_or_init(|| {
+            let (w, h) = image::dimensions(image);
+            texture::create_rgba8(w, h, image::pixels(image)?)
+        }).clone(),
         TextureSlot::Lazy(payload, cell) => cell
             .get_or_init(|| {
                 let bytes = bytes_of_image(payload).map_err(|d| format!("{}: {}", d.code, d.message))?;
-                let mut pixels = v::array_buffer(bytes.len() / 4).map_err(|d| format!("{}: {}", d.code, d.message))?;
-                pixels.extend(bytes.chunks(4).map(|c| rays_math::color::rgba(c[0] as i64, c[1] as i64, c[2] as i64, c[3] as i64)));
-                texture::create_owned(sop::image::width(payload), sop::image::height(payload), pixels)
+                texture::create_rgba8(sop::image::width(payload), sop::image::height(payload), bytes)
             })
             .clone(),
     }
@@ -1178,7 +1181,18 @@ fn compute_entry(
             None => workspace_resources::image(&d.resources, key, &|| image::upload_rgba(None, width, height, &bytes)),
         }
     };
-    if node.kind == "image/map" {
+    if node.kind == "image/load" {
+        let ImageKey::Load(path) = key else { unreachable!() };
+        let source = workspace_resources::image(&d.resources, key, &|| image::load(path))?;
+        let mut e = entry.borrow_mut();
+        if !display {
+            e.cpu = Some(Snapshot { payload: cpu_of_image(&source)?, stamp: stamp.clone() });
+        }
+        if e.texture.is_none() {
+            e.texture = Some(Rc::new(TextureSlot::Loaded(source.clone(), OnceCell::new())));
+        }
+        e.image = Some(source);
+    } else if node.kind == "image/map" {
         let width = int_arg(args, "width", 256)?;
         let height = int_arg(args, "height", 256)?;
         let Some(Value::Fn(function)) = args.get_str("function") else { return Err(error("Image map needs a pixel function.")) };
@@ -1375,15 +1389,6 @@ fn compute_entry(
     } else {
         entry.borrow_mut().display = None;
         let (image_, payload) = match node.kind.as_str() {
-            "image/load" => {
-                let path = match args.get_str("path") {
-                    Some(Value::Text(path)) => String::from_utf8_lossy(path).into_owned(),
-                    _ => unreachable!("assert false"),
-                };
-                let image_ = workspace_resources::image(&d.resources, key, &|| image::load(&path))?;
-                let payload = cpu_of_image(&image_)?;
-                (image_, payload)
-            }
             "image/noise" => {
                 let factory = sop::image_nodes::noise_factory();
                 let source = edit_graph::instantiate(&factory, &[]).map_err(|m| error(&m))?;

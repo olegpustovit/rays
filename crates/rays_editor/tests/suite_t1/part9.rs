@@ -36,21 +36,10 @@ pub fn run_roots() {
     if !gpu() {
         return;
     }
-    let f = |res, gate| b::film(true, res, gate);
-    check(f((1600, 900), (1700, 1000)) == ((1600, 900), 1), "a gate over the resolution is step 1");
-    check(f((1600, 900), (1600, 900)) == ((1600, 900), 1), "a gate at the resolution is step 1");
-    check(f((1600, 900), (1599, 899)) == ((800, 450), 2), "one pixel under is a half");
-    check(f((1600, 900), (800, 450)) == ((800, 450), 2), "the half fits its gate exactly");
-    check(f((1600, 900), (799, 449)) == ((400, 225), 4), "then a quarter");
-    check(f((1600, 900), (300, 169)) == ((200, 112), 8), "then an eighth");
-    check(f((1600, 900), (10, 10)) == ((200, 112), 8), "never smaller than an eighth");
-    // a resize inside a step leaves the film alone
-    check((0..200).all(|i| {
-        let w = 400 + i;
-        f((1600, 900), (w, w * 9 / 16)) == ((400, 225), 4)
-    }), "every gate from 400 to 599 points wide gets the same film");
-    // a free view is traced in place: its film is its pane, whatever the root's resolution
-    check([(1396, 1960), (640, 360), (3000, 2000)].iter().all(|gate| b::film(false, (1920, 1080), *gate) == (*gate, 1)), "a traced free view does not fill its pane pixel for pixel");
+    let gate = (1397, 1961);
+    check(b::film(gate, false) == (gate, 1), "a still film fills its drawable gate pixel for pixel");
+    check(b::film(gate, true) == ((698, 980), 2), "a moving film traces at half size");
+    check(b::film((1, 1), true) == ((1, 1), 2), "a moving film still has at least one pixel");
     let order: Vec<String> = ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
     let w = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     check(b::next_turn(&order, None, &w(&["b", "c", "d"])) == Some("b".into()), "the first wanting viewport takes the first turn");

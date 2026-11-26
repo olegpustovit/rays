@@ -7,7 +7,6 @@ pub struct Material {
     pub ambient: color::T,
     pub specular: color::T,
     pub emissive: color::T,
-    pub vertex_emission: bool,
     pub shininess: f64,
     /// Round-corners radius in scene units for the path tracer (0 = off): edges shade as a bevel
     /// of this radius without changing geometry. Raster ignores it.
@@ -35,7 +34,6 @@ pub fn create(
         ambient: ambient.unwrap_or_else(color::white),
         specular: specular.unwrap_or_else(color::white),
         emissive: emissive.unwrap_or_else(color::black),
-        vertex_emission: true,
         shininess,
         round,
     })

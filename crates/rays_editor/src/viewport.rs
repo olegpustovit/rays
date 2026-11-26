@@ -959,10 +959,8 @@ pub fn film(extra_: &Extra, key: &str, (x, y, width, height): Bounds) -> Bounds 
     }
 }
 
-/// Each viewport renders as its own root says. Looking through the render camera, the tracer's
-/// film is the root's resolution in a step that fits the viewport's gate in drawable pixels; a free
-/// view's film is the pane itself. `views` carry each viewport's rectangle (`film`).
-pub fn render(mut extra_: Extra, pixel_scale: (f64, f64), focus: Option<&str>, views: Vec<(String, Bounds, rcam::Camera, d3::Scene3)>) -> Extra {
+/// The gate and free view are laid out in points, then traced in drawable pixels.
+pub fn render(mut extra_: Extra, pixel_scale: (f64, f64), now: f64, focus: Option<&str>, views: Vec<(String, Bounds, rcam::Camera, d3::Scene3)>) -> Extra {
     let mode = extra_.renderer_request.unwrap_or(extra_.renderer.mode);
     // Settled raster: no tracer slots, skip building renderer::View (warm pan/zoom/hover).
     if !extra_.renderer.custom
@@ -986,7 +984,12 @@ pub fn render(mut extra_: Extra, pixel_scale: (f64, f64), focus: Option<&str>, v
         .map(|(key, (_, _, width, height), camera_, scene_)| {
             let settings = look(&extra_, &key).settings;
             let gate = ((width as f64 * scale_x).round() as i64, (height as f64 * scale_y).round() as i64);
-            let (film_, step) = renderer::film(looks(&extra_, &key), (settings.width, settings.height), gate);
+            let full_size_at = match renderer::slot_of(&extra_.renderer, &key) {
+                Some(slot) if slot.tracer.is_some() && (slot.camera.as_ref() != Some(&camera_) || !d3::same(&slot.scene, &scene_)) => now + 0.12,
+                Some(slot) => slot.full_size_at,
+                None => now,
+            };
+            let (film_, step) = renderer::film(gate, now < full_size_at);
             renderer::View {
                 key,
                 film: film_,
@@ -994,6 +997,7 @@ pub fn render(mut extra_: Extra, pixel_scale: (f64, f64), focus: Option<&str>, v
                 camera: camera_,
                 scene: scene_,
                 cap: settings.max_spp,
+                full_size_at,
                 setting: renderer::Setting { mode: of_root(settings.renderer), bounces: settings.bounces, round_samples: settings.round_samples, film: settings.film },
             }
         })

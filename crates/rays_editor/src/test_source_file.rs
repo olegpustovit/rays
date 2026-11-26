@@ -51,9 +51,9 @@ fn carry_inserts_spaced_from_what_it_touches() {
 
 #[test]
 fn renderer_film_steps_and_turns() {
-    assert_eq!(r::film(true, (1920, 1080), (1000, 600)), ((960, 540), 2));
-    assert_eq!(r::film(true, (4000, 4000), (100, 100)), ((500, 500), 8));
-    assert_eq!(r::film(false, (1920, 1080), (300, 200)), ((300, 200), 1));
+    assert_eq!(r::film((1000, 600), true), ((500, 300), 2));
+    assert_eq!(r::film((1, 1), true), ((1, 1), 2));
+    assert_eq!(r::film((300, 200), false), ((300, 200), 1));
     let order: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
     let wanting: Vec<String> = ["a", "c"].iter().map(|s| s.to_string()).collect();
     assert_eq!(r::next_turn(&order, Some("a"), &wanting).as_deref(), Some("c"));

@@ -397,7 +397,10 @@ pub fn plan(factories: Factories, catalog: &Catalog, doc: &Document, payload: &P
             };
             if material {
                 match (head.as_str(), &shown) {
-                    ("scene/geometry", Some(graph)) => material_on_graph(catalog, doc, graph, &expr, &name).and_then(with_doc),
+                    ("scene/geometry", Some(graph))
+                        if !node.as_ref().is_some_and(|node| node.rows.iter().any(|row| {
+                            matches!(&row.key, ArgKey::Kw(key) if key == "material") && row.expr.is_some()
+                        })) => material_on_graph(catalog, doc, graph, &expr, &name).and_then(with_doc),
                     _ => assign(ArgKey::Kw("material".into()), format!(":material (ref {name}) on {here}")),
                 }
             } else {

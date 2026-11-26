@@ -1,6 +1,6 @@
 (flow_manifest
   (version 202609)
-  (digest "313c544da5d4f747473fc9858f26b5bd")
+  (digest "845130035370f4c21d4fbcebc5c79d9c")
   (kinds
     (kind "sop/switch"
       (key "switch")
@@ -2381,8 +2381,7 @@
         (field "round" "Round corners" (folder) (float (soft 0 0.5) (hard 0 nil)) (float 0) (primary false) (vec3))
         (field "emission_r" "Emission red" (folder) (float (soft 0 1) (hard 0 1)) (float 0) (primary false) (vec3 "emission" 0))
         (field "emission_g" "Emission green" (folder) (float (soft 0 1) (hard 0 1)) (float 0) (primary false) (vec3 "emission" 1))
-        (field "emission_b" "Emission blue" (folder) (float (soft 0 1) (hard 0 1)) (float 0) (primary false) (vec3 "emission" 2))
-        (field "vertex_emission" "Vertex colour tints emission" (folder) (bool) (bool true) (primary false) (vec3)))
+        (field "emission_b" "Emission blue" (folder) (float (soft 0 1) (hard 0 1)) (float 0) (primary false) (vec3 "emission" 2)))
       (outputs (output "geo" geometry))
       (body lisp)
       (calls))
@@ -3696,7 +3695,7 @@
       (label "Geometry")
       (description "Place geometry in a scene with a local transform and visibility controls.")
       (category "Object")
-      (slots (slot "geometry" required) (slot "texture" optional image))
+      (slots (slot "geometry" required) (slot "texture" optional image) (slot "material" optional material))
       (fields
         (field "name" "Name" (folder) (text) (text "") (primary false) (vec3))
         (field "parent" "Parent" (folder) (text) (text "") (primary false) (vec3))
