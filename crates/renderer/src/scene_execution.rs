@@ -4333,6 +4333,9 @@ pub fn resize(value: &mut SceneExecution, configuration: &Configuration) -> Resu
             scene_attachment_pool::destroy(&mut attachments);
             return Err(e);
         }
+    // The passes own the old target and its attachments until the pass wrappers are released.
+    value.frame_passes = [None, None];
+    *value.ui_reopen_pass.get_mut() = None;
     let old = std::mem::replace(&mut value.target, target);
     let mut old_attachments = std::mem::replace(&mut value.attachments, attachments);
     value.configuration = configuration.clone();
