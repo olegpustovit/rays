@@ -607,6 +607,80 @@ pub mod workspace {
         result
     }
 
+    /// Render the primary scene's camera (or a named camera) into a full-resolution path-traced film.
+    pub fn render_scene_png(camera: Option<&str>, size: Option<(i64, i64)>, samples: Option<i64>, frame: i64, path: &str, doc: &workspace_doc::T) -> Result<(), Diagnostic> {
+        use editor_document::{kind_graph as kg, objects};
+        use rays::scene3::walk;
+        use rays_pathtracer::rays_pathtracer as trace;
+
+        let fail = |message: String| rays_diagnostic::error("E_RENDER_SCENE".into(), message, None, None, None, Vec::new(), Vec::new());
+        let mut editor = super::editor::create(
+            loop_model::Create { await_: Some(true), ..Default::default() },
+            doc, None, super::editor::prepare_fn(), super::editor::draw_fn(),
+        ).map_err(fail)?;
+        let result = (|| {
+            let core = Rc::make_mut(&mut editor.core);
+            core.timeline = crate::timeline::seek(&core.timeline, frame).0;
+            let root = &core.doc.root;
+            let (width, height) = size.unwrap_or((root.width, root.height));
+            let samples = samples.unwrap_or(root.max_spp);
+            if frame < 0 || width <= 0 || height <= 0 || samples <= 0 {
+                return Err(fail("Frame must be nonnegative. Dimensions and sample count must be positive.".into()));
+            }
+            // The tiled film stores pixel indices as float32.
+            if width.checked_mul(height).is_none_or(|pixels| pixels > 1 << 24) {
+                return Err(fail("Path-traced film supports up to 16,777,216 pixels.".into()));
+            }
+            editor.extra.renderer = crate::editor_renderer::empty();
+            let live = input::Frame { dt: 1. / 60., frame, tick: frame, size: (width, height), ..input::at_time(frame as f64 / 60.) };
+            let at = rays::frame::Frame { input: live, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
+            editor_loop::update(&mut editor, &at);
+            let core = &editor.core;
+            if let Some(message) = core.cook.error.as_ref().or(editor.context_error.as_ref()) {
+                return Err(fail(message.clone()));
+            }
+            let authored = editor.resolved.as_ref().map_or(&core.doc.scene, |(_, _, scene, _)| scene);
+            let camera_id = match camera {
+                Some(name) => authored.iter().find(|n| n.kind == "camera" && n.label == name).map(|n| n.id),
+                None => core.doc.active_camera.or_else(|| objects::ids("camera", authored).next()),
+            };
+            let camera = camera_id.and_then(|id| kg::find(authored, id)).and_then(crate::viewport::node_camera)
+                .ok_or_else(|| fail(camera.map_or_else(|| "Scene needs a camera.".into(), |name| format!("Scene has no camera named {name:?}."))))?;
+            let scene = editor.rendered.as_ref().ok_or_else(|| fail("Scene has no cooked geometry.".into()))?;
+            let (_, mesh, first) = crate::editor_renderer::traced_scene(&crate::editor_renderer::empty_meshes(), scene).map_err(fail)?;
+            let batch = (1..=8).rev().find(|n| samples % n == 0);
+            let options = trace::CreateOptions {
+                spp: batch, bounces: Some(core.doc.root.bounces),
+                round_samples: Some(core.doc.root.round_samples), ..Default::default()
+            };
+            let scene_input = trace::Scene {
+                objects: vec![first], spheres: vec![], strands: vec![],
+                lights: walk::lights(scene).iter().map(trace::light_of).collect(),
+                environment: trace::Environment { sky: trace::Linear_color::rgb(0.51, 0.57, 0.67), ground: trace::Linear_color::rgb(0.31, 0.31, 0.31), panels: vec![] },
+            };
+            let mut tracer = trace::create(&options, width, height, &scene_input).map_err(fail)?;
+            let result = (|| {
+                trace::replace_mesh(&mut tracer, &mesh)?;
+                trace::set_world(&mut tracer, walk::world(scene).as_ref())?;
+                while trace::samples(&tracer) < samples {
+                    trace::render(&mut tracer, &camera)?;
+                    trace::flush(&mut tracer)?;
+                }
+                let canvas = rays::canvas::create(width, height)?;
+                let result = (|| {
+                    let film = rays::scene::image(&trace::image(&tracer), (0, 0), None, None)?;
+                    rays::canvas::render(Some(1), &canvas, &[film])?;
+                    rays::canvas::save_png(&canvas, path)
+                })();
+                result.and(rays::canvas::destroy(&canvas))
+            })();
+            trace::destroy(&mut tracer);
+            result.map_err(fail)
+        })();
+        editor_loop::close(&editor);
+        result
+    }
+
     /// Export a draw graph (the first by default) through `Sketch::export_state`. Each invocation
     /// starts a fresh fold and pins every frame fact.
     pub fn export(graph: Option<&str>, fps: Option<i64>, directory: &str, frames: i64, doc: &workspace_doc::T) -> Result<(), Diagnostic> {

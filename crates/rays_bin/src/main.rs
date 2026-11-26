@@ -86,6 +86,7 @@ const USAGE: &str = "Usage: rays [FILE.rays]
        rays fmt FILE
        rays doc [NAME|NAMESPACE/|SEARCH] [--json] [--all] [--markdown]
        rays render FILE -o PNG [--frame N] [--size WIDTHxHEIGHT] [--graph NAME]
+       rays render FILE -o PNG --camera NAME [--size WIDTHxHEIGHT] [--samples N]
        rays mem FILE [--frames N]
        rays web FILE -o DIR
 
@@ -99,12 +100,15 @@ fn render_command(args: &[&str]) {
     let Some((file, options)) = args.split_first() else { usage("render: missing FILE") };
     if file.starts_with('-') { usage(file); }
     let (mut output, mut graph, mut size, mut frame) = (None, None, None, 0);
+    let (mut camera, mut samples) = (None, None);
     let mut rest = options;
     while !rest.is_empty() {
         let [flag, value, tail @ ..] = rest else { usage(rest[0]); };
         match *flag {
             "-o" if output.is_none() => output = Some(*value),
             "--graph" if graph.is_none() => graph = Some(*value),
+            "--camera" if camera.is_none() => camera = Some(*value),
+            "--samples" if samples.is_none() => samples = Some(value.parse::<i64>().ok().filter(|n| *n > 0).unwrap_or_else(|| usage(value))),
             "--frame" => frame = value.parse::<i64>().ok().filter(|n| *n >= 0).unwrap_or_else(|| usage(value)),
             "--size" => size = Some(value.split_once('x').and_then(|(w,h)| Some((w.parse::<i64>().ok()?, h.parse::<i64>().ok()?))).filter(|(w,h)| *w > 0 && *h > 0).unwrap_or_else(|| usage(value))),
             _ => usage(flag),
@@ -112,13 +116,22 @@ fn render_command(args: &[&str]) {
         rest = tail;
     }
     let output = output.unwrap_or_else(|| usage("render: missing -o PNG"));
-    eprintln!("render uses the CPU reference evaluator; use rays mem FILE --frames N to measure device frames.");
     let text = std::fs::read_to_string(file).unwrap_or_else(|e| die(&format!("rays: {file}: {e}")));
     let doc = workspace::load_file(file, &text).unwrap_or_else(|ds| {
         for d in ds { eprintln!("{}", rays_diagnostic::report(file, &text, &d)); }
         std::process::exit(1)
     });
-    if let Err(d) = workspace::render_png(graph, size, frame, output, &doc) { die(&rays_diagnostic::report(file, &text, &d)); }
+    let draw = doc.checked.graphs.iter().any(|g| g.context == flow_syntax::context::draw());
+    let scene = doc.checked.graphs.iter().any(|g| g.context == flow_syntax::context::scene());
+    let rendered = if graph.is_none() && (camera.is_some() || samples.is_some() || (scene && !draw)) {
+        if !scene { usage("render: no scene graph"); }
+        workspace::render_scene_png(camera, size, samples, frame, output, &doc)
+    } else {
+        if camera.is_some() || samples.is_some() { usage("render: --graph selects a draw graph"); }
+        eprintln!("render uses the CPU reference evaluator; use rays mem FILE --frames N to measure device frames.");
+        workspace::render_png(graph, size, frame, output, &doc)
+    };
+    if let Err(d) = rendered { die(&rays_diagnostic::report(file, &text, &d)); }
 }
 
 fn run(args: Vec<String>) {
