@@ -1,0 +1,67 @@
+; Example: rays render sketches/hero_ui.rays --camera macro -o macro.png
+; Run from the repository root so the default PXUI gallery paths resolve.
+; To use your own PNGs, set path, columns and rows in the main, rear and side graphs.
+; The mesh uses one point per texel. Crop large captures to the region you want to film.
+(workspace hero_ui
+  (defn phosphor :context value [(v : float)]
+    (pow (max 0.0 (/ (- v 0.09) 0.91)) 2.05))
+
+  (defn screen :context sop [(path : text) (cols : int) (rows : int) (width : float) (gain : float)]
+    (let* [texels (sop/image_texels (image/load path))
+           rgba (sop/attr texels "rgba" :owner "point" :type "vec4")
+           height (* width (/ (float rows) (float cols)))
+           ; ponytail: one vertex per texel preserves the screenshot detail. Use a sampled
+           ; emission texture if full-size captures make grid cooking or upload too expensive.
+           grid (sop/grid :counts "Point counts" :columns cols :rows rows :width width :height height)
+           cd (exact (map (fn [(c : vec4)]
+                  (let* [l (+ (+ (* c.x 0.2126) (* c.y 0.7152)) (* c.z 0.0722))
+                         ink (* 0.55 (phosphor l))]
+                    [(* c.w (+ (* 0.94 ink) (* 0.52 (phosphor c.x))))
+                     (* c.w (+ ink (* 0.52 (phosphor c.y))))
+                     (* c.w (+ (* 1.07 ink) (* 0.52 (phosphor c.z)))) 1.0])) rgba))]
+      (sop/material (sop/with_attr grid "Cd" cd :owner "point" :type vec4)
+        :material "Pixels" :color [0 0 0] :emission [gain gain gain] :roughness 0.4)))
+
+  (graph main :context sop
+    [(path : text "pxui/tools/pxui_gallery/fixtures/gallery_kit_dusk_1x.png")
+     (columns : int 640) (rows : int 464)]
+    (screen path columns rows 4.8 1.0))
+
+  (graph rear :context sop
+    [(path : text "pxui/tools/pxui_gallery/fixtures/gallery_controls_dusk_1x.png")
+     (columns : int 640) (rows : int 464)]
+    (screen path columns rows 3.0 0.58))
+
+  (graph side :context sop
+    [(path : text "pxui/tools/pxui_gallery/fixtures/gallery_bodies_dusk_1x.png")
+     (columns : int 640) (rows : int 464)]
+    (screen path columns rows 2.5 0.48))
+
+  (graph table :context sop
+    (sop/material (sop/grid :width 10 :height 10)
+                  :material "Matte charcoal" :color [0.04 0.047 0.05] :roughness 0.55))
+
+  (graph world :context world
+    (world/gradient :name "Black studio"
+      :zenith [0.008 0.011 0.014] :horizon [0.002 0.003 0.005] :nadir [0.001 0.001 0.002]))
+
+  (graph scene :context scene
+    (let* [left (scene/camera :name "left" :eye [-1.80 1.17 2.05] :target [-1.31 0.355 -0.48]
+                               :fov 0.52 :aperture 0.12 :up [0.38 1 0])
+           right (scene/camera :name "right" :eye [0.43 1.32 2.52] :target [-0.44 0.385 -0.32]
+                                :fov 0.50 :aperture 0.10 :up [-0.34 1 0])
+           overhead (scene/camera :name "overhead" :eye [1.20 4.50 2.70] :target [0.26 0.35 -0.82]
+                                   :fov 0.59 :aperture 0.26 :up [-0.30 1 0])
+           macro (scene/camera :name "macro" :eye [-1.90 1.02 1.38] :target [-2.03 0.30 -1.00]
+                                :fov 0.38 :aperture 0.22 :up [0.23 1 0])
+           wide (scene/camera :name "wide" :eye [-4.10 3.50 7.10] :target [0 0.42 -1.20]
+                               :fov 0.67 :aperture 0.22 :up [0.14 1 0])
+           primary (scene/geometry (ref main) :name "Inspector" :translate [0 0.42 0] :rotate [-0.085 0 0.018])
+           back (scene/geometry (ref rear) :name "Control layer" :translate [-1.65 1.05 -2.55]
+                                :rotate [-0.14 -0.15 -0.025])
+           wing (scene/geometry (ref side) :name "Auxiliary layer" :translate [2.50 0.73 -1.50]
+                                :rotate [-0.11 0.17 0.02])
+           floor (scene/geometry (ref table) :name "Charcoal table")
+           dome (scene/world (ref world))]
+      (scene/root (scene/merge primary back wing floor left right overhead macro wide dome)
+        :camera left :renderer "Path traced" :width 2400 :height 3000 :max_spp 256 :bounces 2))))
