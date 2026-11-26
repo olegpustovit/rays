@@ -95,11 +95,12 @@ pub fn empty_meshes() -> MeshCache {
 /// How one viewport renders: the root of its scene instance, else the document's. The sample cap is
 /// not part of it: a cap is read each frame, so raising one continues the accumulation while any
 /// other change discards the tracer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Setting {
     pub mode: Mode,
     pub bounces: i64,
     pub round_samples: i64,
+    pub film: editor_document::objects::root::Film,
 }
 
 /// A viewport as one frame asks to draw it: `film` is the tracer's film in drawable pixels, `step`
@@ -128,6 +129,7 @@ pub struct Slot {
     pub camera: Option<camera::Camera>,
     pub wire: Option<d3::Scene3>,
     pub tracer: Option<Tracer>,
+    graded: Option<(i64, rays::image::Image)>,
     pub setting: Setting,
     pub cap: i64,
     /// why the last render of the slot failed, until one succeeds
@@ -186,7 +188,9 @@ fn linear(c: &color::T) -> p::LinearColor {
 }
 
 pub fn traced_material(m: &material::Material) -> p::Material {
-    p::material(Some((2.0 / (m.shininess.max(0.0) + 2.0)).sqrt()), None, Some(linear(&m.emissive)), Some(m.round), linear(&m.diffuse))
+    let mut traced = p::material(Some((2.0 / (m.shininess.max(0.0) + 2.0)).sqrt()), None, Some(linear(&m.emissive)), Some(m.round), linear(&m.diffuse));
+    traced.vertex_emission = m.vertex_emission;
+    traced
 }
 
 pub fn wire_scene(scene: &d3::Scene3) -> d3::Scene3 {
@@ -434,6 +438,7 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut MeshCache) -
         camera: None,
         wire: None,
         tracer: None,
+        graded: None,
         setting,
         cap: plan.limit,
         failure: None,
@@ -482,7 +487,7 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut MeshCache) -
                     Some(tracer) => tracer.clone(),
                     None => {
                         let first = mesh_.as_ref().map(|(_, first)| first.clone()).ok_or_else(|| "Path tracing needs a scene mesh.".to_string())?;
-                        let options = p::CreateOptions { bounces: Some(setting.bounces), round_samples: Some(setting.round_samples), ..p::CreateOptions::default() };
+                        let options = p::CreateOptions { bounces: Some(setting.bounces), round_samples: Some(setting.round_samples), exposure: Some(2f64.powf(setting.film.exposure)), ..p::CreateOptions::default() };
                         let scene_ = p::Scene {
                             objects: vec![first],
                             spheres: Vec::new(),
@@ -509,7 +514,22 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut MeshCache) -
                 }
                 p::set_world(&mut tracer.borrow_mut(), walk::world(scene).as_ref())?;
                 p::render(&mut tracer.borrow_mut(), &view.camera)?;
-                Ok(Slot { scene: scene.clone(), camera: Some(view.camera.clone()), tracer: Some(tracer), ..blank.clone() })
+                let graded = if crate::film_grade::enabled(setting.film) {
+                    let t = tracer.borrow();
+                    let raw = p::image(&t);
+                    let generation = rays::image::generation(&raw);
+                    match prior.graded.as_ref() {
+                        Some((known, _)) if *known == generation => prior.graded.clone(),
+                        _ if p::samples(&t) > 0 => {
+                            let into = prior.graded.as_ref().map(|(_, pixels)| pixels);
+                            Some((generation, crate::film_grade::apply(&raw, setting.film, into)?))
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                Ok(Slot { scene: scene.clone(), camera: Some(view.camera.clone()), tracer: Some(tracer), graded, ..blank.clone() })
             };
             match render() {
                 Ok(slot) => slot,
@@ -576,12 +596,13 @@ pub fn paint(state: &State, key: &str, bounds: (i64, i64, i64, i64), camera: &ca
     match slot_of(state, key) {
         Some(Slot { setting: Setting { mode: Mode::Raster, .. }, .. }) => raster(),
         Some(Slot { wire: Some(wire), .. }) => Some(view(wire)),
-        Some(Slot { tracer: Some(tracer), .. }) => {
+        Some(Slot { tracer: Some(tracer), graded, .. }) => {
             let (x, y, w, _) = bounds;
             let tracer = tracer.borrow();
             // the film is scaled to its pane's gate, so a resize inside a step never re-renders
             let (sw, _) = p::size(&tracer);
-            scene::image(&p::image(&tracer), (x, y), Some(w as f64 / sw.max(1) as f64), None).ok()
+            let image = graded.as_ref().map_or_else(|| p::image(&tracer), |(_, image)| image.clone());
+            scene::image(&image, (x, y), Some(w as f64 / sw.max(1) as f64), None).ok()
         }
         _ => None,
     }

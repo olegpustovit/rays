@@ -1024,6 +1024,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
                 | Action::PickUp
                 | Action::LookThrough
                 | Action::LookThroughCamera
+                | Action::SelectCamera(_)
+                | Action::RenderOutput { .. }
                 | Action::RenderMode(_)
                 | Action::Tool(_)
                 | Action::Fly
@@ -1152,7 +1154,13 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         }, None)
     };
     // Enter and row activation share camera selection and look-through.
-    let entered_camera: Option<i64> = if pane_level(&value.into()) != Level::Scene || loaded_flag || carrying {
+    let picked_camera = actions.iter().find_map(|action| match action {
+        Action::SelectCamera(id) if kind(value, *id).as_deref() == Some("camera") && view_wants(value, &View::Primary, *id) => Some(*id),
+        _ => None,
+    });
+    let entered_camera: Option<i64> = if let Some(id) = picked_camera.filter(|_| !loaded_flag && !carrying) {
+        Some(id)
+    } else if pane_level(&value.into()) != Level::Scene || loaded_flag || carrying {
         None
     } else {
         let candidate = match result.opened {

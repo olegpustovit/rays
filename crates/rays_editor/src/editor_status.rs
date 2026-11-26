@@ -30,6 +30,8 @@ pub fn prompt_name(value: &EditorModel) -> &'static str {
         Some(Prompt::Confirming { .. }) => "confirm",
         Some(Prompt::Saving(_)) => "save preset",
         Some(Prompt::Palette(_)) => "commands",
+        Some(Prompt::Cameras(_)) => "cameras",
+        Some(Prompt::RenderOutput { .. }) => "render output",
         Some(Prompt::Jumping(_)) => "jump",
         Some(Prompt::Symbols(_)) => "go to symbol",
         Some(Prompt::Referencing(..)) => "references",

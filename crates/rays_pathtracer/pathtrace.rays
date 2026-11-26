@@ -50,7 +50,7 @@
      :rad (xyz r) :one-sided o.w :area r.w}))
 (defn material-at :context value [(mats : (array vec4)) (k : int)]
   (let* [a (array/nth mats (int/mul k 3)) e (array/nth mats (int/add (int/mul k 3) 1)) r (array/nth mats (int/add (int/mul k 3) 2))]
-    {:albedo (xyz a) :rough a.w :emit (xyz e) :metal e.w :round r.x}))
+    {:albedo (xyz a) :rough a.w :emit (xyz e) :metal e.w :round r.x :uniform-emit (> r.y 0.)}))
 ; World maps: bilinear lookup (u wraps, v clamps), the CDF search and the texel solid-angle pdf of pathtrace.metal.
 (defn world-lookup :context value [(wmap : (array vec3)) (base : int) (w : int) (h : int) (d : vec3)]
   ; u in [0, 1) and v in [0, 1] put the texel corners in [-1, w - 1] x [-1, h - 1]: pathtrace.metal's wrap and
@@ -203,7 +203,7 @@
                     [1. 1. 1.])
              albedo (* mat.albedo tint)
              cov (if (and use-map at-eye) (+ st.cov 1.) st.cov)
-             emitted (if u.emissive (* (* st.thr mat.emit) tint) zero)
+             emitted (if u.emissive (* (* st.thr mat.emit) (if mat.uniform-emit [1. 1. 1.] tint)) zero)
              early (or (not use-map) (int/le st.b 1))
              rad1 (if early (+ rad0 emitted) rad0) ind1 (if early ind0 (+ ind0 emitted))
              to-rad (or (not use-map) at-eye)

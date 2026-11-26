@@ -18,6 +18,8 @@ pub mod editor_model;
 pub mod editor_panels;
 pub mod editor_panes;
 pub mod editor_reduce;
+mod editor_render_output;
+mod film_grade;
 pub mod editor_scope;
 pub mod editor_setup;
 pub mod editor_shell;

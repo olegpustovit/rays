@@ -614,9 +614,35 @@ pub mod workspace {
         use rays_pathtracer::rays_pathtracer as trace;
 
         let fail = |message: String| rays_diagnostic::error("E_RENDER_SCENE".into(), message, None, None, None, Vec::new(), Vec::new());
+        let export = if let Some(graph) = workspace_doc::camera_take_graph(doc) {
+            use flow_syntax::{arena::{Draft, SyntaxBuilder}, ty::Ty};
+            use flow_graph::flow_edit::Op;
+            let catalog = editor_document::kinds::shared(None)?;
+            let mut export = doc.clone();
+            let mut set_default = |input: &str, draft| -> Result<(), Diagnostic> {
+                let mut builder = SyntaxBuilder::new();
+                let root = builder.push_draft(0, draft, rays_diagnostic::Span { start: 0, finish: 0 }, None);
+                let value = builder.freeze().handle(root);
+                export = workspace_doc::edit(&catalog, &export, &Op::SetInputDefault {
+                    form: graph.name.clone(),
+                    input: input.into(),
+                    value,
+                })?;
+                Ok(())
+            };
+            if let Some(name) = camera {
+                set_default("take", Draft::Str(name.as_bytes().to_vec()))?;
+            }
+            if graph.inputs.iter().any(|(name, ty, _)| name == "preview" && *ty == Ty::Bool) {
+                set_default("preview", Draft::Sym("false".into()))?;
+            }
+            Some(export)
+        } else {
+            None
+        };
         let mut editor = super::editor::create(
             loop_model::Create { await_: Some(true), ..Default::default() },
-            doc, None, super::editor::prepare_fn(), super::editor::draw_fn(),
+            export.as_ref().unwrap_or(doc), None, super::editor::prepare_fn(), super::editor::draw_fn(),
         ).map_err(fail)?;
         let result = (|| {
             let core = Rc::make_mut(&mut editor.core);
@@ -651,6 +677,7 @@ pub mod workspace {
             let batch = (1..=8).rev().find(|n| samples % n == 0);
             let options = trace::CreateOptions {
                 spp: batch, bounces: Some(core.doc.root.bounces),
+                exposure: Some(2f64.powf(core.doc.root.film.exposure)),
                 round_samples: Some(core.doc.root.round_samples), ..Default::default()
             };
             let scene_input = trace::Scene {
@@ -662,13 +689,29 @@ pub mod workspace {
             let result = (|| {
                 trace::replace_mesh(&mut tracer, &mesh)?;
                 trace::set_world(&mut tracer, walk::world(scene).as_ref())?;
+                let report = std::env::var_os("RAYS_RENDER_PROGRESS").is_some();
+                let mut progress = -1;
                 while trace::samples(&tracer) < samples {
                     trace::render(&mut tracer, &camera)?;
                     trace::flush(&mut tracer)?;
+                    if report {
+                        let percent = 100 * trace::samples(&tracer) / samples;
+                        if percent / 5 != progress {
+                            progress = percent / 5;
+                            eprintln!("RAYS_PROGRESS {percent}");
+                        }
+                    }
                 }
                 let canvas = rays::canvas::create(width, height)?;
                 let result = (|| {
-                    let film = rays::scene::image(&trace::image(&tracer), (0, 0), None, None)?;
+                    let raw = trace::image(&tracer);
+                    let grade = core.doc.root.film;
+                    let pixels = if crate::film_grade::enabled(grade) {
+                        crate::film_grade::apply(&raw, grade, None)?
+                    } else {
+                        raw
+                    };
+                    let film = rays::scene::image(&pixels, (0, 0), None, None)?;
                     rays::canvas::render(Some(1), &canvas, &[film])?;
                     rays::canvas::save_png(&canvas, path)
                 })();

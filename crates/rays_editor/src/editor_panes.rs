@@ -872,7 +872,8 @@ pub fn draw_graph_header<'a>(
     if let (Some(leaf), Some((looks, mode))) = (active_view(value, g), &value.view_tools) {
         if leaf.header.3 > 0 {
             let from = tools_from(&leaf);
-            let revision = kit::revision(&|h| (leaf.header, from.to_bits(), *looks, *mode).hash(h));
+            let camera = value.doc.active_camera.and_then(|id| editor_document::kind_graph::find(&value.doc.scene, id));
+            let revision = kit::revision(&|h| (leaf.header, from.to_bits(), *looks, *mode, camera.map(|node| &node.label)).hash(h));
             kit::cached(ui, "workspace-view-tools", revision, &mut |ui| {
                 let (hx, hy, hw, hh) = leaf.header;
                 let from = hx as f32 + from;
@@ -881,7 +882,10 @@ pub fn draw_graph_header<'a>(
                 let look_w = kit::button_width(ui, Some("C"), false, "Look through");
                 let ty = hy as f32 + ((hh - 20) as f32 / 2.0);
                 let frame_w = kit::button_width(ui, Some("F"), false, "Frame");
-                if from + seg_w + 8.0 + look_w + 8.0 + frame_w < (hx + hw - 36) as f32 {
+                let right = (hx + hw - 36) as f32;
+                let name = camera.map_or("Camera", |node| node.label.as_str());
+                let cam_w = if camera.is_some() { kit::button_width(ui, None, false, name) + 8.0 } else { 0.0 };
+                if from + seg_w + 8.0 + look_w + 8.0 + frame_w < right - cam_w {
                     bars::rule(ui, "workspace-view-rule", leaf.header, from - hx as f32);
                     let render = match kit::segments(ui, "workspace-render", from + seg_w, ty, &modes, *mode).0 {
                         Some(i) if i != *mode => Some(Action::RenderMode(i)),
@@ -896,6 +900,12 @@ pub fn draw_graph_header<'a>(
                     } else {
                         render
                     };
+                }
+                if camera.is_some() && right - cam_w > from
+                    && kit::button(ui, "workspace-choose-camera", (right - cam_w, ty), cam_w - 8.0,
+                        &ButtonOpts::default(), name)
+                {
+                    view_action = Some(Action::PickCamera);
                 }
             });
         }

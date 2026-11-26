@@ -175,7 +175,8 @@ sop/curve|sop|Math|scalar|pos=points:list:vec3|opt=|rest=-|kw=closed:bool,filled
 sop/point_list|sop|Math|structfalse|pos=geometry:geometry|opt=|rest=-|kw=key:text|choices=|any=false|live=false|ar=false|pk=false
 sop/piece_list|sop|Math|structfalse|pos=geometry:geometry|opt=|rest=-|kw=key:text|choices=|any=false|live=false|ar=false|pk=false
 scene/merge|scene|Math|structtrue|pos=|opt=|rest=scene:scene|kw=|choices=|any=false|live=false|ar=false|pk=false
-material/standard|material|Math|structfalse|pos=|opt=|rest=-|kw=name:text,color:color,roughness:float,emission:color|choices=|any=false|live=false|ar=false|pk=false
+material/film|material|Math|structfalse|pos=|opt=|rest=-|kw=exposure:float,bloom:float,bloom_threshold:float,bloom_sigma:float,grain:float|choices=|any=false|live=false|ar=false|pk=false
+material/standard|material|Math|structfalse|pos=|opt=|rest=-|kw=name:text,color:color,roughness:float,emission:color,vertex_emission:bool|choices=|any=false|live=false|ar=false|pk=false
 world/none|world|Math|structfalse|pos=|opt=|rest=-|kw=|choices=|any=false|live=false|ar=false|pk=false
 ui/workspace|editor|Math|structfalse|pos=root:panel|opt=|rest=-|kw=effects:any|choices=|any=false|live=false|ar=false|pk=false
 ui/viewport|editor|Math|structfalse|pos=scene:scene|opt=|rest=-|kw=look_through:bool,focus:bool|choices=|any=false|live=false|ar=false|pk=false

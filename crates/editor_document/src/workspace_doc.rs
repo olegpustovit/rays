@@ -719,6 +719,12 @@ pub fn edit_layout(catalog: &Catalog, t: &T, op: &layout_edit::Op) -> R<T> {
     })
 }
 
+/// The optional scene input that couples the active camera to its take's scene and output settings.
+pub fn camera_take_graph(workspace: &T) -> Option<&w::Graph> {
+    workspace.checked.graphs.iter().find(|g| g.context == context::scene())
+        .filter(|g| g.inputs.iter().any(|(name, ty, _)| name == "take" && *ty == flow_syntax::ty::Ty::Text))
+}
+
 /// The value of a context's default instance in an evaluated plan (forced at `t = 0` unless
 /// `force` is false); none when the workspace has no graph of that context.
 pub fn context_value(force: bool, workspace: &T, plan: &Plan, ctx: Context) -> R<Option<E>> {

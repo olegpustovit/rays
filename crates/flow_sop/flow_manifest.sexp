@@ -1,6 +1,6 @@
 (flow_manifest
   (version 202609)
-  (digest "845130035370f4c21d4fbcebc5c79d9c")
+  (digest "313c544da5d4f747473fc9858f26b5bd")
   (kinds
     (kind "sop/switch"
       (key "switch")
@@ -2381,7 +2381,8 @@
         (field "round" "Round corners" (folder) (float (soft 0 0.5) (hard 0 nil)) (float 0) (primary false) (vec3))
         (field "emission_r" "Emission red" (folder) (float (soft 0 1) (hard 0 1)) (float 0) (primary false) (vec3 "emission" 0))
         (field "emission_g" "Emission green" (folder) (float (soft 0 1) (hard 0 1)) (float 0) (primary false) (vec3 "emission" 1))
-        (field "emission_b" "Emission blue" (folder) (float (soft 0 1) (hard 0 1)) (float 0) (primary false) (vec3 "emission" 2)))
+        (field "emission_b" "Emission blue" (folder) (float (soft 0 1) (hard 0 1)) (float 0) (primary false) (vec3 "emission" 2))
+        (field "vertex_emission" "Vertex colour tints emission" (folder) (bool) (bool true) (primary false) (vec3)))
       (outputs (output "geo" geometry))
       (body lisp)
       (calls))
@@ -3752,7 +3753,7 @@
         (field "fov" "FOV (radians)" (folder "Lens") (float (soft 0.08726646259971647 2.6179938779914944) (hard 0.017453292519943295 3.12413936106985)) (float 1.0471975511965976) (primary false) (vec3) (unit "rad"))
         (field "near" "Near clip" (folder "Lens") (float (soft 0.01 10) (hard 0.0001 nil)) (float 0.1) (primary false) (vec3) (unit "m"))
         (field "far" "Far clip" (folder "Lens") (float (soft 10 10000) (hard 0.001 nil)) (float 1000) (primary false) (vec3) (unit "m"))
-        (field "aperture" "Aperture (lens radius)" (folder "Lens") (float (soft 0 2) (hard 0 nil)) (float 0) (primary false) (vec3) (unit "m"))
+        (field "aperture" "Aperture (lens radius)" (folder "Lens") (float (soft 0 12) (hard 0 nil)) (float 0) (primary false) (vec3) (unit "m"))
         (field "focus_distance" "Focus distance (0: target)" (folder "Lens") (float (soft 0 100) (hard 0 nil)) (float 0) (primary false) (vec3) (unit "m"))
         (field "eye_x" "Eye X" (folder "Transform") (float (soft -100 100) (hard nil nil)) (float 0) (primary false) (vec3 "eye" 0) (unit "m"))
         (field "eye_y" "Eye Y" (folder "Transform") (float (soft -100 100) (hard nil nil)) (float 0) (primary false) (vec3 "eye" 1) (unit "m"))
@@ -3794,7 +3795,7 @@
       (label "Root")
       (description "Assemble the scene root with render and output settings.")
       (category "Render")
-      (slots (slot "scene" required) (slot "camera" optional))
+      (slots (slot "scene" required scene) (slot "camera" optional scene) (slot "film" optional material))
       (fields
         (field "name" "Name" (folder) (text) (text "") (primary false) (vec3))
         (field "renderer" "Renderer" (folder) (choice "Raster" "Wireframe" "Path traced") (choice "Raster") (primary false) (vec3))

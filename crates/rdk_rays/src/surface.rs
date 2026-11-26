@@ -102,6 +102,7 @@ fn device_refusal(g: &geometry::T) -> Option<String> {
             (Owner::Primitive, "material_color"),
             (Owner::Primitive, "material_roughness"),
             (Owner::Primitive, "material_emission"),
+            (Owner::Primitive, "material_vertex_emission"),
             (Owner::Primitive, "material_round"),
         ]
         .iter()
@@ -140,12 +141,12 @@ fn valid_tuple(a: &Option<packed::float4::T>) -> bool {
 }
 
 /// Numeric cache keys normalize 0 and -0 to the same value.
-fn key_bits(values: [f64; 8]) -> [u64; 8] {
+fn key_bits(values: [f64; 9]) -> [u64; 9] {
     values.map(|v| (v + 0.0).to_bits())
 }
 
 fn of_host(instances: Option<Vec<mat4::T>>, reason: String, g: &geometry::T) -> Result<T, String> {
-    let needs_triangles = ["piece", "material_color", "material_roughness", "material_emission", "material_round"]
+    let needs_triangles = ["piece", "material_color", "material_roughness", "material_emission", "material_round", "material_vertex_emission"]
         .iter()
         .any(|name| geometry::find_attribute(Owner::Primitive, name, g).is_some());
     let g = if !needs_triangles
@@ -181,7 +182,12 @@ fn of_host(instances: Option<Vec<mat4::T>>, reason: String, g: &geometry::T) -> 
         Some(Storage::Float4(a)) => Some(a),
         Some(_) => return Err("material_color must be primitive float4".to_owned()),
     };
-    let has_material = roughness.is_some() || emission.is_some() || color_.is_some() || round.is_some();
+    let vertex_emission = match primitive_storage(&g, "material_vertex_emission") {
+        None => None,
+        Some(Storage::Float(a)) => Some(a),
+        Some(_) => return Err("material_vertex_emission must be primitive float".into()),
+    };
+    let has_material = vertex_emission.is_some() || roughness.is_some() || emission.is_some() || color_.is_some() || round.is_some();
     if !round.as_ref().is_none_or(|a| a.iter().all(|x| x.is_finite() && *x >= 0.0)) {
         return Err("material_round must be finite and non-negative".to_owned());
     }
@@ -194,9 +200,9 @@ fn of_host(instances: Option<Vec<mat4::T>>, reason: String, g: &geometry::T) -> 
     let batches = if !has_material {
         Vec::new()
     } else {
-        let mut table: HashMap<[u64; 8], usize> = HashMap::new();
+        let mut table: HashMap<[u64; 9], usize> = HashMap::new();
         // first-appearance order of each key, with the primitives it holds
-        let mut order: Vec<([f64; 8], Vec<i64>)> = Vec::new();
+        let mut order: Vec<([f64; 9], Vec<i64>)> = Vec::new();
         for primitive in 0..count {
             let at = primitive as usize;
             let rough = roughness.as_ref().map_or((2.0f64 / 34.0).sqrt(), |a| a[at]);
@@ -215,7 +221,8 @@ fn of_host(instances: Option<Vec<mat4::T>>, reason: String, g: &geometry::T) -> 
                 }
             };
             let round = round.as_ref().map_or(0.0, |a| a[at]);
-            let key = [rough, r, g, b, er, eg, eb, round];
+            let tint = vertex_emission.as_ref().is_none_or(|a| a[at] != 0.);
+            let key = [rough, r, g, b, er, eg, eb, round, f64::from(tint)];
             let slot = *table.entry(key_bits(key)).or_insert_with(|| {
                 order.push((key, Vec::new()));
                 order.len() - 1
@@ -223,10 +230,10 @@ fn of_host(instances: Option<Vec<mat4::T>>, reason: String, g: &geometry::T) -> 
             order[slot].1.push(primitive);
         }
         let mut batches = Vec::with_capacity(order.len());
-        for ([rough, r, g, b, er, eg, eb, round], primitives) in order {
+        for ([rough, r, g, b, er, eg, eb, round, tint], primitives) in order {
             let indices: Vec<i64> = (0..primitives.len() * 3).map(|i| primitives[i / 3] * 3 + (i % 3) as i64).collect();
             let shininess = f64::max(0.0, 2.0 / f64::max(0.0001, rough * rough) - 2.0);
-            let material = material::create(
+            let mut material = material::create(
                 Some(color::of_floats(r, g, b, 1.0)),
                 None,
                 None,
@@ -234,6 +241,7 @@ fn of_host(instances: Option<Vec<mat4::T>>, reason: String, g: &geometry::T) -> 
                 Some(shininess),
                 Some(round),
             )?;
+            material.vertex_emission = tint != 0.;
             batches.push((material, indices));
         }
         batches

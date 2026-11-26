@@ -86,7 +86,7 @@ const USAGE: &str = "Usage: rays [FILE.rays]
        rays fmt FILE
        rays doc [NAME|NAMESPACE/|SEARCH] [--json] [--all] [--markdown]
        rays render FILE -o PNG [--frame N] [--size WIDTHxHEIGHT] [--graph NAME]
-       rays render FILE -o PNG --camera NAME [--size WIDTHxHEIGHT] [--samples N]
+       rays render FILE --camera NAME [-o PNG] [--size WIDTHxHEIGHT] [--samples N]
        rays mem FILE [--frames N]
        rays web FILE -o DIR
 
@@ -101,11 +101,13 @@ fn render_command(args: &[&str]) {
     if file.starts_with('-') { usage(file); }
     let (mut output, mut graph, mut size, mut frame) = (None, None, None, 0);
     let (mut camera, mut samples) = (None, None);
+    let mut source_stdin = false;
     let mut rest = options;
     while !rest.is_empty() {
         let [flag, value, tail @ ..] = rest else { usage(rest[0]); };
         match *flag {
             "-o" if output.is_none() => output = Some(*value),
+            "--source" if *value == "-" => source_stdin = true,
             "--graph" if graph.is_none() => graph = Some(*value),
             "--camera" if camera.is_none() => camera = Some(*value),
             "--samples" if samples.is_none() => samples = Some(value.parse::<i64>().ok().filter(|n| *n > 0).unwrap_or_else(|| usage(value))),
@@ -115,8 +117,23 @@ fn render_command(args: &[&str]) {
         }
         rest = tail;
     }
-    let output = output.unwrap_or_else(|| usage("render: missing -o PNG"));
-    let text = std::fs::read_to_string(file).unwrap_or_else(|e| die(&format!("rays: {file}: {e}")));
+    let fallback;
+    let output = match (output, camera) {
+        (Some(explicit), _) => explicit,
+        (None, Some(name)) => {
+            fallback = format!("{}.png", editor_document::preset::sanitize(name));
+            &fallback
+        }
+        (None, None) => usage("render: missing -o PNG"),
+    };
+    let text = if source_stdin {
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin().lock(), &mut text)
+            .unwrap_or_else(|e| die(&format!("rays: stdin: {e}")));
+        text
+    } else {
+        std::fs::read_to_string(file).unwrap_or_else(|e| die(&format!("rays: {file}: {e}")))
+    };
     let doc = workspace::load_file(file, &text).unwrap_or_else(|ds| {
         for d in ds { eprintln!("{}", rays_diagnostic::report(file, &text, &d)); }
         std::process::exit(1)

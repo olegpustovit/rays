@@ -489,6 +489,16 @@ fn delete_objects(st: &mut State, before: &document::T, gone: &[(i64, Home)]) ->
 /// The render camera in the text: the root's `:camera` when the scene has a root, else `:active`
 /// on the camera. `alive` says whether the camera it replaces is still an object.
 fn set_camera(st: &mut State, before: &document::T, alive: &dyn Fn(i64) -> bool, camera: Option<i64>) -> R<()> {
+    if let Some(graph) = workspace_doc::camera_take_graph(&st.workspace)
+        && let Some(id) = camera
+        && let Some(node) = g::find(&before.scene, id)
+    {
+        return apply(st, Op::SetInputDefault {
+            form: graph.name.clone(),
+            input: "take".into(),
+            value: string(&node.label),
+        });
+    }
     let home = |id: i64| before.homes.objects.iter().find(|(i, _)| *i == id).map(|(_, h)| h.clone());
     let active = ArgKey::Kw("active".to_owned());
     match &before.homes.root {

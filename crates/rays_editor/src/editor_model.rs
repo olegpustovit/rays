@@ -169,6 +169,8 @@ pub enum Prompt {
     Saving(String),
     /// command search query
     Palette(String),
+    Cameras(String),
+    RenderOutput { all: bool, path: String },
     /// / j: graph search query
     Jumping(String),
     /// Command-P: binding search query

@@ -137,6 +137,25 @@ pub fn prompt_panel<'a>(value: &ModelView<'a>, focus: &Panel, keymap: &[Command]
                 _ => (Some(Prompt::Confirming { title, message, accept, cancel, action, accepting }), None),
             }
         }
+        Some(Prompt::Cameras(query)) => {
+            use crate::editor_inspect::{scene, view_wants, View};
+            let mut choices: Vec<_> = scene(value).iter()
+                .filter(|node| node.kind == "camera" && view_wants(value, &View::Primary, node.id))
+                .map(|node| (node.label.as_str(), if value.doc.active_camera == Some(node.id) { "Active" } else { "" },
+                    PromptIntent::RunAction(Action::SelectCamera(node.id))))
+                .collect();
+            choices.push(("Render camera…", "", PromptIntent::RunAction(Action::RenderCamera)));
+            choices.push(("Render all takes", "", PromptIntent::RunAction(Action::RenderAllCameras)));
+            search_prompt(ui, "camera-picker", "Camera", "Search cameras", &query, &choices, &Prompt::Cameras)
+        }
+        Some(Prompt::RenderOutput { all, path }) => {
+            let (title, label) = if all { ("Render all takes", "Output folder") } else { ("Render camera", "Output PNG") };
+            match shell_prompt::name(ui, "render-output", title, label, label, &path) {
+                None | Some((_, pxui::ui::Pick::Cancel)) => (None, None),
+                Some((path, pxui::ui::Pick::Submit)) => (None, Some(PromptIntent::RunAction(Action::RenderOutput { all, path }))),
+                Some((path, _)) => (Some(Prompt::RenderOutput { all, path }), None),
+            }
+        }
         Some(Prompt::Saving(name)) => match shell_prompt::name(ui, "preset-save", "Save preset", "Name for the current state of the document", "Preset name", &name) {
             None | Some((_, pxui::ui::Pick::Cancel)) => (None, None),
             Some((name, pxui::ui::Pick::Submit)) => (None, Some(PromptIntent::SavePresetFile(name))),
@@ -1178,6 +1197,9 @@ pub fn update_frame(
             Action::BrowsePresets => initial_prompt = browse(&*value, ""),
             Action::GuideKeys => initial_prompt = Some(Prompt::Keys),
             Action::CommandPalette => initial_prompt = Some(Prompt::Palette(String::new())),
+            Action::PickCamera => initial_prompt = Some(Prompt::Cameras(String::new())),
+            Action::RenderCamera => initial_prompt = Some(Prompt::RenderOutput { all: false, path: "render.png".into() }),
+            Action::RenderAllCameras => initial_prompt = Some(Prompt::RenderOutput { all: true, path: "renders".into() }),
             Action::Jump => initial_prompt = Some(Prompt::Jumping(String::new())),
             Action::GotoSymbol if text_shown.is_some() => initial_prompt = Some(Prompt::Symbols(String::new())),
             Action::GotoLine if text_shown.is_some() => initial_prompt = Some(Prompt::Going(String::new())),

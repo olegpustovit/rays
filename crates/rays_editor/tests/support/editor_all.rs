@@ -33,6 +33,8 @@ mod suite_t5;
 mod suite_t6;
 #[path = "../suites/natq.rs"]
 mod natq;
+#[path = "../support/hero.rs"]
+mod hero;
 
 fn run_split(pure: bool) {
     // a cached view whose revision misses an input panics, naming it (debug builds)
@@ -50,6 +52,8 @@ fn run_split(pure: bool) {
     cases.extend(suite_t5::cases());
     cases.extend(suite_t6::cases());
     cases.extend(natq::cases());
+    cases.push(("hero_named_camera", hero::named_camera));
+    cases.push(("hero_material_edit", hero::material_edit));
     // ponytail: keep the device-free names in one list; use per-case markers if it churns.
     let pure_names: std::collections::HashSet<&str> = include_str!("../pure_cases.txt").lines().collect();
     cases.retain(|(name, _)| pure_names.contains(name) == pure);

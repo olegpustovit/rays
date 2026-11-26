@@ -718,6 +718,12 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
         match a {
             Action::HideUi => control = V::toggle_ui(&control),
             Action::OpenCamera => control = V::open_camera(&control),
+            Action::RenderOutput { all, path } => {
+                render_status = Some(match crate::editor_render_output::start(value, *all, path) {
+                    Ok(()) => "Preparing camera render…".into(),
+                    Err(message) => message,
+                });
+            }
             other => {
                 let (e, notice) = V::apply_action(&camera, &extra, other);
                 extra = e;
@@ -1053,6 +1059,16 @@ pub fn source_at_rest(value: &mut LoopModel, now: f64) -> bool {
 }
 
 pub fn update(value: &mut LoopModel, frame_: &frame::Frame) {
+    if let Some(job) = &value.render_output
+        && let Some((done, status)) = job.poll()
+    {
+        value.render_status = Some(status);
+        if done {
+            value.render_output = None;
+        }
+        value.picture_size = None;
+        value.rest = None;
+    }
     // REST_SECONDS expiry alone must not rebuild: sliding the rest window keeps idle at 0 allocs
     // while still allowing wants_frame / input / picture changes to wake (status fps stays from the
     // last full frame until something else asks for one).

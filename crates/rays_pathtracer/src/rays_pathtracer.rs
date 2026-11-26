@@ -23,6 +23,7 @@ pub struct Material {
     pub roughness: f64,
     pub metallic: f64,
     pub emission: LinearColor,
+    pub vertex_emission: bool,
     /// Round-corners radius in scene units (0 = off). A render-time shading bevel: the normal rolls over
     /// onto adjacent faces within this distance of an edge, without changing geometry.
     pub round: f64,
@@ -34,6 +35,7 @@ pub fn material(roughness: Option<f64>, metallic: Option<f64>, emission: Option<
         roughness: roughness.unwrap_or(0.5),
         metallic: metallic.unwrap_or(0.),
         emission: emission.unwrap_or(linear::rgb(0., 0., 0.)),
+        vertex_emission: true,
         round: round.unwrap_or(0.),
     }
 }
@@ -371,7 +373,7 @@ pub fn material_bytes(materials: &[Material]) -> Vec<u8> {
     for m in materials {
         add_float4(&mut builder, color_tuple(&m.albedo), m.roughness);
         add_float4(&mut builder, color_tuple(&m.emission), m.metallic);
-        add_float4(&mut builder, (m.round, 0., 0.), 0.);
+        add_float4(&mut builder, (m.round, if m.vertex_emission { 0. } else { 1. }, 0.), 0.);
     }
     builder
 }

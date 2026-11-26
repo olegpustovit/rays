@@ -117,7 +117,7 @@ pub mod camera {
                 fov,
                 sop::decl::Spec { unit: Some("m"), ..fl("near", "Near clip", "Lens", 0.1, 0.01, 10., Some(0.0001), None) },
                 sop::decl::Spec { unit: Some("m"), ..fl("far", "Far clip", "Lens", 1000., 10., 10000., Some(0.001), None) },
-                sop::decl::Spec { unit: Some("m"), ..fl("aperture", "Aperture (lens radius)", "Lens", 0., 0., 2., Some(0.), None) },
+                sop::decl::Spec { unit: Some("m"), ..fl("aperture", "Aperture (lens radius)", "Lens", 0., 0., 12., Some(0.), None) },
                 sop::decl::Spec { unit: Some("m"), ..fl("focus_distance", "Focus distance (0: target)", "Lens", 0., 0., 100., Some(0.), None) },
                 tr("eye_x", "Eye X", 0.),
                 tr("eye_y", "Eye Y", 0.),
@@ -229,8 +229,18 @@ pub mod root {
         }
     }
 
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct Film {
+        pub exposure: f64,
+        pub bloom: f64,
+        pub bloom_threshold: f64,
+        pub bloom_sigma: f64,
+        pub grain: f64,
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct Parameters {
+        pub film: Film,
         pub renderer: Renderer,
         pub width: i64,
         pub height: i64,
@@ -258,6 +268,7 @@ pub mod root {
         let schema = parameters_schema();
         let r = Rec::of(&schema, values);
         Parameters {
+            film: Film::default(),
             renderer: renderer_of_label(r.c("renderer")),
             width: r.i("width"),
             height: r.i("height"),

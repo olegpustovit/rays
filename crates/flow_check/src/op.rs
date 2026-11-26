@@ -922,7 +922,10 @@ fn panel_ops()->Vec<Op>{
     ops.push(structure_op("sop/point_list",context::sop(),vec![("geometry",ty::geometry())],vec![],None,vec![("key",Ty::Text)],list(Ty::Vec3),false,"SOP"));
     ops.push(structure_op("sop/piece_list",context::sop(),vec![("geometry",ty::geometry())],vec![],None,vec![("key",Ty::Text)],list(ty::geometry()),false,"SOP"));
     ops.push(structure_op("scene/merge",context::scene(),vec![],vec![],Some(("scene",scene.clone())),vec![],scene.clone(),true,"Scene"));
-    ops.push(structure_op("material/standard",context::material(),vec![],vec![],None,vec![("name",Ty::Text),("color",Ty::Color),("roughness",Ty::Float),("emission",Ty::Color)],ty::material(),false,"Material"));
+    ops.push(structure_op("material/film",context::material(),vec![],vec![],None,vec![
+        ("exposure",Ty::Float),("bloom",Ty::Float),("bloom_threshold",Ty::Float),
+        ("bloom_sigma",Ty::Float),("grain",Ty::Float)],ty::material(),false,"Film grade"));
+    ops.push(structure_op("material/standard",context::material(),vec![],vec![],None,vec![("name",Ty::Text),("color",Ty::Color),("roughness",Ty::Float),("emission",Ty::Color),("vertex_emission",Ty::Bool)],ty::material(),false,"Material"));
     ops.push(structure_op("world/none",context::world(),vec![],vec![],None,vec![],ty::world(),false,"World"));
     ops.push(structure_op("ui/workspace",context::editor(),vec![("root",panel.clone())],vec![],None,vec![("effects",Ty::Any)],ty::editor(),false,"Editor"));
     ops.push(structure_op("ui/viewport",context::editor(),vec![("scene",scene)],vec![],None,vec![("look_through",Ty::Bool),("focus",Ty::Bool)],panel.clone(),false,"Editor"));

@@ -48,7 +48,7 @@ pub struct Options {
 
 // ---- lowering a struct ----
 
-const SLOT_NAMES: [&str; 10] = ["geometry", "texture", "layers", "below", "name", "parent", "active", "world", "scene", "camera"];
+const SLOT_NAMES: [&str; 11] = ["geometry", "texture", "layers", "below", "name", "parent", "active", "world", "scene", "camera", "film"];
 
 /// The field changes a struct's keywords make, checked against the schema's bounds.
 fn changes(qualified: &str, args: &Record) -> R<Vec<(String, PV)>> {
@@ -531,6 +531,32 @@ fn find_call(calls: &[&Call], value: &E) -> Option<usize> {
     }
 }
 
+fn film_of(args: &Record) -> R<root::Film> {
+    let Some(value) = args.get_str("film") else { return Ok(root::Film::default()) };
+    let E::Struct(film) = force0(value)? else {
+        return Err(diag("E_LOWER", "Film expects material/film."));
+    };
+    if film.name != "material/film" {
+        return Err(diag("E_LOWER", "Film expects material/film."));
+    }
+    let number = |key: &str, default: f64, min: f64, max: f64| {
+        if let Some(value) = film.fields.get_str(key) {
+            flow_syntax::value::num(value).and_then(|n| {
+                if (min..=max).contains(&n) { Ok(n) } else {
+                    Err(diag("E_RANGE", &format!("Film {key} must be in [{min}, {max}].")))
+                }
+            })
+        } else { Ok(default) }
+    };
+    Ok(root::Film {
+        exposure: number("exposure", 0., -16., 16.)?,
+        bloom: number("bloom", 0., 0., 4.)?,
+        bloom_threshold: number("bloom_threshold", 0.5, 0., 1.)?,
+        bloom_sigma: number("bloom_sigma", 0.002, 0., 0.1)?,
+        grain: number("grain", 0., 0., 1.)?,
+    })
+}
+
 fn root_of(all: &[Call]) -> R<Root> {
     match all.iter().find(|c| c.kind == "scene/root") {
         None => Ok(Root { params: root::default(), root_home: None, camera: None }),
@@ -538,7 +564,8 @@ fn root_of(all: &[Call]) -> R<Root> {
             let own: Vec<(Symbol, E)> = call.args.iter().filter(|(key, _)| !SLOT_NAMES.contains(&key.as_str())).cloned().collect();
             let forced = force0(&struct_value("scene/root", ty::scene(), own.into()))?;
             let values = changes("scene/root", &forced_args(forced))?;
-            let params = root_params(&values)?;
+            let mut params = root_params(&values)?;
+            params.film = film_of(&call.args)?;
             let others: Vec<&Call> = all.iter().filter(|c| c.kind != "scene/root").collect();
             Ok(Root { params, root_home: Some(call.home.clone()), camera: call.args.iter().find(|(n, _)| n == "camera").and_then(|(_, v)| find_call(&others, v)) })
         }
@@ -719,7 +746,10 @@ pub fn instance_root(value: &E) -> Option<ViewRoot> {
             let own: Vec<(Symbol, E)> = args.iter().filter(|(key, _)| !SLOT_NAMES.contains(&key.as_str())).cloned().collect();
             match force0(&struct_value("scene/root", ty::scene(), own.into())) {
                 Ok(E::Struct(forced)) => match changes("scene/root", &forced.fields) {
-                    Ok(values) => root_params(&values).ok().map(|params| ViewRoot { params, camera: instance_camera(args.iter().find(|(n, _)| n == "camera").map(|(_, v)| v)) }),
+                    Ok(values) => root_params(&values).ok().and_then(|mut params| {
+                        params.film = film_of(args).ok()?;
+                        Some(ViewRoot { params, camera: instance_camera(args.get_str("camera")) })
+                    }),
                     Err(_) => None,
                 },
                 _ => None,

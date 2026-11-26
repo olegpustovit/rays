@@ -994,7 +994,7 @@ pub fn render(mut extra_: Extra, pixel_scale: (f64, f64), focus: Option<&str>, v
                 camera: camera_,
                 scene: scene_,
                 cap: settings.max_spp,
-                setting: renderer::Setting { mode: of_root(settings.renderer), bounces: settings.bounces, round_samples: settings.round_samples },
+                setting: renderer::Setting { mode: of_root(settings.renderer), bounces: settings.bounces, round_samples: settings.round_samples, film: settings.film },
             }
         })
         .collect();
