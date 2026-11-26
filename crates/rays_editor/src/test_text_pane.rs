@@ -564,6 +564,9 @@ fn lisp_text_completions() {
     let with_ring = format!("{doc}sop/transform ring)");
     assert!(describe(&with_ring, doc.len() as i64 + 15).contains("let* binding"), "a binding's description");
     assert!(describe(doc, index_of("int 5") + 4).contains("drag"), "a number's description");
+    let unicode = "(let* [ø 1] ø)";
+    let reference = unicode.rfind('ø').unwrap() as i64;
+    assert!(describe(unicode, reference).contains("let* binding"));
 }
 
 #[test]

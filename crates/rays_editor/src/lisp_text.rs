@@ -131,15 +131,11 @@ pub fn colorize_now(theme: &Theme, text: &str, out: &mut Vec<(usize, usize, pxui
 }
 
 pub fn brackets(text: &str) -> Vec<(usize, usize)> {
-    // ponytail: PXUI wants usize; hand off a capacity shell like colorize_now.
-    thread_local!(static PAIRS: std::cell::RefCell<Vec<(usize, usize)>> = const { std::cell::RefCell::new(Vec::new()) });
-    PAIRS.with(|cell| {
-        let mut out = cell.borrow_mut();
-        out.clear();
-        out.extend_from_slice(&lex(text).1);
-        let cap = out.capacity();
-        std::mem::replace(&mut *out, Vec::with_capacity(cap))
-    })
+    lex(text).1.clone()
+}
+
+fn brackets_into(text: &str, out: &mut Vec<(usize, usize)>) {
+    out.extend_from_slice(&lex(text).1);
 }
 
 /// One kind of the catalog as the text editor sees it: the qualified name a head writes, its context
@@ -488,11 +484,18 @@ fn soft_finish(mut soft: Vec<Soft<'_>>) -> Vec<Candidate> {
 }
 
 fn kind_of<'a>(vocab: &'a Vocab, context: &str, name: &str) -> Option<&'a Entry> {
-    vocab
-        .by_name
-        .get(name)
-        .or_else(|| vocab.by_name.get(&format!("{context}/{name}")))
-        .map(|i| &vocab.kinds[*i])
+    let index = vocab.by_name.get(name).or_else(|| {
+        thread_local!(static QUALIFIED: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) });
+        QUALIFIED.with(|key| {
+            let mut key = key.borrow_mut();
+            key.clear();
+            key.push_str(context);
+            key.push('/');
+            key.push_str(name);
+            vocab.by_name.get(key.as_str())
+        })
+    })?;
+    Some(&vocab.kinds[*index])
 }
 
 pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text: &str, caret: usize) -> Vec<Completion> {
@@ -752,18 +755,18 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
     let t = &tokens[i];
     let w = word(text, t);
     let enclosing_head = scan::head_before(text, tokens, i);
-    let open_stack = lex(sub(text, 0, t.start)).2.clone();
-    let context = scan::context_of(text, tokens, &open_stack);
+    let before = lex(sub(text, 0, t.start));
+    let context = scan::context_of(text, tokens, &before.2);
     let kind = |name: &str| kind_of(vocab, context, name);
-    let signature = |name: &str| workspace::op_signature(&vocab.ops, &ws_context(context), name);
-    let bare = if w.len() > 1 { w[1..].to_string() } else { String::new() };
+    let signature = |name: &str| op::find_ref(&vocab.ops, name, &ws_context(context)).map(|op| &op.signature);
+    let bare = w.get(1..).unwrap_or_default();
     let doc: Option<String> = match t.kind {
         Kind::Head => match (specials().iter().find(|(n, _)| *n == w), kind(&w), signature(&w)) {
             (Some((_, doc)), _, _) => Some(doc.clone()),
             (None, Some(k), _) => Some(format!("{} \u{b7} {}", k.qualified, kind_doc(k))),
-            (None, None, Some(s)) => Some(op_doc(&w, &s)),
+            (None, None, Some(s)) => Some(op_doc_sig(w, s)),
             (None, None, None) => {
-                let (_, defns, _) = scan::bound(text, tokens, t.start);
+                let (_, defns, _) = scan::bound_where(text, tokens, t.start, &|name| name == w);
                 if defns.contains(&w) { Some(format!("{w} \u{b7} a function of this workspace")) } else { None }
             }
         },
@@ -791,7 +794,7 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
         Kind::Sym => match constants().iter().find(|(n, _)| *n == w) {
             Some((_, doc)) => Some(doc.to_string()),
             None => {
-                let (bindings, defns, graphs) = scan::bound(text, tokens, t.start);
+                let (bindings, defns, graphs) = scan::bound_where(text, tokens, t.start, &|name| name == w);
                 match bindings.iter().rev().find(|(n, _)| *n == w) {
                     Some((_, doc)) => Some(format!("{w} \u{b7} {}", doc.render(text, tokens))),
                     None => {
@@ -807,7 +810,7 @@ pub fn describe(vocab: &Vocab, text: &str, byte: usize) -> Option<(i64, i64, Str
             }
         },
         Kind::Num => Some(format!("{w} \u{b7} drag sideways to change it, Shift for coarse steps")),
-          Kind::Meta => special_keyword(&bare).map(|s| s.to_string()),
+        Kind::Meta => special_keyword(bare).map(|s| s.to_string()),
         Kind::Str => match enclosing_head.and_then(kind) {
             Some(k) => {
                 let v: String = w.replace('"', " ");
@@ -884,7 +887,7 @@ pub fn color_chips(text: &str, out: &mut Vec<(usize, usize, pxui::Rgba)>) {
 #[derive(Clone)]
 pub struct Language {
     pub colorize: Rc<pxui::ColorizeFn<'static>>,
-    pub brackets: Rc<pxui::BracketsFn<'static>>,
+    pub brackets: Rc<pxui::BracketsIntoFn<'static>>,
     pub indent: Rc<pxui::IndentFn<'static>>,
     pub complete: Rc<pxui::CompleteFn<'static>>,
     pub describe: Rc<pxui::DescribeFn<'static>>,
@@ -897,7 +900,7 @@ pub struct Language {
 impl Language {
     pub fn as_pxui(&self) -> pxui::Language<'_> {
         let language = pxui::Language::DEFAULT
-            .colorize(self.colorize.as_ref()).brackets(self.brackets.as_ref()).indent(self.indent.as_ref())
+            .colorize(self.colorize.as_ref()).brackets_into(self.brackets.as_ref()).indent(self.indent.as_ref())
             .pairs(&[('(', ')'), ('[', ']'), ('{', '}'), ('"', '"')])
             .complete(self.complete.as_ref()).describe(self.describe.as_ref()).number_at(self.number_at.as_ref())
             .context_at(self.context_at.as_ref()).comment(self.comment);
@@ -912,7 +915,7 @@ pub fn language(vocab: Option<Rc<Vocab>>, names: Option<Rc<Names>>, imports: Opt
     let complete_vocab = vocab.clone();
     Language {
         colorize: Rc::new(move |text, out| colorize_now(&theme, text, out)),
-        brackets: Rc::new(brackets),
+        brackets: Rc::new(brackets_into),
         indent: Rc::new(scan::indent),
         complete: Rc::new(move |text, caret| complete(&names, &imports, &complete_vocab, text, caret)),
         describe: Rc::new(move |text, byte, out| {

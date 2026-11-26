@@ -726,7 +726,8 @@ pub fn node_menu_step<'a>(value: &ModelView<'a>, workspace: &Shell, frame_: &fra
     }
 }
 
-type TextState<'h> = (Option<&'h Host>, text_pane::State, Option<text_pane::Shown>, Vec<(Key_, layout::Path, text_pane::State, text_pane::Shown)>);
+type OtherText = (usize, text_pane::State, text_pane::Shown);
+type TextState<'h> = (Option<&'h Host>, text_pane::State, Option<text_pane::Shown>, Vec<OtherText>);
 
 /// What each text pane shows: its state and what it is showing.
 pub fn text_state<'a, 'h>(value: &ModelView<'a>, actions: &[Action], pane_of: &dyn Fn(&Host) -> ModelView<'a>, hosts: &'h [Host], pane_text: text_pane::State) -> Result<TextState<'h>, rays_diagnostic::Diagnostic> {
@@ -750,8 +751,8 @@ pub fn text_state<'a, 'h>(value: &ModelView<'a>, actions: &[Action], pane_of: &d
         };
         Ok(Some(text_pane::shown(Some(shown_ws), state, &shown_ws.source, graph, selected)?))
     };
-    let text_hosts = hosts.iter().filter(|host| host.3 == HostKind::Text);
-    let text_host = text_hosts.clone().find(|(key, _, _, _)| Some(key) == value.text_at.as_ref());
+    let text_hosts = hosts.iter().enumerate().filter(|(_, host)| host.3 == HostKind::Text);
+    let text_host = text_hosts.clone().map(|(_, host)| host).find(|(key, _, _, _)| Some(key) == value.text_at.as_ref());
     let (mut text, text_shown) = match text_host {
         Some(host) => match text_of(pane_text, host)? {
             Some((text, shown)) => (text, Some(shown)),
@@ -767,13 +768,14 @@ pub fn text_state<'a, 'h>(value: &ModelView<'a>, actions: &[Action], pane_of: &d
             }
         }
     }
-    let mut other_texts = Vec::new();
-    for host in text_hosts {
+    let mut other_texts = OTHER_TEXTS.take();
+    other_texts.clear();
+    for (index, host) in text_hosts {
         if Some(&host.0) == value.text_at.as_ref() {
             continue;
         }
-        if let Some((state, shown)) = text_of(local_of(&value.locals, &host.0).code.clone(), host)? {
-            other_texts.push((host.0.clone(), host.1.clone(), state, shown));
+        if let Some((state, shown)) = text_of(local_of(&value.locals, &host.0).code, host)? {
+            other_texts.push((index, state, shown));
         }
     }
     Ok((text_host, text, text_shown, other_texts))
@@ -956,6 +958,7 @@ thread_local! {
     // before the roots are read, even when another editor uses this thread.
     static PANE_KEYS: Cell<Vec<pxui::Key>> = const { Cell::new(Vec::new()) };
     static PANE_ROOTS: Cell<Vec<(Leaf, pxui::Handle)>> = const { Cell::new(Vec::new()) };
+    static OTHER_TEXTS: Cell<Vec<OtherText>> = const { Cell::new(Vec::new()) };
     static HEADER_POSITIONS: Cell<Vec<([Option<f32>; 2], f32)>> = const { Cell::new(Vec::new()) };
 }
 
@@ -1097,7 +1100,7 @@ pub fn update_frame(
     // graph pane in use (the first graph of the workspace when none is open).
     // a panel's pane, laid out: the one in use, or one of the others
     let pane_of = |host: &Host| shown_as(&(&*value).into(), (&host.0, &host.1, &host.2));
-    let ((text_host, text, text_shown, other_texts), text_error) = {
+    let ((text_host, text, text_shown, mut other_texts), text_error) = {
         let mv = (&*value).into();
         match text_state(&mv, &actions, &pane_of, &hosts, taken_text) {
             Ok(state) => (state, None),
@@ -1273,7 +1276,7 @@ pub fn update_frame(
                 }
                 let text_ = match (&text_host, &text_shown) {
                     (Some((_, path, _, _)), Some(shown)) if *path == leaf.path => Some((&text, shown)),
-                    _ => other_texts.iter().find_map(|(_, path, state, shown)| (*path == leaf.path).then_some((state, shown))),
+                    _ => other_texts.iter().find_map(|(index, state, shown)| (hosts[*index].1 == leaf.path).then_some((state, shown))),
                 };
                 let mut widths = [0.0; 2];
                 let graph = usize::from(leaf.panel == Panel::Graph);
@@ -1357,7 +1360,7 @@ pub fn update_frame(
             pending_menu = menu2.clone();
             // Each pane builder returns only its frame intents and updated pane-local state.
             let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &(&*value).into(), &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), rows.as_ref(), &host_rows, &|| selected(selection), tree_value.clone(), list_intents.clone(), value.locals.clone());
-            let (text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &*value, &root_at, &tab_at, text_host, &text_shown, &text, &other_texts, locals);
+            let (text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &*value, &root_at, &tab_at, text_host, &text_shown, &text, &hosts, &other_texts, locals);
             let (outline, outline_intents, locals) = draw_outline_panes(ui, frame_, &*value, &hosted(HostKind::Outline), &root_at, value.outline.clone(), locals);
             let locals = draw_spreadsheet_panes(ui, frame_, &(&*value).into(), &of_kind(&Panel::Spreadsheet), locals);
             let mut changes = pane_changes(&(&*value).into(), &vw, command_changes.clone(), &scope_changes, &menu_pick, &outline_intents);
@@ -1501,10 +1504,17 @@ pub fn update_frame(
             // the first build, which received the frame's input.
             if built.is_none() {
                 built = Some(result);
+            } else {
+                text_pane::recycle_intents(result.text_intents);
+                for (_, _, intents) in result.other_texts {
+                    text_pane::recycle_intents(intents);
+                }
             }
         };
         rays_shell::host::frame(&mut ui_handle.borrow_mut(), frame_, &mut build_and_prompt);
     }
+    other_texts.clear();
+    OTHER_TEXTS.set(other_texts);
     let result = match built {
         Some(result) => result,
         None => FrameResult {

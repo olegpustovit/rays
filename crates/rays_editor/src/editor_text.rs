@@ -187,8 +187,7 @@ fn one_intent(value: &mut EditorModel, intent: Intent) {
         value.text = text;
         return;
     }
-    let intent = &intent;
-    if !matches!(intent, Intent::DocScrub(..) | Intent::GraphScrub(..) | Intent::BindingScrub(..)) {
+    if !matches!(&intent, Intent::DocScrub(..) | Intent::GraphScrub(..) | Intent::BindingScrub(..)) {
         text.scrubbing = false;
         if was_scrubbing {
             text.cache = None;
@@ -197,6 +196,46 @@ fn one_intent(value: &mut EditorModel, intent: Intent) {
     let doc = value.doc.clone();
     let workspace: &WorkspaceDoc = &doc.workspace.ws;
     let base = |old: Option<Arc<WorkspaceDoc>>| -> Option<Arc<WorkspaceDoc>> { Some(old.unwrap_or_else(|| Arc::new(workspace.clone()))) };
+    let intent = match intent {
+        Intent::DocDraft(draft) => {
+            if let Some(previous) = text.draft.replace(draft) {
+                text_pane::recycle_draft(previous);
+            }
+            text.doc_base = base(text.doc_base.take());
+            value.text = text;
+            return;
+        }
+        Intent::BindingDraft(shown, draft) => {
+            match &mut text.binding_draft {
+                Some((path, previous)) if *path == shown.key => {
+                    text_pane::recycle_draft(std::mem::replace(previous, draft));
+                }
+                slot => {
+                    if let Some((_, previous)) = slot.replace((shown.key.clone(), draft)) {
+                        text_pane::recycle_draft(previous);
+                    }
+                    text.binding_base = None;
+                }
+            }
+            text.binding_base = base(text.binding_base.take());
+            value.text = text;
+            return;
+        }
+        Intent::GraphDraft(shown, draft) => {
+            if let Some(at) = text.graphs.iter().position(|(name, _)| *name == shown.graph) {
+                let slot = &mut text.graphs[at].1;
+                text_pane::recycle_draft(std::mem::replace(&mut slot.gtext, draft));
+                slot.gbase = base(slot.gbase.take());
+                text.graphs[..=at].rotate_right(1);
+            } else {
+                text.graphs.insert(0, (shown.graph.clone(), Slot { gtext: draft, gbase: base(None), gerrors: text_pane::no_errors() }));
+            }
+            value.text = text;
+            return;
+        }
+        other => other,
+    };
+    let intent = &intent;
     let slot_of = |text: &text_pane::State, graph: &str| -> Option<Slot> { text_pane::graph_slot(text, graph).cloned() };
     let failed = |text: &text_pane::State, graph: &str, draft: &str, errors: Vec<Diagnostic>| -> Option<Slot> {
         Some(Slot { gtext: draft.to_string(), gbase: base(slot_of(text, graph).and_then(|s| s.gbase)), gerrors: Checked { at: draft.to_string(), found: errors } })
@@ -305,22 +344,6 @@ fn one_intent(value: &mut EditorModel, intent: Intent) {
             text.pending = Vec::new();
             value.text = text
         }
-        Intent::DocDraft(draft) => {
-            // Reuse the draft String's buffer across keystrokes instead of replacing it.
-            match &mut text.draft {
-                Some(had) => {
-                    if had.capacity() < draft.len() {
-                        had.reserve(draft.len() - had.capacity() + 64);
-                    }
-                    had.clear();
-                    had.push_str(draft);
-                }
-                None => text.draft = Some(draft.clone()),
-            }
-            text.doc_base = base(text.doc_base.clone());
-            text.scrubbing = false;
-            value.text = text
-        }
         Intent::DocDiscard => {
             text.draft = None;
             text.doc_base = None;
@@ -339,32 +362,16 @@ fn one_intent(value: &mut EditorModel, intent: Intent) {
                 value.text = text
             }
         },
-        Intent::BindingDraft(path, draft) => {
-            let kept = match &text.binding_draft {
-                Some((old, _)) if old == path => text.binding_base.clone(),
-                _ => None,
-            };
-            text.binding_base = base(kept);
-            text.binding_draft = Some((path.clone(), draft.clone()));
-            value.text = text
-        }
         Intent::BindingDiscard => {
             text.binding_draft = None;
             text.binding_base = None;
             text.binding_errors = text_pane::no_errors();
             value.text = text
         }
-        Intent::GraphDraft(graph, draft) => {
-            let old = slot_of(&text, graph);
-            let slot = Slot {
-                gtext: draft.clone(),
-                gbase: base(old.as_ref().and_then(|s| s.gbase.clone())),
-                gerrors: old.as_ref().map(|s| s.gerrors.clone()).unwrap_or_else(text_pane::no_errors),
-            };
-            value.text = put(text, graph, Some(slot))
-        }
         Intent::GraphDiscard(graph) => value.text = put(text, graph, None),
-        Intent::Live(_) => unreachable!("Live handled above"),
+        Intent::Live(_) | Intent::DocDraft(_) | Intent::BindingDraft(..) | Intent::GraphDraft(..) => {
+            unreachable!("state-only edits handled above")
+        }
         Intent::GraphApply(graph, draft) => {
             let gbase = slot_of(&text, graph).and_then(|s| s.gbase);
             match checked(false, &|ws| of_graph(graph, ws), draft, gbase.as_deref(), &|d| graph_document(&*value, graph, d)) {

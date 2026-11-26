@@ -1832,13 +1832,13 @@ pub enum Intent {
     /// Check & apply the whole workspace text
     DocApply(String),
     DocDiscard,
-    BindingDraft(Path, String),
+    BindingDraft(Shown, String),
     /// Check & apply of Selection: patch the shown closure's named bindings into one candidate
     /// graph, preserving omitted bindings and refusing changed results or duplicate names.
     BindingApply(Path, String),
     BindingDiscard,
-    /// the graph's name and its draft text
-    GraphDraft(String, String),
+    /// The shown graph and its draft text.
+    GraphDraft(Shown, String),
     /// Check & apply: the graph's form is replaced (`Flow_edit::Op::SetGraph`)
     GraphApply(String, String),
     /// the graph whose draft is dropped
@@ -1889,6 +1889,31 @@ fn dirty(state: &State, shown: &Shown) -> Result<bool, Diagnostic> {
 }
 
 // ---- drawing ----
+
+thread_local! {
+    static EDIT_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+    static DRAFT_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+    static TEXT_INTENTS: RefCell<Vec<Intent>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) fn recycle_draft(draft: String) {
+    DRAFT_TEXT.with(|cell| {
+        let mut old = cell.borrow_mut();
+        if old.capacity() < draft.capacity() {
+            *old = draft;
+        }
+    });
+}
+
+pub(crate) fn recycle_intents(mut intents: Vec<Intent>) {
+    intents.clear();
+    TEXT_INTENTS.with(|cell| {
+        let mut spare = cell.borrow_mut();
+        if intents.capacity() > spare.capacity() {
+            *spare = intents;
+        }
+    });
+}
 
 type Emit = RefCell<Vec<Intent>>;
 
@@ -2290,7 +2315,10 @@ fn editor_area(
         if phase.get().is_none() && changed.bytes().any(|b| b == b'\r' || b == b'\t') {
             std::borrow::Cow::Owned(normalized(changed))
         } else {
-            std::borrow::Cow::Owned(changed.to_owned())
+            let mut buffer = EDIT_TEXT.take();
+            buffer.clear();
+            buffer.push_str(changed);
+            std::borrow::Cow::Owned(buffer)
         }
     });
     AREA_SCRATCH.set((spans_ui, chips_ui, error_lines));
@@ -2354,7 +2382,10 @@ fn editor_area(
         Some(ScrubPhase::Done) => push(emit, scrub(text2.to_string(), true)),
         None => {
             if text2 != text {
-                push(emit, draft(text2.to_string()));
+                let mut buffer = DRAFT_TEXT.take();
+                buffer.clear();
+                buffer.push_str(&text2);
+                push(emit, draft(buffer));
             }
         }
     }
@@ -2637,6 +2668,9 @@ fn editor_area(
         }
     }
     CHIPS.set(chips);
+    if let std::borrow::Cow::Owned(text) = text2 {
+        EDIT_TEXT.set(text);
+    }
 }
 
 /// Text as the pane keeps it: line ends are `\n`, a tab is two spaces (B45). One place for the menu's
@@ -2664,7 +2698,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
     let row = ui.row_height() as f32;
     let (x, y, width, height) = (x as f32, y as f32, width as f32, height as f32);
     let theme = ui.tokens();
-    let emit = Emit::default();
+    let emit = Emit::new(TEXT_INTENTS.take());
     // the printed document is made here, once a frame, never inside a token scrub
     let _ = shown.applied.text()?;
     let dirty = dirty(state, shown)?;
@@ -2752,7 +2786,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 &|| Intent::GraphDiscard(graph.clone()),
                 dirty,
                 message,
-                &|t| Intent::GraphDraft(graph.clone(), t),
+                &|t| Intent::GraphDraft(shown.clone(), t),
                 &|t, done| Intent::GraphScrub(graph.clone(), t, done),
             );
         }
@@ -2779,7 +2813,7 @@ fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f3
                 &|| Intent::BindingDiscard,
                 dirty,
                 message,
-                &|t| Intent::BindingDraft(shown.key.clone(), t),
+                &|t| Intent::BindingDraft(shown.clone(), t),
                 &|t, done| Intent::BindingScrub(shown.key.clone(), t, done),
             );
         }

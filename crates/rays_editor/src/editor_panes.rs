@@ -694,7 +694,8 @@ pub fn draw_text_panes<'r>(
     text_host: Option<&Host>,
     text_shown: &Option<text_pane::Shown>,
     text: &text_pane::State,
-    other_texts: &[(Key, layout::Path, text_pane::State, text_pane::Shown)],
+    hosts: &[Host],
+    other_texts: &[(usize, text_pane::State, text_pane::Shown)],
     locals: Vec<(Key, Local)>,
 ) -> (Vec<text_pane::Intent>, Vec<(Key, Local)>, Vec<(Key, text_pane::Shown, Vec<text_pane::Intent>)>) {
     let names = crate::editor_text::shared_names(value);
@@ -718,11 +719,22 @@ pub fn draw_text_panes<'r>(
     };
     let mut locals = locals;
     let mut texts = Vec::new();
-    for (key, path, state, shown) in other_texts {
-        locals = put_local(key, &|l| Local { code: state.clone(), ..l }, &locals);
+    for (index, state, shown) in other_texts {
+        let (key, path, ..) = &hosts[*index];
+        if let Some(at) = locals.iter().position(|(k, _)| k == key) {
+            locals[at].1.code = state.clone();
+            locals[..=at].rotate_right(1);
+        } else {
+            locals.truncate(LOCALS_CAPACITY - 1);
+            locals.insert(0, (key.clone(), Local { code: state.clone(), ..fresh_local() }));
+        }
         let intents = view_text(ui, path, state, shown);
-        // Dispatch intents from the latest drawn pane first.
-        texts.insert(0, (key.clone(), shown.clone(), intents));
+        if !intents.is_empty() {
+            // Dispatch intents from the latest drawn pane first.
+            texts.insert(0, (key.clone(), shown.clone(), intents));
+        } else {
+            text_pane::recycle_intents(intents);
+        }
     }
     (text_intents, locals, texts)
 }

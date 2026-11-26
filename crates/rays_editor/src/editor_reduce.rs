@@ -1413,10 +1413,12 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     value2.timeline = timeline.clone();
     value2.history = history2;
-    apply_text(value2, std::mem::take(&mut result.text_intents));
+    apply_text(value2, result.text_intents.drain(..));
+    text_pane::recycle_intents(std::mem::take(&mut result.text_intents));
     // each other text pane's intents fold into its own state
-    for (key, _, intents) in &result.other_texts {
+    for (key, _, intents) in &mut result.other_texts {
         apply_text_at(value2, key, intents);
+        text_pane::recycle_intents(std::mem::take(intents));
     }
     sync_scope(value2);
     for c in &scope_changes {
