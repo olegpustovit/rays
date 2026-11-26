@@ -2450,29 +2450,15 @@ fn intersect_extent(bound_w: i64, bound_h: i64, (x, y, w, h): (i64, i64, i64, i6
     if x1 <= x0 || y1 <= y0 { None } else { Some((x0, y0, x1 - x0, y1 - y0)) }
 }
 
-fn sampler_signature(sampler: &SamplerDescriptor) -> SamplerDescriptor {
-    SamplerDescriptor {
-        label: None,
-        min_filter: sampler.min_filter,
-        mag_filter: sampler.mag_filter,
-        mip_filter: sampler.mip_filter,
-        address_u: sampler.address_u,
-        address_v: sampler.address_v,
-        lod_min: sampler.lod_min,
-        lod_max: sampler.lod_max,
-        max_anisotropy: sampler.max_anisotropy,
-    }
-}
-
 fn texture_signature(source: &SampledTexture, cached: &CachedTextureRef) -> (i64, SamplerDescriptor) {
-    (backend::texture_id(&cached.borrow().texture), sampler_signature(&source.sampler))
+    (backend::texture_id(&cached.borrow().texture), source.sampler.clone())
 }
 
 fn auxiliary_signature(entry: &(Rc<AuxiliaryResource>, CachedAuxiliaryRef, CachedTextureRef)) -> (i64, i64, SamplerDescriptor) {
     (
         backend::buffer_id(&entry.1.borrow().buffer),
         backend::texture_id(&entry.2.borrow().texture),
-        sampler_signature(&entry.0.texture.sampler),
+        entry.0.texture.sampler.clone(),
     )
 }
 
