@@ -385,8 +385,46 @@ fn strands() {
     println!("pathtracer: strands ok");
 }
 
+fn vertex_emission() {
+    use rays::mesh::{Vec3Buffer, view::create_packed_owned};
+    use rays_math::color;
+
+    if !common::gpu() {
+        return;
+    }
+    let red = color::rgb(255, 0, 0);
+    let green = color::rgb(0, 255, 0);
+    let screen = get(create_packed_owned(
+        None, Some(vec![0, 1, 2, 0, 2, 3]),
+        Some(Vec3Buffer::of_planes(vec![0.; 4], vec![0.; 4], vec![1.; 4])),
+        Some(vec![red, green, green, red]), None,
+        Vec3Buffer::of_planes(vec![-1., 1., 1., -1.], vec![-1., -1., 1., 1.], vec![0.; 4]),
+    ));
+    let black = rgb(0., 0., 0.);
+    let material = p::material(None, None, Some(rgb(1., 1., 1.)), None, black.clone());
+    let scene = p::Scene {
+        objects: vec![(screen, material)],
+        spheres: vec![], strands: vec![], lights: vec![],
+        environment: p::Environment { sky: black.clone(), ground: black, panels: vec![] },
+    };
+    let camera = get(rays::camera::perspective(Some(0.5), None, None, vec3::create(0., 0., 3.), vec3::zero()));
+    let mut tracer = get(p::create(&p::CreateOptions { spp: Some(2), bounces: Some(1), ..Default::default() }, 32, 24, &scene));
+    tracer.bands = 1;
+    frame(&mut tracer, &camera);
+    let one = pixels(&tracer);
+    let pixel = |x: usize| &one[(12 * 32 + x) * 4..(12 * 32 + x) * 4 + 4];
+    let (left, right) = (pixel(2), pixel(29));
+    assert!(left[0] > left[1] && right[1] > right[0] && left[2] == 0 && right[2] == 0);
+    p::reset(&mut tracer);
+    tracer.bands = 3;
+    frame(&mut tracer, &camera);
+    assert!(pixels(&tracer) == one, "banded emission differs from a single dispatch");
+    p::destroy(&mut tracer);
+}
+
 pub const CASES: &[(&str, fn())] = &[
         ("lit", lit),
+        ("vertex_emission", vertex_emission),
         ("lens", lens),
         ("instanced", instanced),
         ("residency", residency),
