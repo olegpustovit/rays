@@ -66,8 +66,8 @@ Lanes Z0–Z7 are defined in the plan. This file is the working contract; delete
 ### Z4
 - `text_pane::shown` still clones State on cache hit because `editor_frame::text_state` takes `&ModelView`; take/replace needs a `&mut` path in Z1's frame.
 ### Z5
-- bump Rays `pxui` pointer to 3ed306c3 (on PXUI origin/dev); F/A native ceils (10/59) assume it. `ctx_spare` dead_code currently breaks `cargo t` against that commit — finish or allow before the bump.
 - wrap_node: `Rc<[Node]>` (needs Node-children type change in `rays/src/scene.rs`).
 - crates/lru: fixed-capacity open-addressing buckets (nobody owns; HashMap nodes on insert).
+- CommandContext/MetalCommands/encoder Arc still per begin (~17 idle Rust floor); MetalHandle pool; animated ICB.
 ### Z6
 ### Z7
