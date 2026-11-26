@@ -121,6 +121,7 @@ pub fn example(name: &str, sig: &op::Signature) -> String {
         "array/index_of" => return "(array/index_of (array/int 3 1) (array/int 3 1))".into(),
         "host/dialog" => return "(host/dialog \"open_file\" false)".into(),
         "image/render" => return "(workspace render_example (graph picture :context draw (draw/circle [20 20] 10 :fill \"#5aaaf0\")) (graph image :context host (image/render (ref picture))))".into(),
+        "material/film" => return "(material/film :exposure 1.0 :bloom 0.12)".into(),
         "ui/canvas" => return "(workspace canvas_example (graph picture :context draw (draw/merge)) (graph editor :context editor (ui/workspace (ui/canvas (ref picture)))))".into(),
         "ui/viewport" => return "(workspace viewport_example (defn preview :context editor [(scene : scene)] (ui/viewport scene)) (graph example :context host 0))".into(),
         "ui/split" => return "(ui/split \"horizontal\" (ui/graph) (ui/inspector))".into(),
@@ -145,6 +146,8 @@ pub fn description(name: &str, sig: &op::Signature) -> String {
         "frame/dt" => "Read elapsed seconds since the previous frame.".into(),
         "frame/index" => "Read the zero-based frame index.".into(),
         "rand/at" => "Read a deterministic random value at an index.".into(),
+        "material/film" => "Set exposure, bloom and grain on a scene root's film.".into(),
+        "material/standard" => "Set surface color, roughness and emission. A scene geometry can supply an image to tint color and emission through its UVs.".into(),
         "noise3" => "Sample seeded three-dimensional coherent noise.".into(),
         _ => {
             let action = name.replace(['/', '_', '-'], " ");

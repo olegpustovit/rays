@@ -103,7 +103,7 @@ Each row is a lookup target and an example from its registry entry.
 | `host/` | `(host/dialog "open_file" false)` |
 | `image/` | `(image/load "example")` |
 | `key/` | `(key/down "example")` |
-| `material/` | `(material/standard)` |
+| `material/` | `(material/film :exposure 1.0 :bloom 0.12)` |
 | `pointer/` | `(pointer/down)` |
 | `rand/` | `(rand/at 1 1)` |
 | `scene/` | `(scene/camera)` |

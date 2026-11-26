@@ -1033,7 +1033,7 @@ mod tests{
         let values=Value::IntArray(Arc::new(vec![2,4,7]));
         let offsets=Value::IntArray(Arc::new(vec![0,2,2,3]));
         assert_eq!((sum.body)(&input::at_time(0.),&|_,_|Err(fail("E_NODE","unexpected node")), &vec![("values".into(),values),("offsets".into(),offsets)]).unwrap(),Value::IntArray(Arc::new(vec![6,0,7])));
-        assert_eq!(all().len(),199);
+        assert_eq!(all().len(),200);
         let names=all().iter().map(|op|op.name.as_str()).collect::<std::collections::HashSet<_>>();
         assert_eq!(names.len(),all().len());
         let row_dispatch=|start:i64,finish:i64,work:&(dyn Fn(i64)+Send+Sync)|{for row in start..=finish{work(row)}};
