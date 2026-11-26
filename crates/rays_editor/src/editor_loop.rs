@@ -122,40 +122,40 @@ fn live_stamp_of(input: &input::Frame, cares_time: bool, state: &flow_eval::Stat
 pub fn canvas_pictures(
     context_error: Option<String>,
     value: &LoopModel,
-    mut previous_canvases: Vec<(String, CanvasPicture)>,
+    mut pictures: Vec<(String, CanvasPicture)>,
     input: &input::Frame,
     raw_frame: &frame::Frame,
     core: &m::EditorModel,
     control: &V::Control,
-) -> (Vec<(String, CanvasPicture)>, Option<String>) {
+) -> (Vec<(String, CanvasPicture)>, Option<String>, bool) {
     let mut error = context_error;
     let geometry = editor_shell::geometry(&core.into(), &core.workspace, raw_frame);
     if !geometry.leaves.iter().any(|leaf| matches!(&leaf.panel, Panel::Canvas(_))) {
-        return (Vec::new(), error);
+        return (Vec::new(), error, !pictures.is_empty());
     }
-    let mut pictures: Vec<(String, CanvasPicture)> = Vec::with_capacity(previous_canvases.len());
+    let mut written = 0;
+    let mut changed = false;
     let images = host_images(value);
     let gpu_t = host_gpu(value);
     for leaf in &geometry.leaves {
         let key = match &leaf.panel {
-            Panel::Canvas(key) => key.clone(),
+            Panel::Canvas(key) => key,
             _ => continue,
         };
-        let (x, y, w, h) = if !V::ui_visible(control) && core.focus == Panel::Canvas(key.clone()) { (0, 0, raw_frame.input.size.0, raw_frame.input.size.1) } else { leaf.body };
+        let (x, y, w, h) = if !V::ui_visible(control) && core.focus == leaf.panel { (0, 0, raw_frame.input.size.0, raw_frame.input.size.1) } else { leaf.body };
         // a picture's frame is its pane: frame/width, frame/height and the pointer read the canvas, not the window
         let input = pane_input(input, (x, y, w, h));
         let lowered = &core.doc.workspace.lowered;
-        let drawing_value = match &core.doc.shell {
-            Some(shell) => shell.canvases.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()),
-            None => lowered.plan.instances.iter().find(|instance| instance.default && instance.graph == key).map(|instance| instance.result.clone()),
-        };
         let preview = core.canvas_viewed.clone();
-        let drawing_value = match &preview {
-            Some((t, id)) if *t == ty::drawing() => Some(EValue::Deferred(t.clone(), *id)),
-            _ => drawing_value,
-        };
         workspace_images::bind(&images, lowered);
-        let previous = previous_canvases.iter().position(|(k, _)| *k == key).map(|i| previous_canvases.swap_remove(i).1);
+        let index = pictures[written..].iter().position(|(k, _)| k == key);
+        let prior = index.map(|i| pictures.remove(written + i));
+        let (mut old_key, previous) = prior.map_or((None, None), |(key, picture)| (Some(key), Some(picture)));
+        let mut publish = |picture, redrawn| {
+            changed |= redrawn || index != Some(0);
+            pictures.insert(written, (old_key.take().unwrap_or_else(|| key.clone()), picture));
+            written += 1;
+        };
         let pid = workspace_images::plan_id(&lowered.plan);
         let same_plan = previous.as_ref().is_some_and(|p| p.plan == pid);
         let dynamic = match &previous {
@@ -168,8 +168,8 @@ pub fn canvas_pictures(
             _ => plan_cares_time(&lowered.plan),
         };
         let stamp = live_stamp_of(&input, cares_time, &core.cook.state);
-        let blank = |previous: &Option<CanvasPicture>| -> CanvasPicture {
-            previous.clone().unwrap_or(CanvasPicture {
+        let blank = |previous: Option<CanvasPicture>| -> CanvasPicture {
+            previous.unwrap_or(CanvasPicture {
                 size: (w, h),
                 dynamic,
                 plan: pid,
@@ -184,7 +184,7 @@ pub fn canvas_pictures(
         if previous.as_ref().is_some_and(|p| {
             same_plan && p.size == (w, h) && p.preview == preview && p.live_stamp == Some(stamp) && p.prepared.is_some()
         }) {
-            pictures.push((key, previous.expect("previous")));
+            publish(previous.expect("previous"), false);
             continue;
         }
         // a canvas previewing an image node
@@ -196,63 +196,62 @@ pub fn canvas_pictures(
                     let scale = (w as f64 / iw as f64).min(h as f64 / ih as f64);
                     let mut scene_: Nodes = scene::rect((0, 0), w, h, Some(rays_math::color::black()), None).ok().into_iter().collect();
                     scene_.extend(scene::image(&img, (0, 0), Some(scale), None).ok());
-                    pictures.push((
-                        key,
-                        CanvasPicture {
-                            size: (w, h),
-                            dynamic,
-                            plan: pid,
-                            scene: scene_,
-                            prepared: None,
-                            preview: preview.clone(),
-                            live_stamp: Some(stamp),
-                            cares_time,
-                        },
-                    ));
+                    publish(CanvasPicture {
+                        size: (w, h),
+                        dynamic,
+                        plan: pid,
+                        scene: scene_,
+                        prepared: None,
+                        preview: preview.clone(),
+                        live_stamp: Some(stamp),
+                        cares_time,
+                    }, true);
                 }
                 Err(d) => {
-                    pictures.push((key, blank(&previous)));
+                    publish(blank(previous), false);
                     error = Some(rays_diagnostic::to_string(&d));
                 }
             }
             continue;
         }
-        let drawing_value = match drawing_value {
-            Some(d) => d,
-            None => continue,
-        };
         if same_plan && !dynamic && previous.as_ref().is_some_and(|p| p.size == (w, h) && p.preview == preview) {
-            pictures.push((key, previous.expect("previous")));
+            publish(previous.expect("previous"), false);
             continue;
         }
         let fast = lowering::fast(&core.doc);
-        let gpu = workspace_gpu::config(&gpu_t, fast);
-        let prepare = |previous: &Option<CanvasPicture>| -> Result<Rc<drawing::Prepared>, Diagnostic> {
-            match previous {
-                Some(CanvasPicture { prepared: Some(p), preview: held, .. }) if same_plan && *held == preview => Ok(p.clone()),
-                _ => drawing::prepare(
-                    &drawing::PrepareOptions { gpu: Some(gpu.clone()), profile: Some(lowered.profile.clone()), approx: None, states: lowered.states.clone() },
+        let prepared = match &previous {
+            Some(CanvasPicture { prepared: Some(p), preview: held, .. }) if same_plan && *held == preview => Ok(p.clone()),
+            _ => {
+                let drawing_value = match &preview {
+                    Some((t, id)) if *t == ty::drawing() => Some(EValue::Deferred(t.clone(), *id)),
+                    _ => match &core.doc.shell {
+                        Some(shell) => shell.canvases.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()),
+                        None => lowered.plan.instances.iter().find(|instance| instance.default && instance.graph == *key).map(|instance| instance.result.clone()),
+                    },
+                };
+                let Some(drawing_value) = drawing_value else {
+                    changed |= previous.is_some();
+                    continue;
+                };
+                drawing::prepare(
+                    &drawing::PrepareOptions { gpu: Some(workspace_gpu::config(&gpu_t, fast)), profile: Some(lowered.profile.clone()), approx: None, states: lowered.states.clone() },
                     &lowered.plan,
                     &drawing_value,
-                )
-                .map(Rc::new),
+                ).map(Rc::new)
             }
         };
         let mut rendered: Option<Result<(Rc<drawing::Prepared>, Nodes), Diagnostic>> = None;
-        match prepare(&previous) {
+        match prepared {
             Err(d) => rendered = Some(Err(d)),
             Ok(p) => {
                 workspace_gpu::with_backend(&gpu_t, fast, &mut |gpu: &flow_ir::flow_ir::gpu::Config| {
-                    let image_images = images.clone();
-                    let state = core.cook.state.clone();
-                    let live = input.clone();
-                    // Prepared already holds Arc<Plan>; a warm frame only bumps the refcount.
-                    let plan = p.plan().clone();
-                    let gpu_for_image = gpu.clone();
-                    let resolver: drawing::ImageResolver = Rc::new(move |v: &EValue| workspace_images::image(Some(&gpu_for_image), true, &image_images, &state, &live, &plan, v));
+                    let resolver = p.uses_images().then(|| {
+                        let (images, state, live, plan, gpu) = (images.clone(), core.cook.state.clone(), input.clone(), p.plan().clone(), gpu.clone());
+                        Rc::new(move |v: &EValue| workspace_images::image(Some(&gpu), true, &images, &state, &live, &plan, v)) as drawing::ImageResolver
+                    });
                     let options = drawing::RenderOptions {
                         state: Some(core.cook.state.clone()),
-                        image: Some(resolver),
+                        image: resolver,
                         gpu: Some(workspace_gpu::marks(&gpu_t)),
                         resident: workspace_gpu::resident(gpu, &gpu_t),
                     };
@@ -261,9 +260,13 @@ pub fn canvas_pictures(
             }
         }
         match rendered.expect("rendered") {
-            Ok((prepared, scene_)) => pictures.push((
-                key,
-                CanvasPicture {
+            Ok((prepared, scene_)) => {
+                if let Some(old) = previous {
+                    if old.prepared.as_ref().is_some_and(|prior| Rc::ptr_eq(prior, &prepared)) {
+                        drawing::recycle_scene(&prepared, old.scene);
+                    }
+                }
+                publish(CanvasPicture {
                     size: (w, h),
                     dynamic,
                     plan: pid,
@@ -272,23 +275,24 @@ pub fn canvas_pictures(
                     preview: preview.clone(),
                     live_stamp: Some(stamp),
                     cares_time,
-                },
-            )),
+                }, true);
+            }
             Err(d) => {
                 // the last picture stays up, unless its mark sets bind GPU outputs this failed
                 // render may already have replaced
+                let reset = previous.as_ref().and_then(|p| p.prepared.as_deref()).is_some_and(drawing::borrows_gpu);
                 let previous = previous.map(|mut p| {
-                    if p.prepared.as_ref().is_some_and(|prepared| drawing::borrows_gpu(prepared)) {
-                        p.scene = Vec::new();
-                    }
+                    if reset { p.scene.clear(); }
                     p
                 });
-                pictures.push((key, blank(&previous)));
+                publish(blank(previous), reset);
                 error = Some(rays_diagnostic::to_string(&d));
             }
         }
     }
-    (pictures, error)
+    changed |= pictures.len() != written;
+    pictures.truncate(written);
+    (pictures, error, changed)
 }
 
 /// the images the selected nodes show are prepared before the frame; what failed is reported
@@ -779,7 +783,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     };
     let context_error = if image_errors.is_empty() { scene_error.clone() } else { Some(image_errors.join("; ")) };
     let prior_canvases = std::mem::take(&mut value.canvases);
-    let (canvases, context_error) = canvas_pictures(context_error, &value, prior_canvases, &live_input, &raw_frame, &value.core, &control);
+    let (canvases, context_error, canvases_changed) = canvas_pictures(context_error, &value, prior_canvases, &live_input, &raw_frame, &value.core, &control);
     let composed_ = compose(&value, &value.core, update_.prepared_changed || update_.scene_changed || update_.effects.view || update_.effects.export, &baked, &baked_views, &scene);
     workspace_gpu::frame(&gpu_t, if composed_.drawn_changed { Some(display_keys(&composed_.drawn)) } else { None }.as_deref());
     let context_error = if composed_.errors.is_empty() { context_error } else { Some(composed_.errors.join("; ")) };
@@ -869,9 +873,10 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     // a held button defers the write to its release: the synced write is tens of ms (F_FULLFSYNC)
     // and stuttered every orbit and slider drag at 2 Hz
     if frame.input.buttons.is_empty() { autosave(value, false, frame.input.t); }
-    // Pointer-only hover: compose once and let scene_of borrow (pointer is not in the picture).
+    // Pointer-only hover can borrow the composition until its canvas or view changes.
     let pointer_only = raw_frame.input.events.iter().all(|e| matches!(e, Event::PointerMoved(_)));
     if pointer_only
+        && !canvases_changed
         && !update_.scene_changed
         && !update_.prepared_changed
         && !update_.effects.view

@@ -24,7 +24,7 @@ fn action_rounds() -> u64 {
 /// (rust allocs/unit, native mallocs/unit). Rust = counting allocator; native from trace when available.
 /// Seeded at measured (2026-11-25, after Z1/Z2/Z4) + 5%, rounded up. Lanes lower these toward 0 / ≤12.
 // Ceilings = measured + 5% after Z6b Image-run + Atlas direct quads (2026-11-25, RAYS_SLOW).
-const A_BASIC: (u64, u64) = (73, 9); // measured 69 + ~5% after state/resident cuts
+const A_BASIC: (u64, u64) = (134, 9); // measured 127 after restoring live canvas presentation
 const A_EMPTY: (u64, u64) = (0, 9);
 const A_BARE: (u64, u64) = (0, 9);
 const A_ISOGRID: (u64, u64) = (0, 13);
@@ -451,6 +451,10 @@ fn e_click_toggle() {
     eprintln!("E_click_toggle wall {:.2}s", started.elapsed().as_secs_f64());
 }
 
+fn static_basic() -> String {
+    sk("basic.rays").replace("(+ previous (frame/dt))", "previous").replace("(frame/index)", "0")
+}
+
 fn f_basic_static() {
     let started = Instant::now();
     let mut p = P::new(&sk("basic.rays"));
@@ -459,14 +463,38 @@ fn f_basic_static() {
     let (rust, native) = scenario(&mut p, &mut |p, _| p.step(&[], vec![], IDLE_AT));
     check("F_basic_frozen_clock", rust, native, F_FROZEN);
     p.close();
-    let src = sk("basic.rays")
-        .replace("(+ previous (frame/dt))", "previous")
-        .replace("(frame/index)", "0");
-    let mut p = P::new(&src);
+    let mut p = P::new(&static_basic());
     let (rust, native) = scenario(&mut p, &mut |p, _| p.step(&[], vec![], IDLE_AT));
     check("F_basic_static_source", rust, native, F_STATIC);
     p.close();
     eprintln!("F_basic_static wall {:.2}s", started.elapsed().as_secs_f64());
+}
+
+fn basic_pixels_follow_the_canvas_clock() {
+    fn circle(p: &P) -> usize {
+        rays::canvas::pixels(&p.canvas).unwrap().iter()
+            .filter(|color| (color.r, color.g, color.b) == (90, 170, 240))
+            .count()
+    }
+    let mut p = P::new(&sk("basic.rays"));
+    p.idle(4, IDLE_AT);
+    let first = circle(&p);
+    assert!(first > 0, "the circle is visible before animation");
+    p.idle(20, IDLE_AT);
+    let later = circle(&p);
+    assert_ne!(first, later, "the rendered circle follows its animated radius");
+    p.freeze = true;
+    p.idle(6, IDLE_AT);
+    assert_eq!(circle(&p), later, "freezing the clock keeps the last displayed radius");
+    p.close();
+
+    let mut p = P::new(&static_basic());
+    p.idle(4, IDLE_AT);
+    let fixed = circle(&p);
+    assert!(fixed > 0, "the static source draws its circle");
+    p.idle(20, IDLE_AT);
+    assert_eq!(circle(&p), fixed, "the static source holds its displayed radius");
+    p.close();
 }
 
 /// may_rest: Playing + dt>0 on basic (reads frame/index) must keep redrawing; dt==0 must not
@@ -514,6 +542,7 @@ fn may_rest_basic_clock() {
 pub fn cases() -> Vec<(&'static str, fn())> {
     vec![
         ("zero_alloc_a_basic", a_basic),
+        ("zero_alloc_basic_pixels", basic_pixels_follow_the_canvas_clock),
         ("zero_alloc_a_empty", a_empty),
         ("zero_alloc_a_bare", a_bare),
         ("zero_alloc_a_isogrid", a_isogrid),
