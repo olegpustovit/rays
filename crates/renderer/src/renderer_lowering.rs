@@ -198,14 +198,25 @@ pub fn sampled_texture_bytes(texture: &SampledTexture) -> i64 {
     texture.levels.iter().fold(0i64, |total, level| total.saturating_add(level.bytes.capacity() as i64))
 }
 
+struct GeometrySlot {
+    number: usize,
+    geometry: Geometry,
+    transform: Transform,
+    clip: (i64, i64, i64, i64),
+    draw: Draw,
+}
+
 pub struct Lowering {
     quad_cache: side_lru::Table,
     quad_payload_cache: side_lru::Table,
     out_slots: Vec<Draw>,
-    out_list: Vec<Draw>,
+    out_list: Rc<Vec<Draw>>,
+    out_spares: Vec<Rc<Vec<Draw>>>,
+    ui_layers: Vec<Draw>,
     transforms: Vec<Transform>,
     clips: Vec<(i64, i64, i64, i64)>,
     image_runs: Vec<Draw>,
+    geometry_slots: [Option<GeometrySlot>; 8],
     ui_slots: side_lru::Table,
     ui_indices_scratch: Bytes,
 }
@@ -215,13 +226,51 @@ pub fn create() -> Lowering {
         quad_cache: side_lru::create(lru::cache("renderer.quad"), true, 64 * 1024 * 1024, Box::new(|_, _| {}), 1024),
         quad_payload_cache: side_lru::create(lru::cache("renderer.quad_payload"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), 256),
         out_slots: Vec::new(),
-        out_list: Vec::new(),
+        out_list: Rc::new(Vec::new()),
+        out_spares: Vec::new(),
+        ui_layers: Vec::new(),
         transforms: Vec::new(),
         clips: Vec::new(),
         image_runs: Vec::new(),
+        geometry_slots: [const { None }; 8],
         ui_slots: side_lru::create(lru::cache("renderer.ui_slots"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), UI_SLOT_CAPACITY),
         ui_indices_scratch: empty_bytes(),
     }
+}
+
+pub fn ui_layer(value: &mut Lowering, framebuffer: (i64, i64, i64, i64), ui: scene_execution::UiLayer) -> Draw {
+    if let Some(i) = value.ui_layers.iter().position(|draw| {
+        draw.ui.as_ref().is_some_and(|old| old.identity() == ui.identity())
+            && draw.draw.state.viewport == framebuffer
+    }) {
+        let draw = value.ui_layers.remove(i);
+        value.ui_layers.push(draw.clone());
+        return draw;
+    }
+    let draw = Rc::new(SampledDraw {
+        ui: Some(ui),
+        family: PipelineFamily::Ui,
+        blend: Blend::Alpha,
+        texture: None,
+        auxiliary: None,
+        vertex_attributes: None,
+        samples: 1,
+        draw: scene_execution::GeometryDraw {
+            mesh: Mesh {
+                key: MeshKey::Host("ui-layer".to_owned()),
+                vertices: empty_bytes(),
+                shared_vertices: None,
+                vertex_count: 0,
+                indices: empty_bytes(),
+                index_count: 0,
+                primitive: Primitive::TriangleList,
+            },
+            state: default_state(framebuffer, framebuffer),
+        },
+    });
+    if value.ui_layers.len() == 16 { value.ui_layers.remove(0); }
+    value.ui_layers.push(draw.clone());
+    draw
 }
 
 pub fn ui_affine(transform: &Transform) -> Bytes {
@@ -264,8 +313,11 @@ pub fn clear(value: &mut Lowering) {
     side_lru::clear(&mut value.quad_cache);
     side_lru::clear(&mut value.quad_payload_cache);
     value.out_slots = Vec::new();
-    value.out_list = Vec::new();
+    value.out_list = Rc::new(Vec::new());
+    value.out_spares.clear();
+    value.ui_layers.clear();
     value.image_runs.clear();
+    value.geometry_slots.fill_with(|| None);
     side_lru::clear(&mut value.ui_slots);
 }
 
@@ -484,6 +536,31 @@ fn to_blend(mode: ir::Blend) -> Blend {
     }
 }
 
+fn lower_geometry(
+    value: &mut Lowering,
+    number: usize,
+    geometry: &Geometry,
+    transform: &Transform,
+    framebuffer: (i64, i64, i64, i64),
+    clip: (i64, i64, i64, i64),
+) -> Draw {
+    if geometry.vertices.len() > 8 || geometry.indices.len() > 6 {
+        return Rc::new(mesh_of_geometry(number as i64, transform, framebuffer, clip, geometry));
+    }
+    // The small meshes typically form a scene's backdrop. Keep their last draw by position.
+    let i = number % value.geometry_slots.len();
+    let slot = &mut value.geometry_slots[i];
+    if let Some(old) = slot.as_ref().filter(|old| {
+        old.number == number && old.geometry == *geometry && old.transform == *transform
+            && old.clip == clip && old.draw.draw.state.viewport == framebuffer
+    }) {
+        return old.draw.clone();
+    }
+    let draw = Rc::new(mesh_of_geometry(number as i64, transform, framebuffer, clip, geometry));
+    *slot = Some(GeometrySlot { number, geometry: geometry.clone(), transform: *transform, clip, draw: draw.clone() });
+    draw
+}
+
 pub fn lower_scene2(
     state_: &mut Lowering,
     facts: &PresentationFacts,
@@ -493,7 +570,7 @@ pub fn lower_scene2(
     rollback: &dyn Fn(),
     resolve: &dyn Fn(i64) -> Option<Resource>,
     commands: &[Command],
-) -> Result<Vec<Draw>, Error> {
+) -> Result<Rc<Vec<Draw>>, Error> {
     let identity = Transform { xx: 1.0, xy: 0.0, yx: 0.0, yy: 1.0, tx: 0.0, ty: 0.0 };
     let native_projection = Transform {
         xx: 2.0 / facts.logical_width as f64,
@@ -640,8 +717,8 @@ pub fn lower_scene2(
                         emit(state_, &mut number, blend, Rc::new(d));
                     }
                 } else if clip_live(&clips) {
-                    let d = mesh_of_geometry(number as i64, &transform, framebuffer, clip, geometry);
-                    emit(state_, &mut number, blend, Rc::new(d));
+                    let draw = lower_geometry(state_, number, geometry, &transform, framebuffer, clip);
+                    emit(state_, &mut number, blend, draw);
                 }
             }
             Command::Image(command) => {
@@ -721,15 +798,36 @@ pub fn lower_scene2(
     if same {
         return Ok(state_.out_list.clone());
     }
-    let list: Vec<Draw> = state_.out_slots[..number].to_vec();
-    state_.out_list = list.clone();
-    Ok(list)
+    if Rc::get_mut(&mut state_.out_list).is_none() {
+        let spare = state_.out_spares.iter().position(|list| Rc::strong_count(list) == 1 && Rc::weak_count(list) == 0)
+            .map_or_else(|| Rc::new(Vec::new()), |i| state_.out_spares.swap_remove(i));
+        if state_.out_spares.len() == 16 { state_.out_spares.remove(0); }
+        state_.out_spares.push(std::mem::replace(&mut state_.out_list, spare));
+    }
+    let list = Rc::get_mut(&mut state_.out_list).unwrap();
+    list.clear();
+    list.extend_from_slice(&state_.out_slots[..number]);
+    Ok(state_.out_list.clone())
 
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_draw_storage_matches_viewport_and_layer() {
+        let mut state = create();
+        let paint: scene_execution::UiPaint = Rc::new(|_, _| Ok(()));
+        let ui = |layer| scene_execution::UiLayer { paint: paint.clone(), layer };
+        let at = (0, 0, 640, 360);
+        let first = ui_layer(&mut state, at, ui(0));
+        assert!(Rc::ptr_eq(&first, &ui_layer(&mut state, at, ui(0))));
+        let resized = ui_layer(&mut state, (0, 0, 1280, 720), ui(0));
+        assert!(!Rc::ptr_eq(&first, &resized));
+        assert!(!Rc::ptr_eq(&first, &ui_layer(&mut state, at, ui(1))));
+        assert_eq!(first.draw.state.viewport, at);
+    }
 
     #[test]
     fn image_run_batches_same_texture_quads() {

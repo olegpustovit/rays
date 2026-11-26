@@ -19,15 +19,35 @@ pub enum ResourceStamp {
     CanvasStamp(i64, i64, i64),
 }
 
+#[derive(Default, PartialEq, Eq)]
+pub struct ResourceStamps {
+    first: Option<ResourceStamp>,
+    rest: Vec<ResourceStamp>,
+}
+
+impl ResourceStamps {
+    pub fn is_empty(&self) -> bool {
+        self.first.is_none()
+    }
+
+    fn push(&mut self, stamp: ResourceStamp) {
+        if self.first.is_none() {
+            self.first = Some(stamp);
+        } else {
+            self.rest.push(stamp);
+        }
+    }
+}
+
 pub struct Plan {
     pub ir_id: i64,
     pub command_count: i64,
     pub source_bytes: i64,
     pub density: i64,
     pub extent: (i64, i64, i64, i64),
-    pub resources: Vec<ResourceStamp>,
+    pub resources: ResourceStamps,
     pub ir: Rc<RenderIr>,
-    pub draws: Vec<crate::scene_execution::Draw>,
+    pub draws: Rc<Vec<crate::scene_execution::Draw>>,
 }
 
 pub type PlanRef = Rc<RefCell<Plan>>;
@@ -37,7 +57,7 @@ pub struct Segment {
     pub density: i64,
     pub width: i64,
     pub height: i64,
-    pub draws: Vec<crate::scene_execution::Draw>,
+    pub draws: Rc<Vec<crate::scene_execution::Draw>>,
 }
 
 pub struct RetainedPlans {
@@ -140,12 +160,12 @@ pub fn plan_source_bytes(commands: &[Command]) -> i64 {
         .sum()
 }
 
-pub fn same_resources(left: &[ResourceStamp], right: &[ResourceStamp]) -> bool {
+pub fn same_resources(left: &ResourceStamps, right: &ResourceStamps) -> bool {
     left == right
 }
 
 /// Whether every resource the commands name is live, and the stamps of those that are.
-pub fn resource_stamps(resolve: &dyn Fn(i64) -> Option<Resource>, commands: &[Command]) -> (bool, Vec<ResourceStamp>) {
+pub fn resource_stamps(resolve: &dyn Fn(i64) -> Option<Resource>, commands: &[Command]) -> (bool, ResourceStamps) {
     thread_local! {
         static IDS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
     }
@@ -160,7 +180,7 @@ pub fn resource_stamps(resolve: &dyn Fn(i64) -> Option<Resource>, commands: &[Co
     }
     ids.sort_unstable();
     ids.dedup();
-    let mut stamps = Vec::new();
+    let mut stamps = ResourceStamps::default();
     for id in ids.drain(..) {
         match resolve(id) {
             None => missing = true,

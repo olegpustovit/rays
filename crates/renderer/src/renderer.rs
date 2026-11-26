@@ -376,7 +376,26 @@ pub struct Submission(Rc<SubmissionData>);
 #[derive(Clone)]
 pub struct Batch {
     owner: Submission,
-    draws: Vec<Draw>,
+    draws: BatchDraws,
+}
+
+#[derive(Clone)]
+enum BatchDraws {
+    Shared(Rc<Vec<Draw>>),
+    Owned(Vec<Draw>),
+    One(Draw),
+}
+
+impl std::ops::Deref for BatchDraws {
+    type Target = [Draw];
+
+    fn deref(&self) -> &[Draw] {
+        match self {
+            Self::Shared(draws) => draws,
+            Self::Owned(draws) => draws,
+            Self::One(draw) => std::slice::from_ref(draw),
+        }
+    }
 }
 
 const RETAINED_VIEW_CAPACITY: usize = 4;
@@ -894,7 +913,7 @@ fn lower_scene2_uncached(
     density: i64,
     resolve: &dyn Fn(i64) -> Option<retained_resource>,
     ir_: &Rc<RenderIr>,
-) -> Result<Vec<Draw>, Error> {
+) -> Result<Rc<Vec<Draw>>, Error> {
     ensure("Renderer.lower_scene2", value)?;
     let checkpoint = renderer_leases::checkpoint(policy_);
     let rollback = || renderer_leases::rollback(policy_, checkpoint);
@@ -972,7 +991,7 @@ fn lower_scene2_with_policy(
     density: i64,
     resolve: &dyn Fn(i64) -> Option<retained_resource>,
     ir_: &Rc<RenderIr>,
-) -> Result<Vec<Draw>, Error> {
+) -> Result<Rc<Vec<Draw>>, Error> {
     if value.0.dead.get() {
         return lower_scene2_uncached(value, policy_, density, resolve, ir_);
     }
@@ -981,7 +1000,7 @@ fn lower_scene2_with_policy(
     let facts = presentation_facts_of(value).expect("presentation facts");
     let extent = (facts.logical_width, facts.logical_height, facts.drawable_width, facts.drawable_height);
     let same_context = |p: &Plan| p.density == density && p.extent == extent;
-    let slow = || -> Result<Vec<Draw>, Error> {
+    let slow = || -> Result<Rc<Vec<Draw>>, Error> {
         let command_count = commands.len();
         let mut fingerprint = command_count as i64;
         let mut mix = |v: i64| fingerprint = rays_math::hash::mix(fingerprint, v);
@@ -1059,7 +1078,7 @@ fn lower_scene2_with_policy(
 }
 
 pub fn lower_scene2(value: &Renderer, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ir_: &Rc<RenderIr>) -> Result<Vec<Draw>, Error> {
-    lower_scene2_with_policy(value, &lease_policy::CopyImageSnapshots, density, resource_, ir_)
+    lower_scene2_with_policy(value, &lease_policy::CopyImageSnapshots, density, resource_, ir_).map(|draws| draws.as_ref().clone())
 }
 
 pub fn replay_step(clear: Option<(f64, f64, f64, f64)>, identity: &str, version: i64, value: &Renderer) -> Result<Option<()>, Error> {
@@ -1194,7 +1213,7 @@ fn lower_scene2_submission(submission_: &Submission, density: i64, resource_: &d
         resource_,
         ir_,
     ) {
-        Ok(draws) => Ok(Batch { owner: submission_.clone(), draws }),
+        Ok(draws) => Ok(Batch { owner: submission_.clone(), draws: BatchDraws::Shared(draws) }),
         Err(e) => {
             close_submission(submission_);
             Err(e)
@@ -1244,12 +1263,13 @@ fn lower_scene2_segment(
     };
     if let Some(entry) = found {
         owner.0.retained_scene2_segment_hits.set(owner.0.retained_scene2_segment_hits.get() + 1);
-        return Ok(Batch { owner: submission_.clone(), draws: entry.draws.clone() });
+        return Ok(Batch { owner: submission_.clone(), draws: BatchDraws::Shared(entry.draws.clone()) });
     }
     let lowered = lower_scene2_submission(submission_, density, resource_, ir_)?;
     if cacheable {
         owner.0.retained_scene2_segment_misses.set(owner.0.retained_scene2_segment_misses.get() + 1);
-        let bytes_ = retained_scene2_segment_bytes(&lowered.draws);
+        let BatchDraws::Shared(draws) = &lowered.draws else { unreachable!("Scene2 lowering returns shared draws") };
+        let bytes_ = retained_scene2_segment_bytes(draws);
         renderer_retained_plans::add_segment(
             &mut owner.0.retained_plans.borrow_mut(),
             identity,
@@ -1259,7 +1279,7 @@ fn lower_scene2_segment(
                 density,
                 width: facts.logical_width,
                 height: facts.logical_height,
-                draws: lowered.draws.clone(),
+                draws: draws.clone(),
             },
         );
     }
@@ -1280,28 +1300,8 @@ fn ui_draw(submission_: &Submission, ui: scene_execution::UiLayer) -> Result<Bat
         }
     };
     let framebuffer = (0, 0, facts.logical_width, facts.logical_height);
-    let draw: Draw = Rc::new(SampledDraw {
-        ui: Some(ui),
-        family: PipelineFamily::Ui,
-        blend: Blend::Alpha,
-        texture: None,
-        auxiliary: None,
-        vertex_attributes: None,
-        samples: 1,
-        draw: GeometryDraw {
-            mesh: scene_execution::Mesh {
-                key: scene_execution::MeshKey::Host("ui-layer".to_owned()),
-                vertices: scene_execution::empty_bytes(),
-                shared_vertices: None,
-                vertex_count: 0,
-                indices: scene_execution::empty_bytes(),
-                index_count: 0,
-                primitive: ogpu_core::render_pass::Primitive::TriangleList,
-            },
-            state: renderer_lowering::default_state(framebuffer, framebuffer),
-        },
-    });
-    Ok(Batch { owner: submission_.clone(), draws: vec![draw] })
+    let draw = renderer_lowering::ui_layer(&mut submission_.0.owner.0.lowering.borrow_mut(), framebuffer, ui);
+    Ok(Batch { owner: submission_.clone(), draws: BatchDraws::One(draw) })
 }
 
 /// Adopts already prepared non-Scene2 draws into this submission.
@@ -1310,7 +1310,7 @@ pub fn adopt_draws(submission_: &Submission, draws: Vec<Draw>) -> Result<Batch, 
         close_submission(submission_);
         return Err(e);
     }
-    Ok(Batch { owner: submission_.clone(), draws })
+    Ok(Batch { owner: submission_.clone(), draws: BatchDraws::Owned(draws) })
 }
 
 /// Consumes the submission on either success or failure.
