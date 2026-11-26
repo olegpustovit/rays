@@ -41,6 +41,7 @@ cases! {
     run_wire_gestures => part1::run_wire_gestures;
     run_values => part2::run_values;
     run_duplicate_and_view => part2::run_duplicate_and_view;
+    run_view_selected_geometry_pixels => part2::run_view_selected_geometry_pixels;
     run_loop_view => part2::run_loop_view;
     run_result_view => part2::run_result_view;
     run_geometry_view => part2::run_geometry_view;

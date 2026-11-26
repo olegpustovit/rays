@@ -231,6 +231,61 @@ pub fn run_duplicate_and_view() {
     }
 }
 
+pub fn run_view_selected_geometry_pixels() {
+    assert!(gpu(), "native GPU required");
+    let mut r = Run::new(editor(
+        r#"(workspace view_selected
+    (graph g :context sop
+      (let* [box (sop/box)
+             shifted (sop/transform box :translate [5 0 0])
+             result (sop/transform shifted :translate [15 0 0])]
+        result))
+    (graph scene :context scene
+      (scene/merge (scene/geometry (ref g))
+        (scene/camera :eye [0 0 6] :follow_viewport true))))"#,
+    ));
+    let m = (450., 300.);
+    r.step(m, vec![]);
+    r.step(m, vec![]);
+    let (gx, gy, _, _) = r.panes().graph;
+    let graph = ((gx + 40) as f64, (gy + 40) as f64);
+    click_at(&mut r, graph);
+    r.step(graph, vec![key(Key::Home)]);
+    r.step(graph, vec![key(Key::KeyChar('i'))]);
+    r.step(graph, vec![]);
+    let (x, y, w, _) = editor::node_box(&r.e, &["g".into(), "box".into()]).expect("box node");
+    let node = ((x + w / 2) as f64, (y + 3) as f64);
+    click_at(&mut r, node);
+    for _ in 0..4 {
+        r.step(node, vec![]);
+    }
+    assert_eq!(r.dump("scope selected"), "g/box");
+    assert_eq!(sop::node::label(&editor::displayed_node(&r.e)), "transform");
+    assert_eq!(centre_x(&r.e), Some(20.));
+
+    let canvas = rays::canvas::create(900, 640).unwrap();
+    let (vx, vy, vw, vh) = r.panes().view;
+    let pixels = |r: &Run| {
+        let f = frame(&[], node, vec![], r.count);
+        rays::canvas::render(None, &canvas, &editor::scene(&r.e, &f)).unwrap();
+        let pixels = rays::canvas::pixels(&canvas).unwrap();
+        let x = (vx + vw / 2) as usize;
+        let y = (vy + vh / 2) as usize;
+        (y - 16..y + 16).flat_map(|row| pixels[row * 900 + x - 16..row * 900 + x + 16].iter().copied()).collect::<Vec<_>>()
+    };
+    let before = pixels(&r);
+    r.step(node, vec![key(Key::KeyChar('v'))]);
+    r.step(node, vec![]);
+    let after = pixels(&r);
+    let displayed = sop::node::label(&editor::displayed_node(&r.e)).to_owned();
+    let centre = centre_x(&r.e);
+    r.close();
+    rays::canvas::destroy(&canvas).unwrap();
+    assert_eq!(displayed, "box", "View left the previous SOP root active");
+    assert_eq!(centre, Some(0.), "View left the previous geometry in the viewport");
+    assert!(before != after, "View left the viewport's center pixels unchanged");
+}
+
 pub fn run_loop_view() {
     if !gpu() {
         return;
