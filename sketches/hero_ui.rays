@@ -1,73 +1,63 @@
-; Example: rays render sketches/hero_ui.rays --camera macro -o macro.png
-; Run from the repository root so the default PXUI gallery paths resolve.
-; To use your own PNGs, set path, columns and rows in the main, rear and side graphs.
-; The mesh uses one point per texel. Crop large captures to the region you want to film.
+; Run from the repository root:
+; rays render sketches/hero_ui.rays --camera hero --size 2400x3000 -o hero.png
+; In panel, supply a cropped PNG, its pixel dimensions and the physical screen width.
+; The scene's shot input picks a camera for a prepared crop. "custom" uses the editable pose below.
+; Agentpack source crop rectangles (x, y, width, height), final mesh size and physical panel width:
+; usage       05-usage-dashboard       470,   3, 844,  850   1668x1680   2.532
+; permission  01-sessions-sidebar      969,   4, 914, 1189   1468x1908   2.742
+; diff        02-chat-transcript      1110, 227, 482,  734    964x1468   1.446
+; topology    06-machine-topology      974,   0, 858, 1014   1540x1820   2.574
+; sessions    01-sessions-sidebar        0,   0, 527,  729   1054x1458   1.581
+; Crop the source and resize it with bicubic filtering before loading it.
 (workspace hero_ui
   (defn phosphor :context value [(v : float)]
-    (pow (max 0.0 (/ (- v 0.09) 0.91)) 2.05))
+    (pow (max 0.0 (/ (- v 0.065) 0.935)) 1.85))
 
-  (defn screen :context sop [(path : text) (cols : int) (rows : int) (width : float) (gain : float)]
+  (graph panel :context sop
+    [(path : text "pxui/tools/pxui_gallery/fixtures/gallery_kit_dusk_1x.png")
+     (columns : int 640) (rows : int 464) (width : float 6.4)]
     (let* [texels (sop/image_texels (image/load path))
            rgba (sop/attr texels "rgba" :owner "point" :type "vec4")
-           height (* width (/ (float rows) (float cols)))
-           ; ponytail: one vertex per texel preserves the screenshot detail. Use a sampled
-           ; emission texture if full-size captures make grid cooking or upload too expensive.
-           grid (sop/grid :counts "Point counts" :columns cols :rows rows :width width :height height)
+           height (* width (/ (float rows) (float columns)))
+           ; ponytail: use bicubic-upsampled crops for macro shots. Mesh memory grows with
+           ; the texel count, so use sampled emission if uncropped shots need the same density.
+           grid (sop/grid :counts "Point counts" :columns columns :rows rows :width width :height height)
            cd (exact (map (fn [(c : vec4)]
                   (let* [l (+ (+ (* c.x 0.2126) (* c.y 0.7152)) (* c.z 0.0722))
-                         ink (* 0.55 (phosphor l))]
-                    [(* c.w (+ (* 0.94 ink) (* 0.52 (phosphor c.x))))
-                     (* c.w (+ ink (* 0.52 (phosphor c.y))))
-                     (* c.w (+ (* 1.07 ink) (* 0.52 (phosphor c.z)))) 1.0])) rgba))
-           pixels (sop/material (sop/with_attr grid "Cd" cd :owner "point" :type vec4)
-                    :material "Pixels" :color [0 0 0] :emission [gain gain gain] :roughness 0.4)
-           body (sop/box :size [(+ width 0.06) 0.036 (+ height 0.06)] :center [0 -0.021 0] :normals "Point")
-           backing (sop/material
-                     (sop/with_attr body "Cd" (array/vec4 (sop/count body :points) [1 1 1 1]) :owner "point" :type vec4)
-                     :material "Graphite glass" :color [0.043 0.055 0.066]
-                     :emission [0.006 0.009 0.014] :roughness 0.37)]
-      (sop/merge pixels backing)))
-
-  (graph main :context sop
-    [(path : text "pxui/tools/pxui_gallery/fixtures/gallery_kit_dusk_1x.png")
-     (columns : int 640) (rows : int 464)]
-    (screen path columns rows 4.8 1.0))
-
-  (graph rear :context sop
-    [(path : text "pxui/tools/pxui_gallery/fixtures/gallery_controls_dusk_1x.png")
-     (columns : int 640) (rows : int 464)]
-    (screen path columns rows 3.0 0.58))
-
-  (graph side :context sop
-    [(path : text "pxui/tools/pxui_gallery/fixtures/gallery_bodies_dusk_1x.png")
-     (columns : int 640) (rows : int 464)]
-    (screen path columns rows 2.5 0.48))
-
-  (graph table :context sop
-    (sop/material (sop/grid :width 10 :height 10)
-                  :material "Matte charcoal" :color [0.04 0.047 0.05] :roughness 0.55))
+                         ink (* 0.15 (phosphor l))]
+                    [(+ 0.004 (* c.w (+ ink (* 0.84 (phosphor c.x)))))
+                     (+ 0.006 (* c.w (+ ink (* 0.84 (phosphor c.y)))))
+                     (+ 0.008 (* c.w (+ ink (* 0.84 (phosphor c.z))))) 1.0])) rgba))]
+      (sop/material (sop/with_attr grid "Cd" cd :owner "point" :type vec4)
+        :material "Screen" :color [0 0 0] :emission [1 1 1] :roughness 0.4)))
 
   (graph world :context world
     (world/gradient :name "Black studio"
-      :zenith [0.008 0.011 0.014] :horizon [0.002 0.003 0.005] :nadir [0.001 0.001 0.002]))
+      :zenith [0.001 0.001 0.002] :horizon [0.001 0.001 0.002] :nadir [0.001 0.001 0.002]))
 
   (graph scene :context scene
-    (let* [left (scene/camera :name "left" :eye [-1.73 1.17 2.05] :target [-1.26 0.356 -0.48]
-                               :fov 0.67 :aperture 0.13 :up [0.38 1 0])
-           right (scene/camera :name "right" :eye [0.43 1.32 2.52] :target [-0.44 0.385 -0.32]
-                                :fov 0.50 :aperture 0.10 :up [-0.34 1 0])
-           overhead (scene/camera :name "overhead" :eye [0.80 4.50 2.77] :target [-0.18 0.346 -0.82]
-                                   :fov 0.76 :aperture 0.29 :up [-0.30 1 0])
-           macro (scene/camera :name "macro" :eye [-1.90 1.02 1.38] :target [-2.03 0.30 -1.00]
-                                :fov 0.38 :aperture 0.22 :up [0.23 1 0])
-           wide (scene/camera :name "wide" :eye [-2.70 4.30 8.40] :target [0.24 0.51 -1.36]
-                               :fov 0.81 :aperture 0.28 :up [0.10 1 0])
-           primary (scene/geometry (ref main) :name "Inspector" :translate [0 0.42 0] :rotate [-0.085 0 0.018])
-           back (scene/geometry (ref rear) :name "Control layer" :translate [-1.65 1.05 -2.55]
-                                :rotate [-0.14 -0.15 -0.025])
-           wing (scene/geometry (ref side) :name "Auxiliary layer" :translate [2.50 0.73 -1.50]
-                                :rotate [-0.11 0.17 0.02])
-           floor (scene/geometry (ref table) :name "Charcoal table")
-           dome (scene/world (ref world))]
-      (scene/root (scene/merge primary back wing floor left right overhead macro wide dome)
-        :camera left :renderer "Path traced" :width 2400 :height 3000 :max_spp 256 :bounces 2))))
+    [(shot : text "custom") (eye : vec3 [0.18 1.10 1.10]) (aim : vec3 [0 0 -0.2]) (up : vec3 [0.22 1 0])
+     (fov : float 0.55) (focus : float 1.84) (aperture : float 0.08)]
+    (let* [pose (cond
+            (equal? shot "usage")
+              {:eye [1.1598823 2.6037481 2.2509740] :aim [0.2755000 0.0000000 0.1675000] :up [-0.0634388 0.6365713 -0.7686043]
+               :fov 0.459 :focus 4.0464810 :aperture 0.1150000}
+            (equal? shot "permission")
+              {:eye [-0.0689331 2.5861440 2.8089022] :aim [0.0935000 0.0000000 0.4860000] :up [-0.1910333 0.6492546 -0.7361894]
+               :fov 0.53 :focus 3.6430709 :aperture 0.1200000}
+            (equal? shot "diff")
+              {:eye [0.4842607 1.0521356 1.7905247] :aim [0.1585000 0.0000000 0.3795000] :up [0.0903515 0.7882819 -0.6086445]
+               :fov 0.49 :focus 1.7936398 :aperture 0.0700000}
+            (equal? shot "topology")
+              {:eye [0.1755976 4.0657299 1.4891748] :aim [-0.0675000 0.0000000 0.1105000] :up [0.1996412 0.3039441 -0.9315371]
+               :fov 0.53 :focus 4.5257754 :aperture 0.1500000}
+            (equal? shot "sessions")
+              {:eye [0.0510000 2.2642884 1.5728844] :aim [0.0510000 0.0000000 0.1580000] :up [-0.1564345 0.5233951 -0.8376072]
+               :fov 0.52 :focus 2.9349596 :aperture 0.1000000}
+            :else {:eye eye :aim aim :up up :fov fov :focus focus :aperture aperture})
+           camera (scene/camera :name "hero" :eye pose.eye :target pose.aim :fov pose.fov :up pose.up
+                                :aperture pose.aperture :focus_distance pose.focus)
+           screen (scene/geometry (ref panel) :name "UI screen")
+           dome (scene/world (ref world) :exposure 0.55)]
+      (scene/root (scene/merge screen camera dome)
+        :camera camera :renderer "Path traced" :width 2400 :height 3000 :max_spp 256 :bounces 1))))
