@@ -1,63 +1,64 @@
 ; Run from the repository root:
 ; rays render sketches/hero_ui.rays --camera hero --size 2400x3000 -o hero.png
 ; In panel, supply a cropped PNG, its pixel dimensions and the physical screen width.
-; The scene's shot input picks a camera for a prepared crop. "custom" uses the editable pose below.
-; Agentpack source crop rectangles (x, y, width, height), final mesh size and physical panel width:
-; usage       05-usage-dashboard       470,   3, 844,  850   1668x1680   2.532
-; permission  01-sessions-sidebar      969,   4, 914, 1189   1468x1908   2.742
-; diff        02-chat-transcript      1110, 227, 482,  734    964x1468   1.446
-; topology    06-machine-topology      974,   0, 858, 1014   1540x1820   2.574
-; sessions    01-sessions-sidebar        0,   0, 527,  729   1054x1458   1.581
-; Crop the source and resize it with bicubic filtering before loading it.
+; Use a full 16:10 screenshot resized to 1920x1200. Set path, columns and rows in panel.
+; The five telephoto scene presets assume a screen width of 9.6. The custom pose is editable.
+; usage = 05-usage-dashboard, permission = 01-sessions-sidebar.
+; diff = 02-chat-transcript, topology = 06-machine-topology, sessions = 03-work-filters.
 (workspace hero_ui
   (defn phosphor :context value [(v : float)]
-    (pow (max 0.0 (/ (- v 0.065) 0.935)) 1.85))
+    (pow (max 0.0 (/ (- v 0.106) 0.894)) 1.90))
 
   (graph panel :context sop
     [(path : text "pxui/tools/pxui_gallery/fixtures/gallery_kit_dusk_1x.png")
-     (columns : int 640) (rows : int 464) (width : float 6.4)]
+     (columns : int 640) (rows : int 464) (width : float 9.6)]
     (let* [texels (sop/image_texels (image/load path))
            rgba (sop/attr texels "rgba" :owner "point" :type "vec4")
            height (* width (/ (float rows) (float columns)))
-           ; ponytail: use bicubic-upsampled crops for macro shots. Mesh memory grows with
-           ; the texel count, so use sampled emission if uncropped shots need the same density.
+           ; ponytail: use one uniformly spaced vertex per resampled texel for distant full-window
+           ; views. Mesh memory grows with pixel count. Use sampled emission for tighter lenses.
            grid (sop/grid :counts "Point counts" :columns columns :rows rows :width width :height height)
            cd (exact (map (fn [(c : vec4)]
                   (let* [l (+ (+ (* c.x 0.2126) (* c.y 0.7152)) (* c.z 0.0722))
-                         ink (* 0.15 (phosphor l))]
-                    [(+ 0.004 (* c.w (+ ink (* 0.84 (phosphor c.x)))))
-                     (+ 0.006 (* c.w (+ ink (* 0.84 (phosphor c.y)))))
-                     (+ 0.008 (* c.w (+ ink (* 0.84 (phosphor c.z))))) 1.0])) rgba))]
-      (sop/material (sop/with_attr grid "Cd" cd :owner "point" :type vec4)
-        :material "Screen" :color [0 0 0] :emission [1 1 1] :roughness 0.4)))
+                         ink (* 0.13 (phosphor l))]
+                    [(+ 0.0051 (* c.w (+ ink (* 0.73 (phosphor c.x)))))
+                     (+ 0.007 (* c.w (+ ink (* 0.78 (phosphor c.y)))))
+                     (+ 0.010 (* c.w (+ ink (* 0.82 (phosphor c.z))))) 1.0])) rgba))
+           pixels (sop/material (sop/with_attr grid "Cd" cd :owner "point" :type vec4)
+                    :material "Screen" :color [0 0 0] :emission [1 1 1] :roughness 0.4)
+           body (sop/box :size [(+ width 0.06) 0.036 (+ height 0.06)] :center [0 -0.0181 0] :normals "Point")
+           rim (sop/material (sop/with_attr body "Cd" (array/vec4 (sop/count body :points) [1 1 1 1])
+                                             :owner "point" :type vec4)
+                 :material "Window edge" :color [0 0 0] :emission [0.023 0.029 0.036] :roughness 0.4)]
+      (sop/merge pixels rim)))
 
   (graph world :context world
     (world/gradient :name "Black studio"
-      :zenith [0.001 0.001 0.002] :horizon [0.001 0.001 0.002] :nadir [0.001 0.001 0.002]))
+      :zenith [0.00012 0.00018 0.00028] :horizon [0.00012 0.00018 0.00028] :nadir [0.00012 0.00018 0.00028]))
 
   (graph scene :context scene
-    [(shot : text "custom") (eye : vec3 [0.18 1.10 1.10]) (aim : vec3 [0 0 -0.2]) (up : vec3 [0.22 1 0])
-     (fov : float 0.55) (focus : float 1.84) (aperture : float 0.08)]
+    [(shot : text "custom") (eye : vec3 [-27 37 47]) (aim : vec3 [0 0 0]) (up : vec3 [0.5 1 0])
+     (fov : float 0.232) (focus : float 64) (aperture : float 9)]
     (let* [pose (cond
             (equal? shot "usage")
-              {:eye [1.1598823 2.6037481 2.2509740] :aim [0.2755000 0.0000000 0.1675000] :up [-0.0634388 0.6365713 -0.7686043]
-               :fov 0.459 :focus 4.0464810 :aperture 0.1150000}
+              {:eye [-23.589291 32.457346 34.627202] :aim [-0.358455 0.000000 0.186072] :up [0.789281 0.612399 -0.044749]
+               :fov 0.223 :focus 53.439584 :aperture 7.800000}
             (equal? shot "permission")
-              {:eye [-0.0689331 2.5861440 2.8089022] :aim [0.0935000 0.0000000 0.4860000] :up [-0.1910333 0.6492546 -0.7361894]
-               :fov 0.53 :focus 3.6430709 :aperture 0.1200000}
+              {:eye [-9.947960 29.156463 42.594602] :aim [-0.224173 0.000000 0.476253] :up [0.788285 0.575898 -0.216676]
+               :fov 0.232 :focus 53.257088 :aperture 8.050000}
             (equal? shot "diff")
-              {:eye [0.4842607 1.0521356 1.7905247] :aim [0.1585000 0.0000000 0.3795000] :up [0.0903515 0.7882819 -0.6086445]
-               :fov 0.49 :focus 1.7936398 :aperture 0.0700000}
+              {:eye [18.565941 29.122714 41.344456] :aim [0.325817 0.000000 0.376466] :up [-0.756913 0.642459 -0.119702]
+               :fov 0.232 :focus 54.600022 :aperture 8.300000}
             (equal? shot "topology")
-              {:eye [0.1755976 4.0657299 1.4891748] :aim [-0.0675000 0.0000000 0.1105000] :up [0.1996412 0.3039441 -0.9315371]
-               :fov 0.53 :focus 4.5257754 :aperture 0.1500000}
+              {:eye [7.947694 56.788173 21.687158] :aim [0.100415 0.000000 0.126934] :up [-0.788370 0.310563 -0.531059]
+               :fov 0.232 :focus 62.121658 :aperture 10.200000}
             (equal? shot "sessions")
-              {:eye [0.0510000 2.2642884 1.5728844] :aim [0.0510000 0.0000000 0.1580000] :up [-0.1564345 0.5233951 -0.8376072]
-               :fov 0.52 :focus 2.9349596 :aperture 0.1000000}
+              {:eye [14.750471 50.945169 40.407574] :aim [0.129769 0.000000 0.237525] :up [-0.672494 0.567548 -0.475018]
+               :fov 0.218 :focus 68.363705 :aperture 8.400000}
             :else {:eye eye :aim aim :up up :fov fov :focus focus :aperture aperture})
            camera (scene/camera :name "hero" :eye pose.eye :target pose.aim :fov pose.fov :up pose.up
                                 :aperture pose.aperture :focus_distance pose.focus)
            screen (scene/geometry (ref panel) :name "UI screen")
-           dome (scene/world (ref world) :exposure 0.55)]
+           dome (scene/world (ref world) :exposure -0.68)]
       (scene/root (scene/merge screen camera dome)
-        :camera camera :renderer "Path traced" :width 2400 :height 3000 :max_spp 256 :bounces 1))))
+        :camera camera :renderer "Path traced" :width 2400 :height 3000 :max_spp 512 :bounces 1))))
