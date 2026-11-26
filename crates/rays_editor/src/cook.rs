@@ -140,6 +140,9 @@ pub struct Cook {
     /// block on each cook: fixed-step runs, see `create`
     pub await_: bool,
     pub schedule: schedule::Schedule,
+    pub(crate) lane_dependencies: deps::T,
+    /// The preview network and root requested at the last cook update, by object.
+    pub(crate) viewed: Rc<[(i64, u64, i64)]>,
     pub preparer: Preparer,
     pub pieces: Rc<Vec<Piece>>,
     /// the latest desired submission settings
@@ -278,6 +281,8 @@ pub fn create(
         domains,
         await_,
         schedule: schedule::initial(),
+        lane_dependencies: deps::STATIC,
+        viewed: Rc::default(),
         preparer: Preparer { cache: Rc::new(RefCell::new(PreparedCache { entries: VecDeque::new(), bytes: 0 })), prepare, clock },
         pieces: Rc::default(),
         settings: None,
@@ -455,11 +460,37 @@ pub fn force(value: &Cook) -> Cook {
 
 /// no cook running or owed, and no footers waiting for their quiet updates (`update`'s `settled`)
 pub fn at_rest(value: &Cook) -> bool {
-    !busy(value) && !value.schedule.dirty && !value.probes_owed
+    !value.force && !value.schedule.dirty && !value.probes_owed && async_cook::at_rest(&value.worker)
 }
 
 pub fn dependencies(value: &Cook) -> deps::T {
-    value.schedule.dependencies
+    deps::union(value.schedule.dependencies, value.lane_dependencies)
+}
+
+fn resets_state(changes: &[timeline::Change]) -> bool {
+    changes.iter().any(|c| matches!(c, timeline::Change::ResetNow | timeline::Change::StoppedNow))
+}
+
+fn apply_timeline(input: &mut input::Frame, timeline: &timeline::Timeline) {
+    input.t = timeline.time;
+    input.frame = timeline.frame;
+    // Paused and stopped clocks keep the same step and tick until playback resumes.
+    if timeline.mode != timeline::Mode::Playing {
+        input.dt = 0.;
+        input.tick = timeline.frame;
+    }
+}
+
+pub(crate) fn can_reuse(value: &Cook, input: &mut input::Frame, timeline: &timeline::Timeline, changes: &[timeline::Change]) -> bool {
+    if value.graphs.is_empty() || !at_rest(value) || resets_state(changes) {
+        return false;
+    }
+    // Compare the scheduler's inputs without cloning or altering the editor's live frame.
+    let clock = (input.t, input.frame, input.dt, input.tick);
+    apply_timeline(input, timeline);
+    let changed = schedule::inputs_changed(dependencies(value), value.schedule.input.as_ref(), Some(input), timeline::changed_context(changes));
+    (input.t, input.frame, input.dt, input.tick) = clock;
+    !changed
 }
 
 /// Preparation, probes and framing are CPU-capable readers of published geometry. Budget their
@@ -491,25 +522,18 @@ pub fn update(
     frame_request: Option<Key2>,
 ) -> UpdateResult {
     let _phase = flow_syntax::phase_timer::measure("cook");
-    if timeline_changes.iter().any(|c| matches!(c, timeline::Change::ResetNow | timeline::Change::StoppedNow)) {
+    if resets_state(timeline_changes) {
         reset_state(false, value);
     }
     let mut input = input.unwrap_or_else(|| flow_native::live_frame::of_frame(frame));
-    {
-        let frame_index = timeline::frame(timeline);
-        // a stopped clock is one frame, however many host frames pass: no step and no host count, or
-        // every idle frame would differ and cook again
-        let still = timeline::mode(timeline) != timeline::Mode::Playing;
-        input.t = timeline::time(timeline);
-        input.frame = frame_index;
-        input.dt = if still { 0.0 } else { input.dt };
-        input.tick = if still { frame_index } else { input.tick };
-    }
+    apply_timeline(&mut input, timeline);
+    let mut lane_dependencies = deps::STATIC;
     let mut resolved_objects: Vec<(i64, edit_graph::T, i64)> = Vec::new();
     let mut value_lanes: BTreeMap<i64, Arc<value_lane::Lane>> = BTreeMap::new();
     let mut applied: BTreeMap<i64, value_lane::Resolved> = BTreeMap::new();
     let mut resolve_error: Option<String> = None;
     for (id, network, displayed) in objects {
+        lane_dependencies = deps::union(lane_dependencies, value_lane::dependencies(network));
         let lane = match value.value_lanes.get(id) {
             Some(lane) => lane.clone(),
             None => Arc::new(value_lane::create(Some(value.state.clone()))),
@@ -824,6 +848,8 @@ pub fn update(
     let cook = Cook {
         results: value.results + u64::from(published),
         schedule,
+        lane_dependencies,
+        viewed: value.viewed.clone(),
         pieces,
         settings: Some(settings.clone()),
         error,

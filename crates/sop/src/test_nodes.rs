@@ -128,7 +128,12 @@ fn async_cook_publishes_the_newest_request_and_refuses_after_close() {
         Box::new(|output| Ok(Box::new(payload::element_count(&output.payload)) as Prepared)),
     )
     .unwrap();
+    while async_cook::status(&worker) != async_cook::Status::Idle {
+        std::thread::yield_now();
+    }
+    assert!(!async_cook::at_rest(&worker), "the owner still has a completion to publish");
     let done = async_cook::await_completion(&worker);
+    assert!(async_cook::at_rest(&worker));
     assert_eq!(done.request_id, id);
     let points = done.result.ok().expect("cook succeeded").downcast::<i64>().expect("prepared an i64");
     assert_eq!(*points, 9);

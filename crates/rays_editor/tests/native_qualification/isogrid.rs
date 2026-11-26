@@ -218,6 +218,90 @@ fn viewport(recipe: i64) {
     assert_eq!(ogpu_core::impl_::live_handles().unwrap(),baseline);
     text();
 }
+fn timeline_changes_geometry() {
+    use crate::support::shell::{Run, ch, editor, replace};
+    use input::{Event, MouseButton};
+    use rays_editor::timeline::Mode;
+
+    assert!(crate::common::gpu(), "native GPU required");
+    // Use a smaller mesh and add a time-driven SOP after its static geometry.
+    let source = replace(&text(), "(resolution : int 24)", "(resolution : int 8)");
+    let source = replace(&source,
+        r#"(sop/with_attr shaded "Cd" (exact colors) :owner "point" :type vec3)))"#,
+        r#"(sop/transform (sop/with_attr shaded "Cd" (exact colors) :owner "point" :type vec3) :translate [t 0 0])))"#);
+    let mut run = Run::new(editor(&source));
+    let pointer = (300., 200.);
+    run.step(pointer, vec![ch('/'), ch('p')]);
+    run.step(pointer, vec![ch('/'), ch('t')]);
+    let sample = |run: &Run| {
+        let clock = rays_editor::editor::timeline(&run.e);
+        let piece = run.e.core.cook.pieces.first().expect("cooked IsoGrid geometry");
+        let x = float3::get(g::positions(&piece.prepared.geometry), 0).unwrap().0;
+        (clock, x)
+    };
+    let (initial, original_x) = sample(&run);
+    assert_eq!(initial.mode, Mode::Paused);
+
+    run.step(pointer, vec![ch('/'), ch('p')]);
+    run.step(pointer, vec![]);
+    let (played, played_x) = sample(&run);
+    assert_eq!(played.mode, Mode::Playing);
+    assert!(played.time > initial.time);
+
+    let (x, y, w, h) = run.panes().timeline;
+    assert!(w > 0 && h > 0, "timeline must be visible");
+    let start = ((x + w / 2) as f64, (y + h / 2) as f64);
+    let end = ((x + w - 10) as f64, start.1);
+    let button = MouseButton::LeftButton;
+    run.stepb(&[button], start, vec![Event::PointerPressed(button, start)]);
+    run.step(end, vec![Event::PointerMoved(end), Event::PointerReleased(button, end)]);
+    let (sought, sought_x) = sample(&run);
+    assert_eq!(sought.mode, Mode::Paused);
+    assert!(sought.time > played.time);
+    run.close();
+
+    let playback_error = ((played_x - original_x) - (played.time - initial.time)).abs();
+    let scrub_error = ((sought_x - original_x) - (sought.time - initial.time)).abs();
+    assert!(playback_error < 1e-4 && scrub_error < 1e-4,
+        "cooked IsoGrid must follow playback and scrub: x {original_x} → {played_x} → {sought_x}, time {} → {} → {}",
+        initial.time, played.time, sought.time);
+}
+
+fn animated_sketches_follow_playback() {
+    use crate::support::shell::{editor, idle_frame, replace, sketch};
+    use rays_editor::editor as e;
+
+    assert!(crate::common::gpu(), "native GPU required");
+    for name in ["isogrid_drift", "isogrid_city"] {
+        // Keep the sketches' voxel programs and clocks, with small test grids.
+        let source = replace(&sketch(name), "(side : int 128)", "(side : int 8)");
+        let mut editor = editor(&source);
+        let mut initial = idle_frame(1);
+        initial.input.dt = 0.;
+        editor = e::update(editor, &initial);
+        let positions = |editor: &e::Editor| {
+            assert!(editor.core.cook.error.is_none(), "{name}: {:?}", editor.core.cook.error);
+            let geometry = e::prepared(editor).expect("cooked IsoGrid geometry");
+            let positions = g::positions(&geometry);
+            (0..float3::length(positions)).map(|i| float3::get(positions, i).unwrap()).collect::<Vec<_>>()
+        };
+        let before = positions(&editor);
+        let mut changed = false;
+        for tick in 2..=5 {
+            let mut frame = idle_frame(tick);
+            // A room can hold its shape for several seconds before its next wipe.
+            frame.input.dt = 4.0;
+            editor = e::update(editor, &frame);
+            if positions(&editor) != before {
+                changed = true;
+                break;
+            }
+        }
+        e::close(&editor);
+        assert!(changed, "{name}: cooked geometry stayed fixed during playback");
+    }
+}
+
 pub fn cases() -> Vec<(&'static str, fn())> {
-    vec![("native_isogrid_viewport_recipe_0",|| viewport(0)),("native_isogrid_viewport_recipe_1",|| viewport(1)),("native_isogrid_viewport_recipe_2",|| viewport(2)),("native_isogrid_viewport_recipe_3",|| viewport(3)),("native_isogrid_viewport_recipe_4",|| viewport(4)),("native_isogrid_viewport_recipe_5",|| viewport(5)),("native_isogrid_viewport_recipe_6",|| viewport(6)),("native_isogrid_viewport_recipe_7",|| viewport(7))]
+    vec![("native_isogrid_animated_sketches_follow_playback", animated_sketches_follow_playback), ("native_isogrid_timeline_changes_geometry", timeline_changes_geometry), ("native_isogrid_viewport_recipe_0",|| viewport(0)),("native_isogrid_viewport_recipe_1",|| viewport(1)),("native_isogrid_viewport_recipe_2",|| viewport(2)),("native_isogrid_viewport_recipe_3",|| viewport(3)),("native_isogrid_viewport_recipe_4",|| viewport(4)),("native_isogrid_viewport_recipe_5",|| viewport(5)),("native_isogrid_viewport_recipe_6",|| viewport(6)),("native_isogrid_viewport_recipe_7",|| viewport(7))]
 }

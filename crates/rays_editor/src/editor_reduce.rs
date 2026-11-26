@@ -1265,7 +1265,6 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let previous_cook = value.cook.clone();
     let previous_level = pane_level(&value.into());
     let had_route = !pane_route(&value.into()).is_empty();
-    let previous_viewed: Vec<_> = value.viewed.iter().map(|(id, (network, root))| (*id, flow_sop::network::identity(network), *root)).collect();
     let vocab = vocabulary_for(value, &doc);
     let workspace = unrestore(&value.doc, &doc, result.workspace.clone());
     // i also follows a reference of the node selected in the pane (a material, an object's graph)
@@ -1430,20 +1429,18 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         (Some(node), Level::Inside(id)) if kind(&*value2, id).as_deref() == Some("geometry") => Some((id, node)),
         _ => None,
     };
-    if !same_workspace_all(&doc.workspace, &previous_doc.workspace)
-        || !value2.viewed.iter().map(|(id, (network, root))| (*id, flow_sop::network::identity(network), *root)).eq(previous_viewed) {
+    let viewed = value2.viewed.iter().map(|(id, (network, root))| (*id, flow_sop::network::identity(network), *root));
+    let same_viewed = viewed.clone().eq(previous_cook.viewed.iter().copied());
+    if !same_workspace_all(&doc.workspace, &previous_doc.workspace) || !same_viewed {
         let roots: BTreeSet<i64> = value2.viewed.values().map(|(_, root)| *root).collect();
         let volatile = flow_sop::lower::is_volatile(&doc.workspace.lowered);
         cook::set_volatile(&previous_cook, Arc::new(move |id| volatile(id) || roots.contains(&id)));
     }
-    // Hover/idle at rest: keep previous cook. live_cook is a setting (usually on);
-    // Playing timelines still emit Advanced every frame — cook is already settled.
-    // Skip only once graphs are stored — else an empty Cook freezes and /g cold-rebuilds.
-    let skip_cook = std::sync::Arc::ptr_eq(&doc, &previous_doc)
-        && cook::at_rest(&previous_cook)
-        && !previous_cook.graphs.is_empty()
+    let skip_cook = Arc::ptr_eq(&doc, &previous_doc)
+        && same_viewed
         && !effects.cook
-        && frame_request.is_none();
+        && frame_request.is_none()
+        && cook::can_reuse(&previous_cook, &mut value2.live_frame, &timeline, &timeline_changes);
     let (cooked_opt, lit_cache) = if skip_cook {
         (None, value2.lit.clone())
     } else {
@@ -1463,7 +1460,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
             None => &default_pump,
         };
         let gpu_config = gpu.cloned().unwrap_or_else(|| value2.gpu.clone());
-        let cooked = cook::update(
+        let mut cooked = cook::update(
             Some(&gpu_config),
             Some(value2.live_frame.clone()),
             result.live_cook,
@@ -1480,6 +1477,9 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
             &frame_,
             frame_request,
         );
+        if !same_viewed {
+            cooked.cook.viewed = viewed.collect();
+        }
         (Some(cooked), lit_cache)
     };
     let document_changed = !Arc::ptr_eq(&doc, &previous_doc);
@@ -1547,6 +1547,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
                 if let Some(c) = std::rc::Rc::get_mut(&mut core.cook) {
                     c.quiet = cooked.cook.quiet;
                     c.schedule = cooked.cook.schedule;
+                    c.lane_dependencies = cooked.cook.lane_dependencies;
+                    c.viewed = cooked.cook.viewed;
                     c.force = cooked.cook.force;
                     c.probe_job = cooked.cook.probe_job;
                     c.probes_owed = cooked.cook.probes_owed;

@@ -325,6 +325,12 @@ pub fn poll(value: &T) -> Option<Completion> {
     value.0.state.lock().unwrap().completion.take()
 }
 
+/// An idle worker can still have a completion for its owner to publish.
+pub fn at_rest(value: &T) -> bool {
+    let state = value.0.state.lock().unwrap();
+    state.active.is_none() && state.pending.is_none() && state.completion.is_none()
+}
+
 pub fn status(value: &T) -> Status {
     let state = value.0.state.lock().unwrap();
     match (&state.active, &state.pending) {

@@ -23,6 +23,22 @@ pub fn initial() -> Schedule {
     Schedule { initialized: false, dirty: false, graphs: Vec::new(), dependencies: deps::STATIC, input: None }
 }
 
+pub(crate) fn inputs_changed(
+    dependencies: deps::T,
+    previous: Option<&input::Frame>,
+    input: Option<&input::Frame>,
+    context_changed: bool,
+) -> bool {
+    // a graph recooks when an input slice it reads differs: a stopped clock, a still pointer or an
+    // unread key leave every idle frame the same
+    (context_changed && (deps::mem(deps::Fact::Time, dependencies) || deps::mem(deps::Fact::Frame, dependencies))) || match (input, previous) {
+        (Some(now), Some(before)) => context::input_changed(dependencies, before, now),
+        _ => [deps::Fact::Input, deps::Fact::Pointer, deps::Fact::Keys, deps::Fact::Size, deps::Fact::Step]
+            .iter()
+            .any(|fact| deps::mem(*fact, dependencies)),
+    }
+}
+
 pub fn step(
     live: bool,
     input: Option<&input::Frame>,
@@ -41,14 +57,7 @@ pub fn step(
     } else {
         graphs.iter().fold(deps::STATIC, |union, graph| deps::union(union, node::graph_dependencies(graph)))
     };
-    // a graph recooks when an input slice it reads differs: a stopped clock, a still pointer or an
-    // unread key leave every idle frame the same
-    let dynamic = (match (input, value.input.as_ref()) {
-        (Some(now), Some(before)) => context::input_changed(dependencies, before, now),
-        _ => [deps::Fact::Input, deps::Fact::Pointer, deps::Fact::Keys, deps::Fact::Size, deps::Fact::Step]
-            .iter()
-            .any(|fact| deps::mem(*fact, dependencies)),
-    }) || (context_changed && (deps::mem(deps::Fact::Time, dependencies) || deps::mem(deps::Fact::Frame, dependencies)));
+    let dynamic = inputs_changed(dependencies, value.input.as_ref(), input, context_changed);
     let held = frame::mouse_down(MouseButton::LeftButton, frame);
     let desired = !value.initialized || dirty || dynamic;
     let urgent = !value.initialized || effects.cook || force;
