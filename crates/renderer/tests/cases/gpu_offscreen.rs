@@ -839,12 +839,15 @@ fn gpu_execution_gpu_film() {
     let film=b::create_texture(&device,descriptor.clone()).unwrap();
     let staging=b::create_buffer(&device,BufferDescriptor { label:Some("film-staging".into()),size:256,usage:vec![BufferUsage::CopySrc] },None).unwrap();
     b::write_buffer(&staging,0,&[0x31,0x82,0xdd,255]).unwrap();
-    let commands=b::begin_commands(&se::queue(&e)).unwrap();
-    let blit=b::blit_encoder(&commands).unwrap();
-    b::buffer_to_texture(&blit,&staging,None,256,256,&film,None,None,Extent { width:1,height:1,depth:1 }).unwrap();
-    b::end_blit(&blit).unwrap();
-    let receipt=b::commit(&commands).unwrap();
-    b::complete_through(&se::queue(&e),receipt.epoch).unwrap();
+    {
+        // The committed command shell owns its queue until it is dropped.
+        let commands=b::begin_commands(&se::queue(&e)).unwrap();
+        let blit=b::blit_encoder(&commands).unwrap();
+        b::buffer_to_texture(&blit,&staging,None,256,256,&film,None,None,Extent { width:1,height:1,depth:1 }).unwrap();
+        b::end_blit(&blit).unwrap();
+        let receipt=b::commit(&commands).unwrap();
+        b::complete_through(&se::queue(&e),receipt.epoch).unwrap();
+    }
     b::destroy_buffer(&staging).unwrap();
     let texture=se::SampledTexture { key:"gpu-film".into(),levels:Rc::new(vec![se::TextureLevel { width:1,height:1,bytes:se::empty_bytes() }]),gpu:Some(film.clone()),sampler:SamplerDescriptor { label:None,min_filter:SamplerFilter::Nearest,mag_filter:SamplerFilter::Nearest,mip_filter:MipFilter::NoMip,address_u:AddressMode::ClampToEdge,address_v:AddressMode::ClampToEdge,lod_min:0.,lod_max:0.,max_anisotropy:1 } };
     let draw=renderer::prepared_draw(renderer::PipelineFamily::Scene2Textured,Some(ogpu_core::pipeline::Blend::Replace),Some(Rc::new(texture.clone())),None,None,None,GeometryDraw {
