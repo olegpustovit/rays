@@ -975,11 +975,13 @@ pub mod layer {
         if let [Node::DisplayList(d)] = scene {
             return Ok((segment_ir(&d.segment)?, d.resources.clone()));
         }
+        let ir = stage_commands(density, scene)?;
+        Ok((ir, image_resources(density, scene)?))
+    }
+
+    fn stage_commands(density: i64, scene: &[Node]) -> Result<Rc<render_ir::RenderIr>, String> {
         let cmds = commands(Some(density), scene)?;
-        match render_ir::create_owned(cmds) {
-            Err(e) => Err(render_error_message(&e)),
-            Ok(ir) => Ok((Rc::new(ir), image_resources(density, scene)?)),
-        }
+        render_ir::create_owned(cmds).map(Rc::new).map_err(|e| render_error_message(&e))
     }
 
     /// Check IR resources at the fixed 640x480 extent.
@@ -1018,8 +1020,8 @@ pub mod layer {
 
     thread_local! {
         static WRAP_ONES: std::cell::RefCell<Vec<Rc<[Node]>>> = const { std::cell::RefCell::new(Vec::new()) };
-        static ORDERED_SCRATCH: std::cell::RefCell<(Vec<Wrapper>, Vec<LayerItem>, Vec<Node>, Vec<Grouped>)> =
-            const { std::cell::RefCell::new((Vec::new(), Vec::new(), Vec::new(), Vec::new())) };
+        static ORDERED_SCRATCH: std::cell::RefCell<(Vec<Wrapper>, Vec<LayerItem>, Vec<Node>, Vec<Grouped>, Vec<Vec<Node>>)> =
+            const { std::cell::RefCell::new((Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())) };
     }
 
     fn wrap_one(n: Node) -> Rc<[Node]> {
@@ -1077,13 +1079,17 @@ pub mod layer {
     }
 
     fn recycle_grouped(grouped: &mut Vec<Grouped>) {
-        for g in grouped.drain(..) {
-            if let Grouped::Two(nodes) = g {
-                for n in nodes {
-                    recycle_wrapped_node(n);
+        ORDERED_SCRATCH.with(|scratch| {
+            let mut scratch = scratch.borrow_mut();
+            for g in grouped.drain(..) {
+                if let Grouped::Two(mut nodes) = g {
+                    for n in nodes.drain(..) {
+                        recycle_wrapped_node(n);
+                    }
+                    scratch.4.push(nodes);
                 }
             }
-        }
+        });
     }
 
     fn wrap_node(wrappers: &[Wrapper], n: Node) -> Node {
@@ -1102,6 +1108,18 @@ pub mod layer {
         n
     }
 
+    /// A plain 2D subtree can stay together in its authored clip/transform. Blend and display
+    /// lists can contain state changes, and native layers must still be extracted individually.
+    fn plain_2d(node: &Node) -> bool {
+        match node {
+            Node::Group(nodes) | Node::Translate(_, _, nodes) | Node::Rotate(_, nodes)
+            | Node::Scale(_, _, nodes) | Node::Affine(_, nodes) | Node::Clip(_, _, _, _, nodes) =>
+                !nodes.is_empty() && nodes.iter().all(plain_2d),
+            Node::Clear(_) | Node::Geometry(_) | Node::Shapes(_) | Node::Text(_) | Node::Image(_) => true,
+            _ => false,
+        }
+    }
+
     fn ordered_items(scene: &[Node]) {
         fn add(wrappers: &mut Vec<Wrapper>, acc: &mut Vec<LayerItem>, list: &[Node]) {
             for n in list {
@@ -1111,6 +1129,8 @@ pub mod layer {
                     Node::Ui(u) => acc.push(LayerItem::UiItem(u.clone())),
                     Node::DisplayList(d) if direct => acc.push(LayerItem::SegmentNode(d.clone())),
                     Node::LayerBreak => acc.push(LayerItem::Break),
+                    Node::Translate(..) | Node::Rotate(..) | Node::Scale(..) | Node::Affine(..) | Node::Clip(..)
+                        if direct && plain_2d(n) => acc.push(LayerItem::TwoNode(n.clone())),
                     Node::Group(nodes) => add(wrappers, acc, nodes),
                     Node::Translate(x, y, nodes) => {
                         wrappers.push(Wrapper::Translate(*x, *y));
@@ -1148,7 +1168,7 @@ pub mod layer {
         }
         // Fills TLS LayerItem/Grouped scratch (capacities retained across stage_native calls).
         ORDERED_SCRATCH.with(|cell| {
-            let (ref mut wrappers, ref mut acc, ref mut nodes, ref mut out) = *cell.borrow_mut();
+            let (ref mut wrappers, ref mut acc, ref mut nodes, ref mut out, ref mut spares) = *cell.borrow_mut();
             wrappers.clear();
             acc.clear();
             add(wrappers, acc, scene);
@@ -1159,7 +1179,7 @@ pub mod layer {
                     LayerItem::TwoNode(n) => nodes.push(n),
                     other => {
                         if !nodes.is_empty() {
-                            out.push(Grouped::Two(std::mem::take(nodes)));
+                            out.push(Grouped::Two(std::mem::replace(nodes, spares.pop().unwrap_or_default())));
                         }
                         match other {
                             LayerItem::SegmentNode(n) => out.push(Grouped::Segment(n)),
@@ -1171,7 +1191,7 @@ pub mod layer {
                 }
             }
             if !nodes.is_empty() {
-                out.push(Grouped::Two(std::mem::take(nodes)));
+                out.push(Grouped::Two(std::mem::replace(nodes, spares.pop().unwrap_or_default())));
             }
         })
     }
@@ -1324,7 +1344,7 @@ pub mod layer {
                     && entry.density == density && same_native_scene(&entry.scene, nodes) && entry.versions == versions {
                         return Ok((entry.ir.clone(), resources));
                     }
-        let (ir, _) = stage_materialized(density, nodes)?;
+        let ir = stage_commands(density, nodes)?;
         if let Some(context) = &lower {
             let bytes = scene2_layer_bytes(&ir) + (versions.len() * 7 * 8) as i64;
             let entry = Rc::new(LayerEntry { scene: nodes.to_vec(), density, ir: ir.clone(), versions });
@@ -1425,7 +1445,7 @@ pub mod layer {
         format!("native View3d lowering failed: {detail}")
     }
 
-    fn stage_native_uncached_with(aggregate: bool, density: Option<i64>, width: i64, height: i64, scene: &[Node]) -> Result<StagedNative, NativeError> {
+    fn stage_native_uncached_with(aggregate: bool, density: Option<i64>, width: i64, height: i64, scene: &[Node], mut layers: Vec<NativeLayer>) -> Result<StagedNative, NativeError> {
         let density = density.unwrap_or(1);
         if let Err(error) = validate_native_images(scene) {
             return Err(NativeError::Resource(error));
@@ -1443,14 +1463,14 @@ pub mod layer {
         };
         let (scene2, resources) = materialized.map_err(NativeError::Message)?;
         let mut failure: Option<NativeError> = None;
-        let mesh_images: Rc<RefCell<Vec<RImage::Image>>> = Rc::new(RefCell::new(Vec::new()));
-        let callbacks = texture_resources(mesh_images.clone());
-        let layers: Vec<NativeLayer> = if single_two {
+        let mut mesh_images = None;
+        let mut callbacks = None;
+        layers.clear();
+        if single_two {
             recycle_grouped(&mut grouped_list);
             ORDERED_SCRATCH.with(|cell| cell.borrow_mut().3 = grouped_list);
-            vec![NativeLayer::Scene2Layer(scene2.clone(), resources.clone())]
+            layers.push(NativeLayer::Scene2Layer(scene2.clone(), resources.clone()));
         } else {
-            let mut layers = Vec::new();
             for item in &grouped_list {
                 if failure.is_some() {
                     break;
@@ -1464,7 +1484,12 @@ pub mod layer {
                     Grouped::Ui(node_) => layers.push(NativeLayer::UiLayer(node_.ui.clone())),
                     Grouped::Three(node_) => {
                         let viewport = node_.viewport.unwrap_or((0, 0, width, height));
-                        match lowering::prepare(&callbacks, &node_.camera, viewport, &node_.scene) {
+                        let callbacks = callbacks.get_or_insert_with(|| {
+                            let images = Rc::new(RefCell::new(Vec::new()));
+                            mesh_images = Some(images.clone());
+                            texture_resources(images)
+                        });
+                        match lowering::prepare(callbacks, &node_.camera, viewport, &node_.scene) {
                             Ok(prepared) => layers.push(NativeLayer::Scene3Layer(prepared)),
                             Err(error) => {
                                 failure = Some(match error {
@@ -1478,8 +1503,7 @@ pub mod layer {
             }
             recycle_grouped(&mut grouped_list);
             ORDERED_SCRATCH.with(|cell| cell.borrow_mut().3 = grouped_list);
-            layers
-        };
+        }
         let mut clear = (0., 0., 0., 0.);
         let mut seen_draw = false;
         for layer in &layers {
@@ -1519,7 +1543,7 @@ pub mod layer {
             )),
             _ => None,
         };
-        let mesh_images = mesh_images.borrow().clone();
+        let mesh_images = mesh_images.map_or_else(Vec::new, |images| images.take());
         Ok(StagedNative { clear, scene2, resources, scene3, layers, mesh_images, retained })
     }
 
@@ -1530,10 +1554,9 @@ pub mod layer {
         cached_height: i64,
         cached_resource_stamp: i64,
         cached_aggregate: bool,
-        cached_stage: Rc<StagedNative>,
+        cached_stage: Option<Rc<StagedNative>>,
         /// it draws a device's vertices
         cached_device: bool,
-        cached_ui: bool,
     }
 
     fn borrows_device(stage: &StagedNative) -> bool {
@@ -1591,68 +1614,93 @@ pub mod layer {
         })
     }
 
+    fn contains_ui(nodes: &[Node]) -> bool {
+        nodes.iter().any(|node| match node {
+            Node::Ui(_) => true,
+            Node::Group(n) | Node::Translate(_, _, n) | Node::Rotate(_, n) | Node::Scale(_, _, n)
+            | Node::Affine(_, n) | Node::Clip(_, _, _, _, n) | Node::Blend(_, n) => contains_ui(n),
+            _ => false,
+        })
+    }
+
     fn stage_native_internal(aggregate: bool, density: Option<i64>, width: i64, height: i64, scene: &[Node]) -> Result<Rc<StagedNative>, NativeError> {
         let density = density.unwrap_or(1);
         let cacheable = match scene {
             [Node::Clear(_), Node::View3d(view)] => scene3::walk::cacheable(&view.scene),
             _ => native_scene_cacheable(scene),
         };
-        let uncached = || stage_native_uncached_with(aggregate, Some(density), width, height, scene);
+        let uncached = |layers| stage_native_uncached_with(aggregate, Some(density), width, height, scene, layers);
         let context = CURRENT_CONTEXT.with(|c| c.borrow().clone());
         let Some(context) = context else {
-            return uncached().map(Rc::new);
+            return uncached(Vec::new()).map(Rc::new);
         };
         if !cacheable {
-            return uncached().map(Rc::new);
+            return uncached(Vec::new()).map(Rc::new);
         }
-        let hash = mix(mix(mix(mix(hash_native_scene(scene), aggregate as i64), density), width), height);
-        let key = TableKey::Int(hash);
-        let cached = side_lru::find(&mut context.0.native_stages.borrow_mut(), &key).and_then(|i| i.downcast::<NativeStageCacheEntry>().ok());
+        // UI packets have one cache slot, while its exact scene, extent and resource stamps still
+        // decide whether a retained submission can replay.
+        let ui = contains_ui(scene);
+        let key = if ui {
+            TableKey::Wide(0, 0)
+        } else {
+            TableKey::Int(mix(mix(mix(mix(hash_native_scene(scene), aggregate as i64), density), width), height))
+        };
+        let mut cached = side_lru::find(&mut context.0.native_stages.borrow_mut(), &key).and_then(|i| i.downcast::<NativeStageCacheEntry>().ok());
         if let Some(entry) = &cached
             && entry.cached_aggregate == aggregate
             && entry.cached_density == density
             && entry.cached_width == width
             && entry.cached_height == height
             && same_native_scene(&entry.cached_scene, scene)
-            && entry.cached_resource_stamp == native_resource_stamp(&entry.cached_stage)
+            && entry.cached_resource_stamp == native_resource_stamp(entry.cached_stage.as_deref().expect("cached stage"))
         {
-            return Ok(entry.cached_stage.clone());
+            return Ok(entry.cached_stage.as_ref().expect("cached stage").clone());
         }
         if cached.is_some() {
             side_lru::remove(&mut context.0.native_stages.borrow_mut(), &key);
         }
-        let mut stage = uncached()?;
-        let ui = stage.layers.iter().any(|l| matches!(l, NativeLayer::UiLayer(..)));
-        if ui {
-            // UI packets change with status text every frame. Keep the latest frame and replace
-            // its submission, rather than retaining 64 copies.
-            let mut old = Vec::new();
-            side_lru::iter(&mut context.0.native_stages.borrow_mut(), &mut |k, v| {
-                if v.downcast_ref::<NativeStageCacheEntry>().is_some_and(|e| e.cached_ui) {
-                    old.push(k.clone());
-                }
-            });
-            for k in old {
-                side_lru::remove(&mut context.0.native_stages.borrow_mut(), &k);
+        let mut stage_spare = cached.as_mut().filter(|_| ui).and_then(Rc::get_mut).and_then(|entry| entry.cached_stage.take());
+        let reusable = stage_spare.as_mut().and_then(Rc::get_mut);
+        let (layers, mut retained) = reusable.map_or_else(|| (Vec::new(), None), |old| {
+            (std::mem::take(&mut old.layers), old.retained.take())
+        });
+        let mut stage = uncached(layers)?;
+        if stage.retained.is_none() {
+            let identity = context.0.next_identity.get() + 1;
+            context.0.next_identity.set(identity);
+            if ui {
+                let (key, _) = retained.take().unwrap_or_else(|| ("scene-ui".to_string(), 0));
+                stage.retained = Some((key, identity));
+            } else {
+                stage.retained = Some((format!("scene-stage:{identity}"), 1));
             }
         }
-        if stage.retained.is_none() {
-            context.0.next_identity.set(context.0.next_identity.get() + 1);
-            let identity = context.0.next_identity.get();
-            stage.retained = Some(if ui { ("scene-ui".to_string(), identity) } else { (format!("scene-stage:{identity}"), 1) });
-        }
-        let stage = Rc::new(stage);
-        let entry = Rc::new(NativeStageCacheEntry {
-            cached_scene: scene.to_vec(),
+        let stage = if let Some(old) = stage_spare.as_mut().and_then(Rc::get_mut) {
+            *old = stage;
+            stage_spare.unwrap()
+        } else {
+            Rc::new(stage)
+        };
+        let mut cached_scene = cached.as_mut().filter(|_| ui).and_then(Rc::get_mut)
+            .map_or_else(Vec::new, |old| std::mem::take(&mut old.cached_scene));
+        cached_scene.clear();
+        cached_scene.extend_from_slice(scene);
+        let entry = NativeStageCacheEntry {
+            cached_scene,
             cached_density: density,
             cached_width: width,
             cached_height: height,
             cached_resource_stamp: native_resource_stamp(&stage),
             cached_aggregate: aggregate,
-            cached_stage: stage.clone(),
+            cached_stage: Some(stage.clone()),
             cached_device: borrows_device(&stage),
-            cached_ui: ui,
-        });
+        };
+        let entry = if let Some(spare) = cached.as_mut().filter(|_| ui).and_then(Rc::get_mut) {
+            *spare = entry;
+            cached.unwrap()
+        } else {
+            Rc::new(entry)
+        };
         if entry.cached_device {
             let mut devices = Vec::new();
             side_lru::iter(&mut context.0.native_stages.borrow_mut(), &mut |k, v| {

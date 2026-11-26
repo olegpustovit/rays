@@ -55,7 +55,12 @@ struct RetainedDraws {
 const RETAINED_DRAW_CAPACITY: i64 = 16;
 
 #[derive(Clone)]
-pub struct CacheContext(Rc<RefCell<IdList>>);
+pub struct CacheContext(Rc<CacheData>);
+
+struct CacheData {
+    retained: RefCell<IdList>,
+    batches: RefCell<Vec<rr::Batch>>,
+}
 
 thread_local! {
     static CURRENT: RefCell<Option<CacheContext>> = const { RefCell::new(None) };
@@ -63,15 +68,18 @@ thread_local! {
 
 pub(crate) fn create_cache_context() -> CacheContext {
     // ponytail: 16 immutable layers keyed by identity; add stable IDs if this cache grows.
-    CacheContext(Rc::new(RefCell::new(idlist::create(
-        lru::cache("rays.retained_draws"),
-        RETAINED_DRAW_CAPACITY,
-        Box::new(|a, b| match (a.downcast_ref::<se::PreparedScene3>(), b.downcast_ref::<se::PreparedScene3>()) {
-            (Some(x), Some(y)) => std::ptr::eq(x, y),
-            _ => false,
-        }),
-        None,
-    ))))
+    CacheContext(Rc::new(CacheData {
+        retained: RefCell::new(idlist::create(
+            lru::cache("rays.retained_draws"),
+            RETAINED_DRAW_CAPACITY,
+            Box::new(|a, b| match (a.downcast_ref::<se::PreparedScene3>(), b.downcast_ref::<se::PreparedScene3>()) {
+                (Some(x), Some(y)) => std::ptr::eq(x, y),
+                _ => false,
+            }),
+            None,
+        )),
+        batches: RefCell::new(Vec::new()),
+    }))
 }
 
 struct Restore(Option<CacheContext>);
@@ -97,14 +105,14 @@ fn current() -> Option<CacheContext> {
 fn sweep_retained(owner: &se::GpuVerticesOwner) {
     if let Some(context) = current() {
         let mut stale: Vec<Item> = Vec::new();
-        idlist::iter(&mut context.0.borrow_mut(), &mut |layer, _| {
+        idlist::iter(&mut context.0.retained.borrow_mut(), &mut |layer, _| {
             if let Some(prepared) = layer.downcast_ref::<se::PreparedScene3>()
                 && se::borrows_unregistered(owner, prepared) {
                     stale.push(layer.clone());
                 }
         });
         for layer in stale {
-            idlist::remove(&mut context.0.borrow_mut(), &layer);
+            idlist::remove(&mut context.0.retained.borrow_mut(), &layer);
         }
     }
 }
@@ -118,13 +126,13 @@ pub(crate) fn draws_of_prepared(staged: &layer::StagedNative, prepared: &Rc<se::
         return direct();
     };
     let key: Item = prepared.clone();
-    let found = idlist::find(&mut context.0.borrow_mut(), &key).and_then(|v| v.downcast::<RetainedDraws>().ok());
+    let found = idlist::find(&mut context.0.retained.borrow_mut(), &key).and_then(|v| v.downcast::<RetainedDraws>().ok());
     if let Some(cached) = found {
         return cached.draws.clone();
     }
     let draws = direct();
     // no bytes: draws over a layer the scene's own cache charges
-    idlist::add(&mut context.0.borrow_mut(), 0, key, Rc::new(RetainedDraws { _layer: prepared.clone(), draws: draws.clone() }));
+    idlist::add(&mut context.0.retained.borrow_mut(), 0, key, Rc::new(RetainedDraws { _layer: prepared.clone(), draws: draws.clone() }));
     draws
 }
 
@@ -174,7 +182,7 @@ impl Drop for Cancel {
 
 enum Outcome {
     Replayed,
-    Prepared(rr::Submission, Option<(String, i64)>, (f64, f64, f64, f64), Vec<rr::Batch>),
+    Prepared(rr::Submission, Rc<layer::StagedNative>),
 }
 
 fn lower_all(
@@ -182,8 +190,9 @@ fn lower_all(
     density: i64,
     staged: &layer::StagedNative,
     submission: &rr::Submission,
-) -> Result<Vec<rr::Batch>, Error> {
-    let mut batches = Vec::with_capacity(staged.layers.len());
+    batches: &mut Vec<rr::Batch>,
+) -> Result<(), Error> {
+    batches.reserve(staged.layers.len());
     for layer in &staged.layers {
         let batch = match layer {
             layer::NativeLayer::Scene2Layer(ir, resources) => {
@@ -212,10 +221,21 @@ fn lower_all(
         };
         batches.push(batch.map_err(Error::Lower)?);
     }
-    Ok(batches)
+    Ok(())
 }
 
 pub(crate) fn render(execution: &rr::Renderer, density: i64, width: i64, height: i64, scene: &[scene::Node]) -> Result<(), Error> {
+    let context = current();
+    let mut batches = context.as_ref().map_or_else(Vec::new, |context| context.0.batches.take());
+    let result = render_into(execution, density, width, height, scene, &mut batches);
+    if let Some(context) = context {
+        batches.clear();
+        *context.0.batches.borrow_mut() = batches;
+    }
+    result
+}
+
+fn render_into(execution: &rr::Renderer, density: i64, width: i64, height: i64, scene: &[scene::Node], batches: &mut Vec<rr::Batch>) -> Result<(), Error> {
     let mut cancel = Cancel(None);
     let prepared: Result<Outcome, Error> = {
         let _release = Release(scene);
@@ -237,8 +257,8 @@ pub(crate) fn render(execution: &rr::Renderer, density: i64, width: i64, height:
                         Err(e) => Err(Error::Begin(e)),
                         Ok(submission) => {
                             cancel.0 = Some(submission.clone());
-                            lower_all(execution, density, &staged, &submission)
-                                .map(|batches| Outcome::Prepared(submission, staged.retained.clone(), staged.clear, batches))
+                            lower_all(execution, density, &staged, &submission, batches)
+                                .map(|()| Outcome::Prepared(submission, staged))
                         }
                     },
                 }
@@ -252,10 +272,10 @@ pub(crate) fn render(execution: &rr::Renderer, density: i64, width: i64, height:
     }
     match prepared? {
         Outcome::Replayed => Ok(()),
-        Outcome::Prepared(submission, retained, clear, batches) => {
-            let stepped = match &retained {
-                None => native::step(Some(clear), None, None, &submission, &batches),
-                Some((identity, version)) => native::step(Some(clear), Some(identity), Some(*version), &submission, &batches),
+        Outcome::Prepared(submission, staged) => {
+            let stepped = match &staged.retained {
+                None => native::step(Some(staged.clear), None, None, &submission, batches),
+                Some((identity, version)) => native::step(Some(staged.clear), Some(identity), Some(*version), &submission, batches),
             };
             stepped.map_err(Error::Step)
         }

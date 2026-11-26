@@ -193,6 +193,16 @@ fn scene_staging_order_and_layer_breaks() {
             _ => panic!("Scene2 layer break did not isolate dynamic commands"),
         }
         check(render_ir::commands_readonly(&staged_split.scene2).len() == 2, "Scene2 layer break leaked into compatibility IR");
+        let framed = [
+            scene::clip((0, 0), 10, 10, vec![scene::translate(1, 2, scene2_only[1..].to_vec())]),
+            layer::layer_break(),
+            split[2].clone(),
+        ];
+        let framed = layer::stage_native_render(16, 12, &framed).expect("stage clipped layer");
+        let layer::NativeLayer::Scene2Layer(ir, _) = &framed.layers[0] else { panic!("clipped Scene2 layer") };
+        use render_ir::Command::*;
+        assert!(matches!(render_ir::commands_readonly(ir),
+            [PushClip(_), PushTransform(_), Geometry(_), Geometry(_), PopTransform, PopClip]));
         let styled = vec![scene::polygon(&[(0, 0), (8, 0), (8, 8)], Some(color::red()), Some(color::white())).expect("polygon")];
         let (styled_ir, _) = layer::stage(16, 16, &styled).expect("stage");
         let c = render_ir::commands_readonly(&styled_ir);

@@ -511,10 +511,18 @@ pub fn borrows_unregistered(owner: &GpuVerticesOwner, prepared: &PreparedScene3)
     })
 }
 
+struct TrustedSource {
+    vertices: Bytes,
+    shared_vertices: Option<Arc<Vec<u8>>>,
+    indices: Bytes,
+    vertex_count: i64,
+    index_count: i64,
+}
+
 struct Cached {
     key: String,
     payload_hash: Option<u128>,
-    trusted_source: Option<Mesh>,
+    trusted_source: Option<TrustedSource>,
     buffer: Buffer,
     index_offset: i64,
     uniform_offset: Option<i64>,
@@ -1306,14 +1314,20 @@ fn digest(hash: u128, data: &[u8]) -> u128 {
     (u128::from(a) << 64) | u128::from(b)
 }
 
-fn source_for_trust(mesh: &Mesh, bytes: i64) -> Option<Mesh> {
+fn source_for_trust(mesh: &Mesh, bytes: i64) -> Option<TrustedSource> {
     // Keep extra CPU retention within the already bounded GPU payload budget, even when an indexed
     // mesh contains a large unused vertex plane.
     let (v, i) = (mesh.retained_vertex_bytes(), mesh.indices.capacity() as i64);
-    if i <= bytes && v <= bytes - i { Some(mesh.clone()) } else { None }
+    (i <= bytes && v <= bytes - i).then(|| TrustedSource {
+        vertices: mesh.vertices.clone(),
+        shared_vertices: mesh.shared_vertices.clone(),
+        indices: mesh.indices.clone(),
+        vertex_count: mesh.vertex_count,
+        index_count: mesh.index_count,
+    })
 }
 
-fn same_bytes(mesh: &Mesh, source: &Option<Mesh>) -> bool {
+fn same_bytes(mesh: &Mesh, source: &Option<TrustedSource>) -> bool {
     match source {
         Some(source) => {
             (match (&source.shared_vertices, &mesh.shared_vertices) {
@@ -1494,18 +1508,21 @@ fn prepare_upload(
             value.mesh_upload_scratch.extend_from_slice(uniform_bytes);
             let (old_key, size, buffer) = {
                 let b = item.borrow();
-                (b.key.clone(), b.bytes, b.buffer.clone())
+                ((b.key != key).then(|| skey(&b.key)), b.bytes, b.buffer.clone())
             };
             let packed = std::mem::take(&mut value.mesh_upload_scratch);
-            write_gpu_bytes(value, &buffer, 0, &packed)?;
+            let written = write_gpu_bytes(value, &buffer, 0, &packed);
             value.mesh_upload_scratch = packed;
-            let stolen = old_key != key;
-            if stolen {
-                side_lru::take(&mut value.cache, &skey(&old_key));
+            written?;
+            if let Some(old_key) = &old_key {
+                side_lru::take(&mut value.cache, old_key);
             }
             {
                 let mut b = item.borrow_mut();
-                b.key = key.to_owned();
+                if old_key.is_some() {
+                    b.key.clear();
+                    b.key.push_str(key);
+                }
                 b.payload_hash = payload_hash;
                 b.trusted_source = source_for_trust(mesh, size);
                 b.index_offset = vertices.len() as i64;
@@ -1516,7 +1533,7 @@ fn prepare_upload(
                 b.index_count = index_count;
                 b.primitive = mesh.primitive;
             }
-            if stolen {
+            if old_key.is_some() {
                 let item_any: Item = item.clone();
                 side_lru::add(&mut value.cache, size, skey(key), item_any);
             }
@@ -2433,15 +2450,29 @@ fn intersect_extent(bound_w: i64, bound_h: i64, (x, y, w, h): (i64, i64, i64, i6
     if x1 <= x0 || y1 <= y0 { None } else { Some((x0, y0, x1 - x0, y1 - y0)) }
 }
 
+fn sampler_signature(sampler: &SamplerDescriptor) -> SamplerDescriptor {
+    SamplerDescriptor {
+        label: None,
+        min_filter: sampler.min_filter,
+        mag_filter: sampler.mag_filter,
+        mip_filter: sampler.mip_filter,
+        address_u: sampler.address_u,
+        address_v: sampler.address_v,
+        lod_min: sampler.lod_min,
+        lod_max: sampler.lod_max,
+        max_anisotropy: sampler.max_anisotropy,
+    }
+}
+
 fn texture_signature(source: &SampledTexture, cached: &CachedTextureRef) -> (i64, SamplerDescriptor) {
-    (backend::texture_id(&cached.borrow().texture), source.sampler.clone())
+    (backend::texture_id(&cached.borrow().texture), sampler_signature(&source.sampler))
 }
 
 fn auxiliary_signature(entry: &(Rc<AuxiliaryResource>, CachedAuxiliaryRef, CachedTextureRef)) -> (i64, i64, SamplerDescriptor) {
     (
         backend::buffer_id(&entry.1.borrow().buffer),
         backend::texture_id(&entry.2.borrow().texture),
-        entry.0.texture.sampler.clone(),
+        sampler_signature(&entry.0.texture.sampler),
     )
 }
 

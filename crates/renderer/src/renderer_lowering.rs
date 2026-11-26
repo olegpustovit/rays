@@ -203,6 +203,9 @@ pub struct Lowering {
     quad_payload_cache: side_lru::Table,
     out_slots: Vec<Draw>,
     out_list: Vec<Draw>,
+    transforms: Vec<Transform>,
+    clips: Vec<(i64, i64, i64, i64)>,
+    image_runs: Vec<Draw>,
     ui_slots: side_lru::Table,
     ui_indices_scratch: Bytes,
 }
@@ -213,6 +216,9 @@ pub fn create() -> Lowering {
         quad_payload_cache: side_lru::create(lru::cache("renderer.quad_payload"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), 256),
         out_slots: Vec::new(),
         out_list: Vec::new(),
+        transforms: Vec::new(),
+        clips: Vec::new(),
+        image_runs: Vec::new(),
         ui_slots: side_lru::create(lru::cache("renderer.ui_slots"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), UI_SLOT_CAPACITY),
         ui_indices_scratch: empty_bytes(),
     }
@@ -259,6 +265,7 @@ pub fn clear(value: &mut Lowering) {
     side_lru::clear(&mut value.quad_payload_cache);
     value.out_slots = Vec::new();
     value.out_list = Vec::new();
+    value.image_runs.clear();
     side_lru::clear(&mut value.ui_slots);
 }
 
@@ -321,49 +328,60 @@ fn image_run_capacity(quads: usize) -> usize {
 fn quads_run(
     state_: &mut Lowering,
     texture: &Rc<SampledTexture>,
-    quads: &[(Rect, (f64, f64, f64, f64))],
+    mut quads: impl ExactSizeIterator<Item = (Rect, (f64, f64, f64, f64))>,
     transform: &Transform,
     clip: (i64, i64, i64, i64),
     framebuffer: (i64, i64, i64, i64),
 ) -> Result<Draw, Error> {
     let n = quads.len();
-    if n == 0 {
-        return Ok(quad(state_, texture, &Rect { x: 0., y: 0., width: 0., height: 0. }, (0., 0., 1., 1.), transform, clip, framebuffer));
-    }
-    if n == 1 {
-        return Ok(quad(state_, texture, &quads[0].0, quads[0].1, transform, clip, framebuffer));
+    if n <= 1 {
+        let (dest, uv) = quads.next().unwrap_or((Rect { x: 0., y: 0., width: 0., height: 0. }, (0., 0., 1., 1.)));
+        return Ok(quad(state_, texture, &dest, uv, transform, clip, framebuffer));
     }
     let capacity = image_run_capacity(n);
-    // Texture key + capacity: destination/UV bytes patch in place under the same mesh identity.
-    let key = format!("image-run:{}:{capacity}", texture.key);
-    let mut vertices = vec![0u8; capacity * 80];
+    let fit = |draw: &Draw| {
+        Rc::strong_count(draw) == 1 && Rc::weak_count(draw) == 0
+            && Rc::strong_count(&draw.draw.mesh.vertices) == 1 && Rc::weak_count(&draw.draw.mesh.vertices) == 0
+            && draw.draw.mesh.vertices.len() == capacity * 80
+            && draw.texture.as_ref().is_some_and(|old| old.key == texture.key)
+    };
+    let mut draw = match state_.image_runs.iter().position(fit) {
+        Some(i) => state_.image_runs.swap_remove(i),
+        None => Rc::new(SampledDraw {
+            ui: None,
+            family: PipelineFamily::Scene2Textured,
+            blend: Blend::Alpha,
+            texture: None,
+            auxiliary: None,
+            vertex_attributes: None,
+            samples: 1,
+            draw: scene_execution::GeometryDraw {
+                mesh: Mesh {
+                    key: MeshKey::Host(format!("image-run:{}:{capacity}", texture.key)),
+                    vertices: new_bytes(vec![0u8; capacity * 80]),
+                    shared_vertices: None,
+                    vertex_count: 4 * capacity as i64,
+                    indices: ui_index_bytes(state_, capacity as i64)?,
+                    index_count: 6 * capacity as i64,
+                    primitive: Primitive::TriangleList,
+                },
+                state: default_state(framebuffer, clip),
+            },
+        }),
+    };
+    let slot = Rc::get_mut(&mut draw).unwrap();
+    slot.texture = Some(texture.clone());
+    slot.draw.state = default_state(framebuffer, clip);
+    let vertices = Rc::get_mut(&mut slot.draw.mesh.vertices).unwrap();
     let empty = Rect { x: 0., y: 0., width: 0., height: 0. };
-    for (i, slot) in vertices.chunks_exact_mut(80).enumerate() {
-        let (dest, uv) = if i < n { (quads[i].0, quads[i].1) } else { (empty, (0., 0., 0., 0.)) };
+    for slot in vertices.chunks_exact_mut(80) {
+        let (dest, uv) = quads.next().unwrap_or((empty, (0., 0., 0., 0.)));
         write_quad_constants(slot, 0, transform, &dest, uv);
     }
-    let indices = ui_index_bytes(state_, capacity as i64)?;
-    Ok(Rc::new(SampledDraw {
-        ui: None,
-        family: PipelineFamily::Scene2Textured,
-        blend: Blend::Alpha,
-        texture: Some(texture.clone()),
-        auxiliary: None,
-        vertex_attributes: None,
-        samples: 1,
-        draw: scene_execution::GeometryDraw {
-            mesh: Mesh {
-                key: MeshKey::Host(key),
-                vertices: new_bytes(vertices),
-                shared_vertices: None,
-                vertex_count: 4 * capacity as i64,
-                indices,
-                index_count: 6 * capacity as i64,
-                primitive: Primitive::TriangleList,
-            },
-            state: default_state(framebuffer, clip),
-        },
-    }))
+    // ponytail: retain at most 16 quad runs; size per texture if many different runs stay live.
+    if state_.image_runs.len() == 16 { state_.image_runs.remove(0); }
+    state_.image_runs.push(draw.clone());
+    Ok(draw)
 }
 
 /// Cached quads retain texture owners, so pointer identity cannot be reused while the draw is cached.
@@ -487,8 +505,12 @@ pub fn lower_scene2(
     };
     let render_transform = |transform: &Transform| compose_raster(&native_projection, transform);
     let framebuffer = (0, 0, facts.logical_width, facts.logical_height);
-    let mut transforms: Vec<Transform> = vec![identity];
-    let mut clips: Vec<(i64, i64, i64, i64)> = vec![framebuffer];
+    let mut transforms = std::mem::take(&mut state_.transforms);
+    let mut clips = std::mem::take(&mut state_.clips);
+    transforms.clear();
+    transforms.push(identity);
+    clips.clear();
+    clips.push(framebuffer);
     let mut blend = Blend::Alpha;
     let mut number: usize = 0;
     let mut failure: Option<String> = None;
@@ -551,12 +573,19 @@ pub fn lower_scene2(
                         if s.indices.len() as i64 != count * 24 {
                             s.indices = match ui_index_bytes(state_, count) {
                                 Ok(indices) => indices,
-                                Err(error) => { drop(s); rollback(); return Err(error); }
+                                Err(error) => {
+                                    drop(s);
+                                    state_.transforms = transforms;
+                                    state_.clips = clips;
+                                    rollback();
+                                    return Err(error);
+                                }
                             };
                         }
-                        let affine = ui_affine(&render_transform(transforms.last().expect("transform")));
-                        if s.affine != affine {
-                            s.affine = affine;
+                        let mut affine = [0; 24];
+                        write_affine(&mut affine, &render_transform(transforms.last().expect("transform")));
+                        if s.affine.as_slice() != affine {
+                            s.affine = new_bytes(affine.to_vec());
                         }
                     }
                     let s = slot.borrow();
@@ -638,16 +667,12 @@ pub fn lower_scene2(
                                     let (w, h) = (width as f64, height as f64);
                                     let transform = render_transform(transforms.last().expect("transform"));
                                     let clip = *clips.last().expect("clip");
-                                    let mut quads = Vec::with_capacity(stop - first);
-                                    for cmd in &commands[first..stop] {
+                                    let quads = commands[first..stop].iter().map(|cmd| {
                                         let Command::Image(img) = cmd else { unreachable!() };
                                         let s = img.source;
-                                        quads.push((
-                                            img.destination,
-                                            (s.x / w, s.y / h, (s.x + s.width) / w, (s.y + s.height) / h),
-                                        ));
-                                    }
-                                    match quads_run(state_, &texture, &quads, &transform, clip, framebuffer) {
+                                        (img.destination, (s.x / w, s.y / h, (s.x + s.width) / w, (s.y + s.height) / h))
+                                    });
+                                    match quads_run(state_, &texture, quads, &transform, clip, framebuffer) {
                                         Ok(d) => emit(state_, &mut number, blend, d),
                                         Err(e) => failure = Some(error::to_string(&e)),
                                     }
@@ -666,7 +691,7 @@ pub fn lower_scene2(
                             Ok((width, height, texture)) => {
                                 let transform = render_transform(transforms.last().expect("transform"));
                                 let clip = *clips.last().expect("clip");
-                                let quads: Vec<(Rect, (f64, f64, f64, f64))> = glyphs
+                                let quads = glyphs
                                     .glyphs
                                     .iter()
                                     .map(|glyph| {
@@ -674,9 +699,8 @@ pub fn lower_scene2(
                                             Rect { x: glyph.x, y: glyph.y, width: width as f64, height: height as f64 },
                                             (0.0, 0.0, 1.0, 1.0),
                                         )
-                                    })
-                                    .collect();
-                                match quads_run(state_, &texture, &quads, &transform, clip, framebuffer) {
+                                    });
+                                match quads_run(state_, &texture, quads, &transform, clip, framebuffer) {
                                     Ok(d) => emit(state_, &mut number, blend, d),
                                     Err(e) => failure = Some(error::to_string(&e)),
                                 }
@@ -687,6 +711,8 @@ pub fn lower_scene2(
             }
         }
     }
+    state_.transforms = transforms;
+    state_.clips = clips;
     if let Some(message) = failure {
         rollback();
         return Err(error::make("Renderer.lower_scene2", ErrorKind::InvalidState, &message));
@@ -698,6 +724,7 @@ pub fn lower_scene2(
     let list: Vec<Draw> = state_.out_slots[..number].to_vec();
     state_.out_list = list.clone();
     Ok(list)
+
 }
 
 #[cfg(test)]
@@ -725,14 +752,19 @@ mod tests {
                 )
             })
             .collect();
-        let draw = quads_run(&mut state, &texture, &quads, &transform, viewport, viewport).unwrap();
+        let draw = quads_run(&mut state, &texture, quads.iter().copied(), &transform, viewport, viewport).unwrap();
         assert_eq!(draw.family, PipelineFamily::Scene2Textured);
         assert_eq!(draw.draw.mesh.vertex_count, 4 * 8); // capacity 8 for 5 quads
         assert_eq!(draw.draw.mesh.index_count, 6 * 8);
         assert!(matches!(&draw.draw.mesh.key, MeshKey::Host(k) if k == "image-run:atlas:8"));
         // Same capacity: a longer run still under 8 keeps the mesh identity for in-place patch.
-        let again = quads_run(&mut state, &texture, &quads[..3], &transform, viewport, viewport).unwrap();
+        let again = quads_run(&mut state, &texture, quads[..3].iter().copied(), &transform, viewport, viewport).unwrap();
         assert!(matches!(&again.draw.mesh.key, MeshKey::Host(k) if k == "image-run:atlas:4"));
+        let old = Rc::as_ptr(&draw);
+        drop(draw);
+        let next = quads_run(&mut state, &texture, quads.iter().copied(), &transform, viewport, viewport).unwrap();
+        assert_eq!(Rc::as_ptr(&next), old, "a released run supplies storage for the next frame");
+        assert_eq!(again.draw.mesh.vertex_count, 16, "the retained draw still has its own mesh");
     }
 
     #[test]

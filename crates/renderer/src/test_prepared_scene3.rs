@@ -82,12 +82,12 @@ fn borrowed_vertices_reuse_indices_with_fresh_empty_host_planes() {
     source.vertices = empty_bytes();
     let mut next = source.clone();
     next.vertices = empty_bytes();
-    assert!(same_bytes(&next, &Some(source.clone())), "empty host planes must not force an index scan");
+    assert!(same_bytes(&next, &source_for_trust(&source, i64::MAX)), "empty host planes must not force an index scan");
     next.vertices = new_bytes(vec![1]);
-    assert!(!same_bytes(&next, &Some(source.clone())));
+    assert!(!same_bytes(&next, &source_for_trust(&source, i64::MAX)));
     next.vertices = empty_bytes();
     next.indices = new_bytes(source.indices.to_vec());
-    assert!(!same_bytes(&next, &Some(source)), "new index storage still needs content validation");
+    assert!(!same_bytes(&next, &source_for_trust(&source, i64::MAX)), "new index storage still needs content validation");
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn published_shapes_retain_immutable_vertices_without_copying() {
     assert!(Arc::ptr_eq(mesh.shared_vertices.as_ref().unwrap(),&storage));
     assert_eq!(mesh.vertex_bytes_len(),2*64);
     let cloned=mesh.clone();
-    assert!(same_bytes(&cloned,&Some(mesh.clone())));
+    assert!(same_bytes(&cloned,&source_for_trust(&mesh, i64::MAX)));
     builder.reset();
     builder.circles(1,&[3.,3.],2,&[0.2],0,0,0,&[1.],0).unwrap();
     let next=builder.publish().unwrap();

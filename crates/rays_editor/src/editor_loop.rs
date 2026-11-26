@@ -876,14 +876,15 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     // Pointer-only hover can borrow the composition until its canvas or view changes.
     let pointer_only = raw_frame.input.events.iter().all(|e| matches!(e, Event::PointerMoved(_)));
     if pointer_only
-        && !canvases_changed
         && !update_.scene_changed
         && !update_.prepared_changed
         && !update_.effects.view
         && !update_.effects.export
     {
-        if value.last_picture.is_none() {
-            value.last_picture = Some(Rc::new(compose_scene(value, raw_frame)));
+        if canvases_changed || value.last_picture.is_none() {
+            let mut picture = value.last_picture.take().unwrap_or_default();
+            compose_scene_into(value, raw_frame, Rc::make_mut(&mut picture));
+            value.last_picture = Some(picture);
         }
     } else {
         value.last_picture = None;
@@ -892,6 +893,12 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
 }
 
 pub fn compose_scene(value: &LoopModel, frame_: &frame::Frame) -> Nodes {
+    let mut scene = Vec::new();
+    compose_scene_into(value, frame_, &mut scene);
+    scene
+}
+
+fn compose_scene_into(value: &LoopModel, frame_: &frame::Frame, out: &mut Nodes) {
     let pv = |key: &str, vp: Bounds, view_: &rays::camera::Camera, r: &rays::scene3::Scene3| paint_view(value, key, vp, view_, r);
     let guides = |bounds: Bounds| -> Option<rays::scene::Node> {
         if value.core.map_view {
@@ -909,6 +916,7 @@ pub fn compose_scene(value: &LoopModel, frame_: &frame::Frame) -> Nodes {
         }
     };
     compose_view(
+        out,
         value.map.as_ref().map(|(_, i)| i),
         &value.canvases,
         V::ui_visible(&value.control),

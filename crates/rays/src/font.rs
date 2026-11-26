@@ -107,6 +107,7 @@ struct TextEngine {
     pages: Vec<AtlasPage>,
     advance: HashMap<(u16, i64, i64, char), f32>,
     rects: Vec<GlyphQuad>,
+    quad_pool: Vec<Rc<[GlyphQuad]>>,
 }
 
 thread_local! {
@@ -130,7 +131,7 @@ fn text_engine() -> Option<TextEngine> {
     let faces = (first_named..fonts.len() as u16).collect();
     let fonts: Vec<_> = fonts.into_iter().map(pxui::FontData).collect();
     let ui = pxui::Ui::new(&pxui::UiDesc::DEFAULT.fonts(&fonts)).ok()?;
-    Some(TextEngine { ui, faces, scratch: Vec::new(), glyphs: HashMap::new(), pages: Vec::new(), advance: HashMap::new(), rects: Vec::new() })
+    Some(TextEngine { ui, faces, scratch: Vec::new(), glyphs: HashMap::new(), pages: Vec::new(), advance: HashMap::new(), rects: Vec::new(), quad_pool: Vec::new() })
 }
 
 fn color_u32(c: color::T) -> u32 {
@@ -232,11 +233,24 @@ fn paint_atlas(engine: &mut TextEngine, density: i64, align: Alignment, size: i6
         return Ok(TextDraw::Image(image::create(1, 1, None)?));
     }
     let page = &engine.pages[page_i];
+    let quads = if let Some(slot) = engine.quad_pool.iter_mut().find(|slot| {
+        Rc::strong_count(slot) == 1 && Rc::weak_count(slot) == 0 && slot.len() == engine.rects.len()
+    }) {
+        Rc::get_mut(slot).unwrap().copy_from_slice(&engine.rects);
+        slot.clone()
+    } else {
+        let quads = Rc::from(engine.rects.as_slice());
+        // ponytail: keep eight recent quad allocations; increase the pool if many live runs are
+        // shaped together. A published draw keeps its old quads even when a pool entry is evicted.
+        if engine.quad_pool.len() == 8 { engine.quad_pool.remove(0); }
+        engine.quad_pool.push(Rc::clone(&quads));
+        quads
+    };
     Ok(TextDraw::Atlas {
         image: page.image.clone(),
         width: lw,
         height: lh,
-        quads: std::rc::Rc::from(engine.rects.as_slice()),
+        quads,
     })
 }
 
@@ -283,8 +297,13 @@ pub mod raster {
     #[derive(Clone)]
     pub struct CacheContext(Rc<ContextData>);
 
+    enum AutomaticDraw {
+        Atlas(TextDraw),
+        Shared(Rc<AutomaticEntry>),
+    }
+
     pub struct Automatic {
-        entry: Rc<AutomaticEntry>,
+        draw: AutomaticDraw,
         context: Option<CacheContext>,
         released: Cell<bool>,
     }
@@ -352,7 +371,7 @@ pub mod raster {
             let draw = paint_text(density, wrap, align, size, text, mode, style)?;
             if matches!(draw, TextDraw::Atlas { .. }) {
                 return Ok(Automatic {
-                    entry: Rc::new(AutomaticEntry { draw, references: Cell::new(1), cached: Cell::new(false) }),
+                    draw: AutomaticDraw::Atlas(draw),
                     context: None,
                     released: Cell::new(false),
                 });
@@ -362,7 +381,7 @@ pub mod raster {
         let context = CURRENT_CACHE.with(|c| c.borrow().clone());
         let Some(context) = context else {
             return paint_text(density, wrap, align, size, text, mode, style).map(|draw| Automatic {
-                entry: Rc::new(AutomaticEntry { draw, references: Cell::new(1), cached: Cell::new(false) }),
+                draw: AutomaticDraw::Shared(Rc::new(AutomaticEntry { draw, references: Cell::new(1), cached: Cell::new(false) })),
                 context: None,
                 released: Cell::new(false),
             });
@@ -373,7 +392,7 @@ pub mod raster {
                 entry.references.set(entry.references.get() + 1);
                 side_lru::set_pinned(&mut context.0.automatic_cache.borrow_mut(), &k, true);
                 context.0.automatic_references.set(context.0.automatic_references.get() + 1);
-                return Ok(Automatic { entry, context: Some(context), released: Cell::new(false) });
+                return Ok(Automatic { draw: AutomaticDraw::Shared(entry), context: Some(context), released: Cell::new(false) });
             }
         let draw = paint_text(density, wrap, align, size, text, mode, style)?;
         let can_cache = side_lru::length(&mut context.0.automatic_cache.borrow_mut()) < CAPACITY
@@ -386,17 +405,20 @@ pub mod raster {
             side_lru::add_pinned(&mut context.0.automatic_cache.borrow_mut(), draw_bytes(&draw), k, entry.clone(), true);
         }
         context.0.automatic_references.set(context.0.automatic_references.get() + 1);
-        Ok(Automatic { entry, context: Some(context), released: Cell::new(false) })
+        Ok(Automatic { draw: AutomaticDraw::Shared(entry), context: Some(context), released: Cell::new(false) })
     }
 
     pub(crate) fn automatic_draw(handle: &Automatic) -> TextDraw {
-        handle.entry.draw.clone()
+        match &handle.draw {
+            AutomaticDraw::Atlas(draw) => draw.clone(),
+            AutomaticDraw::Shared(entry) => entry.draw.clone(),
+        }
     }
 
     pub(crate) fn release_automatic(handle: &Automatic) {
         if handle.released.get() { return; }
         handle.released.set(true);
-        let entry = &handle.entry;
+        let AutomaticDraw::Shared(entry) = &handle.draw else { return };
         entry.references.set(entry.references.get() - 1);
         if let Some(context) = &handle.context {
             context.0.automatic_references.set(context.0.automatic_references.get() - 1);

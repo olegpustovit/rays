@@ -149,6 +149,7 @@ pub fn hidden_entry(background: color::T, rendered: Option<&d3::Scene3>, camera:
 
 #[allow(clippy::too_many_arguments)]
 pub fn compose_view(
+    out: &mut Nodes,
     map: Option<&image::Image>,
     canvases: &[(String, CanvasPicture)],
     ui_visible: bool,
@@ -163,7 +164,8 @@ pub fn compose_view(
     cache: Option<&HiddenSceneCache>,
     core: &Model,
     frame_: &frame::Frame,
-) -> Nodes {
+) {
+    out.clear();
     let view_visible = editor_shell::view_visible(&core.into());
     let paint_world = |viewport: Bounds| -> Nodes {
         match map {
@@ -184,22 +186,23 @@ pub fn compose_view(
     // each viewport is drawn from its own orbit
     if !ui_visible {
         if let Panel::Canvas(key) = &core.focus {
-            let mut out = vec![scene::clear(background)];
+            out.push(scene::clear(background));
             if let Some((_, picture)) = canvases.iter().find(|(k, _)| k == key) {
                 out.extend(picture.scene.iter().cloned());
             }
-            editor_host::machinery_into(&core.into(), None, false, &mut out);
-            return out;
+            editor_host::machinery_into(&core.into(), None, false, out);
+            return;
         }
     }
     if hidden_only(ui_visible, core) {
-        return hidden_entry(background, focused, camera, paint_view, cache, core, frame_).scene;
+        out.extend(hidden_entry(background, focused, camera, paint_view, cache, core, frame_).scene);
+        return;
     }
+    out.push(scene::clear(background));
     if !ui_visible {
-        let mut out = vec![scene::clear(background)];
         out.extend(world_nodes(paint_view, "@hidden", camera, focused, view_visible, (0, 0, frame_.input.size.0, frame_.input.size.1)));
-        editor_host::machinery_into(&core.into(), None, false, &mut out);
-        return out;
+        editor_host::machinery_into(&core.into(), None, false, out);
+        return;
     }
     let geometry = editor_shell::geometry(&core.into(), &core.workspace, frame_);
     let viewport = editor_shell::panes_in(&core.into(), &geometry).view;
@@ -217,7 +220,6 @@ pub fn compose_view(
         core.pane_keys.iter().find_map(|(root, (p, pp))| if p == panel && pp.as_ref() == Some(path) { Some(*root) } else { None })
     };
     // Compose newest floating windows first.
-    let mut painted: Vec<Nodes> = Vec::new();
     let mut windows: Vec<(Option<i64>, Nodes)> = Vec::new();
     for (key, bounds) in editor_shell::view_bodies_in(&core.into(), &geometry).iter() {
         let image = if *bounds == viewport && core.map_view {
@@ -226,7 +228,7 @@ pub fn compose_view(
             worlds(paint_view, camera_of, rendered, views, view_visible, &[(key.as_str(), *bounds)])
         };
         match floating.iter().find(|(k, _, _)| k == key) {
-            None => painted.insert(0, image),
+            None => out.extend(image),
             Some((_, path, (x, y, w, h))) => {
                 let root = root_of(&Panel::View(key.clone()), path);
                 // inside the window's line-2 frame, which Chrome paints on the body's edge
@@ -236,32 +238,26 @@ pub fn compose_view(
             }
         }
     }
-    let mut canvas_painted: Vec<Nodes> = Vec::new();
     let mut canvas_windows: Vec<(Option<i64>, Nodes)> = Vec::new();
     for leaf in &geometry.leaves {
         if let Panel::Canvas(key) = &leaf.panel {
             let (x, y, w, h) = leaf.body;
-            let scene_ = canvases.iter().find(|(k, _)| k == key).map(|(_, p)| p.scene.clone()).unwrap_or_default();
-            let root = root_of(&Panel::Canvas(key.clone()), &leaf.path);
-            let picture: Nodes = vec![scene::clip((x, y), w, h, vec![scene::translate(x, y, scene_)])];
+            let scene_ = canvases.iter().find(|(k, _)| k == key).map_or(&[][..], |(_, p)| p.scene.as_slice());
+            let translated = scene::Node::Translate(x, y, Rc::from(scene_));
+            let picture = scene::Node::Clip(x, y, w, h, Rc::from([translated]));
             if leaf.floating {
-                canvas_windows.insert(0, (root, picture));
+                let root = root_of(&leaf.panel, &leaf.path);
+                canvas_windows.insert(0, (root, vec![picture]));
             } else {
-                canvas_painted.insert(0, picture);
+                out.push(picture);
             }
         }
     }
     let mut all_windows = canvas_windows;
     all_windows.extend(windows);
     let under = |key: i64| -> Nodes { all_windows.iter().find(|(r, _)| *r == Some(key)).map(|(_, n)| n.clone()).unwrap_or_default() };
-    let mut order: Vec<Nodes> = canvas_painted;
-    order.extend(painted);
-    order.reverse();
-    let mut out = vec![scene::clear(background)];
-    out.extend(order.into_iter().flatten());
     if let Some(g) = guides {
         out.push(g);
     }
-    editor_host::machinery_into(&core.into(), Some(&under), true, &mut out);
-    out
+    editor_host::machinery_into(&core.into(), Some(&under), true, out);
 }

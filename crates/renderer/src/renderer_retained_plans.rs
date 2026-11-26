@@ -146,7 +146,10 @@ pub fn same_resources(left: &[ResourceStamp], right: &[ResourceStamp]) -> bool {
 
 /// Whether every resource the commands name is live, and the stamps of those that are.
 pub fn resource_stamps(resolve: &dyn Fn(i64) -> Option<Resource>, commands: &[Command]) -> (bool, Vec<ResourceStamp>) {
-    let mut ids: Vec<i64> = Vec::new();
+    thread_local! {
+        static IDS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
+    }
+    let mut ids = IDS.with(|ids| ids.take());
     let mut missing = false;
     for command in commands {
         match command {
@@ -155,10 +158,10 @@ pub fn resource_stamps(resolve: &dyn Fn(i64) -> Option<Resource>, commands: &[Co
             _ => {}
         }
     }
-    ids.sort();
+    ids.sort_unstable();
     ids.dedup();
     let mut stamps = Vec::new();
-    for id in ids {
+    for id in ids.drain(..) {
         match resolve(id) {
             None => missing = true,
             Some(Resource::Image(image)) => {
@@ -177,5 +180,8 @@ pub fn resource_stamps(resolve: &dyn Fn(i64) -> Option<Resource>, commands: &[Co
             }
         }
     }
+    IDS.with(|spare| {
+        if spare.borrow().capacity() < ids.capacity() { *spare.borrow_mut() = ids; }
+    });
     (!missing, stamps)
 }
